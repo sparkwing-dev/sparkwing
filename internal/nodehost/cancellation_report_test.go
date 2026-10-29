@@ -19,6 +19,7 @@ import (
 type delayedCancellationReport struct {
 	NodeTransitionStore
 	committed bool
+	wait      func(context.Context) error
 }
 
 func TestOwnerFinishesCancellationAfterACommittedPolicyResult(t *testing.T) {
@@ -54,12 +55,8 @@ func TestOwnerFinishesCancellationAfterACommittedPolicyResult(t *testing.T) {
 
 func (s *delayedCancellationReport) TransitionNode(ctx context.Context, command store.NodeCommand) (runstate.Applied, error) {
 	if captureNodeCommand(command).Cause == runstate.CauseReport {
-		timer := time.NewTimer(limits.HeartbeatTimeout + time.Second)
-		defer timer.Stop()
-		select {
-		case <-timer.C:
-		case <-ctx.Done():
-			return runstate.Applied{}, context.Cause(ctx)
+		if err := s.wait(ctx); err != nil {
+			return runstate.Applied{}, err
 		}
 		s.committed = true
 	}
@@ -73,7 +70,16 @@ func TestCancellationReportsUseTheLiveClaimLifetime(t *testing.T) {
 			t.Run(name, func(t *testing.T) {
 				synctest.Test(t, func(t *testing.T) {
 					input, state, deps, _ := executorFixture(t)
-					reports := &delayedCancellationReport{NodeTransitionStore: state}
+					reports := &delayedCancellationReport{NodeTransitionStore: state, wait: func(ctx context.Context) error {
+						timer := time.NewTimer(limits.HeartbeatTimeout + time.Second)
+						defer timer.Stop()
+						select {
+						case <-timer.C:
+							return nil
+						case <-ctx.Done():
+							return context.Cause(ctx)
+						}
+					}}
 					deps.Store = reports
 					keeper := lease.Keeper{Interval: time.Second, Lease: time.Minute, Renew: func(context.Context) (lease.Beat, error) {
 						beat := lease.Beat{CancelRequested: true}

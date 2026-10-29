@@ -393,7 +393,8 @@ func (h *OwnerHost) executeAward(ctx context.Context, run RunInput, accepted Acc
 	workCtx, stop := keepNode(ctx, h.Lease, h.Store, result.Node.Ref, executorActor(input))
 	defer stop()
 	if err := context.Cause(workCtx); err != nil {
-		return err
+		err = claimSetupFailure(workCtx, input, err, h.Masker.Mask, h.Store.TransitionNode)
+		return h.executionError(ctx, accepted.RunID, ownerExecution{nodeID: input.NodeID, err: err})
 	}
 	admitted := false
 	err = h.executionAdmission.claimedNode(workCtx, input, func(ctx context.Context) error {
