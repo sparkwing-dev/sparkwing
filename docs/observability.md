@@ -20,7 +20,9 @@ Read a selected run with `sparkwing runs status --run RUN --steps`. Use
 `sparkwing runs logs --run RUN --follow` for its logs, or add `--job JOB` for
 one job. JSON preserves job attempts and trigger, plan or eval log subjects.
 Log follow completes only after the controller reports final persisted logs.
-An interrupted or incomplete observation exits 3.
+An interrupted or incomplete observation exits 3, and polling again may
+complete it. A run that does not exist, or that the credential cannot read,
+exits 4: stop polling.
 
 Search several runs with `sparkwing runs grep --grep PATTERN --pipeline check`.
 Search output retains its continuation even when a page has no matching lines.

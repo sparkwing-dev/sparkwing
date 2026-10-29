@@ -515,7 +515,7 @@ func Registry() []Command {
 			"Read runs through the selected controller. Filters apply before pagination. Runs are ordered by descending team number. --since accepts days and weeks, such as 7d or 2w.",
 			"JSON emits compact run records and a page record with next_cursor and truncated. Quiet JSON emits id records and sends continuation metadata to stderr. Plain emits run IDs.",
 			"--by-pipeline totals every matching page and retains the newest --sparkline statuses. --group-by run|job|step requires --status failed and groups the selected page.",
-			"--wait blocks until a matching run appears. --follow reads every newer matching run between polls. Grouped follow output describes each new batch. Interrupted or timed-out waits exit 3.",
+			"--wait blocks until a matching run appears. --follow reads every newer matching run between polls. Grouped follow output describes each new batch. Interrupted or timed-out waits exit 3. A refused read (not found, unauthenticated or forbidden) exits 4, which retrying cannot change.",
 		}, Flags: []Flag{
 			{Name: "pipeline", Argument: "NAME"},
 			{Name: "status", Argument: "STATUS"},
@@ -544,7 +544,7 @@ func Registry() []Command {
 		}},
 		{Path: "sparkwing runs logs", Rules: []string{
 			"Read job-attempt and trigger, plan or eval logs through the controller. --job selects a job. --tree includes descendants. --events-only and --no-events select lifecycle events or output.",
-			"--follow consumes every available page, then waits for new records until final log segments are complete. An incomplete or interrupted observation exits 3.",
+			"--follow consumes every available page, then waits for new records until final log segments are complete. An incomplete or interrupted observation exits 3. A run that does not exist or that the credential cannot read exits 4; stop polling on 4.",
 			"JSON emits tagged log records. Plain emits log lines. Use --grep without --run to search across runs with the same filters and pagination as runs grep.",
 		}, Flags: []Flag{
 			{Name: "run", Argument: "RUN_ID"},
@@ -604,7 +604,7 @@ func Registry() []Command {
 		{Path: "sparkwing runs status", Rules: []string{
 			"Read the same public run detail through a controller profile or the local controller. Numeric run selectors are per-team numbers.",
 			"Views: summary, timeline, receipt, errors, tree. Summary includes recorded failing steps and errors for failed jobs. --steps includes all recorded steps. Receipts retain the controller's hashes and settled cost.",
-			"--follow streams observations until the run ends. Exit 0 means success, 1 means a failed or cancelled run, 2 means invalid usage, and 3 means the observation is incomplete. --exit-zero suppresses terminal failure only.",
+			"--follow streams observations until the run ends. Exit 0 means success, 1 means a failed or cancelled run, 2 means invalid usage, 3 means the observation is incomplete and may be retried, and 4 means the run does not exist or the credential cannot read it, so polling again will not help. --exit-zero suppresses terminal failure only.",
 			"JSON preserves run details and notices: one document per observation, so --follow and the errors view (one record per failed job) are NDJSON. The exit code carries the outcome, and no error document follows the observation. Plain summary prints the run status, every job's status and outcome, and failure details. Errors prints failed job IDs, tree prints run IDs, and receipt prints the receipt hash. --steps adds recorded steps to summary and tree output.",
 		}, Flags: []Flag{
 			{Name: "run", Argument: "RUN_ID", Required: true},

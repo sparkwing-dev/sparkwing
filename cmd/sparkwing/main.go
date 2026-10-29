@@ -85,6 +85,20 @@ func exitError(code int, err error) error {
 	return &cliError{code: code, err: err}
 }
 
+const exitRefused = 4
+
+func observationError(err error) error {
+	var failure *apierr.Error
+	if errors.As(err, &failure) {
+		switch failure.Code {
+		case apierr.NotFound, apierr.Unauthenticated, apierr.Forbidden, apierr.BadRequest, apierr.InvalidArgs,
+			apierr.UnsupportedRoute, apierr.MethodNotAllowed, apierr.VersionRevoked, apierr.VersionUnsupported:
+			return exitError(exitRefused, err)
+		}
+	}
+	return exitError(3, err)
+}
+
 func reportedExit(err error) error {
 	if err == nil {
 		return nil

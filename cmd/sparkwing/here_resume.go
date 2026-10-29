@@ -102,7 +102,7 @@ func resumeAttachedHereRun(ctx context.Context, options client.EngineOptions, ru
 }
 
 func incompleteHereHandoff(run string, cause error) error {
-	return exitError(3, fmt.Errorf("here handoff for run %s is incomplete: %w", run, cause))
+	return observationError(fmt.Errorf("here handoff for run %s is incomplete: %w", run, cause))
 }
 
 func resumeHereRun(ctx context.Context, options client.EngineOptions, run string, deps hereDependencies) (completion nodehost.RunCompletion, resultErr error) {
