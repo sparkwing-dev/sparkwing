@@ -20,6 +20,7 @@ unlock.
 
 ## [Unreleased]
 
+- **source:** Remote source selection, including schedules and branch-pinned child runs, no longer fails when the controller cannot change the system temporary directory's permissions. Selection creates a private child and leaves the shared parent unchanged.
 - **tokens:** `sparkwing tokens create` against the local controller answers `capability_unsupported` naming the socket and `sparkwing dashboard open`, instead of minting a token no route accepted (it carried the local user's identity, which only the local socket may present).
 - **team:** A member token can no longer remove its holder from a team; `DELETE /api/v1/team/members/{account}` for yourself needs a signed-in session (the console's Leave team), or `team.admin` as before. A leaked read-only token could otherwise remove its holder and fence off their machines and tokens.
 - **operator:** Deleting an account touches only rows that name it. It no longer fails on an invitation the account accepted through a linked address, no longer deletes other teams' open invitations to its address (a later holder of the address keeps them), and relabels an event payload value only when the whole value is the account's name, instead of rewriting every payload containing the address as text. Accepted invitations keep their row with the accepter shown as `deleted user` and the address removed.
