@@ -129,9 +129,11 @@ func (h *OwnerHost) Run(parent context.Context, input RunInput) (completion RunC
 	}
 	var preparing atomic.Bool
 	preparing.Store(true)
+	var unaccepted atomic.Bool
+	unaccepted.Store(input.Accepted == nil)
 	ctx, stop := h.keepOwner(parent, input.Owner, func() bool {
 		return preparing.Load() || h.Computing != nil && h.Computing(input.RunID)
-	})
+	}, unaccepted.Load)
 	defer stop()
 	if err := context.Cause(ctx); err != nil {
 		return completion, err
@@ -147,6 +149,7 @@ func (h *OwnerHost) Run(parent context.Context, input RunInput) (completion RunC
 		return completion, err
 	}
 	if snapshot.Run.Spec != nil {
+		unaccepted.Store(false)
 		if err := runspec.CheckMaskingSeal(*snapshot.Run.Spec); err != nil {
 			return completion, err
 		}
@@ -184,6 +187,7 @@ func (h *OwnerHost) Run(parent context.Context, input RunInput) (completion RunC
 	if err != nil {
 		return completion, err
 	}
+	unaccepted.Store(false)
 	if snapshot.Run.State == runstate.RunPending {
 		_, err = h.Store.TransitionRun(ctx, runstate.RunTransition{RunID: runspec.RunID(input.RunID), To: runstate.RunRunning, Actor: input.Owner, Cause: runstate.RunStart})
 		if err != nil {
@@ -223,8 +227,15 @@ func (h *OwnerHost) acquire(ctx context.Context, input RunInput, row store.RunRo
 	return source.Acquire(ctx, spec, options)
 }
 
-func (h *OwnerHost) keepOwner(parent context.Context, actor runstate.Actor, computing func() bool) (context.Context, func()) {
-	return h.keepUnit(parent, actor, computing)
+func (h *OwnerHost) keepOwner(parent context.Context, actor runstate.Actor, computing, unaccepted func() bool) (context.Context, func()) {
+	owner := *h
+	owner.Renew = func(ctx context.Context, actor runstate.Actor, computing bool) (runstate.LeaseBeat, error) {
+		beat, err := h.Renew(ctx, actor, computing)
+		// safety: the scheduler must retain its lease while cancelled work drains and the run finishes.
+		beat.CancelRequested = beat.CancelRequested && unaccepted()
+		return beat, err
+	}
+	return owner.keepUnit(parent, actor, computing)
 }
 
 func (h *OwnerHost) keepUnit(parent context.Context, actor runstate.Actor, computing func() bool) (context.Context, func()) {
