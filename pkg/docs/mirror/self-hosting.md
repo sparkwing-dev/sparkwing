@@ -28,7 +28,12 @@ and runners or a launcher. Cloud Jobs require exclusive team nodes, Docker and
 enforced network isolation. Chart rendering alone does not prove those properties.
 
 The opt-in `k8s-e2e` pipeline requires an explicit cluster and image set. It does
-not create or delete a cluster. Native deployment parity remains a launch check.
+not create or delete a cluster. Set `SPARKWING_K8S_E2E_LICENSE_FILE` to a valid
+signed multi-team license. The harness installs `deployment=team`, enrolls a runner
+with an independent administrator session and uploads its committed fixture as a
+source bundle. It checks execution, logs, cancellation, retry and retained state.
+GitHub webhook intake and remote Git fetching need separate integration evidence.
+Native deployment parity remains a launch check.
 
 ### First shared deployment
 

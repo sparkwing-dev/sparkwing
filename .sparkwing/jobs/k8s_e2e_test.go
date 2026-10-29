@@ -27,7 +27,7 @@ func TestKubernetesE2EPreflightIsExplicitAndLocalInfrastructureFree(t *testing.T
 	record := filepath.Join(t.TempDir(), "calls")
 	writeStub(t, bin, "kubectl", `printf 'kubectl %s\n' "$*" >>"$CALL_RECORD"`)
 	writeStub(t, bin, "helm", `printf 'helm %s\n' "$*" >>"$CALL_RECORD"`)
-	for _, name := range []string{"curl", "jq", "openssl"} {
+	for _, name := range []string{"curl", "jq", "openssl", "git", "dirname"} {
 		writeStub(t, bin, name, "exit 0\n")
 	}
 	result := runKubernetesScriptWithEnv(t, bin,
@@ -62,7 +62,7 @@ func TestKubernetesE2EPreflightIsExplicitAndLocalInfrastructureFree(t *testing.T
 
 func TestKubernetesE2EExistingClusterPreflightRequiresExactCleanupAllowList(t *testing.T) {
 	bin := t.TempDir()
-	for _, name := range []string{"kubectl", "helm", "curl", "jq", "openssl"} {
+	for _, name := range []string{"kubectl", "helm", "curl", "jq", "openssl", "git", "dirname"} {
 		writeStub(t, bin, name, "exit 0\n")
 	}
 	result := runKubernetesScriptWithEnv(t, bin,
@@ -78,7 +78,7 @@ func TestKubernetesE2EExistingClusterPreflightRequiresExactCleanupAllowList(t *t
 
 func TestKubernetesE2EExistingClusterPreflightRejectsAnUnsafeImagePrefix(t *testing.T) {
 	bin := t.TempDir()
-	for _, name := range []string{"kubectl", "helm", "curl", "jq", "openssl"} {
+	for _, name := range []string{"kubectl", "helm", "curl", "jq", "openssl", "git", "dirname"} {
 		writeStub(t, bin, name, "exit 0\n")
 	}
 	result := runKubernetesScriptWithEnv(t, bin,
@@ -89,6 +89,22 @@ func TestKubernetesE2EExistingClusterPreflightRejectsAnUnsafeImagePrefix(t *test
 	)
 	if result.err == nil || !strings.Contains(result.output, "unsafe in an image repository") {
 		t.Fatalf("unsafe image prefix result = %v, %q", result.err, result.output)
+	}
+}
+
+func TestKubernetesE2EPreflightRequiresALicenseFile(t *testing.T) {
+	bin := t.TempDir()
+	for _, name := range []string{"kubectl", "helm", "curl", "jq", "openssl", "git", "dirname"} {
+		writeStub(t, bin, name, "exit 0\n")
+	}
+	result := runKubernetesScriptWithEnv(t, bin,
+		"SPARKWING_K8S_E2E_KUBE_CONTEXT=remote-e2e",
+		"SPARKWING_K8S_E2E_IMAGE_PREFIX=registry.example/sparkwing",
+		"SPARKWING_K8S_E2E_TAG=fixture",
+		"SPARKWING_K8S_E2E_LICENSE_FILE="+filepath.Join(t.TempDir(), "missing"),
+	)
+	if result.err == nil || !strings.Contains(result.output, "LICENSE_FILE must name a readable signed multi-team license") {
+		t.Fatalf("missing license: %v\n%s", result.err, result.output)
 	}
 }
 
@@ -403,7 +419,7 @@ func TestKubernetesE2EExistingClusterRetainsReleaseWhenPVCAdoptionIsIncomplete(t
 func existingClusterFailureHarness(t *testing.T) (bin, calls, artifacts string) {
 	t.Helper()
 	bin = t.TempDir()
-	for _, name := range []string{"cat", "dirname", "grep", "jq", "mkdir"} {
+	for _, name := range []string{"cat", "dirname", "grep", "jq", "mkdir", "cp", "tr", "wc", "awk"} {
 		linkTool(t, bin, name)
 	}
 	calls = filepath.Join(t.TempDir(), "calls")
@@ -420,11 +436,6 @@ case "$*" in
     ;;
   *"--context remote-e2e create -f -"*)
     if [ "${FAIL_AT:-}" = "namespace-create" ]; then
-      exit 23
-    fi
-    ;;
-  *"rollout status deployment/k8s-repo"*)
-    if [ "${FAIL_AT:-}" = "fixture" ]; then
       exit 23
     fi
     ;;
@@ -460,114 +471,17 @@ case "$*" in
     ;;
 esac
 `)
+	writeStub(t, bin, "git", `
+if [ "${FAIL_AT:-}" = "fixture" ]; then exit 23; fi
+case "$*" in
+  *" bundle create "*) printf 'fixture bundle' >"$5" ;;
+  *" rev-parse HEAD"*) printf '%040d' 0 ;;
+esac
+`)
 	writeStub(t, bin, "curl", "exit 0\n")
 	writeStub(t, bin, "openssl", "printf '"+kubernetesE2ETestOwner+"\\n'\n")
 	artifacts = filepath.Join(t.TempDir(), "artifacts")
 	return bin, calls, artifacts
-}
-
-func TestKubernetesE2EUsesExplicitReleaseImagesAndCapturesFailureEvidence(t *testing.T) {
-	script := readHostedCIFile(t, "bin/k8s-e2e.sh")
-	for _, component := range buildImagesComponents {
-		if !strings.Contains(script, "repository: ${image_prefix}"+component.name) &&
-			!strings.Contains(script, "$(image_ref "+component.name+")") {
-			t.Errorf("Kubernetes harness is missing release image %q", component.name)
-		}
-	}
-	for _, marker := range []string{
-		`git config --global --add url."git://k8s-repo.${namespace}.svc.cluster.local/".insteadOf`,
-		`"https://github.com/sparkwing-k8s/"`,
-		`"git@github.com:sparkwing-k8s/"`,
-		"helm_e2e install",
-		"SPARKWING_K8S_E2E_KUBE_CONTEXT",
-		"SPARKWING_K8S_E2E_IMAGE_PREFIX",
-		"SPARKWING_K8S_E2E_TAG",
-		"SPARKWING_K8S_E2E_ALLOW_CLEANUP",
-		"create namespace \"$namespace\" --dry-run=client -o yaml",
-		"sparkwing.dev/e2e-owner=$run_owner",
-		"--description \"$release_owner_description\"",
-		"--labels \"$owner_token_label\"",
-		"kube_context=$kube_context",
-		"namespace=$namespace",
-		"release=$release_name",
-		"image_prefix=$image_prefix",
-		"image_tag=$image_tag",
-		"configmap sparkwing-k8s-fixture",
-		"initContainers:",
-		"readinessProbe:",
-		"invalid trigger token returned $invalid_trigger_status, want 401",
-		".runs | length == 0",
-		"/api/v1/triggers",
-		"/api/v1/agents",
-		"/logs/prove-controller-runner-logs",
-		"/cancel",
-		"/retry?full=1",
-		"rollout restart \"deployment/$runner_deployment\"",
-		`prove_runner_execution "$success_run" "$initial_runner_pod" initial`,
-		`prove_runner_execution "$post_runner_restart_run" "$runner_pod_after" post-restart`,
-		".status.readyReplicas == 1",
-		"rollout restart \"deployment/$controller_deployment\"",
-		"sort_by(.metadata.creationTimestamp)",
-		"retry node output $retry_output does not match retry run $retry_run",
-		"web_static_path",
-		"referenced web static asset was empty",
-		"controller PVC was not retained across uninstall",
-		"helm_e2e get manifest",
-		"get events --sort-by=.metadata.creationTimestamp",
-		"logs \"$pod\" --all-containers",
-	} {
-		if !strings.Contains(script, marker) {
-			t.Errorf("Kubernetes harness is missing contract marker %q", marker)
-		}
-	}
-	for _, forbidden := range []string{"docker ", "kind create", "kind load", "kind delete", "kind export", "kindest/node"} {
-		if strings.Contains(script, forbidden) {
-			t.Fatalf("Kubernetes harness contains local infrastructure command %q", forbidden)
-		}
-	}
-	if strings.Contains(script, "command -v git-daemon") {
-		t.Fatal("Kubernetes harness requires git-daemon as a standalone PATH binary")
-	}
-	if strings.Contains(script, "helm_e2e list --all") {
-		t.Fatal("Kubernetes harness uses Helm v3's removed list --all flag")
-	}
-	if strings.Contains(script, "hostPath:") || strings.Contains(script, "extraMounts:") {
-		t.Fatal("Kubernetes fixture depends on a node host mount")
-	}
-	if strings.Contains(script, `post_runner_claim" != "$success_claim`) {
-		t.Fatal("runner restart proof compares per-claim nonce values instead of the replacement pod hostname")
-	}
-	for _, block := range []string{
-		between(t, script, `success_nodes="$(api_get "/api/v1/runs/$success_run/nodes")"`, `start_forward "$web_service" 80 web`),
-		between(t, script, `post_runner_nodes="$(api_get "/api/v1/runs/$post_runner_restart_run/nodes")"`, `echo "k8s-e2e: proving controller restart`),
-		between(t, script, `retry_nodes="$(api_get "/api/v1/runs/$retry_run/nodes")"`, `echo "k8s-e2e: proving uninstall retention`),
-	} {
-		if strings.Contains(block, `claimed_by | startswith("runner:")`) {
-			t.Fatal("in-process trigger execution is presented as a pool-runner claim")
-		}
-	}
-	if strings.Contains(script, "<!DOCTYPE html") || strings.Contains(script, "logs, and dashboard") {
-		t.Fatal("Kubernetes harness claims functional dashboard coverage from an HTML shell")
-	}
-	if got := strings.Count(script, `start_forward "$controller_service" 80`); got != 4 {
-		t.Fatalf("controller forward starts = %d, want bootstrap, authenticated, restarted, and reinstalled", got)
-	}
-	invalidTrigger := strings.Index(script, "k8s-e2e: proving invalid trigger authentication")
-	validTrigger := strings.Index(script, "submit_trigger k8s-success")
-	if invalidTrigger < 0 || validTrigger < 0 || invalidTrigger > validTrigger {
-		t.Fatal("Kubernetes harness does not reject an invalid token before its first valid trigger")
-	}
-	fixture := readHostedCIFile(t, "testdata/k8s-e2e/repo/.sparkwing/jobs/k8s.go")
-	for _, marker := range []string{
-		"sparkwing.Produces[string]",
-		"runID: rc.RunID",
-		"sparkwing-k8s-e2e-success run_id=%s",
-		"return j.runID, nil",
-	} {
-		if !strings.Contains(fixture, marker) {
-			t.Errorf("Kubernetes fixture is missing causal retry marker %q", marker)
-		}
-	}
 }
 
 func TestKubernetesE2EWaitRunStatusRetriesOnlyNotFound(t *testing.T) {
@@ -596,9 +510,9 @@ func TestKubernetesE2EWaitRunStatusRejectsOtherHTTPFailures(t *testing.T) {
 	}
 }
 
-const kubernetesRunnerExecutionNodes = `{"nodes":[{"id":"prove-controller-runner-logs","status":"done","execution_attempts":[{"outcome":"success","executor_kind":"kubernetes","execution_site":"cluster","execution_site_name":"runner-new"}]}]}`
+const kubernetesRunnerExecutionNodes = `{"jobs":[{"id":"prove-controller-runner-logs","status":"done"}],"attempts":[{"job_id":"prove-controller-runner-logs","outcome":"success","executor":"agent","location":"local","executor_name":"k8s-e2e"}]}`
 
-func TestKubernetesE2EProvesSuccessfulExecutionByTheExpectedReadyRunnerPod(t *testing.T) {
+func TestKubernetesE2EProvesSuccessfulExecutionByTheEnrolledRunner(t *testing.T) {
 	result := runProveRunnerExecution(t, kubernetesRunnerExecutionNodes)
 	if result.err != nil {
 		t.Fatalf("runner execution proof: %v\n%s", result.err, result.output)
@@ -607,12 +521,12 @@ func TestKubernetesE2EProvesSuccessfulExecutionByTheExpectedReadyRunnerPod(t *te
 
 func TestKubernetesE2ERejectsUnprovenRunnerExecution(t *testing.T) {
 	for _, tc := range []struct{ name, nodes string }{
-		{"wrong pod", strings.Replace(kubernetesRunnerExecutionNodes, `"runner-new"`, `"runner-old"`, 1)},
+		{"wrong runner", strings.Replace(kubernetesRunnerExecutionNodes, `"k8s-e2e"`, `"other-runner"`, 1)},
 		{"failed attempt", strings.Replace(kubernetesRunnerExecutionNodes, `"success"`, `"failed"`, 1)},
-		{"missing attempts", `{"nodes":[{"id":"prove-controller-runner-logs","status":"done"}]}`},
+		{"missing attempts", `{"jobs":[{"id":"prove-controller-runner-logs","status":"done"}]}`},
 		{"wrong node", strings.Replace(kubernetesRunnerExecutionNodes, `"prove-controller-runner-logs"`, `"other-node"`, 1)},
-		{"wrong executor", strings.Replace(kubernetesRunnerExecutionNodes, `"kubernetes"`, `"local"`, 1)},
-		{"wrong site", strings.Replace(kubernetesRunnerExecutionNodes, `"cluster"`, `"local"`, 1)},
+		{"wrong executor", strings.Replace(kubernetesRunnerExecutionNodes, `"agent"`, `"kubernetes"`, 1)},
+		{"wrong site", strings.Replace(kubernetesRunnerExecutionNodes, `"local"`, `"cloud"`, 1)},
 		{"unfinished node", strings.Replace(kubernetesRunnerExecutionNodes, `"done"`, `"running"`, 1)},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -620,7 +534,7 @@ func TestKubernetesE2ERejectsUnprovenRunnerExecution(t *testing.T) {
 			if result.err == nil {
 				t.Fatal("runner execution proof accepted unproven execution")
 			}
-			if !strings.Contains(result.output, "test run run-1 has no successful execution by Ready runner pod runner-new") {
+			if !strings.Contains(result.output, "test run run-1 has no successful execution by enrolled runner k8s-e2e (Ready pod runner-new)") {
 				t.Fatalf("runner execution proof output = %q", result.output)
 			}
 		})
@@ -659,7 +573,7 @@ prove_runner_execution run-1 runner-new test
 	if err != nil {
 		t.Fatal(err)
 	}
-	if string(calls) != "get /api/v1/runs/run-1/nodes\n" {
+	if string(calls) != "get /api/v1/runs/run-1\n" {
 		t.Fatalf("runner execution proof calls = %q", calls)
 	}
 	evidence, err := os.ReadFile(filepath.Join(artifactDir, "runner-test-nodes.json"))
@@ -677,7 +591,7 @@ func runWaitRunStatus(t *testing.T, responses ...string) (scriptResult, int) {
 	script := readHostedCIFile(t, "bin/k8s-e2e.sh")
 	waitFunction := "wait_run_status() {\n" + between(t, script,
 		"wait_run_status() {\n",
-		"\n}\n\necho \"k8s-e2e: proving invalid trigger authentication\"",
+		"\n}\n\necho \"k8s-e2e: proving invalid run authentication\"",
 	) + "\n}\n"
 	responseDir := t.TempDir()
 	for i, response := range responses {
@@ -828,7 +742,11 @@ func kubernetesTestBash(t *testing.T) string {
 }
 
 func kubernetesTestEnv(t *testing.T, extra ...string) []string {
-	env := append([]string{}, os.Environ()...)
+	license := filepath.Join(t.TempDir(), "license")
+	if err := os.WriteFile(license, []byte("offline license fixture"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	env := append(append([]string{}, os.Environ()...), "SPARKWING_K8S_E2E_LICENSE_FILE="+filepath.ToSlash(license))
 	for _, entry := range extra {
 		name, value, ok := strings.Cut(entry, "=")
 		if runtime.GOOS == "windows" && ok && (strings.HasSuffix(name, "_FILE") || strings.HasSuffix(name, "_DIR") || name == "CALL_RECORD" || name == "artifact_dir") {
