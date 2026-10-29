@@ -77,6 +77,15 @@ func apiServerAuthorizing(t *testing.T, authorization string) *rest.Config {
 	return cfg
 }
 
+func TestStartReapsAnAlreadyObservedProcess(t *testing.T) {
+	t.Run("exited before cleanup", func(t *testing.T) {
+		exited := start(t, os.Args[0], "-test.run=^$")
+		if err := <-exited; err != nil {
+			t.Fatal(err)
+		}
+	})
+}
+
 func start(t *testing.T, binary string, args ...string) <-chan error {
 	t.Helper()
 	cmd := exec.Command(binary, args...)
@@ -89,7 +98,10 @@ func start(t *testing.T, binary string, args ...string) <-chan error {
 		t.Fatal(err)
 	}
 	exited := make(chan error, 1)
-	go func() { exited <- cmd.Wait() }()
+	go func() {
+		exited <- cmd.Wait()
+		close(exited)
+	}()
 	t.Cleanup(func() {
 		if err := cmd.Process.Kill(); err != nil && !errors.Is(err, os.ErrProcessDone) {
 			t.Error(err)
