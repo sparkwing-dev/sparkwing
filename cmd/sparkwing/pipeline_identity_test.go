@@ -105,7 +105,7 @@ func TestPipelineAliasResolvesFlagsAndHelp(t *testing.T) {
 	}
 	var out bytes.Buffer
 	printPipelineHelp(&out, runspec.PipelinePresentation(schema))
-	for _, want := range []string{"sparkwing run deploy-prod --region <string> --image <string>", "[from job rollout]", "[secret]"} {
+	for _, want := range []string{"sparkwing run deploy-prod [sparkwing flags] -- --region <string> --image <string>", "[from job rollout]", "[secret]"} {
 		if !strings.Contains(out.String(), want) {
 			t.Fatalf("missing %q in help: %s", want, &out)
 		}

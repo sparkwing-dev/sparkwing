@@ -169,7 +169,7 @@ func fragmentFlagError(command string) error {
 		_, err = clisurface.Parse("sparkwing", append([]string{"--help"}, args...))
 	}
 	var usage *clisurface.UsageError
-	if errors.As(err, &usage) && (strings.HasPrefix(usage.Message, "unknown flag ") || strings.HasPrefix(usage.Message, "unknown short flag ") || strings.HasSuffix(usage.Message, " is not accepted")) {
+	if errors.As(err, &usage) && (strings.HasPrefix(usage.Message, "unknown flag ") || strings.HasPrefix(usage.Message, "unknown short flag ") || strings.Contains(usage.Message, " is not accepted")) {
 		return err
 	}
 	return nil

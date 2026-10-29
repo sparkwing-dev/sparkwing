@@ -46,7 +46,7 @@ func TestPipelineAliasResolvesBeforeArgumentParsing(t *testing.T) {
 	}
 	var help bytes.Buffer
 	printPipelineHelp(&help, presentation)
-	if !strings.Contains(help.String(), "sparkwing run deploy-prod --target <string> --image <string>") {
+	if !strings.Contains(help.String(), "sparkwing run deploy-prod [sparkwing flags] -- --target <string> --image <string>") {
 		t.Fatal("alias help lost its required pipeline or job flags:", help.String())
 	}
 }
