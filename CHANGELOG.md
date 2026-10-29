@@ -20,6 +20,7 @@ unlock.
 
 ## [Unreleased]
 
+- **controller:** The retention pass deletes each invitation email log row a day after the send, once it no longer counts toward the five-a-day cap. The log keeps a digest of each invited address and used to drop it only when the same address was invited again.
 - **runner:** A runner's pipeline compiles use the runner's `GOCACHE` as well as its `GOMODCACHE`, as a local run does, so the chart's Go cache volume keeps the build cache warm across runner restarts instead of compiling from a cold `$HOME/.cache/go-build`.
 - **controller:** The controller lists its bucket for the bucket ceiling only while `--max-bucket-bytes`, `--max-bucket-objects`, `--warn-bucket-bytes` or `--warn-bucket-objects` is set. It used to list the whole `--bucket-store` every hour even with no ceiling, for a health total nothing acted on. A multi-team controller needs `--bucket-store` only when it sets one of those flags.
 - **storage:** Signing a log segment no longer reads the S3 bucket's lifecycle rules. The controller read them once per segment, about one extra S3 request per logging job every 10 seconds, counted against the controller's object-store request budget, and refused the upload, losing persisted logs, when a class had no rule or the controller lacked `s3:GetLifecycleConfiguration`. It now reads them once at startup and logs a warning for each retention class without a backstop rule; uploads never wait on one. The permission is optional.

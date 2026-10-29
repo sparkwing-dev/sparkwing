@@ -386,3 +386,22 @@ func TestAccountDeletionRelabelsEveryRowThatNamedTheAccount(t *testing.T) {
 		t.Error("tenant egress bytes changed during account deletion")
 	}
 }
+
+// The invitation email log holds an unsalted digest of every invited address,
+// so the retention pass drops each row once it no longer counts toward the
+// daily cap, not only when the same address is invited again.
+func TestRetentionPrunesTheInvitationEmailLogAfterADay(t *testing.T) {
+	st := storetest.Open(t)
+	ctx := context.Background()
+	now := time.Now()
+	if _, err := st.DB().ExecContext(ctx, storetest.Rebind(st, `INSERT INTO invitation_email_log(address,sent_at) VALUES ('old',?),('recent',?)`), now.Add(-25*time.Hour).UnixNano(), now.Add(-time.Hour).UnixNano()); err != nil {
+		t.Fatal(err)
+	}
+	st.SetTestClock(t, func() time.Time { return now })
+	if _, err := st.AsOperator().MaintainRetention(ctx, store.RetentionRequest{Limit: 100}); err != nil {
+		t.Fatal(err)
+	}
+	if old, recent := countWhere(t, st, "invitation_email_log", "address = 'old'"), countWhere(t, st, "invitation_email_log", "address = 'recent'"); old != 0 || recent != 1 {
+		t.Fatalf("after retention the log keeps %d day-old and %d recent rows, want 0 and 1", old, recent)
+	}
+}
