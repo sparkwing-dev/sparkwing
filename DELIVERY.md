@@ -607,7 +607,9 @@ file. Other syntax and workflow checks remain active.
   PostgreSQL 17 service through `SPARKWING_TEST_PG_URL`, so `store-postgres`
   uses that server without downloading embedded binaries. The separate
   Postgres conformance job verifies the backup drill with a matching client
-  and rejects skipped tests. Its no-skip selection also includes
+  and rejects skipped tests. Its service shares `/var/run/postgresql` with the
+  runner so the Unix socket identity test exercises a real socket connection.
+  Its no-skip selection also includes
   `TestCLITokenMintUsesCommittedMembershipAuthority` in `internal/controller`,
   retaining the PostgreSQL bearer-token regression for demotion and removal.
   It also retains both SQL literal regressions, which verify that run filters
