@@ -264,10 +264,9 @@ func matrixCells(r runspec.SealedRequest) ([][2]string, error) {
 	}, nil
 }
 
-// sourceCredentialUnproven lists the rows that receive a GitHub repository's
-// source credential without proving that repository (no OIDC repository claim).
-// They pin today's rule until the M1 decision lands; a row that starts or stops
-// contradicting fails the matrix.
+// safety: these rows get a GitHub repository's source credential without proving that
+// repository (no OIDC repository claim); they pin today's rule until the M1 decision,
+// and a row that starts or stops contradicting fails the matrix.
 var sourceCredentialUnproven = map[string]bool{
 	"schedule-locked":    true,
 	"schedule-no-app":    true,
@@ -275,8 +274,6 @@ var sourceCredentialUnproven = map[string]bool{
 	"child-other-repo":   true,
 }
 
-// checkSourceCredentialProof holds the invariant that a gh: repository's
-// source credential goes only to a run that proves a repository.
 func checkSourceCredentialProof(t *testing.T, key string, cells [][2]string) {
 	t.Helper()
 	value := map[string]string{}
