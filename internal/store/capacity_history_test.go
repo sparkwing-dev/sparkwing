@@ -90,21 +90,6 @@ func TestProfileHistory(t *testing.T) {
 					if err != nil || len(window) != 0 {
 						t.Errorf("obsolete samples: %v, %v", window, err)
 					}
-					if err := tenantFor(t, st, store.DefaultTeam).UpsertProfilePin(ctx, "history", node, 2, 100); err != nil {
-						t.Fatal(err)
-					}
-					if node == "" {
-						if err := tenantFor(t, st, store.DefaultTeam).RecordWaitObservation(ctx, "history", time.Millisecond); err != nil {
-							t.Fatal(err)
-						}
-					}
-					var after []byte
-					if err := st.DB().QueryRow(storetest.Rebind(st, `SELECT samples_json FROM pipeline_profiles WHERE team = ? AND pipeline = ? AND node_id = ?`), store.DefaultTeam, "history", node).Scan(&after); err != nil {
-						t.Fatal(err)
-					}
-					if string(after) != string(document.raw) {
-						t.Errorf("pin or wait update changed resource document: %s", after)
-					}
 					for _, hash := range []string{"old-plan", "new-plan"} {
 						for _, contended := range []bool{false, true} {
 							seed()

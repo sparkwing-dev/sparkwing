@@ -1,7 +1,6 @@
 package store_test
 
 import (
-	"context"
 	"errors"
 	"testing"
 	"time"
@@ -66,63 +65,5 @@ func TestSecretNameIsUniquePerTeam(t *testing.T) {
 	}
 	if got.Value != "beta-ci" {
 		t.Errorf("beta's secret = %q after alpha deleted its own", got.Value)
-	}
-}
-
-func TestPipelineProfileIsUniquePerTeam(t *testing.T) {
-	ctx := context.Background()
-	st := storetest.New(t).Open(t)
-	alpha := tenantFor(t, st, "alpha")
-	beta := tenantFor(t, st, "beta")
-
-	if err := alpha.UpsertProfilePin(ctx, "ci", "build", 4, 4096); err != nil {
-		t.Fatalf("alpha UpsertProfilePin: %v", err)
-	}
-	if err := beta.UpsertProfilePin(ctx, "ci", "build", 1, 1024); err != nil {
-		t.Fatalf("beta UpsertProfilePin: %v", err)
-	}
-
-	for _, c := range []struct {
-		tn    *store.Tenant
-		cores float64
-	}{{alpha, 4}, {beta, 1}} {
-		got, err := c.tn.GetPipelineProfile(ctx, "ci", "build")
-		if err != nil {
-			t.Fatalf("%s GetPipelineProfile: %v", c.tn.Team(), err)
-		}
-		if got == nil || got.PinnedCores != c.cores {
-			t.Errorf("%s reads pinned cores %+v, want %v", c.tn.Team(), got, c.cores)
-		}
-	}
-
-	if err := alpha.RecordProfileObservation(ctx, "ci", "build", store.ProfileObservation{
-		Duration: time.Second, PeakCores: 3, PeakMemoryBytes: 2048, CPUMeasured: true,
-	}); err != nil {
-		t.Fatalf("alpha RecordProfileObservation: %v", err)
-	}
-	betaProfile, err := beta.GetPipelineProfile(ctx, "ci", "build")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if betaProfile.SampleCount != 0 {
-		t.Errorf("beta's profile took alpha's sample: %+v", betaProfile)
-	}
-
-	if _, err := alpha.ResetAllProfiles(ctx); err != nil {
-		t.Fatalf("alpha ResetAllProfiles: %v", err)
-	}
-	betaProfile, err = beta.GetPipelineProfile(ctx, "ci", "build")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if betaProfile == nil || betaProfile.PinnedCores != 1 {
-		t.Errorf("beta's pin = %+v after alpha reset every profile of its own team", betaProfile)
-	}
-	list, err := beta.ListPipelineProfiles(ctx, "")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(list) != 1 || list[0].PinnedCores != 1 {
-		t.Errorf("beta's listing = %+v, want only its own profile", list)
 	}
 }

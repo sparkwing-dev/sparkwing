@@ -106,25 +106,6 @@ func TestCapacityProfiles_ColdStartBeforeEnoughSamples(t *testing.T) {
 	}
 }
 
-func TestCapacityProfiles_PinWinsAndDriftIsReported(t *testing.T) {
-	st, b := capacityBackend(t)
-	measure(t, st, "pinned", 10)
-	if err := teststore.ForTeam(t, st, store.DefaultTeam).SetProfilePin(context.Background(), "pinned", "", 16, 0); err != nil {
-		t.Fatal(err)
-	}
-
-	body := getJSON[capacityProfilesPayload](t,
-		CapacityProfilesHandler(b), "/api/v1/capacity/profiles", http.StatusOK)
-
-	p := body.Profiles[0]
-	if p.Charge.Source != string(store.CostSourcePin) || p.Charge.Cores != 16 {
-		t.Fatalf("charge = %+v, want the pin verbatim", p.Charge)
-	}
-	if p.Drift == "" || p.DriftClass == "" {
-		t.Errorf("a 16-core pin over a ~10-core measurement should report drift: %+v", p)
-	}
-}
-
 func TestCapacityProfiles_UnsupportedBackend(t *testing.T) {
 	rec := httptest.NewRecorder()
 	CapacityProfilesHandler(nil)(rec, httptest.NewRequest(http.MethodGet, "/api/v1/capacity/profiles", nil))

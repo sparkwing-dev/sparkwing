@@ -20,14 +20,6 @@ func TestProfileObservationRequiresMeasuredCPU(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			if err := tenantFor(t, st, store.DefaultTeam).UpsertProfilePin(ctx, "known", node, 3, 200); err != nil {
-				t.Fatal(err)
-			}
-			if node == "" {
-				if err := tenantFor(t, st, store.DefaultTeam).RecordWaitObservation(ctx, "known", 5*time.Millisecond); err != nil {
-					t.Fatal(err)
-				}
-			}
 			before, err := tenantFor(t, st, store.DefaultTeam).GetPipelineProfile(ctx, "known", node)
 			if err != nil {
 				t.Fatal(err)
@@ -55,8 +47,8 @@ func TestProfileObservationRequiresMeasuredCPU(t *testing.T) {
 				t.Fatal(err)
 			}
 			next, err := tenantFor(t, st, store.DefaultTeam).GetPipelineProfile(ctx, "known", node)
-			if err != nil || next == nil || next.SampleCount != 0 || next.FloorCores != 1 || next.FloorMemoryBytes != 50 || !next.CPUMeasured || next.PrevPeakCores != 2 || next.PrevSustainedCores != 1 || next.PrevPeakMemoryBytes != 100 || next.PinnedCores != 3 || next.PinnedMemoryBytes != 200 {
-				t.Fatalf("measured predecessor carry/pin lost: %+v,%v", next, err)
+			if err != nil || next == nil || next.SampleCount != 0 || next.FloorCores != 1 || next.FloorMemoryBytes != 50 || !next.CPUMeasured || next.PrevPeakCores != 2 || next.PrevSustainedCores != 1 || next.PrevPeakMemoryBytes != 100 {
+				t.Fatalf("measured predecessor carry lost: %+v,%v", next, err)
 			}
 			measured.CPUMeasured = false
 			measured.PlanHash = "unmeasured"

@@ -32,8 +32,6 @@ func (s *Server) handleGetPipelineProfile(w http.ResponseWriter, r *http.Request
 	return nil
 }
 
-// safety: omit sustained cores because these profiles become hard Kubernetes
-// CPU limits; charging a local-host plateau would throttle spiky pods.
 func runProfileObservations(ctx context.Context, t *store.Tenant, run *store.Run) (map[string]store.ProfileObservation, error) {
 	observations := map[string]store.ProfileObservation{}
 	if run == nil || run.Pipeline == "" {

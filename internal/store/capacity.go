@@ -17,7 +17,7 @@ import (
 type CostSource string
 
 const (
-	// CostSourcePin is an explicit .Resources() pin, used verbatim.
+	// CostSourcePin is a stored resource pin, used verbatim.
 	CostSourcePin CostSource = "pin"
 	// CostSourceMeasured is a measured profile with enough samples to
 	// trust.
@@ -88,10 +88,9 @@ type PipelineProfile struct {
 	// The estimate uses learned resource values only when it is true.
 	CPUMeasured bool      `json:"cpu_measured"`
 	UpdatedAt   time.Time `json:"updated_at"`
-	// PinnedCores and PinnedMemoryBytes record the explicit .Resources()
-	// pin last seen for this pipeline, or zero when it declared none. They
-	// let a reader recompute pin drift against the measured peaks without
-	// the pipeline's source. Meaningful only on the rollup row.
+	// PinnedCores and PinnedMemoryBytes are the stored resource pin for
+	// this pipeline, or zero when it has none. Meaningful only on the
+	// rollup row.
 	PinnedCores       float64 `json:"pinned_cores,omitempty"`
 	PinnedMemoryBytes int64   `json:"pinned_memory_bytes,omitempty"`
 	// ContendedCount is how many of this pipeline's runs the admission
@@ -360,205 +359,6 @@ func loadProfileMutState(ctx context.Context, tx *storeTx, team Team, pipeline, 
 	}
 	st.window = samples
 	return st, nil
-}
-
-type waitWindowDoc struct {
-	Schema  int     `json:"schema"`
-	Samples []int64 `json:"samples"`
-}
-
-const waitSchemaCurrent = 1
-
-// RecordWaitObservation folds an admission wait into this tenant's pipeline rollup.
-func (t *Tenant) RecordWaitObservation(ctx context.Context, pipeline string, wait time.Duration) error {
-	if pipeline == "" {
-		return nil
-	}
-	if wait < 0 {
-		wait = 0
-	}
-	window, err := t.loadWaitWindow(ctx, pipeline)
-	if err != nil {
-		return err
-	}
-	window = append(window, wait.Milliseconds())
-	if len(window) > profileWindow {
-		window = window[len(window)-profileWindow:]
-	}
-	p50 := percentile(window, 0.50)
-	p99 := percentile(window, 0.99)
-	raw, err := json.Marshal(waitWindowDoc{Schema: waitSchemaCurrent, Samples: window})
-	if err != nil {
-		return err
-	}
-	return retryOnBusy(func() error {
-		_, err := t.s.exec(ctx, `
-INSERT INTO pipeline_profiles
-    (team, pipeline, node_id, p50_duration_ms, p99_duration_ms, peak_cores, peak_memory_bytes, sample_count, cpu_measured, updated_at,
-     wait_samples_json, wait_p50_ms, wait_p99_ms, wait_sample_count)
-VALUES (?, ?, ?, 0, 0, 0, 0, 0, 0, ?, ?, ?, ?, ?)
-ON CONFLICT (team, pipeline, node_id) DO UPDATE SET
-    wait_samples_json = excluded.wait_samples_json,
-    wait_p50_ms       = excluded.wait_p50_ms,
-    wait_p99_ms       = excluded.wait_p99_ms,
-    wait_sample_count = excluded.wait_sample_count`,
-			string(t.team), pipeline, "", time.Now().UnixNano(), raw, p50, p99, len(window))
-		return err
-	})
-}
-
-func (t *Tenant) loadWaitWindow(ctx context.Context, pipeline string) ([]int64, error) {
-	var raw []byte
-	err := t.s.queryRow(ctx,
-		`SELECT wait_samples_json FROM pipeline_profiles WHERE team = ? AND pipeline = ? AND node_id = ''`,
-		string(t.team), pipeline).Scan(&raw)
-	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return nil, nil
-		}
-		return nil, err
-	}
-	if len(raw) == 0 {
-		return nil, nil
-	}
-	var doc waitWindowDoc
-	if err := json.Unmarshal(raw, &doc); err != nil || doc.Schema != waitSchemaCurrent {
-		return nil, nil
-	}
-	return doc.Samples, nil
-}
-
-// SetProfilePin updates the resource pin on this tenant's existing profile row.
-func (t *Tenant) SetProfilePin(ctx context.Context, pipeline, nodeID string, cores float64, memoryBytes int64) error {
-	return retryOnBusy(func() error {
-		_, err := t.s.exec(ctx, `
-UPDATE pipeline_profiles SET pinned_cores = ?, pinned_memory_bytes = ?
- WHERE team = ? AND pipeline = ? AND node_id = ?`, cores, memoryBytes, string(t.team), pipeline, nodeID)
-		return err
-	})
-}
-
-// UpsertProfilePin records this tenant's resource pin, creating an unmeasured row when absent.
-func (t *Tenant) UpsertProfilePin(ctx context.Context, pipeline, nodeID string, cores float64, memoryBytes int64) error {
-	return retryOnBusy(func() error {
-		_, err := t.s.exec(ctx, `
-INSERT INTO pipeline_profiles
-    (team, pipeline, node_id, p50_duration_ms, p99_duration_ms, peak_cores, peak_memory_bytes, sample_count, cpu_measured, updated_at, pinned_cores, pinned_memory_bytes)
-VALUES (?, ?, ?, 0, 0, 0, 0, 0, 0, ?, ?, ?)
-ON CONFLICT (team, pipeline, node_id) DO UPDATE SET
-    pinned_cores        = excluded.pinned_cores,
-    pinned_memory_bytes = excluded.pinned_memory_bytes`,
-			string(t.team), pipeline, nodeID, time.Now().UnixNano(), cores, memoryBytes)
-		return err
-	})
-}
-
-// ProfileResetSummary reports what a profile reset removed. RowsDeleted
-// counts (pipeline, node) rows removed outright -- those with no pin to
-// preserve. RowsCleared counts rows whose learned samples, peaks, and
-// waits were zeroed but whose pin was kept, so the estimate keeps the pin
-// while the profile re-learns. SamplesDropped is the total windowed
-// duration samples discarded across both.
-//
-// FloorsDropped counts rows that carried a contended-run demand floor,
-// counted separately because a floor is the one piece of a profile that can
-// exist with no measured samples behind it: a pipeline that never finished a
-// clean run is still estimated from its floor, so a reset that clears one
-// has changed the estimate even when SamplesDropped is zero.
-type ProfileResetSummary struct {
-	Pipelines      []string `json:"pipelines"`
-	RowsDeleted    int      `json:"rows_deleted"`
-	RowsCleared    int      `json:"rows_cleared"`
-	SamplesDropped int      `json:"samples_dropped"`
-	FloorsDropped  int      `json:"floors_dropped"`
-}
-
-func (t *Tenant) resetProfiles(ctx context.Context, pipeline string) (ProfileResetSummary, error) {
-	summary := ProfileResetSummary{Pipelines: []string{}}
-	andPipeline := ""
-	args := []any{string(t.team)}
-	if pipeline != "" {
-		andPipeline = " AND pipeline = ?"
-		args = append(args, pipeline)
-	}
-	rows, err := t.s.query(ctx, `SELECT pipeline, sample_count, pinned_cores, pinned_memory_bytes, floor_cores, floor_memory_bytes
-  FROM pipeline_profiles WHERE team = ?`+andPipeline, args...)
-	if err != nil {
-		return ProfileResetSummary{}, err
-	}
-	seen := map[string]bool{}
-	for rows.Next() {
-		var p string
-		var samples int
-		var pinCores float64
-		var pinMem int64
-		var floorCores float64
-		var floorMem int64
-		if err := rows.Scan(&p, &samples, &pinCores, &pinMem, &floorCores, &floorMem); err != nil {
-			_ = rows.Close()
-			return ProfileResetSummary{}, err
-		}
-		summary.SamplesDropped += samples
-		if floorCores > 0 || floorMem > 0 {
-			summary.FloorsDropped++
-		}
-		if pinCores != 0 || pinMem != 0 {
-			summary.RowsCleared++
-		} else {
-			summary.RowsDeleted++
-		}
-		if !seen[p] {
-			seen[p] = true
-			summary.Pipelines = append(summary.Pipelines, p)
-		}
-	}
-	if err := rows.Err(); err != nil {
-		_ = rows.Close()
-		return ProfileResetSummary{}, err
-	}
-	if err := rows.Close(); err != nil {
-		return ProfileResetSummary{}, err
-	}
-	sort.Strings(summary.Pipelines)
-	if summary.RowsDeleted == 0 && summary.RowsCleared == 0 {
-		return summary, nil
-	}
-	if err := retryOnBusy(func() error {
-		_, derr := t.s.exec(ctx, `DELETE FROM pipeline_profiles WHERE team = ? AND pinned_cores = 0 AND pinned_memory_bytes = 0`+andPipeline, args...)
-		return derr
-	}); err != nil {
-		return ProfileResetSummary{}, err
-	}
-	clearArgs := append([]any{time.Now().UnixNano()}, args...)
-	if err := retryOnBusy(func() error {
-		_, uerr := t.s.exec(ctx, `
-UPDATE pipeline_profiles SET
-    p50_duration_ms   = 0,
-    p99_duration_ms   = 0,
-    peak_cores        = 0,
-    sustained_cores   = 0,
-    peak_memory_bytes = 0,
-    sample_count      = 0,
-    cpu_measured      = 0,
-    samples_json      = NULL,
-    wait_samples_json = NULL,
-    wait_p50_ms       = 0,
-    wait_p99_ms       = 0,
-    wait_sample_count = 0,
-    contended_count   = 0,
-    plan_hash         = '',
-    floor_cores       = 0,
-    floor_memory_bytes = 0,
-    prev_peak_cores   = 0,
-    prev_sustained_cores = 0,
-    prev_peak_memory_bytes = 0,
-    updated_at        = ?
- WHERE team = ? AND (pinned_cores != 0 OR pinned_memory_bytes != 0)`+andPipeline, clearArgs...)
-		return uerr
-	}); err != nil {
-		return ProfileResetSummary{}, err
-	}
-	return summary, nil
 }
 
 const profileColumns = `p50_duration_ms, p99_duration_ms, peak_cores, peak_memory_bytes, sample_count, cpu_measured, updated_at, pinned_cores, pinned_memory_bytes, samples_json, wait_p50_ms, wait_p99_ms, wait_sample_count, contended_count, plan_hash, floor_cores, floor_memory_bytes, prev_peak_cores, prev_peak_memory_bytes, sustained_cores, prev_sustained_cores`
@@ -842,24 +642,4 @@ func (t *Tenant) ProfileSamples(ctx context.Context, pipeline, nodeID string) ([
 		})
 	}
 	return out, nil
-}
-
-// RecordContention increments this tenant's contention tally for an existing pipeline rollup.
-func (t *Tenant) RecordContention(ctx context.Context, pipeline string) error {
-	return retryOnBusy(func() error {
-		_, err := t.s.exec(ctx,
-			`UPDATE pipeline_profiles SET contended_count = contended_count + 1
-			  WHERE team = ? AND pipeline = ? AND node_id = ''`, string(t.team), pipeline)
-		return err
-	})
-}
-
-// ResetPipelineProfile clears one tenant pipeline's learned observations and floors while preserving resource pins.
-func (t *Tenant) ResetPipelineProfile(ctx context.Context, pipeline string) (ProfileResetSummary, error) {
-	return t.resetProfiles(ctx, pipeline)
-}
-
-// ResetAllProfiles clears this tenant's learned observations and floors while preserving resource pins.
-func (t *Tenant) ResetAllProfiles(ctx context.Context) (ProfileResetSummary, error) {
-	return t.resetProfiles(ctx, "")
 }
