@@ -31,17 +31,17 @@ func TestLocalDashboardExchangeWaitsForServingOwner(t *testing.T) {
 		defer peer.Close()
 		entered, ready := make(chan struct{}), make(chan struct{})
 		done := dashboardPeer(t, server, func(hello *wingwire.Hello, request *wingwire.LocalDashboard) wingwire.Message {
-			if hello.HealthProbe || request.Address != "127.0.0.1:0" {
+			if hello.HealthProbe || request.Address != "127.0.0.1:0" || !request.ReadOnly {
 				t.Errorf("dashboard request: %+v %+v", hello, request)
 			}
 			close(entered)
 			<-ready
-			return &wingwire.LocalDashboardAck{}
+			return &wingwire.LocalDashboardAck{ReadOnly: request.ReadOnly}
 		})
 		ctx, cancel := context.WithTimeout(t.Context(), time.Minute)
 		defer cancel()
 		result := make(chan error, 1)
-		go func() { result <- exchangeLocalDashboard(ctx, peer, "fixture", "127.0.0.1:0") }()
+		go func() { result <- exchangeLocalDashboard(ctx, peer, "fixture", "127.0.0.1:0", true) }()
 		<-entered
 		synctest.Wait()
 		<-time.NewTimer(2 * probeTimeout).C
@@ -63,10 +63,11 @@ func TestLocalDashboardExchangeRefusesBadReplies(t *testing.T) {
 		&wingwire.Unsupported{Type: string(wingwire.TypeLocalDashboard)},
 		&wingwire.LocalControlStatus{Running: true, PID: 1, Version: "v1"},
 		&wingwire.LocalDashboardAck{Error: "dashboard address is occupied"},
+		&wingwire.LocalDashboardAck{ReadOnly: true},
 	} {
 		peer, server := net.Pipe()
 		done := dashboardPeer(t, server, func(*wingwire.Hello, *wingwire.LocalDashboard) wingwire.Message { return reply })
-		err := exchangeLocalDashboard(t.Context(), peer, "fixture", "127.0.0.1:0")
+		err := exchangeLocalDashboard(t.Context(), peer, "fixture", "127.0.0.1:0", false)
 		peer.Close()
 		<-done
 		if err == nil {
@@ -85,7 +86,7 @@ func TestLocalDashboardExchangeCancellation(t *testing.T) {
 		defer server.Close()
 		ctx, cancel := context.WithCancel(t.Context())
 		result := make(chan error, 1)
-		go func() { result <- exchangeLocalDashboard(ctx, peer, "fixture", "127.0.0.1:0") }()
+		go func() { result <- exchangeLocalDashboard(ctx, peer, "fixture", "127.0.0.1:0", false) }()
 		if _, err := newFrameReader(server).read(); err != nil {
 			t.Fatal(err)
 		}
@@ -109,7 +110,7 @@ func TestLocalDashboardExchangeCancellationAfterRequest(t *testing.T) {
 		ctx, cancel := context.WithCancel(t.Context())
 		defer cancel()
 		result := make(chan error, 1)
-		go func() { result <- exchangeLocalDashboard(ctx, peer, "fixture", "127.0.0.1:0") }()
+		go func() { result <- exchangeLocalDashboard(ctx, peer, "fixture", "127.0.0.1:0", false) }()
 		<-entered
 		cancel()
 		if err := <-result; !errors.Is(err, context.Canceled) {
@@ -125,14 +126,14 @@ func TestLocalDashboardExchangeUnresponsiveHandshake(t *testing.T) {
 		peer, server := net.Pipe()
 		defer peer.Close()
 		defer server.Close()
-		if err := exchangeLocalDashboard(t.Context(), peer, "fixture", "127.0.0.1:0"); !errors.Is(err, errDaemonWedged) {
+		if err := exchangeLocalDashboard(t.Context(), peer, "fixture", "127.0.0.1:0", false); !errors.Is(err, errDaemonWedged) {
 			t.Fatalf("unresponsive owner: %v", err)
 		}
 	})
 }
 
 func TestLocalDashboardRequiresAddressBeforeDial(t *testing.T) {
-	if err := startLocalDashboard(t.Context(), t.TempDir(), ""); err == nil || !strings.Contains(err.Error(), "address is required") {
+	if err := startLocalDashboard(t.Context(), t.TempDir(), "", false); err == nil || !strings.Contains(err.Error(), "address is required") {
 		t.Fatalf("missing dashboard address: %v", err)
 	}
 }
@@ -183,9 +184,20 @@ func TestLocalDashboardExchangeCancellationDuringDeadlineChange(t *testing.T) {
 		}
 		<-nc.closed
 	}()
-	err := exchangeLocalDashboard(ctx, nc, "fixture", "127.0.0.1:0")
+	err := exchangeLocalDashboard(ctx, nc, "fixture", "127.0.0.1:0", false)
 	<-done
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("cancellation during deadline change: %v", err)
+	}
+}
+
+func TestLocalDashboardReadOnlyRefusesAnOwnerWithoutPolicySupport(t *testing.T) {
+	peer, server := net.Pipe()
+	defer peer.Close()
+	done := dashboardPeer(t, server, func(*wingwire.Hello, *wingwire.LocalDashboard) wingwire.Message { return &wingwire.LocalDashboardAck{} })
+	err := exchangeLocalDashboard(t.Context(), peer, "fixture", "127.0.0.1:0", true)
+	<-done
+	if err == nil || !strings.Contains(err.Error(), "did not confirm") {
+		t.Fatalf("old owner accepted read-only: %v", err)
 	}
 }

@@ -34,17 +34,17 @@ func TestLocalDashboardWireStartsAndReusesOwner(t *testing.T) {
 		}
 	})
 	for range 2 {
-		reply, ok := localControlPipe(t, r.run.daemon, false)(&wingwire.LocalDashboard{Address: "127.0.0.1:0"}).(*wingwire.LocalDashboardAck)
-		if !ok || reply.Error != "" {
+		reply, ok := localControlPipe(t, r.run.daemon, false)(&wingwire.LocalDashboard{Address: "127.0.0.1:0", ReadOnly: true}).(*wingwire.LocalDashboardAck)
+		if !ok || reply.Error != "" || !reply.ReadOnly {
 			t.Fatalf("dashboard start: %+v", reply)
 		}
 	}
 	if binds.Load() != 1 {
 		t.Fatalf("dashboard binds=%d, want one", binds.Load())
 	}
-	reply := localControlPipe(t, r.run.daemon, false)(&wingwire.LocalDashboard{Address: "127.0.0.1:9001"}).(*wingwire.LocalDashboardAck)
+	reply := localControlPipe(t, r.run.daemon, false)(&wingwire.LocalDashboard{Address: "127.0.0.1:0", ReadOnly: false}).(*wingwire.LocalDashboardAck)
 	if !strings.Contains(reply.Error, "already serves") {
-		t.Fatalf("address change: %+v", reply)
+		t.Fatalf("policy change: %+v", reply)
 	}
 	status, err := r.Status(t.Context())
 	if err != nil || !status.Running || !status.Stay {
@@ -67,7 +67,7 @@ func TestLocalDashboardWireRefusesProbeAndAdmissionOnly(t *testing.T) {
 		}
 	}
 	var calls atomic.Int32
-	d.localDashboard = func(context.Context, string) error { calls.Add(1); return nil }
+	d.localDashboard = func(context.Context, string, bool) error { calls.Add(1); return nil }
 	if _, ok := localControlPipe(t, d, true)(&wingwire.LocalDashboard{Address: "127.0.0.1:0"}).(*wingwire.Unsupported); !ok || calls.Load() != 0 {
 		t.Fatal("health probe started dashboard")
 	}
@@ -112,7 +112,7 @@ func TestLocalDashboardWirePeerDisconnectCancelsAndJoins(t *testing.T) {
 		}
 		t.Cleanup(d.finalShutdown)
 		entered, returned := make(chan struct{}), make(chan struct{})
-		d.localDashboard = func(ctx context.Context, _ string) error {
+		d.localDashboard = func(ctx context.Context, _ string, _ bool) error {
 			defer close(returned)
 			close(entered)
 			<-ctx.Done()

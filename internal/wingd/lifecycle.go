@@ -49,6 +49,7 @@ type LocalStartOptions struct {
 	Home, Executable, Version string
 	Stay, Standalone          bool
 	DashboardAddress          string
+	DashboardReadOnly         bool
 }
 
 // LocalRuntime uses the same internal/controller implementation, route policy and state owner.
@@ -59,9 +60,9 @@ type LocalRuntime interface {
 	AwaitReady(context.Context) (LocalStatus, error)
 	Status(context.Context) (LocalStatus, error)
 	SetStay(context.Context, bool) error
-	// EnsureDashboard starts the UI on an already-ready owner, reusing an identical address.
-	// A different address is refused until the controller is stopped and restarted.
-	EnsureDashboard(context.Context, string) error
+	// EnsureDashboard starts the UI on an already-ready owner, reusing an identical address and read-only policy.
+	// A different address or policy is refused until the controller is stopped and restarted.
+	EnsureDashboard(context.Context, string, bool) error
 	// Drain returns after the admission drain and controller shutdown complete.
 	Drain(context.Context) error
 }

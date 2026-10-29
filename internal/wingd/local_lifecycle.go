@@ -152,7 +152,7 @@ func (l *localLifecycle) StartDashboard(ctx context.Context, opts LocalStartOpti
 	if err != nil || opts.DashboardAddress == "" {
 		return status, err
 	}
-	if err := l.runtime.EnsureDashboard(ctx, opts.DashboardAddress); err != nil {
+	if err := l.runtime.EnsureDashboard(ctx, opts.DashboardAddress, opts.DashboardReadOnly); err != nil {
 		return LocalStatus{}, err
 	}
 	status, err = l.Status(ctx)

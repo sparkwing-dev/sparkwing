@@ -463,12 +463,22 @@
           "name": "address",
           "kind": "string",
           "omitempty": false
+        },
+        {
+          "name": "read_only",
+          "kind": "bool",
+          "omitempty": true
         }
       ]
     },
     {
       "type": "local_dashboard_ack",
       "fields": [
+        {
+          "name": "read_only",
+          "kind": "bool",
+          "omitempty": true
+        },
         {
           "name": "error",
           "kind": "string",

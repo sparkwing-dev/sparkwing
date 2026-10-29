@@ -78,7 +78,6 @@ func Registry() []Command {
 		{Path: "sparkwing dashboard start", Rules: []string{"Starts the local controller on demand; --stay pins it until stopped. Runs, queued work, held leases and dashboard connections prevent idle exit."}, Flags: []Flag{
 			{Name: "addr", Argument: "HOST:PORT"},
 			{Name: "allow-remote"},
-			{Name: "allow-origin", Argument: "ORIGIN", Repeatable: true, CommaList: true},
 			{Name: "read-only"},
 			{Name: "stay"},
 		}},

@@ -760,6 +760,7 @@ unlock.
 
 ### Fixed
 
+- **dashboard (Breaking):** `--allow-remote` starts a non-loopback dashboard with mandatory browser-session authentication, and `--read-only` refuses browser mutations. `--allow-origin` is removed because the controller requires same-origin requests. Changing a running dashboard's address or read-only policy requires stopping it first.
 - **controller:** Startup flag discovery now includes all 61 flags the controller parses. A regression compares the shared help registry with the real controller parser's names and argument requirements.
 - **TypeScript SDK:** Local `file:` directory and tarball pins select the package's exact engine version and validate their npm lockfile source. Tarball bytes or the directory manifest participate in pin identity.
 - **run:** A pipeline whose `sparkwing.yaml` entrypoint matches no SDK registration fails with `sparkwing.yaml names entrypoint "Gate", which the SDK does not register; it registers "gate", "lint"` and says to register that name or point `entrypoint:` at a registered one. It answered `describe failed: unknown_pipeline (details withheld: secrets not yet known)`, also for `run <pipeline> --help`. Registered names stay withheld while another pipeline's declarations are unknown.
