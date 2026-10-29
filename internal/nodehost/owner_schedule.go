@@ -441,7 +441,7 @@ func (h *OwnerHost) finish(ctx context.Context, input RunInput, decision store.S
 		return RunCompletion{}, err
 	}
 	switch runstate.RunState(decision.Outcome) {
-	case runstate.RunSuccess, runstate.RunFailed, runstate.RunCancelled:
+	case runstate.RunSuccess, runstate.RunDryRun, runstate.RunFailed, runstate.RunCancelled:
 	default:
 		return RunCompletion{}, errors.New("schedule returned an invalid run verdict")
 	}

@@ -79,7 +79,7 @@ func (o *Operator) dueRunEffects(ctx context.Context, effect Effect, limit int) 
 		observedAt := tx.now(ctx)
 		rows, err := tx.queryContext(ctx, `SELECT e.team,e.run_id,e.effect,e.desired_state,e.desired_rev,e.delivered_rev,e.attempts,e.next_at,
 r.pipeline,r.git_sha,r.git_branch,r.error,
-(SELECT v.payload FROM events v WHERE v.team=r.team AND v.run_id=r.id AND v.node_id='' AND v.state_seq=r.state_seq AND v.kind IN ('run_success','run_failed','run_cancelled') ORDER BY v.seq DESC LIMIT 1) FROM run_effects e JOIN runs r ON r.team = e.team AND r.id = e.run_id
+(SELECT v.payload FROM events v WHERE v.team=r.team AND v.run_id=r.id AND v.node_id='' AND v.state_seq=r.state_seq AND v.kind IN ('run_success','run_dry_run','run_failed','run_cancelled') ORDER BY v.seq DESC LIMIT 1) FROM run_effects e JOIN runs r ON r.team = e.team AND r.id = e.run_id
 WHERE e.delivered_rev < e.desired_rev AND e.next_at <= ? AND (?='' OR e.effect=?) ORDER BY e.next_at,e.team,e.run_id,e.effect LIMIT ?`, observedAt.UnixNano(), effect, effect, limit)
 		if err != nil {
 			return nil, err
@@ -197,7 +197,7 @@ func effectPhase(state runstate.RunState) EffectPhase {
 }
 
 func writeRunEffectsTx(ctx context.Context, tx *storeTx, team Team, runID string, state runstate.RunState, now time.Time) error {
-	if state != runstate.RunPending && state != runstate.RunRunning && state != runstate.RunSuccess && state != runstate.RunFailed && state != runstate.RunCancelled {
+	if state != runstate.RunPending && state != runstate.RunRunning && state != runstate.RunSuccess && state != runstate.RunDryRun && state != runstate.RunFailed && state != runstate.RunCancelled {
 		return fmt.Errorf("invalid effect state %q", state)
 	}
 	phase := effectPhase(state)

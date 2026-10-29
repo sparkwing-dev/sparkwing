@@ -15,7 +15,7 @@ func TestRunEventKindsRegisterEveryStateEvent(t *testing.T) {
 			t.Errorf("job event %q is not in runstate.RunEventKinds", rule.Kind)
 		}
 	}
-	for _, state := range []runstate.RunState{runstate.RunPending, runstate.RunSuccess, runstate.RunFailed, runstate.RunCancelled} {
+	for _, state := range []runstate.RunState{runstate.RunPending, runstate.RunSuccess, runstate.RunDryRun, runstate.RunFailed, runstate.RunCancelled} {
 		if !slices.Contains(runstate.RunEventKinds, "run_"+string(state)) {
 			t.Errorf("run event run_%s is not in runstate.RunEventKinds", state)
 		}
