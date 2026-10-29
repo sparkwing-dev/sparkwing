@@ -28,11 +28,11 @@ type StorageStanding struct {
 	LogBytes          int64
 }
 
-// safety: the operator's team is the whole of a self-hosted install, which
-// never had a free tier and must not gain its limits.
-func holdsFreeAllowance(team Team) bool {
+// safety: free-tier limits exist only where usage is metered, so a deployment without metering, such as a
+// self-hosted team controller, never gains them; the operator's own team never pays.
+func (s *Store) holdsFreeAllowance(team Team) bool {
 	team = NormalizeTeam(team)
-	return team != "" && team != DefaultTeam
+	return !s.creditMeteringOff.Load() && team != "" && team != DefaultTeam
 }
 
 func storageStandingTx(ctx context.Context, tx *storeTx, team Team) (StorageStanding, error) {
@@ -48,7 +48,7 @@ func storageStandingTx(ctx context.Context, tx *storeTx, team Team) (StorageStan
 	if out.AllowanceBytes, err = storageFreeAllowanceTx(ctx, tx); err != nil {
 		return StorageStanding{}, err
 	}
-	if !holdsFreeAllowance(team) {
+	if !tx.store.holdsFreeAllowance(team) {
 		return out, nil
 	}
 	funded, err := teamFundedTx(ctx, tx, team)

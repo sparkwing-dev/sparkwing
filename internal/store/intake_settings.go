@@ -17,7 +17,7 @@ func IntakeSettings(ctx context.Context, resolver capability.AuthorityResolver, 
 	if err != nil {
 		return ComputeLimits{}, false, err
 	}
-	if !holdsFreeAllowance(team) {
+	if !tx.store.holdsFreeAllowance(team) {
 		return guards, true, nil
 	}
 	funded, err := teamFundedTx(ctx, tx, team)

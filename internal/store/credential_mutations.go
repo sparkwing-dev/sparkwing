@@ -33,7 +33,7 @@ func (t *Tenant) WriteSecret(ctx context.Context, a capability.Authorized, seale
 		if row.Principal != "" && row.Principal != actor {
 			return bindingRefusal()
 		}
-		if holdsFreeAllowance(t.team) {
+		if t.s.holdsFreeAllowance(t.team) {
 			if len(row.Value) > maxSecretValueBytes {
 				return ErrSecretLimit
 			}
