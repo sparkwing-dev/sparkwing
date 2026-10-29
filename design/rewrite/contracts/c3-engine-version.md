@@ -125,7 +125,7 @@ code. Local TypeScript `file:` directories and local `.tgz`/`.tar.gz` requiremen
 resolve their name and exact release version from the source package manifest.
 The npm lockfile must name the same source and agree with its version when it
 records one. Local tarball bytes or the directory package manifest join the pin
-input digest. They select the matching verified release engine, as registry pins
+input digest with slash-separated source names on every OS. They select the matching verified release engine, as registry pins
 do. `TestReadTypeScriptLocalPin` covers npm lockfile versions 1 through 3,
 source agreement and changed package identity. CLI selection and `info` pass the pipeline directory to `ReadPin`, matching
 source acquisition. A range alone cannot select an exact engine. Go `vX.Y.Z` and TypeScript

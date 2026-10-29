@@ -35,6 +35,9 @@ func TestReadTypeScriptLocalPin(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
+				if lockVersion == 3 && spec == "file:sdk" && pin.InputsDigest != "a264b1e5372c31cbfe5231493a4f54599dcdb8ee9d71fe2e3d9704fc19a9fb1d" {
+					t.Fatalf("local pin digest changed across platforms: %s", pin.InputsDigest)
+				}
 				version, err := VersionForPin(pin)
 				if err != nil || version != "v0.68.0-qa.16" {
 					t.Fatalf("version=%s error=%v", version, err)

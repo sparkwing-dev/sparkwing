@@ -245,7 +245,7 @@ func pinInputsDigest(dir string, pin engineid.Pin) (string, error) {
 			if err != nil {
 				return "", err
 			}
-			paths = append(paths, path)
+			paths = append(paths, filepath.ToSlash(path))
 		}
 	}
 	for _, path := range paths {
