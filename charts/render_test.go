@@ -979,17 +979,36 @@ func renderNotes(t *testing.T, sets ...string) string {
 	if err != nil {
 		t.Skip("helm not installed; chart rendering not exercised")
 	}
-	args := helmArgs("./sparkwing-full", "sparkwing", sets)
-	args[0] = "install"
-	out, err := exec.Command(helm, append(args, "--dry-run=client")...).CombinedOutput()
+	chart := filepath.Join(t.TempDir(), "sparkwing-full")
+	if err := os.CopyFS(chart, os.DirFS("sparkwing-full")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Rename(filepath.Join(chart, "templates", "NOTES.txt"), filepath.Join(chart, "notes.txt")); err != nil {
+		t.Fatal(err)
+	}
+	// safety: Helm 3 install dry-runs contact Kubernetes; template renders
+	// the same notes through tpl without requiring cluster access.
+	manifest := `apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: notes
+data:
+  notes: {{ tpl (.Files.Get "notes.txt") . | quote }}
+`
+	if err := os.WriteFile(filepath.Join(chart, "templates", "notes.yaml"), []byte(manifest), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	out, err := exec.Command(helm, helmArgs(chart, "sparkwing", sets, "--show-only", "templates/notes.yaml")...).CombinedOutput()
 	if err != nil {
-		t.Fatalf("helm install --dry-run: %v\n%s", err, out)
+		t.Fatalf("helm template notes: %v\n%s", err, out)
 	}
-	_, notes, ok := strings.Cut(string(out), "NOTES:")
-	if !ok {
-		t.Fatalf("helm install --dry-run printed no NOTES:\n%s", out)
+	var rendered struct {
+		Data map[string]string `yaml:"data"`
 	}
-	return notes
+	if err := yaml.Unmarshal(out, &rendered); err != nil {
+		t.Fatal(err)
+	}
+	return rendered.Data["notes"]
 }
 
 // safety: the notes are the first instructions an operator follows, and an
