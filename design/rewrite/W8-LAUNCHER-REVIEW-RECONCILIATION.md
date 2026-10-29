@@ -1,6 +1,6 @@
 # W8 launcher review reconciliation - 2026-10-17
 
-Continues 788701c0e and the integration merge of bw-3095-rewrite. The lead's
+Continues 788701c0e and the integration merge of the integration branch. The lead's
 native report after session 2 has nine passing packages and no FAIL. It covers
 the previous committed state. This worker leaves that external report unchanged.
 The lead must commit this work and rerun native verification before accepting it.

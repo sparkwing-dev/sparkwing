@@ -1,6 +1,6 @@
 # W9 merge and receipt continuation
 
-Base HEAD: `ae13798f2`, with `bw-3095-rewrite` mid-merge. The lead's 01:40
+Base HEAD: `ae13798f2`, with the integration branch mid-merge. The lead's 01:40
 native passes for local_controller, local_schedules and public doctor remain
 the starting evidence. The SDK replacement pin policy is unchanged.
 

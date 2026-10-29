@@ -4,7 +4,7 @@
 
 ## Merge
 
-Started at 1b306fd7a with bw-3095-rewrite already merging. All 19 conflict
+Started at 1b306fd7a with the integration branch already merging. All 19 conflict
 contents are resolved. The index still reports them as unmerged because the
 swarm brief forbids Git writes. The lead must stage the resolutions and finish
 the merge. No conflict marker remains. Amendments-1.md and handoffs.md match
