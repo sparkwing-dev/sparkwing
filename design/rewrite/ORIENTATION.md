@@ -105,6 +105,12 @@ credential model in `docs/auth.md`, and the decision log
 | --- | --- | --- |
 | Local repository memo lookups miss after scope checks; publication is skipped | `blob_lookup.go`: `lookupMemoTx`; `internal/nodehost/executor_memo.go`: `saveMemo` | `blob_local_cache_test.go`: `TestLocalDepcacheRoundTrip`; `internal/nodehost/native_memo_test.go`: `TestNativeExecutorLocalRepositoryMemoRunsBody`; `internal/nodehost/executor_memo_test.go`: `TestExecutorLocalRepositorySkipsMemoPublication` |
 
+### Logs
+
+| Rule | Owner | Guard test |
+| --- | --- | --- |
+| Bound node commands flush final logs at report, retry or release, within the attempt's tail grace | `internal/nodehost/assembly_native_logs.go`: `logHostStore.TransitionNode` reads the command payload | `internal/nodehost/assembly_native_logs_test.go`: `TestStalledLogsDoNotDelayLifecycleCommits`, `TestLogLifecycleDetachesFlush` |
+
 ### CLI and API surface
 
 | Rule | Owner | Guard test |

@@ -57,8 +57,12 @@ func (s logHostStore) FinishRunAndUnit(ctx context.Context, request runstate.Fin
 }
 
 func (s logHostStore) TransitionNode(ctx context.Context, request store.NodeCommand) (runstate.Applied, error) {
-	switch request.(type) {
-	case store.ReportNode, store.RetryNode, store.ReleaseNode:
+	payload, err := store.NodeCommandPayloadFor(request)
+	if err != nil {
+		return runstate.Applied{}, err
+	}
+	switch payload.Cause {
+	case runstate.CauseReport, runstate.CauseRetry, runstate.CauseRelease:
 		ref, _ := store.NodeCommandAuthority(request)
 		s.logs.finish(context.WithoutCancel(ctx), string(ref.NodeID))
 	}
