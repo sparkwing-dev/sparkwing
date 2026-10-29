@@ -37,18 +37,9 @@ func TestTheTestStepKeepsLiveServicesAwayFromTheSuitesItRuns(t *testing.T) {
 	}
 }
 
-// safety: the names the node injector reaches through a constant the pipeline
-// module cannot import; each is pinned against its declaration below.
-var nodeEnvConstants = map[string]string{
-	"protofd.NodeURLEnv":   "SPARKWING_NODE_URL",
-	"protofd.NodeTokenEnv": "SPARKWING_NODE_TOKEN",
-}
-
-// safety: a name the injector strips or reads never reaches a child, so only
-// the KEY=value entries it appends define the output this contract covers.
-var envConstantReference = regexp.MustCompile(`\b(protofd\.[A-Z][A-Za-z0-9]*Env)\+"="`)
-
-var envNameLiteral = regexp.MustCompile(`"(SPARKWING_[A-Z0-9_]+)=|\{"(SPARKWING_[A-Z0-9_]+)",`)
+// safety: composeRuntime is the one place a node child's run bindings are
+// written, each through put, so its put calls are the names this covers.
+var injectedName = regexp.MustCompile(`\bput\("([A-Z][A-Z0-9_]*)"`)
 
 func readProductSource(t *testing.T, parts ...string) string {
 	t.Helper()
@@ -65,28 +56,15 @@ func readProductSource(t *testing.T, parts ...string) string {
 }
 
 func TestEveryVariableTheNodeInjectorSetsIsScrubbedPinnedOrRecorded(t *testing.T) {
-	declarations := readProductSource(t, "internal", "protofd", "protofd.go")
-	for reference, name := range nodeEnvConstants {
-		constant := strings.TrimPrefix(reference, "protofd.")
-		if !regexp.MustCompile(`\b` + constant + `\s*=\s*"` + name + `"`).MatchString(declarations) {
-			t.Fatalf("protofd no longer declares %s = %q", constant, name)
-		}
+	source := readProductSource(t, "internal", "procenv", "build.go")
+	_, injector, found := strings.Cut(source, "func composeRuntime(")
+	if !found {
+		t.Fatal("internal/procenv/build.go no longer defines composeRuntime; point this contract at the new injector")
 	}
-
-	injector := readProductSource(t, "internal", "nodehost", "attempt.go")
+	injector, _, _ = strings.Cut(injector, "\n}\n")
 	injected := map[string]bool{}
-	for _, m := range envNameLiteral.FindAllStringSubmatch(injector, -1) {
-		injected[m[1]+m[2]] = true
-	}
-	for _, match := range envConstantReference.FindAllStringSubmatch(injector, -1) {
-		reference := match[1]
-		name, ok := nodeEnvConstants[reference]
-		if !ok {
-			t.Errorf("the node injector reads %s, a constant this contract cannot resolve; "+
-				"add it to nodeEnvConstants with its value", reference)
-			continue
-		}
-		injected[name] = true
+	for _, m := range injectedName.FindAllStringSubmatch(injector, -1) {
+		injected[m[1]] = true
 	}
 	if len(injected) == 0 {
 		t.Fatal("read no variable names out of the node injector, so this contract checks nothing")
