@@ -99,7 +99,7 @@ func TestHostedCIProvesThePostgresSuitesRanAgainstARealDatabase(t *testing.T) {
 		`SPARKWING_REQUIRE_PG: "1"`,
 		"SPARKWING_TEST_PG_URL: postgres://postgres:postgres@localhost:5432/postgres?sslmode=disable",
 		`--health-cmd "pg_isready -U postgres"`,
-		"go test -short ./internal/store ./internal/backend ./internal/orchestrator",
+		"go test -short -timeout 20m -skip 'Postgres|Pg|BackupRestoreDrill' ./internal/store ./internal/backend ./internal/orchestrator",
 		"go test -v -count=1 -run 'Postgres|Pg|BackupRestoreDrill|^TestCLITokenMintUsesCommittedMembershipAuthority$|^TestRunFiltersTreatSQLMetacharactersAsLiteral$|^TestSecretMutationsTreatSQLMetacharactersAsLiteral$' ./internal/store ./internal/backend ./internal/orchestrator ./internal/controller",
 		`grep -q -- '--- SKIP' "$RUNNER_TEMP/postgres-gated.log"`,
 		"actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1",

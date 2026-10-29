@@ -629,7 +629,7 @@ file. Other syntax and workflow checks remain active.
   conformance` job in `.github/workflows/ci.yaml` on every pull request
   and push to main, and `sparkwing run integration` against its
   Dockerized Postgres and MinIO. The hosted job runs the three packages
-  under `-short`, because the canonical gate already runs them in full on
+  under `-short`, leaving the names its no-skip step selects to that step, because the canonical gate already runs them in full on
   SQLite and the full store suite overran Go's ten-minute package limit on
   a hosted runner; the tests that switch to the service database stay in
   the short class.
