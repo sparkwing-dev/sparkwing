@@ -35,7 +35,7 @@ func TestProductionWarmExchangesActionsIdentity(t *testing.T) {
 			json.NewEncoder(w).Encode(map[string]any{"token": "runner-secret", "team": "acme", "expires_at": expires.Unix(), "binding": capability.Binding{Push: &push}})
 		default:
 			t.Errorf("unexpected path %s", r.URL.Path)
-			w.WriteHeader(404)
+			w.WriteHeader(http.StatusNotFound)
 		}
 	}))
 	defer server.Close()
