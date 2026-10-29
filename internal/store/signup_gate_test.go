@@ -130,7 +130,7 @@ func TestAWaitlistedAccountMayAcceptAnInvitation(t *testing.T) {
 		t.Fatalf("CreateTeam after accepting = %v, want ErrWaitlisted", err)
 	}
 
-	approved, err := st.ApproveWaitlisted(ctx, []string{acct.ID}, "")
+	approved, err := st.ApproveWaitlisted(ctx, []string{acct.ID}, "operator")
 	if err != nil || len(approved) != 1 || approved[0].ActiveTeam != owner.Account.ActiveTeam {
 		t.Fatalf("approve = %+v, %v", approved, err)
 	}
@@ -281,7 +281,7 @@ func TestApprovingTheOldestAdmitsInArrivalOrder(t *testing.T) {
 		t.Fatalf("counts = %+v, %v", counts, err)
 	}
 
-	approved, err := st.ApproveOldestWaitlisted(ctx, 2, "")
+	approved, err := st.ApproveOldestWaitlisted(ctx, 2, "operator")
 	if err != nil || len(approved) != 2 || approved[0].ID != ids[0] || approved[1].ID != ids[1] {
 		t.Fatalf("approve oldest = %+v, %v", approved, err)
 	}
@@ -289,11 +289,15 @@ func TestApprovingTheOldestAdmitsInArrivalOrder(t *testing.T) {
 		if a.Waitlisted || a.ActiveTeam == "" {
 			t.Fatalf("approved account = %+v, want a personal space", a)
 		}
+		var actor string
+		if err := st.DB().QueryRowContext(ctx, storetest.Rebind(st, `SELECT actor FROM audit_events WHERE kind='account.admitted' AND subject_id=?`), a.ID).Scan(&actor); err != nil || actor != "operator" {
+			t.Fatalf("admission of %s audited as %q, want the approving operator's account: %v", a.ID, actor, err)
+		}
 		if _, err := st.AsOperator().CreateAccountTeam(ctx, storetest.AccountAuthority(t, st, a.ID), store.TeamInfo{Slug: store.Team("t-" + a.ID[:8]), DisplayName: ""}); err != nil {
 			t.Fatalf("an approved account cannot create a team: %v", err)
 		}
 	}
-	again, err := st.ApproveWaitlisted(ctx, []string{ids[0], ids[2]}, "")
+	again, err := st.ApproveWaitlisted(ctx, []string{ids[0], ids[2]}, "operator")
 	if err != nil || len(again) != 1 || again[0].ID != ids[2] {
 		t.Fatalf("approving an admitted account again = %+v, %v", again, err)
 	}
@@ -315,7 +319,7 @@ func TestSignUpInputsAreValidated(t *testing.T) {
 	if _, err := st.SetSignUpLimits(ctx, store.SignUpLimits{HourlyLimit: -1}); !errors.Is(err, store.ErrInvalidInput) {
 		t.Fatalf("negative limit = %v", err)
 	}
-	if _, err := st.ApproveOldestWaitlisted(ctx, 0, ""); !errors.Is(err, store.ErrInvalidInput) {
+	if _, err := st.ApproveOldestWaitlisted(ctx, 0, "operator"); !errors.Is(err, store.ErrInvalidInput) {
 		t.Fatalf("approve zero = %v", err)
 	}
 }
