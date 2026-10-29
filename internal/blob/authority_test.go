@@ -256,3 +256,21 @@ func FuzzDepcacheNamespaceKeepsAbsentRefDistinct(f *testing.F) {
 		}
 	})
 }
+
+func TestFetchedRunWritesApartFromItsSubmittersUploads(t *testing.T) {
+	writer := runspec.PrincipalWriter("account", "alice")
+	upload, err := runspec.AssertedProvenance(writer, "refs/heads/main", "0000000000000000000000000000000000000a11", "ci")
+	if err != nil {
+		t.Fatal(err)
+	}
+	fetched, err := upload.FetchedFrom(7, "acme/repo", "refs/heads/main", "0000000000000000000000000000000000000a11")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ScopeFor(fetched) == ScopeFor(upload) {
+		t.Fatalf("a fetched run restores its submitter's upload caches: %+v", ScopeFor(fetched))
+	}
+	if fetched.Writer() != writer {
+		t.Fatalf("fetched run lost its submitter: %q", fetched.Writer())
+	}
+}

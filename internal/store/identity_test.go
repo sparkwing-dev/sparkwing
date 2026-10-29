@@ -405,3 +405,28 @@ func TestIdentityWithdrawnInvitationCannotBeAccepted(t *testing.T) {
 		t.Fatalf("withdrawing twice = %v, want ErrNotFound", err)
 	}
 }
+
+// Leaving a team is the member's own act: a token they hold cannot remove
+// them, while their signed-in session can.
+func TestIdentityOnlyASessionLeavesATeam(t *testing.T) {
+	st := storetest.Open(t)
+	ctx := context.Background()
+	owner := signIn(t, st, "o", "owner@example.com")
+	member := signIn(t, st, "m", "member@example.com")
+	own := tenant(t, st, owner.PersonalTeam)
+	inv, err := own.InviteForTest(t, ctx, owner.Account.ID, "member@example.com", store.RoleEditor, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.AsOperator().AcceptAccountInvitation(ctx, storetest.AccountAuthority(t, st, member.Account.ID), inv.ID); err != nil {
+		t.Fatal(err)
+	}
+	token := own.MemberCapabilityForTest(t, member.Account.ID, time.Now()).Capability
+	byToken := runstate.Actor{Kind: runstate.ActorOperator, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: token.Prefix}}
+	if err := own.UpdateMembership(ctx, byToken, store.MembershipUpdate{AccountID: member.Account.ID}); err == nil {
+		t.Fatal("a member token removed its holder from the team")
+	}
+	if err := own.UpdateMembership(ctx, membershipActor(t, st, member.Account.ID, own.Team()), store.MembershipUpdate{AccountID: member.Account.ID}); err != nil {
+		t.Fatalf("leaving from a session: %v", err)
+	}
+}

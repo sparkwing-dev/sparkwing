@@ -2,9 +2,8 @@ package controller
 
 import (
 	"context"
-	"errors"
 	"net/http"
-	"slices"
+	"strings"
 
 	"github.com/sparkwing-dev/sparkwing/internal/backend"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
@@ -23,7 +22,8 @@ func (s *Server) dashboardRead(read func(backend.Backend) http.HandlerFunc, clas
 		}
 		var b backend.Backend = backend.NewStoreBackend(tenant, s.dashboardLogs(tenant, engineActor(a)))
 		if a.Principal.Authority.Kind == capability.AuthorityCapability || a.Principal.Authority.Kind == capability.AuthoritySession {
-			b = &recheckedEvents{Backend: b, recheck: func(ctx context.Context) error { return s.recheckReader(ctx, a) }}
+			pattern := strings.TrimPrefix(r.Pattern, r.Method+" ")
+			b = &recheckedEvents{Backend: b, recheck: func(ctx context.Context) error { return tenant.Reauthorize(ctx, a, r.Method, pattern) }}
 		}
 		r.SetPathValue("run", a.Target.RunID)
 		r.SetPathValue("job", a.Target.NodeID)
@@ -59,7 +59,9 @@ func (s *Server) dashboardLogs(tenant *store.Tenant, actor runstate.Actor) stora
 }
 
 // recheckedEvents ends an event stream whose reader lost its authority: log
-// tails reauthorize every read, and event polls recheck every few seconds.
+// tails reauthorize every read, and event polls rerun the route's own
+// authorization every few seconds, so a claim reader also stops when its run
+// is cancelled or its claim moves on.
 type recheckedEvents struct {
 	backend.Backend
 	recheck func(context.Context) error
@@ -76,23 +78,4 @@ func (b *recheckedEvents) ListEventsAfter(ctx context.Context, runID string, aft
 		}
 	}
 	return b.Backend.ListEventsAfter(ctx, runID, afterSeq, limit)
-}
-
-func (s *Server) recheckReader(ctx context.Context, a capability.Authorized) error {
-	if s.operator == nil {
-		return errors.New("authority resolver is not configured")
-	}
-	p, err := s.operator.ResolveAuthority(ctx, a.Principal.Authority)
-	if err != nil {
-		return err
-	}
-	for _, grant := range a.Access.Grants {
-		if !slices.Contains(p.Capability.Grants, grant) {
-			return errors.New("reader lost the stream's grant")
-		}
-	}
-	if p.Capability.Team != a.Principal.Capability.Team || p.Capability.Team != a.Target.Team {
-		return errors.New("reader left the stream's team")
-	}
-	return nil
 }

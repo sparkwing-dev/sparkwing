@@ -480,7 +480,16 @@ func authorityChainTx(ctx context.Context, tx *storeTx, ref capability.Authority
 			return nil, authorityError(apierr.Unauthenticated, "here requester lost run authority")
 		}
 	}
+	if len(chain) == 1 && localPeerRoot(chain[0].principal.Capability) {
+		chain[0].principal.Class = capability.CredentialPeer
+	}
 	return chain, nil
+}
+
+// safety: the peer root's bearer never leaves authentication, so the verified local peer is
+// its only presentation and every store re-check must judge it as that peer.
+func localPeerRoot(c capability.Capability) bool {
+	return c.Subject.Kind == capability.SubjectLocal && c.Subject.ID != "" && c.Parent == nil && c.Binding == (capability.Binding{Kind: capability.BindingNone}) && c.Unit == "" && c.Audience == capability.Controller && c.Team == string(DefaultTeam)
 }
 
 func discoverAuthorityChainTx(ctx context.Context, tx *storeTx, ref capability.AuthorityRef) ([]authorityNode, error) {

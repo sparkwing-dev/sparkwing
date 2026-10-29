@@ -230,10 +230,11 @@ run. The pipeline alias remains in run context and output.
 A `source:` pin that is a full commit ID keeps the run's sealed identity. A
 branch or tag pin, such as `origin/main`, runs code whoever can push that ref
 chooses, so unless it resolves to the execution commit itself the run is sealed
-as asserted: its OIDC token claims `trigger:manual` with no `repository_id`,
-`ref` or `sha`, it receives no reserved pool, and it writes under its own cache
-scope. It still reads its repository's pipeline secrets, because the
-controller fetches its code from the repository; see [secrets](secrets.md). Pin a full commit to keep an App, schedule or Actions
+as asserted: its OIDC token claims `trigger:manual` with no `ref` or `sha`,
+it receives no reserved pool, and it writes under its own fetched cache scope.
+It still reads its repository's pipeline secrets and its token still claims
+`repository_id`, because the controller fetches its code from the repository;
+see [secrets](secrets.md). Pin a full commit to keep an App, schedule or Actions
 run's identity. See [OIDC](oidc.md#what-each-value-proves).
 
 The pinned Go or TypeScript SDK selects its matching verified engine before SDK

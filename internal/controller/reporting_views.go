@@ -5,16 +5,10 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
 
-func credentialRotationView(row store.CredentialRotation) controllerwire.CredentialRotation {
-	out := controllerwire.CredentialRotation{
-		Rotated:        row.Rotated,
-		GitCredentials: row.GitCredentials,
-	}
-	if row.Skipped != nil {
-		out.Skipped = make([]controllerwire.SecretRotationSkip, len(row.Skipped))
-		for i, row := range row.Skipped {
-			out.Skipped[i] = controllerwire.SecretRotationSkip(row)
-		}
+func credentialRotationView(row store.CredentialRotation) controllerwire.SecretRotation {
+	out := controllerwire.SecretRotation{Rotated: row.Rotated, GitCredentials: row.GitCredentials, Skipped: make([]controllerwire.SecretSelector, len(row.Skipped))}
+	for i, row := range row.Skipped {
+		out.Skipped[i] = controllerwire.SecretSelector(row)
 	}
 	return out
 }

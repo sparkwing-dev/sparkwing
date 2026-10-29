@@ -24,7 +24,10 @@ func (t *Tenant) ReleaseSourceCredential(ctx context.Context, authorized capabil
 		if err != nil {
 			return err
 		}
-		credential, err = scanGitCredential(tx.QueryRowContext(ctx, `SELECT `+gitCredentialCols+` FROM git_credentials WHERE team=? AND host=? AND (repository_key=? OR host_wide=1) ORDER BY host_wide LIMIT 1`+tx.forUpdate(), t.team, request.Host, request.RepositoryKey))
+		credential, err = scanGitCredential(tx.QueryRowContext(ctx, `SELECT `+gitCredentialCols+` FROM git_credentials WHERE team=? AND host=? AND (repository_key=? AND ?=1 OR host_wide=1) ORDER BY host_wide LIMIT 1`+tx.forUpdate(), t.team, request.Host, request.RepositoryKey, boolInt(request.RepositoryProven)))
+		if errors.Is(err, sql.ErrNoRows) && !request.RepositoryProven {
+			return errors.Join(ErrNotFound, &apierr.Error{Code: apierr.NotFound, Message: unprovenSourceRemedy(request.Host)})
+		}
 		if errors.Is(err, sql.ErrNoRows) {
 			return errors.Join(ErrNotFound, &apierr.Error{Code: apierr.NotFound, Message: "store a git credential for " + request.Host + " in the team's Git credentials"})
 		}
@@ -115,7 +118,18 @@ func (t *Tenant) sourceReleaseRequestTx(ctx context.Context, tx *storeTx, author
 	root := chain[len(chain)-1].principal.Capability
 	executor := capability.SourceExecutor{Team: string(t.team), MachineID: root.Subject.ID, AuthorizedRepositories: []string{string(run.Request.Request.Git.Repository.Key)}}
 	authorized = capability.Authorized{Principal: p, Binding: b, Target: capability.Target{Team: c.Team, RunID: b.RunID, NodeID: b.NodeID}, Access: capability.AccessRule{Grants: []capability.Grant{capability.SourceRead}, Binding: capability.BindSource, Liveness: capability.LiveSensitive}}
-	return capability.SourceReleaseRequest{Authorization: authorized, Executor: executor, RepositoryKey: string(run.Request.Request.Git.Repository.Key), Host: host}, nil
+	return capability.SourceReleaseRequest{Authorization: authorized, Executor: executor, RepositoryKey: string(run.Request.Request.Git.Repository.Key), Host: host, RepositoryProven: sourceRepositoryProven(run.Request)}, nil
+}
+
+// safety: code the submitter supplied (an upload, working tree or local checkout) proves no
+// repository, so it gets only a host-wide credential; intake bound the remote to the key.
+func sourceRepositoryProven(sealed runspec.SealedRequest) bool {
+	return sealed.Request.Git.Repository.Key != "" && sealed.Request.Source.FetchedFromRemote()
+}
+
+func unprovenSourceRemedy(host string) string {
+	return "Sparkwing has not proven this run's repository, so it gets no credential scoped to that repository; run it from " +
+		"its repository (a GitHub App push, the console or a CLI run Sparkwing fetches) or store a host-wide git credential for " + host
 }
 
 func checkSourceReleaseFenceTx(ctx context.Context, tx *storeTx, c capability.Capability) error {

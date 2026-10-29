@@ -474,8 +474,8 @@ func TestConsoleTriggerAdmitsSelectedSourceAndProvesRepository(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := run.Request
-	if got.Request.Git.SHA != head || got.Request.Source.Ref != head || got.Provenance.Trust() != runspec.TrustAsserted || got.Provenance.SecretRepositoryID() != 42 {
-		t.Fatalf("sealed git=%+v source ref=%q trust=%s proven=%d", got.Request.Git, got.Request.Source.Ref, got.Provenance.Trust(), got.Provenance.SecretRepositoryID())
+	if got.Request.Git.SHA != head || got.Request.Source.Ref != head || got.Provenance.Trust() != runspec.TrustAsserted || got.Provenance.ProvenRepository() != "gh:42" {
+		t.Fatalf("sealed git=%+v source ref=%q trust=%s proven=%q", got.Request.Git, got.Request.Source.Ref, got.Provenance.Trust(), got.Provenance.ProvenRepository())
 	}
 	if trigger, id, ref, sha := got.Provenance.OIDC(); trigger != "manual" || id != 42 || ref != "refs/heads/main" || sha != head || got.Provenance.Repository() != "acme/app" || got.Request.Git.Ref != "main" {
 		t.Fatalf("OIDC identity = %s %d %q %q repository %q", trigger, id, ref, sha, got.Provenance.Repository())

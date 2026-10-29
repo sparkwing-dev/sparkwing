@@ -6,6 +6,7 @@ import (
 	"slices"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/routepolicy"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
@@ -51,6 +52,10 @@ func (s *Server) handleIssueCredential(w http.ResponseWriter, r *http.Request, a
 		return routepolicy.MissingEndpointPolicy()
 	}
 	p := a.Principal
+	// safety: a token minted under the local peer keeps its local subject, which no member route accepts from a bearer.
+	if p.Class == capability.CredentialPeer && request.Data == nil {
+		return &apierr.Error{Code: apierr.CapabilityUnsupported, Message: "a local controller issues no member tokens; the CLI reaches it over its socket, and `sparkwing dashboard open` signs a browser in"}
+	}
 	var issued capability.Issued
 	var err error
 	if p.DirectAccountSession() && request.Data == nil {

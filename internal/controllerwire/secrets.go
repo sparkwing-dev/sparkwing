@@ -72,10 +72,13 @@ type SecretRotationRequest struct {
 
 // SecretRotation keeps skipped row identities so a partial rotation cannot be
 // mistaken for evidence that the previous encryption key can be dropped.
+// Rotation is safe to repeat, so a retried request rotates again and
+// Replayed stays false.
 type SecretRotation struct {
-	Rotated  int              `json:"rotated"`
-	Skipped  []SecretSelector `json:"skipped"`
-	Replayed bool             `json:"replayed"`
+	Rotated        int              `json:"rotated"`
+	Skipped        []SecretSelector `json:"skipped"`
+	GitCredentials int              `json:"git_credentials"`
+	Replayed       bool             `json:"replayed"`
 }
 
 // SecretManager is shared by api.sock and remote management clients. The

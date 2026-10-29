@@ -399,9 +399,12 @@ func ProvenanceReferenceModel(t *testing.T, open func(*testing.T) *Store) {
 	}
 	// Decision 70: code the controller fetched from a repository proves that
 	// repository's id and name. Decision 72: when the code ran at the branch or
-	// tag head the App resolved, it also claims that ref and commit.
+	// tag head the App resolved, it also claims that ref and commit. Its data
+	// scope is its writer's fetched scope, apart from that writer's uploads.
 	fetched := func(o provenanceObservation, repository string) provenanceObservation {
 		o.Repository, o.Subject = repository, strings.Replace(o.Subject, "repository_id::", "repository_id:701:", 1)
+		o.Write = strings.Replace(o.Write, "manual:", "manual:fetched/", 1)
+		o.Reads = []string{o.Write, "refs/heads/main"}
 		return o
 	}
 	fetchedAt := func(o provenanceObservation, repository, ref, sha string) provenanceObservation {

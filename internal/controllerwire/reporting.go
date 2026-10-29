@@ -59,20 +59,6 @@ type PipelineProfile struct {
 	PrevSustainedCores  float64       `json:"prev_sustained_cores,omitempty"`
 }
 
-// CredentialRotation contains the fields exposed by the controller.
-type CredentialRotation struct {
-	Rotated        int                  `json:"rotated"`
-	Skipped        []SecretRotationSkip `json:"skipped"`
-	GitCredentials int                  `json:"git_credentials"`
-}
-
-// SecretRotationSkip contains the fields exposed by the controller.
-type SecretRotationSkip struct {
-	Name     string `json:"name"`
-	Repo     string `json:"repo,omitempty"`
-	Pipeline string `json:"pipeline,omitempty"`
-}
-
 // GitHubAppAutomation contains the fields exposed by the controller.
 type GitHubAppAutomation struct {
 	RepositoryID   int64  `json:"repository_id"`

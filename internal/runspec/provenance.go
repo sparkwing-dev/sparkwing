@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"path"
 	"slices"
+	"strconv"
 	"strings"
 )
 
@@ -121,8 +122,8 @@ func (p Provenance) SharedSecretsOnly() bool { return p.identity.SharedOnly }
 // repository, the owner/name GitHub reported, may be empty when no lookup
 // reported one. ref and sha are the branch or tag head the App resolved and
 // the run's code ran at, or both empty when the code ran elsewhere (decision
-// 72); they are claimed in OIDC only. The trust class, pools and data scopes
-// stay asserted.
+// 72); they are claimed in OIDC only. The trust class and pools stay
+// asserted, and the data scope is the writer's fetched scope (DataWriter).
 func (p Provenance) FetchedFrom(repositoryID int64, repository, ref, sha string) (Provenance, error) {
 	if p.identity.Trust != TrustAsserted || p.identity.SharedOnly || repositoryID <= 0 {
 		return Provenance{}, errors.New("only an asserted run the controller fetched names a fetched repository")
@@ -131,14 +132,22 @@ func (p Provenance) FetchedFrom(repositoryID int64, repository, ref, sha string)
 	return p, p.validate()
 }
 
-// SecretRepositoryID is the proven GitHub repository whose pipeline secrets the
-// run reads: the repository a verified run sealed, or the one the controller
-// fetched an asserted run's code from. Zero means shared secrets only.
-func (p Provenance) SecretRepositoryID() int64 {
-	if p.identity.RepositoryID > 0 {
-		return p.identity.RepositoryID
+// ProvenRepository is the one repository identity this run proves, which
+// pipeline secret release reads. Source credentials and App tokens are not yet
+// bound to it: they follow where the host fetches the code from. It is the
+// GitHub repository a verified delivery, an Actions push or an admin-armed
+// schedule sealed, or the one the controller fetched an asserted run's code
+// from. A run whose code or repository the submitter supplied proves none and
+// returns "" (decision 68).
+func (p Provenance) ProvenRepository() RepoKey {
+	id := p.identity.RepositoryID
+	if id <= 0 {
+		id = p.identity.Fetched
 	}
-	return p.identity.Fetched
+	if id <= 0 {
+		return ""
+	}
+	return RepoKey("gh:" + strconv.FormatInt(id, 10))
 }
 
 // ReadingDefault adds the repository's verified default branch, which intake learned
@@ -275,8 +284,19 @@ func (p Provenance) PullRequestBase() string { return p.identity.Base }
 // Delivery is the verified delivery digest, empty for every unverified class.
 func (p Provenance) Delivery() string { return p.identity.Delivery }
 
-// Writer keys the data scope of every unverified class, and is empty when verified.
+// Writer identifies who submitted an unverified run, and is empty when verified.
 func (p Provenance) Writer() Writer { return Writer(p.identity.Writer) }
+
+// DataWriter keys the data scope of every unverified class. A run whose code
+// the controller fetched writes and restores apart from its submitter's other
+// runs: the proof that releases its repository's secrets and OIDC claims also
+// keys its caches, so an upload cannot plant what a fetched run executes.
+func (p Provenance) DataWriter() Writer {
+	if p.identity.Fetched > 0 {
+		return Writer("fetched/" + p.identity.Writer)
+	}
+	return Writer(p.identity.Writer)
+}
 
 // OIDC returns the trigger, repository ID, ref and commit an ID token may claim.
 // An asserted run proves neither its ref nor its commit, so it claims neither,

@@ -103,10 +103,9 @@ func (s *Store) readPeerAuthentication(ctx context.Context, lookup capability.Cr
 		if err != nil {
 			return capability.AuthenticationSnapshot{}, err
 		}
-		if p.Capability.Subject != lookup.Peer || p.Capability.Team != team || p.Capability.Parent != nil || p.Capability.Binding != (capability.Binding{Kind: capability.BindingNone}) || p.Capability.Unit != "" || p.Capability.Audience != capability.Controller {
+		if p.Capability.Subject != lookup.Peer || p.Class != capability.CredentialPeer {
 			return capability.AuthenticationSnapshot{}, authorityError(apierr.Unauthenticated, "invalid local peer authority")
 		}
-		p.Class = capability.CredentialPeer
 		out := capability.AuthenticationSnapshot{Now: tx.now(ctx), Authorities: []capability.AuthorityState{{Principal: p}}}
 		return out, nil
 	})

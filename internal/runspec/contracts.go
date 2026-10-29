@@ -159,6 +159,13 @@ type Source struct {
 	HashAllFiles      bool             `json:"hash_all_files,omitempty"`
 }
 
+// FetchedFromRemote reports code the host fetches from Location.RemoteURL,
+// rather than code the submitter supplied as an upload bundle, a working tree
+// or a local checkout.
+func (s Source) FetchedFromRemote() bool {
+	return s.Location.RemoteURL != "" && !s.BundleDigest.Set && !s.WorkingTree && s.Location.LocalCheckout == ""
+}
+
 // SourceLocation preserves acquisition input separately from repository identity and checkout policy.
 // RemoteURL is credential-free. LocalCheckout is permitted only in its machine-local store.
 // PipelineDir is checkout-relative and cannot escape the checkout. Git.SHA pins remote execution.

@@ -3732,6 +3732,8 @@ components:
     internal.controllerwire.SecretRotation:
       additionalProperties: true
       properties:
+        git_credentials:
+          type: integer
         replayed:
           type: boolean
         rotated:
@@ -3745,6 +3747,7 @@ components:
       required:
         - rotated
         - skipped
+        - git_credentials
         - replayed
       type: object
       x-sparkwing-go-type: controllerwire.SecretRotation

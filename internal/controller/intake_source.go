@@ -123,9 +123,8 @@ func (s *Server) keyedRepositoryDisplay(ctx context.Context, team string, reques
 // head selects (GitHub may serve it from a fork) or a pull request ref, or
 // when selection disagrees with the request.
 func (s *Server) selectFetchedSource(ctx context.Context, request *runspec.Request, selectSource func(context.Context, runspec.Request) (runspec.Git, runspec.Source, error)) (store.FetchedRepository, error) {
-	code := request.Source
 	here := request.Options.Runner.Set && request.Options.Runner.Value.Kind == runspec.RunnerHere
-	if s.githubApp == nil || request.Lineage.ParentRunID != "" || code.Location.RemoteURL == "" || code.BundleDigest.Set || code.WorkingTree || code.Location.LocalCheckout != "" || here {
+	if s.githubApp == nil || request.Lineage.ParentRunID != "" || !request.Source.FetchedFromRemote() || here {
 		return store.FetchedRepository{}, nil
 	}
 	key, ok := strings.CutPrefix(string(request.Git.Repository.Key), "gh:")
@@ -156,7 +155,7 @@ func (s *Server) selectFetchedSource(ctx context.Context, request *runspec.Reque
 		request.Git, request.Source = git, selected
 		return fetched, nil
 	}
-	if err != nil || !strings.EqualFold(git.SHA, request.Git.SHA) || code.Ref != "" && !strings.EqualFold(selected.Ref, code.Ref) {
+	if err != nil || !strings.EqualFold(git.SHA, request.Git.SHA) || request.Source.Ref != "" && !strings.EqualFold(selected.Ref, request.Source.Ref) {
 		return store.FetchedRepository{}, nil
 	}
 	return fetched, nil

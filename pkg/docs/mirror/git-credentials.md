@@ -89,6 +89,12 @@ A team stores at most 50 credentials.
 
 ## Who receives it
 
+A credential scoped to a repository, and a GitHub App token, go only to a run
+whose code the host fetches from that repository. A run whose code its
+submitter supplied (a CLI upload, a working tree or a local checkout) proves no
+repository, even when it names one, so it receives only a host-wide credential
+for the host; with none stored, the release answers 404 naming the fix.
+
 A live authorized claim receives a stored credential or an App token only when
 its executor is Cloud work or a shared runner of the team. GitHub Actions
 runners use the workflow's own `GITHUB_TOKEN` and receive no team credential or App token. A personal machine
