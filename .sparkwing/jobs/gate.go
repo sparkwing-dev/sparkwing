@@ -293,6 +293,7 @@ var homeRules = []homeRule{
 			"internal/paths/paths.go":             "owns the resolution, and with it the test-sandbox redirect every other caller inherits",
 			"internal/storage/storeurl/spec.go":   "storage URL configuration carries its own test-sandbox redirect",
 			"internal/configguard/configguard.go": "watches the real user's home for writes a suite should not have made, so resolving anywhere else would measure the wrong directory; its package doc states this",
+			"internal/testleak/testleak.go":       "lays out the sandbox home a test binary runs in, before internal/paths has a home to resolve",
 		},
 		advice: "Call internal/paths.DefaultPaths() for the real home, or paths.PathsAt(root) when the root is already known.",
 	},
@@ -379,16 +380,46 @@ func formattersOverScope(ctx context.Context, scopeOf scopeFunc) error {
 	if len(files) == 0 {
 		return nil
 	}
-	_, runErr := sparkwing.Bash(ctx, "golangci-lint fmt --diff -- "+shellQuoteAll(files)).Capture()
-	if runErr == nil {
-		return nil
+	var diffs []string
+	for _, batch := range argBatches(files) {
+		_, runErr := sparkwing.Exec(ctx, "golangci-lint", append([]string{"fmt", "--diff", "--"}, batch...)...).Capture()
+		if runErr == nil {
+			continue
+		}
+		var execErr *sparkwing.ExecError
+		if !errors.As(runErr, &execErr) || strings.TrimSpace(execErr.Stdout) == "" {
+			return fmt.Errorf("golangci-lint fmt: %w", runErr)
+		}
+		diffs = append(diffs, strings.TrimSpace(execErr.Stdout))
 	}
-	var execErr *sparkwing.ExecError
-	if errors.As(runErr, &execErr) && strings.TrimSpace(execErr.Stdout) != "" {
-		return fmt.Errorf("%s do not match the configured formatters; run `golangci-lint fmt -- %s`:\n%s",
-			scope, shellQuoteAll(files), strings.TrimSpace(execErr.Stdout))
+	if len(diffs) > 0 {
+		return fmt.Errorf("%s do not match the configured formatters; run `golangci-lint fmt -- <file>...` on the files this diff names:\n%s",
+			scope, strings.Join(diffs, "\n"))
 	}
-	return fmt.Errorf("golangci-lint fmt: %w", runErr)
+	return nil
+}
+
+// perf: a change of any size is split into command lines of at most this
+// many bytes, under Linux's 128 KiB limit on one argument and the 32 KiB
+// Windows command line.
+const argBatchBytes = 24 << 10
+
+func argBatches(files []string) [][]string {
+	var batches [][]string
+	var batch []string
+	size := 0
+	for _, f := range files {
+		if len(batch) > 0 && size+len(f)+1 > argBatchBytes {
+			batches = append(batches, batch)
+			batch, size = nil, 0
+		}
+		batch = append(batch, f)
+		size += len(f) + 1
+	}
+	if len(batch) > 0 {
+		batches = append(batches, batch)
+	}
+	return batches
 }
 
 func changeScope(ctx context.Context, noun string, keep func([]string) []string) ([]string, string, error) {

@@ -2,6 +2,8 @@ package jobs
 
 import (
 	"context"
+	"fmt"
+	"strings"
 
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
@@ -96,7 +98,20 @@ func gofmtOverScope(ctx context.Context, scopeOf scopeFunc) error {
 	if len(files) == 0 {
 		return nil
 	}
-	return sparkwing.Bash(ctx, "gofmt -l -- "+shellQuoteAll(files)).MustBeEmpty("files need formatting")
+	var unformatted []string
+	for _, batch := range argBatches(files) {
+		out, err := sparkwing.Exec(ctx, "gofmt", append([]string{"-l", "--"}, batch...)...).String()
+		if err != nil {
+			return err
+		}
+		if out != "" {
+			unformatted = append(unformatted, out)
+		}
+	}
+	if len(unformatted) > 0 {
+		return fmt.Errorf("files need formatting:\n%s", strings.Join(unformatted, "\n"))
+	}
+	return nil
 }
 
 func init() {
