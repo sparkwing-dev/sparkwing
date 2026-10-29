@@ -753,6 +753,7 @@ unlock.
 
 ### Fixed
 
+- **run:** A pipeline whose `sparkwing.yaml` entrypoint matches no SDK registration fails with `sparkwing.yaml names entrypoint "Gate", which the SDK does not register; it registers "gate", "lint"` and says to register that name or point `entrypoint:` at a registered one. It answered `describe failed: unknown_pipeline (details withheld: secrets not yet known)`, also for `run <pipeline> --help`. Registered names stay withheld while another pipeline's declarations are unknown.
 - **engine:** A pipeline pinned to an SDK version its engine origin never published fails with `engine vX.Y.Z is not published at <origin>` and says to move the pin with `sparkwing upgrade --version`; a QA build adds that it installs only `-qa.N` versions. It reported only `official download returned HTTP 403`.
 - **cli:** `sparkwing --version` prints the version, the same as `sparkwing version`; it answered `unknown flag --version`.
 - **cli:** A refused flag names its fix. `sparkwing update --check` answered `unknown flag --check; pipeline arguments follow --`; it now lists the flags `update` takes (`--dry-run` previews an update), and only `run`, `pipeline plan` and `pipeline trigger` point at `--`. A pipeline's `run <pipeline> --help` shows its flags after `--` in the usage line.

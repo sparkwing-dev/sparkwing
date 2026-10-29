@@ -2,7 +2,10 @@ package runspec
 
 import (
 	"errors"
+	"fmt"
 	"slices"
+	"strconv"
+	"strings"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
@@ -72,7 +75,7 @@ func (g *DeclarationGate) Inspect(name string) (DeclaredArguments, error) {
 func (g *DeclarationGate) resolve(name string, args map[string]string, secretArgs []string, inspect bool) (DeclaredArguments, error) {
 	pipeline, ok := g.doc.Pipeline(name)
 	if !ok {
-		return DeclaredArguments{}, &apierr.Error{Code: apierr.UnknownPipeline, Message: "SDK describe does not declare the requested pipeline"}
+		return DeclaredArguments{}, g.unregistered(name)
 	}
 	if pipeline.Error != nil {
 		return DeclaredArguments{}, g.Error(pipeline.Error)
@@ -143,8 +146,35 @@ func declarationError(message string) error {
 	return &apierr.Error{Code: apierr.ProtocolError, Message: message}
 }
 
+// UnregisteredEntrypoint refuses an entrypoint the SDK does not register. The host
+// composes its text from masked identifiers only, so it is shown before
+// secret declarations are known.
+type UnregisteredEntrypoint struct{ Err *apierr.Error }
+
+func (e *UnregisteredEntrypoint) Error() string { return e.Err.Error() }
+
+func (e *UnregisteredEntrypoint) Unwrap() error { return e.Err }
+
+// safety: registration names are author text, which stays withheld while any
+// pipeline's declarations are unknown; the entrypoint comes from sparkwing.yaml.
+func (g *DeclarationGate) unregistered(entrypoint string) error {
+	message := fmt.Sprintf("sparkwing.yaml names entrypoint %q, which the SDK does not register", g.masker.Mask(entrypoint))
+	if g.complete {
+		names := make([]string, 0, len(g.doc.Pipelines))
+		for _, pipeline := range g.doc.Pipelines {
+			names = append(names, strconv.Quote(g.masker.Mask(pipeline.Name)))
+		}
+		message += "; it registers " + strings.Join(names, ", ")
+	}
+	return &UnregisteredEntrypoint{Err: &apierr.Error{Code: apierr.UnknownPipeline, Message: message}}
+}
+
 // Error withholds unclassified author errors and sanitizes classified payloads.
 func (g *DeclarationGate) Error(err error) error {
+	var unregistered *UnregisteredEntrypoint
+	if errors.As(err, &unregistered) {
+		return unregistered
+	}
 	if !g.Complete() {
 		code := apierr.SDKError
 		var canonical *apierr.Error

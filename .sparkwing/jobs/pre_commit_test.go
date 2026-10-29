@@ -172,7 +172,7 @@ func TestEveryDeclaredPipelineResolvesToItsConfiguredEntrypoint(t *testing.T) {
 // different message at each, and both mean the entrypoint is unregistered.
 func unregisteredPipeline(err error) bool {
 	return err != nil && (strings.Contains(err.Error(), "pipeline is not registered") ||
-		strings.Contains(err.Error(), "does not declare the requested pipeline"))
+		strings.Contains(err.Error(), "which the SDK does not register"))
 }
 
 func TestPreCommitGofmtJudgesOnlyTheChange(t *testing.T) {

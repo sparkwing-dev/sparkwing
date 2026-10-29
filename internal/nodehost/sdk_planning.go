@@ -208,6 +208,12 @@ func (p SDKPlanner) process(ctx context.Context, input PlanningProcessInput, log
 }
 
 func (p SDKPlanner) planningError(ctx context.Context, err error, known bool, entrypoint string) error {
+	var unregistered *runspec.UnregisteredEntrypoint
+	if errors.As(err, &unregistered) {
+		failure := *unregistered.Err
+		failure.Hint = p.Masker.Mask(fmt.Sprintf("Register the entrypoint by that name, sparkwing.Register(%q, factory), or set the pipeline's entrypoint: in sparkwing.yaml to a registered name.", entrypoint))
+		return errors.Join(context.Cause(ctx), &failure)
+	}
 	code := apierr.SDKError
 	var structured *apierr.Error
 	if errors.As(err, &structured) {
