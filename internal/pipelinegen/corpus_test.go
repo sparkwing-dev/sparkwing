@@ -8,6 +8,8 @@ import (
 	"testing"
 
 	"golang.org/x/mod/modfile"
+
+	"github.com/sparkwing-dev/sparkwing/pkg/projectconfig"
 )
 
 func TestLoadCorpusParsesEmbeddedSpecs(t *testing.T) {
@@ -63,16 +65,16 @@ func TestParseSpecRejectsMalformed(t *testing.T) {
 
 func TestParseSpecReadsGuardTokens(t *testing.T) {
 	s, err := parseSpec("t", "---\nexpect: fail\nentrypoint: P\n"+
-		"guard-require: profile:local, profile:controller\n"+
-		"guard-reject: profile:controller,\n---\ngated\n")
+		"guard-when: where:local, where:controller\n"+
+		"guard-unless: where:controller,\n---\ngated\n")
 	if err != nil {
 		t.Fatalf("parseSpec: %v", err)
 	}
-	if len(s.GuardRequire) != 2 || s.GuardRequire[0] != "profile:local" || s.GuardRequire[1] != "profile:controller" {
-		t.Errorf("GuardRequire = %q", s.GuardRequire)
+	if len(s.GuardWhen) != 2 || s.GuardWhen[0] != "where:local" || s.GuardWhen[1] != "where:controller" {
+		t.Errorf("GuardWhen = %q", s.GuardWhen)
 	}
-	if len(s.GuardReject) != 1 || s.GuardReject[0] != "profile:controller" {
-		t.Errorf("GuardReject = %q (a trailing comma must not yield a blank token)", s.GuardReject)
+	if len(s.GuardUnless) != 1 || s.GuardUnless[0] != "where:controller" {
+		t.Errorf("GuardUnless = %q (a trailing comma must not yield a blank token)", s.GuardUnless)
 	}
 	if !s.hasGuards() {
 		t.Error("HasGuards() = false for a spec declaring guards")
@@ -87,17 +89,16 @@ func TestPipelineYAMLEmitsGuardsOnlyWhenDeclared(t *testing.T) {
 
 	gated := pipelineYAML(Spec{
 		Name: "n", Entrypoint: "E",
-		GuardRequire: []string{"profile:local", "profile:controller"},
-		GuardReject:  []string{"profile:controller"},
+		GuardWhen:   []string{"where:local", "where:controller"},
+		GuardUnless: []string{"where:controller"},
 	})
-	for _, want := range []string{
-		"    guards:\n",
-		"      require: [profile:local, profile:controller]\n",
-		"      reject: [profile:controller]\n",
-	} {
-		if !strings.Contains(gated, want) {
-			t.Errorf("guarded yaml missing %q:\n%s", want, gated)
-		}
+	cfg, err := projectconfig.Parse([]byte(gated))
+	if err != nil {
+		t.Fatalf("generated project configuration: %v\n%s", err, gated)
+	}
+	guards := cfg.Pipelines[0].Guards
+	if guards == nil || strings.Join(guards.When, ",") != "where:local,where:controller" || strings.Join(guards.Unless, ",") != "where:controller" {
+		t.Fatalf("generated guards = %+v", guards)
 	}
 }
 

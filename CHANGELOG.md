@@ -760,6 +760,7 @@ unlock.
 
 ### Fixed
 
+- **pipeline generator:** Generated guards use `when`/`unless` and valid `where:` placement tokens. Corpus metadata uses `guard-when`/`guard-unless`. Scoring selects the candidate with `--pipeline` instead of passing removed plan and lint flags.
 - **runner:** `warm --github-actions` exchanges the workflow's ID token for controller access and uses the returned verified repository, ref, commit and expiry. The exchange response includes its push binding. The default repository allowlist uses the verified GitHub path instead of the internal repository key.
 - **dashboard (Breaking):** `--allow-remote` starts a non-loopback dashboard with mandatory browser-session authentication, and `--read-only` refuses browser mutations. `--allow-origin` is removed because the controller requires same-origin requests. Changing a running dashboard's address or read-only policy requires stopping it first.
 - **controller:** Startup flag discovery now includes all 61 flags the controller parses. A regression compares the shared help registry with the real controller parser's names and argument requirements.
