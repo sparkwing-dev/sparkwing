@@ -450,3 +450,24 @@ func TestMigrationIndexEscapesPipes(t *testing.T) {
 		}
 	}
 }
+
+// The cut refuses an [Unreleased] whose (Breaking) links name no section of the
+// guide it rolls, so this holds the tree to what the next release will accept.
+func TestRepositoryUnreleasedSectionRollsForTheNextRelease(t *testing.T) {
+	root, err := filepath.Abs("../..")
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, err := os.ReadFile(filepath.Join(root, "CHANGELOG.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	const next = "v0.999.0"
+	rewrite, err := planChangelogRewrite(string(body), next)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := planMigrationRollIn(root, rewrite.newBody, next, "2026-01-01"); err != nil {
+		t.Fatal(err)
+	}
+}

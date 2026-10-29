@@ -2665,7 +2665,7 @@ store. It no longer takes `--profile`, and a profile's `state:` is
 `sqlite` or `controller`. Shared run history lives on a controller:
 `sparkwing pipeline trigger <pipeline> --profile P` runs a pipeline there.
 This ends the temporary exception
-[v0.67.0](v0.67.0.md#sparkwing-run-takes---profile-only-for-s3-or-postgres-state)
+[v0.67.0](v0.67.0.md#local-execution-and-controller-profiles)
 kept for S3 and Postgres state profiles.
 
 | Before | After |
@@ -3860,3 +3860,40 @@ distinct from empty. Filesystem errors are host errors. Go and TypeScript now
 use the same path rule: basenames match anywhere, trailing slashes match a
 literal prefix from the checkout root, and `**` spans path segments. TypeScript
 `ignore("cache/")` therefore keeps `nested/cache/data`. See [Caching](../caching.md).
+
+## Committed result storage
+
+Job outputs live in committed result records and verified blobs. The store no
+longer keeps output bytes of its own, and the old output scheduler, output
+grants and state-store interface are removed. Read a job's output through its
+committed output and manifest selectors. Dashboard log streams use the bound
+segment reader.
+
+## Billing policy writer
+
+`SetOperatorCreditSettings` is removed. Write billing policy with
+`Operator.SetCreditSettings`. Installed rate tables survive a scalar override,
+so a caller no longer has to resend them.
+
+## Log writes use tagged subjects
+
+The legacy node-log upload, signing and seal APIs, their HTTP writers and the
+segment upload client are removed. Writers use tagged log bindings and commits;
+leased maintenance seals abandoned streams. Physical manifest readers and
+object-side abandoned seals are removed. Log completeness follows the selected
+attempt's persisted finish time and the store clock. See
+[Log identities use tagged subjects](#log-identities-use-tagged-subjects) for
+the subject a binding carries.
+
+## Card workers use Operator
+
+Deployment card collection, settlement, fraud warnings and queued refunds move
+from `Store` to `Operator`: use `Operator.SettlePayment`, `Operator.DueCardRefunds`
+and `Operator.MarkCardRefundMade`. The unused raw card-setup, dispute, warning,
+refund and payment-lookup entry points and `Store.SetTokenMetered` are removed.
+Console hold and release keep their tenant handles.
+
+## Legacy binary lookups
+
+`Store.BinaryObject`, `Store.CommittedObjectFor` and `Store.SourceBoundToRun`
+are removed. Read binaries and sources through their logical blob records.
