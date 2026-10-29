@@ -20,11 +20,12 @@ type BuildImages struct {
 }
 
 type BuildImagesArgs struct {
-	Registry string `flag:"registry" desc:"Optional registry prefix (e.g. an ECR host). When set, images are tagged <registry>/<component>:<tag>."`
-	Push     bool   `flag:"push" desc:"Build multi-arch (linux/amd64,linux/arm64) and push to the registry. Requires --registry."`
-	Tag      string `flag:"tag" desc:"Override the image tag. Default: commit-<short-sha> resolved from the current HEAD."`
-	SkipWeb  bool   `flag:"skip-web-bundle" desc:"Skip the Next.js SPA build. Use when internal/web/next-out/ is already current (faster iteration)."`
-	QATrust  bool   `flag:"qatrust" desc:"Build with the qatrust tag: trust the QA release key and read policy and engines from https://qa-releases.sparkwing.dev. Pair with --tag set to the QA pre-release version (e.g. v0.68.0-qa.1). Never for production images."`
+	Registry    string `flag:"registry" desc:"Optional registry prefix (e.g. an ECR host). When set, images are tagged <registry>/<component>:<tag>."`
+	Push        bool   `flag:"push" desc:"Build multi-arch (linux/amd64,linux/arm64) and push to the registry. Requires --registry."`
+	Tag         string `flag:"tag" desc:"Override the image tag. Default: commit-<short-sha> resolved from the current HEAD."`
+	SkipWeb     bool   `flag:"skip-web-bundle" desc:"Skip the Next.js SPA build. Use when internal/web/next-out/ is already current (faster iteration)."`
+	RuntimeBase bool   `flag:"runtime-base" desc:"Build each Dockerfile's runtime stage, without a binary, as <component>-base for publish-images to append signed binaries to. Requires --push; the builder must run linux/arm64 natively or under emulation."`
+	QATrust     bool   `flag:"qatrust" desc:"Build with the qatrust tag: trust the QA release key and read policy and engines from https://qa-releases.sparkwing.dev. Pair with --tag set to the QA pre-release version (e.g. v0.68.0-qa.1). Never for production images."`
 }
 
 type buildImageSpec struct {
@@ -43,21 +44,24 @@ func (BuildImages) ShortHelp() string {
 }
 
 func (BuildImages) Help() string {
-	return "Builds sparkwing-controller from build/Dockerfile.binary, and sparkwing-runner from build/Dockerfile.runner (it needs git plus a netrc-seeding entrypoint wrapper). By default produces single-arch images in the local daemon. With --registry --push, builds multi-arch (amd64 + arm64) and pushes directly to the configured registry; the caller must be logged in. Prints a final RELEASE_IMAGES line that cross-process consumers parse for the image refs."
+	return "Builds sparkwing-controller from build/Dockerfile.binary, and sparkwing-runner from build/Dockerfile.runner (it needs git plus a netrc-seeding entrypoint wrapper). By default produces single-arch images in the local daemon. With --registry --push, builds multi-arch (amd64 + arm64) and pushes directly to the configured registry; the caller must be logged in. With --runtime-base --push, builds only the runtime stages as <component>-base, the multi-arch bases publish-images appends signed binaries to. Prints a final RELEASE_IMAGES line that cross-process consumers parse for the image refs."
 }
 
 func (BuildImages) Examples() []sparkwing.Example {
 	return []sparkwing.Example{
 		{Comment: "Local single-arch build, tagged commit-<sha>", Command: "sparkwing run build-images"},
-		{Comment: "Push multi-arch to a registry", Command: "sparkwing run build-images --registry=123456789012.dkr.ecr.us-west-2.amazonaws.com --push"},
-		{Comment: "Reuse a current SPA bundle to skip the slow npm step", Command: "sparkwing run build-images --skip-web-bundle"},
-		{Comment: "QA-flavoured images for a QA pre-release", Command: "sparkwing run build-images --qatrust --tag v0.68.0-qa.1 --registry=123456789012.dkr.ecr.us-west-2.amazonaws.com --push"},
+		{Comment: "Push multi-arch to a registry", Command: "sparkwing run build-images -- --registry=123456789012.dkr.ecr.us-west-2.amazonaws.com --push"},
+		{Comment: "Reuse a current SPA bundle to skip the slow npm step", Command: "sparkwing run build-images -- --skip-web-bundle"},
+		{Comment: "QA-flavoured images for a QA pre-release", Command: "sparkwing run build-images -- --qatrust --tag v0.68.0-qa.1 --registry=123456789012.dkr.ecr.us-west-2.amazonaws.com --push"},
 	}
 }
 
 func (p *BuildImages) Plan(_ context.Context, plan *sparkwing.Plan, in BuildImagesArgs, _ sparkwing.RunContext) error {
 	if in.Push && in.Registry == "" {
 		return fmt.Errorf("build-images: --push requires --registry")
+	}
+	if in.RuntimeBase && !in.Push {
+		return fmt.Errorf("build-images: --runtime-base requires --push, because publish-images reads both architectures from the registry")
 	}
 	p.args = in
 	sparkwing.Job(plan, "build", p).Inline()
@@ -121,8 +125,12 @@ func (p *BuildImages) resolveTag(ctx context.Context) error {
 		prefix = strings.TrimSuffix(p.args.Registry, "/") + "/"
 	}
 	p.refs = make([]string, 0, len(buildImagesComponents))
+	suffix := ""
+	if p.args.RuntimeBase {
+		suffix = "-base"
+	}
 	for _, c := range buildImagesComponents {
-		p.refs = append(p.refs, prefix+c.name+":"+p.tag)
+		p.refs = append(p.refs, prefix+c.name+suffix+":"+p.tag)
 	}
 
 	sparkwing.Info(ctx, "resolved tag=%s; %d images to build", p.tag, len(p.refs))
@@ -131,8 +139,8 @@ func (p *BuildImages) resolveTag(ctx context.Context) error {
 }
 
 func (p *BuildImages) buildWebBundle(ctx context.Context) error {
-	if p.args.SkipWeb {
-		sparkwing.Info(ctx, "skipping SPA build per --skip-web-bundle")
+	if p.args.SkipWeb || p.args.RuntimeBase {
+		sparkwing.Info(ctx, "skipping SPA build: --skip-web-bundle, or a runtime base carries no binary")
 		return nil
 	}
 	sparkwing.Info(ctx, "running bin/build-web.sh (npm ci + next build)")
@@ -157,6 +165,9 @@ func (p *BuildImages) buildOne(ctx context.Context, spec buildImageSpec) error {
 	}
 	if p.args.QATrust {
 		args = append(args, "--build-arg", "GO_TAGS=qatrust")
+	}
+	if p.args.RuntimeBase {
+		args = append(args, "--target", "runtime")
 	}
 	if p.args.Push {
 		args = append(args, "--platform", "linux/amd64,linux/arm64", "--push")

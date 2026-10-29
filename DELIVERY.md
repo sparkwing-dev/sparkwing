@@ -29,7 +29,8 @@ SPARKWING_HOME="$(mktemp -d)" sparkwing run release --sw-allow-risk destructive,
 ```
 
 The version defaults to a minor bump of the newest tag on origin; pass
-`--bump patch` for a patch release or `--version vX.Y.Z` to name it. The
+`-- --bump patch` for a patch release or `-- --version vX.Y.Z` to name it
+(pipeline flags follow `--`). The
 pipeline refuses `v1.0.0` and above. The dry run resolves the version, runs the
 read-only cut checks (version freshness, Go directives, SDK pins, changelog
 links) and previews the changelog and guide roll; build, lint and the short
@@ -123,15 +124,18 @@ Accepted QA-only risks:
 - Clients that read a new `versions.json` before its signature lands fall back to
   their cached index until it does.
 
-QA images: `bin/qa-release.sh` also publishes the controller and runner images from the
-signed linux binaries it built, through `bin/publish-qa-images.sh`: each architecture under
-`vX.Y.Z-qa.N-amd64` and `vX.Y.Z-qa.N-arm64`, and one linux/amd64 + linux/arm64 index under
-`vX.Y.Z-qa.N`, which is the tag to deploy. The registry is `QA_IMAGE_REGISTRY`, by default the
-AWS profile account's ECR in us-west-2. The runtime stages run apt and apk, so the docker
-buildx builder must build linux/arm64 natively or through binfmt emulation; the script checks
-that before it builds anything. The hosted release publishes the same two architectures under
-one index per tag on ghcr.io. `sparkwing run build-images --qatrust --tag vX.Y.Z-qa.N
---registry <ecr> --push` builds both from source instead.
+QA images: `bin/qa-release.sh` also publishes the controller and runner images, through the
+`publish-images` pipeline run on the CLI it just built. The pipeline appends each signed linux
+binary, checked against SHA256SUMS, as one layer onto the matching platform of a multi-arch
+runtime base, tags each architecture `vX.Y.Z-qa.N-amd64` and `vX.Y.Z-qa.N-arm64`, joins them
+under one index tagged `vX.Y.Z-qa.N` (the tag to deploy), and reads every platform back to
+check its binary. It is registry operations only, with no Docker daemon or emulation. Name the
+bases by digest in `SPARKWING_CONTROLLER_BASE` and `SPARKWING_RUNNER_BASE`; the registry is
+`QA_IMAGE_REGISTRY`, by default the AWS profile account's ECR in us-west-2. A base is each
+Dockerfile's `runtime` stage, rebuilt only when that stage or its pinned images change, with
+`sparkwing run build-images -- --runtime-base --registry <ecr> --push --tag <tag>` on a builder
+that runs linux/arm64 natively or under emulation. The hosted release still builds its ghcr.io
+images with buildx under QEMU and joins both architectures under one index per tag.
 
 ### Check tiers
 

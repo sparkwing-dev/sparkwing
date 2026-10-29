@@ -9,7 +9,9 @@
 #
 # Reads the QA signing seed from SSM (AWS_PROFILE, default kikd-prod) straight
 # into the signer's environment; it is never written to disk. Images go to
-# QA_IMAGE_REGISTRY, by default the profile account's ECR in us-west-2.
+# QA_IMAGE_REGISTRY, by default the profile account's ECR in us-west-2, built by
+# the publish-images pipeline onto the runtime bases SPARKWING_CONTROLLER_BASE
+# and SPARKWING_RUNNER_BASE name by digest (see build-images --runtime-base).
 set -euo pipefail
 
 bucket=kikd-prod-sparkwing-qa-releases
@@ -27,12 +29,8 @@ if [[ ! "$version" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)-qa\.[1
   exit 2
 fi
 sha=$(git -C "$repo" rev-parse --verify "$commit^{commit}")
-# Checked before the build, which takes minutes, rather than at image time.
-if ! docker buildx inspect --bootstrap 2>/dev/null | grep -q 'linux/arm64'; then
-  echo "the docker buildx builder cannot build linux/arm64; register emulation with" >&2
-  echo "  docker run --privileged --rm tonistiigi/binfmt --install arm64" >&2
-  exit 1
-fi
+: "${SPARKWING_CONTROLLER_BASE:?name the controller runtime base by digest (build-images --runtime-base)}"
+: "${SPARKWING_RUNNER_BASE:?name the runner runtime base by digest (build-images --runtime-base)}"
 registry=${QA_IMAGE_REGISTRY:-$(aws sts get-caller-identity --query Account --output text).dkr.ecr.$region.amazonaws.com}
 published=$(aws s3api list-objects-v2 --region "$region" --bucket "$bucket" --prefix "releases/download/$version/" --max-keys 1 --query KeyCount --output text)
 if [[ "$published" != 0 ]]; then
@@ -107,9 +105,13 @@ unset seed
 GOFLAGS=$qa_flags GOWORK=off go -C "$src" run ./cmd/verify-release --dist "$dist" --verify
 
 # Images first: a failed push publishes nothing clients read, and the version is
-# then spent either way, since the registry's tags are immutable too.
-aws ecr get-login-password --region "$region" | docker login --username AWS --password-stdin "$registry" >/dev/null
-bash "$(dirname "${BASH_SOURCE[0]}")/publish-qa-images.sh" "$src" "$registry" "$version" "$sha"
+# then spent either way, since the registry's tags are immutable too. The
+# pipeline runs on the CLI just built for this host, under a throwaway home.
+aws ecr get-login-password --region "$region" | crane auth login "$registry" --username AWS --password-stdin >/dev/null
+host_cli=$dist/sparkwing-$(go env GOOS)-$(go env GOARCH)
+env -C "$src" SPARKWING_HOME="$work/sparkwing-home" "$host_cli" run publish-images -- \
+  --dist "$dist" --version "$version" --revision "$sha" --registry "$registry" \
+  --controller-base "$SPARKWING_CONTROLLER_BASE" --runner-base "$SPARKWING_RUNNER_BASE"
 
 aws s3 cp --region "$region" "$dist/" "s3://$bucket/releases/download/$version/" --recursive --only-show-errors
 aws s3 cp --region "$region" "$goproxy/" "s3://$bucket/goproxy/" --recursive --only-show-errors
