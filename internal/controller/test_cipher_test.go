@@ -5,7 +5,6 @@ import (
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
-	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
 
 // safety: one key for every fixture, so a row seeded straight into the store
@@ -19,14 +18,4 @@ func testCipher(t testing.TB) *secrets.Cipher {
 		t.Fatal(err)
 	}
 	return c
-}
-
-func sealedSecret(t testing.TB, team store.Team, sec store.Secret) store.Secret {
-	t.Helper()
-	v, err := testCipher(t).SealBound(secrets.PurposeSecret, string(team), sec.Name, sec.SealScope(), sec.Shared, sec.Masked, sec.Value)
-	if err != nil {
-		t.Fatal(err)
-	}
-	sec.Value = v
-	return sec
 }

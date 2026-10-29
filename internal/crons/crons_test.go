@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -1090,13 +1089,6 @@ func TestListAndShowDeriveNameStateAndZone(t *testing.T) {
 	if row, _, err = h.svc.Show(ctx, sched.ID, 5); err != nil || row.State != stateArmed {
 		t.Fatalf("resume: %v %+v", err, row)
 	}
-}
-
-func nativeTimerFixtureBinary() string {
-	if runtime.GOOS == "windows" {
-		return filepath.VolumeName(os.TempDir()) + "/usr/local/bin/sparkwing"
-	}
-	return "/usr/local/bin/sparkwing"
 }
 
 func TestTeamScheduleIDKeepsTheOperatorsIDsAndSeparatesTeams(t *testing.T) {

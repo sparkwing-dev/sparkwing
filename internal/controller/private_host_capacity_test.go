@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
-	"reflect"
 	"testing"
 	"time"
 
@@ -91,18 +90,6 @@ func privateCapacityRequest(t *testing.T, server *serverFixture, bearer string, 
 	w := httptest.NewRecorder()
 	server.Handler().ServeHTTP(w, req)
 	return w.Code
-}
-
-func assertOtherCapacityUnchanged(t *testing.T, tenant *store.Tenant, key string, before *store.ConcurrencyState) {
-	t.Helper()
-	after, err := tenant.GetConcurrencyState(t.Context(), key)
-	if err != nil || !reflect.DeepEqual(before, after) {
-		t.Fatalf("changed other run's capacity: before=%+v after=%+v error=%v", before, after, err)
-	}
-	other, err := tenant.ReadNode(t.Context(), runspec.NodeRef{RunID: "other", NodeID: "build"})
-	if err != nil || other.CancelRequestedAt != nil {
-		t.Fatalf("cancelled other run: %+v %v", other, err)
-	}
 }
 
 func TestPrivateStartRequiresAwardAndUsesAcceptedGroupSet(t *testing.T) {

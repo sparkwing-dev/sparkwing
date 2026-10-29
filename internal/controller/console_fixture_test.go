@@ -6,7 +6,6 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/routepolicy"
 )
 
 // safety: handler fixtures use existing identity rows while the committed-fact
@@ -43,28 +42,6 @@ func (consoleFixtureAuthority) CheckBinding(_ context.Context, _ capability.Prin
 		return &apierr.Error{Code: apierr.PolicyMissing}
 	}
 	return nil
-}
-
-// ConfigureConsoleFixture supplies controlled authorization outcomes for console handler tests.
-func ConfigureConsoleFixture(s *Server) {
-	f := consoleFixtureAuthority{s}
-	s.WithAuthorization(routepolicy.Authorization{
-		Authenticator: f, Bindings: f,
-		Identify: func(r *http.Request) (capability.Presentation, error) {
-			raw := sessionCookie(r, s.cookiesSecure())
-			if raw == "" {
-				return capability.Presentation{}, &apierr.Error{Code: apierr.Unauthenticated}
-			}
-			return capability.Presentation{Raw: raw, Class: capability.CredentialSession}, nil
-		},
-		CheckCSRF: func(r *http.Request, _ capability.Principal) error {
-			session, err := s.operator.LookupSession(r.Context(), sessionCookie(r, s.cookiesSecure()))
-			if err != nil || !validAPIRequestCSRF(r, session.CSRFToken, s.cookiesSecure()) {
-				return &apierr.Error{Code: apierr.Forbidden, Message: "invalid CSRF token"}
-			}
-			return nil
-		},
-	})
 }
 
 // ConsoleFixtureRequest presents the existing fixture session as a browser would.
