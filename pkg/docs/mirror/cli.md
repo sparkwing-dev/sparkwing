@@ -217,3 +217,12 @@ mode includes a short page footer. Explicit `commands --format markdown`
 exports the exhaustive reference and rejects search/pagination flags; a
 `--path` export still selects the requested subtree. Use `--output plain`
 when redirecting the Markdown artifact to a file.
+
+Misspelled command words suggest the closest command in the same group. Run the
+suggested command with `--help` to see its flags. Unknown flags name the accepted
+flags and point to `--help`.
+
+`runs status` in plain and pretty formats includes `started_at`, `finished_at`
+and `duration` for the run, plus each job's start, finish and duration. Missing
+timestamps or a duration without both timestamps appear as `-`. JSON retains
+the controller's timestamps.

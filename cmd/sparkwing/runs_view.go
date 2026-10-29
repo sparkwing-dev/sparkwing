@@ -186,6 +186,7 @@ func writeRunDetail(out io.Writer, detail controllerwire.RunDetail, opts runStat
 	} else {
 		fmt.Fprintf(&text, "%s\t%s\t%s\n", detail.ID, detail.Inputs.Pipeline, detail.Status)
 	}
+	fmt.Fprintf(&text, "started_at\t%s\nfinished_at\t%s\nduration\t%s\n", displayTime(detail.StartedAt), displayTime(detail.FinishedAt), displayDuration(detail.StartedAt, detail.FinishedAt))
 	if detail.Engine != nil {
 		fmt.Fprintf(&text, "engine\t%s\n", detail.Engine.Version)
 	}
@@ -196,10 +197,10 @@ func writeRunDetail(out io.Writer, detail controllerwire.RunDetail, opts runStat
 		writeRunTimeline(&text, detail, opts.width)
 	} else {
 		if opts.format == "pretty" {
-			text.WriteString("JOB\tSTATUS\tOUTCOME\tATTEMPT\tGENERATION\tDETAIL\n")
+			text.WriteString("JOB\tSTATUS\tOUTCOME\tATTEMPT\tGENERATION\tDETAIL\tSTARTED_AT\tFINISHED_AT\tDURATION\n")
 		}
 		for _, job := range detail.Jobs {
-			fmt.Fprintf(&text, "%s\t%s\t%s\t%d\t%d\t%s\n", job.ID, job.Status, job.Outcome, job.Attempt, job.Generation, job.StatusDetail)
+			fmt.Fprintf(&text, "%s\t%s\t%s\t%d\t%d\t%s\t%s\t%s\t%s\n", job.ID, job.Status, job.Outcome, job.Attempt, job.Generation, job.StatusDetail, displayTime(job.StartedAt), displayTime(job.FinishedAt), displayDuration(job.StartedAt, job.FinishedAt))
 		}
 	}
 	for _, step := range detail.Steps {
@@ -290,4 +291,11 @@ func writeEngineNotices(out io.Writer, notices []engineid.Notice) error {
 		}
 	}
 	return nil
+}
+
+func displayDuration(start, finish *time.Time) string {
+	if start == nil || finish == nil || finish.Before(*start) {
+		return "-"
+	}
+	return finish.Sub(*start).String()
 }

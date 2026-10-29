@@ -20,6 +20,8 @@ unlock.
 
 ## [Unreleased]
 
+- **CLI:** Misspelled command words suggest the nearest command. Plain and pretty `runs status` show run and job start, finish and duration times.
+
 - **store:** PostgreSQL admission locks stay within their store schema
   Independent stores sharing a database no longer defer each other's job releases.
 
