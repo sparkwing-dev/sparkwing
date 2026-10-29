@@ -1,21 +1,26 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
 
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controller"
 	"github.com/sparkwing-dev/sparkwing/internal/controller/client"
@@ -364,5 +369,87 @@ func TestProductionLocalQueueReportsTheMachineAdmissionDaemon(t *testing.T) {
 	}
 	if !keys["cores"] || !keys["memory"] {
 		t.Errorf("host resources = %+v, want the daemon's cores and memory capacity", live.Resources)
+	}
+}
+
+// A daemon that holds its socket and goes quiet, before or after its hello, still gets the public refusal back
+// well inside the browser's ten-second abort.
+func TestProductionLocalQueueRefusesASilentDaemonPromptly(t *testing.T) {
+	for _, silence := range []string{"before hello", "after hello"} {
+		t.Run(silence, func(t *testing.T) {
+			home := t.TempDir()
+			queue, err := client.NewQueueManager(productionLocalPolicyClientAt(t, home))
+			if err != nil {
+				t.Fatal(err)
+			}
+			var real string
+			if silence == "after hello" {
+				real = t.TempDir()
+				daemon, err := wingd.New(wingd.Config{Home: real, Version: installedVersion(), Stay: true})
+				if err != nil {
+					t.Fatal(err)
+				}
+				ctx, stop := context.WithCancel(t.Context())
+				done := make(chan error, 1)
+				go func() { done <- daemon.Run(ctx) }()
+				<-daemon.Ready()
+				t.Cleanup(func() { stop(); <-done })
+				if real, err = wingd.EnsureSocketPath(real); err != nil {
+					t.Fatal(err)
+				}
+			}
+			sock, err := wingd.EnsureSocketPath(home)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := os.MkdirAll(filepath.Dir(sock), 0o700); err != nil {
+				t.Fatal(err)
+			}
+			listener, err := net.Listen("unix", sock)
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { _ = listener.Close() })
+			var hellos atomic.Int32
+			go silentDaemon(listener, real, &hellos)
+
+			started := time.Now()
+			_, err = queue.ReadQueue(t.Context())
+			var failure *apierr.Error
+			if !errors.As(err, &failure) || failure.Code != apierr.Unavailable || !strings.Contains(failure.Message, "did not answer") {
+				t.Fatalf("queue with a silent daemon = %v, want the public unavailable refusal", err)
+			}
+			if elapsed := time.Since(started); elapsed > 5*time.Second {
+				t.Fatalf("queue with a silent daemon took %s, want well under the browser's 10s abort", elapsed)
+			}
+			if silence == "after hello" && hellos.Load() == 0 {
+				t.Fatal("the daemon never answered a hello, so the case after one went untested")
+			}
+		})
+	}
+}
+
+func silentDaemon(listener net.Listener, real string, hellos *atomic.Int32) {
+	for {
+		conn, err := listener.Accept()
+		if err != nil {
+			return
+		}
+		if real == "" {
+			continue
+		}
+		upstream, err := net.Dial("unix", real)
+		if err != nil {
+			_ = conn.Close()
+			continue
+		}
+		go func() { _, _ = io.Copy(upstream, conn) }()
+		go func() {
+			line, err := bufio.NewReader(upstream).ReadBytes('\n')
+			if err == nil && strings.Contains(string(line), "hello_ack") {
+				hellos.Add(1)
+				_, _ = conn.Write(line)
+			}
+		}()
 	}
 }

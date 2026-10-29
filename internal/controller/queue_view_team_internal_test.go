@@ -6,6 +6,8 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -101,7 +103,7 @@ func TestQueueStateCarriesTheLocalAdmissionDaemon(t *testing.T) {
 	})
 	rec = view()
 	if body := rec.Body.String(); rec.Code != http.StatusServiceUnavailable || !strings.Contains(body, "The local admission daemon did not answer.") ||
-		!strings.Contains(body, "sparkwing daemon restart") || strings.Contains(body, "wedged") {
+		!strings.Contains(body, "kill "+strconv.Itoa(os.Getpid())) || !strings.Contains(body, "sparkwing dashboard start") || strings.Contains(body, "wedged") {
 		t.Fatalf("an unanswering daemon gave HTTP %d %s, want 503 saying how to restart it and no internal detail", rec.Code, body)
 	}
 }
