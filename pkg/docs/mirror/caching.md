@@ -277,7 +277,8 @@ MOST RECENTLY USED (2 of 2)
 ### Why did it recompile?
 
 `sparkwing cache explain` prints the key, whether it is cached, and every
-input behind it with its own digest:
+input behind it with its own digest. It applies the same native Go platform,
+workspace isolation, and module-file settings as a pipeline run:
 
 ```
 INPUTS

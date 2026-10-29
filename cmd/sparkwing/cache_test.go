@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -9,6 +10,9 @@ import (
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/bincache"
+	"github.com/sparkwing-dev/sparkwing/internal/engine"
+	"github.com/sparkwing-dev/sparkwing/internal/engine/sdkinstall"
+	"github.com/sparkwing-dev/sparkwing/internal/engineid"
 )
 
 func TestCacheExplainJSONEmitsReport(t *testing.T) {
@@ -244,5 +248,65 @@ func TestCacheExplainFindsTheModuleFromASubdirectory(t *testing.T) {
 	}
 	if payload := decodeCachePayload(t, out); payload["dir"] != dir {
 		t.Fatalf("explain dir = %v, want the module above the working directory %s", payload["dir"], dir)
+	}
+}
+
+func TestCacheExplainFindsInstalledSDKBinary(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("SPARKWING_HOME", filepath.Join(root, "home"))
+	t.Setenv("SPARKWING_CONFIG", filepath.Join(root, "missing.yaml"))
+	t.Setenv("GOPROXY", "off")
+	t.Setenv("GOOS", "js")
+	t.Setenv("GOARCH", "wasm")
+	dir := filepath.Join(root, ".sparkwing")
+	sdk := filepath.Join(root, "sdk")
+	for _, path := range []string{dir, sdk} {
+		if err := os.Mkdir(path, 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	inputs := map[string]string{
+		filepath.Join(dir, "go.mod"):  "module fixture\ngo 1.26\nrequire " + engine.GoModule + " v0.20.0\nreplace " + engine.GoModule + " => " + filepath.ToSlash(sdk) + "\n",
+		filepath.Join(sdk, "go.mod"):  "module " + engine.GoModule + "\ngo 1.26\n",
+		filepath.Join(dir, "main.go"): "package main\nfunc main() {}\n",
+	}
+	for path, body := range inputs {
+		if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Chdir(root)
+	request, err := json.Marshal(engine.SDKInstallRequest{Directory: dir, SDK: engineid.GoSDK, ExecutableDirectory: t.TempDir()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var output, diagnostics bytes.Buffer
+	if err := sdkinstall.Run(t.Context(), "development", bytes.NewReader(request), &output, &diagnostics); err != nil {
+		t.Fatalf("install: %v: %s", err, &diagnostics)
+	}
+	var installed engine.SDKCommand
+	if err := json.Unmarshal(output.Bytes(), &installed); err != nil {
+		t.Fatal(err)
+	}
+	var explainErr error
+	out := captureStdout(t, func() { explainErr = runCacheExplainArgs([]string{"-o", "json"}) })
+	if explainErr != nil {
+		t.Fatal(explainErr)
+	}
+	payload := decodeCachePayload(t, out)
+	if payload["cached"] != true {
+		t.Fatalf("installed SDK binary is not cached: %s", out)
+	}
+	entry, err := bincache.PipelineEntry(payload["key"].(string))
+	if err != nil {
+		t.Fatal(err)
+	}
+	lease, found, err := entry.Acquire(t.Context())
+	if err != nil || !found {
+		t.Fatalf("explained cache entry: %t %v", found, err)
+	}
+	defer func() { _ = lease.Release() }()
+	if lease.CachedPath() != installed.CachedExecutable {
+		t.Fatalf("explained cache entry %s differs from installed %s", lease.CachedPath(), installed.CachedExecutable)
 	}
 }
