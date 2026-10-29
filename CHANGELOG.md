@@ -20,6 +20,10 @@ unlock.
 
 ## [Unreleased]
 
+- **logs:** Finished jobs start their final log flush on report, retry or release
+  Long local pipelines no longer leave earlier jobs' logs unsealed and hang
+  while waiting for log completion.
+
 - **store:** PostgreSQL admission locks stay within their store schema
   Independent stores sharing a database no longer defer each other's job releases.
 
