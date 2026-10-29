@@ -62,3 +62,16 @@ func TestReleaseHomeGuardFailsItsJobAndRunsUnderDryRun(t *testing.T) {
 		t.Fatalf("home guard = %v", err)
 	}
 }
+
+func TestReleaseDryRunRunsTheReadOnlyCutChecks(t *testing.T) {
+	_, _, doc := prepareWork(t, &releaseCutChecksJob{})
+	safe := map[string]bool{}
+	for _, step := range doc.Steps {
+		safe[step.ID] = step.SafeWithoutDryRun
+	}
+	for _, id := range []string{"version-freshness", "go-directives", "sdk-pins", "changelog-links"} {
+		if !safe[id] {
+			t.Errorf("release-cut-checks step %s skips under --sw-dry-run, so a preview passes a cut it refuses", id)
+		}
+	}
+}

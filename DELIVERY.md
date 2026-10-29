@@ -25,8 +25,15 @@ newer embedded schema cannot migrate the operational runs store:
 
 ```bash
 SPARKWING_HOME="$(mktemp -d)" sparkwing run release --sw-dry-run
-SPARKWING_HOME="$(mktemp -d)" sparkwing run release --bump patch --sw-allow destructive,prod
+SPARKWING_HOME="$(mktemp -d)" sparkwing run release --sw-allow-risk destructive,prod
 ```
+
+The version defaults to a minor bump of the newest tag on origin; pass
+`--bump patch` for a patch release or `--version vX.Y.Z` to name it. The
+pipeline refuses `v1.0.0` and above. The dry run resolves the version, runs the
+read-only cut checks (version freshness, Go directives, SDK pins, changelog
+links) and previews the changelog and guide roll; build, lint and the short
+tests run only in the real cut.
 
 `push-tag` declares the `destructive` and `prod` risk labels, so only the
 second command tags and pushes. The tag push starts the hosted release below.
@@ -670,7 +677,7 @@ file. Other syntax and workflow checks remain active.
   position of local replacements against origin/main, so a cut may use an older
   commit. Preview with
   `SPARKWING_HOME="$(mktemp -d)" sparkwing run release --sw-dry-run`, then
-  `SPARKWING_HOME="$(mktemp -d)" sparkwing run release --bump patch --sw-allow
+  `SPARKWING_HOME="$(mktemp -d)" sparkwing run release --sw-allow-risk
   destructive,prod`; the isolated home keeps prerelease state out of the
   operational runs store, which the release runner refuses to touch. From the
   tag push on, `.github/workflows/release.yaml` owns the release, and it checks

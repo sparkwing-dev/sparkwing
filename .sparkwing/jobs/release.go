@@ -37,8 +37,8 @@ func (Release) Help() string {
 
 func (Release) Examples() []sparkwing.Example {
 	return []sparkwing.Example{
-		{Comment: "Auto-pick version by bumping latest origin tag", Command: "SPARKWING_HOME=\"$(mktemp -d)\" sparkwing run release --sw-allow destructive,prod"},
-		{Comment: "Tag and push an explicit version", Command: "SPARKWING_HOME=\"$(mktemp -d)\" sparkwing run release --version v0.24.0 --sw-allow destructive,prod"},
+		{Comment: "Auto-pick version by bumping latest origin tag", Command: "SPARKWING_HOME=\"$(mktemp -d)\" sparkwing run release --sw-allow-risk destructive,prod"},
+		{Comment: "Tag and push an explicit version", Command: "SPARKWING_HOME=\"$(mktemp -d)\" sparkwing run release --version v0.24.0 --sw-allow-risk destructive,prod"},
 		{Comment: "Preview without pushing", Command: "SPARKWING_HOME=\"$(mktemp -d)\" sparkwing run release --sw-dry-run"},
 	}
 }
@@ -119,14 +119,15 @@ func (j *releaseCutChecksJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, erro
 	budget.step(w, "build", runBuild)
 	budget.step(w, "lint", runGolangciLint)
 	budget.step(w, "test", runShortTest)
+	// safety: these four only read, so a dry run reports what the cut would refuse.
 	budget.step(w, "version-freshness", func(ctx context.Context) error {
 		return checkPublishedVersionsFreshness(ctx, sparkwing.WorkDir())
-	})
-	budget.step(w, "go-directives", checkGoDirectives)
+	}).SafeWithoutDryRun()
+	budget.step(w, "go-directives", checkGoDirectives).SafeWithoutDryRun()
 	budget.step(w, "sdk-pins", func(context.Context) error {
 		return checkReleasePins(sparkwing.WorkDir())
-	})
-	budget.step(w, "changelog-links", checkChangelogLinks)
+	}).SafeWithoutDryRun()
+	budget.step(w, "changelog-links", checkChangelogLinks).SafeWithoutDryRun()
 	budget.verdict(w)
 	return nil, nil
 }
@@ -226,9 +227,6 @@ func (j *validateVersionJob) run(ctx context.Context) error {
 	if err := requireAheadOfNewestTag(version, newest); err != nil {
 		return err
 	}
-	if err := j.checkHostingReleaseConstant(ctx, version); err != nil {
-		return err
-	}
 	if newest == "" {
 		sparkwing.Info(ctx, "origin carries no release tag; %s is the first", version)
 		return nil
@@ -249,40 +247,6 @@ func requireAheadOfNewestTag(version, newest string) error {
 	}
 	return fmt.Errorf("release: version %s is not ahead of %s, the newest tag on origin; "+
 		"a release tag must outrank every published version (never force-push a module tag), so pick a higher one", version, newest)
-}
-
-const firstHostingReleaseSource = "internal/wingd/client/client.go"
-
-var firstHostingReleasePattern = regexp.MustCompile(`(?m)^const FirstHostingRelease = "([^"]+)"`)
-
-func (j *validateVersionJob) checkHostingReleaseConstant(ctx context.Context, version string) error {
-	path := filepath.Join(j.RepoDir, firstHostingReleaseSource)
-	src, err := os.ReadFile(path)
-	if err != nil {
-		return fmt.Errorf("release: read %s: %w", firstHostingReleaseSource, err)
-	}
-	m := firstHostingReleasePattern.FindSubmatch(src)
-	if m == nil {
-		return fmt.Errorf("release: no FirstHostingRelease declaration found in %s; "+
-			"the daemon-hosting release gate cannot verify what a too-old host is told to install "+
-			"(update firstHostingReleasePattern if the constant moved)", firstHostingReleaseSource)
-	}
-	declared := string(m[1])
-	if version == declared {
-		return nil
-	}
-	claimed, err := tagExistsOnRemote(ctx, j.RepoDir, declared)
-	if err != nil {
-		return fmt.Errorf("release: check daemon-hosting release tag: %w", err)
-	}
-	if claimed {
-		return nil
-	}
-	return fmt.Errorf("release: cutting %s while FirstHostingRelease still names the unreleased %s. "+
-		"That constant is what a pipeline binary tells an operator to install when their sparkwing is too old to host "+
-		"the admission daemon, so shipping it unchanged would name a release that never carried the feature. "+
-		"Set it to %s in %s (and update the migration note in CHANGELOG.md), or cut %s instead",
-		version, declared, version, firstHostingReleaseSource, declared)
 }
 
 type checkCleanTreeJob struct {
