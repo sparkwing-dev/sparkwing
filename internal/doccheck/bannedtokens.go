@@ -85,7 +85,7 @@ var banned = []bannedPattern{
 	},
 	{
 		regexp.MustCompile(`SPARKWING_PLAN_ADMISSION`),
-		"removed; children inherit admission by attaching to the parent's daemon lease (SPARKWING_LEASE_TOKEN)",
+		"removed; children inherit admission by attaching to the parent's daemon lease",
 	},
 	{
 		regexp.MustCompile(`\bHostAdmission\b`),
