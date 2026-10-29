@@ -267,13 +267,10 @@ func TestCloudLauncherRequiresDigestAndSeparateCredential(t *testing.T) {
 	}
 }
 
-// cloudJobLabels are the labels the launcher puts on every Job Pod.
 var cloudJobLabels = labels.Set{"app": "sparkwing-job", "app.kubernetes.io/managed-by": "sparkwing-launcher", "sparkwing.dev/job": "job"}
 
-// jobPolicyProblems evaluates every rendered NetworkPolicy that selects a
-// Cloud Job Pod in its namespace, as the cluster does: the Pod's allowed
-// traffic is the union of those policies. It must deny all ingress and allow
-// egress only to the internet blocks, with private ranges excepted.
+// safety: a Pod's traffic is the union of every policy selecting it in its namespace, so all are judged together:
+// no ingress, and egress only to cluster DNS and the internet blocks with private ranges excepted.
 func jobPolicyProblems(policies []networkingv1.NetworkPolicy, namespace string) []string {
 	var problems []string
 	isolatedIn, isolatedOut, internet := false, false, false
@@ -331,7 +328,6 @@ func jobPolicyProblems(policies []networkingv1.NetworkPolicy, namespace string) 
 	return problems
 }
 
-// clusterDNSPeer is the one in-cluster destination a Cloud Job may reach.
 func clusterDNSPeer(peer networkingv1.NetworkPolicyPeer) bool {
 	return peer.IPBlock == nil && peer.NamespaceSelector != nil && peer.PodSelector != nil &&
 		len(peer.NamespaceSelector.MatchExpressions) == 0 && len(peer.PodSelector.MatchExpressions) == 0 &&

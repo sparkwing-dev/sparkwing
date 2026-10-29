@@ -37,8 +37,8 @@ func (l *Launcher) rejectJob(ctx context.Context, job *batchv1.Job, binding Clou
 	return rejectionFault(job.Name, l.teardown(ctx, job, reservation))
 }
 
-// rejectionFault marks a rejected Job's cleanup failure as a teardown fault, which keeps claims going, and
-// unlike teardownFault still reports containers that are running, so the rejection stays visible until done.
+// safety: a rejected Job's cleanup failure is a teardown fault, so claims continue; unlike teardownFault it
+// still reports running containers, so the rejection stays visible until it finishes.
 func rejectionFault(job string, err error) error {
 	if err == nil {
 		return nil

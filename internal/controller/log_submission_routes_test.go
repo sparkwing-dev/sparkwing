@@ -2,12 +2,12 @@ package controller
 
 import (
 	"bytes"
-	"context"
-	"errors"
 	"compress/gzip"
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -317,8 +317,6 @@ func TestLogSigningRefusesATeamAtItsStorageLimit(t *testing.T) {
 	}
 }
 
-// lifecycleProbeObjects reports a bucket with no lifecycle rule and counts
-// every time the request path asks.
 type lifecycleProbeObjects struct {
 	*blob.Filesystem
 	reads *int

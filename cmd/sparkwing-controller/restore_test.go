@@ -2,8 +2,8 @@ package main
 
 import (
 	"bytes"
-	"errors"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"

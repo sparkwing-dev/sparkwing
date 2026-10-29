@@ -40,8 +40,7 @@ type githubAppAutomationPreview struct {
 	Status         string                        `json:"status"`
 	Error          string                        `json:"error,omitempty"`
 	Pipelines      []githubAppAutomationPipeline `json:"pipelines"`
-	// Skipped names each pipeline whose declaration repository automation cannot honor; its siblings still run.
-	Skipped []githubAppAutomationSkipped `json:"skipped"`
+	Skipped        []githubAppAutomationSkipped  `json:"skipped"`
 }
 
 type githubAppAutomationSkipped struct {
@@ -70,10 +69,8 @@ func validateAutomationPatterns(patterns []string) error {
 	return nil
 }
 
-// automationDeclarations reads each pipeline's repository triggers. A
-// pipeline whose declaration is unsupported is skipped and named, so one
-// pipeline cannot disable its siblings; the configuration is unsupported only
-// when every declaring pipeline is skipped.
+// safety: an unsupported declaration skips and names only its pipeline, so it cannot disable its siblings;
+// the configuration is unsupported only when every declaring pipeline is skipped.
 func automationDeclarations(content []byte) ([]githubAppAutomationPipeline, []githubAppAutomationSkipped, string, error) {
 	cfg, err := projectconfig.Parse(content)
 	if err != nil {

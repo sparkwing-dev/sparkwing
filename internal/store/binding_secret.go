@@ -52,11 +52,9 @@ func secretRepository(r runspec.SealedRequest) string {
 	return ""
 }
 
-// secretReaderTx is the one rule for which award may read a declared secret:
-// a live approval evaluator, or a trigger, plan or node award without an
-// expansion. Route authorization and the committing release both call it, so
-// they cannot disagree. It reports whether the reader is an approval evaluator,
-// whose evaluation fence it has already checked.
+// safety: the one rule for which award reads a declared secret, a live approval evaluator or a trigger, plan or
+// node award without an expansion; route authorization and the committing release both call it. It reports
+// an approval evaluator, whose evaluation fence it has already checked.
 func secretReaderTx(ctx context.Context, tx *storeTx, c capability.Capability) (bool, error) {
 	if c.Binding.RunID == "" || c.Delivery == capability.DeliveryBootstrap {
 		return false, bindingRefusal()

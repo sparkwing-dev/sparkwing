@@ -812,9 +812,8 @@ var reviewedUnboundJoinAliases = map[string]string{
 
 var unionSplitRe = regexp.MustCompile(`(?i)\bunion(\s+all)?\b|\bintersect\b|\bexcept\b`)
 
-// unboundJoinAliases names each tenant table alias in a join that no
-// alias.team reference binds. One branch's single team predicate says nothing
-// about another table joined to it by a non-team column.
+// safety: one branch's team predicate says nothing about a table joined to it by a non-team column, so each
+// joined tenant alias needs its own alias.team reference.
 func unboundJoinAliases(sql string) []string {
 	tenant := teamColumnTables()
 	var out []string

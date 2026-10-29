@@ -821,8 +821,7 @@ func (op *Operator) grantCreatorTeamsTx(ctx context.Context, tx *storeTx, n prin
 // deployment's sender to flood an inbox.
 const MaxInvitationEmailsPerDay = 5
 
-// invitationEmailWindow is how long a send counts toward the cap; the
-// retention pass drops each log row once it has passed.
+// safety: a send counts toward the cap for this window, and the retention pass drops each log row after it.
 const invitationEmailWindow = 24 * time.Hour
 
 // ClaimInvitationEmail records that an invitation is about to be mailed, and

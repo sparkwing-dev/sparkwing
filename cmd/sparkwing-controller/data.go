@@ -18,10 +18,8 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
 
-// warnLogLifecycle reads the bucket's lifecycle rules once at startup and
-// warns for each log retention class without a backstop rule. The
-// maintenance pass deletes log objects itself, so a missing rule never
-// refuses a log upload; it only costs leftover bytes if that pass fails.
+// safety: the maintenance pass deletes log objects itself, so a missing lifecycle rule only warns once at startup;
+// it never refuses an upload and no request path reads bucket rules.
 func warnLogLifecycle(ctx context.Context, objects *blob.S3, overrides map[store.Team]int) {
 	days := []int{int(limits.FreeLogRetention / (24 * time.Hour)), int(limits.FundedLogRetention / (24 * time.Hour))}
 	for _, d := range overrides {

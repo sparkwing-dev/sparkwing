@@ -540,7 +540,9 @@ func (t *Tenant) OverrideAuthorizedSchedule(ctx context.Context, a capability.Au
 
 // DeleteAuthorizedSchedule removes a resolved schedule and history under current tenant authority.
 func (t *Tenant) DeleteAuthorizedSchedule(ctx context.Context, a capability.Authorized, id string) (string, bool, error) {
-	resolved, err := t.editSchedule(ctx, a, id, "", func(tx *storeTx, _ capability.Principal, row CronSchedule) error { return deleteScheduleTx(ctx, tx, t.team, row.ID) })
+	resolved, err := t.editSchedule(ctx, a, id, "", func(tx *storeTx, _ capability.Principal, row CronSchedule) error {
+		return deleteScheduleTx(ctx, tx, t.team, row.ID)
+	})
 	return resolved, err == nil, err
 }
 

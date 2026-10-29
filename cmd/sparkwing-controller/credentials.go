@@ -34,9 +34,6 @@ const (
 	credStripeWebhookSecret    = "stripe-webhook-secret"
 )
 
-// epochMismatch names the file and both ways out when the store refuses an
-// epoch it was not written under: put the original file back, or sign
-// everyone out on purpose.
 func epochMismatch(err error, dir string) error {
 	if !errors.Is(err, store.ErrCredentialEpochChanged) {
 		return err

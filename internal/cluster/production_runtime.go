@@ -197,9 +197,7 @@ func ownerGitAccess(owner bool) source.GitAccess {
 	return source.GitAccessTeam
 }
 
-// runnerInstallBase passes the runner's Go build and module caches to the
-// pipeline compiles it runs, as a local run does, so a chart runner's cache
-// volume serves them instead of a cold $HOME/.cache after every restart.
+// perf: compiles keep the runner's GOCACHE and GOMODCACHE, as a local run does, so the cache volume stays warm.
 func runnerInstallBase(owner bool, modules string) procenv.Base {
 	return procenv.Base{OwnerMachine: owner, Ambient: runnerToolEnvironment(modules), SubmitEnvAllow: []string{"GOCACHE", "GOMODCACHE"}, Masker: secrets.NewMasker()}
 }

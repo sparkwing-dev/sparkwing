@@ -120,11 +120,8 @@ func rawCommandType(t types.Type) bool {
 	return ok && named.Obj().Pkg() != nil && named.Obj().Pkg().Path() == "os/exec" && named.Obj().Name() == "Cmd"
 }
 
-// hostCommandPackages run host tooling, so their children may inherit the
-// host or controller environment. Every other package, including one added
-// later and those that run repository code (repos, pipelineentry, nodehost,
-// engine), builds its environment through procenv.Command; joining this list
-// is a reviewed decision.
+// safety: only these packages run host tooling whose children may inherit the host environment; any other
+// package, including a new one or one running repository code, must use procenv.Command. Joining is reviewed.
 var hostCommandPackages = []string{
 	"bin/qagoproxy",
 	"cmd/sparkwing",

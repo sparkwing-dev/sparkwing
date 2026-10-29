@@ -228,9 +228,7 @@ func TestMoneyStatementsCarryPaymentMode(t *testing.T) {
 	}
 }
 
-// paymentModeBinding matches payment_mode compared in a predicate, on either
-// side, or written by an INSERT or SET; a statement that only selects the
-// column does not bind it.
+// safety: payment_mode binds only when compared in a predicate or written by INSERT or SET; selecting it does not.
 var paymentModeBinding = regexp.MustCompile(`(?is)\bpayment_mode\s*(=|<>|!=|\bin\b)|(=|<>|!=)\s*(\w+\.)?payment_mode\b|^\s*insert\b.*\bpayment_mode\b|\bset\b[^;]*\bpayment_mode\s*=`)
 
 func bindsPaymentMode(text string) bool {

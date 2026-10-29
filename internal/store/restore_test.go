@@ -28,7 +28,7 @@ func TestRestoreHoldsSchedulesUntilAcknowledgement(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	// A lost or replaced epoch file is refused, not taken as a restore: nothing is held or cancelled.
+	// safety: a lost or replaced epoch file is refused, not taken as a restore: nothing is held or cancelled.
 	s.credentialEpoch = "rotated"
 	if err := s.EnsureCredentialEpoch(ctx); !errors.Is(err, ErrCredentialEpochChanged) {
 		t.Fatalf("changed epoch served: %v", err)

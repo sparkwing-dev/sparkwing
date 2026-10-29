@@ -102,7 +102,7 @@ func TestConcurrentCoOwnerDeletionsLeaveTheTeamAnOwner(t *testing.T) {
 						t.Fatalf("iteration %d: deleting %s: %v", i, ids[n], err)
 					}
 				}
-				// With an editor the second deletion is the last owner of a team with members; without one it
+				// safety: with an editor the second deletion is the last owner of a team with members; without one it
 				// empties the team, which is queued for deletion.
 				if withEditor && (deleted != 1 || lastOwner != 1) || !withEditor && deleted != 2 {
 					t.Fatalf("iteration %d editor=%v: %d deletions succeeded and %d were refused as last owner", i, withEditor, deleted, lastOwner)
