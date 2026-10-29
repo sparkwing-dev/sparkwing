@@ -83,7 +83,10 @@ integration evidence. See [log completeness](observability.md#log-completeness).
 A store has one active controller. Before migrations, startup writes or serving,
 a PostgreSQL controller takes a session advisory lock derived from the database
 and Sparkwing schema on a dedicated connection. A second controller blocks as a
-standby. Promotion bumps the `controller_epoch` row in the same transaction
+standby. It logs the controller advisory lock's database and numeric key once,
+with instructions to wait for or stop the active controller, or cancel the standby
+startup. The standby does not serve HTTP until it acquires the lock, so health
+and readiness remain unavailable while it waits. Promotion bumps the `controller_epoch` row in the same transaction
 that takes the lock. Every write transaction holds a shared lock on that row
 and checks its promoted epoch. Promotion waits for in-flight writes to finish.
 The former controller's later writes abort and trigger fail-stop, even before
