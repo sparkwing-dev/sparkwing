@@ -61,27 +61,14 @@ internal/settings	1
 # ErrUnverifiedEmail: external signup tests match this sentinel with errors.Is.
 # FormatCredits: external credits tests exercise credit rendering.
 # LastOwnerError.Error: implements error; callers use the error interface.
-# Operator.CreditRateTable: external pricing tests read persisted deployment prices.
-# Operator.WarmCPUClassCores: external pricing tests inspect the persisted warm-runner class.
 # ParseRunFilter: external filter tests exercise query parsing.
 # RevokeNode: external state-transition tests construct revocation requests.
 # Role.AtLeast: external identity tests exercise role ordering.
 # StorageQuotaError: external quota tests inspect structured refusals with errors.As.
 # StorageQuotaError.Error: implements error; callers use the error interface.
-# Store.ApproveOldestWaitlisted: external signup tests exercise FIFO approval and reservations.
-# Store.SetSignUpMode: external signup tests configure the signup gate.
-# Store.WaitlistedAccounts: external signup tests inspect durable waitlist state.
-# Tenant.GitHubAppExtraRepos: external GitHub tests inspect persisted repository permissions.
-# Tenant.ReadBlob: external blob tests exercise metadata authority checks.
-# Tenant.RecordContention: external profile tests exercise tenant-scoped contention updates.
 # Tenant.RecordGitHubCheckRun: external GitHub tests exercise check-run bindings and receipts.
-# Tenant.RenewOwner: external owner tests exercise lease and authority fencing.
-# Tenant.ReserveQuota: external quota tests exercise reservation transactions.
-# Tenant.ResetAllProfiles: external profile tests exercise tenant-wide reset isolation.
-# Tenant.ResetPipelineProfile: external profile tests exercise pipeline-scoped reset isolation.
-# Tenant.SettleQuota: external quota tests exercise settlement transactions.
 # secretPreflightError.Error: implements error; callers use the error interface.
-internal/store	26
+internal/store	23
 # SeedUpload: external fixture tests share this upload setup implementation.
 internal/store/teststore	1
 # FieldError.Error: implements error; callers use the error interface.
