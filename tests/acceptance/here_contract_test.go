@@ -24,7 +24,7 @@ func TestHereResumeClaimContract(t *testing.T) {
 			if err != nil || inv.Pipeline != "" || len(inv.Args) != 0 || inv.Value("resume") != "here-run" {
 				t.Fatalf("resume grammar: %#v %v", inv, err)
 			}
-			claimBy := time.Unix(1, 0)
+			claimBy := time.Unix(1, 0).UTC()
 			want := controllerwire.ClaimedUnit{
 				Unit: capability.UnitTrigger, Purpose: capability.PurposeHere, Delivery: capability.DeliveryDirect,
 				RunID: "here-run", UnitID: "trigger", Capability: "new-private-owner-bearer",
