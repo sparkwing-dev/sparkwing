@@ -2,7 +2,7 @@ package nodehost
 
 import "github.com/sparkwing-dev/sparkwing/pkg/projectconfig"
 
-// pipelineIdentity separates the invoked pipeline name from its SDK registration key.
+// safety: Entrypoint is the SDK registration key, which may differ from the invoked name.
 type pipelineIdentity struct {
 	Invoked    string
 	Entrypoint string
