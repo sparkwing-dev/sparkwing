@@ -260,11 +260,11 @@ func prepareNativeLocalRun(ctx context.Context, home, directory, pipeline string
 			return err
 		},
 	}
-	prepared, err := planner.Prepare(ctx, nodehost.PlanningProcessInput{
+	prepared, err := planner.Inspect(ctx, nodehost.PlanningProcessInput{
 		Entry: entry, Entrypoint: identity.Entrypoint,
 		Environment: seal, Args: map[string]string{}, Runner: nodeproto.RunnerIdentity{Name: "local", Type: "local", Labels: []string{}},
 		Run: nodeproto.RunContext{RunID: rand.Text(), Pipeline: pipeline},
-	}, nodehost.PlanningInput{})
+	})
 	if err != nil {
 		return localRunPreparation{}, err
 	}

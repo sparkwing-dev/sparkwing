@@ -20,6 +20,8 @@ unlock.
 
 ## [Unreleased]
 
+- **CLI:** Local runs accept required pipeline arguments before validation, and invalid public enum values list the allowed choices. Controller URL errors name malformed input and show a valid URL form. Connection failures point to profile inspection, URL repair and network checks. Undeclared child-run errors name `StartsChildren` and the TypeScript equivalent.
+
 - **CLI:** Misspelled command words suggest the nearest command. Plain and pretty `runs status` show run and job start, finish and duration times.
 
 - **store:** PostgreSQL admission locks stay within their store schema

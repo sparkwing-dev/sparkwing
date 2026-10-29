@@ -76,7 +76,7 @@ func (c *engineClient) request(ctx context.Context, method, pattern, path, key s
 		resp, requestErr := c.http.Do(req)
 		if requestErr != nil {
 			if !mayRetry || attempt >= unavailableRetries || ctx.Err() != nil || !retryableTransportError(requestErr) {
-				return requestErr
+				return fmt.Errorf("cannot connect to controller %s: %w; check its URL with sparkwing profiles show --profile NAME, repair it with sparkwing profiles set --profile NAME --controller URL, and check your network and whether the controller is running", c.base, requestErr)
 			}
 			if err := waitFor(ctx, time.Duration(1<<attempt)*100*time.Millisecond); err != nil {
 				return err

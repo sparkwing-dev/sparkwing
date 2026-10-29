@@ -601,7 +601,7 @@ func validateChildLineageTx(ctx context.Context, tx *storeTx, team Team, input *
 		return 0, admissionIdentity{}, nil
 	}
 	if !claim.AllowsChild(input.Pipeline, string(input.Git.Repository.Key)) {
-		return 0, admissionIdentity{}, authorityError(apierr.Forbidden, "child source is outside the parent claim's declared children")
+		return 0, admissionIdentity{}, authorityError(apierr.Forbidden, "child source is outside the parent claim's declared children; declare it on the parent job with StartsChildren (TypeScript: startsChildren), or StartsChildrenIn for another repository")
 	}
 	seen := map[string]bool{}
 	depth := 1

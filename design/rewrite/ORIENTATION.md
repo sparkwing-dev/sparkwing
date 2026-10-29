@@ -109,6 +109,8 @@ credential model in `docs/auth.md`, and the decision log
 
 | Rule | Owner | Guard test |
 | --- | --- | --- |
+| Local argument discovery | `cmd/sparkwing/local_run.go`: `prepareNativeLocalRun` inspects declarations before invocation values are parsed; `internal/nodeproto/arguments.go`: public enum errors list choices | `cmd/sparkwing/local_describe_unix_test.go`: `TestNativeLocalPreparationInspectsBeforeParsingRequiredEnum` |
+| Undeclared child refusal | `internal/controller/child_source.go`: `resolveChildRevisions`; `internal/store/intake_runtime.go`: intake authorization names `StartsChildren` | `internal/controller/child_source_test.go`: `TestUndeclaredChildSourceNamesDeclarationMethod`; `internal/store/provenance_reference_test.go`: `TestChildPipelinesMustBeDeclared` |
 | Command registry | `internal/clisurface/registry.go`: `Registry` | `internal/clisurface/contract_test.go` |
 | Route table | `internal/capability/tables.go`: `Routes`; dispatch in `internal/routepolicy` | `internal/capability/policy_test.go` |
 | OpenAPI | `internal/apispec` writes `api/openapi.yaml`; regenerate with `bin/gen-api-docs.sh` | `bin/check-api-spec.sh`; `internal/apispec/final_contract_test.go` |

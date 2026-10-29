@@ -92,3 +92,10 @@ func TestProfileCmd_RejectsPositionalArg(t *testing.T) {
 		t.Errorf("message = %q", err.Error())
 	}
 }
+
+func TestControllerURLDiagnosticNamesInputAndRepair(t *testing.T) {
+	_, err := normalizeControllerURL("staging.sparkwing.dev")
+	if err == nil || !strings.Contains(err.Error(), "staging.sparkwing.dev") || !strings.Contains(err.Error(), "https://") || !strings.Contains(err.Error(), "--controller") {
+		t.Fatalf("URL refusal lacks repair: %v", err)
+	}
+}

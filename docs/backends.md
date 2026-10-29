@@ -18,6 +18,12 @@ to probe and save a connection. The probe checks controller health and reads
 one run-list page with the supplied credential. A malformed response or
 redirect fails the check. `--no-probe` saves without verification.
 
+Controller URLs need `http://` or `https://` and a host. For example, use
+`--controller https://staging.sparkwing.dev`. On connection failure, inspect the
+saved URL with `sparkwing profiles show --profile NAME`, repair it with
+`sparkwing profiles set --profile NAME --controller URL`, and check your network
+and whether the controller is running.
+
 `sparkwing profiles list` lists connection names. `sparkwing profiles show --profile prod`
 shows the selected connection with its token redacted. `sparkwing profiles set --profile prod --token-stdin`
 replaces a credential without putting it in shell history.
