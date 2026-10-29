@@ -137,7 +137,6 @@ func (r *Resolver) fetch(ctx context.Context, address string, release bool) ([]b
 	return body, nil
 }
 
-// downloadStatus is an official origin's non-200 answer.
 type downloadStatus int
 
 func (s downloadStatus) Error() string {

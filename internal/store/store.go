@@ -1356,8 +1356,8 @@ func scanApproval(rs rowScanner) (*Approval, error) {
 		}
 		return nil, err
 	}
-	// bug: a replayed approval decodes its stored JSON in UTC, so a Local time here made
-	// the first answer and its replay differ on any host whose zone is not UTC.
+	// safety: a replayed approval decodes its stored JSON in UTC, so the first answer
+	// must be UTC too or the two differ on any host whose zone is not UTC.
 	a.RequestedAt = time.Unix(0, requestedNS).UTC()
 	if resolvedNS.Valid {
 		t := time.Unix(0, resolvedNS.Int64).UTC()
