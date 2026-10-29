@@ -3,6 +3,7 @@ package controller
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"math"
 	"net/http"
 	"slices"
@@ -291,21 +292,34 @@ func (s *Server) localHostAuthority(ctx context.Context, a capability.Authorized
 	if err != nil {
 		return capability.Principal{}, err
 	}
-	nodes, err := tenant.ReadOwnerNodes(ctx, owner.Authority, a.Target.RunID)
+	var principal capability.Principal
+	if ref.Kind == capability.AuthorityCapability && ref.ID != "" {
+		principal, err = s.operator.ResolveAuthority(ctx, ref)
+	} else if digest != ([32]byte{}) {
+		principal, err = s.operator.LookupCapability(ctx, digest)
+	} else {
+		return capability.Principal{}, localHostRefusal()
+	}
+	if err != nil {
+		var failure *apierr.Error
+		if errors.As(err, &failure) && failure.Code == apierr.Unauthenticated {
+			return capability.Principal{}, localHostRefusal()
+		}
+		return capability.Principal{}, err
+	}
+	binding := principal.Capability.Binding
+	if binding.Kind != capability.BindingNode || binding.RunID != a.Target.RunID || binding.NodeID == "" {
+		return capability.Principal{}, localHostRefusal()
+	}
+	node, err := tenant.ReadOwnerNode(ctx, owner.Authority, runspec.NodeRef{RunID: runspec.RunID(binding.RunID), NodeID: runspec.NodeID(binding.NodeID)})
+	if errors.Is(err, store.ErrNotFound) {
+		return capability.Principal{}, localHostRefusal()
+	}
 	if err != nil {
 		return capability.Principal{}, engineLookupError(err)
 	}
-	for _, node := range nodes {
-		if node.OwnerCapabilityPrefix != owner.Capability.Prefix || node.CapabilityPrefix == "" || ref.ID != "" && ref.ID != node.CapabilityPrefix {
-			continue
-		}
-		principal, err := s.operator.ResolveAuthority(ctx, capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: node.CapabilityPrefix})
-		if err != nil {
-			return capability.Principal{}, err
-		}
-		if localHostOwnsNode(owner, node, principal) && (ref == principal.Authority || digest != ([32]byte{}) && digest == principal.Capability.Digest) {
-			return principal, nil
-		}
+	if localHostOwnsNode(owner, node, principal) && (ref == principal.Authority || digest != ([32]byte{}) && digest == principal.Capability.Digest) {
+		return principal, nil
 	}
 	return capability.Principal{}, localHostRefusal()
 }
