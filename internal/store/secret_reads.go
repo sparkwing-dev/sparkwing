@@ -106,8 +106,9 @@ func (t *Tenant) authorizeSecretReadTx(ctx context.Context, tx *storeTx, a capab
 
 func (t *Tenant) secretClaimFenceTx(ctx context.Context, tx *storeTx, c capability.Capability) error {
 	b := c.Binding
-	if c.UnitID == "" || b.RunID == "" || b.Expansion != nil || c.Delivery == capability.DeliveryBootstrap || !slices.Contains([]capability.UnitKind{capability.UnitTrigger, capability.UnitPlan, capability.UnitNode}, c.Unit) {
-		return bindingRefusal()
+	approval, err := secretReaderTx(ctx, tx, c)
+	if err != nil || approval {
+		return err
 	}
 	if err := lockOwnerUnitTx(ctx, tx, t.team, UnitRef{Kind: c.Unit, RunID: runspec.RunID(b.RunID), NodeID: runspec.NodeID(b.NodeID)}); err != nil {
 		return err
