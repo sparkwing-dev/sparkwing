@@ -2,14 +2,17 @@ package controller
 
 import (
 	"encoding/json"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"reflect"
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
+	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 )
 
 func TestPersistedStepResultsReachTheStepsResponse(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 2.5s measured in the short class; the full suite runs it")
+	}
 	run := consoleRunFixture(t)
 	var got controllerwire.RunSteps
 	if err := json.Unmarshal(run.get(t, "/api/v1/runs/run-jobs/steps"), &got); err != nil {
@@ -38,6 +41,9 @@ func TestPersistedStepResultsReachTheStepsResponse(t *testing.T) {
 }
 
 func TestPersistedJobResultsReachRunDetail(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 1.8s measured in the short class; the full suite runs it")
+	}
 	run := consoleRunFixture(t)
 	var got controllerwire.RunDetail
 	if err := json.Unmarshal(run.get(t, "/api/v1/runs/run-jobs"), &got); err != nil {

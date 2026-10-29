@@ -8,10 +8,10 @@ import (
 	"testing/quick"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/runspec"
-
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/quicktest"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 )
 
 func launcherSnapshotFixture(t *testing.T, kind capability.UnitKind, previousAttempts ...int64) (*Store, UnitDemand, UnitClaim, *time.Time) {
@@ -157,7 +157,7 @@ func TestLauncherSnapshotFencingProperty(t *testing.T) {
 				}
 				return true
 			}
-			if err := quick.Check(check, &quick.Config{MaxCount: 100}); err != nil {
+			if err := quick.Check(check, quicktest.Config(&quick.Config{MaxCount: 100})); err != nil {
 				t.Fatal(err)
 			}
 			awards, _, err := s.AsOperator().ReconcileLauncherAwards(t.Context(), ref, nil, nil, nil, nil, nil)
@@ -318,7 +318,7 @@ func TestLauncherReservationOwnershipProperty(t *testing.T) {
 		}
 		return true
 	}
-	if err := quick.Check(check, &quick.Config{MaxCount: 90}); err != nil {
+	if err := quick.Check(check, quicktest.Config(&quick.Config{MaxCount: 90})); err != nil {
 		t.Fatal(err)
 	}
 }

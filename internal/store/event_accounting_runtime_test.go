@@ -10,6 +10,8 @@ import (
 	"testing"
 	"testing/quick"
 	"time"
+
+	"github.com/sparkwing-dev/sparkwing/internal/quicktest"
 )
 
 func TestStoreDataEventsUseFinalReplicaRows(t *testing.T) {
@@ -224,7 +226,7 @@ func TestStoreDataEventsTenantIsolationAndConservation(t *testing.T) {
 		}
 		return retained == want && charged == want
 	}
-	if err := quick.Check(property, &quick.Config{MaxCount: 32, Rand: rand.New(rand.NewSource(13711))}); err != nil {
+	if err := quick.Check(property, quicktest.Config(&quick.Config{MaxCount: 32, Rand: rand.New(rand.NewSource(13711))})); err != nil {
 		t.Fatal(err)
 	}
 }

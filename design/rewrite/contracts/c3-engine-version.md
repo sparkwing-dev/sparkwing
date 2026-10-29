@@ -254,8 +254,14 @@ the checkout root. Pin reads, native dependency edits and collected changes use
 its validated `.sparkwing` directory. Application manifests at the root remain
 separate inputs. `UpgradeVerifier` resolves dependencies, compiles Go or type-checks
 TypeScript, then runs describe/plan with the exact verified engine. Job bodies
-never run. Only verified changes apply, with each original digest rechecked to
-avoid overwriting concurrent edits. Failures leave original pins unchanged.
+never run. Verified changes apply, with each original digest rechecked to
+avoid overwriting concurrent edits. The one other case that applies is a
+verification the pipeline's own code fails (`engine.ErrPipelineIncompatible`:
+an offline Go compile, a TypeScript type check, or describe/plan refusing the
+code), which applies the pin and lockfile edits, reports the failure with the
+migration guides and the changed files, and exits non-zero. Every other failure,
+including SDK downloads, missing tools, installer output and malformed
+discovery, leaves the original pins unchanged.
 `--dry-run` reports proposed changes without applying them or restarting services.
 
 Installed machine software remains the `sparkwing update` responsibility.

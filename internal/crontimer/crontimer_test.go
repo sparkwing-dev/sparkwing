@@ -689,7 +689,7 @@ func TestInspectReportsATimerThatTicksAnotherHome(t *testing.T) {
 				path = filepath.Join(AgentDir(h), h.plistName())
 			}
 			body := strings.ReplaceAll(read(t, path), h.SparkwingHome, other.SparkwingHome)
-			if err := os.WriteFile(path, []byte(body), 0600); err != nil {
+			if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
 				t.Fatal(err)
 			}
 			state, err := Inspect(t.Context(), h)

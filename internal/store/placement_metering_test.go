@@ -35,6 +35,9 @@ func TestCloudClaimMetersAwardFromUnmeteredLauncher(t *testing.T) {
 }
 
 func TestPlacementMeteringUsesEnrolledOriginProperty(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 3.3s measured in the short class; the full suite runs it")
+	}
 	for i := range 64 {
 		t.Run(fmt.Sprint(i), func(t *testing.T) {
 			cloud, metered, queued, delegated, funded := i&1 != 0, i&2 != 0, i&4 != 0, i&8 != 0, i&16 != 0

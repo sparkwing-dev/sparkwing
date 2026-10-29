@@ -9,6 +9,8 @@ import (
 	"testing"
 	"testing/quick"
 	"time"
+
+	"github.com/sparkwing-dev/sparkwing/internal/quicktest"
 )
 
 func TestStoreDataDownloadRecordsTheDayRow(t *testing.T) {
@@ -172,7 +174,7 @@ func TestStoreDataDownloadTenantIsolationAndConservation(t *testing.T) {
 		}
 		return true
 	}
-	if err := quick.Check(property, &quick.Config{MaxCount: 32, Rand: rand.New(rand.NewSource(527903))}); err != nil {
+	if err := quick.Check(property, quicktest.Config(&quick.Config{MaxCount: 32, Rand: rand.New(rand.NewSource(527903))})); err != nil {
 		t.Fatal(err)
 	}
 }

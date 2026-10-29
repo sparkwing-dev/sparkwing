@@ -12,6 +12,9 @@ import (
 )
 
 func TestSignedFraudWarningUsesSettledLiabilityShift(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 2.7s measured in the short class; the full suite runs it")
+	}
 	for _, kind := range []string{"checkout", "refill"} {
 		for _, result := range []string{"authenticated", "attempt_acknowledged", "", "failed", "unknown"} {
 			for _, warningFirst := range []bool{false, true} {

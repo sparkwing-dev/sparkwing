@@ -8,6 +8,8 @@ import (
 	"testing"
 	"testing/quick"
 	"time"
+
+	"github.com/sparkwing-dev/sparkwing/internal/quicktest"
 )
 
 func TestStoreDataCreditHistoryPreservesTenantAndAwardIdentity(t *testing.T) {
@@ -76,7 +78,7 @@ func TestStoreDataCreditHistoryPreservesTenantAndAwardIdentity(t *testing.T) {
 		}
 		return true
 	}
-	if err := quick.Check(property, &quick.Config{MaxCount: 64, Rand: rand.New(rand.NewSource(52198))}); err != nil {
+	if err := quick.Check(property, quicktest.Config(&quick.Config{MaxCount: 64, Rand: rand.New(rand.NewSource(52198))})); err != nil {
 		t.Fatal(err)
 	}
 }

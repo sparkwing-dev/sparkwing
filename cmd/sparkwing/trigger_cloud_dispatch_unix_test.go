@@ -14,8 +14,21 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/blob"
+	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/controller"
+	"github.com/sparkwing-dev/sparkwing/internal/controller/client"
+	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
+	"github.com/sparkwing-dev/sparkwing/internal/deployment/deploymenttest"
 	"github.com/sparkwing-dev/sparkwing/internal/engineid"
+	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
+	"github.com/sparkwing-dev/sparkwing/internal/runners/launcher"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
+	"github.com/sparkwing-dev/sparkwing/internal/settings"
+	"github.com/sparkwing-dev/sparkwing/internal/storage/logseg"
+	"github.com/sparkwing-dev/sparkwing/internal/store"
+	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
 
 	authenticationv1 "k8s.io/api/authentication/v1"
 
@@ -28,20 +41,6 @@ import (
 	k8sruntime "k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes/fake"
-
-	"github.com/sparkwing-dev/sparkwing/internal/blob"
-	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/controller"
-	"github.com/sparkwing-dev/sparkwing/internal/controller/client"
-	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
-	"github.com/sparkwing-dev/sparkwing/internal/deployment/deploymenttest"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
-	"github.com/sparkwing-dev/sparkwing/internal/runners/launcher"
-	"github.com/sparkwing-dev/sparkwing/internal/runspec"
-	"github.com/sparkwing-dev/sparkwing/internal/settings"
-	"github.com/sparkwing-dev/sparkwing/internal/storage/logseg"
-	"github.com/sparkwing-dev/sparkwing/internal/store"
-	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
 
 	ktesting "k8s.io/client-go/testing"
 )
@@ -140,6 +139,9 @@ func main() { sw.Register("Deploy", func() sw.Pipeline[sw.NoInputs] { return pip
 }
 
 func TestCloudWorkingTreeTriggerRunsPlanEvalAndJobsOnTheLauncher(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 3.7s measured in the short class; the full suite runs it")
+	}
 	f := cloudDispatchTrigger(t)
 	created, err := f.member.CreateRun(t.Context(), f.request)
 	if err != nil {
@@ -191,6 +193,9 @@ func TestCloudWorkingTreeTriggerRunsPlanEvalAndJobsOnTheLauncher(t *testing.T) {
 }
 
 func TestCloudTriggerWithRunnerSelectorStaysOnTheRunner(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 3.5s measured in the short class; the full suite runs it")
+	}
 	f := cloudDispatchTrigger(t, "--runner=builder")
 	created, err := f.member.CreateRun(t.Context(), f.request)
 	if err != nil {
@@ -242,6 +247,9 @@ func TestCloudTriggerNoticesWorkNobodyHasClaimed(t *testing.T) {
 }
 
 func TestCloudTriggerWithoutCreditsNamesTheCreditHold(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 4.2s measured in the short class; the full suite runs it")
+	}
 	f := cloudDispatchSetup(t, false)
 	created, err := f.member.CreateRun(t.Context(), f.request)
 	if err != nil {
@@ -474,6 +482,9 @@ func (cloudDispatchBoundary) Release(context.Context, launcher.CloudNodeReservat
 func (cloudDispatchBoundary) Retire(context.Context, launcher.CloudNodeReservation) error { return nil }
 
 func TestCloudJobReportsThroughTheNodeHostRoute(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 5.5s measured in the short class; the full suite runs it")
+	}
 	f := cloudDispatchTrigger(t)
 	created, err := f.member.CreateRun(t.Context(), f.request)
 	if err != nil {

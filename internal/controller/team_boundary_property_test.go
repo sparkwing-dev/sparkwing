@@ -13,6 +13,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
+	"github.com/sparkwing-dev/sparkwing/internal/quicktest"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
@@ -122,7 +123,7 @@ func TestTeamBoundaryRunPrivacyProperty(t *testing.T) {
 			own, err := f.teamB.ListRuns(t.Context(), store.RunFilter{Limit: 100})
 			return err == nil && len(own) == 0
 		}
-		if err := quick.Check(property, &quick.Config{MaxCount: 32}); err != nil {
+		if err := quick.Check(property, quicktest.Config(&quick.Config{MaxCount: 32})); err != nil {
 			t.Fatal(err)
 		}
 	})
@@ -147,7 +148,7 @@ func TestTeamBoundaryOutputHidesRunExistenceProperty(t *testing.T) {
 			}
 			return true
 		}
-		if err := quick.Check(property, &quick.Config{MaxCount: 32}); err != nil {
+		if err := quick.Check(property, quicktest.Config(&quick.Config{MaxCount: 32})); err != nil {
 			t.Fatal(err)
 		}
 	})

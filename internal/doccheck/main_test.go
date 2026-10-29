@@ -45,7 +45,7 @@ func TestGoBlocksReportRemovedSDKSymbols(t *testing.T) {
 		t.Fatal(err)
 	}
 	content := t.TempDir()
-	if err := os.WriteFile(filepath.Join(content, "guide.md"), []byte("```go\nsw.NoSuchPublicSDKFunction()\n```\n"), 0600); err != nil {
+	if err := os.WriteFile(filepath.Join(content, "guide.md"), []byte("```go\nsw.NoSuchPublicSDKFunction()\n```\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	if checkGoBlocks(content, root) {

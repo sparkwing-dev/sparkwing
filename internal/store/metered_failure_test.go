@@ -7,6 +7,7 @@ import (
 	"testing/quick"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/quicktest"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 )
@@ -83,7 +84,7 @@ func TestMeteredFailureReportSettlesAndReleasesClaimProperty(t *testing.T) {
 			}
 		}
 	}
-	if err := quick.Check(property, &quick.Config{MaxCount: 24, Rand: rand.New(rand.NewSource(744))}); err != nil {
+	if err := quick.Check(property, quicktest.Config(&quick.Config{MaxCount: 24, Rand: rand.New(rand.NewSource(744))})); err != nil {
 		t.Fatal(err)
 	}
 }

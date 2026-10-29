@@ -137,8 +137,9 @@ func executionHostFixture(t *testing.T, mode string, trace *[]string, processes 
 	if err != nil {
 		t.Fatal(err)
 	}
-	host := &ClaimedNodeHost{Admission: ComposeStartGate(s, nil, false),
-		Store: s, Executor: executor, Lease: lease.Keeper{Interval: time.Minute, Lease: time.Hour}, Masker: testMasker("private"),
+	host := &ClaimedNodeHost{
+		Admission: ComposeStartGate(s, nil, false),
+		Store:     s, Executor: executor, Lease: lease.Keeper{Interval: time.Minute, Lease: time.Hour}, Masker: testMasker("private"),
 		Acquire: func(_ context.Context, in source.Spec, _ source.Options) (*source.Entry, error) {
 			return &source.Entry{Engine: resolved, SHA: in.SHA, RepoKey: in.RepoKey}, nil
 		},

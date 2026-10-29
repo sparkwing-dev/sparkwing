@@ -6,6 +6,7 @@ import (
 	"testing/quick"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/quicktest"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 )
@@ -51,7 +52,7 @@ func TestResumeDebugPauseCurrentAuthorityProperty(t *testing.T) {
 		}
 		return (released == 1) == allowed && (before.StatusDetail == "") == allowed
 	}
-	if err := quick.Check(property, &quick.Config{MaxCount: 40}); err != nil {
+	if err := quick.Check(property, quicktest.Config(&quick.Config{MaxCount: 40})); err != nil {
 		t.Fatal(err)
 	}
 }

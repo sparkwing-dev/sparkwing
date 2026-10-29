@@ -17,6 +17,9 @@ import (
 )
 
 func TestGitHubAppRemovalListingFailureIsTargeted(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 1.0s measured in the short class; the full suite runs it")
+	}
 	key, err := rsa.GenerateKey(rand.Reader, 1024)
 	if err != nil {
 		t.Fatal(err)

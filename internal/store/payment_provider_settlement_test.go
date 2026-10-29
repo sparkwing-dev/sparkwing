@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/quicktest"
 )
 
 func providerPaymentFixture(t *testing.T) (*Store, *Tenant, time.Time) {
@@ -108,6 +109,9 @@ func TestPendingDisputeReversalAndDelayedGrantCommitTogether(t *testing.T) {
 }
 
 func TestProviderPaymentsCommitFinancialStateWithReceipt(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 1.3s measured in the short class; the full suite runs it")
+	}
 	for _, kind := range []capability.PaymentEventKind{capability.PaymentCardSetup, capability.PaymentCardPaid, capability.PaymentCardFailed, capability.PaymentRefund, capability.PaymentWarningEvent, capability.PaymentDisputeOpened, capability.PaymentDisputeClosed} {
 		t.Run(string(kind), func(t *testing.T) {
 			s, _, now := providerPaymentFixture(t)
@@ -358,7 +362,7 @@ func TestProviderWarningProtectionIsMonotonicProperty(t *testing.T) {
 		}
 		return true
 	}
-	if err := quick.Check(property, &quick.Config{MaxCount: 32, Rand: rand.New(rand.NewSource(742))}); err != nil {
+	if err := quick.Check(property, quicktest.Config(&quick.Config{MaxCount: 32, Rand: rand.New(rand.NewSource(742))})); err != nil {
 		t.Fatal(err)
 	}
 }

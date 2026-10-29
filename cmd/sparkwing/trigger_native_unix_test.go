@@ -19,6 +19,9 @@ import (
 )
 
 func TestNativeHereTriggerSubmitsAndReplaysRecordedReason(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 5.8s measured in the short class; the full suite runs it")
+	}
 	t.Setenv("SPARKWING_HOME", t.TempDir())
 	t.Setenv("SPARKWING_CONFIG", filepath.Join(t.TempDir(), "config.yaml"))
 	if err := os.WriteFile(os.Getenv("SPARKWING_CONFIG"), []byte("run:\n  submit_env_allow: [W9_APP_*, W9_MISSING, W9_TOKEN]\n"), 0o600); err != nil {

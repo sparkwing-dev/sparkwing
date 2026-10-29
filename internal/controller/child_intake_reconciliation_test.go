@@ -9,11 +9,11 @@ import (
 	"testing/quick"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/runstate"
-
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
+	"github.com/sparkwing-dev/sparkwing/internal/quicktest"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
 )
@@ -210,7 +210,7 @@ func TestTeamBoundary_TriggerAncestryStaysInTheCallersTeam(t *testing.T) {
 		}
 		return replies[0] == replies[1] && !strings.Contains(replies[0], private) && count == 1
 	}
-	if err := quick.Check(property, &quick.Config{MaxCount: 12}); err != nil {
+	if err := quick.Check(property, quicktest.Config(&quick.Config{MaxCount: 12})); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -270,7 +270,7 @@ func TestChildIntakeRetainsRepositoryInheritanceWithoutGrantingSourceAuthority(t
 		engineClaimHTTP(t, h, claim, "POST", "/api/v1/runs/run/children", string(raw), 403)
 		return true
 	}
-	if err := quick.Check(property, &quick.Config{MaxCount: 8}); err != nil {
+	if err := quick.Check(property, quicktest.Config(&quick.Config{MaxCount: 8})); err != nil {
 		t.Fatal(err)
 	}
 }

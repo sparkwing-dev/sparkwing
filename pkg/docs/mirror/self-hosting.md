@@ -294,6 +294,7 @@ no CloudFront signing keys.
 Controller embedders configure authenticated data routes through
 `WithDataController`. Host storage bindings need separate wiring. See
 [Data downloads](api.md#data-downloads) for route behavior.
+
 ### Storage class
 
 When you deploy sparkwing in-cluster (Helm chart at `charts/sparkwing-full`),

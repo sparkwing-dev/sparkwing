@@ -153,7 +153,6 @@ func TestCredentialTokenBoundaries(t *testing.T) {
 			}
 		}
 	})
-
 }
 
 func TestCredentialFileName(t *testing.T) {

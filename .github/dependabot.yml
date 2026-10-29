@@ -17,6 +17,12 @@ updates:
       go-minor-and-patch:
         patterns: ["*"]
         update-types: [minor, patch]
+    # The k8s.io modules move in lockstep, but Dependabot raises them one at a
+    # time and go mod tidy fails in between (client-go's fake imports API
+    # groups the next k8s.io/api drops). Raise their minor versions together by hand.
+    ignore:
+      - dependency-name: "k8s.io/*"
+        update-types: ["version-update:semver-minor", "version-update:semver-major"]
 
   - package-ecosystem: npm
     directory: /web

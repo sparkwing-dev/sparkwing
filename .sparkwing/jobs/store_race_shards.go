@@ -154,8 +154,7 @@ func runStoreRaceShardsAtHome(ctx context.Context, home string) (runErr error) {
 	results := make(chan storeRaceResult, storeRaceShardCount)
 	for i, shard := range shards {
 		go func() {
-			result, runErr := storeRaceExec(shardCtx, home, binary,
-				"-test.run", storeRacePattern(shard), "-test.count=1", "-test.timeout=80m").
+			result, runErr := storeRaceExec(shardCtx, home, binary, storeRaceShardArgs(shard)...).
 				Dir("internal/store").Env("GOMAXPROCS", "1").Capture()
 			results <- storeRaceResult{shard: i + 1, count: len(shard), output: result, err: runErr}
 		}()
@@ -176,4 +175,10 @@ func runStoreRaceShardsAtHome(ctx context.Context, home string) (runErr error) {
 		}
 	}
 	return firstErr
+}
+
+// perf: the hosted four-core runner ran every shard past 80 minutes with the
+// slow class included; the full suite still runs that class without -race.
+func storeRaceShardArgs(shard []string) []string {
+	return []string{"-test.run", storeRacePattern(shard), "-test.short", "-test.count=1", "-test.timeout=80m"}
 }

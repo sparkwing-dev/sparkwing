@@ -341,6 +341,9 @@ func TestControllerReconcileRenewsOnlyContinuousCapacity(t *testing.T) {
 }
 
 func TestRetryPlannerFailureBeforeHandoffProperty(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 3.3s measured in the short class; the full suite runs it")
+	}
 	random := rand.New(rand.NewPCG(83, 117))
 	for range 12 {
 		tenant, request, _ := controllerPlanFixture(t, nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{{ID: "job"}}, Concurrency: []nodeproto.ConcurrencySpec{{Group: "retry", Scope: new("global"), Capacity: new(1), Cost: new(1), OnLimit: new("queue")}}})

@@ -18,6 +18,11 @@ func TestMarkdownlintCommandIsPinnedAndSelfProvisioning(t *testing.T) {
 	if markdownlintCommand != want {
 		t.Fatalf("markdownlint command = %q, want exactly %q", markdownlintCommand, want)
 	}
+	root, err := filepath.Abs("../..")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Chdir(root)
 	if err := runMarkdownlint(context.Background()); err != nil {
 		t.Fatalf("self-provisioned markdown lint failed: %v", err)
 	}

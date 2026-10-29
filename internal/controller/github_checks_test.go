@@ -309,6 +309,9 @@ func TestGitHubAppRerequestedSpendsTheRunBudget(t *testing.T) {
 }
 
 func TestGitHubAppRerequestedRetainsTagAndPullRequestFilters(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 1.4s measured in the short class; the full suite runs it")
+	}
 	for _, kind := range []string{"tag", "pr base", "pr label"} {
 		t.Run(kind, func(t *testing.T) {
 			f := newAppFixture(t)

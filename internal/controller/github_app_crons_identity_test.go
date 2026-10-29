@@ -64,6 +64,9 @@ func TestGitHubAppCronRenameKeepsIdentityAndPauseAtRepoCap(t *testing.T) {
 }
 
 func TestGitHubAppCronLifecycleWithdrawsOldBindings(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 3.9s measured in the short class; the full suite runs it")
+	}
 	for _, action := range []string{"uninstall", "team_unbind", "operator_unbind", "suspend", "repository_removed", "selection_changed", "repository_removed_api_failure", "repository_deleted", "transfer_unconnected"} {
 		t.Run(action, func(t *testing.T) {
 			f := newAppFixture(t)

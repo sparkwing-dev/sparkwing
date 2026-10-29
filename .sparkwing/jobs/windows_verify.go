@@ -10,7 +10,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
-const windowsVerifyRuntimeTests = `^Test(Sh_|Cmd_|Bash_|Exec_|ExecWindows|ExecError_|NpmCache|DefaultNpmCache|ResolveNpmCache|PublishRunHandle|ProbeReportsNoDaemonWhenSocketDirectoryIsAbsentOnWindows|WindowsNetDown|QueryReportsNoDaemonForFreshWindowsHome)`
+const windowsVerifyRuntimeTests = `^Test(Sh_|Cmd_|Bash_|Exec_|ExecWindows|ExecError_|NPMCommand|PublishRunHandle|ProbeReportsNoDaemonWhenSocketDirectoryIsAbsentOnWindows|WindowsNetDown|QueryReportsNoDaemonForFreshWindowsHome)`
 
 const windowsVerifyTemplateTests = `^TestTemplateVerify(CLIPath|Windows)`
 
@@ -22,7 +22,7 @@ func (WindowsVerify) ShortHelp() string {
 }
 
 func (WindowsVerify) Help() string {
-	return "Runs the native Windows process-lifetime, SDK Bash/Exec, npm-cache, daemon discovery, and run-handle Go tests with the race detector, " +
+	return "Runs the native Windows process-lifetime, SDK Bash/Exec, npm invocation, daemon discovery, and run-handle Go tests with the race detector, " +
 		"checks template executable paths, locking, and disk space, " +
 		"then bin/install-test.sh and bin/release-install-test.sh through Git Bash. " +
 		"Requires Windows, Go, a working native C compiler, Git Bash, Node, and npm on PATH. " +
@@ -75,7 +75,7 @@ func runWindowsVerifyRuntime(ctx context.Context) error {
 	}
 	command := shellQuoteAll([]string{
 		"go", "test", "-race", "-p", "2", "-timeout", "5m", "-count=1", "-run", windowsVerifyRuntimeTests,
-		"./sparkwing", "./internal/depcache", "./internal/wingd/client", "./internal/orchestrator",
+		"./sparkwing", "./internal/pipelineentry", "./internal/wingd/client", "./internal/orchestrator",
 	})
 	return runWindowsVerifyIsolated(ctx, withPinned(command, []string{"CGO_ENABLED=1", "GOOS=windows", "GOARCH=" + shellQuote(runtime.GOARCH)}))
 }

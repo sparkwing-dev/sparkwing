@@ -18,6 +18,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/deployment"
+	"github.com/sparkwing-dev/sparkwing/internal/quicktest"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
@@ -114,7 +115,7 @@ func TestDataStorageAttachesVerifiedResultRecords(t *testing.T) {
 		row, err = tenant.ReadNode(t.Context(), runspec.NodeRef{RunID: "run", NodeID: "job"})
 		return err == nil && row.Status == runstate.StatusDone && row.Outcome == runstate.NodeSuccess
 	}
-	if err := quick.Check(property, &quick.Config{MaxCount: 12, Rand: rand.New(rand.NewSource(71))}); err != nil {
+	if err := quick.Check(property, quicktest.Config(&quick.Config{MaxCount: 12, Rand: rand.New(rand.NewSource(71))})); err != nil {
 		t.Fatal(err)
 	}
 }

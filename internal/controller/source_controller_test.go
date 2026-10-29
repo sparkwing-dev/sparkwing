@@ -36,6 +36,9 @@ func (c *auditedSourceCipher) OpenBound(purpose secrets.Purpose, team, name, sco
 }
 
 func TestSourceControllerUsesStoreAuditAndBoundCipher(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 1.2s measured in the short class; the full suite runs it")
+	}
 	for _, revoked := range []bool{false, true} {
 		t.Run(map[bool]string{false: "live", true: "revoked"}[revoked], func(t *testing.T) {
 			e, tenant := engineRuntimeStore(t)

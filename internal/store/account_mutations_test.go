@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/quicktest"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 )
@@ -100,7 +101,7 @@ func TestAccountMutationsRequireTheSameLiveDirectSessionProperty(t *testing.T) {
 		_, unlinkErr := s.AsOperator().UnlinkAccountIdentity(t.Context(), a, ProviderGoogle)
 		return selectErr != nil && createErr != nil && acceptErr != nil && unlinkErr != nil && reflect.DeepEqual(before, accountMutationRows(t, s))
 	}
-	if err := quick.Check(property, &quick.Config{MaxCount: 36}); err != nil {
+	if err := quick.Check(property, quicktest.Config(&quick.Config{MaxCount: 36})); err != nil {
 		t.Fatal(err)
 	}
 }

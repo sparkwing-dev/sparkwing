@@ -196,6 +196,9 @@ func TestCapabilitySessionEndsWithItsCapability(t *testing.T) {
 }
 
 func TestSessionMembershipChangesApplyWithoutCachedGrantsProperty(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 1.1s measured in the short class; the full suite runs it")
+	}
 	random := rand.New(rand.NewPCG(141, 803))
 	for i := range 16 {
 		t.Run(fmt.Sprint(i), func(t *testing.T) {

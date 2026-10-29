@@ -29,6 +29,9 @@ func TestExpansionJobConcurrencyIsIndependentOfAcceptedPlanConcurrency(t *testin
 }
 
 func TestGeneratedDependenciesUseAcceptedTopologyProperty(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 6.9s measured in the short class; the full suite runs it")
+	}
 	random := rand.New(rand.NewPCG(47, 153))
 	for trial := range 32 {
 		t.Run(fmt.Sprint(trial), func(t *testing.T) {

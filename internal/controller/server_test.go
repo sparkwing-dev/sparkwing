@@ -13,11 +13,11 @@ import (
 	"testing/quick"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/runstate"
-
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controller"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
+	"github.com/sparkwing-dev/sparkwing/internal/quicktest"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
 )
@@ -51,6 +51,9 @@ func TestController_HealthHidesDatabaseErrors(t *testing.T) {
 }
 
 func TestController_HealthDoesNotExposeRunFailures(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 1.0s measured in the short class; the full suite runs it")
+	}
 	f := newCronsFixture(t)
 	for i := range 20 {
 		if err := teststore.SeedRun(f.store, t.Context(), store.DefaultTeam, store.Run{RunSummary: runstate.RunSummary{ID: fmt.Sprintf("failed-%d", i), Pipeline: "demo", Status: "failed", StartedAt: time.Now()}}); err != nil {
@@ -202,7 +205,7 @@ func TestControllerPublicHealthHidesWorkloadProperty(t *testing.T) {
 		}
 		return w.Code == http.StatusOK && json.Unmarshal(w.Body.Bytes(), &body) == nil && body.Status == "ok" && !strings.Contains(w.Body.String(), secret) && !strings.Contains(w.Body.String(), "private-run")
 	}
-	if err := quick.Check(property, &quick.Config{MaxCount: 20}); err != nil {
+	if err := quick.Check(property, quicktest.Config(&quick.Config{MaxCount: 20})); err != nil {
 		t.Fatal(err)
 	}
 }

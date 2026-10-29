@@ -208,7 +208,7 @@ func TestPlanningFailureMasksCanonicalPayloads(t *testing.T) {
 	planner := SDKPlanner{Masker: masker}
 	source := &apierr.Error{Code: "failure-private-default", Message: "private-default", Hint: "private-default", Details: map[string]any{"token": "private-default"}}
 	var result *apierr.Error
-	if !errors.As(planner.planningError(t.Context(), source, true, "Build"), &result) {
+	if !errors.As(planner.planningError(t.Context(), nil, source, true, "Build"), &result) {
 		t.Fatal("lost canonical error")
 	}
 	raw, _ := json.Marshal(result)
@@ -264,5 +264,34 @@ func TestPlanningUnknownPipelineNamesTheEntrypointToRegister(t *testing.T) {
 	}
 	if !strings.Contains(failure.Hint, strconv.Quote(input.Entrypoint)) {
 		t.Fatalf("hint %q does not name the entrypoint %q the host looked up", failure.Hint, input.Entrypoint)
+	}
+	if !strings.Contains(failure.Message, `entrypoint "Build"`) || !strings.Contains(failure.Message, `registers "registered-by-yaml-name"`) || strings.Contains(failure.Message, "withheld") {
+		t.Fatalf("message %q withholds the looked-up entrypoint or the registered names", failure.Message)
+	}
+}
+
+func TestPlanningUnknownPipelineWithholdsNamesWhileDiscoveryIsIncomplete(t *testing.T) {
+	planner, input, fixture, _ := sdkPlanningFixture(t)
+	input.Entrypoint = "Build"
+	start := planner.Start
+	planner.Start = func(ctx context.Context, in PlanningProcessInput, log func(context.Context, nodeproto.FrameLog) error) (ExecutorProcess, error) {
+		process, err := start(ctx, in, log)
+		proc := process.(*executorProcess)
+		answer := proc.answer
+		proc.answer = func(ctx context.Context, request nodeproto.Request) (any, error) {
+			if request.Op == nodeproto.OpDescribe {
+				return nodeproto.DescribeDoc{Pipelines: []nodeproto.PipelineDescription{{Name: "private-name", Args: []nodeproto.ArgumentDescription{}}, {Name: "broken", Error: &apierr.Error{Code: apierr.SDKError, Message: "unknown-private"}}}}, nil
+			}
+			return answer(ctx, request)
+		}
+		return process, err
+	}
+	_, err := planner.Prepare(t.Context(), input, fixture.input)
+	var failure *apierr.Error
+	if !errors.As(err, &failure) || failure.Code != apierr.UnknownPipeline || !strings.Contains(failure.Message, `entrypoint "Build"`) {
+		t.Fatalf("planning error = %v, want unknown_pipeline naming the entrypoint", err)
+	}
+	if strings.Contains(err.Error(), "private-name") || strings.Contains(err.Error(), "unknown-private") {
+		t.Fatalf("incomplete discovery leaked author text: %v", err)
 	}
 }

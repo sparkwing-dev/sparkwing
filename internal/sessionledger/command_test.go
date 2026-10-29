@@ -2,12 +2,13 @@ package sessionledger
 
 import (
 	"context"
-	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"os"
 	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
+
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 )
 
 func TestCommandRecordsFromOneOwnerDoNotCollide(t *testing.T) {

@@ -111,6 +111,7 @@ GONOSUMDB=github.com/sparkwing-dev/sparkwing go mod tidy`). The TypeScript SDK h
 no QA package: packing it requires the Windows native bridges.
 
 Accepted QA-only risks:
+
 - A qatrust build also trusts the production key. It reads only the QA origin, but
   a production index cached in the same engine cache makes it fail closed; use a
   separate HOME for QA.
@@ -252,7 +253,10 @@ file. Other syntax and workflow checks remain active.
   and 18 minutes in another. All four shards reached the former 55-minute
   timeout with different active tests running for 1s to 6s. The new 80-minute
   shard timeout is a hypothesis to verify on hosted runners, not a measured
-  passing budget. Later checks remain under the 120-minute node deadline and a
+  passing budget. Hosted run 40856721261 still ran all four shards past it,
+  with TestRefillModel alone at over a minute under race, so the shards run
+  the short class (`-test.short`); the tests that guard themselves as slow keep
+  running without race in `gate` and on PostgreSQL in `store-postgres`. Later checks remain under the 120-minute node deadline and a
   130-minute hosted job deadline. The hosted `gate` job keeps its 60-minute
   deadline.
   A Go step's own parallelism depends on who else holds the
@@ -297,7 +301,15 @@ file. Other syntax and workflow checks remain active.
   an unapproved submission to leave the queue empty. First-run compilation,
   ref selection and pinned-binary risk fixtures remain in the full class.
   `gate` runs the suite without `-short`, which is where every guarded test is
-  still judged.
+  still judged. On 2026-10-29, with the cut's `GOMAXPROCS=7 -p 7` on a shared
+  16-core host at load 9 to 15, `cmd/sparkwing`, `internal/controller` and
+  `internal/store` took 241 s, 832 s and 617 s under `-short`, two of them past
+  Go's ten-minute package limit. The tests that measured 1 s or more there
+  now split by what they guard. A `testing/quick` property keeps running under
+  `-short`, checking three fixed-seed cases through `internal/quicktest`; a
+  test whose name or file names an authorization, fence, expiry, masking,
+  tenant or secret boundary keeps running whole; the rest skip as slow. That
+  brought the three packages to 123 s, 265 s and 353 s at load 6 to 7.
 - **What the two hooks cost:** measured on this 16-core Linux host. `pre-push`
   retains a ten-second target when the compiler cache is warm. Run records
   expose total and per-step durations, but they carry no compiler-cache
@@ -622,7 +634,11 @@ file. Other syntax and workflow checks remain active.
   verbosely and fail on any `--- SKIP` line: the hosted `Postgres
   conformance` job in `.github/workflows/ci.yaml` on every pull request
   and push to main, and `sparkwing run integration` against its
-  Dockerized Postgres and MinIO.
+  Dockerized Postgres and MinIO. The hosted job runs the three packages
+  under `-short`, leaving the names its no-skip step selects to that step, because the canonical gate already runs them in full on
+  SQLite and the full store suite overran Go's ten-minute package limit on
+  a hosted runner; the tests that switch to the service database stay in
+  the short class.
 - **Postgres client on the hosted lane:** the `Postgres conformance` job
   installs `postgresql-client-17` from the PostgreSQL Apt repository and
   points `SPARKWING_PG_BIN` at `/usr/lib/postgresql/17/bin`, because

@@ -19,6 +19,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/sparkwing-dev/sparkwing/internal/githubapp"
+	"github.com/sparkwing-dev/sparkwing/internal/quicktest"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
@@ -393,7 +394,7 @@ func TestGitHubCompletionAuthorityProperty(t *testing.T) {
 			t.Fatalf("invalid completion handling in authority scenario %d", scenario)
 		}
 	}
-	if err := quick.Check(property, &quick.Config{MaxCount: 20}); err != nil {
+	if err := quick.Check(property, quicktest.Config(&quick.Config{MaxCount: 20})); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -420,7 +421,7 @@ func TestGitHubCompletionStalePhasesNeverRegressProperty(t *testing.T) {
 		}
 		return len(f.api.checks) == currentChecks && len(f.api.statuses) == currentStatuses
 	}
-	if err := quick.Check(property, &quick.Config{MaxCount: 16}); err != nil {
+	if err := quick.Check(property, quicktest.Config(&quick.Config{MaxCount: 16})); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -457,7 +458,7 @@ func TestGitHubCompletionSummaryPrivacyProperty(t *testing.T) {
 		output := f.api.checks[0].Output
 		return !strings.Contains(string(encoded), private) && utf8.Valid(encoded) && len(output.Summary) <= 65535 && strings.Contains(output.Summary, "2 failed")
 	}
-	if err := quick.Check(property, &quick.Config{MaxCount: 12}); err != nil {
+	if err := quick.Check(property, quicktest.Config(&quick.Config{MaxCount: 12})); err != nil {
 		t.Fatal(err)
 	}
 }

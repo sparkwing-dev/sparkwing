@@ -74,7 +74,8 @@ func TestOwnerHostAcquiresSealedSourceWithExplicitEnvironment(t *testing.T) {
 			engines := &ownerSourceEngine{claimEngine: claimEngine{resolved: resolved}}
 			installed := 0
 			host.Acquire = nil
-			host.Source = source.Options{Engines: engines, Target: resolved.Target, SDK: engineid.GoSDK,
+			host.Source = source.Options{
+				Engines: engines, Target: resolved.Target, SDK: engineid.GoSDK,
 				Base: procenv.Base{Local: true, Captured: []string{"PATH=/daemon/bin"}}, BuildEnvironment: sourcetest.BuildEnvironment,
 				ReadPin: func(string, engineid.SDKKind) (engineid.Pin, error) { return resolved.Identity.Pin, nil },
 				InstallSDK: func(_ context.Context, got engine.Resolved, request engine.SDKInstallRequest) (engine.SDKCommand, error) {

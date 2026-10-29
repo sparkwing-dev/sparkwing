@@ -8,6 +8,9 @@ import (
 )
 
 func TestRetryPlacementRegressions(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 1.0s measured in the short class; the full suite runs it")
+	}
 	store.RetryPlacementRegressions(t, func(t *testing.T) *store.Store { return storetest.Open(t) })
 }
 

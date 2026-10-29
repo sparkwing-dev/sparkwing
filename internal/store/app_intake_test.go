@@ -11,8 +11,8 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
-
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/quicktest"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 )
 
@@ -99,7 +99,7 @@ func TestAppAdmissionRequiresCurrentOriginProperty(t *testing.T) {
 		}
 		return number == 2
 	}
-	if err := quick.Check(property, &quick.Config{MaxCount: 48}); err != nil {
+	if err := quick.Check(property, quicktest.Config(&quick.Config{MaxCount: 48})); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -213,7 +213,7 @@ func TestAppFullRefRetainsExactDefaultBranchDataTrustProperty(t *testing.T) {
 		}
 		return !got.Ref.DefaultBranchVerified
 	}
-	if err := quick.Check(property, &quick.Config{MaxCount: 30}); err != nil {
+	if err := quick.Check(property, quicktest.Config(&quick.Config{MaxCount: 30})); err != nil {
 		t.Fatal(err)
 	}
 }

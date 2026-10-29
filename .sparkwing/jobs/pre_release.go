@@ -162,7 +162,6 @@ func preReleaseChecks() []preReleaseCheck {
 		{id: "schema-parity-script", run: preReleaseShell("bash bin/check-release-schema-parity-test.sh")},
 		{id: "changelog-script", run: preReleaseShell("bash bin/check-changelog-test.sh")},
 		{id: "installer-report", run: preReleaseShell("bash bin/install-test.sh")},
-		{id: "service-installer", run: preReleaseShell("bash bin/service-install-test.sh")},
 		{id: "release-installer", run: preReleaseShell("bash bin/release-install-test.sh")},
 		{id: "install-to-green", run: checkPreReleaseInstallToGreen},
 		{id: "shellcheck", run: preReleaseShell("bash bin/check-shell.sh")},

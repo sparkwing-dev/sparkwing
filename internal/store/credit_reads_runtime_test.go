@@ -8,6 +8,8 @@ import (
 	"testing"
 	"testing/quick"
 	"time"
+
+	"github.com/sparkwing-dev/sparkwing/internal/quicktest"
 )
 
 func TestStoreDataCreditReadsStayInTenantAndUseStoreClock(t *testing.T) {
@@ -156,7 +158,7 @@ func TestStoreDataCreditStateUsesOneSnapshotProperty(t *testing.T) {
 		}
 		return fresh.ChargedMicro == after && fresh.StorageChargedMicro == after && fresh.BurnMicro == after && fresh.BalanceMicro == -after && fresh.RateMicroPerSecond == 2
 	}
-	if err := quick.Check(property, &quick.Config{MaxCount: 16, Rand: rand.New(rand.NewSource(8329))}); err != nil {
+	if err := quick.Check(property, quicktest.Config(&quick.Config{MaxCount: 16, Rand: rand.New(rand.NewSource(8329))})); err != nil {
 		t.Fatal(err)
 	}
 }

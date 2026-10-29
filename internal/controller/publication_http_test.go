@@ -42,6 +42,9 @@ func TestProfilePublicationImportsRecordsAndLogsWithoutClaims(t *testing.T) {
 }
 
 func FuzzProfilePublicationExcludesShellEnvironment(f *testing.F) {
+	if testing.Short() {
+		f.Skip("slow: 1.1s measured in the short class; the full suite runs it")
+	}
 	f.Add([]byte("developer-tool"))
 	f.Add([]byte{0, 255, 10, 34})
 	f.Fuzz(func(t *testing.T, raw []byte) {

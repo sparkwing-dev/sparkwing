@@ -26,6 +26,8 @@ type storeRecoveryFixture struct {
 	target        *storetest.Target
 	seq           int64
 	holderBearer  string
+	// safety: the store's frozen clock; a deadline a test writes must use it.
+	now time.Time
 }
 
 func newStoreRecoveryFixture(t *testing.T, started bool) *storeRecoveryFixture {
@@ -58,6 +60,7 @@ func newStoreRecoveryFixtureSetup(t *testing.T, started bool, target *storetest.
 		}
 	})
 	now := time.Now().UTC()
+	f.now = now
 	f.s.SetTestClock(t, func() time.Time { return now })
 	var plan store.PlanAcceptance
 	f.tenant, plan, err = storePlanSealRequestFor(ctx, f.s, identity, false, func(_ *store.IntakeRequest, doc *nodeproto.PlanDoc) {

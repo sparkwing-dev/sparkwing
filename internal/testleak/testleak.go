@@ -13,8 +13,9 @@ import (
 	"runtime"
 	"testing"
 
-	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 	"go.uber.org/goleak"
+
+	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 )
 
 // safety: helper children inherit this, which is how they tell a re-exec of the

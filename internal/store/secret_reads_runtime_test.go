@@ -12,14 +12,13 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/runstate"
-
-	modernsqlite "modernc.org/sqlite"
-
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/pkg/match"
+
+	modernsqlite "modernc.org/sqlite"
 )
 
 func secretReadStoreFixture(t *testing.T) (*Tenant, capability.Authorized) {

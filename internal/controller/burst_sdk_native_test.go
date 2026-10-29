@@ -39,6 +39,9 @@ func TestBurstSDKNativeChild(t *testing.T) {
 }
 
 func TestBurstNativeSDKExecutesHerePersonalAndCloudAwards(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 3.8s measured in the short class; the full suite runs it")
+	}
 	burstNativeSDKAcceptance(t, burstSDKPipeService)
 }
 

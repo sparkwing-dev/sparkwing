@@ -23,6 +23,9 @@ import (
 )
 
 func TestNativeLocalPreparationResolvesRepositoryAlias(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 4.9s measured in the short class; the full suite runs it")
+	}
 	root, err := moduleRoot()
 	if err != nil {
 		t.Fatal(err)
@@ -49,6 +52,9 @@ func TestNativeLocalPreparationResolvesRepositoryAlias(t *testing.T) {
 }
 
 func TestNativeLocalPreparationResolvesTrackingSparksBeforeInstallation(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 30.3s measured in the short class; the full suite runs it")
+	}
 	home := t.TempDir()
 	t.Setenv("SPARKWING_HOME", home)
 	t.Setenv("SPARKWING_CONFIG", filepath.Join(home, "missing.yaml"))

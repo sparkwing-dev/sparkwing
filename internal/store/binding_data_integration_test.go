@@ -9,6 +9,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/quicktest"
 )
 
 func TestBindingDataUsesTransactionalPersistence(t *testing.T) {
@@ -88,7 +89,7 @@ func TestBindingDataCannotWidenPersistedAuthority(t *testing.T) {
 		})
 		return errors.Is(err, rollback)
 	}
-	if err := quick.Check(property, &quick.Config{MaxCount: 96, Rand: rand.New(rand.NewSource(5109))}); err != nil {
+	if err := quick.Check(property, quicktest.Config(&quick.Config{MaxCount: 96, Rand: rand.New(rand.NewSource(5109))})); err != nil {
 		t.Fatal(err)
 	}
 }

@@ -18,6 +18,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/quicktest"
 	"github.com/sparkwing-dev/sparkwing/internal/routepolicy"
 )
 
@@ -106,7 +107,7 @@ func TestReportingRoutesRejectInvalidAuthorityProperty(t *testing.T) {
 				var failure apierr.Envelope
 				return json.Unmarshal(w.Body.Bytes(), &failure) == nil && failure.Error != nil && failure.Error.Code == code
 			}
-			if err := quick.Check(property, &quick.Config{MaxCount: 40}); err != nil {
+			if err := quick.Check(property, quicktest.Config(&quick.Config{MaxCount: 40})); err != nil {
 				t.Fatal(err)
 			}
 		})

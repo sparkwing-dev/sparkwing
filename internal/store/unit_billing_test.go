@@ -418,6 +418,9 @@ func TestMeteredUnitApplicationRetryKeepsOneReservation(t *testing.T) {
 }
 
 func TestMeteredUnitStaleReportCannotSettleReplacementProperty(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 2.4s measured in the short class; the full suite runs it")
+	}
 	random := rand.New(rand.NewPCG(19, 928))
 	for range 24 {
 		s, demand, now := meteredUnitFixture(t, true)

@@ -133,6 +133,9 @@ func TestAdmissionClaimOrOwnerLossRetainsLiveFIFO(t *testing.T) {
 }
 
 func TestAdmissionWeightedCapacityAndBackfill(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 2.4s measured in the short class; the full suite runs it")
+	}
 	type action struct {
 		index  int
 		finish bool
@@ -349,6 +352,9 @@ func TestAdmissionTenantScopesRemainIndependent(t *testing.T) {
 }
 
 func TestAdmissionAcrossSQLiteConnectionsSerializes(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 1.9s measured in the short class; the full suite runs it")
+	}
 	for _, policy := range []string{"queue", "fail"} {
 		t.Run(policy, func(t *testing.T) {
 			f := newStoreRecoveryFixtureAt(t, false, storetest.NewSQLite(t), func(doc *nodeproto.PlanDoc) {

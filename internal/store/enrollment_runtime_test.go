@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/quicktest"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 )
@@ -183,7 +184,7 @@ func TestMachineEnrollmentNameReuseProperty(t *testing.T) {
 		}
 		return errors.Is(err, ErrAgentNameTaken) && issued.Raw == ""
 	}
-	if err := quick.Check(check, &quick.Config{MaxCount: 64}); err != nil {
+	if err := quick.Check(check, quicktest.Config(&quick.Config{MaxCount: 64})); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -237,7 +238,7 @@ func TestEnrolledClaimRepositoryAncestryProperty(t *testing.T) {
 		rewriteSchemaExec(t, s.db, `UPDATE nodes SET ready_at=1`)
 		return true
 	}
-	if err := quick.Check(check, &quick.Config{MaxCount: 80}); err != nil {
+	if err := quick.Check(check, quicktest.Config(&quick.Config{MaxCount: 80})); err != nil {
 		t.Fatal(err)
 	}
 }

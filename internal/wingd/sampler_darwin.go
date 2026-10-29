@@ -12,8 +12,9 @@ import (
 	"time"
 	"unsafe"
 
-	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 	"golang.org/x/sys/unix"
+
+	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 )
 
 func (p *procSampler) sample(pid int) (ProcUsage, bool) {

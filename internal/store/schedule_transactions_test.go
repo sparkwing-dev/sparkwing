@@ -10,9 +10,9 @@ import (
 	"testing/quick"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/cronspec"
-
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/cronspec"
+	"github.com/sparkwing-dev/sparkwing/internal/quicktest"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 )
 
@@ -122,7 +122,7 @@ func TestScheduleConsentAndReplayRequireCurrentAuthorityProperty(t *testing.T) {
 		stored, err := tenant.ReadRun(t.Context(), admitted.RunID)
 		return replayErr != nil && nextErr != nil && err == nil && reflect.DeepEqual(stored.Request, admitted.Request)
 	}
-	if err := quick.Check(property, &quick.Config{MaxCount: 24}); err != nil {
+	if err := quick.Check(property, quicktest.Config(&quick.Config{MaxCount: 24})); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -288,7 +288,7 @@ func TestScheduledSourceResolutionCannotOutliveConsentProperty(t *testing.T) {
 		rewriteSchemaCount(t, tenant.s.db, "cron_fires", 0)
 		return err != nil
 	}
-	if err := quick.Check(property, &quick.Config{MaxCount: 18}); err != nil {
+	if err := quick.Check(property, quicktest.Config(&quick.Config{MaxCount: 18})); err != nil {
 		t.Fatal(err)
 	}
 }

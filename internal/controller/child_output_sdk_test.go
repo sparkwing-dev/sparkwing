@@ -22,6 +22,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/deployment/deploymenttest"
 	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
+	"github.com/sparkwing-dev/sparkwing/internal/quicktest"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/sdkserve"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
@@ -208,7 +209,7 @@ func TestRunAndAwaitChildOutputThroughLocalController(t *testing.T) {
 			object, err := tenant.ReadChildOutput(ctx, changed)
 			return err != nil && object == (blob.Blob{})
 		}
-		if err := quick.Check(property, &quick.Config{MaxCount: 64}); err != nil {
+		if err := quick.Check(property, quicktest.Config(&quick.Config{MaxCount: 64})); err != nil {
 			t.Fatal(err)
 		}
 	})
@@ -395,7 +396,7 @@ func TestJobOutputThroughNativeClientAndCurrentReadSet(t *testing.T) {
 		got, err := tenant.ReadJobOutput(t.Context(), changed)
 		return err != nil && got == (blob.Blob{})
 	}
-	if err := quick.Check(property, &quick.Config{MaxCount: 64}); err != nil {
+	if err := quick.Check(property, quicktest.Config(&quick.Config{MaxCount: 64})); err != nil {
 		t.Fatal(err)
 	}
 	childOutputSQL(t, e.Store, `INSERT INTO accounts(id,email,created_at,updated_at) VALUES ('output-reader','output-reader@example.test',1,1)`)

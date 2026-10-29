@@ -98,8 +98,10 @@ func TestEveryCheckoutCallMatchesTheSharedContract(t *testing.T) {
 	ctx := t.Context()
 	pageFor := func(route string, kind capability.BillingPageKind) (*capability.BillingPage, map[string]any) {
 		in := contractFields(t, c.Routes[route].Request)
-		page := &capability.BillingPage{Kind: kind, Team: in["team"].(string), ReservationID: in["key"].(string),
-			ExpiresAt: time.Unix(int64(in["expires_at"].(float64)), 0)}
+		page := &capability.BillingPage{
+			Kind: kind, Team: in["team"].(string), ReservationID: in["key"].(string),
+			ExpiresAt: time.Unix(int64(in["expires_at"].(float64)), 0),
+		}
 		if cents, ok := in["amount_cents"].(float64); ok {
 			page.AmountCents = int64(cents)
 		}

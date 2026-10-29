@@ -1,12 +1,13 @@
 package main
 
 import (
-	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 )
 
 func pushedAndLocalCommits(t *testing.T) (work, pushed, local string) {
@@ -47,7 +48,6 @@ func TestTriggerPreflightSeesOnlyPushedCommits(t *testing.T) {
 			t.Fatal("unreachable source accepted")
 		}
 	}
-
 }
 
 func TestTriggerPreflightRejectsCommitOnlyOnAnotherRemote(t *testing.T) {

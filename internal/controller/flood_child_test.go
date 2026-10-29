@@ -15,6 +15,9 @@ import (
 )
 
 func TestChildrenSpendTheirRootsFloodBudget(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 1.1s measured in the short class; the full suite runs it")
+	}
 	for _, app := range []bool{false, true} {
 		for _, queue := range []bool{false, true} {
 			t.Run(fmt.Sprintf("App=%v/queue=%v", app, queue), func(t *testing.T) {

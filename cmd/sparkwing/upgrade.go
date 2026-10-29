@@ -8,7 +8,9 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
 	"github.com/sparkwing-dev/sparkwing/internal/engineid"
@@ -73,13 +75,30 @@ func (c upgradeCommand) run(ctx context.Context, inv clisurface.Invocation) erro
 	if err != nil {
 		return err
 	}
-	if result.DryRun != request.DryRun || result.DryRun && (result.Applied || result.Verified) || !result.DryRun && !result.Verified {
+	if result.DryRun != request.DryRun || result.DryRun && (result.Applied || result.Verified) || !result.DryRun && result.Verified == (result.Unverified != nil) {
 		return errors.New("upgrade: resolver returned an inconsistent verification result")
 	}
 	if !result.DryRun && len(result.Plan.Edits) > 0 && !result.Applied {
-		return errors.New("upgrade: verified pin changes were not applied")
+		return errors.New("upgrade: pin changes were not applied")
 	}
-	return writeUpgradeReport(c.out, inv.Output(c.terminal), result)
+	if err := writeUpgradeReport(c.out, inv.Output(c.terminal), result); err != nil {
+		return err
+	}
+	if result.Unverified != nil {
+		files := make([]string, 0, len(result.Plan.Edits))
+		for _, edit := range result.Plan.Edits {
+			files = append(files, edit.Path)
+		}
+		changed := strings.Join(files, " ")
+		return &apierr.Error{
+			Code:    apierr.PlanFailed,
+			Message: fmt.Sprintf("the SDK pin moved to %s, but the pipeline does not build or plan against it yet: %v", result.Plan.After.Version, result.Unverified),
+			Hint: "Make the code changes the migration guides describe, " + engine.MigrationGuides(result.Plan.Before.Version, result.Plan.After.Version) +
+				", then rerun the pipeline. This upgrade changed only " + changed + "; to return to the old pin, review `git diff -- " + changed +
+				"` and revert those files, which keeps your other pipeline edits.",
+		}
+	}
+	return nil
 }
 
 type upgradeReport struct {
@@ -111,6 +130,9 @@ func writeUpgradeReport(out io.Writer, format string, result engine.UpgradeResul
 	status := "Verified"
 	if result.Applied {
 		status = "Verified and applied"
+	}
+	if result.Applied && !result.Verified {
+		status = "Applied, pipeline code needs changes"
 	}
 	if result.DryRun {
 		status = "Preview"

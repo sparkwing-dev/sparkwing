@@ -57,11 +57,24 @@ type UpgradeVerifier interface {
 }
 
 // UpgradeResult reports verification separately from a dry-run preview.
+// Unverified holds why the staged pipeline failed against the new pin; the
+// pin is still applied, and the pipeline code needs the changes it names.
 type UpgradeResult struct {
-	Plan     UpgradePlan
-	Applied  bool
-	Verified bool
-	DryRun   bool
+	Plan       UpgradePlan
+	Applied    bool
+	Verified   bool
+	DryRun     bool
+	Unverified error
+}
+
+// ErrPipelineIncompatible marks a verification failure in the repository's own
+// pipeline code. Only such a failure lets Upgrade apply the pin and report it;
+// any other verification failure leaves the original pins unchanged.
+var ErrPipelineIncompatible = errors.New("the pipeline code needs changes for this SDK")
+
+// MigrationGuides names where the code changes between two pins are documented.
+func MigrationGuides(before, after string) string {
+	return fmt.Sprintf("`sparkwing docs migrations --from %s --to %s`, or https://github.com/sparkwing-dev/sparkwing/tree/%s/docs/migrations", before, after, after)
 }
 
 // SoftwareUpdate keeps a verified runner replacement separate from an SDK-matched pipeline engine.
@@ -99,8 +112,9 @@ func (r *Resolver) Upgrade(ctx context.Context, request UpgradeRequest, verifier
 	if verifier == nil {
 		return result, invalid("upgrade verification is required", "Supply the dependency, build and describe/plan verifier.")
 	}
-	if err := verifier.Verify(ctx, stage, resolved); err != nil {
-		return result, fmt.Errorf("SDK upgrade verification failed; repository pins are unchanged: %w", err)
+	unverified := verifier.Verify(ctx, stage, resolved)
+	if unverified != nil && !errors.Is(unverified, ErrPipelineIncompatible) {
+		return result, fmt.Errorf("SDK upgrade verification failed; repository pins are unchanged: %w", unverified)
 	}
 	after, err := ReadPin(stagePipeline, request.SDK)
 	if err != nil {
@@ -116,7 +130,8 @@ func (r *Resolver) Upgrade(ctx context.Context, request UpgradeRequest, verifier
 		return result, err
 	}
 	result.Plan = plan
-	result.Verified = true
+	result.Verified = unverified == nil
+	result.Unverified = unverified
 	currentInputs, err := readPinInputDigests(pipeline, request.SDK)
 	if err != nil {
 		return result, err
@@ -229,7 +244,17 @@ func (r *Resolver) updateNativePin(ctx context.Context, dir string, sdk engineid
 		if err := os.WriteFile(filepath.Join(dir, "go.mod"), body, 0o600); err != nil {
 			return err
 		}
-		return r.nativeCommand(ctx, dir, engineid.Pin{SDK: engineid.GoSDK, Version: version}, "go", "mod", "tidy")
+		pin := engineid.Pin{SDK: engineid.GoSDK, Version: version}
+		tidy := r.nativeCommand(ctx, dir, pin, "go", "mod", "tidy")
+		if tidy == nil {
+			return nil
+		}
+		// safety: tidy loads every import, so a package the new release removed fails
+		// it; go get moves only the requirement and leaves those imports to the report.
+		if err := r.nativeCommand(ctx, dir, pin, "go", "get", GoModule+"@"+version); err != nil {
+			return errors.Join(tidy, err)
+		}
+		return nil
 	case engineid.TypeScriptSDK:
 		body, err := os.ReadFile(filepath.Join(dir, "package.json"))
 		if err != nil {

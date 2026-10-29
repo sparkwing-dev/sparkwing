@@ -8,9 +8,9 @@ import (
 	"testing/quick"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/runspec"
-
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/quicktest"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 )
 
 func readRunnerInventory(t *testing.T, s *Store, team Team) capability.RunnerSnapshot {
@@ -104,7 +104,7 @@ func TestRunnerInventoryAttributesOnlyCurrentSameTenantAuthorityProperty(t *test
 		other := readRunnerInventory(t, s, "b")
 		return active == expectedActive && len(other.Runners) == 1 && other.Runners[0].Team == "b" && len(other.Runners[0].ActiveJobs) == 0
 	}
-	if err := quick.Check(property, &quick.Config{MaxCount: 56}); err != nil {
+	if err := quick.Check(property, quicktest.Config(&quick.Config{MaxCount: 56})); err != nil {
 		t.Fatal(err)
 	}
 }

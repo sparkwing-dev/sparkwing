@@ -10,6 +10,9 @@ import (
 )
 
 func TestProfileHistory(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 1.7s measured in the short class; the full suite runs it")
+	}
 	for _, node := range []string{"", "worker"} {
 		for _, document := range []struct {
 			name string

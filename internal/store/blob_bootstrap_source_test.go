@@ -15,6 +15,9 @@ import (
 )
 
 func TestBootstrapSourceBundleReadStaysBoundBeforeExchange(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 1.7s measured in the short class; the full suite runs it")
+	}
 	for _, kind := range []capability.UnitKind{capability.UnitNode, capability.UnitPlan, capability.UnitEval} {
 		for attack := range 10 {
 			t.Run(fmt.Sprintf("%s/%d", kind, attack), func(t *testing.T) {
@@ -25,6 +28,9 @@ func TestBootstrapSourceBundleReadStaysBoundBeforeExchange(t *testing.T) {
 }
 
 func FuzzBootstrapSourceBundleReadStaysBound(f *testing.F) {
+	if testing.Short() {
+		f.Skip("slow: 2.0s measured in the short class; the full suite runs it")
+	}
 	for attack := range 10 {
 		for kind := range 3 {
 			f.Add(uint8(kind), uint8(attack), uint16(1), "source bundle")

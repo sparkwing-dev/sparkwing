@@ -11,6 +11,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/limits"
+	"github.com/sparkwing-dev/sparkwing/internal/quicktest"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 )
@@ -103,7 +104,7 @@ func TestLogPersistenceMaintenancePreservesWritableSubjects(t *testing.T) {
 			}
 		})
 	}
-	if err := quick.Check(property, &quick.Config{MaxCount: 64}); err != nil {
+	if err := quick.Check(property, quicktest.Config(&quick.Config{MaxCount: 64})); err != nil {
 		t.Fatal(err)
 	}
 }

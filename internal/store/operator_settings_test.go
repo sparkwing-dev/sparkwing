@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/quicktest"
 )
 
 func TestOperatorSettingsRevalidateAuthorityProperty(t *testing.T) {
@@ -115,7 +116,7 @@ func TestOperatorSettingsRevalidateAuthorityProperty(t *testing.T) {
 		}
 		return ok
 	}
-	if err := quick.Check(property, &quick.Config{MaxCount: 12}); err != nil {
+	if err := quick.Check(property, quicktest.Config(&quick.Config{MaxCount: 12})); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -186,7 +187,7 @@ func TestOperatorSettingsConsoleProofProperty(t *testing.T) {
 		}
 		return err == nil && limits.GlobalRunners == want
 	}
-	if err := quick.Check(property, &quick.Config{MaxCount: 48}); err != nil {
+	if err := quick.Check(property, quicktest.Config(&quick.Config{MaxCount: 48})); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -224,7 +225,7 @@ func TestDeploymentBindingAllowsOnlyUnboundTeamSelectionProperty(t *testing.T) {
 		target.NodeID = ""
 		return s.AsOperator().CheckBinding(t.Context(), p, capability.BindOperatorSettings, target) != nil
 	}
-	if err := quick.Check(property, &quick.Config{MaxCount: 32}); err != nil {
+	if err := quick.Check(property, quicktest.Config(&quick.Config{MaxCount: 32})); err != nil {
 		t.Fatal(err)
 	}
 }

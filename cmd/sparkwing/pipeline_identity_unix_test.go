@@ -121,6 +121,9 @@ func main() {
 }
 
 func TestPipelineAliasDiscoveryUsesConfiguredEntrypoint(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 2.7s measured in the short class; the full suite runs it")
+	}
 	t.Setenv("SPARKWING_HOME", t.TempDir())
 	projectAt(t, "pipelines:\n  - name: deploy-prod\n    entrypoint: Deploy\n  - name: deploy-stage\n    entrypoint: Deploy\n")
 	dir, err := findSparkwingDir()

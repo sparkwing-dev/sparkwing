@@ -18,7 +18,6 @@ import (
 	"strings"
 	"sync"
 	"testing"
-	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
@@ -131,9 +130,7 @@ func pipelineHTTP(t *testing.T, handler http.Handler) *http.Client {
 	}}
 	t.Cleanup(func() {
 		transport.CloseIdleConnections()
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		if err := server.Shutdown(ctx); err != nil {
+		if err := server.Shutdown(context.Background()); err != nil {
 			t.Error(err)
 		}
 		if err := <-done; !errors.Is(err, http.ErrServerClosed) {
@@ -166,8 +163,7 @@ func (pipelineAdmission) Release() error                                        
 func (pipelineAdmission) Watch(func(wingwire.Evicted), func(wingwire.Cancel)) error { return nil }
 
 func TestLocalControllerTwoJobProcessesUseIndependentAwards(t *testing.T) {
-	ctx, cancel := context.WithTimeout(t.Context(), 20*time.Second)
-	defer cancel()
+	ctx := t.Context()
 	t.Setenv("SPARKWING_CONFIG", filepath.Join(t.TempDir(), "config.yaml"))
 	var b Binding
 	var claimant *Claimant

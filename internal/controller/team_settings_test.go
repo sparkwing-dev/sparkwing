@@ -10,6 +10,7 @@ import (
 	"testing/quick"
 
 	"github.com/sparkwing-dev/sparkwing/internal/deployment/deploymenttest"
+	"github.com/sparkwing-dev/sparkwing/internal/quicktest"
 )
 
 func TestMachineTeamSettingsHTTP(t *testing.T) {
@@ -71,7 +72,7 @@ func TestMachineTeamSettingsHTTP(t *testing.T) {
 		}
 		return true
 	}
-	if err := quick.Check(property, &quick.Config{MaxCount: 24}); err != nil {
+	if err := quick.Check(property, quicktest.Config(&quick.Config{MaxCount: 24})); err != nil {
 		t.Fatal(err)
 	}
 	engineSQL(t, s.store, `UPDATE memberships SET role='owner' WHERE account_id='member'`)

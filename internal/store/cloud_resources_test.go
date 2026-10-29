@@ -6,6 +6,7 @@ import (
 	"testing/quick"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/quicktest"
 )
 
 func TestCloudAllocationKeepsCommittedClassAcrossExchangeAndPriceChanges(t *testing.T) {
@@ -42,7 +43,7 @@ func TestCloudAllocationKeepsCommittedClassAcrossExchangeAndPriceChanges(t *test
 		}
 		return true
 	}
-	if err := quick.Check(property, &quick.Config{MaxCount: 24}); err != nil {
+	if err := quick.Check(property, quicktest.Config(&quick.Config{MaxCount: 24})); err != nil {
 		t.Fatal(err)
 	}
 }

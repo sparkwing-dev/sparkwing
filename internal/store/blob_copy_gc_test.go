@@ -9,6 +9,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/limits"
+	"github.com/sparkwing-dev/sparkwing/internal/quicktest"
 )
 
 func TestBlobCopiedOutputSurvivesSourceCollection(t *testing.T) {
@@ -96,7 +97,7 @@ func TestBlobCopiedOutputSurvivesSourceCollection(t *testing.T) {
 			t.Fatalf("copy/collection order %d violated reachability", order)
 		}
 	}
-	if err := quick.Check(property, &quick.Config{MaxCount: 48, Rand: rand.New(rand.NewSource(625021))}); err != nil {
+	if err := quick.Check(property, quicktest.Config(&quick.Config{MaxCount: 48, Rand: rand.New(rand.NewSource(625021))})); err != nil {
 		t.Fatal(err)
 	}
 }

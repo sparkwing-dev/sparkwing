@@ -9,6 +9,9 @@ import (
 )
 
 func TestSchemaRejectsIncompleteLifecycleRows(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 1.1s measured in the short class; the full suite runs it")
+	}
 	for _, test := range []struct {
 		name  string
 		query string

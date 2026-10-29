@@ -19,6 +19,9 @@ import (
 )
 
 func TestTriggerSDKUsesPipelineCommit(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 2.1s measured in the short class; the full suite runs it")
+	}
 	for _, manifest := range []string{"", `{"dependencies":{"@sparkwing/sdk":"1.2.3"}}`, `{"devDependencies":{"@sparkwing/sdk":"1.2.3"}}`, "{"} {
 		t.Run(manifest, func(t *testing.T) {
 			repo, _ := triggerPreparationRepo(t)

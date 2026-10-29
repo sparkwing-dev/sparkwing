@@ -9,6 +9,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
+	"github.com/sparkwing-dev/sparkwing/internal/quicktest"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 )
 
@@ -85,7 +86,7 @@ func TestBlobRecordsReplayNormalizesOptionalMetadata(t *testing.T) {
 				rewriteSchemaCount(t, s.db, "blob_records", 1)
 				return true
 			}
-			if err := quick.Check(property, &quick.Config{MaxCount: 48, Rand: rand.New(rand.NewSource(625019))}); err != nil {
+			if err := quick.Check(property, quicktest.Config(&quick.Config{MaxCount: 48, Rand: rand.New(rand.NewSource(625019))})); err != nil {
 				t.Fatal(err)
 			}
 		})

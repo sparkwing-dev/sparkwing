@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/quicktest"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 )
 
@@ -145,7 +146,7 @@ func TestScheduleAdmissionRequiresCurrentTenantAndDeclarationProperty(t *testing
 		}
 		return true
 	}
-	if err := quick.Check(property, &quick.Config{MaxCount: 6}); err != nil {
+	if err := quick.Check(property, quicktest.Config(&quick.Config{MaxCount: 6})); err != nil {
 		t.Fatal(err)
 	}
 }

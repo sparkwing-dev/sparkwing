@@ -45,6 +45,9 @@ func TestRecoveryReadsExactRecordedFailure(t *testing.T) {
 }
 
 func TestRecoveryFailureReadRechecksSourceAndReader(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 1.4s measured in the short class; the full suite runs it")
+	}
 	for _, problem := range []string{"generation", "nonterminal", "edge", "owner", "revoked", "grant", "foreign_team", "corrupt"} {
 		t.Run(problem, func(t *testing.T) {
 			tenant, owner, holder, failure := recoveryFailureFixture(t)

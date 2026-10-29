@@ -13,6 +13,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/quicktest"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 )
@@ -131,7 +132,7 @@ func TestBlobResultRecordsRejectForgedResultKeys(t *testing.T) {
 		assertBlobResultUnchanged(t, records, change)
 		return err != nil
 	}
-	if err := quick.Check(property, &quick.Config{MaxCount: 240, Rand: rand.New(rand.NewSource(43))}); err != nil {
+	if err := quick.Check(property, quicktest.Config(&quick.Config{MaxCount: 240, Rand: rand.New(rand.NewSource(43))})); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := records.tenant.TransitionNode(t.Context(), change); err != nil {
@@ -273,7 +274,7 @@ func TestBlobResultRecordsManifestReadCannotOutliveHolder(t *testing.T) {
 		assertBlobResultUnchanged(t, records, change)
 		return err != nil
 	}
-	if err := quick.Check(property, &quick.Config{MaxCount: 96, Rand: rand.New(rand.NewSource(47))}); err != nil {
+	if err := quick.Check(property, quicktest.Config(&quick.Config{MaxCount: 96, Rand: rand.New(rand.NewSource(47))})); err != nil {
 		t.Fatal(err)
 	}
 }

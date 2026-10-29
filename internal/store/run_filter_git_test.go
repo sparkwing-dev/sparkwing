@@ -120,6 +120,9 @@ func TestListRunsClampsLimitToOneRowAboveTheCap(t *testing.T) {
 }
 
 func TestListTriggersClampsLimitToTheCap(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 2.1s measured in the short class; the full suite runs it")
+	}
 	st, err := storetest.New(t).TryOpen()
 	if err != nil {
 		t.Fatal(err)
@@ -147,6 +150,9 @@ func TestListTriggersClampsLimitToTheCap(t *testing.T) {
 }
 
 func TestListEventsAfterClampsLimitToTheCap(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 1.2s measured in the short class; the full suite runs it")
+	}
 	st, err := storetest.New(t).TryOpen()
 	if err != nil {
 		t.Fatal(err)

@@ -98,6 +98,9 @@ func (e childSourceEngine) Ensure(ctx context.Context, identity engineid.Identit
 }
 
 func TestNativeFreshBranchChildResolvesBeforeIntakeAndAcquisition(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 1.8s measured in the short class; the full suite runs it")
+	}
 	for _, explicit := range []bool{false, true} {
 		t.Run(fmt.Sprintf("explicit_repository=%v", explicit), func(t *testing.T) {
 			checkNativeFreshBranchChild(t, explicit)

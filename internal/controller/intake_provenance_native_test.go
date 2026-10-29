@@ -12,6 +12,9 @@ import (
 )
 
 func FuzzRunIntakeRejectsLegacyEnvironmentProvenance(f *testing.F) {
+	if testing.Short() {
+		f.Skip("slow: 1.2s measured in the short class; the full suite runs it")
+	}
 	keys := []string{"SPARKWING_LEASE_TOKEN", "SPARKWING_CHILD_LEASE_TOKEN", "NPM_TOKEN", "SPARKWING_PG_URL", "_SPARKWING_RETRY_REPO_DIR", "_SPARKWING_RETRY_REPO_URL", "_SPARKWING_RETRY_REVISION", "_SPARKWING_RETRY_PLAN_HASH", "_SPARKWING_SUBMIT_PIPELINE_REV"}
 	for i := range keys {
 		f.Add(byte(i), []byte("private-value"))

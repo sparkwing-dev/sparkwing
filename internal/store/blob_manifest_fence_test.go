@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
+	"github.com/sparkwing-dev/sparkwing/internal/quicktest"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 )
 
@@ -105,7 +106,7 @@ func TestBlobRecordsManifestIOCannotOutliveAuthority(t *testing.T) {
 				}
 				return count == 0
 			}
-			if err := quick.Check(property, &quick.Config{MaxCount: 144, Rand: rand.New(rand.NewSource(29))}); err != nil {
+			if err := quick.Check(property, quicktest.Config(&quick.Config{MaxCount: 144, Rand: rand.New(rand.NewSource(29))})); err != nil {
 				t.Fatal(err)
 			}
 		})

@@ -326,8 +326,10 @@ func (w *refillWorld) checkout(m *modelTeam, r *modelRefill) (string, error) {
 		}
 		w.outcomes[r.id] = outcome
 		pi := "pi_" + r.id
-		e := capability.PaymentEvent{EventID: "evt_" + pi, PaymentID: pi, ObjectID: pi, Currency: "usd", AmountMinor: r.amount, Mode: capability.PaymentTest,
-			Kind: capability.PaymentCardPaid, CustomerID: r.customer, ChargeID: "ch_" + r.id, Status: "succeeded", Created: w.now.Unix(), RefillID: r.id}
+		e := capability.PaymentEvent{
+			EventID: "evt_" + pi, PaymentID: pi, ObjectID: pi, Currency: "usd", AmountMinor: r.amount, Mode: capability.PaymentTest,
+			Kind: capability.PaymentCardPaid, CustomerID: r.customer, ChargeID: "ch_" + r.id, Status: "succeeded", Created: w.now.Unix(), RefillID: r.id,
+		}
 		if outcome == "" {
 			r.captured, r.capturedAt = true, *w.now
 		} else {
@@ -617,6 +619,9 @@ func refillModelSeeds(t *testing.T) ([]uint64, int) {
 // service, webhooks early, late and duplicated, and clock jumps never charge an ineligible team, never open a second
 // refill, credit every charge exactly once and keep refills stopped exactly while the model says they are.
 func TestRefillModel(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 10.4s measured in the short class; the full suite runs it")
+	}
 	seeds, histories := refillModelSeeds(t)
 	for _, seed := range seeds {
 		t.Run(strconv.FormatUint(seed, 10), func(t *testing.T) {

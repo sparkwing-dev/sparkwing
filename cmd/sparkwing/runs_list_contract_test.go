@@ -25,6 +25,7 @@ type listingReader struct {
 func (r listingReader) ListRuns(ctx context.Context, q controllerwire.RunQuery) (controllerwire.RunPage, error) {
 	return r.list(ctx, q)
 }
+
 func (r listingReader) ReadSteps(ctx context.Context, id string) (controllerwire.RunSteps, error) {
 	return r.steps(ctx, id)
 }
@@ -37,6 +38,7 @@ func listingInvocation(t *testing.T, args ...string) clisurface.Invocation {
 	}
 	return inv
 }
+
 func listedRun(id string, number int64) controllerwire.RunDetail {
 	return controllerwire.RunDetail{ID: id, Number: number, Team: "acme", Status: "success", Inputs: runspec.Display{Pipeline: "check"}}
 }

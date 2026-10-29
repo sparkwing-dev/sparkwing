@@ -14,6 +14,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
+	"github.com/sparkwing-dev/sparkwing/internal/quicktest"
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
 	"github.com/sparkwing-dev/sparkwing/pkg/match"
 )
@@ -39,7 +40,7 @@ func TestEngineClaimHTTPRemovedSelectorsNeverAwardProperty(t *testing.T) {
 		var got controllerwire.ClaimResponse
 		return json.Unmarshal(w.Body.Bytes(), &got) == nil && got.Claim != nil && got.Claim.RunID == "run" && got.Claim.JobID == "job"
 	}
-	if err := quick.Check(property, &quick.Config{MaxCount: 28}); err != nil {
+	if err := quick.Check(property, quicktest.Config(&quick.Config{MaxCount: 28})); err != nil {
 		t.Fatal(err)
 	}
 }

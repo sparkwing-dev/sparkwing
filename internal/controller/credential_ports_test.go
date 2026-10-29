@@ -16,6 +16,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
+	"github.com/sparkwing-dev/sparkwing/internal/quicktest"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
@@ -57,7 +58,7 @@ func TestCredentialMemberHTTPRoleCeilingProperty(t *testing.T) {
 		principal, err := s.store.AsOperator().LookupCapability(t.Context(), sha256.Sum256([]byte(issued.Capability)))
 		return err == nil && principal.Capability.Parent != nil && principal.Capability.Parent.Kind == capability.AuthoritySession && principal.Capability.Subject == (capability.Subject{Kind: capability.SubjectAccount, ID: "member"}) && principal.Capability.Team == "a"
 	}
-	if err := quick.Check(property, &quick.Config{MaxCount: 42}); err != nil {
+	if err := quick.Check(property, quicktest.Config(&quick.Config{MaxCount: 42})); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -166,7 +167,7 @@ func TestCredentialClaimHTTPAncestryAndFenceProperty(t *testing.T) {
 		}
 		return true
 	}
-	if err := quick.Check(property, &quick.Config{MaxCount: 48}); err != nil {
+	if err := quick.Check(property, quicktest.Config(&quick.Config{MaxCount: 48})); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -202,7 +203,7 @@ func TestCredentialMachineHTTPCannotBecomeAMemberProperty(t *testing.T) {
 		}
 		return runs == 1 && cancelled == nil
 	}
-	if err := quick.Check(property, &quick.Config{MaxCount: 32}); err != nil {
+	if err := quick.Check(property, quicktest.Config(&quick.Config{MaxCount: 32})); err != nil {
 		t.Fatal(err)
 	}
 }

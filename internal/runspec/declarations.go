@@ -2,7 +2,10 @@ package runspec
 
 import (
 	"errors"
+	"fmt"
 	"slices"
+	"strconv"
+	"strings"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
@@ -16,6 +19,8 @@ type DeclarationGate struct {
 	masker   *secrets.Masker
 	complete bool
 	defaults []SecretValue
+	// safety: pointer identity is what proves a refusal is the host's own text.
+	unregistered *apierr.Error
 }
 
 // DeclaredArguments is the resolved argument set and its sealing projection.
@@ -72,7 +77,7 @@ func (g *DeclarationGate) Inspect(name string) (DeclaredArguments, error) {
 func (g *DeclarationGate) resolve(name string, args map[string]string, secretArgs []string, inspect bool) (DeclaredArguments, error) {
 	pipeline, ok := g.doc.Pipeline(name)
 	if !ok {
-		return DeclaredArguments{}, &apierr.Error{Code: apierr.UnknownPipeline, Message: "SDK describe does not declare the requested pipeline"}
+		return DeclaredArguments{}, g.refuseUnregistered(name)
 	}
 	if pipeline.Error != nil {
 		return DeclaredArguments{}, g.Error(pipeline.Error)
@@ -143,8 +148,38 @@ func declarationError(message string) error {
 	return &apierr.Error{Code: apierr.ProtocolError, Message: message}
 }
 
+// UnregisteredEntrypoint returns a copy of the refusal this gate composed for an
+// entrypoint the SDK does not register, when err carries it. The host builds that
+// text from masked identifiers only, so it is safe to show before secret
+// declarations are known.
+func (g *DeclarationGate) UnregisteredEntrypoint(err error) (*apierr.Error, bool) {
+	if g == nil || g.unregistered == nil || !errors.Is(err, g.unregistered) {
+		return nil, false
+	}
+	refusal := *g.unregistered
+	return &refusal, true
+}
+
+// safety: registration names are author text, which stays withheld while any
+// pipeline's declarations are unknown; the entrypoint comes from sparkwing.yaml.
+func (g *DeclarationGate) refuseUnregistered(entrypoint string) error {
+	message := fmt.Sprintf("sparkwing.yaml names entrypoint %q, which the SDK does not register", g.masker.Mask(entrypoint))
+	if g.complete {
+		names := make([]string, 0, len(g.doc.Pipelines))
+		for _, pipeline := range g.doc.Pipelines {
+			names = append(names, strconv.Quote(g.masker.Mask(pipeline.Name)))
+		}
+		message += "; it registers " + strings.Join(names, ", ")
+	}
+	g.unregistered = &apierr.Error{Code: apierr.UnknownPipeline, Message: message}
+	return g.unregistered
+}
+
 // Error withholds unclassified author errors and sanitizes classified payloads.
 func (g *DeclarationGate) Error(err error) error {
+	if g != nil && g.unregistered != nil && errors.Is(err, g.unregistered) {
+		return g.unregistered
+	}
 	if !g.Complete() {
 		code := apierr.SDKError
 		var canonical *apierr.Error

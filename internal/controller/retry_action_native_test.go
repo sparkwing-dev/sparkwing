@@ -303,6 +303,9 @@ func TestRetryActionUnknownRunAndRemovedRequestShapes(t *testing.T) {
 }
 
 func FuzzRetryActionValidatesBeforeAdmission(f *testing.F) {
+	if testing.Short() {
+		f.Skip("slow: 1.4s measured in the short class; the full suite runs it")
+	}
 	for _, mode := range []string{"failed", "all", "", "unknown"} {
 		for _, key := range []string{"retry", ""} {
 			f.Add(mode, key)

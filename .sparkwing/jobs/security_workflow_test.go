@@ -265,8 +265,9 @@ func TestSecurityWorkflowUploadsTheScannerReports(t *testing.T) {
 		"path: ${{ runner.temp }}/security/",
 		"if-no-files-found: ignore",
 	)
-	if !strings.Contains(body, "--report-dir=\"$RUNNER_TEMP/security\"") {
-		t.Fatal("the uploaded directory is not the one the scanners write to")
+	if !strings.Contains(body, "run security-scan -- --report-dir=\"$RUNNER_TEMP/security\"") {
+		t.Fatal("the uploaded directory is not the one the scanners write to, or the flag precedes the `--` " +
+			"that separates pipeline arguments from run flags")
 	}
 }
 

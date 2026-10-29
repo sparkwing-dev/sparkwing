@@ -14,6 +14,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
 	"github.com/sparkwing-dev/sparkwing/internal/engineid"
 	"github.com/sparkwing-dev/sparkwing/internal/pipelineentry"
@@ -57,6 +58,13 @@ func (v *upgradeVerifier) Verify(ctx context.Context, checkout string, selected 
 	if err != nil {
 		return err
 	}
+	// safety: a Go compile failure is the one install failure that is the pipeline's
+	// code, so the modules download first and the code compiles offline before install.
+	if sdk == engineid.GoSDK {
+		if err := v.compileGo(ctx, dir, installEnv, selected.Identity.Pin); err != nil {
+			return err
+		}
+	}
 	install := v.install
 	if install == nil {
 		install = func(ctx context.Context, selected engine.Resolved, request engine.SDKInstallRequest) (engine.SDKCommand, error) {
@@ -71,8 +79,10 @@ func (v *upgradeVerifier) Verify(ctx context.Context, checkout string, selected 
 	if command.Directory != dir || len(command.Command) == 0 || !filepath.IsAbs(command.Command[0]) {
 		return errors.New("upgrade: selected installer returned an invalid SDK command")
 	}
-	if err := v.checkTypes(ctx, dir, installEnv, sdk); err != nil {
-		return err
+	if sdk == engineid.TypeScriptSDK {
+		if err := v.checkTypes(ctx, dir, installEnv); err != nil {
+			return err
+		}
 	}
 	hostEnv, err := v.buildEnv(procenv.HostChild, base, procenv.Runtime{})
 	if err != nil {
@@ -90,33 +100,62 @@ func (v *upgradeVerifier) Verify(ctx context.Context, checkout string, selected 
 	for _, name := range names {
 		for _, operation := range []string{"describe", "plan"} {
 			if _, err := v.exec(ctx, checkout, hostEnv, selected.Executable, "pipeline", operation, "--pipeline="+name, "--output=json"); err != nil {
-				return fmt.Errorf("upgrade: %s pipeline %q: %w", operation, name, err)
+				err = fmt.Errorf("upgrade: %s pipeline %q: %w", operation, name, err)
+				if pipelineCodeRefusal(err) {
+					return fmt.Errorf("%w: %w", engine.ErrPipelineIncompatible, err)
+				}
+				return err
 			}
 		}
 	}
 	return nil
 }
 
-func (v *upgradeVerifier) checkTypes(ctx context.Context, dir string, env procenv.Env, sdk engineid.SDKKind) error {
-	var command []string
-	switch sdk {
-	case engineid.GoSDK:
-		// safety: a parent workspace must not substitute another checkout's SDK pin.
-		var err error
-		env, err = env.GoTool("GOWORK=off")
-		if err != nil {
-			return err
-		}
-		command = []string{"go", "build", "-mod=readonly", "-o", os.DevNull, "./..."}
-	case engineid.TypeScriptSDK:
-		command = []string{"npm", "exec", "--offline", "--no", "--", "tsc", "--noEmit"}
-	default:
-		return fmt.Errorf("upgrade: unsupported SDK %q", sdk)
+func (v *upgradeVerifier) compileGo(ctx context.Context, dir string, env procenv.Env, pin engineid.Pin) error {
+	// safety: a parent workspace must not substitute another checkout's SDK pin.
+	env, err := env.GoTool("GOWORK=off")
+	if err != nil {
+		return err
 	}
-	if _, err := v.exec(ctx, dir, env, command[0], command[1:]...); err != nil {
-		return fmt.Errorf("upgrade: %s: %w", strings.Join(command, " "), err)
+	qa, err := engine.QAModuleEnvironment(pin, func(args ...string) ([]byte, error) { return v.exec(ctx, dir, env, "go", args...) })
+	if err != nil {
+		return err
+	}
+	if env, err = env.GoTool(qa...); err != nil {
+		return err
+	}
+	if _, err := v.exec(ctx, dir, env, "go", "mod", "download"); err != nil {
+		return fmt.Errorf("upgrade: go mod download: %w", err)
+	}
+	offline, err := env.GoTool("GOPROXY=off")
+	if err != nil {
+		return err
+	}
+	if _, err := v.exec(ctx, dir, offline, "go", "build", "-mod=readonly", "-o", os.DevNull, "./..."); err != nil {
+		return fmt.Errorf("%w: upgrade: go build: %w", engine.ErrPipelineIncompatible, err)
 	}
 	return nil
+}
+
+func (v *upgradeVerifier) checkTypes(ctx context.Context, dir string, env procenv.Env) error {
+	command := []string{"npm", "exec", "--offline", "--no", "--", "tsc", "--noEmit"}
+	if _, err := v.exec(ctx, dir, env, command[0], command[1:]...); err != nil {
+		return fmt.Errorf("%w: upgrade: %s: %w", engine.ErrPipelineIncompatible, strings.Join(command, " "), err)
+	}
+	return nil
+}
+
+// safety: describe and plan refuse pipeline code with these codes; any other
+// failure (no engine, no daemon, a malformed answer) says nothing about the code.
+var pipelineCodeRefusals = []apierr.Code{apierr.UnknownPipeline, apierr.PlanFailed, apierr.PlanInvalid, apierr.InvalidArgs, apierr.SDKError}
+
+func pipelineCodeRefusal(err error) bool {
+	for _, code := range pipelineCodeRefusals {
+		if strings.Contains(err.Error(), `"code":"`+string(code)+`"`) {
+			return true
+		}
+	}
+	return false
 }
 
 func upgradePipelineNames(raw []byte) ([]string, error) {

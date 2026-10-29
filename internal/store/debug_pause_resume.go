@@ -2,11 +2,10 @@ package store
 
 import (
 	"context"
-	"github.com/sparkwing-dev/sparkwing/internal/runstate"
-
-	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 )
 
 // ResumeAuthorizedDebugPause closes open pauses without changing job lifecycle or execution fences.

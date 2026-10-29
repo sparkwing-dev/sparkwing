@@ -178,16 +178,24 @@ After the upgrade, delete the old logs PVC and the cache deployment, as
 
 Every repository's `.sparkwing` module moves to the v0.68 SDK, because the
 CLI runs each repository with the engine its pin names. Go pipelines pin `github.com/sparkwing-dev/sparkwing` in `.sparkwing/go.mod`.
-`sparkwing upgrade` changes a pin only after the new SDK compiles and plans
-the pipeline, so move the pin by hand, fix the code, then check it:
+`sparkwing upgrade --version v0.68.0` moves the pin and then reports the
+pipeline code that no longer builds against it. Fix the code, then check it:
 
 ```sh
-go -C .sparkwing get github.com/sparkwing-dev/sparkwing@v0.68.0
+sparkwing upgrade --version v0.68.0
 go -C .sparkwing mod tidy
 go -C .sparkwing build ./...
 sparkwing pipeline plan --pipeline build
 sparkwing run build
 ```
+
+A pipeline's required `entrypoint:` in `sparkwing.yaml` names the SDK
+registration it runs; the pipeline's `name` no longer selects it. A repository
+that registers by name, `sparkwing.Register("gate", ...)`, under
+`entrypoint: Gate` fails with
+`sparkwing.yaml names entrypoint "Gate", which the SDK does not register`.
+Register the entrypoint, `sparkwing.Register("Gate", ...)`, or set
+`entrypoint: gate`. Aliases that share one entrypoint register it once.
 
 The entrypoint moves out of the removed `pkg/runner` package:
 
@@ -216,7 +224,11 @@ Renamed and removed Go SDK APIs, all in package `sparkwing` unless named:
 | `NeedsOptional(...)` | `NeedsIfPresent(...)` |
 | `JobApproval(plan, id, cfg)`, `ApprovalConfig.OnExpiry` | `plan.Approval(id, cfg)`, `ApprovalConfig.OnTimeout` |
 | `JobFanOutDynamic`, `ExpandGenerator` | `source.Generate(fn)`, and `NeedsGenerated` on the jobs that wait for it |
-| `Resources(Cores(n), MemoryGB(n))` | A runner label: `Requires("sparkwing-4cpu")` on Cloud |
+| `Resources(Cores(n), MemoryGB(n))` on a job, a group or the `Plan` | A runner label: `Requires("sparkwing-4cpu")` on Cloud; drop it for local runs |
+| `ToolCacheDir(tool)` | Declare the directory as a job cache, `.Cache(sparkwing.Dir(".sparkwing/cache/golangci-lint", sparkwing.KeyFromFile("go.sum")))`, and hand the tool `sparkwing.Path(".sparkwing", "cache", "golangci-lint")`; gitignore `.sparkwing/cache/` |
+| `CurrentRuntime().Git` | `rc.Git` in `Plan`, captured by the job that needs it, or `sparkwing.NewGitFromTree(ctx, sparkwing.WorkDir())` inside a job |
+| `Annotate(ctx, "text")` | `Annotate(ctx, sparkwing.Annotation{Message: "text"})` |
+| `Ref.NodeID` | `Ref.JobID`, or `Ref.Job()` |
 | `Config(ctx, name)`, `MustConfig` | `Variable(ctx, name)`, `MustVariable` |
 | `RetryBackoff(d)` | `Backoff(d)` |
 | `RetryAuto`, `WhenRunner`, `LoggerFromContext`, `NodeFromContext`, `StepFromContext`, `CancelTimeout` | Removed. Log with `sparkwing.Info`, `Warn` and `Error` |
@@ -3213,6 +3225,7 @@ stores observed capacity and labels with store time. Configured local-first
 preferences, hold and liveness now apply to shared named and queued job claims.
 Only a recent eligible runner with live authority and enough advertised capacity
 can hold work. No new flag, deadline or customer limit is added.
+
 ## Egress accounting uses tenant and replica counters
 
 `Store.RecordEgressUsage`, `Store.ListEgressUsage` and `Store.PruneEgressUsage`

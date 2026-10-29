@@ -13,8 +13,9 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 	"golang.org/x/sys/unix"
+
+	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 )
 
 const processTableTimeout = 2 * time.Second

@@ -18,6 +18,9 @@ import (
 )
 
 func TestControllerPlanContinuityLapseWaitsWithoutStoppingReleasedWork(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 2.1s measured in the short class; the full suite runs it")
+	}
 	for _, policy := range []string{"queue", "skip", "fail", "cancel_others"} {
 		t.Run(policy, func(t *testing.T) {
 			now := time.Now()

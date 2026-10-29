@@ -582,13 +582,16 @@ func checkDocsMirror(ctx context.Context) error {
 // safety: a node hands each child the run's own bindings, so a suite that
 // reads one reaches the machine's admission daemon, the operator's controller
 // or cache, or a credential of the run's, and reds only inside a gate.
-// The node host's attempt environment is the injector these names track.
+// internal/procenv's composeRuntime is the injector these names track; the
+// service and token names come from an operator's shell rather than from it.
 var productTestUnset = []string{
 	"GIT_INDEX_FILE",
 	"SPARKWING_AGENT_TOKEN",
 	"SPARKWING_CACHE_URL",
 	"SPARKWING_CONTROLLER_URL",
 	"SPARKWING_DRY_RUN",
+	"SPARKWING_GATE_INDEX",
+	"SPARKWING_JOB_ID",
 	"SPARKWING_NODE_ID",
 	"SPARKWING_NODE_TOKEN",
 	"SPARKWING_NODE_URL",
@@ -599,9 +602,14 @@ var productTestUnset = []string{
 // service and carries no credential. A name absent from both this map and the
 // list above fails the contract test rather than reaching a suite unread.
 var productTestKept = map[string]string{
-	"SPARKWING_RUNNER_NAME":   "reports which runner executed the node",
-	"SPARKWING_RUNNER_TYPE":   "reports which runner executed the node",
-	"SPARKWING_RUNNER_LABELS": "reports what the local runner advertises",
+	"SPARKWING_RUNNER_NAME":    "reports which runner executed the node",
+	"SPARKWING_RUNNER_TYPE":    "reports which runner executed the node",
+	"SPARKWING_RUNNER_LABELS":  "reports what the local runner advertises",
+	"SPARKWING_BRANCH":         "describes the run's source and no product code reads it",
+	"SPARKWING_COMMIT":         "describes the run's source and no product code reads it",
+	"SPARKWING_REPO":           "describes the run's source; the installer reads SPARKWING_RELEASE_REPO instead",
+	"SPARKWING_TRIGGER_SOURCE": "describes the run's source and no product code reads it",
+	"CI":                       "hosted runners set it for every suite anyway",
 }
 
 // safety: a fresh home also hides the dev.env the local dashboard writes, which

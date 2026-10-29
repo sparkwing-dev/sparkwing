@@ -127,6 +127,9 @@ func TestPersistedRunPagesFilterBeforeLimitAndPreserveCurrentNotices(t *testing.
 }
 
 func TestPersistedRunPagesScanPastInternalBatchesWithoutCappingLimit(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 9.0s measured in the short class; the full suite runs it")
+	}
 	server, _ := engineRuntimeStore(t)
 	for number := 2; number <= 105; number++ {
 		pipeline := "noise"

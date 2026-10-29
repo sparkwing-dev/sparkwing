@@ -154,9 +154,21 @@ func TestRefusedFlagHintNamesWhereTheFlagBelongs(t *testing.T) {
 	}
 }
 
+func TestBareVersionFlagSelectsTheVersionCommand(t *testing.T) {
+	for _, args := range [][]string{{"--version"}, {"--version", "-o", "json"}, {"-o", "json", "--version"}} {
+		inv, err := Parse("sparkwing", args)
+		if err != nil || inv.Command.Path != "sparkwing version" {
+			t.Errorf("%v: command %q, err %v; want sparkwing version", args, inv.Command.Path, err)
+		}
+	}
+	if _, err := Parse("sparkwing", []string{"runs", "--version"}); err == nil {
+		t.Error("--version after a command word selected the version command")
+	}
+}
+
 func TestParseReadsOnlyGlobalFlagsBeforeTheCommand(t *testing.T) {
 	for args, want := range map[string]string{
-		"--version":             "unknown flag --version; use the version command",
+		"--version=x":           "unknown flag --version; use the version command",
 		"--tail 5 runs list":    "unknown flag --tail; a command's flags follow the command",
 		"commands --query x":    "unknown flag --query; sparkwing commands takes --search, --limit, --cursor, --format, --split-dir, --path, --all (see --help)",
 		"run check --bogus":     "unknown flag --bogus; pipeline arguments follow --",

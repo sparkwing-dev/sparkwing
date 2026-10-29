@@ -13,16 +13,16 @@ import (
 	"testing"
 	"testing/quick"
 
-	"github.com/sparkwing-dev/sparkwing/internal/runstate"
-
-	"golang.org/x/crypto/ssh"
-
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/quicktest"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
 	"github.com/sparkwing-dev/sparkwing/pkg/match"
+
+	"golang.org/x/crypto/ssh"
 )
 
 type gitReleaseFixture struct {
@@ -358,7 +358,7 @@ func TestTeamGitCredentialStaysWithTheTeamClaimAndHost(t *testing.T) {
 		f.audits(1)
 		return true
 	}
-	if err := quick.Check(property, &quick.Config{MaxCount: 30}); err != nil {
+	if err := quick.Check(property, quicktest.Config(&quick.Config{MaxCount: 30})); err != nil {
 		t.Fatal(err)
 	}
 }

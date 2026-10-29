@@ -178,6 +178,9 @@ func FuzzBurstHostSourceEnvironmentExcludesRequesterValues(f *testing.F) {
 }
 
 func TestBurstNativePreparationBuildsUploadedEditedSDK(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 6.9s measured in the short class; the full suite runs it")
+	}
 	t.Setenv("STRAY_REQUESTER_SHELL_NAME", "private")
 	home := t.TempDir()
 	t.Setenv("GOMODCACHE", offlineGoEnv(t, "GOMODCACHE"))
@@ -433,6 +436,9 @@ func TestBurstFixtureSupportsPublicSessionEnrollment(t *testing.T) {
 }
 
 func TestBurstNativePreparationRetainsAdvertisedRunOptions(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 4.0s measured in the short class; the full suite runs it")
+	}
 	t.Setenv("SPARKWING_HOME", t.TempDir())
 	t.Setenv("SPARKWING_CONFIG", filepath.Join(t.TempDir(), "missing.yaml"))
 	t.Setenv("XDG_CACHE_HOME", t.TempDir())
@@ -468,6 +474,9 @@ func TestBurstNativePreparationRetainsAdvertisedRunOptions(t *testing.T) {
 }
 
 func TestBurstNativePreparationSelectsConfiguredSDKEntrypoint(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 3.5s measured in the short class; the full suite runs it")
+	}
 	t.Setenv("SPARKWING_HOME", t.TempDir())
 	t.Setenv("SPARKWING_CONFIG", filepath.Join(t.TempDir(), "missing.yaml"))
 	t.Setenv("TOKEN", burstIntakeSecret)

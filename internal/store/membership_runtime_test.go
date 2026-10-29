@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
-
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 )
 
@@ -78,7 +77,6 @@ func TestMembershipRevalidatesOnlyTheAffectedPersonalCredentialsProperty(t *test
 					t.Fatalf("prefix=%s ended=%v error=%v", prefix, ended, err)
 				}
 			}
-
 		})
 	}
 }

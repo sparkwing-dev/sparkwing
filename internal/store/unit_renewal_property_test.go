@@ -11,6 +11,9 @@ import (
 )
 
 func TestRenewUnitRequiresCurrentAwardProperty(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 1.6s measured in the short class; the full suite runs it")
+	}
 	random := rand.New(rand.NewPCG(172, 936))
 	for _, kind := range []capability.UnitKind{capability.UnitTrigger, capability.UnitPlan, capability.UnitEval, capability.UnitNode} {
 		t.Run(string(kind), func(t *testing.T) {

@@ -14,12 +14,11 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
-	"github.com/sparkwing-dev/sparkwing/internal/runspec"
-
-	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
-
 	"github.com/sparkwing-dev/sparkwing/internal/githubapp/githubapptest"
+	"github.com/sparkwing-dev/sparkwing/internal/quicktest"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
+	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
 )
 
 type sourceAnswer struct {
@@ -401,7 +400,7 @@ func TestSourceCredential_ExtraConsentStaysWithSourceIDProperty(t *testing.T) {
 		got, code = f.sourceCredential(original, "original")
 		return code == http.StatusOK && f.app.TokenCovers(got.Token, renamed) && f.app.TokenCovers(got.Token, "acme/plans") && !f.app.TokenCovers(got.Token, "acme/widgets")
 	}
-	if err := quick.Check(property, &quick.Config{MaxCount: 12}); err != nil {
+	if err := quick.Check(property, quicktest.Config(&quick.Config{MaxCount: 12})); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -423,7 +422,7 @@ func TestSourceCredential_RenamedRepositoryClearsExtraConsentProperty(t *testing
 		got, code := f.sourceCredential(original, "original")
 		return code == http.StatusOK && f.app.TokenCovers(got.Token, renamed) && !f.app.TokenCovers(got.Token, "acme/plans") && !f.app.TokenCovers(got.Token, "acme/widgets")
 	}
-	if err := quick.Check(property, &quick.Config{MaxCount: 8}); err != nil {
+	if err := quick.Check(property, quicktest.Config(&quick.Config{MaxCount: 8})); err != nil {
 		t.Fatal(err)
 	}
 }

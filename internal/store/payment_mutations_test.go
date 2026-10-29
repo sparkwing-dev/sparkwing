@@ -13,9 +13,13 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/quicktest"
 )
 
 func TestPaymentMutationsRollBackWithReceipt(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 1.1s measured in the short class; the full suite runs it")
+	}
 	for _, kind := range []string{"card_setup", "refund", "dispute_open", "dispute_close", "warning", "queued_refund"} {
 		t.Run(kind, func(t *testing.T) {
 			s, tenant, now := cardFixture(t)
@@ -171,7 +175,7 @@ func TestPaymentMutationRefundConservationProperty(t *testing.T) {
 				}
 				return true
 			}
-			if err := quick.Check(property, &quick.Config{MaxCount: 32, Rand: rand.New(rand.NewSource(42))}); err != nil {
+			if err := quick.Check(property, quicktest.Config(&quick.Config{MaxCount: 32, Rand: rand.New(rand.NewSource(42))})); err != nil {
 				t.Fatal(err)
 			}
 		})

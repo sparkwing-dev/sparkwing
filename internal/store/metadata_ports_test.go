@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"math/rand/v2"
 	"reflect"
 	"strings"
@@ -14,6 +13,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/limits"
+	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
@@ -331,6 +331,9 @@ func TestMetadataRetryClosesOnlyTheEndingAttempt(t *testing.T) {
 }
 
 func TestMetadataAnnotationByteCapacityRollsBackTheRejectedAppend(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 2.8s measured in the short class; the full suite runs it")
+	}
 	for _, step := range []string{"", "body"} {
 		t.Run(step, func(t *testing.T) {
 			f := newStoreRecoveryFixture(t, true)

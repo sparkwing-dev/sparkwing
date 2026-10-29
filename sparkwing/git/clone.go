@@ -9,8 +9,10 @@ import (
 )
 
 // CloneOption configures a clone.
-type CloneOption func(*cloneConfig)
-type cloneConfig struct{ depth int }
+type (
+	CloneOption func(*cloneConfig)
+	cloneConfig struct{ depth int }
+)
 
 // WithDepth limits the fetched history to n commits.
 func WithDepth(n int) CloneOption { return func(c *cloneConfig) { c.depth = n } }

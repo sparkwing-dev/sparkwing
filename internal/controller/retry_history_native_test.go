@@ -101,6 +101,9 @@ func TestRetryHistoryRechecksEachRunBinding(t *testing.T) {
 }
 
 func TestRetryHistoryTraversesLongChainsAndCycles(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 48.9s measured in the short class; the full suite runs it")
+	}
 	s, session := pauseHTTPFixture(t)
 	seedRetryHistory(t, s, "private-retry-value")
 	ids := []string{"run", "second", "sibling", "last"}

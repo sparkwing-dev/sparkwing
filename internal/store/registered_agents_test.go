@@ -14,6 +14,9 @@ import (
 )
 
 func TestRegisteredAgentsHonorRotationGraceProperty(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 1.0s measured in the short class; the full suite runs it")
+	}
 	random := rand.New(rand.NewPCG(433, 800))
 	for i := range 32 {
 		t.Run(fmt.Sprint(i), func(t *testing.T) {

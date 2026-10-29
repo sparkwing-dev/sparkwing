@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/quicktest"
 )
 
 func TestStoreDataMeteredDisruptionReplayUsesAwardedTerms(t *testing.T) {
@@ -32,7 +33,7 @@ func TestStoreDataMeteredDisruptionReplayUsesAwardedTerms(t *testing.T) {
 			}
 		}
 	}
-	if err := quick.Check(property, &quick.Config{MaxCount: 48, Rand: rand.New(rand.NewSource(420738))}); err != nil {
+	if err := quick.Check(property, quicktest.Config(&quick.Config{MaxCount: 48, Rand: rand.New(rand.NewSource(420738))})); err != nil {
 		t.Fatal(err)
 	}
 }

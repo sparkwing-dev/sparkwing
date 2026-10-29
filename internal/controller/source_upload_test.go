@@ -19,6 +19,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/controller/client"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/procenv"
+	"github.com/sparkwing-dev/sparkwing/internal/quicktest"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
@@ -182,7 +183,7 @@ func TestSourceSnapshotAuthorityAndRevisionProperty(t *testing.T) {
 		w := sourceUploadHTTP(h, raw, "POST", "/api/v1/runs", string(body))
 		return w.Code == 403
 	}
-	if err := quick.Check(property, &quick.Config{MaxCount: 64}); err != nil {
+	if err := quick.Check(property, quicktest.Config(&quick.Config{MaxCount: 64})); err != nil {
 		t.Fatal(err)
 	}
 	engineSQL(t, s.store, `DELETE FROM memberships WHERE team='a' AND account_id='member'`)

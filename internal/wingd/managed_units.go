@@ -111,8 +111,10 @@ func (m *nativeUnits) inspect(ctx context.Context) ([]ManagedUnit, error) {
 		return nil, errors.New(timer.Detail)
 	}
 	if timer.Installed {
-		units = append(units, ManagedUnit{Kind: ManagedSchedule, Name: timer.Path, Executable: timer.Binary,
-			Version: timer.Version, Arguments: timer.Arguments, Home: timer.Home})
+		units = append(units, ManagedUnit{
+			Kind: ManagedSchedule, Name: timer.Path, Executable: timer.Binary,
+			Version: timer.Version, Arguments: timer.Arguments, Home: timer.Home,
+		})
 	}
 	return units, nil
 }

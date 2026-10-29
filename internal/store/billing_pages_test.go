@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/quicktest"
 )
 
 func billingPageFixture(t *testing.T) (*Store, *Tenant, capability.Authorized) {
@@ -113,7 +114,7 @@ func TestBillingPagesImmutableReservationProperty(t *testing.T) {
 		err = tenant.CompleteAuthorizedBillingPage(t.Context(), a, page)
 		return err != nil && reflect.DeepEqual(before, billingPageRows(t, s))
 	}
-	if err := quick.Check(property, &quick.Config{MaxCount: 40}); err != nil {
+	if err := quick.Check(property, quicktest.Config(&quick.Config{MaxCount: 40})); err != nil {
 		t.Fatal(err)
 	}
 }

@@ -498,7 +498,6 @@ func TestKubernetesE2EUsesExplicitReleaseImagesAndCapturesFailureEvidence(t *tes
 		"invalid trigger token returned $invalid_trigger_status, want 401",
 		".runs | length == 0",
 		"/api/v1/triggers",
-		"/api/v1/tokens",
 		"/api/v1/agents",
 		"/logs/prove-controller-runner-logs",
 		"/cancel",

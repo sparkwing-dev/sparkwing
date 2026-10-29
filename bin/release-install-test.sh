@@ -254,6 +254,40 @@ chmod +x "$PERMISSIVE/openssl"
 run_install permissive-openssl "$GOOD" "$TAG" "SPARKWING_OPENSSL=$PERMISSIVE/openssl"
 refuses permissive-openssl "which arrived in OpenSSL 3.0"
 
+# Inside a pipeline SPARKWING_REPO names the run's source repository, so it
+# must never choose where the installer downloads from. A curl stub records
+# the first URL the installer asks for, with no release URL override to hide it.
+STUB="$WORK/curl-stub"
+mkdir -p "$STUB"
+cat >"$STUB/curl" <<'STUBEOF'
+#!/bin/sh
+for arg in "$@"; do case "$arg" in https://*) printf '%s\n' "$arg" >>"$CURL_LOG" ;; esac; done
+exit 22
+STUBEOF
+chmod +x "$STUB/curl"
+for repo_case in "pipeline-source::https://github.com/sparkwing-dev/sparkwing/releases/download/" "release-override:acme/fork:https://github.com/acme/fork/releases/download/"; do
+  repo_name="${repo_case%%:*}"
+  rest="${repo_case#*:}"
+  release_repo="${rest%%:*}"
+  want="${rest#*:}"
+  CURL_LOG="$WORK/curl-$repo_name.log"
+  : >"$CURL_LOG"
+  if [ -n "$release_repo" ]; then
+    env -u SPARKWING_RELEASE_BASE_URL -u SPARKWING_RELEASE_LATEST_URL PATH="$STUB:$PATH" CURL_LOG="$CURL_LOG" \
+      HOME="$WORK/home-$repo_name" SPARKWING_REPO=acme/pipeline-source SPARKWING_RELEASE_REPO="$release_repo" \
+      sh "$INSTALLER" --version "$TAG" --prefix "$WORK/prefix-$repo_name" >/dev/null 2>&1 || true
+  else
+    env -u SPARKWING_RELEASE_BASE_URL -u SPARKWING_RELEASE_LATEST_URL -u SPARKWING_RELEASE_REPO PATH="$STUB:$PATH" CURL_LOG="$CURL_LOG" \
+      HOME="$WORK/home-$repo_name" SPARKWING_REPO=acme/pipeline-source \
+      sh "$INSTALLER" --version "$TAG" --prefix "$WORK/prefix-$repo_name" >/dev/null 2>&1 || true
+  fi
+  first="$(head -n 1 "$CURL_LOG")"
+  case "$first" in
+    "$want"*) ;;
+    *) case_failed "release-repo-$repo_name" "downloaded from ${first:-nothing}, want $want" ;;
+  esac
+done
+
 if command -v shellcheck >/dev/null 2>&1; then
   if ! shellcheck --severity=warning --shell=sh "$ROOT/install/install.sh"; then
     case_failed posix-shell "install/install.sh is not clean under shellcheck --shell=sh"

@@ -16,7 +16,8 @@ func TestManagedUnitsW8Components(t *testing.T) {
 	for _, goos := range []string{"linux", "darwin"} {
 		t.Run(goos, func(t *testing.T) {
 			root := t.TempDir()
-			host := crontimer.Host{GOOS: goos, Home: root, ConfigHome: filepath.Join(root, "config"),
+			host := crontimer.Host{
+				GOOS: goos, Home: root, ConfigHome: filepath.Join(root, "config"),
 				SparkwingHome: filepath.Join(root, ".sparkwing"), Binary: filepath.Join(root, "bin with $ and space", "sparkwing"),
 				Version: "v1.2.3-foo--bar", PathEnv: "/captured/tools", UID: 501,
 				Exec: func(_ context.Context, name string, args ...string) (string, error) {
@@ -24,7 +25,8 @@ func TestManagedUnitsW8Components(t *testing.T) {
 						return "path = " + filepath.Join(root, "Library", "LaunchAgents", filepath.Base(args[1])+".plist") + "\n", nil
 					}
 					return "", nil
-				}}
+				},
+			}
 			manager, err := wingd.NewManagedUnitManager(host)
 			if err != nil {
 				t.Fatal(err)

@@ -28,7 +28,9 @@ ED25519_VECTOR_KEY="PUAXw+hDiVqStwqnTRt+vJyYLM8uxJaMwM1V8Sr0Zgw="
 ED25519_VECTOR_SIG="kqAJqfDUyrhyDoILX2QlQKKye1QWUD+Ps3YiI+vbadoIWsHkPhWZbkWPNhPQ8R2MOHsurrQwKu6wDSkWErsMAA=="
 ED25519_VECTOR_MESSAGE="r"
 
-REPO="${SPARKWING_REPO:-sparkwing-dev/sparkwing}"
+# SPARKWING_REPO is the run's source identity inside a pipeline, so the release
+# repository has a name of its own.
+REPO="${SPARKWING_RELEASE_REPO:-sparkwing-dev/sparkwing}"
 RELEASE_BASE_URL="${SPARKWING_RELEASE_BASE_URL:-https://github.com/${REPO}/releases/download}"
 RELEASE_LATEST_URL="${SPARKWING_RELEASE_LATEST_URL:-https://github.com/${REPO}/releases/latest}"
 
@@ -46,8 +48,8 @@ Usage: install.sh [--version vX.Y.Z] [--prefix DIR]
   --prefix   Install directory. Default: \$HOME/.local/bin.
 
 Environment:
-  SPARKWING_REPO     Override owner/repo (used for staging tests).
-  SPARKWING_OPENSSL  Path to an openssl that can verify ed25519 signatures.
+  SPARKWING_RELEASE_REPO  Override the release owner/repo (used for staging tests).
+  SPARKWING_OPENSSL       Path to an openssl that can verify ed25519 signatures.
 EOF
 }
 

@@ -35,12 +35,14 @@ func askRoute(t testing.TB, s *server, method, path, bearer, body string) reply 
 	}
 	return out
 }
+
 func wantRefusal(t testing.TB, got reply, status int, code string) {
 	t.Helper()
 	if got.status != status || failureCode(got) != code {
 		t.Fatalf("status %d body %v, want %d %s", got.status, got.body, status, code)
 	}
 }
+
 func TestUnavailableProcessServiceRefuses(t *testing.T) {
 	s := start(t)
 	bearer := admitService(t, s, newService(t))

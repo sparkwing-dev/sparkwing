@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/quicktest"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 )
@@ -157,7 +158,7 @@ func TestBillingModelDisputeOutcomePreservesStandingProperty(t *testing.T) {
 			t.Fatalf("dispute changed standing: seed=%d", seed)
 		}
 	}
-	if err := quick.Check(property, &quick.Config{MaxCount: 24, Rand: rand.New(rand.NewSource(1122))}); err != nil {
+	if err := quick.Check(property, quicktest.Config(&quick.Config{MaxCount: 24, Rand: rand.New(rand.NewSource(1122))})); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -191,7 +192,7 @@ func TestBillingModelCloudAdmissionCapacityProperty(t *testing.T) {
 		}
 		return true
 	}
-	if err := quick.Check(property, &quick.Config{MaxCount: 32, Rand: rand.New(rand.NewSource(112))}); err != nil {
+	if err := quick.Check(property, quicktest.Config(&quick.Config{MaxCount: 32, Rand: rand.New(rand.NewSource(112))})); err != nil {
 		t.Fatal(err)
 	}
 }
