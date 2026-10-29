@@ -32,5 +32,5 @@ func genCachedTest(ctx context.Context) error {
 }
 
 func init() {
-	sw.Register[sw.NoInputs]("cached-suite", func() sw.Pipeline[sw.NoInputs] { return &GenCachedSuite{} })
+	sw.Register[sw.NoInputs]("GenCachedSuite", func() sw.Pipeline[sw.NoInputs] { return &GenCachedSuite{} })
 }

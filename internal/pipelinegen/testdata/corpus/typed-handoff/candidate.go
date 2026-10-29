@@ -58,5 +58,5 @@ func (j *genHandoffDeploy) Work(w *sw.Work) (*sw.WorkStep, error) {
 }
 
 func init() {
-	sw.Register[sw.NoInputs]("typed-handoff", func() sw.Pipeline[sw.NoInputs] { return &GenTypedHandoff{} })
+	sw.Register[sw.NoInputs]("GenTypedHandoff", func() sw.Pipeline[sw.NoInputs] { return &GenTypedHandoff{} })
 }

@@ -31,6 +31,9 @@ definePipeline({
 await main();
 ```
 
+`name` is the registration key. The `entrypoint` of a `sparkwing.yaml`
+pipeline names it, and the run context's `pipeline` carries the invoked name.
+
 Declare allowed child runs with `job.startsChildren("deploy")` for the parent
 repository or `job.startsChildrenIn("gh:123", "publish")` for an explicit canonical
 repository key. Calls append targets and can be chained.

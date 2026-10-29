@@ -42,7 +42,7 @@ type CommandGenerator struct {
 
 func commandPrompt(spec Spec) string {
 	return fmt.Sprintf(
-		"Register the pipeline under the name %q with an entrypoint struct named %s.\n\n%s",
+		"sparkwing.yaml lists pipeline %q with entrypoint %q. Implement it as a struct named %[2]s and register it with sparkwing.Register(%[2]q, factory).\n\n%[3]s",
 		spec.Name, spec.Entrypoint, spec.Prompt,
 	)
 }

@@ -48,5 +48,5 @@ func (j *genStepSequenceJob) Work(w *sw.Work) (*sw.WorkStep, error) {
 }
 
 func init() {
-	sw.Register[sw.NoInputs]("step-sequence", func() sw.Pipeline[sw.NoInputs] { return &GenStepSequence{} })
+	sw.Register[sw.NoInputs]("GenStepSequence", func() sw.Pipeline[sw.NoInputs] { return &GenStepSequence{} })
 }

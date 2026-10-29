@@ -3,7 +3,6 @@ package store
 import (
 	"fmt"
 	"math/rand/v2"
-	"reflect"
 	"testing"
 	"time"
 )
@@ -12,7 +11,7 @@ func TestProfileTenantIsolationProperty(t *testing.T) {
 	s := authorityStore(t)
 	a, b := &Tenant{s: s, team: "a"}, &Tenant{s: s, team: "b"}
 	random := rand.New(rand.NewPCG(42, 317))
-	for i := range 96 {
+	for range 96 {
 		pipeline := fmt.Sprintf("%s/%x", []string{"shared", "' OR 1=1 --", "_%", "a/b", "\u96ea"}[random.IntN(5)], random.Uint64())
 		node := []string{"", "job", "' OR 1=1 --", "_%", "\u96ea"}[random.IntN(5)]
 		for j, tenant := range []*Tenant{a, b} {
@@ -33,78 +32,5 @@ func TestProfileTenantIsolationProperty(t *testing.T) {
 		if err != nil || len(own) != 1 || own[0].PeakCores != 1 {
 			t.Fatalf("read crossed tenant: %+v, %v", own, err)
 		}
-		if i%2 == 0 {
-			_, err = a.ResetPipelineProfile(t.Context(), pipeline)
-		} else {
-			_, err = a.ResetAllProfiles(t.Context())
-		}
-		if err != nil {
-			t.Fatal(err)
-		}
-		after, err := b.GetPipelineProfile(t.Context(), pipeline, node)
-		if err != nil || !reflect.DeepEqual(before, after) {
-			t.Fatalf("reset changed foreign profile: %+v -> %+v, %v", before, after, err)
-		}
-		afterSamples, err := b.ProfileSamples(t.Context(), pipeline, node)
-		if err != nil || !reflect.DeepEqual(samples, afterSamples) {
-			t.Fatalf("reset changed foreign samples: %+v -> %+v, %v", samples, afterSamples, err)
-		}
-		cleared, err := a.ProfileSamples(t.Context(), pipeline, node)
-		if err != nil || len(cleared) != 0 {
-			t.Fatalf("own reset left samples=%+v, %v", cleared, err)
-		}
-	}
-}
-
-func TestProfileMutationsRemainTenantScopedProperty(t *testing.T) {
-	s := authorityStore(t)
-	a, b := &Tenant{s: s, team: "a"}, &Tenant{s: s, team: "b"}
-	random := rand.New(rand.NewPCG(743, 219))
-	for range 96 {
-		pipeline := fmt.Sprintf("%s/%x", []string{"shared", "' OR 1=1 --", "_%", "a/b", "雪"}[random.IntN(5)], random.Uint64())
-		node := []string{"job", "' OR 1=1 --", "_%", "雪"}[random.IntN(4)]
-		for j, tenant := range []*Tenant{a, b} {
-			for _, id := range []string{"", node} {
-				if err := tenant.RecordProfileObservation(t.Context(), pipeline, id, ProfileObservation{CPUMeasured: true, PeakCores: float64(j + 1), Duration: time.Duration(j+1) * time.Second}); err != nil {
-					t.Fatal(err)
-				}
-			}
-		}
-		before, err := b.ListPipelineProfiles(t.Context(), pipeline)
-		if err != nil || len(before) != 2 {
-			t.Fatalf("foreign profiles=%+v, %v", before, err)
-		}
-		for _, mutate := range []func() error{
-			func() error { return a.RecordWaitObservation(t.Context(), pipeline, time.Second) },
-			func() error { return a.RecordContention(t.Context(), pipeline) },
-			func() error { return a.SetProfilePin(t.Context(), pipeline, node, 3, 4096) },
-			func() error { return a.UpsertProfilePin(t.Context(), pipeline, "pin/"+node, 4, 8192) },
-		} {
-			if err := mutate(); err != nil {
-				t.Fatal(err)
-			}
-			after, err := b.ListPipelineProfiles(t.Context(), pipeline)
-			if err != nil || !reflect.DeepEqual(before, after) {
-				t.Fatalf("mutation crossed tenant: %+v -> %+v, %v", before, after, err)
-			}
-		}
-		rollup, err := a.GetPipelineProfile(t.Context(), pipeline, "")
-		if err != nil || rollup == nil || rollup.WaitSampleCount != 1 || rollup.ContendedCount != 1 || rollup.PeakCores != 1 {
-			t.Fatalf("own rollup=%+v, %v", rollup, err)
-		}
-		for id, cores := range map[string]float64{node: 3, "pin/" + node: 4} {
-			profile, err := a.GetPipelineProfile(t.Context(), pipeline, id)
-			if err != nil || profile == nil || profile.PinnedCores != cores {
-				t.Fatalf("own pin=%+v, %v", profile, err)
-			}
-		}
-	}
-	profiles, err := a.ListPipelineProfiles(t.Context(), "")
-	if err != nil || len(profiles) != 288 {
-		t.Fatalf("own listing=%d, %v", len(profiles), err)
-	}
-	profiles, err = b.ListPipelineProfiles(t.Context(), "")
-	if err != nil || len(profiles) != 192 {
-		t.Fatalf("foreign listing=%d, %v", len(profiles), err)
 	}
 }

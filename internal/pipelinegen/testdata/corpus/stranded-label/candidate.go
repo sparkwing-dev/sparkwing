@@ -34,5 +34,5 @@ func genStrandedStep(ctx context.Context) error {
 }
 
 func init() {
-	sw.Register[sw.NoInputs]("stranded-label", func() sw.Pipeline[sw.NoInputs] { return &GenStrandedLabel{} })
+	sw.Register[sw.NoInputs]("GenStrandedLabel", func() sw.Pipeline[sw.NoInputs] { return &GenStrandedLabel{} })
 }

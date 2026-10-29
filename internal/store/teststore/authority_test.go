@@ -2,6 +2,7 @@ package teststore_test
 
 import (
 	"path/filepath"
+	"reflect"
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/store"
@@ -25,5 +26,29 @@ func TestAuthorityFixturesCommitAuthorizedWrites(t *testing.T) {
 	rate := int64(5)
 	if _, err := console.ConsoleSetCreditSettings(t.Context(), a, store.CreditSettingsUpdate{StorageRateMicroPerGBDay: &rate}); err != nil {
 		t.Fatalf("console write: %v", err)
+	}
+}
+
+func TestSeedCreditRatesMatchesTheConsoleWrite(t *testing.T) {
+	table := store.CreditRateTable{{Cores: 8, MicroPerSecond: 40}, {Cores: 4, MicroPerSecond: 20}}
+	read := func(seed func(*store.Store)) store.CreditSettings {
+		st, err := teststore.OpenExisting(filepath.Join(t.TempDir(), "state.db"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = st.Close() })
+		seed(st)
+		got, err := st.AsOperator().CreditSettings(t.Context())
+		if err != nil {
+			t.Fatal(err)
+		}
+		return got
+	}
+	want := read(func(st *store.Store) {
+		teststore.SetCreditSettings(t, st, store.CreditSettingsUpdate{RateTable: &table})
+	})
+	got := read(func(st *store.Store) { teststore.SeedCreditRates(t, st, table) })
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("seeded settings = %+v, console write = %+v", got, want)
 	}
 }

@@ -6,7 +6,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/projectconfig"
 )
 
-// PipelineIdentity separates the registered pipeline name from its Go type identity.
+// PipelineIdentity separates the invoked pipeline name from its SDK registration key.
 type PipelineIdentity struct {
 	Name       string
 	Entrypoint string

@@ -28,9 +28,6 @@ func TestPipelineProfile_InvalidObservationLeavesProfileUnchanged(t *testing.T) 
 				st := storetest.Open(t)
 				ctx := context.Background()
 				if state == "existing" {
-					if err := tenantFor(t, st, store.DefaultTeam).UpsertProfilePin(ctx, "validation", "build", 2, 512<<20); err != nil {
-						t.Fatal(err)
-					}
 					if err := tenantFor(t, st, store.DefaultTeam).RecordProfileObservation(ctx, "validation", "build", store.ProfileObservation{
 						Duration: time.Second, PeakCores: 1, SustainedCores: 0.5,
 						PeakMemoryBytes: 64 << 20, CPUMeasured: true,

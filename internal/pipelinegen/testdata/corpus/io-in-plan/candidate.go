@@ -34,5 +34,5 @@ func (j *genIOJob) Work(w *sw.Work) (*sw.WorkStep, error) {
 }
 
 func init() {
-	sw.Register[sw.NoInputs]("io-in-plan", func() sw.Pipeline[sw.NoInputs] { return &GenIOInPlan{} })
+	sw.Register[sw.NoInputs]("GenIOInPlan", func() sw.Pipeline[sw.NoInputs] { return &GenIOInPlan{} })
 }

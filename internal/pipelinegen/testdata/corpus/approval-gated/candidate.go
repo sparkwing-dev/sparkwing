@@ -44,5 +44,5 @@ func (j *genApprovalJob) Work(w *sw.Work) (*sw.WorkStep, error) {
 }
 
 func init() {
-	sw.Register[sw.NoInputs]("approval-gated", func() sw.Pipeline[sw.NoInputs] { return &GenApproval{} })
+	sw.Register[sw.NoInputs]("GenApproval", func() sw.Pipeline[sw.NoInputs] { return &GenApproval{} })
 }

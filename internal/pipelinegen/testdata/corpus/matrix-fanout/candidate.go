@@ -46,5 +46,5 @@ func genMatrixPublish(target string) func(ctx context.Context) error {
 }
 
 func init() {
-	sw.Register[sw.NoInputs]("matrix-fanout", func() sw.Pipeline[sw.NoInputs] { return &GenMatrix{} })
+	sw.Register[sw.NoInputs]("GenMatrix", func() sw.Pipeline[sw.NoInputs] { return &GenMatrix{} })
 }

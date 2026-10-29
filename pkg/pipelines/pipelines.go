@@ -20,18 +20,18 @@ type Config struct {
 	Pipelines []Pipeline `yaml:"pipelines"`
 }
 
-// Pipeline is one registry entry. A pipeline binds a Go entrypoint
-// (declared via the SDK's RegisterEntrypoint function) to one named
-// deployment shape: defaults, guards, dispatch metadata, and triggers.
-// One Go entrypoint can back many pipelines, each with its own policy.
+// Pipeline is one registry entry. A pipeline binds an SDK registration
+// to one named deployment shape: defaults, guards, dispatch metadata,
+// and triggers. One registration can back many pipelines, each with its
+// own policy.
 type Pipeline struct {
 	// Name is the invocable name (`sparkwing run <name>`), independent of
 	// the SDK registration key. It must match
 	// `^[A-Za-z0-9][A-Za-z0-9._-]*$`.
 	Name string `yaml:"name"`
 
-	// Entrypoint is the key the SDK's RegisterEntrypoint call registered
-	// this entry's pipeline under. Required.
+	// Entrypoint is the key the SDK registered this entry's pipeline
+	// under, such as sparkwing.Register("Deploy", ...). Required.
 	Entrypoint string `yaml:"entrypoint"`
 
 	// Source selects the Git ref to compile; jobs still execute in the submitted checkout.
@@ -775,8 +775,8 @@ func (c *Config) Names() []string {
 	return out
 }
 
-// EntrypointsByName returns a map of pipeline name -> entrypoint type
-// name.
+// EntrypointsByName returns a map of pipeline name -> SDK registration
+// key.
 func (c *Config) EntrypointsByName() map[string]string {
 	out := make(map[string]string, len(c.Pipelines))
 	for _, p := range c.Pipelines {

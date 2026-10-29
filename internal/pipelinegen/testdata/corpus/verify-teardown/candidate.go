@@ -57,5 +57,5 @@ func genFixtureTeardown(ctx context.Context) error {
 }
 
 func init() {
-	sw.Register[sw.NoInputs]("verify-teardown", func() sw.Pipeline[sw.NoInputs] { return &GenVerifyTeardown{} })
+	sw.Register[sw.NoInputs]("GenVerifyTeardown", func() sw.Pipeline[sw.NoInputs] { return &GenVerifyTeardown{} })
 }

@@ -112,7 +112,7 @@ func (p *Test) run(ctx context.Context) error {
 }
 
 func init() {
-	sparkwing.Register("test", func() sparkwing.Pipeline[sparkwing.NoInputs] { return &Test{} })
+	sparkwing.Register("Test", func() sparkwing.Pipeline[sparkwing.NoInputs] { return &Test{} })
 }
 EOF
 

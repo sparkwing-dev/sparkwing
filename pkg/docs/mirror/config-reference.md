@@ -9,7 +9,7 @@ Reference tables for selected `.sparkwing/sparkwing.yaml` structs, generated fro
 | Field | Type | Required | Description |
 |---|---|---|---|
 | `name` | `string` | **yes** | Name is the invocable name (`sparkwing run <name>`), independent of the SDK registration key. It must match `^[A-Za-z0-9][A-Za-z0-9._-]*$`. |
-| `entrypoint` | `string` | **yes** | Entrypoint is the key the SDK's RegisterEntrypoint call registered this entry's pipeline under. Required. |
+| `entrypoint` | `string` | **yes** | Entrypoint is the key the SDK registered this entry's pipeline under, such as sparkwing.Register("Deploy", ...). Required. |
 | `source` | `string` | no | Source selects the Git ref to compile; jobs still execute in the submitted checkout. |
 | `description` | `string` | no | Description is the one-line summary surfaced by `pipeline list`. |
 | `on` | `Triggers` | no | On declares the triggers that auto-fire this pipeline. Absent means manual-only (a command invoked by name). |

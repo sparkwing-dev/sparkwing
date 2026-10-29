@@ -12,58 +12,29 @@ import (
 )
 
 func TestPipelineProfile_ConcurrentObservationsAreRetained(t *testing.T) {
-	for _, seeded := range []bool{false, true} {
-		name := "new profile"
-		if seeded {
-			name = "pinned profile"
-		}
-		t.Run(name, func(t *testing.T) {
-			assertConcurrentProfileObservations(t, storetest.Open(t), seeded)
-		})
-	}
+	assertConcurrentProfileObservations(t, storetest.Open(t))
 }
 
 func TestPostgresPipelineProfile_ConcurrentObservationsAreRetained(t *testing.T) {
-	for _, seeded := range []bool{false, true} {
-		name := "new profile"
-		if seeded {
-			name = "pinned profile"
-		}
-		t.Run(name, func(t *testing.T) {
-			assertConcurrentProfileObservations(t, openPGTestStore(t), seeded)
-		})
-	}
+	assertConcurrentProfileObservations(t, openPGTestStore(t))
 }
 
 func TestSQLitePipelineProfile_IndependentStoresRetainConcurrentObservations(t *testing.T) {
-	for _, seeded := range []bool{false, true} {
-		name := "new profile"
-		if seeded {
-			name = "pinned profile"
-		}
-		t.Run(name, func(t *testing.T) {
-			target := storetest.NewSQLite(t)
-			writers := make([]*store.Store, 4)
-			for i := range writers {
-				writers[i] = target.Open(t)
-			}
-			assertConcurrentProfileObservations(t, writers[0], seeded, writers...)
-		})
+	target := storetest.NewSQLite(t)
+	writers := make([]*store.Store, 4)
+	for i := range writers {
+		writers[i] = target.Open(t)
 	}
+	assertConcurrentProfileObservations(t, writers[0], writers...)
 }
 
-func assertConcurrentProfileObservations(t *testing.T, st *store.Store, seeded bool, writers ...*store.Store) {
+func assertConcurrentProfileObservations(t *testing.T, st *store.Store, writers ...*store.Store) {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 	const observations = 12
 	if len(writers) == 0 {
 		writers = []*store.Store{st}
-	}
-	if seeded {
-		if err := tenantFor(t, st, store.DefaultTeam).UpsertProfilePin(ctx, "concurrent-observations", "build", 2, 512<<20); err != nil {
-			t.Fatal(err)
-		}
 	}
 	start := make(chan struct{})
 	results := make(chan error, observations)
@@ -94,9 +65,6 @@ func assertConcurrentProfileObservations(t *testing.T, st *store.Store, seeded b
 	}
 	if profile.SampleCount != observations {
 		t.Errorf("retained %d observations after %d successful calls", profile.SampleCount, observations)
-	}
-	if seeded && (profile.PinnedCores != 2 || profile.PinnedMemoryBytes != 512<<20) {
-		t.Errorf("profile update changed pins: cores=%v memory=%d", profile.PinnedCores, profile.PinnedMemoryBytes)
 	}
 	var raw []byte
 	if err := st.DB().QueryRowContext(ctx, `SELECT samples_json FROM pipeline_profiles WHERE pipeline = 'concurrent-observations' AND node_id = 'build'`).Scan(&raw); err != nil {

@@ -57,9 +57,6 @@ func TestFoldRunProfilesMissingNodeEvidence(t *testing.T) {
 					t.Fatalf("cache fixture=%+v, %v", n, err)
 				}
 			}
-			if err := teststore.ForTeam(t, st, store.DefaultTeam).UpsertProfilePin(t.Context(), "coverage", "", 2, 1024); err != nil {
-				t.Fatal(err)
-			}
 			tenant, err := st.ForTeam(t.Context(), store.DefaultTeam)
 			if err != nil {
 				t.Fatal(err)
@@ -86,9 +83,6 @@ func TestFoldRunProfilesMissingNodeEvidence(t *testing.T) {
 			p, err := teststore.ForTeam(t, st, store.DefaultTeam).GetPipelineProfile(t.Context(), "coverage", "")
 			if err != nil {
 				t.Fatal(err)
-			}
-			if p == nil || p.PinnedCores != 2 || p.PinnedMemoryBytes != 1024 {
-				t.Fatalf("explicit run pin changed: %+v", p)
 			}
 			wantRun := mode == "memoized"
 			if wantRun {

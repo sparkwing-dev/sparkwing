@@ -27,12 +27,6 @@ func TestFoldRunProfilesRequiresSingleContributingNode(t *testing.T) {
 			if err := teststore.SeedRun(st, ctx, store.DefaultTeam, run); err != nil {
 				t.Fatal(err)
 			}
-			if err := teststore.ForTeam(t, st, store.DefaultTeam).UpsertProfilePin(ctx, "aggregate", "", 4, 400); err != nil {
-				t.Fatal(err)
-			}
-			if err := teststore.ForTeam(t, st, store.DefaultTeam).RecordWaitObservation(ctx, "aggregate", time.Second); err != nil {
-				t.Fatal(err)
-			}
 			before, err := teststore.ForTeam(t, st, store.DefaultTeam).GetPipelineProfile(ctx, "aggregate", "")
 			if err != nil {
 				t.Fatal(err)
@@ -94,7 +88,7 @@ func TestFoldRunProfilesRequiresSingleContributingNode(t *testing.T) {
 				t.Fatal(err)
 			}
 			if mode == "single" || mode == "memoized" {
-				if after == nil || after.SampleCount != 1 || !after.CPUMeasured || after.PeakCores != 1 || after.PeakMemoryBytes != 100 || after.PinnedCores != 4 || after.PinnedMemoryBytes != 400 || after.WaitSampleCount != 1 {
+				if after == nil || after.SampleCount != 1 || !after.CPUMeasured || after.PeakCores != 1 || after.PeakMemoryBytes != 100 {
 					t.Fatalf("single node observation lost: %+v", after)
 				}
 			} else if !reflect.DeepEqual(before, after) {

@@ -1,16 +1,10 @@
 package sparkwing
 
 import (
-	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 )
-
-// ErrNoProject is returned by SDK helpers that resolve a relative path
-// when no working directory is known. errors.Is-check to distinguish it
-// from other I/O errors. Path() panics with the same message.
-var ErrNoProject = errors.New("sparkwing: no .sparkwing/ project found above cwd")
 
 // Path joins parts onto WorkDir() and returns the absolute path.
 // The first absolute part wins -- subsequent absolute parts are
@@ -23,12 +17,12 @@ var ErrNoProject = errors.New("sparkwing: no .sparkwing/ project found above cwd
 // not it sits inside a Sparkwing project.
 func Path(parts ...string) string {
 	if len(parts) == 0 {
-		return requireWorkDir()
+		return WorkDir()
 	}
 	if filepath.IsAbs(parts[0]) {
 		return filepath.Join(parts...)
 	}
-	return filepath.Join(append([]string{requireWorkDir()}, parts...)...)
+	return filepath.Join(append([]string{WorkDir()}, parts...)...)
 }
 
 // ReadFile reads the named file. Relative paths resolve against
@@ -39,11 +33,7 @@ func Path(parts ...string) string {
 //
 // Wraps os.ReadFile.
 func ReadFile(path string) ([]byte, error) {
-	resolved, err := resolvePath(path)
-	if err != nil {
-		return nil, fmt.Errorf("sparkwing.ReadFile(%q): %w", path, err)
-	}
-	return os.ReadFile(resolved)
+	return os.ReadFile(resolvePath(path))
 }
 
 // WriteFile writes data to the named file with perm 0o644 (creating
@@ -55,11 +45,7 @@ func ReadFile(path string) ([]byte, error) {
 // Use os.WriteFile directly for
 // non-default permissions.
 func WriteFile(path string, data []byte) error {
-	resolved, err := resolvePath(path)
-	if err != nil {
-		return fmt.Errorf("sparkwing.WriteFile(%q): %w", path, err)
-	}
-	return os.WriteFile(resolved, data, 0o644)
+	return os.WriteFile(resolvePath(path), data, 0o644)
 }
 
 // Glob expands a shell-style glob pattern. Relative patterns resolve
@@ -74,35 +60,16 @@ func WriteFile(path string, data []byte) error {
 // repo-aware matching with `**`, use inputs.Files / inputs.RepoFiles
 // in a MemoInput recipe instead.
 func Glob(pattern string) ([]string, error) {
-	resolved, err := resolvePath(pattern)
-	if err != nil {
-		return nil, fmt.Errorf("sparkwing.Glob(%q): %w", pattern, err)
-	}
-	matches, err := filepath.Glob(resolved)
+	matches, err := filepath.Glob(resolvePath(pattern))
 	if err != nil {
 		return nil, fmt.Errorf("sparkwing.Glob(%q): %w", pattern, err)
 	}
 	return matches, nil
 }
 
-func requireWorkDir() string {
-	wd := WorkDir()
-	if wd == "" {
-		panic(ErrNoProject)
-	}
-	return wd
-}
-
-func resolvePath(p string) (string, error) {
+func resolvePath(p string) string {
 	if filepath.IsAbs(p) {
-		return p, nil
+		return p
 	}
-	wd := WorkDir()
-	if wd == "" {
-		return "", ErrNoProject
-	}
-	if p == "" {
-		return wd, nil
-	}
-	return filepath.Join(wd, p), nil
+	return filepath.Join(WorkDir(), p)
 }

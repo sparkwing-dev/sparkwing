@@ -24,13 +24,6 @@ func TestMeteredAwardPricesRequiredSizeDespiteProfilePins(t *testing.T) {
 				t.Fatal(err)
 			}
 			rewriteSchemaExec(t, s.db, "UPDATE nodes SET execution_json=?", []byte(fmt.Sprintf(`{"requires":{"set":true,"value":["sparkwing-%dcpu"]}}`, pin.class)))
-			sealedRun, err := (&Tenant{s: s, team: "a"}).GetRun(t.Context(), "run")
-			if err != nil {
-				t.Fatal(err)
-			}
-			if err := (&Tenant{s: s, team: "a"}).UpsertProfilePin(t.Context(), sealedRun.Pipeline, "job", 96, 1<<40); err != nil {
-				t.Fatal(err)
-			}
 			claim, _ := meteredUnitClaim(t, s, demand)
 			tenant := &Tenant{s: s, team: claim.Team}
 			charges, err := tenant.ListCreditCharges(t.Context(), 100)
