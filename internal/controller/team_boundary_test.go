@@ -143,7 +143,7 @@ func newTenancyFixture(t *testing.T, open func(*testing.T, ...store.Option) *sto
 
 	f.runA = "run-team-a"
 	seedRun(t, st, f.teamA, f.runA, "build-a")
-	if err := teststore.SeedNode(st, ctx, store.Node{RunID: f.runA, NodeID: "n1", Status: "pending"}); err != nil {
+	if err := teststore.SeedNode(st, ctx, store.Node{RunID: f.runA, NodeID: "n1", Status: "approval_pending"}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := teststore.SQL(t, st).ExecContext(ctx, `INSERT INTO approvals(team,run_id,node_id,requested_at,message,on_timeout) VALUES ($1,$2,$3,$4,$5,$6)`, f.teamA.Team(), f.runA, "n1", now.UnixNano(), "", "fail"); err != nil {

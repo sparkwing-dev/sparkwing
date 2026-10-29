@@ -103,7 +103,7 @@ func ownerDemandEligibleTx(ctx context.Context, tx *storeTx, owner capability.Pr
 	return err == nil, err
 }
 
-func ownerEligibleNodesTx(ctx context.Context, tx *storeTx, owner capability.Principal, demand UnitDemand) (map[runspec.NodeRef]bool, error) {
+func ownerEligibleNodesTx(ctx context.Context, tx *storeTx, owner capability.Principal, demand UnitDemand) (_ map[runspec.NodeRef]bool, err error) {
 	unit := UnitRef{Kind: capability.UnitNode, RunID: runspec.RunID(owner.Capability.Binding.RunID)}
 	if _, err := claimKinds(owner.Capability, UnitDemand{Target: &unit}); err != nil {
 		return nil, nil
@@ -118,7 +118,7 @@ func ownerEligibleNodesTx(ctx context.Context, tx *storeTx, owner capability.Pri
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer closeRowsInto(rows, &err)
 	eligible := make(map[runspec.NodeRef]bool)
 	for rows.Next() {
 		var team Team
@@ -128,5 +128,5 @@ func ownerEligibleNodesTx(ctx context.Context, tx *storeTx, owner capability.Pri
 		}
 		eligible[runspec.NodeRef{RunID: selected.RunID, NodeID: selected.NodeID}] = true
 	}
-	return eligible, errors.Join(rows.Err(), rows.Close())
+	return eligible, rows.Err()
 }
