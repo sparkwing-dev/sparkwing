@@ -2,9 +2,11 @@ package controller
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"testing"
 
+	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controller/client"
 	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
@@ -55,5 +57,16 @@ func TestPrivateNodeRecoveryReadsOnlyItsPersistedSource(t *testing.T) {
 	}
 	if _, err := cfg.ReadFailure(t.Context(), source, 5); err == nil {
 		t.Fatal("recovery read a different source generation")
+	}
+	key := blob.RecordKey{Team: "a", Kind: blob.KindManifest, Scope: blob.Scope{Repo: "gh:1", Job: "source"}, Name: "result"}
+	raw, err := json.Marshal(key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	engineSQL(t, server.store, `UPDATE nodes SET manifest_record=? WHERE run_id='run' AND node_id='source'`, raw)
+	engineSQL(t, server.store, `UPDATE nodes SET spec_json=? WHERE run_id='run' AND node_id='recovery'`, []byte(`{"id":"recovery","on_failure_of":"source","consumes":[{"producer":"source"}]}`))
+	row, err = host.ReadNode(t.Context(), source)
+	if err != nil || row.ManifestRecord == nil || *row.ManifestRecord != key || row.Generation != 4 || row.Outcome != runstate.NodeFailed {
+		t.Fatalf("recovery lost its source artifact selector: %+v %v", row, err)
 	}
 }

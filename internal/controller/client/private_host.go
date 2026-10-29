@@ -142,6 +142,9 @@ func (c *LocalHostClient) ReadNode(ctx context.Context, ref runspec.NodeRef) (ru
 			return result, localHostClientRefusal()
 		}
 		if source := snapshot.RecoverySource; source != nil && source.Ref == ref {
+			if key, ok := snapshot.ArtifactSources[string(ref.NodeID)]; ok {
+				source.ManifestRecord = &key
+			}
 			return *source, nil
 		}
 		if key, ok := snapshot.ArtifactSources[string(ref.NodeID)]; ok {
