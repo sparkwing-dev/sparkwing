@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"database/sql"
 	"encoding/base64"
 	"fmt"
 	"reflect"
@@ -233,5 +234,34 @@ func TestAccountDeletionDropsOnlyItsPrivateControlReceiptsProperty(t *testing.T)
 	}
 	if err := quick.Check(property, &quick.Config{MaxCount: 12}); err != nil {
 		t.Fatal(err)
+	}
+}
+
+type approvalRow []any
+
+func (r approvalRow) Scan(dest ...any) error {
+	for i, value := range r {
+		switch target := dest[i].(type) {
+		case *string:
+			*target = value.(string)
+		case *int64:
+			*target = value.(int64)
+		case *sql.NullInt64:
+			*target = sql.NullInt64{Int64: value.(int64), Valid: true}
+		default:
+			return fmt.Errorf("unexpected scan target %T", dest[i])
+		}
+	}
+	return nil
+}
+
+func TestApprovalTimesReadBackInUTCSoAReplayEqualsTheFirstAnswer(t *testing.T) {
+	at := time.Date(2023, time.November, 14, 22, 13, 20, 0, time.UTC).UnixNano()
+	approval, err := scanApproval(approvalRow{"run", "gate", at, "", int64(1000), "fail", "member", at, "approved", "note"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if approval.RequestedAt.Location() != time.UTC || approval.ResolvedAt == nil || approval.ResolvedAt.Location() != time.UTC {
+		t.Fatalf("approval times are not UTC: %v %v", approval.RequestedAt.Location(), approval.ResolvedAt)
 	}
 }
