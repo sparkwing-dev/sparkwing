@@ -73,7 +73,13 @@ func (l *Launcher) checkJob(ctx context.Context, job *batchv1.Job, binding Cloud
 	if err := awardPod(&want, template); err != nil {
 		return &podMismatch{message: fmt.Sprintf("Cloud Job %s: %v", job.Name, err)}
 	}
-	pods, err := l.Kube.CoreV1().Pods(l.Config.Namespace).List(ctx, metav1.ListOptions{LabelSelector: JobLabel + "=" + job.Name})
+	list := metav1.ListOptions{LabelSelector: JobLabel + "=" + job.Name}
+	if l.jobPodChecked(job.UID) {
+		// perf: once the Job's Pod is checked, each pass only watches for a replacement, which the API server's
+		// cache answers without a quorum read; a stale answer only delays that detection by a pass.
+		list.ResourceVersion = "0"
+	}
+	pods, err := l.Kube.CoreV1().Pods(l.Config.Namespace).List(ctx, list)
 	if err != nil {
 		return err
 	}
@@ -104,6 +110,12 @@ func (l *Launcher) podChecked(job, pod types.UID) bool {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	return l.checked[job][pod]
+}
+
+func (l *Launcher) jobPodChecked(job types.UID) bool {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return len(l.checked[job]) > 0
 }
 
 func (l *Launcher) markPodChecked(job, pod types.UID) {
