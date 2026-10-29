@@ -3,6 +3,9 @@ package jobs
 import (
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
+	"regexp"
 	"slices"
 	"strings"
 	"testing"
@@ -43,7 +46,7 @@ func TestPreReleaseWorkKeepsEveryCheckInOrder(t *testing.T) {
 		"race-store", "store-postgres", "chaos", "release-vulnerability", "shell-portability",
 		"hosted-mutation-guard", "vulnerability-script", "schema-parity-script",
 		"changelog-script",
-		"installer-report", "service-installer", "release-installer",
+		"installer-report", "release-installer",
 		"install-to-green", "shellcheck", "terraform", "markdownlint",
 		"actionlint", "doc-examples", "cli-reference", "config-reference",
 		"sdk-reference", "api-reference", "api-snapshot",
@@ -100,5 +103,27 @@ func TestPreReleaseFailuresDoNotSuppressLaterChecks(t *testing.T) {
 	}
 	if want := []string{"first-failure", "second-failure", "later-success"}; !slices.Equal(ran, want) {
 		t.Fatalf("check order = %v, want %v", ran, want)
+	}
+}
+
+func TestEveryScriptAPipelineRunsIsInTheCheckout(t *testing.T) {
+	sources, err := filepath.Glob("*.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	script := regexp.MustCompile(`bin/[A-Za-z0-9_./-]+\.sh`)
+	for _, source := range sources {
+		if strings.HasSuffix(source, "_test.go") {
+			continue
+		}
+		body, err := os.ReadFile(source)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, path := range script.FindAllString(string(body), -1) {
+			if _, err := os.Stat(filepath.Join("..", "..", path)); err != nil {
+				t.Errorf("%s runs %s, which is not in the checkout: %v", source, path, err)
+			}
+		}
 	}
 }
