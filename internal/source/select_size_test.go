@@ -99,6 +99,18 @@ func TestTenantSelectionNeverDownloadsAnOversizedConfiguration(t *testing.T) {
 	}
 }
 
+func TestTenantSelectionAllowsAnAbsentConfiguration(t *testing.T) {
+	repo, execution := sourcetest.Repository(t)
+	sourcetest.Git(t, repo, "config", "uploadpack.allowFilter", "true")
+	remote := "https://8.8.8.8/team/no-config"
+	sourcetest.Remote(t, map[string]string{remote: "file://" + repo})
+	options := source.Options{Workspace: t.TempDir(), Access: &access{}, Base: procenv.Base{Ambient: sourcetest.Environment(t)}, BuildEnvironment: sourcetest.BuildEnvironment}
+	_, _, cfg, err := source.Select(t.Context(), source.Spec{RepoKey: "git:8.8.8.8/team/no-config", RemoteURL: remote}, "build", runspec.Git{SHA: execution}, runspec.Source{}, "", options)
+	if err != nil || cfg != nil {
+		t.Fatalf("absent tenant configuration = %v, %v", cfg, err)
+	}
+}
+
 func shellWord(s string) string { return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'" }
 
 func TestTenantSelectionReportsAGitFailureAsItself(t *testing.T) {

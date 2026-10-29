@@ -87,11 +87,10 @@ func readCommitFile(ctx context.Context, spec Spec, sha, name string, options Op
 		return nil, false, err
 	}
 	parent := options.Workspace
-	if parent == "" {
-		parent = os.TempDir()
-	}
-	if err := fssecure.EnsureDir(parent); err != nil {
-		return nil, false, err
+	if parent != "" {
+		if err := fssecure.EnsureDir(parent); err != nil {
+			return nil, false, err
+		}
 	}
 	workspace, err := fssecure.MkdirPrivateTemp(parent, "selection-")
 	if err != nil {
@@ -114,10 +113,9 @@ func readCommitFile(ctx context.Context, spec Spec, sha, name string, options Op
 	if _, err := client.run(ctx, repository, remote, "fetch", "--quiet", "--no-tags", "--no-recurse-submodules", "--no-write-fetch-head", "--depth=1", "--filter=blob:limit="+strconv.FormatInt(limits.ProjectConfigBytes+1, 10), "--", remote, sha); err != nil {
 		return nil, false, err
 	}
-	// safety: an oversized blob the remote omitted must stay absent rather than
-	// be fetched lazily; readCommittedBlob still refuses one the remote sent.
+	// safety: cat-file must not fetch a blob that the size filter omitted.
 	local := *client
-	local.env = append(append([]string{}, client.env...), "GIT_NO_LAZY_FETCH=1")
+	local.env = append(append([]string{}, client.env...), "GIT_ALLOW_PROTOCOL=")
 	return readCommittedBlob(ctx, &local, repository, sha+":"+name)
 }
 

@@ -979,17 +979,33 @@ func renderNotes(t *testing.T, sets ...string) string {
 	if err != nil {
 		t.Skip("helm not installed; chart rendering not exercised")
 	}
-	args := helmArgs("./sparkwing-full", "sparkwing", sets)
-	args[0] = "install"
-	out, err := exec.Command(helm, append(args, "--dry-run=client")...).CombinedOutput()
+	chart := filepath.Join(t.TempDir(), "sparkwing-full")
+	if err := os.CopyFS(chart, os.DirFS("sparkwing-full")); err != nil {
+		t.Fatal(err)
+	}
+	notes, err := os.ReadFile(filepath.Join(chart, "templates", "NOTES.txt"))
 	if err != nil {
-		t.Fatalf("helm install --dry-run: %v\n%s", err, out)
+		t.Fatal(err)
 	}
-	_, notes, ok := strings.Cut(string(out), "NOTES:")
-	if !ok {
-		t.Fatalf("helm install --dry-run printed no NOTES:\n%s", out)
+	if err := os.WriteFile(filepath.Join(chart, "notes.txt"), notes, 0o600); err != nil {
+		t.Fatal(err)
 	}
-	return notes
+	fixture := "apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: notes\ndata:\n  notes: |\n{{ tpl (.Files.Get \"notes.txt\") . | indent 4 }}\n"
+	if err := os.WriteFile(filepath.Join(chart, "templates", "test-notes.yaml"), []byte(fixture), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	args := helmArgs(chart, "sparkwing", sets, "--show-only", "templates/test-notes.yaml")
+	out, err := exec.Command(helm, args...).CombinedOutput()
+	if err != nil {
+		t.Fatalf("helm template: %v\n%s", err, out)
+	}
+	var rendered struct {
+		Data map[string]string `yaml:"data"`
+	}
+	if err := yaml.Unmarshal(out, &rendered); err != nil {
+		t.Fatalf("parse rendered notes: %v\n%s", err, out)
+	}
+	return rendered.Data["notes"]
 }
 
 // safety: the notes are the first instructions an operator follows, and an

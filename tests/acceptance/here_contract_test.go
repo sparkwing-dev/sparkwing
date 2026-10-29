@@ -24,7 +24,7 @@ func TestHereResumeClaimContract(t *testing.T) {
 			if err != nil || inv.Pipeline != "" || len(inv.Args) != 0 || inv.Value("resume") != "here-run" {
 				t.Fatalf("resume grammar: %#v %v", inv, err)
 			}
-			claimBy := time.Unix(1, 0)
+			claimBy := time.Unix(1, 0).UTC()
 			want := controllerwire.ClaimedUnit{
 				Unit: capability.UnitTrigger, Purpose: capability.PurposeHere, Delivery: capability.DeliveryDirect,
 				RunID: "here-run", UnitID: "trigger", Capability: "new-private-owner-bearer",
@@ -48,7 +48,7 @@ func TestHereResumeClaimContract(t *testing.T) {
 			}
 			got, err := c.Claim(t.Context(), controllerwire.ClaimRequest{RunID: "here-run", Kinds: []capability.UnitKind{capability.UnitTrigger}})
 			if err != nil || calls != 1 || !reflect.DeepEqual(got.Claim, &want) {
-				t.Fatal("here reclaim changed the server's seal or fence")
+				t.Fatalf("here reclaim: calls=%d claim=%+v, want %+v, err=%v", calls, got.Claim, &want, err)
 			}
 		})
 	}

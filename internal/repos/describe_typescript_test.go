@@ -18,16 +18,23 @@ func typeScriptRepo(t *testing.T, pipeline string) string {
 	if err != nil {
 		t.Fatal(err)
 	}
+	fixtureSDK := t.TempDir()
+	if err := os.WriteFile(filepath.Join(fixtureSDK, "package.json"), []byte(`{"name":"@sparkwing/sdk","type":"module","exports":{".":"./src/index.ts"}}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join(sdk, "src"), filepath.Join(fixtureSDK, "src")); err != nil {
+		t.Fatal(err)
+	}
 	repo := t.TempDir()
 	dir := filepath.Join(repo, ".sparkwing")
 	if err := os.MkdirAll(filepath.Join(dir, "node_modules", "@sparkwing"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.Symlink(sdk, filepath.Join(dir, "node_modules", "@sparkwing", "sdk")); err != nil {
+	if err := os.Symlink(fixtureSDK, filepath.Join(dir, "node_modules", "@sparkwing", "sdk")); err != nil {
 		t.Fatal(err)
 	}
 	files := map[string]string{
-		"package.json": `{"type":"module","main":"pipeline.ts","dependencies":{"@sparkwing/sdk":"file:` + sdk + `"}}`,
+		"package.json": `{"type":"module","main":"pipeline.ts","dependencies":{"@sparkwing/sdk":"file:` + fixtureSDK + `"}}`,
 		"pipeline.ts":  pipeline,
 	}
 	for name, body := range files {

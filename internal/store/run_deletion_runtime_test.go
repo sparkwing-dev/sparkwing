@@ -13,6 +13,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/internal/storetest"
+	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
 )
 
 func TestAuthorizedRunDeletionPreservesBillingAndAllowsCleanupReplay(t *testing.T) {
@@ -112,7 +113,7 @@ func TestAuthorizedRunDeletionPreservesBillingAndAllowsCleanupReplay(t *testing.
 			if _, err := s.DB().Exec(`INSERT INTO log_streams(team,run_id,id,subject_kind,generation,unit_kind,prefix,retention_class,created_at,updated_at) VALUES (?,?,'stream','owner_unit',1,'plan','stream','r30',1,1)`, tenant.Team(), row.ID); err != nil {
 				t.Fatal(err)
 			}
-			if _, err := s.DB().Exec(`INSERT INTO log_slots(team,run_id,stream_id,generation,n,size,committed,object_key,created_at) VALUES (?,?,'stream',1,1,8,1,'key',?)`, tenant.Team(), row.ID, time.Now().UnixNano()); err != nil {
+			if _, err := s.DB().Exec(`INSERT INTO log_slots(team,run_id,stream_id,generation,n,size,committed,object_key,created_at) VALUES (?,?,'stream',1,1,8,1,'key',?)`, tenant.Team(), row.ID, teststore.Now(s).UnixNano()); err != nil {
 				t.Fatal(err)
 			}
 			// A live upload deadline refuses deletion: a saved URL could recreate the deleted object uncounted.
@@ -120,7 +121,7 @@ func TestAuthorizedRunDeletionPreservesBillingAndAllowsCleanupReplay(t *testing.
 			if err := tenant.DeleteAuthorizedRun(t.Context(), a, func(context.Context) error { t.Fatal("logs deleted while still uploading"); return nil }); !errors.As(err, &uploading) || uploading.Code != apierr.Conflict || !strings.Contains(uploading.Message, "still uploading") {
 				t.Fatalf("deletion within the upload deadline = %v; want a conflict", err)
 			}
-			if _, err := s.DB().Exec(`UPDATE log_slots SET created_at=? WHERE team=? AND run_id=?`, time.Now().Add(-limits.LogUploadURLTTL-time.Second).UnixNano(), tenant.Team(), row.ID); err != nil {
+			if _, err := s.DB().Exec(`UPDATE log_slots SET created_at=? WHERE team=? AND run_id=?`, teststore.Now(s).Add(-limits.LogUploadURLTTL-time.Second).UnixNano(), tenant.Team(), row.ID); err != nil {
 				t.Fatal(err)
 			}
 			retained, err := tenant.StorageRetainedBytes(t.Context())
