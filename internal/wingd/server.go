@@ -1930,7 +1930,7 @@ func (d *Daemon) runConnsLocked(runID string) []*conn {
 		out = append(out, own)
 	}
 	for c := range d.conns {
-		if c.ownerRunID != runID || c.runID == runID {
+		if (c.ownerRunID != runID && string(wingwire.HolderRef(c.runID).RunID()) != runID) || c.runID == runID {
 			continue
 		}
 		if c.role != roleWaiter && c.role != roleHolder {
@@ -1953,7 +1953,7 @@ func resolveRelativePriority(snap admission.Snapshot, runID, mode string) (int, 
 	}
 	others := make([]wingwire.Waiter, 0, len(snap.Waiters))
 	for _, w := range snap.Waiters {
-		if w.RequestID == runID || w.OwnerID == runID {
+		if w.RequestID == runID || w.OwnerID == runID || string(wingwire.HolderRef(w.RequestID).RunID()) == runID {
 			continue
 		}
 		others = append(others, wingwire.Waiter{Priority: w.Priority})
@@ -1966,7 +1966,7 @@ func resolveRelativePriority(snap admission.Snapshot, runID, mode string) (int, 
 // queue view prints, so an operator can compare the two.
 func runQueuePosition(snap admission.Snapshot, runID string) int {
 	for i, w := range snap.Waiters {
-		if w.RequestID == runID || w.OwnerID == runID {
+		if w.RequestID == runID || w.OwnerID == runID || string(wingwire.HolderRef(w.RequestID).RunID()) == runID {
 			return i + 1
 		}
 	}
