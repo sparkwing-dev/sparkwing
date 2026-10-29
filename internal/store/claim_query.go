@@ -406,7 +406,7 @@ func (q *claimSQL) predicate() string {
 	burst := `(` + w("burst") + ` IS NULL OR (` + f("here_run") + `=w.run_id AND w.kind<>'node') OR EXISTS (SELECT 1 FROM ` + q.array(w("burst", "preferences"), "step") + ` WHERE (` + q.at("step.value", "target") + `='cloud' AND ` + n("cloud") + `=1) OR (` + q.at("step.value", "target") + `='here' AND ` + f("here_run") + `=w.run_id) OR (` + q.at("step.value", "target") + `='machines' AND ` + n("personal") + `=1) OR ((` + n("personal") + `=1 OR ` + f("here_run") + `=w.run_id) AND ` + q.contains(f("labels"), q.at("step.value", "target")) + `)))`
 	foreground := `w.kind<>'trigger' OR COALESCE(` + q.at("w.request", "run_id") + `,'')<>w.run_id OR COALESCE(CAST(` + w("local_foreground") + ` AS TEXT),'false') NOT IN ('true','1') OR EXISTS (SELECT 1 FROM triggers ft WHERE ft.team=w.team AND ft.id=w.run_id AND ft.generation>0)`
 	foreground += ` OR (` + n("current") + `=1 AND ` + n("named") + `=1 AND ` + n("local") + `=1 AND ` + f("name") + `=w.created_principal)`
-	guards := `(w.kind NOT IN ('node','eval') OR ` + `CAST(` + q.at("w.spec", "resolved", "guards", "passed") + ` AS TEXT) IN ('true','1') OR (COALESCE(` + q.at("w.spec", "resolved", "guards", "when") + `,'[]')='[]' AND COALESCE(` + q.at("w.spec", "resolved", "guards", "unless") + `,'[]')='[]' AND COALESCE(` + q.at("w.spec", "resolved", "guards", "reason") + `,'')=''))`
+	guards := `(w.kind NOT IN ('node','eval') OR ` + `CAST(` + q.at("w.guards", "passed") + ` AS TEXT) IN ('true','1') OR (COALESCE(` + q.at("w.guards", "when") + `,'[]')='[]' AND COALESCE(` + q.at("w.guards", "unless") + `,'[]')='[]' AND COALESCE(` + q.at("w.guards", "reason") + `,'')=''))`
 	// Facts that no claimant carries need no correlated relation in the query plan.
 	any := func(test func(claimFacts) bool) bool { return slices.ContainsFunc(q.facts, test) }
 	if !any(func(f claimFacts) bool { return len(f.Scopes) > 0 }) {
@@ -694,7 +694,7 @@ func (q *claimSQL) query(facts []claimFacts, teams []claimTeamFacts, rates Credi
 	}
 	writer := q.at(request, "provenance", "writer")
 	account, machine := writerPrincipalSQL(writer, "account"), writerPrincipalSQL(writer, "machine")
-	raw := `SELECT ready.team,ready.run_id,ready.node_id,ready.source_generation,ready.arrived,ready.kind,ready.requirements,r.repo_key,r.repo_display,` + repository + ` AS repository,` + request + ` AS request,` + spec + ` AS spec,` + selectors + ` AS selectors,` + prefers + ` AS preferences,r.created_principal,tm.claim_ranking,tm.claim_award_ordinal,
+	raw := `SELECT ready.team,ready.run_id,ready.node_id,ready.source_generation,ready.arrived,ready.kind,ready.requirements,r.repo_key,r.repo_display,` + repository + ` AS repository,` + request + ` AS request,` + q.at(spec, "resolved", "guards") + ` AS guards,` + selectors + ` AS selectors,` + prefers + ` AS preferences,r.created_principal,tm.claim_ranking,tm.claim_award_ordinal,
  CASE WHEN (` + account + `)<>'' THEN ` + account + ` WHEN (` + machine + `)<>'' THEN (SELECT CASE WHEN COUNT(*)>0 AND COUNT(DISTINCT m.created_by)=1 AND MIN(CASE WHEN COALESCE(CAST(` + q.at(q.blob("m.authority_json"), "origin", "personal") + ` AS TEXT),'false') IN ('true','1') AND m.created_by<>'' THEN 1 ELSE 0 END)=1 THEN MIN(m.created_by) ELSE '' END FROM capabilities m WHERE m.team=r.team AND m.subject_id=(` + machine + `) AND m.subject_kind='machine' AND m.bind_kind='none' AND m.parent_id IS NULL) ELSE '' END AS requester
  FROM ready JOIN runs r ON r.team=ready.team AND r.id=ready.run_id JOIN teams tm ON tm.name=r.team JOIN clock ON TRUE
  WHERE r.team IN (` + liveTeamsSQL + `) AND r.status IN ('pending','running') AND r.cancel_requested_at IS NULL AND r.intake_mode='execute' AND NOT EXISTS (SELECT 1 FROM triggers deadline WHERE deadline.team=r.team AND deadline.id=r.id AND deadline.expires_at<=clock.now)`
@@ -762,7 +762,10 @@ func (q *claimSQL) query(facts []claimFacts, teams []claimTeamFacts, rates Credi
 	if q.ordinal != nil {
 		final += ` AND w.claim_award_ordinal=` + q.param(*q.ordinal)
 	}
-	final += ` ORDER BY w.claim_award_ordinal,w.arrived,w.team,w.run_id,w.kind,w.node_id,w.source_generation LIMIT 1`
+	final += ` ORDER BY w.claim_award_ordinal,w.arrived,w.team,w.run_id,w.kind,w.node_id,w.source_generation`
+	if !q.projected || demand.Target != nil {
+		final += ` LIMIT 1`
+	}
 	return ctes + final, nil
 }
 

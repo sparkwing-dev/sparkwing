@@ -102,3 +102,31 @@ func ownerDemandEligibleTx(ctx context.Context, tx *storeTx, owner capability.Pr
 	}
 	return err == nil, err
 }
+
+func ownerEligibleNodesTx(ctx context.Context, tx *storeTx, owner capability.Principal, demand UnitDemand) (map[runspec.NodeRef]bool, error) {
+	unit := UnitRef{Kind: capability.UnitNode, RunID: runspec.RunID(owner.Capability.Binding.RunID)}
+	if _, err := claimKinds(owner.Capability, UnitDemand{Target: &unit}); err != nil {
+		return nil, nil
+	}
+	demand.Target, demand.Kinds = nil, nil
+	q := claimSQL{projected: true}
+	query, err := claimQueryTx(ctx, tx, demand, []capability.UnitKind{capability.UnitNode}, &q)
+	if err != nil {
+		return nil, err
+	}
+	rows, err := tx.queryContext(ctx, query, q.args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	eligible := make(map[runspec.NodeRef]bool)
+	for rows.Next() {
+		var team Team
+		var selected UnitRef
+		if err := rows.Scan(&team, &selected.RunID, &selected.NodeID, &selected.SourceGeneration, &selected.Kind); err != nil {
+			return nil, err
+		}
+		eligible[runspec.NodeRef{RunID: selected.RunID, NodeID: selected.NodeID}] = true
+	}
+	return eligible, errors.Join(rows.Err(), rows.Close())
+}
