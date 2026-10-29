@@ -6,7 +6,7 @@ import (
 )
 
 func TestRunCommandsDispatchThroughFinalNames(t *testing.T) {
-	for _, subcommand := range cmdJobs.SubcommandOrder {
+	for _, subcommand := range surfaceCommand("sparkwing runs").SubcommandOrder {
 		t.Run(subcommand, func(t *testing.T) {
 			var commandErr error
 			out := captureStdout(t, func() {

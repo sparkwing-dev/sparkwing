@@ -105,7 +105,7 @@ func TestCommandsJSONOmitsHiddenUnlessAsked(t *testing.T) {
 
 func TestHelpJSONStillCarriesFullDetail(t *testing.T) {
 	var buf bytes.Buffer
-	if err := writeCommandHelp(cmdCommands, &buf, "json"); err != nil {
+	if err := writeCommandHelp(surfaceCommand("sparkwing commands"), &buf, "json"); err != nil {
 		t.Fatal(err)
 	}
 

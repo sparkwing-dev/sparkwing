@@ -52,7 +52,7 @@ func TestPrintHelpDistinguishesOptionalSubcommands(t *testing.T) {
 	}{
 		{
 			name: "command group",
-			cmd:  cmdQueue,
+			cmd:  surfaceCommand("sparkwing queue"),
 			want: "  sparkwing queue <subcommand> [flags]\n",
 		},
 		{
@@ -62,12 +62,12 @@ func TestPrintHelpDistinguishesOptionalSubcommands(t *testing.T) {
 		},
 		{
 			name: "command group with flags",
-			cmd:  cmdVersion,
+			cmd:  surfaceCommand("sparkwing version"),
 			want: "  sparkwing version <subcommand> [flags]\n",
 		},
 		{
 			name: "command group",
-			cmd:  cmdJobs,
+			cmd:  surfaceCommand("sparkwing runs"),
 			want: "  sparkwing runs <subcommand> [flags]\n",
 		},
 	}
@@ -105,7 +105,7 @@ func TestCommandFlagsAreUnique(t *testing.T) {
 
 func TestRunsLogsHelpIncludesEventFilters(t *testing.T) {
 	var buf bytes.Buffer
-	PrintHelp(cmdJobsLogs, &buf)
+	PrintHelp(surfaceCommand("sparkwing runs logs"), &buf)
 	for _, tc := range []struct {
 		name     string
 		conflict string
@@ -117,7 +117,7 @@ func TestRunsLogsHelpIncludesEventFilters(t *testing.T) {
 		if !containsFlagRow(buf.String(), name) {
 			t.Errorf("runs logs help omits accepted flag %s:\n%s", name, buf.String())
 		}
-		spec, ok := findFlagSpec(cmdJobsLogs.Flags, tc.name)
+		spec, ok := findFlagSpec(surfaceCommand("sparkwing runs logs").Flags, tc.name)
 		if !ok {
 			t.Errorf("runs logs registry omits accepted flag %s", name)
 			continue
@@ -130,7 +130,7 @@ func TestRunsLogsHelpIncludesEventFilters(t *testing.T) {
 
 func TestRunsHelpUsesPublicLogsCommandName(t *testing.T) {
 	var buf bytes.Buffer
-	PrintHelp(cmdJobs, &buf)
+	PrintHelp(surfaceCommand("sparkwing runs"), &buf)
 	if strings.Contains(buf.String(), "jobs logs") {
 		t.Fatalf("runs help advertises retired command name:\n%s", buf.String())
 	}
