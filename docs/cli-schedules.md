@@ -42,12 +42,12 @@ Capture the installing environment; native timers on Linux/macOS invoke __tick. 
 | `-C, --checkout PATH` | Resolve the project from this local checkout path. |
 | `-h, --help` | Show command help without executing. |
 | `--help-all` | Include uncommon flags in command help. |
-| `--profile NAME` | Connection profiles come only from the user's config; allowed before the verb if the command accepts it. Local run refuses --profile. |
+| `--profile NAME` | Controller connection profile from your config. Omit it to use the local controller. |
 | `--schedule SCHEDULE` | Schedule name. Repeatable; comma-separated values are accepted. |
-| `--unpinned` | unpinned |
-| `--no-prove` | no prove |
-| `--no-timer` | no timer |
-| `--all-repos` | all repos |
+| `--unpinned` | Arm schedules to compile the checkout on every fire instead of pinning a proved binary; with --profile, follow the checked-out branch. |
+| `--no-prove` | Arm local schedules without compiling their pipelines first, which also leaves them unpinned; ignored with --profile. |
+| `--no-timer` | Skip installing the native timer that fires local schedules; ignored with --profile. |
+| `--all-repos` | Install local schedules for every registered repository instead of only the current one; cannot be combined with --profile or --schedule. |
 
 ## `sparkwing schedules list`
 
@@ -61,10 +61,10 @@ List the schedules armed on this host
 | `-C, --checkout PATH` | Resolve the project from this local checkout path. |
 | `-h, --help` | Show command help without executing. |
 | `--help-all` | Include uncommon flags in command help. |
-| `--profile NAME` | Connection profiles come only from the user's config; allowed before the verb if the command accepts it. Local run refuses --profile. |
-| `--all` | Include entries normally hidden. |
-| `--timer` | timer |
-| `--next N` | next |
+| `--profile NAME` | Controller connection profile from your config. Omit it to use the local controller. |
+| `--all` | Include entries that are hidden by default. |
+| `--timer` | Report the health of the schedule timer instead of listing schedules, exiting with failure when it is unhealthy. |
+| `--next N` | List the next N fire times across all schedules instead of the schedule table. |
 
 ## `sparkwing schedules pause`
 
@@ -79,7 +79,7 @@ Pause a schedule
 | `-h, --help` | Show command help without executing. |
 | `--help-all` | Include uncommon flags in command help. |
 | `--schedule SCHEDULE` | Schedule name. Repeatable; comma-separated values are accepted. (required) |
-| `--profile PROFILE` | Connection profiles come only from the user's config; allowed before the verb if the command accepts it. Local run refuses --profile. |
+| `--profile PROFILE` | Controller connection profile from your config. Omit it to use the local controller. |
 
 ## `sparkwing schedules resume`
 
@@ -94,7 +94,7 @@ Resume a paused schedule
 | `-h, --help` | Show command help without executing. |
 | `--help-all` | Include uncommon flags in command help. |
 | `--schedule SCHEDULE` | Schedule name. Repeatable; comma-separated values are accepted. (required) |
-| `--profile PROFILE` | Connection profiles come only from the user's config; allowed before the verb if the command accepts it. Local run refuses --profile. |
+| `--profile PROFILE` | Controller connection profile from your config. Omit it to use the local controller. |
 
 ## `sparkwing schedules run`
 
@@ -108,7 +108,7 @@ Launch a schedule's pipeline now
 | `-C, --checkout PATH` | Resolve the project from this local checkout path. |
 | `-h, --help` | Show command help without executing. |
 | `--help-all` | Include uncommon flags in command help. |
-| `--profile NAME` | Connection profiles come only from the user's config; allowed before the verb if the command accepts it. Local run refuses --profile. |
+| `--profile NAME` | Controller connection profile from your config. Omit it to use the local controller. |
 | `--schedule SCHEDULE` | Schedule name. Repeatable; comma-separated values are accepted. (required) |
 
 ## `sparkwing schedules set`
@@ -123,15 +123,15 @@ Override a declared cadence on this host
 | `-C, --checkout PATH` | Resolve the project from this local checkout path. |
 | `-h, --help` | Show command help without executing. |
 | `--help-all` | Include uncommon flags in command help. |
-| `--profile NAME` | Connection profiles come only from the user's config; allowed before the verb if the command accepts it. Local run refuses --profile. |
-| `--cron EXPR` | cron |
-| `--tz ZONE` | tz |
-| `--overlap POLICY` | overlap Values: skip, queue. |
-| `--catch-up DUR` | catch up |
-| `--arg K=V` | arg Repeatable; comma-separated values are accepted. |
-| `--reset` | reset |
-| `--pin` | pin |
-| `--unpin` | unpin |
+| `--profile NAME` | Controller connection profile from your config. Omit it to use the local controller. |
+| `--cron EXPR` | Override the schedule's cron expression. |
+| `--tz ZONE` | Override the schedule's time zone with an IANA zone name; an empty value selects the default zone. |
+| `--overlap POLICY` | Override what happens when a fire comes due while the previous scheduled run is still running. Values: skip, queue. |
+| `--catch-up DUR` | Override how long after its due time a late fire may still run. |
+| `--arg K=V` | Replace the schedule's pipeline arguments with these KEY=VALUE pairs; a single empty value replaces them with none. Repeatable; comma-separated values are accepted. |
+| `--reset` | Drop every override so the repository's declared schedule applies again; must be used alone. |
+| `--pin` | Pin a local schedule to a freshly compiled binary of its checkout, so later checkout changes do not affect its runs; must be used alone. |
+| `--unpin` | Let a local schedule compile its checkout on every fire instead of running a pinned binary; must be used alone. |
 | `--schedule SCHEDULE` | Schedule name. Repeatable; comma-separated values are accepted. (required) |
 
 ## `sparkwing schedules show`
@@ -146,9 +146,9 @@ Show one schedule's full record and its recent fires
 | `-C, --checkout PATH` | Resolve the project from this local checkout path. |
 | `-h, --help` | Show command help without executing. |
 | `--help-all` | Include uncommon flags in command help. |
-| `--profile NAME` | Connection profiles come only from the user's config; allowed before the verb if the command accepts it. Local run refuses --profile. |
-| `--fires N` | fires |
-| `--next N` | next |
+| `--profile NAME` | Controller connection profile from your config. Omit it to use the local controller. |
+| `--fires N` | Number of recent fires to include in the detail, 10 by default. |
+| `--next N` | Print the next N fire times for each selected schedule instead of its detail. |
 | `--schedule SCHEDULE` | Schedule name. Repeatable; comma-separated values are accepted. (required) |
 
 ## `sparkwing schedules uninstall`
@@ -163,6 +163,6 @@ Disarm a repo's schedules, and remove the timer when nothing is left
 | `-C, --checkout PATH` | Resolve the project from this local checkout path. |
 | `-h, --help` | Show command help without executing. |
 | `--help-all` | Include uncommon flags in command help. |
-| `--profile NAME` | Connection profiles come only from the user's config; allowed before the verb if the command accepts it. Local run refuses --profile. |
+| `--profile NAME` | Controller connection profile from your config. Omit it to use the local controller. |
 | `--schedule SCHEDULE` | Schedule name. Repeatable; comma-separated values are accepted. |
-| `--all-repos` | all repos |
+| `--all-repos` | Remove every local schedule on this host from all repositories, then remove the timer when none remain. |

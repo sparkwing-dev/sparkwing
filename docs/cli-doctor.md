@@ -18,5 +18,5 @@ Identify removed timer verbs, service version skew and incompatible store schema
 | `-C, --checkout PATH` | Resolve the project from this local checkout path. |
 | `-h, --help` | Show command help without executing. |
 | `--help-all` | Include uncommon flags in command help. |
-| `--dry-run` | Preview with no side effects. |
-| `--timeout DURATION` | timeout |
+| `--dry-run` | Show what would change without changing anything. |
+| `--timeout DURATION` | Longest time to spend inspecting the machine and local controller, 10s by default. |

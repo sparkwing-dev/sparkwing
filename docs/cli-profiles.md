@@ -38,7 +38,7 @@ Add a controller connection profile
 | `-h, --help` | Show command help without executing. |
 | `--help-all` | Include uncommon flags in command help. |
 | `--controller URL` | Controller URL for this connection profile. (required) |
-| `--profile NAME` | Connection profiles come only from the user's config; allowed before the verb if the command accepts it. Local run refuses --profile. |
+| `--profile NAME` | Controller connection profile from your config. Omit it to use the local controller. |
 | `--token-stdin` | Read the controller credential from standard input. |
 | `--force` | Replace an existing object. |
 | `--no-probe` | Skip checking the controller connection. |
@@ -68,7 +68,7 @@ Remove a controller connection profile
 | `-C, --checkout PATH` | Resolve the project from this local checkout path. |
 | `-h, --help` | Show command help without executing. |
 | `--help-all` | Include uncommon flags in command help. |
-| `--profile NAME` | Connection profiles come only from the user's config; allowed before the verb if the command accepts it. Local run refuses --profile. (required) |
+| `--profile NAME` | Controller connection profile from your config. Omit it to use the local controller. (required) |
 | `--keep-token` | Retain the credential when removing the profile. |
 
 ## `sparkwing profiles set`
@@ -83,7 +83,7 @@ Update fields on an existing profile
 | `-C, --checkout PATH` | Resolve the project from this local checkout path. |
 | `-h, --help` | Show command help without executing. |
 | `--help-all` | Include uncommon flags in command help. |
-| `--profile NAME` | Connection profiles come only from the user's config; allowed before the verb if the command accepts it. Local run refuses --profile. (required) |
+| `--profile NAME` | Controller connection profile from your config. Omit it to use the local controller. (required) |
 | `--controller URL` | Controller URL for this connection profile. |
 | `--token-stdin` | Read the controller credential from standard input. |
 
@@ -99,4 +99,4 @@ Print one controller connection profile
 | `-C, --checkout PATH` | Resolve the project from this local checkout path. |
 | `-h, --help` | Show command help without executing. |
 | `--help-all` | Include uncommon flags in command help. |
-| `--profile NAME` | Connection profiles come only from the user's config; allowed before the verb if the command accepts it. Local run refuses --profile. (required) |
+| `--profile NAME` | Controller connection profile from your config. Omit it to use the local controller. (required) |

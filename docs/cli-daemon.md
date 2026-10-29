@@ -41,12 +41,12 @@ JSON emits event records followed by a page record with truncated. Plain and pre
 | `-C, --checkout PATH` | Resolve the project from this local checkout path. |
 | `-h, --help` | Show command help without executing. |
 | `--help-all` | Include uncommon flags in command help. |
-| `--run ID` | Stable run ID or per-team run number; '-' reads run IDs from stdin on cancel, retry and prune. |
-| `--since DURATION` | since |
-| `--kind KIND` | kind Repeatable; comma-separated values are accepted. |
-| `--incarnation N` | incarnation Must be at least 0. |
-| `--limit N` | Output count at least one; paginated commands continue with --cursor. |
-| `--explain` | explain |
+| `--run ID` | Run ID or per-team run number. |
+| `--since DURATION` | Show only events recorded within this lookback, such as 30m, 12h, 7d or 2w. |
+| `--kind KIND` | Show only events of this kind. Repeatable; comma-separated values are accepted. |
+| `--incarnation N` | Show only events from this numbered controller start, the N in the #N.seq column; zero shows every start. Must be at least 0. |
+| `--limit N` | Maximum number of records to print, at least one; continue with --cursor when more exist. |
+| `--explain` | Print the complete admission timeline for the --run run and all its descendant runs, without pagination. |
 
 ## `sparkwing daemon recover-state`
 
@@ -60,7 +60,7 @@ Preserve unreadable daemon state after its holders stop
 | `-C, --checkout PATH` | Resolve the project from this local checkout path. |
 | `-h, --help` | Show command help without executing. |
 | `--help-all` | Include uncommon flags in command help. |
-| `--yes` | Confirm bulk destruction. (required) |
+| `--yes` | Confirm a destructive change without prompting. (required) |
 
 ## `sparkwing daemon restart`
 

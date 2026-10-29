@@ -40,15 +40,15 @@ Shared runner registration requires team administration. --personal registers ca
 | `--runner RUNNER` | Runner name or selection. (required) |
 | `--personal` | Offer this machine only to your runs, including Cloud overflow. |
 | `--session-stdin` | Read an existing independent account session from stdin without saving it; required with --personal. |
-| `--repos PATTERN` | repos Repeatable; comma-separated values are accepted. |
-| `--label LABEL` | label Repeatable; comma-separated values are accepted. |
-| `--max-concurrent N` | max concurrent Must be at least 1. |
-| `--config PATH` | config |
+| `--repos PATTERN` | Repository patterns this runner takes jobs for; a job on a runner serving several repositories can claim the others' jobs and their secrets, so scope it to repositories that trust each other. Repeatable; comma-separated values are accepted. |
+| `--label LABEL` | Labels this runner advertises, matched against the labels jobs ask for or prefer. Repeatable; comma-separated values are accepted. |
+| `--max-concurrent N` | Most jobs this runner holds at once, written to its config. Must be at least 1. |
+| `--config PATH` | Machine config file to write the runner section into, the standard Sparkwing config file by default. |
 | `--force` | Replace an existing object. |
-| `--no-service` | no service |
-| `--profile NAME` | Connection profiles come only from the user's config; allowed before the verb if the command accepts it. Local run refuses --profile. |
-| `--reserved-for POOL` | reserved for Repeatable; comma-separated values are accepted. |
-| `--trust CLASS` | trust Values: verified-default, any. |
+| `--no-service` | Write the runner config and credential without installing or starting the runner service. |
+| `--profile NAME` | Controller connection profile from your config. Omit it to use the local controller. |
+| `--reserved-for POOL` | Reserved pools this shared runner holds, which lets it take work and secrets restricted to those pools; requires team administration. Repeatable; comma-separated values are accepted. |
+| `--trust CLASS` | Which runs this shared runner takes: verified-default takes only verified default-branch pushes, and any takes every run; unset, a runner holding a pool with a reserved secret takes only verified default-branch pushes. Values: verified-default, any. |
 | `--platform PLATFORM` | Record a shared Kubernetes runner at admin enrollment; a runner in a pod stops at its first poll without it. Values: kubernetes. |
 | `--launcher` | Enroll only claims.launch for a shared reserved pool and skip the persistent runner service. |
 
@@ -66,8 +66,8 @@ Read the same runner details from the local controller or a selected profile. JS
 | `-C, --checkout PATH` | Resolve the project from this local checkout path. |
 | `-h, --help` | Show command help without executing. |
 | `--help-all` | Include uncommon flags in command help. |
-| `--profile NAME` | Connection profiles come only from the user's config; allowed before the verb if the command accepts it. Local run refuses --profile. |
-| `-q, --quiet` | quiet |
+| `--profile NAME` | Controller connection profile from your config. Omit it to use the local controller. |
+| `-q, --quiet` | Print only runner names. |
 
 ## `sparkwing runners remove`
 
@@ -83,7 +83,7 @@ Require the enrolled controller, optional runner name and explicit runner creden
 | `-C, --checkout PATH` | Resolve the project from this local checkout path. |
 | `-h, --help` | Show command help without executing. |
 | `--help-all` | Include uncommon flags in command help. |
-| `--config PATH` | config |
-| `--no-service` | no service |
-| `--profile NAME` | Connection profiles come only from the user's config; allowed before the verb if the command accepts it. Local run refuses --profile. |
+| `--config PATH` | Machine config file holding the runner section to remove, the standard Sparkwing config file by default. |
+| `--no-service` | Revoke the runner credential without stopping the installed runner service. |
+| `--profile NAME` | Controller connection profile from your config. Omit it to use the local controller. |
 | `--runner RUNNER` | Runner name or selection. |

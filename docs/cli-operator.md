@@ -57,9 +57,9 @@ Operational ceilings and signup settings only; values above ceilings are refused
 | `-C, --checkout PATH` | Resolve the project from this local checkout path. |
 | `-h, --help` | Show command help without executing. |
 | `--help-all` | Include uncommon flags in command help. |
-| `--setting GUARD` | setting (required) |
-| `--value N` | value (required) |
-| `--profile NAME` | Connection profiles come only from the user's config; allowed before the verb if the command accepts it. Local run refuses --profile. |
+| `--setting GUARD` | Name of the operational guard to change, as operator limits show lists it. (required) |
+| `--value N` | New value for the guard as a nonnegative integer; a value above the deployment's ceiling is refused, not clamped. (required) |
+| `--profile NAME` | Controller connection profile from your config. Omit it to use the local controller. |
 
 ## `sparkwing operator limits show`
 
@@ -73,7 +73,7 @@ Print every compute guard and visible runner usage
 | `-C, --checkout PATH` | Resolve the project from this local checkout path. |
 | `-h, --help` | Show command help without executing. |
 | `--help-all` | Include uncommon flags in command help. |
-| `--profile NAME` | Connection profiles come only from the user's config; allowed before the verb if the command accepts it. Local run refuses --profile. |
+| `--profile NAME` | Controller connection profile from your config. Omit it to use the local controller. |
 
 ## `sparkwing operator object-store`
 
@@ -105,7 +105,7 @@ Clear a tripped object-store budget or ceiling freeze
 | `-C, --checkout PATH` | Resolve the project from this local checkout path. |
 | `-h, --help` | Show command help without executing. |
 | `--help-all` | Include uncommon flags in command help. |
-| `--profile NAME` | Connection profiles come only from the user's config; allowed before the verb if the command accepts it. Local run refuses --profile. |
+| `--profile NAME` | Controller connection profile from your config. Omit it to use the local controller. |
 
 ## `sparkwing operator object-store status`
 
@@ -119,7 +119,7 @@ Show the controller's object-store request budget
 | `-C, --checkout PATH` | Resolve the project from this local checkout path. |
 | `-h, --help` | Show command help without executing. |
 | `--help-all` | Include uncommon flags in command help. |
-| `--profile NAME` | Connection profiles come only from the user's config; allowed before the verb if the command accepts it. Local run refuses --profile. |
+| `--profile NAME` | Controller connection profile from your config. Omit it to use the local controller. |
 
 ## `sparkwing operator secrets`
 
@@ -156,8 +156,8 @@ Repeats safely. JSON retains the counts, previous_key_only and each unreadable r
 | `-C, --checkout PATH` | Resolve the project from this local checkout path. |
 | `-h, --help` | Show command help without executing. |
 | `--help-all` | Include uncommon flags in command help. |
-| `--verify` | verify |
-| `--profile NAME` | Connection profiles come only from the user's config; allowed before the verb if the command accepts it. Local run refuses --profile. |
+| `--verify` | Change nothing and count the rows that still open only under the previous key; retire that key once this reports zero and nothing unreadable. |
+| `--profile NAME` | Controller connection profile from your config. Omit it to use the local controller. |
 
 ## `sparkwing operator teams`
 
@@ -193,9 +193,9 @@ JSON includes the one-time capability and account metadata. Plain and pretty pri
 | `-C, --checkout PATH` | Resolve the project from this local checkout path. |
 | `-h, --help` | Show command help without executing. |
 | `--help-all` | Include uncommon flags in command help. |
-| `--team SLUG` | team (required) |
-| `--display-name NAME` | display name |
-| `--profile NAME` | Connection profiles come only from the user's config; allowed before the verb if the command accepts it. Local run refuses --profile. |
+| `--team SLUG` | Slug for the new team; a slug that exists or was retired is refused. (required) |
+| `--display-name NAME` | Human-readable name for the new team, the slug by default. |
+| `--profile NAME` | Controller connection profile from your config. Omit it to use the local controller. |
 
 ## `sparkwing operator teams show`
 
@@ -213,9 +213,9 @@ The value is derived from the deployment's Cloud Job namespace and the team, so 
 | `-C, --checkout PATH` | Resolve the project from this local checkout path. |
 | `-h, --help` | Show command help without executing. |
 | `--help-all` | Include uncommon flags in command help. |
-| `--team SLUG` | team (required) |
-| `--job-namespace NAMESPACE` | job namespace (required) |
-| `--profile NAME` | Connection profiles come only from the user's config; allowed before the verb if the command accepts it. Local run refuses --profile. |
+| `--team SLUG` | Slug of the team to show. (required) |
+| `--job-namespace NAMESPACE` | Kubernetes namespace this deployment runs Cloud Jobs in; the team's node label value is derived from it and the team. (required) |
+| `--profile NAME` | Controller connection profile from your config. Omit it to use the local controller. |
 
 ## `sparkwing operator tokens`
 
@@ -253,11 +253,11 @@ Use the deployment /operator/tokens routes. JSON includes the new bearer and met
 | `-C, --checkout PATH` | Resolve the project from this local checkout path. |
 | `-h, --help` | Show command help without executing. |
 | `--help-all` | Include uncommon flags in command help. |
-| `--type KIND` | type Values: service, deployment. |
-| `--principal NAME` | principal |
+| `--type KIND` | Kind of credential to issue, service by default; deployment is refused by this command. Values: service, deployment. |
+| `--principal NAME` | Name of the service the credential is issued to; the controller requires it. |
 | `--scope SCOPE` | Credential scope. Repeatable; comma-separated values are accepted. |
-| `--ttl DURATION` | ttl |
-| `--profile NAME` | Connection profiles come only from the user's config; allowed before the verb if the command accepts it. Local run refuses --profile. |
+| `--ttl DURATION` | Lifetime of the new credential in whole seconds or a duration; omitted or zero issues a credential that never expires. |
+| `--profile NAME` | Controller connection profile from your config. Omit it to use the local controller. |
 
 ## `sparkwing operator tokens list`
 
@@ -274,9 +274,9 @@ Read deployment credential metadata. JSON emits one record per token, with exact
 | `-h, --help` | Show command help without executing. |
 | `--help-all` | Include uncommon flags in command help. |
 | `--token PREFIX` | Token identifier or prefix. |
-| `--type KIND` | type Values: service, deployment. |
-| `--include-revoked` | include revoked |
-| `--profile NAME` | Connection profiles come only from the user's config; allowed before the verb if the command accepts it. Local run refuses --profile. |
+| `--type KIND` | List only credentials of this kind. Values: service, deployment. |
+| `--include-revoked` | Also list credentials that have been revoked. |
+| `--profile NAME` | Controller connection profile from your config. Omit it to use the local controller. |
 
 ## `sparkwing operator tokens revoke`
 
@@ -293,7 +293,7 @@ Revoke through the deployment token route. JSON retains the confirmed revocation
 | `-h, --help` | Show command help without executing. |
 | `--help-all` | Include uncommon flags in command help. |
 | `--token PREFIX` | Token identifier or prefix. (required) |
-| `--profile NAME` | Connection profiles come only from the user's config; allowed before the verb if the command accepts it. Local run refuses --profile. |
+| `--profile NAME` | Controller connection profile from your config. Omit it to use the local controller. |
 
 ## `sparkwing operator tokens rotate`
 
@@ -310,6 +310,6 @@ Rotate through the deployment token route. JSON includes the new bearer, metadat
 | `-h, --help` | Show command help without executing. |
 | `--help-all` | Include uncommon flags in command help. |
 | `--token PREFIX` | Token identifier or prefix. (required) |
-| `--grace DURATION` | grace |
-| `--ttl DURATION` | ttl |
-| `--profile NAME` | Connection profiles come only from the user's config; allowed before the verb if the command accepts it. Local run refuses --profile. |
+| `--grace DURATION` | How long the old credential keeps working after rotation, in whole seconds or a duration, 24h by default; zero revokes it at once. |
+| `--ttl DURATION` | Lifetime of the replacement credential in whole seconds or a duration; omitted or zero keeps the old credential's remaining lifetime. |
+| `--profile NAME` | Controller connection profile from your config. Omit it to use the local controller. |
