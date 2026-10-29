@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import type { Context } from "../index.d.ts";
 import { ConcurrencyGroup, Generated, Plan, dir, goModules, npm, refTo, refToLastRun, startup } from "../src/plan.ts";
@@ -41,7 +42,7 @@ test("flat declarations keep zero and false settings and leave authority to the 
   assert.deepEqual(job.memo, { ttl_ms: 0 });
   assert.deepEqual(job.env, { CI: { value: "1" }, NODE_OPTIONS: { value: "--stack-trace-limit=50", startup: true } });
   assert.deepEqual(job.caches, [
-    { name: "go-modules", resolver: "gomod", key_files: ["go.sum"] },
+    { name: "go-modules", resolver: "go-modules", key_files: ["go.sum"] },
     { name: "npm", resolver: "npm", key_files: ["package-lock.json"] },
     { name: "node_modules", path: "./web/node_modules/", key_scope: "web/node_modules", key_files: ["web/package-lock.json"] },
   ]);
@@ -341,4 +342,15 @@ test("runner label declarations leave normalization to the host", () => {
   const job = plan.toDoc().jobs[0];
   assert.deepEqual(job?.requires, ["", " gpu ", "gpu", "gpu"]);
   assert.deepEqual(job?.prefers, ["", " fast ", "fast"]);
+});
+
+test("every cache resolver the SDK emits is one the host accepts", () => {
+  const schema = JSON.parse(
+    readFileSync(new URL("../../../internal/nodeproto/conformance/testdata/v2-documents.schema.json", import.meta.url), "utf8"),
+  );
+  const accepted: string[] = schema.$defs.CacheSpec.properties.resolver.enum;
+  const plan = new Plan();
+  plan.job("build", () => 1).cache(goModules(), npm());
+  const resolvers = plan.toDoc().jobs[0]!.caches!.map((cache) => cache.resolver);
+  assert.deepEqual(resolvers.filter((resolver) => !accepted.includes(resolver!)), []);
 });

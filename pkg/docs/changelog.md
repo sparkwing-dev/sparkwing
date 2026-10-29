@@ -20,6 +20,7 @@ unlock.
 
 ## [Unreleased]
 
+- **sdk (TypeScript):** `goModules()` caches Go modules again: it declared the resolver `gomod`, which no host accepts, so every run fell back to uncached with a warning. A plan naming an unknown cache resolver is now refused at acceptance (`plan_invalid`, listing `go-modules` and `npm`), and the protocol schema lists the accepted resolvers.
 - **cli:** A missing `.sparkwing` directory, an unknown docs topic, example or profile, and an untracked `repos info` checkout report `not_found` instead of `internal`, so a script can tell a typo from a Sparkwing failure. The missing-project error hints at `pipeline new` and `-C`.
 - **runs status:** `sparkwing runs status`, `runs logs`, `runs list --wait`, `runs grep` and `pipeline trigger --follow` exit 4 when the controller refuses the read (`not_found`, `unauthenticated`, `forbidden`, `bad_request`, a revoked or unsupported version), so a poller that retries on exit 3 stops on a typo, a pruned run or a revoked token. Exit 3 still means an incomplete observation that may complete on retry.
 - **sdk:** A pipeline whose `entrypoint` has no SDK registration fails with `unknown_pipeline` and a hint naming the entrypoint the host looked up and the `sparkwing.Register` call that provides it. The README, pipelines and SDK guides now register the entrypoint `sparkwing.yaml` names (`sw.Register("Hello", ...)` for `name: hello, entrypoint: Hello`), as the scaffold does; their samples registered the pipeline name, which the host never looks up.
