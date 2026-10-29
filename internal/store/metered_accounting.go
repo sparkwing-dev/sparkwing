@@ -279,14 +279,17 @@ func renewBillingAwardTx(ctx context.Context, tx *storeTx, team Team, reservatio
 	if err != nil {
 		return err
 	}
-	want, err := billingProduct(result.BillableSeconds+SliceSeconds, rate)
+	// safety: the funded horizon is one slice past the compute used, and at least the minimum already owed, so a
+	// minimum charged at the first renewal does not also need a second slice before the job runs.
+	horizon := max(result.ElapsedSeconds+SliceSeconds, result.BillableSeconds)
+	want, err := billingProduct(horizon, rate)
 	if err != nil {
 		return err
 	}
 	if err := refuseUnfundedTx(ctx, l.view(), max(want-paid, 0), a.run, a.node); err != nil {
 		return err
 	}
-	ahead := result.BillableSeconds + SliceSeconds - paidSeconds
+	ahead := horizon - paidSeconds
 	if ahead <= 0 {
 		return nil
 	}

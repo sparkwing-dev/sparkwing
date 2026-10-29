@@ -7,7 +7,7 @@ const billing = {
   micro_per_credit: 100_000,
   credits_per_dollar: 1_000,
   slice_seconds: 60,
-  purchase_min_cents: 50,
+  purchase_min_cents: 1_000,
   purchase_max_cents: 100_000,
   trusted: true,
   rate_table: [
@@ -156,9 +156,10 @@ test("an owner sees prices from the controller and starts a checkout", async ({
   ).toBeVisible();
   const amount = page.getByLabel("Amount in US dollars");
   const buy = page.getByRole("button", { name: "Add funds" });
-  await expect(page.getByText("Minimum purchase $0.50. Cloud usage draws on the balance.")).toBeVisible();
-  await amount.fill("0.49");
-  await expect(page.getByText("Minimum purchase $0.50.",{exact:true})).toBeVisible();
+  await expect(page.getByText("Minimum purchase $10. Cloud usage draws on the balance.")).toBeVisible();
+  await expect(amount).toHaveValue("10");
+  await amount.fill("9.99");
+  await expect(page.getByText("Minimum purchase $10.",{exact:true})).toBeVisible();
   await expect(buy).toBeDisabled();
   await amount.fill("1000");
   await expect(buy).toBeEnabled();

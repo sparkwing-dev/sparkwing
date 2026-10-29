@@ -85,7 +85,7 @@ func teamRefillBody(r store.RefillState) teamRefillJSON {
 	out := teamRefillJSON{
 		Enabled: r.Enabled, ThresholdCents: r.ThresholdCents, AmountCents: r.AmountCents,
 		WeekLimitCents: r.WeekLimitCents, MonthLimitCents: r.MonthLimitCents,
-		MinAmountCents: store.MinRefillCents, MaxAmountCents: store.MaxCardPaymentCents,
+		MinAmountCents: store.MinCardPaymentCents, MaxAmountCents: store.MaxCardPaymentCents,
 		Caps:    teamRefillCapsJSON{AmountCents: r.Caps.AmountCents, PerDay: r.Caps.PerDay, WeekCents: r.Caps.WeekCents},
 		Failure: r.Failure, Open: r.Open, DayCount: r.DayCount, WeekCents: r.WeekCents, MonthCents: r.MonthCents, Limit: r.Limit,
 	}
@@ -142,7 +142,7 @@ func (s *Server) handleTeamBilling(w http.ResponseWriter, r *http.Request, a cap
 		MicroPerCredit:            store.MicroCreditsPerCredit,
 		CreditsPerDollar:          store.CreditsPerDollar,
 		SliceSeconds:              store.SliceSeconds,
-		PurchaseMinCents:          store.MinCardChargeCents,
+		PurchaseMinCents:          store.MinCardPaymentCents,
 		PurchaseMaxCents:          store.MaxCardPaymentCents,
 		RateTable:                 creditRateTableToJSON(state.RateTable),
 		StorageRateMicroPerGBDay:  state.StorageRateMicroPerGBDay,

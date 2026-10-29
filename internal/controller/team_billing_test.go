@@ -47,6 +47,10 @@ func newFakeCheckout(t *testing.T) (*fakeCheckout, string) {
 		fc.requests = append(fc.requests, call)
 		status, url := fc.status, fc.url
 		fc.mu.Unlock()
+		if call.Bearer != "Bearer "+checkoutToken {
+			http.Error(w, `{"error":"checkout token rejected"}`, http.StatusUnauthorized)
+			return
+		}
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(status)
 		_ = json.NewEncoder(w).Encode(map[string]any{
@@ -131,7 +135,7 @@ func TestTeamBilling_EveryMemberReadsTheActiveTeamsBilling(t *testing.T) {
 			t.Errorf("%s grants = %+v", tc.name, b.Grants)
 		}
 		if b.MicroPerCredit != 100_000 || b.CreditsPerDollar != 1_000 || b.SliceSeconds != 60 ||
-			b.PurchaseMinCents != 50 || b.Trusted || len(b.RateTable) == 0 {
+			b.PurchaseMinCents != 1_000 || b.Trusted || len(b.RateTable) == 0 {
 			t.Errorf("%s reads prices %+v", tc.name, b)
 		}
 	}
@@ -180,7 +184,7 @@ func TestTeamBillingCheckout_OpensASessionForTheOwnersActiveTeam(t *testing.T) {
 		{"an editor", editor, map[string]any{"amount_cents": 2_500}, http.StatusForbidden},
 		{"a reader", reader, map[string]any{"amount_cents": 2_500}, http.StatusForbidden},
 		{"a body naming a team", owner, map[string]any{"amount_cents": 2_500, "team": "someone-else"}, http.StatusBadRequest},
-		{"a purchase below the provider minimum", owner, map[string]any{"amount_cents": 49}, http.StatusBadRequest},
+		{"a purchase below the checkout service's $10 minimum", owner, map[string]any{"amount_cents": 999}, http.StatusBadRequest},
 		{"a negative purchase", owner, map[string]any{"amount_cents": -2_500}, http.StatusBadRequest},
 	}
 	for _, tc := range refused {

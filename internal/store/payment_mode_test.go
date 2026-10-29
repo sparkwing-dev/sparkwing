@@ -42,7 +42,7 @@ func TestPaymentModeTestActivityCanSwitchToLive(t *testing.T) {
 				}
 			case "checkout":
 				if err := s.inTx(t.Context(), func(tx *storeTx) error {
-					_, err := (&Tenant{s: s, team: "a"}).openCreditCheckoutTx(t.Context(), tx, MinCardChargeCents*MicroCreditsPerCent, s.now(), time.Minute)
+					_, err := (&Tenant{s: s, team: "a"}).openCreditCheckoutTx(t.Context(), tx, MinCardPaymentCents*MicroCreditsPerCent, s.now(), time.Minute)
 					return err
 				}); err != nil {
 					t.Fatal(err)

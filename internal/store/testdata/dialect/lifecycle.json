@@ -9,7 +9,7 @@
   {"op":"grant","reference":"bonus","amount":7000,"want":"created","balance":1056400},
   {"op":"admit","want":"ok","balance":1056400},
   {"op":"start","want":"ok","balance":1056400},
-  {"op":"renew","want":"ok","balance":1055800},
-  {"op":"cancel","want":"ok","balance":1055800},
+  {"op":"renew","want":"ok","balance":1056290},
+  {"op":"cancel","want":"ok","balance":1056290},
   {"op":"settle","want":"ok","balance":1056400}
 ]

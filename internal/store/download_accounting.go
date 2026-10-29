@@ -79,7 +79,7 @@ func (t *Tenant) chargeDownloadTx(ctx context.Context, tx *storeTx, c DownloadCh
 		return DownloadCharged{}, fmt.Errorf("download accounting overflow")
 	}
 	out := DownloadCharged{Tier: teamTierFunded}
-	if holdsFreeAllowance(t.team) {
+	if t.s.holdsFreeAllowance(t.team) {
 		funded, err := teamFundedTx(ctx, tx, t.team)
 		if err != nil {
 			return DownloadCharged{}, err

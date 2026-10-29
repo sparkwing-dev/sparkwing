@@ -112,7 +112,7 @@ to exist, and it settles the answer once at startup.
 | `--deployment` | `local` (default), `team`, `cloud` | `local` holds one team. `team` holds many teams under a multi-team license and meters usage. `cloud` is the hosted service. |
 | `--store` | `sqlite` (default), `postgres` | Where state lives. `postgres` reads the `pg-url` credential. |
 | `--external-url` | an `https` URL, an `http` URL on loopback or a Kubernetes Service (`*.svc`), or empty | The origin runners, OIDC tokens and GitHub Actions workflows name. Runners accept the same addresses. |
-| `--payment-mode` | `test`, `live` or empty | Which Stripe credentials settle payments. Test can switch once to live; live cannot switch back to test. |
+| `--payment-mode` | `test`, `live` or empty | Which Stripe credentials settle payments. Test can switch once to live; live cannot switch back to test. `--billing-url` needs it, so the controller settles every payment it opens. |
 
 Configuration is validated before startup creates the home directory, credential
 epoch or store. This includes sign-up mode, Google sign-in and callback URLs,

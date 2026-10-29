@@ -83,7 +83,7 @@ func run(args []string) error {
 	billingURL := fs.String("billing-url", "",
 		"base URL of the hosted checkout service that opens a Stripe Checkout Session "+
 			"when a team owner buys credits; the controller authenticates with the "+
-			credBillingToken+" credential. Empty sells no credits.")
+			credBillingToken+" credential and needs --payment-mode to settle what it sells. Empty sells no credits.")
 	deploymentKind := fs.String("deployment", string(deployment.KindLocal),
 		"what kind of deployment this controller serves: local (one team, no license), team (many teams under "+
 			"the multi-team license in the "+credLicense+" credential, metered) or cloud (the hosted service). "+
@@ -414,6 +414,11 @@ func run(args []string) error {
 	if strings.TrimSpace(*billingURL) != "" && creds.BillingToken == "" {
 		return errors.New("--billing-url is set but the " + credBillingToken + " credential is absent; " +
 			"the checkout service refuses a controller without its token")
+	}
+	if strings.TrimSpace(*billingURL) != "" && paymentVerifier == nil {
+		return errors.New("--billing-url is set but payment settlement is off, so a card would be charged for credits " +
+			"this controller never grants; set --payment-mode with the " + credStripeAPIKey + " and " +
+			credStripeWebhookSecret + " credentials, or drop --billing-url")
 	}
 
 	identity, err := parseIdentity(identityFlags{

@@ -183,7 +183,7 @@ func TestSelfClaimedJobFundingStopPreservesFundedOwner(t *testing.T) {
 	if _, err := tenant.TransitionNode(t.Context(), nodeTransition{Ref: self.Node.Ref, Actor: holder, To: runstate.NodeRunning, Cause: runstate.CauseStart, SourceAttempt: sourceAttempt(0)}); err != nil {
 		t.Fatal(err)
 	}
-	rewriteSchemaExec(t, s.db, `UPDATE credit_grants SET amount_micro=120+(SELECT SUM(amount_micro) FROM credit_charges WHERE team='a') WHERE team='a'`)
+	rewriteSchemaExec(t, s.db, `UPDATE credit_grants SET amount_micro=20+(SELECT SUM(amount_micro) FROM credit_charges WHERE team='a') WHERE team='a'`)
 	*now = now.Add(10 * time.Second)
 	beat, err := s.AsOperator().RenewUnit(t.Context(), owner.Award.CapabilityPrefix, false)
 	if err != nil {
