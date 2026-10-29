@@ -88,7 +88,7 @@ func TestBillingModelControllerQueuePassesOverStandingLimitedTeams(t *testing.T)
 			engineSQL(t, e.Store, `INSERT INTO nodes(team,run_id,node_id,status,ready_at,queue_started_at,spec_json,execution_json) SELECT 'b','later','job','pending',1,queue_started_at,?,execution_json FROM nodes WHERE team='a' AND node_id='one'`, []byte(`{"id":"job"}`))
 			engineAcceptedFixturePlan(t, e, "b", "later", "job")
 			rates := store.CreditRateTable{{Cores: 4, MicroPerSecond: 1}, {Cores: 16, MicroPerSecond: 4}}
-			teststore.SetCreditSettings(t, e.Store, store.CreditSettingsUpdate{RateTable: &rates})
+			teststore.SeedCreditRates(t, e.Store, rates)
 			e.claimProfiles = billingCloudProfile{}
 			e.RunnerPolicy = runnerAdmissionFunc(func(context.Context, string) error { return nil })
 			root := engineHTTPRoot(t, e, "", "launcher", []capability.Grant{capability.ClaimsLaunch})
@@ -128,7 +128,7 @@ func TestBillingModelControllerPrepayAndChargeback(t *testing.T) {
 	}
 	engineAcceptedFixturePlan(t, e, "a", "run", "one", "two")
 	rates := store.CreditRateTable{{Cores: 16, MicroPerSecond: 1}}
-	teststore.SetCreditSettings(t, e.Store, store.CreditSettingsUpdate{RateTable: &rates})
+	teststore.SeedCreditRates(t, e.Store, rates)
 	e.claimProfiles = billingCloudProfile{}
 	e.RunnerPolicy = runnerAdmissionFunc(func(context.Context, string) error { return nil })
 	root := engineHTTPRoot(t, e, "", "launcher", []capability.Grant{capability.ClaimsLaunch})

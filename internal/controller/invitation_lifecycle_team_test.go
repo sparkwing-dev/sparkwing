@@ -68,6 +68,7 @@ func TestTeamBoundary_InvitationsGoWithTheirInvitersAuthority(t *testing.T) {
 					code, raw = f.do(http.MethodPatch, "/api/v1/team/members/"+erin.ID, f.ownerA, map[string]string{"role": "editor"})
 				case "deleted":
 					code = http.StatusNoContent
+					f.srv.WithOperatorAccounts([]string{"operator"})
 					teststore.SeedTeam(t, f.st, "ops")
 					console, operator := teststore.Console(t, f.st, "ops", "operator")
 					operator.Target.AccountID = erin.ID

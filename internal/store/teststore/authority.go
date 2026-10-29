@@ -3,6 +3,7 @@ package teststore
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
@@ -37,11 +38,15 @@ func Console(t T, st *store.Store, team store.Team, account string) (*store.Cons
 	return st.AsConsole(func(id string) bool { return id == account }), a
 }
 
+// FixtureOperator is the console account SetCreditSettings acts as. A store
+// whose console policy names operator accounts must name this one.
+const FixtureOperator = "fixture-operator"
+
 // SetCreditSettings commits up through a fixture operator's console session.
 func SetCreditSettings(t T, st *store.Store, up store.CreditSettingsUpdate) store.CreditSettings {
 	t.Helper()
 	SeedTeam(t, st, fixtureOperatorTeam)
-	console, a := Console(t, st, fixtureOperatorTeam, "fixture-operator")
+	console, a := Console(t, st, fixtureOperatorTeam, FixtureOperator)
 	out, err := console.ConsoleSetCreditSettings(t.Context(), a, up)
 	if err != nil {
 		t.Fatal(err)
@@ -50,3 +55,19 @@ func SetCreditSettings(t T, st *store.Store, up store.CreditSettingsUpdate) stor
 }
 
 const fixtureOperatorTeam store.Team = "fixture-operator"
+
+// SeedCreditRates installs table as the deployment's rate table, for stores
+// whose console policy no fixture session satisfies.
+func SeedCreditRates(t T, st *store.Store, table store.CreditRateTable) {
+	t.Helper()
+	if err := table.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	raw, err := json.Marshal(table)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Exec(t.Context(), st, `INSERT INTO settings(key,value) VALUES ('credit_rate_table',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value`, raw); err != nil {
+		t.Fatal(err)
+	}
+}

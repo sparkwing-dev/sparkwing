@@ -24,7 +24,7 @@ func creditClaimFixture(t *testing.T, size int, rates store.CreditRateTable) (*e
 	engineSQL(t, e.Store, `INSERT INTO nodes(team,run_id,node_id,status,ready_at,spec_json,execution_json) VALUES ('a','run','job','pending',1,?,?)`, []byte(`{"id":"job"}`), []byte(fmt.Sprintf(`{"requires":{"set":true,"value":["sparkwing-%dcpu"]}}`, size)))
 	engineAcceptedFixturePlan(t, e, "a", "run")
 	if rates != nil {
-		teststore.SetCreditSettings(t, e.Store, store.CreditSettingsUpdate{RateTable: &rates})
+		teststore.SeedCreditRates(t, e.Store, rates)
 	}
 	e.claimProfiles = billingCloudProfile{}
 	e.RunnerPolicy = runnerAdmissionFunc(func(context.Context, string) error { return nil })

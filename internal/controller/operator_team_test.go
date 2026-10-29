@@ -246,6 +246,7 @@ func TestOperatorCreateTeamHTTPConsole(t *testing.T) {
 	checkActors("member")
 	s.WithOperatorAccounts(nil)
 	reviewSessionRequest(t, s, raw, csrf, "POST", "/api/v1/operator/teams", `{"slug":"refused-team"}`, 403)
+	s.WithOperatorAccounts([]string{"operator"})
 	teststore.SeedTeam(t, s.store, "ops")
 	console, operator := teststore.Console(t, s.store, "ops", "operator")
 	operator.Target.AccountID = "member"
