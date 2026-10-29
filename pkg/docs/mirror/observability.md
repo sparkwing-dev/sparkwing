@@ -753,8 +753,9 @@ The measurement is one paginated listing of the artifact store, which
 object stores bill per thousand keys, so an install that wants the
 ceiling without the listing sets `--bucket-reconcile 0` and accepts the
 drift. `--bucket-store` names the store the measurement reads; the
-controller measures it on the interval whether or not a ceiling is set,
-so its totals are the bucket's rather than zeros, and serves none of it.
+controller measures it on the interval only while a ceiling or warning mark
+is set, because nothing else reads the totals, and serves none of it. A
+multi-team controller that sets one needs `--bucket-store`.
 A controller pointed at no store, or at a backend that cannot total
 itself, keeps the running count. The running count starts at zero on
 restart, so a controller with no measurement source sees only what it

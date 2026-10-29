@@ -392,9 +392,6 @@ func run(args []string) error {
 			*liveLogNodeKB, *liveLogTotalMB)
 	}
 
-	if err := checkMultiTeamObjectStore(cfg, *bucketStoreURL, *cacheBlobStore); err != nil {
-		return err
-	}
 	if err := checkInsecureCookies(cfg, *insecureCookies); err != nil {
 		return err
 	}
@@ -479,6 +476,9 @@ func run(args []string) error {
 		Reconcile: *bucketReconcile,
 	}
 	if err := validateBucketCeiling(ceiling); err != nil {
+		return err
+	}
+	if err := checkMultiTeamObjectStore(cfg, *bucketStoreURL, *cacheBlobStore, ceiling.Limit.Bounded()); err != nil {
 		return err
 	}
 	if err := validateSupportContact(*supportContact); err != nil {
@@ -834,20 +834,20 @@ func checkRequireAuth(ctx context.Context, reader deploymentAdminReader, require
 }
 
 // safety: uploads reserve team quota through the store whatever the blob backend,
-// but without --bucket-store the bucket ceiling counts only this process's writes,
-// so a multi-team controller must measure the bucket itself. The hosted
+// but without --bucket-store a bucket ceiling counts only this process's writes,
+// so a multi-team controller that sets one must measure the bucket itself. The hosted
 // controller's home is replaced with its pod while PostgreSQL keeps the records of
 // every blob, so its blobs must live in S3; --bucket-store only measures a bucket.
-func checkMultiTeamObjectStore(cfg deployment.Config, bucketStoreURL, cacheBlobStore string) error {
+func checkMultiTeamObjectStore(cfg deployment.Config, bucketStoreURL, cacheBlobStore string, bounded bool) error {
 	if cfg.Hosted() && !strings.HasPrefix(cacheBlobStore, "s3://") {
 		return errors.New("--deployment=cloud needs --cache-blob-store=s3://bucket/prefix: without it blobs, artifacts " +
 			"and logs land on the pod's filesystem and are lost when it is replaced, while PostgreSQL keeps their records")
 	}
-	if !cfg.MultiTeam() || strings.TrimSpace(bucketStoreURL) != "" {
+	if !cfg.MultiTeam() || !bounded || strings.TrimSpace(bucketStoreURL) != "" {
 		return nil
 	}
-	return errors.New("a multi-team deployment needs --bucket-store set to the store --cache-blob-store " +
-		"keeps its objects in, so the bucket ceiling measures every object rather than only this process's writes")
+	return errors.New("a multi-team deployment with a bucket ceiling or warning mark needs --bucket-store set to the store " +
+		"--cache-blob-store keeps its objects in, so the ceiling measures every object rather than only this process's writes")
 }
 
 func checkInsecureCookies(cfg deployment.Config, insecure bool) error {

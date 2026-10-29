@@ -139,12 +139,12 @@ func (s *Server) bucketMeasured() bool {
 	return s.bucketUsageStore != nil
 }
 
-// perf: an install with neither a bucket nor a ceiling returns before the
-// first listing, so it never pays to enumerate anything.
+// perf: an install with no ceiling and no warning mark returns before the
+// first listing, so it never pays to enumerate a bucket nobody reads totals for.
 func (s *Server) runBucketCeiling(ctx context.Context) {
 	limiter := objectguard.Shared()
 	ceiling := limiter.Ceiling()
-	if !ceiling.Enforced() && !s.bucketMeasured() {
+	if !ceiling.Bounded() {
 		return
 	}
 	interval := ceiling.Reconcile()

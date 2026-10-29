@@ -82,6 +82,10 @@ type CeilingLimit struct {
 // enforced reports whether either ceiling can freeze writes.
 func (l CeilingLimit) enforced() bool { return l.MaxBytes > 0 || l.MaxObjects > 0 }
 
+// Bounded reports whether any ceiling or warning mark is set, which is the
+// only time a measured bucket total has a reader.
+func (l CeilingLimit) Bounded() bool { return l.enforced() || l.WarnBytes > 0 || l.WarnObjects > 0 }
+
 // DefaultCeilingReconcile is how often a measured bucket total replaces
 // the incremental counters when an operator sets no interval.
 const DefaultCeilingReconcile = time.Hour
@@ -214,6 +218,13 @@ func (c *Ceiling) Enforced() bool {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	return c.limit.enforced()
+}
+
+// Bounded reports whether any ceiling or warning mark is set.
+func (c *Ceiling) Bounded() bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.limit.Bounded()
 }
 
 // Reconcile is the gap between measured bucket totals. A value at or
