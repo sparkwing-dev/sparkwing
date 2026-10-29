@@ -347,8 +347,7 @@ func TestHeadRequestsChargeNothing(t *testing.T) {
 	m, _ := meterAt(t, Config{GlobalDailyAlarmBytes: 1}, "2026-09-13T10:00:00Z")
 	rec := httptest.NewRecorder()
 	out := m.serveResponse(rec, httptest.NewRequest(http.MethodHead, "/a", nil), "alice", ClassArtifact)
-	// safety: net/http discards this, so charging it let a HEAD loop latch
-	// the daily alarm with nothing on the wire.
+	// safety: net/http discards this body, so it must not move the daily alarm.
 	if _, err := out.Write([]byte(strings.Repeat("x", 4096))); err != nil {
 		t.Fatal(err)
 	}

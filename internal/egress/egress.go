@@ -231,7 +231,7 @@ func (st *principalCounters) hold(slot Slot, delta int) {
 }
 
 // Meter counts bytes sent per principal and for the process as a whole.
-// Safe for concurrent use.
+// Safe for concurrent use once [Meter.WithLogger] has returned.
 type Meter struct {
 	cfg    Config
 	logger *slog.Logger
@@ -491,10 +491,11 @@ func compareStrings(a, b string) int {
 	}
 }
 
-// Restore loads persisted usages, so a restarted service resumes the
-// month where it left off rather than handing every principal a fresh
-// budget. A usage for another month is ignored, and a usage below what
-// this process has already counted never lowers the total.
+// Restore loads persisted usages, so a restarted service resumes each
+// principal's month total rather than reporting it from zero. A usage for
+// another month is ignored, and a usage below what this process has already
+// counted never lowers the total. Team download caps are enforced apart
+// from this meter.
 func (m *Meter) Restore(usages []Usage) {
 	if m == nil || len(usages) == 0 {
 		return
@@ -517,7 +518,7 @@ func (m *Meter) Restore(usages []Usage) {
 }
 
 // DayUsage is the process's total for one UTC day, as a service persists
-// and reloads it so a restart does not reopen the daily cap.
+// and reloads it so a restart does not reset the daily alarm count.
 type DayUsage struct {
 	// Day is the UTC day the bytes fell in, as "2006-01-02".
 	Day   string
@@ -555,8 +556,8 @@ func (m *Meter) flushDay(persist func(DayUsage) error) error {
 }
 
 // RestoreDay loads a persisted process total, so a restarted service
-// resumes the day and the month where it left off rather than reopening the
-// daily cap or restarting the month's count. A total for another day or
+// resumes the day and the month where it left off rather than restarting
+// the daily alarm count or the month's count. A total for another day or
 // month is ignored for that period, and one below what this process has
 // already counted never lowers it.
 func (m *Meter) RestoreDay(u DayUsage) {
@@ -802,8 +803,8 @@ func (w *countingWriter) Write(p []byte) (int, error) {
 }
 
 // safety: net/http drops a HEAD response body and an error body is not a
-// download, so neither is counted; counting a HEAD let eight of them latch
-// the daily alarm with nothing on the wire.
+// download, so neither is counted; bytes that never reach the wire must not
+// move the daily alarm.
 func (w *countingWriter) charges() bool {
 	return !w.bodyless && w.status >= 200 && w.status < 300
 }
