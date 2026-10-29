@@ -753,7 +753,7 @@ func TestRefreshKeepsTheLockOfARowItRepublishes(t *testing.T) {
 	id := scheduleID(root, "every-minute", "")
 	// safety: only a pin the refresh does not skip can prove the lock is
 	// carried through, and Refresh skips a row with a pinned binary, so the
-	// row carries a ref alone -- the shape `crons install --no-prove` leaves.
+	// fixture installs a ref-only lock directly.
 	lock := store.CronLock{Ref: "0123456789abcdef0123456789abcdef01234567"}
 	if err := teststore.ForTeam(t, h.store, store.DefaultTeam).SetCronScheduleLock(ctx, id, lock); err != nil {
 		t.Fatalf("SetCronScheduleLock: %v", err)
