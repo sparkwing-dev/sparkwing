@@ -89,8 +89,8 @@ func (d Dir) ReadBytes(name string) ([]byte, error) {
 	return d.read(name, fssecure.OpenCredential)
 }
 
-// ReadPrivateBytes is ReadBytes for a private key: a file that group or other
-// users can read is refused.
+// ReadPrivateBytes is ReadBytes for a private key: a file other users can read
+// is refused, and group read is admitted only for one of this process's groups.
 func (d Dir) ReadPrivateBytes(name string) ([]byte, error) {
 	return d.read(name, fssecure.OpenPrivateCredential)
 }

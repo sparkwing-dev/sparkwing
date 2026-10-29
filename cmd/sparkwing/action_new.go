@@ -590,8 +590,8 @@ func ({{STRUCT}}) Examples() []sw.Example {
 // state), run.Trigger (push/manual/schedule/webhook), run.Pipeline
 // (registered name).
 //
-// Prefers records plan-snapshot metadata; it
-// does not affect runner selection.
+// Prefers gives matching eligible runners a head start without
+// relaxing placement requirements.
 func ({{STRUCT}}) Plan(ctx context.Context, plan *sw.Plan, _ sw.NoInputs, run sw.RunContext) error {
 	lint := sw.Job(plan, "lint", &{{STRUCT}}Lint{})
 	test := sw.Job(plan, "test", &{{STRUCT}}Test{}).Prefers("ci-linux")
