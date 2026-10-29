@@ -360,14 +360,15 @@ type claimBenchmarkStatement struct {
 }
 
 type claimBenchmarkTrace struct {
-	lockedOnly bool
-	examine    bool
-	enabled    bool
-	statements []claimBenchmarkStatement
+	lockedOnly    bool
+	allStatements bool
+	examine       bool
+	enabled       bool
+	statements    []claimBenchmarkStatement
 }
 
 func (trace *claimBenchmarkTrace) record(query string, args []driver.NamedValue) {
-	if trace == nil || !trace.enabled || !strings.Contains(query, "nodes n") && !strings.Contains(query, "claim_contexts") && !strings.Contains(query, "overflow_controls") {
+	if trace == nil || !trace.enabled || !trace.allStatements && !strings.Contains(query, "nodes n") && !strings.Contains(query, "claim_contexts") && !strings.Contains(query, "overflow_controls") {
 		return
 	}
 	statement := claimBenchmarkStatement{query: query, args: make([]any, len(args))}
