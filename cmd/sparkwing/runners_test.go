@@ -816,10 +816,10 @@ func TestRunnersPersonalEnrollmentUsesEphemeralSession(t *testing.T) {
 		if r.Header.Get("Authorization") != "Session private-independent-session" {
 			t.Fatalf("enrollment did not use independent consent: %s", r.URL.Path)
 		}
-		if r.Method == "GET" && r.URL.Path == "/api/v1/auth/session" {
+		if r.Method == http.MethodGet && r.URL.Path == "/api/v1/auth/session" {
 			return 200, `{"csrf_token":"private-csrf"}`
 		}
-		if r.Method != "POST" || r.URL.Path != "/api/v1/runners" || r.Header.Get("Origin") != "https://controller.example" || r.Header.Get("X-CSRF-Token") != "private-csrf" {
+		if r.Method != http.MethodPost || r.URL.Path != "/api/v1/runners" || r.Header.Get("Origin") != "https://controller.example" || r.Header.Get("X-CSRF-Token") != "private-csrf" {
 			t.Fatalf("wrong session enrollment request: %s %s", r.Method, r.URL.Path)
 		}
 		cookie, err := r.Cookie("__Host-sw_csrf")

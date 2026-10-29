@@ -25,7 +25,7 @@ func TestSurfaceSecretsTransport(t *testing.T) {
 				var result any
 				switch calls {
 				case 1:
-					if req.Method != "POST" || req.URL.Path != "/api/v1/secrets" || req.Header.Get("Idempotency-Key") != "write-key" {
+					if req.Method != http.MethodPost || req.URL.Path != "/api/v1/secrets" || req.Header.Get("Idempotency-Key") != "write-key" {
 						t.Fatalf("write: %s %s", req.Method, req.URL)
 					}
 					var input controllerwire.SecretWrite
@@ -37,22 +37,22 @@ func TestSurfaceSecretsTransport(t *testing.T) {
 					}
 					result = controllerwire.SecretWritten{Secret: metadata, Replayed: true}
 				case 2:
-					if req.Method != "GET" || req.URL.Path != "/api/v1/secrets" {
+					if req.Method != http.MethodGet || req.URL.Path != "/api/v1/secrets" {
 						t.Fatalf("list: %s %s", req.Method, req.URL)
 					}
 					result = controllerwire.Secrets{Secrets: []controllerwire.SecretMetadata{metadata}}
 				case 3:
-					if req.Method != "GET" || req.URL.Path != "/api/v1/secrets/DEPLOY_KEY" || req.URL.Query().Get("repo") != "acme/web" || req.URL.Query().Get("pipeline") != "deploy" {
+					if req.Method != http.MethodGet || req.URL.Path != "/api/v1/secrets/DEPLOY_KEY" || req.URL.Query().Get("repo") != "acme/web" || req.URL.Query().Get("pipeline") != "deploy" {
 						t.Fatalf("read: %s %s", req.Method, req.URL)
 					}
 					result = controllerwire.SecretValue{SecretMetadata: metadata, Value: "private"}
 				case 4:
-					if req.Method != "DELETE" || req.URL.Path != "/api/v1/secrets/DEPLOY_KEY" || req.URL.Query().Get("repo") != "acme/web" || req.URL.Query().Get("pipeline") != "deploy" {
+					if req.Method != http.MethodDelete || req.URL.Path != "/api/v1/secrets/DEPLOY_KEY" || req.URL.Query().Get("repo") != "acme/web" || req.URL.Query().Get("pipeline") != "deploy" {
 						t.Fatalf("delete: %s %s", req.Method, req.URL)
 					}
-					return &http.Response{StatusCode: 204, Body: io.NopCloser(strings.NewReader(""))}, nil
+					return &http.Response{StatusCode: http.StatusNoContent, Body: io.NopCloser(strings.NewReader(""))}, nil
 				case 5:
-					if req.Method != "POST" || req.URL.Path != "/api/v1/secrets/rotate" || req.Header.Get("Idempotency-Key") != "rotate-key" {
+					if req.Method != http.MethodPost || req.URL.Path != "/api/v1/secrets/rotate" || req.Header.Get("Idempotency-Key") != "rotate-key" {
 						t.Fatalf("rotate: %s %s", req.Method, req.URL)
 					}
 					result = controllerwire.SecretRotation{Rotated: 3, Skipped: []controllerwire.SecretSelector{{Name: "OTHER", Repo: "gh:7", Pipeline: "release"}}, Replayed: true}
@@ -63,7 +63,7 @@ func TestSurfaceSecretsTransport(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(string(data)))}, nil
+				return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(string(data)))}, nil
 			})}})
 			if err != nil {
 				t.Fatal(err)

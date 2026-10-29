@@ -144,7 +144,7 @@ func TestMetricsHTTPAuthorityProperty(t *testing.T) {
 					f.facts.snapshot.Authorities[0].Principal.Capability.RevokedAt = &f.facts.snapshot.Now
 					want = 401
 				}
-				r := httptest.NewRequest("POST", "/api/v1/runs/run/jobs/job/"+operation+"?team=foreign&holder="+strings.Repeat("x", len(input)%64), strings.NewReader(body))
+				r := httptest.NewRequest(http.MethodPost, "/api/v1/runs/run/jobs/job/"+operation+"?team=foreign&holder="+strings.Repeat("x", len(input)%64), strings.NewReader(body))
 				r.Header.Set("Content-Type", "application/json")
 				r.Header.Set("Authorization", "Bearer "+f.raw)
 				w := httptest.NewRecorder()

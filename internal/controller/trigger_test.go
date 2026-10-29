@@ -53,7 +53,7 @@ func TestEventListClampsItsLimit(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	r := httptest.NewRequest("GET", "/api/v1/runs/run-1/events?limit=1000000000", nil)
+	r := httptest.NewRequest(http.MethodGet, "/api/v1/runs/run-1/events?limit=1000000000", nil)
 	r.Header.Set("Authorization", "Bearer "+raw)
 	w := httptest.NewRecorder()
 	controller.New(st, nil).Handler().ServeHTTP(w, r)
@@ -103,7 +103,7 @@ func TestRunIntakeRefusesClientSuppliedTriggerEnvironment(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		r := httptest.NewRequest("POST", "/api/v1/runs", bytes.NewReader(encoded))
+		r := httptest.NewRequest(http.MethodPost, "/api/v1/runs", bytes.NewReader(encoded))
 		r.Header.Set("Authorization", "Bearer "+f.token)
 		r.Header.Set("Content-Type", "application/json")
 		w := f.serve(r)
@@ -127,7 +127,7 @@ func TestTrigger_RequiresJSONContentType(t *testing.T) {
 		typ    string
 		status int
 	}{{"text/plain;charset=UTF-8", 400}, {"application/x-www-form-urlencoded", 400}, {"", 400}, {"application/json", 201}, {"application/json; charset=utf-8", 201}} {
-		r := httptest.NewRequest("POST", "/api/v1/runs", bytes.NewReader(body))
+		r := httptest.NewRequest(http.MethodPost, "/api/v1/runs", bytes.NewReader(body))
 		r.Header.Set("Authorization", "Bearer "+f.token)
 		r.Header.Set("Content-Type", tc.typ)
 		w := f.serve(r)

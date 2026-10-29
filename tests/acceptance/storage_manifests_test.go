@@ -91,7 +91,7 @@ func checkStorageManifests(t *testing.T, objects blob.ObjectBackend, transfers b
 		if got, err := reader.ReadBlobManifest(t.Context(), store.Team(team+"-other"), digest); got != nil || !errors.Is(err, blob.ErrNotFound) {
 			return false
 		}
-		for _, badTeam := range []store.Team{"../" + store.Team(team), store.Team(team) + "/../" + store.Team(team), store.Team(team) + "\\other"} {
+		for _, badTeam := range []store.Team{"../" + store.Team(team), store.Team(team) + "/../" + store.Team(team), store.Team(team) + "\\othere"} {
 			if got, err := reader.ReadBlobManifest(t.Context(), badTeam, digest); got != nil || err == nil {
 				return false
 			}

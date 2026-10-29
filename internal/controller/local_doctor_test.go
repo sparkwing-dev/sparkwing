@@ -108,7 +108,7 @@ func TestLocalDoctorRecordsOnlyTheLocalTenant(t *testing.T) {
 func FuzzLocalDoctorRejectsRequestIdentity(f *testing.F) {
 	f.Add("local:123", "123", "forged")
 	f.Fuzz(func(t *testing.T, subject, uid, bearer string) {
-		r := httptest.NewRequest("POST", "/api/v1/local/doctor", nil)
+		r := httptest.NewRequest(http.MethodPost, "/api/v1/local/doctor", nil)
 		r.Header.Set("X-Local-UID", uid)
 		r.Header.Set("Authorization", bearer)
 		a := capability.Authorized{Principal: capability.Principal{Class: capability.CredentialPeer, Capability: capability.Capability{Subject: capability.Subject{Kind: capability.SubjectLocal, ID: subject}}}, Target: capability.Target{Team: string(store.DefaultTeam)}}

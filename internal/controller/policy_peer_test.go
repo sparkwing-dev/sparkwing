@@ -50,7 +50,7 @@ func TestPolicyPeerIdentityProperty(t *testing.T) {
 	h := s.Handler()
 	property := func(value []byte, mutation uint8) bool {
 		id := "uid-or-sid:" + hex.EncodeToString(value)
-		r := httptest.NewRequest("GET", "http://local/api/v1/auth/whoami", nil)
+		r := httptest.NewRequest(http.MethodGet, "http://local/api/v1/auth/whoami", nil)
 		r.Header.Set("X-Local-UID", id)
 		subject := capability.Subject{Kind: capability.SubjectLocal, ID: id}
 		status := 200
@@ -86,7 +86,7 @@ func TestPolicyPeerIdentityProperty(t *testing.T) {
 	if err := quick.Check(property, &quick.Config{MaxCount: 100}); err != nil {
 		t.Fatal(err)
 	}
-	r := httptest.NewRequest("GET", "/api/v1/auth/whoami", nil)
+	r := httptest.NewRequest(http.MethodGet, "/api/v1/auth/whoami", nil)
 	r.Header.Set("X-Local-UID", "1000")
 	w := httptest.NewRecorder()
 	h.ServeHTTP(w, r)

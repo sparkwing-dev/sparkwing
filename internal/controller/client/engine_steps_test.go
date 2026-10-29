@@ -38,7 +38,7 @@ func FuzzEngineStepReportKeepsRouteAndAttempt(f *testing.F) {
 		c := testEngine(t, func(req *http.Request) (*http.Response, error) {
 			calls++
 			path := "/api/v1/runs/" + url.PathEscape(run) + "/jobs/" + url.PathEscape(job) + "/steps/" + action
-			if !valid || req.Method != "POST" || req.URL.EscapedPath() != path || req.URL.RawQuery != "" {
+			if !valid || req.Method != http.MethodPost || req.URL.EscapedPath() != path || req.URL.RawQuery != "" {
 				t.Fatal("step input changed the declared route")
 			}
 			var body map[string]json.RawMessage

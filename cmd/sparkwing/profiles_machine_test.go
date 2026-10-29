@@ -94,7 +94,7 @@ func TestProfilesRemoveRetainsConnectionChangedDuringRevocation(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if r.Method == "GET" {
+		if r.Method == http.MethodGet {
 			return 200, fmt.Sprintf(`{"prefix":%q,"team":"team-a","subject":{"kind":"account","id":"person"},"audience":"controller","grants":[],"created_by":"issuer","git_credentials":false,"metered":false,"issued_at":"2026-10-14T00:00:00Z"}`, prefix)
 		}
 		profiles["prod"] = userconfig.Profile{Controller: userconfig.Connection{URL: "https://replacement.example"}}

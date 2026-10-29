@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"net/http"
 	"net/http/httptest"
 	"reflect"
 	"strings"
@@ -144,7 +145,7 @@ func TestOwnerEvaluationRefusesFreshIdentifierAfterIssuance(t *testing.T) {
 		if request.Op != nodeproto.OpEval {
 			return nil, nil
 		}
-		if _, err := bound.oidc(httptest.NewRequest("POST", "/node/v1/oidc-token", strings.NewReader(`{"audience":"deploy"}`)), capability.Authorized{}); err != nil {
+		if _, err := bound.oidc(httptest.NewRequest(http.MethodPost, "/node/v1/oidc-token", strings.NewReader(`{"audience":"deploy"}`)), capability.Authorized{}); err != nil {
 			t.Fatal(err)
 		}
 		jobs := []nodeproto.JobSpec{}

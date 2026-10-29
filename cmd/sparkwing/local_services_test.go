@@ -170,7 +170,7 @@ func TestProductionLocalControllerReconcilesAndServesSharedHandlers(t *testing.T
 		case "shell":
 			h, want = owner.HTTP().Shell, 200
 		}
-		h.ServeHTTP(response, httptest.NewRequest("GET", handler.path, nil))
+		h.ServeHTTP(response, httptest.NewRequest(http.MethodGet, handler.path, nil))
 		if response.Code != want {
 			t.Fatalf("%s: HTTP %d: %s", handler.name, response.Code, response.Body)
 		}

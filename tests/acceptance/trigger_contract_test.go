@@ -53,10 +53,10 @@ func TestSurfaceInitialTriggerIntakeTransport(t *testing.T) {
 					if err := json.NewDecoder(req.Body).Decode(&got); err != nil {
 						t.Fatal(err)
 					}
-					if req.Method != "POST" || req.URL.Path != "/api/v1/runs" || req.Header.Get("Idempotency-Key") != request.IdempotencyKey || !reflect.DeepEqual(got, request) {
+					if req.Method != http.MethodPost || req.URL.Path != "/api/v1/runs" || req.Header.Get("Idempotency-Key") != request.IdempotencyKey || !reflect.DeepEqual(got, request) {
 						t.Fatalf("initial intake changed: %s %s %+v", req.Method, req.URL, got)
 					}
-					return &http.Response{StatusCode: 202, Body: io.NopCloser(strings.NewReader(string(raw)))}, nil
+					return &http.Response{StatusCode: http.StatusAccepted, Body: io.NopCloser(strings.NewReader(string(raw)))}, nil
 				})}})
 				if err != nil {
 					t.Fatal(err)

@@ -250,7 +250,7 @@ func TestEngineJobsRemovedNodeReads(t *testing.T) {
 	f := jobViewFixture(b)
 	s := jobViewServer(t, b, f)
 	for _, path := range []string{"/api/v1/runs/run/nodes", "/api/v1/runs/run/nodes/job"} {
-		r := httptest.NewRequest("GET", path, nil)
+		r := httptest.NewRequest(http.MethodGet, path, nil)
 		r.Header.Set("Authorization", "Bearer "+b.raw)
 		w := httptest.NewRecorder()
 		s.ServeHTTP(w, r)

@@ -31,7 +31,7 @@ func TestProductionHostingRetainsPrivateTransport(t *testing.T) {
 				if kind == capability.UnitNode {
 					want = "/api/v1/runs/run/local-host/nodes/build/authentication"
 				}
-				if r.Method != "POST" || r.URL.Scheme != "http" || r.URL.Host != "private.invalid" || r.URL.Path != want || r.Header.Get("Authorization") != "Bearer "+bearer {
+				if r.Method != http.MethodPost || r.URL.Scheme != "http" || r.URL.Host != "private.invalid" || r.URL.Path != want || r.Header.Get("Authorization") != "Bearer "+bearer {
 					t.Errorf("private request lost the award or destination: %s %s", r.Method, r.URL)
 				}
 				return nil, boundary

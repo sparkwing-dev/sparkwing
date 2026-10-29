@@ -21,7 +21,7 @@ func TestPoolLauncherEnrollmentRequiresExclusivePoolAuthority(t *testing.T) {
 		{`["claims.launch"]`, `[]`, 403},
 	} {
 		body := fmt.Sprintf(`{"name":"deploy-%d","repos":["github.com/acme/*"],"reserved_pools":%s,"trust":"verified-default","grants":%s}`, i, tc.pools, tc.grants)
-		r := httptest.NewRequest("POST", "https://controller.test/api/v1/runners", strings.NewReader(body))
+		r := httptest.NewRequest(http.MethodPost, "https://controller.test/api/v1/runners", strings.NewReader(body))
 		r.Header.Set("Content-Type", "application/json")
 		r.Header.Set("Origin", "https://controller.test")
 		r.Header.Set(csrfHeaderName, "session-csrf")

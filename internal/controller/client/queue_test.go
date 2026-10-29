@@ -14,12 +14,12 @@ func TestQueueManagerUsesFinalRoutes(t *testing.T) {
 		calls++
 		switch calls {
 		case 1:
-			if req.Method != "GET" || req.URL.RequestURI() != "/api/v1/queue" {
+			if req.Method != http.MethodGet || req.URL.RequestURI() != "/api/v1/queue" {
 				t.Fatalf("queue: %s %s", req.Method, req.URL)
 			}
 			return engineResponse(200, `{"resources":[{"key":"cores","capacity":2.5,"held":1}],"holders":[{"run_id":"r1","elapsed_ms":0,"resources":{}}],"waiters":[{"run_id":"r2","position":1,"resources":{}}],"runners":[{"name":"linux","cores":1.5,"memory_bytes":1024}]}`), nil
 		case 2:
-			if req.Method != "GET" || req.URL.EscapedPath() != "/api/v1/queue/groups/deploy%2Fprod%20+" {
+			if req.Method != http.MethodGet || req.URL.EscapedPath() != "/api/v1/queue/groups/deploy%2Fprod%20+" {
 				t.Fatalf("group: %s %s", req.Method, req.URL)
 			}
 			return engineResponse(200, `{"group":"deploy/prod +","capacity":2,"effective_capacity":2,"used_cost":1,"holders":[{"holder_id":"h1","run_id":"r1","job_id":"deploy","claimed_at":"2026-10-14T01:00:00Z","lease_expires_at":"2026-10-14T02:00:00Z","superseded":false,"cost":1}],"waiters":[{"run_id":"r2","job_id":"deploy","arrived_at":"2026-10-14T01:01:00Z","policy":"queue","position":1,"cost":1}]}`), nil

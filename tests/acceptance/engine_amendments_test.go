@@ -43,19 +43,19 @@ func TestEngineAmendmentsPreservePrivateWireContract(t *testing.T) {
 					if req.URL.Path == "/api/v1/launcher/claim" {
 						kinds = []capability.UnitKind{capability.UnitNode}
 					}
-					if req.Method != "POST" || !reflect.DeepEqual(input.Kinds, kinds) {
+					if req.Method != http.MethodPost || !reflect.DeepEqual(input.Kinds, kinds) {
 						t.Fatalf("claim changed: %+v", input)
 					}
 					return engineContractResponse(t, controllerwire.ClaimResponse{}), nil
 				case "/api/v1/runs/r1/jobs/source/failure":
-					if req.Method != "GET" || req.URL.Query().Get("generation") != "3" {
+					if req.Method != http.MethodGet || req.URL.Query().Get("generation") != "3" {
 						t.Fatalf("failure selector: %s %s", req.Method, req.URL)
 					}
 					inner := `{"code":"future_error","message":"masked","hint":"recover","future":true}`
 					if malformed {
 						inner = `{"code":"x","code":"y","message":"duplicate"}`
 					}
-					return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(`{"job":"source","stage":"body","error":` + inner + `}`))}, nil
+					return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(`{"job":"source","stage":"body","error":` + inner + `}`))}, nil
 				case "/api/v1/runs/r1/jobs/build/reconcile":
 					var input controllerwire.ReconcileRequest
 					if err := json.NewDecoder(req.Body).Decode(&input); err != nil || input.MaterializeOnly || input.Policy != "resume" {
@@ -146,5 +146,5 @@ func engineContractResponse(t *testing.T, value any) *http.Response {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(string(body)))}
+	return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(string(body)))}
 }

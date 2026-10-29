@@ -128,7 +128,7 @@ func TestAuditFormatsCredentialsInEveryField(t *testing.T) {
 			noteAuditTarget(r.Context(), "machine_id", value)
 			w.WriteHeader(http.StatusOK)
 		})
-		h.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest("DELETE", "/", nil))
+		h.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodDelete, "/", nil))
 		records := auditLines(t, logs, "audit")
 		for _, key := range []string{"route", "principal_kind", "principal_id", "team", "machine_id"} {
 			got, _ := records[0][key].(string)
@@ -146,7 +146,7 @@ func TestRequestIDIgnoresClientValues(t *testing.T) {
 	for _, id := range []string{"trace-1_A.b", strings.Repeat("a", 64), "", "bad id", "bad\nline", strings.Repeat("a", 65)} {
 		h, logs := auditHarness(t, "/", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })
 		for range 2 {
-			req := httptest.NewRequest("POST", "/", nil)
+			req := httptest.NewRequest(http.MethodPost, "/", nil)
 			req.Header.Set(RequestIDHeader, id)
 			w := httptest.NewRecorder()
 			h.ServeHTTP(w, req)

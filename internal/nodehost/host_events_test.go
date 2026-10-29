@@ -32,10 +32,10 @@ func TestHostLifecycleEvents(t *testing.T) {
 			var fixture *storeHostFixture
 			var trace []string
 			var processes []*scriptedSDK
-			input, _, host := executionHostFixture(t, mode, &trace, &processes, func(deps *ExecutorDependencies) {
+			_, _, host := executionHostFixture(t, mode, &trace, &processes, func(deps *ExecutorDependencies) {
 				fixture = executionStoreFixture(t, deps)
 			})
-			input = storedExecutionInput(t, fixture, host)
+			input := storedExecutionInput(t, fixture, host)
 			row := runstate.NodeRow{Ref: runspec.NodeRef{RunID: runspec.RunID(input.Accepted.RunID), NodeID: runspec.NodeID(input.NodeID)}}
 			if mode == "result_refused" {
 				if _, err := teststore.SQL(t, fixture.Store).ExecContext(ctx, `CREATE TRIGGER refuse_result BEFORE UPDATE OF outcome ON nodes WHEN NEW.status='done' BEGIN SELECT RAISE(ABORT,'result transaction refused'); END`); err != nil {
@@ -119,7 +119,7 @@ func TestHostStepPersistence(t *testing.T) {
 			var trace []string
 			var processes []*scriptedSDK
 			var diagnostics []nodeproto.FrameLog
-			input, _, host := executionHostFixture(t, mode, &trace, &processes, func(deps *ExecutorDependencies) {
+			_, _, host := executionHostFixture(t, mode, &trace, &processes, func(deps *ExecutorDependencies) {
 				fixture = executionStoreFixture(t, deps)
 				deps.Log = func(ctx context.Context, in NodeInput, log nodeproto.FrameLog) error {
 					row, err := fixture.Tenant.ReadNode(ctx, runspec.NodeRef{RunID: runspec.RunID(in.Accepted.RunID), NodeID: "job"})
@@ -140,7 +140,7 @@ func TestHostStepPersistence(t *testing.T) {
 					return nil
 				}
 			})
-			input = storedExecutionInput(t, fixture, host)
+			input := storedExecutionInput(t, fixture, host)
 			host.Store, host.Masker = fixture.Tenant, secrets.NewMasker()
 			if mode == "step_write_refused" {
 				if _, err := teststore.SQL(t, fixture.Store).ExecContext(ctx, `CREATE TRIGGER refuse_step BEFORE UPDATE OF status ON node_steps WHEN NEW.status='passed' BEGIN SELECT RAISE(ABORT,'step transaction refused'); END`); err != nil {
@@ -250,8 +250,8 @@ func TestClaimedHostForeignAwards(t *testing.T) {
 			var fixture *storeHostFixture
 			var trace []string
 			var processes []*scriptedSDK
-			input, _, host := executionHostFixture(t, "success", &trace, &processes, func(deps *ExecutorDependencies) { fixture = executionStoreFixture(t, deps) })
-			input = storedExecutionInput(t, fixture, host)
+			_, _, host := executionHostFixture(t, "success", &trace, &processes, func(deps *ExecutorDependencies) { fixture = executionStoreFixture(t, deps) })
+			input := storedExecutionInput(t, fixture, host)
 			before, err := fixture.Tenant.ReadSnapshot(ctx, input.Accepted.RunID)
 			if err != nil {
 				t.Fatal(err)

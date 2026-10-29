@@ -76,7 +76,7 @@ func TestNativeHostStorageAndLogsUsePublicRecordReaders(t *testing.T) {
 	if _, err := sink.Close(t.Context(), logseg.End{}); err != nil {
 		t.Fatal(err)
 	}
-	request, err := http.NewRequestWithContext(t.Context(), "GET", "http://local/api/v1/runs/run/jobs/job/logs", nil)
+	request, err := http.NewRequestWithContext(t.Context(), http.MethodGet, "http://local/api/v1/runs/run/jobs/job/logs", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -89,7 +89,7 @@ func TestNativeHostStorageAndLogsUsePublicRecordReaders(t *testing.T) {
 	if closeErr := response.Body.Close(); closeErr != nil {
 		t.Fatal(closeErr)
 	}
-	if err != nil || response.StatusCode != 200 || !strings.Contains(string(body), "public local log") {
+	if err != nil || response.StatusCode != http.StatusOK || !strings.Contains(string(body), "public local log") {
 		t.Fatalf("public log roundtrip: status=%d %s %v", response.StatusCode, body, err)
 	}
 }

@@ -161,7 +161,7 @@ func manageSchedules(ctx context.Context, inv clisurface.Invocation, manager con
 	}
 	for _, detail := range rows {
 		row := detail.Schedule
-		var result any = row
+		var result any
 		plain := row.ID
 		verb := strings.TrimPrefix(inv.Command.Path, "sparkwing schedules ")
 		switch verb {

@@ -207,7 +207,7 @@ func TestActionsIssuanceHTTPRefusesInvalidProofAndConsent(t *testing.T) {
 			case "keys unavailable":
 				f.server.WithGitHubRunners(githuboidc.Config{
 					Audience: "https://controller.test", Issuer: "https://actions.test", JWKSURL: "https://actions.test/keys",
-					HTTP: &http.Client{Transport: reportTransport{http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(503) })}},
+					HTTP: &http.Client{Transport: reportTransport{http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusServiceUnavailable) })}},
 				})
 				status, code = 503, apierr.Unavailable
 			}
@@ -269,7 +269,7 @@ func TestActionsIssuanceHTTPCallerFieldsCannotSelectAuthority(t *testing.T) {
 func TestActionsIssuanceHTTPMalformedBodyCannotReachOrigin(t *testing.T) {
 	f := newActionsExchangeFixture(t)
 	for _, body := range []string{"", "null", "{}", `{"id_token":null,"team":"team"}`, `{"id_token":[],"team":"team"}`, `{"id_token":"private","team":1}`, `{"id_token":"private","team":"team"} {}`} {
-		r := httptest.NewRequest("POST", "/api/v1/runners/github/exchange", strings.NewReader(body))
+		r := httptest.NewRequest(http.MethodPost, "/api/v1/runners/github/exchange", strings.NewReader(body))
 		r.Header.Set("Content-Type", "application/json")
 		w := httptest.NewRecorder()
 		f.server.Handler().ServeHTTP(w, r)
@@ -336,7 +336,7 @@ func TestActionsIssuanceHTTPCommitsThroughSoleIssuer(t *testing.T) {
 		t.Fatalf("persisted root=%+v err=%v", principal, err)
 	}
 	for path, status := range map[string]int{"/api/v1/auth/whoami": 200, "/api/v1/pipelines/build/sizing": 403} {
-		r := httptest.NewRequest("GET", path, nil)
+		r := httptest.NewRequest(http.MethodGet, path, nil)
 		r.Header.Set("Authorization", "Bearer "+result.Token)
 		w := httptest.NewRecorder()
 		f.server.Handler().ServeHTTP(w, r)

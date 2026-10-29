@@ -163,3 +163,15 @@ func TestRejectRemovedAdmissionAdvisor(t *testing.T) {
 		}
 	}
 }
+
+func TestRemovedMachineSectionsSayToDeleteThem(t *testing.T) {
+	for _, key := range []string{"agent", "logs", "fleet", "allow_repos", "dispatch_wait"} {
+		_, err := Decode("machine.yaml", []byte(key+": {}\n"))
+		var field *FieldError
+		if !errors.As(err, &field) || field.Key != key || field.Line != 1 ||
+			!strings.Contains(field.Problem, "is removed; delete it") ||
+			!strings.Contains(field.Problem, "https://sparkwing.dev/docs/migration-guide/") {
+			t.Errorf("%s: diagnostic does not say how to fix it: %v", key, err)
+		}
+	}
+}

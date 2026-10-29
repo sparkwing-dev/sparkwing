@@ -38,7 +38,7 @@ func loginCapability(t *testing.T, f sessionFlow) capability.Issued {
 
 func loginRequest(raw, csrf, next string) *http.Request {
 	form := url.Values{"token": {raw}, "csrf_token": {csrf}, "next": {next}}
-	r := httptest.NewRequest("POST", "https://controller.test/login", strings.NewReader(form.Encode()))
+	r := httptest.NewRequest(http.MethodPost, "https://controller.test/login", strings.NewReader(form.Encode()))
 	r.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	r.Header.Set("Origin", "https://controller.test")
 	r.AddCookie(&http.Cookie{Name: "__Host-sw_csrf", Value: csrf})
@@ -98,7 +98,7 @@ func TestLoginHTTPAccountCapabilitySession(t *testing.T) {
 	if _, err := f.store.AsOperator().LookupSession(t.Context(), f.raw); err != nil {
 		t.Fatalf("sign-in ended its minting session: %v", err)
 	}
-	r = httptest.NewRequest("GET", "https://controller.test/api/v1/auth/whoami", nil)
+	r = httptest.NewRequest(http.MethodGet, "https://controller.test/api/v1/auth/whoami", nil)
 	r.AddCookie(&http.Cookie{Name: "__Host-sw_session", Value: raw})
 	w = httptest.NewRecorder()
 	h.ServeHTTP(w, r)
@@ -194,7 +194,7 @@ func TestLoginHTTPPageAndMethods(t *testing.T) {
 	f := newSessionFlow(t)
 	h := f.server.WithDashboard(controller.Dashboard{Version: "</script><script>alert(1)</script>\u2028"}).Handler()
 	for _, state := range []string{"anonymous", "signed-in", "stale"} {
-		r := httptest.NewRequest("GET", "https://controller.test/login?next=%2Fruns", nil)
+		r := httptest.NewRequest(http.MethodGet, "https://controller.test/login?next=%2Fruns", nil)
 		if state == "signed-in" {
 			r.AddCookie(&http.Cookie{Name: "__Host-sw_session", Value: f.raw})
 		} else if state == "stale" {
@@ -229,7 +229,7 @@ func TestLoginHTTPPageAndMethods(t *testing.T) {
 		assertEngineError(t, w, 405, apierr.MethodNotAllowed)
 	}
 	w := httptest.NewRecorder()
-	h.ServeHTTP(w, httptest.NewRequest("GET", "https://controller.test/sparkwing-runtime.js", nil))
+	h.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "https://controller.test/sparkwing-runtime.js", nil))
 	if w.Code != 200 || strings.ContainsAny(w.Body.String(), "\u2028\u2029") || strings.Contains(w.Body.String(), "</script>") || strings.Contains(w.Body.String(), f.raw) {
 		t.Fatalf("runtime script: HTTP %d %s", w.Code, w.Body.String())
 	}
@@ -315,19 +315,19 @@ func TestLoginHTTPNonlocalRequiresSession(t *testing.T) {
 	h := controller.New(nil, nil).WithDashboard(controller.Dashboard{}).Handler()
 	for _, path := range []string{"/", "/runs", "/operator"} {
 		w := httptest.NewRecorder()
-		h.ServeHTTP(w, httptest.NewRequest("GET", "https://controller.test"+path, nil))
+		h.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "https://controller.test"+path, nil))
 		if w.Code != 303 || !strings.HasPrefix(w.Header().Get("Location"), "/login?next=") {
 			t.Fatalf("page %s HTTP %d %s", path, w.Code, w.Body.String())
 		}
 	}
 	w := httptest.NewRecorder()
-	h.ServeHTTP(w, httptest.NewRequest("GET", "https://controller.test/login?next=%2Fruns", nil))
+	h.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "https://controller.test/login?next=%2Fruns", nil))
 	if w.Code != 200 || !strings.Contains(w.Body.String(), "Account access token") {
 		t.Fatalf("HTTP %d %s", w.Code, w.Body.String())
 	}
 	for _, path := range []string{"/login/bootstrap", "/api/v1/auth/login"} {
 		w := httptest.NewRecorder()
-		h.ServeHTTP(w, httptest.NewRequest("POST", "https://controller.test"+path, nil))
+		h.ServeHTTP(w, httptest.NewRequest(http.MethodPost, "https://controller.test"+path, nil))
 		if w.Code != 404 && w.Code != 405 {
 			t.Fatalf("POST %s: HTTP %d %s", path, w.Code, w.Body.String())
 		}

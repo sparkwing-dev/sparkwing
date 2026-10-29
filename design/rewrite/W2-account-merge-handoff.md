@@ -2,7 +2,7 @@
 
 <!-- design:begin -->
 
-Starts from 994107032 with bw-3095-rewrite already merging. No Git writes.
+Starts from 994107032 with the integration branch already merging. No Git writes.
 
 ## Implemented and deleted
 

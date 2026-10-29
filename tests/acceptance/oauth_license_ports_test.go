@@ -3,6 +3,7 @@ package acceptance_test
 import (
 	"encoding/base64"
 	"encoding/json"
+	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"slices"
@@ -56,7 +57,7 @@ func TestOAuthHTTPLicenseControlsPublicProviders(t *testing.T) {
 			p := &oauthProvider{}
 			h := withOAuthGitHub(f.server, p).WithGoogleSignIn(googleauth.New(googleauth.Google("client", "private")), []string{oauthOrigin + "/auth/google/callback"}).Handler()
 			w := httptest.NewRecorder()
-			h.ServeHTTP(w, httptest.NewRequest("GET", "/api/v1/capabilities", nil))
+			h.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/api/v1/capabilities", nil))
 			var caps struct {
 				Teams struct{ Enabled bool }
 				Auth  struct{ Providers []string }
@@ -69,7 +70,7 @@ func TestOAuthHTTPLicenseControlsPublicProviders(t *testing.T) {
 			}
 			for _, provider := range []string{"google", "github"} {
 				w = httptest.NewRecorder()
-				h.ServeHTTP(w, httptest.NewRequest("GET", oauthOrigin+"/auth/"+provider+"/start", nil))
+				h.ServeHTTP(w, httptest.NewRequest(http.MethodGet, oauthOrigin+"/auth/"+provider+"/start", nil))
 				location, err := url.Parse(w.Header().Get("Location"))
 				started := err == nil && location.Query().Get("state") != "" && location.Query().Get("code_challenge") != "" && oauthCookie(w, "__Host-sw_oauth") != nil
 				if name == "valid" {

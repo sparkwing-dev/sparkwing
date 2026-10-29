@@ -37,7 +37,7 @@ import (
 func FuzzLocalSchedulesRequireVerifiedTransportPeer(f *testing.F) {
 	f.Add("local:0", "0", "bearer")
 	f.Fuzz(func(t *testing.T, subject, uid, authorization string) {
-		request := httptest.NewRequest("POST", "http://local/api/v1/schedules/local/tick", nil)
+		request := httptest.NewRequest(http.MethodPost, "http://local/api/v1/schedules/local/tick", nil)
 		request.Header.Set("X-Local-UID", uid)
 		request.Header.Set("Authorization", authorization)
 		authorized := capability.Authorized{Target: capability.Target{Team: string(store.DefaultTeam)}, Principal: capability.Principal{Class: capability.CredentialPeer, Capability: capability.Capability{Subject: capability.Subject{Kind: capability.SubjectLocal, ID: subject}}}}
@@ -232,7 +232,7 @@ func TestLocalScheduleTransportRegistersPinsTicksAndDeletes(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	request, err := http.NewRequestWithContext(t.Context(), "PUT", options.URL+"/api/v1/schedules/repos", bytes.NewReader(encoded))
+	request, err := http.NewRequestWithContext(t.Context(), http.MethodPut, options.URL+"/api/v1/schedules/repos", bytes.NewReader(encoded))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -243,7 +243,7 @@ func TestLocalScheduleTransportRegistersPinsTicksAndDeletes(t *testing.T) {
 	}
 	data, readErr := io.ReadAll(response.Body)
 	closeErr := response.Body.Close()
-	if response.StatusCode != 200 || readErr != nil || closeErr != nil {
+	if response.StatusCode != http.StatusOK || readErr != nil || closeErr != nil {
 		t.Fatalf("verified local principal was capped: %d %s %v %v", response.StatusCode, data, readErr, closeErr)
 	}
 	var registered controllerwire.ScheduleRepoWritten

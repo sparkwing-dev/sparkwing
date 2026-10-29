@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/hex"
 	"encoding/json"
+	"net/http"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
@@ -15,7 +16,7 @@ func validateResultProofTx(ctx context.Context, tx *storeTx, team Team, actor ru
 	if proof == nil {
 		return nil
 	}
-	if proof.Actor != actor.Authority || proof.Method != "POST" || runspec.RunID(proof.RunID) != ref.RunID || runspec.NodeID(proof.NodeID) != ref.NodeID || proof.ClaimID != "" || runspec.ClaimGeneration(proof.Generation) != actor.Generation || len(proof.Digest) != 64 {
+	if proof.Actor != actor.Authority || proof.Method != http.MethodPost || runspec.RunID(proof.RunID) != ref.RunID || runspec.NodeID(proof.NodeID) != ref.NodeID || proof.ClaimID != "" || runspec.ClaimGeneration(proof.Generation) != actor.Generation || len(proof.Digest) != 64 {
 		return holderRefusal()
 	}
 	if _, err := hex.DecodeString(proof.Digest); err != nil {
@@ -64,7 +65,7 @@ func authenticationResultTx(ctx context.Context, tx *storeTx, c capability.Capab
 	if evidence.ResultDigest == "" || c.Binding.RunID == "" {
 		return nil
 	}
-	if evidence.Method == "POST" && evidence.Pattern == "/api/v1/runs/{run}/plan" {
+	if evidence.Method == http.MethodPost && evidence.Pattern == "/api/v1/runs/{run}/plan" {
 		var digest string
 		if err := tx.QueryRowContext(ctx, `SELECT result_digest FROM capabilities WHERE team=? AND prefix=?`, c.Team, c.Prefix).Scan(&digest); err != nil {
 			return err

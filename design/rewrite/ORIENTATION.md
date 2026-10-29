@@ -110,7 +110,7 @@ A lane test script exports its environment once and runs every command with
 
 ```bash
 export GOWORK=off GOFLAGS=-buildvcs=false TMPDIR=/var/tmp/sw-lead-tmp \
-  SPARKWING_GUARD_BASE=bw-3095-rewrite \
+  SPARKWING_GUARD_BASE=<integration-branch> \
   KUBEBUILDER_ASSETS=/var/tmp/sw-lead-tmp/vapreview/envtest/k8s/1.37.0-linux-amd64
 W=/home/bombuntu/.xwing/envs/<env>/sparkwing
 go -C $W build ./... && go -C $W vet ./...

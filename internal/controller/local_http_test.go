@@ -112,7 +112,7 @@ func testLocalControllerHTTP(t *testing.T, native bool) {
 	})
 	client := &http.Client{Transport: transport}
 	property := func(input []byte, mutation uint8) bool {
-		r, err := http.NewRequestWithContext(t.Context(), "GET", "http://local/api/v1/auth/whoami", nil)
+		r, err := http.NewRequestWithContext(t.Context(), http.MethodGet, "http://local/api/v1/auth/whoami", nil)
 		if err != nil {
 			return false
 		}
@@ -143,19 +143,19 @@ func testLocalControllerHTTP(t *testing.T, native bool) {
 		t.Fatal(err)
 	}
 	for _, path := range []string{"/api/v1/triggers", "/api/v1/runs/run/nodes/job/start", "/api/v1/concurrency/group/acquire"} {
-		r, _ := http.NewRequestWithContext(t.Context(), "POST", "http://local"+path, nil)
+		r, _ := http.NewRequestWithContext(t.Context(), http.MethodPost, "http://local"+path, nil)
 		resp, err := client.Do(r)
 		if err != nil {
 			t.Fatal(err)
 		}
 		resp.Body.Close()
-		if resp.StatusCode != 404 {
+		if resp.StatusCode != http.StatusNotFound {
 			t.Fatalf("retired local route %s: HTTP %d", path, resp.StatusCode)
 		}
 	}
 	for _, handler := range []http.Handler{services.API, services.Dashboard} {
 		w := httptest.NewRecorder()
-		r := httptest.NewRequest("GET", "/api/v1/auth/whoami", nil)
+		r := httptest.NewRequest(http.MethodGet, "/api/v1/auth/whoami", nil)
 		r.Header.Set("X-Local-UID", "1234")
 		handler.ServeHTTP(w, r)
 		if w.Code != 401 {

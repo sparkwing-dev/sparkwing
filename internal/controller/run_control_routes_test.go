@@ -83,7 +83,7 @@ func TestRunControlHTTPAuthorityProperty(t *testing.T) {
 			if err != nil {
 				return false
 			}
-			r := httptest.NewRequest("POST", path+"?team=foreign&run_id=other", strings.NewReader(string(data)))
+			r := httptest.NewRequest(http.MethodPost, path+"?team=foreign&run_id=other", strings.NewReader(string(data)))
 			r.Header.Set("Authorization", "Bearer "+f.raw)
 			r.Header.Set("Content-Type", "application/json")
 			r.Header.Set("Idempotency-Key", key)
@@ -169,7 +169,7 @@ func TestBusinessRetiredRoutesAndExactMethods(t *testing.T) {
 		}
 	}
 	for path, allow := range map[string]string{"/api/v1/schedules": "GET", "/api/v1/schedules/entry": "DELETE, GET", "/api/v1/runs/run/approvals/job": "GET, POST", "/api/v1/runs/run/debug-pauses": "GET, POST", "/api/v1/runners": "GET, POST"} {
-		r := httptest.NewRequest("PATCH", path, nil)
+		r := httptest.NewRequest(http.MethodPatch, path, nil)
 		w := httptest.NewRecorder()
 		h.ServeHTTP(w, r)
 		if w.Code != 405 || w.Header().Get("Allow") != allow || !strings.Contains(w.Body.String(), "method_not_allowed") {

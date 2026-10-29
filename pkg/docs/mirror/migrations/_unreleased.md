@@ -87,7 +87,9 @@ These steps cover a laptop or CI machine that runs pipelines with
    The next command creates a new one.
 3. Clean `~/.config/sparkwing/config.yaml`. The file must be mode `0600`, and
    every unknown key fails with its file and line. Delete the `agent`, `logs`
-   and `fleet` sections and the `allow_repos` and `dispatch_wait` keys. A
+   and `fleet` sections and the `allow_repos` and `dispatch_wait` keys; until
+   you do, every command fails with, for example,
+   `config.yaml: agent: line 1: agent is removed; delete it`. A
    profile now holds only `controller.url` and an optional `controller.token`,
    so delete every other profile key. See
    [Machine settings](../machine-config.md).
@@ -97,7 +99,9 @@ These steps cover a laptop or CI machine that runs pipelines with
 5. Move every repository's SDK pin to v0.68 before running it, as
    [Upgrade pipeline code](#upgrade-pipeline-code) shows.
 6. Reinstall git hooks with `sparkwing pipeline hooks install`, because hooks
-   an older CLI wrote can pass flags v0.68 removed, such as `--sw-local-only`.
+   an older CLI wrote can pass flags v0.68 removed, such as `--sw-local-only`,
+   and set `SPARKWING_LOG_FORMAT=quiet`, which v0.68 refuses with
+   `SPARKWING_LOG_FORMAT="quiet" must be pretty, json or plain`.
 7. Set local secrets again with `sparkwing secrets set --secret NAME`.
 8. Open the local dashboard with `sparkwing dashboard start`, then
    `sparkwing dashboard open`. The dashboard now needs the one-time link that

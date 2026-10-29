@@ -181,7 +181,7 @@ func TestInstallationRepositoriesListsEveryPage(t *testing.T) {
 				}
 				body = string(encoded)
 			}
-			return &http.Response{StatusCode: 200, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(body)), Request: r}, nil
+			return &http.Response{StatusCode: http.StatusOK, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(body)), Request: r}, nil
 		})}})
 		got, err := client.InstallationRepositories(context.Background(), 7)
 		if err != nil || len(got) != count || got[count-1].ID != int64(10000+count-1) {
@@ -266,7 +266,7 @@ func TestInstallationRepositoriesRejectsNonAdvancingPages(t *testing.T) {
 					}
 					body = string(encoded)
 				}
-				return &http.Response{StatusCode: 200, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(body)), Request: r}, nil
+				return &http.Response{StatusCode: http.StatusOK, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(body)), Request: r}, nil
 			})}})
 			got, err := client.InstallationRepositories(t.Context(), 7)
 			want := "did not advance"
@@ -309,7 +309,7 @@ func TestInstallationRepositoriesHasOverallDeadline(t *testing.T) {
 				}
 				body = string(encoded)
 			}
-			return &http.Response{StatusCode: 200, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(body)), Request: r}, nil
+			return &http.Response{StatusCode: http.StatusOK, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(body)), Request: r}, nil
 		})}})
 		started := time.Now()
 		got, err := client.InstallationRepositories(t.Context(), 7)

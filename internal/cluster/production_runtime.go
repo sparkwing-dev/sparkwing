@@ -236,7 +236,7 @@ func (s *githubActionsSource) GitCredential(ctx context.Context, spec source.Spe
 		return source.Credential{}, err
 	}
 	host, err := sourceurl.Host(spec.RemoteURL)
-	if string(spec.RepoKey) != s.repository || err != nil || host != "github.com" || s.token == "" {
+	if spec.RepoKey != s.repository || err != nil || host != "github.com" || s.token == "" {
 		return source.Credential{}, errors.New("Actions source requires this repository's GITHUB_TOKEN")
 	}
 	return source.Credential{Kind: "https", Host: "github.com", Username: "x-access-token", Secret: s.token}, nil

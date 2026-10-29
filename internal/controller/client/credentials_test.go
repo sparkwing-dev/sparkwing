@@ -25,7 +25,7 @@ func FuzzRunnerEnrollmentNeverReplays(f *testing.F) {
 		calls := 0
 		manager, err := NewRunnerTokenManager(EngineOptions{URL: "https://controller.example", HTTP: &http.Client{Transport: engineTransport(func(req *http.Request) (*http.Response, error) {
 			calls++
-			if req.Method != "POST" || req.URL.Path != "/api/v1/runners" || req.GetBody != nil || req.Header.Get("Idempotency-Key") != "" {
+			if req.Method != http.MethodPost || req.URL.Path != "/api/v1/runners" || req.GetBody != nil || req.Header.Get("Idempotency-Key") != "" {
 				t.Fatalf("enrollment can replay or select another route: %s %s", req.Method, req.URL)
 			}
 			var proposal controllerwire.EnrollRunnerRequest
@@ -83,19 +83,19 @@ func TestCredentialManagementUsesCurrentControllerContract(t *testing.T) {
 			var result any
 			switch calls {
 			case 1:
-				if req.Method != "GET" || req.URL.Path != base || req.URL.Query().Get("kind") != string(subject) || req.URL.Query().Get("include_revoked") != "1" {
+				if req.Method != http.MethodGet || req.URL.Path != base || req.URL.Query().Get("kind") != string(subject) || req.URL.Query().Get("include_revoked") != "1" {
 					t.Fatalf("list: %s %s", req.Method, req.URL)
 				}
 				result = struct {
 					Tokens []capability.Metadata `json:"tokens"`
 				}{[]capability.Metadata{metadata}}
 			case 2:
-				if req.Method != "GET" || req.URL.Path != base+"/swk_prefix" {
+				if req.Method != http.MethodGet || req.URL.Path != base+"/swk_prefix" {
 					t.Fatalf("lookup: %s %s", req.Method, req.URL)
 				}
 				result = metadata
 			case 3:
-				if req.Method != "POST" || req.URL.Path != base || req.Header.Get("Idempotency-Key") != "" || req.GetBody != nil {
+				if req.Method != http.MethodPost || req.URL.Path != base || req.Header.Get("Idempotency-Key") != "" || req.GetBody != nil {
 					t.Fatalf("creation may replay: %s %s %v", req.Method, req.URL, req.Header)
 				}
 				var input map[string]json.RawMessage
@@ -114,7 +114,7 @@ func TestCredentialManagementUsesCurrentControllerContract(t *testing.T) {
 				}
 				result = controllerwire.CreatedToken{Capability: "swk_new-secret", Prefix: metadata.Prefix, Team: metadata.Team, Grants: []string{"runs.read"}}
 			case 4:
-				if req.Method != "POST" || req.URL.Path != base+"/swk_prefix/rotate" || req.Header.Get("Idempotency-Key") != "" || req.GetBody != nil {
+				if req.Method != http.MethodPost || req.URL.Path != base+"/swk_prefix/rotate" || req.Header.Get("Idempotency-Key") != "" || req.GetBody != nil {
 					t.Fatalf("rotation may replay: %s %s %v", req.Method, req.URL, req.Header)
 				}
 				var input map[string]json.RawMessage
@@ -126,7 +126,7 @@ func TestCredentialManagementUsesCurrentControllerContract(t *testing.T) {
 				}
 				result = map[string]any{"capability": "swk_rotated-secret", "new": metadata, "old_prefix": "swk_prefix", "old_revoked_at": time.Unix(42, 0).UTC()}
 			case 5:
-				if req.Method != "DELETE" || req.URL.Path != base+"/swk_prefix" {
+				if req.Method != http.MethodDelete || req.URL.Path != base+"/swk_prefix" {
 					t.Fatalf("revoke: %s %s", req.Method, req.URL)
 				}
 				return engineResponse(http.StatusNoContent, ""), nil

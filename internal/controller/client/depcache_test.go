@@ -25,7 +25,7 @@ func TestDataClientReadsExecutionDepcacheWithoutExposingAuthority(t *testing.T) 
 	} {
 		t.Run(tc.ref, func(t *testing.T) {
 			_, records := testDataClient(t, func(request *http.Request) (*http.Response, error) {
-				if request.URL.Path != "/prefix/api/v1/data/depcache/lookup" || request.Method != "POST" {
+				if request.URL.Path != "/prefix/api/v1/data/depcache/lookup" || request.Method != http.MethodPost {
 					t.Fatalf("unexpected lookup: %s %s", request.Method, request.URL)
 				}
 				var fields map[string]any

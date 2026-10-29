@@ -24,7 +24,7 @@ func TestRunReaderRoutesAndPublicShapes(t *testing.T) {
 	} {
 		t.Run(tc.path, func(t *testing.T) {
 			reader, err := NewRunReader(EngineOptions{URL: "https://controller.example", Bearer: func(context.Context) (string, error) { return "private-capability", nil }, HTTP: &http.Client{Transport: engineTransport(func(req *http.Request) (*http.Response, error) {
-				if req.Method != "GET" || req.URL.RequestURI() != tc.path || req.Header.Get("Authorization") != "Bearer private-capability" {
+				if req.Method != http.MethodGet || req.URL.RequestURI() != tc.path || req.Header.Get("Authorization") != "Bearer private-capability" {
 					t.Fatalf("request %s %s", req.Method, req.URL)
 				}
 				return engineResponse(200, tc.body), nil

@@ -40,7 +40,7 @@ func (g StartGate) claimedNode(ctx context.Context, input NodeInput, body func(c
 	if g.compute == nil {
 		return body(ctx)
 	}
-	row := runstate.NodeRow{Ref: runspec.NodeRef{RunID: runspec.RunID(input.Accepted.RunID), NodeID: runspec.NodeID(input.NodeID)}, Generation: runspec.ClaimGeneration(input.Generation), Execution: input.Execution}
+	row := runstate.NodeRow{Ref: runspec.NodeRef{RunID: runspec.RunID(input.Accepted.RunID), NodeID: runspec.NodeID(input.NodeID)}, Generation: input.Generation, Execution: input.Execution}
 	var spec runspec.Spec
 	if err := json.Unmarshal(input.Accepted.Spec, &spec); err != nil {
 		return err

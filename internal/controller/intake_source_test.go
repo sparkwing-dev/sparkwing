@@ -53,7 +53,7 @@ func TestIntakeSourceNumericIdentityProperty(t *testing.T) {
 			default:
 				return nil, fmt.Errorf("unexpected GitHub request %s", r.URL)
 			}
-			return &http.Response{StatusCode: 200, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(payload))}, nil
+			return &http.Response{StatusCode: http.StatusOK, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(payload))}, nil
 		})}}
 		s.WithGitHubApp(cfg)
 		tenant, err := s.store.ForTeam(t.Context(), "a")
@@ -102,7 +102,7 @@ func TestIntakeSourceNumericIdentityProperty(t *testing.T) {
 func TestIntakeSourceRefusesUnverifiedAndCredentialBearingLocations(t *testing.T) {
 	original := http.DefaultTransport
 	http.DefaultTransport = intakeGitHubTransport(func(*http.Request) (*http.Response, error) {
-		return &http.Response{StatusCode: 404, Header: make(http.Header), Body: http.NoBody}, nil
+		return &http.Response{StatusCode: http.StatusNotFound, Header: make(http.Header), Body: http.NoBody}, nil
 	})
 	t.Cleanup(func() { http.DefaultTransport = original })
 	e, _ := engineRuntimeStore(t)
@@ -127,7 +127,7 @@ func TestIntakeSourcePublicGitHubUsesProductionLookup(t *testing.T) {
 		if r.URL.String() != "https://api.github.com/repos/acme/app" || r.Header.Get("Authorization") != "" {
 			t.Fatalf("public identity request: %s", r.URL)
 		}
-		return &http.Response{StatusCode: 200, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(`{"id":42}`))}, nil
+		return &http.Response{StatusCode: http.StatusOK, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(`{"id":42}`))}, nil
 	})
 	t.Cleanup(func() { http.DefaultTransport = original })
 	_, options, input, _ := sourceUploadFixture(t)
@@ -161,7 +161,7 @@ func TestIntakeSourcePrivateGitHubUsesStoredTeamCredential(t *testing.T) {
 		if r.URL.String() != "https://api.github.com/repos/acme/app" || r.Header.Get("Authorization") != "Bearer team-read-token" {
 			t.Fatal("private identity escaped the repository credential")
 		}
-		return &http.Response{StatusCode: 200, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(fmt.Sprintf(`{"id":%d}`, githubID)))}, nil
+		return &http.Response{StatusCode: http.StatusOK, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(fmt.Sprintf(`{"id":%d}`, githubID)))}, nil
 	})
 	t.Cleanup(func() { http.DefaultTransport = original })
 	input.Git.Repository = runspec.Repository{Key: "gh:42", Display: "acme/app"}
@@ -231,7 +231,7 @@ func TestSourceUploadNameScopeNeverTrustsCallerDisplayProperty(t *testing.T) {
 	}
 	original := http.DefaultTransport
 	http.DefaultTransport = intakeGitHubTransport(func(*http.Request) (*http.Response, error) {
-		return &http.Response{StatusCode: 200, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(`{"id":42}`))}, nil
+		return &http.Response{StatusCode: http.StatusOK, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(`{"id":42}`))}, nil
 	})
 	t.Cleanup(func() { http.DefaultTransport = original })
 	h := s.Handler()
@@ -259,7 +259,7 @@ func TestTrigger_RequiresAGitHubRepositorySlug(t *testing.T) {
 		if r.URL.String() != "https://api.github.com/repos/sparkwing-dev/sparkwing" {
 			t.Fatalf("unexpected identity lookup: %s", r.URL)
 		}
-		return &http.Response{StatusCode: 200, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(`{"id":42}`))}, nil
+		return &http.Response{StatusCode: http.StatusOK, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(`{"id":42}`))}, nil
 	})
 	t.Cleanup(func() { http.DefaultTransport = original })
 	h := s.Handler()
@@ -314,8 +314,9 @@ func TestTrigger_ReservesGitHubProvenanceForTheWebhook(t *testing.T) {
 		iteration++
 		request := input
 		request.Git.Repository.Display = data
-		request.Git.App = runspec.Optional[runspec.AppFacts]{Set: true, Value: runspec.AppFacts{Repository: "acme/repo",
-			Event: "push", DeliveryKey: data, InstallationID: 7, RepositoryID: 42,
+		request.Git.App = runspec.Optional[runspec.AppFacts]{Set: true, Value: runspec.AppFacts{
+			Repository: "acme/repo",
+			Event:      "push", DeliveryKey: data, InstallationID: 7, RepositoryID: 42,
 			Ref: "refs/heads/main", SHA: input.Git.SHA, DefaultBranch: data,
 			DefaultBranchPush: true, VerifiedAt: time.Now().UTC(),
 		}}
@@ -327,7 +328,7 @@ func TestTrigger_ReservesGitHubProvenanceForTheWebhook(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			r := httptest.NewRequest("POST", "/api/v1/runs", strings.NewReader(string(payload)))
+			r := httptest.NewRequest(http.MethodPost, "/api/v1/runs", strings.NewReader(string(payload)))
 			r.Header.Set("Authorization", "Bearer "+raw)
 			r.Header.Set("Content-Type", "application/json")
 			w := httptest.NewRecorder()

@@ -168,7 +168,7 @@ func TestOperatorCreateTeamHTTPAuthorityProperty(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		r := httptest.NewRequest("POST", "https://controller.test/api/v1/operator/teams?team="+url.QueryEscape(adversarial)+"&operator=true", strings.NewReader(string(body)))
+		r := httptest.NewRequest(http.MethodPost, "https://controller.test/api/v1/operator/teams?team="+url.QueryEscape(adversarial)+"&operator=true", strings.NewReader(string(body)))
 		r.Header.Set("Authorization", "Bearer "+presentation)
 		r.Header.Set("Content-Type", "application/json")
 		r.Header.Set("X-Operator", adversarial)
@@ -311,7 +311,7 @@ func TestOperatorCreateTeamHTTPConcurrentReplicas(t *testing.T) {
 	for _, h := range handlers {
 		done.Go(func() {
 			<-start
-			r := httptest.NewRequest("POST", "https://controller.test/api/v1/operator/teams", strings.NewReader(`{"slug":"concurrent-team"}`))
+			r := httptest.NewRequest(http.MethodPost, "https://controller.test/api/v1/operator/teams", strings.NewReader(`{"slug":"concurrent-team"}`))
 			r.Header.Set("Authorization", "Bearer "+raw)
 			r.Header.Set("Content-Type", "application/json")
 			w := httptest.NewRecorder()

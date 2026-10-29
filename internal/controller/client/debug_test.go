@@ -37,7 +37,7 @@ func TestDebugReadsUseFinalRoutes(t *testing.T) {
 		if calls > 1 {
 			path, value = "/api/v1/runs/run-1/jobs/build/debug-pause", pause
 		}
-		if req.Method != "GET" || req.URL.Path != path || req.URL.RawQuery != "" || req.Header.Get("Authorization") != "Bearer private-capability" {
+		if req.Method != http.MethodGet || req.URL.Path != path || req.URL.RawQuery != "" || req.Header.Get("Authorization") != "Bearer private-capability" {
 			t.Fatalf("debug request: %s %s %v", req.Method, req.URL, req.Header)
 		}
 		return engineResponse(200, debugJSON(t, value)), nil
@@ -120,7 +120,7 @@ func FuzzDebugReadsDropPrivateAdditiveFields(f *testing.F) {
 			if calls > 1 {
 				want = selector
 			}
-			if req.Method != "GET" || req.URL.EscapedPath() != "/api/v1/runs/run-1/jobs/"+url.PathEscape(want) || req.URL.RawQuery != "" {
+			if req.Method != http.MethodGet || req.URL.EscapedPath() != "/api/v1/runs/run-1/jobs/"+url.PathEscape(want) || req.URL.RawQuery != "" {
 				t.Fatal("selector changed the declared route")
 			}
 			return engineResponse(200, debugJSON(t, data)), nil
@@ -152,7 +152,7 @@ func TestDebugResumeRequiresControllerAcknowledgement(t *testing.T) {
 		c := testEngine(t, func(r *http.Request) (*http.Response, error) {
 			calls++
 			body, err := io.ReadAll(r.Body)
-			if err != nil || r.Method != "POST" || r.URL.Path != "/api/v1/runs/run-1/jobs/build/resume" || r.Header.Get("Authorization") != "Bearer private-capability" || string(body) != "{}" {
+			if err != nil || r.Method != http.MethodPost || r.URL.Path != "/api/v1/runs/run-1/jobs/build/resume" || r.Header.Get("Authorization") != "Bearer private-capability" || string(body) != "{}" {
 				t.Fatalf("release request: %s %s %s %v", r.Method, r.URL, body, err)
 			}
 			return engineResponse(tc.status, tc.body), nil

@@ -27,7 +27,7 @@ func TestReviewNativeActionsRootIssuance(t *testing.T) {
 	engineSQL(t, e.Store, `INSERT INTO github_runner_bindings(team,repository_id,repository_owner_id,repository,created_by,created_at,repo_key) VALUES ('a',42,7,'acme/repo','member',1,'gh:42')`)
 	signer := jwkstest.NewSigner(t, "actions-key")
 	client := &http.Client{Transport: intakeGitHubTransport(func(request *http.Request) (*http.Response, error) {
-		if request.Method != "GET" || request.URL.String() != githuboidc.JWKSURL {
+		if request.Method != http.MethodGet || request.URL.String() != githuboidc.JWKSURL {
 			return nil, fmt.Errorf("unexpected key request %s %s", request.Method, request.URL)
 		}
 		response := httptest.NewRecorder()

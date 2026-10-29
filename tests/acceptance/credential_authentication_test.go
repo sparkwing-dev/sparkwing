@@ -118,7 +118,7 @@ func (b *credentialBoundary) router(t *testing.T) http.Handler {
 
 func (b *credentialBoundary) request(t *testing.T, path, body string, want int, code apierr.Code) {
 	t.Helper()
-	r := httptest.NewRequest("POST", path, strings.NewReader(body))
+	r := httptest.NewRequest(http.MethodPost, path, strings.NewReader(body))
 	if b.raw != "" {
 		r.Header.Set("Authorization", "Bearer "+b.raw)
 	}
