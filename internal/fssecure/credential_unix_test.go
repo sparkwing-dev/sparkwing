@@ -74,8 +74,8 @@ func TestCredentialGroupWriteOnlyForOwnGroups(t *testing.T) {
 }
 
 // Kubelet's fsGroupChangePolicy OnRootMismatch skips relabelling only when the
-// volume root keeps setgid group rwx; taking it away made every controller
-// restart re-add group write to the credential epoch.
+// volume root keeps setgid group rwx; without it each controller restart
+// re-adds group write to the credential epoch.
 func TestEnsureDirKeepsTheFSGroupModeOfAPodVolume(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.Chown(dir, -1, os.Getegid()); err != nil {

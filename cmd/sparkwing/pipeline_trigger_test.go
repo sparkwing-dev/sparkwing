@@ -101,8 +101,8 @@ func enterGitCheckout(t *testing.T, origin string) {
 	})
 }
 
-// Staging qa.8: --runner cloud sealed a runner name no Cloud launcher holds,
-// so the run stayed unclaimed.
+// --runner cloud must select the Cloud claimant class, because no Cloud
+// launcher holds a runner name the run could be sealed to.
 func TestRunnerFlagCloudSelectsTheCloudClass(t *testing.T) {
 	for flag, want := range map[string]runspec.RunnerSelection{
 		"cloud":       {Kind: runspec.RunnerLabel, Value: "class=cloud"},

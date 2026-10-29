@@ -405,9 +405,8 @@ func writeFixtureModule(t *testing.T, root string, files map[string]string) {
 	runSnapshotGit(t, root, "add", "-A")
 }
 
-// Two directories whose packages share a name used to leave the qualifier
-// pointing at whichever import came last, so a read of one package's constant
-// recorded the other package's value.
+// Two imports whose packages share a name make the qualifier ambiguous, so no
+// constant read through it can be attributed to either package.
 func TestEnvVarWalkRefusesAQualifierTwoImportsAnswerTo(t *testing.T) {
 	root := t.TempDir()
 	writeFixtureModule(t, root, map[string]string{
@@ -429,8 +428,8 @@ func TestEnvVarWalkRefusesAQualifierTwoImportsAnswerTo(t *testing.T) {
 	}
 }
 
-// A directory whose files disagree on the package name used to take whichever
-// name the file walk reached last, which is map order.
+// A directory whose files disagree on the package name has no package name,
+// so a qualifier naming either one stays unresolved.
 func TestEnvVarWalkRefusesADisputedPackageName(t *testing.T) {
 	root := t.TempDir()
 	writeFixtureModule(t, root, map[string]string{
@@ -440,8 +439,8 @@ func TestEnvVarWalkRefusesADisputedPackageName(t *testing.T) {
 		"main.go": "package main\n\nimport (\n\t\"os\"\n\n\t\"fake/internal/dup\"\n)\n\n" +
 			"var a = os.Getenv(alpha.K)\n",
 	})
-	// safety: the old shape answered out of map order, so one run proves
-	// nothing about the next.
+	// safety: an answer that depended on map order would vary between runs,
+	// so one run proves nothing about the next.
 	for range 10 {
 		names, dynamic, err := envVarsRead(root)
 		if err != nil {
