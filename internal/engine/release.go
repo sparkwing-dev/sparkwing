@@ -140,7 +140,9 @@ func (r *Resolver) fetch(ctx context.Context, address string, release bool) ([]b
 // downloadStatus is an official origin's non-200 answer.
 type downloadStatus int
 
-func (s downloadStatus) Error() string { return fmt.Sprintf("official download returned HTTP %d", int(s)) }
+func (s downloadStatus) Error() string {
+	return fmt.Sprintf("official download returned HTTP %d", int(s))
+}
 
 // safety: both origins answer a version they never published with 403 or 404, so
 // the fix the hint names is the pin rather than the network.
