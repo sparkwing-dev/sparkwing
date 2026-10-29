@@ -7,6 +7,7 @@ import (
 	"crypto/rand"
 	"encoding/json"
 	"errors"
+	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
@@ -90,7 +91,7 @@ func TestCredentialSSHWritePinsHostAndKeepsKeyPrivate(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			r := httptest.NewRequest("POST", "/api/v1/team/git-credentials?team=foreign", bytes.NewReader(data))
+			r := httptest.NewRequest(http.MethodPost, "/api/v1/team/git-credentials?team=foreign", bytes.NewReader(data))
 			r.Header.Set("Authorization", "Bearer member")
 			r.Header.Set("Content-Type", "application/json")
 			w := httptest.NewRecorder()

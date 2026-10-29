@@ -20,7 +20,7 @@ func TestTrustedProxyClientAddress(t *testing.T) {
 		{"[::ffff:10.0.0.2]:443", "::ffff:198.51.100.7", "198.51.100.7"},
 	} {
 		t.Run(tc.peer+"/"+tc.forwarded, func(t *testing.T) {
-			req := httptest.NewRequest("GET", "/", nil)
+			req := httptest.NewRequest(http.MethodGet, "/", nil)
 			req.RemoteAddr = tc.peer
 			req.Header.Set("X-Forwarded-For", tc.forwarded)
 			var got string
@@ -35,7 +35,7 @@ func TestTrustedProxyClientAddress(t *testing.T) {
 func TestUntrustedForwardedPrefixCannotChangeClient(t *testing.T) {
 	prefixes := []netip.Prefix{netip.MustParsePrefix("10.0.0.0/8")}
 	property := func(spoof string, last uint8) bool {
-		req := httptest.NewRequest("GET", "/", nil)
+		req := httptest.NewRequest(http.MethodGet, "/", nil)
 		req.RemoteAddr = "10.0.0.2:443"
 		client := netip.AddrFrom4([4]byte{198, 51, 100, last}).String()
 		req.Header.Set("X-Forwarded-For", spoof+", "+client+", 10.0.0.1")
@@ -52,7 +52,7 @@ func TestUntrustedPeerCannotAssertForwardedClient(t *testing.T) {
 	prefixes := []netip.Prefix{netip.MustParsePrefix("10.0.0.0/8")}
 	property := func(forwarded string, last uint8) bool {
 		peer := netip.AddrFrom4([4]byte{203, 0, 113, last}).String()
-		req := httptest.NewRequest("GET", "/", nil)
+		req := httptest.NewRequest(http.MethodGet, "/", nil)
 		req.RemoteAddr = peer + ":5000"
 		req.Header.Set("X-Forwarded-For", forwarded)
 		req.Header.Set("X-Real-IP", forwarded)

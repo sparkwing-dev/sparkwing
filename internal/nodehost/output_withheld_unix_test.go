@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"net/http"
 	"net/http/httptest"
 	"strings"
 	"sync"
@@ -99,7 +100,7 @@ func TestDynamicProcessMasksWithholdItsJobOutput(t *testing.T) {
 	start := deps.Start
 	deps.Start = func(ctx context.Context, in NodeInput, activity ExecutorActivity) (ExecutorProcess, error) {
 		service := ProcessServices{Masks: masks}
-		request := httptest.NewRequest("POST", "/node/v1/masks", strings.NewReader(`{"value":"dynamic-output-secret"}`))
+		request := httptest.NewRequest(http.MethodPost, "/node/v1/masks", strings.NewReader(`{"value":"dynamic-output-secret"}`))
 		if err := service.write(request, capability.Authorized{}, "/node/v1/masks"); err != nil {
 			t.Fatal(err)
 		}

@@ -19,14 +19,14 @@ func TestSurfaceLauncherSyncAwardRetirement(t *testing.T) {
 	for _, endpoint := range []string{"http://api.sock", "https://controller.example"} {
 		t.Run(endpoint, func(t *testing.T) {
 			controller, err := client.NewEngineClient(client.EngineOptions{URL: endpoint, HTTP: &http.Client{Transport: surfaceTransport(func(req *http.Request) (*http.Response, error) {
-				if req.Method != "POST" || req.URL.Path != "/api/v1/launcher/sync" {
+				if req.Method != http.MethodPost || req.URL.Path != "/api/v1/launcher/sync" {
 					t.Fatalf("sync route changed: %s %s", req.Method, req.URL)
 				}
 				var got controllerwire.LauncherSyncRequest
 				if err := json.NewDecoder(req.Body).Decode(&got); err != nil || !reflect.DeepEqual(got, input) {
 					t.Fatalf("award fence changed: %+v %v", got, err)
 				}
-				return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(`{"awards":[],"retired":[{"kind":"node","id":"stable-unit","holder":"launcher","generation":7}]}`))}, nil
+				return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(`{"awards":[],"retired":[{"kind":"node","id":"stable-unit","holder":"launcher","generation":7}]}`))}, nil
 			})}})
 			if err != nil {
 				t.Fatal(err)

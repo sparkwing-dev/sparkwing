@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/hex"
 	"log/slog"
+	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"strings"
@@ -62,7 +63,7 @@ func TestAuditPolicyNeverLogsSecretPathsOrCredentialsProperty(t *testing.T) {
 	property := func(input []byte) bool {
 		logs.Reset()
 		secret := "secret-" + hex.EncodeToString(input)
-		r := httptest.NewRequest("DELETE", "/api/v1/secrets/"+url.PathEscape(secret)+"?reason=private-query", nil)
+		r := httptest.NewRequest(http.MethodDelete, "/api/v1/secrets/"+url.PathEscape(secret)+"?reason=private-query", nil)
 		r.Header.Set("Authorization", "Bearer "+f.raw)
 		r.Header.Set(RequestIDHeader, "audit-1")
 		r.Header.Set("User-Agent", "pusher@example.test leaked-user-agent")
@@ -108,7 +109,7 @@ func TestAuditPolicyRecordsSensitiveReadsAndDeniedSubjects(t *testing.T) {
 	} {
 		logs.Reset()
 		f.facts.snapshot.Authorities[0].Principal.Capability.Grants = tc.grants
-		r := httptest.NewRequest("GET", tc.path, nil)
+		r := httptest.NewRequest(http.MethodGet, tc.path, nil)
 		r.Header.Set("Authorization", "Bearer "+tc.raw)
 		f.s.Handler().ServeHTTP(httptest.NewRecorder(), r)
 		records := auditLines(t, &logs, "audit")
@@ -125,7 +126,7 @@ func TestAuditPolicyRecordsFinalJobPathIDs(t *testing.T) {
 	}})
 	var logs bytes.Buffer
 	f.s.logger = slog.New(slog.NewJSONHandler(&logs, nil))
-	r := httptest.NewRequest("POST", "/api/v1/runs/run-7/jobs/build/cancel", strings.NewReader(`{"reason":"cancel"}`))
+	r := httptest.NewRequest(http.MethodPost, "/api/v1/runs/run-7/jobs/build/cancel", strings.NewReader(`{"reason":"cancel"}`))
 	r.Header.Set("Authorization", "Bearer "+f.raw)
 	r.Header.Set("Content-Type", "application/json")
 	f.s.Handler().ServeHTTP(httptest.NewRecorder(), r)
@@ -143,7 +144,7 @@ func TestAuditPolicySkipsFinalEmptyPolls(t *testing.T) {
 	if w.Code != 200 || len(auditLines(t, &logs, "audit")) != 0 {
 		t.Fatalf("empty poll=%d logs=%s", w.Code, logs.String())
 	}
-	r := httptest.NewRequest("GET", "/api/v1/health", nil)
+	r := httptest.NewRequest(http.MethodGet, "/api/v1/health", nil)
 	r.Header.Set(RequestIDHeader, "bad id")
 	w = httptest.NewRecorder()
 	s.Handler().ServeHTTP(w, r)

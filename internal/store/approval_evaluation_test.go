@@ -297,12 +297,19 @@ func TestApprovalEvaluationSecretAndReferenceReadsRequireDeclaredLiveAuthority(t
 				}
 				op := tenant.s.AsOperator()
 				authenticated, err := capability.NewAuthenticator(op).Authenticate(t.Context(), capability.Presentation{Class: capability.CredentialBearer, Raw: string(claim.Bearer), Evidence: capability.RequestEvidence{Target: read.target}}, route)
+				var authorized capability.Authorized
 				if err == nil {
-					_, err = capability.Authorize(t.Context(), op, route, authenticated, read.target)
+					authorized, err = capability.Authorize(t.Context(), op, route, authenticated, read.target)
 				}
 				allowed := read.declared && (change == "live" || change == "undeclared_secret" || change == "undeclared_reference")
 				if (err == nil) != allowed {
 					t.Fatalf("path=%s allowed=%v error=%v", read.path, allowed, err)
+				}
+				if allowed && read.target.SecretName != "" {
+					row, err := tenant.ReadSecret(t.Context(), authorized)
+					if err != nil || row == nil || row.Name != "TOKEN" {
+						t.Fatalf("authorized approval evaluator could not read its declared secret: %+v %v", row, err)
+					}
 				}
 			}
 		})

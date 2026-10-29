@@ -138,7 +138,7 @@ func TestEngineReportingMethodsAndHardCut(t *testing.T) {
 		}
 		t.Run("removed/"+operation.suffix, func(t *testing.T) {
 			w := httptest.NewRecorder()
-			handler.ServeHTTP(w, httptest.NewRequest("POST", "/api/v1/runs/run/nodes/job/"+operation.suffix, nil))
+			handler.ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/api/v1/runs/run/nodes/job/"+operation.suffix, nil))
 			if w.Code != http.StatusNotFound {
 				t.Fatalf("legacy path = %d %s", w.Code, w.Body.String())
 			}
@@ -267,7 +267,7 @@ func TestEngineReportingBodyRace(t *testing.T) {
 				b.snapshot.Binding.Current.Generation = 5
 				f.err = &store.ErrIllegalTransition{Reason: store.ReasonStaleGeneration}
 			}}
-			r := httptest.NewRequest("POST", "/api/v1/runs/run/jobs/job/"+operation.suffix, body)
+			r := httptest.NewRequest(http.MethodPost, "/api/v1/runs/run/jobs/job/"+operation.suffix, body)
 			r.Header.Set("Authorization", "Bearer "+b.raw)
 			r.Header.Set("Content-Type", "application/json")
 			w := httptest.NewRecorder()

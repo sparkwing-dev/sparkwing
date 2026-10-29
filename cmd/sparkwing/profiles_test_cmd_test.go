@@ -99,7 +99,7 @@ func TestProbeAuthChecksIdentityRoute(t *testing.T) {
 			calls := 0
 			profileHTTPFixture(t, func(req *http.Request) (int, string) {
 				calls++
-				if req.Method != "GET" || req.URL.Path != "/api/v1/auth/whoami" || req.Header.Get("Authorization") != "Bearer private-credential" {
+				if req.Method != http.MethodGet || req.URL.Path != "/api/v1/auth/whoami" || req.Header.Get("Authorization") != "Bearer private-credential" {
 					t.Fatalf("auth probe: %s %s", req.Method, req.URL)
 				}
 				return tc.status, `{"principal":"person","kind":"account","scopes":[]}`

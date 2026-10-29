@@ -129,8 +129,8 @@ func checkRestoreDrill(t *testing.T, signOut bool) {
 			t.Error(err)
 		}
 	}()
-	if err := restored.EnsureCredentialEpoch(t.Context()); err != nil {
-		t.Fatal(err)
+	if err := restored.EnsureCredentialEpoch(t.Context()); signOut != errors.Is(err, store.ErrCredentialEpochChanged) || !signOut && err != nil {
+		t.Fatalf("restored epoch check sign-out=%t: %v", signOut, err)
 	}
 	if err := restored.AsOperator().PrepareRestore(t.Context(), restoredEpoch); err != nil {
 		t.Fatal(err)

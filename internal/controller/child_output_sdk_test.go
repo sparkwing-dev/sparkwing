@@ -152,7 +152,7 @@ func TestRunAndAwaitChildOutputThroughLocalController(t *testing.T) {
 	}
 	var childID string
 	transport.after = func(r *http.Request, w *httptest.ResponseRecorder) {
-		if r.Method != "POST" || !strings.HasSuffix(r.URL.Path, "/children") || w.Code != http.StatusCreated {
+		if r.Method != http.MethodPost || !strings.HasSuffix(r.URL.Path, "/children") || w.Code != http.StatusCreated {
 			return
 		}
 		var child struct {
@@ -405,7 +405,7 @@ func TestJobOutputThroughNativeClientAndCurrentReadSet(t *testing.T) {
 		t.Fatal(err)
 	}
 	request := func() *httptest.ResponseRecorder {
-		r := httptest.NewRequest("GET", "http://local/api/v1/runs/run/jobs/stamp/output", nil)
+		r := httptest.NewRequest(http.MethodGet, "http://local/api/v1/runs/run/jobs/stamp/output", nil)
 		r.Header.Set("Authorization", "Session "+session)
 		w := httptest.NewRecorder()
 		handler.ServeHTTP(w, r)

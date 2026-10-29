@@ -57,10 +57,10 @@ Only team administrators change team settings. Changes are audited. Pass --membe
 | `-C, --checkout PATH` | Resolve the project from this local checkout path. |
 | `-h, --help` | Show command help without executing. |
 | `--help-all` | Include uncommon flags in command help. |
-| `--profile NAME` | Connection profiles come only from the user's config; allowed before the verb if the command accepts it. Local run refuses --profile. (required) |
-| `--members-can-add-machines BOOL` | members can add machines Values: true, false. |
-| `--high-trust BOOL` | high trust Values: true, false. |
-| `--claim-ranking TIERS` | claim ranking |
+| `--profile NAME` | Controller connection profile from your config. Omit it to use the local controller. (required) |
+| `--members-can-add-machines BOOL` | Whether members without administration may enroll their own personal machines; false also ends personal machines such members already enrolled, and true does not revive them. Values: true, false. |
+| `--high-trust BOOL` | Let verified runs on plain-machine, persistent and self-hosted Actions runners write the shared verified cache; leave it false unless every job those runners take is trusted, since an earlier job on the same host could tamper with what they archive. Values: true, false. |
+| `--claim-ranking TIERS` | Comma-separated tiers, best first, that take runs selecting no runner; a tier left out takes none of them, none means first come among every tier, and default restores the standard ranking. |
 | `--max-children-per-root COUNT` | Maximum descendants per root run (1 to 1000, default 50; retries excluded) |
 
 ## `sparkwing team settings show`
@@ -77,4 +77,4 @@ Show the team's members_can_add_machines setting and claim ranking. members_can_
 | `-C, --checkout PATH` | Resolve the project from this local checkout path. |
 | `-h, --help` | Show command help without executing. |
 | `--help-all` | Include uncommon flags in command help. |
-| `--profile NAME` | Connection profiles come only from the user's config; allowed before the verb if the command accepts it. Local run refuses --profile. (required) |
+| `--profile NAME` | Controller connection profile from your config. Omit it to use the local controller. (required) |

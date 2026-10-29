@@ -404,8 +404,8 @@ func (s *Store) waitlisted(ctx context.Context, order string, limit, offset int)
 // ApproveWaitlisted admits the named accounts: each leaves the waitlist and,
 // if it belongs to no team, gets its personal space. An id that is not on the
 // waitlist is skipped, so approving twice admits once. Each admission records
-// an account.admitted business event naming actor. It returns the accounts it
-// admitted.
+// an account.admitted business event naming actor, the operator's account, as
+// the other break-glass methods do. It returns the accounts it admitted.
 func (s *Store) ApproveWaitlisted(ctx context.Context, ids []string, actor string) ([]Account, error) {
 	out := []Account{}
 	for _, id := range ids {
@@ -440,7 +440,7 @@ func (s *Store) approveOneOnce(ctx context.Context, id, actor string) (Account, 
 		return Account{}, false, err
 	}
 	defer rollbackOrLog(tx)
-	acct, changed, err := tx.operator.approveOneTx(ctx, tx, id, auditActor{system: auditBreakGlass}, tx.now(ctx))
+	acct, changed, err := tx.operator.approveOneTx(ctx, tx, id, auditAccountActor(actor), tx.now(ctx))
 	if err != nil {
 		return Account{}, false, err
 	}

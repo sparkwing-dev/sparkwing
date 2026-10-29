@@ -61,12 +61,12 @@ func TestSurfaceRunQueryAndPruneTransport(t *testing.T) {
 			calls++
 			status, body := http.StatusOK, `{"runs":[],"next_cursor":"","truncated":false}`
 			switch req.Method {
-			case "GET":
+			case http.MethodGet:
 				q := req.URL.Query()
 				if req.URL.Path != "/api/v1/runs" || q.Get("after_number") != "412" || q.Get("root_only") != "true" || q.Get("finished_before") != "2026-10-14T00:00:00Z" || !reflect.DeepEqual(q["branch"], []string{"main", "!release"}) {
 					t.Fatalf("query lost: %s", req.URL)
 				}
-			case "DELETE":
+			case http.MethodDelete:
 				if req.URL.Path != "/api/v1/runs/412" {
 					t.Fatalf("delete selector: %s", req.URL)
 				}
@@ -111,7 +111,7 @@ func TestSurfaceManagementTransportsKeepAuthorityNamespaces(t *testing.T) {
 			default:
 				t.Fatalf("unexpected management request: %s", req.URL)
 			}
-			return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(body))}, nil
+			return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(body))}, nil
 		})}}
 		pools, err := client.NewPoolManager(options)
 		if err != nil {
@@ -176,7 +176,7 @@ func TestSurfaceWireDetailTransport(t *testing.T) {
 				if r.URL.Path != "/api/v1/runs/r1" || r.Header.Get("Authorization") != "Bearer bound-capability" {
 					t.Fatalf("wrong detail request: %s", r.URL)
 				}
-				return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(string(body)))}, nil
+				return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(string(body)))}, nil
 			})},
 		})
 		if err != nil {
@@ -205,7 +205,7 @@ func TestSurfaceRunObservationTransport(t *testing.T) {
 			default:
 				t.Fatalf("unexpected observation %s", req.URL)
 			}
-			return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(body))}, nil
+			return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(body))}, nil
 		})}})
 		if err != nil {
 			t.Fatal(err)

@@ -249,7 +249,9 @@ or write another attempt's logs.
 
 An interrupted or incomplete observation remains visible independently of the
 recorded run verdict. The CLI returns exit 3 when it cannot establish a complete
-observation. See [Observability](observability.md).
+observation, and exit 4 when the controller refuses the read (`not_found`,
+`unauthenticated`, `forbidden`), which retrying cannot change. See
+[Observability](observability.md).
 
 Blob transfers and logical memo/depcache records use the authenticated `/data`
 routes. Storage authorization rechecks the live capability, bound uploader and

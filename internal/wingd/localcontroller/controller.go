@@ -89,6 +89,9 @@ func (cfg Config) Open(ctx context.Context, home string) (_ wingd.LocalControlle
 	}()
 
 	if err := s.EnsureCredentialEpoch(ctx); err != nil {
+		if errors.Is(err, store.ErrCredentialEpochChanged) {
+			err = fmt.Errorf("%w: %s is missing or replaced (a missing file is created afresh); put the original file back, or move state.db aside to start with a fresh local store", err, filepath.Join(home, "credential-epoch"))
+		}
 		return nil, err
 	}
 	if err := context.Cause(ctx); err != nil {

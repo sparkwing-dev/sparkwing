@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
+	"net/http"
 	"reflect"
 	"slices"
 	"strings"
@@ -385,7 +386,7 @@ func TestDataDownloadRequiresLiveExistenceAndReadAuthority(t *testing.T) {
 			}
 			transfer, err := binding.Signer.Download(t.Context(), blob.GetRequest{Authority: binding.Authority, Digest: dataDigest()})
 			if state == "readable" {
-				if err != nil || transfer.Digest != dataDigest() || transfer.Size != 14 || objects.signed.Key != "teams/team/cas/"+string(dataDigest()) || objects.signed.Method != "GET" || reads != 1 {
+				if err != nil || transfer.Digest != dataDigest() || transfer.Size != 14 || objects.signed.Key != "teams/team/cas/"+string(dataDigest()) || objects.signed.Method != http.MethodGet || reads != 1 {
 					t.Fatalf("transfer=%+v signed=%+v reads=%d err=%v", transfer, objects.signed, reads, err)
 				}
 			} else if err == nil || transfer.URL != "" || objects.signed.Key != "" {
@@ -433,7 +434,7 @@ func TestDataUploadReservesBeforeSigningAndSettlesVerifiedBytes(t *testing.T) {
 	if err != nil || ticket.ID == "" || ticket.ID != f.ticket.ID || ticket.Transfer.Digest != dataDigest() {
 		t.Fatalf("ticket=%+v err=%v", ticket, err)
 	}
-	if !reflect.DeepEqual(*events, []string{"authorize", "reserve", "sign"}) || objects.signed.Key != "teams/team/pending/"+ticket.ID || objects.signed.Method != "PUT" || objects.signed.Size != 14 || objects.signed.SHA256 != string(dataDigest()) {
+	if !reflect.DeepEqual(*events, []string{"authorize", "reserve", "sign"}) || objects.signed.Key != "teams/team/pending/"+ticket.ID || objects.signed.Method != http.MethodPut || objects.signed.Size != 14 || objects.signed.SHA256 != string(dataDigest()) {
 		t.Fatalf("events=%v signed=%+v", *events, objects.signed)
 	}
 	*events = nil

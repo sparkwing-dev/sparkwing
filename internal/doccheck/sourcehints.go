@@ -155,7 +155,7 @@ func sourceHintsIn(repoRoot string, fset *token.FileSet, file *ast.File, info *t
 			if len(verb.tokens) == 0 {
 				continue
 			}
-			verb.err = fragmentFlagError(command)
+			verb.err = fragmentFlagError(command, false)
 			standalone := !sourceHintDataLiteral(parent, expression) && slices.ContainsFunc(strings.Split(text, "\n"), func(line string) bool {
 				line = strings.TrimSpace(line)
 				line = strings.TrimPrefix(line, "$ ")

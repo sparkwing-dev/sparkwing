@@ -295,7 +295,7 @@ func TestPaymentHTTPFinancialProviderHandoffProperty(t *testing.T) {
 					body := fmt.Sprintf(`{"id":"evt_provider","object":"event","created":900,"type":%q,"livemode":%t,"data":{"object":%s}}`, tc.kind, mode == capability.PaymentLive, encoded)
 					ledger := &paymentLedger{}
 					h := paymentServer(verifier, ledger).Handler()
-					r := httptest.NewRequest("POST", "https://controller.test/webhooks/stripe?team=forged", strings.NewReader(body))
+					r := httptest.NewRequest(http.MethodPost, "https://controller.test/webhooks/stripe?team=forged", strings.NewReader(body))
 					r.Header.Set("Stripe-Signature", paymentSignature(body, time.Now()))
 					w := httptest.NewRecorder()
 					h.ServeHTTP(w, r)
@@ -314,7 +314,7 @@ func TestPaymentHTTPFinancialProviderHandoffProperty(t *testing.T) {
 					} else {
 						signature = paymentSignature(body, time.Now().Add(-time.Hour))
 					}
-					r = httptest.NewRequest("POST", "https://controller.test/webhooks/stripe", strings.NewReader(body))
+					r = httptest.NewRequest(http.MethodPost, "https://controller.test/webhooks/stripe", strings.NewReader(body))
 					r.Header.Set("Stripe-Signature", signature)
 					w = httptest.NewRecorder()
 					h.ServeHTTP(w, r)

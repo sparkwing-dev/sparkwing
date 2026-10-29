@@ -33,7 +33,7 @@ func TestProfilesAddStoresExistingCredentialAfterProbe(t *testing.T) {
 	token := "swu_existing_credential"
 	withStdin(t, token+"\n")
 	profileHTTPFixture(t, func(r *http.Request) (int, string) {
-		if r.Method != "GET" {
+		if r.Method != http.MethodGet {
 			t.Fatalf("probe mutated controller: %s %s", r.Method, r.URL)
 		}
 		if r.URL.Path == "/api/v1/health" {
@@ -153,7 +153,7 @@ func TestProfilesRemoveRevokesOnlyMemberCredential(t *testing.T) {
 				if r.Header.Get("Authorization") != "Bearer "+token {
 					t.Fatal("missing bearer")
 				}
-				if r.Method == "GET" {
+				if r.Method == http.MethodGet {
 					if r.URL.Path != "/api/v1/tokens/"+prefix {
 						t.Fatalf("metadata route: %s", r.URL)
 					}
@@ -163,7 +163,7 @@ func TestProfilesRemoveRevokesOnlyMemberCredential(t *testing.T) {
 					}
 					return 200, `{"prefix":"` + prefix + `","team":"team-a","subject":{"kind":"` + kind + `","id":"` + tc.principal + `"},"audience":"controller","grants":[],"created_by":"issuer","git_credentials":false,"metered":false,"issued_at":"2026-10-14T00:00:00Z"}`
 				}
-				if r.Method == "DELETE" {
+				if r.Method == http.MethodDelete {
 					deletes++
 					if tc.revoked {
 						return http.StatusNoContent, ""

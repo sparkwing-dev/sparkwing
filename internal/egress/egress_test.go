@@ -684,3 +684,29 @@ func TestFlushDayHandsOverTodaysTotalAndRestoreDayResumesIt(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestOneTeamFillingTheCapNeverSharesABudgetWithAnotherTeam(t *testing.T) {
+	m, _ := meterAt(t, Config{MaxDownloadsPerPrincipal: 1}, "2026-09-13T10:00:00Z")
+	for i := range MaxPrincipals {
+		m.record(TeamPrincipal("a", fmt.Sprintf("actions:%d", i)), ClassArtifact, 1)
+	}
+	releaseB, err := m.Open(TeamPrincipal("b", "runner"), SlotDownload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer releaseB()
+	releaseC, err := m.Open(TeamPrincipal("c", "runner"), SlotDownload)
+	if err != nil {
+		t.Fatalf("team c's first download shared team b's overflow slot: %v", err)
+	}
+	defer releaseC()
+	releaseA, err := m.Open(TeamPrincipal("a", "late"), SlotDownload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer releaseA()
+	var refused *ConcurrencyError
+	if _, err := m.Open(TeamPrincipal("a", "later"), SlotDownload); !errors.As(err, &refused) || refused.Principal != TeamPrincipal("a", overflowPrincipal) {
+		t.Fatalf("team a's untracked principals did not share team a's overflow: %v", err)
+	}
+}

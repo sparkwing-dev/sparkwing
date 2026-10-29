@@ -62,11 +62,11 @@ Plain emits run/job[/step]. JSON retains the controller replay result.
 | `-C, --checkout PATH` | Resolve the project from this local checkout path. |
 | `-h, --help` | Show command help without executing. |
 | `--help-all` | Include uncommon flags in command help. |
-| `--run RUN_ID` | Stable run ID or per-team run number; '-' reads run IDs from stdin on cancel, retry and prune. (required) |
+| `--run RUN_ID` | Run ID or per-team run number. (required) |
 | `--job JOB` | Job within the selected run. |
 | `--step STEP_ID` | Step within the selected job. |
-| `--message TEXT` | message (required) |
-| `--profile NAME` | Connection profiles come only from the user's config; allowed before the verb if the command accepts it. Local run refuses --profile. |
+| `--message TEXT` | Text of the info-level annotation to attach to the job, or to the step named by --step. (required) |
+| `--profile NAME` | Controller connection profile from your config. Omit it to use the local controller. |
 
 ## `sparkwing runs annotations list`
 
@@ -82,11 +82,11 @@ JSON emits job_id, optional step_id, level, message and source location per anno
 | `-C, --checkout PATH` | Resolve the project from this local checkout path. |
 | `-h, --help` | Show command help without executing. |
 | `--help-all` | Include uncommon flags in command help. |
-| `--run RUN_ID` | Stable run ID or per-team run number; '-' reads run IDs from stdin on cancel, retry and prune. (required) |
+| `--run RUN_ID` | Run ID or per-team run number. (required) |
 | `--job JOB` | Job within the selected run. |
 | `--step STEP_ID` | Step within the selected job. |
-| `--steps` | steps |
-| `--profile NAME` | Connection profiles come only from the user's config; allowed before the verb if the command accepts it. Local run refuses --profile. |
+| `--steps` | Also list annotations recorded on the run's steps, not only those on its jobs; --step implies this. |
+| `--profile NAME` | Controller connection profile from your config. Omit it to use the local controller. |
 
 ## `sparkwing runs approvals`
 
@@ -121,10 +121,10 @@ The controller derives the approver from authentication. Plain emits run/job. JS
 | `-C, --checkout PATH` | Resolve the project from this local checkout path. |
 | `-h, --help` | Show command help without executing. |
 | `--help-all` | Include uncommon flags in command help. |
-| `--run ID` | Stable run ID or per-team run number; '-' reads run IDs from stdin on cancel, retry and prune. (required) |
+| `--run ID` | Run ID or per-team run number. (required) |
 | `--job JOB` | Job within the selected run. (required) |
-| `--comment STR` | comment |
-| `--profile NAME` | Connection profiles come only from the user's config; allowed before the verb if the command accepts it. Local run refuses --profile. |
+| `--comment STR` | Comment recorded with the approval. |
+| `--profile NAME` | Controller connection profile from your config. Omit it to use the local controller. |
 
 ## `sparkwing runs approvals deny`
 
@@ -140,10 +140,10 @@ The controller derives the approver from authentication. Plain emits run/job. JS
 | `-C, --checkout PATH` | Resolve the project from this local checkout path. |
 | `-h, --help` | Show command help without executing. |
 | `--help-all` | Include uncommon flags in command help. |
-| `--run ID` | Stable run ID or per-team run number; '-' reads run IDs from stdin on cancel, retry and prune. (required) |
+| `--run ID` | Run ID or per-team run number. (required) |
 | `--job JOB` | Job within the selected run. (required) |
-| `--comment STR` | comment |
-| `--profile NAME` | Connection profiles come only from the user's config; allowed before the verb if the command accepts it. Local run refuses --profile. |
+| `--comment STR` | Comment recorded with the denial. |
+| `--profile NAME` | Controller connection profile from your config. Omit it to use the local controller. |
 
 ## `sparkwing runs approvals list`
 
@@ -159,8 +159,8 @@ Without --run, list pending approvals. With --run, include resolved history. Pla
 | `-C, --checkout PATH` | Resolve the project from this local checkout path. |
 | `-h, --help` | Show command help without executing. |
 | `--help-all` | Include uncommon flags in command help. |
-| `--run RUN_ID` | Stable run ID or per-team run number; '-' reads run IDs from stdin on cancel, retry and prune. |
-| `--profile NAME` | Connection profiles come only from the user's config; allowed before the verb if the command accepts it. Local run refuses --profile. |
+| `--run RUN_ID` | Run ID or per-team run number. |
+| `--profile NAME` | Controller connection profile from your config. Omit it to use the local controller. |
 
 ## `sparkwing runs cancel`
 
@@ -174,8 +174,8 @@ Request cancellation of in-flight runs
 | `-C, --checkout PATH` | Resolve the project from this local checkout path. |
 | `-h, --help` | Show command help without executing. |
 | `--help-all` | Include uncommon flags in command help. |
-| `--run RUN_ID` | Stable run ID or per-team run number; '-' reads run IDs from stdin on cancel, retry and prune. (required) |
-| `--profile NAME` | Connection profiles come only from the user's config; allowed before the verb if the command accepts it. Local run refuses --profile. |
+| `--run RUN_ID` | Run ID or per-team run number. (required) |
+| `--profile NAME` | Controller connection profile from your config. Omit it to use the local controller. |
 
 ## `sparkwing runs grep`
 
@@ -194,18 +194,18 @@ JSON emits matching records and a page record with next_cursor and truncated. Qu
 | `-h, --help` | Show command help without executing. |
 | `--help-all` | Include uncommon flags in command help. |
 | `--job JOB` | Job within the selected run. |
-| `--grep PATTERN` | Match log text only. |
-| `--since DURATION` | since |
-| `--profile NAME` | Connection profiles come only from the user's config; allowed before the verb if the command accepts it. Local run refuses --profile. |
+| `--grep PATTERN` | Show only log lines matching this text. |
+| `--since DURATION` | Search only runs that started within this lookback, such as 24h, 7d or 2w; 0 sets no bound, and the later of --since and --started-after wins. |
+| `--profile NAME` | Controller connection profile from your config. Omit it to use the local controller. |
 | `--pipeline NAME` | Pipeline name. |
-| `--status STATUS` | status |
-| `--branch BRANCH` | branch Repeatable; comma-separated values are accepted. |
-| `--sha PREFIX` | sha |
-| `--started-after DATE` | started after |
-| `--started-before DATE` | started before |
-| `--limit N` | Output count at least one; paginated commands continue with --cursor. |
-| `--max-matches N` | max matches |
-| `-q, --quiet` | quiet |
+| `--status STATUS` | Search only runs whose status matches exactly; prefix with ! to exclude a status. |
+| `--branch BRANCH` | Search only runs on this exact branch name; several names match any of them, and a ! prefix excludes a branch. Repeatable; comma-separated values are accepted. |
+| `--sha PREFIX` | Search only runs whose commit SHA starts with this prefix, ignoring case; prefix with ! to exclude. |
+| `--started-after DATE` | Search only runs that started at or after this time: today, yesterday, a lookback such as 7d, YYYY-MM-DD, YYYY-MM-DD HH:MM:SS or RFC 3339, in local time. |
+| `--started-before DATE` | Search only runs that started at or before this time, in the same formats as --started-after. |
+| `--limit N` | Maximum number of records to print, at least one. Continue with --cursor when more exist. |
+| `--max-matches N` | Most matching lines returned from each job or owner log, 5 by default; zero removes the cap. |
+| `-q, --quiet` | Print each matching run ID once instead of the matching lines. |
 | `--cursor CURSOR` | Continue from next_cursor using the same filters. |
 
 ## `sparkwing runs list`
@@ -218,7 +218,7 @@ JSON emits compact run records and a page record with next_cursor and truncated.
 
 --by-pipeline totals every matching page and retains the newest --sparkline statuses. --group-by run|job|step requires --status failed and groups the selected page.
 
---wait blocks until a matching run appears. --follow reads every newer matching run between polls. Grouped follow output describes each new batch. Interrupted or timed-out waits exit 3.
+--wait blocks until a matching run appears. --follow reads every newer matching run between polls. Grouped follow output describes each new batch. Interrupted or timed-out waits exit 3. A refused read (not found, unauthenticated or forbidden) exits 4, which retrying cannot change.
 
 ### Flags
 
@@ -229,29 +229,29 @@ JSON emits compact run records and a page record with next_cursor and truncated.
 | `-h, --help` | Show command help without executing. |
 | `--help-all` | Include uncommon flags in command help. |
 | `--pipeline NAME` | Pipeline name. |
-| `--status STATUS` | status |
-| `--branch BRANCH` | branch Repeatable; comma-separated values are accepted. |
-| `--sha PREFIX` | sha |
-| `--error SUBSTR` | error |
-| `--search QUERY` | Match records; never scan log text. |
-| `--since DURATION` | since |
-| `--started-after DATE` | started after |
-| `--started-before DATE` | started before |
-| `--finished-after DATE` | finished after |
-| `--finished-before DATE` | finished before |
-| `--limit N` | Output count at least one; paginated commands continue with --cursor. |
+| `--status STATUS` | List only runs whose status matches exactly; prefix with ! to exclude a status. |
+| `--branch BRANCH` | List only runs on this exact branch name; several names match any of them, and a ! prefix excludes a branch. Repeatable; comma-separated values are accepted. |
+| `--sha PREFIX` | List only runs whose commit SHA starts with this prefix, ignoring case; prefix with ! to exclude. |
+| `--error SUBSTR` | List only runs whose recorded failure text, from run failures, job details and attempt failure reasons, contains this text, ignoring case. |
+| `--search QUERY` | Text to match against record names and summaries; log text is not searched. |
+| `--since DURATION` | List only runs that started within this lookback, such as 24h, 7d or 2w; 0 sets no bound, and the later of --since and --started-after wins. |
+| `--started-after DATE` | List only runs that started at or after this time: today, yesterday, a lookback such as 7d, YYYY-MM-DD, YYYY-MM-DD HH:MM:SS or RFC 3339, in local time. |
+| `--started-before DATE` | List only runs that started at or before this time, in the same formats as --started-after. |
+| `--finished-after DATE` | List only runs that finished at or after this time, in the same formats as --started-after; unfinished runs are left out. |
+| `--finished-before DATE` | List only runs that finished at or before this time, in the same formats as --started-after; unfinished runs are left out. |
+| `--limit N` | Maximum number of records to print, at least one. Continue with --cursor when more exist. |
 | `--cursor CURSOR` | Continue from next_cursor using the same filters. |
-| `-q, --quiet` | quiet |
-| `--by-pipeline` | by pipeline |
-| `--sparkline N` | sparkline |
-| `--style STYLE` | style |
-| `--repo OWNER/NAME` | Repository identity, never a checkout path; typed identity grants no authority. Repeatable; comma-separated values are accepted. |
-| `--root-only` | root only |
-| `--group-by KEY` | group by |
-| `--wait` | wait |
-| `--wait-timeout DURATION` | wait timeout |
-| `-f, --follow` | Stream until the observed work is done. |
-| `--profile NAME` | Connection profiles come only from the user's config; allowed before the verb if the command accepts it. Local run refuses --profile. |
+| `-q, --quiet` | Print only run IDs, or only pipeline names or group keys with --by-pipeline or --group-by. |
+| `--by-pipeline` | Print one row per pipeline with run and failure totals, the last run and recent statuses, read across every matching page. |
+| `--sparkline N` | Number of recent statuses kept for each pipeline with --by-pipeline, 30 by default. |
+| `--style STYLE` | Characters used to draw the recent-status sparkline in pretty --by-pipeline output, ascii by default. |
+| `--repo OWNER/NAME` | Repository identity as owner/name. Naming a repository grants no access. Repeatable; comma-separated values are accepted. |
+| `--root-only` | List only top-level runs, leaving out runs started by another run. |
+| `--group-by KEY` | Group the failed runs on this page by run, job or step, with counts and a sample error; requires --status failed and cannot be used with --by-pipeline. |
+| `--wait` | Poll every 2 seconds until at least one matching run exists, exiting 3 if --wait-timeout passes first. |
+| `--wait-timeout DURATION` | How long --wait polls before giving up, as a Go duration such as 30s or 5m, 2m by default; ignored without --wait. |
+| `-f, --follow` | Keep streaming until the observed work finishes. |
+| `--profile NAME` | Controller connection profile from your config. Omit it to use the local controller. |
 
 ## `sparkwing runs logs`
 
@@ -259,7 +259,7 @@ Print a run's logs
 
 Read job-attempt and trigger, plan or eval logs through the controller. --job selects a job. --tree includes descendants. --events-only and --no-events select lifecycle events or output.
 
---follow consumes every available page, then waits for new records until final log segments are complete. An incomplete or interrupted observation exits 3.
+--follow consumes every available page, then waits for new records until final log segments are complete. An incomplete or interrupted observation exits 3. A run that does not exist or that the credential cannot read exits 4; stop polling on 4.
 
 JSON emits tagged log records. Plain emits log lines. Use --grep without --run to search across runs with the same filters and pagination as runs grep.
 
@@ -271,27 +271,27 @@ JSON emits tagged log records. Plain emits log lines. Use --grep without --run t
 | `-C, --checkout PATH` | Resolve the project from this local checkout path. |
 | `-h, --help` | Show command help without executing. |
 | `--help-all` | Include uncommon flags in command help. |
-| `--run RUN_ID` | Stable run ID or per-team run number; '-' reads run IDs from stdin on cancel, retry and prune. |
+| `--run RUN_ID` | Run ID or per-team run number. |
 | `--job JOB` | Job within the selected run. |
-| `--tail N` | tail |
-| `--head N` | head |
-| `--lines A:B` | lines |
-| `--grep PATTERN` | Match log text only. |
-| `--since DURATION` | since |
-| `--tree` | tree |
-| `--events-only` | events only |
-| `--no-events` | no events |
-| `-f, --follow` | Stream until the observed work is done. |
-| `--profile NAME` | Connection profiles come only from the user's config; allowed before the verb if the command accepts it. Local run refuses --profile. |
+| `--tail N` | Print only the last N lines of each job or owner log; by default every line is printed. |
+| `--head N` | Print only the first N lines of each job or owner log; cannot be combined with --tail. |
+| `--lines A:B` | Print only lines A through B, inclusive and counted from 1, of each job or owner log. |
+| `--grep PATTERN` | Show only log lines matching this text. |
+| `--since DURATION` | With --run, print only lines and events within this lookback, such as 10m or 2d, keeping lines without a timestamp; with --grep and no --run, search only runs that started within it. |
+| `--tree` | Also include logs from the runs this run started, and from the runs those started. |
+| `--events-only` | Print only lifecycle events, leaving out log output. |
+| `--no-events` | Print only log output, leaving out lifecycle events. |
+| `-f, --follow` | Keep streaming until the observed work finishes. |
+| `--profile NAME` | Controller connection profile from your config. Omit it to use the local controller. |
 | `--pipeline NAME` | Pipeline name. |
-| `--status STATUS` | status |
-| `--branch BRANCH` | branch Repeatable; comma-separated values are accepted. |
-| `--sha PREFIX` | sha |
-| `--started-after DATE` | started after |
-| `--started-before DATE` | started before |
-| `--limit N` | Output count at least one; paginated commands continue with --cursor. |
-| `--max-matches N` | max matches |
-| `-q, --quiet` | quiet |
+| `--status STATUS` | When searching with --grep and no --run, search only runs whose status matches exactly; prefix with ! to exclude a status. |
+| `--branch BRANCH` | When searching with --grep and no --run, search only runs on this exact branch name; a ! prefix excludes a branch. Repeatable; comma-separated values are accepted. |
+| `--sha PREFIX` | When searching with --grep and no --run, search only runs whose commit SHA starts with this prefix, ignoring case. |
+| `--started-after DATE` | When searching with --grep and no --run, search only runs that started at or after this time: today, yesterday, a lookback such as 7d, YYYY-MM-DD or RFC 3339. |
+| `--started-before DATE` | When searching with --grep and no --run, search only runs that started at or before this time, in the same formats as --started-after. |
+| `--limit N` | Maximum number of records to print, at least one. Continue with --cursor when more exist. |
+| `--max-matches N` | When searching with --grep and no --run, the most matching lines returned from each log, 5 by default; zero removes the cap. |
+| `-q, --quiet` | When searching with --grep and no --run, print each matching run ID once instead of the matching lines. |
 | `--cursor CURSOR` | Continue from next_cursor using the same filters. |
 
 ## `sparkwing runs prune`
@@ -310,10 +310,10 @@ Select --run, including --run - for IDs on stdin, or --older-than. Age selection
 | `-C, --checkout PATH` | Resolve the project from this local checkout path. |
 | `-h, --help` | Show command help without executing. |
 | `--help-all` | Include uncommon flags in command help. |
-| `--older-than DURATION` | older than |
-| `--run RUN_ID` | Stable run ID or per-team run number; '-' reads run IDs from stdin on cancel, retry and prune. |
-| `--dry-run` | Preview with no side effects. |
-| `--profile NAME` | Connection profiles come only from the user's config; allowed before the verb if the command accepts it. Local run refuses --profile. |
+| `--older-than DURATION` | Delete every finished run that started longer ago than this, such as 72h, 30d or 4w; cannot be combined with --run. |
+| `--run RUN_ID` | Run ID or per-team run number. |
+| `--dry-run` | Show what would change without changing anything. |
+| `--profile NAME` | Controller connection profile from your config. Omit it to use the local controller. |
 
 ## `sparkwing runs retry`
 
@@ -331,10 +331,10 @@ Repeat --run or use --run - for newline-separated IDs on stdin. JSON emits one s
 | `-C, --checkout PATH` | Resolve the project from this local checkout path. |
 | `-h, --help` | Show command help without executing. |
 | `--help-all` | Include uncommon flags in command help. |
-| `--run RUN_ID` | Stable run ID or per-team run number; '-' reads run IDs from stdin on cancel, retry and prune. Repeatable; comma-separated values are accepted. (required) |
-| `--failed` | failed |
-| `--all-jobs` | all jobs |
-| `--profile NAME` | Connection profiles come only from the user's config; allowed before the verb if the command accepts it. Local run refuses --profile. |
+| `--run RUN_ID` | Run ID or per-team run number. Repeatable; comma-separated values are accepted. (required) |
+| `--failed` | Start a new run that reuses the source run's successful jobs and runs the rest again. |
+| `--all-jobs` | Start a new run that runs every job of the source run's plan again. |
+| `--profile NAME` | Controller connection profile from your config. Omit it to use the local controller. |
 
 ## `sparkwing runs stats`
 
@@ -355,12 +355,12 @@ Sizing reset requires an authorized controller route. Until that contract exists
 | `-h, --help` | Show command help without executing. |
 | `--help-all` | Include uncommon flags in command help. |
 | `--pipeline NAME` | Pipeline name. |
-| `--since DURATION` | since |
-| `--sizing` | sizing |
-| `--reset` | reset |
-| `--all-pipelines` | all pipelines |
-| `--yes` | Confirm bulk destruction. |
-| `--profile NAME` | Connection profiles come only from the user's config; allowed before the verb if the command accepts it. Local run refuses --profile. |
+| `--since DURATION` | Count only top-level runs that started within this lookback, such as 7d or 2w; by default every run counts. |
+| `--sizing` | Show the controller's learned resource sizing for each job instead of run statistics. |
+| `--reset` | Clear learned sizing for --pipeline or --all-pipelines while keeping resource pins; the controller has no route for this yet, so it fails with policy_missing and changes nothing. |
+| `--all-pipelines` | Apply --reset to every pipeline; requires --reset and --yes. |
+| `--yes` | Confirm a destructive change without prompting. |
+| `--profile NAME` | Controller connection profile from your config. Omit it to use the local controller. |
 
 ## `sparkwing runs status`
 
@@ -370,7 +370,7 @@ Read the same public run detail through a controller profile or the local contro
 
 Views: summary, timeline, receipt, errors, tree. Summary includes recorded failing steps and errors for failed jobs. --steps includes all recorded steps. Receipts retain the controller's hashes and settled cost.
 
---follow streams observations until the run ends. Exit 0 means success, 1 means a failed or cancelled run, 2 means invalid usage, and 3 means the observation is incomplete. --exit-zero suppresses terminal failure only.
+--follow streams observations until the run ends. Exit 0 means success, 1 means a failed or cancelled run, 2 means invalid usage, 3 means the observation is incomplete and may be retried, and 4 means the run does not exist or the credential cannot read it, so polling again will not help. --exit-zero suppresses terminal failure only.
 
 JSON preserves run details and notices: one document per observation, so --follow and the errors view (one record per failed job) are NDJSON. The exit code carries the outcome, and no error document follows the observation. Plain summary prints the run status, every job's status and outcome, and failure details. Errors prints failed job IDs, tree prints run IDs, and receipt prints the receipt hash. --steps adds recorded steps to summary and tree output.
 
@@ -382,12 +382,12 @@ JSON preserves run details and notices: one document per observation, so --follo
 | `-C, --checkout PATH` | Resolve the project from this local checkout path. |
 | `-h, --help` | Show command help without executing. |
 | `--help-all` | Include uncommon flags in command help. |
-| `--run RUN_ID` | Stable run ID or per-team run number; '-' reads run IDs from stdin on cancel, retry and prune. (required) |
-| `-f, --follow` | Stream until the observed work is done. |
-| `--steps` | steps |
-| `--exit-zero` | exit zero |
-| `--view VIEW` | view |
-| `--width N` | width |
-| `--timeout DURATION` | timeout |
-| `--poll DURATION` | poll |
-| `--profile NAME` | Connection profiles come only from the user's config; allowed before the verb if the command accepts it. Local run refuses --profile. |
+| `--run RUN_ID` | Run ID or per-team run number. (required) |
+| `-f, --follow` | Keep streaming until the observed work finishes. |
+| `--steps` | Include every recorded step in summary and tree output, not only the failing steps summary shows by default. |
+| `--exit-zero` | Exit 0 when the run ended failed or cancelled; invalid usage and incomplete observations still exit nonzero. |
+| `--view VIEW` | Which view of the run to print, summary by default. |
+| `--width N` | Width in characters of the timeline view's bars, 60 by default. |
+| `--timeout DURATION` | With --follow, stop after this Go duration, such as 30m, and exit 3 if the run has not ended; refused without --follow. |
+| `--poll DURATION` | Time between checks of the run with --follow, as a Go duration, 3s by default. |
+| `--profile NAME` | Controller connection profile from your config. Omit it to use the local controller. |

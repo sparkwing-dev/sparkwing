@@ -29,7 +29,7 @@ func resumeHTTP(s interface {
 	cookiesSecure() bool
 }, session, path, body string,
 ) *httptest.ResponseRecorder {
-	r := httptest.NewRequest("POST", "https://controller.test"+path, strings.NewReader(body))
+	r := httptest.NewRequest(http.MethodPost, "https://controller.test"+path, strings.NewReader(body))
 	r.Header.Set("Content-Type", "application/json")
 	r.Header.Set("Origin", "https://controller.test")
 	r.Header.Set(csrfHeaderName, "session-csrf")

@@ -26,7 +26,7 @@ func dataResponse(t *testing.T, output any) *http.Response {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return &http.Response{StatusCode: 200, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(string(body)))}
+	return &http.Response{StatusCode: http.StatusOK, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(string(body)))}
 }
 
 func testDataClient(t *testing.T, transport dataTransport) (blob.DataSigner, blob.RecordStore) {
@@ -156,7 +156,7 @@ func TestDataClientBudgetsBoundTransport(t *testing.T) {
 					if err != nil {
 						t.Fatal(err)
 					}
-					if req.Method == "GET" {
+					if req.Method == http.MethodGet {
 						body = []byte(`{"deadline":"` + req.URL.Query().Get("deadline") + `"}`)
 					}
 					if !strings.Contains(string(body), `"deadline":"`+deadline.Format(time.RFC3339Nano)+`"`) {
@@ -233,7 +233,7 @@ func TestDataClientRefusesUnsafeTransfers(t *testing.T) {
 func TestDataClientRefusesMalformedResponsesAndRedirects(t *testing.T) {
 	for _, body := range []string{`{}`, `null`, `{"present":[],"present":[]}`, `{"present":[]} {}`, `{"present":[],"PRESENT":[]}`, `{"present":false}`} {
 		s, _ := testDataClient(t, func(*http.Request) (*http.Response, error) {
-			return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(body))}, nil
+			return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(body))}, nil
 		})
 		if _, err := s.HasMany(t.Context(), blob.HasManyRequest{}); err == nil {
 			t.Fatalf("accepted malformed response %s", body)
@@ -242,7 +242,7 @@ func TestDataClientRefusesMalformedResponsesAndRedirects(t *testing.T) {
 	calls := 0
 	s, _ := testDataClient(t, func(*http.Request) (*http.Response, error) {
 		calls++
-		return &http.Response{StatusCode: 307, Header: http.Header{"Location": {"http://foreign/steal"}}, Body: io.NopCloser(strings.NewReader(""))}, nil
+		return &http.Response{StatusCode: http.StatusTemporaryRedirect, Header: http.Header{"Location": {"http://foreign/steal"}}, Body: io.NopCloser(strings.NewReader(""))}, nil
 	})
 	if _, err := s.Download(t.Context(), blob.GetRequest{}); err == nil || calls != 1 {
 		t.Fatalf("followed redirect: %v calls=%d", err, calls)

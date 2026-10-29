@@ -184,3 +184,37 @@ func TestPostgresBlobCollectionFencesSourceReservationDuringDeletion(t *testing.
 type sourceGCDeleter func(context.Context, blob.Blob) error
 
 func (d sourceGCDeleter) DeleteBlob(ctx context.Context, b blob.Blob) error { return d(ctx, b) }
+
+// A source read or commit replay resolves the submitter's authority, which
+// locks the team, before it locks the ticket: intake takes the team first and
+// the ticket at binding, so the opposite order deadlocks against it.
+func TestPostgresSourceReadLocksAuthorityBeforeTicket(t *testing.T) {
+	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+	defer cancel()
+	f := newSourceGCFixture(t, ctx)
+	u, err := f.reserve(ctx, "reading")
+	if err != nil {
+		t.Fatal(err)
+	}
+	blocker, err := f.s.DB().BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = blocker.Rollback() })
+	if _, err := blocker.ExecContext(ctx, `SELECT name FROM teams WHERE name=$1 FOR UPDATE`, f.tenant.Team()); err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan error, 1)
+	go func() { _, err := f.tenant.ReadSourceUpload(ctx, f.authority, u.ID); done <- err }()
+	f.blockedBehind(t, ctx, blocker, done)
+	var tickets int
+	if err := f.s.DB().QueryRowContext(ctx, `SELECT COUNT(*) FROM (SELECT 1 FROM source_uploads WHERE team=$1 AND id=$2 FOR UPDATE SKIP LOCKED) free`, f.tenant.Team(), u.ID).Scan(&tickets); err != nil || tickets != 1 {
+		t.Fatalf("source read holds its ticket while waiting for the team (%d free): %v", tickets, err)
+	}
+	if err := blocker.Rollback(); err != nil {
+		t.Fatal(err)
+	}
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+}

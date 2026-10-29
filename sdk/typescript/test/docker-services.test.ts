@@ -32,7 +32,7 @@ test("Docker push tries remaining registries but propagates all errors", async (
   assert.deepEqual(fake.calls.at(-1)!.argv, ["docker", "push", "good/app:latest"]);
 });
 
-test("Docker login masks first and passes its secret through stdin without argv or exec logs", async (t) => {
+test("Docker login registers no mask and passes its secret through stdin without argv or exec logs", async (t) => {
   const root = await fs.mkdtemp(join(tmpdir(), "sdk-login-"));
   t.after(() => fs.rm(root, { recursive: true, force: true }));
   if (process.platform === "win32") await fs.copyFile(process.execPath, root + "/docker.exe");
@@ -45,10 +45,7 @@ test("Docker login masks first and passes its secret through stdin without argv 
   const events: unknown[] = [];
   registerCommandContext(
     fake.ctx,
-    (event, attrs) => {
-      assert.deepEqual(fake.messages[0], { mask: "private-value" });
-      events.push({ event, attrs });
-    },
+    (event, attrs) => events.push({ event, attrs }),
     { PATH: root + delimiter + (process.env.PATH ?? "") },
   );
   await runScope({ phase: "execute", root }, () => docker.login(fake.ctx, "registry.test", "user", "private-value"));
@@ -56,6 +53,7 @@ test("Docker login masks first and passes its secret through stdin without argv 
   assert.equal(received.input, "private-value");
   assert.deepEqual(received.args, ["--username", "user", "--password-stdin", "registry.test"]);
   assert.equal(JSON.stringify(events).includes("private-value"), false);
+  assert.deepEqual(fake.messages.filter((message) => "mask" in (message as object)), []);
 });
 
 test("Docker buildx filters variants, refuses unsupported targets and requires the plugin", async () => {

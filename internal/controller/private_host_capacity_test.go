@@ -85,7 +85,7 @@ func privateCapacityRequest(t *testing.T, server *serverFixture, bearer string, 
 	if err != nil {
 		t.Fatal(err)
 	}
-	req := httptest.NewRequest("POST", "/api/v1/runs/run/local-host/may-start", bytes.NewReader(raw))
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/runs/run/local-host/may-start", bytes.NewReader(raw))
 	req.Header.Set("Authorization", "Bearer "+bearer)
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()

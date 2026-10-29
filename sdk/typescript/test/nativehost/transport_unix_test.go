@@ -34,7 +34,7 @@ func checkClosed(t *testing.T, identities string) {
 			t.Fatal(err)
 		}
 		var stat syscall.Stat_t
-		if err := syscall.Fstat(fd, &stat); err == nil && uint64(stat.Dev) == dev && uint64(stat.Ino) == ino {
+		if err := syscall.Fstat(fd, &stat); err == nil && uint64(stat.Dev) == dev && uint64(stat.Ino) == ino { //nolint:unconvert // Dev and Ino are narrower than uint64 on some Unix platforms
 			t.Fatal("child inherited a protocol pipe")
 		}
 	}

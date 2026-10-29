@@ -357,7 +357,7 @@ func (t *Tenant) acquireConcurrencySlotTx(ctx context.Context, tx *storeTx, req 
 	case onLimitQueue:
 		fallthrough
 	default:
-		arrivedNS := nowNS
+		var arrivedNS int64
 		if queuedArrivedNS, queued, err := txQueueWaiterArrivedAt(ctx, tx, t.team, req.Key, req.RunID, req.NodeID); err != nil {
 			return runstate.AcquireSlotResponse{}, err
 		} else if queued {

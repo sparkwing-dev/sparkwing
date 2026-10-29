@@ -9,7 +9,7 @@ is complete. No lead-owned amendment or handoff file changed.
 
 ## Merge recovery and implementation
 
-Recovered the working tree from the merge of bw-3095-rewrite into
+Recovered the working tree from the merge of the integration branch into
 bd905b7de15faa2dc7f3256ff1b618a8db179146. All 44 conflicted paths have a
 working-file resolution and no conflict markers remain. Retired client,
 orchestrator, localws and credential test files stay deleted. The amended

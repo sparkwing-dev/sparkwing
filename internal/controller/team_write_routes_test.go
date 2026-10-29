@@ -174,6 +174,7 @@ func (f *billingWriterFake) Team() store.Team { return f.team }
 func (f *billingWriterFake) TeamOwnerEmails(context.Context) ([]string, error) {
 	return []string{"owner@example.test"}, nil
 }
+
 func (f *billingWriterFake) PrepareAuthorizedBillingPage(_ context.Context, a capability.Authorized, kind capability.BillingPageKind, amount int64, key string) (capability.BillingPage, error) {
 	f.prepared++
 	f.seen = a
@@ -233,7 +234,7 @@ func TestBillingPageHTTPAuthorityAndReplayProperty(t *testing.T) {
 		if mode == 3 {
 			return nil, errors.New("private-provider-password")
 		}
-		return &http.Response{StatusCode: 200, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(`{"url":"https://checkout.stripe.com/page","id":"cs_17","setup_intent":"seti_17","payment_intent":"pi_17","expires_at":200}`))}, nil
+		return &http.Response{StatusCode: http.StatusOK, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(`{"url":"https://checkout.stripe.com/page","id":"cs_17","setup_intent":"seti_17","payment_intent":"pi_17","expires_at":200}`))}, nil
 	})}}
 	for _, tc := range []struct {
 		path, body string

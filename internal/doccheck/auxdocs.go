@@ -115,10 +115,10 @@ func checkAuxDocs(repoRoot string) bool {
 			}
 		}
 
-		for _, inv := range extractInvocations(rel, doc) {
+		for _, inv := range extractInvocations(rel, normalizeUnprefixedInvocations(doc)) {
 			verbs++
-			if unknown := resolvePath(inv.tokens, valid, posArgs); unknown != "" {
-				hits = append(hits, fmt.Sprintf("%s:%d: `%s` -- no such command %q", inv.file, inv.line, inv.raw, unknown))
+			if problem := judgeInvocation(inv, valid, posArgs); problem != "" {
+				hits = append(hits, problem)
 			}
 		}
 	}

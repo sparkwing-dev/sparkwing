@@ -1,6 +1,7 @@
 package controller
 
 import (
+	"net/http"
 	"net/http/httptest"
 	"path/filepath"
 	"strings"
@@ -30,7 +31,7 @@ func TestCallerStorageStandingUsesFinalTenantInventory(t *testing.T) {
 		t.Fatal(err)
 	}
 	server := NewDeployment(s, deploymenttest.Team(t), nil)
-	request := httptest.NewRequest("GET", "/", nil)
+	request := httptest.NewRequest(http.MethodGet, "/", nil)
 	got, err := server.teamStorageStanding(request, "a")
 	if err != nil || got == nil || got.Team != "a" || got.CacheBytes != 3 || got.LogBytes != 0 || got.EventBytes != 0 {
 		t.Fatalf("controller standing=%+v: %v", got, err)

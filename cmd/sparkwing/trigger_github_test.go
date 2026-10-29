@@ -60,7 +60,7 @@ func TestGitHubLookupNeverForwardsOrPrintsCredentials(t *testing.T) {
 			if r.URL.Host != "api.github.com" || r.Header.Get("Authorization") != "Bearer "+token {
 				t.Fatal("credential escaped lookup")
 			}
-			return &http.Response{StatusCode: 302, Header: http.Header{"Location": []string{"https://foreign.example"}}, Body: http.NoBody}, nil
+			return &http.Response{StatusCode: http.StatusFound, Header: http.Header{"Location": []string{"https://foreign.example"}}, Body: http.NoBody}, nil
 		})
 		defer func() { http.DefaultTransport = original }()
 		_, err := lookupTriggerGitHubID(t.Context(), "git@github.com:acme/app.git", []string{"GH_TOKEN=" + token})

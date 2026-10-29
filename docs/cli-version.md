@@ -20,8 +20,8 @@ Inspect versions (CLI, SDK, sparks)
 | `-C, --checkout PATH` | Resolve the project from this local checkout path. |
 | `-h, --help` | Show command help without executing. |
 | `--help-all` | Include uncommon flags in command help. |
-| `--offline` | offline |
-| `--changelog` | changelog |
+| `--offline` | Skip the network check for the latest release and report only local version information. |
+| `--changelog` | Print the embedded changelog entry for this CLI version instead of the version report. |
 
 ## `sparkwing version hold`
 
@@ -35,5 +35,5 @@ Show, set, or clear the operator ceiling on CLI upgrades
 | `-C, --checkout PATH` | Resolve the project from this local checkout path. |
 | `-h, --help` | Show command help without executing. |
 | `--help-all` | Include uncommon flags in command help. |
-| `--set VERSION` | set |
-| `--clear` | clear |
+| `--set VERSION` | Set a machine-wide version ceiling, as vMAJOR.MINOR or vMAJOR.MINOR.PATCH, that sparkwing update will not pass without --override-hold. |
+| `--clear` | Remove the machine-wide version hold. |

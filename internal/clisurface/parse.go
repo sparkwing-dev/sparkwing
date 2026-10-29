@@ -68,15 +68,20 @@ func (i Invocation) invalid(format string, args ...any) error {
 }
 
 // Parse validates the final command registry without consulting files, environment
-// or credentials. Flags may precede the command; their legality belongs to the
-// selected leaf. Pipeline arguments are opaque after --.
+// or credentials. Only global flags and --profile may precede the command word;
+// every other flag follows its command, whose leaf decides its legality.
+// Pipeline arguments are opaque after --.
 func Parse(binary string, args []string) (Invocation, error) {
 	commands := Registry()
 	inv := Invocation{Flags: make(map[string][]string)}
 	paths := make(map[string]Command, len(commands))
+	groups := map[string]bool{}
 	flags, shorts := map[string]Flag{}, map[string]string{}
 	for _, c := range commands {
 		paths[c.Path] = c
+		if i := strings.LastIndexByte(c.Path, ' '); i > 0 {
+			groups[c.Path[:i]] = true
+		}
 		if c.Path != binary && !strings.HasPrefix(c.Path, binary+" ") {
 			continue
 		}
@@ -105,7 +110,21 @@ func Parse(binary string, args []string) (Invocation, error) {
 				return inv, inv.invalid("%s", err)
 			}
 			f, known := flags[name]
+			// safety: before the command word only global flags and --profile are read, so a
+			// leaf's valued flag (docs --version, runs logs --tail) cannot swallow the next word.
+			if known && groups[inv.Command.Path] && name != "profile" && !slices.ContainsFunc(append(GlobalFlags(), inv.Command.Flags...), func(own Flag) bool { return own.Name == name }) {
+				known = false
+			}
 			if !known {
+				if _, command := paths[inv.Command.Path+" "+name]; command {
+					return inv, inv.invalid("unknown flag --%s; use the %s command", name, strings.TrimSpace(strings.TrimPrefix(inv.Command.Path, binary)+" "+name))
+				}
+				if inv.Command.PipelineArgsAfterSeparator {
+					return inv, inv.invalid("unknown flag --%s; pipeline arguments follow --", name)
+				}
+				if groups[inv.Command.Path] {
+					return inv, inv.invalid("unknown flag --%s; a command's flags follow the command", name)
+				}
 				return inv, inv.invalid("unknown flag --%s%s", name, inv.flagHint())
 			}
 			if f.Argument != "" && !explicit {

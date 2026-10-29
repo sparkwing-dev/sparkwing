@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
 )
 
@@ -64,5 +65,18 @@ func TestDispatchRunValidationPrecedesSideEffects(t *testing.T) {
 	}
 	if _, err := os.Stat(home); !os.IsNotExist(err) {
 		t.Fatalf("created state: %v", err)
+	}
+}
+
+func TestLogFormatRefusalNamesTheValueAndTheFix(t *testing.T) {
+	t.Setenv("SPARKWING_LOG_FORMAT", "quiet")
+	flags, _ := parseRunFlagsArgs(nil)
+	if flags.parseErr == nil {
+		t.Fatal("SPARKWING_LOG_FORMAT=quiet was accepted")
+	}
+	for _, want := range []string{`SPARKWING_LOG_FORMAT="quiet"`, "sparkwing pipeline hooks install"} {
+		if !strings.Contains(flags.parseErr.Error(), want) {
+			t.Errorf("refusal %q does not contain %q", flags.parseErr, want)
+		}
 	}
 }

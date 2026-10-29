@@ -38,11 +38,7 @@ func TestLogSigningBindsOneExactObject(t *testing.T) {
 			for _, index := range []int64{0, 17} {
 				t.Run(fmt.Sprint(subject, class, index), func(t *testing.T) {
 					backend := &logPutSigner{}
-					var checked []string
-					signer := Signer{Objects: backend, Now: func() time.Time { return now }, ClassReady: func(_ context.Context, class string) error {
-						checked = append(checked, class)
-						return nil
-					}}
+					signer := Signer{Objects: backend, Now: func() time.Time { return now }}
 					req := blob.LogSigningRequest{Subject: subject, Index: index, Size: 42, Digest: signingDigest}
 					slot, err := signer.Sign(t.Context(), req, class)
 					if err != nil {
@@ -56,8 +52,8 @@ func TestLogSigningBindsOneExactObject(t *testing.T) {
 					if index > 0 {
 						key = blob.LogSegmentKey(prefix, int(index))
 					}
-					if !reflect.DeepEqual(slot.Subject, subject) || slot.RetentionClass != class || slot.Index != index || !slot.ExpiresAt.Equal(now.Add(15*time.Minute)) || !reflect.DeepEqual(checked, []string{class}) {
-						t.Fatalf("slot = %+v, lifecycle = %v", slot, checked)
+					if !reflect.DeepEqual(slot.Subject, subject) || slot.RetentionClass != class || slot.Index != index || !slot.ExpiresAt.Equal(now.Add(15*time.Minute)) {
+						t.Fatalf("slot = %+v", slot)
 					}
 					if !reflect.DeepEqual(backend.keys, []string{key}) || backend.sizes[0] != 42 || backend.digests[0] != signingDigest || !backend.expires[0].Equal(slot.ExpiresAt) || slot.URL != "https://objects.test/"+key || slot.Headers["X-Object-Key"] != key {
 						t.Fatalf("signed %+v for slot %+v", backend, slot)
@@ -85,7 +81,7 @@ func TestLogSigningRejectsBeforeSigning(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			backend := &logPutSigner{}
-			signer := Signer{Objects: backend, ClassReady: func(context.Context, string) error { t.Fatal("checked invalid request"); return nil }}
+			signer := Signer{Objects: backend}
 			req, class := blob.LogSigningRequest{Subject: jobSubject(), Index: 1, Size: 1, Digest: signingDigest}, "r90"
 			change(&req, &class)
 			if _, err := signer.Sign(t.Context(), req, class); err == nil || len(backend.keys) != 0 {
@@ -95,19 +91,10 @@ func TestLogSigningRejectsBeforeSigning(t *testing.T) {
 	}
 }
 
-func TestLogSigningRequiresLifecycleAndPreservesErrors(t *testing.T) {
+func TestLogSigningPreservesErrors(t *testing.T) {
 	request := blob.LogSigningRequest{Subject: jobSubject(), Index: 1, Size: 1, Digest: signingDigest}
 	backend := &logPutSigner{}
 	signer := Signer{Objects: backend}
-	if _, err := signer.Sign(t.Context(), request, "r90"); err == nil {
-		t.Fatal("signed without lifecycle check")
-	}
-	want := errors.New("lifecycle rule missing")
-	signer.ClassReady = func(context.Context, string) error { return want }
-	if _, err := signer.Sign(t.Context(), request, "r90"); !errors.Is(err, want) || len(backend.keys) != 0 {
-		t.Fatalf("missing lifecycle = %v, keys = %v", err, backend.keys)
-	}
-	signer.ClassReady = func(context.Context, string) error { return nil }
 	backend.err = errors.New("backend unavailable")
 	if slot, err := signer.Sign(t.Context(), request, "r90"); !errors.Is(err, backend.err) || slot.URL != "" {
 		t.Fatalf("failed slot = %+v, %v", slot, err)

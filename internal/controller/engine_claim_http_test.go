@@ -161,7 +161,7 @@ func TestEngineClaimHTTPRefusalsDoNotAward(t *testing.T) {
 		`{"runner_version":"v1","kinds":["node"],"team":"foreign"}`,
 	} {
 		w := httptest.NewRecorder()
-		r := httptest.NewRequest("POST", "/api/v1/runners/claim", strings.NewReader(body))
+		r := httptest.NewRequest(http.MethodPost, "/api/v1/runners/claim", strings.NewReader(body))
 		r.Header.Set("Authorization", "Bearer "+raw)
 		r.Header.Set("Content-Type", "application/json")
 		h.ServeHTTP(w, r)
@@ -279,7 +279,7 @@ func FuzzEngineClaimHTTPKindsNeverWidenGrants(f *testing.F) {
 			t.Fatal(err)
 		}
 		w := httptest.NewRecorder()
-		r := httptest.NewRequest("POST", "/api/v1/runners/claim", strings.NewReader(string(body)))
+		r := httptest.NewRequest(http.MethodPost, "/api/v1/runners/claim", strings.NewReader(string(body)))
 		r.Header.Set("Authorization", "Bearer "+raw)
 		r.Header.Set("Content-Type", "application/json")
 		h.ServeHTTP(w, r)

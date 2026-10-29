@@ -33,3 +33,17 @@ func TestAfterRunConsumesFinalResult(t *testing.T) {
 		})
 	}
 }
+
+func TestAfterRunPanicReportsAnErrorThatFailsTheNode(t *testing.T) {
+	plan := NewPlan()
+	Job(plan, "job", func(context.Context) error { return nil }).AfterRun(func(context.Context, error) {
+		panic("report upload failed")
+	})
+	result, err := (sdkOperations{}).Eval(t.Context(), plan, nodeproto.Request{Job: "job", Closure: "job/after/0", Input: json.RawMessage(`{"outcome":"success"}`)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Error == nil {
+		t.Fatalf("a panicking AfterRun hook reported success: %+v", result)
+	}
+}

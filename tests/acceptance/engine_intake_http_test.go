@@ -45,7 +45,7 @@ func planBoundary() *credentialBoundary {
 
 func engineHTTP(t *testing.T, b *credentialBoundary, f *engineTransactions, path, body string) *httptest.ResponseRecorder {
 	t.Helper()
-	r := httptest.NewRequest("POST", path, strings.NewReader(body))
+	r := httptest.NewRequest(http.MethodPost, path, strings.NewReader(body))
 	if b.raw != "" {
 		r.Header.Set("Authorization", "Bearer "+b.raw)
 	}

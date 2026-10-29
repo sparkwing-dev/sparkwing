@@ -252,7 +252,7 @@ func billingModelProviderDelivery(t *testing.T, e *engineFixture, provider payme
 		if _, err := fmt.Fprintf(mac, "%d.%s", now, body); err != nil {
 			t.Fatal(err)
 		}
-		r := httptest.NewRequest("POST", "/webhooks/stripe", strings.NewReader(body))
+		r := httptest.NewRequest(http.MethodPost, "/webhooks/stripe", strings.NewReader(body))
 		r.Header.Set("Stripe-Signature", fmt.Sprintf("t=%d,v1=%x", now, mac.Sum(nil)))
 		w := httptest.NewRecorder()
 		h.ServeHTTP(w, r)
@@ -320,7 +320,7 @@ func TestBillingModelControllerReportsStandingAndKeepsCardPrepay(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	request := httptest.NewRequest("GET", "https://controller.test/api/v1/team/billing", nil)
+	request := httptest.NewRequest(http.MethodGet, "https://controller.test/api/v1/team/billing", nil)
 	request.AddCookie(&http.Cookie{Name: cookieName(sessionCookieName, server.cookiesSecure()), Value: raw})
 	response := httptest.NewRecorder()
 	server.Handler().ServeHTTP(response, request)

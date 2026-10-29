@@ -25,15 +25,15 @@ func TestSurfaceDebugControlTransport(t *testing.T) {
 				}
 				if calls == 3 {
 					raw, err := io.ReadAll(req.Body)
-					if err != nil || string(raw) != "{}" || req.Method != "POST" || req.URL.Path != "/api/v1/runs/run-412/jobs/build/resume" || req.Header.Get("Authorization") != "Bearer display-credential" {
+					if err != nil || string(raw) != "{}" || req.Method != http.MethodPost || req.URL.Path != "/api/v1/runs/run-412/jobs/build/resume" || req.Header.Get("Authorization") != "Bearer display-credential" {
 						t.Fatalf("debug release changed: %s %s %s %v", req.Method, req.URL, raw, err)
 					}
 					return &http.Response{StatusCode: http.StatusNoContent, Body: http.NoBody}, nil
 				}
-				if calls > 2 || req.Method != "GET" || req.URL.Path != path || req.Header.Get("Authorization") != "Bearer display-credential" {
+				if calls > 2 || req.Method != http.MethodGet || req.URL.Path != path || req.Header.Get("Authorization") != "Bearer display-credential" {
 					t.Fatalf("debug read changed: %s %s", req.Method, req.URL)
 				}
-				return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(body))}, nil
+				return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(body))}, nil
 			})}})
 			if err != nil {
 				t.Fatal(err)

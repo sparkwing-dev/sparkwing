@@ -65,13 +65,14 @@ func runRunsStatus(ctx context.Context, inv clisurface.Invocation) error {
 	}
 	reader, closeTransport, err := resolveRunReader(ctx, inv.Value("profile"))
 	if err != nil {
-		return exitError(3, err)
+		return observationError(err)
 	}
 	defer closeTransport()
 	return observeRunStatus(ctx, inv, reader, os.Stdout, waitStatusPoll)
 }
 
-func observeRunStatus(ctx context.Context, inv clisurface.Invocation, reader controllerwire.RunReader, out io.Writer, wait func(context.Context, time.Duration) error) error {
+func observeRunStatus(ctx context.Context, inv clisurface.Invocation, reader controllerwire.RunReader, out io.Writer, wait func(context.Context, time.Duration) error) (err error) {
+	defer func() { err = observationError(err) }()
 	opts, err := parseRunStatus(inv)
 	if err != nil {
 		return err
@@ -88,10 +89,10 @@ func observeRunStatus(ctx context.Context, inv clisurface.Invocation, reader con
 	for {
 		detail, err := reader.ReadRun(ctx, inv.Value("run"))
 		if err != nil {
-			return exitError(3, err)
+			return err
 		}
 		if detail.ID == "" || detail.Status == "" || previous != nil && previous.ID != detail.ID {
-			return exitError(3, invalidObservation("run observation is missing its identity or changed runs"))
+			return invalidObservation("run observation is missing its identity or changed runs")
 		}
 		failedJobs := opts.view == "summary" && slices.ContainsFunc(detail.Jobs, func(job controllerwire.JobDetail) bool {
 			return job.Outcome == "failed" || job.Status == "failed"
@@ -99,7 +100,7 @@ func observeRunStatus(ctx context.Context, inv clisurface.Invocation, reader con
 		if (opts.steps || failedJobs) && opts.view != "receipt" {
 			steps, err := reader.ReadSteps(ctx, detail.ID)
 			if err != nil {
-				return exitError(3, err)
+				return err
 			}
 			detail.Steps = steps.Steps
 			if !opts.steps {
@@ -124,7 +125,7 @@ func observeRunStatus(ctx context.Context, inv clisurface.Invocation, reader con
 			return reportedExit(exitErrorf(3, "run %s is %s", detail.ID, detail.Status))
 		}
 		if err := wait(ctx, opts.poll); err != nil {
-			return exitError(3, fmt.Errorf("observation incomplete: %w", err))
+			return fmt.Errorf("observation incomplete: %w", err)
 		}
 	}
 }

@@ -187,7 +187,7 @@ raw readiness publication and other legacy lifecycle/claim/trigger APIs remain
 open, along with the earlier foreign contract gaps. W1b implementation files
 are unchanged. See `../w1-session22-progress.md` for evidence and shared files.
 
-## From bw-3095-w1b-store-data (triaged by lead, see "Lead decisions 07:40")
+## From the w1b-store-data lane (triaged by lead, see "Lead decisions 07:40")
 
 W1b continuation: shared `accountBillingAwardTx` now bypasses the calculator
 for unmetered awards, including checkpoint, final settlement and replay. W1's
@@ -203,7 +203,7 @@ are removed. Select a Tenant explicitly for their retained methods. Caller
 migrations in this checkout are complete. W1 lifecycle files changed only at
 two price-read callsites in `store.go`.
 
-## From bw-3095-w3-host (triaged by lead, see "Lead decisions 07:40")
+## From the w3-host lane (triaged by lead, see "Lead decisions 07:40")
 
 W3's [shared steps and alias caller continuation](w3-ingress-lease-continuation.md#shared-steps-and-alias-caller-continuation)
 removes the separate retained step scheduler. The retained and common executors
@@ -293,7 +293,7 @@ retains StartAt/StopAt/Only, but `runspec.Options` has no representation for the
 Declare their intake/seal representation before W3 migrates those assertions to
 the common executor. Mutable flags and invocation blobs cannot replace the seal.
 
-## From bw-3095-w2-credentials (triaged by lead, see "Lead decisions 07:40")
+## From the w2-credentials lane (triaged by lead, see "Lead decisions 07:40")
 
 **W2 runner administration and billing hard cut.** The three legacy GitHub
 runner permission routes, token-table metering route and eight credits.grant
@@ -444,7 +444,7 @@ representation remain integration points.
 **W1: authority-bearing secret reads for W2.** The secret-by-name HTTP cutover now uses C2's local SecretReader interface: Team() Team and ReadSecret(ctx, Authorized) (*Secret, error). Use one store-clock transaction to recheck ancestry, current membership, the selected route alternative and claim liveness/cancellation. Derive claim run/pipeline from its binding and seal, require declaration, enforce pipeline/shared precedence and only_on pools, and commit secret_released with selection. A missing run selector never detaches a claim from its bound run. Member run selectors stay tenant-scoped, and masked member reads are forbidden. Return no row after a failed audit or authority check. Tenant.ReleaseClaimSecret takes the retired ClaimToken and caller clock and is not an adapter. W2 tests the final HTTP/decryption path with fakes. The default refuses missing transactions with policy_missing. See [W2-secret-reads-handoff.md](../W2-secret-reads-handoff.md).
 
 
-## From bw-3095-w8-runners-engine (triaged by lead, see "Lead decisions 07:40")
+## From the w8-runners-engine lane (triaged by lead, see "Lead decisions 07:40")
 
 ### W8 composition continuation
 

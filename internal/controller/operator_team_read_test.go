@@ -38,7 +38,7 @@ func TestOperatorTeamViewPagesAuditEvents(t *testing.T) {
 	}
 	var cursor string
 	for page, want := range []int{50, 50, 5} {
-		r := httptest.NewRequest("GET", "https://controller.test/api/v1/operator/teams/a?cursor="+url.QueryEscape(cursor), nil)
+		r := httptest.NewRequest(http.MethodGet, "https://controller.test/api/v1/operator/teams/a?cursor="+url.QueryEscape(cursor), nil)
 		r.AddCookie(&http.Cookie{Name: cookieName(sessionCookieName, s.cookiesSecure()), Value: raw})
 		w := httptest.NewRecorder()
 		h.ServeHTTP(w, r)
@@ -57,7 +57,7 @@ func TestOperatorTeamViewPagesAuditEvents(t *testing.T) {
 			t.Fatalf("page %d cursor=%q", page, cursor)
 		}
 	}
-	r := httptest.NewRequest("GET", "https://controller.test/api/v1/operator/teams/a?cursor=missing", nil)
+	r := httptest.NewRequest(http.MethodGet, "https://controller.test/api/v1/operator/teams/a?cursor=missing", nil)
 	r.AddCookie(&http.Cookie{Name: cookieName(sessionCookieName, s.cookiesSecure()), Value: raw})
 	w := httptest.NewRecorder()
 	h.ServeHTTP(w, r)
@@ -92,7 +92,7 @@ func TestOperatorTeamReadRequiresCurrentDeploymentGrantProperty(t *testing.T) {
 		if forged {
 			token = "swk_" + strings.Repeat("Z", 43)
 		}
-		r := httptest.NewRequest("GET", "https://controller.test/api/v1/operator/teams/default?team="+url.QueryEscape(adversarial), nil)
+		r := httptest.NewRequest(http.MethodGet, "https://controller.test/api/v1/operator/teams/default?team="+url.QueryEscape(adversarial), nil)
 		r.Header.Set("Authorization", "Bearer "+token)
 		r.Header.Set("X-Operator", url.QueryEscape(adversarial))
 		w := httptest.NewRecorder()

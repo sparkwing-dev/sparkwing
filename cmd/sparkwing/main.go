@@ -85,6 +85,25 @@ func exitError(code int, err error) error {
 	return &cliError{code: code, err: err}
 }
 
+const exitRefused = 4
+
+func observationError(err error) error {
+	var classified *cliError
+	var usage *clisurface.UsageError
+	if err == nil || errors.As(err, &classified) || errors.As(err, &usage) {
+		return err
+	}
+	var failure *apierr.Error
+	if errors.As(err, &failure) {
+		switch failure.Code {
+		case apierr.NotFound, apierr.Unauthenticated, apierr.Forbidden, apierr.BadRequest, apierr.InvalidArgs,
+			apierr.UnsupportedRoute, apierr.MethodNotAllowed, apierr.VersionRevoked, apierr.VersionUnsupported:
+			return exitError(exitRefused, err)
+		}
+	}
+	return exitError(3, err)
+}
+
 func reportedExit(err error) error {
 	if err == nil {
 		return nil
@@ -475,7 +494,7 @@ func findSparkwingDirFrom(start string) (string, error) {
 		}
 		parent := filepath.Dir(dir)
 		if parent == dir {
-			return "", fmt.Errorf("no .sparkwing/main.go or TypeScript .sparkwing/package.json found from %s up", abs)
+			return "", &apierr.Error{Code: apierr.NotFound, Message: fmt.Sprintf("no .sparkwing/main.go or TypeScript .sparkwing/package.json found from %s up", abs), Hint: "Run sparkwing pipeline new --pipeline NAME to create one, or select a checkout with -C."}
 		}
 		dir = parent
 	}

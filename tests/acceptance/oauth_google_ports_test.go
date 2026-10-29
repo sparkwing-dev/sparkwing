@@ -76,7 +76,7 @@ func TestGoogleOAuthHTTPSubjectAndProofProperty(t *testing.T) {
 			HTTP: &http.Client{Transport: transport},
 		}), []string{redirect}).Handler()
 		w := httptest.NewRecorder()
-		h.ServeHTTP(w, httptest.NewRequest("GET", oauthOrigin+"/auth/google/start", nil))
+		h.ServeHTTP(w, httptest.NewRequest(http.MethodGet, oauthOrigin+"/auth/google/start", nil))
 		authorize, err := url.Parse(w.Header().Get("Location"))
 		flow := oauthCookie(w, "__Host-sw_oauth")
 		if err != nil || w.Code != 303 || flow == nil {
@@ -101,7 +101,7 @@ func TestGoogleOAuthHTTPSubjectAndProofProperty(t *testing.T) {
 			flow.Value = base64.RawURLEncoding.EncodeToString(data)
 		}
 		before, expiry := f.state(t)
-		r := httptest.NewRequest("GET", redirect+"?"+url.Values{"state": {authorize.Query().Get("state")}, "code": {"provider-code"}}.Encode(), nil)
+		r := httptest.NewRequest(http.MethodGet, redirect+"?"+url.Values{"state": {authorize.Query().Get("state")}, "code": {"provider-code"}}.Encode(), nil)
 		r.AddCookie(flow)
 		w = httptest.NewRecorder()
 		h.ServeHTTP(w, r)
@@ -118,7 +118,7 @@ func TestGoogleOAuthHTTPSubjectAndProofProperty(t *testing.T) {
 			t.Logf("callback HTTP %d %s", w.Code, w.Body)
 			return false
 		}
-		r = httptest.NewRequest("GET", oauthOrigin+"/api/v1/auth/whoami", nil)
+		r = httptest.NewRequest(http.MethodGet, oauthOrigin+"/api/v1/auth/whoami", nil)
 		r.AddCookie(session)
 		w = httptest.NewRecorder()
 		h.ServeHTTP(w, r)

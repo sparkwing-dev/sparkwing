@@ -28,7 +28,7 @@ Manage team credentials
 
 Mint a new API token
 
-Create a member credential through the team token route. Enroll runners with runners add. The controller derives authority and metering. JSON includes the new bearer and metadata; plain emits the bearer once. Member tokens expire within 90 days and end with their minting session. team.admin requires --allow-team-admin and expires within 30 days.
+Create a member credential through the team token route. Enroll runners with runners add. The controller derives authority and metering. JSON includes the new bearer and metadata; plain emits the bearer once. A token minted with a profile token is delegated from it: it gets at most the minting token's scopes, including team.admin, and never outlives it.
 
 ### Flags
 
@@ -38,12 +38,12 @@ Create a member credential through the team token route. Enroll runners with run
 | `-C, --checkout PATH` | Resolve the project from this local checkout path. |
 | `-h, --help` | Show command help without executing. |
 | `--help-all` | Include uncommon flags in command help. |
-| `--type KIND` | type Values: member. |
-| `--principal NAME` | principal |
+| `--type KIND` | Kind of token to create, member by default; runners get credentials from runners add instead. Values: member. |
+| `--principal NAME` | Not used for member tokens, which always belong to the signed-in account that mints them; the value is ignored. |
 | `--scope SCOPE` | Credential scope. Repeatable; comma-separated values are accepted. |
-| `--ttl DURATION` | ttl |
-| `--allow-team-admin` | allow team admin |
-| `--profile NAME` | Connection profiles come only from the user's config; allowed before the verb if the command accepts it. Local run refuses --profile. |
+| `--ttl DURATION` | Lifetime of the new token in whole seconds or a duration such as 7d; omitted or zero gives it the remaining lifetime of the token that mints it, which it can never outlive. |
+| `--allow-team-admin` | Ask for team.admin on a token minted from a signed-in account session, which then expires within 30 days; a token minted with a profile token gets team.admin whenever that token holds it, and ignores this flag. |
+| `--profile NAME` | Controller connection profile from your config. Omit it to use the local controller. |
 
 ## `sparkwing tokens list`
 
@@ -60,9 +60,9 @@ JSON emits one metadata record per token with exact scopes and no bearer. Plain 
 | `-h, --help` | Show command help without executing. |
 | `--help-all` | Include uncommon flags in command help. |
 | `--token PREFIX` | Token identifier or prefix. |
-| `--type KIND` | type Values: member, runner. |
-| `--include-revoked` | include revoked |
-| `--profile NAME` | Connection profiles come only from the user's config; allowed before the verb if the command accepts it. Local run refuses --profile. |
+| `--type KIND` | List only tokens of this kind. Values: member, runner. |
+| `--include-revoked` | Also list tokens that have been revoked. |
+| `--profile NAME` | Controller connection profile from your config. Omit it to use the local controller. |
 
 ## `sparkwing tokens revoke`
 
@@ -79,7 +79,7 @@ JSON retains the confirmed revocation; plain emits the prefix. A failed or uncon
 | `-h, --help` | Show command help without executing. |
 | `--help-all` | Include uncommon flags in command help. |
 | `--token PREFIX` | Token identifier or prefix. (required) |
-| `--profile NAME` | Connection profiles come only from the user's config; allowed before the verb if the command accepts it. Local run refuses --profile. |
+| `--profile NAME` | Controller connection profile from your config. Omit it to use the local controller. |
 
 ## `sparkwing tokens rotate`
 
@@ -96,6 +96,6 @@ JSON includes the new bearer, metadata and old revocation time; plain emits the 
 | `-h, --help` | Show command help without executing. |
 | `--help-all` | Include uncommon flags in command help. |
 | `--token PREFIX` | Token identifier or prefix. (required) |
-| `--grace DURATION` | grace |
-| `--ttl DURATION` | ttl |
-| `--profile NAME` | Connection profiles come only from the user's config; allowed before the verb if the command accepts it. Local run refuses --profile. |
+| `--grace DURATION` | How long the old token keeps working after rotation, in whole seconds or a duration, 24h by default; zero revokes it at once. |
+| `--ttl DURATION` | Lifetime of the replacement token in whole seconds or a duration; omitted or zero keeps the old token's remaining lifetime. |
+| `--profile NAME` | Controller connection profile from your config. Omit it to use the local controller. |

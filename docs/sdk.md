@@ -43,13 +43,15 @@ func (Ship) Plan(_ context.Context, plan *sw.Plan, in Inputs, _ sw.RunContext) e
 }
 
 func main() {
-    sw.Register[Inputs]("ship", func() sw.Pipeline[Inputs] { return Ship{} })
+    sw.Register[Inputs]("Ship", func() sw.Pipeline[Inputs] { return Ship{} })
     sw.Main()
 }
 ```
 
-`sw.RegisterEntrypoint[T]` registers a named SDK entrypoint for a project alias.
-The invoked pipeline name travels in `RunContext.Pipeline`. Pipelines without
+Registration is keyed by the `entrypoint` a `sparkwing.yaml` pipeline names
+(`entrypoint: Ship` here), not by the pipeline name. `sw.RegisterEntrypoint[T]`
+does the same as `sw.Register[T]`. The invoked pipeline name travels in
+`RunContext.Pipeline`. Pipelines without
 flags use `sw.NoInputs`.
 
 Input structs support `flag`, `short`, `default`, `required`, `enum` and `desc`

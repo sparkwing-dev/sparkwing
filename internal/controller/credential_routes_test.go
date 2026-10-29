@@ -56,7 +56,7 @@ func servingRegistrations(t *testing.T, separateMetrics bool) []string {
 	}
 	actual := server.Registrations()
 	local := httptest.NewRecorder()
-	server.HTTP().API.ServeHTTP(local, httptest.NewRequest("POST", "/api/v1/local/doctor", nil))
+	server.HTTP().API.ServeHTTP(local, httptest.NewRequest(http.MethodPost, "/api/v1/local/doctor", nil))
 	if local.Code != http.StatusInternalServerError || !strings.Contains(local.Body.String(), `"code":"policy_missing"`) {
 		t.Fatalf("local doctor registration: HTTP %d %s", local.Code, local.Body)
 	}
@@ -175,7 +175,7 @@ func compareCredentialRoutes(expected []credentialRouteExpectation, actual []cap
 
 func TestFinalCredentialRouteCoverageRejectsDrift(t *testing.T) {
 	intakeIndex := slices.IndexFunc(capability.Routes(), func(route capability.RoutePolicy) bool {
-		return route.Method == "POST" && route.Path == "/api/v1/runs"
+		return route.Method == http.MethodPost && route.Path == "/api/v1/runs"
 	})
 	if intakeIndex < 0 {
 		t.Fatal("missing run intake route")

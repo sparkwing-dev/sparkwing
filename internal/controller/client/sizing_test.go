@@ -14,7 +14,7 @@ func TestSizingQueryUsesAuthorizedReadAndPreservesMeasurements(t *testing.T) {
 	want := controllerwire.SizingDetail{Pipeline: "check", Repo: "acme/api", Source: "floor", MemoExcluded: 3, Rollup: controllerwire.SizingMeasurements{FloorCores: 6.5, FloorMemoryBytes: 7 << 30, CPUP50: 0.5, CPUP95: 1.25, CPUMeasured: true, PrevPeakCores: 2}, Jobs: []controllerwire.JobSizing{}}
 	c := testEngine(t, func(req *http.Request) (*http.Response, error) {
 		q := req.URL.Query()
-		if req.Method != "GET" || req.URL.Path != "/api/v1/sizing" || q.Get("pipeline") != "check" || q.Get("limit") != "1" || q.Get("cursor") != "opaque" {
+		if req.Method != http.MethodGet || req.URL.Path != "/api/v1/sizing" || q.Get("pipeline") != "check" || q.Get("limit") != "1" || q.Get("cursor") != "opaque" {
 			t.Fatalf("sizing: %s %s", req.Method, req.URL)
 		}
 		body, err := json.Marshal(controllerwire.SizingPage{Sizing: []controllerwire.SizingDetail{want}})

@@ -2,6 +2,7 @@ package controller
 
 import (
 	"encoding/json"
+	"net/http"
 	"net/http/httptest"
 	"reflect"
 	"strings"
@@ -24,7 +25,7 @@ func TestExpansionTransportPreservesPrivateMaskRegistration(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	request := httptest.NewRequest("POST", "/", strings.NewReader(string(raw)))
+	request := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(string(raw)))
 	request.Header.Set("Content-Type", "application/json")
 	got, err := decodeExpansion(request)
 	if err != nil {

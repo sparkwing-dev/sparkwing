@@ -57,9 +57,10 @@ generate the bundle locally first (`bash bin/build-web.sh && go install
 ```sh
 mkdir my-pipelines && cd my-pipelines
 git init
-sparkwing pipeline new --name hello
+sparkwing pipeline new --pipeline hello
 
-# Edit .sparkwing/jobs/hello.go to taste, then run it
+# Edit .sparkwing/jobs/hello.go to taste, commit, then run it
+git add -A && git commit -m "add hello pipeline"
 sparkwing run hello
 
 # Dashboard lifecycle (requires the native runtime binding)
@@ -134,9 +135,12 @@ func (Hello) Plan(ctx context.Context, plan *sw.Plan, _ sw.NoInputs, run sw.RunC
 }
 
 func init() {
-    sw.Register[sw.NoInputs]("hello", func() sw.Pipeline[sw.NoInputs] { return &Hello{} })
+    sw.Register[sw.NoInputs]("Hello", func() sw.Pipeline[sw.NoInputs] { return &Hello{} })
 }
 ```
+
+Register the `entrypoint` that `.sparkwing/sparkwing.yaml` names, not the
+pipeline name: the scaffold's `name: hello` entry has `entrypoint: Hello`.
 
 `sparkwing pipeline new` scaffolds a working stub. See [`docs/`](./docs)
 for the full reference; [`docs/sdk.md`](./docs/sdk.md) is the SDK

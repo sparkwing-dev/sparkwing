@@ -98,12 +98,15 @@ Supported declarations are `on.push.branches` and
 `on.pull_request.actions`/`branches` (the PR base branch). Empty branch filters
 match all branches. Empty PR actions select `opened`, `synchronize` and `reopened`;
 `closed` and `ready_for_review` are also supported. Patterns use Go `path.Match`:
-`*` does not cross `/`. Recursive `**`, negative patterns, changed-path filters
-and unsupported PR actions produce an explicit unsupported status instead of
-broader execution. Other event types remain configured through manual subscriptions.
+`*` does not cross `/`. A pipeline that declares recursive `**`, a negative
+pattern, a changed-path filter or an unsupported PR action is skipped rather
+than run more broadly: the preview lists it under `skipped` with the reason,
+and the repository's other pipelines keep running. Other event types remain
+configured through manual subscriptions.
 
-Missing, invalid, unsupported or unreadable configuration starts no automatic
-runs. The preview explains the problem; refresh discovery after fixing it.
+Missing, invalid or unreadable configuration, or one whose every declaring
+pipeline is skipped (status `unsupported`), starts no automatic runs. The
+preview explains the problem; refresh discovery after fixing it.
 Temporary discovery failures preserve saved consent. Removing repository access or
 disconnecting its installation revokes consent; reconnecting requires enabling it
 again. Existing manual subscriptions take precedence for their pipeline name,

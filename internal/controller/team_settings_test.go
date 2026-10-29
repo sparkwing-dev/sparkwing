@@ -88,7 +88,7 @@ func TestSelfHostedControllerRefusesTheCloudTier(t *testing.T) {
 		}
 		engineSQL(t, s.store, `UPDATE sessions SET scopes='runs.read,runs.write,team.admin'`)
 		engineSQL(t, s.store, `UPDATE memberships SET role='owner' WHERE account_id='member'`)
-		r := httptest.NewRequest("PUT", "https://controller.test/api/v1/team/settings", strings.NewReader(`{"claim_ranking":["self-hosted","cloud"]}`))
+		r := httptest.NewRequest(http.MethodPut, "https://controller.test/api/v1/team/settings", strings.NewReader(`{"claim_ranking":["self-hosted","cloud"]}`))
 		r.Header.Set("Content-Type", "application/json")
 		r.Header.Set("Origin", "https://controller.test")
 		r.Header.Set(csrfHeaderName, "session-csrf")
@@ -116,7 +116,7 @@ func TestChildCeilingTeamSettingsHTTP(t *testing.T) {
 		{"owner", `{"max_children_per_root":1001}`, 400},
 	} {
 		engineSQL(t, s.store, `UPDATE memberships SET role=? WHERE account_id='member'`, tc.role)
-		r := httptest.NewRequest("PUT", "https://controller.test/api/v1/team/settings", strings.NewReader(tc.body))
+		r := httptest.NewRequest(http.MethodPut, "https://controller.test/api/v1/team/settings", strings.NewReader(tc.body))
 		r.Header.Set("Content-Type", "application/json")
 		r.Header.Set("Origin", "https://controller.test")
 		r.Header.Set(csrfHeaderName, "session-csrf")

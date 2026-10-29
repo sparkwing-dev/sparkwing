@@ -36,10 +36,10 @@ func TestSurfaceOperatorManagementTransport(t *testing.T) {
 			if req.Method != want.method || req.URL.Path != want.path || req.Header.Get("Authorization") != "Bearer deployment-credential" {
 				t.Fatalf("operation changed: %s %s", req.Method, req.URL)
 			}
-			if req.Method == "POST" && req.Header.Get("Idempotency-Key") != "one-reset" {
+			if req.Method == http.MethodPost && req.Header.Get("Idempotency-Key") != "one-reset" {
 				t.Fatal("reset lost its replay identity")
 			}
-			if req.Method == "PUT" {
+			if req.Method == http.MethodPut {
 				var got controllerwire.OperatorLimitsWrite
 				if json.NewDecoder(req.Body).Decode(&got) != nil || !reflect.DeepEqual(got.Limits, limits.Limits) {
 					t.Fatal("explicit zero changed")
@@ -49,7 +49,7 @@ func TestSurfaceOperatorManagementTransport(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(string(body)))}, nil
+			return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(string(body)))}, nil
 		})}})
 		if err != nil {
 			t.Fatal(err)

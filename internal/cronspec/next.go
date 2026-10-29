@@ -49,16 +49,38 @@ func (s *Schedule) Next(after time.Time, loc *time.Location) time.Time {
 	return time.Time{}
 }
 
-// ShortestInterval returns the smallest gap between the next n instants after
-// `after`, which is a schedule's real cadence however its expression spells
-// it: `*/5 * * * *` and `0,5,10,...` both measure five minutes. It reports
-// false when fewer than two instants resolve.
-func (s *Schedule) ShortestInterval(after time.Time, loc *time.Location, n int) (time.Duration, bool) {
-	fires := s.Upcoming(after, loc, n)
-	if len(fires) < 2 {
+// ShortestInterval returns a schedule's wall-clock cadence however its expression
+// spells it: `*/5 * * * *` and `0,5,10,...` both measure five minutes, and
+// `0,5,...,50,51 * * * *` measures one. Every matching day fires at the same
+// times, so the gaps within one day are exact; only gaps across midnight depend
+// on which days match, and those are measured over the next eight matching days.
+// It reports false when fewer than two instants resolve.
+func (s *Schedule) ShortestInterval(after time.Time, loc *time.Location) (time.Duration, bool) {
+	if s == nil {
 		return 0, false
 	}
-	shortest := time.Duration(0)
+	var day []int
+	for hour := range 24 {
+		for minute := range 60 {
+			if bitSet(s.hour, hour) && bitSet(s.minute, minute) {
+				day = append(day, hour*60+minute)
+			}
+		}
+	}
+	within := 0
+	for i := 1; i < len(day); i++ {
+		if gap := day[i] - day[i-1]; within == 0 || gap < within {
+			within = gap
+		}
+	}
+	if len(s.Upcoming(after, loc, 2)) < 2 {
+		return 0, false
+	}
+	if within > 0 && within <= 24*60-day[len(day)-1]+day[0] {
+		return time.Duration(within) * time.Minute, true
+	}
+	fires := s.Upcoming(after, loc, max(10, 8*len(day)))
+	shortest := time.Duration(within) * time.Minute
 	for i := 1; i < len(fires); i++ {
 		gap := fires[i].Sub(fires[i-1])
 		if shortest == 0 || gap < shortest {

@@ -3,6 +3,7 @@ package controller
 import (
 	"encoding/json"
 	"io"
+	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
@@ -17,7 +18,7 @@ type unsizedRequestBody struct{ io.Reader }
 func TestEngineClaimHTTPChunkedBody(t *testing.T) {
 	_, h, raw := engineClaimHTTPFixture(t, []capability.Grant{capability.NodesClaim})
 	for _, body := range []string{"", `{"runner_version":"v1","kinds":["node"],"pipelines":["other"]}`, `{"runner_version":"v1","kinds":["node"],"lease_nanos":3600000000000}`} {
-		r := httptest.NewRequest("POST", "/api/v1/runners/claim", unsizedRequestBody{strings.NewReader(body)})
+		r := httptest.NewRequest(http.MethodPost, "/api/v1/runners/claim", unsizedRequestBody{strings.NewReader(body)})
 		r.Header.Set("Content-Type", "application/json")
 		r.Header.Set("Authorization", "Bearer "+raw)
 		w := httptest.NewRecorder()
@@ -26,7 +27,7 @@ func TestEngineClaimHTTPChunkedBody(t *testing.T) {
 			t.Fatalf("HTTP %d %s", w.Code, w.Body)
 		}
 	}
-	r := httptest.NewRequest("POST", "/api/v1/runners/claim", unsizedRequestBody{strings.NewReader(`{"runner_version":"v1","kinds":["node"]}`)})
+	r := httptest.NewRequest(http.MethodPost, "/api/v1/runners/claim", unsizedRequestBody{strings.NewReader(`{"runner_version":"v1","kinds":["node"]}`)})
 	r.Header.Set("Content-Type", "application/json")
 	r.Header.Set("Authorization", "Bearer "+raw)
 	if r.ContentLength != -1 {
@@ -51,7 +52,7 @@ func TestCapabilityRotationChunkedBodyPreservesGrace(t *testing.T) {
 		{`{"grace_secs":0}`, 0, 200},
 		{"", 0, 400},
 	} {
-		r := httptest.NewRequest("POST", "/api/v1/tokens/target/rotate", unsizedRequestBody{strings.NewReader(tc.body)})
+		r := httptest.NewRequest(http.MethodPost, "/api/v1/tokens/target/rotate", unsizedRequestBody{strings.NewReader(tc.body)})
 		r.Header.Set("Content-Type", "application/json")
 		if r.ContentLength != -1 {
 			t.Fatalf("body length = %d", r.ContentLength)

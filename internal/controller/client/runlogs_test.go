@@ -36,7 +36,7 @@ func TestLogReaderUsesFinalRoutesAndAuthenticatedTransport(t *testing.T) {
 	} {
 		t.Run(tc.path, func(t *testing.T) {
 			c, err := NewLogReader(EngineOptions{URL: "https://controller.example", Bearer: func(context.Context) (string, error) { return "private", nil }, HTTP: &http.Client{Transport: engineTransport(func(req *http.Request) (*http.Response, error) {
-				if req.Method != "GET" || req.URL.RequestURI() != tc.path || req.Header.Get("Authorization") != "Bearer private" {
+				if req.Method != http.MethodGet || req.URL.RequestURI() != tc.path || req.Header.Get("Authorization") != "Bearer private" {
 					t.Fatalf("request = %s %s", req.Method, req.URL)
 				}
 				return engineResponse(200, `{"records":[],"next_cursor":"","truncated":false,"complete":true,"matches":[],"future":1}`), nil

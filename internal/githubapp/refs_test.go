@@ -65,7 +65,7 @@ func TestResolveCommitUsesExactReferenceAndPeelsTags(t *testing.T) {
 				default:
 					t.Fatalf("unexpected request %s %s", r.Method, r.URL)
 				}
-				return &http.Response{StatusCode: 200, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(body)), Request: r}, nil
+				return &http.Response{StatusCode: http.StatusOK, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(body)), Request: r}, nil
 			})}})
 			got, err := client.ResolveCommit(t.Context(), 7, "acme", "widgets", tc.ref)
 			if got != tc.want || (err != nil) != (tc.want == "") {

@@ -3,6 +3,7 @@ package acceptance_test
 import (
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"strings"
@@ -70,7 +71,7 @@ func TestOAuthHTTPGitHubUsesNumericIdentityProperty(t *testing.T) {
 			t.Logf("sign-in: %d %s", w.Code, w.Body)
 			return false
 		}
-		r := httptest.NewRequest("GET", oauthOrigin+"/api/v1/auth/whoami", nil)
+		r := httptest.NewRequest(http.MethodGet, oauthOrigin+"/api/v1/auth/whoami", nil)
 		r.AddCookie(session)
 		w = httptest.NewRecorder()
 		f.handler.ServeHTTP(w, r)

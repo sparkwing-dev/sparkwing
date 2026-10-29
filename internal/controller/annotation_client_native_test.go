@@ -81,7 +81,7 @@ func FuzzMetadataNumericSelectorsRetainJobAuthority(f *testing.F) {
 			{"steps/annotations", `{"step_id":"compile","level":"info","message":"masked note"}`},
 			{"steps/summary", `{"step_id":"compile","markdown":"masked summary"}`},
 		} {
-			request := httptest.NewRequest("POST", "/api/v1/runs/"+url.PathEscape(selector)+"/jobs/job/"+operation.suffix, strings.NewReader(operation.body))
+			request := httptest.NewRequest(http.MethodPost, "/api/v1/runs/"+url.PathEscape(selector)+"/jobs/job/"+operation.suffix, strings.NewReader(operation.body))
 			request.Header.Set("Authorization", "Bearer "+raw)
 			request.Header.Set("Content-Type", "application/json")
 			response := httptest.NewRecorder()

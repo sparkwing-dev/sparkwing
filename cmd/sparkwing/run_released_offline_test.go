@@ -94,7 +94,7 @@ func TestReleasedEngineOfflineUsesSignedPolicyAndVerifiedCache(t *testing.T) {
 			return nil, fmt.Errorf("unexpected download: %s", r.URL)
 		}
 		downloads++
-		return &http.Response{StatusCode: 200, Header: make(http.Header), Body: io.NopCloser(bytes.NewReader(body)), Request: r}, nil
+		return &http.Response{StatusCode: http.StatusOK, Header: make(http.Header), Body: io.NopCloser(bytes.NewReader(body)), Request: r}, nil
 	})}
 	cache := t.TempDir()
 	resolver, err := engine.NewResolver(engine.Config{TrustedKeys: []ed25519.PublicKey{public}, CacheDirectory: cache, BuildVersion: version, HTTPClient: online})

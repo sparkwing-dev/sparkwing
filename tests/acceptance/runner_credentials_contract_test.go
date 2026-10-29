@@ -31,7 +31,7 @@ func TestSurfaceRunnerEnrollmentCredentialTransport(t *testing.T) {
 				status := http.StatusOK
 				switch calls {
 				case 1:
-					if req.Method != "POST" || req.URL.Path != "/api/v1/runners" {
+					if req.Method != http.MethodPost || req.URL.Path != "/api/v1/runners" {
 						t.Fatalf("enrollment: %s %s", req.Method, req.URL)
 					}
 					var body controllerwire.EnrollRunnerRequest
@@ -44,12 +44,12 @@ func TestSurfaceRunnerEnrollmentCredentialTransport(t *testing.T) {
 					response = controllerwire.CreatedToken{Capability: "swk_00000001_secret", Prefix: metadata.Prefix, Team: metadata.Team, Grants: grants}
 					status = http.StatusCreated
 				case 2:
-					if req.Method != "GET" || req.URL.Path != "/api/v1/tokens/"+metadata.Prefix {
+					if req.Method != http.MethodGet || req.URL.Path != "/api/v1/tokens/"+metadata.Prefix {
 						t.Fatalf("identity check: %s %s", req.Method, req.URL)
 					}
 					response = metadata
 				case 3:
-					if req.Method != "DELETE" || req.URL.Path != "/api/v1/tokens/"+metadata.Prefix {
+					if req.Method != http.MethodDelete || req.URL.Path != "/api/v1/tokens/"+metadata.Prefix {
 						t.Fatalf("revocation: %s %s", req.Method, req.URL)
 					}
 					return &http.Response{StatusCode: http.StatusNoContent, Body: io.NopCloser(strings.NewReader(""))}, nil

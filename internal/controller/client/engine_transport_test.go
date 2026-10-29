@@ -74,7 +74,7 @@ func checkNonReplayableHTTPReuse(t *testing.T, key string) {
 							awards.Add(1)
 							return
 						}
-						response := &http.Response{StatusCode: 200, ProtoMajor: 1, ProtoMinor: 1, ContentLength: int64(len(body)), Body: io.NopCloser(strings.NewReader(string(body)))}
+						response := &http.Response{StatusCode: http.StatusOK, ProtoMajor: 1, ProtoMinor: 1, ContentLength: int64(len(body)), Body: io.NopCloser(strings.NewReader(string(body)))}
 						if err := response.Write(server); err != nil {
 							t.Error(err)
 							return

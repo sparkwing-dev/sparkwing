@@ -3,6 +3,7 @@ package controller
 import (
 	"context"
 	"encoding/json"
+	"net/http"
 	"net/http/httptest"
 	"testing"
 
@@ -33,7 +34,7 @@ var (
 func OperatorHealth(t *testing.T, s *Server) controllerwire.OperatorHealth {
 	t.Helper()
 	w := httptest.NewRecorder()
-	if err := s.handleOperatorHealth(w, httptest.NewRequest("GET", "/api/v1/operator/health", nil), capability.Authorized{}); err != nil {
+	if err := s.handleOperatorHealth(w, httptest.NewRequest(http.MethodGet, "/api/v1/operator/health", nil), capability.Authorized{}); err != nil {
 		t.Fatal(err)
 	}
 	var out controllerwire.OperatorHealth

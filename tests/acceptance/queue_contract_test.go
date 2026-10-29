@@ -17,10 +17,10 @@ func TestSurfaceQueueTransport(t *testing.T) {
 		manager, err := client.NewQueueManager(client.EngineOptions{URL: endpoint, HTTP: &http.Client{Transport: surfaceTransport(func(req *http.Request) (*http.Response, error) {
 			calls = append(calls, req.Method+" "+req.URL.RequestURI())
 			body := `{}`
-			if req.Method == "GET" && req.URL.Path != "/api/v1/queue" {
+			if req.Method == http.MethodGet && req.URL.Path != "/api/v1/queue" {
 				body = `{"group":"g:deploy","capacity":2,"effective_capacity":1,"used_cost":2,"holders":[],"waiters":[]}`
 			}
-			return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(body))}, nil
+			return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(body))}, nil
 		})}})
 		if err != nil {
 			t.Fatal(err)

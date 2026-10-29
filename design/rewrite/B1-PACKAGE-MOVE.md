@@ -1,6 +1,6 @@
 # Barrier B1 package move
 
-The harness committed session 1 as f8ba35d93. Integration (215ddd7d4, bw-3095-rewrite) is already an ancestor of HEAD. This session made no commit.
+The harness committed session 1 as f8ba35d93. Integration (215ddd7d4) is already an ancestor of HEAD. This session made no commit.
 
 Moved store, store/teststore, controller, controller/client, controller/ciphertest and all storage packages under internal/, including nested helpers. No alias facade remains. NodeRef, CreateTokenRequest, CreateServiceTokenRequest, EnrollRunnerRequest, CreatedToken and RotatedToken moved to internal/controllerwire. RunSnapshot remains a private store read model because it contains authority state.
 

@@ -62,11 +62,11 @@ func TestRequestBudgetHeartbeatUsesAuthenticatedHolderProperty(t *testing.T) {
 		calls := 0
 		endpoint := s.budgetEndpoint(controllerwire.Endpoint{Pattern: "/api/v1/claims/{claim}/heartbeat", Authentication: capability.AuthCapability, Handle: func(w http.ResponseWriter, _ *http.Request, _ capability.Authorized) error {
 			calls++
-			w.WriteHeader(204)
+			w.WriteHeader(http.StatusNoContent)
 			return nil
 		}})
 		for i := range 2 {
-			r := httptest.NewRequest("POST", "/", nil)
+			r := httptest.NewRequest(http.MethodPost, "/", nil)
 			r.Header.Set(store.RunnerIdentityHeader, value)
 			r.Header.Set("X-Sparkwing-Claim-Holder", value)
 			w := httptest.NewRecorder()
@@ -110,7 +110,7 @@ func TestRequestBudgetNeverLogsRunnerHeader(t *testing.T) {
 			a := capability.Authorized{Principal: capability.Principal{Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: "root"}}}
 			credential := prefix + strings.Repeat("x", 43)
 			for i := range 2 {
-				r := httptest.NewRequest("POST", "/", nil)
+				r := httptest.NewRequest(http.MethodPost, "/", nil)
 				identity := credential
 				if class == budgetClassRunnerNames && i == 0 {
 					identity = "first"
@@ -131,7 +131,7 @@ func TestRequestBudgetBoundsRunnerHeader(t *testing.T) {
 	prefix := strings.Repeat("x", 4096)
 	keys := make(map[string]bool)
 	for _, identity := range []string{prefix + "one", prefix + "two"} {
-		r := httptest.NewRequest("POST", "/", nil)
+		r := httptest.NewRequest(http.MethodPost, "/", nil)
 		r.Header.Set(store.RunnerIdentityHeader, identity)
 		key, ok := s.runnerBudgetKey(httptest.NewRecorder(), r, a)
 		if !ok || len(key) > 256 || keys[key] {

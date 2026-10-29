@@ -176,7 +176,7 @@ func TestDashboardReadsStayInsideTheTeamBoundary(t *testing.T) {
 	}
 	get := func(path, token string) *httptest.ResponseRecorder {
 		t.Helper()
-		req := httptest.NewRequest("GET", path, nil)
+		req := httptest.NewRequest(http.MethodGet, path, nil)
 		req.Header.Set("Authorization", "Bearer "+token)
 		return f.serve(req)
 	}
@@ -216,7 +216,7 @@ func TestDashboardStreamsOutliveTheListenersWriteTimeout(t *testing.T) {
 	ts.Start()
 	t.Cleanup(ts.Close)
 
-	req, err := http.NewRequestWithContext(ctx, "GET", ts.URL+"/api/v1/runs/r1/events/stream", nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, ts.URL+"/api/v1/runs/r1/events/stream", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -256,7 +256,7 @@ func TestRunEventStreamEndsWhenMembershipEnds(t *testing.T) {
 	t.Cleanup(ts.Close)
 	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
 	defer cancel()
-	req, err := http.NewRequestWithContext(ctx, "GET", ts.URL+"/api/v1/runs/r1/events/stream", nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, ts.URL+"/api/v1/runs/r1/events/stream", nil)
 	if err != nil {
 		t.Fatal(err)
 	}

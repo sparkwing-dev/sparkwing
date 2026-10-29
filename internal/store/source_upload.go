@@ -85,17 +85,25 @@ func (t *Tenant) ReserveSourceUpload(ctx context.Context, authority capability.A
 func readSourceUploadTx(ctx context.Context, tx *storeTx, team Team, authority capability.AuthorityRef, id string) (SourceUpload, error) {
 	u := SourceUpload{ID: id, Blob: blob.Blob{Team: string(team)}}
 	var expires int64
-	err := tx.QueryRowContext(ctx, `SELECT repo_key,repo_display,execution_sha,pipeline_sha,digest,size,expires_at,committed_at FROM source_uploads WHERE team=? AND id=? AND authority_kind=? AND authority_id=?`+tx.forUpdate(), team, id, authority.Kind, authority.ID).Scan(&u.Scope.Repository, &u.Scope.RepositoryDisplay, &u.Scope.ExecutionSHA, &u.Scope.PipelineSHA, &u.Blob.Digest, &u.Blob.Size, &expires, &u.CommittedAt)
-	if errors.Is(err, sql.ErrNoRows) {
-		return u, blob.ErrDigestNotReadable
+	read := func(lock string) error {
+		err := tx.QueryRowContext(ctx, `SELECT repo_key,repo_display,execution_sha,pipeline_sha,digest,size,expires_at,committed_at FROM source_uploads WHERE team=? AND id=? AND authority_kind=? AND authority_id=?`+lock, team, id, authority.Kind, authority.ID).Scan(&u.Scope.Repository, &u.Scope.RepositoryDisplay, &u.Scope.ExecutionSHA, &u.Scope.PipelineSHA, &u.Blob.Digest, &u.Blob.Size, &expires, &u.CommittedAt)
+		if errors.Is(err, sql.ErrNoRows) {
+			return blob.ErrDigestNotReadable
+		}
+		return err
 	}
-	if err != nil {
+	// safety: the ticket's scope is read unlocked to resolve authority, which locks the team, and the ticket is
+	// locked and reread only after it, the order intake takes; the reverse deadlocks against intake.
+	if err := read(""); err != nil {
 		return u, err
 	}
-	u.ExpiresAt = time.Unix(0, expires).UTC()
 	if _, err := sourceUploaderTx(ctx, tx, team, authority, u.Scope); err != nil {
 		return u, err
 	}
+	if err := read(tx.forUpdate()); err != nil {
+		return u, err
+	}
+	u.ExpiresAt = time.Unix(0, expires).UTC()
 	if !u.ExpiresAt.After(tx.now(ctx)) {
 		return u, authorityError(apierr.Conflict, "source upload expired; upload again")
 	}

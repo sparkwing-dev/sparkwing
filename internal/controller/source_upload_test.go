@@ -216,7 +216,7 @@ func TestSourceSnapshotRevokedBeforeCommitExpiresPhysicalStaging(t *testing.T) {
 	transport := inventoryRoundTrip{s.Handler()}
 	options.HTTP.Transport = intakeGitHubTransport(func(r *http.Request) (*http.Response, error) {
 		response, err := transport.RoundTrip(r)
-		if err == nil && r.Method == "PUT" && strings.Contains(r.URL.Path, "/data/uploads/") {
+		if err == nil && r.Method == http.MethodPut && strings.Contains(r.URL.Path, "/data/uploads/") {
 			engineSQL(t, s.store, `DELETE FROM memberships WHERE team='a' AND account_id='member'`)
 		}
 		return response, err
@@ -288,7 +288,7 @@ func TestSourceSnapshotPublishesScannedCopyAfterInputChanges(t *testing.T) {
 	transport := options.HTTP.Transport
 	changed := false
 	options.HTTP.Transport = intakeGitHubTransport(func(r *http.Request) (*http.Response, error) {
-		if r.Method == "POST" && r.URL.Path == "/api/v1/data/source" {
+		if r.Method == http.MethodPost && r.URL.Path == "/api/v1/data/source" {
 			if err := os.WriteFile(path, []byte("private-value-added-after-scan"), 0o600); err != nil {
 				return nil, err
 			}

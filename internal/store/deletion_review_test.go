@@ -78,14 +78,35 @@ func TestConcurrentCoOwnerDeletionsLeaveTheTeamAnOwner(t *testing.T) {
 				}
 				st.SetTestClock(t, func() time.Time { return now })
 				var wg sync.WaitGroup
-				for _, id := range []string{a.Account.ID, b.Account.ID} {
+				ids := []string{a.Account.ID, b.Account.ID}
+				errs := make([]error, len(ids))
+				for n, id := range ids {
 					wg.Add(1)
 					go func() {
 						defer wg.Done()
-						_, _ = st.DeleteAccount(ctx, id)
+						_, errs[n] = st.DeleteAccount(ctx, id)
 					}()
 				}
 				wg.Wait()
+				deleted, lastOwner := 0, 0
+				for n, err := range errs {
+					switch {
+					case err == nil:
+						deleted++
+						if left := countWhere(t, st, "accounts", "id = '"+ids[n]+"'"); left != 0 {
+							t.Fatalf("iteration %d: deletion of %s succeeded but the account remains", i, ids[n])
+						}
+					case errors.Is(err, store.ErrLastOwner):
+						lastOwner++
+					default:
+						t.Fatalf("iteration %d: deleting %s: %v", i, ids[n], err)
+					}
+				}
+				// safety: with an editor the second deletion is the last owner of a team with members; without one it
+				// empties the team, which is queued for deletion.
+				if withEditor && (deleted != 1 || lastOwner != 1) || !withEditor && deleted != 2 {
+					t.Fatalf("iteration %d editor=%v: %d deletions succeeded and %d were refused as last owner", i, withEditor, deleted, lastOwner)
+				}
 				owners := countWhere(t, st, "memberships", "team = 'shared' AND role = 'owner'")
 				members := countWhere(t, st, "memberships", "team = 'shared'")
 				deleting := countWhere(t, st, "team_deletions", "slug = 'shared' AND state = 'pending'")
@@ -363,5 +384,24 @@ func TestAccountDeletionRelabelsEveryRowThatNamedTheAccount(t *testing.T) {
 	}
 	if n := countWhere(t, st, "egress_usage", "team = '"+team+"' AND bytes = 700"); n != 1 {
 		t.Error("tenant egress bytes changed during account deletion")
+	}
+}
+
+// The invitation email log holds an unsalted digest of every invited address,
+// so the retention pass drops each row once it no longer counts toward the
+// daily cap, not only when the same address is invited again.
+func TestRetentionPrunesTheInvitationEmailLogAfterADay(t *testing.T) {
+	st := storetest.Open(t)
+	ctx := context.Background()
+	now := time.Now()
+	if _, err := st.DB().ExecContext(ctx, storetest.Rebind(st, `INSERT INTO invitation_email_log(address,sent_at) VALUES ('old',?),('recent',?)`), now.Add(-25*time.Hour).UnixNano(), now.Add(-time.Hour).UnixNano()); err != nil {
+		t.Fatal(err)
+	}
+	st.SetTestClock(t, func() time.Time { return now })
+	if _, err := st.AsOperator().MaintainRetention(ctx, store.RetentionRequest{Limit: 100}); err != nil {
+		t.Fatal(err)
+	}
+	if old, recent := countWhere(t, st, "invitation_email_log", "address = 'old'"), countWhere(t, st, "invitation_email_log", "address = 'recent'"); old != 0 || recent != 1 {
+		t.Fatalf("after retention the log keeps %d day-old and %d recent rows, want 0 and 1", old, recent)
 	}
 }

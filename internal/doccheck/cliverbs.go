@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 
 	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
@@ -72,16 +73,8 @@ func checkCLIVerbs(contentDir string) bool {
 
 	var bad []string
 	for _, inv := range invocations {
-		if inv.args != nil || inv.err != nil {
-			err := inv.err
-			if err == nil {
-				_, err = clisurface.Parse("sparkwing", inv.args)
-			}
-			if err != nil {
-				bad = append(bad, fmt.Sprintf("%s:%d: `%s` -- %v", inv.file, inv.line, inv.raw, err))
-			}
-		} else if unknown := resolvePath(inv.tokens, valid, posArgs); unknown != "" {
-			bad = append(bad, fmt.Sprintf("%s:%d: `%s` -- no such command %q", inv.file, inv.line, inv.raw, unknown))
+		if problem := judgeInvocation(inv, valid, posArgs); problem != "" {
+			bad = append(bad, problem)
 		}
 	}
 
@@ -95,6 +88,23 @@ func checkCLIVerbs(contentDir string) bool {
 	}
 	fmt.Println("\nALL sparkwing INVOCATIONS RESOLVE")
 	return true
+}
+
+func judgeInvocation(inv cliVerb, valid, posArgs map[string]bool) string {
+	if inv.args != nil || inv.err != nil {
+		err := inv.err
+		if err == nil {
+			_, err = clisurface.Parse("sparkwing", inv.args)
+		}
+		if err != nil {
+			return fmt.Sprintf("%s:%d: `%s` -- %v", inv.file, inv.line, inv.raw, err)
+		}
+		return ""
+	}
+	if unknown := resolvePath(inv.tokens, valid, posArgs); unknown != "" {
+		return fmt.Sprintf("%s:%d: `%s` -- no such command %q", inv.file, inv.line, inv.raw, unknown)
+	}
+	return ""
 }
 
 func loadRegistry() (valid, posArgs map[string]bool) {
@@ -154,7 +164,7 @@ func extractInvocations(file, doc string) []cliVerb {
 		}
 		for _, m := range inlineCodeRE.FindAllStringSubmatch(line, -1) {
 			if inv, ok := parseInvocation(file, start+1, m[1]); ok {
-				inv.err = fragmentFlagError(m[1])
+				inv.err = fragmentFlagError(m[1], true)
 				out = append(out, inv)
 			}
 		}
@@ -163,21 +173,33 @@ func extractInvocations(file, doc string) []cliVerb {
 }
 
 // hack: --help skips required-flag checks, so fragments that omit required values still pass.
-func fragmentFlagError(command string) error {
+// hack: a markdown fragment is copied as written, so a stray positional fails
+// it; a Go source hint sits in prose, where a positional is only noise.
+func fragmentFlagError(command string, positional bool) error {
 	args, err := shellExampleArgs(command)
 	if err == nil {
+		args = slices.DeleteFunc(args, func(word string) bool {
+			return word == "..." || strings.HasPrefix(word, "[") && strings.HasSuffix(word, "]")
+		})
 		_, err = clisurface.Parse("sparkwing", append([]string{"--help"}, args...))
 	}
 	var usage *clisurface.UsageError
-	if errors.As(err, &usage) && (strings.HasPrefix(usage.Message, "unknown flag ") || strings.HasPrefix(usage.Message, "unknown short flag ") || strings.Contains(usage.Message, " is not accepted")) {
+	if errors.As(err, &usage) && (strings.HasPrefix(usage.Message, "unknown flag ") || strings.HasPrefix(usage.Message, "unknown short flag ") || strings.Contains(usage.Message, " is not accepted") || (positional && strings.HasPrefix(usage.Message, "unexpected positional argument"))) {
 		return err
 	}
 	return nil
 }
 
-func shellExampleArgs(line string) ([]string, error) {
+var envAssignmentRE = regexp.MustCompile(`^(?:[A-Za-z_][A-Za-z0-9_]*=(?:"[^"]*"|'[^']*'|[^\s"']*)[ \t]+)+`)
+
+func stripEnvAssignments(line string) string {
 	line = strings.TrimSpace(line)
 	line = strings.TrimSpace(strings.TrimPrefix(line, "$ "))
+	return envAssignmentRE.ReplaceAllString(line, "")
+}
+
+func shellExampleArgs(line string) ([]string, error) {
+	line = stripEnvAssignments(line)
 	var words []string
 	var word strings.Builder
 	var quote rune
@@ -257,10 +279,7 @@ var rootValueFlags = map[string]bool{"-C": true, "--profile": true, "-o": true, 
 var subcmdTokenRE = regexp.MustCompile(`^[a-z][a-z0-9-]*$`)
 
 func parseInvocation(file string, line int, s string) (cliVerb, bool) {
-	fields := strings.Fields(strings.TrimSpace(s))
-	if len(fields) > 0 && fields[0] == "$" {
-		fields = fields[1:]
-	}
+	fields := strings.Fields(stripEnvAssignments(s))
 	if len(fields) == 0 || fields[0] != "sparkwing" {
 		return cliVerb{}, false
 	}
