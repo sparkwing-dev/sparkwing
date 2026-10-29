@@ -2,6 +2,7 @@ package charts
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"maps"
@@ -349,7 +350,7 @@ func TestJobPolicyEvaluationRefusesAdditivePermissions(t *testing.T) {
 	for {
 		var policy networkingv1.NetworkPolicy
 		err := decoder.Decode(&policy)
-		if err == io.EOF {
+		if errors.Is(err, io.EOF) {
 			break
 		}
 		if err != nil {
