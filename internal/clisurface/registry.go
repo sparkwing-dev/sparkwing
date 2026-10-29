@@ -351,6 +351,7 @@ func Registry() []Command {
 			{Name: "profile", Argument: "NAME", Required: true},
 			{Name: "controller", Argument: "URL"},
 			{Name: "token-stdin"},
+			{Name: "default"},
 		}},
 		{Path: "sparkwing profiles show", Flags: []Flag{
 			{Name: "profile", Argument: "NAME", Required: true},
@@ -368,7 +369,7 @@ func Registry() []Command {
 		{Path: "sparkwing repos", Flags: []Flag{}},
 		{Path: "sparkwing repos add", Rules: []string{"--checkout is required; it must be a local path."}, Flags: []Flag{}},
 		{Path: "sparkwing repos info", Rules: []string{"--checkout is required; repository identity is distinct from local checkout."}, Flags: []Flag{}},
-		{Path: "sparkwing repos list", Flags: []Flag{
+		{Path: "sparkwing repos list", Rules: []string{"Inventory includes each checkout SDK kind (go or typescript) and its native SDK pin. TypeScript pins come from the npm lockfile when present. JSON uses sdk and pin; plain appends SDK kind after name, pin and primary path."}, Flags: []Flag{
 			{Name: "checkouts"},
 			{Name: "pipelines"},
 		}},

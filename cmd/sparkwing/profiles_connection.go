@@ -57,6 +57,7 @@ func addProfile(inv clisurface.Invocation, format string) error {
 		if profiles == nil {
 			profiles = make(map[string]userconfig.Profile)
 		}
+		p.Default = profiles[name].Default
 		profiles[name] = p.Profile
 		return nil
 	})
@@ -155,7 +156,11 @@ func normalizeControllerURL(raw string) (string, error) {
 		return "", &apierr.Error{Code: apierr.BadRequest, Message: "profiles: --controller must not contain credentials, query parameters or a fragment"}
 	}
 	if (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
-		return "", &apierr.Error{Code: apierr.BadRequest, Message: fmt.Sprintf("profiles: --controller %q must be an http or https URL; use --controller https://HOST", trimmed)}
+		value := "value"
+		if u.Scheme == "" && !strings.Contains(trimmed, "/") {
+			value = fmt.Sprintf("%q", trimmed)
+		}
+		return "", &apierr.Error{Code: apierr.BadRequest, Message: fmt.Sprintf("profiles: --controller %s must be an http or https URL; use --controller https://HOST", value)}
 	}
 	return trimmed, nil
 }

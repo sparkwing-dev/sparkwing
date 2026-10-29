@@ -19,6 +19,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/ndjson"
 	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 
+	"github.com/sparkwing-dev/sparkwing/internal/engineid"
 	"github.com/sparkwing-dev/sparkwing/internal/gotoolchain"
 	"github.com/sparkwing-dev/sparkwing/internal/repos"
 	"github.com/sparkwing-dev/sparkwing/pkg/color"
@@ -121,7 +122,7 @@ func runReposList(inv clisurface.Invocation) error {
 		return ndjson.Write(os.Stdout, fleetJSON(fleet, latest))
 	case "plain":
 		for _, r := range fleet {
-			fmt.Printf("%s\t%s\t%s\n", r.Name, orDashStr(r.Pin), orDashStr(r.Primary))
+			fmt.Printf("%s\t%s\t%s\t%s\n", r.Name, orDashStr(r.Pin), orDashStr(r.Primary), orDashStr(string(r.SDK)))
 		}
 		return nil
 	}
@@ -132,6 +133,7 @@ func runReposList(inv clisurface.Invocation) error {
 type fleetRepoJSON struct {
 	Name         string              `json:"name"`
 	Primary      string              `json:"primary,omitempty"`
+	SDK          engineid.SDKKind    `json:"sdk,omitempty"`
 	Pin          string              `json:"pin,omitempty"`
 	Replace      string              `json:"replace,omitempty"`
 	Latest       string              `json:"latest,omitempty"`
@@ -143,8 +145,9 @@ type fleetRepoJSON struct {
 }
 
 type fleetWorktreeJSON struct {
-	Path string `json:"path"`
-	Pin  string `json:"pin,omitempty"`
+	Path string           `json:"path"`
+	SDK  engineid.SDKKind `json:"sdk,omitempty"`
+	Pin  string           `json:"pin,omitempty"`
 }
 
 func fleetJSON(fleet []repos.Repo, latest string) []fleetRepoJSON {
@@ -153,6 +156,7 @@ func fleetJSON(fleet []repos.Repo, latest string) []fleetRepoJSON {
 		row := fleetRepoJSON{
 			Name:         r.Name,
 			Primary:      r.Primary,
+			SDK:          r.SDK,
 			Pin:          r.Pin,
 			Replace:      r.Replace,
 			Latest:       latest,
@@ -164,7 +168,7 @@ func fleetJSON(fleet []repos.Repo, latest string) []fleetRepoJSON {
 			row.LastRun = r.LastRun.Format(time.RFC3339)
 		}
 		for _, w := range r.DivergentWorktrees() {
-			row.Worktrees = append(row.Worktrees, fleetWorktreeJSON{Path: w.Path, Pin: w.Pin})
+			row.Worktrees = append(row.Worktrees, fleetWorktreeJSON{Path: w.Path, SDK: w.SDK, Pin: w.Pin})
 		}
 		out = append(out, row)
 	}
@@ -197,7 +201,7 @@ func printFleet(fleet []repos.Repo, latest string) {
 				last += " " + r.LastPipeline
 			}
 		}
-		fmt.Printf("  %-24s %-14s%s  last-run: %s\n", r.Name, pin, behind, last)
+		fmt.Printf("  %-24s %-10s %-14s%s  last-run: %s\n", r.Name, orDashStr(string(r.SDK)), pin, behind, last)
 		if r.Status == "runs-only" {
 			fmt.Printf("      %s\n", color.Dim("observed in runs; no local checkout registered"))
 		} else if r.Primary != "" {

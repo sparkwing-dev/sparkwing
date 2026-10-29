@@ -35,9 +35,18 @@ changes while revocation is in progress, removal fails and retains the changed
 connection. Runner credentials cannot be revoked by profile removal.
 
 Select a connection with `--profile NAME` on controller commands, such as
-`sparkwing runs list --profile prod`. Without a profile, observations use the
-local controller. No environment variable selects a default profile.
-`sparkwing run` executes locally and accepts no `--profile`.
+`sparkwing runs list --profile prod`. Save a default with
+`sparkwing profiles set --profile prod --default`. Commands with an optional
+`--profile` use that saved connection when the flag is omitted. An explicit
+`--profile NAME` wins, and `--profile=` selects the local controller for one
+command. Commands that require a profile still require the flag.
+
+Switch the default by setting `--default` on another profile. Clear it with
+`sparkwing profiles set --profile prod --default=false`. Removing the default
+profile also restores local selection. Profile list and show report `default`
+in JSON and pretty output. No environment variable chooses a default.
+`sparkwing run` and local helpers keep their local routing. Local schedule
+operations with `--all-repos` also stay local.
 
 ## Pinning a pipeline to a profile
 

@@ -319,7 +319,7 @@ func validateFlag(f Flag, value string) error {
 		}
 		return nil
 	}
-	if value == "" && !f.AllowEmpty && f.Name != "arg" && (f.CommaList || f.Argument != "VALUE" && f.Name != "tz") {
+	if value == "" && !f.AllowEmpty && !(f.Name == "profile" && !f.Required) && f.Name != "arg" && (f.CommaList || f.Argument != "VALUE" && f.Name != "tz") {
 		return fmt.Errorf("requires %s", f.Argument)
 	}
 	if len(f.Values) > 0 && !slices.Contains(f.Values, value) {

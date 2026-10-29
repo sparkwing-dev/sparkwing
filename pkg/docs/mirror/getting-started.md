@@ -156,13 +156,26 @@ For a build/test/deploy DAG instead of a single node, pass
 sparkwing pipeline new --pipeline release --template build-test-deploy
 ```
 
-The five shapes are structure only -- they run green in any repo, and
+The five Go shapes are structure only -- they run green in any repo, and
 you replace the echo bodies with real work. For how a real pipeline is
 written, read a finished one: `sparkwing examples` lists the registry
 (static-site deploys, containerized deploys to Kubernetes,
 migrate+deploy, CI-hygiene gates, and more), and `--example <example>
 --body` prints the source. Usually `sparkwing docs search --search "<task>"`
 gets you there in one step, since it ranks examples alongside the docs.
+
+For a TypeScript project, scaffold a minimal pipeline with:
+
+```bash
+sparkwing pipeline new --pipeline hello --template typescript
+sparkwing run hello
+```
+
+This creates `.sparkwing/package.json` with an exact `@sparkwing/sdk` pin,
+`index.ts`, `jobs/hello.ts` and `sparkwing.yaml`. It uses the same `--on`,
+`--hidden` and `--short` flags as the Go shapes. Repeat the command with another
+pipeline name to add a pipeline to the TypeScript entry. Sparkwing installs
+the SDK dependencies when the pipeline runs.
 
 Examples are for reading, not scaffolding: `--template` takes a shape,
 not an example name. See the
@@ -383,8 +396,10 @@ An existing profile is replaced only with `--force`. Removing a profile with
 `--keep-token` removes only the saved connection. Project configuration cannot
 supply connection profiles or credentials.
 
-Commands reach the connection only when they name it with `--profile`;
-without the flag they act on this machine's store.
+Use `--profile NAME` to select a connection, or save one with
+`sparkwing profiles set --profile prod --default`. Optional-profile commands
+use that default when the flag is omitted. With no saved default they use the
+local controller. `--profile=` selects local for one command.
 
 ```bash
 sparkwing profiles show --profile prod        # saved connection, with token redacted

@@ -20,6 +20,10 @@ unlock.
 
 ## [Unreleased]
 
+- **CLI:** `profiles set --profile NAME --default` switches the saved default for optional-profile controller commands. Explicit profiles override it, `--profile=` selects local for one command, and `--default=false` clears it. Profile list/show report the selection. Local runs, internal local clients and `schedules --all-repos` stay local.
+
+- **CLI:** `pipeline new --template typescript` scaffolds a minimal TypeScript SDK project and adds further pipelines to its entry. `repos list` includes SDK kind and TypeScript pins resolved from npm lockfiles in JSON, plain and pretty output.
+
 - **CLI:** Local runs accept required pipeline arguments before validation, and invalid public enum values list the allowed choices. Controller URL errors name malformed input and show a valid URL form. Connection failures point to profile inspection, URL repair and network checks. Undeclared child-run errors name `StartsChildren` and the TypeScript equivalent.
 
 - **CLI:** Misspelled command words suggest the nearest command. Plain and pretty `runs status` show run and job start, finish and duration times.

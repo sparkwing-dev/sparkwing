@@ -38,7 +38,7 @@ kubectl exec into a paused job's pod (cluster mode)
 | `--run ID` | Run ID or per-team run number. (required) |
 | `--job JOB` | Job within the selected run. (required) |
 | `--namespace NAME` | Kubernetes namespace to pass to kubectl exec, overriding the namespace recorded for the job's pod. |
-| `--profile NAME` | Controller connection profile from your config. Omit it to use the local controller. |
+| `--profile NAME` | Controller connection profile from your config. Optional profiles use the saved default, then local; --profile= selects local. |
 
 ## `sparkwing debug env`
 
@@ -54,7 +54,7 @@ Inspect public job, executor and pause diagnostics
 | `--help-all` | Include uncommon flags in command help. |
 | `--run ID` | Run ID or per-team run number. (required) |
 | `--job JOB` | Job within the selected run. (required) |
-| `--profile NAME` | Controller connection profile from your config. Omit it to use the local controller. |
+| `--profile NAME` | Controller connection profile from your config. Optional profiles use the saved default, then local; --profile= selects local. |
 
 ## `sparkwing debug resume`
 
@@ -70,4 +70,4 @@ Resume a paused job
 | `--help-all` | Include uncommon flags in command help. |
 | `--run ID` | Run ID or per-team run number. (required) |
 | `--job JOB` | Job within the selected run. (required) |
-| `--profile NAME` | Controller connection profile from your config. Omit it to use the local controller. |
+| `--profile NAME` | Controller connection profile from your config. Optional profiles use the saved default, then local; --profile= selects local. |

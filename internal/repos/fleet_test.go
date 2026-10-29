@@ -130,3 +130,30 @@ func TestDeriveFleet_FoldsRemoteSlugIntoCheckout(t *testing.T) {
 		t.Errorf("checkout row should carry the newest slug-named run: %+v", fleet[0])
 	}
 }
+
+func TestDeriveFleetIncludesSDKAndTypeScriptLockedPin(t *testing.T) {
+	goRepo, tsRepo := filepath.Join(t.TempDir(), "go"), filepath.Join(t.TempDir(), "ts")
+	writeSparkwingPin(t, goRepo, "v0.68.0")
+	dir := filepath.Join(tsRepo, ".sparkwing")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for name, body := range map[string]string{
+		"package.json":      `{"dependencies":{"@sparkwing/sdk":"^0.68.0"}}`,
+		"package-lock.json": `{"lockfileVersion":3,"packages":{"":{"dependencies":{"@sparkwing/sdk":"^0.68.0"}},"node_modules/@sparkwing/sdk":{"version":"0.68.1","integrity":"sha512-fixture"}}}`,
+	} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	fleet := DeriveFleet([]Candidate{{Path: goRepo}, {Path: tsRepo}}, nil, fakeGit(nil), "v0.68.2", nil)
+	for _, r := range fleet {
+		wantSDK, wantPin := "go", "v0.68.0"
+		if r.Primary == tsRepo {
+			wantSDK, wantPin = "typescript", "0.68.1"
+		}
+		if string(r.SDK) != wantSDK || r.Pin != wantPin {
+			t.Errorf("fleet row = %+v, want SDK %s pin %s", r, wantSDK, wantPin)
+		}
+	}
+}

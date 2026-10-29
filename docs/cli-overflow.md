@@ -36,7 +36,7 @@ Set your monthly Cloud allowance with --minutes, or remove your saved cap with -
 | `-C, --checkout PATH` | Resolve the project from this local checkout path. |
 | `-h, --help` | Show command help without executing. |
 | `--help-all` | Include uncommon flags in command help. |
-| `--profile NAME` | Controller connection profile from your config. Omit it to use the local controller. (required) |
+| `--profile NAME` | Controller connection profile from your config. Optional profiles use the saved default, then local; --profile= selects local. (required) |
 | `--minutes N` | Monthly Cloud overflow allowance in minutes; zero stops new Cloud overflow while local and registered-machine work stays eligible. Must be at least 0. |
 | `--uncapped` | Remove your saved monthly overflow cap; team standing and billing limits still apply. |
 
@@ -54,4 +54,4 @@ Report the authenticated account's monthly Cloud allowance, used seconds and UTC
 | `-C, --checkout PATH` | Resolve the project from this local checkout path. |
 | `-h, --help` | Show command help without executing. |
 | `--help-all` | Include uncommon flags in command help. |
-| `--profile NAME` | Controller connection profile from your config. Omit it to use the local controller. (required) |
+| `--profile NAME` | Controller connection profile from your config. Optional profiles use the saved default, then local; --profile= selects local. (required) |
