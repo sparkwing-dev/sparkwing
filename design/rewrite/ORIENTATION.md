@@ -41,7 +41,7 @@ credential model in `docs/auth.md`, and the decision log
 | Pools and reserved secrets | `controller_pools.go`: `claimSQL.poolSatisfies`; `claimSQL.poolTrust` | `claim_trust_test.go`: `TestReservedSecretPoolTakesOnlyVerifiedDefaultBranchWork`; `pool_launcher_test.go` |
 | Ranking and preference holds (decision 52) | `claim_query.go`: `rankingHold`, `firstPreferenceHold`, `placementCTEs` | `claim_ranking_test.go` |
 | Team holds (operator, fraud) | `credit_reversals.go`: `teamHoldTx`, `Tenant.HoldByOperator` | `hold_stop_test.go` |
-| Concurrency admission (decision 45) | `capacity_admission.go`: `Tenant.MayStart`, `admitWorkTx` | `admission_concurrent_test.go` |
+| Concurrency admission (decision 45) | `capacity_admission.go`: `Tenant.MayStart`, `admitWorkTx`; `capacity_owner.go`: `tryAdmissionLockTx` | `admission_concurrent_test.go`; `capacity_order_postgres_test.go`: `TestPostgresAdmissionLocksFollowTheirStoreSchema` |
 
 ### Secrets
 

@@ -20,6 +20,9 @@ unlock.
 
 ## [Unreleased]
 
+- **store:** PostgreSQL admission locks stay within their store schema
+  Independent stores sharing a database no longer defer each other's job releases.
+
 - **source:** Remote schedule and child-run intake preserve the shared temporary directory permissions, so an unprivileged controller no longer fails trying to chmod `/tmp`. Oversized remote configuration files remain refused without downloading them on newer Git versions, rather than being treated as absent.
 
 - **tokens:** `sparkwing tokens create` against the local controller answers `capability_unsupported` naming the socket and `sparkwing dashboard open`, instead of minting a token no route accepted (it carried the local user's identity, which only the local socket may present).

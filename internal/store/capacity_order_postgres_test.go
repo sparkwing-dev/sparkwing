@@ -59,7 +59,7 @@ func TestPostgresControllerAdmissionDefersContendedGroupWithoutWaitingOnRunLock(
 			switch held {
 			case "group":
 				name := fmt.Sprintf("capacity-admission:%d:%s:%s", len(f.tenant.Team()), f.tenant.Team(), "plan:global:plan")
-				_, err = blocked.ExecContext(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1,0))`, name)
+				_, err = blocked.ExecContext(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1, 'admission_work'::regclass::oid::bigint))`, name)
 			case "foreign_run":
 				_, err = blocked.ExecContext(ctx, `SELECT id FROM runs WHERE team=$1 AND id=$2 FOR NO KEY UPDATE`, f.tenant.Team(), competitor)
 
@@ -92,7 +92,7 @@ func TestPostgresConcurrencyMaintenanceDefersBusyAdmission(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer admission.Rollback()
-	if _, err := admission.ExecContext(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1,0))`, "admission:"+string(f.tenant.Team())); err != nil {
+	if _, err := admission.ExecContext(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1, 'admission_work'::regclass::oid::bigint))`, "admission:"+string(f.tenant.Team())); err != nil {
 		t.Fatal(err)
 	}
 	result, err := f.s.AsOperator().MaintainConcurrency(ctx)
@@ -113,4 +113,8 @@ func TestPostgresConcurrencyMaintenanceDefersBusyAdmission(t *testing.T) {
 	if err := f.s.DB().QueryRowContext(ctx, `SELECT COUNT(*) FROM concurrency_holders WHERE team=$1 AND run_id=$2`, f.tenant.Team(), f.ref.RunID).Scan(&count); err != nil || count != 0 {
 		t.Fatalf("partial cleanup: count=%d %v", count, err)
 	}
+}
+
+func TestPostgresAdmissionLocksFollowTheirStoreSchema(t *testing.T) {
+	store.AdmissionSchemaIsolation(t, func(t *testing.T) *store.Store { return storetest.OpenPostgres(t) })
 }

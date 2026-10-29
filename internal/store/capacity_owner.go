@@ -207,9 +207,14 @@ func capacityWorkLiveTx(ctx context.Context, tx *storeTx, team Team, binding run
 }
 
 func lockAdmissionTeamTx(ctx context.Context, tx *storeTx, team Team) error {
+	return tryAdmissionLockTx(ctx, tx, "admission:"+string(team))
+}
+
+// safety: PostgreSQL advisory locks span schemas; each independent store owns its admission table.
+func tryAdmissionLockTx(ctx context.Context, tx *storeTx, name string) error {
 	if tx.dialect == DialectPostgres {
 		var locked bool
-		if err := tx.QueryRowContext(ctx, `SELECT pg_try_advisory_xact_lock(hashtextextended(?,0))`, "admission:"+string(team)).Scan(&locked); err != nil {
+		if err := tx.QueryRowContext(ctx, `SELECT pg_try_advisory_xact_lock(hashtextextended(?, 'admission_work'::regclass::oid::bigint))`, name).Scan(&locked); err != nil {
 			return err
 		}
 		if !locked {
@@ -226,15 +231,7 @@ func prepareCapacityAcquisitionTx(ctx context.Context, tx *storeTx, team Team, k
 	for _, key := range keys {
 		name := fmt.Sprintf("capacity-admission:%d:%s:%s", len(team), team, key)
 		// safety: settlement already owns its run row, so it must never wait behind admission that needs that row.
-		if tx.dialect == DialectPostgres {
-			var locked bool
-			if err := tx.QueryRowContext(ctx, `SELECT pg_try_advisory_xact_lock(hashtextextended(?,0))`, name).Scan(&locked); err != nil {
-				return err
-			}
-			if !locked {
-				return errCapacityAdmissionBusy
-			}
-		} else if err := advisoryLockTx(ctx, tx, name); err != nil {
+		if err := tryAdmissionLockTx(ctx, tx, name); err != nil {
 			return err
 		}
 	}
