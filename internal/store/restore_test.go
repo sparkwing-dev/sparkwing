@@ -28,12 +28,18 @@ func TestRestoreHoldsSchedulesUntilAcknowledgement(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	// Rotation can survive a crash before prepare records its database half.
+	// A lost or replaced epoch file is refused, not taken as a restore: nothing is held or cancelled.
 	s.credentialEpoch = "rotated"
-	if err := s.EnsureCredentialEpoch(ctx); err != nil {
-		t.Fatal(err)
+	if err := s.EnsureCredentialEpoch(ctx); !errors.Is(err, ErrCredentialEpochChanged) {
+		t.Fatalf("changed epoch served: %v", err)
 	}
 	op := s.AsOperator()
+	if state, err := op.RestoreStatus(ctx); err != nil || state.Pending {
+		t.Fatalf("refused epoch held schedules: %+v %v", state, err)
+	}
+	if err := op.PrepareRestore(ctx, "rotated"); err != nil {
+		t.Fatal(err)
+	}
 	if ran, err := op.RunCronTick(ctx, func(context.Context) error {
 		t.Fatal("a held deployment ticked")
 		return nil

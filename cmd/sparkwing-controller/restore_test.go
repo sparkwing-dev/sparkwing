@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"errors"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -167,5 +168,41 @@ func TestRestoreUsesSeparatePersistentEpochDirectory(t *testing.T) {
 		if _, err := os.Stat(filepath.Join(dir, "credential-epoch")); !os.IsNotExist(err) {
 			t.Fatalf("epoch appeared outside its persistent directory %s: %v", dir, err)
 		}
+	}
+}
+
+func TestRestorePrepareRefusesALostEpochFileAndNamesTheWayOut(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("SPARKWING_HOME", home)
+	epoch, err := credentials.LoadOrCreateEpoch(home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(home, "state.db")
+	st, err := store.Open(path, store.WithCredentialEpoch(epoch))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.EnsureCredentialEpoch(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(filepath.Join(home, "credential-epoch")); err != nil {
+		t.Fatal(err)
+	}
+	var out, stderr bytes.Buffer
+	err = runRestore([]string{"prepare"}, &out, &stderr)
+	if !errors.Is(err, store.ErrCredentialEpochChanged) || !strings.Contains(err.Error(), filepath.Join(home, "credential-epoch")) || !strings.Contains(err.Error(), "--sign-out-everyone") {
+		t.Fatalf("lost epoch file was not refused with its remedy: %v", err)
+	}
+	st, err = store.Open(path, store.WithCredentialEpoch(epoch))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	if state, err := st.AsOperator().RestoreStatus(t.Context()); err != nil || state.Pending {
+		t.Fatalf("refused restore held schedules: %+v %v", state, err)
 	}
 }

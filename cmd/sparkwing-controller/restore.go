@@ -83,8 +83,11 @@ func runRestore(args []string, stdout, stderr io.Writer) error {
 		return err
 	}
 	defer st.Close()
-	if err := st.EnsureCredentialEpoch(ctx); err != nil {
-		return err
+	// safety: only a deliberate sign-out adopts an epoch the database was not written under.
+	if !signOutEveryone {
+		if err := st.EnsureCredentialEpoch(ctx); err != nil {
+			return epochMismatch(err, epochDir)
+		}
 	}
 	op := st.AsOperator()
 	switch verb {

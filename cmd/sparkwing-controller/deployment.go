@@ -168,7 +168,7 @@ func openDeclaredStore(ctx context.Context, stateDB string) (*store.Store, error
 		return nil, errors.Join(err, st.Close())
 	}
 	if err := st.EnsureCredentialEpoch(ctx); err != nil {
-		return nil, errors.Join(err, st.Close())
+		return nil, errors.Join(epochMismatch(err, epochDir), st.Close())
 	}
 	return st, nil
 }

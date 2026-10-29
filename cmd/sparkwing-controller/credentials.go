@@ -10,6 +10,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/credentials"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
+	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
 
 const (
@@ -32,6 +33,16 @@ const (
 	credStripeAPIKey           = "stripe-api-key"
 	credStripeWebhookSecret    = "stripe-webhook-secret"
 )
+
+// epochMismatch names the file and both ways out when the store refuses an
+// epoch it was not written under: put the original file back, or sign
+// everyone out on purpose.
+func epochMismatch(err error, dir string) error {
+	if !errors.Is(err, store.ErrCredentialEpochChanged) {
+		return err
+	}
+	return fmt.Errorf("%w: %s is missing, moved or replaced (a missing file is created afresh). Copy the deployment's original credential-epoch file into %s and start again, or run `sparkwing-controller restore prepare --sign-out-everyone` to end every session, API token and runner credential on purpose", err, filepath.Join(dir, "credential-epoch"), dir)
+}
 
 func credentialEpochDirectory(explicit, credentialsDir, home string) string {
 	if explicit != "" {

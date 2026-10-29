@@ -618,7 +618,7 @@ func run(args []string) error {
 		defer func() { _ = closeObjects() }()
 	}
 	if serr != nil {
-		return fmt.Errorf("open state db: %w", serr)
+		return fmt.Errorf("open state db: %w", epochMismatch(serr, epochDir))
 	}
 	defer func() { _ = st.Close() }()
 
