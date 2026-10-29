@@ -19,3 +19,133 @@ description = "SHA-256 of the empty artifact blob"
 condition = "AND"
 paths = ['''(^|/)internal/orchestrator/direct_artifact\.go$''']
 regexes = ['''^artifacts/blobs/e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855$''']
+
+[[rules.allowlists]]
+description = "Constructed compiler-error masking fixture"
+condition = "AND"
+paths = ['''(^|/)internal/controller/cloud_plan_compile_failure_test\.go$''']
+regexes = [
+  '''^\Qplan-compile-secret-5c1e\E$''',
+]
+
+[[rules.allowlists]]
+description = "Base64 of private-credential in a redaction fixture"
+condition = "AND"
+paths = ['''(^|/)internal/nodehost/routes_children_test\.go$''']
+regexes = [
+  '''^\QcHJpdmF0ZS1jcmVkZW50aWFs\E$''',
+]
+
+[[rules.allowlists]]
+description = "Sequential hexadecimal account id in a revocation fixture"
+condition = "AND"
+paths = ['''(^|/)internal/controller/audit_revocation_test\.go$''']
+regexes = [
+  '''^\Q0123456789abcdef\E$''',
+]
+
+[[rules.allowlists]]
+description = "Adjacent prose mistaken for a token assignment"
+condition = "AND"
+paths = ['''(^|/)design/rewrite/w3-service-store-port-progress\.md$''']
+regexes = [
+  '''^\Qforwarding-502\E$''',
+]
+
+[[rules.allowlists]]
+description = "Illustrative profile tokens with sequential ids"
+condition = "AND"
+paths = ['''(^|/)cmd/sparkwing/profiles_connection_test\.go$''']
+regexes = [
+  '''^\Qswk_12345678_long_private\E$''',
+  '''^\Qswu_12345678_long_private\E$''',
+]
+
+[[rules.allowlists]]
+description = "Constructed overlapping and chunk-boundary masking fixtures"
+condition = "AND"
+paths = ['''(^|/)internal/secrets/child_values_internal_test\.go$''']
+regexes = [
+  '''^\Qfixture-secret-7c41e9\E$''',
+  '''^\Qfixture-secret-7c41e9fixture\E$''',
+  '''^\Qfixture-secret-7c41e9a\E$''',
+  '''^\Qchunk-boundary-secret-91d2\E$''',
+]
+
+[[rules.allowlists]]
+description = "Constructed log-forwarding masking fixture"
+condition = "AND"
+paths = ['''(^|/)internal/runners/local/forward_test\.go$''']
+regexes = [
+  '''^\Qfixture-private-7c41e9\E$''',
+]
+
+[[rules.allowlists]]
+description = "Constructed child-process masking fixture"
+condition = "AND"
+paths = ['''(^|/)internal/secrets/child_values_test\.go$''']
+regexes = [
+  '''^\Qfixture-secret-7c41e9\E$''',
+]
+
+[[rules.allowlists]]
+description = "Historical webhook signing fixture with a constructed hexadecimal value"
+condition = "AND"
+paths = ['''(^|/)pkg/controller/webhook_github_bindings_test\.go$''']
+regexes = [
+  '''^\Q3b9d0a1f4c7e2b5a8d6f0c3e9b2a5d8f\E$''',
+]
+
+[[rules.allowlists]]
+description = "Argon2 function alias, not a credential"
+condition = "AND"
+paths = ['''(^|/)pkg/store/argon2\.go$''']
+regexes = [
+  '''^\Qargon2.IDKey\E$''',
+]
+
+[[rules.allowlists]]
+description = "Historical artifact path validation fixture"
+condition = "AND"
+paths = ['''(^|/)pkg/storage/segment_artifact_test\.go$''']
+regexes = [
+  '''^\Qartifacts/blobs/0f1e\E$''',
+]
+
+[[rules]]
+id = "private-key"
+
+[[rules.allowlists]]
+description = "PEM armor around random benchmark bytes, not key material"
+condition = "AND"
+paths = ['''(^|/)internal/secrets/registry_benchmark_test\.go$''']
+regexes = [
+  '''^\Q-----BEGIN PRIVATE KEY-----\n" + base64.StdEncoding.EncodeToString(data) + "\n-----END PRIVATE KEY-----\E$''',
+]
+
+[[rules.allowlists]]
+description = "PEM armor around a repeated fragment for stream masking"
+condition = "AND"
+paths = ['''(^|/)internal/secrets/stream_test\.go$''']
+regexes = [
+  '''^\Q-----BEGIN PRIVATE KEY-----\n" + strings.Repeat("MIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQDb5dJ7j\n", 32) + "-----END PRIVATE KEY-----\E$''',
+]
+
+[[rules.allowlists]]
+description = "Public PEM fixture strings for source redaction"
+condition = "AND"
+paths = ['''(^|/)cmd/sparkwing/burst_source_test\.go$''']
+regexes = [
+  '''^\Q-----BEGIN PRIVATE KEY-----\npublic fixture\n-----END PRIVATE KEY-----\n", "-----BEGIN PRIVATE KEY-----\E$''',
+]
+
+[[rules]]
+id = "curl-auth-header"
+
+[[rules.allowlists]]
+description = "Intentionally invalid token testing trigger authentication refusal"
+condition = "AND"
+paths = ['''(^|/)bin/k8s-e2e\.sh$''']
+regexes = [
+  '''^\Qswu_k8se2einvalidtokenk8se2einvalidtoken\E$''',
+]

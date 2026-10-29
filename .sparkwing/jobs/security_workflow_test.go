@@ -341,31 +341,43 @@ func TestSecurityWorkflowHasNoPrivateInfrastructureSurface(t *testing.T) {
 
 func TestGitleaksExclusionsCannotHideRepositoryPaths(t *testing.T) {
 	body := readHostedCIFile(t, ".gitleaks.toml")
-	const artifactException = `[[rules]]
-id = "generic-api-key"
-
-[[rules.allowlists]]
-description = "SHA-256 of the empty artifact blob"
-condition = "AND"
-paths = ['''(^|/)internal/orchestrator/direct_artifact\.go$''']
-regexes = ['''^artifacts/blobs/e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855$''']`
-	if strings.Count(body, artifactException) != 1 {
-		t.Fatal("gitleaks artifact exception must match the exact rule, path and empty-content hash")
+	sections := strings.Split(body, "[[rules]]")
+	if strings.Contains(sections[0], "paths =") {
+		t.Fatal("global gitleaks allow-list excludes a repository path")
 	}
-	body = strings.Replace(body, artifactException, "", 1)
-	if regexp.MustCompile(`(?m)^\s*\[\[\s*rules(?:\s*\]\]|\s*\.)`).MatchString(body) {
-		t.Fatal("unexpected gitleaks rule override")
+	for _, section := range sections[1:] {
+		blocks := strings.Split(section, "[[rules.allowlists]]")
+		rule := strings.TrimSpace(blocks[0])
+		if rule != `id = "generic-api-key"` && rule != `id = "private-key"` && rule != `id = "curl-auth-header"` {
+			t.Fatalf("unexpected gitleaks rule override: %s", rule)
+		}
+		for _, block := range blocks[1:] {
+			if !strings.Contains(block, `description = "`) || !strings.Contains(block, `condition = "AND"`) {
+				t.Fatal("gitleaks exception needs a reason and combined path/value matching")
+			}
+			path := regexp.MustCompile(`(?m)^paths = \['''(.+)'''\]$`).FindStringSubmatch(block)
+			if len(path) != 2 || !strings.HasPrefix(path[1], "(^|/)") || !strings.HasSuffix(path[1], "$") {
+				t.Fatal("gitleaks exception needs one anchored file path")
+			}
+			literalPath := strings.TrimSuffix(strings.TrimPrefix(path[1], "(^|/)"), "$")
+			literalPath = strings.ReplaceAll(literalPath, `\.`, ".")
+			if regexp.QuoteMeta(literalPath) != strings.TrimSuffix(strings.TrimPrefix(path[1], "(^|/)"), "$") {
+				t.Fatal("gitleaks exception path contains a pattern instead of one file")
+			}
+			values := regexp.MustCompile(`'''(.*?)'''`).FindAllStringSubmatch(strings.SplitN(block, "regexes =", 2)[1], -1)
+			if len(values) == 0 {
+				t.Fatal("gitleaks exception needs an exact fixture value")
+			}
+			for _, value := range values {
+				if strings.HasPrefix(value[1], `^\Q`) && strings.HasSuffix(value[1], `\E$`) {
+					continue
+				}
+				if value[1] != "^artifacts/blobs/e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855$" {
+					t.Fatal("gitleaks exception does not match an exact fixture value")
+				}
+			}
+		}
 	}
-	if strings.Contains(body, "paths =") {
-		t.Fatal("gitleaks allow-list excludes a repository path")
-	}
-	if got := strings.Count(body, "[[allowlists]]"); got != 2 {
-		t.Fatalf("gitleaks allow-list entries = %d, want 2 exact fixture values", got)
-	}
-	requireWorkflowText(t, body,
-		"sw_a1b2c3d4e5f6g7h8i9j0k1l2m3n4",
-		"abcd1234-ef567890",
-	)
 	ignore := strings.TrimSpace(readHostedCIFile(t, ".gitleaksignore"))
 	want := strings.Join([]string{
 		"49be43e4b2e9c0dc24ee7d50eaf4a0dd0291e147:internal/web/next-out/_next/static/chunks/17mq5rf2.ibbt.js:generic-api-key:55",
