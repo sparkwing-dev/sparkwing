@@ -35,3 +35,38 @@ func TestRunObservationsStopPollersOnARefusedRead(t *testing.T) {
 		}
 	}
 }
+
+func TestRunListStopsPollersOnARefusalInAnyRead(t *testing.T) {
+	refused := &apierr.Error{Code: apierr.Forbidden, Message: "credential revoked"}
+	failedRun := listedRun("r1", 7)
+	failedRun.Status = "failed"
+	for name, tc := range map[string]struct {
+		args   []string
+		reader listingReader
+	}{
+		"second page of --by-pipeline": {
+			args: []string{"--by-pipeline", "-o", "json"},
+			reader: listingReader{list: func(_ context.Context, q controllerwire.RunQuery) (controllerwire.RunPage, error) {
+				if q.Cursor == "" {
+					return controllerwire.RunPage{Runs: []controllerwire.RunDetail{listedRun("r2", 8)}, NextCursor: "next", Truncated: true}, nil
+				}
+				return controllerwire.RunPage{}, refused
+			}},
+		},
+		"steps of --group-by step": {
+			args: []string{"--status", "failed", "--group-by", "step", "-o", "json"},
+			reader: listingReader{
+				list: func(context.Context, controllerwire.RunQuery) (controllerwire.RunPage, error) {
+					return controllerwire.RunPage{Runs: []controllerwire.RunDetail{failedRun}}, nil
+				},
+				steps: func(context.Context, string) (controllerwire.RunSteps, error) { return controllerwire.RunSteps{}, refused },
+			},
+		},
+	} {
+		var out bytes.Buffer
+		err := observeRunList(t.Context(), listingInvocation(t, tc.args...), tc.reader, &out, &out, nil)
+		if got := exitCodeFor(err); got != exitRefused {
+			t.Errorf("%s: exit %d (%v), want %d", name, got, err, exitRefused)
+		}
+	}
+}

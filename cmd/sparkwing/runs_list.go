@@ -114,13 +114,14 @@ func runRunsList(ctx context.Context, inv clisurface.Invocation) error {
 	}
 	reader, closeTransport, err := resolveRunReader(ctx, inv.Value("profile"))
 	if err != nil {
-		return err
+		return observationError(err)
 	}
 	defer closeTransport()
 	return observeRunList(ctx, inv, reader, os.Stdout, os.Stderr, waitStatusPoll)
 }
 
-func observeRunList(ctx context.Context, inv clisurface.Invocation, reader controllerwire.RunReader, out, diagnostics io.Writer, wait func(context.Context, time.Duration) error) error {
+func observeRunList(ctx context.Context, inv clisurface.Invocation, reader controllerwire.RunReader, out, diagnostics io.Writer, wait func(context.Context, time.Duration) error) (err error) {
+	defer func() { err = observationError(err) }()
 	o, err := parseRunList(inv)
 	if err != nil {
 		return err
@@ -143,7 +144,7 @@ func observeRunList(ctx context.Context, inv clisurface.Invocation, reader contr
 	emitted := map[string]bool{}
 	for {
 		if err := wait(ctx, 2*time.Second); err != nil {
-			return observationError(err)
+			return err
 		}
 		query := o.query
 		query.Cursor = ""
@@ -171,11 +172,11 @@ func observeRunList(ctx context.Context, inv clisurface.Invocation, reader contr
 			return renderRunList(ctx, reader, out, diagnostics, page, o)
 		})
 		if err != nil {
-			return observationError(err)
+			return err
 		}
 		if len(grouped) > 0 {
 			if err := renderRunList(ctx, reader, out, diagnostics, controllerwire.RunPage{Runs: grouped}, o); err != nil {
-				return observationError(err)
+				return err
 			}
 		}
 	}
@@ -191,13 +192,13 @@ func firstRunPage(ctx context.Context, reader controllerwire.RunReader, o runLis
 		page, err := reader.ListRuns(ctx, o.query)
 		if err != nil {
 			if o.wait || o.follow {
-				return page, observationError(err)
+				return page, err
 			}
 			return page, err
 		}
 		if err := validateRunPage(page, o.query); err != nil {
 			if o.wait || o.follow {
-				return page, observationError(err)
+				return page, err
 			}
 			return page, err
 		}
@@ -205,7 +206,7 @@ func firstRunPage(ctx context.Context, reader controllerwire.RunReader, o runLis
 			return page, nil
 		}
 		if err := wait(ctx, 2*time.Second); err != nil {
-			return page, observationError(fmt.Errorf("waiting for a matching run: %w", err))
+			return page, fmt.Errorf("waiting for a matching run: %w", err)
 		}
 	}
 }
