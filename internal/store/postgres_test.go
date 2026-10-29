@@ -2,12 +2,10 @@ package store_test
 
 import (
 	"context"
-
-	"github.com/sparkwing-dev/sparkwing/internal/runstate"
-
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/internal/storetest"
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"

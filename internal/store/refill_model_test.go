@@ -326,8 +326,10 @@ func (w *refillWorld) checkout(m *modelTeam, r *modelRefill) (string, error) {
 		}
 		w.outcomes[r.id] = outcome
 		pi := "pi_" + r.id
-		e := capability.PaymentEvent{EventID: "evt_" + pi, PaymentID: pi, ObjectID: pi, Currency: "usd", AmountMinor: r.amount, Mode: capability.PaymentTest,
-			Kind: capability.PaymentCardPaid, CustomerID: r.customer, ChargeID: "ch_" + r.id, Status: "succeeded", Created: w.now.Unix(), RefillID: r.id}
+		e := capability.PaymentEvent{
+			EventID: "evt_" + pi, PaymentID: pi, ObjectID: pi, Currency: "usd", AmountMinor: r.amount, Mode: capability.PaymentTest,
+			Kind: capability.PaymentCardPaid, CustomerID: r.customer, ChargeID: "ch_" + r.id, Status: "succeeded", Created: w.now.Unix(), RefillID: r.id,
+		}
 		if outcome == "" {
 			r.captured, r.capturedAt = true, *w.now
 		} else {

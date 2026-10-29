@@ -24,6 +24,7 @@ type sizingManager struct {
 func (s *sizingManager) ListSizing(_ context.Context, q controllerwire.SizingQuery) (controllerwire.SizingPage, error) {
 	return s.list(q)
 }
+
 func (s *sizingManager) ResetSizing(_ context.Context, input controllerwire.SizingReset) (controllerwire.SizingResetSummary, error) {
 	s.reset = input
 	return s.summary, s.err

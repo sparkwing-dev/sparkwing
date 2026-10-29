@@ -3,6 +3,7 @@ package engine
 import (
 	"bytes"
 	"context"
+	"crypto/ed25519"
 	"debug/buildinfo"
 	"fmt"
 	"io"
@@ -10,8 +11,6 @@ import (
 	"net/url"
 	"runtime/debug"
 	"strings"
-
-	"crypto/ed25519"
 
 	"github.com/sparkwing-dev/sparkwing/internal/releaseasset"
 )

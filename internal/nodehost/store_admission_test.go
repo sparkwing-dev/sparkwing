@@ -19,10 +19,12 @@ func (s *capacityProbe) MayStart(ctx context.Context, binding runstate.CapacityB
 	s.bindings = append(s.bindings, binding)
 	return s.admit(ctx)
 }
+
 func (s *capacityProbe) RelinquishStart(context.Context, runstate.CapacityBinding, runstate.Actor) error {
 	s.relinquished++
 	return nil
 }
+
 func capacityFixture(t *testing.T) (StartGate, *capacityProbe, AcceptedRun, runstate.NodeRow) {
 	t.Helper()
 	probe := &capacityProbe{admit: func(context.Context) (runstate.AcquireSlotResponse, error) {
@@ -33,6 +35,7 @@ func capacityFixture(t *testing.T) (StartGate, *capacityProbe, AcceptedRun, runs
 	row.Generation = 4
 	return ComposeStartGate(probe, nil, false), probe, accepted, row
 }
+
 func TestStartGateRequestsPermitForGroupFreeWork(t *testing.T) {
 	gate, probe, accepted, row := capacityFixture(t)
 	ran := false
@@ -45,6 +48,7 @@ func TestStartGateRequestsPermitForGroupFreeWork(t *testing.T) {
 		t.Fatalf("binding=%+v", probe.bindings[0])
 	}
 }
+
 func TestStartDecisionsAndPolling(t *testing.T) {
 	for _, kind := range []runstate.AcquireKind{runstate.AcquireQueued, runstate.AcquireSkipped, runstate.AcquireFailed} {
 		t.Run(string(kind), func(t *testing.T) {
@@ -73,6 +77,7 @@ func TestStartDecisionsAndPolling(t *testing.T) {
 		})
 	}
 }
+
 func TestStartRefusalDoesNotSettleTwice(t *testing.T) {
 	input, state, host, _ := claimedNodeFixture(t)
 	for _, kind := range []runstate.AcquireKind{runstate.AcquireSkipped, runstate.AcquireFailed} {
@@ -87,6 +92,7 @@ func TestStartRefusalDoesNotSettleTwice(t *testing.T) {
 		}
 	}
 }
+
 func TestStartBoundaryErrorsStayErrors(t *testing.T) {
 	gate, probe, accepted, row := capacityFixture(t)
 	denied := errors.New("award fence refused")

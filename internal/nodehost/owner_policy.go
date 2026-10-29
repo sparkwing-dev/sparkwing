@@ -22,7 +22,6 @@ func (h *OwnerEvaluator) approvalSkipIf(ctx context.Context, input EvaluationInp
 		return skipEvaluation{}, h.policyError(ctx, err)
 	}
 	evaluator := predicateEvaluator{code: &h.sdkCode, childContext: h.deps.ChildContext, process: func(ctx context.Context, evaluate func(*executorSession, NodeInput) error) error {
-
 		return h.evaluateProcess(ctx, input, spec, evaluate)
 	}}
 	result, err := evaluator.skipIf(ctx, job)

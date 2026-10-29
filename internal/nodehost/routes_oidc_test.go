@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 )
 
@@ -32,6 +31,7 @@ func TestOIDCTokenIsMaskedBeforeTheNodeGetsIt(t *testing.T) {
 		t.Fatal("token answered before registration")
 	}
 }
+
 func TestOIDCTokenRefusals(t *testing.T) {
 	for _, tc := range []struct {
 		name, body string

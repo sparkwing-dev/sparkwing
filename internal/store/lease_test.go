@@ -2,7 +2,6 @@ package store_test
 
 import (
 	"context"
-
 	"testing"
 	"time"
 

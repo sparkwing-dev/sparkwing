@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"io"
 	"strings"
 	"text/tabwriter"
@@ -12,6 +11,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/ndjson"
+	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 )
 
 type annotationEntry struct {

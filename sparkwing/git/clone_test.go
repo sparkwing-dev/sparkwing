@@ -89,7 +89,7 @@ func TestCloneAndFetchUseOriginDirectly(t *testing.T) {
 		t.Fatal(err)
 	}
 	marker := filepath.Join(dest, "keep")
-	if err := os.WriteFile(marker, []byte("retained"), 0600); err != nil {
+	if err := os.WriteFile(marker, []byte("retained"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	if err := Clone(t.Context(), source, dest); err == nil {

@@ -145,8 +145,10 @@ func reapNodeUnitTx(ctx context.Context, tx *storeTx, target expiredUnit, actor 
 		to = runstate.NodeCancelled
 		previous := tx.cancelingTeam
 		tx.cancelingTeam = target.team
-		_, err = transitionNodeStateTx(ctx, tx, target.team, nodeTransition{Ref: target.ref, To: to, Actor: runstate.Actor{Kind: runstate.ActorOperator},
-			Cause: causeCancel, Extra: transitionExtra{Result: &runstate.NodeResult{Outcome: to, Reason: stop}}})
+		_, err = transitionNodeStateTx(ctx, tx, target.team, nodeTransition{
+			Ref: target.ref, To: to, Actor: runstate.Actor{Kind: runstate.ActorOperator},
+			Cause: causeCancel, Extra: transitionExtra{Result: &runstate.NodeResult{Outcome: to, Reason: stop}},
+		})
 		tx.cancelingTeam = previous
 	} else {
 		_, err = transitionNodeTx(ctx, tx, target.team, nodeTransition{Ref: target.ref, To: to, Actor: actor, Cause: runstate.CauseLeaseLapse})

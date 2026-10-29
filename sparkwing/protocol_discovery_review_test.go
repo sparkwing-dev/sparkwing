@@ -124,7 +124,6 @@ func TestProtocolDescribeReportsDiscoveryFailures(t *testing.T) {
 			isolateProtocolDiscoveryRegistry(t)
 			Register[NoInputs]("broken", func() Pipeline[NoInputs] {
 				return protocolDiscoveryPipeline[NoInputs]{declare: func(p *Plan, _ NoInputs) error {
-
 					if kind == "panic-error" {
 						panic(cause)
 					}

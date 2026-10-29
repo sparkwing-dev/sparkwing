@@ -2,7 +2,6 @@ package main
 
 import (
 	"encoding/json"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"reflect"
 	"slices"
 	"strings"
@@ -10,6 +9,7 @@ import (
 	"time"
 
 	wire "github.com/sparkwing-dev/sparkwing/internal/controllerwire"
+	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 )
 

@@ -61,8 +61,10 @@ func (s *Server) handleQueueStateView(w http.ResponseWriter, r *http.Request, a 
 			// socket that went quiet, so stopping this process by hand is the one recovery that works.
 			apierr.NoteResponseError(w, err)
 			pid := strconv.Itoa(os.Getpid())
-			return apierr.WriteHTTP(w, &apierr.Error{Code: apierr.Unavailable, Message: "The local admission daemon did not answer.",
-				Hint: "Stop the sparkwing process " + pid + " by hand (for example `kill " + pid + "`), then run `sparkwing dashboard start`."})
+			return apierr.WriteHTTP(w, &apierr.Error{
+				Code: apierr.Unavailable, Message: "The local admission daemon did not answer.",
+				Hint: "Stop the sparkwing process " + pid + " by hand (for example `kill " + pid + "`), then run `sparkwing dashboard start`.",
+			})
 		}
 	}
 	now := time.Now()

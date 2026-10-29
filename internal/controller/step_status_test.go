@@ -2,11 +2,11 @@ package controller
 
 import (
 	"encoding/json"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"reflect"
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
+	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 )
 
 func TestPersistedStepResultsReachTheStepsResponse(t *testing.T) {

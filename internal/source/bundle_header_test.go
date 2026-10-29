@@ -16,7 +16,7 @@ func TestBundlePrerequisitesAcceptBothGitObjectFormats(t *testing.T) {
 			sha := strings.Repeat("a", format.length)
 			path := filepath.Join(t.TempDir(), "source.bundle")
 			header := "# " + format.version + " git bundle\n" + format.capability + "-" + sha + " prerequisite\n\n"
-			if err := os.WriteFile(path, []byte(header), 0600); err != nil {
+			if err := os.WriteFile(path, []byte(header), 0o600); err != nil {
 				t.Fatal(err)
 			}
 			got, err := bundlePrerequisites(path)

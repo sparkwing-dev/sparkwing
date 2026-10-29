@@ -51,8 +51,9 @@ func TestClaimedNodeLifecycle(t *testing.T) {
 					t.Fatal(err)
 				}
 				acquired, executed, joined := false, false, false
-				host := ClaimedNodeHost{Admission: ComposeStartGate(s, nil, false),
-					Store: s, Lease: lease.Keeper{Interval: 10 * time.Second, Lease: time.Minute}, Masker: testMasker("private"),
+				host := ClaimedNodeHost{
+					Admission: ComposeStartGate(s, nil, false),
+					Store:     s, Lease: lease.Keeper{Interval: 10 * time.Second, Lease: time.Minute}, Masker: testMasker("private"),
 					Acquire: func(_ context.Context, projected source.Spec, _ source.Options) (*source.Entry, error) {
 						acquired = true
 						if s.beats.Load() != 1 || projected.SHA != request.Request.Git.SHA || projected.Engine == nil || *projected.Engine != identity {

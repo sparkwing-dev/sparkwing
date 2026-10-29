@@ -20,16 +20,20 @@ func (operations) Arguments(any) []nodeproto.ArgumentDescription { return nil }
 func (operations) Describe(context.Context) (nodeproto.DescribeDoc, error) {
 	return nodeproto.DescribeDoc{Pipelines: []nodeproto.PipelineDescription{{Name: "p", Args: []nodeproto.ArgumentDescription{}}}}, nil
 }
+
 func (operations) Plan(context.Context, string, map[string]string, nodeproto.RunContext) (any, nodeproto.PlanDoc, error) {
 	return struct{}{}, document(), nil
 }
+
 func (operations) RunStep(context.Context, any, nodeproto.Request) (nodeproto.RunResult, error) {
 	panic("approval cannot execute a step")
 }
+
 func (operations) Eval(ctx context.Context, _ any, _ nodeproto.Request) (nodeproto.EvalResult, error) {
 	value, err := sdkserve.ServicesFrom(ctx).Latest(ctx, "upstream", "artifact", 0)
 	return nodeproto.EvalResult{Value: value}, err
 }
+
 func document() nodeproto.PlanDoc {
 	return nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{
 		{ID: "build", Steps: []nodeproto.StepSpec{{ID: "run"}}},

@@ -11,8 +11,9 @@ import (
 	"time"
 	"unsafe"
 
-	"github.com/sparkwing-dev/sparkwing/internal/localhostwire"
 	"golang.org/x/sys/windows"
+
+	"github.com/sparkwing-dev/sparkwing/internal/localhostwire"
 )
 
 func TestWindowsLocalTransportCarriesClientSID(t *testing.T) {

@@ -236,7 +236,7 @@ func bindsPaymentMode(text string, money []string) bool {
 	return paymentModeBound(text, nil, money)
 }
 
-func paymentModeBound(sql string, parents []string, money []string) bool {
+func paymentModeBound(sql string, parents, money []string) bool {
 	parts := splitSubqueries(sql)
 	tokens := scopeTokens(parts.outer)
 	for _, branch := range scopeParts(tokens, "union") {
@@ -256,7 +256,7 @@ func paymentModeBound(sql string, parents []string, money []string) bool {
 	return true
 }
 
-func paymentModeWritten(tokens []string, money []string) bool {
+func paymentModeWritten(tokens, money []string) bool {
 	if table, columns, tail := scopeInsert(tokens); table != "" {
 		named := slices.ContainsFunc(columns, func(column []string) bool { return len(column) == 1 && column[0] == "payment_mode" })
 		return named && (len(tail) == 0 || tail[0] != "select" || scopeRelationsBound(tail, nil, "payment_mode", money))

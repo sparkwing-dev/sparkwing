@@ -11,8 +11,12 @@ func TestRenewalBoundaries(t *testing.T) {
 		every, ttl time.Duration
 		valid      bool
 	}{
-		{time.Second, 3 * time.Second, true}, {time.Second, 2 * time.Second, false},
-		{time.Second, 2*time.Second + 1, true}, {0, time.Minute, false}, {-1, time.Minute, false}, {1, 0, false},
+		{time.Second, 3 * time.Second, true},
+		{time.Second, 2 * time.Second, false},
+		{time.Second, 2*time.Second + 1, true},
+		{0, time.Minute, false},
+		{-1, time.Minute, false},
+		{1, 0, false},
 		{time.Duration(math.MaxInt64), time.Duration(math.MaxInt64), false},
 		{time.Duration(math.MaxInt64 / 3), time.Duration(math.MaxInt64), true},
 	} {

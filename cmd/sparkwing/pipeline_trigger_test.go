@@ -2,14 +2,15 @@ package main
 
 import (
 	"bytes"
-	"github.com/sparkwing-dev/sparkwing/internal/fssecure"
-	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/sparkwing-dev/sparkwing/internal/fssecure"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 )
 
 const triggerTestOrigin = "https://github.com/acme/sample-app.git"

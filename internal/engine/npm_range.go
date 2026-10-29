@@ -52,6 +52,7 @@ func parseNpmBound(raw string) (npmBound, bool) {
 	bound.version = fmt.Sprintf("v%d.%d.%d%s", bound.major, bound.minor, bound.patch, suffix)
 	return bound, semver.IsValid(bound.version)
 }
+
 func (b npmBound) upper(part int) string {
 	switch part {
 	case 1:
@@ -62,6 +63,7 @@ func (b npmBound) upper(part int) string {
 		return fmt.Sprintf("v%d.%d.%d", b.major, b.minor, b.patch+1)
 	}
 }
+
 func npmSatisfies(spec, version string) bool {
 	actual := "v" + version
 	if !releaseVersion(actual) {
@@ -74,6 +76,7 @@ func npmSatisfies(spec, version string) bool {
 	}
 	return false
 }
+
 func npmAlternative(spec, actual string) bool {
 	if spec == "latest" {
 		return semver.Prerelease(actual) == ""
@@ -123,9 +126,11 @@ func npmAlternative(spec, actual string) bool {
 	}
 	return prereleaseAllowed
 }
+
 func samePrereleaseBase(a, b string) bool {
 	return semver.Prerelease(b) != "" && strings.SplitN(a, "-", 2)[0] == strings.SplitN(b, "-", 2)[0]
 }
+
 func npmCompare(actual, operator string, b npmBound) bool {
 	compare := semver.Compare(actual, b.version)
 	switch operator {

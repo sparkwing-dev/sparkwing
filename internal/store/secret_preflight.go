@@ -3,11 +3,11 @@ package store
 import (
 	"context"
 	"fmt"
-	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"strings"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 )
 
 // secretPreflightError refuses a plan that declares a required secret its run

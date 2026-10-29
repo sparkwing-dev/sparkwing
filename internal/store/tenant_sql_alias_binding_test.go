@@ -121,7 +121,7 @@ func scopeRestrictions(tokens []string) []string {
 
 // safety: the relations one query reads or writes at its own depth, as the reference each is named by; INTO names
 // an insert target, which the insert reader judges by its column list.
-func scopeRelationRefs(tokens []string, tables []string) []string {
+func scopeRelationRefs(tokens, tables []string) []string {
 	var refs []string
 	depth, inFrom := 0, false
 	for i, token := range tokens {

@@ -164,8 +164,10 @@ func TestLogSubmissionRoutesCommitOnlyTheirExactAuthorizedSubject(t *testing.T) 
 		t.Fatalf("manifest PUT = %d", code)
 	}
 	otherSum := sha256.Sum256([]byte("other"))
-	commit := logCommitRequest{Subject: subject, Segments: []runstate.Segment{first, second}, Final: true,
-		Manifest: &blob.LogUploadCheck{Subject: subject, Size: int64(len(manifest)), Digest: blob.Digest(hex.EncodeToString(otherSum[:]))}}
+	commit := logCommitRequest{
+		Subject: subject, Segments: []runstate.Segment{first, second}, Final: true,
+		Manifest: &blob.LogUploadCheck{Subject: subject, Size: int64(len(manifest)), Digest: blob.Digest(hex.EncodeToString(otherSum[:]))},
+	}
 	encoded, err := json.Marshal(commit)
 	if err != nil {
 		t.Fatal(err)
