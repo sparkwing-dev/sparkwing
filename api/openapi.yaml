@@ -6503,6 +6503,8 @@ components:
           type: string
         ExpansionDigest:
           type: string
+        FailureReason:
+          type: string
         FinishedAt:
           anyOf:
             - format: date-time
@@ -6566,6 +6568,7 @@ components:
         - Status
         - Outcome
         - StatusDetail
+        - FailureReason
         - ClaimedBy
         - CapabilityPrefix
         - OwnerCapabilityPrefix

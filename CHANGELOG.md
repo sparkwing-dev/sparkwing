@@ -29,7 +29,7 @@ unlock.
 - **runs:** `sparkwing runs stats` includes nearest-rank P50 duration in JSON and table output alongside the mean and P95.
 - **approvals:** The local controller checks approval deadlines every second. Cancelled runs no longer leave their gates in the pending approvals list. Per-run approval history remains available.
 - **cache:** Reusing a compiled Go pipeline prints `Cache hit: pipeline binary`, including after `sparkwing cache warm`.
-- **secrets:** Missing-secret errors for local runs include `sparkwing secrets set --secret NAME --file <path>` and local status syntax.
+- **secrets:** Missing-secret errors for local runs include `sparkwing secrets set --secret NAME --file <path>` without remote-profile advice.
 
 - **store:** PostgreSQL admission locks stay within their store schema
   Independent stores sharing a database no longer defer each other's job releases.

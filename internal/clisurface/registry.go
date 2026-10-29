@@ -360,7 +360,7 @@ func Registry() []Command {
 			{Name: "profile", Argument: "PROFILE"},
 			{Name: "group", Argument: "GROUP"},
 		}},
-		{Path: "sparkwing queue priority", Rules: []string{"Local jobs follow their run's priority. --set front moves a visible waiting run ahead of the other queued runs."}, Flags: []Flag{
+		{Path: "sparkwing queue priority", Rules: []string{"Queued local jobs follow their run's priority. --set front moves a visible waiting run ahead of the other queued runs."}, Flags: []Flag{
 			{Name: "profile", Argument: "PROFILE"},
 			{Name: "run", Argument: "ID", Required: true},
 			{Name: "set", Argument: "VALUE", Required: true},
