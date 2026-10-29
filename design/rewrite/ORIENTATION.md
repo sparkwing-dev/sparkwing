@@ -8,8 +8,8 @@ out. When a rule changes, update its row here in the same commit.
 Longer contracts: `internal/store/STORE-DATA.md` (schema, log slots, claim
 ranking, lock order, admission), `internal/secrets/MASKING.md`,
 `internal/runners/launcher/CLOUD-JOBS.md`, `internal/runners/HOSTING.md`,
-`design/rewrite/ADMISSION.md`, `design/rewrite/RUN-ANYWHERE.md`,
-`design/credential-model.md`, and the decision log
+`design/rewrite/ADMISSION.md`, `design/rewrite/RUN-ANYWHERE.md`, the
+credential model in `docs/auth.md`, and the decision log
 `design/rewrite/contracts/handoffs.md` (index below).
 
 ## Owners and guards

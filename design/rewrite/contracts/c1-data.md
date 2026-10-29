@@ -1056,6 +1056,8 @@ authority callback and checks identity substitution and revocation after binding
 
 ## Payment mutation transactions
 
+**Superseded by decisions 26, 62 and 65 (2026-10-19 to 2026-10-25):** Cloud billing is prepaid credits with automatic refill; there is no post-pay ladder, card collection, recovery page, pay-now or owner budget, deletion is never refused over money, and Stripe holds all card data. [`docs/billing.md`](../../../docs/billing.md) states the current rules; the text below is retained as history.
+
 Card setup, collection, payment reversal, dispute hold/release, warning and
 refund-queue mutations have transaction-local owners. Their existing Tenant and
 Operator entry points call those owners in a store transaction. Payment receipt
@@ -2496,6 +2498,7 @@ is removed. Verified failure and expiry events own those outcomes.
 `CreditGrantRequest` carries no checkout session. Only verified payment
 settlement writes the checkout's paid timestamp and grant association.
 
+**Superseded by decisions 26, 62 and 65 (2026-10-19 to 2026-10-25):** Cloud billing is prepaid credits with automatic refill; there is no post-pay ladder, card collection, recovery page, pay-now or owner budget, deletion is never refused over money, and Stripe holds all card data. [`docs/billing.md`](../../../docs/billing.md) states the current rules; the text below is retained as history.
 `Operator` owns deployment card collection and refund workers: `DueCardCharges`,
 `RecordAttemptIntent`, `SettleCardPayment`,
 `DueCardRefunds`, `MarkCardRefundMade` and `FailCardAttempt`.
@@ -3569,6 +3572,8 @@ collect possible copied bytes and release every quota dimension.
 
 ## Decision 112 billing cut
 
+**Superseded by decisions 26, 62 and 65 (2026-10-19 to 2026-10-25):** Cloud billing is prepaid credits with automatic refill; there is no post-pay ladder, card collection, recovery page, pay-now or owner budget, deletion is never refused over money, and Stripe holds all card data. [`docs/billing.md`](../../../docs/billing.md) states the current rules; the text below is retained as history.
+
 The billing implementation uses `billing_policy.go` as its ladder and standing
 table. `BillingStanding` carries `Tier`, `CloudVCPU`, `MaxJobDuration` and the
 operator decision. `SpendStanding` keeps the owner budget, balance, current rung
@@ -3590,6 +3595,8 @@ collection releases every decline hold on that team.
 
 
 ## Decision 112 production hosted pages
+
+**Superseded by decisions 26, 62 and 65 (2026-10-19 to 2026-10-25):** Cloud billing is prepaid credits with automatic refill; there is no post-pay ladder, card collection, recovery page, pay-now or owner budget, deletion is never refused over money, and Stripe holds all card data. [`docs/billing.md`](../../../docs/billing.md) states the current rules; the text below is retained as history.
 
 `Tenant` implements C2's `billingWriter` directly. Billing writes lock the team
 and member authority before the ledger, then recheck authority at commit. `billing_pages`
@@ -4262,7 +4269,7 @@ are deleted. Memo result selection remains in the blob/result transactions.
 Coalesced source requests are refused. The remaining cache/leader fields and
 leader-read redaction path are removed with durable admission.
 
-`TestConcurrencyHTTPRejectsRetiredInheritedHolderSelector` replaces the obsolete
+`TestConcurrencyGroupReadsSharedAdmissionAndRetiresSlotRoutes` replaces the obsolete
 inheritance surface tests. Weighted admission, backfill, cancellation, promotion,
 owner-loss continuity and real result materialization retain their tests. The
 native harness still owns PostgreSQL and socket verification.

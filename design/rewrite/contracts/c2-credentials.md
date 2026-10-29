@@ -1446,8 +1446,8 @@ SSH credentials. C1 rechecks the live claim and executor and commits
 nothing. App-token issuance still requires a live authorized claim.
 
 Revocation stops new controller operations. It cannot recall existing GitHub
-tokens, OIDC/provider sessions or signed URLs. Root plus privileged Docker on
-a team-dedicated node and same-uid access to runner credentials remain accepted
+tokens, OIDC/provider sessions or signed URLs. Rootful Docker in a user-namespaced
+pod on a team-dedicated node and same-uid access to runner credentials remain accepted
 residuals. This contract makes no process-isolation claim.
 
 ## Billing
@@ -2729,8 +2729,8 @@ type billingWriter interface {
 }
 ```
 
-Team rename preserves slug identity. Deletion retains last-team, held-team,
-debt and checkout guards. Invitation creation owns role/email/expiry/use rules,
+Team rename preserves slug identity. Deletion retains the last-owner guard and
+is never refused over money: financial records outlive the team (decision 62). Invitation creation owns role/email/expiry/use rules,
 existing email budgets and durable request replay. Build trust never comes
 from repository code. Run deletion verifies exact ownership and lifecycle,
 commits deletion before external cleanup, and permits cleanup retry. Physical
@@ -2847,8 +2847,8 @@ covers all nine actual writes, forwarding the authority and target, refusal befo
 a writer, committing conflicts, private failures and missing transactions. Existing
 console executable acceptance now injects an explicit store-backed transaction fake.
 The old TestSettleFinishedNodeClearsTheWindowForAnUnmeteredFinisher is retired with
-its dead helper. Store's TestMeteredUnitNodeLifecycleUsesImmutableAward,
-SettlementFailureRollsBackResult and StaleReportCannotSettleReplacementProperty
+its dead helper. Store's TestStoreDataMeteredDisruptionReplayUsesAwardedTerms,
+TestPaymentSettlementRollbackAndLatePayment and TestMeteredUnitStaleReportCannotSettleReplacementProperty
 retain the immutable-billing, atomic-finalization and stale-holder invariants.
 
 ## Final credential helper and reporting cut
@@ -3180,6 +3180,8 @@ method returns method_not_allowed and Allow before signature validation.
 
 ## Decision 112 billing composition amendment
 
+**Superseded by decisions 26, 62 and 65 (2026-10-19 to 2026-10-25):** Cloud billing is prepaid credits with automatic refill; there is no post-pay ladder, card collection, recovery page, pay-now or owner budget, deletion is never refused over money, and Stripe holds all card data. [`docs/billing.md`](../../../docs/billing.md) states the current rules; the text below is retained as history.
+
 C1's `Tenant` now implements `billingWriter`. `Server.New` reaches it through
 its native tenant resolver. The controller asserts conformance at compile time.
 `WithBillingWriter` remains the contract test seam. No extra runtime resolver
@@ -3203,8 +3205,8 @@ while keeping signature verification and store settlement real.
 Decision 112 supersedes purchase-window and purchase-cap gates in the earlier
 billing-page paragraph. Current member authority, amount validation and deletion
 guards govern funding. Cloud admissions own standing and budget enforcement.
-`TestBillingModelProductionPagesAndBudget` and
-`TestBillingModelProductionCardPrepayAndRecoverySettlement` exercise construction,
+`TestBillingModelProductionPages` and
+`TestBillingModelProductionCardPrepayAndRefill` exercise construction,
 real sessions and CSRF, page commits, provider delivery and signed settlement.
 
 Controller startup commits its validated `--payment-mode` through
