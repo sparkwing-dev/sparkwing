@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -171,5 +172,122 @@ func TestReleaseImageTagsPreserveLatestAndImmutableVersions(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+const qaDockerFixture = `#!/usr/bin/env bash
+set -eu
+printf '%s\n' "$*" >>docker-calls.txt
+if [[ "$1 $2 $3" == "buildx imagetools inspect" ]]; then
+  arches=${QA_FIXTURE_ARCHES:-amd64 arm64}
+  printf '{"manifests":['
+  sep=
+  for a in $arches; do printf '%s{"platform":{"os":"linux","architecture":"%s"}}' "$sep" "$a"; sep=,; done
+  printf ',{"platform":{"os":"unknown","architecture":"unknown"}}]}\n'
+fi
+`
+
+func qaImageFixture(t *testing.T) (string, string) {
+	t.Helper()
+	dir, root := releaseFixture(t)
+	if err := os.WriteFile(filepath.Join(dir, "docker"), []byte(qaDockerFixture), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(filepath.Join(dir, "dist"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	for _, arch := range []string{"amd64", "arm64"} {
+		for _, binary := range []string{"sparkwing-controller", "sparkwing-runner"} {
+			if err := os.WriteFile(filepath.Join(dir, "dist", binary+"-linux-"+arch), []byte("signed"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	return dir, root
+}
+
+func qaDockerCalls(t *testing.T, dir string) []string {
+	t.Helper()
+	body, err := os.ReadFile(filepath.Join(dir, "docker-calls.txt"))
+	if err != nil && !os.IsNotExist(err) {
+		t.Fatal(err)
+	}
+	if strings.TrimSpace(string(body)) == "" {
+		return nil
+	}
+	return strings.Split(strings.TrimSpace(string(body)), "\n")
+}
+
+func TestQAImagesPublishOneIndexPerTagForBothArchitectures(t *testing.T) {
+	dir, root := qaImageFixture(t)
+	if out, err := runReleaseScript(t, dir, root, "publish-qa-images.sh", "QA_FIXTURE_ARCHES=amd64 arm64"); err == nil {
+		t.Fatalf("ran without arguments: %s", out)
+	}
+	cmd := exec.Command("bash", filepath.Join(root, "publish-qa-images.sh"), dir, "registry.example/", "v0.68.0-qa.1", "abc123")
+	cmd.Dir = dir
+	cmd.Env = append(os.Environ(), "PATH="+dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("%v: %s", err, out)
+	}
+	calls := qaDockerCalls(t, dir)
+	var builds, indexes []string
+	for _, call := range calls {
+		switch {
+		case strings.HasPrefix(call, "buildx build "):
+			builds = append(builds, call)
+		case strings.HasPrefix(call, "buildx imagetools create "):
+			indexes = append(indexes, call)
+		}
+	}
+	if len(builds) != 4 || len(indexes) != 2 {
+		t.Fatalf("builds=%d indexes=%d, want 4 and 2:\n%s", len(builds), len(indexes), strings.Join(builds, "\n"))
+	}
+	for _, binary := range []string{"sparkwing-controller", "sparkwing-runner"} {
+		image := "registry.example/" + binary + ":v0.68.0-qa.1"
+		for _, arch := range []string{"amd64", "arm64"} {
+			want := "--platform linux/" + arch
+			found := false
+			for _, b := range builds {
+				if strings.Contains(b, "--target release") && strings.Contains(b, want) &&
+					strings.Contains(b, "BINARY="+binary+" ") && strings.Contains(b, "--tag "+image+"-"+arch+" --push") {
+					found = true
+				}
+			}
+			if !found {
+				t.Errorf("no release-target %s build for %s tagged %s-%s", want, binary, image, arch)
+			}
+		}
+		want := "buildx imagetools create --tag " + image + " " + image + "-amd64 " + image + "-arm64"
+		if !slices.Contains(indexes, want) {
+			t.Errorf("no index %q in %v", want, indexes)
+		}
+	}
+}
+
+func TestQAImagesRefuseAnIndexMissingAnArchitecture(t *testing.T) {
+	dir, root := qaImageFixture(t)
+	cmd := exec.Command("bash", filepath.Join(root, "publish-qa-images.sh"), dir, "registry.example", "v0.68.0-qa.1", "abc123")
+	cmd.Dir = dir
+	cmd.Env = append(os.Environ(), "PATH="+dir+string(os.PathListSeparator)+os.Getenv("PATH"), "QA_FIXTURE_ARCHES=amd64")
+	out, err := cmd.CombinedOutput()
+	if err == nil || !strings.Contains(string(out), "want amd64,arm64") {
+		t.Fatalf("accepted an amd64-only index: err=%v output=%s", err, out)
+	}
+}
+
+func TestQAImagesNeedEveryLinuxBinaryBeforeBuilding(t *testing.T) {
+	dir, root := qaImageFixture(t)
+	if err := os.Remove(filepath.Join(dir, "dist", "sparkwing-runner-linux-arm64")); err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.Command("bash", filepath.Join(root, "publish-qa-images.sh"), dir, "registry.example", "v0.68.0-qa.1", "abc123")
+	cmd.Dir = dir
+	cmd.Env = append(os.Environ(), "PATH="+dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	out, err := cmd.CombinedOutput()
+	if err == nil || !strings.Contains(string(out), "sparkwing-runner-linux-arm64") {
+		t.Fatalf("built without the arm64 runner: err=%v output=%s", err, out)
+	}
+	if calls := qaDockerCalls(t, dir); len(calls) != 0 {
+		t.Fatalf("docker ran before the binaries were checked: %v", calls)
 	}
 }

@@ -123,10 +123,15 @@ Accepted QA-only risks:
 - Clients that read a new `versions.json` before its signature lands fall back to
   their cached index until it does.
 
-QA images: `sparkwing run build-images --qatrust --tag vX.Y.Z-qa.N --registry <ecr> --push`
-builds the controller and runner from source with the tag. To package the published QA
-binaries instead, copy the release's `sparkwing-{controller,runner}-linux-<arch>` from the
-bucket into `dist/` and build each Dockerfile's `release` target, as the release workflow does.
+QA images: `bin/qa-release.sh` also publishes the controller and runner images from the
+signed linux binaries it built, through `bin/publish-qa-images.sh`: each architecture under
+`vX.Y.Z-qa.N-amd64` and `vX.Y.Z-qa.N-arm64`, and one linux/amd64 + linux/arm64 index under
+`vX.Y.Z-qa.N`, which is the tag to deploy. The registry is `QA_IMAGE_REGISTRY`, by default the
+AWS profile account's ECR in us-west-2. The runtime stages run apt and apk, so the docker
+buildx builder must build linux/arm64 natively or through binfmt emulation; the script checks
+that before it builds anything. The hosted release publishes the same two architectures under
+one index per tag on ghcr.io. `sparkwing run build-images --qatrust --tag vX.Y.Z-qa.N
+--registry <ecr> --push` builds both from source instead.
 
 ### Check tiers
 
