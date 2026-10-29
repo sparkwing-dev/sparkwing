@@ -12,7 +12,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
 
-// 10#5: anyone who can push a tag can publish a release on it, so a release runs
+// Anyone who can push a tag can publish a release on it, so a release runs
 // only when its tag matches the subscription's tag patterns.
 func TestReleaseSubscriptionRequiresATagPattern(t *testing.T) {
 	env := map[string]string{"GITHUB_TAG_NAME": "v1.2.3"}
@@ -36,7 +36,7 @@ func pullRequestClosedBody(merged bool, merge string) []byte {
 "base":{"ref":"main","sha":"2222222222222222222222222222222222222222","repo":{"id":42}},"user":{"login":"writer"}}}`, merged, merge)
 }
 
-// 10#5: a closed pull request runs only once merged, and then runs the merge commit
+// A closed pull request runs only once merged, and then runs the merge commit
 // that branch protection admitted, never the head the author still controls.
 func TestClosedPullRequestRunsOnlyTheMergeCommit(t *testing.T) {
 	env := githubAppDelivery{Action: "closed"}
@@ -55,7 +55,7 @@ func TestClosedPullRequestRunsOnlyTheMergeCommit(t *testing.T) {
 	}
 }
 
-// 10#1 and 13 C1: a child names its parent's exact revision or a branch the
+// A child names its parent's exact revision or a branch the
 // controller resolves; a body that pairs another ref with a commit is refused.
 func TestChildCannotPairAnotherRefWithItsOwnCommit(t *testing.T) {
 	e, _, claim := childIntakeFixture(t)

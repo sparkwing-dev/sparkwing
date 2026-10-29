@@ -45,7 +45,7 @@ func (consoleFixtureAuthority) CheckBinding(_ context.Context, _ capability.Prin
 	return nil
 }
 
-// ConfigureConsoleFixture isolates handler tests from the unfinished store reader.
+// ConfigureConsoleFixture supplies controlled authorization outcomes for console handler tests.
 func ConfigureConsoleFixture(s *Server) {
 	f := consoleFixtureAuthority{s}
 	s.WithAuthorization(routepolicy.Authorization{

@@ -382,8 +382,8 @@ func TestSecrets_AssertedRunReadsOnlySharedSecrets(t *testing.T) {
 	}
 }
 
-// `sparkwing secrets set --only-on` failed on every call: the API dropped the
-// pool, so the client's confirmation of it never matched.
+// Secret writes must keep and return the pool restriction, because the client
+// confirms it against the response.
 func TestSecrets_WriteKeepsOnlyOnPool(t *testing.T) {
 	f := newBrowserFixture(t, nil)
 	code, body, _ := secretsRequest(t, f, "POST", "/api/v1/secrets", "", map[string]any{"name": "DEPLOY", "value": "deploy-value", "repo": "gh:1", "pipeline": "ci", "only_on": "prod"})

@@ -43,8 +43,10 @@ func TestMaskHidesEveryJSONEscapeSpelling(t *testing.T) {
 	}
 }
 
-// Invariant: no registered secret is visible in masked text, raw or after
-// decoding JSON escapes, however its characters are escaped or overlap others.
+// Invariant: no registered secret free of '*' is visible in masked text, raw or
+// after decoding JSON escapes, however its characters are escaped or overlap
+// others. A '*' beside a replacement marker is the accepted residual MASKING.md
+// describes, so the alphabet leaves it out.
 func TestMaskLeavesNoSecretVisibleProperty(t *testing.T) {
 	r := rand.New(rand.NewSource(817))
 	alpha := []rune(`ab/"\é`)
