@@ -82,7 +82,10 @@ func TestOwnerCannotForgetExpiredSelfClaim(t *testing.T) {
 	if _, err := tenant.TransitionNode(t.Context(), nodeTransition{Ref: self.Node.Ref, Actor: holder, To: runstate.NodeRunning, Cause: runstate.CauseStart, SourceAttempt: sourceAttempt(0)}); err != nil {
 		t.Fatal(err)
 	}
-	*now = self.Claim.LeaseExpiresAt.Add(5 * time.Second)
+	lapsed := self.Claim.LeaseExpiresAt.Add(-10 * time.Second)
+	rewriteSchemaExec(t, s.db, `UPDATE nodes SET lease_expires_at=? WHERE team='a' AND run_id='run' AND node_id='job'`, lapsed.UnixNano())
+	self.Claim.LeaseExpiresAt = lapsed
+	*now = lapsed.Add(5 * time.Second)
 	if !first.ExpiresAt.After(*now) {
 		t.Fatalf("fixture owner lease %v must outlive child %v", first.ExpiresAt, self.Claim.LeaseExpiresAt)
 	}
