@@ -108,7 +108,10 @@ exemption, seeded from GOPRIVATE when GONOSUMDB is unset. Other pins are untouch
 A QA pipeline's `go.sum` is generated the same way
 (`GOPROXY='https://qa-releases.sparkwing.dev/goproxy|https://proxy.golang.org,direct'
 GONOSUMDB=github.com/sparkwing-dev/sparkwing go mod tidy`). The TypeScript SDK has
-no QA package: packing it requires the Windows native bridges.
+no QA registry package. For Linux/macOS dogfooding, `npm run pack:local --
+--version <engine-version> --destination <directory>` in `sdk/typescript` builds
+a private local tarball without Windows bridges. npm refuses publication of it.
+Published packages still require both verified native Windows bridges.
 
 Accepted QA-only risks:
 

@@ -165,8 +165,8 @@ observes the matching `Run` result, so startup failures and lost elections
 return instead of waiting forever.
 
 `EnsureDashboard` starts the dashboard on an existing ready controller. Requests
-for the same address share its listener and readiness. A bind failure leaves
-the controller running. A different address requires a stop and restart because
+for the same address and read-only policy share its listener and readiness. A bind failure leaves
+the controller running. A different address or read-only policy requires a stop and restart because
 the runtime owns one dashboard listener. Shutdown joins that serving loop before
 closing the store, including when the dashboard started after the controller.
 
@@ -367,3 +367,28 @@ transport identity and local orphan recovery. These require the real controller
 and platform fixtures.
 
 <!-- design:end -->
+
+The local dashboard accepts non-loopback addresses through `dashboard start
+--allow-remote`. Every data request requires the bearer session minted through
+`api.sock`, including remote requests. `--read-only` rejects authenticated browser
+requests other than GET, HEAD and OPTIONS before controller dispatch; sign-in and
+sign-out remain available. It blocks writes but still allows reading decrypted
+secrets, so a read-only session is not safe to share. The local socket retains
+its normal authority.
+
+`--allow-remote` serves cleartext HTTP. The one-time login token and 24-hour
+session bearer cross the network unencrypted, and a session can read decrypted
+secrets. Use it only on a trusted network or through an SSH tunnel. For a tunnel,
+keep the remote dashboard bound to `127.0.0.1:4343` and run this on your machine:
+
+```sh
+ssh -N -L 4343:127.0.0.1:4343 user@host
+```
+
+Open the dashboard through `http://127.0.0.1:4343` on your machine.
+
+The dashboard owner acknowledges the requested read-only policy so a client
+refuses an owner that cannot confirm it. Browser origins must match the bound
+host and port; wildcard binds need a loopback origin or a concrete bind address.
+`--allow-origin` is removed because the controller's browser API requires same-origin
+requests. Remote access through an alternate hostname should use a controller deployment.

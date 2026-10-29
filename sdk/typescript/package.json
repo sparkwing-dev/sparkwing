@@ -20,6 +20,7 @@
     "build": "tsc -p tsconfig.build.json",
     "prepack": "npm run build && node native/check-package.mjs",
     "release:native": "node native/release.mjs bridge",
+    "pack:local": "node native/release.mjs local-pack",
     "release:pack": "node native/release.mjs pack"
   },
   "devDependencies": {

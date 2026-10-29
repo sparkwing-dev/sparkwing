@@ -109,6 +109,7 @@ credential model in `docs/auth.md`, and the decision log
 
 | Rule | Owner | Guard test |
 | --- | --- | --- |
+| Runner warm Actions identity requires HTTPS except on loopback; removed flags and chart values fail | `internal/cluster/production_runtime.go`, `internal/controller/client/github_actions.go`, `charts/sparkwing-runner-bundle/templates/validate.yaml` | `internal/cluster/actions_runtime_test.go`: `TestProductionWarmExchangesActionsIdentity`; `internal/controller/client/github_actions_test.go`: `TestExchangeGitHubActionsRequiresHTTPSExceptLoopback`; `runner_cli_test.go`: `TestWarmRejectsInertFlags`; `internal/clisurface/parse_test.go`: `TestLintRejectsRemovedStaticFlag`; `charts/render_test.go`: `TestRunnerRejectsRemovedWarmModules` |
 | Command registry | `internal/clisurface/registry.go`: `Registry` | `internal/clisurface/contract_test.go` |
 | Route table | `internal/capability/tables.go`: `Routes`; dispatch in `internal/routepolicy` | `internal/capability/policy_test.go` |
 | OpenAPI | `internal/apispec` writes `api/openapi.yaml`; regenerate with `bin/gen-api-docs.sh` | `bin/check-api-spec.sh`; `internal/apispec/final_contract_test.go` |

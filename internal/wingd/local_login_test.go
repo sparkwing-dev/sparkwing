@@ -3,6 +3,7 @@ package wingd
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net"
 	"net/http"
@@ -326,7 +327,7 @@ func FuzzLocalDashboardRequiresBearer(f *testing.F) {
 		}
 		w.WriteHeader(http.StatusNoContent)
 	})
-	server.Config.Handler = guardDashboard(localhostwire.LocalHTTP{Dashboard: dashboard, Shell: shell}, server.Listener.Addr().String(), logins)
+	server.Config.Handler = guardDashboard(localhostwire.LocalHTTP{Dashboard: dashboard, Shell: shell}, server.Listener.Addr().String(), logins, false)
 	logins.serving(server.URL)
 	uid := uint32(1000)
 	login, failure := logins.mint(localhostwire.LocalPeerIdentity{GOOS: "linux", UID: &uid})
@@ -471,6 +472,55 @@ func TestLocalDashboardStreamsEndWithTheirSession(t *testing.T) {
 			case <-done:
 			case <-t.Context().Done():
 				t.Fatal("an open stream outlived its session")
+			}
+		})
+	}
+}
+
+func TestLocalDashboardReadOnlyRequiresAuthAndRefusesChanges(t *testing.T) {
+	for _, readOnly := range []bool{false, true} {
+		t.Run(fmt.Sprint(readOnly), func(t *testing.T) {
+			logins := newDashboardLogins(nil)
+			logins.serving("http://192.0.2.1:4343")
+			uid := uint32(1000)
+			login, failure := logins.mint(localhostwire.LocalPeerIdentity{GOOS: "linux", UID: &uid})
+			if failure != nil {
+				t.Fatal(failure)
+			}
+			session, ok := logins.redeem(strings.TrimPrefix(login.URL, "http://192.0.2.1:4343/login?token="))
+			if !ok {
+				t.Fatal("redeem login")
+			}
+			handler := guardDashboard(localhostwire.LocalHTTP{Dashboard: http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusNoContent) })}, "192.0.2.1:4343", logins, readOnly)
+			for _, tc := range []struct {
+				method, token, origin string
+				status                int
+			}{
+				{"GET", "", "", http.StatusUnauthorized},
+				{"POST", "", "", http.StatusUnauthorized},
+				{"GET", session, "", http.StatusNoContent},
+				{"GET", session, "http://other.example", http.StatusForbidden},
+				{"POST", session, "", map[bool]int{false: http.StatusNoContent, true: http.StatusForbidden}[readOnly]},
+				{"PUT", session, "", map[bool]int{false: http.StatusNoContent, true: http.StatusForbidden}[readOnly]},
+				{"DELETE", session, "", map[bool]int{false: http.StatusNoContent, true: http.StatusForbidden}[readOnly]},
+			} {
+				request := httptest.NewRequest(tc.method, "http://192.0.2.1:4343/api/v1/runs", nil)
+				if tc.token != "" {
+					request.Header.Set("Authorization", "Bearer "+tc.token)
+				}
+				request.Header.Set("Origin", tc.origin)
+				response := httptest.NewRecorder()
+				handler.ServeHTTP(response, request)
+				if response.Code != tc.status {
+					t.Fatalf("%s authenticated=%v origin=%q: status=%d want=%d body=%s", tc.method, tc.token != "", tc.origin, response.Code, tc.status, response.Body)
+				}
+			}
+			request := httptest.NewRequest(http.MethodPost, "http://192.0.2.1:4343/logout", nil)
+			request.Header.Set("Authorization", "Bearer "+session)
+			response := httptest.NewRecorder()
+			handler.ServeHTTP(response, request)
+			if response.Code != http.StatusNoContent {
+				t.Fatalf("logout: %d %s", response.Code, response.Body)
 			}
 		})
 	}

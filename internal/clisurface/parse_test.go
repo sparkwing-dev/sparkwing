@@ -189,3 +189,9 @@ func TestParseReadsOnlyGlobalFlagsBeforeTheCommand(t *testing.T) {
 		}
 	}
 }
+
+func TestLintRejectsRemovedStaticFlag(t *testing.T) {
+	if _, err := Parse("sparkwing", []string{"pipeline", "lint", "--static"}); err == nil {
+		t.Fatal("accepted inert --static")
+	}
+}

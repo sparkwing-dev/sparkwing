@@ -283,10 +283,12 @@ type LocalControlStatus struct {
 	IdleSince            time.Time
 }
 type LocalDashboard struct {
-	Address string
+	Address  string
+	ReadOnly bool
 }
 type LocalDashboardAck struct {
-	Error string
+	ReadOnly bool
+	Error    string
 }
 type Message interface {
 	wireType() MessageType

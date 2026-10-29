@@ -98,7 +98,7 @@ func TestActionsExchangeUsesCallerContextAndServerPushBinding(t *testing.T) {
 			if raw, err := options.Bearer(got); err != nil || raw != "private" {
 				t.Fatalf("runtime lost Actions credential: %v", err)
 			}
-			if !options.Loop.ClaimUntil.Equal(expires) || !reflect.DeepEqual(options.Config.Repos, []string{push.RepositoryKey}) {
+			if !options.Loop.ClaimUntil.Equal(expires) || !reflect.DeepEqual(options.Config.Repos, []string{"github.com/" + push.Repository}) {
 				t.Errorf("Actions loop: %#v", options)
 			}
 			return runners.RuntimeConfig{}, boundary
@@ -135,12 +135,9 @@ func TestWarmMapsPollingKindsAndClaimBudgetToUnifiedLoop(t *testing.T) {
 		if options.Loop.PollInterval != 2*time.Second || options.Loop.MaxClaims != 7 || !reflect.DeepEqual(options.Loop.Kinds, []capability.UnitKind{capability.UnitEval, capability.UnitNode}) {
 			t.Errorf("loop: %#v", options.Loop)
 		}
-		if options.CPUCeiling == nil || *options.CPUCeiling != .5 || options.MemoryCeiling == nil || *options.MemoryCeiling != 1<<30 {
-			t.Errorf("resource ceilings lost")
-		}
 		return runners.RuntimeConfig{}, boundary
 	}}
-	err := cli.Run(t.Context(), "warm", []string{"--controller=https://controller.example", "--credentials-dir=" + runnerCredentials(t), "--poll=2s", "--max-claims-before-restart=7", "--also-claim-triggers=false", "--claim-jobs=true", "--cpu-ceiling=500m", "--memory-ceiling=1Gi"}, "v1.2.3")
+	err := cli.Run(t.Context(), "warm", []string{"--controller=https://controller.example", "--credentials-dir=" + runnerCredentials(t), "--poll=2s", "--max-claims-before-restart=7", "--also-claim-triggers=false", "--claim-jobs=true"}, "v1.2.3")
 	if !errors.Is(err, boundary) {
 		t.Fatal(err)
 	}
@@ -192,7 +189,7 @@ func TestRunnerRejectsSelectorsMissingFromControllerContract(t *testing.T) {
 		return runners.RuntimeConfig{}, nil
 	}}
 	for _, option := range []string{"--trigger-source=github", "--holder-prefix=worker"} {
-		if err := cli.Run(t.Context(), "warm", []string{"--controller=https://controller.example", option}, "v1.2.3"); err == nil || !strings.Contains(err.Error(), "claim contract") {
+		if err := cli.Run(t.Context(), "warm", []string{"--controller=https://controller.example", option}, "v1.2.3"); err == nil || !strings.Contains(err.Error(), "unknown flag") {
 			t.Fatalf("%s: %v", option, err)
 		}
 	}
@@ -211,5 +208,16 @@ func TestWarmCarriesTheOperatorSubmitAllowList(t *testing.T) {
 	err := cli.Run(t.Context(), "warm", []string{"--controller=https://controller.example", "--credentials-dir=" + credentials, "--submit-env-allow=BUILD_*"}, "v1.2.3")
 	if !errors.Is(err, boundary) {
 		t.Fatalf("Run = %v", err)
+	}
+}
+
+func TestWarmRejectsInertFlags(t *testing.T) {
+	for _, option := range []string{"--cpu-ceiling=1", "--memory-ceiling=1Gi", "--deadline=1h", "--warm-module=off", "--accept-working-tree", "--holder-prefix=worker", "--trigger-source=github", "--heartbeat=10s", "--lease=1m"} {
+		t.Run(option, func(t *testing.T) {
+			err := (RunnerCLI{}).Run(t.Context(), "warm", []string{"--controller=https://controller.example", option}, "v1.2.3")
+			if err == nil || !strings.Contains(err.Error(), "unknown flag") {
+				t.Fatalf("expected unknown flag, got %v", err)
+			}
+		})
 	}
 }

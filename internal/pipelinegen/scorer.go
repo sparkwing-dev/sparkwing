@@ -77,8 +77,8 @@ func (s *ProjectScorer) Score(ctx context.Context, spec Spec, source string) ([]
 		runFormatCheck(ctx, jobsDir),
 		runCheck(ctx, checkCompile, proj, "go", "build", "./..."),
 		runCheck(ctx, CheckVet, proj, "go", "vet", "./..."),
-		runCheck(ctx, checkExplain, tmp, s.Sparkwing, "pipeline", "plan", "--static", "--all", "-o", "json"),
-		runCheck(ctx, CheckLint, tmp, s.Sparkwing, "pipeline", "lint", "--all", "-o", "json"),
+		runCheck(ctx, checkExplain, tmp, s.Sparkwing, "pipeline", "plan", "--pipeline", spec.Name, "-o", "json"),
+		runCheck(ctx, CheckLint, tmp, s.Sparkwing, "pipeline", "lint", "--pipeline", spec.Name, "-o", "json"),
 	}
 	return checks, nil
 }
@@ -90,11 +90,11 @@ func pipelineYAML(spec Spec) string {
 		return b.String()
 	}
 	b.WriteString("    guards:\n")
-	if len(spec.GuardRequire) > 0 {
-		fmt.Fprintf(&b, "      require: [%s]\n", strings.Join(spec.GuardRequire, ", "))
+	if len(spec.GuardWhen) > 0 {
+		fmt.Fprintf(&b, "      when: [%s]\n", strings.Join(spec.GuardWhen, ", "))
 	}
-	if len(spec.GuardReject) > 0 {
-		fmt.Fprintf(&b, "      reject: [%s]\n", strings.Join(spec.GuardReject, ", "))
+	if len(spec.GuardUnless) > 0 {
+		fmt.Fprintf(&b, "      unless: [%s]\n", strings.Join(spec.GuardUnless, ", "))
 	}
 	return b.String()
 }
