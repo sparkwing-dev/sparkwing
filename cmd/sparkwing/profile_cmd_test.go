@@ -177,5 +177,4 @@ func TestProfileDefaultSwitchControlsCLIAndKeepsLocalHelpersLocal(t *testing.T) 
 			t.Fatalf("local selection changed: %+v: %v", inv, err)
 		}
 	}
-
 }

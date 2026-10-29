@@ -278,8 +278,10 @@ func TestRunStatusTextIncludesRunAndJobTiming(t *testing.T) {
 	jobStart, jobFinish := start.Add(time.Second), finish.Add(-time.Second)
 	for _, format := range []string{"plain", "pretty"} {
 		t.Run(format, func(t *testing.T) {
-			detail := controllerwire.RunDetail{ID: "r1", Status: "success", StartedAt: &start, FinishedAt: &finish,
-				Jobs: []controllerwire.JobDetail{{ID: "hello", Status: "done", Outcome: "success", StartedAt: &jobStart, FinishedAt: &jobFinish}}}
+			detail := controllerwire.RunDetail{
+				ID: "r1", Status: "success", StartedAt: &start, FinishedAt: &finish,
+				Jobs: []controllerwire.JobDetail{{ID: "hello", Status: "done", Outcome: "success", StartedAt: &jobStart, FinishedAt: &jobFinish}},
+			}
 			r := &statusReader{details: []controllerwire.RunDetail{detail}}
 			var out bytes.Buffer
 			if err := observeRunStatus(t.Context(), statusInvocation(t, "-o", format), r, &out, nil); err != nil {
