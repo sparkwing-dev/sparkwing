@@ -79,5 +79,4 @@ func TestLogFormatRefusalNamesTheValueAndTheFix(t *testing.T) {
 			t.Errorf("refusal %q does not contain %q", flags.parseErr, want)
 		}
 	}
-
 }
