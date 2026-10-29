@@ -33,6 +33,7 @@ credential model in `docs/auth.md`, and the decision log
 | Source selection leaves the shared temporary parent unchanged | `internal/source/select.go`: `readCommitFile` prepares only an explicit workspace; `fssecure.MkdirPrivateTemp` owns the private child | `internal/source/select_temp_unix_test.go`: `TestSelectLeavesTheSharedTemporaryParentUnchanged` |
 | Remote configuration size is checked without downloading oversized blobs | `internal/source/select.go`: `readCommitFile` filters blobs and blocks transports during local inspection | `internal/source/select_size_test.go`: `TestTenantSelectionNeverDownloadsAnOversizedConfiguration`, `TestTenantSelectionAllowsAnAbsentConfiguration`; `select_size_unix_test.go`: `TestTenantSelectionRefusesOversizedConfigurationBehindSymlink` |
 | OIDC claims | `Provenance.OIDC`; `internal/oidcissuer/issuer.go`: `Claims`, `runnerEnvironment`; `authority_oidc.go`: `Tenant.MintOIDCToken` | `oidc_repository_test.go`: `TestOIDCRepositoryClaimReadsSealedProvenance`; `pool_launcher_test.go`: `TestLauncherPodOIDCIsFresh` |
+| OIDC without an issuer preserves `not_found` and explains controller setup | `internal/nodehost/process_service_reads.go`: `ProcessServices.oidc` | `internal/nodehost/routes_oidc_test.go`: `TestOIDCWithoutIssuerExplainsControllerSetup` |
 
 ### Claims and placement
 

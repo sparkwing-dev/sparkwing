@@ -11,6 +11,11 @@ The model matches GitHub Actions' `id-token: write`: the cloud provider fetches 
 3. The controller signs a token only for a caller holding a live claim on that run, reads every claim from the run's stored rows, and never from the request, except the audience.
 4. The pipeline hands the token to the cloud provider's token exchange.
 
+Purely local runs have no OIDC issuer. To obtain tokens, run the pipeline through
+a controller with OIDC configured as described in [Turn it on](#turn-it-on).
+If the controller has no signing key, `sparkwing.OIDCToken` reports `not_found`
+with a setup explanation and a pointer to this guide.
+
 ## Turn it on
 
 The issuer is the controller's `--external-url`. It must be an `https` origin with no path, query or fragment, because every cloud provider fetches `<issuer>/.well-known/openid-configuration` and compares the token's `iss` claim to the issuer byte for byte. AWS also expects no port.
