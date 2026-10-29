@@ -70,7 +70,7 @@ func (h *OwnerHost) schedule(parent context.Context, input RunInput, accepted Ac
 				err = nil
 			}
 			var cancelled *lease.CancelError
-			if errors.As(context.Cause(workCtx), &cancelled) && waitFailure(err, cancelled) == nil {
+			if errors.As(context.Cause(workCtx), &cancelled) {
 				err = h.executionError(ctx, input.RunID, ownerExecution{nodeID, err})
 			}
 			select {
