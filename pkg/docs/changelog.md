@@ -20,6 +20,10 @@ unlock.
 
 ## [Unreleased]
 
+- **docs:** The Go SDK migration table covers the removed `SetWorkDir`
+  Author tests select their fixture repository with `t.Chdir(root)` and let Go
+  restore the original directory after the test.
+
 - **cli:** Fresh QA Go scaffolds resolve their SDK pin
   `pipeline new` uses the QA Go proxy and checksum settings during dependency
   setup. Production builds use a public SDK pin even if stamped with a QA version.
