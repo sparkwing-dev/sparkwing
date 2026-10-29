@@ -45,7 +45,7 @@ func (s *Server) handleOperatorHealth(w http.ResponseWriter, r *http.Request, _ 
 		out.Problems = append(out.Problems, "db: unavailable")
 	}
 	var problems []string
-	out.ObjectStore, problems = objectStoreHealth(s.bucketMeasured())
+	out.ObjectStore, problems = objectStoreHealth()
 	out.Problems = append(out.Problems, problems...)
 	out.Egress, problems = s.egressHealth()
 	out.Problems = append(out.Problems, problems...)

@@ -83,12 +83,8 @@ func TestMeasuringAnUnlimitedBucketNeitherEnforcesNorFreezes(t *testing.T) {
 	if state.Bytes != 69<<20 || state.Objects != 412 || state.ReconciledAt.IsZero() || state.Incomplete {
 		t.Fatalf("an unlimited bucket's state = %+v, want the measured 69 MiB in 412 objects", state)
 	}
-	if state.Enforced || state.Frozen {
-		t.Fatalf("measuring an unlimited bucket enforced or froze it: %+v", state)
-	}
-	summary, problems := objectStoreHealth(true)
-	if _, ok := summary["ceiling"]; !ok || len(problems) != 0 {
-		t.Fatalf("health with a measured bucket = %v %v, want a ceiling summary and no problem", summary, problems)
+	if state.Enforced || state.Frozen || state.Measured {
+		t.Fatalf("measuring an unlimited bucket enforced, froze or published it: %+v", state)
 	}
 }
 
@@ -111,13 +107,14 @@ func TestAFailedBucketMeasurementReachesHealth(t *testing.T) {
 	if !state.Incomplete || !strings.Contains(state.MeasureError, "AccessDenied") {
 		t.Fatalf("state after a failed measurement = %+v, want it incomplete and naming the error", state)
 	}
-	summary, problems := objectStoreHealth(true)
+	summary, problems := objectStoreHealth()
 	bucket, _ := summary["ceiling"].(map[string]any)
 	if bucket["measurement_incomplete"] != true || len(problems) == 0 || !strings.Contains(strings.Join(problems, "\n"), "measure") {
 		t.Fatalf("health after a failed measurement = %v %v, want it incomplete with a problem", summary, problems)
 	}
-	if summary, problems := objectStoreHealth(false); summary["ceiling"] != nil || len(problems) != 0 {
-		t.Fatalf("health with no bucket = %v %v", summary, problems)
+	ceiling.Configure(objectguard.CeilingConfig{})
+	if summary, problems := objectStoreHealth(); summary["ceiling"] != nil || len(problems) != 0 {
+		t.Fatalf("health with no ceiling = %v %v, want no unmeasured totals", summary, problems)
 	}
 }
 

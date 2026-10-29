@@ -552,8 +552,8 @@ backend you run (e.g. Tempo for traces, Loki for logs).
 | `sparkwing_object_store_requests_total` | Counter | `class`, `outcome` | Object-store requests by class (`put`, `get`, `list`, `delete`) and whether the budget let them reach the store |
 | `sparkwing_object_store_trips_total` | Counter | `class` | Times a request class exhausted its budget and began refusing requests |
 | `sparkwing_object_store_tripped` | Gauge | `class` | 1 while a request class is refusing requests |
-| `sparkwing_object_store_bucket_bytes` | Gauge | (none) | Bytes the bucket holds, counted per write and replaced by each measurement |
-| `sparkwing_object_store_bucket_objects` | Gauge | (none) | Objects the bucket holds, counted per write and replaced by each measurement |
+| `sparkwing_object_store_bucket_bytes` | Gauge | (none) | Bytes the bucket holds, counted per write and replaced by each measurement; absent while no ceiling or warning mark is set |
+| `sparkwing_object_store_bucket_objects` | Gauge | (none) | Objects the bucket holds, counted per write and replaced by each measurement; absent while no ceiling or warning mark is set |
 | `sparkwing_object_store_bucket_ceiling` | Gauge | `unit` | The configured ceiling, by `unit` (`bytes`, `objects`); 0 while that unit is unlimited |
 | `sparkwing_object_store_bucket_ceiling_frozen` | Gauge | (none) | 1 while the bucket is over its ceiling and object writes are refused |
 | `sparkwing_object_store_bucket_ceiling_freezes_total` | Counter | (none) | Times the bucket crossed its ceiling and began refusing object writes |
@@ -754,8 +754,10 @@ object stores bill per thousand keys, so an install that wants the
 ceiling without the listing sets `--bucket-reconcile 0` and accepts the
 drift. `--bucket-store` names the store the measurement reads; the
 controller measures it on the interval only while a ceiling or warning mark
-is set, because nothing else reads the totals, and serves none of it. A
-multi-team controller that sets one needs `--bucket-store`.
+is set, and serves none of it. Without one the controller publishes no bucket
+totals: the gauges are absent, health has no `ceiling` block, and the breaker
+route reports `measured: false` beside a count of this process's own writes.
+A multi-team controller that sets one needs `--bucket-store`.
 A controller pointed at no store, or at a backend that cannot total
 itself, keeps the running count. The running count starts at zero on
 restart, so a controller with no measurement source sees only what it
@@ -783,7 +785,7 @@ in place of the listing.
 
 `GET /api/v1/operator/health` reports `object_store.ceiling` as `enforced`,
 `frozen`, `warning`, `measurement_incomplete` and `measured_at` alone,
-whenever a ceiling is set or a bucket is measured; the totals
+whenever a ceiling or warning mark is set; the totals
 and the ceilings sit behind the admin-scoped
 `GET /api/v1/operator/object-store/breaker` and on `sparkwing operator object-store status`, which also reports `counted_at` (when the running
 count last moved) and `reconciled_at` (when the bucket was last
