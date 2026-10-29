@@ -1154,3 +1154,7 @@ copy of the example in `testdata/refill_contract.json`.
 ## 2026-10-27 Korey decision 72: fetched runs carry their branch in OIDC
 
 - Amends decision 70. A run whose code Sparkwing fetched from the repository through the App at a branch or tag head (run-now, console runs, unlocked schedule overrides) carries the ref and sha it ran in its OIDC token, alongside the repository claims, with trigger manual. The branch head was resolved and verified by Sparkwing, so it is the source of truth, matching GitHub's workflow_dispatch tokens. Deploy policies that pin ref:refs/heads/main accept a run-now on main and refuse one on another branch; policies that care how a run started can require trigger:push. Uploads, local and here runs still carry no repository or ref claims.
+
+## 2026-10-29 Amendment (lead, for Korey to ratify): log lifecycle rules are a startup warning
+
+- Amends c1-data.md's retention rule and the frozen architecture §4.4 ("lifecycle rules are checked at boot"; the code had drifted to a check on every log-segment signing). Sparkwing deletes log objects at their class age itself, so a bucket lifecycle rule is only a backstop. Signing a log segment never reads bucket lifecycle rules and never refuses a class without one. An S3 controller reads the rules once at startup and logs a warning for each retention class without a rule at least that long; it does not refuse to start, and `s3:GetLifecycleConfiguration` is optional. Continuous verification of the rule belongs to external operator checks, as network policy does under decision 71.

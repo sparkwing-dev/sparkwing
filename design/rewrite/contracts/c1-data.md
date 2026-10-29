@@ -2591,7 +2591,8 @@ days; self-hosted disabled). Outputs expire after 30 days except pinned outputs.
 Metrics use their own setting. Log classes retain funded logs for 90 days and
 free logs for 30, or an operator-defined class. Standing changes affect new runs
 only; Sparkwing deletes log objects at their class age under the [one log-slot rule](../../../internal/store/STORE-DATA.md#log-slot-accounting),
-and signing refuses a class without a backend lifecycle rule at least that long. Unpinned blob
+and a backend lifecycle rule at least that long is a backstop the controller checks once at startup and only
+warns about; signing never reads or waits on it (amended 2026-10-29, see the decision log). Unpinned blob
 records expire by their own time; reachability GC uses a 24-hour tombstone grace.
 Capabilities expire seven days after expiry or revocation. Fully delivered
 terminal effects expire seven days after delivery; undelivered effects remain due.
