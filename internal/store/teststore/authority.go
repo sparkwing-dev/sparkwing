@@ -1,9 +1,12 @@
 package teststore
 
 import (
+	"cmp"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"slices"
+	"strconv"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
@@ -62,11 +65,21 @@ func SeedCreditRates(t T, st *store.Store, table store.CreditRateTable) {
 	if err := table.Validate(); err != nil {
 		t.Fatal(err)
 	}
-	raw, err := json.Marshal(table)
+	sorted := slices.SortedFunc(slices.Values(table), func(a, b store.CreditRate) int { return cmp.Compare(a.Cores, b.Cores) })
+	raw, err := json.Marshal(sorted)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := Exec(t.Context(), st, `INSERT INTO settings(key,value) VALUES ('credit_rate_table',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value`, raw); err != nil {
-		t.Fatal(err)
+	writes := map[string]string{"credit_rate_table": string(raw)}
+	// safety: like the console write, the four-core entry is also the scalar rate.
+	for _, rate := range sorted {
+		if rate.Cores == 4 {
+			writes["credit_rate_micro_per_second"] = strconv.FormatInt(rate.MicroPerSecond, 10)
+		}
+	}
+	for key, value := range writes {
+		if _, err := Exec(t.Context(), st, `INSERT INTO settings(key,value) VALUES (?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value`, key, []byte(value)); err != nil {
+			t.Fatal(err)
+		}
 	}
 }
