@@ -2805,6 +2805,9 @@ other hosts lowercase the host and preserve ports and path case, except
 GitLab.com and Bitbucket.org path folding. Credentials and trailing .git are
 stripped. Filesystem identities hash the cleaned absolute path and remain local
 to that machine. Controller access rules and memo writes reject local keys.
+Authorized memo lookups and copies for the bound local repository return a clean
+miss after selector checks. Executors skip memo publication for local keys, so
+the job runs normally and keeps its output and artifact records.
 
 A verified upload produces a receipt only after size and digest verification
 and immutable-key commit. Object existence, integrity and reference authority
