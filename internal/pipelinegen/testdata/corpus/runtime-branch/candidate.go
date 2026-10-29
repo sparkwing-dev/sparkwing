@@ -38,5 +38,5 @@ func (j *genRBJob) Work(w *sw.Work) (*sw.WorkStep, error) {
 }
 
 func init() {
-	sw.Register[sw.NoInputs]("runtime-branch", func() sw.Pipeline[sw.NoInputs] { return &GenRuntimeBranch{} })
+	sw.Register[sw.NoInputs]("GenRuntimeBranch", func() sw.Pipeline[sw.NoInputs] { return &GenRuntimeBranch{} })
 }

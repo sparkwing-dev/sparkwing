@@ -36,5 +36,5 @@ func (genMinimalJob) run(ctx context.Context) error {
 }
 
 func init() {
-	sw.Register[sw.NoInputs]("minimal", func() sw.Pipeline[sw.NoInputs] { return &GenMinimal{} })
+	sw.Register[sw.NoInputs]("GenMinimal", func() sw.Pipeline[sw.NoInputs] { return &GenMinimal{} })
 }

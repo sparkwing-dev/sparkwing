@@ -47,5 +47,5 @@ func genArgsApply(in GenTypedArgsInput) func(ctx context.Context) error {
 }
 
 func init() {
-	sw.Register[GenTypedArgsInput]("typed-args", func() sw.Pipeline[GenTypedArgsInput] { return &GenTypedArgs{} })
+	sw.Register[GenTypedArgsInput]("GenTypedArgs", func() sw.Pipeline[GenTypedArgsInput] { return &GenTypedArgs{} })
 }

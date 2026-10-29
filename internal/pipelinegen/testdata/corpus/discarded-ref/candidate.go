@@ -47,5 +47,5 @@ func genDiscardedRefDeploy(ctx context.Context) error {
 }
 
 func init() {
-	sw.Register[sw.NoInputs]("discarded-ref", func() sw.Pipeline[sw.NoInputs] { return &GenDiscardedRef{} })
+	sw.Register[sw.NoInputs]("GenDiscardedRef", func() sw.Pipeline[sw.NoInputs] { return &GenDiscardedRef{} })
 }

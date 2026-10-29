@@ -56,5 +56,5 @@ func (j *genBTDDeploy) Work(w *sw.Work) (*sw.WorkStep, error) {
 }
 
 func init() {
-	sw.Register[sw.NoInputs]("build-test-deploy", func() sw.Pipeline[sw.NoInputs] { return &GenBuildTestDeploy{} })
+	sw.Register[sw.NoInputs]("GenBuildTestDeploy", func() sw.Pipeline[sw.NoInputs] { return &GenBuildTestDeploy{} })
 }

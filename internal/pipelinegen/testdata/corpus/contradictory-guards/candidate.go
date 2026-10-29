@@ -32,7 +32,7 @@ func genGuardStep(ctx context.Context) error {
 }
 
 func init() {
-	sw.Register[sw.NoInputs]("contradictory-guards", func() sw.Pipeline[sw.NoInputs] {
+	sw.Register[sw.NoInputs]("GenContradictoryGuards", func() sw.Pipeline[sw.NoInputs] {
 		return &GenContradictoryGuards{}
 	})
 }

@@ -39,5 +39,5 @@ func genArtifactPublish(ctx context.Context) error {
 }
 
 func init() {
-	sw.Register[sw.NoInputs]("artifact-handoff", func() sw.Pipeline[sw.NoInputs] { return &GenArtifactHandoff{} })
+	sw.Register[sw.NoInputs]("GenArtifactHandoff", func() sw.Pipeline[sw.NoInputs] { return &GenArtifactHandoff{} })
 }
