@@ -12,21 +12,12 @@ import (
 // ReadOwnerSnapshot reads scheduling state and its current owner authority in one snapshot.
 // Cancellation remains observable while the owner drains its still-held lease.
 func (t *Tenant) ReadOwnerSnapshot(ctx context.Context, authority capability.AuthorityRef, runID string) (RunSnapshot, error) {
-	return t.readOwnerSnapshot(ctx, authority, runID, nil, true)
+	return t.readOwnerSnapshot(ctx, authority, runID, nil)
 }
 
-// ReadOwnerNode reads one node of the owner's run with its private placement decision.
+// ReadOwnerNode reads one node under the live owner's authority without projecting placement.
 func (t *Tenant) ReadOwnerNode(ctx context.Context, authority capability.AuthorityRef, ref runspec.NodeRef) (runstate.NodeRow, error) {
-	return t.readOwnerNode(ctx, authority, ref, true)
-}
-
-// ReadOwnerNodeState retains the live owner's authority checks without projecting placement.
-func (t *Tenant) ReadOwnerNodeState(ctx context.Context, authority capability.AuthorityRef, ref runspec.NodeRef) (runstate.NodeRow, error) {
-	return t.readOwnerNode(ctx, authority, ref, false)
-}
-
-func (t *Tenant) readOwnerNode(ctx context.Context, authority capability.AuthorityRef, ref runspec.NodeRef, placement bool) (runstate.NodeRow, error) {
-	snapshot, err := t.readOwnerSnapshot(ctx, authority, string(ref.RunID), &ref, placement)
+	snapshot, err := t.readOwnerSnapshot(ctx, authority, string(ref.RunID), &ref)
 	if err != nil {
 		return runstate.NodeRow{}, err
 	}
@@ -38,7 +29,7 @@ func (t *Tenant) readOwnerNode(ctx context.Context, authority capability.Authori
 	return runstate.NodeRow{}, ErrNotFound
 }
 
-func (t *Tenant) readOwnerSnapshot(ctx context.Context, authority capability.AuthorityRef, runID string, target *runspec.NodeRef, placement bool) (RunSnapshot, error) {
+func (t *Tenant) readOwnerSnapshot(ctx context.Context, authority capability.AuthorityRef, runID string, target *runspec.NodeRef) (RunSnapshot, error) {
 	tx, err := t.s.beginSnapshotReadTx(ctx)
 	if err != nil {
 		return RunSnapshot{}, err
@@ -88,7 +79,7 @@ func (t *Tenant) readOwnerSnapshot(ctx context.Context, authority capability.Aut
 	loaded := false
 	for i := range snapshot.Nodes {
 		node := &snapshot.Nodes[i]
-		if c.Unit != capability.UnitTrigger || !placement {
+		if c.Unit != capability.UnitTrigger || target != nil {
 			continue
 		}
 		if !loaded {
@@ -97,13 +88,7 @@ func (t *Tenant) readOwnerSnapshot(ctx context.Context, authority capability.Aut
 				return RunSnapshot{}, err
 			}
 			if observed {
-				if target == nil {
-					eligible, err = ownerEligibleNodesTx(ctx, tx, p, demand)
-				} else {
-					var allowed bool
-					allowed, err = ownerDemandEligibleTx(ctx, tx, p, demand, *target)
-					eligible = map[runspec.NodeRef]bool{*target: allowed}
-				}
+				eligible, err = ownerEligibleNodesTx(ctx, tx, p, demand)
 				if err != nil {
 					return RunSnapshot{}, err
 				}

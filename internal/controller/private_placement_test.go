@@ -1,12 +1,32 @@
 package controller
 
 import (
+	"context"
 	"testing"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/match"
 )
+
+func TestPrivateHostNodeReadsStateWithoutPlacement(t *testing.T) {
+	server, host, _, _ := localHostFixture(t)
+	engineSQL(t, server.store, `INSERT INTO nodes(team,run_id,node_id,status,ready_at,spec_json,spec_hash,execution_json) VALUES ('a','run','build','pending',?,?,?,?)`, time.Now().UnixNano(), []byte(`{"id":"build"}`), "declaration", []byte(`{}`))
+	placementReads := 0
+	server.engine.claimProfiles = engineEnrollmentFunc(func(context.Context, capability.Principal) (match.Profile, error) {
+		placementReads++
+		return match.Profile{}, nil
+	})
+	node, err := host.ReadNode(t.Context(), runspec.NodeRef{RunID: "run", NodeID: "build"})
+	if err != nil || node.Ref.NodeID != "build" {
+		t.Fatalf("private node state: %+v %v", node, err)
+	}
+	if placementReads != 0 || node.OwnerExecution != nil {
+		t.Fatalf("node state read projected placement: reads=%d decision=%+v", placementReads, node.OwnerExecution)
+	}
+}
 
 func TestPrivateHostSnapshotCarriesCanonicalPlacementAcrossTransport(t *testing.T) {
 	server, host, _, owner := localHostFixture(t)

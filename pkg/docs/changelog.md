@@ -20,7 +20,7 @@ unlock.
 
 ## [Unreleased]
 
-- **local controller:** Large plans batch placement and node reads, reuse run facts when releasing jobs, and resolve private job and child-authority reads directly. Readiness probes no longer wait behind the database writer or label a busy controller as unresponsive.
+- **local controller:** Large plans batch placement and node reads, reuse run facts when releasing jobs, and resolve private job and child-authority reads directly. Single-job reads and child authentication no longer recompute scheduling placement. Readiness probes no longer wait behind the database writer or label a busy controller as unresponsive.
 
 - **runs:** Status names the failed dependency that blocked a job and explains `queue_timeout` even when the job never started.
 - **debug:** Local runs persist before/after/failure pauses so `sparkwing debug env` can inspect them and `debug resume` can release them. Cancellation while paused stops dispatch, and resuming after failure preserves the failed outcome.

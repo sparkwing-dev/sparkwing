@@ -20,7 +20,7 @@ func TestOwnerNodeReadDoesNotLoadUnrelatedJobs(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if node.Ref.NodeID != "job" || node.OwnerExecution == nil || !node.OwnerExecution.Allowed {
+	if node.Ref.NodeID != "job" || node.OwnerExecution != nil {
 		t.Fatalf("selected node: %+v", node)
 	}
 	reads, placement := 0, 0
@@ -30,21 +30,12 @@ func TestOwnerNodeReadDoesNotLoadUnrelatedJobs(t *testing.T) {
 		}
 		if strings.Contains(statement.query, "work_input AS MATERIALIZED") {
 			placement++
-			targeted := false
-			for _, arg := range statement.args {
-				if arg == "job" {
-					targeted = true
-				}
-			}
-			if !targeted {
-				t.Error("single-node placement queried unrelated jobs")
-			}
 		}
 	}
 	if reads != 1 {
 		t.Errorf("single-node lookup read %d job rows, want 1", reads)
 	}
-	if placement != 1 {
-		t.Errorf("single-node lookup made %d placement queries, want 1", placement)
+	if placement != 0 {
+		t.Errorf("single-node lookup made %d placement queries, want 0", placement)
 	}
 }
