@@ -106,11 +106,11 @@ func (p SDKPlanner) prepare(ctx context.Context, input PlanningProcessInput, pla
 		return errors.Join(err, logs.release(ctx))
 	})
 	if err != nil {
-		return PreparedPlanning{}, p.planningError(ctx, err, logs.known, input.Entrypoint)
+		return PreparedPlanning{}, p.planningError(ctx, prepared.Declarations, err, logs.known, input.Entrypoint)
 	}
 	declarationsKnown = logs.known
 	if prepared.Description.Error != nil {
-		return PreparedPlanning{}, p.planningError(ctx, prepared.Description.Error, logs.known, input.Entrypoint)
+		return PreparedPlanning{}, p.planningError(ctx, prepared.Declarations, prepared.Description.Error, logs.known, input.Entrypoint)
 	}
 	if declarationsOnly {
 		return prepared, nil
@@ -126,7 +126,7 @@ func (p SDKPlanner) prepare(ctx context.Context, input PlanningProcessInput, pla
 			return session.call(ctx, nodeproto.Request{Op: nodeproto.OpPlan, Pipeline: input.Entrypoint, Args: maps.Clone(input.Args), Run: &input.Run}, &raw, "")
 		})
 		if err != nil {
-			return nil, p.planningError(ctx, err, logs.known, input.Entrypoint)
+			return nil, p.planningError(ctx, nil, err, logs.known, input.Entrypoint)
 		}
 		return raw, nil
 	}
@@ -207,12 +207,10 @@ func (p SDKPlanner) process(ctx context.Context, input PlanningProcessInput, log
 	return errors.Join(err, context.Cause(ctx))
 }
 
-func (p SDKPlanner) planningError(ctx context.Context, err error, known bool, entrypoint string) error {
-	var unregistered *runspec.UnregisteredEntrypoint
-	if errors.As(err, &unregistered) {
-		failure := *unregistered.Err
+func (p SDKPlanner) planningError(ctx context.Context, gate *runspec.DeclarationGate, err error, known bool, entrypoint string) error {
+	if failure, ok := gate.UnregisteredEntrypoint(err); ok {
 		failure.Hint = p.Masker.Mask(fmt.Sprintf("Register the entrypoint by that name, sparkwing.Register(%q, factory), or set the pipeline's entrypoint: in sparkwing.yaml to a registered name.", entrypoint))
-		return errors.Join(context.Cause(ctx), &failure)
+		return errors.Join(context.Cause(ctx), failure)
 	}
 	code := apierr.SDKError
 	var structured *apierr.Error

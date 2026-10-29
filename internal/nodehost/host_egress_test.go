@@ -208,7 +208,7 @@ func TestPlanningFailureMasksCanonicalPayloads(t *testing.T) {
 	planner := SDKPlanner{Masker: masker}
 	source := &apierr.Error{Code: "failure-private-default", Message: "private-default", Hint: "private-default", Details: map[string]any{"token": "private-default"}}
 	var result *apierr.Error
-	if !errors.As(planner.planningError(t.Context(), source, true, "Build"), &result) {
+	if !errors.As(planner.planningError(t.Context(), nil, source, true, "Build"), &result) {
 		t.Fatal("lost canonical error")
 	}
 	raw, _ := json.Marshal(result)
