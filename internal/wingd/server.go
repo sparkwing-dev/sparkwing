@@ -1889,8 +1889,8 @@ func (d *Daemon) handleSetPriority(c *conn, req *wingwire.SetPriority) {
 	for _, t := range targets {
 		if t.runID == req.RunID {
 			previous = t.priority
-			holding = t.role == roleHolder
 		}
+		holding = holding || t.role == roleHolder
 		t.priority = priority
 	}
 	_, events := d.ledger.SetPriority(req.RunID, priority)

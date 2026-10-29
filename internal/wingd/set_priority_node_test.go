@@ -39,3 +39,20 @@ func TestSetPriority_NodeParticipantRecognizesOwningRun(t *testing.T) {
 		t.Fatal(admitted.err)
 	}
 }
+
+func TestSetPriority_NodeHolderReportsHolding(t *testing.T) {
+	home := shortHome(t)
+	startDaemon(t, wingd.Config{Home: home, Sampler: newFakeSampler(4, 8<<30), GraceWindow: -1})
+	holder := ensure(t, home, "")
+	participant := string(wingwire.NodeHostParticipant("held-run", "job"))
+	lease := mustAcquire(t, holder, coreReq(participant, 1))
+	defer func() {
+		if err := lease.Release(); err != nil {
+			t.Error(err)
+		}
+	}()
+	ack := setPriority(t, home, "held-run", 3, "")
+	if !ack.Found || !ack.Holding || ack.Participants != 1 || ack.Priority != 3 {
+		t.Fatalf("node holder ack = %+v, want found and holding", ack)
+	}
+}
