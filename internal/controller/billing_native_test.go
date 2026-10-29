@@ -453,7 +453,7 @@ func TestCardBilling_OwnerSetsARefill(t *testing.T) {
 	}
 	r := answer.Refill
 	if !r.Enabled || r.ThresholdCents != 500 || r.AmountCents != 2000 || r.WeekLimitCents != 6000 || r.MonthLimitCents != 0 ||
-		r.MinAmountCents != store.MinRefillCents || r.MaxAmountCents != store.MaxCardPaymentCents || r.Open || r.Limit != "" ||
+		r.MinAmountCents != store.MinCardPaymentCents || r.MaxAmountCents != store.MaxCardPaymentCents || r.Open || r.Limit != "" ||
 		r.Caps.AmountCents != 5000 || r.Caps.PerDay != 1 || r.Caps.WeekCents != 10000 {
 		t.Fatalf("refill block=%+v", r)
 	}

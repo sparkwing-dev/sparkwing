@@ -20,6 +20,7 @@ unlock.
 
 ## [Unreleased]
 
+- **billing:** Add funds is at least $10, the checkout service's minimum, as a refill already was. The controller advertised and reserved purchases from $0.50, which the checkout service refused, so the owner was told to try again for a payment that could never open. `purchase_min_cents` reads 1,000 and the console pre-fills $10; a smaller amount is refused with the minimum.
 - **controller (Breaking):** `--billing-url` without `--payment-mode` refuses to start, naming both. The controller used to open payment pages and charge refills it could never settle: every Stripe webhook answered 503 and the payer got no credits.
 - **billing:** A metered job admitted with between one and two slices left in the balance runs. Its first renewal charged the job minimum and then asked for a second slice on top of it, so the job was cancelled for credits before it started and kept one slice; a renewal now reserves one slice past the compute used, and at least the minimum.
 - **claims:** On PostgreSQL a metered team's job that names a Cloud size such as `sparkwing-8cpu` is checked for funding at that size. The claim query read the size suffix with a negative `substr` start, which PostgreSQL treats differently from SQLite, so the job passed the funding check at the smallest size, then failed its award on every poll.

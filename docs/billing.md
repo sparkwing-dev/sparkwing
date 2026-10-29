@@ -115,8 +115,9 @@ Automatic refill charges the customer's default payment method in Stripe. When
 a card is set up, the controller passes the team owner's email to Stripe for its
 receipts without storing it.
 
-Each Add funds payment and automatic refill is at most $1,000, at every standing
-tier including High. Larger amounts are refused before a payment starts. Use
+Each Add funds payment and automatic refill is at least $10, so card fees stay
+a small share of it, and at most $1,000, at every standing tier including High.
+Other amounts are refused before a payment starts. Use
 the billing page contact request, or `sparkwing billing request-tier --profile cloud --tier high --message <text>`, to ask about larger payments. The request reaches the
 operator console queue.
 
@@ -136,8 +137,7 @@ the request under that key conflicts. An expired page requires a new key.
 Automatic refill is off until an owner turns it on, and turning it on needs a
 saved card. The owner sets a threshold and a refill amount: when the balance
 falls below the threshold, the controller charges the saved card the refill
-amount. A refill is at least $10, so card fees stay a small share of it, and at
-most $1,000. The owner can also set a weekly and a monthly limit on refills;
+amount, between $10 and $1,000. The owner can also set a weekly and a monthly limit on refills;
 zero means no limit.
 
 Set refills on the console billing page, with `sparkwing billing refill`

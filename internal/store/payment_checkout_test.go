@@ -34,7 +34,7 @@ func TestPaymentCheckoutCreatesSettlementFacts(t *testing.T) {
 
 func TestPaymentCheckoutAttachmentCannotMoveFinancialIdentity(t *testing.T) {
 	s, tenant, a := billingPageFixture(t)
-	page, err := tenant.PrepareAuthorizedBillingPage(t.Context(), a, capability.BillingPageCredits, 100, "binding")
+	page, err := tenant.PrepareAuthorizedBillingPage(t.Context(), a, capability.BillingPageCredits, 1_000, "binding")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -42,7 +42,7 @@ func TestPaymentCheckoutAttachmentCannotMoveFinancialIdentity(t *testing.T) {
 	if err := tenant.CompleteAuthorizedBillingPage(t.Context(), a, page); err != nil {
 		t.Fatal(err)
 	}
-	event := capability.PaymentEvent{Mode: capability.PaymentTest, EventID: "paid", CheckoutID: "provider-session", PaymentID: "payment", Kind: capability.PaymentCheckoutPaid, AmountMinor: 100, Currency: "usd"}
+	event := capability.PaymentEvent{Mode: capability.PaymentTest, EventID: "paid", CheckoutID: "provider-session", PaymentID: "payment", Kind: capability.PaymentCheckoutPaid, AmountMinor: 1_000, Currency: "usd"}
 	for _, paid := range []bool{false, true} {
 		if paid {
 			if _, err := s.settlePaymentFacts(t.Context(), event); err != nil {

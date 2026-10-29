@@ -9,9 +9,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 )
 
-// MinCardChargeCents is the provider's minimum card payment.
-const MinCardChargeCents = 50
-
 const (
 	// CardRefusedWarning refuses a payment that an actionable early fraud warning named before it settled.
 	CardRefusedWarning = "warning"
