@@ -51,6 +51,11 @@ func TestUpgradeNoticeFollowsTheCommandOutput(t *testing.T) {
 	t.Setenv("HOME", home)
 	t.Setenv("SPARKWING_HOME", filepath.Join(home, ".sparkwing"))
 	t.Setenv("SPARKWING_CONFIG", filepath.Join(home, "missing.yaml"))
+	t.Cleanup(func() {
+		if out, err := exec.Command(cli, "daemon", "stop").CombinedOutput(); err != nil {
+			t.Errorf("stop fixture controller: %v\n%s", err, out)
+		}
+	})
 	stamp := paths.PathsAt(filepath.Join(home, ".sparkwing")).VersionStampFile(installsite.PathKey(cli))
 	for _, args := range [][]string{{"docs", "list", "-o", "plain"}, {"runs", "status", "--run", "run-missing", "-o", "plain"}} {
 		seedStamp(t, stamp, cli, "v0.0.1")

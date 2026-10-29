@@ -158,6 +158,7 @@ func libraryModulePath(source, libDir string, entries []sparkManifestEntry) stri
 }
 
 func modulePathFromGoMod(goModPath string) string {
+	// #nosec G703 -- catalog reads the module selected by the operator or Go module downloader
 	raw, err := os.ReadFile(goModPath)
 	if err != nil {
 		return ""
@@ -170,6 +171,7 @@ func readSparkManifest(target string) (*sparkManifest, string, string, error) {
 	if err != nil {
 		return nil, "", "", err
 	}
+	// #nosec G703 -- catalog reads the manifest selected by the operator or Go module downloader
 	raw, err := os.ReadFile(manifestPath)
 	if err != nil {
 		return nil, "", "", fmt.Errorf("spark catalog: read %s: %w", manifestPath, err)

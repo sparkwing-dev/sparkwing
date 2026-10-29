@@ -316,14 +316,17 @@ func renderBuiltinTemplate(name, short, tmpl string) string {
 func scaffoldGoFromTemplate(sparkwingDir, name string, hidden bool, short, tmpl string, bootstrapped bool, trigger, mode string) error {
 	struct_ := kebabToPascal(name)
 	file := filepath.Join(sparkwingDir, "jobs", goJobFilename(name))
+	// #nosec G703 -- the pipeline name is validated as kebab-case before scaffolding in the selected project
 	if _, err := os.Stat(file); err == nil {
 		return fmt.Errorf("refusing to overwrite %s\n  pick a different --pipeline, or delete the file first if you want to regenerate", file)
 	}
 	body := renderBuiltinTemplate(name, short, tmpl)
+	// #nosec G703 -- the pipeline name is validated as kebab-case before scaffolding in the selected project
 	if err := os.WriteFile(file, []byte(body), 0o644); err != nil {
 		return err
 	}
 	if err := appendPipelinesYAML(sparkwingDir, name, struct_, hidden, trigger); err != nil {
+		// #nosec G703 -- rollback removes the validated pipeline filename this scaffold just wrote
 		return errors.Join(err, os.Remove(file))
 	}
 	return finishScaffold(sparkwingDir, file, name, bootstrapped, trigger, mode)

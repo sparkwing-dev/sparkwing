@@ -20,6 +20,9 @@ unlock.
 
 ## [Unreleased]
 
+- **store:** PostgreSQL admission locks stay within their store schema
+  Independent stores sharing a database no longer defer each other's job releases.
+
 - **source:** Remote source selection, including schedules and branch-pinned child runs, no longer fails when the controller cannot change the system temporary directory's permissions. Selection creates a private child and leaves the shared parent unchanged.
 - **source:** Remote source selection enforces the existing 1 MiB configuration limit on Git 2.56, including through configuration symlinks. An oversized blob omitted by the fetch filter is refused instead of being treated as an absent configuration.
 - **memo:** Jobs in checkouts with a machine-local repository identity run normally instead of failing with `digest is not readable`. Memo lookups miss and publication is skipped. Outputs, artifacts and local dependency caches remain available.

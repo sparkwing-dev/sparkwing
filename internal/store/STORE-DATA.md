@@ -843,6 +843,10 @@ grant and renewal use claim-or-owner liveness. Expired reservations do not reviv
 Job and run terminal transitions release their records. Released work settles
 while plan reacquisition withholds only new releases.
 
+PostgreSQL admission locks use the `admission_work` table identity as their hash
+seed. Connections to the same store contend; independent schemas in the same
+database cannot make each other defer admission.
+
 Approval predicates and generated expansions use store-owned evaluation release
 permission. Approval callbacks hold no groups or compute. Controller-owned
 approvals use source-fenced evaluation units. Typed outcomes settle the source

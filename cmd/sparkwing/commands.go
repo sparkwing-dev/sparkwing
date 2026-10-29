@@ -443,10 +443,12 @@ func writeSplitMarkdownOutput(dir string, cmds []CommandJSON, output string) err
 	var wrote, unchanged, removed int
 	for _, name := range names {
 		path := filepath.Join(dir, name)
+		// #nosec G703 -- this generator reads its own registry-derived names in the operator-selected output directory
 		if prev, rerr := os.ReadFile(path); rerr == nil && string(prev) == files[name] {
 			unchanged++
 			continue
 		}
+		// #nosec G703 -- this generator writes its own registry-derived names in the operator-selected output directory
 		if err := os.WriteFile(path, []byte(files[name]), 0o644); err != nil {
 			return fmt.Errorf("commands: %w", err)
 		}
@@ -464,10 +466,12 @@ func writeSplitMarkdownOutput(dir string, cmds []CommandJSON, output string) err
 		if _, ok := files[name]; ok {
 			continue
 		}
+		// #nosec G703 -- ReadDir supplies a basename inside the operator-selected output directory
 		data, rerr := os.ReadFile(filepath.Join(dir, name))
 		if rerr != nil || !strings.HasPrefix(string(data), "<!-- GENERATED from the CLI command registry") {
 			continue
 		}
+		// #nosec G703 -- only generated pages enumerated inside the operator-selected output directory are removed
 		if err := os.Remove(filepath.Join(dir, name)); err != nil {
 			return fmt.Errorf("commands: %w", err)
 		}
