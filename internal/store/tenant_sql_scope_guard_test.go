@@ -769,7 +769,7 @@ func looksLikeSQL(s string) bool { return sqlVerbRe.MatchString(s) }
 
 func collapse(s string) string { return strings.Join(strings.Fields(s), " ") }
 
-// The blind spots security pass 3 reproduced with this guard's own matcher.
+// Syntax this guard's matcher cannot judge is refused rather than passed.
 func TestTenantSQLScope_RefusesUnjudgeableSyntax(t *testing.T) {
 	for _, c := range []struct {
 		sql     string

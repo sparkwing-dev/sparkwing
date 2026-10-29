@@ -11,8 +11,8 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
 )
 
-// B15: log preparation took the run before the writer's authority, while
-// renewal takes the authority before the run, so the two deadlocked.
+// Log preparation must lock the writer's authority before the run, because
+// renewal takes them in that order.
 func TestPostgresLogPreparationLocksAuthorityBeforeRunAgainstRenewal(t *testing.T) {
 	st, demand, ctx := lockOrderStore(t)
 	claim, err := st.AsOperator().ClaimUnit(ctx, demand)

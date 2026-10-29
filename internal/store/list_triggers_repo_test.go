@@ -12,8 +12,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/store/internal/storetest"
 )
 
-// The repo filter reads GITHUB_REPOSITORY out of each row, so it has to
-// keep reading past the newest page to fill the caller's limit.
+// Newer triggers of other repositories must not consume the caller's limit.
 func TestListTriggers_RepoFilterLooksPastTheFirstPage(t *testing.T) {
 	s := storetest.Open(t)
 	ctx := context.Background()
@@ -86,8 +85,6 @@ func TestListTriggers_RepoFilterHonoursLimit(t *testing.T) {
 	}
 }
 
-// One page is 200 rows, so a match older than that is only reachable if
-// the walk carries its cursor across the page boundary.
 func TestListTriggers_RepoFilterCrossesAPageBoundary(t *testing.T) {
 	s := storetest.Open(t)
 	ctx := context.Background()
@@ -124,8 +121,7 @@ func TestListTriggers_RepoFilterCrossesAPageBoundary(t *testing.T) {
 	}
 }
 
-// Triggers sharing a created_at must not be dropped or repeated at a page
-// boundary, which is what the id half of the cursor is for.
+// Triggers sharing a created_at order by id, so none is dropped or repeated.
 func TestListTriggers_RepoFilterTiedTimestampsAcrossPages(t *testing.T) {
 	s := storetest.Open(t)
 	ctx := context.Background()

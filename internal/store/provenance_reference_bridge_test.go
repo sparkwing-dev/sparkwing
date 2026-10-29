@@ -492,7 +492,7 @@ func ProvenanceReferenceModel(t *testing.T, open func(*testing.T) *Store) {
 			want:  asserted("nightly", "armer/armer", "refs/heads/main", "team-token"),
 		},
 		{
-			// 11 M2 and the M1 review: any override, here only the time zone, means a
+			// Any override, here only the time zone, means a
 			// principal chose part of the fire, so it cannot keep trigger:cron.
 			name:  "a schedule fire with any override is asserted",
 			admit: func(t *testing.T, s *Store) (*Tenant, string) { return scheduleReference(t, s, "override") },
@@ -544,7 +544,7 @@ func ProvenanceReferenceModel(t *testing.T, open func(*testing.T) *Store) {
 			want: provenanceObservation{Repository: "acme/repo", Subject: "team:a:repository_id:1:pipeline:ci:trigger:push:runner:runner:runner_environment:persistent:ref:refs/heads/main", SHA: referenceMain, Write: "refs/heads/main", Reads: []string{"refs/heads/main"}, Pools: []string{"deploy-pool"}, DefaultClaimant: true, Secrets: []string{"ci-token", "team-token"}},
 		},
 		{
-			// 10#1 and 13 C1: a feature-branch job names main and the deploy pipeline
+			// A feature-branch job names main and the deploy pipeline
 			// with its own commit. It must not mint main's subject, reach any
 			// pipeline's scoped secrets, the main-only pool or main's write scope.
 			name: "attack: a feature child claiming main's ref and the deploy pipeline is refused main's identity",
@@ -619,8 +619,7 @@ func ProvenanceReferenceModel(t *testing.T, open func(*testing.T) *Store) {
 	}
 }
 
-// UnverifiedWritersShareNoScope is 11 S3 and 13 C2: one
-// editor's manual run naming main writes a scope that no other member's run, no
+// UnverifiedWritersShareNoScope: one editor's manual run naming main writes a scope that no other member's run, no
 // schedule fire, no Actions build and no verified build of main reads.
 func UnverifiedWritersShareNoScope(t *testing.T, open func(*testing.T) *Store) {
 	s := open(t)

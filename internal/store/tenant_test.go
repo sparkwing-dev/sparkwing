@@ -181,8 +181,7 @@ func TestTenantWritesReportNotFoundForAnotherTeamsRun(t *testing.T) {
 	}
 }
 
-// The un-ported *Store surface writes the default team, so a caller
-// that has not moved yet and the default team's handle see one store.
+// A run seeded for the default team reads back through the default team's handle.
 func TestUnportedStoreWritesLandInTheDefaultTeam(t *testing.T) {
 	ctx := context.Background()
 	st := storetest.New(t).Open(t)
