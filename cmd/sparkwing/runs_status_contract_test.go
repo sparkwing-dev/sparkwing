@@ -228,7 +228,7 @@ func TestRunStatusReceiptMismatchIsIncomplete(t *testing.T) {
 }
 
 func TestRunStatusPlainValuesAndTerminalExits(t *testing.T) {
-	for _, status := range []string{"success", "failed", "cancelled", "running"} {
+	for _, status := range []string{"success", "dry_run", "failed", "cancelled", "running"} {
 		for _, exitZero := range []bool{false, true} {
 			r := &statusReader{details: []controllerwire.RunDetail{{ID: "r1", Status: status}}}
 			args := []string{"-o", "plain"}
@@ -238,7 +238,7 @@ func TestRunStatusPlainValuesAndTerminalExits(t *testing.T) {
 			var out bytes.Buffer
 			err := observeRunStatus(t.Context(), statusInvocation(t, args...), r, &out, nil)
 			want := 1
-			if exitZero || status == "success" {
+			if exitZero || status == "success" || status == "dry_run" {
 				want = 0
 			}
 			if status == "running" {
