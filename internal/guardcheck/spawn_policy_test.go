@@ -9,7 +9,7 @@ import (
 	"golang.org/x/tools/go/packages"
 )
 
-func TestPipelineProcessesRequirePolicyConstructors(t *testing.T) {
+func TestPackagesOutsideTheHostListRequirePolicyConstructors(t *testing.T) {
 	root := t.TempDir()
 	files := map[string]string{
 		"go.mod": "module " + modulePath + "\n\ngo 1.26.0\n",
@@ -32,7 +32,7 @@ func control(ctx context.Context) { p.ControlCommand(os.Environ(),"go"); p.Contr
 var factory = p.HostCommand
 `,
 	}
-	for _, name := range []string{"repos", "pipelineentry", "nodehost", "engine/subpackage"} {
+	for _, name := range []string{"repos", "pipelineentry", "nodehost", "engine/subpackage", "newexecutor"} {
 		files["internal/"+name+"/env.go"] = files["internal/engine/env.go"]
 	}
 	for name, source := range files {
@@ -48,14 +48,14 @@ var factory = p.HostCommand
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(pkgs) != 6 {
+	if len(pkgs) != 7 {
 		t.Fatalf("load: %+v", pkgs)
 	}
 	for _, pkg := range pkgs {
 		if len(pkg.Errors) != 0 {
 			t.Fatalf("load %s: %v", pkg.PkgPath, pkg.Errors)
 		}
-		if !pipelinePackage(pkg.PkgPath) {
+		if pkg.PkgPath == modulePath+"/internal/procenv" {
 			continue
 		}
 		findings := packageSpawnFindings(pkg)

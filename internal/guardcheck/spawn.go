@@ -5,6 +5,7 @@ import (
 	"go/ast"
 	"go/types"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 
@@ -52,10 +53,10 @@ func packageSpawnFindings(pkg *packages.Package) []string {
 					break
 				}
 				path, name := object.Pkg().Path(), object.Name()
-				if pipelinePackage(pkg.PkgPath) && path == modulePath+"/internal/procenv" {
+				if path == modulePath+"/internal/procenv" && pkg.PkgPath != path && !hostCommandPackage(pkg.PkgPath) {
 					switch name {
 					case "HostCommand", "HostCommandContext", "ControlCommand", "ControlCommandContext", "ConfigureWindowsBash", "Replace":
-						report(node, "pipeline processes require procenv.Command or CommandContext with procenv.Env, not "+name)
+						report(node, "a package outside hostCommandPackages requires procenv.Command or CommandContext with procenv.Env, not "+name)
 					}
 				}
 				forbidden := path == "os/exec" && (name == "Command" || name == "CommandContext") || path == "os" && name == "StartProcess" || (path == "syscall" || path == "golang.org/x/sys/unix" || path == "golang.org/x/sys/windows") && (name == "Exec" || name == "ForkExec" || name == "StartProcess" || name == "CreateProcess" || name == "CreateProcessAsUser" || name == "ForkExecWithEnv")
@@ -119,13 +120,46 @@ func rawCommandType(t types.Type) bool {
 	return ok && named.Obj().Pkg() != nil && named.Obj().Pkg().Path() == "os/exec" && named.Obj().Name() == "Cmd"
 }
 
-// These packages execute repository-controlled code rather than host tooling.
-func pipelinePackage(path string) bool {
-	for _, name := range []string{"repos", "pipelineentry", "nodehost", "engine"} {
-		root := modulePath + "/internal/" + name
-		if path == root || strings.HasPrefix(path, root+"/") {
-			return true
-		}
-	}
-	return false
+// hostCommandPackages run host tooling, so their children may inherit the
+// host or controller environment. Every other package, including one added
+// later and those that run repository code (repos, pipelineentry, nodehost,
+// engine), builds its environment through procenv.Command; joining this list
+// is a reviewed decision.
+var hostCommandPackages = []string{
+	"bin/qagoproxy",
+	"cmd/sparkwing",
+	"cmd/verify-release",
+	"internal/acceptance",
+	"internal/bincache",
+	"internal/chaos/crashdummy",
+	"internal/chaos/soakguard",
+	"internal/cluster",
+	"internal/crons",
+	"internal/crontimer",
+	"internal/doccheck",
+	"internal/gatescope",
+	"internal/gitcmd",
+	"internal/gotoolchain",
+	"internal/guardcheck",
+	"internal/pipelineaccept",
+	"internal/pipelinegen",
+	"internal/procgroup",
+	"internal/runners/service",
+	"internal/sessionledger",
+	"internal/source",
+	"internal/source/sourcetest",
+	"internal/sparks",
+	"internal/testleak",
+	"internal/testshell",
+	"internal/wingd",
+	"internal/wingd/client",
+	"sparkwing",
+	"sparkwing/docker",
+	"sparkwing/git",
+	"sparkwing/services",
+}
+
+func hostCommandPackage(path string) bool {
+	rel, ok := strings.CutPrefix(path, modulePath+"/")
+	return ok && slices.Contains(hostCommandPackages, rel)
 }
