@@ -492,8 +492,8 @@ func ProvenanceReferenceModel(t *testing.T, open func(*testing.T) *Store) {
 			want:  asserted("nightly", "armer/armer", "refs/heads/main", "team-token"),
 		},
 		{
-			// Any override, here only the time zone, means a
-			// principal chose part of the fire, so it cannot keep trigger:cron.
+			// safety: any override, here only the time zone, means a principal chose part of the fire, so it
+			// cannot keep trigger:cron.
 			name:  "a schedule fire with any override is asserted",
 			admit: func(t *testing.T, s *Store) (*Tenant, string) { return scheduleReference(t, s, "override") },
 			want:  fetchedAt(asserted("nightly", "run/{run}", "refs/heads/main", "nightly-token", "team-token"), "acme/app", "refs/heads/main", referenceMain),
@@ -544,9 +544,8 @@ func ProvenanceReferenceModel(t *testing.T, open func(*testing.T) *Store) {
 			want: provenanceObservation{Repository: "acme/repo", Subject: "team:a:repository_id:1:pipeline:ci:trigger:push:runner:runner:runner_environment:persistent:ref:refs/heads/main", SHA: referenceMain, Write: "refs/heads/main", Reads: []string{"refs/heads/main"}, Pools: []string{"deploy-pool"}, DefaultClaimant: true, Secrets: []string{"ci-token", "team-token"}},
 		},
 		{
-			// A feature-branch job names main and the deploy pipeline
-			// with its own commit. It must not mint main's subject, reach any
-			// pipeline's scoped secrets, the main-only pool or main's write scope.
+			// safety: a feature-branch job naming main and the deploy pipeline with its own commit must not mint
+			// main's subject or reach any pipeline's scoped secrets, the main-only pool or main's write scope.
 			name: "attack: a feature child claiming main's ref and the deploy pipeline is refused main's identity",
 			admit: func(t *testing.T, s *Store) (*Tenant, string) {
 				parent, git := referenceAppProvenance(t, "refs/heads/feature", referenceFeature)

@@ -54,7 +54,7 @@ type Loop struct {
 	draining     bool
 }
 
-// startDrain may be called before or during Run; the mutex makes repeats close drain once.
+// safety: callable before or during Run; the mutex makes repeats close drain once.
 func (l *Loop) startDrain() {
 	l.mu.Lock()
 	defer l.mu.Unlock()

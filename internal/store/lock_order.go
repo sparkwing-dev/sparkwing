@@ -50,8 +50,8 @@ func compareLockTiers(a, b storeLockTier) int {
 	return cmp.Compare(slices.Index(storeLockOrder[:], a), slices.Index(storeLockOrder[:], b))
 }
 
-// Claims take the controller epoch fence, queue arbitration, authority and unit rows,
-// then the ledger. Arbitration serializes awards without unit ranking locks.
+// safety: claims take the controller epoch fence, queue arbitration, authority and unit rows, then the ledger;
+// arbitration serializes awards without unit ranking locks.
 func lockClaimQueueTx(ctx context.Context, tx *storeTx) error {
 	if tx.claimQueueLocked {
 		return nil
@@ -526,13 +526,6 @@ func (s *Store) forUpdate() string {
 func (t *storeTx) forUpdate() string {
 	if t.dialect == DialectPostgres && !t.snapshotRead {
 		return " FOR UPDATE"
-	}
-	return ""
-}
-
-func (t *storeTx) forKeyShare() string {
-	if t.dialect == DialectPostgres && !t.snapshotRead {
-		return " FOR KEY SHARE"
 	}
 	return ""
 }

@@ -135,7 +135,7 @@ func TestMemoCallbackCanonicalJSONAndKeyInvalidation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// The memo version domain separates these keys from a bare canonical hash.
+	// safety: the memo version domain separates these keys from a bare canonical hash.
 	old, _ := runspec.CanonicalHash("key")
 	if key == string(old) {
 		t.Fatal("old memo namespace was reused")
