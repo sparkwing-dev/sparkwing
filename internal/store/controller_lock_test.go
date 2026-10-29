@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgproto3"
+
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
 

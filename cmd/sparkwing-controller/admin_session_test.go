@@ -36,11 +36,11 @@ func adminSessionFixture(t *testing.T) (*store.Store, *secrets.Cipher, string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(epochDir, "credential-epoch"), epoch, 0600); err != nil {
+	if err := os.WriteFile(filepath.Join(epochDir, "credential-epoch"), epoch, 0o600); err != nil {
 		t.Fatal(err)
 	}
 	key := bytes.Repeat([]byte{42}, secrets.KeySize)
-	if err := os.WriteFile(filepath.Join(credentialsDir, "secrets-key"), []byte(base64.StdEncoding.EncodeToString(key)), 0600); err != nil {
+	if err := os.WriteFile(filepath.Join(credentialsDir, "secrets-key"), []byte(base64.StdEncoding.EncodeToString(key)), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	cipher, err := secrets.NewCipher(key)
@@ -60,7 +60,7 @@ func adminSessionFixture(t *testing.T) (*store.Store, *secrets.Cipher, string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(deploymentRecordPath(p.StateDB()), body, 0600); err != nil {
+	if err := os.WriteFile(deploymentRecordPath(p.StateDB()), body, 0o600); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.Remove(filepath.Join(p.Root, "credential-epoch")); err != nil {
