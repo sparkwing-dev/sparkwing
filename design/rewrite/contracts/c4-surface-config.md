@@ -415,8 +415,10 @@ profile backend/rerun_image settings are unknown keys.
 
 ### CLI
 
-`clisurface.Registry()` lists the whole target grammar for sparkwing,
-sparkwing-runner and sparkwing-controller, including hidden process entrypoints.
+`clisurface.Registry()` lists the whole target grammar for sparkwing and
+sparkwing-runner, including hidden process entrypoints. It also lists the
+sparkwing-controller admin subcommands; the controller's serve flags are parsed
+with pflag and are not in the registry.
 GlobalFlags apply to every row, and every flag carries its own authored help. Unknown engine flags fail;
 pipeline arguments start after `--`. Only run and pipeline trigger take a
 pipeline positional. Output selection is validated before side effects; lists
@@ -443,7 +445,7 @@ configured entrypoint for SDK requests and keeps the invoked name in RunContext.
 Plan previews redact classified arguments and structured planning failures.
 
 - `run` is local. `--publish P` uploads the record/results/logs with local
-  provenance under trust_local_builds; publication failure cannot fail the run.
+  provenance; publication failure cannot fail the run.
   `--sw-cache-from P` or run.cache_from reads only authorized verified-default-
   branch memo/artifacts/depcache, never writes, and never fetches pipeline binaries.
 - `pipeline trigger --resume RUN` reattaches that here run with its sealed spec;

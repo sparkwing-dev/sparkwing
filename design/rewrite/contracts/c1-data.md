@@ -2846,16 +2846,15 @@ refs use manual scope and never overwrite a verified ref. Depcache restores own
 ref, verified PR base, then verified default branch. A memo hit adds authorized
 edges and copies output/manifest records atomically. Missing or corrupt memo is
 a miss; depcache runs cold; staging and required output reads fail. Logs use a
-separate signed upload path and controller-proxied reads. Cloud binary execution
-checks committed digest and cloud provenance unless trust_local_builds is set.
-Local remote-cache opt-in uses the user's repo-bound read grant and returns only
+separate signed upload path and controller-proxied reads. Binary records carry
+server-assigned provenance; no execution path runs a stored binary, so
+trust_local_builds gates nothing. Local remote-cache opt-in uses the user's repo-bound read grant and returns only
 verified default-branch memo, artifacts and depcache, with no writes or binaries.
 
-`depcacheblob.NewRemoteReader` adapts that `blob.RemoteCache` to `depcache.Reader`
-with an explicit repository and lookup budget. `depcache.WithRemoteReader`
-keeps local archives first and saves locally. The remote interface has no write
-method. Both dependency-archive backends use the same verified-download and staged
-extraction path. A copied memo without an explicit output digest is a miss,
+The node host reads `blob.RemoteCache` only after the team's own record lookup
+misses, with the depcache lookup budget, and restores through the same verified
+download and `depcacheblob.RestoreArchiveIn` staged extraction as a local hit.
+The remote interface has no write method. A copied memo without an explicit output digest is a miss,
 including for followers. Explicit empty output remains a valid hit.
 
 `blob.RemoteCache` accepts a zero optional lookup deadline for unbounded local
@@ -2945,7 +2944,7 @@ already pass. Each should run on SQLite and PostgreSQL where a store is involved
 | C1-17 | Uploaded foreign-team, foreign-run and unrelated same-run digests cannot be attached by forged manifests. | 8.1 |
 | C1-18 | Missing/corrupt required bytes fail; memo misses and depcache runs cold; HasMany reveals readable bytes only. | 8.1 |
 | C1-19 | Manual refs cannot overwrite verified refs; memo cannot share across pipelines without a permitted edge. | 8.1 |
-| C1-20 | Local binary provenance is refused by Cloud until trust_local_builds; exact committed digest is executed. | 8.1 |
+| C1-20 | Binary records carry server-assigned local or cloud provenance; no execution path runs a stored binary. | 8.1 |
 | C1-21 | Opted-in local cache reads user-authorized verified-default data only, never binary fetch or shared writes. | 8.5 |
 | C1-22 | Publish accepts plan/results/logs without owner claims; failed publication leaves local success intact. | 3.1, 9.3 |
 | C1-23 | Retrying older default-branch SHA retains original App trust, actor, PR and seals, with distinct retrier lineage. | 3.1, 3.5 |
