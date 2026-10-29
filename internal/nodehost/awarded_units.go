@@ -8,7 +8,6 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/lease"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
@@ -25,7 +24,7 @@ func (h *OwnerHost) Plan(parent context.Context, input RunInput) (accepted Accep
 	if owner.Kind != runstate.OwnerTrigger || owner.RunID != runspec.RunID(input.RunID) || owner.Holder == "" || owner.Generation <= 0 {
 		return accepted, errors.New("plan unit requires its planning lease")
 	}
-	ctx, stop := h.keepUnit(parent, lease.Identity{Kind: capability.UnitPlan, RunID: input.RunID, Holder: owner.Holder, Generation: int64(owner.Generation)}, input.Owner, func() bool { return true })
+	ctx, stop := h.keepUnit(parent, input.Owner, func() bool { return true })
 	defer stop()
 	if err := context.Cause(ctx); err != nil {
 		return accepted, err
@@ -67,7 +66,7 @@ func (h *OwnerHost) Evaluate(parent context.Context, input RunInput, sourceID st
 	if err := h.Masks.initializeSeal(*input.Accepted); err != nil {
 		return err
 	}
-	ctx, stop := h.keepUnit(parent, lease.Identity{Kind: capability.UnitEval, RunID: input.RunID, NodeID: sourceID, Holder: fence.Holder, Generation: fence.Generation}, input.Owner, func() bool { return true })
+	ctx, stop := h.keepUnit(parent, input.Owner, func() bool { return true })
 	defer stop()
 	if err := context.Cause(ctx); err != nil {
 		return err
