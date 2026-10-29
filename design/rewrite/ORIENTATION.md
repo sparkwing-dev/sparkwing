@@ -30,6 +30,8 @@ credential model in `docs/auth.md`, and the decision log
 | Verified default-branch work | `Provenance.DefaultBranchWork` (Go) and its SQL twin `claimSQL.defaultBranchWork` (`claim_query.go`) | `trust_sql_test.go`: `TestDefaultBranchWorkSQLAgreesWithGo` |
 | Sealed provenance | `internal/runspec/seal.go`: `SealRequest`; store side `intake_provenance.go`: `sealProvenanceTx`, `identityTx` | `internal/runspec/provenance_test.go`: `TestProvenanceRoundTripsAndRefusesForgedSeals`; `internal/runspec/spec_test.go`: `TestSealRefusals` |
 | Fetched repository (run-now, console, unlocked schedules) | `internal/controller/intake_source.go`: `selectFetchedSource`; `run_spec.go`: `FetchedRepository`; `intake_provenance.go`: `fetchedRepositoryTx`; `Provenance.FetchedFrom` | `internal/controller/intake_source_test.go`: `TestFetchedGitHubRepositoryFollowsSourceSelection` |
+| Source selection leaves the shared temporary parent unchanged | `internal/source/select.go`: `readCommitFile` prepares only an explicit workspace; `fssecure.MkdirPrivateTemp` owns the private child | `internal/source/select_temp_unix_test.go`: `TestSelectLeavesTheSharedTemporaryParentUnchanged` |
+| Remote configuration size is checked without downloading oversized blobs | `internal/source/select.go`: `readCommitFile` filters blobs and blocks transports during local inspection | `internal/source/select_size_test.go`: `TestTenantSelectionNeverDownloadsAnOversizedConfiguration`, `TestTenantSelectionAllowsAnAbsentConfiguration`; `select_size_unix_test.go`: `TestTenantSelectionRefusesOversizedConfigurationBehindSymlink` |
 | OIDC claims | `Provenance.OIDC`; `internal/oidcissuer/issuer.go`: `Claims`, `runnerEnvironment`; `authority_oidc.go`: `Tenant.MintOIDCToken` | `oidc_repository_test.go`: `TestOIDCRepositoryClaimReadsSealedProvenance`; `pool_launcher_test.go`: `TestLauncherPodOIDCIsFresh` |
 
 ### Claims and placement
@@ -96,6 +98,12 @@ credential model in `docs/auth.md`, and the decision log
 | Node reuse labels (one run per node) | `internal/runners/launcher/node_team.go`: `usedTeamLabel`, `usedRunLabel`, `runNodeValue`; `internal/runners/launcher/boundary.go`: `KubernetesBoundary.Reserve` | `internal/runners/launcher/boundary_test.go`: `TestBoundaryReusesAWarmNodeOnlyWithinItsRun` |
 | Pod admission policy | `internal/runners/launcher/admission_policy.go` | `internal/runners/launcher/admission_policy_test.go`: `TestAdmissionPolicyOnAPIServer` (skips without `KUBEBUILDER_ASSETS`) |
 | NetworkPolicy (decision 71) | `charts/sparkwing-runner-bundle/templates/launcher-networkpolicy.yaml` | `charts/cloud_test.go`: `TestCloudExampleRendersCompleteInstall` |
+
+### Memoization
+
+| Rule | Owner | Guard test |
+| --- | --- | --- |
+| Local repository memo lookups miss after scope checks; publication is skipped | `blob_lookup.go`: `lookupMemoTx`; `internal/nodehost/executor_memo.go`: `saveMemo` | `blob_local_cache_test.go`: `TestLocalDepcacheRoundTrip`; `internal/nodehost/native_memo_test.go`: `TestNativeExecutorLocalRepositoryMemoRunsBody`; `internal/nodehost/executor_memo_test.go`: `TestExecutorLocalRepositorySkipsMemoPublication` |
 
 ### CLI and API surface
 

@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"testing"
 	"testing/quick"
 
@@ -69,6 +70,37 @@ func TestLocalDepcacheRoundTrip(t *testing.T) {
 			key := blob.RecordKey{Team: "a", Kind: blob.KindDepcache, Scope: blob.Scope{Repo: repo, Ref: assertedRef(ref), Key: "v1"}, Name: "modules"}
 			if _, err := records.CommitRecord(t.Context(), blob.CommitRecordRequest{Authority: authority, Source: intent.Identity, Key: key, Digest: intent.Digest}); err != nil {
 				t.Fatal(err)
+			}
+			memo := blob.MemoLookup{Authority: authority, Key: blob.MemoKey{Repo: repo, Ref: authority.Ref.Scope, Pipeline: "ci", Job: "job", Hash: fixtureMemoHash}}
+			if hit, err := records.LookupMemo(t.Context(), memo); err != nil || hit.Found {
+				t.Fatalf("local memo must miss: %+v %v", hit, err)
+			}
+			if hit, err := records.CopyMemo(t.Context(), blob.CopyMemoRequest{Lookup: memo, Destination: authority.Attempt.Value}); err != nil || hit.Found {
+				t.Fatalf("local memo copy must miss: %+v %v", hit, err)
+			}
+			for _, field := range []string{"repo", "local_repo", "pipeline", "job", "ref", "hash"} {
+				bad := memo
+				switch field {
+				case "repo":
+					bad.Key.Repo = "gh:1"
+				case "local_repo":
+					bad.Key.Repo += "foreign"
+				case "pipeline":
+					bad.Key.Pipeline += "foreign"
+				case "job":
+					bad.Key.Job += "foreign"
+				case "ref":
+					bad.Key.Ref.Ref += "foreign"
+				case "hash":
+					bad.Key.Hash = ""
+				}
+				if hit, err := records.LookupMemo(t.Context(), bad); !errors.Is(err, blob.ErrDigestNotReadable) || hit.Found {
+					t.Fatalf("foreign memo %s must be refused: %+v %v", field, hit, err)
+				}
+			}
+			memoKey := blob.RecordKey{Team: "a", Kind: blob.KindMemo, Scope: blob.Scope{Repo: repo, Ref: authority.Ref.Scope, Pipeline: "ci", Job: "job", Key: string(fixtureMemoHash)}, Name: blob.MemoRecordName}
+			if _, err := records.CommitRecord(t.Context(), blob.CommitRecordRequest{Authority: authority, Source: intent.Identity, Key: memoKey, Digest: intent.Digest}); err == nil {
+				t.Fatal("local repository published a memo")
 			}
 			intent.Authority.Upload = runspec.Optional[blob.UploadIdentity]{}
 			reader := addBlobJob(t, s, intent, "consumer")

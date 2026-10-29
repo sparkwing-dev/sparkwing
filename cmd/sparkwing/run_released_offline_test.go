@@ -50,7 +50,6 @@ func TestReleasedEngineOfflineUsesSignedPolicyAndVerifiedCache(t *testing.T) {
 		t.Fatal(err)
 	}
 	binary := filepath.Join(t.TempDir(), "engine")
-	// safety: this synthetic release version must not conflict with the checkout's VCS-derived module version.
 	build := exec.Command("go", "build", "-buildvcs=false", "-p", "4", "-ldflags", "-X main.Version="+version, "-o", binary, "./cmd/sparkwing")
 	build.Dir = root
 	if out, err := build.CombinedOutput(); err != nil {

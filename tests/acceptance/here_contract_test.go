@@ -48,7 +48,7 @@ func TestHereResumeClaimContract(t *testing.T) {
 			}
 			got, err := c.Claim(t.Context(), controllerwire.ClaimRequest{RunID: "here-run", Kinds: []capability.UnitKind{capability.UnitTrigger}})
 			if err != nil || calls != 1 || !reflect.DeepEqual(got.Claim, &want) {
-				t.Fatal("here reclaim changed the server's seal or fence")
+				t.Fatalf("here reclaim: calls=%d claim=%+v, want %+v, err=%v", calls, got.Claim, &want, err)
 			}
 		})
 	}

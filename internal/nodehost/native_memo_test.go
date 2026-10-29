@@ -24,6 +24,15 @@ import (
 )
 
 func TestNativeExecutorMemoRecipeHitUsesClaimAndReleasesAdmission(t *testing.T) {
+	nativeExecutorMemoRuns(t, "gh:1", true)
+}
+
+func TestNativeExecutorLocalRepositoryMemoRunsBody(t *testing.T) {
+	nativeExecutorMemoRuns(t, runspec.RepoKey("local:"+strings.Repeat("a", 64)), false)
+}
+
+func nativeExecutorMemoRuns(t *testing.T, repo runspec.RepoKey, reuse bool) {
+	t.Helper()
 	ctx := t.Context()
 	objects, directory := nativeStoreObjects(t)
 	database := openStore(t, store.WithPolicies(func(*store.Store) (store.Policies, error) {
@@ -33,7 +42,10 @@ func TestNativeExecutorMemoRecipeHitUsesClaimAndReleasesAdmission(t *testing.T) 
 	job.Concurrency = []nodeproto.ConcurrencySpec{{Group: "memo-job", Scope: new("global"), Capacity: new(1), Cost: new(1), OnLimit: new("queue")}}
 	job.Artifacts = []string{"artifact.txt"}
 	plan := nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{job}}
-	request := runspec.Request{Version: 1, Team: string(store.DefaultTeam), Pipeline: "p", Mode: runspec.IntakeExecute, Origin: runspec.OriginTrigger, Dispatch: runspec.DispatchHost, Git: runspec.Git{Repository: runspec.Repository{Key: "gh:1"}, SHA: strings.Repeat("a", 40)}}
+	request := runspec.Request{Version: 1, Team: string(store.DefaultTeam), Pipeline: "p", Mode: runspec.IntakeExecute, Origin: runspec.OriginTrigger, Dispatch: runspec.DispatchHost, Git: runspec.Git{Repository: runspec.Repository{Key: repo}, SHA: strings.Repeat("a", 40)}}
+	if !reuse {
+		request.Origin = runspec.OriginLocal
+	}
 	bodies := 0
 	for run := range 2 {
 		f := newStoreHostFixtureForRequest(t, database, plan, request)
@@ -111,10 +123,14 @@ func TestNativeExecutorMemoRecipeHitUsesClaimAndReleasesAdmission(t *testing.T) 
 		}
 		row, err := f.Tenant.ReadNode(ctx, ref)
 		want := runstate.NodeSuccess
-		if run == 1 {
+		if reuse && run == 1 {
 			want = runstate.NodeMemoized
 		}
-		if err != nil || row.Status != runstate.StatusDone || row.Outcome != want || row.Attempt != 1 || row.ClaimedBy != "" || row.OutputRecord == nil || row.ManifestRecord == nil || bodies != 1 {
+		wantBodies := run + 1
+		if reuse {
+			wantBodies = 1
+		}
+		if err != nil || row.Status != runstate.StatusDone || row.Outcome != want || row.Attempt != 1 || row.ClaimedBy != "" || row.OutputRecord == nil || row.ManifestRecord == nil || bodies != wantBodies {
 			t.Fatalf("run=%d row=%+v bodies=%d error=%v", run, row, bodies, err)
 		}
 		attempt := runspec.AttemptIdentity{Team: request.Team, RunID: f.Input.RunID, NodeID: job.ID, Attempt: int64(row.Attempt), Generation: int64(row.Generation)}

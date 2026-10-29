@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"strings"
 	"testing"
 	"time"
 
@@ -144,6 +145,19 @@ func TestExecutorMemoImportsRemoteArtifactsIntoLocalAttempt(t *testing.T) {
 	}
 	if commits[1].Members[0].Team != "team" || remote.hit.Members[0].Team != "remote-team" || commits[1].Source.Attempt != input.Storage.Authority.Attempt {
 		t.Fatal("remote manifest was not imported under local attempt authority")
+	}
+}
+
+func TestExecutorLocalRepositorySkipsMemoPublication(t *testing.T) {
+	host, input, _, _, _, backend := executorMemoFixture(t, nil)
+	input.Storage.Authority.Repo = runspec.RepoKey("local:" + strings.Repeat("a", 64))
+	backend.onPut = func(context.Context, blob.PutRequest) (blob.Receipt, error) {
+		t.Fatal("local memo publication uploaded bytes")
+		return blob.Receipt{}, nil
+	}
+	hash, _ := runspec.CanonicalHash("key")
+	if err := host.saveMemo(t.Context(), input, hash, runstate.NodeResult{Outcome: runstate.NodeSuccess}); err != nil {
+		t.Fatalf("local memo publication must skip cleanly: %v", err)
 	}
 }
 

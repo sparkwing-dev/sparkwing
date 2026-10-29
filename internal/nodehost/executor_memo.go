@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
@@ -194,7 +195,7 @@ func executorMemoIdentity(authority blob.Authority) blob.UploadIdentity {
 }
 
 func (h *nodeExecutor) saveMemo(ctx context.Context, input NodeInput, hash runspec.Hash, result runstate.NodeResult) error {
-	if hash == "" || result.Outcome != runstate.NodeSuccess {
+	if hash == "" || result.Outcome != runstate.NodeSuccess || strings.HasPrefix(string(input.Storage.Authority.Repo), "local:") {
 		return nil
 	}
 	storage := input.Storage

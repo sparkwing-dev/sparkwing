@@ -113,8 +113,7 @@ func readCommitFile(ctx context.Context, spec Spec, sha, name string, options Op
 	if _, err := client.run(ctx, repository, remote, "fetch", "--quiet", "--no-tags", "--no-recurse-submodules", "--no-write-fetch-head", "--depth=1", "--filter=blob:limit="+strconv.FormatInt(limits.ProjectConfigBytes+1, 10), "--", remote, sha); err != nil {
 		return nil, false, err
 	}
-	// safety: disable lazy-fetch transports so filtered blobs stay absent and
-	// Git still distinguishes an omitted blob from a path missing in the commit.
+	// safety: cat-file must not fetch a blob that the size filter omitted.
 	local := *client
 	local.env = append(append([]string{}, client.env...), "GIT_ALLOW_PROTOCOL=")
 	return readCommittedBlob(ctx, &local, repository, sha+":"+name)

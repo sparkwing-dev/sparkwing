@@ -983,30 +983,27 @@ func renderNotes(t *testing.T, sets ...string) string {
 	if err := os.CopyFS(chart, os.DirFS("sparkwing-full")); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.Rename(filepath.Join(chart, "templates", "NOTES.txt"), filepath.Join(chart, "notes.txt")); err != nil {
-		t.Fatal(err)
-	}
-	// safety: Helm 3 install dry-runs contact Kubernetes; template renders
-	// the same notes through tpl without requiring cluster access.
-	manifest := `apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: notes
-data:
-  notes: {{ tpl (.Files.Get "notes.txt") . | quote }}
-`
-	if err := os.WriteFile(filepath.Join(chart, "templates", "notes.yaml"), []byte(manifest), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	out, err := exec.Command(helm, helmArgs(chart, "sparkwing", sets, "--show-only", "templates/notes.yaml")...).CombinedOutput()
+	notes, err := os.ReadFile(filepath.Join(chart, "templates", "NOTES.txt"))
 	if err != nil {
-		t.Fatalf("helm template notes: %v\n%s", err, out)
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(chart, "notes.txt"), notes, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	fixture := "apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: notes\ndata:\n  notes: |\n{{ tpl (.Files.Get \"notes.txt\") . | indent 4 }}\n"
+	if err := os.WriteFile(filepath.Join(chart, "templates", "test-notes.yaml"), []byte(fixture), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	args := helmArgs(chart, "sparkwing", sets, "--show-only", "templates/test-notes.yaml")
+	out, err := exec.Command(helm, args...).CombinedOutput()
+	if err != nil {
+		t.Fatalf("helm template: %v\n%s", err, out)
 	}
 	var rendered struct {
 		Data map[string]string `yaml:"data"`
 	}
 	if err := yaml.Unmarshal(out, &rendered); err != nil {
-		t.Fatal(err)
+		t.Fatalf("parse rendered notes: %v\n%s", err, out)
 	}
 	return rendered.Data["notes"]
 }

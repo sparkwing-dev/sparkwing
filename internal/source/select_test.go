@@ -167,27 +167,3 @@ func TestSelectUsesHostAuthorityForExecutionAndConfiguredSourceRevisions(t *test
 		})
 	}
 }
-
-func TestRemoteSelectionPreservesTheSystemTemporaryDirectory(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("Unix permissions")
-	}
-	parent := t.TempDir()
-	if err := os.Chmod(parent, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	t.Setenv("TMPDIR", parent)
-	remote := "https://8.8.8.8/team/temp-parent"
-	sha := sourcetest.FixedRemote(t, remote)
-	options := source.Options{Access: &access{}, Base: procenv.Base{Local: true, Captured: sourcetest.Environment(t)}, BuildEnvironment: sourcetest.BuildEnvironment}
-	if _, _, _, err := source.Select(t.Context(), source.Spec{RemoteURL: remote}, "build", runspec.Git{SHA: sha}, runspec.Source{}, "", options); err != nil {
-		t.Fatal(err)
-	}
-	info, err := os.Stat(parent)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got := info.Mode().Perm(); got != 0o755 {
-		t.Fatalf("system temporary directory mode = %04o, want 0755", got)
-	}
-}
