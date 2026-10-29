@@ -156,8 +156,6 @@ func scopeRelationRefs(tokens []string, tables []string) []string {
 	return refs
 }
 
-// scopeEveryRelationBound reports whether every relation of tables in one query is pinned on column by its
-// restricting predicates; a bare column pins the query's only such relation.
 func scopeEveryRelationBound(tokens, parents []string, column string, tables []string) bool {
 	if len(scopeRelationRefs(tokens, tables)) == 0 {
 		// safety: a query whose relations the reader cannot name (a CTE result, a table spliced in at run time)
@@ -167,6 +165,8 @@ func scopeEveryRelationBound(tokens, parents []string, column string, tables []s
 	return scopeRelationsBound(tokens, parents, column, tables)
 }
 
+// safety: every relation of tables in one query must be pinned on column by its restricting predicates; a bare
+// column pins the query's only such relation.
 func scopeRelationsBound(tokens, parents []string, column string, tables []string) bool {
 	refs := scopeRelationRefs(tokens, tables)
 	seed := map[string]bool{}
@@ -182,7 +182,6 @@ func scopeRelationsBound(tokens, parents []string, column string, tables []strin
 	return true
 }
 
-// scopeBoundRefs names the column references a bound query passes to its subqueries.
 func scopeBoundRefs(tokens []string, column string, tables []string) []string {
 	var out []string
 	for _, ref := range scopeRelationRefs(tokens, tables) {
