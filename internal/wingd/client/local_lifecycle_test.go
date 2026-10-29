@@ -14,6 +14,7 @@ type lifecycleOwner struct {
 	err                       error
 	stays, dashboards, drains int
 	address                   string
+	readOnly                  bool
 	onStay                    func()
 }
 
@@ -33,9 +34,9 @@ func (o *lifecycleOwner) SetStay(_ context.Context, stay bool) error {
 	return o.err
 }
 
-func (o *lifecycleOwner) EnsureDashboard(_ context.Context, address string) error {
+func (o *lifecycleOwner) EnsureDashboard(_ context.Context, address string, readOnly bool) error {
 	o.dashboards++
-	o.address = address
+	o.address, o.readOnly = address, readOnly
 	return o.err
 }
 
@@ -85,12 +86,12 @@ func TestLocalLifecycleReusesForeignOwner(t *testing.T) {
 	local := &localRuntimeFixture{}
 	owner := &lifecycleOwner{status: wingd.LocalStatus{Running: true, PID: 72, Version: "v1"}}
 	lifecycle := localLifecycleFixture(t, home, local, owner)
-	opts := wingd.LocalStartOptions{Home: home, Version: "v2", Stay: true, DashboardAddress: "127.0.0.1:9173"}
+	opts := wingd.LocalStartOptions{Home: home, Version: "v2", Stay: true, DashboardAddress: "127.0.0.1:9173", DashboardReadOnly: true}
 	status, err := lifecycle.StartDashboard(t.Context(), opts)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if status.PID != 72 || status.Version != "v1" || !status.Stay || local.starts != 0 || owner.stays != 1 || owner.dashboards != 1 || owner.address != opts.DashboardAddress {
+	if status.PID != 72 || status.Version != "v1" || !status.Stay || local.starts != 0 || owner.stays != 1 || owner.dashboards != 1 || owner.address != opts.DashboardAddress || !owner.readOnly {
 		t.Fatalf("owner=%+v local starts=%d stays=%d dashboards=%d", status, local.starts, owner.stays, owner.dashboards)
 	}
 	if err := lifecycle.Stop(t.Context()); err != nil {

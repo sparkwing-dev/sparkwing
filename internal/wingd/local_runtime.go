@@ -137,7 +137,7 @@ func (r *localRuntime) Run(ctx context.Context, opts LocalStartOptions) (err err
 	d.cfg.Runs = controller
 	d.localControl = func(stay *bool) LocalStatus { return r.control(session, stay) }
 	d.localDashboard = r.EnsureDashboard
-	return r.serve(ctx, session, controller, opts.DashboardAddress)
+	return r.serve(ctx, session, controller, opts.DashboardAddress, opts.DashboardReadOnly)
 }
 
 func (r *localRuntime) begin(d *Daemon, cancel context.CancelFunc) (*localRuntimeSession, error) {
@@ -160,7 +160,7 @@ func (r *localRuntime) changed() {
 	r.change = make(chan struct{})
 }
 
-func (r *localRuntime) serve(ctx context.Context, session *localRuntimeSession, controller LocalController, dashboard string) error {
+func (r *localRuntime) serve(ctx context.Context, session *localRuntimeSession, controller LocalController, dashboard string, readOnly bool) error {
 	d := session.daemon
 	var workers sync.WaitGroup
 	var failuresMu sync.Mutex
@@ -203,16 +203,17 @@ func (r *localRuntime) serve(ctx context.Context, session *localRuntimeSession, 
 	}
 	var dashboardListener net.Listener
 	var dashboardAddress string
+	var dashboardReadOnly bool
 	var dashboardReady chan struct{}
 	defer func() {
 		if dashboardListener != nil {
 			dashboardListener.Close()
 		}
 	}()
-	startDashboard := func(bindCtx context.Context, address string) error {
+	startDashboard := func(bindCtx context.Context, address string, requestedReadOnly bool) error {
 		if dashboardListener != nil {
-			if dashboardAddress != address {
-				return fmt.Errorf("wingd: dashboard already serves %s; stop the controller before changing its address", dashboardAddress)
+			if dashboardAddress != address || dashboardReadOnly != requestedReadOnly {
+				return fmt.Errorf("wingd: dashboard already serves %s; stop the controller before changing its address or read-only policy", dashboardAddress)
 			}
 			return nil
 		}
@@ -226,19 +227,19 @@ func (r *localRuntime) serve(ctx context.Context, session *localRuntimeSession, 
 		if err != nil {
 			return fmt.Errorf("wingd: dashboard listen: %w", err)
 		}
-		dashboardListener, dashboardAddress = ln, address
+		dashboardListener, dashboardAddress, dashboardReadOnly = ln, address, requestedReadOnly
 		dashboardReady = make(chan struct{})
 		logins.serving("http://" + ln.Addr().String())
 		workers.Go(func() {
 			defer ln.Close()
 			serve("dashboard", func() error {
-				return ServeLocalHTTP(ctx, &readyListener{Listener: ln, ready: dashboardReady}, guardDashboard(controller.HTTP(), ln.Addr().String(), logins), nil, d.dashboardConnection)
+				return ServeLocalHTTP(ctx, &readyListener{Listener: ln, ready: dashboardReady}, guardDashboard(controller.HTTP(), ln.Addr().String(), logins, requestedReadOnly), nil, d.dashboardConnection)
 			})
 		})
 		return nil
 	}
 	if dashboard != "" {
-		if err := startDashboard(ctx, dashboard); err != nil {
+		if err := startDashboard(ctx, dashboard, readOnly); err != nil {
 			return err
 		}
 	} else {
@@ -281,7 +282,7 @@ running:
 		case request := <-session.dashboard:
 			dashboardErr := request.ctx.Err()
 			if dashboardErr == nil {
-				dashboardErr = startDashboard(request.ctx, request.address)
+				dashboardErr = startDashboard(request.ctx, request.address, request.readOnly)
 			}
 			if dashboardErr == nil {
 				select {
@@ -476,12 +477,23 @@ func (r *localRuntime) Drain(ctx context.Context) error {
 	}
 }
 
-// safety: TCP carries no peer identity, so only the dashboard's own loopback
+// safety: TCP carries no peer identity, so only the dashboard's own
 // origin may reach it, and only with a session from a link api.sock minted; a
 // rebound DNS name or another site's page is refused before the session check.
-func guardDashboard(local localhostwire.LocalHTTP, addr string, logins *dashboardLogins) http.Handler {
+func guardDashboard(local localhostwire.LocalHTTP, addr string, logins *dashboardLogins, readOnly bool) http.Handler {
 	if local.Dashboard == nil {
 		return nil
 	}
-	return originguard.Guard(logins.gate(local.Dashboard, local.Shell), originguard.NewPolicy(addr, !originguard.LoopbackHost(addr), nil))
+	dashboard := local.Dashboard
+	if readOnly {
+		dashboard = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			switch r.Method {
+			case http.MethodGet, http.MethodHead, http.MethodOptions:
+				local.Dashboard.ServeHTTP(w, r)
+			default:
+				http.Error(w, "forbidden: the dashboard is read-only", http.StatusForbidden)
+			}
+		})
+	}
+	return originguard.Guard(logins.gate(dashboard, local.Shell), originguard.NewPolicy(addr, !originguard.LoopbackHost(addr), nil))
 }

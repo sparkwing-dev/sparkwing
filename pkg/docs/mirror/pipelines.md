@@ -44,7 +44,7 @@ hard parse error):
 - **entrypoint** - the SDK registration implementing it (required). Register the implementation under this name; several pipeline names may share one entrypoint.
 - **description** - one-line summary surfaced by `sparkwing pipeline list`
 - **on** - declarative trigger block: `push` (branches/paths), `pull_request` (actions/branches), `schedule` (one entry, or a list of them, each with `name`, `cron`, a required `where`, `tz`, `overlap`, `catch_up`, `args`), `pre_commit`, `pre_push`, `post_commit`. Absent means "manual only" (a command).
-- **guards** - gate dispatch on placement, args and git branch (`when` / `unless` token lists)
+- **guards** - gate dispatch on placement, args and git branch (`when` / `unless` token lists). Generated pipeline configuration uses these same keys.
 - **args** - per-arg default values, keyed by CLI flag name
 - **profile** - the named controller connection in the machine config. A pinned pipeline runs through `pipeline trigger --profile`.
 - **requires** - runner-label requirements inherited by every job

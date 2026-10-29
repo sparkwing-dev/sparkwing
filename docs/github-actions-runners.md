@@ -33,7 +33,7 @@ binding.
 
 The request takes `id_token` and `team`. The controller derives grants, push
 facts, expiry and runner identity. Its response carries `token`, `team`,
-`repository`, `expires_at` and `labels`. The token is returned once. The exchange
+`repository`, `expires_at`, `labels` and the verified `binding`. The token is returned once. The exchange
 has no automatic retry because a repeated request cannot recover a lost bearer.
 
 `POST /api/v1/runners/claim` accepts the requested trigger and job kinds. Each
@@ -135,3 +135,15 @@ those seals host dispatch. With `github-actions`, only an Actions runner whose
 push binding matches the delivery's repository, ref and commit may claim the
 run's trigger; other team machines are refused. A create-run request cannot
 select `github-actions` itself. See [GitHub App run owner](github-app.md#run-owner).
+
+The runner requests a GitHub ID token with the controller URL as its audience,
+then exchanges it for a short-lived controller capability. The exchange returns
+the verified push binding; the runner uses that repository and expiry for its
+claims. The workflow needs `id-token: write` and `GITHUB_TOKEN` for source access.
+
+`warm` uses controller-awarded leases and job settings. It rejects the removed
+`--heartbeat`, `--lease`, `--holder-prefix`, `--trigger-source`,
+`--accept-working-tree`, `--cpu-ceiling`, `--memory-ceiling`, `--deadline` and
+`--warm-module` flags. Configure resource ceilings on the Kubernetes launcher;
+configure job timeouts in the pipeline. Pipeline lint always analyzes source
+without running pipelines; its removed `--static` flag is rejected.

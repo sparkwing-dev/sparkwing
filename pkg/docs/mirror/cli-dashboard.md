@@ -88,9 +88,8 @@ Starts the local controller on demand; --stay pins it until stopped. Runs, queue
 | `-h, --help` | Show command help without executing. |
 | `--help-all` | Include uncommon flags in command help. |
 | `--addr HOST:PORT` | Address the dashboard listens on as HOST:PORT, 127.0.0.1:4343 by default; a non-loopback host also needs --allow-remote. |
-| `--allow-remote` | Permit a non-loopback --addr that other hosts can reach; this build refuses the flag because the local controller has no dashboard access policy yet. |
-| `--allow-origin ORIGIN` | Browser origin allowed to call the dashboard API besides its own; this build refuses the flag because the local controller has no dashboard access policy yet. Repeatable; comma-separated values are accepted. |
-| `--read-only` | Serve the dashboard without changes from the browser; this build refuses the flag because the local controller has no dashboard access policy yet. |
+| `--allow-remote` | Permit a non-loopback --addr over cleartext HTTP. The one-time login token and 24-hour session bearer cross the network unencrypted, and a session can read decrypted secrets. Use only on a trusted network or through an SSH tunnel: ssh -N -L 4343:127.0.0.1:4343 user@host (keep the remote dashboard on loopback). |
+| `--read-only` | Block browser writes while still allowing authenticated reads of decrypted secrets and sign-out. This is not safe to share. |
 | `--stay` | Keep the local controller running until stopped. |
 
 ## `sparkwing dashboard status`

@@ -971,7 +971,7 @@ retain their captured environment policy.
 
 `runner.holder_prefix` saved by enrollment is registration display metadata.
 Starting that saved configuration does not select a claim holder or execution
-identity. Explicit `warm --holder-prefix` remains refused because the controller
+identity. The `warm --holder-prefix` flag is absent because the controller
 owns holder identity. Awarded runner names, labels and fences remain authoritative.
 The enrollment-to-startup regression uses real session enrollment and credential
 files. The runner-loop property varies saved names while preserving the awarded
@@ -1282,3 +1282,19 @@ in JSON and the label assignment in plain/pretty output.
 Supersedes the Pod-verification parts of the EKS verification amendment and the launcher review reconciliation. Cloud Jobs run in `launcher.jobNamespace` (default `<release>-jobs`, never the release namespace), which holds the customer ServiceAccount, the launcher Role and the egress policies. `launcher.AdmissionPolicies` builds params-free ValidatingAdmissionPolicies for Pods and Jobs (CREATE/UPDATE, failurePolicy Fail), bound with [Deny] to that namespace's `kubernetes.io/metadata.name`; the chart template is generated from it. `Run` refuses to start unless the live objects equal that output for its SelfSubjectReview username, namespace and images.
 
 The launcher keeps a synchronous award backstop. It checks create and patch responses. At activation and on every sync it compares the Job template with the binding and reservation, and each owned Pod with the template (team label, selector, node, images, container and pod resources; VPC ENI is ignored). Only a mismatch rejects: annotation, Retire, UID-fenced delete, then a failed award through `/launcher/sync`. There is no background verifier, activation grace, EKS allow-list or requested-template annotation.
+
+## Runner warm surface
+
+The runner's `warm` command uses controller-awarded leases and pipeline job
+settings. Flags that accepted values without affecting execution are removed:
+`heartbeat`, `lease`, `accept-working-tree`, `cpu-ceiling`, `memory-ceiling`,
+`deadline` and `warm-module`. Unsupported `holder-prefix` and `trigger-source`
+selectors are removed too. Saved runner heartbeat/lease configuration retains
+its validation contract. Kubernetes launcher resource ceilings remain supported.
+Pipeline lint analyzes source without execution and has no `static` switch.
+
+The installed runner exchanges the workflow's GitHub ID token through the
+controller client transport. The exchange response includes the server-issued
+capability binding, so repository/ref/commit/workflow scope comes from verified
+controller facts rather than ambient workflow variables. Claiming stops at the
+issued capability's expiry.

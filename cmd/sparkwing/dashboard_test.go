@@ -131,8 +131,6 @@ func TestDashboardRejectsBeforeResolvingServices(t *testing.T) {
 		{"linux", []string{"start", "--addr", "127.0.0.1:notaport"}},
 		{"linux", []string{"start", "--addr", "127.0.0.1:65536"}},
 		{"linux", []string{"start", "--addr", "0.0.0.0:4343"}},
-		{"linux", []string{"start", "--read-only"}},
-		{"linux", []string{"start", "--allow-remote"}},
 		{"linux", []string{"start", "--allow-origin", "http://example.com"}},
 		{"linux", []string{"install", "--force"}},
 		{"windows", []string{"install"}},
@@ -243,5 +241,19 @@ func TestDashboardOpenPrintsSocketMintedLink(t *testing.T) {
 	})
 	if !errors.Is(err, failure) || output.Len() != 0 {
 		t.Fatalf("error=%v output=%q", err, &output)
+	}
+}
+
+func TestDashboardRemoteStartUsesAuthenticatedController(t *testing.T) {
+	lifecycle := &dashboardLifecycleFake{}
+	var output bytes.Buffer
+	err := runDashboardCommandArgs(t.Context(), []string{"start", "--addr", "192.0.2.1:4343", "--allow-remote", "--read-only"}, &output, "linux", func(context.Context) (dashboardServices, error) {
+		return dashboardServices{lifecycle: lifecycle}, nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(lifecycle.calls, []string{"start"}) || lifecycle.options.DashboardAddress != "192.0.2.1:4343" || !lifecycle.options.DashboardReadOnly {
+		t.Fatalf("start options: %+v calls: %v", lifecycle.options, lifecycle.calls)
 	}
 }

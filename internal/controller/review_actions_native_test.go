@@ -67,6 +67,9 @@ func TestReviewNativeActionsRootIssuance(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if issued.Binding.Push == nil || issued.Binding.Push.RepositoryKey != "gh:42" || issued.Binding.Push.Ref != "refs/heads/main" || issued.Binding.Push.SHA != strings.Repeat("a", 40) || issued.Binding.Push.WorkflowRunID != "1000" {
+		t.Fatalf("exchange response lost verified push scope: %+v", issued.Binding)
+	}
 	c := principal.Capability
 	if c.Parent != nil || c.Team != "a" || c.Subject.Kind != capability.SubjectMachine || c.Binding.Kind != capability.BindingPush || c.Binding.Push == nil || c.Binding.Push.RepositoryKey != "gh:42" || c.Binding.Push.Ref != "refs/heads/main" || c.Binding.Push.SHA != strings.Repeat("a", 40) || c.Binding.Push.WorkflowRunID != "1000" || c.Binding.Push.RunnerEnvironment != "self-hosted" || c.RootMetered || c.ExpiresAt == nil {
 		t.Fatalf("Actions root lost verified scope: %+v", c)
