@@ -51,12 +51,11 @@ func listTemplates(category, cloud, output string) error {
 
 	switch strings.ToLower(output) {
 	case "json":
-		manifests := make([]templates.Manifest, 0, len(filtered))
+		records := make([]templateListRecord, 0, len(filtered))
 		for _, t := range filtered {
-			manifests = append(manifests, t.Manifest)
+			records = append(records, templateListRecord{Name: t.Manifest.Name, Category: templateCategory(t.Manifest), Summary: templateSummary(t.Manifest)})
 		}
-
-		return ndjson.Write(os.Stdout, manifests)
+		return ndjson.Write(os.Stdout, records)
 	case "plain":
 		for _, t := range filtered {
 			if _, err := fmt.Fprintln(os.Stdout, t.Manifest.Name); err != nil {
@@ -98,7 +97,13 @@ func renderTemplateList(filtered []templates.Template) {
 	printTemplateListFooter(len(filtered), len(groups))
 }
 
-func printTemplateLine(m templates.Manifest) {
+type templateListRecord struct {
+	Name     string `json:"name"`
+	Category string `json:"category"`
+	Summary  string `json:"summary"`
+}
+
+func templateSummary(m templates.Manifest) string {
 	signal := strings.TrimSpace(m.WhenToUse)
 	if signal == "" {
 		signal = strings.TrimSpace(m.Description)
@@ -107,6 +112,18 @@ func printTemplateLine(m templates.Manifest) {
 	if i := strings.Index(signal, ". "); i > 0 {
 		signal = signal[:i]
 	}
+	return signal
+}
+
+func templateCategory(m templates.Manifest) string {
+	if cat := strings.TrimSpace(m.Applicability.Category); cat != "" {
+		return cat
+	}
+	return uncategorizedLabel
+}
+
+func printTemplateLine(m templates.Manifest) {
+	signal := templateSummary(m)
 	const width = 30
 	name := m.Name
 	pad := ""
@@ -125,10 +142,7 @@ func groupTemplatesByCategory(list []templates.Template) []templateCategoryGroup
 	order := make([]string, 0)
 	byCat := make(map[string][]templates.Template)
 	for _, t := range list {
-		cat := strings.TrimSpace(t.Manifest.Applicability.Category)
-		if cat == "" {
-			cat = uncategorizedLabel
-		}
+		cat := templateCategory(t.Manifest)
 		if _, seen := byCat[cat]; !seen {
 			order = append(order, cat)
 		}

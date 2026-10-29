@@ -20,6 +20,7 @@ unlock.
 
 ## [Unreleased]
 
+- **examples:** `sparkwing examples -o json` prints one `{name, category, summary}` record per example, the fields the terminal list shows, instead of every full manifest (about 105 KB). `sparkwing examples --example NAME -o json` still returns the full manifest.
 - **sdk (TypeScript):** `docker.login` no longer registers its secret as a mask, matching the Go SDK and the rule that neither SDK sends automatic mask registrations; the host masks declared secrets, and pipeline code calls `ctx.mask` for anything else.
 - **schedules:** The minimum schedule interval is measured over a whole day of fire times instead of the next ten fires, so `0,5,10,...,50,51 * * * *` counts as a one-minute cadence and is refused under a five-minute minimum.
 - **sdk (TypeScript):** `goModules()` caches Go modules again: it declared the resolver `gomod`, which no host accepts, so every run fell back to uncached with a warning. A plan naming an unknown cache resolver is now refused at acceptance (`plan_invalid`, listing `go-modules` and `npm`), and the protocol schema lists the accepted resolvers.
