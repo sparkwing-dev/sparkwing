@@ -23,7 +23,15 @@ func typeScriptRepo(t *testing.T, pipeline string) string {
 	if err := os.MkdirAll(filepath.Join(dir, "node_modules", "@sparkwing"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.Symlink(sdk, filepath.Join(dir, "node_modules", "@sparkwing", "sdk")); err != nil {
+	installed := filepath.Join(dir, "node_modules", "@sparkwing", "sdk")
+	if err := os.Mkdir(installed, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join(sdk, "src"), filepath.Join(installed, "src")); err != nil {
+		t.Fatal(err)
+	}
+	// safety: a clean checkout has SDK sources but no generated dist directory.
+	if err := os.WriteFile(filepath.Join(installed, "package.json"), []byte(`{"name":"@sparkwing/sdk","type":"module","exports":"./src/index.ts"}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	files := map[string]string{
