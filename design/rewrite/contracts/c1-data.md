@@ -1430,7 +1430,7 @@ legacy HTTP handler and Doctor's heartbeat-age run finalizer. `TouchNodeHeartbea
 on Store, Tenant and Client is also removed with the node-touch route and
 Kubernetes dispatcher's advisory heartbeat loop. Job claim renewal supplies
 the job's liveness timestamp. Run liveness is
-the current owner lease. `RenewUnit` and `RenewOwner` renew that exact fence.
+the current owner lease. `RenewUnit` renews that exact fence.
 Only the elected `ReapUnits` pass recovers an expired owner. Job renewal never
 extends its run owner's lease. The final C2 owner-heartbeat route remains a
 declaration for W2 to bind to the implemented `EngineController.Renew` adapter.
@@ -1995,8 +1995,7 @@ and transfer integrity remain integration obligations.
 
 The `TestReplica` tests use `internal/store/internal/storetest` targets to check usage
 sums, quota races, reservation release, singleton election and download caps
-across independent clients and reopening. Quota setup uses ReserveQuota and
-SettleQuota. The suite's dialect selection applies to these tests.
+across independent clients and reopening. The suite's dialect selection applies to these tests.
 
 LookupRecord, LookupMemo, LookupDepcache, CommitRecord and CopyMemo remain the
 only record owners. W1 integrates receipt/read-set checks, members, unique-byte
@@ -2220,7 +2219,7 @@ Cancellation still takes precedence. A refused seal cannot release or claim work
 
 `Operator.RenewUnit` is the controller adapter for a unit capability and the wire's
 `executing` flag. It derives team, unit, holder and generations from the live
-capability. Trigger and plan renewal share `Tenant.RenewOwner`'s transaction
+capability. Trigger and plan renewal share one owner-renewal transaction
 path. Job renewal shares `Tenant.RenewNodeClaim`'s path. Eval renewal checks its
 own claim, terminal source generation and elected controller generation.
 Bootstrap credentials cannot renew. The first executing renewal records an
@@ -3287,8 +3286,6 @@ The existing `Store`, `Tenant`, `Operator`, `Open`, `ForTeam`, `AsOperator` and
 | `UsageDelta` | UsageDelta is additive per replica; summed counters are reports and never admission locks. |
 | `QuotaReservation` | QuotaReservation is backed by the shared team/quota row, preventing two replicas from spending the same capacity. |
 | `Tenant.AddUsage` | AddUsage records accounting under the Tenant with a replica identity, including exact log egress. |
-| `Tenant.ReserveQuota` | ReserveQuota locks one shared team/quota row; log reads are exempt from download quota. |
-| `Tenant.SettleQuota` | SettleQuota commits actual usage or releases the reservation in one transaction. |
 
 ### internal/store/result_metadata.go
 
@@ -3340,7 +3337,6 @@ The existing `Store`, `Tenant`, `Operator`, `Open`, `ForTeam`, `AsOperator` and
 | `Tenant.ReadSnapshot` | ReadSnapshot prevents scheduling from a mix of states observed in different transactions. |
 | `Tenant.ReadStateEvents` | ReadStateEvents resumes strictly after the caller's sequence; state transitions own lifecycle event writes. |
 | `Tenant.ReconcileNode` | ReconcileNode decides and self-claims atomically; WaitHolder callers follow events and reconcile again after requeue. |
-| `Tenant.RenewOwner` | RenewOwner also renews self-claimed jobs and continuously live plan and job concurrency holders atomically. |
 | `Tenant.RenewNodeClaim` | RenewNodeClaim renews the exact live claim and its bound concurrency holders using the store clock. |
 
 ### internal/store/node_state.go
