@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
+	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
 	"github.com/sparkwing-dev/sparkwing/internal/userconfig"
 )
 
@@ -47,8 +48,7 @@ func profileNames(profiles map[string]userconfig.Profile) []string {
 	return names
 }
 
-// safety: only the flag selects a profile, so a command without --profile acts
-// on this machine's store whatever the environment or project config holds.
+// safety: internal local clients never apply the CLI's configured default.
 func resolveProfileFlag(name string) (*namedProfile, error) {
 	if name == "" {
 		return nil, nil
@@ -76,4 +76,36 @@ func displayConfigPath(path string) string {
 		}
 	}
 	return path
+}
+
+func applyConfiguredProfile(inv *clisurface.Invocation) error {
+	if inv.Has("profile") || inv.Bool("all-repos") || strings.HasPrefix(inv.Command.Path, "sparkwing profiles ") {
+		return nil
+	}
+	eligible := false
+	for _, flag := range inv.Command.Flags {
+		if flag.Name == "profile" && !flag.Required {
+			eligible = true
+		}
+	}
+	if !eligible {
+		return nil
+	}
+	profiles, _, err := loadProfiles()
+	if err != nil {
+		return err
+	}
+	selected := ""
+	for _, name := range profileNames(profiles) {
+		if profiles[name].Default {
+			if selected != "" {
+				return fmt.Errorf("multiple default profiles; select one with sparkwing profiles set --profile NAME --default")
+			}
+			selected = name
+		}
+	}
+	if selected != "" {
+		inv.Flags["profile"] = []string{selected}
+	}
+	return nil
 }

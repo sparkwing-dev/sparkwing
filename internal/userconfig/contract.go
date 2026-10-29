@@ -17,6 +17,7 @@ type Config struct {
 // Profile is only a named controller connection; storage uses that controller.
 type Profile struct {
 	Controller Connection `yaml:"controller" json:"controller"`
+	Default    bool       `yaml:"default,omitempty" json:"default,omitempty"`
 }
 
 // Connection persists the user's credential in private YAML configuration,

@@ -58,7 +58,10 @@ Input structs support `flag`, `short`, `default`, `required`, `enum` and `desc`
 tags. `secret:"true"` classifies a flag value for masking. A `flag:",extra"`
 map receives extra flags. Typed job inputs use an embedded `sw.WithArgs[T]` and
 share the pipeline's flag namespace. The host checks required values, types,
-enums and name collisions before execution. Generated jobs carry declarations
+enums and name collisions before execution. An invalid public enum value lists
+the allowed choices. Secret enum diagnostics omit both the supplied value and
+the choices. Local discovery reads declarations before validating invocation
+values, so required inputs can be supplied after `--`. Generated jobs carry declarations
 with their job specification. The host prepares their values from the accepted
 run snapshot after generation and sends them for typed decoding before execution.
 Use the pipeline extra-flag map for supplied flags that only a generator declares.
@@ -198,7 +201,9 @@ in the same run.
 Declare every pipeline a job may start with
 `sw.Job(plan, "release", &Release{}).StartsChildren("deploy-us", "deploy-eu")`
 (TypeScript `job.startsChildren("deploy-us", "deploy-eu")`); the controller
-refuses an undeclared child with `403`. A child at its parent's exact revision
+refuses an undeclared child with `403` and names `StartsChildren` as the repair.
+For another repository, declare it with `StartsChildrenIn` (TypeScript
+`startsChildrenIn`). A child at its parent's exact revision
 inherits the parent's identity, including its repository and pipeline for OIDC
 claims and pipeline secrets. A child that names a branch the controller resolves
 runs as an asserted manual run under its own pipeline name and reads only

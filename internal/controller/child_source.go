@@ -37,7 +37,7 @@ func (s *Server) resolveChildRevisions(ctx context.Context, engine *EngineContro
 	}
 	from := parent.Request.Request
 	if !a.Principal.Capability.AllowsChild(request.Pipeline, string(request.Git.Repository.Key)) {
-		return apierr.Authorization(apierr.ReasonRepositoryUnauthorized, "child source is outside the parent claim's declared children")
+		return apierr.Authorization(apierr.ReasonRepositoryUnauthorized, "child source is outside the parent claim's declared children; declare it on the parent job with StartsChildren (TypeScript: startsChildren), or StartsChildrenIn for another repository")
 	}
 	sameRepository := request.Git.Repository.Key == from.Git.Repository.Key
 	if request.Git.SHA != "" {

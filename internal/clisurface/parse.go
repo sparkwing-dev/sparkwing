@@ -6,6 +6,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/sparkwing-dev/sparkwing/internal/sparkwingruntime"
 )
 
 // Invocation retains explicit flag presence separately from values and defaults.
@@ -149,6 +151,16 @@ func Parse(binary string, args []string) (Invocation, error) {
 		} else if inv.Command.PipelineArgument && inv.Pipeline == "" && arg != "" {
 			inv.Pipeline = arg
 		} else {
+			if groups[inv.Command.Path] {
+				next := ""
+				if n+1 < len(args) {
+					next = args[n+1]
+				}
+				if suggestion := suggestCommand(commands, inv.Command.Path, arg, next); suggestion != "" {
+					return inv, inv.invalid("unknown command; did you mean %s? Run %s --help", suggestion, inv.Command.Path)
+				}
+				return inv, inv.invalid("unknown command; run %s --help for commands", inv.Command.Path)
+			}
 			return inv, inv.invalid("unexpected positional argument; use a kind-named flag")
 		}
 	}
@@ -159,6 +171,29 @@ func Parse(binary string, args []string) (Invocation, error) {
 		return inv, err
 	}
 	return inv, nil
+}
+
+func suggestCommand(commands []Command, parent, word, next string) string {
+	var names, withNext []string
+	for _, command := range commands {
+		name, child := strings.CutPrefix(command.Path, parent+" ")
+		if !child || strings.Contains(name, " ") || command.Hidden {
+			continue
+		}
+		names = append(names, name)
+		if next != "" && slices.ContainsFunc(commands, func(c Command) bool { return c.Path == command.Path+" "+next }) {
+			withNext = append(withNext, name)
+		}
+	}
+	slices.Sort(names)
+	slices.Sort(withNext)
+	if suggestion := sparkwingruntime.SuggestClosest(word, withNext); suggestion != "" {
+		return parent + " " + suggestion
+	}
+	if suggestion := sparkwingruntime.SuggestClosest(word, names); suggestion != "" {
+		return parent + " " + suggestion
+	}
+	return ""
 }
 
 // safety: only a command that forwards pipeline arguments points at --; any
@@ -284,7 +319,7 @@ func validateFlag(f Flag, value string) error {
 		}
 		return nil
 	}
-	if value == "" && !f.AllowEmpty && f.Name != "arg" && (f.CommaList || f.Argument != "VALUE" && f.Name != "tz") {
+	if value == "" && !f.AllowEmpty && !(f.Name == "profile" && !f.Required) && f.Name != "arg" && (f.CommaList || f.Argument != "VALUE" && f.Name != "tz") {
 		return fmt.Errorf("requires %s", f.Argument)
 	}
 	if len(f.Values) > 0 && !slices.Contains(f.Values, value) {

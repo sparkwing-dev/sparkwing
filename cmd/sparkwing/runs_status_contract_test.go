@@ -244,7 +244,7 @@ func TestRunStatusPlainValuesAndTerminalExits(t *testing.T) {
 			if status == "running" {
 				want = 3
 			}
-			if out.String() != status+"\n" || exitCodeFor(err) != want {
+			if out.String() != status+"\nstarted_at\t-\nfinished_at\t-\nduration\t-\n" || exitCodeFor(err) != want {
 				t.Fatalf("%s exit-zero=%t: %q %v", status, exitZero, out.String(), err)
 			}
 		}
@@ -268,6 +268,39 @@ func TestRunStatusJSONIsTheOnlyDocumentForAnUnsuccessfulRun(t *testing.T) {
 		}
 		if documents != 1 || exitCodeFor(err) == 0 {
 			t.Fatalf("%s: %d documents on stdout and stderr, exit %d", status, documents, exitCodeFor(err))
+		}
+	}
+}
+
+func TestRunStatusTextIncludesRunAndJobTiming(t *testing.T) {
+	start := time.Date(2026, 10, 29, 19, 57, 48, 559000000, time.UTC)
+	finish := start.Add(2244 * time.Millisecond)
+	jobStart, jobFinish := start.Add(time.Second), finish.Add(-time.Second)
+	for _, format := range []string{"plain", "pretty"} {
+		t.Run(format, func(t *testing.T) {
+			detail := controllerwire.RunDetail{
+				ID: "r1", Status: "success", StartedAt: &start, FinishedAt: &finish,
+				Jobs: []controllerwire.JobDetail{{ID: "hello", Status: "done", Outcome: "success", StartedAt: &jobStart, FinishedAt: &jobFinish}},
+			}
+			r := &statusReader{details: []controllerwire.RunDetail{detail}}
+			var out bytes.Buffer
+			if err := observeRunStatus(t.Context(), statusInvocation(t, "-o", format), r, &out, nil); err != nil {
+				t.Fatal(err)
+			}
+			for _, want := range []string{"started_at\t2026-10-29T19:57:48.559Z", "finished_at\t2026-10-29T19:57:50.803Z", "duration\t2.244s", "2026-10-29T19:57:49.559Z", "2026-10-29T19:57:49.803Z", "244ms"} {
+				if !strings.Contains(out.String(), want) {
+					t.Errorf("missing %q in %s", want, &out)
+				}
+			}
+		})
+	}
+	var out bytes.Buffer
+	if err := writeRunDetail(&out, controllerwire.RunDetail{Status: "queued"}, runStatusOptions{format: "plain"}); err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"started_at\t-", "finished_at\t-", "duration\t-"} {
+		if !strings.Contains(out.String(), want) {
+			t.Errorf("queued run invents timing: %s", &out)
 		}
 	}
 }

@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"io"
 	"net"
 	"net/http"
@@ -95,5 +96,17 @@ func checkNonReplayableHTTPReuse(t *testing.T, key string) {
 				t.Fatalf("award requests=%d error=%v", awards.Load(), err)
 			}
 		})
+	}
+}
+
+func TestControllerTransportFailureIncludesRepairAndPreservesCause(t *testing.T) {
+	failure := errors.New("fixture connection failure")
+	c, err := NewRunReader(EngineOptions{URL: "https://controller.example.dev", HTTP: &http.Client{Transport: engineTransport(func(*http.Request) (*http.Response, error) { return nil, failure })}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = c.ReadRun(t.Context(), "r1")
+	if !errors.Is(err, failure) || !strings.Contains(err.Error(), "sparkwing profiles show --profile") || !strings.Contains(err.Error(), "network") {
+		t.Fatalf("connection refusal lacks repair or cause: %v", err)
 	}
 }

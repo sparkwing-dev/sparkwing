@@ -67,6 +67,9 @@ func surfaceFlag(path string, flag clisurface.Flag) FlagSpec {
 	}
 	if spec.Desc == "" {
 		spec.Desc = flagDescriptions[flag.Name]
+		if flag.Name == "profile" && flag.Required {
+			spec.Desc = "Controller connection profile from your config. Must be supplied explicitly."
+		}
 	}
 	if len(flag.Values) > 0 {
 		spec.Desc += " Values: " + strings.Join(flag.Values, ", ") + "."
@@ -167,7 +170,9 @@ var commandFlagDescriptions = map[string]string{
 	"sparkwing pipeline new --hidden":                        "Mark the new pipeline hidden in sparkwing.yaml so pipeline list omits it unless --all is given.",
 	"sparkwing pipeline new --on":                            "Trigger events to declare, comma separated, replacing the shape's default trigger; manual declares no trigger.",
 	"sparkwing pipeline new --short":                         "One-line description to write into the generated pipeline source instead of a placeholder.",
-	"sparkwing pipeline new --template":                      "Built-in shape to scaffold, minimal by default.",
+	"sparkwing pipeline new --template":                      "Go shape to scaffold, minimal by default; typescript creates a minimal TypeScript pipeline.",
+	"sparkwing profiles add --profile":                       "Name for this saved connection; defaults to the controller host.",
+	"sparkwing profiles set --default":                       "Use this profile when an optional --profile is omitted. --default=false restores local selection if this is the default.",
 	"sparkwing pipeline plan --start-at":                     "Preview the run as if it started at this step, marking steps that are neither this step nor downstream of it as skipped.",
 	"sparkwing pipeline plan --stop-at":                      "Preview the run as if it stopped after this step, marking steps that are neither this step nor upstream of it as skipped.",
 	"sparkwing pipeline sparks add --source":                 "Go module path of the spark library to add to the project's spark list.",
@@ -350,7 +355,7 @@ var commandFlagDescriptions = map[string]string{
 }
 
 var flagDescriptions = map[string]string{
-	"profile":             "Controller connection profile from your config. Omit it to use the local controller.",
+	"profile":             "Controller connection profile from your config. Optional profiles use the saved default, then local; --profile= selects local.",
 	"repo":                "Repository identity as owner/name. Naming a repository grants no access.",
 	"checkout":            "Path to a local checkout.",
 	"run":                 "Run ID or per-team run number.",
@@ -476,7 +481,7 @@ var commandSynopses = map[string]string{
 	"sparkwing pipeline hooks uninstall":            "Remove sparkwing-managed git hooks",
 	"sparkwing pipeline lint":                       "Check pipeline source for idiomatic anti-patterns (enforced gate)",
 	"sparkwing pipeline list":                       "Enumerate every pipeline with metadata",
-	"sparkwing pipeline new":                        "Scaffold a new Go pipeline",
+	"sparkwing pipeline new":                        "Scaffold a new Go or TypeScript pipeline",
 	"sparkwing pipeline plan":                       "Render the runtime-resolved DAG without dispatching any jobs",
 	"sparkwing pipeline sparks":                     "Manage sparks libraries declared in .sparkwing/sparkwing.yaml",
 	"sparkwing pipeline sparks add":                 "Add a library to the sparks: block",
@@ -506,7 +511,7 @@ var commandSynopses = map[string]string{
 	"sparkwing profiles add":                        "Add a controller connection profile",
 	"sparkwing profiles list":                       "Print every registered profile",
 	"sparkwing profiles remove":                     "Remove a controller connection profile",
-	"sparkwing profiles set":                        "Update fields on an existing profile",
+	"sparkwing profiles set":                        "Update a connection or select the default profile",
 	"sparkwing profiles show":                       "Print one controller connection profile",
 	"sparkwing queue":                               "Inspect queued work and scheduling priority",
 	"sparkwing queue list":                          "List running and queued work with expected start and finish",
