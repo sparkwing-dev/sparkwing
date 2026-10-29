@@ -56,9 +56,7 @@ func (s *Server) WithBillingCheckout(url, token string) *Server {
 // request itself and is final, so a refill or refund stops and reaches the owners instead of looping.
 var errCheckoutUnavailable = errors.New("the checkout service is unavailable")
 
-type checkoutMisconfiguredError struct{ cause string }
-
-func (e checkoutMisconfiguredError) Error() string { return e.cause }
+var errCheckoutMisconfigured = errors.New("the checkout service and this controller are not paired")
 
 // safety: an operator slip in the pairing is retried like an outage, never final for every team's refill or refund.
 var checkoutMisconfigurations = map[int]string{
@@ -143,7 +141,7 @@ func (c *billingCheckout) post(ctx context.Context, path string, in, out any) er
 	if resp.StatusCode != http.StatusOK {
 		detail := strings.TrimSpace(string(payload))
 		if cause, ok := checkoutMisconfigurations[resp.StatusCode]; ok {
-			return fmt.Errorf("%w: %w: %d %s", errCheckoutUnavailable, checkoutMisconfiguredError{cause}, resp.StatusCode, detail)
+			return fmt.Errorf("%w: %w: %s: %d %s", errCheckoutUnavailable, errCheckoutMisconfigured, cause, resp.StatusCode, detail)
 		}
 		class := errCheckoutRefused
 		if resp.StatusCode >= 500 || resp.StatusCode == http.StatusTooManyRequests || resp.StatusCode == http.StatusRequestTimeout {
@@ -201,13 +199,12 @@ func (c *billingCheckout) settled(key string) { delete(c.retries, key) }
 const checkoutMisconfiguredAlert = "checkout_misconfigured"
 
 func (s *Server) alertCheckoutMisconfigured(err error) {
-	var m checkoutMisconfiguredError
-	if !errors.As(err, &m) || s.checkout.misconfigured {
+	if !errors.Is(err, errCheckoutMisconfigured) || s.checkout.misconfigured {
 		return
 	}
 	s.checkout.misconfigured = true
-	s.logger.Error("billing alert: the checkout service and this controller are not paired; refills and refunds are retried until it is fixed",
-		"alert", checkoutMisconfiguredAlert, "cause", m.cause, "deployment", s.paymentDeployment, "err", err)
+	s.logger.Error("billing alert: refills and refunds are retried until the pairing is fixed",
+		"alert", checkoutMisconfiguredAlert, "deployment", s.paymentDeployment, "err", err)
 }
 
 // refillRequest and refillResponse are the checkout service's POST /internal/refill contract, which creates and
