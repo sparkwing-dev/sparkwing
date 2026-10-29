@@ -426,7 +426,7 @@ func (t *Tenant) replaceConsentedSchedules(ctx context.Context, a *capability.Au
 
 // editSchedule edits a schedule the host declared. appAudit names the audited operation that lets a team admin
 // apply this edit to a schedule the GitHub App declared; empty refuses App schedules to every caller.
-func (t *Tenant) editSchedule(ctx context.Context, a capability.Authorized, selector, appAudit string, edit func(*storeTx, CronSchedule) error) (string, error) {
+func (t *Tenant) editSchedule(ctx context.Context, a capability.Authorized, selector, appAudit string, edit func(*storeTx, capability.Principal, CronSchedule) error) (string, error) {
 	var id string
 	err := t.s.inTx(ctx, func(tx *storeTx) error {
 		if a.Target.Team != string(t.team) {
@@ -449,7 +449,7 @@ func (t *Tenant) editSchedule(ctx context.Context, a capability.Authorized, sele
 			app = true
 		}
 		id = row.ID
-		if err = edit(tx, row); err != nil {
+		if err = edit(tx, p, row); err != nil {
 			return err
 		}
 		if p, err = t.scheduleAuthorityTx(ctx, tx, a.Principal.Authority); err != nil || !app {
@@ -466,7 +466,7 @@ func (t *Tenant) PauseAuthorizedSchedule(ctx context.Context, a capability.Autho
 	if paused {
 		operation = "PauseAppSchedule"
 	}
-	return t.editSchedule(ctx, a, id, operation, func(tx *storeTx, row CronSchedule) error {
+	return t.editSchedule(ctx, a, id, operation, func(tx *storeTx, _ capability.Principal, row CronSchedule) error {
 		if row.Paused && !paused {
 			next, err := scheduleNext(row, tx.now(ctx), 0)
 			if err != nil {
@@ -484,7 +484,7 @@ func (t *Tenant) PauseAuthorizedSchedule(ctx context.Context, a capability.Autho
 
 // OverrideAuthorizedSchedule validates and persists an effective cadence atomically.
 func (t *Tenant) OverrideAuthorizedSchedule(ctx context.Context, a capability.Authorized, id string, body *cronspec.Override) (string, error) {
-	return t.editSchedule(ctx, a, id, "", func(tx *storeTx, row CronSchedule) error {
+	return t.editSchedule(ctx, a, id, "", func(tx *storeTx, p capability.Principal, row CronSchedule) error {
 		if body == nil {
 			row.Override = nil
 		} else {
@@ -519,7 +519,7 @@ func (t *Tenant) OverrideAuthorizedSchedule(ctx context.Context, a capability.Au
 			return err
 		}
 		minimum := guards.CronSeconds
-		if a.Principal.Capability.Subject.Kind == capability.SubjectLocal {
+		if p.Capability.Subject.Kind == capability.SubjectLocal {
 			minimum = 0
 		}
 		next, err := scheduleNext(row, tx.now(ctx), minimum)
@@ -540,7 +540,7 @@ func (t *Tenant) OverrideAuthorizedSchedule(ctx context.Context, a capability.Au
 
 // DeleteAuthorizedSchedule removes a resolved schedule and history under current tenant authority.
 func (t *Tenant) DeleteAuthorizedSchedule(ctx context.Context, a capability.Authorized, id string) (string, bool, error) {
-	resolved, err := t.editSchedule(ctx, a, id, "", func(tx *storeTx, row CronSchedule) error { return deleteScheduleTx(ctx, tx, t.team, row.ID) })
+	resolved, err := t.editSchedule(ctx, a, id, "", func(tx *storeTx, _ capability.Principal, row CronSchedule) error { return deleteScheduleTx(ctx, tx, t.team, row.ID) })
 	return resolved, err == nil, err
 }
 
