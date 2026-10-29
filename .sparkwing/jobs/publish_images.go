@@ -282,8 +282,8 @@ func verifyPublishedIndex(tag name.Tag, binary string, sums map[string]string, o
 	return nil
 }
 
-// imageFileSHA256 hashes the file as the container sees it: the topmost layer
-// that carries the path wins.
+// safety: the topmost layer carrying the path is the file the container sees,
+// so a lower layer's copy cannot pass for the published binary.
 func imageFileSHA256(img v1.Image, path string) (string, error) {
 	layers, err := img.Layers()
 	if err != nil {

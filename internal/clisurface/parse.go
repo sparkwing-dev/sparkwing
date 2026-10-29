@@ -137,8 +137,8 @@ func Parse(binary string, args []string) (Invocation, error) {
 	return inv, nil
 }
 
-// flagHint points a refused flag at where it belongs: after -- for a command
-// that forwards pipeline arguments, else at the flags the command does take.
+// safety: only a command that forwards pipeline arguments points at --; any
+// other names its own flags, so the hint never sends a user to a separator.
 func (i Invocation) flagHint() string {
 	if i.Command.PipelineArgsAfterSeparator {
 		return "; pipeline arguments follow --"

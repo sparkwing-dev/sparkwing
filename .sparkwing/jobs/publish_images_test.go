@@ -24,8 +24,8 @@ import (
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
-// pushBase writes a two-platform runtime base the way buildx does, plus the
-// attestation entry buildx adds, and returns it by digest.
+// safety: the base carries buildx's attestation entry, so the assembly must
+// skip a platform that is not linux.
 func pushBase(t *testing.T, host, repo string, arches ...string) string {
 	t.Helper()
 	index := mutate.IndexMediaType(empty.Index, types.OCIImageIndex)
