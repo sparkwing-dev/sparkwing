@@ -14,7 +14,7 @@ func TestShortConfigChecksAFixedHandfulOfCases(t *testing.T) {
 		}
 		return
 	}
-	if got.MaxCount != ShortCount || got.Rand == nil {
+	if got.MaxCount != shortCount || got.Rand == nil {
 		t.Fatalf("short config = %+v", got)
 	}
 	first, second := Config(full).Rand.Int63(), Config(full).Rand.Int63()
