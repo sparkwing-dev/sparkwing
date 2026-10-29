@@ -557,6 +557,11 @@ func walkHashable(dir string, keep fileFilter) ([]string, error) {
 			}
 			return nil
 		}
+		// safety: a linked worktree's .git file names that worktree's own path, so
+		// hashing it gives every checkout of one commit its own key.
+		if d.Name() == ".git" {
+			return nil
+		}
 		if !keep(d.Name()) {
 			return nil
 		}

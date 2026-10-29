@@ -85,3 +85,29 @@ func TestPipelineCacheKey_NonRepoDirHashesEverything(t *testing.T) {
 		t.Fatalf("outside a repository nothing is ignorable, got %s twice", before)
 	}
 }
+
+func TestPipelineCacheKey_IgnoresALinkedWorktreesGitFile(t *testing.T) {
+	for _, rel := range []string{".git", filepath.Join("vendored", ".git")} {
+		dir := newPipelineDir(t)
+		writeFile(t, filepath.Join(dir, rel), "gitdir: /depot/repo/.git/worktrees/north\n")
+		before := mustKey(t, dir)
+
+		writeFile(t, filepath.Join(dir, rel), "gitdir: /depot/repo/.git/worktrees/south\n")
+
+		if after := mustKey(t, dir); after != before {
+			t.Errorf("two worktrees of one commit must share a key with %s: %s -> %s", rel, before, after)
+		}
+	}
+}
+
+func TestPipelineCacheKey_InvalidatesOnGitattributesEdit(t *testing.T) {
+	dir := newPipelineDir(t)
+	writeFile(t, filepath.Join(dir, ".gitattributes"), "*.go text\n")
+	before := mustKey(t, dir)
+
+	writeFile(t, filepath.Join(dir, ".gitattributes"), "*.go text eol=lf\n")
+
+	if after := mustKey(t, dir); after == before {
+		t.Fatalf("a .gitattributes edit must move the key, got %s twice", before)
+	}
+}
