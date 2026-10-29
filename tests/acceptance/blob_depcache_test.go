@@ -145,13 +145,13 @@ func checkBlobDepcache(t testing.TB, ctx context.Context, root string, objects b
 	destination := filepath.Join(root, "deps")
 	finish, err := cache.Prepare(ctx, input, job)
 	if err != nil || finish == nil {
-		return fmt.Errorf("prepare cold archive: %v", err)
+		return fmt.Errorf("prepare cold archive: %w", err)
 	}
 	if err := os.CopyFS(destination, os.DirFS(producer)); err != nil {
 		return err
 	}
 	if err := finish(ctx, input, &runstate.NodeResult{Outcome: runstate.NodeSuccess}); err != nil || len(warnings) != 0 {
-		return fmt.Errorf("save physical archive: %v: %v", warnings, err)
+		return fmt.Errorf("save physical archive: %v: %w", warnings, err)
 	}
 	if err := s.Close(); err != nil {
 		return err
@@ -187,7 +187,7 @@ func checkBlobDepcache(t testing.TB, ctx context.Context, root string, objects b
 		return fmt.Errorf("staged physical artifact differs: %v", err)
 	}
 	if restored, warned, err := restoreDepcache(ctx, cache, input, job, destination); err != nil || !restored || warned {
-		return fmt.Errorf("restore reopened archive: restored=%t warned=%t: %v", restored, warned, err)
+		return fmt.Errorf("restore reopened archive: restored=%t warned=%t: %w", restored, warned, err)
 	}
 	if body, err := os.ReadFile(filepath.Join(destination, "module")); err != nil || !bytes.Equal(body, payload) {
 		return fmt.Errorf("reopened archive differs: %v", err)
@@ -208,7 +208,7 @@ func checkBlobDepcache(t testing.TB, ctx context.Context, root string, objects b
 		return err
 	}
 	if restored, warned, err := restoreDepcache(ctx, cache, input, job, destination); err != nil || restored || !warned {
-		return fmt.Errorf("corrupt archive: restored=%t warned=%t: %v", restored, warned, err)
+		return fmt.Errorf("corrupt archive: restored=%t warned=%t: %w", restored, warned, err)
 	}
 	if _, err := teststore.SQL(t, s).ExecContext(ctx, "UPDATE capabilities SET revoked_at=? WHERE prefix=?", teststore.Now(s).UnixNano(), identity.CapabilityRef); err != nil {
 		return err
@@ -246,7 +246,7 @@ func checkDepcacheScopes(ctx context.Context, cache nodehost.DepcacheRecords, in
 			bad.Storage.Authority.Ref.Scope.Verified = true
 		}
 		if restored, _, err := restoreDepcache(ctx, cache, bad, job, destination); err != nil || restored {
-			return fmt.Errorf("forged %s restored an archive: %v", field, err)
+			return fmt.Errorf("forged %s restored an archive: %w", field, err)
 		}
 	}
 	return nil

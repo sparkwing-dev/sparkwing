@@ -13,9 +13,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/runstate"
-
 	"github.com/sparkwing-dev/sparkwing/internal/backend"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
 )
@@ -339,7 +338,7 @@ func TestRunsGrep_FindsOlderFilteredMatchBeyondRecentRuns(t *testing.T) {
 	}
 	b := &fakeBackend{
 		listRuns: func(f store.RunFilter) ([]*store.Run, error) {
-			return teststore.ForTeam(t, st, store.DefaultTeam).ListRuns(ctx, f)
+			return teststore.ForTeam(t, st, store.DefaultTeam).ListRuns(ctx, f) //nolint:contextcheck // teststore helpers bind the test's own context.
 		},
 		listNodes:   func(string) ([]*store.Node, error) { return []*store.Node{{NodeID: "hello"}}, nil },
 		readNodeLog: func(string, string, backend.ReadOpts) ([]byte, error) { return []byte("{\"msg\":\"needle\"}\n"), nil },
@@ -443,7 +442,7 @@ func TestRunsGrep_PagesOlderRunsByCursorWithExclusionsAppliedBeforeTheLimit(t *t
 	}
 	b := &fakeBackend{
 		listRuns: func(f store.RunFilter) ([]*store.Run, error) {
-			return teststore.ForTeam(t, st, store.DefaultTeam).ListRuns(ctx, f)
+			return teststore.ForTeam(t, st, store.DefaultTeam).ListRuns(ctx, f) //nolint:contextcheck // teststore helpers bind the test's own context.
 		},
 		listNodes:   func(string) ([]*store.Node, error) { return []*store.Node{{NodeID: "n"}}, nil },
 		readNodeLog: func(string, string, backend.ReadOpts) ([]byte, error) { return []byte("{\"msg\":\"needle\"}\n"), nil },

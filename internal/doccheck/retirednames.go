@@ -76,33 +76,43 @@ var retiredPatterns = func() []*regexp.Regexp {
 	return out
 }()
 
-func retiredNameTargets(repoRoot string) []string {
+func retiredNameTargets(repoRoot string) ([]string, error) {
 	targets := auxDocFiles(repoRoot)
 	for _, g := range retiredExtraGlobs {
-		matches, _ := filepath.Glob(filepath.Join(repoRoot, g))
+		matches, err := filepath.Glob(filepath.Join(repoRoot, g))
+		if err != nil {
+			return nil, err
+		}
 		targets = append(targets, matches...)
 	}
 	// #nosec G703 -- a build-time tool reading paths the operator names
-	_ = filepath.Walk(filepath.Join(repoRoot, "docs"), func(path string, info os.FileInfo, err error) error {
+	err := filepath.Walk(filepath.Join(repoRoot, "docs"), func(path string, info os.FileInfo, err error) error {
 		if err == nil && !info.IsDir() && strings.HasSuffix(path, ".md") && !strings.Contains(path, "/migrations/") {
 			targets = append(targets, path)
 		}
 		return err
 	})
-	return targets
+	return targets, err
 }
 
 func checkRetiredNames(repoRoot string) bool {
-	targets := retiredNameTargets(repoRoot)
+	targets, err := retiredNameTargets(repoRoot)
+	if err != nil {
+		fmt.Fprintln(os.Stdout, "retired-names: list error:", err)
+		return false
+	}
 	var hits []string
 	for _, path := range targets {
 		// #nosec G703 -- a build-time tool reading paths the operator names
 		data, err := os.ReadFile(path)
 		if err != nil {
-			fmt.Println("retired-names: read error:", err)
+			fmt.Fprintln(os.Stdout, "retired-names: read error:", err)
 			return false
 		}
-		rel, _ := filepath.Rel(repoRoot, path)
+		rel, err := filepath.Rel(repoRoot, path)
+		if err != nil {
+			rel = path
+		}
 		for ln, line := range strings.Split(string(data), "\n") {
 			if rejectedEnvironmentRow(line) {
 				continue
@@ -116,7 +126,7 @@ func checkRetiredNames(repoRoot string) bool {
 	}
 	fmt.Printf("doccheck/retired-names: %d name(s) over %d file(s) -- %d hit(s)\n", len(retiredNames), len(targets), len(hits))
 	for _, h := range hits {
-		fmt.Println("  " + h)
+		fmt.Fprintln(os.Stdout, "  "+h)
 	}
 	return len(hits) == 0
 }

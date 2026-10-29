@@ -89,7 +89,7 @@ func (f *credentialMutationFake) WriteSecret(_ context.Context, a capability.Aut
 	if err := teststore.SeedSecret(f.store, f.Team(), row, teststore.Now(f.store)); err != nil {
 		return store.Secret{}, err
 	}
-	stored, err := teststore.SecretRow(f.Tenant, row.Name, row.Repo, row.Pipeline)
+	stored, err := teststore.SecretRow(f.Tenant, row.Name, row.Repo, row.Pipeline) //nolint:contextcheck // teststore helpers bind the test's own context.
 	if err != nil {
 		return store.Secret{}, err
 	}
