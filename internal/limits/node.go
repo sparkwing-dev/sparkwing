@@ -7,14 +7,6 @@ const (
 	MaxRetries int = 10
 	// MaxDisruptions bounds post-start lease-loss disruptions outside application retries; OOM remains ordinary job failure.
 	MaxDisruptions int = 3
-	// maxJobs bounds jobs in an accepted plan.
-	maxJobs int = 1000
-	// maxFanOut bounds generated jobs per fan-out.
-	maxFanOut int = 256
-	// maxLabels bounds labels per job.
-	maxLabels int = 32
-	// maxPipelineRefs bounds pipeline references per plan.
-	maxPipelineRefs int = 32
 	// MaxChildrenPerRoot is the largest supported team descendant ceiling.
 	MaxChildrenPerRoot int64 = 1000
 	// MaxChildDepth bounds a child-run chain, counting the root run as one level.
@@ -29,14 +21,8 @@ const (
 	maxCleanups int = 16
 	// maxCleanupArgs bounds arguments per cleanup.
 	maxCleanupArgs int = 64
-	// jobIDBytes bounds maximum encoded job identifier.
-	jobIDBytes int64 = 200
-	// labelBytes bounds maximum label length.
-	labelBytes int64 = 128
 	// NodeOutputBytes bounds typed output per job or step.
 	NodeOutputBytes int64 = 16 << 20
-	// runOutputBytes bounds total typed outputs per run.
-	runOutputBytes int64 = 1 << 30
 	// ErrorBytes bounds UTF-8 head and tail error text after masking.
 	ErrorBytes int64 = 8 << 10
 	// failureBytes bounds structured failure record.
@@ -49,10 +35,6 @@ const (
 	EventBytes int64 = 256 << 10
 	// RunEventBytes bounds events per run.
 	RunEventBytes int64 = 64 << 20
-	// cleanupDescriptionBytes bounds cleanup description.
-	cleanupDescriptionBytes int64 = 256
-	// cleanupBodyBytes bounds cleanup body.
-	cleanupBodyBytes int64 = 16 << 10
 	// JobScratchBytes bounds fixed scratch volume for every runner Job.
 	JobScratchBytes int64 = 20 << 30
 	// AttemptLogBytes bounds logs per attempt.

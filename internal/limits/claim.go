@@ -5,8 +5,6 @@ import "time"
 const (
 	// DefaultLease bounds default work lease.
 	DefaultLease time.Duration = 3 * time.Minute
-	// maxLease bounds maximum lease, bounded by claim expiry.
-	maxLease time.Duration = 10 * time.Minute
 	// ClaimPoll bounds idle claim-loop poll.
 	ClaimPoll time.Duration = 500 * time.Millisecond
 	// placementHold bounds preferred placement hold.
@@ -21,10 +19,6 @@ const (
 	ClaimWindow time.Duration = 10 * time.Minute
 	// HeartbeatTimeout bounds shared heartbeat RPC timeout.
 	HeartbeatTimeout time.Duration = 2 * time.Second
-	// heartbeatMaxSilence bounds shared heartbeat outage budget.
-	heartbeatMaxSilence time.Duration = 3 * time.Minute
-	// maxPollAdvice bounds maximum server poll advice.
-	maxPollAdvice time.Duration = 8 * time.Second
 	// ChildAwait bounds child await request budget.
 	ChildAwait time.Duration = 60 * time.Second
 )
