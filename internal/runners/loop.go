@@ -54,7 +54,7 @@ type Loop struct {
 	draining     bool
 }
 
-// Drain may be called before or during Run and is safe to repeat.
+// startDrain may be called before or during Run; the mutex makes repeats close drain once.
 func (l *Loop) startDrain() {
 	l.mu.Lock()
 	defer l.mu.Unlock()
@@ -329,6 +329,6 @@ func validateUnit(unit controllerwire.ClaimedUnit) error {
 	return nil
 }
 
-// InKubernetesPod reports whether this process runs in a Kubernetes pod, where the
-// kubelet sets KUBERNETES_SERVICE_HOST in every container.
+// InKubernetesPod reports whether KUBERNETES_SERVICE_HOST, which the kubelet sets in
+// every container, is present in the process environment.
 func InKubernetesPod() bool { return os.Getenv("KUBERNETES_SERVICE_HOST") != "" }
