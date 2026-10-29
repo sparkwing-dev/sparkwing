@@ -239,8 +239,8 @@ claim. See [limits](limits.md#execution-and-records).
 
 ### Approvals
 
-An approval pauses a run until a team member with `approvals.write` (an editor,
-admin or owner, including the member who started the run) approves or denies
+An approval pauses a run until a team member with `approvals.write` (an editor
+or owner, including the member who started the run) approves or denies
 it. It is a workflow step, not a security control. It does not enforce a
 separate reviewer, and it does not narrow what the run's code, secrets or OIDC
 tokens can reach. Protect a deployment target with that target's own controls,
@@ -482,8 +482,9 @@ DinD sidecar. The sidecar adds namespaced `SYS_ADMIN`, `NET_ADMIN` and
 `SYS_PTRACE` and an unmasked `/proc`, under a Localhost seccomp profile that
 every customer container inherits. The kernel's user-namespace surface,
 nf_tables above all, is what an escape would use, so node kernel patch
-latency is part of this boundary. One Job per team-dedicated node is a hard prerequisite. Jobs from
-the same team cannot share a node under this boundary. Aggregate scratch,
+latency is part of this boundary. A team-dedicated node serves one run: later Jobs of
+that run may reuse it warm, and no other run, of the same team or another,
+ever uses it. Aggregate scratch,
 including DinD, is fixed at 20 GiB.
 
 Deployment acceptance must prove exclusive node reservation, enforced default-deny
@@ -580,8 +581,9 @@ scanner failure on `main` is what holds a release back, before the tag exists.
   operator-console authority. Do not use an unauthenticated bootstrap window.
 - Terminate TLS at a trusted ingress and keep signing and source credentials
   outside pipeline Jobs.
-- Reserve one Job per team-dedicated node and verify network enforcement and
-  teardown with native probes before accepting Cloud execution.
+- Dedicate each Cloud node to one run and enforce NetworkPolicy in the
+  cluster. Sparkwing does not probe enforcement; verify it and node teardown
+  periodically with your own tooling.
 - Configure storage lifecycle rules for the declared log retention classes as
   a backstop. Startup warns about a class without one; Sparkwing still deletes
   log objects at their class age.
