@@ -171,5 +171,6 @@ is the operator's periodic check.
 `values.yaml` lists the supported chart values.
 
 The runner fills Go caches while preparing claimed work. Startup module warming
-and `runner.goCache.warmModules` are removed. Persistent cache volumes remain
-configured through `runner.goCache.persistence`.
+and `runner.goCache.warmModules` are removed. Rendering fails if
+`runner.goCache.warmModules` is set, even to an empty list. Unset it.
+Persistent cache volumes remain configured through `runner.goCache.persistence`.

@@ -785,13 +785,23 @@ func TestRunnerGoCacheOnOneReplicaAcceptsReadWriteOnce(t *testing.T) {
 	}
 }
 
-func TestRunnerDoesNotPassRemovedWarmModules(t *testing.T) {
+func TestRunnerRejectsRemovedWarmModules(t *testing.T) {
 	if testing.Short() {
 		t.Skip("slow: chart render")
 	}
-	args := runnerContainer(t, renderRunner(t, "runner.goCache.warmModules={example.com/pipelines@v1.0.0}")).Args
-	if flag, ok := hasFlag(args, "--warm-module="); ok {
-		t.Fatalf("rendered removed runner flag %s", flag)
+	for _, chart := range []string{"./sparkwing-runner-bundle", "./sparkwing-full"} {
+		prefix := ""
+		if chart == "./sparkwing-full" {
+			prefix = "sparkwing-runner-bundle."
+		}
+		for _, value := range []string{"{example.com/pipelines@v1.0.0}", "{}", "false"} {
+			t.Run(chart+"/"+value, func(t *testing.T) {
+				out := helmRenderError(t, chart, "sparkwing", prefix+"runner.goCache.warmModules="+value)
+				if !strings.Contains(out, "runner.goCache.warmModules was removed; unset it") {
+					t.Fatalf("render error = %q, want the removed value and remedy named", out)
+				}
+			})
+		}
 	}
 }
 
