@@ -41,7 +41,7 @@ Each entry has (these are the only valid keys; an unknown field is a
 hard parse error):
 
 - **name** - the invoked pipeline name (`sparkwing run build-deploy`), matching `^[A-Za-z0-9][A-Za-z0-9._-]*$`
-- **entrypoint** - the Go type implementing it (required). Register each pipeline by its YAML name, even when several names use the same type.
+- **entrypoint** - the SDK registration implementing it (required). Register the implementation under this name; several pipeline names may share one entrypoint.
 - **description** - one-line summary surfaced by `sparkwing pipeline list`
 - **on** - declarative trigger block: `push` (branches/paths), `pull_request` (actions/branches), `schedule` (one entry, or a list of them, each with `name`, `cron`, a required `where`, `tz`, `overlap`, `catch_up`, `args`), `pre_commit`, `pre_push`, `post_commit`. Absent means "manual only" (a command).
 - **guards** - gate dispatch on placement, args and git branch (`when` / `unless` token lists)
@@ -56,10 +56,12 @@ For the complete schema -- every top-level key, pipeline field, and
 trigger field with types -- see the generated [config-reference.md](config-reference.md).
 
 For `name: deploy-prod` with `entrypoint: Deploy`, use `deploy-prod` in commands.
-Register the SDK implementation as `sw.Register("deploy-prod", factory)`, with
-a factory returning the `Deploy` Go type. Scaffolds register the YAML name.
-Help, flag completion, secrets and risk declarations come from that registration.
-Help and argument errors keep the invoked name.
+Register the SDK implementation as `sw.Register("Deploy", factory)`. Scaffolds
+register the configured entrypoint. A run of `deploy-prod` whose entrypoint has
+no registration fails with `unknown_pipeline`, and its hint names the entrypoint
+the host looked up. Help, flag completion, secrets and risk declarations come
+from that registration. Help, argument errors and `RunContext.Pipeline` keep the
+invoked name.
 
 ## Triggers
 
@@ -170,7 +172,7 @@ func (p *Lint) run(ctx context.Context) error {
 }
 
 // In .sparkwing/main.go:
-//     sparkwing.Register[sparkwing.NoInputs]("lint", func() sparkwing.Pipeline[sparkwing.NoInputs] { return &Lint{} })
+//     sparkwing.Register[sparkwing.NoInputs]("Lint", func() sparkwing.Pipeline[sparkwing.NoInputs] { return &Lint{} })
 ```
 
 `sw.Job`'s third argument is `any`: a `func(ctx context.Context)

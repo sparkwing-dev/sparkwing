@@ -135,9 +135,12 @@ func (Hello) Plan(ctx context.Context, plan *sw.Plan, _ sw.NoInputs, run sw.RunC
 }
 
 func init() {
-    sw.Register[sw.NoInputs]("hello", func() sw.Pipeline[sw.NoInputs] { return &Hello{} })
+    sw.Register[sw.NoInputs]("Hello", func() sw.Pipeline[sw.NoInputs] { return &Hello{} })
 }
 ```
+
+Register the `entrypoint` that `.sparkwing/sparkwing.yaml` names, not the
+pipeline name: the scaffold's `name: hello` entry has `entrypoint: Hello`.
 
 `sparkwing pipeline new` scaffolds a working stub. See [`docs/`](./docs)
 for the full reference; [`docs/sdk.md`](./docs/sdk.md) is the SDK

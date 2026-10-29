@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"os"
+	"strconv"
 	"strings"
 	"testing"
 	"testing/synctest"
@@ -207,7 +208,7 @@ func TestPlanningFailureMasksCanonicalPayloads(t *testing.T) {
 	planner := SDKPlanner{Masker: masker}
 	source := &apierr.Error{Code: "failure-private-default", Message: "private-default", Hint: "private-default", Details: map[string]any{"token": "private-default"}}
 	var result *apierr.Error
-	if !errors.As(planner.planningError(t.Context(), source, true), &result) {
+	if !errors.As(planner.planningError(t.Context(), source, true, "Build"), &result) {
 		t.Fatal("lost canonical error")
 	}
 	raw, _ := json.Marshal(result)
@@ -237,5 +238,31 @@ func TestPlanningCannotProceedWithUnknownPipelineDeclarations(t *testing.T) {
 	}
 	if len(*processes) != 1 {
 		t.Fatal("started author plan after incomplete discovery")
+	}
+}
+
+func TestPlanningUnknownPipelineNamesTheEntrypointToRegister(t *testing.T) {
+	planner, input, fixture, _ := sdkPlanningFixture(t)
+	input.Entrypoint = "Build"
+	start := planner.Start
+	planner.Start = func(ctx context.Context, in PlanningProcessInput, log func(context.Context, nodeproto.FrameLog) error) (ExecutorProcess, error) {
+		process, err := start(ctx, in, log)
+		proc := process.(*executorProcess)
+		answer := proc.answer
+		proc.answer = func(ctx context.Context, request nodeproto.Request) (any, error) {
+			if request.Op == nodeproto.OpDescribe {
+				return nodeproto.DescribeDoc{Pipelines: []nodeproto.PipelineDescription{{Name: "registered-by-yaml-name", Args: []nodeproto.ArgumentDescription{}}}}, nil
+			}
+			return answer(ctx, request)
+		}
+		return process, err
+	}
+	_, err := planner.Prepare(t.Context(), input, fixture.input)
+	var failure *apierr.Error
+	if !errors.As(err, &failure) || failure.Code != apierr.UnknownPipeline {
+		t.Fatalf("planning error = %v, want unknown_pipeline", err)
+	}
+	if !strings.Contains(failure.Hint, strconv.Quote(input.Entrypoint)) {
+		t.Fatalf("hint %q does not name the entrypoint %q the host looked up", failure.Hint, input.Entrypoint)
 	}
 }

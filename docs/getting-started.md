@@ -300,7 +300,7 @@ func (j *Build) Work(w *sw.Work) (*sw.WorkStep, error) {
 
 // At the bottom of .sparkwing/jobs/build_deploy.go:
 //     func init() {
-//         sw.Register[sw.NoInputs]("build-deploy", func() sw.Pipeline[sw.NoInputs] { return &BuildDeploy{} })
+//         sw.Register[sw.NoInputs]("BuildDeploy", func() sw.Pipeline[sw.NoInputs] { return &BuildDeploy{} })
 //     }
 ```
 
