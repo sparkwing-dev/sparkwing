@@ -13,8 +13,9 @@ const githubHostedRunner = "github-hosted"
 type claimantFacts struct {
 	Launcher, Personal, Shared, Cloud, Observable, PersistentKubernetes bool
 	OwnerAccount, Tier, OIDCKind, ExecutorClass                         string
-	// FreshHost is a host no earlier job touched: a launcher pod, a Cloud pod or
-	// a GitHub-hosted Actions runner. A self-hosted Actions runner is a
+	// FreshHost is a host no job of another run touched: a launcher pod or a
+	// Cloud pod, whose warm node serves only its own run, or a GitHub-hosted
+	// Actions runner. A self-hosted Actions runner is a
 	// long-lived host like any other. Host names any other host.
 	FreshHost bool
 	Host      string
