@@ -287,11 +287,13 @@ func resolveUpdateVersion(ctx context.Context, requested string, check bool) (st
 
 func updateMetadata(ctx context.Context, path string, value any) error {
 	client := &http.Client{Timeout: versionFetchTimeout}
+	// #nosec G704 -- the fixed GitHub API base receives only escaped tag paths or validated commit IDs
 	request, err := http.NewRequestWithContext(ctx, http.MethodGet, updateReleaseAPI+path, nil)
 	if err != nil {
 		return err
 	}
 	request.Header.Set("Accept", "application/vnd.github+json")
+	// #nosec G704 -- the request targets the fixed GitHub API base, not a user-selected host
 	response, err := client.Do(request)
 	if err != nil {
 		return fmt.Errorf("release metadata request: %w", err)

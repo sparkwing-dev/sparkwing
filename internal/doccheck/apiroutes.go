@@ -45,6 +45,7 @@ func knownAPIRoute(method, path string) bool {
 
 func checkAPIRoutes(contentDir string) bool {
 	var checked, failed int
+	// #nosec G703 -- a build-time tool reading the documentation directory the operator selects
 	err := filepath.WalkDir(contentDir, func(path string, entry fs.DirEntry, err error) error {
 		if err != nil {
 			return err

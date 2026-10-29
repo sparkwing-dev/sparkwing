@@ -268,6 +268,7 @@ func (e httpStatusError) Error() string { return fmt.Sprintf("HTTP %d", e.code) 
 
 func downloadFile(url, dst string, maxBytes int64) error {
 	client := &http.Client{Timeout: 60 * time.Second}
+	// #nosec G704 -- callers construct release asset URLs under the fixed GitHub release base
 	resp, err := client.Get(url)
 	if err != nil {
 		return err

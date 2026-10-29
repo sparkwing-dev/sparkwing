@@ -262,6 +262,7 @@ func writeProtocolSchemas(contentDir string) error {
 		if err != nil {
 			return err
 		}
+		// #nosec G703 -- the build tool writes fixed schema names under the operator-selected docs directory
 		if err := os.WriteFile(filepath.Join(contentDir, "schemas", name+".schema.json"), body, 0o644); err != nil {
 			return err
 		}
@@ -278,6 +279,7 @@ func checkProtocolSchemas(contentDir string) bool {
 			return false
 		}
 		path := filepath.Join(contentDir, "schemas", name+".schema.json")
+		// #nosec G703 -- the build tool reads fixed schema names under the operator-selected docs directory
 		got, err := os.ReadFile(path)
 		if err != nil || !bytes.Equal(got, want) {
 			fmt.Fprintf(os.Stderr, "protocol-schema: %s differs from the v2 contract; run GOWORK=off go generate ./internal/doccheck\n", path)

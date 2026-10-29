@@ -65,6 +65,7 @@ func captureLocalRunEnvironment(ctx context.Context, home, checkout, index strin
 		return runspec.EnvSnapshot{}, err
 	}
 	retained := filepath.Join(directory, fmt.Sprintf("index-%x", sha256.Sum256(body)))
+	// #nosec G703 -- both paths are private snapshots; the destination name is a SHA-256 digest
 	if err := os.Rename(path, retained); err != nil {
 		return runspec.EnvSnapshot{}, err
 	}

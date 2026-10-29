@@ -241,6 +241,7 @@ func (r *Resolver) updateNativePin(ctx context.Context, dir string, sdk engineid
 		if err != nil {
 			return err
 		}
+		// #nosec G703 -- dir is the resolver-owned staging copy of the pipeline module
 		if err := os.WriteFile(filepath.Join(dir, "go.mod"), body, 0o600); err != nil {
 			return err
 		}
@@ -413,6 +414,7 @@ func copyCheckout(ctx context.Context, source, destination string) error {
 		if err != nil {
 			return err
 		}
+		// #nosec G703 -- WalkDir supplies a checkout-relative path inside the newly created staging directory
 		return os.WriteFile(target, body, info.Mode().Perm())
 	})
 }

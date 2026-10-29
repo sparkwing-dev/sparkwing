@@ -113,6 +113,7 @@ func (s hereCredentials) save(controller, run, bearer string) error {
 	base, _ := normalizeControllerURL(controller)
 	err = errors.Join(json.NewEncoder(f).Encode(hereCredential{Controller: base, Socket: s.socket, RunID: run, Bearer: bearer}), f.Close())
 	if err != nil {
+		// #nosec G703 -- path is a hash-derived credential filename under the private config directory
 		return errors.Join(err, os.Remove(path))
 	}
 	return nil

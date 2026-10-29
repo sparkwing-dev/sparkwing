@@ -193,6 +193,7 @@ func runSparksLint(inv clisurface.Invocation) error {
 	if err != nil {
 		return err
 	}
+	// #nosec G703 -- lint reads the manifest path explicitly selected by the CLI operator
 	raw, err := os.ReadFile(manifestPath)
 	if err != nil {
 		return fmt.Errorf("spark lint: read %s: %w", manifestPath, err)
@@ -287,6 +288,7 @@ func lintSparkEntries(libDir, field string, entries []sparkManifestEntry) []stri
 			problems = append(problems, fmt.Sprintf("%s[%d]: 'path' is required", field, i))
 		} else {
 			abs := filepath.Join(libDir, e.Path)
+			// #nosec G703 -- lint checks directory references in the manifest selected by the CLI operator
 			if info, err := os.Stat(abs); err != nil || !info.IsDir() {
 				problems = append(problems, fmt.Sprintf(
 					"%s[%d] (%s): directory %s does not exist", field, i, e.Path, abs,
@@ -333,6 +335,7 @@ func lintEntryGoMod(dir, field string, i int, e sparkManifestEntry) []string {
 		return nil
 	}
 	goModPath := filepath.Join(dir, "go.mod")
+	// #nosec G703 -- lint reads module metadata referenced by the operator-selected manifest
 	data, err := os.ReadFile(goModPath)
 	if err != nil {
 		return nil
@@ -368,12 +371,14 @@ func pluralS(n int) string {
 }
 
 func resolveSparkJSONPath(verb, target string) (libDir, manifestPath string, err error) {
+	// #nosec G703 -- this CLI accepts a manifest or library directory explicitly selected by the operator
 	info, err := os.Stat(target)
 	if err != nil {
 		return "", "", fmt.Errorf("%s: %s: %w", verb, target, err)
 	}
 	if info.IsDir() {
 		manifestPath = filepath.Join(target, "spark.json")
+		// #nosec G703 -- spark.json is read inside the library directory selected by the CLI operator
 		if _, err := os.Stat(manifestPath); err != nil {
 			return "", "", fmt.Errorf("%s: %s has no spark.json", verb, target)
 		}
