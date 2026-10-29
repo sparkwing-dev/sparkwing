@@ -6,8 +6,10 @@ excluded. The denied server package roots are named in sdk.go. Paths through
 public packages and internal leaves are checked too.
 
 Run `go run ./internal/guardcheck .` for the repository guards. The spawn
-guard has no allow-list. It checks typed references because aliases, dot
-imports and function values must not hide process constructors.
+guard's one allow-list is `hostCommandPackages` in spawn.go, the packages that
+may use host and control process constructors. It checks typed references
+because aliases, dot imports and function values must not hide process
+constructors.
 
 The spawn guard independently inventories production Go source in the root
 module, using Go's directory exclusions. It loads Linux, macOS and Windows
@@ -23,11 +25,14 @@ Build. Its values can be read through an iterator, but its backing slice cannot
 be changed or replaced by callers. Go-tool additions use Env.GoTool, which
 checks names, filters credentials and registers masks before launch.
 
-In repos, pipelineentry, nodehost and engine (including subpackages), the guard
-refuses host and control process constructors and command environment mutation.
-Those packages must use the constructors that take procenv.Env. Host tooling
-elsewhere can capture an explicit environment with ControlCommand or preserve
-host inheritance with HostCommand. Source and build transports still carry
+Outside the packages listed in `hostCommandPackages` (each named exactly, so a
+subpackage is a separate entry), the guard refuses host and control process
+constructors and command environment mutation. Every other package, including
+a new one and those that run repository code (repos, pipelineentry, nodehost,
+engine), must use the constructors that take procenv.Env. A listed package that
+runs host tooling can capture an explicit environment with ControlCommand or
+preserve host inheritance with HostCommand; adding a package to the list is a
+reviewed change. Source and build transports still carry
 ordinary slices. The protected launch boundary requires Build to apply policy
 before those values become an environment.
 

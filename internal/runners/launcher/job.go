@@ -63,6 +63,12 @@ func (c CloudJobConfig) Validate() error {
 	return nil
 }
 
+// JobPodLabels are the labels every Cloud Job, its Pod and its bootstrap
+// Secret carry. [JobLabel] and [TeamLabel] vary per Job; the rest are fixed.
+func JobPodLabels(namespace, team, job string) map[string]string {
+	return map[string]string{"app": "sparkwing-job", "app.kubernetes.io/managed-by": managedByLauncher, JobLabel: job, TeamLabel: TeamNodeValue(namespace, team)}
+}
+
 // BuildJob builds plan, eval and work Jobs after validating their award and reserving isolation.
 func BuildJob(ctx context.Context, now time.Time, cfg CloudJobConfig, award CloudJobAward, boundary CloudBoundary) (CloudJobResources, error) {
 	if err := cfg.Validate(); err != nil {
@@ -106,7 +112,7 @@ func BuildJob(ctx context.Context, now time.Time, cfg CloudJobConfig, award Clou
 	if err = validateBoundary(b, name, reservation); err != nil {
 		return CloudJobResources{}, errors.Join(err, boundary.Release(ctx, reservation))
 	}
-	labels := map[string]string{"app": "sparkwing-job", "app.kubernetes.io/managed-by": managedByLauncher, JobLabel: name, TeamLabel: TeamNodeValue(cfg.Namespace, b.Team)}
+	labels := JobPodLabels(cfg.Namespace, b.Team, name)
 	reservationJSON, err := json.Marshal(reservation)
 	if err != nil {
 		return CloudJobResources{}, errors.Join(err, boundary.Release(ctx, reservation))

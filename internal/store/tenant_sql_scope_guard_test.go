@@ -151,6 +151,11 @@ var reviewedOperatorTableSQL = map[string]string{
 // predicate reader knows only team, so this table is reviewed here rather than silently skipped.
 // safety: claim search reads every claimable team; this statement binds each row's team from the
 // proof heads the caller passed as one JSON parameter, so the guard cannot see the binding.
+// safety: each entry joins a tenant relation pinned by a key other than team, with the reason that key is safe.
+var reviewedForeignKeyedJoins = map[string]string{
+	"(*Tenant).recordSessionMembershipTx": "a session is keyed by its hash across teams; m.team binds the tenant the row is written for",
+}
+
 var reviewedClaimSearchSQL = map[string]string{
 	"claimProofFactsTx": "joins requirement terms on each proof head's own team and requirements, both bound per head",
 }
@@ -196,6 +201,10 @@ func TestTenantSQLScope_EveryTenantTableStatementCarriesTheKey(t *testing.T) {
 			seen[stmt.key] = true
 			continue
 		}
+		if _, ok := reviewedForeignKeyedJoins[stmt.key]; ok {
+			seen[stmt.key] = true
+			continue
+		}
 		if _, fragment := reviewedClaimSQLFragments[stmt.key]; fragment {
 			seen[stmt.key] = true
 			continue
@@ -217,6 +226,11 @@ func TestTenantSQLScope_EveryTenantTableStatementCarriesTheKey(t *testing.T) {
 	for key, why := range reviewedClaimSQLFragments {
 		if !strings.HasPrefix(key, "(*claimSQL).") || why == "" || !seen[key] {
 			t.Errorf("stale or unexplained claim SQL fragment %s", key)
+		}
+	}
+	for key, why := range reviewedForeignKeyedJoins {
+		if strings.TrimSpace(why) == "" || !seen[key] {
+			t.Errorf("reviewedForeignKeyedJoins entry %q is stale or has no reason; delete it", key)
 		}
 	}
 	for key, why := range reviewedOperatorTableSQL {
@@ -343,6 +357,14 @@ func TestTenantSQLScope_MatcherAcceptsAndRefuses(t *testing.T) {
 		{"outer scoped EXISTS requires its own bound team", `DELETE FROM nodes WHERE EXISTS (SELECT 1 FROM runs r WHERE r.team = ? AND r.id = nodes.run_id)`, false},
 		{"scoped subquery in a SET clause", `UPDATE nodes SET x = (SELECT x FROM runs WHERE team = ? AND id = ?) WHERE run_id = ?`, false},
 		{"outer reading no table", `SELECT (SELECT SUM(amount_micro) FROM credit_grants WHERE team = ?), (SELECT SUM(amount_micro) FROM credit_charges WHERE team = ?)`, true},
+		{"join on a non-team column", `SELECT s.team,s.value FROM runs r JOIN secrets s ON s.pipeline=r.pipeline WHERE r.team=?`, false},
+		{"join bound through team equality", `SELECT s.value FROM runs r JOIN secrets s ON s.team=r.team AND s.pipeline=r.pipeline WHERE r.team=?`, true},
+		{"join bound in WHERE", `SELECT s.value FROM runs r JOIN secrets s ON s.pipeline=r.pipeline WHERE r.team=? AND s.team=?`, true},
+		{"join team named only in the projection", `SELECT s.team FROM runs r JOIN secrets s ON s.pipeline=r.pipeline WHERE r.team=? AND s.team IS NOT NULL`, false},
+		{"join bound in only one alternative", `SELECT s.value FROM runs r JOIN secrets s ON s.pipeline=r.pipeline WHERE r.team=? AND (s.team=r.team OR s.shared=1)`, false},
+		{"comma join", `SELECT s.value FROM runs r, secrets s WHERE r.team=? AND s.pipeline=r.pipeline`, false},
+		{"join inside a subquery", `SELECT id FROM nodes WHERE team=? AND run_id IN (SELECT r.id FROM runs r JOIN secrets s ON s.pipeline=r.pipeline WHERE r.team=?)`, false},
+		{"insert select from a join", `INSERT INTO secrets(team,name) SELECT r.team,s.name FROM runs r JOIN secrets s ON s.pipeline=r.pipeline WHERE r.team=?`, false},
 		{"parenthesis in a literal", `SELECT id FROM runs WHERE team = ? AND note = '(' AND id IN (SELECT run_id FROM nodes WHERE team = ?)`, true},
 	}
 	for _, c := range cases {
@@ -447,9 +469,8 @@ func tenantTablesTouchedBy(sql string) []string {
 	return out
 }
 
-// safety: reads one statement's text, so a statement joining two tenant
-// tables passes on a single predicate here; unboundJoinAliases judges each
-// joined alias. A subquery is judged on its own by unscopedSubqueries.
+// safety: every tenant relation a query names must be pinned to the tenant by a WHERE or ON predicate, directly or
+// by equality with one already pinned; a comparison in a projection pins nothing. Subqueries are judged on their own.
 func statementCarriesTeam(sql string) bool {
 	return scopeBound(scopeTokens(sql), nil)
 }
@@ -802,84 +823,5 @@ func TestTenantSQLScope_RefusesUnjudgeableSyntax(t *testing.T) {
 	}
 	if !found {
 		t.Error("the guard no longer reads SQL built in package-level initializers")
-	}
-}
-
-// safety: each entry names one joined alias bound by a key other than team, with its reason.
-var reviewedUnboundJoinAliases = map[string]string{
-	"(*Tenant).recordSessionMembershipTx|s": "a session is keyed by its hash across teams; m.team binds the tenant the row is written for",
-}
-
-var unionSplitRe = regexp.MustCompile(`(?i)\bunion(\s+all)?\b|\bintersect\b|\bexcept\b`)
-
-// safety: one branch's team predicate says nothing about a table joined to it by a non-team column, so each
-// joined tenant alias needs its own alias.team reference.
-func unboundJoinAliases(sql string) []string {
-	tenant := teamColumnTables()
-	var out []string
-	for _, branch := range unionSplitRe.Split(strings.ToLower(splitSubqueries(sql).outer), -1) {
-		var aliases []string
-		for _, m := range tableAliasRe.FindAllStringSubmatch(branch, -1) {
-			if !slices.Contains(tenant, m[1]) || strings.HasPrefix(strings.TrimSpace(m[0]), "into") {
-				continue
-			}
-			alias := m[2]
-			if alias == "" || slices.Contains(sqlClauseWords, alias) || slices.Contains([]string{"right", "full", "natural"}, alias) {
-				alias = m[1]
-			}
-			aliases = append(aliases, alias)
-		}
-		if len(aliases) < 2 {
-			continue
-		}
-		for _, alias := range aliases {
-			if !regexp.MustCompile(`\b` + regexp.QuoteMeta(alias) + `\.team\b`).MatchString(branch) {
-				out = append(out, alias)
-			}
-		}
-	}
-	return out
-}
-
-func TestTenantSQLScope_EveryJoinedTenantTableBindsTheTeam(t *testing.T) {
-	for q, want := range map[string][]string{
-		`SELECT s.value FROM runs r JOIN secrets s ON s.pipeline=r.pipeline WHERE r.team=?`:                       {"s"},
-		`SELECT s.value FROM runs r JOIN secrets s ON s.team=r.team AND s.pipeline=r.pipeline WHERE r.team=?`:     nil,
-		`SELECT key FROM concurrency_holders WHERE team=? UNION SELECT key FROM concurrency_waiters WHERE team=?`: nil,
-		`INSERT INTO log_streams(team,run_id) SELECT team,id FROM runs WHERE team=? AND id=?`:                     nil,
-	} {
-		if got := unboundJoinAliases(q); !slices.Equal(got, want) {
-			t.Errorf("unboundJoinAliases(%q) = %v, want %v", q, got, want)
-		}
-	}
-	used, joins := map[string]bool{}, 0
-	for _, stmt := range tenantSQLStatements(t) {
-		if regexp.MustCompile(`(?i)\bjoin\b`).MatchString(stmt.text) {
-			joins++
-		}
-		if exemptFromScope(stmt.key) {
-			continue
-		}
-		if _, ok := reviewedClaimSearchSQL[stmt.key]; ok {
-			continue
-		}
-		if _, ok := reviewedClaimSQLFragments[stmt.key]; ok {
-			continue
-		}
-		for _, alias := range unboundJoinAliases(stmt.text) {
-			if _, ok := reviewedUnboundJoinAliases[stmt.key+"|"+alias]; ok {
-				used[stmt.key+"|"+alias] = true
-				continue
-			}
-			t.Errorf("%s: statement in %s joins tenant table alias %s without binding %s.team; join on team or bind it to the tenant.\n\t%s", stmt.pos, stmt.key, alias, alias, collapse(stmt.text))
-		}
-	}
-	if joins < 20 {
-		t.Fatalf("guard saw only %d joining statements; it is no longer reading this package", joins)
-	}
-	for key, why := range reviewedUnboundJoinAliases {
-		if strings.TrimSpace(why) == "" || !used[key] {
-			t.Errorf("reviewedUnboundJoinAliases entry %q is stale or has no reason; delete it", key)
-		}
 	}
 }

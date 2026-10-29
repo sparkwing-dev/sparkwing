@@ -83,7 +83,7 @@ type CeilingLimit struct {
 func (l CeilingLimit) enforced() bool { return l.MaxBytes > 0 || l.MaxObjects > 0 }
 
 // Bounded reports whether any ceiling or warning mark is set, which is the
-// only time a measured bucket total has a reader.
+// only time the controller measures the bucket; without one it publishes no totals.
 func (l CeilingLimit) Bounded() bool { return l.enforced() || l.WarnBytes > 0 || l.WarnObjects > 0 }
 
 // DefaultCeilingReconcile is how often a measured bucket total replaces
@@ -127,7 +127,10 @@ var errMeasurementPartial = errors.New("store measurement did not finish")
 type CeilingState struct {
 	// Enforced is false while neither ceiling is set, which is the
 	// shipped default and means the ceiling never refuses a write.
-	Enforced     bool          `json:"enforced"`
+	Enforced bool `json:"enforced"`
+	// Measured is false while no ceiling or warning mark is set: the controller then never lists the bucket,
+	// so Bytes and Objects count only this process's writes since it started and do not describe the bucket.
+	Measured     bool          `json:"measured"`
 	MaxBytes     int64         `json:"max_bytes"`
 	MaxObjects   int64         `json:"max_objects"`
 	WarnBytes    int64         `json:"warn_bytes"`
@@ -346,6 +349,7 @@ func (c *Ceiling) State() CeilingState {
 	defer c.mu.Unlock()
 	st := CeilingState{
 		Enforced:     c.limit.enforced(),
+		Measured:     c.limit.Bounded(),
 		MaxBytes:     c.limit.MaxBytes,
 		MaxObjects:   c.limit.MaxObjects,
 		WarnBytes:    c.limit.WarnBytes,
