@@ -10,6 +10,8 @@ type CloudSize struct {
 	Resources   Resources
 }
 func CloudSizeForProfile(selector []string, profile Profile) (CloudSize, error)
+const CloudSizeLabelPrefix = "sparkwing-"
+const CloudSizeLabelSuffix = "cpu"
 func CloudSizeMemoryBytes(cores int64) int64
 func CloudSizes() []CloudSize
 var CloudTools = parseToolManifest(build.RunnerTools)
@@ -25,6 +27,7 @@ type Demand struct {
 }
 func DetectTools(lookPath func(string) (string, error)) []string
 func Evaluate(profile Profile, demand Demand) Verdict
+func IsCloudSizeLabel(label string) bool
 func IsKnownTool(name string) bool
 var KnownTools = []string{
 	"aws", "buildx", "crane", "docker", "git", "go", "golangci-lint",
