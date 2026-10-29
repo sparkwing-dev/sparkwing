@@ -50,7 +50,7 @@ func TestCredentialTransactionsHTTPUseDefaultStoreAdapters(t *testing.T) {
 	if rows, err := foreign.GitCredentials(t.Context()); err != nil || len(rows) != 0 {
 		t.Fatalf("foreign credentials changed: %d %v", len(rows), err)
 	}
-	if _, err := foreign.GetSecretRow("KEY", "gh:1", "deploy"); err == nil {
+	if _, err := teststore.SecretRow(foreign, "KEY", "gh:1", "deploy"); err == nil {
 		t.Fatal("foreign secret changed")
 	}
 	call("DELETE", "/api/v1/team/git-credentials/git.example.test", "", 204)
@@ -60,7 +60,7 @@ func TestCredentialTransactionsHTTPUseDefaultStoreAdapters(t *testing.T) {
 	}
 	call("POST", "/api/v1/secrets", `{"name":"DENIED","value":"private-value"}`, 403)
 	call("POST", "/api/v1/team/git-credentials", `{"host_wide":true, "host":"git.example.test","kind":"https","token":"private-key"}`, 403)
-	if _, err := tenant.GetSecretRow("DENIED", "", ""); err == nil {
+	if _, err := teststore.SecretRow(tenant, "DENIED", "", ""); err == nil {
 		t.Fatal("demoted member stored secret")
 	}
 	if _, err := tenant.GitCredentialForRepository(t.Context(), "", "git.example.test"); err == nil {

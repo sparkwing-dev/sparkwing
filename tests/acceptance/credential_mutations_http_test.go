@@ -89,7 +89,7 @@ func (f *credentialMutationFake) WriteSecret(_ context.Context, a capability.Aut
 	if err := teststore.SeedSecret(f.store, f.Team(), row, teststore.Now(f.store)); err != nil {
 		return store.Secret{}, err
 	}
-	stored, err := f.Tenant.GetSecretRow(row.Name, row.Repo, row.Pipeline)
+	stored, err := teststore.SecretRow(f.Tenant, row.Name, row.Repo, row.Pipeline)
 	if err != nil {
 		return store.Secret{}, err
 	}
@@ -171,7 +171,7 @@ func TestCredentialMutationsHTTPSelectAuthenticatedTenant(t *testing.T) {
 			t.Fatal(err)
 		}
 		w := authorityHTTP(h, b, "POST", "/api/v1/secrets?"+query.Encode(), string(body))
-		row, err := target.GetSecretRow("KEY", repo, pipeline)
+		row, err := teststore.SecretRow(target, "KEY", repo, pipeline)
 		var receipt controllerwire.SecretWritten
 		if json.Unmarshal(w.Body.Bytes(), &receipt) != nil {
 			return false
@@ -190,10 +190,10 @@ func TestCredentialMutationsHTTPSelectAuthenticatedTenant(t *testing.T) {
 			return false
 		}
 		w = authorityHTTP(h, b, "DELETE", "/api/v1/secrets/KEY?"+query.Encode(), "")
-		if _, err := target.GetSecretRow("KEY", repo, pipeline); w.Code != 204 || !errors.Is(err, store.ErrNotFound) {
+		if _, err := teststore.SecretRow(target, "KEY", repo, pipeline); w.Code != 204 || !errors.Is(err, store.ErrNotFound) {
 			return false
 		}
-		other, err := foreign.GetSecretRow("KEY", repo, pipeline)
+		other, err := teststore.SecretRow(foreign, "KEY", repo, pipeline)
 		if err != nil || other.Value != "foreign-value" {
 			return false
 		}
@@ -486,7 +486,7 @@ func TestCredentialMutationsHTTPMemberTransports(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		row, err := tenant.GetSecretRow("KEY", "", "")
+		row, err := teststore.SecretRow(tenant, "KEY", "", "")
 		if err != nil || !row.Masked || row.Shared || row.Principal != p.Capability.Subject.ID {
 			t.Fatalf("class %s stored %+v %v", class, row, err)
 		}
@@ -533,7 +533,7 @@ func TestCredentialMutationsHTTPEncryptionFailuresStoreNothing(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if row, err := tenant.GetSecretRow("KEY", "", ""); !errors.Is(err, store.ErrNotFound) || row != nil {
+	if row, err := teststore.SecretRow(tenant, "KEY", "", ""); !errors.Is(err, store.ErrNotFound) || row != nil {
 		t.Fatalf("stored failed secret: %+v %v", row, err)
 	}
 	if row, err := tenant.GitCredentialForRepository(t.Context(), "", "git.invalid"); !errors.Is(err, store.ErrNotFound) || row.ID != "" {

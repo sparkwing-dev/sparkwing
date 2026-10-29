@@ -23,7 +23,8 @@ func TestOpenKeepsStateSeparate(t *testing.T) {
 		}
 		t.Cleanup(func() { _ = st.Close() })
 		fixtures[i] = st
-		version, err := st.CurrentSchemaVersion(ctx)
+		var version int
+		err = teststore.SQL(t, st).QueryRowContext(ctx, `SELECT COALESCE(MAX(version),0) FROM sparkwing_schema_version`).Scan(&version)
 		if err != nil || version != store.ExpectedSchemaVersion() {
 			t.Fatalf("store %d schema = %d, %v", i, version, err)
 		}

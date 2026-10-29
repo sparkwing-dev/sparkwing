@@ -69,30 +69,6 @@ func eventBytes(kind string, payload []byte) int64 {
 	return int64(len(kind) + len(payload))
 }
 
-// eventLimits returns the caps in force, the defaults where the operator
-// set none.
-func (s *Store) eventLimits(ctx context.Context) (eventLimits, error) {
-	return inTxResult(ctx, s, func(tx *storeTx) (eventLimits, error) {
-		return eventLimitsTx(ctx, tx)
-	})
-}
-
-// setEventLimits replaces every cap; zero lifts one.
-func (s *Store) setEventLimits(ctx context.Context, limits eventLimits) error {
-	return s.inTxOnce(ctx, func(tx *storeTx) error {
-		if err := setCreditSettingTx(ctx, tx, metaKeyEventMaxBytes, formatCreditSetting(limits.MaxBytesPerEvent)); err != nil {
-			return err
-		}
-		if err := setCreditSettingTx(ctx, tx, metaKeyEventMaxBytesPerRun, formatCreditSetting(limits.MaxBytesPerRun)); err != nil {
-			return err
-		}
-		if err := setCreditSettingTx(ctx, tx, metaKeyEventMaxEventsPerRun, formatCreditSetting(limits.MaxEventsPerRun)); err != nil {
-			return err
-		}
-		return nil
-	})
-}
-
 func eventLimitsTx(ctx context.Context, tx *storeTx) (eventLimits, error) {
 	defaults := defaultEventLimits()
 	perEvent, err := creditSettingTx(ctx, tx, metaKeyEventMaxBytes, defaults.MaxBytesPerEvent)

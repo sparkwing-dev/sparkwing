@@ -164,15 +164,3 @@ func lockActorTx(ctx context.Context, tx *storeTx, actor runstate.Actor) error {
 	}
 	return tx.operator.lockAuthorityTx(ctx, tx, []capability.AuthorityRef{actor.Authority}, actor.CapabilityPrefix)
 }
-
-// RenewOwner renews owner-bound jobs and capacity within the owner lease transaction.
-func (t *Tenant) RenewOwner(ctx context.Context, actor runstate.Actor) (runstate.LeaseBeat, error) {
-	var beat runstate.LeaseBeat
-	err := t.s.inTx(ctx, func(tx *storeTx) error {
-		if err := lockActorTx(ctx, tx, actor); err != nil {
-			return err
-		}
-		return t.renewOwnerTx(ctx, tx, actor, &beat)
-	})
-	return beat, err
-}

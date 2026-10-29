@@ -214,21 +214,6 @@ func (op *Operator) discoverAccountDeletionLocks(ctx context.Context, tx *storeT
 	return tx.operator.discoverDeletionAuthorityLocks(ctx, tx, set, `created_by=? OR (subject_kind='account' AND subject_id=?)`, account, account)
 }
 
-func (t *Tenant) requestTeamDeletionTx(ctx context.Context, tx *storeTx, now time.Time) (TeamDeletion, []string, error) {
-	if err := acquireLockSet(ctx, tx, func() lockSet { return discoverTeamDeletionLocks(ctx, tx, lockSet{}, t.team) }); err != nil {
-		return TeamDeletion{}, nil, err
-	}
-	revoked, err := t.markForDeletionTx(ctx, tx, "", now)
-	if err != nil {
-		return TeamDeletion{}, nil, err
-	}
-	del, err := teamDeletionTx(ctx, tx, t.team)
-	if err != nil {
-		return TeamDeletion{}, nil, err
-	}
-	return del, revoked, nil
-}
-
 // Authority closes before physical cleanup. Financial records survive both purge passes.
 func (t *Tenant) markForDeletionTx(ctx context.Context, tx *storeTx, requestedBy string, now time.Time) ([]string, error) {
 	if t.team == DefaultTeam {
@@ -574,41 +559,6 @@ func (o *Operator) RecordTeamDeletionFailure(ctx context.Context, team Team, cau
 		UPDATE team_deletions SET attempts = attempts + 1, last_error = ?
 		WHERE slug = ? AND (state = ? OR recheck_at IS NOT NULL)`, truncate(cause, 500), string(NormalizeTeam(team)), TeamDeletionPending)
 	return err
-}
-
-// AccountByEmail finds the account an address names: the one holding it
-// verified, or the only one holding it at all.
-func (s *Store) AccountByEmail(ctx context.Context, email string) (_ Account, err error) {
-	tx, err := s.beginSnapshotReadTx(ctx)
-	if err != nil {
-		return Account{}, err
-	}
-	defer rollbackOrLog(tx)
-	out, err := accountByEmailTx(ctx, tx, email)
-	if err != nil {
-		return Account{}, err
-	}
-	return out, tx.Commit()
-}
-
-// DeleteAccount removes an account and everything that identifies it: its
-// identities, memberships, sessions and account row. Tokens it minted in any
-// team are revoked. Teams it was the only member of are queued for deletion
-// with all their data. Rows that belong to a team and name the account, such
-// as the runs it started, stay with the team and name [deletedUserLabel]
-// instead.
-//
-// It refuses with a [*LastOwnerError] while the account is the last owner of
-// a team that has other members, because deleting it would leave those
-// members in a team nobody can administer.
-func (s *Store) DeleteAccount(ctx context.Context, accountID string) (AccountDeletion, error) {
-	var result AccountDeletion
-	err := s.inTx(ctx, func(tx *storeTx) error {
-		var err error
-		result, err = tx.operator.deleteAccountTx(ctx, tx, accountID, tx.now(ctx))
-		return err
-	})
-	return result, err
 }
 
 func (o *Operator) deleteAccountTx(ctx context.Context, tx *storeTx, accountID string, now time.Time) (AccountDeletion, error) {

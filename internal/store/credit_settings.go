@@ -10,14 +10,6 @@ import (
 	"strings"
 )
 
-func (s *Store) creditSetting(ctx context.Context, key string, fallback int64) (int64, error) {
-	raw, err := s.creditSettingRaw(ctx, key)
-	if err != nil {
-		return 0, err
-	}
-	return integerCreditSetting(key, raw, fallback)
-}
-
 func creditSettingTx(ctx context.Context, tx *storeTx, key string, fallback int64) (int64, error) {
 	raw, err := creditSettingRawTx(ctx, tx, key)
 	if err != nil {
@@ -66,10 +58,6 @@ ON CONFLICT(key) DO UPDATE SET value=excluded.value WHERE settings.sealed=0`, ke
 		return err
 	}
 	return requireOneRow(result, "credit setting")
-}
-
-func (s *Store) creditSettingRaw(ctx context.Context, key string) (string, error) {
-	return scanCreditSetting(s.queryRow(ctx, "SELECT value,sealed FROM settings WHERE key=?", key), key)
 }
 
 func creditSettingRawTx(ctx context.Context, tx *storeTx, key string) (string, error) {

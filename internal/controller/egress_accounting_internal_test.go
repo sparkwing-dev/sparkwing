@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
+	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
 
 	"github.com/sparkwing-dev/sparkwing/internal/egress"
@@ -38,21 +39,16 @@ func TestControllerEgressUsesAuthenticatedTenant(t *testing.T) {
 			t.Fatalf("server=%d bytes=%d: %v", i, bytes, err)
 		}
 	}
-	tenant, err := engine.Store.ForTeam(t.Context(), "a")
+	usage, err := engine.Store.AsOperator().EgressUsageAcrossTeams(t.Context(), time.Now().UTC().Format("2006-01"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	usage, err := tenant.EgressUsage(t.Context(), time.Now().UTC().Format("2006-01"))
-	if err != nil || usage.Bytes != 30 {
-		t.Fatalf("team usage=%+v: %v", usage, err)
+	byTeam := map[store.Team]int64{}
+	for _, u := range usage {
+		byTeam[u.Team] += u.Bytes
 	}
-	foreign, err := engine.Store.ForTeam(t.Context(), "b")
-	if err != nil {
-		t.Fatal(err)
-	}
-	usage, err = foreign.EgressUsage(t.Context(), time.Now().UTC().Format("2006-01"))
-	if err != nil || usage.Bytes != 0 {
-		t.Fatalf("foreign usage=%+v: %v", usage, err)
+	if byTeam["a"] != 30 || byTeam["b"] != 0 {
+		t.Fatalf("usage by team=%v", byTeam)
 	}
 }
 

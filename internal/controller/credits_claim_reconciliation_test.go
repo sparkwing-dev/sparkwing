@@ -24,9 +24,7 @@ func creditClaimFixture(t *testing.T, size int, rates store.CreditRateTable) (*e
 	engineSQL(t, e.Store, `INSERT INTO nodes(team,run_id,node_id,status,ready_at,spec_json,execution_json) VALUES ('a','run','job','pending',1,?,?)`, []byte(`{"id":"job"}`), []byte(fmt.Sprintf(`{"requires":{"set":true,"value":["sparkwing-%dcpu"]}}`, size)))
 	engineAcceptedFixturePlan(t, e, "a", "run")
 	if rates != nil {
-		if _, err := e.Store.AsOperator().SetCreditSettings(t.Context(), store.CreditSettingsUpdate{RateTable: &rates}); err != nil {
-			t.Fatal(err)
-		}
+		teststore.SetCreditSettings(t, e.Store, store.CreditSettingsUpdate{RateTable: &rates})
 	}
 	e.claimProfiles = billingCloudProfile{}
 	e.RunnerPolicy = runnerAdmissionFunc(func(context.Context, string) error { return nil })
@@ -45,7 +43,7 @@ func TestCredits_AnUnpricedSizeIsRefusedAtomically(t *testing.T) {
 	if err != nil || node.Status != runstate.StatusDone || node.Outcome != runstate.NodeFailed || node.ClaimedBy != "" || node.FinishedAt == nil {
 		t.Fatalf("unpriced work did not fail fast: %+v: %v", node, err)
 	}
-	projected, err := tenant.GetNode(t.Context(), "run", "job")
+	projected, err := teststore.Node(t.Context(), tenant, "run", "job")
 	if err != nil || projected.FailureReason != store.FailureUnpricedCPUClass {
 		t.Fatalf("pricing failure reason: %+v %v", projected, err)
 	}
