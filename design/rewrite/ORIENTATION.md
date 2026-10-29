@@ -60,7 +60,10 @@ ranking, lock order, admission), `internal/secrets/MASKING.md`,
 | Refill eligibility | `refill.go`: `SpendStanding.refillEligible` | `refill_model_test.go`: `TestRefillModel`; `refill_test.go` |
 | Storage admission | `storage_admission.go`: `admitStorageGrowthTx` | `storage_admission_dialect_test.go` |
 | Log slots | `result_logs.go`: `openLogSlotTx`, `commitLogSlotTx`; `controller_reporting.go`: `Tenant.OpenLogSlot` | `storage_admission_dialect_test.go`: `TestLogSlotsCountAgainstTheRunObjectLimit` |
-| Metering and lease renewal | `metered_accounting.go`: `renewBillingAwardTx`, `settleBillingChargesTx`; `state_renewal.go`: `Tenant.RenewNodeClaim` | `metered_accounting_test.go`; `refill_test.go`: `TestRenewalPaysTheNextSliceAndSettlementReturnsTheRest` |
+| Metering and lease renewal | `metered_accounting.go`: `renewBillingAwardTx`, `settleBillingChargesTx`; `state_renewal.go`: `Tenant.RenewNodeClaim` | `metered_accounting_test.go`; `refill_test.go`: `TestRenewalPaysTheNextSliceAndSettlementReturnsTheRest`; `unit_billing_test.go`: `TestFirstRenewalRunsAJobItsAdmittedSliceCovers` |
+| Free-tier limits only where usage is metered | `free_tier.go`: `Store.holdsFreeAllowance` | `free_tier_mode_test.go`: `TestUnmeteredDeploymentAppliesNoFreeTierLimits` |
+| Payment bounds ($10 to $1,000) | `refill.go`: `MinCardPaymentCents`, `MaxCardPaymentCents`; checked in `billing_pages.go` and `RefillSettings.validate` | `internal/controller/checkout_contract_internal_test.go` |
+| Controller and checkout service contract | `internal/controller/testdata/checkout_contract.json`, byte-identical with sparkwing-platform's `internal/billing/testdata` copy; final versus retried refusals in `internal/controller/billing_checkout.go`: `billingCheckout.post` | `checkout_contract_internal_test.go`; `internal/capability/payment_contract_test.go`; `payment_deployment_contract_test.go` |
 
 ### Lock order
 
