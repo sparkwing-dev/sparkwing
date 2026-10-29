@@ -3,7 +3,6 @@ package store
 import (
 	"context"
 	"database/sql"
-	"reflect"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
@@ -32,47 +31,20 @@ func bindingSlotTx(ctx context.Context, tx *storeTx, c capability.Capability, ta
 }
 
 func (t *Tenant) slotAuthorityTx(ctx context.Context, tx *storeTx, a capability.Authorized) (capability.Authorized, time.Time, error) {
-	if a.Target.Team != string(t.team) || a.Target.SlotKey == "" || a.ResultReplay || a.LogTailAttempt != 0 {
+	if a.Target.SlotKey == "" || a.ResultReplay || a.LogTailAttempt != 0 {
 		return capability.Authorized{}, time.Time{}, bindingRefusal()
-	}
-	chain, err := teamAuthorityChainTx(ctx, tx, t.team, a.Principal.Authority, true, sameTeam)
-	if err != nil {
-		return capability.Authorized{}, time.Time{}, err
-	}
-	now := tx.now(ctx)
-	snapshot := capability.AuthenticationSnapshot{Now: now}
-	for _, node := range chain {
-		snapshot.Authorities = append(snapshot.Authorities, capability.AuthorityState{Principal: node.principal})
-	}
-	snapshot.Binding, err = authenticationBindingTx(ctx, tx, chain[0].principal.Capability)
-	if err != nil {
-		return capability.Authorized{}, time.Time{}, err
 	}
 	route, ok := capability.LookupRoute("GET", "/api/v1/queue/groups/{group}")
 	if !ok {
 		return capability.Authorized{}, time.Time{}, bindingRefusal()
 	}
-	auth, err := capability.AuthenticateSnapshot(snapshot, route, capability.RequestEvidence{Target: a.Target})
-	if err != nil {
-		return capability.Authorized{}, time.Time{}, err
-	}
-	if !reflect.DeepEqual(auth.Principal.Capability.Binding, a.Binding) {
-		return capability.Authorized{}, time.Time{}, bindingRefusal()
-	}
-	var live []capability.LiveAccess
-	for _, option := range auth.Live {
-		if reflect.DeepEqual(route.Access[option.RuleIndex], a.Access) {
-			live = append(live, option)
-		}
-	}
-	auth.Live = live
-	current, err := capability.Authorize(ctx, tx, route, auth, a.Target)
+	current, snapshot, err := t.reauthorizeTx(ctx, tx, a, route, true)
 	if err != nil {
 		return capability.Authorized{}, time.Time{}, err
 	}
 	until := snapshot.Binding.LeaseExpiresAt
-	if auth.Principal.Capability.ExpiresAt != nil && (until.IsZero() || auth.Principal.Capability.ExpiresAt.Before(until)) {
-		until = *auth.Principal.Capability.ExpiresAt
+	if current.Principal.Capability.ExpiresAt != nil && (until.IsZero() || current.Principal.Capability.ExpiresAt.Before(until)) {
+		until = *current.Principal.Capability.ExpiresAt
 	}
 	if a.Access.Credential == capability.CredentialClaim {
 		var deadline sql.NullInt64
