@@ -3,7 +3,6 @@ package blob
 import (
 	"context"
 	"errors"
-	"fmt"
 	"io/fs"
 	"strconv"
 	"strings"
@@ -22,17 +21,6 @@ func LogClassDays(class string) (int, bool) {
 		return 0, false
 	}
 	return days, true
-}
-
-// LogClassReady validates a class handled by filesystem expiry.
-func (f *Filesystem) LogClassReady(ctx context.Context, class string) error {
-	if err := ctx.Err(); err != nil {
-		return err
-	}
-	if _, ok := LogClassDays(class); !ok {
-		return fmt.Errorf("invalid log retention class %q", class)
-	}
-	return nil
 }
 
 // ExpireLogs removes filesystem log objects whose stored class has elapsed.

@@ -62,10 +62,12 @@ refuses any other value.
 ### Node log retention
 
 The log storage contract assigns a retention class before signing segment
-uploads. Object-store lifecycle rules must cover each class before URLs are
-issued and expire it no sooner than the class: Sparkwing deletes log objects at
-the class age itself, so set each rule longer (for example the class plus seven
-days) as a backstop. The shared free and funded classes are thirty and ninety days.
+uploads. Sparkwing deletes log objects at the class age itself, so an
+object-store lifecycle rule per class is a backstop: expire it no sooner than
+the class, and set it longer (for example the class plus seven days). An S3
+controller with `s3:GetLifecycleConfiguration` reads the rules once at startup
+and logs a warning for each class without one; it never refuses an upload for
+a missing rule. The shared free and funded classes are thirty and ninety days.
 Filesystem storage uses its backend's retention mechanism.
 
 Log reads reauthorize at the controller and cover tagged job-attempt and

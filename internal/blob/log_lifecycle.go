@@ -14,9 +14,10 @@ import (
 // no sooner than the class. It does not look for other rules that could expire
 // some of its objects sooner. Sparkwing's maintenance pass deletes each log
 // object at its class age and only then stops counting it, so the rule is a
-// backstop and should be set longer than the class. Use it as the batch
-// signer's lifecycle check. It never changes bucket rules, which may also
-// govern unrelated operator-owned prefixes.
+// backstop and should be set longer than the class. The controller calls it
+// once per class at startup and only warns; no request path reads bucket
+// rules. It never changes bucket rules, which may also govern unrelated
+// operator-owned prefixes.
 func (s *S3) LogClassReady(ctx context.Context, class string) error {
 	if err := ctx.Err(); err != nil {
 		return err

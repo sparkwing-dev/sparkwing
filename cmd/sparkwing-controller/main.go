@@ -224,7 +224,7 @@ func run(args []string) error {
 	logRetention := fs.String("log-retention", "",
 		"teams whose node log segments keep for a set number of days instead of 90 (with credits) or 30 "+
 			"(without), as team=days[,team=days...]. Each distinct number is a retention class under "+
-			"<cache prefix>/logs/r<days>/ that needs its own lifecycle rule in the cache bucket")
+			"<cache prefix>/logs/r<days>/; give each a lifecycle rule in the cache bucket as a backstop")
 	teamDownloadFree := fs.Int64("team-daily-download-free-bytes", controller.DefaultTeamDailyDownloadFreeBytes,
 		"bytes one team without credits may download in a UTC day: binaries, artifacts, dependency archives "+
 			"and git fetches, through the cache or this controller. Log reads are not counted. Past it the "+
@@ -594,6 +594,7 @@ func run(args []string) error {
 			if err != nil {
 				return store.Policies{}, fmt.Errorf("--cache-blob-store: direct uploads: %w", err)
 			}
+			warnLogLifecycle(ctx, objects, retention)
 			var backend blob.ObjectBackend = objects
 			if cloudFront != nil {
 				backend, err = cloudFront.Backend(objects)
