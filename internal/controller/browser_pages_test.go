@@ -246,8 +246,20 @@ func TestDashboardStreamsOutliveTheListenersWriteTimeout(t *testing.T) {
 }
 
 // An open event stream ends once its caller's membership does, rather than
-// following the run for as long as it lasts.
+// following the run for as long as it lasts, whether it reads with a member
+// token or a browser session.
 func TestRunEventStreamEndsWhenMembershipEnds(t *testing.T) {
+	for name, present := range map[string]func(*http.Request, *browserFixture){
+		"member token": func(r *http.Request, f *browserFixture) { r.Header.Set("Authorization", "Bearer "+f.token) },
+		"browser session": func(r *http.Request, f *browserFixture) {
+			r.AddCookie(&http.Cookie{Name: "__Host-sw_session", Value: f.sessID})
+		},
+	} {
+		t.Run(name, func(t *testing.T) { runEventStreamEndsWhenMembershipEnds(t, present) })
+	}
+}
+
+func runEventStreamEndsWhenMembershipEnds(t *testing.T, present func(*http.Request, *browserFixture)) {
 	f := newBrowserFixture(t, &controller.Dashboard{Paths: paths.PathsAt(t.TempDir())})
 	if err := teststore.SeedRun(f.st, t.Context(), store.DefaultTeam, store.Run{RunSummary: runstate.RunSummary{ID: "r1", Pipeline: "demo", Status: "running", StartedAt: time.Now()}}); err != nil {
 		t.Fatal(err)
@@ -260,7 +272,7 @@ func TestRunEventStreamEndsWhenMembershipEnds(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	req.Header.Set("Authorization", "Bearer "+f.token)
+	present(req, f)
 	resp, err := ts.Client().Do(req)
 	if err != nil {
 		t.Fatal(err)
