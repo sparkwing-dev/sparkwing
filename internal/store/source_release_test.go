@@ -3,6 +3,7 @@ package store
 import (
 	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 	"testing/quick"
 	"time"
@@ -252,4 +253,57 @@ func TestSourceReleaseNeverReachesAPersonalMachineProperty(t *testing.T) {
 	if err := quick.Check(property, &quick.Config{MaxCount: 32}); err != nil {
 		t.Fatal(err)
 	}
+}
+
+// An uploaded run names its repository but supplies its own code, so a
+// credential scoped to that repository would reach code the repository never
+// held; it gets only a host-wide credential.
+func TestSourceReleaseGivesRepositoryCredentialsOnlyToFetchedCode(t *testing.T) {
+	tenant, auth := sourceReleaseFixture(t)
+	authorityMember(t, tenant.s, "owner", RoleReader)
+	rewriteSchemaExec(t, tenant.s.db, `INSERT INTO git_credentials(host_wide,repository_key,id,team,host,kind,secret,confirmed_at,created_at,updated_at) VALUES (0,'gh:1','scoped','a','github.com','https','scoped-secret',1,1,1)`)
+	release := func() (GitCredential, error) {
+		credential, _, err := tenant.ReleaseSourceCredential(t.Context(), auth)
+		return credential, err
+	}
+	if credential, err := release(); err != nil || credential.ID != "scoped" {
+		t.Fatalf("fetched code did not get its repository's credential: %q %v", credential.ID, err)
+	}
+	for name, supply := range map[string]func(*runspec.Source){
+		"upload": func(s *runspec.Source) {
+			s.BundleDigest = runspec.Optional[string]{Set: true, Value: "sha256:" + strings.Repeat("a", 64)}
+		},
+		"working tree":   func(s *runspec.Source) { s.WorkingTree = true },
+		"local checkout": func(s *runspec.Source) { s.Location.LocalCheckout = "/work/repo" },
+	} {
+		t.Run(name, func(t *testing.T) {
+			run, err := tenant.ReadRun(t.Context(), "run")
+			if err != nil {
+				t.Fatal(err)
+			}
+			fetched := run.Request
+			supplied := fetched
+			supply(&supplied.Request.Source)
+			setRunRequest(t, tenant, supplied)
+			defer setRunRequest(t, tenant, fetched)
+			if credential, err := release(); err != nil || credential.ID != "credential" {
+				t.Fatalf("supplied code got %q %v, want only the host-wide credential", credential.ID, err)
+			}
+			rewriteSchemaExec(t, tenant.s.db, `UPDATE git_credentials SET host_wide=0,repository_key='gh:2' WHERE id='credential'`)
+			defer rewriteSchemaExec(t, tenant.s.db, `UPDATE git_credentials SET host_wide=1,repository_key='' WHERE id='credential'`)
+			var refused *apierr.Error
+			if credential, err := release(); !errors.Is(err, ErrNotFound) || !errors.As(err, &refused) || !strings.Contains(refused.Message, "has not proven") {
+				t.Fatalf("supplied code without a host-wide credential got %q %v", credential.ID, err)
+			}
+		})
+	}
+}
+
+func setRunRequest(t *testing.T, tenant *Tenant, sealed runspec.SealedRequest) {
+	t.Helper()
+	raw, err := json.Marshal(sealed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rewriteSchemaExec(t, tenant.s.db, `UPDATE runs SET request_json=? WHERE id='run'`, raw)
 }

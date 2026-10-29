@@ -15,6 +15,8 @@
 #                              reads it: fresh only on a fresh host, whatever the team's high_trust
 # cache_reads                  awardDataScope for a job claim (ReadRefs)
 # default_branch_work_go       Provenance.DefaultBranchWork()
+# source_credential            sourceRepositoryProven: a git credential or App token scoped to the run's repository,
+#                              or only a host-wide git credential (the CLI upload carries a bundle; local a checkout)
 # actions_runner_fresh_host    claimantFactsTx FreshHost for the Actions binding's signed runner_environment
 # cache_write_<host>           awardDataScope WriteRef with awardCacheHostTx's writer for that host:
 #                              fresh_host (launcher pod, Cloud, GitHub-hosted Actions), long_lived (plain
@@ -43,6 +45,7 @@ oidc_ref                                           refs/heads/main
 oidc_sha                                           main-head
 cache_reads                                        refs/heads/main
 default_branch_work_go                             yes
+source_credential                                  repository gh:7
 cache_write_fresh_host                             refs/heads/main
 cache_write_default_branch_fresh_host              yes
 oidc_runner_environment_fresh_host                 fresh
@@ -72,6 +75,7 @@ oidc_ref                                           refs/heads/feature
 oidc_sha                                           main-head
 cache_reads                                        refs/heads/feature refs/heads/main
 default_branch_work_go                             no
+source_credential                                  repository gh:7
 cache_write_fresh_host                             refs/heads/feature
 cache_write_default_branch_fresh_host              no
 oidc_runner_environment_fresh_host                 fresh
@@ -101,6 +105,7 @@ oidc_ref                                           refs/pull/1/head
 oidc_sha                                           main-head
 cache_reads                                        refs/pull/1/head refs/heads/main
 default_branch_work_go                             no
+source_credential                                  repository gh:7
 cache_write_fresh_host                             refs/pull/1/head
 cache_write_default_branch_fresh_host              no
 oidc_runner_environment_fresh_host                 fresh
@@ -130,6 +135,7 @@ oidc_ref                                           -
 oidc_sha                                           -
 cache_reads                                        manual:fetched/run/run-app-push-branch-source-pin:refs/heads/main refs/heads/main
 default_branch_work_go                             no
+source_credential                                  repository gh:7
 cache_write_fresh_host                             manual:fetched/run/run-app-push-branch-source-pin:refs/heads/main
 cache_write_default_branch_fresh_host              no
 oidc_runner_environment_fresh_host                 fresh
@@ -159,6 +165,7 @@ oidc_ref                                           refs/heads/main
 oidc_sha                                           main-head
 cache_reads                                        manual:schedule/nightly:refs/heads/main refs/heads/main
 default_branch_work_go                             yes
+source_credential                                  repository gh:7
 cache_write_fresh_host                             manual:schedule/nightly:refs/heads/main
 cache_write_default_branch_fresh_host              no
 oidc_runner_environment_fresh_host                 fresh
@@ -188,6 +195,7 @@ oidc_ref                                           refs/heads/main
 oidc_sha                                           main-head
 cache_reads                                        manual:fetched/account/alice:refs/heads/main refs/heads/main
 default_branch_work_go                             no
+source_credential                                  repository gh:7
 cache_write_fresh_host                             manual:fetched/account/alice:refs/heads/main
 cache_write_default_branch_fresh_host              no
 oidc_runner_environment_fresh_host                 fresh
@@ -217,6 +225,7 @@ oidc_ref                                           refs/heads/main
 oidc_sha                                           main-head
 cache_reads                                        manual:fetched/run/run-schedule-overridden:refs/heads/main refs/heads/main
 default_branch_work_go                             no
+source_credential                                  repository gh:7
 cache_write_fresh_host                             manual:fetched/run/run-schedule-overridden:refs/heads/main
 cache_write_default_branch_fresh_host              no
 oidc_runner_environment_fresh_host                 fresh
@@ -246,6 +255,7 @@ oidc_ref                                           -
 oidc_sha                                           -
 cache_reads                                        manual:run/run-schedule-locked:refs/heads/main refs/heads/main
 default_branch_work_go                             no
+source_credential                                  repository gh:7
 cache_write_fresh_host                             manual:run/run-schedule-locked:refs/heads/main
 cache_write_default_branch_fresh_host              no
 oidc_runner_environment_fresh_host                 fresh
@@ -275,6 +285,7 @@ oidc_ref                                           -
 oidc_sha                                           -
 cache_reads                                        manual:armer/alice:refs/heads/main refs/heads/main
 default_branch_work_go                             no
+source_credential                                  repository gh:7
 cache_write_fresh_host                             manual:armer/alice:refs/heads/main
 cache_write_default_branch_fresh_host              no
 oidc_runner_environment_fresh_host                 fresh
@@ -304,6 +315,7 @@ oidc_ref                                           refs/heads/main
 oidc_sha                                           main-head
 cache_reads                                        manual:fetched/account/alice:refs/heads/main refs/heads/main
 default_branch_work_go                             no
+source_credential                                  repository gh:7
 cache_write_fresh_host                             manual:fetched/account/alice:refs/heads/main
 cache_write_default_branch_fresh_host              no
 oidc_runner_environment_fresh_host                 fresh
@@ -333,6 +345,7 @@ oidc_ref                                           -
 oidc_sha                                           -
 cache_reads                                        manual:account/alice:refs/heads/main refs/heads/main
 default_branch_work_go                             no
+source_credential                                  host-wide only
 cache_write_fresh_host                             manual:account/alice:refs/heads/main
 cache_write_default_branch_fresh_host              no
 oidc_runner_environment_fresh_host                 fresh
@@ -362,6 +375,7 @@ oidc_ref                                           -
 oidc_sha                                           -
 cache_reads                                        manual:local/laptop:refs/heads/main refs/heads/main
 default_branch_work_go                             no
+source_credential                                  host-wide only
 cache_write_fresh_host                             manual:local/laptop:refs/heads/main
 cache_write_default_branch_fresh_host              no
 oidc_runner_environment_fresh_host                 fresh
@@ -391,6 +405,7 @@ oidc_ref                                           refs/heads/main
 oidc_sha                                           main-head
 cache_reads                                        manual:actions:refs/heads/main refs/heads/main
 default_branch_work_go                             no
+source_credential                                  repository gh:7
 actions_runner_fresh_host                          yes
 cache_write_fresh_host                             manual:actions:refs/heads/main
 cache_write_default_branch_fresh_host              no
@@ -421,6 +436,7 @@ oidc_ref                                           refs/heads/main
 oidc_sha                                           main-head
 cache_reads                                        manual:actions:refs/heads/main refs/heads/main
 default_branch_work_go                             no
+source_credential                                  repository gh:7
 actions_runner_fresh_host                          no
 cache_write_fresh_host                             manual:actions:refs/heads/main
 cache_write_default_branch_fresh_host              no
@@ -451,6 +467,7 @@ oidc_ref                                           refs/heads/main
 oidc_sha                                           main-head
 cache_reads                                        refs/heads/main
 default_branch_work_go                             yes
+source_credential                                  repository gh:7
 cache_write_fresh_host                             refs/heads/main
 cache_write_default_branch_fresh_host              yes
 oidc_runner_environment_fresh_host                 fresh
@@ -480,6 +497,7 @@ oidc_ref                                           -
 oidc_sha                                           -
 cache_reads                                        manual:run/run-app-push-default:refs/heads/main refs/heads/main
 default_branch_work_go                             no
+source_credential                                  repository gh:7
 cache_write_fresh_host                             manual:run/run-app-push-default:refs/heads/main
 cache_write_default_branch_fresh_host              no
 oidc_runner_environment_fresh_host                 fresh
@@ -509,6 +527,7 @@ oidc_ref                                           -
 oidc_sha                                           -
 cache_reads                                        manual:run/run-app-push-default:refs/heads/main
 default_branch_work_go                             no
+source_credential                                  repository gh:8
 cache_write_fresh_host                             manual:run/run-app-push-default:refs/heads/main
 cache_write_default_branch_fresh_host              no
 oidc_runner_environment_fresh_host                 fresh
@@ -538,6 +557,7 @@ oidc_ref                                           refs/heads/main
 oidc_sha                                           main-head
 cache_reads                                        manual:fetched/account/alice:refs/heads/main refs/heads/main
 default_branch_work_go                             no
+source_credential                                  repository gh:7
 cache_write_fresh_host                             manual:fetched/account/alice:refs/heads/main
 cache_write_default_branch_fresh_host              no
 oidc_runner_environment_fresh_host                 fresh

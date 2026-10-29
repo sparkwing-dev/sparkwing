@@ -333,6 +333,9 @@ trust and records its new requester separately.
 
 Source credentials require live authorized claim access. Team Git credentials
 also require Cloud work or a shared runner of that team, never a personal machine.
+A credential scoped to a repository and a GitHub App token go only to a run
+whose code the host fetches from that repository; an upload, working tree or
+local checkout gets only a host-wide credential.
 Local owner credentials remain subject to the repository allow-list. Every
 credential release is audited. See [Git credentials](git-credentials.md).
 

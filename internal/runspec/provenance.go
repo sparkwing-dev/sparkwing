@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"path"
 	"slices"
+	"strconv"
 	"strings"
 )
 
@@ -131,14 +132,21 @@ func (p Provenance) FetchedFrom(repositoryID int64, repository, ref, sha string)
 	return p, p.validate()
 }
 
-// SecretRepositoryID is the proven GitHub repository whose pipeline secrets the
-// run reads: the repository a verified run sealed, or the one the controller
-// fetched an asserted run's code from. Zero means shared secrets only.
-func (p Provenance) SecretRepositoryID() int64 {
-	if p.identity.RepositoryID > 0 {
-		return p.identity.RepositoryID
+// ProvenRepository is the one repository identity this run proves, and every
+// release of repository-scoped material reads it: pipeline secrets, the
+// repository's source credentials and App tokens. It is the GitHub repository
+// a verified delivery, an Actions push or an admin-armed schedule sealed, or
+// the one the controller fetched an asserted run's code from. A run whose code
+// or repository the submitter supplied proves none and returns "" (decision 68).
+func (p Provenance) ProvenRepository() RepoKey {
+	id := p.identity.RepositoryID
+	if id <= 0 {
+		id = p.identity.Fetched
 	}
-	return p.identity.Fetched
+	if id <= 0 {
+		return ""
+	}
+	return RepoKey("gh:" + strconv.FormatInt(id, 10))
 }
 
 // ReadingDefault adds the repository's verified default branch, which intake learned

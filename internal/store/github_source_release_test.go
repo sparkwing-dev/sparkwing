@@ -336,3 +336,16 @@ func TestGitHubSourceReleaseMintsOutsideTransactionsAndRechecksProperty(t *testi
 		t.Fatal(err)
 	}
 }
+
+func TestGitHubSourceReleaseMintsNoTokenForSuppliedCode(t *testing.T) {
+	tenant, auth, provider := githubSourceFixture(t, 2)
+	run, err := tenant.ReadRun(t.Context(), "run")
+	if err != nil {
+		t.Fatal(err)
+	}
+	run.Request.Request.Source.BundleDigest = runspec.Optional[string]{Set: true, Value: "sha256:" + fmt.Sprintf("%064x", 1)}
+	setRunRequest(t, tenant, run.Request)
+	if _, err := releaseGitHubSourceForTest(t.Context(), tenant, auth, provider); !errors.Is(err, ErrNotFound) || provider.calls != 0 {
+		t.Fatalf("an upload got a repository App token: %v, %d mints", err, provider.calls)
+	}
+}
