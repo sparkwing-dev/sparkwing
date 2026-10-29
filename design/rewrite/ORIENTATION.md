@@ -27,6 +27,7 @@ credential model in `docs/auth.md`, and the decision log
 | Rule | Owner | Guard test |
 | --- | --- | --- |
 | Foreground cancellation waits for terminal state | `cmd/sparkwing/run_host.go`: `runLocalCommand`, `here_attach.go`: `observeHereRun` | `TestLocalRunInterruptCancelsAndWaitsForTerminalRun` |
+| Final cancellation reports retain the hard claim lifetime | `internal/nodehost/executor.go`: `report`, `claimed_node.go`: `claimSetupFailure` | `TestCancellationReportsUseTheLiveClaimLifetime`, `TestOwnerFinishesCancellationAfterACommittedPolicyResult` |
 | Foreground worker bound | `internal/nodehost/owner_schedule.go`: `OwnerHost.schedule` | `TestOwnerHostWorkersBoundLocalExecution` |
 | Successful previews finish as `dry_run` | `internal/store/scheduling_contract.go`: `Decide`; `internal/runstate/state.go`: `RunDryRun` | `internal/store/run_dry_run_test.go` |
 | Paged logs drain committed records, then report unsealed terminal logs incomplete after the existing seal grace | `internal/controller/log_pages.go`: `readLogPage` | `TestPersistedLogPageEndsUnsealedTerminalObservationAfterGrace` |
