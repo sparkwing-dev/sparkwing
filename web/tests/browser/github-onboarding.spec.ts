@@ -30,7 +30,7 @@ test("repository onboarding requires separate trigger and Actions consent", asyn
       await route.fulfill({ json: { repositories: [{ repository_id: 9, full_name: "acme/app", private: true }] } });
     } else if (path === "/api/v1/team/github-app/automation") {
       if (method === "PUT") { expect(route.request().postDataJSON()).toEqual({ repository: "acme/app", runner: "anywhere" }); enabled = true; }
-      await route.fulfill({ json: { repository: "acme/app", repository_id: 9, installation_id: 7, enabled, default_branch: "main", source_sha: "abc123", status: "ready", pipelines: [{ pipeline: "gate", push: true, branches: ["main"], pull_request: false, actions: [], base_branches: [], manual_override: true }] } });
+      await route.fulfill({ json: { repository: "acme/app", repository_id: 9, installation_id: 7, enabled, default_branch: "main", source_sha: "abc123", status: "ready", pipelines: [{ pipeline: "gate", push: true, branches: ["main"], pull_request: false, actions: [], base_branches: [], manual_override: true }], skipped: [{ pipeline: "docs", error: "pipeline docs: on.push.paths is unsupported by repository automation" }] } });
     } else if (path === "/api/v1/runners/github") {
       if (method === "POST") { expect(route.request().postDataJSON()).toEqual({ repository: "acme/app" }); bound = true; }
       await route.fulfill({ status: method === "POST" ? 201 : 200, json: { bindings: bound ? runnersFixture.bindings : [], workflow } });
@@ -42,6 +42,7 @@ test("repository onboarding requires separate trigger and Actions consent", asyn
   await page.getByRole("combobox", { name: "Repository to set up", exact: true }).selectOption("acme/app");
   await expect(page.getByText("Push branches: main", { exact: true })).toBeVisible();
   await expect(page.getByText(/Manual subscription controls this pipeline/)).toBeVisible();
+  await expect(page.getByText("Skipped docs: pipeline docs: on.push.paths is unsupported by repository automation", { exact: true })).toBeVisible();
   expect(mutations).toEqual([]);
   await page.getByRole("button", { name: "Enable repository declarations", exact: true }).click();
   await expect(page.getByText("Repository automation: enabled", { exact: true })).toBeVisible();

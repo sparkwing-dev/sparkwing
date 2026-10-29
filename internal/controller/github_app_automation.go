@@ -40,6 +40,13 @@ type githubAppAutomationPreview struct {
 	Status         string                        `json:"status"`
 	Error          string                        `json:"error,omitempty"`
 	Pipelines      []githubAppAutomationPipeline `json:"pipelines"`
+	// Skipped names each pipeline whose declaration repository automation cannot honor; its siblings still run.
+	Skipped []githubAppAutomationSkipped `json:"skipped"`
+}
+
+type githubAppAutomationSkipped struct {
+	Pipeline string `json:"pipeline"`
+	Error    string `json:"error"`
 }
 
 func validateAutomationPatterns(patterns []string) error {
@@ -63,52 +70,72 @@ func validateAutomationPatterns(patterns []string) error {
 	return nil
 }
 
-func automationDeclarations(content []byte) ([]githubAppAutomationPipeline, string, error) {
+// automationDeclarations reads each pipeline's repository triggers. A
+// pipeline whose declaration is unsupported is skipped and named, so one
+// pipeline cannot disable its siblings; the configuration is unsupported only
+// when every declaring pipeline is skipped.
+func automationDeclarations(content []byte) ([]githubAppAutomationPipeline, []githubAppAutomationSkipped, string, error) {
 	cfg, err := projectconfig.Parse(content)
 	if err != nil {
-		return nil, "invalid", err
+		return nil, nil, "invalid", err
 	}
-	out := []githubAppAutomationPipeline{}
+	out, skipped := []githubAppAutomationPipeline{}, []githubAppAutomationSkipped{}
 	for _, pipeline := range cfg.Pipelines {
 		if pipeline.On == nil {
 			continue
 		}
-		decl := githubAppAutomationPipeline{Pipeline: pipeline.Name, Branches: []string{}, Actions: []string{}, BaseBranches: []string{}}
-		if push := pipeline.On.Push; push != nil {
-			if len(push.Paths) != 0 {
-				return nil, "unsupported", fmt.Errorf("pipeline %s: on.push.paths is unsupported by repository automation", pipeline.Name)
-			}
-			if err := validateAutomationPatterns(push.Branches); err != nil {
-				return nil, "unsupported", fmt.Errorf("pipeline %s: on.push.branches: %w", pipeline.Name, err)
-			}
-			decl.Push = true
-			decl.Branches = append(decl.Branches, push.Branches...)
-		}
-		if pr := pipeline.On.PullRequest; pr != nil {
-			if err := validateAutomationPatterns(pr.Branches); err != nil {
-				return nil, "unsupported", fmt.Errorf("pipeline %s: on.pull_request.branches: %w", pipeline.Name, err)
-			}
-			decl.PullRequest = true
-			decl.BaseBranches = append(decl.BaseBranches, pr.Branches...)
-			decl.Actions = append(decl.Actions, pr.Actions...)
-			if len(decl.Actions) == 0 {
-				decl.Actions = []string{"opened", "synchronize", "reopened"}
-			}
-			for _, action := range decl.Actions {
-				if !slices.Contains([]string{"opened", "synchronize", "reopened", "closed", "ready_for_review"}, action) {
-					return nil, "unsupported", fmt.Errorf("pipeline %s: on.pull_request.actions %q is unsupported by repository automation", pipeline.Name, action)
-				}
-			}
+		decl, err := automationDeclaration(pipeline.Name, pipeline.On)
+		if err != nil {
+			skipped = append(skipped, githubAppAutomationSkipped{Pipeline: pipeline.Name, Error: err.Error()})
+			continue
 		}
 		if decl.Push || decl.PullRequest {
 			out = append(out, decl)
 		}
 	}
-	return out, "ready", nil
+	if len(out) == 0 && len(skipped) > 0 {
+		errs := make([]error, len(skipped))
+		for i, skip := range skipped {
+			errs[i] = errors.New(skip.Error)
+		}
+		return out, skipped, "unsupported", errors.Join(errs...)
+	}
+	return out, skipped, "ready", nil
+}
+
+func automationDeclaration(name string, on *projectconfig.Events) (githubAppAutomationPipeline, error) {
+	decl := githubAppAutomationPipeline{Pipeline: name, Branches: []string{}, Actions: []string{}, BaseBranches: []string{}}
+	if push := on.Push; push != nil {
+		if len(push.Paths) != 0 {
+			return decl, fmt.Errorf("pipeline %s: on.push.paths is unsupported by repository automation", name)
+		}
+		if err := validateAutomationPatterns(push.Branches); err != nil {
+			return decl, fmt.Errorf("pipeline %s: on.push.branches: %w", name, err)
+		}
+		decl.Push = true
+		decl.Branches = append(decl.Branches, push.Branches...)
+	}
+	if pr := on.PullRequest; pr != nil {
+		if err := validateAutomationPatterns(pr.Branches); err != nil {
+			return decl, fmt.Errorf("pipeline %s: on.pull_request.branches: %w", name, err)
+		}
+		decl.PullRequest = true
+		decl.BaseBranches = append(decl.BaseBranches, pr.Branches...)
+		decl.Actions = append(decl.Actions, pr.Actions...)
+		if len(decl.Actions) == 0 {
+			decl.Actions = []string{"opened", "synchronize", "reopened"}
+		}
+		for _, action := range decl.Actions {
+			if !slices.Contains([]string{"opened", "synchronize", "reopened", "closed", "ready_for_review"}, action) {
+				return decl, fmt.Errorf("pipeline %s: on.pull_request.actions %q is unsupported by repository automation", name, action)
+			}
+		}
+	}
+	return decl, nil
 }
 
 func (s *Server) githubAppAutomationPreview(ctx context.Context, tenant *store.Tenant, in store.GitHubAppInstallation, repo store.GitHubRepo) (githubAppAutomationPreview, error) {
-	out := githubAppAutomationPreview{Repository: repo.Slug(), RepositoryID: repo.ID, InstallationID: in.InstallationID, Pipelines: []githubAppAutomationPipeline{}}
+	out := githubAppAutomationPreview{Repository: repo.Slug(), RepositoryID: repo.ID, InstallationID: in.InstallationID, Pipelines: []githubAppAutomationPipeline{}, Skipped: []githubAppAutomationSkipped{}}
 	if grant, err := tenant.GitHubAppAutomation(ctx, in.InstallationID, repo.ID); err == nil {
 		out.Enabled, out.Runner = true, grant.Runner
 	} else if !errors.Is(err, store.ErrNotFound) {
@@ -129,8 +156,8 @@ func (s *Server) githubAppAutomationPreview(ctx context.Context, tenant *store.T
 		out.Error = "Add .sparkwing/sparkwing.yaml to the default branch with on.push or on.pull_request declarations"
 		return out, nil
 	}
-	decls, status, err := automationDeclarations(snapshot.Content)
-	out.Status = status
+	decls, skipped, status, err := automationDeclarations(snapshot.Content)
+	out.Status, out.Skipped = status, skipped
 	if err != nil {
 		out.Error = err.Error()
 		return out, nil //nolint:nilerr // Invalid or unsupported declarations are valid preview results.

@@ -20,6 +20,7 @@ unlock.
 
 ## [Unreleased]
 
+- **github app:** One pipeline whose `on:` declaration repository automation cannot honor (`on.push.paths`, recursive `**`, a negative pattern or an unsupported pull request action) no longer turns off automation for the whole repository. That pipeline is skipped and listed with its reason under `skipped` in `GET /api/v1/team/github-app/automation` and on **Team → GitHub**, and its sibling pipelines keep running. The status is `unsupported` only when every declaring pipeline is skipped.
 - **controller:** The retention pass deletes each invitation email log row a day after the send, once it no longer counts toward the five-a-day cap. The log keeps a digest of each invited address and used to drop it only when the same address was invited again.
 - **runner:** A runner's pipeline compiles use the runner's `GOCACHE` as well as its `GOMODCACHE`, as a local run does, so the chart's Go cache volume keeps the build cache warm across runner restarts instead of compiling from a cold `$HOME/.cache/go-build`.
 - **controller:** The controller lists its bucket for the bucket ceiling only while `--max-bucket-bytes`, `--max-bucket-objects`, `--warn-bucket-bytes` or `--warn-bucket-objects` is set. It used to list the whole `--bucket-store` every hour even with no ceiling, for a health total nothing acted on. A multi-team controller needs `--bucket-store` only when it sets one of those flags.
