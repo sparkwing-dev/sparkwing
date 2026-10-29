@@ -73,6 +73,9 @@ func init() {
 }
 
 func TestBurstSDKExecutesHerePersonalAndCloudAwards(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 3.8s measured in the short class; the full suite runs it")
+	}
 	_, plan, err := sdkserve.DefaultOperations.Plan(t.Context(), burstSDKPipelineName, map[string]string{}, nodeproto.RunContext{Pipeline: burstSDKPipelineName})
 	if err != nil {
 		t.Fatal(err)

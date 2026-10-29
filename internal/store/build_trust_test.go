@@ -40,6 +40,9 @@ func TestStoreDataBuildTrustDefaultsAndTenantIsolation(t *testing.T) {
 }
 
 func TestStoreDataBuildTrustPersistsOnlyTheSelectedTenantProperty(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 7.0s measured in the short class; the full suite runs it")
+	}
 	s := authorityStore(t)
 	_ = authorityMember(t, s, "owner", RoleOwner)
 	path := blobAccountingDiskStore(t, s)

@@ -12,6 +12,9 @@ import (
 )
 
 func TestMeteredFailureReportSettlesAndReleasesClaimProperty(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 5.3s measured in the short class; the full suite runs it")
+	}
 	property := func(seed uint32, cloud, started bool) bool {
 		s, demand, now := meteredUnitFixture(t, cloud)
 		_, actor := meteredUnitClaim(t, s, demand)

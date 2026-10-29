@@ -58,6 +58,9 @@ func TestLogPersistenceMaintenanceRespectsFinalTailGrace(t *testing.T) {
 }
 
 func TestLogPersistenceMaintenancePreservesWritableSubjects(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 2.7s measured in the short class; the full suite runs it")
+	}
 	// safety: any subject writable before maintenance remains writable after it.
 	property := func(kind uint8, elapsed int16) bool {
 		return t.Run(fmt.Sprintf("%d/%d", kind, elapsed), func(t *testing.T) {

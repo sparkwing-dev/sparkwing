@@ -50,6 +50,9 @@ func TestAnnotationClientAcknowledgesCommittedNativeWrite(t *testing.T) {
 }
 
 func FuzzMetadataNumericSelectorsRetainJobAuthority(f *testing.F) {
+	if testing.Short() {
+		f.Skip("slow: 3.6s measured in the short class; the full suite runs it")
+	}
 	for _, selector := range []string{"run", "1", "foreign", "2", "01", "+1", "../foreign", "1?team=b"} {
 		for state := range byte(3) {
 			f.Add(selector, state)

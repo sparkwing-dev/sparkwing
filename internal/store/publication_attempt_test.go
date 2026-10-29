@@ -39,6 +39,9 @@ func TestPublicationImportsTerminalAttemptWithoutExecution(t *testing.T) {
 }
 
 func TestPublicationAttemptNeverCreatesAnExecutableAward(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 1.9s measured in the short class; the full suite runs it")
+	}
 	property := func(kind uint8, value int64) bool {
 		tenant, now, terminal := publicationFixture(t)
 		a := runspec.PublishedAttempt{Attempt: 1, Generation: 1, StartedAt: now.Add(-time.Second), FinishedAt: *now, Outcome: "success", Executor: "desktop"}

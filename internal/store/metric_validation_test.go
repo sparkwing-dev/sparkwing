@@ -10,6 +10,9 @@ import (
 )
 
 func TestAddNodeMetricSample_Validation(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 2.3s measured in the short class; the full suite runs it")
+	}
 	minimum := time.Unix(0, math.MinInt64)
 	maximum := time.Unix(0, math.MaxInt64)
 	for _, tc := range []struct {

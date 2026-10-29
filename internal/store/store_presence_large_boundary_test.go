@@ -13,6 +13,9 @@ import (
 )
 
 func TestStoreLargePresenceBudget(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 4.5s measured in the short class; the full suite runs it")
+	}
 	s, tenant, actor, attempt := resultFixture(t)
 	own := blobIntent(actor, attempt)
 	unrelated := addBlobJob(t, s, own, "unrelated")

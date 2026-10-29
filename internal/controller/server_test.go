@@ -51,6 +51,9 @@ func TestController_HealthHidesDatabaseErrors(t *testing.T) {
 }
 
 func TestController_HealthDoesNotExposeRunFailures(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 1.0s measured in the short class; the full suite runs it")
+	}
 	f := newCronsFixture(t)
 	for i := range 20 {
 		if err := teststore.SeedRun(f.store, t.Context(), store.DefaultTeam, store.Run{RunSummary: runstate.RunSummary{ID: fmt.Sprintf("failed-%d", i), Pipeline: "demo", Status: "failed", StartedAt: time.Now()}}); err != nil {
@@ -184,6 +187,9 @@ func seedReportRun(t *testing.T, f *cronsFixture, id string, jobs []string) {
 }
 
 func TestControllerPublicHealthHidesWorkloadProperty(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 17.7s measured in the short class; the full suite runs it")
+	}
 	property := func(value []byte, failed bool) bool {
 		f := newCronsFixture(t)
 		secret := "private-workload-" + hex.EncodeToString(value)

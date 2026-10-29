@@ -188,6 +188,9 @@ func TestARefundOutcomeBeforeItsBindIsKept(t *testing.T) {
 }
 
 func TestRecordedRefundCannotBindAnotherAssociationProperty(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 1.1s measured in the short class; the full suite runs it")
+	}
 	property := func(seed uint32, outcome uint8) bool {
 		s, _, now := queuedRefundFixture(t, false)
 		ctx := t.Context()

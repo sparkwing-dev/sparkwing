@@ -12,6 +12,9 @@ import (
 )
 
 func TestCompletedOwnerLogsRetainOnlyTheirFinalTail(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 1.6s measured in the short class; the full suite runs it")
+	}
 	for _, kind := range []capability.UnitKind{capability.UnitTrigger, capability.UnitPlan, capability.UnitEval} {
 		t.Run(string(kind), func(t *testing.T) {
 			for _, change := range []string{"tail", "deadline", "late", "holder", "generation", "revoked parent"} {

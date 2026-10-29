@@ -15,6 +15,9 @@ import (
 )
 
 func TestNativeChildIntakeInheritsCapturedEnvironment(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 3.3s measured in the short class; the full suite runs it")
+	}
 	property := func(seed uint32, descendant bool) bool {
 		e, handler, claim := childIntakeFixture(t)
 		tenant, err := e.Store.ForTeam(t.Context(), "a")

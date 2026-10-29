@@ -13,6 +13,9 @@ import (
 )
 
 func TestMachineTeamSettingsHTTP(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 2.0s measured in the short class; the full suite runs it")
+	}
 	s, session := credentialSessionServer(t)
 	handler := s.Handler()
 	call := func(method, path, body string, status int) *httptest.ResponseRecorder {

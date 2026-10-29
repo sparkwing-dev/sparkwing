@@ -131,6 +131,9 @@ func TestProjectUntrackedSourceRequiresMachineApproval(t *testing.T) {
 }
 
 func TestBurstCLIRejectsNonPreferredAndTeamClaimants(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 14.6s measured in the short class; the full suite runs it")
+	}
 	for _, tc := range []struct{ personal, listed, allowed bool }{
 		{true, false, false}, {false, false, false}, {false, true, false}, {true, true, true},
 	} {
@@ -139,6 +142,9 @@ func TestBurstCLIRejectsNonPreferredAndTeamClaimants(t *testing.T) {
 }
 
 func FuzzBurstCLIClaimantsStayInsidePreferenceSet(f *testing.F) {
+	if testing.Short() {
+		f.Skip("slow: 7.2s measured in the short class; the full suite runs it")
+	}
 	f.Add(true, false, "class=cloud")
 	f.Add(false, true, "class=coordinator")
 	f.Fuzz(func(t *testing.T, personal, listed bool, forgedLabel string) {

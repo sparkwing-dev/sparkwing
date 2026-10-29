@@ -81,6 +81,9 @@ var localSmokeSteps = []localSmokeStep{
 // real CLI against a controller it starts in a fresh, isolated home: no profile,
 // no fakes on either side of the wire.
 func TestLocalControllerSmoke(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 8.2s measured in the short class; the full suite runs it")
+	}
 	driven := map[string]bool{}
 	for _, step := range localSmokeSteps {
 		path := "sparkwing"

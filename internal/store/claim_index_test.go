@@ -15,6 +15,9 @@ import (
 )
 
 func TestClaimRoutesSeekBoundedHeadsInALargeQueue(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 1.7s measured in the short class; the full suite runs it")
+	}
 	var visited atomic.Int64
 	probe := fmt.Sprintf("route_probe_%x", time.Now().UnixNano())
 	if err := sqlite.RegisterScalarFunction(probe, 1, func(_ *sqlite.FunctionContext, _ []driver.Value) (driver.Value, error) {

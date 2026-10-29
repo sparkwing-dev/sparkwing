@@ -180,6 +180,9 @@ func TestSubmittedEnvironmentRefusesInvalidIntakeAtomically(t *testing.T) {
 }
 
 func FuzzExecutionEnvironmentUsesOnlyLiveUnitFence(f *testing.F) {
+	if testing.Short() {
+		f.Skip("slow: 2.0s measured in the short class; the full suite runs it")
+	}
 	for kind := uint8(0); kind < 3; kind++ {
 		for change := uint8(0); change < 11; change++ {
 			f.Add(kind, change, "captured-value")

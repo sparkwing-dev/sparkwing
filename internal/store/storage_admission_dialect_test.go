@@ -246,6 +246,9 @@ func TestUncommittedLogSlotsStayCountedAndAdmitted(t *testing.T) {
 // Every new log slot is one object of its run, so a free run signs 1,000 slots and
 // the 1,001st is refused before its upload URL exists.
 func TestLogSlotsCountAgainstTheRunObjectLimit(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 5.3s measured in the short class; the full suite runs it")
+	}
 	bothDialects(t, func(t *testing.T, target *storetest.Target) {
 		f := newGrowthFixture(t, target)
 		for index := int64(0); index < 1000; index++ {

@@ -11,6 +11,9 @@ import (
 )
 
 func TestTenantEventAppendIsolationProperty(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 1.3s measured in the short class; the full suite runs it")
+	}
 	property := func(input string, offset int32, count uint8) bool {
 		tenant, now, _ := stateFixture(t)
 		other := &Tenant{s: tenant.s, team: "b"}

@@ -13,6 +13,9 @@ import (
 )
 
 func TestCapabilityClaimLivenessProperty(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 2.0s measured in the short class; the full suite runs it")
+	}
 	random := rand.New(rand.NewPCG(419, 122))
 	for i := range 32 {
 		t.Run(fmt.Sprint(i), func(t *testing.T) {
@@ -75,6 +78,9 @@ func TestCapabilityClaimLivenessProperty(t *testing.T) {
 }
 
 func TestCapabilityResultCannotChangeAfterCompletionOrLossProperty(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 1.7s measured in the short class; the full suite runs it")
+	}
 	random := rand.New(rand.NewPCG(442, 122))
 	for i := range 24 {
 		t.Run(fmt.Sprint(i), func(t *testing.T) {

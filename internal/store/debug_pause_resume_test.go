@@ -11,6 +11,9 @@ import (
 )
 
 func TestResumeDebugPauseCurrentAuthorityProperty(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 1.4s measured in the short class; the full suite runs it")
+	}
 	property := func(selector uint8, suffix string) bool {
 		tenant, now, _ := liveHolderFixture(t)
 		actor := authorityMember(t, tenant.s, "member", RoleEditor)

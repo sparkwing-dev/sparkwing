@@ -91,6 +91,9 @@ func TestRequestBudgetRecommendationsClearShippedCadence(t *testing.T) {
 }
 
 func TestRequestBudgetFleetStaysAlive(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 2.5s measured in the short class; the full suite runs it")
+	}
 	s := newAdviceServer(t).WithRequestBudget(RequestBudget{ClaimsPerMinute: CompliantClaimPollsPerMinute(), HeartbeatsPerMinute: RecommendedHeartbeatsPerMinute})
 	for _, runner := range []string{"one", "two", "three"} {
 		for range CompliantClaimPollsPerMinute() {

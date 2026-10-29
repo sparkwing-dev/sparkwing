@@ -140,6 +140,9 @@ func main() { sw.Register("Deploy", func() sw.Pipeline[sw.NoInputs] { return pip
 }
 
 func TestCloudWorkingTreeTriggerRunsPlanEvalAndJobsOnTheLauncher(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 3.7s measured in the short class; the full suite runs it")
+	}
 	f := cloudDispatchTrigger(t)
 	created, err := f.member.CreateRun(t.Context(), f.request)
 	if err != nil {
@@ -191,6 +194,9 @@ func TestCloudWorkingTreeTriggerRunsPlanEvalAndJobsOnTheLauncher(t *testing.T) {
 }
 
 func TestCloudTriggerWithRunnerSelectorStaysOnTheRunner(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 3.5s measured in the short class; the full suite runs it")
+	}
 	f := cloudDispatchTrigger(t, "--runner=builder")
 	created, err := f.member.CreateRun(t.Context(), f.request)
 	if err != nil {
@@ -211,6 +217,9 @@ func TestCloudTriggerWithRunnerSelectorStaysOnTheRunner(t *testing.T) {
 }
 
 func TestCloudTriggerNoticesWorkNobodyHasClaimed(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 7.0s measured in the short class; the full suite runs it")
+	}
 	for _, runner := range []string{"", "--runner=builder"} {
 		t.Run(map[string]string{"": "launcher", "--runner=builder": "runner"}[runner], func(t *testing.T) {
 			var args []string
@@ -242,6 +251,9 @@ func TestCloudTriggerNoticesWorkNobodyHasClaimed(t *testing.T) {
 }
 
 func TestCloudTriggerWithoutCreditsNamesTheCreditHold(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 4.2s measured in the short class; the full suite runs it")
+	}
 	f := cloudDispatchSetup(t, false)
 	created, err := f.member.CreateRun(t.Context(), f.request)
 	if err != nil {
@@ -474,6 +486,9 @@ func (cloudDispatchBoundary) Release(context.Context, launcher.CloudNodeReservat
 func (cloudDispatchBoundary) Retire(context.Context, launcher.CloudNodeReservation) error { return nil }
 
 func TestCloudJobReportsThroughTheNodeHostRoute(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 5.5s measured in the short class; the full suite runs it")
+	}
 	f := cloudDispatchTrigger(t)
 	created, err := f.member.CreateRun(t.Context(), f.request)
 	if err != nil {

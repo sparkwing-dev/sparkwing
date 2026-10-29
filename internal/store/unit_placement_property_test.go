@@ -90,6 +90,9 @@ func TestCloudPreferenceHoldUsesAllocatedSize(t *testing.T) {
 }
 
 func TestClaimPlacementOnlyLiveEligibleRunnersCanHoldWorkProperty(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 5.5s measured in the short class; the full suite runs it")
+	}
 	random := rand.New(rand.NewPCG(213, 611))
 	for _, problem := range []string{"live", "stale", "stale_activity", "revoked", "expired", "foreign", "repository", "grant", "hard_selector", "deadline", "preferred_claimant", "granted_name"} {
 		for i := range 6 {
@@ -200,6 +203,9 @@ func TestClaimPlacementOnlyLiveEligibleRunnersCanHoldWorkProperty(t *testing.T) 
 }
 
 func TestOrderedPlacementPreferencesHoldOnlyForLiveEarlierRunnersProperty(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 7.9s measured in the short class; the full suite runs it")
+	}
 	random := rand.New(rand.NewPCG(318, 910))
 	for i := range 96 {
 		t.Run(fmt.Sprint(i), func(t *testing.T) {

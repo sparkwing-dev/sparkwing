@@ -23,6 +23,9 @@ func (e *matchingEnrollment) ResolveClaimProfile(context.Context, capability.Pri
 }
 
 func TestStoreClaimMatching(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 2.1s measured in the short class; the full suite runs it")
+	}
 	for _, named := range []bool{false, true} {
 		name := "queued"
 		if named {

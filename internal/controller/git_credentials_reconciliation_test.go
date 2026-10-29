@@ -307,6 +307,9 @@ func TestTeamGitCredentialNeedsASecretsKey(t *testing.T) {
 }
 
 func TestTeamGitCredentialStaysWithTheTeamClaimAndHost(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 5.1s measured in the short class; the full suite runs it")
+	}
 	property := func(noise uint32, mode uint8) bool {
 		f := newGitReleaseFixture(t)
 		f.put("private-git-token")

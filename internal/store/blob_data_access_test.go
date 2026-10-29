@@ -104,6 +104,9 @@ func TestBlobDataAccessTransactionSeesReadEdgeWrites(t *testing.T) {
 }
 
 func TestBlobDataAccessTransactionAuthorityProperty(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 4.0s measured in the short class; the full suite runs it")
+	}
 	s, tenant, actor, attempt := resultFixture(t)
 	intent := blobIntent(actor, attempt)
 	if _, err := commitTestBlob(t, tenant, intent); err != nil {

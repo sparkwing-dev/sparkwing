@@ -54,6 +54,9 @@ func appAdmissionFixture(t *testing.T, automatic bool, digest string) (*Store, *
 }
 
 func TestAppAdmissionRequiresCurrentOriginProperty(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 1.6s measured in the short class; the full suite runs it")
+	}
 	property := func(automatic bool, mode uint8, salt uint64) bool {
 		s, tenant, in := appAdmissionFixture(t, automatic, fmt.Sprintf("digest-%x", salt))
 		defer s.Close()
@@ -159,6 +162,9 @@ func TestAppAdmissionRefusesUntypedOriginAndRollsBack(t *testing.T) {
 }
 
 func TestAppFullRefRetainsExactDefaultBranchDataTrustProperty(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 2.0s measured in the short class; the full suite runs it")
+	}
 	property := func(suffix uint32, mode uint8) bool {
 		s, records, intent := blobRecordFixture(t)
 		defer s.Close()

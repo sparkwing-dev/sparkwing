@@ -12,6 +12,9 @@ import (
 )
 
 func TestScaffoldAliasThroughCLI(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 8.1s measured in the short class; the full suite runs it")
+	}
 	dir := filepath.Join(initSnapshotRepo(t), ".sparkwing")
 	if err := os.MkdirAll(filepath.Join(dir, "jobs"), 0o700); err != nil {
 		t.Fatal(err)
@@ -62,6 +65,9 @@ func TestScaffoldAliasThroughCLI(t *testing.T) {
 }
 
 func TestRegisteredNameThroughCLI(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 6.5s measured in the short class; the full suite runs it")
+	}
 	dir := filepath.Join(initSnapshotRepo(t), ".sparkwing")
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		t.Fatal(err)

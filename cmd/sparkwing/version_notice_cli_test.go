@@ -13,6 +13,9 @@ import (
 )
 
 func TestJSONOutputCarriesNoUpgradeNotice(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 6.7s measured in the short class; the full suite runs it")
+	}
 	cli := buildSubmitCLI(t)
 	home := t.TempDir()
 	t.Setenv("HOME", home)

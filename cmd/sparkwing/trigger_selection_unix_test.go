@@ -51,6 +51,9 @@ func main(){sw.Register("`+entrypoint+`",func()sw.Pipeline[sw.NoInputs]{return p
 }
 
 func TestTriggerCommandGuardsTheSelectedRevision(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 3.3s measured in the short class; the full suite runs it")
+	}
 	selectedRevisionRepo(t)
 	for _, profile := range []string{"prod", "dev"} {
 		t.Run(profile, func(t *testing.T) {

@@ -39,6 +39,9 @@ func launcherFairnessFixture(t *testing.T) (*Store, UnitDemand) {
 }
 
 func TestClaimSeededDisjointLabelsAndFairShare(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 3.1s measured in the short class; the full suite runs it")
+	}
 	s, demand := launcherFairnessFixture(t)
 	rewriteSchemaExec(t, s.db, `DELETE FROM nodes`)
 	rng := rand.New(rand.NewPCG(44, 3095))

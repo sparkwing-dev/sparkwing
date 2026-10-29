@@ -85,6 +85,9 @@ func committedDashboardLogSegments(t *testing.T, payloads ...[]byte) (segmentLog
 }
 
 func TestCommittedDashboardLogsReadRealRecords(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 2.1s measured in the short class; the full suite runs it")
+	}
 	property := func(seed [16]byte, ordinal uint8) bool {
 		payload := []byte(fmt.Sprintf("%x\nsecond\n", seed))
 		logs, subject, st := committedDashboardLogs(t, payload)
@@ -123,6 +126,9 @@ func TestCommittedDashboardLogsReadRealRecords(t *testing.T) {
 }
 
 func TestCommittedDashboardLogsNeverEmitForForeignOrRevokedActors(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 2.1s measured in the short class; the full suite runs it")
+	}
 	property := func(seed [16]byte) bool {
 		logs, subject, st := committedDashboardLogs(t, []byte(fmt.Sprintf("%x\n", seed)))
 		foreign := logs.actor
@@ -186,6 +192,9 @@ func (w *revokeLogWriter) Write(body []byte) (int, error) {
 }
 
 func TestCommittedDashboardLogsRecheckAuthorityBetweenSegments(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 1.4s measured in the short class; the full suite runs it")
+	}
 	property := func(seed [16]byte) bool {
 		first := []byte(fmt.Sprintf("%x first\n", seed))
 		second := []byte(fmt.Sprintf("%x second\n", seed))

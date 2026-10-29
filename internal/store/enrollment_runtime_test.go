@@ -158,6 +158,9 @@ func TestMachineEnrollmentRollbackDoesNotReserveName(t *testing.T) {
 }
 
 func TestMachineEnrollmentNameReuseProperty(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 4.1s measured in the short class; the full suite runs it")
+	}
 	check := func(revoked bool, offset int16) bool {
 		s, spec := machineEnrollment(t)
 		now := s.now()
@@ -201,6 +204,9 @@ func TestMachineEnrollmentNamesAreTeamScoped(t *testing.T) {
 }
 
 func TestEnrolledClaimRepositoryAncestryProperty(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 2.5s measured in the short class; the full suite runs it")
+	}
 	s, spec := machineEnrollment(t)
 	_, demand := unitClaimFixtureStore(t, s)
 	spec.ReservedPools = nil

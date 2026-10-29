@@ -11,6 +11,9 @@ import (
 )
 
 func TestGitHubAppWebhookBoundsBodiesWithoutBufferingUnsignedOnes(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 1.5s measured in the short class; the full suite runs it")
+	}
 	f := newAppFixture(t)
 	post := func(body []byte, signature string) int {
 		t.Helper()

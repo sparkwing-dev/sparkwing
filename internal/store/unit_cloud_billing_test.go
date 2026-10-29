@@ -42,6 +42,9 @@ func TestCloudPlanIdleRenewalIsCharged(t *testing.T) {
 }
 
 func TestCloudRenewalBillsHeldTimeRegardlessOfActivityProperty(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 3.5s measured in the short class; the full suite runs it")
+	}
 	random := rand.New(rand.NewPCG(1010, 4))
 	for _, kind := range []capability.UnitKind{capability.UnitPlan, capability.UnitEval, capability.UnitNode} {
 		for sample := range 10 {

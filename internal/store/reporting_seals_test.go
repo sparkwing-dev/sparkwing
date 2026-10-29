@@ -21,6 +21,9 @@ import (
 )
 
 func TestReportingReadsSealedFactsWithoutSecretValuesProperty(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 1.4s measured in the short class; the full suite runs it")
+	}
 	random := rand.New(rand.NewPCG(423, 173))
 	for i := range 16 {
 		t.Run(fmt.Sprint(i), func(t *testing.T) {

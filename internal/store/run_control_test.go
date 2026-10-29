@@ -17,6 +17,9 @@ import (
 )
 
 func TestRunControlCommitsOnlyForCurrentMemberAuthorityProperty(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 2.1s measured in the short class; the full suite runs it")
+	}
 	property := func(selector uint8, suffix uint64) bool {
 		tenant, ref, _, _ := approvalReaperFixture(t, "fail")
 		actor := authorityMember(t, tenant.s, "member", RoleEditor)
@@ -65,6 +68,9 @@ func TestRunControlCommitsOnlyForCurrentMemberAuthorityProperty(t *testing.T) {
 }
 
 func TestRunControlMasksEncodedClassifiedValuesAndReplaysExactlyProperty(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 1.4s measured in the short class; the full suite runs it")
+	}
 	property := func(seed uint64) bool {
 		tenant, ref, _, _ := approvalReaperFixture(t, "fail")
 		actor := authorityMember(t, tenant.s, "member", RoleEditor)

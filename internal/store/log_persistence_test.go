@@ -143,6 +143,9 @@ func TestLogPersistenceAttemptByteLimitPreservesCommittedBytes(t *testing.T) {
 }
 
 func TestLogPersistenceLaterNodeFinishCannotExtendAttemptGrace(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 2.8s measured in the short class; the full suite runs it")
+	}
 	property := func(offset int16, later uint8) bool {
 		s, tenant, actor, attempt := resultFixture(t)
 		commit := logCommit(actor, attempt)

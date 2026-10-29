@@ -45,6 +45,9 @@ exit 1
 }
 
 func TestPipelineToolchainOverrideStaysInTheBuild(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 2.6s measured in the short class; the full suite runs it")
+	}
 	// safety: the pin is process state, so the build runs in a child that
 	// checks its own GOTOOLCHAIN afterwards.
 	if dir := os.Getenv("SPARKWING_TEST_TOOLCHAIN_CHILD_DIR"); dir != "" {

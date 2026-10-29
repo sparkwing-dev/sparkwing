@@ -35,6 +35,9 @@ func TestTrigger_Validation(t *testing.T) {
 }
 
 func TestEventListClampsItsLimit(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 2.0s measured in the short class; the full suite runs it")
+	}
 	st, err := teststore.Open(filepath.Join(t.TempDir(), "state.db"))
 	if err != nil {
 		t.Fatal(err)

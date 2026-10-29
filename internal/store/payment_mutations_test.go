@@ -16,6 +16,9 @@ import (
 )
 
 func TestPaymentMutationsRollBackWithReceipt(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 1.1s measured in the short class; the full suite runs it")
+	}
 	for _, kind := range []string{"card_setup", "refund", "dispute_open", "dispute_close", "warning", "queued_refund"} {
 		t.Run(kind, func(t *testing.T) {
 			s, tenant, now := cardFixture(t)
@@ -123,6 +126,9 @@ func paymentMutationSnapshot(t *testing.T, s *Store) map[string][]string {
 }
 
 func TestPaymentMutationRefundConservationProperty(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 2.7s measured in the short class; the full suite runs it")
+	}
 	for _, mode := range []capability.PaymentMode{capability.PaymentTest, capability.PaymentLive} {
 		t.Run(string(mode), func(t *testing.T) {
 			property := func(seed uint64) bool {

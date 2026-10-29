@@ -331,6 +331,9 @@ func TestMetadataRetryClosesOnlyTheEndingAttempt(t *testing.T) {
 }
 
 func TestMetadataAnnotationByteCapacityRollsBackTheRejectedAppend(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 2.8s measured in the short class; the full suite runs it")
+	}
 	for _, step := range []string{"", "body"} {
 		t.Run(step, func(t *testing.T) {
 			f := newStoreRecoveryFixture(t, true)

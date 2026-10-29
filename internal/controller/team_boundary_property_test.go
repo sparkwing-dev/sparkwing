@@ -79,6 +79,9 @@ func TestTeamBoundary_AClaimWhoseCredentialNamesNoTeamIsRefused(t *testing.T) {
 }
 
 func TestTeamBoundaryRunPrivacyProperty(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 3.1s measured in the short class; the full suite runs it")
+	}
 	tenancyDialects(t, func(t *testing.T, f *tenancyFixture) {
 		serial := 0
 		property := func(value uint64) bool {
@@ -129,6 +132,9 @@ func TestTeamBoundaryRunPrivacyProperty(t *testing.T) {
 }
 
 func TestTeamBoundaryOutputHidesRunExistenceProperty(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 3.5s measured in the short class; the full suite runs it")
+	}
 	tenancyDialects(t, func(t *testing.T, f *tenancyFixture) {
 		serial := 0
 		property := func(value uint64) bool {

@@ -59,6 +59,9 @@ func (f *runControlWriterFake) ResolveAuthorizedApproval(_ context.Context, a ca
 }
 
 func TestRunControlHTTPAuthorityProperty(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 3.0s measured in the short class; the full suite runs it")
+	}
 	property := func(input string, fail bool) bool {
 		f := newScheduleHTTPFixture(t)
 		f.facts.snapshot.Authorities[0].Principal.Capability.Grants = []capability.Grant{capability.RunsControl, capability.ApprovalsWrite}

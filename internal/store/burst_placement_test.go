@@ -36,6 +36,9 @@ func burstPersonalClaimant(t *testing.T, s *Store, authority capability.Authorit
 }
 
 func TestBurstPersonalMachineOwnershipProperty(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 2.0s measured in the short class; the full suite runs it")
+	}
 	random := rand.New(rand.NewPCG(816, 192))
 	for i := range 32 {
 		t.Run(fmt.Sprint(i), func(t *testing.T) {
@@ -217,6 +220,9 @@ func TestBurstMachinesPreferenceIncludesEveryOwnersRegisteredMachine(t *testing.
 }
 
 func TestBurstOverflowRequestNeverRaisesStoredBudgetProperty(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 1.1s measured in the short class; the full suite runs it")
+	}
 	random := rand.New(rand.NewPCG(112, 216))
 	for i := range 32 {
 		t.Run(fmt.Sprint(i), func(t *testing.T) {

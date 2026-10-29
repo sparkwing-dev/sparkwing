@@ -245,6 +245,9 @@ func TestAuthenticatedResponsesAreNoStoreAndPublicOnesAreNot(t *testing.T) {
 }
 
 func TestSecretsDashboardMaskedValuesProperty(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 1.5s measured in the short class; the full suite runs it")
+	}
 	property := func(value []byte, shared bool, role uint8) bool {
 		owner := newBrowserFixture(t, nil)
 		viewer := owner

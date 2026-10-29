@@ -33,6 +33,9 @@ func teamAuthorization(t *testing.T, s *Store, actor runstate.Actor, team Team, 
 }
 
 func TestTeamMutationsRequireCurrentAuthorityProperty(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 1.6s measured in the short class; the full suite runs it")
+	}
 	property := func(caseID uint8, suffix uint32) bool {
 		s := authorityStore(t)
 		actor := authorityMember(t, s, "owner", RoleOwner)

@@ -172,6 +172,9 @@ func TestBlobMaterializationRollsBackBothRecordsWithState(t *testing.T) {
 }
 
 func TestBlobMaterializationCannotOutliveOwnerProperty(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 1.0s measured in the short class; the full suite runs it")
+	}
 	s, tenant, request := blobMaterializationFixture(t)
 	records := s.materializations.(*blobRecords)
 	manifests := records.manifests

@@ -18,6 +18,9 @@ import (
 )
 
 func TestAppScheduleFireResolvesBothRevisionsThroughGitHub(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 3.1s measured in the short class; the full suite runs it")
+	}
 	const execution = "0123456789abcdef0123456789abcdef01234567"
 	const pinned = "abcdef0123456789abcdef0123456789abcdef01"
 	key, err := rsa.GenerateKey(rand.Reader, 1024)

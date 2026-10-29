@@ -48,6 +48,9 @@ func TestMetrics_RoundTrip(t *testing.T) {
 }
 
 func TestNodeMetricsCapAndPages(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 1.1s measured in the short class; the full suite runs it")
+	}
 	f := newStoreRecoveryFixtureAt(t, true, storetest.New(t))
 	a := metricAuthorization(t, f, "metrics")
 	ctx := t.Context()

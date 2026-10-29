@@ -24,6 +24,9 @@ import (
 )
 
 func TestDataStorageAttachesVerifiedResultRecords(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 2.6s measured in the short class; the full suite runs it")
+	}
 	property := func(payload [16]byte) bool {
 		dir := t.TempDir()
 		objects, err := blob.NewFilesystem(blob.FilesystemOptions{Directory: dir, Endpoint: "https://controller.invalid", SigningKey: bytes.Repeat([]byte{42}, 32)})

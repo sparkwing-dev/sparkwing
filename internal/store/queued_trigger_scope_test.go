@@ -20,6 +20,9 @@ import (
 )
 
 func TestQueuedTriggerRepositoryScopeProperty(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 5.7s measured in the short class; the full suite runs it")
+	}
 	random := rand.New(rand.NewPCG(323, 911))
 	for trial := range 4 {
 		t.Run(fmt.Sprint(trial), func(t *testing.T) {

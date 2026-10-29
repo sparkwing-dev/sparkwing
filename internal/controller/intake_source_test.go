@@ -34,6 +34,9 @@ type intakeGitHubTransport func(*http.Request) (*http.Response, error)
 func (f intakeGitHubTransport) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
 
 func TestIntakeSourceNumericIdentityProperty(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 3.0s measured in the short class; the full suite runs it")
+	}
 	key, err := rsa.GenerateKey(rand.Reader, 2048)
 	if err != nil {
 		t.Fatal(err)

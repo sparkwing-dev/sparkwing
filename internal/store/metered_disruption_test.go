@@ -15,6 +15,9 @@ import (
 )
 
 func TestStoreDataMeteredDisruptionReplayUsesAwardedTerms(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 22.1s measured in the short class; the full suite runs it")
+	}
 	property := func(unitIndex, elapsed, tariff uint8, atAward, started bool) bool {
 		name := fmt.Sprintf("unit=%d/at_award=%t/started=%t/elapsed=%d/rate=%d", unitIndex%4, atAward, started, elapsed, tariff)
 		return t.Run(name, func(t *testing.T) {

@@ -12,6 +12,9 @@ import (
 )
 
 func TestPaymentWarningCannotChangePaymentProperty(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 2.9s measured in the short class; the full suite runs it")
+	}
 	s, event := paymentFixture(t, capability.PaymentTest)
 	if _, err := s.settlePaymentFacts(t.Context(), event); err != nil {
 		t.Fatal(err)

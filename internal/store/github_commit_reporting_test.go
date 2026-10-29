@@ -14,6 +14,9 @@ import (
 )
 
 func TestGitHubCommitReportingUsesSealedIdentityProperty(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 3.5s measured in the short class; the full suite runs it")
+	}
 	property := func(raw uint32, name, sha string) bool {
 		tenant, input, _ := intakeFixture(t)
 		repoID := int64(raw) + 1

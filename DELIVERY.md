@@ -298,7 +298,12 @@ file. Other syntax and workflow checks remain active.
   an unapproved submission to leave the queue empty. First-run compilation,
   ref selection and pinned-binary risk fixtures remain in the full class.
   `gate` runs the suite without `-short`, which is where every guarded test is
-  still judged.
+  still judged. On 2026-10-29, with the cut's `GOMAXPROCS=7 -p 7` on a shared
+  16-core host at load 9 to 15, `cmd/sparkwing`, `internal/controller` and
+  `internal/store` took 241 s, 832 s and 617 s under `-short`, two of them past
+  Go's ten-minute package limit. Guarding every test that measured 1 s or more
+  there (and keeping the tests that switch to PostgreSQL) brought them to 41 s,
+  155 s and 189 s.
 - **What the two hooks cost:** measured on this 16-core Linux host. `pre-push`
   retains a ten-second target when the compiler cache is warm. Run records
   expose total and per-step durations, but they carry no compiler-cache
@@ -623,7 +628,11 @@ file. Other syntax and workflow checks remain active.
   verbosely and fail on any `--- SKIP` line: the hosted `Postgres
   conformance` job in `.github/workflows/ci.yaml` on every pull request
   and push to main, and `sparkwing run integration` against its
-  Dockerized Postgres and MinIO.
+  Dockerized Postgres and MinIO. The hosted job runs the three packages
+  under `-short`, because the canonical gate already runs them in full on
+  SQLite and the full store suite overran Go's ten-minute package limit on
+  a hosted runner; the tests that switch to the service database stay in
+  the short class.
 - **Postgres client on the hosted lane:** the `Postgres conformance` job
   installs `postgresql-client-17` from the PostgreSQL Apt repository and
   points `SPARKWING_PG_BIN` at `/usr/lib/postgresql/17/bin`, because

@@ -7,6 +7,9 @@ import (
 )
 
 func TestLauncherRejectionFailsExactAward(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 1.5s measured in the short class; the full suite runs it")
+	}
 	for _, kind := range []capability.UnitKind{capability.UnitPlan, capability.UnitEval, capability.UnitNode} {
 		for _, exchange := range []bool{false, true} {
 			t.Run(string(kind)+map[bool]string{false: "/bootstrap", true: "/exchanged"}[exchange], func(t *testing.T) {

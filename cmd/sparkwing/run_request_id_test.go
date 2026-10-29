@@ -16,6 +16,9 @@ import (
 )
 
 func TestDetachedRequestIDSurvivesRealPreparationIntakeAndRetry(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 5.8s measured in the short class; the full suite runs it")
+	}
 	connection := productionLocalPolicyClient(t)
 	home := t.TempDir()
 	t.Setenv("SPARKWING_HOME", home)

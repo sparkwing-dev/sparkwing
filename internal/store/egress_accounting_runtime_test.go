@@ -10,6 +10,9 @@ import (
 )
 
 func TestStoreDataEgressConservationAndTenantIsolation(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 4.5s measured in the short class; the full suite runs it")
+	}
 	property := func(first, second uint16) bool {
 		s, tenant, _ := maintenanceStore(t)
 		path := blobAccountingDiskStore(t, s)

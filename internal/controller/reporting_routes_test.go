@@ -40,6 +40,9 @@ func (f *reportingFacts) CheckBinding(context.Context, capability.Principal, cap
 }
 
 func TestReportingRoutesRejectInvalidAuthorityProperty(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 2.5s measured in the short class; the full suite runs it")
+	}
 	s := New(nil, slog.New(slog.NewTextHandler(io.Discard, nil))).WithEngineController(&EngineController{
 		ResolveTenant: selectorTenant("a", nil),
 	})

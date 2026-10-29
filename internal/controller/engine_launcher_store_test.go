@@ -139,6 +139,9 @@ func TestEngineLauncherSyncCommitsPodRejection(t *testing.T) {
 }
 
 func TestEngineLauncherSyncIsolatesCorruptionDuringPreparationAndSnapshot(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 2.2s measured in the short class; the full suite runs it")
+	}
 	for _, damage := range []struct {
 		name, query string
 		body        []byte

@@ -12,6 +12,9 @@ import (
 )
 
 func TestTeamPurgeIsolationProperty(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 1.2s measured in the short class; the full suite runs it")
+	}
 	random := rand.New(rand.NewPCG(919, 317))
 	for i := range 24 {
 		t.Run(fmt.Sprint(i), func(t *testing.T) {

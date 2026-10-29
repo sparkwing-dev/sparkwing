@@ -165,6 +165,9 @@ func TestGitHubAppWithoutChecksPermissionPostsStatuses(t *testing.T) {
 }
 
 func TestGitHubAppCheckRunSummaryIsBounded(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 137.9s measured in the short class; the full suite runs it")
+	}
 	f := newGitHubCompletion(t)
 	for i := range 400 {
 		f.addReportingNode("node-"+strings.Repeat("x", 40)+"-"+strconv.Itoa(i), runstate.NodeFailed, strings.Repeat("é", 500))

@@ -58,6 +58,9 @@ func (c materializationTransfers) Transfer(ctx context.Context, transfer blob.Si
 }
 
 func TestMaterializedResultCopiesBytesThroughControllerAndHost(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 1.1s measured in the short class; the full suite runs it")
+	}
 	for _, damage := range []string{"none", "missing_output", "corrupt_output", "corrupt_manifest", "missing_member", "corrupt_member"} {
 		t.Run(damage, func(t *testing.T) { checkMaterializedResultBytes(t, damage) })
 	}

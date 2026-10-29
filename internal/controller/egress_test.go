@@ -128,6 +128,9 @@ func TestMeteredRoutesStillServeTheRunnerAndCLITokens(t *testing.T) {
 }
 
 func TestDownloadRoutesRefuseARequestWithoutABearer(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 1.0s measured in the short class; the full suite runs it")
+	}
 	f := newEgressFixture(t, egress.Config{})
 	for _, path := range []string{egressLogPath, egressLogPath + "/stream"} {
 		w := f.fetch("GET", path, "")

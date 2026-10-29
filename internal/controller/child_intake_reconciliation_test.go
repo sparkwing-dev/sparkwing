@@ -175,6 +175,9 @@ func TestClaimRun_ChildRunsInheritTheParentAndAnswerOnlyIt(t *testing.T) {
 }
 
 func TestTeamBoundary_TriggerAncestryStaysInTheCallersTeam(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 5.0s measured in the short class; the full suite runs it")
+	}
 	property := func(seed uint32) bool {
 		private := fmt.Sprintf("private-pipeline-%x", seed)
 		e, h, claim := childIntakeFixtureWith(t, func(e *engineFixture) { declareChildren(t, e, "ci", private) })
@@ -224,6 +227,9 @@ func TestChildIntakeCannotBroadenIssuedChildren(t *testing.T) {
 }
 
 func TestChildIntakeRetainsRepositoryInheritanceWithoutGrantingSourceAuthority(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 3.3s measured in the short class; the full suite runs it")
+	}
 	property := func(inherited bool, seed uint32) bool {
 		e, h, claim := childIntakeFixture(t)
 		tenant, err := e.Store.ForTeam(t.Context(), "a")

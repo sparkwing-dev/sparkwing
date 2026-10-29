@@ -255,6 +255,9 @@ func TestSecrets_EnvelopeIsBoundToAccessFields(t *testing.T) {
 }
 
 func TestSecretsEnvelopeBindingProperty(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 6.1s measured in the short class; the full suite runs it")
+	}
 	fields := []string{"team", "name", "pipeline", "unscoped", "shared", "masked"}
 	for _, field := range fields {
 		t.Run(field, func(t *testing.T) {

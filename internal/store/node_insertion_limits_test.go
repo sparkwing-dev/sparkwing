@@ -32,6 +32,9 @@ func planWithJobs(t *testing.T, tenant *Tenant, request PlanAcceptance, count in
 }
 
 func TestPlanInsertionLimitsAreAtomicProperty(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 2.6s measured in the short class; the full suite runs it")
+	}
 	property := func(rawCap, rawCount uint8, metered, unrelated bool) bool {
 		tenant, request, _ := planFixture(t, runspec.DispatchHost)
 		cap, count := int64(rawCap%5), int(rawCount%7)

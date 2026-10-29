@@ -124,6 +124,9 @@ func TestSecretReadCommitsBoundReleaseAndNeverDetachesAnImplicitRun(t *testing.T
 }
 
 func TestSecretReadAuthorityAndSelectionProperty(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 2.2s measured in the short class; the full suite runs it")
+	}
 	random := rand.New(rand.NewPCG(35, 841))
 	for i := range 48 {
 		t.Run(fmt.Sprint(i), func(t *testing.T) {

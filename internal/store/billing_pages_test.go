@@ -80,6 +80,9 @@ func billingPageRows(t *testing.T, s *Store) []string {
 }
 
 func TestBillingPagesImmutableReservationProperty(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 1.1s measured in the short class; the full suite runs it")
+	}
 	property := func(change uint8, suffix uint32) bool {
 		s, tenant, a := billingPageFixture(t)
 		page, err := tenant.PrepareAuthorizedBillingPage(t.Context(), a, capability.BillingPageCredits, 2000, "key")

@@ -10,6 +10,9 @@ import (
 )
 
 func TestOperatorSettingsRevalidateAuthorityProperty(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 4.0s measured in the short class; the full suite runs it")
+	}
 	property := func(input uint16) bool {
 		ok := true
 		for phase := range 11 {
@@ -142,6 +145,9 @@ func TestOperatorSignUpBatchRollsBackInvalidSibling(t *testing.T) {
 }
 
 func TestOperatorSettingsConsoleProofProperty(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 2.7s measured in the short class; the full suite runs it")
+	}
 	property := func(input uint16, phase uint8) bool {
 		s := authorityStore(t)
 		actor := authorityMember(t, s, "owner", RoleOwner)
@@ -192,6 +198,9 @@ func TestOperatorSettingsConsoleProofProperty(t *testing.T) {
 }
 
 func TestDeploymentBindingAllowsOnlyUnboundTeamSelectionProperty(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 2.1s measured in the short class; the full suite runs it")
+	}
 	property := func(input uint16) bool {
 		s := authorityStore(t)
 		root := authorityRoot("ops", "")

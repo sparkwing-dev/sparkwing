@@ -18,6 +18,9 @@ import (
 
 // Reserved secrets require launcher enrollment; trust stays on the root credential.
 func TestReservedSecretPoolTakesOnlyVerifiedDefaultBranchWork(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 2.2s measured in the short class; the full suite runs it")
+	}
 	for _, tc := range []struct {
 		name     string
 		secret   bool

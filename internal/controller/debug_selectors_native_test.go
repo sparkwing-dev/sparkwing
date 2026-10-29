@@ -87,6 +87,9 @@ func TestDebugCurrentExecutionProjection(t *testing.T) {
 }
 
 func FuzzDebugSelectorsStayWithinAuthenticatedTeam(f *testing.F) {
+	if testing.Short() {
+		f.Skip("slow: 2.0s measured in the short class; the full suite runs it")
+	}
 	for _, selector := range []string{"run", "1", "2", "foreign-run", "01", "+1", "-1", "9223372036854775808", "1?team=b", "../foreign-run", "' OR 1=1 --"} {
 		f.Add(selector, byte(0))
 	}

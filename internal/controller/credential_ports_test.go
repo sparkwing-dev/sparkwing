@@ -22,6 +22,9 @@ import (
 )
 
 func TestCredentialMemberHTTPRoleCeilingProperty(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 3.7s measured in the short class; the full suite runs it")
+	}
 	property := func(roleIndex, selection uint8) bool {
 		s, session := credentialSessionServer(t)
 		role := []store.Role{store.RoleReader, store.RoleEditor, store.RoleOwner}[roleIndex%3]
@@ -103,6 +106,9 @@ func TestCredentialMemberHTTPMembershipAndSessionLifecycle(t *testing.T) {
 }
 
 func TestCredentialClaimHTTPAncestryAndFenceProperty(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 11.2s measured in the short class; the full suite runs it")
+	}
 	property := func(mutation uint8, header []byte, trigger bool) bool {
 		e, h, root := engineClaimHTTPFixture(t, []capability.Grant{capability.NodesClaim})
 		body := `{"runner_version":"v1","kinds":["node"]}`
@@ -172,6 +178,9 @@ func TestCredentialClaimHTTPAncestryAndFenceProperty(t *testing.T) {
 }
 
 func TestCredentialMachineHTTPCannotBecomeAMemberProperty(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 2.1s measured in the short class; the full suite runs it")
+	}
 	property := func(grantIndex uint8, selector []byte) bool {
 		e, _ := engineRuntimeStore(t)
 		grant := []capability.Grant{capability.NodesClaim, capability.TriggersClaim, capability.RunsWrite, capability.RunsControl}[grantIndex%4]

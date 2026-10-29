@@ -13,6 +13,9 @@ import (
 )
 
 func TestProvisionMemberCurrentScopesProperty(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 1.6s measured in the short class; the full suite runs it")
+	}
 	random := rand.New(rand.NewPCG(127, 901))
 	grants := []capability.Grant{capability.RunsRead, capability.LogsRead, capability.RunsWrite, capability.TeamAdmin, capability.NodesClaim, capability.OperatorTokens, "unknown"}
 	for i := range 40 {

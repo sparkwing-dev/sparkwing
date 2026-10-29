@@ -132,6 +132,9 @@ func TestRenewUnitRecordsOwnerExecutionForRecovery(t *testing.T) {
 }
 
 func TestRenewUnitRefusesStaleAndRootAuthority(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 1.1s measured in the short class; the full suite runs it")
+	}
 	for _, kind := range []capability.UnitKind{capability.UnitTrigger, capability.UnitPlan, capability.UnitEval, capability.UnitNode} {
 		for _, problem := range []string{"root", "revoked", "expired", "generation", "holder"} {
 			t.Run(string(kind)+"/"+problem, func(t *testing.T) {

@@ -117,6 +117,9 @@ func TestInspectionAcquiresSelectedCodeAndEngine(t *testing.T) {
 }
 
 func TestInspectionPolicyRefusalPreventsInstallationProperty(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 1.0s measured in the short class; the full suite runs it")
+	}
 	dir, _ := inspectionSourceRepo(t)
 	home := t.TempDir()
 	target := releaseasset.Target{Binary: releaseasset.Sparkwing, GOOS: runtime.GOOS, GOARCH: runtime.GOARCH}

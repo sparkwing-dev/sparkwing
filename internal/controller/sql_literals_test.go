@@ -221,6 +221,9 @@ func TestSecretMutationsInvalidNamesCannotChangeRowsProperty(t *testing.T) {
 }
 
 func TestRunFilterTenantLiteralsProperty(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 5.7s measured in the short class; the full suite runs it")
+	}
 	sqlLiteralDialects(t, func(t *testing.T, f *cronsFixture, teamA, teamB *store.Tenant) {
 		index := 0
 		property := func(value []byte) bool {

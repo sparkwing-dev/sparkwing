@@ -13,6 +13,9 @@ import (
 )
 
 func TestRenewUnitCannotMutateAStaleJobProperty(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 2.3s measured in the short class; the full suite runs it")
+	}
 	random := rand.New(rand.NewPCG(313, 977))
 	for trial := range 48 {
 		t.Run(fmt.Sprint(trial), func(t *testing.T) {

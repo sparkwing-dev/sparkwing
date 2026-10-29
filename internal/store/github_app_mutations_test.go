@@ -25,6 +25,9 @@ func githubMutationFixture(t *testing.T) (*Store, *Tenant, capability.Authorized
 }
 
 func TestGitHubAppMutationsRequireCurrentAdministrationProperty(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 3.3s measured in the short class; the full suite runs it")
+	}
 	property := func(mode uint8, delegated bool) bool {
 		s, tenant, a, _ := githubMutationFixture(t)
 		defer s.Close()

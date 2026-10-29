@@ -12,6 +12,9 @@ import (
 )
 
 func TestBlobCopiedOutputSurvivesSourceCollection(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 3.1s measured in the short class; the full suite runs it")
+	}
 	property := func(order uint8) bool {
 		s, records, intent := blobRecordFixture(t)
 		now := s.now()

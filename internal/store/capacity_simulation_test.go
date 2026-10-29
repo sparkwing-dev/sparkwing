@@ -17,6 +17,9 @@ import (
 )
 
 func TestAdmissionDeterministicSimulation(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 23.4s measured in the short class; the full suite runs it")
+	}
 	count := 12
 	if raw := os.Getenv("SPARKWING_ADMISSION_SIM_SEEDS"); raw != "" {
 		var err error

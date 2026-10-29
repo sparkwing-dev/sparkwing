@@ -14,6 +14,9 @@ import (
 )
 
 func TestMembershipRevalidatesOnlyTheAffectedPersonalCredentialsProperty(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 2.9s measured in the short class; the full suite runs it")
+	}
 	random := rand.New(rand.NewPCG(817, 719))
 	for i := range 32 {
 		t.Run(fmt.Sprint(i), func(t *testing.T) {
@@ -142,6 +145,9 @@ func TestMembershipDowngradeRechecksInviterAuthority(t *testing.T) {
 }
 
 func TestMembershipRemovalKeepsAccountSessionsScopedAndParentsBoundProperty(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 1.5s measured in the short class; the full suite runs it")
+	}
 	random := rand.New(rand.NewPCG(191, 919))
 	for i := range 24 {
 		t.Run(fmt.Sprint(i), func(t *testing.T) {

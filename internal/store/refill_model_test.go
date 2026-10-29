@@ -619,6 +619,9 @@ func refillModelSeeds(t *testing.T) ([]uint64, int) {
 // service, webhooks early, late and duplicated, and clock jumps never charge an ineligible team, never open a second
 // refill, credit every charge exactly once and keep refills stopped exactly while the model says they are.
 func TestRefillModel(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 10.4s measured in the short class; the full suite runs it")
+	}
 	seeds, histories := refillModelSeeds(t)
 	for _, seed := range seeds {
 		t.Run(strconv.FormatUint(seed, 10), func(t *testing.T) {

@@ -139,6 +139,9 @@ func cronPushBody() map[string]any {
 }
 
 func TestControllerCrons_RunNowCreatesOneTriggerAndPendingRunPerDueInstant(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 1.7s measured in the short class; the full suite runs it")
+	}
 	f := newCronsFixture(t)
 	f.push(cronPushBody())
 	const path = "/api/v1/schedules/acme%2Fwidgets%2Fnightly"
@@ -175,6 +178,9 @@ func TestControllerCrons_RunNowCreatesOneTriggerAndPendingRunPerDueInstant(t *te
 }
 
 func TestControllerCrons_RunNowReplaysTheSameRequest(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 2.0s measured in the short class; the full suite runs it")
+	}
 	f := newCronsFixture(t)
 	f.push(cronPushBody())
 	const path = "/api/v1/schedules/acme%2Fwidgets%2Fnightly/run"

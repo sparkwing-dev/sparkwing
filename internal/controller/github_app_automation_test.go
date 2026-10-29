@@ -17,6 +17,9 @@ type automationTransport func(*http.Request) (*http.Response, error)
 func (f automationTransport) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
 
 func TestGitHubAppAutomationRevokedDuringDiscoveryStartsNoRun(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 2.1s measured in the short class; the full suite runs it")
+	}
 	for _, scenario := range []string{"revoke", "revoke and reenable", "suspend", "unbind"} {
 		t.Run(scenario, func(t *testing.T) {
 			f := newAppFixture(t)
@@ -221,6 +224,9 @@ func TestGitHubAppAutomationRequiresConsentAndUsesDefaultBranch(t *testing.T) {
 }
 
 func TestGitHubAppAutomationConfigErrorsAndManualOverride(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 1.6s measured in the short class; the full suite runs it")
+	}
 	f := newAppFixture(t)
 	olga := f.ghUser(501, "olga")
 	f.connect(olga, 501, 7, acmeAdmin)

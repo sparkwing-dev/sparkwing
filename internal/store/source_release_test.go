@@ -120,6 +120,9 @@ func TestSourceReleaseDerivesFactsAndCommitsAudit(t *testing.T) {
 }
 
 func TestSourceReleaseRefusesChangedAuthorityBeforeReleasing(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 1.7s measured in the short class; the full suite runs it")
+	}
 	for _, problem := range []string{"team", "revoked", "parent_revoked", "lease", "generation", "holder", "started", "cancelled", "finished", "deadline", "personal", "unregistered", "unconfirmed_ssh", "credential_host", "repository", "enrollment", "audit", "commit"} {
 		t.Run(problem, func(t *testing.T) {
 			tenant, auth := sourceReleaseFixture(t)
@@ -228,6 +231,9 @@ func TestSourceReleaseCannotSubstituteCloudForAPersonalMachine(t *testing.T) {
 }
 
 func TestSourceReleaseNeverReachesAPersonalMachineProperty(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 2.8s measured in the short class; the full suite runs it")
+	}
 	property := func(personal, registered, ssh bool) bool {
 		tenant, auth := sourceReleaseFixture(t)
 		s := tenant.s

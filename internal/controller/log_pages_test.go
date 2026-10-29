@@ -22,6 +22,9 @@ import (
 )
 
 func TestLogTreeTraversesEveryTenantDescendantProperty(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 94.3s measured in the short class; the full suite runs it")
+	}
 	property := func(size uint8, order uint32) bool {
 		engine, _ := engineRuntimeStore(t)
 		st := engine.Store

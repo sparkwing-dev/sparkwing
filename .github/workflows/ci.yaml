@@ -78,8 +78,11 @@ jobs:
             exit 1
           fi
 
+      # -short: the canonical gate already runs these suites in full on SQLite;
+      # this step is for the tests that switch to the service database, and the
+      # full store suite does not fit Go's ten-minute package limit here.
       - name: Run the Postgres conformance suites
-        run: go test ./internal/store ./internal/backend ./internal/orchestrator
+        run: go test -short ./internal/store ./internal/backend ./internal/orchestrator
 
       - name: Prove the Postgres-gated tests did not skip
         run: |

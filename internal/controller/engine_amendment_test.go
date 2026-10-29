@@ -234,6 +234,9 @@ func TestEngineBootstrapExchangeReturnsOriginalUnitOnce(t *testing.T) {
 }
 
 func TestEngineCancellationIntentPreservesHolderProperty(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 4.0s measured in the short class; the full suite runs it")
+	}
 	property := func(reason string) bool {
 		server, tenant := engineRuntimeStore(t)
 		owner := engineRuntimeClaim(t, server, capability.UnitTrigger)

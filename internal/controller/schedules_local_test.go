@@ -97,6 +97,9 @@ type localScheduleConnection struct {
 func (c localScheduleConnection) PeerIdentity() localhostwire.LocalPeerIdentity { return c.peer }
 
 func TestLocalScheduleTransportRegistersPinsTicksAndDeletes(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 2.4s measured in the short class; the full suite runs it")
+	}
 	st := newStoreForAuth(t)
 	tenant, err := st.ForTeam(t.Context(), store.DefaultTeam)
 	if err != nil {

@@ -312,6 +312,9 @@ func TestGitHubAppExistingInstallationPicker(t *testing.T) {
 }
 
 func TestGitHubAppExistingPickerOnlyBindsListedInstallations(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 1.4s measured in the short class; the full suite runs it")
+	}
 	selectInstallation := func(code string, id int64) (int, string) {
 		t.Helper()
 		f := newAppFixture(t)

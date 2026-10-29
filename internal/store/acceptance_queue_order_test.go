@@ -17,6 +17,9 @@ import (
 )
 
 func TestStoreQueueOrder(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 1.1s measured in the short class; the full suite runs it")
+	}
 	for _, preferred := range []bool{false, true} {
 		name := "fifo"
 		if preferred {

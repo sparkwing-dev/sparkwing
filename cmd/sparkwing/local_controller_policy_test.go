@@ -114,6 +114,9 @@ func productionLocalPolicyClientAt(t *testing.T, home string) client.EngineOptio
 }
 
 func TestProductionLocalControllerAdmitsRun(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 2.4s measured in the short class; the full suite runs it")
+	}
 	for _, version := range []string{"(devel)", "v1.2.3"} {
 		t.Run(version, func(t *testing.T) {
 			previous := Version

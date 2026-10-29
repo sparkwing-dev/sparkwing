@@ -53,6 +53,9 @@ func TestRunnerInventoryKeepsLabelObservationsAcrossRenewal(t *testing.T) {
 }
 
 func TestRunnerInventoryAttributesOnlyCurrentSameTenantAuthorityProperty(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 2.5s measured in the short class; the full suite runs it")
+	}
 	property := func(seed uint64, mutation uint8) bool {
 		s, demand, claim, now := renewalFixture(t, capability.UnitNode)
 		twin := authorityRoot(fmt.Sprintf("twin-%x", seed), "a")

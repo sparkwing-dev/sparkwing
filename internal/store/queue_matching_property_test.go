@@ -13,6 +13,9 @@ import (
 )
 
 func TestClaimQueueMismatchPreservesPositionProperty(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 2.4s measured in the short class; the full suite runs it")
+	}
 	random := rand.New(rand.NewPCG(52, 109))
 	for range 32 {
 		s, demand := unitClaimFixture(t)

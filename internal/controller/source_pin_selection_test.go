@@ -67,6 +67,9 @@ func TestGitHubAppRunSealsConfiguredCodePin(t *testing.T) {
 }
 
 func TestRemoteScheduleSealsConfiguredCodePin(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 1.4s measured in the short class; the full suite runs it")
+	}
 	f := newCronsFixture(t)
 	remote := "https://8.8.8.8/acme/pinned.git"
 	execution, code := pinnedSourceRepository(t, remote)

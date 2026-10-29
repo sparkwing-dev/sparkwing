@@ -86,6 +86,9 @@ func TestBlobResultRecordsCommitAndReplayWithTerminalState(t *testing.T) {
 }
 
 func TestBlobResultRecordsRejectForgedResultKeys(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 1.7s measured in the short class; the full suite runs it")
+	}
 	_, records, change := blobResultFixture(t)
 	property := func(value uint32, dimension, part uint8) bool {
 		key := *change.Extra.Result.OutputRecord
@@ -257,6 +260,9 @@ func TestBlobResultRecordsUseTheOwningTransaction(t *testing.T) {
 }
 
 func TestBlobResultRecordsManifestReadCannotOutliveHolder(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 1.1s measured in the short class; the full suite runs it")
+	}
 	s, records, change := blobResultFixture(t)
 	reader := records.manifests
 	base := s.now()

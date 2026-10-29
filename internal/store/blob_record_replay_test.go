@@ -27,6 +27,9 @@ func TestBlobRecordsReplayKeepsEquivalentExpiry(t *testing.T) {
 }
 
 func TestBlobRecordsReplayNormalizesOptionalMetadata(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 13.1s measured in the short class; the full suite runs it")
+	}
 	for _, kind := range []blob.Kind{blob.KindOutput, blob.KindManifest} {
 		t.Run(string(kind), func(t *testing.T) {
 			property := func(offset int32, nanos uint32, expires bool, unused string) bool {

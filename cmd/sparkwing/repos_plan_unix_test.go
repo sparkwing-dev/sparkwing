@@ -8,6 +8,9 @@ import (
 )
 
 func TestRepositoryPlanAdapterUsesCurrentSelector(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 6.5s measured in the short class; the full suite runs it")
+	}
 	t.Setenv("SPARKWING_HOME", t.TempDir())
 	t.Setenv("XDG_CACHE_HOME", t.TempDir())
 	projectAt(t, "pipelines:\n  - name: gate\n    entrypoint: Gate\n")

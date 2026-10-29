@@ -53,6 +53,9 @@ func TestBlobRecordsRemoteCacheResolvesVerifiedDefault(t *testing.T) {
 }
 
 func TestBlobRemoteCacheStableFallbackCompletesProperty(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 1.1s measured in the short class; the full suite runs it")
+	}
 	for _, kind := range []blob.Kind{blob.KindMemo, blob.KindDepcache} {
 		for count := 1; count <= 9; count++ {
 			t.Run(fmt.Sprintf("%s/%d", kind, count), func(t *testing.T) {

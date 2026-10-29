@@ -13,6 +13,9 @@ import (
 )
 
 func TestBlobPublicationRequiresTerminalImportedAttempt(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 1.5s measured in the short class; the full suite runs it")
+	}
 	s, tenant, logs := publishedLogFixture(t)
 	rewriteSchemaExec(t, s.db, "DELETE FROM log_streams")
 	authority := dataAccessAuthority(t, s, logs.Actor.CapabilityPrefix)

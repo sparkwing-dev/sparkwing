@@ -16,6 +16,9 @@ import (
 )
 
 func TestPlanTopologyStrangerLearnsNothingProperty(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 2.5s measured in the short class; the full suite runs it")
+	}
 	property := func(value []byte, terminal, missing, resultGrant bool) bool {
 		s, _ := credentialSessionServer(t)
 		private := "private-" + hex.EncodeToString(value)

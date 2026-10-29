@@ -308,6 +308,9 @@ func TestCapabilityRotationBearerAndRollback(t *testing.T) {
 }
 
 func TestCapabilityRotationScopeProperty(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 1.7s measured in the short class; the full suite runs it")
+	}
 	for i := range 48 {
 		t.Run(fmt.Sprint(i), func(t *testing.T) {
 			s := authorityStore(t)

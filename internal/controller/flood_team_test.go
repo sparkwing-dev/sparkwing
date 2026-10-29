@@ -74,6 +74,9 @@ func TestFloodPolicy_ShedsOnlyTheTeamWhoseQueueIsDeep(t *testing.T) {
 }
 
 func TestFloodPolicyTeamBucketsRemainIndependentProperty(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 4.3s measured in the short class; the full suite runs it")
+	}
 	f := newFloodServer(t, controller.FloodPolicy{RunsPerPrincipalHour: 1})
 	i := 0
 	property := func(seed uint32) bool {

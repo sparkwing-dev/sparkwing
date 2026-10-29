@@ -15,6 +15,9 @@ import (
 )
 
 func TestGitHubAppOwnerSelectionSealsDispatchAndActionsClaimsItsTrigger(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 1.9s measured in the short class; the full suite runs it")
+	}
 	issuer := githuboidctest.New(t)
 	f := newDeploymentAppFixture(t, deploymenttest.Cloud(t, ghAudience), func(s *controller.Server) *controller.Server {
 		return s.WithGitHubRunners(issuer.Config(ghAudience))

@@ -82,6 +82,9 @@ func TestScheduledIntakeCommitsOneSealedRunAndHistoryPerDueInstant(t *testing.T)
 }
 
 func TestScheduleConsentAndReplayRequireCurrentAuthorityProperty(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 1.3s measured in the short class; the full suite runs it")
+	}
 	property := func(variant uint8, seed uint32) bool {
 		tenant, a, body, now := consentedScheduleFixture(t)
 		body.Schedules[0].Args = map[string]string{"input": fmt.Sprintf("value-%x", seed)}
@@ -257,6 +260,9 @@ func (p scheduleResolutionRace) ResolveScheduleSource(ctx context.Context, row C
 }
 
 func TestScheduledSourceResolutionCannotOutliveConsentProperty(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 1.4s measured in the short class; the full suite runs it")
+	}
 	property := func(variant uint8) bool {
 		tenant, a, body, now := consentedScheduleFixture(t)
 		ids, _, err := tenant.ReplaceAuthorizedSchedules(t.Context(), a, body)

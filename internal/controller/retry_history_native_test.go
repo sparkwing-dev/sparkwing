@@ -101,6 +101,9 @@ func TestRetryHistoryRechecksEachRunBinding(t *testing.T) {
 }
 
 func TestRetryHistoryTraversesLongChainsAndCycles(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 48.9s measured in the short class; the full suite runs it")
+	}
 	s, session := pauseHTTPFixture(t)
 	seedRetryHistory(t, s, "private-retry-value")
 	ids := []string{"run", "second", "sibling", "last"}
@@ -145,6 +148,9 @@ func TestRetryHistoryOrdersEqualTimestampsByRunNumber(t *testing.T) {
 }
 
 func FuzzRetryHistoryKeepsPrivateInputsAndTeams(f *testing.F) {
+	if testing.Short() {
+		f.Skip("slow: 7.6s measured in the short class; the full suite runs it")
+	}
 	for _, selector := range []string{"run", "1", "second", "2", "foreign", "5", "01", "../foreign", "' OR 1=1 --"} {
 		for state := range byte(4) {
 			f.Add(selector, []byte("private-value"), state)

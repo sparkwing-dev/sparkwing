@@ -64,6 +64,9 @@ func accountMutationRows(t *testing.T, s *Store) []string {
 }
 
 func TestAccountMutationsRequireTheSameLiveDirectSessionProperty(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 3.0s measured in the short class; the full suite runs it")
+	}
 	property := func(choice uint8, suffix uint32) bool {
 		s, a, _, now := accountMutationFixture(t)
 		id := a.Principal.Capability.Subject.ID

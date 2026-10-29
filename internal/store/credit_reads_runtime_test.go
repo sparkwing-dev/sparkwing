@@ -95,6 +95,9 @@ func TestStoreDataCreditReadsStayInTenantAndUseStoreClock(t *testing.T) {
 }
 
 func TestStoreDataCreditStateUsesOneSnapshotProperty(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 2.2s measured in the short class; the full suite runs it")
+	}
 	property := func(amount uint16) bool {
 		s := authorityStore(t)
 		path := blobAccountingDiskStore(t, s)

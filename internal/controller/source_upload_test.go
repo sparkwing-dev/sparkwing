@@ -150,6 +150,9 @@ func TestSourceSnapshotRealClientStorageAndIntake(t *testing.T) {
 }
 
 func TestSourceSnapshotAuthorityAndRevisionProperty(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 1.7s measured in the short class; the full suite runs it")
+	}
 	s, options, input, raw := sourceUploadFixture(t)
 	path := filepath.Join(t.TempDir(), "snapshot.bundle")
 	if err := os.WriteFile(path, []byte("snapshot bytes"), 0o600); err != nil {

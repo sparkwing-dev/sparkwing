@@ -12,6 +12,9 @@ import (
 )
 
 func TestMeteredRootPolicyCannotRewriteAwardProperty(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 2.3s measured in the short class; the full suite runs it")
+	}
 	for i := range 32 {
 		t.Run(fmt.Sprint(i), func(t *testing.T) {
 			cloud, metered := i&1 != 0, i&2 != 0

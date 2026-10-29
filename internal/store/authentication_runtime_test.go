@@ -145,6 +145,9 @@ func TestAuthenticationSnapshotReadsPlanLeaseAndCancellation(t *testing.T) {
 }
 
 func TestAuthenticationCancellationReasonKeepsJobIntentProperty(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 1.1s measured in the short class; the full suite runs it")
+	}
 	random := rand.New(rand.NewPCG(483, 771))
 	for i := range 24 {
 		t.Run(fmt.Sprint(i), func(t *testing.T) {

@@ -609,6 +609,9 @@ func TestBlobUploadRejectedCommitLeavesCollectableBytes(t *testing.T) {
 }
 
 func TestBlobUploadLiveTicketsProtectSharedDigestProperty(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 1.6s measured in the short class; the full suite runs it")
+	}
 	random := rand.New(rand.NewSource(1839))
 	for sample := range 20 {
 		t.Run(fmt.Sprint(sample), func(t *testing.T) {

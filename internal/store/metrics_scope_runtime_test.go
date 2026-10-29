@@ -10,6 +10,9 @@ import (
 )
 
 func TestMetricIdentityPreservesTenantAndConflictingRetriesProperty(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 1.1s measured in the short class; the full suite runs it")
+	}
 	f := newStoreRecoveryFixtureAt(t, true, storetest.New(t))
 	foreign := tenantFor(t, f.s, "foreign")
 	a := metricAuthorization(t, f, "metrics")

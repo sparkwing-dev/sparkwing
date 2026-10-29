@@ -262,6 +262,9 @@ func TestSourceCredential_TypedRepositoryNeedsASubscription(t *testing.T) {
 // With nothing that covers the run, the route answers the code a runner reads
 // as "no credential", and a message naming what the team can do about it.
 func TestSourceCredential_NamesTheRemedy(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 1.2s measured in the short class; the full suite runs it")
+	}
 	f := newAppFixture(t)
 	olga := f.ghUser(501, "olga")
 	f.connect(olga, 501, 7, acmeAdmin)
@@ -387,6 +390,9 @@ func TestSourceCredential_AppTokenReadsOnlyTheOwnersExtraRepos(t *testing.T) {
 }
 
 func TestSourceCredential_ExtraConsentStaysWithSourceIDProperty(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 6.7s measured in the short class; the full suite runs it")
+	}
 	property := func(value uint16) bool {
 		f := newAppFixture(t)
 		owner := f.ghUser(501, "olga")
@@ -412,6 +418,9 @@ func TestSourceCredential_ExtraConsentStaysWithSourceIDProperty(t *testing.T) {
 }
 
 func TestSourceCredential_RenamedRepositoryClearsExtraConsentProperty(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 3.2s measured in the short class; the full suite runs it")
+	}
 	property := func(value uint16) bool {
 		f := newAppFixture(t)
 		owner := f.ghUser(501, "olga")

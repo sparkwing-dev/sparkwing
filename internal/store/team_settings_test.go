@@ -89,6 +89,9 @@ func TestChildCeilingDatabaseRange(t *testing.T) {
 }
 
 func TestMachineEnrollmentTeamSettingProperty(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 2.0s measured in the short class; the full suite runs it")
+	}
 	property := func(enabled, personal bool, roleIndex uint8) bool {
 		s, spec := machineEnrollment(t)
 		role := []Role{RoleOwner, RoleEditor, RoleReader}[roleIndex%3]
@@ -176,6 +179,9 @@ func TestTeamSettingAuditsOnlyCommittedChanges(t *testing.T) {
 }
 
 func TestTeamSettingRechecksAuthorityProperty(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 1.1s measured in the short class; the full suite runs it")
+	}
 	property := func(change uint8, suffix uint32) bool {
 		s, spec := machineEnrollment(t)
 		a := teamAuthorization(t, s, runstate.Actor{Authority: *spec.Authority}, "a", "PUT", "/api/v1/team/settings")

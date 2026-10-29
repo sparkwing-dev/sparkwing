@@ -11,6 +11,9 @@ import (
 )
 
 func TestBlobDataBindingUsesTransactionalReadSet(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 1.4s measured in the short class; the full suite runs it")
+	}
 	s, tenant, actor, attempt := resultFixture(t)
 	intent := blobIntent(actor, attempt)
 	if _, err := commitTestBlob(t, tenant, intent); err != nil {

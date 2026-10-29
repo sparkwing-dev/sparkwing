@@ -249,6 +249,9 @@ func TestDashboardStreamsOutliveTheListenersWriteTimeout(t *testing.T) {
 // following the run for as long as it lasts, whether it reads with a member
 // token or a browser session.
 func TestRunEventStreamEndsWhenMembershipEnds(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 3.6s measured in the short class; the full suite runs it")
+	}
 	for name, present := range map[string]func(*http.Request, *browserFixture){
 		"member token": func(r *http.Request, f *browserFixture) { r.Header.Set("Authorization", "Bearer "+f.token) },
 		"browser session": func(r *http.Request, f *browserFixture) {

@@ -183,6 +183,9 @@ func TestStoreDataEventsFailuresLeaveNoPartialCharge(t *testing.T) {
 }
 
 func TestStoreDataEventsTenantIsolationAndConservation(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 5.5s measured in the short class; the full suite runs it")
+	}
 	property := func(first, second uint8) bool {
 		s, tenant, _, _ := resultFixture(t)
 		path := blobAccountingDiskStore(t, s)

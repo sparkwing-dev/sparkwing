@@ -12,6 +12,9 @@ import (
 )
 
 func TestOwnerLeaseAloneDeterminesLivenessProperty(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 2.5s measured in the short class; the full suite runs it")
+	}
 	random := rand.New(rand.NewPCG(53, 101))
 	for i := range 24 {
 		t.Run(fmt.Sprint(i), func(t *testing.T) {

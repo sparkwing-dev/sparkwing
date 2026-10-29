@@ -13,6 +13,9 @@ import (
 )
 
 func TestBlobRecordsMutationCannotOutliveAuthority(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 17.3s measured in the short class; the full suite runs it")
+	}
 	for _, operation := range []string{"commit", "copy"} {
 		for _, fence := range []string{"lease", "leaf", "ancestor"} {
 			t.Run(operation+"/"+fence, func(t *testing.T) {

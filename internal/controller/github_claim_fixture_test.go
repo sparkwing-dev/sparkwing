@@ -91,6 +91,9 @@ func githubClaimBody(kind capability.UnitKind, run, job string) controllerwire.C
 func githubFixtureKey(id int64) string { return fmt.Sprintf("gh:%d", id) }
 
 func TestSourceClaimsFollowSeededReadiness(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 1.3s measured in the short class; the full suite runs it")
+	}
 	for _, kind := range []capability.UnitKind{capability.UnitPlan, capability.UnitNode} {
 		t.Run(string(kind), func(t *testing.T) {
 			e, _, _ := controller.EngineClaimHTTPFixture(t, []capability.Grant{capability.NodesClaim})

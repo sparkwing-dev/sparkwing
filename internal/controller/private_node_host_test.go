@@ -14,6 +14,9 @@ import (
 )
 
 func FuzzPrivateNodeHostConfinesStateAndAuthority(f *testing.F) {
+	if testing.Short() {
+		f.Skip("slow: 2.1s measured in the short class; the full suite runs it")
+	}
 	f.Add("build", "run", int64(0))
 	f.Add("build", "run", int64(1))
 	f.Add("sibling", "run", int64(0))

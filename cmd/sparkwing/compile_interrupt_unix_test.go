@@ -26,6 +26,9 @@ wait
 `
 
 func TestMaterializeStopsTheToolchainOnTermination(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 1.3s measured in the short class; the full suite runs it")
+	}
 	if os.Getenv("SPARKWING_TEST_COMPILE_INTERRUPT_CHILD") == "1" {
 		err := runSelectedHelp(os.Getenv("SPARKWING_TEST_FLEET_COMPILE_DIR"), "ci", runFlags{noUpdate: true})
 		if err != nil {

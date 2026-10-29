@@ -10,6 +10,9 @@ import (
 )
 
 func TestBlobMetadataRequiresCurrentTenantAuthorityProperty(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 8.3s measured in the short class; the full suite runs it")
+	}
 	property := func(n uint64) bool {
 		for _, mutation := range []string{"team", "principal", "repo", "attempt", "upload", "digest", "revoked", "edge", "tombstone"} {
 			s, records, intent := blobRecordFixture(t)

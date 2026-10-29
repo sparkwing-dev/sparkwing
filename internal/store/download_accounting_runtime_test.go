@@ -133,6 +133,9 @@ func TestStoreDataDownloadReplicasRaceForLastCapacity(t *testing.T) {
 }
 
 func TestStoreDataDownloadTenantIsolationAndConservation(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 4.5s measured in the short class; the full suite runs it")
+	}
 	property := func(first, second, foreign uint16) bool {
 		s := authorityStore(t)
 		path := blobAccountingDiskStore(t, s)

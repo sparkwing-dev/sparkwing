@@ -96,6 +96,9 @@ func githubSourceFixture(t *testing.T, extra int64) (*Tenant, capability.Authori
 }
 
 func TestGitHubSourceReleaseCannotEscapeClaimOrConsentProperty(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 6.9s measured in the short class; the full suite runs it")
+	}
 	property := func(mode uint8, value uint16) bool {
 		extra := int64(value) + 10
 		tenant, auth, provider := githubSourceFixture(t, extra)
@@ -171,6 +174,9 @@ func TestGitHubSourceReleaseAuditPrecedesReturn(t *testing.T) {
 }
 
 func TestGitHubScheduledSourceCannotEscapeConsentProperty(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 3.0s measured in the short class; the full suite runs it")
+	}
 	property := func(value uint16) bool {
 		for mode := range 8 {
 			extra := int64(value) + 10
@@ -241,6 +247,9 @@ func TestGitHubScheduledSourceCannotEscapeConsentProperty(t *testing.T) {
 }
 
 func TestGitHubSourceReleaseRequiresMatchingSameTeamMachineProperty(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 2.9s measured in the short class; the full suite runs it")
+	}
 	property := func(value uint16) bool {
 		for mode := range 3 {
 			tenant, auth, provider := githubSourceFixture(t, int64(value)+10)
@@ -276,6 +285,9 @@ func deniedSource(t *testing.T) match.RepoFilter {
 }
 
 func TestGitHubSourceReleaseMintsOutsideTransactionsAndRechecksProperty(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 4.5s measured in the short class; the full suite runs it")
+	}
 	property := func(value uint16) bool {
 		for mode := range 6 {
 			tenant, auth, provider := githubSourceFixture(t, int64(value)+10)

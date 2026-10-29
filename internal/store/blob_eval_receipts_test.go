@@ -48,6 +48,9 @@ func evalUploadFixture(t *testing.T) (*Store, *Tenant, UploadReservationRequest)
 }
 
 func TestBlobEvalReceiptBindsBothUnitAndSourceFences(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 1.3s measured in the short class; the full suite runs it")
+	}
 	s, tenant, request := evalUploadFixture(t)
 	path := blobAccountingDiskStore(t, s)
 	ticket, err := tenant.ReserveBlobUpload(t.Context(), request)

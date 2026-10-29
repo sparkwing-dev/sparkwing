@@ -162,6 +162,9 @@ func TestConcurrentSealedIntakeNeverPassesThePrincipalHourlyGuard(t *testing.T) 
 }
 
 func TestSealedIntakeRateKeepsPrincipalKindsSeparateProperty(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 1.2s measured in the short class; the full suite runs it")
+	}
 	property := func(seed uint64) bool {
 		tenant, request, _ := intakeFixture(t)
 		id := fmt.Sprintf("subject-%016x", seed)

@@ -86,6 +86,9 @@ func (s childAwaitServices) RunPipeline(ctx context.Context, request sdkserve.Ch
 }
 
 func TestRunAndAwaitChildOutputThroughLocalController(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 2.0s measured in the short class; the full suite runs it")
+	}
 	ctx, cancel := context.WithTimeout(t.Context(), 20*time.Second)
 	defer cancel()
 	objectDirectory := t.TempDir()
@@ -305,6 +308,9 @@ func finishChildOutput(t *testing.T, st *store.Store, handler http.Handler, http
 }
 
 func TestJobOutputThroughNativeClientAndCurrentReadSet(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 1.7s measured in the short class; the full suite runs it")
+	}
 	objects, err := blob.NewFilesystem(blob.FilesystemOptions{Directory: t.TempDir(), Endpoint: "http://local", SigningKey: bytes.Repeat([]byte{42}, 32)})
 	if err != nil {
 		t.Fatal(err)

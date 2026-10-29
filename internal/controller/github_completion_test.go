@@ -333,6 +333,9 @@ func TestGitHubCompletionUsesCurrentNumericRepository(t *testing.T) {
 }
 
 func TestGitHubCompletionAuthorityProperty(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 8.9s measured in the short class; the full suite runs it")
+	}
 	property := func(scenario uint8, display string) bool {
 		f := newGitHubCompletion(t)
 		// The App facts only route the report to an installation, so a run whose facts name
@@ -399,6 +402,9 @@ func TestGitHubCompletionAuthorityProperty(t *testing.T) {
 }
 
 func TestGitHubCompletionStalePhasesNeverRegressProperty(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 4.8s measured in the short class; the full suite runs it")
+	}
 	property := func(outcome uint8, phase, statuses bool) bool {
 		f := newGitHubCompletion(t)
 		f.api.checksGranted = !statuses
@@ -426,6 +432,9 @@ func TestGitHubCompletionStalePhasesNeverRegressProperty(t *testing.T) {
 }
 
 func TestGitHubCompletionSummaryPrivacyProperty(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 6.0s measured in the short class; the full suite runs it")
+	}
 	property := func(raw []byte) bool {
 		f := newGitHubCompletion(t)
 		private := "private-" + hex.EncodeToString(raw)

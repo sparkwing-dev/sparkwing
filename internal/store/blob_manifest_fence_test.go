@@ -13,6 +13,9 @@ import (
 )
 
 func TestBlobRecordsManifestIOCannotOutliveAuthority(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 3.8s measured in the short class; the full suite runs it")
+	}
 	for _, operation := range []string{"commit", "record", "memo", "depcache", "copy"} {
 		t.Run(operation, func(t *testing.T) {
 			s, records, intent := blobRecordFixture(t)

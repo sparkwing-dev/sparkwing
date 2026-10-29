@@ -90,6 +90,9 @@ func TestLauncherSnapshotRetainsCurrentAwardThroughExchange(t *testing.T) {
 }
 
 func TestLauncherSnapshotFencingProperty(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 1.5s measured in the short class; the full suite runs it")
+	}
 	for _, kind := range []capability.UnitKind{capability.UnitPlan, capability.UnitEval, capability.UnitNode} {
 		t.Run(string(kind), func(t *testing.T) {
 			s, demand, claim, now := launcherSnapshotFixture(t, kind)
@@ -249,6 +252,9 @@ func TestLauncherSnapshotIsolatesIntegrityButRejectsStorageFailures(t *testing.T
 }
 
 func TestLauncherReservationOwnershipProperty(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 4.3s measured in the short class; the full suite runs it")
+	}
 	check := func(kindIndex, mode uint8, offset uint16, delegated bool) bool {
 		kind := []capability.UnitKind{capability.UnitPlan, capability.UnitEval, capability.UnitNode}[kindIndex%3]
 		s, demand, claim, now := launcherSnapshotFixture(t, kind)

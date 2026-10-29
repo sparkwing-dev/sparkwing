@@ -14,6 +14,9 @@ import (
 )
 
 func TestSimultaneousClaimsInsideTheWindowAwardOnlyTheBestTier(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 1.6s measured in the short class; the full suite runs it")
+	}
 	testSimultaneousRankedClaims(t, func(t *testing.T) *store.Store { return storetest.Open(t) })
 }
 

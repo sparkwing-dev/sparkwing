@@ -77,6 +77,9 @@ func TestChildIntakePersistsLineageAndInvocationReplay(t *testing.T) {
 }
 
 func TestChildIntakeCannotEscapeItsLiveParentProperty(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 5.0s measured in the short class; the full suite runs it")
+	}
 	for i := range 24 {
 		for _, dimension := range []string{"run", "job", "team", "generation", "cancelled", "finished"} {
 			tenant, request := childIntakeFixture(t)

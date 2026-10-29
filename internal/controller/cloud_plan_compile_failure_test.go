@@ -24,6 +24,9 @@ import (
 // Staging qa.12: a Cloud run whose pipeline did not compile ended plan_failed, and neither `runs status` nor
 // `runs logs` showed why, because the plan host recorded only "run preparation failed".
 func TestCloudPlanCompileFailureShowsMaskedCompilerOutput(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 2.5s measured in the short class; the full suite runs it")
+	}
 	modules, err := exec.CommandContext(t.Context(), "go", "env", "GOMODCACHE").Output()
 	if err != nil {
 		t.Fatal(err)
