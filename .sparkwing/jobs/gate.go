@@ -607,7 +607,7 @@ var productTestKept = map[string]string{
 	"SPARKWING_RUNNER_LABELS":  "reports what the local runner advertises",
 	"SPARKWING_BRANCH":         "describes the run's source and no product code reads it",
 	"SPARKWING_COMMIT":         "describes the run's source and no product code reads it",
-	"SPARKWING_REPO":           "describes the run's source and no product code reads it",
+	"SPARKWING_REPO":           "describes the run's source; the installer reads SPARKWING_RELEASE_REPO instead",
 	"SPARKWING_TRIGGER_SOURCE": "describes the run's source and no product code reads it",
 	"CI":                       "hosted runners set it for every suite anyway",
 }
