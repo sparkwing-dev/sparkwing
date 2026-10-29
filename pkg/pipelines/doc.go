@@ -1,6 +1,6 @@
 // Package pipelines parses the pipelines section of
 // .sparkwing/sparkwing.yaml. The registry maps each invocation name to
-// its Go entrypoint and dispatch metadata.
+// its SDK registration key and dispatch metadata.
 //
 // The file is intentionally a thin registry. The Plan itself, jobs,
 // conditions, and per-step details all live in Go code.

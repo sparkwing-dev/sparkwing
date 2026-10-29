@@ -2,7 +2,7 @@ package nodehost
 
 import "github.com/sparkwing-dev/sparkwing/pkg/projectconfig"
 
-// pipelineIdentity separates the registered pipeline name from its Go type identity.
+// pipelineIdentity separates the invoked pipeline name from its SDK registration key.
 type pipelineIdentity struct {
 	Invoked    string
 	Entrypoint string

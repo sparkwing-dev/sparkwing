@@ -26,9 +26,10 @@ catalog without compiling Go, so a Go registration alone will not appear.
 
 When adding a pipeline by hand, pair its registration in `.sparkwing/jobs/`:
 
+<!-- registration-example -->
 ```go
 func init() {
-    sparkwing.Register("deploy", func() sparkwing.Pipeline[sparkwing.NoInputs] {
+    sparkwing.Register("Deploy", func() sparkwing.Pipeline[sparkwing.NoInputs] {
         return &Deploy{}
     })
 }
@@ -42,7 +43,9 @@ pipelines:
     entrypoint: Deploy
 ```
 
-The `name` matches the registration, and `entrypoint` names the Go type.
+`entrypoint` names the registration key, and `name` is what
+`sparkwing run` invokes. The two may differ, and several names may share
+one entrypoint. The pipeline reads the invoked name from `RunContext.Pipeline`.
 Run `sparkwing pipeline list` to confirm the catalog entry, then
 `sparkwing pipeline lint` to check the pipeline source and guards.
 
