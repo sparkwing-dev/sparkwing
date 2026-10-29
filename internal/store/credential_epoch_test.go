@@ -1,6 +1,7 @@
 package store
 
 import (
+	"errors"
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
@@ -44,7 +45,10 @@ func TestEpochChangeReopensBootstrapForFreshSeed(t *testing.T) {
 		t.Fatalf("first bootstrap: %t %v", created, err)
 	}
 	s.credentialEpoch = "restored"
-	if err := s.EnsureCredentialEpoch(t.Context()); err != nil {
+	if err := s.EnsureCredentialEpoch(t.Context()); !errors.Is(err, ErrCredentialEpochChanged) {
+		t.Fatalf("changed epoch served without a deliberate sign-out: %v", err)
+	}
+	if err := s.AsOperator().PrepareRestore(t.Context(), "restored"); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := s.AsOperator().ResolveAuthority(t.Context(), capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: first.Seed[:CredentialPrefixLength]}); err == nil {
