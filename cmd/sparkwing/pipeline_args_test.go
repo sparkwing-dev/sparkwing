@@ -109,7 +109,8 @@ func TestPipelineHelpFromDescribe(t *testing.T) {
 	out := buf.String()
 	for _, want := range []string{
 		"DESCRIPTION\n  Ships the service.",
-		"sparkwing run deploy --env <string> [flags]",
+		"sparkwing run deploy [sparkwing flags] -- --env <string> [pipeline flags]",
+		"PIPELINE FLAGS (after --)",
 		"-e, --env <string>",
 		"[required] string  target environment [enum: dev|prod]",
 		"[optional] int  pod count (default: 2) [from job rollout]",
@@ -132,7 +133,7 @@ func TestPipelineHelpFromDescribe(t *testing.T) {
 
 	buf.Reset()
 	printPipelineHelp(&buf, runspec.PipelinePresentation{Name: "lint", Extra: true})
-	if out := buf.String(); !strings.Contains(out, "No pipeline-specific flags.") || strings.Contains(out, "[flags]") {
+	if out := buf.String(); !strings.Contains(out, "No pipeline-specific flags.") || strings.Contains(out, "[pipeline flags]") {
 		t.Errorf("help for a pipeline without flags:\n%s", out)
 	}
 }

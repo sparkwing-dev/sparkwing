@@ -106,7 +106,7 @@ func Parse(binary string, args []string) (Invocation, error) {
 			}
 			f, known := flags[name]
 			if !known {
-				return inv, inv.invalid("unknown flag --%s; pipeline arguments follow --", name)
+				return inv, inv.invalid("unknown flag --%s%s", name, inv.flagHint())
 			}
 			if f.Argument != "" && !explicit {
 				if n+1 >= len(args) || args[n+1] == "--" || strings.HasPrefix(args[n+1], "--") {
@@ -135,6 +135,22 @@ func Parse(binary string, args []string) (Invocation, error) {
 		return inv, err
 	}
 	return inv, nil
+}
+
+// flagHint points a refused flag at where it belongs: after -- for a command
+// that forwards pipeline arguments, else at the flags the command does take.
+func (i Invocation) flagHint() string {
+	if i.Command.PipelineArgsAfterSeparator {
+		return "; pipeline arguments follow --"
+	}
+	var names []string
+	for _, f := range i.Command.Flags {
+		names = append(names, "--"+f.Name)
+	}
+	if len(names) == 0 {
+		return "; see " + i.Command.Path + " --help"
+	}
+	return "; " + i.Command.Path + " takes " + strings.Join(names, ", ") + " (see --help)"
 }
 
 func flagToken(arg string, shorts map[string]string) (name, value string, explicit bool, err error) {
@@ -173,7 +189,7 @@ func (i *Invocation) validate() error {
 			if i.Command.Path == "sparkwing run" && name == "profile" {
 				return i.invalid("--profile is not accepted by local run; use sparkwing pipeline trigger <pipeline> --profile NAME")
 			}
-			return i.invalid("flag --%s is not accepted", name)
+			return i.invalid("flag --%s is not accepted%s", name, i.flagHint())
 		}
 		if !f.Repeatable && len(i.Flags[name]) > 1 {
 			return i.invalid("--%s may be supplied only once", name)

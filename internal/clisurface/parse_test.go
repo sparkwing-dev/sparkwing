@@ -137,3 +137,19 @@ func TestControllerBreakGlassRequiresOperator(t *testing.T) {
 		}
 	}
 }
+
+func TestRefusedFlagHintNamesWhereTheFlagBelongs(t *testing.T) {
+	for _, tc := range []struct {
+		args []string
+		want string
+	}{
+		{[]string{"update", "--check"}, "unknown flag --check; sparkwing update takes --dry-run, --force, --override-hold, --version (see --help)"},
+		{[]string{"run", "release", "--bump", "patch"}, "unknown flag --bump; pipeline arguments follow --"},
+		{[]string{"run", "release", "--version", "v0.68.0"}, "flag --version is not accepted; pipeline arguments follow --"},
+	} {
+		_, err := Parse("sparkwing", tc.args)
+		if err == nil || !strings.HasSuffix(err.Error(), tc.want) {
+			t.Errorf("%v: err = %v, want suffix %q", tc.args, err, tc.want)
+		}
+	}
+}

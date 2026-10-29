@@ -332,6 +332,8 @@ unlock.
 
 ### Added
 
+- **release:** The `publish-images` pipeline publishes the controller and runner images for linux/amd64 and linux/arm64 under one index per tag, assembled from the signed binaries onto prebuilt runtime bases with no Docker daemon or emulation, and checks each published binary against SHA256SUMS. `bin/qa-release.sh` runs it, so QA releases ship arm64 images; `build-images -- --runtime-base --push` builds the bases.
+
 - **controller:** Launcher reconciliation reads current award fences and execution inputs from one store snapshot, including after bootstrap exchange. Cleanup selects the exact observed Kubernetes Job UID. Removed the legacy `Store.SyncLaunchJobs` and `Client.LauncherSync` APIs.
 - **controller:** Embedded data bindings validate persisted uploader identity, reserve uploads before signing, settle receipts after byte verification and check every record edge. Remote-cache bindings require verified default-branch reads and reject writes.
 - **controller:** Job cancellation and persisted recovery failures use the shared capability policy. Cancellation preserves a live holder's result rights. Failure reads require the declared recovery edge and source generation.
@@ -722,6 +724,8 @@ unlock.
   `POST /api/v1/nodes/claim` and `POST /api/v1/runs/{id}/nodes/{nodeID}/claim` add `claim_token`, a `swc_` token bound to the claim and its generation. It acts as the runner that claimed the node, confined to that claim: it reaches the claim's run, and for `Ref.Get`, `TryGet` and `RunAndAwait` its team's pipeline references, its own node's child runs and their lookup, writes only to its own node, carries the claim's own fence on every request and never acts as the trigger claimant, and it stops working when the claim ends, the node is claimed again or the runner's credential is revoked. `POST /api/v1/triggers/claim` and `POST /api/v1/triggers/{id}/claim` add a `claim_token` that reads the run's declared secrets while the trigger claim lives. The Kubernetes node runner writes each node's claim token, not the runner's bearer, into its Job's `SPARKWING_AGENT_TOKEN`, so reading a Job spec yields one node's claim. A pooled node runs on its claim token, and every trigger child, including a Kubernetes or warm runner's and `sparkwing cluster worker`'s, reaches the controller through the runner's trigger broker. Schema v99 adds the trigger claim token table. Upgrade runners together with the controller: a runner from this release gets no claim token from an older controller, and its nodes fail to authenticate. See [migration guide](docs/migrations/_unreleased.md#runner-claims-answer-with-claim-tokens).
 
 ### Fixed
+
+- **cli:** A refused flag names its fix. `sparkwing update --check` answered `unknown flag --check; pipeline arguments follow --`; it now lists the flags `update` takes (`--dry-run` previews an update), and only `run`, `pipeline plan` and `pipeline trigger` point at `--`. A pipeline's `run <pipeline> --help` shows its flags after `--` in the usage line.
 
 - **CLI:** Hook install, uninstall and pipeline scaffolding accept `-o pretty|json|plain`
   and emit JSON when piped. Hook `--all-repos` selects registered repositories.
