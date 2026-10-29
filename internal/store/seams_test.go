@@ -402,7 +402,6 @@ func (t *Tenant) CountRuns(ctx context.Context, f RunFilter) (int, error) {
 	return count, err
 }
 
-// nodeIsAncestor checks a job's transitive dependencies in the tenant's sealed specs.
 func (t *Tenant) nodeIsAncestor(ctx context.Context, runID, ancestor, node string) (found bool, err error) {
 	err = t.s.inTx(ctx, func(tx *storeTx) error {
 		dependencies, _, err := blobDependenciesTx(ctx, tx, t.team, runID, node)
@@ -471,15 +470,13 @@ func (t *storeTx) queryRow(q string, args ...any) rowScanner {
 	return t.QueryRowContext(context.Background(), q, args...)
 }
 
-// eventLimits returns the caps in force, the defaults where the operator
-// set none.
 func (s *Store) eventLimits(ctx context.Context) (eventLimits, error) {
 	return inTxResult(ctx, s, func(tx *storeTx) (eventLimits, error) {
 		return eventLimitsTx(ctx, tx)
 	})
 }
 
-// setEventLimits replaces every cap; zero lifts one.
+// safety: zero lifts a cap.
 func (s *Store) setEventLimits(ctx context.Context, limits eventLimits) error {
 	return s.inTxOnce(ctx, func(tx *storeTx) error {
 		if err := setCreditSettingTx(ctx, tx, metaKeyEventMaxBytes, formatCreditSetting(limits.MaxBytesPerEvent)); err != nil {
@@ -512,7 +509,7 @@ func (t *storeTx) forKeyShare() string {
 	return ""
 }
 
-// financialTables identifies records that never take a cascading run foreign key.
+// safety: these records never take a cascading run foreign key.
 func financialTables() []string {
 	return []string{
 		"credit_grants", "credit_charges", "credit_checkouts", "credit_freezes",
@@ -687,8 +684,6 @@ func (s *Store) approveOneOnce(ctx context.Context, id, actor string) (Account, 
 	return acct, changed, tx.Commit()
 }
 
-// getLatestRun returns the newest run for pipeline matching statuses
-// within maxAge. ErrNotFound on miss.
 func (o *Operator) getLatestRun(ctx context.Context, pipeline string, statuses []string, maxAge time.Duration) (*Run, error) {
 	return o.s.getLatestRun(ctx, `SELECT team,id FROM runs WHERE pipeline=?`, []any{pipeline}, pipeline, statuses, maxAge)
 }
@@ -707,9 +702,7 @@ func schemaTableNames(owner schemaOwner) []string {
 	return names
 }
 
-// countPendingTriggers returns how many of t's triggers are waiting to be
-// claimed. Another team's backlog is not counted, so it cannot shed t's
-// submissions.
+// safety: another team's backlog is not counted, so it cannot shed t's submissions.
 func (t *Tenant) countPendingTriggers(ctx context.Context) (int, error) {
 	var n int
 	if err := t.s.queryRow(ctx,
@@ -736,7 +729,6 @@ const (
 	outcomeSuperseded = "superseded"
 )
 
-// failureComputeLimit is the failure reason on a node a compute guard stopped.
 const failureComputeLimit = "compute_limit"
 
 var (

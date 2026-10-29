@@ -8,10 +8,8 @@ import (
 	"strings"
 )
 
-// retiredNames lists removed surfaces from the CHANGELOG's Breaking bullets and
-// the decision log. CHANGELOG.md, docs/migrations/ and design/rewrite/contracts/
-// keep superseded sections that name these surfaces as history, so the scan
-// covers only text that describes the product as it ships.
+// safety: CHANGELOG.md, docs/migrations/ and design/rewrite/contracts/ name these
+// surfaces as history, so the scan covers only text describing the shipped product.
 var retiredNames = []struct{ name, use string }{
 	{"--free-team-slots", "automatic free and paid storage tiers"},
 	{"max_global_runs_per_hour", "per-principal hourly limits and prepaid credits"},

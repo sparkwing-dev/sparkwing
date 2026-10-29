@@ -38,15 +38,14 @@ func Console(t T, st *store.Store, team store.Team, account string) (*store.Cons
 	return st.AsConsole(func(id string) bool { return id == account }), a
 }
 
-// FixtureOperator is the console account SetCreditSettings acts as. A store
-// whose console policy names operator accounts must name this one.
-const FixtureOperator = "fixture-operator"
+// safety: a store whose console policy names operator accounts must name this one.
+const fixtureOperator = "fixture-operator"
 
 // SetCreditSettings commits up through a fixture operator's console session.
 func SetCreditSettings(t T, st *store.Store, up store.CreditSettingsUpdate) store.CreditSettings {
 	t.Helper()
 	SeedTeam(t, st, fixtureOperatorTeam)
-	console, a := Console(t, st, fixtureOperatorTeam, FixtureOperator)
+	console, a := Console(t, st, fixtureOperatorTeam, fixtureOperator)
 	out, err := console.ConsoleSetCreditSettings(t.Context(), a, up)
 	if err != nil {
 		t.Fatal(err)

@@ -222,8 +222,6 @@ func checkBlobDepcache(t testing.TB, ctx context.Context, root string, objects b
 	return nil
 }
 
-// restoreDepcache prepares the job's cache on an empty directory, as the host
-// does before a job runs, and reports whether the archive landed.
 func restoreDepcache(ctx context.Context, cache nodehost.DepcacheRecords, input nodehost.NodeInput, job nodeproto.JobSpec, destination string) (restored, warned bool, err error) {
 	if err := os.RemoveAll(destination); err != nil {
 		return false, false, err

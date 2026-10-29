@@ -15,7 +15,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/userconfig"
 )
 
-// enrolledRunner is the runner section and credential as a starting runner reads them.
 type enrolledRunner struct {
 	HolderPrefix, CredentialsDir, Token string
 	MaxConcurrent                       int

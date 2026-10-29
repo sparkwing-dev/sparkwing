@@ -69,8 +69,8 @@ func TestOperatorSettingsHTTPCommitAuthorityProperty(t *testing.T) {
 	}
 }
 
-// storeSettingsWriter commits storage settings through the store's authorized
-// writes under fixture deployment authority, whatever the route authenticated.
+// hack: commits through the store's authorized writes under fixture deployment
+// authority, whatever the route authenticated.
 type storeSettingsWriter struct {
 	OperatorSettingsWriter
 	store     *store.Store
