@@ -1,6 +1,8 @@
 package jobs
 
 import (
+	"context"
+	"path/filepath"
 	"strings"
 	"testing"
 	"testing/fstest"
@@ -271,7 +273,7 @@ func TestLintChangelog_Breaking_Unreleased_NoLinkIsOK(t *testing.T) {
 	}
 }
 
-func TestLintChangelog_Breaking_Unreleased_UnreleasedPlaceholderIsOK(t *testing.T) {
+func TestLintChangelog_Breaking_Unreleased_LinkResolvesInTheUnreleasedGuide(t *testing.T) {
 	body := `## [Unreleased]
 
 ### Changed
@@ -279,9 +281,24 @@ func TestLintChangelog_Breaking_Unreleased_UnreleasedPlaceholderIsOK(t *testing.
 - **sdk (Breaking):** Foo.
   See [migration guide](docs/migrations/_unreleased.md#foo).
 `
-	issues := LintChangelog(body, fstest.MapFS{})
-	if len(issues) != 0 {
-		t.Fatalf("expected 0 issues (_unreleased.md placeholder is allowed), got %v", formatAllIssues(issues))
+	guide := fstest.MapFS{"_unreleased.md": &fstest.MapFile{Data: []byte("# Next\n\n## Foo\n")}}
+	if issues := LintChangelog(body, guide); len(issues) != 0 {
+		t.Fatalf("expected 0 issues, got %v", formatAllIssues(issues))
+	}
+}
+
+func TestLintChangelog_Breaking_Unreleased_ReportsAnAnchorTheUnreleasedGuideLacks(t *testing.T) {
+	body := `## [Unreleased]
+
+### Changed
+
+- **sdk (Breaking):** Foo.
+  See [migration guide](docs/migrations/_unreleased.md#foo).
+`
+	guide := fstest.MapFS{"_unreleased.md": &fstest.MapFile{Data: []byte("# Next\n\n## Bar\n")}}
+	issues := LintChangelog(body, guide)
+	if len(issues) != 1 || issues[0].Category != "missing-migration-anchor" {
+		t.Fatalf("expected one missing-migration-anchor issue, got %v", formatAllIssues(issues))
 	}
 }
 
@@ -349,4 +366,14 @@ func formatAllIssues(issues []ChangelogIssue) []string {
 		out[i] = x.Format()
 	}
 	return out
+}
+
+func TestRepositoryChangelogLintsClean(t *testing.T) {
+	root, err := filepath.Abs("../..")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := CheckChangelogLint(context.Background(), root); err != nil {
+		t.Fatalf("the gate, lint and release cut all refuse this changelog:\n%v", err)
+	}
 }

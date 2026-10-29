@@ -159,13 +159,20 @@ func TestEveryDeclaredPipelineResolvesToItsConfiguredEntrypoint(t *testing.T) {
 	t.Chdir(sourceTreeRoot())
 	host := newTestHost(t, sparkwingtest.Options{})
 	for _, p := range readPipelineConfig(t).Pipelines {
-		if _, err := host.Plan(t.Context(), p.Entrypoint, nil); err != nil && strings.Contains(err.Error(), "pipeline is not registered") {
+		if _, err := host.Plan(t.Context(), p.Entrypoint, nil); unregisteredPipeline(err) {
 			t.Errorf("%s entrypoint %s is unregistered: %v", p.Name, p.Entrypoint, err)
 		}
 	}
-	if _, err := host.Plan(t.Context(), "push-checks", nil); err == nil || !strings.Contains(err.Error(), "pipeline is not registered") {
+	if _, err := host.Plan(t.Context(), "push-checks", nil); !unregisteredPipeline(err) {
 		t.Fatalf("removed push-checks registration: %v", err)
 	}
+}
+
+// safety: the SDK refuses an unknown pipeline at describe or at plan, with a
+// different message at each, and both mean the entrypoint is unregistered.
+func unregisteredPipeline(err error) bool {
+	return err != nil && (strings.Contains(err.Error(), "pipeline is not registered") ||
+		strings.Contains(err.Error(), "does not declare the requested pipeline"))
 }
 
 func TestPreCommitGofmtJudgesOnlyTheChange(t *testing.T) {

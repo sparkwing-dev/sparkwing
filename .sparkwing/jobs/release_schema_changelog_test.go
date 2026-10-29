@@ -1,6 +1,8 @@
 package jobs
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -143,5 +145,37 @@ func TestSchemaSQLDrift(t *testing.T) {
 	}
 	if err := schemaSQLDrift("v0.70.0", 1, map[string]string{}, same); err == nil {
 		t.Fatal("a tag without the baseline files passed the drift check")
+	}
+}
+
+func TestSchemaGateCountsAStoreThePreviousTagLacksAsAChange(t *testing.T) {
+	base := t.TempDir()
+	origin := filepath.Join(base, "origin.git")
+	repo := filepath.Join(base, "repo")
+	gitRun(t, base, "init", "--bare", "-b", "main", origin)
+	gitRun(t, base, "init", "-b", "main", repo)
+	gitRun(t, repo, "config", "user.email", "test@example.invalid")
+	gitRun(t, repo, "config", "user.name", "test")
+	gitRun(t, repo, "remote", "add", "origin", origin)
+	writeFile(t, filepath.Join(repo, "CHANGELOG.md"), "# Changelog\n\n## [Unreleased]\n")
+	gitRun(t, repo, "add", "CHANGELOG.md")
+	gitRun(t, repo, "commit", "-m", "before the store moved")
+	gitRun(t, repo, "tag", "v0.1.0")
+	if err := os.MkdirAll(filepath.Join(repo, "internal", "store"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, filepath.Join(repo, filepath.FromSlash(storeSchemaSourcePath)), "package store\n\nconst expectedSchemaVersion = 3\n")
+	writeFile(t, filepath.Join(repo, "CHANGELOG.md"), "# Changelog\n\n## [Unreleased]\n\n### Changed\n\n- **cli:** Unrelated.\n")
+	gitRun(t, repo, "add", ".")
+	gitRun(t, repo, "commit", "-m", "the store moves")
+	gitRun(t, repo, "push", "origin", "main", "--tags")
+
+	err := checkSchemaBreak(t.Context(), repo, "v0.2.0")
+	if err == nil || !strings.Contains(err.Error(), "undescribed runs-store schema change") {
+		t.Fatalf("unmarked new store = %v, want the schema refusal", err)
+	}
+	writeFile(t, filepath.Join(repo, "CHANGELOG.md"), "# Changelog\n\n## [Unreleased]\n\n### Changed\n\n- **store (Breaking):** A new schema baseline.\n")
+	if err := checkSchemaBreak(t.Context(), repo, "v0.2.0"); err != nil {
+		t.Fatalf("marked new store refused: %v", err)
 	}
 }

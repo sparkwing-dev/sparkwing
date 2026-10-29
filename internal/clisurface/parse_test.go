@@ -138,11 +138,27 @@ func TestControllerBreakGlassRequiresOperator(t *testing.T) {
 	}
 }
 
+func TestRefusedFlagHintNamesWhereTheFlagBelongs(t *testing.T) {
+	for _, tc := range []struct {
+		args []string
+		want string
+	}{
+		{[]string{"update", "--check"}, "unknown flag --check; sparkwing update takes --dry-run, --force, --override-hold, --version (see --help)"},
+		{[]string{"run", "release", "--bump", "patch"}, "unknown flag --bump; pipeline arguments follow --"},
+		{[]string{"run", "release", "--version", "v0.68.0"}, "flag --version is not accepted; pipeline arguments follow --"},
+	} {
+		_, err := Parse("sparkwing", tc.args)
+		if err == nil || !strings.HasSuffix(err.Error(), tc.want) {
+			t.Errorf("%v: err = %v, want suffix %q", tc.args, err, tc.want)
+		}
+	}
+}
+
 func TestParseReadsOnlyGlobalFlagsBeforeTheCommand(t *testing.T) {
 	for args, want := range map[string]string{
 		"--version":             "unknown flag --version; use the version command",
 		"--tail 5 runs list":    "unknown flag --tail; a command's flags follow the command",
-		"commands --query x":    "unknown flag --query",
+		"commands --query x":    "unknown flag --query; sparkwing commands takes --search, --limit, --cursor, --format, --split-dir, --path, --all (see --help)",
 		"run check --bogus":     "unknown flag --bogus; pipeline arguments follow --",
 		"runs --run 1 status":   "unknown flag --run; a command's flags follow the command",
 		"-o json runs list":     "",

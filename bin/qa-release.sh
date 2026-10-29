@@ -1,12 +1,17 @@
 #!/usr/bin/env bash
 # Publishes a QA pre-release to https://qa-releases.sparkwing.dev, signed with
-# the QA key, plus the Go SDK at that version under /goproxy. Only builds made
-# with the qatrust tag trust it, so production clients never see these releases.
+# the QA key, plus the Go SDK at that version under /goproxy, and the controller
+# and runner images for linux/amd64 and linux/arm64 under one index per tag.
+# Only builds made with the qatrust tag trust it, so production clients never
+# see these releases.
 #
 # usage: bin/qa-release.sh <repo> <commit> <vX.Y.Z-qa.N>
 #
 # Reads the QA signing seed from SSM (AWS_PROFILE, default kikd-prod) straight
-# into the signer's environment; it is never written to disk.
+# into the signer's environment; it is never written to disk. Images go to
+# QA_IMAGE_REGISTRY, by default the profile account's ECR in us-west-2, built by
+# the publish-images pipeline onto the runtime bases SPARKWING_CONTROLLER_BASE
+# and SPARKWING_RUNNER_BASE name by digest (see build-images --runtime-base).
 set -euo pipefail
 
 bucket=kikd-prod-sparkwing-qa-releases
@@ -24,6 +29,9 @@ if [[ ! "$version" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)-qa\.[1
   exit 2
 fi
 sha=$(git -C "$repo" rev-parse --verify "$commit^{commit}")
+: "${SPARKWING_CONTROLLER_BASE:?name the controller runtime base by digest (build-images --runtime-base)}"
+: "${SPARKWING_RUNNER_BASE:?name the runner runtime base by digest (build-images --runtime-base)}"
+registry=${QA_IMAGE_REGISTRY:-$(aws sts get-caller-identity --query Account --output text).dkr.ecr.$region.amazonaws.com}
 published=$(aws s3api list-objects-v2 --region "$region" --bucket "$bucket" --prefix "releases/download/$version/" --max-keys 1 --query KeyCount --output text)
 if [[ "$published" != 0 ]]; then
   echo "$version is already published; QA releases are immutable, use the next -qa.N" >&2
@@ -95,6 +103,15 @@ SPARKWING_RELEASE_SIGNING_KEY=$seed GOFLAGS=$qa_flags GOWORK=off go -C "$src" ru
 SPARKWING_RELEASE_SIGNING_KEY=$seed GOFLAGS=$qa_flags GOWORK=off go -C "$src" run ./bin/qaindex --version "$version" --previous "$previous" --out "$work"
 unset seed
 GOFLAGS=$qa_flags GOWORK=off go -C "$src" run ./cmd/verify-release --dist "$dist" --verify
+
+# Images first: a failed push publishes nothing clients read, and the version is
+# then spent either way, since the registry's tags are immutable too. The
+# pipeline runs on the CLI just built for this host, under a throwaway home.
+aws ecr get-login-password --region "$region" | crane auth login "$registry" --username AWS --password-stdin >/dev/null
+host_cli=$dist/sparkwing-$(go env GOOS)-$(go env GOARCH)
+env -C "$src" SPARKWING_HOME="$work/sparkwing-home" "$host_cli" run publish-images -- \
+  --dist "$dist" --version "$version" --revision "$sha" --registry "$registry" \
+  --controller-base "$SPARKWING_CONTROLLER_BASE" --runner-base "$SPARKWING_RUNNER_BASE"
 
 aws s3 cp --region "$region" "$dist/" "s3://$bucket/releases/download/$version/" --recursive --only-show-errors
 aws s3 cp --region "$region" "$goproxy/" "s3://$bucket/goproxy/" --recursive --only-show-errors
