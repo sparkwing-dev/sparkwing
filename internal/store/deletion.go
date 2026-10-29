@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"database/sql"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"slices"
@@ -669,10 +670,9 @@ func (o *Operator) deleteAccountTx(ctx context.Context, tx *storeTx, accountID s
 		{`DELETE FROM sessions WHERE account_id = ?`, []any{accountID}},
 		{`DELETE FROM identities WHERE account_id = ?`, []any{accountID}},
 		{`DELETE FROM identity_unlinks WHERE account_id = ?`, []any{accountID}},
-		{`DELETE FROM invitations WHERE email = ?`, []any{acct.Email}},
 		{`UPDATE invitations SET withdrawn_at = ? WHERE invited_by = ? AND accepted_at IS NULL AND withdrawn_at IS NULL`, []any{now.UnixNano(), accountID}},
 		{`UPDATE invitations SET invited_by = '' WHERE invited_by = ?`, []any{accountID}},
-		{`UPDATE invitations SET accepted_by = '' WHERE accepted_by = ?`, []any{accountID}},
+		{`UPDATE invitations SET accepted_by = ?, email = '' WHERE accepted_by = ?`, []any{deletedUserLabel, accountID}},
 		{`UPDATE github_runner_bindings SET created_by = '' WHERE created_by = ?`, []any{accountID}},
 		{`UPDATE teams SET created_by = '' WHERE created_by = ?`, []any{accountID}},
 		{`UPDATE team_deletions SET requested_by = '' WHERE requested_by = ?`, []any{accountID}},
@@ -716,41 +716,31 @@ func (op *Operator) ownedTeamsTx(ctx context.Context, tx *storeTx, accountID str
 	return sole, blocked, rows.Err()
 }
 
-type principalName struct {
-	name string
-	team string
-}
-
-func accountPrincipalNamesTx(ctx context.Context, tx *storeTx, acct Account) (_ []principalName, err error) {
-	names := []principalName{{name: acct.Email}, {name: acct.ID}}
-	add := func(n principalName) {
-		if n.name != "" && n.name != deletedUserLabel && !slices.Contains(names, n) &&
-			!slices.Contains(names, principalName{name: n.name}) {
-			names = append(names, n)
-		}
-	}
-	rows, err := tx.queryContext(ctx, `
-		SELECT email, '' FROM identities WHERE account_id = ? AND linked = 0`, acct.ID)
+func accountPrincipalNamesTx(ctx context.Context, tx *storeTx, acct Account) (_ []string, err error) {
+	names := []string{acct.Email, acct.ID}
+	rows, err := tx.queryContext(ctx, `SELECT email FROM identities WHERE account_id = ? AND linked = 0`, acct.ID)
 	if err != nil {
 		return nil, err
 	}
 	defer closeRowsInto(rows, &err)
 	for rows.Next() {
-		var n principalName
-		if err := rows.Scan(&n.name, &n.team); err != nil {
+		var name string
+		if err := rows.Scan(&name); err != nil {
 			return nil, err
 		}
-		add(n)
+		if name != "" && name != deletedUserLabel && !slices.Contains(names, name) {
+			names = append(names, name)
+		}
 	}
 	return names, rows.Err()
 }
 
-func (op *Operator) relabelPrincipalTx(ctx context.Context, tx *storeTx, n principalName) error {
+// relabelPrincipalTx replaces the account's name where a row names it: whole
+// principal columns, and whole JSON string values in event payloads, never a
+// substring of a longer value.
+func (op *Operator) relabelPrincipalTx(ctx context.Context, tx *storeTx, name string) error {
 	label := deletedUserLabel
-	scope, args := "", []any{label, n.name}
-	if n.team != "" {
-		scope, args = ` AND team = ?`, append(args, n.team)
-	}
+	args := []any{label, name}
 	for _, col := range []struct{ table, column string }{
 		{"runs", "created_principal"},
 		{"triggers", "claim_principal"},
@@ -761,11 +751,11 @@ func (op *Operator) relabelPrincipalTx(ctx context.Context, tx *storeTx, n princ
 		{"secrets", "principal"},
 	} {
 		if _, err := tx.execContext(ctx,
-			`UPDATE `+col.table+` SET `+col.column+` = ? WHERE `+col.column+` = ?`+scope, args...); err != nil {
+			`UPDATE `+col.table+` SET `+col.column+` = ? WHERE `+col.column+` = ?`, args...); err != nil {
 			return fmt.Errorf("relabel %s.%s: %w", col.table, col.column, err)
 		}
 	}
-	if err := relabelGrantCreatorTx(ctx, tx, n, label); err != nil {
+	if err := relabelGrantCreatorTx(ctx, tx, name, label); err != nil {
 		return err
 	}
 	eventsSQL := `UPDATE events SET payload = CAST(REPLACE(CAST(payload AS TEXT), ?, ?) AS BLOB)
@@ -774,12 +764,15 @@ func (op *Operator) relabelPrincipalTx(ctx context.Context, tx *storeTx, n princ
 		eventsSQL = `UPDATE events SET payload = convert_to(replace(convert_from(payload, 'UTF8'), ?, ?), 'UTF8')
 		WHERE payload IS NOT NULL AND strpos(convert_from(payload, 'UTF8'), ?) > 0`
 	}
-	eventArgs := []any{n.name, label, n.name}
-	if n.team != "" {
-		eventsSQL += ` AND team = ?`
-		eventArgs = append(eventArgs, n.team)
+	value, err := json.Marshal(name)
+	if err != nil {
+		return err
 	}
-	if _, err := tx.execContext(ctx, eventsSQL, eventArgs...); err != nil {
+	quotedLabel, err := json.Marshal(label)
+	if err != nil {
+		return err
+	}
+	if _, err := tx.execContext(ctx, eventsSQL, string(value), string(quotedLabel), string(value)); err != nil {
 		return fmt.Errorf("relabel event payloads: %w", err)
 	}
 	return nil
@@ -787,8 +780,8 @@ func (op *Operator) relabelPrincipalTx(ctx context.Context, tx *storeTx, n princ
 
 // safety: a relabel can reach grants on teams the account does not own, so it takes each touched team's ledger lock
 // in name order before rewriting that team's grants.
-func relabelGrantCreatorTx(ctx context.Context, tx *storeTx, n principalName, label string) error {
-	teams, err := tx.operator.grantCreatorTeamsTx(ctx, tx, n)
+func relabelGrantCreatorTx(ctx context.Context, tx *storeTx, name, label string) error {
+	teams, err := tx.operator.grantCreatorTeamsTx(ctx, tx, name)
 	if err != nil {
 		return err
 	}
@@ -797,19 +790,15 @@ func relabelGrantCreatorTx(ctx context.Context, tx *storeTx, n principalName, la
 		if err != nil {
 			return err
 		}
-		if err := l.relabelCreator(ctx, n.name, label); err != nil {
+		if err := l.relabelCreator(ctx, name, label); err != nil {
 			return fmt.Errorf("relabel credit_grants.created_by: %w", err)
 		}
 	}
 	return nil
 }
 
-func (op *Operator) grantCreatorTeamsTx(ctx context.Context, tx *storeTx, n principalName) ([]string, error) {
-	query, args := `SELECT DISTINCT team FROM credit_grants WHERE created_by=?`, []any{n.name}
-	if n.team != "" {
-		query, args = query+` AND team=?`, append(args, n.team)
-	}
-	rows, err := tx.queryContext(ctx, query+` ORDER BY team`, args...)
+func (op *Operator) grantCreatorTeamsTx(ctx context.Context, tx *storeTx, name string) ([]string, error) {
+	rows, err := tx.queryContext(ctx, `SELECT DISTINCT team FROM credit_grants WHERE created_by=? ORDER BY team`, name)
 	if err != nil {
 		return nil, err
 	}

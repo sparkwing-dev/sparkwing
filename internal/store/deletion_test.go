@@ -439,3 +439,54 @@ func TestTeamDeletionWithdrawsSchedulesAndEffectsBeforePurge(t *testing.T) {
 		}
 	}
 }
+
+// Account deletion finds the account's rows by the account, never by address
+// text: an invitation accepted through a linked address does not block it, a
+// later holder of the address keeps its invitation, and an event payload that
+// only contains the address inside a longer value is left alone.
+func TestAccountDeletionTouchesOnlyRowsNamingTheAccount(t *testing.T) {
+	st := storetest.Open(t)
+	ctx := context.Background()
+	now := time.Now()
+	owner := signIn(t, st, "o", "owner@example.com")
+	shared := tenant(t, st, owner.PersonalTeam)
+	leaver := signIn(t, st, "l", "jo@example.com")
+	if _, err := st.LinkIdentity(ctx, leaver.Account.ID, gh("gh-l", "work@example.com"), now); err != nil {
+		t.Fatal(err)
+	}
+	inv, err := shared.InviteForTest(t, ctx, owner.Account.ID, "work@example.com", store.RoleReader, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.AsOperator().AcceptAccountInvitation(ctx, storetest.AccountAuthority(t, st, leaver.Account.ID), inv.ID); err != nil {
+		t.Fatal(err)
+	}
+	other := signIn(t, st, "o2", "owner2@example.com")
+	if _, err := tenant(t, st, other.PersonalTeam).InviteForTest(t, ctx, other.Account.ID, "jo@example.com", store.RoleEditor, now); err != nil {
+		t.Fatal(err)
+	}
+	if err := shared.TestOnlySeedTriggerWithRun(ctx,
+		store.Trigger{ID: "run-e", Pipeline: "build", CreatedAt: now},
+		store.Run{RunSummary: runstate.RunSummary{ID: "run-e", Pipeline: "build", Status: "pending", StartedAt: now}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := shared.AppendEvent(ctx, "run-e", "", "approved", []byte(`{"approver":"jo@example.com","note":"kjo@example.com"}`)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.DeleteAccount(ctx, leaver.Account.ID); err != nil {
+		t.Fatalf("DeleteAccount after an acceptance through a linked address: %v", err)
+	}
+	if n := countWhere(t, st, "invitations", "email = 'jo@example.com' AND accepted_at IS NULL AND withdrawn_at IS NULL"); n != 1 {
+		t.Fatalf("the open invitation to the address went with its former holder (%d left)", n)
+	}
+	if n := countWhere(t, st, "invitations", "accepted_by = 'deleted user' AND email = ''"); n != 1 {
+		t.Fatalf("the accepted invitation kept the account or its address (%d anonymised)", n)
+	}
+	var payload string
+	if err := st.DB().QueryRowContext(ctx, `SELECT CAST(payload AS TEXT) FROM events WHERE run_id='run-e' AND kind='approved'`).Scan(&payload); err != nil {
+		t.Fatal(err)
+	}
+	if payload != `{"approver":"deleted user","note":"kjo@example.com"}` {
+		t.Fatalf("event payload after deletion = %s", payload)
+	}
+}
