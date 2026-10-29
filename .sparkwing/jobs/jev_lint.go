@@ -80,8 +80,8 @@ func (JevLint) Help() string {
 func (JevLint) Examples() []sparkwing.Example {
 	return []sparkwing.Example{
 		{Comment: "Store the local API key without putting it in shell history", Command: "sparkwing secrets set --name TYPESAFE_API_KEY --file /path/to/key"},
-		{Comment: "Preview the exact request without using the API", Command: "sparkwing run jev-lint --dry-run"},
-		{Comment: "Judge this branch against its merge base", Command: "sparkwing run jev-lint --base origin/main"},
+		{Comment: "Preview the exact request without using the API", Command: "sparkwing run jev-lint -- --dry-run"},
+		{Comment: "Judge this branch against its merge base", Command: "sparkwing run jev-lint -- --base origin/main"},
 	}
 }
 

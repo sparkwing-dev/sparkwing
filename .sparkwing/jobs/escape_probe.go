@@ -63,7 +63,7 @@ func (EscapeProbe) Help() string {
 func (EscapeProbe) Examples() []sparkwing.Example {
 	return []sparkwing.Example{{
 		Comment: "Probe from a node pod",
-		Command: "sparkwing run escape-probe --rds db.example:5432 --api-hosts 10.0.36.1,10.0.65.130 --other-run <earlier run>",
+		Command: "sparkwing run escape-probe -- --rds db.example:5432 --api-hosts 10.0.36.1,10.0.65.130 --other-run <earlier run>",
 	}}
 }
 

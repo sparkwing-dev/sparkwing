@@ -38,7 +38,7 @@ func (Release) Help() string {
 func (Release) Examples() []sparkwing.Example {
 	return []sparkwing.Example{
 		{Comment: "Auto-pick version by bumping latest origin tag", Command: "SPARKWING_HOME=\"$(mktemp -d)\" sparkwing run release --sw-allow-risk destructive,prod"},
-		{Comment: "Tag and push an explicit version", Command: "SPARKWING_HOME=\"$(mktemp -d)\" sparkwing run release --version v0.24.0 --sw-allow-risk destructive,prod"},
+		{Comment: "Tag and push an explicit version", Command: "SPARKWING_HOME=\"$(mktemp -d)\" sparkwing run release --sw-allow-risk destructive,prod -- --version v0.24.0"},
 		{Comment: "Preview without pushing", Command: "SPARKWING_HOME=\"$(mktemp -d)\" sparkwing run release --sw-dry-run"},
 	}
 }

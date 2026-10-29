@@ -189,7 +189,7 @@ Before cutting `vX.Y.Z`, the agent applies this rubric to `[Unreleased]`:
    internal-cleanup entries that don't belong (those are dev-facing,
    not adopter-facing).
 
-The release pipeline (`sparkwing run release --version vX.Y.Z`) then
+The release pipeline (`sparkwing run release -- --version vX.Y.Z`) then
 takes over: validates `[vX.Y.Z]` doesn't exist yet, renames
 `[Unreleased]` to `[vX.Y.Z] - YYYY-MM-DD`, rolls
 `docs/migrations/_unreleased.md` to `vX.Y.Z.md` with its index row and

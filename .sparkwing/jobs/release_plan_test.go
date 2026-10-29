@@ -242,3 +242,38 @@ func TestReleaseRecipesNameTheRiskFlagRunAccepts(t *testing.T) {
 		t.Errorf("DELIVERY.md names --sw-allow at byte %d; use --sw-allow-risk", loc[0])
 	}
 }
+
+// `sparkwing run` refuses a pipeline flag before `--`, so an example that
+// puts one there fails for whoever copies it.
+func TestPipelineExamplesPassPipelineFlagsAfterTheSeparator(t *testing.T) {
+	runFlags := map[string]bool{"-o": true, "--output": true, "-C": true, "--checkout": true, "-h": true, "--help": true, "--help-all": true, "--publish": true, "-v": true}
+	command := regexp.MustCompile(`Command:\s*"((?:[^"\\]|\\.)*)"`)
+	files, err := filepath.Glob("*.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, file := range files {
+		if strings.HasSuffix(file, "_test.go") {
+			continue
+		}
+		src, err := os.ReadFile(file)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, m := range command.FindAllStringSubmatch(string(src), -1) {
+			_, run, ok := strings.Cut(m[1], "sparkwing run ")
+			if !ok {
+				continue
+			}
+			for _, tok := range strings.Fields(run)[1:] {
+				if tok == "--" {
+					break
+				}
+				flag, _, _ := strings.Cut(tok, "=")
+				if strings.HasPrefix(tok, "-") && !strings.HasPrefix(tok, "--sw-") && !runFlags[flag] {
+					t.Errorf("%s: example %q passes %s before --", file, m[1], tok)
+				}
+			}
+		}
+	}
+}
