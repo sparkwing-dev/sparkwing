@@ -158,7 +158,7 @@ func (h *OwnerHost) schedule(parent context.Context, input RunInput, accepted Ac
 				releasePending.Store(true)
 				releasing[action.NodeID] = releasePending
 				launch(action.NodeID, func(ctx context.Context) error {
-					return h.release(ctx, input, accepted, entry, row, action.Kind, func(ctx context.Context, request store.ReconcileRequest) error {
+					return h.release(ctx, input, accepted, entry, snapshot.Run, row, action.Kind, func(ctx context.Context, request store.ReconcileRequest) error {
 						releasePending.Store(false)
 						return h.execute(ctx, input, accepted, entry, request)
 					})
@@ -266,22 +266,29 @@ func (h *OwnerHost) apply(ctx context.Context, input RunInput, accepted Accepted
 	return err
 }
 
-func (h *OwnerHost) release(ctx context.Context, input RunInput, accepted AcceptedRun, entry *source.Entry, row runstate.NodeRow, kind store.DecisionKind, next func(context.Context, store.ReconcileRequest) error) error {
+func (h *OwnerHost) release(ctx context.Context, input RunInput, accepted AcceptedRun, entry *source.Entry, run store.RunRow, row runstate.NodeRow, kind store.DecisionKind, next func(context.Context, store.ReconcileRequest) error) error {
 	if h.DebugPolicy == nil || h.SkipPolicy == nil {
 		return errors.New("run host requires owner layer policies before dispatch")
 	}
-	if err := h.debugBoundary(ctx, input, accepted, row, true); err != nil {
-		return err
-	}
-	request := store.ReconcileRequest{Ref: row.Ref, Actor: input.Owner, Policy: runstate.SourceNone}
-	snapshot, err := h.Store.ReadSnapshot(ctx, input.RunID)
+	boundary, err := debugBoundary(input, accepted, row, true)
 	if err != nil {
 		return err
 	}
-	if snapshot.Run.CancelRequestedAt != nil || snapshot.Run.FinishedAt != nil {
+	if boundary != nil {
+		if err := h.debugBoundary(ctx, input, accepted, row, true); err != nil {
+			return err
+		}
+		snapshot, err := h.Store.ReadSnapshot(ctx, input.RunID)
+		if err != nil {
+			return err
+		}
+		run = snapshot.Run
+	}
+	if run.CancelRequestedAt != nil || run.FinishedAt != nil {
 		return nil
 	}
-	if selection := snapshot.Run.Retry; selection != nil {
+	request := store.ReconcileRequest{Ref: row.Ref, Actor: input.Owner, Policy: runstate.SourceNone}
+	if selection := run.Retry; selection != nil {
 		if selected, ok := selection.Results[string(row.Ref.NodeID)]; ok {
 			probe := request
 			probe.Policy, probe.MaterializeOnly = runstate.SourceManualRetry, true

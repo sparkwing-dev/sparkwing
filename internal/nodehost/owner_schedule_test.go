@@ -287,7 +287,11 @@ func TestOwnerHostPassesOwnerStorageToLayerPolicies(t *testing.T) {
 
 func releasedRequest(h *OwnerHost, ctx context.Context, input RunInput, accepted AcceptedRun, entry *source.Entry, row runstate.NodeRow, kind store.DecisionKind) (*store.ReconcileRequest, error) {
 	var result *store.ReconcileRequest
-	err := h.release(ctx, input, accepted, entry, row, kind, func(_ context.Context, request store.ReconcileRequest) error {
+	snapshot, err := h.Store.ReadSnapshot(ctx, input.RunID)
+	if err != nil {
+		return nil, err
+	}
+	err = h.release(ctx, input, accepted, entry, snapshot.Run, row, kind, func(_ context.Context, request store.ReconcileRequest) error {
 		result = &request
 		return nil
 	})
