@@ -304,8 +304,8 @@ unsupported methods return `method_not_allowed` with `Allow: GET`.
 
 `POST /api/v1/runs/{run}/jobs/{job}/expansion` uses the shared capability
 policy. It requires `expansion.submit`, the bound source job and generation,
-and a live owner or eval lease. Eval also requires a live controller ownership
-lease. The ended source claim cannot submit an expansion.
+and a live owner or eval lease. Eval of a controller-dispatched run also
+requires that the controller still owns the run. The ended source claim cannot submit an expansion.
 
 The body supplies `source_generation` and exactly one of `body` or `failure`.
 A successful empty expansion uses `"body":{"jobs":[]}`. A failure uses the
@@ -557,7 +557,8 @@ ancestry, including the nearest here award.
 
 Same-uid pipeline code may still reach a runner's credential. A private pipe or
 filtered environment does not isolate hostile processes sharing an OS account.
-Cloud jobs use root and privileged Docker on team-dedicated nodes. Those are
+Cloud jobs run rootful Docker inside a user-namespaced pod on team-dedicated
+nodes, never privileged. Those are
 accepted deployment boundaries, separate from the claim's API authority.
 
 A pod bootstrap has only source-read and exchange authority. A bootstrap-specific
@@ -613,7 +614,8 @@ error. Pricing and compute measurements come from the controller's observations.
 
 ## Buying credits
 
-Checkout, card setup and payment-recovery POSTs require one nonempty
+`POST /api/v1/team/billing/checkout` and `POST /api/v1/team/billing/card`
+require one nonempty
 `Idempotency-Key` header. A committing transaction derives the team, account,
 reservation and current billing limits. The checkout service receives that
 reservation as its request key. A completed replay returns the recorded URL
@@ -784,9 +786,9 @@ Execution, queue wait and approval wait are separate bounds. Local runs gain
 no execution deadline. A queued job with a bounded owner also ends at the
 owner's deadline. Approval zero remains indefinite wherever the owner can wait.
 
-Deployment-wide counters and singleton maintenance leases live in the store.
-One supported controller replica does not justify process-local financial or
-authorization state.
+Deployment-wide counters live in the store. One controller holds a store at a
+time, which still does not justify process-local financial or authorization
+state.
 
 ## Teams and sign-in
 

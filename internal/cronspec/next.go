@@ -12,8 +12,8 @@ const yearHorizon = 5
 // When both day-of-month and day-of-week are restricted, a day matches if
 // either field matches, as standard cron does. A field counts as restricted
 // only when it does not begin with `*`, which is the flag Vixie cron sets, so
-// `0 3 */2 * 1` means every second day and every Monday, not their
-// intersection.
+// `0 3 */2 * 1` fires only on Mondays that fall on an odd day of the month,
+// the intersection, while `0 3 1-31/2 * 1` fires on either.
 //
 // Across a daylight-saving transition the walk follows the wall clock: a minute
 // that does not exist on a spring-forward day is skipped, and a minute that

@@ -22,13 +22,14 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
-	"github.com/sparkwing-dev/sparkwing/internal/runspec"
-	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/stdlib"
 	_ "modernc.org/sqlite"
+
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 )
 
 // DefaultBusyTimeoutMS is the SQLite busy_timeout Open applies, in
@@ -468,18 +469,6 @@ func (f RunFilter) hasCursor() bool { return f.AfterID != "" }
 // hasBeforeCursor reports whether the filter pages toward newer runs.
 func (f RunFilter) hasBeforeCursor() bool { return f.BeforeID != "" }
 
-// ListRuns returns runs ordered newest-first, then by id descending, filtered
-// by f. The cursor clause depends on that order.
-//
-// Scope: this reads every team. Tenant callers use [Tenant.ListRuns].
-func (o *Operator) ListRuns(ctx context.Context, f RunFilter) (_ []*Run, err error) {
-	where, args, err := runFilterWhere(o.s.dialect, f)
-	if err != nil {
-		return nil, err
-	}
-	return o.s.listRuns(ctx, `SELECT `+runColumns+` FROM runs`+where, args, f)
-}
-
 func (s *Store) listRuns(ctx context.Context, query string, args []any, f RunFilter) (_ []*Run, err error) {
 	limit := f.Limit
 	if limit <= 0 {
@@ -622,12 +611,6 @@ func prefixUpperBound(prefix string) (string, bool) {
 		return string(b[:i+1]), true
 	}
 	return "", false
-}
-
-// getLatestRun returns the newest run for pipeline matching statuses
-// within maxAge. ErrNotFound on miss.
-func (o *Operator) getLatestRun(ctx context.Context, pipeline string, statuses []string, maxAge time.Duration) (*Run, error) {
-	return o.s.getLatestRun(ctx, `SELECT team,id FROM runs WHERE pipeline=?`, []any{pipeline}, pipeline, statuses, maxAge)
 }
 
 // GetLatestRun returns t's newest run for pipeline matching statuses within
@@ -806,26 +789,6 @@ func (t *Tenant) ListNodes(ctx context.Context, runID string) ([]*Node, error) {
 		}
 	}
 	return out, nil
-}
-
-// GetNode returns this tenant's job or ErrNotFound.
-func (t *Tenant) GetNode(ctx context.Context, runID, nodeID string) (*Node, error) {
-	row := t.s.queryRow(ctx, `SELECT `+nodeSelectColumns+`
-  FROM nodes
- WHERE team = ? AND run_id = ? AND node_id = ?`, string(t.team), runID, nodeID)
-	record := &Node{}
-	if err := scanNodeRow(row, record); err != nil {
-		return nil, err
-	}
-	attempts, err := t.listNodeExecutionAttempts(ctx, runID, nodeID)
-	if err != nil {
-		return nil, err
-	}
-	record.ExecutionAttempts = attempts
-	if err := t.populateNodeOutput(ctx, record); err != nil {
-		return nil, err
-	}
-	return record, nil
 }
 
 const nodeSelectColumns = `run_id,node_id,status,outcome,deps_json,error,started_at,finished_at,
@@ -1206,58 +1169,6 @@ const triggerSelect = `SELECT ` + runColumns + `,triggers.team,triggers.status,t
  triggers.generation,triggers.webhook_delivery,triggers.webhook_replay_key,runs.idempotency_key,runs.parent_node_id
  FROM runs JOIN triggers ON triggers.team=runs.team AND triggers.id=runs.id`
 
-// ListTriggers returns this tenant's sealed trigger displays, newest first.
-func (t *Tenant) ListTriggers(ctx context.Context, f TriggerFilter) (_ []*Trigger, err error) {
-	if t.team == "" {
-		return nil, ErrNoTeam
-	}
-
-	filter := RunFilter{Pipelines: f.Pipelines}
-	if f.Repo != "" {
-		filter.RepoNames = []string{f.Repo}
-	}
-	where, args, err := runFilterWhere(t.s.dialect, filter)
-	if err != nil {
-		return nil, err
-	}
-	if len(f.Statuses) > 0 {
-		if where == "" {
-			where = " WHERE "
-		} else {
-			where += " AND "
-		}
-		where += "triggers.status IN (" + placeholders(len(f.Statuses)) + ")"
-		args = append(args, stringsToAny(f.Statuses)...)
-	}
-	limit := f.Limit
-	if limit <= 0 {
-		limit = 20
-	}
-	args = append(args, min(limit, MaxRunListLimit))
-	args = append([]any{t.team}, args...)
-	where = strings.Replace(where, " WHERE ", " AND ", 1)
-	rows, err := t.s.query(ctx, triggerSelect+` WHERE runs.team = ?`+where+` ORDER BY triggers.created_at DESC,triggers.id DESC LIMIT ?`, args...)
-	if err != nil {
-		return nil, err
-	}
-	defer closeRowsInto(rows, &err)
-	var out []*Trigger
-	for rows.Next() {
-		trigger, err := scanTrigger(rows)
-		if err != nil {
-			return nil, err
-		}
-		out = append(out, trigger)
-	}
-	if err := errors.Join(rows.Err(), rows.Close()); err != nil {
-		return nil, err
-	}
-	if err := t.s.refreshTriggerPresentations(ctx, out); err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
 func scanTrigger(rs rowScanner) (*Trigger, error) {
 	var tr Trigger
 	var claimed, lease sql.NullInt64
@@ -1378,17 +1289,6 @@ const expectedSchemaVersion = 25
 // sparkwing_schema_version table on a fresh database.
 func ExpectedSchemaVersion() int { return expectedSchemaVersion }
 
-// CurrentSchemaVersion returns the schema version recorded in the
-// database (MAX of sparkwing_schema_version), or 0 when unrecorded.
-func (s *Store) CurrentSchemaVersion(ctx context.Context) (int, error) {
-	var v int
-	if err := s.queryRow(ctx,
-		`SELECT COALESCE(MAX(version), 0) FROM sparkwing_schema_version`).Scan(&v); err != nil {
-		return 0, err
-	}
-	return v, nil
-}
-
 // safety: two Postgres openers of an empty database would both create the
 // baseline, so each takes this lock before looking.
 const migrateAdvisoryLock = `SELECT pg_advisory_xact_lock(hashtext('sparkwing_migrate'))`
@@ -1491,8 +1391,4 @@ func databaseEmpty(ctx context.Context, tx *storeTx) (bool, error) {
 	var n int
 	err := tx.QueryRowContext(ctx, q).Scan(&n)
 	return n == 0, err
-}
-
-func isTerminalRunStatus(status string) bool {
-	return status == "success" || status == runStatusFailed || status == runStatusCancelled
 }

@@ -21,8 +21,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
 
-// Staging qa.12: a Cloud run whose pipeline did not compile ended plan_failed, and neither `runs status` nor
-// `runs logs` showed why, because the plan host recorded only "run preparation failed".
+// A plan compile failure must reach run detail, with secret values masked, so `runs status` says why the run failed.
 func TestCloudPlanCompileFailureShowsMaskedCompilerOutput(t *testing.T) {
 	if testing.Short() {
 		t.Skip("slow: 2.5s measured in the short class; the full suite runs it")

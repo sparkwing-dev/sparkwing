@@ -10,7 +10,6 @@ import (
 	"sync/atomic"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
-	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/lease"
 	"github.com/sparkwing-dev/sparkwing/internal/limits"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
@@ -225,13 +224,10 @@ func (h *OwnerHost) acquire(ctx context.Context, input RunInput, row store.RunRo
 }
 
 func (h *OwnerHost) keepOwner(parent context.Context, actor runstate.Actor, computing func() bool) (context.Context, func()) {
-	return h.keepUnit(parent, lease.Identity{Kind: capability.UnitKind(actor.Owner.Kind), RunID: string(actor.Owner.RunID), Holder: actor.Owner.Holder, Generation: int64(actor.Owner.Generation)}, actor, computing)
+	return h.keepUnit(parent, actor, computing)
 }
 
-func (h *OwnerHost) keepUnit(parent context.Context, identity lease.Identity, actor runstate.Actor, computing func() bool) (context.Context, func()) {
-	if lease.Adopt(parent, identity, computing) {
-		return parent, func() {}
-	}
+func (h *OwnerHost) keepUnit(parent context.Context, actor runstate.Actor, computing func() bool) (context.Context, func()) {
 	keeper := h.Lease
 	keeper.Renew = func(ctx context.Context) (lease.Beat, error) {
 		beat, err := h.Renew(ctx, actor, computing())

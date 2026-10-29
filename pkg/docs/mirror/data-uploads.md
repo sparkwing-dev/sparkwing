@@ -129,6 +129,6 @@ verified default-branch runs. The interface exposes memo, artifact and depcache
 reads. Pipeline binaries stay in the local binary cache.
 
 `run --publish PROFILE` is the separate one-way path for a local run record,
-results and logs under `trust_local_builds`. Publication failure is reported
+results and logs. Publication failure is reported
 independently and does not change the completed local run outcome. Source-bundle
 intake and publication result-copy composition still need their owner bindings.

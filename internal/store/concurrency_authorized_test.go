@@ -31,28 +31,6 @@ func slotFixtureAt(t *testing.T, target *storetest.Target) *storeRecoveryFixture
 	})
 }
 
-func slotAuthorization(t *testing.T, f *storeRecoveryFixture) capability.Authorized {
-	t.Helper()
-	route, ok := capability.LookupRoute("GET", "/api/v1/queue/groups/{group}")
-	if !ok {
-		t.Fatal("missing slot route")
-	}
-	row, err := f.tenant.ReadNode(t.Context(), f.ref)
-	if err != nil {
-		t.Fatal(err)
-	}
-	target := capability.Target{Team: string(f.tenant.Team()), RunID: string(f.ref.RunID), NodeID: string(f.ref.NodeID), SlotKey: "job:global:deploy", SlotRunID: string(f.ref.RunID), SlotNodeID: string(f.ref.NodeID), SlotGeneration: int64(row.Generation)}
-	auth, err := capability.NewAuthenticator(f.s.AsOperator()).Authenticate(t.Context(), capability.Presentation{Raw: f.holderBearer, Class: capability.CredentialBearer, Evidence: capability.RequestEvidence{Target: target}}, route)
-	if err != nil {
-		t.Fatal(err)
-	}
-	a, err := capability.Authorize(t.Context(), f.s.AsOperator(), route, auth, target)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return a
-}
-
 func TestConcurrencyGroupReadsSharedAdmissionAndRetiresSlotRoutes(t *testing.T) {
 	f := slotFixture(t)
 	admitted, err := f.tenant.MayStart(t.Context(), runstate.CapacityBinding{RunID: string(f.ref.RunID), NodeID: string(f.ref.NodeID), Generation: int64(f.holder.Generation)}, f.holder)

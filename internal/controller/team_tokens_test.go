@@ -6,8 +6,3 @@ var (
 	machineScopes = []string{"nodes.claim", "triggers.claim"}
 	memberScopes  = store.ScopesForRole(store.RoleEditor)
 )
-
-type mintedRunner struct {
-	Token  string `json:"token"`
-	Prefix string `json:"prefix"`
-}

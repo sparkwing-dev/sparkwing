@@ -227,7 +227,7 @@ func nativeStoreObjects(t *testing.T) (*blob.Filesystem, string) {
 
 func nativeStoreOutputRecords(t *testing.T, ctx context.Context, f *storeHostFixture, request runspec.Request, objects *blob.Filesystem) OutputRecords {
 	t.Helper()
-	if err := f.Tenant.SetStorageQuota(ctx, store.StorageQuota{}); err != nil {
+	if _, err := f.Store.AsOperator().WriteStorageQuota(ctx, teststore.OperatorAuthorized(t, f.Store, f.Tenant.Team()), store.StorageQuota{}); err != nil {
 		t.Fatal(err)
 	}
 	transfer := blob.TransferClient{Transport: sourceTransfer(func(request *http.Request) (*http.Response, error) {

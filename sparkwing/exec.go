@@ -164,7 +164,6 @@ func commandEnvFromContext(ctx context.Context) map[string]string {
 // force-kills the whole group, so grandchildren do not outlive a cancelled run.
 // On Linux and macOS, a no-progress timeout first requests a goroutine dump. A
 // process that remains alive after the diagnostic window is force-killed.
-// Terminal SIGINT (Ctrl-C) also reaches the group via the OS.
 func Bash(ctx context.Context, line string) *Cmd {
 	return &Cmd{ctx: ctx, kind: kindBash, line: line}
 }
@@ -181,7 +180,6 @@ func Bash(ctx context.Context, line string) *Cmd {
 // force-kills the whole group, so grandchildren do not outlive a cancelled run.
 // On Linux and macOS, a no-progress timeout first requests a goroutine dump. A
 // process that remains alive after the diagnostic window is force-killed.
-// Terminal SIGINT (Ctrl-C) also reaches the group via the OS.
 func Exec(ctx context.Context, name string, args ...string) *Cmd {
 	return &Cmd{ctx: ctx, kind: kindExec, name: name, args: args}
 }

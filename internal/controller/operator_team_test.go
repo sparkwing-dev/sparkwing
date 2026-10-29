@@ -246,7 +246,11 @@ func TestOperatorCreateTeamHTTPConsole(t *testing.T) {
 	checkActors("member")
 	s.WithOperatorAccounts(nil)
 	reviewSessionRequest(t, s, raw, csrf, "POST", "/api/v1/operator/teams", `{"slug":"refused-team"}`, 403)
-	if _, err := s.store.DeleteAccount(t.Context(), "member"); err != nil {
+	s.WithOperatorAccounts([]string{"operator"})
+	teststore.SeedTeam(t, s.store, "ops")
+	console, operator := teststore.Console(t, s.store, "ops", "operator")
+	operator.Target.AccountID = "member"
+	if _, err := console.ConsoleDeleteAccount(t.Context(), operator); err != nil {
 		t.Fatal(err)
 	}
 	checkActors("deleted account")

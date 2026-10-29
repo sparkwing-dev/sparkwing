@@ -22,15 +22,13 @@ each team's last committed award ordinal, then arrival and stable identity.
 Only a successful award advances the ordinal. Claimant refusals leave other
 eligible work selectable. There are no scan frontiers or demand hashes.
 Private owner projections use the same predicate before job readiness, without
-writing asks or reserving work. Award rechecks readiness and eligibility in its
+reserving work. Award rechecks readiness and eligibility in its
 transaction. Notices explain refusals without selecting or awarding work.
 
-**C. Asks and awards serialize under queue arbitration.** Claims take the
-controller lease, queue arbitration, authority and unit rows, then the ledger,
-as defined in `lock_order.go`. Taking queue arbitration after a ledger lock
-poisons the transaction. A waiting claimant's ask commits even when its scan
-awards another unit or nothing. `RankingAward` (2 s after the window, worst
-case 7 s) preserves the window winner.
+**C. Awards serialize under queue arbitration.** Claims take queue
+arbitration, authority and unit rows, then the ledger, as defined in
+`lock_order.go`. Taking queue arbitration after a ledger lock poisons the
+transaction. Ranking writes nothing: a claim is one indexed lookup.
 
 A self-hosted `sparkwing-controller` runs no pipelines itself: without a
 registered runner, unselected work shows `no_eligible_runner`.
@@ -105,18 +103,14 @@ launcher, so the Cloud tier is never present there.
 Each plan, eval and job unit has its own window `W = limits.RankingWindow`
 (5 s) from its readiness.
 
-- Inside the window, a claim waits while a better-ranked claimant is live and
-  fully eligible for the unit (the shared eligibility below, including its
-  advertised kinds, labels and billing). The best-ranked claimant present
-  wins immediately. A waiting claim records an **ask** (`unit_asks`:
-  claimant, rank, time) under queue arbitration, in the claim
-  transaction itself, whether that transaction awards another unit or none.
-- From `ready+W` to `ready+W+A` (`A = limits.RankingAward`, 2 s, the lead
-  amendment to decision 2), the window's winner is the best-ranked asker
-  recorded inside the window, and only that winner may take the unit. A
-  claimant that first asks after the window waits, whatever its rank. With no
-  ask inside the window, the first eligible asker wins.
-- After that, the first eligible asker wins. An award clears the unit's asks.
+- Inside the window, a unit that names no runner is held for the best-ranked
+  tier that has a live claimant of the same team which is fully eligible for
+  it (the shared eligibility below, including its advertised kinds, labels and
+  billing) and has a free slot. Lower tiers skip the unit until that claimant
+  takes it. A busy or offline better tier causes no wait.
+- After the window, any eligible claimant may take the unit, by fair share and
+  arrival. A claimant takes the next eligible unit with no per-runner
+  preference scoring; `Prefers` orders placement for that job only.
 
 Claimants keep their normal poll cadence. SQL selection considers live claimant
 observations. Notices explain up to `limits.RankingObservations` (64) of the
@@ -172,4 +166,4 @@ pin that requires `class=cloud`, so only the launcher matches.
 3. Job placement uses required labels. Plans and evaluations use their run's
    labels. Cloud standing capacity and funding are checked and reserved at
    award. Private snapshots check funding through the shared predicate and
-   leave readiness, asks, reservations and fairness accounting unchanged.
+   leave readiness, reservations and fairness accounting unchanged.

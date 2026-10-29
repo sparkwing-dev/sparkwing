@@ -114,8 +114,8 @@ func readCommitFile(ctx context.Context, spec Spec, sha, name string, options Op
 	if _, err := client.run(ctx, repository, remote, "fetch", "--quiet", "--no-tags", "--no-recurse-submodules", "--no-write-fetch-head", "--depth=1", "--filter=blob:limit="+strconv.FormatInt(limits.ProjectConfigBytes+1, 10), "--", remote, sha); err != nil {
 		return nil, false, err
 	}
-	// safety: a filtered blob is absent rather than fetched on demand, so an
-	// oversized configuration never reaches the controller's disk.
+	// safety: an oversized blob the remote omitted must stay absent rather than
+	// be fetched lazily; readCommittedBlob still refuses one the remote sent.
 	local := *client
 	local.env = append(append([]string{}, client.env...), "GIT_NO_LAZY_FETCH=1")
 	return readCommittedBlob(ctx, &local, repository, sha+":"+name)

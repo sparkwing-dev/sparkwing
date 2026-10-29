@@ -226,8 +226,9 @@ What still wants the network is visible in advance:
 
 ```
 .sparkwing/
+  .gitignore        # ignores the compiled sparkwing-pipeline binary
   sparkwing.yaml    # registry of every pipeline this repo defines
-  main.go           # thin entrypoint; blank-imports jobs/ and delegates to runner.Main
+  main.go           # thin entrypoint; blank-imports jobs/ and calls sparkwing.Main
   README.md         # generated package README
   go.mod            # Go module for pipeline code
   go.sum            # dependency checksums (from go mod tidy)

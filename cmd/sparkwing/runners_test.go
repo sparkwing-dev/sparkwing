@@ -13,7 +13,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/sparkwing-dev/sparkwing/internal/agentconfig"
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/fssecure"
 	runnerservice "github.com/sparkwing-dev/sparkwing/internal/runners/service"
@@ -204,7 +203,7 @@ func TestRunnersAddMintsAScopedTokenAndWritesTheClaimModeConfig(t *testing.T) {
 	} else if info.Mode().Perm() != 0o600 {
 		t.Errorf("config mode = %04o, want 0600", info.Mode().Perm())
 	}
-	raw, err := agentconfig.Load(f.config)
+	raw, err := loadEnrolledRunner(f.config)
 	if err != nil {
 		t.Fatalf("the written config does not load: %v", err)
 	}
@@ -219,9 +218,6 @@ func TestRunnersAddMintsAScopedTokenAndWritesTheClaimModeConfig(t *testing.T) {
 	}
 	if !strings.HasPrefix(raw.Token, minted.Prefix) {
 		t.Error("the config does not carry the minted token")
-	}
-	if _, err := agentconfig.Validate(*raw); err != nil {
-		t.Fatalf("the written config does not validate: %v", err)
 	}
 
 	wantCalls := []string{
@@ -468,7 +464,7 @@ func TestRunnersAddForceTwiceKeepsTheLatestConfigReadable(t *testing.T) {
 			t.Fatalf("first add: %v", err)
 		}
 	})
-	first, err := agentconfig.Load(f.config)
+	first, err := loadEnrolledRunner(f.config)
 	if err != nil {
 		t.Fatalf("load after the first add: %v", err)
 	}
@@ -480,7 +476,7 @@ func TestRunnersAddForceTwiceKeepsTheLatestConfigReadable(t *testing.T) {
 			t.Fatalf("second add --force: %v", err)
 		}
 	})
-	second, err := agentconfig.Load(f.config)
+	second, err := loadEnrolledRunner(f.config)
 	if err != nil {
 		t.Fatalf("load after the second add: %v", err)
 	}
@@ -576,15 +572,12 @@ func TestRunnersAddWritesTheAllowList(t *testing.T) {
 			t.Fatalf("runners add: %v", err)
 		}
 	})
-	raw, err := agentconfig.Load(f.config)
+	raw, err := loadEnrolledRunner(f.config)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !slices.Equal(raw.AllowRepos, []string{"github.com/acme/*", "gitlab.example.com/acme/tools"}) {
 		t.Fatalf("repos = %v", raw.AllowRepos)
-	}
-	if _, err := agentconfig.Validate(*raw); err != nil {
-		t.Fatalf("validate written config: %v", err)
 	}
 	if len(f.runnerTokens(t)) != 1 {
 		t.Fatal("runners add minted no token")
@@ -615,7 +608,7 @@ func TestRunnersEnrollmentUsesRegistrationAndPreservesRepeatedSelectors(t *testi
 	if len(f.enrolled) != 1 || f.enrolled[0].Name != "desk" || !slices.Equal(f.enrolled[0].Repos, []string{"github.com/acme/*", "gitlab.example.com/acme/*"}) {
 		t.Fatalf("enrollment: %+v", f.enrolled)
 	}
-	raw, err := agentconfig.Load(f.config)
+	raw, err := loadEnrolledRunner(f.config)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -781,7 +774,7 @@ func TestRunnersEnrollmentRequestsPersonalCapacityOnlyWhenSelected(t *testing.T)
 			if received != personal {
 				t.Fatalf("reported personal=%v, want %v", received, personal)
 			}
-			if cfg, err := agentconfig.Load(f.config); err != nil || cfg.HolderPrefix != "desk" {
+			if cfg, err := loadEnrolledRunner(f.config); err != nil || cfg.HolderPrefix != "desk" {
 				t.Fatalf("runner config: %+v %v", cfg, err)
 			}
 			if strings.Contains(out, "_secret") {
@@ -908,7 +901,7 @@ func TestRunnersRemovalDoesNotReportSuccessWhenRevocationFails(t *testing.T) {
 	if !errors.Is(runErr, f.revokeErr) || out != "" || f.tokens[0].RevokedAt != nil {
 		t.Fatalf("failed revoke: %q %v %+v", out, runErr, f.tokens)
 	}
-	if _, err := agentconfig.Load(f.config); err != nil {
+	if _, err := loadEnrolledRunner(f.config); err != nil {
 		t.Fatalf("live credential config lost: %v", err)
 	}
 }

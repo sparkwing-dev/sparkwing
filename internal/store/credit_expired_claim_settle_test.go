@@ -2,7 +2,6 @@ package store_test
 
 import (
 	"context"
-	"fmt"
 	"runtime"
 	"testing"
 	"time"
@@ -11,18 +10,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/store/internal/storetest"
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
 )
-
-func usageSeconds(t *testing.T, s *store.Store, runID, nodeID string) int64 {
-	t.Helper()
-	var seconds int64
-	if err := s.DB().QueryRow(fmt.Sprintf(
-		`SELECT COALESCE(SUM(seconds), 0) FROM credit_charges
-		  WHERE run_id = '%s' AND node_id = '%s' AND kind = '%s'`,
-		runID, nodeID, "usage")).Scan(&seconds); err != nil {
-		t.Fatalf("read usage: %v", err)
-	}
-	return seconds
-}
 
 // A hold takes the team's ledger lock a metered claim takes, so a claim that
 // read the team as not held commits before the hold does and none can commit

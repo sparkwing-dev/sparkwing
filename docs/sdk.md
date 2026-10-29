@@ -208,7 +208,8 @@ team-wide shared secrets. Use `WithFreshRepo("owner/repo")` (TypeScript
 must authorize that repository. A child in another repository always names a
 branch, never a commit, and is always asserted.
 Children nest at most 10 levels deep
-counting the root, and one root starts at most 50; see
+counting the root, and one root starts at most the team's
+`max_children_per_root` (50 unless a team admin changes it, at most 1,000); see
 [limits](limits.md#execution-and-records).
 The creating job reads the child's committed output under its live claim.
 Missing output, missing bytes and failed digest verification fail the await.
@@ -286,7 +287,7 @@ deadline. Approvals support `Needs`, `NeedsIfPresent`, `NeedsGenerated`, `SkipIf
 The gate itself only declares a decision.
 
 Any team member whose credential holds `approvals.write` can approve or deny:
-editors, admins and owners, including the member who started the run. Readers
+editors and owners, including the member who started the run. Readers
 cannot. An approval is a workflow step that pauses a run for a person's
 decision. It is not a security control: it does not stop a run's author from
 approving their own run, and it does not limit what the run's code or secrets

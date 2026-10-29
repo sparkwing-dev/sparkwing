@@ -32,40 +32,6 @@ func (s *Server) handleGetPipelineProfile(w http.ResponseWriter, r *http.Request
 	return nil
 }
 
-type setPinReq struct {
-	Cores       float64 `json:"cores"`
-	MemoryBytes int64   `json:"memory_bytes"`
-}
-
-// safety: a pin becomes a hard Kubernetes limit for every later run of the
-// pipeline, so a negative component is a bad request rather than a clear.
-func (b setPinReq) validate() error {
-	if err := boundedProfileValue("cores", b.Cores, maxProfileCores); err != nil {
-		return err
-	}
-	return boundedProfileValue("memory_bytes", float64(b.MemoryBytes), maxProfileBytes)
-}
-
-func (s *Server) handleSetPipelinePin(w http.ResponseWriter, r *http.Request, a capability.Authorized) error {
-	var body setPinReq
-	if err := decodeEngineRequest(r, &body); err != nil {
-		return err
-	}
-	if err := body.validate(); err != nil {
-		return invalidEngineBody(err.Error())
-	}
-	tenant, err := s.sizingStore(r.Context(), a.Target.Team)
-	if err != nil {
-		return err
-	}
-	err = tenant.SetProfilePin(r.Context(), a, body.Cores, body.MemoryBytes)
-	if err != nil {
-		return engineLookupError(err)
-	}
-	w.WriteHeader(http.StatusNoContent)
-	return nil
-}
-
 // safety: omit sustained cores because these profiles become hard Kubernetes
 // CPU limits; charging a local-host plateau would throttle spiky pods.
 func runProfileObservations(ctx context.Context, t *store.Tenant, run *store.Run) (map[string]store.ProfileObservation, error) {
@@ -205,46 +171,11 @@ func runDuration(run *store.Run) time.Duration {
 	return d
 }
 
-type profileObservationReq struct {
-	Partial          bool    `json:"partial,omitempty"`
-	DurationNanos    int64   `json:"duration_nanos,omitempty"`
-	PeakCores        float64 `json:"peak_cores,omitempty"`
-	PeakMemoryBytes  int64   `json:"peak_memory_bytes,omitempty"`
-	SustainedCores   float64 `json:"sustained_cores,omitempty"`
-	CPUMeasured      bool    `json:"cpu_measured,omitempty"`
-	PlanHash         string  `json:"plan_hash,omitempty"`
-	Contended        bool    `json:"contended,omitempty"`
-	FloorCores       float64 `json:"floor_cores,omitempty"`
-	FloorMemoryBytes int64   `json:"floor_memory_bytes,omitempty"`
-}
-
-// safety: these figures become the price of every later run of the pipeline,
-// so a wire caller cannot post a negative or an implausible one.
+// safety: a wire caller cannot post a negative or an implausible usage figure.
 const (
 	maxProfileDuration = 365 * 24 * time.Hour
-	maxProfileCores    = 1 << 20
 	maxProfileBytes    = 1 << 50
 )
-
-func (b profileObservationReq) validate() error {
-	for _, f := range []struct {
-		name  string
-		value float64
-		limit float64
-	}{
-		{"duration_nanos", float64(b.DurationNanos), float64(maxProfileDuration)},
-		{"peak_cores", b.PeakCores, maxProfileCores},
-		{"peak_memory_bytes", float64(b.PeakMemoryBytes), maxProfileBytes},
-		{"sustained_cores", b.SustainedCores, maxProfileCores},
-		{"floor_cores", b.FloorCores, maxProfileCores},
-		{"floor_memory_bytes", float64(b.FloorMemoryBytes), maxProfileBytes},
-	} {
-		if err := boundedProfileValue(f.name, f.value, f.limit); err != nil {
-			return err
-		}
-	}
-	return nil
-}
 
 func boundedProfileValue(name string, value, limit float64) error {
 	if math.IsNaN(value) || math.IsInf(value, 0) {
@@ -256,78 +187,5 @@ func boundedProfileValue(name string, value, limit float64) error {
 	if value > limit {
 		return fmt.Errorf("%s exceeds the %g ceiling", name, limit)
 	}
-	return nil
-}
-
-func (b profileObservationReq) observation() store.ProfileObservation {
-	return store.ProfileObservation{
-		Partial:          b.Partial,
-		Duration:         time.Duration(b.DurationNanos),
-		PeakCores:        b.PeakCores,
-		PeakMemoryBytes:  b.PeakMemoryBytes,
-		SustainedCores:   b.SustainedCores,
-		CPUMeasured:      b.CPUMeasured,
-		PlanHash:         b.PlanHash,
-		Contended:        b.Contended,
-		FloorCores:       b.FloorCores,
-		FloorMemoryBytes: b.FloorMemoryBytes,
-	}
-}
-
-func (s *Server) handleRecordProfileObservation(w http.ResponseWriter, r *http.Request, a capability.Authorized) error {
-	var body profileObservationReq
-	if err := decodeEngineRequest(r, &body); err != nil {
-		return err
-	}
-	if err := body.validate(); err != nil {
-		return invalidEngineBody(err.Error())
-	}
-	tenant, err := s.sizingStore(r.Context(), a.Target.Team)
-	if err != nil {
-		return err
-	}
-	if err := tenant.RecordProfileObservation(r.Context(), a, body.observation()); err != nil {
-		return engineLookupError(err)
-	}
-	w.WriteHeader(http.StatusNoContent)
-	return nil
-}
-
-func (s *Server) handleRecordContention(w http.ResponseWriter, r *http.Request, a capability.Authorized) error {
-	tenant, err := s.sizingStore(r.Context(), a.Target.Team)
-	if err != nil {
-		return err
-	}
-	if err := tenant.RecordContention(r.Context(), a); err != nil {
-		return engineLookupError(err)
-	}
-	w.WriteHeader(http.StatusNoContent)
-	return nil
-}
-
-type waitObservationReq struct {
-	WaitNanos int64 `json:"wait_nanos"`
-}
-
-func (b waitObservationReq) validate() error {
-	return boundedProfileValue("wait_nanos", float64(b.WaitNanos), float64(maxProfileDuration))
-}
-
-func (s *Server) handleRecordWaitObservation(w http.ResponseWriter, r *http.Request, a capability.Authorized) error {
-	var body waitObservationReq
-	if err := decodeEngineRequest(r, &body); err != nil {
-		return err
-	}
-	if err := body.validate(); err != nil {
-		return invalidEngineBody(err.Error())
-	}
-	tenant, err := s.sizingStore(r.Context(), a.Target.Team)
-	if err != nil {
-		return err
-	}
-	if err := tenant.RecordWaitObservation(r.Context(), a, time.Duration(body.WaitNanos)); err != nil {
-		return engineLookupError(err)
-	}
-	w.WriteHeader(http.StatusNoContent)
 	return nil
 }

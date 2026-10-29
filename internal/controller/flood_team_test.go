@@ -53,7 +53,7 @@ func TestFloodPolicy_APISubmissionsAndRetriesUsePerTokenCaps(t *testing.T) {
 	if r := retry(tokens[2], "over-cap"); r.Code != 429 {
 		t.Fatalf("retry = %d %s", r.Code, r.Body)
 	}
-	runs, err := f.st.AsOperator().ListRuns(t.Context(), store.RunFilter{Limit: 10})
+	runs, err := teststore.ForTeam(t, f.st, store.DefaultTeam).ListRuns(t.Context(), store.RunFilter{Limit: 10})
 	if err != nil || len(runs) != 3 {
 		t.Fatalf("runs = %d: %v", len(runs), err)
 	}

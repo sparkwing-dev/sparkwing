@@ -19,8 +19,8 @@ type Profile struct {
 	Controller Connection `yaml:"controller" json:"controller"`
 }
 
-// Connection keeps the user's credential in an owner-only file, never env.
-// It cannot be serialized in errors, diagnostics, run specs or process arguments.
+// Connection persists the user's credential in private YAML configuration,
+// never env. JSON omits Token; any other encoder must treat it as a secret.
 type Connection struct {
 	URL   string  `yaml:"url" json:"url"`
 	Token *string `yaml:"token,omitempty" json:"-"`

@@ -5,29 +5,14 @@ import (
 	"errors"
 	"math"
 	"testing"
-	"time"
-
-	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/internal/storetest"
-	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
 )
 
 // safety: runner sizes are labels priced by class, and these fixtures' nodes
 // bill at the default rate table's smallest class, two cores.
 var unpinnedNodeRateMicro = int64(9_000)
-
-func seedClaimedNode(t *testing.T, s *store.Store, runID, nodeID string) {
-	t.Helper()
-	ctx := context.Background()
-	if err := teststore.ForTeam(t, s, store.DefaultTeam).TestOnlySeedRun(ctx, store.Run{RunSummary: runstate.RunSummary{ID: runID, Pipeline: "demo", Status: "running", StartedAt: time.Now()}}); err != nil {
-		t.Fatalf("create run: %v", err)
-	}
-	if err := teststore.SeedNode(s, ctx, store.Node{RunID: runID, NodeID: nodeID, Status: "pending"}); err != nil {
-		t.Fatalf("create node: %v", err)
-	}
-}
 
 func TestCreditsGrantRejectsUnknownKindAndZero(t *testing.T) {
 	s := storetest.Open(t)

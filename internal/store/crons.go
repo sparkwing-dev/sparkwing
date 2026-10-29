@@ -125,8 +125,9 @@ type CronDeclaration struct {
 	LockedDigest string            `json:"locked_digest,omitempty"`
 }
 
-// CronOverride is a host's edit of a declared schedule. An empty Cron,
-// TZ or Overlap and a nil CatchUp leave that field to the declaration;
+// CronOverride is a host's edit of a declared schedule. An empty Cron
+// or Overlap and a nil CatchUp leave that field to the declaration, as
+// does an empty TZ unless TZSet, which overrides it to the empty zone;
 // a nil Args does the same, while an empty non-nil Args overrides the
 // declaration to no arguments at all. Base is the declaration the
 // override was set against, so a reader can tell an override whose

@@ -17,7 +17,8 @@ import (
 const podENI corev1.ResourceName = "vpc.amazonaws.com/pod-eni"
 
 // safety: only this error rejects an award; API failures retry on the next sync.
-// An unadmittable Job never ran a Pod, so its rejection leaves the node in service.
+// An unadmittable Job has no owned Pod listed, so its rejection leaves the node in service;
+// the node's used-run label still keeps other runs off it.
 type podMismatch struct {
 	message      string
 	unadmittable bool

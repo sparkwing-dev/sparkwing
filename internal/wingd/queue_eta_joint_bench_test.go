@@ -42,7 +42,6 @@ func BenchmarkSemaphoreETA(b *testing.B) {
 			for i := 0; i < b.N; i++ {
 				q := qs
 				q.Waiters = append([]wingwire.Waiter(nil), qs.Waiters...)
-				annotateETA(&q, snap)
 				annotateSemaphoreETA(&q, snap)
 			}
 		})

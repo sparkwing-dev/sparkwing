@@ -182,7 +182,6 @@ var paymentModeAcrossModes = map[string]string{
 	"(*Operator).grantCreatorTeamsTx|credit_grants":                    "account deletion finds every team whose grants name the account, in any mode",
 	"(*Operator).disputeHoldTx|credit_freezes":                         "dispute_id is the table's primary key, and provider dispute ids never repeat across modes",
 	"(*Tenant).ListNodes|credit_charges":                               "shows the cpu class of one award's reservation, which the award's prefix pins; no amount is read",
-	"(*Tenant).GetNode|credit_charges":                                 "shows the cpu class of one award's reservation, which the award's prefix pins; no amount is read",
 	"(*Operator).ComputeUsage|credit_charges":                          "counts running metered awards per principal, a capacity fact rather than money",
 	"billingPriceTx|credit_charges":                                    "reads one award's reservation by its id",
 	"paidBillingTx|credit_charges":                                     "settles one award against everything charged to it; cutover refuses to start while any award is unsettled, so an award's charges share one mode",

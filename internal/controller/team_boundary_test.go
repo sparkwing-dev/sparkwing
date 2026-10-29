@@ -257,9 +257,8 @@ func tenancyDialects(t *testing.T, run func(t *testing.T, f *tenancyFixture)) {
 	}
 }
 
-// The sequence an identity review ran against a build without the boundary: a
-// fresh account in its own team listed, read and cancelled a run of another
-// team and started a run that landed in default.
+// A fresh account in its own team must not list, read or cancel another team's
+// runs, and a run it starts must land in its own team.
 func TestTeamBoundary_AFreshAccountCannotReachAnotherTeamsRun(t *testing.T) {
 	tenancyDialects(t, func(t *testing.T, f *tenancyFixture) {
 		ctx := context.Background()

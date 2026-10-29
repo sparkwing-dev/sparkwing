@@ -267,7 +267,7 @@ const (
 // SkipPredicate is a function evaluated after upstream dependencies complete.
 // Executable-job predicates run on the executing host under the actual job
 // award, inside its acquired concurrency slot. A true result skips the body
-// and releases the job's groups. Approval predicates run on the run's coordinator
+// and releases the job's groups. Approval predicates run in a separate evaluation job
 // before the human wait, holding no capacity.
 //
 // Predicates must be cheap and side-effect-free because their budget is short.
@@ -511,8 +511,6 @@ func (n *JobNode) Prefers(labels ...string) *JobNode {
 }
 
 // Inline places the node on the dispatcher's host.
-// Local execution uses a separate process; cluster execution uses the dispatcher's
-// own goroutine pool, where CPU-heavy work delays other nodes.
 // Retry, timeout, and memoization still apply. Requires labels are ignored.
 func (n *JobNode) Inline() *JobNode {
 	if n.approvalSpec != nil {

@@ -2,7 +2,6 @@ package controller_test
 
 import (
 	"context"
-	"errors"
 	"io"
 	"net/http"
 	"testing"
@@ -73,15 +72,9 @@ func TestTeamLogReadsAreNotRefusedPastTheDownloadCap(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := tenant.ChargeDownload(context.Background(), store.DownloadCharge{
-		Bytes: 150, Record: true, FreeCapBytes: 150,
-	}); err != nil {
+	now := teststore.Now(f.store)
+	if _, err := teststore.Exec(t.Context(), f.store, `INSERT INTO quota_admission(team,quota,period,used,updated_at) VALUES (?,'download',?,150,?)`, string(tenant.Team()), now.UTC().Format("2006-01-02"), now.UnixNano()); err != nil {
 		t.Fatalf("spend team-a's day: %v", err)
-	}
-	if _, err := tenant.ChargeDownload(context.Background(), store.DownloadCharge{
-		FreeCapBytes: 150,
-	}); !errors.Is(err, store.ErrDownloadCap) {
-		t.Fatalf("team-a after spending its day = %v, want the cap", err)
 	}
 	if code, _ := f.download(t, a, "/api/v1/runs/ra/nodes/n1/logs"); code == http.StatusTooManyRequests {
 		t.Fatal("team-a's log read past its download cap was refused")

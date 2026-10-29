@@ -58,7 +58,7 @@ func TestFoldRunProfilesRequiresSingleContributingNode(t *testing.T) {
 				if _, err := teststore.SQL(t, st).Exec(`UPDATE nodes SET started_at=?, finished_at=? WHERE run_id=? AND node_id=?`, begin.UnixNano(), end.UnixNano(), "r", id); err != nil {
 					t.Fatal(err)
 				}
-				n, err := teststore.ForTeam(t, st, store.DefaultTeam).GetNode(ctx, "r", id)
+				n, err := teststore.Node(ctx, teststore.ForTeam(t, st, store.DefaultTeam), "r", id)
 				if err != nil || n == nil || n.Outcome != outcome || n.StartedAt == nil || n.FinishedAt == nil || !n.StartedAt.Equal(begin) || !n.FinishedAt.Equal(end) {
 					t.Fatalf("node fixture differs: %+v, %v", n, err)
 				}

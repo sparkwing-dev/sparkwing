@@ -102,7 +102,7 @@ func TestCronTick_ASecondTickInTheWindowFiresNothing(t *testing.T) {
 		t.Errorf("evaluations = %d then %d, want the second tick in the window skipped", ran, evaluations)
 	}
 
-	triggers, err := teststore.ForTeam(t, st, store.DefaultTeam).ListTriggers(ctx, store.TriggerFilter{Pipelines: []string{"nightly"}})
+	triggers, err := teststore.Triggers(ctx, teststore.ForTeam(t, st, store.DefaultTeam), "nightly")
 	if err != nil {
 		t.Fatalf("ListTriggers: %v", err)
 	}
@@ -162,7 +162,7 @@ func TestCronTick_ARepeatedInstantReachesTheFirstRun(t *testing.T) {
 	if second != first {
 		t.Errorf("the repeated instant started run %s, want the first run %s", second, first)
 	}
-	if triggers, err := teststore.ForTeam(t, st, store.DefaultTeam).ListTriggers(context.Background(), store.TriggerFilter{Pipelines: []string{"nightly"}}); err != nil || len(triggers) != 1 {
+	if triggers, err := teststore.Triggers(context.Background(), teststore.ForTeam(t, st, store.DefaultTeam), "nightly"); err != nil || len(triggers) != 1 {
 		t.Errorf("recorded %d runs (%v), want 1", len(triggers), err)
 	}
 }

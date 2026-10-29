@@ -72,11 +72,6 @@ func (f *appFixture) createRun(owner signedIn, runID, repoURL string, repoID int
 	seedSourceRun(f.t, f.store, owner.team, runID, repoURL, key, "refs/heads/main", headSHA, repoID, runspec.DispatchHost, writers...)
 }
 
-func (f *appFixture) runWork(owner signedIn, runID, repoURL string) (auth, prefix string) {
-	bearer, _, prefix := f.claimRunNode(owner, runID, repoURL, 0)
-	return bearer, prefix
-}
-
 func (f *appFixture) nodeClaim(owner signedIn, runID, repoURL string, repoID int64) (auth, prefix string) {
 	_, claim, prefix := f.claimRunNode(owner, runID, repoURL, repoID)
 	return claim, prefix

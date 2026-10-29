@@ -74,34 +74,6 @@ func (f creditsFixture) request(t *testing.T, method, path, token string, body a
 	return w.Code, w.Body.Bytes()
 }
 
-func creditsRequest(t *testing.T, method, url, token string, body any) (int, []byte) {
-	t.Helper()
-	var reader io.Reader
-	if body != nil {
-		buf, err := json.Marshal(body)
-		if err != nil {
-			t.Fatalf("marshal: %v", err)
-		}
-		reader = bytes.NewReader(buf)
-	}
-	req, err := http.NewRequest(method, url, reader)
-	if err != nil {
-		t.Fatalf("request: %v", err)
-	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+token)
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		t.Fatalf("do: %v", err)
-	}
-	defer func() { _ = resp.Body.Close() }()
-	out, err := io.ReadAll(resp.Body)
-	if err != nil {
-		t.Fatalf("read body: %v", err)
-	}
-	return resp.StatusCode, out
-}
-
 func TestCredits_RoutesShowGrantAndHistory(t *testing.T) {
 	if testing.Short() {
 		t.Skip("slow: 0.3s of real work; the fast class runs under -short")

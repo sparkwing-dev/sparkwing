@@ -82,7 +82,7 @@ func TestSecrets_EncryptionRoundTrip(t *testing.T) {
 		if code, body, _ := secretsRequest(t, f, "POST", "/api/v1/secrets", "", map[string]any{"name": name, "value": "supersecret", "repo": "gh:1", "pipeline": "ci", "masked": masked}); code != http.StatusOK {
 			t.Fatalf("write: HTTP %d %s", code, body)
 		}
-		row, err := teststore.ForTeam(t, f.st, store.DefaultTeam).GetSecretRow(name, "gh:1", "ci")
+		row, err := teststore.SecretRow(teststore.ForTeam(t, f.st, store.DefaultTeam), name, "gh:1", "ci")
 		if err != nil || !secrets.IsBound(row.Value) || strings.Contains(row.Value, "supersecret") {
 			t.Fatalf("unsealed or plaintext storage: %v", err)
 		}
@@ -115,7 +115,7 @@ func TestSecrets_SaveWarningAndWriteOnlyAccess(t *testing.T) {
 		if code != http.StatusOK || json.Unmarshal([]byte(body), &response) != nil || response.Warning != wantWarning || !response.Secret.Masked {
 			t.Fatalf("short secret: HTTP %d %s", code, body)
 		}
-		row, err := teststore.ForTeam(t, f.st, store.DefaultTeam).GetSecretRow("TOKEN", "gh:1", "ci")
+		row, err := teststore.SecretRow(teststore.ForTeam(t, f.st, store.DefaultTeam), "TOKEN", "gh:1", "ci")
 		if err != nil || !row.Masked || !secrets.IsBound(row.Value) {
 			t.Fatalf("short secret lost protection: %+v %v", row, err)
 		}
@@ -155,7 +155,7 @@ func checkSecretBindingMutation(t *testing.T, field, private string) {
 	if code, body, _ := secretsRequest(t, f, "POST", "/api/v1/secrets", "", write); code != http.StatusOK {
 		t.Fatalf("write: HTTP %d %s", code, body)
 	}
-	row, err := teststore.ForTeam(t, f.st, store.DefaultTeam).GetSecretRow("TOKEN", repo, scope)
+	row, err := teststore.SecretRow(teststore.ForTeam(t, f.st, store.DefaultTeam), "TOKEN", repo, scope)
 	if err != nil || !secrets.IsBound(row.Value) {
 		t.Fatalf("bound row: %v", err)
 	}
@@ -189,7 +189,7 @@ func checkSecretBindingMutation(t *testing.T, field, private string) {
 	if code != http.StatusInternalServerError || json.Unmarshal([]byte(body), &failure) != nil || failure.Error.Code != apierr.Internal || failure.Error.Message != "request failed" || strings.Contains(body, private) || strings.Contains(f.logs.String(), private) {
 		t.Fatalf("%s relocation: HTTP %d %s", field, code, body)
 	}
-	stored, err := teststore.ForTeam(t, f.st, team).GetSecretRow(edited.Name, edited.Repo, edited.Pipeline)
+	stored, err := teststore.SecretRow(teststore.ForTeam(t, f.st, team), edited.Name, edited.Repo, edited.Pipeline)
 	if err != nil || stored.Value != row.Value || stored.Shared != edited.Shared || stored.Masked != edited.Masked {
 		t.Fatalf("refused read changed the row: %v", err)
 	}
@@ -226,7 +226,7 @@ func TestSecrets_ReadRefusesEnvelopesSealedBeforeTeamBinding(t *testing.T) {
 	if status != http.StatusInternalServerError || strings.Contains(body, "older secret") {
 		t.Fatalf("unbound read: HTTP %d %s", status, body)
 	}
-	row, err := teststore.ForTeam(t, f.st, store.DefaultTeam).GetSecretRow("LEGACY", "", "")
+	row, err := teststore.SecretRow(teststore.ForTeam(t, f.st, store.DefaultTeam), "LEGACY", "", "")
 	if err != nil || row.Value != legacy {
 		t.Fatalf("refused read changed the stored envelope: %v", err)
 	}
@@ -242,7 +242,7 @@ func TestSecrets_PlaintextRowFailsClosedOnceEncrypted(t *testing.T) {
 	if status != http.StatusInternalServerError || json.Unmarshal([]byte(body), &failure) != nil || failure.Error.Code != apierr.Internal || failure.Error.Message != "request failed" || strings.Contains(body, "plain value") || strings.Contains(body, "not sealed") {
 		t.Fatalf("plaintext read: HTTP %d %s", status, body)
 	}
-	row, err := teststore.ForTeam(t, f.st, store.DefaultTeam).GetSecretRow("PREDATES", "", "")
+	row, err := teststore.SecretRow(teststore.ForTeam(t, f.st, store.DefaultTeam), "PREDATES", "", "")
 	if err != nil || row.Value != "plain value" {
 		t.Fatalf("refused read changed the row: %v", err)
 	}
@@ -332,7 +332,7 @@ func TestSecretsMalformedEnvelopeReadsProperty(t *testing.T) {
 			t.Fatal(err)
 		}
 		status, body, _ := secretsRequest(t, f, "GET", "/api/v1/secrets/MALFORMED", "", nil)
-		row, err := teststore.ForTeam(t, f.st, store.DefaultTeam).GetSecretRow("MALFORMED", "", "")
+		row, err := teststore.SecretRow(teststore.ForTeam(t, f.st, store.DefaultTeam), "MALFORMED", "", "")
 		var failure apierr.Envelope
 		return err == nil && row.Value == stored && status == http.StatusInternalServerError && json.Unmarshal([]byte(body), &failure) == nil && failure.Error.Code == apierr.Internal && failure.Error.Message == "request failed" && !strings.Contains(body, private) && !strings.Contains(f.logs.String(), private)
 	}
@@ -385,8 +385,8 @@ func TestSecrets_AssertedRunReadsOnlySharedSecrets(t *testing.T) {
 	}
 }
 
-// `sparkwing secrets set --only-on` failed on every call: the API dropped the
-// pool, so the client's confirmation of it never matched.
+// Secret writes must keep and return the pool restriction, because the client
+// confirms it against the response.
 func TestSecrets_WriteKeepsOnlyOnPool(t *testing.T) {
 	f := newBrowserFixture(t, nil)
 	code, body, _ := secretsRequest(t, f, "POST", "/api/v1/secrets", "", map[string]any{"name": "DEPLOY", "value": "deploy-value", "repo": "gh:1", "pipeline": "ci", "only_on": "prod"})
@@ -394,7 +394,7 @@ func TestSecrets_WriteKeepsOnlyOnPool(t *testing.T) {
 	if code != http.StatusOK || json.Unmarshal([]byte(body), &written) != nil || written.Secret.OnlyOn != "prod" {
 		t.Fatalf("write: HTTP %d %s", code, body)
 	}
-	row, err := teststore.ForTeam(t, f.st, store.DefaultTeam).GetSecretRow("DEPLOY", "gh:1", "ci")
+	row, err := teststore.SecretRow(teststore.ForTeam(t, f.st, store.DefaultTeam), "DEPLOY", "gh:1", "ci")
 	if err != nil || row.OnlyOn != "prod" {
 		t.Fatalf("stored pool: %+v %v", row, err)
 	}

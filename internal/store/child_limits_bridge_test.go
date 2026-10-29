@@ -31,7 +31,7 @@ func childLimitsFixture(t *testing.T, s *Store, children int) time.Time {
 	return now
 }
 
-// TestOnlyChildLimits is D11 and 10#6 in the store's dialect: a child run is bounded
+// TestOnlyChildLimits checks in the store's dialect that a child run is bounded
 // in depth and per root, and spends the hourly budget of whoever created its root
 // rather than escaping every budget.
 func (s *Store) TestOnlyChildLimits(t *testing.T) {

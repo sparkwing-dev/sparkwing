@@ -64,7 +64,7 @@ func sealRow(t *testing.T, c controller.Cipher, st *store.Store, name, value str
 
 func openRow(t *testing.T, c controller.Cipher, st *store.Store, name string) (string, error) {
 	t.Helper()
-	sec, err := teststore.ForTeam(t, st, store.DefaultTeam).GetSecretRow(name, "", "")
+	sec, err := teststore.SecretRow(teststore.ForTeam(t, st, store.DefaultTeam), name, "", "")
 	if err != nil {
 		t.Fatalf("read %s: %v", name, err)
 	}
@@ -98,7 +98,7 @@ func TestKeyring_FirstSealCreatesAPrivateKeyFile(t *testing.T) {
 	if len(entries) != 1 || entries[0].Name() != "secrets.key" {
 		t.Fatalf("temporary key artifacts remain: %v", entries)
 	}
-	sec, _ := teststore.ForTeam(t, st, store.DefaultTeam).GetSecretRow("TOKEN", "", "")
+	sec, _ := teststore.SecretRow(teststore.ForTeam(t, st, store.DefaultTeam), "TOKEN", "", "")
 	if !secrets.IsBound(sec.Value) {
 		t.Errorf("stored value %q is not a sealed envelope", sec.Value)
 	}

@@ -48,8 +48,8 @@ func GitHub(audience string) Config {
 type Claims struct {
 	// Repository is "owner/name" as it was named when the job ran.
 	Repository string
-	// RepositoryID and RepositoryOwnerID survive renames and transfers,
-	// which is why a binding keys on them rather than on the name.
+	// RepositoryID survives renames and transfers; RepositoryOwnerID pins the
+	// owning account, so a transfer invalidates a binding keyed on both.
 	RepositoryID      int64
 	RepositoryOwnerID int64
 	Ref               string

@@ -1,7 +1,6 @@
 package controller
 
 import (
-	"net/http"
 	"path/filepath"
 	"sync"
 	"testing"
@@ -11,12 +10,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
 )
-
-func teapotHandler() http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.WriteHeader(http.StatusTeapot)
-	})
-}
 
 func newStoreForAuth(t *testing.T, opts ...store.Option) *store.Store {
 	t.Helper()

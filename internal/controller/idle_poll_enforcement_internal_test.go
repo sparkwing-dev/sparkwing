@@ -126,11 +126,9 @@ func TestClaimPollAdvice_TwoRunnersOnOneHostAreBothAdmitted(t *testing.T) {
 	}
 }
 
-// TestClaimPollAdvice_AFloodOfRunnerNamesLeavesTheGateUp is the shape one
-// token used to switch enforcement off fleet-wide with. The runner name on
-// this route is the caller's own word, so a caller varying it gets a fresh
-// gate each time; what must not happen is that it takes anybody else's with
-// it, and what stops the flood itself is the per-token budget.
+// The runner name on this route is the caller's own word, so a caller varying
+// it gets a fresh gate each time; it must not disable another runner's gate,
+// and the per-token budget bounds the name churn itself.
 func TestClaimPollAdvice_AFloodOfRunnerNamesLeavesTheGateUp(t *testing.T) {
 	const hostileBudget = 50
 	srv := newAdviceServer(t).

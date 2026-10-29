@@ -547,7 +547,7 @@ func TestCredentialMaintenanceHTTPMissingAdaptersNeverUseLegacyStore(t *testing.
 		if err != nil {
 			t.Fatal(err)
 		}
-		row, err := tenant.GetSecretRow("UNCHANGED", "", "")
+		row, err := teststore.SecretRow(tenant, "UNCHANGED", "", "")
 		if err != nil || row.Value != "original-envelope" {
 			t.Fatalf("legacy fallback changed %s: %+v %v", team, row, err)
 		}
@@ -595,7 +595,7 @@ func TestCredentialMaintenanceHTTPUsesStoreTransactions(t *testing.T) {
 	if err := json.Unmarshal(w.Body.Bytes(), &result); err != nil || result.Rotated != 1 || result.Git != 1 {
 		t.Fatalf("rotation response: %s,%v", w.Body.String(), err)
 	}
-	got, err := tenant.GetSecretRow("TOKEN", "gh:1", "deploy")
+	got, err := teststore.SecretRow(tenant, "TOKEN", "gh:1", "deploy")
 	if err != nil || got.Value == row.Value {
 		t.Fatalf("secret did not rotate: %+v,%v", got, err)
 	}
@@ -616,7 +616,7 @@ func TestCredentialMaintenanceHTTPUsesStoreTransactions(t *testing.T) {
 	if w.Code != http.StatusForbidden {
 		t.Fatalf("demoted rotation: %d %s", w.Code, w.Body.String())
 	}
-	after, err := tenant.GetSecretRow("TOKEN", "gh:1", "deploy")
+	after, err := teststore.SecretRow(tenant, "TOKEN", "gh:1", "deploy")
 	if err != nil || after.Value != got.Value {
 		t.Fatalf("demoted request changed secret: %+v,%v", after, err)
 	}

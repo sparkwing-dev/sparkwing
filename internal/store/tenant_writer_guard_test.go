@@ -15,9 +15,8 @@ const tablesWithNoTeamWriterSize = 2
 
 // A predicate is only as real as the data under it. The scope guard beside
 // this one reads statement text, so it can prove a team predicate exists
-// and never that anything ever wrote the column it reads: three tables
-// carried the key for a full release with no writer that set it, and every
-// guard reading them answered about the default team alone.
+// and never that anything ever wrote the column it reads; a table with no
+// writer that sets the key answers every scoped read about the default team.
 //
 // This is the per-table half. A tenant-owned table needs at least one
 // INSERT in this package that names `team`, or its rows all land on the

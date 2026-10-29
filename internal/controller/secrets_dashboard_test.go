@@ -125,7 +125,7 @@ func TestSecrets_ListOpensAVariablesEnvelope(t *testing.T) {
 		}
 	}
 	for _, name := range []string{"REGION", "TOKEN"} {
-		row, err := teststore.ForTeam(t, f.st, store.DefaultTeam).GetSecretRow(name, "", "")
+		row, err := teststore.SecretRow(teststore.ForTeam(t, f.st, store.DefaultTeam), name, "", "")
 		if err != nil {
 			t.Fatal(err)
 		}

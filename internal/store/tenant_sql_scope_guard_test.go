@@ -37,8 +37,6 @@ var reviewedUnscopedSQL = map[string]string{
 	"(*Operator).discoverDeletionAccountLocks":   "account deletion discovers all memberships that account mutations can update before locking them",
 	"(*Operator).discoverAccountDeletionLocks":   "deleting one deployment account discovers all affected memberships and ledger teams before taking the complete lock set",
 
-	"(*Operator).ListRuns":                  "the operator lists runs across all tenants",
-	"(*Operator).getLatestRun":              "the operator locates the latest pipeline run across tenants",
 	"(*Operator).ComputeUsage":              "deployment capacity sums metered awards from every tenant",
 	"(*Operator).ListWaitingNodes":          "deployment attention samples every tenant queue before updating individual tenant nodes",
 	"(*Operator).MarkBlobTombstones":        "garbage collection compares every tenant blob with the complete live reference graph",
@@ -769,7 +767,7 @@ func looksLikeSQL(s string) bool { return sqlVerbRe.MatchString(s) }
 
 func collapse(s string) string { return strings.Join(strings.Fields(s), " ") }
 
-// The blind spots security pass 3 reproduced with this guard's own matcher.
+// Syntax this guard's matcher cannot judge is refused rather than passed.
 func TestTenantSQLScope_RefusesUnjudgeableSyntax(t *testing.T) {
 	for _, c := range []struct {
 		sql     string

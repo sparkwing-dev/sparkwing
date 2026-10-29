@@ -11,7 +11,8 @@ import (
 // want field for field: every field of its type that want leaves unset,
 // including seLinuxOptions, must be absent. The fields are those of the
 // vendored k8s.io/api, so a field a newer API server adds is unpinned until
-// that dependency moves; only the launcher creates these objects.
+// that dependency moves. The launcher builds every spec these rules judge:
+// capacity Pods directly, Job Pods through the Job controller from its templates.
 func exactly(path string, want any) string {
 	v := reflect.ValueOf(want)
 	if v.IsNil() {

@@ -134,9 +134,10 @@ type TableSize struct {
 	Bytes int64  `json:"bytes"`
 }
 
-// DatabaseSize is a size sample taken off the database itself. It counts the
-// pages a database actually holds, never the free pages a delete left behind,
-// so an alarm clears once retention has removed the rows.
+// DatabaseSize is a size sample taken off the database itself. On SQLite it
+// subtracts the freelist a delete leaves behind; on PostgreSQL it sums
+// pg_total_relation_size, which still counts the reusable space deleted rows
+// leave inside the files, so retention alone may not lower the sample.
 type DatabaseSize struct {
 	TotalBytes int64       `json:"total_bytes"`
 	Tables     []TableSize `json:"tables,omitempty"`

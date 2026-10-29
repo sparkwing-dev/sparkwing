@@ -34,8 +34,8 @@ func (p groupProcess) Terminate(ctx context.Context, grace time.Duration) error 
 	return p.reapLeader(p.Group.Terminate(ctx, grace))
 }
 
-// safety: the group reaps its leader only once every descendant is gone, so
-// a descendant stuck past the cleanup deadline, or a failed session signal,
+// safety: the group reaps its leader only once no other session member
+// remains, so a member stuck past the cleanup deadline, or a failed session signal,
 // would leave the leader running or a zombie. Its pid is still unreaped here,
 // so killing it by pid cannot hit another process.
 func (p groupProcess) reapLeader(err error) error {

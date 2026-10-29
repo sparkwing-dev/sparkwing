@@ -414,22 +414,6 @@ func creditSettingsWrites(up CreditSettingsUpdate) (map[string]string, error) {
 	return writes, nil
 }
 
-// safety: SQLite's immediate transaction already serializes writers. The
-// Postgres advisory lock gives its read-committed transaction the same single
-// settings writer before an operator checks which rate representation owns the
-// price.
-func (s *Store) beginCreditSettingsTx(ctx context.Context) (*storeTx, error) {
-	tx, err := s.beginTx(ctx)
-	if err != nil {
-		return nil, err
-	}
-	if err := advisoryLockTx(ctx, tx, "sparkwing/credit-settings"); err != nil {
-		rollbackOrLog(tx)
-		return nil, err
-	}
-	return tx, nil
-}
-
 func writeCreditSettingsTx(
 	ctx context.Context, tx *storeTx, writes map[string]string,
 ) (CreditSettings, error) {

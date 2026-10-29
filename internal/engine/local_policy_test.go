@@ -94,8 +94,8 @@ func TestLocalPolicyPreservesVerifiedRestrictionsAndRunnerDenial(t *testing.T) {
 	}
 }
 
-// Staging qa.9: a local run pinned to a release published after the cached
-// policy failed as "not listed", though a machine with no cache runs it.
+// A cached policy cannot list a release published after it was fetched, so
+// that release must be admitted as it is on a machine with no cache.
 func TestLocalPolicyAdmitsAReleaseNewerThanTheCache(t *testing.T) {
 	r, transport, key, _, now := fixtureResolver(t)
 	if _, err := r.Index(t.Context(), now); err != nil {

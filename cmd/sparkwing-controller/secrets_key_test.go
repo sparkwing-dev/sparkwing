@@ -81,7 +81,7 @@ func TestConfigureSecrets_SingleTeamSQLiteCreatesItsKeyOnTheFirstSecret(t *testi
 	if err != nil || info.Mode().Perm() != 0o600 {
 		t.Fatalf("key file %s = %v, %v; want one with mode 0600 after the first secret", keyPath, info, err)
 	}
-	row, err := teststore.ForTeam(t, st, store.DefaultTeam).GetSecretRow("TOKEN", "", "")
+	row, err := teststore.SecretRow(teststore.ForTeam(t, st, store.DefaultTeam), "TOKEN", "", "")
 	if err != nil || !secrets.IsBound(row.Value) {
 		t.Fatalf("stored value = %v, %v; want a sealed envelope", row, err)
 	}

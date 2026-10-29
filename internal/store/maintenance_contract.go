@@ -19,16 +19,6 @@ type ReapedUnit struct {
 	Failed      bool
 }
 
-// financialTables identifies records that never take a cascading run foreign key.
-func financialTables() []string {
-	return []string{
-		"credit_grants", "credit_charges", "credit_checkouts", "credit_freezes",
-		"billing_awards", "billable_intervals",
-		"card_refunds", "payment_warnings", "payment_refunds", "payment_setups",
-		"storage_run_usage", "storage_month_usage",
-	}
-}
-
 // RetentionRequest bounds one retention pass; settings are resolved inside the store.
 type RetentionRequest struct {
 	Limit int
@@ -93,14 +83,4 @@ func (t *Tenant) AddUsage(ctx context.Context, delta UsageDelta) error {
 		}
 		return nil
 	})
-}
-
-// ReserveQuota locks one shared team/quota row; log reads are exempt from download quota.
-func (t *Tenant) ReserveQuota(ctx context.Context, quota string, amount int64) (QuotaReservation, error) {
-	return t.reserveQuota(ctx, quota, amount)
-}
-
-// SettleQuota commits actual usage or releases the reservation in one transaction.
-func (t *Tenant) SettleQuota(ctx context.Context, reservationID string, used int64) error {
-	return t.settleQuota(ctx, reservationID, used)
 }

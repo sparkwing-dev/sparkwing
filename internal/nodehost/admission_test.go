@@ -9,8 +9,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
 )
 
-const testBox = "box-1"
-
 type fakeDaemon struct {
 	mu       sync.Mutex
 	changed  chan struct{}

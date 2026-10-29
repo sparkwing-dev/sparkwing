@@ -14,6 +14,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/settings"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
+	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
 )
 
 func controllerPlanFixture(t *testing.T, plan nodeproto.PlanDoc, opts ...store.Option) (*engineFixture, *store.Tenant, http.Handler, string, []byte) {
@@ -89,7 +90,7 @@ func TestPlanSubmissionBodyLimitPreservesCommittedPlan(t *testing.T) {
 
 func TestComputeLimits_PlanInsertionRefusedPastThePerRunCap(t *testing.T) {
 	e, tenant, h, raw, body := controllerPlanFixture(t, nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{{ID: "one", Steps: []nodeproto.StepSpec{{ID: "work"}}}, {ID: "two", Steps: []nodeproto.StepSpec{{ID: "work"}}}}})
-	if _, err := e.Store.AsOperator().SetComputeLimits(t.Context(), map[string]int64{store.ComputeLimitNodesPerRun: 1}); err != nil {
+	if _, err := teststore.Exec(t.Context(), e.Store, `INSERT INTO settings(key,value) VALUES (?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value`, "compute_limit_"+store.ComputeLimitNodesPerRun, []byte("1")); err != nil {
 		t.Fatal(err)
 	}
 	w := engineClaimHTTP(t, h, raw, http.MethodPost, "/api/v1/runs/run/plan", string(body), http.StatusUnprocessableEntity)

@@ -530,12 +530,12 @@ func sameArgs(a, b map[string]string) bool {
 // A locked schedule is left alone entirely: its declaration is what was armed
 // with it, and reading the working tree is exactly what the pin exists to
 // avoid. What the checkout has done since is derived on read instead, and
-// reaches an operator through the lock state in `sparkwing crons list`.
+// reaches an operator through the lock state in `sparkwing schedules list`.
 //
 // refresh only ever republishes rows that already exist. A pipeline that starts
-// declaring a schedule is armed by `sparkwing crons install`, because which
+// declaring a schedule is armed by `sparkwing schedules install`, because which
 // host evaluates a schedule is a decision an operator makes on that host, and a
-// schedule `crons uninstall --name` removed is gone from the store, so nothing here can
+// schedule `schedules uninstall --schedule` removed is gone from the store, so nothing here can
 // bring it back. A row the repository had stopped declaring is different: it is
 // still in the store, so a repository that declares it again republishes it and
 // it fires once more, as long as it follows the checkout.

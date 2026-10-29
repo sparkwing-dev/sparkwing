@@ -44,9 +44,6 @@ const (
 	ComputeLimitCronSeconds = "min_cron_interval_seconds"
 )
 
-// failureComputeLimit is the failure reason on a node a compute guard stopped.
-const failureComputeLimit = "compute_limit"
-
 // ErrComputeLimit is returned when a compute guard refuses work. The refusal
 // is a [ComputeLimitError], which names the cap and what was measured
 // against it.
@@ -195,18 +192,6 @@ func validateComputeLimit(name string, value int64) error {
 		return fmt.Errorf("%w: %s must not be negative", ErrInvalidComputeLimitSetting, name)
 	}
 	return nil
-}
-
-// SetComputeLimits validates and writes every named guard in one transaction.
-// A value of zero removes that ceiling.
-func (o *Operator) SetComputeLimits(ctx context.Context, updates map[string]int64) (_ ComputeLimits, err error) {
-	var out ComputeLimits
-	err = o.s.inTx(ctx, func(tx *storeTx) error {
-		var err error
-		out, err = setComputeLimitsTx(ctx, tx, updates)
-		return err
-	})
-	return out, err
 }
 
 func setComputeLimitsTx(ctx context.Context, tx *storeTx, updates map[string]int64) (ComputeLimits, error) {

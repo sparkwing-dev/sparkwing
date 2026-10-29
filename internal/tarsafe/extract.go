@@ -256,9 +256,10 @@ func refuseSymlinkedAncestors(root *os.Root, rel string) error {
 }
 
 // ExtractIntoRootStaged runs extract into a fresh directory beside name inside
-// parent and renames it over name, so a concurrent reader sees the previous
-// contents or the new ones, never a partial tree, and a failed extraction leaves
-// the previous contents in place. Every step goes through parent, so a symlink
+// parent, moves name aside and renames the stage into place, so a concurrent
+// reader sees the previous contents, the new ones or, briefly, no name at all,
+// never a partial tree, and a failed extraction leaves the previous contents in
+// place. Every step goes through parent, so a symlink
 // on the way cannot move the restore outside it.
 func ExtractIntoRootStaged(parent *os.Root, name, stagePrefix string, extract func(stage *os.Root) error) error {
 	if !filepath.IsLocal(name) {

@@ -183,7 +183,6 @@ func TestMixedResourceETAUsesTheLaterKnownBoundOrUnknown(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			qs, snap := mixedETAState(tc.hostExpected, tc.hostElapsed, tc.semExpected, tc.semElapsed)
-			annotateETA(&qs, snap)
 			annotateSemaphoreETA(&qs, snap)
 			assertETA(t, "ExpectedStartMS", qs.Waiters[0].ExpectedStartMS, tc.wantStart)
 			assertETA(t, "ExpectedClearMS", qs.ExpectedClearMS, tc.wantClear)
@@ -210,7 +209,6 @@ func TestAtomicMultiKeyETAAllowsBackfillWithoutPartialReservation(t *testing.T) 
 			{RequestID: "w2", Admit: 3, Claims: []admission.ClaimState{{Key: "b", Capacity: 1, Cost: 1}}},
 		},
 	}
-	annotateETA(&qs, snap)
 	annotateSemaphoreETA(&qs, snap)
 	assertETA(t, "w1 ExpectedStartMS", qs.Waiters[0].ExpectedStartMS, 10000)
 	assertETA(t, "w2 ExpectedStartMS", qs.Waiters[1].ExpectedStartMS, 0)
@@ -233,7 +231,6 @@ func TestJointETAAllowsHostBackfill(t *testing.T) {
 			{RequestID: "small", Admit: 3, MilliCores: 1000},
 		},
 	}
-	annotateETA(&qs, snap)
 	annotateSemaphoreETA(&qs, snap)
 	assertETA(t, "large ExpectedStartMS", qs.Waiters[0].ExpectedStartMS, 10000)
 	assertETA(t, "small ExpectedStartMS", qs.Waiters[1].ExpectedStartMS, 0)
@@ -273,7 +270,6 @@ func TestJointETAUsesExactLargeResourceBudgets(t *testing.T) {
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			annotateETA(&tc.qs, tc.snap)
 			annotateSemaphoreETA(&tc.qs, tc.snap)
 			assertETA(t, "ExpectedStartMS", tc.qs.Waiters[0].ExpectedStartMS, 7000)
 			assertETA(t, "ExpectedClearMS", tc.qs.ExpectedClearMS, 8000)

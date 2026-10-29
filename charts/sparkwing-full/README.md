@@ -109,12 +109,8 @@ from it before listening. Use the seed to provision the first real deployment
 administrator through operator credential management. That transaction revokes
 the seed and its descendants. After that handoff the seed Secret may be removed.
 A consumed seed left mounted whose digest still matches only logs a warning to
-remove the credential; it no longer stops the controller.
+remove the credential and does not stop the controller.
 
-`controller.requireAuth` and `controller.allowOpenBootstrap` were removed in
-chart 0.3.0. Setting either, including to its old default, fails the render.
-Delete them from values files, or pass `--set controller.requireAuth=null
---set controller.allowOpenBootstrap=null` with `--reuse-values`.
 Create the launcher service credential under the real administrator, with
 `claims.launch`, and store its one-time output in `sparkwing-launcher-token`:
 

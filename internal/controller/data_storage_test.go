@@ -41,9 +41,7 @@ func TestDataStorageCollectionFailureStillResetsZeroRateBilling(t *testing.T) {
 		t.Fatal("fixture has no metering authority")
 	}
 	rate := int64(0)
-	if _, err := st.AsOperator().SetCreditSettings(t.Context(), store.CreditSettingsUpdate{StorageRateMicroPerGBDay: &rate}); err != nil {
-		t.Fatal(err)
-	}
+	teststore.SetCreditSettings(t, st, store.CreditSettingsUpdate{StorageRateMicroPerGBDay: &rate})
 	digest := strings.Repeat("a", 64)
 	if _, err := teststore.SQL(t, st).ExecContext(t.Context(), "INSERT INTO blobs(team,digest,size,created_at) VALUES (?,?,1,?)", store.DefaultTeam, digest, now.UnixNano()); err != nil {
 		t.Fatal(err)

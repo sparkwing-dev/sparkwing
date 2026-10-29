@@ -310,7 +310,7 @@ func TestLogSigningRefusesATeamAtItsStorageLimit(t *testing.T) {
 		t.Fatal(err)
 	}
 	sign(1, 3, http.StatusConflict)
-	if err := tenant.SetStorageQuota(t.Context(), store.StorageQuota{MaxBytesPerRun: 4}); err != nil {
+	if _, err := e.Store.AsOperator().WriteStorageQuota(t.Context(), teststore.OperatorAuthorized(t, e.Store, "a"), store.StorageQuota{MaxBytesPerRun: 4}); err != nil {
 		t.Fatal(err)
 	}
 	refused := sign(2, 1<<20, http.StatusTooManyRequests)

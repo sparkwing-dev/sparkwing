@@ -47,8 +47,7 @@ func TestStoreSQLTrustLiterals(t *testing.T) {
 }
 
 // TestDefaultBranchWorkSQLAgreesWithGo evaluates the SQL rule against every trust
-// class, including a verified delivery on the default branch that is not a push,
-// which the fresh-pod SQL counted while the pool SQL and the Go cache rule did not.
+// class, including a verified delivery on the default branch that is not a push.
 // Intake seals every signed default-branch push as verified-default, so the
 // non-push case is ordinary verified work everywhere.
 func TestDefaultBranchWorkSQLAgreesWithGo(t *testing.T) {

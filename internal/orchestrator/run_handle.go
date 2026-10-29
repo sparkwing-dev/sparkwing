@@ -26,8 +26,8 @@ func NewRunHandle(runID, pipeline, status string) RunHandle {
 	}
 }
 
-// ReserveRunHandle refuses a destination that already exists, so two runs never
-// answer to one handle file.
+// ReserveRunHandle reports an existing handle before intake; publication's hard
+// link arbitrates callers that pass this check at once.
 func ReserveRunHandle(path string) (func(), error) {
 	if _, err := os.Lstat(path); err == nil {
 		return nil, os.ErrExist

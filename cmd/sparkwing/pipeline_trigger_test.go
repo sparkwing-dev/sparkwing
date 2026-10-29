@@ -9,34 +9,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/sparkwing-dev/sparkwing/internal/fssecure"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 )
-
-const triggerTestOrigin = "https://github.com/acme/sample-app.git"
-
-func writeTriggerProfiles(t *testing.T, controllerURL string) {
-	t.Helper()
-	path := filepath.Join(t.TempDir(), "config.yaml")
-	body := "profiles:\n" +
-		"  prod: { controller: { url: " + controllerURL + ", token: swu_test } }\n" +
-		"  laptop: { state: { type: sqlite } }\n"
-	if err := fssecure.WriteFile(path, []byte(body)); err != nil {
-		t.Fatalf("write profiles: %v", err)
-	}
-	t.Setenv("SPARKWING_CONFIG", path)
-}
-
-func writeTriggerProfilesWithLogs(t *testing.T, controllerURL string) {
-	t.Helper()
-	path := filepath.Join(t.TempDir(), "config.yaml")
-	body := "profiles:\n" +
-		"  prod: { controller: { url: " + controllerURL + " } }\n"
-	if err := fssecure.WriteFile(path, []byte(body)); err != nil {
-		t.Fatalf("write profiles: %v", err)
-	}
-	t.Setenv("SPARKWING_CONFIG", path)
-}
 
 func captureStderr(t *testing.T, fn func()) string {
 	t.Helper()
@@ -56,12 +30,6 @@ func captureStderr(t *testing.T, fn func()) string {
 	fn()
 	w.Close()
 	return string(<-done)
-}
-
-func withGitCheckout(t *testing.T, origin string, fn func()) {
-	t.Helper()
-	enterGitCheckout(t, origin)
-	fn()
 }
 
 func enterGitCheckout(t *testing.T, origin string) {
@@ -102,8 +70,8 @@ func enterGitCheckout(t *testing.T, origin string) {
 	})
 }
 
-// Staging qa.8: --runner cloud sealed a runner name no Cloud launcher holds,
-// so the run stayed unclaimed.
+// --runner cloud must select the Cloud claimant class, because no Cloud
+// launcher holds a runner name the run could be sealed to.
 func TestRunnerFlagCloudSelectsTheCloudClass(t *testing.T) {
 	for flag, want := range map[string]runspec.RunnerSelection{
 		"cloud":       {Kind: runspec.RunnerLabel, Value: "class=cloud"},

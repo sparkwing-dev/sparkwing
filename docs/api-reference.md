@@ -91,10 +91,6 @@ The owner names the server lookup. Bindings and current authority constrain ever
 | `GET` | `/api/v1/pipelines` | `controller` | `team` | `capability` | `safe` | `unbound_member_or_local` / `runs.read` / `none` / `credential` |
 | `GET` | `/api/v1/pipelines/{name}/latest` | `controller` | `team` | `capability` | `safe` | `unbound_member_or_local` / `runs.read` / `none` / `credential`<br>`awarded_or_delegated_claim` / `refs.read` / `readSet` / `sensitive` |
 | `GET` | `/api/v1/pipelines/{name}/sizing` | `controller` | `team` | `capability` | `safe` | `unbound_member_or_local` / `runs.read` / `none` / `credential`<br>`awarded_or_delegated_claim` / `source.read` / `pipelineOfBoundRun` / `sensitive` |
-| `PUT` | `/api/v1/pipelines/{name}/sizing/pin` | `controller` | `team` | `capability` | `exact_body` | `awarded_or_delegated_claim` / `node.report` / `pipelineOfBoundRun` / `reporting` |
-| `POST` | `/api/v1/pipelines/{name}/sizing/observations` | `controller` | `team` | `capability` | `exact_body` | `awarded_or_delegated_claim` / `node.report` / `pipelineOfBoundRun` / `reporting` |
-| `POST` | `/api/v1/pipelines/{name}/sizing/contention` | `controller` | `team` | `capability` | `exact_body` | `awarded_or_delegated_claim` / `node.report` / `pipelineOfBoundRun` / `reporting` |
-| `POST` | `/api/v1/pipelines/{name}/sizing/waits` | `controller` | `team` | `capability` | `exact_body` | `awarded_or_delegated_claim` / `node.report` / `pipelineOfBoundRun` / `reporting` |
 | `GET` | `/api/v1/sizing` | `controller` | `team` | `capability` | `safe` | `unbound_member_or_local` / `runs.read` / `none` / `credential` |
 | `GET` | `/api/v1/sizing/explain` | `controller` | `team` | `capability` | `safe` | `unbound_member_or_local` / `runs.read` / `none` / `credential` |
 | `GET` | `/api/v1/runners` | `controller` | `team` | `capability` | `safe` | `unbound_member_or_local` / `runs.read` / `none` / `credential` |

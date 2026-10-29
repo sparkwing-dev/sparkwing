@@ -95,21 +95,6 @@ func (o *Operator) RunTeam(ctx context.Context, runID string) (Team, error) {
 	return Team(team), err
 }
 
-var (
-	tenantTables   = schemaTableNames(schemaTenant)
-	operatorTables = schemaTableNames(schemaOperator)
-)
-
-func schemaTableNames(owner schemaOwner) []string {
-	var names []string
-	for _, table := range schemaTables {
-		if table.Owner == owner {
-			names = append(names, table.Name)
-		}
-	}
-	return names
-}
-
 // safety: a local install starts with an explicit registered team and its authority generation.
 func recordDefaultTeamTx(ctx context.Context, tx *storeTx) error {
 	return registerTeamTx(ctx, tx, DefaultTeam)

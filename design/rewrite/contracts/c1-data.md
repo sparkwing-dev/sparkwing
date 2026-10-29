@@ -1056,6 +1056,8 @@ authority callback and checks identity substitution and revocation after binding
 
 ## Payment mutation transactions
 
+**Superseded by decisions 26, 62 and 65 (2026-10-19 to 2026-10-25):** Cloud billing is prepaid credits with automatic refill; there is no post-pay ladder, card collection, recovery page, pay-now or owner budget, deletion is never refused over money, and Stripe holds all card data. [`docs/billing.md`](../../../docs/billing.md) states the current rules; the text below is retained as history.
+
 Card setup, collection, payment reversal, dispute hold/release, warning and
 refund-queue mutations have transaction-local owners. Their existing Tenant and
 Operator entry points call those owners in a store transaction. Payment receipt
@@ -1428,7 +1430,7 @@ legacy HTTP handler and Doctor's heartbeat-age run finalizer. `TouchNodeHeartbea
 on Store, Tenant and Client is also removed with the node-touch route and
 Kubernetes dispatcher's advisory heartbeat loop. Job claim renewal supplies
 the job's liveness timestamp. Run liveness is
-the current owner lease. `RenewUnit` and `RenewOwner` renew that exact fence.
+the current owner lease. `RenewUnit` renews that exact fence.
 Only the elected `ReapUnits` pass recovers an expired owner. Job renewal never
 extends its run owner's lease. The final C2 owner-heartbeat route remains a
 declaration for W2 to bind to the implemented `EngineController.Renew` adapter.
@@ -1829,9 +1831,8 @@ this tenant method into DataController.ReadBlob.
 local binary execution opt-in. Their raw Store methods are removed. An absent
 row means false. Read errors or invalid stored flags cannot enable trust.
 Enabling trust does not change upload or record provenance. The controller's
-membership checks own who may read or change this policy. W7's
-`blob.CheckBinaryExecution` and W3's execution adapter must enforce the policy
-against the committed binary and digest.
+membership checks own who may read or change this policy. No execution path
+reads it.
 
 `blob.Authority.Upload` contains C2's resolved tagged uploader. W1 rechecks it
 against the exact job/attempt/generation, owner lease or imported terminal
@@ -1994,8 +1995,7 @@ and transfer integrity remain integration obligations.
 
 The `TestReplica` tests use `internal/store/internal/storetest` targets to check usage
 sums, quota races, reservation release, singleton election and download caps
-across independent clients and reopening. Quota setup uses ReserveQuota and
-SettleQuota. The suite's dialect selection applies to these tests.
+across independent clients and reopening. The suite's dialect selection applies to these tests.
 
 LookupRecord, LookupMemo, LookupDepcache, CommitRecord and CopyMemo remain the
 only record owners. W1 integrates receipt/read-set checks, members, unique-byte
@@ -2219,7 +2219,7 @@ Cancellation still takes precedence. A refused seal cannot release or claim work
 
 `Operator.RenewUnit` is the controller adapter for a unit capability and the wire's
 `executing` flag. It derives team, unit, holder and generations from the live
-capability. Trigger and plan renewal share `Tenant.RenewOwner`'s transaction
+capability. Trigger and plan renewal share one owner-renewal transaction
 path. Job renewal shares `Tenant.RenewNodeClaim`'s path. Eval renewal checks its
 own claim, terminal source generation and elected controller generation.
 Bootstrap credentials cannot renew. The first executing renewal records an
@@ -2496,6 +2496,7 @@ is removed. Verified failure and expiry events own those outcomes.
 `CreditGrantRequest` carries no checkout session. Only verified payment
 settlement writes the checkout's paid timestamp and grant association.
 
+**Superseded by decisions 26, 62 and 65 (2026-10-19 to 2026-10-25):** Cloud billing is prepaid credits with automatic refill; there is no post-pay ladder, card collection, recovery page, pay-now or owner budget, deletion is never refused over money, and Stripe holds all card data. [`docs/billing.md`](../../../docs/billing.md) states the current rules; the text below is retained as history.
 `Operator` owns deployment card collection and refund workers: `DueCardCharges`,
 `RecordAttemptIntent`, `SettleCardPayment`,
 `DueCardRefunds`, `MarkCardRefundMade` and `FailCardAttempt`.
@@ -3201,16 +3202,12 @@ The existing `Store`, `Tenant`, `Operator`, `Open`, `ForTeam`, `AsOperator` and
 | `MemoKey` | MemoKey cannot share an unclaimed result across pipelines. |
 | `MemoRecordName` | Names the persisted memo output consistently for writers and exact-key readers. |
 | `ResultRecordKey` | Names output and manifest records for an exact persisted attempt. |
-| `MemoNamespace` | MemoNamespace reserves manual:<ref> for submitter-vouched writes. |
 | `MemoLookup` | MemoLookup uses the authority's server-derived scope and verified default fallback. |
 | `CopyMemoRequest` | CopyMemoRequest creates output and manifest edges atomically with the hit. |
 | `MemoHit` | MemoHit carries digests and authorized edges rather than relying on the source run's survival. |
 | `DepcacheKey` | DepcacheKey shares repo/ref isolation with memo while naming a file cache. |
 | `RestoreSource` | RestoreSource orders own-ref, PR-base and verified-default cache lookups. |
 | `DepcacheLookup` | DepcacheLookup never accepts a caller-selected repo outside its data grant. |
-| `BuildTrust` | BuildTrust preserves the team-owned opt-in for local binary provenance. |
-| `BinaryExecution` | BinaryExecution binds cloud execution to the committed digest and provenance. |
-| `CheckBinaryExecution` | CheckBinaryExecution permits local provenance only with trust_local_builds. |
 | `RemoteCacheOptions` | RemoteCacheOptions uses the user's existing repo-bound read authority. |
 | `RemoteCache` | RemoteCache exposes reads only, with no binary fetch or shared-cache write method. Every returned record must originate in a verified default-branch run. |
 | `OpenRemoteCache` | OpenRemoteCache is opt-in by profile and never borrows a runner credential. |
@@ -3289,8 +3286,6 @@ The existing `Store`, `Tenant`, `Operator`, `Open`, `ForTeam`, `AsOperator` and
 | `UsageDelta` | UsageDelta is additive per replica; summed counters are reports and never admission locks. |
 | `QuotaReservation` | QuotaReservation is backed by the shared team/quota row, preventing two replicas from spending the same capacity. |
 | `Tenant.AddUsage` | AddUsage records accounting under the Tenant with a replica identity, including exact log egress. |
-| `Tenant.ReserveQuota` | ReserveQuota locks one shared team/quota row; log reads are exempt from download quota. |
-| `Tenant.SettleQuota` | SettleQuota commits actual usage or releases the reservation in one transaction. |
 
 ### internal/store/result_metadata.go
 
@@ -3342,7 +3337,6 @@ The existing `Store`, `Tenant`, `Operator`, `Open`, `ForTeam`, `AsOperator` and
 | `Tenant.ReadSnapshot` | ReadSnapshot prevents scheduling from a mix of states observed in different transactions. |
 | `Tenant.ReadStateEvents` | ReadStateEvents resumes strictly after the caller's sequence; state transitions own lifecycle event writes. |
 | `Tenant.ReconcileNode` | ReconcileNode decides and self-claims atomically; WaitHolder callers follow events and reconcile again after requeue. |
-| `Tenant.RenewOwner` | RenewOwner also renews self-claimed jobs and continuously live plan and job concurrency holders atomically. |
 | `Tenant.RenewNodeClaim` | RenewNodeClaim renews the exact live claim and its bound concurrency holders using the store clock. |
 
 ### internal/store/node_state.go
@@ -3569,6 +3563,8 @@ collect possible copied bytes and release every quota dimension.
 
 ## Decision 112 billing cut
 
+**Superseded by decisions 26, 62 and 65 (2026-10-19 to 2026-10-25):** Cloud billing is prepaid credits with automatic refill; there is no post-pay ladder, card collection, recovery page, pay-now or owner budget, deletion is never refused over money, and Stripe holds all card data. [`docs/billing.md`](../../../docs/billing.md) states the current rules; the text below is retained as history.
+
 The billing implementation uses `billing_policy.go` as its ladder and standing
 table. `BillingStanding` carries `Tier`, `CloudVCPU`, `MaxJobDuration` and the
 operator decision. `SpendStanding` keeps the owner budget, balance, current rung
@@ -3590,6 +3586,8 @@ collection releases every decline hold on that team.
 
 
 ## Decision 112 production hosted pages
+
+**Superseded by decisions 26, 62 and 65 (2026-10-19 to 2026-10-25):** Cloud billing is prepaid credits with automatic refill; there is no post-pay ladder, card collection, recovery page, pay-now or owner budget, deletion is never refused over money, and Stripe holds all card data. [`docs/billing.md`](../../../docs/billing.md) states the current rules; the text below is retained as history.
 
 `Tenant` implements C2's `billingWriter` directly. Billing writes lock the team
 and member authority before the ledger, then recheck authority at commit. `billing_pages`
@@ -4262,7 +4260,7 @@ are deleted. Memo result selection remains in the blob/result transactions.
 Coalesced source requests are refused. The remaining cache/leader fields and
 leader-read redaction path are removed with durable admission.
 
-`TestConcurrencyHTTPRejectsRetiredInheritedHolderSelector` replaces the obsolete
+`TestConcurrencyGroupReadsSharedAdmissionAndRetiresSlotRoutes` replaces the obsolete
 inheritance surface tests. Weighted admission, backfill, cancellation, promotion,
 owner-loss continuity and real result materialization retain their tests. The
 native harness still owns PostgreSQL and socket verification.

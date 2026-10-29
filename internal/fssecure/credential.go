@@ -7,8 +7,8 @@ import (
 	"path/filepath"
 )
 
-// OpenPrivateCredential is OpenCredential for a private key, which only its
-// owner may read.
+// OpenPrivateCredential is OpenCredential for a private key: no other user may
+// read it, and group read is admitted only for one of this process's groups.
 func OpenPrivateCredential(directory, name string) (*os.File, error) {
 	file, err := OpenCredential(directory, name)
 	if err != nil {

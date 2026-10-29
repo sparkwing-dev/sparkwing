@@ -10,7 +10,7 @@ import (
 // errDaemonLacksOperation reports a daemon that answered [wingwire.Unsupported]
 // for a message this client sent. The wire surface grows by default, so this
 // means the daemon is older than the operation, not that the operation is
-// wrong: the caller degrades rather than failing the run.
+// wrong; whether to degrade or fail is the caller's choice.
 var errDaemonLacksOperation = errors.New("wingd/client: daemon does not serve this operation")
 
 func daemonLacksOperation(wireType, daemonVersion string) error {

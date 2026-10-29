@@ -441,19 +441,6 @@ func TestReaperSamplesTheOperationalSeries(t *testing.T) {
 
 const claimRoute = "/api/v1/runners/claim"
 
-func claimWithLabels(t *testing.T, base, holder string, labels []string) {
-	t.Helper()
-	body := `{"holder_id":"` + holder + `","lease_secs":60,"labels":["` + strings.Join(labels, `","`) + `"]}`
-	resp, err := http.Post(base+claimRoute, "application/json", strings.NewReader(body))
-	if err != nil {
-		t.Fatalf("claim poll: %v", err)
-	}
-	defer func() { _ = resp.Body.Close() }()
-	if resp.StatusCode != http.StatusNoContent && resp.StatusCode != http.StatusOK {
-		t.Fatalf("claim poll status = %d", resp.StatusCode)
-	}
-}
-
 // safety: read from the collectors the registry serves rather than from the
 // exposition, so a metric that has minted no child yet is still checked.
 func describedMetrics() map[string][]string {

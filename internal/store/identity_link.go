@@ -295,16 +295,6 @@ func lockAccountTx(ctx context.Context, tx *storeTx, accountID string) error {
 	})
 }
 
-func (s *Store) consumeFlowNonce(ctx context.Context, kind, nonce string, expires time.Time) (bool, error) {
-	used := false
-	err := s.inTx(ctx, func(tx *storeTx) error {
-		var err error
-		used, err = consumeFlowNonceTx(ctx, tx, kind, nonce, expires)
-		return err
-	})
-	return err == nil && used, err
-}
-
 func consumeFlowNonceTx(ctx context.Context, tx *storeTx, kind, nonce string, expires time.Time) (bool, error) {
 	if nonce == "" || !expires.After(tx.now(ctx)) {
 		return false, nil

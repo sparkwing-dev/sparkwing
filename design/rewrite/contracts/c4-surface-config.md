@@ -40,7 +40,7 @@ no target flag. Author arguments named target remain opaque after `--`.
 `sparkwing overflow show --profile NAME` reads the authenticated account's
 allowance and current usage. `overflow set --profile NAME` requires exactly
 one of `--minutes N` or `--uncapped`. Zero prevents new Cloud overflow, and
-uncapped removes the saved cap. The existing team tier and billing ladder remain
+uncapped removes the saved cap. Team standing and prepaid credits remain
 in force. Explicit profiles keep this Cloud account setting separate from local
 execution settings.
 
@@ -484,10 +484,11 @@ work and retains authenticated connections for drain. See
 [the transport contract](../../../internal/wingd/LOCAL-TRANSPORT.md) for framing
 and native acceptance requirements.
 
-Every plan/eval/work Cloud Job runs root with privileged DinD, including jobs
-from run-host dispatch. Before a runnable object exists, CloudBoundary must
-reserve exactly one Job on a team-dedicated node and establish enforced default-
-deny egress, allowed destinations, DaemonSet-port inventory and the escape probe.
+Every plan/eval/work Cloud Job runs rootful DinD in a user-namespaced pod, never
+privileged, including jobs from run-host dispatch. Before a runnable object
+exists, CloudBoundary must reserve a team-dedicated node that no other run has
+used (later Jobs of the same run may reuse it) and apply the Cloud job network
+rule. The cluster enforces NetworkPolicy; Sparkwing does not probe it.
 The builder cannot silently fall back to a shared node. DinD is not credential
 isolation. Scratch is fixed at 20 GiB. Bootstrap is an owner-only Secret file,
 source init uses it, and run-node exchanges it once for an in-memory capability.
@@ -526,7 +527,7 @@ check registry integrity, grammar, typed bounds, precedence order and seal phase
 | C4-idle | Each activity hold prevents exit, health probe does not; stay pins; CLI-hosted local and standalone ownership | §2.1 |
 | C4-managed-units | Linux/macOS login/restart; update rewrites __tick + restarts controller; doctor detects drift; uninstall removes service | §2.1, §9.3 |
 | C4-windows | SID refusal/verification and owner DACL; stay/daemon schedules work, login-service install refuses | §5.6 |
-| C4-cloud-pod | All unit kinds root/DinD; no shared-node launch; enforcement probe failure refuses; 20Gi scratch/deadline/Secret teardown | §2.6, §5.4-5.5 |
+| C4-cloud-pod | All unit kinds rootful DinD in a user-namespaced pod; no shared-node launch; no node shared across runs; 20Gi scratch/deadline/Secret teardown | §2.6, §5.4-5.5 |
 | C4-cloud-exchange | Bootstrap source-only then one exchange, immutable row-derived binding, root ancestry; no env/argv credential | §5.1, §5.4 |
 | C4-recovery | Application retry keeps Job/claim; OOM ordinary failure; local orphan fails | §3.3-3.4, §7.6 |
 
@@ -621,9 +622,9 @@ managed services and timers before restart. Schedules survive without reinstall.
 5. **Scratch accounting.** The fixed 20Gi budget is interpreted as aggregate Job
    scratch including DinD storage, not 20Gi per container. Kubernetes enforcement
    must make that true without requiring pipeline opt-in.
-6. **Network evidence.** The design does not supply a destination list or freshness
-   interval for enforcement probes. CloudBoundary requires evidence for the target
-   node/namespace and current policy revision; no invented timeout is added.
+6. **Network enforcement.** The cluster enforces NetworkPolicy and the operator
+   verifies it with external checks; CloudBoundary requires no enforcement
+   evidence.
 
 
 ## Verification
@@ -863,58 +864,14 @@ This document is the new contract report. Existing files changed only for collid
 
 ## W9 runner composition integration amendments
 
-Invariant: a changed canary cannot authorize work, and probe cleanup cannot delete
-a Pod outside the exact namespace, reservation and observed instance UID.
-`FuzzProductionBoundaryRefusesChangedCanary` and
-`FuzzProductionBoundaryCleanupReservationFence` exercise these boundaries.
-
 `cluster.productionLauncher` loads the standard Kubernetes context and composes
-`launcher.NewLauncher` with a `launcher.KubernetesBoundary`; decision 71 removed the runtime network probes. Claim demand uses
+`launcher.NewLauncher` with a `launcher.KubernetesBoundary`. Claim demand uses
 the linker version, plan/eval/node kinds and advertised labels. Physical pod
 ceilings are enforced when the selected catalog allocation is delivered.
-Launcher authority remains confined to the controller transport.
-
-`KubernetesBoundary.StopProbes` is an optional reservation-scoped recovery callback.
-Release calls it after verifying the full node/reservation/namespace fence and
-before requiring container vacancy. It may delete only reservation-owned probe
-Pods and control policies, with UID preconditions. This permits recovery from a
-cancelled or crashed probe without treating an active workload as vacant. Clear
-still runs after vacancy. The production implementation uses the same probe
-cleanup for both callbacks. Workload emptyDir and container-state cleanup belongs
-to Kubernetes after Pod removal. Arbitrary host changes made through privileged
-DinD remain an accepted residual and require node reprovisioning.
-
-The production probe uses a readiness-confirmed listener and a control policy
-allowing ingress plus egress only to the listener. A separate witness Pod must
-connect to that listener before egress-denial evidence can be accepted. Its
-measurement Pod uses exact workload labels, root, privilege and host PID access
-for a node-network escape canary. Both pod and node contexts must reach the
-controller and refuse observed cluster API, DaemonSet TCP and kubelet endpoints.
-DaemonSet UDP ports are inventoried. DNS ports remain available. The policy,
-endpoint and node-reservation projections must stay unchanged through cleanup.
-Every probe and Pod lifetime is bounded by the persisted award deadline.
-
-Only the controller is a known required destination in this composition. Extra
-source/blob/provider destinations, UDP enforcement, native image and CNI behavior,
-and kubelet reclamation require deployment acceptance. These callback tests use
-the Kubernetes API fake and do not establish native cluster security evidence.
-No new flag, environment variable, policy destination configuration or workload
-limit is introduced. The chart grants namespaced Pod create/get/delete and
-NetworkPolicy list/create/delete, and the runner image requires nc and nsenter.
-
-## Runner integration amendment: Cloud endpoint classification
-
-DESIGN: endpoint classification. A required Cloud destination cannot also be
-classified as forbidden. The production boundary refuses a controller endpoint
-that overlaps the Kubernetes API, an inventoried non-DNS DaemonSet endpoint or
-a kubelet endpoint. TCP probes cannot distinguish services sharing one address
-and port, so silently preferring the required class would produce false escape
-proof. The integration lead authorized this rule within the existing Cloud
-boundary contract. It adds no grant, flag or configuration field.
-
-`FuzzProductionBoundaryRefusesConflictingDestinations` varies API, DaemonSet and
-kubelet collisions. Canary admission tests apply standard API readiness defaults
-to a cloned response. The authored probe includes those exact scalar defaults.
+Launcher authority remains confined to the controller transport. Workload
+emptyDir and container-state cleanup belongs to Kubernetes after Pod removal.
+Arbitrary host changes made through rootful DinD remain an accepted residual and
+require node reprovisioning.
 
 ## W9 native QA surface corrections (2026-10-16)
 

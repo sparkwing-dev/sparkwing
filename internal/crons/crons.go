@@ -2,8 +2,8 @@
 // repository declares into armed rows in this home's runs store, and turns one
 // per-minute tick into runs.
 //
-// The package is pure orchestration. Every clock reading arrives through
-// [Service.Now], every launch through a [Launcher] the caller supplies, and
+// The package is pure orchestration. Every tick decision reads the clock
+// through [Service.Now], every launch through a [Launcher] the caller supplies, and
 // every durable fact through [store.Store], so the same code serves the CLI,
 // the dashboard, and a test with a fake clock and a fake launcher.
 //
@@ -208,11 +208,9 @@ type Launcher interface {
 	// returns the run id.
 	Launch(ctx context.Context, s store.CronSchedule, due time.Time) (runID string, err error)
 
-	// Active reports whether the run is still pending or running, after
-	// reconciling runs whose executor died, so a crashed run never suppresses
-	// a schedule forever. A run that has sat unclaimed for longer than
-	// staleAfter is not active either: nothing is going to pick it up, and an
-	// overlap policy of skip would otherwise wedge the schedule for good.
+	// Active reports whether the run is still pending or running as stored.
+	// A run that has sat unclaimed for longer than staleAfter is not active
+	// either: nothing is going to pick it up, and an overlap policy of skip would otherwise wedge the schedule for good.
 	// sched is the schedule that fired the run, whose team owns it.
 	Active(ctx context.Context, sched store.CronSchedule, runID string, staleAfter time.Duration) (bool, error)
 }
