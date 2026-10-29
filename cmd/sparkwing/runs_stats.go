@@ -26,6 +26,7 @@ type pipelineStats struct {
 	Running    int           `json:"running"`
 	SuccessPct float64       `json:"success_pct"`
 	AvgDur     time.Duration `json:"avg_duration_ns"`
+	P50Dur     time.Duration `json:"p50_duration_ns"`
 	P95Dur     time.Duration `json:"p95_duration_ns"`
 }
 
@@ -155,6 +156,7 @@ func aggregateRunDetails(name string, runs []controllerwire.RunDetail) (pipeline
 			remainder %= n
 		}
 		sort.Slice(durations, func(i, j int) bool { return durations[i] < durations[j] })
+		s.P50Dur = durations[(len(durations)-1)/2]
 		s.P95Dur = durations[int(math.Ceil(float64(len(durations))*0.95))-1]
 	}
 	return s, nil
@@ -178,13 +180,13 @@ func writeRunStatistics(out io.Writer, stats []pipelineStats, format string) err
 		return nil
 	}
 	tw := tabwriter.NewWriter(out, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(tw, "PIPELINE\tRUNS\tPASS\tFAIL\tCANCEL\tACTIVE\tSUCCESS\tAVG\tP95")
+	fmt.Fprintln(tw, "PIPELINE\tRUNS\tPASS\tFAIL\tCANCEL\tACTIVE\tSUCCESS\tAVG\tP50\tP95")
 	for _, s := range stats {
 		success := "-"
 		if s.Passed+s.Failed+s.Cancelled > 0 {
 			success = fmt.Sprintf("%.0f%%", s.SuccessPct)
 		}
-		fmt.Fprintf(tw, "%s\t%d\t%d\t%d\t%d\t%d\t%s\t%s\t%s\n", s.Pipeline, s.Runs, s.Passed, s.Failed, s.Cancelled, s.Running, success, fmtDur(s.AvgDur), fmtDur(s.P95Dur))
+		fmt.Fprintf(tw, "%s\t%d\t%d\t%d\t%d\t%d\t%s\t%s\t%s\t%s\n", s.Pipeline, s.Runs, s.Passed, s.Failed, s.Cancelled, s.Running, success, fmtDur(s.AvgDur), fmtDur(s.P50Dur), fmtDur(s.P95Dur))
 	}
 	return tw.Flush()
 }
