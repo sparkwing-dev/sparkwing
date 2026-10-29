@@ -149,10 +149,18 @@ func repoRoot() (string, error) {
 	if d == "" {
 		return "", errors.New("sparkwing.WorkDir() returned empty")
 	}
-	if _, err := os.Stat(filepath.Join(d, ".git")); err != nil {
-		return "", fmt.Errorf("not a git repo at %s: %w", d, err)
+	// safety: go test runs a package from its own directory, so the checkout
+	// root is the nearest ancestor that holds .git, not the working directory.
+	for dir := d; ; {
+		if _, err := os.Stat(filepath.Join(dir, ".git")); err == nil {
+			return dir, nil
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			return "", fmt.Errorf("not a git repo at %s or above it", d)
+		}
+		dir = parent
 	}
-	return d, nil
 }
 
 type resolveVersionJob struct {
