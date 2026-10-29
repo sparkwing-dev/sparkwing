@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
@@ -27,6 +28,8 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/wingd/localcontroller"
 	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
 )
+
+const localAdmissionTimeout = 3 * time.Second
 
 func resolveLocalServices(ctx context.Context) (dashboardServices, error) {
 	p, err := paths.DefaultPaths()
@@ -158,6 +161,10 @@ func bindLocalController(ctx context.Context, b localcontroller.Binding) (_ loca
 	}
 	server.WithLocalSessions(paths.PathsAt(b.Home).SessionLedgerDir())
 	server.WithLocalAdmission(func(ctx context.Context) (wingwire.QueueState, error) {
+		// safety: a daemon can hold its socket and go quiet before or after its hello; the bound answers the
+		// console's poll with the public refusal well before the browser abandons the request at ten seconds.
+		ctx, cancel := context.WithTimeout(ctx, localAdmissionTimeout)
+		defer cancel()
 		state, err := wingdclient.Query(ctx, wingdclient.Options{Home: b.Home, Version: installedVersion()})
 		if errors.Is(err, wingdclient.ErrNoDaemon) {
 			return wingwire.QueueState{}, nil
