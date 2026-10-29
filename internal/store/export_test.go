@@ -44,3 +44,6 @@ func (o *Operator) TestOnlyCreateTeam(ctx context.Context, team Team) error {
 	}
 	return o.s.inTx(ctx, func(tx *storeTx) error { return registerTeamTx(ctx, tx, team) })
 }
+
+// CloudSizeLabelSQL exposes the claim query's size-label rule to the dialect parity test.
+var CloudSizeLabelSQL = cloudSizeLabelSQL

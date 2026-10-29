@@ -151,6 +151,11 @@ var reviewedOperatorTableSQL = map[string]string{
 // predicate reader knows only team, so this table is reviewed here rather than silently skipped.
 // safety: claim search reads every claimable team; this statement binds each row's team from the
 // proof heads the caller passed as one JSON parameter, so the guard cannot see the binding.
+// safety: each entry joins a tenant relation pinned by a key other than team, with the reason that key is safe.
+var reviewedForeignKeyedJoins = map[string]string{
+	"(*Tenant).recordSessionMembershipTx": "a session is keyed by its hash across teams; m.team binds the tenant the row is written for",
+}
+
 var reviewedClaimSearchSQL = map[string]string{
 	"claimProofFactsTx": "joins requirement terms on each proof head's own team and requirements, both bound per head",
 }
@@ -196,6 +201,10 @@ func TestTenantSQLScope_EveryTenantTableStatementCarriesTheKey(t *testing.T) {
 			seen[stmt.key] = true
 			continue
 		}
+		if _, ok := reviewedForeignKeyedJoins[stmt.key]; ok {
+			seen[stmt.key] = true
+			continue
+		}
 		if _, fragment := reviewedClaimSQLFragments[stmt.key]; fragment {
 			seen[stmt.key] = true
 			continue
@@ -217,6 +226,11 @@ func TestTenantSQLScope_EveryTenantTableStatementCarriesTheKey(t *testing.T) {
 	for key, why := range reviewedClaimSQLFragments {
 		if !strings.HasPrefix(key, "(*claimSQL).") || why == "" || !seen[key] {
 			t.Errorf("stale or unexplained claim SQL fragment %s", key)
+		}
+	}
+	for key, why := range reviewedForeignKeyedJoins {
+		if strings.TrimSpace(why) == "" || !seen[key] {
+			t.Errorf("reviewedForeignKeyedJoins entry %q is stale or has no reason; delete it", key)
 		}
 	}
 	for key, why := range reviewedOperatorTableSQL {
@@ -343,6 +357,14 @@ func TestTenantSQLScope_MatcherAcceptsAndRefuses(t *testing.T) {
 		{"outer scoped EXISTS requires its own bound team", `DELETE FROM nodes WHERE EXISTS (SELECT 1 FROM runs r WHERE r.team = ? AND r.id = nodes.run_id)`, false},
 		{"scoped subquery in a SET clause", `UPDATE nodes SET x = (SELECT x FROM runs WHERE team = ? AND id = ?) WHERE run_id = ?`, false},
 		{"outer reading no table", `SELECT (SELECT SUM(amount_micro) FROM credit_grants WHERE team = ?), (SELECT SUM(amount_micro) FROM credit_charges WHERE team = ?)`, true},
+		{"join on a non-team column", `SELECT s.team,s.value FROM runs r JOIN secrets s ON s.pipeline=r.pipeline WHERE r.team=?`, false},
+		{"join bound through team equality", `SELECT s.value FROM runs r JOIN secrets s ON s.team=r.team AND s.pipeline=r.pipeline WHERE r.team=?`, true},
+		{"join bound in WHERE", `SELECT s.value FROM runs r JOIN secrets s ON s.pipeline=r.pipeline WHERE r.team=? AND s.team=?`, true},
+		{"join team named only in the projection", `SELECT s.team FROM runs r JOIN secrets s ON s.pipeline=r.pipeline WHERE r.team=? AND s.team IS NOT NULL`, false},
+		{"join bound in only one alternative", `SELECT s.value FROM runs r JOIN secrets s ON s.pipeline=r.pipeline WHERE r.team=? AND (s.team=r.team OR s.shared=1)`, false},
+		{"comma join", `SELECT s.value FROM runs r, secrets s WHERE r.team=? AND s.pipeline=r.pipeline`, false},
+		{"join inside a subquery", `SELECT id FROM nodes WHERE team=? AND run_id IN (SELECT r.id FROM runs r JOIN secrets s ON s.pipeline=r.pipeline WHERE r.team=?)`, false},
+		{"insert select from a join", `INSERT INTO secrets(team,name) SELECT r.team,s.name FROM runs r JOIN secrets s ON s.pipeline=r.pipeline WHERE r.team=?`, false},
 		{"parenthesis in a literal", `SELECT id FROM runs WHERE team = ? AND note = '(' AND id IN (SELECT run_id FROM nodes WHERE team = ?)`, true},
 	}
 	for _, c := range cases {
@@ -447,10 +469,8 @@ func tenantTablesTouchedBy(sql string) []string {
 	return out
 }
 
-// safety: reads one statement's text, so a statement joining two tenant
-// tables passes on a single predicate; this is the guard's floor, not a
-// proof that every table in the statement is scoped. A subquery is judged
-// on its own by unscopedSubqueries.
+// safety: every tenant relation a query names must be pinned to the tenant by a WHERE or ON predicate, directly or
+// by equality with one already pinned; a comparison in a projection pins nothing. Subqueries are judged on their own.
 func statementCarriesTeam(sql string) bool {
 	return scopeBound(scopeTokens(sql), nil)
 }

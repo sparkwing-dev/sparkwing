@@ -142,7 +142,7 @@ func TestControllerEgressConcurrencyUsesCanonicalError(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer release()
-	r := httptest.NewRequest("GET", "/logs", nil)
+	r := httptest.NewRequest(http.MethodGet, "/logs", nil)
 	w := httptest.NewRecorder()
 	called := false
 	s.meterResponse(w, r, egress.ClassLog, egress.SlotDownload, http.HandlerFunc(func(http.ResponseWriter, *http.Request) { called = true }), "a/account", "a")

@@ -13,7 +13,7 @@ func healthProfile(url string) *namedProfile {
 func mockControllerHealth(t *testing.T, authField string) {
 	t.Helper()
 	profileHTTPFixture(t, func(req *http.Request) (int, string) {
-		if req.Method != "GET" || req.URL.Path != "/api/v1/health" || req.Header.Get("Authorization") != "" {
+		if req.Method != http.MethodGet || req.URL.Path != "/api/v1/health" || req.Header.Get("Authorization") != "" {
 			t.Fatalf("health request: %s %s", req.Method, req.URL)
 		}
 		return 200, `{"status":"ok","auth":"` + authField + `"}`

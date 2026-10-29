@@ -91,7 +91,7 @@ func TestDataRecordClientVerifiedDefaultSelection(t *testing.T) {
 			if r.Header.Get("Authorization") != "" || r.Header.Get("Cookie") != "" {
 				t.Fatal("profile credential reached object storage")
 			}
-			return &http.Response{StatusCode: 200, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(body))}, nil
+			return &http.Response{StatusCode: http.StatusOK, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(body))}, nil
 		}
 		w := httptest.NewRecorder()
 		h.ServeHTTP(w, r)

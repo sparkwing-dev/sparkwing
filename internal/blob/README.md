@@ -216,8 +216,8 @@ The S3 backend opens exact log keys and refuses objects beyond the shared
 segment or manifest size bound. The committed reader verifies each persisted
 segment before sending bytes. Missing or corrupt objects remain read failures.
 
-`S3.LogClassReady` checks the bucket's lifecycle configuration for the batch
-signer's callback. It requires an enabled prefix rule expiring the class after
+`S3.LogClassReady` checks the bucket's lifecycle configuration once per class
+at controller startup, which only warns. It requires an enabled prefix rule expiring the class after
 at least its days. Sparkwing's maintenance pass deletes each log object at the
 class age (`DeleteLogObject`), so the rule is a backstop and should be longer.
 Rules limited by tags or object size cannot establish expiry for the whole

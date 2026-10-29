@@ -70,6 +70,9 @@ pipelines:
   - name: build-images
     entrypoint: BuildImages
 
+  - name: publish-images
+    entrypoint: PublishImages
+
   - name: k8s-e2e
     entrypoint: KubernetesE2E
 

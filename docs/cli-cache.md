@@ -49,8 +49,8 @@ Print cache dir, size, ceilings, and recent entries
 | `-C, --checkout PATH` | Resolve the project from this local checkout path. |
 | `-h, --help` | Show command help without executing. |
 | `--help-all` | Include uncommon flags in command help. |
-| `--all-entries` | all entries |
-| `--docs` | docs |
+| `--all-entries` | List every managed cache entry with all owning checkouts instead of the 10 most recently used. |
+| `--docs` | Report on the downloaded web docs cache instead of the pipeline binary cache; other flags are ignored. |
 
 ## `sparkwing cache prune`
 
@@ -64,10 +64,10 @@ Prune oldest cached binaries down to the ceilings
 | `-C, --checkout PATH` | Resolve the project from this local checkout path. |
 | `-h, --help` | Show command help without executing. |
 | `--help-all` | Include uncommon flags in command help. |
-| `--max-bytes SIZE` | max bytes |
-| `--max-entries N` | max entries |
-| `--all-entries` | all entries |
-| `--docs` | docs |
+| `--max-bytes SIZE` | Remove least recently used entries until the binary cache is at most this size, overriding the configured ceiling; zero means no size limit. |
+| `--max-entries N` | Remove least recently used entries until the binary cache holds at most this many, overriding the configured ceiling; zero means no entry limit. |
+| `--all-entries` | Remove every binary cache entry that is not in use, ignoring the size and entry ceilings. |
+| `--docs` | Clear the downloaded web docs cache instead of pruning the binary cache; the size and entry flags are ignored. |
 
 ## `sparkwing cache warm`
 
@@ -85,4 +85,4 @@ Go preparation uses the filtered install environment and masks compiler diagnost
 | `-C, --checkout PATH` | Resolve the project from this local checkout path. |
 | `-h, --help` | Show command help without executing. |
 | `--help-all` | Include uncommon flags in command help. |
-| `--clear-cache` | clear cache |
+| `--clear-cache` | Remove every unused pipeline binary cache entry on this machine before building, so the build starts cold. |

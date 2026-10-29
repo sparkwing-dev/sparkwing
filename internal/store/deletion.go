@@ -809,6 +809,9 @@ func (op *Operator) grantCreatorTeamsTx(ctx context.Context, tx *storeTx, name s
 // deployment's sender to flood an inbox.
 const MaxInvitationEmailsPerDay = 5
 
+// safety: a send counts toward the cap for this window, and the retention pass drops each log row after it.
+const invitationEmailWindow = 24 * time.Hour
+
 // ClaimInvitationEmail records that an invitation is about to be mailed, and
 // reports false instead when its address has already been mailed
 // [MaxInvitationEmailsPerDay] times in the last 24 hours, counting every
@@ -837,11 +840,7 @@ func (o *Operator) ClaimInvitationEmail(ctx context.Context, invitationID string
 		}
 	}
 	at := tx.now(ctx).UTC().UnixNano()
-	since := tx.now(ctx).Add(-24 * time.Hour).UnixNano()
-	if _, err := tx.execContext(ctx,
-		`DELETE FROM invitation_email_log WHERE address = ? AND sent_at <= ?`, address, since); err != nil {
-		return false, err
-	}
+	since := tx.now(ctx).Add(-invitationEmailWindow).UnixNano()
 	var sent int
 	if err := tx.QueryRowContext(ctx,
 		`SELECT COUNT(*) FROM invitation_email_log WHERE address = ? AND sent_at > ?`, address, since).Scan(&sent); err != nil {

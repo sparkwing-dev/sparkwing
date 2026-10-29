@@ -74,9 +74,9 @@ func TestRevocationPathsEmitIdentifyingAuditLines(t *testing.T) {
 			}
 			logs.Reset()
 			if path == "browser-logout" {
-				endpoint, status = "/logout", http.StatusSeeOther
+				status = http.StatusSeeOther
 				s.WithDashboard(Dashboard{})
-				req := httptest.NewRequest("POST", "https://controller.test/logout", strings.NewReader(url.Values{"csrf_token": {csrf}}.Encode()))
+				req := httptest.NewRequest(http.MethodPost, "https://controller.test/logout", strings.NewReader(url.Values{"csrf_token": {csrf}}.Encode()))
 				req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 				req.Header.Set("Origin", "https://controller.test")
 				req.AddCookie(&http.Cookie{Name: cookieName(sessionCookieName, s.cookiesSecure()), Value: raw})
@@ -122,7 +122,7 @@ func TestAuditRejectsCredentialRequestIDsAndUncommittedRunnerTargets(t *testing.
 		t.Run(prefix, func(t *testing.T) {
 			logs.Reset()
 			credential := prefix + strings.Repeat("x", 43)
-			req := httptest.NewRequest("DELETE", "https://controller.test/api/v1/runners/"+credential, nil)
+			req := httptest.NewRequest(http.MethodDelete, "https://controller.test/api/v1/runners/"+credential, nil)
 			req.Header.Set(RequestIDHeader, credential)
 			req.Header.Set("Origin", "https://controller.test")
 			req.Header.Set(csrfHeaderName, csrf)
@@ -189,7 +189,7 @@ func TestSessionRevocationAuditIdentifiesOnlyTheEndedSession(t *testing.T) {
 					}
 				})
 				logs = output
-				req := httptest.NewRequest("POST", "https://controller.test/login", nil)
+				req := httptest.NewRequest(http.MethodPost, "https://controller.test/login", nil)
 				req.AddCookie(&http.Cookie{Name: cookieName(sessionCookieName, s.cookiesSecure()), Value: prior})
 				handler.ServeHTTP(httptest.NewRecorder(), req)
 			}

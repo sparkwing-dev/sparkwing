@@ -212,3 +212,32 @@ func TestThePushTierRepeatsNothingTheCommitTierAlreadyRan(t *testing.T) {
 		}
 	}
 }
+
+func TestTouchedStepsPassAPackageOnlyTheQATrustFlavourBuilds(t *testing.T) {
+	root := gateFixtureRepo(t)
+	gitCommitAll(t, root, "clean base")
+	runTestGit(t, root, "update-ref", "refs/remotes/origin/main", "HEAD")
+
+	writeGoFile(t, filepath.Join(root, "qaonly", "main.go"),
+		"//go:build qatrust\n\npackage main\n\nfunc main() {}\n")
+	writeGoFile(t, filepath.Join(root, "qaonly", "main_test.go"),
+		"//go:build qatrust\n\npackage main\n")
+	gitCommitAll(t, root, "a command that builds only with the qatrust tag")
+
+	if err := runBuildTouched(context.Background()); err != nil {
+		t.Errorf("build-touched refused a package the default build excludes: %v", err)
+	}
+	if err := runVetTouched(context.Background()); err != nil {
+		t.Errorf("vet-touched refused a package the default build excludes: %v", err)
+	}
+	requireGolangciLint(t)
+	if err := runFastLintTouched(context.Background()); err != nil {
+		t.Errorf("lint-touched refused a package the default build excludes: %v", err)
+	}
+}
+
+func TestFastLintTimeoutOutlastsAColdCache(t *testing.T) {
+	if got := fastLintCommand(3, []string{"./internal/x"}); !strings.Contains(got, " --timeout 5m ") {
+		t.Errorf("fast lint command = %q, want a five-minute timeout", got)
+	}
+}

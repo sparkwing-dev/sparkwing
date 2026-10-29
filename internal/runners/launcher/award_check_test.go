@@ -352,3 +352,39 @@ func TestUpgradedImagesFailUnstartedJobWithoutRetiringItsNode(t *testing.T) {
 		})
 	}
 }
+
+// Once a Job's Pod is checked, later passes only look for a replacement Pod,
+// so they read the API server's cache instead of making a quorum read.
+func TestACheckedJobIsListedFromTheCache(t *testing.T) {
+	l, p := requestedPod(t)
+	if _, err := l.LaunchOne(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	kube := l.Kube.(*fake.Clientset)
+	if _, err := kube.CoreV1().Pods("cloud").Create(t.Context(), p, metav1.CreateOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	if err := l.Sync(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	kube.ClearActions()
+	for range 3 {
+		if err := l.Sync(t.Context()); err != nil {
+			t.Fatal(err)
+		}
+	}
+	listed := 0
+	for _, action := range kube.Actions() {
+		list, ok := action.(ktesting.ListActionImpl)
+		if !ok || action.GetResource().Resource != "pods" || !strings.HasPrefix(list.GetListRestrictions().Labels.String(), JobLabel+"=") {
+			continue
+		}
+		listed++
+		if rv := list.ListOptions.ResourceVersion; rv != "0" {
+			t.Fatalf("a checked Job's Pods were listed with a quorum read (resourceVersion %q)", rv)
+		}
+	}
+	if listed == 0 {
+		t.Fatal("later passes stopped looking for a replacement Pod")
+	}
+}

@@ -25,7 +25,7 @@ func TestRefundReportingRejectsTeamOwnerAndRunner(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	controller.PaidCreditsFixture(t, f.store, tenant, 500)
+	controller.PaidCreditsFixture(t, f.store, tenant, 1_000)
 	balance, err := tenant.CreditBalanceMicro(ctx)
 	if err != nil {
 		t.Fatal(err)

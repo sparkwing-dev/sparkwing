@@ -83,7 +83,6 @@ func replayDialectTrace(t *testing.T, target *storetest.Target, commands []diale
 	s := target.Open(t, store.WithPolicies(sealStorePolicies))
 	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 	s.SetTestClock(t, func() time.Time { return now })
-	started := now
 	// A named owner award seeds the lifecycle; queue selection has its own reference model.
 	tenant, plan, err := storePlanSealRequestFor(t.Context(), s, string(acceptanceTeam), true, func(_ *store.IntakeRequest, doc *nodeproto.PlanDoc) {
 		doc.Concurrency = []nodeproto.ConcurrencySpec{admissionGroup(1, 1)}
@@ -163,8 +162,9 @@ func replayDialectTrace(t *testing.T, target *storetest.Target, commands []diale
 		case "renew":
 			result.Beat, commandErr = s.AsOperator().RenewUnit(t.Context(), plan.Actor.CapabilityPrefix, true)
 			if commandErr == nil {
-				// The host minimum is sixty seconds; renewal funds another sixty-second slice.
-				want := started.Add(120 * time.Second)
+				// Compute starts at this renewal, which funds one sixty-second slice past it; the admitted slice already
+				// covers the sixty-second host minimum.
+				want := now.Add(60 * time.Second)
 				var deadline int64
 				if err := s.DB().QueryRowContext(t.Context(), `SELECT lease_expires_at FROM triggers`).Scan(&deadline); err != nil {
 					t.Fatal(err)

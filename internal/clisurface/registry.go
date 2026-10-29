@@ -419,7 +419,7 @@ func Registry() []Command {
 			{Name: "sw-run-handle-file", Argument: "PATH"},
 		}},
 		{Path: "sparkwing runners", Flags: []Flag{}},
-		{Path: "sparkwing runners add", Authority: teamCredential, Rules: []string{"Shared runner registration requires team administration. --personal registers capacity for only your runs and requires --session-stdin with an existing independent account session. Members may enroll personal machines when the team's members_can_add_machines setting is true (the default). When false, enrollment requires team administration. Turning it off ends personal machines that members without administration enrolled, and turning it back on does not revive them. The session and its CSRF proof stay in memory. --reserved-for requires team-admin runner registration support. --trust sets which runs a shared runner takes (verified-default or any); unset, a runner holding a pool with a reserved secret takes only verified default-branch pushes. --launcher enrolls only claims.launch for a shared reserved pool and skips the persistent runner service. Verified-default pools and pools holding reserved secrets require launcher credentials, including with --trust=any. --repos accepts repeatable, comma-separated patterns. A runner serving several repositories lets a job from one act as the runner and claim another repository's jobs in the team, with their secrets; scope --repos to one repository, or to repositories that trust each other, to isolate them. JSON reports personal scope, credential metadata and service state without the bearer. Plain emits the runner name."}, Flags: []Flag{
+		{Path: "sparkwing runners add", Authority: teamCredential, Rules: []string{"Shared runner registration requires team administration. --personal registers capacity for only your runs and requires --session-stdin with an existing independent account session. Members may enroll personal machines when the team's members_can_add_machines setting is true (the default). When false, enrollment requires team administration. Turning it off ends personal machines that members without administration enrolled, and turning it back on does not revive them. The session and its CSRF proof stay in memory. --reserved-for requires team-admin runner registration support. --trust sets which runs a shared runner takes (verified-default or any); unset, a launcher holding a pool with a reserved secret takes only verified default-branch work, including unmodified admin-armed default-branch schedules. --launcher enrolls only claims.launch for a shared reserved pool and skips the persistent runner service. Verified-default pools and pools holding reserved secrets require launcher credentials, including with --trust=any. --repos accepts repeatable, comma-separated patterns. A runner serving several repositories lets a job from one act as the runner and claim another repository's jobs in the team, with their secrets; scope --repos to one repository, or to repositories that trust each other, to isolate them. JSON reports personal scope, credential metadata and service state without the bearer. Plain emits the runner name."}, Flags: []Flag{
 			{Name: "runner", Argument: "RUNNER", Required: true},
 			{Name: "personal", Meaning: "Offer this machine only to your runs, including Cloud overflow."},
 			{Name: "session-stdin", Meaning: "Read an existing independent account session from stdin without saving it; required with --personal."},
@@ -515,7 +515,7 @@ func Registry() []Command {
 			"Read runs through the selected controller. Filters apply before pagination. Runs are ordered by descending team number. --since accepts days and weeks, such as 7d or 2w.",
 			"JSON emits compact run records and a page record with next_cursor and truncated. Quiet JSON emits id records and sends continuation metadata to stderr. Plain emits run IDs.",
 			"--by-pipeline totals every matching page and retains the newest --sparkline statuses. --group-by run|job|step requires --status failed and groups the selected page.",
-			"--wait blocks until a matching run appears. --follow reads every newer matching run between polls. Grouped follow output describes each new batch. Interrupted or timed-out waits exit 3.",
+			"--wait blocks until a matching run appears. --follow reads every newer matching run between polls. Grouped follow output describes each new batch. Interrupted or timed-out waits exit 3. A refused read (not found, unauthenticated or forbidden) exits 4, which retrying cannot change.",
 		}, Flags: []Flag{
 			{Name: "pipeline", Argument: "NAME"},
 			{Name: "status", Argument: "STATUS"},
@@ -544,7 +544,7 @@ func Registry() []Command {
 		}},
 		{Path: "sparkwing runs logs", Rules: []string{
 			"Read job-attempt and trigger, plan or eval logs through the controller. --job selects a job. --tree includes descendants. --events-only and --no-events select lifecycle events or output.",
-			"--follow consumes every available page, then waits for new records until final log segments are complete. An incomplete or interrupted observation exits 3.",
+			"--follow consumes every available page, then waits for new records until final log segments are complete. An incomplete or interrupted observation exits 3. A run that does not exist or that the credential cannot read exits 4; stop polling on 4.",
 			"JSON emits tagged log records. Plain emits log lines. Use --grep without --run to search across runs with the same filters and pagination as runs grep.",
 		}, Flags: []Flag{
 			{Name: "run", Argument: "RUN_ID"},
@@ -604,7 +604,7 @@ func Registry() []Command {
 		{Path: "sparkwing runs status", Rules: []string{
 			"Read the same public run detail through a controller profile or the local controller. Numeric run selectors are per-team numbers.",
 			"Views: summary, timeline, receipt, errors, tree. Summary includes recorded failing steps and errors for failed jobs. --steps includes all recorded steps. Receipts retain the controller's hashes and settled cost.",
-			"--follow streams observations until the run ends. Exit 0 means success, 1 means a failed or cancelled run, 2 means invalid usage, and 3 means the observation is incomplete. --exit-zero suppresses terminal failure only.",
+			"--follow streams observations until the run ends. Exit 0 means success, 1 means a failed or cancelled run, 2 means invalid usage, 3 means the observation is incomplete and may be retried, and 4 means the run does not exist or the credential cannot read it, so polling again will not help. --exit-zero suppresses terminal failure only.",
 			"JSON preserves run details and notices: one document per observation, so --follow and the errors view (one record per failed job) are NDJSON. The exit code carries the outcome, and no error document follows the observation. Plain summary prints the run status, every job's status and outcome, and failure details. Errors prints failed job IDs, tree prints run IDs, and receipt prints the receipt hash. --steps adds recorded steps to summary and tree output.",
 		}, Flags: []Flag{
 			{Name: "run", Argument: "RUN_ID", Required: true},
@@ -701,7 +701,7 @@ func Registry() []Command {
 			{Name: "only-on", Argument: "POOL"},
 		}},
 		{Path: "sparkwing tokens", Flags: []Flag{}},
-		{Path: "sparkwing tokens create", Authority: teamCredential, Rules: []string{"Create a member credential through the team token route. Enroll runners with runners add. The controller derives authority and metering. JSON includes the new bearer and metadata; plain emits the bearer once. Member tokens expire within 90 days and end with their minting session. team.admin requires --allow-team-admin and expires within 30 days."}, Flags: []Flag{
+		{Path: "sparkwing tokens create", Authority: teamCredential, Rules: []string{"Create a member credential through the team token route. Enroll runners with runners add. The controller derives authority and metering. JSON includes the new bearer and metadata; plain emits the bearer once. A token minted with a profile token is delegated from it: it gets at most the minting token's scopes, including team.admin, and never outlives it."}, Flags: []Flag{
 			{Name: "type", Argument: "KIND", Values: []string{"member"}},
 			{Name: "principal", Argument: "NAME"},
 			{Name: "scope", Argument: "SCOPE", Repeatable: true, CommaList: true},
@@ -759,15 +759,16 @@ func Registry() []Command {
 			{Name: "metrics-addr", Argument: "VALUE"},
 			{Name: "dashboard-url", Argument: "VALUE"},
 			{Name: "billing-url", Argument: "VALUE"},
-			{Name: "operator-account", Argument: "VALUE", Repeatable: true, CommaList: true},
+			{Name: "operator-accounts", Argument: "VALUE", Repeatable: true, CommaList: true},
 			{Name: "external-url", Argument: "VALUE"},
 			{Name: "oidc-token-ttl", Argument: "DURATION"},
 			{Name: "trusted-proxy-addr", Argument: "VALUE"},
-			{Name: "live-log-job-kb", Argument: "N"},
+			{Name: "trusted-proxy-cidrs", Argument: "VALUE"},
+			{Name: "live-log-node-kb", Argument: "N"},
 			{Name: "live-log-total-mb", Argument: "N"},
-			{Name: "live-log-max-jobs", Argument: "N"},
+			{Name: "live-log-max-nodes", Argument: "N"},
 			{Name: "live-log-idle", Argument: "DURATION"},
-			{Name: "prefers", Argument: "VALUE", Repeatable: true, CommaList: true},
+			{Name: "default-prefer-labels", Argument: "VALUE", Repeatable: true, CommaList: true},
 			{Name: "placement-hold", Argument: "DURATION"},
 			{Name: "placement-liveness", Argument: "DURATION"},
 			{Name: "max-runs-per-principal-hour", Argument: "N"},
@@ -781,7 +782,7 @@ func Registry() []Command {
 			{Name: "warn-bucket-bytes", Argument: "N"},
 			{Name: "warn-bucket-objects", Argument: "N"},
 			{Name: "bucket-store", Argument: "VALUE"},
-			{Name: "blob-store", Argument: "VALUE"},
+			{Name: "cache-blob-store", Argument: "VALUE"},
 			{Name: "log-retention", Argument: "VALUE"},
 			{Name: "team-daily-download-free-bytes", Argument: "N"},
 			{Name: "team-daily-download-funded-bytes", Argument: "N"},
@@ -795,7 +796,7 @@ func Registry() []Command {
 			{Name: "github-app-slug", Argument: "VALUE"},
 			{Name: "cloudfront-domain", Argument: "VALUE"},
 			{Name: "cloudfront-key-pair-id", Argument: "VALUE"},
-			{Name: "oauth-redirect-uri", Argument: "VALUE", Repeatable: true, CommaList: true},
+			{Name: "oauth-redirect-uris", Argument: "VALUE", Repeatable: true, CommaList: true},
 			{Name: "signup-gate", Argument: "VALUE"},
 			{Name: "hsts"},
 			{Name: "insecure-cookies"},

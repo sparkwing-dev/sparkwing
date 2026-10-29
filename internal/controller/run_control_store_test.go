@@ -2,6 +2,7 @@ package controller
 
 import (
 	"encoding/json"
+	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
@@ -27,7 +28,7 @@ func TestRunControlHTTPUsesStoreTransactions(t *testing.T) {
 	engineSQL(t, s.store, `INSERT INTO approvals(team,run_id,node_id,requested_at) VALUES ('a','run','gate',?)`, time.Now().UnixNano())
 	request := func(path, body, key string, status int) *httptest.ResponseRecorder {
 		t.Helper()
-		r := httptest.NewRequest("POST", path, strings.NewReader(body))
+		r := httptest.NewRequest(http.MethodPost, path, strings.NewReader(body))
 		r.Header.Set("Authorization", "Bearer "+token.Capability)
 		r.Header.Set("Content-Type", "application/json")
 		r.Header.Set("Idempotency-Key", key)

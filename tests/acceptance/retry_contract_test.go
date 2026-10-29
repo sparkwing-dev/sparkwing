@@ -24,7 +24,7 @@ func TestRetrySelectionContract(t *testing.T) {
 				calls := 0
 				c, err := client.NewEngineClient(client.EngineOptions{URL: endpoint, HTTP: &http.Client{Transport: surfaceTransport(func(req *http.Request) (*http.Response, error) {
 					calls++
-					if req.Method != "POST" || req.URL.Path != "/api/v1/runs/412/retry" || req.URL.RawQuery != "" || req.Header.Get("Idempotency-Key") != "retry-selection" || req.Header.Get("Authorization") != "Bearer member-authority" {
+					if req.Method != http.MethodPost || req.URL.Path != "/api/v1/runs/412/retry" || req.URL.RawQuery != "" || req.Header.Get("Idempotency-Key") != "retry-selection" || req.Header.Get("Authorization") != "Bearer member-authority" {
 						t.Fatalf("wrong retry request: %s %s", req.Method, req.URL)
 					}
 					var body map[string]json.RawMessage

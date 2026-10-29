@@ -18,10 +18,10 @@ func searchRunLogs(ctx context.Context, inv clisurface.Invocation, reader contro
 	}
 	page, err := reader.SearchLogs(ctx, query)
 	if err != nil {
-		return exitError(3, err)
+		return err
 	}
 	if err := page.Validate(query.Runs.Cursor); err != nil {
-		return exitError(3, invalidObservation(err.Error()))
+		return invalidObservation(err.Error())
 	}
 	format := runLogOutput(inv)
 	if len(page.Matches) == 0 && format == "pretty" && !inv.Bool("quiet") {

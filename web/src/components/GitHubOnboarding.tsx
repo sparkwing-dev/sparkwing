@@ -83,7 +83,10 @@ export default function GitHubOnboarding({ repositories, canManage, teamSlug }: 
             {pipeline.manual_override && <p className="text-[var(--warning)]">Manual subscription controls this pipeline. Remove it below to use repository declarations.</p>}
           </li>)}
         </ul>
-        <p className="text-xs text-[var(--muted)]">Branch patterns use Go path.Match: * does not cross /. Fork pull requests do not run. Invalid or unsupported configuration stops declaration-based dispatch.</p>
+        {preview.skipped.length > 0 && <ul className="space-y-2">
+          {preview.skipped.map((skip) => <li key={skip.pipeline} className="break-words text-[var(--warning)]">Skipped {skip.pipeline}: {skip.error}</li>)}
+        </ul>}
+        <p className="text-xs text-[var(--muted)]">Branch patterns use Go path.Match: * does not cross /. Fork pull requests do not run. A pipeline with an unsupported declaration is skipped; invalid configuration stops declaration-based dispatch.</p>
         <p role="status">Repository automation: {preview.enabled ? "enabled" : "not enabled"}</p>
         <label className="block">Runs on
           <select className="mt-2 block min-h-11 w-full rounded-[var(--radius-control)] border border-[var(--border)] bg-[var(--surface)] p-2 focus-visible:ring-2 focus-visible:ring-[var(--accent)]" value={runner} disabled={busy || !canManage} onChange={(event) => {

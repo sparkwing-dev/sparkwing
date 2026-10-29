@@ -235,6 +235,23 @@ func TestMetrics_BucketCeilingIsExported(t *testing.T) {
 	}
 }
 
+// With no ceiling or warning mark the bucket is never measured, so its
+// process-local count is not published as the bucket's size.
+func TestMetrics_AnUnmeasuredBucketPublishesNoTotals(t *testing.T) {
+	h := newMetricsHTTPHandler(t, capability.OperatorLimits)
+	freezeBucket(t, objectguard.CeilingLimit{}, 4096, 12)
+
+	body := metricsHTTPResponse(t, h, http.MethodGet, "/metrics", "operator").Body.String()
+	for _, absent := range []string{"sparkwing_object_store_bucket_bytes ", "sparkwing_object_store_bucket_objects "} {
+		if strings.Contains(body, absent) {
+			t.Errorf("metrics publish %q for an unmeasured bucket", absent)
+		}
+	}
+	if state := objectguard.Shared().Ceiling().State(); state.Measured {
+		t.Errorf("an unmeasured bucket's state says measured: %+v", state)
+	}
+}
+
 func TestMetrics_BucketCeilingReportsAnIncompleteMeasurement(t *testing.T) {
 	h := newMetricsHTTPHandler(t, capability.OperatorLimits)
 	ceiling := freezeBucket(t, objectguard.CeilingLimit{MaxBytes: 1000}, 4096, 12)

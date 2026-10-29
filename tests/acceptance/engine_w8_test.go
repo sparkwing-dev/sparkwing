@@ -134,7 +134,7 @@ func (f *engineTransportW8) RoundTrip(request *http.Request) (*http.Response, er
 	default:
 		return nil, fmt.Errorf("unexpected origin %s", request.URL)
 	}
-	return &http.Response{StatusCode: 200, Header: make(http.Header), Body: io.NopCloser(bytes.NewReader(body)), Request: request}, nil
+	return &http.Response{StatusCode: http.StatusOK, Header: make(http.Header), Body: io.NopCloser(bytes.NewReader(body)), Request: request}, nil
 }
 
 func TestEngineW8FallbackHonorsSharedMachineRevocation(t *testing.T) {

@@ -175,7 +175,7 @@ func FuzzRetryHistoryKeepsPrivateInputsAndTeams(f *testing.F) {
 			owner := engineRuntimeClaim(t, e, capability.UnitTrigger)
 			raw = nativeClaimPresentation(t, e, owner)
 		}
-		r := httptest.NewRequest("GET", "/api/v1/runs/"+url.PathEscape(selector)+"/attempts", nil)
+		r := httptest.NewRequest(http.MethodGet, "/api/v1/runs/"+url.PathEscape(selector)+"/attempts", nil)
 		r.Header.Set("Authorization", "Bearer "+raw)
 		w := httptest.NewRecorder()
 		s.Handler().ServeHTTP(w, r)

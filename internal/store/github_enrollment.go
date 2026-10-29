@@ -30,7 +30,7 @@ func (t *Tenant) RegisterGitHubRunner(ctx context.Context, a capability.Authoriz
 		if exists != 0 {
 			return ErrAlreadyBound
 		}
-		if holdsFreeAllowance(t.team) && count >= maxGitHubRunnerBindings {
+		if t.s.holdsFreeAllowance(t.team) && count >= maxGitHubRunnerBindings {
 			return ErrBindingLimit
 		}
 		out = GitHubRunnerBinding{Team: t.team, RepositoryID: row.RepositoryID, RepositoryOwnerID: row.RepositoryOwnerID, Repository: repo.Slug(), InstallationID: row.InstallationID, CreatedBy: actor, CreatedAt: tx.now(ctx)}

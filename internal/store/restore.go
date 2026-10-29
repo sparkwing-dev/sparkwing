@@ -24,8 +24,13 @@ type RestoreState struct {
 	AcknowledgedAt int64  `json:"acknowledged_at,omitempty"`
 }
 
-// EnsureCredentialEpoch detects an external fence changed across a database restore.
-// Keeping the last observed epoch in the database closes the crash window between rotation and preparation.
+// ErrCredentialEpochChanged refuses to serve a database written under another
+// credential epoch. Serving it would end every session, token and runner
+// credential, so only `restore prepare --sign-out-everyone` changes the epoch.
+var ErrCredentialEpochChanged = errors.New("store: the credential epoch file does not match the epoch this database was written under")
+
+// EnsureCredentialEpoch records the external fence on a database that has none
+// and refuses one written under a different epoch with [ErrCredentialEpochChanged].
 func (s *Store) EnsureCredentialEpoch(ctx context.Context) error {
 	return s.ensureCredentialEpoch(ctx, s.credentialEpoch, false)
 }
@@ -49,7 +54,10 @@ func (s *Store) ensureCredentialEpoch(ctx context.Context, epoch string, prepare
 		if err != nil && !errors.Is(err, sql.ErrNoRows) {
 			return err
 		}
-		if prepared || err == nil && string(previous) != epoch {
+		if !prepared && err == nil && string(previous) != epoch {
+			return ErrCredentialEpochChanged
+		}
+		if prepared {
 			if err := tx.operator.cancelRestoredSchedulesTx(ctx, tx); err != nil {
 				return err
 			}

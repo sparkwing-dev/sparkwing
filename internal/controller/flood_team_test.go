@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"net/http/httptest"
 	"testing"
 	"testing/quick"
@@ -39,7 +40,7 @@ func TestFloodPolicy_APISubmissionsAndRetriesUsePerTokenCaps(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		req := httptest.NewRequest("POST", "/api/v1/runs/"+first.RunID+"/retry", bytes.NewReader(body))
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/runs/"+first.RunID+"/retry", bytes.NewReader(body))
 		req.Header.Set("Content-Type", "application/json")
 		req.Header.Set("Authorization", "Bearer "+token)
 		return f.serve(req)

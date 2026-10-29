@@ -358,7 +358,7 @@ func TestCapabilityManagementHTTPMissingAdaptersAndCSRF(t *testing.T) {
 			b = issuanceSession()
 		}
 		h := managementServer(b, f)
-		r := httptest.NewRequest("POST", managementPath(operator)+"/target/rotate", strings.NewReader(`{}`))
+		r := httptest.NewRequest(http.MethodPost, managementPath(operator)+"/target/rotate", strings.NewReader(`{}`))
 		r.AddCookie(&http.Cookie{Name: "console-session", Value: b.raw})
 		r.Header.Set("Content-Type", "application/json")
 		w := httptest.NewRecorder()
@@ -374,7 +374,7 @@ func TestCapabilityManagementHTTPMissingAdaptersAndCSRF(t *testing.T) {
 	}
 	s := controller.New(nil, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	w := httptest.NewRecorder()
-	s.Handler().ServeHTTP(w, httptest.NewRequest("GET", "/api/v1/team/tokens", nil))
+	s.Handler().ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/api/v1/team/tokens", nil))
 	if w.Code != http.StatusNotFound {
 		t.Fatalf("legacy inventory: HTTP %d %s", w.Code, w.Body.String())
 	}

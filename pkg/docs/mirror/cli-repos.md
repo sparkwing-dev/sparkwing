@@ -68,8 +68,8 @@ List the machine's fleet of sparkwing repos
 | `-C, --checkout PATH` | Resolve the project from this local checkout path. |
 | `-h, --help` | Show command help without executing. |
 | `--help-all` | Include uncommon flags in command help. |
-| `--checkouts` | checkouts |
-| `--pipelines` | pipelines |
+| `--checkouts` | List each registered local checkout with its status instead of the per-repository version summary. |
+| `--pipelines` | With --checkouts, include each checkout's pipeline names, on by default and turned off with --pipelines=false; refused without --checkouts. |
 
 ## `sparkwing repos prune`
 
@@ -113,9 +113,9 @@ Apply by default; --dry-run previews. --all-repos requires --yes for bulk change
 | `-C, --checkout PATH` | Resolve the project from this local checkout path. |
 | `-h, --help` | Show command help without executing. |
 | `--help-all` | Include uncommon flags in command help. |
-| `--version TAG` | version |
-| `--verify` | verify |
-| `--in-place` | in place |
-| `--dry-run` | Preview with no side effects. |
-| `--all-repos` | all repos |
-| `--yes` | Confirm bulk destruction. |
+| `--version TAG` | SDK release tag to move repositories to, latest by default. |
+| `--verify` | After the bump, run pre-commit run --all-files and treat a failure as a broken update; refused with --in-place. |
+| `--in-place` | Bump the current checkout's SDK pin directly, skipping the before and after plan comparison and the commit. |
+| `--dry-run` | Show what would change without changing anything. |
+| `--all-repos` | Update every registered repository instead of only the current one; requires --yes unless --dry-run is given. |
+| `--yes` | Confirm a destructive change without prompting. |

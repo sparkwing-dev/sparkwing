@@ -34,6 +34,11 @@ export interface AutomationPipeline {
   manual_override: boolean;
 }
 
+export interface AutomationSkipped {
+  pipeline: string;
+  error: string;
+}
+
 // Who owns an App run: the team's claim ranking, Cloud's launcher, a GitHub Actions runner, or a pool's self-hosted runners.
 export type AppRunner = "anywhere" | "cloud" | "github-actions" | `pool=${string}`;
 
@@ -54,6 +59,7 @@ export interface AutomationPreview {
   status: "ready" | "missing" | "invalid" | "unsupported" | "unavailable";
   error?: string;
   pipelines: AutomationPipeline[];
+  skipped: AutomationSkipped[];
 }
 
 export interface RunnerBinding {

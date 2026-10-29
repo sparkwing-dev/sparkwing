@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"maps"
 	"reflect"
 	"slices"
@@ -105,11 +106,11 @@ func (p SDKPlanner) prepare(ctx context.Context, input PlanningProcessInput, pla
 		return errors.Join(err, logs.release(ctx))
 	})
 	if err != nil {
-		return PreparedPlanning{}, p.planningError(ctx, err, logs.known)
+		return PreparedPlanning{}, p.planningError(ctx, err, logs.known, input.Entrypoint)
 	}
 	declarationsKnown = logs.known
 	if prepared.Description.Error != nil {
-		return PreparedPlanning{}, p.planningError(ctx, prepared.Description.Error, logs.known)
+		return PreparedPlanning{}, p.planningError(ctx, prepared.Description.Error, logs.known, input.Entrypoint)
 	}
 	if declarationsOnly {
 		return prepared, nil
@@ -125,7 +126,7 @@ func (p SDKPlanner) prepare(ctx context.Context, input PlanningProcessInput, pla
 			return session.call(ctx, nodeproto.Request{Op: nodeproto.OpPlan, Pipeline: input.Entrypoint, Args: maps.Clone(input.Args), Run: &input.Run}, &raw, "")
 		})
 		if err != nil {
-			return nil, p.planningError(ctx, err, logs.known)
+			return nil, p.planningError(ctx, err, logs.known, input.Entrypoint)
 		}
 		return raw, nil
 	}
@@ -206,7 +207,7 @@ func (p SDKPlanner) process(ctx context.Context, input PlanningProcessInput, log
 	return errors.Join(err, context.Cause(ctx))
 }
 
-func (p SDKPlanner) planningError(ctx context.Context, err error, known bool) error {
+func (p SDKPlanner) planningError(ctx context.Context, err error, known bool, entrypoint string) error {
 	code := apierr.SDKError
 	var structured *apierr.Error
 	if errors.As(err, &structured) {
@@ -230,8 +231,11 @@ func (p SDKPlanner) planningError(ctx context.Context, err error, known bool) er
 			failure = p.Masker.Error(failure)
 		}
 	}
-	if code == apierr.ProtocolMismatch {
+	switch code {
+	case apierr.ProtocolMismatch:
 		failure.Hint = "Rebuild .sparkwing with the matching SDK."
+	case apierr.UnknownPipeline:
+		failure.Hint = p.Masker.Mask(fmt.Sprintf("No SDK registration is named %q. Register the entrypoint sparkwing.yaml names: sparkwing.Register(%q, factory).", entrypoint, entrypoint))
 	}
 	return errors.Join(context.Cause(ctx), failure)
 }

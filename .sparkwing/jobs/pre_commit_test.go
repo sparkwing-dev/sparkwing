@@ -2,8 +2,10 @@ package jobs
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
 	"testing"
@@ -157,13 +159,20 @@ func TestEveryDeclaredPipelineResolvesToItsConfiguredEntrypoint(t *testing.T) {
 	t.Chdir(sourceTreeRoot())
 	host := newTestHost(t, sparkwingtest.Options{})
 	for _, p := range readPipelineConfig(t).Pipelines {
-		if _, err := host.Plan(t.Context(), p.Entrypoint, nil); err != nil && strings.Contains(err.Error(), "pipeline is not registered") {
+		if _, err := host.Plan(t.Context(), p.Entrypoint, nil); unregisteredPipeline(err) {
 			t.Errorf("%s entrypoint %s is unregistered: %v", p.Name, p.Entrypoint, err)
 		}
 	}
-	if _, err := host.Plan(t.Context(), "push-checks", nil); err == nil || !strings.Contains(err.Error(), "pipeline is not registered") {
+	if _, err := host.Plan(t.Context(), "push-checks", nil); !unregisteredPipeline(err) {
 		t.Fatalf("removed push-checks registration: %v", err)
 	}
+}
+
+// safety: the SDK refuses an unknown pipeline at describe or at plan, with a
+// different message at each, and both mean the entrypoint is unregistered.
+func unregisteredPipeline(err error) bool {
+	return err != nil && (strings.Contains(err.Error(), "pipeline is not registered") ||
+		strings.Contains(err.Error(), "does not declare the requested pipeline"))
 }
 
 func TestPreCommitGofmtJudgesOnlyTheChange(t *testing.T) {
@@ -196,5 +205,59 @@ func TestPreCommitGofmtRefusesWhatTheStagedChangeIntroduces(t *testing.T) {
 
 	if err := runGofmtOnTheChange(ctx); err == nil {
 		t.Error("gofmt passed a staged file it must reformat")
+	}
+}
+
+// safety: the names exceed Linux's 128 KiB limit on one argument, and the one
+// unformatted file comes last, so a run that judges only the first command
+// line misses it.
+func manyGoFiles(t *testing.T, root string) scopeFunc {
+	t.Helper()
+	dir := filepath.Join("internal", strings.Repeat("deeply_nested_package_", 3))
+	if err := os.MkdirAll(filepath.Join(root, dir), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	const count = 3000
+	files := make([]string, 0, count+1)
+	for i := range count {
+		name := filepath.Join(dir, fmt.Sprintf("sound_file_with_a_long_name_%05d.go", i))
+		writeGoFile(t, filepath.Join(root, name), "package internal\n")
+		files = append(files, name)
+	}
+	last := filepath.Join(dir, "zz_unformatted.go")
+	writeGoFile(t, filepath.Join(root, last), "package internal\nfunc  Bad( )  int { return 3 }\n")
+	files = append(files, last)
+	return func(context.Context, string, func([]string) []string) ([]string, string, error) {
+		return files, fmt.Sprintf("%d Go file(s)", len(files)), nil
+	}
+}
+
+func TestGofmtJudgesAChangeTooLargeForOneCommandLine(t *testing.T) {
+	root := gateFixtureRepo(t)
+	err := gofmtOverScope(context.Background(), manyGoFiles(t, root))
+	if err == nil || !strings.Contains(err.Error(), "files need formatting") ||
+		!strings.Contains(err.Error(), "zz_unformatted.go") || strings.Contains(err.Error(), "sound_file_with_a_long_name") {
+		t.Fatalf("gofmt over a large change = %.300v, want it to name only zz_unformatted.go", err)
+	}
+}
+
+func TestFormattersJudgeAChangeTooLargeForOneCommandLine(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("the stand-in formatter is a POSIX script")
+	}
+	root := gateFixtureRepo(t)
+	// perf: the real formatter costs about 0.2 s a file, so a stand-in that
+	// reports the one unformatted file keeps this test under a second.
+	bin := t.TempDir()
+	writeGoFile(t, filepath.Join(bin, "golangci-lint"), "#!/bin/sh\nstatus=0\n"+
+		"for f in \"$@\"; do case \"$f\" in *zz_unformatted.go) echo \"--- $f\"; status=1;; esac; done\nexit $status\n")
+	if err := os.Chmod(filepath.Join(bin, "golangci-lint"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	err := formattersOverScope(context.Background(), manyGoFiles(t, root))
+	if err == nil || !strings.Contains(err.Error(), "do not match the configured formatters") ||
+		!strings.Contains(err.Error(), "zz_unformatted.go") || strings.Contains(err.Error(), "sound_file_with_a_long_name") {
+		t.Fatalf("formatters over a large change = %.300v, want them to name only zz_unformatted.go", err)
 	}
 }

@@ -56,24 +56,3 @@ type ExitCode int
 const (
 	ExitUsage ExitCode = 2
 )
-
-// CommonRules fixes shared meanings so a new command cannot reinterpret a flag.
-func CommonRules() map[string]string {
-	return map[string]string{
-		"profile":    "Connection profiles come only from the user's config; allowed before the verb if the command accepts it. Local run refuses --profile.",
-		"repo":       "Repository identity, never a checkout path; typed identity grants no authority.",
-		"checkout":   "Local checkout path, never owner/name or a registry basename.",
-		"run":        "Stable run ID or per-team run number; '-' reads run IDs from stdin on cancel, retry and prune.",
-		"search":     "Match records; never scan log text.",
-		"grep":       "Match log text only.",
-		"limit":      "Output count at least one; paginated commands continue with --cursor.",
-		"follow":     "Stream until the observed work is done.",
-		"all":        "Include entries normally hidden.",
-		"dry-run":    "Preview with no side effects.",
-		"yes":        "Confirm bulk destruction.",
-		"force":      "Replace an existing object.",
-		"repeatable": "Singular names accept repeated flags and comma lists; --repos is the explicit runner allow-list exception.",
-		"short":      "Only -o output, -q quiet, -f follow, -v run verbosity, -C checkout and -h help.",
-		"unknown":    "Unknown engine flags fail with exit 2; only arguments after -- belong to the pipeline.",
-	}
-}

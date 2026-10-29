@@ -95,7 +95,6 @@ func (s *Service) Tick(ctx context.Context, dryRun bool) (TickReport, error) {
 		}
 		return nil
 	}
-	err = nil
 	if s.Schedules != nil {
 		err = tick(s)
 	} else {

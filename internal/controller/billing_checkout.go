@@ -25,6 +25,11 @@ type billingCheckout struct {
 	url   string
 	token string
 	http  *http.Client
+
+	now func() time.Time
+	// safety: only the billing worker's goroutine touches retries, keyed by idempotency key; a restart forgets
+	// them and starts the backoff again.
+	retries map[string]checkoutRetry
 }
 
 // WithBillingCheckout points the controller at the checkout service that
@@ -40,11 +45,16 @@ func (s *Server) WithBillingCheckout(url, token string) *Server {
 	s.checkout = &billingCheckout{
 		url: url, token: token,
 		http: &http.Client{Timeout: billingCheckoutTimeout},
+		now:  time.Now, retries: map[string]checkoutRetry{},
 	}
 	return s
 }
 
-var errCheckoutRefused = errors.New("the checkout service refused the session")
+// safety: only no answer, a 5xx or a 429 may pass on a later call; any other refusal is final, so a refill or refund
+// stops and reaches the owners instead of looping.
+var errCheckoutUnavailable = errors.New("the checkout service is unavailable")
+
+var errCheckoutRefused = errors.New("the checkout service refused the request")
 
 // errRefillNoCard is the checkout service's refusal to charge a refill for a customer with no card in Stripe.
 var errRefillNoCard = errors.New("the customer has no card")
@@ -110,30 +120,68 @@ func (c *billingCheckout) post(ctx context.Context, path string, in, out any) er
 	req.Header.Set("Authorization", "Bearer "+c.token)
 	resp, err := c.http.Do(req)
 	if err != nil {
-		return fmt.Errorf("checkout service: %w", err)
+		return fmt.Errorf("%w: %w", errCheckoutUnavailable, err)
 	}
 	defer func() { _ = resp.Body.Close() }()
 	payload, err := io.ReadAll(io.LimitReader(resp.Body, 64<<10))
 	if err != nil {
-		return fmt.Errorf("checkout service: read: %w", err)
+		return fmt.Errorf("%w: read: %w", errCheckoutUnavailable, err)
 	}
 	if resp.StatusCode != http.StatusOK {
-		err := fmt.Errorf("%w: %d %s", errCheckoutRefused, resp.StatusCode, strings.TrimSpace(string(payload)))
+		class := errCheckoutRefused
+		if resp.StatusCode >= 500 || resp.StatusCode == http.StatusTooManyRequests || resp.StatusCode == http.StatusRequestTimeout {
+			class = errCheckoutUnavailable
+		}
+		err := fmt.Errorf("%w: %d %s", class, resp.StatusCode, strings.TrimSpace(string(payload)))
 		if path == "/internal/refill" && resp.StatusCode == http.StatusConflict {
 			err = errors.Join(errRefillNoCard, err)
 		}
 		return err
 	}
 	if err := json.Unmarshal(payload, out); err != nil {
-		return fmt.Errorf("checkout service: decode: %w", err)
+		return fmt.Errorf("%w: decode: %w", errCheckoutRefused, err)
 	}
 	return nil
 }
 
+// safety: an unanswered call is retried on the next pass, then after waits doubling from billingInterval up to
+// checkoutRetryMaxWait, and fails for good checkoutRetryLimit after its first failure, reaching the owners.
+const (
+	checkoutRetryMaxWait = 30 * time.Minute
+	checkoutRetryLimit   = 6 * time.Hour
+)
+
+type checkoutRetry struct {
+	first, next time.Time
+	wait        time.Duration
+}
+
+func (c *billingCheckout) due(key string) bool {
+	r, ok := c.retries[key]
+	return !ok || !c.now().Before(r.next)
+}
+
+func (c *billingCheckout) unavailable(key string) bool {
+	now := c.now()
+	r, ok := c.retries[key]
+	if !ok {
+		r = checkoutRetry{first: now}
+	}
+	r.next = now.Add(r.wait)
+	r.wait = min(max(r.wait*2, billingInterval), checkoutRetryMaxWait)
+	c.retries[key] = r
+	if now.Sub(r.first) < checkoutRetryLimit {
+		return false
+	}
+	delete(c.retries, key)
+	return true
+}
+
+func (c *billingCheckout) settled(key string) { delete(c.retries, key) }
+
 // refillRequest and refillResponse are the checkout service's POST /internal/refill contract, which creates and
-// confirms one off-session payment under the refill id. testdata/refill_contract.json holds the example these types
-// are tested against; the checkout service keeps a byte-identical copy and tests its own side against that, so the
-// copies must be changed together, since neither suite reads the other's.
+// confirms one off-session payment under the refill id. testdata/checkout_contract.json pins it with the other routes;
+// the checkout service tests its handler against a byte-identical copy, so the two copies change together.
 type refillRequest struct {
 	Team        string `json:"team"`
 	Deployment  string `json:"deployment"`

@@ -46,7 +46,7 @@ func setProfile(inv clisurface.Invocation, format string) error {
 		return err
 	}
 	if _, ok := profiles[name]; !ok {
-		return fmt.Errorf("profiles set: %q not found", name)
+		return missingProfile(name, path, profiles)
 	}
 	var base string
 	if inv.Has("controller") {
@@ -70,7 +70,7 @@ func setProfile(inv clisurface.Invocation, format string) error {
 	err = userconfig.Update(path, userconfig.Profiles, "profiles", &profiles, func(bool) error {
 		p, ok := profiles[name]
 		if !ok {
-			return fmt.Errorf("profiles set: %q not found", name)
+			return missingProfile(name, path, profiles)
 		}
 		if inv.Has("controller") {
 			p.Controller.URL = base

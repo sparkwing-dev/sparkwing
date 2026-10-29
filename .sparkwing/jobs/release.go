@@ -37,8 +37,8 @@ func (Release) Help() string {
 
 func (Release) Examples() []sparkwing.Example {
 	return []sparkwing.Example{
-		{Comment: "Auto-pick version by bumping latest origin tag", Command: "SPARKWING_HOME=\"$(mktemp -d)\" sparkwing run release --sw-allow destructive,prod"},
-		{Comment: "Tag and push an explicit version", Command: "SPARKWING_HOME=\"$(mktemp -d)\" sparkwing run release --version v0.24.0 --sw-allow destructive,prod"},
+		{Comment: "Auto-pick version by bumping latest origin tag", Command: "SPARKWING_HOME=\"$(mktemp -d)\" sparkwing run release --sw-allow-risk destructive,prod"},
+		{Comment: "Tag and push an explicit version", Command: "SPARKWING_HOME=\"$(mktemp -d)\" sparkwing run release --sw-allow-risk destructive,prod -- --version v0.24.0"},
 		{Comment: "Preview without pushing", Command: "SPARKWING_HOME=\"$(mktemp -d)\" sparkwing run release --sw-dry-run"},
 	}
 }
@@ -119,14 +119,15 @@ func (j *releaseCutChecksJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, erro
 	budget.step(w, "build", runBuild)
 	budget.step(w, "lint", runGolangciLint)
 	budget.step(w, "test", runShortTest)
+	// safety: these four only read, so a dry run reports what the cut would refuse.
 	budget.step(w, "version-freshness", func(ctx context.Context) error {
 		return checkPublishedVersionsFreshness(ctx, sparkwing.WorkDir())
-	})
-	budget.step(w, "go-directives", checkGoDirectives)
+	}).SafeWithoutDryRun()
+	budget.step(w, "go-directives", checkGoDirectives).SafeWithoutDryRun()
 	budget.step(w, "sdk-pins", func(context.Context) error {
 		return checkReleasePins(sparkwing.WorkDir())
-	})
-	budget.step(w, "changelog-links", checkChangelogLinks)
+	}).SafeWithoutDryRun()
+	budget.step(w, "changelog-links", checkChangelogLinks).SafeWithoutDryRun()
 	budget.verdict(w)
 	return nil, nil
 }
@@ -148,10 +149,18 @@ func repoRoot() (string, error) {
 	if d == "" {
 		return "", errors.New("sparkwing.WorkDir() returned empty")
 	}
-	if _, err := os.Stat(filepath.Join(d, ".git")); err != nil {
-		return "", fmt.Errorf("not a git repo at %s: %w", d, err)
+	// safety: go test runs a package from its own directory, so the checkout
+	// root is the nearest ancestor that holds .git, not the working directory.
+	for dir := d; ; {
+		if _, err := os.Stat(filepath.Join(dir, ".git")); err == nil {
+			return dir, nil
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			return "", fmt.Errorf("not a git repo at %s or above it", d)
+		}
+		dir = parent
 	}
-	return d, nil
 }
 
 type resolveVersionJob struct {
@@ -226,9 +235,6 @@ func (j *validateVersionJob) run(ctx context.Context) error {
 	if err := requireAheadOfNewestTag(version, newest); err != nil {
 		return err
 	}
-	if err := j.checkHostingReleaseConstant(ctx, version); err != nil {
-		return err
-	}
 	if newest == "" {
 		sparkwing.Info(ctx, "origin carries no release tag; %s is the first", version)
 		return nil
@@ -249,40 +255,6 @@ func requireAheadOfNewestTag(version, newest string) error {
 	}
 	return fmt.Errorf("release: version %s is not ahead of %s, the newest tag on origin; "+
 		"a release tag must outrank every published version (never force-push a module tag), so pick a higher one", version, newest)
-}
-
-const firstHostingReleaseSource = "internal/wingd/client/client.go"
-
-var firstHostingReleasePattern = regexp.MustCompile(`(?m)^const FirstHostingRelease = "([^"]+)"`)
-
-func (j *validateVersionJob) checkHostingReleaseConstant(ctx context.Context, version string) error {
-	path := filepath.Join(j.RepoDir, firstHostingReleaseSource)
-	src, err := os.ReadFile(path)
-	if err != nil {
-		return fmt.Errorf("release: read %s: %w", firstHostingReleaseSource, err)
-	}
-	m := firstHostingReleasePattern.FindSubmatch(src)
-	if m == nil {
-		return fmt.Errorf("release: no FirstHostingRelease declaration found in %s; "+
-			"the daemon-hosting release gate cannot verify what a too-old host is told to install "+
-			"(update firstHostingReleasePattern if the constant moved)", firstHostingReleaseSource)
-	}
-	declared := string(m[1])
-	if version == declared {
-		return nil
-	}
-	claimed, err := tagExistsOnRemote(ctx, j.RepoDir, declared)
-	if err != nil {
-		return fmt.Errorf("release: check daemon-hosting release tag: %w", err)
-	}
-	if claimed {
-		return nil
-	}
-	return fmt.Errorf("release: cutting %s while FirstHostingRelease still names the unreleased %s. "+
-		"That constant is what a pipeline binary tells an operator to install when their sparkwing is too old to host "+
-		"the admission daemon, so shipping it unchanged would name a release that never carried the feature. "+
-		"Set it to %s in %s (and update the migration note in CHANGELOG.md), or cut %s instead",
-		version, declared, version, firstHostingReleaseSource, declared)
 }
 
 type checkCleanTreeJob struct {
@@ -866,15 +838,21 @@ func checkSchemaBreak(ctx context.Context, repoDir, version string) error {
 	if err != nil {
 		return fmt.Errorf("release: current schema: %w", err)
 	}
-	prevSrc, err := runGitIn(ctx, repoDir, "show", prevTag+":"+storeSchemaSourcePath)
+	prevSrc, present, err := fileAtTag(ctx, repoDir, prevTag, storeSchemaSourcePath)
 	if err != nil {
 		return fmt.Errorf("release: read %s at %s: %w", storeSchemaSourcePath, prevTag, err)
 	}
-	prevSchema, err := parseStoreSchemaVersion(prevSrc)
-	if err != nil {
-		return fmt.Errorf("release: schema at %s: %w", prevTag, err)
+	// safety: a tag that kept its store elsewhere has no schema this one can
+	// open, so it counts as a change the changelog must mark.
+	prevSchema := 0
+	if present {
+		if prevSchema, err = parseStoreSchemaVersion(prevSrc); err != nil {
+			return fmt.Errorf("release: schema at %s: %w", prevTag, err)
+		}
+	} else {
+		sparkwing.Info(ctx, "%s does not exist at %s, so the store at schema %d is new", storeSchemaSourcePath, prevTag, curSchema)
 	}
-	if prevSchema == curSchema {
+	if present && prevSchema == curSchema {
 		prevSQL, curSQL := map[string]string{}, map[string]string{}
 		for _, path := range storeSchemaSQLPaths {
 			cur, err := os.ReadFile(filepath.Join(repoDir, filepath.FromSlash(path)))

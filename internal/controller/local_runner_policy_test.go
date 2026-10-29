@@ -3,6 +3,7 @@ package controller
 import (
 	"context"
 	"encoding/json"
+	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
@@ -26,7 +27,7 @@ func FuzzMachineClaimsCannotSelectLocalVersionPolicy(f *testing.F) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		request := httptest.NewRequest("POST", "/api/v1/runners/claim", strings.NewReader(string(body)))
+		request := httptest.NewRequest(http.MethodPost, "/api/v1/runners/claim", strings.NewReader(string(body)))
 		request.Header.Set("Authorization", "Bearer "+raw)
 		request.Header.Set("Content-Type", "application/json")
 		response := httptest.NewRecorder()

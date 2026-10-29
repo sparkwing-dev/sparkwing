@@ -45,7 +45,7 @@ func creditPolicyFixture(t *testing.T) (*serverFixture, http.Handler, string, st
 func creditPolicyWrite(t *testing.T, h http.Handler, raw, csrf, body string, want int) creditSettingsJSON {
 	t.Helper()
 	w := httptest.NewRecorder()
-	r := httptest.NewRequest("PUT", "https://controller.test/api/v1/operator/credits/settings", strings.NewReader(body))
+	r := httptest.NewRequest(http.MethodPut, "https://controller.test/api/v1/operator/credits/settings", strings.NewReader(body))
 	r.Header.Set("Content-Type", "application/json")
 	r.Header.Set("Origin", "https://controller.test")
 	r.Header.Set(csrfHeaderName, csrf)

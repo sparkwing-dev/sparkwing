@@ -87,6 +87,10 @@ func (s *Server) handleInvite(w http.ResponseWriter, r *http.Request, a capabili
 	if err := decodeEngineRequest(r, &req); err != nil {
 		return err
 	}
+	role := store.Role(req.Role)
+	if !role.Valid() {
+		return unknownRole(role)
+	}
 	key, err := controlIdempotencyKey(r)
 	if err != nil {
 		return err
@@ -95,7 +99,7 @@ func (s *Server) handleInvite(w http.ResponseWriter, r *http.Request, a capabili
 	if err != nil {
 		return err
 	}
-	inv, err := writer.CreateAuthorizedInvitation(r.Context(), a, req.Email, store.Role(req.Role), key)
+	inv, err := writer.CreateAuthorizedInvitation(r.Context(), a, req.Email, role, key)
 	if err != nil {
 		return accountMutationError(err)
 	}

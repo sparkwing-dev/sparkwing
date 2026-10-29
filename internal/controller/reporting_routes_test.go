@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"io"
 	"log/slog"
+	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"strings"
@@ -120,7 +121,7 @@ func TestReportingRetiredRoutes(t *testing.T) {
 		"/api/v1/runs/run/paused", "/api/v1/runs/run/logs/job", "/api/v1/runs/run/logs/job/stream", "/api/v1/runs/run/logs/job/completeness",
 	} {
 		for _, bearer := range []string{"", "swct_retired", "swk_unrecognized"} {
-			r := httptest.NewRequest("GET", path, nil)
+			r := httptest.NewRequest(http.MethodGet, path, nil)
 			r.Header.Set("Authorization", "Bearer "+bearer)
 			w := httptest.NewRecorder()
 			h.ServeHTTP(w, r)

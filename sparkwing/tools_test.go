@@ -20,7 +20,7 @@ func TestNeedsToolsKeepsRequiredLabels(t *testing.T) {
 func TestClaimWaitPreservesExplicitValue(t *testing.T) {
 	plan := NewPlan().ClaimWait(2 * time.Hour)
 	value := planDocument(plan).ClaimWaitMS
-	if value == nil || *value != int64((2*time.Hour).Milliseconds()) {
+	if value == nil || *value != (2*time.Hour).Milliseconds() {
 		t.Fatalf("claim wait = %v", value)
 	}
 }

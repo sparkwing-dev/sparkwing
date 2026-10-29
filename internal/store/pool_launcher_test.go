@@ -135,7 +135,7 @@ func (f poolPin) claim(t *testing.T, kind capability.UnitKind, run string) (capa
 	if err != nil {
 		return capability.Capability{}, err
 	}
-	if run != "" && string(award.RunID) != run || award.Kind != kind {
+	if run != "" && award.RunID != run || award.Kind != kind {
 		t.Fatalf("pool award: %+v", award)
 	}
 	issued, err := f.tenant.s.AsOperator().ExchangeCapability(t.Context(), capability.ExchangeSpec{BootstrapPrefix: award.Award.CapabilityPrefix})

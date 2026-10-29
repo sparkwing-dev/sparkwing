@@ -45,7 +45,7 @@ exit 1
 	previous := http.DefaultTransport
 	http.DefaultTransport = profileTransport(func(*http.Request) (*http.Response, error) {
 		calls++
-		return &http.Response{StatusCode: 404, Body: io.NopCloser(strings.NewReader("missing"))}, nil
+		return &http.Response{StatusCode: http.StatusNotFound, Body: io.NopCloser(strings.NewReader("missing"))}, nil
 	})
 	t.Cleanup(func() { http.DefaultTransport = previous })
 	ctx := gotoolchain.WithSession(t.Context(), os.Environ(), nil)

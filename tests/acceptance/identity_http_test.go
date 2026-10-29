@@ -46,7 +46,7 @@ func TestIdentityHTTPUsesCommittedPrincipal(t *testing.T) {
 				b.snapshot.Authorities[0].Principal.Capability.Grants = nil
 			}
 			p := b.snapshot.Authorities[0].Principal
-			r := httptest.NewRequest("GET", "/api/v1/auth/whoami?team=forged&principal=forged", nil)
+			r := httptest.NewRequest(http.MethodGet, "/api/v1/auth/whoami?team=forged&principal=forged", nil)
 			if p.Class == capability.CredentialBearer {
 				r.Header.Set("Authorization", "Bearer "+b.raw)
 			} else {
@@ -115,7 +115,7 @@ func TestIdentityHTTPDoesNotTrustLocalHeaders(t *testing.T) {
 	b := authorityMember()
 	h := identityServer(b)
 	for _, header := range []string{"X-User", "X-Uid", "X-Sparkwing-Principal", "X-Forwarded-User"} {
-		r := httptest.NewRequest("GET", "http://localhost/api/v1/auth/whoami", nil)
+		r := httptest.NewRequest(http.MethodGet, "http://localhost/api/v1/auth/whoami", nil)
 		r.RemoteAddr = "127.0.0.1:1234"
 		r.Header.Set(header, "uid:1000")
 		w := httptest.NewRecorder()
@@ -159,7 +159,7 @@ func TestIdentityHTTPRefusesInvalidCredentials(t *testing.T) {
 			if state == "missing policy" {
 				h = controller.New(nil, nil).Handler()
 			}
-			r := httptest.NewRequest("GET", "/api/v1/auth/whoami", nil)
+			r := httptest.NewRequest(http.MethodGet, "/api/v1/auth/whoami", nil)
 			if b.raw != "" {
 				r.Header.Set("Authorization", "Bearer "+b.raw)
 			}

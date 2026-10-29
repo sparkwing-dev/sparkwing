@@ -523,10 +523,6 @@ func validateMigrationLink(s changelogSection, e changelogEntry, urlTail string,
 	path = strings.TrimSpace(path)
 	anchor = strings.TrimSpace(anchor)
 
-	if isUnreleased && path == "_unreleased.md" {
-		return nil
-	}
-
 	if !isUnreleased {
 		expected := s.version
 		if !strings.HasPrefix(expected, "v") {

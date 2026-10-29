@@ -38,7 +38,7 @@ func publishLocalProfile(ctx context.Context, home string, local client.EngineOp
 		if err := ctx.Err(); err != nil {
 			return nil, 0, err
 		}
-		key, err := blob.ObjectKey(string(state.Run.Team), digest)
+		key, err := blob.ObjectKey(state.Run.Team, digest)
 		if err != nil {
 			return nil, 0, err
 		}

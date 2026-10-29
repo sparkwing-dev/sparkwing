@@ -36,7 +36,7 @@ func TestControllerRefusesAnonymousBeforeBootstrapProperty(t *testing.T) {
 			property := func(selector []byte) bool {
 				forged := hex.EncodeToString(selector)
 				for _, path := range []string{"/api/v1/runs", "/api/v1/tokens", "/api/v1/runners"} {
-					r := httptest.NewRequest("GET", path+"?team="+forged, nil)
+					r := httptest.NewRequest(http.MethodGet, path+"?team="+forged, nil)
 					r.Header.Set("X-Sparkwing-Team", forged)
 					w := httptest.NewRecorder()
 					h.ServeHTTP(w, r)
@@ -51,7 +51,7 @@ func TestControllerRefusesAnonymousBeforeBootstrapProperty(t *testing.T) {
 				t.Fatal(err)
 			}
 			w := httptest.NewRecorder()
-			h.ServeHTTP(w, httptest.NewRequest("GET", "/api/v1/health", nil))
+			h.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/api/v1/health", nil))
 			var health struct {
 				Auth string `json:"auth"`
 			}

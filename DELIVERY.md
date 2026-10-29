@@ -25,8 +25,16 @@ newer embedded schema cannot migrate the operational runs store:
 
 ```bash
 SPARKWING_HOME="$(mktemp -d)" sparkwing run release --sw-dry-run
-SPARKWING_HOME="$(mktemp -d)" sparkwing run release --bump patch --sw-allow destructive,prod
+SPARKWING_HOME="$(mktemp -d)" sparkwing run release --sw-allow-risk destructive,prod
 ```
+
+The version defaults to a minor bump of the newest tag on origin; pass
+`-- --bump patch` for a patch release or `-- --version vX.Y.Z` to name it
+(pipeline flags follow `--`). The
+pipeline refuses `v1.0.0` and above. The dry run resolves the version, runs the
+read-only cut checks (version freshness, Go directives, SDK pins, changelog
+links) and previews the changelog and guide roll; build, lint and the short
+tests run only in the real cut.
 
 `push-tag` declares the `destructive` and `prod` risk labels, so only the
 second command tags and pushes. The tag push starts the hosted release below.
@@ -116,10 +124,18 @@ Accepted QA-only risks:
 - Clients that read a new `versions.json` before its signature lands fall back to
   their cached index until it does.
 
-QA images: `sparkwing run build-images --qatrust --tag vX.Y.Z-qa.N --registry <ecr> --push`
-builds the controller and runner from source with the tag. To package the published QA
-binaries instead, copy the release's `sparkwing-{controller,runner}-linux-<arch>` from the
-bucket into `dist/` and build each Dockerfile's `release` target, as the release workflow does.
+QA images: `bin/qa-release.sh` also publishes the controller and runner images, through the
+`publish-images` pipeline run on the CLI it just built. The pipeline appends each signed linux
+binary, checked against SHA256SUMS, as one layer onto the matching platform of a multi-arch
+runtime base, tags each architecture `vX.Y.Z-qa.N-amd64` and `vX.Y.Z-qa.N-arm64`, joins them
+under one index tagged `vX.Y.Z-qa.N` (the tag to deploy), and reads every platform back to
+check its binary. It is registry operations only, with no Docker daemon or emulation. Name the
+bases by digest in `SPARKWING_CONTROLLER_BASE` and `SPARKWING_RUNNER_BASE`; the registry is
+`QA_IMAGE_REGISTRY`, by default the AWS profile account's ECR in us-west-2. A base is each
+Dockerfile's `runtime` stage, rebuilt only when that stage or its pinned images change, with
+`sparkwing run build-images -- --runtime-base --registry <ecr> --push --tag <tag>` on a builder
+that runs linux/arm64 natively or under emulation. The hosted release still builds its ghcr.io
+images with buildx under QEMU and joins both architectures under one index per tag.
 
 ### Check tiers
 
@@ -268,7 +284,7 @@ file. Other syntax and workflow checks remain active.
   coverage. The ten-minute budget keeps the entire short suite and its
   checks, with room above the measured 7m19.746s class span. `sparkwing runs stats
   --pipeline pre-commit --since 7d` reports what a class has cost over the
-  week, and `sparkwing runs status <id> --view timeline --steps` breaks one run into
+  week, and `sparkwing runs status --run <id> --view timeline --steps` breaks one run into
   its steps; the runs store is shared across repositories, so filter the runs
   by repo before reading a per-pipeline figure as this one's.
 - **The short test class:** the release cut runs `go test -short`. Use
@@ -676,7 +692,7 @@ file. Other syntax and workflow checks remain active.
   position of local replacements against origin/main, so a cut may use an older
   commit. Preview with
   `SPARKWING_HOME="$(mktemp -d)" sparkwing run release --sw-dry-run`, then
-  `SPARKWING_HOME="$(mktemp -d)" sparkwing run release --bump patch --sw-allow
+  `SPARKWING_HOME="$(mktemp -d)" sparkwing run release --sw-allow-risk
   destructive,prod`; the isolated home keeps prerelease state out of the
   operational runs store, which the release runner refuses to touch. From the
   tag push on, `.github/workflows/release.yaml` owns the release, and it checks

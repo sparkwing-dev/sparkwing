@@ -22,7 +22,7 @@ func TestSurfaceJobFailureReportTransport(t *testing.T) {
 			calls := 0
 			controller, err := client.NewEngineClient(client.EngineOptions{URL: endpoint, HTTP: &http.Client{Transport: surfaceTransport(func(req *http.Request) (*http.Response, error) {
 				calls++
-				if req.Method != "POST" || req.URL.Path != "/api/v1/runs/run/jobs/build/transition" {
+				if req.Method != http.MethodPost || req.URL.Path != "/api/v1/runs/run/jobs/build/transition" {
 					t.Fatalf("unexpected report: %s %s", req.Method, req.URL)
 				}
 				var got struct {
@@ -48,7 +48,7 @@ func TestSurfaceJobFailureReportTransport(t *testing.T) {
 				if failure.Job != "build" || failure.Stage != "step:verify" || failure.Error.Code != "future_failure" || failure.Error.Message != "masked failure" || failure.Error.Hint != "retry verification" || failure.Error.Details["exit_code"] != 7 || got.Result.Error != nil {
 					t.Fatalf("report lost its structured failure: %+v", got)
 				}
-				return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(`{"replayed":false,"cancel_requested":false,"state_seq":3,"generation":1,"attempt":1}`))}, nil
+				return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(`{"replayed":false,"cancel_requested":false,"state_seq":3,"generation":1,"attempt":1}`))}, nil
 			})}})
 			if err != nil {
 				t.Fatal(err)

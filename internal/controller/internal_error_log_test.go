@@ -114,7 +114,7 @@ func TestSignedUploadFailureLogsMaskedCauseOnceProperty(t *testing.T) {
 		server := New(nil, slog.New(slog.NewJSONHandler(&logs, nil))).WithDataObjects(objects)
 		ctx, masker := withRequestMasker(t.Context())
 		masker.Register(secret)
-		req := httptest.NewRequest("PUT", signed.URL, failingUploadBody{errors.New("upload read: " + secret)}).WithContext(ctx)
+		req := httptest.NewRequest(http.MethodPut, signed.URL, failingUploadBody{errors.New("upload read: " + secret)}).WithContext(ctx)
 		req.Header.Set(RequestIDHeader, "upload-request")
 		out := httptest.NewRecorder()
 		server.Handler().ServeHTTP(out, req)

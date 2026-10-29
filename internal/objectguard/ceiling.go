@@ -82,6 +82,10 @@ type CeilingLimit struct {
 // enforced reports whether either ceiling can freeze writes.
 func (l CeilingLimit) enforced() bool { return l.MaxBytes > 0 || l.MaxObjects > 0 }
 
+// Bounded reports whether any ceiling or warning mark is set, which is the
+// only time the controller measures the bucket; without one it publishes no totals.
+func (l CeilingLimit) Bounded() bool { return l.enforced() || l.WarnBytes > 0 || l.WarnObjects > 0 }
+
 // DefaultCeilingReconcile is how often a measured bucket total replaces
 // the incremental counters when an operator sets no interval.
 const DefaultCeilingReconcile = time.Hour
@@ -123,7 +127,10 @@ var errMeasurementPartial = errors.New("store measurement did not finish")
 type CeilingState struct {
 	// Enforced is false while neither ceiling is set, which is the
 	// shipped default and means the ceiling never refuses a write.
-	Enforced     bool          `json:"enforced"`
+	Enforced bool `json:"enforced"`
+	// Measured is false while no ceiling or warning mark is set: the controller then never lists the bucket,
+	// so Bytes and Objects count only this process's writes since it started and do not describe the bucket.
+	Measured     bool          `json:"measured"`
 	MaxBytes     int64         `json:"max_bytes"`
 	MaxObjects   int64         `json:"max_objects"`
 	WarnBytes    int64         `json:"warn_bytes"`
@@ -209,11 +216,17 @@ func (c *Ceiling) Configure(cfg CeilingConfig) {
 	c.evaluateLocked()
 }
 
-// Enforced reports whether either ceiling is set.
-func (c *Ceiling) Enforced() bool {
+func (c *Ceiling) enforced() bool {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	return c.limit.enforced()
+}
+
+// Bounded reports whether any ceiling or warning mark is set.
+func (c *Ceiling) Bounded() bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.limit.Bounded()
 }
 
 // Reconcile is the gap between measured bucket totals. A value at or
@@ -336,6 +349,7 @@ func (c *Ceiling) State() CeilingState {
 	defer c.mu.Unlock()
 	st := CeilingState{
 		Enforced:     c.limit.enforced(),
+		Measured:     c.limit.Bounded(),
 		MaxBytes:     c.limit.MaxBytes,
 		MaxObjects:   c.limit.MaxObjects,
 		WarnBytes:    c.limit.WarnBytes,
@@ -373,7 +387,7 @@ type UsageSource func(context.Context) (Usage, error)
 // still over its ceiling. The ceiling then reports itself incomplete
 // and keeps counting writes.
 func (c *Ceiling) ReconcileWith(ctx context.Context, src UsageSource) error {
-	if !c.Enforced() {
+	if !c.enforced() {
 		return nil
 	}
 	return c.Measure(ctx, src)

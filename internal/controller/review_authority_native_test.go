@@ -189,7 +189,7 @@ func TestReviewConsoleCommitRevalidatesProofProperty(t *testing.T) {
 	s.WithOperatorAccounts([]string{"member"})
 	var route capability.RoutePolicy
 	for _, candidate := range capability.Routes() {
-		if candidate.Method == "POST" && candidate.Path == "/api/v1/operator/tokens" {
+		if candidate.Method == http.MethodPost && candidate.Path == "/api/v1/operator/tokens" {
 			route = candidate
 		}
 	}
@@ -319,7 +319,7 @@ func TestNativeDeploymentEligibilityProperty(t *testing.T) {
 	property := func(pick uint8, hint uint64) bool {
 		d := deployments[int(pick)%len(deployments)]
 		s := NewDeployment(e.Store, d, nil)
-		r := httptest.NewRequest("GET", fmt.Sprintf("/api/v1/operator/tokens?mode=cloud&eligible=%d", hint), nil)
+		r := httptest.NewRequest(http.MethodGet, fmt.Sprintf("/api/v1/operator/tokens?mode=cloud&eligible=%d", hint), nil)
 		r.Header.Set("Authorization", "Bearer "+raw)
 		w := httptest.NewRecorder()
 		s.Handler().ServeHTTP(w, r)

@@ -2,7 +2,10 @@ package charts
 
 import (
 	"encoding/json"
+	"errors"
+	"fmt"
 	"io"
+	"maps"
 	"os/exec"
 	"slices"
 	"strings"
@@ -10,8 +13,13 @@ import (
 
 	appsv1 "k8s.io/api/apps/v1"
 	networkingv1 "k8s.io/api/networking/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/selection"
 	utilyaml "k8s.io/apimachinery/pkg/util/yaml"
+
+	"github.com/sparkwing-dev/sparkwing/internal/runners/launcher"
 )
 
 func TestCloudExampleRendersCompleteInstall(t *testing.T) {
@@ -95,7 +103,9 @@ func TestImagesRequireRepositoryAndTagTogether(t *testing.T) {
 func checkCloudBindings(t *testing.T, manifest []byte) {
 	t.Helper()
 	decoder := utilyaml.NewYAMLOrJSONDecoder(strings.NewReader(string(manifest)), 4096)
-	ingressFound, controllerFound, launcherFound, denyFound, allowFound := false, false, false, false, false
+	ingressFound, controllerFound, launcherFound := false, false, false
+	var policies []networkingv1.NetworkPolicy
+	jobNamespace := ""
 	for {
 		var raw runtime.RawExtension
 		err := decoder.Decode(&raw)
@@ -189,6 +199,11 @@ func checkCloudBindings(t *testing.T, manifest []byte) {
 				}
 			} else {
 				launcherFound = true
+				for _, arg := range pod.Containers[0].Args {
+					if ns, ok := strings.CutPrefix(arg, "--namespace="); ok {
+						jobNamespace = ns
+					}
+				}
 				if paths["agent-token"] != "sparkwing-launcher-token/token" {
 					t.Errorf("launcher credential = %v", paths)
 				}
@@ -198,34 +213,7 @@ func checkCloudBindings(t *testing.T, manifest []byte) {
 			if err := json.Unmarshal(raw.Raw, &policy); err != nil {
 				t.Fatal(err)
 			}
-			if strings.HasSuffix(policy.Name, "-cloud-allow") {
-				allowFound = true
-				internet := false
-				for _, rule := range policy.Spec.Egress {
-					for _, peer := range rule.To {
-						if peer.IPBlock == nil {
-							continue
-						}
-						if len(rule.Ports) != 0 {
-							t.Errorf("Cloud internet egress is limited to ports %+v", rule.Ports)
-						}
-						want := map[string][]string{"0.0.0.0/0": {"10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "169.254.0.0/16", "100.64.0.0/10"}, "::/0": {"fc00::/7", "fe80::/10"}}[peer.IPBlock.CIDR]
-						if want == nil || !slices.Equal(peer.IPBlock.Except, want) {
-							t.Errorf("Cloud egress block %s excepts %v, want %v", peer.IPBlock.CIDR, peer.IPBlock.Except, want)
-						}
-						internet = true
-					}
-				}
-				if !internet {
-					t.Error("Cloud Job policy allows no internet egress")
-				}
-			}
-			if strings.HasSuffix(policy.Name, "-cloud-deny") {
-				denyFound = true
-				if !slices.Contains(policy.Spec.PolicyTypes, networkingv1.PolicyTypeIngress) || !slices.Contains(policy.Spec.PolicyTypes, networkingv1.PolicyTypeEgress) || len(policy.Spec.Ingress)+len(policy.Spec.Egress) != 0 {
-					t.Errorf("Cloud Job policy does not deny all ingress and egress: %+v", policy.Spec)
-				}
-			}
+			policies = append(policies, policy)
 		case "Ingress":
 			ingressFound = true
 			var ingress networkingv1.Ingress
@@ -252,11 +240,11 @@ func checkCloudBindings(t *testing.T, manifest []byte) {
 			}
 		}
 	}
-	if !allowFound {
-		t.Error("Cloud Job egress allow policy missing")
+	if jobNamespace == "" {
+		t.Error("launcher names no Job namespace")
 	}
-	if !denyFound {
-		t.Error("Cloud Job deny policy not rendered")
+	for _, problem := range jobPolicyProblems(policies, jobNamespace) {
+		t.Error(problem)
 	}
 	if !ingressFound || !controllerFound || !launcherFound {
 		t.Fatal("Cloud bindings were not exercised")
@@ -280,5 +268,156 @@ func TestCloudLauncherRequiresDigestAndSeparateCredential(t *testing.T) {
 				t.Fatalf("render error = %v %s, want %s", err, out, test.want)
 			}
 		})
+	}
+}
+
+// safety: the Job's real labels come from the launcher; the team and job values vary per Job, so a selector
+// constraining only those keys can still select some Job and is judged.
+func selectsSomeCloudJob(selector metav1.LabelSelector, namespace string) (bool, error) {
+	parsed, err := metav1.LabelSelectorAsSelector(&selector)
+	if err != nil {
+		return false, err
+	}
+	fixed := launcher.JobPodLabels(namespace, "team", "job")
+	requirements, _ := parsed.Requirements()
+	for _, requirement := range requirements {
+		if requirement.Key() == launcher.JobLabel || requirement.Key() == launcher.TeamLabel {
+			if requirement.Operator() == selection.DoesNotExist {
+				return false, nil
+			}
+			continue
+		}
+		if !requirement.Matches(labels.Set(fixed)) {
+			return false, nil
+		}
+	}
+	return true, nil
+}
+
+// safety: a Pod's traffic is the union of every policy selecting it in its namespace, so all are judged together:
+// no ingress, and egress only to cluster DNS and the internet blocks with private ranges excepted.
+func jobPolicyProblems(policies []networkingv1.NetworkPolicy, namespace string) []string {
+	var problems []string
+	isolatedIn, isolatedOut, internet := false, false, false
+	want := map[string][]string{"0.0.0.0/0": {"10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "169.254.0.0/16", "100.64.0.0/10"}, "::/0": {"fc00::/7", "fe80::/10"}}
+	for _, policy := range policies {
+		selects, err := selectsSomeCloudJob(policy.Spec.PodSelector, namespace)
+		if err != nil {
+			problems = append(problems, fmt.Sprintf("%s: %v", policy.Name, err))
+			continue
+		}
+		if policy.Namespace != namespace || !selects {
+			continue
+		}
+		isolatedIn = isolatedIn || slices.Contains(policy.Spec.PolicyTypes, networkingv1.PolicyTypeIngress)
+		isolatedOut = isolatedOut || slices.Contains(policy.Spec.PolicyTypes, networkingv1.PolicyTypeEgress)
+		if len(policy.Spec.Ingress) != 0 {
+			problems = append(problems, fmt.Sprintf("%s allows ingress to Cloud Jobs: %+v", policy.Name, policy.Spec.Ingress))
+		}
+		for _, rule := range policy.Spec.Egress {
+			if len(rule.To) == 0 {
+				problems = append(problems, fmt.Sprintf("%s allows Cloud Jobs egress to every destination", policy.Name))
+			}
+			for _, peer := range rule.To {
+				if clusterDNSPeer(peer) {
+					for _, port := range rule.Ports {
+						if port.Port == nil || port.Port.IntValue() != 53 || port.EndPort != nil {
+							problems = append(problems, fmt.Sprintf("%s allows Cloud Jobs cluster DNS traffic on port %+v", policy.Name, port))
+						}
+					}
+					if len(rule.Ports) == 0 {
+						problems = append(problems, fmt.Sprintf("%s allows Cloud Jobs every port on cluster DNS", policy.Name))
+					}
+					continue
+				}
+				if peer.IPBlock == nil || peer.PodSelector != nil || peer.NamespaceSelector != nil {
+					problems = append(problems, fmt.Sprintf("%s allows Cloud Jobs egress to in-cluster peer %+v", policy.Name, peer))
+					continue
+				}
+				if len(rule.Ports) != 0 {
+					problems = append(problems, fmt.Sprintf("%s limits Cloud internet egress to ports %+v", policy.Name, rule.Ports))
+				}
+				if except, ok := want[peer.IPBlock.CIDR]; !ok || !slices.Equal(peer.IPBlock.Except, except) {
+					problems = append(problems, fmt.Sprintf("%s: Cloud egress block %s excepts %v, want %v", policy.Name, peer.IPBlock.CIDR, peer.IPBlock.Except, except))
+				}
+				internet = true
+			}
+		}
+	}
+	if !isolatedIn || !isolatedOut {
+		problems = append(problems, fmt.Sprintf("no NetworkPolicy in %s isolates Cloud Job ingress and egress", namespace))
+	}
+	if !internet {
+		problems = append(problems, "Cloud Job policy allows no internet egress")
+	}
+	return problems
+}
+
+func clusterDNSPeer(peer networkingv1.NetworkPolicyPeer) bool {
+	return peer.IPBlock == nil && peer.NamespaceSelector != nil && peer.PodSelector != nil &&
+		len(peer.NamespaceSelector.MatchExpressions) == 0 && len(peer.PodSelector.MatchExpressions) == 0 &&
+		maps.Equal(peer.NamespaceSelector.MatchLabels, map[string]string{"kubernetes.io/metadata.name": "kube-system"}) &&
+		maps.Equal(peer.PodSelector.MatchLabels, map[string]string{"k8s-app": "kube-dns"})
+}
+
+func TestJobPolicyEvaluationRefusesAdditivePermissions(t *testing.T) {
+	helm, err := exec.LookPath("helm")
+	if err != nil {
+		t.Fatal(err)
+	}
+	out, err := exec.Command(helm, "template", "sparkwing", "./sparkwing-full", "--namespace", "sparkwing", "-f", "../examples/cloud.yaml").CombinedOutput()
+	if err != nil {
+		t.Fatalf("Cloud example: %v\n%s", err, out)
+	}
+	var rendered []networkingv1.NetworkPolicy
+	decoder := utilyaml.NewYAMLOrJSONDecoder(strings.NewReader(string(out)), 4096)
+	for {
+		var policy networkingv1.NetworkPolicy
+		err := decoder.Decode(&policy)
+		if errors.Is(err, io.EOF) {
+			break
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		if policy.Kind == "NetworkPolicy" {
+			rendered = append(rendered, policy)
+		}
+	}
+	namespace := "sparkwing-cloud-jobs"
+	if problems := jobPolicyProblems(rendered, namespace); len(problems) != 0 {
+		t.Fatalf("rendered policies: %v", problems)
+	}
+	for name, mutate := range map[string]func([]networkingv1.NetworkPolicy) []networkingv1.NetworkPolicy{
+		"another policy allows all egress": func(p []networkingv1.NetworkPolicy) []networkingv1.NetworkPolicy {
+			return append(p, networkingv1.NetworkPolicy{ObjectMeta: metav1.ObjectMeta{Name: "extra", Namespace: namespace}, Spec: networkingv1.NetworkPolicySpec{PolicyTypes: []networkingv1.PolicyType{networkingv1.PolicyTypeEgress}, Egress: []networkingv1.NetworkPolicyEgressRule{{}}}})
+		},
+		"another policy reaches the cluster": func(p []networkingv1.NetworkPolicy) []networkingv1.NetworkPolicy {
+			return append(p, networkingv1.NetworkPolicy{ObjectMeta: metav1.ObjectMeta{Name: "extra", Namespace: namespace}, Spec: networkingv1.NetworkPolicySpec{PodSelector: metav1.LabelSelector{MatchLabels: map[string]string{"app": "sparkwing-job"}}, PolicyTypes: []networkingv1.PolicyType{networkingv1.PolicyTypeEgress}, Egress: []networkingv1.NetworkPolicyEgressRule{{To: []networkingv1.NetworkPolicyPeer{{NamespaceSelector: &metav1.LabelSelector{}}}}}}})
+		},
+		"another policy selects by team label": func(p []networkingv1.NetworkPolicy) []networkingv1.NetworkPolicy {
+			return append(p, networkingv1.NetworkPolicy{ObjectMeta: metav1.ObjectMeta{Name: "extra", Namespace: namespace}, Spec: networkingv1.NetworkPolicySpec{PodSelector: metav1.LabelSelector{MatchExpressions: []metav1.LabelSelectorRequirement{{Key: launcher.TeamLabel, Operator: metav1.LabelSelectorOpExists}}}, PolicyTypes: []networkingv1.PolicyType{networkingv1.PolicyTypeEgress}, Egress: []networkingv1.NetworkPolicyEgressRule{{}}}})
+		},
+		"another policy selects one team": func(p []networkingv1.NetworkPolicy) []networkingv1.NetworkPolicy {
+			return append(p, networkingv1.NetworkPolicy{ObjectMeta: metav1.ObjectMeta{Name: "extra", Namespace: namespace}, Spec: networkingv1.NetworkPolicySpec{PodSelector: metav1.LabelSelector{MatchLabels: map[string]string{launcher.TeamLabel: "some-team-hash"}}, PolicyTypes: []networkingv1.PolicyType{networkingv1.PolicyTypeEgress}, Egress: []networkingv1.NetworkPolicyEgressRule{{}}}})
+		},
+		"deny selects other pods": func(p []networkingv1.NetworkPolicy) []networkingv1.NetworkPolicy {
+			out := slices.Clone(p)
+			for i := range out {
+				out[i].Spec.PodSelector = metav1.LabelSelector{MatchLabels: map[string]string{"app": "other"}}
+			}
+			return out
+		},
+		"policies sit in another namespace": func(p []networkingv1.NetworkPolicy) []networkingv1.NetworkPolicy {
+			out := slices.Clone(p)
+			for i := range out {
+				out[i].Namespace = "elsewhere"
+			}
+			return out
+		},
+	} {
+		if problems := jobPolicyProblems(mutate(slices.Clone(rendered)), namespace); len(problems) == 0 {
+			t.Errorf("%s: evaluation accepted the policy set", name)
+		}
 	}
 }

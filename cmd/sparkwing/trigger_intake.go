@@ -77,7 +77,7 @@ func submitTriggeredRun(ctx context.Context, input controllerwire.CreateRunReque
 			resultErr = connection.here(ctx, response)
 		}
 	} else if err := ctx.Err(); err != nil {
-		resultErr = exitError(3, err)
+		resultErr = observationError(err)
 	} else if !detached {
 		receipt.Outcome, resultErr = followTriggeredRun(ctx, response.RunID, connection.follow)
 	}
@@ -102,14 +102,14 @@ func initialTriggerReceipt(pipeline string, here bool, response controllerwire.C
 
 func followTriggeredRun(ctx context.Context, run string, follow func(context.Context, string) (string, error)) (string, error) {
 	if follow == nil {
-		return "", exitError(3, &apierr.Error{Code: apierr.Unavailable, Message: "trigger observation requires a run follower"})
+		return "", observationError(&apierr.Error{Code: apierr.Unavailable, Message: "trigger observation requires a run follower"})
 	}
 	outcome, err := follow(ctx, run)
 	if err := errors.Join(err, ctx.Err()); err != nil {
-		return "", exitError(3, err)
+		return "", observationError(err)
 	}
 	if !isTerminalRunStatus(outcome) {
-		return "", exitError(3, &apierr.Error{Code: apierr.Unavailable, Message: "triggered run outcome is unknown"})
+		return "", observationError(&apierr.Error{Code: apierr.Unavailable, Message: "triggered run outcome is unknown"})
 	}
 	return outcome, statusExitCode(outcome)
 }

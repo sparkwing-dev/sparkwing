@@ -3,6 +3,8 @@ package nodeproto
 import (
 	"fmt"
 	"path/filepath"
+	"slices"
+	"strings"
 )
 
 func (v *planValidator) validateJob(job JobSpec, path string) error {
@@ -107,6 +109,9 @@ func (v *planValidator) validateJob(job JobSpec, path string) error {
 		}
 		if cacheNames[cache.Name] {
 			return planInvalid(at+".name", "duplicate cache name")
+		}
+		if cache.Resolver != "" && !slices.Contains(CacheResolvers, cache.Resolver) {
+			return planInvalid(at+".resolver", fmt.Sprintf("unknown cache resolver %q; use one of %s", cache.Resolver, strings.Join(CacheResolvers, ", ")))
 		}
 		if cache.Resolver == "" && cache.Path != "" && !filepath.IsLocal(filepath.FromSlash(cache.Path)) {
 			return planInvalid(at+".path", "cache path must be relative and stay inside the workspace")

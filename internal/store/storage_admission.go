@@ -68,7 +68,7 @@ func admitStorageGrowthTx(ctx context.Context, tx *storeTx, team Team, g storage
 // safety: storage past the free allowance is billed daily, so a team that cannot pay may not grow it; a held team,
 // revoked standing included, may not grow it at all.
 func refuseUnpaidStorageGrowthTx(ctx context.Context, tx *storeTx, team Team, bytes int64) error {
-	if tx.store.creditMeteringOff.Load() || !holdsFreeAllowance(team) {
+	if !tx.store.holdsFreeAllowance(team) {
 		return nil
 	}
 	if cause, err := teamHoldTx(ctx, tx, team); err != nil {

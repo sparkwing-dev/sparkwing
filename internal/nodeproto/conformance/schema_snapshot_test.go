@@ -101,6 +101,9 @@ func shape(t reflect.Type, defs map[string]any, strict bool) map[string]any {
 				key = field.Name
 			}
 			properties[key] = shape(field.Type, defs, strict)
+			if t == reflect.TypeOf(nodeproto.CacheSpec{}) && field.Name == "Resolver" {
+				properties[key] = map[string]any{"type": "string", "enum": nodeproto.CacheResolvers}
+			}
 			if !strings.Contains(options, "omitempty") && !strings.Contains(options, "omitzero") {
 				required = append(required, key)
 			}

@@ -173,7 +173,7 @@ func TestAuthorizedCrossRepositoryChildNamesABranch(t *testing.T) {
 						default:
 							return nil, fmt.Errorf("unexpected GitHub request %s", r.URL)
 						}
-						return &http.Response{StatusCode: 200, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(payload))}, nil
+						return &http.Response{StatusCode: http.StatusOK, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(payload))}, nil
 					})}}
 					e.Server.WithGitHubApp(cfg)
 				}

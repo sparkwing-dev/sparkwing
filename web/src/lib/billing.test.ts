@@ -63,7 +63,7 @@ const billing = {
   micro_per_credit: 100_000,
   credits_per_dollar: 1_000,
   slice_seconds: 60,
-  purchase_min_cents: 50,
+  purchase_min_cents: 1_000,
   purchase_max_cents: 100_000,
   trusted: true,
   rate_table: [
@@ -328,9 +328,9 @@ it("refuses payments above $1,000 and points to the contact request", () => {
   assert.match(lib.purchaseProblem(100_001, billing) ?? "", /at most \$1,000.*Contact us.*larger payments/);
 });
 
-it("prepay accepts the provider minimum and refuses smaller amounts", () => {
- assert.equal(lib.purchaseProblem(50,billing),null);
- assert.equal(lib.purchaseProblem(49,billing),"Minimum purchase $0.50.");
+it("prepay accepts the $10 minimum and refuses smaller amounts", () => {
+ assert.equal(lib.purchaseProblem(1_000,billing),null);
+ assert.equal(lib.purchaseProblem(999,billing),"Minimum purchase $10.");
 });
 
 describe("standing requests", () => {

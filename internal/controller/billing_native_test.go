@@ -62,7 +62,7 @@ func TestBillingModelProductionPages(t *testing.T) {
 		if body["team"] != "a" || body["amount_cents"] != float64(2000) || body["key"] == "" {
 			t.Fatalf("provider: %v", body)
 		}
-		return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(`{"url":"https://checkout.stripe.com/page","id":"cs_native","expires_at":` + strconv.FormatInt(time.Now().Add(30*time.Minute).Unix(), 10) + `}`))}, nil
+		return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(`{"url":"https://checkout.stripe.com/page","id":"cs_native","expires_at":` + strconv.FormatInt(time.Now().Add(30*time.Minute).Unix(), 10) + `}`))}, nil
 	})
 	h := s.Handler()
 	call := func(method, path, body string, status int) {
@@ -161,7 +161,7 @@ func TestBillingModelProductionCardPrepayAndRefill(t *testing.T) {
 		default:
 			t.Fatalf("provider lookup %s", r.URL)
 		}
-		return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(body))}, nil
+		return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(body))}, nil
 	})})
 	if err != nil {
 		t.Fatal(err)
@@ -201,7 +201,7 @@ func TestBillingModelProductionCardPrepayAndRefill(t *testing.T) {
 		default:
 			t.Fatalf("payment page %s", r.URL.Path)
 		}
-		return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(body))}, nil
+		return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(body))}, nil
 	})
 	h := s.Handler()
 	call := func(path, body string, status int) {
@@ -232,7 +232,7 @@ func TestBillingModelProductionCardPrepayAndRefill(t *testing.T) {
 		if _, err := fmt.Fprintf(mac, "%d.%s", now, body); err != nil {
 			t.Fatal(err)
 		}
-		r := httptest.NewRequest("POST", "/webhooks/stripe", strings.NewReader(body))
+		r := httptest.NewRequest(http.MethodPost, "/webhooks/stripe", strings.NewReader(body))
 		r.Header.Set("Stripe-Signature", fmt.Sprintf("t=%d,v1=%x", now, mac.Sum(nil)))
 		w := httptest.NewRecorder()
 		h.ServeHTTP(w, r)
@@ -334,12 +334,12 @@ func TestBillingModelProductionPageFailureKeepsReservation(t *testing.T) {
 				if phase == "revoked" {
 					engineSQL(t, s.store, `UPDATE memberships SET role='reader' WHERE team='a' AND account_id='owner'`)
 				}
-				return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(`{"id":"cs_retry","url":"https://checkout.stripe.com/page"}`))}, nil
+				return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(`{"id":"cs_retry","url":"https://checkout.stripe.com/page"}`))}, nil
 			})
 			h := s.Handler()
 			call := func(want int) {
 				t.Helper()
-				r := httptest.NewRequest("POST", "https://controller.test/api/v1/team/billing/checkout", strings.NewReader(`{"amount_cents":2000}`))
+				r := httptest.NewRequest(http.MethodPost, "https://controller.test/api/v1/team/billing/checkout", strings.NewReader(`{"amount_cents":2000}`))
 				r.Header.Set("Content-Type", "application/json")
 				r.Header.Set("Idempotency-Key", "retry")
 				r.Header.Set("Origin", "https://controller.test")
@@ -453,7 +453,7 @@ func TestCardBilling_OwnerSetsARefill(t *testing.T) {
 	}
 	r := answer.Refill
 	if !r.Enabled || r.ThresholdCents != 500 || r.AmountCents != 2000 || r.WeekLimitCents != 6000 || r.MonthLimitCents != 0 ||
-		r.MinAmountCents != store.MinRefillCents || r.MaxAmountCents != store.MaxCardPaymentCents || r.Open || r.Limit != "" ||
+		r.MinAmountCents != store.MinCardPaymentCents || r.MaxAmountCents != store.MaxCardPaymentCents || r.Open || r.Limit != "" ||
 		r.Caps.AmountCents != 5000 || r.Caps.PerDay != 1 || r.Caps.WeekCents != 10000 {
 		t.Fatalf("refill block=%+v", r)
 	}

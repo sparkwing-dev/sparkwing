@@ -74,8 +74,8 @@ func (t *Tenant) PrepareAuthorizedBillingPage(ctx context.Context, a capability.
 		}
 		switch kind {
 		case capability.BillingPageCredits:
-			if amount < MinCardChargeCents {
-				return ErrInvalidInput
+			if amount < MinCardPaymentCents {
+				return fmt.Errorf("%w: each payment is at least $%d", ErrInvalidInput, MinCardPaymentCents/100)
 			}
 			page.AmountCents = amount
 			page.ReservationID, err = t.openCreditCheckoutTx(ctx, tx, amount*MicroCreditsPerCent, tx.now(ctx), billingPageLife)

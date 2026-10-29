@@ -16,15 +16,14 @@ type LogPutSigner interface {
 	SignLogPut(ctx context.Context, key string, size int64, digest blob.Digest, expiry time.Time) (string, map[string]string, error)
 }
 
-// Signer assembles one storage URL after controller authorization. ClassReady
-// checks the backend lifecycle rule; the caller supplies the run's persisted
-// retention class. Now defaults to time.Now. Expires, when set, is the slot's
-// fixed upload deadline; otherwise the URL lasts limits.LogUploadURLTTL.
+// Signer assembles one storage URL after controller authorization; the caller
+// supplies the run's persisted retention class. Now defaults to time.Now.
+// Expires, when set, is the slot's fixed upload deadline; otherwise the URL
+// lasts limits.LogUploadURLTTL.
 type Signer struct {
-	Objects    LogPutSigner
-	ClassReady func(context.Context, string) error
-	Now        func() time.Time
-	Expires    time.Time
+	Objects LogPutSigner
+	Now     func() time.Time
+	Expires time.Time
 }
 
 // Sign returns one immutable segment or final-manifest slot for the requested
@@ -33,8 +32,8 @@ func (s Signer) Sign(ctx context.Context, request blob.LogSigningRequest, class 
 	if err := ctx.Err(); err != nil {
 		return blob.LogUploadURL{}, err
 	}
-	if s.Objects == nil || s.ClassReady == nil {
-		return blob.LogUploadURL{}, fmt.Errorf("logseg: signing requires objects and lifecycle validation")
+	if s.Objects == nil {
+		return blob.LogUploadURL{}, fmt.Errorf("logseg: signing requires objects")
 	}
 	if request.Index < 0 || request.Index > int64(limits.MaxLogSegmentNumber) {
 		return blob.LogUploadURL{}, fmt.Errorf("logseg: invalid segment index")
@@ -42,9 +41,6 @@ func (s Signer) Sign(ctx context.Context, request blob.LogSigningRequest, class 
 	subject := cloneSubject(request.Subject)
 	prefix, err := blob.LogSubjectPrefix(class, subject)
 	if err != nil {
-		return blob.LogUploadURL{}, err
-	}
-	if err := s.ClassReady(ctx, class); err != nil {
 		return blob.LogUploadURL{}, err
 	}
 	now := time.Now

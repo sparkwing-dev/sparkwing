@@ -36,14 +36,14 @@ Enumerate every doc topic
 | `-C, --checkout PATH` | Resolve the project from this local checkout path. |
 | `-h, --help` | Show command help without executing. |
 | `--help-all` | Include uncommon flags in command help. |
-| `--guides` | guides |
-| `--versions` | versions |
-| `--search TEXT` | Match records; never scan log text. |
-| `--limit N` | Output count at least one; paginated commands continue with --cursor. |
+| `--guides` | List the embedded reading guides and the topics each covers instead of topic pages. |
+| `--versions` | List the docs versions embedded in this CLI, adding the ones published on sparkwing.dev with --web. |
+| `--search TEXT` | Text to match against record names and summaries; log text is not searched. |
+| `--limit N` | Maximum number of records to print, at least one. Continue with --cursor when more exist. |
 | `--cursor CURSOR` | Continue from next_cursor using the same filters. |
-| `--web` | web |
-| `--version vX.Y.Z` | version |
-| `--no-cache` | no cache |
+| `--web` | List topics from sparkwing.dev for the selected version instead of the docs embedded in this CLI. |
+| `--version vX.Y.Z` | Docs version to list; without --web it must match this CLI's embedded version or latest. |
+| `--no-cache` | Fetch from sparkwing.dev without using the local docs web cache; has no effect without --web. |
 
 ## `sparkwing docs migrations`
 
@@ -57,11 +57,11 @@ Per-version migration guides (agent-friendly)
 | `-C, --checkout PATH` | Resolve the project from this local checkout path. |
 | `-h, --help` | Show command help without executing. |
 | `--help-all` | Include uncommon flags in command help. |
-| `--version vX.Y.Z` | version |
-| `--from vX.Y.Z` | from |
-| `--to vA.B.C` | to |
-| `--web` | web |
-| `--no-cache` | no cache |
+| `--version vX.Y.Z` | Print the migration guide for this one release. |
+| `--from vX.Y.Z` | Combine every migration guide released after this version, from the beginning by default. |
+| `--to vA.B.C` | Combine every migration guide up to and including this version, the newest by default. |
+| `--web` | Read migration guides from sparkwing.dev instead of the copies embedded in this CLI. |
+| `--no-cache` | Fetch from sparkwing.dev without using the local docs web cache; has no effect without --web. |
 
 ## `sparkwing docs read`
 
@@ -78,10 +78,10 @@ Read one document
 | `--full` | Read the full documentation topic. |
 | `--section START_LINE` | First line of the documentation section. |
 | `--topic NAME` | Documentation topic. |
-| `--guide NAME` | guide |
-| `--web` | web |
-| `--version vX.Y.Z` | version |
-| `--no-cache` | no cache |
+| `--guide NAME` | Read this embedded guide instead of a topic; cannot be combined with --topic, --web, --version or --no-cache. |
+| `--web` | Read the topic from sparkwing.dev instead of the copy embedded in this CLI. |
+| `--version vX.Y.Z` | Docs version to read; without --web it must match this CLI's embedded version or latest. |
+| `--no-cache` | Fetch from sparkwing.dev without using the local docs web cache; has no effect without --web. |
 
 ## `sparkwing docs search`
 
@@ -95,8 +95,8 @@ Find the section that answers a question
 | `-C, --checkout PATH` | Resolve the project from this local checkout path. |
 | `-h, --help` | Show command help without executing. |
 | `--help-all` | Include uncommon flags in command help. |
-| `--limit N` | Output count at least one; paginated commands continue with --cursor. |
+| `--limit N` | Maximum number of records to print, at least one. Continue with --cursor when more exist. |
 | `--cursor CURSOR` | Continue from next_cursor using the same filters. |
-| `--search TEXT` | Match records; never scan log text. |
+| `--search TEXT` | Text to match against record names and summaries; log text is not searched. |
 | `--body` | Include document bodies in search results. |
-| `--topics` | topics |
+| `--topics` | Return matching topic pages instead of individual section hits. |

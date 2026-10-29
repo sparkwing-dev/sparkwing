@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"sort"
 	"strings"
@@ -217,5 +218,62 @@ func TestPreviousReleaseTagIsNotTheReleaseBeingCut(t *testing.T) {
 	trimmed := slices.DeleteFunc(slices.Clone(tags), func(t string) bool { return t == "v0.50.4" })
 	if got := highestReleaseTag(trimmed); got != "v0.50.3" {
 		t.Fatalf("previous tag = %q, want v0.50.3; the schema and wire gates would diff a release against itself", got)
+	}
+}
+
+// `sparkwing run` refuses `--sw-allow`; the risk flag is `--sw-allow-risk`, so a
+// release recipe that names the old spelling stops before push-tag can run.
+func TestReleaseRecipesNameTheRiskFlagRunAccepts(t *testing.T) {
+	removed := regexp.MustCompile(`--sw-allow(\s|=)`)
+	for _, ex := range (Release{}).Examples() {
+		if removed.MatchString(ex.Command + " ") {
+			t.Errorf("release example %q names --sw-allow; use --sw-allow-risk", ex.Command)
+		}
+	}
+	root, err := filepath.Abs("../..")
+	if err != nil {
+		t.Fatal(err)
+	}
+	delivery, err := os.ReadFile(filepath.Join(root, "DELIVERY.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if loc := removed.FindIndex(delivery); loc != nil {
+		t.Errorf("DELIVERY.md names --sw-allow at byte %d; use --sw-allow-risk", loc[0])
+	}
+}
+
+// `sparkwing run` refuses a pipeline flag before `--`, so an example that
+// puts one there fails for whoever copies it.
+func TestPipelineExamplesPassPipelineFlagsAfterTheSeparator(t *testing.T) {
+	runFlags := map[string]bool{"-o": true, "--output": true, "-C": true, "--checkout": true, "-h": true, "--help": true, "--help-all": true, "--publish": true, "-v": true}
+	command := regexp.MustCompile(`Command:\s*"((?:[^"\\]|\\.)*)"`)
+	files, err := filepath.Glob("*.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, file := range files {
+		if strings.HasSuffix(file, "_test.go") {
+			continue
+		}
+		src, err := os.ReadFile(file)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, m := range command.FindAllStringSubmatch(string(src), -1) {
+			_, run, ok := strings.Cut(m[1], "sparkwing run ")
+			if !ok {
+				continue
+			}
+			for _, tok := range strings.Fields(run)[1:] {
+				if tok == "--" {
+					break
+				}
+				flag, _, _ := strings.Cut(tok, "=")
+				if strings.HasPrefix(tok, "-") && !strings.HasPrefix(tok, "--sw-") && !runFlags[flag] {
+					t.Errorf("%s: example %q passes %s before --", file, m[1], tok)
+				}
+			}
+		}
 	}
 }

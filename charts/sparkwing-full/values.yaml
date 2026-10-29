@@ -141,8 +141,9 @@ controller:
     # startup and then relies on the running count.
     reconcile: ""
     # Object store the ceiling measures, as a store URL such as
-    # s3://bucket/prefix. Read on the interval above and never served.
-    # Empty counts only the writes the controller itself makes.
+    # s3://bucket/prefix. Read on the interval above while a maximum or
+    # warning mark is set, and never served. Empty counts only the writes
+    # the controller itself makes.
     store: ""
     # Listings one measurement may spend before it stops and reports
     # itself incomplete. Each listing covers a thousand objects, so the

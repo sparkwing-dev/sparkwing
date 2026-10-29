@@ -61,7 +61,7 @@ func credentialSessionServerWith(t *testing.T, configure func(*Server), opts ...
 
 func credentialRequestHTTP(t *testing.T, handler http.Handler, raw, body string, bearer bool) *httptest.ResponseRecorder {
 	t.Helper()
-	r := httptest.NewRequest("POST", "https://controller.test/api/v1/tokens", strings.NewReader(body))
+	r := httptest.NewRequest(http.MethodPost, "https://controller.test/api/v1/tokens", strings.NewReader(body))
 	r.Header.Set("Content-Type", "application/json")
 	if bearer {
 		r.Header.Set("Authorization", "Bearer "+raw)

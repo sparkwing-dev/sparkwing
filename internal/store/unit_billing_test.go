@@ -2,6 +2,7 @@ package store
 
 import (
 	"errors"
+	"fmt"
 	"math/rand/v2"
 	"sync"
 	"testing"
@@ -284,7 +285,31 @@ func TestMeteredUnitRenewalCheckpointsAfterComputeStarts(t *testing.T) {
 	if _, err := s.AsOperator().RenewUnit(t.Context(), claim.Award.CapabilityPrefix, false); err != nil {
 		t.Fatal(err)
 	}
-	unitBillingTotal(t, s, 1200, false)
+	unitBillingTotal(t, s, 600, false)
+}
+
+// A team with one and a half slices left runs the job it was admitted for: the first renewal charges the job minimum
+// inside the admitted slice and asks only one slice past the compute used, not a second slice on top of the minimum.
+func TestFirstRenewalRunsAJobItsAdmittedSliceCovers(t *testing.T) {
+	for _, cloud := range []bool{true, false} {
+		t.Run(fmt.Sprint("cloud=", cloud), func(t *testing.T) {
+			s, demand, now := meteredUnitFixture(t, cloud)
+			claim, _ := meteredUnitClaim(t, s, demand)
+			var paid int64
+			if err := s.db.QueryRow(`SELECT COALESCE(SUM(amount_micro),0) FROM credit_charges`).Scan(&paid); err != nil {
+				t.Fatal(err)
+			}
+			rewriteSchemaExec(t, s.db, `UPDATE credit_grants SET amount_micro=?`, paid*3/2)
+			*now = now.Add(time.Second)
+			if _, err := s.AsOperator().RenewUnit(t.Context(), claim.Award.CapabilityPrefix, false); err != nil {
+				t.Fatalf("first renewal at one and a half slices: %v", err)
+			}
+			row, err := (&Tenant{s: s, team: "a"}).ReadNode(t.Context(), runspec.NodeRef{RunID: "run", NodeID: "job"})
+			if err != nil || row.CancelRequestedAt != nil {
+				t.Fatalf("first renewal stopped the job: %q, %v", row.CancelReason, err)
+			}
+		})
+	}
 }
 
 func TestMeteredUnitIssuanceCannotOutliveClaimAuthorityProperty(t *testing.T) {

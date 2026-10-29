@@ -115,8 +115,9 @@ Automatic refill charges the customer's default payment method in Stripe. When
 a card is set up, the controller passes the team owner's email to Stripe for its
 receipts without storing it.
 
-Each Add funds payment and automatic refill is at most $1,000, at every standing
-tier including High. Larger amounts are refused before a payment starts. Use
+Each Add funds payment and automatic refill is at least $10, so card fees stay
+a small share of it, and at most $1,000, at every standing tier including High.
+Other amounts are refused before a payment starts. Use
 the billing page contact request, or `sparkwing billing request-tier --profile cloud --tier high --message <text>`, to ask about larger payments. The request reaches the
 operator console queue.
 
@@ -136,8 +137,7 @@ the request under that key conflicts. An expired page requires a new key.
 Automatic refill is off until an owner turns it on, and turning it on needs a
 saved card. The owner sets a threshold and a refill amount: when the balance
 falls below the threshold, the controller charges the saved card the refill
-amount. A refill is at least $10, so card fees stay a small share of it, and at
-most $1,000. The owner can also set a weekly and a monthly limit on refills;
+amount, between $10 and $1,000. The owner can also set a weekly and a monthly limit on refills;
 zero means no limit.
 
 Set refills on the console billing page, with `sparkwing billing refill`
@@ -171,9 +171,17 @@ makes one call that creates and confirms the off-session payment, with the
 refill's id as Stripe's idempotency key and in the payment's metadata. Until
 the payment settles, every pass rechecks the same eligibility, setting the
 refill's own reservation aside, and repeats that same request under the same
-key, so a crash or a lost answer never charges twice. A refill the team is no
-longer eligible for, for example because refills were turned off or the card
-changed, is withdrawn without another call; a payment an earlier call made is
+key, so a crash or a lost answer never charges twice. A call the checkout
+service does not answer, or answers with a 5xx or 429, is repeated on the next
+pass, then after waits that double from 30 seconds up to 30 minutes; one it
+still cannot answer 6 hours after the first failure closes as
+`checkout_unavailable`. Any other refusal, such as a 400 for a deployment the
+service does not serve or a 401 for a rotated token, closes the refill as
+`checkout_refused` without another call. Either one logs
+`alert=checkout_failed` for the operator and stops refills the way a decline
+does, and the owners get one email saying automatic refills stopped. A refill
+the team is no longer eligible for, for example because refills were turned off
+or the team's Stripe customer changed, is withdrawn without another call; a payment an earlier call made is
 still credited. A refill that nothing settles within 23 hours is closed
 as expired and the next one starts fresh; a payment that settles later is still
 credited. Credits settle only from Stripe's signed webhook, which names the
@@ -210,8 +218,9 @@ funds payment does not block refills again. A failure from a newer refill does.
 Cloud work is metered in 60-second slices. Admission reserves the first slice
 from the balance; a job whose first slice the balance cannot cover is refused
 with "out of credits", naming the balance and what the slice needs. Each lease
-renewal charges the time used and reserves the next slice in the same
-transaction. A metered lease never runs past its funded horizon. When the
+renewal charges the time used, at least the job minimum, and reserves one
+slice past the time used in the same transaction, so the slice admission
+reserved also pays the minimum the first renewal charges. A metered lease never runs past its funded horizon. When the
 balance cannot pay the next slice, the renewal records
 the stop and cancels the metered job in the same transaction. A hold records
 its drain deadline with the financial obligation. The next renewal applies
@@ -337,9 +346,12 @@ payer or outcomes. A refund response binds only the provider's refund ID to the
 queued refund. Verified callbacks supply its amount and outcome, including
 when an earlier partial refund leaves less than the original payment to return.
 The worker refunds under the payment as its idempotency key, so a call that
-fails before Stripe answers repeats the same refund. A refund Stripe reports
-failed or canceled is not retried: the operator console lists it on the team
-under Refunds Stripe did not make, and the operator returns the money in Stripe.
+fails before Stripe answers repeats the same refund, with the same backoff as a
+refill. A refund Stripe reports failed or canceled is not retried, and neither
+is one the checkout service refuses or still cannot answer 6 hours after the
+first failure, which also logs `alert=checkout_failed`: the operator console
+lists it on the team under Refunds Stripe did not make, and the operator
+returns the money in Stripe.
 The team's owners get one email saying the refund of that amount for the payment
 on its date could not be completed by Stripe and that Sparkwing will follow up. A
 terminal refund outcome survives a later pending delivery, and a conflicting

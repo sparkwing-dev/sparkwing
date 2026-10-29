@@ -23,7 +23,7 @@ func CloudSizeMemoryBytes(cores int64) int64 {
 func CloudSizes() []CloudSize {
 	out := make([]CloudSize, 0, 6)
 	for _, cores := range []int64{2, 4, 8, 16, 32, 64} {
-		out = append(out, CloudSize{Label: fmt.Sprintf("sparkwing-%dcpu", cores), CreditClass: cores, Resources: Resources{Cores: float64(cores), MemoryBytes: CloudSizeMemoryBytes(cores)}})
+		out = append(out, CloudSize{Label: fmt.Sprintf("%s%d%s", CloudSizeLabelPrefix, cores, CloudSizeLabelSuffix), CreditClass: cores, Resources: Resources{Cores: float64(cores), MemoryBytes: CloudSizeMemoryBytes(cores)}})
 	}
 	return out
 }
@@ -31,7 +31,7 @@ func CloudSizes() []CloudSize {
 // CloudSizeForProfile resolves size terms using the same AND/OR rules as selectors.
 // Terms without a Cloud size label remain the claim module's responsibility.
 func CloudSizeForProfile(selector []string, profile Profile) (CloudSize, error) {
-	profile.Labels = slices.DeleteFunc(slices.Clone(profile.Labels), isCloudSizeLabel)
+	profile.Labels = slices.DeleteFunc(slices.Clone(profile.Labels), IsCloudSizeLabel)
 	for _, size := range CloudSizes() {
 		candidate := profile
 		candidate.Labels = append(slices.Clone(profile.Labels), size.Label)
@@ -39,7 +39,7 @@ func CloudSizeForProfile(selector []string, profile Profile) (CloudSize, error) 
 		for _, term := range selector {
 			sizeTerm := false
 			for _, alt := range strings.Split(term, ",") {
-				sizeTerm = sizeTerm || isCloudSizeLabel(strings.TrimSpace(alt))
+				sizeTerm = sizeTerm || IsCloudSizeLabel(strings.TrimSpace(alt))
 			}
 			if sizeTerm && !TermSatisfied(candidate, term) {
 				matched = false
@@ -54,6 +54,14 @@ func CloudSizeForProfile(selector []string, profile Profile) (CloudSize, error) 
 	return CloudSize{}, fmt.Errorf("no Cloud size satisfies required labels %q", selector)
 }
 
-func isCloudSizeLabel(label string) bool {
-	return strings.HasPrefix(label, "sparkwing-") && strings.HasSuffix(label, "cpu")
+// CloudSizeLabelPrefix and CloudSizeLabelSuffix bound every Cloud size label, sparkwing-<cores>cpu. The store's claim
+// query spells IsCloudSizeLabel in SQL from these two values.
+const (
+	CloudSizeLabelPrefix = "sparkwing-"
+	CloudSizeLabelSuffix = "cpu"
+)
+
+// IsCloudSizeLabel reports whether label names a Cloud size.
+func IsCloudSizeLabel(label string) bool {
+	return strings.HasPrefix(label, CloudSizeLabelPrefix) && strings.HasSuffix(label, CloudSizeLabelSuffix)
 }

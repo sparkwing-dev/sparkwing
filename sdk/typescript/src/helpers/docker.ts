@@ -225,7 +225,6 @@ export const docker = {
   async login(ctx: Context, registry: string, username: string, secret: string): Promise<void> {
     assertExecution();
     if (!registry || !username || !secret) throw new Error("Docker login requires registry, username and secret");
-    await ctx.mask(secret);
     try {
       await runInput(ctx, ["docker", "login", "--username", username, "--password-stdin", registry], secret);
     } catch (cause) {

@@ -582,8 +582,9 @@ scanner failure on `main` is what holds a release back, before the tag exists.
   outside pipeline Jobs.
 - Reserve one Job per team-dedicated node and verify network enforcement and
   teardown with native probes before accepting Cloud execution.
-- Configure storage lifecycle rules for the declared log retention classes.
-  Startup refuses signing into a class whose lifecycle rule is absent.
+- Configure storage lifecycle rules for the declared log retention classes as
+  a backstop. Startup warns about a class without one; Sparkwing still deletes
+  log objects at their class age.
 - Pin verified image digests, encrypt the deployment's secret store and rotate
   source and release credentials under their owning services' procedures.
 

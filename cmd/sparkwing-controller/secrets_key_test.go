@@ -41,7 +41,7 @@ func postSecret(t *testing.T, srv *controller.Server, st *store.Store, name, val
 	if err != nil {
 		t.Fatal(err)
 	}
-	req := httptest.NewRequest("POST", "/api/v1/secrets", bytes.NewReader(body))
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/secrets", bytes.NewReader(body))
 	req.Header.Set("Authorization", "Bearer "+raw)
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()

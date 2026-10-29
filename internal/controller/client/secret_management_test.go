@@ -178,7 +178,7 @@ func TestSecretManagementDeletionReadsTheControllerStatus(t *testing.T) {
 		deleted bool
 	}{{204, "", true}, {404, `{"error":{"code":"not_found","message":"secret not found"}}`, false}} {
 		c := testEngine(t, func(req *http.Request) (*http.Response, error) {
-			if req.Method != "DELETE" || req.URL.Query().Get("repo") != "gh:7" || req.URL.Query().Get("pipeline") != "deploy" {
+			if req.Method != http.MethodDelete || req.URL.Query().Get("repo") != "gh:7" || req.URL.Query().Get("pipeline") != "deploy" {
 				t.Fatalf("selector lost: %s %s", req.Method, req.URL)
 			}
 			return engineResponse(tc.status, tc.body), nil

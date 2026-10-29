@@ -16,5 +16,5 @@ Describe Sparkwing and the selected project
 | `-C, --checkout PATH` | Resolve the project from this local checkout path. |
 | `-h, --help` | Show command help without executing. |
 | `--help-all` | Include uncommon flags in command help. |
-| `--for-agent` | for agent |
-| `--first-time` | first time |
+| `--for-agent` | Print the agent orientation block with this repository's current state instead of the summary table. |
+| `--first-time` | Print a welcome card with missing prerequisites and first commands to try; ignored with --for-agent. |

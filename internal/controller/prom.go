@@ -470,13 +470,13 @@ var (
 
 	objectStoreBucketBytesDesc = prometheus.NewDesc(
 		"sparkwing_object_store_bucket_bytes",
-		"Bytes the bucket holds, counted as writes happen and replaced by each measured total.",
+		"Bytes the bucket holds, counted as writes happen and replaced by each measured total. Absent while no ceiling or warning mark is set.",
 		nil, nil,
 	)
 
 	objectStoreBucketObjectsDesc = prometheus.NewDesc(
 		"sparkwing_object_store_bucket_objects",
-		"Objects the bucket holds, counted as writes happen and replaced by each measured total.",
+		"Objects the bucket holds, counted as writes happen and replaced by each measured total. Absent while no ceiling or warning mark is set.",
 		nil, nil,
 	)
 
@@ -549,8 +549,10 @@ func (objectStoreCollector) Collect(ch chan<- prometheus.Metric) {
 // safety: the ceiling gauges are emitted even while the bucket is unlimited, so
 // an alert on a frozen bucket keeps a series to evaluate against.
 func collectCeiling(ch chan<- prometheus.Metric, c objectguard.CeilingState) {
-	ch <- prometheus.MustNewConstMetric(objectStoreBucketBytesDesc, prometheus.GaugeValue, float64(c.Bytes))
-	ch <- prometheus.MustNewConstMetric(objectStoreBucketObjectsDesc, prometheus.GaugeValue, float64(c.Objects))
+	if c.Measured {
+		ch <- prometheus.MustNewConstMetric(objectStoreBucketBytesDesc, prometheus.GaugeValue, float64(c.Bytes))
+		ch <- prometheus.MustNewConstMetric(objectStoreBucketObjectsDesc, prometheus.GaugeValue, float64(c.Objects))
+	}
 	ch <- prometheus.MustNewConstMetric(objectStoreCeilingDesc, prometheus.GaugeValue, float64(c.MaxBytes), "bytes")
 	ch <- prometheus.MustNewConstMetric(objectStoreCeilingDesc, prometheus.GaugeValue, float64(c.MaxObjects), "objects")
 	frozen := 0.0

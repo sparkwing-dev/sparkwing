@@ -102,20 +102,23 @@ func printPipelineHelp(w io.Writer, schema runspec.PipelinePresentation) {
 	if schema.Help != "" {
 		fmt.Fprintf(w, "DESCRIPTION\n  %s\n\n", schema.Help)
 	}
-	fmt.Fprintf(w, "USAGE\n  sparkwing run %s", schema.Name)
+	fmt.Fprintf(w, "USAGE\n  sparkwing run %s [sparkwing flags]", schema.Name)
+	if len(schema.Args) > 0 {
+		fmt.Fprint(w, " --")
+	}
 	for _, a := range schema.Args {
 		if a.Required {
 			fmt.Fprintf(w, " --%s <%s>", a.Name, a.Type)
 		}
 	}
 	if len(schema.Args) > 0 {
-		fmt.Fprint(w, " [flags]")
+		fmt.Fprint(w, " [pipeline flags]")
 	}
 	fmt.Fprint(w, "\n\n")
 	if len(schema.Args) == 0 {
 		fmt.Fprint(w, "No pipeline-specific flags.\n\n")
 	} else {
-		fmt.Fprintln(w, "PIPELINE FLAGS")
+		fmt.Fprintln(w, "PIPELINE FLAGS (after --)")
 		for _, a := range schema.Args {
 			fmt.Fprintln(w, pipelineFlagLine(a))
 		}

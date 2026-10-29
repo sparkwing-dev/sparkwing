@@ -32,7 +32,7 @@ func TestAccountRolelessHTTPKeepsOnlyAccountAuthorityProperty(t *testing.T) {
 			return false
 		}
 		for _, path := range []string{"/api/v1/services", "/api/v1/team/members", "/api/v1/runners"} {
-			r := httptest.NewRequest("GET", path, nil)
+			r := httptest.NewRequest(http.MethodGet, path, nil)
 			r.AddCookie(&http.Cookie{Name: "console-session", Value: b.raw})
 			r.Header.Set("X-Team", string(team))
 			w := httptest.NewRecorder()

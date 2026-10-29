@@ -187,7 +187,7 @@ raw readiness publication and other legacy lifecycle/claim/trigger APIs remain
 open, along with the earlier foreign contract gaps. W1b implementation files
 are unchanged. See `../w1-session22-progress.md` for evidence and shared files.
 
-## From bw-3095-w1b-store-data (triaged by lead, see "Lead decisions 07:40")
+## From the w1b-store-data lane (triaged by lead, see "Lead decisions 07:40")
 
 W1b continuation: shared `accountBillingAwardTx` now bypasses the calculator
 for unmetered awards, including checkpoint, final settlement and replay. W1's
@@ -203,7 +203,7 @@ are removed. Select a Tenant explicitly for their retained methods. Caller
 migrations in this checkout are complete. W1 lifecycle files changed only at
 two price-read callsites in `store.go`.
 
-## From bw-3095-w3-host (triaged by lead, see "Lead decisions 07:40")
+## From the w3-host lane (triaged by lead, see "Lead decisions 07:40")
 
 W3's [shared steps and alias caller continuation](w3-ingress-lease-continuation.md#shared-steps-and-alias-caller-continuation)
 removes the separate retained step scheduler. The retained and common executors
@@ -293,7 +293,7 @@ retains StartAt/StopAt/Only, but `runspec.Options` has no representation for the
 Declare their intake/seal representation before W3 migrates those assertions to
 the common executor. Mutable flags and invocation blobs cannot replace the seal.
 
-## From bw-3095-w2-credentials (triaged by lead, see "Lead decisions 07:40")
+## From the w2-credentials lane (triaged by lead, see "Lead decisions 07:40")
 
 **W2 runner administration and billing hard cut.** The three legacy GitHub
 runner permission routes, token-table metering route and eight credits.grant
@@ -444,7 +444,7 @@ representation remain integration points.
 **W1: authority-bearing secret reads for W2.** The secret-by-name HTTP cutover now uses C2's local SecretReader interface: Team() Team and ReadSecret(ctx, Authorized) (*Secret, error). Use one store-clock transaction to recheck ancestry, current membership, the selected route alternative and claim liveness/cancellation. Derive claim run/pipeline from its binding and seal, require declaration, enforce pipeline/shared precedence and only_on pools, and commit secret_released with selection. A missing run selector never detaches a claim from its bound run. Member run selectors stay tenant-scoped, and masked member reads are forbidden. Return no row after a failed audit or authority check. Tenant.ReleaseClaimSecret takes the retired ClaimToken and caller clock and is not an adapter. W2 tests the final HTTP/decryption path with fakes. The default refuses missing transactions with policy_missing. See [W2-secret-reads-handoff.md](../W2-secret-reads-handoff.md).
 
 
-## From bw-3095-w8-runners-engine (triaged by lead, see "Lead decisions 07:40")
+## From the w8-runners-engine lane (triaged by lead, see "Lead decisions 07:40")
 
 ### W8 composition continuation
 
@@ -924,8 +924,10 @@ the Stripe `status` and, when Stripe refused the charge, `failure`
 (`authentication_required` or the decline code). Under decision 65 the
 controller sends no card or email: the service charges the customer's default
 payment method, or its newest card when it has no default, and answers 409
-when the customer has no card. Both repositories test against a byte-for-byte
-copy of the example in `testdata/refill_contract.json`.
+when the customer has no card. Both repositories test their real code against a
+byte-for-byte copy of `testdata/checkout_contract.json`, which covers every
+checkout-service route, the payment bounds, the Stripe metadata keys and which
+refusals are final.
 
 - The controller checks eligibility and opens the refill in one transaction:
   refills on, no failed refill blocking them, no hold, balance below the
@@ -1154,3 +1156,7 @@ copy of the example in `testdata/refill_contract.json`.
 ## 2026-10-27 Korey decision 72: fetched runs carry their branch in OIDC
 
 - Amends decision 70. A run whose code Sparkwing fetched from the repository through the App at a branch or tag head (run-now, console runs, unlocked schedule overrides) carries the ref and sha it ran in its OIDC token, alongside the repository claims, with trigger manual. The branch head was resolved and verified by Sparkwing, so it is the source of truth, matching GitHub's workflow_dispatch tokens. Deploy policies that pin ref:refs/heads/main accept a run-now on main and refuse one on another branch; policies that care how a run started can require trigger:push. Uploads, local and here runs still carry no repository or ref claims.
+
+## 2026-10-29 Amendment (lead, for Korey to ratify): log lifecycle rules are a startup warning
+
+- Amends c1-data.md's retention rule and the frozen architecture §4.4 ("lifecycle rules are checked at boot"; the code had drifted to a check on every log-segment signing). Sparkwing deletes log objects at their class age itself, so a bucket lifecycle rule is only a backstop. Signing a log segment never reads bucket lifecycle rules and never refuses a class without one. An S3 controller reads the rules once at startup and logs a warning for each retention class without a rule at least that long; it does not refuse to start, and `s3:GetLifecycleConfiguration` is optional. Continuous verification of the rule belongs to external operator checks, as network policy does under decision 71.

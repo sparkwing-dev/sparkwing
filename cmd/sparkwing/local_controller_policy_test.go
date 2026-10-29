@@ -323,7 +323,7 @@ func exerciseLocalRun(t *testing.T, options client.EngineOptions, admitted contr
 	if _, err := sink.Close(ctx, logseg.End{}); err != nil {
 		t.Fatal("log commit:", err)
 	}
-	request, err := http.NewRequestWithContext(ctx, "GET", options.URL+"/api/v1/runs/"+admitted.RunID+"/jobs/build/logs", nil)
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, options.URL+"/api/v1/runs/"+admitted.RunID+"/jobs/build/logs", nil)
 	if err != nil {
 		t.Fatal(err)
 	}

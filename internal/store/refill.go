@@ -20,9 +20,9 @@ const (
 	businessEventRefillFailed   = "billing.refill_failed"
 	businessEventRefillSettings = "billing.refill_settings"
 
-	// MinRefillCents keeps a refill's card fee reasonable.
-	MinRefillCents = 1000
-	// MaxCardPaymentCents bounds each Add funds payment and automatic refill, at every standing tier.
+	// MinCardPaymentCents and MaxCardPaymentCents bound each Add funds payment and automatic refill, at every standing
+	// tier. The checkout service holds the same pair, pinned by the shared checkout contract fixture.
+	MinCardPaymentCents = 1_000
 	MaxCardPaymentCents = 100_000
 )
 
@@ -187,8 +187,8 @@ func (s RefillSettings) validate() error {
 		return fmt.Errorf("%w: a refill threshold or limit is at most $%d", ErrInvalidInput, MaxCreditGrantMicro/MicroCreditsPerCent/100)
 	case s.AmountCents > MaxCardPaymentCents:
 		return fmt.Errorf("%w: each payment is at most $%d; contact us through the billing request form or sparkwing billing request-tier for larger payments", ErrInvalidInput, MaxCardPaymentCents/100)
-	case (s.Enabled || s.AmountCents != 0) && s.AmountCents < MinRefillCents:
-		return fmt.Errorf("%w: a refill is at least $%d", ErrInvalidInput, MinRefillCents/100)
+	case (s.Enabled || s.AmountCents != 0) && s.AmountCents < MinCardPaymentCents:
+		return fmt.Errorf("%w: a refill is at least $%d", ErrInvalidInput, MinCardPaymentCents/100)
 	}
 	return nil
 }

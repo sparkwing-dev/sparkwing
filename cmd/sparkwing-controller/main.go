@@ -83,7 +83,7 @@ func run(args []string) error {
 	billingURL := fs.String("billing-url", "",
 		"base URL of the hosted checkout service that opens a Stripe Checkout Session "+
 			"when a team owner buys credits; the controller authenticates with the "+
-			credBillingToken+" credential. Empty sells no credits.")
+			credBillingToken+" credential and needs --payment-mode to settle what it sells. Empty sells no credits.")
 	deploymentKind := fs.String("deployment", string(deployment.KindLocal),
 		"what kind of deployment this controller serves: local (one team, no license), team (many teams under "+
 			"the multi-team license in the "+credLicense+" credential, metered) or cloud (the hosted service). "+
@@ -224,7 +224,7 @@ func run(args []string) error {
 	logRetention := fs.String("log-retention", "",
 		"teams whose node log segments keep for a set number of days instead of 90 (with credits) or 30 "+
 			"(without), as team=days[,team=days...]. Each distinct number is a retention class under "+
-			"<cache prefix>/logs/r<days>/ that needs its own lifecycle rule in the cache bucket")
+			"<cache prefix>/logs/r<days>/; give each a lifecycle rule in the cache bucket as a backstop")
 	teamDownloadFree := fs.Int64("team-daily-download-free-bytes", controller.DefaultTeamDailyDownloadFreeBytes,
 		"bytes one team without credits may download in a UTC day: binaries, artifacts, dependency archives "+
 			"and git fetches, through the cache or this controller. Log reads are not counted. Past it the "+
@@ -392,9 +392,6 @@ func run(args []string) error {
 			*liveLogNodeKB, *liveLogTotalMB)
 	}
 
-	if err := checkMultiTeamObjectStore(cfg, *bucketStoreURL, *cacheBlobStore); err != nil {
-		return err
-	}
 	if err := checkInsecureCookies(cfg, *insecureCookies); err != nil {
 		return err
 	}
@@ -417,6 +414,11 @@ func run(args []string) error {
 	if strings.TrimSpace(*billingURL) != "" && creds.BillingToken == "" {
 		return errors.New("--billing-url is set but the " + credBillingToken + " credential is absent; " +
 			"the checkout service refuses a controller without its token")
+	}
+	if strings.TrimSpace(*billingURL) != "" && paymentVerifier == nil {
+		return errors.New("--billing-url is set but payment settlement is off, so a card would be charged for credits " +
+			"this controller never grants; set --payment-mode with the " + credStripeAPIKey + " and " +
+			credStripeWebhookSecret + " credentials, or drop --billing-url")
 	}
 
 	identity, err := parseIdentity(identityFlags{
@@ -479,6 +481,9 @@ func run(args []string) error {
 		Reconcile: *bucketReconcile,
 	}
 	if err := validateBucketCeiling(ceiling); err != nil {
+		return err
+	}
+	if err := checkMultiTeamObjectStore(cfg, *bucketStoreURL, *cacheBlobStore, ceiling.Limit.Bounded()); err != nil {
 		return err
 	}
 	if err := validateSupportContact(*supportContact); err != nil {
@@ -594,6 +599,7 @@ func run(args []string) error {
 			if err != nil {
 				return store.Policies{}, fmt.Errorf("--cache-blob-store: direct uploads: %w", err)
 			}
+			warnLogLifecycle(ctx, objects, retention)
 			var backend blob.ObjectBackend = objects
 			if cloudFront != nil {
 				backend, err = cloudFront.Backend(objects)
@@ -618,7 +624,7 @@ func run(args []string) error {
 		defer func() { _ = closeObjects() }()
 	}
 	if serr != nil {
-		return fmt.Errorf("open state db: %w", serr)
+		return fmt.Errorf("open state db: %w", epochMismatch(serr, epochDir))
 	}
 	defer func() { _ = st.Close() }()
 
@@ -833,20 +839,20 @@ func checkRequireAuth(ctx context.Context, reader deploymentAdminReader, require
 }
 
 // safety: uploads reserve team quota through the store whatever the blob backend,
-// but without --bucket-store the bucket ceiling counts only this process's writes,
-// so a multi-team controller must measure the bucket itself. The hosted
+// but without --bucket-store a bucket ceiling counts only this process's writes,
+// so a multi-team controller that sets one must measure the bucket itself. The hosted
 // controller's home is replaced with its pod while PostgreSQL keeps the records of
 // every blob, so its blobs must live in S3; --bucket-store only measures a bucket.
-func checkMultiTeamObjectStore(cfg deployment.Config, bucketStoreURL, cacheBlobStore string) error {
+func checkMultiTeamObjectStore(cfg deployment.Config, bucketStoreURL, cacheBlobStore string, bounded bool) error {
 	if cfg.Hosted() && !strings.HasPrefix(cacheBlobStore, "s3://") {
 		return errors.New("--deployment=cloud needs --cache-blob-store=s3://bucket/prefix: without it blobs, artifacts " +
 			"and logs land on the pod's filesystem and are lost when it is replaced, while PostgreSQL keeps their records")
 	}
-	if !cfg.MultiTeam() || strings.TrimSpace(bucketStoreURL) != "" {
+	if !cfg.MultiTeam() || !bounded || strings.TrimSpace(bucketStoreURL) != "" {
 		return nil
 	}
-	return errors.New("a multi-team deployment needs --bucket-store set to the store --cache-blob-store " +
-		"keeps its objects in, so the bucket ceiling measures every object rather than only this process's writes")
+	return errors.New("a multi-team deployment with a bucket ceiling or warning mark needs --bucket-store set to the store " +
+		"--cache-blob-store keeps its objects in, so the ceiling measures every object rather than only this process's writes")
 }
 
 func checkInsecureCookies(cfg deployment.Config, insecure bool) error {

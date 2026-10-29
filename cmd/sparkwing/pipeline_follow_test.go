@@ -77,7 +77,7 @@ func TestTriggeredOutcomeUsesSharedReadRetryPolicy(t *testing.T) {
 		calls := 0
 		reader, err := client.NewRunReader(client.EngineOptions{URL: "http://api.sock", HTTP: &http.Client{Transport: profileTransport(func(req *http.Request) (*http.Response, error) {
 			calls++
-			if req.Method != "GET" || req.URL.Path != "/api/v1/runs/run-outcome" {
+			if req.Method != http.MethodGet || req.URL.Path != "/api/v1/runs/run-outcome" {
 				t.Fatalf("unexpected outcome read: %s %s", req.Method, req.URL)
 			}
 			if calls == 1 {

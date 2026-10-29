@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"reflect"
 	"sync"
@@ -655,5 +656,25 @@ func TestAdminPausesAndResumesAppScheduleButCannotEditIt(t *testing.T) {
 	}
 	if after, err := tenant.GetCronSchedule(t.Context(), ids[0]); err != nil || !reflect.DeepEqual(before, after) {
 		t.Fatalf("refused admin edit changed App schedule: %v", err)
+	}
+}
+
+// The cron minimum waiver follows the authority the edit's transaction
+// resolved, never the subject a caller wrote into its copy of Authorized.
+func TestScheduleOverrideWaivesTheCronMinimumOnlyForResolvedLocalAuthority(t *testing.T) {
+	tenant, a, body, _ := consentedScheduleFixture(t)
+	ids, _, err := tenant.ReplaceAuthorizedSchedules(t.Context(), a, body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tenant.s.AsOperator().SetComputeLimits(t.Context(), map[string]int64{ComputeLimitCronSeconds: 3600}); err != nil {
+		t.Fatal(err)
+	}
+	forged := a
+	forged.Principal.Capability.Subject.Kind = capability.SubjectLocal
+	cron := "* * * * *"
+	var limit *ComputeLimitError
+	if _, err := tenant.OverrideAuthorizedSchedule(t.Context(), forged, ids[0], &cronspec.Override{Cron: &cron}); !errors.As(err, &limit) || limit.Limit != ComputeLimitCronSeconds {
+		t.Fatalf("a caller's local subject waived the cron minimum: %v", err)
 	}
 }

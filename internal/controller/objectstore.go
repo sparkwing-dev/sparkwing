@@ -60,7 +60,7 @@ func (s *Server) handleResetObjectStoreBreaker(w http.ResponseWriter, _ *http.Re
 // safety: the health summary says which classes refuse and never what their
 // limits are, and a failed measurement is named here while its error goes to
 // the log and the admin breaker route.
-func objectStoreHealth(bucket bool) (map[string]any, []string) {
+func objectStoreHealth() (map[string]any, []string) {
 	limiter := objectguard.Shared()
 	state := limiter.State()
 	summary := map[string]any{"tripped": state.Tripped, "enabled": state.Enabled}
@@ -80,7 +80,7 @@ func objectStoreHealth(bucket bool) (map[string]any, []string) {
 	}
 
 	ceiling := state.Ceiling
-	if ceiling.Enforced || bucket {
+	if ceiling.Measured {
 		// safety: the totals and the ceilings stay on the admin-scoped breaker route,
 		// so health says that writes are frozen and not how large the bucket is.
 		summary["ceiling"] = map[string]any{
@@ -135,16 +135,12 @@ func (s *Server) measureBucket(ctx context.Context, ceiling *objectguard.Ceiling
 	return ceiling.Measure(ctx, s.bucketUsage)
 }
 
-func (s *Server) bucketMeasured() bool {
-	return s.bucketUsageStore != nil
-}
-
-// perf: an install with neither a bucket nor a ceiling returns before the
-// first listing, so it never pays to enumerate anything.
+// perf: an install with no ceiling and no warning mark returns before the first listing; it then publishes no
+// bucket totals (CeilingState.Measured is false), so nothing reads a count that does not describe the bucket.
 func (s *Server) runBucketCeiling(ctx context.Context) {
 	limiter := objectguard.Shared()
 	ceiling := limiter.Ceiling()
-	if !ceiling.Enforced() && !s.bucketMeasured() {
+	if !ceiling.Bounded() {
 		return
 	}
 	interval := ceiling.Reconcile()

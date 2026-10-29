@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"net/http/httptest"
 	"strconv"
 	"sync"
@@ -42,7 +43,7 @@ func (f *floodFixture) intake(token string, body controllerwire.CreateRunRequest
 	if err != nil {
 		f.t.Fatal(err)
 	}
-	req := httptest.NewRequest("POST", "/api/v1/runs", bytes.NewReader(raw))
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/runs", bytes.NewReader(raw))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+token)
 	return f.serve(req)

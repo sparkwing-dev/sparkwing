@@ -24,7 +24,7 @@ func TestSurfaceSchedulesTransport(t *testing.T) {
 				var response any
 				switch calls {
 				case 1:
-					if req.Method != "GET" || req.URL.RequestURI() != "/api/v1/schedules?all=true&next=2" {
+					if req.Method != http.MethodGet || req.URL.RequestURI() != "/api/v1/schedules?all=true&next=2" {
 						t.Fatalf("list: %s %s", req.Method, req.URL)
 					}
 					response = controllerwire.ScheduleOverview{Schedules: []controllerwire.ScheduleView{row}, Upcoming: []controllerwire.ScheduleUpcoming{{Schedule: "s1", Name: row.Name, At: "2026-10-15T03:00:00Z"}}}
@@ -40,12 +40,12 @@ func TestSurfaceSchedulesTransport(t *testing.T) {
 						action = "resume"
 						row.Paused = false
 					}
-					if req.Method != "POST" || req.URL.Path != "/api/v1/schedules/s1/"+action {
+					if req.Method != http.MethodPost || req.URL.Path != "/api/v1/schedules/s1/"+action {
 						t.Fatalf("pause/resume: %s %s", req.Method, req.URL)
 					}
 					response = controllerwire.ScheduleEnvelope{Schedule: row}
 				case 5:
-					if req.Method != "PUT" || req.URL.Path != "/api/v1/schedules/s1/override" {
+					if req.Method != http.MethodPut || req.URL.Path != "/api/v1/schedules/s1/override" {
 						t.Fatalf("override: %s %s", req.Method, req.URL)
 					}
 					var body map[string]any
@@ -58,18 +58,18 @@ func TestSurfaceSchedulesTransport(t *testing.T) {
 					row.Override = controllerwire.OverrideView{Fields: []string{"tz", "catch_up", "args"}, TZ: "", CatchUpNS: 0, Args: controllerwire.DisplayScheduleArgs(map[string]string{"empty": "", "message": "a=b"})}
 					response = controllerwire.ScheduleEnvelope{Schedule: row}
 				case 6:
-					if req.Method != "DELETE" || req.URL.Path != "/api/v1/schedules/s1/override" {
+					if req.Method != http.MethodDelete || req.URL.Path != "/api/v1/schedules/s1/override" {
 						t.Fatalf("reset: %s %s", req.Method, req.URL)
 					}
 					row.Override = controllerwire.OverrideView{}
 					response = controllerwire.ScheduleEnvelope{Schedule: row}
 				case 7:
-					if req.Method != "POST" || req.URL.Path != "/api/v1/schedules/s1/run" || req.Header.Get("Idempotency-Key") != "stable-key" {
+					if req.Method != http.MethodPost || req.URL.Path != "/api/v1/schedules/s1/run" || req.Header.Get("Idempotency-Key") != "stable-key" {
 						t.Fatalf("run: %s %s", req.Method, req.URL)
 					}
 					response = controllerwire.ScheduleRun{RunID: "r1", Schedule: row, Replayed: true}
 				case 8:
-					if req.Method != "DELETE" || req.URL.Path != "/api/v1/schedules/s1" {
+					if req.Method != http.MethodDelete || req.URL.Path != "/api/v1/schedules/s1" {
 						t.Fatalf("delete: %s %s", req.Method, req.URL)
 					}
 					response = controllerwire.ScheduleDeletion{ScheduleID: "s1", Deleted: false}
@@ -80,7 +80,7 @@ func TestSurfaceSchedulesTransport(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(string(data)))}, nil
+				return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(string(data)))}, nil
 			})}})
 			if err != nil {
 				t.Fatal(err)

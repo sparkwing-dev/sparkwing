@@ -190,7 +190,7 @@ func claimSetupFailure(ctx context.Context, input NodeInput, failure error, mask
 	result := runstate.NodeResult{Outcome: runstate.NodeFailed, Reason: string(code), MaskedError: boundedNodeErrText(mask(failure.Error()))}
 	var refused *admissionFailure
 	if errors.As(failure, &refused) && waitFailure(failure, refused) == nil {
-		result.Outcome, result.Reason = refused.Outcome, string(refused.Reason)
+		result.Outcome, result.Reason = refused.Outcome, refused.Reason
 	}
 	if ctx.Err() != nil {
 		result.Outcome, result.Reason = runstate.NodeCancelled, string(apierr.ReasonCancelled)

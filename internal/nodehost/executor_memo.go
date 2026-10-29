@@ -74,7 +74,7 @@ func (h *nodeExecutor) memoKey(ctx context.Context, session *executorSession, in
 	if !json.Valid(value) || bytes.Equal(bytes.TrimSpace(value), []byte(`""`)) {
 		return "", executorError(apierr.ProtocolError, "memo callback must return a JSON value or null")
 	}
-	return memoValueKey(json.RawMessage(value))
+	return memoValueKey(value)
 }
 
 func (h *nodeExecutor) restoreMemo(ctx context.Context, input NodeInput, pipeline string, hash runspec.Hash) (*runstate.NodeResult, error) {

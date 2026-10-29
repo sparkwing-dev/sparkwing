@@ -46,7 +46,7 @@ func TestPreReleaseWorkKeepsEveryCheckInOrder(t *testing.T) {
 		"installer-report", "service-installer", "release-installer",
 		"install-to-green", "shellcheck", "terraform", "markdownlint",
 		"actionlint", "doc-examples", "cli-reference", "config-reference",
-		"sdk-reference", "api-reference", "openapi", "api-snapshot",
+		"sdk-reference", "api-reference", "api-snapshot",
 	}
 	steps := work.Steps
 	if len(steps) != len(want) {

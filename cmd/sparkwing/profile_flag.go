@@ -6,6 +6,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/userconfig"
 )
 
@@ -58,10 +59,14 @@ func resolveProfileFlag(name string) (*namedProfile, error) {
 	}
 	p, found := profiles[name]
 	if !found {
-		return nil, fmt.Errorf("profile %q not found in %s.\nAvailable profiles: %s",
-			name, displayConfigPath(path), strings.Join(profileNames(profiles), ", "))
+		return nil, missingProfile(name, path, profiles)
 	}
 	return &namedProfile{Name: name, Profile: p}, nil
+}
+
+func missingProfile(name, path string, profiles map[string]userconfig.Profile) error {
+	return &apierr.Error{Code: apierr.NotFound, Message: fmt.Sprintf("profile %q not found in %s.\nAvailable profiles: %s",
+		name, displayConfigPath(path), strings.Join(profileNames(profiles), ", "))}
 }
 
 func displayConfigPath(path string) string {

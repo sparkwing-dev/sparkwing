@@ -367,7 +367,7 @@ func TestRootProvisioningHTTPServiceCommitsThroughSoleIssuer(t *testing.T) {
 		t.Fatalf("bootstrap: %v %v", created, err)
 	}
 	h := f.server.Handler()
-	r := httptest.NewRequest("POST", "/api/v1/operator/tokens", strings.NewReader(`{"name":"launcher","grants":["claims.launch"]}`))
+	r := httptest.NewRequest(http.MethodPost, "/api/v1/operator/tokens", strings.NewReader(`{"name":"launcher","grants":["claims.launch"]}`))
 	r.Header.Set("Authorization", "Bearer "+seed)
 	r.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()

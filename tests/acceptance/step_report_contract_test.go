@@ -32,14 +32,14 @@ func TestSurfaceStepReportTransport(t *testing.T) {
 				calls := 0
 				controller, err := client.NewEngineClient(client.EngineOptions{URL: endpoint, HTTP: &http.Client{Transport: surfaceTransport(func(req *http.Request) (*http.Response, error) {
 					calls++
-					if req.Method != "POST" || req.URL.EscapedPath() != "/api/v1/runs/run/jobs/generated%2Fbuild/steps/"+action {
+					if req.Method != http.MethodPost || req.URL.EscapedPath() != "/api/v1/runs/run/jobs/generated%2Fbuild/steps/"+action {
 						t.Fatalf("unexpected step report: %s %s", req.Method, req.URL)
 					}
 					var got controllerwire.StepReportRequest
 					if err := json.NewDecoder(req.Body).Decode(&got); err != nil || !reflect.DeepEqual(got, input) {
 						t.Fatalf("step report changed: %+v %v", got, err)
 					}
-					return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(`{"recorded":true}`))}, nil
+					return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(`{"recorded":true}`))}, nil
 				})}})
 				if err != nil {
 					t.Fatal(err)

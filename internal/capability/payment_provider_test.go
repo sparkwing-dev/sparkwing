@@ -22,7 +22,7 @@ func providerVerifier(t *testing.T, mode PaymentMode) (*paymentAuthenticator, *i
 	v := &paymentAuthenticator{mode: mode, secret: []byte("whsec_fixture"), now: func() time.Time { return time.Unix(1000, 0) }, provider: newPaymentProvider("sk_" + string(mode) + "_private")}
 	v.provider.client.Transport = paymentTransport(func(r *http.Request) (*http.Response, error) {
 		*calls++
-		if r.URL.Scheme != "https" || r.URL.Host != "api.stripe.com" || r.Method != "GET" || r.Header.Get("Authorization") != "Bearer sk_"+string(mode)+"_private" {
+		if r.URL.Scheme != "https" || r.URL.Host != "api.stripe.com" || r.Method != http.MethodGet || r.Header.Get("Authorization") != "Bearer sk_"+string(mode)+"_private" {
 			t.Fatalf("unsafe provider request: %s %s", r.Method, r.URL)
 		}
 		var body string
@@ -32,7 +32,7 @@ func providerVerifier(t *testing.T, mode PaymentMode) (*paymentAuthenticator, *i
 		default:
 			t.Fatalf("unexpected provider path %s", r.URL.Path)
 		}
-		return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(body))}, nil
+		return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(body))}, nil
 	})
 	return v, calls
 }

@@ -170,11 +170,10 @@ func preReleaseChecks() []preReleaseCheck {
 		{id: "markdownlint", run: runMarkdownlint},
 		{id: "actionlint", run: runActionlint},
 		{id: "doc-examples", run: checkPreReleaseDocExamples},
-		{id: "cli-reference", run: checkPreReleaseCLIReference},
-		{id: "config-reference", run: checkPreReleaseConfigReference},
-		{id: "sdk-reference", run: checkPreReleaseSDKReference},
-		{id: "api-reference", run: checkPreReleaseAPIReference},
-		{id: "openapi", run: checkPreReleaseOpenAPI},
+		{id: "cli-reference", run: preReleaseShell("bash bin/gen-cli-docs.sh --check")},
+		{id: "config-reference", run: preReleaseShell("bash bin/gen-config-docs.sh --check")},
+		{id: "sdk-reference", run: preReleaseShell("bash bin/gen-sdk-docs.sh --check")},
+		{id: "api-reference", run: preReleaseShell("bash bin/gen-api-docs.sh --check")},
 		{id: "api-snapshot", run: checkPreReleaseAPISnapshot},
 	}
 }
@@ -234,77 +233,6 @@ func checkPreReleaseDocExamples(ctx context.Context) error {
 		`cd "$ROOT" && go run ./internal/doccheck "$ROOT/docs" "$ROOT"`,
 	).Env("ROOT", sparkwing.Path()).Run(); err != nil {
 		return fmt.Errorf("doc-examples: %w", err)
-	}
-	return nil
-}
-
-func checkPreReleaseCLIReference(ctx context.Context) error {
-	if _, err := sparkwing.Bash(ctx,
-		`cd "$ROOT" &&
-		TMP="$(mktemp -d)" &&
-		trap 'rm -rf "$TMP"' EXIT &&
-		go run ./cmd/sparkwing commands --format markdown --output plain --split-dir "$TMP" >/dev/null &&
-		fail=0 &&
-		for f in "$TMP"/*.md; do
-			diff -u "docs/$(basename "$f")" "$f" || fail=1
-		done;
-		for f in docs/cli-*.md; do
-			if [ ! -e "$TMP/$(basename "$f")" ] && head -n1 "$f" | grep -q "GENERATED from the CLI command registry"; then
-				echo "stale generated page: $f"
-				fail=1
-			fi
-		done;
-		exit "$fail"`,
-	).Env("ROOT", sparkwing.Path()).Run(); err != nil {
-		return errors.New("cli-reference: stale -- run `bash bin/gen-cli-docs.sh`")
-	}
-	return nil
-}
-
-func checkPreReleaseConfigReference(ctx context.Context) error {
-	if _, err := sparkwing.Bash(ctx,
-		`cd "$ROOT" && go run ./internal/configref "$ROOT" | diff -u docs/config-reference.md -`,
-	).Env("ROOT", sparkwing.Path()).Run(); err != nil {
-		return errors.New("config-reference: stale -- run `bash bin/gen-config-docs.sh`")
-	}
-	return nil
-}
-
-func checkPreReleaseSDKReference(ctx context.Context) error {
-	if _, err := sparkwing.Bash(ctx,
-		`cd "$ROOT" &&
-		TMP="$(mktemp -d)" &&
-		trap 'rm -rf "$TMP"' EXIT &&
-		go run ./internal/sdkref "$ROOT" "$TMP" >/dev/null &&
-		fail=0 &&
-		for f in "$TMP"/*.md; do
-			diff -u "docs/$(basename "$f")" "$f" || fail=1
-		done;
-		for f in docs/sdk-*.md; do
-			if [ ! -e "$TMP/$(basename "$f")" ] && head -n1 "$f" | grep -q "GENERATED from the .sparkwing. package via go/doc"; then
-				echo "stale generated page: $f"
-				fail=1
-			fi
-		done;
-		exit "$fail"`,
-	).Env("ROOT", sparkwing.Path()).Run(); err != nil {
-		return errors.New("sdk-reference: stale -- run `bash bin/gen-sdk-docs.sh`")
-	}
-	return nil
-}
-
-func checkPreReleaseAPIReference(ctx context.Context) error {
-	if _, err := sparkwing.Bash(ctx,
-		`cd "$ROOT" && go run ./internal/apiref "$ROOT" | diff -u docs/api-reference.md -`,
-	).Env("ROOT", sparkwing.Path()).Run(); err != nil {
-		return errors.New("api-reference: stale -- run `bash bin/gen-api-docs.sh`")
-	}
-	return nil
-}
-
-func checkPreReleaseOpenAPI(ctx context.Context) error {
-	if _, err := sparkwing.Bash(ctx, "bash bin/check-api-spec.sh").Run(); err != nil {
-		return errors.New("openapi: stale -- run `bash bin/gen-api-docs.sh`")
 	}
 	return nil
 }

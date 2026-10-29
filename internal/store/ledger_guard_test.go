@@ -7,6 +7,7 @@ import (
 	"go/token"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -177,19 +178,26 @@ func TestLedgerGuardTruncateTableLists(t *testing.T) {
 // safety: each entry names a statement that reaches across payment modes on purpose,
 // with its reason; the guard refuses an entry that no longer matches a statement.
 var paymentModeAcrossModes = map[string]string{
-	"(*ledgerTx).relabelCreator|credit_grants":      "account deletion relabels the creator on every mode's grants; no amount or balance is read",
-	"(*Operator).grantCreatorTeamsTx|credit_grants": "account deletion finds every team whose grants name the account, in any mode",
-	"(*Operator).disputeHoldTx|credit_freezes":      "dispute_id is the table's primary key, and provider dispute ids never repeat across modes",
-	"(*Tenant).ListNodes|credit_charges":            "shows the cpu class of one award's reservation, which the award's prefix pins; no amount is read",
-	"(*Tenant).GetNode|credit_charges":              "shows the cpu class of one award's reservation, which the award's prefix pins; no amount is read",
-	"(*Operator).ComputeUsage|credit_charges":       "counts running metered awards per principal, a capacity fact rather than money",
-	"billingPriceTx|credit_charges":                 "reads one award's reservation by its id",
-	"paidBillingTx|credit_charges":                  "settles one award against everything charged to it; cutover refuses to start while any award is unsettled, so an award's charges share one mode",
-	"settledBillingResultTx|credit_charges":         "reports one award's billed seconds, in whatever mode they were charged",
+	"(*ledgerTx).relabelCreator|credit_grants":                         "account deletion relabels the creator on every mode's grants; no amount or balance is read",
+	"(*Operator).grantCreatorTeamsTx|credit_grants":                    "account deletion finds every team whose grants name the account, in any mode",
+	"(*Operator).disputeHoldTx|credit_freezes":                         "dispute_id is the table's primary key, and provider dispute ids never repeat across modes",
+	"(*Tenant).ListNodes|credit_charges":                               "shows the cpu class of one award's reservation, which the award's prefix pins; no amount is read",
+	"(*Tenant).GetNode|credit_charges":                                 "shows the cpu class of one award's reservation, which the award's prefix pins; no amount is read",
+	"(*Operator).ComputeUsage|credit_charges":                          "counts running metered awards per principal, a capacity fact rather than money",
+	"billingPriceTx|credit_charges":                                    "reads one award's reservation by its id",
+	"paidBillingTx|credit_charges":                                     "settles one award against everything charged to it; cutover refuses to start while any award is unsettled, so an award's charges share one mode",
+	"settledBillingResultTx|credit_charges":                            "reports one award's billed seconds, in whatever mode they were charged",
+	"overflowControlTx|credit_charges":                                 "sums one award's charged seconds; the reservation it filters on pins the mode, and an award's charges share one mode",
+	"(*Operator).refundableBillingSecondsTx|credit_charges":            "sums one award's charged seconds; the reservation it filters on pins the mode, and an award's charges share one mode",
+	"(*Operator).setPaymentModeTx|credit_checkouts":                    "looks for open test-mode refills before a switch; the literal 'test' names the mode",
+	"(*Operator).paidGrantForPaymentTx|credit_checkouts,credit_grants": "the checkout is pinned to the mode, and the grant joins by its own id, which belongs to that checkout's mode",
+	"(*Tenant).PrepareAuthorizedBillingPage|billing_pages":             "reads the page's stored mode and refuses it unless it is the configured mode (configuredPaymentModeTx)",
+	"(*Tenant).billingPageTx|billing_pages":                            "reads the page's stored mode and refuses it unless it is the configured mode (configuredPaymentModeTx)",
 }
 
 // Decision 63 keeps test-mode money out of every live decision by one column, so
-// every statement on a table that carries payment_mode must filter or set it. The
+// every statement on a table that carries payment_mode must filter or set it;
+// selecting the column alone does not count. The
 // money tables come from the schema, so a new one is judged the day it is added.
 func TestMoneyStatementsCarryPaymentMode(t *testing.T) {
 	money := schemaTablesWithColumn(t, "payment_mode")
@@ -203,14 +211,12 @@ func TestMoneyStatementsCarryPaymentMode(t *testing.T) {
 			continue
 		}
 		checked++
-		if strings.Contains(strings.ToLower(stmt.text), "payment_mode") {
+		if bindsPaymentMode(stmt.text, money) {
 			continue
 		}
-		if len(tables) == 1 {
-			if _, ok := paymentModeAcrossModes[stmt.key+"|"+tables[0]]; ok {
-				used[stmt.key+"|"+tables[0]] = true
-				continue
-			}
+		if _, ok := paymentModeAcrossModes[stmt.key+"|"+strings.Join(tables, ",")]; ok {
+			used[stmt.key+"|"+strings.Join(tables, ",")] = true
+			continue
 		}
 		t.Errorf("%s: statement in %s touches %s without payment_mode.\n\t%s", stmt.pos, stmt.key, strings.Join(tables, ", "), collapse(stmt.text))
 	}
@@ -220,6 +226,72 @@ func TestMoneyStatementsCarryPaymentMode(t *testing.T) {
 	for key, why := range paymentModeAcrossModes {
 		if strings.TrimSpace(why) == "" || !used[key] {
 			t.Errorf("paymentModeAcrossModes entry %q is stale or has no reason; delete it", key)
+		}
+	}
+}
+
+// safety: every money relation in each query and subquery must be pinned to one payment mode by a WHERE or ON
+// predicate, as the tenant reader pins team; an INSERT naming payment_mode or an UPDATE setting it writes the mode.
+func bindsPaymentMode(text string, money []string) bool {
+	return paymentModeBound(text, nil, money)
+}
+
+func paymentModeBound(sql string, parents []string, money []string) bool {
+	parts := splitSubqueries(sql)
+	tokens := scopeTokens(parts.outer)
+	for _, branch := range scopeParts(tokens, "union") {
+		if len(branch) > 0 && (branch[0] == "all" || branch[0] == "distinct") {
+			branch = branch[1:]
+		}
+		if len(branch) > 0 && !paymentModeWritten(branch, money) && !scopeRelationsBound(branch, parents, "payment_mode", money) {
+			return false
+		}
+	}
+	inner := append(slices.Clone(parents), scopeBoundRefs(tokens, "payment_mode", money)...)
+	for _, sub := range parts.subs {
+		if len(statementTables(sub, money)) > 0 && !paymentModeBound(sub, inner, money) {
+			return false
+		}
+	}
+	return true
+}
+
+func paymentModeWritten(tokens []string, money []string) bool {
+	if table, columns, tail := scopeInsert(tokens); table != "" {
+		named := slices.ContainsFunc(columns, func(column []string) bool { return len(column) == 1 && column[0] == "payment_mode" })
+		return named && (len(tail) == 0 || tail[0] != "select" || scopeRelationsBound(tail, nil, "payment_mode", money))
+	}
+	if len(tokens) == 0 || tokens[0] != "update" {
+		return false
+	}
+	set := slices.Index(tokens, "set")
+	for _, assignment := range scopeParts(scopeParts(tokens[set+1:], "where")[0], ",") {
+		if set >= 0 && len(assignment) >= 2 && assignment[0] == "payment_mode" && assignment[1] == "=" {
+			return true
+		}
+	}
+	return false
+}
+
+func TestPaymentModeGuardRefusesAStatementThatDoesNotFilterTheMode(t *testing.T) {
+	money := []string{"credit_grants", "teams"}
+	for q, binds := range map[string]bool{
+		`SELECT payment_mode, amount FROM credit_grants WHERE team=?`:                                          false,
+		`SELECT payment_mode='live',amount_micro FROM credit_grants WHERE team=?`:                              false,
+		`SELECT amount FROM credit_grants WHERE team=? AND payment_mode=?`:                                     true,
+		`SELECT amount FROM credit_grants g WHERE g.team=? AND g.payment_mode IN (?,?)`:                        true,
+		`SELECT amount FROM credit_grants WHERE team=? AND (payment_mode=? OR amount>0)`:                       false,
+		`SELECT 1 FROM credit_grants g JOIN teams t ON t.payment_mode = g.payment_mode WHERE g.payment_mode=?`: true,
+		`SELECT 1 FROM credit_grants g JOIN teams t ON t.name = g.team WHERE g.payment_mode=?`:                 false,
+		`SELECT id FROM runs WHERE team=? AND id IN (SELECT run_id FROM credit_grants WHERE team=?)`:           false,
+		`SELECT id FROM runs WHERE id IN (SELECT run_id FROM credit_grants WHERE payment_mode=?)`:              true,
+		`INSERT INTO credit_grants(team,payment_mode,amount) VALUES (?,?,?)`:                                   true,
+		`UPDATE credit_grants SET payment_mode=? WHERE id=?`:                                                   true,
+		`UPDATE credit_grants SET amount=0 WHERE id=? RETURNING payment_mode`:                                  false,
+		`DELETE FROM credit_grants WHERE team=? AND payment_mode=?`:                                            true,
+	} {
+		if got := bindsPaymentMode(q, money); got != binds {
+			t.Errorf("bindsPaymentMode(%q) = %v, want %v", q, got, binds)
 		}
 	}
 }

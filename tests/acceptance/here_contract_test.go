@@ -34,7 +34,7 @@ func TestHereResumeClaimContract(t *testing.T) {
 			calls := 0
 			c, err := client.NewEngineClient(client.EngineOptions{URL: endpoint, Bearer: func(context.Context) (string, error) { return "retained-here-bearer", nil }, HTTP: &http.Client{Transport: surfaceTransport(func(req *http.Request) (*http.Response, error) {
 				calls++
-				if req.Method != "POST" || req.URL.Path != "/api/v1/runs/here-run/claim" || req.URL.RawQuery != "" || req.Header.Get("Authorization") != "Bearer retained-here-bearer" {
+				if req.Method != http.MethodPost || req.URL.Path != "/api/v1/runs/here-run/claim" || req.URL.RawQuery != "" || req.Header.Get("Authorization") != "Bearer retained-here-bearer" {
 					t.Fatalf("wrong here claim: %s %s", req.Method, req.URL)
 				}
 				var input controllerwire.ClaimRequest

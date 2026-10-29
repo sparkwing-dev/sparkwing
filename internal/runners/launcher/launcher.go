@@ -108,8 +108,9 @@ func (l *Launcher) Run(ctx context.Context) error {
 	var cooldown time.Time
 	for ctx.Err() == nil {
 		if !time.Now().Before(cooldown) {
-			// safety: a faulty node is excluded from placement, so only
-			// cluster-wide faults stop claims for every team.
+			// safety: a faulty node is excluded from placement and a Job's teardown
+			// fault is retried each pass, so claiming continues; other
+			// reconciliation errors back off claims for every team.
 			synced := l.sync(ctx)
 			if blocking(synced) != nil {
 				logger.Warn("launcher reconciliation failed", failureAttrs(synced)...)

@@ -8,7 +8,7 @@ import (
 )
 
 func (t *Tenant) openCreditCheckoutTx(ctx context.Context, tx *storeTx, amountMicro int64, now time.Time, hold time.Duration) (string, error) {
-	if amountMicro < MinCardChargeCents*MicroCreditsPerCent || amountMicro > MaxCardPaymentCents*MicroCreditsPerCent || amountMicro%MicroCreditsPerCent != 0 || hold <= 0 {
+	if amountMicro <= 0 || amountMicro > MaxCardPaymentCents*MicroCreditsPerCent || amountMicro%MicroCreditsPerCent != 0 || hold <= 0 {
 		return "", errors.New("credits: checkout requires whole positive USD cents and a positive hold")
 	}
 	id, err := newCreditID("checkout")

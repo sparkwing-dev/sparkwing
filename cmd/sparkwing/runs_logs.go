@@ -27,16 +27,16 @@ func runRunsLogs(ctx context.Context, inv clisurface.Invocation) error {
 	}
 	options, closeTransport, err := controllerOptions(ctx, inv.Value("profile"))
 	if err != nil {
-		return exitError(3, err)
+		return observationError(err)
 	}
 	defer closeTransport()
 	reader, err := client.NewLogReader(options)
 	if err != nil {
-		return exitError(3, err)
+		return observationError(err)
 	}
 	runs, err := client.NewRunReader(options)
 	if err != nil {
-		return exitError(3, err)
+		return observationError(err)
 	}
 	return observeRunLogs(ctx, inv, reader, runs, os.Stdout, os.Stderr, waitStatusPoll)
 }
@@ -85,7 +85,8 @@ func parseRunLogs(inv clisurface.Invocation) (controllerwire.LogQuery, error) {
 	return q, nil
 }
 
-func observeRunLogs(ctx context.Context, inv clisurface.Invocation, reader controllerwire.LogReader, runs controllerwire.RunReader, out, diagnostics io.Writer, wait func(context.Context, time.Duration) error) error {
+func observeRunLogs(ctx context.Context, inv clisurface.Invocation, reader controllerwire.LogReader, runs controllerwire.RunReader, out, diagnostics io.Writer, wait func(context.Context, time.Duration) error) (err error) {
+	defer func() { err = observationError(err) }()
 	query, err := parseRunLogs(inv)
 	if err != nil {
 		return err
@@ -100,13 +101,13 @@ func observeRunLogs(ctx context.Context, inv clisurface.Invocation, reader contr
 	for {
 		page, err := reader.ReadLogs(ctx, inv.Value("run"), query)
 		if err != nil {
-			return exitError(3, err)
+			return err
 		}
 		if err := page.Validate(query.Cursor); err != nil {
-			return exitError(3, invalidObservation(err.Error()))
+			return invalidObservation(err.Error())
 		}
 		if page.NextCursor != "" && page.NextCursor != query.Cursor && seen[page.NextCursor] {
-			return exitError(3, invalidObservation("controller repeated an earlier log cursor"))
+			return invalidObservation("controller repeated an earlier log cursor")
 		}
 		for _, record := range page.Records {
 			if err := writeLogRecord(out, record, runLogOutput(inv), false); err != nil {
@@ -120,7 +121,7 @@ func observeRunLogs(ctx context.Context, inv clisurface.Invocation, reader contr
 		seen[query.Cursor] = true
 		if !page.Truncated {
 			if err := wait(ctx, time.Second); err != nil {
-				return exitError(3, fmt.Errorf("log observation incomplete: %w", err))
+				return fmt.Errorf("log observation incomplete: %w", err)
 			}
 		}
 	}
@@ -132,7 +133,7 @@ func writeUnloggedFailures(ctx context.Context, inv clisurface.Invocation, runs 
 	}
 	detail, err := runs.ReadRun(ctx, inv.Value("run"))
 	if err != nil {
-		return exitError(3, err)
+		return err
 	}
 	if detail.Failure != "" && job == "" {
 		if runLogOutput(inv) == "json" {

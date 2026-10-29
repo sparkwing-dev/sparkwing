@@ -242,7 +242,7 @@ func TestGitHubRunnerExchangeReadsOnlyATokenSizedBody(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, padding := range []int{0, 64 << 10} {
-		request, err := http.NewRequest("POST", f.url+"/api/v1/runners/github/exchange", bytes.NewReader(append(body, bytes.Repeat([]byte(" "), padding)...)))
+		request, err := http.NewRequest(http.MethodPost, f.url+"/api/v1/runners/github/exchange", bytes.NewReader(append(body, bytes.Repeat([]byte(" "), padding)...)))
 		if err != nil {
 			t.Fatal(err)
 		}

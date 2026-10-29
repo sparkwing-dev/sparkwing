@@ -29,7 +29,7 @@ func TestNativeAnnotationPreservesLocationAndStep(t *testing.T) {
 				if step != "" {
 					suffix = "/steps" + suffix
 				}
-				if request.Method != "POST" || request.URL.Path != "/api/v1/runs/run/jobs/job"+suffix {
+				if request.Method != http.MethodPost || request.URL.Path != "/api/v1/runs/run/jobs/job"+suffix {
 					t.Fatalf("annotation route: %s %s", request.Method, request.URL.Path)
 				}
 				return engineResponse(http.StatusNoContent, ""), nil

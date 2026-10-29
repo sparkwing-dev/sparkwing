@@ -176,8 +176,9 @@ The example declares `deployment: cloud` and `store: postgres`.
 The controller ServiceAccount's IRSA role needs S3 read, write, delete and list
 access under `controller/`. Scope object permissions to
 `arn:aws:s3:::sparkwing-cloud-data/controller/*` and `s3:ListBucket` to
-`controller/*` through its `s3:prefix` condition. Allow
-`s3:GetLifecycleConfiguration` on the bucket and configure lifecycle expiry
+`controller/*` through its `s3:prefix` condition. Optionally allow
+`s3:GetLifecycleConfiguration` on the bucket, which the controller reads once at
+startup to warn about a missing rule, and configure lifecycle expiry
 rules for `controller/logs/r30/`, `controller/logs/r90/` and every other retention
 class in use, each longer than its class (for example 37 and 97 days). The
 controller deletes log objects at the class age; the rule is a backstop. Set `AWS_REGION` through `controller.extraEnv`. Configure

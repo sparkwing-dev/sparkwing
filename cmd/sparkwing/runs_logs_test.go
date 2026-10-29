@@ -112,7 +112,7 @@ func TestRunLogsPropagatesFailuresAndIncompleteFollow(t *testing.T) {
 		return controllerwire.LogPage{}, failure
 	}}
 	err := observeRunLogs(t.Context(), logInvocation(t, "logs", "--run", "r1"), reader, nil, &out, &out, nil)
-	if !errors.Is(err, failure) || exitCodeFor(err) != 3 {
+	if !errors.Is(err, failure) || exitCodeFor(err) != exitRefused {
 		t.Fatalf("error = %v", err)
 	}
 	reader.read = func(context.Context, string, controllerwire.LogQuery) (controllerwire.LogPage, error) {
@@ -177,7 +177,7 @@ func TestRunLogsDistinguishesMissingRunFromEmptyLogs(t *testing.T) {
 	}
 	err := observeRunLogs(t.Context(), logInvocation(t, "logs", "--run", "missing"), reader, nil, &output, &output, nil)
 	var failure *apierr.Error
-	if !errors.As(err, &failure) || failure.Code != apierr.NotFound || exitCodeFor(err) != 3 {
+	if !errors.As(err, &failure) || failure.Code != apierr.NotFound || exitCodeFor(err) != exitRefused {
 		t.Fatalf("missing logs: %v", err)
 	}
 }
@@ -206,7 +206,7 @@ func TestRunLogsTriggerFollowPreservesTransportAndBearer(t *testing.T) {
 		if req.URL.Path != "/api/v1/runs/r1/logs" || req.Header.Get("Authorization") != "Bearer secret" {
 			t.Fatalf("request = %s", req.URL)
 		}
-		return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(`{"records":[],"next_cursor":"","truncated":false,"complete":true}`)), Header: make(http.Header)}, nil
+		return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(`{"records":[],"next_cursor":"","truncated":false,"complete":true}`)), Header: make(http.Header)}, nil
 	})}}
 	if err := followControllerRunLogs(t.Context(), options, "r1", "plain", &out); err != nil || out.Len() != 0 {
 		t.Fatalf("follow=%q err=%v", out.String(), err)

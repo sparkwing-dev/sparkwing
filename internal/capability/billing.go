@@ -79,8 +79,10 @@ type BillableInterval struct {
 
 // BillingSettlement is calculated from immutable provenance and persisted intervals, not a live token.
 type BillingSettlement struct {
-	ReservationID   string
+	ReservationID string
+	// BillableSeconds is the compute charged, raised to the unit minimum; ElapsedSeconds is the compute without it.
 	BillableSeconds int64
+	ElapsedSeconds  int64
 	RefundUnstarted bool
 }
 
@@ -121,11 +123,11 @@ func SettleBilling(provenance BillingProvenance, intervals []BillableInterval) (
 	}
 	result.RefundUnstarted = len(ordered) == 0
 	if !result.RefundUnstarted && provenance.Metered {
-		result.BillableSeconds = int64(total / time.Second)
+		result.ElapsedSeconds = int64(total / time.Second)
 		if total%time.Second != 0 {
-			result.BillableSeconds++
+			result.ElapsedSeconds++
 		}
-		result.BillableSeconds = max(result.BillableSeconds, rule.MinimumSeconds)
+		result.BillableSeconds = max(result.ElapsedSeconds, rule.MinimumSeconds)
 	}
 	return result, nil
 }

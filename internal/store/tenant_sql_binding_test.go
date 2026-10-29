@@ -166,7 +166,7 @@ func scopeBound(tokens, parents []string) bool {
 		})
 	}
 	if tokens[0] != "insert" {
-		return scopeFilter(tokens, parents)
+		return scopeEveryRelationBound(tokens, parents, "team", teamColumnTables())
 	}
 	_, columns, tail := scopeInsert(tokens)
 	team := -1
@@ -202,7 +202,7 @@ func scopeBound(tokens, parents []string) bool {
 		}
 	case "select":
 		projection := scopeParts(scopeParts(values[1:], "where")[0], "from")
-		if len(projection) > 1 && !scopeFilter(values, parents) {
+		if len(projection) > 1 && !scopeEveryRelationBound(values, parents, "team", teamColumnTables()) {
 			return false
 		}
 		fields := scopeParts(projection[0], ",")

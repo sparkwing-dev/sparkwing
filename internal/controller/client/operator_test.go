@@ -22,7 +22,7 @@ func TestOperatorTeamCreationNeverReplaysOneTimeCredential(t *testing.T) {
 			calls := 0
 			manager, err := NewOperatorManager(EngineOptions{URL: "https://controller.test", HTTP: &http.Client{Transport: engineTransport(func(r *http.Request) (*http.Response, error) {
 				calls++
-				if r.GetBody != nil || r.Method != "POST" || r.URL.Path != "/api/v1/operator/teams" {
+				if r.GetBody != nil || r.Method != http.MethodPost || r.URL.Path != "/api/v1/operator/teams" {
 					t.Fatalf("unsafe request: %+v", r)
 				}
 				if failure == "lost response" {
@@ -92,7 +92,7 @@ func TestOperatorManagementUsesDeclaredRoutes(t *testing.T) {
 			}
 			switch calls {
 			case 1:
-				if req.Method != "GET" || req.URL.Path != "/api/v1/operator/limits" {
+				if req.Method != http.MethodGet || req.URL.Path != "/api/v1/operator/limits" {
 					t.Fatalf("read limits: %s %s", req.Method, req.URL)
 				}
 				return operatorResponse(t, limits), nil
@@ -101,17 +101,17 @@ func TestOperatorManagementUsesDeclaredRoutes(t *testing.T) {
 				if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
 					t.Fatal(err)
 				}
-				if req.Method != "PUT" || req.URL.Path != "/api/v1/operator/limits" || !reflect.DeepEqual(body.Limits, limits.Limits) {
+				if req.Method != http.MethodPut || req.URL.Path != "/api/v1/operator/limits" || !reflect.DeepEqual(body.Limits, limits.Limits) {
 					t.Fatalf("write limits: %s %s %+v", req.Method, req.URL, body)
 				}
 				return operatorResponse(t, limits), nil
 			case 3:
-				if req.Method != "GET" || req.URL.Path != "/api/v1/operator/object-store/breaker" {
+				if req.Method != http.MethodGet || req.URL.Path != "/api/v1/operator/object-store/breaker" {
 					t.Fatalf("read breaker: %s %s", req.Method, req.URL)
 				}
 				return operatorResponse(t, state), nil
 			case 4:
-				if req.Method != "POST" || req.URL.Path != "/api/v1/operator/object-store/reset-breaker" || req.Header.Get("Idempotency-Key") != "stable" {
+				if req.Method != http.MethodPost || req.URL.Path != "/api/v1/operator/object-store/reset-breaker" || req.Header.Get("Idempotency-Key") != "stable" {
 					t.Fatalf("reset breaker: %s %s", req.Method, req.URL)
 				}
 				return operatorResponse(t, state), nil
@@ -254,12 +254,12 @@ func FuzzOperatorMutationsStayOnDeclaredRoutes(f *testing.F) {
 				t.Fatal("input changed request authority")
 			}
 			if reset {
-				if req.Method != "POST" || req.URL.Path != "/api/v1/operator/object-store/reset-breaker" || req.Header.Get("Idempotency-Key") != "one-reset" {
+				if req.Method != http.MethodPost || req.URL.Path != "/api/v1/operator/object-store/reset-breaker" || req.Header.Get("Idempotency-Key") != "one-reset" {
 					t.Fatal("input selected another reset operation")
 				}
 				return operatorResponse(t, controllerwire.ObjectStoreBreaker{}), nil
 			}
-			if req.Method != "PUT" || req.URL.Path != "/api/v1/operator/limits" {
+			if req.Method != http.MethodPut || req.URL.Path != "/api/v1/operator/limits" {
 				t.Fatal("input selected another limits operation")
 			}
 			return operatorResponse(t, controllerwire.OperatorLimits{Limits: map[string]int64{name: value}}), nil

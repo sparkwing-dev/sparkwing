@@ -361,3 +361,10 @@ func TestMemoRecipeRequiresOneHostInputSource(t *testing.T) {
 		checkPlan(t, `{"jobs":[{"id":"build",`+fields+`,"steps":[{"id":"run"}]}]}`, planContext(), apierr.PlanInvalid)
 	}
 }
+
+func TestPlanAcceptanceRefusesAnUnknownCacheResolver(t *testing.T) {
+	for _, resolver := range CacheResolvers {
+		checkPlan(t, `{"jobs":[{"id":"a","caches":[{"name":"deps","resolver":"`+resolver+`","key_files":["go.sum"]}],"steps":[{"id":"s"}]}]}`, planContext(), "")
+	}
+	checkPlan(t, `{"jobs":[{"id":"a","caches":[{"name":"go-modules","resolver":"gomod","key_files":["go.sum"]}],"steps":[{"id":"s"}]}]}`, planContext(), apierr.PlanInvalid)
+}

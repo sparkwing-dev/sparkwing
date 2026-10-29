@@ -40,7 +40,7 @@ func TestRunnerMeteringHTTPCommitsThroughCurrentConsoleSession(t *testing.T) {
 	}
 	request := func(body, csrfValue string) *httptest.ResponseRecorder {
 		t.Helper()
-		r := httptest.NewRequest("POST", "https://controller.test/api/v1/operator/runners/"+root.Capability.Prefix+"/metered", strings.NewReader(body))
+		r := httptest.NewRequest(http.MethodPost, "https://controller.test/api/v1/operator/runners/"+root.Capability.Prefix+"/metered", strings.NewReader(body))
 		r.Header.Set("Content-Type", "application/json")
 		r.Header.Set("Origin", "https://controller.test")
 		r.Header.Set(csrfHeaderName, csrfValue)

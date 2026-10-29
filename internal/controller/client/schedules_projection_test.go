@@ -31,7 +31,7 @@ func TestScheduleManagerRetainsUpcomingAndEffectiveCadence(t *testing.T) {
 		if req.URL.Path == "/api/v1/schedules" {
 			return scheduleTestResponse(t, overview), nil
 		}
-		if req.Method != "GET" || req.URL.EscapedPath() != "/api/v1/schedules/api%2Fcheck%2Fnightly" || req.URL.Query().Get("next") != "1" {
+		if req.Method != http.MethodGet || req.URL.EscapedPath() != "/api/v1/schedules/api%2Fcheck%2Fnightly" || req.URL.Query().Get("next") != "1" {
 			t.Fatalf("read selection: %s %s", req.Method, req.URL)
 		}
 		return scheduleTestResponse(t, detail), nil
@@ -56,10 +56,10 @@ func TestScheduleManagerConfirmsCronOverrideAndDeclaredReset(t *testing.T) {
 		if req.URL.Path != "/api/v1/schedules/s1/override" {
 			t.Fatalf("override selection: %s", req.URL)
 		}
-		if req.Method == "DELETE" {
+		if req.Method == http.MethodDelete {
 			return scheduleTestResponse(t, controllerwire.ScheduleEnvelope{Schedule: declared}), nil
 		}
-		if req.Method != "PUT" {
+		if req.Method != http.MethodPut {
 			t.Fatalf("override method: %s", req.Method)
 		}
 		return scheduleTestResponse(t, controllerwire.ScheduleEnvelope{Schedule: row}), nil
@@ -78,7 +78,7 @@ func TestScheduleManagerReturnsStructuredNotFound(t *testing.T) {
 	calls := 0
 	c := testEngine(t, func(req *http.Request) (*http.Response, error) {
 		calls++
-		if req.Method != "GET" || req.URL.Path != "/api/v1/schedules/missing" {
+		if req.Method != http.MethodGet || req.URL.Path != "/api/v1/schedules/missing" {
 			t.Fatalf("missing selection: %s %s", req.Method, req.URL)
 		}
 		return engineResponse(404, `{"error":{"code":"not_found","message":"schedule not found"}}`), nil

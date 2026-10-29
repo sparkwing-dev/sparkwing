@@ -82,7 +82,7 @@ func TestPolicyRouterOrderingAndErrorBoundary(t *testing.T) {
 						t.Fatal("handler lost authorized target")
 					}
 					if tc.handlerErr == nil {
-						w.WriteHeader(204)
+						w.WriteHeader(http.StatusNoContent)
 					}
 					return tc.handlerErr
 				},
@@ -90,7 +90,7 @@ func TestPolicyRouterOrderingAndErrorBoundary(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			req := httptest.NewRequest("GET", "/api/v1/runs/run-1", nil)
+			req := httptest.NewRequest(http.MethodGet, "/api/v1/runs/run-1", nil)
 			req.Header.Set("Authorization", "Bearer synthetic")
 			w := httptest.NewRecorder()
 			mux.ServeHTTP(w, req)
@@ -130,13 +130,13 @@ func TestPolicyRouterResolvesTeamLocalTargets(t *testing.T) {
 					if a.Target.Team != "team" || a.Target.TokenPrefix != "target" {
 						t.Fatalf("target = %+v", a.Target)
 					}
-					w.WriteHeader(204)
+					w.WriteHeader(http.StatusNoContent)
 					return nil
 				},
 			}); err != nil {
 				t.Fatal(err)
 			}
-			r := httptest.NewRequest("GET", "/api/v1/tokens/target?team=forged", nil)
+			r := httptest.NewRequest(http.MethodGet, "/api/v1/tokens/target?team=forged", nil)
 			r.Header.Set("Authorization", "Bearer synthetic")
 			r.Header.Set("X-Sparkwing-Team", "forged")
 			w := httptest.NewRecorder()
@@ -162,11 +162,11 @@ func TestPolicyRouterMissingRoutesAndPolicies(t *testing.T) {
 	}
 	for path, code := range map[string]apierr.Code{"/without-policy": apierr.PolicyMissing, "/absent": apierr.NotFound} {
 		w := httptest.NewRecorder()
-		mux.ServeHTTP(w, httptest.NewRequest("GET", path, nil))
+		mux.ServeHTTP(w, httptest.NewRequest(http.MethodGet, path, nil))
 		assertPolicyError(t, w, code)
 	}
 	w := httptest.NewRecorder()
-	mux.ServeHTTP(w, httptest.NewRequest("POST", "/without-policy", nil))
+	mux.ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/without-policy", nil))
 	assertPolicyError(t, w, apierr.MethodNotAllowed)
 	if called {
 		t.Fatal("unprotected handler ran")
@@ -183,7 +183,7 @@ func TestPolicyRouterExternalProofCannotBePublic(t *testing.T) {
 		t.Fatal(err)
 	}
 	w := httptest.NewRecorder()
-	mux.ServeHTTP(w, httptest.NewRequest("POST", "/webhooks/stripe", nil))
+	mux.ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/webhooks/stripe", nil))
 	assertPolicyError(t, w, apierr.PolicyMissing)
 	if called {
 		t.Fatal("payment callback bypassed proof verification")
@@ -206,14 +206,14 @@ func TestPolicyRouterExternalProofRunsBeforeHandler(t *testing.T) {
 				},
 				Handle: func(w http.ResponseWriter, _ *http.Request, _ capability.Authorized) error {
 					order = append(order, "handler")
-					w.WriteHeader(204)
+					w.WriteHeader(http.StatusNoContent)
 					return nil
 				},
 			}); err != nil {
 				t.Fatal(err)
 			}
 			w := httptest.NewRecorder()
-			mux.ServeHTTP(w, httptest.NewRequest("POST", "/webhooks/stripe", nil))
+			mux.ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/webhooks/stripe", nil))
 			if valid {
 				if w.Code != 204 || !reflect.DeepEqual(order, []string{"proof", "handler"}) {
 					t.Fatalf("valid proof: %d, %v", w.Code, order)
@@ -258,13 +258,13 @@ func TestPolicyRouterSessionCSRFAndBearerPrecedence(t *testing.T) {
 				Decode: func(*http.Request) (capability.RequestEvidence, error) { return capability.RequestEvidence{}, nil },
 				Handle: func(w http.ResponseWriter, _ *http.Request, _ capability.Authorized) error {
 					order = append(order, "handler")
-					w.WriteHeader(204)
+					w.WriteHeader(http.StatusNoContent)
 					return nil
 				},
 			}); err != nil {
 				t.Fatal(err)
 			}
-			req := httptest.NewRequest("POST", "/api/v1/operator/teams/team/trust", nil)
+			req := httptest.NewRequest(http.MethodPost, "/api/v1/operator/teams/team/trust", nil)
 			if mode == "malformed bearer" {
 				req.Header.Set("Authorization", "Bearer")
 			}
@@ -310,7 +310,7 @@ func TestPolicyRouterDeadCredentialHidesDecoderError(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	r := httptest.NewRequest("GET", "/api/v1/runs/run", nil)
+	r := httptest.NewRequest(http.MethodGet, "/api/v1/runs/run", nil)
 	r.Header.Set("Authorization", "Bearer synthetic")
 	w := httptest.NewRecorder()
 	mux.ServeHTTP(w, r)
@@ -349,7 +349,7 @@ func TestPolicyRouterRunSelectorsRequireResolver(t *testing.T) {
 		t.Fatal("run selector accepted without resolver")
 	}
 	w := httptest.NewRecorder()
-	router.ServeHTTP(w, httptest.NewRequest("GET", "/api/v1/runs/foreign", nil))
+	router.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/api/v1/runs/foreign", nil))
 	assertPolicyError(t, w, apierr.PolicyMissing)
 	if len(order) != 0 {
 		t.Fatalf("incomplete wiring ran policy: %v", order)

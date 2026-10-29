@@ -280,7 +280,7 @@ type SkipPredicate func(ctx context.Context) bool
 type BeforeRunFn func(ctx context.Context) error
 
 // AfterRunFn receives the final Run error after all retries, or nil on success.
-// A hook panic is logged and leaves the node’s outcome unchanged.
+// A hook panic fails the node, even after Run succeeded.
 type AfterRunFn func(ctx context.Context, err error)
 
 // Dep accepts [JobNode], [Approval], and [JobGroup] handles as dependencies.
@@ -445,7 +445,7 @@ func (n *JobNode) BeforeRun(fn BeforeRunFn) *JobNode {
 }
 
 // AfterRun registers a hook invoked after Run and all retries finish.
-// A hook panic is logged and leaves the node’s outcome unchanged.
+// A hook panic fails the node, even after Run succeeded.
 func (n *JobNode) AfterRun(fn AfterRunFn) *JobNode {
 	if fn != nil {
 		n.afterRun = append(n.afterRun, fn)

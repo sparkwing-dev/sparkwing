@@ -257,7 +257,7 @@ func TestRecordsUseAcknowledgedBoundRoutes(t *testing.T) {
 			s.ctx = t.Context()
 			s.Emit(test.frame)
 			s.transport = routeTransport(func(*http.Request) (*http.Response, error) {
-				return &http.Response{StatusCode: 500, Body: io.NopCloser(strings.NewReader(`{"error":{"code":"unavailable","message":"write failed"}}`)), Header: http.Header{}}, nil
+				return &http.Response{StatusCode: http.StatusInternalServerError, Body: io.NopCloser(strings.NewReader(`{"error":{"code":"unavailable","message":"write failed"}}`)), Header: http.Header{}}, nil
 			})
 			defer func() {
 				if recover() == nil {

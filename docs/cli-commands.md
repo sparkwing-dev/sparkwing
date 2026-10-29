@@ -18,13 +18,13 @@ Search command paths and summaries. Lists return bounded pages and a next_cursor
 | `-C, --checkout PATH` | Resolve the project from this local checkout path. |
 | `-h, --help` | Show command help without executing. |
 | `--help-all` | Include uncommon flags in command help. |
-| `--search TEXT` | Match records; never scan log text. |
-| `--limit N` | Output count at least one; paginated commands continue with --cursor. |
+| `--search TEXT` | Text to match against record names and summaries; log text is not searched. |
+| `--limit N` | Maximum number of records to print, at least one. Continue with --cursor when more exist. |
 | `--cursor CURSOR` | Continue from next_cursor using the same filters. |
 | `--format markdown` | Artifact format; markdown exports the full command reference. |
 | `--split-dir DIR` | Directory for one generated Markdown page per command family. |
 | `--path PREFIX` | Command path prefix, with or without the sparkwing binary name. |
-| `--all` | Include entries normally hidden. |
+| `--all` | Include entries that are hidden by default. |
 
 ### Examples
 

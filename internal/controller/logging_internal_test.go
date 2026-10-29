@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
@@ -62,7 +63,7 @@ func TestIdleClaimShedNeverLogsRunnerCredential(t *testing.T) {
 	s := New(nil, slog.New(slog.NewJSONHandler(&logs, nil))).WithIdleClaimPoll(time.Second).WithIdleClaimPollEnforced(true)
 	s.recordQueueActivity(time.Now().Add(-time.Hour))
 	credential := "swk_" + strings.Repeat("x", 43)
-	r := httptest.NewRequest("POST", "/api/v1/claims", nil)
+	r := httptest.NewRequest(http.MethodPost, "/api/v1/claims", nil)
 	r.Header.Set(store.RunnerIdentityHeader, credential)
 	key, ok := s.runnerBudgetKey(httptest.NewRecorder(), r, capability.Authorized{})
 	if !ok || !s.admitIdleClaimPoll(httptest.NewRecorder(), r, key) {
@@ -88,7 +89,7 @@ func TestGitHubMutationLogsNeverContainCredentials(t *testing.T) {
 			message := "github app installation uninstalled"
 			if path == "delivery" {
 				body := []byte(`{"action":"deleted","installation":{"id":7,"app_id":99}}`)
-				r := httptest.NewRequest("POST", "/webhooks/github-app", bytes.NewReader(body))
+				r := httptest.NewRequest(http.MethodPost, "/webhooks/github-app", bytes.NewReader(body))
 				r.Header.Set("X-GitHub-Event", "installation")
 				r.Header.Set("X-GitHub-Delivery", credential)
 				r.Header.Set("X-Hub-Signature-256", githubapptest.SignWith("test-key", body))
