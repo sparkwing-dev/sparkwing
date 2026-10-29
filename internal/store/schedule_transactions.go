@@ -90,7 +90,7 @@ func scheduleNext(row CronSchedule, now time.Time, minimum int64) (*time.Time, e
 		return nil, err
 	}
 	if minimum > 0 {
-		if gap, ok := parsed.ShortestInterval(now, loc, 10); ok && int64(gap/time.Second) < minimum {
+		if gap, ok := parsed.ShortestInterval(now, loc); ok && int64(gap/time.Second) < minimum {
 			return nil, &ComputeLimitError{Limit: ComputeLimitCronSeconds, Cap: minimum, Observed: int64(gap / time.Second)}
 		}
 	}

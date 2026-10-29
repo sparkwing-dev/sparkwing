@@ -7,10 +7,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
 
-// safety: ten fires cover the repeating step of every cadence a minute field
-// can express, so the shortest gap measured over them is the schedule's own.
-const minIntervalSamples = 10
-
 // refuseBelowMinInterval reports the compute guard a schedule's cadence
 // breaks, or nil when it is at or above the guard. A ceiling of zero is
 // unlimited, and an expression that resolves fewer than two instants is
@@ -31,7 +27,7 @@ func refuseBelowMinInterval(expr, tz string, ceilingSeconds int64) error {
 			return err
 		}
 	}
-	shortest, ok := schedule.ShortestInterval(time.Now(), loc, minIntervalSamples)
+	shortest, ok := schedule.ShortestInterval(time.Now(), loc)
 	if !ok {
 		return nil
 	}

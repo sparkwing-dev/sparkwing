@@ -20,6 +20,7 @@ unlock.
 
 ## [Unreleased]
 
+- **schedules:** The minimum schedule interval is measured over a whole day of fire times instead of the next ten fires, so `0,5,10,...,50,51 * * * *` counts as a one-minute cadence and is refused under a five-minute minimum.
 - **sdk (TypeScript):** `goModules()` caches Go modules again: it declared the resolver `gomod`, which no host accepts, so every run fell back to uncached with a warning. A plan naming an unknown cache resolver is now refused at acceptance (`plan_invalid`, listing `go-modules` and `npm`), and the protocol schema lists the accepted resolvers.
 - **cli:** A missing `.sparkwing` directory, an unknown docs topic, example or profile, and an untracked `repos info` checkout report `not_found` instead of `internal`, so a script can tell a typo from a Sparkwing failure. The missing-project error hints at `pipeline new` and `-C`.
 - **runs status:** `sparkwing runs status`, `runs logs`, `runs list --wait`, `runs grep` and `pipeline trigger --follow` exit 4 when the controller refuses the read (`not_found`, `unauthenticated`, `forbidden`, `bad_request`, a revoked or unsupported version), so a poller that retries on exit 3 stops on a typo, a pruned run or a revoked token. Exit 3 still means an incomplete observation that may complete on retry.
