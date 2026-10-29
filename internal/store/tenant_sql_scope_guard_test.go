@@ -448,9 +448,8 @@ func tenantTablesTouchedBy(sql string) []string {
 }
 
 // safety: reads one statement's text, so a statement joining two tenant
-// tables passes on a single predicate; this is the guard's floor, not a
-// proof that every table in the statement is scoped. A subquery is judged
-// on its own by unscopedSubqueries.
+// tables passes on a single predicate here; unboundJoinAliases judges each
+// joined alias. A subquery is judged on its own by unscopedSubqueries.
 func statementCarriesTeam(sql string) bool {
 	return scopeBound(scopeTokens(sql), nil)
 }
@@ -803,5 +802,84 @@ func TestTenantSQLScope_RefusesUnjudgeableSyntax(t *testing.T) {
 	}
 	if !found {
 		t.Error("the guard no longer reads SQL built in package-level initializers")
+	}
+}
+
+// safety: each entry names one joined alias bound by a key other than team, with its reason.
+var reviewedUnboundJoinAliases = map[string]string{
+	"(*Tenant).recordSessionMembershipTx|s": "a session is keyed by its hash across teams; m.team binds the tenant the row is written for",
+}
+
+var unionSplitRe = regexp.MustCompile(`(?i)\bunion(\s+all)?\b|\bintersect\b|\bexcept\b`)
+
+// safety: one branch's team predicate says nothing about a table joined to it by a non-team column, so each
+// joined tenant alias needs its own alias.team reference.
+func unboundJoinAliases(sql string) []string {
+	tenant := teamColumnTables()
+	var out []string
+	for _, branch := range unionSplitRe.Split(strings.ToLower(splitSubqueries(sql).outer), -1) {
+		var aliases []string
+		for _, m := range tableAliasRe.FindAllStringSubmatch(branch, -1) {
+			if !slices.Contains(tenant, m[1]) || strings.HasPrefix(strings.TrimSpace(m[0]), "into") {
+				continue
+			}
+			alias := m[2]
+			if alias == "" || slices.Contains(sqlClauseWords, alias) || slices.Contains([]string{"right", "full", "natural"}, alias) {
+				alias = m[1]
+			}
+			aliases = append(aliases, alias)
+		}
+		if len(aliases) < 2 {
+			continue
+		}
+		for _, alias := range aliases {
+			if !regexp.MustCompile(`\b` + regexp.QuoteMeta(alias) + `\.team\b`).MatchString(branch) {
+				out = append(out, alias)
+			}
+		}
+	}
+	return out
+}
+
+func TestTenantSQLScope_EveryJoinedTenantTableBindsTheTeam(t *testing.T) {
+	for q, want := range map[string][]string{
+		`SELECT s.value FROM runs r JOIN secrets s ON s.pipeline=r.pipeline WHERE r.team=?`:                       {"s"},
+		`SELECT s.value FROM runs r JOIN secrets s ON s.team=r.team AND s.pipeline=r.pipeline WHERE r.team=?`:     nil,
+		`SELECT key FROM concurrency_holders WHERE team=? UNION SELECT key FROM concurrency_waiters WHERE team=?`: nil,
+		`INSERT INTO log_streams(team,run_id) SELECT team,id FROM runs WHERE team=? AND id=?`:                     nil,
+	} {
+		if got := unboundJoinAliases(q); !slices.Equal(got, want) {
+			t.Errorf("unboundJoinAliases(%q) = %v, want %v", q, got, want)
+		}
+	}
+	used, joins := map[string]bool{}, 0
+	for _, stmt := range tenantSQLStatements(t) {
+		if regexp.MustCompile(`(?i)\bjoin\b`).MatchString(stmt.text) {
+			joins++
+		}
+		if exemptFromScope(stmt.key) {
+			continue
+		}
+		if _, ok := reviewedClaimSearchSQL[stmt.key]; ok {
+			continue
+		}
+		if _, ok := reviewedClaimSQLFragments[stmt.key]; ok {
+			continue
+		}
+		for _, alias := range unboundJoinAliases(stmt.text) {
+			if _, ok := reviewedUnboundJoinAliases[stmt.key+"|"+alias]; ok {
+				used[stmt.key+"|"+alias] = true
+				continue
+			}
+			t.Errorf("%s: statement in %s joins tenant table alias %s without binding %s.team; join on team or bind it to the tenant.\n\t%s", stmt.pos, stmt.key, alias, alias, collapse(stmt.text))
+		}
+	}
+	if joins < 20 {
+		t.Fatalf("guard saw only %d joining statements; it is no longer reading this package", joins)
+	}
+	for key, why := range reviewedUnboundJoinAliases {
+		if strings.TrimSpace(why) == "" || !used[key] {
+			t.Errorf("reviewedUnboundJoinAliases entry %q is stale or has no reason; delete it", key)
+		}
 	}
 }

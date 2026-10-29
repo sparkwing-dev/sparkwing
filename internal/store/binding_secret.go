@@ -52,17 +52,34 @@ func secretRepository(r runspec.SealedRequest) string {
 	return ""
 }
 
-func bindingSecretTx(ctx context.Context, tx *storeTx, c capability.Capability, target capability.Target) error {
+// safety: the one rule for which award reads a declared secret, a live approval evaluator or a trigger, plan or
+// node award without an expansion; route authorization and the committing release both call it. It reports
+// an approval evaluator, whose evaluation fence it has already checked.
+func secretReaderTx(ctx context.Context, tx *storeTx, c capability.Capability) (bool, error) {
+	if c.Binding.RunID == "" || c.Delivery == capability.DeliveryBootstrap {
+		return false, bindingRefusal()
+	}
 	if c.Unit == capability.UnitEval {
 		approval, err := approvalEvaluationReaderTx(ctx, tx, c)
 		if err != nil {
-			return err
+			return false, err
 		}
 		if !approval {
-			return bindingRefusal()
+			return false, bindingRefusal()
 		}
+		return true, nil
 	}
-	if c.Binding.RunID == "" || target.SecretName == "" || target.RunID != "" && target.RunID != c.Binding.RunID {
+	if c.UnitID == "" || c.Binding.Expansion != nil || !slices.Contains([]capability.UnitKind{capability.UnitTrigger, capability.UnitPlan, capability.UnitNode}, c.Unit) {
+		return false, bindingRefusal()
+	}
+	return false, nil
+}
+
+func bindingSecretTx(ctx context.Context, tx *storeTx, c capability.Capability, target capability.Target) error {
+	if _, err := secretReaderTx(ctx, tx, c); err != nil {
+		return err
+	}
+	if target.SecretName == "" || target.RunID != "" && target.RunID != c.Binding.RunID {
 		return bindingRefusal()
 	}
 	run, err := readRunTx(ctx, tx, Team(c.Team), c.Binding.RunID)

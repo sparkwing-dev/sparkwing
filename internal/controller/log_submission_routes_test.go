@@ -3,9 +3,11 @@ package controller
 import (
 	"bytes"
 	"compress/gzip"
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -312,5 +314,52 @@ func TestLogSigningRefusesATeamAtItsStorageLimit(t *testing.T) {
 	refused := sign(2, 1<<20, http.StatusTooManyRequests)
 	if strings.Contains(refused.Body.String(), "url") || !strings.Contains(refused.Body.String(), "contact support to raise this limit") {
 		t.Fatalf("refused signing = %s; want a quota refusal naming the remedy and no URL", refused.Body.String())
+	}
+}
+
+type lifecycleProbeObjects struct {
+	*blob.Filesystem
+	reads *int
+}
+
+func (o lifecycleProbeObjects) LogClassReady(context.Context, string) error {
+	*o.reads++
+	return errors.New("bucket has no lifecycle rule")
+}
+
+func TestLogSigningNeverReadsTheBucketLifecycle(t *testing.T) {
+	e, _, raw := engineClaimHTTPFixture(t, []capability.Grant{capability.NodesClaim})
+	fsObjects, err := blob.NewFilesystem(blob.FilesystemOptions{
+		Directory: t.TempDir(), Endpoint: "https://controller.invalid", SigningKey: bytes.Repeat([]byte{41}, 32),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := fsObjects.Close(); err != nil {
+			t.Error(err)
+		}
+	})
+	reads := 0
+	objects := lifecycleProbeObjects{Filesystem: fsObjects, reads: &reads}
+	h := New(e.Store, nil).WithEngineController(e.EngineController).WithDataController(NewDataController(e.Store, DataController{Objects: objects})).Handler()
+	response := engineClaimHTTP(t, h, raw, "POST", "/api/v1/runners/claim", `{"runner_version":"v1","kinds":["node"]}`, 200)
+	var award controllerwire.ClaimResponse
+	if err := json.Unmarshal(response.Body.Bytes(), &award); err != nil || award.Claim == nil {
+		t.Fatalf("claim: %v", err)
+	}
+	claim := award.Claim
+	engineAdmitBearer(t, e.Store, claim.Capability)
+	engineClaimHTTP(t, h, claim.Capability, "POST", "/api/v1/runs/run/jobs/job/transition", `{"to":"running","cause":"start","source_attempt":0}`, 200)
+	subject := blob.LogSubject{Kind: blob.LogJobAttempt, Team: "a", RunID: "run", Attempt: &runspec.AttemptIdentity{Team: "a", RunID: "run", NodeID: "job", Attempt: 1, Generation: claim.Binding.Generation}}
+	for index := int64(1); index <= 3; index++ {
+		encoded, err := json.Marshal(blob.LogSigningRequest{Subject: subject, Index: index, Size: 3, Digest: blob.Digest(strings.Repeat("a", 64))})
+		if err != nil {
+			t.Fatal(err)
+		}
+		engineClaimHTTP(t, h, claim.Capability, "POST", "/api/v1/runs/run/jobs/job/log-segments", string(encoded), http.StatusOK)
+	}
+	if reads != 0 {
+		t.Fatalf("log signing read the bucket lifecycle %d times; a backstop rule is checked at startup only", reads)
 	}
 }

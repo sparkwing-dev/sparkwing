@@ -9,6 +9,9 @@ Preparation cancels restored unfinished scheduled runs and holds new schedule
 admissions. Sessions, API tokens, runner and machine credentials, and API/local
 schedule consent remain valid. `restore acknowledge` discards schedule catch-up
 through its timestamp and lifts the hold without requiring new consent.
+Preparation and startup refuse a database recorded under a different epoch,
+such as one taken before an earlier sign-out or one served with a lost epoch
+file, and name the file to restore.
 
 For a security incident, such as a stolen database or leaked keys, use
 `restore prepare --sign-out-everyone`. It rotates the external epoch and

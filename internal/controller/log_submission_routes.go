@@ -24,7 +24,6 @@ import (
 type logSubmissionObjects interface {
 	logseg.LogPutSigner
 	logseg.SegmentObjects
-	LogClassReady(context.Context, string) error
 }
 
 func (s *Server) logSubmissionEndpoints(e *EngineController) []controllerwire.Endpoint {
@@ -119,7 +118,7 @@ func (s *Server) handleLogSigning(w http.ResponseWriter, r *http.Request, a capa
 	// safety: the URL carries the slot's first admitted size and upload deadline, so signing again can never store
 	// more or upload later.
 	body.Size = opened.Size
-	slot, err := (logseg.Signer{Objects: objects, ClassReady: objects.LogClassReady, Expires: opened.UploadExpires}).Sign(r.Context(), body, opened.RetentionClass)
+	slot, err := (logseg.Signer{Objects: objects, Expires: opened.UploadExpires}).Sign(r.Context(), body, opened.RetentionClass)
 	if err != nil {
 		return err
 	}

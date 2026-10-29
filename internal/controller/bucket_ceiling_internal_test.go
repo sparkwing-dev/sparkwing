@@ -70,9 +70,9 @@ func TestBucketUsageSurfacesAFailedMeasurement(t *testing.T) {
 	}
 }
 
-// A controller pointed at a bucket measures it whether or not a ceiling is
-// set, so the totals it reports are the bucket's, never zeros.
-func TestTheBucketIsMeasuredWithNoCeilingSet(t *testing.T) {
+// Measuring a bucket with no ceiling records its totals without enforcing
+// or freezing anything.
+func TestMeasuringAnUnlimitedBucketNeitherEnforcesNorFreezes(t *testing.T) {
 	ceiling := objectguard.NewCeiling(objectguard.CeilingConfig{})
 	store := &measuredStore{usage: storage.StoreUsage{Bytes: 69 << 20, Objects: 412, ObservedAt: time.Now()}}
 	s := New(nil, nil).WithBucketUsage(store)
@@ -104,7 +104,7 @@ func TestAFailedBucketMeasurementReachesHealth(t *testing.T) {
 		}})
 		ceiling.Observe(objectguard.Usage{})
 	})
-	ceiling.Configure(objectguard.CeilingConfig{})
+	ceiling.Configure(objectguard.CeilingConfig{Limit: objectguard.CeilingLimit{WarnBytes: 1 << 40}})
 	s := New(nil, nil).WithBucketUsage(&measuredStore{err: errors.New("AccessDenied: list bucket")})
 	s.runBucketCeiling(context.Background())
 	state := ceiling.State()
@@ -118,5 +118,25 @@ func TestAFailedBucketMeasurementReachesHealth(t *testing.T) {
 	}
 	if summary, problems := objectStoreHealth(false); summary["ceiling"] != nil || len(problems) != 0 {
 		t.Fatalf("health with no bucket = %v %v", summary, problems)
+	}
+}
+
+// With no ceiling and no warning mark nothing reads the totals, so the
+// controller never lists the bucket, even when pointed at one.
+func TestAnUnboundedCeilingNeverListsTheBucket(t *testing.T) {
+	ceiling := objectguard.Shared().Ceiling()
+	saved := ceiling.State()
+	t.Cleanup(func() {
+		ceiling.Configure(objectguard.CeilingConfig{Limit: objectguard.CeilingLimit{
+			MaxBytes: saved.MaxBytes, MaxObjects: saved.MaxObjects, WarnBytes: saved.WarnBytes, WarnObjects: saved.WarnObjects,
+		}})
+	})
+	ceiling.Configure(objectguard.CeilingConfig{Reconcile: time.Millisecond})
+	store := &measuredStore{usage: storage.StoreUsage{Bytes: 1, Objects: 1, ObservedAt: time.Now()}}
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+	New(nil, nil).WithBucketUsage(store).runBucketCeiling(ctx)
+	if store.calls != 0 {
+		t.Fatalf("an unbounded ceiling listed the bucket %d times", store.calls)
 	}
 }

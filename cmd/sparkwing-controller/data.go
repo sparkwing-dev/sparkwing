@@ -5,13 +5,34 @@ import (
 	"crypto/rand"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net"
 	"os"
 	"path/filepath"
+	"slices"
+	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
+	"github.com/sparkwing-dev/sparkwing/internal/limits"
 	s3store "github.com/sparkwing-dev/sparkwing/internal/storage/s3"
+	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
+
+// safety: the maintenance pass deletes log objects itself, so a missing lifecycle rule only warns once at startup;
+// it never refuses an upload and no request path reads bucket rules.
+func warnLogLifecycle(ctx context.Context, objects *blob.S3, overrides map[store.Team]int) {
+	days := []int{int(limits.FreeLogRetention / (24 * time.Hour)), int(limits.FundedLogRetention / (24 * time.Hour))}
+	for _, d := range overrides {
+		days = append(days, d)
+	}
+	slices.Sort(days)
+	for _, d := range slices.Compact(days) {
+		class := fmt.Sprintf("r%d", d)
+		if err := objects.LogClassReady(ctx, class); err != nil {
+			slog.Warn("log lifecycle backstop rule missing; log uploads continue and the maintenance pass still deletes them at their retention age", "class", class, "err", err)
+		}
+	}
+}
 
 func openFilesystemData(root, externalURL, address string) (*blob.Filesystem, error) {
 	endpoint, err := filesystemDataEndpoint(externalURL, address)

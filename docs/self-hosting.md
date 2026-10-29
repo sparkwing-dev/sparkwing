@@ -62,10 +62,12 @@ refuses any other value.
 ### Node log retention
 
 The log storage contract assigns a retention class before signing segment
-uploads. Object-store lifecycle rules must cover each class before URLs are
-issued and expire it no sooner than the class: Sparkwing deletes log objects at
-the class age itself, so set each rule longer (for example the class plus seven
-days) as a backstop. The shared free and funded classes are thirty and ninety days.
+uploads. Sparkwing deletes log objects at the class age itself, so an
+object-store lifecycle rule per class is a backstop: expire it no sooner than
+the class, and set it longer (for example the class plus seven days). An S3
+controller with `s3:GetLifecycleConfiguration` reads the rules once at startup
+and logs a warning for each class without one; it never refuses an upload for
+a missing rule. The shared free and funded classes are thirty and ninety days.
 Filesystem storage uses its backend's retention mechanism.
 
 Log reads reauthorize at the controller and cover tagged job-attempt and
@@ -203,6 +205,12 @@ retained PVC at `/var/lib/sparkwing/credential-epoch` and selects it with this
 flag, including when `/data` uses `emptyDir`, and sets the pod's
 `fsGroupChangePolicy` to `OnRootMismatch` so the kubelet does not relabel the
 volume on every mount.
+
+The database records the epoch it was first served under. A controller whose
+`credential-epoch` file is missing, moved or replaced refuses to start and names
+the file, rather than ending every session, API token and runner credential.
+Copy the original file back, or run `sparkwing-controller restore prepare
+--sign-out-everyone` to end them on purpose.
 Preserve the latest epoch when
 restoring a database. Retain its volume independently of database backups.
 Declared restore preparation holds schedules until operator acknowledgment and

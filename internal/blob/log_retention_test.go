@@ -41,13 +41,13 @@ func TestFilesystemLogRetention(t *testing.T) {
 	}
 	var retained, expired []string
 	for _, class := range []string{"", "r0", "r01", "r+30", "r-1"} {
-		if err := backend.LogClassReady(t.Context(), class); err == nil {
+		if _, ok := LogClassDays(class); ok {
 			t.Fatalf("accepted invalid class %q", class)
 		}
 	}
 	for _, days := range []int{30, 90, 120} {
-		if err := backend.LogClassReady(t.Context(), "r"+strconv.Itoa(days)); err != nil {
-			t.Fatal(err)
+		if got, ok := LogClassDays("r" + strconv.Itoa(days)); !ok || got != days {
+			t.Fatalf("class r%d = %d, %t", days, got, ok)
 		}
 		for i, age := range []time.Duration{time.Duration(days)*24*time.Hour - time.Nanosecond, time.Duration(days) * 24 * time.Hour, time.Duration(days+1) * 24 * time.Hour} {
 			for _, name := range []string{"seg-000001.ndjson.gz", "manifest.json"} {
@@ -110,9 +110,6 @@ func TestFilesystemLogRetention(t *testing.T) {
 	}
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
-	if err := backend.LogClassReady(ctx, "r30"); !errors.Is(err, context.Canceled) {
-		t.Fatalf("cancelled class check = %v", err)
-	}
 	if n, err := backend.ExpireLogs(ctx); n != 0 || !errors.Is(err, context.Canceled) {
 		t.Fatalf("cancelled sweep = %d, %v", n, err)
 	}

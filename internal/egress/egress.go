@@ -9,6 +9,7 @@ import (
 	"net"
 	"net/http"
 	"slices"
+	"strings"
 	"sync"
 	"time"
 )
@@ -40,10 +41,11 @@ func TeamPrincipal(team, name string) string {
 }
 
 // overflowPrincipal labels bytes served to a principal the meter had no
-// room to track separately. They share one budget rather than an
-// unbudgeted one, so reaching the cardinality cap tightens the meter
-// instead of opening it. The fold lasts until the month rolls, which is
-// when a meter drops the principals that spent nothing.
+// room to track separately. They share their team's one budget rather than
+// an unbudgeted one, so reaching the cardinality cap tightens the meter
+// instead of opening it, and one team's principals never spend another
+// team's budget. The fold lasts until the month rolls, which is when a
+// meter drops the principals that spent nothing.
 const overflowPrincipal = "(overflow)"
 
 // maxPendingUsages bounds the closing-month totals a meter parks for a
@@ -52,10 +54,10 @@ const overflowPrincipal = "(overflow)"
 // that has stopped entirely is capped rather than unbounded.
 const maxPendingUsages = 2 * MaxPrincipals
 
-// MaxPrincipals bounds how many principals one meter tracks. A
-// controller mints tokens under an operator's hand, so the cap sits far
-// above a real deployment's principal count and exists to bound memory
-// against a fleet that invents identities.
+// MaxPrincipals bounds how many principals one meter tracks, which bounds
+// memory against a fleet that invents identities (each GitHub Actions run
+// exchanges its own). Past it each team's new principals fold into that
+// team's overflow bucket, so the meter grows by at most one bucket per team.
 const MaxPrincipals = 10000
 
 // Slot names a concurrency cap. Both slots bound how many responses one
@@ -654,15 +656,19 @@ func sign(n int64) int64 {
 	}
 }
 
-// safety: a principal past the cardinality cap folds into one shared
-// bucket, so the budget a caller spends is never wider than the one the
-// meter can account for.
+// safety: a principal past the cardinality cap folds into its team's
+// overflow bucket, so the budget a caller spends is never wider than the one
+// the meter can account for and never one another team spends.
 func (m *Meter) key(principal string) string {
 	if principal == "" {
 		return anonymousPrincipal
 	}
 	if _, tracked := m.principals[principal]; !tracked && len(m.principals) >= MaxPrincipals {
-		return overflowPrincipal
+		team, _, scoped := strings.Cut(principal, "/")
+		if !scoped {
+			team = ""
+		}
+		return TeamPrincipal(team, overflowPrincipal)
 	}
 	return principal
 }
@@ -673,10 +679,10 @@ func (m *Meter) key(principal string) string {
 func (m *Meter) counters(principal string, now time.Time) (string, *principalCounters) {
 	m.rollGlobal(now)
 	key := m.key(principal)
-	if key == overflowPrincipal && !m.overflowed {
+	if strings.HasSuffix(key, overflowPrincipal) && !m.overflowed {
 		m.overflowed = true
 		m.logger.Warn("egress principal cap reached",
-			"principals", len(m.principals), "shared_budget", overflowPrincipal)
+			"principals", len(m.principals), "shared_budget", key)
 	}
 	st := m.principals[key]
 	if st == nil {

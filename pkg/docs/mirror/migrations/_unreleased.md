@@ -2193,16 +2193,15 @@ collection after the 24-hour grace.
   node that wrote none, so logs the service already holds stay readable.
   Deleting a run or a team deletes its segments.
 - **Operator steps:** keep the logs service running so its existing logs
-  stay readable. On an S3 cache bucket, grant the controller
-  `s3:GetLifecycleConfiguration` and add enabled lifecycle rules expiring
+  stay readable. On an S3 cache bucket, add enabled lifecycle rules expiring
   `<cache prefix>/logs/r90/` after at least 90 days and `<cache prefix>/logs/r30/`
   after at least 30, plus `<cache prefix>/logs/r<days>/` after at least `<days>`
   for each team `--log-retention team=days` names. The controller deletes log
   objects at the class age itself, so set each rule longer as a backstop; [self-hosting.md](../self-hosting.md#node-log-retention)
-  has the command. Until a class has its rule, the controller issues no
-  upload URLs into it and those nodes' runners keep writing to their logs
-  URL, or their own disk without one. A controller that keeps segments on
-  its own disk needs no rule and keeps them until their run is deleted.
+  has the command. With `s3:GetLifecycleConfiguration` the controller
+  checks the rules once at startup and warns for a class without one; uploads
+  never wait on a rule. A controller that keeps segments on its own disk
+  needs no rule.
   On a multi-team controller segment bytes count against the team's log
   storage.
 - **Logs the service already holds:** nothing converts them; they become

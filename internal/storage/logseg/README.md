@@ -50,10 +50,8 @@ key, reads bounded bytes and requires successful close, exact size and SHA-256.
 It returns no bytes or read URL and creates no reference edge. `RecordSegments`
 rechecks the writer before committing that edge. The verifier works with both
 object backends; the controller's final log commit uses it for the manifest.
-`LogClassReady` is part of the controller's physical log binding. S3 validates
-the bucket lifecycle, which must expire the class no sooner than its days.
-Filesystem validates the class handled by its expiry pass.
-The controller runs filesystem expiry after renewing its maintenance lease. Both
+Signing never reads bucket lifecycle rules; the controller checks S3 rules once
+at startup and warns. The controller runs filesystem expiry after renewing its maintenance lease. Both
 are backstops: Sparkwing deletes log objects itself under [log slot accounting](../../store/STORE-DATA.md#log-slot-accounting).
 
 `CommittedReader` calls `ReadLogSegments` before each segment. It checks the returned

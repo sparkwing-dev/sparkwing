@@ -303,3 +303,30 @@ func TestGitHubAppAutomationKeepsTheSignedDefaultBranch(t *testing.T) {
 		t.Fatalf("signed default replaced by discovery=%+v", git)
 	}
 }
+
+// One pipeline's unsupported declaration skips that pipeline and names it;
+// its siblings keep their repository automation.
+func TestGitHubAppAutomationSkipsOnlyAnUnsupportedPipeline(t *testing.T) {
+	f := newAppFixture(t)
+	owner := f.ghUser(501, "olga")
+	f.connect(owner, 501, 7, acmeAdmin)
+	f.app.SetCommit("acme/widgets", "main", headSHA)
+	config := automationConfig + `  - name: docs
+    entrypoint: Docs
+    on:
+      push:
+        paths: [docs/*]
+`
+	f.app.SetFile("acme/widgets", headSHA, ".sparkwing/sparkwing.yaml", []byte(config))
+	out := automationPreview(t, f, owner)
+	pipelines, _ := out["pipelines"].([]any)
+	skipped, _ := out["skipped"].([]any)
+	if out["status"] != "ready" || len(pipelines) != 1 || pipelines[0].(map[string]any)["pipeline"] != "deploy" || len(skipped) != 1 || skipped[0].(map[string]any)["pipeline"] != "docs" || !strings.Contains(skipped[0].(map[string]any)["error"].(string), "on.push.paths") {
+		t.Fatalf("discovery with one unsupported pipeline = %+v", out)
+	}
+	enableAutomation(t, f, owner)
+	_, delivered := f.deliver("push", pushPayload(7, 701, "acme/widgets", headSHA), "")
+	if ids := startedRunIDs(t, delivered); len(ids) != 1 {
+		t.Fatalf("sibling of an unsupported pipeline did not dispatch: %+v", delivered)
+	}
+}
