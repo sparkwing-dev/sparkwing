@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 
 	batchv1 "k8s.io/api/batch/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -25,10 +26,24 @@ func (l *Launcher) rejectJob(ctx context.Context, job *batchv1.Job, binding Clou
 	if err == nil && (len(states) != 1 || !sameBinding(states[0].Binding, binding) || !states[0].Delete) {
 		err = errors.New("controller did not retire rejected Cloud award")
 	}
-	if err := errors.Join(containErr, err); blocking(err) != nil {
-		return err
+	// safety: containment and teardown failures belong to this Job, which every sync rejects again; only a
+	// controller failure stops claims. A failed containment skips teardown, which would release the node.
+	if blocking(err) != nil {
+		return errors.Join(rejectionFault(job.Name, containErr), err)
 	}
-	return errors.Join(containErr, l.teardown(ctx, job, reservation))
+	if containErr != nil {
+		return rejectionFault(job.Name, containErr)
+	}
+	return rejectionFault(job.Name, l.teardown(ctx, job, reservation))
+}
+
+// rejectionFault marks a rejected Job's cleanup failure as a teardown fault, which keeps claims going, and
+// unlike teardownFault still reports containers that are running, so the rejection stays visible until done.
+func rejectionFault(job string, err error) error {
+	if err == nil {
+		return nil
+	}
+	return fmt.Errorf("%w: %s: %w", errJobTeardown, job, err)
 }
 
 func (l *Launcher) containJob(ctx context.Context, job *batchv1.Job, reservation CloudNodeReservation, reason string) (*batchv1.Job, error) {

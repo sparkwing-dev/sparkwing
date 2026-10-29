@@ -504,3 +504,28 @@ func TestForeignNamespaceReservationIsReported(t *testing.T) {
 		t.Fatalf("legacy reservation went unreported: %s", logs.String())
 	}
 }
+
+// A rejected Job's cleanup failure is that Job's fault: it is retried each
+// pass while the launcher keeps claiming work for every other team.
+func TestRejectedJobTeardownFailureDoesNotStopClaims(t *testing.T) {
+	l, kube, _, control := fixture()
+	if _, err := l.LaunchOne(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	name := jobName(control.award.Binding)
+	job, err := kube.BatchV1().Jobs("cloud").Get(t.Context(), name, metav1.GetOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	job.Annotations[rejectedAnnotation] = rejectedPod
+	if _, err := kube.BatchV1().Jobs("cloud").Update(t.Context(), job, metav1.UpdateOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	failure := errors.New("Job deletion unavailable")
+	kube.PrependReactor("delete", "jobs", func(ktesting.Action) (bool, runtime.Object, error) {
+		return true, nil, failure
+	})
+	if err := l.Sync(t.Context()); !errors.Is(err, failure) || blocking(err) != nil {
+		t.Fatalf("rejected Job teardown failure = %v, want a non-blocking fault naming it", err)
+	}
+}
