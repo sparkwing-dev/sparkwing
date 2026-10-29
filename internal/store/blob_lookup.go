@@ -238,7 +238,7 @@ func (r *blobRecords) lookupMemo(ctx context.Context, request blob.MemoLookup, r
 func (r *blobRecords) lookupMemoTx(ctx context.Context, tx *storeTx, a blobActor, request blob.MemoLookup, source *blob.Record) (blob.MemoHit, error) {
 	result := blob.MemoHit{}
 	key := request.Key
-	if key.Repo != a.authority.Repo || key.Hash == "" || blobLocalRepo(key.Repo) {
+	if key.Repo != a.authority.Repo || key.Hash == "" {
 		return result, blob.ErrDigestNotReadable
 	}
 	if a.capability.Data.Use != capability.DataRemoteCache && (key.Pipeline != a.pipeline || !a.authority.Attempt.Set || key.Job != a.authority.Attempt.Value.NodeID || key.Ref != a.authority.Ref.Scope) {
@@ -248,6 +248,9 @@ func (r *blobRecords) lookupMemoTx(ctx context.Context, tx *storeTx, a blobActor
 		if err := requireBlobMemoTx(ctx, tx, a); err != nil {
 			return result, err
 		}
+	}
+	if blobLocalRepo(key.Repo) {
+		return result, nil
 	}
 	refs := []blob.RefScope{a.authority.Ref.Scope}
 	if a.capability.Data.Use == capability.DataRemoteCache {
