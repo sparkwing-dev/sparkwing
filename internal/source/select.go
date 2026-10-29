@@ -87,11 +87,10 @@ func readCommitFile(ctx context.Context, spec Spec, sha, name string, options Op
 		return nil, false, err
 	}
 	parent := options.Workspace
-	if parent == "" {
-		parent = os.TempDir()
-	}
-	if err := fssecure.EnsureDir(parent); err != nil {
-		return nil, false, err
+	if parent != "" {
+		if err := fssecure.EnsureDir(parent); err != nil {
+			return nil, false, err
+		}
 	}
 	workspace, err := fssecure.MkdirPrivateTemp(parent, "selection-")
 	if err != nil {

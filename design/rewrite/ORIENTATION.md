@@ -30,6 +30,7 @@ credential model in `docs/auth.md`, and the decision log
 | Verified default-branch work | `Provenance.DefaultBranchWork` (Go) and its SQL twin `claimSQL.defaultBranchWork` (`claim_query.go`) | `trust_sql_test.go`: `TestDefaultBranchWorkSQLAgreesWithGo` |
 | Sealed provenance | `internal/runspec/seal.go`: `SealRequest`; store side `intake_provenance.go`: `sealProvenanceTx`, `identityTx` | `internal/runspec/provenance_test.go`: `TestProvenanceRoundTripsAndRefusesForgedSeals`; `internal/runspec/spec_test.go`: `TestSealRefusals` |
 | Fetched repository (run-now, console, unlocked schedules) | `internal/controller/intake_source.go`: `selectFetchedSource`; `run_spec.go`: `FetchedRepository`; `intake_provenance.go`: `fetchedRepositoryTx`; `Provenance.FetchedFrom` | `internal/controller/intake_source_test.go`: `TestFetchedGitHubRepositoryFollowsSourceSelection` |
+| Source selection leaves the shared temporary parent unchanged | `internal/source/select.go`: `readCommitFile` prepares only an explicit workspace; `fssecure.MkdirPrivateTemp` owns the private child | `internal/source/select_temp_unix_test.go`: `TestSelectLeavesTheSharedTemporaryParentUnchanged` |
 | OIDC claims | `Provenance.OIDC`; `internal/oidcissuer/issuer.go`: `Claims`, `runnerEnvironment`; `authority_oidc.go`: `Tenant.MintOIDCToken` | `oidc_repository_test.go`: `TestOIDCRepositoryClaimReadsSealedProvenance`; `pool_launcher_test.go`: `TestLauncherPodOIDCIsFresh` |
 
 ### Claims and placement
