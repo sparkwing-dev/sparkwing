@@ -76,7 +76,7 @@ type AfterRunFn func(ctx context.Context, err error)
 
 ### type Annotation
 
-Annotation carries source location and the same severity vocabulary as log records.
+Annotation carries source location and a severity: LevelDebug, LevelInfo, LevelWarn or LevelError.
 
 ```
 type Annotation struct {
@@ -1120,6 +1120,15 @@ type Workable interface {
 
 
 ## Constants
+
+```
+const (
+    LevelDebug = "debug"
+    LevelInfo  = "info"
+    LevelWarn  = "warn"
+    LevelError = "error"
+)
+```
 
 ```
 const ExitNotStarted = -1
