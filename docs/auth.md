@@ -128,7 +128,12 @@ claim's binding. Members may read only unmasked values in their own team.
 `GET /api/v1/queue` uses the shared capability policy. A member or verified
 local peer needs `runs.read` for its active team. Queue groups and advertised
 runner headroom belong to that team. Machine roots and work claims cannot read
-the team queue. The former `/api/v1/queue/state` path is removed.
+the team queue. The former `/api/v1/queue/state` path is removed. The local
+controller that `sparkwing dashboard start` runs also reports its machine's
+admission daemon: `daemon_version`, `daemon_uptime_ms`, the `cores` and
+`memory` rows and the daemon's holders and waiters. Without a running daemon
+those fields are absent, and a daemon that does not answer returns
+`unavailable`. A team or Cloud controller has no daemon to report.
 
 Run intake, plan acceptance, job status reads, job transitions, finish,
 cancellation, retry and run/job renewal use the shared capability policy. The
@@ -824,7 +829,8 @@ The existing limit is ten link attempts per account per minute.
 `GET /auth/{provider}/link/complete` uses that same session and flow cookie.
 It consumes the flow before provider access and attaches only the verified
 provider identity. Neither endpoint renews the session or accepts an
-Authorization header. Failures return the canonical error envelope.
+Authorization header. A refused link returns to `/account/sign-ins?refused=<reason>`,
+and the page says what happened and what to do.
 Controller construction binds the store operator as the identity-link writer
 for committing session and nonce checks. A missing writer returns `policy_missing`.
 
@@ -856,7 +862,18 @@ checks. Membership and session ancestry remain live authorization inputs.
 
 Provider sign-in verifies the callback state, proof-key flow and provider token
 or identity response. It checks the configured redirect origin and the provider's
-identity and verification claims. Linking a provider does not grant repository
+identity and verification claims. A refused sign-in returns to
+`/login?refused=<reason>` (keeping `next`), and the sign-in page says what
+happened and what to do. The reason is one of a fixed set that names no
+account or provider detail: `expired`, `cancelled`, `email_unverified`,
+`account_exists`, `no_team`, `reauth_required`, `direct_sign_in_required`,
+`identity_linked_elsewhere`, `identity_already_linked`,
+`provider_already_linked`, `rate_limited`, `unavailable` or `failed`. A refused
+invitation acceptance carries `invitation_not_found`, `invitation_closed` or
+`team_full` in `error.details.reason`. The store finds an invitation only through
+an address the account owns, so a missing invitation and one sent elsewhere get
+the same `invitation_not_found` answer; expiry and use are reported only for the
+caller's own invitation. Linking a provider does not grant repository
 trust. GitHub App intake separately verifies its webhook and clones its exact
 SHA. A subsequent branch-head lookup cannot replace that proof.
 

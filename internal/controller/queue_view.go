@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
@@ -23,6 +24,18 @@ func (s *Server) queueReader(ctx context.Context, team string) (QueueReader, err
 	return tenantPort[QueueReader](ctx, s, store.Team(team))
 }
 
+// LocalAdmission reads the admission daemon on the local controller's own machine. It answers an empty state with
+// no error when no daemon is running.
+type LocalAdmission func(context.Context) (wingwire.QueueState, error)
+
+// WithLocalAdmission makes GET /api/v1/queue report the machine's admission daemon (its version, host capacity,
+// holders and waiters) beside the controller's concurrency groups. Only the local controller shares a machine with
+// one, so a team or Cloud controller leaves it unset.
+func (s *Server) WithLocalAdmission(read LocalAdmission) *Server {
+	s.localAdmission = read
+	return s
+}
+
 func (s *Server) queueEndpoints() []controllerwire.Endpoint {
 	return []controllerwire.Endpoint{
 		{Method: "GET", Pattern: "/api/v1/queue", Authentication: capability.AuthCapability, Decode: authorityTarget, Handle: s.handleQueueStateView},
@@ -38,8 +51,17 @@ func (s *Server) handleQueueStateView(w http.ResponseWriter, r *http.Request, a 
 	if err != nil {
 		return engineLookupError(err)
 	}
-	now := time.Now()
 	qs := wingwire.QueueState{}
+	if s.localAdmission != nil {
+		if qs, err = s.localAdmission(r.Context()); err != nil {
+			// safety: the policy writer replaces a 5xx message with "request failed", so this fixed public message is
+			// written here and the cause goes only to the request log.
+			apierr.NoteResponseError(w, err)
+			return apierr.WriteHTTP(w, &apierr.Error{Code: apierr.Unavailable, Message: "The local admission daemon did not answer.",
+				Hint: "Restart it with `sparkwing daemon restart`, then try again."})
+		}
+	}
+	now := time.Now()
 	for _, st := range states {
 		if st == nil {
 			return errors.New("missing persisted concurrency group")

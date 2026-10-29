@@ -61,7 +61,6 @@ func TestAccountTeamHTTPTransactionGuards(t *testing.T) {
 		{"/api/v1/teams", `{"slug":"next-team"}`, store.ErrTeamLimit, apierr.Forbidden},
 		{"/api/v1/teams", `{"slug":"next-team"}`, store.ErrSlugTaken, apierr.Conflict},
 		{"/api/v1/teams", `{"slug":"next-team"}`, store.ErrInvalidSlug, apierr.BadRequest},
-		{"/api/v1/invitations/invite/accept", "", store.ErrEmailMismatch, apierr.Forbidden},
 		{"/api/v1/invitations/invite/accept", "", store.ErrInvitationClosed, apierr.Conflict},
 		{"/api/v1/invitations/missing/accept", "", store.ErrNotFound, apierr.NotFound},
 	} {

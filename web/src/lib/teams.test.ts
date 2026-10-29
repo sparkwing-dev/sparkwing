@@ -276,6 +276,44 @@ describe("team administration calls", () => {
     }
   });
 
+  it("says what a refused invitation means and what to do", async () => {
+    respond = () =>
+      new Response(
+        JSON.stringify({
+          error: {
+            code: "conflict",
+            message: "this invitation has expired or was already used",
+            details: { reason: "invitation_closed" },
+          },
+        }),
+        { status: 409 },
+      );
+    await assert.rejects(teams.acceptInvitation("inv1"), {
+      message:
+        "This invitation has expired or was already used. Ask a team owner to send a new one.",
+    });
+    respond = () =>
+      new Response(
+        JSON.stringify({ error: { code: "conflict", message: "account resource already exists" } }),
+        { status: 409 },
+      );
+    await assert.rejects(teams.acceptInvitation("inv1"), {
+      message: "Accept invitation: account resource already exists",
+    });
+  });
+
+  it("has a sentence for every invitation refusal the controller sends", () => {
+    const reasons = (
+      JSON.parse(
+        readFileSync(join(__dirname, "testdata", "refusal-reasons.json"), "utf8"),
+      ) as { invitation: string[] }
+    ).invitation;
+    assert.deepEqual(
+      Object.keys(teams.invitationRefusalText).sort(),
+      [...reasons].sort(),
+    );
+  });
+
   it("creates a team with slug and display name", async () => {
     respond = () =>
       new Response(JSON.stringify({ slug: "acme", display_name: "Acme" }), {

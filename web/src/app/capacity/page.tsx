@@ -45,6 +45,7 @@ import {
   sortProfiles,
 } from "@/lib/capacity";
 import Tooltip from "@/components/Tooltip";
+import { showsLocalAdmission } from "@/lib/navTabs";
 import { useTeamState } from "@/lib/useTeam";
 
 const HOST_POLL_MS = 2000;
@@ -52,7 +53,7 @@ const PRICING_POLL_MS = 10000;
 
 export default function CapacityPage() {
   const team = useTeamState();
-  const localAdmission = team.status === "single-team";
+  const localAdmission = showsLocalAdmission(team.status);
   const [qs, setQs] = useState<QueueState | null>(null);
   const [hostLoaded, setHostLoaded] = useState(false);
   const [pricing, setPricing] = useState<CapacityProfiles | null>(null);
@@ -156,7 +157,7 @@ export default function CapacityPage() {
       <div className="flex-1 overflow-y-auto p-6 max-w-6xl mx-auto w-full">
         <h1 className="text-xl font-bold">Capacity is local to a machine</h1>
         <p className="mt-3 text-sm text-[var(--muted)]">
-          Cloud runner capacity is in <Link href="/cluster" className="text-[var(--accent)]">Fleet</Link>.
+          Runner capacity is in <Link href="/cluster" className="text-[var(--accent)]">Fleet</Link>.
           Run trends are in <Link href="/analytics" className="text-[var(--accent)]">Analytics</Link>.
         </p>
       </div>
@@ -249,7 +250,8 @@ function HostSection({
       >
         <Empty>
           <div className="text-sm text-[var(--foreground)]">
-            Daemon not running; nothing is being admitted or charged.
+            {qs?.daemon_error ??
+              "Daemon not running; nothing is being admitted or charged."}
           </div>
           <div className="text-xs text-[var(--muted)] mt-1">
             The daemon starts with your next run and arbitrates local capacity

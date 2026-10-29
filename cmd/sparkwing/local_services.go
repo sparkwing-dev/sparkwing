@@ -25,6 +25,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/wingd"
 	wingdclient "github.com/sparkwing-dev/sparkwing/internal/wingd/client"
 	"github.com/sparkwing-dev/sparkwing/internal/wingd/localcontroller"
+	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
 )
 
 func resolveLocalServices(ctx context.Context) (dashboardServices, error) {
@@ -156,6 +157,13 @@ func bindLocalController(ctx context.Context, b localcontroller.Binding) (_ loca
 		return localcontroller.Services{}, err
 	}
 	server.WithLocalSessions(paths.PathsAt(b.Home).SessionLedgerDir())
+	server.WithLocalAdmission(func(ctx context.Context) (wingwire.QueueState, error) {
+		state, err := wingdclient.Query(ctx, wingdclient.Options{Home: b.Home, Version: installedVersion()})
+		if errors.Is(err, wingdclient.ErrNoDaemon) {
+			return wingwire.QueueState{}, nil
+		}
+		return state, err
+	})
 	server.WithLocalSchedules(schedules, func(ctx context.Context, root, pipeline string, environment []string) (crons.Proof, error) {
 		return proveLocalSchedule(ctx, b.Home, root, pipeline, environment)
 	}, snapshots)

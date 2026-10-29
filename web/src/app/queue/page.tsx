@@ -36,13 +36,14 @@ import {
 } from "@/lib/resourceObservability";
 import HostPressureChart from "@/components/HostPressureChart";
 import Tooltip from "@/components/Tooltip";
+import { showsLocalAdmission } from "@/lib/navTabs";
 import { useTeamState } from "@/lib/useTeam";
 
 const POLL_MS = 3000;
 
 export default function QueuePage() {
   const team = useTeamState();
-  const localAdmission = team.status === "single-team";
+  const localAdmission = showsLocalAdmission(team.status);
   const [qs, setQs] = useState<QueueState | null>(null);
   const [loaded, setLoaded] = useState(false);
   const [pulse, setPulse] = useState(false);
@@ -86,8 +87,8 @@ export default function QueuePage() {
       <div className="flex-1 overflow-y-auto p-6 max-w-5xl mx-auto w-full">
         <h1 className="text-xl font-bold">Queue is local to a machine</h1>
         <p className="mt-3 text-sm text-[var(--muted)]">
-          Cloud runner availability is in <Link href="/cluster" className="text-[var(--accent)]">Fleet</Link>.
-          Pending Cloud work is in <Link href="/runs" className="text-[var(--accent)]">Runs</Link>.
+          Runner availability is in <Link href="/cluster" className="text-[var(--accent)]">Fleet</Link>.
+          Pending work is in <Link href="/runs" className="text-[var(--accent)]">Runs</Link>.
         </p>
       </div>
     );
@@ -99,7 +100,7 @@ export default function QueuePage() {
       {!loaded ? (
         <Skeleton />
       ) : !qs || !hasDaemon(qs) ? (
-        <EmptyState />
+        <EmptyState error={qs?.daemon_error} />
       ) : (
         <QueueBody qs={qs} pressureHistory={pressureHistory} />
       )}
@@ -690,7 +691,14 @@ function Skeleton() {
   );
 }
 
-function EmptyState() {
+function EmptyState({ error }: { error?: string }) {
+  if (error) {
+    return (
+      <div className="rounded-lg border border-[var(--border)] bg-[var(--surface)] p-6 text-sm text-[var(--foreground)]">
+        {error}
+      </div>
+    );
+  }
   return (
     <div className="rounded-lg border border-[var(--border)] bg-[var(--surface)] p-6 flex items-start gap-3">
       <span className="w-2.5 h-2.5 rounded-full bg-[var(--muted)] shrink-0 mt-1.5" />

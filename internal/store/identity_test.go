@@ -116,8 +116,8 @@ func TestIdentityInvitationNeedsTheInvitedVerifiedEmail(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := st.AsOperator().AcceptAccountInvitation(ctx, storetest.AccountAuthority(t, st, y.Account.ID), inv.ID); !errors.Is(err, store.ErrEmailMismatch) {
-		t.Fatalf("y accepting x's invitation = %v, want ErrEmailMismatch", err)
+	if _, err := st.AsOperator().AcceptAccountInvitation(ctx, storetest.AccountAuthority(t, st, y.Account.ID), inv.ID); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("y accepting x's invitation = %v, want ErrNotFound", err)
 	}
 	acc, err := st.AsOperator().AcceptAccountInvitation(ctx, storetest.AccountAuthority(t, st, x.Account.ID), inv.ID)
 	if err != nil || acc.Team != owner.PersonalTeam || acc.Admitted {
@@ -284,7 +284,7 @@ func TestIdentitySecondSubjectFromTheSameProviderGetsItsOwnAccount(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := st.AsOperator().AcceptAccountInvitation(ctx, storetest.AccountAuthority(t, st, first.Account.ID), inv.ID); !errors.Is(err, store.ErrEmailMismatch) {
+	if _, err := st.AsOperator().AcceptAccountInvitation(ctx, storetest.AccountAuthority(t, st, first.Account.ID), inv.ID); !errors.Is(err, store.ErrNotFound) {
 		t.Fatalf("the account that lost the address accepted its invitation: %v", err)
 	}
 }

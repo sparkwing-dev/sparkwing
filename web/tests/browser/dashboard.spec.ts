@@ -1855,6 +1855,79 @@ test("lists a connection-only lease apart from the holders", async ({
   ).toHaveCount(1);
 });
 
+test("the local Queue and Capacity panels show the machine's admission daemon", async ({
+  page,
+}) => {
+  await installMockAPI(page, { queue: wire("queue.json") });
+  await page.goto("/queue");
+  await expect(page.getByText("daemon v1.2.3, up 1h")).toBeVisible();
+  await expect(page.getByText("1 holding, 0 connected, 1 queued")).toBeVisible();
+  await expect(page.getByRole("row", { name: "cores 8 4 1 1.50 1.50" })).toBeVisible();
+  await expect(
+    page.getByRole("row", { name: "1 run-plan hello app 3 cores, 2.0 GiB default 48s cores 4s" }),
+  ).toBeVisible();
+
+  await page.goto("/capacity");
+  await expect(page.getByText("daemon v1.2.3, up 1h")).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Host, live" })).toBeVisible();
+  await expect(page.getByText("Daemon not running", { exact: false })).toHaveCount(0);
+});
+
+test("says plainly when the local admission daemon is not running", async ({
+  page,
+}) => {
+  await installMockAPI(page, {
+    queue: { resources: [{ key: "deploy", capacity: 1, held: 1 }] },
+  });
+  await page.goto("/queue");
+  await expect(
+    page.getByText("No admission daemon running; nothing is queued."),
+  ).toBeVisible();
+  await page.goto("/capacity");
+  await expect(
+    page.getByText("Daemon not running; nothing is being admitted or charged."),
+  ).toBeVisible();
+});
+
+test("says how to fix an admission daemon that does not answer", async ({ page }) => {
+  await installMockAPI(page);
+  await page.route("**/api/v1/queue", (route) =>
+    route.fulfill({
+      status: 503,
+      json: { error: { code: "unavailable", message: "The local admission daemon did not answer.", hint: "Restart it with `sparkwing daemon restart`, then try again." } },
+    }),
+  );
+  const said = "The local admission daemon did not answer. Restart it with `sparkwing daemon restart`, then try again.";
+  await page.goto("/queue");
+  await expect(page.getByText(said)).toBeVisible();
+  await page.goto("/capacity");
+  await expect(page.getByText(said)).toBeVisible();
+});
+
+test("a signed-in controller without teams hides the machine-local panels", async ({
+  page,
+}) => {
+  const queueReads: string[] = [];
+  await page.addInitScript(() => {
+    (window as unknown as { __SPARKWING_REQUIRE_LOGIN__: string }).__SPARKWING_REQUIRE_LOGIN__ = "true";
+  });
+  await installMockAPI(page, {
+    queue: wire("queue.json"),
+    onRequest: (route) => {
+      const path = new URL(route.request().url()).pathname;
+      if (path === "/api/v1/queue") queueReads.push(path);
+    },
+  });
+  await page.goto("/queue");
+  await expect(page.getByRole("heading", { name: "Queue is local to a machine" })).toBeVisible();
+  await expect(page.getByRole("link", { name: "Fleet", exact: true }).first()).toBeVisible();
+  await expect(page.getByRole("link", { name: "Queue", exact: true })).toHaveCount(0);
+  await expect(page.getByRole("link", { name: "Capacity", exact: true })).toHaveCount(0);
+  await page.goto("/capacity");
+  await expect(page.getByRole("heading", { name: "Capacity is local to a machine" })).toBeVisible();
+  expect(queueReads).toEqual([]);
+});
+
 test("surfaces a general controller connection failure", async ({ page }) => {
   await installMockAPI(page, { failPath: "/api/v1/queue" });
   await page.goto("/queue");

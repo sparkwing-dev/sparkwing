@@ -1129,12 +1129,22 @@ export interface QueueState {
   external_sample_age_ms?: number;
   external_measurement_age_ms?: number;
   events?: QueueEvents | null;
+  // Set by getQueue, never by the controller: what the controller said when
+  // the local admission daemon did not answer.
+  daemon_error?: string;
 }
 
 export async function getQueue(): Promise<QueueState | null> {
   const res = await authFetch(`${API_URL}/api/v1/queue`, {
     cache: "no-store",
   }).catch(() => null);
+  if (res?.status === 503) {
+    const body = (await res.json().catch(() => null)) as {
+      error?: { message?: string; hint?: string };
+    } | null;
+    const said = [body?.error?.message, body?.error?.hint].filter(Boolean).join(" ");
+    if (said) return { daemon_error: said };
+  }
   if (!res || !res.ok) return null;
   return res.json();
 }

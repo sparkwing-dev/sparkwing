@@ -172,7 +172,7 @@ func (s *Server) offeredProvider(name string) (signInProvider, error) {
 	if p, ok := s.identity.providers[name]; ok && s.deployment.MultiTeam() {
 		return p, nil
 	}
-	return nil, refuse(http.StatusNotFound, "", name+" sign-in is not enabled on this controller")
+	return nil, refuse(http.StatusNotFound, refusedUnavailable, name+" sign-in is not enabled on this controller")
 }
 
 // safety: nothing is stored; the browser surface's __Host- flow cookie proves the same browser finishes the
@@ -235,18 +235,18 @@ func (s *Server) oauthSignIn(ctx context.Context, name, code, verifier, redirect
 	profile, err := provider.SignIn(ctx, code, verifier, redirectURI)
 	switch {
 	case errors.Is(err, errSignInUnverified):
-		return nil, "", refuse(http.StatusForbidden, "", name+" has not verified this account's email address")
+		return nil, "", refuse(http.StatusForbidden, refusedEmailUnverified, name+" has not verified this account's email address")
 	case errors.Is(err, errSignInRejected):
 		s.logger.Info("sign-in rejected", "provider", name)
-		return nil, "", refuse(http.StatusUnauthorized, "", "that sign-in could not be verified; start again")
+		return nil, "", refuse(http.StatusUnauthorized, refusedExpired, "that sign-in could not be verified; start again")
 	case err != nil:
 		s.logger.Warn("sign-in failed", "provider", name)
-		return nil, "", refuse(http.StatusBadGateway, "", name+" could not be reached to finish the sign-in")
+		return nil, "", refuse(http.StatusBadGateway, refusedUnavailable, name+" could not be reached to finish the sign-in")
 	}
 	now := time.Now().UTC()
 	res, err := s.operator.ResolveSignIn(ctx, profile, s.signUpConditions(ctx))
 	if errors.Is(err, store.ErrAccountExists) {
-		return nil, "", refuse(http.StatusConflict, "", errAccountExistsSignIn.Error())
+		return nil, "", refuse(http.StatusConflict, refusedAccountExists, errAccountExistsSignIn.Error())
 	}
 	if err != nil {
 		return nil, "", fmt.Errorf("sign-in resolve: %w", err)
@@ -257,7 +257,7 @@ func (s *Server) oauthSignIn(ctx context.Context, name, code, verifier, redirect
 		profile.Provider, profile.Subject, s.sessionInitialTTL())
 	if err != nil {
 		if errors.Is(err, store.ErrIdentityUnlinked) {
-			return nil, "", refuse(http.StatusUnauthorized, "", "that sign-in changed while it was being verified; start again")
+			return nil, "", refuse(http.StatusUnauthorized, refusedExpired, "that sign-in changed while it was being verified; start again")
 		}
 		return nil, "", fmt.Errorf("session create: %w", err)
 	}
@@ -406,7 +406,7 @@ func writeIdentityError(w http.ResponseWriter, s *Server, r *http.Request, op st
 		errors.Is(err, store.ErrInvitationOpen):
 		writeError(w, http.StatusConflict, err)
 	case errors.Is(err, store.ErrLastOwner), errors.Is(err, store.ErrRoleAboveOwn),
-		errors.Is(err, store.ErrEmailMismatch), errors.Is(err, store.ErrTeamLimit), errors.Is(err, store.ErrTeamFull),
+		errors.Is(err, store.ErrTeamLimit), errors.Is(err, store.ErrTeamFull),
 		errors.Is(err, store.ErrWaitlisted), errors.Is(err, store.ErrBindingLimit):
 		writeError(w, http.StatusForbidden, err)
 	case errors.Is(err, store.ErrInvitationClosed):

@@ -144,6 +144,14 @@ func oauthCookie(w *httptest.ResponseRecorder, name string) *http.Cookie {
 	return nil
 }
 
+func assertRefusedFlow(t *testing.T, w *httptest.ResponseRecorder, location string) {
+	t.Helper()
+	if w.Code != http.StatusSeeOther || w.Header().Get("Location") != location || w.Header().Get("Cache-Control") != "no-store" ||
+		oauthCookie(w, "__Host-sw_session") != nil || strings.Contains(w.Body.String(), "private-") {
+		t.Fatalf("HTTP %d to %q %s, want 303 to %q", w.Code, w.Header().Get("Location"), w.Body.String(), location)
+	}
+}
+
 func (f *oauthHTTP) callback(query url.Values, cookies ...*http.Cookie) *httptest.ResponseRecorder {
 	r := httptest.NewRequest("GET", oauthOrigin+"/auth/github/callback?"+query.Encode(), nil)
 	f.requests++
@@ -178,7 +186,7 @@ func TestOAuthHTTPSessionAndReplay(t *testing.T) {
 		t.Fatalf("session HTTP %d %s", w.Code, w.Body.String())
 	}
 	w = f.callback(query, f.flow)
-	assertEngineError(t, w, 401, apierr.Unauthenticated)
+	assertRefusedFlow(t, w, "/login?next=%2Fruns%3Frun%3Dr1&refused=expired")
 	if count, _ := f.state(t); count != 1 || oauthCookie(w, "__Host-sw_session") != nil {
 		t.Fatal("replayed code created another session")
 	}
@@ -222,8 +230,7 @@ func TestOAuthHTTPProofProperty(t *testing.T) {
 		before, expiry := f.state(t)
 		w := f.callback(query, cookies...)
 		after, renewed := f.state(t)
-		var result apierr.Envelope
-		return (w.Code == 400 || w.Code == 401) && json.Unmarshal(w.Body.Bytes(), &result) == nil && result.Error != nil && before == after && expiry == renewed && f.provider.calls == 0 && oauthCookie(w, cookie.Name) == nil && oauthCookie(w, "__Host-sw_session") == nil && w.Header().Get("Cache-Control") == "no-store"
+		return w.Code == 303 && strings.HasPrefix(w.Header().Get("Location"), "/login?") && before == after && expiry == renewed && f.provider.calls == 0 && oauthCookie(w, cookie.Name) == nil && oauthCookie(w, "__Host-sw_session") == nil && w.Header().Get("Cache-Control") == "no-store"
 	}
 	if err := quick.Check(property, &quick.Config{MaxCount: 90}); err != nil {
 		t.Fatal(err)
@@ -234,24 +241,23 @@ func TestOAuthHTTPProviderAndStoreRefusals(t *testing.T) {
 	for _, state := range []string{"rejected", "unavailable", "unverified", "redirect", "license", "missing store", "missing key"} {
 		t.Run(state, func(t *testing.T) {
 			f := newOAuthHTTP(t)
-			code := apierr.Unavailable
+			reason := "unavailable"
 			switch state {
 			case "rejected":
-				f.provider.failure, code = state, apierr.Unauthenticated
+				f.provider.failure, reason = state, "expired"
 			case "unavailable":
 				f.provider.failure = state
 			case "unverified":
-				f.provider.failure, code = state, apierr.Forbidden
+				f.provider.failure, reason = state, "email_unverified"
 			case "redirect":
 				r := httptest.NewRequest("GET", "https://foreign.test/auth/github/callback?"+url.Values{"state": {f.oauthState}, "code": {f.provider.code}}.Encode(), nil)
 				r.AddCookie(f.flow)
 				w := httptest.NewRecorder()
 				f.handler.ServeHTTP(w, r)
-				assertEngineError(t, w, 400, apierr.BadRequest)
+				assertRefusedFlow(t, w, "/login?next=%2Fruns%3Frun%3Dr1&refused=failed")
 				return
 			case "license":
 				f.handler = withOAuthGitHub(controller.New(f.store, slog.New(slog.NewTextHandler(f.logs, nil))), f.provider).Handler()
-				code = apierr.NotFound
 			case "missing store":
 				if err := f.store.Close(); err != nil {
 					t.Fatal(err)
@@ -261,7 +267,7 @@ func TestOAuthHTTPProviderAndStoreRefusals(t *testing.T) {
 				f.handler = withOAuthGitHub(f.server, f.provider).Handler()
 			}
 			w := f.callback(url.Values{"state": {f.oauthState}, "code": {f.provider.code}}, f.flow)
-			assertEngineError(t, w, apierr.Status(code), code)
+			assertRefusedFlow(t, w, "/login?next=%2Fruns%3Frun%3Dr1&refused="+reason)
 			if oauthCookie(w, "__Host-sw_session") != nil || strings.Contains(w.Body.String(), "private-") || strings.Contains(f.logs.String(), "private-") {
 				t.Fatalf("HTTP %d %s logs=%s", w.Code, w.Body.String(), f.logs.String())
 			}
@@ -319,8 +325,7 @@ func TestOAuthHTTPPKCEProperty(t *testing.T) {
 		before, expiry := f.state(t)
 		w := f.callback(url.Values{"state": {f.oauthState}, "code": {f.provider.code}}, &cookie)
 		after, renewed := f.state(t)
-		var result apierr.Envelope
-		return w.Code == 401 && json.Unmarshal(w.Body.Bytes(), &result) == nil && result.Error != nil && result.Error.Code == apierr.Unauthenticated && before == after && expiry == renewed && !f.provider.spent && oauthCookie(w, "__Host-sw_session") == nil && !strings.Contains(f.logs.String(), "private-")
+		return w.Code == 303 && w.Header().Get("Location") == "/login?next=%2Fruns%3Frun%3Dr1&refused=expired" && before == after && expiry == renewed && !f.provider.spent && oauthCookie(w, "__Host-sw_session") == nil && !strings.Contains(f.logs.String(), "private-")
 	}
 	if err := quick.Check(property, &quick.Config{MaxCount: 64}); err != nil {
 		t.Fatal(err)
@@ -330,7 +335,7 @@ func TestOAuthHTTPPKCEProperty(t *testing.T) {
 func TestOAuthHTTPDeclineAndSafeNext(t *testing.T) {
 	f := newOAuthHTTP(t)
 	w := f.callback(url.Values{"state": {f.oauthState}, "error": {"private-provider-error"}}, f.flow)
-	assertEngineError(t, w, 401, apierr.Unauthenticated)
+	assertRefusedFlow(t, w, "/login?next=%2Fruns%3Frun%3Dr1&refused=cancelled")
 	if f.provider.calls != 0 || oauthCookie(w, f.flow.Name) != nil || strings.Contains(w.Body.String(), "private-") {
 		t.Fatal("declined callback disclosed provider text or changed the flow")
 	}
@@ -390,7 +395,7 @@ func TestOAuthHTTPLinkCallbackCarriesProofWithoutIssuingSession(t *testing.T) {
 		t.Fatal("link callback lost proof or placed code in page")
 	}
 	w = f.callback(url.Values{"state": {f.oauthState}, "code": {f.provider.code}}, continued)
-	assertEngineError(t, w, 400, apierr.BadRequest)
+	assertRefusedFlow(t, w, "/account/sign-ins?refused=expired")
 }
 
 func TestOAuthHTTPRateLimit(t *testing.T) {
@@ -404,8 +409,8 @@ func TestOAuthHTTPRateLimit(t *testing.T) {
 	}
 	w := httptest.NewRecorder()
 	f.handler.ServeHTTP(w, httptest.NewRequest("GET", oauthOrigin+"/auth/github/start", nil))
-	assertEngineError(t, w, 429, apierr.RateLimited)
-	if w.Header().Get("Retry-After") != "60" || w.Header().Get("Cache-Control") != "no-store" || f.provider.calls != 0 {
+	assertRefusedFlow(t, w, "/login?refused=rate_limited")
+	if w.Header().Get("Retry-After") != "60" || f.provider.calls != 0 {
 		t.Fatal("invalid rate-limit response")
 	}
 }
@@ -421,7 +426,7 @@ func TestOAuthHTTPMethodsAndUnknownProvider(t *testing.T) {
 	}
 	w := httptest.NewRecorder()
 	f.handler.ServeHTTP(w, httptest.NewRequest("GET", oauthOrigin+"/auth/unknown/start", nil))
-	assertEngineError(t, w, 404, apierr.NotFound)
+	assertRefusedFlow(t, w, "/login?refused=unavailable")
 	if f.provider.calls != 0 {
 		t.Fatal("invalid route reached provider")
 	}

@@ -149,7 +149,6 @@ var (
 	ErrNotMember        = errors.New("store: not a member of this team")
 	ErrAlreadyMember    = errors.New("store: already a member of this team")
 	ErrInvitationClosed = errors.New("store: invitation is expired or already used")
-	ErrEmailMismatch    = errors.New("store: invitation is addressed to another email")
 	ErrInvitationOpen   = errors.New("store: that address already has an open invitation")
 	ErrUnverifiedEmail  = errors.New("store: a sign-in needs a verified email")
 	// ErrAccountExists refuses a first sign-in whose verified address an
@@ -786,8 +785,13 @@ func (op *Operator) acceptAccountInvitationTx(ctx context.Context, tx *storeTx, 
 	var team, email, role, inviter string
 	var expires int64
 	var accepted, withdrawn sql.NullInt64
+	// safety: the lookup is scoped to an address the account owns now, so an invitation sent elsewhere reads as
+	// missing and its existence and state stay hidden. The account row's email copy outlives the identity that
+	// verified it, so only email_owners proves ownership.
 	err := tx.QueryRowContext(ctx,
-		`SELECT team, email, role, invited_by, expires_at, accepted_at, withdrawn_at FROM invitations WHERE id = ?`+tx.forUpdate(), invitationID).
+		`SELECT team, email, role, invited_by, expires_at, accepted_at, withdrawn_at FROM invitations
+		WHERE id = ? AND EXISTS (SELECT 1 FROM email_owners WHERE account_id = ? AND email = invitations.email)`+tx.forUpdate(),
+		invitationID, accountID).
 		Scan(&team, &email, &role, &inviter, &expires, &accepted, &withdrawn)
 	if errors.Is(err, sql.ErrNoRows) {
 		return none, ErrNotFound
@@ -798,18 +802,6 @@ func (op *Operator) acceptAccountInvitationTx(ctx context.Context, tx *storeTx, 
 	acct, err := accountTx(ctx, tx, accountID)
 	if err != nil {
 		return none, err
-	}
-	// safety: the address check runs before the expiry and use checks, so a
-	// holder of someone else's invitation learns nothing about its state. Only the
-	// address's one current owner may accept; the account row's copy outlives the
-	// identity that verified it.
-	var proves bool
-	if err := tx.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM email_owners
-		WHERE account_id = ? AND email = ?)`, accountID, email).Scan(&proves); err != nil {
-		return none, err
-	}
-	if !proves {
-		return none, ErrEmailMismatch
 	}
 	// safety: the gate row is locked before the member count and the admission
 	// count are read, so concurrent acceptances cannot both slip under a limit.

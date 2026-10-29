@@ -3,13 +3,16 @@ package controller
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
+	"github.com/sparkwing-dev/sparkwing/internal/routepolicy"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
 )
@@ -67,3 +70,38 @@ type queueRunnerTenant struct {
 }
 
 func (q queueRunnerTenant) Team() store.Team { return q.queueTeamReader.Team() }
+
+func TestQueueStateCarriesTheLocalAdmissionDaemon(t *testing.T) {
+	srv := New(nil, nil)
+	srv.WithTenantResolver(func(_ context.Context, team store.Team) (TenantHandle, error) {
+		return queueRunnerTenant{queueTeamReader: queueTeamReader{team: team}, runnerInventoryFake: &runnerInventoryFake{team: team, snapshot: capability.RunnerSnapshot{Now: time.Now()}}}, nil
+	})
+	view := func() *httptest.ResponseRecorder {
+		t.Helper()
+		rec := httptest.NewRecorder()
+		err := srv.handleQueueStateView(rec, httptest.NewRequest(http.MethodGet, "/api/v1/queue", nil), capability.Authorized{Target: capability.Target{Team: string(store.DefaultTeam)}})
+		if err != nil {
+			routepolicy.WritePolicyError(rec, err)
+		}
+		return rec
+	}
+	srv.WithLocalAdmission(func(context.Context) (wingwire.QueueState, error) {
+		return wingwire.QueueState{DaemonVersion: "v1.2.3", Resources: []wingwire.ResourceState{{Key: "cores", Capacity: 8, Held: 2}}}, nil
+	})
+	rec := view()
+	var qs wingwire.QueueState
+	if err := json.NewDecoder(rec.Body).Decode(&qs); err != nil || rec.Code != http.StatusOK {
+		t.Fatalf("HTTP %d: %v", rec.Code, err)
+	}
+	if qs.DaemonVersion != "v1.2.3" || len(qs.Resources) != 1 || qs.Resources[0].Key != "cores" {
+		t.Fatalf("queue state %+v lost the daemon's ledger", qs)
+	}
+	srv.WithLocalAdmission(func(context.Context) (wingwire.QueueState, error) {
+		return wingwire.QueueState{}, errors.New("daemon wedged")
+	})
+	rec = view()
+	if body := rec.Body.String(); rec.Code != http.StatusServiceUnavailable || !strings.Contains(body, "The local admission daemon did not answer.") ||
+		!strings.Contains(body, "sparkwing daemon restart") || strings.Contains(body, "wedged") {
+		t.Fatalf("an unanswering daemon gave HTTP %d %s, want 503 saying how to restart it and no internal detail", rec.Code, body)
+	}
+}

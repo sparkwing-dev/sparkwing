@@ -137,6 +137,7 @@ type Server struct {
 	localSchedules            *crons.Service
 	localScheduleProver       LocalScheduleProver
 	localScheduleEnvironments LocalScheduleEnvironments
+	localAdmission            LocalAdmission
 }
 
 type placementPolicy struct {

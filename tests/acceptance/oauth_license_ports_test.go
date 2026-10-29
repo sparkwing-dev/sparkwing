@@ -4,6 +4,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"net/http/httptest"
+	"net/url"
 	"slices"
 	"strings"
 	"testing"
@@ -69,12 +70,15 @@ func TestOAuthHTTPLicenseControlsPublicProviders(t *testing.T) {
 			for _, provider := range []string{"google", "github"} {
 				w = httptest.NewRecorder()
 				h.ServeHTTP(w, httptest.NewRequest("GET", oauthOrigin+"/auth/"+provider+"/start", nil))
-				status := 404
+				location, err := url.Parse(w.Header().Get("Location"))
+				started := err == nil && location.Query().Get("state") != "" && location.Query().Get("code_challenge") != "" && oauthCookie(w, "__Host-sw_oauth") != nil
 				if name == "valid" {
-					status = 303
+					started = started && map[string]string{"google": "accounts.google.com", "github": "provider.test"}[provider] == location.Host
+				} else {
+					started = location != nil && location.String() == "/login?refused=unavailable" && oauthCookie(w, "__Host-sw_oauth") == nil
 				}
-				if w.Code != status || p.calls != 0 {
-					t.Fatalf("%s start HTTP %d %s", provider, w.Code, w.Body)
+				if w.Code != 303 || p.calls != 0 || !started {
+					t.Fatalf("%s start HTTP %d to %q %s", provider, w.Code, w.Header().Get("Location"), w.Body)
 				}
 			}
 		})

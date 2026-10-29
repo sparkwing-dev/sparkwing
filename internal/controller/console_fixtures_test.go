@@ -2,16 +2,20 @@ package controller
 
 import (
 	"bytes"
+	"context"
 	"crypto/sha256"
 	"encoding/json"
 	"flag"
+	"maps"
 	"net/http"
 	"os"
 	"path/filepath"
+	"slices"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/admission"
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
@@ -21,6 +25,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
+	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
 )
 
 var updateConsoleFixtures = flag.Bool("update-console-fixtures", false, "rewrite the console's wire fixtures")
@@ -74,7 +79,9 @@ func consoleRunFixture(t *testing.T) *consoleRun {
 	if err != nil {
 		t.Fatal(err)
 	}
-	c.handler = e.Server.WithEngineController(e.EngineController).Handler()
+	c.handler = e.Server.WithEngineController(e.EngineController).WithLocalAdmission(func(context.Context) (wingwire.QueueState, error) {
+		return consoleDaemonState(), nil
+	}).Handler()
 	c.seedRun(t, "run-plan", 14, "")
 	c.seedRun(t, "run-jobs", 15, "run-earlier")
 
@@ -251,6 +258,33 @@ func (c *consoleRun) get(t *testing.T, path string) []byte {
 
 func ptr[T any](v T) *T { return &v }
 
+// hack: a daemon's report is marshaled as given, so the fixture pins the daemon fields the local queue view passes on.
+func consoleDaemonState() wingwire.QueueState {
+	return wingwire.QueueState{
+		Resources: []wingwire.ResourceState{
+			{Key: "cores", Capacity: 8, Held: 4, Reserved: 1, External: 1.5, ExternalSource: wingwire.ExternalMeasured, Available: 1.5},
+			{Key: "memory", Capacity: 16 << 30, Held: 4 << 30, Reserved: 1 << 30, ExternalSource: wingwire.ExternalUnmeasured, Available: 11 << 30},
+		},
+		Holders: []wingwire.Holder{{
+			RunID: "run-jobs", ParticipantID: "run-jobs/node-host/dGVzdA", DisplayRunID: "run-jobs/test", Pipeline: "hello", Repo: "app",
+			ElapsedMS: 12_000, Resources: wingwire.HostResources{Cores: 4, MemoryBytes: 4 << 30}, CostSource: "measured",
+			CostRationale: "measured sustained p95 over 12 runs", ExpectedDurationMS: 60_000, Origin: wingwire.OriginLocal,
+		}},
+		Waiters: []wingwire.Waiter{{
+			RunID: "run-plan", DisplayRunID: "run-plan", Pipeline: "hello", Repo: "app", Position: 1,
+			Resources: wingwire.HostResources{Cores: 3, MemoryBytes: 2 << 30}, WaitingOn: []string{"cores"},
+			BlockingReason: "needs 3.0 cores; 1.5 available (external load 1.5)", WaitingMS: 4_000, CostSource: "default",
+			CostRationale: "first run, conservative default until measured", ExpectedStartMS: ptr(int64(48_000)),
+		}},
+		AdmissionMode:       string(admission.ModeAuto),
+		ExpectedClearMS:     ptr(int64(108_000)),
+		DaemonVersion:       "v1.2.3",
+		DaemonUptimeMS:      3_600_000,
+		Events:              &wingwire.EventsWindow{WindowMS: 3_600_000, Runs: 6, MedianWaitMS: 2_000},
+		ExternalSampleAgeMS: 1_000, ExternalMeasurementAgeMS: 1_000,
+	}
+}
+
 func handBuiltConsoleFixtures() map[string]any {
 	// hack: these marshal controllerwire values rather than handler responses, so they pin field names only.
 	started := consoleFixtureStart
@@ -275,6 +309,10 @@ func handBuiltConsoleFixtures() map[string]any {
 		LastFiredAt: ptr("2026-10-28T03:00:00Z"), LastRunID: "run-jobs", LastOutcome: "fired", NextDueAt: ptr("2026-10-29T03:00:00Z"),
 	}
 	return map[string]any{
+		"refusal-reasons.json": map[string][]string{
+			"flow":       slices.Sorted(maps.Keys(signInRefusalText)),
+			"invitation": {invitationClosed, invitationNotFound, invitationTeamFull},
+		},
 		"runs-list.json":   map[string]any{"runs": []runstate.RunSummary{summary}},
 		"run-created.json": controllerwire.CreateRunResponse{RunID: "run-retry", Number: 16, Inputs: inputs, WriteScope: "team"},
 		"runners.json": controllerwire.Runners{Runners: []controllerwire.RunnerDetail{{
@@ -321,6 +359,7 @@ func TestConsoleFixturesMatchTheWireTypes(t *testing.T) {
 		"run-detail-plan-failure.json": "/api/v1/runs/run-plan",
 		"run-detail-jobs.json":         "/api/v1/runs/run-jobs",
 		"run-steps.json":               "/api/v1/runs/run-jobs/steps",
+		"queue.json":                   "/api/v1/queue",
 	} {
 		var body bytes.Buffer
 		if err := json.Indent(&body, run.get(t, path), "", "  "); err != nil {

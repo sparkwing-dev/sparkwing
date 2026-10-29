@@ -1,0 +1,22 @@
+{
+  "flow": [
+    "account_exists",
+    "cancelled",
+    "direct_sign_in_required",
+    "email_unverified",
+    "expired",
+    "failed",
+    "identity_already_linked",
+    "identity_linked_elsewhere",
+    "no_team",
+    "provider_already_linked",
+    "rate_limited",
+    "reauth_required",
+    "unavailable"
+  ],
+  "invitation": [
+    "invitation_closed",
+    "invitation_not_found",
+    "team_full"
+  ]
+}

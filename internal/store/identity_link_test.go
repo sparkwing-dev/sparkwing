@@ -709,8 +709,8 @@ func TestUnlinkingTheProvingIdentityReleasesTheAddress(t *testing.T) {
 	if listed, err := st.AsOperator().OpenInvitationsForAccount(ctx, mallory.Account.ID); err != nil || len(listed) != 0 {
 		t.Fatalf("invitations listed after unlinking the proving identity = %+v, %v", listed, err)
 	}
-	if _, err := st.AsOperator().AcceptAccountInvitation(ctx, storetest.AccountAuthority(t, st, mallory.Account.ID), before.ID); !errors.Is(err, store.ErrEmailMismatch) {
-		t.Fatalf("accepting after unlinking the proving identity = %v, want ErrEmailMismatch", err)
+	if _, err := st.AsOperator().AcceptAccountInvitation(ctx, storetest.AccountAuthority(t, st, mallory.Account.ID), before.ID); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("accepting after unlinking the proving identity = %v, want ErrNotFound", err)
 	}
 
 	hire := signIn(t, st, "g-hire", "devops@corp.example")
@@ -766,8 +766,8 @@ func TestNewAddressOwnerWithdrawsALinkedIdentitysClaim(t *testing.T) {
 	if listed, err := st.AsOperator().OpenInvitationsForAccount(ctx, former.Account.ID); err != nil || len(listed) != 0 {
 		t.Fatalf("former holder still lists the invitation: %+v %v", listed, err)
 	}
-	if _, err := st.AsOperator().AcceptAccountInvitation(ctx, storetest.AccountAuthority(t, st, former.Account.ID), inv.ID); !errors.Is(err, store.ErrEmailMismatch) {
-		t.Fatalf("former holder accepting = %v, want ErrEmailMismatch", err)
+	if _, err := st.AsOperator().AcceptAccountInvitation(ctx, storetest.AccountAuthority(t, st, former.Account.ID), inv.ID); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("former holder accepting = %v, want ErrNotFound", err)
 	}
 	if _, err := st.AsOperator().AcceptAccountInvitation(ctx, storetest.AccountAuthority(t, st, successor.Account.ID), inv.ID); err != nil {
 		t.Fatalf("new holder accepting = %v", err)
@@ -852,7 +852,7 @@ func TestConcurrentLinksLeaveOneAddressOwnerPostgres(t *testing.T) {
 	for _, account := range []store.SignInResult{first, second} {
 		if _, err := st.AsOperator().AcceptAccountInvitation(ctx, storetest.AccountAuthority(t, st, account.Account.ID), inv.ID); err == nil {
 			accepted++
-		} else if !errors.Is(err, store.ErrEmailMismatch) && !errors.Is(err, store.ErrInvitationClosed) {
+		} else if !errors.Is(err, store.ErrNotFound) && !errors.Is(err, store.ErrInvitationClosed) {
 			t.Fatal(err)
 		}
 	}
@@ -892,8 +892,8 @@ func TestChangedSignInAddressReleasesTheFormerOne(t *testing.T) {
 			if listed, err := st.AsOperator().OpenInvitationsForAccount(ctx, acct.Account.ID); err != nil || len(listed) != 0 {
 				t.Fatalf("the former address's invitation is still listed: %+v %v", listed, err)
 			}
-			if _, err := st.AsOperator().AcceptAccountInvitation(ctx, storetest.AccountAuthority(t, st, acct.Account.ID), inv.ID); !errors.Is(err, store.ErrEmailMismatch) {
-				t.Fatalf("accepting through the former address = %v, want ErrEmailMismatch", err)
+			if _, err := st.AsOperator().AcceptAccountInvitation(ctx, storetest.AccountAuthority(t, st, acct.Account.ID), inv.ID); !errors.Is(err, store.ErrNotFound) {
+				t.Fatalf("accepting through the former address = %v, want ErrNotFound", err)
 			}
 		})
 	}

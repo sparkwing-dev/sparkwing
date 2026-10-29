@@ -90,11 +90,43 @@ export interface LinkNotice {
 export const reauthMessage =
   "Linking and unlinking need a recent sign-in. Sign out, sign in again, then try within 10 minutes.";
 
-// The controller sends a completed link back with the provider's fixed code,
-// and the page words it here, so nothing a URL carries is shown as text. A
-// refused link ends on the controller's own error answer.
+// One sentence per reason the controller sends a refused link back with.
+export const linkRefusalText: Record<string, string> = {
+  expired: "This link request expired or was already used. Start linking again.",
+  cancelled: "Linking was cancelled before it finished. Start linking again to continue.",
+  email_unverified:
+    "The provider has not verified this account's email address. Verify it with the provider, then link again.",
+  account_exists:
+    "That sign-in's email address belongs to another account. Link a sign-in that uses your own address.",
+  no_team: "Your account belongs to no team. Ask a team owner to invite you, then link again.",
+  reauth_required: reauthMessage,
+  direct_sign_in_required:
+    "Linking needs a Google or GitHub sign-in, not an access token. Sign out, sign in with a provider, then link.",
+  identity_linked_elsewhere:
+    "That sign-in belongs to another Sparkwing account, and accounts cannot be combined. Link a different sign-in.",
+  identity_already_linked: "That sign-in is already linked to this account; there is nothing more to do.",
+  provider_already_linked:
+    "This account already has a sign-in from that provider. Unlink it first, then link the new one.",
+  rate_limited: "Too many link attempts. Wait a minute, then try again.",
+  unavailable: "Linking is unavailable right now. Try again in a minute.",
+  failed:
+    "Linking failed on this server. Try again, and if it keeps failing, contact your Sparkwing administrator.",
+};
+
+// The controller sends a link back with the provider's fixed code or a fixed
+// refusal reason, and the page words it here, so nothing a URL carries is
+// shown as text.
 export function linkNotice(search: string): LinkNotice | null {
   const query = new URLSearchParams(search);
+  const refused = query.get("refused");
+  if (refused !== null) {
+    return {
+      tone: "error",
+      message: Object.hasOwn(linkRefusalText, refused)
+        ? linkRefusalText[refused]
+        : linkRefusalText.failed,
+    };
+  }
   const linked = providerLabels[query.get("linked") ?? ""];
   if (!linked) return null;
   return {

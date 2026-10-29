@@ -1,4 +1,6 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { afterEach, before, beforeEach, describe, it } from "node:test";
 
 type SignInsLib = typeof import("./signIns");
@@ -69,6 +71,35 @@ describe("linkNotice", () => {
 
   it("never confirms an unknown provider", () => {
     assert.equal(lib.linkNotice("?linked=%3Cb%3Eevil%3C%2Fb%3E"), null);
+  });
+
+  it("says what a refused link means and what to do", () => {
+    assert.deepEqual(lib.linkNotice("?refused=identity_linked_elsewhere"), {
+      tone: "error",
+      message:
+        "That sign-in belongs to another Sparkwing account, and accounts cannot be combined. Link a different sign-in.",
+    });
+  });
+
+  it("words an unknown refusal as a plain failure, never as the URL's text", () => {
+    assert.deepEqual(lib.linkNotice("?refused=%3Cb%3Eevil%3C%2Fb%3E"), {
+      tone: "error",
+      message: lib.linkRefusalText.failed,
+    });
+    assert.deepEqual(lib.linkNotice("?refused=constructor"), {
+      tone: "error",
+      message: lib.linkRefusalText.failed,
+    });
+  });
+
+  it("has a sentence for every reason the controller sends", () => {
+    const reasons = (
+      JSON.parse(
+        readFileSync(join(__dirname, "testdata", "refusal-reasons.json"), "utf8"),
+      ) as { flow: string[] }
+    ).flow;
+    assert.ok(reasons.length > 0);
+    assert.deepEqual(Object.keys(lib.linkRefusalText).sort(), [...reasons].sort());
   });
 });
 

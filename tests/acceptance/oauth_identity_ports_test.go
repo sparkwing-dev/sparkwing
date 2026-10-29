@@ -9,7 +9,6 @@ import (
 	"testing"
 	"testing/quick"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
 )
 
@@ -36,8 +35,7 @@ func TestOAuthHTTPGitHubPrimaryEmailProperty(t *testing.T) {
 		before, _ := f.state(t)
 		w := f.callback(url.Values{"state": {f.oauthState}, "code": {f.provider.code}}, f.flow)
 		after, _ := f.state(t)
-		var failure apierr.Envelope
-		return w.Code == 403 && json.Unmarshal(w.Body.Bytes(), &failure) == nil && failure.Error != nil && failure.Error.Code == apierr.Forbidden && oauthCookie(w, "__Host-sw_session") == nil && before == after
+		return w.Code == 303 && w.Header().Get("Location") == "/login?next=%2Fruns%3Frun%3Dr1&refused=email_unverified" && oauthCookie(w, "__Host-sw_session") == nil && before == after
 	}
 	if err := quick.Check(property, &quick.Config{MaxCount: 32}); err != nil {
 		t.Fatal(err)

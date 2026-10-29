@@ -328,6 +328,28 @@ test("the controller signs a browser in and authenticates the dashboard's calls 
   }
 });
 
+test("a refused sign-in returns to the sign-in page saying what happened", async ({
+  page,
+}) => {
+  test.setTimeout(120_000);
+  const dashboard = await startAuthenticatedDashboard();
+  try {
+    await page.goto(
+      `${dashboard.origin}/auth/google/start?next=${encodeURIComponent("/invitations?id=inv-1")}`,
+    );
+    await expect(page).toHaveURL(/\/login\?/);
+    const landed = new URL(page.url());
+    expect(landed.searchParams.get("refused")).toBe("unavailable");
+    expect(landed.searchParams.get("next")).toBe("/invitations?id=inv-1");
+    await expect(page.getByRole("alert")).toHaveText(
+      "This sign-in method is unavailable right now. Try again in a minute, or use another sign-in method.",
+    );
+    await expect(page.locator('input[name="next"]')).toHaveValue("/invitations?id=inv-1");
+  } finally {
+    await dashboard.close();
+  }
+});
+
 test("bounds a failed fixture build and removes its temporary output", async () => {
   const parent = await mkdtemp(join(tmpdir(), "sparkwing-auth-build-test-"));
   const pidFile = join(parent, "build.pid");

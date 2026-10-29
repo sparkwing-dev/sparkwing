@@ -205,7 +205,7 @@ func TestAccountInvitationCommitsMembershipAndSessionTogether(t *testing.T) {
 	}
 	rewriteSchemaExec(t, s.db, `DROP TRIGGER refuse_invitation_session`)
 	rewriteSchemaExec(t, s.db, `DELETE FROM email_owners WHERE account_id=?`, a.Principal.Capability.Subject.ID)
-	if _, err := s.AsOperator().AcceptAccountInvitation(t.Context(), a, invitation.ID); !errors.Is(err, ErrEmailMismatch) {
+	if _, err := s.AsOperator().AcceptAccountInvitation(t.Context(), a, invitation.ID); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("unverified acceptance: %v", err)
 	}
 	rewriteSchemaExec(t, s.db, `INSERT INTO email_owners(email,account_id,updated_at) VALUES ('member@example.test',?,1)`, a.Principal.Capability.Subject.ID)

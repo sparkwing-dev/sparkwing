@@ -48,14 +48,10 @@ func TestIdentityLinkHTTPCommittedIdentityConflicts(t *testing.T) {
 			before, expiry := f.state(t)
 			f.provider.onToken = func() { f.exec(t, tc.conflict) }
 			w := f.complete(cookie)
-			assertEngineError(t, w, 409, apierr.Conflict)
-			var result apierr.Envelope
-			if err := json.Unmarshal(w.Body.Bytes(), &result); err != nil {
-				t.Fatal(err)
-			}
+			assertRefusedFlow(t, w, "/account/sign-ins?refused="+tc.reason)
 			after, expires := f.state(t)
 			consumed, committed := f.links(t)
-			if result.Error.Details["reason"] != tc.reason || consumed != 1 || committed != 0 ||
+			if consumed != 1 || committed != 0 ||
 				f.provider.calls != 3 || before != after || expiry != expires || oauthCookie(w, "__Host-sw_session") != nil {
 				t.Fatalf("HTTP %d %s links=%d/%d calls=%d", w.Code, w.Body, consumed, committed, f.provider.calls)
 			}

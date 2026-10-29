@@ -159,7 +159,14 @@ func TestBrowserSensitiveChangesUseStoreClock(t *testing.T) {
 				if stale {
 					want = http.StatusForbidden
 				}
-				if rec := f.serve(request); rec.Code != want {
+				rec := f.serve(request)
+				if change == "identity-link" && stale {
+					if location := rec.Header().Get("Location"); rec.Code != http.StatusSeeOther || location != "/account/sign-ins?refused=reauth_required" {
+						t.Fatalf("stale link start: %d to %q, want the sign-ins page naming reauth_required", rec.Code, location)
+					}
+					continue
+				}
+				if rec.Code != want {
 					t.Fatalf("stale=%v: %d %s, want %d", stale, rec.Code, rec.Body, want)
 				}
 			}

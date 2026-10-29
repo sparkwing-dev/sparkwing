@@ -19,6 +19,11 @@ export function localDashboard(): boolean {
   return browser()?.__SPARKWING_REQUIRE_LOGIN__ === "false";
 }
 
+// Only a team or Cloud controller serves browser sign-in.
+export function signInRequired(): boolean {
+  return browser()?.__SPARKWING_REQUIRE_LOGIN__ === "true";
+}
+
 export function sessionFromFragment(hash: string | undefined): string | null {
   const match = /(?:^#|&)s=([^&]+)/.exec(hash ?? "");
   return match ? decodeURIComponent(match[1]) : null;
