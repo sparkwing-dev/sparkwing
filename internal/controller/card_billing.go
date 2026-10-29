@@ -103,8 +103,8 @@ func (s *Server) reportPaymentSettlement(ctx context.Context, settled store.Paym
 	case settled.RefillFailed == refillCheckoutRefused || settled.RefillFailed == refillCheckoutUnavailable:
 		s.logger.Warn("billing alert: an automatic refill failed", append(attrs, "alert", "refill_failed", "decline_code", settled.RefillFailed)...)
 		s.mailOwners(ctx, settled.Team, "Your Sparkwing automatic refill failed",
-			"Sparkwing's payment service could not make an automatic refill ("+settled.RefillFailed+"), so automatic refills are stopped and Sparkwing is looking into it. "+
-				"Cloud work stops when the credits run out. Click Add funds to buy credits and resume automatic refills:", s.billingPageURL())
+			"Sparkwing's payment service could not make an automatic refill ("+settled.RefillFailed+"); your card was not declined, and Sparkwing's operators have been alerted. "+
+				"Automatic refills stay stopped until you click Add funds, and Cloud work stops when the credits run out:", s.billingPageURL())
 	case settled.RefillFailed != "":
 		s.logger.Warn("billing alert: an automatic refill failed", append(attrs, "alert", "refill_failed", "decline_code", settled.RefillFailed)...)
 		s.mailOwners(ctx, settled.Team, "Your Sparkwing automatic refill failed",
@@ -162,6 +162,7 @@ func (s *Server) refillPass(ctx context.Context) {
 		case errors.Is(err, errRefillNoCard):
 			s.recordRefillFailure(ctx, r, store.RefillNoCard)
 		case errors.Is(err, errCheckoutUnavailable):
+			s.alertCheckoutMisconfigured(err)
 			if !s.checkout.unavailable(r.ID) {
 				s.logger.Error("charging a refill failed; it is retried", "team", string(r.Team), "refill", r.ID, "err", err)
 				return
@@ -213,7 +214,10 @@ func (s *Server) refundQueuedPayments(ctx context.Context) {
 		if !s.checkout.due(d.PaymentIntent) {
 			continue
 		}
-		refund, status, err := s.checkout.refund(ctx, s.paymentDeployment, d.PaymentIntent, d.Reason)
+		refund, status, err := s.checkout.refund(ctx, s.paymentDeployment, d.Team, d.PaymentIntent, d.Reason)
+		if errors.Is(err, errCheckoutUnavailable) {
+			s.alertCheckoutMisconfigured(err)
+		}
 		if errors.Is(err, errCheckoutUnavailable) && !s.checkout.unavailable(d.PaymentIntent) {
 			s.logger.Error("refunding a queued card payment failed; it is retried", "team", string(d.Team),
 				"payment_intent", d.PaymentIntent, "err", err)

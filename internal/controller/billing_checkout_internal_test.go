@@ -52,10 +52,10 @@ func TestAQueuedRefundNamesItsDeployment(t *testing.T) {
 		}
 		return refillReply(http.StatusOK, `{"refund":"re_1","status":"pending"}`), nil
 	})}}
-	if _, _, err := checkout.refund(t.Context(), "dep", "pi_1", "duplicate"); err != nil {
+	if _, _, err := checkout.refund(t.Context(), "dep", "a", "pi_1", "duplicate"); err != nil {
 		t.Fatal(err)
 	}
-	if sent["deployment"] != "dep" || sent["payment_intent"] != "pi_1" || sent["key"] != "pi_1" || sent["reason"] != "duplicate" {
+	if sent["team"] != "a" || sent["deployment"] != "dep" || sent["payment_intent"] != "pi_1" || sent["key"] != "pi_1" || sent["reason"] != "duplicate" {
 		t.Fatalf("refund request %v", sent)
 	}
 }

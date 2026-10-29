@@ -27,6 +27,8 @@ type billingCheckout struct {
 	http  *http.Client
 
 	now func() time.Time
+	// safety: set once the misconfiguration alert is logged, so it fires once, and cleared by the next answered call.
+	misconfigured bool
 	// safety: only the billing worker's goroutine touches retries, keyed by idempotency key; a restart forgets
 	// them and starts the backoff again.
 	retries map[string]checkoutRetry
@@ -50,9 +52,18 @@ func (s *Server) WithBillingCheckout(url, token string) *Server {
 	return s
 }
 
-// safety: only no answer, a 5xx or a 429 may pass on a later call; any other refusal is final, so a refill or refund
-// stops and reaches the owners instead of looping.
+// safety: no answer, a 5xx, a 429 or a misconfigured pairing may pass on a later call; any other refusal is about the
+// request itself and is final, so a refill or refund stops and reaches the owners instead of looping.
 var errCheckoutUnavailable = errors.New("the checkout service is unavailable")
+
+var errCheckoutMisconfigured = errors.New("the checkout service and this controller are not paired")
+
+// safety: an operator slip in the pairing is retried like an outage, never final for every team's refill or refund.
+var checkoutMisconfigurations = map[int]string{
+	http.StatusUnauthorized:       "the checkout service refused the billing-token credential; it must equal the service's BILLING_CHECKOUT_TOKEN",
+	http.StatusNotFound:           "the checkout service has no such route; --billing-url must name the checkout service",
+	http.StatusMisdirectedRequest: "the checkout service serves another deployment; its BILLING_DEPLOYMENT must be this controller's deployment",
+}
 
 var errCheckoutRefused = errors.New("the checkout service refused the request")
 
@@ -128,16 +139,21 @@ func (c *billingCheckout) post(ctx context.Context, path string, in, out any) er
 		return fmt.Errorf("%w: read: %w", errCheckoutUnavailable, err)
 	}
 	if resp.StatusCode != http.StatusOK {
+		detail := strings.TrimSpace(string(payload))
+		if cause, ok := checkoutMisconfigurations[resp.StatusCode]; ok {
+			return fmt.Errorf("%w: %w: %s: %d %s", errCheckoutUnavailable, errCheckoutMisconfigured, cause, resp.StatusCode, detail)
+		}
 		class := errCheckoutRefused
 		if resp.StatusCode >= 500 || resp.StatusCode == http.StatusTooManyRequests || resp.StatusCode == http.StatusRequestTimeout {
 			class = errCheckoutUnavailable
 		}
-		err := fmt.Errorf("%w: %d %s", class, resp.StatusCode, strings.TrimSpace(string(payload)))
+		err := fmt.Errorf("%w: %d %s", class, resp.StatusCode, detail)
 		if path == "/internal/refill" && resp.StatusCode == http.StatusConflict {
 			err = errors.Join(errRefillNoCard, err)
 		}
 		return err
 	}
+	c.misconfigured = false
 	if err := json.Unmarshal(payload, out); err != nil {
 		return fmt.Errorf("%w: decode: %w", errCheckoutRefused, err)
 	}
@@ -178,6 +194,18 @@ func (c *billingCheckout) unavailable(key string) bool {
 }
 
 func (c *billingCheckout) settled(key string) { delete(c.retries, key) }
+
+// safety: operator alerting keys on this value; it fires once per misconfiguration, naming the likely cause.
+const checkoutMisconfiguredAlert = "checkout_misconfigured"
+
+func (s *Server) alertCheckoutMisconfigured(err error) {
+	if !errors.Is(err, errCheckoutMisconfigured) || s.checkout.misconfigured {
+		return
+	}
+	s.checkout.misconfigured = true
+	s.logger.Error("billing alert: refills and refunds are retried until the pairing is fixed",
+		"alert", checkoutMisconfiguredAlert, "deployment", s.paymentDeployment, "err", err)
+}
 
 // refillRequest and refillResponse are the checkout service's POST /internal/refill contract, which creates and
 // confirms one off-session payment under the refill id. testdata/checkout_contract.json pins it with the other routes;
@@ -222,13 +250,13 @@ func (c *billingCheckout) portal(ctx context.Context, deployment, team, customer
 	return out.URL, nil
 }
 
-func (c *billingCheckout) refund(ctx context.Context, deployment, paymentIntent, reason string) (string, string, error) {
+func (c *billingCheckout) refund(ctx context.Context, deployment string, team store.Team, paymentIntent, reason string) (string, string, error) {
 	var out struct {
 		Refund string `json:"refund"`
 		Status string `json:"status"`
 	}
 	err := c.post(ctx, "/internal/refund", map[string]any{
-		"deployment": deployment, "payment_intent": paymentIntent, "key": paymentIntent, "reason": reason,
+		"team": string(team), "deployment": deployment, "payment_intent": paymentIntent, "key": paymentIntent, "reason": reason,
 	}, &out)
 	if err == nil && (out.Refund == "" || out.Status == "") {
 		err = fmt.Errorf("%w: it named no refund and status", errCheckoutRefused)

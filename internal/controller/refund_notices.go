@@ -17,7 +17,7 @@ func (s *Server) noticeFailedRefunds(ctx context.Context) {
 	for _, n := range notices {
 		cents := n.AmountMicro / store.MicroCreditsPerCent
 		s.mailOwners(ctx, n.Team, "Your Sparkwing refund could not be completed",
-			fmt.Sprintf("The refund of $%d.%02d for your payment on %s could not be completed by Stripe. Sparkwing will follow up with you about it.",
+			fmt.Sprintf("The refund of $%d.%02d for your payment on %s could not be completed. Sparkwing will follow up with you about it.",
 				cents/100, cents%100, n.PaidAt.Format("January 2, 2006")), s.billingPageURL())
 	}
 }

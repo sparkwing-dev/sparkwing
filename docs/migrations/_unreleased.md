@@ -543,7 +543,12 @@ reconcile, confirm and cancel operations receive the Stripe `customer` without
 `payment_method` or `receipt_email`; the service must charge the customer's
 default payment method off-session. The new `POST /internal/portal` receives
 `team`, `deployment` and `customer` and answers with the `url` of a Stripe
-customer portal session. Deploy the matching sparkwing-platform release.
+customer portal session. `POST /internal/refund` receives the `team`, and a
+request naming another deployment is answered 421. Every Add funds payment and
+refill is $10 to $1,000 on both sides; the service no longer reads
+`BILLING_MAX_CENTS` or `BILLING_TRUSTED_PROXY_HOPS`, so a value set below $1,000
+no longer lowers the cap: check the checkout service's environment before
+rollout. Deploy the matching sparkwing-platform release.
 
 Cards are no longer pinned to the first team they fund, and an early fraud
 warning no longer blocks its card on other teams. A warning holds only the team

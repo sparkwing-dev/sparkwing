@@ -162,8 +162,7 @@ func replayDialectTrace(t *testing.T, target *storetest.Target, commands []diale
 		case "renew":
 			result.Beat, commandErr = s.AsOperator().RenewUnit(t.Context(), plan.Actor.CapabilityPrefix, true)
 			if commandErr == nil {
-				// Compute starts at this renewal, which funds one sixty-second slice past it; the admitted slice already
-				// covers the sixty-second host minimum.
+				// safety: the admitted slice covers the host minimum, so this renewal funds one slice past the compute it starts.
 				want := now.Add(60 * time.Second)
 				var deadline int64
 				if err := s.DB().QueryRowContext(t.Context(), `SELECT lease_expires_at FROM triggers`).Scan(&deadline); err != nil {
