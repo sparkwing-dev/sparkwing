@@ -7,6 +7,7 @@ import (
 	"go/token"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"testing"
@@ -177,19 +178,22 @@ func TestLedgerGuardTruncateTableLists(t *testing.T) {
 // safety: each entry names a statement that reaches across payment modes on purpose,
 // with its reason; the guard refuses an entry that no longer matches a statement.
 var paymentModeAcrossModes = map[string]string{
-	"(*ledgerTx).relabelCreator|credit_grants":      "account deletion relabels the creator on every mode's grants; no amount or balance is read",
-	"(*Operator).grantCreatorTeamsTx|credit_grants": "account deletion finds every team whose grants name the account, in any mode",
-	"(*Operator).disputeHoldTx|credit_freezes":      "dispute_id is the table's primary key, and provider dispute ids never repeat across modes",
-	"(*Tenant).ListNodes|credit_charges":            "shows the cpu class of one award's reservation, which the award's prefix pins; no amount is read",
-	"(*Tenant).GetNode|credit_charges":              "shows the cpu class of one award's reservation, which the award's prefix pins; no amount is read",
-	"(*Operator).ComputeUsage|credit_charges":       "counts running metered awards per principal, a capacity fact rather than money",
-	"billingPriceTx|credit_charges":                 "reads one award's reservation by its id",
-	"paidBillingTx|credit_charges":                  "settles one award against everything charged to it; cutover refuses to start while any award is unsettled, so an award's charges share one mode",
-	"settledBillingResultTx|credit_charges":         "reports one award's billed seconds, in whatever mode they were charged",
+	"(*ledgerTx).relabelCreator|credit_grants":             "account deletion relabels the creator on every mode's grants; no amount or balance is read",
+	"(*Operator).grantCreatorTeamsTx|credit_grants":        "account deletion finds every team whose grants name the account, in any mode",
+	"(*Operator).disputeHoldTx|credit_freezes":             "dispute_id is the table's primary key, and provider dispute ids never repeat across modes",
+	"(*Tenant).ListNodes|credit_charges":                   "shows the cpu class of one award's reservation, which the award's prefix pins; no amount is read",
+	"(*Tenant).GetNode|credit_charges":                     "shows the cpu class of one award's reservation, which the award's prefix pins; no amount is read",
+	"(*Operator).ComputeUsage|credit_charges":              "counts running metered awards per principal, a capacity fact rather than money",
+	"billingPriceTx|credit_charges":                        "reads one award's reservation by its id",
+	"paidBillingTx|credit_charges":                         "settles one award against everything charged to it; cutover refuses to start while any award is unsettled, so an award's charges share one mode",
+	"settledBillingResultTx|credit_charges":                "reports one award's billed seconds, in whatever mode they were charged",
+	"(*Tenant).PrepareAuthorizedBillingPage|billing_pages": "reads the page's stored mode and refuses it unless it is the configured mode (configuredPaymentModeTx)",
+	"(*Tenant).billingPageTx|billing_pages":                "reads the page's stored mode and refuses it unless it is the configured mode (configuredPaymentModeTx)",
 }
 
 // Decision 63 keeps test-mode money out of every live decision by one column, so
-// every statement on a table that carries payment_mode must filter or set it. The
+// every statement on a table that carries payment_mode must filter or set it;
+// selecting the column alone does not count. The
 // money tables come from the schema, so a new one is judged the day it is added.
 func TestMoneyStatementsCarryPaymentMode(t *testing.T) {
 	money := schemaTablesWithColumn(t, "payment_mode")
@@ -203,7 +207,7 @@ func TestMoneyStatementsCarryPaymentMode(t *testing.T) {
 			continue
 		}
 		checked++
-		if strings.Contains(strings.ToLower(stmt.text), "payment_mode") {
+		if bindsPaymentMode(stmt.text) {
 			continue
 		}
 		if len(tables) == 1 {
@@ -220,6 +224,31 @@ func TestMoneyStatementsCarryPaymentMode(t *testing.T) {
 	for key, why := range paymentModeAcrossModes {
 		if strings.TrimSpace(why) == "" || !used[key] {
 			t.Errorf("paymentModeAcrossModes entry %q is stale or has no reason; delete it", key)
+		}
+	}
+}
+
+// paymentModeBinding matches payment_mode compared in a predicate, on either
+// side, or written by an INSERT or SET; a statement that only selects the
+// column does not bind it.
+var paymentModeBinding = regexp.MustCompile(`(?is)\bpayment_mode\s*(=|<>|!=|\bin\b)|(=|<>|!=)\s*(\w+\.)?payment_mode\b|^\s*insert\b.*\bpayment_mode\b|\bset\b[^;]*\bpayment_mode\s*=`)
+
+func bindsPaymentMode(text string) bool {
+	return paymentModeBinding.MatchString(text)
+}
+
+func TestPaymentModeGuardRefusesAStatementThatOnlySelectsTheColumn(t *testing.T) {
+	for q, binds := range map[string]bool{
+		`SELECT payment_mode, amount FROM credit_grants WHERE team=?`:                   false,
+		`SELECT amount FROM credit_grants WHERE team=? AND payment_mode=?`:              true,
+		`SELECT amount FROM credit_grants g WHERE g.team=? AND g.payment_mode IN (?,?)`: true,
+		`SELECT 1 FROM credit_grants g JOIN teams t ON t.payment_mode = g.payment_mode`: true,
+		`INSERT INTO credit_grants(team,payment_mode,amount) VALUES (?,?,?)`:            true,
+		`UPDATE credit_grants SET payment_mode=? WHERE id=?`:                            true,
+		`UPDATE credit_grants SET amount=0 WHERE id=? RETURNING payment_mode`:           false,
+	} {
+		if got := bindsPaymentMode(q); got != binds {
+			t.Errorf("bindsPaymentMode(%q) = %v, want %v", q, got, binds)
 		}
 	}
 }
