@@ -161,7 +161,7 @@ you replace the echo bodies with real work. For how a real pipeline is
 written, read a finished one: `sparkwing examples` lists the registry
 (static-site deploys, containerized deploys to Kubernetes,
 migrate+deploy, CI-hygiene gates, and more), and `--example <example>
---body` prints the source. Usually `sparkwing docs search -q "<task>"`
+--body` prints the source. Usually `sparkwing docs search --search "<task>"`
 gets you there in one step, since it ranks examples alongside the docs.
 
 Examples are for reading, not scaffolding: `--template` takes a shape,

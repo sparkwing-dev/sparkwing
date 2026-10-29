@@ -25,7 +25,7 @@ newer embedded schema cannot migrate the operational runs store:
 
 ```bash
 SPARKWING_HOME="$(mktemp -d)" sparkwing run release --sw-dry-run
-SPARKWING_HOME="$(mktemp -d)" sparkwing run release --bump patch --sw-allow destructive,prod
+SPARKWING_HOME="$(mktemp -d)" sparkwing run release --sw-allow-risk destructive,prod -- --bump patch
 ```
 
 `push-tag` declares the `destructive` and `prod` risk labels, so only the
@@ -116,7 +116,7 @@ Accepted QA-only risks:
 - Clients that read a new `versions.json` before its signature lands fall back to
   their cached index until it does.
 
-QA images: `sparkwing run build-images --qatrust --tag vX.Y.Z-qa.N --registry <ecr> --push`
+QA images: `sparkwing run build-images -- --qatrust --tag vX.Y.Z-qa.N --registry <ecr> --push`
 builds the controller and runner from source with the tag. To package the published QA
 binaries instead, copy the release's `sparkwing-{controller,runner}-linux-<arch>` from the
 bucket into `dist/` and build each Dockerfile's `release` target, as the release workflow does.
@@ -268,7 +268,7 @@ file. Other syntax and workflow checks remain active.
   coverage. The ten-minute budget keeps the entire short suite and its
   checks, with room above the measured 7m19.746s class span. `sparkwing runs stats
   --pipeline pre-commit --since 7d` reports what a class has cost over the
-  week, and `sparkwing runs status <id> --view timeline --steps` breaks one run into
+  week, and `sparkwing runs status --run <id> --view timeline --steps` breaks one run into
   its steps; the runs store is shared across repositories, so filter the runs
   by repo before reading a per-pipeline figure as this one's.
 - **The short test class:** the release cut runs `go test -short`. Use
@@ -670,8 +670,8 @@ file. Other syntax and workflow checks remain active.
   position of local replacements against origin/main, so a cut may use an older
   commit. Preview with
   `SPARKWING_HOME="$(mktemp -d)" sparkwing run release --sw-dry-run`, then
-  `SPARKWING_HOME="$(mktemp -d)" sparkwing run release --bump patch --sw-allow
-  destructive,prod`; the isolated home keeps prerelease state out of the
+  `SPARKWING_HOME="$(mktemp -d)" sparkwing run release --sw-allow-risk
+  destructive,prod -- --bump patch`; the isolated home keeps prerelease state out of the
   operational runs store, which the release runner refuses to touch. From the
   tag push on, `.github/workflows/release.yaml` owns the release, and it checks
   nothing: it resolves the tag to a commit, builds the binaries and images,

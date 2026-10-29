@@ -67,7 +67,7 @@ trigger, plan and eval claims can seal their own stream during the same tail win
 If a retry refuses the prior attempt's
 detached flush, that stream stays visible in run details and maintenance seals it
 incomplete.
-The host emits a `run logs incomplete` operator error with the run identity,
+The host emits a `"run logs incomplete"` operator error with the run identity,
 node when known, and
 a masked error. A failed stream is recorded as incomplete. Streams that cannot publish
 their final manifest are sealed incomplete by log maintenance after the writer
@@ -141,7 +141,7 @@ structured `failure_reason` -- read the logs.
 A log write the controller rejects, or a log store that stays unreachable,
 never fails the run or changes a job's result. The job keeps its real
 outcome, the runner seals that attempt's log as incomplete, and it records a
-`run logs incomplete` error in its own log for the operator. Readers see the
+`"run logs incomplete"` error in its own log for the operator. Readers see the
 gap: the log ends with `[logs incomplete: <reason>]`, a live stream ends with a
 `log_incomplete` event, and a log the runner never sealed reads as incomplete
 a minute after its attempt finished.

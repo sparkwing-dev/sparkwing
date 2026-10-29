@@ -57,9 +57,10 @@ generate the bundle locally first (`bash bin/build-web.sh && go install
 ```sh
 mkdir my-pipelines && cd my-pipelines
 git init
-sparkwing pipeline new --name hello
+sparkwing pipeline new --pipeline hello
 
-# Edit .sparkwing/jobs/hello.go to taste, then run it
+# Edit .sparkwing/jobs/hello.go to taste, commit, then run it
+git add -A && git commit -m "add hello pipeline"
 sparkwing run hello
 
 # Dashboard lifecycle (requires the native runtime binding)
