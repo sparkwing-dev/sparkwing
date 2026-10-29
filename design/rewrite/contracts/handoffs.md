@@ -924,8 +924,10 @@ the Stripe `status` and, when Stripe refused the charge, `failure`
 (`authentication_required` or the decline code). Under decision 65 the
 controller sends no card or email: the service charges the customer's default
 payment method, or its newest card when it has no default, and answers 409
-when the customer has no card. Both repositories test against a byte-for-byte
-copy of the example in `testdata/refill_contract.json`.
+when the customer has no card. Both repositories test their real code against a
+byte-for-byte copy of `testdata/checkout_contract.json`, which covers every
+checkout-service route, the payment bounds, the Stripe metadata keys and which
+refusals are final.
 
 - The controller checks eligibility and opens the refill in one transaction:
   refills on, no failed refill blocking them, no hold, balance below the

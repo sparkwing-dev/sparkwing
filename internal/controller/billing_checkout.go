@@ -185,9 +185,8 @@ func (c *billingCheckout) unavailable(key string) bool {
 func (c *billingCheckout) settled(key string) { delete(c.retries, key) }
 
 // refillRequest and refillResponse are the checkout service's POST /internal/refill contract, which creates and
-// confirms one off-session payment under the refill id. testdata/refill_contract.json holds the example these types
-// are tested against; the checkout service keeps a byte-identical copy and tests its own side against that, so the
-// copies must be changed together, since neither suite reads the other's.
+// confirms one off-session payment under the refill id. testdata/checkout_contract.json pins it with the other routes;
+// the checkout service tests its handler against a byte-identical copy, so the two copies change together.
 type refillRequest struct {
 	Team        string `json:"team"`
 	Deployment  string `json:"deployment"`

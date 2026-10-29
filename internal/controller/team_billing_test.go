@@ -47,6 +47,10 @@ func newFakeCheckout(t *testing.T) (*fakeCheckout, string) {
 		fc.requests = append(fc.requests, call)
 		status, url := fc.status, fc.url
 		fc.mu.Unlock()
+		if call.Bearer != "Bearer "+checkoutToken {
+			http.Error(w, `{"error":"checkout token rejected"}`, http.StatusUnauthorized)
+			return
+		}
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(status)
 		_ = json.NewEncoder(w).Encode(map[string]any{

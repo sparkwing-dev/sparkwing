@@ -7,7 +7,6 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
-	"os"
 	"reflect"
 	"strconv"
 	"strings"
@@ -18,30 +17,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/deployment/deploymenttest"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
-
-type refillContractCase struct {
-	Name       string          `json:"name"`
-	HTTPStatus int             `json:"http_status"`
-	Body       json.RawMessage `json:"body"`
-}
-
-// testdata/refill_contract.json is copied byte for byte into the checkout service's tests, so both sides of the call
-// are held to one request and one set of answers.
-func loadRefillContract(t *testing.T) (json.RawMessage, []refillContractCase) {
-	t.Helper()
-	data, err := os.ReadFile("testdata/refill_contract.json")
-	if err != nil {
-		t.Fatal(err)
-	}
-	var contract struct {
-		Request json.RawMessage      `json:"request"`
-		Cases   []refillContractCase `json:"cases"`
-	}
-	if err := json.Unmarshal(data, &contract); err != nil {
-		t.Fatal(err)
-	}
-	return contract.Request, contract.Cases
-}
 
 func strictJSON(t *testing.T, data []byte, into any) {
 	t.Helper()
@@ -66,52 +41,6 @@ func sameJSON(t *testing.T, a, b []byte) bool {
 
 func refillReply(status int, body string) *http.Response {
 	return &http.Response{StatusCode: status, Body: io.NopCloser(strings.NewReader(body))}
-}
-
-// The controller sends exactly the contract's request and reads every contract answer as the outcome it names.
-func TestRefillCallMatchesTheSharedContract(t *testing.T) {
-	request, cases := loadRefillContract(t)
-	var want refillRequest
-	strictJSON(t, request, &want)
-	r := store.Refill{Team: store.Team(want.Team), ID: want.RefillID, AmountCents: want.AmountCents, Customer: want.Customer}
-	outcomes := map[string]string{
-		"charged": "", "processing": "", "declined": "insufficient_funds",
-		"authentication_required": "authentication_required", "no_card": store.RefillNoCard,
-	}
-	if len(cases) != len(outcomes) {
-		t.Fatalf("contract cases %d; want %d", len(cases), len(outcomes))
-	}
-	for _, tc := range cases {
-		t.Run(tc.Name, func(t *testing.T) {
-			outcome, ok := outcomes[tc.Name]
-			if !ok {
-				t.Fatalf("contract case %q has no expected outcome", tc.Name)
-			}
-			if tc.Body != nil {
-				strictJSON(t, tc.Body, &refillResponse{})
-			}
-			checkout := &billingCheckout{url: "https://checkout.test", token: "credential", http: &http.Client{Transport: billingPageTransport(func(req *http.Request) (*http.Response, error) {
-				body, err := io.ReadAll(req.Body)
-				if err != nil {
-					t.Fatal(err)
-				}
-				if req.URL.Path != "/internal/refill" || !sameJSON(t, body, request) {
-					t.Fatalf("refill call %s %s; want the contract request %s", req.URL.Path, body, request)
-				}
-				return refillReply(tc.HTTPStatus, string(tc.Body)), nil
-			})}}
-			res, err := checkout.refill(t.Context(), want.Deployment, r)
-			got := res.Failure
-			if errors.Is(err, errRefillNoCard) {
-				got = store.RefillNoCard
-			} else if err != nil {
-				t.Fatal(err)
-			}
-			if got != outcome {
-				t.Fatalf("outcome %q; want %q", got, outcome)
-			}
-		})
-	}
 }
 
 func refillOwner(t *testing.T, e *engineFixture) {

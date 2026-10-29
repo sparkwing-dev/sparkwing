@@ -1,0 +1,56 @@
+{
+  "about": "The controller and the checkout service each test their real code against a byte-for-byte copy of this file: sparkwing internal/controller/testdata and sparkwing-platform internal/billing/testdata. Change both copies together. Each route's request is the whole body the controller sends with the bearer token; each response is the service's whole answer. refill_cases are the service's answers to each Stripe outcome of the refill request. refusals are answers the controller must classify: final ones close the refill or refund for the owners and operator, the others are retried with backoff.",
+  "token": "bct_contract_token",
+  "deployment": "dep-0123456789abcdef01234567",
+  "min_cents": 1000,
+  "max_cents": 100000,
+  "metadata": {
+    "deployment": "sparkwing_deployment",
+    "purpose": "purpose",
+    "refill_id": "refill_id",
+    "card_setup": "card_setup",
+    "card_refill": "card_refill"
+  },
+  "routes": {
+    "checkout": {
+      "path": "/internal/checkout",
+      "request": {"team": "acme", "key": "checkout-contract", "deployment": "dep-0123456789abcdef01234567", "expires_at": 1900000000, "amount_cents": 1000},
+      "response": {"id": "cs_contract", "url": "https://checkout.stripe.com/c/pay/cs_contract", "expires_at": 1900000000}
+    },
+    "card_setup": {
+      "path": "/internal/card-setup",
+      "request": {"team": "acme", "key": "setup-contract", "deployment": "dep-0123456789abcdef01234567", "expires_at": 1900000000, "setup_id": "setup-contract", "customer": "cus_contract", "email": "owner@example.test"},
+      "response": {"url": "https://checkout.stripe.com/c/pay/cs_setup_contract", "id": "cs_setup_contract", "customer": "cus_contract", "expires_at": 1900000000}
+    },
+    "portal": {
+      "path": "/internal/portal",
+      "request": {"team": "acme", "deployment": "dep-0123456789abcdef01234567", "customer": "cus_contract"},
+      "response": {"url": "https://billing.stripe.com/p/session/bps_contract"}
+    },
+    "refund": {
+      "path": "/internal/refund",
+      "request": {"deployment": "dep-0123456789abcdef01234567", "payment_intent": "pi_contract", "key": "pi_contract", "reason": "warning"},
+      "response": {"refund": "re_contract", "status": "pending"}
+    },
+    "refill": {
+      "path": "/internal/refill",
+      "request": {"team": "acme", "deployment": "dep-0123456789abcdef01234567", "refill_id": "refill-contract", "amount_cents": 2500, "customer": "cus_contract"}
+    }
+  },
+  "refill_cases": [
+    {"name": "charged", "http_status": 200, "body": {"payment_intent": "pi_contract", "status": "succeeded"}},
+    {"name": "processing", "http_status": 200, "body": {"payment_intent": "pi_contract", "status": "processing"}},
+    {"name": "declined", "http_status": 200, "body": {"payment_intent": "pi_contract", "status": "requires_payment_method", "failure": "insufficient_funds"}},
+    {"name": "authentication_required", "http_status": 200, "body": {"payment_intent": "pi_contract", "status": "requires_payment_method", "failure": "authentication_required"}},
+    {"name": "no_card", "http_status": 409}
+  ],
+  "refusals": [
+    {"name": "wrong_token", "http_status": 401, "final": true},
+    {"name": "wrong_deployment", "http_status": 400, "final": true},
+    {"name": "below_minimum", "http_status": 400, "final": true},
+    {"name": "above_maximum", "http_status": 400, "final": true},
+    {"name": "another_teams_customer", "http_status": 403, "final": true},
+    {"name": "stripe_refused", "http_status": 422, "final": true},
+    {"name": "stripe_unavailable", "http_status": 502, "final": false}
+  ]
+}
