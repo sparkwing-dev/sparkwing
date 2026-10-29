@@ -244,7 +244,7 @@ func TestRunStatusPlainValuesAndTerminalExits(t *testing.T) {
 			if status == "running" {
 				want = 3
 			}
-			if out.String() != status+"\n" || exitCodeFor(err) != want {
+			if out.String() != status+"\nstarted_at\t-\nfinished_at\t-\nduration\t-\n" || exitCodeFor(err) != want {
 				t.Fatalf("%s exit-zero=%t: %q %v", status, exitZero, out.String(), err)
 			}
 		}
