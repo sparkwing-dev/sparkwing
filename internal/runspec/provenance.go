@@ -132,12 +132,13 @@ func (p Provenance) FetchedFrom(repositoryID int64, repository, ref, sha string)
 	return p, p.validate()
 }
 
-// ProvenRepository is the one repository identity this run proves, and every
-// release of repository-scoped material reads it: pipeline secrets, the
-// repository's source credentials and App tokens. It is the GitHub repository
-// a verified delivery, an Actions push or an admin-armed schedule sealed, or
-// the one the controller fetched an asserted run's code from. A run whose code
-// or repository the submitter supplied proves none and returns "" (decision 68).
+// ProvenRepository is the one repository identity this run proves, which
+// pipeline secret release reads. Source credentials and App tokens are not yet
+// bound to it: they follow where the host fetches the code from. It is the
+// GitHub repository a verified delivery, an Actions push or an admin-armed
+// schedule sealed, or the one the controller fetched an asserted run's code
+// from. A run whose code or repository the submitter supplied proves none and
+// returns "" (decision 68).
 func (p Provenance) ProvenRepository() RepoKey {
 	id := p.identity.RepositoryID
 	if id <= 0 {

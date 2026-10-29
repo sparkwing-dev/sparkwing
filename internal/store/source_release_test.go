@@ -266,8 +266,21 @@ func TestSourceReleaseGivesRepositoryCredentialsOnlyToFetchedCode(t *testing.T) 
 		credential, _, err := tenant.ReleaseSourceCredential(t.Context(), auth)
 		return credential, err
 	}
+	run, err := tenant.ReadRun(t.Context(), "run")
+	if err != nil {
+		t.Fatal(err)
+	}
+	proven := run.Request
+	proven.Provenance, err = proven.Provenance.FetchedFrom(1, "acme/repo", "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if proven.Provenance.ProvenRepository() != proven.Request.Git.Repository.Key {
+		t.Fatalf("fixture proves %q, want its own repository %q", proven.Provenance.ProvenRepository(), proven.Request.Git.Repository.Key)
+	}
+	setRunRequest(t, tenant, proven)
 	if credential, err := release(); err != nil || credential.ID != "scoped" {
-		t.Fatalf("fetched code did not get its repository's credential: %q %v", credential.ID, err)
+		t.Fatalf("a run proving its repository did not get that repository's credential: %q %v", credential.ID, err)
 	}
 	for name, supply := range map[string]func(*runspec.Source){
 		"upload": func(s *runspec.Source) {

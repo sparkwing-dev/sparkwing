@@ -184,6 +184,7 @@ func TestTrustMatrix(t *testing.T) {
 			t.Fatalf("%s: hosts: %v", row.key, err)
 		}
 		cells = append(cells, hostCells...)
+		checkSourceCredentialProof(t, row.key, cells)
 		fmt.Fprintf(&out, "\n== %s: %s\n", row.key, row.title)
 		for _, cell := range cells {
 			out.WriteString(strings.TrimRight(fmt.Sprintf("%-50s %s", cell[0], cell[1]), " ") + "\n")
@@ -261,6 +262,31 @@ func matrixCells(r runspec.SealedRequest) ([][2]string, error) {
 		{"default_branch_work_go", yesNo(p.DefaultBranchWork())},
 		{"source_credential", matrixSourceCredential(r)},
 	}, nil
+}
+
+// sourceCredentialUnproven lists the rows that receive a GitHub repository's
+// source credential without proving that repository (no OIDC repository claim).
+// They pin today's rule until the M1 decision lands; a row that starts or stops
+// contradicting fails the matrix.
+var sourceCredentialUnproven = map[string]bool{
+	"schedule-locked":    true,
+	"schedule-no-app":    true,
+	"child-other-commit": true,
+	"child-other-repo":   true,
+}
+
+// checkSourceCredentialProof holds the invariant that a gh: repository's
+// source credential goes only to a run that proves a repository.
+func checkSourceCredentialProof(t *testing.T, key string, cells [][2]string) {
+	t.Helper()
+	value := map[string]string{}
+	for _, cell := range cells {
+		value[cell[0]] = cell[1]
+	}
+	contradicts := strings.HasPrefix(value["source_credential"], "repository gh:") && value["oidc_repository"] == "-"
+	if contradicts != sourceCredentialUnproven[key] {
+		t.Errorf("%s: source_credential %q with oidc_repository %q; update sourceCredentialUnproven only with the M1 decision", key, value["source_credential"], value["oidc_repository"])
+	}
 }
 
 func matrixSourceCredential(r runspec.SealedRequest) string {
