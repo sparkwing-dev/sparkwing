@@ -1,5 +1,50 @@
 # Migrating to the next release
 
+v0.68 rewrites the engine, the store and the trust model. The upgrade is
+mostly mechanical, but it is not in place: v0.68 starts a new, empty store,
+and the CLI, each repository's SDK pin, the controller and its runners move to
+v0.68 together. Read [What changed and why](#what-changed-and-why), then the
+section for each way you use Sparkwing. The
+[reference](#reference-every-breaking-change) at the end lists every breaking
+change one by one.
+
+## What changed and why
+
+- **The engine hosts every run.** `sparkwing run`, runners and Cloud Jobs start
+  the pipeline binary as a [node protocol](../node-protocol.md) process and
+  plan and run each job through it. The CLI runs each repository with the
+  engine its SDK pin names, so a repository gets the v0.68 engine only once
+  its pin moves to v0.68.
+- **A new store.** The schema starts again at a new baseline and has no
+  importer, so run history, secrets, tokens, teams and schedules do not carry
+  over. Later releases migrate the store in place.
+- **Every run carries a sealed identity.** Intake records a trust class
+  (`verified-default`, `verified`, `actions`, `schedule` or `asserted`) with
+  the repository, ref and commit Sparkwing can prove. Pipeline secrets, OIDC
+  claims, cache scopes and reserved pools read only that record, because a
+  value the run supplied about itself proves nothing. A pipeline secret set
+  for one repository can no longer reach another repository's pipeline of the
+  same name.
+- **One way to do each thing.** Command families folded into one registry
+  (`cluster`, `cloud`, `configure`, `crons`, `fleet` and `serve` are gone),
+  and the logs service, the cache service, password users and the assisted
+  fleet are removed with no shims. A removed config key fails with an error
+  naming it; a removed command fails with a usage error, and
+  [the command table](#removed-and-renamed-commands) maps it to its
+  replacement.
+- **Cloud is prepaid.** Usage draws on a prepaid balance, Stripe holds every
+  card, and a Cloud job runs only on a fresh, isolated pod.
+
+## Before you start
+
+1. Let in-flight runs finish. The new store does not carry them over, so a
+   run still queued or running at the upgrade is lost.
+2. Export anything you need from the old store: secret values you cannot
+   recreate, run history and logs. A v0.67 binary still reads the old store.
+3. Upgrade the controller and every runner in one window. Runner credentials
+   live in the store, so every runner enrolls again against the v0.68
+   controller.
+
 ## Upgrading from v0.67: v0.68 starts a new store
 
 v0.68 replaces the store. It cannot read a store written by v0.67 or earlier,
@@ -29,6 +74,332 @@ it unchanged. It never deletes or rewrites it.
 
 Releases after v0.68.0 ship schema changes as forward migrations. See
 [Schema compatibility](../backup-restore.md#schema-compatibility).
+
+## Upgrade a local install
+
+These steps cover a laptop or CI machine that runs pipelines with
+`sparkwing run` and keeps its own store.
+
+1. Install the v0.68 CLI with `sparkwing update`, or with the install script
+   from [Getting started](../getting-started.md).
+2. Move the old store aside, as
+   [the store section](#upgrading-from-v067-v068-starts-a-new-store) shows.
+   The next command creates a new one.
+3. Clean `~/.config/sparkwing/config.yaml`. The file must be mode `0600`, and
+   every unknown key fails with its file and line. Delete the `agent`, `logs`
+   and `fleet` sections and the `allow_repos` and `dispatch_wait` keys. A
+   profile now holds only `controller.url` and an optional `controller.token`,
+   so delete every other profile key. See
+   [Machine settings](../machine-config.md).
+4. Recreate controller connections with
+   `sparkwing profiles add --controller URL --profile NAME --token-stdin`.
+   A command reaches a controller only when `--profile` names it.
+5. Move every repository's SDK pin to v0.68 before running it, as
+   [Upgrade pipeline code](#upgrade-pipeline-code) shows.
+6. Reinstall git hooks with `sparkwing pipeline hooks install`, because hooks
+   an older CLI wrote can pass flags v0.68 removed, such as `--sw-local-only`.
+7. Set local secrets again with `sparkwing secrets set --secret NAME`.
+8. Open the local dashboard with `sparkwing dashboard start`, then
+   `sparkwing dashboard open`. The dashboard now needs the one-time link that
+   `open` prints; it expires after 60 seconds.
+
+`sparkwing run` always runs on this machine and refuses `--profile`. To run on
+a controller, use `sparkwing pipeline trigger PIPELINE --profile NAME`.
+
+## Upgrade a self-hosted controller
+
+Running your own shared controller is outside the launch offering, which is
+local use and Sparkwing Cloud, but the `sparkwing-full` and
+`sparkwing-runner-bundle` charts still ship. v0.68 does not migrate a v0.67
+database: the controller refuses it with
+`... is a store from Sparkwing v0.67 or earlier`, and leaves it unchanged.
+
+1. **Back up the database** and keep a v0.67 controller binary if you need
+   to read the old history.
+2. **Point the controller at an empty database.** On PostgreSQL, create a new
+   database and change the `pg-url` credential. On SQLite, move `state.db` out
+   of the data directory or mount a new volume.
+3. **Declare the deployment.** Pass `--deployment=local` (or `team` with a
+   multi-team license) and `--store=sqlite` or `--store=postgres`. A
+   controller with a `pg-url` credential refuses to start without
+   `--store=postgres`.
+4. **Drop removed flags:** `--argon2-memory-budget-mb`, `--cache-url`,
+   `--cache-pod-url`, `--free-team-slots`, `--logs-url`,
+   `--logs-archive-store` and `--trigger-dedupe-window`. Each now fails as an
+   unknown flag. `--require-auth`, which the chart always passes, refuses to
+   start until a deployment administrator exists, so seed one with a
+   `bootstrap-admin-token` credential: `swk_` followed by unpadded base64url
+   of 32 random bytes.
+5. **Clean the credentials directory.** Startup refuses any file the
+   controller does not read, so delete `logs-delete-token` and any other file
+   the controller does not list. See
+   [controller credentials](../self-hosting.md#controller-credentials).
+6. **Plan sign-in.** Password users are gone. On a multi-team license,
+   configure Google or GitHub sign-in and list operators in
+   `--operator-accounts`; otherwise the operator token is the dashboard's
+   sign-in. See [Password users are removed](#password-users-are-removed).
+7. **Rebuild the team.** Create teams with
+   `sparkwing operator teams create --team SLUG --profile PROFILE`, invite
+   members from the console, enroll runners with `sparkwing runners add`, and
+   set secrets again with their repository (see
+   [secrets](#behavior-you-will-notice)). The controller host no longer
+   claims work, so register at least one runner.
+8. **Upgrade every runner at the same time**, including `sparkwing-runner`
+   services and GitHub Actions runners. Enroll a runner that runs in a
+   Kubernetes pod with
+   `sparkwing runners add --runner NAME --profile NAME --platform kubernetes`.
+
+### Helm values
+
+`sparkwing-full` moves from chart 0.2.0 to 0.3.2 and `sparkwing-runner-bundle`
+from 0.1.10 to 0.1.17. Neither chart falls back to `appVersion` for images.
+Through `sparkwing-full`, the runner-bundle keys below sit under
+`sparkwing-runner-bundle.`.
+
+| Chart | Change |
+|---|---|
+| both | Set `image.repository` and `image.tag` for every enabled controller, runner and launcher image. |
+| `sparkwing-full` | Add `controller.deployment` (`local`, `team` or `cloud`) and `controller.store` (`sqlite` or `postgres`). Every PostgreSQL install sets `controller.store: postgres`, or rendering fails. |
+| `sparkwing-full` | Delete `controller.requireAuth`, `controller.allowOpenBootstrap`, `controller.logs`, `controller.cache.url`, `controller.argon2MemoryBudgetMB` and `controller.triggerDedupeWindow`. Rendering fails while `requireAuth`, `allowOpenBootstrap` or `logs` is present, even with the old default. |
+| `sparkwing-full` | `controller.storage.type: emptyDir` needs `controller.store: postgres` and `controller.dataStore.s3URL`; otherwise use `pvc`. |
+| `sparkwing-full` | The chart now creates a small retained PVC for the credential epoch. |
+| `sparkwing-runner-bundle` | Set `runner.repos`. An empty list admits no repository. |
+| `sparkwing-runner-bundle` | Delete the `cache` and `logs` blocks, the top-level `networkPolicy` block, `rbac.create`, `serviceAccount.shareAcrossComponents`, `runner.triggerRunner`, `runner.jobCeiling`, `runner.jobDeadline`, `runner.teamNodes` and `runner.gitcacheUrl`. A `logs` key fails rendering; the others are ignored. |
+| `sparkwing-runner-bundle` | Pools that hold reserved secrets use `launcher.enabled: true` with `launcher.tokenSecret` and digest-pinned job images. The cluster's CNI must enforce NetworkPolicy. |
+
+After the upgrade, delete the old logs PVC and the cache deployment, as
+[The logs service is removed](#the-logs-service-is-removed) shows.
+
+## Upgrade pipeline code
+
+Every repository's `.sparkwing` module moves to the v0.68 SDK, because the
+CLI runs each repository with the engine its pin names. Go pipelines pin `github.com/sparkwing-dev/sparkwing` in `.sparkwing/go.mod`.
+`sparkwing upgrade` changes a pin only after the new SDK compiles and plans
+the pipeline, so move the pin by hand, fix the code, then check it:
+
+```sh
+go -C .sparkwing get github.com/sparkwing-dev/sparkwing@v0.68.0
+go -C .sparkwing mod tidy
+go -C .sparkwing build ./...
+sparkwing pipeline plan --pipeline build
+sparkwing run build
+```
+
+The entrypoint moves out of the removed `pkg/runner` package:
+
+```go
+// Before
+import "github.com/sparkwing-dev/sparkwing/pkg/runner"
+
+func main() { runner.Main() }
+
+// After
+import "github.com/sparkwing-dev/sparkwing/sparkwing"
+
+func main() { sparkwing.Main() }
+```
+
+Renamed and removed Go SDK APIs, all in package `sparkwing` unless named:
+
+| Before | After |
+|---|---|
+| `pkg/runner.Main()` | `sparkwing.Main()` |
+| `JobNode.Memoize(fn)`, `Key(...)`, `NoCache`, `TTL(d)` | `JobNode.Memo(recipe)`, `MemoKey(...)`, `NoMemo`, `MemoTTL(d)` |
+| An `inputs.Files(...)` result called as `(ctx)` | Pass the recipe to `Memo`, combining several with `inputs.Compose` |
+| Outcome `Cached` | `Memoized` |
+| `JobNode.CacheDir(...)`, `NpmCache()` | `JobNode.Cache(...)`, `Npm()` |
+| `Outputs(globs...)` | `Artifacts(globs...)` |
+| `NeedsOptional(...)` | `NeedsIfPresent(...)` |
+| `JobApproval(plan, id, cfg)`, `ApprovalConfig.OnExpiry` | `plan.Approval(id, cfg)`, `ApprovalConfig.OnTimeout` |
+| `JobFanOutDynamic`, `ExpandGenerator` | `source.Generate(fn)`, and `NeedsGenerated` on the jobs that wait for it |
+| `Resources(Cores(n), MemoryGB(n))` | A runner label: `Requires("sparkwing-4cpu")` on Cloud |
+| `Config(ctx, name)`, `MustConfig` | `Variable(ctx, name)`, `MustVariable` |
+| `RetryBackoff(d)` | `Backoff(d)` |
+| `RetryAuto`, `WhenRunner`, `LoggerFromContext`, `NodeFromContext`, `StepFromContext`, `CancelTimeout` | Removed. Log with `sparkwing.Info`, `Warn` and `Error` |
+| `pkg/controller`, `pkg/store`, `pkg/storage`, `pkg/logs`, `sparkwing/planguard` | Removed. Call the HTTP API instead |
+
+Memo keys move into the plan, where the executing host evaluates them:
+
+```go
+// Before
+sparkwing.Job(plan, "build", &Build{}).
+    Memoize(func(ctx context.Context) (sparkwing.CacheKey, error) {
+        files, err := inputs.Files("go.sum")(ctx)
+        return sparkwing.Key(files, "v1"), err
+    })
+
+// After
+sparkwing.Job(plan, "build", &Build{}).
+    Memo(inputs.Compose(inputs.Files("go.sum"), inputs.Const("v1")))
+```
+
+Runner size is a label, not a resource request:
+
+```go
+// Before
+sparkwing.Job(plan, "test", &Test{}).Resources(sparkwing.Cores(4), sparkwing.MemoryGB(8))
+
+// After
+sparkwing.Job(plan, "test", &Test{}).Requires("sparkwing-4cpu")
+```
+
+A job that starts another pipeline declares it, or the controller answers
+`403`:
+
+```go
+// After
+sparkwing.Job(plan, "release", &Release{}).StartsChildren("deploy")
+```
+
+Other changes the compiler does not catch:
+
+- **Plan is deterministic.** Every job process plans the run again, and a job
+  whose plan entry differs from the accepted one fails with `plan_drift`. Read
+  the clock, randomness and the environment in step bodies, not in `Plan`.
+- **Run options are not environment variables.** `--sw-only`,
+  `--sw-start-at` and the other run flags no longer reach pipeline code as
+  `SPARKWING_*` variables. `SPARKWING_DRY_RUN` remains.
+- **Declare every secret.** A job reads only names its `Secrets()` struct
+  declares; any other name answers `403` with reason `secret_undeclared`.
+- **The binary needs a host.** A pipeline binary starts only under a host:
+  `sparkwing run`, a runner, Cloud, or `sparkwingtest` in tests. Run on its own,
+  it exits with an error.
+- **Concurrency groups.** Plan and job groups are separate namespaces, a plan
+  group cannot use box scope, and an approval cannot declare a group.
+- **Memo entries start empty.** Each memoized job runs once to fill the new
+  cache.
+
+The TypeScript SDK, `@sparkwing/sdk`, is first released with v0.68; v0.67
+carried only an unpublished prototype. A pipeline written against the
+prototype pins `@sparkwing/sdk` 0.68.0 in `.sparkwing/package.json` with its
+lockfile, and calls `main()` with no arguments.
+
+## Sparkwing Cloud customers
+
+Sparkwing Cloud runs v0.68 on its side. On yours:
+
+1. Upgrade the CLI and every repository's pin, as in
+   [Upgrade a local install](#upgrade-a-local-install) and
+   [Upgrade pipeline code](#upgrade-pipeline-code).
+2. Mint a CLI token on the console's **Team > Machines** page and save it:
+   `sparkwing profiles add --controller URL --profile cloud --token-stdin`.
+3. Set each pipeline secret again with its repository:
+   `sparkwing secrets set --secret DEPLOY_KEY --repo acme/web --pipeline deploy --profile cloud`.
+4. Update cloud trust policies for the new OIDC subject, as
+   [OIDC runner environment and triggers](#oidc-runner-environment-and-triggers)
+   shows.
+5. Replace CPU and memory requests with a size label such as
+   `sparkwing-4cpu`. A job with no size label runs on `sparkwing-2cpu`.
+6. Add funds from the console's billing page. Automatic refill starts off; turn
+   it on with
+   `sparkwing billing refill --profile cloud --enable --threshold 20 --amount 50`.
+   The team needs a saved card first.
+
+If your team, balance, GitHub App connection or schedules are not there after
+the upgrade, write to support@sparkwing.dev.
+
+## Removed and renamed commands
+
+Each removed command now fails with a generic usage error, so use this table
+to find its replacement. Flags left over from v0.67 fail as unknown flags.
+
+| Before | After |
+|---|---|
+| `sparkwing cloud connect`, `configure profiles add` | `sparkwing profiles add --controller URL --profile NAME --token-stdin` |
+| `sparkwing cloud status`, `configure profiles show` | `sparkwing profiles show --profile NAME` |
+| `sparkwing cloud disconnect` | `sparkwing profiles remove --profile NAME` |
+| `sparkwing configure init` | none; `sparkwing profiles add` writes the machine file |
+| `sparkwing crons ...` | `sparkwing schedules ...`, with the same verbs plus `pause` and `resume` |
+| `sparkwing serve start`, `serve stop`, `serve logs` | `sparkwing dashboard start`, `dashboard stop`, `dashboard logs` |
+| `sparkwing cluster tokens ...` | `sparkwing operator tokens ...` for deployment credentials, `sparkwing tokens ...` for team credentials |
+| `sparkwing cluster limits ...`, `cluster object-store ...` | `sparkwing operator limits ...`, `operator object-store ...` |
+| `sparkwing cluster runners add`, `cluster agents enroll`, `fleet init` | `sparkwing runners add --runner NAME --profile NAME` |
+| `sparkwing cluster runners remove` | `sparkwing runners remove --runner NAME --profile NAME` |
+| `sparkwing cluster concurrency` | `sparkwing queue list --group GROUP` |
+| `sparkwing cluster users ...` | none; people sign in with Google or GitHub |
+| `sparkwing cluster triggers ...`, `cluster worker`, `runs consumer ...` | none; `sparkwing queue list` shows queued work and runners claim it |
+| `sparkwing debug run` | `sparkwing run PIPELINE --sw-pause-before JOB` |
+| `sparkwing debug release` | `sparkwing debug resume` |
+| `sparkwing debug replay`, `debug rerun`, `runs bounce` | `sparkwing runs cancel`, then `sparkwing runs retry --run RUN --failed` |
+| `sparkwing pipeline sparks warmup` | `sparkwing cache warm` |
+| `sparkwing pipeline sparks resolve` | none |
+| `sparkwing run PIPELINE --profile NAME` | `sparkwing pipeline trigger PIPELINE --profile NAME` |
+| `sparkwing run PIPELINE --plan`, `--explain` | `sparkwing pipeline plan --pipeline PIPELINE` |
+| `sparkwing run PIPELINE config` | `sparkwing pipeline describe --pipeline PIPELINE --secrets` |
+| `--sw-no-cache` | `--sw-no-memo` |
+| `--sw-allow` | `--sw-allow-risk` |
+| `--sw-fleet`, `--sw-local-only`, `--sw-artifact-digest-backfill` | none |
+| `sparkwing secrets set --name NAME --plain` | `sparkwing secrets set --secret NAME --variable` |
+| `--name PIPELINE` on `pipeline` commands | `--pipeline PIPELINE` |
+| `--node JOB` on `runs` commands | `--job JOB` |
+| `--query` on `commands`, `docs` and `pipeline list`; `--grep` on `secrets list` | `--search` |
+| `sparkwing runs retry --all` | `sparkwing runs retry --run RUN --all-jobs` |
+| `sparkwing update --check` | `sparkwing update --dry-run` |
+
+Pipeline arguments now follow `--`, as in `sparkwing run deploy -- --region us-east-1`.
+
+## Behavior you will notice
+
+- **Pipeline secrets belong to one repository.** `sparkwing secrets set`,
+  `get` and `delete` take `--repo OWNER/NAME` with `--pipeline`. Only runs
+  whose code Sparkwing fetched from that repository through the GitHub App,
+  or whose repository a GitHub Actions job proved, read them. Local, uploaded
+  and `--runner here` runs read only `--shared` secrets. See
+  [Secrets and run identity](../secrets.md).
+- **Trust classes decide what a run receives.** A pool that holds reserved
+  secrets takes only verified default-branch work, through a launcher, by
+  default
+  (`sparkwing runners add --runner NAME --profile NAME --reserved-for POOL --trust verified-default --launcher`).
+  Verified default-branch work never runs on a persistent Kubernetes runner.
+- **OIDC subjects gain `runner_environment`.** It is `fresh` on launcher pods,
+  Cloud pods and GitHub-hosted Actions runners and `persistent` elsewhere.
+  GitHub Actions-bound runs mint `trigger:actions`. A deploy role should
+  require `runner_environment:fresh`. See [OIDC tokens](../oidc.md#subject-format).
+- **Runs without a runner selector run anywhere.** Claimants rank `here`,
+  `personal`, `github-actions`, `self-hosted`, then `cloud`; change it with
+  `sparkwing team settings set --profile NAME --claim-ranking cloud,self-hosted`.
+  Personal machines take only their owner's manual runs and never receive team
+  git credentials.
+- **Cloud jobs run on fresh pods.** A warm Cloud node serves only jobs of the
+  same run, and Docker on Cloud refuses `--privileged` and host namespaces.
+  See [Docker on Cloud](../limits.md#docker-on-cloud).
+- **Caches are scoped to who wrote them.** Manual runs by different members no
+  longer share memo, dependency-cache or output entries. See
+  [Who shares a cache](../caching.md#who-shares-a-cache).
+- **Child runs are declared.** A job starts only the child pipelines its plan
+  names. Children nest at most 10 levels, and a root run may start 50
+  descendants by default
+  (`sparkwing team settings set --profile NAME --max-children-per-root 200`).
+- **Job outputs that contain a secret are withheld.** The job passes with an
+  `output withheld: contains a secret` warning. Return the secret's name
+  instead of its value.
+- **GitHub deliveries queue.** Webhooks answer `202` and process later. A
+  failed delivery never retries on its own; a team admin chooses Process again
+  in the team's GitHub settings. Release subscriptions need `release_tags`,
+  and `pull_request_closed` runs only merged pull requests.
+- **Cloud billing is prepaid.** A job whose balance cannot pay its next
+  60-second slice stops at that renewal. One payment is at most $1,000, and
+  storage tiers replace free-tier slots. Stripe holds the card: the console's
+  Manage card opens Stripe's portal. See [Cloud billing](../billing.md).
+- **Tokens.** A team admin can revoke another member's account token or
+  personal machine but no longer rotate it. Admins still rotate shared runners.
+- **Local dashboard.** It answers only a session from the one-time link that
+  `sparkwing dashboard open` prints.
+
+## Get help
+
+Run `sparkwing docs migrations --version v0.68.0` to read this guide from the
+CLI. For anything this guide does not cover, write to support@sparkwing.dev
+with the command you ran and its full error.
+
+## Reference: every breaking change
+
+Each section below was written when its change landed. Where one disagrees
+with the guide above, the guide describes v0.68.0. Because v0.68 starts a new
+store, a section that says existing tokens, secrets, runs or schedules keep
+working does not apply to an upgrade from v0.67. Sections that name
+`internal/` Go packages concern code inside this repository, which other
+modules cannot import.
 
 ## OIDC runner environment and triggers
 
