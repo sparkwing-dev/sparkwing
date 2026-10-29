@@ -365,6 +365,7 @@ unlock.
 
 ### Added
 
+- **TypeScript SDK:** `npm run pack:local -- --version <engine-version> --destination <directory>` builds a Linux/macOS dogfood tarball without Windows bridges. The package is private and npm refuses to publish it. Release packing still requires both verified Windows bridges.
 - **match:** `CloudSizeLabelPrefix`, `CloudSizeLabelSuffix` and `IsCloudSizeLabel` name the Cloud size label format, so the claim query and the award price read one rule.
 - **release:** The `publish-images` pipeline publishes the controller and runner images for linux/amd64 and linux/arm64 under one index per tag, assembled from the signed binaries onto prebuilt runtime bases with no Docker daemon or emulation, and checks each published binary against SHA256SUMS. `bin/qa-release.sh` runs it, so QA releases ship arm64 images; `build-images -- --runtime-base --push` builds the bases.
 - **controller:** Launcher reconciliation reads current award fences and execution inputs from one store snapshot, including after bootstrap exchange. Cleanup selects the exact observed Kubernetes Job UID. Removed the legacy `Store.SyncLaunchJobs` and `Client.LauncherSync` APIs.

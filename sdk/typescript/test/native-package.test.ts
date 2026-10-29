@@ -94,3 +94,46 @@ test("package preflight requires npm's engine version stamp in both manifests", 
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+test("local pack installs on Unix and refuses npm publication", { skip: process.platform === "win32" }, async () => {
+  const root = mkdtempSync(join(tmpdir(), "sdk-local-pack-"));
+  const source = new URL("../", import.meta.url);
+  try {
+    const packed = spawnSync(process.execPath, [new URL("native/release.mjs", source).pathname, "local-pack", "--version", "0.71.0", "--destination", root], {
+      encoding: "utf8",
+    });
+    assert.equal(packed.status, 0, packed.stderr);
+    const archive = join(root, "sparkwing-sdk-0.71.0.tgz");
+    writeFileSync(join(root, "package.json"), JSON.stringify({ private: true, type: "module", dependencies: { "@sparkwing/sdk": `file:${archive}` } }));
+    const installed = spawnSync("npm", ["install", "--offline", "--ignore-scripts", "--no-audit", "--no-fund"], { cwd: root, encoding: "utf8" });
+    assert.equal(installed.status, 0, installed.stderr);
+    const manifest = JSON.parse(readFileSync(join(root, "node_modules/@sparkwing/sdk/package.json"), "utf8"));
+    assert.equal(manifest.version, "0.71.0");
+    assert.equal(manifest.private, true);
+    const { createServer } = await import("node:http");
+    const { spawn } = await import("node:child_process");
+    let writes = 0;
+    const server = createServer((request, response) => {
+      if (request.method === "PUT") writes++;
+      response.writeHead(404, { "Content-Type": "application/json" }).end('{"error":"not found"}');
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    try {
+      const address = server.address();
+      assert.ok(address && typeof address === "object");
+      writeFileSync(join(root, ".npmrc"), `//127.0.0.1:${address.port}/:_authToken=fixture\n`);
+      const child = spawn("npm", ["publish", archive, "--ignore-scripts", "--force", "--registry", `http://127.0.0.1:${address.port}/`], { cwd: root });
+      let stderr = "";
+      child.stdout.resume();
+      child.stderr.on("data", (chunk) => { stderr += chunk; });
+      const status = await new Promise<number | null>((resolve, reject) => { child.on("error", reject); child.on("close", resolve); });
+      assert.notEqual(status, 0);
+      assert.match(stderr, /EPRIVATE/);
+      assert.equal(writes, 0);
+    } finally {
+      await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+    }
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
