@@ -11,28 +11,26 @@ import (
 	"time"
 )
 
-// CostSource names how a run's admission cost was resolved. It is
-// recorded on the lease and echoed in the queue view so an operator can
-// see whether a charge came from an explicit pin, from measurement, or
-// from the conservative cold-start default.
+// CostSource names the basis of a pipeline's resource estimate in the
+// capacity view: an explicit pin, measurement, or the cold-start default.
+// The estimate is display data; Cloud billing prices size labels instead.
 type CostSource string
 
 const (
-	// CostSourcePin is an explicit .Resources() pin: authoritative, used
-	// verbatim.
+	// CostSourcePin is an explicit .Resources() pin, used verbatim.
 	CostSourcePin CostSource = "pin"
 	// CostSourceMeasured is a measured profile with enough samples to
 	// trust.
 	CostSourceMeasured CostSource = "measured"
-	// CostSourceDefault is the cold-start default charged to an unknown
+	// CostSourceDefault is the cold-start estimate for an unknown
 	// pipeline's first runs.
 	CostSourceDefault CostSource = "default"
 	// CostSourceMeasuring is a version still being measured: it has a
 	// predecessor peak (a structural change) but not yet the clean samples
-	// that finalize a measured price, so it is charged from the predecessor
-	// peak and re-measures until clean.
+	// that finalize a measured estimate, so it is estimated from the
+	// predecessor peak and re-measures until clean.
 	CostSourceMeasuring CostSource = "measuring"
-	// CostSourceFloor is a still-measuring version whose operative charge is
+	// CostSourceFloor is a still-measuring version whose estimate is
 	// the demand floor learned from its contended runs -- a lower bound that
 	// tightens the conservative default from real evidence.
 	CostSourceFloor CostSource = "floor"
@@ -46,14 +44,12 @@ const floorDecayFactor = 0.5
 
 // PipelineProfile is the measured resource fingerprint of a
 // (pipeline, node) pair over a bounded window of recent runs: duration
-// percentiles and peak host usage. The pipeline-level rollup used by
-// admission and ETA carries the empty node id; per-node rows record where
-// the numbers came from.
+// percentiles and peak host usage. The pipeline-level rollup carries the
+// empty node id; per-node rows record where the numbers came from.
 //
 // The resource distribution fields (CPUP50/CPUP95, MemoryP50Bytes/
-// MemoryP95Bytes) describe how spiky the pipeline is; they inform the
-// reader and never gate admission. Admission charges SustainedCores and
-// PeakMemoryBytes.
+// MemoryP95Bytes) describe how spiky the pipeline is; the estimate uses
+// SustainedCores and PeakMemoryBytes instead.
 type PipelineProfile struct {
 	Pipeline        string        `json:"pipeline"`
 	NodeID          string        `json:"node_id"`
@@ -63,23 +59,21 @@ type PipelineProfile struct {
 	PeakMemoryBytes int64         `json:"peak_memory_bytes"`
 	// SustainedCores is the same across-window rank as PeakCores taken over
 	// each run's sustained core demand rather than its burst peak, and it is
-	// what admission charges for cores. The dimensions differ because the
+	// the estimate's core figure. The dimensions differ because the
 	// resources do: cores are compressible, so the kernel time-slices two
-	// runs that collide for a tick, and reserving a burst peak for a whole
-	// hold refuses work the box could have run; memory is a cliff, so
-	// PeakMemoryBytes stays the memory charge. Zero on a profile measured
-	// before sustained figures were stored, which keeps such a profile
-	// pricing off PeakCores until fresh observations age into its window.
+	// runs that collide for a tick, and sizing for a burst peak overstates
+	// what a run needs; memory is a cliff, so PeakMemoryBytes stays the
+	// memory figure. Zero when no observation in the window carried a
+	// sustained figure, which falls the estimate back to PeakCores.
 	SustainedCores float64 `json:"sustained_cores"`
 	SampleCount    int     `json:"sample_count"`
 	// CPUP50 and CPUP95 are the median and 95th-percentile per-run CPU
 	// peaks across the window, recomputed from the stored samples on
-	// read. Display-only; admission charges SustainedCores.
+	// read.
 	CPUP50 float64 `json:"cpu_p50,omitempty"`
 	CPUP95 float64 `json:"cpu_p95,omitempty"`
 	// MemoryP50Bytes and MemoryP95Bytes are the median and
-	// 95th-percentile per-run memory peaks across the window. Display-
-	// only; admission charges PeakMemoryBytes.
+	// 95th-percentile per-run memory peaks across the window.
 	MemoryP50Bytes int64 `json:"memory_p50_bytes,omitempty"`
 	MemoryP95Bytes int64 `json:"memory_p95_bytes,omitempty"`
 	// WaitP50 and WaitP99 are the median and 99th-percentile admission
@@ -91,7 +85,7 @@ type PipelineProfile struct {
 	// WaitSampleCount is how many wait observations back WaitP50/WaitP99.
 	WaitSampleCount int `json:"wait_sample_count,omitempty"`
 	// CPUMeasured records that profile observations included measured CPU.
-	// Admission uses learned resource values only when it is true.
+	// The estimate uses learned resource values only when it is true.
 	CPUMeasured bool      `json:"cpu_measured"`
 	UpdatedAt   time.Time `json:"updated_at"`
 	// PinnedCores and PinnedMemoryBytes record the explicit .Resources()
@@ -108,8 +102,8 @@ type PipelineProfile struct {
 	// PlanHash is the capacity fingerprint of the pipeline version these
 	// clean samples were measured on: the DAG shape plus the concurrency
 	// declarations that bound how much of it runs at once. A change stamps a
-	// new hash and clears the learned window, so admission re-measures the
-	// changed version rather than pricing it on stale samples. Meaningful
+	// new hash and clears the learned window, so the changed version is
+	// re-measured rather than estimated from stale samples. Meaningful
 	// only on the rollup row.
 	PlanHash string `json:"plan_hash,omitempty"`
 	// FloorCores and FloorMemoryBytes are the demand lower bound learned from
@@ -117,20 +111,20 @@ type PipelineProfile struct {
 	// what it wanted, so it never sets the measured peak or graduates the
 	// version. Contended evidence above the floor raises it; evidence below
 	// decays it by floorDecayFactor, so a floor inflated by transient external
-	// load converges back to demand. Admission charges a safety multiple of
+	// load converges back to demand. The estimate is a safety multiple of
 	// the floor while the version is still measuring. Meaningful only on the
 	// rollup row.
 	FloorCores       float64 `json:"floor_cores,omitempty"`
 	FloorMemoryBytes int64   `json:"floor_memory_bytes,omitempty"`
 	// PrevPeakCores and PrevPeakMemoryBytes carry the previous version's
 	// measured peak across a plan-hash change, so the changed version warm-
-	// starts at what its predecessor cost instead of the blind half-machine
+	// starts at its predecessor's figures instead of the blind half-machine
 	// default. Meaningful only on the rollup row.
 	PrevPeakCores       float64 `json:"prev_peak_cores,omitempty"`
 	PrevPeakMemoryBytes int64   `json:"prev_peak_memory_bytes,omitempty"`
-	// PrevSustainedCores is SustainedCores' counterpart in that carry: what
-	// the predecessor version was charged for cores, so the warm start prices
-	// the changed version at parity rather than at the predecessor's bursts.
+	// PrevSustainedCores is SustainedCores' counterpart in that carry, so the
+	// warm start matches the predecessor's core estimate rather than its
+	// bursts.
 	// Zero when the predecessor predates sustained figures, which falls back
 	// to PrevPeakCores. Meaningful only on the rollup row.
 	PrevSustainedCores float64 `json:"prev_sustained_cores,omitempty"`
@@ -145,9 +139,9 @@ type ProfileObservation struct {
 	PeakCores       float64
 	PeakMemoryBytes int64
 	// SustainedCores is the core level this run held for most of its life,
-	// as opposed to the burst PeakCores touched. It is what the window's
-	// charged core figure is computed from; left zero it degrades the
-	// profile to peak pricing rather than to free.
+	// as opposed to the burst PeakCores touched. The window's SustainedCores
+	// is computed from it; left zero, the estimate falls back to PeakCores
+	// rather than to zero.
 	SustainedCores float64
 	// CPUMeasured must be true to update learned resource values.
 	// False observations are validated but leave the profile unchanged.
@@ -166,10 +160,10 @@ type ProfileObservation struct {
 	// folds normally.
 	Contended bool
 	// FloorCores and FloorMemoryBytes are the demand lower bound a contended
-	// run proves: what it measured on the dimension admission charges --
-	// sustained cores, peak memory -- raised to the charge it was admitted at
-	// when it consumed essentially the whole charge (a ceiling hit proves it
-	// wanted at least that much). Ignored unless Contended.
+	// run proves: what it measured on the estimate's dimensions -- sustained
+	// cores, peak memory -- raised to its local admission grant when it
+	// consumed essentially all of it (a ceiling hit proves it wanted at
+	// least that much). Ignored unless Contended.
 	FloorCores       float64
 	FloorMemoryBytes int64
 }
@@ -462,17 +456,15 @@ ON CONFLICT (team, pipeline, node_id) DO UPDATE SET
 // ProfileResetSummary reports what a profile reset removed. RowsDeleted
 // counts (pipeline, node) rows removed outright -- those with no pin to
 // preserve. RowsCleared counts rows whose learned samples, peaks, and
-// waits were zeroed but whose pin was kept, so admission keeps honoring
-// the pin while it re-learns. SamplesDropped is the total windowed
+// waits were zeroed but whose pin was kept, so the estimate keeps the pin
+// while the profile re-learns. SamplesDropped is the total windowed
 // duration samples discarded across both.
 //
 // FloorsDropped counts rows that carried a contended-run demand floor,
 // counted separately because a floor is the one piece of a profile that can
 // exist with no measured samples behind it: a pipeline that never finished a
-// clean run still gets priced off its floor, so a reset that clears one has
-// changed what the next run is charged even when SamplesDropped is zero. The
-// reset verb reported only samples before, which made clearing a
-// ratcheted floor look like it had done nothing.
+// clean run is still estimated from its floor, so a reset that clears one
+// has changed the estimate even when SamplesDropped is zero.
 type ProfileResetSummary struct {
 	Pipelines      []string `json:"pipelines"`
 	RowsDeleted    int      `json:"rows_deleted"`
@@ -770,7 +762,7 @@ func boolToInt(b bool) int {
 // exported for the layers that compute a profile's inputs -- notably the
 // per-run sustained figure folded in through [ProfileObservation] -- so a
 // run's own rank and the across-window rank taken here cannot disagree by
-// one and price the same measurements differently.
+// one over the same measurements.
 func NearestRankPercentile(xs []float64, q float64) float64 { return percentile(xs, q) }
 
 // NearestRankIndex returns the position in xs holding the value
@@ -778,10 +770,10 @@ func NearestRankPercentile(xs []float64, q float64) float64 { return percentile(
 // resolve to the earliest position of the tied value, so a window of equal
 // samples points at the oldest of them.
 //
-// It exists so a reader can be shown the run a charge came from rather than
-// a figure that merely equals it: with the sample window on screen and one
-// row marked, a human recomputes the price by eye and catches a charge that
-// no sample supports.
+// It exists so a reader can be shown the run an estimate came from rather
+// than a figure that merely equals it: with the sample window on screen and
+// one row marked, a human recomputes the estimate by eye and catches one
+// that no sample supports.
 func NearestRankIndex(xs []float64, q float64) int {
 	if len(xs) == 0 {
 		return -1
@@ -816,8 +808,8 @@ func nearestRank(n int, q float64) int {
 
 // ProfileSample is one run's persisted contribution to a profile window:
 // what that run took and drew, as folded by [Tenant.RecordProfileObservation].
-// It is the evidence behind a pipeline's price, exported read-only so a
-// reader can recompute the charge from the same rows admission charged from.
+// It is the evidence behind a pipeline's estimate, exported read-only so a
+// reader can recompute the estimate from the same rows.
 type ProfileSample struct {
 	Duration        time.Duration `json:"duration_ns"`
 	PeakCores       float64       `json:"peak_cores"`
