@@ -377,6 +377,7 @@ type ScheduleSnapshot struct {
 	RunID           string              `json:"run_id"`
 	StoreNow        time.Time           `json:"store_now"`
 	CancelRequested bool                `json:"cancel_requested"`
+	DryRun          bool                `json:"dry_run"`
 	GuardRefusal    string              `json:"guard_refusal,omitempty"`
 	SelectionSkips  map[string]string   `json:"selection_skips"`
 	Jobs            []ScheduleJob       `json:"jobs"`
