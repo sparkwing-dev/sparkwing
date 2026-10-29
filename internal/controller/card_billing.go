@@ -133,8 +133,6 @@ func (s *Server) runBilling(ctx context.Context, every time.Duration) {
 	}
 }
 
-// Failure codes a refill closes with when the checkout service refused it, or could not answer for
-// checkoutRetryLimit.
 const (
 	refillCheckoutRefused     = "checkout_refused"
 	refillCheckoutUnavailable = "checkout_unavailable"

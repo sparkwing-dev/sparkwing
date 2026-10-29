@@ -27,8 +27,8 @@ type billingCheckout struct {
 	http  *http.Client
 
 	now func() time.Time
-	// retries backs off each refill and refund the service could not answer, keyed by its idempotency key. Only the
-	// billing worker's goroutine reads and writes it; a restart forgets it and starts the backoff again.
+	// safety: only the billing worker's goroutine touches retries, keyed by idempotency key; a restart forgets
+	// them and starts the backoff again.
 	retries map[string]checkoutRetry
 }
 
@@ -50,11 +50,10 @@ func (s *Server) WithBillingCheckout(url, token string) *Server {
 	return s
 }
 
-// errCheckoutUnavailable is a checkout service failure a later call may not meet: no answer, a 5xx or a 429.
+// safety: only no answer, a 5xx or a 429 may pass on a later call; any other refusal is final, so a refill or refund
+// stops and reaches the owners instead of looping.
 var errCheckoutUnavailable = errors.New("the checkout service is unavailable")
 
-// errCheckoutRefused is an answer a repeat of the same request cannot change: any other 4xx, or a reply outside the
-// contract.
 var errCheckoutRefused = errors.New("the checkout service refused the request")
 
 // errRefillNoCard is the checkout service's refusal to charge a refill for a customer with no card in Stripe.
@@ -145,9 +144,8 @@ func (c *billingCheckout) post(ctx context.Context, path string, in, out any) er
 	return nil
 }
 
-// Backoff for a refill or refund the checkout service could not answer: the first retry is the next billing pass and
-// each later one waits twice as long as the one before, from billingInterval up to checkoutRetryMaxWait.
-// checkoutRetryLimit after the first failure it fails for good, which reaches the owners as a refused one does.
+// safety: an unanswered call is retried on the next pass, then after waits doubling from billingInterval up to
+// checkoutRetryMaxWait, and fails for good checkoutRetryLimit after its first failure, reaching the owners.
 const (
 	checkoutRetryMaxWait = 30 * time.Minute
 	checkoutRetryLimit   = 6 * time.Hour
@@ -158,13 +156,11 @@ type checkoutRetry struct {
 	wait        time.Duration
 }
 
-// due reports whether the request under key may be sent now.
 func (c *billingCheckout) due(key string) bool {
 	r, ok := c.retries[key]
 	return !ok || !c.now().Before(r.next)
 }
 
-// unavailable records a failed call under key and reports whether it has failed for checkoutRetryLimit.
 func (c *billingCheckout) unavailable(key string) bool {
 	now := c.now()
 	r, ok := c.retries[key]
@@ -181,7 +177,6 @@ func (c *billingCheckout) unavailable(key string) bool {
 	return true
 }
 
-// settled forgets the backoff of a request the service answered.
 func (c *billingCheckout) settled(key string) { delete(c.retries, key) }
 
 // refillRequest and refillResponse are the checkout service's POST /internal/refill contract, which creates and

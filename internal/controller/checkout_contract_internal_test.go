@@ -13,8 +13,8 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
 
-// checkoutContract is testdata/checkout_contract.json. The checkout service keeps a byte-identical copy and tests its
-// real handler against it, so a change to either side's request, answer, bounds or refusal classes fails a suite.
+// safety: sparkwing-platform tests its real handler against a byte-identical copy of testdata/checkout_contract.json,
+// so the two copies change together.
 type checkoutContract struct {
 	Token      string `json:"token"`
 	Deployment string `json:"deployment"`
@@ -50,12 +50,11 @@ func loadCheckoutContract(t *testing.T) checkoutContract {
 	return c
 }
 
-// client is the real checkout client holding token, talking to a fake service that, like the real one, answers 401
-// to any other bearer, and otherwise requires the contract's request for route and answers status with body.
 func (c checkoutContract) client(t *testing.T, token, route string, status int, body []byte) *billingCheckout {
 	want := c.Routes[route]
 	checkout := (&Server{}).WithBillingCheckout("https://checkout.test", token).checkout
 	checkout.http.Transport = billingPageTransport(func(r *http.Request) (*http.Response, error) {
+		// safety: the fake answers 401 to another bearer, as the real service does.
 		if r.Header.Get("Authorization") != "Bearer "+c.Token {
 			return refillReply(http.StatusUnauthorized, `{"error":"checkout token rejected"}`), nil
 		}

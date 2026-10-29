@@ -238,8 +238,8 @@ type claimSQL struct {
 	overflow        []claimOverflowFacts
 }
 
-// cloudSizeLabelSQL is match.IsCloudSizeLabel in SQL. The suffix is read from a start counted by length because
-// SQLite and PostgreSQL disagree on substr with a negative start.
+// hack: SQLite and PostgreSQL disagree on substr with a negative start, so match.IsCloudSizeLabel's suffix is read
+// from a start counted by length.
 func cloudSizeLabelSQL(alt string) string {
 	prefix, suffix := match.CloudSizeLabelPrefix, match.CloudSizeLabelSuffix
 	return `(substr(` + alt + `,1,` + fmt.Sprint(len(prefix)) + `)='` + prefix + `' AND substr(` + alt + `,length(` + alt + `)-` +
