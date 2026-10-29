@@ -68,8 +68,9 @@ func (i Invocation) invalid(format string, args ...any) error {
 }
 
 // Parse validates the final command registry without consulting files, environment
-// or credentials. Flags may precede the command; their legality belongs to the
-// selected leaf. Pipeline arguments are opaque after --.
+// or credentials. Only global flags and --profile may precede the command word;
+// every other flag follows its command, whose leaf decides its legality.
+// Pipeline arguments are opaque after --.
 func Parse(binary string, args []string) (Invocation, error) {
 	commands := Registry()
 	inv := Invocation{Flags: make(map[string][]string)}
