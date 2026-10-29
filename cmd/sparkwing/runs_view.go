@@ -18,17 +18,17 @@ func renderObservedRun(ctx context.Context, reader controllerwire.RunReader, out
 	if opts.view == "receipt" {
 		receipt, err := reader.ReadReceipt(ctx, detail.ID)
 		if err != nil {
-			return exitError(3, err)
+			return observationError(err)
 		}
 		if receipt.RunID != detail.ID {
-			return exitError(3, invalidObservation("receipt names a different run"))
+			return observationError(invalidObservation("receipt names a different run"))
 		}
 		return writeRunReceipt(out, receipt, opts.format)
 	}
 	if opts.view == "tree" {
 		tree, err := readRunTree(ctx, reader, detail, opts.steps, map[string]bool{})
 		if err != nil {
-			return exitError(3, err)
+			return observationError(err)
 		}
 		if opts.format == "json" {
 			return json.NewEncoder(out).Encode(tree)

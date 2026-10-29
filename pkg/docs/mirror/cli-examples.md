@@ -16,7 +16,7 @@ Read complete example pipelines
 | `-C, --checkout PATH` | Resolve the project from this local checkout path. |
 | `-h, --help` | Show command help without executing. |
 | `--help-all` | Include uncommon flags in command help. |
-| `--example EXAMPLE` | example |
+| `--example EXAMPLE` | Show one example's manifest and readme instead of listing examples; --category and --cloud are ignored. |
 | `--body` | Include document bodies in search results. |
-| `--category CATEGORY` | category |
-| `--cloud CLOUD` | cloud |
+| `--category CATEGORY` | List only examples in this category. |
+| `--cloud CLOUD` | List only examples for this cloud, plus examples not tied to any cloud. |

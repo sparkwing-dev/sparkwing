@@ -442,7 +442,7 @@ export class Job<T = unknown> extends Declaration implements API.Job<T> {
   cache(...caches: readonly API.CacheSpec[]): this {
     this.assertMutable();
     const entries = caches.map((cache) => {
-      if (cache.kind === "go_modules") return { name: "go-modules", resolver: "gomod", key_files: ["go.sum"] };
+      if (cache.kind === "go_modules") return { name: "go-modules", resolver: "go-modules", key_files: ["go.sum"] };
       if (cache.kind === "npm") return { name: "npm", resolver: "npm", key_files: ["package-lock.json"] };
       if (cache.kind !== "dir" || !cache.path || !cache.keyFiles?.length)
         throw new Error("directory cache needs a path and at least one key file");

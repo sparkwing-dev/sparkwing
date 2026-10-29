@@ -229,6 +229,10 @@ func (n *JobNode) Timeout(d time.Duration) *JobNode
 func (n *JobNode) Verify(fn VerifyFn) *JobNode
 func KeyFromFile(path string) KeySource
 type KeySource struct{}
+const LevelDebug = "debug"
+const LevelError = "error"
+const LevelInfo = "info"
+const LevelWarn = "warn"
 type LogRecord struct {
 	TS    time.Time
 	Level string

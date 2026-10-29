@@ -207,16 +207,20 @@ func TestShortestInterval(t *testing.T) {
 		{"*/5 * * * *", 5 * time.Minute, true},
 		{"0,5,10,15,20,25,30,35,40,45,50,55 * * * *", 5 * time.Minute, true},
 		{"0,1 * * * *", time.Minute, true},
+		{"0,5,10,15,20,25,30,35,40,45,50,51 * * * *", time.Minute, true},
+		{"0 23,1 * * *", 2 * time.Hour, true},
+		{"0 23,1 * * 1", 22 * time.Hour, true},
+		{"0 0 30 2 *", 0, false},
 		{"0 3 * * *", 24 * time.Hour, true},
 		{"0 0 1 1 *", 365 * 24 * time.Hour, true},
 	} {
-		got, ok := mustParse(t, tc.expr).ShortestInterval(after, time.UTC, 10)
+		got, ok := mustParse(t, tc.expr).ShortestInterval(after, time.UTC)
 		if ok != tc.ok || got != tc.want {
 			t.Errorf("ShortestInterval(%q) = (%s, %v), want (%s, %v)", tc.expr, got, ok, tc.want, tc.ok)
 		}
 	}
 	var nilSchedule *cronspec.Schedule
-	if _, ok := nilSchedule.ShortestInterval(after, time.UTC, 10); ok {
+	if _, ok := nilSchedule.ShortestInterval(after, time.UTC); ok {
 		t.Error("a nil schedule reported an interval")
 	}
 }

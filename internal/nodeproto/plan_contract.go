@@ -113,6 +113,17 @@ type MemoSpec struct {
 	Input *MemoInput `json:"input,omitempty"`
 }
 
+// Cache resolvers name a package-manager cache directory the host finds with the
+// ecosystem's own tool where the node runs.
+const (
+	CacheResolverGoModules = "go-modules"
+	CacheResolverNpm       = "npm"
+)
+
+// CacheResolvers is every resolver a host accepts; the protocol schema snapshot
+// lists the same values for SDKs written in other languages.
+var CacheResolvers = []string{CacheResolverGoModules, CacheResolverNpm}
+
 // CacheSpec is wire-only so SDK binaries need not link engine storage implementations.
 type CacheSpec struct {
 	Name     string   `json:"name"`

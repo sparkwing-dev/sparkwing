@@ -18,5 +18,5 @@ Bump the current repository's Go or TypeScript SDK pin to the signed latest perm
 | `-C, --checkout PATH` | Resolve the project from this local checkout path. |
 | `-h, --help` | Show command help without executing. |
 | `--help-all` | Include uncommon flags in command help. |
-| `--version TAG` | version |
-| `--dry-run` | Preview with no side effects. |
+| `--version TAG` | SDK release tag to pin the repository to instead of the latest permitted release. |
+| `--dry-run` | Show what would change without changing anything. |

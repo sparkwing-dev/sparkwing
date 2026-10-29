@@ -112,7 +112,7 @@ func TestRunLogsPropagatesFailuresAndIncompleteFollow(t *testing.T) {
 		return controllerwire.LogPage{}, failure
 	}}
 	err := observeRunLogs(t.Context(), logInvocation(t, "logs", "--run", "r1"), reader, nil, &out, &out, nil)
-	if !errors.Is(err, failure) || exitCodeFor(err) != 3 {
+	if !errors.Is(err, failure) || exitCodeFor(err) != exitRefused {
 		t.Fatalf("error = %v", err)
 	}
 	reader.read = func(context.Context, string, controllerwire.LogQuery) (controllerwire.LogPage, error) {
@@ -177,7 +177,7 @@ func TestRunLogsDistinguishesMissingRunFromEmptyLogs(t *testing.T) {
 	}
 	err := observeRunLogs(t.Context(), logInvocation(t, "logs", "--run", "missing"), reader, nil, &output, &output, nil)
 	var failure *apierr.Error
-	if !errors.As(err, &failure) || failure.Code != apierr.NotFound || exitCodeFor(err) != 3 {
+	if !errors.As(err, &failure) || failure.Code != apierr.NotFound || exitCodeFor(err) != exitRefused {
 		t.Fatalf("missing logs: %v", err)
 	}
 }

@@ -18,7 +18,7 @@ Update installed machine software using verified release assets. Re-render manag
 | `-C, --checkout PATH` | Resolve the project from this local checkout path. |
 | `-h, --help` | Show command help without executing. |
 | `--help-all` | Include uncommon flags in command help. |
-| `--dry-run` | Preview with no side effects. |
+| `--dry-run` | Show what would change without changing anything. |
 | `--force` | Replace an existing object. |
-| `--override-hold` | override hold |
-| `--version TAG` | version |
+| `--override-hold` | Allow the update to go past the operator's version hold. |
+| `--version TAG` | CLI release tag to install instead of the latest release. |

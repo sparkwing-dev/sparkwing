@@ -9,6 +9,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
 
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
@@ -100,7 +101,7 @@ func selectRepo(fleet []repos.Repo, sel string) (repos.Repo, error) {
 	if sel != "" {
 		scoped := scopeFleet(fleet, sel)
 		if len(scoped) == 0 {
-			return repos.Repo{}, fmt.Errorf("repos info: no tracked repo matches %q", sel)
+			return repos.Repo{}, &apierr.Error{Code: apierr.NotFound, Message: fmt.Sprintf("repos info: no tracked repo matches %q", sel)}
 		}
 		return scoped[0], nil
 	}

@@ -137,3 +137,27 @@ func TestControllerBreakGlassRequiresOperator(t *testing.T) {
 		}
 	}
 }
+
+func TestParseReadsOnlyGlobalFlagsBeforeTheCommand(t *testing.T) {
+	for args, want := range map[string]string{
+		"--version":             "unknown flag --version; use the version command",
+		"--tail 5 runs list":    "unknown flag --tail; a command's flags follow the command",
+		"commands --query x":    "unknown flag --query",
+		"run check --bogus":     "unknown flag --bogus; pipeline arguments follow --",
+		"runs --run 1 status":   "unknown flag --run; a command's flags follow the command",
+		"-o json runs list":     "",
+		"--profile p runs list": "",
+	} {
+		_, err := Parse("sparkwing", strings.Fields(args))
+		var usage *UsageError
+		if want == "" {
+			if err != nil {
+				t.Errorf("%s: %v", args, err)
+			}
+			continue
+		}
+		if !errors.As(err, &usage) || usage.Message != want {
+			t.Errorf("%s: error %v, want %q", args, err, want)
+		}
+	}
+}

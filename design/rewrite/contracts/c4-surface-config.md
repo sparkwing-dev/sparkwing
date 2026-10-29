@@ -417,7 +417,7 @@ profile backend/rerun_image settings are unknown keys.
 
 `clisurface.Registry()` lists the whole target grammar for sparkwing,
 sparkwing-runner and sparkwing-controller, including hidden process entrypoints.
-GlobalFlags and CommonRules apply to every row. Unknown engine flags fail;
+GlobalFlags apply to every row, and every flag carries its own authored help. Unknown engine flags fail;
 pipeline arguments start after `--`. Only run and pipeline trigger take a
 pipeline positional. Output selection is validated before side effects; lists
 are NDJSON and diagnostics use the C2 error object on stderr.
@@ -725,7 +725,6 @@ holds unevaluated predicates. `CheckoutDeclarationsVersion` names format 1.
 | [`Command`](../../../internal/clisurface/grammar.go) | Command separates parser metadata from handlers; Flags adds to GlobalFlags. |
 | [`GlobalFlags`](../../../internal/clisurface/grammar.go) | GlobalFlags is inherited everywhere; profile selection is command-local, but an accepted --profile may appear before the verb. |
 | [`ExitCode`](../../../internal/clisurface/grammar.go) | ExitCode keeps usage failures distinguishable from incomplete observations. |
-| [`CommonRules`](../../../internal/clisurface/grammar.go) | CommonRules fixes shared meanings so a new command cannot reinterpret a flag. |
 | [`Registry`](../../../internal/clisurface/registry.go#L4) | the final tree is independent of runtime dispatch so help and parsers share one contract. |
 | [`PipelineIdentity`](../../../internal/clisurface/pipeline.go) | Captures the invoked name separately from the registered SDK entrypoint. |
 | [`ResolvePipeline`](../../../internal/clisurface/pipeline.go) | Resolves the configured pair without process globals or later configuration reads. |

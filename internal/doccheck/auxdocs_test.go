@@ -121,8 +121,34 @@ func TestCheckAuxDocs_AcceptsAFlagAPipelineDeclares(t *testing.T) {
 	root := t.TempDir()
 	declares := "package jobs\n\ntype Inputs struct {\n\tDryRun bool `flag:\"dry-run\" desc:\"Print the request\"`\n}\n"
 	writeRepoFile(t, root, ".sparkwing/jobs/demo.go", declares)
-	writeRepoFile(t, root, "README.md", "```\nsparkwing run build --dry-run\n```\n")
+	writeRepoFile(t, root, "README.md", "```\nsparkwing run build -- --dry-run\n```\n")
 	if !checkAuxDocs(root) {
 		t.Fatal("a flag a pipeline declares is live, however a banned pattern reads it")
+	}
+}
+
+func TestCheckAuxDocs_ParsesRootDocCommandsWithTheShippedGrammar(t *testing.T) {
+	for name, doc := range map[string]string{
+		"unknown flag in a fence":          "```sh\nsparkwing pipeline new --name hello\n```\n",
+		"environment prefix in a fence":    "```bash\nSPARKWING_HOME=\"$(mktemp -d)\" sparkwing run release --bump patch\n```\n",
+		"pipeline argument before --":      "Run `sparkwing run build-images --qatrust --push`.\n",
+		"positional where a flag is named": "Read `sparkwing runs status <id> --steps`.\n",
+	} {
+		t.Run(name, func(t *testing.T) {
+			root := t.TempDir()
+			writeRepoFile(t, root, "DELIVERY.md", doc)
+			if checkAuxDocs(root) {
+				t.Fatalf("aux doc passed a command the CLI refuses:\n%s", doc)
+			}
+		})
+	}
+}
+
+func TestCheckAuxDocs_AcceptsCommandsTheGrammarTakes(t *testing.T) {
+	root := t.TempDir()
+	writeRepoFile(t, root, "DELIVERY.md", "```bash\nSPARKWING_HOME=\"$(mktemp -d)\" sparkwing run release --sw-allow-risk destructive,prod -- --bump patch\n```\n\n"+
+		"Read `sparkwing runs status --run <id> --view timeline --steps`, or `sparkwing run <pipeline> [flags...]`.\n")
+	if !checkAuxDocs(root) {
+		t.Fatal("aux doc refused commands the CLI accepts")
 	}
 }

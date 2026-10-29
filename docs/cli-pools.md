@@ -40,11 +40,11 @@ Create a rule through the team-admin route with an idempotency key. JSON preserv
 | `-h, --help` | Show command help without executing. |
 | `--help-all` | Include uncommon flags in command help. |
 | `--pool POOL` | Runner pool name. (required) |
-| `--repo REPO` | Repository identity, never a checkout path; typed identity grants no authority. Repeatable; comma-separated values are accepted. (required) |
-| `--branch BRANCH` | branch Repeatable; comma-separated values are accepted. |
-| `--source SOURCE` | source Values: github. |
-| `--route` | route |
-| `--profile PROFILE` | Connection profiles come only from the user's config; allowed before the verb if the command accepts it. Local run refuses --profile. |
+| `--repo REPO` | GitHub repositories the rule admits, as owner/name; each must be reachable through the team's GitHub App, and naming one grants nothing on its own. Repeatable; comma-separated values are accepted. (required) |
+| `--branch BRANCH` | Branch name patterns the rule admits, with * and ? wildcards that do not cross a slash; omitted, every branch of the repositories qualifies. Repeatable; comma-separated values are accepted. |
+| `--source SOURCE` | Admit only runs that a GitHub App webhook delivery started; omitted, any run whose repository was verified qualifies. Values: github. |
+| `--route` | Also keep runs from the matching repositories and branches that select no runner on this pool's self-hosted runners instead of Sparkwing Cloud. |
+| `--profile PROFILE` | Controller connection profile from your config. Omit it to use the local controller. |
 
 ## `sparkwing pools disallow`
 
@@ -61,8 +61,8 @@ Delete the selected pool rule through the team-admin route. JSON retains whether
 | `-h, --help` | Show command help without executing. |
 | `--help-all` | Include uncommon flags in command help. |
 | `--pool POOL` | Runner pool name. (required) |
-| `--rule RULE` | rule (required) |
-| `--profile PROFILE` | Connection profiles come only from the user's config; allowed before the verb if the command accepts it. Local run refuses --profile. |
+| `--rule RULE` | ID of the pool rule to delete, as pools list shows it. (required) |
+| `--profile PROFILE` | Controller connection profile from your config. Omit it to use the local controller. |
 
 ## `sparkwing pools list`
 
@@ -78,4 +78,4 @@ Read controller-granted reservations and access rules. JSON emits each pool with
 | `-C, --checkout PATH` | Resolve the project from this local checkout path. |
 | `-h, --help` | Show command help without executing. |
 | `--help-all` | Include uncommon flags in command help. |
-| `--profile PROFILE` | Connection profiles come only from the user's config; allowed before the verb if the command accepts it. Local run refuses --profile. |
+| `--profile PROFILE` | Controller connection profile from your config. Omit it to use the local controller. |

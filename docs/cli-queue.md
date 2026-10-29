@@ -34,8 +34,8 @@ List running and queued work with expected start and finish
 | `-C, --checkout PATH` | Resolve the project from this local checkout path. |
 | `-h, --help` | Show command help without executing. |
 | `--help-all` | Include uncommon flags in command help. |
-| `--profile PROFILE` | Connection profiles come only from the user's config; allowed before the verb if the command accepts it. Local run refuses --profile. |
-| `--group GROUP` | group |
+| `--profile PROFILE` | Controller connection profile from your config. Omit it to use the local controller. |
+| `--group GROUP` | Show only this concurrency group's capacity, lease holders and waiting runs instead of the whole queue. |
 
 ## `sparkwing queue priority`
 
@@ -49,6 +49,6 @@ Change the priority of queued work
 | `-C, --checkout PATH` | Resolve the project from this local checkout path. |
 | `-h, --help` | Show command help without executing. |
 | `--help-all` | Include uncommon flags in command help. |
-| `--profile PROFILE` | Connection profiles come only from the user's config; allowed before the verb if the command accepts it. Local run refuses --profile. |
-| `--run ID` | Stable run ID or per-team run number; '-' reads run IDs from stdin on cancel, retry and prune. (required) |
-| `--set VALUE` | set (required) |
+| `--profile PROFILE` | Controller connection profile from your config. Omit it to use the local controller. |
+| `--run ID` | Run ID or per-team run number. (required) |
+| `--set VALUE` | New admission priority for the run on this machine: an integer, where higher is admitted sooner, or front or back to place it ahead of or behind every other waiting run; refused with --profile. (required) |

@@ -18,7 +18,7 @@ func KeyFromFile(path string) KeySource { return KeySource{files: []string{path}
 
 // GoModules caches downloaded Go modules using go.sum as its input.
 func GoModules() DirCache {
-	return DirCache{spec: nodeproto.CacheSpec{Name: "go-modules", Resolver: "go-modules", KeyFiles: []string{"go.sum"}}}
+	return DirCache{spec: nodeproto.CacheSpec{Name: "go-modules", Resolver: nodeproto.CacheResolverGoModules, KeyFiles: []string{"go.sum"}}}
 }
 
 // Dir declares a dependency cache rooted at path with explicit key inputs.

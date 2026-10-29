@@ -55,8 +55,8 @@ Read a bounded dashboard log tail
 | `-C, --checkout PATH` | Resolve the project from this local checkout path. |
 | `-h, --help` | Show command help without executing. |
 | `--help-all` | Include uncommon flags in command help. |
-| `--tail N` | tail |
-| `-f, --follow` | Stream until the observed work is done. |
+| `--tail N` | Number of most recent log lines to print, 40 by default; with --follow, lines before streaming starts. |
+| `-f, --follow` | Keep streaming until the observed work finishes. |
 
 ## `sparkwing dashboard open`
 
@@ -87,10 +87,10 @@ Starts the local controller on demand; --stay pins it until stopped. Runs, queue
 | `-C, --checkout PATH` | Resolve the project from this local checkout path. |
 | `-h, --help` | Show command help without executing. |
 | `--help-all` | Include uncommon flags in command help. |
-| `--addr HOST:PORT` | addr |
-| `--allow-remote` | allow remote |
-| `--allow-origin ORIGIN` | allow origin Repeatable; comma-separated values are accepted. |
-| `--read-only` | read only |
+| `--addr HOST:PORT` | Address the dashboard listens on as HOST:PORT, 127.0.0.1:4343 by default; a non-loopback host also needs --allow-remote. |
+| `--allow-remote` | Permit a non-loopback --addr that other hosts can reach; this build refuses the flag because the local controller has no dashboard access policy yet. |
+| `--allow-origin ORIGIN` | Browser origin allowed to call the dashboard API besides its own; this build refuses the flag because the local controller has no dashboard access policy yet. Repeatable; comma-separated values are accepted. |
+| `--read-only` | Serve the dashboard without changes from the browser; this build refuses the flag because the local controller has no dashboard access policy yet. |
 | `--stay` | Keep the local controller running until stopped. |
 
 ## `sparkwing dashboard status`

@@ -35,10 +35,10 @@ kubectl exec into a paused job's pod (cluster mode)
 | `-C, --checkout PATH` | Resolve the project from this local checkout path. |
 | `-h, --help` | Show command help without executing. |
 | `--help-all` | Include uncommon flags in command help. |
-| `--run ID` | Stable run ID or per-team run number; '-' reads run IDs from stdin on cancel, retry and prune. (required) |
+| `--run ID` | Run ID or per-team run number. (required) |
 | `--job JOB` | Job within the selected run. (required) |
-| `--namespace NAME` | namespace |
-| `--profile NAME` | Connection profiles come only from the user's config; allowed before the verb if the command accepts it. Local run refuses --profile. |
+| `--namespace NAME` | Kubernetes namespace to pass to kubectl exec, overriding the namespace recorded for the job's pod. |
+| `--profile NAME` | Controller connection profile from your config. Omit it to use the local controller. |
 
 ## `sparkwing debug env`
 
@@ -52,9 +52,9 @@ Inspect public job, executor and pause diagnostics
 | `-C, --checkout PATH` | Resolve the project from this local checkout path. |
 | `-h, --help` | Show command help without executing. |
 | `--help-all` | Include uncommon flags in command help. |
-| `--run ID` | Stable run ID or per-team run number; '-' reads run IDs from stdin on cancel, retry and prune. (required) |
+| `--run ID` | Run ID or per-team run number. (required) |
 | `--job JOB` | Job within the selected run. (required) |
-| `--profile NAME` | Connection profiles come only from the user's config; allowed before the verb if the command accepts it. Local run refuses --profile. |
+| `--profile NAME` | Controller connection profile from your config. Omit it to use the local controller. |
 
 ## `sparkwing debug resume`
 
@@ -68,6 +68,6 @@ Resume a paused job
 | `-C, --checkout PATH` | Resolve the project from this local checkout path. |
 | `-h, --help` | Show command help without executing. |
 | `--help-all` | Include uncommon flags in command help. |
-| `--run ID` | Stable run ID or per-team run number; '-' reads run IDs from stdin on cancel, retry and prune. (required) |
+| `--run ID` | Run ID or per-team run number. (required) |
 | `--job JOB` | Job within the selected run. (required) |
-| `--profile NAME` | Connection profiles come only from the user's config; allowed before the verb if the command accepts it. Local run refuses --profile. |
+| `--profile NAME` | Controller connection profile from your config. Omit it to use the local controller. |

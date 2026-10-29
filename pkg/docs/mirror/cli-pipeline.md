@@ -41,7 +41,7 @@ Print one pipeline's full metadata
 | `-h, --help` | Show command help without executing. |
 | `--help-all` | Include uncommon flags in command help. |
 | `--pipeline NAME` | Pipeline name. (required) |
-| `--secrets` | secrets |
+| `--secrets` | Print only the secrets the pipeline declares, each marked required or optional. |
 
 ## `sparkwing pipeline hooks`
 
@@ -74,8 +74,8 @@ Install pre-commit / pre-push / post-commit git hooks from sparkwing.yaml trigge
 | `-C, --checkout PATH` | Resolve the project from this local checkout path. |
 | `-h, --help` | Show command help without executing. |
 | `--help-all` | Include uncommon flags in command help. |
-| `--no-prove` | no prove |
-| `--all-repos` | all repos |
+| `--no-prove` | Arm hooks without first running each blocking gate pipeline to prove it passes. |
+| `--all-repos` | Install hooks in every registered repository that declares hook triggers, then print a status survey of all of them. |
 
 ## `sparkwing pipeline hooks status`
 
@@ -89,8 +89,8 @@ Report declared, installed, and missing sparkwing hooks
 | `-C, --checkout PATH` | Resolve the project from this local checkout path. |
 | `-h, --help` | Show command help without executing. |
 | `--help-all` | Include uncommon flags in command help. |
-| `--all-repos` | all repos |
-| `--ungated` | ungated |
+| `--all-repos` | Survey hook status across every registered repository instead of only the current one. |
+| `--ungated` | Show only repositories whose declared gates are not armed; has no effect without --all-repos. |
 
 ## `sparkwing pipeline hooks uninstall`
 
@@ -118,9 +118,9 @@ Check pipeline source for idiomatic anti-patterns (enforced gate)
 | `-h, --help` | Show command help without executing. |
 | `--help-all` | Include uncommon flags in command help. |
 | `--pipeline NAME` | Pipeline name. |
-| `--rules` | rules |
-| `--dir DIR` | dir |
-| `--static` | static |
+| `--rules` | Print the lint rules with what each forbids and why, without analyzing any source. |
+| `--dir DIR` | Analyze Go pipeline source in this directory instead of .sparkwing/jobs, or .sparkwing when there is no jobs directory. |
+| `--static` | Accepted but ignored; lint always analyzes source without running pipelines. |
 
 ## `sparkwing pipeline list`
 
@@ -134,8 +134,8 @@ Enumerate every pipeline with metadata
 | `-C, --checkout PATH` | Resolve the project from this local checkout path. |
 | `-h, --help` | Show command help without executing. |
 | `--help-all` | Include uncommon flags in command help. |
-| `--all` | Include entries normally hidden. |
-| `--search TEXT` | Match records; never scan log text. |
+| `--all` | Include entries that are hidden by default. |
+| `--search TEXT` | Text to match against record names and summaries; log text is not searched. |
 
 ## `sparkwing pipeline new`
 
@@ -150,10 +150,10 @@ Scaffold a new Go pipeline
 | `-h, --help` | Show command help without executing. |
 | `--help-all` | Include uncommon flags in command help. |
 | `--pipeline NAME` | Pipeline name. (required) |
-| `--template SHAPE` | template |
-| `--on EVENT` | on |
-| `--hidden` | hidden |
-| `--short TEXT` | Only -o output, -q quiet, -f follow, -v run verbosity, -C checkout and -h help. |
+| `--template SHAPE` | Built-in shape to scaffold, minimal by default. |
+| `--on EVENT` | Trigger events to declare, comma separated, replacing the shape's default trigger; manual declares no trigger. |
+| `--hidden` | Mark the new pipeline hidden in sparkwing.yaml so pipeline list omits it unless --all is given. |
+| `--short TEXT` | One-line description to write into the generated pipeline source instead of a placeholder. |
 
 ## `sparkwing pipeline plan`
 
@@ -168,8 +168,8 @@ Render the runtime-resolved DAG without dispatching any jobs
 | `-h, --help` | Show command help without executing. |
 | `--help-all` | Include uncommon flags in command help. |
 | `--pipeline NAME` | Pipeline name. (required) |
-| `--start-at STEP` | start at |
-| `--stop-at STEP` | stop at |
+| `--start-at STEP` | Preview the run as if it started at this step, marking steps that are neither this step nor downstream of it as skipped. |
+| `--stop-at STEP` | Preview the run as if it stopped after this step, marking steps that are neither this step nor upstream of it as skipped. |
 
 ## `sparkwing pipeline sparks`
 
@@ -206,9 +206,9 @@ Add a library to the sparks: block
 | `-C, --checkout PATH` | Resolve the project from this local checkout path. |
 | `-h, --help` | Show command help without executing. |
 | `--help-all` | Include uncommon flags in command help. |
-| `--source PATH` | source (required) |
-| `--version VER` | version |
-| `--spark NAME` | spark |
+| `--source PATH` | Go module path of the spark library to add to the project's spark list. (required) |
+| `--version VER` | Version of the library to declare, latest by default. |
+| `--spark NAME` | Name to record for the library, the last element of --source by default. |
 
 ## `sparkwing pipeline sparks catalog`
 
@@ -222,7 +222,7 @@ List the blocks a spark library offers
 | `-C, --checkout PATH` | Resolve the project from this local checkout path. |
 | `-h, --help` | Show command help without executing. |
 | `--help-all` | Include uncommon flags in command help. |
-| `--library MODULE` | library |
+| `--library MODULE` | Full Go module path of the library whose blocks to list, sparks-core by default, at the version the project declares or latest. |
 | `--path DIR` | Path to select. |
 
 ## `sparkwing pipeline sparks inflate`
@@ -267,7 +267,7 @@ Show declared sparks libraries and their resolved versions
 | `-C, --checkout PATH` | Resolve the project from this local checkout path. |
 | `-h, --help` | Show command help without executing. |
 | `--help-all` | Include uncommon flags in command help. |
-| `--no-resolve` | no resolve |
+| `--no-resolve` | Show declared versions only, skipping the module lookup that resolves each to a concrete version. |
 
 ## `sparkwing pipeline sparks remove`
 
@@ -281,7 +281,7 @@ Remove a library from the sparks: block
 | `-C, --checkout PATH` | Resolve the project from this local checkout path. |
 | `-h, --help` | Show command help without executing. |
 | `--help-all` | Include uncommon flags in command help. |
-| `--spark NAME` | spark (required) |
+| `--spark NAME` | Name or source module path of the library to remove from the project's spark list. (required) |
 
 ## `sparkwing pipeline sparks update`
 
@@ -320,12 +320,12 @@ Against Sparkwing Cloud, a run without --runner executes on Cloud unless a repos
 | `-C, --checkout PATH` | Resolve the project from this local checkout path. |
 | `-h, --help` | Show command help without executing. |
 | `--help-all` | Include uncommon flags in command help. |
-| `--profile NAME` | Connection profiles come only from the user's config; allowed before the verb if the command accepts it. Local run refuses --profile. (required) |
-| `--detach` | detach |
-| `--working-tree` | working tree |
-| `--allow-secret-file PATH` | allow secret file Repeatable; comma-separated values are accepted. |
-| `--runner RUNNER` | Runner name or selection. |
-| `--reason TEXT` | reason |
-| `--resume RUN` | resume |
-| `--ref REF` | ref |
-| `--pipeline-ref REF` | pipeline ref |
+| `--profile NAME` | Controller connection profile from your config. Omit it to use the local controller. (required) |
+| `--detach` | Return once the controller accepts the run instead of following its logs to the end; refused with --runner here. |
+| `--working-tree` | Run an uploaded snapshot of this checkout, with uncommitted edits, deletions and untracked files that .gitignore does not exclude, instead of a pushed commit; the upload is refused if it holds secret-shaped files or values, submodules, unsafe symlinks, more than 100,000 files or more than 500 MiB. |
+| `--allow-secret-file PATH` | Include this repository-relative file in a --working-tree snapshot even though its name or content looks like a secret; the trigger fails if no snapshot file has that path, the secret-value scan still applies, and it is refused without --working-tree. Repeatable; comma-separated values are accepted. |
+| `--runner RUNNER` | Where the run executes: here in this CLI, cloud on Sparkwing Cloud, a self-hosted runner by name, or matching self-hosted runners with label=<label>; without it, the team's routing decides. |
+| `--reason TEXT` | Text the run records to explain why it ran in this CLI; required with --runner here and refused with any other runner. |
+| `--resume RUN` | Host an interrupted --runner here run again in this CLI, using the credential this machine saved and the run's original pipeline and arguments. |
+| `--ref REF` | Git revision of this checkout to run, resolved locally, HEAD by default. |
+| `--pipeline-ref REF` | Git revision to load the pipeline definitions from when it differs from the revision being run; it must match any source pin in the repository's configuration. |
