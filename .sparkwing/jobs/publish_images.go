@@ -85,8 +85,12 @@ var releaseImageArches = []string{"amd64", "arm64"}
 
 func publishReleaseImages(ctx context.Context, in PublishImagesArgs, opts ...remote.Option) ([]string, error) {
 	for _, input := range []struct{ flag, value string }{
-		{"--dist", in.Dist}, {"--version", in.Version}, {"--revision", in.Revision},
-		{"--registry", in.Registry}, {"--controller-base", in.ControllerBase}, {"--runner-base", in.RunnerBase},
+		{"--dist", in.Dist},
+		{"--version", in.Version},
+		{"--revision", in.Revision},
+		{"--registry", in.Registry},
+		{"--controller-base", in.ControllerBase},
+		{"--runner-base", in.RunnerBase},
 	} {
 		if strings.TrimSpace(input.value) == "" {
 			return nil, fmt.Errorf("publish-images: %s is required", input.flag)
