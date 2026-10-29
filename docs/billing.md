@@ -210,8 +210,9 @@ funds payment does not block refills again. A failure from a newer refill does.
 Cloud work is metered in 60-second slices. Admission reserves the first slice
 from the balance; a job whose first slice the balance cannot cover is refused
 with "out of credits", naming the balance and what the slice needs. Each lease
-renewal charges the time used and reserves the next slice in the same
-transaction. A metered lease never runs past its funded horizon. When the
+renewal charges the time used, at least the job minimum, and reserves one
+slice past the time used in the same transaction, so the slice admission
+reserved also pays the minimum the first renewal charges. A metered lease never runs past its funded horizon. When the
 balance cannot pay the next slice, the renewal records
 the stop and cancels the metered job in the same transaction. A hold records
 its drain deadline with the financial obligation. The next renewal applies

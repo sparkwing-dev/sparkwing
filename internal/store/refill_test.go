@@ -198,7 +198,7 @@ func TestAnUnsettledRefillExpiresAndALatePaymentStillCredits(t *testing.T) {
 }
 
 // Renewal pays the next slice ahead, so a running job's charges lead its usage by one slice, and settlement returns
-// the unused part.
+// the unused part. The first renewal starts compute, and the admitted slice already covers its minimum.
 func TestRenewalPaysTheNextSliceAndSettlementReturnsTheRest(t *testing.T) {
 	s, demand, now := meteredUnitFixture(t, true)
 	claim, _ := meteredUnitClaim(t, s, demand)
@@ -207,8 +207,13 @@ func TestRenewalPaysTheNextSliceAndSettlementReturnsTheRest(t *testing.T) {
 	if _, err := s.AsOperator().RenewUnit(t.Context(), claim.Award.CapabilityPrefix, false); err != nil {
 		t.Fatal(err)
 	}
-	unitBillingTotal(t, s, 1_200, false)
-	*now = now.Add(90 * time.Second)
+	unitBillingTotal(t, s, 600, false)
+	*now = now.Add(40 * time.Second)
+	if _, err := s.AsOperator().RenewUnit(t.Context(), claim.Award.CapabilityPrefix, false); err != nil {
+		t.Fatal(err)
+	}
+	unitBillingTotal(t, s, 1_000, false)
+	*now = now.Add(50 * time.Second)
 	if _, err := s.AsOperator().RenewUnit(t.Context(), claim.Award.CapabilityPrefix, false); err != nil {
 		t.Fatal(err)
 	}
