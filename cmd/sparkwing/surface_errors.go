@@ -14,6 +14,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/settings"
 	"github.com/sparkwing-dev/sparkwing/internal/userconfig"
 	"github.com/sparkwing-dev/sparkwing/pkg/color"
+	"github.com/sparkwing-dev/sparkwing/pkg/docs"
 )
 
 type invocationError struct {
@@ -43,6 +44,8 @@ func writeInvocationError(w io.Writer, err error, encode func(io.Writer, *apierr
 			}
 		case errors.As(err, &field), errors.Is(err, configguard.ErrOutsideSandboxHome):
 			failure.Code = apierr.BadRequest
+		case errors.Is(err, docs.ErrNotFound):
+			failure.Code = apierr.NotFound
 		case errors.Is(err, context.Canceled):
 			failure.Code = apierr.Cancelled
 		case errors.Is(err, context.DeadlineExceeded):

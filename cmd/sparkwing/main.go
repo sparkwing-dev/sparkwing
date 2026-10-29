@@ -489,7 +489,7 @@ func findSparkwingDirFrom(start string) (string, error) {
 		}
 		parent := filepath.Dir(dir)
 		if parent == dir {
-			return "", fmt.Errorf("no .sparkwing/main.go or TypeScript .sparkwing/package.json found from %s up", abs)
+			return "", &apierr.Error{Code: apierr.NotFound, Message: fmt.Sprintf("no .sparkwing/main.go or TypeScript .sparkwing/package.json found from %s up", abs), Hint: "Run sparkwing pipeline new --pipeline NAME to create one, or select a checkout with -C."}
 		}
 		dir = parent
 	}

@@ -87,7 +87,7 @@ func removeProfile(inv clisurface.Invocation, format string) error {
 	}
 	connection, ok := profiles[name]
 	if !ok {
-		return fmt.Errorf("profiles remove: %q not found", name)
+		return &apierr.Error{Code: apierr.NotFound, Message: fmt.Sprintf("profiles remove: %q not found", name)}
 	}
 	p := &namedProfile{Name: name, Profile: connection}
 	if !inv.Bool("keep-token") {

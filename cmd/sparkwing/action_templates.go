@@ -8,6 +8,7 @@ import (
 	"strings"
 	"text/tabwriter"
 
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/ndjson"
 
 	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
@@ -186,7 +187,7 @@ func clearedFilterSuffix(category, cloud string) string {
 func showTemplateDetail(name string, body bool, output string) error {
 	tmpl, err := templates.Get(name)
 	if err != nil {
-		return fmt.Errorf("template %q not found -- run `sparkwing examples` to list them", name)
+		return &apierr.Error{Code: apierr.NotFound, Message: fmt.Sprintf("template %q not found -- run `sparkwing examples` to list them", name)}
 	}
 	var rendered string
 	if body {
