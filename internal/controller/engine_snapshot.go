@@ -116,8 +116,19 @@ func executionJob(node runstate.NodeRow) controllerwire.ExecutionJob {
 }
 
 func snapshotJob(node runstate.NodeRow) controllerwire.JobDetail {
+	detail := node.StatusDetail
+	if detail == "" && node.Status == runstate.StatusDone {
+		switch node.FailureReason {
+		case "queue_timeout":
+			detail = "queue_timeout: timed out waiting to start"
+		case "upstream_failed":
+			detail = "upstream_failed: an upstream dependency did not succeed"
+		default:
+			detail = node.FailureReason
+		}
+	}
 	return controllerwire.JobDetail{
-		ID: string(node.Ref.NodeID), Status: string(node.Status), Outcome: string(node.Outcome), StatusDetail: node.StatusDetail,
+		ID: string(node.Ref.NodeID), Status: string(node.Status), Outcome: string(node.Outcome), StatusDetail: detail,
 		Generation: int64(node.Generation), Attempt: int64(node.Attempt), StateSeq: node.StateSeq, Expansion: string(node.Expansion),
 		StartedAt: node.StartedAt, FinishedAt: node.FinishedAt, CancelRequestedAt: node.CancelRequestedAt,
 	}
