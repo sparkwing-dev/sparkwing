@@ -21,7 +21,11 @@ A release is a tag push. The `release` pipeline resolves the version, renames
 tree, checks the section covers any schema or wire change since the previous
 tag, and pushes the branch and an annotated `vX.Y.Z` tag. Run it from the
 sparkwing checkout under a temporary home, which the pipeline requires so a
-newer embedded schema cannot migrate the operational runs store:
+newer embedded schema cannot migrate the operational runs store. The release
+factory validates the home before intake opens the store, including for a dry
+run. An unset `SPARKWING_HOME` or `$HOME/.sparkwing` is refused. Discovery may
+withhold the refusal's details under the secret policy, so set the isolated
+home before retrying a `plan_failed` release preview:
 
 ```bash
 SPARKWING_HOME="$(mktemp -d)" sparkwing run release --sw-dry-run

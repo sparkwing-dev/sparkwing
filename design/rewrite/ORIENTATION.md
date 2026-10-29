@@ -113,6 +113,7 @@ credential model in `docs/auth.md`, and the decision log
 | Route table | `internal/capability/tables.go`: `Routes`; dispatch in `internal/routepolicy` | `internal/capability/policy_test.go` |
 | OpenAPI | `internal/apispec` writes `api/openapi.yaml`; regenerate with `bin/gen-api-docs.sh` | `bin/check-api-spec.sh`; `internal/apispec/final_contract_test.go` |
 | Docs mirror and drift | `docs/` is the source; `bin/sync-docs.sh` copies it to `pkg/docs/mirror/`; `bin/regen-all.sh` reruns every generator | `bin/sync-docs.sh --check`; `internal/doccheck/cliverbs_test.go`, `internal/doccheck/apiroutes_test.go` |
+| Repository release home is checked before intake opens the store | `.sparkwing/jobs/release.go`: release factory captures `requireReleaseHome` and `Plan` returns a refusal during discovery | `.sparkwing/jobs/release_home_test.go`: `TestReleaseRefusesOperationalHomeDuringPlanning` |
 
 ## Test and gate workflow
 

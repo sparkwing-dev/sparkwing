@@ -20,6 +20,10 @@ unlock.
 
 ## [Unreleased]
 
+- **release:** The isolated-home guard refuses before run intake opens the
+  operational store, including during a release preview. A refused release
+  no longer creates a run or migrates the store.
+
 - **docs:** The Go SDK migration table covers the removed `SetWorkDir`
   Author tests select their fixture repository with `t.Chdir(root)` and let Go
   restore the original directory after the test.
