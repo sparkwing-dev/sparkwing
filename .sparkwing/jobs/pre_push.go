@@ -2,7 +2,10 @@ package jobs
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"go/build"
+	"path/filepath"
 	"runtime"
 	"strings"
 
@@ -124,10 +127,13 @@ func runBuildTouched(ctx context.Context) error {
 // It also vets the qatrust flavour, which no default build compiles.
 func runVetTouched(ctx context.Context) error {
 	return overTouchedPackages(ctx, "vet-touched", "compile", "Go file(s)", existingGoFiles,
-		func(_ string, pkgs []string) string {
-			args := strings.Join(pkgs, " ")
+		func(module string, pkgs []string) string {
 			cores := prePushTaskCores(runtime.NumCPU())
-			return goCommandAt(cores, "vet", args) + " && " + goCommandAt(cores, "vet", "-tags qatrust "+args)
+			qa := goCommandAt(cores, "vet", "-tags qatrust "+strings.Join(pkgs, " "))
+			if def := defaultBuildPackages(module, pkgs, true); len(def) > 0 {
+				return goCommandAt(cores, "vet", strings.Join(def, " ")) + " && " + qa
+			}
+			return qa
 		})
 }
 
@@ -143,7 +149,11 @@ func runFastLintTouched(ctx context.Context) error {
 
 func goOverTouchedPackages(ctx context.Context, verb, noun string, keep func([]string) []string) error {
 	return overTouchedPackages(ctx, verb+"-touched", "compile", noun, keep,
-		func(_ string, pkgs []string) string {
+		func(module string, pkgs []string) string {
+			pkgs = defaultBuildPackages(module, pkgs, false)
+			if len(pkgs) == 0 {
+				return "true"
+			}
 			args := strings.Join(pkgs, " ")
 			// safety: go build discards its output for several packages but writes
 			// a lone package's binary beside the module, where ./cmd/sparkwing
@@ -195,6 +205,24 @@ func buildableGoFiles(all []string) []string {
 			continue
 		}
 		out = append(out, f)
+	}
+	return out
+}
+
+// safety: go build and go vet refuse a package whose every file the default
+// build excludes, such as the qatrust-only bin/qaindex, so the default pass
+// drops it; vet's qatrust pass still judges it.
+func defaultBuildPackages(module string, pkgs []string, withTests bool) []string {
+	out := make([]string, 0, len(pkgs))
+	for _, pkg := range pkgs {
+		p, err := build.Default.ImportDir(filepath.Join(sparkwing.WorkDir(), module, pkg), 0)
+		var noGo *build.NoGoError
+		switch {
+		case errors.As(err, &noGo):
+		case err != nil, len(p.GoFiles)+len(p.CgoFiles) > 0,
+			withTests && len(p.TestGoFiles)+len(p.XTestGoFiles) > 0:
+			out = append(out, pkg)
+		}
 	}
 	return out
 }
