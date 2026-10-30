@@ -16,7 +16,7 @@ import (
 )
 
 type publicationCase struct {
-	name, version, packedVersion, packedName, tag string
+	name, version, packedVersion, packedName, packedRepo, tag string
 	metadata, status, versions, versionsStatus    string
 	dryRunStatus, publishStatus, failure          string
 	success, publish, preview                     bool
@@ -38,6 +38,7 @@ func TestTypeScriptPublicationRequiresAnExactImmutablePackage(t *testing.T) {
 		{name: "higher major prerelease", version: "22.0.0-rc.1", tag: "next", failure: "major version 0"},
 		{name: "wrong packed version", packedVersion: "0.70.0", failure: "version must equal"},
 		{name: "wrong package", packedName: "@other/sdk", failure: "name must be @sparkwing/sdk"},
+		{name: "missing repository", packedRepo: "none", failure: "repository must be"},
 		{name: "latest first publication", tag: "latest", versions: `{"error":{"code":"E404"}}`, versionsStatus: "1", success: true, publish: true},
 		{name: "latest newer", tag: "latest", versions: `["0.9.0","0.70.9","0.72.0-rc.1"]`, success: true, publish: true},
 		{name: "latest newer patch", version: "0.71.10", tag: "latest", versions: `["0.71.9"]`, success: true, publish: true},
@@ -79,10 +80,14 @@ func checkPublication(t *testing.T, payload []byte, test publicationCase) {
 	if test.packedName == "" {
 		test.packedName = "@sparkwing/sdk"
 	}
+	repo := map[string]string{"type": "git", "url": "git+https://github.com/sparkwing-dev/sparkwing.git", "directory": "sdk/typescript"}
+	if test.packedRepo == "none" {
+		repo = nil
+	}
 	if test.tag == "" {
 		test.tag = "release-" + test.version
 	}
-	manifest, err := json.Marshal(map[string]string{"name": test.packedName, "version": test.packedVersion})
+	manifest, err := json.Marshal(map[string]any{"name": test.packedName, "version": test.packedVersion, "repository": repo})
 	if err != nil {
 		t.Fatal(err)
 	}

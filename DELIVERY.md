@@ -112,7 +112,8 @@ tarball without rebuilding it. Stable releases eligible for GitHub Latest use th
 npm `latest` tag only after an independent npm version check. Prereleases use
 `next`, and older stable rebuilds use a version-specific `release-` tag.
 
-`bin/publish-typescript.mjs` refuses major versions above 0, a packed package name
+`bin/publish-typescript.mjs` refuses major versions above 0, a packed `repository.url`
+other than this repository (npm provenance rejects it), a packed package name
 other than `@sparkwing/sdk`, or a packed version different from the release tag
 without `v`. There is no major-version override. An explicit `latest` requires a
 stable version newer than every published stable `0.x` from

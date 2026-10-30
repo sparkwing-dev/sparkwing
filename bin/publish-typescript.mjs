@@ -12,6 +12,10 @@ if (manifest.error) throw manifest.error;
 if (manifest.status !== 0) throw new Error("cannot read packed package.json");
 const packed = JSON.parse(manifest.stdout);
 if (packed.name !== "@sparkwing/sdk") throw new Error("packed package name must be @sparkwing/sdk");
+// npm provenance rejects the upload unless repository.url names the building repository.
+if (packed.repository?.url !== "git+https://github.com/sparkwing-dev/sparkwing.git") {
+  throw new Error("packed package repository must be git+https://github.com/sparkwing-dev/sparkwing.git");
+}
 if (packed.version !== version) throw new Error("packed package version must equal the release tag without v");
 if (version.includes("-") && tag !== "next") throw new Error("prereleases must use the next npm tag");
 
