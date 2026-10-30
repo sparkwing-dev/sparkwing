@@ -29,6 +29,7 @@ unlock.
 
 ### Fixed
 
+- **storage:** Quota refusals name the tier or override, limit, usage and requested growth, with funding, monthly reset and support remedies.
 - **release:** Schema and wire changelog gates fetch a previous release tag missing from the job checkout. Failed fetches name that checkout and show a recovery command.
 
 ## [v0.68.0] - 2026-10-30

@@ -61,7 +61,7 @@ func TestStorageTierRefusalNamesTheRemedy(t *testing.T) {
 		return err
 	})
 	var refusal *StorageQuotaError
-	if !errors.As(err, &refusal) || !strings.Contains(err.Error(), refusal.Limit) || !strings.Contains(err.Error(), "contact support to raise this limit") {
+	if !errors.As(err, &refusal) || !strings.Contains(err.Error(), refusal.Limit) || !strings.Contains(err.Error(), "support@sparkwing.dev") {
 		t.Fatalf("refusal = %v; want the limit and the remedy", err)
 	}
 }

@@ -267,6 +267,13 @@ func decodeEngineRequest(r *http.Request, body any) error {
 }
 
 func engineLookupError(err error) error {
+	var quota *store.StorageQuotaError
+	if errors.As(err, &quota) {
+		return &apierr.Error{Code: apierr.QuotaExceeded, Message: quota.Error()}
+	}
+	if errors.Is(err, store.ErrStorageQuota) {
+		return &apierr.Error{Code: apierr.QuotaExceeded, Message: err.Error()}
+	}
 	var integrity *apierr.Error
 	if errors.As(err, &integrity) && integrity.Code == apierr.IntegrityFailure {
 		return errors.Join(&apierr.Error{Code: apierr.Internal, Message: "stored state is invalid"}, err)

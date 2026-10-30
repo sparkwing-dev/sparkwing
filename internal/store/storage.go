@@ -38,8 +38,7 @@ var paidTierQuota = StorageQuota{
 	MaxObjectsPerRun: 100_000,
 }
 
-// storageLimitRemedy tells whoever hits a storage tier limit how to lift it.
-const storageLimitRemedy = "contact support to raise this limit"
+const storageLimitRemedy = "contact support@sparkwing.dev for a higher limit; delete unneeded runs/artifacts to free retained storage (deletion does not reset cumulative quota usage)"
 
 // ErrStorageQuota is returned when a write would take a team past one of its
 // storage limits. The enforcing call returns a [StorageQuotaError], which
@@ -51,6 +50,7 @@ var ErrStorageQuota = errors.New("storage quota exceeded")
 // has already stored against that limit, and what the write asked for.
 type StorageQuotaError struct {
 	Principal string
+	Tier      string
 	Limit     string
 	Unit      string
 	Used      int64
@@ -61,12 +61,25 @@ type StorageQuotaError struct {
 }
 
 func (e *StorageQuotaError) Error() string {
-	msg := fmt.Sprintf("storage quota exceeded: %s for team %s: %d of %d %s used and this write adds %d",
-		e.Limit, e.Principal, e.Used, e.Allowed, e.Unit, e.Requested)
-	if e.Remedy != "" {
-		msg += "; " + e.Remedy
+	policy := "configured limit"
+	if e.Tier != "" {
+		policy = e.Tier
+		if e.Tier == storageTierFree || e.Tier == storageTierPaid {
+			policy += " tier"
+		}
 	}
-	return msg
+	remedy := e.Remedy
+	if remedy == "" {
+		remedy = storageLimitRemedy
+	}
+	if e.Tier == storageTierFree {
+		remedy = "add funds to use the automatic paid tier (operator overrides still apply); " + remedy
+	}
+	if e.Limit == storageLimitBytesPerMonth {
+		remedy = "wait until the next UTC calendar month for monthly quota to reset; " + remedy
+	}
+	return fmt.Sprintf("storage quota exceeded: %s (%s) for team %s: %d of %d %s used and this write adds %d; %s",
+		e.Limit, policy, e.Principal, e.Used, e.Allowed, e.Unit, e.Requested, remedy)
 }
 
 // Unwrap reports [ErrStorageQuota], so a caller matches the condition without

@@ -79,6 +79,7 @@ credential model in `docs/auth.md`, and the decision log
 | `payment_mode` on money statements (decision 63) | every money query filters `payment_mode` | `ledger_guard_test.go`: `TestMoneyStatementsCarryPaymentMode`; `payment_mode_test.go` |
 | Refill eligibility | `refill.go`: `SpendStanding.refillEligible` | `refill_model_test.go`: `TestRefillModel`; `refill_test.go` |
 | Storage admission | `storage_admission.go`: `admitStorageGrowthTx` | `storage_admission_dialect_test.go` |
+| Storage quota refusals name tier, limit, usage and remedy | `storage.go`: `StorageQuotaError.Error`; `internal/controller/engine_routes.go`: `engineLookupError` | `internal/controller/source_upload_test.go`: `TestSourceQuotaRefusalNamesTierUsageAndRemedy`, `TestSourceAttachmentQuotaRefusalNamesTierAndRemedy`; `upload_quota_runtime_test.go` |
 | Log slots | `result_logs.go`: `openLogSlotTx`, `commitLogSlotTx`; `controller_reporting.go`: `Tenant.OpenLogSlot` | `storage_admission_dialect_test.go`: `TestLogSlotsCountAgainstTheRunObjectLimit` |
 | Metering and lease renewal | `metered_accounting.go`: `renewBillingAwardTx`, `settleBillingChargesTx`; `state_renewal.go`: `Tenant.RenewNodeClaim` | `metered_accounting_test.go`; `refill_test.go`: `TestRenewalPaysTheNextSliceAndSettlementReturnsTheRest`; `unit_billing_test.go`: `TestFirstRenewalRunsAJobItsAdmittedSliceCovers` |
 | Free-tier limits only where usage is metered | `free_tier.go`: `Store.holdsFreeAllowance` | `free_tier_mode_test.go`: `TestUnmeteredDeploymentAppliesNoFreeTierLimits` |

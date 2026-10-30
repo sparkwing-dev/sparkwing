@@ -20,7 +20,14 @@ from persisted facts. Machine roots need an award before they can upload.
 Signing failures release their reservations. A physical object left by an
 interrupted commit grants no read authority. A later commit must verify its
 bytes and pass the transaction's authority checks. Storage quota failures use
-`quota_exceeded`. Bad bytes use `integrity_failure`. Private backend errors
+`quota_exceeded` (HTTP 429). The message names the free or paid tier, or an
+operator override, the limit, current usage including live reservations, and
+the requested growth. Add funds to move an automatic free Cloud tier to paid.
+Operator overrides still apply after payment. Contact support@sparkwing.dev
+for a higher limit. Monthly quota resets at the next UTC calendar month.
+Deleting unneeded runs/artifacts frees retained storage, but does not reset
+cumulative quota usage. Event-size refusals name their configured limit and
+the support contact too. Bad bytes use `integrity_failure`. Private backend errors
 return the common `internal` envelope.
 
 `POST /api/v1/data/records` creates an authorized logical reference. It takes
