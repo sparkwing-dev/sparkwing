@@ -158,6 +158,7 @@ func New(t testing.TB) *GitHub {
 	mux.HandleFunc("GET /installation/repositories", g.handleInstallationRepos)
 	mux.HandleFunc("GET /repos/{owner}/{repo}/commits/{ref...}", g.handleCommit)
 	mux.HandleFunc("GET /repos/{owner}/{repo}/git/ref/{ref...}", g.handleCommit)
+	mux.HandleFunc("GET /repos/{owner}/{repo}/compare/{comparison...}", g.handleCompare)
 	mux.HandleFunc("POST /repos/{owner}/{repo}/statuses/{sha}", g.handleStatus)
 	mux.HandleFunc("GET /repos/{owner}/{repo}/commits/{sha}/check-runs", g.handleListCheckRuns)
 	mux.HandleFunc("POST /repos/{owner}/{repo}/check-runs", g.handleCheckRun)
@@ -337,6 +338,28 @@ func (g *GitHub) handleCommit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"sha": sha})
+}
+
+func (g *GitHub) handleCompare(w http.ResponseWriter, r *http.Request) {
+	repo := strings.ToLower(r.PathValue("owner") + "/" + r.PathValue("repo"))
+	tok := g.installationToken(r)
+	if tok == nil || !tok.repos[repo] || tok.permissions["contents"] != "read" {
+		writeJSON(w, http.StatusForbidden, map[string]string{"message": "Forbidden"})
+		return
+	}
+	base, ref, ok := strings.Cut(r.PathValue("comparison"), "...")
+	if !ok {
+		writeJSON(w, http.StatusNotFound, map[string]string{"message": "Not Found"})
+		return
+	}
+	g.mu.Lock()
+	head := g.commits[repo+"/"+strings.TrimPrefix(ref, "refs/")]
+	g.mu.Unlock()
+	status := "diverged"
+	if head != "" && head == base {
+		status = "identical"
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": status})
 }
 
 // SetChecksGranted records whether installation id's owner accepted the
