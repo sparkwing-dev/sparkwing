@@ -321,7 +321,9 @@ All runner enrollment requires an independent account session. Shared runners
 require current team administration for enrollment, token
 rotation and revocation. Members enroll their own personal machines through
 `sparkwing runners add --personal --session-stdin` with an independent account
-session. The team setting `members_can_add_machines` defaults to true. When it
+session. After fetching the session CSRF proof, the CLI attempts logout on
+enrollment success or failure. Use a dedicated session because logout ends it
+for every client. The team setting `members_can_add_machines` defaults to true. When it
 is false, personal enrollment requires administration too. A personal runner
 records the membership epoch, grant and setting that authorized enrollment.
 Every use checks them again, and turning the setting off ends members' personal

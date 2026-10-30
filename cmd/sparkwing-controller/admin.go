@@ -34,9 +34,9 @@ session prints an independent account session for an existing team administrator
 on a licensed team or Cloud controller.
 Plain output is the default for piping to sparkwing runners add --session-stdin.
 Use --output json for a JSON object containing the session. Its initial expiry is 15 minutes.
-Normal renewal applies, including during enrollment. Enrollment attempts logout
-on success or failure. If logout fails, the renewed session remains live until
-expiry or revocation. The session is printed only
+Normal renewal applies, including during enrollment. After fetching the session
+CSRF proof, enrollment attempts logout on success or failure. If fetching the
+proof or logout fails, the session remains live until expiry or revocation. The session is printed only
 to stdout. The session.break_glass audit row records the account and team,
 excluding the session and free-form reason.
 

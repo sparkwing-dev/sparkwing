@@ -394,8 +394,9 @@ an existing administrator of the named team and creates no account or membership
 It prints the raw session as plain text by default, or a JSON object with
 `--output json`, only to stdout and an audit line without the session to stderr. A durable `session.break_glass` audit row records the account ID and
 team, excluding the session and free-text reason. The initial expiry is 15 minutes. Enrollment renews the session through
-the normal account-session lifecycle and attempts logout on success or failure.
-If logout fails, the renewed session remains live until expiry or revocation.
+the normal account-session lifecycle. After fetching the session CSRF proof,
+enrollment attempts logout on success or failure. If fetching the proof or logout
+fails, the session remains live until expiry or revocation.
 Use a dedicated session because logout ends it for every client. See
 [session lifecycle](auth.md#browser-session-lifecycle) for expiry and logout. Keep session output private. A `local` deployment uses
 the local controller connection and does not support account sessions.
