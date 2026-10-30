@@ -38,6 +38,7 @@ func secretReadStoreFixture(t *testing.T) (*Tenant, capability.Authorized) {
 		t.Fatal(err)
 	}
 	c := p.Capability
+	c.Host = &capability.HostFacts{Kind: capability.HostSelfHosted, RunnerKind: "runner"}
 	c.Grants = append(c.Grants, capability.SecretsRelease)
 	c.Grants = append(c.Grants, capability.NodesClaim)
 	rewriteSchemaExec(t, tenant.s.db, `DELETE FROM capabilities WHERE prefix=?`, c.Prefix)

@@ -123,7 +123,7 @@ func TestJobAdmissionPolicyCommitsTerminalOutcome(t *testing.T) {
 func admissionAcceptedPlan(t *testing.T, f *storeRecoveryFixture, edits ...func(*nodeproto.PlanDoc)) (store.PlanAcceptance, runstate.Actor) {
 	t.Helper()
 	ctx := t.Context()
-	intake, err := f.tenant.AdmitRun(ctx, store.IntakeRequest{Authority: f.plan.Seal.Request.AuthorityRef, Request: f.plan.Seal.Request.Request})
+	intake, err := f.tenant.AdmitRun(ctx, store.IntakeRequest{Authority: f.plan.Seal.Request.AuthorityRef, Request: f.plan.Seal.Request.Request, FetchedRepository: store.FetchedRepository{ID: 1, Name: "acme/repo"}})
 	if err != nil {
 		t.Fatal(err)
 	}

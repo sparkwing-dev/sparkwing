@@ -15,6 +15,7 @@ import (
 func runnerMeteringFixture(t *testing.T) (*Store, UnitDemand, capability.Authorized) {
 	t.Helper()
 	s, demand, _ := meteredUnitFixture(t, false)
+	proveClaimFixtureRepository(t, s)
 	owner := authorityMember(t, s, "owner", RoleOwner)
 	expiry := s.now().Add(time.Hour)
 	issued, err := s.AsOperator().ProvisionCapability(t.Context(), capability.ProvisionSpec{
