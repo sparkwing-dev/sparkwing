@@ -1,0 +1,150 @@
+--- a/README.md
++++ b/README.md
+@@ -88,7 +88,9 @@
+ progress under the same key is 502. A request naming another deployment is 421. The controller
+ retries no answer, any 5xx, 429 and 408, and also 401, 404 and 421, which mean the two services are
+ not paired correctly, with one `alert=checkout_misconfigured`; every other refusal is final. `internal/billing/testdata/checkout_contract.json` holds every route's
+-request and answer, the bounds, the Stripe metadata keys and these refusals; it is kept
++request and answer, the bounds, the Stripe metadata keys, these refusals and a captured
++`refund.created` event. Stripe refund objects have no `livemode`; the controller verifies
++the signed event envelope's mode and settles `refund.*` by refund ID. The fixture is kept
+ byte-identical with the controller's copy, and both sides test their real code against it. Sessions are pinned to card payments,
+ return the payer to `BILLING_RETURN_URL` with a `checkout` or `card` query, and expire at
+ the controller's `expires_at`, so a retried request repeats Stripe's parameters exactly and gets the
+--- a/internal/billing/contract_test.go
++++ b/internal/billing/contract_test.go
+@@ -16,12 +16,13 @@
+ // checkoutContract is testdata/checkout_contract.json. The controller keeps a byte-identical copy and tests its client
+ // against it, so a change to either side's request, answer, bounds, metadata keys or refusal classes fails a suite.
+ type checkoutContract struct {
+-	Token      string            `json:"token"`
+-	Deployment string            `json:"deployment"`
+-	MinCents   int64             `json:"min_cents"`
+-	MaxCents   int64             `json:"max_cents"`
+-	Metadata   map[string]string `json:"metadata"`
+-	Routes     map[string]struct {
++	RefundEvent json.RawMessage   `json:"refund_event"`
++	Token       string            `json:"token"`
++	Deployment  string            `json:"deployment"`
++	MinCents    int64             `json:"min_cents"`
++	MaxCents    int64             `json:"max_cents"`
++	Metadata    map[string]string `json:"metadata"`
++	Routes      map[string]struct {
+ 		Path     string          `json:"path"`
+ 		Request  json.RawMessage `json:"request"`
+ 		Response json.RawMessage `json:"response"`
+@@ -248,3 +249,55 @@
+ 		}
+ 	}
+ }
++
++func TestRefundAnswersTheCapturedStripeContract(t *testing.T) {
++	c := loadCheckoutContract(t)
++	var event struct {
++		Type string `json:"type"`
++		Data struct {
++			Object json.RawMessage `json:"object"`
++		} `json:"data"`
++	}
++	if err := json.Unmarshal(c.RefundEvent, &event); err != nil {
++		t.Fatal(err)
++	}
++	var refund struct {
++		ID            string `json:"id"`
++		PaymentIntent string `json:"payment_intent"`
++		Status        string `json:"status"`
++	}
++	if err := json.Unmarshal(event.Data.Object, &refund); err != nil {
++		t.Fatal(err)
++	}
++	if event.Type != "refund.created" || refund.ID == "" || refund.PaymentIntent == "" || refund.Status != "succeeded" {
++		t.Fatalf("refund fixture: %+v", refund)
++	}
++	var object map[string]any
++	if err := json.Unmarshal(event.Data.Object, &object); err != nil {
++		t.Fatal(err)
++	}
++	stub := newRoutedStripe(t, map[string]func(url.Values) (int, map[string]any){
++		"GET /v1/payment_intents/" + refund.PaymentIntent: fixed(map[string]any{"id": refund.PaymentIntent, "object": "payment_intent", "metadata": map[string]any{DeploymentMetadata: c.Deployment, "team": "acme"}}),
++		"POST /v1/refunds": fixed(object),
++	})
++	service := c.service(t, stub.ServeHTTP)
++	request, err := json.Marshal(refundRequest{Team: "acme", Deployment: c.Deployment, PaymentIntent: refund.PaymentIntent, Key: refund.PaymentIntent, Reason: "warning"})
++	if err != nil {
++		t.Fatal(err)
++	}
++	want, err := json.Marshal(refundResponse{Refund: refund.ID, Status: refund.Status})
++	if err != nil {
++		t.Fatal(err)
++	}
++	for range 2 {
++		rec := c.post(service, c.Routes["refund"].Path, c.Token, request)
++		if rec.Code != http.StatusOK || !sameJSONBytes(t, rec.Body.Bytes(), want) {
++			t.Fatalf("refund = %d %s; want %s", rec.Code, rec.Body.String(), want)
++		}
++	}
++	for _, call := range stub.callsTo("POST /v1/refunds") {
++		if call.key != "refund-"+refund.PaymentIntent || call.form.Get("payment_intent") != refund.PaymentIntent {
++			t.Fatalf("refund request: %+v", call)
++		}
++	}
++}
+--- a/internal/billing/testdata/checkout_contract.json
++++ b/internal/billing/testdata/checkout_contract.json
+@@ -1,5 +1,5 @@
+ {
+-  "about": "The controller and the checkout service each test their real code against a byte-for-byte copy of this file: sparkwing internal/controller/testdata and sparkwing-platform internal/billing/testdata. Change both copies together. Each route's request is the whole body the controller sends with the bearer token; each response is the service's whole answer. refill_cases are the service's answers to each Stripe outcome of the refill request. refusals are answers the controller must classify: final ones are about the request and close the refill or refund for the owners and operator; the others, outages and a misconfigured pairing (wrong token, route or deployment), are retried with backoff.",
++  "about": "The controller and the checkout service each test their real code against a byte-for-byte copy of this file: sparkwing internal/controller/testdata and sparkwing-platform internal/billing/testdata. Change both copies together. Each route's request is the whole body the controller sends with the bearer token; each response is the service's whole answer. refund_event is the captured Stripe test-mode refund.created event, with an event-level livemode and no object-level livemode. refill_cases are the service's answers to each Stripe outcome of the refill request. refusals are answers the controller must classify: final ones are about the request and close the refill or refund for the owners and operator; the others, outages and a misconfigured pairing (wrong token, route or deployment), are retried with backoff.",
+   "token": "bct_contract_token",
+   "deployment": "dep-0123456789abcdef01234567",
+   "min_cents": 1000,
+@@ -37,6 +37,49 @@
+       "request": {"team": "acme", "deployment": "dep-0123456789abcdef01234567", "refill_id": "refill-contract", "amount_cents": 2500, "customer": "cus_contract"}
+     }
+   },
++  "refund_event": {
++    "id": "evt_3UWJRSCsxdZEQ29m0B1SCls8",
++    "object": "event",
++    "api_version": "2026-08-26.dahlia",
++    "created": 1793380883,
++    "data": {
++      "object": {
++        "id": "re_3UWJRSCsxdZEQ29m024vKnKG",
++        "object": "refund",
++        "amount": 500,
++        "balance_transaction": "txn_3UWJRSCsxdZEQ29m06hmO5OP",
++        "charge": "ch_3UWJRSCsxdZEQ29m09GzUvnG",
++        "created": 1793380883,
++        "currency": "usd",
++        "customer": null,
++        "customer_account": null,
++        "destination_details": {
++          "card": {
++            "reference_status": "pending",
++            "reference_type": "acquirer_reference_number",
++            "type": "refund"
++          },
++          "type": "card"
++        },
++        "metadata": {},
++        "payment_intent": "pi_3UWJRSCsxdZEQ29m0gPoSOd7",
++        "payment_method": "pm_1UWJRRCsxdZEQ29m7z7at1hq",
++        "reason": null,
++        "receipt_number": null,
++        "source_transfer_reversal": null,
++        "status": "succeeded",
++        "transfer_reversal": null
++      },
++      "previous_attributes": {}
++    },
++    "livemode": false,
++    "pending_webhooks": 1,
++    "request": {
++      "id": "req_6h9AvE6AXKDs8X",
++      "idempotency_key": "5493a8b4-4926-450b-94e0-b03175632a2e"
++    },
++    "type": "refund.created"
++  },
+   "refill_cases": [
+     {"name": "charged", "http_status": 200, "body": {"payment_intent": "pi_contract", "status": "succeeded"}},
+     {"name": "processing", "http_status": 200, "body": {"payment_intent": "pi_contract", "status": "processing"}},
