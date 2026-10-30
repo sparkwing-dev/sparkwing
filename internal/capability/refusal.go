@@ -33,8 +33,6 @@ func RequiredAuthority(reason apierr.Reason, alternatives ...[]Grant) *apierr.Er
 			message += "; use an awarded or delegated job credential with oidc.mint"
 		case DataRead:
 			message += "; use a job credential with repository authority or ask a team editor or owner with repository authority to mint a repository cache reader through POST /api/v1/tokens with a remote_cache data scope"
-		case DataWrite:
-			message += "; use a job credential with repository authority or ask a team editor or owner with repository authority to mint a run-bound publication credential"
 		}
 	}
 	return apierr.Authorization(reason, message)

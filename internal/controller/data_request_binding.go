@@ -93,12 +93,10 @@ func resolveDataTarget(_ context.Context, p capability.Principal, target capabil
 		return target, dataForbidden()
 	}
 	if p.Capability.Data == nil {
-		grant := capability.DataRead
-		switch target.Data.Operation {
-		case capability.DataUpload, capability.DataCommit, capability.DataRecord:
-			grant = capability.DataWrite
+		if target.Data.Operation == capability.DataLookup {
+			return target, capability.RequiredAuthority(apierr.ReasonBinding, []capability.Grant{capability.DataRead})
 		}
-		return target, capability.RequiredAuthority(apierr.ReasonBinding, []capability.Grant{grant})
+		return target, dataForbidden()
 	}
 	scope := p.Capability.Data
 	if target.Data.NodeID != "" {
