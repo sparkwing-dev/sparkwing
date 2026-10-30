@@ -6,6 +6,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/githubapp"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
@@ -17,9 +18,13 @@ func (s *Server) verifyIntakeSourceCredential(ctx context.Context, team store.Te
 	if s.githubApp == nil || !request.Source.FetchedFromRemote() || here || request.Lineage.ParentRunID != "" || request.Lineage.RetryOf != "" {
 		return store.FetchedRepository{}, false, nil
 	}
-	id, err := strconv.ParseInt(strings.TrimPrefix(string(request.Git.Repository.Key), "gh:"), 10, 64)
-	if err != nil || id <= 0 || !strings.HasPrefix(string(request.Git.Repository.Key), "gh:") {
+	key, github := strings.CutPrefix(string(request.Git.Repository.Key), "gh:")
+	if !github {
 		return store.FetchedRepository{}, false, nil
+	}
+	id, err := strconv.ParseInt(key, 10, 64)
+	if err != nil || id <= 0 {
+		return store.FetchedRepository{}, false, &apierr.Error{Code: apierr.BadRequest, Message: "GitHub source repository requires a positive numeric ID"}
 	}
 	access := &intakeRevisionAccess{server: s, team: team}
 	spec := source.Spec{RepoKey: string(request.Git.Repository.Key), RemoteURL: request.Source.Location.RemoteURL}

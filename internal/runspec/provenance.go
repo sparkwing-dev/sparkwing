@@ -328,7 +328,10 @@ func (p Provenance) DataWriter() Writer {
 // unless the controller fetched its code from a repository: it then claims that
 // repository, and the branch or tag head it ran when the App resolved one.
 func (p Provenance) OIDC() (trigger string, repositoryID int64, ref, sha string) {
-	id, _ := strconv.ParseInt(strings.TrimPrefix(string(p.ProvenRepository()), "gh:"), 10, 64)
+	id, err := strconv.ParseInt(strings.TrimPrefix(string(p.ProvenRepository()), "gh:"), 10, 64)
+	if err != nil {
+		return "manual", 0, "", ""
+	}
 	switch p.identity.Trust {
 	case TrustVerified, TrustVerifiedDefault:
 		return p.identity.Event, id, p.identity.Ref, p.identity.SHA
