@@ -184,3 +184,52 @@ func (e describeEngine) Resolve(context.Context, engineid.Pin, releaseasset.Targ
 func (e describeEngine) Ensure(context.Context, engineid.Identity, releaseasset.Target) (engine.Resolved, error) {
 	return e.resolved, nil
 }
+
+func TestNativeLocalPreparationInspectsBeforeParsingRequiredEnum(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("SPARKWING_HOME", home)
+	t.Setenv("SPARKWING_CONFIG", filepath.Join(home, "config.yaml"))
+	repo := t.TempDir()
+	for _, args := range [][]string{{"init", "--quiet"}, {"-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "--quiet", "--allow-empty", "--no-verify", "-m", "fixture"}} {
+		if out, err := exec.Command("git", append([]string{"-C", repo}, args...)...).CombinedOutput(); err != nil {
+			t.Fatalf("git: %v: %s", err, out)
+		}
+	}
+	dir := filepath.Join(repo, ".sparkwing")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeSDKFixture(t, dir, `package main
+import (
+ "context"
+ sw "github.com/sparkwing-dev/sparkwing/sparkwing"
+)
+type args struct { Env string `+"`flag:\"env\" required:\"true\" enum:\"dev,prod\"`"+` }
+type pipeline struct { sw.Base }
+func (pipeline) Plan(_ context.Context, p *sw.Plan, _ args, _ sw.RunContext) error {
+ sw.Job(p, "ok", func(context.Context) error { return nil }); return nil
+}
+func main() { sw.Register("Required", func() sw.Pipeline[args] { return pipeline{} }); sw.Main() }
+`)
+	writeFile(t, filepath.Join(dir, "sparkwing.yaml"), "pipelines:\n  - name: required\n    entrypoint: Required\n")
+	snapshots, err := nodehost.NewFileEnvironmentSnapshots(filepath.Join(home, "environments"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	prepared, err := prepareNativeLocalRun(t.Context(), home, dir, "required", os.Environ(), snapshots, runFlags{})
+	if err != nil {
+		t.Fatalf("discovery required invocation arguments before parsing them: %v", err)
+	}
+	for _, args := range [][]string{{"--env=dev"}, {"--env", "prod"}} {
+		request, err := prepareLocalRunRequest(t.Context(), prepared, runFlags{}, args)
+		if err != nil || request.Request.RequestedArgs["env"] == "" {
+			t.Fatalf("supplied enum lost: %+v: %v", request.Request.RequestedArgs, err)
+		}
+	}
+	for _, args := range [][]string{{"--env=qa"}, {"--env", "qa"}} {
+		_, err := prepareLocalRunRequest(t.Context(), prepared, runFlags{}, args)
+		if err == nil || !strings.Contains(err.Error(), "dev, prod") || strings.Contains(err.Error(), "is required") {
+			t.Fatalf("enum refusal lacks choices: %v", err)
+		}
+	}
+}

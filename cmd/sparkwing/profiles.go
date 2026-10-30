@@ -78,6 +78,15 @@ func setProfile(inv clisurface.Invocation, format string) error {
 		if inv.Bool("token-stdin") {
 			p.Controller.Token = &token
 		}
+		if inv.Has("default") {
+			p.Default = inv.Bool("default")
+			if p.Default {
+				for other, connection := range profiles {
+					connection.Default = false
+					profiles[other] = connection
+				}
+			}
+		}
 		profiles[name], updated = p, p
 		return nil
 	})

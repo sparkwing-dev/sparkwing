@@ -21,6 +21,10 @@ for the execution and lifecycle integration boundaries.
 
 ## Cloud controller and dashboard
 
+Run `sparkwing-controller --help` for the controller startup flags. Use
+`--credentials-dir` for mounted credentials and `--credential-epoch-dir` for the
+persistent writable epoch directory.
+
 The [`sparkwing-full` Helm chart](../charts/sparkwing-full/README.md) is the
 repository's Kubernetes deployment surface. It requires an explicitly compatible
 image set. The final deployment uses one controller, authorized object storage

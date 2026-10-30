@@ -36,8 +36,8 @@ func (d *Daemon) handleLocalDashboard(c *conn, request *wingwire.LocalDashboard)
 		c.close()
 		<-peerDone
 	}()
-	reply := &wingwire.LocalDashboardAck{}
-	if err := d.localDashboard(ctx, request.Address); err != nil {
+	reply := &wingwire.LocalDashboardAck{ReadOnly: request.ReadOnly}
+	if err := d.localDashboard(ctx, request.Address, request.ReadOnly); err != nil {
 		reply.Error = err.Error()
 	}
 	if ctx.Err() == nil {

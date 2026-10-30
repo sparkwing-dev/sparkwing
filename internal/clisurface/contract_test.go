@@ -84,7 +84,7 @@ func TestLaunchCriticalSurfaces(t *testing.T) {
 		"sparkwing dashboard install": {}, "sparkwing dashboard uninstall": {}, "sparkwing __tick": {},
 		"sparkwing schedules pause": {"schedule"}, "sparkwing schedules resume": {"schedule"},
 		"sparkwing runners add": {"repos", "reserved-for"}, "sparkwing pools allow": {"pool", "repo", "branch", "source", "route"},
-		"sparkwing-runner start": {"config", "repos"}, "sparkwing-runner warm": {"github-actions", "heartbeat", "lease"},
+		"sparkwing-runner start": {"config", "repos"}, "sparkwing-runner warm": {"github-actions", "poll"},
 		"sparkwing-runner run-node": {"bootstrap-file", "generation"}, "sparkwing-controller admin freeze": {"team", "reason"},
 	}
 	for path, names := range required {

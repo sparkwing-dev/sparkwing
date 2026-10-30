@@ -42,7 +42,7 @@ Capture the installing environment; native timers on Linux/macOS invoke __tick. 
 | `-C, --checkout PATH` | Resolve the project from this local checkout path. |
 | `-h, --help` | Show command help without executing. |
 | `--help-all` | Include uncommon flags in command help. |
-| `--profile NAME` | Controller connection profile from your config. Omit it to use the local controller. |
+| `--profile NAME` | Controller connection profile from your config. Optional profiles use the saved default, then local; --profile= selects local. |
 | `--schedule SCHEDULE` | Schedule name. Repeatable; comma-separated values are accepted. |
 | `--unpinned` | Arm schedules to compile the checkout on every fire instead of pinning a proved binary; with --profile, follow the checked-out branch. |
 | `--no-prove` | Arm local schedules without compiling their pipelines first, which also leaves them unpinned; ignored with --profile. |
@@ -61,7 +61,7 @@ List the schedules armed on this host
 | `-C, --checkout PATH` | Resolve the project from this local checkout path. |
 | `-h, --help` | Show command help without executing. |
 | `--help-all` | Include uncommon flags in command help. |
-| `--profile NAME` | Controller connection profile from your config. Omit it to use the local controller. |
+| `--profile NAME` | Controller connection profile from your config. Optional profiles use the saved default, then local; --profile= selects local. |
 | `--all` | Include entries that are hidden by default. |
 | `--timer` | Report the health of the schedule timer instead of listing schedules, exiting with failure when it is unhealthy. |
 | `--next N` | List the next N fire times across all schedules instead of the schedule table. |
@@ -79,7 +79,7 @@ Pause a schedule
 | `-h, --help` | Show command help without executing. |
 | `--help-all` | Include uncommon flags in command help. |
 | `--schedule SCHEDULE` | Schedule name. Repeatable; comma-separated values are accepted. (required) |
-| `--profile PROFILE` | Controller connection profile from your config. Omit it to use the local controller. |
+| `--profile PROFILE` | Controller connection profile from your config. Optional profiles use the saved default, then local; --profile= selects local. |
 
 ## `sparkwing schedules resume`
 
@@ -94,7 +94,7 @@ Resume a paused schedule
 | `-h, --help` | Show command help without executing. |
 | `--help-all` | Include uncommon flags in command help. |
 | `--schedule SCHEDULE` | Schedule name. Repeatable; comma-separated values are accepted. (required) |
-| `--profile PROFILE` | Controller connection profile from your config. Omit it to use the local controller. |
+| `--profile PROFILE` | Controller connection profile from your config. Optional profiles use the saved default, then local; --profile= selects local. |
 
 ## `sparkwing schedules run`
 
@@ -108,7 +108,7 @@ Launch a schedule's pipeline now
 | `-C, --checkout PATH` | Resolve the project from this local checkout path. |
 | `-h, --help` | Show command help without executing. |
 | `--help-all` | Include uncommon flags in command help. |
-| `--profile NAME` | Controller connection profile from your config. Omit it to use the local controller. |
+| `--profile NAME` | Controller connection profile from your config. Optional profiles use the saved default, then local; --profile= selects local. |
 | `--schedule SCHEDULE` | Schedule name. Repeatable; comma-separated values are accepted. (required) |
 
 ## `sparkwing schedules set`
@@ -123,7 +123,7 @@ Override a declared cadence on this host
 | `-C, --checkout PATH` | Resolve the project from this local checkout path. |
 | `-h, --help` | Show command help without executing. |
 | `--help-all` | Include uncommon flags in command help. |
-| `--profile NAME` | Controller connection profile from your config. Omit it to use the local controller. |
+| `--profile NAME` | Controller connection profile from your config. Optional profiles use the saved default, then local; --profile= selects local. |
 | `--cron EXPR` | Override the schedule's cron expression. |
 | `--tz ZONE` | Override the schedule's time zone with an IANA zone name; an empty value selects the default zone. |
 | `--overlap POLICY` | Override what happens when a fire comes due while the previous scheduled run is still running. Values: skip, queue. |
@@ -146,7 +146,7 @@ Show one schedule's full record and its recent fires
 | `-C, --checkout PATH` | Resolve the project from this local checkout path. |
 | `-h, --help` | Show command help without executing. |
 | `--help-all` | Include uncommon flags in command help. |
-| `--profile NAME` | Controller connection profile from your config. Omit it to use the local controller. |
+| `--profile NAME` | Controller connection profile from your config. Optional profiles use the saved default, then local; --profile= selects local. |
 | `--fires N` | Number of recent fires to include in the detail, 10 by default. |
 | `--next N` | Print the next N fire times for each selected schedule instead of its detail. |
 | `--schedule SCHEDULE` | Schedule name. Repeatable; comma-separated values are accepted. (required) |
@@ -163,6 +163,6 @@ Disarm a repo's schedules, and remove the timer when nothing is left
 | `-C, --checkout PATH` | Resolve the project from this local checkout path. |
 | `-h, --help` | Show command help without executing. |
 | `--help-all` | Include uncommon flags in command help. |
-| `--profile NAME` | Controller connection profile from your config. Omit it to use the local controller. |
+| `--profile NAME` | Controller connection profile from your config. Optional profiles use the saved default, then local; --profile= selects local. |
 | `--schedule SCHEDULE` | Schedule name. Repeatable; comma-separated values are accepted. |
 | `--all-repos` | Remove every local schedule on this host from all repositories, then remove the timer when none remain. |

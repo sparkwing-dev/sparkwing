@@ -153,7 +153,7 @@ func (r *lifecycleRuntime) SetStay(_ context.Context, stay bool) error {
 	return nil
 }
 
-func (r *lifecycleRuntime) EnsureDashboard(context.Context, string) error { return nil }
+func (r *lifecycleRuntime) EnsureDashboard(context.Context, string, bool) error { return nil }
 
 func (r *lifecycleRuntime) Drain(context.Context) error {
 	r.mu.Lock()

@@ -33,6 +33,7 @@ credential model in `docs/auth.md`, and the decision log
 | Source selection leaves the shared temporary parent unchanged | `internal/source/select.go`: `readCommitFile` prepares only an explicit workspace; `fssecure.MkdirPrivateTemp` owns the private child | `internal/source/select_temp_unix_test.go`: `TestSelectLeavesTheSharedTemporaryParentUnchanged` |
 | Remote configuration size is checked without downloading oversized blobs | `internal/source/select.go`: `readCommitFile` filters blobs and blocks transports during local inspection | `internal/source/select_size_test.go`: `TestTenantSelectionNeverDownloadsAnOversizedConfiguration`, `TestTenantSelectionAllowsAnAbsentConfiguration`; `select_size_unix_test.go`: `TestTenantSelectionRefusesOversizedConfigurationBehindSymlink` |
 | OIDC claims | `Provenance.OIDC`; `internal/oidcissuer/issuer.go`: `Claims`, `runnerEnvironment`; `authority_oidc.go`: `Tenant.MintOIDCToken` | `oidc_repository_test.go`: `TestOIDCRepositoryClaimReadsSealedProvenance`; `pool_launcher_test.go`: `TestLauncherPodOIDCIsFresh` |
+| OIDC without an issuer preserves `not_found` and explains controller setup | `internal/nodehost/process_service_reads.go`: `ProcessServices.oidc` | `internal/nodehost/routes_oidc_test.go`: `TestOIDCWithoutIssuerExplainsControllerSetup` |
 
 ### Claims and placement
 
@@ -115,6 +116,13 @@ credential model in `docs/auth.md`, and the decision log
 
 | Rule | Owner | Guard test |
 | --- | --- | --- |
+| Local argument discovery | `cmd/sparkwing/local_run.go`: `prepareNativeLocalRun` inspects declarations before invocation values are parsed; `internal/nodeproto/arguments.go`: public enum errors list choices | `cmd/sparkwing/local_describe_unix_test.go`: `TestNativeLocalPreparationInspectsBeforeParsingRequiredEnum` |
+| Undeclared child refusal | `internal/controller/child_source.go`: `resolveChildRevisions`; `internal/store/intake_runtime.go`: intake authorization names `StartsChildren` | `internal/controller/child_source_test.go`: `TestUndeclaredChildSourceNamesDeclarationMethod`; `internal/store/provenance_reference_test.go`: `TestChildPipelinesMustBeDeclared` |
+| TypeScript scaffold and fleet inventory | `cmd/sparkwing/action_new_typescript.go`: `scaffoldTypeScriptPipeline`; `internal/repos/fleet.go`: `inventoryPin` delegates npm pins to `engine.ReadPin` | `cmd/sparkwing/action_new_test.go`: `TestPipelineNewTypeScriptBootstrapsAndAddsPipelines`; `internal/repos/fleet_test.go`: `TestDeriveFleetIncludesSDKAndTypeScriptLockedPin` |
+| Default CLI profile | `cmd/sparkwing/profiles.go`: `setProfile` switches one saved default; `profile_flag.go`: `applyConfiguredProfile` applies it only to optional-profile CLI invocations; internal local clients bypass it | `cmd/sparkwing/profile_cmd_test.go`: `TestProfileDefaultSwitchControlsCLIAndKeepsLocalHelpersLocal` |
+| Command typo recovery | `internal/clisurface/parse.go`: `Parse` suggests sibling commands through `sparkwingruntime.SuggestClosest` | `internal/clisurface/parse_test.go`: `TestMisspelledCommandSuggestsNearestSibling` |
+| Run status timing | `cmd/sparkwing/runs_view.go`: `writeRunDetail` prints recorded run and job timestamps and completed durations | `cmd/sparkwing/runs_status_contract_test.go`: `TestRunStatusTextIncludesRunAndJobTiming` |
+| Runner warm Actions identity requires HTTPS except on loopback; removed flags and chart values fail | `internal/cluster/production_runtime.go`, `internal/controller/client/github_actions.go`, `charts/sparkwing-runner-bundle/templates/validate.yaml` | `internal/cluster/actions_runtime_test.go`: `TestProductionWarmExchangesActionsIdentity`; `internal/controller/client/github_actions_test.go`: `TestExchangeGitHubActionsRequiresHTTPSExceptLoopback`; `runner_cli_test.go`: `TestWarmRejectsInertFlags`; `internal/clisurface/parse_test.go`: `TestLintRejectsRemovedStaticFlag`; `charts/render_test.go`: `TestRunnerRejectsRemovedWarmModules` |
 | Command registry | `internal/clisurface/registry.go`: `Registry` | `internal/clisurface/contract_test.go` |
 | Route table | `internal/capability/tables.go`: `Routes`; dispatch in `internal/routepolicy` | `internal/capability/policy_test.go` |
 | OpenAPI | `internal/apispec` writes `api/openapi.yaml`; regenerate with `bin/gen-api-docs.sh` | `bin/check-api-spec.sh`; `internal/apispec/final_contract_test.go` |

@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 	"testing/quick"
 
@@ -226,4 +227,24 @@ func (childSourcePublicAccess) GitCredential(context.Context, source.Spec) (sour
 
 func (childSourcePublicAccess) BundleURL(context.Context, string) (string, error) {
 	return "", fmt.Errorf("unexpected bundle")
+}
+
+func TestUndeclaredChildSourceNamesDeclarationMethod(t *testing.T) {
+	e, _, _ := childIntakeFixture(t)
+	tenant, err := e.Store.ForTeam(t.Context(), "a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	parent, err := tenant.ReadRun(t.Context(), "run")
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := parent.Request.Request
+	request.Lineage = runspec.Lineage{ParentRunID: "run", ParentJobID: "job"}
+	a := capability.Authorized{Target: capability.Target{Team: "a", RunID: "run", NodeID: "job"}}
+	err = e.Server.resolveChildRevisions(t.Context(), e.EngineController, a, &request)
+	var refusal *apierr.Error
+	if !errors.As(err, &refusal) || refusal.Code != apierr.Forbidden || !strings.Contains(refusal.Message, "StartsChildren") {
+		t.Fatalf("undeclared child refusal lacks declaration guidance: %v", err)
+	}
 }

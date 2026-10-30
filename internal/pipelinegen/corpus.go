@@ -26,13 +26,13 @@ type Spec struct {
 
 	Expect Expectation
 
-	GuardRequire []string
-	GuardReject  []string
+	GuardWhen   []string
+	GuardUnless []string
 
 	Prompt string
 }
 
-func (s Spec) hasGuards() bool { return len(s.GuardRequire) > 0 || len(s.GuardReject) > 0 }
+func (s Spec) hasGuards() bool { return len(s.GuardWhen) > 0 || len(s.GuardUnless) > 0 }
 
 func LoadCorpus(fsys fs.FS, root string) ([]Spec, error) {
 	entries, err := fs.ReadDir(fsys, root)
@@ -94,10 +94,10 @@ func parseSpec(name, content string) (Spec, error) {
 			spec.Entrypoint = val
 		case "expect":
 			spec.Expect = Expectation(val)
-		case "guard-require":
-			spec.GuardRequire = splitTokens(val)
-		case "guard-reject":
-			spec.GuardReject = splitTokens(val)
+		case "guard-when":
+			spec.GuardWhen = splitTokens(val)
+		case "guard-unless":
+			spec.GuardUnless = splitTokens(val)
 		default:
 			return Spec{}, fmt.Errorf("unknown frontmatter key %q", key)
 		}

@@ -23,10 +23,18 @@ unlock.
 - **logs:** Finished jobs start their final log flush on report, retry or release
   Long local pipelines no longer leave earlier jobs' logs unsealed and hang
   while waiting for log completion.
+- **CLI:** `profiles set --profile NAME --default` switches the saved default for optional-profile controller commands. Explicit profiles override it, `--profile=` selects local for one command, and `--default=false` clears it. Profile list/show report the selection. Commands requiring `--profile` say it must be supplied explicitly in help. Local runs, internal local clients and `schedules --all-repos` stay local.
+
+- **CLI:** `pipeline new --template typescript` scaffolds a minimal TypeScript SDK project and adds further pipelines to its entry. `repos list` includes SDK kind and TypeScript pins resolved from npm lockfiles in JSON, plain and pretty output.
+
+- **CLI:** Local runs accept required pipeline arguments before validation, and invalid public enum values list the allowed choices. Controller URL errors name malformed input and show a valid URL form. Connection failures point to profile inspection, URL repair and network checks. Undeclared child-run errors name `StartsChildren` and the TypeScript equivalent.
+
+- **CLI:** Misspelled command words suggest the nearest command. Plain and pretty `runs status` show run and job start, finish and duration times.
 
 - **store:** PostgreSQL admission locks stay within their store schema
   Independent stores sharing a database no longer defer each other's job releases.
 
+- **runner:** GitHub Actions exchanges require HTTPS for token-request and controller URLs except on loopback. Helm rejects the removed `runner.goCache.warmModules` value with an instruction to unset it, including when set to an empty list.
 - **source:** Remote source selection, including schedules and branch-pinned child runs, no longer fails when the controller cannot change the system temporary directory's permissions. Selection creates a private child and leaves the shared parent unchanged.
 - **source:** Remote source selection enforces the existing 1 MiB configuration limit on Git 2.56, including through configuration symlinks. An oversized blob omitted by the fetch filter is refused instead of being treated as an absent configuration.
 - **memo:** Jobs in checkouts with a machine-local repository identity run normally instead of failing with `digest is not readable`. Memo lookups miss and publication is skipped. Outputs, artifacts and local dependency caches remain available.
@@ -372,6 +380,7 @@ unlock.
 
 ### Added
 
+- **TypeScript SDK:** `npm run pack:local -- --version <engine-version> --destination <directory>` builds a Linux/macOS dogfood tarball without Windows bridges. The package is private and npm refuses to publish it. Release packing still requires both verified Windows bridges.
 - **match:** `CloudSizeLabelPrefix`, `CloudSizeLabelSuffix` and `IsCloudSizeLabel` name the Cloud size label format, so the claim query and the award price read one rule.
 - **release:** The `publish-images` pipeline publishes the controller and runner images for linux/amd64 and linux/arm64 under one index per tag, assembled from the signed binaries onto prebuilt runtime bases with no Docker daemon or emulation, and checks each published binary against SHA256SUMS. `bin/qa-release.sh` runs it, so QA releases ship arm64 images; `build-images -- --runtime-base --push` builds the bases.
 - **controller:** Launcher reconciliation reads current award fences and execution inputs from one store snapshot, including after bootstrap exchange. Cleanup selects the exact observed Kubernetes Job UID. Removed the legacy `Store.SyncLaunchJobs` and `Client.LauncherSync` APIs.
@@ -766,6 +775,11 @@ unlock.
 
 ### Fixed
 
+- **pipeline generator:** Generated guards use `when`/`unless` and valid `where:` placement tokens. Corpus metadata uses `guard-when`/`guard-unless`. Scoring selects the candidate with `--pipeline` instead of passing removed plan and lint flags.
+- **runner:** `warm --github-actions` exchanges the workflow's ID token for controller access and uses the returned verified repository, ref, commit and expiry. The exchange response includes its push binding. The default repository allowlist uses the verified GitHub path instead of the internal repository key.
+- **dashboard (Breaking):** `--allow-remote` starts a non-loopback dashboard with mandatory browser-session authentication, and `--read-only` refuses browser mutations. `--allow-origin` is removed because the controller requires same-origin requests. Changing a running dashboard's address or read-only policy requires stopping it first.
+- **controller:** Startup flag discovery now includes all 61 flags the controller parses. A regression compares the shared help registry with the real controller parser's names and argument requirements.
+- **TypeScript SDK:** Local `file:` directory and tarball pins select the package's exact engine version and validate their npm lockfile source. Tarball bytes or the directory manifest participate in pin identity, using portable source-path separators across hosts.
 - **run:** A pipeline whose `sparkwing.yaml` entrypoint matches no SDK registration fails with `sparkwing.yaml names entrypoint "Gate", which the SDK does not register; it registers "gate", "lint"` and says to register that name or point `entrypoint:` at a registered one. It answered `describe failed: unknown_pipeline (details withheld: secrets not yet known)`, also for `run <pipeline> --help`. Registered names stay withheld while another pipeline's declarations are unknown.
 - **engine:** A pipeline pinned to an SDK version its engine origin never published fails with `engine vX.Y.Z is not published at <origin>` and says to move the pin with `sparkwing upgrade --version`; a QA build adds that it installs only `-qa.N` versions. It reported only `official download returned HTTP 403`.
 - **cli:** `sparkwing --version` prints the version, the same as `sparkwing version`; it answered `unknown flag --version`.
@@ -871,6 +885,7 @@ unlock.
 
 ### Removed
 
+- **runner + cli (Breaking):** Removed inert warm-runner flags `--heartbeat`, `--lease`, `--holder-prefix`, `--trigger-source`, `--accept-working-tree`, `--cpu-ceiling`, `--memory-ceiling`, `--deadline` and `--warm-module`, plus the runner chart's `warmModules` setting. Leases come from the controller; resource ceilings belong to the launcher and timeouts to pipeline jobs. `pipeline lint --static` is removed because lint always analyzes source.
 - **sdk (Breaking):** `sparkwing.ErrNoProject` is removed. No helper could return it: `WorkDir()` is the process working directory, so `Path`, `ReadFile`, `WriteFile`, `Glob`, `Bash` and `Exec` always resolve relative paths against it, and `WorkDir()` panics only when `os.Getwd` fails. Delete `errors.Is(err, sparkwing.ErrNoProject)` checks.
 - **api + wingwire (Breaking):** The HTTP API and the daemon protocol drop or reshape routes, OpenAPI components and message members since v0.67.0. The migration guide lists each one. See [migration guide](docs/migrations/_unreleased.md#wire-surface-changes-since-v0670).
 - **store (Breaking):** Deployment card collection, settlement, fraud warnings and queued refunds move from Store to Operator. See [migration guide](docs/migrations/_unreleased.md#card-workers-use-operator).

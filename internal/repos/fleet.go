@@ -8,6 +8,10 @@ import (
 	"strings"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/engine"
+	"github.com/sparkwing-dev/sparkwing/internal/engineid"
+	"github.com/sparkwing-dev/sparkwing/internal/pipelineentry"
+
 	"golang.org/x/mod/modfile"
 	"golang.org/x/mod/semver"
 )
@@ -25,6 +29,7 @@ type RunObservation struct {
 
 type WorktreeRef struct {
 	Path string
+	SDK  engineid.SDKKind
 	Pin  string
 }
 
@@ -32,6 +37,7 @@ type Repo struct {
 	Primary string
 	Name    string
 
+	SDK engineid.SDKKind
 	Pin string
 
 	Replace      string
@@ -46,7 +52,7 @@ type Repo struct {
 func (r Repo) DivergentWorktrees() []WorktreeRef {
 	var out []WorktreeRef
 	for _, w := range r.Worktrees {
-		if w.Pin != "" && w.Pin != r.Pin {
+		if w.Pin != "" && (w.Pin != r.Pin || w.SDK != r.SDK) {
 			out = append(out, w)
 		}
 	}
@@ -79,6 +85,21 @@ func canonPath(p string) string {
 		return r
 	}
 	return c
+}
+
+func inventoryPin(sparkwingDir string) (engineid.SDKKind, string, string) {
+	if ts, err := pipelineentry.IsTypeScript(sparkwingDir); err == nil && ts {
+		resolved, err := engine.ReadPin(sparkwingDir, engineid.TypeScriptSDK)
+		if err != nil {
+			return engineid.TypeScriptSDK, "", ""
+		}
+		return engineid.TypeScriptSDK, resolved.Version, ""
+	}
+	pin, replace := SDKPin(sparkwingDir)
+	if pin == "" && replace == "" {
+		return "", "", ""
+	}
+	return engineid.GoSDK, pin, replace
 }
 
 func SDKPin(sparkwingDir string) (pin, replace string) {
@@ -117,24 +138,25 @@ func DeriveFleet(cands []Candidate, runs []RunObservation, git Git, latest strin
 		}
 		r, ok := byPrimary[primary]
 		if !ok {
-			pin, replace := SDKPin(filepath.Join(primary, ".sparkwing"))
+			sdk, pin, replace := inventoryPin(filepath.Join(primary, ".sparkwing"))
 			r = &Repo{
 				Primary: primary,
 				Name:    filepath.Base(primary),
+				SDK:     sdk,
 				Pin:     pin,
 				Replace: replace,
 				Status:  "ok",
 				Latest:  latest,
 			}
 			if pin != "" && guidesBehind != nil {
-				r.GuidesBehind = guidesBehind(pin, latest)
+				r.GuidesBehind = guidesBehind("v"+strings.TrimPrefix(pin, "v"), latest)
 			}
 			byPrimary[primary] = r
 			order = append(order, primary)
 		}
 		if canonPath(c.Path) != primary {
-			pin, _ := SDKPin(filepath.Join(canonPath(c.Path), ".sparkwing"))
-			r.Worktrees = append(r.Worktrees, WorktreeRef{Path: canonPath(c.Path), Pin: pin})
+			sdk, pin, _ := inventoryPin(filepath.Join(canonPath(c.Path), ".sparkwing"))
+			r.Worktrees = append(r.Worktrees, WorktreeRef{Path: canonPath(c.Path), SDK: sdk, Pin: pin})
 		}
 	}
 

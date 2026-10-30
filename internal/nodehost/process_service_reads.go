@@ -153,6 +153,10 @@ func (s *ProcessServices) oidc(request *http.Request, auth capability.Authorized
 	}
 	token, err := s.OIDC(request.Context(), auth, body.Audience)
 	if err != nil {
+		var failure *apierr.Error
+		if errors.As(err, &failure) && failure.Code == apierr.NotFound {
+			return nil, executorError(apierr.NotFound, "OIDC tokens are unavailable for this run. Run the pipeline through a controller with an OIDC issuer configured. See docs/oidc.md for signing key and issuer setup.")
+		}
 		return nil, serviceUnavailable()
 	}
 	if token.Token == "" || token.ExpiresAt.IsZero() {

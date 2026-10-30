@@ -44,7 +44,7 @@ Create a rule through the team-admin route with an idempotency key. JSON preserv
 | `--branch BRANCH` | Branch name patterns the rule admits, with * and ? wildcards that do not cross a slash; omitted, every ref of the repositories qualifies, tags included. Repeatable; comma-separated values are accepted. |
 | `--source SOURCE` | Admit only runs that a GitHub App webhook delivery started; omitted, schedules whose commit the GitHub App resolved also qualify, while runs proved by GitHub Actions or fetched by the controller never do. Values: github. |
 | `--route` | Also keep runs from the matching repositories and branches that select no runner on this pool's self-hosted runners instead of Sparkwing Cloud. |
-| `--profile PROFILE` | Controller connection profile from your config. Omit it to use the local controller. |
+| `--profile PROFILE` | Controller connection profile from your config. Optional profiles use the saved default, then local; --profile= selects local. |
 
 ## `sparkwing pools disallow`
 
@@ -62,7 +62,7 @@ Delete the selected pool rule through the team-admin route. JSON retains whether
 | `--help-all` | Include uncommon flags in command help. |
 | `--pool POOL` | Runner pool name. (required) |
 | `--rule RULE` | ID of the pool rule to delete, as pools list shows it. (required) |
-| `--profile PROFILE` | Controller connection profile from your config. Omit it to use the local controller. |
+| `--profile PROFILE` | Controller connection profile from your config. Optional profiles use the saved default, then local; --profile= selects local. |
 
 ## `sparkwing pools list`
 
@@ -78,4 +78,4 @@ Read controller-granted reservations and access rules. JSON emits each pool with
 | `-C, --checkout PATH` | Resolve the project from this local checkout path. |
 | `-h, --help` | Show command help without executing. |
 | `--help-all` | Include uncommon flags in command help. |
-| `--profile PROFILE` | Controller connection profile from your config. Omit it to use the local controller. |
+| `--profile PROFILE` | Controller connection profile from your config. Optional profiles use the saved default, then local; --profile= selects local. |

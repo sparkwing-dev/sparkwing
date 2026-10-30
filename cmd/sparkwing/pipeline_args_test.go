@@ -166,8 +166,8 @@ func presentationFixture(pipelines ...nodeproto.PipelineDescription) runspec.Des
 	return presentation
 }
 
-func TestPipelineArgumentErrorsWithholdPrivateDeclarationText(t *testing.T) {
-	schema := nodeproto.PipelineDescription{Name: "demo", Args: []nodeproto.ArgumentDescription{{Name: "unknown-private-name", Short: "r", Type: "string", Enum: []string{"unknown-private-choice"}}}}
+func TestPipelineArgumentErrorsWithholdSecretDeclarationText(t *testing.T) {
+	schema := nodeproto.PipelineDescription{Name: "demo", Args: []nodeproto.ArgumentDescription{{Name: "unknown-private-name", Short: "r", Type: "string", Secret: true, Enum: []string{"unknown-private-choice"}}}}
 	for _, args := range [][]string{{"-r", "invalid"}, {"-r"}} {
 		_, err := parsePipelineArgs(schema, args)
 		if err == nil || strings.Contains(err.Error(), "unknown-private") {

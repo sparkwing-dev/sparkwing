@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"math"
 	"os"
 	"slices"
 	"strconv"
@@ -13,7 +12,6 @@ import (
 	"time"
 
 	flag "github.com/spf13/pflag"
-	"k8s.io/apimachinery/pkg/api/resource"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controller/client"
@@ -34,11 +32,7 @@ type RunnerOptions struct {
 	SubmitAccept     procenv.SubmitAccept
 	Loop             runners.LoopConfig
 	Heartbeat, Lease time.Duration
-	WarmModules      []string
 	MetricsAddress   string
-	CPUCeiling       *float64
-	MemoryCeiling    *int64
-	Deadline         *time.Duration
 	Bearer           func(context.Context) (string, error) `json:"-"`
 	Output, Checkout string
 }
@@ -197,9 +191,6 @@ func runnerOptions(cfg userconfig.RunnerConfig, fs *flag.FlagSet, version string
 	if cfg.MaxConcurrent != nil {
 		options.Loop.MaxConcurrent = *cfg.MaxConcurrent
 	}
-	if fs.Changed("holder-prefix") {
-		return options, errors.New("runner holder-prefix is unavailable: the controller claim contract owns holder identity")
-	}
 	if options.Loop.MaxConcurrent < 1 {
 		return options, errors.New("runner max-concurrent must be positive")
 	}
@@ -240,19 +231,6 @@ func runnerOptions(cfg userconfig.RunnerConfig, fs *flag.FlagSet, version string
 
 func warmOptions(options RunnerOptions, fs *flag.FlagSet) (RunnerOptions, error) {
 	options.MetricsAddress = textFlag(fs, "metrics-addr")
-	if err := runnerCeilings(&options, fs); err != nil {
-		return options, err
-	}
-	sources, _ := fs.GetStringSlice("trigger-source")
-	if len(sources) > 0 {
-		return options, errors.New("--trigger-source is unavailable: the controller claim contract has no source filter")
-	}
-	modules, _ := fs.GetStringSlice("warm-module")
-	var err error
-	options.WarmModules, err = parseWarmModules(strings.Join(modules, ","), options.Loop.Version)
-	if err != nil {
-		return options, fmt.Errorf("--warm-module: %w", err)
-	}
 	if fs.Changed("max-claims-before-restart") {
 		value, err := strconv.Atoi(textFlag(fs, "max-claims-before-restart"))
 		if err != nil || value < 0 {
@@ -276,40 +254,7 @@ func warmOptions(options RunnerOptions, fs *flag.FlagSet) (RunnerOptions, error)
 	if claimJobs {
 		options.Loop.Kinds = append(options.Loop.Kinds, capability.UnitEval, capability.UnitNode)
 	}
-	if fs.Changed("deadline") {
-		value, err := time.ParseDuration(textFlag(fs, "deadline"))
-		if err != nil || value <= 0 {
-			return options, errors.New("--deadline must be positive")
-		}
-		options.Deadline = &value
-	}
 	return options, nil
-}
-
-func runnerCeilings(options *RunnerOptions, fs *flag.FlagSet) error {
-	for _, name := range []string{"cpu-ceiling", "memory-ceiling"} {
-		if !fs.Changed(name) {
-			continue
-		}
-		quantity, err := resource.ParseQuantity(textFlag(fs, name))
-		if err != nil || quantity.Sign() <= 0 {
-			return fmt.Errorf("--%s requires a positive quantity", name)
-		}
-		if name == "cpu-ceiling" {
-			value := quantity.AsApproximateFloat64()
-			if math.IsInf(value, 0) || math.IsNaN(value) {
-				return errors.New("--cpu-ceiling must be finite")
-			}
-			options.CPUCeiling = &value
-		} else {
-			if quantity.Cmp(*resource.NewQuantity(math.MaxInt64, resource.DecimalSI)) > 0 {
-				return errors.New("--memory-ceiling must fit in a signed 64-bit byte count")
-			}
-			value := quantity.Value()
-			options.MemoryCeiling = &value
-		}
-	}
-	return nil
 }
 
 func runnerDuration(name string, value *string, fallback time.Duration) (time.Duration, error) {
@@ -336,7 +281,7 @@ func (cli RunnerCLI) authorizeActions(ctx context.Context, fs *flag.FlagSet, opt
 		return err
 	}
 	push, expires := issued.Capability.Binding.Push, issued.Capability.ExpiresAt
-	if issued.Raw == "" || issued.Capability.Team != team || push == nil || push.RepositoryKey == "" || push.Ref == "" || push.SHA == "" || push.WorkflowRunID == "" || expires == nil || !expires.After(time.Now()) {
+	if issued.Raw == "" || issued.Capability.Team != team || push == nil || push.RepositoryKey == "" || push.Repository == "" || push.Ref == "" || push.SHA == "" || push.WorkflowRunID == "" || expires == nil || !expires.After(time.Now()) {
 		return errors.New("GitHub Actions exchange returned no live push-bound capability")
 	}
 	options.Bearer = func(ctx context.Context) (string, error) {
@@ -348,7 +293,7 @@ func (cli RunnerCLI) authorizeActions(ctx context.Context, fs *flag.FlagSet, opt
 	options.Loop.ClaimUntil = *expires
 	options.actions = &githubActionsSource{repository: push.RepositoryKey, token: os.Getenv("GITHUB_TOKEN")}
 	if options.Config.Repos == nil {
-		options.Config.Repos = []string{push.RepositoryKey}
+		options.Config.Repos = []string{"github.com/" + push.Repository}
 	}
 	if !slices.Contains(options.Loop.Labels, "github-actions") {
 		options.Loop.Labels = append(options.Loop.Labels, "github-actions")

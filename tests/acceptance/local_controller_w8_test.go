@@ -93,7 +93,7 @@ func (r *localRuntimeW8) SetStay(_ context.Context, stay bool) error {
 	return nil
 }
 
-func (r *localRuntimeW8) EnsureDashboard(context.Context, string) error { return nil }
+func (r *localRuntimeW8) EnsureDashboard(context.Context, string, bool) error { return nil }
 
 func (r *localRuntimeW8) Drain(context.Context) error {
 	r.drains++

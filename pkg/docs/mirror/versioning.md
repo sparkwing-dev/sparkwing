@@ -10,6 +10,15 @@ TypeScript pipelines pin `@sparkwing/sdk` through their manifest and native
 lockfile. A version range alone cannot select an exact engine. Go `vX.Y.Z` and
 TypeScript `X.Y.Z` identify engine `vX.Y.Z`, including any prerelease suffix.
 
+For local TypeScript development, pin a version-stamped SDK directory with
+`file:../sdk` or a tarball such as `file:vendor/sparkwing-sdk-0.68.0.tgz`.
+Relative tarball paths without `file:` also work. Run npm install to update the
+native lockfile. Sparkwing reads the local package's name and version without
+executing it, checks that the lockfile resolves that source, and selects that
+exact release's engine. Local pins retain signed engine verification. Keep local
+sources inside the repository when they must travel with a fetched checkout.
+Tarball bytes, or a directory's package manifest, participate in pin identity.
+
 A Go SDK `replace` directive that applies to the required version disables engine
 pinning for that run. Sparkwing warns and uses the installed CLI's engine to build
 and run the replacement. It records the replacement and installed executable's

@@ -14,7 +14,7 @@ This repo's pipelines
 - `hooks` -- Install / uninstall git pre-commit + pre-push + post-commit hooks
 - `lint` -- Check pipeline source for idiomatic anti-patterns (enforced gate)
 - `list` -- Enumerate every pipeline with metadata
-- `new` -- Scaffold a new Go pipeline
+- `new` -- Scaffold a new Go or TypeScript pipeline
 - `plan` -- Render the runtime-resolved DAG without dispatching any jobs
 - `sparks` -- Manage sparks libraries declared in .sparkwing/sparkwing.yaml
 - `trigger` -- Submit a pipeline run to a controller
@@ -120,7 +120,6 @@ Check pipeline source for idiomatic anti-patterns (enforced gate)
 | `--pipeline NAME` | Pipeline name. |
 | `--rules` | Print the lint rules with what each forbids and why, without analyzing any source. |
 | `--dir DIR` | Analyze Go pipeline source in this directory instead of .sparkwing/jobs, or .sparkwing when there is no jobs directory. |
-| `--static` | Accepted but ignored; lint always analyzes source without running pipelines. |
 
 ## `sparkwing pipeline list`
 
@@ -139,7 +138,7 @@ Enumerate every pipeline with metadata
 
 ## `sparkwing pipeline new`
 
-Scaffold a new Go pipeline
+Scaffold a new Go or TypeScript pipeline
 
 ### Flags
 
@@ -150,7 +149,7 @@ Scaffold a new Go pipeline
 | `-h, --help` | Show command help without executing. |
 | `--help-all` | Include uncommon flags in command help. |
 | `--pipeline NAME` | Pipeline name. (required) |
-| `--template SHAPE` | Built-in shape to scaffold, minimal by default. |
+| `--template SHAPE` | Go shape to scaffold, minimal by default; typescript creates a minimal TypeScript pipeline. |
 | `--on EVENT` | Trigger events to declare, comma separated, replacing the shape's default trigger; manual declares no trigger. |
 | `--hidden` | Mark the new pipeline hidden in sparkwing.yaml so pipeline list omits it unless --all is given. |
 | `--short TEXT` | One-line description to write into the generated pipeline source instead of a placeholder. |
@@ -320,7 +319,7 @@ Against Sparkwing Cloud, a run without --runner executes on Cloud unless a repos
 | `-C, --checkout PATH` | Resolve the project from this local checkout path. |
 | `-h, --help` | Show command help without executing. |
 | `--help-all` | Include uncommon flags in command help. |
-| `--profile NAME` | Controller connection profile from your config. Omit it to use the local controller. (required) |
+| `--profile NAME` | Controller connection profile from your config. Must be supplied explicitly. (required) |
 | `--detach` | Return once the controller accepts the run instead of following its logs to the end; refused with --runner here. |
 | `--working-tree` | Run an uploaded snapshot of this checkout, with uncommitted edits, deletions and untracked files that .gitignore does not exclude, instead of a pushed commit; the upload is refused if it holds secret-shaped files or values, submodules, unsafe symlinks, more than 100,000 files or more than 500 MiB. |
 | `--allow-secret-file PATH` | Include this repository-relative file in a --working-tree snapshot even though its name or content looks like a secret; the trigger fails if no snapshot file has that path, the secret-value scan still applies, and it is refused without --working-tree. Repeatable; comma-separated values are accepted. |

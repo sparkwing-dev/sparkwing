@@ -12,6 +12,9 @@ import (
 
 	"golang.org/x/mod/module"
 
+	"github.com/sparkwing-dev/sparkwing/internal/engine"
+	"github.com/sparkwing-dev/sparkwing/internal/engineid"
+	"github.com/sparkwing-dev/sparkwing/internal/pipelineentry"
 	"github.com/sparkwing-dev/sparkwing/internal/pipelinelint"
 	"github.com/sparkwing-dev/sparkwing/pkg/pipelines"
 	"github.com/sparkwing-dev/sparkwing/pkg/projectconfig"
@@ -514,5 +517,46 @@ func TestInitialProjectUsesExplicitEmptyPipelines(t *testing.T) {
 	}
 	if cfg.Pipelines == nil || len(cfg.Pipelines) != 0 {
 		t.Fatal("initial registry must be explicitly empty")
+	}
+}
+
+func TestPipelineNewTypeScriptBootstrapsAndAddsPipelines(t *testing.T) {
+	repo := t.TempDir()
+	t.Chdir(repo)
+	t.Setenv("PATH", t.TempDir())
+	for _, name := range []string{"hello", "second"} {
+		var commandErr error
+		captureStdout(t, func() {
+			commandErr = runSparkwing([]string{"pipeline", "new", "--pipeline", name, "--template", "typescript", "--short", "Say hello", "--on", "push", "-o", "json"})
+		})
+		if commandErr != nil {
+			t.Fatal(commandErr)
+		}
+	}
+	dir := filepath.Join(repo, ".sparkwing")
+	ts, err := pipelineentry.IsTypeScript(dir)
+	if err != nil || !ts {
+		t.Fatalf("scaffold is not TypeScript: %v", err)
+	}
+	if _, err := engine.ReadPin(dir, engineid.TypeScriptSDK); err != nil {
+		t.Fatalf("scaffold SDK pin: %v", err)
+	}
+	cfg, err := projectconfig.Load(filepath.Join(dir, "sparkwing.yaml"))
+	if err != nil || len(cfg.Pipelines) != 2 {
+		t.Fatalf("scaffold config: %+v: %v", cfg, err)
+	}
+	for _, p := range cfg.Pipelines {
+		if p.Entrypoint != kebabToPascal(p.Name) || p.On.Push == nil {
+			t.Fatalf("pipeline declaration: %+v", p)
+		}
+	}
+	for _, filename := range []string{"jobs/hello.ts", "jobs/second.ts"} {
+		body, err := os.ReadFile(filepath.Join(dir, filename))
+		if err != nil || !strings.Contains(string(body), "Say hello") {
+			t.Fatalf("pipeline source: %s: %v", body, err)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(dir, "go.mod")); !os.IsNotExist(err) {
+		t.Fatalf("TypeScript scaffold wrote a Go module: %v", err)
 	}
 }

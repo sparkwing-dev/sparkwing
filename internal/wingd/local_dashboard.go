@@ -6,12 +6,13 @@ import (
 )
 
 type localDashboardRequest struct {
-	ctx     context.Context
-	address string
-	result  chan error
+	ctx      context.Context
+	address  string
+	readOnly bool
+	result   chan error
 }
 
-func (r *localRuntime) EnsureDashboard(ctx context.Context, address string) error {
+func (r *localRuntime) EnsureDashboard(ctx context.Context, address string, readOnly bool) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -25,7 +26,7 @@ func (r *localRuntime) EnsureDashboard(ctx context.Context, address string) erro
 	if !ready {
 		return errors.New("wingd: local controller is not ready")
 	}
-	request := localDashboardRequest{ctx: ctx, address: address, result: make(chan error, 1)}
+	request := localDashboardRequest{ctx: ctx, address: address, readOnly: readOnly, result: make(chan error, 1)}
 	select {
 	case session.dashboard <- request:
 	case <-session.done:

@@ -16,6 +16,7 @@ import (
 	"go.yaml.in/yaml/v3"
 
 	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
+	"github.com/sparkwing-dev/sparkwing/internal/pipelineentry"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/color"
 	"github.com/sparkwing-dev/sparkwing/pkg/projectconfig"
@@ -38,6 +39,10 @@ func runPipelineNew(inv clisurface.Invocation) error {
 	if err != nil {
 		return err
 	}
+	if template == "typescript" {
+		return scaffoldTypeScriptPipeline(cwd, inv, mode)
+	}
+
 	sparkwingDir, ok := walkUpForSparkwing(cwd)
 	bootstrapped := !ok
 	if !ok {
@@ -65,7 +70,7 @@ func runPipelineNew(inv clisurface.Invocation) error {
 	if !ok {
 		return fmt.Errorf("new: unknown shape %q -- pipeline new takes a shape, one of: %s\n"+
 			"  a worked pipeline to read instead: sparkwing examples --example %s --body",
-			template, strings.Join(builtinShapeNames(), ", "), template)
+			template, strings.Join(append(builtinShapeNames(), "typescript"), ", "), template)
 	}
 	trigger, err := resolveTrigger(shape, parseOnFlag(inv.Flags["on"]), inv.Has("on"))
 	if err != nil {
@@ -333,12 +338,23 @@ func scaffoldGoFromTemplate(sparkwingDir, name string, hidden bool, short, tmpl 
 }
 
 func finishScaffold(sparkwingDir, file, name string, bootstrapped bool, trigger, mode string) error {
-	if err := ensureGitignoreEntry(sparkwingDir, "sparkwing-pipeline"); err != nil {
-		fmt.Fprintf(os.Stderr, "init: note: could not update .sparkwing/.gitignore; add sparkwing-pipeline to an ignore file: %v\n", err)
-	}
-	tidied, err := tidySkeleton(context.Background(), sparkwingDir)
+	typescript, err := pipelineentry.IsTypeScript(sparkwingDir)
 	if err != nil {
 		return err
+	}
+	ignored := "sparkwing-pipeline"
+	if typescript {
+		ignored = "node_modules/"
+	}
+	if err := ensureGitignoreEntry(sparkwingDir, ignored); err != nil {
+		fmt.Fprintf(os.Stderr, "init: note: could not update .sparkwing/.gitignore; add %s to an ignore file: %v\n", ignored, err)
+	}
+	tidied := false
+	if !typescript {
+		tidied, err = tidySkeleton(context.Background(), sparkwingDir)
+		if err != nil {
+			return err
+		}
 	}
 	if mode == "json" {
 		return json.NewEncoder(os.Stdout).Encode(struct {

@@ -57,6 +57,7 @@ func addProfile(inv clisurface.Invocation, format string) error {
 		if profiles == nil {
 			profiles = make(map[string]userconfig.Profile)
 		}
+		p.Default = profiles[name].Default
 		profiles[name] = p.Profile
 		return nil
 	})
@@ -68,7 +69,7 @@ func addProfile(inv clisurface.Invocation, format string) error {
 
 func checkProfileConnection(ctx context.Context, p *namedProfile) error {
 	if reach := probeController(ctx, p); reach.Status == "fail" {
-		return fmt.Errorf("profiles add: controller probe failed: %w", reach.err)
+		return fmt.Errorf("profiles add: controller probe failed for %s: %w; check the --controller URL, your network and whether the controller is running", p.ControllerURL(), reach.err)
 	}
 	if p.ControllerToken() == "" {
 		return &apierr.Error{Code: apierr.BadRequest, Message: "profiles add: --token-stdin is required to verify controller access; use --no-probe to save without verification"}
@@ -149,13 +150,17 @@ func normalizeControllerURL(raw string) (string, error) {
 	trimmed := strings.TrimRight(strings.TrimSpace(raw), "/")
 	u, err := neturl.Parse(trimmed)
 	if err != nil {
-		return "", &apierr.Error{Code: apierr.BadRequest, Message: "profiles: --controller must be an http or https URL"}
-	}
-	if (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
-		return "", &apierr.Error{Code: apierr.BadRequest, Message: "profiles: --controller must be an http or https URL"}
+		return "", &apierr.Error{Code: apierr.BadRequest, Message: "profiles: --controller must be an http or https URL; use --controller https://HOST"}
 	}
 	if u.User != nil || u.RawQuery != "" || u.Fragment != "" {
 		return "", &apierr.Error{Code: apierr.BadRequest, Message: "profiles: --controller must not contain credentials, query parameters or a fragment"}
+	}
+	if (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
+		value := "value"
+		if u.Scheme == "" && !strings.Contains(trimmed, "/") {
+			value = fmt.Sprintf("%q", trimmed)
+		}
+		return "", &apierr.Error{Code: apierr.BadRequest, Message: fmt.Sprintf("profiles: --controller %s must be an http or https URL; use --controller https://HOST", value)}
 	}
 	return trimmed, nil
 }
