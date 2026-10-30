@@ -165,6 +165,7 @@ credential model in `docs/auth.md`, and the decision log
 | Release schema checks compare the neutral SQL baseline with the previous tag | `.sparkwing/jobs/release.go`: `checkSchemaBreak`, `schemaSQLDrift` | `.sparkwing/jobs/release_schema_changelog_test.go`: `TestSchemaGateComparesTheNeutralBaseline` |
 | Release notes stay uncommitted until every gate passes | `.sparkwing/jobs/release.go`: `prepareChangelogJob`, `commitChangelogJob`, `Release.Plan` | `.sparkwing/jobs/release_atomic_test.go`: `TestReleaseGateFailureAfterPreparationLeavesHEADUnchanged`; `.sparkwing/jobs/release_plan_test.go`: `TestReleasePlanCommitsOnlyAfterAllGates` |
 | Release gates fetch comparison tags missing from a shallow job checkout | `.sparkwing/jobs/release.go`: `fileAtTag` | `.sparkwing/jobs/release_checkout_tags_test.go`: `TestReleaseGatesFetchThePreviousTagInTheJobCheckout`, `TestReleaseMissingTagExplainsTheJobCheckoutAndRecovery` |
+| npm uploads require matching `@sparkwing/sdk` 0.x archives, safe dist-tags, a dry run and provenance | `bin/publish-typescript.mjs` | `bin/typescript_publish_test.go`: `TestTypeScriptPublicationRequiresAnExactImmutablePackage`; `bin/typescript_release_test.go`: `TestTypeScriptReleaseRequiresBothNativeBridges` |
 
 ## Test and gate workflow
 

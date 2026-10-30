@@ -109,19 +109,68 @@ source. SDK text uses LF endings so source digests agree across operating system
 Assembly checks both receipts against that source and the engine release version,
 then packs the SDK. The publication job depends on assembly and publishes that
 tarball without rebuilding it. Stable releases eligible for GitHub Latest use the
-npm `latest` tag. Prereleases use `next`, and older stable rebuilds use a
-version-specific `release-` tag.
+npm `latest` tag only after an independent npm version check. Prereleases use
+`next`, and older stable rebuilds use a version-specific `release-` tag.
+
+`bin/publish-typescript.mjs` refuses major versions above 0, a packed package name
+other than `@sparkwing/sdk`, or a packed version different from the release tag
+without `v`. There is no major-version override. An explicit `latest` requires a
+stable version newer than every published stable `0.x` from
+`npm view @sparkwing/sdk versions --json`; only an E404 means no versions.
+Other lookup failures stop publication. Prereleases must use `next`. These checks
+prevent a new publication from moving `latest` backwards.
 
 npm publication runs before the immutable GitHub release becomes public. A retry
 accepts an existing SDK version only when its registry integrity matches the packed
 tarball. Different bytes, missing integrity, failed lookup and failed publication
 stop the job. Package lifecycle scripts run during assembly, with publishing scripts
-disabled when uploading the checked tarball.
+disabled when uploading the checked tarball. An identical retry skips publishing
+and leaves all npm tags unchanged. Before each real upload, the publisher runs
+`npm publish --dry-run` with the same arguments, including `--provenance`, and logs
+the JSON file list and packed size. A failed dry run stops the upload. The release
+job grants `id-token: write` for npm provenance.
 
 The release repository needs an `NPM_TOKEN` Actions secret authorized to publish
 `@sparkwing/sdk`. An empty secret fails before the publication job signs assets. Native workflow
 definitions and local graph checks do not establish Windows runtime support.
 Both Windows jobs must execute successfully before that evidence is claimed.
+
+After publication-tool fixes reach `main`, rebuild an existing tag with a new
+dispatch, rather than rerunning an old workflow attempt:
+
+```bash
+gh workflow run release.yaml --repo sparkwing-dev/sparkwing --ref main \
+  -f tag=v0.68.1 -F verify_only=false -F publish_images=false
+```
+
+This builds `v0.68.1` source, uses `main`'s publication tools (including the npm
+guards), and publishes release assets with image publication skipped. It does
+not create or move the Git tag. `NPM_TOKEN` must already be configured.
+
+For an accidental npm publication, first move `latest` to a verified good `0.x`
+version and check the result:
+
+```bash
+npm dist-tag add "@sparkwing/sdk@<version>" latest
+npm view @sparkwing/sdk dist-tags --json
+```
+
+Within 72 hours, remove the bad version if the
+[npm unpublish policy](https://docs.npmjs.com/policies/unpublish/) permits it
+(including the dependent-package restriction):
+
+```bash
+npm unpublish "@sparkwing/sdk@<bad-version>"
+```
+
+After that window, or if npm refuses removal, warn installers instead:
+
+```bash
+npm deprecate "@sparkwing/sdk@<bad-version>" "Do not use; install @sparkwing/sdk@<version>."
+```
+
+Recheck dist-tags after recovery. The package/version pair can never be reused,
+even after unpublishing; publish corrected bytes under a fresh `0.x` version.
 
 For Windows verification without publication, dispatch `release.yaml` on the
 branch to check with `verify_only=true`, `publish_images=false`, and a release
