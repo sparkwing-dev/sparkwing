@@ -33,7 +33,7 @@ func (Release) ShortHelp() string {
 }
 
 func (Release) Help() string {
-	return "Cuts a release from the commit in the working tree: refuses to start unless SPARKWING_HOME names a directory other than ~/.sparkwing, resolves the version, checks it is ahead of the newest tag origin carries, renames the CHANGELOG.md [Unreleased] section to it, rolls docs/migrations/_unreleased.md to vX.Y.Z.md with a fresh placeholder behind it, adds the index row, repoints the section's (Breaking) links at the rolled guide, commits all of that as one change, then pushes the branch and an annotated vX.Y.Z tag. It refuses to tag when a (Breaking) entry has no section in the guide being rolled, because that prose is written by a person. It refuses nothing about where origin's branch tip is. The .github/workflows/release.yaml workflow takes over from the tag push and checks nothing: it resolves the tag to a commit, builds the binaries and images, signs and publishes them, and creates the GitHub release from the tag's changelog section, falling back to the annotated tag message and then to a pointer at CHANGELOG.md when that source carries no section. A failed build publishes nothing; the fix is a later patch tag. Before changing the changelog, the release cut checks published module-version freshness, Go directive policy, SDK pin coherence and changelog links alongside build, full lint and the short test suite, under one fixed ten-minute budget. Local replacement checkouts are not required to match origin/main. Rolled changelog and migration-guide checks run before the changelog commit, and every refusal precedes push-tag. The race, Postgres, chaos and browser suites are the heavier classes that `gate` and `pre-release` run on demand and in hosted CI. This pipeline never builds or publishes artifacts itself."
+	return "Cuts a release from the commit in the working tree: refuses to start unless SPARKWING_HOME names a directory other than ~/.sparkwing, resolves the version, checks it is ahead of the newest tag origin carries, renames the CHANGELOG.md [Unreleased] section to it, rolls docs/migrations/_unreleased.md to vX.Y.Z.md with a fresh placeholder behind it, adds the index row, repoints the section's (Breaking) links at the rolled guide, stages all of that, checks schema and wire change coverage, commits after every gate passes, then pushes the branch and an annotated vX.Y.Z tag. It refuses to tag when a (Breaking) entry has no section in the guide being rolled, because that prose is written by a person. It refuses nothing about where origin's branch tip is. The .github/workflows/release.yaml workflow takes over from the tag push and checks nothing: it resolves the tag to a commit, builds the binaries and images, signs and publishes them, and creates the GitHub release from the tag's changelog section, falling back to the annotated tag message and then to a pointer at CHANGELOG.md when that source carries no section. A failed build publishes nothing; the fix is a later patch tag. Before changing the changelog, the release cut checks published module-version freshness, Go directive policy, SDK pin coherence and changelog links alongside build, full lint and the short test suite, under one fixed ten-minute budget. Local replacement checkouts are not required to match origin/main. Rolled changelog, migration-guide, schema and wire checks run before the changelog commit. A gate failure after preparation leaves HEAD unchanged with the prepared release files staged for inspection. Every refusal precedes push-tag. The race, Postgres, chaos and browser suites are the heavier classes that `gate` and `pre-release` run on demand and in hosted CI. This pipeline never builds or publishes artifacts itself."
 }
 
 func (Release) Examples() []sparkwing.Example {
@@ -76,7 +76,7 @@ func (r *Release) Plan(_ context.Context, plan *sparkwing.Plan, in ReleaseArgs, 
 	})
 
 	// safety: the class judges the tree the tag will carry, and it judges it
-	// before prepare-changelog commits, so no lint or suite reads a checkout
+	// before prepare-changelog writes, so no lint or suite reads a checkout
 	// that changes under it.
 	cutChecks := sparkwing.Job(plan, "release-cut-checks", &releaseCutChecksJob{}).Cache(lintCache())
 
@@ -98,11 +98,17 @@ func (r *Release) Plan(_ context.Context, plan *sparkwing.Plan, in ReleaseArgs, 
 	})
 	wireGate.Needs(discover, changelog)
 
+	commit := sparkwing.Job(plan, "commit-changelog", &commitChangelogJob{
+		Version: versionRef,
+		RepoDir: repoDir,
+	})
+	commit.Needs(changelog, schemaGate, wireGate)
+
 	pushTag := sparkwing.Job(plan, "push-tag", &pushTagJob{
 		Version: versionRef,
 		RepoDir: repoDir,
 	})
-	pushTag.Needs(validate, clean, changelog, schemaGate, wireGate, cutChecks)
+	pushTag.Needs(commit)
 	return nil
 }
 
@@ -356,6 +362,26 @@ func (j *prepareChangelogJob) run(ctx context.Context) error {
 	if _, err := runGitIn(ctx, j.RepoDir, append([]string{"add"}, staged...)...); err != nil {
 		return fmt.Errorf("release: git add changelog: %w", err)
 	}
+	sparkwing.Info(ctx, "staged release notes for %s; commit waits for the schema and wire gates", version)
+	return nil
+}
+
+type commitChangelogJob struct {
+	sparkwing.Base
+	RepoDir string
+	Version sparkwing.Ref[string]
+}
+
+func (j *commitChangelogJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
+	sparkwing.Step(w, "run", j.run).DryRun(func(ctx context.Context) error {
+		sparkwing.Info(ctx, "dry-run: would commit prepared release notes for %s after all gates pass", j.Version.Get(ctx))
+		return nil
+	})
+	return nil, nil
+}
+
+func (j *commitChangelogJob) run(ctx context.Context) error {
+	version := j.Version.Get(ctx)
 	pending, err := runGitIn(ctx, j.RepoDir, "diff", "--cached", "--name-only")
 	if err != nil {
 		return fmt.Errorf("release: read the staged set: %w", err)
@@ -364,7 +390,8 @@ func (j *prepareChangelogJob) run(ctx context.Context) error {
 		sparkwing.Info(ctx, "the rename and the guide are already committed for %s; nothing to commit", version)
 		return nil
 	}
-	if _, err := runGitIn(ctx, j.RepoDir, "commit", "-m", releaseCommitSubject(version, roll.needed)); err != nil {
+	rolled := slices.Contains(strings.Fields(pending), migrationsDirRel+"/"+version+".md")
+	if _, err := runGitIn(ctx, j.RepoDir, "commit", "-m", releaseCommitSubject(version, rolled)); err != nil {
 		return fmt.Errorf("release: git commit CHANGELOG.md: %w", err)
 	}
 	sparkwing.Info(ctx, "committed CHANGELOG.md rewrite for %s", version)
@@ -412,7 +439,7 @@ func (j *prepareChangelogJob) dryRun(ctx context.Context) error {
 	case rewriteNoop:
 		sparkwing.Info(ctx, "dry-run: CHANGELOG.md already has [%s] (%d entries); rewrite would be a no-op", version, action.versionEntries)
 	case rewriteApply:
-		sparkwing.Info(ctx, "dry-run: would rename [Unreleased] -> [%s] (%d entries) and commit", version, action.unreleasedEntries)
+		sparkwing.Info(ctx, "dry-run: would rename [Unreleased] -> [%s] (%d entries) and stage", version, action.unreleasedEntries)
 	}
 	roll, err := planMigrationRollIn(j.RepoDir, body, version, releaseDateFor(body, version))
 	if err != nil {

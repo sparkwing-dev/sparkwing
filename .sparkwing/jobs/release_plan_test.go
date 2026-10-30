@@ -18,6 +18,7 @@ import (
 // safety: source, so a node outside this list is work the release does not need.
 var releaseRecipe = []string{
 	"check-clean-tree",
+	"commit-changelog",
 	"discover-version",
 	"gate-schema-changelog",
 	"gate-wire-changelog",
@@ -94,13 +95,23 @@ func TestReleasePlanTagsOnlyAfterTheChangelogCommit(t *testing.T) {
 	plan := releasePlan(t)
 
 	deps := ancestors(t, plan, "push-tag")
-	for _, need := range []string{"validate-version", "check-clean-tree", "prepare-changelog", "gate-schema-changelog", "gate-wire-changelog", "release-cut-checks"} {
+	for _, need := range []string{"validate-version", "check-clean-tree", "prepare-changelog", "gate-schema-changelog", "gate-wire-changelog", "release-cut-checks", "commit-changelog"} {
 		if !deps[need] {
 			t.Errorf("push-tag must depend on %s; the tag has to land on the tree that already carries the release notes", need)
 		}
 		n := mustNode(t, plan, need)
 		if n.ContinueOnError || n.Optional {
 			t.Errorf("%s must block push-tag on failure, but is marked ContinueOnError/Optional", need)
+		}
+	}
+}
+
+func TestReleasePlanCommitsOnlyAfterAllGates(t *testing.T) {
+	plan := releasePlan(t)
+	deps := ancestors(t, plan, "commit-changelog")
+	for _, need := range []string{"prepare-changelog", "gate-schema-changelog", "gate-wire-changelog", "release-cut-checks"} {
+		if !deps[need] {
+			t.Errorf("commit-changelog must wait for %s so a failed gate leaves HEAD unchanged", need)
 		}
 	}
 }
