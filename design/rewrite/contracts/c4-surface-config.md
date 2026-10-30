@@ -1171,9 +1171,10 @@ and sparks lint/update also emit JSON when piped. Required-flag diagnostics
 retain the registry's explanation when present.
 
 Hook install, uninstall and status, and pipeline scaffolding consume the parsed
-`clisurface.Invocation`. Hook `--all-repos` selects the registered repositories.
-The removed `--fleet` and hooks `--all` spellings are refused. Hook mutations
-report their resulting status in the selected output format. Their progress and
+`clisurface.Invocation`. Hook commands operate on the selected repository.
+Installation writes hooks without executing pipelines and refuses a conflicting
+`core.hooksPath`; the operator owns manual composition. Hook mutations report
+their resulting status in the selected output format. Their progress and
 warnings go to stderr. Pipeline scaffolding emits a JSON pipeline/path receipt,
 a plain pipeline name, or pretty guidance after dependency resolution succeeds.
 
