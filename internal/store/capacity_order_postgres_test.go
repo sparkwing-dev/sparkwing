@@ -32,7 +32,7 @@ func TestPostgresControllerAdmissionDefersContendedGroupWithoutWaitingOnRunLock(
 			}
 			competitor := ""
 			if held != "group" {
-				admitted, err := f.tenant.AdmitRun(ctx, store.IntakeRequest{Authority: f.plan.Seal.Request.AuthorityRef, Request: f.plan.Seal.Request.Request})
+				admitted, err := f.tenant.AdmitRun(ctx, store.IntakeRequest{Authority: f.plan.Seal.Request.AuthorityRef, Request: f.plan.Seal.Request.Request, FetchedRepository: store.FetchedRepository{ID: 1, Name: "acme/repo"}})
 				if err != nil {
 					t.Fatal(err)
 				}
