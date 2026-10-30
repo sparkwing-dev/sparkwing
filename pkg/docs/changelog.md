@@ -30,6 +30,17 @@ unlock.
 - **CLI:** Local runs accept required pipeline arguments before validation, and invalid public enum values list the allowed choices. Controller URL errors name malformed input and show a valid URL form. Connection failures point to profile inspection, URL repair and network checks. Undeclared child-run errors name `StartsChildren` and the TypeScript equivalent.
 
 - **CLI:** Misspelled command words suggest the nearest command. Plain and pretty `runs status` show run and job start, finish and duration times.
+- **release:** The isolated-home guard refuses before run intake opens the
+  operational store, including during a release preview. A refused release
+  no longer creates a run or migrates the store.
+
+- **docs:** The Go SDK migration table covers the removed `SetWorkDir`
+  Author tests select their fixture repository with `t.Chdir(root)` and let Go
+  restore the original directory after the test.
+
+- **cli:** Fresh QA Go scaffolds resolve their SDK pin
+  `pipeline new` uses the QA Go proxy and checksum settings during dependency
+  setup. Production builds use a public SDK pin even if stamped with a QA version.
 
 - **store:** PostgreSQL admission locks stay within their store schema
   Independent stores sharing a database no longer defer each other's job releases.

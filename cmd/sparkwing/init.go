@@ -14,6 +14,8 @@ import (
 
 	"golang.org/x/mod/module"
 
+	"github.com/sparkwing-dev/sparkwing/internal/engine"
+	"github.com/sparkwing-dev/sparkwing/internal/engineid"
 	"github.com/sparkwing-dev/sparkwing/internal/gotoolchain"
 	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 	"github.com/sparkwing-dev/sparkwing/pkg/color"
@@ -109,6 +111,9 @@ require github.com/sparkwing-dev/sparkwing %s
 
 func sdkRequirementVersion() string {
 	v := installedVersion()
+	if strings.Contains(v, "-qa.") && !engine.QATrust {
+		return scaffold.FallbackSDKVersion
+	}
 	if isResolvableModuleVersion(v) {
 		return v
 	}
@@ -236,6 +241,17 @@ func tidySkeleton(ctx context.Context, sparkwingDir string) (bool, error) {
 	env, err := gotoolchain.BuildEnv(ctx, sparkwingDir, nil, "")
 	if err != nil {
 		return true, err
+	}
+	if pin, err := engine.ReadPin(sparkwingDir, engineid.GoSDK); err == nil {
+		qa, err := engine.QAModuleEnvironment(pin, func(args ...string) ([]byte, error) {
+			probe := procenv.ControlCommandContext(ctx, env, "go", args...)
+			probe.Dir = sparkwingDir
+			return probe.Output()
+		})
+		if err != nil {
+			return true, err
+		}
+		env = append(env, qa...)
 	}
 	cmd := procenv.ControlCommandContext(ctx, env, "go", "mod", "tidy")
 	cmd.Dir = sparkwingDir

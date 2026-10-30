@@ -24,7 +24,8 @@ type ReleaseArgs struct {
 
 type Release struct {
 	sparkwing.Base
-	args ReleaseArgs
+	args      ReleaseArgs
+	homeError error
 }
 
 func (Release) ShortHelp() string {
@@ -44,6 +45,9 @@ func (Release) Examples() []sparkwing.Example {
 }
 
 func (r *Release) Plan(_ context.Context, plan *sparkwing.Plan, in ReleaseArgs, _ sparkwing.RunContext) error {
+	if r.homeError != nil {
+		return fmt.Errorf("release: %w", r.homeError)
+	}
 	r.args = in
 
 	// safety: Plan is pure-declarative, so it reads WorkDir rather than calling
@@ -54,14 +58,11 @@ func (r *Release) Plan(_ context.Context, plan *sparkwing.Plan, in ReleaseArgs, 
 		return errors.New("release: no working directory; run this pipeline from a tree with a .sparkwing directory above it")
 	}
 
-	home := sparkwing.Job(plan, "require-isolated-home", &requireIsolatedHomeJob{}).Inline()
-
 	discover := sparkwing.Job(plan, "discover-version", &resolveVersionJob{
 		Explicit: r.args.Version,
 		Bump:     r.args.Bump,
 		RepoDir:  repoDir,
 	}).Inline()
-	discover.Needs(home)
 	versionRef := sparkwing.RefTo[string](discover)
 
 	validate := sparkwing.Job(plan, "validate-version", &validateVersionJob{
@@ -73,13 +74,11 @@ func (r *Release) Plan(_ context.Context, plan *sparkwing.Plan, in ReleaseArgs, 
 	clean := sparkwing.Job(plan, "check-clean-tree", &checkCleanTreeJob{
 		RepoDir: repoDir,
 	})
-	clean.Needs(home)
 
 	// safety: the class judges the tree the tag will carry, and it judges it
 	// before prepare-changelog commits, so no lint or suite reads a checkout
 	// that changes under it.
 	cutChecks := sparkwing.Job(plan, "release-cut-checks", &releaseCutChecksJob{}).Cache(lintCache())
-	cutChecks.Needs(home)
 
 	changelog := sparkwing.Job(plan, "prepare-changelog", &prepareChangelogJob{
 		RepoDir: repoDir,
@@ -975,5 +974,8 @@ func fileAtTag(ctx context.Context, repoDir, tag, path string) (body string, pre
 }
 
 func init() {
-	sparkwing.Register[ReleaseArgs]("Release", func() sparkwing.Pipeline[ReleaseArgs] { return &Release{} })
+	sparkwing.Register[ReleaseArgs]("Release", func() sparkwing.Pipeline[ReleaseArgs] {
+		// safety: discovery precedes intake, so a refusal cannot open or migrate the runs store.
+		return &Release{homeError: requireReleaseHome(os.Getenv, os.UserHomeDir)}
+	})
 }

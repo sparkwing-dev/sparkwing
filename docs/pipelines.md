@@ -5,6 +5,11 @@ Pipelines define what happens when you run
 [SDK guide](sdk.md) for API usage and [Authoring pipelines](authoring-pipelines.md)
 for the rules enforced by `sparkwing pipeline lint`.
 
+`sparkwing pipeline new` pins the running CLI's SDK release. Source builds
+without a release stamp use a published fallback. QA builds pin their QA SDK
+and resolve it through the QA Go proxy during dependency setup. Production
+builds use public SDK pins.
+
 > **Host requirements.** Pipelines that call `sparkwing.Bash` shell
 > out to `bash` on the runner host. macOS and Linux have this by
 > default. On Windows, install
