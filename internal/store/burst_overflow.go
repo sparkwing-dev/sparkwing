@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"math"
 	"slices"
 	"time"
@@ -139,31 +140,32 @@ func overflowControlTx(ctx context.Context, tx *storeTx, team Team, account stri
 const overflowAllowanceReached = "monthly overflow allowance reached"
 
 func checkOverflowTx(ctx context.Context, tx *storeTx, team Team, run string) error {
-	exhausted, err := overflowExhaustedTx(ctx, tx, team, run, SliceSeconds)
+	exhausted, control, err := overflowExhaustedTx(ctx, tx, team, run, SliceSeconds)
 	if err != nil || !exhausted {
 		return err
 	}
-	return authorityError(apierr.LockHeld, "user monthly overflow budget reached; local capacity remains available")
+	return authorityError(apierr.LockHeld, fmt.Sprintf("monthly Cloud overflow limit is %d minutes, current usage is %d seconds, requested reservation is %d seconds; raise your overflow setting and any lower run overflow setting, wait for the next month, or contact support@sparkwing.dev; local capacity remains available", *control.MonthlyMinutes, control.UsedSeconds, SliceSeconds))
 }
 
 // overflowExhaustedTx reports whether run's requester lacks room for reserving seconds more in its monthly overflow
 // budget, counting every second its overflow work has already reserved.
-func overflowExhaustedTx(ctx context.Context, tx *storeTx, team Team, run string, seconds int64) (bool, error) {
+func overflowExhaustedTx(ctx context.Context, tx *storeTx, team Team, run string, seconds int64) (bool, OverflowControl, error) {
 	burst, err := burstPlacementTx(ctx, tx, team, run)
 	if err != nil || burst == nil {
-		return false, err
+		return false, OverflowControl{}, err
 	}
 	var account string
 	if err := tx.QueryRowContext(ctx, `SELECT created_principal FROM runs WHERE team=? AND id=?`, team, run).Scan(&account); err != nil {
-		return false, err
+		return false, OverflowControl{}, err
 	}
 	control, err := overflowControlTx(ctx, tx, team, account)
 	if err != nil {
-		return false, err
+		return false, OverflowControl{}, err
 	}
 	limit := control.MonthlyMinutes
 	if burst.OverflowMinutes != nil && (limit == nil || *burst.OverflowMinutes < *limit) {
 		limit = burst.OverflowMinutes
 	}
-	return limit != nil && (control.UsedSeconds > *limit*60 || seconds > *limit*60-control.UsedSeconds), nil
+	control.MonthlyMinutes = limit
+	return limit != nil && (control.UsedSeconds > *limit*60 || seconds > *limit*60-control.UsedSeconds), control, nil
 }

@@ -297,7 +297,7 @@ func renewBillingAwardTx(ctx context.Context, tx *storeTx, team Team, reservatio
 	// it is about to add, not a fresh slice on top of what the award already prepaid. Work the budget cannot extend
 	// keeps only the time it prepaid; the award records why, and its lease and drain end there.
 	if a.provenance.ExecutorClass == TierCloud {
-		exhausted, err := overflowExhaustedTx(ctx, tx, team, a.run, ahead)
+		exhausted, _, err := overflowExhaustedTx(ctx, tx, team, a.run, ahead)
 		if err != nil {
 			return err
 		}

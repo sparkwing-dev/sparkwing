@@ -98,7 +98,8 @@ func publicQueueDepthRefusal(err error) *apierr.Error {
 	if !limitOK || !usageOK {
 		return nil
 	}
-	return &apierr.Error{Code: apierr.Unavailable,
+	return &apierr.Error{
+		Code:    apierr.Unavailable,
 		Message: fmt.Sprintf("team queue depth limit is %d, current usage is %d pending runs; wait for queued work to start or ask the operator to raise the queue shed threshold", limit, usage),
 		Details: map[string]any{"reason": "queue_depth_limit", "limit": limit, "usage": usage, "retry_after_ms": shedRetryAfter.Milliseconds()},
 	}
