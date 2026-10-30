@@ -147,3 +147,7 @@ claims. The workflow needs `id-token: write` and `GITHUB_TOKEN` for source acces
 `--warm-module` flags. Configure resource ceilings on the Kubernetes launcher;
 configure job timeouts in the pipeline. Pipeline lint always analyzes source
 without running pipelines; its removed `--static` flag is rejected.
+
+`--max-concurrent` defaults to one job. Trigger owners have separate capacity
+with the same bound, because an owner waits for its jobs to finish. The default
+runner can hold one owner and execute one job at a time.

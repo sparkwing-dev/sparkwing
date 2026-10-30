@@ -176,7 +176,7 @@ func (l *Loop) run(ctx context.Context) (policyErr, runErr error) {
 		if err := validateUnit(unit); err != nil {
 			return err
 		}
-		if !slices.Contains(l.Config.Kinds, unit.Unit) || (l.Config.RunID != "" && unit.RunID != l.Config.RunID) {
+		if !slices.Contains(outcome.kinds, unit.Unit) || (l.Config.RunID != "" && unit.RunID != l.Config.RunID) {
 			return errors.New("controller awarded work outside the runner's requested selection")
 		}
 		key := capability.LeaseRef{Kind: unit.Unit, ID: unit.UnitID, Holder: unit.Binding.Holder, Generation: unit.Binding.Generation}
@@ -213,18 +213,39 @@ func (l *Loop) run(ctx context.Context) (policyErr, runErr error) {
 		if backoffUntil.After(nextClaim) {
 			nextClaim = backoffUntil
 		}
-		if pending == nil && len(active) < l.Config.MaxConcurrent && !nextClaim.After(time.Now()) {
+		request := l.request()
+		owners := 0
+		for key := range active {
+			if key.Kind == capability.UnitTrigger {
+				owners++
+			}
+		}
+		freeSlots := l.Config.MaxConcurrent
+		// safety: Owners wait for jobs, so sharing their claim slots would deadlock.
+		request.Kinds = slices.DeleteFunc(request.Kinds, func(kind capability.UnitKind) bool {
+			if len(active)-owners >= l.Config.MaxConcurrent {
+				return true
+			}
+			used := len(active) - owners
+			if kind == capability.UnitTrigger {
+				used = owners
+			}
+			if used >= l.Config.MaxConcurrent {
+				return true
+			}
+			freeSlots = min(freeSlots, l.Config.MaxConcurrent-used)
+			return false
+		})
+		if pending == nil && len(request.Kinds) > 0 && !nextClaim.After(time.Now()) {
 			if stop, err := l.checkPolicy(claims); stop {
 				return err, nil
 			}
 			done := make(chan claimOutcome, 1)
 			pending = done
-			freeSlots := l.Config.MaxConcurrent - len(active)
+			request.FreeSlots = &freeSlots
 			go func() {
-				request := l.request()
-				request.FreeSlots = &freeSlots
 				response, err := l.Controller.Claim(claims, request)
-				done <- claimOutcome{response: response, err: err}
+				done <- claimOutcome{response: response, err: err, kinds: request.Kinds}
 			}()
 		}
 		wait := limits.VersionIndexRefresh
@@ -282,6 +303,7 @@ func (l *Loop) lifecycleWait(wait time.Duration, idleSince time.Time, idle bool)
 type claimOutcome struct {
 	response controllerwire.ClaimResponse
 	err      error
+	kinds    []capability.UnitKind
 }
 
 func (l *Loop) checkPolicy(ctx context.Context) (bool, error) {
