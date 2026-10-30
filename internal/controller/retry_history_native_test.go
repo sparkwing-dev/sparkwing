@@ -128,8 +128,41 @@ func TestRetryHistoryTraversesLongChainsAndCycles(t *testing.T) {
 			engineSQL(t, s.store, `UPDATE runs SET retry_of=? WHERE id='run'`, parent)
 		}
 		for _, selector := range []string{"run", parent, "274"} {
-			w := engineClaimHTTP(t, s.Handler(), raw, "GET", "/api/v1/runs/"+selector+"/attempts", "", 200)
-			assertRetryHistoryProjection(t, w.Body.Bytes(), "private-retry-value", ids)
+			var history []json.RawMessage
+			cursor := ""
+			seen := map[string]bool{}
+			for {
+				path := "/api/v1/runs/" + selector + "/attempts"
+				if cursor != "" {
+					path += "?cursor=" + url.QueryEscape(cursor)
+				}
+				w := engineClaimHTTP(t, s.Handler(), raw, "GET", path, "", 200)
+				if bytes.Contains(w.Body.Bytes(), []byte("private-retry-value")) {
+					t.Fatalf("history page exposed a private input: %s", w.Body)
+				}
+				var page struct {
+					Runs       []json.RawMessage `json:"runs"`
+					NextCursor string            `json:"next_cursor"`
+					Truncated  bool              `json:"truncated"`
+				}
+				if err := json.Unmarshal(w.Body.Bytes(), &page); err != nil {
+					t.Fatal(err)
+				}
+				if len(page.Runs) > defaultCollectionPage || page.Truncated != (page.NextCursor != "") || page.NextCursor != "" && seen[page.NextCursor] {
+					t.Fatalf("history page did not advance within its limit: %s", w.Body)
+				}
+				history = append(history, page.Runs...)
+				if !page.Truncated {
+					break
+				}
+				seen[page.NextCursor] = true
+				cursor = page.NextCursor
+			}
+			body, err := json.Marshal(map[string]any{"runs": history, "next_cursor": "", "truncated": false})
+			if err != nil {
+				t.Fatal(err)
+			}
+			assertRetryHistoryProjection(t, body, "private-retry-value", ids)
 		}
 	}
 }

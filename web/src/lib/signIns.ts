@@ -1,3 +1,4 @@
+import { listPages } from "./listPages";
 import { authFetch } from "./api";
 import { failure, send } from "./teams";
 
@@ -33,11 +34,7 @@ export const signInsPath = "/account/sign-ins";
 export const howAccountsWorkId = "how-accounts-work";
 
 export async function getSignIns(): Promise<SignIns> {
-  const res = await send(
-    "GET",
-    "/api/v1/me/identities",
-    "List linked sign-ins",
-  );
+  const res = await listPages("/api/v1/me/identities", ["identities"], (path) => send("GET", path, "List linked sign-ins"));
   const body = (await res.json()) as Partial<SignIns>;
   return {
     identities: body.identities ?? [],

@@ -106,8 +106,12 @@ func TestEngineJobsHTTP(t *testing.T) {
 					t.Fatalf("HTTP %d %s headers=%v", w.Code, w.Body.String(), w.Header())
 				}
 				if list {
-					var got []controllerwire.JobDetail
-					if json.Unmarshal(w.Body.Bytes(), &got) != nil || !reflect.DeepEqual(got, []controllerwire.JobDetail{want}) || f.reads != 1 || f.nodeReads != 0 {
+					var got struct {
+						Jobs       []controllerwire.JobDetail `json:"jobs"`
+						NextCursor string                     `json:"next_cursor"`
+						Truncated  bool                       `json:"truncated"`
+					}
+					if json.Unmarshal(w.Body.Bytes(), &got) != nil || !reflect.DeepEqual(got.Jobs, []controllerwire.JobDetail{want}) || got.NextCursor != "" || got.Truncated || f.reads != 1 || f.nodeReads != 0 {
 						t.Fatalf("list=%s reads=%d nodeReads=%d", w.Body.String(), f.reads, f.nodeReads)
 					}
 				} else {
@@ -221,7 +225,12 @@ func TestEngineJobsEmptyListAndMethods(t *testing.T) {
 	f := jobViewFixture(b)
 	f.snapshot.Nodes = nil
 	w := snapshotRequest(jobViewServer(t, b, f), b, "GET", "/api/v1/runs/run/jobs")
-	if w.Code != 200 || strings.TrimSpace(w.Body.String()) != "[]" {
+	var got struct {
+		Jobs       []controllerwire.JobDetail `json:"jobs"`
+		NextCursor string                     `json:"next_cursor"`
+		Truncated  bool                       `json:"truncated"`
+	}
+	if w.Code != 200 || json.Unmarshal(w.Body.Bytes(), &got) != nil || got.Jobs == nil || len(got.Jobs) != 0 || got.NextCursor != "" || got.Truncated {
 		t.Fatalf("HTTP %d %s", w.Code, w.Body.String())
 	}
 	for _, path := range []string{"/api/v1/runs/run/jobs", "/api/v1/runs/run/jobs/job"} {

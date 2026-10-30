@@ -1,3 +1,4 @@
+import { listPages } from "./listPages";
 import { authFetch } from "./api";
 
 export type Role = "owner" | "editor" | "reader";
@@ -304,7 +305,7 @@ export async function renameTeam(displayName: string): Promise<void> {
 }
 
 export async function listMembers(): Promise<Member[]> {
-  const res = await send("GET", "/api/v1/team/members", "List members");
+  const res = await listPages("/api/v1/team/members", ["members"], (path) => send("GET", path, "List members"));
   return asList<Member>(await res.json(), "members");
 }
 
@@ -334,7 +335,7 @@ export async function removeMember(userID: string): Promise<void> {
 }
 
 export async function listInvitations(): Promise<TeamInvitation[]> {
-  const res = await send("GET", "/api/v1/team/invitations", "List invitations");
+  const res = await listPages("/api/v1/team/invitations", ["invitations"], (path) => send("GET", path, "List invitations"));
   return asList<TeamInvitation>(await res.json(), "invitations");
 }
 
@@ -381,7 +382,7 @@ export async function acceptInvitation(id: string): Promise<void> {
 }
 
 export async function listTeamTokens(): Promise<TeamToken[]> {
-  const res = await send("GET", "/api/v1/tokens", "List tokens");
+  const res = await listPages("/api/v1/tokens", ["tokens"], (path) => send("GET", path, "List tokens"));
   return asList<TeamToken>(await res.json(), "tokens");
 }
 
@@ -501,10 +502,6 @@ export async function deleteTeam(confirmSlug: string): Promise<TeamDeletion> {
 }
 
 export async function listTeamDeletions(): Promise<TeamDeletion[]> {
-  const res = await send(
-    "GET",
-    "/api/v1/me/team-deletions",
-    "List team deletions",
-  );
+  const res = await listPages("/api/v1/me/team-deletions", ["deletions"], (path) => send("GET", path, "List team deletions"));
   return asList<TeamDeletion>(await res.json(), "deletions");
 }

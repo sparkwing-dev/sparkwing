@@ -7,8 +7,6 @@ const (
 	ScheduleCatchUpMin time.Duration = 2 * time.Minute
 	// ScheduleCatchUpMax bounds maximum catch-up.
 	ScheduleCatchUpMax time.Duration = 24 * time.Hour
-	// MaxSchedulesPerRepo bounds schedules per repository.
-	MaxSchedulesPerRepo int = 20
-	// MaxScheduledReposPerTeam bounds scheduled repositories per team.
-	MaxScheduledReposPerTeam int = 10
+	// MaxSchedulesPerTeam bounds declared schedules across all repositories.
+	MaxSchedulesPerTeam int = 50
 )

@@ -131,6 +131,12 @@ func TestOverflowLimitIsPerUserAndDefaultsUncapped(t *testing.T) {
 	}
 	if err := s.inTx(t.Context(), func(tx *storeTx) error { return checkOverflowTx(t.Context(), tx, "a", "run") }); err == nil {
 		t.Fatal("zero limit admitted Cloud")
+	} else {
+		for _, want := range []string{"overflow limit is 0 minutes", "current usage is 0 seconds", fmt.Sprintf("requested reservation is %d seconds", SliceSeconds), "raise your overflow setting", "next month", "support@sparkwing.dev"} {
+			if !strings.Contains(err.Error(), want) {
+				t.Fatalf("overflow refusal %q omits %q", err, want)
+			}
+		}
 	}
 	untouched, err := tenant.ReadOverflowControl(t.Context(), other.Authority)
 	if err != nil || untouched.MonthlyMinutes != nil {
@@ -235,6 +241,9 @@ func TestBurstOverflowRequestNeverRaisesStoredBudgetProperty(t *testing.T) {
 			if min(stored, requested) == 0 && err == nil {
 				t.Fatal("request bypassed lower user limit")
 			}
+			if err != nil && !strings.Contains(err.Error(), fmt.Sprintf("limit is %d minutes", min(stored, requested))) {
+				t.Fatalf("refusal names the wrong effective limit: %v", err)
+			}
 			if min(stored, requested) > 0 && err != nil {
 				t.Fatal(err)
 			}
@@ -254,6 +263,20 @@ func TestOverflowUsageIncludesCloudWorkAcrossMonthBoundary(t *testing.T) {
 	control, err := (&Tenant{s: s, team: "a"}).ReadOverflowControl(t.Context(), owner.Authority)
 	if err != nil || control.UsedSeconds != 120 {
 		t.Fatalf("usage across month: %+v %v", control, err)
+	}
+	limit := int64(2)
+	if err := (&Tenant{s: s, team: "a"}).SetOverflowLimit(t.Context(), owner.Authority, &limit); err != nil {
+		t.Fatal(err)
+	}
+	err = s.inTx(t.Context(), func(tx *storeTx) error { return checkOverflowTx(t.Context(), tx, "a", "run") })
+	var refusal *apierr.Error
+	if !errors.As(err, &refusal) || refusal.Code != apierr.LockHeld {
+		t.Fatalf("overflow allowance accepted another reservation: %v", err)
+	}
+	for _, want := range []string{"limit is 2 minutes", "current usage is 120 seconds", "requested reservation is 60 seconds", "support@sparkwing.dev"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("overflow refusal %q omits %q", err, want)
+		}
 	}
 }
 

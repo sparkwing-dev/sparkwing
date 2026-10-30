@@ -9,9 +9,91 @@ import (
 	"testing/quick"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/quicktest"
 )
+
+func TestBillingPagesShareHourlySessionLimitAndReplay(t *testing.T) {
+	s, tenant, a := billingPageFixture(t)
+	now := s.now()
+	s.clock = func() time.Time { return now }
+	otherActor := authorityMember(t, s, "other-owner", RoleOwner)
+	other := teamAuthorization(t, s, otherActor, "a", "POST", "/api/v1/team/billing/card")
+	var first capability.BillingPage
+	for i := range checkoutSessionsPerHour {
+		kind, amount, auth := capability.BillingPageCredits, int64(2000), a
+		if i%2 != 0 {
+			kind, amount, auth = capability.BillingPageCard, 0, other
+		}
+		page, err := tenant.PrepareAuthorizedBillingPage(t.Context(), auth, kind, amount, fmt.Sprint(i))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if i == 0 {
+			first = page
+			if err := tenant.RecordAuthorizedBillingPageFailure(t.Context(), a, page); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	if replay, err := tenant.PrepareAuthorizedBillingPage(t.Context(), a, capability.BillingPageCredits, 2000, "0"); err != nil || replay != first {
+		t.Fatalf("replay at limit = %+v, %v", replay, err)
+	}
+	_, err := tenant.PrepareAuthorizedBillingPage(t.Context(), a, capability.BillingPageCredits, 2000, "excess")
+	var failure *apierr.Error
+	if !errors.As(err, &failure) || failure.Code != apierr.RateLimited || failure.Details["usage"] != checkoutSessionsPerHour || failure.Details["retry_after_ms"] != time.Hour.Milliseconds() {
+		t.Fatalf("hourly refusal = %#v, %v", failure, err)
+	}
+	for _, text := range []string{"Stripe Checkout Session", "20 per hour", "current usage is 20", "contact support"} {
+		if !strings.Contains(err.Error(), text) {
+			t.Errorf("refusal lacks %q: %v", text, err)
+		}
+	}
+	foreignActor := authorityMember(t, s, "foreign-owner", RoleOwner, "b")
+	foreign := teamAuthorization(t, s, foreignActor, "b", "POST", "/api/v1/team/billing/checkout")
+	if _, err := (&Tenant{s: s, team: "b"}).PrepareAuthorizedBillingPage(t.Context(), foreign, capability.BillingPageCredits, 2000, "independent"); err != nil {
+		t.Fatalf("another team's allowance: %v", err)
+	}
+	now = now.Add(time.Hour - time.Nanosecond)
+	if _, err := tenant.PrepareAuthorizedBillingPage(t.Context(), a, capability.BillingPageCredits, 2000, "still-excess"); err == nil {
+		t.Fatal("hourly window released early")
+	}
+	now = now.Add(time.Nanosecond)
+	if _, err := tenant.PrepareAuthorizedBillingPage(t.Context(), a, capability.BillingPageCredits, 2000, "next-hour"); err != nil {
+		t.Fatalf("hourly window did not release: %v", err)
+	}
+}
+
+func TestBillingPagesConcurrentSessionLimit(t *testing.T) {
+	s, tenant, a := billingPageFixture(t)
+	results := make(chan error, checkoutSessionsPerHour+5)
+	for i := range cap(results) {
+		go func() {
+			_, err := tenant.PrepareAuthorizedBillingPage(t.Context(), a, capability.BillingPageCredits, 2000, fmt.Sprint(i))
+			results <- err
+		}()
+	}
+	accepted := 0
+	for range cap(results) {
+		err := <-results
+		if err == nil {
+			accepted++
+		} else {
+			var failure *apierr.Error
+			if !errors.As(err, &failure) || failure.Code != apierr.RateLimited {
+				t.Fatal(err)
+			}
+		}
+	}
+	if accepted != checkoutSessionsPerHour {
+		t.Fatalf("accepted %d sessions, want %d", accepted, checkoutSessionsPerHour)
+	}
+	var rows int
+	if err := s.db.QueryRow(`SELECT COUNT(*) FROM billing_pages WHERE team='a'`).Scan(&rows); err != nil || rows != checkoutSessionsPerHour {
+		t.Fatalf("reserved %d sessions: %v", rows, err)
+	}
+}
 
 func billingPageFixture(t *testing.T) (*Store, *Tenant, capability.Authorized) {
 	t.Helper()

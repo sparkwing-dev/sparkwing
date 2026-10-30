@@ -1,3 +1,4 @@
+import { listPages } from "./listPages";
 import { asList, send } from "./teams";
 
 // One stored row as GET /api/v1/secrets lists it. The controller fills
@@ -160,7 +161,7 @@ export function existingRow(
 }
 
 export async function listSecrets(): Promise<StoredSecret[]> {
-  const res = await send("GET", "/api/v1/secrets", "List secrets");
+  const res = await listPages("/api/v1/secrets", ["secrets"], (path) => send("GET", path, "List secrets"));
   return asList<StoredSecret>(await res.json(), "secrets");
 }
 

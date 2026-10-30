@@ -100,7 +100,11 @@ SELECT cpu_millicores, memory_bytes, cpu_time_nanos, kind
 			return err
 		}
 		if held > MaxNodeMetricSamples && (!sample.Marker() || held > MaxNodeMetricSamples+maxNodeMetricMarkers) {
-			return ErrNodeMetricLimit
+			cap := MaxNodeMetricSamples
+			if sample.Marker() {
+				cap += maxNodeMetricMarkers
+			}
+			return fmt.Errorf("%w: node metric sample limit is %d, current usage is %d samples; reduce sampling frequency or contact support@sparkwing.dev to raise this limit", ErrNodeMetricLimit, cap, held-1)
 		}
 	}
 

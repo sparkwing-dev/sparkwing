@@ -38,7 +38,7 @@ func (c *engineClient) ListSchedules(ctx context.Context, q controllerwire.Sched
 	if len(query) > 0 {
 		path += "?" + query.Encode()
 	}
-	if err := c.request(ctx, "GET", "/api/v1/schedules", path, "", nil, &result); err != nil {
+	if err := c.requestList(ctx, "/api/v1/schedules", path, &result, "schedules", "upcoming"); err != nil {
 		return result, err
 	}
 	if !validScheduleHealth(result.Health) {

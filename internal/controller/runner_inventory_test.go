@@ -5,9 +5,11 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"math"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"reflect"
 	"strings"
 	"testing"
@@ -31,7 +33,14 @@ type runnerInventoryFake struct {
 func (f *runnerInventoryFake) Team() store.Team { return f.team }
 func (f *runnerInventoryFake) ReadRunners(context.Context) (capability.RunnerSnapshot, error) {
 	f.calls++
-	return f.snapshot, f.err
+	snapshot := f.snapshot
+	snapshot.Runners = append([]capability.RunnerObservation{}, f.snapshot.Runners...)
+	for i := range snapshot.Runners {
+		if snapshot.Runners[i].ID == "" {
+			snapshot.Runners[i].ID = fmt.Sprintf("fixture:%04d", i)
+		}
+	}
+	return snapshot, f.err
 }
 
 func runnerInventoryFixture(t *testing.T, f *runnerInventoryFake) (http.Handler, string) {
@@ -92,6 +101,31 @@ func TestRunnerInventoryHTTPUsesCommittedSnapshot(t *testing.T) {
 	engineClaimHTTP(t, h, "", "GET", "/api/v1/runners", "", 401)
 	if f.calls != 1 {
 		t.Fatal("anonymous request read inventory")
+	}
+}
+
+func TestRunnerInventoryPagesDistinctEnrollmentsWithTheSameName(t *testing.T) {
+	now := time.Unix(1800000000, 0).UTC()
+	f := &runnerInventoryFake{team: "a", snapshot: capability.RunnerSnapshot{Now: now}}
+	for _, id := range []string{"c", "a", "b"} {
+		f.snapshot.Runners = append(f.snapshot.Runners, capability.RunnerObservation{ID: id, Team: "a", Runner: nodeproto.RunnerIdentity{Name: "same", Type: "runner", Labels: []string{id}}, LastSeen: now})
+	}
+	h, raw := runnerInventoryFixture(t, f)
+	cursor := ""
+	for _, want := range []string{"a", "b", "c"} {
+		w := engineClaimHTTP(t, h, raw, "GET", "/api/v1/runners?limit=1&cursor="+url.QueryEscape(cursor), "", 200)
+		var page struct {
+			Runners    []controllerwire.RunnerDetail `json:"runners"`
+			NextCursor string                        `json:"next_cursor"`
+			Truncated  bool                          `json:"truncated"`
+		}
+		if json.Unmarshal(w.Body.Bytes(), &page) != nil || len(page.Runners) != 1 || !reflect.DeepEqual(page.Runners[0].Labels, []string{want}) || page.Truncated != (want != "c") {
+			t.Fatalf("page for enrollment %s: %s", want, w.Body)
+		}
+		cursor = page.NextCursor
+	}
+	if cursor != "" {
+		t.Fatal("last page retained a cursor")
 	}
 }
 
@@ -173,7 +207,12 @@ func TestRunnerInventoryHTTPRefusesMissingAndCorruptFacts(t *testing.T) {
 	f := &runnerInventoryFake{team: "a", snapshot: capability.RunnerSnapshot{Now: now}}
 	h, raw := runnerInventoryFixture(t, f)
 	w := engineClaimHTTP(t, h, raw, "GET", "/api/v1/runners", "", 200)
-	if strings.TrimSpace(w.Body.String()) != `{"runners":[]}` {
+	var empty struct {
+		Runners    []controllerwire.RunnerDetail `json:"runners"`
+		NextCursor string                        `json:"next_cursor"`
+		Truncated  bool                          `json:"truncated"`
+	}
+	if json.Unmarshal(w.Body.Bytes(), &empty) != nil || empty.Runners == nil || len(empty.Runners) != 0 || empty.NextCursor != "" || empty.Truncated {
 		t.Fatalf("empty inventory: %s", w.Body.String())
 	}
 	for _, mutate := range []func(){

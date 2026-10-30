@@ -35,8 +35,7 @@ func (s *Server) handleListGitHubAppExtraRepos(w http.ResponseWriter, r *http.Re
 		out = append(out, githubAppExtraReposJSON{Repository: repo, ExtraRepos: extras})
 	}
 	slices.SortFunc(out, func(a, b githubAppExtraReposJSON) int { return strings.Compare(a.Repository, b.Repository) })
-	writeJSON(w, http.StatusOK, map[string]any{"extra_repos": out})
-	return nil
+	return writeListPage(w, r, a, "extra_repos", out, func(row githubAppExtraReposJSON) string { return row.Repository }, nil)
 }
 
 // safety: only a team owner widens what a run's token reads, never the

@@ -19,7 +19,7 @@ func NewPoolManager(options EngineOptions) (controllerwire.PoolManager, error) {
 
 func (c *engineClient) ListPools(ctx context.Context) (controllerwire.Pools, error) {
 	var result controllerwire.Pools
-	err := c.request(ctx, "GET", "/api/v1/pools", "/api/v1/pools", "", nil, &result)
+	err := c.requestList(ctx, "/api/v1/pools", "/api/v1/pools", &result, "pools")
 	if err != nil {
 		return result, err
 	}

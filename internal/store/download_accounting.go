@@ -84,7 +84,7 @@ func (t *Tenant) chargeDownloadTx(ctx context.Context, tx *storeTx, c DownloadCh
 		if out.Tier == teamTierFree && c.FundedCapBytes > c.FreeCapBytes {
 			remedy = fmt.Sprintf("add credits to the team to raise it to %d bytes a day, or wait for midnight UTC", c.FundedCapBytes)
 		}
-		return DownloadCharged{}, &DownloadCapError{Team: string(t.team), Day: day, UsedBytes: used + reserved, CapBytes: out.CapBytes, RequestedBytes: c.Bytes, RetryAfter: now.Truncate(24 * time.Hour).Add(24 * time.Hour).Sub(now), Remedy: remedy}
+		return DownloadCharged{}, &DownloadCapError{Team: string(t.team), Day: day, UsedBytes: used + reserved, CapBytes: out.CapBytes, RequestedBytes: c.Bytes, RetryAfter: now.Truncate(24 * time.Hour).Add(24 * time.Hour).Sub(now), Remedy: remedy + "; contact support@sparkwing.dev or ask the operator to raise the daily download cap"}
 	}
 	if _, err := tx.execContext(ctx, "UPDATE quota_reservations SET state='released' WHERE team=? AND quota='download' AND state='held' AND expires_at<=?", t.team, now.UnixNano()); err != nil {
 		return DownloadCharged{}, err

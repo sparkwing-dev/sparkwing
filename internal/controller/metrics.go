@@ -145,7 +145,7 @@ func (s *Server) handleGetJobMetrics(w http.ResponseWriter, r *http.Request, a c
 
 func metricError(err error) error {
 	if errors.Is(err, store.ErrNodeMetricLimit) {
-		return &apierr.Error{Code: apierr.RateLimited, Message: "job metric sample limit reached"}
+		return &apierr.Error{Code: apierr.RateLimited, Message: err.Error()}
 	}
 	return engineLookupError(err)
 }

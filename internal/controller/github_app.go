@@ -503,8 +503,7 @@ func (s *Server) handleGitHubAppShow(w http.ResponseWriter, r *http.Request, a c
 	for _, in := range list {
 		out.Installations = append(out.Installations, githubAppInstallationOut(in))
 	}
-	writeJSON(w, http.StatusOK, out)
-	return nil
+	return writeListPage(w, r, a, "installations", out.Installations, func(row githubAppInstallationJSON) string { return strconv.FormatInt(row.InstallationID, 10) }, map[string]any{"slug": out.Slug})
 }
 
 func (s *Server) handleGitHubAppUnbind(w http.ResponseWriter, r *http.Request, a capability.Authorized) error {
@@ -584,8 +583,7 @@ func (s *Server) handleGitHubAppRepositories(w http.ResponseWriter, r *http.Requ
 	for _, repo := range repos {
 		out = append(out, githubAppRepositoryJSON{RepositoryID: repo.ID, FullName: repo.FullName, Private: repo.Private})
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"repositories": out})
-	return nil
+	return writeListPage(w, r, a, "repositories", out, func(row githubAppRepositoryJSON) string { return strconv.FormatInt(row.RepositoryID, 10) }, nil)
 }
 
 type githubAppTriggerReq struct {
@@ -664,8 +662,7 @@ func (s *Server) handleListGitHubAppTriggers(w http.ResponseWriter, r *http.Requ
 	for _, tr := range list {
 		out = append(out, githubAppTriggerOut(tr))
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"triggers": out})
-	return nil
+	return writeListPage(w, r, a, "triggers", out, func(row githubAppTriggerJSON) string { return row.Repository + "\x00" + row.Pipeline }, nil)
 }
 
 // safety: the repository is resolved through GitHub to an installation this

@@ -9,6 +9,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"slices"
 	"strings"
 	"time"
@@ -395,7 +396,7 @@ func awardCapabilityTx(ctx context.Context, tx *storeTx, spec capability.AwardSp
 			}
 			deadline := began.Add(standing.MaxJobDuration)
 			if !deadline.After(tx.now(ctx)) {
-				return capability.Capability{}, authorityError(apierr.BadRequest, "job reached "+standing.Tier+" standing maximum duration")
+				return capability.Capability{}, authorityError(apierr.BadRequest, fmt.Sprintf("%s standing job duration limit is %s, current elapsed time is %s; split the work into shorter jobs or contact support@sparkwing.dev for higher standing or a duration override", standing.Tier, standing.MaxJobDuration, tx.now(ctx).Sub(began)))
 			}
 
 			if c.ExpiresAt == nil || deadline.Before(*c.ExpiresAt) {

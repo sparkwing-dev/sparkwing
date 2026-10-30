@@ -298,6 +298,13 @@ func TestGitHubEnrollmentLimitsIgnoreFundingAndExemptDefaultTeam(t *testing.T) {
 		if i < maxGitHubRunnerBindings && err != nil || i == maxGitHubRunnerBindings && !errors.Is(err, ErrBindingLimit) {
 			t.Fatalf("funded registration %d: %v", i, err)
 		}
+		if i == maxGitHubRunnerBindings {
+			for _, want := range []string{"limit is 20", "current usage is 20", "support@sparkwing.dev"} {
+				if !strings.Contains(err.Error(), want) {
+					t.Fatalf("binding refusal %q omits %q", err, want)
+				}
+			}
+		}
 		if _, err := operator.RegisterGitHubRunner(t.Context(), op, row); err != nil {
 			t.Fatalf("default-team registration %d: %v", i, err)
 		}
@@ -381,6 +388,12 @@ func TestGitHubActionsExpiryFreesQuotaWithoutDeletingAudit(t *testing.T) {
 	}
 	if issued, err := s.AsOperator().ProvisionCapability(t.Context(), actionsSpec(t, s, tenant.team, "full")); !errors.Is(err, ErrGitHubRunnerCredentialLimit) || issued.Raw != "" {
 		t.Fatalf("full quota: %+v, %v", issued.Capability, err)
+	} else {
+		for _, want := range []string{"limit is 20", "current usage is 20", "support@sparkwing.dev"} {
+			if !strings.Contains(err.Error(), want) {
+				t.Fatalf("Actions credential refusal %q omits %q", err, want)
+			}
+		}
 	}
 	now = *first.Capability.ExpiresAt
 	if _, err := s.AsOperator().LookupCapability(t.Context(), first.Capability.Digest); err == nil {

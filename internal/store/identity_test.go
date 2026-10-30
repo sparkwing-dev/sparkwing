@@ -315,21 +315,14 @@ func TestIdentityConcurrentFirstSignInsShareALocalPart(t *testing.T) {
 	}
 }
 
-func TestIdentityTeamCreationIsCapped(t *testing.T) {
+func TestIdentityTeamCreationHasNoLifetimeCap(t *testing.T) {
 	st := storetest.Open(t)
 	ctx := context.Background()
 	u := signIn(t, st, "s", "busy@example.com")
-	for i := 2; i <= 3; i++ {
-		if _, err := st.AsOperator().CreateAccountTeam(ctx, storetest.AccountAuthority(t, st, u.Account.ID), store.TeamInfo{Slug: store.Team(fmt.Sprintf("busy-team-%d", i)), DisplayName: ""}); err != nil {
+	for i := 2; i <= 12; i++ {
+		if _, err := st.AsOperator().CreateAccountTeam(ctx, storetest.AccountAuthority(t, st, u.Account.ID), store.TeamInfo{Slug: store.Team(fmt.Sprintf("busy-team-%d", i))}); err != nil {
 			t.Fatalf("team %d: %v", i, err)
 		}
-	}
-	_, err := st.AsOperator().CreateAccountTeam(ctx, storetest.AccountAuthority(t, st, u.Account.ID), store.TeamInfo{Slug: "one-too-many", DisplayName: ""})
-	if !errors.Is(err, store.ErrTeamLimit) {
-		t.Fatalf("fourth team = %v, want ErrTeamLimit", err)
-	}
-	if !strings.Contains(err.Error(), "at most 3 teams") {
-		t.Fatalf("refusal = %q, want it to name the cap", err)
 	}
 }
 
@@ -357,6 +350,12 @@ func TestIdentityOpenInvitationsAreCapped(t *testing.T) {
 	}
 	if _, err := tn.InviteForTest(t, ctx, u.Account.ID, "one-more@example.com", store.RoleReader, time.Now()); !errors.Is(err, store.ErrInvitationLimit) {
 		t.Fatalf("invitation past the open cap = %v, want ErrInvitationLimit", err)
+	} else {
+		for _, want := range []string{"open invitation limit is 50", "current usage is 50", "support@sparkwing.dev"} {
+			if !strings.Contains(err.Error(), want) {
+				t.Fatalf("invitation refusal %q omits %q", err, want)
+			}
+		}
 	}
 }
 
@@ -378,6 +377,12 @@ func TestIdentityDailyInvitationsAreCappedThroughWithdrawals(t *testing.T) {
 	}
 	if _, err := tn.InviteForTest(t, ctx, u.Account.ID, "victim@example.com", store.RoleReader, time.Now()); !errors.Is(err, store.ErrInvitationLimit) {
 		t.Fatalf("invitation past the daily cap = %v, want ErrInvitationLimit", err)
+	} else {
+		for _, want := range []string{"daily invitation limit is 100", "current usage is 100", "support@sparkwing.dev"} {
+			if !strings.Contains(err.Error(), want) {
+				t.Fatalf("invitation refusal %q omits %q", err, want)
+			}
+		}
 	}
 	if _, err := tn.InviteForTest(t, ctx, u.Account.ID, "victim@example.com", store.RoleReader,
 		time.Now().Add(25*time.Hour)); err != nil {

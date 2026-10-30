@@ -18,7 +18,6 @@ internal/clisurface	1
 # intakeRunToken.Error: implements error; callers use the error interface.
 internal/controller	8
 # ConcurrencyError.Error: implements error; callers use the error interface.
-internal/egress	1
 # apiError.Error: implements error; callers use the error interface.
 internal/githubapp	1
 # Error.Error: implements error; callers use the error interface.
@@ -66,7 +65,7 @@ internal/settings	1
 # Role.AtLeast: external identity tests exercise role ordering.
 # Tenant.RecordGitHubCheckRun: external GitHub tests exercise check-run bindings and receipts.
 # secretPreflightError.Error: implements error; callers use the error interface.
-internal/store	21
+internal/store	20
 # SeedUpload: external fixture tests share this upload setup implementation.
 internal/store/teststore	1
 # FieldError.Error: implements error; callers use the error interface.

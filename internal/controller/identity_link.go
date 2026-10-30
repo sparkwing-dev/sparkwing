@@ -50,8 +50,7 @@ func (s *Server) handleIdentities(w http.ResponseWriter, r *http.Request, a capa
 	for _, id := range ids {
 		out.Identities = append(out.Identities, identityOut(id))
 	}
-	writeJSON(w, http.StatusOK, out)
-	return nil
+	return writeListPage(w, r, a, "identities", out.Identities, func(row identityJSON) string { return row.Provider }, map[string]any{"providers": out.Providers})
 }
 
 type identityLinkState struct {

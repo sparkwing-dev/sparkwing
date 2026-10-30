@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"testing"
 	"testing/synctest"
 	"time"
@@ -153,6 +154,11 @@ func TestTheGateClosesItselfPastTheHourlyLimit(t *testing.T) {
 	requireWaitlisted(t, fourth, store.WaitlistReasonHourly)
 	if fourth.GateClosed == nil || fourth.GateClosed.Source != store.WaitlistReasonHourly {
 		t.Fatalf("the sign-up that crossed the limit reported no closure: %+v", fourth.GateClosed)
+	}
+	for _, want := range []string{"limit is 3 per hour", "current usage is 3", "ask the operator", "support@sparkwing.dev"} {
+		if !strings.Contains(fourth.GateClosed.Reason, want) {
+			t.Fatalf("signup limit reason %q omits %q", fourth.GateClosed.Reason, want)
+		}
 	}
 	g, err := st.AsOperator().SignUpGate(ctx)
 	if err != nil || g.Mode != store.SignUpWaitlist || g.Source != store.WaitlistReasonHourly || g.SetBy != "automatic" {

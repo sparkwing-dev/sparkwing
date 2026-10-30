@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
@@ -35,14 +36,14 @@ func (t *Tenant) WriteSecret(ctx context.Context, a capability.Authorized, seale
 		}
 		if t.s.holdsFreeAllowance(t.team) {
 			if len(row.Value) > maxSecretValueBytes {
-				return ErrSecretLimit
+				return fmt.Errorf("%w: secret value size limit is %d bytes, current sealed value is %d bytes; reduce the value or contact support@sparkwing.dev to raise this limit", ErrSecretLimit, maxSecretValueBytes, len(row.Value))
 			}
 			var count, replacing int
 			if err := tx.QueryRowContext(ctx, `SELECT COUNT(*),COALESCE(SUM(CASE WHEN name=? AND repo=? AND pipeline=? THEN 1 ELSE 0 END),0) FROM secrets WHERE team=?`, row.Name, row.Repo, row.Pipeline, t.team).Scan(&count, &replacing); err != nil {
 				return err
 			}
 			if replacing == 0 && count >= maxSecretsPerTeam {
-				return ErrSecretLimit
+				return fmt.Errorf("%w: team secret limit is %d, current usage is %d secrets; delete unused secrets or contact support@sparkwing.dev to raise this limit", ErrSecretLimit, maxSecretsPerTeam, count)
 			}
 		}
 		at := tx.now(ctx).UnixNano()

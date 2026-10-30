@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"slices"
 	"strings"
 	"time"
@@ -84,7 +85,7 @@ func boundedResultText(text string) error {
 		return authorityError(apierr.BadRequest, "result text must be UTF-8")
 	}
 	if int64(len(text)) > limits.AnnotationBytes {
-		return authorityError(apierr.PayloadTooLarge, "result text exceeds the annotation byte limit")
+		return authorityError(apierr.PayloadTooLarge, fmt.Sprintf("result text byte limit is %d, submitted usage is %d bytes; shorten the text or contact support@sparkwing.dev to raise this limit", limits.AnnotationBytes, len(text)))
 	}
 	return nil
 }
@@ -169,7 +170,7 @@ func (t *Tenant) WriteAnnotation(ctx context.Context, annotation AnnotationWrite
 		return err
 	}
 	if int64(len(encoded)) > limits.AnnotationBytes {
-		return authorityError(apierr.PayloadTooLarge, "annotation exceeds the byte limit")
+		return authorityError(apierr.PayloadTooLarge, fmt.Sprintf("annotation byte limit is %d, submitted usage is %d bytes; shorten the annotation or contact support@sparkwing.dev to raise this limit", limits.AnnotationBytes, len(encoded)))
 	}
 	return t.s.inTxOnce(ctx, func(tx *storeTx) error {
 		row, err := checkMetadataWriterTx(ctx, tx, t.team, annotation.Ref, annotation.Actor, annotation.StepID)
@@ -181,8 +182,11 @@ func (t *Tenant) WriteAnnotation(ctx context.Context, annotation AnnotationWrite
 		if err != nil {
 			return err
 		}
-		if count >= int64(limits.MaxAnnotations) || total+int64(len(encoded))+2 > limits.RunAnnotationBytes {
-			return authorityError(apierr.LimitExceeded, "run annotation limit exceeded")
+		if count >= int64(limits.MaxAnnotations) {
+			return authorityError(apierr.LimitExceeded, fmt.Sprintf("run annotation count limit is %d, current usage is %d annotations; combine annotations or contact support@sparkwing.dev to raise this limit", limits.MaxAnnotations, count))
+		}
+		if total+int64(len(encoded))+2 > limits.RunAnnotationBytes {
+			return authorityError(apierr.LimitExceeded, fmt.Sprintf("run annotation byte limit is %d, current usage is %d bytes, requested addition is %d bytes; shorten annotations or contact support@sparkwing.dev to raise this limit", limits.RunAnnotationBytes, total, len(encoded)+2))
 		}
 		var existing []byte
 		query, args := resultTarget(row, t.team, annotation.StepID)

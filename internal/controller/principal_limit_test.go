@@ -31,6 +31,13 @@ func TestRequestBudgetShedsClaimsAndSeparatesRunners(t *testing.T) {
 		if w.Code != tc.want || w.Code == 429 && w.Header().Get("Retry-After") == "" {
 			t.Fatalf("%s=%d %s", tc.runner, w.Code, w.Body)
 		}
+		if w.Code == 429 {
+			for _, want := range []string{"limit is 1", "usage is at least 1", "ask the operator"} {
+				if !strings.Contains(w.Body.String(), want) {
+					t.Fatalf("claim refusal omits %q: %s", want, w.Body.String())
+				}
+			}
+		}
 	}
 }
 
@@ -49,8 +56,12 @@ func TestRequestBudgetCapsRunnerNames(t *testing.T) {
 		runner string
 		want   int
 	}{{"first", 200}, {"second", 200}, {"third", 429}, {"first", 200}} {
-		if w := budgetRequest(s, tc.runner); w.Code != tc.want {
+		w := budgetRequest(s, tc.runner)
+		if w.Code != tc.want {
 			t.Fatalf("%s=%d %s", tc.runner, w.Code, w.Body)
+		}
+		if w.Code == 429 && (!strings.Contains(w.Body.String(), "limit is 2") || !strings.Contains(w.Body.String(), "current usage is 2") || !strings.Contains(w.Body.String(), "ask the operator")) {
+			t.Fatalf("runner-name refusal lacks usage and remedy: %s", w.Body.String())
 		}
 	}
 }
@@ -138,5 +149,40 @@ func TestRequestBudgetBoundsRunnerHeader(t *testing.T) {
 			t.Fatalf("unbounded or colliding runner budget key: length=%d", len(key))
 		}
 		keys[key] = true
+	}
+}
+
+func TestTokenRequestBudgetRefusalNamesLimitUsageAndOperator(t *testing.T) {
+	s := newAdviceServer(t).WithTokenRequestBudget(TokenRequestBudget{PerTokenMinute: 1})
+	if w := budgetRequest(s, "first"); w.Code != 200 {
+		t.Fatalf("first request: %d %s", w.Code, w.Body)
+	}
+	w := budgetRequest(s, "second")
+	if w.Code != 429 {
+		t.Fatalf("token budget: %d %s", w.Code, w.Body)
+	}
+	for _, want := range []string{"limit is 1 per minute", "usage is at least 1", "ask the operator"} {
+		if !strings.Contains(w.Body.String(), want) {
+			t.Fatalf("token refusal omits %q: %s", want, w.Body.String())
+		}
+	}
+}
+
+func TestIdentityLinkBudgetRefusalNamesLimitUsageAndSupport(t *testing.T) {
+	s := New(nil, nil)
+	session := &store.Session{AccountID: "linking-account"}
+	for range identityLinkAttemptsPerMinute {
+		if err := s.admitIdentityLink(session); err != nil {
+			t.Fatal(err)
+		}
+	}
+	err := s.admitIdentityLink(session)
+	if err == nil {
+		t.Fatal("11th identity link attempt accepted")
+	}
+	for _, want := range []string{"limit is 10", "current usage is 10", "support@sparkwing.dev"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("link refusal %q omits %q", err, want)
+		}
 	}
 }

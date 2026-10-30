@@ -114,9 +114,13 @@ func TestDeleteTeamClosesItAtOnceAndThePassRemovesItsRows(t *testing.T) {
 		t.Fatalf("a pass inside the tenant-cache window purged the team: %v", err)
 	}
 	f.srv.ProcessTeamDeletions(context.Background(), afterCacheWindow())
-	var mine []teamDeletionBody
+	var mine struct {
+		Deletions  []teamDeletionBody `json:"deletions"`
+		NextCursor string             `json:"next_cursor"`
+		Truncated  bool               `json:"truncated"`
+	}
 	f.call("GET", "/api/v1/me/team-deletions", owner.auth, nil, &mine)
-	if len(mine) != 1 || mine[0].State != store.TeamDeletionDone {
+	if len(mine.Deletions) != 1 || mine.Deletions[0].State != store.TeamDeletionDone || mine.NextCursor != "" || mine.Truncated {
 		t.Fatalf("owner's deletions = %+v, want acme done", mine)
 	}
 	if info, err := f.store.TeamInfo(t.Context(), "acme"); err != nil || info.DisplayName != "" || info.CreatedBy != "" {

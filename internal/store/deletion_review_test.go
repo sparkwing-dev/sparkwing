@@ -157,25 +157,17 @@ func TestInvitationEmailCapSurvivesTeamDeletion(t *testing.T) {
 	}
 }
 
-// Deleting a team frees nothing on the count of teams an account has
-// created, so creating and deleting in a loop stops at the lifetime cap.
-func TestTeamCreationIsCappedOverTheAccountsLifetime(t *testing.T) {
+func TestTeamDeletionDoesNotRestrictFutureTeamCreation(t *testing.T) {
 	st := storetest.Open(t)
 	ctx := context.Background()
 	now := time.Now()
 	owner := signIn(t, st, "o", "owner@example.com")
-	var err error
-	created := 1
-	for i := range 30 {
+	for i := range 12 {
 		slug := store.Team(fmt.Sprintf("churn-%d", i))
-		if _, err = st.AsOperator().CreateAccountTeam(ctx, storetest.AccountAuthority(t, st, owner.Account.ID), store.TeamInfo{Slug: slug, DisplayName: ""}); err != nil {
-			break
+		if _, err := st.AsOperator().CreateAccountTeam(ctx, storetest.AccountAuthority(t, st, owner.Account.ID), store.TeamInfo{Slug: slug}); err != nil {
+			t.Fatal(err)
 		}
-		created++
 		deleteAndPurge(t, st, slug, now)
-	}
-	if !errors.Is(err, store.ErrTeamLimit) || created != store.MaxCreatedTeams {
-		t.Fatalf("created %d teams before %v, want %d then ErrTeamLimit", created, err, store.MaxCreatedTeams)
 	}
 }
 

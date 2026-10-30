@@ -19,15 +19,13 @@ func NewRunnerReader(options EngineOptions) (controllerwire.RunnerReader, error)
 
 func (c *engineClient) ListRunners(ctx context.Context) (controllerwire.Runners, error) {
 	var result controllerwire.Runners
-	if err := c.request(ctx, "GET", "/api/v1/runners", "/api/v1/runners", "", nil, &result); err != nil {
+	if err := c.requestList(ctx, "/api/v1/runners", "/api/v1/runners", &result, "runners"); err != nil {
 		return result, err
 	}
-	seen := map[string]bool{}
 	for _, runner := range result.Runners {
-		if !validRunnerDetail(runner) || seen[runner.Name] {
-			return result, &apierr.Error{Code: apierr.ProtocolError, Message: "controller returned invalid or repeated runner details"}
+		if !validRunnerDetail(runner) {
+			return result, &apierr.Error{Code: apierr.ProtocolError, Message: "controller returned invalid runner details"}
 		}
-		seen[runner.Name] = true
 	}
 	return result, nil
 }

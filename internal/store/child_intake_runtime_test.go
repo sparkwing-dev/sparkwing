@@ -26,8 +26,13 @@ func TestDynamicChildLimitExplainsTheFix(t *testing.T) {
 	request.IdempotencyKey = "another-invocation"
 	_, err := tenant.AdmitRun(t.Context(), request)
 	var refusal *apierr.Error
-	if !errors.As(err, &refusal) || refusal.Code != apierr.Conflict || refusal.Message != "This team allows 1 child runs per root run (maximum 1,000). Raise the team's child-run limit or split the work into separate runs." || refusal.Details["limit"] != "max_children_per_root" || refusal.Details["cap"] != int64(1) || refusal.Details["observed"] != int64(1) {
+	if !errors.As(err, &refusal) || refusal.Code != apierr.Conflict || refusal.Details["limit"] != "max_children_per_root" || refusal.Details["cap"] != int64(1) || refusal.Details["observed"] != int64(1) {
 		t.Fatalf("dynamic child limit: %+v, %v", refusal, err)
+	}
+	for _, want := range []string{"allows 1 child runs", "maximum 1,000", "Current usage is 1", "Raise the team's child-run limit", "support@sparkwing.dev"} {
+		if !strings.Contains(refusal.Message, want) {
+			t.Fatalf("child limit refusal %q omits %q", refusal.Message, want)
+		}
 	}
 	rewriteSchemaCount(t, tenant.s.db, "runs", 2)
 }

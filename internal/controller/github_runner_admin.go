@@ -57,8 +57,7 @@ func (s *Server) handleListGitHubRunnerBindings(w http.ResponseWriter, r *http.R
 		}
 		out.Bindings = append(out.Bindings, githubBindingOut(binding))
 	}
-	writeJSON(w, http.StatusOK, out)
-	return nil
+	return writeListPage(w, r, a, "bindings", out.Bindings, func(row githubBindingJSON) string { return row.Repository }, map[string]any{"workflow": out.Workflow})
 }
 
 func validGitHubRunnerBinding(binding store.GitHubRunnerBinding, team string) bool {

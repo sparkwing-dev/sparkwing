@@ -5,6 +5,7 @@ import (
 	"math"
 	"math/rand"
 	"reflect"
+	"strings"
 	"sync"
 	"testing"
 	"testing/quick"
@@ -44,6 +45,11 @@ func TestStoreDataDownloadCapCrossingFundingAndMidnight(t *testing.T) {
 	var refusal *DownloadCapError
 	if got != (DownloadCharged{}) || !errors.As(err, &refusal) || !errors.Is(err, ErrDownloadCap) || refusal.UsedBytes != 120 || refusal.CapBytes != 100 || refusal.RetryAfter != 2*time.Hour {
 		t.Fatalf("exhausted download=%+v: %v", got, err)
+	}
+	for _, want := range []string{"120", "100", "support@sparkwing.dev", "ask the operator"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("download refusal %q omits %q", err, want)
+		}
 	}
 	request.Record, request.Bytes = true, 500
 	if got, err := tenant.ChargeDownload(t.Context(), request); err != nil || got.DayBytes != 620 {

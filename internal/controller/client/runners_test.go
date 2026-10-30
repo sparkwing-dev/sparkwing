@@ -8,7 +8,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 )
 
-func TestRunnerReaderRejectsMissingAndConflictingDetails(t *testing.T) {
+func TestRunnerReaderRejectsMalformedDetails(t *testing.T) {
 	for _, body := range []string{`{}`, `{"runners":[{}]}`, `{"agents":[]}`} {
 		c := testEngine(t, func(*http.Request) (*http.Response, error) { return engineResponse(200, body), nil })
 		if _, err := c.ListRunners(t.Context()); err == nil {
@@ -41,12 +41,30 @@ func TestRunnerReaderRejectsMissingAndConflictingDetails(t *testing.T) {
 			t.Fatalf("invalid detail accepted: %s", data)
 		}
 	}
-	data, err := json.Marshal(controllerwire.Runners{Runners: []controllerwire.RunnerDetail{valid, valid}})
-	if err != nil {
-		t.Fatal(err)
-	}
-	c := testEngine(t, func(*http.Request) (*http.Response, error) { return engineResponse(200, string(data)), nil })
-	if _, err := c.ListRunners(t.Context()); err == nil {
-		t.Fatal("duplicate runner identity accepted")
+}
+
+func TestRunnerReaderKeepsSameNamedEnrollmentsAcrossPages(t *testing.T) {
+	calls := 0
+	c := testEngine(t, func(r *http.Request) (*http.Response, error) {
+		calls++
+		next := "next-enrollment"
+		if calls == 2 {
+			if r.URL.Query().Get("cursor") != next {
+				t.Fatalf("lost enrollment cursor: %s", r.URL)
+			}
+			next = ""
+		}
+		data, err := json.Marshal(map[string]any{
+			"runners":     []controllerwire.RunnerDetail{{Name: "worker", Class: "runner", Location: "machine", Status: "idle"}},
+			"next_cursor": next, "truncated": next != "",
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return engineResponse(200, string(data)), nil
+	})
+	result, err := c.ListRunners(t.Context())
+	if err != nil || len(result.Runners) != 2 || calls != 2 {
+		t.Fatalf("same-named enrollments lost: %+v calls=%d err=%v", result, calls, err)
 	}
 }

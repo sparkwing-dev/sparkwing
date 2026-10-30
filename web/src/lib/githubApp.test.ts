@@ -356,7 +356,7 @@ describe("subscription form rules", () => {
 describe("failed deliveries", () => {
   it("lists failures without signed payloads and encodes manual processing IDs", async () => {
     const failure = { id: "delivery/1", event: "push", received_at: "2026-10-21T00:00:00Z", last_error: "GitHub unavailable" };
-    respond = () => json([failure]);
+    respond = () => json({ deliveries: [failure] });
     assert.deepEqual(await lib.listFailedGitHubDeliveries(), [failure]);
     assert.equal(calls[0].url, "/api/v1/team/github-app/deliveries/failed");
     respond = () => new Response(null, { status: 204 });

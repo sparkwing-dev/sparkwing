@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"fmt"
 	"slices"
 	"strings"
 
@@ -104,7 +105,7 @@ func checkEnrollmentNamesTx(ctx context.Context, tx *storeTx, spec capability.Pr
 		return err
 	}
 	if spec.Kind == capability.ProvisionMachine && tx.rotatingRoot == nil && len(names) >= maxRunnerTokensPerTeam {
-		return ErrRunnerTokenLimit
+		return fmt.Errorf("%w: team runner enrollment limit is %d, current usage is %d runner names; revoke unused runners or contact support@sparkwing.dev to raise this limit", ErrRunnerTokenLimit, maxRunnerTokensPerTeam, len(names))
 	}
 	return nil
 }

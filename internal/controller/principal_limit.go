@@ -113,7 +113,7 @@ func (s *Server) runnerBudgetKey(w http.ResponseWriter, r *http.Request, a capab
 		limit := s.requestBudget.values().RunnersPerToken
 		observePrincipalThrottled(budgetClassRunnerNames)
 		s.logger.Warn("request shed", "principal", principal, "route_class", budgetClassRunnerNames, "cap", limit)
-		writeRetryAfter(w, runnerNameIdle, fmt.Sprintf("this caller already holds %d runner names, the most it may; reuse one", limit))
+		writeRetryAfter(w, runnerNameIdle, fmt.Sprintf("runner name limit is %d per caller; current usage is %d names; reuse a name or ask the operator to raise --runners-per-token", limit, limit))
 		return "", false
 	}
 	return principal + "/" + identity, true
@@ -180,7 +180,11 @@ func (s *Server) admitRunnerRequest(w http.ResponseWriter, r *http.Request, a ca
 		}
 		observePrincipalThrottled(class)
 		s.logger.Warn("request shed", "principal", credentialBudgetKey(a.Principal), "route_class", class, "retry_after", wait)
-		writeRetryAfter(w, wait, "too many "+class+" requests from this runner")
+		cap := s.requestBudget.values().HeartbeatsPerMinute
+		if class == budgetClassClaim {
+			cap = s.requestBudget.values().ClaimsPerMinute
+		}
+		writeRetryAfter(w, wait, fmt.Sprintf("runner %s request limit is %d per minute; current budget usage is at least %d requests; wait for Retry-After or ask the operator to raise the request budget", class, cap, cap))
 	}
 	return key, allowed
 }

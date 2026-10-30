@@ -76,16 +76,18 @@ func (s *Server) holdLogScanSlot(w http.ResponseWriter, r *http.Request, princip
 func (s *Server) writeEgressRefusal(w http.ResponseWriter, r *http.Request, class egress.Class, err error) {
 	reason := "egress_download_limit"
 	retryAfter := egress.SlotRetryAfter
+	message := "concurrent egress limit reached; wait for existing transfers to finish or contact support@sparkwing.dev to raise this limit"
 	var concurrency *egress.ConcurrencyError
 	if errors.As(err, &concurrency) {
 		if concurrency.Slot != egress.SlotDownload {
 			reason = "egress_stream_limit"
 		}
 		retryAfter = concurrency.RetryAfter
+		message = concurrency.Error()
 	}
 	s.logger.Warn("egress refused", append(requestLogAttrs(r), "reason", reason, "class", string(class))...)
 	w.Header().Set("Retry-After", strconv.FormatInt(retryAfterSeconds(retryAfter), 10))
-	routepolicy.WritePolicyError(w, &apierr.Error{Code: apierr.RateLimited, Message: "too many concurrent downloads or log streams", Details: map[string]any{"reason": reason}})
+	routepolicy.WritePolicyError(w, &apierr.Error{Code: apierr.RateLimited, Message: message, Details: map[string]any{"reason": reason}})
 }
 
 func retryAfterSeconds(d time.Duration) int64 {

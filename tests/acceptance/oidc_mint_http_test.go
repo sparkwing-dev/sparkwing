@@ -278,6 +278,11 @@ func TestOIDCMintHTTPInputAndBudget(t *testing.T) {
 	}
 	w := authorityHTTP(h, b, "POST", "/api/v1/runs/run/oidc-token", `{"audience":"vault"}`)
 	assertEngineError(t, w, 429, apierr.RateLimited)
+	for _, want := range []string{"30 tokens", "5 minutes", "current budget usage", "support@sparkwing.dev"} {
+		if !strings.Contains(w.Body.String(), want) {
+			t.Fatalf("OIDC limit refusal omits %q: %s", want, w.Body.String())
+		}
+	}
 	if w.Header().Get("Retry-After") == "" {
 		t.Fatal("no retry delay")
 	}

@@ -106,8 +106,7 @@ func (s *Server) handleListCapabilities(w http.ResponseWriter, r *http.Request, 
 		row.Grants = append([]capability.Grant{}, row.Grants...)
 		out = append(out, row)
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"tokens": out})
-	return nil
+	return writeListPage(w, r, a, "tokens", out, func(row capability.Metadata) string { return row.Prefix }, nil)
 }
 
 func (s *Server) handleReadCapability(w http.ResponseWriter, r *http.Request, a capability.Authorized) error {

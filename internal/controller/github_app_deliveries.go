@@ -23,8 +23,7 @@ func (s *Server) handleFailedGitHubDeliveries(w http.ResponseWriter, r *http.Req
 	for i, delivery := range deliveries {
 		response[i] = controllerwire.FailedGitHubDelivery(delivery)
 	}
-	writeJSON(w, http.StatusOK, response)
-	return nil
+	return writeListPage(w, r, a, "deliveries", response, func(row controllerwire.FailedGitHubDelivery) string { return row.ID }, nil)
 }
 
 func (s *Server) handleProcessGitHubDeliveryAgain(w http.ResponseWriter, r *http.Request, a capability.Authorized) error {

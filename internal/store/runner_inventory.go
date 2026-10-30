@@ -26,7 +26,7 @@ func (t *Tenant) ReadRunners(ctx context.Context) (capability.RunnerSnapshot, er
 		return capability.RunnerSnapshot{}, err
 	}
 	for _, agent := range agents {
-		row := capability.RunnerObservation{Team: string(t.team), Runner: nodeproto.RunnerIdentity{Name: agent.Name, Type: "runner", Labels: slices.Clone(agent.Profile.Labels)}, Location: agent.Profile.Location, LastSeen: agent.LastSeen, ActiveJobs: []string{}}
+		row := capability.RunnerObservation{ID: "machine:" + agent.CapabilityPrefix, Team: string(t.team), Runner: nodeproto.RunnerIdentity{Name: agent.Name, Type: "runner", Labels: slices.Clone(agent.Profile.Labels)}, Location: agent.Profile.Location, LastSeen: agent.LastSeen, ActiveJobs: []string{}}
 		if row.LastSeen.After(out.Now) {
 			return capability.RunnerSnapshot{}, authorityError(apierr.IntegrityFailure, "runner observation is in the future")
 		}
@@ -120,7 +120,7 @@ func appendRunnerAwardTx(ctx context.Context, tx *storeTx, team Team, prefix str
 			location = TierCloud
 		}
 		i, indices[key] = len(out.Runners), len(out.Runners)
-		out.Runners = append(out.Runners, capability.RunnerObservation{Team: string(team), Runner: nodeproto.RunnerIdentity{Name: c.Binding.Holder, Type: c.Billing.ExecutorClass}, Location: location, ActiveJobs: []string{}})
+		out.Runners = append(out.Runners, capability.RunnerObservation{ID: "award:" + key, Team: string(team), Runner: nodeproto.RunnerIdentity{Name: c.Binding.Holder, Type: c.Billing.ExecutorClass}, Location: location, ActiveJobs: []string{}})
 	}
 	row := &out.Runners[i]
 	if seen.After(row.LastSeen) {

@@ -61,8 +61,7 @@ func (s *Server) handlePools(w http.ResponseWriter, r *http.Request, a capabilit
 		result.Pools = append(result.Pools, *pool)
 	}
 	sort.Slice(result.Pools, func(i, j int) bool { return result.Pools[i].Name < result.Pools[j].Name })
-	writeJSON(w, http.StatusOK, result)
-	return nil
+	return writeListPage(w, r, a, "pools", result.Pools, func(row controllerwire.PoolDetail) string { return row.Name }, nil)
 }
 
 func poolRuleSource(source string) string {

@@ -170,8 +170,7 @@ func (s *Server) handleListSecrets(w http.ResponseWriter, r *http.Request, a cap
 			UpdatedAt: sec.UpdatedAt.Unix(),
 		})
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"secrets": out})
-	return nil
+	return writeListPage(w, r, a, "secrets", out, func(row secretJSON) string { return row.Name + "\x00" + row.RepoKey + "\x00" + row.Pipeline }, nil)
 }
 
 func (s *Server) handleDeleteSecret(w http.ResponseWriter, r *http.Request, a capability.Authorized) error {

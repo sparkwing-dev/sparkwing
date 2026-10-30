@@ -16,6 +16,27 @@ Intake seals request inputs once. Plan acceptance resolves checkout and code
 declarations against that request and the operator ceilings in one transaction.
 Retry and resume retain the accepted values.
 
+## Team resource limits
+
+Metered teams may store 1,000 secrets. Each sealed secret value may hold at most
+128 KiB, including its encryption envelope. The operator's own team and unmetered
+self-hosted deployments retain their secret exemptions. Replacing a secret at
+the count limit is allowed if its sealed value fits the size limit.
+
+A team may declare 50 schedules across all repositories. Paused declarations
+count. Withdrawn declarations do not. Replacing a repository's schedules checks
+the resulting team total atomically. Local peer schedules retain their exemption.
+The operator's minimum cron interval still applies.
+
+Each claim and run may mint 30 OIDC tokens, refilled over five minutes on the
+controller. A refusal includes `Retry-After`. See [OIDC](oidc.md).
+
+Accounts may create teams without a lifetime count limit. Slug uniqueness,
+reserved names and the signup waitlist still apply.
+
+Quota refusals name the limit, usage and a remedy. Contact
+support@sparkwing.dev to request a higher limit.
+
 ## Operational guards
 
 Read deployment guards and request budgets with

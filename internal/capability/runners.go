@@ -16,6 +16,7 @@ type RunnerHeadroom struct {
 
 // RunnerObservation is one tenant's granted runner identity and committed activity.
 type RunnerObservation struct {
+	ID            string
 	Team          string
 	Runner        nodeproto.RunnerIdentity
 	Location      string

@@ -136,7 +136,7 @@ A GitHub Actions job holding a claim can request a token too, with `runner:githu
 
 - `audience` is required: 1 to 256 printable ASCII characters with no spaces, which admits URLs and plain identifiers.
 - The caller must hold the live run-bound claim. Missing, expired, revoked, cancelled or ended authority answers 401 `unauthenticated`. A live credential without the grant or matching run binding answers 403 `forbidden`. Request headers and query parameters cannot select the team, holder, repository or signing facts.
-- Each claim may mint 30 tokens per run on each controller replica, refilled over five minutes; past that the route answers 429 with `Retry-After`.
+- Each claim may mint 30 tokens per run on each controller replica, refilled over five minutes; past that the route answers 429 with `Retry-After`, the 30-token limit, current budget usage and support@sparkwing.dev to request a higher limit.
 - A controller with no signing key answers 404.
 
 ## Get a token in a pipeline

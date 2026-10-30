@@ -1160,3 +1160,20 @@ refusals are final.
 ## 2026-10-29 Amendment (lead, for Korey to ratify): log lifecycle rules are a startup warning
 
 - Amends c1-data.md's retention rule and the frozen architecture §4.4 ("lifecycle rules are checked at boot"; the code had drifted to a check on every log-segment signing). Sparkwing deletes log objects at their class age itself, so a bucket lifecycle rule is only a backstop. Signing a log segment never reads bucket lifecycle rules and never refuses a class without one. An S3 controller reads the rules once at startup and logs a warning for each retention class without a rule at least that long; it does not refuse to start, and `s3:GetLifecycleConfiguration` is optional. Continuous verification of the rule belongs to external operator checks, as network policy does under decision 71.
+
+## 2026-10-30 Korey decision 73: team limits and cursor pagination
+
+- Raise the secret count from 100 to 1,000 per team. Replace the 10-per-repository and 20-per-team schedule caps with one 50-per-team cap. Keep the operator's minimum cron interval and the existing local/operator exemptions. Keep OIDC minting at 30 tokens per five minutes per claim. Delete the lifetime cap of three team creations per account, including its persisted counter.
+- Every unbounded list endpoint gets cursor pagination. Use the existing page contract (`next_cursor`, `truncated`) with a default of 50 and a maximum of 200 records for the new pages. Retain existing limits on already bounded endpoints. CLI and console callers follow cursors. Raw-array list responses become named collection envelopes as a hard cut.
+- Limit each team's Stripe Checkout Session creation to 20 per rolling hour across Add funds and saved-card setup. Count reservations in the active payment mode under the team's ledger lock, before calling the provider. Idempotent retries count once. Failed provider requests keep their reservation because the provider may have created the session. Portal visits and off-session refills are outside this cap.
+- Every limit refusal names the limit, current usage and the remedy, including support contact or the existing operator override where one exists. These changes ship as hard cuts, with breaking API and schema entries. No deployment is part of this decision.
+
+Provider comparison, checked against primary documentation on 2026-10-30:
+
+| Surface | GitHub Actions | CircleCI | Sparkwing decision |
+| --- | --- | --- | --- |
+| Secrets | [1,000 organization secrets and 100 repository secrets](https://docs.github.com/en/actions/reference/security/secrets). A workflow sees at most 100 organization secrets. | [100 variables per context and 500 contexts per organization](https://circleci.com/docs/guides/security/contexts/). | 1,000 stored secrets across a team. Existing per-value and run-envelope byte limits remain. |
+| Schedules | [A five-minute minimum interval](https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows#schedule). | [50 triggers per project by default](https://circleci.zendesk.com/hc/en-us/articles/19387584083995-Why-can-t-I-add-a-trigger-or-schedule). | One team cap of 50, with the operator's existing minimum interval. |
+| Lists | [REST pagination uses continuation links and per-page sizes](https://docs.github.com/en/rest/using-the-rest-api/using-pagination-in-the-rest-api). | [API v2 lists expose page tokens](https://circleci.com/docs/api/v2/). | Cursor pages, drained by first-party callers. |
+
+GitHub and CircleCI's cited pages do not establish an equivalent lifetime team-creation cap, OIDC mint quota, or customer-facing Stripe Checkout Session quota. The retained OIDC limit and new checkout limit are Sparkwing's own limits, not parity claims.

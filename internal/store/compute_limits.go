@@ -71,7 +71,7 @@ func (e *ComputeLimitError) Error() string {
 	if scope == "" {
 		scope = "controller"
 	}
-	return fmt.Sprintf("compute limit %s reached: %s is at %d, cap %d",
+	return fmt.Sprintf("compute limit %s reached: %s is at %d, cap %d; ask the operator to adjust this guard with sparkwing operator limits set or contact support@sparkwing.dev",
 		e.Limit, scope, e.Observed, e.Cap)
 }
 
@@ -345,7 +345,7 @@ func runsPerHourRefusal(
 // The caller's per-team intake lock serializes the count.
 func enforceChildLimitsTx(ctx context.Context, tx *storeTx, team Team, root string, depth int) error {
 	if depth > limits.MaxChildDepth {
-		return &apierr.Error{Code: apierr.Conflict, Message: fmt.Sprintf("child runs nest at most %d levels deep, counting the root run", limits.MaxChildDepth), Details: map[string]any{"limit": "max_child_depth", "cap": limits.MaxChildDepth}}
+		return &apierr.Error{Code: apierr.Conflict, Message: fmt.Sprintf("child run depth limit is %d levels including the root, requested depth is %d; split the work into separate root runs or contact support@sparkwing.dev to raise this limit", limits.MaxChildDepth, depth), Details: map[string]any{"limit": "max_child_depth", "cap": limits.MaxChildDepth, "observed": depth}}
 	}
 	var created, ceiling int64
 	if err := tx.QueryRowContext(ctx, `SELECT r.created_at,t.max_children_per_root FROM runs r JOIN teams t ON t.name=r.team WHERE r.team=? AND r.id=?`, team, root).Scan(&created, &ceiling); err != nil {
@@ -364,7 +364,7 @@ func enforceChildLimitsTx(ctx context.Context, tx *storeTx, team Team, root stri
 		for i := len(maximum) - 3; i > 0; i -= 3 {
 			maximum = maximum[:i] + "," + maximum[i:]
 		}
-		return &apierr.Error{Code: apierr.Conflict, Message: fmt.Sprintf("This team allows %d child runs per root run (maximum %s). Raise the team's child-run limit or split the work into separate runs.", ceiling, maximum), Details: map[string]any{"limit": "max_children_per_root", "cap": ceiling, "observed": children}}
+		return &apierr.Error{Code: apierr.Conflict, Message: fmt.Sprintf("This team allows %d child runs per root run (maximum %s). Current usage is %d children. Raise the team's child-run limit or split the work into separate runs. Contact support@sparkwing.dev to raise the maximum.", ceiling, maximum, children), Details: map[string]any{"limit": "max_children_per_root", "cap": ceiling, "observed": children}}
 	}
 	return nil
 }

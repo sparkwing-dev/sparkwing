@@ -41,7 +41,7 @@ type Secret struct {
 // are bounded in count and size; the operator's own team is not.
 const (
 	// maxSecretsPerTeam bounds the secret rows one signed-up team holds.
-	maxSecretsPerTeam = 100
+	maxSecretsPerTeam = 1000
 	// maxSecretValueBytes bounds one stored secret value of a signed-up
 	// team, as stored, sealed envelope included.
 	maxSecretValueBytes = 128 << 10

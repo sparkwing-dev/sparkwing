@@ -236,8 +236,10 @@ func (s *Server) handleGitHubAppAutomation(w http.ResponseWriter, r *http.Reques
 		}
 		slug = req.Repository
 	} else if slug == "" {
-		if r.URL.RawQuery != "" {
-			return githubAppRequestError(http.StatusBadRequest, errors.New("repository must be owner/name"))
+		for name := range r.URL.Query() {
+			if name != "limit" && name != "cursor" {
+				return githubAppRequestError(http.StatusBadRequest, errors.New("repository must be owner/name"))
+			}
 		}
 		list, err := tenant.GitHubAppAutomations(r.Context())
 		if err != nil {
@@ -250,8 +252,7 @@ func (s *Server) handleGitHubAppAutomation(w http.ResponseWriter, r *http.Reques
 		for i, row := range list {
 			out[i] = automationView(row)
 		}
-		writeJSON(w, http.StatusOK, map[string]any{"automation": out})
-		return nil
+		return writeListPage(w, r, a, "automation", out, func(row controllerwire.GitHubAppAutomation) string { return row.Repository }, nil)
 	}
 	in, repo, err := s.resolveAutomationRepository(r.Context(), tenant, slug)
 	if err != nil {

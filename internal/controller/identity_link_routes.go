@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/url"
 	"slices"
@@ -75,7 +76,7 @@ func (s *Server) identityLinkSession(r *http.Request) (*store.Session, signInPro
 
 func (s *Server) admitIdentityLink(session *store.Session) error {
 	if !s.identityLinkLimit.allow(session.AccountID, identityLinkAttemptsPerMinute, time.Now()) {
-		return &apierr.Error{Code: apierr.RateLimited, Message: "too many link attempts; wait a minute and try again", Details: map[string]any{"retry_after_ms": time.Minute.Milliseconds()}}
+		return &apierr.Error{Code: apierr.RateLimited, Message: fmt.Sprintf("identity link attempt limit is %d per account per minute; current usage is %d attempts; wait a minute or contact support@sparkwing.dev to raise this limit", identityLinkAttemptsPerMinute, identityLinkAttemptsPerMinute), Details: map[string]any{"retry_after_ms": time.Minute.Milliseconds()}}
 	}
 	return nil
 }

@@ -158,25 +158,27 @@ func TestControllerCrons_ATeamsSchedulesAreCapped(t *testing.T) {
 
 	many := cronPushBody()
 	var entries []map[string]any
-	for i := range 21 {
+	for i := range 51 {
 		entries = append(entries, map[string]any{"pipeline": fmt.Sprintf("p%d", i), "cron": "0 3 * * *"})
 	}
 	many["schedules"] = entries
 	if got := f.status(http.MethodPut, "/api/v1/schedules/repos", writerB, many); got != http.StatusConflict {
-		t.Errorf("a push of 21 schedules = %d want 409", got)
+		t.Errorf("a push of 51 schedules = %d want 409", got)
 	}
 
-	for i := range 10 {
-		body := cronPushBody()
-		body["repo_url"] = fmt.Sprintf("https://8.8.8.8/acme/repo-%d.git", i)
-		f.call(http.MethodPut, "/api/v1/schedules/repos", writerB, body, http.StatusOK, nil)
+	many["schedules"] = entries[:48]
+	f.call(http.MethodPut, "/api/v1/schedules/repos", writerB, many, http.StatusOK, nil)
+	second := cronPushBody()
+	second["repo_url"] = "https://8.8.8.8/acme/repo-0.git"
+	f.call(http.MethodPut, "/api/v1/schedules/repos", writerB, second, http.StatusOK, nil)
+	third := cronPushBody()
+	third["repo_url"] = "https://8.8.8.8/acme/repo-1.git"
+	if got := f.status(http.MethodPut, "/api/v1/schedules/repos", writerB, third); got != http.StatusConflict {
+		t.Errorf("adding schedules beyond the team's 50 = %d want 409", got)
 	}
-	eleventh := cronPushBody()
-	eleventh["repo_url"] = "https://8.8.8.8/acme/repo-10.git"
-	if got := f.status(http.MethodPut, "/api/v1/schedules/repos", writerB, eleventh); got != http.StatusConflict {
-		t.Errorf("an eleventh repository = %d want 409", got)
+	f.call(http.MethodPut, "/api/v1/schedules/repos", writerB, second, http.StatusOK, nil)
+	second["schedules"] = entries[:3]
+	if got := f.status(http.MethodPut, "/api/v1/schedules/repos", writerB, second); got != http.StatusConflict {
+		t.Errorf("growing an existing repository beyond the team's 50 = %d want 409", got)
 	}
-	again := cronPushBody()
-	again["repo_url"] = "https://8.8.8.8/acme/repo-3.git"
-	f.call(http.MethodPut, "/api/v1/schedules/repos", writerB, again, http.StatusOK, nil)
 }

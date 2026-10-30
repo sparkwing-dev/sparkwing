@@ -1,3 +1,4 @@
+import { listPages } from "./listPages";
 import { type Capabilities, asList, send } from "./teams";
 
 export interface GitHubAppInstallation {
@@ -89,7 +90,7 @@ export async function disableAutomation(repositoryID: number): Promise<void> {
 }
 
 export async function getRunnerBindings(): Promise<RunnerBindings> {
-  const res = await send("GET", "/api/v1/runners/github", "Read GitHub Actions permissions");
+  const res = await listPages("/api/v1/runners/github", ["bindings"], (path) => send("GET", path, "Read GitHub Actions permissions"));
   const body = await res.json() as Partial<RunnerBindings>;
   return { bindings: body.bindings ?? [], workflow: body.workflow ?? "" };
 }
@@ -151,7 +152,7 @@ export function githubAppEnabled(caps: Capabilities | null): boolean {
 const seg = encodeURIComponent;
 
 export async function getGitHubApp(): Promise<GitHubApp> {
-  const res = await send("GET", "/api/v1/team/github-app", "Load GitHub");
+  const res = await listPages("/api/v1/team/github-app", ["installations"], (path) => send("GET", path, "Load GitHub"));
   const body = (await res.json()) as Partial<GitHubApp>;
   return {
     slug: body.slug ?? "",
@@ -170,20 +171,12 @@ export async function disconnectInstallation(id: number): Promise<void> {
 export async function listInstallationRepositories(
   id: number,
 ): Promise<GitHubAppRepository[]> {
-  const res = await send(
-    "GET",
-    `/api/v1/team/github-app/installations/${seg(String(id))}/repositories`,
-    "List repositories",
-  );
+  const res = await listPages(`/api/v1/team/github-app/installations/${seg(String(id))}/repositories`, ["repositories"], (path) => send("GET", path, "List repositories"));
   return asList<GitHubAppRepository>(await res.json(), "repositories");
 }
 
 export async function listSubscriptions(): Promise<GitHubAppSubscription[]> {
-  const res = await send(
-    "GET",
-    "/api/v1/team/github-app/triggers",
-    "List subscriptions",
-  );
+  const res = await listPages("/api/v1/team/github-app/triggers", ["triggers"], (path) => send("GET", path, "List subscriptions"));
   return asList<GitHubAppSubscription>(await res.json(), "triggers");
 }
 
@@ -297,11 +290,7 @@ export interface ExtraRepos {
 export const maxExtraRepos = 10;
 
 export async function listExtraRepos(): Promise<ExtraRepos[]> {
-  const res = await send(
-    "GET",
-    "/api/v1/team/github-app/extra-repos",
-    "List extra repositories",
-  );
+  const res = await listPages("/api/v1/team/github-app/extra-repos", ["extra_repos"], (path) => send("GET", path, "List extra repositories"));
   return asList<ExtraRepos>(await res.json(), "extra_repos");
 }
 
@@ -359,11 +348,7 @@ export interface FailedGitHubDelivery {
 }
 
 export async function listFailedGitHubDeliveries(): Promise<FailedGitHubDelivery[]> {
-  const res = await send(
-    "GET",
-    "/api/v1/team/github-app/deliveries/failed",
-    "Read failed pushes",
-  );
+  const res = await listPages("/api/v1/team/github-app/deliveries/failed", ["deliveries"], (path) => send("GET", path, "Read failed pushes"));
   return asList<FailedGitHubDelivery>(await res.json(), "deliveries");
 }
 

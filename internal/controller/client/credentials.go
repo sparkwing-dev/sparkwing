@@ -105,7 +105,7 @@ func (c *tokenManager) ListTokens(ctx context.Context, q controllerwire.TokenQue
 	var response struct {
 		Tokens []capability.Metadata `json:"tokens"`
 	}
-	if err := c.client.request(ctx, "GET", c.base, path, "", nil, &response); err != nil {
+	if err := c.client.requestList(ctx, c.base, path, &response, "tokens"); err != nil {
 		return result, err
 	}
 	seen := map[string]bool{}

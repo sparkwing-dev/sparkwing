@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"strings"
 	"sync"
 	"testing"
 	"testing/quick"
@@ -12,6 +13,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/cronspec"
+	"github.com/sparkwing-dev/sparkwing/internal/limits"
 	"github.com/sparkwing-dev/sparkwing/internal/quicktest"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 )
@@ -145,7 +147,7 @@ func TestScheduleReplacementCapsAndOverrideRollback(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for i := 0; i < 20; i++ {
+	for i := 0; i < limits.MaxSchedulesPerTeam; i++ {
 		body.Schedules = append(body.Schedules, runspec.ScheduleDeclaration{Pipeline: fmt.Sprintf("extra-%d", i), Cron: "* * * * *"})
 	}
 	if _, _, err := tenant.ReplaceAuthorizedSchedules(t.Context(), a, body); err == nil {
@@ -227,7 +229,7 @@ func TestAppScheduleReplacementIsAtomicAndMemberReplaceKeepsAppRows(t *testing.T
 	}
 	var rows []CronSchedule
 	var requests []runspec.Request
-	for i := 1; i <= 21; i++ {
+	for i := 1; i <= limits.MaxSchedulesPerTeam; i++ {
 		r, q := makeInput(i)
 		r.ID, r.GitHubInstallationID = fmt.Sprintf("app-eight-%d", i), 8
 		rows, requests = append(rows, r), append(requests, q)
@@ -492,20 +494,26 @@ func TestScheduleReplayStaysWithScheduleWhenArmerChanges(t *testing.T) {
 	rewriteSchemaCount(t, tenant.s.db, "runs", 1)
 }
 
-func TestScheduleRepositoryCapCommitsOnlyTenRepositories(t *testing.T) {
+func TestScheduleTeamCapSpansRepositories(t *testing.T) {
 	tenant, a, body, _ := consentedScheduleFixture(t)
-	for i := range 10 {
+	for i := range limits.MaxSchedulesPerTeam {
 		body.RepoURL = fmt.Sprintf("https://gitlab.com/acme/repo-%d.git", i)
 		if _, _, err := tenant.ReplaceAuthorizedSchedules(t.Context(), a, body); err != nil {
 			t.Fatal(err)
 		}
 	}
-	body.RepoURL = "https://gitlab.com/acme/eleventh.git"
+	body.RepoURL = "https://gitlab.com/acme/extra.git"
 	if _, _, err := tenant.ReplaceAuthorizedSchedules(t.Context(), a, body); err == nil {
-		t.Fatal("eleventh repository committed")
+		t.Fatal("51st schedule committed")
+	} else {
+		for _, want := range []string{"limit is 50", "current usage is 50", "requested total is 51", "support@sparkwing.dev"} {
+			if !strings.Contains(err.Error(), want) {
+				t.Fatalf("refusal %q omits %q", err, want)
+			}
+		}
 	}
 	rows, err := tenant.ListCronSchedules(t.Context())
-	if err != nil || len(rows) != 10 {
+	if err != nil || len(rows) != limits.MaxSchedulesPerTeam {
 		t.Fatalf("cap changed declarations: %d %v", len(rows), err)
 	}
 	body.RepoURL = "https://gitlab.com/acme/repo-3.git"
@@ -676,5 +684,65 @@ func TestScheduleOverrideWaivesTheCronMinimumOnlyForResolvedLocalAuthority(t *te
 	var limit *ComputeLimitError
 	if _, err := tenant.OverrideAuthorizedSchedule(t.Context(), forged, ids[0], &cronspec.Override{Cron: &cron}); !errors.As(err, &limit) || limit.Limit != ComputeLimitCronSeconds {
 		t.Fatalf("a caller's local subject waived the cron minimum: %v", err)
+	}
+}
+
+func TestScheduleTeamCapAllowsFiftyInOneRepository(t *testing.T) {
+	tenant, a, body, _ := consentedScheduleFixture(t)
+	body.Schedules = nil
+	for i := range limits.MaxSchedulesPerTeam {
+		body.Schedules = append(body.Schedules, runspec.ScheduleDeclaration{Pipeline: fmt.Sprintf("pipeline-%d", i), Cron: "* * * * *"})
+	}
+	if ids, _, err := tenant.ReplaceAuthorizedSchedules(t.Context(), a, body); err != nil || len(ids) != 50 {
+		t.Fatalf("fifty schedules: %d %v", len(ids), err)
+	}
+	body.Schedules = body.Schedules[:1]
+	body.Schedules[0].Pipeline = "replacement"
+	if ids, withdrawn, err := tenant.ReplaceAuthorizedSchedules(t.Context(), a, body); err != nil || len(ids) != 1 || len(withdrawn) != 50 {
+		t.Fatalf("replacement frees allowance: %d %d %v", len(ids), len(withdrawn), err)
+	}
+	body.RepoURL = "https://gitlab.com/acme/another.git"
+	body.Schedules = nil
+	for i := range limits.MaxSchedulesPerTeam - 1 {
+		body.Schedules = append(body.Schedules, runspec.ScheduleDeclaration{Pipeline: fmt.Sprintf("pipeline-%d", i), Cron: "* * * * *"})
+	}
+	if ids, _, err := tenant.ReplaceAuthorizedSchedules(t.Context(), a, body); err != nil || len(ids) != 49 {
+		t.Fatalf("withdrawn rows still consume allowance: %d %v", len(ids), err)
+	}
+}
+
+func TestScheduleTeamCapExemptsOnlyPersistedLocalAuthority(t *testing.T) {
+	for _, local := range []bool{false, true} {
+		t.Run(fmt.Sprintf("local=%t", local), func(t *testing.T) {
+			tenant, a, body, _ := consentedScheduleFixture(t)
+			if local {
+				rewriteSchemaExec(t, tenant.s.db, "INSERT INTO teams(name,created_at,updated_at) VALUES ('default',1,1)")
+				rewriteSchemaExec(t, tenant.s.db, "INSERT INTO team_counters(team) VALUES ('default')")
+				snapshot, err := tenant.s.AsOperator().ReadAuthentication(t.Context(), capability.CredentialLookup{Class: capability.CredentialPeer, Peer: capability.Subject{Kind: capability.SubjectLocal, ID: "uid:1000"}}, capability.RequestEvidence{})
+				if err != nil {
+					t.Fatal(err)
+				}
+				tenant, err = tenant.s.ForTeam(t.Context(), DefaultTeam)
+				if err != nil {
+					t.Fatal(err)
+				}
+				a.Principal = snapshot.Authorities[0].Principal
+				a.Target.Team = string(DefaultTeam)
+			} else {
+				a.Principal.Capability.Subject.Kind = capability.SubjectLocal
+			}
+			body.Schedules = nil
+			for i := range limits.MaxSchedulesPerTeam + 1 {
+				body.Schedules = append(body.Schedules, runspec.ScheduleDeclaration{Pipeline: fmt.Sprintf("pipeline-%d", i), Cron: "* * * * *"})
+			}
+			ids, _, err := tenant.ReplaceAuthorizedSchedules(t.Context(), a, body)
+			if local {
+				if err != nil || len(ids) != 51 {
+					t.Fatalf("local schedules: %d %v", len(ids), err)
+				}
+			} else if err == nil || !strings.Contains(err.Error(), "team schedule limit is 50") {
+				t.Fatalf("caller-supplied local subject waived the cap: %v", err)
+			}
+		})
 	}
 }

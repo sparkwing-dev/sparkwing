@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"path/filepath"
 	"slices"
 	"strconv"
@@ -165,6 +166,22 @@ func (t *Tenant) ReplaceAuthorizedSchedules(ctx context.Context, a capability.Au
 	if !ok {
 		return nil, nil, authorityError(apierr.Unavailable, "schedule source policy is unavailable")
 	}
+	if len(body.Schedules) > limits.MaxSchedulesPerTeam {
+		err := t.s.inTx(ctx, func(tx *storeTx) error {
+			p, err := t.scheduleAuthorityTx(ctx, tx, a.Principal.Authority)
+			if err != nil || p.Capability.Subject.Kind == capability.SubjectLocal {
+				return err
+			}
+			var current int
+			if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM cron_schedules WHERE team=? AND declared=1`, t.team).Scan(&current); err != nil {
+				return err
+			}
+			return authorityError(apierr.Conflict, fmt.Sprintf("team schedule limit is %d, current usage is %d declared schedules, request declares %d schedules; remove unused schedules or contact support@sparkwing.dev to raise this limit", limits.MaxSchedulesPerTeam, current, len(body.Schedules)))
+		})
+		if err != nil {
+			return nil, nil, err
+		}
+	}
 	for _, entry := range body.Schedules {
 		name := entry.Name
 		if name == "" {
@@ -270,24 +287,13 @@ func (t *Tenant) replaceConsentedSchedules(ctx context.Context, a *capability.Au
 				if err != nil {
 					return err
 				}
-				repos := map[string]bool{}
 				keep := map[string]bool{}
 				seen := map[string]bool{}
+				current := 0
 				for _, row := range existing {
 					if row.Declared {
-						key := string(row.RepositoryKey)
-						if key == "" {
-							key = row.RepoPath
-						}
-						repos[key] = true
+						current++
 					}
-				}
-				repoKey := repo
-				if len(requests) > 0 {
-					repoKey = string(requests[0].Git.Repository.Key)
-				}
-				if p.Capability.Subject.Kind != capability.SubjectLocal && len(proposed) > 0 && !repos[repoKey] && len(repos) >= limits.MaxScheduledReposPerTeam {
-					return authorityError(apierr.Conflict, "team schedule repository limit reached")
 				}
 				guards, err := computeLimitsTx(ctx, tx)
 				if err != nil {
@@ -390,12 +396,12 @@ func (t *Tenant) replaceConsentedSchedules(ctx context.Context, a *capability.Au
 						} else {
 							count++
 						}
-					} else if !owned && !keep[row.ID] && row.Declared && string(row.RepositoryKey) == repoKey {
+					} else if !owned && !keep[row.ID] && row.Declared {
 						count++
 					}
 				}
-				if p.Capability.Subject.Kind != capability.SubjectLocal && count > limits.MaxSchedulesPerRepo {
-					return authorityError(apierr.BadRequest, "repository schedule limit reached")
+				if p.Capability.Subject.Kind != capability.SubjectLocal && count > limits.MaxSchedulesPerTeam {
+					return authorityError(apierr.Conflict, fmt.Sprintf("team schedule limit is %d, current usage is %d declared schedules, requested total is %d; remove unused schedules or contact support@sparkwing.dev to raise this limit", limits.MaxSchedulesPerTeam, current, count))
 				}
 				if a != nil {
 					_, err = t.scheduleAuthorityTx(ctx, tx, a.Principal.Authority)

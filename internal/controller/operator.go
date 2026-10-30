@@ -50,8 +50,7 @@ func (s *Server) handleOperatorTeams(w http.ResponseWriter, r *http.Request, aut
 			Team: string(m.Slug), DisplayName: m.DisplayName, Owners: append([]string{}, m.Owners...),
 		})
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"teams": out})
-	return nil
+	return writeListPage(w, r, authorized, "teams", out, func(row operatorTeamMatchJSON) string { return row.Team }, nil)
 }
 
 type operatorEventJSON struct {

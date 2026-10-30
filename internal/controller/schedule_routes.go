@@ -9,11 +9,9 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/cronspec"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/crons"
-	"github.com/sparkwing-dev/sparkwing/internal/limits"
 
 	"github.com/sparkwing-dev/sparkwing/internal/sourceurl"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
@@ -55,9 +53,6 @@ func (s *Server) handlePutCronRepo(w http.ResponseWriter, r *http.Request, a cap
 	var body controllerwire.ScheduleRepoRequest
 	if err := decodeEngineRequest(r, &body); err != nil {
 		return err
-	}
-	if a.Principal.Capability.Subject.Kind != capability.SubjectLocal && len(body.Schedules) > limits.MaxSchedulesPerRepo {
-		return &apierr.Error{Code: apierr.Conflict, Message: "repository schedule limit exceeded"}
 	}
 	if body.Mode == "" {
 		body.Mode = controllerwire.ScheduleReplace

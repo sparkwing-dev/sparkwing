@@ -102,8 +102,7 @@ func (s *Server) handleListGitCredentials(w http.ResponseWriter, r *http.Request
 	for _, c := range creds {
 		out = append(out, gitCredentialJSON(c, ""))
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"credentials": out})
-	return nil
+	return writeListPage(w, r, a, "credentials", out, func(row GitCredentialJSON) string { return row.Host + "\x00" + row.Repository }, nil)
 }
 
 func (s *Server) handlePutGitCredential(w http.ResponseWriter, r *http.Request, a capability.Authorized) error {

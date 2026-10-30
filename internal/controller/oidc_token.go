@@ -3,6 +3,7 @@ package controller
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"time"
 
@@ -108,7 +109,7 @@ func (s *Server) handleOIDCToken(w http.ResponseWriter, r *http.Request, a capab
 		key := a.Principal.Authority.ID + "\x00" + a.Target.RunID
 		if ok, wait := s.oidc.limit.AllowWithRetry(key, facts.Now); !ok {
 			limited = wait
-			return store.OIDCMint{}, &apierr.Error{Code: apierr.RateLimited, Message: "OIDC issuance budget exhausted"}
+			return store.OIDCMint{}, &apierr.Error{Code: apierr.RateLimited, Message: fmt.Sprintf("OIDC minting limit is %d tokens per claim and run refilled over 5 minutes; current budget usage is at least %d tokens; wait for Retry-After or contact support@sparkwing.dev to raise this limit", oidcTokensPerRun, oidcTokensPerRun)}
 		}
 		if err := r.Context().Err(); err != nil {
 			return store.OIDCMint{}, err

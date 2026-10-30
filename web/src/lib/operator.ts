@@ -1,3 +1,4 @@
+import { listPages } from "./listPages";
 import { authFetch } from "./api";
 import {
   type StandingHistory,
@@ -233,11 +234,7 @@ async function readJSON<T>(res: Response): Promise<T> {
 const quiet = { speaksForSession: false };
 
 export async function searchTeams(q: string): Promise<TeamMatch[]> {
-  const res = await authFetch(
-    `/api/v1/operator/teams?q=${encodeURIComponent(q)}`,
-    {},
-    quiet,
-  );
+  const res = await listPages(`/api/v1/operator/teams?q=${encodeURIComponent(q)}`, ["teams"], (path) => authFetch(path, {}, quiet));
   return (await readJSON<{ teams: TeamMatch[] }>(res)).teams;
 }
 

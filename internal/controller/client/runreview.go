@@ -25,7 +25,7 @@ func (c *engineClient) ListApprovals(ctx context.Context, run string) (controlle
 		}
 		pattern, path = "/api/v1/runs/{run}/approvals", "/api/v1/runs/"+url.PathEscape(run)+"/approvals"
 	}
-	err := c.request(ctx, "GET", pattern, path, "", nil, &result)
+	err := c.requestList(ctx, pattern, path, &result, "approvals")
 	if err == nil {
 		for _, approval := range result.Approvals {
 			if approval.RunID == "" || approval.JobID == "" || approval.RequestedAt.IsZero() || approval.ResolvedAt == nil && approval.Resolution != "" || approval.ResolvedAt != nil && approval.Resolution == "" {

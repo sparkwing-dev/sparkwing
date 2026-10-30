@@ -77,8 +77,7 @@ func (s *EngineController) handleMemberDirectory(w http.ResponseWriter, r *http.
 	for _, member := range members {
 		out = append(out, memberJSON{UserID: member.AccountID, Email: member.Email, Name: member.Name, Role: string(member.Role)})
 	}
-	writeJSON(w, http.StatusOK, out)
-	return nil
+	return writeListPage(w, r, a, "members", out, func(row memberJSON) string { return row.UserID }, nil)
 }
 
 func (s *EngineController) handleRevokeAuthority(w http.ResponseWriter, r *http.Request, a capability.Authorized) error {

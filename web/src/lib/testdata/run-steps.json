@@ -1,4 +1,5 @@
 {
+  "next_cursor": "",
   "steps": [
     {
       "annotations": [
@@ -49,5 +50,6 @@
       "finished_at": "2026-10-28T05:02:04Z",
       "summary": "## Coverage\n91%"
     }
-  ]
+  ],
+  "truncated": false
 }

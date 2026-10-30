@@ -2,6 +2,7 @@ package store_test
 
 import (
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -81,6 +82,12 @@ SELECT team, id, ?, ?, ?, 1, 0 FROM runs WHERE team = ? AND id = ?`)
 
 	if err := f.tenant.WriteMetric(ctx, a, next(store.MaxNodeMetricSamples)); !errors.Is(err, store.ErrNodeMetricLimit) {
 		t.Fatalf("a sample past the cap = %v, want ErrNodeMetricLimit", err)
+	} else {
+		for _, want := range []string{"limit is 10000", "current usage is 10000", "support@sparkwing.dev"} {
+			if !strings.Contains(err.Error(), want) {
+				t.Fatalf("metric refusal %q omits %q", err, want)
+			}
+		}
 	}
 	for i := range 8 {
 		marker := store.MetricSample{Kind: store.MetricPartial, TS: base.Add(time.Duration(store.MaxNodeMetricSamples+1+i) * time.Second)}

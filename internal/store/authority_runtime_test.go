@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"errors"
 	"slices"
+	"strings"
 	"testing"
 	"testing/synctest"
 	"time"
@@ -339,4 +340,29 @@ func issueFixtureAward(t *testing.T, s *Store, tx *storeTx, spec capability.Awar
 		err = writeOwnerClaimTx(t.Context(), tx, UnitClaim{Team: "a", Kind: unit.Kind, RunID: string(unit.RunID), NodeID: string(unit.NodeID), SourceGeneration: unit.SourceGeneration, Award: runstate.ClaimAward{Holder: "machine", CapabilityPrefix: issued.Capability.Prefix, Generation: 7, LeaseExpiresAt: time.Unix(0, expiry)}})
 	}
 	return issued, err
+}
+
+func TestAuthorityCloudAwardDurationRefusalNamesLimitUsageAndRemedy(t *testing.T) {
+	s := authorityStore(t)
+	root := authorityRoot("machine", "")
+	root.Subject.Kind = capability.SubjectService
+	root.Grants = []capability.Grant{capability.ClaimsLaunch}
+	spec := authorityClaimFixture(t, s, root)
+	began := s.now().Add(-4*time.Hour - 10*time.Minute)
+	rewriteSchemaExec(t, s.db, `INSERT INTO billing_awards(team,reservation_id,capability_prefix,run_id,node_id,generation,payer_team,metered,executor_class,billing_start,unit_kind,billing_unit,awarded_at) VALUES ('a','prior-award','prior-cloud','run','job',1,'a',1,'cloud','at_start','node','job',?)`, began.UnixNano())
+	tx, err := s.beginTx(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rollbackOrLog(tx)
+	_, err = issueFixtureAward(t, s, tx, spec)
+	var refusal *apierr.Error
+	if !errors.As(err, &refusal) || refusal.Code != apierr.BadRequest {
+		t.Fatalf("over-duration Cloud award: %v", err)
+	}
+	for _, want := range []string{"New standing job duration limit is 4h0m0s", "current elapsed time is 4h10m0s", "higher standing", "support@sparkwing.dev"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("duration refusal %q omits %q", err, want)
+		}
+	}
 }

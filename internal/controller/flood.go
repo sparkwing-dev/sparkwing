@@ -3,6 +3,7 @@ package controller
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sync"
 	"time"
 
@@ -81,10 +82,27 @@ func (s *Server) depthRefusal(team store.Team, key, source string, readDepth fun
 				"principal", key, "team", team, "source", source,
 				"reason", "team queue depth above the shed threshold",
 				"queue_depth", depth, "threshold", f.policy.ShedQueueDepth)
-			return &apierr.Error{Code: apierr.Unavailable, Message: "this team's queue is above its shed threshold", Details: map[string]any{"retry_after_ms": shedRetryAfter.Milliseconds()}}
+			return &apierr.Error{Code: apierr.Unavailable, Message: fmt.Sprintf("team queue depth limit is %d, current usage is %d pending runs; wait for queued work to start or ask the operator to raise the queue shed threshold", f.policy.ShedQueueDepth, depth), Details: map[string]any{"reason": "queue_depth_limit", "limit": f.policy.ShedQueueDepth, "usage": depth, "retry_after_ms": shedRetryAfter.Milliseconds()}}
 		}
 	}
 	return nil
+}
+
+func publicQueueDepthRefusal(err error) *apierr.Error {
+	var failure *apierr.Error
+	if !errors.As(err, &failure) || failure.Code != apierr.Unavailable || failure.Details["reason"] != "queue_depth_limit" {
+		return nil
+	}
+	limit, limitOK := failure.Details["limit"].(int)
+	usage, usageOK := failure.Details["usage"].(int)
+	if !limitOK || !usageOK {
+		return nil
+	}
+	return &apierr.Error{
+		Code:    apierr.Unavailable,
+		Message: fmt.Sprintf("team queue depth limit is %d, current usage is %d pending runs; wait for queued work to start or ask the operator to raise the queue shed threshold", limit, usage),
+		Details: map[string]any{"reason": "queue_depth_limit", "limit": limit, "usage": usage, "retry_after_ms": shedRetryAfter.Milliseconds()},
+	}
 }
 
 func (s *Server) runCapRefusal(key, source string) error {
@@ -100,7 +118,7 @@ func (s *Server) runCapRefusal(key, source string) error {
 			s.logger.Warn("trigger shed",
 				"principal", key, "source", source, "reason", "hourly run cap reached",
 				"cap_per_hour", f.policy.RunsPerPrincipalHour, "retry_after", wait)
-			return &apierr.Error{Code: apierr.RateLimited, Message: "hourly run cap reached for this principal", Details: map[string]any{"retry_after_ms": wait.Milliseconds()}}
+			return &apierr.Error{Code: apierr.RateLimited, Message: fmt.Sprintf("principal run limit is %d per hour, current budget usage is at least %d runs; wait for Retry-After or ask the operator to raise the hourly run cap", f.policy.RunsPerPrincipalHour, f.policy.RunsPerPrincipalHour), Details: map[string]any{"retry_after_ms": wait.Milliseconds()}}
 		}
 	}
 	return nil

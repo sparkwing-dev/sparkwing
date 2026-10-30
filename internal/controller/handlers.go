@@ -260,8 +260,9 @@ func (s *Server) handleListNodeSteps(w http.ResponseWriter, r *http.Request, aut
 	if err != nil {
 		return engineLookupError(err)
 	}
-	writeJSON(w, http.StatusOK, publicRunSteps(steps))
-	return nil
+	return writeListPage(w, r, authorized, "steps", publicRunSteps(steps).Steps, func(row controllerwire.StepDetail) string {
+		return stepCollectionKey(row.JobID, row.Attempt, row.StartedAt, row.ID)
+	}, nil)
 }
 
 func (s *Server) handleListEvents(w http.ResponseWriter, r *http.Request, authorized capability.Authorized) error {
@@ -316,6 +317,7 @@ func (s *Server) handleListDebugPauses(w http.ResponseWriter, r *http.Request, a
 	for i, row := range pauses {
 		out[i] = controllerwire.PauseHistory(*row)
 	}
-	writeJSON(w, http.StatusOK, out)
-	return nil
+	return writeListPage(w, r, authorized, "pauses", out, func(row controllerwire.PauseHistory) string {
+		return fmt.Sprintf("%016x/%s/%s", ^(uint64(row.PausedAt.UnixNano()) ^ (1 << 63)), row.NodeID, row.Reason)
+	}, nil)
 }

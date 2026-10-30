@@ -362,11 +362,9 @@ CREATE TABLE accounts (
     active_team TEXT NOT NULL DEFAULT '',
     created_at BIGINT NOT NULL,
     updated_at BIGINT NOT NULL,
-    teams_created BIGINT NOT NULL DEFAULT 0,
     waitlist_reason TEXT NOT NULL DEFAULT '',
     waitlisted_at BIGINT NOT NULL DEFAULT 0,
-    CHECK(email_verified IN (0,1)),
-    CHECK(teams_created >= 0)
+    CHECK(email_verified IN (0,1))
 );
 
 CREATE TABLE sessions (
@@ -967,9 +965,12 @@ CREATE TABLE billing_pages (
     request_key TEXT NOT NULL CHECK(request_key <> ''),
     payment_mode TEXT NOT NULL CHECK(payment_mode IN ('test','live')),
     page_json BLOB NOT NULL,
+    created_at BIGINT NOT NULL,
     failed_at BIGINT,
     UNIQUE(team,account_id,request_key)
 );
+
+CREATE INDEX idx_billing_pages_created ON billing_pages(team,payment_mode,created_at);
 
 CREATE TABLE payment_correlations (
     payment_mode TEXT NOT NULL CHECK(payment_mode IN ('test','live')),
