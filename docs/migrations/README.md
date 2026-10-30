@@ -15,6 +15,7 @@ Format conventions live in `CHANGELOG-STYLE.md` at the repository root.
 
 | Version | Date | Summary |
 |---|---|---|
+| [v0.68.0](v0.68.0.md) | 2026-10-30 | v0.68 rewrites the engine, the store and the trust model. |
 | [v0.67.0](v0.67.0.md) | 2026-10-12 | CLI, source selection and environment configuration changes. |
 | [v0.66.0](v0.66.0.md) | 2026-10-01 | Historical release changes. Follow the latest migration for the current CLI. |
 | [v0.65.0](v0.65.0.md) | 2026-09-29 | Historical release changes. Follow the latest migration for the current CLI. |
