@@ -40,6 +40,8 @@ read-only cut checks (version freshness, Go directives, SDK pins, changelog
 links) and previews the changelog and guide roll; build, lint and the short
 tests run only in the real cut.
 
+Version freshness excludes `testdata` fixture modules, matching the committed-module checks.
+
 `push-tag` declares the `destructive` and `prod` risk labels, so only the
 second command tags and pushes. The tag push starts the hosted release below.
 

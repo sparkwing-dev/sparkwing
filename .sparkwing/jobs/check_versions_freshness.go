@@ -229,7 +229,7 @@ func findGoModFiles(root string) ([]string, error) {
 		}
 		name := d.Name()
 		if d.IsDir() {
-			if name == ".git" || name == "node_modules" || name == "vendor" {
+			if name == ".git" || name == "node_modules" || name == "vendor" || name == "testdata" {
 				return filepath.SkipDir
 			}
 			return nil

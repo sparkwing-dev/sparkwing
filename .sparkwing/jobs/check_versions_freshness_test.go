@@ -665,6 +665,40 @@ func TestCheckVersionsFreshnessIgnoresRetractedProxyVersions(t *testing.T) {
 	}
 }
 
+func TestCheckVersionsFreshnessExcludesTestdataModules(t *testing.T) {
+	cases := []struct {
+		moduleDir   string
+		wantProblem bool
+	}{
+		{moduleDir: kubernetesE2EPipelineModuleRel},
+		{moduleDir: "internal/agenttrial/testdata/trial-repo"},
+		{moduleDir: ".sparkwing", wantProblem: true},
+		{moduleDir: "internal/testdatabase", wantProblem: true},
+	}
+	for _, c := range cases {
+		t.Run(c.moduleDir, func(t *testing.T) {
+			repo := seedProxyPinnedRepo(t, true)
+			moduleDir := filepath.Join(repo, filepath.FromSlash(c.moduleDir))
+			if err := os.MkdirAll(moduleDir, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			writeFile(t, filepath.Join(moduleDir, "go.mod"),
+				"module fixture\n\ngo 1.26.0\n\nrequire "+sdkModulePath+" v0.68.0-qa.16\n")
+
+			err := CheckVersionsFreshness(context.Background(), repo)
+			if c.wantProblem {
+				if err == nil || !strings.Contains(err.Error(), c.moduleDir+"/go.mod") {
+					t.Fatalf("freshness error = %v, want unresolved pin in %s/go.mod", err, c.moduleDir)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("fixture module must not require a published pin: %v", err)
+			}
+		})
+	}
+}
+
 func TestRetractedReleasesExcludesOnlyTheOwningModule(t *testing.T) {
 	dir := t.TempDir()
 	writeFile(t, filepath.Join(dir, "go.mod"), "module "+sdkModulePath+`
