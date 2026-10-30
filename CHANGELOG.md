@@ -58,6 +58,8 @@ unlock.
 
 ### Removed
 
+- **daemon (Breaking):** Removed the version-aware takeover ladder
+  Local startup attempts one replacement. A second incompatible daemon reports a conflict; stop competing installations and restart the daemon, or use a separate `SPARKWING_HOME`.
 - **hooks (Breaking):** Removed installation proofs, fleet modes, automatic global-hook chaining and doctor's fleet survey
   `--no-prove`, `--all-repos` and `--ungated` are gone. Install and inspect hooks per repository. Installation refuses a conflicting `core.hooksPath` with manual repair guidance.
 - **GitHub App (Breaking):** Removed commit-status reporting

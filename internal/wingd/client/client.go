@@ -243,33 +243,11 @@ func daemonStartupBudget(opts Options) time.Duration {
 	return time.Duration(dialsPerSpawn) * opts.backoff()
 }
 
-const maxTakeoverAttempts = 3
-
-const maxTotalTakeovers = 2 * maxTakeoverAttempts
-
-type takeoverBudget struct {
-	version    string
-	perVersion int
-	total      int
-}
-
-func (b *takeoverBudget) spend(version string) bool {
-	if version != b.version {
-		b.version, b.perVersion = version, 0
-	}
-	if b.perVersion >= maxTakeoverAttempts || b.total >= maxTotalTakeovers {
-		return false
-	}
-	b.perVersion++
-	b.total++
-	return true
-}
-
-var errTakeoverExhausted = errors.New("wingd/client: repeated daemon takeover did not resolve the version skew")
+var errTakeoverExhausted = errors.New("wingd/client: daemon replacement did not resolve the version conflict")
 
 var errDaemonDraining = errors.New("wingd/client: daemon is draining")
 
-func takeoverExhausted(selfVersion string, ack wingwire.HelloAck, attempts int) error {
+func takeoverExhausted(selfVersion string, ack wingwire.HelloAck) error {
 	self := selfVersion
 	if self == "" {
 		self = "(unknown)"
@@ -278,9 +256,9 @@ func takeoverExhausted(selfVersion string, ack wingwire.HelloAck, attempts int) 
 	if daemon == "" {
 		daemon = "(unknown)"
 	}
-	return fmt.Errorf("%w: after %d attempts the daemon still reports %s (protocol %d) while this binary is %s (protocol %d). "+
-		"Run `sparkwing daemon restart` to replace it, or set SPARKWING_HOME to run against a daemon of your own",
-		errTakeoverExhausted, attempts, daemon, ack.ProtocolMajor, self, wingd.ProtocolMajor)
+	return fmt.Errorf("%w: after one replacement attempt the daemon still reports %s (protocol %d) while this binary is %s (protocol %d). "+
+		"Stop competing Sparkwing installations and run `sparkwing daemon restart`, or set SPARKWING_HOME to use a separate daemon",
+		errTakeoverExhausted, daemon, ack.ProtocolMajor, self, wingd.ProtocolMajor)
 }
 
 func spawnFailed(home, sock string, serr, dialErr error) error {
@@ -349,7 +327,7 @@ func (cl *Client) connect(ctx context.Context) error {
 func (cl *Client) connectPaced(ctx context.Context, dialMax time.Duration) error {
 	opts := cl.opts
 	spawns := 0
-	takeovers := &takeoverBudget{}
+	replacementAttempted := false
 	drainWait := newRetry("wait for draining daemon", 0)
 	dialWait := newRetryCapped("wait for daemon socket", 0, dialMax)
 	electionWait := newRetryCapped("wait for predecessor daemon", 0, max(dialMax, electionPaceMax))
@@ -460,17 +438,15 @@ func (cl *Client) connectPaced(ctx context.Context, dialMax time.Duration) error
 		if ack.ProtocolMajor != wingd.ProtocolMajor {
 			if wingd.ProtocolMajor > ack.ProtocolMajor {
 				if opts.NoTakeover {
-					// safety: reported before any budget is spent, so a
-					// client that never takes over can never exhaust the
-					// takeover allowance and report the wrong fault.
 					cl.Close()
 					return daemonTooOld(opts.Version, ack)
 				}
 				cl.ack = ack
-				if !takeovers.spend(ack.BinaryVersion) {
+				if replacementAttempted {
 					cl.Close()
-					return takeoverExhausted(opts.Version, ack, takeovers.total)
+					return takeoverExhausted(opts.Version, ack)
 				}
+				replacementAttempted = true
 				if terr := cl.takeover(ctx, opts); terr != nil {
 					return terr
 				}
@@ -482,10 +458,11 @@ func (cl *Client) connectPaced(ctx context.Context, dialMax time.Duration) error
 		if !opts.NoTakeover && !servedDownLevel(ack) &&
 			(supersedes(opts.Version, ack.BinaryVersion) || sameVersionBuildReplacement(opts.Version, ack)) {
 			cl.ack = ack
-			if !takeovers.spend(ack.BinaryVersion) {
+			if replacementAttempted {
 				_ = cl.Close()
-				return takeoverExhausted(opts.Version, ack, takeovers.total)
+				return takeoverExhausted(opts.Version, ack)
 			}
+			replacementAttempted = true
 			if terr := cl.takeover(ctx, opts); terr != nil {
 				return terr
 			}
