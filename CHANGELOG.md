@@ -29,6 +29,8 @@ unlock.
 
 ### Fixed
 
+- **billing:** Stripe refund webhooks accept refund objects without `livemode`, using the signed event mode. Replays reverse each refund once.
+
 - **release:** Schema and wire changelog gates fetch a previous release tag missing from the job checkout. Failed fetches name that checkout and show a recovery command.
 
 ## [v0.68.0] - 2026-10-30

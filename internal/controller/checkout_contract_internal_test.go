@@ -16,11 +16,12 @@ import (
 // safety: sparkwing-platform tests its real handler against a byte-identical copy of testdata/checkout_contract.json,
 // so the two copies change together.
 type checkoutContract struct {
-	Token      string `json:"token"`
-	Deployment string `json:"deployment"`
-	MinCents   int64  `json:"min_cents"`
-	MaxCents   int64  `json:"max_cents"`
-	Routes     map[string]struct {
+	RefundEvent json.RawMessage `json:"refund_event"`
+	Token       string          `json:"token"`
+	Deployment  string          `json:"deployment"`
+	MinCents    int64           `json:"min_cents"`
+	MaxCents    int64           `json:"max_cents"`
+	Routes      map[string]struct {
 		Path     string          `json:"path"`
 		Request  json.RawMessage `json:"request"`
 		Response json.RawMessage `json:"response"`

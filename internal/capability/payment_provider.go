@@ -61,9 +61,14 @@ type paymentObject struct {
 
 func (a *paymentAuthenticator) providerEvent(ctx context.Context, id string, created int64, body []byte, policy paymentEventPolicy) (*VerifiedPaymentEvent, error) {
 	var object paymentObject
-	if err := json.Unmarshal(body, &object); err != nil || object.ID == "" || object.LiveMode == nil || *object.LiveMode != (a.mode == PaymentLive) || created <= 0 {
+	if err := json.Unmarshal(body, &object); err != nil || object.ID == "" || created <= 0 {
 		return nil, invalidPaymentEvent()
 	}
+	// safety: refunds omit livemode; their signed event envelope already binds the mode.
+	if object.LiveMode == nil && policy.Kind != PaymentRefund || object.LiveMode != nil && *object.LiveMode != (a.mode == PaymentLive) {
+		return nil, invalidPaymentEvent()
+	}
+
 	event := PaymentEvent{
 		EventID: id, ObjectID: object.ID, Created: created, Mode: a.mode, Kind: policy.Kind, Status: object.Status,
 		CustomerID: string(object.Customer), PaymentID: string(object.PaymentIntent), ChargeID: string(object.Charge), Reason: object.Reason,
