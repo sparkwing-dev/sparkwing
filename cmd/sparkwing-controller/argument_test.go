@@ -30,3 +30,13 @@ func TestControllerHelpAndUnknownArgumentsDoNotStart(t *testing.T) {
 		})
 	}
 }
+
+func TestControllerRejectsRemovedLiveLogFlags(t *testing.T) {
+	for _, arg := range []string{"--live-log-node-kb=1", "--live-log-total-mb=1", "--live-log-max-nodes=1", "--live-log-idle=1m"} {
+		t.Run(arg, func(t *testing.T) {
+			if err := run([]string{arg}); err == nil || !strings.Contains(err.Error(), "unknown flag") {
+				t.Fatalf("removed flag %s: %v", arg, err)
+			}
+		})
+	}
+}

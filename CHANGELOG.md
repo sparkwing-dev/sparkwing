@@ -54,6 +54,11 @@ unlock.
 - **billing:** Stripe refund webhooks accept refund objects without `livemode`, using the signed event mode. Replays reverse each refund once.
 - **storage:** Quota refusals name the tier or override, limit, usage and requested growth, with funding, monthly reset and support remedies.
 
+### Removed
+
+- **controller (Breaking):** Removed `--live-log-node-kb`, `--live-log-total-mb`, `--live-log-max-nodes` and `--live-log-idle`
+  Live buffers retain fixed limits of 512 KiB per node, 64 MiB total, 1,024 nodes and a 10-minute idle timeout.
+
 ## [v0.68.1] - 2026-10-30
 ### Changed
 
