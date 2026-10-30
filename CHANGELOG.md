@@ -28,7 +28,7 @@ unlock.
   The schedule limit replaces the 10-per-repository and 20-per-team caps. The operator's minimum cron interval and the OIDC limit of 30 mints per five minutes per claim remain. Limit refusals name usage and a remedy.
 - **billing (Breaking):** Each team can create 20 Stripe Checkout Sessions per rolling hour across Add funds and saved-card setup
   Idempotent retries count once. Refusals report current usage, a retry delay and support guidance before calling the provider.
-- **store (Breaking):** Store schema version 27 records Checkout Session reservation times and removes the lifetime team-creation counter
+- **store (Breaking):** The schema baseline advances to version 27, recording Checkout Session reservation times and removing the lifetime team-creation counter
   Stores at another schema version must be recreated using the existing backup and move-aside instructions.
 - **scaffold:** `const FallbackSDKVersion` pins v0.68.1, so a fresh scaffold compiles against that release.
 - **TypeScript SDK:** The npm package names this repository, which npm provenance requires. Publication refuses major versions above 0, a name or version that does not match the release, and a `latest` tag that would move backwards.
