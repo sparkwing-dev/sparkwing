@@ -95,7 +95,6 @@ func TestHooksCommandsUseRegistryGrammarAndJSON(t *testing.T) {
 			t.Fatalf("%s: %v", flag, err)
 		}
 	}
-
 }
 
 func parseHooksInstall(args []string) error {

@@ -515,7 +515,6 @@ func TestHooksStatus_RejectsIncompleteOrStaleGate(t *testing.T) {
 			if strings.Contains(output, `"state":"armed"`) {
 				t.Fatalf("stale gate reported as armed: %s", output)
 			}
-
 		})
 	}
 }
