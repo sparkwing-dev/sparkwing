@@ -36,7 +36,8 @@ Use --output plain to pipe it to sparkwing runners add --session-stdin. Its init
 Normal renewal applies, including during enrollment. Enrollment attempts logout
 on success or failure. If logout fails, the renewed session remains live until
 expiry or revocation. The session is printed only
-to stdout and the audit line contains no secret.
+to stdout. The session.break_glass audit row records the account and team,
+excluding the session and free-form reason.
 
 freeze holds the team: its metered claims are refused until the hold is
 released. Running Cloud work stops at its funded deadline. unfreeze releases the holds
@@ -197,7 +198,7 @@ func runAdmin(args []string, stdout, stderr io.Writer) error {
 		if err != nil || role != store.RoleOwner {
 			return errors.New("admin session requires an existing team administrator in --team")
 		}
-		raw, _, _, err := st.AsOperator().CreateAccountSession(ctx, store.Account{ID: *operator}, t.Team(), 15*time.Minute)
+		raw, _, _, err := st.AsOperator().CreateBreakGlassSession(ctx, *operator, t.Team(), 15*time.Minute)
 		if err != nil {
 			return err
 		}

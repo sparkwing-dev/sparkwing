@@ -102,6 +102,17 @@ func TestAdminSessionEnrollsSharedRunnerAndReservedLauncher(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer func() { _ = st.Close() }()
+	tenant, err := st.ForTeam(t.Context(), "default")
+	if err != nil {
+		t.Fatal(err)
+	}
+	events, err := tenant.BusinessEvents(t.Context(), "session.break_glass", 100, "")
+	if err != nil || len(events) != 1 {
+		t.Fatalf("session mint missing durable audit: %+v %v", events, err)
+	}
+	if event := events[0]; event.Account != "ops-admin" || event.Actor != "sparkwing-controller admin" || event.Team != "default" || len(event.Attrs) != 0 {
+		t.Fatalf("session mint audit identity or privacy: %+v", event)
+	}
 	httpServer := httptest.NewTLSServer(server.Handler())
 	defer httpServer.Close()
 	manager, err := client.NewSessionRunnerTokenManager(t.Context(), client.EngineOptions{URL: httpServer.URL, HTTP: httpServer.Client()}, raw)
@@ -133,6 +144,10 @@ func TestAdminSessionEnrollsSharedRunnerAndReservedLauncher(t *testing.T) {
 	}
 	if err := json.Unmarshal(session.Bytes(), &result); err != nil || result.Session == "" || strings.Contains(audit.String(), result.Session) {
 		t.Fatal("default JSON session output was missing or leaked to audit")
+	}
+	events, err = tenant.BusinessEvents(t.Context(), "session.break_glass", 100, "")
+	if err != nil || len(events) != 2 {
+		t.Fatalf("repeat session mint lost audit: %+v %v", events, err)
 	}
 }
 
