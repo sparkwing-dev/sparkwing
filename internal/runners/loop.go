@@ -221,7 +221,7 @@ func (l *Loop) run(ctx context.Context) (policyErr, runErr error) {
 			}
 		}
 		freeSlots := l.Config.MaxConcurrent
-		// Owners wait for jobs, so they must leave job capacity available.
+		// safety: Owners wait for jobs, so sharing their claim slots would deadlock.
 		request.Kinds = slices.DeleteFunc(request.Kinds, func(kind capability.UnitKind) bool {
 			if len(active)-owners >= l.Config.MaxConcurrent {
 				return true

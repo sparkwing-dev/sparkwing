@@ -167,7 +167,7 @@ func runLocalCommand(ctx context.Context, pipeline string, flags runFlags, args 
 	if err != nil {
 		return err
 	}
-	// The standalone controller still owns this context through hosting.
+	// safety: Canceling preparation would stop the standalone controller before hosting.
 	close(preparationDone)
 	<-preparationStopped
 	if err := validateLocalIntake(response, pipeline); err != nil {
