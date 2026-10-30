@@ -69,7 +69,7 @@ func (c *engineClient) ReadSteps(ctx context.Context, run string) (controllerwir
 	if !validSelector(run) {
 		return result, &apierr.Error{Code: apierr.BadRequest, Message: "invalid run selector"}
 	}
-	err := c.request(ctx, "GET", "/api/v1/runs/{run}/steps", "/api/v1/runs/"+url.PathEscape(run)+"/steps", "", nil, &result)
+	err := c.requestList(ctx, "/api/v1/runs/{run}/steps", "/api/v1/runs/"+url.PathEscape(run)+"/steps", &result, "steps")
 	return result, err
 }
 

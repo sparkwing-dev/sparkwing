@@ -21,7 +21,7 @@ func NewSecretManager(options EngineOptions) (controllerwire.SecretManager, erro
 
 func (c *engineClient) ListSecrets(ctx context.Context) (controllerwire.Secrets, error) {
 	var result controllerwire.Secrets
-	if err := c.request(ctx, "GET", "/api/v1/secrets", "/api/v1/secrets", "", nil, &result); err != nil {
+	if err := c.requestList(ctx, "/api/v1/secrets", "/api/v1/secrets", &result, "secrets"); err != nil {
 		return result, err
 	}
 	seen := map[controllerwire.SecretSelector]bool{}

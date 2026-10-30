@@ -19,7 +19,7 @@ func NewRunnerReader(options EngineOptions) (controllerwire.RunnerReader, error)
 
 func (c *engineClient) ListRunners(ctx context.Context) (controllerwire.Runners, error) {
 	var result controllerwire.Runners
-	if err := c.request(ctx, "GET", "/api/v1/runners", "/api/v1/runners", "", nil, &result); err != nil {
+	if err := c.requestList(ctx, "/api/v1/runners", "/api/v1/runners", &result, "runners"); err != nil {
 		return result, err
 	}
 	seen := map[string]bool{}
