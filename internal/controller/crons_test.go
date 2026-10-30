@@ -23,7 +23,8 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
 )
 
-const cronTestRepoURL = "https://gitlab.com/acme/widgets.git"
+// bug: git's local fixture redirect happens after clone-host validation, so a named host would still require DNS.
+const cronTestRepoURL = "https://8.8.8.8/acme/widgets.git"
 
 const cronTestSHA = "cf857896cdbc5330e7600465c2a6dade81d8bcba"
 
@@ -41,7 +42,7 @@ func newCronsFixture(t *testing.T, opts ...store.Option) *cronsFixture {
 	t.Helper()
 	remotes := []string{cronTestRepoURL}
 	for i := range 11 {
-		remotes = append(remotes, fmt.Sprintf("https://gitlab.com/acme/repo-%d.git", i))
+		remotes = append(remotes, fmt.Sprintf("https://8.8.8.8/acme/repo-%d.git", i))
 	}
 	if sha := sourcetest.FixedRemote(t, remotes...); sha != cronTestSHA {
 		t.Fatalf("fixed schedule commit = %s", sha)
