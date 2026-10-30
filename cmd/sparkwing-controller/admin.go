@@ -7,17 +7,21 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"os"
 	"strings"
+	"time"
 
 	flag "github.com/spf13/pflag"
 
 	"github.com/sparkwing-dev/sparkwing/internal/controller"
+	"github.com/sparkwing-dev/sparkwing/internal/deployment"
 	"github.com/sparkwing-dev/sparkwing/internal/paths"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
 
 const adminUsage = `usage: sparkwing-controller admin freeze --operator ACCOUNT_ID --team SLUG --reason TEXT
        sparkwing-controller admin unfreeze --operator ACCOUNT_ID --team SLUG --reason TEXT [--hold ID]
+       sparkwing-controller admin session --operator ACCOUNT_ID --team SLUG --reason TEXT [--output json|plain]
        sparkwing-controller admin grant --operator ACCOUNT_ID --team SLUG --cents N --reason TEXT --key KEY [--reverses REF] [--allow-large]
 
 Break-glass for the operator console. When console sign-in is down, run it in
@@ -25,6 +29,16 @@ the controller pod with kubectl exec; it acts on the controller's state
 database directly, beside the running controller, so the cluster access that
 reaches the pod is the credential. It opens the running controller's recorded
 store configuration under SPARKWING_HOME and never creates a store.
+
+session prints an independent account session for an existing team administrator
+on a licensed team or Cloud controller.
+Plain output is the default for piping to sparkwing runners add --session-stdin.
+Use --output json for a JSON object containing the session. Its initial expiry is 15 minutes.
+Normal renewal applies, including during enrollment. After fetching the session
+CSRF proof, enrollment attempts logout on success or failure. If fetching the
+proof or logout fails, the session remains live until expiry or revocation. The session is printed only
+to stdout. The session.break_glass audit row records the account and team,
+excluding the session and free-form reason.
 
 freeze holds the team: its metered claims are refused until the hold is
 released. Running Cloud work stops at its funded deadline. unfreeze releases the holds
@@ -58,13 +72,14 @@ type adminGrantJSON struct {
 }
 
 func runAdmin(args []string, stdout, stderr io.Writer) error {
-	if len(args) == 0 || (args[0] != "freeze" && args[0] != "unfreeze" && args[0] != "grant") {
+	if len(args) == 0 || (args[0] != "freeze" && args[0] != "unfreeze" && args[0] != "grant" && args[0] != "session") {
 		fmt.Fprintln(stderr, adminUsage)
-		return errors.New("admin needs freeze, unfreeze or grant")
+		return errors.New("admin needs freeze, unfreeze, grant or session")
 	}
 	verb := args[0]
 	fs := flag.NewFlagSet("admin "+verb, flag.ContinueOnError)
 	fs.Usage = func() { fmt.Fprintln(stderr, adminUsage) }
+	output := fs.StringP("output", "o", "plain", "session only: plain (default) or json")
 	operator := fs.String("operator", "", "your operator account ID (required)")
 	allowLarge := fs.Bool("allow-large", false, "grant only: allow this grant to exceed $100")
 	team := fs.String("team", "", "the team's slug (required)")
@@ -75,6 +90,12 @@ func runAdmin(args []string, stdout, stderr io.Writer) error {
 	reverses := fs.String("reverses", "", "grant only: reference of a free grant to correct")
 	if err := fs.Parse(args[1:]); err != nil {
 		return err
+	}
+	if fs.Changed("output") && verb != "session" {
+		return errors.New("--output belongs to session")
+	}
+	if *output != "json" && *output != "plain" {
+		return errors.New("--output must be json or plain")
 	}
 	if *operator == "" || strings.ContainsAny(*operator, "@\r\n\t ") {
 		return errors.New("admin " + verb + " needs --operator with your account ID")
@@ -110,8 +131,8 @@ func runAdmin(args []string, stdout, stderr io.Writer) error {
 	}
 	holdID := strings.TrimSpace(*hold)
 	if fs.Changed("hold") {
-		if verb == "freeze" {
-			return errors.New("--hold names a hold to release; freeze takes none")
+		if verb != "unfreeze" {
+			return errors.New("--hold belongs to unfreeze")
 		}
 		// safety: a blank --hold must not fall through to releasing the
 		// console's holds, let alone read as every hold on the team.
@@ -124,7 +145,40 @@ func runAdmin(args []string, stdout, stderr io.Writer) error {
 	if err != nil {
 		return err
 	}
-	st, err := openDeclaredStore(ctx, p.StateDB())
+	var opts []store.Option
+	if verb == "session" {
+		opts = append(opts, store.WithPolicies(func(st *store.Store) (store.Policies, error) {
+			body, err := os.ReadFile(deploymentRecordPath(p.StateDB()))
+			if err != nil {
+				return store.Policies{}, err
+			}
+			var rec deploymentRecord
+			if err := json.Unmarshal(body, &rec); err != nil {
+				return store.Policies{}, err
+			}
+
+			if rec.Kind != deployment.KindTeam && rec.Kind != deployment.KindCloud {
+				return store.Policies{}, errors.New("admin session requires a licensed team or Cloud controller; local execution uses the local controller connection")
+			}
+			creds, err := readCredentials(rec.CredentialsDir)
+			if err != nil {
+				return store.Policies{}, err
+			}
+			keys, err := deployment.NewKeyPair(credSecretsKey, credSecretsPreviousKey, creds.SecretsKey, creds.SecretsPreviousKey)
+			if err != nil {
+				return store.Policies{}, err
+			}
+			cipher, err := secretsCipher(keys)
+			if cipher == nil && err == nil {
+				return store.Policies{}, errors.New("admin session needs the serving controller's secrets-key credential")
+			}
+			if err != nil {
+				return store.Policies{}, err
+			}
+			return store.Policies{SessionKeys: cipher}, nil
+		}))
+	}
+	st, err := openDeclaredStore(ctx, p.StateDB(), opts...)
 	if err != nil {
 		return err
 	}
@@ -138,6 +192,26 @@ func runAdmin(args []string, stdout, stderr io.Writer) error {
 	}
 	t, err := st.ForTeam(ctx, store.Team(*team))
 	if err != nil {
+		return err
+	}
+	if verb == "session" {
+		role, err := t.MemberRole(ctx, *operator)
+		if err != nil || role != store.RoleOwner {
+			return errors.New("admin session requires an existing team administrator in --team")
+		}
+		raw, _, _, err := st.AsOperator().CreateBreakGlassSession(ctx, *operator, t.Team(), 15*time.Minute)
+		if err != nil {
+			return err
+		}
+		slog.New(controller.CredentialSafeLogHandler(slog.NewJSONHandler(stderr, nil))).Info("audit",
+			"command", "sparkwing-controller admin session", "principal_kind", "break-glass", "principal_id", *operator,
+			"target_team", string(t.Team()))
+		if *output == "json" {
+			return json.NewEncoder(stdout).Encode(struct {
+				Session string `json:"session"`
+			}{Session: raw})
+		}
+		_, err = fmt.Fprintln(stdout, raw)
 		return err
 	}
 	if verb == "grant" {

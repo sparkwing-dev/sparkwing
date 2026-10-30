@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net"
 	"time"
 
@@ -29,7 +30,13 @@ func OpenControllerPostgres(ctx context.Context, dsn string, failStop func(error
 	var key int64
 	err = conn.QueryRow(ctx, `SELECT hashtextextended('sparkwing.controller:' || current_database() || '/' || `+postgresStoreSchema+`, 0)`).Scan(&key)
 	if err == nil {
-		_, err = conn.Exec(ctx, `SELECT pg_advisory_lock($1)`, key)
+		var held bool
+		err = conn.QueryRow(ctx, `SELECT pg_try_advisory_lock($1)`, key).Scan(&held)
+		if err == nil && !held {
+			slog.InfoContext(ctx, "waiting for controller advisory lock", "database", cfg.Database, "lock_key", key,
+				"action", "wait for or stop the active controller, or cancel this startup")
+			_, err = conn.Exec(ctx, `SELECT pg_advisory_lock($1)`, key)
+		}
 	}
 	if err != nil {
 		return nil, errors.Join(err, conn.Close(context.WithoutCancel(ctx)))

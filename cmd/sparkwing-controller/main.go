@@ -286,7 +286,7 @@ func run(args []string) error {
 	requireAuth := fs.Bool("require-auth", false,
 		"refuse to start until a live deployment administrator capability exists; private routes always require credentials")
 	fs.Usage = func() {
-		fmt.Fprintln(fs.Output(), "usage: sparkwing-controller [flags]\n       sparkwing-controller admin freeze|unfreeze|grant [flags]\n       sparkwing-controller restore prepare|acknowledge [flags]\n\nController flags:")
+		fmt.Fprintln(fs.Output(), "usage: sparkwing-controller [flags]\n       sparkwing-controller admin freeze|unfreeze|grant|session [flags]\n       sparkwing-controller restore prepare|acknowledge [flags]\n\nController flags:")
 		fs.PrintDefaults()
 	}
 	if err := fs.Parse(args); err != nil {

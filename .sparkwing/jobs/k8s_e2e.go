@@ -20,7 +20,7 @@ func (KubernetesE2E) ShortHelp() string {
 }
 
 func (KubernetesE2E) Help() string {
-	return "Installs the full Helm chart in an explicit Kubernetes context and exercises auth, GitHub webhook intake, runner execution, logs, restarts, retry, cancellation, and retained state. It requires caller-supplied image coordinates and an exact namespace/release cleanup allow-list; it never creates or deletes cluster infrastructure. Native Windows cancellation force-terminates the full process tree; use WSL when cancellation must run the shell cleanup trap."
+	return "Installs the full Helm chart in an explicit Kubernetes context and exercises auth, uploaded-source intake, runner execution, logs, restarts, retry, cancellation, and retained state. It requires a signed multi-team license in SPARKWING_K8S_E2E_LICENSE_FILE, caller-supplied image coordinates and an exact namespace/release cleanup allow-list; it never creates or deletes cluster infrastructure. Native Windows cancellation force-terminates the full process tree; use WSL when cancellation must run the shell cleanup trap."
 }
 
 func (KubernetesE2E) Examples() []sparkwing.Example {

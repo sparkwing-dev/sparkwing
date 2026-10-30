@@ -37,6 +37,8 @@ jobs:
           POSTGRES_PASSWORD: postgres
         ports:
           - 5432:5432
+        volumes:
+          - /var/run/postgresql:/var/run/postgresql
         options: >-
           --health-cmd "pg_isready -U postgres"
           --health-interval 5s

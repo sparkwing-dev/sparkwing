@@ -9,8 +9,22 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 )
 
+// SessionRunnerTokenManager manages enrollment and revocation of its input session.
+type SessionRunnerTokenManager interface {
+	RunnerTokenManager
+	Logout(context.Context) error
+}
+
+type sessionRunnerTokenManager struct {
+	*tokenManager
+}
+
+func (m *sessionRunnerTokenManager) Logout(ctx context.Context) error {
+	return m.client.request(ctx, "POST", "/api/v1/auth/logout", "/api/v1/auth/logout", "", nil, nil)
+}
+
 // NewSessionRunnerTokenManager uses an existing account session without converting bearer authority.
-func NewSessionRunnerTokenManager(ctx context.Context, options EngineOptions, session string) (RunnerTokenManager, error) {
+func NewSessionRunnerTokenManager(ctx context.Context, options EngineOptions, session string) (SessionRunnerTokenManager, error) {
 	if !validSessionValue(session) || options.Bearer != nil {
 		return nil, &apierr.Error{Code: apierr.BadRequest, Message: "runner session enrollment requires only an account-session presentation"}
 	}
@@ -36,7 +50,7 @@ func NewSessionRunnerTokenManager(ctx context.Context, options EngineOptions, se
 		return nil, &apierr.Error{Code: apierr.ProtocolError, Message: "controller returned no valid session CSRF proof"}
 	}
 	auth.csrf = proof.CSRFToken
-	return &tokenManager{client: c, base: "/api/v1/tokens"}, nil
+	return &sessionRunnerTokenManager{tokenManager: &tokenManager{client: c, base: "/api/v1/tokens"}}, nil
 }
 
 func validSessionValue(value string) bool {

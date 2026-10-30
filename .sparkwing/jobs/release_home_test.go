@@ -1,9 +1,33 @@
 package jobs
 
 import (
+	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/sparkwing-dev/sparkwing/sparkwing/sparkwingtest"
 )
+
+func TestReleaseRefusesOperationalHomeDuringPlanning(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	for _, store := range []string{"", filepath.Join(home, ".sparkwing")} {
+		t.Run(store, func(t *testing.T) {
+			t.Setenv("SPARKWING_HOME", store)
+			_, err := newTestHost(t, sparkwingtest.Options{}).Plan(t.Context(), "Release", nil)
+			if err == nil {
+				t.Fatalf("release planning = %v, want isolated-home refusal before intake", err)
+			}
+			if _, err := newTestHost(t, sparkwingtest.Options{}).Plan(t.Context(), "Build", nil); err != nil {
+				t.Fatalf("another pipeline in the operational home: %v", err)
+			}
+		})
+	}
+	t.Setenv("SPARKWING_HOME", t.TempDir())
+	if _, err := newTestHost(t, sparkwingtest.Options{}).Plan(t.Context(), "Release", nil); err != nil {
+		t.Fatalf("release planning with isolated home: %v", err)
+	}
+}
 
 func operatorHome() (string, error) { return "/home/operator", nil }
 
@@ -33,33 +57,6 @@ func TestReleaseRejectsExplicitDefaultSparkwingHome(t *testing.T) {
 	err := requireReleaseHome(func(string) string { return "/home/operator/.sparkwing/" }, operatorHome)
 	if err == nil {
 		t.Fatal("release accepted the operational default store through an explicit environment value")
-	}
-}
-
-func TestReleaseRefusesTheOperationalHomeBeforeAnyOtherJob(t *testing.T) {
-	plan := releasePlan(t)
-	for _, n := range plan.Jobs {
-		if id := n.ID; id != "require-isolated-home" && !ancestors(t, plan, id)["require-isolated-home"] {
-			t.Errorf("%s runs without waiting on require-isolated-home, so a release in the operational home reaches it", id)
-		}
-	}
-	if !mustNode(t, plan, "require-isolated-home").Inline {
-		t.Error("require-isolated-home must run inline, ahead of any dispatched job")
-	}
-}
-
-func TestReleaseHomeGuardFailsItsJobAndRunsUnderDryRun(t *testing.T) {
-	t.Setenv("SPARKWING_HOME", "")
-	host, plan, doc := prepareWork(t, &requireIsolatedHomeJob{})
-	if len(doc.Steps) != 1 {
-		t.Fatalf("home guard steps = %+v", doc.Steps)
-	}
-	step := doc.Steps[0]
-	if !step.SafeWithoutDryRun {
-		t.Errorf("step %s skips under dry run", step.ID)
-	}
-	if _, err := host.RunStep(t.Context(), plan, "job", step.ID); err == nil || !strings.Contains(err.Error(), "SPARKWING_HOME") {
-		t.Fatalf("home guard = %v", err)
 	}
 }
 

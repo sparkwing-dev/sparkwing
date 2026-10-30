@@ -900,7 +900,15 @@ func checkTeamRoomTx(ctx context.Context, tx *storeTx, team Team, limit int) err
 
 // CreateAccountSession opens a session for a current team member.
 func (o *Operator) CreateAccountSession(ctx context.Context, acct Account, team Team, ttl time.Duration) (string, string, *Session, error) {
-	return o.createAccountSession(ctx, acct, team, "", "", ttl)
+	return o.createAccountSession(ctx, acct, team, "", "", ttl, false)
+}
+
+// CreateBreakGlassSession opens and audits a session for an existing team administrator.
+func (o *Operator) CreateBreakGlassSession(ctx context.Context, accountID string, team Team, ttl time.Duration) (string, string, *Session, error) {
+	if team == "" {
+		return "", "", nil, ErrNotMember
+	}
+	return o.createAccountSession(ctx, Account{ID: accountID}, team, "", "", ttl, true)
 }
 
 // CreateIdentityAccountSession opens a session while the provider identity remains linked.
@@ -908,10 +916,10 @@ func (o *Operator) CreateIdentityAccountSession(ctx context.Context, acct Accoun
 	if provider == "" || subject == "" {
 		return "", "", nil, fmt.Errorf("%w: provider and subject required", ErrInvalidInput)
 	}
-	return o.createAccountSession(ctx, acct, team, provider, subject, ttl)
+	return o.createAccountSession(ctx, acct, team, provider, subject, ttl, false)
 }
 
-func (o *Operator) createAccountSession(ctx context.Context, acct Account, team Team, provider, subject string, ttl time.Duration) (string, string, *Session, error) {
+func (o *Operator) createAccountSession(ctx context.Context, acct Account, team Team, provider, subject string, ttl time.Duration, breakGlass bool) (string, string, *Session, error) {
 	if acct.ID == "" || ttl <= 0 {
 		return "", "", nil, fmt.Errorf("%w: account and positive ttl required", ErrInvalidInput)
 	}
@@ -962,6 +970,9 @@ func (o *Operator) createAccountSession(ctx context.Context, acct Account, team 
 				return ErrNotMember
 			}
 		}
+		if breakGlass && role != RoleOwner {
+			return ErrNotMember
+		}
 		var email string
 		if err := tx.QueryRowContext(ctx, `SELECT email FROM accounts WHERE id=?`, acct.ID).Scan(&email); err != nil {
 			return err
@@ -974,6 +985,11 @@ func (o *Operator) createAccountSession(ctx context.Context, acct Account, team 
 		}
 		if err := tx.operator.recordSessionMembershipsTx(ctx, tx, sessionDigest(raw)); err != nil {
 			return err
+		}
+		if breakGlass {
+			if err := tx.operator.recordAudit(ctx, tx, auditContext{At: now, Team: team, Actor: auditActor{system: auditBreakGlass}}, auditSessionMint{AccountID: acct.ID}); err != nil {
+				return err
+			}
 		}
 		session = &Session{Now: now, ID: raw, Principal: email, Team: team, AccountID: acct.ID, Scopes: ScopesForRole(role), CSRFToken: csrf, CreatedAt: now, ExpiresAt: expires}
 		return nil

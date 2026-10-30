@@ -20,6 +20,9 @@ unlock.
 
 ## [Unreleased]
 
+- **logs:** Finished jobs start their final log flush on report, retry or release
+  Long local pipelines no longer leave earlier jobs' logs unsealed and hang
+  while waiting for log completion.
 - **CLI:** `profiles set --profile NAME --default` switches the saved default for optional-profile controller commands. Explicit profiles override it, `--profile=` selects local for one command, and `--default=false` clears it. Profile list/show report the selection. Commands requiring `--profile` say it must be supplied explicitly in help. Local runs, internal local clients and `schedules --all-repos` stay local.
 
 - **CLI:** `pipeline new --template typescript` scaffolds a minimal TypeScript SDK project and adds further pipelines to its entry. `repos list` includes SDK kind and TypeScript pins resolved from npm lockfiles in JSON, plain and pretty output.
@@ -32,6 +35,17 @@ unlock.
 - **recovery:** Failure-hook jobs load their persisted source failure in local and runner hosts, so the callback executes instead of failing before its body starts.
 - **logs:** Log observation drains committed output and reports unsealed terminal logs as incomplete after the existing final-tail window instead of polling forever.
 - **cache:** `cache explain` uses the same native Go build settings as pipeline runs, so cached source builds report a cache hit.
+- **release:** The isolated-home guard refuses before run intake opens the
+  operational store, including during a release preview. A refused release
+  no longer creates a run or migrates the store.
+
+- **docs:** The Go SDK migration table covers the removed `SetWorkDir`
+  Author tests select their fixture repository with `t.Chdir(root)` and let Go
+  restore the original directory after the test.
+
+- **cli:** Fresh QA Go scaffolds resolve their SDK pin
+  `pipeline new` uses the QA Go proxy and checksum settings during dependency
+  setup. Production builds use a public SDK pin even if stamped with a QA version.
 
 - **store:** PostgreSQL admission locks stay within their store schema
   Independent stores sharing a database no longer defer each other's job releases.
@@ -111,8 +125,9 @@ unlock.
 - **runners:** Verified default-branch work on Kubernetes requires fresh pods; teams with only persistent Kubernetes runners see a waiting notice explaining how to add fresh capacity, or, for a run dispatched to a selected runner, how to change its runner selection and start a new run. Plain-machine runners keep serving verified work
 - **cache:** Retries preserve the source writer's memo and dependency-cache scope in full and failed modes. Personal placement reads the same sealed writer. Only that writer's principal can retry `--runner here` and other local runs. Other members must start a new run
 - **runtime:** Owners refuse `--only` when the controller omits the selection projection, with an error asking for a controller update
+- **runner enrollment:** `--session-stdin` attempts logout on success or failure. `sparkwing-controller admin session` defaults to plain text for enrollment pipes. Its initial expiry is 15 minutes, and normal session renewal applies until logout or revocation
 - **security:** Deleting another member's run requires `team.admin` on the credential. Member schedule edits and deletion exclude GitHub App declarations. Runner enrollment routes require the same direct account session and grants as the store
-- **audit:** Approval decisions, cancellations, token minting and rotation, runner enrollment, and invitation acceptance commit typed audit events with each mutation. Audit payloads exclude comments, reasons and personal text
+- **audit:** Approval decisions, cancellations, token minting and rotation, runner enrollment, break-glass session minting, and invitation acceptance commit typed audit events with each mutation. Audit payloads exclude comments, reasons and personal text
 - **security:** Actions push-bound runners require proven provenance for the exact repository, ref and commit. Matching ref and commit text on an asserted run cannot claim that runner.
 - **admission:** Only the store decides and commits admission skips, failures and queue timeouts. Hosts request admission and report declared approval predicates. Dependency skips and cancellations must match the accepted graph.
 - **runners:** Pools holding reserved secrets require launcher credentials even with `--trust=any`.

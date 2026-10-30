@@ -91,6 +91,10 @@ credential model in `docs/auth.md`, and the decision log
 | --- | --- | --- |
 | Email address ownership | `identity.go`: `claimEmailTx`, `releaseEmailTx`, `dropUnprovenEmailOwnershipTx` | `identity_test.go`: `TestIdentitySignInRefusesAnUnverifiedEmail`, `TestIdentityRecycledEmailNeverLinksIntoTheOldAccount` |
 | Invitations | `identity.go`: `Tenant.createInvitationTx`, `Operator.acceptAccountInvitationTx` | `identity_test.go`: `TestIdentityInvitationNeedsTheInvitedVerifiedEmail`; `team_mutations_test.go` |
+| Headless runner enrollment preserves independent account authority | `cmd/sparkwing-controller/admin.go`: `admin session`; `internal/capability/policy.go`: enrollment refusal | `cmd/sparkwing-controller/admin_session_test.go`: `TestAdminSessionEnrollsSharedRunnerAndReservedLauncher`, `TestAdminSessionRequiresExistingTeamAdministrator`; `internal/capability/authorization_test.go`: `TestRunnerEnrollmentRouteRequiresStoreOriginAuthority` |
+| Controller standby explains its advisory-lock wait | `controller_lock.go`: `OpenControllerPostgres` | `controller_lock_test.go`: `TestControllerStandbyLogsBeforeWaiting` |
+| Stdin enrollment attempts logout after session authentication on success or failure | `cmd/sparkwing/runners.go`: `runRunnersAdd` | `cmd/sparkwing/runners_personal_test.go`: `TestRunnersPersonalEnrollmentCLIThroughController`; `cmd/sparkwing/runners_test.go`: `TestRunnersPersonalEnrollmentUsesEphemeralSession` |
+| Break-glass session mints commit an audit row with no secret or reason | `identity.go`: `Operator.CreateBreakGlassSession` | `cmd/sparkwing-controller/admin_session_test.go`: `TestAdminSessionEnrollsSharedRunnerAndReservedLauncher` |
 | Sessions | `auth.go`: `Operator.LookupSession`, `CreateCapabilitySession`; `identity.go`: `createAccountSession` | `session_runtime_test.go`; `internal/controller/session_store_runtime_test.go`: `TestMemberTokenHTTPSessionTimeoutAndLogout` |
 | Tokens and capability issuance | `authority_issue.go`: `Store.issueTx`, `awardCapabilityTx` | `security_audit_test.go`: `TestDelegatedTokenRequiresAudit` |
 
@@ -117,6 +121,12 @@ credential model in `docs/auth.md`, and the decision log
 | --- | --- | --- |
 | Local repository memo lookups miss after scope checks; publication is skipped | `blob_lookup.go`: `lookupMemoTx`; `internal/nodehost/executor_memo.go`: `saveMemo` | `blob_local_cache_test.go`: `TestLocalDepcacheRoundTrip`; `internal/nodehost/native_memo_test.go`: `TestNativeExecutorLocalRepositoryMemoRunsBody`; `internal/nodehost/executor_memo_test.go`: `TestExecutorLocalRepositorySkipsMemoPublication` |
 
+### Logs
+
+| Rule | Owner | Guard test |
+| --- | --- | --- |
+| Bound node commands flush final logs at report, retry or release, within the attempt's tail grace | `internal/nodehost/assembly_native_logs.go`: `logHostStore.TransitionNode` reads the command payload | `internal/nodehost/assembly_native_logs_test.go`: `TestStalledLogsDoNotDelayLifecycleCommits`, `TestLogLifecycleDetachesFlush` |
+
 ### CLI and API surface
 
 | Rule | Owner | Guard test |
@@ -132,6 +142,7 @@ credential model in `docs/auth.md`, and the decision log
 | Route table | `internal/capability/tables.go`: `Routes`; dispatch in `internal/routepolicy` | `internal/capability/policy_test.go` |
 | OpenAPI | `internal/apispec` writes `api/openapi.yaml`; regenerate with `bin/gen-api-docs.sh` | `bin/check-api-spec.sh`; `internal/apispec/final_contract_test.go` |
 | Docs mirror and drift | `docs/` is the source; `bin/sync-docs.sh` copies it to `pkg/docs/mirror/`; `bin/regen-all.sh` reruns every generator | `bin/sync-docs.sh --check`; `internal/doccheck/cliverbs_test.go`, `internal/doccheck/apiroutes_test.go` |
+| Repository release home is checked before intake opens the store | `.sparkwing/jobs/release.go`: release factory captures `requireReleaseHome` and `Plan` returns a refusal during discovery | `.sparkwing/jobs/release_home_test.go`: `TestReleaseRefusesOperationalHomeDuringPlanning` |
 
 ## Test and gate workflow
 

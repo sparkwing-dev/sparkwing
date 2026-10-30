@@ -123,7 +123,7 @@ func publishDeploymentRecord(stateDB string, body []byte) error {
 // openDeclaredStore opens the store the serving controller recorded. It
 // never creates one. Verification and subsequent mutations retain the same
 // connection, so reconnecting cannot silently redirect an admin operation.
-func openDeclaredStore(ctx context.Context, stateDB string) (*store.Store, error) {
+func openDeclaredStore(ctx context.Context, stateDB string, opts ...store.Option) (*store.Store, error) {
 	path := deploymentRecordPath(stateDB)
 	body, err := os.ReadFile(path)
 	if errors.Is(err, os.ErrNotExist) {
@@ -152,7 +152,7 @@ func openDeclaredStore(ctx context.Context, stateDB string) (*store.Store, error
 	if err != nil {
 		return nil, err
 	}
-	st, err := store.OpenExisting(ctx, dialect, target, store.WithCredentialEpoch(epoch))
+	st, err := store.OpenExisting(ctx, dialect, target, append(opts, store.WithCredentialEpoch(epoch))...)
 	if err != nil {
 		return nil, err
 	}
