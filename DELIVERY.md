@@ -17,9 +17,9 @@ launcher when testing isolated tool state.
 ### Cutting a release
 
 A release is a tag push. The `release` pipeline resolves the version, renames
-`## [Unreleased]` in CHANGELOG.md to the version, commits that from a clean
-tree, checks the section covers any schema or wire change since the previous
-tag, and pushes the branch and an annotated `vX.Y.Z` tag. Run it from the
+`## [Unreleased]` in CHANGELOG.md to the version, stages the release notes,
+checks the section covers any schema or wire change since the previous tag,
+then commits and pushes the branch and an annotated `vX.Y.Z` tag. Run it from the
 sparkwing checkout under a temporary home, which the pipeline requires so a
 newer embedded schema cannot migrate the operational runs store. The release
 factory validates the home before intake opens the store, including for a dry
@@ -49,7 +49,11 @@ Version discovery lists origin's tags, which can include tags absent from a
 shallow job checkout. The schema and wire gates fetch a missing comparison tag
 from that checkout's origin before reading its files. A failed fetch names the
 job checkout and the Git command to retry there. Changelog preparation reads
-and previews or commits files in the same captured checkout.
+and previews or stages files in the same captured checkout. `commit-changelog`
+waits for every gate, including the schema and wire gates that read the prepared
+notes. A gate failure after preparation leaves HEAD at the starting commit
+and the prepared files staged for inspection. No commit needs undoing. Inspect those files and return
+the checkout to a clean tree before retrying the cut.
 
 Version freshness excludes `testdata` fixture modules, matching the committed-module checks.
 
@@ -769,7 +773,7 @@ file. Other syntax and workflow checks remain active.
   clean tree, and verifies published module freshness, Go directive policy,
   coherent SDK pins and changelog links in the fixed ten-minute build/lint/short-test class. It then
   renames `[Unreleased]`, rolls the migration guide, validates the resulting
-  section and guide before committing, and checks schema/wire change coverage.
+  section and guide, and checks schema/wire change coverage before committing.
   All refusals precede push-tag. Freshness checks published versions, not the
   position of local replacements against origin/main, so a cut may use an older
   commit. Preview with
