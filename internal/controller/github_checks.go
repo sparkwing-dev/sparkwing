@@ -2,7 +2,6 @@ package controller
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"net/url"
 	"slices"
@@ -64,7 +63,6 @@ type githubCheckReporter struct {
 	resolveTenant func(context.Context, store.Team) (TenantHandle, error)
 	operator      *store.Operator
 	dashboardURL  string
-	missingChecks func()
 }
 
 func (r *githubCheckReporter) deliver(ctx context.Context, u githubCheckUpdate) error {
@@ -80,27 +78,11 @@ func (r *githubCheckReporter) deliver(ctx context.Context, u githubCheckUpdate) 
 		if u.phase() < githubCheckPhaseFor(run.Status) {
 			return 0, nil
 		}
-		statuses, err := tenant.GitHubCommitStatuses(ctx, u.runID)
-		if err != nil {
-			return 0, err
-		}
-		if !statuses {
-			created, err := r.writeCheckRun(ctx, tenant, u, run, id)
-			if !errors.Is(err, githubapp.ErrPermissionMissing) {
-				return created, err
-			}
-			if err := tenant.UseGitHubCommitStatuses(ctx, u.runID); err != nil {
-				return 0, err
-			}
-			if r.missingChecks != nil {
-				r.missingChecks()
-			}
-		}
-		return 0, r.writeCommitStatus(ctx, u)
+		return r.writeCheckRun(ctx, tenant, u, run, id)
 	})
 }
 
-func (r *githubCheckReporter) repository(ctx context.Context, u githubCheckUpdate, permission string) (string, string, string, error) {
+func (r *githubCheckReporter) repository(ctx context.Context, u githubCheckUpdate) (string, string, string, error) {
 	in, err := r.operator.GitHubAppInstallationTeam(ctx, u.installation)
 	if err != nil {
 		return "", "", "", err
@@ -108,7 +90,7 @@ func (r *githubCheckReporter) repository(ctx context.Context, u githubCheckUpdat
 	if in.Team != u.team || in.Suspended {
 		return "", "", "", fmt.Errorf("GitHub installation is not active for the run's team")
 	}
-	tok, err := r.client.InstallationTokenByIDs(ctx, u.installation, []int64{u.repository}, map[string]string{permission: "write"})
+	tok, err := r.client.InstallationTokenByIDs(ctx, u.installation, []int64{u.repository}, map[string]string{"checks": "write"})
 	if err != nil {
 		return "", "", "", err
 	}
@@ -131,7 +113,7 @@ func (r *githubCheckReporter) repository(ctx context.Context, u githubCheckUpdat
 }
 
 func (r *githubCheckReporter) writeCheckRun(ctx context.Context, tenant *store.Tenant, u githubCheckUpdate, run *store.Run, id int64) (int64, error) {
-	token, owner, repo, err := r.repository(ctx, u, "checks")
+	token, owner, repo, err := r.repository(ctx, u)
 	if err != nil {
 		return 0, err
 	}
@@ -155,24 +137,6 @@ func (r *githubCheckReporter) writeCheckRun(ctx context.Context, tenant *store.T
 		return id, nil
 	}
 	return 0, r.client.UpdateCheckRun(ctx, token, owner, repo, id, check)
-}
-
-func (r *githubCheckReporter) writeCommitStatus(ctx context.Context, u githubCheckUpdate) error {
-	if u.phase() == githubCheckInProgress {
-		return nil
-	}
-	token, owner, repo, err := r.repository(ctx, u, "statuses")
-	if err != nil {
-		return err
-	}
-	status := "pending"
-	if u.phase() == githubCheckCompleted {
-		status = u.runStatus
-	}
-	state, description := githubCommitState(status)
-	return r.client.CreateCommitStatus(ctx, token, owner, repo, u.sha, githubCommitStatusRequest{
-		State: state, TargetURL: githubRunTargetURL(r.dashboardURL, u.runID), Description: description, Context: "sparkwing/" + u.pipeline,
-	})
 }
 
 func (r *githubCheckReporter) checkRun(ctx context.Context, tenant *store.Tenant, u githubCheckUpdate, run *store.Run) (githubapp.CheckRun, error) {
@@ -277,29 +241,7 @@ func githubCheckSummary(run *store.Run, nodes []*store.Node, conclusion, link st
 	return summary.String()
 }
 
-const githubStatusTimeout = 10 * time.Second
-
-type githubCommitStatusRequest struct {
-	State       string `json:"state"`
-	TargetURL   string `json:"target_url,omitempty"`
-	Description string `json:"description"`
-	Context     string `json:"context"`
-}
-
-func githubCommitState(runStatus string) (state, description string) {
-	switch runStatus {
-	case "pending":
-		return "pending", "Sparkwing pipeline is running"
-	case "success":
-		return "success", "Sparkwing pipeline passed"
-	case "dry_run":
-		return "success", "Sparkwing dry run completed"
-	case "failed", "timed_out":
-		return "failure", "Sparkwing pipeline failed"
-	default:
-		return "error", "Sparkwing pipeline could not complete"
-	}
-}
+const githubCheckTimeout = 10 * time.Second
 
 func githubRunTargetURL(baseURL, runID string) string {
 	if baseURL == "" {

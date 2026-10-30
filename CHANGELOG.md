@@ -56,6 +56,8 @@ unlock.
 
 ### Removed
 
+- **GitHub App (Breaking):** Removed commit-status reporting
+  Runs report through Checks only. Installation owners must accept Checks read/write permission; missing permission leaves reports pending while execution continues.
 - **checks (Breaking):** Removed `internal/guardcheck`, its `.guards/` allow-lists and standalone gate steps
   Dependency rules run through depguard in `.golangci.yml`, including the fast push tier.
 - **cache (Breaking):** Removed binary-cache checkout owners, use counts, shared-entry counts and `related_entries` history

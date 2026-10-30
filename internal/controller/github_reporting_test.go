@@ -1,12 +1,11 @@
 package controller
 
 import (
-	"bytes"
 	"encoding/json"
-	"log/slog"
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 	"unicode/utf8"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
@@ -94,9 +93,6 @@ func TestGitHubAppRunReportsOneCheckRun(t *testing.T) {
 			t.Fatalf("summary lacks %q: %s", want, checks[2].Output.Summary)
 		}
 	}
-	if len(f.api.statuses) != 0 {
-		t.Fatalf("check run posted statuses=%+v", f.api.statuses)
-	}
 	for _, token := range f.api.tokens {
 		if len(token.IDs) != 1 || token.IDs[0] != 42 || len(token.Names) != 0 || len(token.Permissions) != 1 || token.Permissions["checks"] != "write" {
 			t.Fatalf("check token=%+v", token)
@@ -108,59 +104,33 @@ func TestGitHubAppRunReportsOneCheckRun(t *testing.T) {
 	}
 }
 
-func TestGitHubAppWithoutChecksPermissionPostsStatuses(t *testing.T) {
+func TestGitHubAppWithoutChecksPermissionKeepsReportPending(t *testing.T) {
 	f := newGitHubCompletion(t)
 	f.api.checksGranted = false
-	var logs bytes.Buffer
-	f.server.logger = slog.New(slog.NewTextHandler(&logs, nil))
 	start := f.pending()
 	f.reconcile()
 	start()
 	f.reconcile()
 	f.finish(runstate.RunSuccess)
 	f.reconcile()
-	if len(f.api.checks) != 0 || len(f.api.statuses) != 2 || f.api.statuses[0].State != "pending" || f.api.statuses[1].State != "success" {
-		t.Fatalf("fallback checks=%+v statuses=%+v", f.api.checks, f.api.statuses)
-	}
-	for _, c := range []struct {
-		id      string
-		granted bool
-	}{{"second", false}, {"third", true}} {
-		f.api.checksGranted = c.granted
-		run, err := f.tenant.ReadRun(t.Context(), "run")
-		if err != nil {
-			t.Fatal(err)
-		}
-		run.Request.RunID = c.id
-		run.Request.Request.Git.SHA = strings.Repeat(map[bool]string{false: "b", true: "c"}[c.granted], 40)
-		run.Request.Request.Git.App.Value.SHA = run.Request.Request.Git.SHA
-		request := sealWith(t, run.Request, appProvenance(t, run.Request.Request.Git.App.Value, run.Request.Request.PullRequest, "ci"))
-		if err := teststore.SeedRun(f.server.store, t.Context(), "a", store.Run{RunSummary: runstate.RunSummary{ID: c.id, Pipeline: "ci", Status: "pending"}}); err != nil {
-			t.Fatal(err)
-		}
-		engineSQL(t, f.server.store, `UPDATE runs SET request_json=? WHERE team='a' AND id=?`, request, c.id)
-		engineSQL(t, f.server.store, `INSERT INTO triggers(team,id,unit_kind,created_at,available_at,expires_at,needs_labels,prefers_labels) VALUES ('a',?,'trigger',1,1,1,?,?)`, c.id, []byte(`[]`), []byte(`[]`))
-		engineSQL(t, f.server.store, `INSERT INTO run_effects(team,run_id,effect,desired_state,desired_rev,next_at) VALUES ('a',?,'github_check','pending',1,1)`, c.id)
-		f.reconcile()
-	}
-	if len(f.api.statuses) != 3 || f.api.statuses[2].State != "pending" || len(f.api.checks) != 1 || f.api.checks[0].Status != "queued" || f.api.checks[0].ExternalID != "third" || f.api.checks[0].HeadSHA != strings.Repeat("c", 40) {
-		t.Fatalf("permission acceptance checks=%+v statuses=%+v", f.api.checks, f.api.statuses)
-	}
-	if got := strings.Join(f.api.statusSHAs, ","); got != strings.Repeat("a", 40)+","+strings.Repeat("a", 40)+","+strings.Repeat("b", 40) {
-		t.Fatalf("fallback reported the wrong commits: %s", got)
-	}
-	for _, status := range f.api.statuses {
-		if status.Context != "sparkwing/ci" {
-			t.Fatalf("status context=%q", status.Context)
-		}
-	}
-	if n := strings.Count(logs.String(), "has not accepted the checks permission"); n != 1 {
-		t.Fatalf("permission warning count=%d: %s", n, logs.String())
+	_, delivered, attempts, _ := f.revision()
+	if len(f.api.checks) != 0 || delivered != 0 || attempts == 0 {
+		t.Fatalf("missing checks permission: checks=%+v delivered=%d attempts=%d", f.api.checks, delivered, attempts)
 	}
 	for _, token := range f.api.tokens {
-		if len(token.IDs) != 1 || token.IDs[0] != 42 || len(token.Names) != 0 || len(token.Permissions) != 1 || token.Permissions["checks"] != "write" && token.Permissions["statuses"] != "write" {
-			t.Fatalf("fallback token=%+v", token)
+		if len(token.IDs) != 1 || token.IDs[0] != 42 || len(token.Names) != 0 || len(token.Permissions) != 1 || token.Permissions["checks"] != "write" {
+			t.Fatalf("check token=%+v", token)
 		}
+	}
+	f.api.checksGranted = true
+	f.now = f.now.Add(time.Hour)
+	f.reconcile()
+	if len(f.api.checks) != 1 || f.api.checks[0].Status != "completed" || f.api.checks[0].Conclusion != "success" {
+		t.Fatalf("permission acceptance checks=%+v", f.api.checks)
+	}
+	_, delivered, _, _ = f.revision()
+	if delivered == 0 {
+		t.Fatal("accepted Checks permission left report pending")
 	}
 }
 

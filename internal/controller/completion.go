@@ -61,9 +61,9 @@ func (s *Server) deliverRunEffect(ctx context.Context, tenant *store.Tenant, eff
 		if s.githubApp == nil {
 			return s.githubAppUnavailable()
 		}
-		ctx, cancel := context.WithTimeout(ctx, githubStatusTimeout)
+		ctx, cancel := context.WithTimeout(ctx, githubCheckTimeout)
 		defer cancel()
-		reporter := githubCheckReporter{client: s.githubApp.client, resolveTenant: s.resolveTenant, operator: s.operator, dashboardURL: s.dashboardURL, missingChecks: func() { s.warnMissingChecks(update.installation) }}
+		reporter := githubCheckReporter{client: s.githubApp.client, resolveTenant: s.resolveTenant, operator: s.operator, dashboardURL: s.dashboardURL}
 		if err := reporter.deliver(ctx, update); err != nil {
 			return err
 		}

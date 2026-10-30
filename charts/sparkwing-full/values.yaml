@@ -118,7 +118,7 @@ controller:
   # docs/security.md.
   limitsProfile: ""
 
-  # Query-free HTTP(S) dashboard base URL used for commit-status run links.
+  # Query-free HTTP(S) dashboard base URL used for check-run links.
   # Empty or invalid keeps reporting enabled but omits the target URL.
   dashboardURL: ""
 

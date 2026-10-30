@@ -121,11 +121,11 @@ func TestCheckRuns_NeedTheChecksPermission(t *testing.T) {
 	ctx := context.Background()
 	run := githubapp.CheckRun{Name: "sparkwing/build", HeadSHA: "0123456789abcdef0123456789abcdef01234567", Status: "queued"}
 
-	statuses, err := c.InstallationTokenByIDs(ctx, 7, []int64{701}, map[string]string{"statuses": "write"})
+	contents, err := c.InstallationTokenByIDs(ctx, 7, []int64{701}, map[string]string{"contents": "read"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := c.CreateCheckRun(ctx, statuses.Token, "acme", "widgets", run); !errors.Is(err, githubapp.ErrPermissionMissing) {
+	if _, err := c.CreateCheckRun(ctx, contents.Token, "acme", "widgets", run); !errors.Is(err, githubapp.ErrPermissionMissing) {
 		t.Fatalf("create with a token lacking checks:write = %v, want ErrPermissionMissing", err)
 	}
 
@@ -133,7 +133,7 @@ func TestCheckRuns_NeedTheChecksPermission(t *testing.T) {
 	if _, err := c.InstallationTokenByIDs(ctx, 7, []int64{701}, map[string]string{"checks": "write"}); !errors.Is(err, githubapp.ErrPermissionMissing) {
 		t.Fatalf("checks token on an installation without the permission = %v, want ErrPermissionMissing", err)
 	}
-	if _, err := c.InstallationTokenByIDs(ctx, 7, []int64{999}, map[string]string{"statuses": "write"}); !errors.Is(err, githubapp.ErrNotInstalled) {
+	if _, err := c.InstallationTokenByIDs(ctx, 7, []int64{999}, map[string]string{"contents": "read"}); !errors.Is(err, githubapp.ErrNotInstalled) {
 		t.Fatalf("control: a repository outside the installation = %v, want ErrNotInstalled", err)
 	}
 

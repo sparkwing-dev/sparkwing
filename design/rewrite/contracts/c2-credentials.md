@@ -3337,7 +3337,7 @@ Completion reads the sealed run request's verified App facts, never trigger
 environment strings. The numeric repository ID must agree with its repository
 key, execution SHA and ref. Delivery needs the installation still bound to the
 same tenant and unsuspended. It mints only the exact repository ID with
-checks:write or statuses:write. `githubapp.Client.RepositoryByID` resolves the
+checks:write. `githubapp.Client.RepositoryByID` resolves the
 current name under that restricted token, so a rename or reused old name cannot
 redirect a report. Installation ownership is rechecked after that lookup.
 Invalid committed App facts consume the failed revision once through C1's
