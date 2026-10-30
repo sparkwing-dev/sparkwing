@@ -30,6 +30,24 @@ func TestNativeProtocol(t *testing.T) {
 	if output, err := build.CombinedOutput(); err != nil {
 		t.Fatalf("build SDK: %v\n%s", err, output)
 	}
+	t.Run("refuses_regular_files", func(t *testing.T) {
+		files := make([]*os.File, 2)
+		for i := range files {
+			file, err := os.CreateTemp(t.TempDir(), "protocol")
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { _ = file.Close() })
+			files[i] = file
+		}
+		command := exec.CommandContext(t.Context(), node, filepath.Join(root, "test/nativehost/fixture.mjs"), "--sw-node-protocol")
+		command.Dir = root
+		attach(t, command, files[0], files[1])
+		output, err := command.CombinedOutput()
+		if exit, ok := err.(*exec.ExitError); !ok || exit.ExitCode() != 2 || !strings.Contains(string(output), "pipe") {
+			t.Fatalf("non-pipe descriptors: %v\n%s", err, output)
+		}
+	})
 	h := startSDK(t, node, root)
 	nativeHello(t, h)
 	plan := nativePlan(t, h)

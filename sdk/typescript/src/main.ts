@@ -28,8 +28,11 @@ export async function main(): Promise<void> {
     const initialized = inherited ?? initialize();
     if (initialized.error) throw initialized.error;
     descriptors = initialized.descriptors!;
-    pipe(descriptors.requestFd);
-    pipe(descriptors.frameFd);
+    // Windows handles are checked by the bridge; Node's FIFO/socket predicates always return false there.
+    if (process.platform !== "win32") {
+      pipe(descriptors.requestFd);
+      pipe(descriptors.frameFd);
+    }
   } catch (error) {
     process.stderr.write(`sparkwing: ${error instanceof Error ? error.message : String(error)}\n`);
     process.exitCode = 2;
