@@ -29,8 +29,11 @@ const run = (command, args, capture = false, cwd = root) => {
     stdio: capture ? ["ignore", "pipe", "inherit"] : "inherit",
     env: command === "go" ? { ...process.env, GOWORK: "off" } : process.env,
   });
-  if (result.error) throw result.error;
-  if (result.status !== 0) throw new Error(`${command} failed (${result.status ?? result.signal})`);
+  if (result.error || result.status !== 0) {
+    if (capture && result.stdout) process.stderr.write(result.stdout);
+    if (result.error) throw result.error;
+    throw new Error(`${command} failed (${result.status ?? result.signal})`);
+  }
   return result.stdout;
 };
 const npm = (args, cwd = root) =>

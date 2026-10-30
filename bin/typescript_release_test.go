@@ -65,7 +65,7 @@ func TestTypeScriptReleaseRequiresBothNativeBridges(t *testing.T) {
 	checkSDKAction(t, job, "actions/upload-artifact@", "path", "sdk/typescript/native/win32-${{ matrix.arch }}")
 	checkSDKAction(t, job, "actions/upload-artifact@", "if-no-files-found", "error")
 	assembly := workflow.Jobs["typescript-package"]
-	if assembly.If != "" || assembly.Allow || !hasSDKDependency(assembly, "typescript-native") || !hasSDKDependency(assembly, "validate-tag") {
+	if assembly.If != "${{ !inputs.verify_only }}" || assembly.Allow || !hasSDKDependency(assembly, "typescript-native") || !hasSDKDependency(assembly, "validate-tag") {
 		t.Fatal("package assembly must depend on successful native work and the resolved source")
 	}
 	checkSDKAction(t, assembly, "actions/checkout@", "ref", "${{ needs.validate-tag.outputs.source_sha }}")
@@ -74,6 +74,14 @@ func TestTypeScriptReleaseRequiresBothNativeBridges(t *testing.T) {
 	}
 	checkSDKStep(t, assembly, "Assemble TypeScript package", "release:pack", "--version", "--destination")
 	publication := workflow.Jobs["release"]
+	for _, name := range []string{"dashboard", "typescript-package", "release"} {
+		if workflow.Jobs[name].If != "${{ !inputs.verify_only }}" {
+			t.Errorf("verification-only dispatch must skip %s", name)
+		}
+	}
+	if !hasSDKDependency(workflow.Jobs["build"], "dashboard") {
+		t.Fatal("release builds must depend on the dashboard disabled during verification")
+	}
 	if !hasSDKDependency(publication, "typescript-package") {
 		t.Fatal("publication does not depend on TypeScript package assembly")
 	}

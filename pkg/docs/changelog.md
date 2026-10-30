@@ -20,6 +20,8 @@ unlock.
 
 ## [Unreleased]
 
+- **TypeScript SDK:** Windows pipelines accept valid protocol pipes instead of refusing startup with `protocol descriptor must be a pipe`. Native release verification prints captured Go test failures.
+
 ## [v0.68.0] - 2026-10-30
 - **local controller:** Large plans batch placement and node reads, reuse run facts when releasing jobs, and resolve private job and child-authority reads directly. Single-job reads and child authentication no longer recompute scheduling placement. Readiness probes no longer wait behind the database writer or label a busy controller as unresponsive.
 
