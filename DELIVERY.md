@@ -84,6 +84,10 @@ committing them. They cannot perform this follow-up for main.
 
 ### Release build and publication
 
+Sparkwing owns artifact publication through its native `release` pipeline and
+`.github/workflows/release.yaml`. Platform deployment belongs to the platform
+repository and runs separately from publishing a Sparkwing tag.
+
 The hosted release builds the dashboard once and shares it with six target
 jobs. Each target compiles its supported commands in one Go cache; all 16
 binary outputs remain available. Linux image packaging copies those same

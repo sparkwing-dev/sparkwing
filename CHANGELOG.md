@@ -22,6 +22,8 @@ unlock.
 
 ### Changed
 
+- **release (Breaking):** Sparkwing releases use the native tag-and-publication flow
+  Platform deployment is separate. Retire the platform repository's `release-all` pipeline and `bin/trigger-change-deploy.sh` callers when updating that repository.
 - **scaffold:** `const FallbackSDKVersion` pins v0.68.1, so a fresh scaffold compiles against that release.
 - **TypeScript SDK:** The npm package names this repository, which npm provenance requires. Publication refuses major versions above 0, a name or version that does not match the release, and a `latest` tag that would move backwards.
 
