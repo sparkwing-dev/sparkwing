@@ -201,6 +201,69 @@ func sourceUploadHTTP(h http.Handler, raw, method, path, body string) *httptest.
 	return w
 }
 
+func TestSourceQuotaRefusalNamesTierUsageAndRemedy(t *testing.T) {
+	for _, tier := range []string{"free", "paid", ""} {
+		t.Run("tier_"+tier, func(t *testing.T) {
+			s, _, input, raw := sourceUploadFixture(t)
+			engineSQL(t, s.store, `INSERT INTO storage_quotas(team,tier,max_bytes_per_month,limits_set,updated_at) VALUES ('a',?,100,1,1)`, tier)
+			body, err := json.Marshal(controllerwire.SourceUploadRequest{Git: input.Git, Source: input.Source, Digest: blob.Digest(strings.Repeat("a", 64)), Size: 60})
+			if err != nil {
+				t.Fatal(err)
+			}
+			h := s.Handler()
+			if w := sourceUploadHTTP(h, raw, "POST", "/api/v1/data/source", string(body)); w.Code != http.StatusOK {
+				t.Fatalf("first reservation: %d %s", w.Code, w.Body)
+			}
+			w := sourceUploadHTTP(h, raw, "POST", "/api/v1/data/source", string(body))
+			var envelope struct {
+				Error struct{ Code, Message string }
+			}
+			if w.Code != http.StatusTooManyRequests || json.Unmarshal(w.Body.Bytes(), &envelope) != nil || envelope.Error.Code != "quota_exceeded" {
+				t.Fatalf("quota refusal: %d %s", w.Code, w.Body)
+			}
+			label := tier + " tier"
+			if tier == "" {
+				label = "operator override"
+			}
+			for _, want := range []string{label, "bytes_per_month", "60 of 100 bytes", "adds 60", "delete", "runs/artifacts", "support@sparkwing.dev", "next UTC calendar month", "deletion does not reset"} {
+				if !strings.Contains(envelope.Error.Message, want) {
+					t.Errorf("quota refusal lacks %q: %s", want, envelope.Error.Message)
+				}
+			}
+			if tier == "free" && !strings.Contains(envelope.Error.Message, "add funds") {
+				t.Errorf("free quota refusal lacks paid-tier remedy: %s", envelope.Error.Message)
+			}
+		})
+	}
+}
+
+func TestSourceAttachmentQuotaRefusalNamesTierAndRemedy(t *testing.T) {
+	s, options, input, raw := sourceUploadFixture(t)
+	path := filepath.Join(t.TempDir(), "source.bundle")
+	if err := os.WriteFile(path, []byte("source bytes"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	digest, err := client.UploadSourceSnapshot(t.Context(), options, source.Publication{Git: input.Git, Source: input.Source, Path: path, Base: procenv.Base{Local: true, Captured: sourcetest.Environment(t), Masker: secrets.NewMasker()}, Secrets: map[string]string{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	engineSQL(t, s.store, `INSERT INTO storage_quotas(team,tier,max_bytes_per_run,limits_set,updated_at) VALUES ('a','free',1,1,1)`)
+	input.Source.BundleDigest = runspec.Optional[string]{Set: true, Value: digest}
+	body, err := json.Marshal(controllerwire.CreateRunRequest{IdempotencyKey: "source-limit", Request: input})
+	if err != nil {
+		t.Fatal(err)
+	}
+	w := sourceUploadHTTP(s.Handler(), raw, "POST", "/api/v1/runs", string(body))
+	if w.Code != http.StatusTooManyRequests {
+		t.Fatalf("source attachment refusal: %d %s", w.Code, w.Body)
+	}
+	for _, want := range []string{"quota_exceeded", "free tier", "bytes_per_run", "0 of 1 bytes", "add funds", "support@sparkwing.dev"} {
+		if !strings.Contains(w.Body.String(), want) {
+			t.Errorf("source attachment refusal lacks %q: %s", want, w.Body)
+		}
+	}
+}
+
 func TestSourceSnapshotRevokedBeforeCommitExpiresPhysicalStaging(t *testing.T) {
 	s, options, input, _ := sourceUploadFixture(t)
 	directory := t.TempDir()

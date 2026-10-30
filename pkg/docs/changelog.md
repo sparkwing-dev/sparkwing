@@ -43,6 +43,8 @@ unlock.
 - **runs logs:** Plain and pretty output render persisted runner frames as text
   Job failures omit raw transition JSON. Retry events include the next attempt
   ordinal, including `attempt=2`.
+- **teams:** Invitations at the free member cap warn with the configured limit and remedy. Acceptance refusals keep those details in the API and console. The cap remains enforced at acceptance.
+- **storage:** Quota refusals name the tier or override, limit, usage and requested growth, with funding, monthly reset and support remedies.
 - **release:** Schema and wire changelog gates fetch a previous release tag missing from the job checkout. Failed fetches name that checkout and show a recovery command.
 
 ## [v0.68.0] - 2026-10-30

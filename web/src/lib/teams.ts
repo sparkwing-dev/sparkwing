@@ -238,6 +238,7 @@ export interface CreatedInvitation {
   // False when the controller mailed nothing: no mail service, or the
   // address reached its daily limit. The link still works either way.
   email_sent?: boolean;
+  warning?: string;
 }
 
 export type TokenFamily = "member" | "machine";
@@ -356,14 +357,12 @@ export async function revokeInvitation(id: string): Promise<void> {
   );
 }
 
-// One sentence per reason the controller refuses an invitation with.
+// Fixed refusals add recovery advice; member limits retain the controller's configured counts.
 export const invitationRefusalText: Record<string, string> = {
   invitation_closed:
     "This invitation has expired or was already used. Ask a team owner to send a new one.",
   invitation_not_found:
     "This invitation isn't for the account you're signed in with, or no longer exists. Sign in with the invited email, or ask a team owner for a new one.",
-  team_full:
-    "This team is full until a team owner buys credits or removes a member.",
 };
 
 export async function acceptInvitation(id: string): Promise<void> {

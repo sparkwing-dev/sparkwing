@@ -43,6 +43,43 @@ func TestRefusedSignInReturnsToTheSignInPageWithAReason(t *testing.T) {
 	}
 }
 
+func TestInvitationAtMemberCapacityWarnsAndAcceptanceExplainsRemedy(t *testing.T) {
+	f := newIdentityFixture(t)
+	owner, _, _ := teamOf(f)
+	limit := 3
+	if code := f.call("PUT", "/api/v1/operator/signups", "Bearer "+f.admin, map[string]int{"free_team_members": limit}, nil); code != http.StatusOK {
+		t.Fatalf("set member cap = %d", code)
+	}
+	guest := f.user("g", "guest@example.com")
+	var invitation struct{ ID, Warning string }
+	if code := f.call("POST", "/api/v1/team/invitations", owner.auth, map[string]string{"email": "guest@example.com", "role": "reader"}, &invitation); code != http.StatusCreated {
+		t.Fatalf("invite at capacity = %d", code)
+	}
+	var refusal struct {
+		Error struct {
+			Message string
+			Details struct{ Reason string }
+		}
+	}
+	if code := f.call("POST", "/api/v1/invitations/"+invitation.ID+"/accept", guest.auth, nil, &refusal); code != http.StatusForbidden || refusal.Error.Details.Reason != "team_full" {
+		t.Fatalf("accept at capacity = %d %+v", code, refusal)
+	}
+	for _, message := range []string{invitation.Warning, refusal.Error.Message} {
+		for _, want := range []string{"free team member limit", "3 of 3 members", "add funds", "remove a member", "support@sparkwing.dev"} {
+			if !strings.Contains(message, want) {
+				t.Errorf("member limit message lacks %q: %q", want, message)
+			}
+		}
+	}
+	limit = 4
+	if code := f.call("PUT", "/api/v1/operator/signups", "Bearer "+f.admin, map[string]int{"free_team_members": limit}, nil); code != http.StatusOK {
+		t.Fatalf("set member cap = %d", code)
+	}
+	if code := f.call("POST", "/api/v1/invitations/"+invitation.ID+"/accept", guest.auth, nil, nil); code != http.StatusNoContent {
+		t.Fatalf("accept after raising cap = %d", code)
+	}
+}
+
 func TestRefusedLinkReturnsToTheSignInsPageWithAReason(t *testing.T) {
 	f := newIdentityFixture(t)
 	alice := f.user("a", "alice@example.com")

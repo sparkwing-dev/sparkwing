@@ -54,7 +54,15 @@ func applyStorageQuotaDimensionTx(ctx context.Context, tx *storeTx, team Team, d
 		return "", authorityError(apierr.Conflict, "storage quota overflow")
 	}
 	if d.amount > 0 && d.ceiling > 0 && d.amount > d.ceiling-used-reserved {
-		return "", &StorageQuotaError{Principal: string(team), Limit: d.limitName, Unit: d.unit, Used: used + reserved, Allowed: d.ceiling, Requested: d.amount, Remedy: storageLimitRemedy}
+		policy, err := storageQuotaForTeamTx(ctx, tx, team)
+		if err != nil {
+			return "", err
+		}
+		tier := policy.Tier
+		if tier == "" {
+			tier = "operator override"
+		}
+		return "", &StorageQuotaError{Principal: string(team), Tier: tier, Limit: d.limitName, Unit: d.unit, Used: used + reserved, Allowed: d.ceiling, Requested: d.amount}
 	}
 	if _, err := tx.execContext(ctx, "UPDATE quota_reservations SET state='released' WHERE team=? AND quota=? AND state='held' AND expires_at<=?", team, d.quota, tx.now(ctx).UnixNano()); err != nil {
 		return "", err

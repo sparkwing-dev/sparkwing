@@ -24,6 +24,11 @@ func TestBlobUploadRunByteLimitIncludesPendingTransfers(t *testing.T) {
 	if _, err := tenant.ReserveBlobUpload(t.Context(), request); !errors.As(err, &refusal) || refusal.Limit != storageLimitBytesPerRun || refusal.Used != 3 || refusal.Requested != 3 {
 		t.Fatalf("pending transfer did not spend the run's byte capacity: %v", err)
 	}
+	for _, want := range []string{"operator override", "bytes_per_run", "3 of 4 bytes", "runs/artifacts", "support@sparkwing.dev"} {
+		if !strings.Contains(refusal.Error(), want) {
+			t.Errorf("run byte refusal lacks %q: %v", want, refusal)
+		}
+	}
 	if _, err := tenant.CommitBlobUpload(t.Context(), verifiedUpload(first, request.Intent.Authority)); err != nil {
 		t.Fatal(err)
 	}
@@ -51,6 +56,11 @@ func TestBlobUploadRunObjectLimitCountsEmptyBlobsAndReleasesAborts(t *testing.T)
 	var refusal *StorageQuotaError
 	if _, err := tenant.ReserveBlobUpload(t.Context(), request); !errors.As(err, &refusal) || refusal.Limit != storageLimitObjectsPerRun || refusal.Used != 1 || refusal.Requested != 1 {
 		t.Fatalf("empty upload did not reserve an object: %v", err)
+	}
+	for _, want := range []string{"operator override", "objects_per_run", "1 of 1 objects", "runs/artifacts", "support@sparkwing.dev"} {
+		if !strings.Contains(refusal.Error(), want) {
+			t.Errorf("run object refusal lacks %q: %v", want, refusal)
+		}
 	}
 	for range 2 {
 		if err := tenant.AbortBlobUpload(t.Context(), request.Intent.Authority, first.ID); err != nil {

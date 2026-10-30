@@ -215,6 +215,8 @@ type Invitation struct {
 	InvitedBy       string
 	CreatedAt       time.Time
 	ExpiresAt       time.Time
+	// Warning explains a member limit that would refuse acceptance.
+	Warning string
 }
 
 // SignInProfile is what an identity provider asserted about the person who
@@ -895,7 +897,7 @@ func checkTeamRoomTx(ctx context.Context, tx *storeTx, team Team, limit int) err
 			return nil
 		}
 	}
-	return ErrTeamFull
+	return fmt.Errorf("%w: %d of %d members; ask a team owner to add funds to lift the free limit or remove a member, or contact support@sparkwing.dev for help", ErrTeamFull, members, limit)
 }
 
 // CreateAccountSession opens a session for a current team member.

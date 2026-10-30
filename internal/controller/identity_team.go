@@ -80,6 +80,7 @@ type inviteResp struct {
 	ID        string `json:"id"`
 	AcceptURL string `json:"accept_url"`
 	EmailSent bool   `json:"email_sent"`
+	Warning   string `json:"warning,omitempty"`
 }
 
 func (s *Server) handleInvite(w http.ResponseWriter, r *http.Request, a capability.Authorized) error {
@@ -110,7 +111,7 @@ func (s *Server) handleInvite(w http.ResponseWriter, r *http.Request, a capabili
 	noteAuditTarget(r.Context(), "role", string(inv.Role))
 	accept := s.acceptURL(inv.ID)
 	sent := s.mailInvitation(r.Context(), a, inv, accept)
-	writeJSON(w, http.StatusCreated, inviteResp{ID: inv.ID, AcceptURL: accept, EmailSent: sent})
+	writeJSON(w, http.StatusCreated, inviteResp{ID: inv.ID, AcceptURL: accept, EmailSent: sent, Warning: inv.Warning})
 	return nil
 }
 
@@ -219,7 +220,7 @@ func invitationRefusal(err error) error {
 	case errors.Is(err, store.ErrInvitationClosed):
 		return reasonedRefusal(apierr.Conflict, invitationClosed, "this invitation has expired or was already used")
 	case errors.Is(err, store.ErrTeamFull):
-		return reasonedRefusal(apierr.Forbidden, invitationTeamFull, "this team has as many members as a team without purchased credits may")
+		return reasonedRefusal(apierr.Forbidden, invitationTeamFull, err.Error())
 	}
 	return accountMutationError(err)
 }

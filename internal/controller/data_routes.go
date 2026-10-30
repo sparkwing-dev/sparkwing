@@ -111,8 +111,6 @@ func dataRouteError(err error) error {
 		return &apierr.Error{Code: apierr.Forbidden, Message: "digest is not readable", Details: map[string]any{"reason": apierr.ReasonDigestNotReadable}}
 	case errors.Is(err, blob.ErrIntegrity):
 		return &apierr.Error{Code: apierr.IntegrityFailure, Message: "stored bytes do not match their declared digest or size"}
-	case errors.Is(err, store.ErrStorageQuota):
-		return &apierr.Error{Code: apierr.QuotaExceeded, Message: "storage quota exceeded"}
 	case errors.Is(err, blob.ErrNotFound), errors.Is(err, store.ErrNotFound):
 		return &apierr.Error{Code: apierr.BlobMissing, Message: "blob is absent or tombstoned"}
 	case errors.Is(err, blob.ErrBudget), errors.Is(err, context.DeadlineExceeded):

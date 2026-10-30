@@ -483,4 +483,7 @@ func TestAFreeTeamHoldsAtMostTheMemberLimit(t *testing.T) {
 	if err := join("paid", "paid@example.com"); err != nil {
 		t.Fatalf("a member of a team that bought credits = %v", err)
 	}
+	if inv := invite(t, st, owner, "pending@example.com"); inv.Warning != "" {
+		t.Fatalf("paid team invitation warns about the free cap: %s", inv.Warning)
+	}
 }

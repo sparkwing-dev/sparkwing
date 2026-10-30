@@ -350,6 +350,15 @@ account's last sign-in that verifies an address, or that sign-in's provider
 reporting another address, stops the account seeing or accepting invitations
 to it.
 
+The free team member cap is checked when an invitation is accepted. Open
+invitations do not reserve member slots. Creating or replaying an invitation
+at capacity still returns HTTP 201 with a `warning` naming the configured
+member limit, current count and remedy. The console shows that warning.
+Acceptance at capacity returns HTTP 403 with reason `team_full` and the same
+limit and remedy: ask a team owner to add funds to lift the free limit or
+remove a member, or contact support@sparkwing.dev for help. Raising the limit
+or freeing a slot lets the same open invitation be accepted.
+
 `GET /api/v1/team/settings` returns `members_can_add_machines`,
 `claim_ranking`, `max_children_per_root` and `high_trust` under `runs.read`. `PUT /api/v1/team/settings` requires
 `team.admin` and names at least one of them. `claim_ranking` takes distinct

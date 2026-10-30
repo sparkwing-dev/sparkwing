@@ -64,11 +64,9 @@ internal/settings	1
 # ParseRunFilter: external filter tests exercise query parsing.
 # RevokeNode: external state-transition tests construct revocation requests.
 # Role.AtLeast: external identity tests exercise role ordering.
-# StorageQuotaError: external quota tests inspect structured refusals with errors.As.
-# StorageQuotaError.Error: implements error; callers use the error interface.
 # Tenant.RecordGitHubCheckRun: external GitHub tests exercise check-run bindings and receipts.
 # secretPreflightError.Error: implements error; callers use the error interface.
-internal/store	23
+internal/store	21
 # SeedUpload: external fixture tests share this upload setup implementation.
 internal/store/teststore	1
 # FieldError.Error: implements error; callers use the error interface.
