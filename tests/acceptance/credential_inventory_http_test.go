@@ -139,15 +139,19 @@ func TestCredentialInventoryHTTPNeverExposesPrivateValues(t *testing.T) {
 		for _, path := range []string{"/api/v1/secrets", "/api/v1/team/git-credentials"} {
 			query := url.Values{"team": {selector}, "run": {selector}, "pipeline": {selector}}
 			w := authorityHTTP(h, b, "GET", path+"?"+query.Encode(), "")
-			var body map[string][]map[string]json.RawMessage
+			var body map[string]json.RawMessage
 			key := "credentials"
 			if path == "/api/v1/secrets" {
 				key = "secrets"
 			}
-			if w.Code != 200 || json.Unmarshal(w.Body.Bytes(), &body) != nil || len(body) != 1 || len(body[key]) != 1 || w.Header().Get("Cache-Control") != "no-store" {
+			if w.Code != 200 || json.Unmarshal(w.Body.Bytes(), &body) != nil || len(body) != 3 || string(body["next_cursor"]) != `""` || string(body["truncated"]) != "false" || w.Header().Get("Cache-Control") != "no-store" {
 				return false
 			}
-			row := body[key][0]
+			var rows []map[string]json.RawMessage
+			if json.Unmarshal(body[key], &rows) != nil || len(rows) != 1 {
+				return false
+			}
+			row := rows[0]
 			allowed := []string{"host", "repository", "host_wide", "kind", "confirmed", "created_by", "created_at", "updated_at"}
 			if key == "secrets" {
 				allowed = []string{"name", "principal", "pipeline", "masked", "bound", "created_at", "updated_at"}
@@ -235,12 +239,12 @@ func TestCredentialInventoryHTTPReadersAndEmptyArrays(t *testing.T) {
 			}
 			f := &credentialInventory{team: "team"}
 			w := discoveryRequest(inventoryServer(t, b, f).Handler(), b, "GET", path)
-			var body map[string][]json.RawMessage
+			var body map[string]json.RawMessage
 			key := "credentials"
 			if path == "/api/v1/secrets" {
 				key = "secrets"
 			}
-			if w.Code != 200 || json.Unmarshal(w.Body.Bytes(), &body) != nil || body[key] == nil || len(body[key]) != 0 || f.reads != 1 {
+			if w.Code != 200 || json.Unmarshal(w.Body.Bytes(), &body) != nil || string(body[key]) != "[]" || string(body["next_cursor"]) != `""` || string(body["truncated"]) != "false" || f.reads != 1 {
 				t.Fatalf("class %s HTTP %d %s reads=%d", class, w.Code, w.Body.String(), f.reads)
 			}
 		}

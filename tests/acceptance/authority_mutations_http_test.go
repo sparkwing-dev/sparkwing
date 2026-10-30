@@ -85,15 +85,20 @@ func TestAuthorityMemberDirectoryHTTP(t *testing.T) {
 				assertEngineError(t, w, apierr.Status(code), code)
 				return
 			}
-			var members []struct {
-				UserID string `json:"user_id"`
-				Email  string `json:"email"`
-				Name   string `json:"name"`
-				Role   string `json:"role"`
+			var page struct {
+				Members []struct {
+					UserID string `json:"user_id"`
+					Email  string `json:"email"`
+					Name   string `json:"name"`
+					Role   string `json:"role"`
+				} `json:"members"`
+				NextCursor string `json:"next_cursor"`
+				Truncated  bool   `json:"truncated"`
 			}
-			if w.Code != 200 || json.Unmarshal(w.Body.Bytes(), &members) != nil || members == nil || len(members) != len(f.members) {
+			if w.Code != 200 || json.Unmarshal(w.Body.Bytes(), &page) != nil || page.Members == nil || len(page.Members) != len(f.members) || page.NextCursor != "" || page.Truncated {
 				t.Fatalf("HTTP %d %s", w.Code, w.Body.String())
 			}
+			members := page.Members
 			if len(members) != 0 && (members[0].UserID != "member" || members[0].Email != "member@example.invalid" || members[0].Name != "Member" || members[0].Role != "owner") {
 				t.Fatalf("members = %+v", members)
 			}
