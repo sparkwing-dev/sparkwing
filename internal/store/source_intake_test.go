@@ -2,11 +2,36 @@ package store
 
 import (
 	"context"
+	"errors"
+	"strings"
 	"testing"
 
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 )
+
+func TestAdmissionRefusesRemoteWorkingTreeBeforeQueueing(t *testing.T) {
+	for _, bundle := range []bool{false, true} {
+		t.Run(map[bool]string{false: "remote", true: "uploaded snapshot"}[bundle], func(t *testing.T) {
+			tenant, in, _ := intakeFixture(t)
+			location := runspec.SourceLocation{RemoteURL: "https://github.com/acme/repo.git", PipelineDir: ".sparkwing"}
+			tenant.s.intakePolicy = fakeIntakePolicy(func(context.Context, capability.AuthorityResolver, IntakeRequest) (IntakePolicyFacts, error) {
+				return IntakePolicyFacts{SourceLocation: &location, LogRetentionClass: "r30", LogRetentionDays: 30}, nil
+			})
+			in.Request.Dispatch = ""
+			in.Request.Source.WorkingTree = true
+			in.Request.Source.BundleDigest = runspec.Optional[string]{Set: bundle, Value: strings.Repeat("a", 64)}
+			_, err := tenant.AdmitRun(t.Context(), in)
+			var refused *apierr.Error
+			if !errors.As(err, &refused) || refused.Code != apierr.InvalidArgs || !strings.Contains(refused.Message, "local checkout") || !strings.Contains(refused.Message, "pipeline trigger --working-tree") {
+				t.Fatalf("remote working tree refusal = %v", err)
+			}
+			rewriteSchemaCount(t, tenant.s.db, "runs", 0)
+			rewriteSchemaCount(t, tenant.s.db, "triggers", 0)
+		})
+	}
+}
 
 func TestAdmissionSourceLocationRequiresServerVerification(t *testing.T) {
 	for _, mode := range []runspec.IntakeMode{runspec.IntakeExecute, runspec.IntakePublish} {
