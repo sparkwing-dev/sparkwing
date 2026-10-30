@@ -40,7 +40,7 @@ credential model in `docs/auth.md`, and the decision log
 
 | Rule | Owner | Guard test |
 | --- | --- | --- |
-| Trust classes and named sets | `internal/runspec/provenance.go`: `TrustClass`, `TrustSet` (`DefaultBranchWorkTrust`, `AppRepositoryTrust`, `AppDeliveryTrust`, `GitHubEventTrust`, `AllTrust`); SQL renders them via `trustIn` in `claim_query.go` | `trust_matrix_test.go`: `TestTrustMatrix` |
+| Trust classes and named sets | `internal/runspec/provenance.go`: `TrustClass`, `TrustSet` (`AppRepositoryTrust`, `AppDeliveryTrust`, `GitHubEventTrust`, `AllTrust`); SQL renders them via `trustIn` in `claim_query.go` | `trust_matrix_test.go`: `TestTrustMatrix` |
 | Verified default-branch work | intake-sealed `Provenance.DefaultBranchWork`; `claimSQL.defaultBranchWork` reads the stored fact | `trust_sql_test.go`: `TestDefaultBranchWorkSQLAgreesWithGo` |
 | Sealed provenance | `internal/runspec/seal.go`: `SealRequest`; store side `intake_provenance.go`: `sealProvenanceTx`, `identityTx` | `internal/runspec/provenance_test.go`: `TestProvenanceRoundTripsAndRefusesForgedSeals`; `internal/runspec/spec_test.go`: `TestSealRefusals` |
 | Proven repository (App, Actions, fetched and compared source) | `internal/controller/intake_source.go`: `selectFetchedSource`; `run_spec.go`: `FetchedRepository`; `intake_provenance.go`: `fetchedRepositoryTx`; `Provenance.FetchedFrom` | `internal/controller/intake_source_test.go`: `TestFetchedGitHubRepositoryFollowsSourceSelection` |

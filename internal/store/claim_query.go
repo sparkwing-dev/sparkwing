@@ -366,7 +366,7 @@ func (q *claimSQL) poolTrust(team, pools, trust, launcher, provenance string) st
 	return `((NOT (` + reserved + ` OR (` + trust + `='` + string(capability.TrustVerifiedDefault) + `' AND ` + hasPools + `)) OR ` + launcher + `=1) AND (` + trust + `='` + string(capability.TrustAny) + `' OR (` + trust + `='' AND NOT (` + reserved + `)) OR ` + q.defaultBranchWork(provenance) + `))`
 }
 
-// SQL reads the same intake-sealed facts as the Go consumers.
+// safety: use sealed facts so SQL and Go consumers cannot disagree on repository proof.
 func (q *claimSQL) defaultBranchWork(provenance string) string {
 	return `COALESCE(CAST(` + q.at(provenance, "verified_default_branch") + ` AS TEXT),'false') IN ('true','1')`
 }

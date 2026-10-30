@@ -151,7 +151,7 @@ func (f *appFixture) enrollRunner(owner signedIn, name string, personal bool, po
 	if err := json.Unmarshal(raw, &record); err != nil {
 		f.t.Fatal(err)
 	}
-	// These tests exercise credential release independently of a runner's repository filter.
+	// safety: bypass placement scope so credential release must enforce its own proof boundary.
 	record.Value.Repositories = nil
 	raw, err := json.Marshal(record)
 	if err != nil {

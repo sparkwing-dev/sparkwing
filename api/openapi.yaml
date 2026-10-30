@@ -4824,6 +4824,8 @@ components:
     internal.nodeproto.PipelineReference:
       additionalProperties: true
       properties:
+        from_any_run:
+          type: boolean
         job:
           type: string
         pipeline:

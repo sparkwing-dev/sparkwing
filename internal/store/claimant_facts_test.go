@@ -33,7 +33,7 @@ func TestClaimantReadsSealedHostFacts(t *testing.T) {
 	defer func() { _ = tx.Rollback() }()
 	for _, kind := range []capability.HostKind{capability.HostCloud, capability.HostSelfHosted, capability.HostPersonal, capability.HostHere} {
 		host := &capability.HostFacts{Kind: kind, Fresh: kind == capability.HostCloud, RunnerKind: "runner", CacheScope: "sealed-cache", MachineID: "sealed-machine", OwnerAccountID: "sealed-owner"}
-		// The root has no enrollment. Consumers must not consult it after claim.
+		// safety: the absent enrollment catches consumers that recompute sealed host facts.
 		leaf := capability.Capability{Subject: capability.Subject{Kind: capability.SubjectMachine, ID: "changed-machine"}, Host: host, Unit: capability.UnitNode}
 		facts, err := claimantFactsTx(ctx, tx, []authorityNode{{principal: capability.Principal{Capability: leaf}}}, runspec.Request{})
 		if err != nil {

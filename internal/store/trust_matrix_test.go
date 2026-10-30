@@ -126,8 +126,7 @@ type matrixHost struct {
 	kind                  capability.HostKind
 }
 
-// The host and pool columns evaluate the claim query's hostTrust, poolTrust and freshPod
-// fragments; a reserved pool is one a team secret is restricted to with only_on.
+// safety: exercise the SQL fragments so claim policy cannot drift from Go consumers.
 var matrixHosts = []matrixHost{
 	{column: "host_fresh_pod", pools: `[]`, launcher: true, kind: capability.HostCloud},
 	{column: "host_plain_machine", pools: `[]`, kind: capability.HostSelfHosted},

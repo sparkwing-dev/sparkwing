@@ -35,10 +35,8 @@ type TrustSet []TrustClass
 func (s TrustSet) Has(c TrustClass) bool { return slices.Contains(s, c) }
 
 var (
-	// DefaultBranchWorkTrust is verified default-branch work: a signed push to the
-	// default branch, or an unmodified fire of an admin-armed default-branch schedule
-	// (decisions 31, 34, 60). Any other class on the default branch is ordinary work.
-	DefaultBranchWorkTrust = TrustSet{TrustVerifiedDefault, TrustSchedule}
+	// safety: a branch name alone cannot establish verified default-branch work.
+	defaultBranchWorkTrust = TrustSet{TrustVerifiedDefault, TrustSchedule}
 	// AppRepositoryTrust proved its repository through the GitHub App: a signed
 	// delivery or a schedule whose commit the App resolved. Pool access rules grant it.
 	AppRepositoryTrust = TrustSet{TrustVerified, TrustVerifiedDefault, TrustSchedule}
@@ -156,7 +154,7 @@ func (p Provenance) sealIdentity() (Provenance, error) {
 	if id > 0 {
 		p.identity.ProvenRepository = RepoKey("gh:" + strconv.FormatInt(id, 10))
 	}
-	p.identity.VerifiedDefaultBranch = DefaultBranchWorkTrust.Has(p.identity.Trust) && p.identity.DefaultBranch != "" && p.identity.Ref == "refs/heads/"+p.identity.DefaultBranch
+	p.identity.VerifiedDefaultBranch = defaultBranchWorkTrust.Has(p.identity.Trust) && p.identity.DefaultBranch != "" && p.identity.Ref == "refs/heads/"+p.identity.DefaultBranch
 	return p, p.validate()
 }
 
@@ -208,7 +206,7 @@ func (p Provenance) validate() error {
 	if p.identity.ProvenRepository != proven || p.identity.SourceCredentialVerified && proven == "" {
 		return errors.New("repository proof does not match the sealed identity")
 	}
-	verifiedDefault := DefaultBranchWorkTrust.Has(p.identity.Trust) && p.identity.DefaultBranch != "" && p.identity.Ref == "refs/heads/"+p.identity.DefaultBranch
+	verifiedDefault := defaultBranchWorkTrust.Has(p.identity.Trust) && p.identity.DefaultBranch != "" && p.identity.Ref == "refs/heads/"+p.identity.DefaultBranch
 	if p.identity.VerifiedDefaultBranch != verifiedDefault {
 		return errors.New("default-branch proof does not match the sealed identity")
 	}

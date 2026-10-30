@@ -85,8 +85,7 @@ func (s *Server) verifyIntakeSourceCredential(ctx context.Context, team store.Te
 	if err != nil || !verified {
 		return store.FetchedRepository{}, false, err
 	}
-	// A caller's selected commit becomes repository proof only after the App
-	// selects its configuration and code, and GitHub confirms reachability.
+	// safety: repository proof requires App-selected code and a GitHub reachability check.
 	git, selected, err := s.appSourceSelector(team)(ctx, request)
 	if err != nil {
 		return store.FetchedRepository{}, false, err
