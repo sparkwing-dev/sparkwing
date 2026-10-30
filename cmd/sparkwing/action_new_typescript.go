@@ -69,6 +69,7 @@ func scaffoldTypeScriptPipeline(cwd string, inv clisurface.Invocation, mode stri
 		return err
 	}
 	file := filepath.Join(dir, "jobs", name+".ts")
+	// #nosec G703 -- the pipeline name is validated as kebab-case before scaffolding in the selected project
 	if _, err := os.Stat(file); err == nil {
 		return fmt.Errorf("refusing to overwrite %s; pick a different --pipeline", file)
 	}
@@ -77,10 +78,12 @@ func scaffoldTypeScriptPipeline(cwd string, inv clisurface.Invocation, mode stri
 		short = "Run " + name
 	}
 	source := fmt.Sprintf("import { definePipeline } from \"@sparkwing/sdk\";\n\ndefinePipeline({\n  name: %s,\n  short: %s,\n  plan(p) {\n    p.job(%s, async (ctx) => { ctx.log.info(%s); });\n  },\n});\n", strconv.Quote(kebabToPascal(name)), strconv.Quote(short), strconv.Quote(name), strconv.Quote(short))
+	// #nosec G703 -- the pipeline name is validated as kebab-case before scaffolding in the selected project
 	if err := os.WriteFile(file, []byte(source), 0o644); err != nil {
 		return err
 	}
 	if err := appendPipelinesYAML(dir, name, kebabToPascal(name), inv.Bool("hidden"), trigger); err != nil {
+		// #nosec G703 -- rollback removes the validated pipeline filename this scaffold just wrote
 		return errors.Join(err, os.Remove(file))
 	}
 	relative, err := filepath.Rel(filepath.Dir(entry), file)
@@ -88,6 +91,7 @@ func scaffoldTypeScriptPipeline(cwd string, inv clisurface.Invocation, mode stri
 		return err
 	}
 	body = append(body, []byte("\nimport "+strconv.Quote("./"+filepath.ToSlash(relative))+";\n")...)
+	// #nosec G703 -- scaffolding updates the main entry declared by the operator-selected local package.json
 	if err := os.WriteFile(entry, body, 0o644); err != nil {
 		return err
 	}

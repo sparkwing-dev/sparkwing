@@ -42,7 +42,7 @@ unlock.
 
 - **CLI:** Misspelled command words suggest the nearest command. Plain and pretty `runs status` show run and job start, finish and duration times.
 - **runs:** Ctrl-C requests cancellation and waits for the run to finish instead of leaving a running run with cancelled jobs. `--sw-workers` bounds simultaneous local foreground jobs.
-- **runs (Breaking):** Successful dry-run previews finish as `dry_run` and emit `run_dry_run`, with exit status zero. Failed and cancelled previews retain those verdicts. Store schema baseline 26 includes this status. See [migration](docs/migrations/_unreleased.md).
+- **runs (Breaking):** Successful dry-run previews finish as `dry_run` and emit `run_dry_run`, with exit status zero. Failed and cancelled previews retain those verdicts. Store schema baseline 26 includes this status. See [migration](docs/migrations/_unreleased.md#upgrading-from-v067-v068-starts-a-new-store).
 - **recovery:** Failure-hook jobs load their persisted source failure in local and runner hosts, so the callback executes instead of failing before its body starts.
 - **logs:** Log observation drains committed output and reports unsealed terminal logs as incomplete after the existing final-tail window instead of polling forever.
 - **cache:** `cache explain` uses the same native Go build settings as pipeline runs, so cached source builds report a cache hit.
