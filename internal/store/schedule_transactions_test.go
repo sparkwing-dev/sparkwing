@@ -710,3 +710,39 @@ func TestScheduleTeamCapAllowsFiftyInOneRepository(t *testing.T) {
 		t.Fatalf("withdrawn rows still consume allowance: %d %v", len(ids), err)
 	}
 }
+
+func TestScheduleTeamCapExemptsOnlyPersistedLocalAuthority(t *testing.T) {
+	for _, local := range []bool{false, true} {
+		t.Run(fmt.Sprintf("local=%t", local), func(t *testing.T) {
+			tenant, a, body, _ := consentedScheduleFixture(t)
+			if local {
+				rewriteSchemaExec(t, tenant.s.db, "INSERT INTO teams(name,created_at,updated_at) VALUES ('default',1,1)")
+				rewriteSchemaExec(t, tenant.s.db, "INSERT INTO team_counters(team) VALUES ('default')")
+				snapshot, err := tenant.s.AsOperator().ReadAuthentication(t.Context(), capability.CredentialLookup{Class: capability.CredentialPeer, Peer: capability.Subject{Kind: capability.SubjectLocal, ID: "uid:1000"}}, capability.RequestEvidence{})
+				if err != nil {
+					t.Fatal(err)
+				}
+				tenant, err = tenant.s.ForTeam(t.Context(), DefaultTeam)
+				if err != nil {
+					t.Fatal(err)
+				}
+				a.Principal = snapshot.Authorities[0].Principal
+				a.Target.Team = string(DefaultTeam)
+			} else {
+				a.Principal.Capability.Subject.Kind = capability.SubjectLocal
+			}
+			body.Schedules = nil
+			for i := range limits.MaxSchedulesPerTeam + 1 {
+				body.Schedules = append(body.Schedules, runspec.ScheduleDeclaration{Pipeline: fmt.Sprintf("pipeline-%d", i), Cron: "* * * * *"})
+			}
+			ids, _, err := tenant.ReplaceAuthorizedSchedules(t.Context(), a, body)
+			if local {
+				if err != nil || len(ids) != 51 {
+					t.Fatalf("local schedules: %d %v", len(ids), err)
+				}
+			} else if err == nil || !strings.Contains(err.Error(), "team schedule limit is 50") {
+				t.Fatalf("caller-supplied local subject waived the cap: %v", err)
+			}
+		})
+	}
+}

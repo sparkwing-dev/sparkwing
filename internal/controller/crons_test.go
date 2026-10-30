@@ -10,9 +10,11 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controller"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
@@ -211,13 +213,19 @@ func TestControllerCrons_BoundsEntriesBeforeResolvingSource(t *testing.T) {
 	probe := &scheduleSourceProbe{}
 	f := newCronsFixture(t, fixtureStorePolicies(store.Policies{Intake: probe}))
 	body := cronPushBody()
-	entries := make([]map[string]any, 21)
+	entries := make([]map[string]any, 51)
 	for i := range entries {
 		entries[i] = map[string]any{"pipeline": fmt.Sprintf("job-%d", i), "cron": "0 3 * * *"}
 	}
 	body["schedules"] = entries
-	status := f.status(http.MethodPut, "/api/v1/schedules/repos", f.writer, body)
-	if status != 409 || probe.calls != 0 {
-		t.Fatalf("overfull declaration: status=%d source calls=%d", status, probe.calls)
+	var refused apierr.Envelope
+	f.call(http.MethodPut, "/api/v1/schedules/repos", f.writer, body, http.StatusConflict, &refused)
+	if probe.calls != 0 || refused.Error == nil || refused.Error.Code != apierr.Conflict {
+		t.Fatalf("overfull declaration: refusal=%+v source calls=%d", refused, probe.calls)
+	}
+	for _, want := range []string{"limit is 50", "current usage is 0", "request declares 51", "support@sparkwing.dev"} {
+		if !strings.Contains(refused.Error.Message, want) {
+			t.Fatalf("refusal %q omits %q", refused.Error.Message, want)
+		}
 	}
 }
