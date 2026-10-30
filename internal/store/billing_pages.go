@@ -75,7 +75,8 @@ func (t *Tenant) PrepareAuthorizedBillingPage(ctx context.Context, a capability.
 			return err
 		}
 		if usage >= checkoutSessionsPerHour {
-			return &apierr.Error{Code: apierr.RateLimited,
+			return &apierr.Error{
+				Code:    apierr.RateLimited,
 				Message: fmt.Sprintf("team Stripe Checkout Session creation limit is %d per hour; current usage is %d; wait for the hourly window or contact support@sparkwing.dev for more", checkoutSessionsPerHour, usage),
 				Details: map[string]any{"limit": checkoutSessionsPerHour, "usage": usage, "retry_after_ms": time.Unix(0, oldest.Int64).Add(time.Hour).Sub(now).Milliseconds()},
 			}
