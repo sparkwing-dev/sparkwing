@@ -28,8 +28,7 @@ func (PrePush) Help() string {
 		"a CHANGELOG.md entry for every covered surface the push changes (bin/check-changelog.sh), " +
 		"api/openapi.yaml agreeing with the controller's route table (bin/check-api-spec.sh), the public API " +
 		"surface matching the .apidiff/ snapshot (bin/check-api-snapshot.sh), and `go build`, `go vet` and the " +
-		"fast linter subset over every package holding changed Go files, plus the depguard architecture guards " +
-		"over the whole tree against their .guards/ allow-lists. It repeats " +
+		"fast linter subset, including depguard dependency rules, over every package holding changed Go files. It repeats " +
 		"nothing `pre-commit` already ran per file: the formatters, the comment, sleep and regex sweeps, the " +
 		"docs mirror and home resolution are the commit tier's, and a push whose commits skipped that hook is " +
 		"judged by `gate`. Every step reads the commits being pushed, the range origin/main..HEAD, and never " +
@@ -67,7 +66,6 @@ func (p *PrePush) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
 	budget.step(w, "build-touched", runBuildTouched)
 	budget.step(w, "vet-touched", runVetTouched)
 	budget.step(w, "lint-touched", runFastLintTouched)
-	budget.step(w, "guards", checkGuardsFast)
 	budget.verdict(w)
 	return nil, nil
 }

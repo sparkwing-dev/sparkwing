@@ -215,7 +215,7 @@ funding.
 The final controller/store lint run reports `0 issues`. The broader follow-up
 lint run over controller, store, localcontroller and nodehost also passed.
 
-The documentation/mirror checks, changelog check, guardcheck, final CLI build
+The documentation/mirror checks, changelog check, final CLI build
 and `go build -o /dev/null ./cmd/...` passed. The lead still owns the full gate.
 Its unrelated Helm-version and missing TypeScript dependency failures were not
 changed in this lane. PostgreSQL, Kubernetes and cloud execution were not run.

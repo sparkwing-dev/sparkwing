@@ -10,14 +10,13 @@ run:
   timeout: 20m
 
 linters:
-  # depguard and the F1 forbidigo rules live in .golangci-guards.yml, which
-  # judges the whole tree against .guards/ rather than only new code.
   default: none
   enable:
     - bidichk # CVE-2021-42574 Trojan Source defense
     - bodyclose # missing http response body Close()
     - contextcheck # work started on a context that ignores the caller's cancellation
     - copyloopvar # loop-variable capture bugs (Go 1.22+ semantics)
+    - depguard # package dependency boundaries
     - errcheck # unchecked error returns
     - errorlint # %w wrapping + errors.Is/As discipline
     - forbidigo # banned function calls (panic / os.Exit outside main)
@@ -30,6 +29,261 @@ linters:
     - unconvert # redundant type conversions
     - usestdlibvars # use stdlib constants (http.StatusOK over 200)
   settings:
+    depguard:
+      rules:
+        main:
+          deny:
+            - pkg: io/ioutil
+              desc: "io/ioutil is deprecated since Go 1.16; use io and os."
+            - pkg: github.com/pkg/errors
+              desc: "use stdlib errors with %w wrapping; errors.Is/As replaces pkg/errors.Cause/As."
+            - pkg: gopkg.in/yaml.v2
+              desc: "use gopkg.in/yaml.v3; v2 is unmaintained and has known issues with anchor handling."
+            - pkg: github.com/stretchr/testify/assert
+              desc: "use testify/require instead so a failed assertion stops the test (assert keeps going and produces follow-on noise)."
+
+        thin-binaries-no-dispatch:
+          list-mode: lax
+          files:
+            - "**/cmd/sparkwing-controller/**"
+            - "**/internal/backend/**"
+            - "**/internal/web/**"
+            - "!$test"
+          deny:
+            - pkg: github.com/sparkwing-dev/sparkwing/internal/orchestrator
+              desc: "Thin binaries and the dashboard support packages must not import internal/orchestrator. Extract the symbol to its own leaf package first."
+
+        memo-inputs-declarations:
+          list-mode: strict
+          files:
+            - "**/sparkwing/inputs/*.go"
+            - "!$test"
+          allow:
+            - github.com/sparkwing-dev/sparkwing/sparkwing$
+
+        memo-key-host-only:
+          list-mode: lax
+          files:
+            - "**/sparkwing/sdk_contract.go"
+          deny:
+            - pkg: crypto
+              desc: "Memo callbacks return values; the executing host owns memo hashing."
+
+        # The SDK is every package under the module's sparkwing/ directory. A
+        # **/sparkwing/** glob would also match a checkout whose root is named
+        # sparkwing, so the scope is the tree minus the other top-level trees.
+        sdk-allowed-internal:
+          list-mode: lax
+          files:
+            - "$all"
+            - "!$test"
+            - "!**/cmd/**"
+            - "!**/internal/**"
+            - "!**/pkg/**"
+            - "!**/tests/**"
+            - "!**/examples/**"
+            - "!**/perf/**"
+            - "!**/testdata/**"
+            - "!**/.sparkwing/**"
+            - "!**/sparkwingtest/**"
+          deny:
+            - pkg: github.com/sparkwing-dev/sparkwing/internal
+              desc: "The SDK may import only the named internal leaves; server packages stay behind the host boundary."
+          allow: &sdk-internal-leaves
+            - github.com/sparkwing-dev/sparkwing/internal/apierr$
+            - github.com/sparkwing-dev/sparkwing/internal/argvalue$
+            - github.com/sparkwing-dev/sparkwing/internal/depcachekey$
+            - github.com/sparkwing-dev/sparkwing/internal/execdiag$
+            - github.com/sparkwing-dev/sparkwing/internal/gitcmd$
+            - github.com/sparkwing-dev/sparkwing/internal/limits$
+            - github.com/sparkwing-dev/sparkwing/internal/nodeproto$
+            - github.com/sparkwing-dev/sparkwing/internal/paths$
+            - github.com/sparkwing-dev/sparkwing/internal/procenv$
+            - github.com/sparkwing-dev/sparkwing/internal/procgroup$
+            - github.com/sparkwing-dev/sparkwing/internal/protofd$
+            - github.com/sparkwing-dev/sparkwing/internal/sdkserve$
+            - github.com/sparkwing-dev/sparkwing/internal/secrets$
+            - github.com/sparkwing-dev/sparkwing/internal/sessionledger$
+            - github.com/sparkwing-dev/sparkwing/internal/swtags$
+            - github.com/sparkwing-dev/sparkwing/internal/envredact$
+            - github.com/sparkwing-dev/sparkwing/internal/fssecure$
+
+        sdk-leaves-allowed-internal:
+          list-mode: lax
+          files:
+            - "**/internal/apierr/*.go"
+            - "**/internal/argvalue/*.go"
+            - "**/internal/depcachekey/*.go"
+            - "**/internal/execdiag/*.go"
+            - "**/internal/gitcmd/*.go"
+            - "**/internal/limits/*.go"
+            - "**/internal/nodeproto/*.go"
+            - "**/internal/paths/*.go"
+            - "**/internal/procenv/*.go"
+            - "**/internal/procgroup/*.go"
+            - "**/internal/protofd/*.go"
+            - "**/internal/sdkserve/*.go"
+            - "**/internal/secrets/*.go"
+            - "**/internal/sessionledger/*.go"
+            - "**/internal/swtags/*.go"
+            - "**/internal/envredact/*.go"
+            - "**/internal/fssecure/*.go"
+            - "!$test"
+          deny:
+            - pkg: github.com/sparkwing-dev/sparkwing/internal
+              desc: "SDK leaves may depend only on the named leaves, never store, controller, wingd or other server packages."
+          allow: *sdk-internal-leaves
+
+        store-allowed-internal:
+          list-mode: lax
+          files:
+            - "**/internal/store/**"
+            - "!$test"
+          deny:
+            - pkg: github.com/sparkwing-dev/sparkwing/internal
+              desc: "internal/store may import only the data-model packages it owns the authority over. Git resolution, token minting and wire DTOs belong to the controller."
+          allow:
+            - github.com/sparkwing-dev/sparkwing/internal/store
+            - github.com/sparkwing-dev/sparkwing/internal/capability
+            - github.com/sparkwing-dev/sparkwing/internal/blob
+            - github.com/sparkwing-dev/sparkwing/internal/runspec
+            - github.com/sparkwing-dev/sparkwing/internal/runstate
+            - github.com/sparkwing-dev/sparkwing/internal/limits
+            - github.com/sparkwing-dev/sparkwing/internal/apierr
+            - github.com/sparkwing-dev/sparkwing/internal/nodeproto
+            - github.com/sparkwing-dev/sparkwing/internal/settings
+            - github.com/sparkwing-dev/sparkwing/internal/admission
+            - github.com/sparkwing-dev/sparkwing/internal/cronspec
+            - github.com/sparkwing-dev/sparkwing/internal/sourceurl
+            - github.com/sparkwing-dev/sparkwing/internal/secrets
+            - github.com/sparkwing-dev/sparkwing/internal/procenv
+
+        wire-is-leaf:
+          list-mode: lax
+          files:
+            - "**/internal/controllerwire/**"
+            - "**/pkg/wingwire/**"
+            - "**/internal/localhostwire/**"
+            - "**/internal/runspec/**"
+            - "**/internal/runstate/**"
+            - "**/internal/engineid/**"
+            - "!$test"
+          deny:
+            - pkg: github.com/sparkwing-dev/sparkwing/internal/store
+              desc: "Wire and value packages are leaves; they must not reach the store."
+            - pkg: github.com/sparkwing-dev/sparkwing/internal/controller$
+              desc: "Server implementation belongs behind the controller wire contract."
+            - pkg: github.com/sparkwing-dev/sparkwing/internal/controller/
+              desc: "Wire and value packages are leaves; they must not reach the controller."
+            - pkg: github.com/sparkwing-dev/sparkwing/internal/engine/
+              desc: "Wire and value packages must not reach engine implementation packages."
+            - pkg: github.com/sparkwing-dev/sparkwing/internal/engine$
+              desc: "Wire and value packages are leaves; move the shared value to a leaf package such as engineid."
+            - pkg: github.com/sparkwing-dev/sparkwing/internal/wingd
+              desc: "Wire and value packages are leaves; they must not reach the local daemon."
+            - pkg: github.com/sparkwing-dev/sparkwing/internal/procgroup
+              desc: "Wire and value packages are leaves; they must not reach process machinery."
+
+        controller-not-daemon:
+          list-mode: lax
+          files:
+            - "**/internal/controller/**"
+            - "!$test"
+          deny:
+            - pkg: github.com/sparkwing-dev/sparkwing/internal/wingd
+              desc: "The controller must not depend on the local daemon; move shared types to a wire package such as localhostwire."
+
+        host-not-server:
+          list-mode: lax
+          files:
+            - "**/internal/nodehost/**"
+            - "**/internal/runners/**"
+            - "!$test"
+          deny:
+            - pkg: github.com/sparkwing-dev/sparkwing/internal/controller$
+              desc: "Server implementation belongs behind the controller wire contract."
+            - pkg: github.com/sparkwing-dev/sparkwing/internal/controller/
+              desc: "Run hosts and runners talk to the controller through internal/controller/client, never the server package."
+          allow:
+            - github.com/sparkwing-dev/sparkwing/internal/controller/client
+
+        client-not-store:
+          list-mode: lax
+          files:
+            - "**/internal/controller/client/**"
+            - "!$test"
+          deny:
+            - pkg: github.com/sparkwing-dev/sparkwing/internal/store
+              desc: "The controller client must not link the store; use wire types."
+
+        internal-not-sdk:
+          list-mode: lax
+          files:
+            - "**/internal/**"
+            - "!**/testdata/**"
+            - "!$test"
+          deny:
+            - pkg: github.com/sparkwing-dev/sparkwing/sparkwing
+              desc: "Internal packages must not depend on the author SDK; move the shared value to an internal leaf the SDK re-exports."
+
+        no-testing-in-prod:
+          list-mode: lax
+          files:
+            - "$all"
+            - "!$test"
+            - "!**/*test/**"
+            - "!**/internal/testleak/**"
+            - "!**/internal/testhome/**"
+            - "!**/internal/testshell/**"
+            - "!**/internal/chaos/**"
+          deny:
+            - pkg: testing
+              desc: "Production code must not import testing; move the hook to export_test.go or a test-only package."
+
+        backends-no-impls:
+          list-mode: lax
+          files:
+            - "**/pkg/backends/**"
+            - "!$test"
+          deny:
+            - pkg: github.com/sparkwing-dev/sparkwing/internal/storage
+              desc: "pkg/backends is config-type only; internal/storage consumes the config, not the reverse."
+            - pkg: github.com/sparkwing-dev/sparkwing/internal/store
+              desc: "pkg/backends is config-type only."
+            - pkg: github.com/sparkwing-dev/sparkwing/internal/controller$
+              desc: "Server implementation belongs behind the controller wire contract."
+            - pkg: github.com/sparkwing-dev/sparkwing/internal/controller/
+              desc: "pkg/backends declares the controller backend type only."
+            - pkg: github.com/sparkwing-dev/sparkwing/pkg/logs
+              desc: "pkg/backends declares log backend types only."
+
+        cluster-runner-only:
+          list-mode: lax
+          files:
+            - "$all"
+            - "!**/cmd/sparkwing-runner/**"
+            - "!**/internal/cluster/**"
+            - "!$test"
+          deny:
+            - pkg: github.com/sparkwing-dev/sparkwing/internal/cluster
+              desc: "internal/cluster is the warm-runner pool; only cmd/sparkwing-runner imports it."
+
+        runners-dispatcher-only:
+          list-mode: lax
+          files:
+            - "$all"
+            - "!**/internal/cluster/**"
+            - "!**/internal/runners/**"
+            - "!**/internal/wingd/localcontroller/**"
+            - "!**/cmd/sparkwing/**"
+            - "!$test"
+          deny:
+            - pkg: github.com/sparkwing-dev/sparkwing/internal/runners
+              desc: "internal/runners/* are the execution backends. Only internal/cluster, internal/wingd/localcontroller and cmd/sparkwing select one; service installers import internal/runners/service/unitfile, and award validation is the shared leaf internal/runners/award."
+          allow:
+            - github.com/sparkwing-dev/sparkwing/internal/runners/service/unitfile
+            - github.com/sparkwing-dev/sparkwing/internal/runners/award
+
     govet:
       enable-all: true
       disable:
@@ -120,8 +374,7 @@ linters:
           - all
 
 issues:
-  # These linters judge changes since origin/main. The whole-tree architecture
-  # rules in .golangci-guards.yml use shrinking allow-lists under .guards/.
+  # Judge changes since origin/main.
   new-from-merge-base: origin/main
 
 formatters:

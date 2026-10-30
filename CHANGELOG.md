@@ -56,6 +56,8 @@ unlock.
 
 ### Removed
 
+- **checks (Breaking):** Removed `internal/guardcheck`, its `.guards/` allow-lists and standalone gate steps
+  Dependency rules run through depguard in `.golangci.yml`, including the fast push tier.
 - **cache (Breaking):** Removed binary-cache checkout owners, use counts, shared-entry counts and `related_entries` history
   `cache explain` retains the current build key and input digests. Save explanations to compare changes.
 - **controller (Breaking):** Removed the $100 admin grant guard and `--allow-large`

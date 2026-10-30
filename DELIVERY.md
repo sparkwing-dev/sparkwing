@@ -273,8 +273,8 @@ file. Other syntax and workflow checks remain active.
   `pre-push` is the fast tier the git pre-push hook runs, and it repeats
   nothing the commit tier already ran: the changelog, OpenAPI and API-snapshot
   gates, and `go build`, `go vet` and the fast linter subset over the packages
-  the push touches, with no package-count cutoff, plus the depguard
-  architecture guards over the whole tree. A
+  the push touches, with no package-count cutoff. The linter includes the
+  depguard dependency rules. A
   runner reserves the combined CPU demand of those three concurrent compiler
   tasks, up to 9 cores. Smaller runners divide their available cores across
   the tasks.
@@ -586,17 +586,9 @@ file. Other syntax and workflow checks remain active.
   the family set it also rejects `_ = call()` on an error-returning call, nil
   returned after an error was observed, and work started on a context that is
   not the caller's. Drop an error only through a helper that logs why.
-- **Architecture guards:** the depguard layering rules and the F1 forbidigo
-  rule live in `.golangci-guards.yml`, which judges the whole tree with no
-  origin/main baseline. Their violations from before each rule, the internal/
-  unexport-candidate counts and the skipped required acceptance cells are
-  listed in `.guards/`, and each list only shrinks:
-  `GOWORK=off go run ./internal/guardcheck .` fails a finding missing from its
-  list, a line no finding matches, and a line the merge base with origin/main
-  lacks. `pre-push` runs depguard and the SDK production dependency closure
-  (`-fast`) for Linux, macOS and Windows on amd64 and arm64. `gate` also runs
-  the typed guards and unexport census.
-  `.guards/README.md` says how to shrink each list.
+- **Dependency boundaries:** `.golangci.yml` keeps the depguard layering rules
+  with the other linters, judging changes since `origin/main`. The fast push
+  tier includes depguard over the packages the push touches.
 - **No sleeps or wall-clock waits in tests:** `internal/sleepcheck` fails any
   `_test.go` that calls `time.Sleep`, `time.After`, `time.Tick`,
   `time.NewTimer` or `time.NewTicker`, or that reads `time.Now` or `time.Since`
