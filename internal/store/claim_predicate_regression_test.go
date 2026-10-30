@@ -97,6 +97,7 @@ func TestClaimPredicateUsesCanonicalRepositoryRouting(t *testing.T) {
 	for _, display := range []string{"git@github.com:acme/repo.git", "https://github.com/acme/repo.git/"} {
 		t.Run(display, func(t *testing.T) {
 			s, demand := unitClaimFixture(t)
+			proveClaimFixtureRepository(t, s)
 			scoped := authorityRoot("scoped", "a")
 			scoped.Grants = []capability.Grant{capability.NodesClaim}
 			scoped.Repositories = []string{"github.com/acme/*"}
