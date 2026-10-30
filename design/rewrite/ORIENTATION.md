@@ -121,6 +121,8 @@ credential model in `docs/auth.md`, and the decision log
 | Rule | Owner | Guard test |
 | --- | --- | --- |
 | Job lifecycle | `internal/runners/launcher/job.go`: `BuildJob`; `internal/runners/launcher/sync.go`: `Launcher.Sync` | `internal/runners/launcher/launcher_test.go`: `TestSyncAdoptsLiveJobWithoutCreatingAnother`; `internal/runners/launcher/sync_batch_test.go` |
+| Unsupported Cloud sizes fail at intake or planning with the catalogue choices | `pkg/match/cloud_sizes.go`: `ValidateCloudSizeLabels`; `internal/settings/resolve.go`: `validNames` | `internal/settings/cloud_sizes_test.go`: `TestCloudSizeValidationAtRequestAndPlan` |
+| Working-tree sources require a local checkout before queueing; uploaded committed snapshots remain valid | `internal/runspec/seal.go`: `SealRequest` | `internal/store/source_intake_test.go`: `TestAdmissionRefusesRemoteWorkingTreeBeforeQueueing`; `internal/runspec/source_test.go`: `TestSourceSealPreservesLocalWorkingTreesAndRemoteSnapshots` |
 | Internal Cloud sync failures appear in pending plan status | `internal/store/launcher_sync_failure.go`: `Operator.RecordLauncherSyncFailure`; `internal/store/run_state.go`: `writeOwnerRecoveryTx` | `internal/controller/engine_launcher_failure_test.go` |
 | Node reuse labels (one run per node) | `internal/runners/launcher/node_team.go`: `usedTeamLabel`, `usedRunLabel`, `runNodeValue`; `internal/runners/launcher/boundary.go`: `KubernetesBoundary.Reserve` | `internal/runners/launcher/boundary_test.go`: `TestBoundaryReusesAWarmNodeOnlyWithinItsRun` |
 | Pod admission policy | `internal/runners/launcher/admission_policy.go` | `internal/runners/launcher/admission_policy_test.go`: `TestAdmissionPolicyOnAPIServer` (skips without `KUBEBUILDER_ASSETS`) |

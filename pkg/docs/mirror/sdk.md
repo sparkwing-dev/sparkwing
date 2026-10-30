@@ -365,6 +365,8 @@ Cloud offers `sparkwing-2cpu`, `sparkwing-4cpu`, `sparkwing-8cpu`,
 `sparkwing-16cpu`, `sparkwing-32cpu` and `sparkwing-64cpu`; an installation must
 price a size before it can award it. Billing uses that label's exact credit class.
 Without a size requirement, Cloud uses `sparkwing-2cpu`.
+Admission and planning refuse unsupported Cloud size labels and list the valid
+sizes, including when the label appears in a comma-separated alternative.
 The `sparkwing-` prefix belongs to Cloud. Requiring a Cloud size label selects
 a fresh, isolated Cloud pod. Self-hosted, personal and pool runners advertise
 their own sizes with other labels. Each selector term must match;

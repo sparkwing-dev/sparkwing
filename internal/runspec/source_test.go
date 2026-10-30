@@ -9,6 +9,19 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/envredact"
 )
 
+func TestSourceSealPreservesLocalWorkingTreesAndRemoteSnapshots(t *testing.T) {
+	for _, source := range []Source{
+		{WorkingTree: true, Location: SourceLocation{LocalCheckout: "/checkout", PipelineDir: ".sparkwing"}},
+		{CommittedCheckout: true, BundleDigest: Optional[string]{Set: true, Value: strings.Repeat("b", 64)}, Location: SourceLocation{RemoteURL: "https://github.com/acme/repo.git", PipelineDir: ".sparkwing"}},
+	} {
+		source.Ref = strings.Repeat("a", 40)
+		request := Request{Version: 1, Team: "team", Pipeline: "build", Mode: IntakeExecute, Dispatch: DispatchHost, Git: Git{Repository: Repository{Key: "gh:1"}, SHA: source.Ref}, Source: source}
+		if _, err := SealRequest(request, IntakeFacts{RunID: "run"}); err != nil {
+			t.Fatalf("valid source refused: %v", err)
+		}
+	}
+}
+
 func TestExecutableSealRequiresBothResolvedCommits(t *testing.T) {
 	property := func(execution, code string) bool {
 		request := Request{Version: 1, Team: "team", Pipeline: "build", Mode: IntakeExecute, Dispatch: DispatchHost, Git: Git{Repository: Repository{Key: "gh:1"}, SHA: execution}, Source: Source{Ref: code}}

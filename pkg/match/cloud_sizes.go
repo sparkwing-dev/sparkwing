@@ -65,3 +65,22 @@ const (
 func IsCloudSizeLabel(label string) bool {
 	return strings.HasPrefix(label, CloudSizeLabelPrefix) && strings.HasSuffix(label, CloudSizeLabelSuffix)
 }
+
+// ValidateCloudSizeLabels refuses reserved size labels outside the Cloud catalog.
+// Comma-separated alternatives follow the selector grammar.
+func ValidateCloudSizeLabels(selector []string) error {
+	sizes := CloudSizes()
+	labels := make([]string, len(sizes))
+	for i, size := range sizes {
+		labels[i] = size.Label
+	}
+	for _, term := range selector {
+		for _, alt := range strings.Split(term, ",") {
+			label := strings.TrimSpace(alt)
+			if IsCloudSizeLabel(label) && !slices.Contains(labels, label) {
+				return fmt.Errorf("unsupported Cloud size %q; valid sizes: %s", label, strings.Join(labels, ", "))
+			}
+		}
+	}
+	return nil
+}

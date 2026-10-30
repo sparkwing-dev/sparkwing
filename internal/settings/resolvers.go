@@ -297,6 +297,11 @@ func runnerSelection(in Inputs) (runspec.RunnerSelection, Origin, error) {
 	default:
 		err = invalid("runner", origin, "unknown runner selector")
 	}
+	if err == nil && value.Kind == runspec.RunnerLabel {
+		if sizeErr := validNames("runner", []string{value.Value}, origin); sizeErr != nil {
+			err = sizeErr
+		}
+	}
 	return value, origin, err
 }
 

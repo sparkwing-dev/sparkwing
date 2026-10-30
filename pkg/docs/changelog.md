@@ -27,6 +27,7 @@ unlock.
 
 ### Fixed
 
+- **Cloud:** Unsupported size labels fail at admission or planning with the valid catalogue sizes. Remote requests that mark source as a working tree without a local checkout fail at intake with snapshot instructions instead of repeatedly losing launcher leases. Uploaded committed snapshots remain supported.
 - **GitHub App:** Connection refusals show their reason without blaming GitHub ownership. An already-used or expired connection explains how to start again.
 
 - **schedules:** Invalid cron overrides name the failing field and show a valid hourly example in CLI and controller errors

@@ -39,6 +39,10 @@ final bundle and source metadata for configured local secret values and uploads 
 through the controller's signed storage binding before admitting the run.
 Source acquisition ignores Git replacement objects, so a selected commit ID
 keeps its original contents.
+Remote API submissions must describe uploaded snapshots as committed checkouts
+with their bundle digest. The `source.working_tree` field requires a local
+checkout and is refused at intake when one is absent. The CLI's
+`pipeline trigger --working-tree` prepares the remote snapshot automatically.
 Sparkwing Cloud uses the launcher for plan, evaluation and work Jobs. Every Job
 runs a rootful DinD sidecar inside its user-namespaced pod, never privileged and
 with namespaced capabilities only, on a team-dedicated node, with

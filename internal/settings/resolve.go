@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"maps"
 	"strings"
+
+	"github.com/sparkwing-dev/sparkwing/pkg/match"
 )
 
 // Error supplies a stable message for the shared apierr translation boundary.
@@ -124,6 +126,11 @@ func mergeArgs(in Inputs) (map[string]string, Origin, error) {
 }
 
 func validNames(key string, values []string, origin Origin) error {
+	if key == "requires" || key == "runner" {
+		if err := match.ValidateCloudSizeLabels(values); err != nil {
+			return invalid(key, origin, err.Error())
+		}
+	}
 	for _, name := range values {
 		if strings.TrimSpace(name) == "" || strings.ContainsAny(name, "\x00\r\n") {
 			return invalid(key, origin, "names must be nonempty and contain no control characters")
