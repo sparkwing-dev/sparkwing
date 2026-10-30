@@ -217,6 +217,16 @@ func TestScheduleHTTPInvalidInputAndBackend(t *testing.T) {
 	}
 }
 
+func TestScheduleHTTPInvalidCronNamesFieldAndExample(t *testing.T) {
+	f := newScheduleHTTPFixture(t)
+	w := f.call(t, "PUT", scheduleHTTPPath+"/override", `{"cron":"61 * * * *"}`, "", 400, nil)
+	for _, want := range []string{"bad_request", "cron", "minute field", "0-59", "0 * * * *"} {
+		if !strings.Contains(w.Body.String(), want) {
+			t.Errorf("response = %s, want %q", w.Body, want)
+		}
+	}
+}
+
 func TestScheduleHTTPRetainedHistoryAndCounts(t *testing.T) {
 	f := newScheduleHTTPFixture(t)
 	var pushed controllerwire.ScheduleRepoWritten

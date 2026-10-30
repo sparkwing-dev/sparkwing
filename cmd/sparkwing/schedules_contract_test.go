@@ -164,6 +164,22 @@ func TestScheduleManagementRejectsInvalidSelectionsAndEdits(t *testing.T) {
 	}
 }
 
+func TestScheduleManagementCronErrorNamesFieldAndExample(t *testing.T) {
+	inv := scheduleInvocation(t, "set", "--schedule", "s1", "--cron", "61 * * * *")
+	f := scheduleFake()
+	var out bytes.Buffer
+	err := manageSchedules(t.Context(), inv, f, &out)
+	var usage *clisurface.UsageError
+	if !errors.As(err, &usage) || len(f.calls) > 0 {
+		t.Fatalf("invalid cron: error=%v calls=%v", err, f.calls)
+	}
+	for _, want := range []string{"cron", "minute field", "0-59", `example: "0 * * * *"`} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error = %q, want %q", err, want)
+		}
+	}
+}
+
 func TestScheduleManagementListKeepsSelectionMetadataAndShowKeepsDetails(t *testing.T) {
 	f := scheduleFake()
 	row := f.rows["s1"]
