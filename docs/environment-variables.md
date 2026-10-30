@@ -108,12 +108,6 @@ Sparkwing code. See [node protocol](node-protocol.md).
 | `CLICOLOR_FORCE` | terminal convention |
 | `NO_COLOR` | terminal convention |
 
-## Undecided
-
-| Variable | Why it stays |
-|---|---|
-| `SPARKS_GO_BIN` | The `go` binary the sparks resolver runs when it writes a pipeline's module overlay; nothing sets it. |
-
 ## Process environment policy
 
 The registry owns these classifications. A trailing `*` denotes a name family.

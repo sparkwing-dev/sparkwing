@@ -12,7 +12,7 @@ import (
 
 func init() {
 	exe, _ := os.Executable()
-	if filepath.Base(exe) != "sparks-go-helper.exe" || os.Getenv("SPARKWING_SPARKS_GO_HELPER") != "1" {
+	if filepath.Base(exe) != "go.exe" || os.Getenv("SPARKWING_SPARKS_GO_HELPER") != "1" {
 		return
 	}
 	if real := os.Getenv("SPARKWING_SPARKS_REAL_GO"); real != "" {
@@ -54,7 +54,7 @@ func nativeSparksGo(t *testing.T, real, counter string) (string, bool) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	bin := filepath.Join(t.TempDir(), "sparks-go-helper.exe")
+	bin := filepath.Join(t.TempDir(), "go.exe")
 	if err := os.WriteFile(bin, raw, 0o755); err != nil {
 		t.Fatal(err)
 	}

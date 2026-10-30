@@ -136,7 +136,15 @@ func fakeGo(t *testing.T) {
 	t.Helper()
 	if runtime.GOOS == "windows" {
 		t.Setenv("SPARKWING_TEST_NATIVE_FAKE_GO", "1")
-		t.Setenv("SPARKS_GO_BIN", os.Args[0])
+		raw, err := os.ReadFile(os.Args[0])
+		if err != nil {
+			t.Fatal(err)
+		}
+		dir := t.TempDir()
+		if err := os.WriteFile(filepath.Join(dir, "go.exe"), raw, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
 		return
 	}
 	dir := t.TempDir()
@@ -155,7 +163,7 @@ func fakeGo(t *testing.T) {
 	if err := os.WriteFile(bin, []byte(script), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	t.Setenv("SPARKS_GO_BIN", bin)
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
 }
 
 func init() {

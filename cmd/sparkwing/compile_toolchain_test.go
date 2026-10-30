@@ -27,7 +27,6 @@ exit 1
 		t.Fatal(err)
 	}
 	t.Setenv("PATH", filepath.Dir(bin)+string(os.PathListSeparator)+os.Getenv("PATH"))
-	t.Setenv("SPARKS_GO_BIN", bin)
 	t.Setenv("GOTOOLCHAIN", "local")
 	err := resolveSparks(context.Background(), dir, false)
 	var floorError *gotoolchain.Error

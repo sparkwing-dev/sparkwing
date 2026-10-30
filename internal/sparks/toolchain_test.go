@@ -27,7 +27,6 @@ func resolveFloorFixture(t *testing.T, setting, floor, listBody, downloadBody st
 		}
 	}
 	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
-	t.Setenv("SPARKS_GO_BIN", filepath.Join(dir, "go"))
 	t.Setenv("GOTOOLCHAIN", setting)
 	t.Setenv("GOWORK", "off")
 	t.Setenv("GOPRIVATE", "example.com/private")

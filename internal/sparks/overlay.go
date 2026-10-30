@@ -20,13 +20,6 @@ const overlaySumfileName = ".resolved.sum"
 
 const goModFilename = "go.mod"
 
-func goBin() string {
-	if v := os.Getenv("SPARKS_GO_BIN"); v != "" {
-		return v
-	}
-	return "go"
-}
-
 func writeOverlay(ctx context.Context, sparkwingDir string, resolved map[string]string) (bool, error) {
 	ctx = gotoolchain.WithSession(ctx, nil, nil)
 	if sparkwingDir == "" {
@@ -151,7 +144,7 @@ func materializeSum(ctx context.Context, workDir, overlayPath, sumPath string) e
 	if err != nil {
 		return err
 	}
-	cmd := procenv.ControlCommandContext(ctx, env, goBin(), "mod", "download",
+	cmd := procenv.ControlCommandContext(ctx, env, "go", "mod", "download",
 		"-modfile="+overlayPath, "all")
 	cmd.Dir = workDir
 

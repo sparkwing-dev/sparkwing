@@ -56,6 +56,8 @@ unlock.
 
 ### Removed
 
+- **cli (Breaking):** Removed `SPARKS_GO_BIN`
+  Select the Go executable through `PATH` for sparks resolution and overlay updates.
 - **controller (Breaking):** Removed `--live-log-node-kb`, `--live-log-total-mb`, `--live-log-max-nodes` and `--live-log-idle`
   Live buffers retain fixed limits of 512 KiB per node, 64 MiB total, 1,024 nodes and a 10-minute idle timeout.
 
