@@ -2,7 +2,7 @@ package controller
 
 import (
 	"context"
-	"errors"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"strings"
@@ -11,7 +11,6 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
-	"github.com/sparkwing-dev/sparkwing/internal/controller/client"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/egress"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
@@ -120,9 +119,6 @@ func TestJSONLogSearchStopsAtTimeBudget(t *testing.T) {
 }
 
 func TestJSONLogScansTakeTheDownloadSlotFirst(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: 180.3s measured in the short class; the full suite runs it")
-	}
 	logs, st, _, _ := budgetedLogSegments(t)
 	options, _, server := memberObservationOptions(t, st, logs.objs.(blob.ObjectBackend))
 	server.WithEgressMeter(egress.New(egress.Config{MaxDownloadsPerPrincipal: 1}))
@@ -131,16 +127,30 @@ func TestJSONLogScansTakeTheDownloadSlotFirst(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer release()
-	reader, err := client.NewLogReader(options)
+	bearer, err := options.Bearer(t.Context())
 	if err != nil {
 		t.Fatal(err)
 	}
-	var refused *apierr.Error
-	if _, err := reader.SearchLogs(t.Context(), controllerwire.LogSearchQuery{Runs: controllerwire.RunQuery{Limit: 1}, Pattern: "fatal"}); !errors.As(err, &refused) || refused.Code != apierr.RateLimited {
-		t.Fatalf("search with the slot held = %v", err)
-	}
-	if _, err := reader.ReadLogs(t.Context(), "run", controllerwire.LogQuery{Grep: "fatal"}); !errors.As(err, &refused) || refused.Code != apierr.RateLimited {
-		t.Fatalf("read with the slot held = %v", err)
+	// bug: the typed client retries rate limits, but the held slot cannot become free during this assertion.
+	for _, path := range []string{"/api/v1/runs/grep?limit=1&grep=fatal", "/api/v1/runs/run/logs/search?grep=fatal"} {
+		r, err := http.NewRequestWithContext(t.Context(), http.MethodGet, "http://local"+path, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		r.Header.Set("Authorization", "Bearer "+bearer)
+		r.Header.Set("Accept", "application/json")
+		response, err := options.HTTP.Do(r)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var refused struct {
+			Error *apierr.Error `json:"error"`
+		}
+		err = json.NewDecoder(response.Body).Decode(&refused)
+		_ = response.Body.Close()
+		if err != nil || response.StatusCode != http.StatusTooManyRequests || refused.Error == nil || refused.Error.Code != apierr.RateLimited {
+			t.Fatalf("%s with the slot held = HTTP %d, %+v, %v", path, response.StatusCode, refused.Error, err)
+		}
 	}
 }
 
