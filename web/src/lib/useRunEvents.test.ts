@@ -10,7 +10,7 @@ describe("listenForRunEvents", () => {
     const heard: string[] = [];
     listenForRunEvents({ addEventListener: (kind) => heard.push(kind) }, () => {});
     assert.deepEqual(heard, produced);
-    for (const kind of ["run_requeued", "debug.paused", "debug.resumed", "secret_preflight_refused", "job_started"]) {
+    for (const kind of ["run_dry_run", "run_requeued", "debug.paused", "debug.resumed", "secret_preflight_refused", "job_started"]) {
       assert.ok(heard.includes(kind), kind);
     }
   });

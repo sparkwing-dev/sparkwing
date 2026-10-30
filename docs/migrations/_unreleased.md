@@ -51,7 +51,9 @@ v0.68 replaces the store. It cannot read a store written by v0.67 or earlier,
 and there is no import tool. Nothing in the old store carries over: run
 history, logs, caches, secrets and tokens, and on a server also teams, members,
 invitations, credits and schedules.
-The new store's schema baseline moves to version 25.
+The new store's schema baseline moves to version 26. Successful previews use
+the terminal `dry_run` status and emit `run_dry_run`; clients must recognize
+that status as completed without treating it as an applied success.
 
 When v0.68 finds an old store it refuses to start, names the store, and leaves
 it unchanged. It never deletes or rewrites it.

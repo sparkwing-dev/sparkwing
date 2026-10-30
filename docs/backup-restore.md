@@ -53,11 +53,11 @@ the store in place.
 
 <!-- BEGIN GENERATED SCHEMA ERRORS -->
 ```text
-sparkwing: store schema version 24 is older than this binary (expects 25); back up the store and use a binary matching it; this build cannot upgrade it; only for a disposable store, delete <path> and start again
+sparkwing: store schema version 25 is older than this binary (expects 26); back up the store and use a binary matching it; this build cannot upgrade it; only for a disposable store, delete <path> and start again
 
-sparkwing: store schema version 24 is older than this binary (expects 25); back up the store and use a binary matching it; this build cannot upgrade it; only for a disposable store, drop the database and start again
+sparkwing: store schema version 25 is older than this binary (expects 26); back up the store and use a binary matching it; this build cannot upgrade it; only for a disposable store, drop the database and start again
 
-sparkwing: store schema version 26 is newer than this binary (expects 25); start a binary matching the store, or restore a backup matching this binary into a separate database
+sparkwing: store schema version 27 is newer than this binary (expects 26); start a binary matching the store, or restore a backup matching this binary into a separate database
 
 sparkwing: ~/.sparkwing/state.db is a store from Sparkwing v0.67 or earlier (schema version 94); this release starts a new store and cannot read or import it, and left the old one unchanged; move it aside and run again: mv ~/.sparkwing/state.db ~/.sparkwing/state.db.v067 (move ~/.sparkwing/state.db-wal and ~/.sparkwing/state.db-shm with it if they exist)
 

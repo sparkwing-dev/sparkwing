@@ -114,3 +114,25 @@ func TestEngineSnapshotRetainsSealedGuardRefusal(t *testing.T) {
 		t.Fatalf("cancelled guard: %+v, %v", got, err)
 	}
 }
+
+func TestEngineSnapshotRetainsSealedDryRun(t *testing.T) {
+	server, _ := engineRuntimeStore(t)
+	owner := engineRuntimeClaim(t, server, capability.UnitTrigger)
+	spec, err := json.Marshal(runspec.Spec{Resolved: runspec.Resolved{Settings: runspec.ExecutionSettings{Options: runspec.Options{DryRun: runspec.Setting[bool]{Optional: runspec.Optional[bool]{Set: true, Value: true}}}}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	engineSQL(t, server.Store, `UPDATE runs SET plan_json=?,plan_hash='plan',sealed_at=1,spec_json=?,spec_hash='spec'`, []byte(`{"jobs":[]}`), spec)
+	got, err := server.snapshot(t.Context(), owner)
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, err := json.Marshal(got)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var wire map[string]any
+	if err := json.Unmarshal(raw, &wire); err != nil || wire["dry_run"] != true {
+		t.Fatalf("scheduling snapshot lost sealed dry-run mode: %s %v", raw, err)
+	}
+}

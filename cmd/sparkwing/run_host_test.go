@@ -179,7 +179,7 @@ func TestLocalRunEnsuresControllerAfterPreparationBeforeIntake(t *testing.T) {
 }
 
 func TestLocalForegroundRunReportsCommittedOutcome(t *testing.T) {
-	for _, outcome := range []string{"success", "failed", "cancelled"} {
+	for _, outcome := range []string{"success", "dry_run", "failed", "cancelled"} {
 		t.Run(outcome, func(t *testing.T) {
 			var calls []string
 			deps := localRuntimeFor(t, localTestAward(t), false, &calls)
@@ -199,7 +199,7 @@ func TestLocalForegroundRunReportsCommittedOutcome(t *testing.T) {
 			var out bytes.Buffer
 			flags, args := parseRunFlagsArgs([]string{"--sw-output=json", "--", "--password=private-value"})
 			err := runLocalCommand(t.Context(), "ci", flags, args, &out, deps)
-			if (err == nil) != (outcome == "success") {
+			if (err == nil) != (outcome == "success" || outcome == "dry_run") {
 				t.Fatalf("outcome=%s error=%v", outcome, err)
 			}
 			var terminal struct {
@@ -930,4 +930,65 @@ func TestLocalRunRequestReservesOnlyForegroundIntake(t *testing.T) {
 			t.Fatalf("detached=%t foreground=%t", detached, request.Request.LocalForeground)
 		}
 	}
+}
+
+func TestLocalRunInterruptCancelsAndWaitsForTerminalRun(t *testing.T) {
+	var calls []string
+	deps := localRuntimeFor(t, localTestAward(t), false, &calls)
+	signals := make(chan os.Signal, 1)
+	deps.interrupts = signals
+	cancelled := make(chan struct{})
+	resolve := deps.resolve
+	deps.resolve = func(ctx context.Context, options localRunOptions) (localRunRuntime, error) {
+		runtime, err := resolve(ctx, options)
+		runtime.controller = localInterruptController{Controller: runtime.controller, cancel: func(ctx context.Context, run string, request controllerwire.CancelRequest) (controllerwire.Applied, error) {
+			if ctx.Err() != nil || run != "local-run" || request.Reason == "" {
+				t.Errorf("cancellation lost live context or run identity: %s %+v %v", run, request, ctx.Err())
+			}
+			close(cancelled)
+			return controllerwire.Applied{}, nil
+		}}
+		runtime.follow = func(ctx context.Context, _, _ string, _ io.Writer) error {
+			select {
+			case <-cancelled:
+				return nil
+			case <-ctx.Done():
+				return ctx.Err()
+			}
+		}
+		bind := runtime.bind
+		runtime.bind = func(ctx context.Context, award controllerwire.ClaimedUnit) (hereHostSession, error) {
+			session, err := bind(ctx, award)
+			session.host = hereTestHost(func(ctx context.Context, _ nodehost.RunInput) (nodehost.RunCompletion, error) {
+				signals <- os.Interrupt
+				select {
+				case <-cancelled:
+					if ctx.Err() != nil {
+						t.Error("first interrupt abandoned owner finalization")
+					}
+					return nodehost.RunCompletion{Outcome: "cancelled"}, nil
+				case <-ctx.Done():
+					return nodehost.RunCompletion{}, ctx.Err()
+				}
+			})
+			return session, err
+		}
+		return runtime, err
+	}
+	ctx, stop := context.WithTimeout(t.Context(), time.Second)
+	defer stop()
+	var out bytes.Buffer
+	err := runLocalCommand(ctx, "ci", runFlags{outputFormat: "json"}, []string{"--password", "private-value"}, &out, deps)
+	if err == nil || strings.Contains(err.Error(), "incomplete") || !strings.Contains(out.String(), `"status":"cancelled"`) {
+		t.Fatalf("interrupt did not finish cancelled run: output=%s error=%v", &out, err)
+	}
+}
+
+type localInterruptController struct {
+	controllerwire.Controller
+	cancel func(context.Context, string, controllerwire.CancelRequest) (controllerwire.Applied, error)
+}
+
+func (c localInterruptController) Cancel(ctx context.Context, run string, request controllerwire.CancelRequest) (controllerwire.Applied, error) {
+	return c.cancel(ctx, run, request)
 }

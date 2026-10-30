@@ -32,6 +32,21 @@ func (h *OwnerHost) schedule(parent context.Context, input RunInput, accepted Ac
 	var workers sync.WaitGroup
 	defer func() { cancel(context.Canceled); workers.Wait() }()
 	completed := make(chan ownerExecution)
+	var slots chan struct{}
+	if limit := spec.Resolved.Settings.Options.Workers.Value; limit > 0 {
+		slots = make(chan struct{}, limit)
+	}
+	execute := func(ctx context.Context, request store.ReconcileRequest) error {
+		if slots != nil {
+			select {
+			case slots <- struct{}{}:
+				defer func() { <-slots }()
+			case <-ctx.Done():
+				return context.Cause(ctx)
+			}
+		}
+		return h.execute(ctx, input, accepted, entry, request)
+	}
 	active := map[string]context.CancelCauseFunc{}
 	releasing := map[string]*atomic.Bool{}
 	debugged := map[string]int64{}
@@ -55,7 +70,7 @@ func (h *OwnerHost) schedule(parent context.Context, input RunInput, accepted Ac
 				err = nil
 			}
 			var cancelled *lease.CancelError
-			if errors.As(context.Cause(workCtx), &cancelled) && waitFailure(err, cancelled) == nil {
+			if errors.As(context.Cause(workCtx), &cancelled) {
 				err = h.executionError(ctx, input.RunID, ownerExecution{nodeID, err})
 			}
 			select {
@@ -160,7 +175,7 @@ func (h *OwnerHost) schedule(parent context.Context, input RunInput, accepted Ac
 				launch(action.NodeID, func(ctx context.Context) error {
 					return h.release(ctx, input, accepted, entry, row, action.Kind, func(ctx context.Context, request store.ReconcileRequest) error {
 						releasePending.Store(false)
-						return h.execute(ctx, input, accepted, entry, request)
+						return execute(ctx, request)
 					})
 				})
 				continue
@@ -193,7 +208,7 @@ func (h *OwnerHost) schedule(parent context.Context, input RunInput, accepted Ac
 			}
 			if row.ReadyAt != nil || row.ClaimedBy != "" {
 				launch(string(row.Ref.NodeID), func(ctx context.Context) error {
-					return h.execute(ctx, input, accepted, entry, store.ReconcileRequest{Ref: row.Ref, Actor: input.Owner, Policy: runstate.SourceNone})
+					return execute(ctx, store.ReconcileRequest{Ref: row.Ref, Actor: input.Owner, Policy: runstate.SourceNone})
 				})
 			}
 		}
@@ -378,7 +393,8 @@ func (h *OwnerHost) executeAward(ctx context.Context, run RunInput, accepted Acc
 	workCtx, stop := keepNode(ctx, h.Lease, h.Store, result.Node.Ref, executorActor(input))
 	defer stop()
 	if err := context.Cause(workCtx); err != nil {
-		return err
+		err = claimSetupFailure(workCtx, input, err, h.Masker.Mask, h.Store.TransitionNode)
+		return h.executionError(ctx, accepted.RunID, ownerExecution{nodeID: input.NodeID, err: err})
 	}
 	admitted := false
 	err = h.executionAdmission.claimedNode(workCtx, input, func(ctx context.Context) error {
@@ -426,7 +442,7 @@ func (h *OwnerHost) finish(ctx context.Context, input RunInput, decision store.S
 		return RunCompletion{}, err
 	}
 	switch runstate.RunState(decision.Outcome) {
-	case runstate.RunSuccess, runstate.RunFailed, runstate.RunCancelled:
+	case runstate.RunSuccess, runstate.RunDryRun, runstate.RunFailed, runstate.RunCancelled:
 	default:
 		return RunCompletion{}, errors.New("schedule returned an invalid run verdict")
 	}

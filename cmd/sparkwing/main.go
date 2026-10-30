@@ -458,11 +458,11 @@ func resolveTTYAwareOutput(outputFormat, cmdPath string) (string, error) {
 }
 
 func isTerminalRunStatus(s string) bool {
-	return s == "success" || s == "failed" || s == "cancelled"
+	return s == "success" || s == "dry_run" || s == "failed" || s == "cancelled"
 }
 
 func statusExitCode(status string) error {
-	if status == "success" {
+	if status == "success" || status == "dry_run" {
 		return nil
 	}
 	return exitErrorf(1, "run status: %s", status)

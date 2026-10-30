@@ -36,6 +36,8 @@ func githubCheckConclusion(runStatus string) string {
 	switch runStatus {
 	case "success":
 		return "success"
+	case "dry_run":
+		return "neutral"
 	case "cancelled":
 		return "cancelled"
 	case "timed_out":
@@ -215,6 +217,8 @@ func githubCheckTitle(conclusion string) string {
 	switch conclusion {
 	case "success":
 		return "Passed"
+	case "neutral":
+		return "Dry run completed"
 	case "cancelled":
 		return "Cancelled"
 	case "timed_out":
@@ -288,6 +292,8 @@ func githubCommitState(runStatus string) (state, description string) {
 		return "pending", "Sparkwing pipeline is running"
 	case "success":
 		return "success", "Sparkwing pipeline passed"
+	case "dry_run":
+		return "success", "Sparkwing dry run completed"
 	case "failed", "timed_out":
 		return "failure", "Sparkwing pipeline failed"
 	default:

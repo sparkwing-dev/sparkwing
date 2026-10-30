@@ -19,7 +19,9 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controller/client"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
+	"github.com/sparkwing-dev/sparkwing/internal/limits"
 	"github.com/sparkwing-dev/sparkwing/internal/quicktest"
+	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
 )
 
 func TestLogTreeTraversesEveryTenantDescendantProperty(t *testing.T) {
@@ -284,4 +286,57 @@ func appendSubjectPage(ctx context.Context, reader segmentLogs, subject blob.Log
 	budget, cancel := newLogBudget(ctx)
 	defer cancel()
 	return appendSubjectLines(reader, subject, q, 0, pattern, cursor, page, budget)
+}
+
+func TestPersistedLogPageEndsUnsealedTerminalObservationAfterGrace(t *testing.T) {
+	for _, kind := range []string{"job_attempt", "owner_unit"} {
+		for _, test := range []struct {
+			name                         string
+			age                          time.Duration
+			terminal, sealed, incomplete bool
+		}{
+			{"running", 2 * limits.LogSealGrace, false, false, false},
+			{"tail grace", limits.LogSealGrace - time.Nanosecond, true, false, false},
+			{"exact grace", limits.LogSealGrace, true, false, true},
+			{"abandoned", 2 * limits.LogSealGrace, true, false, true},
+			{"sealed", 2 * limits.LogSealGrace, true, true, false},
+		} {
+			t.Run(kind+"/"+test.name, func(t *testing.T) {
+				logs, _, st := committedDashboardLogs(t, []byte("tail\n"))
+				now := teststore.Now(st)
+				if kind == "owner_unit" {
+					completeness := "open"
+					if test.sealed {
+						completeness = "complete"
+					}
+					owner := blob.LogSubject{Kind: blob.LogOwnerUnit, Team: "a", RunID: "run", Unit: &blob.LogUnit{Kind: blob.LogTrigger, Generation: 1}}
+					encoded, err := json.Marshal(owner)
+					if err != nil {
+						t.Fatal(err)
+					}
+					engineSQL(t, st, `INSERT INTO log_streams(team,run_id,id,subject_kind,generation,unit_kind,prefix,retention_class,completeness,created_at,updated_at) VALUES ('a','run',?,'owner_unit',1,'trigger','fixture','r30',?,1,1)`, fmt.Sprintf("%x", sha256.Sum256(encoded)), completeness)
+				} else if !test.sealed {
+					engineSQL(t, st, `UPDATE log_streams SET completeness='open',sealed_at=NULL WHERE team='a' AND run_id='run'`)
+				}
+				if test.terminal {
+					engineSQL(t, st, `UPDATE runs SET status='failed',finished_at=? WHERE team='a' AND id='run'`, now.Add(-test.age).UnixNano())
+				}
+				reader, _ := memberLogSearchReader(t, st, logs.objs.(blob.ObjectBackend))
+				page, err := reader.ReadLogs(t.Context(), "run", controllerwire.LogQuery{NoEvents: true})
+				if test.incomplete {
+					if err != nil || len(page.Records) != 1 || page.Complete {
+						t.Fatalf("abandoned logs lost their committed tail: %+v %v", page, err)
+					}
+					page, err = reader.ReadLogs(t.Context(), "run", controllerwire.LogQuery{NoEvents: true, Cursor: page.NextCursor})
+					if err == nil || !strings.Contains(err.Error(), "logs incomplete: the runner never sealed this log") {
+						t.Fatalf("abandoned logs kept observation open: %+v %v", page, err)
+					}
+					return
+				}
+				if err != nil || page.Complete != (test.terminal && test.sealed) || len(page.Records) != 1 {
+					t.Fatalf("grace/seal verdict: %+v %v", page, err)
+				}
+			})
+		}
+	}
 }

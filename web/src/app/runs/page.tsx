@@ -131,6 +131,8 @@ function statusDot(status: string): string {
     case "success":
     case "complete":
       return "bg-green-400";
+    case "dry_run":
+      return "bg-violet-400";
     case "failed":
       return "bg-red-400";
     case "running":
@@ -1211,7 +1213,7 @@ function Pipelines({ pivotTabs }: { pivotTabs: React.ReactNode }) {
                 kind="runs"
                 items={topLevel.map((r) => ({
                   id: r.id,
-                  label: `${r.repo || r.github_repo || "unknown"} / ${r.pipeline} / ${r.git_branch || "unknown branch"} / ${fmtFullDate(r.started_at)}`,
+                  label: `${r.repo || r.github_repo || "unknown"} / ${r.pipeline} / ${r.git_branch || "unknown branch"} / ${fmtFullDate(r.started_at)} / ${r.status === "dry_run" ? "dry run" : r.status}`,
                   dotClass: statusDot(r.status),
                 }))}
                 selectedID={selectedRun}
@@ -2391,11 +2393,12 @@ const FullRunRow = memo(function FullRunRow({
           facet="status"
           value={r.status}
           ctx={ctx}
-          tooltip={`Status: ${r.status}`}
+          tooltip={`Status: ${r.status === "dry_run" ? "dry run" : r.status}`}
         >
           <span
             className={`inline-block align-middle w-2.5 h-2.5 rounded-full shrink-0 ${statusDot(r.status)}`}
           />
+          {r.status === "dry_run" && <StatusLabel status={r.status} />}
         </FilterableValue>
         <FilterableValue
           facet="repo"
@@ -2591,7 +2594,7 @@ const CompactFullRunRow = memo(function CompactFullRunRow({
     return "";
   };
 
-  const fullTitle = `${r.status.toUpperCase()} · ${repo}/${r.pipeline}${r.git_branch ? ` · ⎇ ${r.git_branch}` : ""}${sha7 ? ` · ${sha7}` : ""}${r.trigger_source ? ` · trigger: ${r.trigger_source}` : ""}\nStarted ${fmtFullDate(r.started_at)}${r.finished_at ? ` · Finished ${fmtFullDate(r.finished_at)}` : ""}`;
+  const fullTitle = `${r.status === "dry_run" ? "DRY RUN" : r.status.toUpperCase()} · ${repo}/${r.pipeline}${r.git_branch ? ` · ⎇ ${r.git_branch}` : ""}${sha7 ? ` · ${sha7}` : ""}${r.trigger_source ? ` · trigger: ${r.trigger_source}` : ""}\nStarted ${fmtFullDate(r.started_at)}${r.finished_at ? ` · Finished ${fmtFullDate(r.finished_at)}` : ""}`;
   const datePrefix = fmtDatePrefix(r.started_at);
   const [repoShort, pipelineShort, branchShort] = waterFill(
     [repo, r.pipeline, r.git_branch || ""],
@@ -2608,6 +2611,7 @@ const CompactFullRunRow = memo(function CompactFullRunRow({
           <span
             className={`inline-block align-middle w-2.5 h-2.5 rounded-full shrink-0 ${statusDot(r.status)} ${styleFor("status", r.status)}`}
           />
+          {r.status === "dry_run" && <StatusLabel status={r.status} />}
           <span
             className={`text-cyan-400/70 min-w-0 truncate ${styleFor("repo", repo)}`}
           >

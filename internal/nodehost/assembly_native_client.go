@@ -15,6 +15,7 @@ import (
 
 // WithClient binds native services to the authenticated controller's common transports.
 func WithClient(cfg NativeConfig, c *client.LocalHostClient) NativeConfig {
+	cfg.ReadFailure = c.ReadFailure
 	if _, remote := cfg.Store.(*RemoteHostStore); remote {
 		cfg.ExpansionActor = func(ctx context.Context, input RunInput, row runstate.NodeRow) (runstate.Actor, error) {
 			principal, err := cfg.Refresh(ctx)

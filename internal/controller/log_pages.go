@@ -21,6 +21,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/egress"
+	"github.com/sparkwing-dev/sparkwing/internal/limits"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
@@ -209,6 +210,7 @@ func (s *Server) readLogPage(ctx context.Context, tenant *store.Tenant, reader s
 	budget, cancel := newLogBudget(ctx)
 	defer cancel()
 	page := controllerwire.LogPage{Records: []controllerwire.LogRecord{}, Complete: true}
+	unsealed := false
 	var pattern *regexp.Regexp
 	if q.Grep != "" {
 		var err error
@@ -231,7 +233,8 @@ func (s *Server) readLogPage(ctx context.Context, tenant *store.Tenant, reader s
 		if err != nil {
 			return page, err
 		}
-		page.Complete = page.Complete && view.Snapshot.Run.FinishedAt != nil
+		previousComplete := page.Complete
+		page.Complete = view.Snapshot.Run.FinishedAt != nil
 		if q.Tree {
 			filter := store.RunFilter{ParentRunID: run, Limit: 100}
 			for {
@@ -273,9 +276,16 @@ func (s *Server) readLogPage(ctx context.Context, tenant *store.Tenant, reader s
 				return page, err
 			}
 		}
+		if finished := view.Snapshot.Run.FinishedAt; finished != nil && !page.Complete && !view.Snapshot.StoreNow.Before(finished.Add(limits.LogSealGrace)) {
+			unsealed = true
+		}
+		page.Complete = previousComplete && page.Complete
 		if page.Truncated {
 			break
 		}
+	}
+	if unsealed && !page.Truncated && len(page.Records) == 0 {
+		return page, &apierr.Error{Code: apierr.Conflict, Message: "logs incomplete: the runner never sealed this log"}
 	}
 	encoded, err := json.Marshal(cursor)
 	if err != nil {

@@ -10,7 +10,6 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/lease"
-	"github.com/sparkwing-dev/sparkwing/internal/limits"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
@@ -195,8 +194,7 @@ func claimSetupFailure(ctx context.Context, input NodeInput, failure error, mask
 		result.Outcome, result.Reason = runstate.NodeCancelled, string(apierr.ReasonCancelled)
 	}
 	result = recordNodeFailure(input.NodeID, result, mask)
-	reportCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), limits.HeartbeatTimeout)
-	defer cancel()
+	reportCtx := lease.ExecutionContext(ctx)
 	_, err := transition(reportCtx, store.ReportNode{Ref: runspec.NodeRef{RunID: runspec.RunID(input.Accepted.RunID), NodeID: runspec.NodeID(input.NodeID)}, Actor: executorActor(input), SourceAttempt: &input.Attempt, Result: &result, Outcome: result.Outcome})
 	if refused != nil && waitFailure(failure, refused) == nil && ctx.Err() == nil {
 		if result.Outcome == runstate.NodeSkipped {

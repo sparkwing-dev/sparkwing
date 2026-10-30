@@ -71,10 +71,8 @@ func Run(ctx context.Context, version string, input io.Reader, output, diagnosti
 	return json.NewEncoder(output).Encode(engine.SDKCommand{Directory: dir, Command: command, CachedExecutable: cachedExecutable})
 }
 
-func installGoSDK(ctx context.Context, dir string, request engine.SDKInstallRequest, pin engineid.Pin, environment procenv.Env, diagnostics io.Writer, masker *secrets.Masker) (command []string, cachedExecutable string, result error) {
-	if !filepath.IsAbs(request.ExecutableDirectory) {
-		return nil, "", errors.New("Go installation requires an owned executable directory")
-	}
+// GoEnvironment applies the native SDK compiler settings used by installation and cache diagnostics.
+func GoEnvironment(ctx context.Context, dir string, pin engineid.Pin, environment procenv.Env) (procenv.Env, error) {
 	flags := ""
 	for setting := range environment.Values() {
 		if value, ok := strings.CutPrefix(setting, "GOFLAGS="); ok {
@@ -83,15 +81,26 @@ func installGoSDK(ctx context.Context, dir string, request engine.SDKInstallRequ
 	}
 	environment, err := environment.GoTool("GOWORK=off", "GOOS="+runtime.GOOS, "GOARCH="+runtime.GOARCH, "GOFLAGS="+flags+" -modfile=go.mod")
 	if err != nil {
-		return nil, "", err
+		return procenv.Env{}, err
 	}
 	qa, err := engine.QAModuleEnvironment(pin, func(args ...string) ([]byte, error) {
 		return installTool(ctx, dir, environment, "go", args...)
 	})
 	if err != nil {
-		return nil, "", err
+		return procenv.Env{}, err
 	}
 	environment, err = environment.GoTool(qa...)
+	if err != nil {
+		return procenv.Env{}, err
+	}
+	return environment, nil
+}
+
+func installGoSDK(ctx context.Context, dir string, request engine.SDKInstallRequest, pin engineid.Pin, environment procenv.Env, diagnostics io.Writer, masker *secrets.Masker) (command []string, cachedExecutable string, result error) {
+	if !filepath.IsAbs(request.ExecutableDirectory) {
+		return nil, "", errors.New("SDK installation requires an owned executable directory")
+	}
+	environment, err := GoEnvironment(ctx, dir, pin, environment)
 	if err != nil {
 		return nil, "", err
 	}

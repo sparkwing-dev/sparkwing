@@ -36,6 +36,33 @@ function notices(wire: import("./api").RunDetailWire): string[] {
 }
 
 describe("runDetailView", () => {
+  it("preserves the dry-run outcome and completion time", () => {
+    const wire = fixture("run-detail-plan-failure.json");
+    wire.status = "dry_run";
+    delete wire.failure;
+    const { run, nodes } = api.runDetailView(wire);
+    assert.equal(run.status, "dry_run");
+    assert.equal(run.finished_at, wire.finished_at);
+    assert.equal(run.error, undefined);
+    assert.deepEqual(nodes, []);
+    assert.equal(api.planFailureHint(run, nodes), null);
+  });
+
+  it("preserves dry-run outcomes in run lists", async () => {
+    const body = fixture<{ runs: import("./api").Run[] }>("runs-list.json");
+    body.runs[0].status = "dry_run";
+    const previousFetch = globalThis.fetch;
+    globalThis.fetch = async () => Response.json(body);
+    try {
+      for (const runs of [await api.getRuns(), await api.listRuns(new URLSearchParams())]) {
+        assert.equal(runs[0].status, "dry_run");
+        assert.equal(runs[0].finished_at, body.runs[0].finished_at);
+      }
+    } finally {
+      globalThis.fetch = previousFetch;
+    }
+  });
+
   it("shows a run that failed to plan with its error and the CLI's hint", () => {
     const { run, nodes } = api.runDetailView(
       fixture("run-detail-plan-failure.json"),

@@ -68,6 +68,17 @@ func runLocalCommand(ctx context.Context, pipeline string, flags runFlags, args 
 	if err := ctx.Err(); err != nil {
 		return err
 	}
+	preparationParent := ctx
+	preparing, stopPreparation := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
+	defer stopPreparation()
+	ctx = preparing
+	signals := deps.interrupts
+	if signals == nil {
+		caught := make(chan os.Signal, 2)
+		signal.Notify(caught, os.Interrupt, syscall.SIGTERM)
+		defer signal.Stop(caught)
+		signals = caught
+	}
 	runtime, err := deps.resolve(ctx, localRunOptions{standalone: flags.allowUnadmitted})
 	if err != nil {
 		return err
@@ -147,6 +158,8 @@ func runLocalCommand(ctx context.Context, pipeline string, flags runFlags, args 
 	if err != nil {
 		return err
 	}
+	stopPreparation()
+	ctx = preparationParent
 	if err := validateLocalIntake(response, pipeline); err != nil {
 		return err
 	}
@@ -167,7 +180,11 @@ func runLocalCommand(ctx context.Context, pipeline string, flags runFlags, args 
 	}
 	completion, err := observeHereRun(ctx, response.RunID, hereObservation{host: host, follow: func(ctx context.Context) error {
 		return runtime.follow(ctx, response.RunID, request.Request.Options.Output.Value, out)
-	}}, nil)
+	}, cancel: func(ctx context.Context) error {
+		_, writeErr := fmt.Fprintf(os.Stderr, "cancelling %s; interrupt again to stop hosting without waiting\n", response.RunID)
+		_, cancelErr := runtime.controller.Cancel(ctx, response.RunID, controllerwire.CancelRequest{Reason: "interrupted by local host"})
+		return errors.Join(writeErr, cancelErr)
+	}}, signals)
 	if err != nil {
 		return fmt.Errorf("run %s is admitted: %w", response.RunID, err)
 	}
@@ -344,9 +361,7 @@ func emitLocalRunReceipt(out io.Writer, response controllerwire.CreateRunRespons
 }
 
 func runLocalInvocation(pipeline string, flags runFlags, args []string) error {
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
-	return runLocalCommand(ctx, pipeline, flags, args, os.Stdout, localRunDependencies{resolve: resolveLocalRunRuntime, version: installedVersion()})
+	return runLocalCommand(context.Background(), pipeline, flags, args, os.Stdout, localRunDependencies{resolve: resolveLocalRunRuntime, version: installedVersion()})
 }
 
 func resolveRelativeRunPriority(ctx context.Context, mode string, queue controllerwire.QueueManager) (int, error) {
