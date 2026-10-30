@@ -32,7 +32,8 @@ store configuration under SPARKWING_HOME and never creates a store.
 
 session prints an independent account session for an existing team administrator
 on a licensed team or Cloud controller.
-Use --output plain to pipe it to sparkwing runners add --session-stdin. Its initial expiry is 15 minutes.
+Plain output is the default for piping to sparkwing runners add --session-stdin.
+Use --output json for a JSON object containing the session. Its initial expiry is 15 minutes.
 Normal renewal applies, including during enrollment. Enrollment attempts logout
 on success or failure. If logout fails, the renewed session remains live until
 expiry or revocation. The session is printed only
@@ -78,7 +79,7 @@ func runAdmin(args []string, stdout, stderr io.Writer) error {
 	verb := args[0]
 	fs := flag.NewFlagSet("admin "+verb, flag.ContinueOnError)
 	fs.Usage = func() { fmt.Fprintln(stderr, adminUsage) }
-	output := fs.StringP("output", "o", "json", "session only: json or plain")
+	output := fs.StringP("output", "o", "plain", "session only: plain (default) or json")
 	operator := fs.String("operator", "", "your operator account ID (required)")
 	allowLarge := fs.Bool("allow-large", false, "grant only: allow this grant to exceed $100")
 	team := fs.String("team", "", "the team's slug (required)")

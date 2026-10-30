@@ -756,7 +756,7 @@ func Registry() []Command {
 
 		{Path: "sparkwing-controller", Flags: []Flag{}},
 		{Path: "sparkwing-controller admin", Flags: []Flag{}},
-		{Path: "sparkwing-controller admin session", Authority: inPodBreakGlass, Rules: []string{"Print an independent account session for an existing team administrator as JSON. Use --output plain to pipe it to sparkwing runners add --session-stdin. Requires access to the running controller's recorded store. The initial expiry is 15 minutes. Normal session renewal applies, including during enrollment. Enrollment attempts logout on success or failure; if logout fails, the renewed session remains live until expiry or revocation. A durable session.break_glass audit row records the account ID and team, excluding the session and free-text reason."}, Flags: []Flag{
+		{Path: "sparkwing-controller admin session", Authority: inPodBreakGlass, Rules: []string{"Print an independent account session for an existing team administrator as plain text by default, ready to pipe to sparkwing runners add --session-stdin. Use --output json for a JSON object containing the session. Requires access to the running controller's recorded store. The initial expiry is 15 minutes. Normal session renewal applies, including during enrollment. Enrollment attempts logout on success or failure; if logout fails, the renewed session remains live until expiry or revocation. A durable session.break_glass audit row records the account ID and team, excluding the session and free-text reason."}, Flags: []Flag{
 			{Name: "team", Argument: "TEAM", Required: true},
 			{Name: "reason", Argument: "TEXT", Required: true},
 			{Name: "operator", Argument: "ACCOUNT_ID", Required: true},

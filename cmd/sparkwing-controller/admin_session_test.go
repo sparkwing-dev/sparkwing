@@ -2,7 +2,9 @@ package main
 
 import (
 	"bytes"
+	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"net/http/httptest"
 	"os"
@@ -136,14 +138,14 @@ func TestAdminSessionEnrollsSharedRunnerAndReservedLauncher(t *testing.T) {
 	}
 	session.Reset()
 	audit.Reset()
-	if err := runAdminFixture([]string{"session", "--team", "default", "--reason", "enroll another machine"}, &session, &audit); err != nil {
+	if err := runAdminFixture([]string{"session", "--team", "default", "--reason", "enroll another machine", "--output", "json"}, &session, &audit); err != nil {
 		t.Fatal(err)
 	}
 	var result struct {
 		Session string `json:"session"`
 	}
 	if err := json.Unmarshal(session.Bytes(), &result); err != nil || result.Session == "" || strings.Contains(audit.String(), result.Session) {
-		t.Fatal("default JSON session output was missing or leaked to audit")
+		t.Fatal("explicit JSON session output was missing or leaked to audit")
 	}
 	events, err = tenant.BusinessEvents(t.Context(), "session.break_glass", 100, "")
 	if err != nil || len(events) != 2 {
@@ -184,5 +186,22 @@ func TestAdminSessionRefusesLocalDeployment(t *testing.T) {
 	err := runAdminFixture([]string{"session", "--team", "default", "--reason", "headless enrollment"}, &out, &bytes.Buffer{})
 	if err == nil || out.Len() != 0 || !strings.Contains(err.Error(), "licensed team or Cloud controller") {
 		t.Fatalf("local session: %v", err)
+	}
+}
+
+func TestAdminSessionDefaultsToPlainForEnrollmentPipe(t *testing.T) {
+	st, _, _ := adminSessionFixture(t)
+	if _, err := teststore.SQL(t, st).ExecContext(t.Context(), `INSERT INTO memberships(team,account_id,role,created_at) VALUES ('default','ops-admin','owner',1)`); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = st.Close() }()
+	var out bytes.Buffer
+	if err := runAdminFixture([]string{"session", "--team", "default", "--reason", "enroll build machines"}, &out, &bytes.Buffer{}); err != nil {
+		t.Fatal(err)
+	}
+	digest := sha256.Sum256([]byte(strings.TrimSpace(out.String())))
+	var count int
+	if err := teststore.SQL(t, st).QueryRowContext(t.Context(), `SELECT COUNT(*) FROM sessions WHERE hash=?`, hex.EncodeToString(digest[:])).Scan(&count); err != nil || count != 1 {
+		t.Fatal("default output cannot be used as an enrollment session")
 	}
 }

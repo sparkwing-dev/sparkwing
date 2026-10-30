@@ -391,8 +391,8 @@ kubectl -n sparkwing exec deployment/sparkwing-sparkwing-full-controller -- \
 Pod access is the break-glass credential. The command opens the serving
 controller's recorded store, encryption keys and credential epoch. It requires
 an existing administrator of the named team and creates no account or membership.
-It prints JSON by default, or the raw session with `--output plain`, only to stdout and an audit line without the session to
-stderr. A durable `session.break_glass` audit row records the account ID and
+It prints the raw session as plain text by default, or a JSON object with
+`--output json`, only to stdout and an audit line without the session to stderr. A durable `session.break_glass` audit row records the account ID and
 team, excluding the session and free-text reason. The initial expiry is 15 minutes. Enrollment renews the session through
 the normal account-session lifecycle and attempts logout on success or failure.
 If logout fails, the renewed session remains live until expiry or revocation.
