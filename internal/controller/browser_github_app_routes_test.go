@@ -1,6 +1,7 @@
 package controller
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"crypto/rsa"
@@ -8,6 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -69,6 +71,7 @@ type githubBrowserFixture struct {
 	h             http.Handler
 	raw, csrf     string
 	providerCalls int
+	providerError func(*http.Request) error
 }
 
 func newGitHubBrowserFixture(t *testing.T) *githubBrowserFixture {
@@ -92,6 +95,11 @@ func newGitHubBrowserFixture(t *testing.T) *githubBrowserFixture {
 	f := &githubBrowserFixture{s: &serverFixture{Server: s, store: e.Store, engine: e}, raw: raw, csrf: csrf, writer: &githubConnectFake{team: "a", subject: "42", consumed: make(map[string]bool)}}
 	cfg := githubapp.Config{AppID: 1, Slug: "test", ClientID: "client", ClientSecret: "private-provider-secret", PrivateKey: key, HTTP: &http.Client{Transport: billingPageTransport(func(r *http.Request) (*http.Response, error) {
 		f.providerCalls++
+		if f.providerError != nil {
+			if err := f.providerError(r); err != nil {
+				return nil, err
+			}
+		}
 		var body string
 		switch r.Method + " " + r.URL.Path {
 		case "POST /login/oauth/access_token":
@@ -230,7 +238,11 @@ func TestGitHubBrowserConnectionProviderAndReplay(t *testing.T) {
 			}
 			query := url.Values{"state": {flow.State}, "code": {"code"}}
 			callback := f.request("GET", githubAppCallbackPath+"?"+query.Encode(), nil, &flow, nil)
-			if callback.Code != 200 {
+			wantCallback := http.StatusOK
+			if existing {
+				wantCallback = http.StatusSeeOther
+			}
+			if callback.Code != wantCallback {
 				t.Fatalf("callback = %d %s", callback.Code, callback.Body)
 			}
 			flow = githubBrowserFlowCookie(t, callback)
@@ -444,4 +456,85 @@ type reclaimMailer struct{ messages []mailer.Message }
 func (m *reclaimMailer) Send(_ context.Context, message mailer.Message) error {
 	m.messages = append(m.messages, message)
 	return nil
+}
+
+func TestGitHubBrowserAvailableRetry(t *testing.T) {
+	for _, canceled := range []bool{true, false} {
+		t.Run(map[bool]string{true: "canceled", false: "upstream failure"}[canceled], func(t *testing.T) {
+			f := newGitHubBrowserFixture(t)
+			var logs bytes.Buffer
+			f.s.logger = slog.New(slog.NewTextHandler(&logs, nil))
+			flow := f.start(t, true)
+			ctx, cancel := context.WithCancel(t.Context())
+			defer cancel()
+			exchanges, listings := 0, 0
+			f.providerError = func(r *http.Request) error {
+				switch r.URL.Path {
+				case "/login/oauth/access_token":
+					exchanges++
+					if exchanges > 1 {
+						return errors.New("authorization code already redeemed")
+					}
+				case "/user/installations":
+					listings++
+					if listings == 1 {
+						if canceled {
+							cancel()
+							return r.Context().Err()
+						}
+						return errors.New("upstream unavailable")
+					}
+				}
+				return nil
+			}
+			callback := f.request("GET", githubAppCallbackPath+"?"+url.Values{"state": {flow.State}, "code": {"code"}}.Encode(), nil, &flow, nil)
+			flow = githubBrowserFlowCookie(t, callback)
+			first := f.request("GET", githubAppAvailablePath, nil, &flow, func(r *http.Request) { *r = *r.WithContext(ctx) })
+			if canceled {
+				if first.Body.Len() != 0 || strings.Contains(logs.String(), "level=ERROR") || !strings.Contains(logs.String(), "connection canceled") {
+					t.Errorf("cancellation rendered/logged an error: %d %s %s", first.Code, first.Body, &logs)
+				}
+			} else if first.Code != http.StatusBadGateway {
+				t.Errorf("upstream failure = %d %s", first.Code, first.Body)
+			}
+
+			engineSQL(t, f.s.store, `INSERT INTO teams(name,created_at,updated_at,next_run_number) VALUES ('b',1,1,1)`)
+			engineSQL(t, f.s.store, `INSERT INTO accounts(id,email,created_at,updated_at) VALUES ('other','other@example.test',1,1)`)
+			engineSQL(t, f.s.store, `INSERT INTO memberships(team,account_id,role,created_at) VALUES ('a','other','owner',1),('b','member','owner',1)`)
+			original := f.raw
+			for _, scope := range []struct {
+				account string
+				team    store.Team
+			}{{"member", "a"}, {"other", "a"}, {"member", "b"}} {
+				raw, _, _, err := f.s.store.AsOperator().CreateAccountSession(t.Context(), store.Account{ID: scope.account}, scope.team, time.Hour)
+				if err != nil {
+					t.Fatal(err)
+				}
+				f.raw, f.writer.team = raw, scope.team
+				calls := f.providerCalls
+				refused := f.request("GET", githubAppAvailablePath, nil, &flow, nil)
+				if refused.Code != http.StatusForbidden || f.providerCalls != calls {
+					t.Fatalf("foreign account/team/session %+v = %d %s", scope, refused.Code, refused.Body)
+				}
+			}
+			f.raw, f.writer.team = original, "a"
+			retry := f.request("GET", githubAppAvailablePath, nil, &flow, nil)
+			if retry.Code != http.StatusOK || !strings.Contains(retry.Body.String(), `value="7"`) || exchanges != 1 {
+				t.Fatalf("retry = %d %s, exchanges=%d", retry.Code, retry.Body, exchanges)
+			}
+			again := f.request("GET", githubAppAvailablePath, nil, &flow, nil)
+			if again.Code != http.StatusOK || exchanges != 1 {
+				t.Fatalf("repeat listing = %d %s, exchanges=%d", again.Code, again.Body, exchanges)
+			}
+			selected := githubBrowserFlowCookie(t, retry)
+			complete := f.request("POST", "/github/app/select", url.Values{"csrf_token": {f.csrf}, "installation_id": {"7"}}, &selected, nil)
+			if complete.Code != http.StatusSeeOther || f.writer.consumes != 1 || f.writer.binds != 1 {
+				t.Fatalf("selection = %d %s", complete.Code, complete.Body)
+			}
+			replay := f.request("POST", "/github/app/select", url.Values{"csrf_token": {f.csrf}, "installation_id": {"7"}}, &selected, nil)
+			if replay.Code != http.StatusForbidden || f.writer.binds != 1 {
+				t.Fatalf("selection replay = %d %s", replay.Code, replay.Body)
+			}
+		})
+	}
 }

@@ -19,6 +19,7 @@ export type AuthenticatedDashboard = StartedFixture & {
 };
 
 type StartOptions = {
+  githubApp?: boolean;
   buildCommand?: string;
   buildArgs?: string[];
   buildTimeoutMs?: number;
@@ -193,7 +194,11 @@ export async function startAuthenticatedDashboard(
     }
     const fixture = spawn(
       binary,
-      ["--fixture-home", join(temporary, "fixture-home"), "--web-out", output],
+      [
+        "--fixture-home", join(temporary, "fixture-home"),
+        "--web-out", output,
+        ...(options.githubApp ? ["--github-app"] : []),
+      ],
       { cwd: repositoryRoot, env: process.env },
     );
     child = fixture;
