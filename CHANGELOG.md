@@ -20,6 +20,10 @@ unlock.
 
 ## [Unreleased]
 
+### Changed
+
+- **scaffold:** `const FallbackSDKVersion` pins v0.68.0, so a fresh scaffold compiles against that release.
+
 - **TypeScript SDK:** Windows pipelines accept valid protocol pipes instead of refusing startup with `protocol descriptor must be a pipe`. Native release verification prints captured Go test failures.
 
 ## [v0.68.0] - 2026-10-30
