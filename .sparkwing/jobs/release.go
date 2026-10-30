@@ -959,14 +959,21 @@ func wireCutsSince(ctx context.Context, repoDir, prevTag string) ([]wireCut, err
 }
 
 func fileAtTag(ctx context.Context, repoDir, tag, path string) (body string, present bool, err error) {
-	listed, err := runGitIn(ctx, repoDir, "ls-tree", "--name-only", tag, "--", path)
+	// safety: release discovery reads origin's refs, while job checkouts may omit tags.
+	ref := "refs/tags/" + tag
+	if _, err := runGitIn(ctx, repoDir, "cat-file", "-e", ref+"^{commit}"); err != nil {
+		if _, err := runGitIn(ctx, repoDir, "fetch", "--no-tags", "--no-recurse-submodules", "--no-write-fetch-head", "origin", ref+":"+ref); err != nil {
+			return "", false, fmt.Errorf("release tag %s is missing in the job checkout %q and could not be fetched from origin; run git -C %q fetch origin %s:%s, then retry: %w", tag, repoDir, repoDir, ref, ref, err)
+		}
+	}
+	listed, err := runGitIn(ctx, repoDir, "ls-tree", "--name-only", ref, "--", path)
 	if err != nil {
 		return "", false, err
 	}
 	if strings.TrimSpace(listed) == "" {
 		return "", false, nil
 	}
-	body, err = runGitIn(ctx, repoDir, "show", tag+":"+path)
+	body, err = runGitIn(ctx, repoDir, "show", ref+":"+path)
 	if err != nil {
 		return "", false, err
 	}
