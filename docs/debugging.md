@@ -19,6 +19,11 @@ Local runs honor `--sw-pause-before JOB`, `--sw-pause-after JOB` and
 release it with `debug resume`. A pause after failure preserves the job
 error and failed outcome.
 
+Released pauses stay released for that job and reason for the rest of the run.
+If a claim expires before the job starts after resuming a pause, recovery can
+return the job to pending without pausing again. Restart the debug run to pause
+at that boundary again.
+
 To open a shell in a running Kubernetes job, use:
 
 ```sh
