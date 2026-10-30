@@ -51,6 +51,9 @@ func TestEngineClaimHTTPRepositorySelectionUsesEnrollment(t *testing.T) {
 			for _, scope := range []string{"unrestricted", "empty", "other", "accepted"} {
 				t.Run(string(kind)+"/"+map[bool]string{false: "queue", true: "named"}[named]+"/"+scope, func(t *testing.T) {
 					e, _ := engineRuntimeStore(t)
+					if scope != "unrestricted" {
+						fetchedRunFixture(t, e.Store, "a", "run", "acme/repo")
+					}
 					if kind == capability.UnitNode {
 						engineRuntimeClaim(t, e, capability.UnitTrigger)
 						engineSQL(t, e.Store, `INSERT INTO nodes(team,run_id,node_id,status,ready_at,spec_json,execution_json) VALUES ('a','run','job','pending',1,?,?)`, []byte(`{"id":"job"}`), []byte(`{}`))

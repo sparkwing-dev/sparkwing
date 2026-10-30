@@ -8,7 +8,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
@@ -36,27 +35,14 @@ func TestRegisteredRunnerRequiresEveryRequestedLabel(t *testing.T) {
 	engineSQL(t, e.Store, `UPDATE memberships SET role='owner' WHERE account_id='member'`)
 	digest := sha256.Sum256([]byte(session))
 	authority := capability.AuthorityRef{Kind: capability.AuthoritySession, ID: hex.EncodeToString(digest[:])}
-	issued, err := e.Store.AsOperator().ProvisionCapability(t.Context(), capability.ProvisionSpec{Kind: capability.ProvisionMachine, Authority: &authority, RegistrationID: "runner:a:capacity-machine", Team: "a", Subject: capability.Subject{Kind: capability.SubjectMachine, ID: "capacity-machine"}, Grants: []capability.Grant{capability.NodesClaim}, Binding: capability.Binding{Kind: capability.BindingNone}, Repositories: []string{"example.test/acme/*"}})
+	issued, err := e.Store.AsOperator().ProvisionCapability(t.Context(), capability.ProvisionSpec{Kind: capability.ProvisionMachine, Authority: &authority, RegistrationID: "runner:a:capacity-machine", Team: "a", Subject: capability.Subject{Kind: capability.SubjectMachine, ID: "capacity-machine"}, Grants: []capability.Grant{capability.NodesClaim}, Binding: capability.Binding{Kind: capability.BindingNone}, Repositories: []string{"github.com/acme/*"}})
 	if err != nil {
 		t.Fatal(err)
 	}
 	bearer := issued.Raw
 	handler := server.WithEngineController(e.EngineController).Handler()
 	engineSQL(t, e.Store, `INSERT INTO nodes(team,run_id,node_id,status,ready_at,spec_json,execution_json) VALUES ('a','run','job','pending',1,?,?)`, []byte(`{"id":"job"}`), []byte(`{}`))
-	var requestBody []byte
-	if err := teststore.SQL(t, e.Store).QueryRow(`SELECT request_json FROM runs WHERE id='run'`).Scan(&requestBody); err != nil {
-		t.Fatal(err)
-	}
-	var sealed runspec.SealedRequest
-	if err := json.Unmarshal(requestBody, &sealed); err != nil {
-		t.Fatal(err)
-	}
-	sealed.Request.Git.Repository.Display = "https://example.test/acme/repo"
-	requestBody, err = json.Marshal(sealed)
-	if err != nil {
-		t.Fatal(err)
-	}
-	engineSQL(t, e.Store, `UPDATE runs SET request_json=?,repo_display=? WHERE id='run'`, requestBody, sealed.Request.Git.Repository.Display)
+	fetchedRunFixture(t, e.Store, "a", "run", "acme/repo")
 	engineAcceptedFixturePlan(t, e, "a", "run")
 	engineSQL(t, e.Store, `UPDATE nodes SET execution_json=? WHERE run_id='run' AND node_id='job'`, []byte(`{"requires":{"set":true,"value":["team-4cpu","tool:terraform"]}}`))
 	request := `{"runner_version":"v1.2.3","kinds":["node"],"labels":["team-4cpu"],"os":"linux","arch":"arm64"}`
