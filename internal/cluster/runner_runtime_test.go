@@ -8,6 +8,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
@@ -73,49 +74,75 @@ func cliAward(kind capability.UnitKind) controllerwire.ClaimedUnit {
 }
 
 func TestStartAndWarmExecuteTriggerAndJobOnOneManagedLoop(t *testing.T) {
-	versions := cliVersions{index: cliVersionIndex(t)}
 	for _, command := range []string{"start", "warm"} {
 		t.Run(command, func(t *testing.T) {
-			ctx, cancel := context.WithCancel(t.Context())
-			defer cancel()
-			controller := "https://controller.example"
-			credentials := runnerCredentials(t)
-			concurrency := 1
-			kinds := []capability.UnitKind{capability.UnitTrigger, capability.UnitNode}
-			var hosted []capability.UnitKind
-			claims := 0
-			cli := RunnerCLI{
-				ReadConfig: func(string) (userconfig.Config, error) {
-					return userconfig.Config{Runner: &userconfig.RunnerConfig{Controller: &controller, CredentialsDir: &credentials, MaxConcurrent: &concurrency, Repos: []string{"github.com/acme/*"}}}, nil
-				},
-				Factory: func(context.Context, RunnerOptions) (runners.RuntimeConfig, error) {
-					return cliRuntime(func(_ context.Context, request controllerwire.ClaimRequest) (controllerwire.ClaimResponse, error) {
-						if !reflect.DeepEqual(request.Kinds, []capability.UnitKind{capability.UnitTrigger, capability.UnitPlan, capability.UnitEval, capability.UnitNode}) || request.RunnerVersion != "v1.2.3" {
-							t.Errorf("claim: %#v", request)
-						}
-						unit := cliAward(kinds[claims])
-						claims++
-						return controllerwire.ClaimResponse{Claim: &unit}, nil
-					}, func(ctx context.Context, unit controllerwire.ClaimedUnit) error {
-						hosted = append(hosted, unit.Unit)
-						if len(hosted) == 2 {
-							cancel()
-						}
-						return nil
-					}, versions), nil
-				},
-			}
-			args := []string{"--config=/fixture/config.yaml"}
-			if command == "warm" {
-				args = []string{"--controller=" + controller, "--credentials-dir=" + credentials, "--max-concurrent=1", "--repos=github.com/acme/*"}
-			}
-			if err := cli.Run(ctx, command, args, "v1.2.3"); !errors.Is(err, context.Canceled) {
-				t.Fatal(err)
-			}
-			if !reflect.DeepEqual(hosted, kinds) {
-				t.Fatalf("hosted: %v", hosted)
-			}
+			synctest.Test(t, func(t *testing.T) {
+				testStartAndWarmExecuteTriggerAndJobOnOneManagedLoop(t, command)
+			})
 		})
+	}
+}
+
+func testStartAndWarmExecuteTriggerAndJobOnOneManagedLoop(t *testing.T, command string) {
+	t.Helper()
+	versions := cliVersions{index: cliVersionIndex(t)}
+	ctx, cancel := context.WithTimeout(t.Context(), time.Minute)
+	defer cancel()
+	controller := "https://controller.example"
+	credentials := runnerCredentials(t)
+	concurrency := 1
+	kinds := []capability.UnitKind{capability.UnitTrigger, capability.UnitNode}
+	ownerStarted, jobFinished := make(chan struct{}), make(chan struct{})
+	var ownerFinished, jobRan bool
+	claims := 0
+	cli := RunnerCLI{
+		ReadConfig: func(string) (userconfig.Config, error) {
+			return userconfig.Config{Runner: &userconfig.RunnerConfig{Controller: &controller, CredentialsDir: &credentials, MaxConcurrent: &concurrency, Repos: []string{"github.com/acme/*"}}}, nil
+		},
+		Factory: func(context.Context, RunnerOptions) (runners.RuntimeConfig, error) {
+			return cliRuntime(func(_ context.Context, request controllerwire.ClaimRequest) (controllerwire.ClaimResponse, error) {
+				if claims >= len(kinds) {
+					return controllerwire.ClaimResponse{}, errors.New("unexpected extra claim")
+				}
+				want := []capability.UnitKind{capability.UnitTrigger, capability.UnitPlan, capability.UnitEval, capability.UnitNode}
+				if claims == 1 {
+					want = want[1:]
+				}
+				if !reflect.DeepEqual(request.Kinds, want) || request.RunnerVersion != "v1.2.3" || request.FreeSlots == nil || *request.FreeSlots != 1 {
+					t.Errorf("claim: %#v", request)
+				}
+				unit := cliAward(kinds[claims])
+				claims++
+				return controllerwire.ClaimResponse{Claim: &unit}, nil
+			}, func(ctx context.Context, unit controllerwire.ClaimedUnit) error {
+				if unit.Unit == capability.UnitTrigger {
+					close(ownerStarted)
+					select {
+					case <-jobFinished:
+						ownerFinished = true
+						cancel()
+						return nil
+					case <-ctx.Done():
+						return ctx.Err()
+					}
+				}
+				<-ownerStarted
+				jobRan = true
+				close(jobFinished)
+				<-ctx.Done()
+				return nil
+			}, versions), nil
+		},
+	}
+	args := []string{"--config=/fixture/config.yaml"}
+	if command == "warm" {
+		args = []string{"--controller=" + controller, "--credentials-dir=" + credentials, "--max-concurrent=1", "--repos=github.com/acme/*"}
+	}
+	if err := cli.Run(ctx, command, args, "v1.2.3"); !errors.Is(err, context.Canceled) {
+		t.Fatal(err)
+	}
+	if claims != len(kinds) || !ownerFinished || !jobRan {
+		t.Fatalf("claims=%d owner finished=%v job ran=%v", claims, ownerFinished, jobRan)
 	}
 }
 

@@ -26,7 +26,7 @@ if command -v go >/dev/null 2>&1; then
     fi
 fi
 
-for tool in bash git ssh curl tar gzip xz make jq unzip go nc nsenter; do
+for tool in bash git ssh curl tar gzip xz make jq unzip go nc nsenter docker; do
     if ! command -v "$tool" >/dev/null 2>&1; then
         echo "runner image is missing $tool" >&2
         exit 1
@@ -49,3 +49,8 @@ for tool in date sort timeout; do
         exit 1
     fi
 done
+
+# safety: plugin files can exist but fail Docker's discovery or execution checks.
+docker --version
+docker buildx version
+docker compose version

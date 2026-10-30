@@ -2,7 +2,7 @@
 <!-- markdownlint-disable MD004 MD007 MD030 MD032 -->
 # SDK API reference: `sparkwing/docker`
 
-Package docker is the sparkwing SDK's Docker-shelling helper layer: build, push, login, and deterministic tag computation.
+Package docker provides build, push, login, and container helpers using the Docker CLI and buildx bundled in Sparkwing Cloud.
 
 Import as `swdocker "github.com/sparkwing-dev/sparkwing/sparkwing/docker"`. The root package and the other subpackages are indexed in [sdk-reference.md](sdk-reference.md).
 
