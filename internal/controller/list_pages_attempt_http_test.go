@@ -3,6 +3,7 @@ package controller
 import (
 	"encoding/json"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
+	"net/http"
 	"net/url"
 	"testing"
 )
@@ -20,7 +21,7 @@ func TestJobAttemptHTTPPagesKeepNumericOrder(t *testing.T) {
 	}
 	cursor, expected := "", int64(1)
 	for range 4 {
-		w := engineClaimHTTP(t, s.Handler(), raw, "GET", "/api/v1/runs/run/jobs/job/attempts?limit=3&cursor="+url.QueryEscape(cursor), "", 200)
+		w := engineClaimHTTP(t, s.Handler(), raw, http.MethodGet, "/api/v1/runs/run/jobs/job/attempts?limit=3&cursor="+url.QueryEscape(cursor), "", 200)
 		var page struct {
 			Attempts   []controllerwire.AttemptDetail `json:"attempts"`
 			NextCursor string                         `json:"next_cursor"`

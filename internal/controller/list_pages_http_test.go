@@ -23,7 +23,7 @@ func TestSecretInventoryHTTPPagesBeyondDefault(t *testing.T) {
 		if cursor != "" {
 			path += "?cursor=" + url.QueryEscape(cursor)
 		}
-		status, body, _ := secretsRequest(t, f, "GET", path, "", nil)
+		status, body, _ := secretsRequest(t, f, http.MethodGet, path, "", nil)
 		var page struct {
 			Secrets    []listedSecret `json:"secrets"`
 			NextCursor string         `json:"next_cursor"`
