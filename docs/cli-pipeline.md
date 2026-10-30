@@ -74,8 +74,6 @@ Install pre-commit / pre-push / post-commit git hooks from sparkwing.yaml trigge
 | `-C, --checkout PATH` | Resolve the project from this local checkout path. |
 | `-h, --help` | Show command help without executing. |
 | `--help-all` | Include uncommon flags in command help. |
-| `--no-prove` | Arm hooks without first running each blocking gate pipeline to prove it passes. |
-| `--all-repos` | Install hooks in every registered repository that declares hook triggers, then print a status survey of all of them. |
 
 ## `sparkwing pipeline hooks status`
 
@@ -89,8 +87,6 @@ Report declared, installed, and missing sparkwing hooks
 | `-C, --checkout PATH` | Resolve the project from this local checkout path. |
 | `-h, --help` | Show command help without executing. |
 | `--help-all` | Include uncommon flags in command help. |
-| `--all-repos` | Survey hook status across every registered repository instead of only the current one. |
-| `--ungated` | Show only repositories whose declared gates are not armed; has no effect without --all-repos. |
 
 ## `sparkwing pipeline hooks uninstall`
 

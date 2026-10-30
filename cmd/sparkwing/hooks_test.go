@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bytes"
 	"errors"
 	"fmt"
 	"os"
@@ -76,7 +75,7 @@ func installInto(t *testing.T, git githooks.Git, repo string) string {
 	t.Helper()
 	var err error
 	out := captureStderr(t, func() {
-		_, err = installHooks(git, repo, filepath.Join(repo, ".sparkwing"), installOptions{})
+		_, err = installHooks(git, repo, filepath.Join(repo, ".sparkwing"))
 	})
 	if err != nil {
 		t.Fatalf("install: %v", err)
@@ -87,7 +86,7 @@ func installInto(t *testing.T, git githooks.Git, repo string) string {
 func rejectedInstallOutput(t *testing.T, git githooks.Git, repo string) string {
 	t.Helper()
 	return captureStderr(t, func() {
-		if _, err := installHooks(git, repo, filepath.Join(repo, ".sparkwing"), installOptions{}); err == nil {
+		if _, err := installHooks(git, repo, filepath.Join(repo, ".sparkwing")); err == nil {
 			t.Fatal("rejected installation returned success")
 		}
 	})
@@ -95,7 +94,7 @@ func rejectedInstallOutput(t *testing.T, git githooks.Git, repo string) string {
 
 func TestRenderHookScript_BlockingHooksAbortOnFailure(t *testing.T) {
 	for _, hook := range []string{"pre-commit", "pre-push"} {
-		script := renderHookScript(hook, []string{"lint", "test"}, false)
+		script := renderHookScript(hook, []string{"lint", "test"})
 		if !strings.Contains(script, "set -e") {
 			t.Errorf("%s hook should set -e so git aborts on failure:\n%s", hook, script)
 		}
@@ -118,7 +117,7 @@ func TestRenderedHooksUseRunOutputGrammar(t *testing.T) {
 		for _, format := range []string{"", "json", "pretty", "plain"} {
 			t.Run(hook+"/"+format, func(t *testing.T) {
 				t.Setenv("SPARKWING_LOG_FORMAT", format)
-				command := exec.CommandContext(t.Context(), "sh", "-c", renderHookScript(hook, []string{"lint"}, false))
+				command := exec.CommandContext(t.Context(), "sh", "-c", renderHookScript(hook, []string{"lint"}))
 				command.Env = append(os.Environ(), "PATH="+bin+string(os.PathListSeparator)+os.Getenv("PATH"))
 				raw, err := command.Output()
 				if err != nil {
@@ -143,7 +142,7 @@ func TestRenderedHooksUseRunOutputGrammar(t *testing.T) {
 }
 
 func TestRenderHookScript_PostCommitIsNonBlocking(t *testing.T) {
-	script := renderHookScript("post-commit", []string{"self-install", "notify"}, false)
+	script := renderHookScript("post-commit", []string{"self-install", "notify"})
 	if strings.Contains(script, "set -e") {
 		t.Errorf("post-commit hook must not set -e (the commit already landed):\n%s", script)
 	}
@@ -154,40 +153,6 @@ func TestRenderHookScript_PostCommitIsNonBlocking(t *testing.T) {
 	}
 	if !strings.HasSuffix(script, "exit 0\n") {
 		t.Errorf("post-commit hook must always exit zero:\n%s", script)
-	}
-}
-
-func TestRenderHookScript_ChainRunsThePipelineBeforeTheGlobalHook(t *testing.T) {
-	script := renderHookScript("pre-push", []string{"gate"}, true)
-	run := strings.Index(script, "sparkwing run 'gate'")
-	chain := strings.Index(script, `exec "$hook"`)
-	if run < 0 || chain < 0 {
-		t.Fatalf("chained hook should run the pipeline and then hand off:\n%s", script)
-	}
-	if run > chain {
-		t.Errorf("the gate must run before the hand-off to the global hook:\n%s", script)
-	}
-	if !strings.Contains(script, `hook="$global/pre-push"`) {
-		t.Errorf("chained hook should hand off to the same-named global hook:\n%s", script)
-	}
-	if !strings.Contains(script, "git config --global --type=path core.hooksPath") {
-		t.Errorf("chained hook should resolve the global hooks path when it runs:\n%s", script)
-	}
-	if !strings.Contains(script, "sparkwing run 'gate' </dev/null") {
-		t.Errorf("a chained hook must leave its own stdin for the global hook:\n%s", script)
-	}
-}
-
-func TestRenderHookScript_ForwarderOnlyChains(t *testing.T) {
-	script := renderHookScript("prepare-commit-msg", nil, true)
-	if strings.Contains(script, "sparkwing run") {
-		t.Errorf("a forwarder runs no pipeline:\n%s", script)
-	}
-	if !strings.HasSuffix(script, `exec "$hook" "$@"`+"\n") {
-		t.Errorf("a forwarder should end by handing off with the original arguments:\n%s", script)
-	}
-	if !strings.Contains(script, sparkwingHookMarker) {
-		t.Errorf("a forwarder must be marked so uninstall can reclaim it:\n%s", script)
 	}
 }
 
@@ -235,226 +200,39 @@ func TestHooksInstall_LeavesGitConfigAloneWithoutAGlobalHooksPath(t *testing.T) 
 	}
 }
 
-func TestHooksInstall_ChainsAGlobalHooksPathInsteadOfLosingIt(t *testing.T) {
-	repo := gateRepo(t)
-	global := t.TempDir()
-	for _, name := range []string{"prepare-commit-msg", "pre-commit"} {
-		if err := os.WriteFile(filepath.Join(global, name), []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
-			t.Fatal(err)
-		}
-	}
-	git := &fakeGit{global: global}
-	out := installInto(t, git.run, repo)
-
-	hooksDir := filepath.Join(repo, ".git", "hooks")
-	if len(git.writes) != 1 || git.writes[0] != hooksDir {
-		t.Fatalf("install should claim core.hooksPath for this repo, wrote %v", git.writes)
-	}
-
-	pre := readRepoFile(t, filepath.Join(hooksDir, "pre-commit"))
-	if !strings.Contains(pre, "sparkwing run 'lint'") || !strings.Contains(pre, `hook="$global/pre-commit"`) {
-		t.Errorf("a hook both layers define should run the gate then the global hook:\n%s", pre)
-	}
-
-	fwd := readRepoFile(t, filepath.Join(hooksDir, "prepare-commit-msg"))
-	if !strings.Contains(fwd, `hook="$global/prepare-commit-msg"`) {
-		t.Errorf("a global-only hook should get a forwarder:\n%s", fwd)
-	}
-	if strings.Contains(fwd, "sparkwing run") {
-		t.Errorf("the forwarder should not invent a pipeline:\n%s", fwd)
-	}
-
-	post := readRepoFile(t, filepath.Join(hooksDir, "post-commit"))
-	if strings.Contains(post, `exec "$hook"`) {
-		t.Errorf("a hook the global layer does not define should not hand off:\n%s", post)
-	}
-	if !strings.Contains(out, "core.hooksPath -> "+hooksDir) {
-		t.Errorf("install should say it claimed the hooks path:\n%s", out)
-	}
-}
-
 func TestHooksInstall_IsIdempotentOnRerun(t *testing.T) {
 	repo := gateRepo(t)
-	global := t.TempDir()
-	if err := os.WriteFile(filepath.Join(global, "prepare-commit-msg"), []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	git := &fakeGit{global: global}
+	git := &fakeGit{}
 	installInto(t, git.run, repo)
-	first := readRepoFile(t, filepath.Join(repo, ".git", "hooks", "prepare-commit-msg"))
-
+	first := readRepoFile(t, filepath.Join(repo, ".git", "hooks", "pre-commit"))
 	out := installInto(t, git.run, repo)
-	if second := readRepoFile(t, filepath.Join(repo, ".git", "hooks", "prepare-commit-msg")); second != first {
-		t.Errorf("re-running the install rewrote the forwarder differently:\n%s\n---\n%s", first, second)
+	if second := readRepoFile(t, filepath.Join(repo, ".git", "hooks", "pre-commit")); second != first {
+		t.Errorf("reinstall changed the hook: %s", second)
 	}
-	if !strings.Contains(out, "3 hook(s) installed, 0 skipped") {
-		t.Errorf("re-running the install should reclaim its own hooks, not skip them:\n%s", out)
-	}
-}
-
-func TestHooksInstall_RefusesTheClaimWhenAHandWrittenHookBlocksAGlobalForwarder(t *testing.T) {
-	for _, blocked := range []string{"prepare-commit-msg", "pre-commit"} {
-		t.Run(blocked, func(t *testing.T) {
-			repo := gateRepo(t)
-			global := t.TempDir()
-			for _, name := range []string{"prepare-commit-msg", "pre-commit"} {
-				if err := os.WriteFile(filepath.Join(global, name), []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
-					t.Fatal(err)
-				}
-			}
-			mine := "#!/bin/sh\necho hand written\n"
-			writeRepoFile(t, filepath.Join(repo, ".git", "hooks", blocked), mine)
-
-			git := &fakeGit{global: global}
-			out := captureStderr(t, func() {
-				if _, err := installHooks(git.run, repo, filepath.Join(repo, ".sparkwing"), installOptions{}); err == nil {
-					t.Fatal("rejected installation returned success")
-				}
-			})
-			if got := readRepoFile(t, filepath.Join(repo, ".git", "hooks", blocked)); got != mine {
-				t.Errorf("install overwrote a hook it does not manage:\n%s", got)
-			}
-			if !strings.Contains(out, "nothing was installed") {
-				t.Errorf("install should report that it published no partial hook set:\n%s", out)
-			}
-			for _, name := range []string{"pre-commit", "post-commit", "prepare-commit-msg"} {
-				if name == blocked {
-					continue
-				}
-				if _, err := os.Stat(filepath.Join(repo, ".git", "hooks", name)); !os.IsNotExist(err) {
-					t.Errorf("blocked forwarder left dormant %s candidate (stat err = %v)", name, err)
-				}
-			}
-			if len(git.writes) != 0 {
-				t.Errorf("install claimed core.hooksPath with the global %s unforwarded, silencing it: %v", blocked, git.writes)
-			}
-			if !strings.Contains(out, "core.hooksPath left alone") || !strings.Contains(out, blocked) {
-				t.Errorf("install should name the global hook that held the claim back:\n%s", out)
-			}
-			if strings.Contains(out, "still fire") {
-				t.Errorf("install promised the global hooks keep firing in the run that could not forward one:\n%s", out)
-			}
-		})
-	}
-}
-
-func TestHooksInstall_ClaimsWhenTheSkippedHookIsNoneOfTheMachinesOwn(t *testing.T) {
-	repo := gateRepo(t)
-	global := t.TempDir()
-	if err := os.WriteFile(filepath.Join(global, "prepare-commit-msg"), []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	writeRepoFile(t, filepath.Join(repo, ".git", "hooks", "post-commit"), "#!/bin/sh\necho hand written\n")
-
-	git := &fakeGit{global: global}
-	out := installInto(t, git.run, repo)
-	hooksDir := filepath.Join(repo, ".git", "hooks")
-	if len(git.writes) != 1 || git.writes[0] != hooksDir {
-		t.Fatalf("a skipped hook the machine does not define costs it nothing, so the claim should proceed: %v", git.writes)
-	}
-	if !strings.Contains(out, "still fire") {
-		t.Errorf("install should say the global hooks keep firing when every one of them is forwarded:\n%s", out)
-	}
-}
-
-func TestHooksInstall_ReportsAGlobalHookNothingHandsOffToWhenTheClaimIsAlreadyInPlace(t *testing.T) {
-	for _, notifierOnly := range []bool{false, true} {
-		t.Run(fmt.Sprint(notifierOnly), func(t *testing.T) {
-			repo := gateRepo(t)
-			if notifierOnly {
-				writeRepoFile(t, filepath.Join(repo, ".sparkwing", "sparkwing.yaml"), "pipelines:\n  - name: notify\n    entrypoint: Notify\n    on:\n      post_commit: {}\n")
-			}
-			hooksDir := filepath.Join(repo, ".git", "hooks")
-			global := t.TempDir()
-			if err := os.WriteFile(filepath.Join(global, "prepare-commit-msg"), []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
-				t.Fatal(err)
-			}
-			git := &fakeGit{global: global, local: hooksDir}
-			writeRepoFile(t, filepath.Join(hooksDir, "prepare-commit-msg"), "#!/bin/sh\necho hand written\n")
-
-			out := captureStderr(t, func() {
-				gated, err := installHooks(git.run, repo, filepath.Join(repo, ".sparkwing"), installOptions{})
-				if err == nil || gated {
-					t.Fatalf("silenced required forwarder accepted: gated=%v, err=%v", gated, err)
-				}
-			})
-			if len(git.writes) != 0 {
-				t.Errorf("the claim is already in place; install rewrote it: %v", git.writes)
-			}
-			if !strings.Contains(out, "global prepare-commit-msg does not fire here") {
-				t.Errorf("install should report the machine's hook it cannot forward, claim or no claim:\n%s", out)
-			}
-		})
-	}
-}
-
-func TestHooksInstall_IgnoresGlobalFilesGitWouldNeverRunAsAHook(t *testing.T) {
-	repo := gateRepo(t)
-	hooksDir := filepath.Join(repo, ".git", "hooks")
-	global := t.TempDir()
-	for _, name := range []string{"common.sh", "README"} {
-		if err := os.WriteFile(filepath.Join(global, name), []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
-			t.Fatal(err)
-		}
-	}
-
-	git := &fakeGit{global: global}
-	out := installInto(t, git.run, repo)
-	for _, name := range []string{"common.sh", "README"} {
-		if _, err := os.Stat(filepath.Join(hooksDir, name)); err == nil {
-			t.Errorf("install forwarded %s, which git never runs as a hook", name)
-		}
-	}
-	if len(git.writes) != 1 || git.writes[0] != hooksDir {
-		t.Errorf("a helper script in the global directory is nothing to lose, so the claim should proceed: %v", git.writes)
-	}
-	if strings.Contains(out, "common.sh") || strings.Contains(out, "README") {
-		t.Errorf("install called a helper script a hook:\n%s", out)
+	if !strings.Contains(out, "2 hook(s) installed, 0 skipped") {
+		t.Errorf("reinstall skipped managed hooks: %s", out)
 	}
 }
 
 func TestHooksInstall_WarnsWhenTheRepositorySetsItsOwnHooksPath(t *testing.T) {
 	repo := gateRepo(t)
 	git := &fakeGit{local: filepath.Join(repo, ".githooks")}
-	out := captureStderr(t, func() {
-		if _, err := installHooks(git.run, repo, filepath.Join(repo, ".sparkwing"), installOptions{}); err == nil {
-			t.Fatal("rejected installation returned success")
-		}
-	})
+	_, installErr := installHooks(git.run, repo, filepath.Join(repo, ".sparkwing"))
+	if installErr == nil {
+		t.Fatal("rejected installation returned success")
+	}
+	out := installErr.Error()
 
 	if len(git.writes) != 0 {
 		t.Errorf("install overwrote a core.hooksPath the repo set deliberately: %v", git.writes)
 	}
-	if !strings.Contains(out, "nothing was installed") || !strings.Contains(out, "--unset core.hooksPath") {
+	if !strings.Contains(out, "--unset core.hooksPath") {
 		t.Errorf("install should avoid publishing shadowed hooks and say how to fix it:\n%s", out)
 	}
 	for _, name := range []string{"pre-commit", "post-commit"} {
 		if _, err := os.Stat(filepath.Join(repo, ".git", "hooks", name)); !os.IsNotExist(err) {
 			t.Errorf("deliberate local shadow left dormant %s candidate (stat err = %v)", name, err)
 		}
-	}
-}
-
-func TestHooksStatus_ReportsTheChain(t *testing.T) {
-	repo := gateRepo(t)
-	global := t.TempDir()
-	for _, name := range []string{"prepare-commit-msg", "pre-commit"} {
-		if err := os.WriteFile(filepath.Join(global, name), []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
-			t.Fatal(err)
-		}
-	}
-	installInto(t, (&fakeGit{global: global}).run, repo)
-
-	out := captureStdout(t, func() {
-		if err := statusHooks((&fakeGit{global: global}).run, repo, "pretty"); err != nil {
-			t.Fatalf("status: %v", err)
-		}
-	})
-	if !strings.Contains(out, "pre-commit -> lint, then the global hook\n") {
-		t.Errorf("status should show a chained gate:\n%s", out)
-	}
-	if !strings.Contains(out, "prepare-commit-msg -> the global hook\n") {
-		t.Errorf("status should show a forwarder for what it does:\n%s", out)
 	}
 }
 
@@ -471,7 +249,7 @@ func TestHooksStatus_ReportsMissingDeclaredHooks(t *testing.T) {
       pre_push: {}
 `)
 	writeExec(t, filepath.Join(repo, ".git", "hooks", "pre-commit"),
-		renderHookScript("pre-commit", []string{"lint"}, false))
+		renderHookScript("pre-commit", []string{"lint"}))
 
 	out := captureStdout(t, func() {
 		if err := statusHooks((&fakeGit{}).run, repo, "pretty"); err != nil {
@@ -482,109 +260,6 @@ func TestHooksStatus_ReportsMissingDeclaredHooks(t *testing.T) {
 		!strings.Contains(out, "pipelines declare pre-push but the hooks are missing or not current") ||
 		!strings.Contains(out, "sparkwing -C "+repo+" pipeline hooks install") {
 		t.Fatalf("status did not identify and remedy the missing declared hook:\n%s", out)
-	}
-}
-
-func TestHooksStatus_ReportsAGlobalHookNothingHandsOffTo(t *testing.T) {
-	repo := gateRepo(t)
-	global := t.TempDir()
-	if err := os.WriteFile(filepath.Join(global, "prepare-commit-msg"), []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	git := &fakeGit{global: global}
-	installInto(t, git.run, repo)
-	writeRepoFile(t, filepath.Join(repo, ".git", "hooks", "prepare-commit-msg"), "#!/bin/sh\necho hand written\n")
-
-	out := captureStderr(t, func() {
-		if err := statusHooks(git.run, repo, "pretty"); err != nil {
-			t.Fatalf("status: %v", err)
-		}
-	})
-	if !strings.Contains(out, "global prepare-commit-msg does not fire here") {
-		t.Errorf("status should report a global hook the claim silenced:\n%s", out)
-	}
-}
-
-func TestHooksStatus_QuietAboutGlobalHooksItStillForwards(t *testing.T) {
-	repo := gateRepo(t)
-	global := t.TempDir()
-	if err := os.WriteFile(filepath.Join(global, "prepare-commit-msg"), []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	git := &fakeGit{global: global}
-	installInto(t, git.run, repo)
-
-	out := captureStdout(t, func() {
-		if err := statusHooks(git.run, repo, "pretty"); err != nil {
-			t.Fatalf("status: %v", err)
-		}
-	})
-	if strings.Contains(out, "does not fire here") {
-		t.Errorf("status warned about a global hook the forwarder still reaches:\n%s", out)
-	}
-}
-
-func TestHooksUninstall_ReleasesTheHooksPathSoGlobalHooksApplyAgain(t *testing.T) {
-	repo := gateRepo(t)
-	global := t.TempDir()
-	if err := os.WriteFile(filepath.Join(global, "prepare-commit-msg"), []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	git := &fakeGit{global: global}
-	installInto(t, git.run, repo)
-
-	captureStdout(t, func() {
-		if err := uninstallHooks(git.run, repo); err != nil {
-			t.Fatalf("uninstall: %v", err)
-		}
-	})
-	if _, err := os.Stat(filepath.Join(repo, ".git", "hooks", "prepare-commit-msg")); !os.IsNotExist(err) {
-		t.Error("uninstall left behind the forwarder it installed")
-	}
-	if git.local != "" {
-		t.Errorf("uninstall stranded the global hooks behind a claimed core.hooksPath = %q", git.local)
-	}
-}
-
-func TestHooksUninstall_ReleasesTheClaimWhenTheManagedHooksAreAlreadyGone(t *testing.T) {
-	wipes := map[string]func(t *testing.T, hooksDir string){
-		"hooks deleted by hand": func(t *testing.T, hooksDir string) {
-			entries, err := os.ReadDir(hooksDir)
-			if err != nil {
-				t.Fatal(err)
-			}
-			for _, e := range entries {
-				if err := os.Remove(filepath.Join(hooksDir, e.Name())); err != nil {
-					t.Fatal(err)
-				}
-			}
-		},
-		"hook directory deleted": func(t *testing.T, hooksDir string) {
-			if err := os.RemoveAll(hooksDir); err != nil {
-				t.Fatal(err)
-			}
-		},
-	}
-	for name, wipe := range wipes {
-		t.Run(name, func(t *testing.T) {
-			repo := gateRepo(t)
-			global := t.TempDir()
-			if err := os.WriteFile(filepath.Join(global, "prepare-commit-msg"), []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
-				t.Fatal(err)
-			}
-			git := &fakeGit{global: global}
-			installInto(t, git.run, repo)
-			wipe(t, filepath.Join(repo, ".git", "hooks"))
-
-			captureStdout(t, func() {
-				if err := uninstallHooks(git.run, repo); err != nil {
-					t.Fatalf("uninstall: %v", err)
-				}
-			})
-			if git.local != "" {
-				t.Errorf("uninstall left core.hooksPath = %q claiming a directory with no forwarders behind it", git.local)
-			}
-		})
 	}
 }
 
@@ -621,7 +296,7 @@ func TestHooksGuidance_NamesCommandsTheCLIDispatches(t *testing.T) {
 		"remedy for a machine-wide override": shadow.Remedy(),
 		"remedy for a repository override":   repoScoped.Remedy(),
 		"install refusing the claim":         rejectedInstallOutput(t, (&fakeGit{global: global}).run, repo),
-		"rendered hook script":               renderHookScript("pre-commit", []string{"lint"}, true),
+		"rendered hook script":               renderHookScript("pre-commit", []string{"lint"}),
 		"status with nothing installed": captureStdout(t, func() {
 			if err := statusHooks((&fakeGit{}).run, empty, "pretty"); err != nil {
 				t.Fatalf("status: %v", err)
@@ -708,7 +383,7 @@ func TestHooksUninstallStillRemovesHooksAfterTheProjectFilesAreGone(t *testing.T
 		t.Fatal(err)
 	}
 	hook := filepath.Join(repo, ".git", "hooks", "pre-commit")
-	writeExec(t, hook, renderHookScript("pre-commit", []string{"lint"}, false))
+	writeExec(t, hook, renderHookScript("pre-commit", []string{"lint"}))
 	captureStdout(t, func() {
 		if err := runIn(t, filepath.Join(repo, ".sparkwing"), parseHooksUninstall); err != nil {
 			t.Fatalf("hooks uninstall with no sparkwing.yaml or go.mod: %v", err)
@@ -830,7 +505,7 @@ func TestHooksStatus_RejectsIncompleteOrStaleGate(t *testing.T) {
 			case "version":
 				writeRepoFile(t, path, strings.Replace(body, "(format 1)", "(format 0)", 1))
 			case "undeclared":
-				writeExec(t, filepath.Join(repo, ".git", "hooks", "pre-push"), renderHookScript("pre-push", []string{"old-gate"}, false))
+				writeExec(t, filepath.Join(repo, ".git", "hooks", "pre-push"), renderHookScript("pre-push", []string{"old-gate"}))
 			}
 			output := captureStdout(t, func() {
 				if err := statusHooks(git.run, repo, "json"); err != nil {
@@ -840,14 +515,37 @@ func TestHooksStatus_RejectsIncompleteOrStaleGate(t *testing.T) {
 			if strings.Contains(output, `"state":"armed"`) {
 				t.Fatalf("stale gate reported as armed: %s", output)
 			}
-			survey := githooks.Survey(git.run, repo, expectedHooks)
-			var fleet bytes.Buffer
-			if err := renderHooksSurvey(&fleet, []githooks.RepoGates{survey}, "pretty"); err != nil {
-				t.Fatal(err)
-			}
-			if strings.Contains(fleet.String(), "every declared gate fires") || !strings.Contains(fleet.String(), "pipeline hooks install") {
-				t.Fatalf("stale fleet gate needs a reinstall remedy: %s", fleet.String())
-			}
+
 		})
+	}
+}
+
+func writeExec(t *testing.T, path, body string) {
+	t.Helper()
+	if err := os.WriteFile(path, []byte(body), 0o755); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestHooksInstall_RefusesGlobalHooksPathWithoutChangingFilesOrConfig(t *testing.T) {
+	repo := gateRepo(t)
+	hook := filepath.Join(repo, ".git", "hooks", "pre-commit")
+	prior := "#!/bin/sh\n# Installed by sparkwing\nexit 0\n"
+	writeExec(t, hook, prior)
+	git := &fakeGit{global: filepath.Join(t.TempDir(), "global-hooks")}
+	_, err := installHooks(git.run, repo, filepath.Join(repo, ".sparkwing"))
+	if err == nil {
+		t.Fatal("global core.hooksPath conflict was accepted")
+	}
+	for _, want := range []string{git.global, "compose the hooks manually", "git config --global --unset core.hooksPath"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("refusal %q omits %q", err, want)
+		}
+	}
+	if len(git.writes) != 0 {
+		t.Fatalf("installation changed git config: %v", git.writes)
+	}
+	if got := readRepoFile(t, hook); got != prior {
+		t.Fatalf("installation changed prior hook: %q", got)
 	}
 }

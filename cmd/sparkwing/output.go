@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"io"
+	"strings"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/color"
 )
@@ -41,4 +42,11 @@ func writeRenderedText(w io.Writer, kind, mode string, render func(io.Writer)) e
 	var text bytes.Buffer
 	render(&text)
 	return writeText(w, kind, text.String(), mode)
+}
+
+func joinOrDash(names []string) string {
+	if len(names) == 0 {
+		return "-"
+	}
+	return strings.Join(names, ",")
 }

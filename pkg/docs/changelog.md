@@ -58,6 +58,8 @@ unlock.
 
 ### Removed
 
+- **hooks (Breaking):** Removed installation proofs, fleet modes, automatic global-hook chaining and doctor's fleet survey
+  `--no-prove`, `--all-repos` and `--ungated` are gone. Install and inspect hooks per repository. Installation refuses a conflicting `core.hooksPath` with manual repair guidance.
 - **GitHub App (Breaking):** Removed commit-status reporting
   Runs report through Checks only. Installation owners must accept Checks read/write permission; missing permission leaves reports pending while execution continues.
 - **checks (Breaking):** Removed `internal/guardcheck`, its `.guards/` allow-lists and standalone gate steps

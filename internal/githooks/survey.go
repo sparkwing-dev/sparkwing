@@ -7,7 +7,6 @@ import (
 	"path/filepath"
 	"runtime"
 	"slices"
-	"sort"
 	"strings"
 )
 
@@ -32,7 +31,6 @@ const Format = "(format 1)"
 type ExpectedHook struct {
 	Content  string
 	Declared bool
-	Forward  bool
 }
 
 type Expectations func(Git, string, string) (map[string]ExpectedHook, error)
@@ -46,7 +44,6 @@ type HookObservation struct {
 	Executable     bool   `json:"executable"`
 	Required       bool   `json:"required"`
 	Declared       bool   `json:"declared"`
-	Forward        bool   `json:"forward"`
 	Active         bool   `json:"active"`
 	Borrowed       bool   `json:"borrowed"`
 	Error          string `json:"error,omitempty"`
@@ -135,16 +132,6 @@ func (r RepoGates) Gated() bool {
 	return r.runsBlockingGate()
 }
 
-func (r RepoGates) SilencedGlobal() []string {
-	var names []string
-	for _, h := range r.Hooks {
-		if h.Forward && h.Active && !h.Current() {
-			names = append(names, h.Name)
-		}
-	}
-	return names
-}
-
 func (r RepoGates) Summary() string {
 	var parts []string
 	if r.ConfigError != "" {
@@ -189,6 +176,9 @@ func undeclaredGateSummary(fires []string) string {
 func (r RepoGates) Remedy() string {
 	if r.Err != nil {
 		return fmt.Sprintf("fix the config, then sparkwing -C %s pipeline hooks install", r.Repo)
+	}
+	if r.Scope == "global" && (len(r.Borrowed) > 0 || len(r.NotFiring()) > 0) {
+		return (Shadow{Repo: r.Repo, Scope: r.Scope}).Remedy()
 	}
 	if len(r.Borrowed) > 0 || (r.Scope == "local" && len(r.NotFiring()) > 0) {
 		return fmt.Sprintf("git -C %s config --unset core.hooksPath, then sparkwing -C %s pipeline hooks install", r.Repo, r.Repo)
@@ -238,8 +228,8 @@ func Survey(git Git, repoRoot string, expected Expectations) RepoGates {
 	for _, name := range slices.Compact(names) {
 		spec, wanted := specs[name]
 		h := HookObservation{
-			Name: name, Declared: spec.Declared, Forward: spec.Forward, Active: !foreign,
-			Required: spec.Forward || (spec.Declared && slices.Contains(BlockingHooks, name)),
+			Name: name, Declared: spec.Declared, Active: !foreign,
+			Required: spec.Declared && slices.Contains(BlockingHooks, name),
 			Borrowed: foreign && slices.Contains(borrowed, name),
 		}
 		path := filepath.Join(hooksDir, name)
@@ -308,44 +298,4 @@ func Survey(git Git, repoRoot string, expected Expectations) RepoGates {
 
 func broken(repoRoot string, err error) RepoGates {
 	return RepoGates{Repo: repoRoot, State: GateBroken, ConfigError: err.Error(), Err: err}
-}
-
-func SurveyFleet(git Git, repoRoots []string, expected Expectations) []RepoGates {
-	git = cacheMachineWideConfig(git)
-	rows := make([]RepoGates, 0, len(repoRoots))
-	for _, root := range repoRoots {
-		rows = append(rows, Survey(git, root, expected))
-	}
-	sort.Slice(rows, func(i, j int) bool { return rows[i].Repo < rows[j].Repo })
-	return rows
-}
-
-func Ungated(rows []RepoGates) []RepoGates {
-	var out []RepoGates
-	for _, r := range rows {
-		if !r.Gated() {
-			out = append(out, r)
-		}
-	}
-	return out
-}
-
-func cacheMachineWideConfig(git Git) Git {
-	type answer struct {
-		out string
-		err error
-	}
-	cache := map[string]answer{}
-	return func(dir string, args ...string) (string, error) {
-		if !slices.Contains(args, "--global") {
-			return git(dir, args...)
-		}
-		key := strings.Join(args, "\x00")
-		if a, ok := cache[key]; ok {
-			return a.out, a.err
-		}
-		out, err := git(dir, args...)
-		cache[key] = answer{out, err}
-		return out, err
-	}
 }

@@ -8,7 +8,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/sparkwing-dev/sparkwing/internal/githooks"
 	"github.com/sparkwing-dev/sparkwing/internal/installsite"
 	"github.com/sparkwing-dev/sparkwing/internal/opsview"
 )
@@ -98,37 +97,5 @@ func TestDoctorCommandRetainsInstallConflict(t *testing.T) {
 				}
 			}
 		})
-	}
-}
-
-func TestDoctorCommandDistinguishesSurveyFailureFromGatedFleet(t *testing.T) {
-	for _, format := range []string{"pretty", "plain", "json"} {
-		for _, failed := range []bool{false, true} {
-			deps := doctorTestDependencies(&doctorLifecycleFake{})
-			deps.machine = func(context.Context) doctorReport {
-				if failed {
-					return doctorReport{GatesSurveyError: "read the repo registry: malformed config"}
-				}
-				return doctorReport{GatesSurveyed: 3, UngatedRepos: []githooks.RepoGates{{Repo: "/projects/repo", Missing: []string{"pre-push"}, Hooks: []githooks.HookObservation{{Name: "pre-push", Declared: true, Required: true, Active: true}}}}}
-			}
-			var out bytes.Buffer
-			if err := runDoctorCommandArgs(t.Context(), []string{"-o", format}, &out, deps); err != nil {
-				t.Fatal(err)
-			}
-			if failed {
-				if !strings.Contains(out.String(), "malformed config") || strings.Contains(out.String(), "gates_surveyed\t") {
-					t.Fatalf("%s hides survey failure: %s", format, out.String())
-				}
-				continue
-			}
-			for _, want := range []string{"gates_surveyed", "/projects/repo", "pre-push"} {
-				if !strings.Contains(out.String(), want) {
-					t.Errorf("%s missing %q in %s", format, want, out.String())
-				}
-			}
-			if format != "json" && !strings.Contains(out.String(), "sparkwing pipeline hooks install --checkout /projects/repo") {
-				t.Errorf("%s omits gate remedy: %s", format, out.String())
-			}
-		}
 	}
 }

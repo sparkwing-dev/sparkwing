@@ -44,9 +44,6 @@ type doctorReport struct {
 	Findings          []doctorFinding                `json:"findings"`
 	GoToolchain       *opsview.DoctorGoToolchain     `json:"go_toolchain,omitempty"`
 	ShadowedHooks     *githooks.Shadow               `json:"shadowed_hooks,omitempty"`
-	UngatedRepos      []githooks.RepoGates           `json:"ungated_repos,omitempty"`
-	GatesSurveyed     int                            `json:"gates_surveyed"`
-	GatesSurveyError  string                         `json:"gates_survey_error,omitempty"`
 	InstallConflict   *opsview.DoctorInstallConflict `json:"install_conflict,omitempty"`
 }
 
@@ -131,13 +128,6 @@ func inspectDoctor(ctx context.Context, dryRun bool, deps doctorDependencies) (d
 func inspectDoctorMachine(ctx context.Context) doctorReport {
 	git := func(dir string, args ...string) (string, error) { return runGitContext(ctx, dir, args...) }
 	report := doctorReport{GoToolchain: diagnoseGoToolchain(ctx), ShadowedHooks: shadowedHooks(git)}
-	surveyed, err := surveyFleet(git)
-	if err != nil {
-		report.GatesSurveyError = err.Error()
-	} else {
-		report.GatesSurveyed = len(surveyed)
-		report.UngatedRepos = githooks.Ungated(surveyed)
-	}
 	if self, err := installsite.Self(); err == nil {
 		home, _ := os.UserHomeDir()
 		report.InstallConflict = opsview.InstallConflict(self, installsite.SearchDirs(os.Getenv, home))
@@ -189,14 +179,6 @@ func renderDoctorMachine(text *bytes.Buffer, report doctorReport) {
 	}
 	if shadow := report.ShadowedHooks; shadow != nil {
 		fmt.Fprintf(text, "shadowed_hooks\t%s\n%s\n", shadow.Summary(), shadow.Remedy())
-	}
-	if report.GatesSurveyError != "" {
-		fmt.Fprintf(text, "gates_survey_error\t%s\n", report.GatesSurveyError)
-	} else {
-		fmt.Fprintf(text, "gates_surveyed\t%d\n", report.GatesSurveyed)
-		for _, row := range report.UngatedRepos {
-			fmt.Fprintf(text, "ungated_repo\t%s\t%s\tsparkwing pipeline hooks install --checkout %s\n", row.Repo, strings.Join(row.NotFiring(), ","), row.Repo)
-		}
 	}
 	if conflict := report.InstallConflict; conflict != nil {
 		fmt.Fprintf(text, "executable\t%s\n", conflict.Self)

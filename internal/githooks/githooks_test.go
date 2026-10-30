@@ -164,7 +164,7 @@ func TestDetect_ReportsAGlobalOverrideShadowingTheGate(t *testing.T) {
 	if !strings.Contains(shadow.Summary(), "never fire") || !strings.Contains(shadow.Summary(), "pre-push") {
 		t.Errorf("Summary does not say what stopped firing: %s", shadow.Summary())
 	}
-	if !strings.Contains(shadow.Remedy(), "sparkwing pipeline hooks install") {
+	if !strings.Contains(shadow.Remedy(), "pipeline hooks install") {
 		t.Errorf("Remedy does not point at the install that chains the two: %s", shadow.Remedy())
 	}
 }

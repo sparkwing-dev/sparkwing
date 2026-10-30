@@ -278,7 +278,7 @@ func TestMigrationDestinationsUseCurrentGrammar(t *testing.T) {
 	if err := os.Mkdir(filepath.Join(content, "migrations"), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	writeDoc(t, filepath.Join(content, "migrations"), "v1.md", "| Before | After |\n|---|---|\n| `sparkwing old-command --gone` | `sparkwing run ci` |\n\nBefore:\n```bash\nsparkwing old-command --gone\n```\nAfter:\n```bash\nsparkwing pipeline hooks status --all-repos\n```\n")
+	writeDoc(t, filepath.Join(content, "migrations"), "v1.md", "| Before | After |\n|---|---|\n| `sparkwing old-command --gone` | `sparkwing run ci` |\n\nBefore:\n```bash\nsparkwing old-command --gone\n```\nAfter:\n```bash\nsparkwing pipeline hooks status\n```\n")
 	if !checkCLIVerbs(content) {
 		t.Fatal("historical Before examples were checked")
 	}

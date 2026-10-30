@@ -73,3 +73,10 @@ func TestHooksStatusOutputKeepsHooksWhenConfigFails(t *testing.T) {
 		}
 	}
 }
+
+const unloadableProject = `pipelines:
+  - name: e2e/k8s
+    entrypoint: Gate
+    on:
+      pre_commit: {}
+`
