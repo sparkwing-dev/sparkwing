@@ -182,13 +182,16 @@ func writeLogRecord(out io.Writer, record controllerwire.LogRecord, format strin
 		var frame nodeproto.FrameLog
 		if json.Unmarshal([]byte(line), &frame) == nil {
 			_, timestampError := time.Parse(time.RFC3339Nano, frame.TS)
-			if (frame.Message != "" || frame.Event != "") && (timestampError == nil || frame.Level != "" || frame.Event != "" || frame.Step != "" || len(frame.Attrs) > 0) {
+			if timestampError == nil || (frame.Message != "" || frame.Event != "") && (frame.Level != "" || frame.Event != "" || frame.Step != "" || len(frame.Attrs) > 0) {
 				line = frame.Message
 				if line == "" {
 					line = frame.Event
 				}
 				if detail := eventValue(frame.Attrs); detail != "" {
-					line += ": " + detail
+					if line != "" {
+						line += ": "
+					}
+					line += detail
 				}
 			}
 		}

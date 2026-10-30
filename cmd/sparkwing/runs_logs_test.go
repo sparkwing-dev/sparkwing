@@ -357,6 +357,8 @@ func TestRunLogsRendersWarningsWithoutTimestampsAndKeepsAttributes(t *testing.T)
 		{`{"ts":"2026-10-30T17:35:04Z","level":"info","msg":"deploy","attrs":{"deployment":{"Outcome":"accepted","deployment_id":"dep-42"}}}`, "deploy: deployment=Outcome=accepted deployment_id=dep-42"},
 		{`{"ts":"","level":"info","msg":"{\"level\":\"info\",\"msg\":\"application message\"}"}`, `{"level":"info","msg":"application message"}`},
 		{`{"ts":"","event":"checkpoint","attrs":{"attempt":2}}`, "checkpoint: attempt=2"},
+		{`{"ts":"2026-10-30T17:35:04Z","level":"info","attrs":{"answer":42}}`, "answer=42"},
+		{`{"ts":"2026-10-30T17:35:04Z","level":"info"}`, ""},
 	} {
 		for _, format := range []string{"plain", "pretty", "json"} {
 			for _, search := range []bool{false, true} {
@@ -369,8 +371,14 @@ func TestRunLogsRendersWarningsWithoutTimestampsAndKeepsAttributes(t *testing.T)
 					if err := json.NewDecoder(&out).Decode(&record); err != nil || record.Line != tc.line {
 						t.Fatalf("JSON changed runner frame: %+v, %v", record, err)
 					}
-				} else if !strings.HasSuffix(out.String(), tc.want+"\n") {
-					t.Errorf("%s search=%v: got %q, want message %q", format, search, &out, tc.want)
+				} else {
+					want := tc.want + "\n"
+					if format != "plain" || search {
+						want = "r1/build#2:3: " + want
+					}
+					if out.String() != want {
+						t.Errorf("%s search=%v: got %q, want %q", format, search, &out, want)
+					}
 				}
 			}
 		}
