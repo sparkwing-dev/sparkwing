@@ -218,8 +218,13 @@ func TestEnrolledClaimRepositoryAncestryProperty(t *testing.T) {
 		if foreign {
 			owner = fmt.Sprintf("foreign-%d", suffix)
 		}
-		request := sealWith(t, runspec.SealedRequest{Request: runspec.Request{Git: runspec.Git{Repository: runspec.Repository{Key: "gh:1", Display: "https://github.com/" + owner + fmt.Sprintf("/repo-%d", suffix)}}}}, assertedProvenance(t, "ci", "", ""))
-		rewriteSchemaExec(t, s.db, `UPDATE runs SET request_json=?,repo_display=?`, request, "https://github.com/"+owner+fmt.Sprintf("/repo-%d", suffix))
+		repository := owner + fmt.Sprintf("/repo-%d", suffix)
+		provenance, err := assertedProvenance(t, "ci", "", "").FetchedFrom(1, repository, "", "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		request := sealWith(t, runspec.SealedRequest{Request: runspec.Request{Git: runspec.Git{Repository: runspec.Repository{Key: "gh:1", Display: "https://github.com/" + repository}}}}, provenance)
+		rewriteSchemaExec(t, s.db, `UPDATE runs SET request_json=?,repo_display=?`, request, "https://github.com/"+repository)
 		demand.CapabilityPrefix = root.Capability.Prefix
 		if delegated {
 			demand.CapabilityPrefix = child.Capability.Prefix
