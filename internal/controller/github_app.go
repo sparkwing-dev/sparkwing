@@ -745,6 +745,9 @@ func (s *Server) handlePutGitHubAppTrigger(w http.ResponseWriter, r *http.Reques
 		ReleasePublished: req.ReleasePublished, ReleasePrereleased: req.ReleasePrereleased, ReleaseTags: req.ReleaseTags,
 		BranchCreate: req.BranchCreate, BranchDelete: req.BranchDelete, Runner: runner,
 	})
+	if errors.Is(err, store.ErrInvalidInput) {
+		return githubAppRequestError(http.StatusBadRequest, err)
+	}
 	if err != nil {
 		return accountMutationError(err)
 	}

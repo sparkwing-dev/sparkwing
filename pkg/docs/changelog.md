@@ -27,6 +27,8 @@ unlock.
 
 ### Fixed
 
+- **GitHub App:** Release subscription refusals name the required `release_tags` filter in their HTTP 400 response
+
 - **GitHub Actions:** Warm runners execute jobs while their trigger owner waits, so runs complete at the default concurrency of one
 
 - **CI:** Standalone runs keep their in-process controller alive through execution and log following, preventing a missing controller socket after admission
