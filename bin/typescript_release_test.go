@@ -19,11 +19,12 @@ type sdkReleaseStep struct {
 }
 
 type sdkReleaseJob struct {
-	Needs    yaml.Node
-	If       string
-	Allow    bool `yaml:"continue-on-error"`
-	Steps    []sdkReleaseStep
-	Strategy struct {
+	Permissions map[string]string
+	Needs       yaml.Node
+	If          string
+	Allow       bool `yaml:"continue-on-error"`
+	Steps       []sdkReleaseStep
+	Strategy    struct {
 		Matrix struct {
 			Include []struct{ Arch, Runner string }
 		}
@@ -74,6 +75,9 @@ func TestTypeScriptReleaseRequiresBothNativeBridges(t *testing.T) {
 	}
 	checkSDKStep(t, assembly, "Assemble TypeScript package", "release:pack", "--version", "--destination")
 	publication := workflow.Jobs["release"]
+	if publication.Permissions["id-token"] != "write" {
+		t.Fatal("npm provenance requires id-token: write on the publication job")
+	}
 	for _, name := range []string{"dashboard", "typescript-package", "release"} {
 		if workflow.Jobs[name].If != "${{ !inputs.verify_only }}" {
 			t.Errorf("verification-only dispatch must skip %s", name)
@@ -86,7 +90,7 @@ func TestTypeScriptReleaseRequiresBothNativeBridges(t *testing.T) {
 		t.Fatal("publication does not depend on TypeScript package assembly")
 	}
 	checkSDKAction(t, publication, "actions/download-artifact@", "name", "release-typescript")
-	checkSDKStep(t, publication, "Publish TypeScript package", "publish-typescript.mjs", "typescript-dist/", "${TAG#v}")
+	checkSDKStep(t, publication, "Publish TypeScript package", "$RELEASE_TOOLS/bin/publish-typescript.mjs", "typescript-dist/", "${TAG#v}")
 	for i, step := range publication.Steps {
 		if step.Name == "Publish complete immutable release" {
 			for _, earlier := range publication.Steps[:i] {
