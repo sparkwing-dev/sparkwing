@@ -27,6 +27,8 @@ unlock.
 
 ### Fixed
 
+- **GitHub App:** Connection refusals show their reason without blaming GitHub ownership. An already-used or expired connection explains how to start again.
+
 - **schedules:** Invalid cron overrides name the failing field and show a valid hourly example in CLI and controller errors
 
 - **schedules:** The controller embeds IANA time zone data so declarations and overrides accept named zones on images without zoneinfo files

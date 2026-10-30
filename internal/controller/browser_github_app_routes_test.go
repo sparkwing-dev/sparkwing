@@ -332,7 +332,8 @@ func TestGitHubBrowserConnectionCommitRefusal(t *testing.T) {
 	flow.Code, flow.InstallationID = "code", 7
 	f.writer.bindErr = &apierr.Error{Code: apierr.Forbidden, Message: "session authority changed"}
 	w := f.request("GET", githubAppCompletePath, nil, &flow, nil)
-	if w.Code != 403 || f.writer.binds != 1 || strings.Contains(w.Body.String(), "connected=") || strings.Contains(w.Body.String(), "provider-token") {
+	if w.Code != 403 || f.writer.binds != 1 || strings.Contains(w.Body.String(), "connected=") || strings.Contains(w.Body.String(), "provider-token") ||
+		strings.Contains(w.Body.String(), "GitHub did not prove") || !strings.Contains(w.Body.String(), "session authority changed") {
 		t.Fatalf("bind conflict = %d %s", w.Code, w.Body)
 	}
 	flow = f.start(t, false)

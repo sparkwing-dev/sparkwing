@@ -286,6 +286,45 @@ func TestGitHubAppConnectBindsAnInstallationItsOrgAdminProves(t *testing.T) {
 	}
 }
 
+func TestGitHubAppCompletionRechecksOwnerTeamAndExplainsReplay(t *testing.T) {
+	f := newDeploymentAppFixture(t, deploymenttest.Cloud(t, "https://controller.test"))
+	owner := f.ghUser(501, "olga")
+	member := f.ghUser(502, "bob")
+	f.join(owner, member, "bob@example.com", "editor")
+	foreign := f.ghUser(503, "foreign")
+	start := f.start(owner)
+	cookie := appFlowCookie(t, map[string]any{
+		"state": start.State, "verifier": start.Verifier, "authorize_url": start.AuthorizeURL,
+		"installation_id": 7, "code": f.issueCode(501, start.Verifier, acmeAdmin),
+	})
+	for name, who := range map[string]signedIn{"member": member, "other team": foreign} {
+		t.Run(name, func(t *testing.T) {
+			resp := f.browserSend("GET", who.auth, "/github/app/complete", nil, cookie)
+			if resp.StatusCode != http.StatusForbidden {
+				t.Fatalf("complete = %d: %s", resp.StatusCode, responseBody(t, resp))
+			}
+		})
+	}
+	if ids := f.installations(owner); len(ids) != 0 {
+		t.Fatalf("refused sessions bound installations: %v", ids)
+	}
+	resp := f.browserSend("GET", owner.auth, "/github/app/complete", nil, cookie)
+	if connected(resp) != http.StatusCreated {
+		t.Fatalf("owner complete = %d: %s", resp.StatusCode, responseBody(t, resp))
+	}
+	tenant := teststore.ForTeam(t, f.store, store.Team(owner.team))
+	bound, err := tenant.GitHubAppInstallation(t.Context(), 7)
+	if err != nil || bound.ConnectedBy != owner.id || bound.GitHubUserID != 501 {
+		t.Fatalf("owner binding = %+v: %v", bound, err)
+	}
+	resp = f.browserSend("GET", owner.auth, "/github/app/complete", nil, cookie)
+	page := responseBody(t, resp)
+	if resp.StatusCode != http.StatusForbidden || !strings.Contains(page, "already used or expired") ||
+		strings.Contains(page, "GitHub did not prove") {
+		t.Fatalf("replayed completion = %d: %s", resp.StatusCode, page)
+	}
+}
+
 func TestGitHubAppExistingInstallationPicker(t *testing.T) {
 	f := newAppFixture(t)
 	olga := f.ghUser(501, "olga")

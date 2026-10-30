@@ -52,6 +52,8 @@ Only a team owner connects, and only as a signed-in account with a linked GitHub
 
 The `installation_id` the controller binds is the one step 2 recorded in the cookie, never one from the callback URL. The callback keeps GitHub's code in the flow cookie and resumes on the controller's own origin before the session is used. A setup return with `setup_action=request` means an organization owner must approve the install; the controller's page says so and the owner connects again after the approval.
 
+A refused connection shows its reason without attributing every refusal to GitHub ownership. An already-used or expired connection asks the owner to start again from the team's GitHub settings.
+
 When an administrator changes repository access on GitHub outside a connect flow,
 GitHub returns to the setup URL with `setup_action=update`, and the controller
 opens **Team → GitHub** with “Repository access updated on GitHub”.

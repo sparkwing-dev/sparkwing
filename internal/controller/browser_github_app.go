@@ -312,7 +312,7 @@ func (s *Server) renderGitHubAppRefusal(w http.ResponseWriter, err error) {
 		page.ActionHref = signInsSettingsPath
 		page.ActionLabel = "Link GitHub"
 	case refused.status == http.StatusForbidden:
-		page.Title = "GitHub did not prove you own this account"
+		page.Title = "GitHub was not connected"
 		page.Message = orDefault(refused.message, "Only a team owner who administers the GitHub account can connect it.")
 	case refused.status == http.StatusUnauthorized:
 		page.Title = "Sign in again"
