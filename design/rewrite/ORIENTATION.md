@@ -72,6 +72,7 @@ credential model in `docs/auth.md`, and the decision log
 | --- | --- | --- |
 | Which secrets a run receives (decisions 66, 68, 70) | `binding_secret.go`: `runSecretSelection` | `secret_selection_test.go`; `internal/controller/secrets_encryption_test.go`: `TestSecrets_AssertedRunReadsOnlySharedSecrets` |
 | Masking algorithm | `internal/secrets/mask.go`: `Masker`, `Maskable`, `Stream` | `internal/secrets/mask_property_test.go`: `TestMaskLeavesNoSecretVisibleProperty` |
+| Team secret count (decision 73) | `credential_mutations.go`: `Tenant.WriteSecret`; `secrets.go`: `maxSecretsPerTeam` | `credential_mutations_runtime_test.go`: `TestCredentialMutationsSecretLimitsPreserveExistingValues` |
 | Host masker registration | `internal/nodehost/mask_registry.go`: `MaskRegistry` | `internal/nodehost/accepted_masks_test.go`: `TestSealedSecretInputsNeverEscapeHostBoundaries` |
 
 ### Billing
@@ -87,6 +88,7 @@ credential model in `docs/auth.md`, and the decision log
 | Metering and lease renewal | `metered_accounting.go`: `renewBillingAwardTx`, `settleBillingChargesTx`; `state_renewal.go`: `Tenant.RenewNodeClaim` | `metered_accounting_test.go`; `refill_test.go`: `TestRenewalPaysTheNextSliceAndSettlementReturnsTheRest`; `unit_billing_test.go`: `TestFirstRenewalRunsAJobItsAdmittedSliceCovers` |
 | Free-tier limits only where usage is metered | `free_tier.go`: `Store.holdsFreeAllowance` | `free_tier_mode_test.go`: `TestUnmeteredDeploymentAppliesNoFreeTierLimits` |
 | Payment bounds ($10 to $1,000) | `refill.go`: `MinCardPaymentCents`, `MaxCardPaymentCents`; checked in `billing_pages.go` and `RefillSettings.validate` | `internal/controller/checkout_contract_internal_test.go` |
+| Checkout Session creation (decision 73) | `billing_pages.go`: `Tenant.PrepareAuthorizedBillingPage`, `checkoutSessionsPerHour` | `billing_pages_test.go`: `TestBillingPagesShareHourlySessionLimitAndReplay`, `TestBillingPagesConcurrentSessionLimit`; `internal/controller/team_billing_test.go`: `TestTeamBillingCheckoutHourlyLimitRefusesBeforeProvider` |
 | Controller and checkout service contract | `internal/controller/testdata/checkout_contract.json`, byte-identical with sparkwing-platform's `internal/billing/testdata` copy; final versus retried refusals in `internal/controller/billing_checkout.go`: `billingCheckout.post` | `checkout_contract_internal_test.go`; `refund_contract_internal_test.go`: `TestCapturedRefundSettlesExactlyOnce`; `internal/capability/payment_contract_test.go`; `payment_deployment_contract_test.go` |
 
 ### Lock order
@@ -102,6 +104,7 @@ credential model in `docs/auth.md`, and the decision log
 | --- | --- | --- |
 | Email address ownership | `identity.go`: `claimEmailTx`, `releaseEmailTx`, `dropUnprovenEmailOwnershipTx` | `identity_test.go`: `TestIdentitySignInRefusesAnUnverifiedEmail`, `TestIdentityRecycledEmailNeverLinksIntoTheOldAccount` |
 | Invitations | `identity.go`: `Tenant.createInvitationTx`, `Operator.acceptAccountInvitationTx` | `identity_test.go`: `TestIdentityInvitationNeedsTheInvitedVerifiedEmail`; `team_mutations_test.go` |
+| Team creation has no lifetime count cap (decision 73) | `identity.go`: `createAccountTeamTx` | `identity_test.go`: `TestIdentityTeamCreationHasNoLifetimeCap`; `deletion_review_test.go`: `TestTeamDeletionDoesNotRestrictFutureTeamCreation` |
 | Free member cap is enforced at acceptance; invitation creation warns at capacity | `identity.go`: `checkTeamRoomTx`; `team_mutations.go`: `CreateAuthorizedInvitation` | `signup_gate_test.go`: `TestAFreeTeamHoldsAtMostTheMemberLimit`; `internal/controller/browser_refusal_test.go`: `TestInvitationAtMemberCapacityWarnsAndAcceptanceExplainsRemedy` |
 | Headless runner enrollment preserves independent account authority | `cmd/sparkwing-controller/admin.go`: `admin session`; `internal/capability/policy.go`: enrollment refusal | `cmd/sparkwing-controller/admin_session_test.go`: `TestAdminSessionEnrollsSharedRunnerAndReservedLauncher`, `TestAdminSessionRequiresExistingTeamAdministrator`; `internal/capability/authorization_test.go`: `TestRunnerEnrollmentRouteRequiresStoreOriginAuthority` |
 | Controller standby explains its advisory-lock wait | `controller_lock.go`: `OpenControllerPostgres` | `controller_lock_test.go`: `TestControllerStandbyLogsBeforeWaiting` |
@@ -150,6 +153,7 @@ credential model in `docs/auth.md`, and the decision log
 | Rule | Owner | Guard test |
 | --- | --- | --- |
 | Schedule time zones resolve without host zoneinfo | `cmd/sparkwing-controller/main.go`, `cmd/sparkwing/main.go`: embedded `time/tzdata` | `cmd/sparkwing-controller/schedule_timezone_test.go`: `TestScheduleTimeZonesWithEmptyZoneInfo`; `cmd/sparkwing/schedules_contract_test.go`: `TestScheduleManagementTimeZonesWithEmptyZoneInfo` |
+| Team schedule count (decision 73) | `schedule_transactions.go`: `Tenant.replaceConsentedSchedules`; `internal/limits/cron.go`: `MaxSchedulesPerTeam` | `schedule_transactions_test.go`: `TestScheduleTeamCapSpansRepositories`, `TestScheduleTeamCapAllowsFiftyInOneRepository` |
 | Invalid cron overrides name the field and a valid example | `internal/cronspec/override.go`: `Override.Validate` | `internal/cronspec/override_test.go`: `TestOverrideCronErrorNamesFieldAndExample`; `cmd/sparkwing/schedules_contract_test.go`: `TestScheduleManagementCronErrorNamesFieldAndExample`; `internal/controller/schedule_routes_test.go`: `TestScheduleHTTPInvalidCronNamesFieldAndExample` |
 | Local argument discovery | `cmd/sparkwing/local_run.go`: `prepareNativeLocalRun` inspects declarations before invocation values are parsed; `internal/nodeproto/arguments.go`: public enum errors list choices | `cmd/sparkwing/local_describe_unix_test.go`: `TestNativeLocalPreparationInspectsBeforeParsingRequiredEnum` |
 | Undeclared child refusal | `internal/controller/child_source.go`: `resolveChildRevisions`; `internal/store/intake_runtime.go`: intake authorization names `StartsChildren` | `internal/controller/child_source_test.go`: `TestUndeclaredChildSourceNamesDeclarationMethod`; `internal/store/provenance_reference_test.go`: `TestChildPipelinesMustBeDeclared` |
@@ -160,6 +164,7 @@ credential model in `docs/auth.md`, and the decision log
 | Runner warm Actions identity requires HTTPS except on loopback; removed flags and chart values fail | `internal/cluster/production_runtime.go`, `internal/controller/client/github_actions.go`, `charts/sparkwing-runner-bundle/templates/validate.yaml` | `internal/cluster/actions_runtime_test.go`: `TestProductionWarmExchangesActionsIdentity`; `internal/controller/client/github_actions_test.go`: `TestExchangeGitHubActionsRequiresHTTPSExceptLoopback`; `runner_cli_test.go`: `TestWarmRejectsInertFlags`; `internal/clisurface/parse_test.go`: `TestLintRejectsRemovedStaticFlag`; `charts/render_test.go`: `TestRunnerRejectsRemovedWarmModules` |
 | Command registry | `internal/clisurface/registry.go`: `Registry` | `internal/clisurface/contract_test.go` |
 | Route table | `internal/capability/tables.go`: `Routes`; dispatch in `internal/routepolicy` | `internal/capability/policy_test.go` |
+| Inventory and run-detail list pagination (decision 73) | `internal/controller/list_pages.go`: `pageCollection`; `internal/controller/client/list_pages.go`: `requestList`; `web/src/lib/listPages.ts` | `internal/controller/list_pages_test.go`, `list_pages_http_test.go`, `list_pages_attempt_http_test.go`; `internal/controller/client/list_pages_test.go`; `web/src/lib/listPages.test.ts` |
 | Grant refusals name required authority without exposing resource state | `internal/capability/refusal.go`: `RequiredAuthority`; `internal/controller/data_request_binding.go`: `resolveDataTarget` | `internal/controller/refusal_guidance_test.go`: `TestPermissionRefusalsExplainRequiredAuthority`, `TestPermissionRefusalsKeepForeignRunsIndistinguishableFromAbsentRuns` |
 | OpenAPI | `internal/apispec` writes `api/openapi.yaml`; regenerate with `bin/gen-api-docs.sh` | `bin/check-api-spec.sh`; `internal/apispec/final_contract_test.go` |
 | Docs mirror and drift | `docs/` is the source; `bin/sync-docs.sh` copies it to `pkg/docs/mirror/`; `bin/regen-all.sh` reruns every generator | `bin/sync-docs.sh --check`; `internal/doccheck/cliverbs_test.go`, `internal/doccheck/apiroutes_test.go` |
@@ -289,3 +294,4 @@ decision amends an earlier one where noted.
 - 70: OIDC carries `runner_environment` (fresh or persistent), the repository for fetched runs, and `trigger:actions`.
 - 71: No runtime network probes; enforcing NetworkPolicy is the operator's job.
 - 72: Fetched runs carry their ref and sha in OIDC.
+- 73: Teams get 1,000 secrets and 50 schedules; keep OIDC at 30 per five minutes; remove lifetime team-creation caps; paginate unbounded lists; allow 20 Checkout Sessions per team per hour.

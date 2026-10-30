@@ -7222,13 +7222,43 @@ paths:
           name: pending
           schema:
             type: boolean
+        - in: query
+          name: limit
+          schema:
+            default: 50
+            maximum: 200
+            minimum: 1
+            type: integer
+        - description: Use next_cursor from the previous page with the same team and filters.
+          in: query
+          name: cursor
+          schema:
+            type: string
       responses:
         2XX:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/internal.controllerwire.Approvals'
-          description: Successful response.
+                additionalProperties: true
+                properties:
+                  approvals:
+                    anyOf:
+                      - items:
+                          $ref: '#/components/schemas/internal.controllerwire.Approval'
+                        type: array
+                      - type: "null"
+                  next_cursor:
+                    description: Opaque continuation; empty on the last page.
+                    type: string
+                  truncated:
+                    type: boolean
+                required:
+                  - approvals
+                  - next_cursor
+                  - truncated
+                type: object
+                x-sparkwing-go-type: controllerwire.Approvals
+          description: A page of results in stable identity order.
         default:
           content:
             application/json:
@@ -8443,15 +8473,47 @@ paths:
       x-sparkwing-wire: undocumented
   /api/v1/me/identities:
     get:
-      description: Authorization is declared by the shared policy. A shared success-body contract is not documented for this operation.
+      parameters:
+        - in: query
+          name: limit
+          schema:
+            default: 50
+            maximum: 200
+            minimum: 1
+            type: integer
+        - description: Use next_cursor from the previous page with the same team and filters.
+          in: query
+          name: cursor
+          schema:
+            type: string
       responses:
+        2XX:
+          content:
+            application/json:
+              schema:
+                properties:
+                  identities:
+                    items:
+                      type: object
+                    type: array
+                  next_cursor:
+                    description: Opaque continuation; empty on the last page.
+                    type: string
+                  truncated:
+                    type: boolean
+                required:
+                  - identities
+                  - next_cursor
+                  - truncated
+                type: object
+          description: A page of results in stable identity order.
         default:
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/internal.apierr.Envelope'
           description: Canonical API failure.
-      summary: GET /api/v1/me/identities
+      summary: List identities
       x-sparkwing-policy:
         method: GET
         path: /api/v1/me/identities
@@ -8464,7 +8526,6 @@ paths:
             binding: none
             liveness: credential
         retry: safe
-      x-sparkwing-wire: undocumented
   /api/v1/me/identities/{provider}:
     delete:
       description: Authorization is declared by the shared policy. A shared success-body contract is not documented for this operation.
@@ -8497,15 +8558,47 @@ paths:
       x-sparkwing-wire: undocumented
   /api/v1/me/team-deletions:
     get:
-      description: Authorization is declared by the shared policy. A shared success-body contract is not documented for this operation.
+      parameters:
+        - in: query
+          name: limit
+          schema:
+            default: 50
+            maximum: 200
+            minimum: 1
+            type: integer
+        - description: Use next_cursor from the previous page with the same team and filters.
+          in: query
+          name: cursor
+          schema:
+            type: string
       responses:
+        2XX:
+          content:
+            application/json:
+              schema:
+                properties:
+                  deletions:
+                    items:
+                      type: object
+                    type: array
+                  next_cursor:
+                    description: Opaque continuation; empty on the last page.
+                    type: string
+                  truncated:
+                    type: boolean
+                required:
+                  - deletions
+                  - next_cursor
+                  - truncated
+                type: object
+          description: A page of results in stable identity order.
         default:
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/internal.apierr.Envelope'
           description: Canonical API failure.
-      summary: GET /api/v1/me/team-deletions
+      summary: List deletions
       x-sparkwing-policy:
         method: GET
         path: /api/v1/me/team-deletions
@@ -8518,7 +8611,6 @@ paths:
             binding: none
             liveness: credential
         retry: safe
-      x-sparkwing-wire: undocumented
   /api/v1/operator/accounts/{account}:
     delete:
       description: Authorization is declared by the shared policy. A shared success-body contract is not documented for this operation.
@@ -9075,15 +9167,47 @@ paths:
         retry: safe
   /api/v1/operator/teams:
     get:
-      description: Authorization is declared by the shared policy. A shared success-body contract is not documented for this operation.
+      parameters:
+        - in: query
+          name: limit
+          schema:
+            default: 50
+            maximum: 200
+            minimum: 1
+            type: integer
+        - description: Use next_cursor from the previous page with the same team and filters.
+          in: query
+          name: cursor
+          schema:
+            type: string
       responses:
+        2XX:
+          content:
+            application/json:
+              schema:
+                properties:
+                  next_cursor:
+                    description: Opaque continuation; empty on the last page.
+                    type: string
+                  teams:
+                    items:
+                      type: object
+                    type: array
+                  truncated:
+                    type: boolean
+                required:
+                  - teams
+                  - next_cursor
+                  - truncated
+                type: object
+          description: A page of results in stable identity order.
         default:
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/internal.apierr.Envelope'
           description: Canonical API failure.
-      summary: GET /api/v1/operator/teams
+      summary: List teams
       x-sparkwing-policy:
         method: GET
         path: /api/v1/operator/teams
@@ -9097,7 +9221,6 @@ paths:
             binding: none
             liveness: credential
         retry: safe
-      x-sparkwing-wire: undocumented
     post:
       requestBody:
         content:
@@ -9404,6 +9527,18 @@ paths:
           name: include_revoked
           schema:
             type: string
+        - in: query
+          name: limit
+          schema:
+            default: 50
+            maximum: 200
+            minimum: 1
+            type: integer
+        - description: Use next_cursor from the previous page with the same team and filters.
+          in: query
+          name: cursor
+          schema:
+            type: string
       responses:
         2XX:
           content:
@@ -9411,16 +9546,23 @@ paths:
               schema:
                 additionalProperties: true
                 properties:
+                  next_cursor:
+                    description: Opaque continuation; empty on the last page.
+                    type: string
                   tokens:
                     anyOf:
                       - items:
                           $ref: '#/components/schemas/internal.capability.Metadata'
                         type: array
                       - type: "null"
+                  truncated:
+                    type: boolean
                 required:
                   - tokens
+                  - next_cursor
+                  - truncated
                 type: object
-          description: Successful response.
+          description: A page of results in stable identity order.
         default:
           content:
             application/json:
@@ -9835,13 +9977,44 @@ paths:
       x-sparkwing-wire: undocumented
   /api/v1/pools:
     get:
+      parameters:
+        - in: query
+          name: limit
+          schema:
+            default: 50
+            maximum: 200
+            minimum: 1
+            type: integer
+        - description: Use next_cursor from the previous page with the same team and filters.
+          in: query
+          name: cursor
+          schema:
+            type: string
       responses:
         2XX:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/internal.controllerwire.Pools'
-          description: Successful response.
+                additionalProperties: true
+                properties:
+                  next_cursor:
+                    description: Opaque continuation; empty on the last page.
+                    type: string
+                  pools:
+                    anyOf:
+                      - items:
+                          $ref: '#/components/schemas/internal.controllerwire.PoolDetail'
+                        type: array
+                      - type: "null"
+                  truncated:
+                    type: boolean
+                required:
+                  - pools
+                  - next_cursor
+                  - truncated
+                type: object
+                x-sparkwing-go-type: controllerwire.Pools
+          description: A page of results in stable identity order.
         default:
           content:
             application/json:
@@ -10024,13 +10197,44 @@ paths:
         retry: safe
   /api/v1/runners:
     get:
+      parameters:
+        - in: query
+          name: limit
+          schema:
+            default: 50
+            maximum: 200
+            minimum: 1
+            type: integer
+        - description: Use next_cursor from the previous page with the same team and filters.
+          in: query
+          name: cursor
+          schema:
+            type: string
       responses:
         2XX:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/internal.controllerwire.Runners'
-          description: Successful response.
+                additionalProperties: true
+                properties:
+                  next_cursor:
+                    description: Opaque continuation; empty on the last page.
+                    type: string
+                  runners:
+                    anyOf:
+                      - items:
+                          $ref: '#/components/schemas/internal.controllerwire.RunnerDetail'
+                        type: array
+                      - type: "null"
+                  truncated:
+                    type: boolean
+                required:
+                  - runners
+                  - next_cursor
+                  - truncated
+                type: object
+                x-sparkwing-go-type: controllerwire.Runners
+          description: A page of results in stable identity order.
         default:
           content:
             application/json:
@@ -10163,15 +10367,47 @@ paths:
         retry: never
   /api/v1/runners/github:
     get:
-      description: Authorization is declared by the shared policy. A shared success-body contract is not documented for this operation.
+      parameters:
+        - in: query
+          name: limit
+          schema:
+            default: 50
+            maximum: 200
+            minimum: 1
+            type: integer
+        - description: Use next_cursor from the previous page with the same team and filters.
+          in: query
+          name: cursor
+          schema:
+            type: string
       responses:
+        2XX:
+          content:
+            application/json:
+              schema:
+                properties:
+                  bindings:
+                    items:
+                      type: object
+                    type: array
+                  next_cursor:
+                    description: Opaque continuation; empty on the last page.
+                    type: string
+                  truncated:
+                    type: boolean
+                required:
+                  - bindings
+                  - next_cursor
+                  - truncated
+                type: object
+          description: A page of results in stable identity order.
         default:
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/internal.apierr.Envelope'
           description: Canonical API failure.
-      summary: GET /api/v1/runners/github
+      summary: List bindings
       x-sparkwing-policy:
         method: GET
         path: /api/v1/runners/github
@@ -10185,7 +10421,6 @@ paths:
             binding: none
             liveness: credential
         retry: safe
-      x-sparkwing-wire: undocumented
     post:
       description: Authorization is declared by the shared policy. A shared success-body contract is not documented for this operation.
       parameters:
@@ -10503,13 +10738,43 @@ paths:
           required: true
           schema:
             type: string
+        - in: query
+          name: limit
+          schema:
+            default: 50
+            maximum: 200
+            minimum: 1
+            type: integer
+        - description: Use next_cursor from the previous page with the same team and filters.
+          in: query
+          name: cursor
+          schema:
+            type: string
       responses:
         2XX:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/internal.controllerwire.Approvals'
-          description: Successful response.
+                additionalProperties: true
+                properties:
+                  approvals:
+                    anyOf:
+                      - items:
+                          $ref: '#/components/schemas/internal.controllerwire.Approval'
+                        type: array
+                      - type: "null"
+                  next_cursor:
+                    description: Opaque continuation; empty on the last page.
+                    type: string
+                  truncated:
+                    type: boolean
+                required:
+                  - approvals
+                  - next_cursor
+                  - truncated
+                type: object
+                x-sparkwing-go-type: controllerwire.Approvals
+          description: A page of results in stable identity order.
         default:
           content:
             application/json:
@@ -10644,13 +10909,43 @@ paths:
           required: true
           schema:
             type: string
+        - in: query
+          name: limit
+          schema:
+            default: 50
+            maximum: 200
+            minimum: 1
+            type: integer
+        - description: Use next_cursor from the previous page with the same team and filters.
+          in: query
+          name: cursor
+          schema:
+            type: string
       responses:
         2XX:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/internal.controllerwire.RunPage'
-          description: Successful response.
+                additionalProperties: true
+                properties:
+                  next_cursor:
+                    description: Opaque continuation; empty on the last page.
+                    type: string
+                  runs:
+                    anyOf:
+                      - items:
+                          $ref: '#/components/schemas/internal.controllerwire.RunDetail'
+                        type: array
+                      - type: "null"
+                  truncated:
+                    type: boolean
+                required:
+                  - runs
+                  - next_cursor
+                  - truncated
+                type: object
+                x-sparkwing-go-type: controllerwire.RunPage
+          description: A page of results in stable identity order.
         default:
           content:
             application/json:
@@ -10887,21 +11182,52 @@ paths:
         retry: never
   /api/v1/runs/{run}/debug-pauses:
     get:
-      description: Authorization is declared by the shared policy. A shared success-body contract is not documented for this operation.
       parameters:
         - in: path
           name: run
           required: true
           schema:
             type: string
+        - in: query
+          name: limit
+          schema:
+            default: 50
+            maximum: 200
+            minimum: 1
+            type: integer
+        - description: Use next_cursor from the previous page with the same team and filters.
+          in: query
+          name: cursor
+          schema:
+            type: string
       responses:
+        2XX:
+          content:
+            application/json:
+              schema:
+                properties:
+                  next_cursor:
+                    description: Opaque continuation; empty on the last page.
+                    type: string
+                  pauses:
+                    items:
+                      type: object
+                    type: array
+                  truncated:
+                    type: boolean
+                required:
+                  - pauses
+                  - next_cursor
+                  - truncated
+                type: object
+          description: A page of results in stable identity order.
         default:
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/internal.apierr.Envelope'
           description: Canonical API failure.
-      summary: GET /api/v1/runs/{run}/debug-pauses
+      summary: List pauses
       x-sparkwing-policy:
         method: GET
         path: /api/v1/runs/{run}/debug-pauses
@@ -10925,7 +11251,6 @@ paths:
             binding: run
             liveness: sensitive
         retry: safe
-      x-sparkwing-wire: undocumented
     post:
       description: Authorization is declared by the shared policy. A shared success-body contract is not documented for this operation.
       parameters:
@@ -11112,21 +11437,52 @@ paths:
       x-sparkwing-wire: undocumented
   /api/v1/runs/{run}/jobs:
     get:
-      description: Authorization is declared by the shared policy. A shared success-body contract is not documented for this operation.
       parameters:
         - in: path
           name: run
           required: true
           schema:
             type: string
+        - in: query
+          name: limit
+          schema:
+            default: 50
+            maximum: 200
+            minimum: 1
+            type: integer
+        - description: Use next_cursor from the previous page with the same team and filters.
+          in: query
+          name: cursor
+          schema:
+            type: string
       responses:
+        2XX:
+          content:
+            application/json:
+              schema:
+                properties:
+                  jobs:
+                    items:
+                      type: object
+                    type: array
+                  next_cursor:
+                    description: Opaque continuation; empty on the last page.
+                    type: string
+                  truncated:
+                    type: boolean
+                required:
+                  - jobs
+                  - next_cursor
+                  - truncated
+                type: object
+          description: A page of results in stable identity order.
         default:
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/internal.apierr.Envelope'
           description: Canonical API failure.
-      summary: GET /api/v1/runs/{run}/jobs
+      summary: List jobs
       x-sparkwing-policy:
         method: GET
         path: /api/v1/runs/{run}/jobs
@@ -11145,7 +11501,6 @@ paths:
             binding: run
             liveness: sensitive
         retry: safe
-      x-sparkwing-wire: undocumented
   /api/v1/runs/{run}/jobs/{job}:
     get:
       parameters:
@@ -11296,7 +11651,6 @@ paths:
         retry: exact_body
   /api/v1/runs/{run}/jobs/{job}/attempts:
     get:
-      description: Authorization is declared by the shared policy. A shared success-body contract is not documented for this operation.
       parameters:
         - in: path
           name: run
@@ -11308,14 +11662,46 @@ paths:
           required: true
           schema:
             type: string
+        - in: query
+          name: limit
+          schema:
+            default: 50
+            maximum: 200
+            minimum: 1
+            type: integer
+        - description: Use next_cursor from the previous page with the same team and filters.
+          in: query
+          name: cursor
+          schema:
+            type: string
       responses:
+        2XX:
+          content:
+            application/json:
+              schema:
+                properties:
+                  attempts:
+                    items:
+                      type: object
+                    type: array
+                  next_cursor:
+                    description: Opaque continuation; empty on the last page.
+                    type: string
+                  truncated:
+                    type: boolean
+                required:
+                  - attempts
+                  - next_cursor
+                  - truncated
+                type: object
+          description: A page of results in stable identity order.
         default:
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/internal.apierr.Envelope'
           description: Canonical API failure.
-      summary: GET /api/v1/runs/{run}/jobs/{job}/attempts
+      summary: List attempts
       x-sparkwing-policy:
         method: GET
         path: /api/v1/runs/{run}/jobs/{job}/attempts
@@ -11339,7 +11725,6 @@ paths:
             binding: runOfTrigger
             liveness: sensitive
         retry: safe
-      x-sparkwing-wire: undocumented
   /api/v1/runs/{run}/jobs/{job}/cancel:
     post:
       parameters:
@@ -12159,7 +12544,6 @@ paths:
       x-sparkwing-wire: undocumented
   /api/v1/runs/{run}/jobs/{job}/steps:
     get:
-      description: Authorization is declared by the shared policy. A shared success-body contract is not documented for this operation.
       parameters:
         - in: path
           name: run
@@ -12171,14 +12555,46 @@ paths:
           required: true
           schema:
             type: string
+        - in: query
+          name: limit
+          schema:
+            default: 50
+            maximum: 200
+            minimum: 1
+            type: integer
+        - description: Use next_cursor from the previous page with the same team and filters.
+          in: query
+          name: cursor
+          schema:
+            type: string
       responses:
+        2XX:
+          content:
+            application/json:
+              schema:
+                properties:
+                  next_cursor:
+                    description: Opaque continuation; empty on the last page.
+                    type: string
+                  steps:
+                    items:
+                      type: object
+                    type: array
+                  truncated:
+                    type: boolean
+                required:
+                  - steps
+                  - next_cursor
+                  - truncated
+                type: object
+          description: A page of results in stable identity order.
         default:
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/internal.apierr.Envelope'
           description: Canonical API failure.
-      summary: GET /api/v1/runs/{run}/jobs/{job}/steps
+      summary: List steps
       x-sparkwing-policy:
         method: GET
         path: /api/v1/runs/{run}/jobs/{job}/steps
@@ -12202,7 +12618,6 @@ paths:
             binding: runOfTrigger
             liveness: sensitive
         retry: safe
-      x-sparkwing-wire: undocumented
   /api/v1/runs/{run}/jobs/{job}/steps/annotations:
     post:
       parameters:
@@ -13684,13 +14099,43 @@ paths:
           required: true
           schema:
             type: string
+        - in: query
+          name: limit
+          schema:
+            default: 50
+            maximum: 200
+            minimum: 1
+            type: integer
+        - description: Use next_cursor from the previous page with the same team and filters.
+          in: query
+          name: cursor
+          schema:
+            type: string
       responses:
         2XX:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/internal.controllerwire.RunSteps'
-          description: Successful response.
+                additionalProperties: true
+                properties:
+                  next_cursor:
+                    description: Opaque continuation; empty on the last page.
+                    type: string
+                  steps:
+                    anyOf:
+                      - items:
+                          $ref: '#/components/schemas/internal.controllerwire.StepDetail'
+                        type: array
+                      - type: "null"
+                  truncated:
+                    type: boolean
+                required:
+                  - steps
+                  - next_cursor
+                  - truncated
+                type: object
+                x-sparkwing-go-type: controllerwire.RunSteps
+          description: A page of results in stable identity order.
         default:
           content:
             application/json:
@@ -13852,13 +14297,53 @@ paths:
           name: next
           schema:
             type: integer
+        - in: query
+          name: limit
+          schema:
+            default: 50
+            maximum: 200
+            minimum: 1
+            type: integer
+        - description: Use next_cursor from the previous page with the same team and filters.
+          in: query
+          name: cursor
+          schema:
+            type: string
       responses:
         2XX:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/internal.controllerwire.ScheduleOverview'
-          description: Successful response.
+                additionalProperties: true
+                properties:
+                  health:
+                    $ref: '#/components/schemas/internal.controllerwire.HealthView'
+                  next_cursor:
+                    description: Opaque continuation; empty on the last page.
+                    type: string
+                  schedules:
+                    anyOf:
+                      - items:
+                          $ref: '#/components/schemas/internal.controllerwire.ScheduleView'
+                        type: array
+                      - type: "null"
+                  truncated:
+                    type: boolean
+                  upcoming:
+                    anyOf:
+                      - items:
+                          $ref: '#/components/schemas/internal.controllerwire.ScheduleUpcoming'
+                        type: array
+                      - type: "null"
+                required:
+                  - health
+                  - schedules
+                  - upcoming
+                  - next_cursor
+                  - truncated
+                type: object
+                x-sparkwing-go-type: controllerwire.ScheduleOverview
+          description: A page of results in stable identity order.
         default:
           content:
             application/json:
@@ -14323,13 +14808,44 @@ paths:
         retry: safe
   /api/v1/secrets:
     get:
+      parameters:
+        - in: query
+          name: limit
+          schema:
+            default: 50
+            maximum: 200
+            minimum: 1
+            type: integer
+        - description: Use next_cursor from the previous page with the same team and filters.
+          in: query
+          name: cursor
+          schema:
+            type: string
       responses:
         2XX:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/internal.controllerwire.Secrets'
-          description: Successful response.
+                additionalProperties: true
+                properties:
+                  next_cursor:
+                    description: Opaque continuation; empty on the last page.
+                    type: string
+                  secrets:
+                    anyOf:
+                      - items:
+                          $ref: '#/components/schemas/internal.controllerwire.SecretMetadata'
+                        type: array
+                      - type: "null"
+                  truncated:
+                    type: boolean
+                required:
+                  - secrets
+                  - next_cursor
+                  - truncated
+                type: object
+                x-sparkwing-go-type: controllerwire.Secrets
+          description: A page of results in stable identity order.
         default:
           content:
             application/json:
@@ -14915,15 +15431,47 @@ paths:
       x-sparkwing-wire: undocumented
   /api/v1/team/git-credentials:
     get:
-      description: Authorization is declared by the shared policy. A shared success-body contract is not documented for this operation.
+      parameters:
+        - in: query
+          name: limit
+          schema:
+            default: 50
+            maximum: 200
+            minimum: 1
+            type: integer
+        - description: Use next_cursor from the previous page with the same team and filters.
+          in: query
+          name: cursor
+          schema:
+            type: string
       responses:
+        2XX:
+          content:
+            application/json:
+              schema:
+                properties:
+                  credentials:
+                    items:
+                      type: object
+                    type: array
+                  next_cursor:
+                    description: Opaque continuation; empty on the last page.
+                    type: string
+                  truncated:
+                    type: boolean
+                required:
+                  - credentials
+                  - next_cursor
+                  - truncated
+                type: object
+          description: A page of results in stable identity order.
         default:
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/internal.apierr.Envelope'
           description: Canonical API failure.
-      summary: GET /api/v1/team/git-credentials
+      summary: List credentials
       x-sparkwing-policy:
         method: GET
         path: /api/v1/team/git-credentials
@@ -14937,7 +15485,6 @@ paths:
             binding: none
             liveness: credential
         retry: safe
-      x-sparkwing-wire: undocumented
     post:
       description: Authorization is declared by the shared policy. A shared success-body contract is not documented for this operation.
       parameters:
@@ -15062,15 +15609,47 @@ paths:
       x-sparkwing-wire: undocumented
   /api/v1/team/github-app:
     get:
-      description: Authorization is declared by the shared policy. A shared success-body contract is not documented for this operation.
+      parameters:
+        - in: query
+          name: limit
+          schema:
+            default: 50
+            maximum: 200
+            minimum: 1
+            type: integer
+        - description: Use next_cursor from the previous page with the same team and filters.
+          in: query
+          name: cursor
+          schema:
+            type: string
       responses:
+        2XX:
+          content:
+            application/json:
+              schema:
+                properties:
+                  installations:
+                    items:
+                      type: object
+                    type: array
+                  next_cursor:
+                    description: Opaque continuation; empty on the last page.
+                    type: string
+                  truncated:
+                    type: boolean
+                required:
+                  - installations
+                  - next_cursor
+                  - truncated
+                type: object
+          description: A page of results in stable identity order.
         default:
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/internal.apierr.Envelope'
           description: Canonical API failure.
-      summary: GET /api/v1/team/github-app
+      summary: List installations
       x-sparkwing-policy:
         method: GET
         path: /api/v1/team/github-app
@@ -15084,7 +15663,6 @@ paths:
             binding: none
             liveness: credential
         retry: safe
-      x-sparkwing-wire: undocumented
   /api/v1/team/github-app/automation:
     delete:
       description: Authorization is declared by the shared policy. A shared success-body contract is not documented for this operation.
@@ -15111,15 +15689,47 @@ paths:
         retry: safe
       x-sparkwing-wire: undocumented
     get:
-      description: Authorization is declared by the shared policy. A shared success-body contract is not documented for this operation.
+      parameters:
+        - in: query
+          name: limit
+          schema:
+            default: 50
+            maximum: 200
+            minimum: 1
+            type: integer
+        - description: Use next_cursor from the previous page with the same team and filters.
+          in: query
+          name: cursor
+          schema:
+            type: string
       responses:
+        2XX:
+          content:
+            application/json:
+              schema:
+                properties:
+                  automation:
+                    items:
+                      type: object
+                    type: array
+                  next_cursor:
+                    description: Opaque continuation; empty on the last page.
+                    type: string
+                  truncated:
+                    type: boolean
+                required:
+                  - automation
+                  - next_cursor
+                  - truncated
+                type: object
+          description: A page of results in stable identity order.
         default:
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/internal.apierr.Envelope'
           description: Canonical API failure.
-      summary: GET /api/v1/team/github-app/automation
+      summary: List automation
       x-sparkwing-policy:
         method: GET
         path: /api/v1/team/github-app/automation
@@ -15133,7 +15743,6 @@ paths:
             binding: none
             liveness: credential
         retry: safe
-      x-sparkwing-wire: undocumented
     put:
       description: Authorization is declared by the shared policy. A shared success-body contract is not documented for this operation.
       responses:
@@ -15191,15 +15800,47 @@ paths:
       x-sparkwing-wire: undocumented
   /api/v1/team/github-app/deliveries/failed:
     get:
-      description: Authorization is declared by the shared policy. A shared success-body contract is not documented for this operation.
+      parameters:
+        - in: query
+          name: limit
+          schema:
+            default: 50
+            maximum: 200
+            minimum: 1
+            type: integer
+        - description: Use next_cursor from the previous page with the same team and filters.
+          in: query
+          name: cursor
+          schema:
+            type: string
       responses:
+        2XX:
+          content:
+            application/json:
+              schema:
+                properties:
+                  deliveries:
+                    items:
+                      type: object
+                    type: array
+                  next_cursor:
+                    description: Opaque continuation; empty on the last page.
+                    type: string
+                  truncated:
+                    type: boolean
+                required:
+                  - deliveries
+                  - next_cursor
+                  - truncated
+                type: object
+          description: A page of results in stable identity order.
         default:
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/internal.apierr.Envelope'
           description: Canonical API failure.
-      summary: GET /api/v1/team/github-app/deliveries/failed
+      summary: List deliveries
       x-sparkwing-policy:
         method: GET
         path: /api/v1/team/github-app/deliveries/failed
@@ -15213,18 +15854,49 @@ paths:
             binding: none
             liveness: credential
         retry: safe
-      x-sparkwing-wire: undocumented
   /api/v1/team/github-app/extra-repos:
     get:
-      description: Authorization is declared by the shared policy. A shared success-body contract is not documented for this operation.
+      parameters:
+        - in: query
+          name: limit
+          schema:
+            default: 50
+            maximum: 200
+            minimum: 1
+            type: integer
+        - description: Use next_cursor from the previous page with the same team and filters.
+          in: query
+          name: cursor
+          schema:
+            type: string
       responses:
+        2XX:
+          content:
+            application/json:
+              schema:
+                properties:
+                  extra_repos:
+                    items:
+                      type: object
+                    type: array
+                  next_cursor:
+                    description: Opaque continuation; empty on the last page.
+                    type: string
+                  truncated:
+                    type: boolean
+                required:
+                  - extra_repos
+                  - next_cursor
+                  - truncated
+                type: object
+          description: A page of results in stable identity order.
         default:
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/internal.apierr.Envelope'
           description: Canonical API failure.
-      summary: GET /api/v1/team/github-app/extra-repos
+      summary: List extra_repos
       x-sparkwing-policy:
         method: GET
         path: /api/v1/team/github-app/extra-repos
@@ -15238,7 +15910,6 @@ paths:
             binding: none
             liveness: credential
         retry: safe
-      x-sparkwing-wire: undocumented
     put:
       description: Authorization is declared by the shared policy. A shared success-body contract is not documented for this operation.
       responses:
@@ -15296,21 +15967,52 @@ paths:
       x-sparkwing-wire: undocumented
   /api/v1/team/github-app/installations/{installation}/repositories:
     get:
-      description: Authorization is declared by the shared policy. A shared success-body contract is not documented for this operation.
       parameters:
         - in: path
           name: installation
           required: true
           schema:
             type: string
+        - in: query
+          name: limit
+          schema:
+            default: 50
+            maximum: 200
+            minimum: 1
+            type: integer
+        - description: Use next_cursor from the previous page with the same team and filters.
+          in: query
+          name: cursor
+          schema:
+            type: string
       responses:
+        2XX:
+          content:
+            application/json:
+              schema:
+                properties:
+                  next_cursor:
+                    description: Opaque continuation; empty on the last page.
+                    type: string
+                  repositories:
+                    items:
+                      type: object
+                    type: array
+                  truncated:
+                    type: boolean
+                required:
+                  - repositories
+                  - next_cursor
+                  - truncated
+                type: object
+          description: A page of results in stable identity order.
         default:
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/internal.apierr.Envelope'
           description: Canonical API failure.
-      summary: GET /api/v1/team/github-app/installations/{installation}/repositories
+      summary: List repositories
       x-sparkwing-policy:
         method: GET
         path: /api/v1/team/github-app/installations/{installation}/repositories
@@ -15324,7 +16026,6 @@ paths:
             binding: none
             liveness: credential
         retry: safe
-      x-sparkwing-wire: undocumented
   /api/v1/team/github-app/triggers:
     delete:
       description: Authorization is declared by the shared policy. A shared success-body contract is not documented for this operation.
@@ -15351,15 +16052,47 @@ paths:
         retry: safe
       x-sparkwing-wire: undocumented
     get:
-      description: Authorization is declared by the shared policy. A shared success-body contract is not documented for this operation.
+      parameters:
+        - in: query
+          name: limit
+          schema:
+            default: 50
+            maximum: 200
+            minimum: 1
+            type: integer
+        - description: Use next_cursor from the previous page with the same team and filters.
+          in: query
+          name: cursor
+          schema:
+            type: string
       responses:
+        2XX:
+          content:
+            application/json:
+              schema:
+                properties:
+                  next_cursor:
+                    description: Opaque continuation; empty on the last page.
+                    type: string
+                  triggers:
+                    items:
+                      type: object
+                    type: array
+                  truncated:
+                    type: boolean
+                required:
+                  - triggers
+                  - next_cursor
+                  - truncated
+                type: object
+          description: A page of results in stable identity order.
         default:
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/internal.apierr.Envelope'
           description: Canonical API failure.
-      summary: GET /api/v1/team/github-app/triggers
+      summary: List triggers
       x-sparkwing-policy:
         method: GET
         path: /api/v1/team/github-app/triggers
@@ -15373,7 +16106,6 @@ paths:
             binding: none
             liveness: credential
         retry: safe
-      x-sparkwing-wire: undocumented
     put:
       description: Authorization is declared by the shared policy. A shared success-body contract is not documented for this operation.
       responses:
@@ -15400,15 +16132,47 @@ paths:
       x-sparkwing-wire: undocumented
   /api/v1/team/invitations:
     get:
-      description: Authorization is declared by the shared policy. A shared success-body contract is not documented for this operation.
+      parameters:
+        - in: query
+          name: limit
+          schema:
+            default: 50
+            maximum: 200
+            minimum: 1
+            type: integer
+        - description: Use next_cursor from the previous page with the same team and filters.
+          in: query
+          name: cursor
+          schema:
+            type: string
       responses:
+        2XX:
+          content:
+            application/json:
+              schema:
+                properties:
+                  invitations:
+                    items:
+                      type: object
+                    type: array
+                  next_cursor:
+                    description: Opaque continuation; empty on the last page.
+                    type: string
+                  truncated:
+                    type: boolean
+                required:
+                  - invitations
+                  - next_cursor
+                  - truncated
+                type: object
+          description: A page of results in stable identity order.
         default:
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/internal.apierr.Envelope'
           description: Canonical API failure.
-      summary: GET /api/v1/team/invitations
+      summary: List invitations
       x-sparkwing-policy:
         method: GET
         path: /api/v1/team/invitations
@@ -15422,7 +16186,6 @@ paths:
             binding: none
             liveness: credential
         retry: safe
-      x-sparkwing-wire: undocumented
     post:
       description: Authorization is declared by the shared policy. A shared success-body contract is not documented for this operation.
       parameters:
@@ -15486,15 +16249,47 @@ paths:
       x-sparkwing-wire: undocumented
   /api/v1/team/members:
     get:
-      description: Authorization is declared by the shared policy. A shared success-body contract is not documented for this operation.
+      parameters:
+        - in: query
+          name: limit
+          schema:
+            default: 50
+            maximum: 200
+            minimum: 1
+            type: integer
+        - description: Use next_cursor from the previous page with the same team and filters.
+          in: query
+          name: cursor
+          schema:
+            type: string
       responses:
+        2XX:
+          content:
+            application/json:
+              schema:
+                properties:
+                  members:
+                    items:
+                      type: object
+                    type: array
+                  next_cursor:
+                    description: Opaque continuation; empty on the last page.
+                    type: string
+                  truncated:
+                    type: boolean
+                required:
+                  - members
+                  - next_cursor
+                  - truncated
+                type: object
+          description: A page of results in stable identity order.
         default:
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/internal.apierr.Envelope'
           description: Canonical API failure.
-      summary: GET /api/v1/team/members
+      summary: List members
       x-sparkwing-policy:
         method: GET
         path: /api/v1/team/members
@@ -15508,7 +16303,6 @@ paths:
             binding: none
             liveness: credential
         retry: safe
-      x-sparkwing-wire: undocumented
   /api/v1/team/members/{account}:
     delete:
       description: Authorization is declared by the shared policy. A shared success-body contract is not documented for this operation.
@@ -15674,6 +16468,18 @@ paths:
           name: include_revoked
           schema:
             type: string
+        - in: query
+          name: limit
+          schema:
+            default: 50
+            maximum: 200
+            minimum: 1
+            type: integer
+        - description: Use next_cursor from the previous page with the same team and filters.
+          in: query
+          name: cursor
+          schema:
+            type: string
       responses:
         2XX:
           content:
@@ -15681,16 +16487,23 @@ paths:
               schema:
                 additionalProperties: true
                 properties:
+                  next_cursor:
+                    description: Opaque continuation; empty on the last page.
+                    type: string
                   tokens:
                     anyOf:
                       - items:
                           $ref: '#/components/schemas/internal.capability.Metadata'
                         type: array
                       - type: "null"
+                  truncated:
+                    type: boolean
                 required:
                   - tokens
+                  - next_cursor
+                  - truncated
                 type: object
-          description: Successful response.
+          description: A page of results in stable identity order.
         default:
           content:
             application/json:

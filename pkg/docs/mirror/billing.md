@@ -132,6 +132,14 @@ interrupted request with the same key. The controller retains its reservation
 after a provider failure and returns the saved page after completion. Changing
 the request under that key conflicts. An expired page requires a new key.
 
+Each team can reserve 20 Stripe Checkout Sessions in a rolling hour, shared
+by Add funds and saved-card setup. Retries with the same idempotency key count
+once. Failed provider requests retain their reservation and count toward the
+limit because the provider may already have created the session. The controller
+refuses the next new session with `rate_limited`, current usage and a retry
+delay. Contact support if your team needs more. The billing portal and automatic
+refills do not create Checkout Sessions and do not use this allowance.
+
 ## Automatic refill
 
 Automatic refill is off until an owner turns it on, and turning it on needs a

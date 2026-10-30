@@ -22,6 +22,14 @@ unlock.
 
 ### Changed
 
+- **controller (Breaking):** List endpoints that returned whole collections now return cursor pages of 50 records by default, up to 200 per request
+  Follow `next_cursor` while `truncated` is true. CLI and console callers fetch subsequent pages. Raw-array lists now use named collection envelopes.
+- **limits:** Teams can store 1,000 secrets and 50 schedules across repositories
+  The schedule limit replaces the 10-per-repository and 20-per-team caps. The operator's minimum cron interval and the OIDC limit of 30 mints per five minutes per claim remain. Limit refusals name usage and a remedy.
+- **billing (Breaking):** Each team can create 20 Stripe Checkout Sessions per rolling hour across Add funds and saved-card setup
+  Idempotent retries count once. Refusals report current usage, a retry delay and support guidance before calling the provider.
+- **store (Breaking):** Store schema version 27 records Checkout Session reservation times and removes the lifetime team-creation counter
+  Stores at another schema version must be recreated using the existing backup and move-aside instructions.
 - **scaffold:** `const FallbackSDKVersion` pins v0.68.1, so a fresh scaffold compiles against that release.
 - **TypeScript SDK:** The npm package names this repository, which npm provenance requires. Publication refuses major versions above 0, a name or version that does not match the release, and a `latest` tag that would move backwards.
 
@@ -53,6 +61,11 @@ unlock.
 - **teams:** Invitations at the free member cap warn with the configured limit and remedy. Acceptance refusals keep those details in the API and console. The cap remains enforced at acceptance.
 - **billing:** Stripe refund webhooks accept refund objects without `livemode`, using the signed event mode. Replays reverse each refund once.
 - **storage:** Quota refusals name the tier or override, limit, usage and requested growth, with funding, monthly reset and support remedies.
+
+### Removed
+
+- **teams (Breaking):** Accounts can create teams without a lifetime creation cap
+  Deleting or leaving a team does not reduce future team-creation access.
 
 ## [v0.68.1] - 2026-10-30
 ### Changed

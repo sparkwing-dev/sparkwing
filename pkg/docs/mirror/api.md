@@ -46,6 +46,16 @@ socket. The [HTTP reference](api-reference.md) is generated from the shared
 capability table. It includes node-host and external-proof routes with their
 separate audiences.
 
+Inventory lists and run detail collections accept `limit` and an opaque
+`cursor`, default to 50 rows and accept at most 200 per page. Responses retain
+their named collection field and include `next_cursor` and `truncated`. Pass a
+nonempty `next_cursor` back as `cursor`, preserving the other filters, until
+`truncated` is false. Raw array responses now use a named collection envelope:
+`members`, `invitations`, `deliveries`, `pauses`, `deletions` or `jobs`, as
+appropriate. The CLI and dashboard follow these cursors to display complete
+inventories. Existing run, log, metric, sizing and other bounded-query
+pagination retain their own limits.
+
 The repository's `api/openapi.yaml` is generated from the same policy and the
 shared wire types. Each operation retains its complete authorization alternatives
 under `x-sparkwing-policy`. JSON schemas preserve omitted fields, nulls and byte
@@ -180,15 +190,15 @@ its stage. The error-only result field is removed.
 
 ## Run detail
 
-`GET /api/v1/runs/{run}/attempts` returns the complete retry history as a
-`RunPage`, oldest first, with no cursor or truncation. Stable IDs and team-local
-numbers select the same history. Each entry uses the shared public `RunDetail`
-projection, including redacted inputs and current `inputs.lineage`. Invocation
+`GET /api/v1/runs/{run}/attempts` returns retry history as a cursor-paginated
+`RunPage`, oldest first. Stable IDs and team-local numbers select the same
+history. Each entry uses the shared public `RunDetail` projection, including
+redacted inputs and current `inputs.lineage`. Invocation
 metadata, execution seals, environment digests and checkout paths are omitted.
 Every returned run must pass the caller's binding. A denied or invalid member
 fails the response before any history is sent.
-Equal creation timestamps sort by run number. Long chains are complete, and
-cycles cannot repeat entries or prevent traversal from finishing.
+Equal creation timestamps sort by run number. Following cursors reads long
+chains. Cycles cannot repeat entries or prevent traversal from finishing.
 
 `RunPruner.DeleteRun` uses the authorized `DELETE /api/v1/runs/{run}` route.
 It succeeds after an empty HTTP 204 acknowledgement, including log cleanup.
