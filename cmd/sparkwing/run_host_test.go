@@ -315,7 +315,7 @@ func TestStandaloneControllerContextSurvivesIntake(t *testing.T) {
 	resolve := deps.resolve
 	deps.resolve = func(ctx context.Context, options localRunOptions) (localRunRuntime, error) {
 		runtime, err := resolve(ctx, options)
-		var controllerContext context.Context
+		controllerContext := ctx
 		runtime.ensureController = func(ctx context.Context) error {
 			controllerContext = ctx
 			return nil
