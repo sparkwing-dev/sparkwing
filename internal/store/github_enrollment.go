@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"slices"
 	"strconv"
 	"strings"
@@ -31,7 +32,7 @@ func (t *Tenant) RegisterGitHubRunner(ctx context.Context, a capability.Authoriz
 			return ErrAlreadyBound
 		}
 		if t.s.holdsFreeAllowance(t.team) && count >= maxGitHubRunnerBindings {
-			return ErrBindingLimit
+			return fmt.Errorf("%w: team GitHub runner repository binding limit is %d, current usage is %d bindings; remove unused bindings or contact support@sparkwing.dev to raise this limit", ErrBindingLimit, maxGitHubRunnerBindings, count)
 		}
 		out = GitHubRunnerBinding{Team: t.team, RepositoryID: row.RepositoryID, RepositoryOwnerID: row.RepositoryOwnerID, Repository: repo.Slug(), InstallationID: row.InstallationID, CreatedBy: actor, CreatedAt: tx.now(ctx)}
 		_, err := tx.execContext(ctx, `INSERT INTO github_runner_bindings(team,repository_id,repository_owner_id,repository,installation_id,created_by,created_at,repo_key) VALUES (?,?,?,?,NULLIF(?,0),?,?,?)`, t.team, out.RepositoryID, out.RepositoryOwnerID, out.Repository, out.InstallationID, actor, out.CreatedAt.UnixNano(), githubRepositoryKey(out.RepositoryID))
@@ -115,7 +116,7 @@ func checkActionsEnrollmentTx(ctx context.Context, tx *storeTx, spec capability.
 		return err
 	}
 	if live >= maxGitHubRunnerCredentials {
-		return ErrGitHubRunnerCredentialLimit
+		return fmt.Errorf("%w: team live GitHub Actions credential limit is %d, current usage is %d credentials; let existing jobs finish or contact support@sparkwing.dev to raise this limit", ErrGitHubRunnerCredentialLimit, maxGitHubRunnerCredentials, live)
 	}
 	return nil
 }

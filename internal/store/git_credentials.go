@@ -99,7 +99,7 @@ func (t *Tenant) putGitCredentialTx(ctx context.Context, tx *storeTx, c GitCrede
 			return GitCredential{}, err
 		}
 		if n >= maxGitCredentialsPerTeam {
-			return GitCredential{}, ErrGitCredentialLimit
+			return GitCredential{}, fmt.Errorf("%w: team git credential limit is %d, current usage is %d credentials; remove unused credentials or contact support@sparkwing.dev to raise this limit", ErrGitCredentialLimit, maxGitCredentialsPerTeam, n)
 		}
 	}
 	var confirmed *int64

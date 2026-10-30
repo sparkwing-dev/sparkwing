@@ -1,6 +1,7 @@
 package controller
 
 import (
+	"fmt"
 	"net/http"
 	"net/netip"
 	"strconv"
@@ -24,7 +25,7 @@ func newLoginLimiter() *loginLimiter {
 
 func (l *loginLimiter) admit(r *http.Request) error {
 	if !l.clients.Allow(loginClientKey(ratelimit.ClientIP(r)), time.Now()) {
-		return &apierr.Error{Code: apierr.RateLimited, Message: "too many login attempts from this client", Details: map[string]any{"retry_after_ms": loginClientWindow.Milliseconds()}}
+		return &apierr.Error{Code: apierr.RateLimited, Message: fmt.Sprintf("login attempt limit is %d per client per minute; current budget usage is %d attempts; wait a minute or contact support@sparkwing.dev to raise this limit", loginClientBurst, loginClientBurst), Details: map[string]any{"retry_after_ms": loginClientWindow.Milliseconds()}}
 	}
 	return nil
 }

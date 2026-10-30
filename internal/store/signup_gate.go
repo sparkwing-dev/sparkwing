@@ -278,7 +278,7 @@ func tripVelocityTx(ctx context.Context, tx *storeTx, g SignUpGate, now time.Tim
 			continue
 		}
 		g.Mode, g.Source, g.SetBy, g.UpdatedAt = SignUpWaitlist, w.reason, "automatic", now
-		g.Reason = fmt.Sprintf("%d admissions in the last %s reached the limit of %d", n, w.label, w.limit)
+		g.Reason = fmt.Sprintf("signup admission limit is %d per %s, current usage is %d admissions; ask the operator to reopen signups or contact support@sparkwing.dev", w.limit, w.label, n)
 		if err := writeSignUpGateTx(ctx, tx, g); err != nil {
 			return nil, err
 		}

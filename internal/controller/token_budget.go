@@ -1,6 +1,7 @@
 package controller
 
 import (
+	"fmt"
 	"net/http"
 	"sync"
 	"time"
@@ -71,7 +72,7 @@ func (s *Server) allowTokenRequest(w http.ResponseWriter, r *http.Request, key s
 		s.logger.Warn("request shed",
 			"principal", key, "route_class", budgetClassToken, "retry_after", wait,
 			"reason", "per-token request budget exhausted")
-		writeRetryAfter(w, wait, "too many requests from this token")
+		writeRetryAfter(w, wait, fmt.Sprintf("token request limit is %d per minute; current budget usage is at least %d requests; wait for Retry-After or ask the operator to raise the per-token request budget", t.policy.PerTokenMinute, t.policy.PerTokenMinute))
 		return false
 	}
 	return true

@@ -112,6 +112,11 @@ func TestLoginLimiter_PerClientBucketReturns429(t *testing.T) {
 	if rec.Code != http.StatusTooManyRequests {
 		t.Fatalf("status after burst = %d, want %d", rec.Code, http.StatusTooManyRequests)
 	}
+	for _, want := range []string{"limit is 30", "current budget usage is 30", "support@sparkwing.dev"} {
+		if !strings.Contains(rec.Body.String(), want) {
+			t.Fatalf("login refusal omits %q: %s", want, rec.Body.String())
+		}
+	}
 	if got := rec.Header().Get("Retry-After"); got != "60" {
 		t.Fatalf("Retry-After = %q, want %q", got, "60")
 	}

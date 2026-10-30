@@ -134,17 +134,24 @@ func TestPostgresMetadataConcurrentAnnotationsKeepEveryEntry(t *testing.T) {
 }
 
 func TestMetadataBoundsRefuseWithoutWriting(t *testing.T) {
+	assertQuota := func(t *testing.T, err error, want ...string) {
+		t.Helper()
+		if err == nil {
+			t.Fatal("over-limit metadata accepted")
+		}
+		for _, part := range append(want, "usage is", "support@sparkwing.dev") {
+			if !strings.Contains(err.Error(), part) {
+				t.Fatalf("metadata refusal %q omits %q", err, part)
+			}
+		}
+	}
 	for _, step := range []string{"", "body"} {
 		t.Run(step, func(t *testing.T) {
 			f := newStoreRecoveryFixture(t, true)
 			metadataStep(t, f, "body", "running")
 			write := store.AnnotationWrite{Ref: f.ref, Actor: f.holder, StepID: step, Annotation: nodeproto.Annotation{Message: strings.Repeat("x", int(limits.AnnotationBytes)+1)}}
-			if err := f.tenant.WriteAnnotation(t.Context(), write); err == nil {
-				t.Fatal("oversized annotation accepted")
-			}
-			if err := f.tenant.WriteSummary(t.Context(), store.SummaryWrite{Ref: f.ref, Actor: f.holder, StepID: step, Markdown: write.Message}); err == nil {
-				t.Fatal("oversized summary accepted")
-			}
+			assertQuota(t, f.tenant.WriteAnnotation(t.Context(), write), "byte limit is")
+			assertQuota(t, f.tenant.WriteSummary(t.Context(), store.SummaryWrite{Ref: f.ref, Actor: f.holder, StepID: step, Markdown: write.Message}), "result text byte limit is")
 			write.Message = "last"
 			if _, err := f.s.DB().ExecContext(t.Context(), storetest.Rebind(f.s, `UPDATE runs SET annotation_count=? WHERE team=? AND id=?`), limits.MaxAnnotations-1, f.tenant.Team(), f.ref.RunID); err != nil {
 				t.Fatal(err)
@@ -153,9 +160,7 @@ func TestMetadataBoundsRefuseWithoutWriting(t *testing.T) {
 				t.Fatal(err)
 			}
 			before, _ := metadataText(t, f, step)
-			if err := f.tenant.WriteAnnotation(t.Context(), write); err == nil {
-				t.Fatal("annotation count exceeded")
-			}
+			assertQuota(t, f.tenant.WriteAnnotation(t.Context(), write), "annotation count limit is")
 			after, _ := metadataText(t, f, step)
 			if !reflect.DeepEqual(before, after) {
 				t.Fatal("refused annotation changed text")
@@ -349,6 +354,11 @@ func TestMetadataAnnotationByteCapacityRollsBackTheRejectedAppend(t *testing.T) 
 				var refused *apierr.Error
 				if !errors.As(err, &refused) || refused.Code != apierr.LimitExceeded {
 					t.Fatalf("byte refusal: %v", err)
+				}
+				for _, want := range []string{"run annotation byte limit is", "current usage is", "requested addition is", "support@sparkwing.dev"} {
+					if !strings.Contains(err.Error(), want) {
+						t.Fatalf("byte refusal %q omits %q", err, want)
+					}
 				}
 				break
 			}

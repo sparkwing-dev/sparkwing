@@ -3,6 +3,7 @@ package store_test
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/store"
@@ -110,5 +111,14 @@ BEGIN SELECT RAISE(ABORT, 'run seconds refused'); END`); err != nil {
 	}
 	if limits != (store.ComputeLimits{}) {
 		t.Fatalf("the failed transaction changed limits: %+v", limits)
+	}
+}
+
+func TestComputeLimitErrorNamesUsageCapAndOperatorRemedy(t *testing.T) {
+	err := (&store.ComputeLimitError{Limit: store.ComputeLimitRunsPerHour, Cap: 20, Observed: 20, Scope: "principal account"}).Error()
+	for _, want := range []string{"max_runs_per_hour", "is at 20, cap 20", "ask the operator", "support@sparkwing.dev"} {
+		if !strings.Contains(err, want) {
+			t.Fatalf("compute refusal %q omits %q", err, want)
+		}
 	}
 }

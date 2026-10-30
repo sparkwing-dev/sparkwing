@@ -132,7 +132,7 @@ func (s *Server) provisionRoot(w http.ResponseWriter, r *http.Request, spec capa
 			return &apierr.Error{Code: apierr.Conflict, Message: "an enrolled credential already uses this name"}
 		}
 		if errors.Is(err, store.ErrRunnerTokenLimit) {
-			return &apierr.Error{Code: apierr.QuotaExceeded, Message: "the team's runner enrollment limit is reached"}
+			return &apierr.Error{Code: apierr.QuotaExceeded, Message: err.Error()}
 		}
 		return engineLookupError(err)
 	}

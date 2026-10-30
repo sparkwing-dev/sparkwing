@@ -3,6 +3,7 @@ package store
 import (
 	"errors"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -53,6 +54,11 @@ func (s *Store) TestOnlyChildLimits(t *testing.T) {
 	})
 	if !refused(err, "max_child_depth") {
 		t.Fatalf("child below the depth bound admitted: %v", err)
+	}
+	for _, want := range []string{"depth limit is 10", "requested depth is 11", "support@sparkwing.dev"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("depth refusal %q omits %q", err, want)
+		}
 	}
 
 	now := childLimitsFixture(t, s, 50)

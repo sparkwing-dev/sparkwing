@@ -3,6 +3,7 @@ package store
 import (
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 	"testing"
 	"testing/quick"
@@ -124,6 +125,13 @@ func TestMachineEnrollmentSerializesNamesAndLimits(t *testing.T) {
 					winners++
 				} else if !errors.Is(err, ErrAgentNameTaken) && !errors.Is(err, ErrRunnerTokenLimit) {
 					t.Fatal(err)
+				}
+				if errors.Is(err, ErrRunnerTokenLimit) {
+					for _, want := range []string{"limit is 100", "current usage is 100", "support@sparkwing.dev"} {
+						if !strings.Contains(err.Error(), want) {
+							t.Fatalf("runner refusal %q omits %q", err, want)
+						}
+					}
 				}
 			}
 			if winners != 1 {

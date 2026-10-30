@@ -180,6 +180,11 @@ func assertEgressLimit(t *testing.T, w *httptest.ResponseRecorder, reason string
 	if w.Code != 429 || json.Unmarshal(w.Body.Bytes(), &body) != nil || body.Error == nil || body.Error.Code != apierr.RateLimited || body.Error.Details["reason"] != reason || w.Header().Get("Retry-After") == "" {
 		t.Fatalf("limit: %d %s", w.Code, w.Body)
 	}
+	for _, want := range []string{"already holds 1 concurrent", "which is the cap", "raise --"} {
+		if !strings.Contains(body.Error.Message, want) {
+			t.Fatalf("egress refusal %q omits %q", body.Error.Message, want)
+		}
+	}
 }
 
 type egressFlushRecorder struct {
@@ -239,7 +244,7 @@ func TestARequestNamingAnotherPodSharesThePrincipalsDownloadSlot(t *testing.T) {
 	defer release()
 	property := func(noise []byte) bool {
 		r := f.request("GET", egressLogPath, f.member)
-		value := strings.Repeat("x", len(noise)+1)
+		value := fmt.Sprintf("untrusted-runner-header:%x", noise)
 		for _, header := range []string{store.RunnerIdentityHeader, "X-Sparkwing-Claim-Holder", "X-Sparkwing-Team"} {
 			r.Header.Set(header, value)
 		}
