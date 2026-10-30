@@ -43,6 +43,7 @@ unlock.
   Job failures omit raw transition JSON. Retry events include the next attempt
   ordinal, including `attempt=2`.
 - **teams:** Invitations at the free member cap warn with the configured limit and remedy. Acceptance refusals keep those details in the API and console. The cap remains enforced at acceptance.
+- **billing:** Stripe refund webhooks accept refund objects without `livemode`, using the signed event mode. Replays reverse each refund once.
 - **storage:** Quota refusals name the tier or override, limit, usage and requested growth, with funding, monthly reset and support remedies.
 
 ## [v0.68.1] - 2026-10-30
@@ -54,8 +55,6 @@ unlock.
 - **TypeScript SDK:** Windows pipelines accept valid protocol pipes instead of refusing startup with `protocol descriptor must be a pipe`. Native release verification prints captured Go test failures.
 
 ### Fixed
-
-- **billing:** Stripe refund webhooks accept refund objects without `livemode`, using the signed event mode. Replays reverse each refund once.
 
 - **release:** Schema and wire changelog gates fetch a previous release tag missing from the job checkout. Failed fetches name that checkout and show a recovery command.
 
