@@ -17,6 +17,8 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"net/http/httptest"
+	"net/url"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -29,6 +31,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/deployment"
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
 	"github.com/sparkwing-dev/sparkwing/internal/githubapp"
+	"github.com/sparkwing-dev/sparkwing/internal/githubauth"
 	"github.com/sparkwing-dev/sparkwing/internal/license"
 	"github.com/sparkwing-dev/sparkwing/internal/paths"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
@@ -38,8 +41,9 @@ import (
 )
 
 type fixtureConfig struct {
-	home   string
-	webOut string
+	home      string
+	webOut    string
+	githubApp bool
 }
 
 type singleValue struct {
@@ -69,6 +73,7 @@ func parseFixtureConfig(args []string) (fixtureConfig, error) {
 	webOut := singleValue{name: "--web-out"}
 	flags.Var(&home, "fixture-home", "temporary fixture state directory")
 	flags.Var(&webOut, "web-out", "dashboard static export directory")
+	githubApp := flags.Bool("github-app", false, "enable the loopback GitHub App flow")
 	if err := flags.Parse(args); err != nil {
 		return fixtureConfig{}, fmt.Errorf("parse browser fixture flags: %w", err)
 	}
@@ -81,7 +86,7 @@ func parseFixtureConfig(args []string) (fixtureConfig, error) {
 	if !webOut.set {
 		return fixtureConfig{}, fmt.Errorf("--web-out is required")
 	}
-	return fixtureConfig{home: home.value, webOut: webOut.value}, nil
+	return fixtureConfig{home: home.value, webOut: webOut.value, githubApp: *githubApp}, nil
 }
 
 const fixtureTeam store.Team = "acme"
@@ -241,7 +246,7 @@ func memberToken(ctx context.Context, st *store.Store) (string, error) {
 	// hack: a provider sign-in gives the new account its own team as owner, which is the fixture's one team.
 	op := st.AsOperator()
 	signIn, err := op.ResolveSignIn(ctx, store.SignInProfile{
-		Provider: store.ProviderGitHub, Subject: "browser-fixture", Email: string(fixtureTeam) + "@example.test", EmailVerified: true,
+		Provider: store.ProviderGitHub, Subject: "42", Email: string(fixtureTeam) + "@example.test", EmailVerified: true,
 		Name: "Acme Owner", ProviderAccountCreatedAt: time.Now().AddDate(-1, 0, 0),
 	}, store.SignUpConditions{})
 	if err != nil {
@@ -309,16 +314,49 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
+	provider := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/login/oauth/authorize" {
+			query := url.Values{"code": {"fixture-code"}, "state": {r.URL.Query().Get("state")}}
+			http.Redirect(w, r, r.URL.Query().Get("redirect_uri")+"?"+query.Encode(), http.StatusSeeOther)
+			return
+		}
+		var result any
+		switch r.URL.Path {
+		case "/login/oauth/access_token":
+			result = map[string]string{"access_token": "fixture-github-token", "token_type": "bearer"}
+		case "/user":
+			result = map[string]any{"id": 42, "login": "acme", "name": "Acme Owner", "created_at": "2020-01-01T00:00:00Z"}
+		case "/user/emails":
+			result = []map[string]any{{"email": "acme@example.test", "primary": true, "verified": true}}
+		case "/user/installations":
+			result = map[string]any{"installations": []any{}}
+		default:
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		if err := json.NewEncoder(w).Encode(result); err != nil {
+			log.Printf("browser fixture GitHub: %v", err)
+		}
+	}))
+	defer provider.Close()
 	var srv *controller.Server
 	st, err := store.Open(home.StateDB(), store.WithPolicies(func(st *store.Store) (store.Policies, error) {
 		srv = controller.NewDeployment(st, cfg, nil).WithEngineController(controller.NewEngineController(st, controller.EngineController{
 			RunnerPolicy:  &controller.SignedRunnerAdmission{Resolver: engines},
 			VersionPolicy: &controller.SignedEngineVersionPolicy{Resolver: engines},
 		})).WithSecretsCipher(cipher).WithDataObjects(objects).WithGitHubApp(githubapp.Config{
-			// safety: the App's GitHub endpoints are a closed loopback port, so a fixture flow never reaches GitHub.
+			// safety: all provider calls stay on loopback so browser tests never reach GitHub.
 			AppID: 1, Slug: "sparkwing-test", PrivateKey: appKey, WebhookSecret: "fixture-hook",
-			WebURL: "http://127.0.0.1:1", APIURL: "http://127.0.0.1:1",
+			ClientID: "fixture-client", ClientSecret: "fixture-secret", WebURL: provider.URL, APIURL: provider.URL,
 		})
+		if config.githubApp {
+			srv.WithGitHubSignIn(githubauth.New(githubauth.Config{
+				ClientID: "fixture-client", ClientSecret: "fixture-secret",
+				AuthURL: provider.URL + "/login/oauth/authorize", TokenURL: provider.URL + "/login/oauth/access_token",
+				UserURL: provider.URL + "/user", EmailsURL: provider.URL + "/user/emails",
+			}), []string{origin + "/github/app/callback", origin + "/auth/github/callback"})
+		}
 		// safety: the fixture serves plain HTTP on loopback, so its cookies drop Secure, which the controller
 		// command refuses for a multi-team deployment.
 		srv.WithDashboard(controller.Dashboard{Bundle: os.DirFS(config.webOut), Version: "auth-browser-fixture", Paths: home, InsecureCookies: true})
