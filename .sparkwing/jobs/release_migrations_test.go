@@ -461,7 +461,6 @@ func TestRepositoryUnreleasedSectionRollsForTheNextRelease(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// A release commit empties [Unreleased]; there is nothing to roll until the next entry lands.
 	if n, err := unreleasedEntries(string(body)); err != nil {
 		t.Fatal(err)
 	} else if n == 0 {
