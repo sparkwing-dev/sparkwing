@@ -20,13 +20,10 @@ unlock.
 
 ## [Unreleased]
 
-## [v0.68.1] - 2026-10-30
 ### Changed
 
-- **scaffold:** `const FallbackSDKVersion` pins v0.68.0, so a fresh scaffold compiles against that release.
-- **release:** The schema changelog gate compares the neutral SQL baseline, so patch-release previews no longer fail on removed dialect-specific files.
-
-- **TypeScript SDK:** Windows pipelines accept valid protocol pipes instead of refusing startup with `protocol descriptor must be a pipe`. Native release verification prints captured Go test failures.
+- **scaffold:** `const FallbackSDKVersion` pins v0.68.1, so a fresh scaffold compiles against that release.
+- **TypeScript SDK:** The npm package names this repository, which npm provenance requires. Publication refuses major versions above 0, a name or version that does not match the release, and a `latest` tag that would move backwards.
 
 ### Fixed
 
@@ -45,6 +42,17 @@ unlock.
   ordinal, including `attempt=2`.
 - **teams:** Invitations at the free member cap warn with the configured limit and remedy. Acceptance refusals keep those details in the API and console. The cap remains enforced at acceptance.
 - **storage:** Quota refusals name the tier or override, limit, usage and requested growth, with funding, monthly reset and support remedies.
+
+## [v0.68.1] - 2026-10-30
+### Changed
+
+- **scaffold:** `const FallbackSDKVersion` pins v0.68.0, so a fresh scaffold compiles against that release.
+- **release:** The schema changelog gate compares the neutral SQL baseline, so patch-release previews no longer fail on removed dialect-specific files.
+
+- **TypeScript SDK:** Windows pipelines accept valid protocol pipes instead of refusing startup with `protocol descriptor must be a pipe`. Native release verification prints captured Go test failures.
+
+### Fixed
+
 - **release:** Schema and wire changelog gates fetch a previous release tag missing from the job checkout. Failed fetches name that checkout and show a recovery command.
 
 ## [v0.68.0] - 2026-10-30

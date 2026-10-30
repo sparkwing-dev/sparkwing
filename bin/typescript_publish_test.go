@@ -17,9 +17,9 @@ import (
 
 type publicationCase struct {
 	name, version, packedVersion, packedName, packedRepo, tag string
-	metadata, status, versions, versionsStatus    string
-	dryRunStatus, publishStatus, failure          string
-	success, publish, preview                     bool
+	metadata, status, versions, versionsStatus                string
+	dryRunStatus, publishStatus, failure                      string
+	success, publish, preview                                 bool
 }
 
 func TestTypeScriptPublicationRequiresAnExactImmutablePackage(t *testing.T) {
