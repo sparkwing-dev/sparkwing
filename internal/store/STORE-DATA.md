@@ -743,6 +743,11 @@ bookkeeping. Global launcher snapshots may visit teams in observation or
 capability order without imposing the writer's sorted acquisition order.
 Warnings record financial holds and drain deadlines without touching work.
 
+An internal Cloud launcher synchronization failure records a safe diagnostic in
+`runs.error` for its live pending plan awards. Existing execution errors are
+preserved. Run transitions and owner requeue clear the diagnostic when work
+resumes. A healthy launcher poll performs no diagnostic write.
+
 `lock_order.go` defines the canonical tiers and comparator. Authority and unit
 batch locking use it. The acquisition-sequence test checks actual SQL against
 that order with shuffled authority and unit inputs.

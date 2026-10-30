@@ -2,8 +2,12 @@ package controller
 
 import (
 	"context"
+	"errors"
+	"log/slog"
+	"net/http"
 	"slices"
 
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/routepolicy"
@@ -43,6 +47,7 @@ func (s *EngineController) syncLauncher(ctx context.Context, a capability.Author
 type storeLauncherSync struct {
 	store interface {
 		ReconcileLauncherAwards(context.Context, capability.AuthorityRef, []capability.LauncherObservation, []capability.LeaseRef, []capability.LeaseRef, []capability.LeaseRef, []capability.LauncherActivation) ([]store.LauncherAward, []store.LauncherPreparation, error)
+		RecordLauncherSyncFailure(context.Context, capability.AuthorityRef) error
 	}
 }
 
@@ -64,6 +69,12 @@ func (s storeLauncherSync) ReadLauncherSync(ctx context.Context, ref capability.
 		}
 	}
 	awards, prepared, err := s.store.ReconcileLauncherAwards(ctx, ref, observed, reservations, body.Preparing, rejected, body.Activations)
+	var refusal *apierr.Error
+	if err != nil && ctx.Err() == nil && (!errors.As(err, &refusal) || apierr.Status(refusal.Code) >= http.StatusInternalServerError) {
+		if diagnosticErr := s.store.RecordLauncherSyncFailure(ctx, ref); diagnosticErr != nil {
+			slog.ErrorContext(ctx, "record launcher reconciliation diagnostic", "err", diagnosticErr)
+		}
+	}
 	if err != nil {
 		return controllerwire.LauncherSyncResponse{}, err
 	}

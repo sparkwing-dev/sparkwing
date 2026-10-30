@@ -465,7 +465,7 @@ func writeOwnerRecoveryTx(ctx context.Context, tx *storeTx, target expiredUnit, 
 	if err != nil {
 		return err
 	}
-	if _, err := tx.execContext(ctx, `UPDATE runs SET state_seq=state_seq+1,state_digest=?,state_actor=? WHERE team=? AND id=?`, digest, actorJSON, target.team, target.ref.RunID); err != nil {
+	if _, err := tx.execContext(ctx, `UPDATE runs SET state_seq=state_seq+1,state_digest=?,state_actor=?,error=CASE WHEN error=? THEN '' ELSE error END WHERE team=? AND id=?`, digest, actorJSON, launcherSyncFailure, target.team, target.ref.RunID); err != nil {
 		return err
 	}
 	return appendStateEventTx(ctx, tx, target.team, runspec.NodeRef{RunID: target.ref.RunID}, "run_requeued", run.StateSeq+1, payload, now)
