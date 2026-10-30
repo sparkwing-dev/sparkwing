@@ -103,7 +103,7 @@ func TestDocsCoverAuthoritativeEnvironmentPolicy(t *testing.T) {
 }
 
 func TestMigrationGuidanceUsesSealedRunIntake(t *testing.T) {
-	raw, err := docs.ReadRaw("migrations/_unreleased")
+	raw, err := docs.ReadRaw("migrations/v0.68.0")
 	if err != nil {
 		t.Fatal(err)
 	}

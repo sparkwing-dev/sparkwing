@@ -18,8 +18,8 @@ import (
 
 func TestSchemaDocumentationNamesBaseline(t *testing.T) {
 	for path, claim := range map[string]string{
-		"../../CHANGELOG.md":                   "schema baseline advances to version %d",
-		"../../docs/migrations/_unreleased.md": "schema baseline moves to version %d",
+		"../../CHANGELOG.md":               "schema baseline advances to version %d",
+		"../../docs/migrations/v0.68.0.md": "schema baseline moves to version %d",
 	} {
 		raw, err := os.ReadFile(path)
 		if err != nil {
