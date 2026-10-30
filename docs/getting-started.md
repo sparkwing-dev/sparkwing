@@ -318,6 +318,13 @@ func (j *Build) Work(w *sw.Work) (*sw.WorkStep, error) {
 //     }
 ```
 
+Sparkwing Cloud includes the Docker CLI, buildx, and Compose on amd64 and arm64.
+`docker build`, `docker run`, and `docker compose` use the job's Docker sidecar
+through the supplied `DOCKER_HOST`. Job commands run as root inside a user
+namespace, and `/tmp` is writable by package-manager users, so `apt-get install`
+works. The pod and sidecar remain unprivileged. On a self-hosted runner, install
+the Docker client and plugins and configure access to a Docker daemon.
+
 Trivial single-step pipelines pass a `func(ctx) error` straight to `sw.Job`:
 
 ```go

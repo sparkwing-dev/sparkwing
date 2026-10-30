@@ -57,6 +57,10 @@ func productionRuntime(version string) clusterRuntime {
 		}},
 		Bootstrap: BootstrapRuntime{
 			Source: func(_ context.Context, options BootstrapOptions) (launcher.SourceInit, error) {
+				// safety: emptyDir hides /tmp's sticky permissions, and apt creates files as an unprivileged user.
+				if err := os.Chmod(filepath.Dir(options.SourceDir), os.ModeSticky|0o777); err != nil {
+					return launcher.SourceInit{}, err
+				}
 				return launcher.SourceInit{Bind: func(_ context.Context, award launcher.CloudJobAward) (source.Options, func() error, error) {
 					access, err := client.NewSourceAccess(client.EngineOptions{URL: options.ControllerURL, Bearer: fixedBearer(string(award.Bootstrap))}, string(award.Binding.RunID), award.Source)
 					return source.Options{Access: access, Base: procenv.Base{Ambient: os.Environ(), Masker: secrets.NewMasker()}}, nil, err
@@ -152,7 +156,7 @@ func productionHostingAt(home, version string, connection client.EngineOptions, 
 			Admission:    nodehost.ComposeStartGate(state, machineAdmission, false),
 			SubmittedEnv: unit.SubmittedEnv, SubmitAccept: submitted,
 			Home: home, Store: state, Parent: private, Bindings: private, Principal: principal, Refresh: refresh, Local: store.OwnerCanExecute(principal),
-			Source: source.Options{PreparedCheckout: checkout, Engines: engines, Access: access, SDK: engineid.GoSDK, Workspace: filepath.Join(home, "workspaces"), Target: releaseasset.Target{Binary: releaseasset.Sparkwing, GOOS: runtime.GOOS, GOARCH: runtime.GOARCH}, GitAccess: ownerGitAccess(unit.OwnerMachine), Base: runnerInstallBase(unit.OwnerMachine, modules)},
+			Source: source.Options{PreparedCheckout: checkout, Engines: engines, Access: access, SDK: engineid.GoSDK, Workspace: filepath.Join(home, "workspaces"), Target: releaseasset.Target{Binary: releaseasset.Sparkwing, GOOS: runtime.GOOS, GOARCH: runtime.GOARCH}, GitAccess: ownerGitAccess(unit.OwnerMachine), Base: runnerInstallBase(unit.OwnerMachine, checkout, modules)},
 			Renew: func(ctx context.Context, _ string, computing bool) (runstate.LeaseBeat, error) {
 				return state.RenewOwner(ctx, runstate.Actor{}, computing)
 			},
@@ -200,8 +204,12 @@ func ownerGitAccess(owner bool) source.GitAccess {
 }
 
 // perf: compiles keep the runner's GOCACHE and GOMODCACHE, as a local run does, so the cache volume stays warm.
-func runnerInstallBase(owner bool, modules string) procenv.Base {
-	return procenv.Base{OwnerMachine: owner, Ambient: runnerToolEnvironment(modules), SubmitEnvAllow: []string{"GOCACHE", "GOMODCACHE"}, Masker: secrets.NewMasker()}
+func runnerInstallBase(owner bool, checkout, modules string) procenv.Base {
+	allow := []string{"GOCACHE", "GOMODCACHE"}
+	if checkout != "" {
+		allow = append(allow, "DOCKER_HOST")
+	}
+	return procenv.Base{OwnerMachine: owner, Ambient: runnerToolEnvironment(modules), SubmitEnvAllow: allow, Masker: secrets.NewMasker()}
 }
 
 func runnerToolEnvironment(modules string) []string {

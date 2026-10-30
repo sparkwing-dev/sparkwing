@@ -27,6 +27,8 @@ unlock.
 
 ### Fixed
 
+- **Cloud:** Runner images include pinned, checksum-verified Docker CLI, buildx, and Compose binaries for amd64 and arm64. Pipeline processes keep the sidecar's `DOCKER_HOST`, and `/tmp` supports package managers that create temporary files as an unprivileged user.
+
 - **GitHub App:** Existing-installation discovery survives canceled requests and GitHub API failures within the original browser session and team. The callback navigates once to the picker, and client cancellations log at info level. Connection refusals show their reason without blaming GitHub ownership. An already-used or expired connection explains how to start again.
 - **Cloud:** Unsupported size labels fail at admission or planning with the valid catalogue sizes. Remote requests that mark source as a working tree without a local checkout fail at intake with snapshot instructions instead of repeatedly losing launcher leases. Uploaded committed snapshots remain supported.
 - **GitHub App:** Release subscription refusals name the required `release_tags` filter in their HTTP 400 response

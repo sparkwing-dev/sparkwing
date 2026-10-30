@@ -1,5 +1,5 @@
-// Package docker is the sparkwing SDK's Docker-shelling helper layer:
-// build, push, login, and deterministic tag computation.
+// Package docker provides build, push, login, and container helpers using
+// the Docker CLI and buildx bundled in Sparkwing Cloud.
 //
 // Free functions, (T, error) returns, no must-variants. Shell-outs
 // are context-aware so cancellation and deadlines propagate. Secrets
