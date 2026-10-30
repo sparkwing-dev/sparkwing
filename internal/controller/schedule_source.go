@@ -64,7 +64,7 @@ func (s *Server) ResolveScheduleSource(ctx context.Context, row store.CronSchedu
 		return request, err
 	}
 	request.Git, request.Source = git, code
-	if row.LockedRef == "" && row.Where != store.CronWhereLocal && s.githubApp != nil && strings.HasPrefix(string(request.Git.Repository.Key), "gh:") {
+	if row.Where != store.CronWhereLocal && s.githubApp != nil && strings.HasPrefix(string(request.Git.Repository.Key), "gh:") {
 		repo, err := s.githubScheduleRepository(ctx, row)
 		if err != nil {
 			return request, err
@@ -76,7 +76,8 @@ func (s *Server) ResolveScheduleSource(ctx context.Context, row store.CronSchedu
 		request.Git.RepositoryName = runspec.Optional[string]{Set: true, Value: repo.FullName}
 	}
 
-	return request, nil
+	_, request.SourceCredentialVerified, err = s.verifyIntakeSourceCredential(ctx, row.Team, request)
+	return request, err
 }
 
 // safety: one App lookup reports id, GitHub-cased owner/name and head branch together, so a

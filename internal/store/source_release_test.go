@@ -24,6 +24,8 @@ func sourceReleaseUnitFixture(t *testing.T, kind capability.UnitKind) (*Tenant, 
 	t.Helper()
 	s, demand := unitClaimFixture(t)
 	fundUnitClaim(t, s)
+	rewriteSchemaExec(t, s.db, `UPDATE capabilities SET created_by='owner' WHERE prefix='runner'`)
+	setMachineOrigin(t, s, "runner", &CapabilityOrigin{Kind: capability.ProvisionMachine, RegistrationID: "runner:a:runner"})
 	demand.Target = &UnitRef{Kind: kind, RunID: "run"}
 	if kind == capability.UnitNode {
 		demand.Target.NodeID = "job"
@@ -37,23 +39,29 @@ func sourceReleaseUnitFixture(t *testing.T, kind capability.UnitKind) (*Tenant, 
 		rewriteSchemaExec(t, s.db, `UPDATE runs SET dispatch='controller'`)
 		rewriteSchemaExec(t, s.db, `UPDATE triggers SET unit_kind='plan'`)
 	}
-	claim, err := s.AsOperator().ClaimUnit(t.Context(), demand)
-	if err != nil {
-		t.Fatal(err)
-	}
 	tenant := &Tenant{s: s, team: "a"}
 	run, err := tenant.ReadRun(t.Context(), "run")
 	if err != nil {
 		t.Fatal(err)
 	}
 	run.Request.Request.Source.Location.RemoteURL = "https://github.com/acme/repo"
+	run.Request.Provenance, err = run.Request.Provenance.FetchedFrom(1, "acme/repo", "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	run.Request.Provenance, err = run.Request.Provenance.WithSourceCredentialVerified()
+	if err != nil {
+		t.Fatal(err)
+	}
 	raw, err := json.Marshal(run.Request)
 	if err != nil {
 		t.Fatal(err)
 	}
 	rewriteSchemaExec(t, s.db, `UPDATE runs SET request_json=? WHERE id='run'`, raw)
-	rewriteSchemaExec(t, s.db, `UPDATE capabilities SET created_by='owner' WHERE prefix='runner'`)
-	setMachineOrigin(t, s, "runner", &CapabilityOrigin{Kind: capability.ProvisionMachine, RegistrationID: "runner:a:runner"})
+	claim, err := s.AsOperator().ClaimUnit(t.Context(), demand)
+	if err != nil {
+		t.Fatal(err)
+	}
 	rewriteSchemaExec(t, s.db, `INSERT INTO git_credentials(host_wide,id,team,host,kind,secret,confirmed_at,created_at,updated_at) VALUES (1,'credential','a','github.com','https','encrypted-secret',1,1,1)`)
 	s.claimProfiles = claimProfileFake{profile: match.Profile{Location: "remote"}}
 	if kind == capability.UnitPlan {
@@ -120,7 +128,7 @@ func TestSourceReleaseDerivesFactsAndCommitsAudit(t *testing.T) {
 }
 
 func TestSourceReleaseRefusesChangedAuthorityBeforeReleasing(t *testing.T) {
-	for _, problem := range []string{"team", "revoked", "parent_revoked", "lease", "generation", "holder", "started", "cancelled", "finished", "deadline", "personal", "unregistered", "unconfirmed_ssh", "credential_host", "repository", "enrollment", "audit", "commit"} {
+	for _, problem := range []string{"team", "revoked", "parent_revoked", "lease", "generation", "holder", "started", "cancelled", "finished", "deadline", "personal", "unregistered", "unconfirmed_ssh", "credential_host", "repository", "audit", "commit"} {
 		t.Run(problem, func(t *testing.T) {
 			tenant, auth := sourceReleaseFixture(t)
 			s := tenant.s
@@ -146,21 +154,20 @@ func TestSourceReleaseRefusesChangedAuthorityBeforeReleasing(t *testing.T) {
 			case "deadline":
 				rewriteSchemaExec(t, s.db, `UPDATE triggers SET expires_at=?`, s.now().UnixNano())
 			case "personal":
-				setMachineOrigin(t, s, "runner", &CapabilityOrigin{Personal: true, Kind: capability.ProvisionMachine, RegistrationID: "runner:a:runner"})
+				setSourceHost(t, tenant, auth, &capability.HostFacts{Kind: capability.HostPersonal})
 			case "unregistered":
-				setMachineOrigin(t, s, "runner", nil)
+				setSourceHost(t, tenant, auth, nil)
 			case "unconfirmed_ssh":
 				rewriteSchemaExec(t, s.db, `UPDATE git_credentials SET kind='ssh',confirmed_at=NULL`)
 			case "credential_host":
 				rewriteSchemaExec(t, s.db, `UPDATE git_credentials SET host='other.example'`)
 			case "repository":
-				accept, err := match.ParseAccept([]string{"github.com/other/*"})
+				run, err := tenant.ReadRun(t.Context(), "run")
 				if err != nil {
 					t.Fatal(err)
 				}
-				s.claimProfiles = claimProfileFake{profile: match.Profile{Accept: accept}}
-			case "enrollment":
-				s.claimProfiles = nil
+				run.Request.Request.Git.Repository.Key = "gh:999"
+				setRunRequest(t, tenant, run.Request)
 			case "audit":
 				rewriteSchemaExec(t, s.db, `CREATE TRIGGER refuse_source_audit BEFORE INSERT ON audit_events BEGIN SELECT RAISE(ABORT,'audit refused'); END`)
 			case "commit":
@@ -199,15 +206,13 @@ func TestSourceReleaseCannotWidenPersistedFacts(t *testing.T) {
 	}
 }
 
-func TestSourceReleaseRechecksLeaseAfterEnrollment(t *testing.T) {
+func TestSourceReleaseRefusesExpiredLease(t *testing.T) {
 	tenant, auth := sourceReleaseFixture(t)
 	row, err := tenant.ReadNode(t.Context(), runspec.NodeRef{RunID: "run", NodeID: "job"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	tenant.s.claimProfiles = claimProfileFake{profile: match.Profile{Location: "remote"}, before: func() {
-		tenant.s.clock = func() time.Time { return *row.LeaseExpiresAt }
-	}}
+	tenant.s.clock = func() time.Time { return *row.LeaseExpiresAt }
 	credential, audit, err := tenant.ReleaseSourceCredential(t.Context(), auth)
 	if err == nil || credential.Secret != "" || audit.ID != "" {
 		t.Fatal("release outlived the locked lease")
@@ -217,7 +222,7 @@ func TestSourceReleaseRechecksLeaseAfterEnrollment(t *testing.T) {
 
 func TestSourceReleaseCannotSubstituteCloudForAPersonalMachine(t *testing.T) {
 	tenant, auth := sourceReleaseFixture(t)
-	setMachineOrigin(t, tenant.s, "runner", &CapabilityOrigin{Personal: true, Kind: capability.ProvisionMachine, RegistrationID: "runner:a:runner"})
+	setSourceHost(t, tenant, auth, &capability.HostFacts{Kind: capability.HostPersonal})
 	auth.Principal.Capability.Billing = &capability.BillingProvenance{ExecutorClass: "cloud"}
 	tenant.s.claimProfiles = claimProfileFake{profile: match.Profile{Name: "cloud", Class: match.ClassCloud, Location: "cloud", Labels: []string{"class=cloud", "location=cloud"}}}
 	credential, audit, err := tenant.ReleaseSourceCredential(t.Context(), auth)
@@ -231,11 +236,15 @@ func TestSourceReleaseNeverReachesAPersonalMachineProperty(t *testing.T) {
 	property := func(personal, registered, ssh bool) bool {
 		tenant, auth := sourceReleaseFixture(t)
 		s := tenant.s
-		var origin *CapabilityOrigin
+		var host *capability.HostFacts
 		if registered {
-			origin = &CapabilityOrigin{Personal: personal, Kind: capability.ProvisionMachine, RegistrationID: "runner:a:runner"}
+			kind := capability.HostSelfHosted
+			if personal {
+				kind = capability.HostPersonal
+			}
+			host = &capability.HostFacts{Kind: kind, MachineID: "runner"}
 		}
-		setMachineOrigin(t, s, "runner", origin)
+		setSourceHost(t, tenant, auth, host)
 		if ssh {
 			rewriteSchemaExec(t, s.db, `UPDATE git_credentials SET kind='ssh'`)
 		}
@@ -247,18 +256,14 @@ func TestSourceReleaseNeverReachesAPersonalMachineProperty(t *testing.T) {
 		if registered && !personal {
 			return err == nil && credential.ID == "credential" && audit.MachineID == "runner" && released == 1
 		}
-		var failure *apierr.Error
-		return errors.As(err, &failure) && failure.Details["reason"] == apierr.ReasonPersonalMachine && credential.Secret == "" && audit.ID == "" && released == 0
+		return err != nil && credential.Secret == "" && audit.ID == "" && released == 0
 	}
 	if err := quick.Check(property, quicktest.Config(&quick.Config{MaxCount: 32})); err != nil {
 		t.Fatal(err)
 	}
 }
 
-// An uploaded run names its repository but supplies its own code, so a
-// credential scoped to that repository would reach code the repository never
-// held; it gets only a host-wide credential.
-func TestSourceReleaseGivesRepositoryCredentialsOnlyToFetchedCode(t *testing.T) {
+func TestSourceReleaseRequiresSealedRepositoryAndIntakeCompare(t *testing.T) {
 	tenant, auth := sourceReleaseFixture(t)
 	authorityMember(t, tenant.s, "owner", RoleReader)
 	rewriteSchemaExec(t, tenant.s.db, `INSERT INTO git_credentials(host_wide,repository_key,id,team,host,kind,secret,confirmed_at,created_at,updated_at) VALUES (0,'gh:1','scoped','a','github.com','https','scoped-secret',1,1,1)`)
@@ -271,10 +276,6 @@ func TestSourceReleaseGivesRepositoryCredentialsOnlyToFetchedCode(t *testing.T) 
 		t.Fatal(err)
 	}
 	proven := run.Request
-	proven.Provenance, err = proven.Provenance.FetchedFrom(1, "acme/repo", "", "")
-	if err != nil {
-		t.Fatal(err)
-	}
 	if proven.Provenance.ProvenRepository() != proven.Request.Git.Repository.Key {
 		t.Fatalf("fixture proves %q, want its own repository %q", proven.Provenance.ProvenRepository(), proven.Request.Git.Repository.Key)
 	}
@@ -282,33 +283,54 @@ func TestSourceReleaseGivesRepositoryCredentialsOnlyToFetchedCode(t *testing.T) 
 	if credential, err := release(); err != nil || credential.ID != "scoped" {
 		t.Fatalf("a run proving its repository did not get that repository's credential: %q %v", credential.ID, err)
 	}
-	for name, supply := range map[string]func(*runspec.Source){
-		"upload": func(s *runspec.Source) {
-			s.BundleDigest = runspec.Optional[string]{Set: true, Value: "sha256:" + strings.Repeat("a", 64)}
+	for name, proof := range map[string]func() (runspec.Provenance, error){
+		"asserted remote commit": func() (runspec.Provenance, error) {
+			return runspec.AssertedProvenance(runspec.PrincipalWriter("account", "owner"), "main", fixtureFeatureSHA, "ci")
 		},
-		"working tree":   func(s *runspec.Source) { s.WorkingTree = true },
-		"local checkout": func(s *runspec.Source) { s.Location.LocalCheckout = "/work/repo" },
+		"proven without compare": func() (runspec.Provenance, error) {
+			p, err := runspec.AssertedProvenance(runspec.PrincipalWriter("account", "owner"), "main", fixtureFeatureSHA, "ci")
+			if err != nil {
+				return p, err
+			}
+			return p.FetchedFrom(1, "acme/repo", "", "")
+		},
 	} {
 		t.Run(name, func(t *testing.T) {
-			run, err := tenant.ReadRun(t.Context(), "run")
+			unproven := proven
+			unproven.Provenance, err = proof()
 			if err != nil {
 				t.Fatal(err)
 			}
-			fetched := run.Request
-			supplied := fetched
-			supply(&supplied.Request.Source)
-			setRunRequest(t, tenant, supplied)
-			defer setRunRequest(t, tenant, fetched)
-			if credential, err := release(); err != nil || credential.ID != "credential" {
-				t.Fatalf("supplied code got %q %v, want only the host-wide credential", credential.ID, err)
-			}
-			rewriteSchemaExec(t, tenant.s.db, `UPDATE git_credentials SET host_wide=0,repository_key='gh:2' WHERE id='credential'`)
-			defer rewriteSchemaExec(t, tenant.s.db, `UPDATE git_credentials SET host_wide=1,repository_key='' WHERE id='credential'`)
+			setRunRequest(t, tenant, unproven)
+			defer setRunRequest(t, tenant, proven)
 			var refused *apierr.Error
 			if credential, err := release(); !errors.Is(err, ErrNotFound) || !errors.As(err, &refused) || !strings.Contains(refused.Message, "has not proven") {
-				t.Fatalf("supplied code without a host-wide credential got %q %v", credential.ID, err)
+				t.Fatalf("unproven code got %q %v", credential.ID, err)
 			}
 		})
+	}
+}
+
+func setSourceHost(t *testing.T, tenant *Tenant, auth capability.Authorized, host *capability.HostFacts) {
+	t.Helper()
+	if err := tenant.s.inTx(t.Context(), func(tx *storeTx) error {
+		record, err := tx.operator.loadCapabilityRecordTx(t.Context(), tx, auth.Principal.Authority.ID)
+		if err != nil {
+			return err
+		}
+		record.Value.Host = host
+		body, err := json.Marshal(record)
+		if err != nil {
+			return err
+		}
+		kind := capability.HostKind("")
+		if host != nil {
+			kind = host.Kind
+		}
+		_, err = tx.execContext(t.Context(), `UPDATE capabilities SET authority_json=?,host_kind=? WHERE prefix=?`, body, kind, auth.Principal.Authority.ID)
+		return err
+	}); err != nil {
+		t.Fatal(err)
 	}
 }
 

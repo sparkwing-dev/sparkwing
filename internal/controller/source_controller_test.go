@@ -47,6 +47,14 @@ func TestSourceControllerUsesStoreAuditAndBoundCipher(t *testing.T) {
 				t.Fatal(err)
 			}
 			run.Request.Request.Source.Location.RemoteURL = "https://github.com/acme/repo"
+			run.Request.Provenance, err = run.Request.Provenance.FetchedFrom(1, "acme/repo", "", "")
+			if err != nil {
+				t.Fatal(err)
+			}
+			run.Request.Provenance, err = run.Request.Provenance.WithSourceCredentialVerified()
+			if err != nil {
+				t.Fatal(err)
+			}
 			raw, err := json.Marshal(run.Request)
 			if err != nil {
 				t.Fatal(err)

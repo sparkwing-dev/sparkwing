@@ -27,7 +27,6 @@ type SourceReleaseRequest struct {
 	CredentialID     string
 	Host             string
 	GitHubApp        bool
-	RepositoryProven bool
 	SSH              bool
 	SSHHostConfirmed bool
 }
