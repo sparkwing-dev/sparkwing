@@ -2,10 +2,11 @@ package controller
 
 import (
 	"encoding/json"
-	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"net/http"
 	"net/url"
 	"testing"
+
+	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 )
 
 func TestJobAttemptHTTPPagesKeepNumericOrder(t *testing.T) {
