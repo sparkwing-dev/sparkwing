@@ -128,23 +128,44 @@ func TestLintSchemaBreak_SchemaMentionWithoutBreakingMarkerFails(t *testing.T) {
 
 func TestSchemaSQLDrift(t *testing.T) {
 	same := map[string]string{
-		"internal/store/schema_sqlite.sql":   "CREATE TABLE runs (id TEXT);\n",
-		"internal/store/schema_postgres.sql": "CREATE TABLE runs (id text);\n",
+		"internal/store/schema.sql": "CREATE TABLE runs (id TEXT);\n",
 	}
 	if err := schemaSQLDrift("v0.70.0", 1, same, same); err != nil {
 		t.Fatalf("identical baselines = %v, want none", err)
 	}
 	edited := map[string]string{
-		"internal/store/schema_sqlite.sql":   "CREATE TABLE runs (run_id TEXT);\n",
-		"internal/store/schema_postgres.sql": same["internal/store/schema_postgres.sql"],
+		"internal/store/schema.sql": "CREATE TABLE runs (run_id TEXT);\n",
 	}
 	err := schemaSQLDrift("v0.70.0", 1, same, edited)
 	if err == nil || !strings.Contains(err.Error(), "schema SQL changed without bumping the schema version") ||
-		!strings.Contains(err.Error(), "schema_sqlite.sql") || strings.Contains(err.Error(), "schema_postgres.sql") {
-		t.Fatalf("an edited SQLite baseline = %v, want the drift refusal naming only that file", err)
+		!strings.Contains(err.Error(), "schema.sql") {
+		t.Fatalf("an edited neutral baseline = %v, want the drift refusal naming that file", err)
 	}
 	if err := schemaSQLDrift("v0.70.0", 1, map[string]string{}, same); err == nil {
 		t.Fatal("a tag without the baseline files passed the drift check")
+	}
+}
+
+func TestSchemaGateComparesTheNeutralBaseline(t *testing.T) {
+	repo := seedReleaseRepo(t)
+	if err := os.MkdirAll(filepath.Join(repo, "internal", "store"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, filepath.Join(repo, storeSchemaSourcePath), "package store\n\nconst expectedSchemaVersion = 26\n")
+	const baseline = "internal/store/schema.sql"
+	writeFile(t, filepath.Join(repo, baseline), "CREATE TABLE runs (id TEXT);\n")
+	gitRun(t, repo, "add", storeSchemaSourcePath, baseline)
+	gitRun(t, repo, "commit", "-m", "add neutral schema")
+	gitRun(t, repo, "tag", "v0.1.0")
+	gitRun(t, repo, "push", "origin", "main", "--tags")
+	if err := checkSchemaBreak(t.Context(), repo, "v0.1.1"); err != nil {
+		t.Fatalf("unchanged neutral baseline refused: %v", err)
+	}
+	writeFile(t, filepath.Join(repo, baseline), "CREATE TABLE runs (run_id TEXT);\n")
+	if err := checkSchemaBreak(t.Context(), repo, "v0.1.1"); err == nil ||
+		!strings.Contains(err.Error(), "schema SQL changed without bumping the schema version") ||
+		!strings.Contains(err.Error(), baseline) {
+		t.Fatalf("edited neutral baseline = %v, want the schema drift refusal", err)
 	}
 }
 

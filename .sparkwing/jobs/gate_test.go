@@ -69,6 +69,19 @@ func TestGateReservesAndBoundsItsCPU(t *testing.T) {
 	}
 }
 
+func TestGateDeadlineAllowsTheHostedPostgresTail(t *testing.T) {
+	plan := inspectPlan(t, func(plan *sparkwing.Plan) error {
+		return (&Gate{}).Plan(t.Context(), plan, sparkwing.NoInputs{}, sparkwing.RunContext{Pipeline: "gate"})
+	})
+	// safety: the hosted full-suite chain took 35m32s before Postgres could start.
+	const beforePostgres = 35*time.Minute + 32*time.Second
+	const cleanupMargin = 2 * time.Minute
+	want := beforePostgres + storePostgresPrePushTimeout + cleanupMargin
+	if got := time.Duration(plan.Jobs[0].TimeoutMS) * time.Millisecond; got < want {
+		t.Fatalf("gate deadline %s cuts off Postgres after the measured hosted test chain; need at least %s", got, want)
+	}
+}
+
 func TestGateOverlapsTestAndRaceOnlyOnFourCPUs(t *testing.T) {
 	for _, cpus := range []int{3, 8} {
 		w := inspectWork(t, testJob(func(w *sparkwing.Work) (*sparkwing.WorkStep, error) { return (&Gate{}).workForCPU(w, cpus) }))

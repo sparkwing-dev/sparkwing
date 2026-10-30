@@ -158,6 +158,7 @@ credential model in `docs/auth.md`, and the decision log
 | Missing local secrets carry local repair commands | `secret_preflight.go`: `secretPreflightTx`, `secretPreflightError.detail` | `secret_preflight_local_test.go`: `TestLocalSecretPreflightGivesLocalSetCommand` |
 | Required-secret plan refusals finish unaccepted runs | `internal/nodehost/owner.go`: `OwnerHost.accept`, `OwnerHost.preparationFailure` | `internal/nodehost/owner_secret_preflight_test.go`: `TestOwnerHostMissingRequiredSecretFinishesUnacceptedRun` |
 | Repository release home is checked before intake opens the store | `.sparkwing/jobs/release.go`: release factory captures `requireReleaseHome` and `Plan` returns a refusal during discovery | `.sparkwing/jobs/release_home_test.go`: `TestReleaseRefusesOperationalHomeDuringPlanning` |
+| Release schema checks compare the neutral SQL baseline with the previous tag | `.sparkwing/jobs/release.go`: `checkSchemaBreak`, `schemaSQLDrift` | `.sparkwing/jobs/release_schema_changelog_test.go`: `TestSchemaGateComparesTheNeutralBaseline` |
 
 ## Test and gate workflow
 
