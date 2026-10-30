@@ -341,10 +341,38 @@ func TestRunLogsRendersPersistedRunnerAndRetryPayloads(t *testing.T) {
 }
 
 func TestRunLogsPreservesApplicationJSON(t *testing.T) {
-	for _, line := range []string{`{"answer":42}`, `{"ts":"application time","msg":"application message"}`} {
+	for _, line := range []string{`{"answer":42}`, `{"level":"info","answer":42}`, `{"attrs":{"answer":42}}`, `{"ts":"application time","msg":"application message"}`} {
 		var out bytes.Buffer
 		if err := writeLogRecord(&out, jobLogRecord("r1", line), "plain", false); err != nil || out.String() != line+"\n" {
 			t.Fatalf("application output changed: %q, %v", &out, err)
+		}
+	}
+}
+
+func TestRunLogsRendersWarningsWithoutTimestampsAndKeepsAttributes(t *testing.T) {
+	for _, tc := range []struct{ line, want string }{
+		{`{"ts":"","level":"warn","msg":"SkipIf predicate exceeded its budget; continuing without skipping","attrs":{"predicate":1}}`, "SkipIf predicate exceeded its budget; continuing without skipping: predicate=1"},
+		{`{"level":"warn","msg":"sparkwing: output withheld because secret declarations were unavailable (1 lines)"}`, "sparkwing: output withheld because secret declarations were unavailable (1 lines)"},
+		{`{"ts":"2026-10-30T17:35:04Z","level":"info","msg":"deploy","attrs":{"Outcome":"accepted","deployment_id":"dep-42"}}`, "deploy: Outcome=accepted deployment_id=dep-42"},
+		{`{"ts":"2026-10-30T17:35:04Z","level":"info","msg":"deploy","attrs":{"deployment":{"Outcome":"accepted","deployment_id":"dep-42"}}}`, "deploy: deployment=Outcome=accepted deployment_id=dep-42"},
+		{`{"ts":"","level":"info","msg":"{\"level\":\"info\",\"msg\":\"application message\"}"}`, `{"level":"info","msg":"application message"}`},
+		{`{"ts":"","event":"checkpoint","attrs":{"attempt":2}}`, "checkpoint: attempt=2"},
+	} {
+		for _, format := range []string{"plain", "pretty", "json"} {
+			for _, search := range []bool{false, true} {
+				var out bytes.Buffer
+				if err := writeLogRecord(&out, jobLogRecord("r1", tc.line), format, search); err != nil {
+					t.Fatal(err)
+				}
+				if format == "json" {
+					var record controllerwire.LogRecord
+					if err := json.NewDecoder(&out).Decode(&record); err != nil || record.Line != tc.line {
+						t.Fatalf("JSON changed runner frame: %+v, %v", record, err)
+					}
+				} else if !strings.HasSuffix(out.String(), tc.want+"\n") {
+					t.Errorf("%s search=%v: got %q, want message %q", format, search, &out, tc.want)
+				}
+			}
 		}
 	}
 }

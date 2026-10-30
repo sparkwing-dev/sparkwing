@@ -181,9 +181,13 @@ func writeLogRecord(out io.Writer, record controllerwire.LogRecord, format strin
 	} else {
 		var frame nodeproto.FrameLog
 		if json.Unmarshal([]byte(line), &frame) == nil {
-			if _, err := time.Parse(time.RFC3339Nano, frame.TS); err == nil {
+			_, timestampError := time.Parse(time.RFC3339Nano, frame.TS)
+			if (frame.Message != "" || frame.Event != "") && (timestampError == nil || frame.Level != "" || frame.Event != "" || frame.Step != "" || len(frame.Attrs) > 0) {
 				line = frame.Message
-				if detail := eventDetail(string(frame.Attrs)); detail != "" {
+				if line == "" {
+					line = frame.Event
+				}
+				if detail := eventValue(frame.Attrs); detail != "" {
 					line += ": " + detail
 				}
 			}
@@ -252,6 +256,10 @@ func eventDetail(payload string) string {
 		}
 		return strings.Join(parts, " ")
 	}
+	return attributeDetail(fields)
+}
+
+func attributeDetail(fields map[string]json.RawMessage) string {
 	keys := slices.Sorted(maps.Keys(fields))
 	parts := make([]string, 0, len(keys))
 	for _, key := range keys {
@@ -265,8 +273,9 @@ func eventValue(raw json.RawMessage) string {
 	if json.Unmarshal(raw, &text) == nil {
 		return text
 	}
-	if len(raw) > 0 && raw[0] == '{' {
-		return eventDetail(string(raw))
+	var fields map[string]json.RawMessage
+	if json.Unmarshal(raw, &fields) == nil {
+		return attributeDetail(fields)
 	}
 	var values []json.RawMessage
 	if json.Unmarshal(raw, &values) == nil {
