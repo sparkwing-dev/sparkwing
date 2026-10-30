@@ -124,7 +124,7 @@ credential model in `docs/auth.md`, and the decision log
 
 | Rule | Owner | Guard test |
 | --- | --- | --- |
-| Cloud Docker client and writable temporary directory | `build/Dockerfile.runner`, `internal/cluster/production_runtime.go`: `runnerInstallBase`, `productionRuntime` | `bin/check-runner-image.sh`, `TestRunnerImageRequiresDockerAndItsPlugins`, `TestCloudProcessesKeepTheSidecarDockerHost`, `TestCloudSourceRestoresTemporaryDirectoryPermissions`, `TestCloudWorkloadsUseTheSidecarSocket` |
+| Cloud Docker client and writable temporary directory | `build/Dockerfile.runner`, `internal/cluster/production_runtime.go`: `runnerInstallBase`, `productionRuntime` | `bin/check-runner-image.sh`, `TestRunnerImageRequiresDockerAndItsPlugins`, `TestCloudProcessesKeepTheSidecarDockerHost`, `TestCloudHostRestoresTemporaryDirectoryPermissions`, `TestCloudWorkloadsUseTheSidecarSocket` |
 | Job lifecycle | `internal/runners/launcher/job.go`: `BuildJob`; `internal/runners/launcher/sync.go`: `Launcher.Sync` | `internal/runners/launcher/launcher_test.go`: `TestSyncAdoptsLiveJobWithoutCreatingAnother`; `internal/runners/launcher/sync_batch_test.go` |
 | Unsupported Cloud sizes fail at intake or planning with the catalogue choices | `pkg/match/cloud_sizes.go`: `ValidateCloudSizeLabels`; `internal/settings/resolve.go`: `validNames` | `internal/settings/cloud_sizes_test.go`: `TestCloudSizeValidationAtRequestAndPlan` |
 | Working-tree sources require a local checkout before queueing; uploaded committed snapshots remain valid | `internal/runspec/seal.go`: `SealRequest` | `internal/store/source_intake_test.go`: `TestAdmissionRefusesRemoteWorkingTreeBeforeQueueing`; `internal/runspec/source_test.go`: `TestSourceSealPreservesLocalWorkingTreesAndRemoteSnapshots` |

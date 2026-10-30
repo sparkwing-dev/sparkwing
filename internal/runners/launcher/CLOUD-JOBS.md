@@ -54,8 +54,8 @@ digests are CEL literals.
   (runner image). Capacity requests run one runner-image container.
 - The runner image includes the Docker CLI, buildx and Compose on amd64 and arm64.
   `DOCKER_HOST=unix:///tmp/docker.sock` survives the pipeline process environment
-  policy and reaches the sidecar through the shared scratch volume. Source
-  initialization restores mode `1777` on that volume before customer code runs,
+  policy and reaches the sidecar through the shared scratch volume. Host
+  startup restores mode `1777` after source checkout and before customer code runs,
   so package managers can create temporary files as unprivileged users.
 - Environment names are `HOME`, `DOCKER_HOST` and the EKS region values.
   No `valueFrom` or `envFrom` is allowed.

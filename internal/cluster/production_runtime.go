@@ -57,16 +57,16 @@ func productionRuntime(version string) clusterRuntime {
 		}},
 		Bootstrap: BootstrapRuntime{
 			Source: func(_ context.Context, options BootstrapOptions) (launcher.SourceInit, error) {
-				// safety: emptyDir hides /tmp's sticky permissions, and apt creates files as an unprivileged user.
-				if err := os.Chmod(filepath.Dir(options.SourceDir), os.ModeSticky|0o777); err != nil {
-					return launcher.SourceInit{}, err
-				}
 				return launcher.SourceInit{Bind: func(_ context.Context, award launcher.CloudJobAward) (source.Options, func() error, error) {
 					access, err := client.NewSourceAccess(client.EngineOptions{URL: options.ControllerURL, Bearer: fixedBearer(string(award.Bootstrap))}, string(award.Binding.RunID), award.Source)
 					return source.Options{Access: access, Base: procenv.Base{Ambient: os.Environ(), Masker: secrets.NewMasker()}}, nil, err
 				}}, nil
 			},
 			Host: func(ctx context.Context, options BootstrapOptions) (launcher.BootstrapHost, func() error, error) {
+				// safety: source checkout tightens the shared /tmp volume; apt needs it writable by unprivileged users.
+				if err := os.Chmod(filepath.Dir(options.SourceDir), os.ModeSticky|0o777); err != nil {
+					return launcher.BootstrapHost{}, nil, err
+				}
 				if err := waitForDocker(ctx, os.Getenv("DOCKER_HOST"), dockerStartup); err != nil {
 					return launcher.BootstrapHost{}, nil, err
 				}
