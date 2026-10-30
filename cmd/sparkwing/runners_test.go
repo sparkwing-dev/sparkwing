@@ -805,12 +805,17 @@ func TestRunnersPersonalEnrollmentRequiresIndependentSessionBeforeSideEffects(t 
 func TestRunnersPersonalEnrollmentUsesEphemeralSession(t *testing.T) {
 	f := newRunnersFixture(t)
 	withStdin(t, "private-independent-session\n")
+	loggedOut := false
 	profileHTTPFixture(t, func(r *http.Request) (int, string) {
 		if r.Header.Get("Authorization") != "Session private-independent-session" {
 			t.Fatalf("enrollment did not use independent consent: %s", r.URL.Path)
 		}
 		if r.Method == http.MethodGet && r.URL.Path == "/api/v1/auth/session" {
 			return 200, `{"csrf_token":"private-csrf"}`
+		}
+		if r.Method == http.MethodPost && r.URL.Path == "/api/v1/auth/logout" && r.Header.Get("Origin") == "https://controller.example" && r.Header.Get("X-CSRF-Token") == "private-csrf" {
+			loggedOut = true
+			return 500, `{"error":"logout unavailable: private-independent-session private-csrf"}`
 		}
 		if r.Method != http.MethodPost || r.URL.Path != "/api/v1/runners" || r.Header.Get("Origin") != "https://controller.example" || r.Header.Get("X-CSRF-Token") != "private-csrf" {
 			t.Fatalf("wrong session enrollment request: %s %s", r.Method, r.URL.Path)
@@ -825,11 +830,23 @@ func TestRunnersPersonalEnrollmentUsesEphemeralSession(t *testing.T) {
 		}
 		return 201, `{"capability":"swk_12345678_runner-secret","prefix":"swk_12345678","team":"team","grants":["nodes.claim","triggers.claim"]}`
 	})
+	var diagnostics string
 	out := captureStdout(t, func() {
-		if err := runRunnersAddArgs([]string{"--profile", "prod", "--runner", "desk", "--personal", "--session-stdin", "--no-service", "--config", f.config, "--output", "json"}); err != nil {
-			t.Fatal(err)
-		}
+		diagnostics = captureStderr(t, func() {
+			if err := runRunnersAddArgs([]string{"--profile", "prod", "--runner", "desk", "--personal", "--session-stdin", "--no-service", "--config", f.config, "--output", "json"}); err != nil {
+				t.Fatal(err)
+			}
+		})
 	})
+	if !loggedOut {
+		t.Fatal("enrollment did not attempt logout")
+	}
+	if !strings.Contains(diagnostics, "warning: could not log out the enrollment session") {
+		t.Fatalf("missing logout failure warning: %q", diagnostics)
+	}
+	if strings.Contains(diagnostics, "private-") || strings.Contains(diagnostics, "runner-secret") {
+		t.Fatalf("credentials reached diagnostics: %q", diagnostics)
+	}
 	config, err := userconfig.ReadConfig(f.config)
 	if err != nil || config.Runner == nil || config.Runner.CredentialsDir == nil {
 		t.Fatalf("personal configuration: %+v %v", config, err)

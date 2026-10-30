@@ -113,6 +113,10 @@ type (
 	}
 )
 
+type auditSessionMint struct {
+	AccountID string `json:"-"`
+}
+
 type auditCredential struct {
 	Operation  auditCredentialOperation `json:"-"`
 	Credential auditDigest              `json:"-"`
@@ -274,6 +278,7 @@ func (auditFirstSuccess) isAuditPayload()         {}
 func (auditRunDeletion) isAuditPayload()          {}
 func (auditApprovalDecision) isAuditPayload()     {}
 func (auditCancellation) isAuditPayload()         {}
+func (auditSessionMint) isAuditPayload()          {}
 func (auditCredential) isAuditPayload()           {}
 func (auditInvitationAcceptance) isAuditPayload() {}
 func (auditMutation) isAuditPayload()             {}
@@ -332,6 +337,10 @@ func (op *Operator) recordAudit(ctx context.Context, tx *storeTx, c auditContext
 		if p.Node != nil {
 			ev.Kind, ev.SubjectID = "job.cancel_requested", p.Node.String()
 		}
+	case auditSessionMint:
+		actorAllowed = c.Actor.system == auditBreakGlass
+		ev.Kind, ev.Account, repeat = "session.break_glass", p.AccountID, true
+		valid = p.AccountID != "" && c.Team != ""
 	case auditCredential:
 		actorAllowed = actorAllowed || c.Actor.system == auditController
 		ev.Kind, ev.SubjectID = string(p.Operation), p.Credential.String()

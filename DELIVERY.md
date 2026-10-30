@@ -677,10 +677,12 @@ file. Other syntax and workflow checks remain active.
   skipped subtest. `sparkwing run integration` still selects
   `Postgres|Pg` only, so the drill can skip there unnoticed.
 - **Kubernetes product path:** `sparkwing run k8s-e2e` proves authenticated
-  webhook intake, runner execution, logs, cancellation, retry, restarts, and
+  uploaded-source intake, runner execution, logs, cancellation, retry, restarts, and
   retained state against an explicit Kubernetes context and caller-supplied
-  image set. It requires an exact namespace/release cleanup allow-list and
-  never creates or deletes cluster infrastructure. This check is manual and
+  image set. It requires a signed multi-team license through
+  `SPARKWING_K8S_E2E_LICENSE_FILE` and an exact namespace/release cleanup
+  allow-list. It never creates or deletes cluster infrastructure. GitHub webhook
+  intake and remote Git fetching need separate evidence. This check is manual and
   opt-in because it uses a real cluster.
 
 ## Decisions before landing

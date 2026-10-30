@@ -118,6 +118,9 @@ func TestRunnersPersonalEnrollmentCLIThroughController(t *testing.T) {
 				args = append(args, "--no-service")
 			}
 			captureStdout(t, func() { err = runRunnersAddArgs(args) })
+			if _, lookupErr := state.AsOperator().LookupSession(t.Context(), session); lookupErr == nil {
+				t.Fatal("enrollment left the stdin account session live")
+			}
 			if mode == "disabled" || mode == "shared" {
 				want := "members_can_add_machines"
 				if mode == "shared" {
@@ -134,6 +137,10 @@ func TestRunnersPersonalEnrollmentCLIThroughController(t *testing.T) {
 			}
 			if (err != nil) != failService {
 				t.Fatalf("enrollment with failed service %v: %v", failService, err)
+			}
+			session, _, _, err = state.AsOperator().CreateAccountSession(t.Context(), store.Account{ID: "member"}, "personal-test", time.Hour)
+			if err != nil {
+				t.Fatal(err)
 			}
 			manager, err := client.NewSessionRunnerTokenManager(t.Context(), client.EngineOptions{URL: "https://controller.example"}, session)
 			if err != nil {
