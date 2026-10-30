@@ -57,7 +57,11 @@ func (s *Server) localNodeSnapshot(w http.ResponseWriter, r *http.Request, a cap
 				return err
 			}
 			sources := map[string]blob.RecordKey{}
+			var recovery *runstate.NodeRow
 			for _, source := range snapshot.Nodes {
+				if string(source.Ref.NodeID) == job.OnFailureOf {
+					recovery = &runstate.NodeRow{Ref: source.Ref, Status: source.Status, Outcome: source.Outcome, Generation: source.Generation}
+				}
 				if source.Ref == node.Ref || source.Status != runstate.StatusDone || source.ManifestRecord == nil || !slices.ContainsFunc(job.Consumes, func(edge nodeproto.ArtifactInput) bool { return runspec.NodeID(edge.Producer) == source.Ref.NodeID }) {
 					continue
 				}
@@ -65,7 +69,7 @@ func (s *Server) localNodeSnapshot(w http.ResponseWriter, r *http.Request, a cap
 			}
 			ancestors := generatorSources(snapshot.Expansions, string(node.Ref.NodeID))
 			snapshot.Nodes = slices.DeleteFunc(snapshot.Nodes, func(row runstate.NodeRow) bool { return row.Ref != node.Ref && !ancestors[string(row.Ref.NodeID)] })
-			writeJSON(w, http.StatusOK, localhostwire.LocalNodeSnapshot{RunSnapshot: snapshot.ExecutionSnapshot(), ArtifactSources: sources})
+			writeJSON(w, http.StatusOK, localhostwire.LocalNodeSnapshot{RunSnapshot: snapshot.ExecutionSnapshot(), ArtifactSources: sources, RecoverySource: recovery})
 			return nil
 		}
 	}

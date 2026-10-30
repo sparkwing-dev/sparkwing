@@ -102,7 +102,7 @@ func TestOwnerHostReportsCurrentComputeOnRenewal(t *testing.T) {
 	})
 }
 
-func TestOwnerHostCancellationStopsSchedulingWithARemoteAttempt(t *testing.T) {
+func TestOwnerHostCancellationDrainsARemoteAttemptBeforeFinishing(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		state, host, input := newOwnerFixture(t, true)
 		state.snapshot.Nodes = []runstate.NodeRow{{Ref: runspec.NodeRef{RunID: runspec.RunID(input.RunID), NodeID: "remote"}, Spec: json.RawMessage(`{"id":"remote"}`), Status: runstate.StatusRunning, ClaimedBy: "personal-machine"}}
@@ -113,7 +113,7 @@ func TestOwnerHostCancellationStopsSchedulingWithARemoteAttempt(t *testing.T) {
 			return runstate.LeaseBeat{CancelRequested: beats.Add(1) > 1}, nil
 		}
 		host.Lease.Observe = func(lease.Beat) {
-			if beats.Load() == 2 {
+			if beats.Load() == 3 {
 				observed <- struct{}{}
 			}
 		}
@@ -128,7 +128,11 @@ func TestOwnerHostCancellationStopsSchedulingWithARemoteAttempt(t *testing.T) {
 			state.mu.Lock()
 			state.snapshot.Run.CancelRequestedAt = &now
 			state.mu.Unlock()
-			<-observed
+			select {
+			case <-observed:
+			case <-ctx.Done():
+				return context.Cause(ctx)
+			}
 			if err := context.Cause(ctx); err != nil {
 				return err
 			}
@@ -139,15 +143,17 @@ func TestOwnerHostCancellationStopsSchedulingWithARemoteAttempt(t *testing.T) {
 			return nil
 		}
 		completion, err := host.Run(t.Context(), input)
-		var cancelled *lease.CancelError
-		if !errors.As(err, &cancelled) || completion.Outcome != "" || state.finished.Transition.RunID != "" || slices.Contains(state.trace, "remote-joined") {
-			t.Fatalf("scheduling suppressed cancellation or finished live remote work: %+v %v trace=%v", completion, err, state.trace)
+		if err != nil || completion.Outcome != "cancelled" || state.finished.Transition.RunID == "" || !slices.Contains(state.trace, "remote-joined") {
+			t.Fatalf("cancellation failed to drain and finish the run: %+v %v trace=%v", completion, err, state.trace)
 		}
 	})
 }
 
-func TestOwnerHostWaitsForAlreadyRequestedRemoteCancellation(t *testing.T) {
+func TestOwnerHostResumesAlreadyRequestedRemoteCancellation(t *testing.T) {
 	state, host, input := newOwnerFixture(t, true)
+	host.Renew = func(context.Context, runstate.Actor, bool) (runstate.LeaseBeat, error) {
+		return runstate.LeaseBeat{CancelRequested: true}, nil
+	}
 	now := time.Now()
 	state.snapshot.Run.CancelRequestedAt = &now
 	state.snapshot.Nodes = []runstate.NodeRow{{Ref: runspec.NodeRef{RunID: runspec.RunID(input.RunID), NodeID: "remote"}, Spec: json.RawMessage(`{"id":"remote"}`), Status: runstate.StatusRunning, ClaimedBy: "personal-machine", CancelRequestedAt: &now}}

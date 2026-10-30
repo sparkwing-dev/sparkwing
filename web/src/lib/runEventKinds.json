@@ -4,6 +4,7 @@
   "run_requeued",
   "run_pending",
   "run_success",
+  "run_dry_run",
   "run_failed",
   "run_cancelled",
   "job_attempt_imported",

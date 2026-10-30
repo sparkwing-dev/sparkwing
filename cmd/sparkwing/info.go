@@ -254,6 +254,7 @@ const agentBlockAuthoring = "### Writing a pipeline\n" +
 	"    shapes: minimal (1 node) | build-test-deploy (3, linear) |\n" +
 	"            ci-pr-check (3, lint+test -> gate) | release (3, linear) |\n" +
 	"            scheduled-report (5, fan-out)\n" +
+	"    TypeScript: --template typescript creates a minimal TypeScript pipeline.\n" +
 	"    --on:   pull_request | push | schedule | manual (combine with a\n" +
 	"            comma: --on push,pull_request)\n" +
 	"    ci-pr-check defaults to pull_request and scheduled-report to schedule;\n" +

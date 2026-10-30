@@ -140,6 +140,28 @@ required because header checks cannot prove that Node can load and use a bridge.
 The bridge source is in [native/protocol.c](native/protocol.c). End users need
 no compiler.
 
+## Local dogfooding
+
+On Linux or macOS, build a local package without Windows bridges:
+
+```sh
+npm ci
+npm run pack:local -- --version <engine-version> --destination <output-directory>
+```
+
+This command builds the SDK and stamps a temporary package with the exact engine
+release version. It leaves the source manifests unchanged. The tarball carries
+`private: true`, so npm refuses publication even with `--ignore-scripts`.
+Use `release:pack` with verified Windows bridges for published packages.
+Local packages support Linux and macOS. They cannot run on Windows.
+
+In the pipeline's package manifest, pin the tarball with
+`"@sparkwing/sdk": "file:vendor/sparkwing-sdk-<engine-version>.tgz"` and run
+`npm install` to record it in the lockfile. The tarball's package version selects
+the exact engine, including any prerelease suffix. Commit the tarball inside the
+repository if fetched checkouts need it. An editable SDK directory can use
+`file:../sdk` after building and stamping that directory's package version.
+
 For development, run `npm ci`, `npm run typecheck`, `npm test` and `npm run build`.
 The build emits ESM into `dist/`; package exports expose only the public root.
 The release process stamps `package.json` and its lockfile with the engine

@@ -222,7 +222,9 @@ A log page contains `records`, `next_cursor`, `truncated` and `complete`.
 An incomplete page retains a cursor even when it has no records. A truncated
 page requires another read immediately. Follow polls only after reaching a
 nontruncated incomplete page. Completion requires both persisted terminal state
-and final log segments.
+and final log segments. If a terminal run still has unsealed logs after the
+one-minute final-tail window, observation drains the committed records and reports
+incomplete logs instead of polling forever.
 
 Each output record names exactly one tagged subject. Job-attempt subjects retain
 team, run, job, generation and positive attempt ordinal. Trigger, plan and eval

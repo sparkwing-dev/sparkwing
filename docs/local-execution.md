@@ -56,6 +56,19 @@ selects the controller for `pipeline trigger`, run observations and management.
 | `sparkwing pipeline trigger build --profile prod` | The selected controller queues the run for an eligible runner or launcher. |
 | `sparkwing pipeline trigger build --profile prod --runner here --reason repair` | This CLI hosts the controller's named here run. |
 
+`--sw-dry-run` records a completed preview as `dry_run` and exits zero.
+`runs stats` counts completed previews separately as `dry_run` and excludes them
+from the applied success percentage. A failed or cancelled preview keeps that outcome. Steps run their declared dry-run
+body or their `SafeWithoutDryRun` body. Other step bodies are skipped.
+
+`--sw-workers N` bounds simultaneous local foreground job executions. Jobs waiting
+for a worker remain available to the scheduler without consuming a local claim.
+`--sw-start-at` and `--sw-stop-at` bound steps inside jobs. Use `--sw-only` to
+select jobs and their dependencies.
+
+Ctrl-C requests cancellation and keeps the foreground host alive until the run
+finishes and logs drain. A second interrupt stops waiting and joins local work.
+
 An explicit empty `--sw-cache-from=` disables `run.cache_from` from the machine
 file. The selected cache profile supplies a temporary repository reader for
 verified default-branch records to a member with the editor role or above. The credential follows the profile's live
@@ -477,8 +490,9 @@ fencing rules. The local controller supplies this machine's admission only.
 Other machines register as runners with Cloud. `sparkwing runners add --runner NAME
 --personal --session-stdin --profile work` reads an existing independent account
 session from stdin and reserves the machine for that user's runs. The session
-and its CSRF proof stay in memory. The command saves only the new runner
-credential. A profile backed only by a member token cannot enroll a personal machine.
+and its CSRF proof stay in memory. After fetching the proof, the command
+attempts logout on enrollment success or failure and saves only the new runner
+credential. Use a dedicated session because logout ends it for every client. A profile backed only by a member token cannot enroll a personal machine.
 The team's `members_can_add_machines` setting defaults to true. Any member
 can enroll a personal machine while it is on. When it is off, personal
 enrollment requires team administration. Shared runners always require team

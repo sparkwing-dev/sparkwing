@@ -21,6 +21,10 @@ for the execution and lifecycle integration boundaries.
 
 ## Cloud controller and dashboard
 
+Run `sparkwing-controller --help` for the controller startup flags. Use
+`--credentials-dir` for mounted credentials and `--credential-epoch-dir` for the
+persistent writable epoch directory.
+
 The [`sparkwing-full` Helm chart](../charts/sparkwing-full/README.md) is the
 repository's Kubernetes deployment surface. It requires an explicitly compatible
 image set. The final deployment uses one controller, authorized object storage
@@ -28,20 +32,27 @@ and runners or a launcher. Cloud Jobs require exclusive team nodes, Docker and
 enforced network isolation. Chart rendering alone does not prove those properties.
 
 The opt-in `k8s-e2e` pipeline requires an explicit cluster and image set. It does
-not create or delete a cluster. Native deployment parity remains a launch check.
+not create or delete a cluster. Set `SPARKWING_K8S_E2E_LICENSE_FILE` to a valid
+signed multi-team license. The harness installs `deployment=team`, enrolls a runner
+with an independent administrator session and uploads its committed fixture as a
+source bundle. It checks execution, logs, cancellation, retry and retained state.
+GitHub webhook intake and remote Git fetching need separate integration evidence.
+Native deployment parity remains a launch check.
 
 ### First shared deployment
 
 This is Cloud operator setup. Controller bootstrap credentials grant deployment
-operations. Team membership and runner enrollment require a team credential.
+operations. Team membership requires a team credential. Runner enrollment requires
+an independent account session with current team administration.
 Create a team and its first administrator through the audited operator command:
 
 ```bash
 sparkwing operator teams create --team support-test --display-name Support --profile deployment -o json
 ```
 
-The deployment profile needs `operator.tokens`. The command returns the first
-team credential once. See [Deployment bootstrap](auth.md#deployment-bootstrap)
+The deployment profile needs `operator.tokens`. The command returns the owner
+`account_id` and the first team credential once. Keep that account ID for
+headless runner enrollment below. See [Deployment bootstrap](auth.md#deployment-bootstrap)
 and the [controller chart](../charts/sparkwing-full/README.md) for credential files.
 
 Team members save their credential with `profiles add --token-stdin`. The command
@@ -81,7 +92,10 @@ integration evidence. See [log completeness](observability.md#log-completeness).
 A store has one active controller. Before migrations, startup writes or serving,
 a PostgreSQL controller takes a session advisory lock derived from the database
 and Sparkwing schema on a dedicated connection. A second controller blocks as a
-standby. Promotion bumps the `controller_epoch` row in the same transaction
+standby. It logs the controller advisory lock's database and numeric key once,
+with instructions to wait for or stop the active controller, or cancel the standby
+startup. The standby does not serve HTTP until it acquires the lock, so health
+and readiness remain unavailable while it waits. Promotion bumps the `controller_epoch` row in the same transaction
 that takes the lock. Every write transaction holds a shared lock on that row
 and checks its promoted epoch. Promotion waits for in-flight writes to finish.
 The former controller's later writes abort and trigger fail-stop, even before
@@ -361,24 +375,51 @@ Recovery is manual; follow the operator runbook kept outside this repository.
 
 ## Add workstation capacity
 
-Enrollment uses a named controller connection and a runner identity:
+Shared runners, personal machines and reserved-pool launchers all require an
+independent account session. A `team.admin` bearer, a token-derived browser
+session and the deployment bootstrap token cannot substitute for it. Shared
+runner and launcher enrollment also require current team administration.
+
+For headless setup on a licensed `team` or Cloud controller, use the existing
+administrator's account ID from `operator teams create`. Run this inside the
+serving controller's pod and pipe its output directly to the enrolling CLI:
 
 ```bash
-sparkwing runners add --profile prod --runner dev-laptop
+kubectl -n sparkwing exec deployment/sparkwing-sparkwing-full-controller -- \
+  sparkwing-controller admin session --operator ACCOUNT_ID --team support-test \
+  --reason 'Enroll build machine' --output plain | \
+  sparkwing runners add --profile prod --runner build-box --session-stdin \
+    --repos github.com/acme/repo --no-service
 ```
 
-To offer your own machine only to your runs, enroll it as personal capacity:
+Pod access is the break-glass credential. The command opens the serving
+controller's recorded store, encryption keys and credential epoch. It requires
+an existing administrator of the named team and creates no account or membership.
+It prints the raw session as plain text by default, or a JSON object with
+`--output json`, only to stdout and an audit line without the session to stderr. A durable `session.break_glass` audit row records the account ID and
+team, excluding the session and free-text reason. The initial expiry is 15 minutes. Enrollment renews the session through
+the normal account-session lifecycle. After fetching the session CSRF proof,
+enrollment attempts logout on success or failure. If fetching the proof or logout
+fails, the session remains live until expiry or revocation.
+Use a dedicated session because logout ends it for every client. See
+[session lifecycle](auth.md#browser-session-lifecycle) for expiry and logout. Keep session output private. A `local` deployment uses
+the local controller connection and does not support account sessions.
+
+For a reserved-pool launcher, use the same pipe with:
 
 ```bash
-sparkwing runners add --profile prod --runner my-desktop --personal
+sparkwing runners add --profile prod --runner deploy-launcher --session-stdin \
+  --repos github.com/acme/repo --reserved-for deploy --launcher
 ```
 
-Personal enrollment requires an independent account session. A member-token
-profile alone cannot authorize it. The controller binds personal capacity to your signed-in account and checks that
-ownership when matching runs. Cloud-routed runs can prefer your registered
-machines before using Cloud pools. Omitting `--personal` enrolls a team runner.
-Repository filters, capacity settings and service installation work the same way
-for both. JSON enrollment output includes `personal` alongside the runner name.
+To offer a machine only to your own runs, add `--personal` to an enrollment
+with `--session-stdin`. Members may use their own independent sign-in session
+when `members_can_add_machines` is enabled. Personal capacity is bound to that
+account, and the controller checks ownership when matching runs. Cloud-routed
+runs can prefer your registered machines before using Cloud pools. Omitting
+`--personal` enrolls a team runner. Repository filters, capacity settings and
+service installation work the same way for both. JSON output includes `personal`
+alongside the runner name.
 
 The CLI checks local prerequisites before minting a runner credential. It writes
 that credential to a private file under `runner.credentials_dir`, then updates
@@ -433,14 +474,14 @@ A runner's credential fixes which runs it accepts:
   branch, manual and scheduled runs wait for another runner.
 - Any other runner takes any run its repository patterns and labels admit.
 - A team admin sets a runner's trust class when registering it:
-  `sparkwing runners add --profile prod --runner deploy-1 --trust=verified-default` applies the restriction to a
+  `sparkwing runners add --profile prod --runner deploy-1 --session-stdin --trust=verified-default` applies the restriction to a
   runner without reserved secrets, and `--trust=any` lifts it from a pool with
   reserved secrets. Pools holding reserved secrets still require a launcher
   with `--trust=any`. The class is stored with the runner's credential, so the
   runner, or anyone holding its token, cannot change it.
 
 For a verified-default pool, enroll a launcher-only credential with
-`--reserved-for deploy --trust verified-default --launcher` on `runners add`.
+`--session-stdin --reserved-for deploy --trust verified-default --launcher` on `runners add`.
 On Kubernetes, set `launcher.enabled=true` and reference that credential in
 `launcher.tokenSecret` in the runner bundle chart. The server requires launcher credentials for verified-default pools and for
 every pool holding reserved secrets, including with `--trust=any`. Pool and trust settings live on the

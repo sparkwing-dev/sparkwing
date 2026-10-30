@@ -48,6 +48,7 @@ type ScheduleExpansion struct {
 // Nodes remain in accepted plan order, including persisted expansion insert order.
 type ScheduleSnapshot struct {
 	CancelRequested bool
+	DryRun          bool
 	GuardRefusal    string
 	SelectionSkips  map[string]string
 	Nodes           []ScheduleNode
@@ -175,6 +176,9 @@ func Decide(snapshot ScheduleSnapshot) ScheduleDecision {
 		}
 	}
 	result.Outcome, result.Reason = scheduleRunVerdict(nodes)
+	if result.Outcome == string(runstate.RunSuccess) && snapshot.DryRun {
+		result.Outcome = string(runstate.RunDryRun)
+	}
 	return result
 }
 
@@ -394,8 +398,10 @@ func (snapshot RunSnapshot) Scheduling() (ScheduleSnapshot, error) {
 		return ScheduleSnapshot{}, fmt.Errorf("accepted plan has no jobs array")
 	}
 	var skips map[string]string
+	var dryRun bool
 	if snapshot.Run.Spec != nil {
 		options := snapshot.Run.Spec.Resolved.Settings.Options
+		dryRun = options.DryRun.Value
 		var err error
 		skips, err = PlanSelectionSkips(plan, options.Only.Value, options.StartAt.Value, options.StopAt.Value)
 		if err != nil {
@@ -405,7 +411,7 @@ func (snapshot RunSnapshot) Scheduling() (ScheduleSnapshot, error) {
 	projection := scheduleProjection{
 		runID:    snapshot.Run.ID,
 		finished: snapshot.Run.FinishedAt != nil,
-		result:   ScheduleSnapshot{CancelRequested: snapshot.Run.CancelRequestedAt != nil, GuardRefusal: runGuardRefusal(snapshot.Run), SelectionSkips: skips},
+		result:   ScheduleSnapshot{CancelRequested: snapshot.Run.CancelRequestedAt != nil, DryRun: dryRun, GuardRefusal: runGuardRefusal(snapshot.Run), SelectionSkips: skips},
 		rows:     make(map[string]runstate.NodeRow, len(snapshot.Nodes)),
 		jobs:     make(map[string]nodeproto.JobSpec, len(snapshot.Nodes)),
 		groups:   make(map[string]int),

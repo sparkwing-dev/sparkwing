@@ -5,6 +5,11 @@ Pipelines define what happens when you run
 [SDK guide](sdk.md) for API usage and [Authoring pipelines](authoring-pipelines.md)
 for the rules enforced by `sparkwing pipeline lint`.
 
+`sparkwing pipeline new` pins the running CLI's SDK release. Source builds
+without a release stamp use a published fallback. QA builds pin their QA SDK
+and resolve it through the QA Go proxy during dependency setup. Production
+builds use public SDK pins.
+
 > **Host requirements.** Pipelines that call `sparkwing.Bash` shell
 > out to `bash` on the runner host. macOS and Linux have this by
 > default. On Windows, install
@@ -44,7 +49,7 @@ hard parse error):
 - **entrypoint** - the SDK registration implementing it (required). Register the implementation under this name; several pipeline names may share one entrypoint.
 - **description** - one-line summary surfaced by `sparkwing pipeline list`
 - **on** - declarative trigger block: `push` (branches/paths), `pull_request` (actions/branches), `schedule` (one entry, or a list of them, each with `name`, `cron`, a required `where`, `tz`, `overlap`, `catch_up`, `args`), `pre_commit`, `pre_push`, `post_commit`. Absent means "manual only" (a command).
-- **guards** - gate dispatch on placement, args and git branch (`when` / `unless` token lists)
+- **guards** - gate dispatch on placement, args and git branch (`when` / `unless` token lists). Generated pipeline configuration uses these same keys.
 - **args** - per-arg default values, keyed by CLI flag name
 - **profile** - the named controller connection in the machine config. A pinned pipeline runs through `pipeline trigger --profile`.
 - **requires** - runner-label requirements inherited by every job

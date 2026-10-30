@@ -4,8 +4,9 @@ A schedule starts a pipeline on a cadence. Its ID stays separate from the IDs
 of the runs it starts. A repository declares the cadence, arguments and where
 it fires. Installing that declaration arms it on a selected controller.
 
-Use `--profile NAME` for a saved controller connection. Omit it to use the
-local controller. Reads, pause/resume, cadence edits and immediate runs share
+Use `--profile NAME` for a saved controller connection. Omission uses the saved
+default profile, or the local controller when none is selected. `--profile=`
+selects local for one command, and `--all-repos` always operates locally. Reads, pause/resume, cadence edits and immediate runs share
 the same HTTP contract on both connections.
 
 Restore preparation holds schedules until acknowledgment, which discards catch-up

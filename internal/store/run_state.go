@@ -34,7 +34,7 @@ type runEdge struct {
 // runTransitions keeps publication, owner recovery and cooperative cancellation visible to implementers.
 func runTransitions() []runEdge {
 	active := []runstate.RunState{runstate.RunPending, runstate.RunRunning}
-	terminal := []runstate.RunState{runstate.RunSuccess, runstate.RunFailed, runstate.RunCancelled}
+	terminal := []runstate.RunState{runstate.RunSuccess, runstate.RunDryRun, runstate.RunFailed, runstate.RunCancelled}
 	owners := []runstate.ActorKind{runstate.ActorRunHost, runstate.ActorController}
 	return []runEdge{
 		{[]runstate.RunState{runstate.RunPending}, []runstate.RunState{runstate.RunFailed}, []runstate.ActorKind{runstate.ActorOperator}, runCreditRefused, "App admission; unstarted and unfunded", false},
@@ -413,7 +413,7 @@ func runVerdictTx(ctx context.Context, tx *storeTx, team Team, row RunRow) (runs
 	}
 	decision := Decide(graph)
 	switch runstate.RunState(decision.Outcome) {
-	case runstate.RunSuccess, runstate.RunFailed, runstate.RunCancelled:
+	case runstate.RunSuccess, runstate.RunDryRun, runstate.RunFailed, runstate.RunCancelled:
 		return runstate.RunState(decision.Outcome), nil
 	default:
 		return "", errors.New("run has no terminal verdict")

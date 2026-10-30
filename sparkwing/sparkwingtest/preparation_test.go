@@ -43,7 +43,7 @@ func TestHostPreparesArguments(t *testing.T) {
 		want string
 	}{
 		{map[string]string{}, "argument --required is required"},
-		{map[string]string{"required": "supplied", "mode": "invalid"}, "argument --mode is not an allowed value"},
+		{map[string]string{"required": "supplied", "mode": "invalid"}, "argument --mode is not an allowed value; choose one of: ready, other"},
 		{map[string]string{"required": "supplied", "unknown": "value"}, "no flag --unknown is declared"},
 	} {
 		if _, err := host.Plan(t.Context(), "sparkwingtest-preparation", tc.args); err == nil || err.Error() != tc.want {

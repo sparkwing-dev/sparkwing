@@ -189,3 +189,29 @@ func TestParseReadsOnlyGlobalFlagsBeforeTheCommand(t *testing.T) {
 		}
 	}
 }
+
+func TestMisspelledCommandSuggestsNearestSibling(t *testing.T) {
+	for _, tc := range []struct {
+		args []string
+		want string
+	}{
+		{[]string{"runs", "stauts"}, "sparkwing runs status"},
+		{[]string{"runz", "list"}, "sparkwing runs"},
+		{[]string{"pipeline", "triger", "check"}, "sparkwing pipeline trigger"},
+	} {
+		_, err := Parse("sparkwing", tc.args)
+		if err == nil || !strings.Contains(err.Error(), "did you mean "+tc.want) {
+			t.Errorf("%v: want suggestion %q, got %v", tc.args, tc.want, err)
+		}
+	}
+	_, err := Parse("sparkwing", []string{"runs", "status", "private-run-value"})
+	if err == nil || strings.Contains(err.Error(), "private-run-value") || strings.Contains(err.Error(), "did you mean") {
+		t.Fatalf("positional value treated as command: %v", err)
+	}
+}
+
+func TestLintRejectsRemovedStaticFlag(t *testing.T) {
+	if _, err := Parse("sparkwing", []string{"pipeline", "lint", "--static"}); err == nil {
+		t.Fatal("accepted inert --static")
+	}
+}

@@ -31,14 +31,16 @@ func (*LocalControlStatus) wireType() MessageType { return TypeLocalControlStatu
 // serving loop. This is a one-request connection; disconnect cancels the wait.
 // Health probes and admission-only daemons cannot serve this operation.
 type LocalDashboard struct {
-	Address string `json:"address"`
+	Address  string `json:"address"`
+	ReadOnly bool   `json:"read_only,omitempty"`
 }
 
 // LocalDashboardAck acknowledges readiness, or names a failed start. A
 // failed transport is an error even if no result arrived. Retrying an identical
-// address reuses the owner's listener; it never spawns another controller.
+// address and read-only policy reuse the owner's listener; it never spawns another controller.
 type LocalDashboardAck struct {
-	Error string `json:"error,omitempty"`
+	ReadOnly bool   `json:"read_only,omitempty"`
+	Error    string `json:"error,omitempty"`
 }
 
 func (*LocalDashboard) wireType() MessageType    { return TypeLocalDashboard }

@@ -387,8 +387,7 @@ func (h *nodeExecutor) report(ctx context.Context, input NodeInput, result runst
 		result = h.failure(runErr)
 	}
 	// safety: a cancelled context cannot send the final fenced report; the store still verifies current authority.
-	reportCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), limits.HeartbeatTimeout)
-	defer cancel()
+	reportCtx := lease.ExecutionContext(ctx)
 	result = recordNodeFailure(input.NodeID, result, h.deps.Masker.Mask)
 	_, err := h.transition(reportCtx, input, store.ReportNode{SourceAttempt: &input.Attempt, Outcome: result.Outcome, Result: &result})
 	return errors.Join(runErr, err)

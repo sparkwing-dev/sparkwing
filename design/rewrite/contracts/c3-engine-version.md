@@ -121,7 +121,13 @@ release verification.
 The Go pin is the `github.com/sparkwing-dev/sparkwing` module requirement in the
 pipeline's go.mod. The TypeScript pin is `@sparkwing/sdk`, resolved exactly by its
 manifest and native lockfile. `ReadPin` reads those files before executing pipeline
-code. CLI selection and `info` pass the pipeline directory to `ReadPin`, matching
+code. Local TypeScript `file:` directories and local `.tgz`/`.tar.gz` requirements
+resolve their name and exact release version from the source package manifest.
+The npm lockfile must name the same source and agree with its version when it
+records one. Local tarball bytes or the directory package manifest join the pin
+input digest with slash-separated source names on every OS. They select the matching verified release engine, as registry pins
+do. `TestReadTypeScriptLocalPin` covers npm lockfile versions 1 through 3,
+source agreement and changed package identity. CLI selection and `info` pass the pipeline directory to `ReadPin`, matching
 source acquisition. A range alone cannot select an exact engine. Go `vX.Y.Z` and TypeScript
 `X.Y.Z` select engine `vX.Y.Z`, retaining any prerelease suffix. A newer installed
 engine does not satisfy an older pin. Missing, conflicting and non-release pins

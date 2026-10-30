@@ -238,7 +238,7 @@ func TestLogLifecycleDetachesFlush(t *testing.T) {
 				case "finish":
 					_, err = state.FinishRunAndUnit(ctx, runstate.FinishRunRequest{})
 				case "release":
-					_, err = state.TransitionNode(ctx, store.ReleaseNode{Ref: ref})
+					_, err = state.TransitionNode(ctx, store.BindNodeCommand(store.ReleaseNode{}, ref, runstate.Actor{}))
 				}
 				if err != nil || !committed {
 					t.Errorf("stalled logs blocked %s: %v", operation, err)
@@ -571,6 +571,7 @@ func TestStalledLogsDoNotDelayLifecycleCommits(t *testing.T) {
 				if operation == "retry" {
 					command = store.RetryNode{Ref: ref, Actor: actor, SourceAttempt: &started.Attempt, Result: &runstate.NodeResult{Outcome: runstate.NodeFailed}}
 				}
+				command = store.BindNodeCommand(command, ref, actor)
 				if _, err := state.TransitionNode(ctx, command); err != nil {
 					t.Fatalf("stalled logs blocked %s: %v", operation, err)
 				}
@@ -581,6 +582,14 @@ func TestStalledLogsDoNotDelayLifecycleCommits(t *testing.T) {
 					t.Fatalf("lifecycle result changed: %+v %v", row, err)
 				}
 				if operation == "report" {
+					_, reader, err := teststore.ProvisionCredential(t.Context(), f.Store, capability.ProvisionSpec{Kind: capability.ProvisionMember, Team: string(store.DefaultTeam), Subject: capability.Subject{Kind: capability.SubjectAccount, ID: "log-reader"}, Grants: []capability.Grant{capability.LogsRead}, Binding: capability.Binding{Kind: capability.BindingNone}})
+					if err != nil {
+						t.Fatal(err)
+					}
+					stream, err := f.Tenant.ReadLogSegments(t.Context(), runstate.Actor{Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: reader.Prefix}}, blob.LogReadRequest{Subject: registered})
+					if err != nil || !stream.Complete {
+						t.Fatalf("completed attempt's log tail was not sealed: %+v %v", stream, err)
+					}
 					if uploader.refused {
 						t.Fatal("current attempt's final tail was refused")
 					}

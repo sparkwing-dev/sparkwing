@@ -10,6 +10,7 @@ image_prefix="${SPARKWING_K8S_E2E_IMAGE_PREFIX:-}"
 image_pull_policy="${SPARKWING_K8S_E2E_PULL_POLICY:-IfNotPresent}"
 kube_context="${SPARKWING_K8S_E2E_KUBE_CONTEXT:-}"
 cleanup_allow="${SPARKWING_K8S_E2E_ALLOW_CLEANUP:-}"
+license_file="${SPARKWING_K8S_E2E_LICENSE_FILE:-}"
 keep_resources="${SPARKWING_K8S_E2E_KEEP_RESOURCES:-0}"
 ownership_label="sparkwing.dev/e2e-owned=true"
 owner_token_label=""
@@ -60,14 +61,6 @@ create_owned_secret() {
     kube --namespace "$namespace" apply -f -
 }
 
-create_owned_configmap() {
-  local name=$1
-  shift
-  kube --namespace "$namespace" create configmap "$name" "$@" --dry-run=client -o yaml | \
-    kube --namespace "$namespace" label --local -f - "$ownership_label" "$owner_token_label" -o yaml | \
-    kube --namespace "$namespace" apply -f -
-}
-
 label_owned_release_pvcs() {
   local label_status=0
   kube --namespace "$namespace" label persistentvolumeclaim \
@@ -78,12 +71,13 @@ label_owned_release_pvcs() {
 
 preflight() {
   local command_name
-  for command_name in kubectl helm curl jq openssl; do
+  for command_name in kubectl helm curl jq openssl git; do
     require_command "$command_name"
   done
   [[ -n "$kube_context" ]] || die "SPARKWING_K8S_E2E_KUBE_CONTEXT is required"
   [[ -n "$image_prefix" ]] || die "SPARKWING_K8S_E2E_IMAGE_PREFIX is required"
   [[ "$image_prefix" =~ ^[a-z0-9][a-z0-9._:/-]*$ ]] || die "SPARKWING_K8S_E2E_IMAGE_PREFIX contains characters that are unsafe in an image repository"
+  [[ -r "$license_file" && -s "$license_file" ]] || die "SPARKWING_K8S_E2E_LICENSE_FILE must name a readable signed multi-team license"
   [[ -n "$image_tag" ]] || die "SPARKWING_K8S_E2E_TAG is required"
   [[ "$cleanup_allow" == "$namespace/$release_name" ]] || die "SPARKWING_K8S_E2E_ALLOW_CLEANUP must equal $namespace/$release_name"
   kubectl version --client >/dev/null
@@ -96,7 +90,10 @@ usage() {
   cat <<'EOF'
 usage: bin/k8s-e2e.sh [--preflight]
 
-Runs the complete Sparkwing controller/runner golden path against an explicit
+SPARKWING_K8S_E2E_LICENSE_FILE must name a signed multi-team license.
+The test installs a team deployment; sessions require that licensed mode.
+
+Uploads a committed source bundle, then runs the Sparkwing controller/runner golden path against an explicit
 Kubernetes context. It requires caller-supplied image coordinates and an exact
 namespace/release cleanup allow-list. It never creates or deletes cluster
 infrastructure.
@@ -200,7 +197,7 @@ collect_diagnostics() {
   done < <(kube --namespace "$namespace" get pods -o name 2>/dev/null || true)
   if [[ -n "$admin_token" && -n "$controller_port" ]]; then
     api_get "/api/v1/runs?limit=100" >"$artifact_dir/kubernetes/runs.json" 2>&1 || true
-    api_get "/api/v1/agents" >"$artifact_dir/kubernetes/agents.json" 2>&1 || true
+    api_get "/api/v1/runners" >"$artifact_dir/kubernetes/agents.json" 2>&1 || true
   fi
   kube cluster-info dump --namespaces "$namespace" \
     --output-directory="$artifact_dir/kubernetes/cluster-dump" >/dev/null 2>&1 || true
@@ -300,122 +297,42 @@ if [[ -n "$namespace_resource" ]]; then
 fi
 create_owned_namespace
 namespace_owned=1
+create_owned_secret sparkwing-e2e-credentials --from-file="license=$license_file"
+bootstrap_token="swk_$(openssl rand -base64 32 | tr '+/' '-_' | tr -d '=\n')"
+create_owned_secret sparkwing-bootstrap-token --from-literal="token=$bootstrap_token"
 create_owned_secret sparkwing-secrets-key \
   --from-literal="key=$(openssl rand -base64 32)"
 
 fixture_root="$repo_root/testdata/k8s-e2e/repo/.sparkwing"
-create_owned_configmap sparkwing-k8s-fixture \
-  --from-file="go.mod=$fixture_root/go.mod" \
-  --from-file="go.sum=$fixture_root/go.sum" \
-  --from-file="main.go=$fixture_root/main.go" \
-  --from-file="k8s.go=$fixture_root/jobs/k8s.go" \
-  --from-file="k8s_test.go=$fixture_root/jobs/k8s_test.go"
-
-cat >"$artifact_dir/git-fixture.yaml" <<EOF
-apiVersion: v1
-kind: Service
-metadata:
-  name: k8s-repo
-  namespace: $namespace
-  labels:
-    app.kubernetes.io/name: sparkwing-k8s-repo
-    sparkwing.dev/e2e-owned: "true"
-    sparkwing.dev/e2e-owner: "$run_owner"
-spec:
-  selector:
-    app.kubernetes.io/name: sparkwing-k8s-repo
-  ports:
-    - name: git
-      port: 9418
-      targetPort: git
----
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: k8s-repo
-  namespace: $namespace
-  labels:
-    app.kubernetes.io/name: sparkwing-k8s-repo
-    sparkwing.dev/e2e-owned: "true"
-    sparkwing.dev/e2e-owner: "$run_owner"
-spec:
-  replicas: 1
-  selector:
-    matchLabels:
-      app.kubernetes.io/name: sparkwing-k8s-repo
-  template:
-    metadata:
-      labels:
-        app.kubernetes.io/name: sparkwing-k8s-repo
-        sparkwing.dev/e2e-owned: "true"
-        sparkwing.dev/e2e-owner: "$run_owner"
-    spec:
-      securityContext:
-        runAsNonRoot: true
-        runAsUser: 65534
-        runAsGroup: 65534
-        fsGroup: 65534
-      initContainers:
-        - name: prepare
-          image: $(image_ref sparkwing-runner)
-          imagePullPolicy: $image_pull_policy
-          command: ["/bin/sh", "-ec"]
-          args:
-            - |
-              mkdir -p /work/source/.sparkwing/jobs
-              cp /fixture/go.mod /fixture/go.sum /fixture/main.go /work/source/.sparkwing/
-              cp /fixture/k8s.go /fixture/k8s_test.go /work/source/.sparkwing/jobs/
-              git -C /work/source init --initial-branch=main
-              git -C /work/source config user.name "Sparkwing Kubernetes E2E"
-              git -C /work/source config user.email "kubernetes-e2e@sparkwing.invalid"
-              git -C /work/source add .
-              GIT_AUTHOR_DATE="2000-01-01T00:00:00Z" GIT_COMMITTER_DATE="2000-01-01T00:00:00Z" \
-                git -C /work/source commit --message "test: add Kubernetes golden-path fixture"
-              git clone --bare /work/source /work/e2e.git
-              touch /work/e2e.git/git-daemon-export-ok
-          volumeMounts:
-            - name: source
-              mountPath: /fixture
-              readOnly: true
-            - name: repository
-              mountPath: /work
-      containers:
-        - name: git
-          image: $(image_ref sparkwing-runner)
-          imagePullPolicy: $image_pull_policy
-          command: ["git"]
-          args: ["daemon", "--reuseaddr", "--base-path=/srv/git", "--export-all", "--verbose", "/srv/git"]
-          ports:
-            - name: git
-              containerPort: 9418
-          volumeMounts:
-            - name: repository
-              mountPath: /srv/git
-              readOnly: true
-          readinessProbe:
-            tcpSocket:
-              port: git
-            initialDelaySeconds: 1
-            periodSeconds: 1
-      volumes:
-        - name: source
-          configMap:
-            name: sparkwing-k8s-fixture
-        - name: repository
-          emptyDir: {}
-EOF
-kube apply -f "$artifact_dir/git-fixture.yaml"
-kube --namespace "$namespace" rollout status deployment/k8s-repo --timeout=180s
+fixture_checkout="$artifact_dir/fixture"
+mkdir -p "$fixture_checkout/.sparkwing/jobs"
+cp "$fixture_root/go.mod" "$fixture_root/go.sum" "$fixture_root/main.go" "$fixture_checkout/.sparkwing/"
+cp "$fixture_root/jobs/k8s.go" "$fixture_root/jobs/k8s_test.go" "$fixture_checkout/.sparkwing/jobs/"
+git -C "$fixture_checkout" init --initial-branch=main
+git -C "$fixture_checkout" add .
+git -C "$fixture_checkout" -c user.name='Kubernetes E2E' -c user.email=k8s-e2e@sparkwing.invalid \
+  -c commit.gpgsign=false commit --message 'test: Kubernetes golden-path fixture'
+fixture_sha="$(git -C "$fixture_checkout" rev-parse HEAD)"
+fixture_bundle="$artifact_dir/source.bundle"
+git -C "$fixture_checkout" bundle create "$fixture_bundle" --all
+fixture_digest="$(openssl dgst -sha256 "$fixture_bundle" | awk '{print $NF}')"
+fixture_size="$(wc -c <"$fixture_bundle" | tr -d ' ')"
 
 write_bootstrap_values() {
   local path=$1
   cat >"$path" <<EOF
+fullnameOverride: sparkwing-e2e
 controller:
+  externalURL: http://sparkwing-e2e-controller.${namespace}.svc.cluster.local
+  deployment: team
+  credentialsSecret:
+    name: sparkwing-e2e-credentials
   image:
     repository: ${image_prefix}sparkwing-controller
     tag: $image_tag
     pullPolicy: $image_pull_policy
-  allowOpenBootstrap: true
+  bootstrapAdminToken:
+    name: sparkwing-bootstrap-token
   secretsKey:
     name: sparkwing-secrets-key
   storage:
@@ -423,7 +340,10 @@ controller:
     pvc:
       keepOnUninstall: true
 sparkwing-runner-bundle:
+  controller:
+    url: http://sparkwing-e2e-controller.${namespace}.svc.cluster.local
   runner:
+    enabled: false
     replicas: 1
     image:
       repository: ${image_prefix}sparkwing-runner
@@ -439,13 +359,9 @@ bootstrap_values="$artifact_dir/values-bootstrap.yaml"
 authenticated_values="$artifact_dir/values-authenticated.yaml"
 write_bootstrap_values "$bootstrap_values"
 cat >"$authenticated_values" <<'EOF'
-controller:
-  requireAuth: true
-web:
-  requireLogin: true
-  tokenSecret:
-    name: sparkwing-token
 sparkwing-runner-bundle:
+  runner:
+    enabled: true
   controller:
     tokenSecret:
       name: sparkwing-token
@@ -488,10 +404,6 @@ ready_pod_identity() {
 
 controller_deployment="$(resource_name deployment controller)"
 controller_service="$(resource_name service controller)"
-web_deployment="$(resource_name deployment web)"
-web_service="$(resource_name service web)"
-runner_deployment="$(resource_name deployment runner)"
-cache_deployment="$(resource_name deployment cache)"
 controller_pvc="$(resource_name pvc controller)"
 
 kube --namespace "$namespace" wait deployment \
@@ -529,12 +441,29 @@ for _ in {1..100}; do
   sleep 0.2
 done
 
-admin_token="$(die "PENDING operator onboarding: the rewritten controller has no team plus first team-admin provisioning route yet. Resume this step when that route is approved and implemented; bootstrap-admin-token only grants deployment operations.")"
-
-create_owned_secret sparkwing-token \
-  --from-literal="token=$admin_token"
+team_response="$(curl --fail --silent --show-error --max-time 10 \
+  -H "Authorization: Bearer $bootstrap_token" -H 'Content-Type: application/json' \
+  --data '{"slug":"k8s-e2e","display_name":"Kubernetes E2E"}' \
+  "http://127.0.0.1:${controller_port}/api/v1/operator/teams")"
+admin_token="$(jq -er '.capability' <<<"$team_response")"
+account_id="$(jq -er '.account_id' <<<"$team_response")"
+enrollment_session="$(kube --namespace "$namespace" exec "deployment/$controller_deployment" -- \
+  /usr/local/bin/sparkwing-controller admin session --operator "$account_id" --team k8s-e2e \
+  --reason 'Kubernetes E2E runner enrollment' --output plain)"
+enrollment_csrf="$(curl --fail --silent --show-error --max-time 10 \
+  -H "Authorization: Session $enrollment_session" \
+  "http://127.0.0.1:${controller_port}/api/v1/auth/session" | jq -er '.csrf_token')"
+runner_token="$(curl --fail --silent --show-error --max-time 10 \
+  -H "Authorization: Session $enrollment_session" -H "X-CSRF-Token: $enrollment_csrf" \
+  -H "Origin: http://127.0.0.1:${controller_port}" --cookie "__Host-sw_csrf=$enrollment_csrf" \
+  -H 'Content-Type: application/json' \
+  --data '{"name":"k8s-e2e","platform":"kubernetes","repos":["example.com/sparkwing-k8s/*"]}' \
+  "http://127.0.0.1:${controller_port}/api/v1/runners" | jq -er '.capability')"
+unset enrollment_session enrollment_csrf
+create_owned_secret sparkwing-token --from-literal="token=$runner_token"
 helm_e2e upgrade "$release_name" "$repo_root/charts/sparkwing-full" \
   --namespace "$namespace" -f "$bootstrap_values" -f "$authenticated_values" --timeout 5m --wait
+runner_deployment="$(resource_name deployment runner)"
 kube --namespace "$namespace" wait deployment \
   -l "app.kubernetes.io/instance=$release_name" \
   --for=condition=Available --timeout=300s
@@ -565,38 +494,46 @@ web_session="${web_session#*=}"
 rm -f "$login_headers"
 [[ -n "$web_session" ]] || die "signing in with the admin token opened no session"
 
-for repository_source in \
-  "https://github.com/sparkwing-k8s/" \
-  "git@github.com:sparkwing-k8s/"; do
-  kube --namespace "$namespace" exec "deployment/$cache_deployment" -- \
-    git config --global --add url."git://k8s-repo.${namespace}.svc.cluster.local/".insteadOf \
-    "$repository_source"
-done
-fixture_sha="$(kube --namespace "$namespace" exec "deployment/$cache_deployment" -- \
-  git ls-remote "https://github.com/sparkwing-k8s/e2e.git" refs/heads/main | awk '{print $1}')"
-[[ "$fixture_sha" =~ ^[0-9a-f]{40}$ ]] || die "in-cluster Git returned invalid fixture commit $fixture_sha"
+source_request() {
+  jq -nc --arg sha "$fixture_sha" --arg entrypoint "$1" '{
+    git:{repository:{key:"git:example.com/sparkwing-k8s/e2e",display:"example.com/sparkwing-k8s/e2e"},ref:"main",sha:$sha},
+    source:{ref:$sha,entrypoint:$entrypoint,location:{remote_url:"https://example.com/sparkwing-k8s/e2e.git",pipeline_dir:".sparkwing"}}
+  }'
+}
 
 trigger_body() {
-  jq -nc --arg pipeline "$1" --arg sha "$fixture_sha" '{
-    pipeline:$pipeline,
-    trigger:{source:"manual"},
-    git:{branch:"main", sha:$sha, repo:"sparkwing-k8s/e2e", github_owner:"sparkwing-k8s", github_repo:"e2e"}
+  jq -nc --arg nonce "$(openssl rand -hex 16)" --arg pipeline "$1" --arg digest "$fixture_digest" --argjson source "$(source_request "$1")" '{
+    idempotency_key:("k8s-e2e/"+$pipeline+"/"+$nonce),
+    request:($source + {version:1,team:"k8s-e2e",pipeline:$pipeline,mode:"execute",origin:"trigger",dispatch:"host"}
+      | .source.bundle_digest={set:true,value:$digest})
   }'
 }
 
 submit_trigger() {
-  trigger_run_id="$(api_post_json "/api/v1/triggers" "$(trigger_body "$1")" | jq -er '.run_id')"
+  local ticket upload_id upload_url header
+  local -a upload_headers=()
+  ticket="$(api_post_json /api/v1/data/source "$(source_request "$1" | \
+    jq --arg digest "$fixture_digest" --argjson size "$fixture_size" '. + {digest:$digest,size:$size}')")"
+  upload_id="$(jq -er '.upload_id' <<<"$ticket")"
+  upload_url="$(jq -er '.url' <<<"$ticket")"
+  # The signed transfer path is shared by the cluster Service and this forward.
+  upload_url="http://127.0.0.1:${controller_port}/${upload_url#*://*/}"
+  while IFS= read -r header; do upload_headers+=(-H "$header"); done < <(jq -r '.headers // {} | to_entries[] | .key+": "+.value' <<<"$ticket")
+  curl --fail --silent --show-error --max-time 30 -X PUT "${upload_headers[@]}" \
+    --data-binary "@$fixture_bundle" "$upload_url" >/dev/null
+  api_post_json "/api/v1/data/source/$upload_id/commit" '{}' | jq -e --arg digest "$fixture_digest" '.digest == $digest' >/dev/null
+  trigger_run_id="$(api_post_json /api/v1/runs "$(trigger_body "$1")" | jq -er '.run_id')"
 }
 
 prove_runner_execution() {
   local run_id=$1 runner_pod=$2 phase=$3 nodes
-  nodes="$(api_get "/api/v1/runs/$run_id/nodes")"
+  nodes="$(api_get "/api/v1/runs/$run_id")"
   printf '%s\n' "$nodes" >"$artifact_dir/runner-$phase-nodes.json"
-  jq -e --arg pod "$runner_pod" '
-    .nodes | length == 1 and .[0].id == "prove-controller-runner-logs" and .[0].status == "done" and
-    (.[0].execution_attempts | any(.outcome == "success" and .executor_kind == "kubernetes" and
-      .execution_site == "cluster" and .execution_site_name == $pod))
-  ' <<<"$nodes" >/dev/null || die "$phase run $run_id has no successful execution by Ready runner pod $runner_pod"
+  jq -e '
+    (.jobs | length == 1 and .[0].id == "prove-controller-runner-logs" and .[0].status == "done") and
+    (.attempts | any(.job_id == "prove-controller-runner-logs" and .outcome == "success" and
+      .executor == "agent" and .executor_name == "k8s-e2e" and .location == "local"))
+  ' <<<"$nodes" >/dev/null || die "$phase run $run_id has no successful execution by enrolled runner k8s-e2e (Ready pod $runner_pod)"
 }
 
 wait_run_status() {
@@ -633,32 +570,30 @@ wait_run_status() {
   die "run $run_id did not reach $wanted within ${timeout_seconds}s"
 }
 
-echo "k8s-e2e: proving invalid trigger authentication"
+echo "k8s-e2e: proving invalid run authentication"
 api_get "/api/v1/runs?limit=100" | jq -e '.runs | length == 0' >/dev/null
 invalid_trigger_status="$(curl --silent --show-error --max-time 10 \
   -o "$artifact_dir/invalid-trigger-response.json" -w '%{http_code}' \
   -X POST -H 'Authorization: Bearer swu_k8se2einvalidtokenk8se2einvalidtoken' \
   -H 'Content-Type: application/json' \
   --data "$(trigger_body k8s-success)" \
-  "http://127.0.0.1:${controller_port}/api/v1/triggers")"
+  "http://127.0.0.1:${controller_port}/api/v1/runs")"
 [[ "$invalid_trigger_status" == "401" ]] || die "invalid trigger token returned $invalid_trigger_status, want 401"
 api_get "/api/v1/runs?limit=100" | jq -e '.runs | length == 0' >/dev/null
 
-echo "k8s-e2e: proving trigger submission, claim, node execution, and web proxies"
+echo "k8s-e2e: proving uploaded-source submission, claim, node execution, and dashboard reads"
 IFS=$'\t' read -r initial_runner_pod initial_runner_uid < <(ready_pod_identity runner)
 submit_trigger k8s-success
 success_run=$trigger_run_id
 wait_run_status "$success_run" success 300
-success_nodes="$(api_get "/api/v1/runs/$success_run/nodes")"
-jq -e '.nodes | length == 1 and .[0].status == "done"' <<<"$success_nodes" >/dev/null
-success_started="$(jq -er '.nodes[0].started_at' <<<"$success_nodes")"
+success_nodes="$(api_get "/api/v1/runs/$success_run")"
+jq -e '.jobs | length == 1 and .[0].status == "done"' <<<"$success_nodes" >/dev/null
+success_started="$(jq -er '.jobs[0].started_at' <<<"$success_nodes")"
 prove_runner_execution "$success_run" "$initial_runner_pod" initial
-agents="$(api_get "/api/v1/agents")"
-jq -e --arg name "$initial_runner_pod" \
-  '.agents | any(.type == "agent" and .name == $name)' <<<"$agents" >/dev/null
+agents="$(api_get "/api/v1/runners")"
+jq -e '.runners | any(.name == "k8s-e2e")' <<<"$agents" >/dev/null
 
-start_forward "$web_service" 80 web
-web_port=$forward_port
+web_port=$controller_port
 unauthenticated_web_status="$(curl --silent --show-error --max-time 5 \
   -o /dev/null -w '%{http_code}' "http://127.0.0.1:${web_port}/api/v1/runs")"
 [[ "$unauthenticated_web_status" == "401" ]] || die "protected web read returned $unauthenticated_web_status without a session"
@@ -674,7 +609,7 @@ curl --fail --silent --show-error --location --max-time 10 --cookie "__Host-sw_s
 curl --fail --silent --show-error --max-time 10 --cookie "__Host-sw_session=$web_session" \
   "http://127.0.0.1:${web_port}/api/v1/runs/$success_run" | jq -e '.status == "success"' >/dev/null
 curl --fail --silent --show-error --max-time 10 --cookie "__Host-sw_session=$web_session" \
-  "http://127.0.0.1:${web_port}/api/v1/runs/$success_run/logs/prove-controller-runner-logs" | \
+  "http://127.0.0.1:${web_port}/api/v1/runs/$success_run/jobs/prove-controller-runner-logs/logs" | \
   grep -q "sparkwing-k8s-e2e-success run_id=$success_run"
 
 echo "k8s-e2e: proving cancellation"
@@ -683,6 +618,7 @@ cancelled_run=$trigger_run_id
 wait_run_status "$cancelled_run" running 180
 curl --fail --silent --show-error --max-time 10 \
   -X POST -H "Authorization: Bearer $admin_token" \
+  -H 'Content-Type: application/json' --data '{"reason":"Kubernetes E2E cancellation"}' \
   "http://127.0.0.1:${controller_port}/api/v1/runs/$cancelled_run/cancel" >/dev/null
 wait_run_status "$cancelled_run" cancelled 120
 
@@ -699,8 +635,8 @@ IFS=$'\t' read -r runner_pod_after runner_uid_after < <(ready_pod_identity runne
 submit_trigger k8s-success
 post_runner_restart_run=$trigger_run_id
 wait_run_status "$post_runner_restart_run" success 300
-post_runner_nodes="$(api_get "/api/v1/runs/$post_runner_restart_run/nodes")"
-jq -e '.nodes | length == 1 and .[0].status == "done"' <<<"$post_runner_nodes" >/dev/null
+post_runner_nodes="$(api_get "/api/v1/runs/$post_runner_restart_run")"
+jq -e '.jobs | length == 1 and .[0].status == "done"' <<<"$post_runner_nodes" >/dev/null
 prove_runner_execution "$post_runner_restart_run" "$runner_pod_after" post-restart
 
 echo "k8s-e2e: proving controller restart and retained run state"
@@ -715,29 +651,27 @@ controller_port=""
 web_port=""
 start_forward "$controller_service" 80 controller-restarted
 controller_port=$forward_port
-start_forward "$web_service" 80 web-controller-restarted
-web_port=$forward_port
+web_port=$controller_port
 api_get "/api/v1/runs/$success_run" | jq -e '.status == "success"' >/dev/null
 
 echo "k8s-e2e: proving retry"
-retry_response="$(curl --fail --silent --show-error --max-time 10 \
-  -X POST -H "Authorization: Bearer $admin_token" \
-  "http://127.0.0.1:${controller_port}/api/v1/runs/$success_run/retry?full=1")"
-retry_run="$(jq -er '.id' <<<"$retry_response")"
+retry_response="$(api_post_json "/api/v1/runs/$success_run/retry" \
+  "$(jq -nc --arg key "$(openssl rand -hex 16)" '{mode:"all",idempotency_key:$key}')")"
+retry_run="$(jq -er '.run_id' <<<"$retry_response")"
 wait_run_status "$retry_run" success 300
-api_get "/api/v1/runs/$retry_run" | jq -e --arg source "$success_run" '.retry_of == $source' >/dev/null
-retry_nodes="$(api_get "/api/v1/runs/$retry_run/nodes")"
+api_get "/api/v1/runs/$retry_run" | jq -e --arg source "$success_run" '.inputs.lineage.retry_of == $source' >/dev/null
+retry_nodes="$(api_get "/api/v1/runs/$retry_run")"
 jq -e --arg source_started "$success_started" '
-  .nodes | length == 1
+  .jobs | length == 1
   and .[0].status == "done"
   and .[0].started_at != null
   and .[0].finished_at != null
   and .[0].started_at != $source_started
 ' <<<"$retry_nodes" >/dev/null
-retry_output="$(api_get "/api/v1/runs/$retry_run/nodes/prove-controller-runner-logs/output" | jq -er '.')"
+retry_output="$(api_get "/api/v1/runs/$retry_run/jobs/prove-controller-runner-logs/output" | jq -er '.output')"
 [[ "$retry_output" == "$retry_run" ]] || die "retry node output $retry_output does not match retry run $retry_run"
 curl --fail --silent --show-error --max-time 10 --cookie "__Host-sw_session=$web_session" \
-  "http://127.0.0.1:${web_port}/api/v1/runs/$retry_run/logs/prove-controller-runner-logs" | \
+  "http://127.0.0.1:${web_port}/api/v1/runs/$retry_run/jobs/prove-controller-runner-logs/logs" | \
   grep -q "sparkwing-k8s-e2e-success run_id=$retry_run"
 
 echo "k8s-e2e: proving uninstall retention and reinstall recovery"
@@ -763,11 +697,10 @@ kube --namespace "$namespace" wait deployment \
   --for=condition=Available --timeout=300s
 start_forward "$controller_service" 80 controller-reinstall
 controller_port=$forward_port
-start_forward "$web_service" 80 web-reinstall
-web_port=$forward_port
+web_port=$controller_port
 api_get "/api/v1/runs/$success_run" | jq -e '.status == "success"' >/dev/null
 curl --fail --silent --show-error --max-time 10 --cookie "__Host-sw_session=$web_session" \
-  "http://127.0.0.1:${web_port}/api/v1/runs/$success_run/logs/prove-controller-runner-logs" | \
+  "http://127.0.0.1:${web_port}/api/v1/runs/$success_run/jobs/prove-controller-runner-logs/logs" | \
   grep -q "sparkwing-k8s-e2e-success run_id=$success_run"
 
 cat >"$artifact_dir/result.txt" <<EOF

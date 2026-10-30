@@ -785,18 +785,23 @@ func TestRunnerGoCacheOnOneReplicaAcceptsReadWriteOnce(t *testing.T) {
 	}
 }
 
-func TestRunnerWarmModulesRenderAsOneFlag(t *testing.T) {
+func TestRunnerRejectsRemovedWarmModules(t *testing.T) {
 	if testing.Short() {
-		t.Skip("slow: 0.3s of real work; the fast class runs under -short")
+		t.Skip("slow: chart render")
 	}
-	args := runnerContainer(t, renderRunner(t,
-		"runner.goCache.warmModules={github.com/sparkwing-dev/sparkwing@v0.49.0,example.com/pipelines}")).Args
-	got, ok := hasFlag(args, "--warm-module=")
-	if !ok {
-		t.Fatalf("runner args = %v, want a warm list", args)
-	}
-	if want := "--warm-module=github.com/sparkwing-dev/sparkwing@v0.49.0,example.com/pipelines"; got != want {
-		t.Fatalf("warm flag = %q, want %q", got, want)
+	for _, chart := range []string{"./sparkwing-runner-bundle", "./sparkwing-full"} {
+		prefix := ""
+		if chart == "./sparkwing-full" {
+			prefix = "sparkwing-runner-bundle."
+		}
+		for _, value := range []string{"{example.com/pipelines@v1.0.0}", "{}", "false"} {
+			t.Run(chart+"/"+value, func(t *testing.T) {
+				out := helmRenderError(t, chart, "sparkwing", prefix+"runner.goCache.warmModules="+value)
+				if !strings.Contains(out, "runner.goCache.warmModules was removed; unset it") {
+					t.Fatalf("render error = %q, want the removed value and remedy named", out)
+				}
+			})
+		}
 	}
 }
 
@@ -805,13 +810,9 @@ func TestFullChartVendorsTheRunnerGoCache(t *testing.T) {
 		t.Skip("slow: 0.3s of real work; the fast class runs under -short")
 	}
 	resources := renderedResources(t, helmRenderAll(t, "./sparkwing-full", "sparkwing", "default",
-		"sparkwing-runner-bundle.runner.goCache.persistence.enabled=true",
-		"sparkwing-runner-bundle.runner.goCache.warmModules={example.com/pipelines@v1.0.0}"))
+		"sparkwing-runner-bundle.runner.goCache.persistence.enabled=true"))
 	runner := componentResource(t, resources, "Deployment", "runner")
 	container := resourceContainer(t, runner)
-	if !containsArg(container.Args, "--warm-module=example.com/pipelines@v1.0.0") {
-		t.Errorf("vendored runner args = %v, want the warm list", container.Args)
-	}
 	build, mod := goCachePaths(t, container)
 	for _, want := range []renderedVolumeMount{
 		{Name: "go-cache", MountPath: build, SubPath: "gocache"},

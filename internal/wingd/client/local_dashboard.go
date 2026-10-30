@@ -17,7 +17,7 @@ import (
 // startLocalDashboard waits for the elected owner's dashboard serving loop.
 // An identical address reuses the listener. This never starts or replaces a
 // controller. Cancellation closes the request; the owner may already be serving.
-func startLocalDashboard(ctx context.Context, home, address string) error {
+func startLocalDashboard(ctx context.Context, home, address string, readOnly bool) error {
 	if address == "" {
 		return errors.New("wingd/client: dashboard address is required")
 	}
@@ -26,10 +26,10 @@ func startLocalDashboard(ctx context.Context, home, address string) error {
 		return err
 	}
 	defer nc.Close()
-	return exchangeLocalDashboard(ctx, nc, sock, address)
+	return exchangeLocalDashboard(ctx, nc, sock, address, readOnly)
 }
 
-func exchangeLocalDashboard(ctx context.Context, nc net.Conn, sock, address string) error {
+func exchangeLocalDashboard(ctx context.Context, nc net.Conn, sock, address string, readOnly bool) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -66,7 +66,7 @@ func exchangeLocalDashboard(ctx context.Context, nc net.Conn, sock, address stri
 		return err
 	}
 	cl.connDeadline = deadline
-	err = cl.startLocalDashboard(address)
+	err = cl.startLocalDashboard(address, readOnly)
 	if ctx.Err() != nil {
 		return ctx.Err()
 	}
@@ -76,8 +76,8 @@ func exchangeLocalDashboard(ctx context.Context, nc net.Conn, sock, address stri
 	return nil
 }
 
-func (cl *Client) startLocalDashboard(address string) error {
-	if err := cl.write(&wingwire.LocalDashboard{Address: address}); err != nil {
+func (cl *Client) startLocalDashboard(address string, readOnly bool) error {
+	if err := cl.write(&wingwire.LocalDashboard{Address: address, ReadOnly: readOnly}); err != nil {
 		return err
 	}
 	message, err := cl.dec.read()
@@ -93,6 +93,9 @@ func (cl *Client) startLocalDashboard(address string) error {
 	}
 	if reply.Error != "" {
 		return errors.New(reply.Error)
+	}
+	if reply.ReadOnly != readOnly {
+		return errors.New("wingd/client: dashboard owner did not confirm the requested read-only policy; restart the controller with this version")
 	}
 	return nil
 }

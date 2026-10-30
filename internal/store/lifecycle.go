@@ -19,4 +19,4 @@ const (
 	triggerStatusDone    = "done"
 )
 
-const runTerminalIn = `status IN ('success','failed','cancelled')`
+const runTerminalIn = `status IN ('success','dry_run','failed','cancelled')`

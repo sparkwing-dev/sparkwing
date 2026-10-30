@@ -292,14 +292,8 @@ func openSQL(ctx context.Context, driver, dsn string, dialect Dialect, path stri
 		s.githubLocks.SetMaxIdleConns(2)
 		s.githubLocks.SetConnMaxIdleTime(5 * time.Minute)
 	}
-	for _, opt := range opts {
-		if opt.policies != nil {
-			policies, err := opt.policies(s)
-			if err != nil {
-				return nil, errors.Join(err, s.Close())
-			}
-			s.configurePolicies(policies)
-		}
+	if err := s.configurePolicyOptions(opts); err != nil {
+		return nil, errors.Join(err, s.Close())
 	}
 	return s, nil
 }
@@ -1281,7 +1275,7 @@ func scanApproval(rs rowScanner) (*Approval, error) {
 var schemaNeutral string
 
 // safety: the baseline is the only schema; a store recording any other version is refused, never upgraded.
-const expectedSchemaVersion = 25
+const expectedSchemaVersion = 26
 
 // ExpectedSchemaVersion returns the schema version this binary
 // understands. Useful for diagnostics, version-mismatch reporting,

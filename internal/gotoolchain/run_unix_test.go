@@ -131,7 +131,14 @@ func TestCancelledProbeStopsItsChildren(t *testing.T) {
 	if err := <-done; !errors.Is(err, context.Canceled) {
 		t.Fatalf("error = %v", err)
 	}
-	if err := syscall.Kill(child, 0); !errors.Is(err, syscall.ESRCH) {
-		t.Fatalf("the probe's child %d survived cancellation: %v", child, err)
+	processes, err := procgroup.List()
+	if err != nil {
+		t.Fatal(err)
+	}
+	// An exited child may remain a zombie until its new parent reaps it.
+	for _, process := range processes {
+		if process.PID == child && !process.Terminated() {
+			t.Fatalf("the probe's child %d survived cancellation in state %q", child, process.State)
+		}
 	}
 }

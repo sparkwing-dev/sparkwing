@@ -288,6 +288,7 @@ const (
 	RunPending   RunState = "pending"
 	RunRunning   RunState = "running"
 	RunSuccess   RunState = "success"
+	RunDryRun    RunState = "dry_run"
 	RunFailed    RunState = "failed"
 	RunCancelled RunState = "cancelled"
 )

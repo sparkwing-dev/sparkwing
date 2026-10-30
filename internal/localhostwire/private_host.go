@@ -11,10 +11,11 @@ type LocalDataAuthority struct {
 	Authority blob.Authority `json:"authority"`
 }
 
-// LocalNodeSnapshot keeps artifact selectors outside the executable job namespace.
+// LocalNodeSnapshot keeps artifact and recovery selectors outside the executable job namespace.
 type LocalNodeSnapshot struct {
 	runstate.RunSnapshot
 	ArtifactSources map[string]blob.RecordKey `json:"artifact_sources,omitempty"`
+	RecoverySource  *runstate.NodeRow         `json:"recovery_source,omitempty"`
 }
 
 // LocalRunTransition carries a lifecycle edge without actor authority.

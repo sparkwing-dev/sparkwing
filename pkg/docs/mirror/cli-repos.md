@@ -60,6 +60,8 @@ Inspect repository versions, worktrees, and pipelines
 
 List the machine's fleet of sparkwing repos
 
+Inventory includes each checkout SDK kind (go or typescript) and its native SDK pin. TypeScript pins come from the npm lockfile when present. JSON uses sdk and pin; plain appends SDK kind after name, pin and primary path.
+
 ### Flags
 
 | Flag | Description |

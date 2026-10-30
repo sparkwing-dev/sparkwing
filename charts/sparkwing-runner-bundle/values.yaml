@@ -139,14 +139,6 @@ runner:
 
   # Go build and module caches reused by source compilation on this runner.
   goCache:
-    # Modules the runner downloads into GOMODCACHE at startup, passed as
-    # --warm-module. Empty warms the Sparkwing SDK at the runner image's
-    # own version, which is most of a pipeline's dependency graph. Each
-    # entry may carry an @version ("example.com/mod@v1.2.3", and
-    # similar); a bare path resolves at download time. ["off"] starts the
-    # pool with no warm.
-    warmModules: []
-
     persistence:
       # true mounts a PersistentVolumeClaim over GOCACHE and GOMODCACHE,
       # so the caches outlive the pod that filled them.

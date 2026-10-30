@@ -89,9 +89,6 @@ func validateDashboardInvocation(inv clisurface.Invocation, goos string) error {
 		if !originguard.LoopbackHost(addr) && !inv.Bool("allow-remote") {
 			return &clisurface.UsageError{Path: inv.Command.Path, Message: "non-loopback --addr requires --allow-remote"}
 		}
-		if inv.Bool("read-only") || inv.Bool("allow-remote") || inv.Has("allow-origin") {
-			return dashboardUnavailable("local controller dashboard access-policy options")
-		}
 	}
 	return nil
 }
@@ -115,6 +112,7 @@ func executeDashboard(ctx context.Context, inv clisurface.Invocation, services d
 	case "start":
 		options := services.options
 		options.Stay, options.DashboardAddress = inv.Bool("stay"), dashboardAddress(inv)
+		options.DashboardReadOnly = inv.Bool("read-only")
 		status, err = services.lifecycle.StartDashboard(ctx, options)
 	case "stop":
 		status, err = stopLocalController(ctx, services.lifecycle)

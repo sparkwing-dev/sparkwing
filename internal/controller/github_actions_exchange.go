@@ -129,7 +129,7 @@ func (s *Server) issueActionsCredential(w http.ResponseWriter, r *http.Request, 
 		return &apierr.Error{Code: apierr.IntegrityFailure, Message: "Actions credential has no expiry"}
 	}
 	writeJSON(w, http.StatusCreated, githubExchangeResp{
-		Token: issued.Raw, Team: proof.spec.Team, Repository: proof.repository,
+		Token: issued.Raw, Team: proof.spec.Team, Repository: proof.repository, Binding: issued.Capability.Binding,
 		ExpiresAt: issued.Capability.ExpiresAt.Unix(), Labels: []string{GitHubActionsLabel},
 	})
 	return nil

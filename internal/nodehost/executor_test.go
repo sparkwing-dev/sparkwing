@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
 	"reflect"
 	"strings"
 	"sync"
@@ -914,6 +915,20 @@ func TestNodeExecutorRecoveryReceivesPersistedFailure(t *testing.T) {
 		}
 		return &failure, nil
 	}
+	cfg, _ := nativeConfigFixture(t)
+	cfg.ReadFailure = deps.ReadFailure
+	services, err := nativeServices(t.Context(), cfg, func(string, string) (net.Listener, error) {
+		return &processListener{closed: make(chan struct{})}, nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := services.Close(); err != nil {
+			t.Error(err)
+		}
+	})
+	deps.ReadFailure = services.Config.Executor.ReadFailure
 	start := deps.Start
 	deps.Start = func(ctx context.Context, in NodeInput, p ExecutorActivity) (ExecutorProcess, error) {
 		process, err := start(ctx, in, p)

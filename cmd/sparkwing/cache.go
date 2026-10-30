@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -13,7 +14,12 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
 
 	"github.com/sparkwing-dev/sparkwing/internal/bincache"
+	"github.com/sparkwing-dev/sparkwing/internal/engine"
+	"github.com/sparkwing-dev/sparkwing/internal/engine/sdkinstall"
+	"github.com/sparkwing-dev/sparkwing/internal/engineid"
 	"github.com/sparkwing-dev/sparkwing/internal/pipelineentry"
+	"github.com/sparkwing-dev/sparkwing/internal/procenv"
+	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/userconfig"
 	"github.com/sparkwing-dev/sparkwing/pkg/color"
 )
@@ -326,7 +332,19 @@ func runCacheExplain(inv clisurface.Invocation) error {
 		})
 	}
 
-	key, parts, err := bincache.ExplainCacheKey(dir, os.Environ())
+	environment, err := procenv.Build(procenv.Install, procenv.Base{Local: true, Captured: os.Environ(), Masker: secrets.NewMasker()}, procenv.Runtime{})
+	if err != nil {
+		return fmt.Errorf("cache explain: %w", err)
+	}
+	pin, err := engine.ReadPin(dir, engineid.GoSDK)
+	if err != nil {
+		return fmt.Errorf("cache explain: %w", err)
+	}
+	environment, err = sdkinstall.GoEnvironment(context.Background(), dir, pin, environment)
+	if err != nil {
+		return fmt.Errorf("cache explain: %w", err)
+	}
+	key, parts, err := bincache.ExplainCacheKey(dir, slices.Collect(environment.Values()))
 	if err != nil {
 		return fmt.Errorf("cache explain: %w", err)
 	}

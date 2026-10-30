@@ -75,5 +75,5 @@ func (c *localController) cancelRun(runID, reason string, actor runstate.Actor) 
 }
 
 func terminal(state runstate.RunState) bool {
-	return state == runstate.RunSuccess || state == runstate.RunFailed || state == runstate.RunCancelled
+	return state == runstate.RunSuccess || state == runstate.RunDryRun || state == runstate.RunFailed || state == runstate.RunCancelled
 }

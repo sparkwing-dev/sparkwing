@@ -123,14 +123,12 @@ indexed in [cli-reference.md](cli-reference.md):
 - **Root flags.** `-C DIR`, `--profile NAME` and `-o FORMAT` may go before
   the verb, as in `sparkwing -C ~/code/other runs list`. It selects a local checkout before project discovery.
 - **Profile addressing.** `--profile NAME` picks a private controller
-  connection. Without it, every verb acts on local state (SQLite under
-  `~/.sparkwing/`); neither the environment nor the project config selects
-  a profile, so a command reaches a controller only when its own command
-  line names one. Every verb that can reach a controller accepts
-  `--profile`. `sparkwing run` always executes
-  locally and takes no `--profile`.
-  `sparkwing pipeline trigger <pipeline> --profile NAME` is the verb for
-  remote (cluster) execution.
+  connection. Commands with an optional profile use the saved default when
+  omitted, then the local controller when no default is selected. Set it with
+  `profiles set --profile NAME --default`; `--profile=` selects local for one
+  command. Environment and project config cannot choose a default connection.
+  `sparkwing run` executes locally and takes no `--profile`.
+  `sparkwing pipeline trigger <pipeline> --profile NAME` submits remote work.
 - **Required flags.** Marked `[required]` in `--help`; missing ones fail
   before any side effect.
 - **Hidden entries.** Pipelines marked `hidden: true` don't appear in
@@ -217,3 +215,12 @@ mode includes a short page footer. Explicit `commands --format markdown`
 exports the exhaustive reference and rejects search/pagination flags; a
 `--path` export still selects the requested subtree. Use `--output plain`
 when redirecting the Markdown artifact to a file.
+
+Misspelled command words suggest the closest command in the same group. Run the
+suggested command with `--help` to see its flags. An unknown flag on `runs list`
+names the accepted flags and points to `--help`.
+
+`runs status` in plain and pretty formats includes `started_at`, `finished_at`
+and `duration` for the run, plus each job's start, finish and duration. Missing
+timestamps or a duration without both timestamps appear as `-`. JSON retains
+the controller's timestamps.

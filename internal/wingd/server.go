@@ -74,7 +74,7 @@ type Daemon struct {
 	dashboardConns      int
 	stay                bool
 	localControl        func(*bool) LocalStatus
-	localDashboard      func(context.Context, string) error
+	localDashboard      func(context.Context, string, bool) error
 	lastActivity        time.Time
 	startedAt           time.Time
 

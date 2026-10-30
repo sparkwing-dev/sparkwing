@@ -47,6 +47,10 @@ func TestLocalDashboardStartsOnExistingController(t *testing.T) {
 			t.Fatalf("dashboard start: %+v %v", status, err)
 		}
 	}
+	opts.DashboardReadOnly = true
+	if _, err := lifecycle.StartDashboard(t.Context(), opts); err == nil {
+		t.Fatal("changed the read-only policy of an existing listener")
+	}
 	if binds.Load() != 1 {
 		t.Fatalf("dashboard binds=%d, want one", binds.Load())
 	}

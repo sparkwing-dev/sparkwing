@@ -651,6 +651,9 @@ func ChildPipelinesMustBeDeclared(t *testing.T, open func(*testing.T) *Store) {
 	if !errors.As(err, &refused) || refused.Code != apierr.Forbidden {
 		t.Fatalf("undeclared child pipeline admitted: %v", err)
 	}
+	if !strings.Contains(refused.Message, "StartsChildren") {
+		t.Fatalf("undeclared child refusal lacks declaration guidance: %v", err)
+	}
 }
 
 // ChildrenOfTheirParentsRepositoryUseItsSourceLocation is the one source-location

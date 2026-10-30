@@ -103,7 +103,7 @@ func (l *processLifecycle) StartDashboard(ctx context.Context, opts wingd.LocalS
 	if err != nil || opts.DashboardAddress == "" {
 		return status, err
 	}
-	if err := l.control.EnsureDashboard(ctx, opts.DashboardAddress); err != nil {
+	if err := l.control.EnsureDashboard(ctx, opts.DashboardAddress, opts.DashboardReadOnly); err != nil {
 		return wingd.LocalStatus{}, err
 	}
 	status, err = l.Status(ctx)

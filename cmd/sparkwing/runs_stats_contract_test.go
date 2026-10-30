@@ -107,3 +107,18 @@ func TestRunStatisticsPlainAndInvalidModes(t *testing.T) {
 		t.Fatalf("plain: %q %v", out.String(), err)
 	}
 }
+
+func TestRunStatisticsCountsPreviewsSeparately(t *testing.T) {
+	stats, err := aggregateRunDetails("check", []controllerwire.RunDetail{{Status: "dry_run"}, {Status: "success"}})
+	var out bytes.Buffer
+	if err == nil {
+		err = writeRunStatistics(&out, []pipelineStats{stats}, "json")
+	}
+	var got map[string]any
+	if err == nil {
+		err = json.Unmarshal(out.Bytes(), &got)
+	}
+	if err != nil || got["dry_run"] != float64(1) || stats.Running != 0 || stats.Passed != 1 || stats.SuccessPct != 100 {
+		t.Fatalf("preview counted as running or applied: stats=%+v json=%s err=%v", stats, &out, err)
+	}
+}

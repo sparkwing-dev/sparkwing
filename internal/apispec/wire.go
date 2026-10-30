@@ -110,7 +110,7 @@ func wireOperations() map[string]wireOperation {
 	result["POST /api/v1/runs/{run}/local-host/release-evaluation"] = operation("Release source expansion under plan admission", localhostwire.LocalEvaluationRelease{}, runstate.Applied{})
 	result["POST /api/v1/runs/{run}/local-host/relinquish-start"] = operation("Relinquish a provisional burst job award", localhostwire.LocalCapacityRequest{}, nil)
 	result["GET /api/v1/runs/{run}/local-host/snapshot"] = operation("Read awarded execution state or export completed local history as the verified local peer", nil, runstate.LocalPublication{})
-	result["GET /api/v1/runs/{run}/local-host/nodes/{job}/snapshot"] = operation("Read awarded job state and declared terminal artifact selectors", nil, localhostwire.LocalNodeSnapshot{})
+	result["GET /api/v1/runs/{run}/local-host/nodes/{job}/snapshot"] = operation("Read awarded job state and declared artifact and recovery selectors", nil, localhostwire.LocalNodeSnapshot{})
 
 	result["POST /api/v1/team/billing/standing-request"] = operation("Contact operators for High standing, higher limits or larger payments", wire.StandingRequestWrite{}, wire.StandingRequest{})
 	result["GET /api/v1/operator/standing-requests"] = operation("List open standing requests", nil, wire.OperatorStandingQueue{})

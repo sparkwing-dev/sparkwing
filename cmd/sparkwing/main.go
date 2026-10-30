@@ -248,6 +248,10 @@ func runSparkwing(args []string) (result error) {
 	if inv.Help() && !pipelineHelp || inv.Command.Path != "sparkwing version" && len(childCommands(inv.Command.Path)) > 0 {
 		return writeCommandHelp(surfaceHelp(inv.Command), os.Stdout, inv.Output(color.IsInteractiveStdout()))
 	}
+	if err := applyConfiguredProfile(&inv); err != nil {
+		return err
+	}
+
 	replayDirectory := ""
 	if checkout := inv.Value("checkout"); checkout != "" {
 		previous, err := os.Getwd()
@@ -454,11 +458,11 @@ func resolveTTYAwareOutput(outputFormat, cmdPath string) (string, error) {
 }
 
 func isTerminalRunStatus(s string) bool {
-	return s == "success" || s == "failed" || s == "cancelled"
+	return s == "success" || s == "dry_run" || s == "failed" || s == "cancelled"
 }
 
 func statusExitCode(status string) error {
-	if status == "success" {
+	if status == "success" || status == "dry_run" {
 		return nil
 	}
 	return exitErrorf(1, "run status: %s", status)

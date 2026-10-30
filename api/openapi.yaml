@@ -3551,6 +3551,8 @@ components:
       properties:
         cancel_requested:
           type: boolean
+        dry_run:
+          type: boolean
         expansions:
           anyOf:
             - items:
@@ -3586,6 +3588,7 @@ components:
         - run_id
         - store_now
         - cancel_requested
+        - dry_run
         - selection_skips
         - jobs
         - generators
@@ -4389,6 +4392,10 @@ components:
             - additionalProperties:
                 $ref: '#/components/schemas/internal.blob.RecordKey'
               type: object
+            - type: "null"
+        recovery_source:
+          anyOf:
+            - $ref: '#/components/schemas/internal.runstate.NodeRow'
             - type: "null"
       required:
         - Run
@@ -13041,7 +13048,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/internal.apierr.Envelope'
           description: Canonical API failure.
-      summary: Read awarded job state and declared terminal artifact selectors
+      summary: Read awarded job state and declared artifact and recovery selectors
       x-sparkwing-policy:
         method: GET
         path: /api/v1/runs/{run}/local-host/nodes/{job}/snapshot

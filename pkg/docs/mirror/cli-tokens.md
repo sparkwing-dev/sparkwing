@@ -43,7 +43,7 @@ Create a member credential through the team token route. Enroll runners with run
 | `--scope SCOPE` | Credential scope. Repeatable; comma-separated values are accepted. |
 | `--ttl DURATION` | Lifetime of the new token in whole seconds or a duration such as 7d; omitted or zero gives it the remaining lifetime of the token that mints it, which it can never outlive. |
 | `--allow-team-admin` | Ask for team.admin on a token minted from a signed-in account session, which then expires within 30 days; a token minted with a profile token gets team.admin whenever that token holds it, and ignores this flag. |
-| `--profile NAME` | Controller connection profile from your config. Omit it to use the local controller. |
+| `--profile NAME` | Controller connection profile from your config. Optional profiles use the saved default, then local; --profile= selects local. |
 
 ## `sparkwing tokens list`
 
@@ -62,7 +62,7 @@ JSON emits one metadata record per token with exact scopes and no bearer. Plain 
 | `--token PREFIX` | Token identifier or prefix. |
 | `--type KIND` | List only tokens of this kind. Values: member, runner. |
 | `--include-revoked` | Also list tokens that have been revoked. |
-| `--profile NAME` | Controller connection profile from your config. Omit it to use the local controller. |
+| `--profile NAME` | Controller connection profile from your config. Optional profiles use the saved default, then local; --profile= selects local. |
 
 ## `sparkwing tokens revoke`
 
@@ -79,7 +79,7 @@ JSON retains the confirmed revocation; plain emits the prefix. A failed or uncon
 | `-h, --help` | Show command help without executing. |
 | `--help-all` | Include uncommon flags in command help. |
 | `--token PREFIX` | Token identifier or prefix. (required) |
-| `--profile NAME` | Controller connection profile from your config. Omit it to use the local controller. |
+| `--profile NAME` | Controller connection profile from your config. Optional profiles use the saved default, then local; --profile= selects local. |
 
 ## `sparkwing tokens rotate`
 
@@ -98,4 +98,4 @@ JSON includes the new bearer, metadata and old revocation time; plain emits the 
 | `--token PREFIX` | Token identifier or prefix. (required) |
 | `--grace DURATION` | How long the old token keeps working after rotation, in whole seconds or a duration, 24h by default; zero revokes it at once. |
 | `--ttl DURATION` | Lifetime of the replacement token in whole seconds or a duration; omitted or zero keeps the old token's remaining lifetime. |
-| `--profile NAME` | Controller connection profile from your config. Omit it to use the local controller. |
+| `--profile NAME` | Controller connection profile from your config. Optional profiles use the saved default, then local; --profile= selects local. |

@@ -12,7 +12,7 @@ func closestMatch(want string, candidates []string) string {
 	best := ""
 	for _, c := range candidates {
 		d := levenshtein(want, c)
-		if bestDist < 0 || d < bestDist {
+		if bestDist < 0 || d < bestDist || d == bestDist && lengthDifference(want, c) < lengthDifference(want, best) {
 			bestDist = d
 			best = c
 		}
@@ -36,6 +36,7 @@ func levenshtein(a, b string) int {
 	if lb == 0 {
 		return la
 	}
+	beforePrev := make([]int, lb+1)
 	prev := make([]int, lb+1)
 	curr := make([]int, lb+1)
 	for j := 0; j <= lb; j++ {
@@ -53,8 +54,11 @@ func levenshtein(a, b string) int {
 				prev[j]+1,
 				prev[j-1]+cost,
 			)
+			if i > 1 && j > 1 && ar[i-1] == br[j-2] && ar[i-2] == br[j-1] {
+				curr[j] = min(curr[j], beforePrev[j-2]+1)
+			}
 		}
-		prev, curr = curr, prev
+		beforePrev, prev, curr = prev, curr, beforePrev
 	}
 	return prev[lb]
 }
@@ -76,3 +80,5 @@ func longerLen(a, b string) int {
 	}
 	return len(b)
 }
+
+func lengthDifference(a, b string) int { return max(len(a), len(b)) - min(len(a), len(b)) }

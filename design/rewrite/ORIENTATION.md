@@ -22,6 +22,17 @@ credential model in `docs/auth.md`, and the decision log
 | Foreign-team refusal for an authority | `capabilities_contract.go`: `resolveTeamAuthorityTx`, `resolveTeamActorTx` (`sameTeam` / `sameTeamOrCloudLauncher`) | `team_authority_guard_test.go`: `TestTeamScopedFunctionsResolveThroughTeam` |
 | Every tenant-table statement carries `team` | the SQL in each tenant method | `tenant_sql_scope_guard_test.go`: `TestTenantSQLScope_EveryTenantTableStatementCarriesTheKey`; `tenant_writer_guard_test.go` |
 
+### Run execution
+
+| Rule | Owner | Guard test |
+| --- | --- | --- |
+| Foreground cancellation waits for terminal state | `cmd/sparkwing/run_host.go`: `runLocalCommand`, `here_attach.go`: `observeHereRun` | `TestLocalRunInterruptCancelsAndWaitsForTerminalRun` |
+| Final cancellation reports retain the hard claim lifetime | `internal/nodehost/executor.go`: `report`, `claimed_node.go`: `claimSetupFailure` | `TestCancellationReportsUseTheLiveClaimLifetime`, `TestOwnerFinishesCancellationAfterACommittedPolicyResult` |
+| Foreground worker bound | `internal/nodehost/owner_schedule.go`: `OwnerHost.schedule` | `TestOwnerHostWorkersBoundLocalExecution` |
+| Successful previews finish as `dry_run` | `internal/store/scheduling_contract.go`: `Decide`; `internal/runstate/state.go`: `RunDryRun` | `internal/store/run_dry_run_test.go` |
+| Paged logs drain committed records, then report unsealed terminal logs incomplete after the existing seal grace | `internal/controller/log_pages.go`: `readLogPage` | `TestPersistedLogPageEndsUnsealedTerminalObservationAfterGrace` |
+| Recovery reads its persisted source failure | `internal/nodehost/native_assembly.go`, `assembly_native_client.go`; `internal/controller/private_host.go` | `TestNodeExecutorRecoveryReceivesPersistedFailure`, `TestPrivateNodeRecoveryReadsOnlyItsPersistedSource` |
+
 ### Trust and provenance
 
 | Rule | Owner | Guard test |
@@ -33,6 +44,7 @@ credential model in `docs/auth.md`, and the decision log
 | Source selection leaves the shared temporary parent unchanged | `internal/source/select.go`: `readCommitFile` prepares only an explicit workspace; `fssecure.MkdirPrivateTemp` owns the private child | `internal/source/select_temp_unix_test.go`: `TestSelectLeavesTheSharedTemporaryParentUnchanged` |
 | Remote configuration size is checked without downloading oversized blobs | `internal/source/select.go`: `readCommitFile` filters blobs and blocks transports during local inspection | `internal/source/select_size_test.go`: `TestTenantSelectionNeverDownloadsAnOversizedConfiguration`, `TestTenantSelectionAllowsAnAbsentConfiguration`; `select_size_unix_test.go`: `TestTenantSelectionRefusesOversizedConfigurationBehindSymlink` |
 | OIDC claims | `Provenance.OIDC`; `internal/oidcissuer/issuer.go`: `Claims`, `runnerEnvironment`; `authority_oidc.go`: `Tenant.MintOIDCToken` | `oidc_repository_test.go`: `TestOIDCRepositoryClaimReadsSealedProvenance`; `pool_launcher_test.go`: `TestLauncherPodOIDCIsFresh` |
+| OIDC without an issuer preserves `not_found` and explains controller setup | `internal/nodehost/process_service_reads.go`: `ProcessServices.oidc` | `internal/nodehost/routes_oidc_test.go`: `TestOIDCWithoutIssuerExplainsControllerSetup` |
 
 ### Claims and placement
 
@@ -85,6 +97,10 @@ credential model in `docs/auth.md`, and the decision log
 | --- | --- | --- |
 | Email address ownership | `identity.go`: `claimEmailTx`, `releaseEmailTx`, `dropUnprovenEmailOwnershipTx` | `identity_test.go`: `TestIdentitySignInRefusesAnUnverifiedEmail`, `TestIdentityRecycledEmailNeverLinksIntoTheOldAccount` |
 | Invitations | `identity.go`: `Tenant.createInvitationTx`, `Operator.acceptAccountInvitationTx` | `identity_test.go`: `TestIdentityInvitationNeedsTheInvitedVerifiedEmail`; `team_mutations_test.go` |
+| Headless runner enrollment preserves independent account authority | `cmd/sparkwing-controller/admin.go`: `admin session`; `internal/capability/policy.go`: enrollment refusal | `cmd/sparkwing-controller/admin_session_test.go`: `TestAdminSessionEnrollsSharedRunnerAndReservedLauncher`, `TestAdminSessionRequiresExistingTeamAdministrator`; `internal/capability/authorization_test.go`: `TestRunnerEnrollmentRouteRequiresStoreOriginAuthority` |
+| Controller standby explains its advisory-lock wait | `controller_lock.go`: `OpenControllerPostgres` | `controller_lock_test.go`: `TestControllerStandbyLogsBeforeWaiting` |
+| Stdin enrollment attempts logout after session authentication on success or failure | `cmd/sparkwing/runners.go`: `runRunnersAdd` | `cmd/sparkwing/runners_personal_test.go`: `TestRunnersPersonalEnrollmentCLIThroughController`; `cmd/sparkwing/runners_test.go`: `TestRunnersPersonalEnrollmentUsesEphemeralSession` |
+| Break-glass session mints commit an audit row with no secret or reason | `identity.go`: `Operator.CreateBreakGlassSession` | `cmd/sparkwing-controller/admin_session_test.go`: `TestAdminSessionEnrollsSharedRunnerAndReservedLauncher` |
 | Sessions | `auth.go`: `Operator.LookupSession`, `CreateCapabilitySession`; `identity.go`: `createAccountSession` | `session_runtime_test.go`; `internal/controller/session_store_runtime_test.go`: `TestMemberTokenHTTPSessionTimeoutAndLogout` |
 | Tokens and capability issuance | `authority_issue.go`: `Store.issueTx`, `awardCapabilityTx` | `security_audit_test.go`: `TestDelegatedTokenRequiresAudit` |
 
@@ -111,10 +127,23 @@ credential model in `docs/auth.md`, and the decision log
 | --- | --- | --- |
 | Local repository memo lookups miss after scope checks; publication is skipped | `blob_lookup.go`: `lookupMemoTx`; `internal/nodehost/executor_memo.go`: `saveMemo` | `blob_local_cache_test.go`: `TestLocalDepcacheRoundTrip`; `internal/nodehost/native_memo_test.go`: `TestNativeExecutorLocalRepositoryMemoRunsBody`; `internal/nodehost/executor_memo_test.go`: `TestExecutorLocalRepositorySkipsMemoPublication` |
 
+### Logs
+
+| Rule | Owner | Guard test |
+| --- | --- | --- |
+| Bound node commands flush final logs at report, retry or release, within the attempt's tail grace | `internal/nodehost/assembly_native_logs.go`: `logHostStore.TransitionNode` reads the command payload | `internal/nodehost/assembly_native_logs_test.go`: `TestStalledLogsDoNotDelayLifecycleCommits`, `TestLogLifecycleDetachesFlush` |
+
 ### CLI and API surface
 
 | Rule | Owner | Guard test |
 | --- | --- | --- |
+| Local argument discovery | `cmd/sparkwing/local_run.go`: `prepareNativeLocalRun` inspects declarations before invocation values are parsed; `internal/nodeproto/arguments.go`: public enum errors list choices | `cmd/sparkwing/local_describe_unix_test.go`: `TestNativeLocalPreparationInspectsBeforeParsingRequiredEnum` |
+| Undeclared child refusal | `internal/controller/child_source.go`: `resolveChildRevisions`; `internal/store/intake_runtime.go`: intake authorization names `StartsChildren` | `internal/controller/child_source_test.go`: `TestUndeclaredChildSourceNamesDeclarationMethod`; `internal/store/provenance_reference_test.go`: `TestChildPipelinesMustBeDeclared` |
+| TypeScript scaffold and fleet inventory | `cmd/sparkwing/action_new_typescript.go`: `scaffoldTypeScriptPipeline`; `internal/repos/fleet.go`: `inventoryPin` delegates npm pins to `engine.ReadPin` | `cmd/sparkwing/action_new_test.go`: `TestPipelineNewTypeScriptBootstrapsAndAddsPipelines`; `internal/repos/fleet_test.go`: `TestDeriveFleetIncludesSDKAndTypeScriptLockedPin` |
+| Default CLI profile | `cmd/sparkwing/profiles.go`: `setProfile` switches one saved default; `profile_flag.go`: `applyConfiguredProfile` applies it only to optional-profile CLI invocations; internal local clients bypass it | `cmd/sparkwing/profile_cmd_test.go`: `TestProfileDefaultSwitchControlsCLIAndKeepsLocalHelpersLocal` |
+| Command typo recovery | `internal/clisurface/parse.go`: `Parse` suggests sibling commands through `sparkwingruntime.SuggestClosest` | `internal/clisurface/parse_test.go`: `TestMisspelledCommandSuggestsNearestSibling` |
+| Run status timing | `cmd/sparkwing/runs_view.go`: `writeRunDetail` prints recorded run and job timestamps and completed durations | `cmd/sparkwing/runs_status_contract_test.go`: `TestRunStatusTextIncludesRunAndJobTiming` |
+| Runner warm Actions identity requires HTTPS except on loopback; removed flags and chart values fail | `internal/cluster/production_runtime.go`, `internal/controller/client/github_actions.go`, `charts/sparkwing-runner-bundle/templates/validate.yaml` | `internal/cluster/actions_runtime_test.go`: `TestProductionWarmExchangesActionsIdentity`; `internal/controller/client/github_actions_test.go`: `TestExchangeGitHubActionsRequiresHTTPSExceptLoopback`; `runner_cli_test.go`: `TestWarmRejectsInertFlags`; `internal/clisurface/parse_test.go`: `TestLintRejectsRemovedStaticFlag`; `charts/render_test.go`: `TestRunnerRejectsRemovedWarmModules` |
 | Command registry | `internal/clisurface/registry.go`: `Registry` | `internal/clisurface/contract_test.go` |
 | Route table | `internal/capability/tables.go`: `Routes`; dispatch in `internal/routepolicy` | `internal/capability/policy_test.go` |
 | OpenAPI | `internal/apispec` writes `api/openapi.yaml`; regenerate with `bin/gen-api-docs.sh` | `bin/check-api-spec.sh`; `internal/apispec/final_contract_test.go` |
@@ -128,6 +157,7 @@ credential model in `docs/auth.md`, and the decision log
 | Compiled pipeline reuse emits a cache-hit diagnostic | `internal/bincache/materialize.go`: `MaterializePipeline` | `internal/bincache/materialize_test.go`: `TestMaterializePipelineReusesBinaryWithoutGo` |
 | Missing local secrets carry local repair commands | `secret_preflight.go`: `secretPreflightTx`, `secretPreflightError.detail` | `secret_preflight_local_test.go`: `TestLocalSecretPreflightGivesLocalSetCommand` |
 | Required-secret plan refusals finish unaccepted runs | `internal/nodehost/owner.go`: `OwnerHost.accept`, `OwnerHost.preparationFailure` | `internal/nodehost/owner_secret_preflight_test.go`: `TestOwnerHostMissingRequiredSecretFinishesUnacceptedRun` |
+| Repository release home is checked before intake opens the store | `.sparkwing/jobs/release.go`: release factory captures `requireReleaseHome` and `Plan` returns a refusal during discovery | `.sparkwing/jobs/release_home_test.go`: `TestReleaseRefusesOperationalHomeDuringPlanning` |
 
 ## Test and gate workflow
 
