@@ -58,7 +58,6 @@ func TestAccountTeamHTTPTransactionGuards(t *testing.T) {
 		err        error
 		code       apierr.Code
 	}{
-		{"/api/v1/teams", `{"slug":"next-team"}`, store.ErrTeamLimit, apierr.Forbidden},
 		{"/api/v1/teams", `{"slug":"next-team"}`, store.ErrSlugTaken, apierr.Conflict},
 		{"/api/v1/teams", `{"slug":"next-team"}`, store.ErrInvalidSlug, apierr.BadRequest},
 		{"/api/v1/invitations/invite/accept", "", store.ErrInvitationClosed, apierr.Conflict},

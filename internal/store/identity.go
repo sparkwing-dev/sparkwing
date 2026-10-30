@@ -133,12 +133,6 @@ const (
 	maxOpenInvitations     = 50
 )
 
-// MaxCreatedTeams bounds how many teams one user creates over the account's
-// life, their personal space included, because each team is a tenant the
-// deployment pays to hold and a deleted team's slug is never reused.
-// Deleting a team does not give the creation back.
-const MaxCreatedTeams = 3
-
 // Identity errors. Callers map these onto status codes.
 var (
 	ErrInvalidSlug      = errors.New("store: invalid team slug")
@@ -154,7 +148,6 @@ var (
 	// ErrAccountExists refuses a first sign-in whose verified address an
 	// existing account holds. It names none of that account's providers.
 	ErrAccountExists    = errors.New("store: an account with this email already exists")
-	ErrTeamLimit        = errors.New("store: this user has created as many teams as one user may")
 	ErrRunnerTokenLimit = errors.New("store: this team holds as many machine tokens as a team may")
 	// ErrAgentNameTaken refuses a machine token for a name another live machine
 	// token of the team already carries, because a node selector and a
@@ -643,10 +636,9 @@ func createAccountTeamTx(ctx context.Context, tx *storeTx, accountID string, slu
 	if len(displayName) > maxDisplayNameLen {
 		return TeamInfo{}, fmt.Errorf("%w: a display name is at most %d characters", ErrInvalidInput, maxDisplayNameLen)
 	}
-	var created int
 	var waitlisted int64
-	if err := tx.QueryRowContext(ctx, `SELECT teams_created, COALESCE(waitlisted_at, 0) FROM accounts WHERE id = ?`+tx.forUpdate(),
-		accountID).Scan(&created, &waitlisted); err != nil {
+	if err := tx.QueryRowContext(ctx, `SELECT COALESCE(waitlisted_at, 0) FROM accounts WHERE id = ?`+tx.forUpdate(),
+		accountID).Scan(&waitlisted); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return TeamInfo{}, ErrNotFound
 		}
@@ -654,11 +646,6 @@ func createAccountTeamTx(ctx context.Context, tx *storeTx, accountID string, slu
 	}
 	if waitlisted != 0 {
 		return TeamInfo{}, ErrWaitlisted
-	}
-	if created >= MaxCreatedTeams {
-		return TeamInfo{}, fmt.Errorf(
-			"%w: one user creates at most %d teams, the personal team included, and this user has created %d",
-			ErrTeamLimit, MaxCreatedTeams, created)
 	}
 	if err := createTeamTx(ctx, tx, accountID, slug, displayName, auditAccountActor(accountID), now); err != nil {
 		return TeamInfo{}, err
@@ -692,8 +679,7 @@ func createTeamTx(ctx context.Context, tx *storeTx, accountID string, slug Team,
 	if err := tx.operator.recordAudit(ctx, tx, auditContext{At: now, Team: slug, Actor: actor}, auditTeamCreation{AccountID: accountID}); err != nil {
 		return err
 	}
-	_, err = tx.execContext(ctx, `UPDATE accounts SET teams_created = teams_created + 1 WHERE id = ?`, accountID)
-	return err
+	return nil
 }
 
 // TeamInfo reads a team's registry row.
@@ -1142,8 +1128,11 @@ func (t *Tenant) createInvitationTx(ctx context.Context, tx *storeTx, actorID, e
 		string(t.team), now.Add(-24*time.Hour).UnixNano()).Scan(&today); err != nil {
 		return Invitation{}, err
 	}
-	if open >= maxOpenInvitations || today >= maxInvitationsPerDay {
-		return Invitation{}, ErrInvitationLimit
+	if open >= maxOpenInvitations {
+		return Invitation{}, fmt.Errorf("%w: open invitation limit is %d per team, current usage is %d invitations; withdraw unused invitations or contact support@sparkwing.dev to raise this limit", ErrInvitationLimit, maxOpenInvitations, open)
+	}
+	if today >= maxInvitationsPerDay {
+		return Invitation{}, fmt.Errorf("%w: daily invitation limit is %d per team, current usage is %d invitations in 24 hours; wait for the window to pass or contact support@sparkwing.dev to raise this limit", ErrInvitationLimit, maxInvitationsPerDay, today)
 	}
 	var already int
 	if err := tx.QueryRowContext(ctx, `

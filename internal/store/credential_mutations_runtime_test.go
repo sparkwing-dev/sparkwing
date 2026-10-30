@@ -214,6 +214,19 @@ func TestCredentialMutationsSecretLimitsPreserveExistingValues(t *testing.T) {
 				if team == DefaultTeam && err != nil || team != DefaultTeam && !errors.Is(err, ErrSecretLimit) {
 					t.Fatalf("secret %s: %v", row.Name, err)
 				}
+				if team != DefaultTeam {
+					want := []string{"support@sparkwing.dev"}
+					if row.Name == "EXTRA" {
+						want = append(want, "limit is 1000", "current usage is 1000 secrets")
+					} else {
+						want = append(want, "value size limit is 131072 bytes", "current sealed value is")
+					}
+					for _, part := range want {
+						if !strings.Contains(err.Error(), part) {
+							t.Fatalf("refusal %q omits %q", err, part)
+						}
+					}
+				}
 			}
 			row, err := tenant.GetSecretRow("KEY_0", "", "")
 			if err != nil || team != DefaultTeam && openSecretFixture(t, tenant, row) != "original" || team == DefaultTeam && len(openSecretFixture(t, tenant, row)) != maxSecretValueBytes+1 {
@@ -308,5 +321,26 @@ func TestWriteSecretReplacementKeepsOnlyOnUnlessChanged(t *testing.T) {
 	cleared.Value = "third"
 	if got := write(cleared); got.OnlyOn != "" {
 		t.Fatalf("explicit clear kept the pool: %+v", got)
+	}
+}
+
+func TestCredentialMutationsGitCredentialLimitNamesUsageAndRemedy(t *testing.T) {
+	tenant, a := credentialMaintenanceFixture(t)
+	for i := range maxGitCredentialsPerTeam {
+		if _, err := tenant.WriteGitCredential(t.Context(), a, sealedGitFixture(t, tenant, GitCredential{HostWide: true, Host: fmt.Sprintf("git-%d.test", i), Kind: GitCredentialHTTPS, Secret: "sealed"})); err != nil {
+			t.Fatal(err)
+		}
+	}
+	_, err := tenant.WriteGitCredential(t.Context(), a, sealedGitFixture(t, tenant, GitCredential{HostWide: true, Host: "extra.test", Kind: GitCredentialHTTPS, Secret: "sealed"}))
+	if !errors.Is(err, ErrGitCredentialLimit) {
+		t.Fatalf("51st credential: %v", err)
+	}
+	for _, want := range []string{"limit is 50", "current usage is 50", "support@sparkwing.dev"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("refusal %q omits %q", err, want)
+		}
+	}
+	if _, err := tenant.WriteGitCredential(t.Context(), a, sealedGitFixture(t, tenant, GitCredential{HostWide: true, Host: "git-0.test", Kind: GitCredentialHTTPS, Secret: "replacement"})); err != nil {
+		t.Fatalf("replacement at cap: %v", err)
 	}
 }

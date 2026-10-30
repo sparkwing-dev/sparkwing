@@ -55,9 +55,9 @@ func credentialWriteError(err error) error {
 	case errors.Is(err, secrets.ErrKeyRefused):
 		return &apierr.Error{Code: apierr.Conflict, Message: "the secrets key is outside this controller home", Hint: "point SPARKWING_SECRETS_KEY_FILE inside this home"}
 	case errors.Is(err, store.ErrSecretLimit):
-		return &apierr.Error{Code: apierr.PayloadTooLarge, Message: "secret storage limit exceeded"}
+		return &apierr.Error{Code: apierr.PayloadTooLarge, Message: err.Error()}
 	case errors.Is(err, store.ErrGitCredentialLimit):
-		return &apierr.Error{Code: apierr.Conflict, Message: "git credential storage limit exceeded"}
+		return &apierr.Error{Code: apierr.Conflict, Message: err.Error()}
 	case errors.Is(err, store.ErrFingerprintMismatch):
 		return &apierr.Error{Code: apierr.Conflict, Message: "fingerprint does not match the pinned host key"}
 	default:
