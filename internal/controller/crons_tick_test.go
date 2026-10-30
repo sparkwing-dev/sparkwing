@@ -40,6 +40,10 @@ func newStoreForTick(t *testing.T) *store.Store {
 			body = `{"token":"token","expires_at":"2100-01-01T00:00:00Z"}`
 		case "GET /installation/repositories":
 			body = `{"total_count":1,"repositories":[{"id":701,"full_name":"acme/widgets","owner":{"id":1,"login":"acme","type":"Organization"}}]}`
+		case "GET /repositories/701":
+			body = `{"id":701,"full_name":"acme/widgets","default_branch":"main"}`
+		case "GET /repos/acme/widgets/compare/0123456789abcdef0123456789abcdef01234567...refs/heads/main":
+			body = `{"status":"identical"}`
 		case "GET /repos/acme/widgets/contents/.sparkwing/sparkwing.yaml":
 			if r.URL.Query().Get("ref") != "0123456789abcdef0123456789abcdef01234567" {
 				return nil, fmt.Errorf("configuration read at unexpected ref: %s", r.URL)

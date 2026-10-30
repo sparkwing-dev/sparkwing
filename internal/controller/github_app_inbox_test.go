@@ -41,6 +41,10 @@ func TestGitHubInboxPersistsFailuresUntilManualProcessing(t *testing.T) {
 				body = `{"id":7,"app_id":1}`
 			case "POST /app/installations/7/access_tokens":
 				body = fmt.Sprintf(`{"token":"token","expires_at":%q}`, time.Now().Add(time.Hour).Format(time.RFC3339))
+			case "GET /installation/repositories":
+				body = `{"total_count":1,"repositories":[{"id":701,"full_name":"acme/widgets","default_branch":"main","owner":{"id":42,"login":"acme","type":"Organization"}}]}`
+			case "GET /repos/acme/widgets/compare/0123456789abcdef0123456789abcdef01234567...refs/heads/main":
+				body = `{"status":"identical"}`
 			case "GET /repos/acme/widgets":
 				if previewUnavailable {
 					code = http.StatusServiceUnavailable
@@ -56,8 +60,12 @@ func TestGitHubInboxPersistsFailuresUntilManualProcessing(t *testing.T) {
 					code = http.StatusNotFound
 				}
 			default:
-				t.Errorf("unexpected GitHub call: %s %s", r.Method, r.URL)
-				code = http.StatusNotFound
+				if r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/repos/acme/widgets/compare/") {
+					body = `{"status":"diverged"}`
+				} else {
+					t.Errorf("unexpected GitHub call: %s %s", r.Method, r.URL)
+					code = http.StatusNotFound
+				}
 			}
 		}
 		return &http.Response{StatusCode: code, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(body)), Request: r}, nil
