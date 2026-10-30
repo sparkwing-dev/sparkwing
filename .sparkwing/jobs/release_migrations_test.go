@@ -461,6 +461,12 @@ func TestRepositoryUnreleasedSectionRollsForTheNextRelease(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// A release commit empties [Unreleased]; there is nothing to roll until the next entry lands.
+	if n, err := unreleasedEntries(string(body)); err != nil {
+		t.Fatal(err)
+	} else if n == 0 {
+		t.Skip("CHANGELOG.md [Unreleased] is empty after a release")
+	}
 	const next = "v0.999.0"
 	rewrite, err := planChangelogRewrite(string(body), next)
 	if err != nil {
