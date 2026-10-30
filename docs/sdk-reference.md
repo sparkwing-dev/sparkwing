@@ -817,14 +817,17 @@ type Ref[T any] struct {
     Pipeline string
 
     // MaxAge bounds the freshness of a cross-pipeline run lookup.
-    // Zero means "any successful run, however old." Ignored for
+    // Zero means "any eligible successful run, however old." Ignored for
     // in-run refs.
     MaxAge time.Duration
+
+    // AnyRun permits cross-pipeline output from runs without verified default-branch provenance.
+    AnyRun bool
 }
 ```
 
 - `func RefTo[T any](n *JobNode) Ref[T]` -- RefTo returns a Ref[T] pointing at an in-run node's output.
-- `func RefToLastRun[T any](pipeline, nodeID string, opts ...RefOption) Ref[T]` -- RefToLastRun returns a Ref[T] pointing at node nodeID in the most recent successful run of pipeline.
+- `func RefToLastRun[T any](pipeline, nodeID string, opts ...RefOption) Ref[T]` -- RefToLastRun returns a Ref[T] pointing at node nodeID in the most recent successful verified default-branch run of pipeline.
 - `func (r Ref[T]) Get(ctx context.Context) T` -- Get resolves the reference to a typed T value.
 - `func (r Ref[T]) Job() string` -- Job returns the upstream node id this reference points at.
 - `func (r Ref[T]) TryGet(ctx context.Context) (T, bool)` -- TryGet resolves the reference like Get but reports an absent upstream output instead of panicking.
@@ -837,6 +840,7 @@ RefOption tunes a cross-pipeline ref constructor (RefToLastRun).
 type RefOption func(*refOpts)
 ```
 
+- `func FromAnyRun() RefOption` -- FromAnyRun permits a cross-pipeline reference to read successful runs from any branch or intake, including uploads.
 - `func MaxAge(d time.Duration) RefOption` -- MaxAge bounds cross-pipeline ref resolution to runs whose finished_at is within d.
 
 ### type RetryConfig

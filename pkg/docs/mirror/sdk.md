@@ -189,8 +189,11 @@ reference, JSON null is absent. An in-run null output is present and decodes to
 the type's zero value. Typed job and step outputs are bounded to 16 MiB each.
 
 `sw.RefToLastRun[T](pipeline, jobID, sw.MaxAge(duration))` reads the latest
-successful run without starting another run. Store it in a job field so planning
-can declare the read edge.
+successful verified default-branch run without starting another run. Store it in
+a job field so planning can declare the read edge. Add `sw.FromAnyRun()` to accept
+output from any successful run, including pull requests and uploads. The opt-out
+must be declared in that job field. Runtime requests cannot widen it.
+TypeScript uses `refToLastRun(pipeline, jobID, { fromAnyRun: true })`.
 
 `sw.RunAndAwait[Out, In](ctx, pipeline, jobID, options...)` starts a child run and
 waits for its output. Options include `sw.WithFreshInputs(in)`,
