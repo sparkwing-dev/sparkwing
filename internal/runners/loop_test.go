@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"slices"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -33,10 +34,14 @@ func TestLoopUsesOneQueueForEveryUnitKind(t *testing.T) {
 	want := []capability.UnitKind{capability.UnitTrigger, capability.UnitPlan, capability.UnitEval, capability.UnitNode}
 	var requests []controllerwire.ClaimRequest
 	var hosted []capability.UnitKind
+	hostedUnit := make(chan struct{}, 1)
 	var loop *Loop
 	loop = &Loop{
 		Config: LoopConfig{Version: "v1.2.3", MaxConcurrent: 1},
 		Controller: claimFunc(func(_ context.Context, req controllerwire.ClaimRequest) (controllerwire.ClaimResponse, error) {
+			if len(requests) > 0 {
+				<-hostedUnit
+			}
 			requests = append(requests, req)
 			return controllerwire.ClaimResponse{Claim: &controllerwire.ClaimedUnit{Unit: want[len(requests)-1], UnitID: "unit", RunID: "run", Capability: "secret"}}, nil
 		}),
@@ -45,6 +50,7 @@ func TestLoopUsesOneQueueForEveryUnitKind(t *testing.T) {
 			if len(hosted) == len(want) {
 				loop.startDrain()
 			}
+			hostedUnit <- struct{}{}
 			return nil
 		}),
 		CheckVersion: func(context.Context, string) error { return nil },
@@ -55,11 +61,56 @@ func TestLoopUsesOneQueueForEveryUnitKind(t *testing.T) {
 	if !reflect.DeepEqual(hosted, want) {
 		t.Fatalf("hosted %v", hosted)
 	}
-	for _, req := range requests {
-		if !reflect.DeepEqual(req.Kinds, want) || req.RunnerVersion != "v1.2.3" {
+	for i, req := range requests {
+		if !slices.Contains(req.Kinds, want[i]) || req.RunnerVersion != "v1.2.3" {
 			t.Fatalf("request %#v", req)
 		}
 	}
+}
+
+func TestLoopOwnerDoesNotOccupyItsJobsOnlySlot(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		ctx, cancel := context.WithTimeout(t.Context(), time.Minute)
+		defer cancel()
+		jobFinished := make(chan struct{})
+		claims := 0
+		var ownerFinished, jobRan bool
+		loop := &Loop{
+			Config:       LoopConfig{Version: "v1.0.0", MaxConcurrent: 1, MaxClaims: 2},
+			CheckVersion: func(context.Context, string) error { return nil },
+			Controller: claimFunc(func(_ context.Context, request controllerwire.ClaimRequest) (controllerwire.ClaimResponse, error) {
+				claims++
+				unit := capability.UnitTrigger
+				if claims == 2 {
+					unit = capability.UnitNode
+					if !reflect.DeepEqual(request.Kinds, []capability.UnitKind{capability.UnitPlan, capability.UnitEval, capability.UnitNode}) {
+						t.Errorf("owner occupied its capacity but claim kinds were %v", request.Kinds)
+					}
+				}
+				if request.FreeSlots == nil || *request.FreeSlots != 1 {
+					t.Errorf("claim %d free slots = %v", claims, request.FreeSlots)
+				}
+				return controllerwire.ClaimResponse{Claim: &controllerwire.ClaimedUnit{Unit: unit, UnitID: string(unit), RunID: "run", JobID: "greet", Capability: "private"}}, nil
+			}),
+			Host: hostFunc(func(ctx context.Context, unit controllerwire.ClaimedUnit) error {
+				if unit.Unit == capability.UnitTrigger {
+					select {
+					case <-jobFinished:
+						ownerFinished = true
+						return nil
+					case <-ctx.Done():
+						return ctx.Err()
+					}
+				}
+				jobRan = true
+				close(jobFinished)
+				return nil
+			}),
+		}
+		if err := loop.Run(ctx); err != nil || !jobRan || !ownerFinished {
+			t.Fatalf("single-slot run stalled: claims=%d greet ran=%v owner finished=%v error=%v", claims, jobRan, ownerFinished, err)
+		}
+	})
 }
 
 func TestLoopDrainKeepsHeldUnitsAliveAndJoins(t *testing.T) {

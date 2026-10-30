@@ -21,6 +21,12 @@ An ordered runner loop asks for trigger, plan, eval and job units. A run-scoped
 loop asks only for its trigger. Plan and eval awards for run-anywhere
 runs execute in-process through the native owner, as a Cloud plan pod does.
 
+`MaxConcurrent` bounds plan, eval and job awards. Trigger owners have a separate
+bound of the same size, because their hosting waits for jobs to finish. Claims
+offer only kinds with available capacity and stop while job capacity is full.
+`TestLoopOwnerDoesNotOccupyItsJobsOnlySlot` covers a waiting owner and its job
+at concurrency one.
+
 The loop has one event wait for pending claims, host completions, poll timing,
 policy refresh and shutdown. A policy refresh leaves a pending claim in place.
 Stopping cancels and joins that request, takes responsibility for a late award,

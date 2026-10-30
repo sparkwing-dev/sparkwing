@@ -27,6 +27,8 @@ unlock.
 
 ### Fixed
 
+- **GitHub Actions:** Warm runners execute jobs while their trigger owner waits, so runs complete at the default concurrency of one
+
 - **CI:** Standalone runs keep their in-process controller alive through execution and log following, preventing a missing controller socket after admission
 
 - **GitHub App:** Connection refusals show their reason without blaming GitHub ownership. An already-used or expired connection explains how to start again.
