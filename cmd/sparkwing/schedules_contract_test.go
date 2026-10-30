@@ -104,6 +104,21 @@ func TestScheduleManagementKeepsOverridePresenceAndExactValues(t *testing.T) {
 	}
 }
 
+func TestScheduleManagementTimeZonesWithEmptyZoneInfo(t *testing.T) {
+	t.Setenv("ZONEINFO", t.TempDir())
+	for _, zone := range []string{"America/Boise", "Etc/UTC"} {
+		f := scheduleFake()
+		var out bytes.Buffer
+		inv := scheduleInvocation(t, "set", "--schedule", "s1", "--tz", zone)
+		if err := manageSchedules(t.Context(), inv, f, &out); err != nil {
+			t.Fatalf("schedule time zone %q: %v", zone, err)
+		}
+		if f.override.TZ == nil || *f.override.TZ != zone {
+			t.Fatalf("time zone override = %v, want %q", f.override.TZ, zone)
+		}
+	}
+}
+
 func TestScheduleManagementUsesAuthoritativeUpcomingAndRunReceipt(t *testing.T) {
 	f := scheduleFake()
 	var out bytes.Buffer

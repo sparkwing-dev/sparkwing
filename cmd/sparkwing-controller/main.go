@@ -17,6 +17,9 @@ import (
 	"syscall"
 	"time"
 
+	// safety: slim controller images have no system zoneinfo database.
+	_ "time/tzdata"
+
 	flag "github.com/spf13/pflag"
 
 	"github.com/sparkwing-dev/sparkwing/internal/backend"

@@ -69,6 +69,9 @@ may contain `=`. Duplicate argument names fail. Arguments replace the declared
 argument map. `--arg=` alone replaces it with an empty map. `--reset` drops the override. Pin, unpin and reset each require
 a separate invocation from cadence edits.
 
+The CLI and controller embed the IANA time zone database. Named zones such as
+`America/Boise` and `Etc/UTC` work on hosts and images without zoneinfo files.
+
 A schedule speaks for the repository only when a team admin armed it (through GitHub App automation consent, or as a member who holds `team.admin` when it fires), it follows the repository's default branch as GitHub reports it through the App at fire time, it has no locked commit and no override of arguments, cadence, timezone, overlap or catch-up, and the App resolves its commit at fire time. Its fires claim
 `trigger:cron` with `repository_id`, `refs/heads/<default>` and the branch head
 at fire time, receive reserved pools whose rules allow the default branch, read
