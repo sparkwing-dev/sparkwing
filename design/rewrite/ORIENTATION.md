@@ -110,6 +110,7 @@ credential model in `docs/auth.md`, and the decision log
 | --- | --- | --- |
 | Durable webhook inbox (decision 41) | `github_delivery_inbox.go`: `EnqueueGitHubDelivery`, `ClaimGitHubDelivery`, `githubDeliveryResultTx` (effect receipts) | `github_delivery_inbox_test.go`: `TestGitHubDeliveryFailuresNeverRetry` |
 | Installations | `github_app.go`: `Tenant.bindGitHubInstallationTx`, `GitHubAppInstallations` | `github_app_test.go`: `TestGitHubAppInstallationBelongsToOneTeam` |
+| Browser connection requires the current team owner and consumes its state once | `internal/controller/browser_github_app_routes.go`: `verifyGitHubAppBrowser`; `github_connect.go`: `Tenant.ConsumeGitHubConnect` | `internal/controller/github_app_test.go`: `TestGitHubAppCompletionRechecksOwnerTeamAndExplainsReplay` |
 | Teardown on uninstall | `github_app.go`: `Tenant.unbindGitHubAppInstallationTx`, `Operator.UnbindGitHubAppInstallation` | `github_enrollment_test.go`: `TestInstallationUnbindEndsActionsConsentAndAutomation`; `github_app_test.go` |
 
 ### Launcher and Cloud
