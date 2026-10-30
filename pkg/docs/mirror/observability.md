@@ -71,6 +71,12 @@ authorized reset operation. It changes no state.
 
 ## Incomplete logs
 
+Each job attempt has a 64 MiB cap on uncompressed log records, including JSON
+metadata. At the cap, the runner appends
+`[sparkwing] truncated: the node log reached its 64 MiB cap` and discards later
+output. Paged reads report `logs truncated: the node log reached its 64 MiB cap`
+as an error, including when a filter excludes the stored marker.
+
 Log storage runs independently of plan acceptance, expansion acceptance, run
 completion and node reporting. Those commits never wait for log uploads or closure.
 Flush effort is bounded by the existing one-minute log tail window. Log I/O holds

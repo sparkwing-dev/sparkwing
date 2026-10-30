@@ -27,6 +27,8 @@ unlock.
 
 ### Fixed
 
+- **logs:** Paged reads of capped logs report truncation and name the 64 MiB attempt limit instead of returning a generic server error.
+
 - **metrics:** Completed Cloud jobs without resource samples return an explicit unavailable error instead of an empty success. Observability docs describe the native runtime's missing sampler.
 
 - **GitHub App:** Connection refusals show their reason without blaming GitHub ownership. An already-used or expired connection explains how to start again.
