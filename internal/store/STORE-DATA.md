@@ -700,7 +700,9 @@ routing identities are normalized by the source URL owner when intake writes the
 
 `claim_contexts` groups work by immutable claim policy. Its hash covers the
 request and provenance, resolved options and guards, job execution settings,
-repository access, allowed pools and creator. It omits seal timestamps and
+repository access, allowed pools and creator. Repository proof and verified
+default-branch eligibility are part of the context, so asserted work cannot hide
+a proven run behind the same context head. It omits seal timestamps and
 unrelated jobs. Intake, plan acceptance and expansion insertion write context
 references with their source rows. The context table stores only identity,
 requirement set and unit kind; run policy remains on the run.

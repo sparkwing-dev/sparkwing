@@ -180,17 +180,18 @@ func TestClaimContextsIgnoreRunSpecificExecutionInputs(t *testing.T) {
 	}
 	for _, trust := range []string{"verified-default", "schedule"} {
 		verified := strings.Replace(nextRequest, `"trust":"asserted"`, `"trust":"`+trust+`","default_branch":"main"`, 1)
-		main := strings.Replace(verified, `"ref":"feature"`, `"ref":"refs/heads/main"`, 1)
+		main := strings.Replace(verified, `"ref":"feature"`, `"ref":"refs/heads/main","verified_default_branch":true`, 1)
 		if persist(verified, nextSpec, nextExecution) == persist(main, nextSpec, nextExecution) {
 			t.Fatalf("%s main and feature work shared a claim context", trust)
 		}
-		if persist(main, nextSpec, nextExecution) == persist(strings.Replace(main, `"default_branch":"main"`, `"default_branch":"trunk"`, 1), nextSpec, nextExecution) {
-			t.Fatalf("different %s default branches shared a claim context", trust)
+		if persist(main, nextSpec, nextExecution) != persist(strings.Replace(main, `"default_branch":"main"`, `"default_branch":"trunk"`, 1), nextSpec, nextExecution) {
+			t.Fatalf("%s context recomputed its sealed default-branch fact", trust)
 		}
 	}
 	for _, change := range []struct{ name, request, spec, execution string }{
 		{"runner", strings.Replace(nextRequest, `"set":false`, `"set":true,"value":{"kind":"name","value":"other"}`, 1), nextSpec, nextExecution},
 		{"root requirements", strings.Replace(nextRequest, `"runner":`, `"requires":{"value":["class=cloud"]},"runner":`, 1), nextSpec, nextExecution},
+		{"repository proof", strings.Replace(nextRequest, `"trust":"asserted"`, `"trust":"asserted","proven_repository":"gh:1"`, 1), nextSpec, nextExecution},
 		{"trust", strings.Replace(nextRequest, `"asserted"`, `"schedule"`, 1), nextSpec, nextExecution},
 		{"job labels", nextRequest, nextSpec, strings.Replace(nextExecution, `"linux"`, `"arm"`, 1)},
 		{"resolved preferences", nextRequest, strings.Replace(nextSpec, `"gpu"`, `"cpu"`, 1), nextExecution},

@@ -22,10 +22,8 @@ type claimContextPlacement struct {
 // A context shares only immutable policy inputs; readiness and authority stay in the claim predicate.
 func persistClaimContextTx(ctx context.Context, tx *storeTx, team Team, runID string, kind capability.UnitKind, requirements string, execution []byte) (string, error) {
 	var request, spec []byte
-	var verifiedDefault bool
-	q := claimSQL{dialect: tx.dialect}
 	var repoKey, repoDisplay, repository, dispatch, subject, principal string
-	if err := tx.QueryRowContext(ctx, `SELECT request_json,spec_json,repo_key,repo_display,repo_identity,dispatch,created_subject_kind,created_principal,`+q.defaultBranchWork(q.at(q.blob("request_json"), "provenance"))+` FROM runs WHERE team=? AND id=?`, team, runID).Scan(&request, &spec, &repoKey, &repoDisplay, &repository, &dispatch, &subject, &principal, &verifiedDefault); err != nil {
+	if err := tx.QueryRowContext(ctx, `SELECT request_json,spec_json,repo_key,repo_display,repo_identity,dispatch,created_subject_kind,created_principal FROM runs WHERE team=? AND id=?`, team, runID).Scan(&request, &spec, &repoKey, &repoDisplay, &repository, &dispatch, &subject, &principal); err != nil {
 		return "", err
 	}
 	var sealed struct {
@@ -48,16 +46,16 @@ func persistClaimContextTx(ctx context.Context, tx *storeTx, team Team, runID st
 		} `json:"request"`
 		// safety: pool access rules read these, so units sharing a context share pool access.
 		Provenance struct {
-			Trust           runspec.TrustClass `json:"trust"`
-			RepositoryID    int64              `json:"repository_id"`
-			Ref             string             `json:"ref"`
-			VerifiedDefault bool
+			Trust            runspec.TrustClass `json:"trust"`
+			RepositoryID     int64              `json:"repository_id"`
+			Ref              string             `json:"ref"`
+			ProvenRepository runspec.RepoKey    `json:"proven_repository"`
+			VerifiedDefault  bool               `json:"verified_default_branch"`
 		} `json:"provenance"`
 	}
 	if err := json.Unmarshal(request, &sealed); err != nil {
 		return "", err
 	}
-	sealed.Provenance.VerifiedDefault = verifiedDefault
 	if !runspec.AppRepositoryTrust.Has(sealed.Provenance.Trust) {
 		sealed.Provenance.RepositoryID, sealed.Provenance.Ref = 0, ""
 	}
