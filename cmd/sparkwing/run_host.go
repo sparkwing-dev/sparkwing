@@ -68,10 +68,6 @@ func runLocalCommand(ctx context.Context, pipeline string, flags runFlags, args 
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	preparationParent := ctx
-	preparing, stopPreparation := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
-	defer stopPreparation()
-	ctx = preparing
 	signals := deps.interrupts
 	if signals == nil {
 		caught := make(chan os.Signal, 2)
@@ -79,6 +75,19 @@ func runLocalCommand(ctx context.Context, pipeline string, flags runFlags, args 
 		defer signal.Stop(caught)
 		signals = caught
 	}
+	preparing, cancelPreparation := context.WithCancel(ctx)
+	preparationDone, preparationStopped := make(chan struct{}), make(chan struct{})
+	go func() {
+		defer close(preparationStopped)
+		select {
+		case <-signals:
+			cancelPreparation()
+		case <-preparationDone:
+		case <-preparing.Done():
+		}
+	}()
+	defer func() { cancelPreparation(); <-preparationStopped }()
+	ctx = preparing
 	runtime, err := deps.resolve(ctx, localRunOptions{standalone: flags.allowUnadmitted})
 	if err != nil {
 		return err
@@ -158,8 +167,9 @@ func runLocalCommand(ctx context.Context, pipeline string, flags runFlags, args 
 	if err != nil {
 		return err
 	}
-	stopPreparation()
-	ctx = preparationParent
+	// The standalone controller still owns this context through hosting.
+	close(preparationDone)
+	<-preparationStopped
 	if err := validateLocalIntake(response, pipeline); err != nil {
 		return err
 	}

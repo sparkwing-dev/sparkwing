@@ -27,6 +27,8 @@ unlock.
 
 ### Fixed
 
+- **CI:** Standalone runs keep their in-process controller alive through execution and log following, preventing a missing controller socket after admission
+
 - **GitHub App:** Connection refusals show their reason without blaming GitHub ownership. An already-used or expired connection explains how to start again.
 
 - **schedules:** Invalid cron overrides name the failing field and show a valid hourly example in CLI and controller errors

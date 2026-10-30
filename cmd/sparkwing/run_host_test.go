@@ -309,6 +309,62 @@ func TestLocalRunSelectsStandaloneFromRealParser(t *testing.T) {
 	}
 }
 
+func TestStandaloneControllerContextSurvivesIntake(t *testing.T) {
+	var calls []string
+	deps := localRuntimeFor(t, localTestAward(t), false, &calls)
+	resolve := deps.resolve
+	deps.resolve = func(ctx context.Context, options localRunOptions) (localRunRuntime, error) {
+		runtime, err := resolve(ctx, options)
+		var controllerContext context.Context
+		runtime.ensureController = func(ctx context.Context) error {
+			controllerContext = ctx
+			return nil
+		}
+		controller := runtime.controller.(localTestController)
+		claim := controller.claim
+		controller.claim = func(ctx context.Context, request controllerwire.ClaimRequest) (controllerwire.ClaimResponse, error) {
+			if err := controllerContext.Err(); err != nil {
+				return controllerwire.ClaimResponse{}, fmt.Errorf("standalone controller stopped before here claim: %w", err)
+			}
+			return claim(ctx, request)
+		}
+		runtime.controller = controller
+		return runtime, err
+	}
+	flags, args := parseRunFlagsArgs([]string{"--sw-allow-unadmitted", "--sw-no-update", "--", "--password", "private-value"})
+	if err := runLocalCommand(t.Context(), "ci", flags, args, io.Discard, deps); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestLocalRunInterruptDuringIntakeDoesNotClaim(t *testing.T) {
+	var calls []string
+	deps := localRuntimeFor(t, localTestAward(t), false, &calls)
+	signals := make(chan os.Signal, 1)
+	deps.interrupts = signals
+	resolve := deps.resolve
+	deps.resolve = func(ctx context.Context, options localRunOptions) (localRunRuntime, error) {
+		runtime, err := resolve(ctx, options)
+		controller := runtime.controller.(localTestController)
+		create := controller.create
+		controller.create = func(ctx context.Context, request controllerwire.CreateRunRequest) (controllerwire.CreateRunResponse, error) {
+			response, err := create(ctx, request)
+			signals <- os.Interrupt
+			<-ctx.Done()
+			return response, err
+		}
+		runtime.controller = controller
+		return runtime, err
+	}
+	err := runLocalCommand(t.Context(), "ci", runFlags{allowUnadmitted: true}, []string{"--password", "private-value"}, io.Discard, deps)
+	if !errors.Is(err, context.Canceled) || !strings.Contains(err.Error(), "run local-run is admitted") {
+		t.Fatalf("interrupted intake: %v", err)
+	}
+	if !reflect.DeepEqual(calls, []string{"resolve", "prepare", "create", "close"}) {
+		t.Fatalf("interrupted intake reached hosting: %v", calls)
+	}
+}
+
 func TestLocalIntakeRejectsDifferentDisplayPipeline(t *testing.T) {
 	award := localTestAward(t)
 	property := func(pipeline string) bool {

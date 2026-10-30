@@ -44,6 +44,15 @@ owns local state and admission. The host executes the pipeline on this CI
 runner. `--sw-workers=N` selects a positive foreground worker count and cannot
 be combined with `--sw-detached`.
 
+For standalone CI, `--sw-allow-unadmitted` starts an exclusive in-process
+controller. It stays available through the here claim, execution and log
+following, then shuts down before the command returns. It cannot detach or
+share a home with another running controller.
+
+```sh
+sparkwing run release-prod --sw-allow-unadmitted --sw-no-update
+```
+
 Keep the pipeline module and any resolved sparks overlay in the checkout.
 Use `sparkwing pipeline sparks update` to refresh declared libraries before
 committing the overlay. The pipeline's SDK pin selects its matching engine.
