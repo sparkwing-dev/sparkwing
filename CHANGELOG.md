@@ -33,6 +33,7 @@ unlock.
 
 - **schedules:** The controller embeds IANA time zone data so declarations and overrides accept named zones on images without zoneinfo files
 
+- **Cloud:** Launcher reconciliation reads awards across teams without failing on writer lock order. Pending plans show a safe reconciliation error in run status if synchronization fails. The error clears when work resumes or requeues.
 - **release:** Schema and wire changelog gates fetch a previous release tag missing from the job checkout. Failed fetches name that checkout and show a recovery command.
 
 ## [v0.68.0] - 2026-10-30

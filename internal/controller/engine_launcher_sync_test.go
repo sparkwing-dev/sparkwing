@@ -131,6 +131,10 @@ func FuzzEngineLauncherSyncOmitsBearer(f *testing.F) {
 
 type launcherAwardSnapshot []store.LauncherAward
 
+func (s launcherAwardSnapshot) RecordLauncherSyncFailure(context.Context, capability.AuthorityRef) error {
+	return nil
+}
+
 func (s launcherAwardSnapshot) ReconcileLauncherAwards(context.Context, capability.AuthorityRef, []capability.LauncherObservation, []capability.LeaseRef, []capability.LeaseRef, []capability.LeaseRef, []capability.LauncherActivation) ([]store.LauncherAward, []store.LauncherPreparation, error) {
 	return s, nil, nil
 }

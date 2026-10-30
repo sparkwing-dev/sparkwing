@@ -738,7 +738,15 @@ because its funding checks acquire the ledger.
 Owner claims and reapers use the same helper to lock the team before trigger or
 evaluation rows. Raw owner-row locks are confined to `lock_order.go` by the guard. Work locks
 reuse their transaction's held keys. New work locks after the ledger are refused.
+Snapshot reads neither acquire team or work locks nor register writer lock
+bookkeeping. Global launcher snapshots may visit teams in observation or
+capability order without imposing the writer's sorted acquisition order.
 Warnings record financial holds and drain deadlines without touching work.
+
+An internal Cloud launcher synchronization failure records a safe diagnostic in
+`runs.error` for its live pending plan awards. Existing execution errors are
+preserved. Run transitions and owner requeue clear the diagnostic when work
+resumes. A healthy launcher poll performs no diagnostic write.
 
 `lock_order.go` defines the canonical tiers and comparator. Authority and unit
 batch locking use it. The acquisition-sequence test checks actual SQL against

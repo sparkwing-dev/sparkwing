@@ -90,6 +90,7 @@ credential model in `docs/auth.md`, and the decision log
 | Rule | Owner | Guard test |
 | --- | --- | --- |
 | Declared order and row locks | `lock_order.go` (`acquireLockSet`, `lockFinancialTeamsTx`, `lockClaimQueueTx`); prose in `STORE-DATA.md` "Lock order" | `lock_order_guard_test.go`: `TestRowLockClausesLiveInLockOrder`; `financial_lock_order_test.go`; `*_lock_order_postgres_test.go` |
+| Snapshot reads skip writer lock bookkeeping across teams | `lock_order.go`: `lockFinancialTeamsTx`, `lockWorkRowTx` | `launcher_multiteam_test.go`: `TestLauncherSnapshotAcrossTeamsInObservationOrder` |
 
 ### Identity
 
@@ -117,6 +118,7 @@ credential model in `docs/auth.md`, and the decision log
 | Rule | Owner | Guard test |
 | --- | --- | --- |
 | Job lifecycle | `internal/runners/launcher/job.go`: `BuildJob`; `internal/runners/launcher/sync.go`: `Launcher.Sync` | `internal/runners/launcher/launcher_test.go`: `TestSyncAdoptsLiveJobWithoutCreatingAnother`; `internal/runners/launcher/sync_batch_test.go` |
+| Internal Cloud sync failures appear in pending plan status | `internal/store/launcher_sync_failure.go`: `Operator.RecordLauncherSyncFailure`; `internal/store/run_state.go`: `writeOwnerRecoveryTx` | `internal/controller/engine_launcher_failure_test.go` |
 | Node reuse labels (one run per node) | `internal/runners/launcher/node_team.go`: `usedTeamLabel`, `usedRunLabel`, `runNodeValue`; `internal/runners/launcher/boundary.go`: `KubernetesBoundary.Reserve` | `internal/runners/launcher/boundary_test.go`: `TestBoundaryReusesAWarmNodeOnlyWithinItsRun` |
 | Pod admission policy | `internal/runners/launcher/admission_policy.go` | `internal/runners/launcher/admission_policy_test.go`: `TestAdmissionPolicyOnAPIServer` (skips without `KUBEBUILDER_ASSETS`) |
 | NetworkPolicy (decision 71) | `charts/sparkwing-runner-bundle/templates/launcher-networkpolicy.yaml` | `charts/cloud_test.go`: `TestCloudExampleRendersCompleteInstall` |

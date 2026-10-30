@@ -207,6 +207,9 @@ func acquireLockSet(ctx context.Context, tx *storeTx, discover func() lockSet) e
 // Financial writers lock the complete team set before any ledger. Existing weaker
 // locks cannot be upgraded, and no new team may be discovered after a ledger is held.
 func lockFinancialTeamsTx(ctx context.Context, tx *storeTx, teams ...Team) error {
+	if tx.snapshotRead {
+		return nil
+	}
 	teams = slices.Compact(slices.Sorted(slices.Values(teams)))
 	for _, team := range teams {
 		row := rowLock{key: storeLockKey{tier: lockTeam, keys: [3]string{string(team)}}, write: true}
@@ -241,6 +244,9 @@ func lockOwnerUnitTx(ctx context.Context, tx *storeTx, team Team, unit UnitRef) 
 }
 
 func lockWorkRowTx(ctx context.Context, tx *storeTx, key storeLockKey, nonblocking bool) error {
+	if tx.snapshotRead {
+		return nil
+	}
 	if slices.Contains(tx.workLocks, key) {
 		return nil
 	}
