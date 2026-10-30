@@ -68,6 +68,18 @@ func (t *Tenant) PrepareAuthorizedBillingPage(ctx context.Context, a capability.
 		if err != nil {
 			return err
 		}
+		var usage int
+		var oldest sql.NullInt64
+		now := tx.now(ctx)
+		if err := tx.QueryRowContext(ctx, `SELECT COUNT(*),MIN(created_at) FROM billing_pages WHERE team=? AND payment_mode=? AND created_at>?`, t.team, mode, now.Add(-time.Hour).UnixNano()).Scan(&usage, &oldest); err != nil {
+			return err
+		}
+		if usage >= checkoutSessionsPerHour {
+			return &apierr.Error{Code: apierr.RateLimited,
+				Message: fmt.Sprintf("team Stripe Checkout Session creation limit is %d per hour; current usage is %d; wait for the hourly window or contact support@sparkwing.dev for more", checkoutSessionsPerHour, usage),
+				Details: map[string]any{"limit": checkoutSessionsPerHour, "usage": usage, "retry_after_ms": time.Unix(0, oldest.Int64).Add(time.Hour).Sub(now).Milliseconds()},
+			}
+		}
 		page = capability.BillingPage{Kind: kind, Team: string(t.team), ExpiresAt: tx.now(ctx).Add(billingPageLife)}
 		if err := tx.QueryRowContext(ctx, `SELECT card_customer FROM teams WHERE name=?`, t.team).Scan(&page.Customer); err != nil {
 			return err
@@ -94,7 +106,7 @@ func (t *Tenant) PrepareAuthorizedBillingPage(ctx context.Context, a capability.
 		if err != nil {
 			return err
 		}
-		_, err = tx.execContext(ctx, `INSERT INTO billing_pages(id,team,account_id,request_key,payment_mode,page_json) VALUES (?,?,?,?,?,?)`, page.ReservationID, t.team, p.Capability.Subject.ID, key, mode, data)
+		_, err = tx.execContext(ctx, `INSERT INTO billing_pages(id,team,account_id,request_key,payment_mode,page_json,created_at) VALUES (?,?,?,?,?,?,?)`, page.ReservationID, t.team, p.Capability.Subject.ID, key, mode, data, now.UnixNano())
 		return err
 	})
 	if err != nil {
@@ -188,6 +200,8 @@ func (t *Tenant) RecordAuthorizedBillingPageFailure(ctx context.Context, a capab
 // safety: a page's Checkout session is asked to expire with the page, and Stripe refuses a session that lives under
 // 30 minutes.
 const billingPageLife = 35 * time.Minute
+
+const checkoutSessionsPerHour = 20
 
 // SetAuthorizedRefill commits the team's automatic refill settings under current team administration.
 func (t *Tenant) SetAuthorizedRefill(ctx context.Context, a capability.Authorized, s RefillSettings) error {

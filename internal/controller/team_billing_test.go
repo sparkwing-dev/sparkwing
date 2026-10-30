@@ -214,6 +214,37 @@ func (f *identityFixture) checkoutRequest(auth string, cents int64, key string) 
 	return w
 }
 
+func TestTeamBillingCheckoutHourlyLimitRefusesBeforeProvider(t *testing.T) {
+	f, fc := billingFixture(t)
+	if _, err := f.store.AsOperator().ConfigureDeployment(t.Context(), capability.PaymentTest, func() error { return nil }); err != nil {
+		t.Fatal(err)
+	}
+	owner := f.user("checkout-limit-owner", "checkout-limit@example.com")
+	fc.mu.Lock()
+	fc.status = http.StatusServiceUnavailable
+	fc.mu.Unlock()
+	for i := range 20 {
+		if response := f.checkoutRequest(owner.auth, 2000, fmt.Sprint(i)); response.Code != http.StatusServiceUnavailable {
+			t.Fatalf("reservation %d: %d %s", i, response.Code, response.Body.String())
+		}
+	}
+	response := f.checkoutRequest(owner.auth, 2000, "excess")
+	if response.Code != http.StatusTooManyRequests {
+		t.Fatalf("excess checkout: %d %s", response.Code, response.Body.String())
+	}
+	for _, text := range []string{"rate_limited", "20 per hour", "current usage is 20", "contact support"} {
+		if !strings.Contains(response.Body.String(), text) {
+			t.Errorf("checkout refusal lacks %q: %s", text, response.Body.String())
+		}
+	}
+	if calls := len(fc.calls()); calls != 20 {
+		t.Fatalf("provider called %d times, want 20", calls)
+	}
+	if response := f.checkoutRequest(owner.auth, 2000, "0"); response.Code != http.StatusServiceUnavailable {
+		t.Fatalf("retry at capacity: %d %s", response.Code, response.Body.String())
+	}
+}
+
 func TestTeamBillingCheckout_ReportsAnUnusableCheckoutService(t *testing.T) {
 	f, fc := billingFixture(t)
 	if _, err := f.store.AsOperator().ConfigureDeployment(t.Context(), capability.PaymentTest, func() error { return nil }); err != nil {
