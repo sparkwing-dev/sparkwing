@@ -653,7 +653,7 @@ async function installMockAPI(page: Page, options: MockAPIOptions = {}) {
       return;
     }
     if (request.method() === "GET" && path.endsWith("/debug-pauses")) {
-      await route.fulfill({ json: [] });
+      await route.fulfill({ json: { pauses: [] } });
       return;
     }
     const metricsMatch = path.match(
@@ -1714,7 +1714,7 @@ test("resumes the run event stream after a disconnect", async ({ page }) => {
       return true;
     }
     if (url.pathname.endsWith("/debug-pauses")) {
-      sendJSON([]);
+      sendJSON({ pauses: [] });
       return true;
     }
     if (url.pathname === `/api/v1/runs/${runningRun.id}`) {

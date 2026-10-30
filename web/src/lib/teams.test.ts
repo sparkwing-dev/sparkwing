@@ -185,7 +185,7 @@ describe("getMe", () => {
     assert.deepEqual(assigned, [], "a /me refusal sent the tab to sign-in");
     assert.notEqual(getConnectionStatus(), "session-expired");
 
-    respond = () => new Response("[]", { status: 200 });
+    respond = () => Response.json({ members: [] });
     await teams.listMembers();
     assert.equal(calls.at(-1)?.url, "/api/v1/team/members");
   });
@@ -338,13 +338,15 @@ describe("team administration calls", () => {
     });
   });
 
-  it("reads a list whether or not the controller wraps it", async () => {
+  it("follows member cursors and rejects an unwrapped list", async () => {
     const rows = [{ user_id: "u1", email: "a@x", name: "A", role: "owner" }];
     respond = () => new Response(JSON.stringify(rows), { status: 200 });
+    await assert.rejects(teams.listMembers(), /collection envelope/);
+    respond = (call) => call.url.includes("cursor=")
+      ? Response.json({ members: rows, next_cursor: "", truncated: false })
+      : Response.json({ members: [], next_cursor: "next/a+b", truncated: true });
     assert.deepEqual(await teams.listMembers(), rows);
-    respond = () =>
-      new Response(JSON.stringify({ members: rows }), { status: 200 });
-    assert.deepEqual(await teams.listMembers(), rows);
+    assert.equal(calls.at(-1)?.url, "/api/v1/team/members?cursor=next%2Fa%2Bb");
     assert.deepEqual(teams.asList(null, "members"), []);
   });
 });

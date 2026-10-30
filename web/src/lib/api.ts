@@ -1,3 +1,4 @@
+import { listPages } from "./listPages";
 import { readCSRFCookie } from "./csrfCookie";
 import { localAuthHeaders } from "./localSession";
 import type { LogCompleteness } from "./logCompleteness";
@@ -570,9 +571,7 @@ export interface RunHistoryEntry {
 }
 
 export async function getRunAttempts(runID: string): Promise<RunHistoryEntry[]> {
-  const res = await authFetch(`${API_URL}/api/v1/runs/${pathSegment(runID)}/attempts`, {
-    cache: "no-store",
-  }).catch(() => null);
+  const res = await listPages(`${API_URL}/api/v1/runs/${pathSegment(runID)}/attempts`, ["runs"], (path) => authFetch(path, { cache: "no-store" })).catch(() => null);
   if (!res || !res.ok) return [];
   const body = await res.json();
   return body.runs || [];
@@ -594,7 +593,7 @@ export async function getRun(runID: string): Promise<RunDetail | null> {
   const run = pathSegment(runID);
   const [res, stepsRes] = await Promise.all([
     authFetch(`${API_URL}/api/v1/runs/${run}`, { cache: "no-store" }),
-    authFetch(`${API_URL}/api/v1/runs/${run}/steps`, { cache: "no-store" }).catch(() => null),
+    listPages(`${API_URL}/api/v1/runs/${run}/steps`, ["steps"], (path) => authFetch(path, { cache: "no-store" })).catch(() => null),
   ]);
   if (!res.ok) return null;
   return runDetailView((await res.json()) as RunDetailWire, await readSteps(stepsRes));
@@ -808,9 +807,7 @@ export interface Runner {
 }
 
 export async function getRunners(): Promise<Runner[]> {
-  const res = await authFetch(`${API_URL}/api/v1/runners`, {
-    cache: "no-store",
-  }).catch(() => null);
+  const res = await listPages(`${API_URL}/api/v1/runners`, ["runners"], (path) => authFetch(path, { cache: "no-store" })).catch(() => null);
   if (!res || !res.ok) return [];
   const data: { runners?: Runner[] } = await res.json();
   return data.runners ?? [];
@@ -860,9 +857,7 @@ export function parseRunArgs(
 let _pipelinesUnavailable = false;
 export async function getPipelines(): Promise<Record<string, PipelineMeta>> {
   if (_pipelinesUnavailable) return {};
-  const res = await authFetch(`${API_URL}/api/v1/pipelines`, {
-    cache: "no-store",
-  }).catch(() => null);
+  const res = await listPages(`${API_URL}/api/v1/pipelines`, ["pipelines"], (path) => authFetch(path, { cache: "no-store" })).catch(() => null);
   if (!res) return {};
   if (res.status === 404) {
     _pipelinesUnavailable = true;
@@ -970,11 +965,9 @@ export interface PauseState {
 }
 
 export async function getPaused(runID: string): Promise<PauseState[]> {
-  const res = await authFetch(`${API_URL}/api/v1/runs/${pathSegment(runID)}/debug-pauses`, {
-    cache: "no-store",
-  });
+  const res = await listPages(`${API_URL}/api/v1/runs/${pathSegment(runID)}/debug-pauses`, ["pauses"], (path) => authFetch(path, { cache: "no-store" }));
   if (!res.ok) throw new Error(`debug pauses failed: ${res.status}`);
-  return res.json();
+  return (await res.json()).pauses ?? [];
 }
 
 export interface Approval {
@@ -1003,9 +996,7 @@ export async function getApproval(
 }
 
 export async function getPendingApprovals(): Promise<Approval[]> {
-  const res = await authFetch(`${API_URL}/api/v1/approvals`, {
-    cache: "no-store",
-  }).catch(() => null);
+  const res = await listPages(`${API_URL}/api/v1/approvals`, ["approvals"], (path) => authFetch(path, { cache: "no-store" })).catch(() => null);
   if (!res || !res.ok) return [];
   const body = await res.json();
   return body.approvals || [];
@@ -1414,9 +1405,7 @@ export interface CronDetail {
 }
 
 export async function getCrons(): Promise<CronsOverview | null> {
-  const res = await authFetch(`${API_URL}/api/v1/schedules`, {
-    cache: "no-store",
-  }).catch(() => null);
+  const res = await listPages(`${API_URL}/api/v1/schedules`, ["schedules", "upcoming"], (path) => authFetch(path, { cache: "no-store" })).catch(() => null);
   if (!res || !res.ok) return null;
   return res.json();
 }

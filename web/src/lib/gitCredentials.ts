@@ -1,3 +1,4 @@
+import { listPages } from "./listPages";
 import { asList, send } from "./teams";
 
 export type GitCredentialKind = "ssh" | "https";
@@ -180,11 +181,7 @@ export function existingCredential(
 const seg = encodeURIComponent;
 
 export async function listGitCredentials(): Promise<GitCredential[]> {
-  const res = await send(
-    "GET",
-    "/api/v1/team/git-credentials",
-    "List git credentials",
-  );
+  const res = await listPages("/api/v1/team/git-credentials", ["credentials"], (path) => send("GET", path, "List git credentials"));
   return asList<GitCredential>(await res.json(), "credentials");
 }
 
