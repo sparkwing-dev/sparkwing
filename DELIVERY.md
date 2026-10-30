@@ -40,6 +40,10 @@ read-only cut checks (version freshness, Go directives, SDK pins, changelog
 links) and previews the changelog and guide roll; build, lint and the short
 tests run only in the real cut.
 
+The schema changelog gate compares the neutral `internal/store/schema.sql`
+baseline with the previous tag. SQL changes at an unchanged schema version
+require a version bump and a matching `(Breaking)` changelog entry.
+
 Version freshness excludes `testdata` fixture modules, matching the committed-module checks.
 
 `push-tag` declares the `destructive` and `prod` risk labels, so only the

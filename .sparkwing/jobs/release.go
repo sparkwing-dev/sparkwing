@@ -774,7 +774,7 @@ const storeSchemaSourcePath = "internal/store/store.go"
 
 var storeSchemaConstRe = regexp.MustCompile(`(?m)^const\s+expectedSchemaVersion\s*=\s*(\d+)\b`)
 
-var storeSchemaSQLPaths = []string{"internal/store/schema_sqlite.sql", "internal/store/schema_postgres.sql"}
+var storeSchemaSQLPaths = []string{"internal/store/schema.sql"}
 
 // safety: a store at an unchanged version is accepted as-is, so a baseline edit that keeps the
 // number would open old stores against a schema they do not have.

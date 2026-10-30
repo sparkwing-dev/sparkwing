@@ -23,6 +23,7 @@ unlock.
 ### Changed
 
 - **scaffold:** `const FallbackSDKVersion` pins v0.68.0, so a fresh scaffold compiles against that release.
+- **release:** The schema changelog gate compares the neutral SQL baseline, so patch-release previews no longer fail on removed dialect-specific files.
 
 - **TypeScript SDK:** Windows pipelines accept valid protocol pipes instead of refusing startup with `protocol descriptor must be a pipe`. Native release verification prints captured Go test failures.
 
