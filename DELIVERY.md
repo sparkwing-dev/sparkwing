@@ -44,6 +44,13 @@ The schema changelog gate compares the neutral `internal/store/schema.sql`
 baseline with the previous tag. SQL changes at an unchanged schema version
 require a version bump and a matching `(Breaking)` changelog entry.
 
+Release jobs use the checkout captured by `sparkwing.WorkDir()` during planning.
+Version discovery lists origin's tags, which can include tags absent from a
+shallow job checkout. The schema and wire gates fetch a missing comparison tag
+from that checkout's origin before reading its files. A failed fetch names the
+job checkout and the Git command to retry there. Changelog preparation reads
+and previews or commits files in the same captured checkout.
+
 Version freshness excludes `testdata` fixture modules, matching the committed-module checks.
 
 `push-tag` declares the `destructive` and `prod` risk labels, so only the
