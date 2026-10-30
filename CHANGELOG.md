@@ -27,6 +27,8 @@ unlock.
 
 ### Fixed
 
+- **runs logs:** Snapshot reads with pending final log segments report `logs incomplete` and exit 3 after printing all available pages. Use `--follow` to wait for the remaining output, including uploads after a job finishes.
+
 - **logs:** Paged reads of capped logs report truncation and name the 64 MiB attempt limit instead of returning a generic server error.
 
 - **metrics:** Completed Cloud jobs without resource samples return an explicit unavailable error instead of an empty success. Observability docs describe the native runtime's missing sampler.

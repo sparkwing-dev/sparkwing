@@ -384,3 +384,32 @@ func TestRunLogsRendersWarningsWithoutTimestampsAndKeepsAttributes(t *testing.T)
 		}
 	}
 }
+
+func TestRunLogsReportsUnsealedSnapshotAfterDrainingPages(t *testing.T) {
+	for _, format := range []string{"plain", "json"} {
+		t.Run(format, func(t *testing.T) {
+			calls := 0
+			reader := fakeLogReader{read: func(_ context.Context, _ string, q controllerwire.LogQuery) (controllerwire.LogPage, error) {
+				calls++
+				if calls == 1 {
+					return controllerwire.LogPage{Records: []controllerwire.LogRecord{jobLogRecord("r1", "$ emit output; echo EMIT_DONE")}, Truncated: true, NextCursor: "prefix"}, nil
+				}
+				if calls != 2 || q.Cursor != "prefix" {
+					t.Fatalf("unexpected read %d: %+v", calls, q)
+				}
+				return controllerwire.LogPage{Records: []controllerwire.LogRecord{jobLogRecord("r1", "retained prefix")}, NextCursor: "awaiting-tail"}, nil
+			}}
+			var output, diagnostics bytes.Buffer
+			err := observeRunLogs(t.Context(), logInvocation(t, "logs", "--run", "r1", "-o", format), reader, nil, &output, &diagnostics, func(context.Context, time.Duration) error {
+				t.Fatal("snapshot read started following")
+				return nil
+			})
+			if err == nil || !strings.Contains(err.Error(), "logs incomplete") || !strings.Contains(err.Error(), "--follow") || exitCodeFor(err) != 3 {
+				t.Fatalf("unsealed snapshot succeeded silently: output=%q error=%v", output.String(), err)
+			}
+			if calls != 2 || !strings.Contains(output.String(), "retained prefix") {
+				t.Fatalf("available pages were lost: calls=%d output=%q", calls, output.String())
+			}
+		})
+	}
+}

@@ -237,6 +237,10 @@ and final log segments. If a terminal run still has unsealed logs after the
 one-minute final-tail window, observation drains the committed records and reports
 incomplete logs instead of polling forever.
 
+Without `--follow`, `sparkwing runs logs` drains all available pages, then exits
+3 with `logs incomplete` if final log segments are still pending. A successful
+job can still have uploads in flight. Use `--follow` to wait for the final logs.
+
 Each output record names exactly one tagged subject. Job-attempt subjects retain
 team, run, job, generation and positive attempt ordinal. Trigger, plan and eval
 logs use owner-unit subjects with their own generation. Eval logs also name the
