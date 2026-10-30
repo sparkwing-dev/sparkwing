@@ -94,6 +94,31 @@ func TestPaymentProviderOutcomes(t *testing.T) {
 	}
 }
 
+func TestNonRefundPaymentEventsRequireObjectMode(t *testing.T) {
+	objects := financialObjects(PaymentTest)
+	objects["payment_intent.requires_action"] = strings.Replace(objects["payment_intent.payment_failed"], "requires_payment_method", "requires_action", 1)
+	for _, kind := range []string{
+		"setup_intent.succeeded",
+		"payment_intent.succeeded",
+		"payment_intent.payment_failed",
+		"payment_intent.requires_action",
+		"radar.early_fraud_warning.created",
+		"radar.early_fraud_warning.updated",
+		"charge.dispute.created",
+		"charge.dispute.closed",
+	} {
+		t.Run(kind, func(t *testing.T) {
+			v, calls := providerVerifier(t, PaymentTest)
+			object := strings.Replace(objects[kind], `,"livemode":false`, "", 1)
+			body := verifiedProviderBody(PaymentTest, kind, object)
+			proof, err := v.VerifyPaymentEvent(t.Context(), PaymentPresentation{Body: body, Signature: paymentSignature(body, string(v.secret), v.now())}, testPaymentScope)
+			if err == nil || proof != nil || *calls != 0 {
+				t.Fatalf("missing object mode: proof=%+v err=%v calls=%d", proof, err, *calls)
+			}
+		})
+	}
+}
+
 func TestPaymentProviderProofProperty(t *testing.T) {
 	for kind, object := range financialObjects(PaymentTest) {
 		t.Run(kind, func(t *testing.T) {
