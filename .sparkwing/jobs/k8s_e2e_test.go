@@ -22,12 +22,42 @@ func TestKubernetesE2EPipelineIsRegisteredAndBounded(t *testing.T) {
 	}
 }
 
+func TestKubernetesE2EUploadedFixtureBuildsWithoutCallerCheckout(t *testing.T) {
+	root, err := mainModuleRoot()
+	if err != nil {
+		t.Fatal(err)
+	}
+	artifacts := t.TempDir()
+	script := readHostedCIFile(t, "bin/k8s-e2e.sh")
+	prepare := "fixture_root=" + between(t, script, "\nfixture_root=", "\nwrite_bootstrap_values() {")
+	cmd := exec.Command(kubernetesTestBash(t), "-c", "set -Eeuo pipefail\n"+prepare)
+	cmd.Env = kubernetesTestEnv(t,
+		"repo_root="+filepath.ToSlash(root),
+		"artifact_dir="+filepath.ToSlash(artifacts),
+	)
+	if output, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("prepare uploaded fixture: %v\n%s", err, output)
+	}
+
+	checkout := filepath.Join(t.TempDir(), "uploaded")
+	cmd = exec.Command("git", "clone", filepath.Join(artifacts, "source.bundle"), checkout)
+	if output, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("clone uploaded fixture: %v\n%s", err, output)
+	}
+	cmd = exec.Command("go", "test", "-mod=readonly", "./...")
+	cmd.Dir = filepath.Join(checkout, ".sparkwing")
+	cmd.Env = append(os.Environ(), "GOWORK=off", "GOFLAGS=-buildvcs=false", "GOPROXY=off", "GOSUMDB=off")
+	if output, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("uploaded Kubernetes fixture: %v\n%s", err, output)
+	}
+}
+
 func TestKubernetesE2EPreflightIsExplicitAndLocalInfrastructureFree(t *testing.T) {
 	bin := t.TempDir()
 	record := filepath.Join(t.TempDir(), "calls")
 	writeStub(t, bin, "kubectl", `printf 'kubectl %s\n' "$*" >>"$CALL_RECORD"`)
 	writeStub(t, bin, "helm", `printf 'helm %s\n' "$*" >>"$CALL_RECORD"`)
-	for _, name := range []string{"curl", "jq", "openssl", "git", "dirname"} {
+	for _, name := range []string{"curl", "jq", "openssl", "git", "tar", "dirname"} {
 		writeStub(t, bin, name, "exit 0\n")
 	}
 	result := runKubernetesScriptWithEnv(t, bin,
@@ -62,7 +92,7 @@ func TestKubernetesE2EPreflightIsExplicitAndLocalInfrastructureFree(t *testing.T
 
 func TestKubernetesE2EExistingClusterPreflightRequiresExactCleanupAllowList(t *testing.T) {
 	bin := t.TempDir()
-	for _, name := range []string{"kubectl", "helm", "curl", "jq", "openssl", "git", "dirname"} {
+	for _, name := range []string{"kubectl", "helm", "curl", "jq", "openssl", "git", "tar", "dirname"} {
 		writeStub(t, bin, name, "exit 0\n")
 	}
 	result := runKubernetesScriptWithEnv(t, bin,
@@ -78,7 +108,7 @@ func TestKubernetesE2EExistingClusterPreflightRequiresExactCleanupAllowList(t *t
 
 func TestKubernetesE2EExistingClusterPreflightRejectsAnUnsafeImagePrefix(t *testing.T) {
 	bin := t.TempDir()
-	for _, name := range []string{"kubectl", "helm", "curl", "jq", "openssl", "git", "dirname"} {
+	for _, name := range []string{"kubectl", "helm", "curl", "jq", "openssl", "git", "tar", "dirname"} {
 		writeStub(t, bin, name, "exit 0\n")
 	}
 	result := runKubernetesScriptWithEnv(t, bin,
@@ -94,7 +124,7 @@ func TestKubernetesE2EExistingClusterPreflightRejectsAnUnsafeImagePrefix(t *test
 
 func TestKubernetesE2EPreflightRequiresALicenseFile(t *testing.T) {
 	bin := t.TempDir()
-	for _, name := range []string{"kubectl", "helm", "curl", "jq", "openssl", "git", "dirname"} {
+	for _, name := range []string{"kubectl", "helm", "curl", "jq", "openssl", "git", "tar", "dirname"} {
 		writeStub(t, bin, name, "exit 0\n")
 	}
 	result := runKubernetesScriptWithEnv(t, bin,
@@ -419,7 +449,7 @@ func TestKubernetesE2EExistingClusterRetainsReleaseWhenPVCAdoptionIsIncomplete(t
 func existingClusterFailureHarness(t *testing.T) (bin, calls, artifacts string) {
 	t.Helper()
 	bin = t.TempDir()
-	for _, name := range []string{"cat", "dirname", "grep", "jq", "mkdir", "cp", "tr", "wc", "awk"} {
+	for _, name := range []string{"cat", "dirname", "grep", "jq", "mkdir", "cp", "sed", "tr", "wc", "awk"} {
 		linkTool(t, bin, name)
 	}
 	calls = filepath.Join(t.TempDir(), "calls")
@@ -471,6 +501,7 @@ case "$*" in
     ;;
 esac
 `)
+	writeStub(t, bin, "tar", "exit 0\n")
 	writeStub(t, bin, "git", `
 if [ "${FAIL_AT:-}" = "fixture" ]; then exit 23; fi
 case "$*" in
