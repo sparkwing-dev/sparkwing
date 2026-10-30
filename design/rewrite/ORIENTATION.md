@@ -90,6 +90,7 @@ credential model in `docs/auth.md`, and the decision log
 | Rule | Owner | Guard test |
 | --- | --- | --- |
 | Declared order and row locks | `lock_order.go` (`acquireLockSet`, `lockFinancialTeamsTx`, `lockClaimQueueTx`); prose in `STORE-DATA.md` "Lock order" | `lock_order_guard_test.go`: `TestRowLockClausesLiveInLockOrder`; `financial_lock_order_test.go`; `*_lock_order_postgres_test.go` |
+| Snapshot reads skip writer lock bookkeeping across teams | `lock_order.go`: `lockFinancialTeamsTx`, `lockWorkRowTx` | `launcher_multiteam_test.go`: `TestLauncherSnapshotAcrossTeamsInObservationOrder` |
 
 ### Identity
 
