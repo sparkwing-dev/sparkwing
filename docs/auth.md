@@ -268,6 +268,11 @@ Download signing and batched presence use the shared capability policy.
 A live claim needs its data grant and sealed run/repository/ref binding.
 A repository reader needs existing repository authority. Cache grants,
 ordinary member tokens and machine roots cannot substitute for either.
+Dependency-cache lookup requires `data.read` on a job credential or a
+repository cache reader. An editor or owner with repository authority can
+mint the repository reader through `POST /api/v1/tokens` with a
+`remote_cache` data scope. Refusals name this requirement without reporting
+whether the requested cache exists.
 Each operation resolves current authority again and checks the read set
 before reading metadata. Presence queries omit unreadable digests. Download
 signing applies the team's daily byte cap and returns a 60-second URL for
@@ -525,8 +530,15 @@ receives `401`. Clients branch on `error.code` and use `details.reason` for the
 specific refusal. Every boundary uses the same envelope:
 
 ```json
-{"error":{"code":"forbidden","message":"The credential cannot perform this operation.","details":{"reason":"grant_missing"}}}
+{"error":{"code":"forbidden","message":"operation requires team.admin; ask a team owner for a credential with team.admin","details":{"reason":"missing_grant"}}}
 ```
+
+Grant refusals name the required grants. Secret writes require `team.admin`,
+which the owner role holds. OIDC minting requires `oidc.mint` on an awarded
+or delegated job credential. A team token cannot substitute for that job
+credential. These messages describe the operation's policy and include no
+resource identifiers. Foreign-team resources retain the same response as
+absent resources.
 
 A root that can claim work does not gain arbitrary execution writes. Awarded
 credentials carry the operation grants and exact binding needed by their unit.

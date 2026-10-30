@@ -15,6 +15,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
 	"github.com/sparkwing-dev/sparkwing/internal/controller/client"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
+	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/pkg/color"
 )
 
@@ -177,6 +178,23 @@ func writeLogRecord(out io.Writer, record controllerwire.LogRecord, format strin
 	line := record.Line
 	if record.Event != "" {
 		line = eventDetail(record.Line)
+	} else {
+		var frame nodeproto.FrameLog
+		if json.Unmarshal([]byte(line), &frame) == nil {
+			_, timestampError := time.Parse(time.RFC3339Nano, frame.TS)
+			if timestampError == nil || (frame.Message != "" || frame.Event != "") && (frame.Level != "" || frame.Event != "" || frame.Step != "" || len(frame.Attrs) > 0) {
+				line = frame.Message
+				if line == "" {
+					line = frame.Event
+				}
+				if detail := eventValue(frame.Attrs); detail != "" {
+					if line != "" {
+						line += ": "
+					}
+					line += detail
+				}
+			}
+		}
 	}
 	if format == "plain" && !search {
 		if record.Event != "" {
@@ -232,6 +250,19 @@ func eventDetail(payload string) string {
 	if reason, ok := fields["reason"]; ok && len(fields) == 1 {
 		return eventValue(reason)
 	}
+	if _, result := fields["Outcome"]; result {
+		var parts []string
+		for _, field := range []struct{ key, label string }{{"attempt", "attempt"}, {"Reason", "reason"}, {"MaskedError", "error"}, {"ExitCode", "exit_code"}} {
+			if value := fields[field.key]; len(value) != 0 && string(value) != "null" && string(value) != `""` {
+				parts = append(parts, field.label+"="+eventValue(value))
+			}
+		}
+		return strings.Join(parts, " ")
+	}
+	return attributeDetail(fields)
+}
+
+func attributeDetail(fields map[string]json.RawMessage) string {
 	keys := slices.Sorted(maps.Keys(fields))
 	parts := make([]string, 0, len(keys))
 	for _, key := range keys {
@@ -244,6 +275,18 @@ func eventValue(raw json.RawMessage) string {
 	var text string
 	if json.Unmarshal(raw, &text) == nil {
 		return text
+	}
+	var fields map[string]json.RawMessage
+	if json.Unmarshal(raw, &fields) == nil {
+		return attributeDetail(fields)
+	}
+	var values []json.RawMessage
+	if json.Unmarshal(raw, &values) == nil {
+		parts := make([]string, 0, len(values))
+		for _, value := range values {
+			parts = append(parts, eventValue(value))
+		}
+		return strings.Join(parts, ",")
 	}
 	return string(raw)
 }

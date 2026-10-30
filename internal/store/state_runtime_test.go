@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"testing"
 	"time"
@@ -185,6 +186,13 @@ func TestTransitionApplicationRetryKeepsClaimAndOrdinal(t *testing.T) {
 	events, err := tenant.ReadStateEvents(ctx, "run", 0, 10)
 	if err != nil || len(events) != 2 || events[0].Kind != "job_retrying" || events[1].Kind != "job_succeeded" {
 		t.Fatalf("events = %+v, %v", events, err)
+	}
+	var retry struct {
+		Attempt runspec.AttemptOrdinal `json:"attempt"`
+		runstate.NodeResult
+	}
+	if err := json.Unmarshal(events[0].Payload, &retry); err != nil || retry.Attempt != applied.Attempt || retry.Reason != "verify" {
+		t.Fatalf("retry event lost next attempt or failure: %s, %v", events[0].Payload, err)
 	}
 	rewriteSchemaExec(t, tenant.s.db, `UPDATE capabilities SET revoked_at=1,revocation_generation=revocation_generation+1 WHERE prefix='claim'`)
 	if _, err = tenant.TransitionNode(ctx, result); err == nil {

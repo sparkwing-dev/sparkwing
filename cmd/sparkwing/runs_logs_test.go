@@ -304,3 +304,83 @@ func TestRunLogsRendersEventPayloadsAsText(t *testing.T) {
 		}
 	}
 }
+
+func TestRunLogsRendersPersistedRunnerAndRetryPayloads(t *testing.T) {
+	frame := `{"ts":"2026-10-30T17:35:03Z","level":"info","step":"run","event":"exec_line","msg":"raw-token=***"}`
+	retry := `{"attempt":2,"Outcome":"failed","Reason":"sdk_error","MaskedError":"command failed (exit 1)","ExitCode":null,"Failure":{"job":"greet","stage":"action","error":{"code":"sdk_error","message":"command failed (exit 1)"}}}`
+	reader := fakeLogReader{read: func(context.Context, string, controllerwire.LogQuery) (controllerwire.LogPage, error) {
+		return controllerwire.LogPage{Complete: true, Records: []controllerwire.LogRecord{
+			jobLogRecord("r1", frame),
+			jobLogRecord("r1", `{"ts":"2026-10-30T17:35:04Z","level":"error","step":"run","event":"step_end","msg":"run","attrs":{"outcome":"failed","error":"command failed (exit 1)","cancelled_steps":["other"]}}`),
+			{RunID: "r1", Event: "job_retrying", JobID: "greet", LineNo: 4, Line: retry},
+		}}, nil
+	}}
+	for _, format := range []string{"plain", "pretty", "json"} {
+		t.Run(format, func(t *testing.T) {
+			var out bytes.Buffer
+			if err := observeRunLogs(t.Context(), logInvocation(t, "logs", "--run", "r1", "-o", format), reader, nil, &out, &out, nil); err != nil {
+				t.Fatal(err)
+			}
+			if format == "json" {
+				var record controllerwire.LogRecord
+				if err := json.NewDecoder(&out).Decode(&record); err != nil || record.Line != frame {
+					t.Fatalf("JSON changed runner frame: %+v, %v", record, err)
+				}
+				return
+			}
+			for _, want := range []string{"raw-token=***\n", "run: cancelled_steps=other error=command failed (exit 1) outcome=failed\n", "attempt=2 reason=sdk_error error=command failed (exit 1)\n"} {
+				if !strings.Contains(out.String(), want) {
+					t.Errorf("missing %q in:\n%s", want, &out)
+				}
+			}
+			if strings.Contains(out.String(), "{") {
+				t.Fatalf("raw runner or transition JSON in:\n%s", &out)
+			}
+		})
+	}
+}
+
+func TestRunLogsPreservesApplicationJSON(t *testing.T) {
+	for _, line := range []string{`{"answer":42}`, `{"level":"info","answer":42}`, `{"attrs":{"answer":42}}`, `{"ts":"application time","msg":"application message"}`} {
+		var out bytes.Buffer
+		if err := writeLogRecord(&out, jobLogRecord("r1", line), "plain", false); err != nil || out.String() != line+"\n" {
+			t.Fatalf("application output changed: %q, %v", &out, err)
+		}
+	}
+}
+
+func TestRunLogsRendersWarningsWithoutTimestampsAndKeepsAttributes(t *testing.T) {
+	for _, tc := range []struct{ line, want string }{
+		{`{"ts":"","level":"warn","msg":"SkipIf predicate exceeded its budget; continuing without skipping","attrs":{"predicate":1}}`, "SkipIf predicate exceeded its budget; continuing without skipping: predicate=1"},
+		{`{"level":"warn","msg":"sparkwing: output withheld because secret declarations were unavailable (1 lines)"}`, "sparkwing: output withheld because secret declarations were unavailable (1 lines)"},
+		{`{"ts":"2026-10-30T17:35:04Z","level":"info","msg":"deploy","attrs":{"Outcome":"accepted","deployment_id":"dep-42"}}`, "deploy: Outcome=accepted deployment_id=dep-42"},
+		{`{"ts":"2026-10-30T17:35:04Z","level":"info","msg":"deploy","attrs":{"deployment":{"Outcome":"accepted","deployment_id":"dep-42"}}}`, "deploy: deployment=Outcome=accepted deployment_id=dep-42"},
+		{`{"ts":"","level":"info","msg":"{\"level\":\"info\",\"msg\":\"application message\"}"}`, `{"level":"info","msg":"application message"}`},
+		{`{"ts":"","event":"checkpoint","attrs":{"attempt":2}}`, "checkpoint: attempt=2"},
+		{`{"ts":"2026-10-30T17:35:04Z","level":"info","attrs":{"answer":42}}`, "answer=42"},
+		{`{"ts":"2026-10-30T17:35:04Z","level":"info"}`, ""},
+	} {
+		for _, format := range []string{"plain", "pretty", "json"} {
+			for _, search := range []bool{false, true} {
+				var out bytes.Buffer
+				if err := writeLogRecord(&out, jobLogRecord("r1", tc.line), format, search); err != nil {
+					t.Fatal(err)
+				}
+				if format == "json" {
+					var record controllerwire.LogRecord
+					if err := json.NewDecoder(&out).Decode(&record); err != nil || record.Line != tc.line {
+						t.Fatalf("JSON changed runner frame: %+v, %v", record, err)
+					}
+				} else {
+					want := tc.want + "\n"
+					if format != "plain" || search {
+						want = "r1/build#2:3: " + want
+					}
+					if out.String() != want {
+						t.Errorf("%s search=%v: got %q, want %q", format, search, &out, want)
+					}
+				}
+			}
+		}
+	}
+}

@@ -134,6 +134,7 @@ credential model in `docs/auth.md`, and the decision log
 | Rule | Owner | Guard test |
 | --- | --- | --- |
 | Bound node commands flush final logs at report, retry or release, within the attempt's tail grace | `internal/nodehost/assembly_native_logs.go`: `logHostStore.TransitionNode` reads the command payload | `internal/nodehost/assembly_native_logs_test.go`: `TestStalledLogsDoNotDelayLifecycleCommits`, `TestLogLifecycleDetachesFlush` |
+| Runner frames and lifecycle failures render as text; retries persist the next attempt ordinal | `cmd/sparkwing/runs_logs.go`: `writeLogRecord`, `eventDetail`; `internal/store/node_state.go`: `transitionNodeStateTx` | `TestRunLogsRendersPersistedRunnerAndRetryPayloads`; `TestTransitionApplicationRetryKeepsClaimAndOrdinal` |
 
 ### CLI and API surface
 
@@ -150,6 +151,7 @@ credential model in `docs/auth.md`, and the decision log
 | Runner warm Actions identity requires HTTPS except on loopback; removed flags and chart values fail | `internal/cluster/production_runtime.go`, `internal/controller/client/github_actions.go`, `charts/sparkwing-runner-bundle/templates/validate.yaml` | `internal/cluster/actions_runtime_test.go`: `TestProductionWarmExchangesActionsIdentity`; `internal/controller/client/github_actions_test.go`: `TestExchangeGitHubActionsRequiresHTTPSExceptLoopback`; `runner_cli_test.go`: `TestWarmRejectsInertFlags`; `internal/clisurface/parse_test.go`: `TestLintRejectsRemovedStaticFlag`; `charts/render_test.go`: `TestRunnerRejectsRemovedWarmModules` |
 | Command registry | `internal/clisurface/registry.go`: `Registry` | `internal/clisurface/contract_test.go` |
 | Route table | `internal/capability/tables.go`: `Routes`; dispatch in `internal/routepolicy` | `internal/capability/policy_test.go` |
+| Grant refusals name required authority without exposing resource state | `internal/capability/refusal.go`: `RequiredAuthority`; `internal/controller/data_request_binding.go`: `resolveDataTarget` | `internal/controller/refusal_guidance_test.go`: `TestPermissionRefusalsExplainRequiredAuthority`, `TestPermissionRefusalsKeepForeignRunsIndistinguishableFromAbsentRuns` |
 | OpenAPI | `internal/apispec` writes `api/openapi.yaml`; regenerate with `bin/gen-api-docs.sh` | `bin/check-api-spec.sh`; `internal/apispec/final_contract_test.go` |
 | Docs mirror and drift | `docs/` is the source; `bin/sync-docs.sh` copies it to `pkg/docs/mirror/`; `bin/regen-all.sh` reruns every generator | `bin/sync-docs.sh --check`; `internal/doccheck/cliverbs_test.go`, `internal/doccheck/apiroutes_test.go` |
 | Local readiness probes do not wait for the database writer | `internal/wingd/localcontroller/state.go`: `localState.Ready`; `internal/wingd/localcontroller/admission.go`: `localController.Ready` | `internal/wingd/localcontroller/state_readiness_test.go`: `TestStateReadinessDoesNotWaitForStoreWriter` |

@@ -272,7 +272,7 @@ func Authorize(ctx context.Context, bindings BindingChecker, route RoutePolicy, 
 	if p.Capability.Audience != route.Audience {
 		return Authorized{}, forbidden(apierr.ReasonAudience)
 	}
-	var refusal error = forbidden(apierr.ReasonMissingGrant)
+	var refusal error
 	if route.Method == http.MethodPost && route.Path == "/api/v1/runners" && !p.DirectAccountSession() {
 		return Authorized{}, apierr.Authorization(apierr.ReasonMissingGrant, "runner enrollment requires an independent account session; in the controller pod run sparkwing-controller admin session --operator ACCOUNT_ID --team TEAM --reason TEXT --output plain as an existing team administrator, then pipe its output to sparkwing runners add --session-stdin")
 	}
@@ -317,7 +317,14 @@ func Authorize(ctx context.Context, bindings BindingChecker, route RoutePolicy, 
 			ResultReplay: live.ResultReplay, LogTailAttempt: live.LogTailAttempt,
 		}, nil
 	}
-	return Authorized{}, refusal
+	if refusal != nil {
+		return Authorized{}, refusal
+	}
+	alternatives := make([][]Grant, 0, len(route.Access))
+	for _, rule := range route.Access {
+		alternatives = append(alternatives, rule.Grants)
+	}
+	return Authorized{}, RequiredAuthority(apierr.ReasonMissingGrant, alternatives...)
 }
 
 func claimSelection(p Principal, path string, kinds []UnitKind) error {

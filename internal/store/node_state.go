@@ -361,7 +361,14 @@ func transitionNodeStateTx(ctx context.Context, tx *storeTx, team Team, change n
 	if kind == "" {
 		return runstate.Applied{}, errors.New("job transition has no event")
 	}
-	if err := appendStateEventTx(ctx, tx, team, change.Ref, kind, row.StateSeq, change.Extra.Result, now); err != nil {
+	var payload any = change.Extra.Result
+	if change.Cause == runstate.CauseRetry {
+		payload = struct {
+			Attempt runspec.AttemptOrdinal `json:"attempt"`
+			*runstate.NodeResult
+		}{row.Attempt, change.Extra.Result}
+	}
+	if err := appendStateEventTx(ctx, tx, team, change.Ref, kind, row.StateSeq, payload, now); err != nil {
 		return runstate.Applied{}, err
 	}
 	if change.Cause == causeApprovalResolve || change.Cause == causeApprovalTimeout || change.Cause == causeCancel {
