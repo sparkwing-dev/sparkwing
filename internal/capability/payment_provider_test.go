@@ -47,9 +47,9 @@ func financialObjects(mode PaymentMode) map[string]string {
 		"setup_intent.succeeded":            `{"id":"seti_setup","object":"setup_intent","status":"succeeded","customer":"cus_owner","payment_method":"pm_card","metadata":{"purpose":"card_setup","sparkwing_deployment":"staging.sparkwing.dev"}` + live,
 		"payment_intent.succeeded":          `{"id":"pi_paid","object":"payment_intent","status":"succeeded","amount":1200,"amount_received":1200,"currency":"usd","latest_charge":"ch_paid","metadata":{"purpose":"card_refill","refill_id":"refill_paid","sparkwing_deployment":"staging.sparkwing.dev"}` + live,
 		"payment_intent.payment_failed":     `{"id":"pi_failed","object":"payment_intent","status":"requires_payment_method","amount":1200,"currency":"usd","last_payment_error":{"decline_code":"insufficient_funds"},"metadata":{"purpose":"card_refill","refill_id":"refill_failed"}` + live,
-		"refund.created":                    `{"id":"re_refund","object":"refund","payment_intent":"pi_paid","charge":"ch_paid","status":"pending","amount":600,"currency":"usd"` + live,
-		"refund.updated":                    `{"id":"re_refund","object":"refund","payment_intent":{"id":"pi_paid"},"charge":{"id":"ch_paid"},"status":"succeeded","amount":600,"currency":"usd"` + live,
-		"refund.failed":                     `{"id":"re_refund","object":"refund","payment_intent":"pi_paid","charge":"ch_paid","status":"failed","amount":600,"currency":"usd"` + live,
+		"refund.created":                    `{"id":"re_refund","object":"refund","payment_intent":"pi_paid","charge":"ch_paid","status":"pending","amount":600,"currency":"usd"}`,
+		"refund.updated":                    `{"id":"re_refund","object":"refund","payment_intent":{"id":"pi_paid"},"charge":{"id":"ch_paid"},"status":"succeeded","amount":600,"currency":"usd"}`,
+		"refund.failed":                     `{"id":"re_refund","object":"refund","payment_intent":"pi_paid","charge":"ch_paid","status":"failed","amount":600,"currency":"usd"}`,
 		"radar.early_fraud_warning.created": `{"id":"issfr_warning","object":"radar.early_fraud_warning","payment_intent":"pi_paid","charge":"ch_paid","actionable":true` + live,
 		"radar.early_fraud_warning.updated": `{"id":"issfr_warning","object":"radar.early_fraud_warning","payment_intent":"pi_paid","charge":"ch_paid","actionable":false` + live,
 		"charge.dispute.created":            `{"id":"dp_dispute","object":"dispute","payment_intent":"pi_paid","charge":"ch_paid","status":"needs_response","amount":1200,"currency":"usd","reason":"fraudulent"` + live,
@@ -91,6 +91,31 @@ func TestPaymentProviderOutcomes(t *testing.T) {
 				}
 			})
 		}
+	}
+}
+
+func TestNonRefundPaymentEventsRequireObjectMode(t *testing.T) {
+	objects := financialObjects(PaymentTest)
+	objects["payment_intent.requires_action"] = strings.Replace(objects["payment_intent.payment_failed"], "requires_payment_method", "requires_action", 1)
+	for _, kind := range []string{
+		"setup_intent.succeeded",
+		"payment_intent.succeeded",
+		"payment_intent.payment_failed",
+		"payment_intent.requires_action",
+		"radar.early_fraud_warning.created",
+		"radar.early_fraud_warning.updated",
+		"charge.dispute.created",
+		"charge.dispute.closed",
+	} {
+		t.Run(kind, func(t *testing.T) {
+			v, calls := providerVerifier(t, PaymentTest)
+			object := strings.Replace(objects[kind], `,"livemode":false`, "", 1)
+			body := verifiedProviderBody(PaymentTest, kind, object)
+			proof, err := v.VerifyPaymentEvent(t.Context(), PaymentPresentation{Body: body, Signature: paymentSignature(body, string(v.secret), v.now())}, testPaymentScope)
+			if err == nil || proof != nil || *calls != 0 {
+				t.Fatalf("missing object mode: proof=%+v err=%v calls=%d", proof, err, *calls)
+			}
+		})
 	}
 }
 

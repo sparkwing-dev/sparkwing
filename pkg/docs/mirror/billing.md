@@ -288,7 +288,10 @@ a negative balance blocks new Cloud work until the team adds funds.
 
 The controller's `--payment-mode` configures both provider verification and the
 store's ledger mode. Provider events must match that mode. Empty mode disables
-settlement.
+settlement. Stripe refund objects omit `livemode`, so refunds use the signed
+event envelope's mode. `refund.created`, `refund.updated` and `refund.failed`
+settle each refund by its ID. `charge.refunded` is acknowledged without a
+ledger effect because its charge total repeats those individual refunds.
 
 Each controller store holds a random payment deployment id, created once at
 first start and never changed by configuration, so renaming the controller's

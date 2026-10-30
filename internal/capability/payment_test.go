@@ -85,6 +85,10 @@ func TestPaymentProof(t *testing.T) {
 			p.Body = paymentBody("checkout.session.completed", "paid", true)
 			p.Signature = paymentSignature(p.Body, secret, now)
 		}},
+		{"refund wrong envelope mode without object mode", func(p *PaymentPresentation) {
+			p.Body = verifiedProviderBody(PaymentLive, "refund.created", financialObjects(PaymentLive)["refund.created"])
+			p.Signature = paymentSignature(p.Body, secret, now)
+		}},
 		{"missing payment", func(p *PaymentPresentation) {
 			p.Body = []byte(strings.ReplaceAll(string(body), `"pi_fixture"`, `null`))
 			p.Signature = paymentSignature(p.Body, secret, now)

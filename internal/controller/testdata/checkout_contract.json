@@ -1,5 +1,5 @@
 {
-  "about": "The controller and the checkout service each test their real code against a byte-for-byte copy of this file: sparkwing internal/controller/testdata and sparkwing-platform internal/billing/testdata. Change both copies together. Each route's request is the whole body the controller sends with the bearer token; each response is the service's whole answer. refill_cases are the service's answers to each Stripe outcome of the refill request. refusals are answers the controller must classify: final ones are about the request and close the refill or refund for the owners and operator; the others, outages and a misconfigured pairing (wrong token, route or deployment), are retried with backoff.",
+  "about": "The controller and the checkout service each test their real code against a byte-for-byte copy of this file: sparkwing internal/controller/testdata and sparkwing-platform internal/billing/testdata. Change both copies together. Each route's request is the whole body the controller sends with the bearer token; each response is the service's whole answer. refund_event is the captured Stripe test-mode refund.created event, with an event-level livemode and no object-level livemode. refill_cases are the service's answers to each Stripe outcome of the refill request. refusals are answers the controller must classify: final ones are about the request and close the refill or refund for the owners and operator; the others, outages and a misconfigured pairing (wrong token, route or deployment), are retried with backoff.",
   "token": "bct_contract_token",
   "deployment": "dep-0123456789abcdef01234567",
   "min_cents": 1000,
@@ -36,6 +36,49 @@
       "path": "/internal/refill",
       "request": {"team": "acme", "deployment": "dep-0123456789abcdef01234567", "refill_id": "refill-contract", "amount_cents": 2500, "customer": "cus_contract"}
     }
+  },
+  "refund_event": {
+    "id": "evt_3UWJRSCsxdZEQ29m0B1SCls8",
+    "object": "event",
+    "api_version": "2026-08-26.dahlia",
+    "created": 1793380883,
+    "data": {
+      "object": {
+        "id": "re_3UWJRSCsxdZEQ29m024vKnKG",
+        "object": "refund",
+        "amount": 500,
+        "balance_transaction": "txn_3UWJRSCsxdZEQ29m06hmO5OP",
+        "charge": "ch_3UWJRSCsxdZEQ29m09GzUvnG",
+        "created": 1793380883,
+        "currency": "usd",
+        "customer": null,
+        "customer_account": null,
+        "destination_details": {
+          "card": {
+            "reference_status": "pending",
+            "reference_type": "acquirer_reference_number",
+            "type": "refund"
+          },
+          "type": "card"
+        },
+        "metadata": {},
+        "payment_intent": "pi_3UWJRSCsxdZEQ29m0gPoSOd7",
+        "payment_method": "pm_1UWJRRCsxdZEQ29m7z7at1hq",
+        "reason": null,
+        "receipt_number": null,
+        "source_transfer_reversal": null,
+        "status": "succeeded",
+        "transfer_reversal": null
+      },
+      "previous_attributes": {}
+    },
+    "livemode": false,
+    "pending_webhooks": 1,
+    "request": {
+      "id": "req_6h9AvE6AXKDs8X",
+      "idempotency_key": "5493a8b4-4926-450b-94e0-b03175632a2e"
+    },
+    "type": "refund.created"
   },
   "refill_cases": [
     {"name": "charged", "http_status": 200, "body": {"payment_intent": "pi_contract", "status": "succeeded"}},
