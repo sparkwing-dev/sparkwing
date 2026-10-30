@@ -360,6 +360,8 @@ type Concurrency struct {
 // Raw requested argument values are restricted execution inputs, not a display document.
 // SecretArgs is unset before describe. Display must then redact every requested value.
 type Request struct {
+	// SourceCredentialVerified carries a controller's schedule lookup into intake; it never crosses the wire or persists.
+	SourceCredentialVerified bool `json:"-"`
 	LocalForeground   bool                  `json:"local_foreground,omitempty"`
 	Burst             *BurstPlacement       `json:"burst,omitempty"`
 	Version           int                   `json:"version"`

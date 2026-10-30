@@ -130,6 +130,7 @@ func admitRun(ctx context.Context, tx *storeTx, team Team, request IntakeRequest
 		if err != nil {
 			return AdmissionResult{}, err
 		}
+		input.SourceCredentialVerified = false
 		if input.OriginMachine, err = originMachineTx(ctx, tx, team, principal, request.OriginMachine, request.IdempotencyKey); err != nil {
 			return AdmissionResult{}, err
 		}

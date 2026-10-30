@@ -33,6 +33,11 @@ func sealProvenanceTx(ctx context.Context, tx *storeTx, team Team, request Intak
 			return sealed, err
 		}
 	}
+	if request.SourceCredentialVerified && sealed.ProvenRepository() != "" {
+		if sealed, err = refused(sealed.WithSourceCredentialVerified()); err != nil {
+			return sealed, err
+		}
+	}
 	if sealed.Verified() || sealed.DefaultBranch() != "" {
 		return sealed, nil
 	}
@@ -72,6 +77,9 @@ func fetchedRepositoryTx(tx *storeTx, request IntakeRequest, input runspec.Reque
 		if s := tx.scheduleAdmission.schedule; s.GitHubInstallationID > 0 && s.LockedRef == "" {
 			// safety: the fire-time App lookup that proved the id reported the name, as for a verified fire.
 			return head(s.GitHubRepositoryID, request.Request.Git.RepositoryName.Value)
+		}
+		if request.SourceCredentialVerified {
+			return FetchedRepository{ID: tx.scheduleAdmission.schedule.GitHubRepositoryID, Name: request.Request.Git.RepositoryName.Value}
 		}
 		return FetchedRepository{}
 	}

@@ -304,6 +304,17 @@ func awardCapabilityTx(ctx context.Context, tx *storeTx, spec capability.AwardSp
 	if err != nil {
 		return capability.Capability{}, err
 	}
+	if spec.Purpose == capability.PurposeHere {
+		facts.HostKind, facts.FreshHost = capability.HostHere, false
+	}
+	if sealed.Provenance.ProvenRepository() != "" && !facts.HostKind.AllowsProvenRepository() {
+		return capability.Capability{}, authorityError(apierr.Forbidden, "personal machines and here hosts cannot execute repository-proven runs; use a shared runner or Sparkwing Cloud")
+	}
+	for _, node := range chain {
+		if node.principal.Capability.Unit == "" && node.principal.Capability.Repositories != nil && sealed.Provenance.ProvenRepository() == "" {
+			return capability.Capability{}, authorityError(apierr.Forbidden, "repository-scoped runners require repository-proven code")
+		}
+	}
 	if reason, err := claimantTrustRefusalTx(ctx, tx, Team(row.team), row.run, chain[len(chain)-1].principal.Capability, facts.Launcher, facts.PersistentKubernetes); err != nil {
 		return capability.Capability{}, err
 	} else if reason != "" {
@@ -345,6 +356,14 @@ func awardCapabilityTx(ctx context.Context, tx *storeTx, spec capability.AwardSp
 	}
 	c := capability.Capability{Team: row.team, Subject: claimant.Capability.Subject, Audience: capability.Controller, Grants: slices.Clone(policy.Grants), Issuance: capability.Award, Unit: spec.Unit, UnitID: spec.UnitID, Purpose: spec.Purpose, Delivery: spec.Delivery, Parent: &parent.Authority, ReservedPools: slices.Clone(parent.Capability.ReservedPools), Repositories: []string{row.repo}}
 	c.ExecutionHost = awardExecutionHost(chain, sealed, here)
+	c.Host = claimant.Capability.Host
+	if c.Host == nil {
+		cacheScope, err := awardCacheHostTx(ctx, tx, Team(row.team), facts)
+		if err != nil {
+			return capability.Capability{}, err
+		}
+		c.Host = &capability.HostFacts{Kind: facts.HostKind, Fresh: facts.FreshHost, RunnerKind: facts.OIDCKind, CacheScope: cacheScope, OwnerAccountID: facts.OwnerAccount, MachineID: chain[len(chain)-1].principal.Capability.Subject.ID}
+	}
 	c.Binding = capability.Binding{Kind: policy.Bindings[0], RunID: row.run, NodeID: row.node, Generation: row.generation, Holder: row.holder, Attempt: 0}
 	if row.expiry.Valid {
 		deadline := time.Unix(0, row.expiry.Int64).UTC()
@@ -407,11 +426,7 @@ func awardCapabilityTx(ctx context.Context, tx *storeTx, spec capability.AwardSp
 	if c.Children, err = awardChildrenTx(ctx, tx, row, spec.Unit); err != nil {
 		return capability.Capability{}, err
 	}
-	host, err := awardCacheHostTx(ctx, tx, Team(row.team), facts)
-	if err != nil {
-		return capability.Capability{}, err
-	}
-	if c.Data, err = awardDataScope(row, sealed, c, host); err != nil {
+	if c.Data, err = awardDataScope(row, sealed, c, c.Host.CacheScope); err != nil {
 		return capability.Capability{}, err
 	}
 	if spec.Delivery == capability.DeliveryBootstrap {

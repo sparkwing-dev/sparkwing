@@ -73,6 +73,9 @@ func bindingSecretTx(ctx context.Context, tx *storeTx, c capability.Capability, 
 	if err != nil {
 		return err
 	}
+	if err := checkRunHost(c, run.Request.Provenance); err != nil {
+		return err
+	}
 	if run.Spec == nil || !slices.Contains(run.Spec.Resolved.SecretNames, target.SecretName) {
 		return &apierr.Error{Code: apierr.Forbidden, Message: "the run's pipeline does not declare this secret", Details: map[string]any{"reason": apierr.ReasonSecretUndeclared}}
 	}

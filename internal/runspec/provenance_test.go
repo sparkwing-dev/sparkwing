@@ -87,3 +87,46 @@ func TestBranchSelectorNormalizesAndGlobs(t *testing.T) {
 		t.Fatal("an empty selector filters branches")
 	}
 }
+
+func TestRepositoryProofAndCompareAreSealed(t *testing.T) {
+	asserted, err := runspec.AssertedProvenance(runspec.RunWriter("run"), "refs/heads/main", provenanceSHA, "ci")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := asserted.WithSourceCredentialVerified(); err == nil {
+		t.Fatal("compare without repository proof was accepted")
+	}
+	proven, err := asserted.FetchedFrom(7, "acme/repo", "refs/heads/main", provenanceSHA)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := proven.FetchedFrom(8, "acme/other", "", ""); err == nil {
+		t.Fatal("repository proof was replaced")
+	}
+	if proven.SourceCredentialVerified() {
+		t.Fatal("fetch silently granted source credentials")
+	}
+	compared, err := proven.WithSourceCredentialVerified()
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, err := json.Marshal(compared)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var back runspec.Provenance
+	if err := json.Unmarshal(raw, &back); err != nil {
+		t.Fatal(err)
+	}
+	if back.ProvenRepository() != "gh:7" || !back.SourceCredentialVerified() || back.DefaultBranchWork() {
+		t.Fatalf("proof changed on persistence: %s", raw)
+	}
+	for _, bad := range []string{
+		strings.Replace(string(raw), `"proven_repository":"gh:7"`, `"proven_repository":"gh:8"`, 1),
+		strings.Replace(string(raw), `"trust":"asserted"`, `"verified_default_branch":true,"trust":"asserted"`, 1),
+	} {
+		if err := json.Unmarshal([]byte(bad), &back); err == nil {
+			t.Fatalf("forged proof accepted: %s", bad)
+		}
+	}
+}

@@ -32,6 +32,11 @@ func (t *Tenant) ReadSecret(ctx context.Context, a capability.Authorized) (*Secr
 			if selected, err = readRunTx(ctx, tx, t.team, run); err != nil {
 				return err
 			}
+			if claim {
+				if err := checkRunHost(p.Capability, selected.Request.Provenance); err != nil {
+					return err
+				}
+			}
 			// safety: a run-bound read selects the pipeline the run speaks for; a caller's selector cannot widen it.
 			if selection, err = runSecretSelection(selected.Request); err != nil {
 				return err
