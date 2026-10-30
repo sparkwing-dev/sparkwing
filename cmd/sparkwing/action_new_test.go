@@ -520,6 +520,56 @@ func TestInitialProjectUsesExplicitEmptyPipelines(t *testing.T) {
 	}
 }
 
+func TestPipelineNewTypeScriptRejectsPathNames(t *testing.T) {
+	for _, name := range []string{"../outside", "nested/name", `..\outside`, "/absolute"} {
+		t.Run(name, func(t *testing.T) {
+			repo := t.TempDir()
+			t.Chdir(repo)
+			err := runSparkwing([]string{"pipeline", "new", "--pipeline", name, "--template", "typescript"})
+			if err == nil || !strings.Contains(err.Error(), "invalid character") {
+				t.Fatalf("path name error = %v", err)
+			}
+			files, err := os.ReadDir(repo)
+			if err != nil || len(files) != 0 {
+				t.Fatalf("rejected name changed the checkout: %v, %v", files, err)
+			}
+		})
+	}
+}
+
+func TestPipelineNewTypeScriptUpdatesDeclaredEntry(t *testing.T) {
+	repo := t.TempDir()
+	t.Chdir(repo)
+	t.Setenv("PATH", t.TempDir())
+	dir := filepath.Join(repo, ".sparkwing")
+	if err := os.MkdirAll(filepath.Join(dir, "src"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	manifest := `{"main":"src/pipeline.ts","dependencies":{"@sparkwing/sdk":"0.67.0"}}`
+	if err := os.WriteFile(filepath.Join(dir, "package.json"), []byte(manifest), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	entry := filepath.Join(dir, "src", "pipeline.ts")
+	const original = "import { main } from '@sparkwing/sdk';\nawait main();\n"
+	if err := os.WriteFile(entry, []byte(original), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var commandErr error
+	captureStdout(t, func() {
+		commandErr = runSparkwing([]string{"pipeline", "new", "--pipeline", "hello", "--template", "typescript", "-o", "json"})
+	})
+	if commandErr != nil {
+		t.Fatal(commandErr)
+	}
+	body, err := os.ReadFile(entry)
+	if err != nil || !strings.HasPrefix(string(body), original) || !strings.Contains(string(body), `import "./../jobs/hello.ts";`) {
+		t.Fatalf("declared entry = %q, %v", body, err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "index.ts")); !os.IsNotExist(err) {
+		t.Fatalf("unexpected default entry: %v", err)
+	}
+}
+
 func TestPipelineNewTypeScriptBootstrapsAndAddsPipelines(t *testing.T) {
 	repo := t.TempDir()
 	t.Chdir(repo)
