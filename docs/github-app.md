@@ -60,7 +60,7 @@ opens **Team → GitHub** with “Repository access updated on GitHub”.
 
 The controller binds the installation to the caller's active team only when all of these hold:
 
-- `state` carries the controller's signature, has not expired (ten minutes), names the caller's account and active team, and was not used before. Used states are kept in the store until they expire, so no replica and no restart finishes a flow twice;
+- `state` carries the controller's signature, has not expired (ten minutes), names the caller's account, browser session and active team, and was not used before. Used states are kept in the store until they expire, so no replica and no restart finishes a flow twice;
 - `verifier` hashes to the value `state` carries, which only the browser that started the flow holds;
 - the code redeems, with that verifier, for a GitHub user whose id equals the GitHub identity linked to the caller's account;
 - GitHub's record of the installation, read with the App's own credential, names an account that user administers: the user's own account, or an organization where the user's membership is `admin`.
@@ -71,7 +71,9 @@ An installation belongs to one team. A freshly verified current GitHub account o
 
 ### Connecting an App installed on GitHub already
 
-On **Team -> GitHub**, choose **Already installed the app? Connect an existing installation**. Sparkwing sends the browser straight to GitHub's authorization page. After GitHub returns, Sparkwing lists installations of this App that the linked GitHub user administers: the user's account and organizations where their membership is active and has the `admin` role. The list carries no binding state: an installation another team holds appears like any other. Selecting it repeats the current admin check before transferring the binding. If the list is empty, use **Connect GitHub** to install the App.
+On **Team -> GitHub**, choose **Already installed the app? Connect an existing installation**. Sparkwing sends the browser straight to GitHub's authorization page. The callback redeems the one-use code, keeps the user token in the encrypted, HttpOnly flow cookie, and redirects once to `/github/app/available`. That page lists installations of this App that the linked GitHub user administers: the user's account and organizations where their membership is active and has the `admin` role. The list carries no binding state: an installation another team holds appears like any other. Selecting it repeats the current admin check before transferring the binding. If the list is empty, use **Connect GitHub** to install the App.
+
+Installation discovery can be retried after a canceled request or a GitHub API failure without redeeming the code again. Every read checks the original session, account, active team, linked GitHub identity and ten-minute expiry. Another session, account or team cannot reuse the flow. Discovery leaves the connection state unused. A client cancellation is logged at info level.
 
 Choosing an installation binds it to the active team. The controller checks the signed, unexpired state and PKCE verifier against the account and team, confirms the linked GitHub identity, and consumes the state before checking the selected installation. The encrypted authorization proof carries the IDs shown in the list, so an ID absent from that list answers 404 and cannot bind. For a listed ID, the controller reads the installation with the App credential and repeats the admin check. A selection with valid state, proof and linked identity consumes the state, including across controller replicas; retry by starting a new connection flow.
 

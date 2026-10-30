@@ -205,6 +205,12 @@ func (f *appFixture) available(who signedIn, s connectStart, code string) availa
 	cookie := appFlowCookie(f.t, map[string]any{
 		"state": s.State, "verifier": s.Verifier, "authorize_url": s.AuthorizeURL, "existing": true, "code": code,
 	})
+	callback := f.browserSend("GET", who.auth, "/github/app/callback?"+url.Values{"state": {s.State}, "code": {code}}.Encode(), nil, cookie)
+	if callback.StatusCode != http.StatusSeeOther {
+		return availableAnswer{status: callback.StatusCode, page: responseBody(f.t, callback)}
+	}
+	cookie = responseCookie(callback, "__Host-sw_github_app")
+	_ = responseBody(f.t, callback)
 	resp := f.browserSend("GET", who.auth, "/github/app/available", nil, cookie)
 	out := availableAnswer{status: resp.StatusCode, page: responseBody(f.t, resp)}
 	if resp.StatusCode != http.StatusOK {

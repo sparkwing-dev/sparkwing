@@ -114,6 +114,7 @@ var errInvalidGitHubCompletion = errors.New("GitHub completion has invalid commi
 type githubConnectState struct {
 	Team     string `json:"t"`
 	Account  string `json:"a"`
+	Session  string `json:"s"`
 	Expires  int64  `json:"e"`
 	Nonce    string `json:"n"`
 	Verifier string `json:"v"`
@@ -126,7 +127,7 @@ func (a *githubAppState) signState(st githubConnectState) (string, error) {
 var errConnectState = errors.New("the connect flow's state is not valid; start connecting again")
 
 // safety: the state proves this controller started the flow for this account
-// and team, and the verifier proves this browser is the one that started it;
+// session and team, and the verifier proves this browser started it;
 // the caller records the nonce so a state finishes one flow only.
 func (a *githubAppState) openState(raw, verifier string, p capability.Authorized, now time.Time) (githubConnectState, error) {
 	var st githubConnectState
@@ -138,6 +139,8 @@ func (a *githubAppState) openState(raw, verifier string, p capability.Authorized
 		return githubConnectState{}, errors.New("the connect flow expired; start connecting again")
 	case st.Account != p.Principal.Capability.Subject.ID || st.Team != p.Target.Team:
 		return githubConnectState{}, errors.New("the connect flow was started by another account or for another team")
+	case st.Session != p.Principal.Authority.ID:
+		return githubConnectState{}, errors.New("the connect flow was started in another session")
 	case verifier == "" || !hmac.Equal([]byte(st.Verifier), []byte(verifierDigest(verifier))):
 		return githubConnectState{}, errors.New("the connect flow was started in another browser")
 	}
@@ -170,7 +173,7 @@ func (s *Server) githubAppConnectBegin(ctx context.Context, p capability.Authori
 	}
 	state, err := s.githubApp.signState(githubConnectState{
 		Team: p.Target.Team, Account: p.Principal.Capability.Subject.ID, Expires: time.Now().Add(githubAppStateTTL).Unix(),
-		Nonce: nonce, Verifier: verifierDigest(verifier),
+		Session: p.Principal.Authority.ID, Nonce: nonce, Verifier: verifierDigest(verifier),
 	})
 	if err != nil {
 		return githubAppConnectGrant{}, fmt.Errorf("github app connect: %w", err)
@@ -310,53 +313,40 @@ func (a *githubAppState) openSelection(raw, state string) (githubAppSelectionPro
 	return proof, nil
 }
 
-func (s *Server) githubAppAvailable(ctx context.Context, p capability.Authorized, flow oauthFlowProof, redirectURI string) (githubAppAvailableResp, error) {
-	if flow.Code == "" || !s.redirectAllowed(redirectURI) {
-		return githubAppAvailableResp{}, refuse(http.StatusBadRequest, "", "code and allowed redirect_uri are required")
-	}
+func (s *Server) githubAppAvailable(ctx context.Context, p capability.Authorized, flow oauthFlowProof, authorization string) (githubAppAvailableResp, error) {
 	st, err := s.githubApp.openState(flow.State, flow.Verifier, p, time.Now())
 	if err != nil {
 		return githubAppAvailableResp{}, refuse(http.StatusForbidden, "", err.Error())
+	}
+	proof, err := s.githubApp.openSelection(authorization, flow.State)
+	if err != nil || proof.Nonce != st.Nonce {
+		return githubAppAvailableResp{}, refuse(http.StatusForbidden, "", errConnectState.Error())
 	}
 	subject, err := s.githubIdentitySubject(ctx, p)
 	if err != nil {
 		return githubAppAvailableResp{}, err
 	}
-	out := githubAppAvailableResp{Installations: []githubAppAvailableInstallation{}}
-	_, err = s.githubApp.client.ExchangeUserCode(ctx, flow.Code, flow.Verifier, redirectURI,
-		func(ctx context.Context, token string, user githubapp.User) error {
-			if strconv.FormatInt(user.ID, 10) != subject {
-				return errGitHubUserMismatch
-			}
-			installations, err := s.githubApp.client.UserInstallations(ctx, token)
-			if err != nil {
-				return err
-			}
-			for _, inst := range installations {
-				admin, err := s.githubAppAdministers(ctx, token, user, inst)
-				if err != nil {
-					return err
-				}
-				if !admin {
-					continue
-				}
-				out.Installations = append(out.Installations, githubAppAvailableInstallation{
-					InstallationID: inst.ID, AccountLogin: inst.Account.Login, AccountType: inst.Account.Type,
-				})
-			}
-			ids := make([]int64, 0, len(out.Installations))
-			for _, inst := range out.Installations {
-				ids = append(ids, inst.InstallationID)
-			}
-			out.Authorization, err = s.githubApp.sealSelection(githubAppSelectionProof{
-				Nonce: st.Nonce, UserID: user.ID, Token: token, InstallationIDs: ids,
-			}, flow.State)
-			return err
-		})
-	if err != nil {
-		return githubAppAvailableResp{}, s.githubAppConnectRefusal(p, 0, err)
+	if strconv.FormatInt(proof.UserID, 10) != subject {
+		return githubAppAvailableResp{}, refuse(http.StatusForbidden, "", errGitHubUserMismatch.Error())
 	}
-	return out, nil
+	installations, err := s.githubApp.client.UserInstallations(ctx, proof.Token)
+	if err != nil {
+		return githubAppAvailableResp{}, s.githubAppConnectRefusal(err)
+	}
+	out := githubAppAvailableResp{Installations: []githubAppAvailableInstallation{}}
+	proof.InstallationIDs = nil
+	for _, inst := range installations {
+		admin, err := s.githubAppAdministers(ctx, proof.Token, githubapp.User{ID: proof.UserID}, inst)
+		if err != nil {
+			return githubAppAvailableResp{}, s.githubAppConnectRefusal(err)
+		}
+		if admin {
+			out.Installations = append(out.Installations, githubAppAvailableInstallation{InstallationID: inst.ID, AccountLogin: inst.Account.Login, AccountType: inst.Account.Type})
+			proof.InstallationIDs = append(proof.InstallationIDs, inst.ID)
+		}
+	}
+	out.Authorization, err = s.githubApp.sealSelection(proof, flow.State)
+	return out, err
 }
 
 func (s *Server) githubAppSelect(ctx context.Context, p capability.Authorized, flow oauthFlowProof, authorization string, installationID int64) (store.GitHubAppInstallation, error) {
@@ -392,11 +382,11 @@ func (s *Server) githubAppSelect(ctx context.Context, p capability.Authorized, f
 	}
 	inst, err := s.githubApp.client.Installation(ctx, installationID)
 	if err != nil {
-		return store.GitHubAppInstallation{}, s.githubAppConnectRefusal(p, installationID, err)
+		return store.GitHubAppInstallation{}, s.githubAppConnectRefusal(err)
 	}
 	admin, err := s.githubAppAdministers(ctx, proof.Token, githubapp.User{ID: proof.UserID}, inst)
 	if err != nil {
-		return store.GitHubAppInstallation{}, s.githubAppConnectRefusal(p, installationID, err)
+		return store.GitHubAppInstallation{}, s.githubAppConnectRefusal(err)
 	}
 	if !admin {
 		return store.GitHubAppInstallation{}, refuse(http.StatusForbidden, "", errGitHubInstallationAccess.Error())
@@ -474,12 +464,12 @@ func (s *Server) githubAppConnectFinish(ctx context.Context, p capability.Author
 	}
 	user, err := s.githubApp.client.ExchangeUserCode(ctx, flow.Code, flow.Verifier, redirectURI, check)
 	if err != nil {
-		return store.GitHubAppInstallation{}, s.githubAppConnectRefusal(p, installationID, err)
+		return store.GitHubAppInstallation{}, s.githubAppConnectRefusal(err)
 	}
 	return s.bindGitHubAppInstallation(ctx, writer, p, inst, user.ID)
 }
 
-func (s *Server) githubAppConnectRefusal(p capability.Authorized, installation int64, err error) error {
+func (s *Server) githubAppConnectRefusal(err error) error {
 	switch {
 	case errors.Is(err, githubapp.ErrNotInstalled):
 		return refuse(http.StatusNotFound, "", "GitHub reports no installation of the App by that id")

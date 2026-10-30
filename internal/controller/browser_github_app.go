@@ -1,6 +1,7 @@
 package controller
 
 import (
+	"context"
 	"errors"
 	"html/template"
 	"net/http"
@@ -9,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
+	"github.com/sparkwing-dev/sparkwing/internal/githubapp"
 	"github.com/sparkwing-dev/sparkwing/internal/routepolicy"
 )
 
@@ -171,19 +173,38 @@ func (s *Server) handleGitHubAppCallback(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	flow.Code = code
+	if flow.Existing {
+		redirectURI := browserURL(r, githubAppCallbackPath)
+		var state githubConnectState
+		if !s.redirectAllowed(redirectURI) || !openFlowState(s.githubApp.stateKey, flow.State, &state) {
+			refuseGitHubAppFlow(w, http.StatusBadRequest, "This connection could not be verified. Start again.")
+			return
+		}
+		// safety: keep the redeemed token in the encrypted browser proof before discovery so a canceled listing can retry.
+		_, err := s.githubApp.client.ExchangeUserCode(r.Context(), code, flow.Verifier, redirectURI,
+			func(_ context.Context, token string, user githubapp.User) (err error) {
+				flow.Authorization, err = s.githubApp.sealSelection(githubAppSelectionProof{Nonce: state.Nonce, UserID: user.ID, Token: token}, flow.State)
+				return err
+			})
+		if err != nil {
+			s.renderGitHubAppRefusal(w, s.githubAppConnectRefusal(err))
+			return
+		}
+		flow.Code = ""
+	}
 	if !s.setGitHubAppFlow(w, flow) {
 		http.Error(w, "could not continue connecting GitHub", http.StatusInternalServerError)
 		return
 	}
-	next, message := githubAppCompletePath, "Finishing the connection."
 	if flow.Existing {
-		next, message = githubAppAvailablePath, "Finding installations you administer."
+		http.Redirect(w, r, githubAppAvailablePath, http.StatusSeeOther)
+		return
 	}
 	renderFlowPage(w, http.StatusOK, flowPage{
 		Title:       "Connecting GitHub",
-		Message:     message,
-		Refresh:     next,
-		ActionHref:  next,
+		Message:     "Finishing the connection.",
+		Refresh:     githubAppCompletePath,
+		ActionHref:  githubAppCompletePath,
 		ActionLabel: "Continue",
 	})
 }
@@ -199,11 +220,11 @@ func (s *Server) handleGitHubAppAvailable(w http.ResponseWriter, r *http.Request
 		return
 	}
 	flow, ok := s.readGitHubAppFlow(r)
-	if !ok || !flow.Existing || flow.Code == "" || flow.Authorization != "" {
+	if !ok || !flow.Existing || flow.Authorization == "" {
 		refuseGitHubAppFlow(w, http.StatusBadRequest, "This connection was not started in this browser. Start again.")
 		return
 	}
-	available, err := s.githubAppAvailable(r.Context(), sess.authorized, flow.proof(), browserURL(r, githubAppCallbackPath))
+	available, err := s.githubAppAvailable(r.Context(), sess.authorized, flow.proof(), flow.Authorization)
 	if err != nil {
 		s.renderGitHubAppRefusal(w, err)
 		return
@@ -289,6 +310,10 @@ func refuseGitHubAppFlow(w http.ResponseWriter, status int, message string) {
 // safety: a refusal's message is written for the person in the flow, so the page shows it; a fault shows no
 // internal text.
 func (s *Server) renderGitHubAppRefusal(w http.ResponseWriter, err error) {
+	if errors.Is(err, context.Canceled) {
+		s.logger.Info("github app connection canceled")
+		return
+	}
 	apierr.NoteResponseError(w, err)
 	page := flowPage{ActionHref: githubAppSettingsPath, ActionLabel: "Back to GitHub settings"}
 	refused, ok := refusalOf(err)
