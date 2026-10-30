@@ -27,6 +27,8 @@ unlock.
 
 ### Fixed
 
+- **metrics:** Completed Cloud jobs without resource samples return an explicit unavailable error instead of an empty success. Observability docs describe the native runtime's missing sampler.
+
 - **GitHub App:** Connection refusals show their reason without blaming GitHub ownership. An already-used or expired connection explains how to start again.
 
 - **schedules:** Invalid cron overrides name the failing field and show a valid hourly example in CLI and controller errors

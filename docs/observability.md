@@ -336,75 +336,14 @@ excerpts at all. The node's `error` still carries the excerpt as text.
 
 ## Resource usage metrics
 
-A dedicated node process samples its observed process tree every 2 seconds
-and takes a final reading before execution returns. Samples are stored and
-charted in the dashboard. No cluster metrics-server is involved.
+Native Cloud runners do not sample or ship job CPU and memory usage. A completed
+Cloud job with no stored samples returns HTTP 503, code `unavailable`, with
+`metrics unavailable on Cloud runners`. The native runtime has no two-second
+sampling guarantee. A pending or running job can still return an empty page.
+Stored samples remain readable, including samples from earlier runtimes.
 
-A sample delivery failure leaves execution and retries unchanged. Sampling
-continues with a five-second timeout per write; the next recorded interval
-spans any missed intervals to preserve CPU time. At node finish, losses of at
-most 1% of attempted interval and command samples produce a `metrics_partial`
-run event with the counts, without a warning or excluding capacity learning.
-Larger losses produce one node log warning and a `resource_samples_incomplete`
-run event, and the executor makes one bounded, best-effort partial-marker write
-independent of execution cancellation. Partial measurements are lower bounds:
-capacity learning can raise a profile from them, but cannot lower any resource
-dimension or evict an older observation unless the partial measurement raises
-one dimension. Partial measurements never count toward graduation, so they
-cannot end the measuring safety margin. A partial contended run can raise the
-demand floor without decaying it. Exact exit CPU time and maximum memory remain
-trustworthy. A backend that refuses the partial marker gets the exclusion
-marker instead.
-
-Some samples exist to exclude a measurement: the marker for an unowned node or
-an unrecorded attempt, the parent marker before a spawn (the parent's
-measurement includes child work), and interval samples flagged invalid. When
-one of those is lost, the executor writes an exclusion marker at finish
-regardless of the loss ratio. Markers carry no reading and may exceed the
-per-node sample cap by a small headroom, so a measurement that filled the cap
-can still be labeled. Reaching the sample cap is not a delivery failure. Exact exit accounting is recorded separately, and billing
-uses claim duration and class rates rather than resource samples. Learned
-profiles can influence the resource class reserved for future claims.
-
-### What's measured
-
-- **CPU**: millicores from the change in cumulative CPU time divided by the
-  matching elapsed interval, clamped to the host's core count. The counters
-  include observed live descendants and reaped child work.
-- **Memory**: summed resident bytes across the observed process tree, using
-  `smaps_rollup` on Linux and process resource counters on macOS. Shared
-  pages can be counted more than once. Process reads are not simultaneous.
-
-Two snapshots check process identity, parentage and counter consistency.
-Unavailable or inconsistent readings mark the sample unknown. Any usable
-reading remains available for diagnostics, but an unknown sample prevents
-a contributing uncached node's observations and the run rollup from training
-resource costs. Cached nodes are excluded from learning.
-A successful zero reading remains measured zero.
-
-An observed process disappearing or changing identity or parentage makes
-attribution unknown, including an ordinary child reap. Descendants still
-present at final collection also make attribution unknown. Work before
-attachment, short-lived descendants absent from every snapshot and escaped
-processes cannot be fully accounted for by polling.
-
-Only a node that owns its dedicated process receives interval attribution.
-Embedded execution and nested work sharing another node's process report
-unknown attribution; process readings are not divided among attached nodes.
-
-Sampling misses peaks between readings. The first interval retains the
-initial memory reading, and final collection can produce an interval even
-when a node finishes before the first timer tick. Supervised local processes
-also report exit CPU time, peak resident set and process lifetime. The local
-capacity fold uses CPU time divided by that matching lifetime as a floor
-under sampled CPU. Exit RSS is a process high-water mark, not simultaneous
-process-tree memory. Pods and embedded nodes do not provide these supervised
-exit figures.
-
-The process lifetime includes startup and teardown. Retries accumulate CPU
-and occupancy, while exit memory retains the largest reported peak. Profile
-learning excludes multiple execution attempts whose combined measurement
-coverage cannot be established.
+Billing uses claim duration and class rates rather than resource samples.
+Resource metrics and billing usage are separate records.
 
 Each stored point has a `kind`:
 

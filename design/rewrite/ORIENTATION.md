@@ -132,6 +132,12 @@ credential model in `docs/auth.md`, and the decision log
 | --- | --- | --- |
 | Local repository memo lookups miss after scope checks; publication is skipped | `blob_lookup.go`: `lookupMemoTx`; `internal/nodehost/executor_memo.go`: `saveMemo` | `blob_local_cache_test.go`: `TestLocalDepcacheRoundTrip`; `internal/nodehost/native_memo_test.go`: `TestNativeExecutorLocalRepositoryMemoRunsBody`; `internal/nodehost/executor_memo_test.go`: `TestExecutorLocalRepositorySkipsMemoPublication` |
 
+### Metrics
+
+| Rule | Owner | Guard test |
+| --- | --- | --- |
+| Completed Cloud jobs with no resource samples report metrics unavailable; stored points and exhausted pages stay readable | `internal/controller/metrics.go`: `handleGetJobMetrics` | `TestMetricsHTTPCompletedCloudJobWithoutSamples` |
+
 ### Logs
 
 | Rule | Owner | Guard test |

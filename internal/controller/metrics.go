@@ -10,6 +10,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
 
@@ -120,6 +121,23 @@ func (s *Server) handleGetJobMetrics(w http.ResponseWriter, r *http.Request, a c
 	samples, err := tenant.ListNodeMetricsPage(r.Context(), a.Target.RunID, a.Target.NodeID, after, limit+1)
 	if err != nil {
 		return engineLookupError(err)
+	}
+	if len(samples) == 0 && after.IsZero() {
+		view, err := tenant.ReadRunView(r.Context(), a.Target.RunID)
+		if err != nil {
+			return engineLookupError(err)
+		}
+		for _, node := range view.Snapshot.Nodes {
+			if string(node.Ref.NodeID) != a.Target.NodeID || node.Status != runstate.StatusDone {
+				continue
+			}
+			for _, attempt := range view.Attempts {
+				if attempt.Identity.NodeID == a.Target.NodeID && attempt.Identity.Attempt == int64(node.Attempt) && attempt.ExecutorLocation == "cloud" {
+					// The policy writer hides 5xx messages; this fixed explanation is safe to publish.
+					return apierr.WriteHTTP(w, &apierr.Error{Code: apierr.Unavailable, Message: "metrics unavailable on Cloud runners: no resource samples were recorded for this job"})
+				}
+			}
+		}
 	}
 	writeJSON(w, http.StatusOK, newMetricsPage(samples, limit))
 	return nil
