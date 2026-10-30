@@ -685,7 +685,10 @@ file. Other syntax and workflow checks remain active.
   `SPARKWING_K8S_E2E_LICENSE_FILE` and an exact namespace/release cleanup
   allow-list. It never creates or deletes cluster infrastructure. GitHub webhook
   intake and remote Git fetching need separate evidence. This check is manual and
-  opt-in because it uses a real cluster.
+  opt-in because it uses a real cluster. The fixture's SDK require pin follows
+  the release pins, with a local replace to the checkout. The harness bundles
+  the committed SDK source from HEAD and rewrites that replace inside the
+  uploaded repository so runner compilation needs no caller checkout.
 
 ## Decisions before landing
 

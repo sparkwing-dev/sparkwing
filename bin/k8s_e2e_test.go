@@ -87,7 +87,7 @@ func TestKubernetesE2EChartRender(t *testing.T) {
 	}
 }
 
-func TestKubernetesE2EFixtureBuildsWithItsPinnedSDK(t *testing.T) {
+func TestKubernetesE2EFixtureBuildsWithCheckoutSDK(t *testing.T) {
 	if _, err := exec.LookPath("go"); err != nil {
 		t.Skipf("Go unavailable: %v", err)
 	}
@@ -96,9 +96,9 @@ func TestKubernetesE2EFixtureBuildsWithItsPinnedSDK(t *testing.T) {
 	cmd.Env = append(os.Environ(), "GOWORK=off", "GOFLAGS=-buildvcs=false", "GOPROXY=off", "GOSUMDB=off")
 	output, err := cmd.CombinedOutput()
 	if bytes.Contains(output, []byte("module lookup disabled by GOPROXY=off")) {
-		t.Skipf("pinned fixture dependencies are not cached: %s", output)
+		t.Skipf("fixture dependencies are not cached: %s", output)
 	}
 	if err != nil {
-		t.Fatalf("pinned Kubernetes fixture: %v\n%s", err, output)
+		t.Fatalf("checkout Kubernetes fixture: %v\n%s", err, output)
 	}
 }
