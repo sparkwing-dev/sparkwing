@@ -31,6 +31,9 @@ func (c *engineClient) requestList(ctx context.Context, pattern, path string, re
 	}
 	var combined map[string]json.RawMessage
 	rows := make(map[string][]json.RawMessage, len(fields))
+	for _, field := range fields {
+		rows[field] = []json.RawMessage{}
+	}
 	seen := map[string]bool{}
 	for {
 		var response listResponse

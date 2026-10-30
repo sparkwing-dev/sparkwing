@@ -93,3 +93,13 @@ func TestStepsDrainPreservesAllRowsAndRejectsCursorCycles(t *testing.T) {
 		t.Fatalf("cycle calls=%d err=%v", calls, err)
 	}
 }
+
+func TestEmptyInventoryRemainsAnArray(t *testing.T) {
+	c := testEngine(t, func(*http.Request) (*http.Response, error) {
+		return engineResponse(200, `{"steps":[],"next_cursor":"","truncated":false}`), nil
+	})
+	result, err := c.ReadSteps(t.Context(), "run")
+	if err != nil || result.Steps == nil {
+		t.Fatalf("empty steps changed to null: %+v %v", result, err)
+	}
+}
