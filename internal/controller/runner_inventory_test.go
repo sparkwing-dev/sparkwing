@@ -207,7 +207,12 @@ func TestRunnerInventoryHTTPRefusesMissingAndCorruptFacts(t *testing.T) {
 	f := &runnerInventoryFake{team: "a", snapshot: capability.RunnerSnapshot{Now: now}}
 	h, raw := runnerInventoryFixture(t, f)
 	w := engineClaimHTTP(t, h, raw, "GET", "/api/v1/runners", "", 200)
-	if strings.TrimSpace(w.Body.String()) != `{"runners":[]}` {
+	var empty struct {
+		Runners    []controllerwire.RunnerDetail `json:"runners"`
+		NextCursor string                        `json:"next_cursor"`
+		Truncated  bool                          `json:"truncated"`
+	}
+	if json.Unmarshal(w.Body.Bytes(), &empty) != nil || empty.Runners == nil || len(empty.Runners) != 0 || empty.NextCursor != "" || empty.Truncated {
 		t.Fatalf("empty inventory: %s", w.Body.String())
 	}
 	for _, mutate := range []func(){
