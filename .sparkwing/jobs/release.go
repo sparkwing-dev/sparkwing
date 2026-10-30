@@ -959,7 +959,7 @@ func wireCutsSince(ctx context.Context, repoDir, prevTag string) ([]wireCut, err
 }
 
 func fileAtTag(ctx context.Context, repoDir, tag, path string) (body string, present bool, err error) {
-	// Release discovery reads origin's refs, while job checkouts may omit tags.
+	// safety: release discovery reads origin's refs, while job checkouts may omit tags.
 	ref := "refs/tags/" + tag
 	if _, err := runGitIn(ctx, repoDir, "cat-file", "-e", ref+"^{commit}"); err != nil {
 		if _, err := runGitIn(ctx, repoDir, "fetch", "--no-tags", "--no-recurse-submodules", "--no-write-fetch-head", "origin", ref+":"+ref); err != nil {
