@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 )
@@ -60,6 +61,9 @@ func (s *Server) handleRetry(engine *EngineController) func(http.ResponseWriter,
 			return engine.retry(ctx, a, body)
 		})
 		if err != nil {
+			if refusal := publicQueueDepthRefusal(err); refusal != nil {
+				return apierr.WriteHTTP(w, refusal)
+			}
 			return err
 		}
 		writeJSON(w, http.StatusOK, response)

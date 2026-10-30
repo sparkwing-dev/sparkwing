@@ -116,7 +116,7 @@ func dataRouteError(err error) error {
 	case errors.Is(err, blob.ErrBudget), errors.Is(err, context.DeadlineExceeded):
 		return &apierr.Error{Code: apierr.DeadlineExceeded, Message: "data query deadline exceeded"}
 	case errors.As(err, &quota):
-		return &apierr.Error{Code: apierr.RateLimited, Message: "daily download cap reached", Details: map[string]any{"retry_after_ms": quota.RetryAfter.Milliseconds()}}
+		return &apierr.Error{Code: apierr.RateLimited, Message: quota.Error(), Details: map[string]any{"retry_after_ms": quota.RetryAfter.Milliseconds()}}
 	default:
 		return engineLookupError(err)
 	}

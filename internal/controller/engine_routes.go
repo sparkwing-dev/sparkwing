@@ -208,6 +208,9 @@ func (s *Server) handleIntake(engine *EngineController) func(http.ResponseWriter
 			return engine.admitRun(ctx, a.Target.Team, request)
 		})
 		if err != nil {
+			if refusal := publicQueueDepthRefusal(err); refusal != nil {
+				return apierr.WriteHTTP(w, refusal)
+			}
 			return err
 		}
 		status := http.StatusCreated

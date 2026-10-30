@@ -330,7 +330,7 @@ func TestDataReadHTTPDownloadFailures(t *testing.T) {
 				f.data.ChargeDownload = nil
 				code = apierr.PolicyMissing
 			case "meter cap":
-				f.chargeErr = &store.DownloadCapError{RetryAfter: time.Minute}
+				f.chargeErr = &store.DownloadCapError{RetryAfter: time.Minute, Team: "team", UsedBytes: 100, CapBytes: 100, Remedy: "contact support@sparkwing.dev to raise this limit"}
 				status, code = 429, apierr.RateLimited
 			case "meter error":
 				f.chargeErr = errors.New("private-ledger")
@@ -339,6 +339,13 @@ func TestDataReadHTTPDownloadFailures(t *testing.T) {
 			}
 			w := authorityHTTP(f.handler(), f.boundary, "POST", "/api/v1/data/download", `{"digest":"`+string(dataDigest())+`"}`)
 			assertEngineError(t, w, status, code)
+			if state == "meter cap" {
+				for _, want := range []string{"100", "support@sparkwing.dev"} {
+					if !strings.Contains(w.Body.String(), want) {
+						t.Fatalf("download refusal omits %q: %s", want, w.Body.String())
+					}
+				}
+			}
 			if state != "sign error" && f.objects.signed.Key != "" {
 				t.Fatal("refused download signed bytes")
 			}

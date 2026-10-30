@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strconv"
+	"strings"
 	"sync"
 	"testing"
 
@@ -67,6 +68,11 @@ func TestFloodPolicy_CapsRunsPerPrincipalHour(t *testing.T) {
 	if refused.Code != 429 {
 		t.Fatalf("cap = %d %s", refused.Code, refused.Body)
 	}
+	for _, want := range []string{"limit is 2 per hour", "usage is at least 2", "ask the operator"} {
+		if !strings.Contains(refused.Body.String(), want) {
+			t.Fatalf("hourly refusal omits %q: %s", want, refused.Body.String())
+		}
+	}
 	if seconds, err := strconv.Atoi(refused.Header().Get("Retry-After")); err != nil || seconds <= 0 {
 		t.Fatalf("Retry-After = %q", refused.Header().Get("Retry-After"))
 	}
@@ -88,6 +94,11 @@ func TestFloodPolicy_ShedsAboveTheQueueDepthThreshold(t *testing.T) {
 	refused := f.submit(f.token, "build", fortyHex(3))
 	if refused.Code != 503 || refused.Header().Get("Retry-After") == "" {
 		t.Fatalf("shed = %d %s headers %v", refused.Code, refused.Body, refused.Header())
+	}
+	for _, want := range []string{"limit is 2", "current usage is 2", "ask the operator"} {
+		if !strings.Contains(refused.Body.String(), want) {
+			t.Fatalf("queue refusal omits %q: %s", want, refused.Body.String())
+		}
 	}
 }
 
@@ -213,5 +224,30 @@ func TestFloodPolicyExplicitKeyRetryAfterStoreRefusal(t *testing.T) {
 	replay := floodRun(t, f.intake(f.token, body), 200)
 	if first.RunID != replay.RunID {
 		t.Fatal("retry did not establish replay")
+	}
+}
+
+func TestFloodPolicyRetryQueueRefusalNamesLimitUsageAndRemedy(t *testing.T) {
+	f := newFloodServer(t, controller.FloodPolicy{})
+	first := floodRun(t, f.submit(f.token, "build", fortyHex(1)), 201)
+	if err := teststore.SeedRunFinish(f.st, t.Context(), store.DefaultTeam, first.RunID, "failed", "boom"); err != nil {
+		t.Fatal(err)
+	}
+	for i := range 2 {
+		floodRun(t, f.submit(f.token, "build", fortyHex(i+2)), 201)
+	}
+	f.srv.WithFloodPolicy(controller.FloodPolicy{ShedQueueDepth: 2})
+	body := strings.NewReader(`{"mode":"all","idempotency_key":"queue-refused"}`)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/runs/"+first.RunID+"/retry", body)
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+f.token)
+	refused := f.serve(req)
+	if refused.Code != 503 || refused.Header().Get("Retry-After") == "" {
+		t.Fatalf("retry shed: %d %s", refused.Code, refused.Body)
+	}
+	for _, want := range []string{"limit is 2", "current usage is 3", "ask the operator"} {
+		if !strings.Contains(refused.Body.String(), want) {
+			t.Fatalf("retry refusal omits %q: %s", want, refused.Body.String())
+		}
 	}
 }

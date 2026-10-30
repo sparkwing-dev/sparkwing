@@ -71,7 +71,7 @@ func (e *ComputeLimitError) Error() string {
 	if scope == "" {
 		scope = "controller"
 	}
-	return fmt.Sprintf("compute limit %s reached: %s is at %d, cap %d; ask the operator to raise this guard with sparkwing operator limits set or contact support@sparkwing.dev",
+	return fmt.Sprintf("compute limit %s reached: %s is at %d, cap %d; ask the operator to adjust this guard with sparkwing operator limits set or contact support@sparkwing.dev",
 		e.Limit, scope, e.Observed, e.Cap)
 }
 
