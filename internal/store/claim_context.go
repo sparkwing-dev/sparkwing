@@ -47,7 +47,6 @@ func persistClaimContextTx(ctx context.Context, tx *storeTx, team Team, runID st
 		// safety: pool access rules read these, so units sharing a context share pool access.
 		Provenance struct {
 			Trust            runspec.TrustClass `json:"trust"`
-			RepositoryID     int64              `json:"repository_id"`
 			Ref              string             `json:"ref"`
 			ProvenRepository runspec.RepoKey    `json:"proven_repository"`
 			VerifiedDefault  bool               `json:"verified_default_branch"`
@@ -57,7 +56,7 @@ func persistClaimContextTx(ctx context.Context, tx *storeTx, team Team, runID st
 		return "", err
 	}
 	if !runspec.AppRepositoryTrust.Has(sealed.Provenance.Trust) {
-		sealed.Provenance.RepositoryID, sealed.Provenance.Ref = 0, ""
+		sealed.Provenance.Ref = ""
 	}
 	var accepted struct {
 		Resolved struct {

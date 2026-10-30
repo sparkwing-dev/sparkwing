@@ -1200,8 +1200,11 @@ migrations. The lead wipes pre-release staging and production stores separately.
 No deployment is part of this change.
 
 Enrollment question for the lead: the current API requires nonempty repository
-patterns for every personal machine. Combining the two approved claim rules
-therefore leaves enrolled personal machines eligible for no work. The proposed
-follow-up is personal enrollment without `--repos`, still limited to the owner's
-asserted runs. This is awaiting the lead's decision. Tests of asserted personal
-work use an unscoped authority fixture and do not claim the API can enroll one.
+patterns for every machine. Combining the approved claim rules leaves enrolled
+personal machines eligible for no work. Shared machines cannot claim asserted
+uploads or non-GitHub work either. The proposed follow-up is optional `--repos`
+for enrollment. Unscoped personal machines would still take only their owner's
+asserted work. Unscoped shared runners could take the team's asserted work, while
+scoped runners would remain proven-only. This is awaiting the lead's decision.
+Tests of asserted personal work use an unscoped authority fixture and do not
+claim the API can enroll one.

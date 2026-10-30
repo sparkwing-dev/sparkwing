@@ -350,7 +350,7 @@ func (q *claimSQL) flag(name string) string { return q.number(q.fact(name)) }
 func (q *claimSQL) pushScopeMatches(provenance, push, repo string) string {
 	p := func(name string) string { return q.at(provenance, name) }
 	b := func(name string) string { return q.at(push, name) }
-	return `COALESCE((` + trustIn(p("trust"), runspec.GitHubEventTrust) + ` AND ` + b("workflow_run_id") + `<>'' AND ` + b("repo_key") + `=` + repo + ` AND ` + b("repo_key") + `='gh:'||CAST(` + p("repository_id") + ` AS TEXT) AND ` + b("ref") + `=` + p("ref") + ` AND ` + b("sha") + `=` + p("sha") + `),FALSE)`
+	return `COALESCE((` + trustIn(p("trust"), runspec.GitHubEventTrust) + ` AND ` + b("workflow_run_id") + `<>'' AND ` + b("repo_key") + `=` + repo + ` AND ` + b("repo_key") + `=` + q.provenRepository(provenance) + ` AND ` + b("ref") + `=` + p("ref") + ` AND ` + b("sha") + `=` + p("sha") + `),FALSE)`
 }
 
 func writerPrincipalSQL(writer, kind string) string {
