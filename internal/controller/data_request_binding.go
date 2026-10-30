@@ -6,6 +6,7 @@ import (
 	"net/url"
 	"strconv"
 
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 )
@@ -88,8 +89,16 @@ func decodeDataTarget(r *http.Request) (capability.RequestEvidence, error) {
 }
 
 func resolveDataTarget(_ context.Context, p capability.Principal, target capability.Target) (capability.Target, error) {
-	if target.Data == nil || p.Capability.Data == nil {
+	if target.Data == nil {
 		return target, dataForbidden()
+	}
+	if p.Capability.Data == nil {
+		grant := capability.DataRead
+		switch target.Data.Operation {
+		case capability.DataUpload, capability.DataCommit, capability.DataRecord:
+			grant = capability.DataWrite
+		}
+		return target, capability.RequiredAuthority(apierr.ReasonBinding, []capability.Grant{grant})
 	}
 	scope := p.Capability.Data
 	if target.Data.NodeID != "" {

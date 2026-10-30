@@ -20,6 +20,11 @@ Read a selected run with `sparkwing runs status --run RUN --steps`. Use
 `sparkwing runs logs --run RUN --follow` for its logs, or add `--job JOB` for
 one job. JSON preserves job attempts and trigger, plan or eval log subjects.
 Log follow completes only after the controller reports final persisted logs.
+Plain and pretty output show runner messages and attributes as text. Lifecycle
+events show concise failure details, and retry events name the next attempt,
+for example `job build retrying: attempt=2 reason=sdk_error`. JSON output
+preserves the stored runner frames and event payloads. JSON printed by pipeline
+code remains part of its message in every format.
 An interrupted or incomplete observation exits 3, and polling again may
 complete it. A run that does not exist, or that the credential cannot read,
 exits 4: stop polling.
@@ -111,7 +116,7 @@ terminal event after reporting a result.
 | Event | Meaning |
 | --- | --- |
 | `job_started` | The awarded job began an execution attempt. |
-| `job_retrying` | An application failure started the next attempt under the same claim. |
+| `job_retrying` | An application failure started the next attempt under the same claim. Its `attempt` names that next execution ordinal. |
 | `job_requeued` | Lease recovery released the job for another scheduling pass. |
 | `job_succeeded`, `job_failed`, `job_cancelled` | A terminal execution result committed. |
 | `job_skipped`, `job_superseded`, `job_memoized` | A scheduling or reuse decision committed. |

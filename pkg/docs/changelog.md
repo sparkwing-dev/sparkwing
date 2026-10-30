@@ -29,6 +29,14 @@ unlock.
 
 ### Fixed
 
+- **auth:** Refusals name the required grant and how to obtain it
+  Secret writes identify the owner role's `team.admin` grant. Dependency-cache
+  reads explain repository-bound `data.read`, and OIDC minting requires an
+  awarded or delegated job credential with `oidc.mint`. Foreign-team resources
+  remain indistinguishable from absent resources.
+- **runs logs:** Plain and pretty output render persisted runner frames as text
+  Job failures omit raw transition JSON. Retry events include the next attempt
+  ordinal, including `attempt=2`.
 - **release:** Schema and wire changelog gates fetch a previous release tag missing from the job checkout. Failed fetches name that checkout and show a recovery command.
 
 ## [v0.68.0] - 2026-10-30
