@@ -10,5 +10,4 @@ func TestGitHubChecksDistinguishDryRunFromSuccess(t *testing.T) {
 	if conclusion != "neutral" || githubCheckTitle(conclusion) != "Dry run completed" {
 		t.Fatalf("dry-run check = %q, %q", conclusion, githubCheckTitle(conclusion))
 	}
-
 }
