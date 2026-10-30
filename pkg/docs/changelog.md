@@ -29,6 +29,10 @@ unlock.
 
 ### Fixed
 
+- **schedules:** Invalid cron overrides name the failing field and show a valid hourly example in CLI and controller errors
+
+- **schedules:** The controller embeds IANA time zone data so declarations and overrides accept named zones on images without zoneinfo files
+
 - **release:** Schema and wire changelog gates fetch a previous release tag missing from the job checkout. Failed fetches name that checkout and show a recovery command.
 
 ## [v0.68.0] - 2026-10-30

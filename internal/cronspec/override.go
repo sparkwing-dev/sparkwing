@@ -2,6 +2,7 @@ package cronspec
 
 import (
 	"errors"
+	"fmt"
 	"strings"
 	"time"
 )
@@ -16,14 +17,14 @@ type Override struct {
 	Args    *map[string]string `json:"args,omitempty"`
 }
 
-// Validate checks a cadence edit without applying defaults or exposing values.
+// Validate checks a cadence edit without applying defaults.
 func (input Override) Validate() error {
 	if input.Cron == nil && input.TZ == nil && input.Overlap == nil && input.CatchUp == nil && input.Args == nil {
 		return errors.New("at least one override field is required")
 	}
 	if input.Cron != nil {
 		if _, err := Parse(*input.Cron); err != nil {
-			return errors.New("invalid schedule expression")
+			return fmt.Errorf("invalid schedule cron: %w; example: \"0 * * * *\" (hourly)", err)
 		}
 	}
 	if input.TZ != nil && *input.TZ != "" && *input.TZ != "local" {

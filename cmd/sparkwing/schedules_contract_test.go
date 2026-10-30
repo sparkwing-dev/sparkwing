@@ -104,6 +104,21 @@ func TestScheduleManagementKeepsOverridePresenceAndExactValues(t *testing.T) {
 	}
 }
 
+func TestScheduleManagementTimeZonesWithEmptyZoneInfo(t *testing.T) {
+	t.Setenv("ZONEINFO", t.TempDir())
+	for _, zone := range []string{"America/Boise", "Etc/UTC"} {
+		f := scheduleFake()
+		var out bytes.Buffer
+		inv := scheduleInvocation(t, "set", "--schedule", "s1", "--tz", zone)
+		if err := manageSchedules(t.Context(), inv, f, &out); err != nil {
+			t.Fatalf("schedule time zone %q: %v", zone, err)
+		}
+		if f.override.TZ == nil || *f.override.TZ != zone {
+			t.Fatalf("time zone override = %v, want %q", f.override.TZ, zone)
+		}
+	}
+}
+
 func TestScheduleManagementUsesAuthoritativeUpcomingAndRunReceipt(t *testing.T) {
 	f := scheduleFake()
 	var out bytes.Buffer
@@ -145,6 +160,22 @@ func TestScheduleManagementRejectsInvalidSelectionsAndEdits(t *testing.T) {
 		var usage *clisurface.UsageError
 		if !errors.As(err, &usage) || len(f.calls) > 0 || out.Len() > 0 {
 			t.Fatalf("invalid edit %v: %v %v %s", args, err, f.calls, out.String())
+		}
+	}
+}
+
+func TestScheduleManagementCronErrorNamesFieldAndExample(t *testing.T) {
+	inv := scheduleInvocation(t, "set", "--schedule", "s1", "--cron", "61 * * * *")
+	f := scheduleFake()
+	var out bytes.Buffer
+	err := manageSchedules(t.Context(), inv, f, &out)
+	var usage *clisurface.UsageError
+	if !errors.As(err, &usage) || len(f.calls) > 0 {
+		t.Fatalf("invalid cron: error=%v calls=%v", err, f.calls)
+	}
+	for _, want := range []string{"cron", "minute field", "0-59", `example: "0 * * * *"`} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error = %q, want %q", err, want)
 		}
 	}
 }
