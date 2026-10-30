@@ -41,11 +41,14 @@ credential model in `docs/auth.md`, and the decision log
 | Rule | Owner | Guard test |
 | --- | --- | --- |
 | Trust classes and named sets | `internal/runspec/provenance.go`: `TrustClass`, `TrustSet` (`DefaultBranchWorkTrust`, `AppRepositoryTrust`, `AppDeliveryTrust`, `GitHubEventTrust`, `AllTrust`); SQL renders them via `trustIn` in `claim_query.go` | `trust_matrix_test.go`: `TestTrustMatrix` |
-| Verified default-branch work | `Provenance.DefaultBranchWork` (Go) and its SQL twin `claimSQL.defaultBranchWork` (`claim_query.go`) | `trust_sql_test.go`: `TestDefaultBranchWorkSQLAgreesWithGo` |
+| Verified default-branch work | intake-sealed `Provenance.DefaultBranchWork`; `claimSQL.defaultBranchWork` reads the stored fact | `trust_sql_test.go`: `TestDefaultBranchWorkSQLAgreesWithGo` |
 | Sealed provenance | `internal/runspec/seal.go`: `SealRequest`; store side `intake_provenance.go`: `sealProvenanceTx`, `identityTx` | `internal/runspec/provenance_test.go`: `TestProvenanceRoundTripsAndRefusesForgedSeals`; `internal/runspec/spec_test.go`: `TestSealRefusals` |
-| Fetched repository (run-now, console, unlocked schedules) | `internal/controller/intake_source.go`: `selectFetchedSource`; `run_spec.go`: `FetchedRepository`; `intake_provenance.go`: `fetchedRepositoryTx`; `Provenance.FetchedFrom` | `internal/controller/intake_source_test.go`: `TestFetchedGitHubRepositoryFollowsSourceSelection` |
+| Proven repository (App, Actions, fetched and compared source) | `internal/controller/intake_source.go`: `selectFetchedSource`; `run_spec.go`: `FetchedRepository`; `intake_provenance.go`: `fetchedRepositoryTx`; `Provenance.FetchedFrom` | `internal/controller/intake_source_test.go`: `TestFetchedGitHubRepositoryFollowsSourceSelection` |
 | Source selection leaves the shared temporary parent unchanged | `internal/source/select.go`: `readCommitFile` prepares only an explicit workspace; `fssecure.MkdirPrivateTemp` owns the private child | `internal/source/select_temp_unix_test.go`: `TestSelectLeavesTheSharedTemporaryParentUnchanged` |
 | Remote configuration size is checked without downloading oversized blobs | `internal/source/select.go`: `readCommitFile` filters blobs and blocks transports during local inspection | `internal/source/select_size_test.go`: `TestTenantSelectionNeverDownloadsAnOversizedConfiguration`, `TestTenantSelectionAllowsAnAbsentConfiguration`; `select_size_unix_test.go`: `TestTenantSelectionRefusesOversizedConfigurationBehindSymlink` |
+| Sealed host boundary | `claimant_facts.go` classifies at claim; `Capability.Host` persists it; `run_trust.go`: `checkRunHost` | `proven_repository_claim_test.go`; `proven_repository_host_test.go`; `claimant_facts_test.go`: `TestClaimantReadsSealedHostFacts` |
+| Job source credentials | `source_release.go` reads sealed proof and compare; `controller/intake_source_credential.go` performs the intake compare | `source_release_test.go`: `TestSourceReleaseRequiresSealedRepositoryAndIntakeCompare`; `internal/controller/intake_source_credential_test.go` |
+| Latest pipeline references | `latest_run.go`, `binding_execution.go`; sealed reference `FromAnyRun` opt-out | `latest_run_test.go`; `binding_pipeline_test.go` |
 | OIDC claims | `Provenance.OIDC`; `internal/oidcissuer/issuer.go`: `Claims`, `runnerEnvironment`; `authority_oidc.go`: `Tenant.MintOIDCToken` | `oidc_repository_test.go`: `TestOIDCRepositoryClaimReadsSealedProvenance`; `pool_launcher_test.go`: `TestLauncherPodOIDCIsFresh` |
 | OIDC without an issuer preserves `not_found` and explains controller setup | `internal/nodehost/process_service_reads.go`: `ProcessServices.oidc` | `internal/nodehost/routes_oidc_test.go`: `TestOIDCWithoutIssuerExplainsControllerSetup` |
 
@@ -54,7 +57,7 @@ credential model in `docs/auth.md`, and the decision log
 | Rule | Owner | Guard test |
 | --- | --- | --- |
 | One claim predicate (decision 44) | `claim_query.go`: `claimSQL.predicate`, `claimSQL.query`, `claimQueryTx` | `claim_predicate_regression_test.go`; `claim_search_bound_test.go`: `TestClaimSearchPreservesTeamFairShareBeforeArrival` |
-| Fresh vs persistent host | `claimant_facts.go`: `claimantFactsTx` sets `FreshHost`; SQL `claimSQL.freshPod` | `claim_trust_test.go`: `TestVerifiedWorkOnAPersistentHostWritesItsHostScope`; `claimant_facts_test.go` |
+| Fresh vs persistent host | `claimant_facts.go`: `claimantFactsTx` classifies once; `Capability.Host` seals freshness and cache scope; SQL `claimSQL.freshPod` | `claim_trust_test.go`: `TestVerifiedWorkOnAPersistentHostWritesItsHostScope`; `claimant_facts_test.go` |
 | Pools and reserved secrets | `controller_pools.go`: `claimSQL.poolSatisfies`; `claimSQL.poolTrust` | `claim_trust_test.go`: `TestReservedSecretPoolTakesOnlyVerifiedDefaultBranchWork`; `pool_launcher_test.go` |
 | Ranking and preference holds (decision 52) | `claim_query.go`: `rankingHold`, `firstPreferenceHold`, `placementCTEs` | `claim_ranking_test.go` |
 | Team holds (operator, fraud) | `credit_reversals.go`: `teamHoldTx`, `Tenant.HoldByOperator` | `hold_stop_test.go` |

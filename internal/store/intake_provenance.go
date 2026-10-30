@@ -55,9 +55,9 @@ func sealProvenanceTx(ctx context.Context, tx *storeTx, team Team, request Intak
 // fetchedRepositoryTx names the GitHub repository the controller itself fetches
 // this run's code from through the team's App installation, at a commit a
 // signed delivery named or a branch head the App resolved: a delivery's
-// repository, an unlocked App-bound schedule's (fires, overrides and run-now),
-// or a remote branch run the controller checked. Zero when the submitter
-// supplies the code, the repository claim or an arbitrary commit.
+// repository, an App-bound schedule's, or remote code the App selected and an
+// intake compare check proved reachable. Zero when the submitter supplies the
+// code or the selected commit has no repository proof.
 func fetchedRepositoryTx(tx *storeTx, request IntakeRequest, input runspec.Request) FetchedRepository {
 	// safety: the ref is a delivery's verified ref or a schedule's server-resolved
 	// branch, claimed only when the run's code ran at that head.
@@ -72,8 +72,8 @@ func fetchedRepositoryTx(tx *storeTx, request IntakeRequest, input runspec.Reque
 	case input.Origin == runspec.OriginApp && request.VerifiedDeliveryID != "" && input.Git.App.Set:
 		return head(input.Git.App.Value.RepositoryID, input.Git.App.Value.Repository)
 	case input.Origin == runspec.OriginSchedule && tx.scheduleAdmission != nil && tx.scheduleAdmission.authority() == request.Authority:
-		// safety: a schedule locked to a commit runs a SHA GitHub may serve from a
-		// fork, not a branch head the App resolved.
+		// safety: a locked commit needs compare proof because GitHub may serve
+		// objects from another repository in the fork network.
 		if s := tx.scheduleAdmission.schedule; s.GitHubInstallationID > 0 && s.LockedRef == "" {
 			// safety: the fire-time App lookup that proved the id reported the name, as for a verified fire.
 			return head(s.GitHubRepositoryID, request.Request.Git.RepositoryName.Value)

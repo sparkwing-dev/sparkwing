@@ -361,29 +361,29 @@ type Concurrency struct {
 // SecretArgs is unset before describe. Display must then redact every requested value.
 type Request struct {
 	// SourceCredentialVerified carries a controller's schedule lookup into intake; it never crosses the wire or persists.
-	SourceCredentialVerified bool `json:"-"`
-	LocalForeground   bool                  `json:"local_foreground,omitempty"`
-	Burst             *BurstPlacement       `json:"burst,omitempty"`
-	Version           int                   `json:"version"`
-	Team              string                `json:"team"`
-	Pipeline          string                `json:"pipeline"`
-	Mode              IntakeMode            `json:"mode"`
-	Origin            Origin                `json:"origin"`
-	Dispatch          Dispatch              `json:"dispatch"`
-	Reason            string                `json:"reason,omitempty"`
-	RequestID         string                `json:"request_id,omitempty"`
-	LocalSecretNames  []string              `json:"local_secret_names,omitempty"`
-	SecretArgs        Optional[[]string]    `json:"secret_args"`
-	RequestedArgs     map[string]string     `json:"requested_args"`
-	Git               Git                   `json:"git"`
-	Actor             Actor                 `json:"actor"`
-	PullRequest       Optional[PullRequest] `json:"pull_request"`
-	Source            Source                `json:"source"`
-	Lineage           Lineage               `json:"lineage"`
-	EnvironmentSource EnvironmentSource     `json:"environment_source,omitempty"`
-	Env               EnvSnapshot           `json:"env"`
-	Options           Options               `json:"options"`
-	ExecutionLocation string                `json:"execution_location"`
+	SourceCredentialVerified bool                  `json:"-"`
+	LocalForeground          bool                  `json:"local_foreground,omitempty"`
+	Burst                    *BurstPlacement       `json:"burst,omitempty"`
+	Version                  int                   `json:"version"`
+	Team                     string                `json:"team"`
+	Pipeline                 string                `json:"pipeline"`
+	Mode                     IntakeMode            `json:"mode"`
+	Origin                   Origin                `json:"origin"`
+	Dispatch                 Dispatch              `json:"dispatch"`
+	Reason                   string                `json:"reason,omitempty"`
+	RequestID                string                `json:"request_id,omitempty"`
+	LocalSecretNames         []string              `json:"local_secret_names,omitempty"`
+	SecretArgs               Optional[[]string]    `json:"secret_args"`
+	RequestedArgs            map[string]string     `json:"requested_args"`
+	Git                      Git                   `json:"git"`
+	Actor                    Actor                 `json:"actor"`
+	PullRequest              Optional[PullRequest] `json:"pull_request"`
+	Source                   Source                `json:"source"`
+	Lineage                  Lineage               `json:"lineage"`
+	EnvironmentSource        EnvironmentSource     `json:"environment_source,omitempty"`
+	Env                      EnvSnapshot           `json:"env"`
+	Options                  Options               `json:"options"`
+	ExecutionLocation        string                `json:"execution_location"`
 	// OriginMachine names the personal machine whose credential intake verified for the submitter; requests cannot set it.
 	OriginMachine string `json:"origin_machine,omitempty"`
 }

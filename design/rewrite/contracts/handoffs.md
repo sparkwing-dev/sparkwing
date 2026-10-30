@@ -1160,3 +1160,48 @@ refusals are final.
 ## 2026-10-29 Amendment (lead, for Korey to ratify): log lifecycle rules are a startup warning
 
 - Amends c1-data.md's retention rule and the frozen architecture §4.4 ("lifecycle rules are checked at boot"; the code had drifted to a check on every log-segment signing). Sparkwing deletes log objects at their class age itself, so a bucket lifecycle rule is only a backstop. Signing a log segment never reads bucket lifecycle rules and never refuses a class without one. An S3 controller reads the rules once at startup and logs a warning for each retention class without a rule at least that long; it does not refuse to start, and `s3:GetLifecycleConfiguration` is optional. Continuous verification of the rule belongs to external operator checks, as network policy does under decision 71.
+
+## 2026-10-30 Korey approved: one sealed repository proof and host classification
+
+This supersedes consumer-specific repository and host trust rules in decisions
+68, 70 and 72. A run proves its repository because Sparkwing selects its code
+through the team's GitHub App or verifies Actions intake. Intake seals that
+repository and verified default-branch eligibility in `Provenance`. A raw commit
+or locked schedule needs an intake compare check plus App source selection to
+establish fetched repository proof. It receives no resolved-head OIDC claims.
+Retries and exact-revision children inherit their seal. Changed-revision and
+cross-repository children prove nothing.
+
+Claim issuance seals cloud, self-hosted, personal or here host kind, OIDC host
+facts and cache scope in award authority. Delegation copies it. Secret release,
+OIDC, source credentials and cache scope consume that seal, so later runner
+labels, enrollment or team settings cannot rewrite an active award's trust.
+
+- Personal machines and here hosts never claim proven-repository work. This also
+  applies to run-now and burst `machines` steps.
+- `--repos` runners accept only proven-repository work. Asserted remote names do
+  not establish eligibility.
+- Every job source credential, including a host-wide credential and an App token,
+  requires the matching repository proof and an intake-time GitHub compare check.
+  Compare the selected commit against its source branch or tag, or the default
+  branch for a raw SHA. Accept `ahead` or `identical`. Controller-owned intake
+  credentials remain separate from job release.
+- Latest pipeline references and direct reference-output reads use verified
+  default-branch runs by default and exclude publication. `sw.FromAnyRun()` opts
+  out explicitly. A job must declare the opt-out in its sealed reference before
+  an HTTP request can use it. TypeScript exposes `{fromAnyRun: true}`.
+- The matrix includes personal and here execution for every trust consumer.
+  Regression tests reproduce the personal claim, asserted scoped-runner claim,
+  unchecked credential and unverified latest-output failures on the old rules.
+
+Schema baseline 27 adds the checked host-kind projection directly. The sealed
+repository facts use the existing request envelope. There are no forward
+migrations. The lead wipes pre-release staging and production stores separately.
+No deployment is part of this change.
+
+Enrollment question for the lead: the current API requires nonempty repository
+patterns for every personal machine. Combining the two approved claim rules
+therefore leaves enrolled personal machines eligible for no work. The proposed
+follow-up is personal enrollment without `--repos`, still limited to the owner's
+asserted runs. This is awaiting the lead's decision. Tests of asserted personal
+work use an unscoped authority fixture and do not claim the API can enroll one.

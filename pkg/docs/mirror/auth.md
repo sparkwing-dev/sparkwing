@@ -966,3 +966,14 @@ they can establish recovery behavior. Client fixtures do not establish config
 hot reload, hourly parking or automatic resumption.
 
 <!-- design:end -->
+
+## Sealed execution trust
+
+Intake seals the proven repository and verified default-branch fact in the
+request. Claim issuance seals the host kind and cache scope in award authority.
+Secret release, OIDC, source credentials, cache writes, latest-output reads and
+repository-scoped runners read those facts. A submitted repository name never
+establishes proof. Personal machines and here hosts cannot claim proven runs.
+Job credentials additionally require the GitHub compare result sealed at intake.
+Latest pipeline references select verified default-branch work unless the
+pipeline declares `sw.FromAnyRun()`.
