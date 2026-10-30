@@ -45,6 +45,28 @@ Version freshness excludes `testdata` fixture modules, matching the committed-mo
 `push-tag` declares the `destructive` and `prod` risk labels, so only the
 second command tags and pushes. The tag push starts the hosted release below.
 
+### After a stable tag
+
+Once the tag is available through the Go module proxy, update main's release
+pins from an attached branch whose HEAD is past that tag:
+
+```bash
+SPARKWING_HOME="$(mktemp -d)" sparkwing run pre-release --sw-start-at sparkwing-pin --sw-stop-at sparkwing-pin
+```
+
+The step bumps `pkg/scaffold/version.go`, `.apidiff/pkg_scaffold.txt`,
+`.sparkwing/go.mod`, and `testdata/k8s-e2e/repo/.sparkwing/go.mod` together,
+tidies both modules, adds a changelog entry, syncs the docs mirror, and commits
+the result. Review that commit and deliver it to main before the next cut.
+Run the follow-up even if hosted artifact publication failed, because the
+module proxy can already serve the immutable tag.
+
+The local release pipeline ends at the tag push because the new module must
+exist before the pins can resolve it. Pre-release leaves the tag's own commit
+unchanged because a release cannot depend on itself before publication.
+Hosted checks use detached checkouts and report stale pins rather than
+committing them. They cannot perform this follow-up for main.
+
 ### Release build and publication
 
 The hosted release builds the dashboard once and shares it with six target
@@ -231,8 +253,8 @@ file. Other syntax and workflow checks remain active.
   0.11 s. `gate`
   and `pre-release` are the heavier classes: they carry no performance budget
   and run asynchronously, on demand and in hosted CI. The broad gate declares
-  a 50-minute execution deadline, which gives the dispatcher 51 minutes with
-  its drain margin, inside a 60-minute hosted job. Pre-release declares a
+  a 70-minute execution deadline, which gives the dispatcher 71 minutes with
+  its drain margin, inside an 80-minute hosted job. Pre-release declares a
   120-minute execution deadline inside a 130-minute hosted job, leaving ten
   minutes beyond the node deadline for setup and cleanup.
   These are liveness boundaries, not claims that either check normally takes
@@ -278,7 +300,7 @@ file. Other syntax and workflow checks remain active.
   with TestRefillModel alone at over a minute under race, so the shards run
   the short class (`-test.short`); the tests that guard themselves as slow keep
   running without race in `gate` and on PostgreSQL in `store-postgres`. Later checks remain under the 120-minute node deadline and a
-  130-minute hosted job deadline. The hosted `gate` job keeps its 60-minute
+  130-minute hosted job deadline. The hosted `gate` job keeps its 80-minute
   deadline.
   A Go step's own parallelism depends on who else holds the
   box. A shared host bounds each step to `(cpus-1)/2`, so one gate cannot
@@ -293,7 +315,12 @@ file. Other syntax and workflow checks remain active.
   f314ad61) finished full Go in 23m18s before PostgreSQL began. Three measured
   PostgreSQL store runs took 16m24s, 16m45s and 20m15s. Those two serial
   checks alone project to 39m42s–43m33s, excluding build, lint and cleanup.
-  Fifty minutes is a budget to verify, not a measured passing run.
+  Hosted source `0f118be32` took 35m32s before PostgreSQL started: 31m20s in
+  the full Go step after build and setup. The 50-minute node deadline then
+  cancelled PostgreSQL after 14m31s, before its 25-minute Go timeout. The
+  server was still writing WAL near cancellation. The 70-minute node deadline
+  allows that measured prefix, the full 30-minute PostgreSQL limit, and
+  cleanup. A passing hosted total at this deadline remains unmeasured.
   That boundary remains a liveness limit rather than a completion
   guarantee. That publication path
   stops at the parent runner rather than

@@ -21,10 +21,9 @@ import (
 
 type Gate struct{ sparkwing.Base }
 
-// safety: store changes add race and Postgres suites after the full test chain.
-// Fifty minutes bounds that workload while leaving the hosted 60-minute job
-// time to cancel children and publish diagnostics.
-const gateRunTimeout = 50 * time.Minute
+// safety: the hosted full-test chain can take 36 minutes before the 30-minute
+// Postgres tail. The hosted job keeps ten more minutes for setup and diagnostics.
+const gateRunTimeout = 70 * time.Minute
 
 func (Gate) ShortHelp() string {
 	return "Broad verification on demand and in hosted CI: Go gates, frontend checks, source-policy sweeps, contract gates, and docs sync"
