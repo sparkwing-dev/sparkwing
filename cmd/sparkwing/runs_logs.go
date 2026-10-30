@@ -116,7 +116,13 @@ func observeRunLogs(ctx context.Context, inv clisurface.Invocation, reader contr
 			}
 		}
 		if !page.Truncated && (!inv.Bool("follow") || page.Complete) {
-			return writeUnloggedFailures(ctx, inv, runs, query.Job, out)
+			if err := writeUnloggedFailures(ctx, inv, runs, query.Job, out); err != nil {
+				return err
+			}
+			if !page.Complete {
+				return fmt.Errorf("logs incomplete: final log segments are still pending; use --follow to wait for the remaining output")
+			}
+			return nil
 		}
 		query.Cursor = page.NextCursor
 		seen[query.Cursor] = true

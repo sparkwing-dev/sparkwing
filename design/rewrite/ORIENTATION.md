@@ -138,10 +138,18 @@ credential model in `docs/auth.md`, and the decision log
 | --- | --- | --- |
 | Local repository memo lookups miss after scope checks; publication is skipped | `blob_lookup.go`: `lookupMemoTx`; `internal/nodehost/executor_memo.go`: `saveMemo` | `blob_local_cache_test.go`: `TestLocalDepcacheRoundTrip`; `internal/nodehost/native_memo_test.go`: `TestNativeExecutorLocalRepositoryMemoRunsBody`; `internal/nodehost/executor_memo_test.go`: `TestExecutorLocalRepositorySkipsMemoPublication` |
 
+### Metrics
+
+| Rule | Owner | Guard test |
+| --- | --- | --- |
+| Completed Cloud jobs with no resource samples report metrics unavailable; stored points and exhausted pages stay readable | `internal/controller/metrics.go`: `handleGetJobMetrics` | `TestMetricsHTTPCompletedCloudJobWithoutSamples` |
+
 ### Logs
 
 | Rule | Owner | Guard test |
 | --- | --- | --- |
+| CLI snapshots drain available pages and report pending final logs with exit 3 | `cmd/sparkwing/runs_logs.go`: `observeRunLogs` | `TestRunLogsReportsUnsealedSnapshotAfterDrainingPages` |
+| Paged reads of capped logs report truncation and name the 64 MiB attempt cap | `internal/controller/log_pages.go`: `appendSubjectLines` | `TestPersistedLogByteCapNamesTheTruncationLimit` |
 | Bound node commands flush final logs at report, retry or release, within the attempt's tail grace | `internal/nodehost/assembly_native_logs.go`: `logHostStore.TransitionNode` reads the command payload | `internal/nodehost/assembly_native_logs_test.go`: `TestStalledLogsDoNotDelayLifecycleCommits`, `TestLogLifecycleDetachesFlush` |
 | Runner frames and lifecycle failures render as text; retries persist the next attempt ordinal | `cmd/sparkwing/runs_logs.go`: `writeLogRecord`, `eventDetail`; `internal/store/node_state.go`: `transitionNodeStateTx` | `TestRunLogsRendersPersistedRunnerAndRetryPayloads`; `TestTransitionApplicationRetryKeepsClaimAndOrdinal` |
 

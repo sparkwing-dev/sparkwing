@@ -259,7 +259,7 @@ Print a run's logs
 
 Read job-attempt and trigger, plan or eval logs through the controller. --job selects a job. --tree includes descendants. --events-only and --no-events select lifecycle events or output.
 
---follow consumes every available page, then waits for new records until final log segments are complete. An incomplete or interrupted observation exits 3. A run that does not exist or that the credential cannot read exits 4; stop polling on 4.
+Every read consumes all available pages. Without --follow, a snapshot with pending final log segments reports logs incomplete and exits 3. --follow waits for new records until final log segments are complete. An interrupted observation exits 3. A run that does not exist or that the credential cannot read exits 4; stop polling on 4.
 
 JSON emits tagged log records. Plain emits log lines. Use --grep without --run to search across runs with the same filters and pagination as runs grep.
 

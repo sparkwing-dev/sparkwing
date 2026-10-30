@@ -107,6 +107,16 @@ func TestPersistedLogPageUsesCanonicalSubjectAndCursor(t *testing.T) {
 	}
 }
 
+func TestPersistedLogByteCapNamesTheTruncationLimit(t *testing.T) {
+	logs, _, st := committedDashboardLogs(t, []byte("last retained line\n[sparkwing] truncated: the node log reached its 64 MiB cap\n"))
+	engineSQL(t, st, `UPDATE log_streams SET completeness='incomplete',incomplete_reason='byte cap' WHERE team='a' AND run_id='run'`)
+	reader, _ := memberLogSearchReader(t, st, logs.objs.(blob.ObjectBackend))
+	_, err := reader.ReadLogs(t.Context(), "run", controllerwire.LogQuery{Job: "job", NoEvents: true})
+	if err == nil || !strings.Contains(err.Error(), "truncated") || !strings.Contains(err.Error(), "64 MiB") {
+		t.Fatalf("missing public truncation limit: %v", err)
+	}
+}
+
 func TestPersistedLogPageSelectionsAndContinuation(t *testing.T) {
 	var body strings.Builder
 	for i := 1; i <= logPageRecords+7; i++ {

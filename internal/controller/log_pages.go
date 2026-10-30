@@ -370,6 +370,9 @@ func appendSubjectLines(reader segmentLogs, subject blob.LogSubject, q controlle
 	if err != nil {
 		return err
 	}
+	if result.IncompleteReason == "byte cap" {
+		return &apierr.Error{Code: apierr.Conflict, Message: "logs truncated: the node log reached its 64 MiB cap"}
+	}
 	if result.IncompleteReason != "" {
 		return &apierr.Error{Code: apierr.IntegrityFailure, Message: "logs incomplete: " + result.IncompleteReason}
 	}
