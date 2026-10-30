@@ -304,3 +304,47 @@ func TestRunLogsRendersEventPayloadsAsText(t *testing.T) {
 		}
 	}
 }
+
+func TestRunLogsRendersPersistedRunnerAndRetryPayloads(t *testing.T) {
+	frame := `{"ts":"2026-10-30T17:35:03Z","level":"info","step":"run","event":"exec_line","msg":"raw-token=***"}`
+	retry := `{"attempt":2,"Outcome":"failed","Reason":"sdk_error","MaskedError":"command failed (exit 1)","ExitCode":null,"Failure":{"job":"greet","stage":"action","error":{"code":"sdk_error","message":"command failed (exit 1)"}}}`
+	reader := fakeLogReader{read: func(context.Context, string, controllerwire.LogQuery) (controllerwire.LogPage, error) {
+		return controllerwire.LogPage{Complete: true, Records: []controllerwire.LogRecord{
+			jobLogRecord("r1", frame),
+			jobLogRecord("r1", `{"ts":"2026-10-30T17:35:04Z","level":"error","step":"run","event":"step_end","msg":"run","attrs":{"outcome":"failed","error":"command failed (exit 1)","cancelled_steps":["other"]}}`),
+			{RunID: "r1", Event: "job_retrying", JobID: "greet", LineNo: 4, Line: retry},
+		}}, nil
+	}}
+	for _, format := range []string{"plain", "pretty", "json"} {
+		t.Run(format, func(t *testing.T) {
+			var out bytes.Buffer
+			if err := observeRunLogs(t.Context(), logInvocation(t, "logs", "--run", "r1", "-o", format), reader, nil, &out, &out, nil); err != nil {
+				t.Fatal(err)
+			}
+			if format == "json" {
+				var record controllerwire.LogRecord
+				if err := json.NewDecoder(&out).Decode(&record); err != nil || record.Line != frame {
+					t.Fatalf("JSON changed runner frame: %+v, %v", record, err)
+				}
+				return
+			}
+			for _, want := range []string{"raw-token=***\n", "run: cancelled_steps=other error=command failed (exit 1) outcome=failed\n", "attempt=2 reason=sdk_error error=command failed (exit 1)\n"} {
+				if !strings.Contains(out.String(), want) {
+					t.Errorf("missing %q in:\n%s", want, &out)
+				}
+			}
+			if strings.Contains(out.String(), "{") {
+				t.Fatalf("raw runner or transition JSON in:\n%s", &out)
+			}
+		})
+	}
+}
+
+func TestRunLogsPreservesApplicationJSON(t *testing.T) {
+	for _, line := range []string{`{"answer":42}`, `{"ts":"application time","msg":"application message"}`} {
+		var out bytes.Buffer
+		if err := writeLogRecord(&out, jobLogRecord("r1", line), "plain", false); err != nil || out.String() != line+"\n" {
+			t.Fatalf("application output changed: %q, %v", &out, err)
+		}
+	}
+}

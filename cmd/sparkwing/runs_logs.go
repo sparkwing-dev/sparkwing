@@ -15,6 +15,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
 	"github.com/sparkwing-dev/sparkwing/internal/controller/client"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
+	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/pkg/color"
 )
 
@@ -177,6 +178,16 @@ func writeLogRecord(out io.Writer, record controllerwire.LogRecord, format strin
 	line := record.Line
 	if record.Event != "" {
 		line = eventDetail(record.Line)
+	} else {
+		var frame nodeproto.FrameLog
+		if json.Unmarshal([]byte(line), &frame) == nil {
+			if _, err := time.Parse(time.RFC3339Nano, frame.TS); err == nil {
+				line = frame.Message
+				if detail := eventDetail(string(frame.Attrs)); detail != "" {
+					line += ": " + detail
+				}
+			}
+		}
 	}
 	if format == "plain" && !search {
 		if record.Event != "" {
@@ -232,6 +243,15 @@ func eventDetail(payload string) string {
 	if reason, ok := fields["reason"]; ok && len(fields) == 1 {
 		return eventValue(reason)
 	}
+	if _, result := fields["Outcome"]; result {
+		var parts []string
+		for _, field := range []struct{ key, label string }{{"attempt", "attempt"}, {"Reason", "reason"}, {"MaskedError", "error"}, {"ExitCode", "exit_code"}} {
+			if value := fields[field.key]; len(value) != 0 && string(value) != "null" && string(value) != `""` {
+				parts = append(parts, field.label+"="+eventValue(value))
+			}
+		}
+		return strings.Join(parts, " ")
+	}
 	keys := slices.Sorted(maps.Keys(fields))
 	parts := make([]string, 0, len(keys))
 	for _, key := range keys {
@@ -244,6 +264,17 @@ func eventValue(raw json.RawMessage) string {
 	var text string
 	if json.Unmarshal(raw, &text) == nil {
 		return text
+	}
+	if len(raw) > 0 && raw[0] == '{' {
+		return eventDetail(string(raw))
+	}
+	var values []json.RawMessage
+	if json.Unmarshal(raw, &values) == nil {
+		parts := make([]string, 0, len(values))
+		for _, value := range values {
+			parts = append(parts, eventValue(value))
+		}
+		return strings.Join(parts, ",")
 	}
 	return string(raw)
 }
