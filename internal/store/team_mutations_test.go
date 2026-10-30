@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"strings"
 	"sync"
 	"testing"
 	"testing/quick"
@@ -105,6 +106,19 @@ func TestTeamMutationsCommitStoreTimeAndInvitationReplay(t *testing.T) {
 	}
 	first, err := tenant.CreateAuthorizedInvitation(t.Context(), a, "  GUEST@example.test ", RoleEditor, "stable")
 	if err != nil {
+		t.Fatal(err)
+	}
+	if first.Warning != "" {
+		t.Fatalf("invitation below capacity warns: %s", first.Warning)
+	}
+	if _, err := s.SetSignUpLimits(t.Context(), SignUpLimits{FreeTeamMembers: 1}); err != nil {
+		t.Fatal(err)
+	}
+	replay, err := tenant.CreateAuthorizedInvitation(t.Context(), a, first.Email, first.Role, "stable")
+	if err != nil || replay.ID != first.ID || !strings.Contains(replay.Warning, "1 of 1 members") {
+		t.Fatalf("replay at capacity=%+v: %v", replay, err)
+	}
+	if _, err := s.SetSignUpLimits(t.Context(), DefaultSignUpLimits()); err != nil {
 		t.Fatal(err)
 	}
 	now = now.Add(time.Hour)

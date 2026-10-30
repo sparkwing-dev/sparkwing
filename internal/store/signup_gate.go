@@ -136,7 +136,7 @@ var ErrWaitlisted = errors.New("store: this account is on the sign-up waitlist")
 
 // ErrTeamFull refuses a member past the limit of a team that has bought no
 // credits.
-var ErrTeamFull = errors.New("store: this team holds as many members as a team without purchased credits may")
+var ErrTeamFull = errors.New("store: free team member limit reached")
 
 // safety: the gate row is seeded here, so every sign-up's SELECT ... FOR UPDATE
 // locks a row that exists; two first sign-ups racing to create it would

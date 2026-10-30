@@ -106,13 +106,24 @@ func (t *Tenant) CreateAuthorizedInvitation(ctx context.Context, a capability.Au
 				return authorityError(apierr.Conflict, "idempotency key names another invitation")
 			}
 			out.CreatedAt, out.ExpiresAt = time.Unix(0, created).UTC(), time.Unix(0, expires).UTC()
-			return nil
+		} else if !errors.Is(err, sql.ErrNoRows) {
+			return err
+		} else {
+			out, err = t.createInvitationTx(ctx, tx, p.Capability.Subject.ID, email, role, id, tx.now(ctx))
+			if err != nil {
+				return err
+			}
 		}
-		if !errors.Is(err, sql.ErrNoRows) {
+		gate, err := scanSignUpGate(tx.QueryRowContext(ctx, signUpGateSelect))
+		if err != nil {
 			return err
 		}
-		out, err = t.createInvitationTx(ctx, tx, p.Capability.Subject.ID, email, role, id, tx.now(ctx))
-		return err
+		if err := checkTeamRoomTx(ctx, tx, t.team, gate.Limits.FreeTeamMembers); errors.Is(err, ErrTeamFull) {
+			out.Warning = "Invitation created. Membership is checked when accepted. " + err.Error()
+		} else if err != nil {
+			return err
+		}
+		return nil
 	})
 	if err != nil {
 		return Invitation{}, err
