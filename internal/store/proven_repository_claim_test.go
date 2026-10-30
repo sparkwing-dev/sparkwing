@@ -2,8 +2,11 @@ package store
 
 import (
 	"encoding/json"
+	"errors"
+	"strings"
 	"testing"
 
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/pkg/match"
@@ -81,6 +84,10 @@ func TestPersonalMachinesNeverClaimProvenRepositoryRuns(t *testing.T) {
 						if err == nil {
 							t.Fatalf("personal machine claimed proven repository work: %+v", claim)
 						}
+						var denied *apierr.Error
+						if named && (!errors.As(err, &denied) || denied.Code != apierr.Forbidden || denied.Message != provenRepositoryHostReason) {
+							t.Fatalf("named claim hid host trust refusal: %v", err)
+						}
 						return
 					}
 					if err != nil || claim.NodeID != "job" {
@@ -122,6 +129,10 @@ func TestRepositoryScopedRunnerClaimsOnlyProvenRepositoryRuns(t *testing.T) {
 					if !proven {
 						if err == nil {
 							t.Fatalf("repository scope accepted caller-asserted code: %+v", claim)
+						}
+						var denied *apierr.Error
+						if named && (!errors.As(err, &denied) || denied.Code != apierr.Forbidden || !strings.Contains(denied.Message, "repository-proven")) {
+							t.Fatalf("named claim hid repository proof refusal: %v", err)
 						}
 						return
 					}

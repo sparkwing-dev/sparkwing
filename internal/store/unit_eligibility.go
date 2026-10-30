@@ -7,7 +7,6 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/pkg/match"
 )
 
@@ -84,11 +83,24 @@ func explainUnitPlacementTx(ctx context.Context, tx *storeTx, team Team, unit Un
 		e.failed, e.refused = stepMatch, authorityError(apierr.Forbidden, "work does not match claimant: "+verdict.String())
 		return e, nil
 	}
-	facts, err := claimantFactsTx(ctx, tx, chain, runspec.Request{})
+	facts, err := claimFactsTx(ctx, tx, claimant)
 	if err != nil {
 		return e, err
 	}
-	if reason, err := claimantTrustRefusalTx(ctx, tx, team, string(unit.RunID), chain[len(chain)-1].principal.Capability, e.launcher, facts.PersistentKubernetes); err != nil || reason != "" {
+	sealed, err := sealedRequestTx(ctx, tx, team, string(unit.RunID))
+	if err != nil {
+		return e, err
+	}
+	proven := sealed.Provenance.ProvenRepository() != ""
+	if proven && !facts.HostKind.AllowsProvenRepository() {
+		e.failed, e.refused = stepTrust, authorityError(apierr.Forbidden, provenRepositoryHostReason)
+		return e, nil
+	}
+	if !proven && facts.ProvenOnly != 0 {
+		e.failed, e.refused = stepTrust, authorityError(apierr.Forbidden, repositoryScopedRunnerReason)
+		return e, nil
+	}
+	if reason, err := claimantTrustRefusalTx(ctx, tx, team, string(unit.RunID), chain[len(chain)-1].principal.Capability, e.launcher, facts.PersistentPod != 0); err != nil || reason != "" {
 		e.failed, e.refused = stepTrust, authorityError(apierr.Forbidden, reason)
 		if reason == freshPodReason {
 			e.failed = stepFreshPod

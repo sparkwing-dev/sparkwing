@@ -308,11 +308,11 @@ func awardCapabilityTx(ctx context.Context, tx *storeTx, spec capability.AwardSp
 		facts.HostKind, facts.FreshHost = capability.HostHere, false
 	}
 	if sealed.Provenance.ProvenRepository() != "" && !facts.HostKind.AllowsProvenRepository() {
-		return capability.Capability{}, authorityError(apierr.Forbidden, "personal machines and here hosts cannot execute repository-proven runs; use a shared runner or Sparkwing Cloud")
+		return capability.Capability{}, authorityError(apierr.Forbidden, provenRepositoryHostReason)
 	}
 	for _, node := range chain {
 		if node.principal.Capability.Unit == "" && node.principal.Capability.Repositories != nil && sealed.Provenance.ProvenRepository() == "" {
-			return capability.Capability{}, authorityError(apierr.Forbidden, "repository-scoped runners require repository-proven code")
+			return capability.Capability{}, authorityError(apierr.Forbidden, repositoryScopedRunnerReason)
 		}
 	}
 	if reason, err := claimantTrustRefusalTx(ctx, tx, Team(row.team), row.run, chain[len(chain)-1].principal.Capability, facts.Launcher, facts.PersistentKubernetes); err != nil {

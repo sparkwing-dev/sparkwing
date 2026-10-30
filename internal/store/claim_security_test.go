@@ -278,13 +278,13 @@ func verifiedDefaultRequiresFreshPod(t *testing.T, open func(*testing.T) *Store)
 					indexFixtureUnit(t, s, "a", ref)
 					// safety: a signed main delivery not sealed as a default-branch push is ordinary verified work everywhere.
 					want := runner != "persistent" || source == "asserted-main" || source == "verified-feature" || source == "verified-main"
-					if runner == "launcher" && source == "asserted-main" {
+					if (runner == "launcher" || runner == "persistent" || runner == "plain-machine") && source == "asserted-main" {
 						want = false
 					}
 					if runner == "actions" && (source == "asserted-main" || source == "schedule" || source == "inherited-schedule") {
 						want = false
 					}
-					if runner == "persistent" && !want {
+					if runner == "persistent" && seal.Provenance.DefaultBranchWork() {
 						if err := s.AsOperator().RecordRunnerPoll(ctx, demand); err != nil {
 							t.Fatal(err)
 						}
@@ -311,7 +311,7 @@ func verifiedDefaultRequiresFreshPod(t *testing.T, open func(*testing.T) *Store)
 					if (err == nil) != want {
 						t.Fatalf("claimed run = %q, %v; want eligible=%v", claim.RunID, err, want)
 					}
-					if !want && named && (!refusal(err) || runner == "persistent" && err.Error() != why) {
+					if !want && named && (!refusal(err) || runner == "persistent" && seal.Provenance.DefaultBranchWork() && err.Error() != why) {
 						t.Fatalf("named refusal = %v", err)
 					}
 					if !want && !named && !errors.Is(err, ErrNotFound) {
