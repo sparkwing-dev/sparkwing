@@ -179,3 +179,90 @@ func TestTakeoverStopsWhenADifferentPredecessorAnswers(t *testing.T) {
 		t.Fatalf("successor spawns = %d, want one replacement attempt", got)
 	}
 }
+
+func TestTakeoverWaitsForDrainingPredecessor(t *testing.T) {
+	for _, protocol := range []int{wingd.ProtocolMajor, wingd.ProtocolMajor - 1} {
+		t.Run(fmt.Sprintf("protocol-%d", protocol), func(t *testing.T) {
+			home := shortHome(t)
+			sock, err := wingd.EnsureSocketPath(home)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := os.MkdirAll(filepath.Dir(sock), 0o700); err != nil {
+				t.Fatal(err)
+			}
+			ln, err := wingd.ListenSocket(sock)
+			if err != nil {
+				t.Fatal(err)
+			}
+			done := make(chan error, 1)
+			go func() {
+				for step := range 3 {
+					nc, err := ln.Accept()
+					if err != nil {
+						done <- err
+						return
+					}
+					err = func() error {
+						defer nc.Close()
+						r := newFrameReader(nc)
+						if _, err := r.read(); err != nil {
+							return err
+						}
+						ack := &wingwire.HelloAck{
+							ProtocolMajor: protocol, NativeProtocolMajor: protocol,
+							BinaryVersion: "v0.1.0", BuildIdentity: wingwire.BuildIdentity,
+							Draining: step == 1,
+						}
+						if step == 2 {
+							ack.ProtocolMajor, ack.NativeProtocolMajor = wingd.ProtocolMajor, wingd.ProtocolMajor
+							ack.BinaryVersion = "v9.9.9"
+						}
+						line, err := wingwire.Encode(ack)
+						if err != nil {
+							return err
+						}
+						if _, err := nc.Write(line); err != nil {
+							return err
+						}
+						if step == 0 {
+							request, err := r.read()
+							if err != nil {
+								return err
+							}
+							if _, ok := request.(*wingwire.DrainRequest); !ok {
+								return fmt.Errorf("expected drain request, got %T", request)
+							}
+							line, err := wingwire.Encode(&wingwire.DrainAck{})
+							if err != nil {
+								return err
+							}
+							_, err = nc.Write(line)
+							return err
+						}
+						_, _ = r.read()
+						return nil
+					}()
+					if err != nil {
+						done <- err
+						return
+					}
+				}
+				done <- nil
+			}()
+			t.Cleanup(func() { _ = ln.Close(); <-done })
+			spawns := 0
+			cl, err := EnsureDaemon(t.Context(), Options{
+				Home: home, Version: "v9.9.9",
+				Spawn: func(string, string) error { spawns++; return nil },
+			})
+			if err != nil {
+				t.Fatalf("draining predecessor prevented replacement: %v", err)
+			}
+			defer cl.Close()
+			if spawns != 1 || cl.DaemonVersion() != "v9.9.9" {
+				t.Fatalf("replacement: spawns=%d version=%q", spawns, cl.DaemonVersion())
+			}
+		})
+	}
+}

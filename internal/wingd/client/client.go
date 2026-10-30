@@ -435,6 +435,14 @@ func (cl *Client) connectPaced(ctx context.Context, dialMax time.Duration) error
 			return errors.Join(err, cl.Close())
 		}
 
+		if replacementAttempted && ack.Draining && ack.ProtocolMajor <= wingd.ProtocolMajor {
+			cl.Close()
+			if err := drainWait.wait(ctx, errDaemonDraining); err != nil {
+				return err
+			}
+			continue
+		}
+
 		if ack.ProtocolMajor != wingd.ProtocolMajor {
 			if wingd.ProtocolMajor > ack.ProtocolMajor {
 				if opts.NoTakeover {
