@@ -4,6 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
+	"os"
+	"time"
 )
 
 // MaterializePipeline leases a cached executable or prepares its dependencies and compiles it.
@@ -25,6 +28,7 @@ func MaterializePipeline(ctx context.Context, dir string, options CompileOptions
 	if lease, found, err := entry.Acquire(ctx); err != nil {
 		return nil, false, err
 	} else if found {
+		lease.markUsed()
 		if _, err := fmt.Fprintln(options.Diagnostics, "Cache hit: pipeline binary"); err != nil {
 			return nil, false, errors.Join(err, lease.Release())
 		}
@@ -45,6 +49,7 @@ func MaterializePipeline(ctx context.Context, dir string, options CompileOptions
 	if err != nil {
 		return nil, false, err
 	}
+	lease.markUsed()
 	if !published {
 		if _, err := fmt.Fprintln(options.Diagnostics, "Cache hit: pipeline binary"); err != nil {
 			return nil, false, errors.Join(err, lease.Release())
@@ -72,3 +77,10 @@ func preparePipelineDependencies(ctx context.Context, dir string, options Compil
 
 // key returns the effective build-input key held by the lease.
 func (l *Lease) key() string { return l.entry.key }
+
+func (l *Lease) markUsed() {
+	now := time.Now()
+	if err := os.Chtimes(l.entry.entryDir(), now, now); err != nil {
+		slog.Debug("refresh pipeline cache recency", "error", err)
+	}
+}
