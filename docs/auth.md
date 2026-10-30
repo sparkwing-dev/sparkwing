@@ -769,8 +769,7 @@ Every grant requires `--key`. Reusing it reports the first grant instead of
 granting again. To correct a mistaken free grant, use `--reverses` with its full
 reference, for example `--key qa-correction --reverses admin:qa-1`. Keep `--cents`
 positive. The command records a negative reversal bounded by the grant's remaining
-amount. Paid credits use the payment refund path. One grant is capped at 10,000 cents ($100). Pass `--allow-large` on that
-invocation to allow more. Every command requires `--operator ACCOUNT_ID` with
+amount. Paid credits use the payment refund path. Every command requires `--operator ACCOUNT_ID` with
 your existing account ID and records that identity in the business event and
 operator log. Pod access remains the authority for the command. Audit rows
 exclude free-form reasons and store grant keys as digests.

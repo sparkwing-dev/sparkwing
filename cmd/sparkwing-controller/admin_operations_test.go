@@ -19,11 +19,10 @@ func TestAdminRequiresOperatorIdentity(t *testing.T) {
 	}
 }
 
-func TestAdminAuditsOperatorAndScopesLargeGrantToInvocation(t *testing.T) {
+func TestAdminAuditsOperator(t *testing.T) {
 	t.Setenv("SPARKWING_HOME", t.TempDir())
-	t.Setenv("SPARKWING_ADMIN_GRANT_ALLOW_LARGE", "1")
 	st := openState(t)
-	if _, err := teststore.SQL(t, st).ExecContext(t.Context(), `INSERT INTO accounts(id,email,created_at,updated_at) VALUES ('ops-alice','alice@example.test',1,1),('ops-bob','bob@example.test',1,1)`); err != nil {
+	if _, err := teststore.SQL(t, st).ExecContext(t.Context(), `INSERT INTO accounts(id,email,created_at,updated_at) VALUES ('ops-alice','alice@example.test',1,1)`); err != nil {
 		t.Fatal(err)
 	}
 	if err := st.Close(); err != nil {
@@ -32,7 +31,7 @@ func TestAdminAuditsOperatorAndScopesLargeGrantToInvocation(t *testing.T) {
 	for _, verb := range []string{"freeze", "unfreeze", "grant"} {
 		args := []string{verb, "--team", "default", "--reason", "incident", "--operator", "ops-alice"}
 		if verb == "grant" {
-			args = append(args, "--cents", "10001", "--allow-large", "--key", "alice-grant")
+			args = append(args, "--cents", "10001", "--key", "alice-grant")
 		}
 		var audit bytes.Buffer
 		if err := runAdmin(args, &bytes.Buffer{}, &audit); err != nil {
@@ -41,9 +40,6 @@ func TestAdminAuditsOperatorAndScopesLargeGrantToInvocation(t *testing.T) {
 		if !strings.Contains(audit.String(), `"principal_id":"ops-alice"`) {
 			t.Errorf("audit: %s", &audit)
 		}
-	}
-	if err := runAdmin([]string{"grant", "--team", "default", "--reason", "incident", "--operator", "ops-bob", "--cents", "10001", "--key", "bob-grant"}, &bytes.Buffer{}, &bytes.Buffer{}); err == nil || !strings.Contains(err.Error(), "--allow-large") {
-		t.Fatalf("pod environment authorized a later large grant: %v", err)
 	}
 	st = openState(t)
 	defer func() { _ = st.Close() }()

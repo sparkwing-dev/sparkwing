@@ -56,6 +56,8 @@ unlock.
 
 ### Removed
 
+- **controller (Breaking):** Removed the $100 admin grant guard and `--allow-large`
+  `sparkwing-controller admin grant` accepts any positive amount the credit ledger can hold.
 - **cli (Breaking):** Removed `SPARKS_GO_BIN`
   Select the Go executable through `PATH` for sparks resolution and overlay updates.
 - **controller (Breaking):** Removed `--live-log-node-kb`, `--live-log-total-mb`, `--live-log-max-nodes` and `--live-log-idle`

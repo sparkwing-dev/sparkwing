@@ -3737,9 +3737,8 @@ prepaid credits cover it (decision 26). An unpriced CPU class reports no hold.
 ## Break-glass credit grants
 
 Break-glass in-pod grants extend frozen §9's break-glass scope from freeze to
-grants. They are capped at $100 without the explicit flag. `sparkwing-controller admin
-grant` refuses more than 10,000 cents per grant unless `--allow-large` is supplied
-for that invocation. `--operator` names the operator's own account ID. It grants
+grants. `sparkwing-controller admin grant` accepts any positive amount the credit
+ledger can hold. `--operator` names the operator's own account ID. It grants
 once per key with reference `admin:<key>` and records `credit.granted` with that
 account as the actor and a digest of the reference. Audit rows exclude free-form
 reasons. No remote credential reaches it.
