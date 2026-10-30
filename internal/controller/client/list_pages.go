@@ -23,7 +23,6 @@ func (p *listResponse) UnmarshalJSON(body []byte) error {
 	return json.Unmarshal(body, &p.fields)
 }
 
-// requestList drains a collection while preserving its first page's metadata.
 func (c *engineClient) requestList(ctx context.Context, pattern, path string, result any, fields ...string) error {
 	parsed, err := url.Parse(path)
 	if err != nil {
