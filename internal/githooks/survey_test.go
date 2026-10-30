@@ -1,7 +1,6 @@
 package githooks
 
 import (
-	"errors"
 	"os"
 	"path/filepath"
 	"slices"
@@ -144,113 +143,6 @@ func TestSurvey_MissingCheckoutReportsBrokenRatherThanPanicking(t *testing.T) {
 	}
 	if got.ConfigError == "" {
 		t.Error("ConfigError is empty, want the reason the hook directory could not be resolved")
-	}
-}
-
-func TestSurveyFleet_SortsRowsByRepoPath(t *testing.T) {
-	root := t.TempDir()
-	var roots []string
-	for _, name := range []string{"zeta", "alpha", "mid"} {
-		repo := filepath.Join(root, name)
-		if err := os.MkdirAll(filepath.Join(repo, ".git", "hooks"), 0o755); err != nil {
-			t.Fatal(err)
-		}
-		roots = append(roots, repo)
-	}
-	rows := surveyFleet(stubGit("", ""), roots, func(string) ([]string, error) { return nil, nil })
-	if len(rows) != 3 {
-		t.Fatalf("rows = %d, want 3", len(rows))
-	}
-	for i, want := range []string{"alpha", "mid", "zeta"} {
-		if filepath.Base(rows[i].Repo) != want {
-			t.Errorf("rows[%d] = %s, want %s", i, filepath.Base(rows[i].Repo), want)
-		}
-	}
-}
-
-func TestSurveyFleet_AsksForEachRepositorysOwnDeclaredHooks(t *testing.T) {
-	armed, armedHooks := checkout(t, "pre-commit")
-	bare, _ := checkout(t)
-	rows := surveyFleet(stubGit("", ""), []string{armed, bare}, func(root string) ([]string, error) {
-		if root == bare {
-			return []string{"pre-push"}, nil
-		}
-		return []string{"pre-commit"}, nil
-	})
-	byRepo := map[string]RepoGates{}
-	for _, r := range rows {
-		byRepo[r.Repo] = r
-	}
-	if got := byRepo[armed].State; got != GateArmed {
-		t.Errorf("%s state = %s, want %s (gates in %s)", armed, got, GateArmed, armedHooks)
-	}
-	if got := byRepo[bare].State; got != GateBroken {
-		t.Errorf("%s state = %s, want %s", bare, got, GateBroken)
-	}
-}
-
-func TestSurveyFleet_AsksGitForTheMachineWideConfigOnce(t *testing.T) {
-	root := t.TempDir()
-	var roots []string
-	for _, name := range []string{"one", "two", "three"} {
-		repo := filepath.Join(root, name)
-		if err := os.MkdirAll(filepath.Join(repo, ".git", "hooks"), 0o755); err != nil {
-			t.Fatal(err)
-		}
-		roots = append(roots, repo)
-	}
-	globalLookups := 0
-	counting := func(dir string, args ...string) (string, error) {
-		for _, a := range args {
-			if a == "--global" {
-				globalLookups++
-			}
-		}
-		return stubGit("", "")(dir, args...)
-	}
-	surveyFleet(counting, roots, func(string) ([]string, error) { return []string{"pre-commit"}, nil })
-	if globalLookups != 1 {
-		t.Errorf("global config lookups = %d, want 1 across %d repos", globalLookups, len(roots))
-	}
-}
-
-func TestSurveyFleet_MarksARepoWhoseDeclarationCannotBeReadBroken(t *testing.T) {
-	armed, _ := checkout(t, "pre-commit")
-	rows := surveyFleet(stubGit("", ""), []string{armed}, func(string) ([]string, error) {
-		return nil, errors.New("config does not load: bad name")
-	})
-	if len(rows) != 1 {
-		t.Fatalf("rows = %+v, want one row", rows)
-	}
-	if rows[0].State != GateBroken {
-		t.Errorf("State = %s, want %s", rows[0].State, GateBroken)
-	}
-	if rows[0].Gated() {
-		t.Error("a repo whose declaration cannot be read counted as gated")
-	}
-	if !strings.Contains(rows[0].Summary(), "config does not load: bad name") {
-		t.Errorf("Summary = %q, want the config error", rows[0].Summary())
-	}
-}
-
-func TestUngated_DropsTheRowsNoGateIsMissingFrom(t *testing.T) {
-	rows := []RepoGates{
-		{Repo: "armed", Declared: []string{"pre-commit"}, Hooks: currentHooks("pre-commit"), State: GateArmed},
-		{Repo: "quiet", State: gateUndeclared},
-		{Repo: "notifier", Declared: []string{"post-commit", "pre-commit"}, Hooks: currentHooks("pre-commit"), State: GateUninstalled, Missing: []string{"post-commit"}},
-		{Repo: "shadowed", Declared: []string{"pre-commit"}, State: GateShadowed, Shadowed: []string{"pre-commit"}},
-		{Repo: "bare", Declared: []string{"pre-commit", "pre-push"}, State: GateUninstalled, Missing: []string{"pre-push"}},
-		{Repo: "borrowed", Declared: []string{"pre-commit"}, State: gateBorrowed, Borrowed: []string{"pre-commit"}},
-	}
-	got := Ungated(rows)
-	want := []string{"quiet", "shadowed", "bare", "borrowed"}
-	if len(got) != len(want) {
-		t.Fatalf("Ungated = %+v, want the %v rows", got, want)
-	}
-	for i, name := range want {
-		if got[i].Repo != name {
-			t.Errorf("Ungated[%d] = %s, want %s", i, got[i].Repo, name)
-		}
 	}
 }
 
@@ -487,16 +379,6 @@ func testExpectations(declared []string) Expectations {
 
 func survey(git Git, repo string, declared []string) RepoGates {
 	return Survey(git, repo, testExpectations(declared))
-}
-
-func surveyFleet(git Git, roots []string, declared func(string) ([]string, error)) []RepoGates {
-	return SurveyFleet(git, roots, func(git Git, repo, dir string) (map[string]ExpectedHook, error) {
-		names, err := declared(repo)
-		if err != nil {
-			return nil, err
-		}
-		return testExpectations(names)(git, repo, dir)
-	})
 }
 
 func currentHooks(names ...string) []HookObservation {

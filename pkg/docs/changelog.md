@@ -30,6 +30,8 @@ unlock.
   Idempotent retries count once. Refusals report current usage, a retry delay and support guidance before calling the provider.
 - **store (Breaking):** The schema baseline advances to version 27, recording Checkout Session reservation times and removing the lifetime team-creation counter
   Stores at another schema version must be recreated using the existing backup and move-aside instructions.
+- **release (Breaking):** Sparkwing releases use the native tag-and-publication flow
+  Platform deployment is separate. Retire the platform repository's `release-all` pipeline and `bin/trigger-change-deploy.sh` callers when updating that repository.
 - **scaffold:** `const FallbackSDKVersion` pins v0.68.1, so a fresh scaffold compiles against that release.
 - **TypeScript SDK:** The npm package names this repository, which npm provenance requires. Publication refuses major versions above 0, a name or version that does not match the release, and a `latest` tag that would move backwards.
 
@@ -73,6 +75,22 @@ unlock.
 
 - **teams (Breaking):** Accounts can create teams without a lifetime creation cap
   Deleting or leaving a team does not reduce future team-creation access.
+- **daemon (Breaking):** Removed the version-aware takeover ladder
+  Local startup attempts one replacement. A second incompatible daemon reports a conflict; stop competing installations and restart the daemon, or use a separate `SPARKWING_HOME`.
+- **hooks (Breaking):** Removed installation proofs, fleet modes, automatic global-hook chaining and doctor's fleet survey
+  `--no-prove`, `--all-repos` and `--ungated` are gone. Install and inspect hooks per repository. Installation refuses a conflicting `core.hooksPath` with manual repair guidance.
+- **GitHub App (Breaking):** Removed commit-status reporting
+  Runs report through Checks only. Installation owners must accept Checks read/write permission; missing permission leaves reports pending while execution continues.
+- **checks (Breaking):** Removed `internal/guardcheck`, its `.guards/` allow-lists and standalone gate steps
+  Dependency rules run through depguard in `.golangci.yml`, including the fast push tier.
+- **cache (Breaking):** Removed binary-cache checkout owners, use counts, shared-entry counts and `related_entries` history
+  `cache explain` retains the current build key and input digests. Save explanations to compare changes.
+- **controller (Breaking):** Removed the $100 admin grant guard and `--allow-large`
+  `sparkwing-controller admin grant` accepts any positive amount the credit ledger can hold.
+- **cli (Breaking):** Removed `SPARKS_GO_BIN`
+  Select the Go executable through `PATH` for sparks resolution and overlay updates.
+- **controller (Breaking):** Removed `--live-log-node-kb`, `--live-log-total-mb`, `--live-log-max-nodes` and `--live-log-idle`
+  Live buffers retain fixed limits of 512 KiB per node, 64 MiB total, 1,024 nodes and a 10-minute idle timeout.
 
 ## [v0.68.1] - 2026-10-30
 ### Changed

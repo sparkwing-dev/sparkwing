@@ -65,11 +65,10 @@ func TestRegisteredFlagsReachExecutionParser(t *testing.T) {
 func TestHooksCommandsUseRegistryGrammarAndJSON(t *testing.T) {
 	f := newChainFixture(t)
 	f.asProcessEnv(t)
-	f.registerRepos(t, f.repo)
 	t.Chdir(f.repo)
 	for _, args := range [][]string{
-		{"pipeline", "hooks", "install", "--all-repos", "--no-prove"},
-		{"pipeline", "hooks", "status", "--all-repos"},
+		{"pipeline", "hooks", "install"},
+		{"pipeline", "hooks", "status"},
 		{"pipeline", "hooks", "uninstall", "-o", "json"},
 	} {
 		var err error
@@ -86,8 +85,13 @@ func TestHooksCommandsUseRegistryGrammarAndJSON(t *testing.T) {
 			}
 		}
 	}
-	for _, flag := range []string{"--fleet", "--all"} {
+	for _, flag := range []string{"--fleet", "--all", "--all-repos", "--ungated"} {
 		if err := runSparkwing([]string{"pipeline", "hooks", "status", flag}); exitCodeFor(err) != 2 {
+			t.Fatalf("%s: %v", flag, err)
+		}
+	}
+	for _, flag := range []string{"--all-repos", "--no-prove"} {
+		if err := runSparkwing([]string{"pipeline", "hooks", "install", flag}); exitCodeFor(err) != 2 {
 			t.Fatalf("%s: %v", flag, err)
 		}
 	}

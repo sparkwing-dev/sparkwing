@@ -1,4 +1,0 @@
-# depguard rule no-testing-in-prod in .golangci-guards.yml. One line per package edge:
-# <importing package dir><TAB><imported package>.
-# Only delete lines: guardcheck fails a finding missing here and a line no
-# finding matches. See .guards/README.md.

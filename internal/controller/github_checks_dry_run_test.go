@@ -10,7 +10,4 @@ func TestGitHubChecksDistinguishDryRunFromSuccess(t *testing.T) {
 	if conclusion != "neutral" || githubCheckTitle(conclusion) != "Dry run completed" {
 		t.Fatalf("dry-run check = %q, %q", conclusion, githubCheckTitle(conclusion))
 	}
-	if state, description := githubCommitState("dry_run"); state != "success" || description != "Sparkwing dry run completed" {
-		t.Fatalf("dry-run commit status = %q, %q", state, description)
-	}
 }

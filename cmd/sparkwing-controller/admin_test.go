@@ -41,7 +41,7 @@ func TestAdminNeedsATeamAndAReason(t *testing.T) {
 		{"grant", "--team", "no-such-team", "--reason", "QA", "--cents", "500"},
 		{"freeze", "--team", "default", "--reason", "abuse", "--cents", "500"},
 		{"unfreeze", "--team", "default", "--reason", "abuse", "--key", "k"},
-		{"freeze", "--team", "default", "--reason", "abuse", "--allow-large"},
+		{"grant", "--team", "default", "--reason", "abuse", "--allow-large"},
 	} {
 		if err := runAdminFixture(args, &bytes.Buffer{}, &bytes.Buffer{}); err == nil {
 			t.Errorf("admin %q succeeded, want a refusal", args)
@@ -173,11 +173,8 @@ func TestAdminGrantsCreditsOnceWithTheConsolesRecord(t *testing.T) {
 	if err := runAdminFixture([]string{"grant", "--team", "default", "--cents", "700", "--reason", "QA", "--key", "qa-1"}, &bytes.Buffer{}, &bytes.Buffer{}); err == nil {
 		t.Fatal("a reused key with different terms granted")
 	}
-	if err := runAdminFixture([]string{"grant", "--team", "default", "--cents", "10001", "--reason", "QA", "--key", "big"}, &bytes.Buffer{}, &bytes.Buffer{}); err == nil || !strings.Contains(err.Error(), "--allow-large") {
-		t.Fatalf("grant over $100 without the flag = %v", err)
-	}
-	if large, _ := grant("--key", "big", "--cents", "10001", "--allow-large"); !large.Created || large.AmountMicro != 10001*store.MicroCreditsPerCent {
-		t.Fatalf("flagged large grant = %+v", large)
+	if large, _ := grant("--key", "big", "--cents", "10001"); !large.Created || large.AmountMicro != 10001*store.MicroCreditsPerCent {
+		t.Fatalf("large grant = %+v", large)
 	}
 	if err := runAdminFixture([]string{"grant", "--team", "default", "--cents", "500", "--reason", "QA"}, &bytes.Buffer{}, &bytes.Buffer{}); err == nil {
 		t.Fatal("keyless grant succeeded")

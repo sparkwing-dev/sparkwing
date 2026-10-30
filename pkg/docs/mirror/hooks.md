@@ -154,19 +154,19 @@ Then install the hooks once per checkout:
 ```bash
 sparkwing pipeline hooks install     # writes .git/hooks/pre-commit, pre-push, post-commit
 sparkwing pipeline hooks status      # report declared, installed, and missing hooks
-sparkwing pipeline hooks status --all-repos      # report which registered repos git gates at all
 sparkwing pipeline hooks uninstall   # remove sparkwing-managed hooks only
 ```
 
 `status` emits one `kind: hook` record per installed hook when piped, followed
 by a `kind: summary` record with the repository, installed count, gate state,
-and silenced global hooks. Hook records contain the name, pipelines, and
-whether the hook calls the global hook. `--output plain` prints only hook
+and hook state. Hook records contain the name, pipelines, and whether the
+installed content matches the repository configuration. `--output plain` prints only hook
 names. `--output pretty` keeps the readable report and repair instructions.
 If configuration loading fails, status still lists installed hooks, reports
 the error on stderr, and exits nonzero. It emits no JSON summary in that case.
 
-Every hook proves and runs its pipelines on this machine.
+Hooks run their pipelines on this machine. Installation writes hooks without
+running pipelines; run a gate manually with `sparkwing run <pipeline>` to check it.
 
 Each managed hook carries a marker comment so `uninstall` and `status`
 can distinguish sparkwing-installed hooks from hand-written ones.
@@ -183,194 +183,23 @@ slow work; the hook runs in the commit's foreground.
 Managed hooks use plain output by default. Runs stream their output and print
 start and finish records with the run ID and status. The hook sets
 `SPARKWING_LOG_FORMAT=plain`. Export `pretty` or `json` before the Git command
-to select another format. Installation proofs also use plain output and report
-the last output line when the gate fails.
+to select another format.
 
-### Hooks are per repository, and the repository says so
+### Repository hook paths
 
-The rule, so a new checkout does not have to rediscover it: **every repository
-that declares a gate claims `core.hooksPath` for its own hook directory, and
-chains the machine's global hooks from there.** A machine-wide hooks directory
-is never where a gate lives.
+Each repository installs hooks in its own Git hook directory. Linked worktrees
+share the main checkout's hook directory.
 
-That is not a preference. `core.hooksPath` has no search path -- one directory
-wins outright -- so a global directory holding the gates would have to dispatch
-on which repository git happened to be in, and every repository's gate would
-change whenever that one directory did, with no commit anywhere to show it. The
-repository that a gate protects is the only place that can declare it, review
-it, and version it.
+When `core.hooksPath` points elsewhere, installation refuses before changing
+hooks or Git configuration. Compose the hooks manually, or clear the override
+and install again. The refusal names the active directory and the command to
+clear the local or global setting. Check the setting before clearing it because
+other repositories may rely on global hooks.
 
-The global directory keeps whatever the machine put there. It is reached
-through a forwarder in each repository's own hook directory, so `prepare-commit-msg`
-and friends still fire, and a repository is never asked to choose between its
-gate and the machine's hooks.
-
-Two failures follow from breaking the rule, and `hooks status --all-repos` names both:
-a repository whose hooks are **shadowed** by the global path holds a full set of
-gates and runs none, and one whose `core.hooksPath` points at a **sibling
-repository** runs that repository's gates instead of its own.
-
-### When your machine sets `core.hooksPath`
-
-A `core.hooksPath` in your global git config replaces `.git/hooks` for
-every repository on the machine. Hooks written into `.git/hooks` are then
-never read, and a gate disappears without a message.
-
-`pipeline hooks install` handles this. When it finds a global
-`core.hooksPath`, it sets `core.hooksPath` for this repository to the
-repository's own hook directory -- a repository setting wins over the global
-one -- and chains the global hooks from there, so nothing is lost:
-
-- A hook name both layers define runs the pipelines first, then hands off
-  to the global hook. A failing blocking pipeline aborts before the
-  hand-off, so the commit or push still stops where you expect.
-- A hook name only the global config defines gets a forwarder, so hooks
-  like `prepare-commit-msg` keep firing. Only names git itself runs as
-  hooks are forwarded; a helper script or note kept in that directory is
-  left where it is.
-
-Forwarders resolve the global path when they run, so changing the machine's
-hooks directory does not mean reinstalling. They carry the same marker as
-any other managed hook, so `uninstall` removes them -- and releases the
-repository's `core.hooksPath` at the same time, putting the machine's hooks
-back in charge rather than stranding them behind a claim with nothing left
-to forward.
-
-If the repository already sets its own `core.hooksPath` pointing somewhere
-else, install leaves it alone -- that setting was deliberate -- and warns
-without publishing dormant candidate hooks. Clear it with
-`git -C <repo> config --unset core.hooksPath` and re-run
-`sparkwing -C <repo> pipeline hooks install`.
-
-Claiming `core.hooksPath` is also what would stop a global hook firing if
-nothing in `.git/hooks` hands off to it, so install refuses the claim while
-any global hook name is unforwarded -- a hand-written hook of that name is
-the usual reason, since install never overwrites one. It names the hook and
-leaves the machine's hooks in charge without publishing candidates; remove
-that file and re-run to get both layers. Once the claim is already in place
-there is no such decision to make, so install and `pipeline hooks status`
-both report a global hook nothing forwards to, however it came about.
-
-`sparkwing pipeline hooks status` and `sparkwing doctor` both report a hook
-directory git is not reading, naming the gates that stopped firing and how
-to restore them.
-
-### Which repositories are gated at all
-
-One repository at a time is how a repository gets forgotten. `hooks status --all-repos`
-answers for every checkout in the local registry at once:
-
-```bash
-sparkwing pipeline hooks status --all-repos            # every registered repo, classified
-sparkwing pipeline hooks status --all-repos --ungated  # just the ones accepting ungated commits
-sparkwing pipeline hooks install --all-repos   # arm all of them
-```
-
-Each repository gets one state:
-
-| State | What it means |
-| --- | --- |
-| `armed` | git runs the repository's own gate for every hook it declares |
-| `shadowed` | gates are installed and `core.hooksPath` sends git elsewhere, so none fire |
-| `uninstalled` | an optional declared hook is missing or not current |
-| `borrowed` | git runs a gate for a declared hook out of another repository's hook directory |
-| `undeclared` | no pipeline asks for a hook, so there is nothing to arm |
-| `broken` | a required hook is missing or not current, or repository configuration cannot be read |
-
-The state answers what git does with the hooks a repository declares. Whether
-the repository runs a gate is a second question, and it is the one an operator
-scans for: work is refused only where a declared `pre-commit` or `pre-push`
-fires from that repository. A repository that declares neither -- because it
-declares no hook at all, or only `post-commit` -- is counted among the ones
-accepting ungated work. The pretty STATE column prints `no-gate` rather than
-`armed` for it, the FIRING column names the declared hooks that do run, and the
-`state` field of `-o json` and `-o plain` keeps the values above unchanged.
-The remedy there is a declared gate, not an install: an install writes the
-hooks the pipelines ask for, and that repository asks for none.
-
-`installed` records managed hooks present on disk. Each declared hook also falls
-into `firing`, `borrowed`, `shadowed` or `missing`. Here `missing` includes hooks
-whose content, version or executability differs from what is expected, so an
-installed hook can also be missing a current installation. Per-hook read errors
-stay in the observations. Optional notifier errors do not revoke gating.
-Repository configuration and path errors make the survey broken. Discovery
-ignores filenames Git does not execute as hooks, including `pre-commit.bak`.
-
-`borrowed` counts as ungated even though commits really are refused. Nothing in
-the repository declares the file that runs, so an uninstall in the repository
-that owns it disarms this one with no commit here and no warning, and the rules
-being enforced are the other repository's. Fixing it means clearing this
-repository's own override first -- install treats a repository-scoped
-`core.hooksPath` as deliberate and will not touch it:
-
-```bash
-git -C <repo> config --unset core.hooksPath
-sparkwing -C <repo> pipeline hooks install
-```
-
-`sparkwing doctor` reports the ungated ones too, including on a run that finds
-nothing else to repair, and states the clean verdict when there are none -- a
-silent report is indistinguishable from one produced by a build too old to
-survey a fleet at all.
-
-A survey that cannot read the registry says so and exits non-zero. It never
-answers with an empty fleet, because that is what a machine with nothing
-registered answers, and one stray character in the registry used to make an
-unread fleet look like a swept one. `sparkwing pipeline hooks install --all-repos`
-and `sparkwing pipeline hooks status --all-repos` refuse for the same reason. `doctor` keeps reporting the rest of its sweep and
-carries
-the reason in `gates_survey_error`, since the registry says nothing about this
-home's runs, locks or daemon.
-
-### Checking installed hooks
-
-`sparkwing pipeline hooks status` compares each managed hook with the expected
-script and format version, and checks which directory Git reads. JSON hook
-records include `current`. The summary's `gates.hooks` observations record presence,
-content, format version, executability, and whether each hook is required.
-Status, fleet status, and doctor use these same observations. Blocking gates and
-global forwarders are required. A missing or stale required hook is broken,
-including a deleted forwarder for a global hook. Notifiers are optional.
-Remove managed hooks whose triggers or global hooks are no longer declared,
-then run `sparkwing pipeline hooks install` to replace stale scripts. For a manual
-execution check, use a throwaway commit in a disposable checkout.
-
-A repository is gated when a current declared `pre-commit` or `pre-push` hook
-fires and every required hook is current and active. `--ungated`, `doctor` and
-the `--all-repos` summary share that verdict. A missing `post-commit` notifier
-loses a notification. A repository that declares no blocking hook has no gate to
-arm, and fleet installation counts it separately.
-
-The list is the machine's repo registry -- the `repos` section of
-`~/.config/sparkwing/config.yaml`, which `sparkwing repos add --checkout <dir>`
-writes to and which can name
-`fallback_paths` directories to scan for `*/.sparkwing/`. That is the whole
-extent of the survey: a checkout the registry does not reach is not surveyed,
-not swept by `--all-repos`, and not reported by `doctor`. Register it, or add the
-directory it lives under to `fallback_paths`, before reading a clean survey as
-a clean machine.
-
-### Arming a repository whose gate cannot run
-
-An ungated repository still accepts work; a repository whose gate is armed but
-cannot execute rejects every commit. The second is worse, and installing a
-hook is what converts the first into the second.
-
-So before those gates can fire, install runs the repository's blocking gates
-once. A gate that does not pass -- a red pipeline, an admission daemon the
-repository's pinned SDK cannot speak to -- rejects the whole installation
-before any candidate hook filename or config value is published. Existing
-hooks remain callable throughout the proof. Once every proof passes, each
-complete hook replaces its predecessor with an atomic rename and only then may
-the repository's `core.hooksPath` change. A write or config error is reported immediately. An interrupted install may
-leave some hooks replaced; re-run the install to finish it. `--no-prove` skips the proof for an operator who has already
-made it.
-
-The proof runs on every install that leaves a gate live, not only the one that
-claims `core.hooksPath`. An install rewrites every hook the repository
-declares, so a repository git already reads needs the same proof as a newly
-armed one. Proof-before-publication keeps its prior gates live while that proof
-runs or if it fails.
+`status` compares each installed hook with the expected content and format and
+reports missing, modified, non-executable, obsolete, or shadowed hooks. Run it
+in the affected repository, repair the reported hook or configuration, and
+reinstall there. `doctor` also reports a shadowed hook in the current repository.
 
 ### Hook-launched pipelines are unbound from the repository
 
@@ -393,9 +222,7 @@ under a name git does not act on; see below.
 
 Managed hooks scrub them a second time, in a subshell around the pipeline
 invocations, which covers the `sparkwing` on `PATH` being older than the
-install that wrote the hook. The subshell is also what keeps the scrub off
-the hand-off to a global hook: that hook is git's to configure, so it gets
-the environment git meant it to have.
+install that wrote the hook.
 
 Identity (`GIT_AUTHOR_*`, `GIT_COMMITTER_*`) and config selection
 (`GIT_CONFIG_GLOBAL`, `GIT_CONFIG_NOSYSTEM`, ...) are left alone: they carry

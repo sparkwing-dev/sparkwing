@@ -3737,9 +3737,8 @@ prepaid credits cover it (decision 26). An unpriced CPU class reports no hold.
 ## Break-glass credit grants
 
 Break-glass in-pod grants extend frozen §9's break-glass scope from freeze to
-grants. They are capped at $100 without the explicit flag. `sparkwing-controller admin
-grant` refuses more than 10,000 cents per grant unless `--allow-large` is supplied
-for that invocation. `--operator` names the operator's own account ID. It grants
+grants. `sparkwing-controller admin grant` accepts any positive amount the credit
+ledger can hold. `--operator` names the operator's own account ID. It grants
 once per key with reference `admin:<key>` and records `credit.granted` with that
 account as the actor and a digest of the reference. Audit rows exclude free-form
 reasons. No remote credential reaches it.
@@ -3946,18 +3945,10 @@ deadlines. `Reason` is read from the exact run state event, including
 queue_timeout and timeout. The payload carries that committed reason. A late
 acknowledgement still advances only its delivered revision.
 
-`triggers.github_status_fallback` records the per-run commit-status fallback as
-0 or 1. `Tenant.GitHubCommitStatuses` reads it and
-`Tenant.UseGitHubCommitStatuses` commits it before any fallback status is sent.
-It is independent of the positive GitHub check ID and scoped to the same tenant
-and run. A controller replacement continues that mode even if the installation
-has since accepted the checks permission. `ReportGitHubCheck` keeps its existing
-report lock and ID recording transaction. Failed ID persistence is retried by
-adopting the check with this run's external ID.
-
-This adds one column to the final schema. Combined with burst attribution and
-overflow controls, the disposable baseline is version 7. Earlier stores are
-refused. There is no migration or backfill. Native QA needs a fresh version-6 store.
+GitHub completion reports use Checks only. `ReportGitHubCheck` keeps its report
+lock and ID recording transaction. Failed ID persistence is retried by adopting
+the check with this run's external ID. Missing Checks permission leaves reports
+pending until the installation owner accepts it.
 
 `Server.ReconcileRunEffects` replaces `ReconcileProfileFolds` in both controller
 compositions. It delivers the profile and GitHub lanes under the same lease,

@@ -83,12 +83,12 @@ func TestGitHubAppDocsDescribeNarrowFailures(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, term := range []string{"GitHub App unavailable", "health and doctor warn", "configuration details stay in controller logs", "reads every page", "one-minute deadline", "empty or unreadable", "approved repository-ID set", "repositories_removed", "failed", "inherited child runs"} {
+	for _, term := range []string{"GitHub App unavailable", "health and doctor warn", "configuration details stay in controller logs", "reads every page", "one-minute deadline", "empty or unreadable", "approved repository-ID set", "repositories_removed", "failed", "inherited child runs", "Checks read and write permission", "reports remain pending"} {
 		if !strings.Contains(page, term) {
 			t.Errorf("GitHub App guide omits %q", term)
 		}
 	}
-	for _, term := range []string{"refuses to start with some", "listing is read up to 1000", "first 1000"} {
+	for _, term := range []string{"refuses to start with some", "listing is read up to 1000", "first 1000", "gets commit statuses instead"} {
 		if strings.Contains(page, term) {
 			t.Errorf("GitHub App guide retains %q", term)
 		}

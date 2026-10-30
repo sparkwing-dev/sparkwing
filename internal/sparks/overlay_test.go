@@ -32,7 +32,7 @@ func writeGoMod(t *testing.T, dir string, requires map[string]string) {
 func fakeGoBin(t *testing.T) {
 	t.Helper()
 	if bin, ok := nativeSparksGo(t, "", ""); ok {
-		t.Setenv("SPARKS_GO_BIN", bin)
+		t.Setenv("PATH", filepath.Dir(bin)+string(os.PathListSeparator)+os.Getenv("PATH"))
 		return
 	}
 	dir := t.TempDir()
@@ -53,7 +53,7 @@ exit 0
 	if err := os.WriteFile(bin, []byte(script), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	t.Setenv("SPARKS_GO_BIN", bin)
+	t.Setenv("PATH", filepath.Dir(bin)+string(os.PathListSeparator)+os.Getenv("PATH"))
 }
 
 func TestWriteOverlayWritesFiles(t *testing.T) {

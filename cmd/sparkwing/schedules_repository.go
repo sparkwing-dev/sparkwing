@@ -11,9 +11,11 @@ import (
 	"path/filepath"
 	"runtime"
 	"slices"
+	"sort"
 	"strings"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/repos"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
@@ -326,4 +328,26 @@ func renderScheduleInstallation(out io.Writer, result scheduleInstallation, form
 
 func scheduleUnavailable(dependency string) error {
 	return &apierr.Error{Code: apierr.PolicyMissing, Message: "local schedules require " + dependency, Hint: "the local controller schedule binding is unavailable in this build"}
+}
+
+func fleetRepoRoots(git repos.Git) ([]string, error) {
+	cands, err := repos.CandidatePaths()
+	if err != nil {
+		return nil, fmt.Errorf("read the repo registry: %w", err)
+	}
+	seen := map[string]bool{}
+	var out []string
+	for _, c := range cands {
+		root, err := repos.PrimaryRoot(git, c.Path)
+		if err != nil || root == "" {
+			root = c.Path
+		}
+		if seen[root] {
+			continue
+		}
+		seen[root] = true
+		out = append(out, root)
+	}
+	sort.Strings(out)
+	return out, nil
 }

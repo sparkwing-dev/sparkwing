@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestMaterializePipelineReusesBinaryWithoutGo(t *testing.T) {
@@ -31,6 +32,10 @@ func TestMaterializePipelineReusesBinaryWithoutGo(t *testing.T) {
 	if err := seed.Release(); err != nil {
 		t.Fatal(err)
 	}
+	old := time.Unix(1, 0)
+	if err := os.Chtimes(entry.entryDir(), old, old); err != nil {
+		t.Fatal(err)
+	}
 	var diagnostics bytes.Buffer
 	lease, published, err := MaterializePipeline(t.Context(), dir, CompileOptions{Environment: env, Diagnostics: &diagnostics})
 	if err != nil {
@@ -38,6 +43,13 @@ func TestMaterializePipelineReusesBinaryWithoutGo(t *testing.T) {
 	}
 	if err := lease.Release(); err != nil {
 		t.Fatal(err)
+	}
+	info, err := os.Stat(entry.entryDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !info.ModTime().After(old) {
+		t.Fatal("cache hit did not refresh entry recency")
 	}
 	if !strings.Contains(diagnostics.String(), "Cache hit: pipeline binary") {
 		t.Fatalf("cached pipeline diagnostic missing: %q", diagnostics.String())

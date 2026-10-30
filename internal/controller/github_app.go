@@ -38,9 +38,8 @@ type githubAppState struct {
 	stateKey []byte
 
 	// perf: reuse installation discovery briefly across App intake requests.
-	mu           sync.Mutex
-	covering     map[string]coveringEntry
-	warnedChecks map[int64]bool
+	mu       sync.Mutex
+	covering map[string]coveringEntry
 }
 
 type coveringEntry struct {
@@ -60,8 +59,7 @@ func (s *Server) WithGitHubApp(cfg githubapp.Config) *Server {
 	client := githubapp.New(cfg)
 	s.githubApp = &githubAppState{
 		client: client, stateKey: client.StateKey(),
-		covering:     map[string]coveringEntry{},
-		warnedChecks: map[int64]bool{},
+		covering: map[string]coveringEntry{},
 	}
 	return s
 }
@@ -784,15 +782,6 @@ func (s *Server) teamInstallationFor(ctx context.Context, t *store.Tenant, repo 
 		return store.GitHubAppInstallation{}, false, nil
 	}
 	return in, true, nil
-}
-
-func (s *Server) warnMissingChecks(installation int64) {
-	s.githubApp.mu.Lock()
-	defer s.githubApp.mu.Unlock()
-	if !s.githubApp.warnedChecks[installation] {
-		s.githubApp.warnedChecks[installation] = true
-		s.logger.Warn("github app installation has not accepted the checks permission; its runs report commit statuses until it does", "installation_id", installation)
-	}
 }
 
 func (s *Server) githubAppCheckUpdate(ctx context.Context, tenant *store.Tenant, effect store.DesiredRunEffect) (githubCheckUpdate, bool, error) {

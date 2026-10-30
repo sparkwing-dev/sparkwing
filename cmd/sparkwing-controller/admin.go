@@ -22,7 +22,7 @@ import (
 const adminUsage = `usage: sparkwing-controller admin freeze --operator ACCOUNT_ID --team SLUG --reason TEXT
        sparkwing-controller admin unfreeze --operator ACCOUNT_ID --team SLUG --reason TEXT [--hold ID]
        sparkwing-controller admin session --operator ACCOUNT_ID --team SLUG --reason TEXT [--output json|plain]
-       sparkwing-controller admin grant --operator ACCOUNT_ID --team SLUG --cents N --reason TEXT --key KEY [--reverses REF] [--allow-large]
+       sparkwing-controller admin grant --operator ACCOUNT_ID --team SLUG --cents N --reason TEXT --key KEY [--reverses REF]
 
 Break-glass for the operator console. When console sign-in is down, run it in
 the controller pod with kubectl exec; it acts on the controller's state
@@ -46,15 +46,11 @@ the console and this command placed, or with --hold the one hold it names, a
 payment dispute's included. grant gives the team N cents of free credits,
 once per required --key. A rerun reports the grant it already made.
 Use --reverses REF to take back credits from a mistaken free grant.
-It refuses more than 10000
-cents ($100) per grant unless --allow-large is supplied for that invocation.
 --operator names your account ID. Each action commits the business event the
 console writes (team.frozen, team.unfrozen or credit.granted or credit.reversed) with that account
 as the actor, prints an audit line to stderr, and prints the team's holds, or the
 grant and the team's balance, as JSON. Audit rows exclude free-form reasons
 and store grant keys as digests.`
-
-const adminGrantCapCents = 10_000
 
 type adminFreezeJSON struct {
 	Team   string   `json:"team"`
@@ -81,7 +77,6 @@ func runAdmin(args []string, stdout, stderr io.Writer) error {
 	fs.Usage = func() { fmt.Fprintln(stderr, adminUsage) }
 	output := fs.StringP("output", "o", "plain", "session only: plain (default) or json")
 	operator := fs.String("operator", "", "your operator account ID (required)")
-	allowLarge := fs.Bool("allow-large", false, "grant only: allow this grant to exceed $100")
 	team := fs.String("team", "", "the team's slug (required)")
 	reason := fs.String("reason", "", "why (required, up to 500 characters; excluded from audit rows)")
 	hold := fs.String("hold", "", "unfreeze only: the one hold to release, as the team's holds name it")
@@ -107,7 +102,7 @@ func runAdmin(args []string, stdout, stderr io.Writer) error {
 	if err != nil {
 		return fmt.Errorf("admin %s: %w", verb, err)
 	}
-	for _, name := range []string{"cents", "key", "reverses", "allow-large"} {
+	for _, name := range []string{"cents", "key", "reverses"} {
 		if fs.Changed(name) && verb != "grant" {
 			return fmt.Errorf("--%s belongs to grant; %s takes none", name, verb)
 		}
@@ -118,9 +113,6 @@ func runAdmin(args []string, stdout, stderr io.Writer) error {
 		}
 		if *cents <= 0 || *cents > store.MaxCreditGrantMicro/store.MicroCreditsPerCent {
 			return errors.New("admin grant needs --cents, a positive amount the credit ledger can hold")
-		}
-		if *cents > adminGrantCapCents && !*allowLarge {
-			return fmt.Errorf("admin grant refuses more than %d cents ($%d) per grant; pass --allow-large for this invocation", adminGrantCapCents, adminGrantCapCents/100)
 		}
 		if fs.Changed("reverses") && strings.TrimSpace(*reverses) == "" {
 			return errors.New("--reverses requires the free grant's reference")

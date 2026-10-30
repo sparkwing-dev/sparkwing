@@ -60,7 +60,7 @@ func stuckOlderDaemon(t *testing.T, home, version, buildIdentity string) *atomic
 	return handshakes
 }
 
-func TestTakeoverStopsAfterItsAttemptBudget(t *testing.T) {
+func TestTakeoverStopsAfterOneReplacement(t *testing.T) {
 	home := shortHome(t)
 	handshakes := stuckOlderDaemon(t, home, "v0.1.0", wingwire.BuildIdentity)
 	spawns := &atomic.Int64{}
@@ -75,13 +75,15 @@ func TestTakeoverStopsAfterItsAttemptBudget(t *testing.T) {
 	if err == nil {
 		t.Fatal("a daemon that never yields returned a usable client")
 	}
-	if !strings.Contains(err.Error(), "v0.1.0") || !strings.Contains(err.Error(), "v9.9.9") {
-		t.Fatalf("takeover failure = %v, want it to name both versions", err)
+	for _, want := range []string{"v0.1.0", "v9.9.9", "Stop competing Sparkwing installations", "sparkwing daemon restart", "SPARKWING_HOME"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("takeover failure = %v, want %q", err, want)
+		}
 	}
-	if got := spawns.Load(); got != int64(maxTakeoverAttempts) {
-		t.Fatalf("successor spawns = %d, want %d", got, maxTakeoverAttempts)
+	if got := spawns.Load(); got != 1 {
+		t.Fatalf("successor spawns = %d, want %d", got, 1)
 	}
-	if got := handshakes.Load(); got > int64(maxTakeoverAttempts)+2 {
+	if got := handshakes.Load(); got > 2 {
 		t.Fatalf("handshakes = %d; the takeover loop is unbounded", got)
 	}
 }
@@ -102,17 +104,17 @@ func TestTakeoverReplacesSameVersionDaemonWithoutNonBlockingAdmission(t *testing
 			if !errors.Is(err, errTakeoverExhausted) {
 				t.Fatalf("same-version old daemon result = %v, want errTakeoverExhausted", err)
 			}
-			if got := spawns.Load(); got != int64(maxTakeoverAttempts) {
-				t.Fatalf("successor spawns = %d, want %d", got, maxTakeoverAttempts)
+			if got := spawns.Load(); got != 1 {
+				t.Fatalf("successor spawns = %d, want %d", got, 1)
 			}
-			if got := handshakes.Load(); got > int64(maxTakeoverAttempts)+2 {
+			if got := handshakes.Load(); got > 2 {
 				t.Fatalf("handshakes = %d; same-version takeover loop is unbounded", got)
 			}
 		})
 	}
 }
 
-func TestTakeoverBudgetRestartsForADifferentDaemon(t *testing.T) {
+func TestTakeoverStopsWhenADifferentPredecessorAnswers(t *testing.T) {
 	home := shortHome(t)
 	sock, err := wingd.EnsureSocketPath(home)
 	if err != nil {
@@ -127,7 +129,7 @@ func TestTakeoverBudgetRestartsForADifferentDaemon(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = ln.Close() })
 
-	const predecessors = 5
+	const predecessors = 2
 	handshakes := &atomic.Int64{}
 	go func() {
 		for {
@@ -163,114 +165,104 @@ func TestTakeoverBudgetRestartsForADifferentDaemon(t *testing.T) {
 	}()
 
 	spawns := &atomic.Int64{}
-	cl, err := EnsureDaemon(context.Background(), Options{
+	_, err = EnsureDaemon(context.Background(), Options{
 		Home:        home,
 		Version:     "v9.9.9",
 		Spawn:       func(string, string) error { spawns.Add(1); return nil },
 		DialTimeout: 200 * time.Millisecond,
 		Backoff:     5 * time.Millisecond,
 	})
-	if err != nil {
-		t.Fatalf("five different predecessors exhausted a budget meant for one: %v", err)
+	if !errors.Is(err, errTakeoverExhausted) {
+		t.Fatalf("different predecessor result = %v, want a version conflict", err)
 	}
-	defer cl.Close()
-
-	if got := spawns.Load(); got != predecessors {
-		t.Fatalf("successor spawns = %d, want one per predecessor (%d)", got, predecessors)
+	if got := spawns.Load(); got != 1 {
+		t.Fatalf("successor spawns = %d, want one replacement attempt", got)
 	}
 }
 
-func TestAlternatingPredecessorsStillExhaustTheBudget(t *testing.T) {
-	home := shortHome(t)
-	sock, err := wingd.EnsureSocketPath(home)
-	if err != nil {
-		t.Fatalf("socket path: %v", err)
-	}
-	if err := os.MkdirAll(filepath.Dir(sock), 0o700); err != nil {
-		t.Fatalf("mkdir socket dir: %v", err)
-	}
-	ln, err := wingd.ListenSocket(sock)
-	if err != nil {
-		t.Fatalf("listen: %v", err)
-	}
-	t.Cleanup(func() { _ = ln.Close() })
-
-	handshakes := &atomic.Int64{}
-	go func() {
-		for {
-			nc, err := ln.Accept()
+func TestTakeoverWaitsForDrainingPredecessor(t *testing.T) {
+	for _, protocol := range []int{wingd.ProtocolMajor, wingd.ProtocolMajor - 1} {
+		t.Run(fmt.Sprintf("protocol-%d", protocol), func(t *testing.T) {
+			home := shortHome(t)
+			sock, err := wingd.EnsureSocketPath(home)
 			if err != nil {
-				return
+				t.Fatal(err)
 			}
-			seen := handshakes.Add(1)
+			if err := os.MkdirAll(filepath.Dir(sock), 0o700); err != nil {
+				t.Fatal(err)
+			}
+			ln, err := wingd.ListenSocket(sock)
+			if err != nil {
+				t.Fatal(err)
+			}
+			done := make(chan error, 1)
 			go func() {
-				defer nc.Close()
-				r := newFrameReader(nc)
-				if _, err := r.read(); err != nil {
-					return
+				for step := range 3 {
+					nc, err := ln.Accept()
+					if err != nil {
+						done <- err
+						return
+					}
+					err = func() error {
+						defer nc.Close()
+						r := newFrameReader(nc)
+						if _, err := r.read(); err != nil {
+							return err
+						}
+						ack := &wingwire.HelloAck{
+							ProtocolMajor: protocol, NativeProtocolMajor: protocol,
+							BinaryVersion: "v0.1.0", BuildIdentity: wingwire.BuildIdentity,
+							Draining: step == 1,
+						}
+						if step == 2 {
+							ack.ProtocolMajor, ack.NativeProtocolMajor = wingd.ProtocolMajor, wingd.ProtocolMajor
+							ack.BinaryVersion = "v9.9.9"
+						}
+						line, err := wingwire.Encode(ack)
+						if err != nil {
+							return err
+						}
+						if _, err := nc.Write(line); err != nil {
+							return err
+						}
+						if step == 0 {
+							request, err := r.read()
+							if err != nil {
+								return err
+							}
+							if _, ok := request.(*wingwire.DrainRequest); !ok {
+								return fmt.Errorf("expected drain request, got %T", request)
+							}
+							line, err := wingwire.Encode(&wingwire.DrainAck{})
+							if err != nil {
+								return err
+							}
+							_, err = nc.Write(line)
+							return err
+						}
+						_, _ = r.read()
+						return nil
+					}()
+					if err != nil {
+						done <- err
+						return
+					}
 				}
-				version := "v0.23.0"
-				if seen%2 == 0 {
-					version = "v0.24.0"
-				}
-				line, _ := wingwire.Encode(&wingwire.HelloAck{
-					ProtocolMajor:       wingd.ProtocolMajor,
-					NativeProtocolMajor: wingd.ProtocolMajor,
-					BinaryVersion:       version,
-				})
-				if _, err := nc.Write(line); err != nil {
-					return
-				}
-				_, _ = r.read()
+				done <- nil
 			}()
-		}
-	}()
-
-	spawns := &atomic.Int64{}
-	done := make(chan error, 1)
-	go func() {
-		_, cerr := EnsureDaemon(context.Background(), Options{
-			Home:        home,
-			Version:     "v9.9.9",
-			Spawn:       func(string, string) error { spawns.Add(1); return nil },
-			DialTimeout: 200 * time.Millisecond,
-			Backoff:     5 * time.Millisecond,
+			t.Cleanup(func() { _ = ln.Close(); <-done })
+			spawns := 0
+			cl, err := EnsureDaemon(t.Context(), Options{
+				Home: home, Version: "v9.9.9",
+				Spawn: func(string, string) error { spawns++; return nil },
+			})
+			if err != nil {
+				t.Fatalf("draining predecessor prevented replacement: %v", err)
+			}
+			defer cl.Close()
+			if spawns != 1 || cl.DaemonVersion() != "v9.9.9" {
+				t.Fatalf("replacement: spawns=%d version=%q", spawns, cl.DaemonVersion())
+			}
 		})
-		done <- cerr
-	}()
-
-	select {
-	case err := <-done:
-		if !errors.Is(err, errTakeoverExhausted) {
-			t.Fatalf("alternating predecessors ended with %v, want the version conflict reported", err)
-		}
-		if got := spawns.Load(); got != int64(maxTotalTakeovers) {
-			t.Fatalf("successor spawns = %d, want the total ceiling %d", got, maxTotalTakeovers)
-		}
-	case <-time.After(30 * time.Second):
-		t.Fatal("alternating predecessors never exhausted the takeover budget")
-	}
-}
-
-func TestTakeoverBudgetRestartsPerVersionUpToATotalCeiling(t *testing.T) {
-	budget := &takeoverBudget{}
-	for i := 0; i < maxTakeoverAttempts; i++ {
-		if !budget.spend("v0.1.0") {
-			t.Fatalf("attempt %d against one version was refused early", i+1)
-		}
-	}
-	if budget.spend("v0.1.0") {
-		t.Fatal("the same version kept coming back and was taken over a fourth time")
-	}
-	if !budget.spend("v0.2.0") {
-		t.Fatal("a different predecessor was refused; replacing it is progress")
-	}
-	for budget.total < maxTotalTakeovers {
-		if !budget.spend(fmt.Sprintf("v0.%d.0", budget.total+3)) {
-			t.Fatalf("budget refused at %d, before the total ceiling %d", budget.total, maxTotalTakeovers)
-		}
-	}
-	if budget.spend("v0.99.0") {
-		t.Fatalf("budget allowed a %dth takeover past the ceiling %d", budget.total+1, maxTotalTakeovers)
 	}
 }

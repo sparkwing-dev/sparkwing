@@ -670,12 +670,6 @@ func permissionsNotGranted(body []byte) bool {
 		strings.Contains(strings.ToLower(answer.Message), "permissions requested are not granted")
 }
 
-// CreateCommitStatus posts a commit status with an installation token.
-func (c *Client) CreateCommitStatus(ctx context.Context, token, owner, repo, sha string, status any) error {
-	_, err := c.repoWrite(ctx, http.MethodPost, token, owner, repo, "/statuses/"+url.PathEscape(sha), "commit status", status)
-	return err
-}
-
 // CheckRunOutput is the text a check run shows on GitHub. GitHub accepts at
 // most 65535 characters in Summary.
 type CheckRunOutput struct {

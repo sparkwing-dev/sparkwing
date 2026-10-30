@@ -176,28 +176,6 @@ func (s *Server) WithDashboardURL(url string) *Server {
 	return s
 }
 
-// WithLiveLogLimits sizes the in-memory live log buffers: perNodeBytes
-// per running node, totalBytes across every node together, maxNodes
-// buffers at once, and idle before a node that stopped writing without
-// finishing is released. A non-positive argument keeps that limit's
-// default, so a caller that wants a value rejected rather than ignored
-// validates it before calling; `sparkwing-controller` does.
-func (s *Server) WithLiveLogLimits(perNodeBytes int, totalBytes int64, maxNodes int, idle time.Duration) *Server {
-	if perNodeBytes > 0 {
-		s.liveLogs.perNodeBytes = perNodeBytes
-	}
-	if totalBytes > 0 {
-		s.liveLogs.totalBytes = totalBytes
-	}
-	if maxNodes > 0 {
-		s.liveLogs.maxNodes = maxNodes
-	}
-	if idle > 0 {
-		s.liveLogs.idle = idle
-	}
-	return s
-}
-
 // WithMetricsAddr moves the Prometheus endpoint off the main listener
 // onto its own address, so /metrics is reachable only from wherever
 // that address is bound and never through the public ingress. Empty

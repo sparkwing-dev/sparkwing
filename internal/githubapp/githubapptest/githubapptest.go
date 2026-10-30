@@ -1,7 +1,7 @@
 // Package githubapptest runs a local stand-in for the parts of GitHub a
 // Sparkwing GitHub App talks to: App JWT authentication, installations,
 // installation tokens restricted to repositories, the user authorization
-// code exchange, organization memberships, commit statuses and check runs. It enforces
+// code exchange, organization memberships and check runs. It enforces
 // what GitHub enforces, so a suite can prove the controller asks for no more
 // than it should.
 package githubapptest
@@ -62,14 +62,6 @@ type MintedToken struct {
 	Permissions   map[string]string
 }
 
-// status records one commit status the fake accepted.
-type status struct {
-	Repo    string
-	SHA     string
-	State   string
-	Context string
-}
-
 // CheckRunCall records one check run write the fake accepted. An update
 // carries the name and head commit the check run was created with.
 type CheckRunCall struct {
@@ -117,7 +109,6 @@ type GitHub struct {
 	failContents     int
 	failInstallRepos int
 	minted           []MintedToken
-	stats            []status
 	checks           []CheckRunCall
 	checkRuns        map[int64]CheckRunCall
 	failChecks       int
@@ -158,7 +149,6 @@ func New(t testing.TB) *GitHub {
 	mux.HandleFunc("GET /installation/repositories", g.handleInstallationRepos)
 	mux.HandleFunc("GET /repos/{owner}/{repo}/commits/{ref...}", g.handleCommit)
 	mux.HandleFunc("GET /repos/{owner}/{repo}/git/ref/{ref...}", g.handleCommit)
-	mux.HandleFunc("POST /repos/{owner}/{repo}/statuses/{sha}", g.handleStatus)
 	mux.HandleFunc("GET /repos/{owner}/{repo}/commits/{sha}/check-runs", g.handleListCheckRuns)
 	mux.HandleFunc("POST /repos/{owner}/{repo}/check-runs", g.handleCheckRun)
 	mux.HandleFunc("PATCH /repos/{owner}/{repo}/check-runs/{id}", g.handleCheckRun)
@@ -690,27 +680,6 @@ func (g *GitHub) handleInstallationRepos(w http.ResponseWriter, r *http.Request)
 		repos = append(repos, map[string]any{"id": repo.ID, "full_name": repo.FullName, "private": repo.Private, "owner": owner})
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"total_count": len(inst.Repos), "repositories": repos})
-}
-
-func (g *GitHub) handleStatus(w http.ResponseWriter, r *http.Request) {
-	tok := g.installationToken(r)
-	full := strings.ToLower(r.PathValue("owner") + "/" + r.PathValue("repo"))
-	if tok == nil || !tok.repos[full] || tok.permissions["statuses"] != "write" {
-		writeJSON(w, http.StatusForbidden, map[string]string{"message": "Resource not accessible by integration"})
-		return
-	}
-	var req struct {
-		State   string `json:"state"`
-		Context string `json:"context"`
-	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"message": err.Error()})
-		return
-	}
-	g.mu.Lock()
-	g.stats = append(g.stats, status{Repo: full, SHA: r.PathValue("sha"), State: req.State, Context: req.Context})
-	g.mu.Unlock()
-	writeJSON(w, http.StatusCreated, map[string]string{"state": req.State})
 }
 
 func (g *GitHub) handleListCheckRuns(w http.ResponseWriter, r *http.Request) {

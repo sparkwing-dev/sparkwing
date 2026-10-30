@@ -55,7 +55,7 @@ func (s Shadow) Remedy() string {
 	if s.Scope == "local" {
 		return fmt.Sprintf("this repo sets its own core.hooksPath; clear it with `git -C %s config --unset core.hooksPath`, then run `sparkwing pipeline hooks install`", s.Repo)
 	}
-	return fmt.Sprintf("run `sparkwing pipeline hooks install` in %s -- it points this repo at its own hooks and chains the global ones so both still fire", s.Repo)
+	return fmt.Sprintf("compose the hooks manually, or clear the global override with `git config --global --unset core.hooksPath`, then run `sparkwing -C %s pipeline hooks install`", s.Repo)
 }
 
 func Dir(repoRoot string) (string, error) {

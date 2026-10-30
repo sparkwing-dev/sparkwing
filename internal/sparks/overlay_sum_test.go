@@ -250,7 +250,7 @@ func TestWriteOverlayDoesNotRedownloadAReplacedModuleSet(t *testing.T) {
 		t.Skip("go toolchain not available")
 	}
 	bin, counter := countingGoBin(t)
-	t.Setenv("SPARKS_GO_BIN", bin)
+	t.Setenv("PATH", filepath.Dir(bin)+string(os.PathListSeparator)+os.Getenv("PATH"))
 	t.Setenv("GOWORK", "off")
 	t.Setenv("GOFLAGS", "")
 	t.Setenv("GOPROXY", "off")
@@ -292,7 +292,7 @@ func TestWriteOverlayLeavesTheSumToTheWorkspace(t *testing.T) {
 		t.Skip("go toolchain not available")
 	}
 	bin, counter := countingGoBin(t)
-	t.Setenv("SPARKS_GO_BIN", bin)
+	t.Setenv("PATH", filepath.Dir(bin)+string(os.PathListSeparator)+os.Getenv("PATH"))
 	t.Setenv("GOWORK", "")
 	t.Setenv("GOFLAGS", "")
 	t.Setenv("GOPROXY", "off")

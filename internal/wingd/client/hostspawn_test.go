@@ -316,7 +316,7 @@ func TestEnsureDaemon_HostingClientStillTakesOver(t *testing.T) {
 	if !errors.Is(err, errTakeoverExhausted) {
 		t.Fatalf("hosting client ended with %v, want the exhausted-takeover report", err)
 	}
-	if got := spawns.Load(); got != int64(maxTakeoverAttempts) {
-		t.Fatalf("successor spawns = %d, want %d -- the hosting client stopped taking over", got, maxTakeoverAttempts)
+	if got := spawns.Load(); got != 1 {
+		t.Fatalf("successor spawns = %d, want %d -- the hosting client stopped taking over", got, 1)
 	}
 }

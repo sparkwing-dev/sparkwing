@@ -25,6 +25,10 @@ Run `sparkwing-controller --help` for the controller startup flags. Use
 `--credentials-dir` for mounted credentials and `--credential-epoch-dir` for the
 persistent writable epoch directory.
 
+Live log buffers keep up to 512 KiB per node and 64 MiB across at most 1,024
+nodes. A node that stops writing without finishing releases its buffer after
+10 minutes. These limits are fixed; durable log storage is unaffected.
+
 The [`sparkwing-full` Helm chart](../charts/sparkwing-full/README.md) is the
 repository's Kubernetes deployment surface. It requires an explicitly compatible
 image set. The final deployment uses one controller, authorized object storage

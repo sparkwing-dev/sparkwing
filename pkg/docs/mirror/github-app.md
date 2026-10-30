@@ -37,7 +37,7 @@ The examples use the hosted deployment's hosts: the dashboard at `console.sparkw
 - **Setup URL**: `https://console.sparkwing.dev/github/app/setup`, with **Redirect on update** checked.
 - **Callback URLs**: `https://console.sparkwing.dev/github/app/callback`, beside the sign-in callback.
 - **Request user authorization (OAuth) during installation**: unchecked. The connect flow asks for the user's authorization as its own step.
-- **Repository permissions**: Checks read and write, Contents read-only, Commit statuses read and write, Metadata read-only, Pull requests read-only. Commit statuses serve an installation until its owner accepts the Checks permission; see [Check runs](#check-runs).
+- **Repository permissions**: Checks read and write, Contents read-only, Metadata read-only, Pull requests read-only.
 - **Organization permissions**: Members read-only.
 - **Account permissions**: Email addresses read-only (sign-in).
 - **Subscribe to events**: Check run, Check suite, Push, Pull request, Release, Create, Delete, Repository. GitHub sends `installation` and `installation_repositories` to every App without a checkbox.
@@ -241,11 +241,14 @@ The check run is created `queued` when the run is dispatched, moves to `in_progr
 | `cancelled` | `cancelled` |
 | no runner claimed it before the queue deadline | `timed_out` |
 
-`details_url` links to the run in the dashboard (`--dashboard-url`) and `external_id` is the run id. A completed check run's summary gives only the outcome, duration, counts of nodes by outcome, and a link to the signed-in Sparkwing console. Node names, errors and logs stay on the run page. The controller records the check run's id with the run, so every later update edits the same check run. Each write holds a per-run lock in the state database, so two controllers sharing it during an upgrade create one check run between them. Before creating a check run the controller looks for one of its own on the commit whose `external_id` is the run id and adopts it, so a create whose record was lost is not repeated. An update behind the run's stored state (queued, then running, then finished) is dropped, so a check run or commit status never moves back and a finished one keeps its conclusion.
+`details_url` links to the run in the dashboard (`--dashboard-url`) and `external_id` is the run id. A completed check run's summary gives only the outcome, duration, counts of nodes by outcome, and a link to the signed-in Sparkwing console. Node names, errors and logs stay on the run page. The controller records the check run's id with the run, so every later update edits the same check run. Each write holds a per-run lock in the state database, so two controllers sharing it during an upgrade create one check run between them. Before creating a check run the controller looks for one of its own on the commit whose `external_id` is the run id and adopts it, so a create whose record was lost is not repeated. An update behind the run's stored state (queued, then running, then finished) is dropped, so a check run never moves back and a finished one keeps its conclusion.
 
 The controller writes check runs in the background with an installation token restricted to the run's numeric repository ID and `checks: write`. It resolves the repository's current name before reporting, so renames keep working. Transient write failures are logged and remain pending for retry across controller restarts. Invalid committed App facts are recorded once and consume that revision without sending a check. GitHub failing a write never fails or delays the run. If the run advances before a report is delivered, the controller may report the newer phase directly. A valid terminal report stays pending until delivered.
 
-An installation whose owner has not yet accepted the Checks permission gets commit statuses instead: `pending`, then `success`, `failure` or `error`, under the context `sparkwing/<pipeline>`, with a token restricted to `statuses: write`. The controller logs this once per installation. A run that started on commit statuses finishes on them, including after a controller restart. New runs after the owner accepts get check runs.
+An installation owner must accept the App's Checks read and write permission
+before reports can reach GitHub. Until then, reports remain pending and execution
+continues. Accept the updated permission in the installation settings; pending
+reports use Checks when retried.
 
 ### Re-running from GitHub
 

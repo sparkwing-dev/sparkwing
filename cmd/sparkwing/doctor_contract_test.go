@@ -12,6 +12,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/githooks"
+
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/localhostwire"
 	"github.com/sparkwing-dev/sparkwing/internal/wingd"
@@ -136,12 +138,12 @@ func TestDoctorCommandMachineCancellationSkipsController(t *testing.T) {
 	defer cancel()
 	deps := doctorDependencies{machine: func(context.Context) doctorReport {
 		cancel()
-		return doctorReport{GatesSurveyError: "registry could not be read"}
+		return doctorReport{ShadowedHooks: &githooks.Shadow{Repo: "/projects/repo"}}
 	}}
 	var out bytes.Buffer
 	err := runDoctorCommandArgs(ctx, []string{"-o", "json"}, &out, deps)
 	var got doctorReport
-	if json.Unmarshal(out.Bytes(), &got) != nil || !errors.Is(err, context.Canceled) || got.ControllerChecked || got.GatesSurveyError != "registry could not be read" {
+	if json.Unmarshal(out.Bytes(), &got) != nil || !errors.Is(err, context.Canceled) || got.ControllerChecked || got.ShadowedHooks == nil || got.ShadowedHooks.Repo != "/projects/repo" {
 		t.Fatalf("machine result or cancellation lost: %+v %v", got, err)
 	}
 }

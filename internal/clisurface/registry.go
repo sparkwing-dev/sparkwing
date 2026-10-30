@@ -212,14 +212,8 @@ func Registry() []Command {
 			{Name: "secrets"},
 		}},
 		{Path: "sparkwing pipeline hooks", Flags: []Flag{}},
-		{Path: "sparkwing pipeline hooks install", Flags: []Flag{
-			{Name: "no-prove"},
-			{Name: "all-repos"},
-		}},
-		{Path: "sparkwing pipeline hooks status", Flags: []Flag{
-			{Name: "all-repos"},
-			{Name: "ungated"},
-		}},
+		{Path: "sparkwing pipeline hooks install", Flags: []Flag{}},
+		{Path: "sparkwing pipeline hooks status", Flags: []Flag{}},
 		{Path: "sparkwing pipeline hooks uninstall", Flags: []Flag{}},
 		{Path: "sparkwing pipeline lint", Flags: []Flag{
 			{Name: "pipeline", Argument: "NAME"},
@@ -783,10 +777,6 @@ func Registry() []Command {
 			{Name: "idle-claim-poll", Argument: "DURATION", Meaning: "Widest poll interval this controller suggests to a claim loop while it has no work to hand out."},
 			{Name: "insecure-cookies", Meaning: "Drop Secure and the __Host- prefix from the dashboard's session cookies so a browser keeps a session over plain HTTP."},
 			{Name: "limits-profile", Argument: "VALUE", Meaning: "Named set of abuse guards this controller runs with: cloud, cloud-free."},
-			{Name: "live-log-idle", Argument: "DURATION", Meaning: "How long a node that stopped writing without reporting that it finished keeps its live log buffer."},
-			{Name: "live-log-max-nodes", Argument: "N", Meaning: "How many nodes may hold a live log buffer at once."},
-			{Name: "live-log-node-kb", Argument: "N", Meaning: "Kilobytes of each running node's log the controller keeps in memory for live readers."},
-			{Name: "live-log-total-mb", Argument: "N", Meaning: "Megabytes of live log buffers across every running node together."},
 			{Name: "log-format", Argument: "VALUE", Meaning: "Format of this service's own log: text or json."},
 			{Name: "log-level", Argument: "VALUE", Meaning: "Lowest level this service logs: debug, info, warn or error."},
 			{Name: "log-retention", Argument: "VALUE", Meaning: "Teams whose node log segments keep for a set number of days instead of 90 (with credits) or 30 (without), as team=days[,team=days...]."},

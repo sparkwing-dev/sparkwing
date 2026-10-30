@@ -264,18 +264,6 @@ sparkwing cache prune --max-bytes 512MiB  # trim to a smaller budget
 sparkwing cache prune --all-entries               # reclaim everything
 ```
 
-### Seeing what an entry is
-
-Sparkwing records which checkouts have used each entry, and how often:
-
-```
-MOST RECENTLY USED (2 of 2)
-  c1df5cd6-4789f450   71.1 MiB  just now   x7  ~/code/sparkwing/.sparkwing +1 more checkout(s)
-  322ecb34-31432125   71.2 MiB  2d ago     x1  ~/worktrees/feature-branch/.sparkwing
-```
-
-`cache info` counts entries used by several checkouts on the `shared:` line.
-
 ### Why did it recompile?
 
 `sparkwing cache explain` prints the key, whether it is cached, and every
@@ -295,9 +283,8 @@ Comparing two checkouts input by input shows exactly what differs -- if
 `module tree` matches and a replace target does not, the pipeline source
 is identical and a dependency is not. The ignored-file count helps identify edits excluded from the key.
 
-When other cached entries came from the same checkout, `explain` lists
-them with the inputs that changed since, which is the direct answer to
-why the last run recompiled.
+Save `cache explain` output before changing build inputs, then compare it
+with the next explanation to see which digests changed.
 
 To skip the binary cache entirely for one invocation, pass
 `--sw-no-bincache`; sparkwing builds a temporary binary with debug

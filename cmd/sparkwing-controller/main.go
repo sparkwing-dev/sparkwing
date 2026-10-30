@@ -110,19 +110,6 @@ func run(args []string) error {
 		"second address serving the same API, whose requests key login throttling, the bearer "+
 			"failure budget and the request log on X-Real-IP. Only a proxy that overwrites "+
 			"X-Real-IP may reach it. Empty serves only --addr, which ignores X-Real-IP")
-	liveLogNodeKB := fs.Int("live-log-node-kb", controller.DefaultLiveLogNodeBytes>>10,
-		"kilobytes of each running node's log the controller keeps in memory for "+
-			"live readers. This is the live view for a deployment whose logs surface "+
-			"is an object store; the durable copy is unaffected.")
-	liveLogTotalMB := fs.Int("live-log-total-mb", int(controller.DefaultLiveLogTotalBytes>>20),
-		"megabytes of live log buffers across every running node together. Past it "+
-			"the controller drops the oldest bytes of the widest buffer.")
-	liveLogMaxNodes := fs.Int("live-log-max-nodes", controller.DefaultLiveLogMaxNodes,
-		"how many nodes may hold a live log buffer at once. Past it the controller "+
-			"releases the buffer of the node that wrote least recently.")
-	liveLogIdle := fs.Duration("live-log-idle", controller.DefaultLiveLogIdleTimeout,
-		"how long a node that stopped writing without reporting that it finished "+
-			"keeps its live log buffer.")
 	defaultPreferLabels := fs.String("default-prefer-labels", "",
 		"comma-separated label terms a node with no Prefers of its own prefers "+
 			"its runner to advertise, in the Prefers term syntax. Empty leaves "+
@@ -328,18 +315,6 @@ func run(args []string) error {
 	if err != nil {
 		return err
 	}
-	if *liveLogNodeKB < 1 {
-		return fmt.Errorf("--live-log-node-kb must be at least 1")
-	}
-	if *liveLogTotalMB < 1 {
-		return fmt.Errorf("--live-log-total-mb must be at least 1")
-	}
-	if *liveLogMaxNodes < 1 {
-		return fmt.Errorf("--live-log-max-nodes must be at least 1")
-	}
-	if *liveLogIdle <= 0 {
-		return fmt.Errorf("--live-log-idle must be positive")
-	}
 	if *maxRunsPerPrincipalHour < 0 {
 		return fmt.Errorf("--max-runs-per-principal-hour cannot be negative")
 	}
@@ -390,10 +365,6 @@ func run(args []string) error {
 	egressCfg.MaxStreamsPerPrincipal = guards.MaxLogStreamsPerPrincipal
 	egressCfg.MaxDownloadsPerPrincipal = guards.MaxDownloadsPerPrincipal
 	egressCfg.GlobalDailyAlarmBytes = guards.EgressDailyAlarmBytes
-	if int64(*liveLogNodeKB)<<10 > int64(*liveLogTotalMB)<<20 {
-		return fmt.Errorf("--live-log-node-kb (%d) exceeds --live-log-total-mb (%d), so one node would never fit",
-			*liveLogNodeKB, *liveLogTotalMB)
-	}
 
 	if err := checkInsecureCookies(cfg, *insecureCookies); err != nil {
 		return err
@@ -562,7 +533,6 @@ func run(args []string) error {
 			WithPayments(paymentVerifier, st.AsOperator()).
 			WithOperatorAccounts(splitCSV(*operatorAccounts)).
 			WithMetricsAddr(*metricsAddr).
-			WithLiveLogLimits(*liveLogNodeKB<<10, int64(*liveLogTotalMB)<<20, *liveLogMaxNodes, *liveLogIdle).
 			WithLocalFirstPlacement(splitCSV(*defaultPreferLabels), *placementHold, *placementLiveness).
 			WithFloodPolicy(controller.FloodPolicy{
 				RunsPerPrincipalHour: guards.RunsPerPrincipalHour,

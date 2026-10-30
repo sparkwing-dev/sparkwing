@@ -66,7 +66,6 @@ Sparkwing code. See [node protocol](node-protocol.md).
 
 | Variable | Why it stays |
 |---|---|
-| `SPARKWING_GUARD_BASE` | Names the git ref whose `.guards/` allow-lists bound growth when this repository's `internal/guardcheck` runs; the default is `origin/main`. |
 | `SPARKWING_TESTLEAK_HOST` | Marks the re-executed test binary in `internal/testleak`; it crosses exec, so it cannot be a flag. |
 | `SPARKWING_TEST_PG_URL` | Points the store test suite at a PostgreSQL database. |
 | `SPARKWING_TEST_SHELL_BASH` | Names the Git Bash that runs a Windows test's fake `#!/bin/sh` tool; it crosses exec into the stand-in executable, so it cannot be a flag. |
@@ -107,12 +106,6 @@ Sparkwing code. See [node protocol](node-protocol.md).
 | `CI` | CI providers |
 | `CLICOLOR_FORCE` | terminal convention |
 | `NO_COLOR` | terminal convention |
-
-## Undecided
-
-| Variable | Why it stays |
-|---|---|
-| `SPARKS_GO_BIN` | The `go` binary the sparks resolver runs when it writes a pipeline's module overlay; nothing sets it. |
 
 ## Process environment policy
 

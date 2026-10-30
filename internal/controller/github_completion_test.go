@@ -30,8 +30,6 @@ type completionGitHub struct {
 	mu          sync.Mutex
 	checks      []githubapp.CheckRun
 	checkWrites []string
-	statuses    []githubCommitStatusRequest
-	statusSHAs  []string
 	tokens      []struct {
 		IDs         []int64           `json:"repository_ids"`
 		Names       []string          `json:"repositories"`
@@ -93,18 +91,6 @@ func (g *completionGitHub) RoundTrip(r *http.Request) (*http.Response, error) {
 			g.existing = 101
 		}
 		payload = fmt.Sprintf(`{"id":%d}`, g.existing)
-	case strings.HasPrefix(r.URL.Path, "/repos/"+g.name+"/statuses/"):
-		if g.failWrites > 0 {
-			g.failWrites--
-			status = 502
-			break
-		}
-		var commit githubCommitStatusRequest
-		if err := json.NewDecoder(r.Body).Decode(&commit); err != nil {
-			return nil, err
-		}
-		g.statuses = append(g.statuses, commit)
-		g.statusSHAs = append(g.statusSHAs, strings.TrimPrefix(r.URL.Path, "/repos/"+g.name+"/statuses/"))
 	default:
 		return nil, fmt.Errorf("unexpected request %s %s", r.Method, r.URL)
 	}
@@ -199,8 +185,8 @@ func TestGitHubCompletionFromRealTerminalTransition(t *testing.T) {
 			if len(checks) != 1 || checks[0].Status != "completed" || checks[0].Conclusion != conclusion || checks[0].ExternalID != "run" || checks[0].DetailsURL != "https://dash.example.test/runs?run=run" {
 				t.Fatalf("terminal GitHub checks=%+v", checks)
 			}
-			if checks[0].HeadSHA != strings.Repeat("a", 40) || len(f.api.statuses) != 0 {
-				t.Fatalf("commit=%+v statuses=%+v", checks[0], f.api.statuses)
+			if checks[0].HeadSHA != strings.Repeat("a", 40) {
+				t.Fatalf("commit=%+v", checks[0])
 			}
 			for _, token := range f.api.tokens {
 				if len(token.IDs) != 1 || token.IDs[0] != 42 || len(token.Names) != 0 || len(token.Permissions) != 1 || token.Permissions["checks"] != "write" {
@@ -298,25 +284,6 @@ func TestGitHubCompletionAdoptsUnrecordedCreate(t *testing.T) {
 	}
 }
 
-func TestGitHubCompletionFallbackSurvivesReplacement(t *testing.T) {
-	f := newGitHubCompletion(t)
-	f.api.checksGranted = false
-	engineSQL(t, f.server.store, `UPDATE runs SET status='pending' WHERE team='a' AND id='run'`)
-	engineSQL(t, f.server.store, `INSERT INTO run_effects(team,run_id,effect,desired_state,desired_rev,next_at) VALUES ('a','run','github_check','pending',1,1)`)
-	f.reconcile()
-	if len(f.api.statuses) != 1 || f.api.statuses[0].State != "pending" {
-		t.Fatalf("pending fallback=%+v", f.api.statuses)
-	}
-	engineSQL(t, f.server.store, `UPDATE runs SET status='running' WHERE team='a' AND id='run'`)
-	f.server.Server = New(f.server.store, nil).WithGitHubApp(f.cfg)
-	f.api.checksGranted = true
-	f.finish(runstate.RunSuccess)
-	f.reconcile()
-	if len(f.api.checks) != 0 || len(f.api.statuses) != 2 || f.api.statuses[1].State != "success" {
-		t.Fatalf("fallback changed after replacement: checks=%+v statuses=%+v", f.api.checks, f.api.statuses)
-	}
-}
-
 func TestGitHubCompletionUsesCurrentNumericRepository(t *testing.T) {
 	f := newGitHubCompletion(t)
 	f.api.name = "renamed/new-name"
@@ -383,11 +350,11 @@ func TestGitHubCompletionAuthorityProperty(t *testing.T) {
 		_, delivered, attempts, _ := f.revision()
 		switch scenario % 12 {
 		case 0, 5:
-			return len(f.api.checks) == 0 && len(f.api.statuses) == 0 && delivered == 1 && attempts == 1 && strings.Count(logs.String(), "deliver run effect") == 1
+			return len(f.api.checks) == 0 && delivered == 1 && attempts == 1 && strings.Count(logs.String(), "deliver run effect") == 1
 		case 1, 2, 3, 4, 6, 7:
 			return len(f.api.checks) == 1 && f.api.checks[0].HeadSHA == strings.Repeat("a", 40) && f.api.checks[0].ExternalID == "run" && delivered == 1 && attempts == 0
 		}
-		return len(f.api.checks) == 0 && len(f.api.statuses) == 0 && delivered == 0 && attempts == 2
+		return len(f.api.checks) == 0 && delivered == 0 && attempts == 2
 	}
 	for scenario := range uint8(12) {
 		if !property(scenario, "untrusted/reused") {
@@ -400,13 +367,12 @@ func TestGitHubCompletionAuthorityProperty(t *testing.T) {
 }
 
 func TestGitHubCompletionStalePhasesNeverRegressProperty(t *testing.T) {
-	property := func(outcome uint8, phase, statuses bool) bool {
+	property := func(outcome uint8, phase bool) bool {
 		f := newGitHubCompletion(t)
-		f.api.checksGranted = !statuses
 		state := []runstate.RunState{runstate.RunSuccess, runstate.RunFailed, runstate.RunCancelled}[outcome%3]
 		f.finish(state)
 		f.reconcile()
-		currentChecks, currentStatuses := len(f.api.checks), len(f.api.statuses)
+		currentChecks := len(f.api.checks)
 		old := runstate.RunPending
 		if phase {
 			old = runstate.RunRunning
@@ -419,7 +385,7 @@ func TestGitHubCompletionStalePhasesNeverRegressProperty(t *testing.T) {
 		if err := reporter.deliver(t.Context(), u); err != nil {
 			t.Fatal(err)
 		}
-		return len(f.api.checks) == currentChecks && len(f.api.statuses) == currentStatuses
+		return len(f.api.checks) == currentChecks
 	}
 	if err := quick.Check(property, quicktest.Config(&quick.Config{MaxCount: 16})); err != nil {
 		t.Fatal(err)

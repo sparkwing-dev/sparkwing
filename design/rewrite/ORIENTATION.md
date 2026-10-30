@@ -199,7 +199,6 @@ A lane test script exports its environment once and runs every command with
 
 ```bash
 export GOWORK=off GOFLAGS=-buildvcs=false TMPDIR=/var/tmp/sw-lead-tmp \
-  SPARKWING_GUARD_BASE=<integration-branch> \
   KUBEBUILDER_ASSETS=/var/tmp/sw-lead-tmp/vapreview/envtest/k8s/1.37.0-linux-amd64
 W=/home/bombuntu/.xwing/envs/<env>/sparkwing
 go -C $W build ./... && go -C $W vet ./...
@@ -207,7 +206,6 @@ go -C $W test -count=1 ./internal/store/ -run 'TestRefill'
 SPARKWING_TEST_STORE=postgres \
   SPARKWING_TEST_PG_URL='postgres://sw:sw@127.0.0.1:55432/sw_<env>?sslmode=disable' \
   go -C $W test -count=1 ./internal/store/ -run 'TestRefill'
-go -C $W run ./internal/guardcheck .
 go -C $W run ./internal/commentcheck -base origin/main .
 ```
 
@@ -217,9 +215,8 @@ go -C $W run ./internal/commentcheck -base origin/main .
   Without the first variable the suite runs on SQLite.
 - Isolated HOME: tests call `testhome.Set` (`internal/testhome`). Run any `sparkwing`
   binary with a private `HOME` and `SPARKWING_HOME`, never the real ones.
-- `internal/guardcheck` checks SDK dependency closure, process spawning and
-  the `.guards/` allow-lists; `SPARKWING_GUARD_BASE` names the ref whose
-  allow-lists bound growth (default `origin/main`).
+- `.golangci.yml` owns the depguard dependency rules, checked with the other
+  linters against changes since `origin/main`.
 - Comment-tag gate: `internal/commentcheck` allows GoDoc on exported API and
   body comments tagged `hack:`, `safety:`, `bug:` or `perf:` (at most 4 lines
   of 120 characters), and refuses ticket ids in comments. The gate job runs

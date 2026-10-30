@@ -1,4 +1,0 @@
-# F1: (*store.Store).ForTeam/AsOperator/SetTestClock outside composition roots,
-# and TestOnly* outside _test.go. One line per call: <file><TAB><method>.
-# Only delete lines: guardcheck fails a finding missing here and a line no
-# finding matches. See .guards/README.md.

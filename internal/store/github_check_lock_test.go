@@ -138,9 +138,6 @@ func TestReportGitHubCheckHoldsNoTransactionDuringFn(t *testing.T) {
 		if state != "idle" {
 			t.Errorf("report lock holder is %q while fn runs, want idle", state)
 		}
-		if err := tenant.UseGitHubCommitStatuses(probe, accepted.RunID); err != nil {
-			return 0, err
-		}
 		return 7, nil
 	}); err != nil {
 		t.Fatal(err)
@@ -178,10 +175,7 @@ func TestReportGitHubCheckConcurrentReportsKeepOperationalCapacity(t *testing.T)
 			} else if id != 41 {
 				return 0, fmt.Errorf("recorded check run = %d, want 41", id)
 			}
-			if _, err := tenant.GitHubCommitStatuses(ctx, accepted.RunID); err != nil {
-				return 0, err
-			}
-			if err := tenant.UseGitHubCommitStatuses(ctx, accepted.RunID); err != nil {
+			if _, err := tenant.GitHubCheckRun(ctx, accepted.RunID); err != nil {
 				return 0, err
 			}
 			return 41, nil
