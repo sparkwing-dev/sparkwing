@@ -90,6 +90,7 @@ export class NodeRoutes implements HostServices {
   }
   async latest<T>(ref: PipelineRef<T>, signal: AbortSignal): Promise<T> {
     const query = new URLSearchParams({ job: ref.jobId });
+    if (ref.fromAnyRun) query.set("from_any_run", "true");
     if (ref.maxAgeMs !== undefined) query.set("max_age_ms", String(ref.maxAgeMs));
     const data = await this.#request("GET", `/node/v1/pipelines/${encodeURIComponent(ref.pipeline)}/latest?${query}`, signal);
     if (!("output" in data)) throw failure("protocol_error", "latest response requires output");

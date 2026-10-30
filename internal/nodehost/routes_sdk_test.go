@@ -60,7 +60,7 @@ func TestSDKHTTPServicesUseTheRegisteredProductionRouter(t *testing.T) {
 	service.Output = func(context.Context, capability.Authorized, string) (json.RawMessage, error) {
 		return json.RawMessage(`{"image":"ready"}`), nil
 	}
-	service.Latest = func(context.Context, capability.Authorized, string, string, time.Duration) (ProcessOutput, error) {
+	service.Latest = func(context.Context, capability.Authorized, string, string, time.Duration, bool) (ProcessOutput, error) {
 		return ProcessOutput{RunID: "previous", Output: json.RawMessage(`{"image":"ready"}`)}, nil
 	}
 	service.OIDC = func(context.Context, capability.Authorized, string) (ProcessOIDCToken, error) {
@@ -113,7 +113,7 @@ func TestSDKHTTPServicesUseTheRegisteredProductionRouter(t *testing.T) {
 			if err != nil || string(raw) != `{"image":"ready"}` {
 				return errors.New("SDK output service failed")
 			}
-			raw, err = services.Latest(ctx, "compile", "build", time.Minute)
+			raw, err = services.Latest(ctx, "compile", "build", time.Minute, false)
 			if err != nil || string(raw) != `{"image":"ready"}` {
 				return errors.New("SDK latest service failed")
 			}

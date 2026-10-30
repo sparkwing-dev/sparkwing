@@ -80,7 +80,7 @@ func (b evaluationBindings) CheckBinding(ctx context.Context, p capability.Princ
 			}
 			declared := false
 			for _, ref := range source.References {
-				if ref.Pipeline == target.Reference.Pipeline && ref.Job != "" && ref.Job == target.Reference.JobID {
+				if (!target.Reference.FromAnyRun || ref.FromAnyRun) && ref.Pipeline == target.Reference.Pipeline && ref.Job != "" && ref.Job == target.Reference.JobID {
 					declared = true
 				}
 			}

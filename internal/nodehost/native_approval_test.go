@@ -241,7 +241,7 @@ func testNativeApprovalPredicateReads(t *testing.T, fixture string, reference bo
 					reads.Add(1)
 					return json.RawMessage("true"), nil
 				}
-				service.Latest = func(_ context.Context, auth capability.Authorized, pipeline, job string, _ time.Duration) (ProcessOutput, error) {
+				service.Latest = func(_ context.Context, auth capability.Authorized, pipeline, job string, _ time.Duration, _ bool) (ProcessOutput, error) {
 					want := capability.PipelineReferenceTarget{Pipeline: "upstream", JobID: "artifact"}
 					if !reference || pipeline != want.Pipeline || job != want.JobID || auth.Target.Reference == nil || *auth.Target.Reference != want || auth.Target.RunID != "" || auth.Target.NodeID != "" || !reflect.DeepEqual(auth.Binding, principal.Capability.Binding) {
 						return ProcessOutput{}, errors.New("pipeline reference mixed caller identity with its resource or lost its exact evaluation fence")

@@ -60,7 +60,7 @@ func TestHostRoutesUseBoundServices(t *testing.T) {
 	})
 	t.Run("latest", func(t *testing.T) {
 		s := fakeRoutes(t, "GET", "/node/v1/pipelines/release%2Fprod/latest?job=build%26image&max_age_ms=60000", `null`, `{"output":42}`)
-		value, err := s.Latest(t.Context(), "release/prod", "build&image", time.Minute)
+		value, err := s.Latest(t.Context(), "release/prod", "build&image", time.Minute, false)
 		if err != nil || string(value) != "42" {
 			t.Fatalf("latest = %s, %v", value, err)
 		}
@@ -161,7 +161,7 @@ func TestHostRoutesRejectIncompleteResponses(t *testing.T) {
 		{
 			"latest", "GET", "/node/v1/pipelines/p/latest?job=job&max_age_ms=0", `null`,
 			[]string{`null`, `{}`},
-			func(s *routeServices) error { _, err := s.Latest(t.Context(), "p", "job", 0); return err },
+			func(s *routeServices) error { _, err := s.Latest(t.Context(), "p", "job", 0, false); return err },
 		},
 		{
 			"oidc", "POST", "/node/v1/oidc-token", `{"audience":"deploy"}`,
@@ -200,7 +200,7 @@ func TestHostRoutesPreserveExplicitEmptyValues(t *testing.T) {
 		t.Fatalf("explicit null output = %s, %v", output, err)
 	}
 	service = fakeRoutes(t, "GET", "/node/v1/pipelines/p/latest?job=job&max_age_ms=0", `null`, `{"output":null}`)
-	if output, err := service.Latest(t.Context(), "p", "job", 0); err != nil || string(output) != "null" {
+	if output, err := service.Latest(t.Context(), "p", "job", 0, false); err != nil || string(output) != "null" {
 		t.Fatalf("explicit null latest output = %s, %v", output, err)
 	}
 }
@@ -274,5 +274,13 @@ func TestRecordsUseAcknowledgedBoundRoutes(t *testing.T) {
 				t.Fatal("invalid acknowledgement accepted")
 			}
 		})
+	}
+}
+
+func TestHostLatestCarriesExplicitTrustOptOut(t *testing.T) {
+	service := fakeRoutes(t, "GET", "/node/v1/pipelines/p/latest?job=job&max_age_ms=0&from_any_run=true", `null`, `{"output":42}`)
+	output, err := service.Latest(t.Context(), "p", "job", 0, true)
+	if err != nil || string(output) != "42" {
+		t.Fatalf("output=%s err=%v", output, err)
 	}
 }

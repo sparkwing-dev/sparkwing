@@ -421,7 +421,7 @@ func (h *host) Output(ctx context.Context, job string) (json.RawMessage, error) 
 	return append(json.RawMessage(nil), raw...), nil
 }
 
-func (h *host) Latest(ctx context.Context, p, j string, _ time.Duration) (json.RawMessage, error) {
+func (h *host) Latest(ctx context.Context, p, j string, _ time.Duration, _ bool) (json.RawMessage, error) {
 	if err := h.executionError(ctx); err != nil {
 		return nil, err
 	}

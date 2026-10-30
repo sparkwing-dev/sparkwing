@@ -124,7 +124,7 @@ func (s *Server) handlePipelineLatest(w http.ResponseWriter, r *http.Request, au
 	if err != nil {
 		return engineLookupError(err)
 	}
-	run, err := tenant.GetLatestRun(r.Context(), name, statuses, maxAge)
+	run, err := tenant.GetLatestRun(r.Context(), name, statuses, maxAge, authorized.Target.Reference.FromAnyRun)
 	if err != nil {
 		return engineLookupError(err)
 	}

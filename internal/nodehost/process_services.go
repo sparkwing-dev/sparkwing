@@ -34,7 +34,7 @@ type ProcessServices struct {
 	Secrets        []string
 	Secret         func(context.Context, capability.Authorized, string) (string, bool, error)
 	Output         func(context.Context, capability.Authorized, string) (json.RawMessage, error)
-	Latest         func(context.Context, capability.Authorized, string, string, time.Duration) (ProcessOutput, error)
+	Latest         func(context.Context, capability.Authorized, string, string, time.Duration, bool) (ProcessOutput, error)
 	OIDC           func(context.Context, capability.Authorized, string) (ProcessOIDCToken, error)
 	StartChild     func(context.Context, capability.Authorized, ChildRequest) (string, error)
 	AwaitChild     func(context.Context, capability.Authorized, string, string, time.Duration) (ProcessChildResult, error)
@@ -158,7 +158,7 @@ func serviceEvidence(request *http.Request, pattern string) (capability.RequestE
 	case "/node/v1/secrets/{name}":
 		evidence.Target.SecretName = request.PathValue("name")
 	case "/node/v1/pipelines/{name}/latest":
-		evidence.Target = capability.Target{Reference: &capability.PipelineReferenceTarget{Pipeline: request.PathValue("name"), JobID: request.URL.Query().Get("job")}}
+		evidence.Target = capability.Target{Reference: &capability.PipelineReferenceTarget{Pipeline: request.PathValue("name"), JobID: request.URL.Query().Get("job"), FromAnyRun: request.URL.Query().Get("from_any_run") == "true"}}
 	}
 	if evidence.Target.Reference == nil && evidence.Target.NodeID == "" {
 		evidence.Target.NodeID = request.URL.Query().Get("job")

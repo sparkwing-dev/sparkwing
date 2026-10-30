@@ -59,8 +59,8 @@ func WithClient(cfg NativeConfig, c *client.LocalHostClient) NativeConfig {
 		service.Output = func(ctx context.Context, _ capability.Authorized, job string) (json.RawMessage, error) {
 			return remote.Output(ctx, service.RunID, job)
 		}
-		service.Latest = func(ctx context.Context, _ capability.Authorized, pipeline, job string, age time.Duration) (ProcessOutput, error) {
-			run, output, err := remote.Latest(ctx, pipeline, job, age)
+		service.Latest = func(ctx context.Context, _ capability.Authorized, pipeline, job string, age time.Duration, fromAnyRun bool) (ProcessOutput, error) {
+			run, output, err := remote.Latest(ctx, pipeline, job, age, fromAnyRun)
 			return ProcessOutput{RunID: run, Output: output}, err
 		}
 		service.OIDC = func(ctx context.Context, _ capability.Authorized, audience string) (ProcessOIDCToken, error) {

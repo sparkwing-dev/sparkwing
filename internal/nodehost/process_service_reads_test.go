@@ -134,7 +134,7 @@ func TestProcessServicesReadUnderBoundAuthorityAndMaskBeforeDelivery(t *testing.
 	if response.Code != http.StatusOK || strings.TrimSpace(response.Body.String()) != `{"output":null}` {
 		t.Fatalf("output response=%d %s", response.Code, response.Body)
 	}
-	service.Latest = func(_ context.Context, got capability.Authorized, pipeline, id string, age time.Duration) (ProcessOutput, error) {
+	service.Latest = func(_ context.Context, got capability.Authorized, pipeline, id string, age time.Duration, fromAnyRun bool) (ProcessOutput, error) {
 		check(got)
 		if pipeline != "release" || id != "producer" || (got.Target.Reference == nil || got.Target.Reference.JobID != id || got.Target.Reference.Pipeline != pipeline) || age != 3*time.Second {
 			t.Fatal("latest output selectors changed")

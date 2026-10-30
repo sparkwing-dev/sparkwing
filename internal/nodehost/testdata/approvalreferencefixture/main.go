@@ -30,7 +30,7 @@ func (operations) RunStep(context.Context, any, nodeproto.Request) (nodeproto.Ru
 }
 
 func (operations) Eval(ctx context.Context, _ any, _ nodeproto.Request) (nodeproto.EvalResult, error) {
-	value, err := sdkserve.ServicesFrom(ctx).Latest(ctx, "upstream", "artifact", 0)
+	value, err := sdkserve.ServicesFrom(ctx).Latest(ctx, "upstream", "artifact", 0, false)
 	return nodeproto.EvalResult{Value: value}, err
 }
 

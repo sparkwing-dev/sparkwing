@@ -14,7 +14,7 @@ func FuzzDeclaredPipelineReferenceDoesNotEscapeItsJob(f *testing.F) {
 	}
 	f.Fuzz(func(t *testing.T, change uint8, suffix string) {
 		s, _, actor, _ := resultFixture(t)
-		rewriteSchemaExec(t, s.db, `UPDATE nodes SET spec_json=? WHERE team='a' AND run_id='run'`, []byte(`{"id":"job","pipeline_refs":[{"pipeline":"producer","job":"output"}]}`))
+		rewriteSchemaExec(t, s.db, `UPDATE nodes SET spec_json=? WHERE team='a' AND run_id='run'`, []byte(`{"id":"job","pipeline_refs":[{"pipeline":"producer","job":"output","from_any_run":true}]}`))
 		sealed, err := json.Marshal(runspec.SealedRequest{Version: 1, Request: runspec.Request{Pipeline: "producer"}})
 		if err != nil {
 			t.Fatal(err)
@@ -39,7 +39,7 @@ func FuzzDeclaredPipelineReferenceDoesNotEscapeItsJob(f *testing.F) {
 		case 3:
 			rewriteSchemaExec(t, s.db, `UPDATE nodes SET spec_json=? WHERE team='a' AND run_id='run'`, []byte(`{"id":"job","pipeline_refs":[{"pipeline":"producer","job":"other"}]}`))
 		case 4:
-			rewriteSchemaExec(t, s.db, `UPDATE nodes SET spec_json=? WHERE team='a' AND run_id='run'`, []byte(`{"id":"job","pipeline_refs":[{"pipeline":"other","job":"output"}]}`))
+			rewriteSchemaExec(t, s.db, `UPDATE nodes SET spec_json=? WHERE team='a' AND run_id='run'`, []byte(`{"id":"job","pipeline_refs":[{"pipeline":"other","job":"output","from_any_run":true}]}`))
 		case 5:
 			rewriteSchemaExec(t, s.db, `UPDATE nodes SET generation=8 WHERE team='a' AND run_id='run'`)
 		case 6:

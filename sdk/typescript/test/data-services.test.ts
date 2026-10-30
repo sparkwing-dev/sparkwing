@@ -40,7 +40,7 @@ test("artifact edges, output references and child results reach the bound routes
         })
         .artifacts("dist/**");
       const direct = refTo(producer);
-      const previous = refToLastRun<number>("release/candidate", "bundle", { maxAgeMs: 0 });
+      const previous = refToLastRun<number>("release/candidate", "bundle", { maxAgeMs: 0, fromAnyRun: true });
       plan
         .job("consumer", async (ctx) => ({
           direct: await direct.get(ctx),
@@ -59,6 +59,7 @@ test("artifact edges, output references and child results reach the bound routes
       if (target.pathname === "/node/v1/pipelines/release%2Fcandidate/latest") {
         assert.equal(target.searchParams.get("job"), "bundle");
         assert.equal(target.searchParams.get("max_age_ms"), "0");
+        assert.equal(target.searchParams.get("from_any_run"), "true");
         return Response.json({ output: 42 });
       }
       if (target.pathname === "/node/v1/children") {
@@ -75,13 +76,13 @@ test("artifact edges, output references and child results reach the bound routes
   assert.deepEqual(jobs[0].artifacts, ["dist/**"]);
   assert.deepEqual(jobs[1].consumes, [{ producer: "producer", into: "vendor" }]);
   assert.deepEqual(jobs[1].deps, ["producer"]);
-  assert.deepEqual(jobs[1].pipeline_refs, [{ pipeline: "release/candidate", job: "bundle" }]);
+  assert.deepEqual(jobs[1].pipeline_refs, [{ pipeline: "release/candidate", job: "bundle", from_any_run: true }]);
   const result = await host.send({ id: "body", op: "run_step", settled: [], job: "consumer", step: jobs[1].steps[0].id, attempt: 1 });
   assert.equal(result.result.outcome, "success", JSON.stringify(result));
   assert.deepEqual(result.result.output, { direct: { revision: 7 }, previous: 42, child: false });
   assert.deepEqual(calls, [
     "GET /node/v1/jobs/producer/output",
-    "GET /node/v1/pipelines/release%2Fcandidate/latest?job=bundle&max_age_ms=0",
+    "GET /node/v1/pipelines/release%2Fcandidate/latest?job=bundle&from_any_run=true&max_age_ms=0",
     "POST /node/v1/children",
     "GET /node/v1/children/child-run/await?job=result&wait_ms=60000",
     "GET /node/v1/children/child-run/await?job=result&wait_ms=60000",

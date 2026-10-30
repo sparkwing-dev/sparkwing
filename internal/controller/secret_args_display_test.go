@@ -102,7 +102,7 @@ func TestSecretArgs_ControllerRejectsOlderWriterInputHash(t *testing.T) {
 func TestSecretArgs_ControllerPipelineLatestRedacts(t *testing.T) {
 	f := newBrowserFixture(t, nil, fixtureStorePolicies(store.Policies{Intake: receiptPolicy{}}))
 	secretArgRun(t, f, ctlSecretValue, true)
-	assertRedactedResponse(t, "latest", secretArgBody(t, f, "/api/v1/pipelines/deploy/latest"), ctlSecretValue, true)
+	assertRedactedResponse(t, "latest", secretArgBody(t, f, "/api/v1/pipelines/deploy/latest?from_any_run=true"), ctlSecretValue, true)
 }
 
 func TestSecretArgs_ControllerAttemptsRedacts(t *testing.T) {
@@ -141,8 +141,12 @@ func TestSecretArgs_ExecutionViewDoesNotWidenOtherEndpoints(t *testing.T) {
 func checkSecretArgViews(t *testing.T, f *browserFixture, run, private string, classified bool) {
 	t.Helper()
 	for _, query := range []string{"", "?include=secret_values"} {
-		for _, path := range []string{"/api/v1/runs", "/api/v1/runs/" + run, "/api/v1/runs/" + run + "/attempts", "/api/v1/pipelines/deploy/latest"} {
-			assertRedactedResponse(t, path+query, secretArgBody(t, f, path+query), private, classified)
+		for _, path := range []string{"/api/v1/runs", "/api/v1/runs/" + run, "/api/v1/runs/" + run + "/attempts", "/api/v1/pipelines/deploy/latest?from_any_run=true"} {
+			target := path + query
+			if strings.Contains(path, "?") && query != "" {
+				target = path + "&" + strings.TrimPrefix(query, "?")
+			}
+			assertRedactedResponse(t, target, secretArgBody(t, f, target), private, classified)
 		}
 		assertPrivateReceipt(t, secretArgBody(t, f, "/api/v1/runs/"+run+"/receipt"+query), private)
 		legacy := f.serve(f.cookieRequest(http.MethodGet, "/api/v1/runs"+query, ""))

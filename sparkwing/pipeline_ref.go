@@ -17,7 +17,7 @@ type resolvedPipelineRef struct {
 // Resolvers also emit an audit trail so the consuming node's event
 // stream records which source run fed it.
 type pipelineResolver interface {
-	resolve(ctx context.Context, pipeline, nodeID string, maxAge time.Duration) (*resolvedPipelineRef, error)
+	resolve(ctx context.Context, pipeline, nodeID string, maxAge time.Duration, fromAnyRun bool) (*resolvedPipelineRef, error)
 }
 
 func pipelineResolverFromContext(ctx context.Context) pipelineResolver {
@@ -28,8 +28,8 @@ func pipelineResolverFromContext(ctx context.Context) pipelineResolver {
 }
 
 // PipelineResolverFunc adapts a plain function to PipelineResolver.
-type pipelineResolverFunc func(ctx context.Context, pipeline, nodeID string, maxAge time.Duration) (*resolvedPipelineRef, error)
+type pipelineResolverFunc func(ctx context.Context, pipeline, nodeID string, maxAge time.Duration, fromAnyRun bool) (*resolvedPipelineRef, error)
 
-func (f pipelineResolverFunc) resolve(ctx context.Context, pipeline, nodeID string, maxAge time.Duration) (*resolvedPipelineRef, error) {
-	return f(ctx, pipeline, nodeID, maxAge)
+func (f pipelineResolverFunc) resolve(ctx context.Context, pipeline, nodeID string, maxAge time.Duration, fromAnyRun bool) (*resolvedPipelineRef, error) {
+	return f(ctx, pipeline, nodeID, maxAge, fromAnyRun)
 }

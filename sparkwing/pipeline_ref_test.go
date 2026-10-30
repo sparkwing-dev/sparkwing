@@ -14,16 +14,18 @@ type stubResolver struct {
 	lastPipeline string
 	lastNodeID   string
 	lastMaxAge   time.Duration
+	lastAnyRun   bool
 
 	runID string
 	data  []byte
 	err   error
 }
 
-func (s *stubResolver) resolve(_ context.Context, pipeline, nodeID string, maxAge time.Duration) (*resolvedPipelineRef, error) {
+func (s *stubResolver) resolve(_ context.Context, pipeline, nodeID string, maxAge time.Duration, fromAnyRun bool) (*resolvedPipelineRef, error) {
 	s.lastPipeline = pipeline
 	s.lastNodeID = nodeID
 	s.lastMaxAge = maxAge
+	s.lastAnyRun = fromAnyRun
 	if s.err != nil {
 		return nil, s.err
 	}
@@ -127,7 +129,7 @@ func TestCollectRefs_DiscoversFilledRefFields(t *testing.T) {
 
 func TestPipelineResolverFunc_AdaptsPlainFunction(t *testing.T) {
 	called := false
-	fn := pipelineResolverFunc(func(_ context.Context, pipeline, nodeID string, maxAge time.Duration) (*resolvedPipelineRef, error) {
+	fn := pipelineResolverFunc(func(_ context.Context, pipeline, nodeID string, maxAge time.Duration, fromAnyRun bool) (*resolvedPipelineRef, error) {
 		called = true
 		return &resolvedPipelineRef{RunID: "fn-run", Data: []byte(`{"digest":"z","tag":"z"}`)}, nil
 	})
@@ -135,5 +137,24 @@ func TestPipelineResolverFunc_AdaptsPlainFunction(t *testing.T) {
 	got := RefToLastRun[buildOut]("x", "y").Get(ctx)
 	if !called || got.Digest != "z" {
 		t.Fatalf("func resolver not invoked properly: called=%v got=%+v", called, got)
+	}
+}
+
+func TestRefToLastRunFromAnyRunIsDeclaredAndResolved(t *testing.T) {
+	resolver := &stubResolver{data: []byte(`{"digest":"ok"}`)}
+	ctx := context.WithValue(t.Context(), keyPipelineResolver, resolver)
+	ref := RefToLastRun[buildOut]("build", "artifact", FromAnyRun())
+	_ = ref.Get(ctx)
+	plan := NewPlan()
+	node := Job(plan, "consumer", &refConsumerJob{Prev: ref})
+	declared := jobDocument(plan, node).References
+	if len(declared) != 1 || !declared[0].FromAnyRun {
+		t.Fatalf("sealed declaration lost opt-out: %+v", declared)
+	}
+	if !resolver.lastAnyRun || !ref.target().AnyRun {
+		t.Fatal("opt-out was lost from the runtime or declared reference")
+	}
+	if RefToLastRun[buildOut]("build", "artifact").AnyRun {
+		t.Fatal("reference defaults to any run")
 	}
 }

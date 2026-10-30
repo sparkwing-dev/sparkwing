@@ -132,6 +132,7 @@ type Failure struct {
 type FailureRecoveryFn func(ctx context.Context, f Failure) error
 type FailureStage int
 func (s FailureStage) String() string
+func FromAnyRun() RefOption
 type GenerateFn func(context.Context, *Plan) error
 type Generator struct {
 }
@@ -304,6 +305,8 @@ type Ref[T any] struct {
 	Pipeline string
 
 	MaxAge time.Duration
+
+	AnyRun bool
 }
 func (r Ref[T]) Get(ctx context.Context) T
 func (r Ref[T]) Job() string

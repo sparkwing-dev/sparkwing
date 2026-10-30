@@ -535,6 +535,9 @@
     "pipelineRef": {
       "additionalProperties": false,
       "properties": {
+        "from_any_run": {
+          "type": "boolean"
+        },
         "job": {
           "type": "string"
         },

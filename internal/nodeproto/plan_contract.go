@@ -148,8 +148,9 @@ type ArtifactInput struct {
 
 // PipelineReference declares a cross-run read without granting undeclared blob access.
 type PipelineReference struct {
-	Pipeline string `json:"pipeline"`
-	Job      string `json:"job"`
+	Pipeline   string `json:"pipeline"`
+	Job        string `json:"job"`
+	FromAnyRun bool   `json:"from_any_run,omitempty"`
 }
 
 // SecretMatcher avoids copying secret values into validation errors or persisted plans.

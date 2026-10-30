@@ -51,7 +51,7 @@ func TestOutputRefusals(t *testing.T) {
 func TestPipelineLatestReadsADeclaredReference(t *testing.T) {
 	s := start(t)
 	service := newService(t)
-	service.Latest = func(_ context.Context, auth capability.Authorized, pipeline, job string, age time.Duration) (ProcessOutput, error) {
+	service.Latest = func(_ context.Context, auth capability.Authorized, pipeline, job string, age time.Duration, fromAnyRun bool) (ProcessOutput, error) {
 		if auth.Binding.RunID != "run-1" || auth.Binding.NodeID != "deploy" || pipeline != "release" || job != "tag" || age != 5*time.Second {
 			t.Fatalf("latest scope=%+v %q %q %v", auth.Binding, pipeline, job, age)
 		}
@@ -67,7 +67,7 @@ func TestPipelineLatestRefusals(t *testing.T) {
 	for _, query := range []string{"", "?job=tag&max_age_ms=-1", "?job=tag&max_age_ms=9223372036854775807", "?node=tag"} {
 		s := start(t)
 		service := newService(t)
-		service.Latest = func(context.Context, capability.Authorized, string, string, time.Duration) (ProcessOutput, error) {
+		service.Latest = func(context.Context, capability.Authorized, string, string, time.Duration, bool) (ProcessOutput, error) {
 			t.Fatal("malformed latest reached callback")
 			return ProcessOutput{}, nil
 		}
@@ -76,7 +76,7 @@ func TestPipelineLatestRefusals(t *testing.T) {
 	for _, code := range []apierr.Code{apierr.NotFound, apierr.Forbidden, apierr.Unavailable} {
 		s := start(t)
 		service := newService(t)
-		service.Latest = func(context.Context, capability.Authorized, string, string, time.Duration) (ProcessOutput, error) {
+		service.Latest = func(context.Context, capability.Authorized, string, string, time.Duration, bool) (ProcessOutput, error) {
 			return ProcessOutput{}, &apierr.Error{Code: code, Message: "latest refused"}
 		}
 		wantRefusal(t, askRoute(t, s, http.MethodGet, "/node/v1/pipelines/release/latest?job=tag", admitService(t, s, service), ""), apierr.Status(code), string(code))

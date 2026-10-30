@@ -608,12 +608,13 @@ func prefixUpperBound(prefix string) (string, bool) {
 }
 
 // GetLatestRun returns t's newest run for pipeline matching statuses within
-// maxAge. ErrNotFound on miss.
-func (t *Tenant) GetLatestRun(ctx context.Context, pipeline string, statuses []string, maxAge time.Duration) (*Run, error) {
+// maxAge. Runs need verified default-branch provenance unless fromAnyRun is true.
+// Returns ErrNotFound on miss.
+func (t *Tenant) GetLatestRun(ctx context.Context, pipeline string, statuses []string, maxAge time.Duration, fromAnyRun bool) (*Run, error) {
 	if t.team == "" {
 		return nil, ErrNoTeam
 	}
-	return t.s.getLatestRun(ctx, `SELECT team,id FROM runs WHERE team=? AND pipeline=?`, []any{t.team, pipeline}, pipeline, statuses, maxAge)
+	return t.s.getLatestRun(ctx, `SELECT team,id FROM runs WHERE team=? AND pipeline=?`, []any{t.team, pipeline}, pipeline, statuses, maxAge, fromAnyRun)
 }
 
 type rowScanner interface {
@@ -1275,7 +1276,7 @@ func scanApproval(rs rowScanner) (*Approval, error) {
 var schemaNeutral string
 
 // safety: the baseline is the only schema; a store recording any other version is refused, never upgraded.
-const expectedSchemaVersion = 26
+const expectedSchemaVersion = 27
 
 // ExpectedSchemaVersion returns the schema version this binary
 // understands. Useful for diagnostics, version-mismatch reporting,

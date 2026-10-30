@@ -367,7 +367,7 @@ export class Job<T = unknown> extends Declaration implements API.Job<T> {
     const entries = (this.spec.pipeline_refs ??= []);
     for (const ref of refs)
       if (!entries.some((entry) => entry.pipeline === ref.pipeline && entry.job === ref.jobId))
-        entries.push({ pipeline: ref.pipeline, job: ref.jobId });
+        entries.push({ pipeline: ref.pipeline, job: ref.jobId, ...(ref.fromAnyRun ? { from_any_run: true } : {}) });
     return this;
   }
   step<U>(id: string, body: API.Body<U>): Step<U> {
@@ -747,6 +747,7 @@ export function refToLastRun<T>(pipeline: string, jobId: string, options: API.Re
     tryGet(ctx) {
       return tryReference(() => ctx.latest(ref));
     },
+    ...(options.fromAnyRun ? { fromAnyRun: true } : {}),
     ...(options.maxAgeMs === undefined ? {} : { maxAgeMs: integer("reference max age", options.maxAgeMs) }),
   };
   return Object.freeze(ref);
