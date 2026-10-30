@@ -1,6 +1,7 @@
 package controller
 
 import (
+	"fmt"
 	"net/http"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
@@ -37,8 +38,9 @@ func (s *Server) handleListApprovalsForRun(w http.ResponseWriter, r *http.Reques
 	for _, row := range rows {
 		out.Approvals = append(out.Approvals, approvalView(*row))
 	}
-	writeJSON(w, http.StatusOK, out)
-	return nil
+	return writeListPage(w, r, authorized, "approvals", out.Approvals, func(row controllerwire.Approval) string {
+		return fmt.Sprintf("%016x/%s/%s", uint64(row.RequestedAt.UnixNano())^(1<<63), row.RunID, row.JobID)
+	}, nil)
 }
 
 func (s *Server) handleListPendingApprovals(w http.ResponseWriter, r *http.Request, authorized capability.Authorized) error {
@@ -54,8 +56,9 @@ func (s *Server) handleListPendingApprovals(w http.ResponseWriter, r *http.Reque
 	for _, row := range rows {
 		out.Approvals = append(out.Approvals, approvalView(*row))
 	}
-	writeJSON(w, http.StatusOK, out)
-	return nil
+	return writeListPage(w, r, authorized, "approvals", out.Approvals, func(row controllerwire.Approval) string {
+		return fmt.Sprintf("%016x/%s/%s", uint64(row.RequestedAt.UnixNano())^(1<<63), row.RunID, row.JobID)
+	}, nil)
 }
 
 func approvalView(a store.Approval) controllerwire.Approval {

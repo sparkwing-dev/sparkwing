@@ -214,15 +214,22 @@ func (s *Server) handleListCrons(w http.ResponseWriter, r *http.Request, a capab
 	if err != nil {
 		return engineLookupError(err)
 	}
+	selected := make([]crons.Row, 0, len(rows))
+	for _, row := range rows {
+		if all || row.Declared {
+			selected = append(selected, row)
+		}
+	}
+	rows, page, err := pageCollection(r, a, selected, func(row crons.Row) string { return row.ID })
+	if err != nil {
+		return err
+	}
 	out := controllerwire.ScheduleOverview{
 		Health:    crons.NewHealthView(health),
 		Schedules: make([]controllerwire.ScheduleView, 0, len(rows)),
 		Upcoming:  []controllerwire.ScheduleUpcoming{},
 	}
 	for _, row := range rows {
-		if !all && !row.Declared {
-			continue
-		}
 		out.Schedules = append(out.Schedules, crons.NewScheduleView(row))
 		if next > 0 {
 			instants, err := svc.Upcoming(r.Context(), row.ID, next)
@@ -234,7 +241,7 @@ func (s *Server) handleListCrons(w http.ResponseWriter, r *http.Request, a capab
 			}
 		}
 	}
-	writeJSON(w, http.StatusOK, out)
+	writeJSON(w, http.StatusOK, map[string]any{"schedules": out.Schedules, "upcoming": out.Upcoming, "health": out.Health, "next_cursor": page.NextCursor, "truncated": page.Truncated})
 	return nil
 }
 

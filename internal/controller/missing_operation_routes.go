@@ -2,6 +2,7 @@ package controller
 
 import (
 	"errors"
+	"fmt"
 	"net/http"
 	"strings"
 
@@ -61,8 +62,9 @@ func (s *Server) handleJobAttempts(w http.ResponseWriter, r *http.Request, a cap
 			attempts = append(attempts, attempt)
 		}
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"attempts": attempts})
-	return nil
+	return writeListPage(w, r, a, "attempts", attempts, func(row controllerwire.AttemptDetail) string {
+		return fmt.Sprintf("%020d/%020d", row.Generation, row.Attempt)
+	}, nil)
 }
 
 func (s *Server) handleJobSteps(w http.ResponseWriter, r *http.Request, a capability.Authorized) error {
@@ -86,8 +88,9 @@ func (s *Server) handleJobSteps(w http.ResponseWriter, r *http.Request, a capabi
 			})
 		}
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"steps": steps})
-	return nil
+	return writeListPage(w, r, a, "steps", steps, func(row controllerwire.StepObservation) string {
+		return stepCollectionKey(row.NodeID, row.Attempt, row.StartedAt, row.StepID)
+	}, nil)
 }
 
 func (s *Server) handleJobActivity(w http.ResponseWriter, r *http.Request, a capability.Authorized) error {

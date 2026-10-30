@@ -21,6 +21,7 @@ type wireOperation struct {
 	parameters []any
 	variants   []reflect.Type
 	selector   reflect.Type
+	collection string
 }
 
 func operation(summary string, request, response any, parameters ...any) wireOperation {
@@ -156,6 +157,7 @@ func wireOperations() map[string]wireOperation {
 	result["POST /api/v1/data/depcache/lookup"] = operation("Look up an authorized dependency cache", wire.DataDepcacheLookupRequest{}, wire.DataDepcacheLookupResult{})
 	result["POST /api/v1/data/memo/lookup"] = operation("Look up authorized memo references", wire.DataMemoLookupRequest{}, wire.DataMemoLookupResult{})
 	result["POST /api/v1/data/memo/copy"] = operation("Copy memo references to the authenticated attempt", wire.DataMemoLookupRequest{}, wire.DataMemoLookupResult{})
+	addCollectionOperations(result)
 	addReadParameters(result)
 	return result
 }
@@ -189,6 +191,50 @@ func addReadParameters(operations map[string]wireOperation) {
 		for _, name := range []string{"tree", "events_only", "no_events"} {
 			op.parameters = append(op.parameters, query(name, "boolean"))
 		}
+		operations[key] = op
+	}
+}
+
+func addCollectionOperations(operations map[string]wireOperation) {
+	for path, field := range map[string]string{
+		"/api/v1/secrets":              "secrets",
+		"/api/v1/tokens":               "tokens",
+		"/api/v1/operator/tokens":      "tokens",
+		"/api/v1/team/git-credentials": "credentials",
+		"/api/v1/team/members":         "members",
+		"/api/v1/team/invitations":     "invitations",
+		"/api/v1/team/github-app":      "installations",
+		"/api/v1/team/github-app/installations/{installation}/repositories": "repositories",
+		"/api/v1/team/github-app/triggers":                                  "triggers",
+		"/api/v1/team/github-app/extra-repos":                               "extra_repos",
+		"/api/v1/team/github-app/deliveries/failed":                         "deliveries",
+		"/api/v1/team/github-app/automation":                                "automation",
+		"/api/v1/runners/github":                                            "bindings",
+		"/api/v1/runners":                                                   "runners",
+		"/api/v1/pools":                                                     "pools",
+		"/api/v1/operator/teams":                                            "teams",
+		"/api/v1/me/identities":                                             "identities",
+		"/api/v1/me/team-deletions":                                         "deletions",
+		"/api/v1/approvals":                                                 "approvals",
+		"/api/v1/runs/{run}/approvals":                                      "approvals",
+		"/api/v1/runs/{run}/attempts":                                       "runs",
+		"/api/v1/runs/{run}/jobs":                                           "jobs",
+		"/api/v1/runs/{run}/jobs/{job}/attempts":                            "attempts",
+		"/api/v1/runs/{run}/jobs/{job}/steps":                               "steps",
+		"/api/v1/runs/{run}/steps":                                          "steps",
+		"/api/v1/runs/{run}/debug-pauses":                                   "pauses",
+		"/api/v1/schedules":                                                 "schedules",
+	} {
+		key := "GET " + path
+		op, exists := operations[key]
+		if !exists {
+			op.summary = "List " + field
+		}
+		op.collection = field
+		op.parameters = append(op.parameters,
+			schema{"in": "query", "name": "limit", "schema": schema{"type": "integer", "minimum": 1, "maximum": 200, "default": 50}},
+			schema{"in": "query", "name": "cursor", "description": "Use next_cursor from the previous page with the same team and filters.", "schema": schema{"type": "string"}},
+		)
 		operations[key] = op
 	}
 }

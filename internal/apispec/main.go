@@ -8,6 +8,7 @@ import (
 	"os"
 	"reflect"
 	"regexp"
+	"slices"
 	"strings"
 
 	"go.yaml.in/yaml/v3"
@@ -116,7 +117,9 @@ func operationDocument(builder *schemaBuilder, route capability.RoutePolicy, pat
 		if body.request != nil {
 			op["requestBody"] = schema{"required": true, "content": jsonContent(builder.value(body.request))}
 		}
-		if body.response != nil {
+		if body.collection != "" {
+			responses["2XX"] = schema{"description": "A page of results in stable identity order.", "content": jsonContent(collectionResponse(builder, body))}
+		} else if body.response != nil {
 			responses["2XX"] = schema{"description": "Successful response.", "content": jsonContent(builder.value(body.response))}
 		}
 		if len(body.variants) > 0 {
@@ -126,7 +129,7 @@ func operationDocument(builder *schemaBuilder, route capability.RoutePolicy, pat
 			}
 			responses["2XX"] = schema{"description": "Response selected by the request operation.", "content": jsonContent(schema{"anyOf": variants})}
 		}
-		if body.response == nil && len(body.variants) == 0 {
+		if body.response == nil && body.collection == "" && len(body.variants) == 0 {
 			responses["204"] = schema{"description": "Completed without a response body."}
 		}
 		if body.selector != nil {
@@ -150,4 +153,33 @@ func errorDefinitions() []schema {
 		result = append(result, schema{"code": code.Code, "http_status": code.HTTPStatus, "purpose": code.Purpose})
 	}
 	return result
+}
+
+func collectionResponse(builder *schemaBuilder, body wireOperation) schema {
+	response := schema{"type": "object", "properties": schema{body.collection: schema{"type": "array", "items": schema{"type": "object"}}}}
+	if body.response != nil {
+		response = builder.value(body.response)
+		if ref, ok := response["$ref"].(string); ok {
+			response = builder.definitions[strings.TrimPrefix(ref, "#/components/schemas/")].(schema)
+		}
+	}
+	out, props := schema{}, schema{}
+	for key, value := range response {
+		out[key] = value
+	}
+	for key, value := range response["properties"].(schema) {
+		props[key] = value
+	}
+	props["next_cursor"] = schema{"type": "string", "description": "Opaque continuation; empty on the last page."}
+	props["truncated"] = schema{"type": "boolean"}
+	out["properties"] = props
+	required, _ := response["required"].([]string)
+	required = append([]string{}, required...)
+	for _, field := range []string{body.collection, "next_cursor", "truncated"} {
+		if !slices.Contains(required, field) {
+			required = append(required, field)
+		}
+	}
+	out["required"] = required
+	return out
 }

@@ -86,8 +86,7 @@ func (s *Server) handleMyTeamDeletions(w http.ResponseWriter, r *http.Request, a
 	for _, d := range dels {
 		out = append(out, teamDeletionBody(d))
 	}
-	writeJSON(w, http.StatusOK, out)
-	return nil
+	return writeListPage(w, r, a, "deletions", out, func(row teamDeletionJSON) string { return row.Slug }, nil)
 }
 
 type deletedAccountJSON struct {

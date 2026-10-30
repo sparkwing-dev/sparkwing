@@ -42,8 +42,7 @@ func (s *EngineController) handleJobs(w http.ResponseWriter, r *http.Request, a 
 		seen[string(row.Ref.NodeID)] = true
 		jobs = append(jobs, snapshotJob(row))
 	}
-	writeJSON(w, http.StatusOK, jobs)
-	return nil
+	return writeListPage(w, r, a, "jobs", jobs, func(row controllerwire.JobDetail) string { return row.ID }, nil)
 }
 
 func (s *EngineController) handleJob(w http.ResponseWriter, r *http.Request, a capability.Authorized) error {

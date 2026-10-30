@@ -67,8 +67,7 @@ func (s *Server) handleListInvitations(w http.ResponseWriter, r *http.Request, a
 	for _, inv := range invites {
 		out = append(out, invitationJSON{ID: inv.ID, Email: inv.Email, Role: string(inv.Role), ExpiresAt: inv.ExpiresAt.Unix()})
 	}
-	writeJSON(w, http.StatusOK, out)
-	return nil
+	return writeListPage(w, r, a, "invitations", out, func(row invitationJSON) string { return row.ID }, nil)
 }
 
 type inviteReq struct {

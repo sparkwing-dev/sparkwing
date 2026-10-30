@@ -37,7 +37,7 @@ func (s *Server) runnerInventory(ctx context.Context, team string) (capability.R
 		return capability.RunnerSnapshot{}, routepolicy.MissingEndpointPolicy()
 	}
 	for _, row := range snapshot.Runners {
-		if row.Team != team || row.Runner.Name == "" || row.Runner.Type == "" || row.MaxConcurrent < 0 || row.LastSeen.After(snapshot.Now) {
+		if row.ID == "" || row.Team != team || row.Runner.Name == "" || row.Runner.Type == "" || row.MaxConcurrent < 0 || row.LastSeen.After(snapshot.Now) {
 			return capability.RunnerSnapshot{}, routepolicy.MissingEndpointPolicy()
 		}
 		if h := row.Headroom; h != nil && (math.IsNaN(h.Cores) || math.IsInf(h.Cores, 0) || h.Cores < 0 || h.MemoryBytes < 0 || h.QueueDepth < 0 || h.ObservedAt.IsZero() || h.ObservedAt.After(snapshot.Now)) {
@@ -52,8 +52,12 @@ func (s *Server) handleAgents(w http.ResponseWriter, r *http.Request, a capabili
 	if err != nil {
 		return err
 	}
-	out := make([]controllerwire.RunnerDetail, 0, len(snapshot.Runners))
-	for _, row := range snapshot.Runners {
+	rows, page, err := pageCollection(r, a, snapshot.Runners, func(row capability.RunnerObservation) string { return row.ID })
+	if err != nil {
+		return err
+	}
+	out := make([]controllerwire.RunnerDetail, 0, len(rows))
+	for _, row := range rows {
 		active := append([]string{}, row.ActiveJobs...)
 		slices.Sort(active)
 		agent := controllerwire.RunnerDetail{
@@ -80,7 +84,7 @@ func (s *Server) handleAgents(w http.ResponseWriter, r *http.Request, a capabili
 		out = append(out, agent)
 	}
 	w.Header().Set("Cache-Control", "no-store")
-	writeJSON(w, http.StatusOK, controllerwire.Runners{Runners: out})
+	writeJSON(w, http.StatusOK, map[string]any{"runners": out, "next_cursor": page.NextCursor, "truncated": page.Truncated})
 	return nil
 }
 

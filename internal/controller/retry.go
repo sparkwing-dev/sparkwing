@@ -1,10 +1,12 @@
 package controller
 
 import (
+	"fmt"
 	"net/http"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
+	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
 
 func (s *Server) handleListAttempts(w http.ResponseWriter, r *http.Request, authorized capability.Authorized) error {
@@ -18,8 +20,14 @@ func (s *Server) handleListAttempts(w http.ResponseWriter, r *http.Request, auth
 		return engineLookupError(err)
 	}
 
+	runs, metadata, err := pageCollection(r, authorized, runs, func(row *store.Run) string {
+		return fmt.Sprintf("%016x/%020d/%s", uint64(row.CreatedAt.UnixNano())^(1<<63), row.Number, row.ID)
+	})
+	if err != nil {
+		return err
+	}
 	engine := s.engineController
-	page := controllerwire.RunPage{Runs: []controllerwire.RunDetail{}}
+	page := controllerwire.RunPage{Runs: []controllerwire.RunDetail{}, NextCursor: metadata.NextCursor, Truncated: metadata.Truncated}
 	for _, run := range runs {
 		a := authorized
 		a.Target.RunID = run.ID

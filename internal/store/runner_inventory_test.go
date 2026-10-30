@@ -39,7 +39,7 @@ func TestRunnerInventoryKeepsLabelObservationsAcrossRenewal(t *testing.T) {
 		t.Fatalf("inventory: %+v", before)
 	}
 	runner := before.Runners[0]
-	if runner.Team != "a" || runner.Runner.Name != "runner" || runner.Runner.Type != "runner" || !reflect.DeepEqual(runner.Runner.Labels, []string{"gpu"}) || !reflect.DeepEqual(runner.ActiveJobs, []string{"run/job"}) || runner.Headroom != nil || !runner.LastSeen.Equal(*now) {
+	if runner.ID == "" || runner.Team != "a" || runner.Runner.Name != "runner" || runner.Runner.Type != "runner" || !reflect.DeepEqual(runner.Runner.Labels, []string{"gpu"}) || !reflect.DeepEqual(runner.ActiveJobs, []string{"run/job"}) || runner.Headroom != nil || !runner.LastSeen.Equal(*now) {
 		t.Fatalf("runner facts: %+v", runner)
 	}
 	*now = now.Add(time.Second)
@@ -47,7 +47,7 @@ func TestRunnerInventoryKeepsLabelObservationsAcrossRenewal(t *testing.T) {
 		t.Fatal(err)
 	}
 	after := readRunnerInventory(t, s, "a")
-	if !after.Now.Equal(*now) || !after.Runners[0].LastSeen.Equal(*now) || !reflect.DeepEqual(after.Runners[0].Headroom, runner.Headroom) {
+	if after.Runners[0].ID != runner.ID || !after.Now.Equal(*now) || !after.Runners[0].LastSeen.Equal(*now) || !reflect.DeepEqual(after.Runners[0].Headroom, runner.Headroom) {
 		t.Fatalf("renewal replaced labels or missed liveness: %+v", after)
 	}
 }
