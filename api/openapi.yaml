@@ -4334,6 +4334,27 @@ components:
         - binding
       type: object
       x-sparkwing-go-type: localhostwire.LocalCapacityRequest
+    internal.localhostwire.LocalDebugPause:
+      additionalProperties: true
+      properties:
+        generation:
+          type: integer
+        reason:
+          type: string
+      required:
+        - generation
+        - reason
+      type: object
+      x-sparkwing-go-type: localhostwire.LocalDebugPause
+    internal.localhostwire.LocalDebugPauseState:
+      additionalProperties: true
+      properties:
+        released:
+          type: boolean
+      required:
+        - released
+      type: object
+      x-sparkwing-go-type: localhostwire.LocalDebugPauseState
     internal.localhostwire.LocalEvaluationRelease:
       additionalProperties: true
       properties:
@@ -12948,6 +12969,52 @@ paths:
             liveness: sensitive
         retry: safe
       x-sparkwing-wire: undocumented
+  /api/v1/runs/{run}/local-host/nodes/{job}/debug-pause:
+    post:
+      parameters:
+        - in: path
+          name: run
+          required: true
+          schema:
+            type: string
+        - in: path
+          name: job
+          required: true
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/internal.localhostwire.LocalDebugPause'
+        required: true
+      responses:
+        2XX:
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/internal.localhostwire.LocalDebugPauseState'
+          description: Successful response.
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/internal.apierr.Envelope'
+          description: Canonical API failure.
+      summary: Follow a sealed debug boundary under the live owner award
+      x-sparkwing-policy:
+        method: POST
+        path: /api/v1/runs/{run}/local-host/nodes/{job}/debug-pause
+        audience: controller
+        owner: run
+        authentication: capability
+        access:
+          - credential: awarded_or_delegated_claim
+            grants:
+              - trigger.host
+            binding: runOfTrigger
+            liveness: reporting
+        retry: exact_body
   /api/v1/runs/{run}/local-host/nodes/{job}/snapshot:
     get:
       parameters:

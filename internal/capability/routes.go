@@ -2,6 +2,7 @@ package capability
 
 // routes is the authorization table for controller and node-host operations, including external proofs.
 var routes = []RoutePolicy{
+	route("POST", "/api/v1/runs/{run}/local-host/nodes/{job}/debug-pause", OwnerRun, RetryExactBody, claim(TriggerHost, BindRunOfTrigger, LiveReporting)),
 	route("GET", "/api/v1/runs/{run}/local-host/data-authority", OwnerRun, RetrySafe, claim(DataRead, BindRunOfTrigger, LiveSensitive), claim(DataRead, BindPlanOwner, LiveSensitive), claim(DataRead, BindSourceReport, LiveSensitive)),
 	route("POST", "/api/v1/runs/{run}/local-host/may-start", OwnerRun, RetryExactBody, claim(NodeReport, BindRun, LiveSensitive)),
 	route("POST", "/api/v1/runs/{run}/local-host/release-evaluation", OwnerRun, RetryExactBody, claim(TriggerHost, BindRunOfTrigger, LiveSensitive)),

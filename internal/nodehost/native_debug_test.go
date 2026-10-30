@@ -1,13 +1,19 @@
 package nodehost
 
 import (
+	"bytes"
 	"context"
 	"net"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 	"testing/synctest"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/controller"
+	"github.com/sparkwing-dev/sparkwing/internal/controller/client"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
@@ -15,7 +21,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
 )
 
-func TestNativeOwnerPersistsDebugPauseUntilReleased(t *testing.T) {
+func TestNativeForegroundOwnerPersistsDebugPauseUntilReleased(t *testing.T) {
 	for _, reason := range []string{store.PauseReasonBefore, store.PauseReasonAfter, store.PauseReasonOnFailure} {
 		for _, release := range []string{"manual", "timeout", "cancelled"} {
 			t.Run(reason+"/"+release, func(t *testing.T) {
@@ -24,10 +30,36 @@ func TestNativeOwnerPersistsDebugPauseUntilReleased(t *testing.T) {
 					cfg.Source.Base.Local = false
 					options := debugOptions(reason)
 					options.PauseTimeout.Set, options.PauseTimeout.Value, options.PauseTimeout.Origin = true, time.Second, options.Pause.Origin
-					f := newStoreHostFixtureOn(t, openStore(t, teststore.WithClock(time.Now)), nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{{ID: "build", Steps: []nodeproto.StepSpec{{ID: "body"}}}}}, options)
-					cfg.Store = f.State
-					cfg.Principal.Capability.Binding.RunID = f.Input.RunID
-					cfg.Refresh = func(context.Context) (capability.Principal, error) { return cfg.Principal, nil }
+					request := runspec.Request{Version: 1, Team: string(store.DefaultTeam), Pipeline: "p", Mode: runspec.IntakeExecute, Origin: runspec.OriginLocal, Dispatch: runspec.DispatchHost, Git: runspec.Git{Repository: runspec.Repository{Key: "gh:1"}}, Options: options}
+					f := newStoreHostFixtureForRequest(t, openStore(t, teststore.WithClock(time.Now)), nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{{ID: "build", Steps: []nodeproto.StepSpec{{ID: "body"}}}}}, request)
+					objects, err := blob.NewFilesystem(blob.FilesystemOptions{Directory: t.TempDir(), Endpoint: "http://local", SigningKey: bytes.Repeat([]byte{42}, 32)})
+					if err != nil {
+						t.Fatal(err)
+					}
+					defer objects.Close()
+					server := controller.New(f.Store, nil).WithDataObjects(objects)
+					transportOptions := client.EngineOptions{URL: "http://local", HTTP: &http.Client{Transport: nativeDebugTransport{server.Handler()}}, Bearer: func(context.Context) (string, error) { return string(f.OwnerBearer), nil }}
+					wire, err := client.NewEngineClient(transportOptions)
+					if err != nil {
+						t.Fatal(err)
+					}
+					private, err := client.NewLocalHostClient(transportOptions, f.Input.RunID)
+					if err != nil {
+						t.Fatal(err)
+					}
+					defer private.Close()
+					remote, err := NewRemoteHostStore(wire, private, "owner", func() bool { return false })
+					if err != nil {
+						t.Fatal(err)
+					}
+					remote.Finish = private.FinishRunAndUnit
+					cfg.Store, cfg.Parent, cfg.Bindings = remote, private, private
+					cfg.Principal, err = private.Principal(t.Context())
+					if err != nil {
+						t.Fatal(err)
+					}
+					cfg.Refresh = private.Principal
+					cfg = WithClient(cfg, private)
 					services, err := nativeServices(t.Context(), cfg, func(string, string) (net.Listener, error) { return &processListener{closed: make(chan struct{})}, nil })
 					if err != nil {
 						t.Fatal(err)
@@ -37,7 +69,19 @@ func TestNativeOwnerPersistsDebugPauseUntilReleased(t *testing.T) {
 							t.Error(err)
 						}
 					}()
-					f.Host.Debug = services.Config.Owner.Debug
+					host, _, _, err := NewNativeHost(services.Config)
+					if err != nil {
+						t.Fatal(err)
+					}
+					host.Acquire, host.Renew = f.Host.Acquire, f.Host.Renew
+					adopt := host.AdoptClaim
+					host.AdoptClaim = func(ctx context.Context, claim runstate.ReconciledNode) error {
+						if err := private.AdoptClaim(ctx, claim); err != nil {
+							return err
+						}
+						return adopt(ctx, claim)
+					}
+					f.Host = *host
 					f.Host.Executor = ownerNodeFunc(func(ctx context.Context, in NodeInput) error {
 						outcome := runstate.NodeSuccess
 						if reason == store.PauseReasonOnFailure {
@@ -59,6 +103,19 @@ func TestNativeOwnerPersistsDebugPauseUntilReleased(t *testing.T) {
 					row, err := f.Tenant.ReadNode(t.Context(), runspec.NodeRef{RunID: runspec.RunID(f.Input.RunID), NodeID: "build"})
 					if err != nil {
 						t.Fatal(err)
+					}
+					for _, invalid := range []struct {
+						ref        runspec.NodeRef
+						generation int64
+						reason     string
+					}{
+						{row.Ref, int64(row.Generation) + 1, reason},
+						{row.Ref, int64(row.Generation), "unselected"},
+						{runspec.NodeRef{RunID: "foreign", NodeID: "build"}, int64(row.Generation), reason},
+					} {
+						if _, err := remote.OwnerDebugPause(t.Context(), invalid.ref, invalid.generation, f.Actor, invalid.reason); err == nil {
+							t.Fatal("invalid boundary changed the pause")
+						}
 					}
 					stale := f.Actor
 					stale.Owner.Generation++
@@ -99,4 +156,15 @@ func TestNativeOwnerPersistsDebugPauseUntilReleased(t *testing.T) {
 			})
 		}
 	}
+}
+
+type nativeDebugTransport struct{ handler http.Handler }
+
+func (tr nativeDebugTransport) RoundTrip(r *http.Request) (*http.Response, error) {
+	response := httptest.NewRecorder()
+	tr.handler.ServeHTTP(response, r)
+	if err := r.Context().Err(); err != nil {
+		return nil, err
+	}
+	return response.Result(), nil
 }

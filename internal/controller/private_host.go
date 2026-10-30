@@ -22,6 +22,7 @@ import (
 func (s *Server) localHostEndpoints() []controllerwire.Endpoint {
 	engine := s.engineController
 	return []controllerwire.Endpoint{
+		{Method: "POST", Pattern: "/api/v1/runs/{run}/local-host/nodes/{job}/debug-pause", Authentication: capability.AuthCapability, Decode: runSelectorTarget, ResolveTarget: engine.resolveRunSelector, Handle: s.localHostDebugPause},
 		{Method: "POST", Pattern: "/api/v1/runs/{run}/local-host/may-start", Authentication: capability.AuthCapability, Decode: runSelectorTarget, ResolveTarget: engine.resolveRunSelector, Handle: s.localHostCapacity},
 		{Method: "POST", Pattern: "/api/v1/runs/{run}/local-host/release-evaluation", Authentication: capability.AuthCapability, Decode: runSelectorTarget, ResolveTarget: engine.resolveRunSelector, Handle: s.localHostReleaseEvaluation},
 		{Method: "POST", Pattern: "/api/v1/runs/{run}/local-host/relinquish-start", Authentication: capability.AuthCapability, Decode: runSelectorTarget, ResolveTarget: engine.resolveRunSelector, Handle: s.localHostRelinquishStart},
@@ -337,4 +338,21 @@ func localHostOwnsNode(owner capability.Principal, node runstate.NodeRow, child 
 
 func localHostRefusal() error {
 	return &apierr.Error{Code: apierr.Forbidden, Message: "authority is outside the local host award"}
+}
+
+func (s *Server) localHostDebugPause(w http.ResponseWriter, r *http.Request, a capability.Authorized) error {
+	var body localhostwire.LocalDebugPause
+	if err := decodeEngineRequest(r, &body); err != nil {
+		return err
+	}
+	tenant, err := s.tenantForTeam(r.Context(), store.Team(a.Target.Team))
+	if err != nil {
+		return err
+	}
+	released, err := tenant.OwnerDebugPause(r.Context(), runspec.NodeRef{RunID: runspec.RunID(a.Target.RunID), NodeID: runspec.NodeID(a.Target.NodeID)}, body.Generation, engineActor(a), body.Reason)
+	if err != nil {
+		return engineLookupError(err)
+	}
+	writeJSON(w, http.StatusOK, localhostwire.LocalDebugPauseState{Released: released})
+	return nil
 }

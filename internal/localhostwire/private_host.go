@@ -65,3 +65,14 @@ type LocalCapacityRequest struct {
 type LocalEvaluationRelease struct {
 	NodeID string `json:"job_id"`
 }
+
+// LocalDebugPause selects a sealed pause policy under the authenticated owner fence.
+type LocalDebugPause struct {
+	Generation int64  `json:"generation"`
+	Reason     string `json:"reason"`
+}
+
+// LocalDebugPauseState reports whether the persisted boundary may proceed.
+type LocalDebugPauseState struct {
+	Released bool `json:"released"`
+}

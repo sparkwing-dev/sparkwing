@@ -13,6 +13,7 @@ import (
 
 // PrivateHostState supplies award-bound execution state.
 type PrivateHostState interface {
+	ownerDebugStore
 	MayStart(context.Context, runstate.CapacityBinding, runstate.Actor) (runstate.AcquireSlotResponse, error)
 	ReleaseEvaluation(context.Context, runspec.NodeRef, runstate.Actor) (runstate.Applied, error)
 	RelinquishStart(context.Context, runstate.CapacityBinding, runstate.Actor) error

@@ -19,6 +19,7 @@ import (
 
 // NativeHostStore supplies the persisted state shared by owner and claimed execution.
 type NativeHostStore interface {
+	ownerDebugStore
 	OwnerStore
 	ClaimStore
 }
