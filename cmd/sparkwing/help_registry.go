@@ -107,7 +107,7 @@ var commandFlagDescriptions = map[string]string{
 	"sparkwing __host-trigger --state-db":                    "Absolute path to the state database for the hosted run; this build refuses any invocation that sets it because standalone hosting is not available.",
 	"sparkwing billing request-tier --message":               "What you need, sent to the operators with the team's standing and payment history.",
 	"sparkwing billing request-tier --tier":                  "Standing tier to request.",
-	"sparkwing cache info --all-entries":                     "List every managed cache entry with all owning checkouts instead of the 10 most recently used.",
+	"sparkwing cache info --all-entries":                     "List every managed cache entry instead of the 10 most recently used.",
 	"sparkwing cache info --docs":                            "Report on the downloaded web docs cache instead of the pipeline binary cache; other flags are ignored.",
 	"sparkwing cache prune --all-entries":                    "Remove every binary cache entry that is not in use, ignoring the size and entry ceilings.",
 	"sparkwing cache prune --docs":                           "Clear the downloaded web docs cache instead of pruning the binary cache; the size and entry flags are ignored.",

@@ -49,7 +49,7 @@ Print cache dir, size, ceilings, and recent entries
 | `-C, --checkout PATH` | Resolve the project from this local checkout path. |
 | `-h, --help` | Show command help without executing. |
 | `--help-all` | Include uncommon flags in command help. |
-| `--all-entries` | List every managed cache entry with all owning checkouts instead of the 10 most recently used. |
+| `--all-entries` | List every managed cache entry instead of the 10 most recently used. |
 | `--docs` | Report on the downloaded web docs cache instead of the pipeline binary cache; other flags are ignored. |
 
 ## `sparkwing cache prune`

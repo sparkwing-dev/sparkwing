@@ -5,10 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"path/filepath"
 	"slices"
 	"strconv"
-	"strings"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
@@ -31,7 +29,6 @@ type cacheInfoReport struct {
 	Entries       int              `json:"entries"`
 	ActiveEntries int              `json:"active_entries"`
 	BusyEntries   int              `json:"busy_entries"`
-	Shared        int              `json:"shared_entries"`
 	TotalBytes    int64            `json:"total_bytes"`
 	MaxBytes      int64            `json:"max_bytes"`
 	MaxEntries    int              `json:"max_entries"`
@@ -40,17 +37,9 @@ type cacheInfoReport struct {
 }
 
 type cacheInfoEntry struct {
-	Key      string           `json:"key"`
-	Bytes    int64            `json:"bytes"`
-	LastUsed string           `json:"last_used,omitempty"`
-	Uses     int              `json:"uses"`
-	Shared   bool             `json:"shared"`
-	Owners   []cacheInfoOwner `json:"owners,omitempty"`
-}
-
-type cacheInfoOwner struct {
-	Dir  string `json:"dir"`
-	Uses int    `json:"uses"`
+	Key      string `json:"key"`
+	Bytes    int64  `json:"bytes"`
+	LastUsed string `json:"last_used,omitempty"`
 }
 
 func runCacheInfo(inv clisurface.Invocation) error {
@@ -89,11 +78,6 @@ func runCacheInfo(inv clisurface.Invocation) error {
 		MaxBytes:      limits.MaxBytes,
 		MaxEntries:    limits.MaxEntries,
 	}
-	for _, e := range entries {
-		if len(e.Owners) > 1 {
-			report.Shared++
-		}
-	}
 	report.OverLimit = (report.MaxBytes > 0 && report.TotalBytes > report.MaxBytes) ||
 		(report.MaxEntries > 0 && report.Entries > report.MaxEntries)
 
@@ -106,11 +90,6 @@ func runCacheInfo(inv clisurface.Invocation) error {
 		if !e.LastUsed.IsZero() {
 			item.LastUsed = e.LastUsed.UTC().Format(time.RFC3339)
 		}
-		item.Uses = bincache.TotalUses(e.Owners)
-		item.Shared = len(e.Owners) > 1
-		for _, o := range e.Owners {
-			item.Owners = append(item.Owners, cacheInfoOwner{Dir: o.Dir, Uses: o.Uses})
-		}
 		report.Items = append(report.Items, item)
 	}
 
@@ -122,10 +101,6 @@ func runCacheInfo(inv clisurface.Invocation) error {
 			return
 		}
 		fmt.Printf("  entries:  %d\n", report.Entries)
-		if report.Shared > 0 {
-			fmt.Printf("  shared:   %s\n",
-				color.Green(fmt.Sprintf("%d entries reused by more than one checkout", report.Shared)))
-		}
 		fmt.Printf("  total:    %s\n", humanBytes(report.TotalBytes))
 		if report.ActiveEntries > 0 || report.BusyEntries > 0 {
 			fmt.Printf("  in use:   %d active, %d busy\n", report.ActiveEntries, report.BusyEntries)
@@ -145,10 +120,7 @@ func runCacheInfo(inv clisurface.Invocation) error {
 			if !e.LastUsed.IsZero() {
 				last = humanAge(time.Since(e.LastUsed))
 			}
-			fmt.Printf("  %-20s %10s  %-10s %4s  %s\n",
-				e.Key, humanBytes(e.Bytes), last,
-				color.Dim(fmt.Sprintf("x%d", bincache.TotalUses(e.Owners))),
-				ownerLabel(e.Owners, all))
+			fmt.Printf("  %-20s %10s  %s\n", e.Key, humanBytes(e.Bytes), last)
 		}
 		if !all && len(entries) > len(shown) {
 			fmt.Printf("  %s\n", color.Dim(fmt.Sprintf("... and %d more (--all-entries to list)", len(entries)-len(shown))))
@@ -234,32 +206,6 @@ func validateCacheOutput(output string) error {
 	return err
 }
 
-func ownerLabel(owners []bincache.Owner, all bool) string {
-	if len(owners) == 0 {
-		return color.Dim("(unknown -- cached before owners were recorded)")
-	}
-	if all {
-		parts := make([]string, 0, len(owners))
-		for _, o := range owners {
-			parts = append(parts, fmt.Sprintf("%s (x%d)", abbreviateHome(o.Dir), o.Uses))
-		}
-		return strings.Join(parts, ", ")
-	}
-	label := abbreviateHome(owners[0].Dir)
-	if len(owners) > 1 {
-		label += color.Green(fmt.Sprintf(" +%d more checkout(s)", len(owners)-1))
-	}
-	return label
-}
-
-func abbreviateHome(p string) string {
-	home, err := os.UserHomeDir()
-	if err != nil || home == "" || !strings.HasPrefix(p, home) {
-		return p
-	}
-	return "~" + strings.TrimPrefix(p, home)
-}
-
 func limitLabel(n int64) string {
 	if n <= 0 {
 		return "unlimited"
@@ -288,23 +234,17 @@ func humanAge(d time.Duration) string {
 }
 
 type cacheExplainReport struct {
-	Dir     string             `json:"dir"`
-	Key     string             `json:"key"`
-	Cached  bool               `json:"cached"`
-	Reason  string             `json:"reason,omitempty"`
-	Parts   []cacheExplainPart `json:"parts"`
-	Related []cacheExplainPrev `json:"related_entries,omitempty"`
+	Dir    string             `json:"dir"`
+	Key    string             `json:"key"`
+	Cached bool               `json:"cached"`
+	Reason string             `json:"reason,omitempty"`
+	Parts  []cacheExplainPart `json:"parts"`
 }
 
 type cacheExplainPart struct {
 	Label  string `json:"label"`
 	Digest string `json:"digest"`
 	Detail string `json:"detail,omitempty"`
-}
-
-type cacheExplainPrev struct {
-	Key     string   `json:"key"`
-	Changed []string `json:"changed_inputs,omitempty"`
 }
 
 func runCacheExplain(inv clisurface.Invocation) error {
@@ -364,32 +304,6 @@ func runCacheExplain(inv clisurface.Invocation) error {
 		report.Parts = append(report.Parts, cacheExplainPart{Label: p.Label, Digest: p.Digest, Detail: p.Detail})
 	}
 
-	absDir, _ := filepath.Abs(dir)
-	entries, err := bincache.ScanCache()
-	if err != nil {
-		return fmt.Errorf("cache explain: %w", err)
-	}
-	for _, e := range entries {
-		if e.Key == key {
-			continue
-		}
-		owned := false
-		for _, o := range e.Owners {
-			if o.Dir == absDir {
-				owned = true
-				break
-			}
-		}
-		if !owned {
-			continue
-		}
-		prev := cacheExplainPrev{Key: e.Key}
-		if stored := bincache.StoredKeyParts(e.Key); stored != nil {
-			prev.Changed = bincache.DiffKeyParts(stored, parts)
-		}
-		report.Related = append(report.Related, prev)
-	}
-
 	return writeCacheOutput(output, report, func() {
 		fmt.Println(color.Bold("CACHE KEY"))
 		fmt.Printf("  pipeline: %s\n", color.Cyan(dir))
@@ -403,20 +317,6 @@ func runCacheExplain(inv clisurface.Invocation) error {
 		fmt.Println(color.Bold("INPUTS"))
 		for _, p := range report.Parts {
 			fmt.Printf("  %-28s %s  %s\n", p.Label, color.Dim(p.Digest), color.Dim(p.Detail))
-		}
-		if len(report.Related) > 0 {
-			fmt.Println()
-			fmt.Println(color.Bold("OTHER ENTRIES FROM THIS CHECKOUT"))
-			for _, r := range report.Related {
-				fmt.Printf("  %s\n", r.Key)
-				if len(r.Changed) == 0 {
-					fmt.Printf("    %s\n", color.Dim("(built before inputs were recorded)"))
-					continue
-				}
-				for _, c := range r.Changed {
-					fmt.Printf("    %s %s\n", color.Yellow("changed:"), c)
-				}
-			}
 		}
 	})
 }

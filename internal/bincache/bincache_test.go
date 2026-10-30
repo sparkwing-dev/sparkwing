@@ -492,3 +492,22 @@ func TestPipelineCacheKey_IncludesWebPackage(t *testing.T) {
 }
 
 const fakeGoEnvProbe = "if [ \"$1\" = env ]; then printf 'auto\\ngo1.26.6\\noff\\n'; exit 0; fi\n"
+
+func TestExplainCacheKey_AgreesWithPipelineCacheKey(t *testing.T) {
+	dir := newPipelineDir(t)
+	key, parts, err := ExplainCacheKey(dir, os.Environ())
+	if err != nil {
+		t.Fatalf("ExplainCacheKey: %v", err)
+	}
+	if want := mustKey(t, dir); key != want {
+		t.Fatalf("explain key %s disagrees with PipelineCacheKey %s", key, want)
+	}
+	if len(parts) == 0 {
+		t.Fatal("explain reported no inputs")
+	}
+	for _, p := range parts {
+		if p.Label == "" || p.Digest == "" {
+			t.Fatalf("input missing label or digest: %+v", p)
+		}
+	}
+}

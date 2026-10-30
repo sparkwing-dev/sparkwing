@@ -14,7 +14,7 @@ func MaterializePipeline(ctx context.Context, dir string, options CompileOptions
 	if _, err := ConfiguredLimits(); err != nil {
 		return nil, false, fmt.Errorf("pipeline cache ceilings: %w", err)
 	}
-	key, parts, err := explainCacheKey(dir, options.Environment, options.HashAllFiles)
+	key, _, err := explainCacheKey(dir, options.Environment, options.HashAllFiles)
 	if err != nil {
 		return nil, false, err
 	}
@@ -25,7 +25,6 @@ func MaterializePipeline(ctx context.Context, dir string, options CompileOptions
 	if lease, found, err := entry.Acquire(ctx); err != nil {
 		return nil, false, err
 	} else if found {
-		lease.recordUse(dir, parts)
 		if _, err := fmt.Fprintln(options.Diagnostics, "Cache hit: pipeline binary"); err != nil {
 			return nil, false, errors.Join(err, lease.Release())
 		}
@@ -34,7 +33,7 @@ func MaterializePipeline(ctx context.Context, dir string, options CompileOptions
 	if err := preparePipelineDependencies(ctx, dir, options); err != nil {
 		return nil, false, fmt.Errorf("prepare pipeline dependencies: %w", err)
 	}
-	key, parts, err = explainCacheKey(dir, options.Environment, options.HashAllFiles)
+	key, _, err = explainCacheKey(dir, options.Environment, options.HashAllFiles)
 	if err != nil {
 		return nil, false, err
 	}
@@ -46,7 +45,6 @@ func MaterializePipeline(ctx context.Context, dir string, options CompileOptions
 	if err != nil {
 		return nil, false, err
 	}
-	lease.recordUse(dir, parts)
 	if !published {
 		if _, err := fmt.Fprintln(options.Diagnostics, "Cache hit: pipeline binary"); err != nil {
 			return nil, false, errors.Join(err, lease.Release())

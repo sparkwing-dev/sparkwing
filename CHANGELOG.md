@@ -56,6 +56,8 @@ unlock.
 
 ### Removed
 
+- **cache (Breaking):** Removed binary-cache checkout owners, use counts, shared-entry counts and `related_entries` history
+  `cache explain` retains the current build key and input digests. Save explanations to compare changes.
 - **controller (Breaking):** Removed the $100 admin grant guard and `--allow-large`
   `sparkwing-controller admin grant` accepts any positive amount the credit ledger can hold.
 - **cli (Breaking):** Removed `SPARKS_GO_BIN`

@@ -34,7 +34,6 @@ type CacheEntry struct {
 	Dir      string
 	Bytes    int64
 	LastUsed time.Time
-	Owners   []Owner
 }
 
 func ScanCache() ([]CacheEntry, error) {
@@ -62,7 +61,6 @@ func ScanCache() ([]CacheEntry, error) {
 			if dirInfo, infoErr := de.Info(); infoErr == nil {
 				entry.LastUsed = dirInfo.ModTime()
 			}
-			entry.Owners = owners(de.Name())
 		}
 		entries = append(entries, entry)
 	}
