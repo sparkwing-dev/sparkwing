@@ -44,3 +44,15 @@ func TestClaimantReadsSealedHostFacts(t *testing.T) {
 		}
 	}
 }
+
+func TestOwnerMachineReadsTheSealedPersonalHereHost(t *testing.T) {
+	tenant, auth := sourceReleaseFixture(t)
+	fixtureRunWriter(t, tenant.s, "run", runspec.PrincipalWriter("account", "owner"))
+	for _, kind := range []capability.HostKind{capability.HostPersonal, capability.HostHere} {
+		setSourceHost(t, tenant, auth, &capability.HostFacts{Kind: kind, RunnerKind: tierPersonal, OwnerAccountID: "owner", MachineID: "runner"})
+		owner, err := tenant.OwnerMachineClaimant(t.Context(), auth.Principal, "run")
+		if err != nil || !owner {
+			t.Fatalf("sealed %s host lost its owner: owner=%v error=%v", kind, owner, err)
+		}
+	}
+}

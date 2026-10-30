@@ -29,7 +29,8 @@ func claimantFactsTx(ctx context.Context, tx *storeTx, chain []authorityNode, re
 	leaf, root := chain[0].principal.Capability, chain[len(chain)-1].principal.Capability
 	if host := leaf.Host; host != nil {
 		facts.HostKind, facts.FreshHost, facts.OIDCKind = host.Kind, host.Fresh, host.RunnerKind
-		facts.Personal, facts.Shared = host.Kind == capability.HostPersonal, host.Kind == capability.HostSelfHosted
+		facts.Personal = host.Kind == capability.HostPersonal || host.Kind == capability.HostHere && host.RunnerKind == tierPersonal
+		facts.Shared = host.Kind == capability.HostSelfHosted
 		facts.OwnerAccount, facts.Host = host.OwnerAccountID, host.MachineID
 		facts.Cloud = host.Kind == capability.HostCloud && host.RunnerKind != tierActions
 		facts.Launcher, facts.Observable = capability.Launcher(leaf), true
@@ -44,6 +45,9 @@ func claimantFactsTx(ctx context.Context, tx *storeTx, chain []authorityNode, re
 			facts.Tier = tierHere
 		case capability.HostCloud:
 			facts.Tier = TierCloud
+		}
+		if facts.Personal && request.OriginMachine != "" && request.OriginMachine == host.MachineID {
+			facts.Tier = tierHere
 		}
 		if host.RunnerKind == tierActions {
 			facts.Tier = tierActions
