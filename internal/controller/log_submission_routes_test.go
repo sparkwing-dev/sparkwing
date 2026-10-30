@@ -314,8 +314,13 @@ func TestLogSigningRefusesATeamAtItsStorageLimit(t *testing.T) {
 		t.Fatal(err)
 	}
 	refused := sign(2, 1<<20, http.StatusTooManyRequests)
-	if strings.Contains(refused.Body.String(), "url") || !strings.Contains(refused.Body.String(), "contact support to raise this limit") {
-		t.Fatalf("refused signing = %s; want a quota refusal naming the remedy and no URL", refused.Body.String())
+	if strings.Contains(refused.Body.String(), "url") {
+		t.Fatalf("refused signing = %s; want no upload URL", refused.Body.String())
+	}
+	for _, want := range []string{"quota_exceeded", "bytes_per_run", "operator override", "of 4 bytes used", "adds 1048576", "delete", "runs/artifacts", "support@sparkwing.dev"} {
+		if !strings.Contains(refused.Body.String(), want) {
+			t.Errorf("quota refusal lacks %q: %s", want, refused.Body.String())
+		}
 	}
 }
 
