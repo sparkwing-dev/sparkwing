@@ -86,6 +86,14 @@ The release repository needs an `NPM_TOKEN` Actions secret authorized to publish
 definitions and local graph checks do not establish Windows runtime support.
 Both Windows jobs must execute successfully before that evidence is claimed.
 
+For Windows verification without publication, dispatch `release.yaml` on the
+branch to check with `verify_only=true`, `publish_images=false`, and a release
+version in `tag` (for example, `v0.68.0`). This mode checks out the dispatched
+commit, runs both Windows bridge jobs, and uploads their receipts. Dashboard,
+release binary builds, package assembly, and publication are skipped. The tag
+input supplies the SDK version only and no tag is created or moved. Captured
+Go test output is printed when bridge verification fails.
+
 ### QA pre-releases
 
 Cloud QA installs unreleased engines through the real signed-release path from

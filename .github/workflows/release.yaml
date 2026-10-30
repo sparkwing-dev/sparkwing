@@ -12,6 +12,11 @@ on:
         description: Existing release tag to rebuild after a publication-only failure
         required: true
         type: string
+      verify_only:
+        description: Verify Windows bridges from the selected ref without publishing
+        required: false
+        default: false
+        type: boolean
       publish_images:
         description: Publish container images as part of the rebuild
         required: true
@@ -42,8 +47,13 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ inputs.tag || github.ref_name }}
           DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          VERIFY_ONLY: ${{ inputs.verify_only || false }}
         run: |
           set -euo pipefail
+          if [ "$GITHUB_EVENT_NAME" = workflow_dispatch ] && [ "$VERIFY_ONLY" = true ]; then
+            echo "source_sha=$GITHUB_SHA" >>"$GITHUB_OUTPUT"
+            exit 0
+          fi
           if [ "$GITHUB_EVENT_NAME" = workflow_dispatch ]; then
             test "$GITHUB_REF" = "refs/heads/$DEFAULT_BRANCH"
           fi
@@ -58,6 +68,7 @@ jobs:
           echo "source_sha=$source_sha" >>"$GITHUB_OUTPUT"
 
   dashboard:
+    if: ${{ !inputs.verify_only }}
     needs: validate-tag
     runs-on: ubuntu-latest
     steps:
@@ -238,6 +249,7 @@ jobs:
           if-no-files-found: error
 
   typescript-package:
+    if: ${{ !inputs.verify_only }}
     needs: [validate-tag, typescript-native]
     runs-on: ubuntu-latest
     steps:
@@ -275,6 +287,7 @@ jobs:
           if-no-files-found: error
 
   release:
+    if: ${{ !inputs.verify_only }}
     needs: [validate-tag, build, typescript-package]
     runs-on: ubuntu-latest
     concurrency:
