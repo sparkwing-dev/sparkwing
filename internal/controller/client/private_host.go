@@ -437,3 +437,13 @@ func (c *LocalHostClient) ReleaseEvaluation(ctx context.Context, ref runspec.Nod
 	err := c.transport.request(ctx, "POST", "/api/v1/runs/{run}/local-host/release-evaluation", "/api/v1/runs/"+url.PathEscape(c.run)+"/local-host/release-evaluation", "", localhostwire.LocalEvaluationRelease{NodeID: string(ref.NodeID)}, &result)
 	return result, err
 }
+
+// OwnerDebugPause follows a selected pause using the server-derived owner authority.
+func (c *LocalHostClient) OwnerDebugPause(ctx context.Context, ref runspec.NodeRef, generation int64, _ runstate.Actor, reason string) (bool, error) {
+	if ref.RunID != runspec.RunID(c.run) || ref.NodeID == "" || c.node != "" {
+		return false, localHostClientRefusal()
+	}
+	var result localhostwire.LocalDebugPauseState
+	err := c.request(ctx, "POST", "/debug-pause", string(ref.NodeID), localhostwire.LocalDebugPause{Generation: generation, Reason: reason}, &result)
+	return result.Released, err
+}

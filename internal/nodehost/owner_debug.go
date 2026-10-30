@@ -24,7 +24,7 @@ type DebugBoundary struct {
 	Timeout    time.Duration
 }
 
-// DebugBoundaryWaiter idempotently persists and follows each generation/reason under live owner authority.
+// DebugBoundaryWaiter idempotently persists and follows each job/reason under live owner authority.
 type DebugBoundaryWaiter interface {
 	WaitDebugBoundary(context.Context, DebugBoundary) error
 }

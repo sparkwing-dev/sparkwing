@@ -14,7 +14,7 @@ SELECT run_id, node_id, requested_at, message, timeout_ms, on_timeout,
        approver, resolved_at, resolution, comment
   FROM approvals
  WHERE approvals.team = ? AND resolved_at IS NULL
-   AND run_id IN (SELECT id FROM runs WHERE team = ?)
+   AND (run_id, node_id) IN (SELECT run_id, node_id FROM nodes WHERE team = ? AND status = 'approval_pending')
  ORDER BY requested_at ASC`, string(t.team), string(t.team))
 	if err != nil {
 		return nil, err

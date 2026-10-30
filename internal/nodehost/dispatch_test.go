@@ -26,7 +26,11 @@ func releaseRemote(t *testing.T, f *storeHostFixture, node string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := f.Host.release(t.Context(), f.Input, f.Accepted, entry, row, store.DecisionReady, func(context.Context, store.ReconcileRequest) error {
+	run, err := f.Tenant.ReadRun(t.Context(), f.Input.RunID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := f.Host.release(t.Context(), f.Input, f.Accepted, entry, run, row, store.DecisionReady, func(context.Context, store.ReconcileRequest) error {
 		t.Fatal("remote work entered owner executor")
 		return nil
 	}); err != nil {

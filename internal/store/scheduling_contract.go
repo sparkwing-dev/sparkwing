@@ -259,6 +259,26 @@ func scheduleDependencies(node ScheduleNode, byID map[string]int, groups map[str
 	return unique, true
 }
 
+// Dependencies resolves the accepted prerequisites used by the scheduler for each job.
+// Jobs with unresolved topology are omitted.
+func (snapshot ScheduleSnapshot) Dependencies() map[string][]string {
+	byID := make(map[string]int, len(snapshot.Nodes))
+	groups := make(map[string]ScheduleExpansion, len(snapshot.Expansions))
+	for i, node := range snapshot.Nodes {
+		byID[node.ID] = i
+	}
+	for _, group := range snapshot.Expansions {
+		groups[group.GeneratorID] = group
+	}
+	dependencies := make(map[string][]string, len(snapshot.Nodes))
+	for _, node := range snapshot.Nodes {
+		if deps, valid := scheduleDependencies(node, byID, groups); valid {
+			dependencies[node.ID] = deps
+		}
+	}
+	return dependencies
+}
+
 // planDependencyClosure returns the selected jobs and every prerequisite used by scheduling.
 func planDependencyClosure(plan nodeproto.PlanDoc, selected []string) (map[string]bool, error) {
 	nodes := make([]ScheduleNode, len(plan.Jobs))

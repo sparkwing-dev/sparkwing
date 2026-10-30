@@ -328,6 +328,10 @@ func (h *OwnerHost) accept(ctx context.Context, input RunInput, row store.RunRow
 		err = commit()
 	}
 	if err != nil {
+		var refusal *apierr.Error
+		if errors.As(err, &refusal) && refusal.Code == apierr.PlanInvalid {
+			return AcceptedRun{}, h.preparationFailure(ctx, input, row, err)
+		}
 		return AcceptedRun{}, err
 	}
 	if !reflect.DeepEqual(accepted.Spec.Request, row.Request) || accepted.PlanHash != string(plan.PlanHash) {

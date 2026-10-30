@@ -29,7 +29,11 @@ func approvalFixture(t *testing.T, gate nodeproto.ApprovalSpec) *storeHostFixtur
 	if err != nil {
 		t.Fatal(err)
 	}
-	err = f.Host.release(t.Context(), f.Input, f.Accepted, entry, row, store.DecisionApproval, func(context.Context, store.ReconcileRequest) error {
+	run, err := f.Tenant.ReadRun(t.Context(), f.Input.RunID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = f.Host.release(t.Context(), f.Input, f.Accepted, entry, run, row, store.DecisionApproval, func(context.Context, store.ReconcileRequest) error {
 		t.Fatal("approval entered the attempt executor")
 		return nil
 	})
@@ -149,7 +153,11 @@ func TestApprovalGateFailsOnAStoreThatCannotRecover(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	err = f.Host.release(t.Context(), f.Input, f.Accepted, entry, row, store.DecisionApproval, func(context.Context, store.ReconcileRequest) error {
+	run, err := f.Tenant.ReadRun(t.Context(), f.Input.RunID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = f.Host.release(t.Context(), f.Input, f.Accepted, entry, run, row, store.DecisionApproval, func(context.Context, store.ReconcileRequest) error {
 		t.Fatal("failed approval entered executor")
 		return nil
 	})

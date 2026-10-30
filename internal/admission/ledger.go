@@ -9,6 +9,8 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+
+	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
 )
 
 type Config struct {
@@ -694,11 +696,14 @@ func (l *Ledger) EffectivePriority(id, ownerID string, carried int) int {
 }
 
 func specBelongsToRun(s spec, runID string) bool {
-	return s.id == runID || s.ownerID == runID
+	return s.id == runID || s.ownerID == runID || string(wingwire.HolderRef(s.id).RunID()) == runID
 }
 
 func (l *Ledger) overrideForSpec(s spec) (int, bool) {
 	if p, ok := l.priorityOverrides[s.id]; ok {
+		return p, true
+	}
+	if p, ok := l.priorityOverrides[string(wingwire.HolderRef(s.id).RunID())]; ok {
 		return p, true
 	}
 	if s.ownerID != "" {
@@ -732,7 +737,7 @@ func (l *Ledger) runPresent(runID string) bool {
 		}
 	}
 	for _, le := range l.leases {
-		if le.requestID == runID || le.ownerID == runID {
+		if specBelongsToRun(spec{id: le.requestID, ownerID: le.ownerID}, runID) {
 			return true
 		}
 		if _, member := le.members[runID]; member {

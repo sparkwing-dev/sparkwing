@@ -198,3 +198,20 @@ func TestApprovalReaperRollsBackResolutionWithLifecycle(t *testing.T) {
 		})
 	}
 }
+
+func TestCancelledApprovalLeavesPendingListAndKeepsHistory(t *testing.T) {
+	tenant, ref, _, _ := approvalReaperFixture(t, "deny")
+	actor := authorityMember(t, tenant.s, "operator", RoleOwner)
+	actor.Kind = runstate.ActorOperator
+	if _, err := tenant.TransitionRun(t.Context(), runstate.RunTransition{RunID: ref.RunID, To: runstate.RunCancelled, Cause: runstate.RunCancel, Actor: actor, Reason: "user_cancelled"}); err != nil {
+		t.Fatal(err)
+	}
+	pending, err := tenant.ListPendingApprovals(t.Context())
+	if err != nil || len(pending) != 0 {
+		t.Fatalf("pending approvals after cancellation: %+v, %v", pending, err)
+	}
+	gate, err := tenant.GetApproval(t.Context(), string(ref.RunID), string(ref.NodeID))
+	if err != nil || gate.NodeID != string(ref.NodeID) {
+		t.Fatalf("cancelled approval history: %+v, %v", gate, err)
+	}
+}

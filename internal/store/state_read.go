@@ -72,16 +72,24 @@ func runClaimWait(run RunRow) runspec.Setting[time.Duration] {
 	return run.Request.Request.Options.ClaimWait
 }
 
-const nodeReadColumns = `status,outcome,status_detail,COALESCE(claimed_by,''),capability_prefix,owner_capability_prefix,generation,attempt,disruptions,ready_at,queue_started_at,lease_expires_at,started_at,finished_at,cancel_requested_at,cancel_reason,state_seq,state_digest,state_actor,expansion,expansion_digest,execution_json,spec_json,spec_hash,output_record,manifest_record`
+// safety: one attempt per generation is not an application retry; the rest are.
+const nodeReadColumns = `node_id,status,outcome,status_detail,failure_reason,COALESCE(claimed_by,''),capability_prefix,owner_capability_prefix,generation,attempt,disruptions,ready_at,queue_started_at,lease_expires_at,started_at,finished_at,cancel_requested_at,cancel_reason,state_seq,state_digest,state_actor,expansion,expansion_digest,execution_json,spec_json,spec_hash,output_record,manifest_record,
+ (SELECT COUNT(*)-COUNT(DISTINCT generation) FROM node_attempts a
+ WHERE a.team=nodes.team AND a.run_id=nodes.run_id AND a.node_id=nodes.node_id)`
 
 func readNodeTx(ctx context.Context, tx *storeTx, team Team, ref runspec.NodeRef) (runstate.NodeRow, error) {
-	v := runstate.NodeRow{Ref: ref}
+	node, err := scanNode(tx.QueryRowContext(ctx, `SELECT `+nodeReadColumns+` FROM nodes WHERE team=? AND run_id=? AND node_id=?`, team, ref.RunID, ref.NodeID), ref.RunID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return runstate.NodeRow{Ref: ref}, notFound("job", string(ref.NodeID))
+	}
+	return node, err
+}
+
+func scanNode(row rowScanner, runID runspec.RunID) (runstate.NodeRow, error) {
+	v := runstate.NodeRow{Ref: runspec.NodeRef{RunID: runID}}
 	var ready, queued, lease, start, finish, cancel sql.NullInt64
 	var actor, execution, output, manifest []byte
-	err := tx.QueryRowContext(ctx, `SELECT `+nodeReadColumns+` FROM nodes WHERE team=? AND run_id=? AND node_id=?`, team, ref.RunID, ref.NodeID).Scan(&v.Status, &v.Outcome, &v.StatusDetail, &v.ClaimedBy, &v.CapabilityPrefix, &v.OwnerCapabilityPrefix, &v.Generation, &v.Attempt, &v.Disruptions, &ready, &queued, &lease, &start, &finish, &cancel, &v.CancelReason, &v.StateSeq, &v.StateDigest, &actor, &v.Expansion, &v.ExpansionDigest, &execution, &v.Spec, &v.SpecHash, &output, &manifest)
-	if errors.Is(err, sql.ErrNoRows) {
-		return v, notFound("job", string(ref.NodeID))
-	}
+	err := row.Scan(&v.Ref.NodeID, &v.Status, &v.Outcome, &v.StatusDetail, &v.FailureReason, &v.ClaimedBy, &v.CapabilityPrefix, &v.OwnerCapabilityPrefix, &v.Generation, &v.Attempt, &v.Disruptions, &ready, &queued, &lease, &start, &finish, &cancel, &v.CancelReason, &v.StateSeq, &v.StateDigest, &actor, &v.Expansion, &v.ExpansionDigest, &execution, &v.Spec, &v.SpecHash, &output, &manifest, &v.ApplicationRetries)
 	if err != nil {
 		return v, err
 	}
@@ -102,11 +110,6 @@ func readNodeTx(ctx context.Context, tx *storeTx, team Team, ref runspec.NodeRef
 	}
 	if err = json.Unmarshal(execution, &v.Execution); err != nil {
 		return v, authorityError(apierr.IntegrityFailure, "invalid persisted execution: "+err.Error())
-	}
-	// safety: application retry is node-wide; counting attempts within each generation excludes lease-loss attempts.
-	err = tx.QueryRowContext(ctx, `SELECT COALESCE(SUM(n-1),0) FROM (SELECT COUNT(*) AS n FROM node_attempts WHERE team=? AND run_id=? AND node_id=? GROUP BY generation) AS attempts`, team, ref.RunID, ref.NodeID).Scan(&v.ApplicationRetries)
-	if err != nil {
-		return v, err
 	}
 	v.ReadyAt, v.QueueStartedAt, v.LeaseExpiresAt, v.StartedAt, v.FinishedAt, v.CancelRequestedAt = stateTime(ready), stateTime(queued), stateTime(lease), stateTime(start), stateTime(finish), stateTime(cancel)
 	if _, err = nodeState(v); err != nil {
@@ -188,28 +191,19 @@ func readSnapshotTx(ctx context.Context, tx *storeTx, team Team, id string) (Run
 		return out, err
 	}
 	out.Expansions = out.Run.expansions
-	rows, err := tx.queryContext(ctx, `SELECT node_id FROM nodes WHERE team=? AND run_id=? ORDER BY seq,node_id`, team, id)
+	rows, err := tx.queryContext(ctx, `SELECT `+nodeReadColumns+` FROM nodes WHERE team=? AND run_id=? ORDER BY seq,node_id`, team, id)
 	if err != nil {
 		return out, err
 	}
-	var refs []runspec.NodeRef
 	for rows.Next() {
-		var node string
-		if err := rows.Scan(&node); err != nil {
-			_ = rows.Close()
-			return out, err
+		node, err := scanNode(rows, runspec.RunID(id))
+		if err != nil {
+			return out, errors.Join(err, rows.Close())
 		}
-		refs = append(refs, runspec.NodeRef{RunID: runspec.RunID(id), NodeID: runspec.NodeID(node)})
+		out.Nodes = append(out.Nodes, node)
 	}
 	if err := errors.Join(rows.Err(), rows.Close()); err != nil {
 		return out, err
-	}
-	for _, ref := range refs {
-		v, err := readNodeTx(ctx, tx, team, ref)
-		if err != nil {
-			return out, err
-		}
-		out.Nodes = append(out.Nodes, v)
 	}
 	return out, nil
 }

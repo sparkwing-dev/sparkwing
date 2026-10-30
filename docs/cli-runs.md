@@ -340,7 +340,7 @@ Repeat --run or use --run - for newline-separated IDs on stdin. JSON emits one s
 
 Report run counts, success rate, and duration percentiles
 
-Read every matching root-run page through the selected controller. --since accepts days and weeks. JSON emits pipeline counts, success percentage, mean duration and nearest-rank P95. Plain emits pipeline names.
+Read every matching root-run page through the selected controller. --since accepts days and weeks. JSON emits pipeline counts, success percentage, mean duration and nearest-rank P50 and P95. Plain emits pipeline names.
 
 --sizing reads controller measurements, job rows, source, drift, memo exclusions and demand floors. --reset selects one --pipeline or --all-pipelines --yes and preserves resource pins. --since applies to run statistics only.
 

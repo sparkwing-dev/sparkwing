@@ -20,6 +20,7 @@ type secretPreflightError struct {
 	Repo       string
 	problems   []secretProblem
 	sharedOnly bool
+	local      bool
 }
 
 type secretProblem struct {
@@ -35,6 +36,9 @@ type secretProblem struct {
 func (e *secretPreflightError) Unwrap() error { return authorityError(apierr.PlanInvalid, e.Error()) }
 
 func (e *secretPreflightError) Error() string {
+	if e.local {
+		return e.detail()
+	}
 	names := make([]string, len(e.problems))
 	for i, p := range e.problems {
 		names[i] = p.Name
@@ -52,6 +56,10 @@ func (e *secretPreflightError) detail() string {
 	fmt.Fprintf(&b, "pipeline %q did not start: it declares %d required %s this run cannot read.",
 		e.Pipeline, len(e.problems), plural(len(e.problems), "secret", "secrets"))
 	for _, p := range e.problems {
+		if e.local {
+			fmt.Fprintf(&b, "\n- %s is unavailable in the local controller.\n  Fix: sparkwing secrets set --secret %s --file <path>", p.Name, p.Name)
+			continue
+		}
 		set := fmt.Sprintf("sparkwing secrets set --secret %s --file <path> --profile <profile>", p.Name)
 		scoped := fmt.Sprintf("%s --repo %s --pipeline %s", set, e.Repo, e.Pipeline)
 		switch {
@@ -160,7 +168,8 @@ func secretPreflightTx(ctx context.Context, tx *storeTx, team Team, run RunRow, 
 	if repo == "" {
 		repo = selection.repo
 	}
-	refused := &secretPreflightError{RunID: runID, Pipeline: pipeline, Repo: repo, sharedOnly: selection.scope == secretSharedOnly}
+	local := run.Request.Request.Origin == runspec.OriginLocal || run.Request.Request.Source.Location.LocalCheckout != ""
+	refused := &secretPreflightError{RunID: runID, Pipeline: pipeline, Repo: repo, sharedOnly: selection.scope == secretSharedOnly, local: local}
 	for _, name := range required {
 		if readable[name] {
 			continue

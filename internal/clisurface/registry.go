@@ -359,7 +359,7 @@ func Registry() []Command {
 			{Name: "profile", Argument: "PROFILE"},
 			{Name: "group", Argument: "GROUP"},
 		}},
-		{Path: "sparkwing queue priority", Flags: []Flag{
+		{Path: "sparkwing queue priority", Rules: []string{"Queued local jobs follow their run's priority. --set front moves a visible waiting run ahead of the other queued runs."}, Flags: []Flag{
 			{Name: "profile", Argument: "PROFILE"},
 			{Name: "run", Argument: "ID", Required: true},
 			{Name: "set", Argument: "VALUE", Required: true},
@@ -588,7 +588,7 @@ func Registry() []Command {
 			{Name: "profile", Argument: "NAME"},
 		}},
 		{Path: "sparkwing runs stats", Rules: []string{
-			"Read every matching root-run page through the selected controller. --since accepts days and weeks. JSON emits pipeline counts, success percentage, mean duration and nearest-rank P95. Plain emits pipeline names.",
+			"Read every matching root-run page through the selected controller. --since accepts days and weeks. JSON emits pipeline counts, success percentage, mean duration and nearest-rank P50 and P95. Plain emits pipeline names.",
 			"--sizing reads controller measurements, job rows, source, drift, memo exclusions and demand floors. --reset selects one --pipeline or --all-pipelines --yes and preserves resource pins. --since applies to run statistics only.",
 			"Sizing reset requires an authorized controller route. Until that contract exists the adapter returns policy_missing without changing state.",
 		}, Flags: []Flag{

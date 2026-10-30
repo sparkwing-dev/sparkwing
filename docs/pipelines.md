@@ -563,7 +563,9 @@ Resolution paths:
 
 For a local run that must survive closing the submitting terminal, use
 `sparkwing run <pipeline> --sw-detached`. The resident consumer owns the
-run while it waits for approval.
+run while it waits for approval. The local controller checks approval deadlines
+every second. Cancelling the run removes its gate from the pending approval
+list. `sparkwing runs approvals list --run ID` still includes its request history.
 
 Repository fleet history comes from the local controller's public run projection.
 A failed history read is an error. Repository commands do not open the runs store

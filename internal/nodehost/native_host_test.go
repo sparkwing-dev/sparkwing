@@ -19,6 +19,7 @@ import (
 )
 
 type nativeHostState struct {
+	ownerDebugStore
 	OwnerStore
 	ClaimStore
 }

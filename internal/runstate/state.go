@@ -124,6 +124,7 @@ type NodeRow struct {
 	Status                NodeStatus
 	Outcome               NodeState
 	StatusDetail          string
+	FailureReason         string
 	ClaimedBy             string
 	CapabilityPrefix      string
 	OwnerCapabilityPrefix string

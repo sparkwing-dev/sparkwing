@@ -11,6 +11,7 @@ The owner names the server lookup. Bindings and current authority constrain ever
 
 | Method | Path | Audience | Owner | Authentication | Retry | Access alternatives |
 |---|---|---|---|---|---|---|
+| `POST` | `/api/v1/runs/{run}/local-host/nodes/{job}/debug-pause` | `controller` | `run` | `capability` | `exact_body` | `awarded_or_delegated_claim` / `trigger.host` / `runOfTrigger` / `reporting` |
 | `GET` | `/api/v1/runs/{run}/local-host/data-authority` | `controller` | `run` | `capability` | `safe` | `awarded_or_delegated_claim` / `data.read` / `runOfTrigger` / `sensitive`<br>`awarded_or_delegated_claim` / `data.read` / `planOwner` / `sensitive`<br>`awarded_or_delegated_claim` / `data.read` / `sourceReport` / `sensitive` |
 | `POST` | `/api/v1/runs/{run}/local-host/may-start` | `controller` | `run` | `capability` | `exact_body` | `awarded_or_delegated_claim` / `node.report` / `run` / `sensitive` |
 | `POST` | `/api/v1/runs/{run}/local-host/release-evaluation` | `controller` | `run` | `capability` | `exact_body` | `awarded_or_delegated_claim` / `trigger.host` / `runOfTrigger` / `sensitive` |

@@ -11,7 +11,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/controller"
 	"github.com/sparkwing-dev/sparkwing/internal/credentials"
 	"github.com/sparkwing-dev/sparkwing/internal/fssecure"
-	"github.com/sparkwing-dev/sparkwing/internal/limits"
 	"github.com/sparkwing-dev/sparkwing/internal/localhostwire"
 	"github.com/sparkwing-dev/sparkwing/internal/runners"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
@@ -194,7 +193,7 @@ func (c *localController) Run(ctx context.Context, report func(wingd.LocalActivi
 }
 
 func (c *localController) maintain(ctx context.Context) error {
-	tick := time.NewTicker(limits.Renew(limits.DefaultLease))
+	tick := time.NewTicker(time.Second)
 	defer tick.Stop()
 	var nextMaintenance time.Time
 	for {

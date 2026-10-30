@@ -26,6 +26,9 @@ func MaterializePipeline(ctx context.Context, dir string, options CompileOptions
 		return nil, false, err
 	} else if found {
 		lease.recordUse(dir, parts)
+		if _, err := fmt.Fprintln(options.Diagnostics, "Cache hit: pipeline binary"); err != nil {
+			return nil, false, errors.Join(err, lease.Release())
+		}
 		return lease, false, nil
 	}
 	if err := preparePipelineDependencies(ctx, dir, options); err != nil {
@@ -44,6 +47,11 @@ func MaterializePipeline(ctx context.Context, dir string, options CompileOptions
 		return nil, false, err
 	}
 	lease.recordUse(dir, parts)
+	if !published {
+		if _, err := fmt.Fprintln(options.Diagnostics, "Cache hit: pipeline binary"); err != nil {
+			return nil, false, errors.Join(err, lease.Release())
+		}
+	}
 	return lease, published, nil
 }
 

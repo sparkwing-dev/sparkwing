@@ -4,9 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"maps"
 	"net/http"
 	"slices"
+	"strings"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
@@ -113,7 +115,7 @@ func runDetailResponse(target capability.Target, facts RunStatusFacts) (controll
 		job.Summary, job.Annotations = results[job.ID].Summary, results[job.ID].Annotations
 		detail.Jobs = append(detail.Jobs, job)
 	}
-	if err := fillJobDeclarations(detail.Jobs, nodes); err != nil {
+	if err := fillJobDeclarations(detail.Jobs, nodes, facts.Snapshot); err != nil {
 		return controllerwire.RunDetail{}, err
 	}
 	attempts, err := statusAttempts(target, nodes, facts.Attempts)
@@ -149,7 +151,8 @@ func runDetailResponse(target capability.Target, facts RunStatusFacts) (controll
 }
 
 // safety: a need on a job this run never planned would draw an edge to nothing, so only planned jobs pass.
-func fillJobDeclarations(jobs []controllerwire.JobDetail, nodes map[string]runstate.NodeRow) error {
+func fillJobDeclarations(jobs []controllerwire.JobDetail, nodes map[string]runstate.NodeRow, snapshot store.RunSnapshot) error {
+	continueOnError := make(map[string]bool, len(jobs))
 	for i := range jobs {
 		spec := nodes[jobs[i].ID].Spec
 		if len(spec) == 0 {
@@ -161,6 +164,7 @@ func fillJobDeclarations(jobs []controllerwire.JobDetail, nodes map[string]runst
 		if json.Unmarshal(spec, &declaration) != nil {
 			continue
 		}
+		continueOnError[jobs[i].ID] = declaration.ContinueOnError
 		for _, need := range append(declaration.Needs, declaration.NeedsIfPresent...) {
 			if _, exists := nodes[need]; exists && !slices.Contains(jobs[i].Needs, need) {
 				jobs[i].Needs = append(jobs[i].Needs, need)
@@ -171,15 +175,49 @@ func fillJobDeclarations(jobs []controllerwire.JobDetail, nodes map[string]runst
 		}
 		jobs[i].Groups, jobs[i].Approval = declaration.Groups, len(declaration.Approval) > 0 && string(declaration.Approval) != "null"
 	}
+	var dependencies map[string][]string
+	resolved := false
+	for i := range jobs {
+		node := nodes[jobs[i].ID]
+		if node.Status != runstate.StatusDone || node.FailureReason != "upstream_failed" || node.StatusDetail != "" {
+			continue
+		}
+		if !resolved {
+			// safety: display reads tolerate malformed declarations, so graph diagnostics only enrich valid topology.
+			if graph, err := snapshot.Scheduling(); err == nil {
+				dependencies = graph.Dependencies()
+			}
+			resolved = true
+		}
+		var blocked []string
+		needs := jobs[i].Needs
+		if resolved, ok := dependencies[jobs[i].ID]; ok {
+			needs = resolved
+		}
+		for _, need := range needs {
+			upstream := nodes[need]
+			if need == jobs[i].OnFailureOf || continueOnError[need] {
+				continue
+			}
+			switch upstream.Outcome {
+			case runstate.NodeFailed, runstate.NodeCancelled, runstate.NodeSuperseded:
+				blocked = append(blocked, fmt.Sprintf("%q (%s)", need, upstream.Outcome))
+			}
+		}
+		if len(blocked) > 0 {
+			jobs[i].StatusDetail = "upstream_failed: blocked by " + strings.Join(blocked, ", ")
+		}
+	}
 	return nil
 }
 
 type jobDisplayDeclaration struct {
-	Needs          []string        `json:"deps"`
-	NeedsIfPresent []string        `json:"deps_if_present"`
-	Groups         []string        `json:"groups"`
-	OnFailureOf    string          `json:"on_failure_of"`
-	Approval       json.RawMessage `json:"approval"`
+	ContinueOnError bool            `json:"continue_on_error"`
+	Needs           []string        `json:"deps"`
+	NeedsIfPresent  []string        `json:"deps_if_present"`
+	Groups          []string        `json:"groups"`
+	OnFailureOf     string          `json:"on_failure_of"`
+	Approval        json.RawMessage `json:"approval"`
 }
 
 func statusAttempts(target capability.Target, nodes map[string]runstate.NodeRow, rows []runstate.NodeAttempt) ([]controllerwire.AttemptDetail, error) {

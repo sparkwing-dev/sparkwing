@@ -57,8 +57,11 @@ VALUES (?,'live',?,'done',?,1,?,?)`, b.Tenant.Team(), outcome, outcome, []byte(`
 	if err := c.Close(); err != nil {
 		t.Fatal(err)
 	}
-	if err := c.State.Ready(); err == nil {
-		t.Fatal("closed store was ready")
+	if err := c.Ready(); err == nil {
+		t.Fatal("closed controller was ready")
+	}
+	if _, err := c.State.Reconcile(t.Context()); err == nil {
+		t.Fatal("closed store activity read succeeded")
 	}
 }
 

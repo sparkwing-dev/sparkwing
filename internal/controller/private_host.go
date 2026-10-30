@@ -3,6 +3,7 @@ package controller
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"math"
 	"net/http"
 	"slices"
@@ -21,6 +22,7 @@ import (
 func (s *Server) localHostEndpoints() []controllerwire.Endpoint {
 	engine := s.engineController
 	return []controllerwire.Endpoint{
+		{Method: "POST", Pattern: "/api/v1/runs/{run}/local-host/nodes/{job}/debug-pause", Authentication: capability.AuthCapability, Decode: runSelectorTarget, ResolveTarget: engine.resolveRunSelector, Handle: s.localHostDebugPause},
 		{Method: "POST", Pattern: "/api/v1/runs/{run}/local-host/may-start", Authentication: capability.AuthCapability, Decode: runSelectorTarget, ResolveTarget: engine.resolveRunSelector, Handle: s.localHostCapacity},
 		{Method: "POST", Pattern: "/api/v1/runs/{run}/local-host/release-evaluation", Authentication: capability.AuthCapability, Decode: runSelectorTarget, ResolveTarget: engine.resolveRunSelector, Handle: s.localHostReleaseEvaluation},
 		{Method: "POST", Pattern: "/api/v1/runs/{run}/local-host/relinquish-start", Authentication: capability.AuthCapability, Decode: runSelectorTarget, ResolveTarget: engine.resolveRunSelector, Handle: s.localHostRelinquishStart},
@@ -122,8 +124,7 @@ func (s *Server) localHostNode(w http.ResponseWriter, r *http.Request, a capabil
 		return err
 	}
 	if a.Principal.Capability.Unit == capability.UnitTrigger {
-		ctx := s.placementContext(r.Context())
-		node, err := tenant.ReadOwnerNode(ctx, a.Principal.Authority, runspec.NodeRef{RunID: runspec.RunID(a.Target.RunID), NodeID: runspec.NodeID(a.Target.NodeID)})
+		node, err := tenant.ReadOwnerNode(r.Context(), a.Principal.Authority, runspec.NodeRef{RunID: runspec.RunID(a.Target.RunID), NodeID: runspec.NodeID(a.Target.NodeID)})
 		if err != nil {
 			return engineLookupError(err)
 		}
@@ -295,21 +296,34 @@ func (s *Server) localHostAuthority(ctx context.Context, a capability.Authorized
 	if err != nil {
 		return capability.Principal{}, err
 	}
-	nodes, err := tenant.ReadOwnerNodes(ctx, owner.Authority, a.Target.RunID)
+	var principal capability.Principal
+	if ref.Kind == capability.AuthorityCapability && ref.ID != "" {
+		principal, err = s.operator.ResolveAuthority(ctx, ref)
+	} else if digest != ([32]byte{}) {
+		principal, err = s.operator.LookupCapability(ctx, digest)
+	} else {
+		return capability.Principal{}, localHostRefusal()
+	}
+	if err != nil {
+		var failure *apierr.Error
+		if errors.As(err, &failure) && failure.Code == apierr.Unauthenticated {
+			return capability.Principal{}, localHostRefusal()
+		}
+		return capability.Principal{}, err
+	}
+	binding := principal.Capability.Binding
+	if binding.Kind != capability.BindingNode || binding.RunID != a.Target.RunID || binding.NodeID == "" {
+		return capability.Principal{}, localHostRefusal()
+	}
+	node, err := tenant.ReadOwnerNode(ctx, owner.Authority, runspec.NodeRef{RunID: runspec.RunID(binding.RunID), NodeID: runspec.NodeID(binding.NodeID)})
+	if errors.Is(err, store.ErrNotFound) {
+		return capability.Principal{}, localHostRefusal()
+	}
 	if err != nil {
 		return capability.Principal{}, engineLookupError(err)
 	}
-	for _, node := range nodes {
-		if node.OwnerCapabilityPrefix != owner.Capability.Prefix || node.CapabilityPrefix == "" || ref.ID != "" && ref.ID != node.CapabilityPrefix {
-			continue
-		}
-		principal, err := s.operator.ResolveAuthority(ctx, capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: node.CapabilityPrefix})
-		if err != nil {
-			return capability.Principal{}, err
-		}
-		if localHostOwnsNode(owner, node, principal) && (ref == principal.Authority || digest != ([32]byte{}) && digest == principal.Capability.Digest) {
-			return principal, nil
-		}
+	if localHostOwnsNode(owner, node, principal) && (ref == principal.Authority || digest != ([32]byte{}) && digest == principal.Capability.Digest) {
+		return principal, nil
 	}
 	return capability.Principal{}, localHostRefusal()
 }
@@ -328,4 +342,21 @@ func localHostOwnsNode(owner capability.Principal, node runstate.NodeRow, child 
 
 func localHostRefusal() error {
 	return &apierr.Error{Code: apierr.Forbidden, Message: "authority is outside the local host award"}
+}
+
+func (s *Server) localHostDebugPause(w http.ResponseWriter, r *http.Request, a capability.Authorized) error {
+	var body localhostwire.LocalDebugPause
+	if err := decodeEngineRequest(r, &body); err != nil {
+		return err
+	}
+	tenant, err := s.tenantForTeam(r.Context(), store.Team(a.Target.Team))
+	if err != nil {
+		return err
+	}
+	released, err := tenant.OwnerDebugPause(r.Context(), runspec.NodeRef{RunID: runspec.RunID(a.Target.RunID), NodeID: runspec.NodeID(a.Target.NodeID)}, body.Generation, engineActor(a), body.Reason)
+	if err != nil {
+		return engineLookupError(err)
+	}
+	writeJSON(w, http.StatusOK, localhostwire.LocalDebugPauseState{Released: released})
+	return nil
 }

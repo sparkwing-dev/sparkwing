@@ -31,12 +31,16 @@ func TestMaterializePipelineReusesBinaryWithoutGo(t *testing.T) {
 	if err := seed.Release(); err != nil {
 		t.Fatal(err)
 	}
-	lease, published, err := MaterializePipeline(t.Context(), dir, CompileOptions{Environment: env, Diagnostics: io.Discard})
+	var diagnostics bytes.Buffer
+	lease, published, err := MaterializePipeline(t.Context(), dir, CompileOptions{Environment: env, Diagnostics: &diagnostics})
 	if err != nil {
 		t.Fatalf("cached binary required Go: %v", err)
 	}
 	if err := lease.Release(); err != nil {
 		t.Fatal(err)
+	}
+	if !strings.Contains(diagnostics.String(), "Cache hit: pipeline binary") {
+		t.Fatalf("cached pipeline diagnostic missing: %q", diagnostics.String())
 	}
 	if published || lease.key() != key || lease.entry.binaryPath() != seed.entry.binaryPath() {
 		t.Fatalf("cached binary replaced: published=%t key=%s", published, lease.key())
@@ -82,6 +86,9 @@ func TestMaterializePipelineUsesTheCompilationWorkspace(t *testing.T) {
 			lease, _, err := MaterializePipeline(t.Context(), directory, CompileOptions{Environment: os.Environ(), Diagnostics: &diagnostics})
 			if err != nil {
 				t.Fatalf("workspace materialization: %v: %s", err, &diagnostics)
+			}
+			if strings.Contains(diagnostics.String(), "Cache hit:") {
+				t.Fatalf("newly compiled pipeline reported a hit: %q", diagnostics.String())
 			}
 			t.Cleanup(func() {
 				if err := lease.Release(); err != nil {

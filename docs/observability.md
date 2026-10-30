@@ -36,13 +36,22 @@ The rewrite's CLI adapters are implemented against the shared controller
 contract. Final server read adapters, annotation policy and persisted log
 completion remain integration requirements.
 
+Jobs that never started still show their terminal explanation in `status_detail`.
+An upstream failure names the dependency that blocked the job. A queue deadline
+shows `queue_timeout: timed out waiting to start` even when no execution attempt
+exists.
+
+Local daemon readiness reports whether its controller has opened and reconciled.
+A busy database writer does not make a readiness probe wait. Status requests
+still read committed database state and report database errors.
+
 ## Run statistics and sizing
 
 `sparkwing runs stats --pipeline check --since 7d` reads every matching root-run
 page. JSON contains separate successful, failed, cancelled and active counts.
 Success percentage counts terminal runs, including cancellations. Mean duration
-and nearest-rank P95 use runs with both timestamps. Plain output emits pipeline
-names. A failed page read produces no partial totals.
+and nearest-rank P50 and P95 use runs with both timestamps. Plain output emits
+pipeline names. A failed page read produces no partial totals.
 
 `sparkwing runs stats --sizing` reads the controller's resource measurements,
 including job rows, CPU and memory distributions, wait times, memo exclusions,
@@ -129,7 +138,7 @@ the logs.
 | `timeout` | Node exceeded its configured execution timeout. | Raise the timeout or optimize the pipeline. |
 | `no_progress_timeout` | Node emitted no observable progress for its configured inactivity window. | Check where the node stopped, stream command output or report progress when work is healthy, and raise the inactivity window if the expected quiet period is longer. |
 | `agent_lost` | The runner holding the job's claim stopped renewing it. Started work requeues in the same run until three disruptions have occurred. | Check the runner and `job_requeued` events. Recovery preserves the application retry budget. |
-| `queue_timeout` | Either a node waited past its concurrency group's `OnLimit: Queue` timeout without getting a slot, or no agent claimed the node within its claim wait (default 24h; the error starts `unclaimable:` and names why). The node's error text names which. | For a concurrency wait, raise the group's capacity or its queue timeout. For an unclaimed node, ensure runners are up and their advertised `--label` set satisfies the pipeline's `requires:` / node `.Requires()`. |
+| `queue_timeout` | Either a node waited past its concurrency group's `OnLimit: Queue` timeout without getting a slot, or no agent claimed the node within its claim wait (default 24h; the error starts `unclaimable:` and names why). Status preserves `queue_timeout` and an explanation even if the job never started. | For a concurrency wait, raise the group's capacity or its queue timeout. For an unclaimed node, ensure runners are up and their advertised `--label` set satisfies the pipeline's `requires:` / node `.Requires()`. |
 | `credits_exhausted` | The team's prepaid balance or a funding hold refused the next execution slice, and the job stopped within its drain deadline. | Add credits or resolve the funding hold, then start the run again. |
 | `unpriced_cpu_class` | The node asks for more cpu than the largest class the credit rate table prices, so no claim can be billed. | A Sparkwing Cloud operator can add the class to the credit rate table. Otherwise lower the node's cpu request, then re-run. The terminal job event records the `unpriced_cpu_class` reason. |
 | `runner_lease_expired` | The worker that claimed this run's *trigger* stopped renewing its lease. The controller returns the trigger to the pending queue and cascade-fails every node the run had not finished. | Check the worker that claimed the trigger. The trigger is re-claimable; this run is terminal. |

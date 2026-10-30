@@ -14,6 +14,16 @@ execution location and pause. An explicit `"pause": null` means no active pause.
 A failed pause read is an error. Pause diagnostics are masked before the
 controller returns them.
 
+Local runs honor `--sw-pause-before JOB`, `--sw-pause-after JOB` and
+`--sw-pause-on-failure`. Inspect the persisted pause with `debug env`, then
+release it with `debug resume`. A pause after failure preserves the job
+error and failed outcome.
+
+Released pauses stay released for that job and reason for the rest of the run.
+If a claim expires before the job starts after resuming a pause, recovery can
+return the job to pending without pausing again. Restart the debug run to pause
+at that boundary again.
+
 To open a shell in a running Kubernetes job, use:
 
 ```sh

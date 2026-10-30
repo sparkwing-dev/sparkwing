@@ -105,6 +105,7 @@ func wireOperations() map[string]wireOperation {
 		"POST /node/v1/summary":                                operation("Write a masked summary", nodeproto.SummaryRequest{}, nodeproto.ServiceAcknowledged{}),
 	}
 	result["POST /api/v1/operator/teams"] = operation("Create a team and its first administrator", wire.OperatorTeamCreate{}, wire.OperatorTeamCreated{})
+	result["POST /api/v1/runs/{run}/local-host/nodes/{job}/debug-pause"] = operation("Follow a sealed debug boundary under the live owner award", localhostwire.LocalDebugPause{}, localhostwire.LocalDebugPauseState{})
 	result["POST /api/v1/runs/{run}/local-host/may-start"] = operation("Ask to start a job under its current award", localhostwire.LocalCapacityRequest{}, runstate.AcquireSlotResponse{})
 	result["POST /api/v1/runs/{run}/local-host/release-evaluation"] = operation("Release source expansion under plan admission", localhostwire.LocalEvaluationRelease{}, runstate.Applied{})
 	result["POST /api/v1/runs/{run}/local-host/relinquish-start"] = operation("Relinquish a provisional burst job award", localhostwire.LocalCapacityRequest{}, nil)
