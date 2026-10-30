@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -44,7 +45,8 @@ func TestNativeProtocol(t *testing.T) {
 		command.Dir = root
 		attach(t, command, files[0], files[1])
 		output, err := command.CombinedOutput()
-		if exit, ok := err.(*exec.ExitError); !ok || exit.ExitCode() != 2 || !strings.Contains(string(output), "pipe") {
+		var exit *exec.ExitError
+		if !errors.As(err, &exit) || exit.ExitCode() != 2 || !strings.Contains(string(output), "pipe") {
 			t.Fatalf("non-pipe descriptors: %v\n%s", err, output)
 		}
 	})
