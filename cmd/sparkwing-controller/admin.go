@@ -32,8 +32,10 @@ store configuration under SPARKWING_HOME and never creates a store.
 
 session prints an independent account session for an existing team administrator
 on a licensed team or Cloud controller.
-Use --output plain to pipe it to sparkwing runners add --session-stdin. It initially expires in 15 minutes;
-normal account-session renewal and revocation apply. The session is printed only
+Use --output plain to pipe it to sparkwing runners add --session-stdin. Its initial expiry is 15 minutes.
+Normal renewal applies, including during enrollment. Enrollment attempts logout
+on success or failure. If logout fails, the renewed session remains live until
+expiry or revocation. The session is printed only
 to stdout and the audit line contains no secret.
 
 freeze holds the team: its metered claims are refused until the hold is

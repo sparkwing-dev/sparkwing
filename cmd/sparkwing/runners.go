@@ -13,6 +13,7 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/controller/client"
 
@@ -70,7 +71,16 @@ func runRunnersAdd(inv clisurface.Invocation) error {
 		if readErr != nil {
 			return readErr
 		}
-		manager, err = client.NewSessionRunnerTokenManager(ctx, client.EngineOptions{URL: prof.ControllerURL()}, session)
+		var sessionManager client.SessionRunnerTokenManager
+		sessionManager, err = client.NewSessionRunnerTokenManager(ctx, client.EngineOptions{URL: prof.ControllerURL()}, session)
+		if err == nil {
+			defer func() {
+				logoutCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+				defer cancel()
+				_ = sessionManager.Logout(logoutCtx)
+			}()
+		}
+		manager = sessionManager
 	} else {
 		manager, err = runnerTokenManager(prof)
 	}

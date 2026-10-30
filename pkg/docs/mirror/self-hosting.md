@@ -392,9 +392,11 @@ Pod access is the break-glass credential. The command opens the serving
 controller's recorded store, encryption keys and credential epoch. It requires
 an existing administrator of the named team and creates no account or membership.
 It prints JSON by default, or the raw session with `--output plain`, only to stdout and an audit line without the session to
-stderr. The initial session expires in 15 minutes. Enrollment renews it through
-the normal account-session lifecycle. See [session lifecycle](auth.md#browser-session-lifecycle)
-for expiry and logout. Keep session output private. A `local` deployment uses
+stderr. The initial expiry is 15 minutes. Enrollment renews the session through
+the normal account-session lifecycle and attempts logout on success or failure.
+If logout fails, the renewed session remains live until expiry or revocation.
+Use a dedicated session because logout ends it for every client. See
+[session lifecycle](auth.md#browser-session-lifecycle) for expiry and logout. Keep session output private. A `local` deployment uses
 the local controller connection and does not support account sessions.
 
 For a reserved-pool launcher, use the same pipe with:
