@@ -228,7 +228,7 @@ func TestResultSegmentsRoundTripContiguityAndSeal(t *testing.T) {
 }
 
 func TestResultFinalLogsUseExactWriterAndBoundedGrace(t *testing.T) {
-	for _, kind := range []string{"allowed", "late", "new_generation", "new_attempt", "revoked", "wrong_writer"} {
+	for _, kind := range []string{"allowed", "late", "new_generation", "wrong_attempt", "revoked", "wrong_writer"} {
 		t.Run(kind, func(t *testing.T) {
 			s, tenant, actor, attempt := resultFixture(t)
 			finished := s.now().Add(-time.Second)
@@ -239,8 +239,8 @@ func TestResultFinalLogsUseExactWriterAndBoundedGrace(t *testing.T) {
 				s.clock = func() time.Time { return finished.Add(limits.LogSealGrace + time.Nanosecond) }
 			case "new_generation":
 				rewriteSchemaExec(t, s.db, "UPDATE nodes SET generation = 8 WHERE run_id = 'run'")
-			case "new_attempt":
-				rewriteSchemaExec(t, s.db, "UPDATE nodes SET attempt = 3 WHERE run_id = 'run'")
+			case "wrong_attempt":
+				attempt.Attempt++
 			case "revoked":
 				rewriteSchemaExec(t, s.db, "DELETE FROM capabilities WHERE prefix = 'machine'")
 			case "wrong_writer":

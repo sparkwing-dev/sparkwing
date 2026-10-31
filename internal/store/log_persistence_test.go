@@ -26,6 +26,39 @@ func TestLogPersistenceCannotCreateStream(t *testing.T) {
 	rewriteSchemaCount(t, s.db, "log_segments", 0)
 }
 
+func TestLogPersistenceRetryTailKeepsItsWriterAndGrace(t *testing.T) {
+	for _, name := range []string{"within grace", "at boundary", "after grace", "other holder", "other credential", "other generation"} {
+		t.Run(name, func(t *testing.T) {
+			s, tenant, actor, attempt := resultFixture(t)
+			rewriteSchemaExec(t, s.db, `UPDATE nodes SET execution_json=? WHERE team='a' AND run_id='run' AND node_id='job'`, []byte(`{"retry":{"set":true,"value":1}}`))
+			finished := s.now()
+			applied, err := tenant.TransitionNode(t.Context(), RetryNode{Ref: runspec.NodeRef{RunID: "run", NodeID: "job"}, Actor: actor, SourceAttempt: sourceAttempt(2), Result: &runstate.NodeResult{Outcome: "failed"}})
+			if err != nil || applied.Attempt != 3 {
+				t.Fatalf("retry: %+v %v", applied, err)
+			}
+			switch name {
+			case "at boundary":
+				s.clock = func() time.Time { return finished.Add(limits.LogSealGrace) }
+			case "after grace":
+				s.clock = func() time.Time { return finished.Add(limits.LogSealGrace + time.Nanosecond) }
+			case "other holder":
+				rewriteSchemaExec(t, s.db, `UPDATE node_attempts SET holder='other' WHERE team='a' AND run_id='run' AND node_id='job' AND attempt=2`)
+			case "other credential":
+				rewriteSchemaExec(t, s.db, `UPDATE node_attempts SET capability_prefix='other' WHERE team='a' AND run_id='run' AND node_id='job' AND attempt=2`)
+			case "other generation":
+				rewriteSchemaExec(t, s.db, `UPDATE nodes SET generation=generation+1 WHERE team='a' AND run_id='run' AND node_id='job'`)
+			}
+			commit := logCommit(actor, attempt)
+			commit.Final = true
+			err = tenant.RecordSegments(t.Context(), commit)
+			allowed := name == "within grace" || name == "at boundary"
+			if (err == nil) != allowed {
+				t.Fatalf("retry tail allowed=%v: %v", allowed, err)
+			}
+		})
+	}
+}
+
 func TestLogPersistenceRetainedBytesCountSegmentsOnce(t *testing.T) {
 	s, tenant, actor, attempt := resultFixture(t)
 	commit := logCommit(actor, attempt)
