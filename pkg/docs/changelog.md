@@ -41,6 +41,8 @@ unlock.
 
 ### Fixed
 
+- **schedules:** Unreachable source repositories and missing refs return HTTP 422 during registration
+  Refusals name the repository and ref, explain which URL and credentials to check, and log at info. Server faults still return HTTP 500.
 - **runners:** Machines with a full shared local budget leave jobs available for Cloud overflow
   With local admission enabled, a saturated machine stops offering job capacity instead of repeatedly reclaiming work it cannot start. Planning continues while the budget is full.
 - **console:** Rerun executes retries of accepted controller-dispatched plans

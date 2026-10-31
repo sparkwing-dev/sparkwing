@@ -25,6 +25,13 @@ writes require member `runs.control`. List queries accept `all` and `next`;
 detail queries accept `fires` and `next`, including zero. Overrides preserve
 explicit empty argument sets, empty zones and zero catch-up.
 
+Repository schedule registration returns `422 plan_failed` when source ref
+resolution finds an unreachable or unknown repository, refused Git credentials,
+or a missing ref. The message names the repository and ref and asks the caller
+to check the URL, credentials and ref. These refusals are logged at info and
+leave schedules unchanged. Server faults, such as a missing Git executable,
+return `500 internal` and are logged at error.
+
 Approval decisions use `POST /runs/{run}/approvals/{job}` with `resolution`
 (`approved` or `denied`) and optional `comment`. The authenticated identity
 supplies the approver. Success returns `{"approval":{...},"replayed":false}`.
