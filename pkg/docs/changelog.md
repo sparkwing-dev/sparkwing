@@ -60,7 +60,6 @@ unlock.
 - **Cloud docs:** Node and network prerequisites describe NetworkPolicy's own-node exception and the kubelet authentication and node-level controls required for that path.
 - **Cloud:** Missing team NodePool configuration ends the awarded unit as `cloud_capacity_unconfigured` and releases its credit hold
   The failure gives support@sparkwing.dev and a run reference. Scaling or exhausted pools keep waiting with a dedicated-capacity notice and elapsed time in API and CLI run status. Launcher NodePool access adds read-only listing.
-
 - **logs:** Finished Cloud runs complete aggregate log reads after bootstrap owner requeues
   Owner streams register when the runner exchanges its bootstrap credential. Awards that never reached a log writer no longer leave unsealed streams. Missing final seals from actual writers still report incomplete logs.
 - **TypeScript SDK:** Imports inside jobs retain CommonJS and ESM exports from symlinked packages
