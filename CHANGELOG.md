@@ -41,6 +41,8 @@ unlock.
 
 ### Fixed
 
+- **runner:** Uploaded Go pipelines with a local SDK replacement install and plan through the runner
+  The runner accepts the internal SDK installer command used during source acquisition.
 - **source credentials:** Refusals explain that an unproven run cannot fetch a private repository
   Changed-revision children require supplied source or a separate App-verified run. Fetch-only access follows the same repository-proof requirement as other job credentials.
 - **controller:** Client-canceled HTTP requests return HTTP 499 and log at info

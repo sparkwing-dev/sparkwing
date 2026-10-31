@@ -263,6 +263,9 @@ installation, describe, planning or execution. Each machine fetches that release
 once from GitHub Releases and verifies it. Pipeline binaries are built and
 cached on the executing machine. Local execution does not fetch prebuilt
 pipeline binaries from a controller. See [repository upgrades](cli-upgrade.md).
+For an uploaded Go pipeline, the runner installs the SDK from the acquired
+snapshot before planning. An upload with a local SDK replacement must include
+that replacement's source.
 
 Before a local run is accepted, foreground and queued hosts select Go or
 TypeScript from the sealed checkout's pipeline directory. A malformed manifest
