@@ -9,7 +9,8 @@ async function drained(stream: NodeJS.WritableStream & { writableLength: number 
   } while (stream.writableLength > 0);
 }
 function pipe(fd: number): number {
-  const stat = fstatSync(fd);
+  // bug: Node's numeric pipe stats can make realpath stop before resolving package symlinks.
+  const stat = fstatSync(fd, { bigint: true });
   if (!stat.isFIFO() && !stat.isSocket()) throw new Error("protocol descriptor must be a pipe");
   return fd;
 }

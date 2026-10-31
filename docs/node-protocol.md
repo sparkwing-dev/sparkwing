@@ -15,6 +15,10 @@ The host starts a Go pipeline binary as `<entry> --sw-node-protocol`. It starts 
 TypeScript entry as `node <main> --sw-node-protocol`. The working directory is the
 acquired repository checkout.
 
+TypeScript package imports use Node's native CommonJS and ESM loading. This
+includes symlinked dependencies installed by pnpm and imports inside job
+callbacks. Default and named exports follow Node's interop rules.
+
 | Stream | Unix descriptor | Purpose |
 |---|---|---|
 | stdin | 0 | Null device |
