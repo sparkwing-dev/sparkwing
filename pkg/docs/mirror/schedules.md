@@ -16,6 +16,11 @@ schedules resume after acknowledgment without rearming. For security incidents,
 rearm those schedules with fresh credentials. Unfinished scheduled runs from
 the backup are cancelled with "cancelled by restore; rerun if needed".
 
+Schedule registration refusals explain invalid input: cron uses five fields,
+for example `0 * * * *` (hourly); branch names can be `main` or `feature/build`
+and cannot contain spaces; commit pins use full 40- or 64-character hexadecimal
+object IDs. Correct the named field and register the declaration again.
+
 ## Inspect schedules
 
 ```sh

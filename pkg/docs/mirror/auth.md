@@ -354,7 +354,8 @@ admin revocation, membership removal or demotion ends them immediately.
 Rejoining or promotion cannot revive them. `team.admin` requires
 `--allow-team-admin` (`allow_team_admin` in the API) and expires within 30 days.
 Omitted expiry uses the applicable ceiling. A requested expiry beyond that
-ceiling is refused, including during rotation.
+ceiling is refused, including during rotation. The refusal names the applicable
+90-day or 30-day maximum and asks for a future expiry within it.
 Invitation acceptance checks that the inviter still holds team administration,
 and that the account owns the invited address: the last sign-in to verify an
 address, through any account, makes that account its one owner. Unlinking the
@@ -909,7 +910,9 @@ invitation acceptance carries `invitation_not_found` or `invitation_closed`
 in `error.details.reason`. The store finds an invitation only through
 an address the account owns, so a missing invitation and one sent elsewhere get
 the same `invitation_not_found` answer; expiry and use are reported only for the
-caller's own invitation. Linking a provider does not grant repository
+caller's own invitation. The refusal asks the user to sign in with the account
+whose verified email matches the invitation, or ask a team owner for a new
+invitation. Linking a provider does not grant repository
 trust. GitHub App intake separately verifies its webhook and clones its exact
 SHA. A subsequent branch-head lookup cannot replace that proof.
 

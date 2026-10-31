@@ -214,9 +214,9 @@ func (s *Server) handleAcceptInvitation(w http.ResponseWriter, r *http.Request, 
 func invitationRefusal(err error) error {
 	switch {
 	case errors.Is(err, store.ErrNotFound):
-		return reasonedRefusal(apierr.NotFound, invitationNotFound, "this invitation is not for the signed-in account or no longer exists")
+		return reasonedRefusal(apierr.NotFound, invitationNotFound, "this invitation is not for the signed-in account or no longer exists; sign in with the account whose verified email matches the invitation, or ask a team owner for a new invitation")
 	case errors.Is(err, store.ErrInvitationClosed):
-		return reasonedRefusal(apierr.Conflict, invitationClosed, "this invitation has expired or was already used")
+		return reasonedRefusal(apierr.Conflict, invitationClosed, "this invitation has expired or was already used; ask a team owner for a new invitation")
 	}
 	return accountMutationError(err)
 }

@@ -598,10 +598,10 @@ func (s *ScheduleTrigger) Validate(pipeline string) error {
 		}
 	}
 	if strings.TrimSpace(s.Cron) == "" {
-		return fmt.Errorf("%s: on.schedule.cron is required", label)
+		return fmt.Errorf("%s: on.schedule.cron is required; use a five-field cron such as %q (hourly)", label, "0 * * * *")
 	}
 	if _, err := cronspec.Parse(s.Cron); err != nil {
-		return fmt.Errorf("%s: on.schedule.cron: %w", label, err)
+		return fmt.Errorf("%s: on.schedule.cron: %w; use a five-field cron such as %q (hourly)", label, err, "0 * * * *")
 	}
 	switch s.Where {
 	case ScheduleWhereLocal, ScheduleWhereController:

@@ -26,5 +26,9 @@ func unclaimedNotice(view store.RunView) *engineid.Notice {
 		return nil
 	}
 	what := map[capability.UnitKind]string{capability.UnitTrigger: "the run's trigger", capability.UnitPlan: "the run's plan", capability.UnitEval: "evaluation of job " + unit.NodeID, capability.UnitNode: "job " + unit.NodeID}[unit.Kind]
-	return &engineid.Notice{Kind: engineid.NoticeUnclaimed, Reason: fmt.Sprintf("no runner or launcher has claimed %s yet; check that a matching runner (or the Cloud launcher) is online", what)}
+	reason := fmt.Sprintf("no runner or launcher has claimed %s yet; check that a matching runner (or the Cloud launcher) is online", what)
+	if !run.Request.Provenance.DefaultBranchWork() {
+		reason += "; if targeting a pool holding reserved secrets, it needs verified default-branch work: push to the repository's default branch through the GitHub App, or select a pool without reserved secrets and start a new run"
+	}
+	return &engineid.Notice{Kind: engineid.NoticeUnclaimed, Reason: reason}
 }

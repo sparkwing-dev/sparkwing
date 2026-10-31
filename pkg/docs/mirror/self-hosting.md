@@ -476,6 +476,11 @@ installing a login service. See [runner reference](cli-runners.md) and
 
 ### Shared runners and pool trust
 
+An unclaimed-work notice for unverified work explains the reserved-pool remedy:
+push to the repository's default branch through the GitHub App to establish
+verified default-branch work, or select a pool without reserved secrets and
+start a new run. Naming the default branch on an uploaded run does not verify it.
+
 A runner's credential fixes which runs it accepts:
 
 - A runner that holds a pool with a secret reserved to it takes only runs from
