@@ -4,10 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 
+	batchv1 "k8s.io/api/batch/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 	ktesting "k8s.io/client-go/testing"
 )
 
@@ -199,5 +202,68 @@ func TestLauncherAcceptsRoundTrippedBindingTimes(t *testing.T) {
 	}
 	if err := l.Sync(t.Context()); err != nil {
 		t.Fatalf("equivalent binding refused during reconciliation: %v", err)
+	}
+}
+
+func TestPublicationRechecksDeadlineAfterConcurrentRenewal(t *testing.T) {
+	for _, alterActivation := range []bool{false, true} {
+		t.Run(fmt.Sprintf("alter_activation=%t", alterActivation), func(t *testing.T) {
+			l, kube, _, control := fixture()
+			funded := time.Now().Add(2 * time.Minute)
+			control.award.LeaseExpiresAt = funded
+			retained, activated := false, false
+			kube.PrependReactor("patch", "jobs", func(action ktesting.Action) (bool, runtime.Object, error) {
+				patching := action.(ktesting.PatchAction)
+				var patch batchv1.Job
+				if err := json.Unmarshal(patching.GetPatch(), &patch); err != nil {
+					t.Fatal(err)
+				}
+				if patch.Spec.Suspend != nil && !*patch.Spec.Suspend {
+					activated = true
+				}
+				if patch.Annotations[bootstrapAnnotation] == "" && !alterActivation {
+					return false, nil, nil
+				}
+				gvr := batchv1.SchemeGroupVersion.WithResource("jobs")
+				object, err := kube.Tracker().Get(gvr, action.GetNamespace(), patching.GetName())
+				if err != nil {
+					t.Fatal(err)
+				}
+				job := object.(*batchv1.Job).DeepCopy()
+				if patch.Annotations[bootstrapAnnotation] != "" {
+					retained = true
+					job.Annotations[bootstrapAnnotation] = patch.Annotations[bootstrapAnnotation]
+				} else if patch.Spec.Suspend != nil {
+					job.Spec.Suspend = patch.Spec.Suspend
+					job.Annotations[launchAnnotation] = patch.Annotations[launchAnnotation]
+				} else {
+					return false, nil, nil
+				}
+				job.Annotations[deadlineAnnotation] = funded.Add(time.Hour).Format(time.RFC3339Nano)
+				job.Spec.ActiveDeadlineSeconds = ptr(int64(3600))
+				if err := kube.Tracker().Update(gvr, job, action.GetNamespace()); err != nil {
+					t.Fatal(err)
+				}
+				return true, job, nil
+			})
+			claimed, err := l.LaunchOne(t.Context())
+			if !claimed || !retained || !activated || (err != nil) != alterActivation {
+				t.Fatalf("publication: claimed=%t retained=%t activated=%t err=%v", claimed, retained, activated, err)
+			}
+			if alterActivation {
+				return
+			}
+			job, err := kube.BatchV1().Jobs(l.Config.Namespace).Get(t.Context(), jobName(control.award.Binding), metav1.GetOptions{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			start, err := time.Parse(time.RFC3339Nano, job.Annotations[launchAnnotation])
+			if err != nil {
+				t.Fatal(err)
+			}
+			if job.Spec.Suspend == nil || *job.Spec.Suspend || job.Annotations[deadlineAnnotation] != funded.Format(time.RFC3339Nano) || job.Spec.ActiveDeadlineSeconds == nil || *job.Spec.ActiveDeadlineSeconds != jobDeadlineSeconds(funded, start) {
+				t.Fatalf("activation did not restore funded deadline: %+v", job)
+			}
+		})
 	}
 }

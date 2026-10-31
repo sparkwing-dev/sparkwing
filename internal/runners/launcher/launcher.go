@@ -110,7 +110,7 @@ func (l *Launcher) Run(ctx context.Context) error {
 	logger := l.logger()
 	var cooldown time.Time
 	for ctx.Err() == nil {
-		// Held awards still need renewal while new claims are backing off.
+		// safety: claim backoff must not let held awards expire before placement.
 		synced := l.sync(ctx)
 		if blocking(synced) != nil {
 			logger.Warn("launcher reconciliation failed", failureAttrs(synced)...)
@@ -305,6 +305,11 @@ func (l *Launcher) retainBootstrap(ctx context.Context, job *batchv1.Job, secret
 	if err == nil {
 		expected := job.DeepCopy()
 		expected.Annotations[bootstrapAnnotation] = string(reference)
+		// safety: activation validates both deadlines before execution, so suspended Jobs can accept concurrent renewal.
+		if retained != nil {
+			expected.Annotations[deadlineAnnotation] = retained.Annotations[deadlineAnnotation]
+			expected.Spec.ActiveDeadlineSeconds = retained.Spec.ActiveDeadlineSeconds
+		}
 		err = validateAdmittedJob(expected, retained)
 		if err == nil && retained.UID != job.UID {
 			err = errors.New("Kubernetes changed the Cloud Job UID")

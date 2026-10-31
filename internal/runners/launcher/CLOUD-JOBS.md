@@ -256,6 +256,11 @@ to the Job UID and must survive the admitted update. A cleanup record injected
 at Job creation is refused. Added server metadata does not change the bootstrap
 contract.
 
+Recording the bootstrap cleanup target preserves concurrent deadline renewals
+on the suspended Job. Activation writes both deadline fields from fresh
+controller authority and validates the admitted response before execution.
+`TestPublicationRechecksDeadlineAfterConcurrentRenewal` guards this sequence.
+
 Secret creation and the cleanup record are separate Kubernetes writes. If the
 record fails, the launcher attempts immediate UID-fenced deletion, retains the
 Job and reservation, and reports the target name and UID. If that deletion also

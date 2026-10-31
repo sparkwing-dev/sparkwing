@@ -41,6 +41,8 @@ unlock.
 
 ### Fixed
 
+- **Cloud:** Bootstrap publication survives concurrent renewal of the suspended Job's deadline
+  Activation applies and validates the latest controller-funded deadline before execution.
 - **Cloud:** Plans waiting for dedicated capacity keep their lease while the launcher holds the award
   Placement retries use the renewed deadline. Claim backoff and unrelated Job observation failures continue renewing held awards. Owner loss still permits recovery and requeue.
 - **schedules:** Installing a schedule that collides with a GitHub App declaration returns HTTP 409 and preserves the existing schedule
