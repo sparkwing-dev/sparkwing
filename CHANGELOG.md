@@ -30,6 +30,8 @@ unlock.
   Idempotent retries count once. Refusals report current usage, a retry delay and support guidance before calling the provider.
 - **store (Breaking):** The schema baseline advances to version 28 and requires a schema wipe
   Back up and recreate stores at any other version using the [backup and move-aside instructions](docs/backup-restore.md#schema-compatibility). The baseline records Checkout Session reservation times, removes unused columns and capacity profile pins, waits, contention counters and floors, and enforces financial row shapes plus one open billing interval per award. Staging and production stores must be recreated before this build starts.
+- **controller (Breaking):** Sizing and capacity responses drop stored resource pins, demand floors, queue waits, contention counters and drift
+  Update API clients using the [capacity-profile migration guide](docs/migrations/_unreleased.md#capacity-profiles-report-measured-data). Measured resource distributions and predecessor estimates remain available.
 - **release (Breaking):** Sparkwing releases use the native tag-and-publication flow
   Platform deployment is separate. Retire the platform repository's `release-all` pipeline and `bin/trigger-change-deploy.sh` callers when updating that repository.
 
