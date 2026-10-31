@@ -135,13 +135,34 @@ func TestGitHubAppWithoutChecksPermissionKeepsReportPending(t *testing.T) {
 }
 
 func TestGitHubAppCheckRunSummaryIsBounded(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: 137.9s measured in the short class; the full suite runs it")
-	}
 	f := newGitHubCompletion(t)
-	for i := range 400 {
-		f.addReportingNode("node-"+strings.Repeat("x", 40)+"-"+strconv.Itoa(i), runstate.NodeFailed, strings.Repeat("é", 500))
+	run, err := f.tenant.ReadRun(t.Context(), "run")
+	if err != nil {
+		t.Fatal(err)
 	}
+	var plan nodeproto.PlanDoc
+	if err := json.Unmarshal(run.Plan, &plan); err != nil {
+		t.Fatal(err)
+	}
+	rows := make([]string, 400)
+	args := make([]any, 0, 6*len(rows))
+	for i := range rows {
+		job := nodeproto.JobSpec{ID: "node-" + strings.Repeat("x", 40) + "-" + strconv.Itoa(i)}
+		plan.Jobs = append(plan.Jobs, job)
+		spec, err := json.Marshal(job)
+		if err != nil {
+			t.Fatal(err)
+		}
+		rows[i] = "('a','run',?,'done','failed',?,?,?,?,?)"
+		args = append(args, job.ID, strings.Repeat("é", 500), f.now.UnixNano(), spec, []byte(`{}`), i+2)
+	}
+	encoded, err := json.Marshal(plan)
+	if err != nil {
+		t.Fatal(err)
+	}
+	engineSQL(t, f.server.store, `UPDATE runs SET plan_json=? WHERE team='a' AND id='run'`, encoded)
+	// perf: one insert projects the fixture's claim indexes once for the whole reporting batch.
+	engineSQL(t, f.server.store, `INSERT INTO nodes(team,run_id,node_id,status,outcome,error,finished_at,spec_json,execution_json,seq) VALUES `+strings.Join(rows, ","), args...)
 	f.finish(runstate.RunFailed)
 	engineSQL(t, f.server.store, `UPDATE runs SET error=? WHERE team='a' AND id='run'`, strings.Repeat("ü", 100_000))
 	f.reconcile()

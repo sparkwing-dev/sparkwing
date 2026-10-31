@@ -404,7 +404,16 @@ file. Other syntax and workflow checks remain active.
   run handle. On exactly four logical CPUs, the gate reserves 2.5 cores and
   starts the full Go suite and touched-package race suite together after the
   build. The race command can run two package binaries while each keeps
-  `GOMAXPROCS=1`. On a four-core single-tenant host, the ordinary and
+  `GOMAXPROCS=1`. When nodehost is touched and the host has capacity for two
+  package processes, its race suite runs after the module's ordinary packages
+  in two exhaustive shards of one compiled binary. Each shard keeps
+  `GOMAXPROCS=1` and runs its assigned tests once, including the slow class,
+  with a ten-minute timeout.
+  Listing, coverage checks, failure cancellation and output collection use the
+  same runner as the store's release shards. The unsharded one-thread local
+  baseline took 687 seconds. Parallel tests within that runtime share the same
+  CPU bound. Hosts with capacity for one package retain the ordinary race
+  command. On a four-core single-tenant host, the ordinary and
   PostgreSQL commands use the same one-thread, two-package bounds, so the
   overlapping commands allow four Go runtime threads rather than six.
   This corrects execution accounting; fitting the whole gate deadline and

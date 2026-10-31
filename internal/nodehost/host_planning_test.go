@@ -6,11 +6,11 @@ import (
 	"fmt"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
 	"github.com/sparkwing-dev/sparkwing/internal/engineid"
+	"github.com/sparkwing-dev/sparkwing/internal/limits"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/releaseasset"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
@@ -45,7 +45,7 @@ func FuzzPlanningDefaultsRefuseSecretIdentifiers(f *testing.F) {
 
 func checkPlanningDefaults(t *testing.T, secret, field string) {
 	t.Helper()
-	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), limits.DefaultLease)
 	defer cancel()
 	job := nodeproto.JobSpec{ID: "safe-job", Steps: []nodeproto.StepSpec{{ID: "body"}}}
 	switch field {

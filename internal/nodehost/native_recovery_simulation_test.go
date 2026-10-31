@@ -14,6 +14,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
 	"github.com/sparkwing-dev/sparkwing/internal/engineid"
+	"github.com/sparkwing-dev/sparkwing/internal/limits"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/releaseasset"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
@@ -158,7 +159,7 @@ func simulateNativeRecovery(t *testing.T, random *rand.Rand, compute bool) {
 		expanded.Store(true)
 		return json.RawMessage(`{"jobs":[]}`), runspec.SecretRegistration{Version: 1}, nil, nil
 	}
-	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), limits.DefaultLease)
 	defer cancel()
 	completion, err := owner.Run(ctx, f.Input)
 	if err != nil || completion.Outcome != "success" || !queued.Load() || !expanded.Load() || !approved.Load() {

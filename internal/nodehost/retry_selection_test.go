@@ -5,8 +5,8 @@ import (
 	"reflect"
 	"slices"
 	"testing"
-	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/limits"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
@@ -21,7 +21,7 @@ func TestRetryExecutesCommittedSelectionAfterRestart(t *testing.T) {
 	}{{"failed", "failed", false}, {"all", "all", false}, {"later_success", "failed", true}} {
 		t.Run(scenario.name, func(t *testing.T) {
 			mode := scenario.mode
-			ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+			ctx, cancel := context.WithTimeout(t.Context(), limits.DefaultLease)
 			defer cancel()
 			original := newStoreHostFixtureOn(t, openStore(t, store.WithPolicies(func(*store.Store) (store.Policies, error) {
 				return store.Policies{ResultBlobs: storage.BlobManifests{}}, nil

@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
+	"github.com/sparkwing-dev/sparkwing/internal/limits"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
@@ -204,7 +205,7 @@ func TestExpansionFansOutAndHoldsItsWaiter(t *testing.T) {
 		}
 		return fixture.report(ctx, input, runstate.NodeSuccess)
 	})
-	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), limits.DefaultLease)
 	defer cancel()
 	completion, err := fixture.Host.Run(ctx, fixture.Input)
 	if err != nil || completion.Outcome != "success" {
@@ -237,7 +238,7 @@ func TestExpansionFailureCancelsItsWaiter(t *testing.T) {
 				}
 				return fixture.report(ctx, input, outcome)
 			})
-			ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+			ctx, cancel := context.WithTimeout(t.Context(), limits.DefaultLease)
 			defer cancel()
 			completion, err := fixture.Host.Run(ctx, fixture.Input)
 			wantRun, wantWaiter := "failed", runstate.NodeCancelled

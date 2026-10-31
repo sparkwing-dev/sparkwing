@@ -3,9 +3,9 @@ package nodehost
 import (
 	"context"
 	"testing"
-	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/limits"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
@@ -49,7 +49,7 @@ func TestHostedRunEmitsTheDispatchersEvents(t *testing.T) {
 		}
 		return f.report(ctx, input, outcome)
 	})
-	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), limits.DefaultLease)
 	defer cancel()
 	completion, err := f.Host.Run(ctx, f.Input)
 	if err != nil || completion.Outcome != "failed" {

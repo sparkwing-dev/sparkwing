@@ -2,8 +2,10 @@ package jobs
 
 import (
 	"context"
+	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -147,3 +149,71 @@ func TestRaces(t *testing.T) {
 	}
 }
 `
+
+func TestNodehostRaceShardsKeepTheHostsPackageBound(t *testing.T) {
+	for _, cpus := range []int{1, 2, 3, 4, 5, 8} {
+		want := 2
+		if cpus < 4 {
+			want = 0
+		}
+		if got := nodehostRaceShardCount(hostShape{cpus: cpus}); got != want {
+			t.Errorf("%d CPUs: %d nodehost shards, want %d", cpus, got, want)
+		}
+	}
+	args := nodehostRaceShardArgs([]string{"TestA", "TestB"})
+	if slices.Contains(args, "-test.short") || !slices.Contains(args, "-test.count=1") || !slices.Contains(args, "-test.timeout=10m") {
+		t.Fatalf("nodehost race shard args=%q, want full class once under 10m", args)
+	}
+}
+
+func TestRaceModulesShardsNodehostAfterOrdinaryPackages(t *testing.T) {
+	t.Setenv("GOMAXPROCS", "8")
+	if nodehostRaceShardCount(currentHost()) == 0 {
+		t.Skip("host has capacity for only one package process")
+	}
+	root := t.TempDir()
+	t.Chdir(root)
+	writeGoFile(t, filepath.Join(root, "go.mod"), "module example.test/shards\n\ngo 1.26.0\n")
+	writeGoFile(t, filepath.Join(root, "internal", "ordinary", "ordinary_test.go"), `package ordinary
+import ("os"; "testing")
+func TestOrdinary(t *testing.T) {
+	if err := os.WriteFile("../ordinary-complete", nil, 0600); err != nil { t.Fatal(err) }
+}
+`)
+	writeGoFile(t, filepath.Join(root, "internal", "nodehost", "host_test.go"), `package nodehost
+import ("os"; "runtime"; "testing"; "time")
+func init() {
+	if runtime.GOMAXPROCS(0) != 1 { panic("nodehost startup exceeded one runtime thread") }
+}
+func check(t *testing.T) {
+	if testing.Short() { t.Fatal("nodehost skipped the full class") }
+	if runtime.GOMAXPROCS(0) != 1 { t.Fatal("nodehost exceeded one runtime thread") }
+	if deadline, ok := t.Deadline(); !ok || time.Until(deadline) < 9*time.Minute || time.Until(deadline) > 10*time.Minute {
+		t.Fatalf("deadline=%v, want ten-minute shard bound", deadline)
+	}
+	if _, err := os.Stat("../ordinary-complete"); err != nil { t.Fatal("ordinary packages did not finish before shards", err) }
+	file, err := os.OpenFile(t.Name(), os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0600)
+	if err != nil { t.Fatal("test ran more than once", err) }
+	if err := file.Close(); err != nil { t.Fatal(err) }
+}
+func TestA(t *testing.T) { check(t) }
+func TestB(t *testing.T) { check(t) }
+`)
+	if err := raceModules(t.Context(), map[string][]string{".": {"./internal/nodehost", "./internal/ordinary"}}, t.TempDir(), t.TempDir()); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"TestA", "TestB"} {
+		if _, err := os.Stat(filepath.Join(root, "internal", "nodehost", name)); err != nil {
+			t.Fatalf("shards omitted %s: %v", name, err)
+		}
+	}
+	for _, name := range []string{"TestA", "TestB"} {
+		if err := os.Remove(filepath.Join(root, "internal", "nodehost", name)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	writeGoFile(t, filepath.Join(root, "internal", "nodehost", "race_test.go"), strings.Replace(racyTest, "package internal", "package nodehost", 1))
+	if err := raceModules(t.Context(), map[string][]string{".": {"./internal/nodehost"}}, t.TempDir(), t.TempDir()); err == nil || !strings.Contains(err.Error(), "race shard") {
+		t.Fatalf("racing shard=%v, want shard failure", err)
+	}
+}
