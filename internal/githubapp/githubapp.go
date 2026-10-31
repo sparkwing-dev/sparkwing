@@ -62,7 +62,8 @@ const (
 var (
 	ErrRejected     = errors.New("githubapp: github rejected the credential")
 	ErrNotInstalled = errors.New("githubapp: the app is not installed there")
-	// ErrUnavailable means GitHub answered with a server error.
+	// ErrUnavailable means GitHub supplied no usable answer, including server
+	// errors and unreadable JSON.
 	ErrUnavailable = errors.New("githubapp: GitHub is unavailable")
 	// ErrPermissionMissing means the installation has not granted a
 	// permission the request needs, as when its owner has not yet accepted
@@ -533,7 +534,14 @@ func (c *Client) CommitReachable(ctx context.Context, installation, repository i
 	} else if err != nil {
 		return false, err
 	}
-	return comparison.Status == "ahead" || comparison.Status == "identical", nil
+	switch comparison.Status {
+	case "ahead", "identical":
+		return true, nil
+	case "behind", "diverged":
+		return false, nil
+	default:
+		return false, fmt.Errorf("%w: unknown compare status %q", ErrUnavailable, comparison.Status)
+	}
 }
 
 type gitObject struct {
@@ -837,16 +845,24 @@ func (c *Client) apiHeaders(req *http.Request, authorization string) {
 }
 
 func (c *Client) do(req *http.Request, out any) (int, error) {
-	status, body, err := c.send(req)
+	ctx, cancel := context.WithTimeout(req.Context(), requestTimeout)
+	defer cancel()
+	resp, err := c.cfg.HTTP.Do(req.WithContext(ctx))
 	if err != nil {
-		return 0, err
+		return 0, fmt.Errorf("githubapp: %s: %w", req.URL.Host, err)
 	}
-	if out != nil && len(body) > 0 && status < 300 {
-		if err := json.Unmarshal(body, out); err != nil {
-			return 0, fmt.Errorf("githubapp: unreadable answer from %s: %w", req.URL.Path, err)
+	defer func() { _ = resp.Body.Close() }()
+	if out != nil && resp.StatusCode < 300 {
+		// bug: compare includes up to 300 file patches even with per_page=1, so a capped read can cut valid JSON.
+		decoder := json.NewDecoder(resp.Body)
+		if err := decoder.Decode(out); err != nil && err != io.EOF {
+			return 0, fmt.Errorf("%w: unreadable answer from %s: %w", ErrUnavailable, req.URL.Path, err)
+		}
+		if err := decoder.Decode(new(any)); err != io.EOF {
+			return 0, fmt.Errorf("%w: trailing data in answer from %s", ErrUnavailable, req.URL.Path)
 		}
 	}
-	return status, nil
+	return resp.StatusCode, nil
 }
 
 func (c *Client) send(req *http.Request) (int, []byte, error) {

@@ -47,6 +47,7 @@ type IntakeRequest struct {
 	// sets it, never a request body.
 	FetchedRepository        FetchedRepository `json:"-"`
 	SourceCredentialVerified bool              `json:"-"`
+	UnverifiedReason         string            `json:"-"`
 	RetryMode                string
 	// OriginMachine is a short-lived proof of the submitting machine's runner credential; intake verifies it and seals
 	// only the machine's name.

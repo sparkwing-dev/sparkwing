@@ -105,6 +105,7 @@ type GitHub struct {
 	tokens           map[string]*issuedToken
 	commits          map[string]string
 	comparisons      map[string]string
+	comparisonFiles  map[string][]map[string]any
 	files            map[string][]byte
 	aliases          map[string]string
 	failContents     int
@@ -127,15 +128,16 @@ func New(t testing.TB) *GitHub {
 	}
 	g := &GitHub{
 		Key: key, t: t,
-		insts:       map[int64]*Installation{},
-		codes:       map[string]*userCode{},
-		users:       map[string]*userCode{},
-		tokens:      map[string]*issuedToken{},
-		commits:     map[string]string{},
-		comparisons: map[string]string{},
-		files:       map[string][]byte{},
-		aliases:     map[string]string{},
-		checkRuns:   map[int64]CheckRunCall{},
+		insts:           map[int64]*Installation{},
+		codes:           map[string]*userCode{},
+		users:           map[string]*userCode{},
+		tokens:          map[string]*issuedToken{},
+		commits:         map[string]string{},
+		comparisons:     map[string]string{},
+		comparisonFiles: map[string][]map[string]any{},
+		files:           map[string][]byte{},
+		aliases:         map[string]string{},
+		checkRuns:       map[int64]CheckRunCall{},
 	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /login/oauth/access_token", g.handleAccessToken)
@@ -202,6 +204,14 @@ func (g *GitHub) SetComparison(repo, base, ref, status string) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	g.comparisons[strings.ToLower(repo)+"/"+base+"..."+ref] = status
+}
+
+// SetComparisonFiles supplies the first page's changed files, including optional
+// patches. GitHub returns up to 300 files even when per_page limits commits.
+func (g *GitHub) SetComparisonFiles(repo, base, ref string, files []map[string]any) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	g.comparisonFiles[strings.ToLower(repo)+"/"+base+"..."+ref] = files
 }
 
 // SetFile makes path available at sha, or removes it when content is nil.
@@ -355,6 +365,7 @@ func (g *GitHub) handleCompare(w http.ResponseWriter, r *http.Request) {
 	g.mu.Lock()
 	head := g.commits[repo+"/"+strings.TrimPrefix(ref, "refs/")]
 	status, configured := g.comparisons[repo+"/"+base+"..."+ref]
+	files := g.comparisonFiles[repo+"/"+base+"..."+ref]
 	g.mu.Unlock()
 	if !configured {
 		switch {
@@ -370,7 +381,14 @@ func (g *GitHub) handleCompare(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusNotFound, map[string]string{"message": "Not Found"})
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]string{"status": status})
+	writeJSON(w, http.StatusOK, map[string]any{
+		"status":            status,
+		"base_commit":       map[string]string{"sha": base},
+		"merge_base_commit": map[string]string{"sha": base},
+		"commits":           []map[string]string{{"sha": head}},
+		"total_commits":     1,
+		"files":             files,
+	})
 }
 
 // SetChecksGranted records whether installation id's owner accepted the

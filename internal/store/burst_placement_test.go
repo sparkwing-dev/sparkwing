@@ -11,6 +11,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 )
 
 func burstFixture(t *testing.T, policy runspec.BurstPlacement) (*Store, UnitDemand) {
@@ -314,5 +315,43 @@ func TestBurstMachinesPreferenceFollowsTheMachineStartedRunsOwner(t *testing.T) 
 	}
 	if strings.Contains(prefers, "foreign") {
 		t.Errorf("machines preference %q names another member's machine", prefers)
+	}
+}
+
+func TestBurstCloudClaimsAfterBusyPersonalRelinquishes(t *testing.T) {
+	for _, queued := range []bool{false, true} {
+		t.Run(fmt.Sprintf("queued=%t", queued), func(t *testing.T) {
+			s, demand := burstFixture(t, runspec.BurstPlacement{Preferences: []runspec.PlacementStep{{Target: "machines", Hold: 5 * time.Second}, {Target: "cloud"}}})
+			now := s.now()
+			s.pinnedClock = func() time.Time { return now }
+			owner := authorityMember(t, s, "owner", RoleOwner)
+			personal := burstPersonalClaimant(t, s, owner.Authority, "laptop")
+			launcher := authorityRoot("burst-launcher", "")
+			launcher.Subject.Kind = capability.SubjectService
+			launcher.Grants = []capability.Grant{capability.ClaimsLaunch}
+			authorityPersist(t, s, launcher)
+			fundUnitClaim(t, s)
+			demand.CapabilityPrefix = personal.Prefix
+			tenant := &Tenant{s: s, team: "a"}
+			for range 3 {
+				claim, actor := meteredUnitClaim(t, s, demand)
+				if err := tenant.RelinquishStart(t.Context(), runstate.CapacityBinding{RunID: claim.RunID, NodeID: claim.NodeID, Generation: int64(claim.Award.Generation)}, actor); err != nil {
+					t.Fatal(err)
+				}
+				now = now.Add(2 * time.Second)
+			}
+			if err := s.AsOperator().RecordRunnerPoll(t.Context(), demand); err != nil {
+				t.Fatal(err)
+			}
+			demand.CapabilityPrefix = launcher.Prefix
+			if queued {
+				demand.Target = nil
+				demand.Kinds = []capability.UnitKind{capability.UnitNode}
+			}
+			claim, err := s.AsOperator().ClaimUnit(t.Context(), demand)
+			if err != nil || claim.NodeID != "job" {
+				t.Fatalf("Cloud did not claim released burst job: %+v %v", claim, err)
+			}
+		})
 	}
 }

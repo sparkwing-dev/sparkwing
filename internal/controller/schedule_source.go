@@ -77,6 +77,11 @@ func (s *Server) ResolveScheduleSource(ctx context.Context, row store.CronSchedu
 	}
 
 	_, request.SourceCredentialVerified, err = s.verifyIntakeSourceCredential(ctx, row.Team, request)
+	var unavailable *intakeCompareUnavailable
+	if errors.As(err, &unavailable) {
+		request.SourceUnverifiedReason = "Run is unverified because " + unavailable.Error()
+		return request, nil
+	}
 	return request, err
 }
 

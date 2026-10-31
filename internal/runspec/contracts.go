@@ -362,6 +362,7 @@ type Concurrency struct {
 type Request struct {
 	// SourceCredentialVerified carries a controller's schedule lookup into intake; it never crosses the wire or persists.
 	SourceCredentialVerified bool                  `json:"-"`
+	SourceUnverifiedReason   string                `json:"-"`
 	LocalForeground          bool                  `json:"local_foreground,omitempty"`
 	Burst                    *BurstPlacement       `json:"burst,omitempty"`
 	Version                  int                   `json:"version"`

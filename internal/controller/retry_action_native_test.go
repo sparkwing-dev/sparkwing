@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
+	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controller/client"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/engineid"
@@ -26,11 +27,17 @@ import (
 
 func retryActionFixture(t *testing.T, value string, accepted bool) (*serverFixture, client.EngineOptions, string, store.RunRow) {
 	t.Helper()
+	return retryActionDispatchFixture(t, value, accepted, runspec.DispatchHost)
+}
+
+func retryActionDispatchFixture(t *testing.T, value string, accepted bool, dispatch runspec.Dispatch) (*serverFixture, client.EngineOptions, string, store.RunRow) {
+	t.Helper()
 	s, session := credentialSessionServer(t)
 	s.WithEngineController(NewEngineController(s.store, EngineController{VersionPolicy: engineVersionPolicy(&engineVersionFake{})}))
 	engineSQL(t, s.store, `UPDATE sessions SET scopes='runs.read,runs.control'`)
 	input := runspec.Request{
-		Version: 1, Team: "a", Pipeline: "ci", Origin: runspec.OriginTrigger, Mode: runspec.IntakeExecute, Dispatch: runspec.DispatchHost,
+		Version: 1, Team: "a", Pipeline: "ci", Origin: runspec.OriginTrigger, Mode: runspec.IntakeExecute, Dispatch: dispatch,
+		Options:       runspec.Options{OwnerExecutionTimeout: runspec.Setting[time.Duration]{Optional: runspec.Optional[time.Duration]{Set: true, Value: time.Hour}}},
 		Actor:         runspec.Actor{Kind: "account", ID: "original-author"},
 		Git:           runspec.Git{Repository: runspec.Repository{Key: "gh:1"}, SHA: strings.Repeat("a", 40), Ref: "refs/heads/main"},
 		RequestedArgs: map[string]string{"public": "visible", "secret": value}, SecretArgs: runspec.Optional[[]string]{Set: true, Value: []string{"secret"}},
@@ -48,7 +55,7 @@ func retryActionFixture(t *testing.T, value string, accepted bool) (*serverFixtu
 	if accepted {
 		plan := json.RawMessage(`{"jobs":[{"id":"job"}]}`)
 		spec, err := runspec.SealSpec(runspec.SealInput{Request: sealed, Plan: plan, Now: time.Unix(2, 0), Resolved: runspec.Resolved{
-			Engine: engineid.Identity{Version: "v1.2.3"}, Args: sealed.Request.RequestedArgs, SecretArgs: []string{"secret"}, Settings: runspec.ExecutionSettings{Jobs: map[string]runspec.JobExecutionSettings{"job": {}}},
+			Engine: engineid.Identity{Version: "v1.2.3"}, Args: sealed.Request.RequestedArgs, SecretArgs: []string{"secret"}, Settings: runspec.ExecutionSettings{Jobs: map[string]runspec.JobExecutionSettings{"job": {Timeout: runspec.Setting[time.Duration]{Optional: runspec.Optional[time.Duration]{Set: true, Value: time.Hour}}}}},
 		}})
 		if err != nil {
 			t.Fatal(err)
@@ -342,4 +349,46 @@ func FuzzRetryActionValidatesBeforeAdmission(f *testing.F) {
 			t.Fatalf("invalid retry committed: %d %v", count, err)
 		}
 	})
+}
+
+func TestConsoleRetryAcceptedControllerPlanExecutes(t *testing.T) {
+	for _, mode := range []controllerwire.RetryMode{controllerwire.RetryFailed, controllerwire.RetryAll} {
+		t.Run(string(mode), func(t *testing.T) {
+			s, options, _, _ := retryActionDispatchFixture(t, "private-value", true, runspec.DispatchController)
+			control, err := client.NewEngineClient(options)
+			if err != nil {
+				t.Fatal(err)
+			}
+			created, err := control.Retry(t.Context(), "run", controllerwire.RetryRequest{Mode: mode, IdempotencyKey: "console-rerun"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			tenant := teststore.ForTeam(t, s.store, "a")
+			row, err := tenant.ReadRun(t.Context(), created.RunID)
+			if err != nil || row.Owner == nil || row.Owner.Kind != runstate.OwnerController {
+				t.Fatalf("accepted retry has no controller owner: %+v %v", row.Owner, err)
+			}
+			visited, err := s.store.AsOperator().ReconcileControllerRuns(t.Context(), "", 10)
+			if err != nil || len(visited) != 1 || visited[0].RunID != created.RunID {
+				t.Fatalf("retry not scheduled: %+v %v", visited, err)
+			}
+			engineHTTPRoot(t, s.engine, "a", "retry-worker", []capability.Grant{capability.NodesClaim})
+			claim, err := s.store.AsOperator().ClaimUnit(t.Context(), store.UnitDemand{CapabilityPrefix: "retry-worker", Target: &store.UnitRef{Kind: capability.UnitNode, RunID: runspec.RunID(created.RunID), NodeID: "job"}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			bearer := string(claim.Bearer)
+			engineAdmitBearer(t, s.store, bearer)
+			path := "/api/v1/runs/" + created.RunID + "/jobs/job/transition"
+			engineClaimHTTP(t, s.Handler(), bearer, "POST", path, `{"to":"running","cause":"start","source_attempt":0}`, http.StatusOK)
+			engineClaimHTTP(t, s.Handler(), bearer, "POST", path, `{"to":"success","cause":"report","source_attempt":1}`, http.StatusOK)
+			if _, err := s.store.AsOperator().ReconcileControllerRuns(t.Context(), "", 10); err != nil {
+				t.Fatal(err)
+			}
+			row, err = tenant.ReadRun(t.Context(), created.RunID)
+			if err != nil || row.State != runstate.RunSuccess {
+				t.Fatalf("retry did not execute: %s %v", row.State, err)
+			}
+		})
+	}
 }

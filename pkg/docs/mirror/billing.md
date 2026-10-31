@@ -253,7 +253,9 @@ delay, which has no fixed upper bound. This extra runtime is never charged to
 the customer. Only an acknowledged renewal extends the funded deadline.
 Renewals cannot move a funding stop's deadline. Lifting the hold or adding
 funds does not resume the stopped job.
-Final settlement refunds the unused part of the last slice.
+Final settlement refunds the unused part of the last slice. A later Cloud award
+can start if the remaining balance covers its first slice and the team has no
+hold. A funding refusal alone does not hold the team.
 
 When a funding stop or hold stops a metered job, only that job stops. The run's
 owner keeps orchestrating, and independent unmetered jobs continue. Normal

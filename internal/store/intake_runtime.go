@@ -228,8 +228,22 @@ func admitRun(ctx context.Context, tx *storeTx, team Team, request IntakeRequest
 		}
 	}
 	if snapshot.spec != nil {
-		if err = writeAcceptedPlanTx(ctx, tx, team, id, *snapshot.spec, snapshot.plan, 0); err != nil {
+		generation := int64(0)
+		controllerOwned := input.Mode == runspec.IntakeExecute && input.Dispatch == runspec.DispatchController
+		if controllerOwned {
+			generation = 1
+		}
+		if err = writeAcceptedPlanTx(ctx, tx, team, id, *snapshot.spec, snapshot.plan, generation); err != nil {
 			return AdmissionResult{}, err
+		}
+		if controllerOwned {
+			if _, err = tx.execContext(ctx, `UPDATE triggers SET status='done',generation=?,finished_at=? WHERE team=? AND id=?`, generation, now.UnixNano(), team, id); err != nil {
+				return AdmissionResult{}, err
+			}
+			if err = retireClaimContextTx(ctx, tx, team, UnitRef{Kind: capability.UnitPlan, RunID: runspec.RunID(id)}); err != nil {
+				return AdmissionResult{}, err
+			}
+			result.OwnerUnit = &runstate.OwnerLeaseRef{Kind: runstate.OwnerController, EvalFence: runspec.EvalFence{RunID: runspec.RunID(id)}}
 		}
 	}
 	if _, err = intakeAuthorityTx(ctx, tx, team, request); err != nil {
