@@ -979,5 +979,12 @@ against the same-repository PR head branch. Merged PR runs compare against their
 base branch. Verified cache fallbacks use the sealed repository proof. Unproven
 runs read and write their own data scope. Unknown claimant shapes use the
 personal host boundary and cannot claim repository-proven work.
+When the intake compare cannot reach GitHub, times out or receives a 5xx, the
+webhook delivery is accepted and the run is sealed as asserted without
+repository proof. It receives no job credentials, proven-repository secrets or
+proven OIDC claims. Run status explains why verification failed. Definite
+negative compare answers, including diverged, behind and 404, retain their
+existing behavior.
+
 Latest pipeline references select verified default-branch work unless the
 pipeline declares `sw.FromAnyRun()`.

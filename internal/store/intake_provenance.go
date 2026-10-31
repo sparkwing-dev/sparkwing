@@ -58,6 +58,9 @@ func sealProvenanceTx(ctx context.Context, tx *storeTx, team Team, request Intak
 // intake compare check proved reachable. Zero when the submitter supplies the
 // code or the selected commit has no repository proof.
 func fetchedRepositoryTx(tx *storeTx, request IntakeRequest, input runspec.Request) FetchedRepository {
+	if tx.appAdmission != nil && tx.appAdmission.UnverifiedReason != "" {
+		return FetchedRepository{}
+	}
 	// safety: the ref is a delivery's verified ref or a schedule's server-resolved
 	// branch, claimed only when the run's code ran at that head.
 	head := func(id int64, name string) FetchedRepository {
@@ -115,6 +118,13 @@ func identityTx(ctx context.Context, tx *storeTx, team Team, request IntakeReque
 	pinned := codePinned(input)
 	switch {
 	case input.Origin == runspec.OriginApp && request.VerifiedDeliveryID != "" && input.Git.App.Set:
+		if tx.appAdmission != nil && tx.appAdmission.UnverifiedReason != "" {
+			sealed, err := asserted(runspec.RunWriter(run))
+			if err != nil {
+				return sealed, err
+			}
+			return refused(sealed.WithUnverifiedReason(tx.appAdmission.UnverifiedReason))
+		}
 		if !pinned {
 			return asserted(runspec.RunWriter(run))
 		}

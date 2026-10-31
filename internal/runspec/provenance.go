@@ -146,6 +146,15 @@ func (p Provenance) WithSourceCredentialVerified() (Provenance, error) {
 // SourceCredentialVerified reports the compare check sealed at intake.
 func (p Provenance) SourceCredentialVerified() bool { return p.identity.SourceCredentialVerified }
 
+// WithUnverifiedReason records why intake could not establish repository proof.
+func (p Provenance) WithUnverifiedReason(reason string) (Provenance, error) {
+	p.identity.UnverifiedReason = reason
+	return p, p.validate()
+}
+
+// UnverifiedReason explains an intake verification failure, including on retries.
+func (p Provenance) UnverifiedReason() string { return p.identity.UnverifiedReason }
+
 func (p Provenance) sealIdentity() (Provenance, error) {
 	id := p.identity.RepositoryID
 	if id == 0 {
@@ -195,6 +204,9 @@ func escapeWriter(s string) string {
 }
 
 func (p Provenance) validate() error {
+	if p.identity.UnverifiedReason != "" && (p.Trust() != TrustAsserted || p.ProvenRepository() != "") {
+		return errors.New("an unverified reason requires asserted trust without repository proof")
+	}
 	id := p.identity.RepositoryID
 	if id == 0 {
 		id = p.identity.Fetched
@@ -342,6 +354,7 @@ func (p Provenance) OIDC() (trigger string, repositoryID int64, ref, sha string)
 }
 
 type provenanceJSON struct {
+	UnverifiedReason         string     `json:"unverified_reason,omitempty"`
 	ProvenRepository         RepoKey    `json:"proven_repository,omitempty"`
 	VerifiedDefaultBranch    bool       `json:"verified_default_branch,omitempty"`
 	SourceCredentialVerified bool       `json:"source_credential_verified,omitempty"`

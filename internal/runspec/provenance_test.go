@@ -130,3 +130,36 @@ func TestRepositoryProofAndCompareAreSealed(t *testing.T) {
 		}
 	}
 }
+
+func TestUnverifiedProvenanceCannotAcquireRepositoryProof(t *testing.T) {
+	asserted, err := runspec.AssertedProvenance(runspec.RunWriter("run"), "refs/heads/main", provenanceSHA, "ci")
+	if err != nil {
+		t.Fatal(err)
+	}
+	const reason = "GitHub compare unavailable"
+	unverified, err := asserted.WithUnverifiedReason(reason)
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, err := json.Marshal(unverified)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var restored runspec.Provenance
+	if err := json.Unmarshal(raw, &restored); err != nil || restored != unverified || restored.UnverifiedReason() != reason {
+		t.Fatalf("restored unverified seal: %+v, %v", restored, err)
+	}
+	if _, err := restored.FetchedFrom(7, "acme/repo", "refs/heads/main", provenanceSHA); err == nil {
+		t.Fatal("unverified seal acquired repository proof")
+	}
+	if _, err := restored.WithSourceCredentialVerified(); err == nil {
+		t.Fatal("unverified seal acquired source credentials")
+	}
+	proven, err := asserted.FetchedFrom(7, "acme/repo", "refs/heads/main", provenanceSHA)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := proven.WithUnverifiedReason(reason); err == nil {
+		t.Fatal("proven seal acquired an unverified reason")
+	}
+}

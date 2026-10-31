@@ -47,6 +47,7 @@ credential model in `docs/auth.md`, and the decision log
 | Source selection leaves the shared temporary parent unchanged | `internal/source/select.go`: `readCommitFile` prepares only an explicit workspace; `fssecure.MkdirPrivateTemp` owns the private child | `internal/source/select_temp_unix_test.go`: `TestSelectLeavesTheSharedTemporaryParentUnchanged` |
 | Remote configuration size is checked without downloading oversized blobs | `internal/source/select.go`: `readCommitFile` filters blobs and blocks transports during local inspection | `internal/source/select_size_test.go`: `TestTenantSelectionNeverDownloadsAnOversizedConfiguration`, `TestTenantSelectionAllowsAnAbsentConfiguration`; `select_size_unix_test.go`: `TestTenantSelectionRefusesOversizedConfigurationBehindSymlink` |
 | Sealed host boundary | `claimant_facts.go` classifies at claim; `Capability.Host` persists it; `run_trust.go`: `checkRunHost` | `proven_repository_claim_test.go`; `proven_repository_host_test.go`; `claimant_facts_test.go`: `TestClaimantReadsSealedHostFacts`, `TestUnknownClaimantsCannotExecuteProvenRepositoryRuns` |
+| GitHub compare outages admit asserted App runs without repository proof and explain why in status | `internal/controller/intake_source_credential.go`: `verifyIntakeSourceCredential`; `intake_provenance.go`: `identityTx`, `fetchedRepositoryTx` | `internal/controller/github_app_compare_test.go`: `TestGitHubAppCompareUnavailableAdmitsUnverifiedRun` |
 | Job source credentials | `source_release.go` reads sealed proof and compare; `controller/intake_source_credential.go` performs the intake compare | `source_release_test.go`: `TestSourceReleaseRequiresSealedRepositoryAndIntakeCompare`; `internal/controller/intake_source_credential_test.go`: `TestIntakeSourceCredentialComparesRepositoryRefsAndBothCommits` |
 | Repository cache fallbacks require sealed proof; awards use the proven key | `intake_provenance.go`: `sealProvenanceTx`; `authority_issue.go`: `awardDataScope` | `cache_provenance_test.go`: `TestCacheDefaultLookupRequiresProvenRepository` |
 | Latest pipeline references | `latest_run.go`, `binding_execution.go`; sealed reference `FromAnyRun` opt-out | `latest_run_test.go`; `binding_pipeline_test.go` |
@@ -310,3 +311,6 @@ decision amends an earlier one where noted.
 - 71: No runtime network probes; enforcing NetworkPolicy is the operator's job.
 - 72: Fetched runs carry their ref and sha in OIDC.
 - 73: Teams get 1,000 secrets and 50 schedules; keep OIDC at 30 per five minutes; remove lifetime team-creation caps; paginate unbounded lists; allow 20 Checkout Sessions per team per hour.
+
+- 2026-10-30: One sealed repository proof and host classification supersede consumer-specific trust rules.
+- 2026-10-31: Compare outages admit asserted App runs. Trust restrictions and unscoped personal enrollment are ratified. v0.68.3 resets stores to schema 28. The final production wipe follows the release cut and a clean staging grid.

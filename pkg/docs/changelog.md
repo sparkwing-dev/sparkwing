@@ -35,12 +35,14 @@ unlock.
   Update API clients using the [capacity-profile migration guide](docs/migrations/_unreleased.md#capacity-profiles-report-measured-data). Measured resource distributions and predecessor estimates remain available.
 - **release (Breaking):** Sparkwing releases use the native tag-and-publication flow
   Platform deployment is separate. Retire the platform repository's `release-all` pipeline and `bin/trigger-change-deploy.sh` callers when updating that repository.
-- **trust (Breaking):** Personal machines and here hosts never claim repository-proven runs, including run-now and burst `machines`. Repository-scoped runners accept only proven runs. Personal enrollment can omit `--repos` to serve the owner's asserted work; shared enrollment still requires a scope. Intake and claim seal repository and host trust once for secrets, OIDC, credentials and cache scopes. Schema baseline 27 adds the checked host-kind projection. See [migration](docs/migrations/_unreleased.md#sealed-execution-trust).
+- **trust (Breaking):** Personal machines and here hosts never claim repository-proven runs, including run-now and burst `machines`. Repository-scoped runners accept only proven runs. Personal enrollment can omit `--repos` to serve the owner's asserted work; shared enrollment still requires a scope. Intake and claim seal repository and host trust once for secrets, OIDC, credentials and cache scopes. The schema reset uses baseline 28. See [migration](docs/migrations/_unreleased.md#sealed-execution-trust).
 - **source credentials (Breaking):** Every job credential requires a matching proven repository and an intake GitHub compare check. Uploaded and unproven runs receive no host-wide fallback. App-selected historical commits and locked schedules can qualify when reachable from a repository branch or tag. See [migration](docs/migrations/_unreleased.md#sealed-execution-trust).
 - **pipeline references (Breaking):** Latest outputs default to verified default-branch runs and exclude publication. Declare `sw.FromAnyRun()` (TypeScript `{fromAnyRun: true}`) to opt out. The direct output route enforces the same rule. See [migration](docs/migrations/_unreleased.md#sealed-execution-trust).
 
 ### Fixed
 
+- **GitHub App:** Compare outages no longer fail webhook deliveries and drop pushes
+  When GitHub is unreachable, times out or returns 5xx during the intake compare, the run is admitted as asserted with no repository proof, job credentials or proven-repository secrets/OIDC. Run status explains why verification failed. Definite negative compare answers retain their existing behavior.
 - **logs:** Finished Cloud runs complete aggregate log reads after bootstrap owner requeues
   Owner streams register when the runner exchanges its bootstrap credential. Awards that never reached a log writer no longer leave unsealed streams. Missing final seals from actual writers still report incomplete logs.
 - **TypeScript SDK:** Imports inside jobs retain CommonJS and ESM exports from symlinked packages
