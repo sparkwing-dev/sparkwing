@@ -160,20 +160,16 @@ func TestControllerReconcileRollsBackFailedCompletion(t *testing.T) {
 	}
 }
 
-func TestControllerRetryKeepsPlannerOwnershipUntilHandoff(t *testing.T) {
+func TestControllerUnacceptedRetryKeepsPlannerOwnershipUntilHandoff(t *testing.T) {
 	for _, started := range []bool{false, true} {
 		t.Run(map[bool]string{false: "unstarted", true: "disruption_limit"}[started], func(t *testing.T) {
 			tenant, request, now := planFixture(t, runspec.DispatchController)
-			accepted, err := tenant.AcceptPlan(t.Context(), request)
-			if err != nil {
-				t.Fatal(err)
-			}
 			retry, err := tenant.AdmitRun(t.Context(), IntakeRequest{Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: "member"}, Request: runspec.Request{Pipeline: "p", Lineage: runspec.Lineage{RetryOf: request.RunID}}})
 			if err != nil {
 				t.Fatal(err)
 			}
 			run, err := tenant.ReadRun(t.Context(), retry.RunID)
-			if err != nil || run.Owner == nil || run.Owner.Kind != runstate.OwnerTrigger || run.Spec == nil || run.Spec.Hash != accepted.Spec.Hash {
+			if err != nil || run.Owner == nil || run.Owner.Kind != runstate.OwnerTrigger || run.Spec != nil || run.Request.Hash != request.Seal.Request.Hash {
 				t.Fatalf("retry owner/seal: %+v, %v", run, err)
 			}
 			controller := controllerActor(retry.RunID)
@@ -181,7 +177,7 @@ func TestControllerRetryKeepsPlannerOwnershipUntilHandoff(t *testing.T) {
 				t.Fatal("controller bypassed retry planner")
 			}
 			visited, err := tenant.s.AsOperator().ReconcileControllerRuns(t.Context(), "", 10)
-			if err != nil || len(visited) != 1 || visited[0].RunID != request.RunID {
+			if err != nil || len(visited) != 0 {
 				t.Fatalf("retry settled before handoff: %+v, %v", visited, err)
 			}
 			root := authorityRoot("launcher", "")
@@ -214,7 +210,7 @@ func TestControllerRetryKeepsPlannerOwnershipUntilHandoff(t *testing.T) {
 			if started {
 				want = runstate.RunFailed
 			}
-			if err != nil || run.State != want || run.Spec.Hash != accepted.Spec.Hash {
+			if err != nil || run.State != want || run.Spec != nil || run.Request.Hash != request.Seal.Request.Hash {
 				t.Fatalf("recovered retry: %+v, %v", run, err)
 			}
 			if started {
@@ -231,7 +227,7 @@ func TestControllerRetryKeepsPlannerOwnershipUntilHandoff(t *testing.T) {
 			request.RunID = retry.RunID
 			request.Actor = runstate.Actor{Kind: runstate.ActorRunHost, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: issued.Capability.Prefix}, CapabilityPrefix: issued.Capability.Prefix, Owner: claim.Owner}
 			resumed, err := tenant.AcceptPlan(t.Context(), request)
-			if err != nil || !resumed.Replayed || resumed.Owner == nil || resumed.Owner.Kind != runstate.OwnerController {
+			if err != nil || resumed.Replayed || resumed.Owner == nil || resumed.Owner.Kind != runstate.OwnerController {
 				t.Fatalf("retry handoff: %+v, %v", resumed, err)
 			}
 		})
@@ -340,17 +336,13 @@ func TestControllerReconcileRenewsOnlyContinuousCapacity(t *testing.T) {
 	}
 }
 
-func TestRetryPlannerFailureBeforeHandoffProperty(t *testing.T) {
+func TestUnacceptedRetryPlannerFailureBeforeHandoffProperty(t *testing.T) {
 	if testing.Short() {
 		t.Skip("slow: 3.3s measured in the short class; the full suite runs it")
 	}
 	random := rand.New(rand.NewPCG(83, 117))
 	for range 12 {
-		tenant, request, _ := controllerPlanFixture(t, nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{{ID: "job"}}, Concurrency: []nodeproto.ConcurrencySpec{{Group: "retry", Scope: new("global"), Capacity: new(1), Cost: new(1), OnLimit: new("queue")}}})
-		accepted, err := tenant.AcceptPlan(t.Context(), request)
-		if err != nil {
-			t.Fatal(err)
-		}
+		tenant, request, _ := planFixture(t, runspec.DispatchController)
 		retry, err := tenant.AdmitRun(t.Context(), IntakeRequest{Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: "member"}, Request: runspec.Request{Pipeline: "p", Lineage: runspec.Lineage{RetryOf: request.RunID}}})
 		if err != nil {
 			t.Fatal(err)
@@ -371,36 +363,18 @@ func TestRetryPlannerFailureBeforeHandoffProperty(t *testing.T) {
 		if actor.Owner.Generation != runspec.ClaimGeneration(generation+2) {
 			t.Fatalf("retry generation reset: %+v", actor.Owner)
 		}
-		for _, kind := range []runstate.ActorKind{runstate.ActorRunHost, runstate.ActorHolder, runstate.ActorOperator, runstate.ActorController} {
-			forged := actor
-			forged.Kind = kind
-			if _, err := tenant.MayStart(t.Context(), runstate.CapacityBinding{RunID: retry.RunID, NodeID: "job"}, forged); err == nil {
-				t.Fatalf("planner acquired copied job capacity as %s", kind)
-			}
-		}
-		if _, err := tenant.MayStart(t.Context(), runstate.CapacityBinding{RunID: retry.RunID, Generation: int64(actor.Owner.Generation)}, actor); err != nil {
-			t.Fatalf("live planner lost run capacity: %v", err)
+		if _, err := tenant.MayStart(t.Context(), runstate.CapacityBinding{RunID: retry.RunID, Generation: int64(actor.Owner.Generation)}, actor); err == nil {
+			t.Fatal("unaccepted planner acquired execution capacity")
 		}
 		before, err := tenant.ReadSnapshot(t.Context(), retry.RunID)
-		if err != nil || before.Run.Spec == nil || before.Run.Spec.Hash != accepted.Spec.Hash {
-			t.Fatalf("retry lost its carried seal: %+v, %v", before.Run, err)
+		if err != nil || before.Run.Spec != nil || before.Run.Request.Hash != request.Seal.Request.Hash {
+			t.Fatalf("retry lost its request seal: %+v, %v", before.Run, err)
 		}
 		for _, rejected := range []runstate.FinishRunRequest{
 			{Unit: stale.Owner, Transition: runstate.RunCompletion{RunID: runspec.RunID(retry.RunID), Cause: runstate.RunFinish, Actor: stale}},
 		} {
 			if _, err := tenant.FinishRunAndUnit(t.Context(), rejected); err == nil {
 				t.Fatalf("invalid planner finished retry: %+v", rejected)
-			}
-		}
-		for _, rejected := range []nodeTransition{
-			{To: runstate.NodeReady, Cause: runstate.CauseRelease},
-			{To: runstate.NodeSkipped, Cause: causeDependency},
-			{To: runstate.NodeFailed, Cause: causeOwnerPolicy, Extra: transitionExtra{OwnerPolicy: &runstate.OwnerPolicyResult{Kind: runstate.OwnerPolicyKind("admission_fail")}, Result: &runstate.NodeResult{Outcome: runstate.NodeFailed}}},
-			{To: runstate.NodeApprovalPending, Cause: runstate.CauseApprovalOpen},
-		} {
-			rejected.Ref, rejected.Actor = runspec.NodeRef{RunID: runspec.RunID(retry.RunID), NodeID: "job"}, actor
-			if _, err := tenant.TransitionNode(t.Context(), rejected); err == nil {
-				t.Fatalf("planner changed copied job before handoff: %+v", rejected)
 			}
 		}
 		after, err := tenant.ReadSnapshot(t.Context(), retry.RunID)
@@ -416,13 +390,41 @@ func TestRetryPlannerFailureBeforeHandoffProperty(t *testing.T) {
 			}
 		}
 		after, err = tenant.ReadSnapshot(t.Context(), retry.RunID)
-		if err != nil || after.Run.State != runstate.RunFailed || after.Run.Spec.Hash != accepted.Spec.Hash || after.Run.Owner == nil || after.Run.Owner.Generation != current.Owner.Generation {
+		if err != nil || after.Run.State != runstate.RunFailed || after.Run.Spec != nil || after.Run.Request.Hash != request.Seal.Request.Hash || after.Run.Owner == nil || after.Run.Owner.Generation != current.Owner.Generation {
 			t.Fatalf("retry finish lost its seal or fence: %+v, %v", after.Run, err)
 		}
-		for _, node := range after.Nodes {
-			if node.Status != runstate.StatusDone || node.Outcome != runstate.NodeCancelled || node.StateActor.Result != nil {
-				t.Fatalf("preparation failure did not close copied job internally: %+v", node)
-			}
+		if len(after.Nodes) != 0 {
+			t.Fatalf("unaccepted retry acquired jobs: %+v", after.Nodes)
+		}
+	}
+}
+
+func TestControllerAcceptedRetrySurvivesPlannerReaping(t *testing.T) {
+	tenant, request, now := planFixture(t, runspec.DispatchController)
+	accepted, err := tenant.AcceptPlan(t.Context(), request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	retry, err := tenant.AdmitRun(t.Context(), IntakeRequest{Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: "member"}, Request: runspec.Request{Pipeline: "p", Lineage: runspec.Lineage{RetryOf: request.RunID}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for range 2 {
+		*now = now.Add(time.Minute)
+		if reaped, err := tenant.s.AsOperator().ReapUnits(t.Context(), 10); err != nil || len(reaped) != 0 {
+			t.Fatalf("controller retry reaped: %+v %v", reaped, err)
+		}
+		visited, err := tenant.s.AsOperator().ReconcileControllerRuns(t.Context(), "", 10)
+		if err != nil || len(visited) != 2 {
+			t.Fatalf("controller retry not resumed: %+v %v", visited, err)
+		}
+		run, err := tenant.ReadRun(t.Context(), retry.RunID)
+		if err != nil || run.State != runstate.RunRunning || run.Owner == nil || run.Owner.Kind != runstate.OwnerController || run.Spec == nil || run.Spec.Hash != accepted.Spec.Hash {
+			t.Fatalf("controller retry lost ownership or seal: %+v %v", run.Owner, err)
+		}
+		job, err := tenant.ReadNode(t.Context(), runspec.NodeRef{RunID: runspec.RunID(retry.RunID), NodeID: "job"})
+		if err != nil || job.ReadyAt == nil || job.Attempt != 0 {
+			t.Fatalf("controller retry not ready before its first attempt: %+v %v", job, err)
 		}
 	}
 }
