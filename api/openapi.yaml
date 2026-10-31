@@ -5854,6 +5854,8 @@ components:
               type: integer
             pipeline:
               type: string
+            proven_repository:
+              type: string
             pull_request_base:
               type: string
             ref:
@@ -5866,6 +5868,8 @@ components:
               type: string
             shared_secrets_only:
               type: boolean
+            source_credential_verified:
+              type: boolean
             trust:
               enum:
                 - verified-default
@@ -5874,6 +5878,8 @@ components:
                 - schedule
                 - asserted
               type: string
+            verified_default_branch:
+              type: boolean
             writer:
               type: string
           required:
