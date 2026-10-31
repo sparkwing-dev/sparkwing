@@ -51,6 +51,10 @@ func fastLintCommand(cores int, pkgs []string) string {
 }
 
 func runGolangciLint(ctx context.Context) error {
+	return runGolangciLintWithin(ctx, lintLockWait)
+}
+
+func runGolangciLintWithin(ctx context.Context, deadline time.Duration) error {
 	dirs, err := committedModuleDirs(ctx)
 	if err != nil {
 		return fmt.Errorf("golangci-lint: could not run -- listing the modules to lint failed: %w", err)
@@ -65,7 +69,7 @@ func runGolangciLint(ctx context.Context) error {
 	// replays findings under the path of the tree that filled it, and those sit
 	// outside this tree's diff, so the baseline filter drops every one.
 	cacheDir := pipelineCacheDir("golangci-lint")
-	lintCtx, cancel := context.WithTimeout(ctx, lintLockWait)
+	lintCtx, cancel := context.WithTimeout(ctx, deadline)
 	defer cancel()
 
 	var failures []string
@@ -75,6 +79,7 @@ func runGolangciLint(ctx context.Context) error {
 			continue
 		}
 		stepStart := time.Now()
+		sparkwing.Info(lintCtx, "golangci-lint: %s waiting for the box-wide lock if held, then linting (deadline %s)", dir, deadline)
 		cmd := sparkwing.Bash(lintCtx, lintCommand()).
 			Dir(dir).
 			Env("GOLANGCI_LINT_CACHE", cacheDir)
