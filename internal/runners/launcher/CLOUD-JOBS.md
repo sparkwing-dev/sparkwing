@@ -535,7 +535,18 @@ reconciliation of other live Jobs.
 
 Job pods are pre-bound to a reserved node and never pend, so they cannot make
 Karpenter add one. When reservation finds no vacant Ready team node, the
-launcher keeps the award and creates `sw-capacity-<award hash>`: an unbound Pod
+launcher reads NodePool templates before requesting capacity. A compatible
+pool carries the exact protected team label and `NoSchedule` taint and permits
+Linux Cloud jobs. Readiness, limits, provider availability and deleting pools
+are not evidence of missing configuration. A failed list retries without
+ending the award. No compatible pool terminally reports
+`cloud_capacity_unconfigured` through the fenced launcher sync. The controller
+releases the unstarted credit reservation in the same transaction. The launcher
+deletes any demand Pod and logs the protected team label value and run ID.
+The customer sees “Cloud capacity is not configured for this team. Contact
+support@sparkwing.dev” with that run ID as a support reference.
+
+With a compatible pool, the launcher keeps the award and creates `sw-capacity-<award hash>`: an unbound Pod
 with the team node selector, the job tolerations, the award's CPU, memory and
 scratch requests, the runner image running `sparkwing-runner version`, and no
 volumes, environment or service account token. The Pod records its unit fence
@@ -561,7 +572,14 @@ and size in `sparkwing.dev/capacity-demand`, never the bootstrap credential.
   deletes only the refused Pod by UID and lets other requests and claims proceed.
   Transport, overload and service-credential errors retain the request for retry.
 
-Capacity observations carry only the award fence to the controller. A capacity
+Run status projects unactivated Cloud bootstrap awards as
+`cloud_capacity_waiting` notices: “Waiting for dedicated Cloud capacity” and
+elapsed time since award issuance. Activation seals the execution host and
+clears the notice. The initial slice is a credit hold, with usage starting at
+the executing Pod's first renewal. Cancellation retains the existing cleanup.
+
+Capacity observations carry the award fence and an optional unconfigured
+capacity diagnosis to the controller. A capacity
 Pod's UID and assigned node never become an execution host. After reserving a
 node and verifying the suspended Job and its bootstrap, the launcher sends an
 authenticated activation with that reservation's Node UID. The controller seals

@@ -52,10 +52,27 @@ The launcher's Kubernetes identity is separate from the customer Job identity.
 Jobs exchange a one-use bootstrap Secret for an in-memory awarded capability.
 
 The [Cloud chart](../charts/sparkwing-full/README.md) documents its values and
-node/network prerequisites. Team-node labels use the hash of the team slug.
-When a team has no vacant Ready node, the launcher holds the award and creates
+node/network prerequisites. Team-node labels hash the Cloud Job namespace with the team slug.
+When a team has no vacant Ready node, the launcher lists NodePools read-only. A
+compatible pool has the exact protected team label and `NoSchedule` taint in
+its template and permits the job's Linux hardware class. Explicit instance CPU
+or memory bounds that exclude the award make a pool incompatible. Unknown
+instance availability keeps waiting. Pool readiness, limits and provider
+availability do not determine whether capacity is configured. With a compatible
+pool, the launcher holds the award and creates
 an unbound, award-sized capacity-request Pod that only the team's NodePool can
-satisfy, so Karpenter adds a node that the held award then reserves. Team
+satisfy, so Karpenter adds a node that the held award then reserves. Run status
+shows “Waiting for dedicated Cloud capacity” with elapsed time until activation.
+The initial credit reservation is a hold. Usage billing begins with execution.
+Users can cancel while waiting.
+
+When no compatible pool exists, the unit ends with reason
+`cloud_capacity_unconfigured` and “Cloud capacity is not configured for this
+team. Contact support@sparkwing.dev”, plus the run ID as a support reference.
+The controller releases the unstarted credit reservation in the terminal
+transaction, and the launcher deletes the capacity-request Pod. Its operator
+log names the protected team label value to configure. Pool-list failures keep
+the award pending for retry. Provision the team pool and trigger a new run. Team
 NodePools need `consolidateAfter` above the 3-minute award lease. Self-hosted runner pools use `runner.repos`,
 `runner.alsoClaimTriggers` and pool scheduling values. They claim through HTTP
 and need no Kubernetes API token.
