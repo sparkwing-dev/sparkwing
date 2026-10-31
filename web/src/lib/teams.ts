@@ -357,7 +357,6 @@ export async function revokeInvitation(id: string): Promise<void> {
   );
 }
 
-// Fixed refusals add recovery advice; member limits retain the controller's configured counts.
 export const invitationRefusalText: Record<string, string> = {
   invitation_closed:
     "This invitation has expired or was already used. Ask a team owner to send a new one.",
