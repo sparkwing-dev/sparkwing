@@ -419,6 +419,10 @@ func TestOlderSchemaRequiresBackupBeforeDiscard(t *testing.T) {
 		`UPDATE sparkwing_schema_version SET version = ?`), store.ExpectedSchemaVersion()-1); err != nil {
 		t.Fatal(err)
 	}
+	remedy := []string{"move ", "-wal", "-shm", "aside"}
+	if st.Dialect() == store.DialectPostgres {
+		remedy = []string{"point the server at an empty database"}
+	}
 	if err := st.Close(); err != nil {
 		t.Fatal(err)
 	}
@@ -426,7 +430,7 @@ func TestOlderSchemaRequiresBackupBeforeDiscard(t *testing.T) {
 	if err == nil {
 		t.Fatal("accepted an older schema")
 	}
-	for _, want := range []string{"older than this binary", "back up the store", "move ", "-wal", "-shm", "aside"} {
+	for _, want := range append([]string{"older than this binary", "back up the store"}, remedy...) {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("error %q lacks %q", err, want)
 		}
