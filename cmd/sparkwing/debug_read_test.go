@@ -171,6 +171,23 @@ func TestDebugAttachRefusesUnusableOrUnobservedTargets(t *testing.T) {
 	}
 }
 
+func TestDebugAttachRunningCloudJobExplainsInspectionAlternative(t *testing.T) {
+	fake := debugReaderFixture()
+	fake.job.Execution = nil
+	var out bytes.Buffer
+	err := observeDebug(t.Context(), debugInvocation(t, "attach"), fake, &out, func(context.Context, controllerwire.DebugExecution, io.Writer) error {
+		t.Fatal("Cloud job attempted shell attachment")
+		return nil
+	})
+	var refusal *apierr.Error
+	if !errors.As(err, &refusal) || refusal.Code != apierr.CapabilityUnsupported || !strings.Contains(refusal.Message, "Cloud jobs do not support shell attachment") || !strings.Contains(refusal.Hint, "sparkwing debug env") || !strings.Contains(refusal.Hint, "sparkwing runs logs") {
+		t.Fatalf("running Cloud refusal lacks supported inspection alternatives: %v", err)
+	}
+	if out.Len() != 0 || len(fake.calls) != 1 {
+		t.Fatalf("unsupported attachment emitted output or read a pause: %q %v", out.String(), fake.calls)
+	}
+}
+
 type debugBrokenWriter struct{ err error }
 
 func (w debugBrokenWriter) Write([]byte) (int, error) { return 0, w.err }
