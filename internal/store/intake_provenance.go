@@ -19,6 +19,13 @@ import (
 // Retries carry their source run's sealed identity unchanged.
 // Repository-proven work also learns the verified default branch for cache reads.
 func sealProvenanceTx(ctx context.Context, tx *storeTx, team Team, request IntakeRequest, p capability.Principal, input runspec.Request, run string) (runspec.Provenance, error) {
+	if request.UnverifiedReason != "" {
+		sealed, err := runspec.AssertedProvenance(runspec.PrincipalWriter(string(p.Capability.Subject.Kind), p.Capability.Subject.ID), input.Git.Ref, input.Git.SHA, input.Pipeline)
+		if err != nil {
+			return refused(sealed, err)
+		}
+		return refused(sealed.WithUnverifiedReason(request.UnverifiedReason))
+	}
 	sealed, err := identityTx(ctx, tx, team, request, p, input, run)
 	if err != nil {
 		return sealed, err

@@ -198,8 +198,14 @@ func (s *Server) handleIntake(engine *EngineController) func(http.ResponseWriter
 			return err
 		}
 		compared, credentialVerified, err := s.verifyIntakeSourceCredential(r.Context(), store.Team(a.Target.Team), body.Request)
+		unverifiedReason := ""
 		if err != nil {
-			return err
+			var unavailable *intakeCompareUnavailable
+			if !errors.As(err, &unavailable) {
+				return err
+			}
+			fetched = store.FetchedRepository{}
+			unverifiedReason = "Run is unverified because " + unavailable.Error()
 		}
 		if fetched.ID == 0 && compared.ID > 0 {
 			fetched = compared
@@ -212,6 +218,7 @@ func (s *Server) handleIntake(engine *EngineController) func(http.ResponseWriter
 		request.Intent = &intent.Request
 		request.FetchedRepository = fetched
 		request.SourceCredentialVerified = credentialVerified
+		request.UnverifiedReason = unverifiedReason
 		response, err := admitWithFlood(ctx, s, func(ctx context.Context) (controllerwire.CreateRunResponse, error) {
 			return engine.admitRun(ctx, a.Target.Team, request)
 		})

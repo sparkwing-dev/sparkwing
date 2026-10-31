@@ -71,7 +71,8 @@ local and unproven remote code receive no team credential. A historical commit
 or locked schedule can qualify after App source selection and a compare result
 of `ahead` or `identical` against a repository branch or tag for both source and
 execution commits when they differ. Merged PR runs compare against their base
-branch. If the intake compare cannot reach GitHub, times out or receives a 5xx,
+branch. If the intake compare cannot reach GitHub, times out, receives a 5xx or
+supplies unreadable JSON or an unknown status,
 the webhook delivery is accepted and its run is sealed as asserted, without
 repository proof, job credentials, proven-repository secrets or OIDC claims.
 Run status explains the failed verification. Definite negative compare answers

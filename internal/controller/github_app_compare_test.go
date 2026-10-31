@@ -18,7 +18,7 @@ import (
 )
 
 func TestGitHubAppCompareUnavailableAdmitsUnverifiedRun(t *testing.T) {
-	for _, comparison := range []string{"503", "500", "timeout", "unreachable", "identical", "diverged", "behind", "404", "403"} {
+	for _, comparison := range []string{"503", "500", "timeout", "unreachable", "identical", "diverged", "behind", "404", "403", "truncated", "missing status", "unknown status", "wrong status type", "null", "trailing JSON"} {
 		t.Run(comparison, func(t *testing.T) {
 			f := newAppFixture(t)
 			owner := f.ghUser(501, "olga")
@@ -33,6 +33,16 @@ func TestGitHubAppCompareUnavailableAdmitsUnverifiedRun(t *testing.T) {
 					return http.DefaultTransport.RoundTrip(r)
 				}
 				switch comparison {
+				case "truncated", "missing status", "unknown status", "wrong status type", "null", "trailing JSON":
+					bodies := map[string]string{
+						"truncated":         `{"status":"ahead","files":[`,
+						"missing status":    `{"files":[]}`,
+						"unknown status":    `{"status":"unknown"}`,
+						"wrong status type": `{"status":1}`,
+						"null":              `null`,
+						"trailing JSON":     `{"status":"ahead"}{}`,
+					}
+					return &http.Response{StatusCode: http.StatusOK, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(bodies[comparison])), Request: r}, nil
 				case "timeout":
 					return nil, context.DeadlineExceeded
 				case "unreachable":
@@ -71,7 +81,7 @@ func TestGitHubAppCompareUnavailableAdmitsUnverifiedRun(t *testing.T) {
 				t.Fatal(err)
 			}
 			proof := run.Request.Provenance
-			unavailable := comparison == "503" || comparison == "500" || comparison == "timeout" || comparison == "unreachable"
+			unavailable := comparison == "503" || comparison == "500" || comparison == "timeout" || comparison == "unreachable" || comparison == "truncated" || comparison == "missing status" || comparison == "unknown status" || comparison == "wrong status type" || comparison == "null" || comparison == "trailing JSON"
 			if !proof.Valid() || (proof.ProvenRepository() == "") != unavailable || proof.SourceCredentialVerified() != (comparison == "identical") {
 				t.Fatalf("proof: %+v", proof)
 			}

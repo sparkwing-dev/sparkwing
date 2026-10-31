@@ -59,8 +59,8 @@ unlock.
   Scaffold planning works before the first commit. An empty initial commit enables local execution without staging files.
 - **upgrade:** SDK verification retains Git history in an isolated staging checkout
   Linked worktrees keep their own index unchanged during verification.
-- **GitHub App:** Compare outages no longer fail webhook deliveries and drop pushes
-  When GitHub is unreachable, times out or returns 5xx during the intake compare, the run is admitted as asserted with no repository proof, job credentials or proven-repository secrets/OIDC. Run status explains why verification failed. Definite negative compare answers retain their existing behavior.
+- **GitHub App:** Large comparisons retain verification, and unreadable answers admit unverified runs
+  Intake parses comparisons with large file patches without truncating the JSON. When GitHub is unreachable, times out, returns 5xx or supplies unreadable JSON or an unknown status during the intake compare, webhook and native trigger runs are admitted as asserted with no repository proof, job credentials or proven-repository secrets/OIDC. Run status explains why verification failed. Definite negative compare answers retain their existing behavior.
 - **logs:** Retried jobs accept each attempt's final log uploads after the next attempt starts or seals
   The controller checks the named attempt's original writer and seal grace. Finished runs report complete aggregate logs once every stream seals successfully.
 - **console:** Unstarted runs show queued creation time without year-one dates or inflated durations, and pending runs offer Cancel

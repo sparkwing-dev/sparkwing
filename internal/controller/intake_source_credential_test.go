@@ -25,7 +25,7 @@ func TestRawCommitIntakeSealsOnlyRepositoryReachableCode(t *testing.T) {
 		t.Fatal(err)
 	}
 	const sha = "0123456789abcdef0123456789abcdef01234567"
-	for _, status := range []string{"ahead", "identical", "diverged", "behind"} {
+	for _, status := range []string{"ahead", "identical", "diverged", "behind", "large", "truncated", "missing status", "unknown status", "wrong status type"} {
 		t.Run(status, func(t *testing.T) {
 			s, session := credentialSessionServer(t)
 			teststore.SeedGitHubInstallation(t, s.store, "a", store.GitHubAppInstallation{InstallationID: 7, AccountID: 70, AccountLogin: "acme", AccountType: "Organization", ConnectedBy: "member", GitHubUserID: 71}, time.Now())
@@ -42,6 +42,16 @@ func TestRawCommitIntakeSealsOnlyRepositoryReachableCode(t *testing.T) {
 				case "/repos/acme/app/compare/" + sha + "...refs/heads/main":
 					compares++
 					payload = fmt.Sprintf(`{"status":%q}`, status)
+					switch status {
+					case "large":
+						payload = fmt.Sprintf(`{"status":"ahead","merge_base_commit":{"sha":%q},"files":[{"patch":%q}]}`, sha, strings.Repeat("+line\n", 210000))
+					case "truncated":
+						payload = `{"status":"ahead","files":[`
+					case "missing status":
+						payload = `{"files":[]}`
+					case "wrong status type":
+						payload = `{"status":1}`
+					}
 				case "/repos/acme/app/contents/.sparkwing/sparkwing.yaml":
 					if r.URL.Query().Get("ref") != sha {
 						t.Fatalf("configuration read another commit: %s", r.URL)
@@ -76,10 +86,14 @@ func TestRawCommitIntakeSealsOnlyRepositoryReachableCode(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			wantProof := status == "ahead" || status == "identical"
+			wantProof := status == "ahead" || status == "identical" || status == "large"
 			proof := run.Request.Provenance
 			if compares != 1 || (proof.ProvenRepository() == "gh:42") != wantProof || proof.SourceCredentialVerified() != wantProof {
 				t.Fatalf("compares=%d proven=%q credential checked=%v, want proof=%v", compares, proof.ProvenRepository(), proof.SourceCredentialVerified(), wantProof)
+			}
+			unreadable := status == "truncated" || status == "missing status" || status == "unknown status" || status == "wrong status type"
+			if unreadable && (proof.Trust() != runspec.TrustAsserted || !strings.Contains(proof.UnverifiedReason(), "GitHub compare unavailable")) {
+				t.Fatalf("unreadable comparison lost asserted trust or explanation: %+v", proof)
 			}
 			if _, _, ref, commit := proof.OIDC(); ref != "" || commit != "" {
 				t.Fatalf("historical commit acquired a head claim: %q %q", ref, commit)
