@@ -19,12 +19,14 @@ import (
 // Snapshot contains private execution inputs; public adapters must project its seals.
 type RunView struct {
 	Snapshot RunSnapshot
+	Reason   string
 	Attempts []runstate.NodeAttempt
 	Logs     []blob.LogSubject
 	Failures []RunFailure
 	// JobResults holds each job's masked summary and annotations from its current attempt.
-	JobResults []JobResult
-	Waiting    *UnclaimedUnit
+	JobResults         []JobResult
+	Waiting            *UnclaimedUnit
+	CloudCapacitySince *time.Time
 }
 
 // JobResult is a job's persisted masked summary and annotations written outside any step.
@@ -63,6 +65,22 @@ func readRunViewTx(ctx context.Context, tx *storeTx, team Team, runID string) (R
 	if view.Snapshot, err = readSnapshotTx(ctx, tx, team, runID); err != nil {
 		return RunView{}, err
 	}
+	if view.Snapshot.Run.FinishedAt != nil {
+		var payload []byte
+		err := tx.QueryRowContext(ctx, `SELECT payload FROM events WHERE team=? AND run_id=? AND node_id='' AND state_seq=?`, team, runID, view.Snapshot.Run.StateSeq).Scan(&payload)
+		if err != nil && !errors.Is(err, sql.ErrNoRows) {
+			return RunView{}, err
+		}
+		if len(payload) > 0 {
+			var event struct {
+				Reason string `json:"reason"`
+			}
+			if err := json.Unmarshal(payload, &event); err != nil {
+				return RunView{}, err
+			}
+			view.Reason = event.Reason
+		}
+	}
 	if view.Failures, err = readRunFailuresTx(ctx, tx, team, runID); err != nil {
 		return RunView{}, err
 	}
@@ -76,6 +94,9 @@ func readRunViewTx(ctx context.Context, tx *storeTx, team Team, runID string) (R
 		return RunView{}, err
 	}
 	if view.Waiting, err = readUnclaimedUnitTx(ctx, tx, team, view.Snapshot.Run); err != nil {
+		return RunView{}, err
+	}
+	if view.CloudCapacitySince, err = readCloudCapacityWaitTx(ctx, tx, team, view.Snapshot.Run); err != nil {
 		return RunView{}, err
 	}
 	return view, nil

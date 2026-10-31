@@ -128,7 +128,7 @@ func snapshotJob(node runstate.NodeRow) controllerwire.JobDetail {
 		}
 	}
 	return controllerwire.JobDetail{
-		ID: string(node.Ref.NodeID), Status: string(node.Status), Outcome: string(node.Outcome), StatusDetail: detail,
+		Reason: node.FailureReason, ID: string(node.Ref.NodeID), Status: string(node.Status), Outcome: string(node.Outcome), StatusDetail: detail,
 		Generation: int64(node.Generation), Attempt: int64(node.Attempt), StateSeq: node.StateSeq, Expansion: string(node.Expansion),
 		StartedAt: node.StartedAt, FinishedAt: node.FinishedAt, CancelRequestedAt: node.CancelRequestedAt,
 	}

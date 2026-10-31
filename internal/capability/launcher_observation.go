@@ -11,6 +11,9 @@ func (o LauncherObservation) Validate() error {
 	}
 	switch o.Award.Kind {
 	case UnitPlan, UnitEval, UnitNode:
+		if o.CapacityUnconfigured && (!o.Reservation || o.Rejected) {
+			return &apierr.Error{Code: apierr.BadRequest, Message: "unconfigured capacity requires a demand observation"}
+		}
 		if o.Reservation && o.Rejected {
 			return &apierr.Error{Code: apierr.BadRequest, Message: "launcher reservation cannot report a rejected Job"}
 		}
@@ -33,9 +36,10 @@ func (a LauncherActivation) Validate() error {
 
 // LauncherObservation reports one award's preparation state without Kubernetes identities.
 type LauncherObservation struct {
-	Award       LeaseRef `json:"award"`
-	Reservation bool     `json:"reservation,omitempty"`
-	Rejected    bool     `json:"rejected,omitempty"`
+	Award                LeaseRef `json:"award"`
+	Reservation          bool     `json:"reservation,omitempty"`
+	Rejected             bool     `json:"rejected,omitempty"`
+	CapacityUnconfigured bool     `json:"capacity_unconfigured,omitempty"`
 }
 
 // LauncherActivation binds a verified execution reservation before its Job is unsuspended.
@@ -44,3 +48,9 @@ type LauncherActivation struct {
 	NodeUID       string   `json:"node_uid"`
 	ReservationID string   `json:"reservation_id"`
 }
+
+// CloudCapacityUnconfigured names a terminal configuration failure before execution.
+const CloudCapacityUnconfigured = "cloud_capacity_unconfigured"
+
+// CloudCapacityUnconfiguredMessage gives customers the support path for missing team pools.
+const CloudCapacityUnconfiguredMessage = "Cloud capacity is not configured for this team. Contact support@sparkwing.dev"

@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
@@ -28,6 +29,7 @@ import (
 // summary and annotations. Notices carry engine version policy and unclaimed-work
 // observations. Private fields stay here until the public display projection.
 type RunStatusFacts struct {
+	Reason     string
 	Snapshot   store.RunSnapshot
 	Attempts   []runstate.NodeAttempt
 	Logs       []blob.LogSubject
@@ -75,7 +77,7 @@ func runDetailResponse(target capability.Target, facts RunStatusFacts) (controll
 		return controllerwire.RunDetail{}, errors.New("invalid persisted run status")
 	}
 	detail := controllerwire.RunDetail{
-		ID: run.ID, Number: run.Number, Team: string(run.Team), Status: string(run.State), StateSeq: run.StateSeq,
+		Reason: facts.Reason, ID: run.ID, Number: run.Number, Team: string(run.Team), Status: string(run.State), StateSeq: run.StateSeq,
 		Inputs: runspec.DisplayRequest(run.Request), Jobs: make([]controllerwire.JobDetail, 0, len(facts.Snapshot.Nodes)),
 		Logs:    append([]blob.LogSubject{}, facts.Logs...),
 		Notices: append([]engineid.Notice{}, facts.Notices...), StartedAt: run.StartedAt,
@@ -260,7 +262,7 @@ func (s *EngineController) readStoredRunStatus(ctx context.Context, team store.T
 }
 
 func (s *EngineController) runViewStatus(ctx context.Context, view store.RunView) (RunStatusFacts, error) {
-	facts := RunStatusFacts{Snapshot: view.Snapshot, Attempts: view.Attempts, Logs: view.Logs, Failures: view.Failures, JobResults: view.JobResults}
+	facts := RunStatusFacts{Reason: view.Reason, Snapshot: view.Snapshot, Attempts: view.Attempts, Logs: view.Logs, Failures: view.Failures, JobResults: view.JobResults}
 	if view.Snapshot.Run.Spec != nil {
 		if s.VersionPolicy == nil {
 			return RunStatusFacts{}, versionPolicyUnavailable()
@@ -273,6 +275,10 @@ func (s *EngineController) runViewStatus(ctx context.Context, view store.RunView
 	}
 	if unclaimed := unclaimedNotice(view); unclaimed != nil {
 		facts.Notices = append(facts.Notices, *unclaimed)
+	}
+	if view.CloudCapacitySince != nil {
+		elapsed := max(time.Duration(0), view.Snapshot.StoreNow.Sub(*view.CloudCapacitySince)).Truncate(time.Second)
+		facts.Notices = append(facts.Notices, engineid.Notice{Kind: engineid.NoticeCloudCapacity, Reason: fmt.Sprintf("Waiting for dedicated Cloud capacity (elapsed %s)", elapsed), Hint: "The credit hold reserves capacity. Usage billing starts when execution begins. You can cancel this run."})
 	}
 	return facts, nil
 }

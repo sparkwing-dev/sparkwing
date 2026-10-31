@@ -304,3 +304,28 @@ func TestRunStatusTextIncludesRunAndJobTiming(t *testing.T) {
 		}
 	}
 }
+
+func TestRunStatusDisplaysCloudCapacityWaitAndConfigurationFailure(t *testing.T) {
+	waiting := controllerwire.RunDetail{ID: "r1", Status: "running", Notices: []engineid.Notice{{Kind: engineid.NoticeCloudCapacity, Reason: "Waiting for dedicated Cloud capacity (elapsed 1m35s)"}}}
+	failed := controllerwire.RunDetail{ID: "r1", Status: "failed", Reason: "cloud_capacity_unconfigured", Failure: "Cloud capacity is not configured for this team. Contact support@sparkwing.dev (Support reference: r1)"}
+	for _, format := range []string{"json", "plain"} {
+		for _, detail := range []controllerwire.RunDetail{waiting, failed} {
+			r := &statusReader{details: []controllerwire.RunDetail{detail}}
+			var out bytes.Buffer
+			err := observeRunStatus(t.Context(), statusInvocation(t, "-o", format), r, &out, nil)
+			if detail.Status == "failed" && exitCodeFor(err) != 1 || detail.Status != "failed" && exitCodeFor(err) != 3 {
+				t.Fatalf("err=%v", err)
+			}
+			want := detail.Failure
+			if detail.Status != "failed" {
+				want = detail.Notices[0].Reason
+			}
+			if !strings.Contains(out.String(), want) || strings.Contains(out.String(), "fix the error above") {
+				t.Fatalf("capacity status: %s", out.String())
+			}
+			if format == "json" && detail.Status == "failed" && !strings.Contains(out.String(), "cloud_capacity_unconfigured") {
+				t.Fatal("JSON lost terminal reason")
+			}
+		}
+	}
+}

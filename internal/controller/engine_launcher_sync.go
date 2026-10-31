@@ -116,7 +116,7 @@ func (s storeLauncherSync) ReadLauncherSync(ctx context.Context, ref capability.
 func validateLauncherSync(body controllerwire.LauncherSyncRequest) ([]capability.LauncherObservation, error) {
 	observed := slices.Clone(body.Observed)
 	for _, demand := range body.Capacity {
-		observed = append(observed, capability.LauncherObservation{Award: demand.Award, Reservation: true})
+		observed = append(observed, capability.LauncherObservation{Award: demand.Award, Reservation: true, CapacityUnconfigured: demand.Unconfigured})
 	}
 	activated := map[capability.LeaseRef]bool{}
 	for _, activation := range body.Activations {

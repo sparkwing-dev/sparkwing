@@ -330,17 +330,21 @@ func resolveReapedExpansionTx(ctx context.Context, tx *storeTx, target expiredUn
 }
 
 func resolveExpansionLossTx(ctx context.Context, tx *storeTx, target expiredUnit, status string, now time.Time) error {
+	state := runstate.ExpansionFailed
+	failure := &ExpansionFailure{Code: apierr.Unavailable, MaskedError: "generator evaluator lost"}
+	if status == "cancelled" {
+		state, failure = runstate.ExpansionNone, nil
+	}
+	return resolveExpansionFailureTx(ctx, tx, target, state, failure, now)
+}
+
+func resolveExpansionFailureTx(ctx context.Context, tx *storeTx, target expiredUnit, state runstate.ExpansionState, failure *ExpansionFailure, now time.Time) error {
 	source, err := readNodeTx(ctx, tx, target.team, target.ref)
 	if err != nil {
 		return err
 	}
 	if pendingApprovalPredicate(source) {
 		return settleControllerTx(ctx, tx, target.team, string(target.ref.RunID), now)
-	}
-	state := runstate.ExpansionFailed
-	failure := &ExpansionFailure{Code: apierr.Unavailable, MaskedError: "generator evaluator lost"}
-	if status == "cancelled" {
-		state, failure = runstate.ExpansionNone, nil
 	}
 	body, err := json.Marshal(failure)
 	if err != nil {
