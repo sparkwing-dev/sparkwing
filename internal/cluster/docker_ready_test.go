@@ -7,10 +7,12 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/sparkwing-dev/sparkwing/internal/testhome"
 )
 
 func TestWaitForDockerNeedsAUsableSocket(t *testing.T) {
-	socket := filepath.Join(t.TempDir(), "docker.sock")
+	socket := filepath.Join(testhome.TempDir(t), "docker.sock")
 	server := &http.Server{ReadHeaderTimeout: time.Second, Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/_ping" {
 			_, _ = w.Write([]byte("OK"))

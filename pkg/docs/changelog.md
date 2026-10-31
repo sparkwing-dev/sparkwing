@@ -43,6 +43,8 @@ unlock.
 
 - **controller:** Failed-only retries reuse successful jobs on Cloud
   Reused jobs finish with zero attempts. Their outputs and artifacts feed dependents in the new run instead of releasing the jobs for fresh execution.
+- **runner:** Slow step-completion writes no longer fail otherwise successful jobs
+  Terminal step state and diagnostics use the live claim's execution lifetime instead of the heartbeat RPC timeout. Claim expiry still stops reporting.
 - **logs:** Client-canceled HTTP requests log at info and keep their status and audit records
   Rollback cleanup on closed or canceled connections logs at debug. Server faults still log at error.
 - **console:** Run submission and Run now keep waiting while the controller admits the run

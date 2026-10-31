@@ -17,6 +17,11 @@ confirmation or service binding. `FuzzHostingRejectsIncompleteNodeAwards` checks
 every combination of missing inputs through the remote hosting entrypoint.
 The native owner and claimed hosts own source acquisition and their only lease keeper.
 
+Terminal step state and its diagnostic use the claim's execution lifetime,
+including after requested cancellation. Claim expiry stops reporting.
+`TestStepCompletionUsesTheLiveClaimLifetime` delays step persistence and diagnostics
+past the heartbeat RPC budget and checks both live and expired claims.
+
 An ordered runner loop asks for trigger, plan, eval and job units. A run-scoped
 loop asks only for its trigger. Plan and eval awards for run-anywhere
 runs execute in-process through the native owner, as a Cloud plan pod does.

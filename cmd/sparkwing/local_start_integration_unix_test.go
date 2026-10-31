@@ -15,12 +15,13 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/testhome"
 	"github.com/sparkwing-dev/sparkwing/internal/wingd"
 	wingdclient "github.com/sparkwing-dev/sparkwing/internal/wingd/client"
 )
 
 func TestRunStartsLocalControllerBeforeSubmitting(t *testing.T) {
-	probe, err := net.Listen("unix", filepath.Join(t.TempDir(), "probe.sock"))
+	probe, err := net.Listen("unix", filepath.Join(testhome.TempDir(t), "probe.sock"))
 	if errors.Is(err, syscall.EPERM) || errors.Is(err, syscall.EACCES) {
 		t.Skipf("sandbox refuses local sockets: %v", err)
 	}

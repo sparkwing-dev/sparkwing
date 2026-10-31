@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
+	"github.com/sparkwing-dev/sparkwing/internal/testhome"
 	"github.com/sparkwing-dev/sparkwing/internal/wingd"
 )
 
@@ -104,7 +105,7 @@ func TestLocalControllerSmoke(t *testing.T) {
 			t.Errorf("%s: drive it in localSmokeSteps or name why not in localSmokeSkipped", command.Path)
 		}
 	}
-	probe, err := net.Listen("unix", filepath.Join(t.TempDir(), "probe.sock"))
+	probe, err := net.Listen("unix", filepath.Join(testhome.TempDir(t), "probe.sock"))
 	if (errors.Is(err, syscall.EPERM) || errors.Is(err, syscall.EACCES)) && os.Getenv("SPARKWING_TEST_NO_LOCAL_SOCKETS") == "1" {
 		t.Skipf("sandbox refuses local sockets: %v", err)
 	}
