@@ -26,7 +26,7 @@ func standingCapPay(t *testing.T, tenant *Tenant, ref string, cents int64) {
 
 func standingCapFree(t *testing.T, s *Store, id string, cents int64) {
 	t.Helper()
-	rewriteSchemaExec(t, s.db, `INSERT INTO credit_grants(id,team,kind,amount_micro,created_at) VALUES (?,'a','free',?,1)`, id, cents*MicroCreditsPerCent)
+	rewriteSchemaExec(t, s.db, `INSERT INTO credit_grants(reference,id,team,kind,amount_micro,created_at) VALUES (?,?,'a','free',?,1)`, id, id, cents*MicroCreditsPerCent)
 }
 
 func standingCapWant(t *testing.T, tenant *Tenant, now time.Time, tier, history, ceiling string) BillingStanding {
@@ -114,7 +114,7 @@ func TestStandingCapPrepayStaysWithinOneTierAndBelowHighProperty(t *testing.T) {
 	check := func(paidCents, freeCents uint32, ageDays uint8) bool {
 		rewriteSchemaExec(t, s.db, `DELETE FROM credit_grants`)
 		if paidCents%100000 > 0 {
-			rewriteSchemaExec(t, s.db, `INSERT INTO credit_grants(id,team,kind,amount_micro,created_at) VALUES ('paid-property','a','paid',?,?)`, int64(paidCents%100000)*MicroCreditsPerCent, now.UnixNano())
+			rewriteSchemaExec(t, s.db, `INSERT INTO credit_grants(reference,id,team,kind,amount_micro,created_at) VALUES ('paid-property','paid-property','a','paid',?,?)`, int64(paidCents%100000)*MicroCreditsPerCent, now.UnixNano())
 		}
 		if freeCents%200000 > 0 {
 			standingCapFree(t, s, "free-property", int64(freeCents%200000))

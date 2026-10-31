@@ -24,7 +24,7 @@ func TestStoreBillingRetention(t *testing.T) {
 	if _, err := op.SetCreditSettings(t.Context(), CreditSettingsUpdate{StorageRateMicroPerGBDay: &rate, StorageFreeAllowanceBytes: &free}); err != nil {
 		t.Fatal(err)
 	}
-	rewriteSchemaExec(t, s.db, `INSERT INTO credit_grants(team,id,kind,amount_micro,created_at) VALUES (?,'storage-fund','paid',?,1)`, tenant.Team(), 100*rate)
+	rewriteSchemaExec(t, s.db, `INSERT INTO credit_grants(reference,team,id,kind,amount_micro,created_at) VALUES ('storage-fund',?,'storage-fund','paid',?,1)`, tenant.Team(), 100*rate)
 	if initial, err := op.ChargeRetainedStorage(t.Context()); err != nil || len(initial.Charges) != 0 {
 		t.Fatalf("initial sample: %+v: %v", initial, err)
 	}

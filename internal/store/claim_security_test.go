@@ -18,7 +18,6 @@ func ClaimSecurityRegressions(t *testing.T, open func(*testing.T) *Store) {
 	fixture := func(t *testing.T) *Store {
 		s := open(t)
 		s.testOnlyExec(t, `INSERT INTO teams(name,created_at,updated_at) VALUES ('a',1,1),('b',1,1) ON CONFLICT(name) DO NOTHING`)
-		s.testOnlyExec(t, `INSERT INTO team_counters(team) VALUES ('a'),('b') ON CONFLICT(team) DO NOTHING`)
 		return s
 	}
 	t.Run("editor asserted main", func(t *testing.T) { actionsClaimRefusesEditorAssertedMain(t, fixture) })

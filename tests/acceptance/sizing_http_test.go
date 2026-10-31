@@ -72,7 +72,7 @@ func TestSizingHTTPReads(t *testing.T) {
 				case "member":
 					b = authorityMember()
 				}
-				f := &sizingStore{profile: &store.PipelineProfile{Pipeline: pipeline, NodeID: "job", PinnedCores: 1.5}}
+				f := &sizingStore{profile: &store.PipelineProfile{Pipeline: pipeline, NodeID: "job", PeakCores: 1.5}}
 				if class == "missing" {
 					f.profile = nil
 				}
@@ -85,7 +85,7 @@ func TestSizingHTTPReads(t *testing.T) {
 					if err := json.Unmarshal(w.Body.Bytes(), &got); err != nil {
 						t.Fatal(err)
 					}
-					if w.Code != 200 || got.PinnedCores != 1.5 {
+					if w.Code != 200 || got.PeakCores != 1.5 {
 						t.Fatalf("HTTP %d %s", w.Code, w.Body.String())
 					}
 				}

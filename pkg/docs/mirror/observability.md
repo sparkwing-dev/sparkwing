@@ -59,13 +59,12 @@ and nearest-rank P50 and P95 use runs with both timestamps. Plain output emits
 pipeline names. A failed page read produces no partial totals.
 
 `sparkwing runs stats --sizing` reads the controller's resource measurements,
-including job rows, CPU and memory distributions, wait times, memo exclusions,
-demand floors, resource pins and drift. Add `--profile NAME` to select a
-controller. JSON preserves the measurements and controller-selected source.
+including job rows, CPU and memory distributions and memo exclusions. Add
+`--profile NAME` to select a controller. JSON preserves the measurements and controller-selected source.
 Plain output emits repository/pipeline names.
 
 Sizing reset selects `--reset --pipeline NAME` or
-`--reset --all-pipelines --yes`. The reset contract preserves resource pins.
+`--reset --all-pipelines --yes`.
 Its HTTP adapter returns `policy_missing` because the route contract has no
 authorized reset operation. It changes no state.
 

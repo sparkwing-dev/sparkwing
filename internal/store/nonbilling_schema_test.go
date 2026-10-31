@@ -35,7 +35,6 @@ func TestNonBillingSchemaRejectsCounterexamples(t *testing.T) {
 	exec(`INSERT INTO storage_quotas(team,storage_allowance_bytes,updated_at) VALUES ('a',1,1)`)
 	exec(`INSERT INTO team_build_trust(team,trust_local_builds) VALUES ('a',0)`)
 	exec(`INSERT INTO egress_usage(team,period,bytes,updated_at) VALUES ('a','day',1,1)`)
-	exec(`INSERT INTO team_counters(team) VALUES ('a')`)
 	for _, tc := range []struct{ name, query string }{
 		{"null installation identity", `UPDATE github_app_installations SET installation_id=NULL WHERE installation_id=2`},
 		{"foreign installation automation", `UPDATE github_app_automation SET installation_id=2 WHERE team='a'`},
@@ -66,7 +65,7 @@ func TestNonBillingSchemaRejectsCounterexamples(t *testing.T) {
 	}
 	if st.Dialect() == store.DialectSQLite {
 		t.Run("fractional counter", func(t *testing.T) {
-			if _, err := st.DB().Exec(`UPDATE team_counters SET concurrent_nodes=0.5 WHERE team='a'`); err == nil {
+			if _, err := st.DB().Exec(`UPDATE teams SET next_run_number=0.5 WHERE name='a'`); err == nil {
 				t.Fatal("accepted fractional integer counter")
 			}
 		})

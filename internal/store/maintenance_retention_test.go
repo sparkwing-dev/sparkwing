@@ -31,7 +31,7 @@ func TestRewriteRetentionKeepsPinsEffectsAndFinancialRows(t *testing.T) {
 	rewriteSchemaExec(t, s.db, `INSERT INTO nodes(team,run_id,node_id,status,spec_json,execution_json) VALUES ('a','pinned','job','pending',?,?)`, []byte(`{}`), []byte(`{}`))
 	rewriteSchemaExec(t, s.db, `INSERT INTO node_metrics(team,run_id,node_id,ts,cpu_millicores,memory_bytes) VALUES ('a','pinned','job',?,1,1)`, old)
 	rewriteSchemaExec(t, s.db, `INSERT INTO settings(key,value) VALUES ('operator.run_retention_days',?),('operator.node_metric_retention_days',?)`, []byte(`90`), []byte(`7`))
-	rewriteSchemaExec(t, s.db, `INSERT INTO credit_grants(team,id,kind,amount_micro,created_at) VALUES ('a','grant','paid',100,1)`)
+	rewriteSchemaExec(t, s.db, `INSERT INTO credit_grants(reference,team,id,kind,amount_micro,created_at) VALUES ('grant','a','grant','paid',100,1)`)
 	rewriteSchemaExec(t, s.db, `INSERT INTO credit_charges(team,id,run_id,node_id,capability_prefix,seconds,amount_micro,charged_at) VALUES ('a','charge','old_failure','job','cap',1,30,1)`)
 	rewriteSchemaExec(t, s.db, `INSERT INTO storage_run_usage(team,run_id,period,bytes,updated_at) VALUES ('a','old_failure','month',123,1)`)
 	rewriteSchemaExec(t, s.db, `INSERT INTO github_app_deliveries(digest,delivery_id,received_at) VALUES ('expired','old',?),('fresh','new',?)`, old, now.UnixNano())

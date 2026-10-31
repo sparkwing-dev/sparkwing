@@ -40,7 +40,6 @@ import {
   type CapacitySortKey,
   chargeBasisLabel,
   mismatchNote,
-  pinDriftFlag,
   rankLabel,
   sortProfiles,
 } from "@/lib/capacity";
@@ -663,9 +662,6 @@ function PricingSection({
               <Th right hideSm>
                 Peak / sustained
               </Th>
-              <Th right hideSm>
-                Floor
-              </Th>
               <SortTh
                 label="Samples"
                 col="samples"
@@ -699,7 +695,6 @@ function PricingSection({
                   <span className="font-mono text-xs">
                     {p.display || p.pipeline}
                   </span>
-                  <PinFlag p={p} />
                 </Td>
                 <Td right mono>
                   {trimFloat(p.charge.cores)}
@@ -720,11 +715,6 @@ function PricingSection({
                 <Td right mono muted hideSm>
                   {trimFloat(p.peak_cores)} / {trimFloat(p.sustained_cores)}
                 </Td>
-                <Td right mono muted hideSm>
-                  {(p.floor_cores ?? 0) > 0
-                    ? trimFloat(p.floor_cores ?? 0)
-                    : "-"}
-                </Td>
                 <Td right mono muted>
                   {p.sample_count}
                 </Td>
@@ -737,37 +727,7 @@ function PricingSection({
           </tbody>
         </table>
       </div>
-      {rows
-        .filter((p) => p.drift)
-        .map((p) => (
-          <div key={`drift-${p.pipeline}`} className="mt-2">
-            <Callout tone="warning">
-              <span className="font-mono text-violet-300">
-                {p.display || p.pipeline}
-              </span>
-              : {p.drift}
-            </Callout>
-          </div>
-        ))}
     </Section>
-  );
-}
-
-function PinFlag({ p }: { p: CapacityProfile }) {
-  const flag = pinDriftFlag(p);
-  if (!flag) return null;
-  const tone = flag === "pinned" ? "neutral" : "warning";
-  return (
-    <Tooltip
-      content={
-        p.drift ||
-        `Pinned at ${trimFloat(p.pinned_cores ?? 0)} cores by .Resources()`
-      }
-    >
-      <span className="ml-1.5 align-middle">
-        <Chip tone={tone}>{flag}</Chip>
-      </span>
-    </Tooltip>
   );
 }
 

@@ -12,7 +12,7 @@ func meteringFixture(t *testing.T, unit capability.UnitKind, start capability.Bi
 	t.Helper()
 	s := authorityStore(t)
 	s.clock = func() time.Time { return time.Unix(1000, 0).UTC() }
-	rewriteSchemaExec(t, s.db, "INSERT INTO credit_grants(id,team,kind,amount_micro,created_at) VALUES ('fund','a','paid',1000000,1)")
+	rewriteSchemaExec(t, s.db, "INSERT INTO credit_grants(reference,id,team,kind,amount_micro,created_at) VALUES ('fund','fund','a','paid',1000000,1)")
 	b := capability.BillingJob
 	switch unit {
 	case capability.UnitTrigger:

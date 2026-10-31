@@ -182,9 +182,6 @@ func SeedTeam(t T, st *store.Store, team store.Team) {
 	if _, err := Exec(t.Context(), st, `INSERT INTO teams(name,created_at,updated_at) VALUES (?,1,1) ON CONFLICT(name) DO NOTHING`, string(team)); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := Exec(t.Context(), st, `INSERT INTO team_counters(team) VALUES (?) ON CONFLICT(team) DO NOTHING`, string(team)); err != nil {
-		t.Fatal(err)
-	}
 }
 
 // SeedGitHubInstallation binds an installation to team with no webhook or

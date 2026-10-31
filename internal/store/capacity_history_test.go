@@ -49,24 +49,20 @@ func TestProfileHistory(t *testing.T) {
 						}
 						_, err := st.DB().Exec(storetest.Rebind(st, `INSERT INTO pipeline_profiles
  (team,pipeline,node_id,p50_duration_ms,p99_duration_ms,peak_cores,peak_memory_bytes,sample_count,cpu_measured,updated_at,samples_json,
- plan_hash,floor_cores,floor_memory_bytes,prev_peak_cores,prev_peak_memory_bytes,sustained_cores,prev_sustained_cores,
- pinned_cores,pinned_memory_bytes,wait_p50_ms,wait_p99_ms,wait_sample_count,contended_count)
- VALUES (?,?,?,9000,9000,14,450,?,1,1,?,'old-plan',10,400,16,500,12,13,2,100,3,7,2,6)`), store.DefaultTeam, "history", node, count, document.raw)
+ plan_hash,prev_peak_cores,prev_peak_memory_bytes,sustained_cores,prev_sustained_cores)
+ VALUES (?,?,?,9000,9000,14,450,?,1,1,?,'old-plan',16,500,12,13)`), store.DefaultTeam, "history", node, count, document.raw)
 						if err != nil {
 							t.Fatal(err)
 						}
 					}
-					check := func(p *store.PipelineProfile, samples int, floor float64, memory int64) {
+					check := func(p *store.PipelineProfile, samples int) {
 						t.Helper()
 						if p == nil {
 							t.Fatal("missing profile")
 						}
-						if p.SampleCount != samples || p.FloorCores != floor || p.FloorMemoryBytes != memory ||
+						if p.SampleCount != samples ||
 							p.PrevPeakCores != 0 || p.PrevSustainedCores != 0 || p.PrevPeakMemoryBytes != 0 {
 							t.Errorf("history survived: %+v", p)
-						}
-						if p.PinnedCores != 2 || p.PinnedMemoryBytes != 100 || p.WaitP50 != 3*time.Millisecond || p.WaitP99 != 7*time.Millisecond || p.WaitSampleCount != 2 || p.ContendedCount != 6 {
-							t.Errorf("pin or wait changed: %+v", p)
 						}
 						if samples == 0 && (p.PeakCores != 0 || p.SustainedCores != 0 || p.PeakMemoryBytes != 0 || p.P50Duration != 0 || p.P99Duration != 0 || p.CPUP50 != 0 || p.MemoryP95Bytes != 0) {
 							t.Errorf("obsolete measured values survived: %+v", p)
@@ -77,7 +73,7 @@ func TestProfileHistory(t *testing.T) {
 					if err != nil {
 						t.Fatal(err)
 					}
-					check(p, 0, 0, 0)
+					check(p, 0)
 					if p.CPUMeasured || p.PlanHash != "" {
 						t.Errorf("obsolete measurement metadata survived: %+v", p)
 					}
@@ -85,7 +81,7 @@ func TestProfileHistory(t *testing.T) {
 					if err != nil || len(profiles) != 1 {
 						t.Fatalf("list: %v, %d profiles", err, len(profiles))
 					}
-					check(&profiles[0], 0, 0, 0)
+					check(&profiles[0], 0)
 					if profiles[0].CPUMeasured || profiles[0].PlanHash != "" {
 						t.Errorf("obsolete list metadata survived: %+v", profiles[0])
 					}
@@ -94,35 +90,21 @@ func TestProfileHistory(t *testing.T) {
 						t.Errorf("obsolete samples: %v, %v", window, err)
 					}
 					for _, hash := range []string{"old-plan", "new-plan"} {
-						for _, contended := range []bool{false, true} {
-							seed()
-							obs := store.ProfileObservation{PlanHash: hash, Duration: time.Second, PeakCores: 3, SustainedCores: 1, PeakMemoryBytes: 80, Contended: contended, FloorCores: 2, FloorMemoryBytes: 60, CPUMeasured: true}
-							if err := tenantFor(t, st, store.DefaultTeam).RecordProfileObservation(ctx, "history", node, obs); err != nil {
-								t.Fatal(err)
-							}
-							p, err := tenantFor(t, st, store.DefaultTeam).GetPipelineProfile(ctx, "history", node)
-							if err != nil {
-								t.Fatal(err)
-							}
-							if contended {
-								check(p, 0, 2, 60)
-								if err := tenantFor(t, st, store.DefaultTeam).RecordProfileObservation(ctx, "history", node, store.ProfileObservation{CPUMeasured: true, PlanHash: hash, Contended: true}); err != nil {
-									t.Fatal(err)
-								}
-								p, err = tenantFor(t, st, store.DefaultTeam).GetPipelineProfile(ctx, "history", node)
-								if err != nil {
-									t.Fatal(err)
-								}
-								check(p, 0, 1, 30)
-							} else {
-								check(p, 1, 0, 0)
-								if p.PeakCores != 3 || p.SustainedCores != 1 || p.PeakMemoryBytes != 80 || p.P50Duration != time.Second {
-									t.Errorf("new observation differs: %+v", p)
-								}
-							}
-							if p.PlanHash != hash || !p.CPUMeasured {
-								t.Errorf("new observation metadata differs: %+v", p)
-							}
+						seed()
+						obs := store.ProfileObservation{PlanHash: hash, Duration: time.Second, PeakCores: 3, SustainedCores: 1, PeakMemoryBytes: 80, CPUMeasured: true}
+						if err := tenantFor(t, st, store.DefaultTeam).RecordProfileObservation(ctx, "history", node, obs); err != nil {
+							t.Fatal(err)
+						}
+						p, err := tenantFor(t, st, store.DefaultTeam).GetPipelineProfile(ctx, "history", node)
+						if err != nil {
+							t.Fatal(err)
+						}
+						check(p, 1)
+						if p.PeakCores != 3 || p.SustainedCores != 1 || p.PeakMemoryBytes != 80 || p.P50Duration != time.Second {
+							t.Errorf("new observation differs: %+v", p)
+						}
+						if p.PlanHash != hash || !p.CPUMeasured {
+							t.Errorf("new observation metadata differs: %+v", p)
 						}
 					}
 				}

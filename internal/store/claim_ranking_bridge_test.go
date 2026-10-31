@@ -27,7 +27,6 @@ func (s *Store) TestOnlyRankingFixture(t *testing.T, funded bool) *RankingFixtur
 	t.Helper()
 	for _, team := range []string{"a", "b"} {
 		s.testOnlyExec(t, `INSERT INTO teams(name,created_at,updated_at) VALUES (?,1,1) ON CONFLICT(name) DO NOTHING`, team)
-		s.testOnlyExec(t, `INSERT INTO team_counters(team) VALUES (?) ON CONFLICT(team) DO NOTHING`, team)
 	}
 	_, demand := unitClaimFixtureStore(t, s)
 	f := &RankingFixture{Store: s, Self: demand.CapabilityPrefix, ReadyAt: s.now()}

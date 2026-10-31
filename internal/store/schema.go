@@ -263,7 +263,6 @@ var schemaTables = []schemaTable{
 	{Name: "storage_quotas", Owner: schemaTenant},
 	{Name: "storage_run_usage", Owner: schemaTenant},
 	{Name: "team_build_trust", Owner: schemaTenant},
-	{Name: "team_counters", Owner: schemaTenant},
 	{Name: "team_deletions", Owner: schemaOperator},
 	{Name: "team_download_day", Owner: schemaTenant},
 	{Name: "team_first_success", Owner: schemaTenant},

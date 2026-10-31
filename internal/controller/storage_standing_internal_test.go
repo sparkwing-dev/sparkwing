@@ -27,7 +27,7 @@ func TestCallerStorageStandingUsesFinalTenantInventory(t *testing.T) {
 	if _, err := teststore.SQL(t, s).ExecContext(t.Context(), "INSERT INTO blobs(team,digest,size,created_at) VALUES ('a',?,3,1),('b',?,999,1)", strings.Repeat("a", 64), strings.Repeat("a", 64)); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := teststore.SQL(t, s).ExecContext(t.Context(), "INSERT INTO team_storage(team,store,used_bytes,reserved_bytes,updated_at) VALUES ('a','cache',999999,999999,1)"); err != nil {
+	if _, err := teststore.SQL(t, s).ExecContext(t.Context(), "INSERT INTO team_storage(team,store,storage_charged_through,updated_at) VALUES ('a','cache',999999,1)"); err != nil {
 		t.Fatal(err)
 	}
 	server := NewDeployment(s, deploymenttest.Team(t), nil)

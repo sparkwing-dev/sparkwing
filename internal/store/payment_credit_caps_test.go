@@ -41,7 +41,7 @@ func TestPaymentPaidEventsPreserveFundsAboveBalanceCap(t *testing.T) {
 
 func TestStoreDataMeteredUsageByRunNetsHostJobAndRefunds(t *testing.T) {
 	s, award := meteringFixture(t, capability.UnitNode, capability.BillingAtStart)
-	rewriteSchemaExec(t, s.db, "INSERT INTO credit_grants(id,team,kind,amount_micro,created_at) VALUES ('other-fund','b','paid',1000000,1)")
+	rewriteSchemaExec(t, s.db, "INSERT INTO credit_grants(reference,id,team,kind,amount_micro,created_at) VALUES ('other-fund','other-fund','b','paid',1000000,1)")
 	now := s.now()
 	s.clock = func() time.Time { return now }
 	for _, tc := range []struct {

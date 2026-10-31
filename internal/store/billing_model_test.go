@@ -331,7 +331,7 @@ func TestBillingModelEveryHoldStopsRunningCloudWork(t *testing.T) {
 			}
 			rewriteSchemaExec(t, s.db, `DELETE FROM credit_freezes`)
 			rewriteSchemaExec(t, s.db, `UPDATE teams SET billing_trust='' WHERE name='a'`)
-			rewriteSchemaExec(t, s.db, `INSERT INTO credit_grants(team,id,kind,amount_micro,created_at) VALUES ('a','late','paid',?,1)`, int64(MaxCreditGrantMicro))
+			rewriteSchemaExec(t, s.db, `INSERT INTO credit_grants(reference,team,id,kind,amount_micro,created_at) VALUES ('late','a','late','paid',?,1)`, int64(MaxCreditGrantMicro))
 			*now = now.Add(10 * time.Second)
 			again, err := s.AsOperator().RenewUnit(t.Context(), claim.Award.CapabilityPrefix, true)
 			if err != nil || !again.CancelRequested || !again.ExpiresAt.Equal(beat.ExpiresAt) {

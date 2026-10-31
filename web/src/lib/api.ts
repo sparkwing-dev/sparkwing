@@ -1166,15 +1166,6 @@ export interface CapacityProfile {
   cpu_measured: boolean;
   p50_duration_ms: number;
   p99_duration_ms: number;
-  wait_p50_ms?: number;
-  wait_p99_ms?: number;
-  floor_cores?: number;
-  floor_memory_bytes?: number;
-  pinned_cores?: number;
-  pinned_memory_bytes?: number;
-  drift?: string;
-  drift_class?: string;
-  contended_count?: number;
   plan_hash?: string;
   updated_at_ms?: number;
   node_count?: number;
@@ -1185,8 +1176,6 @@ export interface CapacityConstants {
   charge_percentile: number;
   sustained_percentile: number;
   warm_start_multiple: number;
-  safety_multiple: number;
-  drift_fraction: number;
   cold_start_cores: number;
 }
 

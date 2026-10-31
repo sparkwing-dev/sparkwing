@@ -79,6 +79,7 @@ credential model in `docs/auth.md`, and the decision log
 
 | Rule | Owner | Guard test |
 | --- | --- | --- |
+| Financial row shapes and one open interval per award | `schema.sql`, translated by `schema.go` for both dialects | `schema_batch_test.go`: `TestSchemaRejectsIncompleteFinancialDecisions`, `TestSchemaAllowsOnlyOneOpenBillingIntervalPerAward` |
 | Ledger writer | `ledger.go`: `ledgerTx` (`lockLedgerTx`, `insertGrant`, `insertCharge`, `debitFunded`) | `ledger_guard_test.go`: `TestLedgerTablesAreWrittenOnlyThroughTheLedger` |
 | `payment_mode` on money statements (decision 63) | every money query filters `payment_mode` | `ledger_guard_test.go`: `TestMoneyStatementsCarryPaymentMode`; `payment_mode_test.go` |
 | Refill eligibility | `refill.go`: `SpendStanding.refillEligible` | `refill_model_test.go`: `TestRefillModel`; `refill_test.go` |

@@ -326,8 +326,8 @@ func TestAccountDeletionRelabelsEveryRowThatNamedTheAccount(t *testing.T) {
 		 VALUES ('c1', '/r', 'build', '* * * * *', 'UTC', 'skip', 0, 1, 'leaver@example.com', 1, 1, '` + team + `', 'gh:1')`,
 		`UPDATE nodes SET claim_principal = '` + leaver.Account.ID + `' WHERE run_id = 'run-l' AND node_id = 'n'`,
 		`UPDATE triggers SET claim_principal = 'leaver@example.com' WHERE id = 'run-l'`,
-		`INSERT INTO credit_grants (id, kind, amount_micro, created_by, created_at, team) VALUES ('g2', 'free', 5, 'deploy-bot', 1, '` + bystander + `')`,
-		`INSERT INTO credit_grants (id, kind, amount_micro, created_by, created_at, team) VALUES ('g1', 'free', 5, 'leaver@example.com', 1, '` + team + `')`,
+		`INSERT INTO credit_grants (reference, id, kind, amount_micro, created_by, created_at, team) VALUES ('g2', 'g2', 'free', 5, 'deploy-bot', 1, '` + bystander + `')`,
+		`INSERT INTO credit_grants (reference, id, kind, amount_micro, created_by, created_at, team) VALUES ('g1', 'g1', 'free', 5, 'leaver@example.com', 1, '` + team + `')`,
 		`UPDATE runs SET created_principal = 'leaver@example.com' WHERE id = 'run-l'`,
 	} {
 		if _, err := st.DB().ExecContext(ctx, q); err != nil {

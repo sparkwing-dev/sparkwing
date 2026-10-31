@@ -310,7 +310,7 @@ func TestARefillIsAuthorizedImmediatelyBeforeItsOwnCall(t *testing.T) {
 	for change, query := range map[string]string{
 		"disabled": `UPDATE teams SET refill_enabled=0 WHERE name='b'`,
 		"held":     `INSERT INTO credit_freezes(dispute_id,team,reason,cause,placed_by,created_at) VALUES ('operator:b','b','review','operator','owner',1)`,
-		"topped up": `INSERT INTO credit_grants(id,team,kind,amount_micro,created_at) VALUES ('topup','b','paid',` +
+		"topped up": `INSERT INTO credit_grants(reference,id,team,kind,amount_micro,created_at) VALUES ('topup','topup','b','paid',` +
 			strconv.FormatInt(5000*store.MicroCreditsPerCent, 10) + `,1)`,
 	} {
 		t.Run(change, func(t *testing.T) {

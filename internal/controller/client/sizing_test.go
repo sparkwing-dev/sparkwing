@@ -11,7 +11,7 @@ import (
 )
 
 func TestSizingQueryUsesAuthorizedReadAndPreservesMeasurements(t *testing.T) {
-	want := controllerwire.SizingDetail{Pipeline: "check", Repo: "acme/api", Source: "floor", MemoExcluded: 3, Rollup: controllerwire.SizingMeasurements{FloorCores: 6.5, FloorMemoryBytes: 7 << 30, CPUP50: 0.5, CPUP95: 1.25, CPUMeasured: true, PrevPeakCores: 2}, Jobs: []controllerwire.JobSizing{}}
+	want := controllerwire.SizingDetail{Pipeline: "check", Repo: "acme/api", Source: "measured", MemoExcluded: 3, Rollup: controllerwire.SizingMeasurements{PeakCores: 6.5, PeakMemoryBytes: 7 << 30, CPUP50: 0.5, CPUP95: 1.25, CPUMeasured: true, PrevPeakCores: 2}, Jobs: []controllerwire.JobSizing{}}
 	c := testEngine(t, func(req *http.Request) (*http.Response, error) {
 		q := req.URL.Query()
 		if req.Method != http.MethodGet || req.URL.Path != "/api/v1/sizing" || q.Get("pipeline") != "check" || q.Get("limit") != "1" || q.Get("cursor") != "opaque" {
@@ -24,7 +24,7 @@ func TestSizingQueryUsesAuthorizedReadAndPreservesMeasurements(t *testing.T) {
 		return engineResponse(200, string(body)), nil
 	})
 	got, err := c.ListSizing(t.Context(), controllerwire.SizingQuery{Pipeline: "check", Limit: 1, Cursor: "opaque"})
-	if err != nil || len(got.Sizing) != 1 || got.Sizing[0].Rollup.FloorCores != 6.5 || got.Sizing[0].Rollup.FloorMemoryBytes != 7<<30 || got.Sizing[0].MemoExcluded != 3 {
+	if err != nil || len(got.Sizing) != 1 || got.Sizing[0].Rollup.PeakCores != 6.5 || got.Sizing[0].Rollup.PeakMemoryBytes != 7<<30 || got.Sizing[0].MemoExcluded != 3 {
 		t.Fatalf("sizing: %+v %v", got, err)
 	}
 }

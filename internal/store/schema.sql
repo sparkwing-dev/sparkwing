@@ -190,8 +190,6 @@ CREATE TABLE nodes (
     cpu_nanos BIGINT NOT NULL DEFAULT 0 CHECK(cpu_nanos >= 0),
     team TEXT NOT NULL REFERENCES teams(name),
     optional BIGINT NOT NULL DEFAULT 0 CHECK(optional IN (0,1)),
-    retry_budget BIGINT NOT NULL DEFAULT 0 CHECK(retry_budget >= 0),
-    retry_backoff_ms BIGINT NOT NULL DEFAULT 0 CHECK(retry_backoff_ms >= 0),
     failure_json BLOB,
     output_record BLOB,
     manifest_record BLOB,
@@ -202,7 +200,6 @@ CREATE TABLE nodes (
     cancel_requested_at BIGINT,
     drain_deadline_at BIGINT GENERATED ALWAYS AS (cancel_requested_at + 300000000000) STORED,
     cancel_reason TEXT NOT NULL DEFAULT '',
-    approval_json BLOB,
     attention_reason TEXT NOT NULL DEFAULT '',
     timeout_ms BIGINT NOT NULL DEFAULT 0 CHECK(timeout_ms >= 0),
     generated_json BLOB,
@@ -379,7 +376,6 @@ CREATE TABLE sessions (
     account_id TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
     capability_prefix TEXT NOT NULL DEFAULT '',
     revoked_at BIGINT,
-    auth_generation BIGINT NOT NULL DEFAULT 0 CHECK(auth_generation >= 0),
     CHECK(team IS NOT NULL OR (account_id <> '' AND capability_prefix = ''))
 );
 
@@ -499,7 +495,7 @@ CREATE TABLE credit_grants (
     id TEXT NOT NULL PRIMARY KEY,
     kind TEXT NOT NULL CHECK(kind IN ('free','paid','reversal')),
     amount_micro BIGINT NOT NULL,
-    reference TEXT NOT NULL DEFAULT '',
+    reference TEXT NOT NULL CHECK(reference <> ''),
     created_by TEXT NOT NULL DEFAULT '',
     created_at BIGINT NOT NULL,
     reverses TEXT NOT NULL DEFAULT '',
@@ -603,18 +599,9 @@ CREATE TABLE pipeline_profiles (
     sample_count BIGINT NOT NULL,
     updated_at BIGINT NOT NULL,
     samples_json BLOB,
-    pinned_cores DOUBLE PRECISION NOT NULL DEFAULT 0,
-    pinned_memory_bytes BIGINT NOT NULL DEFAULT 0,
     cpu_measured BIGINT NOT NULL DEFAULT 0,
-    wait_samples_json BLOB,
-    wait_p50_ms BIGINT NOT NULL DEFAULT 0,
-    wait_p99_ms BIGINT NOT NULL DEFAULT 0,
-    wait_sample_count BIGINT NOT NULL DEFAULT 0,
-    contended_count BIGINT NOT NULL DEFAULT 0,
     prev_peak_memory_bytes BIGINT NOT NULL DEFAULT 0,
     plan_hash TEXT NOT NULL DEFAULT '',
-    floor_cores DOUBLE PRECISION NOT NULL DEFAULT 0,
-    floor_memory_bytes BIGINT NOT NULL DEFAULT 0,
     prev_peak_cores DOUBLE PRECISION NOT NULL DEFAULT 0,
     sustained_cores DOUBLE PRECISION NOT NULL DEFAULT 0,
     prev_sustained_cores DOUBLE PRECISION NOT NULL DEFAULT 0,
@@ -626,15 +613,7 @@ CREATE TABLE pipeline_profiles (
     CHECK(peak_cores >= 0),
     CHECK(peak_memory_bytes >= 0),
     CHECK(sample_count >= 0),
-    CHECK(pinned_cores >= 0),
-    CHECK(pinned_memory_bytes >= 0),
-    CHECK(wait_p50_ms >= 0),
-    CHECK(wait_p99_ms >= 0),
-    CHECK(wait_sample_count >= 0),
-    CHECK(contended_count >= 0),
     CHECK(prev_peak_memory_bytes >= 0),
-    CHECK(floor_cores >= 0),
-    CHECK(floor_memory_bytes >= 0),
     CHECK(prev_peak_cores >= 0),
     CHECK(sustained_cores >= 0),
     CHECK(prev_sustained_cores >= 0)
@@ -796,7 +775,6 @@ CREATE TABLE github_app_triggers (
     repository TEXT NOT NULL,
     installation_id BIGINT NOT NULL,
     on_push BIGINT NOT NULL DEFAULT 0,
-    on_tags BIGINT NOT NULL DEFAULT 0,
     tag_patterns TEXT NOT NULL DEFAULT '[]',
     on_pull_request BIGINT NOT NULL DEFAULT 0,
     created_by TEXT NOT NULL DEFAULT '',
@@ -817,7 +795,6 @@ CREATE TABLE github_app_triggers (
     PRIMARY KEY (team, repository_id, pipeline),
     FOREIGN KEY(team,installation_id) REFERENCES github_app_installations(team,installation_id) ON DELETE CASCADE,
     CHECK(on_push IN (0,1)),
-    CHECK(on_tags IN (0,1)),
     CHECK(on_pull_request IN (0,1)),
     CHECK(on_pr_closed IN (0,1)),
     CHECK(on_pr_labeled IN (0,1)),
@@ -875,7 +852,8 @@ CREATE TABLE team_deletions (
     finished_at BIGINT,
     recheck_at BIGINT,
     lease_holder TEXT NOT NULL DEFAULT '',
-    lease_until BIGINT
+    lease_until BIGINT,
+    CHECK((state = 'done') = (finished_at IS NOT NULL))
 );
 
 CREATE TABLE invitation_email_log (
@@ -951,6 +929,7 @@ CREATE TABLE payment_events (
     PRIMARY KEY(payment_mode,event_id),
     FOREIGN KEY(team,checkout_id,payment_mode) REFERENCES credit_checkouts(team,id,payment_mode),
     FOREIGN KEY(team,grant_id) REFERENCES credit_grants(team,id),
+    CHECK(grant_id IS NULL OR team IS NOT NULL),
     CHECK(team IS NOT NULL OR event_kind IN ('warning','refund','dispute_opened','dispute_closed','card_setup','card_paid','card_failed')),
     CHECK((event_kind IN ('checkout_paid','checkout_expired','checkout_failed') AND checkout_id IS NOT NULL AND team IS NOT NULL)
        OR (event_kind NOT IN ('checkout_paid','checkout_expired','checkout_failed') AND checkout_id IS NULL AND object_id <> '' AND event_json IS NOT NULL AND settlement_json IS NOT NULL))
@@ -1008,16 +987,14 @@ CREATE TABLE standing_requests (
     state TEXT NOT NULL CHECK(state IN ('open','approved','declined')),
     decided_by TEXT NOT NULL DEFAULT '',
     decided_at BIGINT NOT NULL DEFAULT 0,
-    decision_reason TEXT NOT NULL DEFAULT ''
+    decision_reason TEXT NOT NULL DEFAULT '',
+    CHECK((state = 'open' AND decided_by = '' AND decided_at = 0)
+       OR (state <> 'open' AND decided_by <> '' AND decided_at <> 0))
 );
 
 CREATE TABLE team_storage (
     team TEXT NOT NULL REFERENCES teams(name),
     store TEXT NOT NULL,
-    used_bytes BIGINT NOT NULL DEFAULT 0,
-    reserved_bytes BIGINT NOT NULL DEFAULT 0,
-    committed_bytes BIGINT NOT NULL DEFAULT 0,
-    reconciled_at BIGINT NOT NULL DEFAULT 0,
     updated_at BIGINT NOT NULL,
     storage_charged_through BIGINT NOT NULL DEFAULT 0,
     PRIMARY KEY (team, store)
@@ -1346,7 +1323,6 @@ CREATE TABLE capabilities (
     repo_scope BLOB,
     ref_scope TEXT NOT NULL DEFAULT '',
     push_sha TEXT NOT NULL DEFAULT '',
-    revocation_generation BIGINT NOT NULL DEFAULT 0 CHECK(revocation_generation >= 0),
     UNIQUE(team,prefix),
     CHECK((parent_kind IS NULL) = (parent_id IS NULL)),
     CHECK((unit_kind IS NULL) = (unit_id IS NULL)),
@@ -1496,13 +1472,6 @@ CREATE TABLE flow_nonces (
     PRIMARY KEY(kind,nonce)
 );
 
-CREATE TABLE team_counters (
-    team TEXT NOT NULL REFERENCES teams(name) PRIMARY KEY,
-    concurrent_nodes BIGINT NOT NULL DEFAULT 0 CHECK(concurrent_nodes >= 0),
-    registered_agents BIGINT NOT NULL DEFAULT 0 CHECK(registered_agents >= 0),
-    auth_generation BIGINT NOT NULL DEFAULT 0 CHECK(auth_generation >= 0)
-);
-
 -- safety: one locked team/quota row serializes admission; summed usage rows never admit work.
 CREATE TABLE quota_admission (
     team TEXT NOT NULL REFERENCES teams(name),
@@ -1544,7 +1513,7 @@ CREATE TABLE billing_awards (
     run_id TEXT NOT NULL,
     requester_account TEXT NOT NULL DEFAULT '',
     node_id TEXT NOT NULL DEFAULT '',
-    generation BIGINT NOT NULL,
+    generation BIGINT NOT NULL CHECK(generation > 0),
     payer_team TEXT NOT NULL REFERENCES teams(name),
     metered BIGINT NOT NULL CHECK(metered IN (0,1)),
     executor_class TEXT NOT NULL,
@@ -1588,6 +1557,8 @@ CREATE TABLE billable_intervals (
     CHECK(finished_at IS NULL OR finished_at >= started_at),
     CHECK(charged_through >= started_at AND (finished_at IS NULL OR charged_through <= finished_at))
 );
+
+CREATE UNIQUE INDEX idx_billable_intervals_one_open ON billable_intervals(team,reservation_id) WHERE finished_at IS NULL;
 
 CREATE INDEX idx_runs_started ON runs(started_at DESC);
 

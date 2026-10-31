@@ -17,7 +17,6 @@ func childLimitsFixture(t *testing.T, s *Store, children int) time.Time {
 	now := s.now()
 	for _, team := range []string{"a"} {
 		s.testOnlyExec(t, `INSERT INTO teams(name,created_at,updated_at) VALUES (?,1,1) ON CONFLICT(name) DO NOTHING`, team)
-		s.testOnlyExec(t, `INSERT INTO team_counters(team) VALUES (?) ON CONFLICT(team) DO NOTHING`, team)
 	}
 	s.testOnlyExec(t, `DELETE FROM runs WHERE team='a'`)
 	insert := func(id, parent, root string) {

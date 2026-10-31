@@ -139,7 +139,7 @@ func FuzzStorageStandingTenantInventory(f *testing.F) {
 		if err := tenant.RecordSegments(t.Context(), commit); err != nil {
 			t.Fatal(err)
 		}
-		rewriteSchemaExec(t, s.db, "INSERT INTO team_storage(team,store,used_bytes,reserved_bytes,updated_at) VALUES ('a','cache',999999,999999,1),('b','logs',999999,999999,1)")
+		rewriteSchemaExec(t, s.db, "INSERT INTO team_storage(team,store,storage_charged_through,updated_at) VALUES ('a','cache',999999,1),('b','logs',999999,1)")
 		rewriteSchemaExec(t, s.db, "INSERT INTO storage_month_usage(team,period,bytes,objects,updated_at) VALUES ('a','1969-12',?,1,1),('b','1969-12',?,1,1)", int64(foreign), int64(own))
 		first, err := tenant.StorageStanding(t.Context())
 		if err != nil || first.BlobBytes != int64(own) || first.LogBytes != int64(own)+1 || first.EventBytes != int64(events) || first.ReservedBlobBytes != 0 {
@@ -159,7 +159,7 @@ func FuzzStorageStandingTenantInventory(f *testing.F) {
 			t.Fatalf("reopened inventory=%+v, want %+v: %v", reopened, first, err)
 		}
 		var raw, usage int64
-		err = errors.Join(s.db.QueryRow("SELECT used_bytes FROM team_storage WHERE team='a' AND store='cache'").Scan(&raw), s.db.QueryRow("SELECT bytes FROM storage_month_usage WHERE team='a' AND period='1969-12'").Scan(&usage))
+		err = errors.Join(s.db.QueryRow("SELECT storage_charged_through FROM team_storage WHERE team='a' AND store='cache'").Scan(&raw), s.db.QueryRow("SELECT bytes FROM storage_month_usage WHERE team='a' AND period='1969-12'").Scan(&usage))
 		if err != nil || raw != 999999 || usage != int64(foreign) {
 			t.Fatalf("report changed accounting: raw=%d usage=%d: %v", raw, usage, err)
 		}

@@ -4,7 +4,6 @@ import type { CapacityProfile, CapacityRankSelection } from "./api";
 import {
   chargeBasisLabel,
   mismatchNote,
-  pinDriftFlag,
   rankLabel,
   sortProfiles,
 } from "./capacity";
@@ -136,18 +135,4 @@ describe("labels", () => {
     assert.equal(chargeBasisLabel("unknown_basis"), "unknown_basis");
   });
 
-  it("flags a pin only when one is set, and says which way it drifted", () => {
-    assert.equal(pinDriftFlag(profile({})), "");
-    assert.equal(pinDriftFlag(profile({ pinned_cores: 4 })), "pinned");
-    assert.equal(
-      pinDriftFlag(profile({ pinned_cores: 4, drift_class: "over_pinned" })),
-      "pin high",
-    );
-    assert.equal(
-      pinDriftFlag(
-        profile({ pinned_memory_bytes: 1024, drift_class: "under_pinned" }),
-      ),
-      "pin low",
-    );
-  });
 });

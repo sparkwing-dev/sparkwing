@@ -194,7 +194,7 @@ func TestTransitionApplicationRetryKeepsClaimAndOrdinal(t *testing.T) {
 	if err := json.Unmarshal(events[0].Payload, &retry); err != nil || retry.Attempt != applied.Attempt || retry.Reason != "verify" {
 		t.Fatalf("retry event lost next attempt or failure: %s, %v", events[0].Payload, err)
 	}
-	rewriteSchemaExec(t, tenant.s.db, `UPDATE capabilities SET revoked_at=1,revocation_generation=revocation_generation+1 WHERE prefix='claim'`)
+	rewriteSchemaExec(t, tenant.s.db, `UPDATE capabilities SET revoked_at=1 WHERE prefix='claim'`)
 	if _, err = tenant.TransitionNode(ctx, result); err == nil {
 		t.Fatal("revoked authority replayed result")
 	}

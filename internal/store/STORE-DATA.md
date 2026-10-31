@@ -9,6 +9,26 @@ counter domains, boolean flags, and nonempty concurrency keys. Installations
 are referenced with their tenant. Job receipts reference the exact attempt and
 generation. Sessions, memberships and identities reference an existing account.
 The schema counterexample suites exercise these rules against either dialect.
+The baseline version is 28. Both dialects are translated from `schema.sql`.
+Stores at another version require a backup and recreation. This baseline has
+no forward migration.
+
+Payment-event grants require a team so the composite grant foreign key applies.
+Standing requests carry neither decider nor decision time while open, and both
+when approved or declined. Team deletion is done exactly when it has a finish
+time. Billing award generations are positive, and every credit grant has a
+nonempty reference.
+
+Sessions and capabilities use their live credential and ancestry records for
+authority. Unused generation columns and the insert-only `team_counters` table
+are removed. Node retries and approvals use their execution specification and
+approval records. GitHub subscriptions retain their active event filters.
+`team_storage` keeps the billing cursor and update time. Retained inventory and
+quota reservations own byte accounting.
+
+Capacity profiles retain measured samples and predecessor estimates. Stored
+pins, queue-wait samples, contention counters and demand floors are removed
+because production never supplied those observations.
 
 Step lifecycle timestamps use the store clock. Runner-reported start and finish
 times remain in `source_started_at` and `source_finished_at` for display, with
@@ -242,7 +262,9 @@ nothing, and conflicting provenance or pricing fails.
 `startBillableIntervalTx` and `finishBillableIntervalTx` delimit compute. An
 executing claimant opens at award. A launcher reservation opens when execution
 starts. Pauses close the current interval, and resuming uses a fresh interval
-key. Customer-runner waits therefore have no interval. Application retries keep
+key. A partial unique index on `(team, reservation_id)` permits one open
+interval per award. The award-locked overlap check also prevents historical
+overlap. Customer-runner waits therefore have no interval. Application retries keep
 the reservation and use separate interval keys.
 
 `chargeBillingAwardTx` charges new elapsed compute during renewal without

@@ -53,7 +53,6 @@ func intakeFixture(t *testing.T, stores ...*Store) (*Tenant, IntakeRequest, *tim
 	} else {
 		s = stores[0]
 		rewriteSchemaExec(t, s.db, "INSERT INTO teams(name,created_at,updated_at) VALUES ('a',1,1),('b',1,1)")
-		rewriteSchemaExec(t, s.db, "INSERT INTO team_counters(team) VALUES ('a'),('b')")
 	}
 	now := time.Unix(1700000000, 0).UTC()
 	s.clock = func() time.Time { return now }

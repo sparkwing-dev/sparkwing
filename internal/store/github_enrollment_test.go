@@ -286,7 +286,7 @@ func TestGitHubEnrollmentAndIssuanceLimitsSerialize(t *testing.T) {
 
 func TestGitHubEnrollmentLimitsIgnoreFundingAndExemptDefaultTeam(t *testing.T) {
 	tenant, a := credentialMaintenanceFixture(t)
-	rewriteSchemaExec(t, tenant.s.db, `INSERT INTO credit_grants(id,team,kind,amount_micro,created_at) VALUES ('fund','a','paid',1000000,1)`)
+	rewriteSchemaExec(t, tenant.s.db, `INSERT INTO credit_grants(reference,id,team,kind,amount_micro,created_at) VALUES ('fund','fund','a','paid',1000000,1)`)
 	rewriteSchemaExec(t, tenant.s.db, `INSERT INTO teams(name,created_at,updated_at) VALUES (?,1,1)`, DefaultTeam)
 	operator := &Tenant{s: tenant.s, team: DefaultTeam}
 	owner := authorityMember(t, tenant.s, "operator-owner", RoleOwner, DefaultTeam)

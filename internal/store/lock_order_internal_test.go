@@ -58,7 +58,6 @@ func TestConcurrencyFirstArrivalLocksEntryBeforeHolders(t *testing.T) {
 func TestAuthorityAndUnitAcquisitionsFollowCanonicalLockOrder(t *testing.T) {
 	s, recorder := newRecordingStore(t)
 	rewriteSchemaExec(t, s.db, `INSERT INTO teams(name,created_at,updated_at) VALUES ('a',1,1)`)
-	rewriteSchemaExec(t, s.db, `INSERT INTO team_counters(team) VALUES ('a')`)
 	s, _ = unitClaimFixtureStore(t, s)
 	member := authorityMember(t, s, "member", RoleOwner)
 	parent := authorityRoot("parent", "a")

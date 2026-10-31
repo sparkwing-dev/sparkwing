@@ -80,14 +80,6 @@ func (s *Server) deliverProfileFold(ctx context.Context, tenant *store.Tenant, d
 	if err != nil {
 		return err
 	}
-	applied, err := tenant.ApplyProfileFold(ctx, delivery, observations)
-	if err != nil {
-		return err
-	}
-	if applied {
-		for node := range observations {
-			s.emitNodeDrift(ctx, tenant, run, node)
-		}
-	}
-	return nil
+	_, err = tenant.ApplyProfileFold(ctx, delivery, observations)
+	return err
 }

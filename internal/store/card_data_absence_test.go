@@ -27,7 +27,6 @@ func TestNoCardDetailsAreStoredFromSetupThroughPurge(t *testing.T) {
 	const deployment, owner = "dep-cards", "owner-sentinel@example.test"
 	for _, query := range []string{
 		`INSERT INTO teams(name,created_at,updated_at,billing_trust,billing_trust_at,billing_trust_by,billing_trust_reason) VALUES ('a',1,1,'granted',1,'operator','customer')`,
-		`INSERT INTO team_counters(team) VALUES ('a')`,
 		`INSERT INTO accounts(id,email,email_verified,created_at,updated_at) VALUES ('acct','` + owner + `',1,1,1)`,
 		`INSERT INTO memberships(team,account_id,role,created_at) VALUES ('a','acct','owner',1)`,
 		`INSERT INTO payment_correlations(payment_mode,provider_id,kind,team,customer_id) VALUES ('test','cs_setup','setup_session','a','cus_cards')`,
