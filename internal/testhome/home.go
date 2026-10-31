@@ -7,11 +7,15 @@ import (
 	"testing"
 )
 
-// TempDir creates a private directory without the test name in its path, so
-// Unix sockets fit within sun_path. It is removed when the test ends.
+// TempDir creates a private directory under /tmp on Unix, so sockets fit within
+// sun_path even with a long TMPDIR. It is removed when the test ends.
 func TempDir(t testing.TB) string {
 	t.Helper()
-	dir, err := os.MkdirTemp("", "sw")
+	base := ""
+	if runtime.GOOS != "windows" {
+		base = "/tmp"
+	}
+	dir, err := os.MkdirTemp(base, "sw")
 	if err != nil {
 		t.Fatal(err)
 	}
