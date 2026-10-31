@@ -192,8 +192,7 @@ func (t *Tenant) GetSecretRow(name, repo, pipeline string) (*Secret, error) {
 // SetSignUpLimits replaces the thresholds. It leaves the mode and its
 // provenance alone.
 func (s *Store) SetSignUpLimits(ctx context.Context, limits SignUpLimits) (SignUpGate, error) {
-	if limits.HourlyLimit < 0 || limits.DailyLimit < 0 || limits.HourlyWarn < 0 || limits.GitHubMinAccountDays < 0 ||
-		limits.FreeTeamMembers < 0 {
+	if limits.HourlyLimit < 0 || limits.DailyLimit < 0 || limits.HourlyWarn < 0 || limits.GitHubMinAccountDays < 0 {
 		return SignUpGate{}, fmt.Errorf("%w: sign-up limits are zero or more", ErrInvalidInput)
 	}
 	return s.updateSignUpGate(ctx, func(tx *storeTx, g *SignUpGate) error {

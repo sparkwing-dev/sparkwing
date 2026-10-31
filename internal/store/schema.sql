@@ -871,8 +871,7 @@ CREATE TABLE signup_gate (
     hourly_limit BIGINT NOT NULL,
     daily_limit BIGINT NOT NULL,
     hourly_warn BIGINT NOT NULL,
-    github_min_account_days BIGINT NOT NULL,
-    free_team_members BIGINT NOT NULL
+    github_min_account_days BIGINT NOT NULL
 );
 
 CREATE TABLE signup_admissions (

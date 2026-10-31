@@ -98,3 +98,16 @@ and `components.schemas.internal.controllerwire.SizingMeasurements` remove
 `wait_p50_ns`, `wait_p99_ns`, `wait_sample_count` and `contended_count`.
 `components.schemas.internal.controllerwire.SizingDetail` removes `drift`.
 Remove dependencies on these fields before upgrading.
+
+## Teams have no member cap
+
+Team membership is unlimited for free, funded and payment-held teams. Remove
+`free_team_members` from operator signup requests and response handling. The
+invitation creation response drops `warning`, and acceptance no longer returns
+`team_full`. Keep handling `invitation_not_found` and `invitation_closed`.
+The inviter must still hold team administration, and the accepting account
+must own the invited address.
+
+The unreleased schema baseline remains 28 and removes
+`signup_gate.free_team_members`. Recreate pre-release stores with the updated
+baseline using the instructions above.

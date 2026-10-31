@@ -72,6 +72,8 @@ unlock.
 
 ### Removed
 
+- **teams + controller (Breaking):** Teams have no member cap
+  Remove `free_team_members` from operator signup settings, invitation `warning` handling and the `team_full` refusal reason. The unreleased schema baseline 28 drops the setting column. See the [migration guide](docs/migrations/_unreleased.md#teams-have-no-member-cap).
 - **teams (Breaking):** Accounts can create teams without a lifetime creation cap
   Deleting or leaving a team does not reduce future team-creation access.
 - **daemon (Breaking):** Removed the version-aware takeover ladder

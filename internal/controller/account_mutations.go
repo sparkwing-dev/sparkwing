@@ -47,7 +47,7 @@ func accountMutationError(err error) error {
 		return &apierr.Error{Code: apierr.Conflict, Message: "account resource already exists"}
 	case errors.Is(err, store.ErrInvitationLimit):
 		return &apierr.Error{Code: apierr.RateLimited, Message: err.Error()}
-	case errors.Is(err, store.ErrTeamFull), errors.Is(err, store.ErrBindingLimit):
+	case errors.Is(err, store.ErrBindingLimit):
 		return apierr.Authorization(apierr.ReasonMissingGrant, err.Error())
 	case errors.Is(err, store.ErrLastOwner), errors.Is(err, store.ErrRoleAboveOwn), errors.Is(err, store.ErrWaitlisted):
 		return apierr.Authorization(apierr.ReasonMissingGrant, "account change refused")

@@ -350,14 +350,8 @@ account's last sign-in that verifies an address, or that sign-in's provider
 reporting another address, stops the account seeing or accepting invitations
 to it.
 
-The free team member cap is checked when an invitation is accepted. Open
-invitations do not reserve member slots. Creating or replaying an invitation
-at capacity still returns HTTP 201 with a `warning` naming the configured
-member limit, current count and remedy. The console shows that warning.
-Acceptance at capacity returns HTTP 403 with reason `team_full` and the same
-limit and remedy: ask a team owner to add funds to lift the free limit or
-remove a member, or contact support@sparkwing.dev for help. Raising the limit
-or freeing a slot lets the same open invitation be accepted.
+Teams can have any number of members, regardless of their funding or payment
+holds. Invitation creation and acceptance do not depend on member count.
 
 `GET /api/v1/team/settings` returns `members_can_add_machines`,
 `claim_ranking`, `max_children_per_root` and `high_trust` under `runs.read`. `PUT /api/v1/team/settings` requires
@@ -899,8 +893,8 @@ account or provider detail: `expired`, `cancelled`, `email_unverified`,
 `account_exists`, `no_team`, `reauth_required`, `direct_sign_in_required`,
 `identity_linked_elsewhere`, `identity_already_linked`,
 `provider_already_linked`, `rate_limited`, `unavailable` or `failed`. A refused
-invitation acceptance carries `invitation_not_found`, `invitation_closed` or
-`team_full` in `error.details.reason`. The store finds an invitation only through
+invitation acceptance carries `invitation_not_found` or `invitation_closed`
+in `error.details.reason`. The store finds an invitation only through
 an address the account owns, so a missing invitation and one sent elsewhere get
 the same `invitation_not_found` answer; expiry and use are reported only for the
 caller's own invitation. Linking a provider does not grant repository

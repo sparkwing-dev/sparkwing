@@ -208,8 +208,6 @@ type Invitation struct {
 	InvitedBy       string
 	CreatedAt       time.Time
 	ExpiresAt       time.Time
-	// Warning explains a member limit that would refuse acceptance.
-	Warning string
 }
 
 // SignInProfile is what an identity provider asserted about the person who
@@ -791,8 +789,8 @@ func (op *Operator) acceptAccountInvitationTx(ctx context.Context, tx *storeTx, 
 	if err != nil {
 		return none, err
 	}
-	// safety: the gate row is locked before the member count and the admission
-	// count are read, so concurrent acceptances cannot both slip under a limit.
+	// safety: serialize admission counts so waitlisted acceptances cannot
+	// race past the sign-up velocity limit.
 	gate, err := lockSignUpGateTx(ctx, tx)
 	if err != nil {
 		return none, err
@@ -802,9 +800,6 @@ func (op *Operator) acceptAccountInvitationTx(ctx context.Context, tx *storeTx, 
 		return none, ErrInvitationClosed
 	}
 	at := now.UTC().UnixNano()
-	if err := checkTeamRoomTx(ctx, tx, Team(team), gate.Limits.FreeTeamMembers); err != nil {
-		return none, err
-	}
 	var inviterRole Role
 	if err := tx.QueryRowContext(ctx, `SELECT role FROM memberships WHERE team=? AND account_id=?`, team, inviter).Scan(&inviterRole); errors.Is(err, sql.ErrNoRows) {
 		return none, ErrInvitationClosed
@@ -848,42 +843,6 @@ func (op *Operator) acceptAccountInvitationTx(ctx context.Context, tx *storeTx, 
 		return none, err
 	}
 	return out, nil
-}
-
-// safety: a team that has bought credits pays for what its members run, so
-// only a team without them is held to the free member limit; members it
-// already has are never removed.
-func checkTeamRoomTx(ctx context.Context, tx *storeTx, team Team, limit int) error {
-	if limit <= 0 {
-		return nil
-	}
-	mode, err := creditPaymentMode(ctx, tx)
-	if err != nil {
-		return err
-	}
-	var members int
-	var paid int64
-	if err := tx.QueryRowContext(ctx, `
-		SELECT (SELECT COUNT(*) FROM memberships WHERE team = ?),
-		       COALESCE((SELECT SUM(amount_micro) FROM credit_grants WHERE team = ? AND payment_mode = ? AND (kind = ? OR (kind = ? AND reverses_kind = 'paid'))), 0)`,
-		string(team), string(team), mode, CreditGrantPaid, creditGrantReversal).Scan(&members, &paid); err != nil {
-		return err
-	}
-	if members < limit {
-		return nil
-	}
-	// safety: a team held over a disputed payment is held to the free member
-	// limit, because the payment that lifted it may be taken back.
-	if paid > 0 {
-		freeze, err := teamCreditFreezeTx(ctx, tx, team)
-		if err != nil {
-			return err
-		}
-		if !freeze.Frozen {
-			return nil
-		}
-	}
-	return fmt.Errorf("%w: %d of %d members; ask a team owner to add funds to lift the free limit or remove a member, or contact support@sparkwing.dev for help", ErrTeamFull, members, limit)
 }
 
 // CreateAccountSession opens a session for a current team member.

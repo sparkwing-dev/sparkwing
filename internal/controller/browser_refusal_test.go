@@ -2,6 +2,7 @@ package controller_test
 
 import (
 	"encoding/json"
+	"fmt"
 	"html"
 	"net/http"
 	"net/url"
@@ -43,40 +44,26 @@ func TestRefusedSignInReturnsToTheSignInPageWithAReason(t *testing.T) {
 	}
 }
 
-func TestInvitationAtMemberCapacityWarnsAndAcceptanceExplainsRemedy(t *testing.T) {
+func TestInvitationAcceptanceHasNoMemberCap(t *testing.T) {
 	f := newIdentityFixture(t)
 	owner, _, _ := teamOf(f)
-	limit := 3
-	if code := f.call("PUT", "/api/v1/operator/signups", "Bearer "+f.admin, map[string]int{"free_team_members": limit}, nil); code != http.StatusOK {
-		t.Fatalf("set member cap = %d", code)
-	}
-	guest := f.user("g", "guest@example.com")
-	var invitation struct{ ID, Warning string }
-	if code := f.call("POST", "/api/v1/team/invitations", owner.auth, map[string]string{"email": "guest@example.com", "role": "reader"}, &invitation); code != http.StatusCreated {
-		t.Fatalf("invite at capacity = %d", code)
-	}
-	var refusal struct {
-		Error struct {
-			Message string
-			Details struct{ Reason string }
+	for i := range 10 {
+		email := fmt.Sprintf("guest%d@example.com", i)
+		guest := f.user(fmt.Sprintf("g%d", i), email)
+		var invitation map[string]json.RawMessage
+		if code := f.call("POST", "/api/v1/team/invitations", owner.auth, map[string]string{"email": email, "role": "reader"}, &invitation); code != http.StatusCreated {
+			t.Fatalf("invite member %d = %d", i+4, code)
 		}
-	}
-	if code := f.call("POST", "/api/v1/invitations/"+invitation.ID+"/accept", guest.auth, nil, &refusal); code != http.StatusForbidden || refusal.Error.Details.Reason != "team_full" {
-		t.Fatalf("accept at capacity = %d %+v", code, refusal)
-	}
-	for _, message := range []string{invitation.Warning, refusal.Error.Message} {
-		for _, want := range []string{"free team member limit", "3 of 3 members", "add funds", "remove a member", "support@sparkwing.dev"} {
-			if !strings.Contains(message, want) {
-				t.Errorf("member limit message lacks %q: %q", want, message)
-			}
+		if len(invitation) != 3 || invitation["accept_url"] == nil || invitation["email_sent"] == nil {
+			t.Fatalf("invitation response = %v", invitation)
 		}
-	}
-	limit = 4
-	if code := f.call("PUT", "/api/v1/operator/signups", "Bearer "+f.admin, map[string]int{"free_team_members": limit}, nil); code != http.StatusOK {
-		t.Fatalf("set member cap = %d", code)
-	}
-	if code := f.call("POST", "/api/v1/invitations/"+invitation.ID+"/accept", guest.auth, nil, nil); code != http.StatusNoContent {
-		t.Fatalf("accept after raising cap = %d", code)
+		var id string
+		if err := json.Unmarshal(invitation["id"], &id); err != nil {
+			t.Fatal(err)
+		}
+		if code := f.call("POST", "/api/v1/invitations/"+id+"/accept", guest.auth, nil, nil); code != http.StatusNoContent {
+			t.Fatalf("accept member %d = %d", i+4, code)
+		}
 	}
 }
 

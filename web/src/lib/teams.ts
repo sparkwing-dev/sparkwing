@@ -239,7 +239,6 @@ export interface CreatedInvitation {
   // False when the controller mailed nothing: no mail service, or the
   // address reached its daily limit. The link still works either way.
   email_sent?: boolean;
-  warning?: string;
 }
 
 export type TokenFamily = "member" | "machine";
@@ -358,7 +357,6 @@ export async function revokeInvitation(id: string): Promise<void> {
   );
 }
 
-// Fixed refusals add recovery advice; member limits retain the controller's configured counts.
 export const invitationRefusalText: Record<string, string> = {
   invitation_closed:
     "This invitation has expired or was already used. Ask a team owner to send a new one.",

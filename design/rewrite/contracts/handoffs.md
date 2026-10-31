@@ -1256,3 +1256,17 @@ and host-classification decision, including its personal enrollment follow-on.
 - The final production wipe to schema 28 is approved after v0.68.3 is cut and
   the staging grid is clean. This decision authorizes that later operation.
   This change performs no deployment or wipe.
+
+## 2026-10-31 Korey decision 74: teams have no member cap
+
+Teams can have any number of people, regardless of funding or payment holds.
+Remove the free-team member limit, its operator setting and schema column,
+the invitation warning and the `team_full` refusal as a hard cut. Delete the
+fields from API types and console callers together, with no deprecated aliases.
+The unreleased schema baseline stays at 28.
+
+Invitation acceptance still requires the inviter's current team administration
+and the accepting account's ownership of the invited address. Invitation
+expiry, withdrawal, replay and sending limits remain. Waitlisted acceptances
+still count toward signup admission velocity. No deployment is part of this
+decision. The lead owns the separate grid cell R16C19 expectation update.

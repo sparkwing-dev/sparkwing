@@ -79,7 +79,6 @@ type inviteResp struct {
 	ID        string `json:"id"`
 	AcceptURL string `json:"accept_url"`
 	EmailSent bool   `json:"email_sent"`
-	Warning   string `json:"warning,omitempty"`
 }
 
 func (s *Server) handleInvite(w http.ResponseWriter, r *http.Request, a capability.Authorized) error {
@@ -110,7 +109,7 @@ func (s *Server) handleInvite(w http.ResponseWriter, r *http.Request, a capabili
 	noteAuditTarget(r.Context(), "role", string(inv.Role))
 	accept := s.acceptURL(inv.ID)
 	sent := s.mailInvitation(r.Context(), a, inv, accept)
-	writeJSON(w, http.StatusCreated, inviteResp{ID: inv.ID, AcceptURL: accept, EmailSent: sent, Warning: inv.Warning})
+	writeJSON(w, http.StatusCreated, inviteResp{ID: inv.ID, AcceptURL: accept, EmailSent: sent})
 	return nil
 }
 
@@ -218,8 +217,6 @@ func invitationRefusal(err error) error {
 		return reasonedRefusal(apierr.NotFound, invitationNotFound, "this invitation is not for the signed-in account or no longer exists")
 	case errors.Is(err, store.ErrInvitationClosed):
 		return reasonedRefusal(apierr.Conflict, invitationClosed, "this invitation has expired or was already used")
-	case errors.Is(err, store.ErrTeamFull):
-		return reasonedRefusal(apierr.Forbidden, invitationTeamFull, err.Error())
 	}
 	return accountMutationError(err)
 }
@@ -227,7 +224,6 @@ func invitationRefusal(err error) error {
 const (
 	invitationClosed   = "invitation_closed"
 	invitationNotFound = "invitation_not_found"
-	invitationTeamFull = "team_full"
 )
 
 const maxRunnerRepos = 32

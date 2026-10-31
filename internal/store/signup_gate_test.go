@@ -456,40 +456,26 @@ func TestWaitlistedInvitationAcceptsCountAsAdmissions(t *testing.T) {
 		store.WaitlistReasonHourly)
 }
 
-// A team nobody has paid for holds at most the member limit; the members it
-// already has stay, and a purchase or an operator's higher limit lifts it.
-func TestAFreeTeamHoldsAtMostTheMemberLimit(t *testing.T) {
-	ctx := context.Background()
-	st := storetest.Open(t)
-	setLimits(t, st, store.SignUpLimits{FreeTeamMembers: 3})
-	owner := signIn(t, st, "o", "o@example.com")
-	join := func(sub, email string) error {
-		acct := signIn(t, st, sub, email)
-		_, err := st.AsOperator().AcceptAccountInvitation(context.Background(), storetest.AccountAuthority(t, st, acct.Account.ID), invite(t, st, owner, email).ID)
-		return err
-	}
-	for i := range 2 {
-		if err := join(fmt.Sprintf("j%d", i), fmt.Sprintf("j%d@example.com", i)); err != nil {
-			t.Fatal(err)
-		}
-	}
-	if err := join("full", "full@example.com"); !errors.Is(err, store.ErrTeamFull) {
-		t.Fatalf("the fourth member of a free team = %v, want ErrTeamFull", err)
-	}
-	setLimits(t, st, store.SignUpLimits{FreeTeamMembers: 4})
-	if err := join("raised", "raised@example.com"); err != nil {
-		t.Fatalf("a member under the raised limit = %v", err)
-	}
-	if err := join("full2", "full2@example.com"); !errors.Is(err, store.ErrTeamFull) {
-		t.Fatalf("the fifth member = %v, want ErrTeamFull", err)
-	}
-	if _, err := tenant(t, st, owner.Account.ActiveTeam).TestOnlySettlePaidCredit(ctx, store.CreditGrantRequest{Kind: store.CreditGrantPaid, AmountMicro: 10 * store.MicroCreditsPerCredit, Reference: "pi_team", CreatedBy: "billing"}); err != nil {
-		t.Fatal(err)
-	}
-	if err := join("paid", "paid@example.com"); err != nil {
-		t.Fatalf("a member of a team that bought credits = %v", err)
-	}
-	if inv := invite(t, st, owner, "pending@example.com"); inv.Warning != "" {
-		t.Fatalf("paid team invitation warns about the free cap: %s", inv.Warning)
+func TestTeamMembershipHasNoCap(t *testing.T) {
+	for _, funded := range []bool{false, true} {
+		t.Run(fmt.Sprintf("funded=%t", funded), func(t *testing.T) {
+			st := storetest.Open(t)
+			owner := signIn(t, st, "o", "o@example.com")
+			if funded {
+				fund(t, tenant(t, st, owner.Account.ActiveTeam))
+			}
+			for i := range 12 {
+				sub, email := fmt.Sprintf("j%d", i), fmt.Sprintf("j%d@example.com", i)
+				acct := signIn(t, st, sub, email)
+				inv := invite(t, st, owner, email)
+				if _, err := st.AsOperator().AcceptAccountInvitation(t.Context(), storetest.AccountAuthority(t, st, acct.Account.ID), inv.ID); err != nil {
+					t.Fatalf("accept member %d: %v", i+2, err)
+				}
+			}
+			members, err := tenant(t, st, owner.Account.ActiveTeam).Members(t.Context())
+			if err != nil || len(members) != 13 {
+				t.Fatalf("members=%d: %v", len(members), err)
+			}
+		})
 	}
 }

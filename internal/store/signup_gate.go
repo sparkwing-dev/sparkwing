@@ -58,7 +58,6 @@ const (
 	DefaultSignUpDailyLimit     = 500
 	DefaultSignUpHourlyWarn     = 20
 	DefaultGitHubMinAccountDays = 7
-	defaultFreeTeamMembers      = 10
 )
 
 // SignUpLimits are the operator's thresholds. A zero limit turns that check
@@ -75,10 +74,6 @@ type SignUpLimits struct {
 	// GitHubMinAccountDays is the youngest GitHub account, in days, that a
 	// sign-up admits; a younger one is waitlisted.
 	GitHubMinAccountDays int
-	// FreeTeamMembers is the most members a team that has bought no credits
-	// may hold. An invitation past it is refused; members a team already
-	// holds are never removed.
-	FreeTeamMembers int
 }
 
 // DefaultSignUpLimits are the limits of a deployment nobody has tuned.
@@ -86,7 +81,6 @@ func DefaultSignUpLimits() SignUpLimits {
 	return SignUpLimits{
 		HourlyLimit: DefaultSignUpHourlyLimit, DailyLimit: DefaultSignUpDailyLimit,
 		HourlyWarn: DefaultSignUpHourlyWarn, GitHubMinAccountDays: DefaultGitHubMinAccountDays,
-		FreeTeamMembers: defaultFreeTeamMembers,
 	}
 }
 
@@ -134,10 +128,6 @@ type WaitlistedAccount struct {
 // ErrWaitlisted refuses what a waitlisted account may not do yet.
 var ErrWaitlisted = errors.New("store: this account is on the sign-up waitlist")
 
-// ErrTeamFull refuses a member past the limit of a team that has bought no
-// credits.
-var ErrTeamFull = errors.New("store: free team member limit reached")
-
 // safety: the gate row is seeded here, so every sign-up's SELECT ... FOR UPDATE
 // locks a row that exists; two first sign-ups racing to create it would
 // otherwise both count past a limit.
@@ -145,15 +135,15 @@ func seedSignUpGateTx(ctx context.Context, tx *storeTx) error {
 	d := DefaultSignUpLimits()
 	_, err := tx.execContext(ctx, `
 		INSERT INTO signup_gate (id, mode, source, reason, set_by, updated_at,
-			hourly_limit, daily_limit, hourly_warn, github_min_account_days, free_team_members)
-		VALUES (1, 'open', 'default', '', '', 0, ?, ?, ?, ?, ?)
+			hourly_limit, daily_limit, hourly_warn, github_min_account_days)
+		VALUES (1, 'open', 'default', '', '', 0, ?, ?, ?, ?)
 		ON CONFLICT (id) DO NOTHING`,
-		d.HourlyLimit, d.DailyLimit, d.HourlyWarn, d.GitHubMinAccountDays, d.FreeTeamMembers)
+		d.HourlyLimit, d.DailyLimit, d.HourlyWarn, d.GitHubMinAccountDays)
 	return err
 }
 
 const signUpGateSelect = `SELECT mode, source, reason, set_by, updated_at,
-	hourly_limit, daily_limit, hourly_warn, github_min_account_days, free_team_members FROM signup_gate WHERE id = 1`
+	hourly_limit, daily_limit, hourly_warn, github_min_account_days FROM signup_gate WHERE id = 1`
 
 // safety: the migration seeds the row; one missing anyway reads as open with
 // the default limits, because nobody has had a reason to close it.
@@ -162,8 +152,7 @@ func scanSignUpGate(row rowScanner) (SignUpGate, error) {
 	var mode string
 	var updated int64
 	err := row.Scan(&mode, &g.Source, &g.Reason, &g.SetBy, &updated,
-		&g.Limits.HourlyLimit, &g.Limits.DailyLimit, &g.Limits.HourlyWarn, &g.Limits.GitHubMinAccountDays,
-		&g.Limits.FreeTeamMembers)
+		&g.Limits.HourlyLimit, &g.Limits.DailyLimit, &g.Limits.HourlyWarn, &g.Limits.GitHubMinAccountDays)
 	if errors.Is(err, sql.ErrNoRows) {
 		return SignUpGate{Mode: SignUpOpen, Source: "default", UpdatedAt: time.Unix(0, 0).UTC(), Limits: DefaultSignUpLimits()}, nil
 	}
@@ -183,16 +172,14 @@ func (o *Operator) SignUpGate(ctx context.Context) (SignUpGate, error) {
 func writeSignUpGateTx(ctx context.Context, tx *storeTx, g SignUpGate) error {
 	_, err := tx.execContext(ctx, `
 		INSERT INTO signup_gate (id, mode, source, reason, set_by, updated_at,
-			hourly_limit, daily_limit, hourly_warn, github_min_account_days, free_team_members)
-		VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			hourly_limit, daily_limit, hourly_warn, github_min_account_days)
+		VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT (id) DO UPDATE SET mode = excluded.mode, source = excluded.source,
 			reason = excluded.reason, set_by = excluded.set_by, updated_at = excluded.updated_at,
 			hourly_limit = excluded.hourly_limit, daily_limit = excluded.daily_limit,
-			hourly_warn = excluded.hourly_warn, github_min_account_days = excluded.github_min_account_days,
-			free_team_members = excluded.free_team_members`,
+			hourly_warn = excluded.hourly_warn, github_min_account_days = excluded.github_min_account_days`,
 		string(g.Mode), g.Source, g.Reason, g.SetBy, g.UpdatedAt.UnixNano(),
-		g.Limits.HourlyLimit, g.Limits.DailyLimit, g.Limits.HourlyWarn, g.Limits.GitHubMinAccountDays,
-		g.Limits.FreeTeamMembers)
+		g.Limits.HourlyLimit, g.Limits.DailyLimit, g.Limits.HourlyWarn, g.Limits.GitHubMinAccountDays)
 	return err
 }
 
@@ -419,10 +406,9 @@ type SignUpSettingsChange struct {
 	DailyLimit           *int    `json:"daily_limit"`
 	HourlyWarn           *int    `json:"hourly_warn"`
 	GitHubMinAccountDays *int    `json:"github_min_account_days"`
-	FreeTeamMembers      *int    `json:"free_team_members"`
 }
 
 // LimitsChanged reports whether a sign-up threshold was supplied.
 func (req SignUpSettingsChange) LimitsChanged() bool {
-	return req.HourlyLimit != nil || req.DailyLimit != nil || req.HourlyWarn != nil || req.GitHubMinAccountDays != nil || req.FreeTeamMembers != nil
+	return req.HourlyLimit != nil || req.DailyLimit != nil || req.HourlyWarn != nil || req.GitHubMinAccountDays != nil
 }
