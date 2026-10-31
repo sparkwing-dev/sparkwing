@@ -121,7 +121,12 @@ verified-default-branch memo, artifacts and dependency caches, never write share
 records, and never fetch executable pipeline binaries.
 
 Logs use a separate signed segment path and controller-proxied reads. Tagged
-subjects distinguish job attempts from trigger, plan and eval units.
+subjects distinguish job attempts from trigger, plan and eval units. Application
+retries keep their claim and give each attempt its own log stream. A finished
+attempt's writer can upload its tail during that attempt's seal grace, including
+after the next attempt starts or seals. The controller checks the submitted
+attempt's stored team, job, claim generation, holder and credential. Each attempt
+must seal successfully before a finished run's aggregate logs are complete.
 
 Cloud source initialization downloads the run's sealed source bundle before
 exchanging its bootstrap. The bootstrap's `source.read` grant permits only that

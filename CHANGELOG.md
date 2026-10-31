@@ -41,6 +41,8 @@ unlock.
 
 ### Fixed
 
+- **logs:** Retried jobs accept each attempt's final log uploads after the next attempt starts or seals
+  The controller checks the named attempt's original writer and seal grace. Finished runs report complete aggregate logs once every stream seals successfully.
 - **logs:** Finished Cloud runs complete aggregate log reads after bootstrap owner requeues
   Owner streams register when the runner exchanges its bootstrap credential. Awards that never reached a log writer no longer leave unsealed streams. Missing final seals from actual writers still report incomplete logs.
 - **TypeScript SDK:** Imports inside jobs retain CommonJS and ESM exports from symlinked packages
