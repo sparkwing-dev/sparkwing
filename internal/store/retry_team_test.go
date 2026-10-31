@@ -44,7 +44,7 @@ func TestManualRetryPreservesOnlyItsTeamsSealedSourceProperty(t *testing.T) {
 		request.Git.SHA = fmt.Sprintf("%040x", random.Uint64())
 		request.RequestedArgs = map[string]string{"message": fmt.Sprintf("secret-%x", random.Uint64())}
 		request.SecretArgs = runspec.Optional[[]string]{Set: true, Value: []string{"message"}}
-		source, err := own.AdmitRun(t.Context(), store.IntakeRequest{Authority: plan.Seal.Request.AuthorityRef, Request: request})
+		source, err := own.AdmitRun(t.Context(), store.IntakeRequest{Authority: plan.Seal.Request.AuthorityRef, Request: request, FetchedRepository: store.FetchedRepository{ID: 1, Name: "acme/repo"}})
 		if err != nil {
 			t.Fatal(err)
 		}

@@ -192,7 +192,7 @@ func TestCloudWorkingTreeTriggerRunsPlanEvalAndJobsOnTheLauncher(t *testing.T) {
 	}
 }
 
-func TestCloudTriggerWithRunnerSelectorStaysOnTheRunner(t *testing.T) {
+func TestCloudRunnerSelectedUploadDoesNotBypassRepositoryProof(t *testing.T) {
 	if testing.Short() {
 		t.Skip("slow: 3.5s measured in the short class; the full suite runs it")
 	}
@@ -210,8 +210,8 @@ func TestCloudTriggerWithRunnerSelectorStaysOnTheRunner(t *testing.T) {
 	}
 	raw := cloudDispatchMachine(t, f, "builder")
 	owner, err := f.open(raw, false).Claim(t.Context(), controllerwire.ClaimRequest{RunnerVersion: installedVersion(), Kinds: []capability.UnitKind{capability.UnitTrigger}, OS: "linux", Arch: "amd64"})
-	if err != nil || owner.Claim == nil || owner.Claim.Unit != capability.UnitTrigger || owner.Claim.RunID != created.RunID {
-		t.Fatalf("selected runner did not take the trigger: %+v %v", owner.Claim, err)
+	if err != nil || owner.Claim != nil {
+		t.Fatalf("repository-scoped runner took an unproven upload: %+v %v", owner.Claim, err)
 	}
 }
 
