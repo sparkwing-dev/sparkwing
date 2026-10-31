@@ -187,7 +187,10 @@ func (l *dashboardLogins) serveSession(w http.ResponseWriter, r *http.Request, n
 		case <-ctx.Done():
 		}
 	}()
-	next.ServeHTTP(w, r.WithContext(ctx))
+	request := r.Clone(ctx)
+	// safety: the dashboard bearer proves this peer session, not a controller capability.
+	request.Header.Del("Authorization")
+	next.ServeHTTP(w, request)
 }
 
 // safety: a browser acts as the api.sock peer that minted its link only while it sends that session as a
