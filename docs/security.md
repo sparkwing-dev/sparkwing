@@ -560,10 +560,10 @@ commit those runs already covered on `main`.
 - **govulncheck** in source mode over `./...`, in addition to the
   binary-mode scan the `pre-release` gate runs against every shipped
   executable.
-- **gitleaks** over the available git history. `.gitleaks.toml` allow-lists two
-  exact documentation and test-fixture values, and `.gitleaksignore` names one
-  historical generated-bundle false positive by fingerprint. No path is
-  excluded.
+- **gitleaks** over the available git history. `.gitleaks.toml` pairs exact
+  documentation and fixture values with their paths. `.gitleaksignore` names
+  historical fixture, generated-bundle and QA cache-identifier false positives
+  by exact fingerprint. No path is excluded.
 - **`npm audit`** over the dashboard's production dependencies at the
   `high` threshold. A registry that times out or answers 5xx is retried, and
   fails as its own error rather than as an advisory. A pass is recorded against
