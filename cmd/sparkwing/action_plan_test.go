@@ -10,7 +10,9 @@ import (
 	"errors"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -304,5 +306,56 @@ func TestPlanPreviewUsesJobVocabulary(t *testing.T) {
 	}
 	if _, found := value["nodes"]; found {
 		t.Fatal("plan preview exposed removed nodes field")
+	}
+}
+
+func TestPlanPreviewJSONRetainsNormalizedRunnerLabels(t *testing.T) {
+	dir := t.TempDir()
+	writeSDKFixture(t, dir, `package main
+import (
+ "context"
+ sw "github.com/sparkwing-dev/sparkwing/sparkwing"
+)
+type pipeline struct{ sw.Base }
+func (pipeline) Plan(_ context.Context, p *sw.Plan, _ sw.NoInputs, _ sw.RunContext) error {
+ sw.Job(p,"labels",func(context.Context) error {return nil}).
+  Requires("", " sparkwing-2cpu ", "sparkwing-2cpu", "sparkwing-2cpu").
+  Prefers("", " nearby ", "nearby")
+ sw.Job(p,"unconstrained",func(context.Context) error {return nil})
+ return nil
+}
+func main(){sw.Register("labels",func() sw.Pipeline[sw.NoInputs]{return pipeline{}});sw.Main()}
+`)
+	bin := filepath.Join(dir, "pipeline")
+	build := exec.CommandContext(t.Context(), "go", "-C", dir, "build", "-mod=mod", "-o", bin, ".")
+	if output, err := build.CombinedOutput(); err != nil {
+		t.Fatalf("build SDK fixture: %v\n%s", err, output)
+	}
+	plan, err := planOverProtocol(t.Context(), pipelineentry.Binary(bin), dir, "labels", nil, "plan")
+	if err != nil {
+		t.Fatal(err)
+	}
+	preview, err := previewPlan(plan, "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, err := json.Marshal(preview)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var doc struct {
+		Jobs []struct {
+			Requires []string `json:"requires"`
+			Prefers  []string `json:"prefers"`
+		} `json:"jobs"`
+	}
+	if err := json.Unmarshal(raw, &doc); err != nil {
+		t.Fatal(err)
+	}
+	if len(doc.Jobs) != 2 || !slices.Equal(doc.Jobs[0].Requires, []string{"sparkwing-2cpu"}) || !slices.Equal(doc.Jobs[0].Prefers, []string{"nearby"}) {
+		t.Fatalf("plan JSON lost normalized runner labels: %s", raw)
+	}
+	if len(doc.Jobs[1].Requires) != 0 || len(doc.Jobs[1].Prefers) != 0 {
+		t.Fatalf("unconstrained job gained runner labels: %s", raw)
 	}
 }

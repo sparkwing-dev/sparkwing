@@ -39,6 +39,8 @@ type planPreviewJobDoc struct {
 	OnFailureOf string              `json:"on_failure_of,omitempty"`
 	Decision    string              `json:"decision"`
 	SkipReason  string              `json:"skip_reason,omitempty"`
+	Requires    []string            `json:"requires,omitempty"`
+	Prefers     []string            `json:"prefers,omitempty"`
 	Work        *planPreviewWorkDoc `json:"work,omitempty"`
 }
 
@@ -303,7 +305,7 @@ func previewPlan(p planned, startAt, stopAt string) (planPreviewDoc, error) {
 		return doc, err
 	}
 	for _, n := range p.doc.Jobs {
-		pn := planPreviewJobDoc{ID: n.ID, Deps: n.Needs, IsApproval: n.Approval != nil, OnFailureOf: n.OnFailureOf, Decision: "would_run"}
+		pn := planPreviewJobDoc{ID: n.ID, Deps: n.Needs, IsApproval: n.Approval != nil, OnFailureOf: n.OnFailureOf, Decision: "would_run", Requires: n.Requires, Prefers: n.Prefers}
 		if len(n.Steps) > 0 && n.Approval == nil {
 			pn.Work = &planPreviewWorkDoc{}
 			ranged := rangeSkips(n.Steps, startAt, stopAt)
