@@ -19,6 +19,15 @@ Home shows a short setup guide while fewer than five runs are in its overview
 window. Its empty attention state links to Runs.
 On the runs Activity view, closing a detail pane keeps the run list compact
 until the pane finishes expanding, so row heights stay steady.
+Unstarted runs show `Not started` and their queued creation time, when available,
+across Activity, Overview, summaries and setup. They have no execution duration.
+Pending and queued runs offer Cancel before execution begins. The run header
+wraps its metadata and actions to keep controls reachable on phone screens.
+
+Run submission refusals show an explanation and remedy. A repository access
+refusal links to Team > GitHub to connect or grant the repository. Unknown
+sign-in refusals show a generic explanation with a support link. The login
+page includes a main landmark and readable access-token summary text.
 
 Run `pnpm test` for the dashboard's TypeScript unit suite, `pnpm run lint` for
 ESLint, and `pnpm run build` for the production static export. Run `pnpm run
@@ -31,6 +40,9 @@ both directories before it starts and after it passes, and ESLint ignores
 them. The suite runs
 deterministic API fixtures against OS-assigned loopback ports; it needs no
 controller, hosted secret, or Kubernetes cluster.
+The browser suite checks run control geometry at 375px, cancellation before
+start, repository refusal remedies, and login accessibility with axe against
+the server-rendered page, including its expanded access-token form.
 
 `sparkwing run gate` runs the unit and full ESLint suites in parallel,
 then the production build and browser smoke suite. Install the locked dashboard

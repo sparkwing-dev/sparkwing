@@ -41,6 +41,10 @@ unlock.
 
 ### Fixed
 
+- **console:** Unstarted runs show queued creation time without year-one dates or inflated durations, and pending runs offer Cancel
+- **console:** Run detail metadata and controls wrap on phone screens
+- **console:** Run submission refusals explain repository access and link to Team > GitHub
+- **sign-in:** Unknown refusals show an explanation and support link; login includes a main landmark and readable access-token summary text
 - **logs:** Finished Cloud runs complete aggregate log reads after bootstrap owner requeues
   Owner streams register when the runner exchanges its bootstrap credential. Awards that never reached a log writer no longer leave unsealed streams. Missing final seals from actual writers still report incomplete logs.
 - **TypeScript SDK:** Imports inside jobs retain CommonJS and ESM exports from symlinked packages
