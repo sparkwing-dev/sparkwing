@@ -133,11 +133,11 @@ func runRaceShardsAtHome(ctx context.Context, home, module, pkg string, shardCou
 		}
 	}()
 	binary := filepath.Join(dir, "package.test")
-	if _, err := raceExec(ctx, home, "go", "test", "-c", "-race", "-o", binary, pkg).Dir(module).Env("TMPDIR", dir).Run(); err != nil {
+	if _, err := raceExec(ctx, home, "go", "test", "-c", "-race", "-p", "2", "-o", binary, pkg).Dir(module).Env("GOMAXPROCS", "1").Env("TMPDIR", dir).Run(); err != nil {
 		return fmt.Errorf("compile %s race binary: %w", pkg, err)
 	}
 	packageDir := filepath.Join(module, pkg)
-	listed, err := raceExec(ctx, home, binary, "-test.list", "^(Test|Example|Fuzz)").Dir(packageDir).Env("TMPDIR", dir).Capture()
+	listed, err := raceExec(ctx, home, binary, "-test.list", "^(Test|Example|Fuzz)").Dir(packageDir).Env("GOMAXPROCS", "1").Env("TMPDIR", dir).Capture()
 	if err != nil {
 		return fmt.Errorf("list %s race tests: %w", pkg, err)
 	}

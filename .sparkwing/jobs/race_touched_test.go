@@ -167,6 +167,7 @@ func TestNodehostRaceShardsKeepTheHostsPackageBound(t *testing.T) {
 }
 
 func TestRaceModulesShardsNodehostAfterOrdinaryPackages(t *testing.T) {
+	t.Setenv("GOMAXPROCS", "8")
 	if nodehostRaceShardCount(currentHost()) == 0 {
 		t.Skip("host has capacity for only one package process")
 	}
@@ -181,6 +182,9 @@ func TestOrdinary(t *testing.T) {
 `)
 	writeGoFile(t, filepath.Join(root, "internal", "nodehost", "host_test.go"), `package nodehost
 import ("os"; "runtime"; "testing"; "time")
+func init() {
+	if runtime.GOMAXPROCS(0) != 1 { panic("nodehost startup exceeded one runtime thread") }
+}
 func check(t *testing.T) {
 	if testing.Short() { t.Fatal("nodehost skipped the full class") }
 	if runtime.GOMAXPROCS(0) != 1 { t.Fatal("nodehost exceeded one runtime thread") }
