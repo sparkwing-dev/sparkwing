@@ -422,7 +422,7 @@ func TestLocalHostSnapshotFailuresLogStoreCauseOnce(t *testing.T) {
 			server := New(engine.Store, slog.New(slog.NewJSONHandler(&logs, nil)))
 			ctx, cancel := context.WithCancel(t.Context())
 			defer cancel()
-			wantStatus, wantCause := 500, "invalid character"
+			wantStatus, wantCause, wantLevel := http.StatusInternalServerError, "invalid character", "ERROR"
 			switch stage {
 			case "store":
 				if _, err := teststore.SQL(t, engine.Store).ExecContext(t.Context(), `UPDATE nodes SET execution_json=?`, []byte(`!`)); err != nil {
@@ -430,10 +430,10 @@ func TestLocalHostSnapshotFailuresLogStoreCauseOnce(t *testing.T) {
 				}
 			case "handler_cancel":
 				server.authorization.Bindings = cancelSnapshotBinding{server.authorization.Bindings, cancel}
-				wantCause = "context canceled"
+				wantStatus, wantCause, wantLevel = statusClientClosedRequest, "context canceled", "INFO"
 			case "authentication_cancel":
 				cancel()
-				wantStatus, wantCause = 503, "context canceled"
+				wantStatus, wantCause, wantLevel = statusClientClosedRequest, "context canceled", "INFO"
 			}
 			r := httptest.NewRequest(http.MethodGet, "/api/v1/runs/run/local-host/snapshot", nil).WithContext(ctx)
 			r.Header.Set("Authorization", "Bearer "+string(award.Bearer))
@@ -443,6 +443,9 @@ func TestLocalHostSnapshotFailuresLogStoreCauseOnce(t *testing.T) {
 			records := auditLines(t, &logs, "http request failed")
 			if w.Code != wantStatus || len(records) != 1 || records[0]["request_id"] != w.Header().Get(RequestIDHeader) || !strings.Contains(records[0]["err"].(string), wantCause) || records[0]["route"] != "/api/v1/runs/{run}/local-host/snapshot" {
 				t.Fatalf("snapshot HTTP %d: %s logs=%s", w.Code, w.Body, logs.String())
+			}
+			if records[0]["level"] != wantLevel || records[0]["status"] != float64(wantStatus) {
+				t.Fatalf("snapshot diagnostic wants %s/%d: %s", wantLevel, wantStatus, logs.String())
 			}
 			if strings.Contains(w.Body.String(), wantCause) {
 				t.Fatalf("snapshot exposes private cause: %s", w.Body)
