@@ -134,6 +134,15 @@ the rewrite. Reinstall units that still invoke the removed `crons` command.
 
 <!-- design:end -->
 
+Local schedule health reads the native timer registration and its activation
+state from systemd or launchd. `--no-timer` leaves automatic firing disabled
+unless a native timer was already installed and enabled. The local controller
+evaluates schedules when `__tick` invokes it. Remote controller health reports
+its evaluator loop as enabled only while that loop is running. Both views
+report the last tick separately, including a tick older than three minutes.
+An unsupported or unreachable native service manager leaves schedule rows
+readable and reports timer state as unavailable, with `enabled` false.
+
 See [CLI schedules](cli-schedules.md) for the generated flag reference and
 [Scheduling](scheduling.md) for runner placement.
 

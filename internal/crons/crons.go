@@ -27,6 +27,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/cronspec"
+	"github.com/sparkwing-dev/sparkwing/internal/crontimer"
 	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 	"github.com/sparkwing-dev/sparkwing/internal/sourceurl"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
@@ -274,6 +275,9 @@ type Service struct {
 	// left alone, so two evaluators sharing one store never fire each
 	// other's schedules.
 	Side string
+
+	// NativeTimer supplies the local host's timer registration and service manager.
+	NativeTimer *crontimer.Host
 }
 
 // safety: a row for the other side has no business firing here -- a controller

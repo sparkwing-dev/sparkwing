@@ -187,12 +187,23 @@ func (l *dashboardLogins) serveSession(w http.ResponseWriter, r *http.Request, n
 		case <-ctx.Done():
 		}
 	}()
-	next.ServeHTTP(w, r.WithContext(ctx))
+	request := r.Clone(ctx)
+	// safety: the dashboard bearer proves this peer session, not a controller capability.
+	request.Header.Del("Authorization")
+	// safety: cookies from another listener must not replace the verified dashboard peer.
+	cookies := request.Cookies()
+	request.Header.Del("Cookie")
+	for _, cookie := range cookies {
+		if cookie.Name != "sw_session" && cookie.Name != "__Host-sw_session" {
+			request.AddCookie(cookie)
+		}
+	}
+	next.ServeHTTP(w, request)
 }
 
 // safety: a browser acts as the api.sock peer that minted its link only while it sends that session as a
-// bearer. Cookies reach every port on a loopback host, so none is read. The static shell carries no run data and
-// loads signed out, because a navigation cannot send the header.
+// bearer. Cookies reach every port on a loopback host, so they cannot authenticate it. The static shell carries no
+// run data and loads signed out, because a navigation cannot send the header.
 func (l *dashboardLogins) gate(next, shell http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {

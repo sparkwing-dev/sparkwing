@@ -99,6 +99,28 @@ func bearer(session string) func(*http.Request) {
 	return func(req *http.Request) { req.Header.Set("Authorization", "Bearer "+session) }
 }
 
+func TestDashboardSessionForwardsUnrelatedCookies(t *testing.T) {
+	request := httptest.NewRequest(http.MethodGet, "/api/v1/runs", nil)
+	request.AddCookie(&http.Cookie{Name: "sw_session", Value: "stale"})
+	request.AddCookie(&http.Cookie{Name: "__Host-sw_session", Value: "also-stale"})
+	request.AddCookie(&http.Cookie{Name: "theme", Value: "dark"})
+	forwarded := false
+	handler := http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+		forwarded = true
+		cookies := r.Cookies()
+		if len(cookies) != 1 || cookies[0].Name != "theme" || cookies[0].Value != "dark" {
+			t.Fatalf("forwarded cookies: %v", cookies)
+		}
+	})
+	newDashboardLogins(nil).serveSession(httptest.NewRecorder(), request, handler, dashboardSession{ended: make(chan struct{})}, time.Hour)
+	if !forwarded {
+		t.Fatal("authenticated request did not reach the handler")
+	}
+	if len(request.Cookies()) != 3 {
+		t.Fatal("forwarding changed the original request cookies")
+	}
+}
+
 func TestLocalDashboardSignsInOnceThroughSocketMintedLink(t *testing.T) {
 	clock := &loginClock{now: time.Unix(1_800_000_000, 0)}
 	api, dashboard, shell := &loginProbe{}, &loginProbe{}, &loginProbe{}

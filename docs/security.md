@@ -460,12 +460,17 @@ TCP carries no peer identity, so the listener also needs a browser session.
 link carries a random 32-byte token, works once and expires after 60 seconds.
 Visiting it redirects to `/#s=<session>`. The page moves the session from the
 fragment into the tab's `sessionStorage`, clears the fragment, and sends it as
-`Authorization: Bearer` on every API request and event stream. No cookie is set
-or read: browsers send a cookie to every port on the same loopback host, so
+`Authorization: Bearer` on every API request and event stream. The local dashboard
+never sets or authenticates with a cookie: browsers send one to every port on the
+same loopback host, so
 another account's server on `127.0.0.1` could replay it, while a header goes
 only to the origin the page names. A TCP request without a live bearer gets
 401, except that the static dashboard pages, which carry no run data, load
 signed out. The browser then acts as the socket peer that minted its link.
+After verifying the dashboard bearer, the gate consumes its Authorization header
+and any controller session cookies, then forwards the verified peer to the shared
+controller API. A stale cookie from another port cannot replace that peer.
+The dashboard bearer is not a controller capability.
 A session ends after 12 hours without a request or 24 hours after sign-in,
 whichever comes first, and the dashboard's Log out button ends it at once with
 a bearer-authenticated `POST /logout`. The controller holds tokens and sessions

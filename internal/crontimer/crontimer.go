@@ -103,6 +103,42 @@ type State struct {
 	Detail string `json:"detail,omitempty"`
 }
 
+// Status reads the native registration and whether its service manager will fire it.
+func Status(ctx context.Context, h Host) (State, error) {
+	state, err := Inspect(ctx, h)
+	if err != nil || !state.Installed || state.Foreign || state.Stale {
+		return state, err
+	}
+	if h.GOOS == "darwin" {
+		state.Enabled, err = refreshPreflight(ctx, h, state.Path)
+	} else {
+		var out string
+		out, err = h.run(ctx, "systemctl", "--user", "show", "--property=FragmentPath,ActiveState,UnitFileState", h.timerName())
+		if err == nil {
+			properties := map[string]string{}
+			for line := range strings.SplitSeq(out, "\n") {
+				key, value, _ := strings.Cut(line, "=")
+				properties[key] = value
+			}
+			if properties["FragmentPath"] != state.Path {
+				err = errors.New("crontimer: service manager has no matching native timer registration")
+			} else {
+				state.Enabled = properties["ActiveState"] == "active" &&
+					(properties["UnitFileState"] == "enabled" || properties["UnitFileState"] == "enabled-runtime")
+			}
+		}
+	}
+	if err != nil {
+		state.Enabled = false
+		return state, fmt.Errorf("crontimer: native timer activation is unknown: %w", err)
+	}
+	state.Detail = "native timer is installed but inactive or disabled"
+	if state.Enabled {
+		state.Detail = "native timer is enabled and fires every minute"
+	}
+	return state, nil
+}
+
 // Install writes the timer's files, enables it, and reports the state that
 // follows. A foreign file at either path is an error and nothing is written.
 // When enabling fails the files stay on disk and the returned State says so,
@@ -212,6 +248,7 @@ func notLoaded(out string) bool {
 		"no such file",
 		"no such process",
 		"could not find specified service",
+		"could not find service",
 		"does not exist",
 		"not found",
 	} {

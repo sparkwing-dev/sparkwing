@@ -3,15 +3,20 @@ package controller
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http/httptest"
+	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
+	"github.com/sparkwing-dev/sparkwing/internal/crons"
+	"github.com/sparkwing-dev/sparkwing/internal/crontimer"
 	"github.com/sparkwing-dev/sparkwing/internal/deployment"
 	"github.com/sparkwing-dev/sparkwing/internal/routepolicy"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
@@ -142,6 +147,86 @@ func TestScheduleHTTPReadWriteAndReplay(t *testing.T) {
 	f.call(t, "POST", scheduleHTTPPath+"/run", "", "", 400, nil)
 	f.call(t, "GET", "/api/v1/schedules/crn_missing", "", "", 404, nil)
 	f.call(t, "GET", "/api/v1/schedules/missing", "", "", 404, nil)
+}
+
+func TestScheduleHTTPLocalHealthDoesNotInventControllerLoop(t *testing.T) {
+	f := newScheduleHTTPFixture(t)
+	home := t.TempDir()
+	f.s.WithLocalSchedules(&crons.Service{
+		Operator: f.s.store.AsOperator(), Schedules: f.writer.Tenant, Side: store.CronWhereLocal,
+		NativeTimer: &crontimer.Host{GOOS: "linux", Home: home, ConfigHome: filepath.Join(home, ".config"), SparkwingHome: filepath.Join(home, ".sparkwing")},
+	}, nil, nil)
+	var overview controllerwire.ScheduleOverview
+	f.call(t, "GET", "/api/v1/schedules", "", "", 200, &overview)
+	if overview.Health.Timer.Installed || overview.Health.Timer.Enabled || overview.Health.Timer.Detail == "controller loop" {
+		t.Fatalf("local health invents an evaluator loop: %+v", overview.Health)
+	}
+	if !strings.Contains(overview.Health.Detail, "no native schedule timer is installed") {
+		t.Fatalf("missing local timer remedy: %+v", overview.Health)
+	}
+}
+
+func TestScheduleHTTPLocalHealthKeepsRowsWhenNativeStateIsUnknown(t *testing.T) {
+	for _, goos := range []string{"linux", "windows"} {
+		t.Run(goos, func(t *testing.T) {
+			f := newScheduleHTTPFixture(t)
+			f.call(t, "PUT", "/api/v1/schedules/repos", schedulePushJSON, "", 200, nil)
+			home := t.TempDir()
+			host := &crontimer.Host{GOOS: goos, Home: home, ConfigHome: filepath.Join(home, ".config"), SparkwingHome: filepath.Join(home, ".sparkwing"), Binary: filepath.Join(home, "sparkwing"), Version: "test"}
+			if goos == "linux" {
+				host.Exec = func(context.Context, string, ...string) (string, error) { return "", nil }
+				if _, err := crontimer.Install(t.Context(), *host); err != nil {
+					t.Fatal(err)
+				}
+				host.Exec = func(context.Context, string, ...string) (string, error) {
+					return "", errors.New("service manager unavailable")
+				}
+			}
+			f.s.WithLocalSchedules(&crons.Service{
+				Operator: f.s.store.AsOperator(), Schedules: f.writer.Tenant, Side: store.CronWhereLocal, NativeTimer: host,
+			}, nil, nil)
+			var overview controllerwire.ScheduleOverview
+			f.call(t, "GET", "/api/v1/schedules", "", "", 200, &overview)
+			if len(overview.Schedules) != 2 || overview.Health.Timer.Enabled || !strings.Contains(overview.Health.Detail, "state is unavailable") {
+				t.Fatalf("unknown timer hides rows or claims enabled: %+v", overview)
+			}
+		})
+	}
+}
+
+type observedCronContext struct {
+	context.Context
+	entered chan struct{}
+	once    sync.Once
+}
+
+func (c *observedCronContext) Done() <-chan struct{} {
+	c.once.Do(func() { close(c.entered) })
+	return c.Context.Done()
+}
+
+func TestScheduleHTTPHealthFollowsControllerLoopLifetime(t *testing.T) {
+	f := newScheduleHTTPFixture(t)
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	observed := &observedCronContext{Context: ctx, entered: make(chan struct{})}
+	stopped := make(chan struct{})
+	go func() {
+		defer close(stopped)
+		f.s.runCronTick(observed, time.Hour)
+	}()
+	<-observed.entered
+	for _, running := range []bool{true, false} {
+		if !running {
+			cancel()
+			<-stopped
+		}
+		var overview controllerwire.ScheduleOverview
+		f.call(t, "GET", "/api/v1/schedules", "", "", 200, &overview)
+		if overview.Health.Timer.Enabled != running || overview.Health.Timer.Installed != running {
+			t.Fatalf("loop running=%v, health=%+v", running, overview.Health)
+		}
+	}
 }
 
 func TestScheduleHTTPOverrideAndWithdrawal(t *testing.T) {

@@ -104,7 +104,8 @@ type Server struct {
 
 	// safety: names this process on each recorded tick, so an operator can
 	// tell which controller evaluated.
-	cronHolder string
+	cronHolder  string
+	cronRunning atomic.Bool
 
 	// safety: the cron evaluator's clock, so a test can resolve a due
 	// instant without waiting a minute for one. Nil reads time.Now.
