@@ -36,6 +36,7 @@ func (s *Store) refreshRunPresentations(ctx context.Context, runs []*Run) error 
 			return err
 		}
 		display := row.Display()
+		run.TrustClass = display.TrustClass
 		run.Args = display.RequestedArgs
 		if row.Spec != nil {
 			run.Args = display.Args

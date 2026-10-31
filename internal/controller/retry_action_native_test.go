@@ -83,7 +83,8 @@ func TestRetryActionPreservesSealsAndCreatesPendingExecution(t *testing.T) {
 		t.Run(strconv.FormatBool(accepted), func(t *testing.T) {
 			s, options, _, original := retryActionFixture(t, "private-retry-value", accepted)
 			wantInputs := runspec.Display{
-				Pipeline: "ci", RequestedArgs: map[string]string{"public": "visible", "secret": "***"}, SecretArgs: []string{"secret"},
+				TrustClass: runspec.TrustAsserted,
+				Pipeline:   "ci", RequestedArgs: map[string]string{"public": "visible", "secret": "***"}, SecretArgs: []string{"secret"},
 				Git: original.Request.Request.Git, Actor: runspec.Actor{Kind: "account", ID: "original-author"},
 			}
 			if accepted {
@@ -172,7 +173,8 @@ func TestRetryAliasesReplayCommittedMode(t *testing.T) {
 		t.Run(string(mode), func(t *testing.T) {
 			s, options, _, source := retryActionFixture(t, "private-value", true)
 			wantInputs := runspec.Display{
-				Pipeline: "ci", RequestedArgs: map[string]string{"public": "visible", "secret": "***"}, Args: map[string]string{"public": "visible", "secret": "***"}, SecretArgs: []string{"secret"},
+				TrustClass: runspec.TrustAsserted,
+				Pipeline:   "ci", RequestedArgs: map[string]string{"public": "visible", "secret": "***"}, Args: map[string]string{"public": "visible", "secret": "***"}, SecretArgs: []string{"secret"},
 				Git: source.Request.Request.Git, Actor: runspec.Actor{Kind: "account", ID: "original-author"},
 				Reproducer: []string{"sparkwing", "run", "ci", "--", "--public=visible"},
 			}

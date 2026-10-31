@@ -8,9 +8,9 @@ before(async () => {
 });
 
 describe("run submission refusals", () => {
-  async function refusal(body: string): Promise<Error> {
+  async function refusal(body: string, status = 403): Promise<Error> {
     const previousFetch = globalThis.fetch;
-    globalThis.fetch = async () => new Response(body, { status: 403 });
+    globalThis.fetch = async () => new Response(body, { status, headers: { "X-Request-Id": "req-console-500" } });
     try {
       await triggerRun("build");
       assert.fail("submission should fail");
@@ -46,5 +46,15 @@ describe("run submission refusals", () => {
       assert.match(error.message, /could not start the run/i);
       assert.doesNotMatch(error.message, /html|new_code|\{/);
     }
+  });
+
+  it("hides server internals and gives support the request id", async () => {
+    const error = await refusal(JSON.stringify({ error: {
+      message: "database connection secret", hint: "internal-only hint",
+    } }), 500);
+    assert.match(error.message, /try again/i);
+    assert.match(error.message, /support@sparkwing.dev/);
+    assert.match(error.message, /req-console-500/);
+    assert.doesNotMatch(error.message, /database|secret|internal-only|\{/);
   });
 });

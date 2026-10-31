@@ -1,9 +1,14 @@
 package runstate
 
-import "time"
+import (
+	"time"
+
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+)
 
 // RunSummary contains the fields exposed by the controller.
 type RunSummary struct {
+	TrustClass      runspec.TrustClass  `json:"trust_class,omitempty"`
 	RepoInherited   bool                `json:"repo_inherited,omitempty"`
 	ID              string              `json:"id"`
 	Number          int64               `json:"number"`

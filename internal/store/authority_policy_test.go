@@ -1,6 +1,8 @@
 package store
 
 import (
+	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -171,6 +173,24 @@ func TestMemberTokenRotationEnforcesExpiryCeiling(t *testing.T) {
 					t.Fatal("rotation exceeded member expiry ceiling")
 				}
 				rewriteSchemaCount(t, s.db, "capabilities", 1)
+			}
+		})
+	}
+}
+
+func TestMemberTokenExpiryRefusalNamesMaximum(t *testing.T) {
+	for _, admin := range []bool{false, true} {
+		t.Run(fmt.Sprint(admin), func(t *testing.T) {
+			s := authorityStore(t)
+			actor := authorityMember(t, s, "owner", RoleOwner)
+			grants, maximum := []capability.Grant{capability.RunsRead}, "90-day maximum"
+			if admin {
+				grants, maximum = []capability.Grant{capability.TeamAdmin}, "30-day maximum"
+			}
+			expiry := time.Now().Add(200 * 24 * time.Hour)
+			_, err := s.AsOperator().ProvisionCapability(t.Context(), capability.ProvisionSpec{Kind: capability.ProvisionMember, Authority: &actor.Authority, Team: "a", Subject: capability.Subject{Kind: capability.SubjectAccount, ID: "owner"}, Binding: capability.Binding{Kind: capability.BindingNone}, Grants: grants, ExpiresAt: &expiry, AllowTeamAdmin: admin})
+			if err == nil || !strings.Contains(err.Error(), maximum) || !strings.Contains(err.Error(), "choose") {
+				t.Fatalf("expiry refusal = %v, want expiry remedy with %s", err, maximum)
 			}
 		})
 	}

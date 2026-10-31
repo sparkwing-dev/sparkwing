@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"slices"
 	"time"
 
@@ -104,7 +105,7 @@ func memberIssuancePolicy(ctx context.Context, tx *storeTx, spec capability.Prov
 		c.ExpiresAt = &ceiling
 	}
 	if c.ExpiresAt.After(ceiling) || !c.ExpiresAt.After(tx.now(ctx)) {
-		return c, authorityError(apierr.BadRequest, "member credential expiry exceeds its lifetime ceiling")
+		return c, authorityError(apierr.BadRequest, fmt.Sprintf("choose a member token expiry in the future, within the %d-day maximum", int(maximum/(24*time.Hour))))
 	}
 	if tx.rotatingRoot != nil {
 		c.Parent = tx.rotatingRoot.Parent

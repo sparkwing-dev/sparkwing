@@ -412,6 +412,7 @@ function Pipelines({ pivotTabs }: { pivotTabs: React.ReactNode }) {
     newer: RunsPageRef | null;
   }>({ older: null, newer: null });
   const [runsError, setRunsError] = useState<string | null>(null);
+  const [detailError, setDetailError] = useState<string | null>(null);
   const runsRequest = useRef({ filterState, pageRef, viewKey });
   runsRequest.current = { filterState, pageRef, viewKey };
   const runsSeq = useRef({ next: 0, applied: 0 });
@@ -487,7 +488,10 @@ function Pipelines({ pivotTabs }: { pivotTabs: React.ReactNode }) {
     let d: RunDetail | null;
     try {
       d = await getRun(runID);
-    } catch {
+    } catch (error) {
+      if (detailSelectionRef.current === selection && selection.runID === runID && request >= detailRequestRef.current.committed) {
+        setDetailError(error instanceof Error ? error.message : "Could not load the run. Try again.");
+      }
       return;
     }
     if (
@@ -500,6 +504,7 @@ function Pipelines({ pivotTabs }: { pivotTabs: React.ReactNode }) {
     }
     detailRequestRef.current.committed = request;
     setDetail(d);
+    setDetailError(null);
   }, []);
 
   const pollsForNewRuns = pageRef.kind === "latest";
@@ -524,7 +529,7 @@ function Pipelines({ pivotTabs }: { pivotTabs: React.ReactNode }) {
     const fetchAll = async () => {
       const updates = await Promise.all(
         running.map(async (r) => {
-          const d = await getRun(r.id);
+          const d = await getRun(r.id).catch(() => null);
           if (!d) return null;
           const total = d.nodes.length;
           const done = d.nodes.filter((n) =>
@@ -548,6 +553,7 @@ function Pipelines({ pivotTabs }: { pivotTabs: React.ReactNode }) {
 
   useEffect(() => {
     detailSelectionRef.current = { runID: selectedRun };
+    setDetailError(null);
     if (!selectedRun) {
       setDetail(null);
       return;
@@ -954,9 +960,14 @@ function Pipelines({ pivotTabs }: { pivotTabs: React.ReactNode }) {
         </div>,
         document.body,
       )}
+      {detailError && (
+        <div role="alert" className="px-3 py-2 text-xs text-red-400 border-b border-[var(--border)]">
+          {detailError}
+        </div>
+      )}
       <div
         ref={filterRef}
-        className="border-b border-[var(--border)] flex items-center bg-[var(--surface)] shrink-0"
+        className="border-b border-[var(--border)] flex flex-wrap items-center bg-[var(--surface)] shrink-0"
       >
         {pivotTabs}
         <FullFilterBar
@@ -968,7 +979,7 @@ function Pipelines({ pivotTabs }: { pivotTabs: React.ReactNode }) {
           setSearchText={filterState.setFilterText}
           onClearAll={() => clearAllFilters(filterState)}
           trailingActions={
-            <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center gap-2">
               <button
                 type="button"
                 onClick={() => setShowNewRun(true)}
@@ -2401,6 +2412,7 @@ const FullRunRow = memo(function FullRunRow({
           />
           {r.status === "dry_run" && <StatusLabel status={r.status} />}
         </FilterableValue>
+        {r.trust_class && <span className="shrink-0 text-[var(--muted)]">Trust: {r.trust_class}</span>}
         <FilterableValue
           facet="repo"
           value={repo}
@@ -2620,6 +2632,7 @@ const CompactFullRunRow = memo(function CompactFullRunRow({
             className={`inline-block align-middle w-2.5 h-2.5 rounded-full shrink-0 ${statusDot(r.status)} ${styleFor("status", r.status)}`}
           />
           {r.status === "dry_run" && <StatusLabel status={r.status} />}
+          {r.trust_class && <span className="shrink-0 text-[var(--muted)]">Trust: {r.trust_class}</span>}
           <span
             className={`text-cyan-400/70 min-w-0 truncate ${styleFor("repo", repo)}`}
           >

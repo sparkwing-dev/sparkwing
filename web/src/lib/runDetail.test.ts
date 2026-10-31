@@ -36,6 +36,16 @@ function notices(wire: import("./api").RunDetailWire): string[] {
 }
 
 describe("runDetailView", () => {
+  it("shows the sealed trust class independently of the branch name", () => {
+    const wire = fixture("run-detail-jobs.json");
+    for (const trust of ["asserted", "verified-default", "verified", "actions", "schedule"]) {
+      wire.inputs.trust_class = trust;
+      wire.inputs.git.ref = "refs/heads/main";
+      assert.equal(api.runDetailView(wire).run.trust_class, trust);
+    }
+    delete wire.inputs.trust_class;
+    assert.equal(api.runDetailView(wire).run.trust_class, undefined);
+  });
   it("does not invent durations for jobs and runs that never started", () => {
     const wire = fixture("run-detail-jobs.json");
     wire.started_at = "0001-01-01T00:00:00Z";

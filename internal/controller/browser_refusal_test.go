@@ -100,6 +100,11 @@ func TestRefusedInvitationNamesItsReason(t *testing.T) {
 	if foreignCode != http.StatusNotFound || foreignCode != missingCode || foreign != missing || !strings.Contains(foreign, `"reason":"invitation_not_found"`) {
 		t.Fatalf("another address's invitation = %d %s, a missing one = %d %s; want one identical invitation_not_found answer", foreignCode, foreign, missingCode, missing)
 	}
+	for _, want := range []string{"sign in", "verified email", "matches the invitation"} {
+		if !strings.Contains(foreign, want) {
+			t.Errorf("invitation refusal = %s, want remedy %q", foreign, want)
+		}
+	}
 	f.advance(8 * 24 * time.Hour)
 	other = f.user("m", "mallory@example.com")
 	if code, expired := accept(id); code != missingCode || expired != missing {

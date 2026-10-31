@@ -5,6 +5,7 @@
   "status": "running",
   "state_seq": 0,
   "inputs": {
+    "trust_class": "asserted",
     "pipeline": "hello",
     "requested_args": {
       "target": "prod"
@@ -309,7 +310,7 @@
     },
     {
       "kind": "unclaimed_work",
-      "reason": "no runner or launcher has claimed the run's trigger yet; check that a matching runner (or the Cloud launcher) is online"
+      "reason": "no runner or launcher has claimed the run's trigger yet; check that a matching runner (or the Cloud launcher) is online; if targeting a pool holding reserved secrets, it needs verified default-branch work: push to the repository's default branch through the GitHub App, or select a pool without reserved secrets and start a new run"
     }
   ],
   "retry": {

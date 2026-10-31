@@ -591,8 +591,8 @@ export function FullFilterBar({
     ((searchText || "").trim() ? 1 : 0);
 
   return (
-    <div className="px-2 py-1.5 flex items-start gap-2 w-full">
-      <div className="flex flex-col gap-1.5 shrink-0 min-w-[32rem]">
+    <div className="px-2 py-1.5 flex flex-wrap items-start gap-2 w-full min-w-0">
+      <div className="flex flex-col gap-1.5 w-full min-w-0 xl:w-auto xl:min-w-[32rem]">
         <div className="flex items-center gap-1 flex-wrap">
           {groups.map((f) => {
             const q = (search[f.key] || "").toLowerCase();
@@ -875,7 +875,7 @@ export function FullFilterBar({
         })}
       </div>
       {trailingActions && (
-        <div className="shrink-0 pt-1 self-start">{trailingActions}</div>
+        <div className="max-w-full pt-1 self-start">{trailingActions}</div>
       )}
     </div>
   );

@@ -1,3 +1,4 @@
+import { readSupportContact } from "./support";
 import { listPages } from "./listPages";
 import { readCSRFCookie } from "./csrfCookie";
 import { localAuthHeaders } from "./localSession";
@@ -141,7 +142,14 @@ export function authFetch(
     .finally(() => clearTimeout(timeout));
 }
 
+function serverErrorMessage(res: Response): string {
+  const contact = readSupportContact()?.label || "support@sparkwing.dev";
+  const requestId = res.headers.get("X-Request-Id");
+  return `Sparkwing could not complete this request. Try again. If the problem continues, contact ${contact}.${requestId ? ` Request ID: ${requestId}.` : ""}`;
+}
+
 export interface Run {
+  trust_class?: string;
   id: string;
   pipeline: string;
   status: string;
@@ -305,6 +313,7 @@ export interface RunDetailWire {
   failure?: string;
   state_seq: number;
   inputs: {
+    trust_class?: string;
     pipeline: string;
     requested_args: Record<string, string> | null;
     args: Record<string, string> | null;
@@ -462,6 +471,7 @@ export function runDetailView(
   const run: Run = {
     id: wire.id,
     pipeline: inputs.pipeline,
+    trust_class: inputs.trust_class,
     status: wire.status,
     git_branch: inputs.git.ref || undefined,
     git_sha: inputs.git.sha || undefined,
@@ -554,6 +564,7 @@ export async function listRuns(params: URLSearchParams): Promise<Run[]> {
     cache: "no-store",
   });
   if (!res.ok) {
+    if (res.status >= 500) throw new Error(serverErrorMessage(res));
     const detail = await res.text().catch(() => "");
     throw new Error(`Listing runs failed (${res.status})${detail ? `: ${detail.trim()}` : ""}`);
   }
@@ -594,6 +605,7 @@ export async function getRun(runID: string): Promise<RunDetail | null> {
     authFetch(`${API_URL}/api/v1/runs/${run}`, { cache: "no-store" }),
     listPages(`${API_URL}/api/v1/runs/${run}/steps`, ["steps"], (path) => authFetch(path, { cache: "no-store" })).catch(() => null),
   ]);
+  if (res.status >= 500) throw new Error(serverErrorMessage(res));
   if (!res.ok) return null;
   return runDetailView((await res.json()) as RunDetailWire, await readSteps(stepsRes));
 }
@@ -760,6 +772,7 @@ export async function triggerRun(
     }),
   });
   if (!res.ok) {
+    if (res.status >= 500) throw new TriggerRunError(serverErrorMessage(res));
     const body = await res.json().catch(() => null) as {
       error?: { message?: unknown; hint?: unknown; details?: { reason?: unknown } };
     } | null;
@@ -1035,6 +1048,7 @@ export async function resolveApproval(
     },
   );
   if (!res.ok) {
+    if (res.status >= 500) throw new Error(serverErrorMessage(res));
     const text = await res.text().catch(() => "");
     throw new Error(text || `resolve failed: ${res.status}`);
   }
@@ -1432,6 +1446,7 @@ async function postCron<T>(id: string, action: string): Promise<T> {
     { method: "POST", headers: action === "run" ? { "Idempotency-Key": crypto.randomUUID() } : undefined },
   );
   if (!res.ok) {
+    if (res.status >= 500) throw new Error(serverErrorMessage(res));
     const text = (await res.text().catch(() => "")).trim();
     throw new Error(text || `${action} failed: ${res.status}`);
   }

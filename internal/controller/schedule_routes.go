@@ -2,6 +2,7 @@ package controller
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -63,14 +64,14 @@ func (s *Server) handlePutCronRepo(w http.ResponseWriter, r *http.Request, a cap
 	}
 	body.RepoURL = repo
 	if err := validateGitBranchName(body.Branch); err != nil {
-		return invalidEngineBody("invalid branch")
+		return invalidEngineBody(fmt.Sprintf("invalid branch: %v; use a branch name such as main or feature/build", err))
 	}
 	if body.Follow {
 		body.SHA = ""
 	}
 	if body.SHA != "" {
 		if err := validateGitSHA(body.SHA); err != nil {
-			return invalidEngineBody("invalid commit SHA")
+			return invalidEngineBody("invalid commit SHA; use a full 40- or 64-character hexadecimal object ID, for example 0123456789abcdef0123456789abcdef01234567")
 		}
 	}
 	entries := make([]cronRepoSchedule, 0, len(body.Schedules))
@@ -78,7 +79,7 @@ func (s *Server) handlePutCronRepo(w http.ResponseWriter, r *http.Request, a cap
 		entries = append(entries, cronRepoSchedule(entry))
 	}
 	if _, err := declaredFromRequest(entries); err != nil {
-		return invalidEngineBody("invalid schedule declaration")
+		return invalidEngineBody(fmt.Sprintf("invalid schedule declaration: %v", err))
 	}
 	writer, err := s.scheduleWriter(r, a)
 	if err != nil {

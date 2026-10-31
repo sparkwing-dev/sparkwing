@@ -398,6 +398,16 @@ must be considered before using learned costs to reduce resource pins.
 
 ## Dashboard
 
+Runs lists show the intake-sealed trust class (`verified-default`, `verified`,
+`actions`, `schedule` or `asserted`). A run naming `main` remains `asserted`
+unless intake verified its provenance. The Start a run toolbar wraps on phone
+screens so its controls remain reachable.
+
+When a run-list, run-detail or run-submission request encounters a server error,
+the console shows retry guidance, the configured support contact (falling back
+to support@sparkwing.dev), and the response's request ID when present. It hides
+the backend error body.
+
 The dashboard shows failure information where a run's detail is:
 
 - **Runs page**: a failure-reason badge on each failed node, both in the

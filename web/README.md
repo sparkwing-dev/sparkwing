@@ -23,9 +23,13 @@ Unstarted runs show `Not started` and their queued creation time, when available
 across Activity, Overview, summaries and setup. They have no execution duration.
 Pending and queued runs offer Cancel before execution begins. The run header
 wraps its metadata and actions to keep controls reachable on phone screens.
+The run-list toolbar also wraps at 375px, including Start a run. Runs show their
+sealed trust class, including asserted runs that name the default branch.
 
-Run submission refusals show an explanation and remedy. A repository access
-refusal links to Team > GitHub to connect or grant the repository. Unknown
+Run submission refusals show an explanation and remedy. Server errors in run
+lists, details and submission show retry guidance, the support contact and the
+response request ID, while keeping backend error bodies out of the page. A
+repository access refusal links to Team > GitHub to connect or grant the repository. Unknown
 sign-in refusals show a generic explanation with a support link. The login
 page includes a main landmark and readable access-token summary text.
 

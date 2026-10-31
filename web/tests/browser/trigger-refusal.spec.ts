@@ -39,3 +39,66 @@ test("a repository access refusal explains the fix and links to Team GitHub", as
   await expect(error).not.toContainText("repository_unauthorized");
   await expect(error).not.toContainText('"error"');
 });
+
+test("server errors give a friendly remedy, support contact and request id", async ({ page }) => {
+  await page.route("**/api/v1/**", async (route) => {
+    const path = new URL(route.request().url()).pathname;
+    if (path === "/api/v1/runs") {
+      await route.fulfill({ status: 500, headers: { "X-Request-Id": "req-console-500" },
+        json: { error: { message: "private database failure" } } });
+    } else {
+      await route.fulfill({ json: {} });
+    }
+  });
+  await page.goto("/runs");
+  await expect(page.getByText(/Try again.*support@sparkwing.dev/)).toBeVisible();
+  await expect(page.getByText(/Request ID: req-console-500/)).toBeVisible();
+  await expect(page.locator("body")).not.toContainText("private database failure");
+  await expect(page.locator("body")).not.toContainText('"error"');
+});
+
+test("the run toolbar fits a 375px viewport without scrolling", async ({ page }) => {
+  await page.setViewportSize({ width: 375, height: 812 });
+  await page.route("**/api/v1/**", (route) => route.fulfill({ json: {} }));
+  await page.goto("/runs");
+  const start = page.getByRole("button", { name: "+ Start a run" });
+  await expect(start).toBeVisible();
+  const bounds = await start.boundingBox();
+  expect(bounds).not.toBeNull();
+  expect(bounds!.x).toBeGreaterThanOrEqual(0);
+  expect(bounds!.x + bounds!.width).toBeLessThanOrEqual(375);
+  expect(await page.evaluate(() => window.scrollX)).toBe(0);
+});
+
+test("run rows show the sealed trust class rather than guessing from main", async ({ page }) => {
+  await page.route("**/api/v1/**", async (route) => {
+    const path = new URL(route.request().url()).pathname;
+    await route.fulfill({ json: path === "/api/v1/runs" ? { runs: [{
+      id: "sealed-run", pipeline: "build", status: "success", git_branch: "main",
+      trust_class: "asserted", started_at: "2026-10-31T10:00:00Z",
+      finished_at: "2026-10-31T10:01:00Z",
+    }] } : {} });
+  });
+  await page.goto("/runs");
+  await expect(page.locator('[data-run-id="sealed-run"]').getByText("Trust: asserted", { exact: true })).toBeVisible();
+  await expect(page.locator("body")).not.toContainText("Trust: verified-default");
+});
+
+test("a run detail server failure shows support and its request id", async ({ page }) => {
+  await page.route("**/api/v1/**", async (route) => {
+    const path = new URL(route.request().url()).pathname;
+    if (path === "/api/v1/runs/detail-error") {
+      await route.fulfill({ status: 500, headers: { "X-Request-Id": "req-detail-500" },
+        json: { error: { message: "private database failure" } } });
+    } else {
+      await route.fulfill({ json: {} });
+    }
+  });
+  await page.goto("/runs?run=detail-error");
+  const alert = page.getByRole("alert").filter({ hasText: "req-detail-500" });
+  await expect(alert).toContainText("Try again");
+  await expect(alert).toContainText("support@sparkwing.dev");
+  await expect(alert).toContainText("Request ID: req-detail-500");
+  await expect(page.locator("body")).not.toContainText("private database failure");
+  await expect(page.locator("body")).not.toContainText('"error"');
+});

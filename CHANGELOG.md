@@ -41,6 +41,11 @@ unlock.
 
 ### Fixed
 
+- **console:** Runs show their sealed trust class and the Start a run toolbar wraps within a 375px viewport
+  Server errors show retry guidance, the support contact and the request ID instead of raw backend JSON.
+- **errors:** Invitation refusals explain which verified-email account to use, and token expiry refusals name the 90-day or 30-day maximum
+  Invalid schedule cron, branch and commit inputs include corrected forms. Unverified waiting work explains how to qualify for reserved pools through a default-branch App push or select a pool without reserved secrets.
+
 - **schedules:** Unreachable source repositories and missing refs return HTTP 422 during registration
   Refusals name the repository and ref, explain which URL and credentials to check, and log at info. Server faults still return HTTP 500.
 - **runners:** Machines with a full shared local budget leave jobs available for Cloud overflow

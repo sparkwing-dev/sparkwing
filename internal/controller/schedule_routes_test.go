@@ -337,3 +337,24 @@ func TestScheduleHTTPRetainedHistoryAndCounts(t *testing.T) {
 		}
 	}
 }
+
+func TestScheduleRegistrationRefusalsExplainCorrectedInput(t *testing.T) {
+	f := newScheduleHTTPFixture(t)
+	for _, tc := range []struct {
+		name, fields string
+		wants        []string
+	}{
+		{"cron", `"schedules":[{"pipeline":"nightly","cron":"not-a-cron"}]`, []string{"cron", "0 * * * *", "hourly"}},
+		{"branch", `"branch":"has a space"`, []string{"branch", "space", "main", "feature/build"}},
+		{"sha", `"sha":"nope"`, []string{"SHA", "40", "64", "0123456789abcdef0123456789abcdef01234567"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			w := f.call(t, "PUT", "/api/v1/schedules/repos", `{"repo_url":"https://github.com/acme/widgets.git",`+tc.fields+`}`, "", 400, nil)
+			for _, want := range tc.wants {
+				if !strings.Contains(w.Body.String(), want) {
+					t.Errorf("refusal = %s, want %q", w.Body, want)
+				}
+			}
+		})
+	}
+}
