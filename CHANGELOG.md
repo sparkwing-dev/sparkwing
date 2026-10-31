@@ -41,6 +41,8 @@ unlock.
 
 ### Fixed
 
+- **logs:** Client-canceled HTTP requests log at info and keep their status and audit records
+  Rollback cleanup on closed or canceled connections logs at debug. Server faults still log at error.
 - **console:** Run submission and Run now keep waiting while the controller admits the run
   Pending controls stay visible. Retrying an unconfirmed request in the same form or action reuses its idempotency key to recover the admitted run without creating another.
 - **cli:** Revoked-token refusals explain how to sign in again and replace the selected profile's token

@@ -7,11 +7,13 @@ package store
 import (
 	"context"
 	"database/sql"
+	"database/sql/driver"
 	_ "embed"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
+	"net"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -890,7 +892,18 @@ ORDER BY node_id, attempt, started_at, step_id`, string(t.team), runID)
 // safety: cleanup failures must stay visible when the caller has already returned.
 func rollbackOrLog(tx *storeTx) {
 	if err := tx.Rollback(); err != nil {
-		slog.Warn("rolling back a store transaction failed", "err", err)
+		level := slog.LevelWarn
+		// safety: pgx's connection lock error has no exported closed sentinel.
+		var connErr interface {
+			error
+			SafeToRetry() bool
+		}
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) ||
+			errors.Is(err, sql.ErrConnDone) || errors.Is(err, driver.ErrBadConn) || errors.Is(err, net.ErrClosed) ||
+			(errors.As(err, &connErr) && connErr.SafeToRetry() && connErr.Error() == "conn closed") {
+			level = slog.LevelDebug
+		}
+		slog.Log(context.Background(), level, "rolling back a store transaction failed", "err", err)
 	}
 }
 
