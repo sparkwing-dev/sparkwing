@@ -141,6 +141,12 @@ sparkwing dashboard start    # detached local dashboard + API on :4343
 sparkwing dashboard open     # one-time sign-in link for the browser
 ```
 
+In a new Git repository, preview the scaffold before your first commit with
+`sparkwing pipeline plan --pipeline release`. Running requires an initial
+commit so intake can record a commit identity. Review and commit your files,
+or run `git commit --allow-empty -m 'Initial commit'`, then retry
+`sparkwing run release`.
+
 The scaffold adds `sparkwing-pipeline` to `.sparkwing/.gitignore` so Git
 ignores an untracked generated binary. Git does not untrack a binary already
 in its index; remove that with `git rm --cached .sparkwing/sparkwing-pipeline`.

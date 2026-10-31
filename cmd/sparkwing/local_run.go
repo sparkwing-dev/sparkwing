@@ -240,6 +240,9 @@ func prepareNativeLocalRun(ctx context.Context, home, directory, pipeline string
 	if entry == nil {
 		return localRunPreparation{}, errors.New("local source acquisition returned no entry")
 	}
+	if entry.SHA == "" {
+		return localRunPreparation{}, &apierr.Error{Code: apierr.InvalidArgs, Message: "repository has no commits; create an initial commit with `git commit --allow-empty -m 'Initial commit'`, then retry this run"}
+	}
 	if selection.git.SHA == "" {
 		selection.git.SHA = entry.SHA
 	}
