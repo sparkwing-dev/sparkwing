@@ -12,6 +12,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/limits"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/pkg/match"
@@ -118,6 +119,13 @@ func (o *Operator) ReconcileLauncherAwards(ctx context.Context, authority capabi
 		}
 		owner.owned[key.fence] = true
 		if !key.live {
+			pending, err := launcherLogTailPendingTx(ctx, tx, root.Authority, claimant.Subject, key.fence)
+			if err != nil {
+				return nil, nil, err
+			}
+			if pending {
+				continue
+			}
 			if observed != nil {
 				out = append(out, LauncherAward{Fence: key.fence, Gone: true})
 			}
@@ -148,6 +156,28 @@ func (o *Operator) ReconcileLauncherAwards(ctx context.Context, authority capabi
 		return nil, nil, err
 	}
 	return out, prepared, nil
+}
+
+// safety: deleting a Cloud pod interrupts its detached log seal after the job result commits.
+func launcherLogTailPendingTx(ctx context.Context, tx *storeTx, root capability.AuthorityRef, subject capability.Subject, fence capability.LeaseRef) (bool, error) {
+	if fence.Kind != capability.UnitNode {
+		return false, nil
+	}
+	now := tx.now(ctx)
+	var pending bool
+	err := tx.QueryRowContext(ctx, `SELECT EXISTS (
+		SELECT 1 FROM capabilities c
+		JOIN node_attempts a ON a.capability_prefix=c.prefix AND a.team=c.team AND a.run_id=c.bind_run AND a.node_id=c.bind_node AND a.generation=c.bind_generation AND a.holder=c.bind_holder
+		JOIN nodes n ON n.team=a.team AND n.run_id=a.run_id AND n.node_id=a.node_id AND n.attempt=a.attempt AND n.generation=a.generation
+		JOIN log_streams l ON l.team=a.team AND l.run_id=a.run_id AND l.node_id=a.node_id AND l.attempt=a.attempt AND l.generation=a.generation
+		WHERE c.parent_kind=? AND c.parent_id=? AND c.subject_kind=? AND c.subject_id=?
+		AND c.unit_kind=? AND c.unit_id=? AND c.bind_holder=? AND c.bind_generation=?
+		AND (c.revoked_at IS NULL OR c.revoked_at>?) AND (c.expires_at IS NULL OR c.expires_at>?)
+		AND n.status='done' AND a.finished_at>=? AND a.finished_at<=?
+		AND l.subject_kind='job_attempt' AND l.sealed_at IS NULL)`,
+		root.Kind, root.ID, subject.Kind, subject.ID, fence.Kind, fence.ID, fence.Holder, fence.Generation,
+		now.UnixNano(), now.UnixNano(), now.Add(-limits.LogSealGrace).UnixNano(), now.UnixNano()).Scan(&pending)
+	return pending, err
 }
 
 // Unit rows retain the observed fence when capability lookup projections are damaged.

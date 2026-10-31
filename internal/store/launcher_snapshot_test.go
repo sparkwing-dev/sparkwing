@@ -10,8 +10,10 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/limits"
 	"github.com/sparkwing-dev/sparkwing/internal/quicktest"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 )
 
 func launcherSnapshotFixture(t *testing.T, kind capability.UnitKind, previousAttempts ...int64) (*Store, UnitDemand, UnitClaim, *time.Time) {
@@ -373,5 +375,54 @@ func TestLauncherSnapshotCorruptAwardDoesNotHideHealthySibling(t *testing.T) {
 	}
 	if live != 1 || deferred != 1 {
 		t.Fatalf("healthy=%d deferred=%d", live, deferred)
+	}
+}
+
+func TestLauncherRetirementWaitsOnlyForCurrentLogTail(t *testing.T) {
+	for _, mode := range []string{"open", "sealed", "grace boundary", "expired", "old generation", "old attempt", "other holder", "foreign launcher", "revoked"} {
+		t.Run(mode, func(t *testing.T) {
+			s, demand, claim, now := launcherSnapshotFixture(t, capability.UnitNode)
+			issued, err := s.AsOperator().ExchangeCapability(t.Context(), capability.ExchangeSpec{BootstrapPrefix: claim.Award.CapabilityPrefix})
+			if err != nil {
+				t.Fatal(err)
+			}
+			actor := runstate.Actor{Kind: runstate.ActorHolder, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: issued.Capability.Prefix}, CapabilityPrefix: issued.Capability.Prefix, NodeFence: runspec.NodeFence{RunID: "run", NodeID: "job", Holder: claim.Award.Holder, Generation: claim.Award.Generation}}
+			tenant := &Tenant{s: s, team: claim.Team}
+			admitExecution(t, tenant, actor)
+			ref := runspec.NodeRef{RunID: "run", NodeID: "job"}
+			if _, err := tenant.TransitionNode(t.Context(), StartNode{Ref: ref, Actor: actor, SourceAttempt: sourceAttempt(0)}); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := tenant.TransitionNode(t.Context(), ReportNode{Ref: ref, Actor: actor, Outcome: runstate.NodeSuccess, SourceAttempt: sourceAttempt(1), Result: &runstate.NodeResult{Outcome: runstate.NodeSuccess}}); err != nil {
+				t.Fatal(err)
+			}
+			fence := capability.LeaseRef{Kind: capability.UnitNode, ID: issued.Capability.UnitID, Holder: claim.Award.Holder, Generation: int64(claim.Award.Generation)}
+			switch mode {
+			case "sealed":
+				rewriteSchemaExec(t, s.db, `UPDATE log_streams SET sealed_at=?,completeness='complete' WHERE team='a' AND subject_kind='job_attempt'`, now.UnixNano())
+			case "grace boundary":
+				*now = now.Add(limits.LogSealGrace)
+			case "expired":
+				*now = now.Add(limits.LogSealGrace + time.Nanosecond)
+			case "old generation":
+				fence.Generation++
+			case "old attempt":
+				rewriteSchemaExec(t, s.db, `UPDATE nodes SET attempt=attempt+1 WHERE team='a' AND run_id='run'`)
+			case "other holder":
+				fence.Holder += "-other"
+			case "foreign launcher":
+				rewriteSchemaExec(t, s.db, `UPDATE capabilities SET parent_id='other' WHERE prefix=?`, issued.Capability.Prefix)
+			case "revoked":
+				rewriteSchemaExec(t, s.db, `UPDATE capabilities SET revoked_at=? WHERE prefix=?`, now.UnixNano(), issued.Capability.Prefix)
+			}
+			awards, _, err := s.AsOperator().ReconcileLauncherAwards(t.Context(), capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: demand.CapabilityPrefix}, []capability.LauncherObservation{{Award: fence}}, nil, nil, nil, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			pending := mode == "open" || mode == "grace boundary"
+			if pending && len(awards) != 0 || !pending && (len(awards) != 1 || !awards[0].Gone) {
+				t.Fatalf("pending=%v award_count=%d", pending, len(awards))
+			}
+		})
 	}
 }
