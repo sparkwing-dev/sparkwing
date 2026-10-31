@@ -730,6 +730,12 @@ export interface RunEvent {
   payload?: unknown;
 }
 
+export class TriggerRunError extends Error {
+  constructor(message: string, readonly reason = "") {
+    super(message);
+  }
+}
+
 export async function triggerRun(
   pipeline: string,
   args?: Record<string, string>,
@@ -755,8 +761,21 @@ export async function triggerRun(
     }),
   });
   if (!res.ok) {
-    const text = await res.text();
-    throw new Error(text || `trigger failed: ${res.status}`);
+    const body = await res.json().catch(() => null) as {
+      error?: { message?: unknown; hint?: unknown; details?: { reason?: unknown } };
+    } | null;
+    const error = body?.error;
+    const reason = typeof error?.details?.reason === "string" ? error.details.reason : "";
+    if (reason === "repository_unauthorized") {
+      throw new TriggerRunError(
+        "Sparkwing does not have access to this repository. Connect or grant the repository under Team > GitHub.",
+        reason,
+      );
+    }
+    const message = [error?.message, error?.hint]
+      .filter((text): text is string => typeof text === "string" && text.trim() !== "")
+      .join(" ");
+    throw new TriggerRunError(message || "Could not start the run. Try again, or use Help if the problem continues.", reason);
   }
   return res.json();
 }
