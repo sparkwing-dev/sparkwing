@@ -62,6 +62,16 @@ func writeInvocationError(w io.Writer, err error, encode func(io.Writer, *apierr
 		contextual.Message = err.Error()
 		failure = &contextual
 	}
+	if failure.Code == apierr.Unauthenticated && failure.Hint == "" {
+		profile := inv.Value("profile")
+		if profile == "" {
+			profile = "NAME"
+		}
+		quoted := "'" + strings.ReplaceAll(profile, "'", "'\\''") + "'"
+		guided := *failure
+		guided.Hint = "Sign in again to the dashboard and create a replacement token, then run `sparkwing profiles set --profile " + quoted + " --token-stdin` and paste it on stdin"
+		failure = &guided
+	}
 	if inv.Output(color.IsInteractiveStdout()) == "json" {
 		return encode(w, failure)
 	}

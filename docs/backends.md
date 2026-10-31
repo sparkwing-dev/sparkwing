@@ -26,7 +26,10 @@ and whether the controller is running.
 
 `sparkwing profiles list` lists connection names. `sparkwing profiles show --profile prod`
 shows the selected connection with its token redacted. `sparkwing profiles set --profile prod --token-stdin`
-replaces a credential without putting it in shell history.
+replaces a credential without putting it in shell history. If a token has expired or been
+revoked, sign in again to the dashboard, create a replacement token, then run
+`sparkwing profiles set --profile prod --token-stdin` and paste it on stdin.
+Authentication refusals include this command for the selected profile.
 
 Profile edits preserve other machine settings. Adding a connection rechecks
 name collisions after probing. Removing one revokes its member credential
