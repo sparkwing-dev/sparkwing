@@ -10,6 +10,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/source"
 	"github.com/sparkwing-dev/sparkwing/internal/source/sourcetest"
+	"github.com/sparkwing-dev/sparkwing/internal/testhome"
 )
 
 func TestCloudHostRestoresTemporaryDirectoryPermissions(t *testing.T) {
@@ -39,7 +40,7 @@ func TestCloudHostRestoresTemporaryDirectoryPermissions(t *testing.T) {
 	if err := initializer.Run(t.Context(), award, options.SourceDir); err != nil {
 		t.Fatal(err)
 	}
-	socket := filepath.Join(t.TempDir(), "docker.sock")
+	socket := filepath.Join(testhome.TempDir(t), "docker.sock")
 	listener, err := net.Listen("unix", socket)
 	if err != nil {
 		t.Fatal(err)

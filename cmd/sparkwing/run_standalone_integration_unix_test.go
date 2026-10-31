@@ -13,11 +13,12 @@ import (
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
+	"github.com/sparkwing-dev/sparkwing/internal/testhome"
 	wingdclient "github.com/sparkwing-dev/sparkwing/internal/wingd/client"
 )
 
 func TestStandaloneRunOwnsControllerAndJoinsShutdown(t *testing.T) {
-	probe, err := net.Listen("unix", filepath.Join(t.TempDir(), "probe.sock"))
+	probe, err := net.Listen("unix", filepath.Join(testhome.TempDir(t), "probe.sock"))
 	if errors.Is(err, syscall.EPERM) || errors.Is(err, syscall.EACCES) {
 		t.Skipf("sandbox refuses local sockets: %v", err)
 	}
@@ -101,7 +102,7 @@ func main(){sw.Register("ci",func()sw.Pipeline[sw.NoInputs]{return pipeline{}});
 }
 
 func TestStandaloneParentAwaitsItsChildRun(t *testing.T) {
-	probe, err := net.Listen("unix", filepath.Join(t.TempDir(), "probe.sock"))
+	probe, err := net.Listen("unix", filepath.Join(testhome.TempDir(t), "probe.sock"))
 	if errors.Is(err, syscall.EPERM) || errors.Is(err, syscall.EACCES) {
 		t.Skipf("sandbox refuses local sockets: %v", err)
 	}
