@@ -6623,11 +6623,16 @@ function RetryButton({ runId, onDone, runNow = false }: {
   runNow?: boolean;
 }) {
   const [loading, setLoading] = useState(false);
+  const submission = useRef<{ input: string; key: string } | null>(null);
 
   const submit = async (full: boolean) => {
+    if (loading) return;
     setLoading(true);
-    const fresh = await retryRun(runId, { full }).catch(() => null);
+    const input = JSON.stringify([runId, full]);
+    if (submission.current?.input !== input) submission.current = { input, key: crypto.randomUUID() };
+    const fresh = await retryRun(runId, { full, idempotencyKey: submission.current.key }).catch(() => null);
     if (fresh?.run_id) {
+      submission.current = null;
       toast(
         full
           ? `Rerun (all nodes) queued as ${fresh.run_id}`
@@ -6636,7 +6641,7 @@ function RetryButton({ runId, onDone, runNow = false }: {
       );
       window.dispatchEvent(new CustomEvent("sparkwing:runs-changed"));
     } else {
-      toast(`Rerun failed for ${runId}`, "error");
+      toast(`Could not confirm the rerun for ${runId}. Retry the same action to check the same request safely.`, "error");
     }
     onDone();
     setLoading(false);

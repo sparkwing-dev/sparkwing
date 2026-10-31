@@ -58,6 +58,7 @@ function CronsRoute() {
   const [loaded, setLoaded] = useState(false);
   const [showUndeclared, setShowUndeclared] = useState(false);
   const [busyID, setBusyID] = useState<string | null>(null);
+  const runRequests = useRef(new Map<string, string>());
   const now = useCurrentTime();
 
   const selectedRef = useRef<string | null>(selected);
@@ -144,7 +145,10 @@ function CronsRoute() {
           await resumeCron(s.id);
           toast(`Resumed ${s.name}`, "success");
         } else {
-          const started = await runCronNow(s.id);
+          const key = runRequests.current.get(s.id) ?? crypto.randomUUID();
+          runRequests.current.set(s.id, key);
+          const started = await runCronNow(s.id, key);
+          runRequests.current.delete(s.id);
           toast(`Started ${started.run_id}`, "success");
         }
       } catch (err) {

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { type PipelineMeta, getPipelines, parseRunArgs, triggerRun, TriggerRunError } from "@/lib/api";
 import { repositoryExample, triggerGit } from "@/lib/triggerSource";
 import { useTeamState } from "@/lib/useTeam";
@@ -23,6 +23,7 @@ export default function TriggerForm({
   const [error, setError] = useState<Error | null>(null);
   const [repository, setRepository] = useState("");
   const [branch, setBranch] = useState("main");
+  const submission = useRef<{ input: string; key: string } | null>(null);
   // A team's runners fetch the source themselves, so a run started here has
   // to name it; a single-team controller's runners take it from the git cache.
   const namesSource = useTeamState().status === "ready";
@@ -39,7 +40,7 @@ export default function TriggerForm({
     source && !source.ok && repository.trim() !== "" ? source.problem : null;
 
   const handleSubmit = async () => {
-    if (!selectedPipeline) return;
+    if (!selectedPipeline || triggering) return;
     if (source && !source.ok) {
       setError(new Error(source.problem));
       return;
@@ -51,16 +52,26 @@ export default function TriggerForm({
     setTriggering(true);
     setError(null);
 
+    const input = JSON.stringify([selectedPipeline, args.values, source?.ok ? source.value : undefined]);
+    // A lost response can still admit a run, so resubmitting unchanged input reuses its key.
+    if (submission.current?.input !== input) {
+      submission.current = { input, key: crypto.randomUUID() };
+    }
+
     try {
       await triggerRun(
         selectedPipeline,
         args.values,
         source?.ok ? source.value : undefined,
+        submission.current.key,
       );
+      submission.current = null;
       onTriggered?.();
       onClose?.();
     } catch (e) {
-      setError(e instanceof Error ? e : new Error("Could not start the run. Try again, or use Help if the problem continues."));
+      setError(e instanceof TypeError
+        ? new Error("Could not confirm whether the run started. Retry without changing this form to check the same request safely, or use Help if the problem continues.")
+        : e instanceof Error ? e : new Error("Could not start the run. Try again, or use Help if the problem continues."));
     } finally {
       setTriggering(false);
     }
@@ -184,6 +195,8 @@ export default function TriggerForm({
           )}
         </div>
       )}
+
+      {triggering && <p role="status" className="text-xs text-[var(--muted)]">Starting the run. Waiting for the controller to finish admission...</p>}
 
       {            }
       <div className="flex items-center gap-2">
