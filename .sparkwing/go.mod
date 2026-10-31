@@ -2,6 +2,8 @@ module sparkwing-pipelines
 
 go 1.26.0
 
+toolchain go1.26.10
+
 require (
 	github.com/fergusstrange/embedded-postgres v1.34.0
 	github.com/google/go-containerregistry v0.22.1
