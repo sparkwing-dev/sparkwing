@@ -56,3 +56,26 @@ func TestOwnerMachineReadsTheSealedPersonalHereHost(t *testing.T) {
 		}
 	}
 }
+
+func TestUnknownClaimantsCannotExecuteProvenRepositoryRuns(t *testing.T) {
+	st, ctx := openTestStore(t)
+	machine := authorityRoot("unknown", "a")
+	machine.Grants = nil
+	authorityPersist(t, st, machine)
+	tx, err := st.beginTx(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	for _, kind := range []capability.SubjectKind{capability.SubjectAccount, capability.SubjectService, capability.SubjectOperator, capability.SubjectMachine, "unknown"} {
+		leaf := machine
+		leaf.Subject.Kind = kind
+		facts, err := claimantFactsTx(ctx, tx, []authorityNode{{principal: capability.Principal{Capability: leaf}}}, runspec.Request{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if facts.HostKind != capability.HostPersonal || facts.HostKind.AllowsProvenRepository() {
+			t.Fatalf("unknown %s claimant received host kind %s", kind, facts.HostKind)
+		}
+	}
+}

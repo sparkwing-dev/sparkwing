@@ -114,9 +114,9 @@ func claimantFactsTx(ctx context.Context, tx *storeTx, chain []authorityNode, re
 			facts.ExecutorClass = tierHere
 		}
 	}
-	facts.HostKind = capability.HostSelfHosted
-	if facts.Personal {
-		facts.HostKind = capability.HostPersonal
+	facts.HostKind = capability.HostPersonal
+	if !facts.Personal && (facts.Shared || registeredClaimant(leaf) || facts.Launcher || facts.Tier == tierActions) {
+		facts.HostKind = capability.HostSelfHosted
 	}
 	if root.Subject.Kind == capability.SubjectLocal || facts.ExecutorClass == tierHere {
 		facts.HostKind = capability.HostHere
