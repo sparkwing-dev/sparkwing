@@ -78,6 +78,14 @@ func releaseOwnerUnitTx(ctx context.Context, tx *storeTx, claim UnitClaim, unit 
 	if status != "claimed" || started.Valid {
 		return holderRefusal()
 	}
+	// safety: a returned reservation has no writer; signed slots still require a truthful final seal.
+	if _, err := tx.execContext(ctx, `DELETE FROM log_streams WHERE team=? AND run_id=? AND subject_kind='owner_unit'
+		AND unit_kind=? AND generation=? AND COALESCE(source_node_id,'')=? AND COALESCE(source_generation,0)=?
+		AND uploaded_through=0 AND sealed_at IS NULL
+		AND NOT EXISTS (SELECT 1 FROM log_slots l WHERE l.team=log_streams.team AND l.run_id=log_streams.run_id AND l.stream_id=log_streams.id)`,
+		claim.Team, claim.RunID, claim.Kind, claim.Award.Generation, claim.NodeID, claim.SourceGeneration); err != nil {
+		return err
+	}
 	target := expiredUnit{team: claim.Team, ref: runspec.NodeRef{RunID: runspec.RunID(claim.RunID), NodeID: runspec.NodeID(claim.NodeID)}, kind: claim.Kind, sourceGeneration: unit.SourceGeneration}
 	owner := ownerRecovery{generation: int64(claim.Award.Generation), disruptions: disruptions}
 	if claim.Kind == capability.UnitEval {

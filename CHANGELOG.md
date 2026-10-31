@@ -55,6 +55,9 @@ unlock.
 - **console:** Run detail metadata and controls wrap on phone screens
 - **console:** Run submission refusals explain repository access and link to Team > GitHub
 - **sign-in:** Unknown refusals show an explanation and support link; login includes a main landmark and readable access-token summary text
+- **logs:** Returning an unstarted owner award removes its unused log reservation, so it cannot keep finished aggregate logs incomplete. Streams with signed uploads, committed segments or an incomplete seal still report missing output.
+- **Cloud docs:** Docker layer cache reuse is limited to builds within one job Pod. The fast-builds guide shows registry cache import and export for reuse across jobs.
+- **Cloud docs:** Node and network prerequisites describe NetworkPolicy's own-node exception and the kubelet authentication and node-level controls required for that path.
 - **logs:** Finished Cloud runs complete aggregate log reads after bootstrap owner requeues
   Owner streams register when the runner exchanges its bootstrap credential. Awards that never reached a log writer no longer leave unsealed streams. Missing final seals from actual writers still report incomplete logs.
 - **TypeScript SDK:** Imports inside jobs retain CommonJS and ESM exports from symlinked packages

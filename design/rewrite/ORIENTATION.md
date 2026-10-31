@@ -34,6 +34,7 @@ credential model in `docs/auth.md`, and the decision log
 | Final cancellation reports retain the hard claim lifetime | `internal/nodehost/executor.go`: `report`, `claimed_node.go`: `claimSetupFailure` | `TestCancellationReportsUseTheLiveClaimLifetime`, `TestOwnerFinishesCancellationAfterACommittedPolicyResult` |
 | Foreground worker bound | `internal/nodehost/owner_schedule.go`: `OwnerHost.schedule` | `TestOwnerHostWorkersBoundLocalExecution` |
 | Successful previews finish as `dry_run` | `internal/store/scheduling_contract.go`: `Decide`; `internal/runstate/state.go`: `RunDryRun` | `internal/store/run_dry_run_test.go` |
+| Returning unstarted owner reservations removes only unsigned empty logs | `internal/store/unit_release.go`: `releaseOwnerUnitTx` | `TestReleasedUnstartedOwnersLeaveNoMissingLogs` |
 | Paged logs drain committed records, then report unsealed terminal logs incomplete after the existing seal grace | `internal/controller/log_pages.go`: `readLogPage` | `TestPersistedLogPageEndsUnsealedTerminalObservationAfterGrace` |
 | Recovery reads its persisted source failure | `internal/nodehost/native_assembly.go`, `assembly_native_client.go`; `internal/controller/private_host.go` | `TestNodeExecutorRecoveryReceivesPersistedFailure`, `TestPrivateNodeRecoveryReadsOnlyItsPersistedSource` |
 

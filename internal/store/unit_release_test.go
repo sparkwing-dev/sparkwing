@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
+	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
@@ -240,6 +241,60 @@ func TestReleaseUnitCannotRequeueCancelledOwnerWork(t *testing.T) {
 			events, err := tenant.ReadStateEvents(t.Context(), claim.RunID, beforeEvents[len(beforeEvents)-1].Seq, 10)
 			if err != nil || len(events) != 0 {
 				t.Fatalf("refused release events = %+v, %v", events, err)
+			}
+		})
+	}
+}
+
+func TestReleasedUnstartedOwnersLeaveNoMissingLogs(t *testing.T) {
+	for _, kind := range []capability.UnitKind{capability.UnitTrigger, capability.UnitPlan, capability.UnitEval} {
+		t.Run(string(kind), func(t *testing.T) {
+			for _, state := range []string{"quiet", "pending", "committed", "incomplete"} {
+				t.Run(state, func(t *testing.T) {
+					s, claim := releaseFixture(t, kind)
+					tenant := &Tenant{s: s, team: claim.Team}
+					reader := authorityMember(t, s, "log-reader", RoleReader)
+					view, err := tenant.ReadRunView(t.Context(), claim.RunID)
+					if err != nil || len(view.Logs) != 1 {
+						t.Fatalf("owner logs=%+v: %v", view.Logs, err)
+					}
+					subject := view.Logs[0]
+					if state != "quiet" {
+						identity, err := logIdentity(subject)
+						if err != nil {
+							t.Fatal(err)
+						}
+						if state != "incomplete" {
+							rewriteSchemaExec(t, s.db, `INSERT INTO log_slots(team,run_id,stream_id,generation,n,size,object_key,created_at) VALUES (?,?,?,?,1,10,'pending',?)`, claim.Team, claim.RunID, identity.id, subject.Unit.Generation, s.now().UnixNano())
+						}
+						if state == "committed" {
+							rewriteSchemaExec(t, s.db, `UPDATE log_slots SET committed=1 WHERE team=? AND run_id=? AND stream_id=?`, claim.Team, claim.RunID, identity.id)
+							rewriteSchemaExec(t, s.db, `UPDATE log_streams SET uploaded_through=1 WHERE team=? AND run_id=? AND id=?`, claim.Team, claim.RunID, identity.id)
+						}
+						if state == "incomplete" {
+							rewriteSchemaExec(t, s.db, `UPDATE log_streams SET sealed_at=?,completeness='incomplete',incomplete_reason='lost' WHERE team=? AND run_id=? AND id=?`, s.now().UnixNano(), claim.Team, claim.RunID, identity.id)
+						}
+					}
+					if err := s.ReleaseUnit(t.Context(), claim, claim.Award.CapabilityPrefix); err != nil {
+						t.Fatal(err)
+					}
+					view, err = tenant.ReadRunView(t.Context(), claim.RunID)
+					if err != nil {
+						t.Fatal(err)
+					}
+					if state == "quiet" && len(view.Logs) != 0 {
+						t.Fatalf("released quiet owner leaves aggregate incomplete: %+v", view.Logs)
+					}
+					if state != "quiet" {
+						if len(view.Logs) != 1 {
+							t.Fatal("release hid a stream with a pending upload")
+						}
+						logs, err := tenant.ReadLogSegments(t.Context(), reader, blob.LogReadRequest{Subject: subject})
+						if err != nil || logs.Complete {
+							t.Fatalf("unsealed upload=%+v: %v", logs, err)
+						}
+					}
+				})
 			}
 		})
 	}

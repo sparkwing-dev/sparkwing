@@ -9,6 +9,7 @@ import (
 	"errors"
 	"io"
 	"net"
+	"strings"
 	"testing"
 	"testing/synctest"
 	"time"
@@ -648,4 +649,27 @@ func (u *fencedLogUploader) PutManifest(ctx context.Context, manifest logseg.Man
 		commit.IncompleteReason = manifest.Reason
 	}
 	return u.tenant.RecordSegments(ctx, commit)
+}
+
+func TestNativeLogsSealFiftyMillionPayloadBytes(t *testing.T) {
+	records := &nativeLogRecords{objects: map[string][]byte{}}
+	logs := &localLogs{run: "run", masker: secrets.NewMasker(), upload: func(_ context.Context, _ capability.Principal, subject blob.LogSubject) (logseg.Uploader, error) {
+		records.view.Subject = subject
+		return records, nil
+	}}
+	logs.bind(capability.Principal{Capability: capability.Capability{Team: "team", Unit: capability.UnitNode, Binding: capability.Binding{RunID: "run", NodeID: "job", Generation: 1}}}, 1)
+	for range 1000 {
+		if err := logs.write(t.Context(), "run", "job", nodeproto.FrameLog{Message: strings.Repeat("x", 50_000)}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := logs.write(t.Context(), "run", "job", nodeproto.FrameLog{Message: "EMIT_DONE"}); err != nil {
+		t.Fatal(err)
+	}
+	<-logs.finish(t.Context(), "")
+	var body bytes.Buffer
+	read, err := (logseg.CommittedReader{Records: records, Objects: records}).Read(t.Context(), runstate.Actor{}, blob.LogReadRequest{Subject: records.view.Subject}, &body)
+	if err != nil || !read.Complete || bytes.Count(body.Bytes(), []byte("x")) != 50_000_000 || !bytes.Contains(body.Bytes(), []byte("EMIT_DONE")) {
+		t.Fatalf("large log incomplete or lost payload: complete=%v bytes=%d error=%v", read.Complete, body.Len(), err)
+	}
 }
