@@ -19,8 +19,10 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/controller/client"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/engineid"
+	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
+	"github.com/sparkwing-dev/sparkwing/internal/storage"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
 )
@@ -30,9 +32,9 @@ func retryActionFixture(t *testing.T, value string, accepted bool) (*serverFixtu
 	return retryActionDispatchFixture(t, value, accepted, runspec.DispatchHost)
 }
 
-func retryActionDispatchFixture(t *testing.T, value string, accepted bool, dispatch runspec.Dispatch) (*serverFixture, client.EngineOptions, string, store.RunRow) {
+func retryActionDispatchFixture(t *testing.T, value string, accepted bool, dispatch runspec.Dispatch, opts ...store.Option) (*serverFixture, client.EngineOptions, string, store.RunRow) {
 	t.Helper()
-	s, session := credentialSessionServer(t)
+	s, session := credentialSessionServer(t, opts...)
 	s.WithEngineController(NewEngineController(s.store, EngineController{VersionPolicy: engineVersionPolicy(&engineVersionFake{})}))
 	engineSQL(t, s.store, `UPDATE sessions SET scopes='runs.read,runs.control'`)
 	input := runspec.Request{
@@ -392,5 +394,35 @@ func TestConsoleRetryAcceptedControllerPlanExecutes(t *testing.T) {
 				t.Fatalf("retry did not execute: %s %v", row.State, err)
 			}
 		})
+	}
+}
+
+func TestConsoleFailedRetryReusesSuccessfulJobWithoutAnAttempt(t *testing.T) {
+	s, options, _, _ := retryActionDispatchFixture(t, "private-value", true, runspec.DispatchController, store.WithPolicies(func(*store.Store) (store.Policies, error) {
+		return store.Policies{ResultBlobs: storage.BlobManifests{}}, nil
+	}))
+	hash, err := runspec.CanonicalHash(nodeproto.JobSpec{ID: "job"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	engineSQL(t, s.store, `INSERT INTO nodes(team,run_id,node_id,status,outcome,state_seq,spec_json,spec_hash,execution_json,finished_at) VALUES ('a','run','job','done','success',2,?,?,?,2)`, []byte(`{"id":"job"}`), string(hash), []byte(`{}`))
+	control, err := client.NewEngineClient(options)
+	if err != nil {
+		t.Fatal(err)
+	}
+	created, err := control.Retry(t.Context(), "run", controllerwire.RetryRequest{Mode: controllerwire.RetryFailed, IdempotencyKey: "failed-retry"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	before, err := control.ReadRun(t.Context(), created.RunID)
+	if err != nil || before.Retry == nil || !reflect.DeepEqual(before.Retry.Reused, []string{"job"}) {
+		t.Fatalf("retry receipt: %+v, %v", before.Retry, err)
+	}
+	if _, err := s.store.AsOperator().ReconcileControllerRuns(t.Context(), "", 10); err != nil {
+		t.Fatal(err)
+	}
+	after, err := control.ReadRun(t.Context(), created.RunID)
+	if err != nil || after.Status != "success" || len(after.Attempts) != 0 || len(after.Jobs) != 1 {
+		t.Fatalf("retry reran reused work: %+v, %v", after, err)
 	}
 }

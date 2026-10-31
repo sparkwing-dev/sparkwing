@@ -22,7 +22,7 @@ type materializedRecords struct {
 }
 
 func materializeChangeTx(ctx context.Context, tx *storeTx, team Team, change nodeTransition) (nodeTransition, error) {
-	if change.Actor.Kind != runstate.ActorRunHost || change.Extra.Materialize == nil || change.Extra.Result != nil {
+	if (change.Actor.Kind != runstate.ActorRunHost && change.Actor.Kind != runstate.ActorController) || change.Extra.Materialize == nil || change.Extra.Result != nil {
 		return change, authorityError(apierr.BadRequest, "materialization requires a persisted source without a supplied result")
 	}
 	source := *change.Extra.Materialize

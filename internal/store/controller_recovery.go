@@ -73,7 +73,7 @@ func (o *Operator) ReconcileControllerRuns(ctx context.Context, after string, li
 	}
 	var visited []ControllerRun
 	for _, ref := range targets {
-		err := o.s.inTx(ctx, func(tx *storeTx) error {
+		err := o.s.inBlobTx(ctx, func(tx *storeTx) error {
 			if err := lockStateRunTx(ctx, tx, ref.Team, ref.RunID); err != nil {
 				return err
 			}

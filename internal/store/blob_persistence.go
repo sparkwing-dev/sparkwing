@@ -65,6 +65,7 @@ func validBlobDigest(digest blob.Digest) bool {
 }
 
 type blobActor struct {
+	owner      *runstate.Actor
 	authority  blob.Authority
 	source     blob.UploadIdentity
 	capability capability.Capability

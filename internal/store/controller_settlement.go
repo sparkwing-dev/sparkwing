@@ -77,6 +77,30 @@ func settleControllerTx(ctx context.Context, tx *storeTx, team Team, runID strin
 				return settleAdmissionTx(ctx, tx, team, runstate.CapacityBinding{RunID: runID}, *actor, result)
 			}
 		}
+		if snapshot.Run.Retry != nil && snapshot.Run.CancelRequestedAt == nil {
+			changed := false
+			var pending error
+			for _, node := range snapshot.Nodes {
+				selected, ok := snapshot.Run.Retry.Results[string(node.Ref.NodeID)]
+				if !ok || node.Status != runstate.StatusPending || node.ReadyAt != nil || node.ClaimedBy != "" {
+					continue
+				}
+				source := runstate.MaterializeSource{Kind: runstate.SourceManualRetry, Result: &selected}
+				reused, err := tryMaterializationTx(ctx, tx, team, ReconcileRequest{Ref: node.Ref, Actor: *actor, Policy: source.Kind, Source: &source})
+				if errors.Is(err, errBlobIOPending) {
+					pending = err
+				} else if err != nil {
+					return err
+				}
+				changed = changed || reused
+			}
+			if pending != nil {
+				return pending
+			}
+			if changed {
+				continue
+			}
+		}
 		graph, err := snapshot.Scheduling()
 		if err != nil {
 			return err

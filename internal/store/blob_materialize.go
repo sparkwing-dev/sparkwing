@@ -18,7 +18,7 @@ import (
 
 func (r *blobRecords) CopyMaterializedRecords(ctx context.Context, tx *storeTx, team Team, actor runstate.Actor, ref runspec.NodeRef, source runstate.MaterializeSource) (materializedRecords, error) {
 	result := materializedRecords{}
-	a, err := resolveBlobAuthorityTx(ctx, tx, team, blob.Authority{CapabilityRef: actor.CapabilityPrefix}, capability.DataWrite)
+	a, err := materializationActorTx(ctx, tx, team, actor, ref)
 	if err != nil {
 		return result, err
 	}
@@ -207,7 +207,7 @@ func tryMaterializationTx(ctx context.Context, tx *storeTx, team Team, request R
 		return false, err
 	}
 
-	_, err := transitionNodeTx(ctx, tx, team, nodeTransition{Ref: request.Ref, Actor: request.Actor, Cause: causeMaterialize, Extra: transitionExtra{Materialize: request.Source}})
+	_, err := transitionNodeStateTx(ctx, tx, team, nodeTransition{Ref: request.Ref, Actor: request.Actor, Cause: causeMaterialize, Extra: transitionExtra{Materialize: request.Source}})
 	if err != nil {
 		if !blob.IsCacheMiss(err) {
 			return false, err
@@ -218,4 +218,32 @@ func tryMaterializationTx(ctx context.Context, tx *storeTx, team Team, request R
 	}
 	_, released := tx.execContext(ctx, "RELEASE SAVEPOINT materialize_result")
 	return err == nil, released
+}
+
+// The controller copies only the retry's sealed scope; it has no runner credential.
+func materializationActorTx(ctx context.Context, tx *storeTx, team Team, actor runstate.Actor, ref runspec.NodeRef) (blobActor, error) {
+	if actor.Kind != runstate.ActorController {
+		return resolveBlobAuthorityTx(ctx, tx, team, blob.Authority{CapabilityRef: actor.CapabilityPrefix}, capability.DataWrite)
+	}
+	if err := checkOwnerTx(ctx, tx, team, actor, string(ref.RunID)); err != nil {
+		return blobActor{}, err
+	}
+	run, err := readRunTx(ctx, tx, team, string(ref.RunID))
+	if err != nil {
+		return blobActor{}, err
+	}
+	if run.CancelRequestedAt != nil || run.FinishedAt != nil || run.Retry == nil || run.Retry.Mode != "failed" {
+		return blobActor{}, holderRefusal()
+	}
+	facts, err := runRefFacts(run.Request, "")
+	if err != nil {
+		return blobActor{}, err
+	}
+	return blobActor{
+		owner:      &actor,
+		authority:  blob.Authority{Repo: run.Request.Request.Git.Repository.Key, Ref: facts},
+		source:     blob.UploadIdentity{Kind: blob.UploadOwnerUnit, Team: string(team), RunID: run.ID},
+		capability: capability.Capability{Team: string(team), Grants: []capability.Grant{capability.DataRead, capability.DataWrite}, Data: &capability.DataScope{WriteRef: facts.Scope.CapabilityScope()}},
+		pipeline:   run.Request.Request.Pipeline,
+	}, nil
 }

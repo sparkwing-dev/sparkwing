@@ -123,7 +123,7 @@ func (t *Tenant) reconcileNode(ctx context.Context, request ReconcileRequest) (r
 }
 
 func validateReconcileRequest(request ReconcileRequest) error {
-	if request.Ref.RunID == "" || request.Ref.NodeID == "" || request.Actor.Kind != runstate.ActorRunHost {
+	if request.Ref.RunID == "" || request.Ref.NodeID == "" || (request.Actor.Kind != runstate.ActorRunHost && request.Actor.Kind != runstate.ActorController) {
 		return authorityError(apierr.BadRequest, "reconciliation requires a job and run host")
 	}
 	if !slices.Contains([]runstate.SourcePolicy{runstate.SourceNone, runstate.SourceResume, runstate.SourceManualRetry, runstate.SourceCoalesced}, request.Policy) {

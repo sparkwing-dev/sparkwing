@@ -26,7 +26,7 @@ func (o *Operator) ReapUnits(ctx context.Context, limit int) ([]ReapedUnit, erro
 	var failures error
 	for _, target := range targets {
 		var result *ReapedUnit
-		err := o.s.inTx(ctx, func(tx *storeTx) error {
+		err := o.s.inBlobTx(ctx, func(tx *storeTx) error {
 			now := tx.now(ctx)
 			actor := runstate.Actor{Kind: runstate.ActorReaper, Owner: runstate.OwnerLeaseRef{Kind: runstate.OwnerController}}
 			var err error
