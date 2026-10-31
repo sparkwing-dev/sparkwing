@@ -376,6 +376,15 @@ func (h *OwnerHost) execute(ctx context.Context, run RunInput, accepted Accepted
 		return errors.New("self execution requires a node host and acquired entry")
 	}
 
+	var spec runspec.Spec
+	if err := json.Unmarshal(accepted.Spec, &spec); err != nil {
+		return err
+	}
+	// safety: a busy owner must leave burst jobs ready for other executors.
+	if spec.Request.Request.Burst != nil && !h.executionAdmission.compute.machineHasJobCapacity(ctx) {
+		return deferRelease(ctx)
+	}
+
 	result, err := followReconciliation(ctx, h.Store, request, h.WaitNode)
 	if err != nil {
 		return err

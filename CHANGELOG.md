@@ -41,6 +41,8 @@ unlock.
 
 ### Fixed
 
+- **overflow:** A saturated here owner leaves jobs ready for Cloud instead of repeatedly claiming and returning them
+  The requester checks its local CPU and memory ledger before taking a provisional burst award, using the same capacity test as registered runners.
 - **runner:** Uploaded Go pipelines with a local SDK replacement install and plan through the runner
   The runner accepts the internal SDK installer command used during source acquisition.
 - **source credentials:** Refusals explain that an unproven run cannot fetch a private repository

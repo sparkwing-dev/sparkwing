@@ -92,3 +92,13 @@ func queryOptions(opts Options) Options {
 	opts.healthProbe = true
 	return opts
 }
+
+// HasJobCapacity reports whether the ledger can admit another native job.
+func HasJobCapacity(state wingwire.QueueState) bool {
+	for _, resource := range state.Resources {
+		if (resource.Key == "cores" || resource.Key == "memory") && resource.Capacity > 0 && resource.Available <= 0 {
+			return false
+		}
+	}
+	return true
+}

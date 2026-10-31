@@ -37,3 +37,16 @@ func (l machineLease) Release() error { return l.lease.Release() }
 func (l machineLease) Watch(evicted func(wingwire.Evicted), stopped func(wingwire.Cancel)) error {
 	return l.lease.WatchControl(evicted, stopped)
 }
+
+func (a *LocalAdmission) machineHasJobCapacity(ctx context.Context) bool {
+	if a == nil {
+		return true
+	}
+	machine, ok := a.Daemon.(machineAdmitter)
+	if !ok {
+		return true
+	}
+	state, err := wingdclient.Query(ctx, machine.options)
+	// safety: admission remains authoritative when the ledger cannot be observed.
+	return err != nil || wingdclient.HasJobCapacity(state)
+}

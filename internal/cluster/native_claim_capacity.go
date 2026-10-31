@@ -22,14 +22,11 @@ func (c nativeCapacityController) Claim(ctx context.Context, request controllerw
 			// safety: a missing daemon must not prevent planning; the awarded host still enforces admission.
 			return c.Controller.Claim(ctx, request)
 		}
-		for _, resource := range state.Resources {
-			if (resource.Key == "cores" || resource.Key == "memory") && resource.Capacity > 0 && resource.Available <= 0 {
-				if len(request.Kinds) == 1 {
-					request.FreeSlots = new(int)
-				} else {
-					request.Kinds = slices.DeleteFunc(slices.Clone(request.Kinds), func(kind capability.UnitKind) bool { return kind == capability.UnitNode })
-				}
-				break
+		if !wingdclient.HasJobCapacity(state) {
+			if len(request.Kinds) == 1 {
+				request.FreeSlots = new(int)
+			} else {
+				request.Kinds = slices.DeleteFunc(slices.Clone(request.Kinds), func(kind capability.UnitKind) bool { return kind == capability.UnitNode })
 			}
 		}
 	}
