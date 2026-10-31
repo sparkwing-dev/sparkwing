@@ -434,7 +434,11 @@ Recoverable bytes can still be lost in a rare race, including identical S3
 bytes with the same ETag. A referenced digest with missing bytes fails loudly.
 A collecting digest that has gained a reference fails the pass loudly.
 
-Attempt-start and owner-unit claim transactions create their log streams. Publication
+Attempt-start and owner-writer issuance transactions create their log streams.
+Direct owner awards register immediately; bootstrap owner awards register atomically
+with credential exchange. Requeued bootstrap generations that never exchanged cannot
+write logs and have no stream. Exchanged generations remain visible and require a
+final seal, including when empty. Publication
 imports create their streams atomically too. `RecordSegments` appends and seals
 existing streams, refusing a missing registration. `RecordSegments` and
 `ReadLogSegments` accept tagged job or owner-unit subjects.

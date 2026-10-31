@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
@@ -124,9 +123,5 @@ func writeOwnerClaimTx(ctx context.Context, tx *storeTx, claim UnitClaim) error 
 	if count != 1 {
 		return holderRefusal()
 	}
-	subject := blob.LogSubject{Kind: blob.LogOwnerUnit, Team: string(claim.Team), RunID: claim.RunID, Unit: &blob.LogUnit{Kind: blob.LogUnitKind(claim.Kind), Generation: int64(claim.Award.Generation)}}
-	if claim.Kind == capability.UnitEval {
-		subject.Unit.Source = &blob.LogSource{NodeID: claim.NodeID, Generation: claim.SourceGeneration}
-	}
-	return createLogStreamTx(ctx, tx, subject)
+	return nil
 }

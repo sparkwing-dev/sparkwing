@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
+	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/limits"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
@@ -105,6 +106,17 @@ func (s *Store) issueTx(ctx context.Context, tx *storeTx, request capability.Iss
 	}
 	if request.Exchange != nil {
 		if err := bindExchangedUnitTx(ctx, tx, c, request.Exchange.BootstrapPrefix); err != nil {
+			return capability.Issued{}, err
+		}
+	}
+	// safety: Register only writers so unused reservations cannot leave an unsealable stream.
+	if (request.Award != nil || request.Exchange != nil) && c.Delivery == capability.DeliveryDirect && c.Unit != capability.UnitNode && c.Purpose != capability.PurposeHere {
+		unit := blob.LogUnit{Kind: blob.LogUnitKind(c.Unit), Generation: c.Binding.Generation}
+		if c.Unit == capability.UnitEval {
+			unit.Generation = c.Binding.Expansion.Generation
+			unit.Source = &blob.LogSource{NodeID: c.Binding.NodeID, Generation: c.Binding.Generation}
+		}
+		if err := createLogStreamTx(ctx, tx, blob.LogSubject{Kind: blob.LogOwnerUnit, Team: c.Team, RunID: c.Binding.RunID, Unit: &unit}); err != nil {
 			return capability.Issued{}, err
 		}
 	}
