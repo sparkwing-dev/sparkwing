@@ -114,3 +114,74 @@ test("Run now keeps waiting for late admission and retries a lost response with 
   await expect(page.getByText("Rerun (all nodes) queued as late-retry")).toBeVisible();
   expect(keys[1]).toBe(keys[0]);
 });
+
+for (const mode of ["Rerun all", "Rerun from failed"]) {
+  test(`the toolbar ${mode} action retains its key and shows pending admission`, async ({ page }) => {
+    let release!: () => void;
+    const pending = new Promise<void>((resolve) => { release = resolve; });
+    const keys: string[] = [];
+    await admissionAPI(page, async (route) => {
+      keys.push(route.request().postDataJSON().idempotency_key);
+      if (keys.length === 1) return route.abort("failed");
+      await pending;
+      await route.fulfill({ status: 201, json: { run_id: "toolbar-retry" } });
+    }, true);
+    await page.goto("/runs");
+    await page.getByRole("checkbox", { name: "select all", exact: true }).check();
+    await page.getByRole("button", { name: "Rerun", exact: true }).click();
+    await page.getByRole("menuitem", { name: mode, exact: false }).click();
+    await expect(page.getByText(/Could not confirm the rerun/)).toBeVisible();
+    await page.clock.install();
+    await page.getByRole("button", { name: "Rerun", exact: true }).click();
+    await page.getByRole("menuitem", { name: mode, exact: false }).click();
+    await expect.poll(() => keys.length).toBe(2);
+    await page.clock.fastForward(120_000);
+    await expect(page.getByRole("button", { name: "Starting..." })).toBeDisabled();
+    release();
+    await expect(page.getByText(/queued as toolbar-retry/)).toBeVisible();
+    expect(keys[1]).toBe(keys[0]);
+  });
+}
+
+test("schedule Run now retries the same key and each pending row stays busy", async ({ page }) => {
+  let release!: () => void;
+  const pending = new Promise<void>((resolve) => { release = resolve; });
+  const keys: string[] = [];
+  const schedules = ["alpha", "beta"].map((id) => ({
+    id, name: `demo/${id}`, schedule_name: "default", repo_path: "demo",
+    pipeline: id, where: "controller", cron: "0 3 * * *", tz: "UTC",
+    overlap: "skip", catch_up_ns: 0, args: {}, paused: false, declared: true,
+    state: "armed", state_detail: "", last_outcome: "", last_fired_at: "",
+    lock: { ref: "", binary: "", digest: "", state: "follows" },
+    override: { fields: [], stale: false, set_at: "" },
+  }));
+  await page.route("**/api/v1/**", async (route) => {
+    const path = new URL(route.request().url()).pathname;
+    if (route.request().method() === "POST") {
+      if (path === "/api/v1/schedules/alpha/run") {
+        keys.push(route.request().headers()["idempotency-key"]);
+        if (keys.length === 1) return route.abort("failed");
+        await pending;
+      }
+      return route.fulfill({ json: { run_id: path.includes("alpha") ? "alpha-run" : "beta-run" } });
+    }
+    return route.fulfill({ json: path === "/api/v1/schedules" ? { schedules } : {} });
+  });
+  await page.goto("/crons");
+  const alpha = page.locator('[data-schedule-id="alpha"]');
+  const beta = page.locator('[data-schedule-id="beta"]');
+  await alpha.getByRole("button", { name: "Run now", exact: true }).click();
+  await expect(page.getByText(/Choose Run now again/)).toBeVisible();
+  await page.clock.install();
+  await alpha.getByRole("button", { name: "Run now", exact: true }).click();
+  await expect.poll(() => keys.length).toBe(2);
+  await beta.getByRole("button", { name: "Run now", exact: true }).click();
+  await expect(page.getByText("Started beta-run", { exact: true })).toBeVisible();
+  await page.clock.fastForward(120_000);
+  await expect(alpha.getByRole("button", { name: "Working..." })).toBeDisabled();
+  await expect(alpha.getByRole("button", { name: "Pause", exact: true })).toBeDisabled();
+  await expect(beta.getByRole("button", { name: "Run now", exact: true })).toBeEnabled();
+  release();
+  await expect(page.getByText("Started alpha-run", { exact: true })).toBeVisible();
+  expect(keys[1]).toBe(keys[0]);
+});
