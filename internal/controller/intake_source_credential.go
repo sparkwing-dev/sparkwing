@@ -36,54 +36,60 @@ func (s *Server) verifyIntakeSourceCredential(ctx context.Context, team store.Te
 		return store.FetchedRepository{}, false, err
 	}
 	repo, _ := store.ParseGitHubRepo(repository.FullName)
-	ref := request.Git.Ref
+	comparisons := []struct{ sha, ref string }{{request.Source.Ref, request.Git.Ref}}
 	if pin := request.Source.RequestedRef; pin != "" && !runspec.IsCommitID(pin) {
-		ref = pin
+		comparisons[0].ref = pin
 	}
-	for _, prefix := range []string{"origin/", "refs/remotes/origin/"} {
-		if branch, ok := strings.CutPrefix(ref, prefix); ok {
-			ref = "refs/heads/" + branch
-		}
-	}
-	if pr := request.PullRequest; pr.Set && !pr.Value.Fork && pr.Value.HeadRepo == request.Git.Repository.Key && pr.Value.HeadRef != "" && (request.Source.RequestedRef == "" || runspec.IsCommitID(request.Source.RequestedRef)) {
-		ref = "refs/heads/" + runspec.NormalizedBranch(pr.Value.HeadRef)
-	}
-	if ref == "" || ref == "HEAD" || runspec.IsCommitID(ref) || strings.HasPrefix(ref, "refs/") && !strings.HasPrefix(ref, "refs/heads/") && !strings.HasPrefix(ref, "refs/tags/") {
-		if repository.DefaultBranch == "" {
-			token, err := s.githubApp.client.InstallationTokenByIDs(ctx, installation.InstallationID, []int64{id}, map[string]string{"metadata": "read"})
-			if err != nil {
-				return store.FetchedRepository{}, false, err
-			}
-			repository, err = s.githubApp.client.RepositoryByID(ctx, token.Token, id)
-			if err != nil {
-				return store.FetchedRepository{}, false, err
-			}
-			if repository.ID != id {
-				return store.FetchedRepository{}, false, errors.New("GitHub source repository identity changed")
-			}
-		}
-		if repository.DefaultBranch == "" {
-			return store.FetchedRepository{}, false, nil
-		}
-		ref = "refs/heads/" + repository.DefaultBranch
-	} else if !strings.HasPrefix(ref, "refs/") {
-		selection := request.Git
-		selection.Ref, selection.SHA = ref, request.Source.Ref
-		git, err := qualifyFetchedRef(ctx, selection, access.resolveGitHubAppRef(spec))
-		if err != nil {
-			return store.FetchedRepository{}, false, err
-		}
-		ref = git.Ref
-		if !strings.HasPrefix(ref, "refs/") {
-			ref = "refs/heads/" + runspec.NormalizedBranch(ref)
-		}
+	if !strings.EqualFold(request.Git.SHA, request.Source.Ref) {
+		comparisons = append(comparisons, struct{ sha, ref string }{request.Git.SHA, request.Git.Ref})
 	}
 	if !runspec.IsCommitID(request.Source.Ref) {
 		return store.FetchedRepository{}, false, nil
 	}
-	verified, err := s.githubApp.client.CommitReachable(ctx, installation.InstallationID, id, repo.Owner, repo.Name, request.Source.Ref, ref)
-	if err != nil || !verified {
-		return store.FetchedRepository{}, false, err
+	for _, comparison := range comparisons {
+		ref := comparison.ref
+		for _, prefix := range []string{"origin/", "refs/remotes/origin/"} {
+			if branch, ok := strings.CutPrefix(ref, prefix); ok {
+				ref = "refs/heads/" + branch
+			}
+		}
+		if pr := request.PullRequest; strings.HasPrefix(ref, "refs/pull/") && pr.Set && !pr.Value.Fork && pr.Value.HeadRepo == request.Git.Repository.Key && pr.Value.HeadRef != "" {
+			ref = "refs/heads/" + runspec.NormalizedBranch(pr.Value.HeadRef)
+		}
+		if ref == "" || ref == "HEAD" || runspec.IsCommitID(ref) || strings.HasPrefix(ref, "refs/") && !strings.HasPrefix(ref, "refs/heads/") && !strings.HasPrefix(ref, "refs/tags/") {
+			if repository.DefaultBranch == "" {
+				token, err := s.githubApp.client.InstallationTokenByIDs(ctx, installation.InstallationID, []int64{id}, map[string]string{"metadata": "read"})
+				if err != nil {
+					return store.FetchedRepository{}, false, err
+				}
+				repository, err = s.githubApp.client.RepositoryByID(ctx, token.Token, id)
+				if err != nil {
+					return store.FetchedRepository{}, false, err
+				}
+				if repository.ID != id {
+					return store.FetchedRepository{}, false, errors.New("GitHub source repository identity changed")
+				}
+			}
+			if repository.DefaultBranch == "" {
+				return store.FetchedRepository{}, false, nil
+			}
+			ref = "refs/heads/" + repository.DefaultBranch
+		} else if !strings.HasPrefix(ref, "refs/") {
+			selection := request.Git
+			selection.Ref, selection.SHA = ref, comparison.sha
+			git, err := qualifyFetchedRef(ctx, selection, access.resolveGitHubAppRef(spec))
+			if err != nil {
+				return store.FetchedRepository{}, false, err
+			}
+			ref = git.Ref
+			if !strings.HasPrefix(ref, "refs/") {
+				ref = "refs/heads/" + runspec.NormalizedBranch(ref)
+			}
+		}
+		verified, err := s.githubApp.client.CommitReachable(ctx, installation.InstallationID, id, repo.Owner, repo.Name, comparison.sha, ref)
+		if err != nil || !verified {
+			return store.FetchedRepository{}, false, err
+		}
 	}
 	// safety: repository proof requires App-selected code and a GitHub reachability check.
 	git, selected, err := s.appSourceSelector(team)(ctx, request)

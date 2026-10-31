@@ -13,6 +13,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/githubapp"
+	"github.com/sparkwing-dev/sparkwing/internal/githubapp/githubapptest"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
@@ -84,5 +85,50 @@ func TestRawCommitIntakeSealsOnlyRepositoryReachableCode(t *testing.T) {
 				t.Fatalf("historical commit acquired a head claim: %q %q", ref, commit)
 			}
 		})
+	}
+}
+
+func TestIntakeSourceCredentialComparesRepositoryRefsAndBothCommits(t *testing.T) {
+	const code = "0123456789abcdef0123456789abcdef01234567"
+	const execution = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+	for _, shape := range []string{"branch", "pull", "merged pull", "pinned source", "pinned branch source"} {
+		for _, status := range []string{"identical", "ahead", "behind", "diverged", "404"} {
+			t.Run(shape+"/"+status, func(t *testing.T) {
+				app := githubapptest.New(t)
+				app.AddInstallation(githubapptest.Installation{ID: 7, Account: githubapp.Account{ID: 70, Login: "acme", Type: "Organization"}, Repos: []githubapptest.Repo{{ID: 42, FullName: "acme/app", DefaultBranch: "main"}}})
+				s, _ := credentialSessionServer(t)
+				s.WithGitHubApp(app.Config())
+				teststore.SeedGitHubInstallation(t, s.store, "a", store.GitHubAppInstallation{InstallationID: 7, AccountID: 70, AccountLogin: "acme", AccountType: "Organization", ConnectedBy: "member", GitHubUserID: 71}, time.Now())
+				ref := "refs/heads/feature/slash"
+				request := runspec.Request{Pipeline: "ci", Git: runspec.Git{Repository: runspec.Repository{Key: "gh:42"}, Ref: ref, SHA: code}, Source: runspec.Source{Ref: code, Location: runspec.SourceLocation{RemoteURL: "https://github.com/acme/app", PipelineDir: ".sparkwing"}}}
+				if shape == "pull" || shape == "merged pull" {
+					request.PullRequest = runspec.Optional[runspec.PullRequest]{Set: true, Value: runspec.PullRequest{HeadRepo: "gh:42", HeadRef: "feature/slash", BaseRef: "main"}}
+					request.Git.Ref = "refs/pull/7/head"
+					if shape == "merged pull" {
+						request.Git.Ref, ref = "refs/heads/main", "refs/heads/main"
+					}
+				}
+				app.SetCommit("acme/app", request.Git.Ref, code)
+				if shape == "pinned source" || shape == "pinned branch source" {
+					request.Git.SHA, request.Source.RequestedRef = execution, code
+					app.SetCommit("acme/app", ref, execution)
+					sourceRef := ref
+					if shape == "pinned branch source" {
+						request.Source.RequestedRef, sourceRef = "refs/heads/code", "refs/heads/code"
+						app.SetCommit("acme/app", sourceRef, code)
+					}
+					app.SetFile("acme/app", execution, ".sparkwing/sparkwing.yaml", []byte("pipelines:\n  - name: ci\n    entrypoint: CI\n    source: "+request.Source.RequestedRef+"\n"))
+					app.SetComparison("acme/app", code, sourceRef, "ahead")
+					app.SetComparison("acme/app", execution, ref, status)
+				} else {
+					app.SetComparison("acme/app", code, ref, status)
+				}
+				fetched, verified, err := s.verifyIntakeSourceCredential(t.Context(), "a", request)
+				want := status == "identical" || status == "ahead"
+				if err != nil || verified != want || (fetched.ID == 42) != want {
+					t.Fatalf("fetched=%+v verified=%v error=%v, want proof=%v", fetched, verified, err, want)
+				}
+			})
+		}
 	}
 }

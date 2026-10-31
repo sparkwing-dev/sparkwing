@@ -112,6 +112,7 @@ type GitHub struct {
 	users            map[string]*userCode
 	tokens           map[string]*issuedToken
 	commits          map[string]string
+	comparisons      map[string]string
 	files            map[string][]byte
 	aliases          map[string]string
 	failContents     int
@@ -135,14 +136,15 @@ func New(t testing.TB) *GitHub {
 	}
 	g := &GitHub{
 		Key: key, t: t,
-		insts:     map[int64]*Installation{},
-		codes:     map[string]*userCode{},
-		users:     map[string]*userCode{},
-		tokens:    map[string]*issuedToken{},
-		commits:   map[string]string{},
-		files:     map[string][]byte{},
-		aliases:   map[string]string{},
-		checkRuns: map[int64]CheckRunCall{},
+		insts:       map[int64]*Installation{},
+		codes:       map[string]*userCode{},
+		users:       map[string]*userCode{},
+		tokens:      map[string]*issuedToken{},
+		commits:     map[string]string{},
+		comparisons: map[string]string{},
+		files:       map[string][]byte{},
+		aliases:     map[string]string{},
+		checkRuns:   map[int64]CheckRunCall{},
 	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /login/oauth/access_token", g.handleAccessToken)
@@ -202,6 +204,14 @@ func (g *GitHub) SetCommit(repo, ref, sha string) {
 		qualified = "heads/" + ref
 	}
 	g.commits[strings.ToLower(repo)+"/"+qualified] = sha
+}
+
+// SetComparison makes a repository's base...ref comparison answer status.
+// Status is identical, ahead, behind, diverged, or 404 for a missing comparison.
+func (g *GitHub) SetComparison(repo, base, ref, status string) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	g.comparisons[strings.ToLower(repo)+"/"+base+"..."+ref] = status
 }
 
 // SetFile makes path available at sha, or removes it when content is nil.
@@ -354,10 +364,21 @@ func (g *GitHub) handleCompare(w http.ResponseWriter, r *http.Request) {
 	}
 	g.mu.Lock()
 	head := g.commits[repo+"/"+strings.TrimPrefix(ref, "refs/")]
+	status, configured := g.comparisons[repo+"/"+base+"..."+ref]
 	g.mu.Unlock()
-	status := "diverged"
-	if head != "" && head == base {
-		status = "identical"
+	if !configured {
+		switch {
+		case head == "":
+			status = "404"
+		case head == base:
+			status = "identical"
+		default:
+			status = "diverged"
+		}
+	}
+	if status == "404" {
+		writeJSON(w, http.StatusNotFound, map[string]string{"message": "Not Found"})
+		return
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"status": status})
 }
