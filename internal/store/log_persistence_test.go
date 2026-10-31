@@ -26,7 +26,7 @@ func TestLogPersistenceCannotCreateStream(t *testing.T) {
 	rewriteSchemaCount(t, s.db, "log_segments", 0)
 }
 
-func TestLogPersistenceRetryTailKeepsItsWriterAndGrace(t *testing.T) {
+func TestLogPersistenceRetryFencesPreviousAttempt(t *testing.T) {
 	for _, name := range []string{"within grace", "at boundary", "after grace", "other holder", "other credential", "other generation"} {
 		t.Run(name, func(t *testing.T) {
 			s, tenant, actor, attempt := resultFixture(t)
@@ -49,12 +49,20 @@ func TestLogPersistenceRetryTailKeepsItsWriterAndGrace(t *testing.T) {
 				rewriteSchemaExec(t, s.db, `UPDATE nodes SET generation=generation+1 WHERE team='a' AND run_id='run' AND node_id='job'`)
 			}
 			commit := logCommit(actor, attempt)
-			commit.Final = true
-			err = tenant.RecordSegments(t.Context(), commit)
-			allowed := name == "within grace" || name == "at boundary"
-			if (err == nil) != allowed {
-				t.Fatalf("retry tail allowed=%v: %v", allowed, err)
+			if _, err := tenant.PrepareLogWrite(t.Context(), commit.Subject, actor); err == nil {
+				t.Fatal("retry permitted the previous attempt's live log write")
 			}
+			if _, err := tenant.OpenLogSlot(t.Context(), commit.Subject, actor, 1, 3); err == nil {
+				t.Fatal("retry permitted the previous attempt's upload slot")
+			}
+			for _, final := range []bool{false, true} {
+				commit.Final = final
+				if err := tenant.RecordSegments(t.Context(), commit); err == nil {
+					t.Fatalf("retry permitted the previous attempt's log commit (final=%v)", final)
+				}
+			}
+			rewriteSchemaCount(t, s.db, "log_slots", 0)
+			rewriteSchemaCount(t, s.db, "log_segments", 0)
 		})
 	}
 }

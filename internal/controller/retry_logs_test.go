@@ -24,15 +24,16 @@ func TestRetryLogUploadsUseTheirAwardedWriter(t *testing.T) {
 		t.Run(fmt.Sprintf("cloud=%v", cloud), func(t *testing.T) {
 			for _, outcome := range []string{"success", "failed"} {
 				t.Run(outcome, func(t *testing.T) {
-					t.Run("while retry runs", func(t *testing.T) { retryLogUploads(t, true, cloud, outcome) })
-					t.Run("after last attempt seals", func(t *testing.T) { retryLogUploads(t, false, cloud, outcome) })
+					for _, timing := range []string{"before retry", "while retry runs", "after last attempt seals"} {
+						t.Run(timing, func(t *testing.T) { retryLogUploads(t, timing, cloud, outcome) })
+					}
 				})
 			}
 		})
 	}
 }
 
-func retryLogUploads(t *testing.T, early, cloud bool, outcome string) {
+func retryLogUploads(t *testing.T, timing string, cloud bool, outcome string) {
 	t.Helper()
 	e, _, raw := engineClaimHTTPFixture(t, []capability.Grant{capability.NodesClaim})
 	objects, err := blob.NewFilesystem(blob.FilesystemOptions{Directory: t.TempDir(), Endpoint: "http://local", SigningKey: bytes.Repeat([]byte{42}, 32)})
@@ -88,7 +89,7 @@ func retryLogUploads(t *testing.T, early, cloud bool, outcome string) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		sink, err := logseg.NewSink(t.Context(), uploader, logseg.Options{Subject: subject})
+		sink, err := logseg.NewSink(t.Context(), uploader, logseg.Options{Subject: subject, Retries: 1})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -100,11 +101,16 @@ func retryLogUploads(t *testing.T, early, cloud bool, outcome string) {
 	engineAdmitBearer(t, e.Store, claim.Capability)
 	engineClaimHTTP(t, h, claim.Capability, "POST", "/api/v1/runs/run/jobs/job/transition", `{"to":"running","cause":"start","source_attempt":0}`, http.StatusOK)
 	first := open(1)
+	if timing == "before retry" {
+		if _, err := first.Close(t.Context(), logseg.End{}); err != nil {
+			t.Fatalf("first upload before retry: %v", err)
+		}
+	}
 	engineClaimHTTP(t, h, claim.Capability, "POST", "/api/v1/runs/run/jobs/job/transition", `{"to":"running","cause":"retry","source_attempt":1,"result":{"outcome":"failed","reason":"retry me"}}`, http.StatusOK)
 	second := open(2)
-	if early {
-		if _, err := first.Close(t.Context(), logseg.End{}); err != nil {
-			t.Fatalf("first upload during retry: %v", err)
+	if timing == "while retry runs" {
+		if _, err := first.Close(t.Context(), logseg.End{}); err == nil {
+			t.Fatal("retry permitted the previous attempt's upload")
 		}
 	}
 	report := fmt.Sprintf(`{"to":%q,"cause":"report","source_attempt":2,"result":{"outcome":%q}}`, outcome, outcome)
@@ -135,20 +141,25 @@ func retryLogUploads(t *testing.T, early, cloud bool, outcome string) {
 		t.Fatalf("retry upload: %v", err)
 	}
 	reader, _ := memberLogSearchReader(t, e.Store, objects)
-	if !early {
+	if timing == "after last attempt seals" {
 		page, err := reader.ReadLogs(t.Context(), "run", controllerwire.LogQuery{NoEvents: true})
 		if err != nil || page.Complete || len(page.Records) != 1 || page.Records[0].Subject.Attempt.Attempt != 2 {
 			t.Fatalf("pending first tail: %+v %v", page, err)
 		}
-		if _, err := first.Close(t.Context(), logseg.End{}); err != nil {
-			t.Fatalf("delayed first upload: %v", err)
+		if _, err := first.Close(t.Context(), logseg.End{}); err == nil {
+			t.Fatal("sealed retry permitted the previous attempt's upload")
 		}
 	}
+	ordinals := []int64{2}
+	complete := timing == "before retry"
+	if complete {
+		ordinals = []int64{1, 2}
+	}
 	page, err := reader.ReadLogs(t.Context(), "run", controllerwire.LogQuery{NoEvents: true})
-	if err != nil || !page.Complete || len(page.Records) != 2 {
+	if err != nil || page.Complete != complete || len(page.Records) != len(ordinals) {
 		t.Fatalf("finished retry aggregate: %+v %v", page, err)
 	}
-	for _, ordinal := range []int64{1, 2} {
+	for _, ordinal := range ordinals {
 		if !slices.ContainsFunc(page.Records, func(record controllerwire.LogRecord) bool {
 			return record.Subject != nil && record.Subject.Attempt != nil && record.Subject.Attempt.Attempt == ordinal && record.Line == fmt.Sprintf("attempt %d output", ordinal)
 		}) {
