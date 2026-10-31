@@ -154,9 +154,10 @@ See [CLI schedules](cli-schedules.md) for the generated flag reference and
 
 Controller fires seal the repository, ref and effective arguments before they
 enter the run queue. Repeating the same due instant returns the original run.
-Scheduled launches use shared run admission and count against their team's
-configured hourly run budget and pending-queue limit. Replaying an admitted
-slot uses no additional run budget.
+Due launches and immediate runs use shared run admission and count against
+their team's configured hourly run budget and pending-queue limit. Replaying
+an admitted request uses no additional run budget. An immediate run records
+the member who pressed Run now as its actor and leaves the cadence unchanged.
 App-managed schedules require a live installation and repository automation
 consent. Team admins may pause and resume an App-managed schedule, and each
 pause or resume is audited. Nobody can override or delete one, including

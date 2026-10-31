@@ -47,7 +47,7 @@ unlock.
   With local admission enabled, a saturated machine stops offering job capacity instead of repeatedly reclaiming work it cannot start. Planning continues while the budget is full.
 - **console:** Rerun executes retries of accepted controller-dispatched plans
   Intake assigns controller ownership so the preserved plan can schedule jobs without losing a planning owner before the first attempt.
-- **schedules:** Due slots enter shared flood admission and create runs within the existing team limits
+- **schedules:** Due slots and Run now enter shared flood admission and create runs within the existing team limits
   Replays return the admitted run without spending another run token.
 - **outputs:** Go and TypeScript jobs can read their declared predecessors' outputs in the same run and team
   Unrelated jobs and other runs remain outside an in-run output read.
