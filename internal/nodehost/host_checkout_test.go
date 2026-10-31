@@ -128,6 +128,9 @@ func checkCheckoutPlanning(t *testing.T, mode string) {
 		t.Fatalf("completion=%+v spec=%+v", completion, s.row.Spec)
 	}
 	resolved := s.row.Spec.Resolved
+	if !reflect.DeepEqual(resolved.OptionalSecretNames, []string{"OPTIONAL"}) {
+		t.Fatalf("lost optional secret declaration: %+v", resolved)
+	}
 	if resolved.Args["explicit"] != "request" || resolved.Args["inherited"] != "pipeline" || resolved.Args["default"] != "defaults" || resolved.Args["sdk"] != defaultArg || resolved.Args["secret"] != secretArg || !reflect.DeepEqual(resolved.SecretNames, []string{"REQUIRED", "OPTIONAL"}) || !reflect.DeepEqual(resolved.SecretArgs, []string{"secret"}) || resolved.Settings.Options.Priority.Value != 7 {
 		t.Fatalf("lost resolved inputs: %+v", resolved)
 	}

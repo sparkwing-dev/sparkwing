@@ -297,7 +297,7 @@ func TestSealRefusals(t *testing.T) {
 			t.Fatal("invalid request sealed")
 		}
 	}
-	for _, change := range []func(*SealInput){func(i *SealInput) { i.Request.Request.Git.SHA = "changed" }, func(i *SealInput) { i.Resolved.SecretArgs = nil }, func(i *SealInput) { i.Resolved.DefaultBranch.Value = "other" }, func(i *SealInput) { i.Resolved.DefaultBranchSource = "other" }, func(i *SealInput) { i.Plan = json.RawMessage(`invalid`) }} {
+	for _, change := range []func(*SealInput){func(i *SealInput) { i.Request.Request.Git.SHA = "changed" }, func(i *SealInput) { i.Resolved.SecretArgs = nil }, func(i *SealInput) { i.Resolved.OptionalSecretNames = []string{"UNDECLARED"} }, func(i *SealInput) { i.Resolved.DefaultBranch.Value = "other" }, func(i *SealInput) { i.Resolved.DefaultBranchSource = "other" }, func(i *SealInput) { i.Plan = json.RawMessage(`invalid`) }} {
 		input := SealInput{Request: s.Request, Resolved: s.Resolved, Plan: json.RawMessage(`{}`)}
 		change(&input)
 		if _, err := SealSpec(input); err == nil {

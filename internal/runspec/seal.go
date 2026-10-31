@@ -99,6 +99,11 @@ func SealSpec(input SealInput) (Spec, error) {
 	if !validResolvedClassification(input.Request.Request, input.Resolved) {
 		return Spec{}, errors.New("resolved secret argument classification is missing or invalid")
 	}
+	for _, name := range input.Resolved.OptionalSecretNames {
+		if !slices.Contains(input.Resolved.SecretNames, name) {
+			return Spec{}, errors.New("optional secret must be declared by the pipeline")
+		}
+	}
 	for _, name := range input.Resolved.SecretArgs {
 		if _, present := input.Resolved.Args[name]; !present {
 			return Spec{}, errors.New("resolved secret argument classification names an absent argument")

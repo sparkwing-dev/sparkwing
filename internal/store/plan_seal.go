@@ -131,7 +131,10 @@ func preparePlanSealTx(ctx context.Context, tx *storeTx, team Team, request Plan
 	if !localSecretDeclared(input.Resolved.SecretNames, run.Request.Request.LocalSecretNames) {
 		return runspec.Spec{}, nil, authorityError(apierr.PlanInvalid, "local secrets must be declared by the pipeline")
 	}
-	if err = secretPreflightTx(ctx, tx, team, run, selection, input.Resolved.SecretNames); err != nil {
+	required := slices.DeleteFunc(slices.Clone(input.Resolved.SecretNames), func(name string) bool {
+		return slices.Contains(input.Resolved.OptionalSecretNames, name)
+	})
+	if err = secretPreflightTx(ctx, tx, team, run, selection, required); err != nil {
 		return runspec.Spec{}, nil, err
 	}
 	if err = checkExpansionSecretPoolsTx(ctx, tx, team, runspec.Spec{Request: run.Request, Resolved: input.Resolved}, resolved.Jobs, selection); err != nil {
