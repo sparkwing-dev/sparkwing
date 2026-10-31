@@ -25,3 +25,10 @@ queue-wait percentiles and contention counters. Update clients that decode
 those fields or the pin/floor estimate sources. The console and CLI continue
 to show measured resource distributions and predecessor estimates. Local daemon
 admission resource pins retain their existing behavior.
+
+The OpenAPI schemas `components.schemas.internal.controllerwire.JobSizing`
+and `components.schemas.internal.controllerwire.SizingMeasurements` remove
+`pinned_cores`, `pinned_memory_bytes`, `floor_cores`, `floor_memory_bytes`,
+`wait_p50_ns`, `wait_p99_ns`, `wait_sample_count` and `contended_count`.
+`components.schemas.internal.controllerwire.SizingDetail` removes `drift`.
+Remove dependencies on these fields before upgrading.

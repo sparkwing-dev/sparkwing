@@ -1,6 +1,7 @@
 package jobs
 
 import (
+	"context"
 	"encoding/json"
 	"strings"
 	"testing"
@@ -81,10 +82,22 @@ func TestReleaseCommitRecordsPreparedFilesOnce(t *testing.T) {
 				t.Fatal("preparation created a commit before the gates")
 			}
 			commit := commitChangelogJob{RepoDir: repo, Version: version}
-			if err := commit.run(ctx); err != nil {
+			_, plan, _ := preparePlan(t, func(_ context.Context, plan *sparkwing.Plan) error {
+				sparkwing.Job(plan, "version", &resolveVersionJob{Explicit: "v0.9.0", RepoDir: repo})
+				sparkwing.Job(plan, "commit", &commit)
+				return nil
+			})
+			host := newTestHost(t, sparkwingtest.Options{Outputs: map[string]json.RawMessage{
+				"version": json.RawMessage(`"v0.9.0"`),
+			}})
+			output, err := host.RunStep(t.Context(), plan, "commit", "run")
+			if err != nil {
 				t.Fatal(err)
 			}
 			after := gitRun(t, repo, "rev-parse", "HEAD")
+			if string(output) != `"`+strings.TrimSpace(after)+`"` {
+				t.Fatalf("commit output = %s, want release commit %s", output, after)
+			}
 			if after == before || gitRun(t, repo, "rev-parse", "HEAD^") != before {
 				t.Fatal("commit did not advance HEAD exactly once")
 			}

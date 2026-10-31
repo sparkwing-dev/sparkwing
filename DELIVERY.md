@@ -19,8 +19,9 @@ launcher when testing isolated tool state.
 A release is a tag push. The `release` pipeline resolves the version, renames
 `## [Unreleased]` in CHANGELOG.md to the version, stages the release notes,
 checks the section covers any schema or wire change since the previous tag,
-then commits and pushes the branch and an annotated `vX.Y.Z` tag. Run it from the
-sparkwing checkout under a temporary home, which the pipeline requires so a
+then commits and atomically pushes that commit to `main` with an annotated
+`vX.Y.Z` tag. Run it from the sparkwing checkout under a temporary home,
+which the pipeline requires so a
 newer embedded schema cannot migrate the operational runs store. The release
 factory validates the home before intake opens the store, including for a dry
 run. An unset `SPARKWING_HOME` or `$HOME/.sparkwing` is refused. Discovery may
@@ -54,6 +55,19 @@ waits for every gate, including the schema and wire gates that read the prepared
 notes. A gate failure after preparation leaves HEAD at the starting commit
 and the prepared files staged for inspection. No commit needs undoing. Inspect those files and return
 the checkout to a clean tree before retrying the cut.
+
+`commit-changelog` returns the release commit SHA. `push-tag` runs on the
+dispatcher in the original checkout and uses that SHA for both the annotated
+tag and the update to `refs/heads/main`, regardless of a job snapshot's detached
+HEAD. One `git push --atomic` publishes both refs. A rejected push changes
+neither remote ref. The local commit and tag remain for inspection. Resolve
+the rejection and remove the unpublished local tag before retrying.
+
+Release lint prints that it is waiting for the box-wide golangci-lint lock,
+then uses `--allow-serial-runners` to wait and lint in sequence. The release
+job and lint deadline allow 40 minutes total: the ten-minute check allowance
+plus 30 minutes for contention. The tier measures that combined wall time,
+including waiting. Other lint callers keep their five-minute deadline.
 
 Version freshness excludes `testdata` fixture modules, matching the committed-module checks.
 
@@ -304,7 +318,8 @@ file. Other syntax and workflow checks remain active.
 - **The three check classes and their budgets:** `pre-commit` is the source
   policy at 3 seconds, `pre-push` the fast tier with a one-minute hard limit,
   and the release cut, the `release-cut-checks` job the `release` pipeline runs
-  before it tags, 10 minutes for build, full lint, the short test suite,
+  before it tags, 40 minutes including 30 minutes of lint-lock allowance
+  and ten minutes for build, full lint, the short test suite,
   published-version, Go-directive and SDK-pin checks, and changelog-link checks
   in parallel.
   Each of those jobs times its own steps and fails when the class overruns,
@@ -312,8 +327,8 @@ file. Other syntax and workflow checks remain active.
   Above 25 changed Go files, the two hook tiers waive only their time budgets
   and still report the span and slowest step. Every selected check still runs.
   At or below 25 files, both hook budgets are enforced. The release cut always
-  enforces its ten-minute budget, regardless of change size. A tier whose
-  scope holds no Go file still runs and passes every step, so it warns and
+  enforces its combined forty-minute wall budget, regardless of change size.
+  A tier whose scope holds no Go file still runs and passes every step, so it warns and
   names the scope it read: a push judged against an empty
   `origin/main..HEAD` range reports success over nothing, and uncommitted
   work is outside what `pre-push` reads. The
@@ -405,7 +420,7 @@ file. Other syntax and workflow checks remain active.
   `internal/store -short` run without concurrent build or lint took 347.558 s,
   with 1,214 top-level passes and a 240 ms median test duration; 1,130
   exceeded 200 ms. Repeated current-schema SQLite setup remains in this
-  coverage. The ten-minute budget keeps the entire short suite and its
+  coverage. The ten-minute check allowance keeps the entire short suite and its
   checks, with room above the measured 7m19.746s class span. `sparkwing runs stats
   --pipeline pre-commit --since 7d` reports what a class has cost over the
   week, and `sparkwing runs status --run <id> --view timeline --steps` breaks one run into
@@ -820,7 +835,8 @@ file. Other syntax and workflow checks remain active.
 - **Release:** merging is not a release; a release is a tag push. The local
   `release` pipeline checks the chosen version against origin tags, checks the
   clean tree, and verifies published module freshness, Go directive policy,
-  coherent SDK pins and changelog links in the fixed ten-minute build/lint/short-test class. It then
+  coherent SDK pins and changelog links in the build/lint/short-test class, with
+  a forty-minute wall budget including 30 minutes of lint-lock allowance. It then
   renames `[Unreleased]`, rolls the migration guide, validates the resulting
   section and guide, and checks schema/wire change coverage before committing.
   All refusals precede push-tag. Freshness checks published versions, not the

@@ -30,11 +30,17 @@ unlock.
   Idempotent retries count once. Refusals report current usage, a retry delay and support guidance before calling the provider.
 - **store (Breaking):** The schema baseline advances to version 28 and requires a schema wipe
   Back up and recreate stores at any other version using the [backup and move-aside instructions](docs/backup-restore.md#schema-compatibility). The baseline records Checkout Session reservation times, removes unused columns and capacity profile pins, waits, contention counters and floors, and enforces financial row shapes plus one open billing interval per award. Staging and production stores must be recreated before this build starts.
+- **controller (Breaking):** Sizing and capacity responses drop stored resource pins, demand floors, queue waits, contention counters and drift
+  Update API clients using the [capacity-profile migration guide](docs/migrations/_unreleased.md#capacity-profiles-report-measured-data). Measured resource distributions and predecessor estimates remain available.
 - **release (Breaking):** Sparkwing releases use the native tag-and-publication flow
   Platform deployment is separate. Retire the platform repository's `release-all` pipeline and `bin/trigger-change-deploy.sh` callers when updating that repository.
 
 ### Fixed
 
+- **release:** Publish main and the annotated tag together with one atomic push of the recorded changelog commit
+  Detached job snapshots no longer block publication or select the wrong commit. A rejected push leaves both remote refs unchanged.
+- **release:** Wait for another tree's golangci-lint run before linting
+  The release logs the wait and allows 30 minutes of contention alongside its ten-minute check allowance.
 - **Cloud:** Runner images include pinned, checksum-verified Docker CLI, buildx, and Compose binaries for amd64 and arm64. Pipeline processes keep the sidecar's `DOCKER_HOST`, and `/tmp` supports package managers that create temporary files as an unprivileged user.
 - **GitHub App:** Existing-installation discovery survives canceled requests and GitHub API failures within the original browser session and team. The callback navigates once to the picker, and client cancellations log at info level. Connection refusals show their reason without blaming GitHub ownership. An already-used or expired connection explains how to start again.
 - **Cloud:** Unsupported size labels fail at admission or planning with the valid catalogue sizes. Remote requests that mark source as a working tree without a local checkout fail at intake with snapshot instructions instead of repeatedly losing launcher leases. Uploaded committed snapshots remain supported.

@@ -51,21 +51,30 @@ func TestPrePushBudgetFailsPastOneMinuteNamingTheSlowestStep(t *testing.T) {
 
 func TestReleaseCutBudgetAcceptsTheMeasuredTestClass(t *testing.T) {
 	span := 7*time.Minute + 19*time.Second + 746*time.Millisecond
-	_, err := budgetVerdict("release cut", releaseCutBudget, span,
+	_, err := budgetVerdict("release cut", releaseCutBudget+releaseLintLockAllowance, span,
 		[]stepTiming{{"test", span}}, false, -1)
 	if err != nil {
 		t.Fatalf("the measured release test class failed its budget: %v", err)
 	}
 }
 
-func TestReleaseCutBudgetFailsPastTenMinutesNamingTheSlowestStep(t *testing.T) {
-	span := 10*time.Minute + time.Millisecond
-	_, err := budgetVerdict("release cut", releaseCutBudget, span,
+func TestReleaseCutBudgetAcceptsContentionAndChecks(t *testing.T) {
+	span := 30*time.Minute + 7*time.Minute + 19*time.Second
+	_, err := budgetVerdict("release cut", releaseCutBudget+releaseLintLockAllowance, span,
+		[]stepTiming{{"lint", span}}, false, -1)
+	if err != nil {
+		t.Fatalf("lint waiting for another tree exhausted the check allowance: %v", err)
+	}
+}
+
+func TestReleaseCutBudgetFailsPastFortyMinutesNamingTheSlowestStep(t *testing.T) {
+	span := 40*time.Minute + time.Millisecond
+	_, err := budgetVerdict("release cut", releaseCutBudget+releaseLintLockAllowance, span,
 		[]stepTiming{{"test", span}}, false, -1)
 	if err == nil {
-		t.Fatal("a release cut past ten minutes passed")
+		t.Fatal("a release cut past forty minutes passed")
 	}
-	if !strings.Contains(err.Error(), "test") || !strings.Contains(err.Error(), "10m0.001s") {
+	if !strings.Contains(err.Error(), "test") || !strings.Contains(err.Error(), "40m0.001s") {
 		t.Errorf("the failure names neither the slowest step nor its cost: %v", err)
 	}
 }
