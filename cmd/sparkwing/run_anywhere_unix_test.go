@@ -3,7 +3,6 @@
 package main
 
 import (
-	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -14,7 +13,6 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
-	"github.com/sparkwing-dev/sparkwing/internal/controller/client"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/engineid"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
@@ -55,31 +53,7 @@ func runAnywherePlan(t *testing.T, f cloudDispatch, created controllerwire.Creat
 	}
 }
 
-func runAnywhereComplete(t *testing.T, f cloudDispatch, unit *controllerwire.ClaimedUnit) {
-	t.Helper()
-	work := f.open(unit.Capability, false)
-	host, err := client.NewNodeHostClient(client.EngineOptions{URL: f.endpoint, Bearer: func(context.Context) (string, error) { return unit.Capability, nil }}, unit.RunID, unit.JobID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() {
-		if err := host.Close(); err != nil {
-			t.Error(err)
-		}
-	})
-	if decision, err := host.MayStart(t.Context(), runstate.CapacityBinding{RunID: unit.RunID, NodeID: unit.JobID, Generation: unit.Binding.Generation}, runstate.Actor{}); err != nil || decision.Kind != runstate.AcquireGranted {
-		t.Fatalf("node admission: %+v: %v", decision, err)
-	}
-	started, err := work.TransitionJob(t.Context(), unit.RunID, unit.JobID, controllerwire.JobTransitionRequest{To: "running", Cause: "start", SourceAttempt: &unit.Binding.Attempt})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := work.TransitionJob(t.Context(), unit.RunID, unit.JobID, controllerwire.JobTransitionRequest{To: "success", Cause: "report", SourceAttempt: &started.Attempt, Result: &controllerwire.JobResult{Outcome: "success"}}); err != nil {
-		t.Fatal(err)
-	}
-}
-
-func TestCloudUnselectedTriggerRunsOnALiveSelfHostedRunnerBeforeCloud(t *testing.T) {
+func TestCloudUnselectedUploadSkipsALiveRepositoryScopedRunner(t *testing.T) {
 	f := cloudDispatchTrigger(t)
 	builder := cloudDispatchMachine(t, f, "builder")
 	if runAnywherePoll(t, f, builder, 1) != nil {
@@ -89,33 +63,27 @@ func TestCloudUnselectedTriggerRunsOnALiveSelfHostedRunnerBeforeCloud(t *testing
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cloudDispatchRequest(t, f, created.RunID).Request.Dispatch != runspec.DispatchController {
-		t.Fatalf("unselected Cloud trigger sealed dispatch=%s", cloudDispatchRequest(t, f, created.RunID).Request.Dispatch)
+	request := cloudDispatchRequest(t, f, created.RunID)
+	if request.Request.Dispatch != runspec.DispatchController || !request.Provenance.Valid() || request.Provenance.ProvenRepository() != "" {
+		t.Fatalf("upload intake: dispatch=%s provenance=%+v", request.Request.Dispatch, request.Provenance)
+	}
+	if plan := runAnywherePoll(t, f, builder, 2); plan != nil {
+		t.Fatalf("repository-scoped runner claimed an unproven upload: %+v", plan)
 	}
 	cloud := newCloudDispatchLauncher(t, f)
-	if launched, err := cloud.runtime.LaunchOne(t.Context()); err != nil || launched {
-		t.Fatalf("launcher took the plan while a better-ranked runner was live: %v %v", launched, err)
-	}
-	plan := runAnywherePoll(t, f, builder, 2)
-	if plan == nil || plan.Unit != capability.UnitPlan || plan.Delivery != capability.DeliveryDirect || plan.RunID != created.RunID {
-		t.Fatalf("runner plan award: %+v", plan)
+	plan := cloud.launch(t, capability.UnitPlan, "")
+	if plan.RunID != created.RunID {
+		t.Fatalf("launcher planned %s, want %s", plan.RunID, created.RunID)
 	}
 	runAnywherePlan(t, f, created, plan.Capability)
-	if launched, err := cloud.runtime.LaunchOne(t.Context()); err != nil || launched {
-		t.Fatalf("launcher took the job while a better-ranked runner was live: %v %v", launched, err)
+	cloud.finish(t)
+	if job := runAnywherePoll(t, f, builder, 1); job != nil {
+		t.Fatalf("repository-scoped runner claimed an unproven job: %+v", job)
 	}
-	job := runAnywherePoll(t, f, builder, 1)
-	if job == nil || job.Unit != capability.UnitNode || job.JobID != "verify" {
-		t.Fatalf("runner job award: %+v", job)
-	}
-	runAnywhereComplete(t, f, job)
+	cloud.complete(t, cloud.launch(t, capability.UnitNode, "verify"))
 	detail, err := f.member.ReadRun(t.Context(), created.RunID)
 	if err != nil || detail.Status != string(runstate.RunSuccess) {
 		t.Fatalf("run-anywhere outcome: %+v %v", detail, err)
-	}
-	var charges, metered int
-	if err := teststore.SQL(t, f.state).QueryRowContext(t.Context(), `SELECT (SELECT COUNT(*) FROM credit_charges),(SELECT COUNT(*) FROM billing_awards WHERE metered=1)`).Scan(&charges, &metered); err != nil || charges != 0 || metered != 0 {
-		t.Fatalf("self-hosted run-anywhere work was billed: charges=%d metered=%d %v", charges, metered, err)
 	}
 }
 

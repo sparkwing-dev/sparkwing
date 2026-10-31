@@ -58,6 +58,36 @@ func TestRankingTopTierPresentClaimsImmediately(t *testing.T) {
 	wantAward(t, f, f.Personal, capability.UnitNode, "job")
 }
 
+func TestRankingLiveSelfHostedRunnerPrecedesCloudForProvenWork(t *testing.T) {
+	for _, kind := range []capability.UnitKind{capability.UnitPlan, capability.UnitNode} {
+		t.Run(string(kind), func(t *testing.T) {
+			f := rankingFixture(t, true)
+			f.Request(t, func(r *runspec.Request) { r.Origin = runspec.OriginApp })
+			f.At(-time.Minute)
+			issued, err := f.Store.AsOperator().ProvisionCapability(t.Context(), capability.ProvisionSpec{
+				Kind: capability.ProvisionMachine, Authority: &f.Admin.Authority,
+				RegistrationID: "runner:a:scoped", Team: "a",
+				Subject:      capability.Subject{Kind: capability.SubjectMachine, ID: "scoped"},
+				Repositories: []string{"github.com/acme/*"},
+				Grants:       []capability.Grant{capability.TriggersClaim, capability.NodesClaim},
+				Binding:      capability.Binding{Kind: capability.BindingNone},
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			self := issued.Capability.Prefix
+			livePolls(t, f, self, f.Launcher)
+			f.At(time.Second)
+			wantNone(t, f, f.Launcher, kind)
+			job := ""
+			if kind == capability.UnitNode {
+				job = "job"
+			}
+			wantAward(t, f, self, kind, job)
+		})
+	}
+}
+
 func TestRankingSeesTheLocalQueue(t *testing.T) {
 	f := rankingFixture(t, true)
 	local := f.LocalQueue(t)
