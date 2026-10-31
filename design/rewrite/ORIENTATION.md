@@ -18,6 +18,7 @@ credential model in `docs/auth.md`, and the decision log
 
 | Rule | Owner | Guard test |
 | --- | --- | --- |
+| Waitlisted operators retain console routes and navigation while customer pages stay gated | `internal/controller/identity.go`: `handleMe`; `web/src/components/WaitlistGate.tsx`, `Nav.tsx` | `internal/controller/operator_test.go`: `TestWaitlistedOperatorKeepsConsoleAccess`; `web/tests/browser/waitlist.spec.ts` |
 | Team handle | `tenant.go`: `Store.ForTeam` returns `*Tenant`; `NormalizeTeam` is the one spelling | `tenant_test.go`: `TestForTeamRefusesTheEmptyTeam`, `TestTenantRunsAreInvisibleToAnotherTeam` |
 | Foreign-team refusal for an authority | `capabilities_contract.go`: `resolveTeamAuthorityTx`, `resolveTeamActorTx` (`sameTeam` / `sameTeamOrCloudLauncher`) | `team_authority_guard_test.go`: `TestTeamScopedFunctionsResolveThroughTeam` |
 | Every tenant-table statement carries `team` | the SQL in each tenant method | `tenant_sql_scope_guard_test.go`: `TestTenantSQLScope_EveryTenantTableStatementCarriesTheKey`; `tenant_writer_guard_test.go` |

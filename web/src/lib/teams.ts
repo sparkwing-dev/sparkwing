@@ -32,6 +32,7 @@ export interface Me {
   // True while the account waits for admission: it holds no personal space
   // and cannot create a team, but it can join a team that invites it.
   waitlisted?: boolean;
+  operator_console?: boolean;
 }
 
 // A waitlisted account with no team yet; it has no active team to show.
@@ -189,6 +190,7 @@ export async function getMe(): Promise<MeResult> {
           memberships: body.memberships ?? [],
           invitations: body.invitations ?? [],
           waitlisted: true,
+          operator_console: body.operator_console,
         },
       };
     }

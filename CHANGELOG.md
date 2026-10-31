@@ -41,6 +41,8 @@ unlock.
 
 ### Fixed
 
+- **console:** Waitlisted operators can open and navigate the operator console
+  Customer pages keep the waitlist screen. Configured operators see an Operator link in the dashboard navigation.
 - **controller:** Failed-only retries reuse successful jobs on Cloud
   Reused jobs finish with zero attempts. Their outputs and artifacts feed dependents in the new run instead of releasing the jobs for fresh execution.
 - **runner:** Slow step-completion writes no longer fail otherwise successful jobs

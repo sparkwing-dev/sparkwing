@@ -81,7 +81,12 @@ and account membership. Browser writes use the session-bound CSRF verifier by de
 and cookie must match the token derived from the persisted encrypted key, and
 the request must come from the same origin. A forged or cross-session token
 returns `forbidden`. Session key failures return `unavailable`. Configured operator
-accounts use the default console-session adapter. Verified local peers use
+accounts use the default console-session adapter. Their direct account sessions
+receive `operator_console: true` from `/api/v1/me`, which shows the Operator
+navigation link even while waitlisted. Operator console routes bypass the
+customer waitlist screen. Customer pages still require admission, and console
+API requests still check the configured operator account and direct session.
+Verified local peers use
 `WithPeerIdentity`, whose callback returns only the transport-verified uid or SID
 as a local subject. Request headers and loopback addresses supply neither
 identity. The local store must implement peer authentication snapshots and
