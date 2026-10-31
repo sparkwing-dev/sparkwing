@@ -639,9 +639,10 @@ const statusClientClosedRequest = 499
 
 type statusRecorder struct {
 	http.ResponseWriter
-	status int
-	cause  error
-	ctx    context.Context
+	status    int
+	cause     error
+	ctx       context.Context
+	committed bool
 }
 
 func (r *statusRecorder) ResponseError(err error) {
@@ -651,11 +652,23 @@ func (r *statusRecorder) ResponseError(err error) {
 }
 
 func (r *statusRecorder) WriteHeader(code int) {
+	if r.committed {
+		return
+	}
 	if code >= http.StatusInternalServerError && r.ctx != nil && errors.Is(r.ctx.Err(), context.Canceled) && errors.Is(r.cause, context.Canceled) {
 		code = statusClientClosedRequest
 	}
-	r.status = code
+	if code < 100 || code >= 200 || code == http.StatusSwitchingProtocols {
+		r.status, r.committed = code, true
+	}
 	r.ResponseWriter.WriteHeader(code)
+}
+
+func (r *statusRecorder) Write(body []byte) (int, error) {
+	if !r.committed {
+		r.WriteHeader(http.StatusOK)
+	}
+	return r.ResponseWriter.Write(body)
 }
 
 // safety: a stream sets its own write deadline through http.ResponseController, which reaches the connection only
@@ -669,6 +682,9 @@ type flushingStatusRecorder struct {
 }
 
 func (r *flushingStatusRecorder) Flush() {
+	if !r.committed {
+		r.WriteHeader(http.StatusOK)
+	}
 	r.ResponseWriter.(http.Flusher).Flush()
 }
 
