@@ -202,8 +202,8 @@ func (l *dashboardLogins) serveSession(w http.ResponseWriter, r *http.Request, n
 }
 
 // safety: a browser acts as the api.sock peer that minted its link only while it sends that session as a
-// bearer. Cookies reach every port on a loopback host, so none is read. The static shell carries no run data and
-// loads signed out, because a navigation cannot send the header.
+// bearer. Cookies reach every port on a loopback host, so they cannot authenticate it. The static shell carries no
+// run data and loads signed out, because a navigation cannot send the header.
 func (l *dashboardLogins) gate(next, shell http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
