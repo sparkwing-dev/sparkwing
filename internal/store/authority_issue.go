@@ -109,7 +109,7 @@ func (s *Store) issueTx(ctx context.Context, tx *storeTx, request capability.Iss
 			return capability.Issued{}, err
 		}
 	}
-	// Bootstrap awards and here reservations cannot write logs.
+	// safety: Register only writers so unused reservations cannot leave an unsealable stream.
 	if (request.Award != nil || request.Exchange != nil) && c.Delivery == capability.DeliveryDirect && c.Unit != capability.UnitNode && c.Purpose != capability.PurposeHere {
 		unit := blob.LogUnit{Kind: blob.LogUnitKind(c.Unit), Generation: c.Binding.Generation}
 		if c.Unit == capability.UnitEval {
