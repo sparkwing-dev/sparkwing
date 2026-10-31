@@ -220,7 +220,7 @@ func tryMaterializationTx(ctx context.Context, tx *storeTx, team Team, request R
 	return err == nil, released
 }
 
-// The controller copies only the retry's sealed scope; it has no runner credential.
+// safety: The controller copies only the retry's sealed scope; it has no runner credential.
 func materializationActorTx(ctx context.Context, tx *storeTx, team Team, actor runstate.Actor, ref runspec.NodeRef) (blobActor, error) {
 	if actor.Kind != runstate.ActorController {
 		return resolveBlobAuthorityTx(ctx, tx, team, blob.Authority{CapabilityRef: actor.CapabilityPrefix}, capability.DataWrite)
