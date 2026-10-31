@@ -511,8 +511,10 @@ for a secret it could have named at the start.
   local controller and reports every missing secret at once
   with the command or setting that supplies it.
 
-A missing optional secret never stops a run; its field stays empty and
-`Secret` returns `sparkwing.ErrSecretMissing` for it. On a controller a
+Optional declarations stay optional during planning and plan acceptance. A
+missing optional secret never stops a run; its field stays empty and `Secret`
+returns `sparkwing.ErrSecretMissing` for it. Optional secrets use the same scope
+checks as required secrets. On a controller a
 node may read only the secrets its pipeline declares, and reading any other
 name fails with an error naming the `sw` tag to add.
 

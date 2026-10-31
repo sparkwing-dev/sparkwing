@@ -41,6 +41,12 @@ unlock.
 
 ### Fixed
 
+- **children:** App-triggered jobs can start child runs without an intake-origin error
+  Exact-revision children inherit the parent's sealed identity. Changed-revision and cross-repository children remain asserted without repository proof.
+- **secrets:** Missing optional secrets no longer fail plan preflight
+  Planning preserves optional declarations through plan acceptance. Missing required secrets still stop the run before jobs start.
+- **source:** Branch-pinned pipelines can acquire a different pipeline commit after source initialization
+  Planning fetches that commit from the repository with the credential allowed by its sealed proof, instead of the shallow execution checkout.
 - **release:** Stable releases publish the signed version index used by upgrades and update notices
   Publication preserves signed policy and release history. An index-only dispatch repairs a missed publication without rebuilding release assets.
 - **cli:** Fresh repositories get an initial-commit repair command before run intake
