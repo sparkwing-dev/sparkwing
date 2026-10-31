@@ -1,0 +1,154 @@
+# Signed release index recovery
+
+Incident evidence, 2026-10-31. The website bucket's `versions.json` is the
+unsigned documentation manifest last uploaded on October 29, with latest
+`v0.67.0`. Its signature object is absent at S3 origin and CloudFront returns
+403. No stable signed-index publisher existed in Sparkwing's hosted release.
+
+The product generator `bin/generate-llms.mjs:publishVersionsManifest` started
+copying its private config to the root object in product commit `a37a4429c2`.
+Product commit `e9e1240d8f` last advanced that config. GitHub workflow
+`koreyGambill/sparkwing-product` / `deploy.yaml` is disabled manually. Its
+publisher would still overwrite the signed JSON if reenabled without exclusion.
+It does not delete absent remote objects.
+
+The platform release chain was deleted in `d8142ca1f78f`, then restored in
+`dc349fa9`. Its frontend child reference was corrected in `d6f3c6bac5d`.
+That child publishes site documentation, not a signed engine policy. QA's
+`bin/qaindex` signs only with the QA key for the QA origin.
+
+GitHub release runs explain the v0.68 tags:
+
+| Tag | Run | Result |
+| --- | --- | --- |
+| v0.68.0 | 41031741492 | Windows bridge failure, no public release |
+| v0.68.1 | 41099315732 | npm credential failure, no public release |
+| v0.68.2 | 41156294277 | npm publication failure |
+| v0.68.2 recovery | 41157264648 | Public release at 2026-10-31T01:55:48Z |
+
+The correct bootstrap lists public stable releases through v0.68.2. It excludes
+v0.68.0 and v0.68.1 until their complete GitHub releases exist. The generator
+fetches every release page rather than trusting the obsolete website list.
+
+## Lead setup
+
+These commands change production IAM and GitHub configuration. They are prepared
+for the lead to run and were not executed during implementation. The existing
+GitHub OIDC provider is in account 633280902600. No release-index role or repository
+variable existed when checked. The website deploy role trusts only the controller
+OIDC issuer and cannot be assumed by GitHub Actions.
+
+Create a dedicated role once, from a shell with AWS and GitHub operator access:
+
+```bash
+(
+set -euo pipefail
+work="$(mktemp -d)"
+cat >"$work/trust.json" <<'JSON'
+{
+  "Version": "2012-10-17",
+  "Statement": [{
+    "Effect": "Allow",
+    "Principal": {"Federated": "arn:aws:iam::633280902600:oidc-provider/token.actions.githubusercontent.com"},
+    "Action": "sts:AssumeRoleWithWebIdentity",
+    "Condition": {
+      "StringEquals": {"token.actions.githubusercontent.com:aud": "sts.amazonaws.com"},
+      "StringLike": {"token.actions.githubusercontent.com:sub": [
+        "repo:sparkwing-dev/sparkwing:ref:refs/heads/main",
+        "repo:sparkwing-dev/sparkwing:ref:refs/tags/v*"
+      ]}
+    }
+  }]
+}
+JSON
+cat >"$work/policy.json" <<'JSON'
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Action": ["s3:GetObject", "s3:PutObject"],
+      "Resource": [
+        "arn:aws:s3:::kikd-prod-sparkwing-website/versions.json",
+        "arn:aws:s3:::kikd-prod-sparkwing-website/versions.json.sig"
+      ]
+    },
+    {
+      "Effect": "Allow",
+      "Action": "s3:ListBucket",
+      "Resource": "arn:aws:s3:::kikd-prod-sparkwing-website",
+      "Condition": {"StringEquals": {"s3:prefix": "versions.json"}}
+    },
+    {
+      "Effect": "Allow",
+      "Action": ["cloudfront:CreateInvalidation", "cloudfront:GetInvalidation"],
+      "Resource": "arn:aws:cloudfront::633280902600:distribution/E3V178ZREDVPYN"
+    }
+  ]
+}
+JSON
+AWS_PROFILE=kikd-prod aws iam create-role --role-name sparkwing-release-index \
+  --assume-role-policy-document "file://$work/trust.json" --no-cli-pager
+AWS_PROFILE=kikd-prod aws iam put-role-policy --role-name sparkwing-release-index \
+  --policy-name release-index --policy-document "file://$work/policy.json"
+gh variable set SPARKWING_RELEASE_INDEX_ROLE_ARN --repo sparkwing-dev/sparkwing \
+  --body arn:aws:iam::633280902600:role/sparkwing-release-index
+rm -rf "$work"
+)
+```
+
+Record this role in kikd-infra's Terraform when applying the setup. Before
+reenabling product site deploys, exclude keys `versions.json` and
+`versions.json.sig` from `bin/deploy-static.mjs`'s inventory before upload and
+remove the root-manifest write from `bin/generate-llms.mjs`. Keep its private
+config for site documentation consumers. Those repositories were read-only in
+this work lane.
+
+## Publish v0.68.2 now
+
+After the change is on main and the role is configured, run exactly:
+
+```bash
+gh workflow run release.yaml --repo sparkwing-dev/sparkwing --ref main \
+  -f tag=v0.68.2 -F index_only=true -F bootstrap_index=true \
+  -F verify_only=false -F publish_images=false
+```
+
+This changes only the two index objects and their CloudFront cache entries.
+The job uses the existing `SPARKWING_UPDATE_SIGNING_KEY` secret without printing
+it. It signs format 1 policy, reads back both objects, waits for invalidation,
+and compares both public responses with the generated bytes. Inspect the
+`release-index` job result and its `signed-release-index` artifact. No release,
+tag or npm/image publication occurs. Rerun without `bootstrap_index` afterward.
+
+## Restore an interrupted pair
+
+Pause other index publication dispatches before restoration. Download the
+`signed-release-index` artifact from the failed run, verify its exact bytes with
+the checked-out publication tools, and restore both objects. Replace `RUN_ID`
+with that failed workflow run's numeric ID:
+
+```bash
+(
+set -euo pipefail
+work="$(mktemp -d)"
+gh run download RUN_ID --repo sparkwing-dev/sparkwing \
+  --name signed-release-index --dir "$work"
+GOWORK=off GOFLAGS=-buildvcs=false go -C /path/to/sparkwing run ./cmd/verify-release \
+  --verify --index-out "$work"
+for object in versions.json versions.json.sig; do
+  content_type=application/json
+  if [[ "$object" == *.sig ]]; then content_type=application/octet-stream; fi
+  AWS_PROFILE=kikd-prod aws s3api put-object --bucket kikd-prod-sparkwing-website \
+    --key "$object" --body "$work/$object" --content-type "$content_type" \
+    --cache-control 'public, max-age=60, must-revalidate' >/dev/null
+done
+AWS_PROFILE=kikd-prod aws cloudfront create-invalidation \
+  --distribution-id E3V178ZREDVPYN --paths /versions.json /versions.json.sig
+rm -rf "$work"
+)
+```
+
+Then dispatch the normal index-only repair. It verifies and preserves the
+restored policy, waits for invalidation and checks the public pair. Never use
+an older artifact over a newer valid policy, because clients refuse rollback.

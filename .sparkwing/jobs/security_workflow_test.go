@@ -48,22 +48,29 @@ func releaseQueueContract(body string) error {
 		return err
 	}
 	jobs := mappingValue(&doc, "jobs")
-	publication := mappingValue(mappingValue(jobs, "release"), "concurrency")
-	for _, field := range []struct{ key, value, tag string }{
-		{"group", "release-publication", "!!str"},
-		{"queue", "max", "!!str"},
-		{"cancel-in-progress", "false", "!!bool"},
-	} {
-		node := mappingValue(publication, field.key)
-		if node == nil || node.Kind != yaml.ScalarNode || node.Value != field.value || node.Tag != field.tag {
-			return fmt.Errorf("release publication concurrency requires %s: %s", field.key, field.value)
+	for _, name := range []string{"release", "release-index"} {
+		job := mappingValue(jobs, name)
+		if job == nil && name == "release-index" {
+			continue
+		}
+		publication := mappingValue(job, "concurrency")
+		for _, field := range []struct{ key, value, tag string }{
+			{"group", "release-publication", "!!str"},
+			{"queue", "max", "!!str"},
+			{"cancel-in-progress", "false", "!!bool"},
+		} {
+			node := mappingValue(publication, field.key)
+			if node == nil || node.Kind != yaml.ScalarNode || node.Value != field.value || node.Tag != field.tag {
+				return fmt.Errorf("%s publication concurrency requires %s: %s", name, field.key, field.value)
+			}
 		}
 	}
+
 	if mappingValue(mappingValue(&doc, "concurrency"), "queue") != nil {
 		return fmt.Errorf("the queue compatibility exception covers only the release publication job")
 	}
 	for i := 0; i+1 < len(jobs.Content); i += 2 {
-		if jobs.Content[i].Value != "release" && mappingValue(mappingValue(jobs.Content[i+1], "concurrency"), "queue") != nil {
+		if jobs.Content[i].Value != "release" && jobs.Content[i].Value != "release-index" && mappingValue(mappingValue(jobs.Content[i+1], "concurrency"), "queue") != nil {
 			return fmt.Errorf("the queue compatibility exception does not cover job %s", jobs.Content[i].Value)
 		}
 	}

@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/releaseasset"
 	"github.com/sparkwing-dev/sparkwing/internal/releaseauth"
@@ -29,9 +30,24 @@ func run(args []string) error {
 	dist := fs.String("dist", "dist", "release asset directory")
 	verify := fs.Bool("verify", false, "verify existing signatures")
 	public := fs.Bool("public-key", false, "print the public key derived from the signing seed")
+	indexOut := fs.String("index-out", "", "write the signed stable version index to this directory")
+	previousIndex := fs.String("previous-index", "", "directory containing the current public index and signature")
+	requireVersion := fs.String("require-version", "", "published stable version that must appear in the index")
+	bootstrapIndex := fs.Bool("bootstrap-index", false, "replace the legacy unsigned documentation index once")
 	latest := fs.String("latest-tag", "", "report whether this tag outranks the published stable releases")
 	if err := fs.Parse(args); err != nil {
 		return err
+	}
+	if *indexOut != "" {
+		if *verify {
+			keys, err := releaseauth.PublicKeys()
+			if err != nil {
+				return err
+			}
+			_, err = readReleaseIndex(*indexOut, false, keys, time.Now().UTC())
+			return err
+		}
+		return publishReleaseIndex(*previousIndex, *indexOut, *requireVersion, *bootstrapIndex)
 	}
 	if *latest != "" {
 		body, err := publishedReleasePages()
