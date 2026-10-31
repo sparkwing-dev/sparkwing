@@ -17,10 +17,14 @@ import (
 )
 
 type initAccess struct {
-	err error
+	err      error
+	requests *[]source.Spec
 }
 
-func (a initAccess) GitCredential(context.Context, source.Spec) (source.Credential, error) {
+func (a initAccess) GitCredential(_ context.Context, spec source.Spec) (source.Credential, error) {
+	if a.requests != nil {
+		*a.requests = append(*a.requests, spec)
+	}
 	return source.Credential{Kind: "https", Host: "1.1.1.1", Username: "x-access-token", Secret: "source-secret"}, a.err
 }
 
@@ -61,6 +65,51 @@ func TestSourceInitPublishesExactCheckoutForEveryCloudUnit(t *testing.T) {
 			}
 			assertInitFiles(t, destination, true)
 		})
+	}
+}
+
+func TestSourceInitPreservesBranchPinnedPipelineAcquisition(t *testing.T) {
+	award, options, destination := initSourceFixture(t, capability.UnitPlan)
+	var requests []source.Spec
+	options.Access = initAccess{requests: &requests}
+	repository, pipelineSHA := sourcetest.Repository(t)
+	sourcetest.Write(t, filepath.Join(repository, ".sparkwing", "pipeline.go"), "package main // execution revision\n")
+	sourcetest.Git(t, repository, "add", ".")
+	sourcetest.Git(t, repository, "commit", "-qm", "execution revision")
+	award.Source.SHA = sourcetest.Git(t, repository, "rev-parse", "HEAD")
+	award.Source.PipelineSHA = pipelineSHA
+	award.Source.DefaultBranch = "trunk"
+	sourcetest.Remote(t, map[string]string{award.Source.RemoteURL: repository})
+	options.Base.Ambient = sourcetest.Environment(t)
+	initializer := SourceInit{Bind: func(context.Context, CloudJobAward) (source.Options, func() error, error) {
+		return options, nil, nil
+	}}
+	if err := initializer.Run(t.Context(), award, destination); err != nil {
+		t.Fatal(err)
+	}
+	options.PreparedCheckout, options.Workspace = destination, t.TempDir()
+	entry, err := source.PrepareCheckout(t.Context(), award.Source, options)
+	if err != nil {
+		t.Fatalf("acquire branch-pinned pipeline after source init: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := entry.Close(); err != nil {
+			t.Error(err)
+		}
+	})
+	want := []source.Spec{award.Source, award.Source.PipelineSource(), award.Source.PipelineSource()}
+	if !reflect.DeepEqual(requests, want) {
+		t.Fatalf("credential release inputs = %+v, want the sealed execution and pipeline sources", requests)
+	}
+	if entry.SHA != award.Source.SHA || sourcetest.Git(t, entry.CheckoutDirectory(), "rev-parse", "HEAD") != award.Source.SHA {
+		t.Fatal("pipeline acquisition changed the execution checkout")
+	}
+	if sourcetest.Git(t, entry.Directory, "rev-parse", "HEAD") != pipelineSHA {
+		t.Fatal("pipeline acquisition changed the sealed pipeline commit")
+	}
+	body, err := os.ReadFile(filepath.Join(entry.Directory, "pipeline.go"))
+	if err != nil || string(body) != "package main\n" {
+		t.Fatalf("pipeline source = %q, %v", body, err)
 	}
 }
 
