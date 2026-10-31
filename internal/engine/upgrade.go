@@ -361,10 +361,52 @@ func copyCheckout(ctx context.Context, source, destination string) error {
 		return err
 	}
 	if _, err := os.Stat(filepath.Join(source, ".git")); err == nil {
-		// A private index keeps verification from writing into a linked worktree's metadata.
+		// safety: a private index keeps verification from writing into a linked worktree's metadata.
 		clone := exec.CommandContext(ctx, "git", "clone", "--shared", "--no-checkout", "--", source, destination)
 		if output, err := clone.CombinedOutput(); err != nil {
 			return fmt.Errorf("stage upgrade Git metadata: %w: %s", err, strings.TrimSpace(string(output)))
+		}
+		refs := exec.CommandContext(ctx, "git", "-C", source, "for-each-ref", "--format=%(objectname) %(refname) %(symref)")
+		output, err := refs.Output()
+		if err != nil {
+			return fmt.Errorf("read upgrade Git refs: %w", err)
+		}
+		// safety: clone remaps local branches to origin; verification needs the source's ref identities.
+		var updates strings.Builder
+		sourceRefs := make(map[string]bool)
+		var symbolicRefs [][]string
+		for line := range strings.SplitSeq(strings.TrimSpace(string(output)), "\n") {
+			fields := strings.Fields(line)
+			if len(fields) < 2 {
+				continue
+			}
+			sourceRefs[fields[1]] = true
+			if len(fields) == 3 {
+				symbolicRefs = append(symbolicRefs, fields)
+				continue
+			}
+			fmt.Fprintf(&updates, "update %s %s\n", fields[1], fields[0])
+		}
+		clonedRefs := exec.CommandContext(ctx, "git", "-C", destination, "for-each-ref", "--format=%(refname)")
+		cloned, err := clonedRefs.Output()
+		if err != nil {
+			return fmt.Errorf("read staged upgrade Git refs: %w", err)
+		}
+		for ref := range strings.FieldsSeq(string(cloned)) {
+			if !sourceRefs[ref] {
+				fmt.Fprintf(&updates, "delete %s\n", ref)
+			}
+		}
+		update := exec.CommandContext(ctx, "git", "-C", destination, "update-ref", "--no-deref", "--stdin")
+		update.Stdin = strings.NewReader(updates.String())
+		if output, err := update.CombinedOutput(); err != nil {
+			return fmt.Errorf("stage upgrade Git refs: %w: %s", err, strings.TrimSpace(string(output)))
+		}
+		for _, fields := range symbolicRefs {
+			symbolic := exec.CommandContext(ctx, "git", "-C", destination, "symbolic-ref", fields[1], fields[2])
+			if output, err := symbolic.CombinedOutput(); err != nil {
+				return fmt.Errorf("stage upgrade Git symbolic ref: %w: %s", err, strings.TrimSpace(string(output)))
+			}
 		}
 		head := exec.CommandContext(ctx, "git", "-C", destination, "rev-parse", "--verify", "--quiet", "HEAD")
 		if err := head.Run(); err == nil {
