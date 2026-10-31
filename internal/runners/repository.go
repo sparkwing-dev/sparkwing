@@ -35,7 +35,8 @@ func (h machineHost) Host(ctx context.Context, unit controllerwire.ClaimedUnit) 
 		spec, err := source.ForRequest(request)
 		if err == nil && spec.LocalCheckout == "" {
 			identity, identityErr := sourceurl.Identity(spec.RemoteURL)
-			if identityErr == nil && h.repositories.Admits(identity) {
+			unscopedOwner := h.repositories.Empty() && unit.OwnerMachine && request.Provenance.Valid() && request.Provenance.ProvenRepository() == ""
+			if identityErr == nil && (h.repositories.Admits(identity) || unscopedOwner) {
 				continue
 			}
 		}

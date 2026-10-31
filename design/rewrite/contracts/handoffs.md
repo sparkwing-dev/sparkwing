@@ -1199,12 +1199,12 @@ repository facts use the existing request envelope. There are no forward
 migrations. The lead wipes pre-release staging and production stores separately.
 No deployment is part of this change.
 
-Enrollment question for the lead: the current API requires nonempty repository
-patterns for every machine. Combining the approved claim rules leaves enrolled
-personal machines eligible for no work. Shared machines cannot claim asserted
-uploads or non-GitHub work either. The proposed follow-up is optional `--repos`
-for enrollment. Unscoped personal machines would still take only their owner's
-asserted work. Unscoped shared runners could take the team's asserted work, while
-scoped runners would remain proven-only. This is awaiting the lead's decision.
-Tests of asserted personal work use an unscoped authority fixture and do not
-claim the API can enroll one.
+Enrollment follow-on for lead ratification: `--repos` is optional for personal
+machines because mandatory repository scopes combined with B1/M2 leave them
+eligible for no work. The absent scope seals as `nil`, and its claim profile
+has no repository filter. The host and owner checks still restrict it to the
+owner's asserted work. The runtime accepts an unscoped award only when the
+controller marks it as the owner's machine and both source envelopes carry
+valid, unproven provenance. Its remote-source check still applies. Shared enrollment still requires nonempty repository
+patterns. Existing explicit scopes keep the proven-only rule on every host.
+This narrows the earlier proposal, which also allowed unscoped shared runners.
