@@ -3,18 +3,23 @@ package controller
 import (
 	"crypto/rand"
 	"crypto/rsa"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/deployment/deploymenttest"
 	"github.com/sparkwing-dev/sparkwing/internal/githubapp"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
+	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
 )
 
 func TestAppScheduleFireResolvesBothRevisionsThroughGitHub(t *testing.T) {
@@ -36,8 +41,11 @@ func TestAppScheduleFireResolvesBothRevisionsThroughGitHub(t *testing.T) {
 		matchingTag   bool
 		locked        bool
 		unreachable   bool
+		malformed     bool
 	}{
 		{name: "execution commit", trust: runspec.TrustSchedule},
+		{name: "unreadable compare", malformed: true, trust: runspec.TrustAsserted},
+		{name: "unreadable locked compare", malformed: true, locked: true, trust: runspec.TrustAsserted},
 		{name: "branch pin", pin: "origin/code", trust: runspec.TrustAsserted},
 		{name: "commit pin", pin: pinned, trust: runspec.TrustSchedule},
 		{name: "ambiguous branch and tag pin", pin: "main", refusal: true},
@@ -103,6 +111,9 @@ func TestAppScheduleFireResolvesBothRevisionsThroughGitHub(t *testing.T) {
 					if tc.unreachable {
 						body = `{"status":"diverged"}`
 					}
+					if tc.malformed {
+						body = `{"status":"ahead","files":[`
+					}
 				case "GET /repos/acme/widgets/git/ref/heads/" + pinned[:12], "GET /repos/acme/widgets/git/ref/tags/" + pinned[:12], "GET /repos/acme/widgets/git/ref/heads/main~1":
 					status = http.StatusNotFound
 				default:
@@ -126,6 +137,28 @@ func TestAppScheduleFireResolvesBothRevisionsThroughGitHub(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
+			if tc.malformed {
+				bearer, _, err := teststore.ProvisionCredential(t.Context(), e.Store, capability.ProvisionSpec{Kind: capability.ProvisionMember, Team: "a", Subject: capability.Subject{Kind: capability.SubjectAccount, ID: "scheduler"}, Binding: capability.Binding{Kind: capability.BindingNone}, Grants: []capability.Grant{capability.RunsControl}})
+				if err != nil {
+					t.Fatal(err)
+				}
+				req := httptest.NewRequest(http.MethodPost, "/api/v1/schedules/"+row.ID+"/run", nil)
+				req.Header.Set("Authorization", "Bearer "+bearer)
+				req.Header.Set("Idempotency-Key", "schedule-compare")
+				response := httptest.NewRecorder()
+				e.Server.Handler().ServeHTTP(response, req)
+				if response.Code != http.StatusOK {
+					t.Fatalf("schedule run: HTTP %d %s", response.Code, response.Body)
+				}
+				var launched controllerwire.ScheduleRun
+				if err := json.Unmarshal(response.Body.Bytes(), &launched); err != nil {
+					t.Fatal(err)
+				}
+				manual, err := tenant.ReadRun(t.Context(), launched.RunID)
+				if err != nil || manual.Request.Provenance.Trust() != runspec.TrustAsserted || manual.Request.Provenance.ProvenRepository() != "" || !strings.Contains(manual.Request.Provenance.UnverifiedReason(), "GitHub compare unavailable") {
+					t.Fatalf("manual schedule compare fallback: %+v %v", manual.Request.Provenance, err)
+				}
+			}
 			admitted, err := tenant.AdmitScheduledRun(t.Context(), row, time.Now())
 			if tc.refusal {
 				if err == nil {
@@ -144,12 +177,15 @@ func TestAppScheduleFireResolvesBothRevisionsThroughGitHub(t *testing.T) {
 			if request.Git.SHA != selectedExecution || request.Source.Ref != wantSource || admitted.Request.Provenance.Trust() != tc.trust || !tc.locked && lookups["main"] == 0 {
 				t.Fatalf("fire execution=%s source=%s trust=%s lookups=%v, want execution=%s source=%s trust=%s", request.Git.SHA, request.Source.Ref, admitted.Request.Provenance.Trust(), lookups, execution, wantSource, tc.trust)
 			}
-			if admitted.Request.Provenance.SourceCredentialVerified() == tc.unreachable {
+			if admitted.Request.Provenance.SourceCredentialVerified() == (tc.unreachable || tc.malformed) {
 				t.Fatalf("source credential compare=%v, reachable=%v", admitted.Request.Provenance.SourceCredentialVerified(), !tc.unreachable)
+			}
+			if tc.malformed && (admitted.Request.Provenance.ProvenRepository() != "" || !strings.Contains(admitted.Request.Provenance.UnverifiedReason(), "GitHub compare unavailable")) {
+				t.Fatalf("automatic schedule compare fallback: %+v", admitted.Request.Provenance)
 			}
 			if tc.locked {
 				proof := admitted.Request.Provenance
-				if (proof.ProvenRepository() == "gh:701") == tc.unreachable || proof.SourceCredentialVerified() == tc.unreachable {
+				if (proof.ProvenRepository() == "gh:701") == (tc.unreachable || tc.malformed) || proof.SourceCredentialVerified() == (tc.unreachable || tc.malformed) {
 					t.Fatalf("locked commit: proven=%q credential checked=%v reachable=%v", proof.ProvenRepository(), proof.SourceCredentialVerified(), !tc.unreachable)
 				}
 				if _, _, ref, sha := proof.OIDC(); ref != "" || sha != "" {
