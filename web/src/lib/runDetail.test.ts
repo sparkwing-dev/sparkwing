@@ -36,6 +36,19 @@ function notices(wire: import("./api").RunDetailWire): string[] {
 }
 
 describe("runDetailView", () => {
+  it("does not invent durations for jobs and runs that never started", () => {
+    const wire = fixture("run-detail-jobs.json");
+    wire.started_at = "0001-01-01T00:00:00Z";
+    wire.finished_at = "2026-10-31T12:00:00Z";
+    for (const job of wire.jobs) {
+      job.started_at = wire.started_at;
+      job.finished_at = wire.finished_at;
+    }
+    const { run, nodes } = api.runDetailView(wire);
+    assert.equal(api.runDurationMs(run), 0);
+    for (const node of nodes) assert.equal(node.duration_ms, 0);
+  });
+
   it("preserves the dry-run outcome and completion time", () => {
     const wire = fixture("run-detail-plan-failure.json");
     wire.status = "dry_run";

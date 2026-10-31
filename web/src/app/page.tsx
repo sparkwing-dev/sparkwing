@@ -26,6 +26,7 @@ import {
 } from "@/lib/timeFormat";
 import Tooltip from "@/components/Tooltip";
 import { Sparkline } from "@/components/PipelineOverview";
+import { hasTimestamp, runTimestamp } from "@/lib/runTime";
 import { recentPipelineTriage } from "@/lib/homeTriage";
 
 const POLL_MS = 15000;
@@ -161,8 +162,8 @@ export default function Home() {
                       </span>
                       <Sparkline runs={history.slice(0, 30)} />
                       <span className="text-[11px] font-mono text-[var(--muted)]">
-                        {fmtAgo(latest.started_at)}
-                        {now - Date.parse(latest.started_at) > WEEK_MS ? " · older than 7d" : ""}
+                        {runTimestamp(latest) ? fmtAgo(runTimestamp(latest)!) : "Not started"}
+                        {now - Date.parse(runTimestamp(latest) ?? "") > WEEK_MS ? " · older than 7d" : ""}
                       </span>
                     </div>
                     <div className="mt-1 truncate font-mono text-[11px] text-red-300" title={latest.error || ""}>
@@ -195,7 +196,7 @@ export default function Home() {
                       </span>
                       <Sparkline runs={history.slice(0, 30)} />
                       <span className="text-[11px] font-mono text-green-400">passed</span>
-                      <span className="text-[11px] font-mono text-[var(--muted)]">{fmtAgo(latest.started_at)}</span>
+                      <span className="text-[11px] font-mono text-[var(--muted)]">{runTimestamp(latest) ? fmtAgo(runTimestamp(latest)!) : "Not started"}</span>
                     </div>
                   </Link>
                 ))}
@@ -323,7 +324,7 @@ function LastDeployCard({ run }: { run: Run | null }) {
     );
   }
   const ok = run.status === "success";
-  const ts = run.finished_at || run.started_at;
+  const ts = hasTimestamp(run.finished_at) ? run.finished_at : runTimestamp(run) ?? "";
   return (
     <Link
       href={`/runs?run=${run.id}`}

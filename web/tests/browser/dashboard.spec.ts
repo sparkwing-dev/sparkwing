@@ -2351,6 +2351,89 @@ test("sends cancel and retry actions for an active run", async ({ page }) => {
     .toBe(true);
 });
 
+for (const status of ["pending", "queued"]) {
+  test(`cancels a ${status} run before it starts`, async ({ page }) => {
+    const run = {
+      ...runningRun,
+      status,
+      created_at: "2026-10-31T12:00:00Z",
+      started_at: "0001-01-01T00:00:00Z",
+    };
+    const requests: string[] = [];
+    await installMockAPI(page, {
+      runs: [run],
+      details: { [run.id]: { run, nodes: [] } },
+      onRequest: (route) => {
+        if (route.request().method() === "POST") requests.push(route.request().url());
+      },
+    });
+    await page.goto(`/runs?run=${run.id}`);
+    await page.getByRole("button", { name: "Cancel", exact: true }).click();
+    await page.getByRole("button", { name: "Confirm cancel" }).click();
+    await expect.poll(() => requests.some((url) => url.endsWith(`/runs/${run.id}/cancel`))).toBe(true);
+  });
+}
+
+test("keeps every run header control inside the phone viewport", async ({ page }) => {
+  const run = {
+    ...runningRun,
+    id: "run-very-long-identifier-0123456789abcdef",
+    repo: "organization/long-repository-name",
+    pipeline: "a-very-long-pipeline-name-without-spaces",
+  };
+  await installMockAPI(page, { runs: [run], details: { [run.id]: { run, nodes: [] } } });
+  await page.setViewportSize({ width: 375, height: 900 });
+  await page.goto(`/runs?run=${run.id}`);
+  const rerun = page.getByRole("button", { name: "Rerun", exact: true }).last();
+  await expect(rerun).toBeVisible();
+  const header = page.locator("div").filter({ has: rerun }).filter({ has: page.getByRole("button", { name: "Run", exact: true }) }).last();
+  const checkControls = async () => {
+    const controls = header.locator("button, a, input, select, [role=button]");
+    expect(await controls.count()).toBeGreaterThanOrEqual(3);
+    for (const control of await controls.all()) {
+      await expect(control).toBeVisible();
+      const box = await control.boundingBox();
+      expect(box, await control.textContent() ?? "control").not.toBeNull();
+      expect(box!.x).toBeGreaterThanOrEqual(0);
+      expect(box!.x + box!.width).toBeLessThanOrEqual(375);
+    }
+  };
+  await checkControls();
+  await page.getByRole("button", { name: "Cancel", exact: true }).click();
+  await checkControls();
+  await page.getByRole("button", { name: "Confirm cancel" }).click();
+  await rerun.click();
+  for (const item of await page.getByRole("menuitem").all()) {
+    const box = await item.boundingBox();
+    expect(box).not.toBeNull();
+    expect(box!.x).toBeGreaterThanOrEqual(0);
+    expect(box!.x + box!.width).toBeLessThanOrEqual(375);
+  }
+});
+
+test("shows queued time instead of a year-one start in every run view", async ({ page }) => {
+  const run = {
+    ...runningRun,
+    id: "run-not-started",
+    created_at: "2026-10-31T12:00:00Z",
+    started_at: "0001-01-01T00:00:00Z",
+    status: "pending",
+  };
+  await installMockAPI(page, { runs: [run], details: { [run.id]: { run, nodes: [] } } });
+  await page.goto("/runs");
+  const row = page.locator(`[data-run-id="${run.id}"]`).first();
+  await expect(row).toContainText("Not started");
+  await expect(row).toContainText("Queued");
+  await expect(row).not.toContainText(/\b1,|\d{6,}[mh]/);
+  await row.click();
+  await expect(page.getByText(/Not started/).first()).toBeVisible();
+  for (const name of ["Summary", "Setup"]) {
+    await page.getByRole("button", { name, exact: true }).click();
+    await expect(page.getByText(/Not started/).first()).toBeVisible();
+    await expect(page.locator("body")).not.toContainText(/\b1,|\d{6,}[mh]/);
+  }
+});
+
 test("renders the crons overview with its health banner", async ({ page }) => {
   await installMockAPI(page, { crons: cronsOverview });
   await page.goto("/crons");

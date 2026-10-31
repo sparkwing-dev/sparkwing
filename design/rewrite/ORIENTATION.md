@@ -168,6 +168,15 @@ credential model in `docs/auth.md`, and the decision log
 | Bound node commands flush final logs at report, retry or release, within the attempt's tail grace | `internal/nodehost/assembly_native_logs.go`: `logHostStore.TransitionNode` reads the command payload | `internal/nodehost/assembly_native_logs_test.go`: `TestStalledLogsDoNotDelayLifecycleCommits`, `TestLogLifecycleDetachesFlush` |
 | Runner frames and lifecycle failures render as text; retries persist the next attempt ordinal | `cmd/sparkwing/runs_logs.go`: `writeLogRecord`, `eventDetail`; `internal/store/node_state.go`: `transitionNodeStateTx` | `TestRunLogsRendersPersistedRunnerAndRetryPayloads`; `TestTransitionApplicationRetryKeepsClaimAndOrdinal` |
 
+### Console
+
+| Rule | Owner | Guard test |
+| --- | --- | --- |
+| Unstarted runs have no execution duration and use queued creation time when present | `web/src/lib/runTime.ts`; run rows and timing panels | `web/src/lib/runTime.test.ts`, `runDetail.test.ts`; `SetupPanel.test.tsx`, `SummaryPanel.test.tsx`; `web/tests/browser/dashboard.spec.ts`: queued timing |
+| Run controls wrap on phones and queued runs can be cancelled | `web/src/app/runs/page.tsx`: `RunDetailPane` | `web/tests/browser/dashboard.spec.ts`: phone viewport geometry, pending and queued cancellation |
+| Run submission refusals explain the remedy and link repository access to Team > GitHub | `web/src/lib/api.ts`: `triggerRun`; `web/src/components/TriggerForm.tsx` | `web/src/lib/triggerRun.test.ts`; `web/tests/browser/trigger-refusal.spec.ts` |
+| Login refusals always explain nonempty reasons; token text has readable contrast and a main landmark | `internal/controller/browser_login.go`: `handleLoginPage`, `loginHTML` | `internal/controller/browser_login_presentation_test.go`; `web/tests/browser/login-accessibility.spec.ts` |
+
 ### CLI and API surface
 
 | Rule | Owner | Guard test |

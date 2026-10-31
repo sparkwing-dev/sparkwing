@@ -61,6 +61,7 @@ import {
   runListQuery,
 } from "@/lib/runsPaging";
 import { useCurrentTime } from "@/lib/useCurrentTime";
+import { hasTimestamp, runElapsedMs, runStartedAt, runTimestamp } from "@/lib/runTime";
 import {
   fmtAgo,
   fmtAgoShort,
@@ -175,7 +176,7 @@ function collectNodeAnnotations(
 
 function nodeDuration(n: RunNode): number {
   if (n.duration_ms) return n.duration_ms;
-  if (n.started_at) {
+  if (hasTimestamp(n.started_at)) {
     const s = new Date(n.started_at).getTime();
     const e = n.finished_at ? new Date(n.finished_at).getTime() : Date.now();
     return Math.max(0, e - s);
@@ -629,7 +630,7 @@ function Pipelines({ pivotTabs }: { pivotTabs: React.ReactNode }) {
       ? runs
       : [...withSelected].sort(
           (a, b) =>
-            new Date(b.started_at).getTime() - new Date(a.started_at).getTime(),
+            Date.parse(runTimestamp(b) ?? "") - Date.parse(runTimestamp(a) ?? ""),
         );
   }, [runs, detailRun, selectedRun]);
   const activeCount = activeFilterCount(filterState);
@@ -1213,7 +1214,7 @@ function Pipelines({ pivotTabs }: { pivotTabs: React.ReactNode }) {
                 kind="runs"
                 items={topLevel.map((r) => ({
                   id: r.id,
-                  label: `${r.repo || r.github_repo || "unknown"} / ${r.pipeline} / ${r.git_branch || "unknown branch"} / ${fmtFullDate(r.started_at)} / ${r.status === "dry_run" ? "dry run" : r.status}`,
+                  label: `${r.repo || r.github_repo || "unknown"} / ${r.pipeline} / ${r.git_branch || "unknown branch"} / ${runStartedAt(r) ? fmtFullDate(r.started_at) : `Not started · Queued ${fmtFullDate(runTimestamp(r) ?? "")}`} / ${r.status === "dry_run" ? "dry run" : r.status}`,
                   dotClass: statusDot(r.status),
                 }))}
                 selectedID={selectedRun}
@@ -2328,7 +2329,7 @@ function StepRow({
               ? "bg-slate-400"
               : "bg-slate-600";
   let durMs = s.duration_ms ?? 0;
-  if (!durMs && status === "running" && s.started_at) {
+  if (!durMs && status === "running" && hasTimestamp(s.started_at)) {
     durMs = Math.max(0, now - new Date(s.started_at).getTime());
   }
   return (
@@ -2379,10 +2380,10 @@ const FullRunRow = memo(function FullRunRow({
   if (compact) {
     return <CompactFullRunRow r={r} ctx={ctx} progress={progress} now={now} />;
   }
-  const startedMs = new Date(r.started_at).getTime();
-  const finishedMs = r.finished_at ? new Date(r.finished_at).getTime() : 0;
-  const elapsedMs = (finishedMs || now) - startedMs;
-  const sinceTs = r.finished_at || r.started_at;
+  const started = runStartedAt(r);
+  const timestamp = runTimestamp(r) ?? "";
+  const elapsedMs = runElapsedMs(r, now) ?? 0;
+  const sinceTs = hasTimestamp(r.finished_at) ? r.finished_at : timestamp;
   const repo = repoLabel(r);
   const sha7 = r.git_sha ? r.git_sha.slice(0, 7) : "";
 
@@ -2464,45 +2465,52 @@ const FullRunRow = memo(function FullRunRow({
         )}
       </div>
       <div className="flex items-center gap-1.5 font-mono tabular-nums text-[var(--muted)] min-w-0 overflow-hidden whitespace-nowrap">
-        {fmtDatePrefix(r.started_at) && (
-          <span className="text-[var(--foreground)] shrink-0">
-            {fmtDatePrefix(r.started_at)}
-          </span>
+        {!started && (
+          <span className="shrink-0">Not started · Queued {fmtDateTime(timestamp)}</span>
         )}
-        <FilterableTimestamp
-          iso={r.started_at}
-          field="started"
-          ctx={ctx}
-          tooltip={`Started ${fmtFullDate(r.started_at)}`}
-        >
-          <span className="text-[var(--foreground)] shrink-0">
-            {fmtClock(r.started_at)}
-          </span>
-        </FilterableTimestamp>
-        <span className="shrink-0">→</span>
-        {r.finished_at ? (
+        {started && (
           <>
-            {fmtDatePrefix(r.finished_at) &&
-              fmtDatePrefix(r.finished_at) !== fmtDatePrefix(r.started_at) && (
-                <span className="text-[var(--foreground)] shrink-0">
-                  {fmtDatePrefix(r.finished_at)}
-                </span>
-              )}
+            {fmtDatePrefix(r.started_at) && (
+              <span className="text-[var(--foreground)] shrink-0">
+                {fmtDatePrefix(r.started_at)}
+              </span>
+            )}
             <FilterableTimestamp
-              iso={r.finished_at}
-              field="finished"
+              iso={r.started_at}
+              field="started"
               ctx={ctx}
-              tooltip={`Finished ${fmtFullDate(r.finished_at!)}`}
+              tooltip={`Started ${fmtFullDate(r.started_at)}`}
             >
               <span className="text-[var(--foreground)] shrink-0">
-                {fmtClock(r.finished_at)}
+                {fmtClock(r.started_at)}
               </span>
             </FilterableTimestamp>
+            <span className="shrink-0">→</span>
+            {r.finished_at ? (
+              <>
+                {fmtDatePrefix(r.finished_at) &&
+                  fmtDatePrefix(r.finished_at) !== fmtDatePrefix(r.started_at) && (
+                    <span className="text-[var(--foreground)] shrink-0">
+                      {fmtDatePrefix(r.finished_at)}
+                    </span>
+                  )}
+                <FilterableTimestamp
+                  iso={r.finished_at}
+                  field="finished"
+                  ctx={ctx}
+                  tooltip={`Finished ${fmtFullDate(r.finished_at!)}`}
+                >
+                  <span className="text-[var(--foreground)] shrink-0">
+                    {fmtClock(r.finished_at)}
+                  </span>
+                </FilterableTimestamp>
+              </>
+            ) : (
+              <Tooltip content="Finished">
+                <span className="text-[var(--foreground)] shrink-0">--</span>
+              </Tooltip>
+            )}
           </>
-        ) : (
-          <Tooltip content="Finished">
-            <span className="text-[var(--foreground)] shrink-0">--</span>
-          </Tooltip>
         )}
         {elapsedMs > 0 && (
           <Tooltip content="Duration">
@@ -2579,10 +2587,10 @@ const CompactFullRunRow = memo(function CompactFullRunRow({
   progress?: { done: number; total: number };
   now: number;
 }) {
-  const startedMs = new Date(r.started_at).getTime();
-  const finishedMs = r.finished_at ? new Date(r.finished_at).getTime() : 0;
-  const elapsedMs = (finishedMs || now) - startedMs;
-  const sinceTs = r.finished_at || r.started_at;
+  const started = runStartedAt(r);
+  const timestamp = runTimestamp(r) ?? "";
+  const elapsedMs = runElapsedMs(r, now) ?? 0;
+  const sinceTs = hasTimestamp(r.finished_at) ? r.finished_at : timestamp;
   const repo = repoLabel(r);
   const sha7 = r.git_sha ? r.git_sha.slice(0, 7) : "";
 
@@ -2594,8 +2602,8 @@ const CompactFullRunRow = memo(function CompactFullRunRow({
     return "";
   };
 
-  const fullTitle = `${r.status === "dry_run" ? "DRY RUN" : r.status.toUpperCase()} · ${repo}/${r.pipeline}${r.git_branch ? ` · ⎇ ${r.git_branch}` : ""}${sha7 ? ` · ${sha7}` : ""}${r.trigger_source ? ` · trigger: ${r.trigger_source}` : ""}\nStarted ${fmtFullDate(r.started_at)}${r.finished_at ? ` · Finished ${fmtFullDate(r.finished_at)}` : ""}`;
-  const datePrefix = fmtDatePrefix(r.started_at);
+  const fullTitle = `${r.status === "dry_run" ? "DRY RUN" : r.status.toUpperCase()} · ${repo}/${r.pipeline}${r.git_branch ? ` · ⎇ ${r.git_branch}` : ""}${sha7 ? ` · ${sha7}` : ""}${r.trigger_source ? ` · trigger: ${r.trigger_source}` : ""}\n${started ? `Started ${fmtFullDate(started)}` : `Not started · Queued ${fmtFullDate(timestamp)}`}${r.finished_at ? ` · Finished ${fmtFullDate(r.finished_at)}` : ""}`;
+  const datePrefix = fmtDatePrefix(timestamp);
   const [repoShort, pipelineShort, branchShort] = waterFill(
     [repo, r.pipeline, r.git_branch || ""],
     24,
@@ -2652,13 +2660,14 @@ const CompactFullRunRow = memo(function CompactFullRunRow({
           ) : (
             <span className="w-2.5 shrink-0" />
           )}
+          {!started && <span className="shrink-0">Not started · Queued</span>}
           {datePrefix && (
             <span className="text-[var(--foreground)] shrink-0">
               {datePrefix}
             </span>
           )}
           <span className="text-[var(--foreground)] shrink-0">
-            {fmtClock(r.started_at)}
+            {fmtClock(timestamp)}
           </span>
           {elapsedMs > 0 && (
             <span className="shrink-0">({fmtMsCompact(elapsedMs)})</span>
@@ -2784,7 +2793,7 @@ function RunDetailPane({
   stepsUnavailable: boolean;
 }) {
   const selected = node;
-  const runIsActive = run.status === "running";
+  const runIsActive = ["pending", "queued", "running"].includes(run.status);
   const [findQuery, setFindQuery] = useState("");
   const [findCursor, setFindCursor] = useState(0);
   const [findLogResults, setFindLogResults] = useState<RunLogMatch[]>([]);
@@ -2911,7 +2920,7 @@ function RunDetailPane({
   }, [findNameHits]);
   const findTimelineHits = useMemo(() => {
     const startedNodes = new Set(
-      nodes.filter((n) => !!n.started_at).map((n) => n.id),
+      nodes.filter((n) => hasTimestamp(n.started_at)).map((n) => n.id),
     );
     return findNameHits.filter((h) => startedNodes.has(h.nodeID));
   }, [findNameHits, nodes]);
@@ -3173,8 +3182,8 @@ function RunDetailPane({
   return (
     <>
       <div className="border-b border-[var(--border)] shrink-0">
-        <div className="flex items-center gap-2 px-4 py-2 text-xs">
-          <div className="flex items-center gap-2">
+        <div data-testid="run-header" className="flex flex-wrap items-center gap-2 px-4 py-2 text-xs min-w-0">
+          <div className="flex flex-wrap items-center gap-2 min-w-0 max-w-full break-words [overflow-wrap:anywhere]">
             <StatusLabel status={run.status} />
             <span className="text-cyan-400">{repoLabel(run)}</span>
             <span className="text-[var(--muted)]">/</span>
@@ -3183,7 +3192,7 @@ function RunDetailPane({
             </span>
           </div>
           <span
-            className="font-mono text-[var(--muted)] cursor-pointer hover:text-[var(--foreground)]"
+            className="font-mono text-[var(--muted)] cursor-pointer hover:text-[var(--foreground)] min-w-0 max-w-full break-all"
             onClick={() => navigator.clipboard.writeText(run.id)}
             title="copy run id"
           >
@@ -3194,17 +3203,17 @@ function RunDetailPane({
 
                                                       }
           <span
-            className="font-mono text-[var(--muted)] whitespace-nowrap"
-            title={`Started ${fmtFullDate(run.started_at)}${
+            className="font-mono text-[var(--muted)] min-w-0 max-w-full break-words"
+            title={`${runStartedAt(run) ? `Started ${fmtFullDate(run.started_at)}` : `Not started · Queued ${fmtFullDate(runTimestamp(run) ?? "")}`}${
               run.finished_at
                 ? `\nFinished ${fmtFullDate(run.finished_at)}`
                 : ""
             }`}
           >
-            {fmtDateTime(run.started_at)}
+            {runStartedAt(run) ? fmtDateTime(run.started_at) : `Not started · Queued ${fmtDateTime(runTimestamp(run) ?? "")}`}
           </span>
           <RerunModeChip run={run} />
-          <span className="ml-auto flex items-center gap-2">
+          <span className="ml-auto flex flex-wrap justify-end items-center gap-2 max-w-full">
             <AttemptsDropdown currentRunID={run.id} />
             {runIsActive && <CancelButton runId={run.id} onDone={onRefresh} />}
             <RetryButton runId={run.id} onDone={onRefresh} runNow={run.error?.startsWith("run did not start: out of credits:")} />
@@ -5779,7 +5788,7 @@ function StepDag({
                 </text>
                 {(() => {
                   let ms = s.duration_ms ?? 0;
-                  if (!ms && status === "running" && s.started_at) {
+                  if (!ms && status === "running" && hasTimestamp(s.started_at)) {
                     ms = Math.max(
                       0,
                       Date.now() - new Date(s.started_at).getTime(),
@@ -5881,7 +5890,7 @@ function StepTooltip({
               ? "bg-slate-400"
               : "bg-slate-600";
   let dur = step.duration_ms ?? 0;
-  if (!dur && status === "running" && step.started_at) {
+  if (!dur && status === "running" && hasTimestamp(step.started_at)) {
     dur = Math.max(0, now - new Date(step.started_at).getTime());
   }
   const alignRight = x > window.innerWidth - 280;

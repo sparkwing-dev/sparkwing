@@ -3,14 +3,8 @@
 
 import { useState } from "react";
 import type { Run, RunInvocation } from "@/lib/api";
+import { hasTimestamp, runElapsedMs, runStartedAt, runTimestamp } from "@/lib/runTime";
 import { fmtDateTime, fmtFullDate } from "@/lib/timeFormat";
-
-function durationMs(run: Run): number {
-  if (!run.finished_at) return 0;
-  return (
-    new Date(run.finished_at).getTime() - new Date(run.started_at).getTime()
-  );
-}
 
 function fmtMs(ms: number): string {
   if (!ms) return "-";
@@ -156,6 +150,8 @@ export default function SetupPanel({
   findMatchedFields?: Set<string>;
   findActiveKey?: string | null;
 }) {
+  const started = runStartedAt(run);
+  const timestamp = runTimestamp(run);
   const inv: RunInvocation = run.invocation ?? {};
   const flags = inv.flags ?? {};
   const args = inv.args ?? run.args ?? {};
@@ -223,17 +219,18 @@ export default function SetupPanel({
             </LabelRow>
           )}
           <LabelRow label="started">
-            <span title={fmtFullDate(run.started_at)}>
-              {fmtDateTime(run.started_at, { seconds: true })}
+            <span title={started ? fmtFullDate(started) : "Not started"}>
+              {started ? fmtDateTime(started, { seconds: true }) : "Not started"}
             </span>
-            {run.finished_at && (
+            {!started && timestamp && <span> · queued {fmtDateTime(timestamp, { seconds: true })}</span>}
+            {hasTimestamp(run.finished_at) && started && (
               <span className="text-[var(--muted)]">
                 {" "}
-                · duration {fmtMs(durationMs(run))}
+                · duration {fmtMs(runElapsedMs(run) ?? 0)}
               </span>
             )}
           </LabelRow>
-          {run.finished_at && (
+          {hasTimestamp(run.finished_at) && (
             <LabelRow label="finished">
               <span title={fmtFullDate(run.finished_at)}>
                 {fmtDateTime(run.finished_at, { seconds: true })}

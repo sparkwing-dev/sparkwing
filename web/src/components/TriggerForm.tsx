@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { type PipelineMeta, getPipelines, parseRunArgs, triggerRun } from "@/lib/api";
+import { type PipelineMeta, getPipelines, parseRunArgs, triggerRun, TriggerRunError } from "@/lib/api";
 import { repositoryExample, triggerGit } from "@/lib/triggerSource";
 import { useTeamState } from "@/lib/useTeam";
 
@@ -20,7 +20,7 @@ export default function TriggerForm({
   const [selectedPipeline, setSelectedPipeline] = useState(pipeline || "");
   const [argText, setArgText] = useState("");
   const [triggering, setTriggering] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<Error | null>(null);
   const [repository, setRepository] = useState("");
   const [branch, setBranch] = useState("main");
   // A team's runners fetch the source themselves, so a run started here has
@@ -41,11 +41,11 @@ export default function TriggerForm({
   const handleSubmit = async () => {
     if (!selectedPipeline) return;
     if (source && !source.ok) {
-      setError(source.problem);
+      setError(new Error(source.problem));
       return;
     }
     if (!args.ok) {
-      setError(args.problem);
+      setError(new Error(args.problem));
       return;
     }
     setTriggering(true);
@@ -60,7 +60,7 @@ export default function TriggerForm({
       onTriggered?.();
       onClose?.();
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Trigger failed");
+      setError(e instanceof Error ? e : new Error("Could not start the run. Try again, or use Help if the problem continues."));
     } finally {
       setTriggering(false);
     }
@@ -176,7 +176,14 @@ export default function TriggerForm({
       </div>
 
       {           }
-      {error && <p className="text-xs text-red-400">{error}</p>}
+      {error && (
+        <div role="alert" className="text-xs text-red-400 space-y-1">
+          <p>{error.message}</p>
+          {error instanceof TriggerRunError && error.reason === "repository_unauthorized" && (
+            <a href="/team/github" className="underline">Open Team &gt; GitHub</a>
+          )}
+        </div>
+      )}
 
       {            }
       <div className="flex items-center gap-2">

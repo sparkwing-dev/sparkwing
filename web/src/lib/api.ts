@@ -3,6 +3,7 @@ import { readCSRFCookie } from "./csrfCookie";
 import { localAuthHeaders } from "./localSession";
 import type { LogCompleteness } from "./logCompleteness";
 import type { TriggerGit } from "./triggerSource";
+import { hasTimestamp, runElapsedMs } from "./runTime";
 
 function getApiUrl(): string {
   if (typeof window !== "undefined") return "";
@@ -163,6 +164,7 @@ export interface Run {
   replay_of_node_id?: string;
   args?: Record<string, string>;
   error?: string;
+  created_at?: string;
   started_at: string;
   finished_at?: string;
   annotation_count?: number;
@@ -188,10 +190,7 @@ export interface RunInvocation {
 }
 
 export function runDurationMs(run: Run): number {
-  if (!run.finished_at) return 0;
-  return (
-    new Date(run.finished_at).getTime() - new Date(run.started_at).getTime()
-  );
+  return hasTimestamp(run.finished_at) ? runElapsedMs(run) ?? 0 : 0;
 }
 
 // Node is the run page's view of one job, projected from run detail by runDetailView.
@@ -373,7 +372,7 @@ export interface StepDetailWire {
 }
 
 function durationMs(started?: string, finished?: string): number {
-  if (!started || !finished) return 0;
+  if (!hasTimestamp(started) || !hasTimestamp(finished)) return 0;
   return Math.max(0, new Date(finished).getTime() - new Date(started).getTime());
 }
 
@@ -730,6 +729,12 @@ export interface RunEvent {
   payload?: unknown;
 }
 
+export class TriggerRunError extends Error {
+  constructor(message: string, readonly reason = "") {
+    super(message);
+  }
+}
+
 export async function triggerRun(
   pipeline: string,
   args?: Record<string, string>,
@@ -755,8 +760,21 @@ export async function triggerRun(
     }),
   });
   if (!res.ok) {
-    const text = await res.text();
-    throw new Error(text || `trigger failed: ${res.status}`);
+    const body = await res.json().catch(() => null) as {
+      error?: { message?: unknown; hint?: unknown; details?: { reason?: unknown } };
+    } | null;
+    const error = body?.error;
+    const reason = typeof error?.details?.reason === "string" ? error.details.reason : "";
+    if (reason === "repository_unauthorized") {
+      throw new TriggerRunError(
+        "Sparkwing does not have access to this repository. Connect or grant the repository under Team > GitHub.",
+        reason,
+      );
+    }
+    const message = [error?.message, error?.hint]
+      .filter((text): text is string => typeof text === "string" && text.trim() !== "")
+      .join(" ");
+    throw new TriggerRunError(message || "Could not start the run. Try again, or use Help if the problem continues.", reason);
   }
   return res.json();
 }

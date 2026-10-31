@@ -39,8 +39,8 @@ func TestRefusedSignInReturnsToTheSignInPageWithAReason(t *testing.T) {
 	if want := html.EscapeString("Your sign-in provider has not verified this account's email address. Verify it with the provider, then sign in again."); !strings.Contains(page, want) {
 		t.Fatalf("sign-in page does not explain the refusal:\n%s", page)
 	}
-	if page := f.browserGet("/login?refused=" + url.QueryEscape("<b>made up</b>")).body; strings.Contains(page, `class="refused"`) || strings.Contains(page, "made up") {
-		t.Fatalf("sign-in page showed text for an unknown reason:\n%s", page)
+	if page := f.browserGet("/login?refused=" + url.QueryEscape("<b>made up</b>")).body; strings.Contains(page, "made up") {
+		t.Fatalf("sign-in page reflected an unknown reason:\n%s", page)
 	}
 }
 

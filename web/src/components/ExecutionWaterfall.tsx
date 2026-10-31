@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { type Node, type NodeWorkStep, type Run } from "@/lib/api";
+import { hasTimestamp } from "@/lib/runTime";
 
 
 function fmtMs(ms: number): string {
@@ -49,24 +50,24 @@ function extractRows(nodes: Node[]): {
   zero: number;
   totalMs: number;
 } {
-  const withStart = nodes.filter((n) => !!n.started_at);
+  const withStart = nodes.filter((n) => hasTimestamp(n.started_at));
   if (withStart.length === 0) return { rows: [], zero: 0, totalMs: 0 };
   const starts = withStart.map((n) => new Date(n.started_at!).getTime());
   const zero = Math.min(...starts);
   const now = Date.now();
   const ends = withStart.map((n) =>
-    n.finished_at ? new Date(n.finished_at).getTime() : now,
+    hasTimestamp(n.finished_at) ? new Date(n.finished_at).getTime() : now,
   );
   const totalMs = Math.max(1, Math.max(...ends) - zero);
   const rows: Row[] = withStart.map((n) => {
     const s = new Date(n.started_at!).getTime();
-    const e = n.finished_at ? new Date(n.finished_at).getTime() : now;
+    const e = hasTimestamp(n.finished_at) ? new Date(n.finished_at).getTime() : now;
     return {
       id: n.id,
       outcome: n.outcome || n.status,
       startMs: s - zero,
       durationMs: Math.max(1, e - s),
-      running: !n.finished_at,
+      running: !hasTimestamp(n.finished_at),
     };
   });
   return { rows, zero, totalMs };
@@ -85,13 +86,13 @@ function stepsForNode(node: Node, zero: number): StepRow[] {
   const now = Date.now();
   const out: StepRow[] = [];
   for (const s of work.steps as NodeWorkStep[]) {
-    if (!s.started_at) continue;
+    if (!hasTimestamp(s.started_at)) continue;
     const start = new Date(s.started_at).getTime();
     let duration = s.duration_ms ?? 0;
     if (!duration && s.status === "running") {
       duration = Math.max(0, now - start);
     }
-    if (!duration && s.finished_at) {
+    if (!duration && hasTimestamp(s.finished_at)) {
       duration = Math.max(0, new Date(s.finished_at).getTime() - start);
     }
     out.push({

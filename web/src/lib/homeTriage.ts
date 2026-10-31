@@ -1,4 +1,5 @@
 import type { Run } from "./api";
+import { runTimestamp } from "./runTime";
 
 export interface PipelineTriage {
   key: string;
@@ -68,11 +69,11 @@ export function recentPipelineTriage(
   }
   const sorted = [...groups.values()]
     .map((group) => {
-      group.runs.sort((a, b) => Date.parse(b.started_at) - Date.parse(a.started_at));
+      group.runs.sort((a, b) => (Date.parse(runTimestamp(b) ?? "") || 0) - (Date.parse(runTimestamp(a) ?? "") || 0));
       group.latest = group.runs.find((run) => run.status === "success" || run.status === "failed") || group.runs[0];
       return group;
     })
-    .sort((a, b) => Date.parse(b.latest.started_at) - Date.parse(a.latest.started_at));
+    .sort((a, b) => (Date.parse(runTimestamp(b.latest) ?? "") || 0) - (Date.parse(runTimestamp(a.latest) ?? "") || 0));
   return {
     failed: sorted.filter((group) => group.latest.status === "failed"),
     recovered: sorted.filter((group) => {

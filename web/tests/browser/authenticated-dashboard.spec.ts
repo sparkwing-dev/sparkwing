@@ -341,8 +341,11 @@ test("a refused sign-in returns to the sign-in page saying what happened", async
     const landed = new URL(page.url());
     expect(landed.searchParams.get("refused")).toBe("unavailable");
     expect(landed.searchParams.get("next")).toBe("/invitations?id=inv-1");
-    await expect(page.getByRole("alert")).toHaveText(
+    await expect(page.getByRole("alert")).toContainText(
       "This sign-in method is unavailable right now. Try again in a minute, or use another sign-in method.",
+    );
+    await expect(page.getByRole("alert").getByRole("link", { name: "Get help" })).toHaveAttribute(
+      "href", "mailto:support@sparkwing.dev",
     );
     await expect(page.locator('input[name="next"]')).toHaveValue("/invitations?id=inv-1");
   } finally {

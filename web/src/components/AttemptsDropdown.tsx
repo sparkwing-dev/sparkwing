@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { type RunHistoryEntry, getRunAttempts } from "@/lib/api";
+import { hasTimestamp } from "@/lib/runTime";
 import { fmtDateTime } from "@/lib/timeFormat";
 
 const SELECT_RUN_EVENT = "sparkwing:select-run";
@@ -163,6 +164,6 @@ function statusDot(status: string): string {
 }
 
 function fmtAttemptTime(r: RunHistoryEntry): string {
-  if (!r.started_at) return r.id;
+  if (!hasTimestamp(r.started_at)) return "Not started";
   return fmtDateTime(r.started_at);
 }
