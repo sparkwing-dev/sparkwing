@@ -50,8 +50,13 @@ func productionRuntime(version string) clusterRuntime {
 			if err != nil {
 				return runners.RuntimeConfig{}, err
 			}
+			var open func(client.EngineOptions) (controllerwire.Controller, error)
+			if options.Config.LocalAdmission != nil && *options.Config.LocalAdmission {
+				open = nativeCapacityClient(home, version)
+			}
 			return runners.RuntimeConfig{
-				Installation: installation, Versions: engines, Target: releaseasset.Target{Binary: releaseasset.SparkwingRunner, GOOS: runtime.GOOS, GOARCH: runtime.GOARCH},
+				NewController: open,
+				Installation:  installation, Versions: engines, Target: releaseasset.Target{Binary: releaseasset.SparkwingRunner, GOOS: runtime.GOOS, GOARCH: runtime.GOARCH},
 				Hosting: hosting,
 			}, nil
 		}},

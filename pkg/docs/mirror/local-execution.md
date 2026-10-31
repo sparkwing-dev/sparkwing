@@ -216,6 +216,9 @@ plan. It records the retrier separately. `--failed` reuses authorized successful
 work. `--all-jobs` executes the complete plan. Application retries within a job
 keep the same claim and increase the attempt ordinal. Lease loss follows the
 separate recovery rule in [scheduling](scheduling.md).
+When the original plan is already accepted and controller-dispatched, the retry
+becomes controller-owned during intake. It schedules the preserved plan without
+starting another planning owner.
 
 ### Publishing a foreground run handle
 
@@ -523,7 +526,10 @@ Registered machines advertise labels and a configured concurrent-job count.
 Required labels select eligible machines. CPU and memory observations are not
 claim requirements. Enrollment can enable `local_admission` to share the
 machine's local admission controller with local runs; claim authority and
-placement still belong to the controller.
+placement still belong to the controller. With `local_admission` enabled, a
+registered machine with no available local CPU or memory budget withdraws its
+job capacity until budget becomes available. Planning continues while the
+machine budget is full.
 
 Each claimed job holds its machine lease through source preparation, execution
 and cleanup. Busy local work does not prevent jobs from becoming ready for overflow.
