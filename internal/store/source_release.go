@@ -120,7 +120,7 @@ func (t *Tenant) sourceReleaseRequestTx(ctx context.Context, tx *storeTx, author
 }
 
 func unprovenSourceRemedy(host string) string {
-	return "Sparkwing has not proven this run's repository and checked that its code is reachable from a repository branch or tag, so it gets no team git credential for " + host + "; run code Sparkwing fetches through the GitHub App"
+	return "Sparkwing has not proven this run's repository and checked that its code is reachable from a repository branch or tag, so it gets no team git credential for " + host + " and cannot fetch a private repository; start a separate run whose code Sparkwing fetches and verifies through the GitHub App, or upload the source"
 }
 
 func checkSourceReleaseFenceTx(ctx context.Context, tx *storeTx, c capability.Capability) error {

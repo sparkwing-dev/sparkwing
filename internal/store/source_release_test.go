@@ -304,7 +304,10 @@ func TestSourceReleaseRequiresSealedRepositoryAndIntakeCompare(t *testing.T) {
 			setRunRequest(t, tenant, unproven)
 			defer setRunRequest(t, tenant, proven)
 			var refused *apierr.Error
-			if credential, err := release(); !errors.Is(err, ErrNotFound) || !errors.As(err, &refused) || !strings.Contains(refused.Message, "has not proven") {
+			if credential, err := release(); !errors.Is(err, ErrNotFound) || !errors.As(err, &refused) ||
+				!strings.Contains(refused.Message, "has not proven") ||
+				!strings.Contains(refused.Message, "cannot fetch a private repository") ||
+				!strings.Contains(refused.Message, "upload") {
 				t.Fatalf("unproven code got %q %v", credential.ID, err)
 			}
 		})

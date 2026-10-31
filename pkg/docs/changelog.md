@@ -41,6 +41,8 @@ unlock.
 
 ### Fixed
 
+- **source credentials:** Refusals explain that an unproven run cannot fetch a private repository
+  Changed-revision children require supplied source or a separate App-verified run. Fetch-only access follows the same repository-proof requirement as other job credentials.
 - **logs:** Client-canceled HTTP requests log at info and keep their status and audit records
   Rollback cleanup on closed or canceled connections logs at debug. Server faults still log at error.
 - **console:** Run submission and Run now keep waiting while the controller admits the run

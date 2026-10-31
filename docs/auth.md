@@ -990,6 +990,12 @@ base branch. An asserted run can still have repository proof: a branch-pinned
 commits pass the intake compare check. The asserted trust class alone does not
 refuse that credential. Changed-revision and cross-repository children inherit
 no repository proof, while exact-revision children inherit their parent's seal.
+Without that proof, a remote run receives neither a team Git credential nor a
+GitHub App source token, including for fetch-only access. A changed-revision child
+therefore cannot fetch a private repository. Start a separate run whose code
+Sparkwing selects and verifies through the GitHub App, or supply the source in an
+upload. Public repositories can still be fetched anonymously. Shared-secret
+eligibility does not grant source credentials.
 Verified cache fallbacks use the sealed repository proof. Unproven
 runs read and write their own data scope. Unknown claimant shapes use the
 personal host boundary and cannot claim repository-proven work.
