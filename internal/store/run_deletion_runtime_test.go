@@ -86,8 +86,12 @@ func TestAuthorizedRunDeletionPreservesBillingAndAllowsCleanupReplay(t *testing.
 			if err != nil {
 				t.Fatal(err)
 			}
-			if err := tenant.DeleteAuthorizedRun(t.Context(), forbidden, nil); err == nil {
-				t.Fatal("editor deleted another account's run")
+			var refused *apierr.Error
+			if err := tenant.DeleteAuthorizedRun(t.Context(), forbidden, nil); !errors.As(err, &refused) || refused.Code != apierr.Forbidden || !strings.Contains(refused.Error(), "team.admin") {
+				t.Fatalf("foreign-creator deletion must name team.admin: %v", err)
+			}
+			if _, err := tenant.ReadRun(t.Context(), row.ID); err != nil {
+				t.Fatalf("refused deletion lost the run: %v", err)
 			}
 			if _, err := s.DB().Exec(`INSERT INTO audit_events(id,ts,team,kind,subject_id,run_id) VALUES ('secret-audit',1,?,'secret.released','secret-release',?),('git-audit',1,?,'git_credential.released','git-release',?)`, tenant.Team(), row.ID, tenant.Team(), row.ID); err != nil {
 				t.Fatal(err)

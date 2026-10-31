@@ -4,6 +4,9 @@ import (
 	"net/http"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
 )
 
 func TestPermissionRefusalsExplainRequiredAuthority(t *testing.T) {
@@ -49,5 +52,19 @@ func TestPermissionRefusalsKeepForeignRunsIndistinguishableFromAbsentRuns(t *tes
 		if foreignCode != absentCode || foreignBody != absentBody || foreignCode == http.StatusOK {
 			t.Fatalf("foreign = %d %s, absent = %d %s", foreignCode, foreignBody, absentCode, absentBody)
 		}
+	}
+}
+
+func TestForeignCreatorRunDeletionRefusalNamesTeamAdmin(t *testing.T) {
+	f := newTenancyFixture(t, openSQLiteStore)
+	if _, err := teststore.SQL(t, f.st).ExecContext(t.Context(), `UPDATE runs SET status='success',finished_at=? WHERE team=? AND id=?`, time.Now().UnixNano(), f.teamA.Team(), f.runA); err != nil {
+		t.Fatal(err)
+	}
+	code, body := f.do("DELETE", "/api/v1/runs/"+f.runA, f.editorA, nil)
+	if code != http.StatusForbidden || !strings.Contains(body, "team.admin") || !strings.Contains(body, "administrator") {
+		t.Fatalf("deletion refusal = %d %s", code, body)
+	}
+	if _, err := f.teamA.ReadRun(t.Context(), f.runA); err != nil {
+		t.Fatalf("refused deletion lost the run: %v", err)
 	}
 }
