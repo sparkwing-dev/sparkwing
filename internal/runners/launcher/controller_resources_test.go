@@ -159,6 +159,11 @@ func cloudResourceStore(t *testing.T) (*cloudResourceFixture, *store.Tenant) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// Repository-scoped launchers require the proof intake seals after fetching source.
+	provenance, err = provenance.FetchedFrom(1, "team/repo", "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
 	request, err := json.Marshal(runspec.SealedRequest{Version: 1, RunID: "run", Hash: "request", Provenance: provenance, Request: runspec.Request{Version: 1, Team: "a", Pipeline: "ci", Mode: runspec.IntakeExecute, Dispatch: runspec.DispatchController, Git: runspec.Git{Repository: runspec.Repository{Key: "gh:1"}}}})
 	if err != nil {
 		t.Fatal(err)
