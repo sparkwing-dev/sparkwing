@@ -142,7 +142,7 @@ func localMetadataClone(call *ast.CallExpr) bool {
 	if !ok || owner.Name != "exec" {
 		return false
 	}
-	// safety: this form cannot contact a remote or select checkout files.
+	// safety: git ignores --local for URLs, so the one caller also restricts the clone to the file protocol.
 	for i, want := range []string{"git", "clone", "--local", "--shared", "--no-checkout", "--"} {
 		literal, ok := call.Args[i+1].(*ast.BasicLit)
 		if !ok || literal.Kind != token.STRING {

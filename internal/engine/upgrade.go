@@ -363,6 +363,8 @@ func copyCheckout(ctx context.Context, source, destination string) error {
 	if _, err := os.Stat(filepath.Join(source, ".git")); err == nil {
 		// safety: a private index keeps verification from writing into a linked worktree's metadata.
 		clone := exec.CommandContext(ctx, "git", "clone", "--local", "--shared", "--no-checkout", "--", source, destination)
+		// safety: git ignores --local for URLs; only the file protocol may serve this clone.
+		clone.Env = append(os.Environ(), "GIT_ALLOW_PROTOCOL=file")
 		if output, err := clone.CombinedOutput(); err != nil {
 			return fmt.Errorf("stage upgrade Git metadata: %w: %s", err, strings.TrimSpace(string(output)))
 		}
