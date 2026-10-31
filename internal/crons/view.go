@@ -67,6 +67,8 @@ func NewScheduleView(row Row) controllerwire.ScheduleView {
 	}
 	return controllerwire.ScheduleView{
 		ID:           row.ID,
+		Owner:        string(row.Team),
+		ArmedBy:      row.ArmedBy,
 		Name:         row.Display,
 		ScheduleName: row.ScheduleName,
 		RepoPath:     row.RepoPath,

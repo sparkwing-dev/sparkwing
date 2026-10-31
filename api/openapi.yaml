@@ -3615,6 +3615,8 @@ components:
           type: object
         armed_at:
           type: string
+        armed_by:
+          type: string
         catch_up_ns:
           type: integer
         cron:
@@ -3647,6 +3649,8 @@ components:
           type: string
         override:
           $ref: '#/components/schemas/internal.controllerwire.OverrideView'
+        owner:
+          type: string
         paused:
           type: boolean
         pipeline:
@@ -3667,6 +3671,8 @@ components:
           type: string
       required:
         - id
+        - owner
+        - armed_by
         - name
         - schedule_name
         - repo_path

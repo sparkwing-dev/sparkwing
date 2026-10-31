@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"reflect"
 	"strings"
@@ -72,6 +73,24 @@ func scheduleInvocation(t *testing.T, args ...string) clisurface.Invocation {
 func scheduleFake() *scheduleFixture {
 	row := controllerwire.DetailView{Schedule: controllerwire.ScheduleView{ID: "s1", Name: "check/nightly", Pipeline: "check", Where: "local", Declared: true, State: "armed", Effective: controllerwire.EffectiveView{Cron: "0 3 * * *", TZ: "UTC", Overlap: "skip"}}}
 	return &scheduleFixture{rows: map[string]controllerwire.DetailView{"s1": row, "check/nightly": row}}
+}
+
+func TestScheduleManagementDisplaysOwnerAndArmer(t *testing.T) {
+	f := scheduleFake()
+	row := f.rows["s1"]
+	if err := json.Unmarshal([]byte(`{"owner":"widgets-team","armed_by":"schedule-armer"}`), &row.Schedule); err != nil {
+		t.Fatal(err)
+	}
+	f.rows["s1"] = row
+	for _, args := range [][]string{{"list", "-o", "json"}, {"list", "-o", "pretty"}, {"show", "--schedule", "s1", "-o", "json"}, {"show", "--schedule", "s1", "-o", "pretty"}} {
+		var out bytes.Buffer
+		if err := manageSchedules(t.Context(), scheduleInvocation(t, args...), f, &out); err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(out.String(), "widgets-team") || !strings.Contains(out.String(), "schedule-armer") {
+			t.Errorf("%v lost owner or armer: %s", args, out.String())
+		}
+	}
 }
 
 func TestScheduleManagementResolvesEverySelectorBeforeMutation(t *testing.T) {

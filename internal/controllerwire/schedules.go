@@ -120,6 +120,8 @@ type EffectiveView struct {
 // only on a schedule pushed to a controller.
 type ScheduleView struct {
 	ID           string        `json:"id"`
+	Owner        string        `json:"owner"`
+	ArmedBy      string        `json:"armed_by"`
 	Name         string        `json:"name"`
 	ScheduleName string        `json:"schedule_name"`
 	RepoPath     string        `json:"repo_path"`
