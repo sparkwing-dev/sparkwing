@@ -5,16 +5,19 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
 	"testing/quick"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controller"
@@ -23,6 +26,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/quicktest"
+	"github.com/sparkwing-dev/sparkwing/internal/routepolicy"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/sdkserve"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
@@ -365,6 +369,89 @@ func TestJobOutputThroughNativeClientAndCurrentReadSet(t *testing.T) {
 	if err != nil || string(output) != `{"weather":"clear","degrees":72}` {
 		t.Fatalf("output = %s: %v", output, err)
 	}
+	t.Run("delegated process", func(t *testing.T) {
+		authorities, err := nodehost.NewProcessAuthorities(nodehost.ProcessAuthorityDependencies{Parent: host, Bindings: host})
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = authorities.Close() })
+		router := routepolicy.New(routepolicy.Authorization{Authenticator: capability.NewAuthenticator(authorities), Bindings: authorities})
+		if err := nodehost.RegisterProcessServices(router, authorities.Resolve); err != nil {
+			t.Fatal(err)
+		}
+		loopback := httptest.NewServer(router)
+		t.Cleanup(loopback.Close)
+		processes := nodehost.NativeProcesses{Authorities: authorities, Masks: nodehost.NewMaskRegistry(secrets.NewMasker()), URL: loopback.URL}
+		binding := principal.Capability.Binding
+		binding.Attempt = 1
+		data := principal.Capability.Data
+		if data != nil {
+			copy := *data
+			copy.Attempt = 1
+			data = &copy
+		}
+		grant, err := processes.Delegate(t.Context(), capability.CredentialLookup{Class: capability.CredentialBearer, Audience: capability.Controller, Digest: principal.Capability.Digest}, capability.DelegateSpec{Parent: principal.Authority, Audience: capability.NodeHost, Binding: binding, Grants: principal.Capability.Grants, Repositories: principal.Capability.Repositories, Data: data, ExpiresAt: principal.Capability.ExpiresAt}, nodehost.ProcessServices{
+			RunID: "run", Job: nodeproto.JobSpec{ID: "job", Needs: []string{"stamp"}},
+			Output: func(ctx context.Context, _ capability.Authorized, job string) (json.RawMessage, error) {
+				return process.Output(ctx, "run", job)
+			},
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = grant.Revoke() })
+		for _, declared := range []bool{true, false} {
+			if !declared {
+				childOutputSQL(t, e.Store, `UPDATE nodes SET spec_json=? WHERE team='a' AND run_id='run' AND node_id='job'`, []byte(`{"id":"job"}`))
+			}
+			request := httptest.NewRequest(http.MethodGet, "/node/v1/jobs/stamp/output", nil)
+			request.Header.Set("Authorization", "Bearer "+grant.Binding.Routes.Bearer)
+			response := httptest.NewRecorder()
+			router.ServeHTTP(response, request)
+			want := http.StatusForbidden
+			if declared {
+				want = http.StatusOK
+			}
+			childOutputSQL(t, e.Store, `UPDATE nodes SET spec_json=? WHERE team='a' AND run_id='run' AND node_id='job'`, []byte(`{"id":"job","deps":["stamp"]}`))
+			if response.Code != want || declared && !strings.Contains(response.Body.String(), `"degrees":72`) {
+				t.Fatalf("process output declared=%t: HTTP %d %s", declared, response.Code, response.Body)
+			}
+		}
+		forbidden := func(err error) bool {
+			var failure *apierr.Error
+			return errors.As(err, &failure) && failure.Code == apierr.Forbidden
+		}
+		for _, target := range []capability.Target{{Team: "b", RunID: "run", NodeID: "stamp"}, {Team: "a", RunID: "other", NodeID: "stamp"}} {
+			if _, err := host.ReadAuthentication(t.Context(), capability.CredentialLookup{Class: capability.CredentialBearer, Audience: capability.Controller, Digest: principal.Capability.Digest}, capability.RequestEvidence{Target: target}); !forbidden(err) {
+				t.Fatalf("foreign target authentication: %+v %v", target, err)
+			}
+			if err := host.CheckBinding(t.Context(), principal, capability.BindReadSet, target); !forbidden(err) {
+				t.Fatalf("foreign output binding: %+v %v", target, err)
+			}
+		}
+		if err := host.CheckBinding(t.Context(), principal, capability.BindOwnNode, capability.Target{Team: "a", RunID: "run", NodeID: "stamp"}); !forbidden(err) {
+			t.Fatalf("dependency ownership binding: %v", err)
+		}
+		t.Run("go", func(t *testing.T) { proveGoDependencyOutput(t, grant.Binding) })
+		t.Run("typescript", func(t *testing.T) {
+			node, err := exec.LookPath("node")
+			if err != nil {
+				t.Skip("TypeScript output proof requires Node.js")
+			}
+			routes, err := json.Marshal(grant.Binding.Routes)
+			if err != nil {
+				t.Fatal(err)
+			}
+			module, err := filepath.Abs("../../sdk/typescript/src/routes.ts")
+			if err != nil {
+				t.Fatal(err)
+			}
+			script := `const { NodeRoutes } = await import(process.argv[1]); const routes = new NodeRoutes(JSON.parse(process.argv[2])); const output = await routes.output("stamp", new AbortController().signal); if (output.weather !== "clear" || output.degrees !== 72) throw new Error(JSON.stringify(output));`
+			if output, err := exec.CommandContext(t.Context(), node, "--input-type=module", "-e", script, module, string(routes)).CombinedOutput(); err != nil {
+				t.Fatalf("TypeScript dependency output: %v\n%s", err, output)
+			}
+		})
+	})
 	tenant, err := e.Store.ForTeam(t.Context(), "a")
 	if err != nil {
 		t.Fatal(err)

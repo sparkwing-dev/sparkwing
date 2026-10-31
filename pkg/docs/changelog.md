@@ -41,6 +41,12 @@ unlock.
 
 ### Fixed
 
+- **schedules:** Due slots enter shared flood admission and create runs within the existing team limits
+  Replays return the admitted run without spending another run token.
+- **outputs:** Go and TypeScript jobs can read their declared predecessors' outputs in the same run and team
+  Unrelated jobs and other runs remain outside an in-run output read.
+- **schedules:** App-managed mutation refusals tell editors to change the repository declaration
+  Schedule show and list include the owning team and arming actor.
 - **children:** App-triggered jobs can start child runs without an intake-origin error
   Exact-revision children inherit the parent's sealed identity. Changed-revision and cross-repository children remain asserted without repository proof.
 - **secrets:** Missing optional secrets no longer fail plan preflight

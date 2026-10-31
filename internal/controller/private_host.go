@@ -271,10 +271,7 @@ func (s *Server) localHostBinding(w http.ResponseWriter, r *http.Request, a capa
 }
 
 func localHostTarget(a capability.Authorized, target capability.Target) (capability.Target, error) {
-	if a.Principal.Capability.Unit == capability.UnitNode {
-		if target.NodeID != "" && target.NodeID != a.Target.NodeID {
-			return capability.Target{}, localHostRefusal()
-		}
+	if a.Principal.Capability.Unit == capability.UnitNode && target.NodeID == "" {
 		target.NodeID = a.Target.NodeID
 	}
 	if target.Team != "" && target.Team != a.Target.Team || target.RunID != "" && target.RunID != a.Target.RunID {

@@ -301,6 +301,7 @@ func handBuiltConsoleFixtures() map[string]any {
 		GithubOwner: "acme", GithubRepo: "app", RetryOf: "run-earlier", TriggerUser: "octocat",
 	}
 	schedule := controllerwire.ScheduleView{
+		Owner: "acme", ArmedBy: "account:owner",
 		ID: "sched-nightly", Name: "app/nightly", ScheduleName: "", RepoPath: "/src/app", Pipeline: "nightly", Where: "controller",
 		Cron: "0 3 * * *", TZ: "UTC", Overlap: "skip", Args: controllerwire.DisplayScheduleArgs(map[string]string{"target": "prod"}),
 		Lock: controllerwire.LockView{State: "follows"}, Override: controllerwire.OverrideView{Fields: []string{}, Args: controllerwire.DisplayScheduleArgs(nil)},

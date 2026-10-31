@@ -31,6 +31,8 @@
   "schedules": [
     {
       "id": "sched-nightly",
+      "owner": "acme",
+      "armed_by": "account:owner",
       "name": "app/nightly",
       "schedule_name": "",
       "repo_path": "/src/app",

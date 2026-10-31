@@ -230,6 +230,8 @@ func selectSchedules(ctx context.Context, inv clisurface.Invocation, opts schedu
 
 type scheduleSummary struct {
 	ID            string  `json:"id"`
+	Owner         string  `json:"owner"`
+	ArmedBy       string  `json:"armed_by"`
 	Name          string  `json:"name"`
 	Pipeline      string  `json:"pipeline"`
 	Where         string  `json:"where"`
@@ -247,7 +249,7 @@ type scheduleSummary struct {
 }
 
 func summarizeSchedule(row controllerwire.ScheduleView) scheduleSummary {
-	return scheduleSummary{ID: row.ID, Name: row.Name, Pipeline: row.Pipeline, Where: row.Where, State: row.State, Paused: row.Paused, Cron: row.Effective.Cron, TZ: row.Effective.TZ, LockState: row.Lock.State, LockRef: row.Lock.Ref, Overridden: len(row.Override.Fields) > 0, OverrideStale: row.Override.Stale, NextDueAt: row.NextDueAt, LastFiredAt: row.LastFiredAt, LastOutcome: row.LastOutcome}
+	return scheduleSummary{ID: row.ID, Owner: row.Owner, ArmedBy: row.ArmedBy, Name: row.Name, Pipeline: row.Pipeline, Where: row.Where, State: row.State, Paused: row.Paused, Cron: row.Effective.Cron, TZ: row.Effective.TZ, LockState: row.Lock.State, LockRef: row.Lock.Ref, Overridden: len(row.Override.Fields) > 0, OverrideStale: row.Override.Stale, NextDueAt: row.NextDueAt, LastFiredAt: row.LastFiredAt, LastOutcome: row.LastOutcome}
 }
 
 func listSchedules(ctx context.Context, inv clisurface.Invocation, opts scheduleOptions, manager controllerwire.ScheduleManager, out io.Writer) error {
@@ -312,7 +314,7 @@ func renderScheduleRecord(out io.Writer, value any, plain, format string) error 
 		if row.OverrideStale {
 			override += " (declaration changed)"
 		}
-		_, err := fmt.Fprintf(out, "%s  %s  %s  %s  %s %s  %s  next %s%s\n", row.ID, row.Name, row.Cron, row.TZ, row.LockState, row.LockRef, row.State, next, override)
+		_, err := fmt.Fprintf(out, "%s  %s  %s  %s  %s %s  %s  next %s%s  owner %s  armed by %s\n", row.ID, row.Name, row.Cron, row.TZ, row.LockState, row.LockRef, row.State, next, override, row.Owner, row.ArmedBy)
 		return err
 	case controllerwire.ScheduleRun:
 		_, err := fmt.Fprintf(out, "run %s submitted (%s)\n  follow: sparkwing runs logs --run %s --follow\n", row.RunID, row.Schedule.Name, row.RunID)
@@ -356,6 +358,7 @@ func renderScheduleDetail(out io.Writer, detail controllerwire.DetailView) error
 	row := detail.Schedule
 	tw := tabwriter.NewWriter(out, 0, 0, 2, ' ', 0)
 	fmt.Fprintf(tw, "schedule\t%s\nname\t%s\nrepo\t%s\npipeline\t%s\nwhere\t%s\nstate\t%s\nlock\t%s %s\nbinary\t%s\ndigest\t%s\nlast run\t%s\nlast outcome\t%s\n", row.ID, row.Name, row.RepoPath, row.Pipeline, row.Where, row.State, row.Lock.State, row.Lock.Ref, row.Lock.Binary, row.Lock.Digest, row.LastRunID, row.LastOutcome)
+	fmt.Fprintf(tw, "owner\t%s\narmed by\t%s\n", row.Owner, row.ArmedBy)
 	fmt.Fprintln(tw, "FIELD\tDECLARED\tOVERRIDE\tEFFECTIVE")
 	fmt.Fprintf(tw, "cron\t%s\t%s\t%s\ntz\t%s\t%s\t%s\noverlap\t%s\t%s\t%s\ncatch up\t%s\t%s\t%s\nargs\t%s\t%s\t%s\n", row.Cron, row.Override.Cron, row.Effective.Cron, row.TZ, row.Override.TZ, row.Effective.TZ, row.Overlap, row.Override.Overlap, row.Effective.Overlap, time.Duration(row.CatchUpNS), time.Duration(row.Override.CatchUpNS), time.Duration(row.Effective.CatchUpNS), renderScheduleArgs(row.Args), renderScheduleArgs(row.Override.Args), renderScheduleArgs(row.Effective.Args))
 	if row.Override.Stale {

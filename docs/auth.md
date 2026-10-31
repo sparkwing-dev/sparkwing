@@ -157,6 +157,10 @@ Create a run with `POST /api/v1/runs`, submit its plan to
 `/api/v1/data` upload, commit and record operations. The controller derives
 execution fences from the authenticated claim.
 
+Job-output reads authenticate the consuming job's live award, then authorize
+the producer against the consumer's declared dependencies in the same run and
+team. An in-run output read cannot select an unrelated job or another run.
+
 An absent route returns the shared `not_found` error before credential
 lookup. A method with no handler on a registered path returns
 `method_not_allowed` and `Allow`, also before credential lookup. Neither

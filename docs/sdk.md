@@ -172,7 +172,9 @@ reason distinguishes conditions such as a concurrency skip.
 
 A job embedding `sw.Produces[T]` exposes its selected result as `T`.
 `sw.RefTo[T](job)` creates a typed reference. Declare its dependency with `Needs`.
-The host authorizes reads through declared edges.
+The host authorizes reads through declared edges in the same run and team.
+Go `Ref.Get(ctx)` and TypeScript `ctx.output(job)` use this rule. A job cannot
+read an unrelated job's output or select another run through an in-run read.
 
 ```go
 build := sw.Job(plan, "build", Build{})

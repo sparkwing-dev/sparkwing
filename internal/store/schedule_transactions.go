@@ -447,6 +447,9 @@ func (t *Tenant) editSchedule(ctx context.Context, a capability.Authorized, sele
 		if !ownsSchedule(nil, row.RepoPath, row) {
 			// safety: decision 67 lets team admins pause and resume App schedules; their declaration stays the repository's.
 			if appAudit == "" || row.GitHubRepositoryID == 0 || !slices.Contains(p.Capability.Grants, capability.TeamAdmin) {
+				if appAudit == "" && row.GitHubRepositoryID > 0 {
+					return apierr.Authorization(apierr.ReasonBinding, "GitHub App manages this schedule; edit the declaration in the repository or update App automation")
+				}
 				return bindingRefusal()
 			}
 			app = true
@@ -582,7 +585,7 @@ func (t *Tenant) DeleteAuthorizedSchedules(ctx context.Context, a capability.Aut
 		for _, row := range rows {
 			if row.RepoPath == repo {
 				if !ownsSchedule(nil, repo, row) {
-					return bindingRefusal()
+					return apierr.Authorization(apierr.ReasonBinding, "GitHub App manages this schedule; edit the declaration in the repository or update App automation")
 				}
 				if err = deleteScheduleTx(ctx, tx, t.team, row.ID); err != nil {
 					return err
