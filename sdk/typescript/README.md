@@ -95,6 +95,10 @@ Requests and frames use private pipes. Standard output and error remain author
 output. No preload or environment bearer is used. The SDK does not filter debug
 logs or assign job identity to log frames.
 
+Package imports use Node's native CommonJS and ESM loading, including symlinked
+dependencies installed by pnpm. Default and named exports follow Node's interop
+rules for both entry imports and imports inside job callbacks.
+
 Every encoded frame must fit the 17 MiB wire limit. Oversized logs fail before
 writing. Typed job and step outputs also have a separate 16 MiB limit.
 Generated declarations use the frame budget. The Sparkwing host masks output and

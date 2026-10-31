@@ -40,6 +40,8 @@ unlock.
 
 ### Fixed
 
+- **TypeScript SDK:** Imports inside jobs retain CommonJS and ESM exports from symlinked packages
+  Protocol pipe validation preserves Node's package path resolution, fixing empty `typescript` exports with pnpm dependencies.
 - **release:** Publish main and the annotated tag together with one atomic push of the recorded changelog commit
   Detached job snapshots no longer block publication or select the wrong commit. A rejected push leaves both remote refs unchanged.
 - **release:** Wait for another tree's golangci-lint run before linting
