@@ -469,7 +469,12 @@ func awardDataScope(row awardRow, sealed runspec.SealedRequest, c capability.Cap
 	if err != nil {
 		return nil, err
 	}
-	scope := &capability.DataScope{Use: capability.DataClaim, RepositoryKey: row.repo, WriteRef: facts.Scope.CapabilityScope(), ReadRefs: readScopes(facts), RunID: row.run, NodeID: row.node, Attempt: row.attempt, Generation: c.Binding.Generation}
+	repo := sealed.Provenance.ProvenRepository()
+	if repo == "" {
+		// safety: unproven work keeps its own data namespace without repository cache fallbacks.
+		repo = sealed.Request.Git.Repository.Key
+	}
+	scope := &capability.DataScope{Use: capability.DataClaim, RepositoryKey: string(repo), WriteRef: facts.Scope.CapabilityScope(), ReadRefs: readScopes(facts), RunID: row.run, NodeID: row.node, Attempt: row.attempt, Generation: c.Binding.Generation}
 	if c.Unit == capability.UnitNode {
 		scope.Attempt = 0
 	}

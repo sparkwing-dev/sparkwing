@@ -17,8 +17,7 @@ import (
 // sealProvenanceTx derives the identity a new run speaks for from facts this
 // admission transaction verified, and never from what the request body claims.
 // Retries carry their source run's sealed identity unchanged.
-// An unverified run also learns the repository's verified default branch, which it
-// may read verified cache records from but never writes as.
+// Repository-proven work also learns the verified default branch for cache reads.
 func sealProvenanceTx(ctx context.Context, tx *storeTx, team Team, request IntakeRequest, p capability.Principal, input runspec.Request, run string) (runspec.Provenance, error) {
 	sealed, err := identityTx(ctx, tx, team, request, p, input, run)
 	if err != nil {
@@ -38,11 +37,11 @@ func sealProvenanceTx(ctx context.Context, tx *storeTx, team Team, request Intak
 			return sealed, err
 		}
 	}
-	if sealed.Verified() || sealed.DefaultBranch() != "" {
+	if sealed.Verified() || sealed.DefaultBranch() != "" || sealed.ProvenRepository() == "" {
 		return sealed, nil
 	}
 	var scope string
-	err = tx.QueryRowContext(ctx, `SELECT ref_scope FROM blob_records WHERE team=? AND repo_key=? AND verified_default_branch=1 ORDER BY created_at DESC LIMIT 1`, team, input.Git.Repository.Key).Scan(&scope)
+	err = tx.QueryRowContext(ctx, `SELECT ref_scope FROM blob_records WHERE team=? AND repo_key=? AND verified_default_branch=1 ORDER BY created_at DESC LIMIT 1`, team, sealed.ProvenRepository()).Scan(&scope)
 	if errors.Is(err, sql.ErrNoRows) {
 		return sealed, nil
 	}

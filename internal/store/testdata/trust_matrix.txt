@@ -482,7 +482,7 @@ oidc_trigger                                       manual
 oidc_repository                                    -
 oidc_ref                                           -
 oidc_sha                                           -
-cache_reads                                        manual:armer/alice:refs/heads/main refs/heads/main
+cache_reads                                        manual:armer/alice:refs/heads/main
 default_branch_work_go                             no
 source_credential                                  no
 cache_write_fresh_host                             manual:armer/alice:refs/heads/main
@@ -498,7 +498,7 @@ personal_claim                                     yes
 personal_pipeline_secrets                          no
 personal_shared_secrets                            yes
 personal_oidc_repository                           -
-personal_cache_reads                               manual:armer/alice:refs/heads/main refs/heads/main
+personal_cache_reads                               manual:armer/alice:refs/heads/main
 personal_source_credential                         no
 personal_cache_write                               manual:host-<machine>/armer/alice:refs/heads/main
 personal_latest_default                            no
@@ -507,7 +507,7 @@ here_claim                                         yes
 here_pipeline_secrets                              no
 here_shared_secrets                                yes
 here_oidc_repository                               -
-here_cache_reads                                   manual:armer/alice:refs/heads/main refs/heads/main
+here_cache_reads                                   manual:armer/alice:refs/heads/main
 here_source_credential                             no
 here_cache_write                                   manual:host-<machine>/armer/alice:refs/heads/main
 here_latest_default                                no
@@ -644,7 +644,7 @@ oidc_trigger                                       manual
 oidc_repository                                    -
 oidc_ref                                           -
 oidc_sha                                           -
-cache_reads                                        manual:account/alice:refs/heads/main refs/heads/main
+cache_reads                                        manual:account/alice:refs/heads/main
 default_branch_work_go                             no
 source_credential                                  no
 cache_write_fresh_host                             manual:account/alice:refs/heads/main
@@ -660,7 +660,7 @@ personal_claim                                     yes
 personal_pipeline_secrets                          no
 personal_shared_secrets                            yes
 personal_oidc_repository                           -
-personal_cache_reads                               manual:account/alice:refs/heads/main refs/heads/main
+personal_cache_reads                               manual:account/alice:refs/heads/main
 personal_source_credential                         no
 personal_cache_write                               manual:host-<machine>/account/alice:refs/heads/main
 personal_latest_default                            no
@@ -669,7 +669,7 @@ here_claim                                         yes
 here_pipeline_secrets                              no
 here_shared_secrets                                yes
 here_oidc_repository                               -
-here_cache_reads                                   manual:account/alice:refs/heads/main refs/heads/main
+here_cache_reads                                   manual:account/alice:refs/heads/main
 here_source_credential                             no
 here_cache_write                                   manual:host-<machine>/account/alice:refs/heads/main
 here_latest_default                                no
@@ -698,7 +698,7 @@ oidc_trigger                                       manual
 oidc_repository                                    -
 oidc_ref                                           -
 oidc_sha                                           -
-cache_reads                                        manual:local/laptop:refs/heads/main refs/heads/main
+cache_reads                                        manual:local/laptop:refs/heads/main
 default_branch_work_go                             no
 source_credential                                  no
 cache_write_fresh_host                             manual:local/laptop:refs/heads/main
@@ -714,7 +714,7 @@ personal_claim                                     yes
 personal_pipeline_secrets                          no
 personal_shared_secrets                            yes
 personal_oidc_repository                           -
-personal_cache_reads                               manual:local/laptop:refs/heads/main refs/heads/main
+personal_cache_reads                               manual:local/laptop:refs/heads/main
 personal_source_credential                         no
 personal_cache_write                               manual:host-<machine>/local/laptop:refs/heads/main
 personal_latest_default                            no
@@ -723,7 +723,7 @@ here_claim                                         yes
 here_pipeline_secrets                              no
 here_shared_secrets                                yes
 here_oidc_repository                               -
-here_cache_reads                                   manual:local/laptop:refs/heads/main refs/heads/main
+here_cache_reads                                   manual:local/laptop:refs/heads/main
 here_source_credential                             no
 here_cache_write                                   manual:host-<machine>/local/laptop:refs/heads/main
 here_latest_default                                no
@@ -916,7 +916,7 @@ oidc_trigger                                       manual
 oidc_repository                                    -
 oidc_ref                                           -
 oidc_sha                                           -
-cache_reads                                        manual:run/run-app-push-default:refs/heads/main refs/heads/main
+cache_reads                                        manual:run/run-app-push-default:refs/heads/main
 default_branch_work_go                             no
 source_credential                                  no
 cache_write_fresh_host                             manual:run/run-app-push-default:refs/heads/main
@@ -932,7 +932,7 @@ personal_claim                                     yes
 personal_pipeline_secrets                          no
 personal_shared_secrets                            yes
 personal_oidc_repository                           -
-personal_cache_reads                               manual:run/run-app-push-default:refs/heads/main refs/heads/main
+personal_cache_reads                               manual:run/run-app-push-default:refs/heads/main
 personal_source_credential                         no
 personal_cache_write                               manual:host-<machine>/run/run-app-push-default:refs/heads/main
 personal_latest_default                            no
@@ -941,7 +941,7 @@ here_claim                                         yes
 here_pipeline_secrets                              no
 here_shared_secrets                                yes
 here_oidc_repository                               -
-here_cache_reads                                   manual:run/run-app-push-default:refs/heads/main refs/heads/main
+here_cache_reads                                   manual:run/run-app-push-default:refs/heads/main
 here_source_credential                             no
 here_cache_write                                   manual:host-<machine>/run/run-app-push-default:refs/heads/main
 here_latest_default                                no
