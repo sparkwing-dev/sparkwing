@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"slices"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
@@ -22,7 +23,7 @@ type materializedRecords struct {
 }
 
 func materializeChangeTx(ctx context.Context, tx *storeTx, team Team, change nodeTransition) (nodeTransition, error) {
-	if change.Actor.Kind != runstate.ActorRunHost || change.Extra.Materialize == nil || change.Extra.Result != nil {
+	if (change.Actor.Kind != runstate.ActorRunHost && change.Actor.Kind != runstate.ActorController) || change.Extra.Materialize == nil || change.Extra.Result != nil {
 		return change, authorityError(apierr.BadRequest, "materialization requires a persisted source without a supplied result")
 	}
 	source := *change.Extra.Materialize
@@ -115,6 +116,9 @@ func materializationResultTx(ctx context.Context, tx *storeTx, team Team, run Ru
 	}
 	node, err := readNodeTx(ctx, tx, team, ref)
 	if err != nil {
+		if ref != target.Ref && errors.Is(err, ErrNotFound) {
+			return runstate.NodeResult{}, blob.ErrNotFound
+		}
 		return runstate.NodeResult{}, err
 	}
 	if source.Kind == runstate.SourceManualRetry {

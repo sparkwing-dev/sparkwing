@@ -72,7 +72,13 @@ func (r *blobRecords) mutateRecordsTx(ctx context.Context, tx *storeTx, a blobAc
 			result[i] = record
 		}
 	}
-	current, err := resolveBlobAuthorityTx(ctx, tx, r.tenant.team, a.authority, capability.DataWrite)
+	var current blobActor
+	var err error
+	if a.owner != nil && target != nil {
+		current, err = materializationActorTx(ctx, tx, r.tenant.team, *a.owner, target.Ref)
+	} else {
+		current, err = resolveBlobAuthorityTx(ctx, tx, r.tenant.team, a.authority, capability.DataWrite)
+	}
 	if err != nil {
 		return nil, err
 	}

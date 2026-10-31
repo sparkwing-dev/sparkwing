@@ -154,7 +154,7 @@ func (t *Tenant) AdmitRun(ctx context.Context, request IntakeRequest) (Admission
 // Published plans require live publisher authority and create importable jobs without awarding an executable claim.
 func (t *Tenant) AcceptPlan(ctx context.Context, request PlanAcceptance) (AcceptedPlan, error) {
 	var result AcceptedPlan
-	err := t.s.inTx(ctx, func(tx *storeTx) error {
+	err := t.s.inBlobTx(ctx, func(tx *storeTx) error {
 		var err error
 		result, err = sealRunSpecTx(ctx, tx, t.team, request, tx.now(ctx))
 		if err != nil {
@@ -187,7 +187,7 @@ func (t *Tenant) AcceptExpansion(ctx context.Context, request ExpansionSubmissio
 	if request.Failure != nil && (request.Failure.MaskedError == "" || len(request.Failure.MaskedError) > int(limits.ErrorBytes) || !slices.ContainsFunc(apierr.Codes, func(code apierr.Definition) bool { return code.Code == request.Failure.Code })) {
 		return result, authorityError(apierr.BadRequest, "invalid expansion failure")
 	}
-	err := t.s.inTx(ctx, func(tx *storeTx) error {
+	err := t.s.inBlobTx(ctx, func(tx *storeTx) error {
 		if err := expansionAuthorityTx(ctx, tx, t.team, request); err != nil {
 			return err
 		}

@@ -524,6 +524,9 @@ sources, or the exact scoped memo record for a memo source. It verifies every
 selected object and manifest member before copying. The records retain uploader,
 provenance and ref facts while operational ownership moves to the destination run.
 Their keys name the destination result sequence. They create no execution attempt.
+Controller-owned retries materialize the committed successful selection before
+releasing jobs. Copy authority comes from the controller's ownership and the
+retry's sealed data scope; host-owned reconciliation uses its live data grant.
 
 Copies, selectors, terminal state and the event share the reconciliation transaction.
 A missing, expired or corrupt source rolls back to the materialization savepoint

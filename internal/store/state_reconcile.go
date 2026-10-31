@@ -2,9 +2,11 @@ package store
 
 import (
 	"context"
+	"errors"
 	"slices"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
+	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
@@ -123,7 +125,7 @@ func (t *Tenant) reconcileNode(ctx context.Context, request ReconcileRequest) (r
 }
 
 func validateReconcileRequest(request ReconcileRequest) error {
-	if request.Ref.RunID == "" || request.Ref.NodeID == "" || request.Actor.Kind != runstate.ActorRunHost {
+	if request.Ref.RunID == "" || request.Ref.NodeID == "" || (request.Actor.Kind != runstate.ActorRunHost && request.Actor.Kind != runstate.ActorController) {
 		return authorityError(apierr.BadRequest, "reconciliation requires a job and run host")
 	}
 	if !slices.Contains([]runstate.SourcePolicy{runstate.SourceNone, runstate.SourceResume, runstate.SourceManualRetry, runstate.SourceCoalesced}, request.Policy) {
@@ -147,6 +149,9 @@ func lockReconcileRunsTx(ctx context.Context, tx *storeTx, team Team, ref runspe
 	slices.Sort(ids)
 	for _, id := range slices.Compact(ids) {
 		if err := lockStateRunTx(ctx, tx, team, id); err != nil {
+			if id != string(ref.RunID) && errors.Is(err, ErrNotFound) {
+				return blob.ErrNotFound
+			}
 			return err
 		}
 	}

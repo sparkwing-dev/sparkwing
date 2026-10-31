@@ -97,7 +97,7 @@ func nodeTransitions() []nodeEdge {
 		{[]runstate.NodeState{runstate.NodeReady}, []runstate.NodeState{nodePending}, owners, runstate.CauseRevoke, []edgeGuard{guardOwner, guardUnclaimed}, false},
 		{[]runstate.NodeState{runstate.NodeReady}, []runstate.NodeState{runstate.NodeClaimed}, []runstate.ActorKind{runstate.ActorHolder, runstate.ActorRunHost}, runstate.CauseAward, []edgeGuard{guardAward, guardUnclaimed}, false},
 		{[]runstate.NodeState{nodePending, runstate.NodeReady}, []runstate.NodeState{runstate.NodeFailed}, []runstate.ActorKind{runstate.ActorReaper}, runstate.CauseQueueTimeout, []edgeGuard{guardQueueDeadline, guardUnclaimed}, false},
-		{[]runstate.NodeState{nodePending, runstate.NodeReady, runstate.NodeClaimed}, terminal, []runstate.ActorKind{runstate.ActorRunHost}, causeMaterialize, []edgeGuard{guardOwner, guardMaterialize}, false},
+		{[]runstate.NodeState{nodePending, runstate.NodeReady, runstate.NodeClaimed}, terminal, owners, causeMaterialize, []edgeGuard{guardOwner, guardMaterialize}, false},
 		{[]runstate.NodeState{runstate.NodeClaimed}, []runstate.NodeState{runstate.NodeRunning}, []runstate.ActorKind{runstate.ActorHolder}, runstate.CauseStart, []edgeGuard{guardHolder}, false},
 		{[]runstate.NodeState{runstate.NodeClaimed}, []runstate.NodeState{nodePending}, []runstate.ActorKind{runstate.ActorHolder}, runstate.CauseRelease, []edgeGuard{guardHolder}, false},
 		{[]runstate.NodeState{runstate.NodeClaimed}, []runstate.NodeState{nodePending}, []runstate.ActorKind{runstate.ActorReaper}, runstate.CauseLeaseLapse, []edgeGuard{guardExpired}, false},
