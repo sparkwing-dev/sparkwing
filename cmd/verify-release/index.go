@@ -146,8 +146,10 @@ func writeReleaseIndex(out string, index engine.VersionIndex, key ed25519.Privat
 	if _, err := engine.VerifyIndex(engine.SignedIndex{Body: body, Signature: signature}, now, keys); err != nil {
 		return fmt.Errorf("refusing an index the client would reject: %w", err)
 	}
+	// #nosec G703 -- out is the release job's own output directory and the names are fixed
 	if err := os.WriteFile(filepath.Join(out, "versions.json"), body, 0o600); err != nil {
 		return err
 	}
+	// #nosec G703 -- out is the release job's own output directory and the names are fixed
 	return os.WriteFile(filepath.Join(out, "versions.json.sig"), signature, 0o600)
 }
