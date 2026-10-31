@@ -55,7 +55,7 @@ func referenceWorld(t *testing.T, s *Store, repo string) *Tenant {
 		s.testOnlyExec(t, `INSERT INTO team_counters(team) VALUES (?) ON CONFLICT(team) DO NOTHING`, team)
 	}
 	s.intakePolicy = referencePolicy()
-	// A verified push of main left a record for repository-proven runs to read.
+	// safety: the saved default-branch record must not grant unproven runs a repository fallback.
 	digest := strings.Repeat("d", 64)
 	s.testOnlyExec(t, `INSERT INTO blobs(team,digest,size,created_at) VALUES ('a',?,1,1)`, digest)
 	s.testOnlyExec(t, `INSERT INTO blob_records(team,kind,scope,name,digest,repo_key,ref_scope,uploader_principal,provenance,source_identity_json,source_kind,source_run_id,verified_ref,verified_default_branch,ref_facts_json,created_at) VALUES ('a','depcache','default','modules',?,?,'refs/heads/main','runner','cloud',?,'job','main-run',1,1,?,1)`, digest, repo, []byte(`{}`), []byte(`{}`))
@@ -390,7 +390,6 @@ func childRequest(pipeline, ref, sha string) runspec.Request {
 // parent, and states every authority that identity decides. {run} is the admitted
 // run's ID.
 func ProvenanceReferenceModel(t *testing.T, open func(*testing.T) *Store) {
-	// An unproven run reads and writes only its writer's scope.
 	asserted := func(pipeline, writer, ref string, secrets ...string) provenanceObservation {
 		write := "manual:" + writer + ":" + ref
 		return provenanceObservation{Subject: "team:a:repository_id::pipeline:" + pipeline + ":trigger:manual:runner:runner:runner_environment:persistent:ref:", Write: write, Reads: []string{write}, Pools: []string{}, Secrets: secrets}
