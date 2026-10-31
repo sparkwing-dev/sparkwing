@@ -72,8 +72,11 @@ func observeDebug(ctx context.Context, inv clisurface.Invocation, reader control
 }
 
 func attachObservedDebug(ctx context.Context, inv clisurface.Invocation, job controllerwire.DebugJob, out io.Writer, attach func(context.Context, controllerwire.DebugExecution, io.Writer) error) error {
-	if job.Execution == nil || job.Job.Status != "running" {
+	if job.Job.Status != "running" {
 		return &apierr.Error{Code: apierr.IllegalTransition, Message: "job has no running executor to attach to"}
+	}
+	if job.Execution == nil {
+		return &apierr.Error{Code: apierr.CapabilityUnsupported, Message: "job has no Kubernetes attachment target. Cloud jobs do not support shell attachment", Hint: "use sparkwing debug env or sparkwing runs logs to inspect the job"}
 	}
 	if job.Execution.Kind != "kubernetes" {
 		return &apierr.Error{Code: apierr.CapabilityUnsupported, Message: "job executor has no Kubernetes attachment target", Hint: "use sparkwing debug env to inspect the job"}

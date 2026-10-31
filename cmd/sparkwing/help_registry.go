@@ -447,7 +447,7 @@ var commandSynopses = map[string]string{
 	"sparkwing dashboard stop":                      "Stop a running dashboard server",
 	"sparkwing dashboard uninstall":                 "Remove the dashboard login service",
 	"sparkwing debug":                               "Interactive debugging for pipeline runs",
-	"sparkwing debug attach":                        "kubectl exec into a paused job's pod (cluster mode)",
+	"sparkwing debug attach":                        "Attach to a running Kubernetes target (Cloud jobs unsupported)",
 	"sparkwing debug env":                           "Inspect public job, executor and pause diagnostics",
 	"sparkwing debug resume":                        "Resume a paused job",
 	"sparkwing docs":                                "Embedded user docs (offline)",

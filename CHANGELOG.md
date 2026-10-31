@@ -51,6 +51,13 @@ unlock.
   Placement retries use the renewed deadline. Claim backoff and unrelated Job observation failures continue renewing held awards. Owner loss still permits recovery and requeue.
 - **schedules:** Installing a schedule that collides with a GitHub App declaration returns HTTP 409 and preserves the existing schedule
   Unknown schedule write modes return HTTP 400.
+- **logs:** Cloud jobs finish their current attempt's log seal before cleanup
+  Cleanup preserves pending uploads within the existing one-minute log tail window, including large logs whose payload has already arrived.
+- **secrets:** Optional declared secrets unavailable to a run return missing
+  Go returns `ErrSecretMissing` and TypeScript returns `undefined` for absent or scoped-out values. Undeclared names remain refused.
+- **debug:** Cloud attachment refusals explain the supported inspection commands
+  `debug attach` requires a published Kubernetes target. Cloud jobs support `debug env` and `runs logs`. The debugging guide now states that shell attachment is unavailable.
+
 - **schedules:** Unreachable source repositories and missing refs return HTTP 422 during registration
   Refusals name the repository and ref, explain which URL and credentials to check, and log at info. Server faults still return HTTP 500.
 - **runners:** Machines with a full shared local budget leave jobs available for Cloud overflow

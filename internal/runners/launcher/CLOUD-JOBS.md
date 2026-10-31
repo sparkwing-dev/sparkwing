@@ -275,7 +275,12 @@ starts teardown.
 
 `Sync` reconstructs ownership from persisted Job and
 node metadata. It adopts live Jobs and retires cancelled, expired or terminal
-Jobs. One controller call reconciles all live observations. Decisions may arrive
+Jobs. A completed job with an unsealed current-attempt log is deferred within
+`limits.LogSealGrace`; sealing that stream or passing the window permits
+retirement. This preserves the detached upload without renewing execution.
+`TestCloudLogsSealFiftyMillionPayloadBytes` drives signed remote uploads through
+result completion and reconciliation before the final seal.
+One controller call reconciles all live observations. Decisions may arrive
 in any order; each must match exactly one observed binding before any live Job
 is retired. Duplicate, changed, extra or missing decisions preserve live Jobs
 and return an error. A corrupt persisted award receives an explicit deferred

@@ -24,7 +24,8 @@ If a claim expires before the job starts after resuming a pause, recovery can
 return the job to pending without pausing again. Restart the debug run to pause
 at that boundary again.
 
-To open a shell in a running Kubernetes job, use:
+Shell attachment requires a running job with a controller-published Kubernetes
+target:
 
 ```sh
 sparkwing debug attach --run 412 --job build --profile ci
@@ -32,8 +33,13 @@ sparkwing debug attach --run 412 --job build --profile ci
 
 The controller supplies the pod, namespace and execution container. The command
 uses your local `kubectl` credentials. `--namespace NAME` overrides the namespace.
-Local processes and runners without a Kubernetes target report that attachment
-is unavailable. Use `debug env` to inspect those jobs.
+Cloud jobs do not support shell attachment because Cloud admission refuses
+`exec` and `attach` connections. Use `debug env` and `runs logs` to inspect a
+Cloud job. To investigate a failure interactively, reproduce it locally with
+`--sw-pause-on-failure`.
+
+Local processes and runners without a Kubernetes target also report that
+attachment is unavailable. Use `debug env` to inspect those jobs.
 
 With `-o json`, attach first emits the execution target, then streams shell output
 in `{"kind":"debug_output","text":"..."}` records. Use `-o plain` for raw shell

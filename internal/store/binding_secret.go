@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"errors"
 	"slices"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
@@ -88,6 +89,9 @@ func bindingSecretTx(ctx context.Context, tx *storeTx, c capability.Capability, 
 		return err
 	}
 	_, pool, err := selectedSecretTx(ctx, tx, Team(c.Team), target.SecretName, selection)
+	if errors.Is(err, ErrNotFound) && slices.Contains(run.Spec.Resolved.OptionalSecretNames, target.SecretName) {
+		return nil
+	}
 	if err != nil {
 		return err
 	}

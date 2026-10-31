@@ -14,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controller/client"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
@@ -27,6 +28,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/source"
 	"github.com/sparkwing-dev/sparkwing/internal/source/sourcetest"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
+	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
 )
 
 func TestBurstAcceptanceLocalOwnerPersonalWorkerAndCancellation(t *testing.T) {
@@ -329,6 +331,10 @@ func burstAcceptanceExecution(t *testing.T, localIneligible bool, placement stri
 		t.Fatal("local secret appeared in persisted run or plan")
 	}
 	if proof != nil {
+		principal, err := s.store.AsOperator().LookupCapability(t.Context(), sha256.Sum256([]byte(awarded.Claim.Capability)))
+		if err != nil {
+			t.Fatal(err)
+		}
 		proof.Execute(workerOptions, *awarded.Claim, owner)
 		completed, err := owner.ReadSnapshot(t.Context(), created.RunID)
 		want := runstate.NodeSuccess
@@ -337,6 +343,20 @@ func burstAcceptanceExecution(t *testing.T, localIneligible bool, placement stri
 		}
 		if err != nil || len(completed.Jobs) != 1 || completed.Jobs[0].Outcome != string(want) {
 			t.Fatalf("owner did not observe %s SDK execution: %+v %v", want, completed, err)
+		}
+		if proof.FinishCloud != nil && completed.Jobs[0].Attempt > 0 {
+			// safety: this fixture collects logs in memory, outside the native log assembly.
+			b := principal.Capability.Binding
+			subject := blob.LogSubject{Kind: blob.LogJobAttempt, Team: principal.Capability.Team, RunID: created.RunID, Attempt: &runspec.AttemptIdentity{Team: principal.Capability.Team, RunID: created.RunID, NodeID: b.NodeID, Generation: b.Generation, Attempt: completed.Jobs[0].Attempt}}
+			actor := engineActor(capability.Authorized{Principal: principal, Binding: b})
+			tenant := teststore.ForTeam(t, s.store, store.Team(principal.Capability.Team))
+			retention, err := tenant.PrepareLogWrite(t.Context(), subject, actor)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := tenant.RecordSegments(t.Context(), store.SegmentCommit{Subject: subject, Actor: actor, Final: true, RetentionClass: retention}); err != nil {
+				t.Fatalf("burst Cloud log seal: %v", err)
+			}
 		}
 		if proof.Failed != nil {
 			detail, err := member.ReadRun(t.Context(), created.RunID)
