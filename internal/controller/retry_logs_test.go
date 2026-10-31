@@ -34,13 +34,13 @@ func TestRetryLogUploadsUseTheirAwardedWriter(t *testing.T) {
 
 func retryLogUploads(t *testing.T, early, cloud bool, outcome string) {
 	t.Helper()
-	e, h, raw := engineClaimHTTPFixture(t, []capability.Grant{capability.NodesClaim})
+	e, _, raw := engineClaimHTTPFixture(t, []capability.Grant{capability.NodesClaim})
 	objects, err := blob.NewFilesystem(blob.FilesystemOptions{Directory: t.TempDir(), Endpoint: "http://local", SigningKey: bytes.Repeat([]byte{42}, 32)})
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = objects.Close() })
-	h = e.Server.WithDataObjects(objects).Handler()
+	h := e.Server.WithDataObjects(objects).Handler()
 	settings := runspec.JobExecutionSettings{}
 	settings.Retry.Set, settings.Retry.Value = true, 1
 	execution, err := json.Marshal(settings)

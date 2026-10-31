@@ -104,7 +104,7 @@ func authenticationNodeTx(ctx context.Context, tx *storeTx, c capability.Capabil
 		if err != nil {
 			return err
 		}
-		// A retry's tail can still be uploading after the last attempt seals.
+		// safety: a retry's tail can still be uploading after the last attempt seals.
 		return tx.QueryRowContext(ctx, `SELECT NOT EXISTS (
 			SELECT 1 FROM log_streams l JOIN node_attempts a
 			ON a.team=l.team AND a.run_id=l.run_id AND a.node_id=l.node_id AND a.attempt=l.attempt AND a.generation=l.generation

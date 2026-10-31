@@ -51,7 +51,7 @@ func (s *Server) logSubmission(r *http.Request, a capability.Authorized, propose
 	if r.PathValue("job") != "" {
 		subject.Kind = blob.LogJobAttempt
 		if proposed.Attempt != nil {
-			// Retry tails name a finished attempt; the store checks its persisted writer and grace.
+			// safety: retry tails name a finished attempt whose stored writer and grace authorize the upload.
 			subject.Attempt = &runspec.AttemptIdentity{
 				Team: a.Target.Team, RunID: a.Target.RunID, NodeID: a.Target.NodeID,
 				Attempt: proposed.Attempt.Attempt, Generation: proposed.Attempt.Generation,
