@@ -132,6 +132,7 @@ exists. The refused installation leaves the stored schedules unchanged.
 Installing an API schedule with an identity already owned by a GitHub App
 schedule returns HTTP 409 and preserves the existing declaration. Manage that
 schedule through the repository declaration or App automation.
+An API request with an unknown schedule write mode returns HTTP 400.
 
 Local installation records the selected declarations and captured environment
 identity durably. Proofs and later pin changes use that captured environment.

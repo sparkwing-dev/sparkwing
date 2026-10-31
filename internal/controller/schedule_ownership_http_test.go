@@ -62,7 +62,7 @@ func TestScheduleHTTPClientExplainsAppDeclarationRefusal(t *testing.T) {
 }
 
 func TestScheduleHTTPInstallConflictsWithAppIdentity(t *testing.T) {
-	for _, mode := range []string{"replace", "merge"} {
+	for _, mode := range []string{"replace", "upsert"} {
 		t.Run(mode, func(t *testing.T) {
 			f := newScheduleHTTPFixture(t)
 			row, _, err := f.writer.ArmCronSchedule(t.Context(), store.CronSchedule{

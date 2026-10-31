@@ -57,6 +57,9 @@ func (s *Server) handlePutCronRepo(w http.ResponseWriter, r *http.Request, a cap
 	if body.Mode == "" {
 		body.Mode = controllerwire.ScheduleReplace
 	}
+	if body.Mode != controllerwire.ScheduleReplace && body.Mode != controllerwire.ScheduleUpsert {
+		return invalidEngineBody("invalid schedule write mode")
+	}
 	repo, err := sourceurl.ValidateCloneURL(body.RepoURL)
 	if err != nil {
 		return invalidEngineBody("invalid repository URL")

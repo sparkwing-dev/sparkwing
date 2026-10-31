@@ -42,6 +42,7 @@ unlock.
 ### Fixed
 
 - **schedules:** Installing a schedule that collides with a GitHub App declaration returns HTTP 409 and preserves the existing schedule
+  Unknown schedule write modes return HTTP 400.
 - **schedules:** Unreachable source repositories and missing refs return HTTP 422 during registration
   Refusals name the repository and ref, explain which URL and credentials to check, and log at info. Server faults still return HTTP 500.
 - **runners:** Machines with a full shared local budget leave jobs available for Cloud overflow
