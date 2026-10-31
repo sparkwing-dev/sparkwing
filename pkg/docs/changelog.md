@@ -43,7 +43,6 @@ unlock.
 
 - **release:** Stable releases publish the signed version index used by upgrades and update notices
   Publication preserves signed policy and release history. An index-only dispatch repairs a missed publication without rebuilding release assets.
-
 - **logs:** Finished Cloud runs complete aggregate log reads after bootstrap owner requeues
   Owner streams register when the runner exchanges its bootstrap credential. Awards that never reached a log writer no longer leave unsealed streams. Missing final seals from actual writers still report incomplete logs.
 - **TypeScript SDK:** Imports inside jobs retain CommonJS and ESM exports from symlinked packages
