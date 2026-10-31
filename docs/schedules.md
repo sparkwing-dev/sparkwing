@@ -34,7 +34,8 @@ resolves before the first mutation. Aliases resolving to the same ID act once.
 A later mutation failure can leave earlier mutations applied.
 
 List JSON emits one selection record per line, including cadence, state, pin
-identity and next/last-fire observations. Show JSON includes its declaration,
+identity, owning team (`owner`), arming actor (`armed_by`) and next/last-fire
+observations. Show JSON includes the same ownership fields, its declaration,
 override, effective cadence, source pin and fire history in one object per
 selected schedule. `--fires 0` requests no history. `--next N` requires a
 positive count and shows the controller's upcoming instants. It does not
@@ -148,11 +149,15 @@ See [CLI schedules](cli-schedules.md) for the generated flag reference and
 
 Controller fires seal the repository, ref and effective arguments before they
 enter the run queue. Repeating the same due instant returns the original run.
+Scheduled launches use shared run admission and count against their team's
+configured hourly run budget and pending-queue limit. Replaying an admitted
+slot uses no additional run budget.
 App-managed schedules require a live installation and repository automation
 consent. Team admins may pause and resume an App-managed schedule, and each
 pause or resume is audited. Nobody can override or delete one, including
 through repository-wide deletion, and other members cannot pause it either.
-Update the repository declaration or App automation instead. A later push
-keeps the schedule's pause state. They follow the configured branch and resolve its
-commit at fire time. An admin-armed default-branch fire
+Edit and delete refusals tell callers to edit the schedule declaration in the
+repository. Update that declaration or App automation to change the schedule.
+A later push keeps the schedule's pause state. App-managed schedules follow
+the configured branch and resolve its commit at fire time. An admin-armed default-branch fire
 without overrides carries verified default-branch trust.
