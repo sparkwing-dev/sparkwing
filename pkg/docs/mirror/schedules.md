@@ -124,6 +124,11 @@ set and withdraws entries removed from the project file. Installing with
 their pins, overrides and pause state. A selection that runs elsewhere makes no
 declaration changes on the selected controller.
 
+When a controller cannot resolve the source repository or ref during
+installation, it returns HTTP 422 with the repository and ref to check.
+Confirm the repository URL, the controller's Git credentials and that the ref
+exists. The refused installation leaves the stored schedules unchanged.
+
 Local installation records the selected declarations and captured environment
 identity durably. Proofs and later pin changes use that captured environment.
 Environment values stay in private host storage and do not appear in schedule

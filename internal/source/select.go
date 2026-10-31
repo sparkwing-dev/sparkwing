@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"os"
 	"path"
 	"path/filepath"
@@ -22,8 +23,10 @@ import (
 // Select resolves the execution commit, reads its configuration for the pipeline's code pin and resolves the code commit.
 func Select(ctx context.Context, spec Spec, pipeline string, git runspec.Git, code runspec.Source, override string, options Options) (runspec.Git, runspec.Source, *projectconfig.Config, error) {
 	lookup := func(ref string) (string, error) {
+		var sha string
+		var err error
 		if options.ResolveRef != nil {
-			return resolveReference(ref, false, func(refs []string) (map[string]string, error) {
+			sha, err = resolveReference(ref, false, func(refs []string) (map[string]string, error) {
 				commits := make(map[string]string)
 				for _, candidate := range refs {
 					sha, err := options.ResolveRef(ctx, candidate)
@@ -34,8 +37,18 @@ func Select(ctx context.Context, spec Spec, pipeline string, git runspec.Git, co
 				}
 				return commits, nil
 			})
+		} else {
+			sha, err = ResolveRef(ctx, spec, ref, options)
 		}
-		return ResolveRef(ctx, spec, ref, options)
+		var dns *net.DNSError
+		if errors.Is(err, errRefUnavailable) || spec.RemoteURL != "" && (gitExit(err, 128) || errors.As(err, &dns) && dns.IsNotFound) {
+			repository := git.Repository.Display
+			if repository == "" {
+				repository = spec.RepoKey
+			}
+			return "", errors.Join(&apierr.Error{Code: apierr.PlanFailed, Message: fmt.Sprintf("cannot resolve source repository %q at ref %q; check the repository URL, access credentials and that the ref exists", repository, ref)}, err)
+		}
+		return sha, err
 	}
 	git, _, err := ResolveRevisions(ctx, git, runspec.Source{}, "", lookup)
 	if err != nil {

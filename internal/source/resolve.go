@@ -10,6 +10,8 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 )
 
+var errRefUnavailable = errors.New("source revision is unavailable")
+
 // ResolveRef looks up ref in the authorized acquisition location without selecting an SDK.
 func ResolveRef(ctx context.Context, spec Spec, ref string, options Options) (string, error) {
 	if (spec.LocalCheckout == "") == (spec.RemoteURL == "") {
@@ -92,7 +94,7 @@ func resolveReference(ref string, local bool, lookup func([]string) (map[string]
 		selected = sha
 	}
 	if selected == "" {
-		return "", errors.New("source revision is unavailable")
+		return "", errRefUnavailable
 	}
 	return selected, nil
 }
