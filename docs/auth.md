@@ -895,6 +895,14 @@ also require the session's CSRF protection. A session cookie is not a deployment
 service credential. Operator-console powers require the console's session
 checks. Membership and session ancestry remain live authorization inputs.
 
+Licensed team and Cloud controllers use `__Host-sw_session` and
+`__Host-sw_csrf`, including over HTTP loopback port-forwards. Session enrollment
+clients send `__Host-sw_csrf` with the proof returned by `/api/v1/auth/session`
+for enrollment and logout. The URL scheme does not select the cookie name.
+The [Secure cookie localhost exception](https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/Set-Cookie#secure)
+allows loopback clients to keep the prefix. Licensed controllers refuse
+`--insecure-cookies`.
+
 ### Google and GitHub sign-in
 
 Provider sign-in verifies the callback state, proof-key flow and provider token
