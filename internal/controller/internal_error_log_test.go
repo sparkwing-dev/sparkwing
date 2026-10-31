@@ -231,17 +231,20 @@ type committedStatusWriter struct {
 }
 
 func (w *committedStatusWriter) Header() http.Header { return w.header }
+
 func (w *committedStatusWriter) WriteHeader(code int) {
 	if w.status == 0 && (code < 100 || code >= 200 || code == http.StatusSwitchingProtocols) {
 		w.status = code
 	}
 }
+
 func (w *committedStatusWriter) Write(body []byte) (int, error) {
 	if w.status == 0 {
 		w.WriteHeader(http.StatusOK)
 	}
 	return len(body), nil
 }
+
 func (w *committedStatusWriter) Flush() {
 	if w.status == 0 {
 		w.WriteHeader(http.StatusOK)

@@ -30,9 +30,11 @@ type uploadedBundle []byte
 func (b uploadedBundle) BundleURL(context.Context, string) (string, error) {
 	return "https://upload.example/source", nil
 }
+
 func (b uploadedBundle) GitCredential(context.Context, source.Spec) (source.Credential, error) {
 	return source.Credential{}, errors.New("uploaded source must not fetch Git")
 }
+
 func (b uploadedBundle) RoundTrip(r *http.Request) (*http.Response, error) {
 	return &http.Response{StatusCode: http.StatusOK, Header: http.Header{}, Body: io.NopCloser(bytes.NewReader(b)), Request: r}, nil
 }
