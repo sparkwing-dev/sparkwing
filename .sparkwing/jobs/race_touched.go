@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 
@@ -38,23 +39,44 @@ func runRaceTouched(ctx context.Context) error {
 func raceModules(ctx context.Context, targets map[string][]string, testRoot, home string) error {
 	var failures []string
 	for _, module := range mapKeys(targets) {
-		pkgs := targets[module]
+		pkgs := slices.Clone(targets[module])
+		shardNodehost := module == "." && slices.Contains(pkgs, "./internal/nodehost") && nodehostRaceShardCount(currentHost()) > 0
+		if shardNodehost {
+			pkgs = slices.DeleteFunc(pkgs, func(pkg string) bool { return pkg == "./internal/nodehost" })
+		}
 		sparkwing.Info(ctx, "race-touched: %s: %s", module, strings.Join(pkgs, " "))
 		// safety: this catches a hang, and the gate's own execution deadline is
 		// what bounds the step. internal/controller legitimately races for 24
 		// minutes, so a 30-minute limit left a fifth of a margin and a loaded
 		// box spent it, failing work that was only slow.
 		cmd := raceGoCommand(currentHost(), "-race -count=1 -timeout 45m "+strings.Join(pkgs, " "))
-		script := productTestScript(fmt.Sprintf("cd %q && %s", module, cmd), home)
-		if _, runErr := sparkwing.Bash(ctx, script).Env("TMPDIR", testRoot).Run(); runErr != nil {
-			failures = append(failures, fmt.Sprintf("%s: %v", module, runErr))
+		if len(pkgs) > 0 {
+			script := productTestScript(fmt.Sprintf("cd %q && %s", module, cmd), home)
+			if _, runErr := sparkwing.Bash(ctx, script).Env("TMPDIR", testRoot).Run(); runErr != nil {
+				failures = append(failures, fmt.Sprintf("%s: %v", module, runErr))
+			}
+		}
+		if shardNodehost {
+			if runErr := runRaceShardsAtHome(ctx, home, module, "./internal/nodehost", 2, nodehostRaceShardArgs); runErr != nil {
+				failures = append(failures, fmt.Sprintf("%s: %v", module, runErr))
+			}
 		}
 	}
 	if len(failures) == 0 {
 		return nil
 	}
-	return fmt.Errorf("go test -race failed in %d module(s):\n  - %s",
-		len(failures), strings.Join(failures, "\n  - "))
+	return fmt.Errorf("go test -race failed:\n  - %s", strings.Join(failures, "\n  - "))
+}
+
+func nodehostRaceShardCount(h hostShape) int {
+	if h.cpus == overlappedGoSuiteCPUs || goStepParallelism(h) >= 2 {
+		return 2
+	}
+	return 0
+}
+
+func nodehostRaceShardArgs(shard []string) []string {
+	return []string{"-test.run", raceTestPattern(shard), "-test.count=1", "-test.timeout=10m"}
 }
 
 // safety: internal/store does not finish under the race detector inside this tier.
