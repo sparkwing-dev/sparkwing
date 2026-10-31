@@ -469,6 +469,10 @@ func TestClaimUnitHereWindowAndReclaim(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
+			view, err := (&Tenant{s: s, team: "a"}).ReadRunView(t.Context(), "run")
+			if err != nil || len(view.Logs) != 0 {
+				t.Fatalf("unclaimed here reservation registered logs: %+v %v", view.Logs, err)
+			}
 			start := s.now()
 			if late {
 				s.clock = func() time.Time { return start.Add(11 * time.Minute) }
@@ -484,6 +488,10 @@ func TestClaimUnitHereWindowAndReclaim(t *testing.T) {
 			}
 			if err != nil {
 				t.Fatal(err)
+			}
+			view, err = (&Tenant{s: s, team: "a"}).ReadRunView(t.Context(), "run")
+			if err != nil || len(view.Logs) != 1 || view.Logs[0].Unit == nil || view.Logs[0].Unit.Generation != int64(claim.Award.Generation) {
+				t.Fatalf("claimed here writer has no log stream: %+v %v", view.Logs, err)
 			}
 			inventory := readRunnerInventory(t, s, "a")
 			if len(inventory.Runners) != 3 {

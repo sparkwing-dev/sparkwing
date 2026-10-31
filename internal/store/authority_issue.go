@@ -109,8 +109,8 @@ func (s *Store) issueTx(ctx context.Context, tx *storeTx, request capability.Iss
 			return capability.Issued{}, err
 		}
 	}
-	// Bootstrap awards cannot write logs; register only when a writer receives authority.
-	if (request.Award != nil || request.Exchange != nil) && c.Delivery == capability.DeliveryDirect && c.Unit != capability.UnitNode {
+	// Bootstrap awards and here reservations cannot write logs.
+	if (request.Award != nil || request.Exchange != nil) && c.Delivery == capability.DeliveryDirect && c.Unit != capability.UnitNode && c.Purpose != capability.PurposeHere {
 		unit := blob.LogUnit{Kind: blob.LogUnitKind(c.Unit), Generation: c.Binding.Generation}
 		if c.Unit == capability.UnitEval {
 			unit.Generation = c.Binding.Expansion.Generation
