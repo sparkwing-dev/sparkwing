@@ -119,7 +119,7 @@ func (o *Operator) ReconcileLauncherAwards(ctx context.Context, authority capabi
 		}
 		owner.owned[key.fence] = true
 		if !key.live {
-			pending, err := launcherLogTailPendingTx(ctx, tx, root.Authority, claimant.Subject, key.fence)
+			pending, err := launcherLogTailPendingTx(ctx, tx, key.team, root.Authority, claimant.Subject, key.fence)
 			if err != nil {
 				return nil, nil, err
 			}
@@ -159,8 +159,8 @@ func (o *Operator) ReconcileLauncherAwards(ctx context.Context, authority capabi
 }
 
 // safety: deleting a Cloud pod interrupts its detached log seal after the job result commits.
-func launcherLogTailPendingTx(ctx context.Context, tx *storeTx, root capability.AuthorityRef, subject capability.Subject, fence capability.LeaseRef) (bool, error) {
-	if fence.Kind != capability.UnitNode {
+func launcherLogTailPendingTx(ctx context.Context, tx *storeTx, team Team, root capability.AuthorityRef, subject capability.Subject, fence capability.LeaseRef) (bool, error) {
+	if team == "" || fence.Kind != capability.UnitNode {
 		return false, nil
 	}
 	now := tx.now(ctx)
@@ -170,12 +170,12 @@ func launcherLogTailPendingTx(ctx context.Context, tx *storeTx, root capability.
 		JOIN node_attempts a ON a.capability_prefix=c.prefix AND a.team=c.team AND a.run_id=c.bind_run AND a.node_id=c.bind_node AND a.generation=c.bind_generation AND a.holder=c.bind_holder
 		JOIN nodes n ON n.team=a.team AND n.run_id=a.run_id AND n.node_id=a.node_id AND n.attempt=a.attempt AND n.generation=a.generation
 		JOIN log_streams l ON l.team=a.team AND l.run_id=a.run_id AND l.node_id=a.node_id AND l.attempt=a.attempt AND l.generation=a.generation
-		WHERE c.parent_kind=? AND c.parent_id=? AND c.subject_kind=? AND c.subject_id=?
+		WHERE c.team=? AND c.parent_kind=? AND c.parent_id=? AND c.subject_kind=? AND c.subject_id=?
 		AND c.unit_kind=? AND c.unit_id=? AND c.bind_holder=? AND c.bind_generation=?
 		AND (c.revoked_at IS NULL OR c.revoked_at>?) AND (c.expires_at IS NULL OR c.expires_at>?)
 		AND n.status='done' AND a.finished_at>=? AND a.finished_at<=?
 		AND l.subject_kind='job_attempt' AND l.sealed_at IS NULL)`,
-		root.Kind, root.ID, subject.Kind, subject.ID, fence.Kind, fence.ID, fence.Holder, fence.Generation,
+		team, root.Kind, root.ID, subject.Kind, subject.ID, fence.Kind, fence.ID, fence.Holder, fence.Generation,
 		now.UnixNano(), now.UnixNano(), now.Add(-limits.LogSealGrace).UnixNano(), now.UnixNano()).Scan(&pending)
 	return pending, err
 }
@@ -234,6 +234,7 @@ func (r *launcherAwardResults) apply(ctx context.Context, fence capability.Lease
 }
 
 type launcherAwardKey struct {
+	team   Team
 	live   bool
 	prefix string
 	fence  capability.LeaseRef
@@ -259,24 +260,25 @@ func (op *Operator) launcherKeysTx(ctx context.Context, tx *storeTx, root capabi
 			continue
 		}
 		var prefix, holder string
+		var team Team
 		var generation int64
 		var live bool
 		var query string
 		args := []any{unit.RunID}
 		switch fence.Kind {
 		case capability.UnitPlan:
-			query = `SELECT capability_prefix,COALESCE(claimed_by,''),generation,status='claimed' AND finished_at IS NULL FROM triggers WHERE id=? AND unit_kind='plan'`
+			query = `SELECT team,capability_prefix,COALESCE(claimed_by,''),generation,status='claimed' AND finished_at IS NULL FROM triggers WHERE id=? AND unit_kind='plan'`
 		case capability.UnitNode:
-			query = `SELECT capability_prefix,COALESCE(claimed_by,''),generation,status<>'done' FROM nodes WHERE run_id=? AND node_id=?`
+			query = `SELECT team,capability_prefix,COALESCE(claimed_by,''),generation,status<>'done' FROM nodes WHERE run_id=? AND node_id=?`
 			args = append(args, unit.NodeID)
 		case capability.UnitEval:
-			query = `SELECT capability_prefix,COALESCE(claimed_by,''),generation,status IN ('claimed','running') FROM eval_units WHERE run_id=? AND source_node_id=? AND source_generation=?`
+			query = `SELECT team,capability_prefix,COALESCE(claimed_by,''),generation,status IN ('claimed','running') FROM eval_units WHERE run_id=? AND source_node_id=? AND source_generation=?`
 			args = append(args, unit.NodeID, unit.SourceGeneration)
 		default:
 			return nil, bindingRefusal()
 		}
-		err = tx.QueryRowContext(ctx, query, args...).Scan(&prefix, &holder, &generation, &live)
-		key := launcherAwardKey{fence: fence}
+		err = tx.QueryRowContext(ctx, query, args...).Scan(&team, &prefix, &holder, &generation, &live)
+		key := launcherAwardKey{team: team, fence: fence}
 		if errors.Is(err, sql.ErrNoRows) || err == nil && (!live || holder != fence.Holder || generation != fence.Generation) {
 			keys = append(keys, key)
 			continue
@@ -314,7 +316,7 @@ func (op *Operator) launcherKeysTx(ctx context.Context, tx *storeTx, root capabi
 }
 
 func (op *Operator) launcherPrefixesTx(ctx context.Context, tx *storeTx, root capability.AuthorityRef, subject capability.Subject, selected []capability.LeaseRef) ([]launcherAwardKey, error) {
-	query := `SELECT * FROM (SELECT c.prefix,c.unit_kind,c.unit_id,c.bind_holder,COALESCE(c.eval_unit_generation,c.bind_generation) AS generation,
+	query := `SELECT * FROM (SELECT c.team,c.prefix,c.unit_kind,c.unit_id,c.bind_holder,COALESCE(c.eval_unit_generation,c.bind_generation) AS generation,
 ` + liveCredentialSQL("c.") + ` AND (
 EXISTS (SELECT 1 FROM nodes n WHERE n.team=c.team AND n.run_id=c.bind_run AND n.node_id=c.bind_node AND n.capability_prefix=c.prefix AND n.status<>'done' AND n.claimed_by IS NOT NULL)
 OR EXISTS (SELECT 1 FROM triggers t WHERE t.team=c.team AND t.id=c.bind_run AND t.capability_prefix=c.prefix AND t.status='claimed' AND t.finished_at IS NULL)
@@ -337,7 +339,7 @@ FROM capabilities c WHERE c.parent_kind=? AND c.parent_id=? AND c.subject_kind=?
 	var keys []launcherAwardKey
 	for rows.Next() {
 		var key launcherAwardKey
-		if err := rows.Scan(&key.prefix, &key.fence.Kind, &key.fence.ID, &key.fence.Holder, &key.fence.Generation, &key.live); err != nil {
+		if err := rows.Scan(&key.team, &key.prefix, &key.fence.Kind, &key.fence.ID, &key.fence.Holder, &key.fence.Generation, &key.live); err != nil {
 			return nil, errors.Join(err, rows.Close())
 		}
 		keys = append(keys, key)
