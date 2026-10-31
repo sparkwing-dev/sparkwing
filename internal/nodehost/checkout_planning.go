@@ -124,6 +124,9 @@ func (p SDKPlanner) PrepareCheckout(ctx context.Context, input CheckoutPlanningI
 	resolved.SecretNames = []string{}
 	for _, declaration := range prepared.Description.Secrets {
 		resolved.SecretNames = append(resolved.SecretNames, declaration.Name)
+		if declaration.Optional {
+			resolved.OptionalSecretNames = append(resolved.OptionalSecretNames, declaration.Name)
+		}
 	}
 	resolved.Guards = checkoutGuardVerdict(guards, request, resolved)
 	return OwnerPlanning{

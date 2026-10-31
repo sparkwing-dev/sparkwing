@@ -438,6 +438,7 @@ type Resolved struct {
 	SecretArgs          []string            `json:"secret_args"`
 	SecretRegistration  SecretRegistration  `json:"secret_registration"`
 	SecretNames         []string            `json:"secret_names"`
+	OptionalSecretNames []string            `json:"optional_secret_names,omitempty"`
 	Entrypoint          string              `json:"entrypoint"`
 	DefaultBranch       Optional[string]    `json:"default_branch"`
 	DefaultBranchSource DefaultBranchSource `json:"default_branch_source"`

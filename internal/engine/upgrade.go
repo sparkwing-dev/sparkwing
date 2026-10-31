@@ -362,7 +362,7 @@ func copyCheckout(ctx context.Context, source, destination string) error {
 	}
 	if _, err := os.Stat(filepath.Join(source, ".git")); err == nil {
 		// safety: a private index keeps verification from writing into a linked worktree's metadata.
-		clone := exec.CommandContext(ctx, "git", "clone", "--shared", "--no-checkout", "--", source, destination)
+		clone := exec.CommandContext(ctx, "git", "clone", "--local", "--shared", "--no-checkout", "--", source, destination)
 		if output, err := clone.CombinedOutput(); err != nil {
 			return fmt.Errorf("stage upgrade Git metadata: %w: %s", err, strings.TrimSpace(string(output)))
 		}

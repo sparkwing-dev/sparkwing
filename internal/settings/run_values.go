@@ -63,44 +63,45 @@ func cloneOptions(out runspec.Options) runspec.Options {
 	return out
 }
 
-func intakeOrigins(options runspec.Options) []runspec.SettingOrigin {
-	origins := []runspec.SettingOrigin{
-		options.Runner.Origin,
-		options.Priority.Origin,
-		options.AdmissionClass.Origin,
-		options.ClaimWait.Origin,
-		options.OwnerExecutionTimeout.Origin,
-		options.Workers.Origin,
-		options.Output.Origin,
-		options.StartAt.Origin,
-		options.StopAt.Origin,
-		options.Only.Origin,
-		options.DryRun.Origin,
-		options.NoMemo.Origin,
-		options.PauseTimeout.Origin,
-		options.Debug.Origin,
-		options.Publish.Origin,
-		options.CacheFrom.Origin,
-		options.RepoLocation.Origin,
-		options.Profile.Origin,
-		options.JobDefaults.Timeout.Origin,
-		options.JobDefaults.NoProgressTimeout.Origin,
-		options.JobDefaults.ApprovalWait.Origin,
-		options.JobDefaults.Retry.Origin,
-		options.JobDefaults.RetryBackoff.Origin,
-		options.JobDefaults.MemoTTL.Origin,
-		options.Requires.Origin,
-		options.Prefers.Origin,
-		options.AllowRisk.Origin,
-		options.SubmitEnvAllow.Origin,
-		options.Pause.Origin,
-		options.Pause.Value.Before.Origin,
-		options.Pause.Value.After.Origin,
-		options.Pause.Value.OnFailure.Origin,
-		options.Checkout.Origin,
+func intakeOrigins(options *runspec.Options) []*runspec.SettingOrigin {
+	origins := []*runspec.SettingOrigin{
+		&options.Runner.Origin,
+		&options.Priority.Origin,
+		&options.AdmissionClass.Origin,
+		&options.ClaimWait.Origin,
+		&options.OwnerExecutionTimeout.Origin,
+		&options.Workers.Origin,
+		&options.Output.Origin,
+		&options.StartAt.Origin,
+		&options.StopAt.Origin,
+		&options.Only.Origin,
+		&options.DryRun.Origin,
+		&options.NoMemo.Origin,
+		&options.PauseTimeout.Origin,
+		&options.Debug.Origin,
+		&options.Publish.Origin,
+		&options.CacheFrom.Origin,
+		&options.RepoLocation.Origin,
+		&options.Profile.Origin,
+		&options.JobDefaults.Timeout.Origin,
+		&options.JobDefaults.NoProgressTimeout.Origin,
+		&options.JobDefaults.ApprovalWait.Origin,
+		&options.JobDefaults.Retry.Origin,
+		&options.JobDefaults.RetryBackoff.Origin,
+		&options.JobDefaults.MemoTTL.Origin,
+		&options.Requires.Origin,
+		&options.Prefers.Origin,
+		&options.AllowRisk.Origin,
+		&options.SubmitEnvAllow.Origin,
+		&options.Pause.Origin,
+		&options.Pause.Value.Before.Origin,
+		&options.Pause.Value.After.Origin,
+		&options.Pause.Value.OnFailure.Origin,
+		&options.Checkout.Origin,
 	}
-	for _, origin := range options.Checkout.Value.Origins {
-		origins = append(origins, origin)
+	for key := range options.Checkout.Value.Origins {
+		origin := options.Checkout.Value.Origins[key]
+		origins = append(origins, &origin)
 	}
 	return origins
 }

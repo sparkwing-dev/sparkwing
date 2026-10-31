@@ -21,7 +21,7 @@ func resolveSetting[T any](in Inputs, resolver func(Inputs) (T, Origin, error), 
 
 // ResolveIntake resolves captured request preferences against trusted controller inputs.
 func ResolveIntake(options runspec.Options, operator OperatorInputs, ctx Context) (runspec.Options, error) {
-	for _, origin := range intakeOrigins(options) {
+	for _, origin := range intakeOrigins(&options) {
 		switch origin.Layer {
 		case "", runspec.LayerFlag, runspec.LayerEnv, runspec.LayerSealed, runspec.LayerMachine, runspec.LayerDefault:
 		default:
@@ -29,6 +29,21 @@ func ResolveIntake(options runspec.Options, operator OperatorInputs, ctx Context
 		}
 	}
 	return ResolveRequest(Inputs{Sealed: Values{Options: options}, Operator: operator, Context: ctx})
+}
+
+// InheritedOptions captures a parent's winners as child intake inputs. Their
+// original policy layers cannot be asserted by a new request; intake reapplies
+// the controller's ceilings and parent-only owner checks.
+func InheritedOptions(options runspec.Options) runspec.Options {
+	options = cloneOptions(options)
+	for _, origin := range intakeOrigins(&options) {
+		origin.Layer = runspec.LayerSealed
+	}
+	for key, origin := range options.Checkout.Value.Origins {
+		origin.Layer = runspec.LayerSealed
+		options.Checkout.Value.Origins[key] = origin
+	}
+	return options
 }
 
 // ResolveRequest resolves only intake inputs; project and code fields remain

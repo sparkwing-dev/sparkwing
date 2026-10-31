@@ -113,6 +113,9 @@ func acquiresGit(function *ast.FuncDecl) bool {
 		if !ok {
 			return true
 		}
+		if localMetadataClone(call) {
+			return true
+		}
 		name := ""
 		switch fun := call.Fun.(type) {
 		case *ast.Ident:
@@ -130,6 +133,29 @@ func acquiresGit(function *ast.FuncDecl) bool {
 	return found
 }
 
+func localMetadataClone(call *ast.CallExpr) bool {
+	function, ok := call.Fun.(*ast.SelectorExpr)
+	if !ok || function.Sel.Name != "CommandContext" || len(call.Args) != 9 || call.Ellipsis.IsValid() {
+		return false
+	}
+	owner, ok := function.X.(*ast.Ident)
+	if !ok || owner.Name != "exec" {
+		return false
+	}
+	// safety: this form cannot contact a remote or select checkout files.
+	for i, want := range []string{"git", "clone", "--local", "--shared", "--no-checkout", "--"} {
+		literal, ok := call.Args[i+1].(*ast.BasicLit)
+		if !ok || literal.Kind != token.STRING {
+			return false
+		}
+		got, err := strconv.Unquote(literal.Value)
+		if err != nil || got != want {
+			return false
+		}
+	}
+	return true
+}
+
 func TestGitAcquisitionGuardRecognizesCommandArguments(t *testing.T) {
 	for _, body := range []string{
 		`exec.Command("git", "clone", remote)`,
@@ -137,6 +163,9 @@ func TestGitAcquisitionGuardRecognizesCommandArguments(t *testing.T) {
 		`args:=[]string{"clone"};args=append(args,remote);runGitEnv(ctx,dir,env,args...)`,
 		`runGitIn(repo,nil,"worktree","add",path)`,
 		`exec.Command("sh","-c","git clone remote")`,
+		`exec.CommandContext(ctx,"git","clone","--shared","--no-checkout","--",remote,destination)`,
+		`exec.CommandContext(ctx,"git","clone","--local","--shared","--",source,destination)`,
+		`exec.CommandContext(ctx,"git","clone","--local","--shared","--no-checkout","--branch","main","--",source,destination)`,
 	} {
 		file, err := parser.ParseFile(token.NewFileSet(), "fixture.go", "package fixture;func f(){"+body+"}", 0)
 		if err != nil {
@@ -146,11 +175,16 @@ func TestGitAcquisitionGuardRecognizesCommandArguments(t *testing.T) {
 			t.Fatalf("missed acquisition: %s", body)
 		}
 	}
-	file, err := parser.ParseFile(token.NewFileSet(), "fixture.go", `package fixture;func f(){path:=filepath.Join(root,"worktree");runGitIn(path,nil,"fetch")}`, 0)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if acquiresGit(file.Decls[0].(*ast.FuncDecl)) {
-		t.Fatal("directory name classified as Git acquisition")
+	for _, body := range []string{
+		`path:=filepath.Join(root,"worktree");runGitIn(path,nil,"fetch")`,
+		`exec.CommandContext(ctx,"git","clone","--local","--shared","--no-checkout","--",source,destination)`,
+	} {
+		file, err := parser.ParseFile(token.NewFileSet(), "fixture.go", "package fixture;func f(){"+body+"}", 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if acquiresGit(file.Decls[0].(*ast.FuncDecl)) {
+			t.Fatalf("local metadata classified as Git acquisition: %s", body)
+		}
 	}
 }

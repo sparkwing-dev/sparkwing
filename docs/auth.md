@@ -978,7 +978,12 @@ establishes proof. Personal machines and here hosts cannot claim proven runs.
 Job credentials additionally require the GitHub compare result sealed at intake
 for both the source and execution commits when they differ. Pull refs compare
 against the same-repository PR head branch. Merged PR runs compare against their
-base branch. Verified cache fallbacks use the sealed repository proof. Unproven
+base branch. An asserted run can still have repository proof: a branch-pinned
+`source:` selected through the App may receive a repository credential when both
+commits pass the intake compare check. The asserted trust class alone does not
+refuse that credential. Changed-revision and cross-repository children inherit
+no repository proof, while exact-revision children inherit their parent's seal.
+Verified cache fallbacks use the sealed repository proof. Unproven
 runs read and write their own data scope. Unknown claimant shapes use the
 personal host boundary and cannot claim repository-proven work.
 When the intake compare cannot reach GitHub, times out or receives a 5xx, the

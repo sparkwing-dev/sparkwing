@@ -82,7 +82,10 @@ ref chooses. Such a run is demoted to asserted: its OIDC token carries
 `repository_id` but no `ref` or `sha`, it receives no reserved pool, and its cache
 records stay in its own scope, so it never writes cache entries that builds of
 `main` read. Sparkwing still fetches its code from the repository, so it reads
-the repository's pipeline secrets.
+the repository's pipeline secrets. Repository checkout credentials also require
+the matching sealed repository proof and an intake compare check for both the
+selected code and execution commits. Demotion to asserted alone does not remove
+that proof or credential eligibility.
 
 Protect every branch a `source:` pin names as strictly as the default branch, or
 pin a full commit ID, which keeps the run's identity. See

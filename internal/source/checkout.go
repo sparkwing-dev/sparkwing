@@ -232,9 +232,7 @@ func PrepareCheckout(ctx context.Context, spec Spec, options Options) (entry *En
 	if spec.PipelineSHA != "" && (spec.PipelineSHA != actual || spec.LocalCheckout != "" && !spec.CommittedCheckout) {
 		code := spec.PipelineSource()
 		codeOptions := options
-		if options.PreparedCheckout != "" {
-			code.LocalCheckout, code.RemoteURL = options.PreparedCheckout, ""
-		}
+		// bug: a prepared checkout can be shallow and lack the separately pinned pipeline commit.
 		codeOptions.PreparedCheckout = ""
 		entry.pipelineEntry, err = PrepareCheckout(ctx, code, codeOptions)
 		if err != nil {

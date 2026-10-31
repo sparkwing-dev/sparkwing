@@ -5773,6 +5773,12 @@ components:
           $ref: '#/components/schemas/internal.runspec.EnvSnapshot'
         guards:
           $ref: '#/components/schemas/internal.runspec.Guards'
+        optional_secret_names:
+          anyOf:
+            - items:
+                type: string
+              type: array
+            - type: "null"
         secret_args:
           anyOf:
             - items:
