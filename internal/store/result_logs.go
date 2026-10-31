@@ -271,7 +271,7 @@ func checkLogWriterTx(ctx context.Context, tx *storeTx, team Team, subject blob.
 		if err != nil {
 			return err
 		}
-		if row.Generation != runspec.ClaimGeneration(a.Generation) {
+		if row.Attempt != runspec.AttemptOrdinal(a.Attempt) || row.Generation != runspec.ClaimGeneration(a.Generation) {
 			return holderRefusal()
 		}
 		var holder, prefix string
@@ -285,15 +285,12 @@ func checkLogWriterTx(ctx context.Context, tx *storeTx, team Team, subject blob.
 			return holderRefusal()
 		}
 		if finished.Valid {
-			if !sealedReplay && tx.now(ctx).UnixNano() > finished.Int64+int64(limits.LogSealGrace) {
+			if row.Status != runstate.StatusDone || (!sealedReplay && tx.now(ctx).UnixNano() > finished.Int64+int64(limits.LogSealGrace)) {
 				return holderRefusal()
 			}
 			return nil
 		}
 
-		if row.Attempt != runspec.AttemptOrdinal(a.Attempt) {
-			return holderRefusal()
-		}
 		return checkHolderTx(ctx, tx, team, row, actor)
 	}
 	if subject.Unit == nil {
