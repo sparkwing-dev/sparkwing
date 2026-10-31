@@ -9,6 +9,9 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/sparkwing-dev/sparkwing/internal/store"
+	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
 )
 
 func TestFreshScaffoldPlansAndExplainsInitialCommitBeforeRun(t *testing.T) {
@@ -63,10 +66,34 @@ func TestFreshScaffoldPlansAndExplainsInitialCommitBeforeRun(t *testing.T) {
 		t.Fatalf("planning or refusal created a commit: %s", out)
 	}
 	runSnapshotGit(t, repo, "-c", "user.name=Test", "-c", "user.email=test@example.test", "commit", "--allow-empty", "--no-verify", "-qm", "Initial commit")
-	captureStdout(t, func() {
+	output = captureStdout(t, func() {
 		commandErr = runSparkwing([]string{"run", "hello", "--sw-allow-unadmitted", "--sw-no-update", "-o=plain"})
 	})
 	if commandErr != nil {
-		t.Fatalf("same scaffold after initial commit: %v", commandErr)
+		t.Errorf("same scaffold after initial commit: %v\n%s", commandErr, output)
+		state, err := teststore.OpenExisting(filepath.Join(home, "state", "state.db"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() {
+			if err := state.Close(); err != nil {
+				t.Error(err)
+			}
+		})
+		tenant := teststore.ForTeam(t, state, store.DefaultTeam)
+		runs, err := tenant.ListRuns(t.Context(), store.RunFilter{Limit: 1})
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, run := range runs {
+			t.Logf("run %s: status=%s error=%s", run.ID, run.Status, run.Error)
+			nodes, err := tenant.ListNodes(t.Context(), run.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, node := range nodes {
+				t.Logf("job %s: status=%s error=%s", node.NodeID, node.Status, node.Error)
+			}
+		}
 	}
 }
