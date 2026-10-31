@@ -50,7 +50,9 @@ func (l cronLauncher) Launch(ctx context.Context, s store.CronSchedule, due time
 	if err != nil {
 		return "", err
 	}
-	admitted, err := writer.AdmitScheduledRun(ctx, s, due)
+	admitted, err := admitWithFlood(ctx, l.server, func(ctx context.Context) (store.AdmissionResult, error) {
+		return writer.AdmitScheduledRun(ctx, s, due)
+	})
 	if err != nil {
 		return "", err
 	}

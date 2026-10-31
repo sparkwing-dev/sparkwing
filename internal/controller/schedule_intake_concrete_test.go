@@ -2,9 +2,13 @@ package controller_test
 
 import (
 	"encoding/json"
+	"errors"
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
+	"github.com/sparkwing-dev/sparkwing/internal/controller"
+	"github.com/sparkwing-dev/sparkwing/internal/crons"
 	"github.com/sparkwing-dev/sparkwing/internal/source/sourcetest"
 
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
@@ -22,6 +26,7 @@ func TestControllerScheduleFiresThroughConcreteStore(t *testing.T) {
 		}
 		return now
 	}))
+	f.srv.WithFloodPolicy(controller.FloodPolicy{RunsPerPrincipalHour: 1})
 	sha := sourcetest.FixedRemote(t, "https://gitlab.com/acme/ci.git")
 	now = time.Now().UTC().Add(time.Minute).Truncate(time.Minute)
 	body := `{"mode":"replace","repo_url":"https://gitlab.com/acme/ci.git","branch":"main","sha":"` + sha + `","follow":false,"schedules":[{"pipeline":"nightly","cron":"* * * * *","args":{"channel":"nightly"}}]}`
@@ -37,10 +42,12 @@ func TestControllerScheduleFiresThroughConcreteStore(t *testing.T) {
 	}
 	now = *row.NextDueAt
 	launcher := f.srv.ScheduleLauncher()
-	first, err := launcher.Launch(t.Context(), row, now)
-	if err != nil {
-		t.Fatal(err)
+	svc := &crons.Service{Operator: f.st.AsOperator(), Schedules: tenant, Launcher: launcher, Now: func() time.Time { return now }, Side: store.CronWhereController}
+	report, err := svc.Tick(t.Context(), false)
+	if err != nil || report.Fired != 1 || len(report.Decisions) != 1 || report.Decisions[0].RunID == "" {
+		t.Fatalf("due slot was not admitted: %+v, err=%v", report, err)
 	}
+	first := report.Decisions[0].RunID
 	second, err := launcher.Launch(t.Context(), row, now)
 	if err != nil || first != second {
 		t.Fatalf("scheduled replay: %s / %s %v", first, second, err)
@@ -56,6 +63,19 @@ func TestControllerScheduleFiresThroughConcreteStore(t *testing.T) {
 	acquired, err := source.ForRequest(run.Request)
 	if err != nil || acquired.PipelineSHA != request.Git.SHA {
 		t.Fatalf("scheduled source is not pinned for acquisition: pipeline=%s checkout=%s err=%v", acquired.PipelineSHA, acquired.SHA, err)
+	}
+	now = now.Add(time.Minute)
+	var refusal *apierr.Error
+	if id, err := launcher.Launch(t.Context(), row, now); id != "" || !errors.As(err, &refusal) || refusal.Code != apierr.RateLimited {
+		t.Fatalf("next slot escaped hourly cap: run=%s err=%v", id, err)
+	}
+	f.srv.WithFloodPolicy(controller.FloodPolicy{ShedQueueDepth: 1})
+	if id, err := launcher.Launch(t.Context(), row, now); id != "" || !errors.As(err, &refusal) || refusal.Code != apierr.Unavailable {
+		t.Fatalf("next slot escaped queue limit: run=%s err=%v", id, err)
+	}
+	runs, err := tenant.ListRuns(t.Context(), store.RunFilter{})
+	if err != nil || len(runs) != 1 {
+		t.Fatalf("refused slots created runs: %+v err=%v", runs, err)
 	}
 	response = f.serve(f.cookieRequest("PUT", "/api/v1/schedules/"+row.ID+"/override", `{"args":{"channel":"changed"}}`))
 	if response.Code != 200 {
