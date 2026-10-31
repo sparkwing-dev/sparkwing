@@ -41,6 +41,8 @@ unlock.
 
 ### Fixed
 
+- **cache:** Changes to gitignored build output no longer force uncached SDK builds
+  Stability snapshots follow the same ignored-file policy as the binary-cache key. `--sw-hash-all-files` still detects changes to ignored inputs.
 - **console:** Waitlisted operators can open and navigate the operator console
   Customer pages keep the waitlist screen. Configured operators see an Operator link in the dashboard navigation.
 - **controller:** Failed-only retries reuse successful jobs on Cloud
