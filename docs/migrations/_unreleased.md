@@ -2,15 +2,48 @@
 
 ## Recreate the store for schema baseline 28
 
-This release changes the SQLite and PostgreSQL baseline directly. There is no
-forward migration. Stores at another baseline refuse startup and remain
-unchanged. Staging and production require a schema wipe.
+v0.68.3 ships SQLite and PostgreSQL schema baseline 28 as a store reset. There
+is no forward migration. Stores at another baseline refuse startup and remain
+unchanged. Before 1.0, schema changes may require moving the local store aside
+or recreating a server database. Forward migrations start after launch.
 
-Before upgrading, stop controllers and runners and back up the database. For a
-disposable SQLite store, move the database and any WAL/SHM files aside. For
-PostgreSQL, point the controller at a new empty database. Recreate teams,
-secrets, credentials and schedules, then enroll runners again. Keep the backup
-with its matching binary if its history is needed. See
+For a local store:
+
+1. Stop the local daemon with `sparkwing daemon stop`, then stop any standalone
+   controllers and runners using the store.
+2. Back up the entire Sparkwing home, including `state.db` and any `state.db-wal`
+   and `state.db-shm` files. Use `~/.sparkwing` unless `SPARKWING_HOME` names
+   another directory. With the processes stopped, run:
+
+   ```bash
+   store_home="${SPARKWING_HOME:-$HOME/.sparkwing}"
+   backup_home="${store_home}.before-v0.68.3-$(date +%Y%m%d%H%M%S)"
+   cp -a "$store_home" "$backup_home"
+   mv "$store_home" "${backup_home}.moved-aside"
+   ```
+
+3. Install v0.68.3 and run `sparkwing runs list`. The local controller starts
+   on demand and creates a fresh store in the original home. Sign in and restore
+   configuration as needed. Do not copy the old database or its WAL/SHM files
+   into the new home.
+
+For a server store:
+
+1. Stop every controller and runner using the database, including staging or
+   production replicas.
+2. Back up the database and the controller's credential directory. Keep the
+   backup with the binary that wrote it. For PostgreSQL, use `pg_dump --format=custom`
+   with the existing connection settings and save the dump outside the database.
+3. Create a new empty PostgreSQL database with `createdb` using the server's
+   database owner and connection settings. Point the controller's store URL at
+   that database. Alternatively, after verifying the backup, drop and recreate
+   the disposable database. For a server using SQLite, back up and move its
+   database and any WAL/SHM files aside before restarting.
+4. Start the v0.68.3 controller against the empty store. Recreate teams, secrets,
+   credentials, repository registrations and schedules, then enroll runners
+   again. Restore configuration without restoring the old schema.
+
+Staging and production require the same reset. See
 [backup and restore](../backup-restore.md#schema-compatibility).
 
 The baseline removes unused session, capability, node, trigger and storage
@@ -38,8 +71,13 @@ local and unproven remote code receive no team credential. A historical commit
 or locked schedule can qualify after App source selection and a compare result
 of `ahead` or `identical` against a repository branch or tag for both source and
 execution commits when they differ. Merged PR runs compare against their base
-branch. Verified cache fallbacks require sealed repository proof. Such a historical
-commit carries no resolved-head OIDC `ref` or `sha`.
+branch. If the intake compare cannot reach GitHub, times out or receives a 5xx,
+the webhook delivery is accepted and its run is sealed as asserted, without
+repository proof, job credentials, proven-repository secrets or OIDC claims.
+Run status explains the failed verification. Definite negative compare answers
+retain their existing behavior. Verified cache fallbacks require sealed
+repository proof. Such a historical commit carries no resolved-head OIDC `ref`
+or `sha`.
 
 Pipeline references now select verified default-branch runs and exclude
 publication. To accept other producers, declare `sw.FromAnyRun()` in Go or

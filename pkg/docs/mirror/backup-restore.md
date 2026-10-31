@@ -40,25 +40,28 @@ make it eligible again. Do not clear a live award's reservation or binding.
 
 ## Schema compatibility
 
-Keep the binary matching a database backup. This build does not upgrade older
-schema baselines. A newer database needs its matching binary; rollback needs
-a matching backup in a separate database. The schema batch uses baseline 28
-on SQLite and PostgreSQL, with no forward migration. Back up and recreate
-stores at every other baseline before starting this build. Staging and
-production require the same schema wipe.
+Keep the binary matching a database backup. Before 1.0, schema changes may
+require moving the local store aside or recreating a server database. The binary
+refuses a mismatched store and leaves it unchanged. For an older local store it
+names the move-aside remedy. A newer database needs its matching binary, and
+rollback needs a matching backup in a separate database. Forward migrations
+start after launch.
+
+v0.68.3 ships schema baseline 28 on SQLite and PostgreSQL as a store reset, with
+no forward migration. Back up and recreate stores at every other baseline
+before starting it. Staging and production require the same schema wipe. Follow
+[the local and server reset steps](migrations/_unreleased.md#recreate-the-store-for-schema-baseline-28).
 
 v0.68.0 replaced the store. It cannot read or import a store written by v0.67
 or earlier, refuses one with the move-aside remedy below, and leaves it
 unchanged. See
-[Upgrading from v0.67](migrations/_unreleased.md#upgrading-from-v067-v068-starts-a-new-store).
-Releases after v0.68.0 ship schema changes as forward migrations that upgrade
-the store in place.
+[Upgrading from v0.67](migrations/v0.68.0.md#upgrading-from-v067-v068-starts-a-new-store).
 
 <!-- BEGIN GENERATED SCHEMA ERRORS -->
 ```text
-sparkwing: store schema version 27 is older than this binary (expects 28); back up the store and use a binary matching it; this build cannot upgrade it; only for a disposable store, delete <path> and start again
+sparkwing: store schema version 27 is older than this binary (expects 28); back up the store and use a binary matching it; this build cannot upgrade it; to start fresh, move <path> and any <path>-wal and <path>-shm files aside and start again
 
-sparkwing: store schema version 27 is older than this binary (expects 28); back up the store and use a binary matching it; this build cannot upgrade it; only for a disposable store, drop the database and start again
+sparkwing: store schema version 27 is older than this binary (expects 28); back up the store and use a binary matching it; this build cannot upgrade it; to start fresh, point the server at an empty database and start again
 
 sparkwing: store schema version 29 is newer than this binary (expects 28); start a binary matching the store, or restore a backup matching this binary into a separate database
 
