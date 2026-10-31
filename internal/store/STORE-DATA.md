@@ -438,7 +438,9 @@ Attempt-start and owner-writer issuance transactions create their log streams.
 Direct owner awards register immediately; bootstrap owner awards register atomically
 with credential exchange. Requeued bootstrap generations that never exchanged cannot
 write logs and have no stream. Exchanged generations remain visible and require a
-final seal, including when empty. Publication
+final seal, including when empty. Explicitly returning an unstarted owner reservation
+removes its empty stream only when no upload slot was signed. A stream with any
+signed slot remains visible and requires a final seal. Publication
 imports create their streams atomically too. `RecordSegments` appends and seals
 existing streams, refusing a missing registration. `RecordSegments` and
 `ReadLogSegments` accept tagged job or owner-unit subjects.
