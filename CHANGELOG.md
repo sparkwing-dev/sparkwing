@@ -41,6 +41,12 @@ unlock.
 
 ### Fixed
 
+- **schedules:** Health reports native timer activation locally and the running evaluator loop on remote controllers
+  Missing, inactive or unobservable native timers no longer appear as an enabled controller loop. Schedule rows stay readable when native activation is unknown.
+- **dashboard:** Local browser sign-in authorizes subsequent API calls as the peer that opened the link
+  Browser session credentials are consumed at the dashboard boundary so controller bearer and cookie authentication cannot override that peer.
+- **cli:** Plan JSON includes normalized runner requirements and preferences for each job
+  The additive `requires` and `prefers` fields preserve trimmed, deduplicated labels and are omitted for empty lists.
 - **logs:** Finished Cloud runs complete aggregate log reads after bootstrap owner requeues
   Owner streams register when the runner exchanges its bootstrap credential. Awards that never reached a log writer no longer leave unsealed streams. Missing final seals from actual writers still report incomplete logs.
 - **TypeScript SDK:** Imports inside jobs retain CommonJS and ESM exports from symlinked packages
