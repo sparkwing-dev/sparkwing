@@ -78,7 +78,7 @@ func releaseOwnerUnitTx(ctx context.Context, tx *storeTx, claim UnitClaim, unit 
 	if status != "claimed" || started.Valid {
 		return holderRefusal()
 	}
-	// A returned reservation has no writer; signed slots still require a truthful final seal.
+	// safety: a returned reservation has no writer; signed slots still require a truthful final seal.
 	if _, err := tx.execContext(ctx, `DELETE FROM log_streams WHERE team=? AND run_id=? AND subject_kind='owner_unit'
 		AND unit_kind=? AND generation=? AND COALESCE(source_node_id,'')=? AND COALESCE(source_generation,0)=?
 		AND uploaded_through=0 AND sealed_at IS NULL
