@@ -993,8 +993,9 @@ personal host boundary and cannot claim repository-proven work.
 GitHub compare responses include file patches even when commit pagination is
 limited. Large comparisons retain verification when their status proves
 reachability. If the intake compare cannot reach GitHub, times out, receives a
-5xx or supplies unreadable JSON or an unknown status, webhook and native
-trigger intake admit the run as asserted without repository proof. It receives no job credentials, proven-repository secrets or
+5xx or supplies unreadable JSON or an unknown status, webhook, native trigger
+and schedule intake admit the run as asserted without repository proof. It
+receives no job credentials, proven-repository secrets or
 proven OIDC claims. Run status explains why verification failed. Definite
 negative compare answers, including diverged, behind and 404, retain their
 existing behavior.
