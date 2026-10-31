@@ -41,6 +41,8 @@ unlock.
 
 ### Fixed
 
+- **kubernetes:** The E2E harness selects the controller data PVC, preserves numeric image tags and provisions its team before enabling licensed mode
+
 - **cli:** Session runner enrollment and logout work through HTTP loopback port-forwards
   The client sends the licensed controller's `__Host-sw_csrf` cookie with the session proof.
 

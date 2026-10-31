@@ -37,11 +37,19 @@ enforced network isolation. Chart rendering alone does not prove those propertie
 
 The opt-in `k8s-e2e` pipeline requires an explicit cluster and image set. It does
 not create or delete a cluster. Set `SPARKWING_K8S_E2E_LICENSE_FILE` to a valid
-signed multi-team license. The harness installs `deployment=team`, enrolls a runner
-with an independent administrator session and uploads its committed fixture as a
-source bundle. It checks execution, logs, cancellation, retry and retained state.
+signed multi-team license. The harness first starts `deployment=local` without
+the license and creates its team through `POST /api/v1/operator/teams` with the
+deployment bootstrap credential. It then mounts the license and upgrades to
+`deployment=team` before opening an independent administrator session to enroll
+the runner. Team mode refuses deployment bearer authentication. The harness
+uploads its committed fixture as a source bundle. It checks execution, logs,
+cancellation, retry and retained state.
 GitHub webhook intake and remote Git fetching need separate integration evidence.
 Native deployment parity remains a launch check.
+
+Retention checks use the PVC mounted as the controller's `data` volume. The
+controller component label also matches the separate credential-epoch PVC.
+Image tags stay strings in the harness values, including numeric tags.
 
 ### First shared deployment
 

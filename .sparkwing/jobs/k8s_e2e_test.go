@@ -791,3 +791,56 @@ func kubernetesTestEnv(t *testing.T, extra ...string) []string {
 	}
 	return env
 }
+
+func TestKubernetesE2ESelectsControllerDataPVC(t *testing.T) {
+	script := readHostedCIFile(t, "bin/k8s-e2e.sh")
+	lookup := "resource_name() {" + between(t, script, "\nresource_name() {", "\nready_pod_identity() {")
+	selection := "controller_deployment=" + between(t, script, "\ncontroller_deployment=", "\nkube --namespace \"$namespace\" wait deployment")
+	cmd := exec.Command(kubernetesTestBash(t), "-c", `set -euo pipefail
+namespace=sparkwing-e2e
+release_name=sparkwing
+die() { echo "$*" >&2; exit 1; }
+kube() {
+ case "$*" in
+  *'get deployment '*'persistentVolumeClaim.claimName'*) printf 'sparkwing-e2e-controller' ;;
+  *'get deployment '*) printf 'sparkwing-e2e-controller' ;;
+  *'get service '*) printf 'sparkwing-e2e-controller' ;;
+  *'get pvc '*) printf 'sparkwing-e2e-controller\nsparkwing-e2e-controller-credential-epoch\n' ;;
+  *) echo "unexpected lookup: $*" >&2; exit 1 ;;
+ esac
+}
+`+lookup+"\n"+selection+`
+[[ "$controller_pvc" == sparkwing-e2e-controller ]]`)
+	if output, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("controller data PVC selection: %v\n%s", err, output)
+	}
+}
+
+func TestKubernetesE2EEnablesLicensedModeBeforeEnrollmentSession(t *testing.T) {
+	script := readHostedCIFile(t, "bin/k8s-e2e.sh")
+	provision := "team_response=" + between(t, script, "\nteam_response=", "\nenrollment_csrf=")
+	cmd := exec.Command(kubernetesTestBash(t), "-c", `set -euo pipefail
+bootstrap_token=bootstrap
+controller_port=1234
+controller_service=controller
+controller_deployment=controller
+release_name=sparkwing
+namespace=sparkwing-e2e
+repo_root=fixture
+bootstrap_values=bootstrap.yaml
+authenticated_values=authenticated.yaml
+licensed=0
+curl() { printf '{"capability":"admin","account_id":"account"}'; }
+helm_e2e() {
+ [[ "$*" == 'upgrade '* && "$*" == *'--set sparkwing-runner-bundle.runner.enabled=false'* ]]
+ licensed=1
+}
+stop_forwards() { :; }
+start_forward() { [[ $licensed == 1 ]]; forward_port=5678; }
+kube() { [[ $licensed == 1 && "$controller_port" == 5678 ]] || return 1; printf 'session'; }
+`+provision+`
+[[ "$enrollment_session" == session ]]`)
+	if output, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("licensed enrollment phase: %v\n%s", err, output)
+	}
+}

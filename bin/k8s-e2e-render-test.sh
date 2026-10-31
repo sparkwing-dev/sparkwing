@@ -26,7 +26,7 @@ export REAL_HELM="$real_helm" INSTALL_REACHED="$work/install"
 export PATH="$work/bin:$PATH"
 export SPARKWING_K8S_E2E_KUBE_CONTEXT=offline-fixture
 export SPARKWING_K8S_E2E_IMAGE_PREFIX=offline.invalid/test
-export SPARKWING_K8S_E2E_TAG=fixture
+export SPARKWING_K8S_E2E_TAG="${SPARKWING_K8S_E2E_TAG:-fixture}"
 export SPARKWING_K8S_E2E_ALLOW_CLEANUP=sparkwing-e2e/sparkwing
 export SPARKWING_K8S_E2E_KEEP_RESOURCES=1
 export SPARKWING_K8S_E2E_ARTIFACT_DIR="$work/artifacts"

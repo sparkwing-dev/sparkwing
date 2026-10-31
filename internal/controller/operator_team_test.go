@@ -16,8 +16,11 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/controller/client"
+	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/deployment/deploymenttest"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
+	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
 )
@@ -329,5 +332,36 @@ func TestOperatorCreateTeamHTTPConcurrentReplicas(t *testing.T) {
 	slices.Sort(got)
 	if !slices.Equal(got, []int{201, 409}) {
 		t.Fatalf("creation race: %v", got)
+	}
+}
+
+func TestLocalTeamProvisioningThenLicensedEnrollment(t *testing.T) {
+	cipher, err := secrets.NewCipher(make([]byte, secrets.KeySize))
+	if err != nil {
+		t.Fatal(err)
+	}
+	e, _ := engineServerFixture(t, deploymenttest.Local(t, ""), func(s *Server) { s.WithSecretsCipher(cipher) })
+	seed := reviewSeed(t, e.Store)
+	w := engineClaimHTTP(t, e.Server.Handler(), seed, "POST", "/api/v1/operator/teams", `{"slug":"k8s-e2e","display_name":"Kubernetes E2E"}`, 201)
+	var created controllerwire.OperatorTeamCreated
+	if err := json.Unmarshal(w.Body.Bytes(), &created); err != nil {
+		t.Fatal(err)
+	}
+	licensed := NewDeployment(e.Store, deploymenttest.Team(t), nil).WithSecretsCipher(cipher)
+	engineClaimHTTP(t, licensed.Handler(), seed, "POST", "/api/v1/operator/teams", `{"slug":"another-team"}`, 401)
+	engineClaimHTTP(t, licensed.Handler(), created.Capability, "GET", "/api/v1/team/members", "", 200)
+	raw, _, _, err := e.Store.AsOperator().CreateAccountSession(t.Context(), store.Account{ID: created.AccountID}, "k8s-e2e", time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	manager, err := client.NewSessionRunnerTokenManager(t.Context(), client.EngineOptions{URL: "http://127.0.0.1", HTTP: &http.Client{Transport: localHostRoundTripper{handler: licensed.Handler()}}}, raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := manager.EnrollRunner(t.Context(), controllerwire.EnrollRunnerRequest{Name: "k8s-e2e", Platform: "kubernetes", Repos: []string{"example.com/sparkwing-k8s/*"}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := manager.Logout(t.Context()); err != nil {
+		t.Fatal(err)
 	}
 }
