@@ -223,7 +223,13 @@ The existing Karpenter NodePool `sparkwing-jobs-small` needs all of the followin
   and its NodePool UID and template label. A protected first-use label permanently
   binds the node to one team. Clearing a reservation retains that label.
   A rejected Pod cordons the node and deletes its exact NodeClaim. With no vacant
-  Ready team node, the launcher holds the award and creates an unbound
+  Ready team node, the launcher uses NodePool `get` and `list` access to check
+  for a matching template label and taint. No compatible pool ends the unit as
+  `cloud_capacity_unconfigured`, releases its credit hold and gives the customer
+  support@sparkwing.dev plus the run ID as a support reference. Provision the
+  pool and trigger a new run. A scaling or exhausted pool keeps waiting with
+  “Waiting for dedicated Cloud capacity” and elapsed time in run status.
+  With a compatible pool, the launcher holds the award and creates an unbound
   `sw-capacity-*` Pod sized to the award, with the team node selector and the job
   tolerations and no credentials, so Karpenter adds a node from the team's pool.
   The request stays on the node until the award reserves it, and is deleted when

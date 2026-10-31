@@ -145,10 +145,10 @@ func (c *ControllerControl) Sync(ctx context.Context, observations []CloudJobObs
 		}
 		byJob[observation.JobName], byAward[observed.Award] = i, i
 		if observation.Capacity != nil {
-			if observation.Capacity.PodUID == "" || observation.NodeUID != "" || observation.ReservationID != "" || observation.JobUID != "" || observation.JobNamespace != "" || observation.Activation != nil || observation.Rejected {
+			if observation.Capacity.PodUID == "" && !observation.Capacity.Unconfigured || observation.NodeUID != "" || observation.ReservationID != "" || observation.JobUID != "" || observation.JobNamespace != "" || observation.Activation != nil || observation.Rejected {
 				return nil, errors.New("capacity observation cannot supply an execution placement")
 			}
-			request.Capacity = append(request.Capacity, controllerwire.LauncherCapacityObservation{Award: observed.Award})
+			request.Capacity = append(request.Capacity, controllerwire.LauncherCapacityObservation{Award: observed.Award, Unconfigured: observation.Capacity.Unconfigured})
 		} else {
 			request.Observed = append(request.Observed, observed)
 			if r := observation.Activation; r != nil {

@@ -194,3 +194,48 @@ func cloudResourceRoot(t *testing.T, e *cloudResourceFixture) string {
 	cloudResourceSQL(t, e.Store, `INSERT INTO capabilities(digest,prefix,subject_kind,subject_id,audience,grants,issuance,authority_version,authority_json,bind_kind,reserved_pools,repo_scope,created_at,created_by) VALUES (?,'launcher','service','launcher','controller',?,'delegate',1,?,'none',?,?,1,'launcher')`, hex.EncodeToString(digest[:]), grants, envelope, []byte(`[]`), []byte(`["gh:1"]`))
 	return raw
 }
+
+func TestCloudCapacityFailureThroughController(t *testing.T) {
+	e, tenant := cloudResourceStore(t)
+	run, err := tenant.ReadRun(t.Context(), "run")
+	if err != nil {
+		t.Fatal(err)
+	}
+	run.Request.Request.Git.SHA = strings.Repeat("a", 40)
+	run.Request.Request.Source.Location = runspec.SourceLocation{RemoteURL: "https://github.com/team/repo", PipelineDir: ".sparkwing"}
+	body, err := json.Marshal(run.Request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cloudResourceSQL(t, e.Store, `UPDATE runs SET request_json=?`, body)
+	raw := cloudResourceRoot(t, e)
+	e.RunnerPolicy = cloudResourcePolicy(func(context.Context, string) error { return nil })
+	handler := controller.New(e.Store, nil).WithEngineController(e.EngineController).Handler()
+	transport := &http.Client{Transport: cloudResourceTransport(func(r *http.Request) (*http.Response, error) {
+		w := httptest.NewRecorder()
+		handler.ServeHTTP(w, r)
+		return w.Result(), nil
+	})}
+	wire, err := client.NewEngineClient(client.EngineOptions{URL: "https://controller.example", Launcher: true, Bearer: func(context.Context) (string, error) { return raw, nil }, HTTP: transport})
+	if err != nil {
+		t.Fatal(err)
+	}
+	control, err := NewControllerControl(wire, controllerwire.ClaimRequest{RunnerVersion: "v1", Kinds: []capability.UnitKind{capability.UnitPlan}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	l, kube, boundary, _ := fixture()
+	boundary.reserveErr = ErrNoDedicatedNode
+	l.Control = control
+	l.Boundary = capacityBoundary{CloudBoundary: boundary, pools: &KubernetesBoundary{Namespace: "cloud", Karpenter: poolClient()}}
+	if _, err := l.LaunchOne(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	detail, err := e.RunDetail(t.Context(), capability.Authorized{Target: capability.Target{Team: "a", RunID: "run"}})
+	if err != nil || detail.Status != "failed" || detail.Reason != capability.CloudCapacityUnconfigured || !strings.Contains(detail.Failure, capability.CloudCapacityUnconfiguredMessage) || !strings.Contains(detail.Failure, "Support reference: run") {
+		t.Fatalf("customer status: %+v %v", detail, err)
+	}
+	if len(detail.Notices) != 0 || len(capacityPods(t, kube)) != 0 {
+		t.Fatal("failure retained transient demand")
+	}
+}

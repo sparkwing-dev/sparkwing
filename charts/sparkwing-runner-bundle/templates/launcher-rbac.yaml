@@ -62,7 +62,7 @@ rules:
     verbs: ["get", "delete"]
   - apiGroups: ["karpenter.sh"]
     resources: ["nodepools"]
-    verbs: ["get"]
+    verbs: ["get", "list"]
   - apiGroups: [""]
     resources: ["nodes"]
     verbs: ["get", "list", "update", "patch"]

@@ -6,6 +6,9 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"slices"
+	"strconv"
 
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -32,6 +35,130 @@ var (
 	nodeClaims = schema.GroupVersionResource{Group: "karpenter.sh", Version: "v1", Resource: "nodeclaims"}
 	nodePools  = schema.GroupVersionResource{Group: "karpenter.sh", Version: "v1", Resource: "nodepools"}
 )
+
+// CapacityConfigured checks pool templates, never current nodes, readiness or fleet limits.
+func (b *KubernetesBoundary) CapacityConfigured(ctx context.Context, binding CloudJobBinding, budget corev1.ResourceList) (bool, error) {
+	if b.Karpenter == nil {
+		return false, errors.New("Cloud boundary requires Karpenter")
+	}
+	pools, err := b.Karpenter.Resource(nodePools).List(ctx, metav1.ListOptions{})
+	if err != nil {
+		return false, err
+	}
+	value := TeamNodeValue(b.Namespace, binding.Team)
+	for _, pool := range pools.Items {
+		compatible, err := compatibleTeamPool(pool, value, budget)
+		if err != nil || compatible {
+			return compatible, err
+		}
+	}
+	return false, nil
+}
+
+func compatibleTeamPool(pool unstructured.Unstructured, value string, budget corev1.ResourceList) (bool, error) {
+	labels, _, err := unstructured.NestedStringMap(pool.Object, "spec", "template", "metadata", "labels")
+	if err != nil || labels[TeamNodeLabel] != value {
+		return false, err
+	}
+	taints, _, err := unstructured.NestedSlice(pool.Object, "spec", "template", "spec", "taints")
+	if err != nil {
+		return false, err
+	}
+	protected := false
+	for _, raw := range taints {
+		taint, ok := raw.(map[string]any)
+		if !ok {
+			return false, errors.New("invalid NodePool taint")
+		}
+		if taint["key"] == TeamNodeLabel && taint["value"] == value && taint["effect"] == string(corev1.TaintEffectNoSchedule) {
+			protected = true
+		}
+	}
+	if !protected {
+		return false, nil
+	}
+	// Cloud Jobs run Linux. Only a contradictory template constraint proves
+	// incompatibility; readiness, provider availability and limits can recover.
+	known := map[string]string{TeamNodeLabel: value, corev1.LabelOSStable: "linux"}
+	if os, ok := labels[corev1.LabelOSStable]; ok && os != "linux" {
+		return false, nil
+	}
+	requirements, _, err := unstructured.NestedSlice(pool.Object, "spec", "template", "spec", "requirements")
+	if err != nil {
+		return false, err
+	}
+	for _, raw := range requirements {
+		requirement, ok := raw.(map[string]any)
+		if !ok {
+			return false, errors.New("invalid NodePool requirement")
+		}
+		key, _ := requirement["key"].(string)
+		minimum := float64(0)
+		switch key {
+		case "karpenter.k8s.aws/instance-cpu":
+			minimum = budget.Cpu().AsApproximateFloat64()
+		case "karpenter.k8s.aws/instance-memory":
+			minimum = float64(budget.Memory().Value()) / (1 << 20)
+		}
+		if minimum > 0 {
+			allows, err := poolRequirementAllowsSize(requirement, minimum)
+			if err != nil || !allows {
+				return false, err
+			}
+		}
+		wanted, fixed := known[key]
+		if !fixed {
+			continue
+		}
+		values, _, err := unstructured.NestedStringSlice(requirement, "values")
+		if err != nil {
+			return false, err
+		}
+		switch requirement["operator"] {
+		case "In":
+			if !slices.Contains(values, wanted) {
+				return false, nil
+			}
+		case "NotIn":
+			if slices.Contains(values, wanted) {
+				return false, nil
+			}
+		case "DoesNotExist":
+			return false, nil
+		case "Exists":
+		case "Gt", "Lt":
+			return false, nil
+		default:
+			return false, fmt.Errorf("unknown NodePool requirement operator %v", requirement["operator"])
+		}
+	}
+	return true, nil
+}
+
+// Only explicit upper bounds can prove the awarded hardware class cannot fit.
+func poolRequirementAllowsSize(requirement map[string]any, minimum float64) (bool, error) {
+	values, _, err := unstructured.NestedStringSlice(requirement, "values")
+	if err != nil {
+		return false, err
+	}
+	switch requirement["operator"] {
+	case "In", "Lt":
+		for _, value := range values {
+			number, err := strconv.ParseFloat(value, 64)
+			if err != nil {
+				return false, err
+			}
+			if requirement["operator"] == "In" && number >= minimum || requirement["operator"] == "Lt" && number > minimum {
+				return true, nil
+			}
+		}
+		return false, nil
+	case "DoesNotExist":
+		return false, nil
+	default:
+		return true, nil
+	}
+}
 
 func (b *KubernetesBoundary) nodeClaim(ctx context.Context, node *corev1.Node) (*unstructured.Unstructured, error) {
 	if b.Karpenter == nil {

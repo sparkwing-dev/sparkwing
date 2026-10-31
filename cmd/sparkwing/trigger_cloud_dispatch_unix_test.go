@@ -471,6 +471,10 @@ func (h cloudDispatchHost) Host(ctx context.Context, unit controllerwire.Claimed
 
 type cloudDispatchBoundary struct{}
 
+func (cloudDispatchBoundary) CapacityConfigured(context.Context, launcher.CloudJobBinding, corev1.ResourceList) (bool, error) {
+	return true, nil
+}
+
 func (cloudDispatchBoundary) Reserve(_ context.Context, binding launcher.CloudJobBinding, job string) (launcher.CloudNodeReservation, error) {
 	return launcher.CloudNodeReservation{NodeName: "cloud-node", NodeUID: "cloud-node-uid", Team: binding.Team, JobName: job, ReservationID: "reservation-" + job, Award: binding.LeaseRef()}, nil
 }

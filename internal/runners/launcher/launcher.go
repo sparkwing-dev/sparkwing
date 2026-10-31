@@ -32,7 +32,10 @@ type CloudControl interface {
 }
 
 // CloudCapacityObservation names a demand Pod, which is never an execution node.
-type CloudCapacityObservation struct{ PodUID string }
+type CloudCapacityObservation struct {
+	PodUID       string
+	Unconfigured bool
+}
 
 // CloudJobObservation retains the identities needed to reconcile after launcher restart.
 type CloudJobObservation struct {
@@ -211,7 +214,7 @@ func (l *Launcher) launch(ctx context.Context, award *CloudJobAward) (launched b
 	r, err := BuildJob(ctx, time.Now(), l.Config, *award, l.Boundary)
 	if errors.Is(err, ErrNoDedicatedNode) {
 		l.wait(award)
-		return true, errors.Join(err, l.requestCapacity(ctx, *award))
+		return true, l.awaitCapacity(ctx, *award)
 	}
 	if err != nil {
 		return true, err

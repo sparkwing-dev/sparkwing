@@ -26,6 +26,10 @@ type cloudBoundaryFake struct {
 	released  int
 }
 
+func (*cloudBoundaryFake) CapacityConfigured(context.Context, launcher.CloudJobBinding, corev1.ResourceList) (bool, error) {
+	return true, nil
+}
+
 func (b *cloudBoundaryFake) Reserve(_ context.Context, binding launcher.CloudJobBinding, name string) (launcher.CloudNodeReservation, error) {
 	b.reserved++
 	team := binding.Team
