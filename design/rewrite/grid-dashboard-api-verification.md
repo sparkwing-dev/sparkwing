@@ -86,3 +86,89 @@ cannot establish that a timer will fire. Returning the old controller-loop
 constant or treating installed files as active would retain the false-health
 bug. The change adds no setting, environment variable, wire field or deadline.
 Removing the observer and the local binding would undo this addition.
+
+## Completed follow-up replay
+
+This supersedes the open replay finding above. The original step-report timeout
+did not recur. All 200 jobs, including `j012`, finished successfully on their
+first attempt. Foreground observation failed separately when an aggregate log
+scan exhausted its time budget. A subsequent log read with the same binary
+succeeded. The original two-second step persistence timeout must fail loudly
+because the host cannot confirm the step's durable completion.
+
+The follow-up used candidate commit `c1331c8913879a1231865a620c6e2cf69eacd79a`.
+Its executable SHA-256 was
+`322b06ecf1ce6c1f7636aae5c4b2d7f08b1a7c63ec413460068eb37012ea1fad`.
+The preserved `R06C02/rerun-replay` fixture was copied into a temporary Git
+repository, with its SDK replacement pointed at this worktree. The private
+runtime retained the environment described above and selected Go 1.26.9
+explicitly because the temporary HOME had no asdf version selection.
+
+```text
+sparkwing pipeline plan -C REPLAY --pipeline big -o json
+sparkwing run big -C REPLAY --sw-workers 16 --sw-no-update -o json
+sparkwing runs status --run run-7ca225d91e9f3e02afa4c6ec -o json
+sparkwing runs logs --run run-7ca225d91e9f3e02afa4c6ec -o json
+```
+
+| Measurement | Result |
+| --- | --- |
+| Plan | 200 jobs, 9.15 seconds |
+| Persisted run | `success`, 904.062 seconds |
+| Persisted jobs | All 200 `done` / `success`, each at attempt 1 |
+| Foreground command | Exit 3 after 916.51 seconds |
+| Subsequent log read | Exit 0 in 0.91 seconds, 600 job records and 802 lifecycle events |
+
+The persisted run started at `2026-10-31T07:50:18.295Z` and finished at
+`2026-10-31T08:05:22.357Z`. Job `j012` succeeded between
+`08:00:33.856Z` and `08:00:37.131Z`.
+
+Observed one-minute load ranged from 13.7 to 41.9 on 16 CPUs. Other lanes kept
+running checks. Admission samples measured roughly 12.4 to 14.3 external cores,
+leaving little capacity after the default reserve. The replay retained normal
+admission and used no timeout, retry or worker-policy changes. This was lower
+load than the prior attempt, but it was not an idle-host test.
+
+### Distinct observation timeout
+
+The foreground command reported:
+
+```text
+run run-7ca225d91e9f3e02afa4c6ec is admitted: here handoff for run run-7ca225d91e9f3e02afa4c6ec is incomplete: request failed
+```
+
+Request `68b53ed36556037a5fc82a35` identifies the cause in the private
+controller log:
+
+```text
+GET /api/v1/runs/{run}/logs status=503 dur_ms=10335
+err="the log scan ran out of its time budget before making progress; retry the request"
+```
+
+This occurred during execution. The job host continued to completion, and the
+later log read succeeded without rebuilding or changing configuration. The
+CLI's nonzero exit correctly preserves the observation failure instead of
+claiming successful observation. This differs from the grid's failed step
+write. Contention is a plausible cause of both timeouts, not a proven exclusive
+cause.
+
+Aggregate pages traverse selected subjects in order, rechecking consumed streams
+before reaching later subjects.
+Skipping sealed subjects from cursor state would reduce those reads but violate
+the current authority-recheck contract. An independent correctness review agreed
+to retain that contract and avoid a new cursor checkpoint, retry or deadline
+change without a repeatable defect. No correctness bug was reproduced in step
+completion, and no runtime code changed in this follow-up.
+
+Focused failure-handling checks passed:
+
+```text
+go test ./internal/nodehost -run '^TestHostStepPersistence/(step_write_refused|diagnostic_refused)$' -count=1
+go test ./internal/controller -run '^(TestJSONLogReadStopsAtByteBudgetAndResumes|TestJSONLogSearchStopsAtTimeBudget|TestPersistedLogPageRechecksAuthorityDespiteConsumedCursor)$' -count=1
+```
+
+These are existing contract tests, not new regressions for an unreproduced step
+failure. The first session's fixes already have old-code failing regressions,
+and the lead's subsequent fast gate passed. The private daemon reported stopped
+with zero runs, queued triggers, held leases and dashboard connections. Temporary
+runtime files were removed after recording this evidence.
