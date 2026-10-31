@@ -533,7 +533,9 @@ owns those requests. The bootstrap still grants only source read and one exchang
 `LaunchOne` checks preparation authority before reserving a node, then runs the
 shared lease keeper through activation. Renewal also reconciles existing Jobs,
 so a slow new reservation does not stop another Job's source checkout heartbeat.
-Every return cancels and joins that keeper. Normal reconciliation keeps persisted
+Each placement attempt builds against the preparation acknowledgement's committed
+lease expiry because a held award can wait beyond its original lease. Every return
+cancels and joins that keeper. Normal reconciliation keeps persisted
 Jobs alive until exchange. Exchanged claims receive no launcher renewal because
 the executing host owns their lease.
 
@@ -584,6 +586,8 @@ and size in `sparkwing.dev/capacity-demand`, never the bootstrap credential.
   Requests are reconciled individually. A definitive binding or fence refusal
   deletes only the refused Pod by UID and lets other requests and claims proceed.
   Transport, overload and service-credential errors retain the request for retry.
+  Claim backoff pauses new claims while reconciliation continues renewing held
+  awards. A failed Job observation still permits capacity-request reconciliation.
 
 Run status projects unactivated Cloud bootstrap awards as
 `cloud_capacity_waiting` notices: “Waiting for dedicated Cloud capacity” and

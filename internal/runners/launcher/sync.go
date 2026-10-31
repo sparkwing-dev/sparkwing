@@ -35,6 +35,7 @@ func (l *Launcher) Sync(ctx context.Context) error {
 
 func (l *Launcher) sync(ctx context.Context) (result error) {
 	defer func() { result = l.syncReservations(ctx, result) }()
+	defer func() { result = errors.Join(result, l.syncCapacity(ctx)) }()
 	var errs []error
 	jobs, err := l.Kube.BatchV1().Jobs(l.Config.Namespace).List(ctx, metav1.ListOptions{LabelSelector: "app.kubernetes.io/managed-by=" + managedByLauncher})
 	if err != nil {
@@ -101,7 +102,7 @@ func (l *Launcher) sync(ctx context.Context) (result error) {
 			errs = append(errs, err)
 		}
 	}
-	return errors.Join(append(errs, l.syncCapacity(ctx))...)
+	return errors.Join(errs...)
 }
 
 func teardownFault(job string, err error) error {

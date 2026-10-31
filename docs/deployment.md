@@ -63,6 +63,9 @@ pool, the launcher holds the award and creates
 an unbound, award-sized capacity-request Pod that only the team's NodePool can
 satisfy, so Karpenter adds a node that the held award then reserves. Run status
 shows “Waiting for dedicated Cloud capacity” with elapsed time until activation.
+The launcher renews held awards during that wait, preserving the plan generation
+through placement retries and claim backoff. Losing the launcher owner allows
+the lease to expire and the controller to requeue the plan.
 The initial credit reservation is a hold. Usage billing begins with execution.
 Users can cancel while waiting.
 

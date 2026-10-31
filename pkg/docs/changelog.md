@@ -41,6 +41,8 @@ unlock.
 
 ### Fixed
 
+- **Cloud:** Plans waiting for dedicated capacity keep their lease while the launcher holds the award
+  Placement retries use the renewed deadline. Claim backoff and unrelated Job observation failures continue renewing held awards. Owner loss still permits recovery and requeue.
 - **schedules:** Installing a schedule that collides with a GitHub App declaration returns HTTP 409 and preserves the existing schedule
   Unknown schedule write modes return HTTP 400.
 - **schedules:** Unreachable source repositories and missing refs return HTTP 422 during registration

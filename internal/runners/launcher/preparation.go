@@ -45,13 +45,13 @@ func (c *ControllerControl) Prepare(ctx context.Context, fences []capability.Lea
 	return expires, nil
 }
 
-func (l *Launcher) keepPreparation(ctx context.Context, fence capability.LeaseRef) (context.Context, func(), error) {
+func (l *Launcher) keepPreparation(ctx context.Context, fence capability.LeaseRef) (context.Context, func(), time.Time, error) {
 	expires, err := l.Control.Prepare(ctx, []capability.LeaseRef{fence})
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, time.Time{}, err
 	}
 	if !expires.After(time.Now()) {
-		return nil, nil, lease.ErrLeaseLost
+		return nil, nil, time.Time{}, lease.ErrLeaseLost
 	}
 	initial, observed := true, false
 	ready := make(chan struct{})
@@ -75,8 +75,8 @@ func (l *Launcher) keepPreparation(ctx context.Context, fence capability.LeaseRe
 	select {
 	case <-unit.Done():
 		stop()
-		return nil, nil, context.Cause(unit)
+		return nil, nil, time.Time{}, context.Cause(unit)
 	case <-ready:
-		return unit, stop, nil
+		return unit, stop, expires, nil
 	}
 }
