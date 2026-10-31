@@ -22,6 +22,8 @@ unlock.
 
 ### Changed
 
+- **release:** Publish `@sparkwing/sdk` through npm Trusted Publishing with GitHub Actions OIDC
+  Publication uses pinned npm 11.6.2 and automatic provenance without an npm token secret.
 - **scaffold:** `const FallbackSDKVersion` pins v0.68.2, so a fresh scaffold compiles against that release.
 - **controller (Breaking):** List endpoints that returned whole collections now return cursor pages of 50 records by default, up to 200 per request
   Follow `next_cursor` while `truncated` is true. CLI and console callers fetch subsequent pages. Raw-array lists now use named collection envelopes.
