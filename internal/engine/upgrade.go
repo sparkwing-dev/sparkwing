@@ -360,6 +360,24 @@ func copyCheckout(ctx context.Context, source, destination string) error {
 	if err != nil {
 		return err
 	}
+	if _, err := os.Stat(filepath.Join(source, ".git")); err == nil {
+		// A private index keeps verification from writing into a linked worktree's metadata.
+		clone := exec.CommandContext(ctx, "git", "clone", "--shared", "--no-checkout", "--", source, destination)
+		if output, err := clone.CombinedOutput(); err != nil {
+			return fmt.Errorf("stage upgrade Git metadata: %w: %s", err, strings.TrimSpace(string(output)))
+		}
+		head := exec.CommandContext(ctx, "git", "-C", destination, "rev-parse", "--verify", "--quiet", "HEAD")
+		if err := head.Run(); err == nil {
+			index := exec.CommandContext(ctx, "git", "-C", destination, "read-tree", "HEAD")
+			if output, err := index.CombinedOutput(); err != nil {
+				return fmt.Errorf("stage upgrade Git index: %w: %s", err, strings.TrimSpace(string(output)))
+			}
+		} else if exit := new(exec.ExitError); !errors.As(err, &exit) || exit.ExitCode() != 1 {
+			return fmt.Errorf("read upgrade Git HEAD: %w", err)
+		}
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
 	return filepath.WalkDir(source, func(path string, entry fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			return walkErr
@@ -378,7 +396,13 @@ func copyCheckout(ctx context.Context, source, destination string) error {
 		if path == destination {
 			return filepath.SkipDir
 		}
-		if entry.IsDir() && (entry.Name() == ".git" || entry.Name() == "node_modules") {
+		if entry.Name() == ".git" {
+			if entry.IsDir() {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if entry.IsDir() && entry.Name() == "node_modules" {
 			return filepath.SkipDir
 		}
 		target := filepath.Join(destination, relative)
