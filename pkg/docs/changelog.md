@@ -46,7 +46,16 @@ unlock.
 - **runner:** Slow step-completion writes no longer fail otherwise successful jobs
   Terminal step state and diagnostics use the live claim's execution lifetime instead of the heartbeat RPC timeout. Claim expiry still stops reporting.
 - **logs:** Client-canceled HTTP requests log at info and keep their status and audit records
+- **overflow:** A saturated here owner leaves jobs ready for Cloud instead of repeatedly claiming and returning them
+  The requester checks its local CPU and memory ledger before taking a provisional burst award, using the same capacity test as registered runners.
+- **runner:** Uploaded Go pipelines with a local SDK replacement install and plan through the runner
+  The runner accepts the internal SDK installer command used during source acquisition.
+- **source credentials:** Refusals explain that an unproven run cannot fetch a private repository
+  Run private code through a separate App-verified or uploaded run. Fetch-only access follows the same repository-proof requirement as other job credentials.
+- **controller:** Client-canceled HTTP requests return HTTP 499 and log at info
+  Responses whose headers were already sent retain their status. Status and audit records remain available.
   Rollback cleanup on closed or canceled connections logs at debug. Server faults still log at error.
+- **claims:** Named claims for a missing execution unit return HTTP 404 instead of a server error
 - **console:** Run submission and Run now keep waiting while the controller admits the run
   Pending controls stay visible. Retrying an unconfirmed request in the same form or action reuses its idempotency key to recover the admitted run without creating another.
 - **cli:** Revoked-token refusals explain how to sign in again and replace the selected profile's token

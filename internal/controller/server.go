@@ -590,7 +590,7 @@ func withRequestLog(
 		ctx, masker := withRequestMasker(r.Context())
 		ctx, rec := withAuditRecord(ctx, id, routeLabel(r))
 		r = r.WithContext(ctx)
-		rw := &statusRecorder{ResponseWriter: w, status: http.StatusOK}
+		rw := &statusRecorder{ResponseWriter: w, status: http.StatusOK, ctx: ctx}
 		writer := http.ResponseWriter(rw)
 		if _, ok := w.(http.Flusher); ok {
 			writer = &flushingStatusRecorder{statusRecorder: rw}
@@ -601,7 +601,7 @@ func withRequestLog(
 			if status == http.StatusNotFound && rec.route == otherLabel {
 				rec.path = sanitizedMissingPath(r.URL.EscapedPath(), masker.Mask)
 			}
-			if status >= http.StatusInternalServerError {
+			if status >= http.StatusInternalServerError || status == statusClientClosedRequest {
 				cause := rw.cause
 				if cause == nil {
 					cause = errors.New(http.StatusText(status))
@@ -635,10 +635,14 @@ func withRequestLog(
 	})
 }
 
+const statusClientClosedRequest = 499
+
 type statusRecorder struct {
 	http.ResponseWriter
-	status int
-	cause  error
+	status    int
+	cause     error
+	ctx       context.Context
+	committed bool
 }
 
 func (r *statusRecorder) ResponseError(err error) {
@@ -648,8 +652,23 @@ func (r *statusRecorder) ResponseError(err error) {
 }
 
 func (r *statusRecorder) WriteHeader(code int) {
-	r.status = code
+	if r.committed {
+		return
+	}
+	if code >= http.StatusInternalServerError && r.ctx != nil && errors.Is(r.ctx.Err(), context.Canceled) && errors.Is(r.cause, context.Canceled) {
+		code = statusClientClosedRequest
+	}
+	if code < 100 || code >= 200 || code == http.StatusSwitchingProtocols {
+		r.status, r.committed = code, true
+	}
 	r.ResponseWriter.WriteHeader(code)
+}
+
+func (r *statusRecorder) Write(body []byte) (int, error) {
+	if !r.committed {
+		r.WriteHeader(http.StatusOK)
+	}
+	return r.ResponseWriter.Write(body)
 }
 
 // safety: a stream sets its own write deadline through http.ResponseController, which reaches the connection only
@@ -663,6 +682,9 @@ type flushingStatusRecorder struct {
 }
 
 func (r *flushingStatusRecorder) Flush() {
+	if !r.committed {
+		r.WriteHeader(http.StatusOK)
+	}
 	r.ResponseWriter.(http.Flusher).Flush()
 }
 

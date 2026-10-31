@@ -24,47 +24,61 @@ import (
 )
 
 func TestRequestCancellationLogLevel(t *testing.T) {
-	for _, method := range []string{http.MethodGet, http.MethodPost} {
-		for _, tc := range []struct {
-			name   string
-			ctxErr error
-			cause  error
-			level  string
-		}{
-			{"client canceled", context.Canceled, fmt.Errorf("read runs: %w", context.Canceled), "INFO"},
-			{"live request", nil, context.Canceled, "ERROR"},
-			{"server fault after cancellation", context.Canceled, errors.New("database unavailable"), "ERROR"},
-			{"deadline", context.DeadlineExceeded, context.DeadlineExceeded, "ERROR"},
-		} {
-			t.Run(method+"/"+tc.name, func(t *testing.T) {
-				ctx := t.Context()
-				if errors.Is(tc.ctxErr, context.Canceled) {
-					var cancel context.CancelFunc
-					ctx, cancel = context.WithCancel(ctx)
-					cancel()
-				} else if errors.Is(tc.ctxErr, context.DeadlineExceeded) {
-					var cancel context.CancelFunc
-					ctx, cancel = context.WithDeadline(ctx, time.Time{})
-					defer cancel()
-				}
-				h, logs := auditHarness(t, "/api/v1/runs", func(w http.ResponseWriter, _ *http.Request) {
-					routepolicy.WritePolicyError(w, tc.cause)
+	for _, writer := range []string{"policy", "legacy"} {
+		for _, method := range []string{http.MethodGet, http.MethodPost} {
+			for _, tc := range []struct {
+				name   string
+				ctxErr error
+				cause  error
+				level  string
+			}{
+				{"client canceled", context.Canceled, fmt.Errorf("read runs: %w", context.Canceled), "INFO"},
+				{"live request", nil, context.Canceled, "ERROR"},
+				{"server fault after cancellation", context.Canceled, errors.New("database unavailable"), "ERROR"},
+				{"deadline", context.DeadlineExceeded, context.DeadlineExceeded, "ERROR"},
+			} {
+				t.Run(writer+"/"+method+"/"+tc.name, func(t *testing.T) {
+					ctx := t.Context()
+					if errors.Is(tc.ctxErr, context.Canceled) {
+						var cancel context.CancelFunc
+						ctx, cancel = context.WithCancel(ctx)
+						cancel()
+					} else if errors.Is(tc.ctxErr, context.DeadlineExceeded) {
+						var cancel context.CancelFunc
+						ctx, cancel = context.WithDeadline(ctx, time.Time{})
+						defer cancel()
+					}
+					path := "/api/v1/runs"
+					if method == http.MethodPost {
+						path = "/api/v1/claims/{claim}/heartbeat"
+					}
+					h, logs := auditHarness(t, path, func(w http.ResponseWriter, _ *http.Request) {
+						if writer == "legacy" {
+							writeError(w, http.StatusInternalServerError, tc.cause)
+						} else {
+							routepolicy.WritePolicyError(w, tc.cause)
+						}
+					})
+					out := httptest.NewRecorder()
+					h.ServeHTTP(out, httptest.NewRequest(method, path, nil).WithContext(ctx))
+					records := auditLines(t, logs, "http request failed")
+					if len(records) != 1 || records[0]["level"] != tc.level || records[0]["err"] != tc.cause.Error() {
+						t.Fatalf("diagnostic = %s, want %s with cause", logs, tc.level)
+					}
+					msg := "http"
+					if method == http.MethodPost {
+						msg = "audit"
+					}
+					status := auditLines(t, logs, msg)
+					wantStatus := http.StatusInternalServerError
+					if tc.name == "client canceled" {
+						wantStatus = 499
+					}
+					if out.Code != wantStatus || len(status) != 1 || status[0]["status"] != float64(out.Code) || status[0]["level"] != "INFO" || status[0]["request_id"] != out.Header().Get(RequestIDHeader) {
+						t.Fatalf("HTTP %d, status/audit = %s", out.Code, logs)
+					}
 				})
-				out := httptest.NewRecorder()
-				h.ServeHTTP(out, httptest.NewRequest(method, "/api/v1/runs", nil).WithContext(ctx))
-				records := auditLines(t, logs, "http request failed")
-				if len(records) != 1 || records[0]["level"] != tc.level || records[0]["err"] != tc.cause.Error() {
-					t.Fatalf("diagnostic = %s, want %s with cause", logs, tc.level)
-				}
-				msg := "http"
-				if method == http.MethodPost {
-					msg = "audit"
-				}
-				status := auditLines(t, logs, msg)
-				if out.Code != http.StatusInternalServerError || len(status) != 1 || status[0]["status"] != float64(out.Code) || status[0]["level"] != "INFO" || status[0]["request_id"] != out.Header().Get(RequestIDHeader) {
-					t.Fatalf("HTTP %d, status/audit = %s", out.Code, logs)
-				}
-			})
+			}
 		}
 	}
 }
@@ -180,3 +194,59 @@ func TestSignedUploadFailureLogsMaskedCauseOnceProperty(t *testing.T) {
 type failingUploadBody struct{ err error }
 
 func (r failingUploadBody) Read([]byte) (int, error) { return 0, r.err }
+
+func TestRequestCancellationPreservesCommittedStatus(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		commit func(http.ResponseWriter)
+		want   int
+	}{
+		{"explicit", func(w http.ResponseWriter) { w.WriteHeader(http.StatusAccepted) }, http.StatusAccepted},
+		{"body", func(w http.ResponseWriter) { _, _ = w.Write([]byte("started")) }, http.StatusOK},
+		{"flush", func(w http.ResponseWriter) { w.(http.Flusher).Flush() }, http.StatusOK},
+		{"informational", func(w http.ResponseWriter) { w.WriteHeader(http.StatusEarlyHints) }, statusClientClosedRequest},
+		{"switching protocols", func(w http.ResponseWriter) { w.WriteHeader(http.StatusSwitchingProtocols) }, http.StatusSwitchingProtocols},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx, cancel := context.WithCancel(t.Context())
+			defer cancel()
+			h, logs := auditHarness(t, "/api/v1/runs", func(w http.ResponseWriter, _ *http.Request) {
+				tc.commit(w)
+				cancel()
+				writeError(w, http.StatusInternalServerError, context.Canceled)
+			})
+			wire := &committedStatusWriter{header: make(http.Header)}
+			h.ServeHTTP(wire, httptest.NewRequest(http.MethodGet, "/api/v1/runs", nil).WithContext(ctx))
+			records := auditLines(t, logs, "http")
+			if wire.status != tc.want || len(records) != 1 || records[0]["status"] != float64(tc.want) {
+				t.Fatalf("wire=%d want=%d logs=%s", wire.status, tc.want, logs)
+			}
+		})
+	}
+}
+
+type committedStatusWriter struct {
+	header http.Header
+	status int
+}
+
+func (w *committedStatusWriter) Header() http.Header { return w.header }
+
+func (w *committedStatusWriter) WriteHeader(code int) {
+	if w.status == 0 && (code < 100 || code >= 200 || code == http.StatusSwitchingProtocols) {
+		w.status = code
+	}
+}
+
+func (w *committedStatusWriter) Write(body []byte) (int, error) {
+	if w.status == 0 {
+		w.WriteHeader(http.StatusOK)
+	}
+	return len(body), nil
+}
+
+func (w *committedStatusWriter) Flush() {
+	if w.status == 0 {
+		w.WriteHeader(http.StatusOK)
+	}
+}

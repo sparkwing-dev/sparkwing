@@ -247,7 +247,9 @@ func TestSourceCredential_SubscriptionCannotProveAnAssertedRun(t *testing.T) {
 	before := len(f.app.Minted())
 	got, code := f.sourceCredential(node, "run-plans")
 	if code != http.StatusNotFound || got.Error != "not_found" || got.Token != "" ||
-		!strings.Contains(got.Message, "has not proven") {
+		!strings.Contains(got.Message, "has not proven") ||
+		!strings.Contains(got.Message, "cannot fetch a private repository") ||
+		!strings.Contains(got.Message, "upload") {
 		t.Fatalf("an asserted private repository = %d %+v, want no credential", code, got)
 	}
 	if n := len(f.app.Minted()) - before; n != 0 {

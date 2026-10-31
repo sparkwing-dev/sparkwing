@@ -12,6 +12,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/buildinfo"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/engine/sdkinstall"
 	"github.com/sparkwing-dev/sparkwing/internal/runners/runnerflags"
 	"github.com/sparkwing-dev/sparkwing/pkg/color"
 )
@@ -38,6 +39,12 @@ func mainWithRuntime(version string, runtime clusterRuntime) {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	switch os.Args[1] {
+	case "__sdk-install":
+		if len(os.Args) != 2 {
+			err = errors.New("SDK install accepts no arguments")
+		} else {
+			err = sdkinstall.Run(ctx, version, os.Stdin, os.Stdout, os.Stderr)
+		}
 	case "start", "warm":
 		err = runtime.Runner.Run(ctx, os.Args[1], os.Args[2:], version)
 	case "run-node", "fetch-source":
