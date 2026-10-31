@@ -126,7 +126,10 @@ func checkPublication(t *testing.T, payload []byte, test publicationCase) {
 		test.versions = `[]`
 	}
 	dir := t.TempDir()
-	file := filepath.Join(dir, "sdk.tgz")
+	file := filepath.Join(dir, "typescript-dist", "sdk.tgz")
+	if err := os.MkdirAll(filepath.Dir(file), 0o700); err != nil {
+		t.Fatal(err)
+	}
 	if err := os.WriteFile(file, archive.Bytes(), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -148,7 +151,8 @@ process.exit(Number(process.env[dryRun ? "DRY_RUN_STATUS" : "PUBLISH_STATUS"] ||
 		t.Fatal(err)
 	}
 	calls := filepath.Join(dir, "calls")
-	command := exec.Command(node, script, file, test.version, test.tag)
+	command := exec.Command(node, script, filepath.Join("typescript-dist", "sdk.tgz"), test.version, test.tag)
+	command.Dir = dir
 	command.Env = append(os.Environ(), "PATH="+dir+string(os.PathListSeparator)+os.Getenv("PATH"), "METADATA="+test.metadata, "LOOKUP_STATUS="+test.status, "VERSIONS="+test.versions, "VERSIONS_STATUS="+test.versionsStatus, "DRY_RUN_STATUS="+test.dryRunStatus, "PUBLISH_STATUS="+test.publishStatus, "CALLS="+calls)
 	output, err := command.CombinedOutput()
 	if (err == nil) != test.success || !strings.Contains(string(output), test.failure) {

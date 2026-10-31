@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
+import { resolve } from "node:path";
 
 const [archive, version, tag] = process.argv.slice(2);
 if (process.argv.length !== 5 || !archive || !/^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(-[0-9A-Za-z.-]+)?$/.test(version) || !tag) {
@@ -55,7 +56,8 @@ if (metadata !== undefined) {
     });
     if (newer) throw new Error("latest requires a stable version newer than every published stable 0.x version");
   }
-  const args = ["publish", archive, "--access", "public", "--tag", tag, "--ignore-scripts", "--provenance", "--json"];
+  // npm reads a relative "dir/file.tgz" as a GitHub owner/repo shorthand.
+  const args = ["publish", resolve(archive), "--access", "public", "--tag", tag, "--ignore-scripts", "--provenance", "--json"];
   for (const dryRun of [true, false]) {
     const published = spawnSync("npm", [...args, ...(dryRun ? ["--dry-run"] : [])], { stdio: "inherit" });
     if (published.error) throw published.error;
