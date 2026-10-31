@@ -438,8 +438,27 @@ func (l *cloudDispatchLauncher) complete(t *testing.T, unit controllerwire.Claim
 	if err != nil {
 		t.Fatalf("Cloud %s start: %v", unit.JobID, err)
 	}
+	principal, err := host.Principal(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	b := principal.Capability.Binding
+	subject := blob.LogSubject{Kind: blob.LogJobAttempt, Team: principal.Capability.Team, RunID: unit.RunID, Attempt: &runspec.AttemptIdentity{Team: principal.Capability.Team, RunID: unit.RunID, NodeID: unit.JobID, Generation: b.Generation, Attempt: started.Attempt}}
+	uploader, err := host.LogUploader(t.Context(), principal, subject)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if _, err := work.TransitionJob(t.Context(), unit.RunID, unit.JobID, controllerwire.JobTransitionRequest{To: "success", Cause: "report", SourceAttempt: &started.Attempt, Result: &controllerwire.JobResult{Outcome: "success"}}); err != nil {
 		t.Fatalf("Cloud %s report: %v", unit.JobID, err)
+	}
+	if err := l.runtime.Sync(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if jobs, err := l.kube.BatchV1().Jobs("cloud").List(t.Context(), metav1.ListOptions{}); err != nil || len(jobs.Items) != 1 {
+		t.Fatalf("Cloud job lost its pending log tail: %+v %v", jobs, err)
+	}
+	if err := uploader.PutManifest(t.Context(), logseg.Manifest{Version: 1, Subject: &subject, Status: logseg.StatusComplete, SealedBy: "node", SealedAt: time.Now().UTC()}); err != nil {
+		t.Fatalf("Cloud %s log seal: %v", unit.JobID, err)
 	}
 	l.finish(t)
 }

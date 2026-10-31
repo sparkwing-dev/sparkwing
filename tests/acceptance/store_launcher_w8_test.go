@@ -2,6 +2,7 @@ package acceptance_test
 
 import (
 	"context"
+	"crypto/sha256"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -14,11 +15,14 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
+	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controller"
 	"github.com/sparkwing-dev/sparkwing/internal/controller/client"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/runners/launcher"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
 )
 
@@ -88,8 +92,26 @@ func TestStoreLauncherW8(t *testing.T) {
 	if err := runtime.Sync(t.Context()); err != nil || boundary.released != 0 {
 		t.Fatalf("live exchanged claim lost its Job: releases=%d: %v", boundary.released, err)
 	}
+	principal, err := server.Store.AsOperator().LookupCapability(t.Context(), sha256.Sum256([]byte(unit.Capability)))
+	if err != nil {
+		t.Fatal(err)
+	}
 	if _, err := work.TransitionJob(t.Context(), unit.RunID, unit.JobID, controllerwire.JobTransitionRequest{To: "success", Cause: "report", SourceAttempt: &started.Attempt, Result: &controllerwire.JobResult{Outcome: "success"}}); err != nil {
 		t.Fatal(err)
+	}
+	if err := runtime.Sync(t.Context()); err != nil || boundary.released != 0 {
+		t.Fatalf("pending log tail lost its Job: releases=%d error=%v", boundary.released, err)
+	}
+	b := principal.Capability.Binding
+	subject := blob.LogSubject{Kind: blob.LogJobAttempt, Team: principal.Capability.Team, RunID: unit.RunID, Attempt: &runspec.AttemptIdentity{Team: principal.Capability.Team, RunID: unit.RunID, NodeID: unit.JobID, Generation: b.Generation, Attempt: started.Attempt}}
+	actor := runstate.Actor{Kind: runstate.ActorHolder, Authority: principal.Authority, CapabilityPrefix: principal.Capability.Prefix, NodeFence: runspec.NodeFence{RunID: runspec.RunID(unit.RunID), NodeID: runspec.NodeID(unit.JobID), Holder: b.Holder, Generation: runspec.ClaimGeneration(b.Generation)}}
+	tenant := teststore.ForTeam(t, server.Store, store.Team(principal.Capability.Team))
+	retention, err := tenant.PrepareLogWrite(t.Context(), subject, actor)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := tenant.RecordSegments(t.Context(), store.SegmentCommit{Subject: subject, Actor: actor, Final: true, RetentionClass: retention}); err != nil {
+		t.Fatalf("store-backed log seal: %v", err)
 	}
 	if err := runtime.Sync(t.Context()); err != nil || boundary.released != 1 {
 		t.Fatalf("store-backed cleanup: releases=%d error=%v", boundary.released, err)
