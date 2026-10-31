@@ -11,8 +11,8 @@ import (
 )
 
 func TestControllerRetryReusesSuccessfulJobWithoutAnAttempt(t *testing.T) {
-	for _, missing := range []bool{false, true} {
-		t.Run(map[bool]string{false: "reusable", true: "missing"}[missing], func(t *testing.T) {
+	for _, missing := range []string{"", "records", "run", "node"} {
+		t.Run("missing="+missing, func(t *testing.T) {
 			tenant, plan, _ := controllerPlanFixture(t, nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{{ID: "job"}, {ID: "next", Needs: []string{"job"}}}})
 			s := tenant.s
 			records := &blobRecords{manifests: fakeBlobManifests{}}
@@ -62,8 +62,13 @@ func TestControllerRetryReusesSuccessfulJobWithoutAnAttempt(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if missing {
+			switch missing {
+			case "records":
 				rewriteSchemaExec(t, s.db, `DELETE FROM blob_records WHERE team='a' AND run_id=?`, plan.RunID)
+			case "run":
+				rewriteSchemaExec(t, s.db, `DELETE FROM runs WHERE team='a' AND id=?`, plan.RunID)
+			case "node":
+				rewriteSchemaExec(t, s.db, `DELETE FROM nodes WHERE team='a' AND run_id=? AND node_id='job'`, plan.RunID)
 			}
 			run := mustReadRun(t, tenant, retry.RunID)
 			if run.Retry == nil || run.Retry.Results["job"].Ref != pre.Ref {
@@ -75,7 +80,7 @@ func TestControllerRetryReusesSuccessfulJobWithoutAnAttempt(t *testing.T) {
 				}
 			}
 			reused, err := tenant.ReadNode(t.Context(), runspec.NodeRef{RunID: runspec.RunID(retry.RunID), NodeID: "job"})
-			if missing {
+			if missing != "" {
 				if err != nil || reused.Status != runstate.StatusPending || reused.ReadyAt == nil || reused.OutputRecord != nil {
 					t.Fatalf("missing source did not fall back to execution: %+v, %v", reused, err)
 				}

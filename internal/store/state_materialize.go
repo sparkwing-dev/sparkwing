@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"slices"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
@@ -115,6 +116,9 @@ func materializationResultTx(ctx context.Context, tx *storeTx, team Team, run Ru
 	}
 	node, err := readNodeTx(ctx, tx, team, ref)
 	if err != nil {
+		if ref != target.Ref && errors.Is(err, ErrNotFound) {
+			return runstate.NodeResult{}, blob.ErrNotFound
+		}
 		return runstate.NodeResult{}, err
 	}
 	if source.Kind == runstate.SourceManualRetry {
