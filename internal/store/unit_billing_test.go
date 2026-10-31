@@ -36,7 +36,7 @@ func meteredUnitFixtureStore(t *testing.T, s *Store, cloud bool) (*Store, UnitDe
 	}
 	authorityPersist(t, s, root)
 	demand.CapabilityPrefix = root.Prefix
-	rewriteSchemaExec(t, s.db, `INSERT INTO credit_grants(id,team,kind,amount_micro,created_at) VALUES ('fund','a','paid',1000000,1)`)
+	rewriteSchemaExec(t, s.db, `INSERT INTO credit_grants(reference,id,team,kind,amount_micro,created_at) VALUES ('fund','fund','a','paid',1000000,1)`)
 	table := CreditRateTable{{Cores: 2, MicroPerSecond: 2}, {Cores: 4, MicroPerSecond: 10}}
 	if _, err := s.AsOperator().SetCreditSettings(t.Context(), CreditSettingsUpdate{RateTable: &table}); err != nil {
 		t.Fatal(err)
@@ -160,7 +160,7 @@ func TestMeteredUnitEvalSettlementUsesPersistedLease(t *testing.T) {
 	c.Binding = capability.Binding{Kind: capability.BindingNode, RunID: "run", NodeID: "job", Holder: "eval-host", Generation: 2, Expansion: &capability.LeaseRef{Kind: capability.UnitEval, ID: id, Holder: "eval-host", Generation: 8}}
 	c.Billing = &capability.BillingProvenance{PayerTeam: "a", Metered: true, ExecutorClass: "cloud", ReservationID: "eval-award", Start: capability.BillingAtStart, Unit: capability.BillingEval}
 	authorityPersist(t, s, c)
-	rewriteSchemaExec(t, s.db, `INSERT INTO credit_grants(id,team,kind,amount_micro,created_at) VALUES ('fund','a','paid',1000000,1)`)
+	rewriteSchemaExec(t, s.db, `INSERT INTO credit_grants(reference,id,team,kind,amount_micro,created_at) VALUES ('fund','fund','a','paid',1000000,1)`)
 	if err := s.inTx(t.Context(), func(tx *storeTx) error {
 		return recordBillingAwardTx(t.Context(), tx, c, CreditRate{Cores: 1, MicroPerSecond: 2}, 0)
 	}); err != nil {
@@ -187,7 +187,6 @@ func BillingLifecycleReferenceModel(t *testing.T, open func(*testing.T) *Store) 
 			s := open(t)
 			for _, team := range []string{"a", "b"} {
 				s.testOnlyExec(t, `INSERT INTO teams(name,created_at,updated_at) VALUES (?,1,1) ON CONFLICT(name) DO NOTHING`, team)
-				s.testOnlyExec(t, `INSERT INTO team_counters(team) VALUES (?) ON CONFLICT(team) DO NOTHING`, team)
 			}
 			s, demand, now := meteredUnitFixtureStore(t, s, cloud)
 			awarded := *now

@@ -21,7 +21,7 @@ func TestStoreDataCreditUsageStaysInTenantWithoutOperationalRows(t *testing.T) {
 			team := NormalizeTeam(Team(fmt.Sprintf("usage_%d_%d_%s_%%'--", iteration, owner, suffix)))
 			rewriteSchemaExec(t, s.db, "INSERT INTO teams(name,created_at,updated_at) VALUES (?,1,1)", team)
 			funding := int64(amount) + 1_000_000
-			rewriteSchemaExec(t, s.db, "INSERT INTO credit_grants(id,team,kind,amount_micro,created_at) VALUES (?,?,'free',?,1)", string(team), team, funding)
+			rewriteSchemaExec(t, s.db, "INSERT INTO credit_grants(reference,id,team,kind,amount_micro,created_at) VALUES (?,?,?,'free',?,1)", string(team), string(team), team, funding)
 			var want []RunCreditUsage
 			balance := funding
 			for row, run := range []string{"run_%'--", "run_雪", "run"} {

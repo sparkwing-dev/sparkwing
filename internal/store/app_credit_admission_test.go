@@ -44,7 +44,7 @@ func testUnfundedPushIsHistoryAndNeverStartsAfterFunding(t *testing.T, requireme
 	rewriteSchemaCount(t, s.db, "events WHERE kind='run_failed'", 1)
 	rewriteSchemaCount(t, s.db, "triggers WHERE status='pending'", 0)
 	rewriteSchemaCount(t, s.db, "billing_awards", 0)
-	rewriteSchemaExec(t, s.db, `INSERT INTO credit_grants(id,team,kind,amount_micro,created_at) VALUES ('fund','a','paid',1000000,1)`)
+	rewriteSchemaExec(t, s.db, `INSERT INTO credit_grants(reference,id,team,kind,amount_micro,created_at) VALUES ('fund','fund','a','paid',1000000,1)`)
 	replay, err := tenant.AdmitGitHubAppRun(t.Context(), in)
 	if err != nil || !replay.Replayed || replay.RunID != result.RunID {
 		t.Fatalf("redelivery after funding changed history: %+v, %v", replay, err)
@@ -69,7 +69,7 @@ func testUnfundedPushIsHistoryAndNeverStartsAfterFunding(t *testing.T, requireme
 	}
 	rewriteSchemaCount(t, s.db, "runs", 1)
 	rewriteSchemaCount(t, s.db, "triggers WHERE status='pending'", 0)
-	rewriteSchemaExec(t, s.db, `INSERT INTO credit_grants(id,team,kind,amount_micro,created_at) VALUES ('fund','a','paid',1000000,1)`)
+	rewriteSchemaExec(t, s.db, `INSERT INTO credit_grants(reference,id,team,kind,amount_micro,created_at) VALUES ('fund','fund','a','paid',1000000,1)`)
 	rerun, err := tenant.AdmitRun(t.Context(), rerunRequest)
 	if err != nil || rerun.RunID == result.RunID {
 		t.Fatalf("funded run-now could not retry an unplanned run: %+v, %v", rerun, err)
@@ -157,7 +157,7 @@ func TestPushCreditAdmissionUsesSealedPlacementWithoutLaunchers(t *testing.T) {
 				rewriteSchemaExec(t, s.db, `UPDATE teams SET claim_ranking=? WHERE name='a'`, tc.ranking)
 			}
 			if tc.funded {
-				rewriteSchemaExec(t, s.db, `INSERT INTO credit_grants(id,team,kind,amount_micro,created_at) VALUES ('fund','a','paid',1000000,1)`)
+				rewriteSchemaExec(t, s.db, `INSERT INTO credit_grants(reference,id,team,kind,amount_micro,created_at) VALUES ('fund','fund','a','paid',1000000,1)`)
 			}
 			if tc.hold {
 				rewriteSchemaExec(t, s.db, `INSERT INTO credit_freezes(dispute_id,team,created_at,cause,placed_by) VALUES ('hold','a',1,'operator','operator')`)

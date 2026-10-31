@@ -87,8 +87,8 @@ func TestCreditHistoryLimitIsClampedToItsMaximum(t *testing.T) {
 	s := authorityStore(t)
 	const count = CreditHistoryMaxLimit + 5
 	rewriteSchemaExec(t, s.db, `WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i+1 FROM n WHERE i<?)
-	 INSERT INTO credit_grants(id,team,kind,amount_micro,created_at)
-	 SELECT printf('%05d',i),'a','free',i,i FROM n`, count)
+	 INSERT INTO credit_grants(reference,id,team,kind,amount_micro,created_at)
+	 SELECT printf('%05d',i),printf('%05d',i),'a','free',i,i FROM n`, count)
 	rewriteSchemaExec(t, s.db, `WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i+1 FROM n WHERE i<?)
 	 INSERT INTO credit_charges(id,team,run_id,node_id,capability_prefix,kind,seconds,amount_micro,charged_at)
 	 SELECT printf('%05d',i),'a','retained','job','award','usage',1,i,i FROM n`, count)

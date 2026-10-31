@@ -154,7 +154,7 @@ func cloudResourceStore(t *testing.T) (*cloudResourceFixture, *store.Tenant) {
 		}
 	})
 	cloudResourceSQL(t, s, `INSERT INTO teams(name,created_at,updated_at) VALUES ('a',1,1)`)
-	cloudResourceSQL(t, s, `INSERT INTO credit_grants(id,team,kind,amount_micro,created_at) VALUES ('fund','a','paid',1000000000,1)`)
+	cloudResourceSQL(t, s, `INSERT INTO credit_grants(reference,id,team,kind,amount_micro,created_at) VALUES ('fund','fund','a','paid',1000000000,1)`)
 	provenance, err := runspec.AssertedProvenance(runspec.PrincipalWriter("account", "fixture"), "", "", "ci")
 	if err != nil {
 		t.Fatal(err)

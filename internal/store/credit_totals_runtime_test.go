@@ -15,7 +15,7 @@ import (
 func TestStoreDataLedgerTotalsUseFinancialRows(t *testing.T) {
 	s := authorityStore(t)
 	rewriteSchemaExec(t, s.db, `INSERT INTO credit_grants(id,team,kind,amount_micro,reverses,created_at,reference) VALUES
-	 ('free','a','free',100,'',1,''),('paid','b','paid',1000,'',1,'payment:test:paid'),('reversal','b','reversal',-25,'payment:test:paid',1,'')`)
+	 ('free','a','free',100,'',1,'free'),('paid','b','paid',1000,'',1,'payment:test:paid'),('reversal','b','reversal',-25,'payment:test:paid',1,'refund')`)
 	rewriteSchemaExec(t, s.db, `INSERT INTO credit_charges(id,team,run_id,node_id,capability_prefix,kind,seconds,amount_micro,charged_at) VALUES
 	 ('reserve','a','pruned','job','award','reservation',60,600,1),
 	 ('refund','a','pruned','job','award','refund',-57,-570,1),
@@ -64,7 +64,7 @@ func TestStoreDataLedgerTotalsReadAwardsWithoutAdvancingBilling(t *testing.T) {
 		for owner := range 2 {
 			team := Team(fmt.Sprintf("totals_%d_%d_%s_%%'--", iteration, owner, suffix))
 			rewriteSchemaExec(t, s.db, "INSERT INTO teams(name,created_at,updated_at) VALUES (?,1,1)", team)
-			rewriteSchemaExec(t, s.db, "INSERT INTO credit_grants(id,team,kind,amount_micro,created_at) VALUES (?,?,'paid',1000000,1)", string(team), team)
+			rewriteSchemaExec(t, s.db, "INSERT INTO credit_grants(reference,id,team,kind,amount_micro,created_at) VALUES (?,?,?,'paid',1000000,1)", string(team), string(team), team)
 			unit := []capability.UnitKind{capability.UnitPlan, capability.UnitEval, capability.UnitNode, capability.UnitTrigger}[(int(unitIndex)+owner)%4]
 			billing := []capability.BillingUnit{capability.BillingPlan, capability.BillingEval, capability.BillingJob, capability.BillingHost}[(int(unitIndex)+owner)%4]
 			c := authorityRoot("same-award", string(team))

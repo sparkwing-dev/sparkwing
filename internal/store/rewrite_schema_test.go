@@ -118,7 +118,7 @@ VALUES ('a','old','n',?,1,'holder','cap','runner','runner','remote',1,2,'success
 	}
 	rewriteSchemaRefuses(t, db, `INSERT INTO node_attempts(team,run_id,node_id,attempt,generation,holder,capability_prefix,executor_kind,executor_name,executor_location,started_at)
 VALUES ('a','old','n',1,2,'holder','cap','runner','runner','remote',1)`)
-	rewriteSchemaExec(t, db, "INSERT INTO credit_grants(id,kind,amount_micro,created_at,team) VALUES ('g','paid',100,1,'a')")
+	rewriteSchemaExec(t, db, "INSERT INTO credit_grants(reference,id,kind,amount_micro,created_at,team) VALUES ('g','g','paid',100,1,'a')")
 	rewriteSchemaExec(t, db, `INSERT INTO credit_charges(id,run_id,node_id,capability_prefix,seconds,amount_micro,charged_at,team)
 VALUES ('c','old','n','cap',1,10,1,'a')`)
 	rewriteSchemaExec(t, db, `INSERT INTO storage_run_usage(team,run_id,period,updated_at) VALUES ('a','old','p',1)`)
