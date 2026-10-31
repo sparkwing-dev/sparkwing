@@ -159,7 +159,7 @@ func cloudResourceStore(t *testing.T) (*cloudResourceFixture, *store.Tenant) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// Repository-scoped launchers require the proof intake seals after fetching source.
+	// safety: repository-scoped launchers require the proof intake seals after fetching source.
 	provenance, err = provenance.FetchedFrom(1, "team/repo", "", "")
 	if err != nil {
 		t.Fatal(err)

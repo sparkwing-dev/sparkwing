@@ -17,18 +17,28 @@ import (
 )
 
 func TestSchemaDocumentationNamesBaseline(t *testing.T) {
-	for path, claim := range map[string]string{
-		"../../CHANGELOG.md":               "schema baseline advances to version %d",
-		"../../docs/migrations/v0.68.0.md": "schema baseline moves to version %d",
-	} {
-		raw, err := os.ReadFile(path)
+	want := store.ExpectedSchemaVersion()
+	changelog, err := os.ReadFile("../../CHANGELOG.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(changelog), fmt.Sprintf("schema baseline advances to version %d", want)) {
+		t.Errorf("CHANGELOG.md omits baseline %d", want)
+	}
+	guides, err := filepath.Glob("../../docs/migrations/*.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, guide := range guides {
+		raw, err := os.ReadFile(guide)
 		if err != nil {
 			t.Fatal(err)
 		}
-		if !strings.Contains(string(raw), fmt.Sprintf(claim, store.ExpectedSchemaVersion())) {
-			t.Errorf("%s omits baseline %d", path, store.ExpectedSchemaVersion())
+		if strings.Contains(string(raw), fmt.Sprintf("Recreate the store for schema baseline %d", want)) {
+			return
 		}
 	}
+	t.Errorf("no migration guide has a \"Recreate the store for schema baseline %d\" section", want)
 }
 
 // safety: neutral-schema translation must preserve every table, column, key,
