@@ -163,3 +163,30 @@ func TestUnverifiedProvenanceCannotAcquireRepositoryProof(t *testing.T) {
 		t.Fatal("proven seal acquired an unverified reason")
 	}
 }
+
+func TestDisplayShowsSealedTrustClass(t *testing.T) {
+	verified, err := runspec.AppProvenance(runspec.AppFacts{Repository: "acme/repo", Event: "push", DeliveryKey: "delivery", RepositoryID: 7, Ref: "refs/heads/main", SHA: provenanceSHA, DefaultBranch: "main", DefaultBranchPush: true, VerifiedAt: time.Unix(1, 0)}, runspec.Optional[runspec.PullRequest]{}, "ci")
+	if err != nil {
+		t.Fatal(err)
+	}
+	asserted, err := runspec.AssertedProvenance("account/owner", "refs/heads/main", provenanceSHA, "ci")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, provenance := range []runspec.Provenance{verified, asserted} {
+		sealed := runspec.SealedRequest{Request: runspec.Request{Pipeline: "ci", Git: runspec.Git{Ref: "refs/heads/main", SHA: provenanceSHA}}, Provenance: provenance}
+		for _, display := range []runspec.Display{runspec.DisplayRequest(sealed), runspec.DisplaySpec(runspec.Spec{Request: sealed})} {
+			body, err := json.Marshal(display)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var fields map[string]json.RawMessage
+			if err := json.Unmarshal(body, &fields); err != nil {
+				t.Fatal(err)
+			}
+			if string(fields["trust_class"]) != `"`+string(provenance.Trust())+`"` {
+				t.Fatalf("display = %s; want sealed trust %s", body, provenance.Trust())
+			}
+		}
+	}
+}

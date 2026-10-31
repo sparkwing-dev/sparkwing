@@ -72,6 +72,7 @@ func displayBase(r Request) Display {
 func DisplayRequest(s SealedRequest) Display {
 	r := s.Request
 	d := displayBase(r)
+	d.TrustClass = s.Provenance.Trust()
 	classified := r.SecretArgs.Set && validClassification(r.SecretArgs.Value, r.RequestedArgs)
 	d.RequestedArgs = redactArgs(r.RequestedArgs, r.SecretArgs.Value, classified)
 	if classified {
@@ -109,6 +110,7 @@ func displaySecretNames(s Spec) ([]string, bool) {
 // DisplaySpec strips private hashes and masks requested and resolved secret arguments alike.
 func DisplaySpec(s Spec) Display {
 	d := displayBase(s.Request.Request)
+	d.TrustClass = s.Request.Provenance.Trust()
 	names, classified := displaySecretNames(s)
 	d.RequestedArgs = redactArgs(s.Request.Request.RequestedArgs, names, classified)
 	d.Args = redactArgs(s.Resolved.Args, names, classified)

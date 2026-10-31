@@ -537,6 +537,7 @@ const RedactedArgValue = "***"
 // safety: Display is a separate safe projection, because serializing Spec exposes execution inputs.
 // Hashes and env digests are omitted because deterministic hashes can reveal guessed secret values.
 type Display struct {
+	TrustClass    TrustClass            `json:"trust_class,omitempty"`
 	Pipeline      string                `json:"pipeline"`
 	RequestedArgs map[string]string     `json:"requested_args"`
 	Args          map[string]string     `json:"args"`

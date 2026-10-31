@@ -5170,6 +5170,8 @@ components:
                 type: string
               type: array
             - type: "null"
+        trust_class:
+          type: string
       required:
         - pipeline
         - requested_args

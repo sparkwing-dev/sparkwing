@@ -41,6 +41,8 @@ unlock.
 
 ### Fixed
 
+- **console:** Runs show their sealed trust class and the Start a run toolbar wraps within a 375px viewport
+  Server errors show retry guidance, the support contact and the request ID instead of raw backend JSON.
 - **errors:** Invitation refusals explain which verified-email account to use, and token expiry refusals name the 90-day or 30-day maximum
   Invalid schedule cron, branch and commit inputs include corrected forms. Unverified waiting work explains how to qualify for reserved pools through a default-branch App push or select a pool without reserved secrets.
 
