@@ -514,7 +514,10 @@ for a secret it could have named at the start.
 Optional declarations stay optional during planning and plan acceptance. A
 missing optional secret never stops a run; its field stays empty and `Secret`
 returns `sparkwing.ErrSecretMissing` for it. Optional secrets use the same scope
-checks as required secrets. On a controller a
+checks as required secrets. An optional secret outside the run's repository or
+pipeline scope, or unavailable to its source provenance, also reads as missing
+(`undefined` in TypeScript). The result does not reveal whether another pipeline
+has a value. On a controller a
 node may read only the secrets its pipeline declares, and reading any other
 name fails with an error naming the `sw` tag to add.
 
