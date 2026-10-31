@@ -41,6 +41,12 @@ unlock.
 
 ### Fixed
 
+- **console:** Run submission and Run now keep waiting while the controller admits the run
+  Pending controls stay visible. Retrying an unconfirmed request in the same form or action reuses its idempotency key to recover the admitted run without creating another.
+- **cli:** Revoked-token refusals explain how to sign in again and replace the selected profile's token
+- **runners:** Waiting job notices name required labels and the command to enroll a matching runner
+- **runs:** Refusing to delete another creator's run names the required `team.admin` authority
+- **uploads:** Oversized working-tree snapshots explain how to exclude files or push the commit and trigger without an upload
 - **console:** Runs show their sealed trust class and the Start a run toolbar wraps within a 375px viewport
   Server errors show retry guidance, the support contact and the request ID instead of raw backend JSON.
 - **errors:** Invitation refusals explain which verified-email account to use, and token expiry refusals name the 90-day or 30-day maximum
