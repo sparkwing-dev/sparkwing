@@ -6,7 +6,6 @@ const (
 	EventDebugPaused            = "debug.paused"
 	EventDebugResumed           = "debug.resumed"
 	EventSecretPreflightRefused = "secret_preflight_refused"
-	EventResourcePinDrift       = "resource_pin_drift"
 )
 
 // RunEventKinds are the registered state and control event kinds of a run's stream: the store refuses a state event
@@ -17,5 +16,5 @@ var RunEventKinds = []string{
 	"job_attempt_imported", "job_ready", "job_requeued", "job_revoked", "job_claimed", "job_approval_pending",
 	"job_approval_ready", "job_expansion_ready", "job_started", "job_retrying", "job_cancel_requested",
 	"job_succeeded", "job_failed", "job_cancelled", "job_skipped", "job_superseded", "job_memoized",
-	EventDebugPaused, EventDebugResumed, EventSecretPreflightRefused, EventResourcePinDrift, "stray_session_reaped",
+	EventDebugPaused, EventDebugResumed, EventSecretPreflightRefused, "stray_session_reaped",
 }

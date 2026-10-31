@@ -17,11 +17,8 @@ func TestPipelineProfile_InvalidObservationLeavesProfileUnchanged(t *testing.T) 
 		"negative peak CPU":       {PeakCores: -1},
 		"negative memory":         {PeakMemoryBytes: -1},
 		"negative sustained CPU":  {SustainedCores: -1},
-		"negative CPU floor":      {Contended: true, FloorCores: -1},
-		"negative memory floor":   {Contended: true, FloorMemoryBytes: -1},
 		"nonfinite peak CPU":      {PeakCores: math.NaN()},
 		"nonfinite sustained CPU": {SustainedCores: math.Inf(1)},
-		"nonfinite CPU floor":     {Contended: true, FloorCores: math.Inf(1)},
 	} {
 		for _, state := range []string{"absent", "existing"} {
 			t.Run(name+"/"+state, func(t *testing.T) {

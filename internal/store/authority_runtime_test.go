@@ -21,7 +21,6 @@ func authorityStore(t *testing.T) *Store {
 	now := time.Now()
 	s := &Store{db: rewriteSchemaDB(t), dialect: DialectSQLite, clock: func() time.Time { return now }}
 	rewriteSchemaExec(t, s.db, "INSERT INTO teams(name,created_at,updated_at) VALUES ('a',1,1),('b',1,1)")
-	rewriteSchemaExec(t, s.db, "INSERT INTO team_counters(team) VALUES ('a'),('b')")
 	return s
 }
 

@@ -52,7 +52,6 @@ func referenceWorld(t *testing.T, s *Store, repo string) *Tenant {
 	s.clock = func() time.Time { return now }
 	for _, team := range []string{"a", "b"} {
 		s.testOnlyExec(t, `INSERT INTO teams(name,created_at,updated_at) VALUES (?,1,1) ON CONFLICT(name) DO NOTHING`, team)
-		s.testOnlyExec(t, `INSERT INTO team_counters(team) VALUES (?) ON CONFLICT(team) DO NOTHING`, team)
 	}
 	s.intakePolicy = referencePolicy()
 	// A verified push of main left a record, so every run of the repository reads

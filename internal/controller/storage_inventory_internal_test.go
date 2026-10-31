@@ -38,7 +38,7 @@ func TestStorageMaintenanceUsesFinalInventoryAndLeavesReplicaUsage(t *testing.T)
 		t.Fatal(err)
 	}
 	for _, kind := range []store.StorageKind{store.StorageCache, store.StorageLogs} {
-		if _, err := teststore.SQL(t, s).ExecContext(t.Context(), "INSERT INTO team_storage(team,store,used_bytes,committed_bytes,storage_charged_through,updated_at) VALUES (?,?,999999,999999,?,?)", store.DefaultTeam, kind, old, old); err != nil {
+		if _, err := teststore.SQL(t, s).ExecContext(t.Context(), "INSERT INTO team_storage(team,store,storage_charged_through,updated_at) VALUES (?,?,?,?)", store.DefaultTeam, kind, old, old); err != nil {
 			t.Fatal(err)
 		}
 	}

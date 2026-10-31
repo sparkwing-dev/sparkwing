@@ -46,7 +46,7 @@ func observeSizing(ctx context.Context, inv clisurface.Invocation, manager contr
 		return nil
 	}
 	tw := tabwriter.NewWriter(out, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(tw, "PIPELINE/JOB\tSOURCE\tP50/P99\tCPU P50/P95/PEAK\tCPU CHARGE\tMEM P50/P95/PEAK\tWAIT P50/P99\tSAMPLES\tCONTENDED\tMEMO EXCLUDED\tFLOOR")
+	fmt.Fprintln(tw, "PIPELINE/JOB\tSOURCE\tP50/P99\tCPU P50/P95/PEAK\tCPU CHARGE\tMEM P50/P95/PEAK\tSAMPLES\tMEMO EXCLUDED")
 	for _, row := range rows {
 		writeSizingRow(tw, sizingName(row), row.Source, row.Rollup, row.MemoExcluded)
 		for _, job := range row.Jobs {
@@ -55,13 +55,6 @@ func observeSizing(ctx context.Context, inv clisurface.Invocation, manager contr
 	}
 	if err := tw.Flush(); err != nil {
 		return err
-	}
-	for _, row := range rows {
-		if row.Drift != "" {
-			if _, err := fmt.Fprintf(out, "%s: %s\n", sizingName(row), row.Drift); err != nil {
-				return err
-			}
-		}
 	}
 	return nil
 }
@@ -121,23 +114,11 @@ func sizingName(row controllerwire.SizingDetail) string {
 }
 
 func writeSizingRow(out io.Writer, name, source string, p controllerwire.SizingMeasurements, memo int) {
-	wait := "-"
-	if p.WaitSampleCount > 0 {
-		wait = fmtDur(p.WaitP50) + "/" + fmtDur(p.WaitP99)
-	}
-	contended := "-"
-	if p.ContendedCount > 0 {
-		contended = fmt.Sprintf("%d/%d", p.ContendedCount, p.SampleCount)
-	}
-	floor := "-"
-	if p.FloorCores > 0 || p.FloorMemoryBytes > 0 {
-		floor = fmt.Sprintf("%.1f/%s", p.FloorCores, humanBytes(p.FloorMemoryBytes))
-	}
 	charge := p.SustainedCores
 	if charge == 0 {
 		charge = p.PeakCores
 	}
-	fmt.Fprintf(out, "%s\t%s\t%s/%s\t%.1f/%.1f/%.1f\t%.1f\t%s/%s/%s\t%s\t%d\t%s\t%d\t%s\n", name, source, fmtDur(p.P50Duration), fmtDur(p.P99Duration), p.CPUP50, p.CPUP95, p.PeakCores, charge, humanBytes(p.MemoryP50Bytes), humanBytes(p.MemoryP95Bytes), humanBytes(p.PeakMemoryBytes), wait, p.SampleCount, contended, memo, floor)
+	fmt.Fprintf(out, "%s\t%s\t%s/%s\t%.1f/%.1f/%.1f\t%.1f\t%s/%s/%s\t%d\t%d\n", name, source, fmtDur(p.P50Duration), fmtDur(p.P99Duration), p.CPUP50, p.CPUP95, p.PeakCores, charge, humanBytes(p.MemoryP50Bytes), humanBytes(p.MemoryP95Bytes), humanBytes(p.PeakMemoryBytes), p.SampleCount, memo)
 }
 
 func writeSizingReset(out io.Writer, s controllerwire.SizingResetSummary, format string) error {
@@ -152,6 +133,6 @@ func writeSizingReset(out io.Writer, s controllerwire.SizingResetSummary, format
 		}
 		return nil
 	}
-	_, err := fmt.Fprintf(out, "reset %d pipeline(s): dropped %d row(s), cleared %d pinned row(s), %d learned sample(s), %d demand floor(s); pins retained\n", len(s.Pipelines), s.RowsDeleted, s.RowsCleared, s.SamplesDropped, s.FloorsDropped)
+	_, err := fmt.Fprintf(out, "reset %d pipeline(s): dropped %d row(s), %d learned sample(s)\n", len(s.Pipelines), s.RowsDeleted, s.SamplesDropped)
 	return err
 }

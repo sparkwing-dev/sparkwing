@@ -27,6 +27,5 @@
   "debug.paused",
   "debug.resumed",
   "secret_preflight_refused",
-  "resource_pin_drift",
   "stray_session_reaped"
 ]

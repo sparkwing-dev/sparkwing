@@ -103,7 +103,7 @@ func TestSurfaceManagementTransportsKeepAuthorityNamespaces(t *testing.T) {
 			case "/api/v1/operator/tokens":
 				body = `{"tokens":[{"prefix":"swk_deployment","team":"","audience":"controller","created_by":"owner","git_credentials":false,"metered":false,"subject":{"kind":"service","id":"deploy"},"grants":["operator.tokens"],"issued_at":"2026-01-01T00:00:00Z"}]}`
 			case "/api/v1/sizing":
-				encoded, err := json.Marshal(controllerwire.SizingPage{Sizing: []controllerwire.SizingDetail{{Pipeline: "check", Repo: "acme/api", Source: "floor", MemoExcluded: 5, Rollup: controllerwire.SizingMeasurements{FloorCores: 6.5, FloorMemoryBytes: 7 << 30}, Jobs: []controllerwire.JobSizing{}}}})
+				encoded, err := json.Marshal(controllerwire.SizingPage{Sizing: []controllerwire.SizingDetail{{Pipeline: "check", Repo: "acme/api", Source: "measured", MemoExcluded: 5, Rollup: controllerwire.SizingMeasurements{PeakCores: 6.5, PeakMemoryBytes: 7 << 30}, Jobs: []controllerwire.JobSizing{}}}})
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -143,7 +143,7 @@ func TestSurfaceManagementTransportsKeepAuthorityNamespaces(t *testing.T) {
 			t.Fatal(err)
 		}
 		measurements, err := sizing.ListSizing(t.Context(), controllerwire.SizingQuery{Limit: 20})
-		if err != nil || len(measurements.Sizing) != 1 || measurements.Sizing[0].Rollup.FloorCores != 6.5 || measurements.Sizing[0].MemoExcluded != 5 {
+		if err != nil || len(measurements.Sizing) != 1 || measurements.Sizing[0].Rollup.PeakCores != 6.5 || measurements.Sizing[0].MemoExcluded != 5 {
 			t.Fatalf("sizing: %+v %v", measurements, err)
 		}
 		want := []string{"GET /api/v1/pools", "GET /api/v1/tokens", "GET /api/v1/operator/tokens", "GET /api/v1/sizing"}

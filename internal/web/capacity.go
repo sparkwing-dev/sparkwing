@@ -3,7 +3,6 @@ package web
 import (
 	"context"
 	"errors"
-	"math"
 	"net/http"
 	"runtime"
 	"sort"
@@ -25,8 +24,6 @@ type capacityConstants struct {
 	ChargePercentile    float64 `json:"charge_percentile"`
 	SustainedPercentile float64 `json:"sustained_percentile"`
 	WarmStartMultiple   float64 `json:"warm_start_multiple"`
-	SafetyMultiple      float64 `json:"safety_multiple"`
-	DriftFraction       float64 `json:"drift_fraction"`
 
 	ColdStartCores float64 `json:"cold_start_cores"`
 }
@@ -60,21 +57,10 @@ type capacityProfile struct {
 
 	P50DurationMS int64 `json:"p50_duration_ms"`
 	P99DurationMS int64 `json:"p99_duration_ms"`
-	WaitP50MS     int64 `json:"wait_p50_ms,omitempty"`
-	WaitP99MS     int64 `json:"wait_p99_ms,omitempty"`
 
-	FloorCores       float64 `json:"floor_cores,omitempty"`
-	FloorMemoryBytes int64   `json:"floor_memory_bytes,omitempty"`
-
-	PinnedCores       float64 `json:"pinned_cores,omitempty"`
-	PinnedMemoryBytes int64   `json:"pinned_memory_bytes,omitempty"`
-	Drift             string  `json:"drift,omitempty"`
-	DriftClass        string  `json:"drift_class,omitempty"`
-
-	ContendedCount int    `json:"contended_count,omitempty"`
-	PlanHash       string `json:"plan_hash,omitempty"`
-	UpdatedAtMS    int64  `json:"updated_at_ms,omitempty"`
-	NodeCount      int    `json:"node_count,omitempty"`
+	PlanHash    string `json:"plan_hash,omitempty"`
+	UpdatedAtMS int64  `json:"updated_at_ms,omitempty"`
+	NodeCount   int    `json:"node_count,omitempty"`
 }
 
 type capacityNode struct {
@@ -259,8 +245,6 @@ func constantsFor(numCPU int) capacityConstants {
 		ChargePercentile:    chargePercentile,
 		SustainedPercentile: capacity.SustainedPercentile,
 		WarmStartMultiple:   capacity.WarmStartMultiple,
-		SafetyMultiple:      capacity.SafetyMultiple,
-		DriftFraction:       capacity.DriftFraction,
 		ColdStartCores:      coldStartCores(numCPU),
 	}
 }
@@ -268,49 +252,33 @@ func constantsFor(numCPU int) capacityConstants {
 const chargePercentile = 0.95
 
 func coldStartCores(numCPU int) float64 {
-	return capacity.Resolve(nil, nil, numCPU, "").Cores
+	return capacity.Resolve(nil, numCPU, "").Cores
 }
 
 func newCapacityProfile(rollup store.PipelineProfile, nodeCount, numCPU int) capacityProfile {
-	pin := pinOf(rollup)
-	res := capacity.Resolve(pin, &rollup, numCPU, rollup.PlanHash)
+	res := capacity.Resolve(&rollup, numCPU, rollup.PlanHash)
 	out := capacityProfile{
-		Pipeline:          rollup.Pipeline,
-		Display:           rollup.Pipeline,
-		Charge:            chargeOf(res, rollup),
-		SampleCount:       rollup.SampleCount,
-		PeakCores:         rollup.PeakCores,
-		SustainedCores:    rollup.SustainedCores,
-		PeakMemoryBytes:   rollup.PeakMemoryBytes,
-		CPUP50:            rollup.CPUP50,
-		CPUP95:            rollup.CPUP95,
-		MemoryP50Bytes:    rollup.MemoryP50Bytes,
-		MemoryP95Bytes:    rollup.MemoryP95Bytes,
-		CPUMeasured:       rollup.CPUMeasured,
-		P50DurationMS:     rollup.P50Duration.Milliseconds(),
-		P99DurationMS:     rollup.P99Duration.Milliseconds(),
-		WaitP50MS:         rollup.WaitP50.Milliseconds(),
-		WaitP99MS:         rollup.WaitP99.Milliseconds(),
-		FloorCores:        rollup.FloorCores,
-		FloorMemoryBytes:  rollup.FloorMemoryBytes,
-		PinnedCores:       rollup.PinnedCores,
-		PinnedMemoryBytes: rollup.PinnedMemoryBytes,
-		ContendedCount:    rollup.ContendedCount,
-		PlanHash:          rollup.PlanHash,
-		NodeCount:         nodeCount,
+		Pipeline:        rollup.Pipeline,
+		Display:         rollup.Pipeline,
+		Charge:          chargeOf(res, rollup),
+		SampleCount:     rollup.SampleCount,
+		PeakCores:       rollup.PeakCores,
+		SustainedCores:  rollup.SustainedCores,
+		PeakMemoryBytes: rollup.PeakMemoryBytes,
+		CPUP50:          rollup.CPUP50,
+		CPUP95:          rollup.CPUP95,
+		MemoryP50Bytes:  rollup.MemoryP50Bytes,
+		MemoryP95Bytes:  rollup.MemoryP95Bytes,
+		CPUMeasured:     rollup.CPUMeasured,
+		P50DurationMS:   rollup.P50Duration.Milliseconds(),
+		P99DurationMS:   rollup.P99Duration.Milliseconds(),
+		PlanHash:        rollup.PlanHash,
+		NodeCount:       nodeCount,
 	}
 	if !rollup.UpdatedAt.IsZero() {
 		out.UpdatedAtMS = rollup.UpdatedAt.UnixMilli()
 	}
-	if d := capacity.CheckDrift(pin, &rollup); d != nil {
-		out.Drift = d.Message
-		out.DriftClass = string(d.Class)
-	}
 	return out
-}
-
-func pinOf(rollup store.PipelineProfile) *capacity.Pin {
-	return &capacity.Pin{Cores: rollup.PinnedCores, MemoryBytes: rollup.PinnedMemoryBytes}
 }
 
 func chargeOf(res capacity.Resolution, rollup store.PipelineProfile) capacityCharge {
@@ -327,15 +295,11 @@ func chargeOf(res capacity.Resolution, rollup store.PipelineProfile) capacityCha
 
 func coresBasis(source store.CostSource, rollup store.PipelineProfile) (string, float64) {
 	switch source {
-	case store.CostSourcePin:
-		return "pin", rollup.PinnedCores
 	case store.CostSourceMeasured:
 		if rollup.SustainedCores > 0 {
 			return "sustained_p95", rollup.SustainedCores
 		}
 		return "peak_p95", rollup.PeakCores
-	case store.CostSourceFloor:
-		return "floor", capacity.SafetyMultiple * rollup.FloorCores
 	case store.CostSourceMeasuring:
 		return "prev_charge", capacity.WarmStartMultiple * carriedCores(rollup)
 	default:
@@ -351,13 +315,8 @@ func carriedCores(rollup store.PipelineProfile) float64 {
 }
 
 func chargeChain(rollup store.PipelineProfile, numCPU int) []chargeStep {
-	pin := pinOf(rollup)
-	res := capacity.Resolve(pin, &rollup, numCPU, rollup.PlanHash)
+	res := capacity.Resolve(&rollup, numCPU, rollup.PlanHash)
 	source := res.Source
-	floorMemory := int64(math.MaxInt64)
-	if rollup.FloorMemoryBytes <= math.MaxInt64/2 {
-		floorMemory = 2 * rollup.FloorMemoryBytes
-	}
 
 	measuredCores := rollup.SustainedCores
 	measuredBasis := "sustained p95 across the window"
@@ -368,15 +327,6 @@ func chargeChain(rollup store.PipelineProfile, numCPU int) []chargeStep {
 	carried := carriedCores(rollup)
 
 	steps := []chargeStep{
-		{
-			Step:        "pin",
-			Label:       "Explicit .Resources() pin",
-			Cores:       rollup.PinnedCores,
-			MemoryBytes: rollup.PinnedMemoryBytes,
-			Eligible:    !pin.Empty(),
-			Applied:     source == store.CostSourcePin,
-			Detail:      "A pin wins verbatim and is policed for drift, never overridden by measurement.",
-		},
 		{
 			Step:        "measured",
 			Label:       "Measured profile",
@@ -394,15 +344,6 @@ func chargeChain(rollup store.PipelineProfile, numCPU int) []chargeStep {
 			Eligible:    rollup.CPUMeasured && carried > 0,
 			Applied:     source == store.CostSourceMeasuring,
 			Detail:      "Charged while a structurally changed version re-measures its own samples.",
-		},
-		{
-			Step:        "floor",
-			Label:       "Demand floor from contended runs",
-			Cores:       capacity.SafetyMultiple * rollup.FloorCores,
-			MemoryBytes: floorMemory,
-			Eligible:    rollup.CPUMeasured && rollup.FloorCores > 0,
-			Applied:     source == store.CostSourceFloor,
-			Detail:      "A contended run measured its allocation, not its demand, so it only raises this lower bound.",
 		},
 		{
 			Step:     "cold_start",

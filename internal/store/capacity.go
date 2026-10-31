@@ -12,13 +12,11 @@ import (
 )
 
 // CostSource names the basis of a pipeline's resource estimate in the
-// capacity view: an explicit pin, measurement, or the cold-start default.
+// capacity view: measurement, a predecessor profile, or the cold-start default.
 // The estimate is display data; Cloud billing prices size labels instead.
 type CostSource string
 
 const (
-	// CostSourcePin is a stored resource pin, used verbatim.
-	CostSourcePin CostSource = "pin"
 	// CostSourceMeasured is a measured profile with enough samples to
 	// trust.
 	CostSourceMeasured CostSource = "measured"
@@ -30,17 +28,11 @@ const (
 	// that finalize a measured estimate, so it is estimated from the
 	// predecessor peak and re-measures until clean.
 	CostSourceMeasuring CostSource = "measuring"
-	// CostSourceFloor is a still-measuring version whose estimate is
-	// the demand floor learned from its contended runs -- a lower bound that
-	// tightens the conservative default from real evidence.
-	CostSourceFloor CostSource = "floor"
 )
 
 const profileWindow = 20
 
 const peakPercentile = 0.95
-
-const floorDecayFactor = 0.5
 
 // PipelineProfile is the measured resource fingerprint of a
 // (pipeline, node) pair over a bounded window of recent runs: duration
@@ -76,28 +68,10 @@ type PipelineProfile struct {
 	// 95th-percentile per-run memory peaks across the window.
 	MemoryP50Bytes int64 `json:"memory_p50_bytes,omitempty"`
 	MemoryP95Bytes int64 `json:"memory_p95_bytes,omitempty"`
-	// WaitP50 and WaitP99 are the median and 99th-percentile admission
-	// queue waits (submit to grant) over a bounded window of recent
-	// runs. Meaningful only on the rollup row; run durations exclude
-	// this interval.
-	WaitP50 time.Duration `json:"wait_p50_ns,omitempty"`
-	WaitP99 time.Duration `json:"wait_p99_ns,omitempty"`
-	// WaitSampleCount is how many wait observations back WaitP50/WaitP99.
-	WaitSampleCount int `json:"wait_sample_count,omitempty"`
 	// CPUMeasured records that profile observations included measured CPU.
 	// The estimate uses learned resource values only when it is true.
 	CPUMeasured bool      `json:"cpu_measured"`
 	UpdatedAt   time.Time `json:"updated_at"`
-	// PinnedCores and PinnedMemoryBytes are the stored resource pin for
-	// this pipeline, or zero when it has none. Meaningful only on the
-	// rollup row.
-	PinnedCores       float64 `json:"pinned_cores,omitempty"`
-	PinnedMemoryBytes int64   `json:"pinned_memory_bytes,omitempty"`
-	// ContendedCount is how many of this pipeline's runs the admission
-	// daemon flagged as throttled by host contention. Against SampleCount
-	// it gives the pipeline's contended share. Meaningful only on the
-	// rollup row.
-	ContendedCount int `json:"contended_count,omitempty"`
 	// PlanHash is the capacity fingerprint of the pipeline version these
 	// clean samples were measured on: the DAG shape plus the concurrency
 	// declarations that bound how much of it runs at once. A change stamps a
@@ -105,16 +79,6 @@ type PipelineProfile struct {
 	// re-measured rather than estimated from stale samples. Meaningful
 	// only on the rollup row.
 	PlanHash string `json:"plan_hash,omitempty"`
-	// FloorCores and FloorMemoryBytes are the demand lower bound learned from
-	// this version's contended runs: a starved run's peak is what it got, not
-	// what it wanted, so it never sets the measured peak or graduates the
-	// version. Contended evidence above the floor raises it; evidence below
-	// decays it by floorDecayFactor, so a floor inflated by transient external
-	// load converges back to demand. The estimate is a safety multiple of
-	// the floor while the version is still measuring. Meaningful only on the
-	// rollup row.
-	FloorCores       float64 `json:"floor_cores,omitempty"`
-	FloorMemoryBytes int64   `json:"floor_memory_bytes,omitempty"`
 	// PrevPeakCores and PrevPeakMemoryBytes carry the previous version's
 	// measured peak across a plan-hash change, so the changed version warm-
 	// starts at its predecessor's figures instead of the blind half-machine
@@ -147,24 +111,11 @@ type ProfileObservation struct {
 	CPUMeasured bool
 	// PlanHash is the DAG-topology fingerprint of the version this run
 	// executed. When it differs from the stored profile's hash the version
-	// has changed structurally: the learned window and floor are cleared and
+	// has changed structurally: the learned window is cleared and
 	// the outgoing peak is carried into PrevPeak, so the new version re-learns
 	// from a warm start. Empty leaves the stored hash untouched (callers that
 	// do not track versions, e.g. per-node cluster rows).
 	PlanHash string
-	// Contended marks a run the admission daemon flagged as throttled by host
-	// contention. Such a run measured its allocation, not its demand, so its
-	// reading feeds FloorCores/FloorMemoryBytes only and never enters the
-	// clean window, sets the peak, or graduates the version. A clean run
-	// folds normally.
-	Contended bool
-	// FloorCores and FloorMemoryBytes are the demand lower bound a contended
-	// run proves: what it measured on the estimate's dimensions -- sustained
-	// cores, peak memory -- raised to its local admission grant when it
-	// consumed essentially all of it (a ceiling hit proves it wanted at
-	// least that much). Ignored unless Contended.
-	FloorCores       float64
-	FloorMemoryBytes int64
 }
 
 type profileSample struct {
@@ -190,19 +141,16 @@ type profileMutState struct {
 	peakCores           float64
 	sustainedCores      float64
 	peakMemoryBytes     int64
-	floorCores          float64
-	floorMemoryBytes    int64
 	prevPeakCores       float64
 	prevSustainedCores  float64
 	prevPeakMemoryBytes int64
-	cpuMeasured         bool
 }
 
 func validateProfileObservation(obs ProfileObservation) error {
-	if obs.Duration < 0 || obs.PeakMemoryBytes < 0 || obs.FloorMemoryBytes < 0 {
+	if obs.Duration < 0 || obs.PeakMemoryBytes < 0 {
 		return errors.New("profile duration and memory must be nonnegative")
 	}
-	for _, value := range []float64{obs.PeakCores, obs.SustainedCores, obs.FloorCores} {
+	for _, value := range []float64{obs.PeakCores, obs.SustainedCores} {
 		if value < 0 || math.IsNaN(value) || math.IsInf(value, 0) {
 			return errors.New("profile CPU values must be finite and nonnegative")
 		}
@@ -210,7 +158,7 @@ func validateProfileObservation(obs ProfileObservation) error {
 	return nil
 }
 
-// RecordProfileObservation folds clean observations and resource floors into this tenant's windowed profile.
+// RecordProfileObservation folds measured observations into this tenant's windowed profile.
 func (t *Tenant) RecordProfileObservation(ctx context.Context, pipeline, nodeID string, obs ProfileObservation) error {
 	return retryOnBusy(func() error {
 		return t.s.inTx(ctx, func(tx *storeTx) error { return t.recordProfileObservationTx(ctx, tx, pipeline, nodeID, obs) })
@@ -234,7 +182,7 @@ func (t *Tenant) recordProfileObservationTx(ctx context.Context, tx *storeTx, pi
 	if err != nil {
 		return err
 	}
-	if obs.Partial && !obs.Contended {
+	if obs.Partial {
 		if obs.PeakCores <= st.peakCores && sustainedOrPeak(obs) <= st.sustainedCores && obs.PeakMemoryBytes <= st.peakMemoryBytes {
 			return nil
 		}
@@ -243,7 +191,6 @@ func (t *Tenant) recordProfileObservationTx(ctx context.Context, tx *storeTx, pi
 		obs.PeakMemoryBytes = max(obs.PeakMemoryBytes, st.peakMemoryBytes)
 	}
 	planHash := st.planHash
-	floorCores, floorMemoryBytes := st.floorCores, st.floorMemoryBytes
 	prevPeakCores, prevPeakMemoryBytes := st.prevPeakCores, st.prevPeakMemoryBytes
 	prevSustainedCores := st.prevSustainedCores
 	window := st.window
@@ -254,31 +201,18 @@ func (t *Tenant) recordProfileObservationTx(ctx context.Context, tx *storeTx, pi
 			prevPeakCores, prevPeakMemoryBytes = st.prevPeakCores, st.prevPeakMemoryBytes
 			prevSustainedCores = st.prevSustainedCores
 		}
-		floorCores, floorMemoryBytes = 0, 0
 		window = nil
 	}
 	if obs.PlanHash != "" {
 		planHash = obs.PlanHash
 	}
 
-	cpuMeasured := obs.CPUMeasured
-	if obs.Contended {
-		if obs.Partial {
-			floorCores = math.Max(st.floorCores, obs.FloorCores)
-			floorMemoryBytes = max(st.floorMemoryBytes, obs.FloorMemoryBytes)
-		} else {
-			floorCores = foldFloor(floorCores, obs.FloorCores)
-			floorMemoryBytes = max(obs.FloorMemoryBytes, floorMemoryBytes/2)
-		}
-		cpuMeasured = st.cpuMeasured || obs.CPUMeasured
-	} else {
-		window = append(window, profileSample{
-			D: obs.Duration.Nanoseconds(), C: obs.PeakCores, M: obs.PeakMemoryBytes,
-			S: sustainedOrPeak(obs), P: obs.Partial,
-		})
-		if len(window) > profileWindow {
-			window = window[len(window)-profileWindow:]
-		}
+	window = append(window, profileSample{
+		D: obs.Duration.Nanoseconds(), C: obs.PeakCores, M: obs.PeakMemoryBytes,
+		S: sustainedOrPeak(obs), P: obs.Partial,
+	})
+	if len(window) > profileWindow {
+		window = window[len(window)-profileWindow:]
 	}
 	prof := profileFromWindow(window)
 	raw, err := json.Marshal(profileWindowDoc{Schema: profileSchemaCurrent, Samples: window})
@@ -288,8 +222,8 @@ func (t *Tenant) recordProfileObservationTx(ctx context.Context, tx *storeTx, pi
 	_, err = tx.execContext(ctx, `
 INSERT INTO pipeline_profiles
     (team, pipeline, node_id, p50_duration_ms, p99_duration_ms, peak_cores, peak_memory_bytes, sample_count, cpu_measured, updated_at, samples_json,
-     plan_hash, floor_cores, floor_memory_bytes, prev_peak_cores, prev_peak_memory_bytes, sustained_cores, prev_sustained_cores)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+     plan_hash, prev_peak_cores, prev_peak_memory_bytes, sustained_cores, prev_sustained_cores)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT (team, pipeline, node_id) DO UPDATE SET
     p50_duration_ms       = excluded.p50_duration_ms,
     p99_duration_ms       = excluded.p99_duration_ms,
@@ -300,8 +234,6 @@ ON CONFLICT (team, pipeline, node_id) DO UPDATE SET
     updated_at            = excluded.updated_at,
     samples_json          = excluded.samples_json,
     plan_hash             = excluded.plan_hash,
-    floor_cores           = excluded.floor_cores,
-    floor_memory_bytes    = excluded.floor_memory_bytes,
     prev_peak_cores       = excluded.prev_peak_cores,
     prev_peak_memory_bytes = excluded.prev_peak_memory_bytes,
     sustained_cores       = excluded.sustained_cores,
@@ -309,8 +241,8 @@ ON CONFLICT (team, pipeline, node_id) DO UPDATE SET
 		string(t.team), pipeline, nodeID,
 		prof.P50Duration.Milliseconds(), prof.P99Duration.Milliseconds(),
 		prof.PeakCores, prof.PeakMemoryBytes, prof.SampleCount,
-		boolToInt(cpuMeasured), tx.now(ctx).UnixNano(), raw,
-		planHash, floorCores, floorMemoryBytes, prevPeakCores, prevPeakMemoryBytes,
+		boolToInt(obs.CPUMeasured), tx.now(ctx).UnixNano(), raw,
+		planHash, prevPeakCores, prevPeakMemoryBytes,
 		prof.SustainedCores, prevSustainedCores)
 	if err != nil {
 		return err
@@ -327,24 +259,16 @@ func sustainedOrPeak(obs ProfileObservation) float64 {
 	return obs.SustainedCores
 }
 
-func foldFloor(stored, observed float64) float64 {
-	if observed >= stored {
-		return observed
-	}
-	return math.Max(observed, floorDecayFactor*stored)
-}
-
 func loadProfileMutState(ctx context.Context, tx *storeTx, team Team, pipeline, nodeID string) (profileMutState, error) {
 	var (
-		raw      []byte
-		st       profileMutState
-		measured int
+		raw []byte
+		st  profileMutState
 	)
 	err := tx.QueryRowContext(ctx,
-		`SELECT samples_json, plan_hash, peak_cores, peak_memory_bytes, floor_cores, floor_memory_bytes, prev_peak_cores, prev_peak_memory_bytes, cpu_measured, sustained_cores, prev_sustained_cores
+		`SELECT samples_json, plan_hash, peak_cores, peak_memory_bytes, prev_peak_cores, prev_peak_memory_bytes, sustained_cores, prev_sustained_cores
 		   FROM pipeline_profiles WHERE team = ? AND pipeline = ? AND node_id = ?`+tx.forUpdate(),
 		string(team), pipeline, nodeID).Scan(&raw, &st.planHash, &st.peakCores, &st.peakMemoryBytes,
-		&st.floorCores, &st.floorMemoryBytes, &st.prevPeakCores, &st.prevPeakMemoryBytes, &measured,
+		&st.prevPeakCores, &st.prevPeakMemoryBytes,
 		&st.sustainedCores, &st.prevSustainedCores)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -352,7 +276,6 @@ func loadProfileMutState(ctx context.Context, tx *storeTx, team Team, pipeline, 
 		}
 		return profileMutState{}, err
 	}
-	st.cpuMeasured = measured != 0
 	samples, ok := decodeProfileWindow(raw)
 	if !ok {
 		return profileMutState{}, nil
@@ -361,7 +284,7 @@ func loadProfileMutState(ctx context.Context, tx *storeTx, team Team, pipeline, 
 	return st, nil
 }
 
-const profileColumns = `p50_duration_ms, p99_duration_ms, peak_cores, peak_memory_bytes, sample_count, cpu_measured, updated_at, pinned_cores, pinned_memory_bytes, samples_json, wait_p50_ms, wait_p99_ms, wait_sample_count, contended_count, plan_hash, floor_cores, floor_memory_bytes, prev_peak_cores, prev_peak_memory_bytes, sustained_cores, prev_sustained_cores`
+const profileColumns = `p50_duration_ms, p99_duration_ms, peak_cores, peak_memory_bytes, sample_count, cpu_measured, updated_at, samples_json, plan_hash, prev_peak_cores, prev_peak_memory_bytes, sustained_cores, prev_sustained_cores`
 
 // GetPipelineProfile returns this tenant's profile, or nil when absent.
 func (t *Tenant) GetPipelineProfile(ctx context.Context, pipeline, nodeID string) (*PipelineProfile, error) {
@@ -428,30 +351,23 @@ func scanProfile(row rowScanner, pipeline, nodeID string) (*PipelineProfile, err
 
 func scanProfileInto(scan func(...any) error, lead ...any) (*PipelineProfile, error) {
 	var (
-		p50, p99         int64
-		cores            float64
-		mem              int64
-		count            int
-		cpuMeasured      int
-		updatedNanos     int64
-		pinCores         float64
-		pinMem           int64
-		samplesRaw       []byte
-		waitP50, waitP99 int64
-		waitCount        int
-		contendedCount   int
-		planHash         string
-		floorCores       float64
-		floorMem         int64
-		prevPeakCores    float64
-		prevPeakMem      int64
-		sustainedCores   float64
-		prevSustained    float64
+		p50, p99       int64
+		cores          float64
+		mem            int64
+		count          int
+		cpuMeasured    int
+		updatedNanos   int64
+		samplesRaw     []byte
+		planHash       string
+		prevPeakCores  float64
+		prevPeakMem    int64
+		sustainedCores float64
+		prevSustained  float64
 	)
 	dests := append(lead,
 		&p50, &p99, &cores, &mem, &count, &cpuMeasured, &updatedNanos,
-		&pinCores, &pinMem, &samplesRaw, &waitP50, &waitP99, &waitCount, &contendedCount,
-		&planHash, &floorCores, &floorMem, &prevPeakCores, &prevPeakMem, &sustainedCores,
+		&samplesRaw,
+		&planHash, &prevPeakCores, &prevPeakMem, &sustainedCores,
 		&prevSustained)
 	if err := scan(dests...); err != nil {
 		return nil, err
@@ -464,8 +380,6 @@ func scanProfileInto(scan func(...any) error, lead ...any) (*PipelineProfile, er
 		mem = 0
 		count = 0
 		cpuMeasured = 0
-		floorCores = 0
-		floorMem = 0
 		prevPeakCores = 0
 		prevPeakMem = 0
 		sustainedCores = 0
@@ -481,15 +395,7 @@ func scanProfileInto(scan func(...any) error, lead ...any) (*PipelineProfile, er
 		SampleCount:         count,
 		CPUMeasured:         cpuMeasured != 0,
 		UpdatedAt:           time.Unix(0, updatedNanos),
-		PinnedCores:         pinCores,
-		PinnedMemoryBytes:   pinMem,
-		WaitP50:             time.Duration(waitP50) * time.Millisecond,
-		WaitP99:             time.Duration(waitP99) * time.Millisecond,
-		WaitSampleCount:     waitCount,
-		ContendedCount:      contendedCount,
 		PlanHash:            planHash,
-		FloorCores:          floorCores,
-		FloorMemoryBytes:    floorMem,
 		PrevPeakCores:       prevPeakCores,
 		PrevPeakMemoryBytes: prevPeakMem,
 		PrevSustainedCores:  prevSustained,

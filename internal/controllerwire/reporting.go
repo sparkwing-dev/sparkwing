@@ -43,17 +43,9 @@ type PipelineProfile struct {
 	CPUP95              float64       `json:"cpu_p95,omitempty"`
 	MemoryP50Bytes      int64         `json:"memory_p50_bytes,omitempty"`
 	MemoryP95Bytes      int64         `json:"memory_p95_bytes,omitempty"`
-	WaitP50             time.Duration `json:"wait_p50_ns,omitempty"`
-	WaitP99             time.Duration `json:"wait_p99_ns,omitempty"`
-	WaitSampleCount     int           `json:"wait_sample_count,omitempty"`
 	CPUMeasured         bool          `json:"cpu_measured"`
 	UpdatedAt           time.Time     `json:"updated_at"`
-	PinnedCores         float64       `json:"pinned_cores,omitempty"`
-	PinnedMemoryBytes   int64         `json:"pinned_memory_bytes,omitempty"`
-	ContendedCount      int           `json:"contended_count,omitempty"`
 	PlanHash            string        `json:"plan_hash,omitempty"`
-	FloorCores          float64       `json:"floor_cores,omitempty"`
-	FloorMemoryBytes    int64         `json:"floor_memory_bytes,omitempty"`
 	PrevPeakCores       float64       `json:"prev_peak_cores,omitempty"`
 	PrevPeakMemoryBytes int64         `json:"prev_peak_memory_bytes,omitempty"`
 	PrevSustainedCores  float64       `json:"prev_sustained_cores,omitempty"`

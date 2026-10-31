@@ -1,11 +1,8 @@
-
 import type { CapacityProfile, CapacityRankSelection } from "./api";
 
 const CHARGE_BASIS_LABELS: Record<string, string> = {
   sustained_p95: "sustained p95",
   peak_p95: "peak p95 (profile predates sustained figures)",
-  pin: "explicit pin",
-  floor: "demand floor of contended runs",
   prev_charge: "previous version's charge",
   cold_start: "cold-start default",
 };
@@ -50,17 +47,7 @@ export function rankLabel(sel: CapacityRankSelection): string {
   return `p${pct} = rank ${sel.rank} of ${sel.count}`;
 }
 
-export function mismatchNote(
-  sel: CapacityRankSelection,
-  label: string,
-): string {
+export function mismatchNote(sel: CapacityRankSelection, label: string): string {
   if (sel.matches || sel.unmeasured || sel.count === 0) return "";
   return `Stored ${label} is ${sel.stored}, but the window ranks ${sel.value} at ${rankLabel(sel)}. The charge and its samples disagree.`;
-}
-
-export function pinDriftFlag(p: CapacityProfile): string {
-  const pinned = (p.pinned_cores ?? 0) > 0 || (p.pinned_memory_bytes ?? 0) > 0;
-  if (!pinned) return "";
-  if (!p.drift_class) return "pinned";
-  return p.drift_class === "under_pinned" ? "pin low" : "pin high";
 }

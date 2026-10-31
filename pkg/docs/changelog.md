@@ -28,8 +28,8 @@ unlock.
   The schedule limit replaces the 10-per-repository and 20-per-team caps. The operator's minimum cron interval and the OIDC limit of 30 mints per five minutes per claim remain. Limit refusals name usage and a remedy.
 - **billing (Breaking):** Each team can create 20 Stripe Checkout Sessions per rolling hour across Add funds and saved-card setup
   Idempotent retries count once. Refusals report current usage, a retry delay and support guidance before calling the provider.
-- **store (Breaking):** The schema baseline advances to version 27, recording Checkout Session reservation times and removing the lifetime team-creation counter
-  Stores at another schema version must be recreated using the existing backup and move-aside instructions.
+- **store (Breaking):** The schema baseline advances to version 28 and requires a schema wipe
+  Back up and recreate stores at any other version using the [backup and move-aside instructions](docs/backup-restore.md#schema-compatibility). The baseline records Checkout Session reservation times, removes unused columns and capacity profile pins, waits, contention counters and floors, and enforces financial row shapes plus one open billing interval per award. Staging and production stores must be recreated before this build starts.
 - **release (Breaking):** Sparkwing releases use the native tag-and-publication flow
   Platform deployment is separate. Retire the platform repository's `release-all` pipeline and `bin/trigger-change-deploy.sh` callers when updating that repository.
 - **scaffold:** `const FallbackSDKVersion` pins v0.68.1, so a fresh scaffold compiles against that release.

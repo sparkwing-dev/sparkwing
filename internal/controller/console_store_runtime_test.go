@@ -40,7 +40,6 @@ func TestConsoleDefaultCompositionCommitsEveryDeclaredWrite(t *testing.T) {
 			engine, _ := engineServerFixture(t, deploymenttest.Team(t), func(s *Server) { s.WithSecretsCipher(cipher) })
 			st := engine.Store
 			engineSQL(t, st, `INSERT INTO teams(name,created_at,updated_at) VALUES ('b',1,1)`)
-			engineSQL(t, st, `INSERT INTO team_counters(team) VALUES ('b')`)
 			engineSQL(t, st, `INSERT INTO accounts(id,email,created_at,updated_at,waitlisted_at) VALUES ('operator','operator@example.test',1,1,0),('victim','victim@example.test',1,1,0),('waiting','waiting@example.test',1,1,1)`)
 			engineSQL(t, st, `INSERT INTO memberships(team,account_id,role,created_at) VALUES ('a','operator','reader',1)`)
 			if strings.HasSuffix(tc.path, "/unfreeze") {

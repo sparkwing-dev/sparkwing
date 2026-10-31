@@ -19,9 +19,6 @@ func (s *Store) TestOnlyUnitDemand(t *testing.T) UnitDemand {
 		if _, err := s.exec(t.Context(), `INSERT INTO teams(name,created_at,updated_at) VALUES (?,1,1) ON CONFLICT(name) DO NOTHING`, team); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := s.exec(t.Context(), `INSERT INTO team_counters(team) VALUES (?) ON CONFLICT(team) DO NOTHING`, team); err != nil {
-			t.Fatal(err)
-		}
 	}
 	_, demand := unitClaimFixtureStore(t, s)
 	return demand

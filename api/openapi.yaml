@@ -1940,18 +1940,12 @@ components:
     internal.controllerwire.JobSizing:
       additionalProperties: true
       properties:
-        contended_count:
-          type: integer
         cpu_measured:
           type: boolean
         cpu_p50:
           type: number
         cpu_p95:
           type: number
-        floor_cores:
-          type: number
-        floor_memory_bytes:
-          type: integer
         job_id:
           type: string
         memory_p50_bytes:
@@ -1965,10 +1959,6 @@ components:
         peak_cores:
           type: number
         peak_memory_bytes:
-          type: integer
-        pinned_cores:
-          type: number
-        pinned_memory_bytes:
           type: integer
         plan_hash:
           type: string
@@ -1985,12 +1975,6 @@ components:
         updated_at:
           format: date-time
           type: string
-        wait_p50_ns:
-          type: integer
-        wait_p99_ns:
-          type: integer
-        wait_sample_count:
-          type: integer
       required:
         - job_id
         - p50_duration_ns
@@ -3864,8 +3848,6 @@ components:
     internal.controllerwire.SizingDetail:
       additionalProperties: true
       properties:
-        drift:
-          type: string
         jobs:
           anyOf:
             - items:
@@ -3894,18 +3876,12 @@ components:
     internal.controllerwire.SizingMeasurements:
       additionalProperties: true
       properties:
-        contended_count:
-          type: integer
         cpu_measured:
           type: boolean
         cpu_p50:
           type: number
         cpu_p95:
           type: number
-        floor_cores:
-          type: number
-        floor_memory_bytes:
-          type: integer
         memory_p50_bytes:
           type: integer
         memory_p95_bytes:
@@ -3917,10 +3893,6 @@ components:
         peak_cores:
           type: number
         peak_memory_bytes:
-          type: integer
-        pinned_cores:
-          type: number
-        pinned_memory_bytes:
           type: integer
         plan_hash:
           type: string
@@ -3937,12 +3909,6 @@ components:
         updated_at:
           format: date-time
           type: string
-        wait_p50_ns:
-          type: integer
-        wait_p99_ns:
-          type: integer
-        wait_sample_count:
-          type: integer
       required:
         - p50_duration_ns
         - p99_duration_ns

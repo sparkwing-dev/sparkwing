@@ -164,28 +164,6 @@ func TestPartialProfileObservationOnlyRaisesResources(t *testing.T) {
 	}
 }
 
-func TestPartialContendedProfileObservationNeverDecaysFloor(t *testing.T) {
-	st := storetest.Open(t)
-	ctx := t.Context()
-	for _, obs := range []store.ProfileObservation{
-		{CPUMeasured: true, Contended: true, PlanHash: "old", FloorCores: 4, FloorMemoryBytes: 1000},
-		{CPUMeasured: true, Contended: true, Partial: true, FloorCores: 8, FloorMemoryBytes: 500},
-		{CPUMeasured: true, Contended: true, Partial: true, FloorCores: 1, FloorMemoryBytes: 2000},
-		{CPUMeasured: true, Contended: true, Partial: true, PlanHash: "new", FloorCores: 1, FloorMemoryBytes: 10},
-	} {
-		if err := tenantFor(t, st, store.DefaultTeam).RecordProfileObservation(ctx, "partial", "", obs); err != nil {
-			t.Fatal(err)
-		}
-	}
-	p, err := tenantFor(t, st, store.DefaultTeam).GetPipelineProfile(ctx, "partial", "")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if p.PlanHash != "new" || p.FloorCores != 8 || p.FloorMemoryBytes != 2000 || p.SampleCount != 0 {
-		t.Fatalf("partial contended floor = %+v", p)
-	}
-}
-
 func TestPartialProfilePlanTransitionKeepsResourceBounds(t *testing.T) {
 	st := storetest.Open(t)
 	ctx := t.Context()

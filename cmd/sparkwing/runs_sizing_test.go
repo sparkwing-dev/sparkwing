@@ -8,7 +8,6 @@ import (
 	"reflect"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
@@ -31,8 +30,8 @@ func (s *sizingManager) ResetSizing(_ context.Context, input controllerwire.Sizi
 }
 
 func TestSizingPreservesControllerMeasurementsAcrossPages(t *testing.T) {
-	measurements := controllerwire.SizingMeasurements{CPUP50: 0.5, CPUP95: 1.25, PeakCores: 2, SustainedCores: 1.5, MemoryP50Bytes: 128 << 20, MemoryP95Bytes: 256 << 20, PeakMemoryBytes: 1 << 30, WaitP50: 4 * time.Second, WaitP99: 2 * time.Minute, WaitSampleCount: 9, SampleCount: 10, CPUMeasured: true, FloorCores: 3, PinnedCores: 1, ContendedCount: 2, PrevPeakCores: 7}
-	row := controllerwire.SizingDetail{Repo: "acme/api", Pipeline: "check", Source: "floor", Drift: "pin below measured demand", MemoExcluded: 5, Rollup: measurements, Jobs: []controllerwire.JobSizing{{JobID: "compile", SizingMeasurements: measurements}}}
+	measurements := controllerwire.SizingMeasurements{CPUP50: 0.5, CPUP95: 1.25, PeakCores: 2, SustainedCores: 1.5, MemoryP50Bytes: 128 << 20, MemoryP95Bytes: 256 << 20, PeakMemoryBytes: 1 << 30, SampleCount: 10, CPUMeasured: true, PrevPeakCores: 7}
+	row := controllerwire.SizingDetail{Repo: "acme/api", Pipeline: "check", Source: "measured", MemoExcluded: 5, Rollup: measurements, Jobs: []controllerwire.JobSizing{{JobID: "compile", SizingMeasurements: measurements}}}
 	s := &sizingManager{list: func(q controllerwire.SizingQuery) (controllerwire.SizingPage, error) {
 		if q.Pipeline != "check" {
 			t.Fatalf("filter lost: %+v", q)
@@ -61,7 +60,7 @@ func TestSizingPreservesControllerMeasurementsAcrossPages(t *testing.T) {
 		} else if format == "plain" && out.String() != "acme/api/check\nacme/web/check\n" {
 			t.Fatalf("plain: %q", out.String())
 		} else if format == "pretty" {
-			for _, want := range []string{"0.5/1.2/2.0", "128.0 MiB/256.0 MiB/1.0 GiB", "4.0s/2m0s", "pin below measured demand", "compile", "floor"} {
+			for _, want := range []string{"0.5/1.2/2.0", "128.0 MiB/256.0 MiB/1.0 GiB", "compile", "measured"} {
 				if !strings.Contains(out.String(), want) {
 					t.Fatalf("missing %q: %s", want, out.String())
 				}
@@ -76,7 +75,7 @@ func TestSizingResetRetainsSummaryAndRefusals(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		s := &sizingManager{summary: controllerwire.SizingResetSummary{Pipelines: []string{"acme/api/check"}, RowsDeleted: 2, RowsCleared: 1, SamplesDropped: 3, FloorsDropped: 1}}
+		s := &sizingManager{summary: controllerwire.SizingResetSummary{Pipelines: []string{"acme/api/check"}, RowsDeleted: 2, SamplesDropped: 3}}
 		var out bytes.Buffer
 		if err := observeSizing(t.Context(), inv, s, &out); err != nil {
 			t.Fatal(err)
@@ -95,8 +94,8 @@ func TestSizingResetRetainsSummaryAndRefusals(t *testing.T) {
 		}
 	}
 	var out bytes.Buffer
-	if err := writeSizingReset(&out, controllerwire.SizingResetSummary{RowsCleared: 1, FloorsDropped: 1}, "pretty"); err != nil || !strings.Contains(out.String(), "1 demand floor(s)") || !strings.Contains(out.String(), "pins retained") {
-		t.Fatalf("floor reset: %s %v", out.String(), err)
+	if err := writeSizingReset(&out, controllerwire.SizingResetSummary{RowsDeleted: 1, SamplesDropped: 3}, "pretty"); err != nil || !strings.Contains(out.String(), "dropped 1 row(s), 3 learned sample(s)") {
+		t.Fatalf("sample reset: %s %v", out.String(), err)
 	}
 }
 

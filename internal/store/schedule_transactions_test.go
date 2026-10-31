@@ -717,7 +717,6 @@ func TestScheduleTeamCapExemptsOnlyPersistedLocalAuthority(t *testing.T) {
 			tenant, a, body, _ := consentedScheduleFixture(t)
 			if local {
 				rewriteSchemaExec(t, tenant.s.db, "INSERT INTO teams(name,created_at,updated_at) VALUES ('default',1,1)")
-				rewriteSchemaExec(t, tenant.s.db, "INSERT INTO team_counters(team) VALUES ('default')")
 				snapshot, err := tenant.s.AsOperator().ReadAuthentication(t.Context(), capability.CredentialLookup{Class: capability.CredentialPeer, Peer: capability.Subject{Kind: capability.SubjectLocal, ID: "uid:1000"}}, capability.RequestEvidence{})
 				if err != nil {
 					t.Fatal(err)

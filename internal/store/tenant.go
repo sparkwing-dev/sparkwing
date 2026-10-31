@@ -95,7 +95,7 @@ func (o *Operator) RunTeam(ctx context.Context, runID string) (Team, error) {
 	return Team(team), err
 }
 
-// safety: a local install starts with an explicit registered team and its authority generation.
+// safety: a local install starts with an explicit registered team.
 func recordDefaultTeamTx(ctx context.Context, tx *storeTx) error {
 	return registerTeamTx(ctx, tx, DefaultTeam)
 }
@@ -106,10 +106,6 @@ func registerTeamTx(ctx context.Context, tx *storeTx, team Team) error {
 		`INSERT INTO teams (name, created_at, updated_at) VALUES (?, ?, ?)
 		 ON CONFLICT (name) DO NOTHING`,
 		string(team), now, now)
-	if err != nil {
-		return err
-	}
-	_, err = tx.execContext(ctx, `INSERT INTO team_counters(team) VALUES (?) ON CONFLICT(team) DO NOTHING`, team)
 	return err
 }
 

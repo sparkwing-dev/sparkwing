@@ -2,7 +2,6 @@ package controller
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"math"
 	"net/http"
@@ -10,9 +9,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/capacity"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
-	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
 
@@ -103,25 +100,6 @@ func runProfileObservations(ctx context.Context, t *store.Tenant, run *store.Run
 		CPUMeasured:     true,
 	}
 	return observations, nil
-}
-
-func (s *Server) emitNodeDrift(ctx context.Context, t *store.Tenant, run *store.Run, nodeID string) {
-	prof, err := t.GetPipelineProfile(ctx, run.Pipeline, nodeID)
-	if err != nil || prof == nil {
-		return
-	}
-	pin := &capacity.Pin{Cores: prof.PinnedCores, MemoryBytes: prof.PinnedMemoryBytes}
-	drift := capacity.CheckDrift(pin, prof)
-	if drift == nil {
-		return
-	}
-	payload, err := json.Marshal(drift)
-	if err != nil {
-		return
-	}
-	if err := t.AppendEvent(ctx, run.ID, nodeID, runstate.EventResourcePinDrift, payload); err != nil {
-		s.logger.Warn("append run event", "kind", runstate.EventResourcePinDrift, "run_id", run.ID, "node_id", nodeID, "err", err)
-	}
 }
 
 func samplePeaks(samples []store.MetricSample) (float64, int64, bool) {

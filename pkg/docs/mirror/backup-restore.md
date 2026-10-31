@@ -42,7 +42,10 @@ make it eligible again. Do not clear a live award's reservation or binding.
 
 Keep the binary matching a database backup. This build does not upgrade older
 schema baselines. A newer database needs its matching binary; rollback needs
-a matching backup in a separate database.
+a matching backup in a separate database. The schema batch uses baseline 28
+on SQLite and PostgreSQL, with no forward migration. Back up and recreate
+stores at every other baseline before starting this build. Staging and
+production require the same schema wipe.
 
 v0.68.0 replaced the store. It cannot read or import a store written by v0.67
 or earlier, refuses one with the move-aside remedy below, and leaves it
@@ -53,11 +56,11 @@ the store in place.
 
 <!-- BEGIN GENERATED SCHEMA ERRORS -->
 ```text
-sparkwing: store schema version 26 is older than this binary (expects 27); back up the store and use a binary matching it; this build cannot upgrade it; only for a disposable store, delete <path> and start again
+sparkwing: store schema version 27 is older than this binary (expects 28); back up the store and use a binary matching it; this build cannot upgrade it; only for a disposable store, delete <path> and start again
 
-sparkwing: store schema version 26 is older than this binary (expects 27); back up the store and use a binary matching it; this build cannot upgrade it; only for a disposable store, drop the database and start again
+sparkwing: store schema version 27 is older than this binary (expects 28); back up the store and use a binary matching it; this build cannot upgrade it; only for a disposable store, drop the database and start again
 
-sparkwing: store schema version 28 is newer than this binary (expects 27); start a binary matching the store, or restore a backup matching this binary into a separate database
+sparkwing: store schema version 29 is newer than this binary (expects 28); start a binary matching the store, or restore a backup matching this binary into a separate database
 
 sparkwing: ~/.sparkwing/state.db is a store from Sparkwing v0.67 or earlier (schema version 94); this release starts a new store and cannot read or import it, and left the old one unchanged; move it aside and run again: mv ~/.sparkwing/state.db ~/.sparkwing/state.db.v067 (move ~/.sparkwing/state.db-wal and ~/.sparkwing/state.db-shm with it if they exist)
 

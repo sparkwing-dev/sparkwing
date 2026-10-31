@@ -24,30 +24,25 @@ func TestProfileObservationRequiresMeasuredCPU(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			for _, contended := range []bool{false, true} {
-				for _, hash := range []string{"known", "changed"} {
-					unknown := store.ProfileObservation{Duration: 10 * time.Second, PeakCores: 50, SustainedCores: 40, PeakMemoryBytes: 10000, FloorCores: 50, FloorMemoryBytes: 10000, Contended: contended, PlanHash: hash}
-					if err := tenantFor(t, st, store.DefaultTeam).RecordProfileObservation(ctx, "known", node, unknown); err != nil {
-						t.Fatal(err)
-					}
-					after, err := tenantFor(t, st, store.DefaultTeam).GetPipelineProfile(ctx, "known", node)
-					if err != nil {
-						t.Fatal(err)
-					}
-					if !reflect.DeepEqual(before, after) {
-						t.Fatalf("unknown observation changed profile (contended=%t, hash=%s): before=%+v after=%+v", contended, hash, before, after)
-					}
+			for _, hash := range []string{"known", "changed"} {
+				unknown := store.ProfileObservation{Duration: 10 * time.Second, PeakCores: 50, SustainedCores: 40, PeakMemoryBytes: 10000, PlanHash: hash}
+				if err := tenantFor(t, st, store.DefaultTeam).RecordProfileObservation(ctx, "known", node, unknown); err != nil {
+					t.Fatal(err)
+				}
+				after, err := tenantFor(t, st, store.DefaultTeam).GetPipelineProfile(ctx, "known", node)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if !reflect.DeepEqual(before, after) {
+					t.Fatalf("unknown observation changed profile (hash=%s): before=%+v after=%+v", hash, before, after)
 				}
 			}
 			measured.PlanHash = "next"
-			measured.Contended = true
-			measured.FloorCores = 1
-			measured.FloorMemoryBytes = 50
 			if err := tenantFor(t, st, store.DefaultTeam).RecordProfileObservation(ctx, "known", node, measured); err != nil {
 				t.Fatal(err)
 			}
 			next, err := tenantFor(t, st, store.DefaultTeam).GetPipelineProfile(ctx, "known", node)
-			if err != nil || next == nil || next.SampleCount != 0 || next.FloorCores != 1 || next.FloorMemoryBytes != 50 || !next.CPUMeasured || next.PrevPeakCores != 2 || next.PrevSustainedCores != 1 || next.PrevPeakMemoryBytes != 100 {
+			if err != nil || next == nil || next.SampleCount != 1 || !next.CPUMeasured || next.PrevPeakCores != 2 || next.PrevSustainedCores != 1 || next.PrevPeakMemoryBytes != 100 {
 				t.Fatalf("measured predecessor carry lost: %+v,%v", next, err)
 			}
 			measured.CPUMeasured = false
@@ -57,7 +52,7 @@ func TestProfileObservationRequiresMeasuredCPU(t *testing.T) {
 			}
 			after, err := tenantFor(t, st, store.DefaultTeam).GetPipelineProfile(ctx, "known", node)
 			if err != nil || !reflect.DeepEqual(next, after) {
-				t.Fatalf("unknown observation changed measured carry/floor: before=%+v after=%+v err=%v", next, after, err)
+				t.Fatalf("unknown observation changed measured carry: before=%+v after=%+v err=%v", next, after, err)
 			}
 		})
 	}

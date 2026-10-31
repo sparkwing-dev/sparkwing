@@ -96,7 +96,7 @@ VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
 	if prof.PeakCores != 0 {
 		t.Errorf("stale PeakCores = %v, want old CPU sample schema ignored on read", prof.PeakCores)
 	}
-	if got := capacity.Resolve(nil, prof, 12, ""); got.Source != store.CostSourceDefault {
+	if got := capacity.Resolve(prof, 12, ""); got.Source != store.CostSourceDefault {
 		t.Errorf("stale profile resolved as %q, want default", got.Source)
 	}
 
