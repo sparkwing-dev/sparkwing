@@ -6,14 +6,19 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
+	"testing/synctest"
 	"time"
 
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controller"
 	"github.com/sparkwing-dev/sparkwing/internal/controller/client"
@@ -137,10 +142,14 @@ type cloudResourceFixture struct {
 	Store *store.Store
 }
 
-func cloudResourceStore(t *testing.T) (*cloudResourceFixture, *store.Tenant) {
+func cloudResourceStore(t *testing.T, clocks ...func() time.Time) (*cloudResourceFixture, *store.Tenant) {
 	t.Helper()
 	now := time.Now().UTC()
-	s, err := teststore.Open(filepath.Join(t.TempDir(), "state.db"), teststore.WithClock(func() time.Time { return now }), store.WithPolicies(func(*store.Store) (store.Policies, error) {
+	clock := func() time.Time { return now }
+	if len(clocks) != 0 {
+		clock = clocks[0]
+	}
+	s, err := teststore.Open(filepath.Join(t.TempDir(), "state.db"), teststore.WithClock(clock), store.WithPolicies(func(*store.Store) (store.Policies, error) {
 		return store.Policies{ClaimProfiles: cloudResourceProfile(func(context.Context, capability.Principal) (match.Profile, error) {
 			return match.Profile{}, nil
 		})}, nil
@@ -238,4 +247,107 @@ func TestCloudCapacityFailureThroughController(t *testing.T) {
 	if len(detail.Notices) != 0 || len(capacityPods(t, kube)) != 0 {
 		t.Fatal("failure retained transient demand")
 	}
+}
+
+func TestCloudCapacityWaitRenewsPlanDespiteOtherFailures(t *testing.T) {
+	for _, mode := range []string{"normal_poll", "claim_backoff", "job_sync"} {
+		t.Run(mode, func(t *testing.T) {
+			jobFailure := mode == "job_sync"
+			synctest.Test(t, func(t *testing.T) {
+				e, tenant := cloudResourceStore(t, time.Now)
+				run, err := tenant.ReadRun(t.Context(), "run")
+				if err != nil {
+					t.Fatal(err)
+				}
+				run.Request.Request.Git.SHA = strings.Repeat("a", 40)
+				run.Request.Request.Source.Location = runspec.SourceLocation{RemoteURL: "https://github.com/team/repo", PipelineDir: ".sparkwing"}
+				body, err := json.Marshal(run.Request)
+				if err != nil {
+					t.Fatal(err)
+				}
+				cloudResourceSQL(t, e.Store, `UPDATE runs SET request_json=?`, body)
+				raw := cloudResourceRoot(t, e)
+				e.RunnerPolicy = cloudResourcePolicy(func(context.Context, string) error { return nil })
+				handler := controller.New(e.Store, nil).WithEngineController(e.EngineController).Handler()
+				transport := &http.Client{Transport: cloudResourceTransport(func(r *http.Request) (*http.Response, error) {
+					w := httptest.NewRecorder()
+					handler.ServeHTTP(w, r)
+					return w.Result(), nil
+				})}
+				wire, err := client.NewEngineClient(client.EngineOptions{URL: "https://controller.example", Launcher: true, Bearer: func(context.Context) (string, error) { return raw, nil }, HTTP: transport})
+				if err != nil {
+					t.Fatal(err)
+				}
+				control, err := NewControllerControl(wire, controllerwire.ClaimRequest{RunnerVersion: "v1", Kinds: []capability.UnitKind{capability.UnitPlan}})
+				if err != nil {
+					t.Fatal(err)
+				}
+				l, kube, boundary, _ := fixture()
+				if jobFailure {
+					if _, err := l.LaunchOne(t.Context()); err != nil {
+						t.Fatal(err)
+					}
+				}
+				l.Control = control
+				boundary.reserveErr = ErrNoDedicatedNode
+				if _, err := l.LaunchOne(t.Context()); !errors.Is(err, ErrNoDedicatedNode) {
+					t.Fatal(err)
+				}
+				pods := capacityPods(t, kube)
+				if len(pods) != 1 {
+					t.Fatalf("capacity requests = %d", len(pods))
+				}
+				pod := pods[0]
+				pod.UID = "capacity-uid"
+				if _, err := kube.CoreV1().Pods("cloud").Update(t.Context(), &pod, metav1.UpdateOptions{}); err != nil {
+					t.Fatal(err)
+				}
+				ctx, cancel := context.WithCancel(t.Context())
+				defer cancel()
+				l.Control = capacityBackoffControl{CloudControl: control, jobFailure: jobFailure, backoff: mode == "claim_backoff"}
+				l.Poll = 5 * time.Second
+				done := make(chan error, 1)
+				go func() { done <- l.Run(ctx) }()
+				synctest.Wait()
+				for range 8 {
+					time.Sleep(30 * time.Second)
+					synctest.Wait()
+					if reaped, err := e.Store.AsOperator().ReapUnits(t.Context(), 10); err != nil || len(reaped) != 0 {
+						t.Fatalf("live capacity wait requeued: %+v %v", reaped, err)
+					}
+				}
+				cancel()
+				if err := <-done; err != nil {
+					t.Fatal(err)
+				}
+				if len(capacityPods(t, kube)) != 1 || len(l.waitingAwards()) != 1 {
+					t.Fatal("capacity wait lost its award")
+				}
+				time.Sleep(3 * time.Minute)
+				if reaped, err := e.Store.AsOperator().ReapUnits(t.Context(), 10); err != nil || len(reaped) != 1 || !reaped[0].Requeued {
+					t.Fatalf("abandoned capacity wait retained ownership: %+v %v", reaped, err)
+				}
+			})
+		})
+	}
+}
+
+type capacityBackoffControl struct {
+	CloudControl
+	jobFailure bool
+	backoff    bool
+}
+
+func (c capacityBackoffControl) Sync(ctx context.Context, observations []CloudJobObservation) ([]CloudJobState, error) {
+	if c.jobFailure && len(observations) > 0 && observations[0].Capacity == nil {
+		return nil, errors.New("unrelated Job observation unavailable")
+	}
+	return c.CloudControl.Sync(ctx, observations)
+}
+
+func (c capacityBackoffControl) Claim(context.Context, string, []string) (*CloudJobAward, error) {
+	if !c.backoff {
+		return nil, nil
+	}
+	return nil, &apierr.Error{Code: apierr.RateLimited, Message: "poll later", Details: map[string]any{"retry_after_ms": float64(240000)}}
 }

@@ -45,13 +45,19 @@ unlock.
   Server errors show retry guidance, the support contact and the request ID instead of raw backend JSON.
 - **errors:** Invitation refusals explain which verified-email account to use, and token expiry refusals name the 90-day or 30-day maximum
   Invalid schedule cron, branch and commit inputs include corrected forms. Unverified waiting work explains how to qualify for reserved pools through a default-branch App push or select a pool without reserved secrets.
+- **Cloud:** Bootstrap publication survives concurrent renewal of the suspended Job's deadline
+  Activation applies and validates the latest controller-funded deadline before execution.
+- **Cloud:** Plans waiting for dedicated capacity keep their lease while the launcher holds the award
+  Placement retries use the renewed deadline. Claim backoff and unrelated Job observation failures continue renewing held awards. Owner loss still permits recovery and requeue.
+- **schedules:** Installing a schedule that collides with a GitHub App declaration returns HTTP 409 and preserves the existing schedule
+  Unknown schedule write modes return HTTP 400.
 - **schedules:** Unreachable source repositories and missing refs return HTTP 422 during registration
   Refusals name the repository and ref, explain which URL and credentials to check, and log at info. Server faults still return HTTP 500.
 - **runners:** Machines with a full shared local budget leave jobs available for Cloud overflow
   With local admission enabled, a saturated machine stops offering job capacity instead of repeatedly reclaiming work it cannot start. Planning continues while the budget is full.
 - **console:** Rerun executes retries of accepted controller-dispatched plans
   Intake assigns controller ownership so the preserved plan can schedule jobs without losing a planning owner before the first attempt.
-- **schedules:** Due slots enter shared flood admission and create runs within the existing team limits
+- **schedules:** Due slots and Run now enter shared flood admission and create runs within the existing team limits
   Replays return the admitted run without spending another run token.
 - **outputs:** Go and TypeScript jobs can read their declared predecessors' outputs in the same run and team
   Unrelated jobs and other runs remain outside an in-run output read.

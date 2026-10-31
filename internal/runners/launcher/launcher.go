@@ -110,22 +110,18 @@ func (l *Launcher) Run(ctx context.Context) error {
 	logger := l.logger()
 	var cooldown time.Time
 	for ctx.Err() == nil {
-		if !time.Now().Before(cooldown) {
-			// safety: a faulty node is excluded from placement and a Job's teardown
-			// fault is retried each pass, so claiming continues; other
-			// reconciliation errors back off claims for every team.
-			synced := l.sync(ctx)
-			if blocking(synced) != nil {
-				logger.Warn("launcher reconciliation failed", failureAttrs(synced)...)
-				cooldown = time.Now().Add(retryWait(synced, 0))
-			} else if synced != nil {
-				logger.Error("Cloud node or Job teardown faults require operator inspection if they persist; suspect nodes are excluded from placement and quarantines use "+quarantineAnnotation+"; claiming continues", "error", synced)
-			}
-			if blocking(synced) == nil {
-				if _, err := l.LaunchOne(ctx); err != nil {
-					logger.Warn("launcher claim failed", failureAttrs(err)...)
-					cooldown = time.Now().Add(retryWait(err, 0))
-				}
+		// safety: claim backoff must not let held awards expire before placement.
+		synced := l.sync(ctx)
+		if blocking(synced) != nil {
+			logger.Warn("launcher reconciliation failed", failureAttrs(synced)...)
+			cooldown = time.Now().Add(retryWait(synced, 0))
+		} else if synced != nil {
+			logger.Error("Cloud node or Job teardown faults require operator inspection if they persist; suspect nodes are excluded from placement and quarantines use "+quarantineAnnotation+"; claiming continues", "error", synced)
+		}
+		if blocking(synced) == nil && !time.Now().Before(cooldown) {
+			if _, err := l.LaunchOne(ctx); err != nil {
+				logger.Warn("launcher claim failed", failureAttrs(err)...)
+				cooldown = time.Now().Add(retryWait(err, 0))
 			}
 		}
 		timer := time.NewTimer(poll)
@@ -199,7 +195,7 @@ func (l *Launcher) placeWaiting(ctx context.Context) error {
 }
 
 func (l *Launcher) launch(ctx context.Context, award *CloudJobAward) (launched bool, err error) {
-	prepared, stop, err := l.keepPreparation(ctx, award.Binding.LeaseRef())
+	prepared, stop, expires, err := l.keepPreparation(ctx, award.Binding.LeaseRef())
 	if err != nil {
 		return true, err
 	}
@@ -211,7 +207,9 @@ func (l *Launcher) launch(ctx context.Context, award *CloudJobAward) (launched b
 			err = errors.Join(err, cause)
 		}
 	}()
-	r, err := BuildJob(ctx, time.Now(), l.Config, *award, l.Boundary)
+	current := *award
+	current.LeaseExpiresAt = expires
+	r, err := BuildJob(ctx, time.Now(), l.Config, current, l.Boundary)
 	if errors.Is(err, ErrNoDedicatedNode) {
 		l.wait(award)
 		return true, l.awaitCapacity(ctx, *award)
@@ -307,6 +305,11 @@ func (l *Launcher) retainBootstrap(ctx context.Context, job *batchv1.Job, secret
 	if err == nil {
 		expected := job.DeepCopy()
 		expected.Annotations[bootstrapAnnotation] = string(reference)
+		// safety: activation validates both deadlines before execution, so suspended Jobs can accept concurrent renewal.
+		if retained != nil {
+			expected.Annotations[deadlineAnnotation] = retained.Annotations[deadlineAnnotation]
+			expected.Spec.ActiveDeadlineSeconds = retained.Spec.ActiveDeadlineSeconds
+		}
 		err = validateAdmittedJob(expected, retained)
 		if err == nil && retained.UID != job.UID {
 			err = errors.New("Kubernetes changed the Cloud Job UID")

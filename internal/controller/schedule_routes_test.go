@@ -109,6 +109,16 @@ const (
 	scheduleHTTPPath = "/api/v1/schedules/acme%2Fwidgets%2Fnightly"
 )
 
+func TestScheduleHTTPRejectsUnknownWriteMode(t *testing.T) {
+	f := newScheduleHTTPFixture(t)
+	body := strings.Replace(schedulePushJSON, `{`, `{"mode":"invalid",`, 1)
+	f.call(t, "PUT", "/api/v1/schedules/repos", body, "", 400, nil)
+	rows, err := f.writer.ListCronSchedules(t.Context())
+	if err != nil || len(rows) != 0 {
+		t.Fatalf("invalid mode created schedules: %+v %v", rows, err)
+	}
+}
+
 func TestScheduleHTTPReadWriteAndReplay(t *testing.T) {
 	f := newScheduleHTTPFixture(t)
 	var pushed controllerwire.ScheduleRepoWritten

@@ -285,6 +285,9 @@ func decodeEngineRequest(r *http.Request, body any) error {
 }
 
 func engineLookupError(err error) error {
+	if errors.Is(err, store.ErrCronScheduleTaken) {
+		return &apierr.Error{Code: apierr.Conflict, Message: "another schedule holds this identity"}
+	}
 	var quota *store.StorageQuotaError
 	if errors.As(err, &quota) {
 		return &apierr.Error{Code: apierr.QuotaExceeded, Message: quota.Error()}

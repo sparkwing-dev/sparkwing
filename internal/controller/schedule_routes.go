@@ -58,6 +58,9 @@ func (s *Server) handlePutCronRepo(w http.ResponseWriter, r *http.Request, a cap
 	if body.Mode == "" {
 		body.Mode = controllerwire.ScheduleReplace
 	}
+	if body.Mode != controllerwire.ScheduleReplace && body.Mode != controllerwire.ScheduleUpsert {
+		return invalidEngineBody("invalid schedule write mode")
+	}
 	repo, err := sourceurl.ValidateCloneURL(body.RepoURL)
 	if err != nil {
 		return invalidEngineBody("invalid repository URL")
@@ -175,15 +178,20 @@ func (s *Server) handleRunCronNow(w http.ResponseWriter, r *http.Request, a capa
 	if err != nil {
 		return err
 	}
-	id, run, replayed, err := writer.RunAuthorizedSchedule(r.Context(), a, r.PathValue("schedule"), key)
+	var scheduleID string
+	result, err := admitWithFlood(r.Context(), s, func(ctx context.Context) (controllerwire.ScheduleRun, error) {
+		id, run, replayed, err := writer.RunAuthorizedSchedule(ctx, a, r.PathValue("schedule"), key)
+		scheduleID = id
+		return controllerwire.ScheduleRun{RunID: run, Replayed: replayed}, err
+	})
 	if err != nil {
 		return engineLookupError(err)
 	}
-	view, err := s.scheduleView(r, a, id)
+	result.Schedule, err = s.scheduleView(r, a, scheduleID)
 	if err != nil {
 		return err
 	}
-	writeJSON(w, http.StatusOK, controllerwire.ScheduleRun{RunID: run, Schedule: view, Replayed: replayed})
+	writeJSON(w, http.StatusOK, result)
 	return nil
 }
 

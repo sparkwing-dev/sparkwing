@@ -113,7 +113,7 @@ func TestPreparationKeeperUsesServerDeadlineAfterResponseLatency(t *testing.T) {
 			}
 			return time.Time{}, errors.New("controller unreachable")
 		}}
-		ctx, stop, err := l.keepPreparation(t.Context(), capability.LeaseRef{Kind: capability.UnitNode, ID: "run/job", Holder: "launcher", Generation: 1})
+		ctx, stop, _, err := l.keepPreparation(t.Context(), capability.LeaseRef{Kind: capability.UnitNode, ID: "run/job", Holder: "launcher", Generation: 1})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -134,7 +134,7 @@ func TestPreparationKeeperRejectsAlreadyExpiredResponse(t *testing.T) {
 			time.Sleep(20 * time.Second)
 			return expires, nil
 		}}
-		_, stop, err := l.keepPreparation(t.Context(), capability.LeaseRef{Kind: capability.UnitNode, ID: "run/job", Holder: "launcher", Generation: 1})
+		_, stop, _, err := l.keepPreparation(t.Context(), capability.LeaseRef{Kind: capability.UnitNode, ID: "run/job", Holder: "launcher", Generation: 1})
 		if stop != nil {
 			stop()
 		}
