@@ -29,7 +29,7 @@ unlock.
   The schedule limit replaces the 10-per-repository and 20-per-team caps. The operator's minimum cron interval and the OIDC limit of 30 mints per five minutes per claim remain. Limit refusals name usage and a remedy.
 - **billing (Breaking):** Each team can create 20 Stripe Checkout Sessions per rolling hour across Add funds and saved-card setup
   Idempotent retries count once. Refusals report current usage, a retry delay and support guidance before calling the provider.
-- **store (Breaking):** v0.68.3 ships schema baseline 28 as a store reset
+- **store (Breaking):** The schema baseline advances to version 28 in v0.68.3 as a store reset
   Before 1.0, schema changes may require moving the local store aside or recreating a server database. Mismatched stores refuse startup with a remedy. Forward migrations start after launch. Back up and recreate stores at any other version using the [local and server reset steps](docs/migrations/_unreleased.md#recreate-the-store-for-schema-baseline-28). The baseline records Checkout Session reservation times, removes unused columns and capacity profile pins, waits, contention counters and floors, and enforces financial row shapes plus one open billing interval per award. Staging and production stores must be recreated before this build starts.
 - **controller (Breaking):** Sizing and capacity responses drop stored resource pins, demand floors, queue waits, contention counters and drift
   Update API clients using the [capacity-profile migration guide](docs/migrations/_unreleased.md#capacity-profiles-report-measured-data). Measured resource distributions and predecessor estimates remain available.
