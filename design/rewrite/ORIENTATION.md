@@ -86,6 +86,7 @@ credential model in `docs/auth.md`, and the decision log
 | Masking algorithm | `internal/secrets/mask.go`: `Masker`, `Maskable`, `Stream` | `internal/secrets/mask_property_test.go`: `TestMaskLeavesNoSecretVisibleProperty` |
 | Team secret count (decision 73) | `credential_mutations.go`: `Tenant.WriteSecret`; `secrets.go`: `maxSecretsPerTeam` | `credential_mutations_runtime_test.go`: `TestCredentialMutationsSecretLimitsPreserveExistingValues` |
 | Host masker registration | `internal/nodehost/mask_registry.go`: `MaskRegistry` | `internal/nodehost/accepted_masks_test.go`: `TestSealedSecretInputsNeverEscapeHostBoundaries` |
+| Job output reads authenticate the consumer award before checking persisted same-run dependency edges | `internal/controller/private_host.go`: `localHostTarget`, `localHostBinding` | `internal/controller/child_output_sdk_test.go`: `TestJobOutputThroughNativeClientAndCurrentReadSet` exercises Go and TypeScript process routes |
 
 ### Billing
 
