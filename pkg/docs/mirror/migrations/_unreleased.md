@@ -18,6 +18,34 @@ columns and the insert-only team counter table. It requires complete financial
 decisions, nonempty credit grant references, positive award generations and
 one open billing interval per award.
 
+## Sealed execution trust
+
+Intake now seals repository proof and verified default-branch eligibility.
+Claim issuance seals host kind and cache scope. These facts govern every trust
+consumer and survive delegation unchanged. The schema baseline is 28; see the store
+recreation section above.
+
+Personal machines and here hosts cannot claim repository-proven runs, including
+run-now and burst `machines` work. Use a shared runner or Sparkwing Cloud.
+Repository-scoped runners reject asserted uploads even when the remote name
+matches `--repos`. Omit `--repos` when enrolling a personal runner so it can
+claim its owner's asserted work. Shared enrollment still requires a repository
+scope.
+
+Job source credentials require both repository proof and a successful intake
+GitHub compare check. Host-wide credentials no longer bypass proof. Uploaded,
+local and unproven remote code receive no team credential. A historical commit
+or locked schedule can qualify after App source selection and a compare result
+of `ahead` or `identical` against a repository branch or tag for both source and
+execution commits when they differ. Merged PR runs compare against their base
+branch. Verified cache fallbacks require sealed repository proof. Such a historical
+commit carries no resolved-head OIDC `ref` or `sha`.
+
+Pipeline references now select verified default-branch runs and exclude
+publication. To accept other producers, declare `sw.FromAnyRun()` in Go or
+`{fromAnyRun: true}` in TypeScript. The direct output route also requires that
+declaration. Existing unverified outputs no longer satisfy the default lookup.
+
 ## Capacity profiles report measured data
 
 Sizing and capacity responses drop stored resource pins, demand floors,

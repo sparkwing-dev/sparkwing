@@ -26,7 +26,7 @@ var scrubPatterns = []struct {
 		"names a host on a private network",
 	},
 	{
-		"private hostname", regexp.MustCompile(`\b[a-z0-9-]+\.(?:internal|lan|home\.arpa)\b`),
+		"private hostname", regexp.MustCompile(`\b[a-z0-9-]+\.(?:internal|lan|home\.arpa)\.?(?:[^a-z0-9.-]|$)`),
 		"names a host that only resolves inside one network",
 	},
 	{
@@ -112,6 +112,8 @@ func TestScrubPatternsMatchWhatTheyClaimTo(t *testing.T) {
 		{"a tilde path is fine", "at ~/.config/sparkwing", false},
 		{"tailnet host", "reach it at box-1.tail1234.ts.net", true},
 		{"private hostname", "point it at runner.internal", true},
+		{"private hostname ending a sentence", "point it at runner.internal.", true},
+		{"an OpenAPI component path is not a hostname", "components.schemas.internal.controllerwire.JobSizing", false},
 		{"kubernetes service dns is public knowledge", "svc.cluster.local", false},
 		{"aws key", "AKIAIOSFODNN7EXAMPLE", true},
 		{"github token", "ghp_abcdefghijklmnopqrstuvwxyz0123456789", true},
