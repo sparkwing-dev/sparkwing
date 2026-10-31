@@ -218,7 +218,11 @@ keep the same claim and increase the attempt ordinal. Lease loss follows the
 separate recovery rule in [scheduling](scheduling.md).
 When the original plan is already accepted and controller-dispatched, the retry
 becomes controller-owned during intake. It schedules the preserved plan without
-starting another planning owner.
+starting another planning owner. The controller materializes reused jobs as
+successful with zero attempts and copies their outputs and artifacts into the
+new run for dependents. Reused jobs receive no execution claim. If a source
+result has expired or cannot be copied within the retry's data scope, the job
+executes again.
 
 ### Publishing a foreground run handle
 
