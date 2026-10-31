@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	yaml "go.yaml.in/yaml/v3"
+	"golang.org/x/mod/modfile"
 )
 
 type workflowStep struct {
@@ -403,8 +404,32 @@ func TestGitleaksExclusionsCannotHideRepositoryPaths(t *testing.T) {
 		"50470b89358f30fde06fcaa53c6b5ebefb8c2232:internal/bincache/direct_credential_test.go:private-key:15",
 		"0a60cdb1e4ee34b04a177f3978a0f9ebf4684f20:refund-platform.patch:generic-api-key:144",
 		"5e1de85c8d0b9fee356abea4e0b417c6ae3cc7f1:internal/controller/testdata/checkout_contract.json:generic-api-key:79",
+		"95faf9f804197eb3f6ef4841f5a2a1d53a94bcf0:sweeps/grid-1-10/evidence/R03C15/explain-after.txt:generic-api-key:6",
+		"95faf9f804197eb3f6ef4841f5a2a1d53a94bcf0:sweeps/grid-1-10/evidence/R03C16/before.txt:generic-api-key:6",
+		"95faf9f804197eb3f6ef4841f5a2a1d53a94bcf0:sweeps/grid-1-10/evidence/R09C14/after.txt:generic-api-key:6",
+		"95faf9f804197eb3f6ef4841f5a2a1d53a94bcf0:sweeps/grid-1-10/evidence/R09C14/before.txt:generic-api-key:6",
 	}, "\n")
 	if ignore != want {
 		t.Fatalf("gitleaks history exceptions are not the exact fingerprint set: %q", ignore)
+	}
+}
+
+func TestBuildToolchainsUseFixedGoPatch(t *testing.T) {
+	const fixed = "1.26.10"
+	for _, name := range workflowFileNames(t) {
+		for _, step := range workflowUsesSteps(t, name) {
+			if strings.HasPrefix(step.uses, "actions/setup-go@") && step.with["go-version"] != fixed {
+				t.Errorf("%s selects Go %q; want %s", step.where(), step.with["go-version"], fixed)
+			}
+		}
+	}
+	for _, name := range []string{"go.mod", ".sparkwing/go.mod"} {
+		file, err := modfile.Parse(name, []byte(readHostedCIFile(t, name)), nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if file.Toolchain == nil || file.Toolchain.Name != "go"+fixed {
+			t.Errorf("%s must select toolchain go%s", name, fixed)
+		}
 	}
 }

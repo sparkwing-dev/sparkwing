@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -277,5 +278,80 @@ func TestUpgradeStagingDoesNotRecursivelyCopyItsOwnCache(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(stage, "engine-cache", "upgrade")); !os.IsNotExist(err) {
 		t.Fatalf("staging copied itself: %v", err)
+	}
+}
+
+func TestUpgradeVerificationRetainsIsolatedGitMetadata(t *testing.T) {
+	for _, linked := range []bool{false, true} {
+		t.Run(fmt.Sprintf("linked=%t", linked), func(t *testing.T) {
+			git := func(dir string, args ...string) string {
+				t.Helper()
+				cmd := exec.CommandContext(t.Context(), "git", append([]string{"-C", dir}, args...)...)
+				out, err := cmd.CombinedOutput()
+				if err != nil {
+					t.Fatalf("git %v: %v: %s", args, err, out)
+				}
+				return strings.TrimSpace(string(out))
+			}
+			repo := t.TempDir()
+			createUpgradeRepo(t, repo, engineid.GoSDK)
+			git(repo, "init", "--initial-branch=main")
+			git(repo, "add", ".")
+			git(repo, "-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid", "-c", "commit.gpgsign=false", "commit", "--no-verify", "-m", "fixture")
+			if linked {
+				worktree := filepath.Join(t.TempDir(), "linked")
+				git(repo, "worktree", "add", "-b", "upgrade", worktree)
+				repo = worktree
+			}
+			main := git(repo, "rev-parse", "HEAD")
+			git(repo, "update-ref", "refs/remotes/origin/main", main)
+			git(repo, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main")
+			git(repo, "checkout", "-b", "feature")
+			git(repo, "-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid", "-c", "commit.gpgsign=false", "commit", "--no-verify", "--allow-empty", "-m", "feature")
+			head := git(repo, "rev-parse", "HEAD")
+			git(repo, "update-ref", "refs/heads/main", head)
+			writeFixture(t, repo, "unrelated.txt", []byte("uncommitted source"))
+			git(repo, "add", "unrelated.txt")
+			originalStatus := git(repo, "status", "--porcelain")
+			r, transport, key, _, _ := fixtureResolver(t)
+			target := releaseasset.Target{Binary: releaseasset.Sparkwing, GOOS: runtime.GOOS, GOARCH: runtime.GOARCH}
+			transport.release(t, "v0.20.0", target, signedBundle(t, key, "v0.20.0", target, fixtureExecutable(t, "v0.20.0", target)))
+			r.command = func(context.Context, string, string, ...string) error { return nil }
+			result, err := r.Upgrade(t.Context(), UpgradeRequest{Checkout: repo, SDK: engineid.GoSDK}, verifyFunc(func(ctx context.Context, stage string, _ Resolved) error {
+				if got := git(stage, "rev-parse", "HEAD"); got != head {
+					t.Fatalf("verification HEAD = %s, want %s", got, head)
+				}
+				if got, want := git(stage, "for-each-ref", "--format=%(refname) %(objectname) %(symref)"), git(repo, "for-each-ref", "--format=%(refname) %(objectname) %(symref)"); got != want {
+					t.Fatalf("verification refs = %s, want %s", got, want)
+				}
+				if got := git(stage, "rev-parse", "origin/main"); got != main {
+					t.Fatalf("verification origin/main = %s, want %s", got, main)
+				}
+				if got := git(stage, "symbolic-ref", "refs/remotes/origin/HEAD"); got != "refs/remotes/origin/main" {
+					t.Fatalf("verification default branch = %s", got)
+				}
+				if got := git(stage, "rev-parse", "--show-toplevel"); got != stage {
+					t.Fatalf("verification root = %s, want %s", got, stage)
+				}
+				body, err := os.ReadFile(filepath.Join(stage, "unrelated.txt"))
+				if err != nil || string(body) != "uncommitted source" {
+					t.Fatalf("staged source = %s, %v", body, err)
+				}
+				if !strings.Contains(git(stage, "status", "--porcelain"), ".sparkwing/go.mod") {
+					t.Fatal("verification cannot see upgraded pin")
+				}
+				git(stage, "add", ".sparkwing/go.mod")
+				if got := git(repo, "status", "--porcelain"); got != originalStatus {
+					t.Fatalf("verification changed original index: %s", got)
+				}
+				return nil
+			}))
+			if err != nil || !result.Verified || !result.Applied {
+				t.Fatalf("upgrade = %+v, %v", result, err)
+			}
+			if got := git(repo, "diff", "--cached", "--name-only"); got != "unrelated.txt" {
+				t.Fatalf("original staged files = %s", got)
+			}
+		})
 	}
 }

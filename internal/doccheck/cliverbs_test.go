@@ -17,6 +17,30 @@ func TestRepositoryCLIExamplesUseCurrentGrammar(t *testing.T) {
 	}
 }
 
+func TestMigrationUpgradeUsesPublishedReleaseSelection(t *testing.T) {
+	guide, err := os.ReadFile(filepath.Join("..", "..", "docs", "migrations", "v0.68.0.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, line := range strings.Split(string(guide), "\n") {
+		args := strings.Fields(line)
+		if len(args) < 2 || args[0] != "sparkwing" || args[1] != "upgrade" {
+			continue
+		}
+		found = true
+		if _, err := clisurface.Parse("sparkwing", args[1:]); err != nil {
+			t.Errorf("migration upgrade command: %v", err)
+		}
+		if len(args) != 2 {
+			t.Errorf("migration upgrade must select the latest stable release without a frozen version: %q", line)
+		}
+	}
+	if !found {
+		t.Fatal("migration guide has no executable SDK upgrade command")
+	}
+}
+
 func TestExistingCIExamplesUseCurrentGrammar(t *testing.T) {
 	blocks, err := extract(filepath.Join("..", "..", "docs"), "yaml")
 	if err != nil {

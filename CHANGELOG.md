@@ -43,6 +43,10 @@ unlock.
 
 - **release:** Stable releases publish the signed version index used by upgrades and update notices
   Publication preserves signed policy and release history. An index-only dispatch repairs a missed publication without rebuilding release assets.
+- **cli:** Fresh repositories get an initial-commit repair command before run intake
+  Scaffold planning works before the first commit. An empty initial commit enables local execution without staging files.
+- **upgrade:** SDK verification retains Git history in an isolated staging checkout
+  Linked worktrees keep their own index unchanged during verification.
 - **logs:** Finished Cloud runs complete aggregate log reads after bootstrap owner requeues
   Owner streams register when the runner exchanges its bootstrap credential. Awards that never reached a log writer no longer leave unsealed streams. Missing final seals from actual writers still report incomplete logs.
 - **TypeScript SDK:** Imports inside jobs retain CommonJS and ESM exports from symlinked packages
@@ -82,6 +86,17 @@ unlock.
   Select the Go executable through `PATH` for sparks resolution and overlay updates.
 - **controller (Breaking):** Removed `--live-log-node-kb`, `--live-log-total-mb`, `--live-log-max-nodes` and `--live-log-idle`
   Live buffers retain fixed limits of 512 KiB per node, 64 MiB total, 1,024 nodes and a 10-minute idle timeout.
+
+### Security
+
+- **toolchain:** Local builds and hosted Go jobs select Go 1.26.10 to fix GO-2026-6809
+  Published module requirements retain their portable major/minor floor.
+- **checks:** Allow-list QA cache identifiers by exact history fingerprint
+  Full-history gitleaks scans retain coverage for every repository path.
+
+### Docs
+
+- **migration:** Install and SDK upgrade steps select the latest stable release instead of unpublished v0.68.0 artifacts
 
 ## [v0.68.2] - 2026-10-31
 ### Changed
