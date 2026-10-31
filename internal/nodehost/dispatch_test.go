@@ -4,9 +4,9 @@ import (
 	"context"
 	"fmt"
 	"testing"
-	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/limits"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
@@ -80,7 +80,7 @@ func TestDispatchAdoptsTheRowTheRemoteHostWrote(t *testing.T) {
 			t.Fatalf("adopted = %+v, error %v", result, err)
 		}
 	}
-	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), limits.DefaultLease)
 	defer cancel()
 	completion, err := f.Host.Run(ctx, f.Input)
 	if err != nil || completion.Outcome != "success" {
@@ -174,7 +174,7 @@ func TestDispatchLeavesConcurrencyToRemoteExecution(t *testing.T) {
 						machine = &LocalAdmission{Daemon: d}
 					}
 					f.Host.executionAdmission = ComposeStartGate(f.Tenant, machine, false)
-					ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+					ctx, cancel := context.WithTimeout(t.Context(), limits.DefaultLease)
 					done := make(chan error, 1)
 					joined := make(chan struct{})
 					go func() {
@@ -246,7 +246,7 @@ func TestDispatchStoreCancellationDrainsTheRemoteHolder(t *testing.T) {
 	f.Host.Local = func(runstate.NodeRow) bool { return false }
 	d := newFakeDaemon()
 	f.Host.executionAdmission = ComposeStartGate(f.Tenant, &LocalAdmission{Daemon: d}, false)
-	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), limits.DefaultLease)
 	done := make(chan error, 1)
 	joined := make(chan struct{})
 	go func() {

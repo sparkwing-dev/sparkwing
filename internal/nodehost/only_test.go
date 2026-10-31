@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/limits"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
@@ -156,7 +157,7 @@ func TestOnlyPreservesSchedulerDependencyKinds(t *testing.T) {
 			fixture.Host.Executor = ownerNodeFunc(func(ctx context.Context, input NodeInput) error {
 				return fixture.report(ctx, input, runstate.NodeSuccess)
 			})
-			ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+			ctx, cancel := context.WithTimeout(t.Context(), limits.DefaultLease)
 			defer cancel()
 			completion, err := fixture.Host.Run(ctx, fixture.Input)
 			if err != nil || completion.Outcome != "success" {

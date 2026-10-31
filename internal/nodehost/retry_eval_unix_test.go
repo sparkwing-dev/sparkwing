@@ -15,6 +15,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
 	"github.com/sparkwing-dev/sparkwing/internal/engineid"
+	"github.com/sparkwing-dev/sparkwing/internal/limits"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/releaseasset"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
@@ -61,7 +62,7 @@ func TestRetryTargetSchedulesOnlyUnfinishedGeneratedWork(t *testing.T) {
 		t.Fatal("recorded expansion evaluated again")
 		return nil, runspec.SecretRegistration{}, nil, nil
 	}
-	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), limits.DefaultLease)
 	defer cancel()
 	completion, err := f.Host.Run(ctx, f.Input)
 	if err != nil || completion.Outcome != "success" || !slices.Equal(bodies, []string{"bad", "summary"}) {
@@ -107,7 +108,7 @@ func TestRetryReuseMissExecutesGeneratorAndChildren(t *testing.T) {
 		body, err := json.Marshal(nodeproto.PlanDoc{Jobs: retryGeneratedJobs()})
 		return body, runspec.SecretRegistration{Version: 1}, nil, err
 	}
-	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), limits.DefaultLease)
 	defer cancel()
 	completion, err := f.Host.Run(ctx, f.Input)
 	slices.Sort(bodies)
@@ -187,7 +188,7 @@ func TestGeneratedRetryExecutionRefusesChangedRecordedDeclarations(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
-	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), limits.DefaultLease)
 	defer cancel()
 	err = host.Execute(ctx, input)
 	if hostCode(err) != apierr.PlanDrift {

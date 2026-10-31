@@ -56,7 +56,7 @@ func TestSchedulerRunsADiamondInOrderAndInParallel(t *testing.T) {
 		{ID: "c", Needs: deps("a"), Steps: []nodeproto.StepSpec{{ID: "body"}}},
 		{ID: "a", Steps: []nodeproto.StepSpec{{ID: "body"}}},
 	}})
-	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), limits.DefaultLease)
 	defer cancel()
 	b, c := make(chan struct{}), make(chan struct{})
 	var mu sync.Mutex
@@ -123,7 +123,7 @@ func TestSchedulerPropagatesFailureAsTheDispatcherDoes(t *testing.T) {
 		}
 		return f.report(ctx, input, outcome)
 	})
-	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), limits.DefaultLease)
 	defer cancel()
 	completion, err := f.Host.Run(ctx, f.Input)
 	if err != nil || completion.Outcome != "failed" {
@@ -154,7 +154,7 @@ func TestSchedulerOptionalFailureLeavesTheRunGreen(t *testing.T) {
 		}
 		return f.report(ctx, input, outcome)
 	})
-	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), limits.DefaultLease)
 	defer cancel()
 	completion, err := f.Host.Run(ctx, f.Input)
 	if err != nil || completion.Outcome != "success" {
@@ -179,7 +179,7 @@ func TestSchedulerWritesPendingRowsFromThePlan(t *testing.T) {
 		{ID: "base", Requires: []string{"linux"}, Steps: []nodeproto.StepSpec{{ID: "body"}}},
 		{ID: "gpu", Needs: deps("base"), NeedsIfPresent: deps("extra"), Requires: []string{"gpu", "linux", "big"}, Prefers: []string{"fast"}, Steps: []nodeproto.StepSpec{{ID: "body"}}},
 	}})
-	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), limits.DefaultLease)
 	defer cancel()
 	snapshot, err := f.Tenant.ReadSnapshot(ctx, f.Accepted.RunID)
 	if err != nil {
@@ -207,7 +207,7 @@ func TestSchedulerCancelMidRunFinishesEveryRow(t *testing.T) {
 		{ID: "next", Needs: deps("slow"), Steps: []nodeproto.StepSpec{{ID: "body"}}},
 		{ID: "later", Needs: deps("next"), Steps: []nodeproto.StepSpec{{ID: "body"}}},
 	}})
-	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), limits.DefaultLease)
 	defer cancel()
 	f.Host.Executor = ownerNodeFunc(func(ctx context.Context, input NodeInput) error {
 		if input.NodeID != "slow" {
@@ -252,7 +252,7 @@ func TestSchedulerCallerCancellationStopsDownstreamDispatch(t *testing.T) {
 				{ID: "slow", Steps: []nodeproto.StepSpec{{ID: "body"}}},
 				{ID: "next", Needs: deps("slow"), Steps: []nodeproto.StepSpec{{ID: "body"}}},
 			}})
-			bounded, stop := context.WithTimeout(t.Context(), 5*time.Second)
+			bounded, stop := context.WithTimeout(t.Context(), limits.DefaultLease)
 			defer stop()
 			ctx, cancel := context.WithCancelCause(bounded)
 			defer cancel(nil)
@@ -277,7 +277,7 @@ func TestSchedulerCallerCancellationStopsDownstreamDispatch(t *testing.T) {
 
 func TestSchedulerWithoutAnExecutorFailsLoudly(t *testing.T) {
 	f := newStoreHostFixture(t, nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{{ID: "a", Steps: []nodeproto.StepSpec{{ID: "body"}}}}})
-	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), limits.DefaultLease)
 	defer cancel()
 	_, err := f.Host.Run(ctx, f.Input)
 	if err == nil || !strings.Contains(err.Error(), "node host") {
@@ -308,7 +308,7 @@ func TestSchedulerARefusedOutputFailsTheNodeAndDependants(t *testing.T) {
 				t.Fatal(err)
 			}
 			f.Host.Executor = executor
-			ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+			ctx, cancel := context.WithTimeout(t.Context(), limits.DefaultLease)
 			defer cancel()
 			completion, err := f.Host.Run(ctx, f.Input)
 			if err != nil || completion.Outcome != "failed" {

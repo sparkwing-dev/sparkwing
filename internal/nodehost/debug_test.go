@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/limits"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
@@ -74,7 +75,7 @@ func TestDebugPausesHoldTheNodeUntilReleased(t *testing.T) {
 				paused = append(paused, b.Reason)
 				return nil
 			})
-			ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+			ctx, cancel := context.WithTimeout(t.Context(), limits.DefaultLease)
 			defer cancel()
 			completion, err := f.Host.Run(ctx, f.Input)
 			want := "success"

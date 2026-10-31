@@ -7,9 +7,9 @@ import (
 	"fmt"
 	"sync"
 	"testing"
-	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
+	"github.com/sparkwing-dev/sparkwing/internal/limits"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
@@ -73,7 +73,7 @@ func TestNativeOwnerAndClaimedContentionNeverHoldComputeBeforeLogicalCapacity(t 
 		return fixture.report(ctx, input, runstate.NodeSuccess)
 	})
 	owner.Executor, claimed.Executor = execute, execute
-	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), limits.DefaultLease)
 	var workers sync.WaitGroup
 	defer func() { cancel(); workers.Wait() }()
 	done := make(chan error, 2)
