@@ -4,11 +4,14 @@ import (
 	"context"
 	"fmt"
 	"time"
+
+	"github.com/sparkwing-dev/sparkwing/internal/crontimer"
+	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
 
 // ControllerHealth reports schedule counts and the last tick from the store,
-// with the timer state naming the controller loop.
-func (s *Service) ControllerHealth(ctx context.Context) (Health, error) {
+// with the timer state naming the active controller loop or local native timer.
+func (s *Service) ControllerHealth(ctx context.Context, loopRunning bool) (Health, error) {
 	rows, err := s.List(ctx)
 	if err != nil {
 		return Health{}, err
@@ -22,14 +25,30 @@ func (s *Service) ControllerHealth(ctx context.Context) (Health, error) {
 		return health, err
 	}
 	health.LastTick = tick
-	health.Timer.Installed = true
-	health.Timer.Enabled = true
-	health.Timer.Detail = controllerTimerDetail
+	if s.Side == store.CronWhereController {
+		health.Timer.Installed = loopRunning
+		health.Timer.Enabled = loopRunning
+		health.Timer.Detail = controllerTimerDetail
+	} else if s.NativeTimer != nil {
+		health.Timer, err = crontimer.Status(ctx, *s.NativeTimer)
+		if err != nil {
+			if ctx.Err() != nil {
+				return health, ctx.Err()
+			}
+			health.Timer.Detail = err.Error()
+			health.Detail = "native schedule timer state is unavailable: " + err.Error()
+		}
+	} else {
+		health.Timer.Detail = "native timer state is unavailable"
+		health.Detail = health.Timer.Detail
+	}
 	now := s.now()
 	// safety: a loop that has never ticked is as unhealthy as one that stopped,
 	// which is what the local Health already says of a timer that never fired.
 	health.TickStale = tick.At.IsZero() || now.Sub(tick.At) > tickStaleAfter
-	health.Detail = health.describeController(now)
+	if health.Detail == "" {
+		health.Detail = health.describeController(now)
+	}
 	health.Remedy = health.remedy()
 	return health, nil
 }
@@ -39,6 +58,24 @@ func (s *Service) ControllerHealth(ctx context.Context) (Health, error) {
 const controllerTimerDetail = "controller loop"
 
 func (h Health) describeController(now time.Time) string {
+	if h.Timer.Detail != controllerTimerDetail {
+		if !h.Timer.Installed {
+			return "no native schedule timer is installed; run `sparkwing schedules install` to enable automatic firing"
+		}
+		if !h.Timer.Enabled || h.Timer.Stale {
+			return "the native schedule timer is inactive or stale; run `sparkwing schedules install` to enable automatic firing"
+		}
+		if h.Armed > 0 && h.TickStale {
+			return "the native schedule timer has not ticked within three minutes; inspect its service-manager logs"
+		}
+		if h.LastTick.Error != "" {
+			return "the last tick reported: " + h.LastTick.Error
+		}
+		return fmt.Sprintf("%d schedule(s) armed and the native timer fires every minute", h.Armed)
+	}
+	if !h.Timer.Enabled {
+		return "the controller schedule evaluator loop is stopped"
+	}
 	switch {
 	case h.Armed == 0 && h.Schedules == 0:
 		return "no schedule is pushed here; `sparkwing schedules install --profile <name>` pushes a repository's"

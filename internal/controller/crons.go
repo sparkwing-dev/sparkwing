@@ -134,6 +134,8 @@ func defaultCronHolder() string {
 // tick keeps a window from being ticked twice. A tick that fails is logged so
 // the next interval still runs.
 func (s *Server) runCronTick(ctx context.Context, interval time.Duration) {
+	s.cronRunning.Store(true)
+	defer s.cronRunning.Store(false)
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 	for {
@@ -206,7 +208,7 @@ func (s *Server) handleListCrons(w http.ResponseWriter, r *http.Request, a capab
 		return engineLookupError(err)
 	}
 	svc := s.cronServiceFor(tenant, "")
-	health, err := svc.ControllerHealth(r.Context())
+	health, err := svc.ControllerHealth(r.Context(), s.cronRunning.Load())
 	if err != nil {
 		return engineLookupError(err)
 	}

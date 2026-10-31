@@ -685,7 +685,7 @@ func TestHealthCountsLocksFollowersAndStaleOverrides(t *testing.T) {
 		}
 	}
 
-	health, err := h.svc.ControllerHealth(ctx)
+	health, err := h.svc.ControllerHealth(ctx, false)
 	if err != nil {
 		t.Fatalf("Health: %v", err)
 	}

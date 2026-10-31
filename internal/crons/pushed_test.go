@@ -23,13 +23,21 @@ func pushedService(t *testing.T) *pushedFixture {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = st.Close() })
-	return &pushedFixture{Service: &Service{Operator: st.AsOperator(), Schedules: teststore.ForTeam(t, st, store.DefaultTeam), ArmedBy: "operator@laptop"}, Store: st}
+	return &pushedFixture{Service: &Service{Operator: st.AsOperator(), Schedules: teststore.ForTeam(t, st, store.DefaultTeam), ArmedBy: "operator@laptop", Side: store.CronWhereController}, Store: st}
 }
 
 func TestControllerHealthReportsTimerLoop(t *testing.T) {
 	svc := pushedService(t)
-	health, err := svc.ControllerHealth(context.Background())
-	if err != nil || health.Timer.Detail != controllerTimerDetail {
+	health, err := svc.ControllerHealth(context.Background(), true)
+	if err != nil || health.Timer.Detail != controllerTimerDetail || !health.Timer.Enabled || !health.Timer.Installed {
+		t.Fatalf("health: %+v %v", health, err)
+	}
+}
+
+func TestControllerHealthReportsStoppedLoop(t *testing.T) {
+	svc := pushedService(t)
+	health, err := svc.ControllerHealth(context.Background(), false)
+	if err != nil || health.Timer.Enabled || health.Timer.Installed || health.Detail != "the controller schedule evaluator loop is stopped" {
 		t.Fatalf("health: %+v %v", health, err)
 	}
 }

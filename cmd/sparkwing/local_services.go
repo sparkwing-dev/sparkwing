@@ -159,6 +159,11 @@ func bindLocalController(ctx context.Context, b localcontroller.Binding) (_ loca
 	if err != nil {
 		return localcontroller.Services{}, err
 	}
+	timerHost, err := localServiceHost(b.Home)
+	if err != nil {
+		return localcontroller.Services{}, err
+	}
+	schedules.NativeTimer = &timerHost
 	server.WithLocalSessions(paths.PathsAt(b.Home).SessionLedgerDir())
 	server.WithLocalAdmission(func(ctx context.Context) (wingwire.QueueState, error) {
 		// safety: a daemon can hold its socket and go quiet before or after its hello; the bound answers the
