@@ -8,8 +8,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 )
 
-// The bootstrap claim is waiting for dedicated capacity until activation seals
-// its execution host. Using the claim time keeps elapsed time stable across polls.
+// safety: claim time keeps capacity wait elapsed time stable across polls until activation seals the execution host.
 func readCloudCapacityWaitTx(ctx context.Context, tx *storeTx, team Team, run RunRow) (*time.Time, error) {
 	if run.FinishedAt != nil || run.CancelRequestedAt != nil {
 		return nil, nil

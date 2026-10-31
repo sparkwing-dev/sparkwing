@@ -39,7 +39,7 @@ var (
 // CapacityConfigured checks pool templates, never current nodes, readiness or fleet limits.
 func (b *KubernetesBoundary) CapacityConfigured(ctx context.Context, binding CloudJobBinding, budget corev1.ResourceList) (bool, error) {
 	if b.Karpenter == nil {
-		return false, errors.New("Cloud boundary requires Karpenter")
+		return false, errors.New("cloud boundary requires Karpenter")
 	}
 	pools, err := b.Karpenter.Resource(nodePools).List(ctx, metav1.ListOptions{})
 	if err != nil {
@@ -77,8 +77,7 @@ func compatibleTeamPool(pool unstructured.Unstructured, value string, budget cor
 	if !protected {
 		return false, nil
 	}
-	// Cloud Jobs run Linux. Only a contradictory template constraint proves
-	// incompatibility; readiness, provider availability and limits can recover.
+	// safety: only contradictory template constraints prove incompatibility; readiness and fleet limits can recover.
 	known := map[string]string{TeamNodeLabel: value, corev1.LabelOSStable: "linux"}
 	if os, ok := labels[corev1.LabelOSStable]; ok && os != "linux" {
 		return false, nil
@@ -135,7 +134,7 @@ func compatibleTeamPool(pool unstructured.Unstructured, value string, budget cor
 	return true, nil
 }
 
-// Only explicit upper bounds can prove the awarded hardware class cannot fit.
+// safety: only explicit upper bounds prove the awarded hardware class cannot fit.
 func poolRequirementAllowsSize(requirement map[string]any, minimum float64) (bool, error) {
 	values, _, err := unstructured.NestedStringSlice(requirement, "values")
 	if err != nil {
