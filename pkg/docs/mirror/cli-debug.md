@@ -10,7 +10,7 @@ Interactive debugging for pipeline runs
 
 ### Subcommands
 
-- `attach` -- kubectl exec into a paused job's pod (cluster mode)
+- `attach` -- Attach to a running Kubernetes target (Cloud jobs unsupported)
 - `env` -- Inspect public job, executor and pause diagnostics
 - `resume` -- Resume a paused job
 
@@ -25,7 +25,7 @@ Interactive debugging for pipeline runs
 
 ## `sparkwing debug attach`
 
-kubectl exec into a paused job's pod (cluster mode)
+Attach to a running Kubernetes target (Cloud jobs unsupported)
 
 ### Flags
 

@@ -79,9 +79,9 @@ as an error, including when a filter excludes the stored marker.
 Log storage runs independently of plan acceptance, expansion acceptance, run
 completion and node reporting. Those commits never wait for log uploads or closure.
 Flush effort is bounded by the existing one-minute log tail window. Cloud job
-cleanup waits for the current attempt’s final seal within that window, so
-recording a successful result cannot interrupt its remaining log uploads. Log I/O holds
-no lock shared across jobs. Log subjects use the committed attempt, without
+cleanup waits for the current attempt's final seal within that window. Existing
+execution and credential deadlines still apply. Log I/O holds no lock shared
+across jobs. Log subjects use the committed attempt, without
 logging-only principal refreshes or node lookups. The store creates each stream
 in the transaction that starts its attempt or grants its owner log-writing authority.
 Direct owner claims register at award; Cloud owner claims register when the runner

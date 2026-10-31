@@ -41,6 +41,13 @@ unlock.
 
 ### Fixed
 
+- **logs:** Cloud jobs finish their current attempt's log seal before cleanup
+  Cleanup preserves pending uploads within the existing one-minute log tail window, including large logs whose payload has already arrived.
+- **secrets:** Optional declared secrets unavailable to a run return missing
+  Go returns `ErrSecretMissing` and TypeScript returns `undefined` for absent or scoped-out values. Undeclared names remain refused.
+- **debug:** Cloud attachment refusals explain the supported inspection commands
+  `debug attach` requires a published Kubernetes target. Cloud jobs support `debug env` and `runs logs`. The debugging guide now states that shell attachment is unavailable.
+
 - **schedules:** Unreachable source repositories and missing refs return HTTP 422 during registration
   Refusals name the repository and ref, explain which URL and credentials to check, and log at info. Server faults still return HTTP 500.
 - **runners:** Machines with a full shared local budget leave jobs available for Cloud overflow
@@ -794,7 +801,7 @@ unlock.
 - **store (Breaking):** Billing-policy writes use `Operator.SetCreditSettings`. The separate `SetOperatorCreditSettings` entry point is removed. Every caller now preserves installed rate tables against scalar overrides. See [migration guide](docs/migrations/v0.68.0.md#billing-policy-writer).
 - **store (Breaking):** Remove `Tenant.GrantCredits`. Use `Tenant.RecordCreditGrant` with a typed request. Tenant credit reports now read balances, burn, storage charges and prices from one database snapshot. See [migration guide](docs/migrations/v0.68.0.md#paid-credit-requires-verified-checkout-settlement).
 - **billing:** Fraud-warning replays retain their original payment and card. Conflicting payer evidence fails without recording a warning or freezing a team. Released warning holds remain released after restart and replay.
-- **store + controller (Breaking):** Remove legacy node-log upload, signing and seal APIs, their HTTP writers and the segment upload client. Tagged log bindings, commits and leased maintenance own uploads, persistence and abandoned-stream sealing. Physical manifest readers and object-side abandoned seals are removed. Completeness uses the selected attempt’s persisted finish time and the store clock. See [migration guide](docs/migrations/v0.68.0.md#log-writes-use-tagged-subjects).
+- **store + controller (Breaking):** Remove legacy node-log upload, signing and seal APIs, their HTTP writers and the segment upload client. Tagged log bindings, commits and leased maintenance own uploads, persistence and abandoned-stream sealing. Physical manifest readers and object-side abandoned seals are removed. Completeness uses the selected attempt's persisted finish time and the store clock. See [migration guide](docs/migrations/v0.68.0.md#log-writes-use-tagged-subjects).
 - **store:** `Tenant.ReadBlob` returns committed blob metadata only after checking live tenant authority and read edges. Tombstoned digests return no metadata.
 - **store (Breaking):** Remove legacy direct-upload reservation, commit, lookup and release APIs and the two node output-upload writers. Tenant blob tickets own quota and verified settlement. See [migration guide](docs/migrations/v0.68.0.md#storage-counters-use-verified-upload-tickets).
 - **store (Breaking):** Remove unused raw card-setup, dispute, warning, refund and payment-lookup Go entry points, plus `Store.SetTokenMetered`. Their transaction owners remain for verified-event settlement. Console hold and release operations retain their tenant handles. See [migration guide](docs/migrations/v0.68.0.md#card-workers-use-operator).
