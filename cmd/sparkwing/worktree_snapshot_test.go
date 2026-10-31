@@ -302,6 +302,11 @@ func TestCaptureWorktreeSnapshotRejectsCompressibleUncompressedOversize(t *testi
 	if err == nil || !strings.Contains(err.Error(), "uncompressed source limit") {
 		t.Fatalf("capture error = %v, want uncompressed source limit", err)
 	}
+	for _, want := range []string{".gitignore", "git push", "without --working-tree"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("capture error = %v; missing %q", err, want)
+		}
+	}
 }
 
 func TestCaptureWorktreeSnapshotRejectsFileCountOversize(t *testing.T) {
