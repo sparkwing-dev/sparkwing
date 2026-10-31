@@ -695,6 +695,7 @@ regenerate with `go test ./tests/acceptance -run '^TestCurrentContractSymbolInve
 | `Flag` | [source](../../../internal/settings/contract.go) |
 | `GlobalDB` | [source](../../../internal/settings/contract.go) |
 | `Guards` | [source](../../../internal/settings/resolvers.go) |
+| `InheritedOptions` | [source](../../../internal/settings/intake.go) |
 | `Inputs` | [source](../../../internal/settings/contract.go) |
 | `JobTimeout` | [source](../../../internal/settings/resolvers.go) |
 | `MemoTTL` | [source](../../../internal/settings/resolvers.go) |
