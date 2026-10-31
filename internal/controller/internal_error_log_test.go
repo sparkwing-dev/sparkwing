@@ -2,6 +2,7 @@ package controller
 
 import (
 	"bytes"
+	"context"
 	"encoding/base64"
 	"encoding/hex"
 	"errors"
@@ -21,6 +22,52 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/routepolicy"
 )
+
+func TestRequestCancellationLogLevel(t *testing.T) {
+	for _, method := range []string{http.MethodGet, http.MethodPost} {
+		for _, tc := range []struct {
+			name   string
+			ctxErr error
+			cause  error
+			level  string
+		}{
+			{"client canceled", context.Canceled, fmt.Errorf("read runs: %w", context.Canceled), "INFO"},
+			{"live request", nil, context.Canceled, "ERROR"},
+			{"server fault after cancellation", context.Canceled, errors.New("database unavailable"), "ERROR"},
+			{"deadline", context.DeadlineExceeded, context.DeadlineExceeded, "ERROR"},
+		} {
+			t.Run(method+"/"+tc.name, func(t *testing.T) {
+				ctx := t.Context()
+				if errors.Is(tc.ctxErr, context.Canceled) {
+					var cancel context.CancelFunc
+					ctx, cancel = context.WithCancel(ctx)
+					cancel()
+				} else if errors.Is(tc.ctxErr, context.DeadlineExceeded) {
+					var cancel context.CancelFunc
+					ctx, cancel = context.WithDeadline(ctx, time.Time{})
+					defer cancel()
+				}
+				h, logs := auditHarness(t, "/api/v1/runs", func(w http.ResponseWriter, _ *http.Request) {
+					routepolicy.WritePolicyError(w, tc.cause)
+				})
+				out := httptest.NewRecorder()
+				h.ServeHTTP(out, httptest.NewRequest(method, "/api/v1/runs", nil).WithContext(ctx))
+				records := auditLines(t, logs, "http request failed")
+				if len(records) != 1 || records[0]["level"] != tc.level || records[0]["err"] != tc.cause.Error() {
+					t.Fatalf("diagnostic = %s, want %s with cause", logs, tc.level)
+				}
+				msg := "http"
+				if method == http.MethodPost {
+					msg = "audit"
+				}
+				status := auditLines(t, logs, msg)
+				if out.Code != http.StatusInternalServerError || len(status) != 1 || status[0]["status"] != float64(out.Code) || status[0]["level"] != "INFO" || status[0]["request_id"] != out.Header().Get(RequestIDHeader) {
+					t.Fatalf("HTTP %d, status/audit = %s", out.Code, logs)
+				}
+			})
+		}
+	}
+}
 
 func TestServerFailuresLogMaskedCauseOnceProperty(t *testing.T) {
 	property := func(input []byte) bool {

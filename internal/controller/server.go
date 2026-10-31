@@ -606,7 +606,11 @@ func withRequestLog(
 				if cause == nil {
 					cause = errors.New(http.StatusText(status))
 				}
-				logger.ErrorContext(ctx, "http request failed", "request_id", masker.Mask(rec.id), "method", r.Method, "route", rec.route, "status", status, "err", masker.Mask(cause.Error()))
+				level := slog.LevelError
+				if errors.Is(ctx.Err(), context.Canceled) && errors.Is(cause, context.Canceled) {
+					level = slog.LevelInfo
+				}
+				logger.Log(ctx, level, "http request failed", "request_id", masker.Mask(rec.id), "method", r.Method, "route", rec.route, "status", status, "err", masker.Mask(cause.Error()))
 			}
 			observeHTTPRequest(rec.route, r.Method, status, elapsed)
 			logRequest(ctx, logger, r, rec, status, elapsed, clientIP(r))

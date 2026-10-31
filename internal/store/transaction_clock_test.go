@@ -260,12 +260,13 @@ func TestTransactionClockFailureRollsBackWrites(t *testing.T) {
 }
 
 type clockFailureConnector struct {
-	err       error
-	commitErr error
-	rollbacks int
-	queries   int
-	writes    int
-	commits   int
+	err         error
+	commitErr   error
+	rollbackErr error
+	rollbacks   int
+	queries     int
+	writes      int
+	commits     int
 }
 
 func (c *clockFailureConnector) Connect(context.Context) (driver.Conn, error) {
@@ -316,7 +317,7 @@ func (r *clockValueRows) Next(values []driver.Value) error {
 type clockFailureTx struct{ c *clockFailureConnector }
 
 func (tx clockFailureTx) Commit() error   { tx.c.commits++; return tx.c.commitErr }
-func (tx clockFailureTx) Rollback() error { tx.c.rollbacks++; return nil }
+func (tx clockFailureTx) Rollback() error { tx.c.rollbacks++; return tx.c.rollbackErr }
 
 func TestTransactionRejectsStatementsWithOpenCursor(t *testing.T) {
 	for _, dialect := range []Dialect{DialectSQLite, DialectPostgres} {
