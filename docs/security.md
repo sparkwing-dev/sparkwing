@@ -196,10 +196,14 @@ every job with the runner's own credential within reach. When it serves several
 repositories, a job from one repository can act as the runner and claim another
 repository's jobs in the same team, and with them that repository's pipeline
 secrets, source token and OIDC identity. The isolation unit is the runner, not
-the repository: enroll a runner with `--repos` limited to one repository, or to
+the repository: enroll a shared runner with `--repos` limited to one repository, or to
 repositories that trust each other, and use launcher pools or Sparkwing Cloud,
 which give each claim a fresh pod, where repositories must stay apart. Pools
 that hold reserved secrets already require a launcher.
+
+Personal enrollment may omit `--repos` because personal machines take only
+their owner's asserted runs. They never claim repository-proven work. Shared
+runner enrollment requires repository scopes, which accept only proven work.
 
 A verified run on a host that outlives its jobs (plain-machine runners,
 persistent Kubernetes runners and self-hosted GitHub Actions runners) writes
@@ -333,9 +337,10 @@ trust and records its new requester separately.
 
 Source credentials require live authorized claim access. Team Git credentials
 also require Cloud work or a shared runner of that team, never a personal machine.
-A credential scoped to a repository and a GitHub App token go only to a run
-whose code the host fetches from that repository; an upload, working tree or
-local checkout gets only a host-wide credential.
+Every job credential, including a host-wide credential or GitHub App token,
+requires a matching sealed repository proof and a successful intake GitHub
+compare check. Uploaded, working-tree and local-checkout code receives no
+team credential.
 Local owner credentials remain subject to the repository allow-list. Every
 credential release is audited. See [Git credentials](git-credentials.md).
 

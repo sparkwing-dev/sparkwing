@@ -489,7 +489,9 @@ Nodes use the existing claim, lease and
 fencing rules. The local controller supplies this machine's admission only.
 Other machines register as runners with Cloud. `sparkwing runners add --runner NAME
 --personal --session-stdin --profile work` reads an existing independent account
-session from stdin and reserves the machine for that user's runs. The session
+session from stdin and reserves the machine for that user's asserted runs.
+Omit `--repos` for a personal runner. Repository scopes require proven code,
+which personal machines never claim. The session
 and its CSRF proof stay in memory. After fetching the proof, the command
 attempts logout on enrollment success or failure and saves only the new runner
 credential. Use a dedicated session because logout ends it for every client. A profile backed only by a member token cannot enroll a personal machine.

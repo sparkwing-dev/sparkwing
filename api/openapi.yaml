@@ -1556,7 +1556,6 @@ components:
           type: string
       required:
         - name
-        - repos
       type: object
       x-sparkwing-go-type: controllerwire.EnrollRunnerRequest
     internal.controllerwire.ExchangeResponse:
