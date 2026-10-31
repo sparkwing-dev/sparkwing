@@ -105,7 +105,7 @@ func retryPersonalPlacementUsesSealedWriter(t *testing.T, open func(*testing.T) 
 					s.testOnlyExec(t, `UPDATE runs SET status='failed',finished_at=? WHERE team='a' AND id=?`, s.now().UnixNano(), source)
 					s.testOnlyExec(t, `UPDATE runs SET created_principal='bob',created_subject_kind='account' WHERE team='a' AND id=?`, retry.RunID)
 					authority := capability.AuthorityRef{Kind: capability.AuthoritySession, ID: account}
-					machine, err := s.AsOperator().ProvisionCapability(t.Context(), capability.ProvisionSpec{Kind: capability.ProvisionMachine, Personal: true, Authority: &authority, RegistrationID: "runner:a:personal", Team: "a", Subject: capability.Subject{Kind: capability.SubjectMachine, ID: "personal"}, Repositories: []string{"github.com/acme/*"}, Grants: []capability.Grant{capability.TriggersClaim}, Binding: capability.Binding{Kind: capability.BindingNone}})
+					machine, err := s.AsOperator().ProvisionCapability(t.Context(), capability.ProvisionSpec{Kind: capability.ProvisionMachine, Personal: true, Authority: &authority, RegistrationID: "runner:a:personal", Team: "a", Subject: capability.Subject{Kind: capability.SubjectMachine, ID: "personal"}, Grants: []capability.Grant{capability.TriggersClaim}, Binding: capability.Binding{Kind: capability.BindingNone}})
 					if err != nil {
 						t.Fatal(err)
 					}

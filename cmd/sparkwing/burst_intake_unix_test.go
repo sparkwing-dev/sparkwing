@@ -430,7 +430,7 @@ func TestBurstFixtureSupportsPublicSessionEnrollment(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := manager.EnrollRunner(t.Context(), controllerwire.EnrollRunnerRequest{Name: "desktop", Repos: []string{"example.test/acme/*"}, Personal: true}); err != nil {
+	if _, err := manager.EnrollRunner(t.Context(), controllerwire.EnrollRunnerRequest{Name: "desktop", Personal: true}); err != nil {
 		t.Fatal(err)
 	}
 }
