@@ -115,6 +115,60 @@ become GitHub Latest or move the image `latest` tags. Failed release-list
 lookups stop publication. Manual rebuilds use the selected tag's source and
 the current workflow's publication tools and image recipes.
 
+#### Signed release index
+
+Every public stable release must finish the `release-index` job in
+`.github/workflows/release.yaml`. It reads all GitHub release pages after asset
+publication, preserves the verified existing policy, and signs the exact client
+format with `SPARKWING_UPDATE_SIGNING_KEY`. Only published stable `v0.x` releases
+are added. Twelve-month support windows use GitHub's `published_at`, not the
+recovery date. The job shares `release-publication` with asset publication, so a
+late older release cannot replace a newer index with an old snapshot.
+
+The publisher writes only `versions.json` and `versions.json.sig` in
+`kikd-prod-sparkwing-website`, then invalidates both paths on CloudFront
+`E3V178ZREDVPYN`. It reads back the exact bytes from S3 and the public hostname.
+Objects use a 60-second cache lifetime. Clients can encounter a mismatched pair
+during the two uploads and fail verification until the pair is complete.
+Existing clients retain their last verified index.
+
+AWS authentication uses GitHub OIDC and repository variable
+`SPARKWING_RELEASE_INDEX_ROLE_ARN`. Its role needs GetObject/PutObject on those
+two keys, ListBucket restricted to prefix `versions.json` to establish signature
+absence, and CreateInvalidation/GetInvalidation on that distribution. An empty
+role variable fails the job. The website deploy must exclude both root objects
+before it is enabled. Website documentation manifests and QA indices cannot
+supply production signed policy.
+
+After these changes reach the default branch, repair publication without
+rebuilding assets or creating a release:
+
+```bash
+gh workflow run release.yaml --repo sparkwing-dev/sparkwing --ref main \
+  -f tag=v0.68.2 -F index_only=true -F verify_only=false -F publish_images=false
+```
+
+For the first migration from the legacy unsigned website manifest only, also pass
+`-F bootstrap_index=true`. This requires `index_only=true`, a missing signature,
+and the legacy manifest shape. It never bypasses verification of an existing
+signature or a signed-policy-shaped document. Later runs require the signed
+pair. Tags without public releases are refused. Failed builds, verification-only
+runs and prereleases never publish this stable index.
+
+A run retains the generated pair as `signed-release-index` for seven days,
+including when an upload fails. An interrupted upload may leave mismatched
+objects and block another dispatch. Restore that artifact's matched pair using
+the procedure in [the recovery runbook](design/release-index-recovery.md), then
+rerun the index-only dispatch. Never bootstrap over a damaged signed policy.
+
+Focused evidence for index changes is `go test ./cmd/verify-release`,
+`go test ./bin -run 'TestReleaseIndex|TestTypeScriptReleaseRequiresBothNativeBridges'`,
+the workflow publication/queue/pin contracts in `.sparkwing/jobs`, actionlint,
+shellcheck on the publisher, and `bin/sync-docs.sh --check`. Generator tests use
+the real client verifier. Publisher tests replace AWS and HTTP with local tools
+and prove failed preflight performs no upload or invalidation. These checks do
+not establish production IAM access or hosted publication success.
+
 The five-minute target includes runner queueing and publication. It has not
 yet been measured for this workflow; local fixtures establish its contracts,
 not hosted latency.
@@ -282,7 +336,7 @@ artifact retains those step outcomes and durations but excludes their error text
 
 Pinned actionlint v1.7.12 does not recognize GitHub's `concurrency.queue`.
 Its config ignores only that exact diagnostic in `release.yaml`. The workflow
-contract tests require the publication job's shared group, `queue: max`, and
+contract tests require both publication jobs' shared group, `queue: max`, and
 `cancel-in-progress: false`, and reject uncovered queue use elsewhere in that
 file. Other syntax and workflow checks remain active.
 

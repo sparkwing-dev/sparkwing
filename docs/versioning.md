@@ -82,6 +82,20 @@ the cached one lists, it proceeds with a warning.
 Cached restrictions still apply, and executable signatures and exact pins remain
 required. Controller runners fail closed when no verified policy is available.
 
+Stable release publication owns both public index objects. After the GitHub
+release becomes public, `.github/workflows/release.yaml` runs
+`bin/publish-release-index.sh` with the existing update signing secret. It lists
+all public stable `v0.x` releases, adds missing records with twelve calendar
+months of support from each GitHub publication date, and preserves verified
+minimum-version restrictions, revocations and existing release history.
+Drafts, prereleases and tags without published releases do not enter this index.
+Index publication shares the release publication queue and reads the current
+signed policy inside that queue. Failed lookups or signature checks stop writes.
+The website deploy must reserve `versions.json` and `versions.json.sig` for this
+publisher. QA uses `bin/qaindex` with its separate key and origin.
+See [Delivery](https://github.com/sparkwing-dev/sparkwing/blob/main/DELIVERY.md#signed-release-index)
+for credentials, verification and the index-only recovery dispatch.
+
 A development build skips signed version-policy checks and logs once per
 resolver that the checks are off. This applies to run admission, run pages,
 compatibility queries, engine selection and runner updates. A development build
