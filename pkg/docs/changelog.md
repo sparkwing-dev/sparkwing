@@ -20,7 +20,6 @@ unlock.
 
 ## [Unreleased]
 
-## [v0.68.2] - 2026-10-31
 ### Changed
 
 - **controller (Breaking):** List endpoints that returned whole collections now return cursor pages of 50 records by default, up to 200 per request
@@ -33,44 +32,18 @@ unlock.
   Back up and recreate stores at any other version using the [backup and move-aside instructions](docs/backup-restore.md#schema-compatibility). The baseline records Checkout Session reservation times, removes unused columns and capacity profile pins, waits, contention counters and floors, and enforces financial row shapes plus one open billing interval per award. Staging and production stores must be recreated before this build starts.
 - **release (Breaking):** Sparkwing releases use the native tag-and-publication flow
   Platform deployment is separate. Retire the platform repository's `release-all` pipeline and `bin/trigger-change-deploy.sh` callers when updating that repository.
-- **scaffold:** `const FallbackSDKVersion` pins v0.68.1, so a fresh scaffold compiles against that release.
-- **TypeScript SDK:** The npm package names this repository, which npm provenance requires. Publication refuses major versions above 0, a name or version that does not match the release, and a `latest` tag that would move backwards.
 
 ### Fixed
 
 - **Cloud:** Runner images include pinned, checksum-verified Docker CLI, buildx, and Compose binaries for amd64 and arm64. Pipeline processes keep the sidecar's `DOCKER_HOST`, and `/tmp` supports package managers that create temporary files as an unprivileged user.
-
 - **GitHub App:** Existing-installation discovery survives canceled requests and GitHub API failures within the original browser session and team. The callback navigates once to the picker, and client cancellations log at info level. Connection refusals show their reason without blaming GitHub ownership. An already-used or expired connection explains how to start again.
 - **Cloud:** Unsupported size labels fail at admission or planning with the valid catalogue sizes. Remote requests that mark source as a working tree without a local checkout fail at intake with snapshot instructions instead of repeatedly losing launcher leases. Uploaded committed snapshots remain supported.
 - **GitHub App:** Release subscription refusals name the required `release_tags` filter in their HTTP 400 response
-
 - **GitHub Actions:** Warm runners execute jobs while their trigger owner waits, so runs complete at the default concurrency of one
-
 - **CI:** Standalone runs keep their in-process controller alive through execution and log following, preventing a missing controller socket after admission
 - **runs logs:** Snapshot reads with pending final log segments report `logs incomplete` and exit 3 after printing all available pages. Use `--follow` to wait for the remaining output, including uploads after a job finishes.
-
 - **logs:** Paged reads of capped logs report truncation and name the 64 MiB attempt limit instead of returning a generic server error.
-
 - **metrics:** Completed Cloud jobs without resource samples return an explicit unavailable error instead of an empty success. Observability docs describe the native runtime's missing sampler.
-
-- **GitHub App:** Connection refusals show their reason without blaming GitHub ownership. An already-used or expired connection explains how to start again.
-
-- **schedules:** Invalid cron overrides name the failing field and show a valid hourly example in CLI and controller errors
-
-- **schedules:** The controller embeds IANA time zone data so declarations and overrides accept named zones on images without zoneinfo files
-
-- **Cloud:** Launcher reconciliation reads awards across teams without failing on writer lock order. Pending plans show a safe reconciliation error in run status if synchronization fails. The error clears when work resumes or requeues.
-- **auth:** Refusals name the required grant and how to obtain it
-  Secret writes identify the owner role's `team.admin` grant. Dependency-cache
-  reads explain repository-bound `data.read`, and OIDC minting requires an
-  awarded or delegated job credential with `oidc.mint`. Foreign-team resources
-  remain indistinguishable from absent resources.
-- **runs logs:** Plain and pretty output render persisted runner frames as text
-  Job failures omit raw transition JSON. Retry events include the next attempt
-  ordinal, including `attempt=2`.
-- **teams:** Invitations at the free member cap warn with the configured limit and remedy. Acceptance refusals keep those details in the API and console. The cap remains enforced at acceptance.
-- **billing:** Stripe refund webhooks accept refund objects without `livemode`, using the signed event mode. Replays reverse each refund once.
-- **storage:** Quota refusals name the tier or override, limit, usage and requested growth, with funding, monthly reset and support remedies.
 
 ### Removed
 
@@ -92,6 +65,33 @@ unlock.
   Select the Go executable through `PATH` for sparks resolution and overlay updates.
 - **controller (Breaking):** Removed `--live-log-node-kb`, `--live-log-total-mb`, `--live-log-max-nodes` and `--live-log-idle`
   Live buffers retain fixed limits of 512 KiB per node, 64 MiB total, 1,024 nodes and a 10-minute idle timeout.
+
+## [v0.68.2] - 2026-10-31
+### Changed
+
+- **scaffold:** `const FallbackSDKVersion` pins v0.68.1, so a fresh scaffold compiles against that release.
+- **TypeScript SDK:** The npm package names this repository, which npm provenance requires. Publication refuses major versions above 0, a name or version that does not match the release, and a `latest` tag that would move backwards.
+
+### Fixed
+
+- **GitHub App:** Connection refusals show their reason without blaming GitHub ownership. An already-used or expired connection explains how to start again.
+
+- **schedules:** Invalid cron overrides name the failing field and show a valid hourly example in CLI and controller errors
+
+- **schedules:** The controller embeds IANA time zone data so declarations and overrides accept named zones on images without zoneinfo files
+
+- **Cloud:** Launcher reconciliation reads awards across teams without failing on writer lock order. Pending plans show a safe reconciliation error in run status if synchronization fails. The error clears when work resumes or requeues.
+- **auth:** Refusals name the required grant and how to obtain it
+  Secret writes identify the owner role's `team.admin` grant. Dependency-cache
+  reads explain repository-bound `data.read`, and OIDC minting requires an
+  awarded or delegated job credential with `oidc.mint`. Foreign-team resources
+  remain indistinguishable from absent resources.
+- **runs logs:** Plain and pretty output render persisted runner frames as text
+  Job failures omit raw transition JSON. Retry events include the next attempt
+  ordinal, including `attempt=2`.
+- **teams:** Invitations at the free member cap warn with the configured limit and remedy. Acceptance refusals keep those details in the API and console. The cap remains enforced at acceptance.
+- **billing:** Stripe refund webhooks accept refund objects without `livemode`, using the signed event mode. Replays reverse each refund once.
+- **storage:** Quota refusals name the tier or override, limit, usage and requested growth, with funding, monthly reset and support remedies.
 
 ## [v0.68.1] - 2026-10-30
 ### Changed
