@@ -8,9 +8,9 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
-	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
+	"github.com/sparkwing-dev/sparkwing/internal/limits"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
@@ -32,7 +32,7 @@ func TestNativeHostCapacityStoreCannotReplaceMachineAdmission(t *testing.T) {
 		executed = true
 		return fixture.report(ctx, input, runstate.NodeSuccess)
 	})
-	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), limits.DefaultLease)
 	defer cancel()
 	completion, err := owner.Run(ctx, fixture.Input)
 	if err != nil || executed || completion.Outcome != "failed" {
@@ -62,7 +62,7 @@ func TestNativeHostBindsRealCapacityPerRun(t *testing.T) {
 			}
 			return fixture.report(ctx, input, runstate.NodeSuccess)
 		})
-		ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+		ctx, cancel := context.WithTimeout(t.Context(), limits.DefaultLease)
 		completion, err := owner.Run(ctx, fixture.Input)
 		cancel()
 		if err != nil || completion.Outcome != "success" {
@@ -131,7 +131,7 @@ func TestNativeRunnerSchedulesWithConcurrencyAndOptionalCompute(t *testing.T) {
 				}
 				return fixture.report(ctx, input, runstate.NodeSuccess)
 			})
-			ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
+			ctx, cancel := context.WithTimeout(t.Context(), limits.DefaultLease)
 			var workers sync.WaitGroup
 			defer func() { cancel(); workers.Wait() }()
 			done := make(chan error, 1)
@@ -271,7 +271,7 @@ func TestNativeClaimedJobsContendWithOptionalCompute(t *testing.T) {
 				_, input := claimRemote(t, fixture, id)
 				inputs = append(inputs, input)
 			}
-			ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+			ctx, cancel := context.WithTimeout(t.Context(), limits.DefaultLease)
 			var workers sync.WaitGroup
 			defer func() { cancel(); workers.Wait() }()
 			done := make(chan error, 2)
