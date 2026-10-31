@@ -129,6 +129,7 @@ func Status(ctx context.Context, h Host) (State, error) {
 		}
 	}
 	if err != nil {
+		state.Enabled = false
 		return state, fmt.Errorf("crontimer: native timer activation is unknown: %w", err)
 	}
 	state.Detail = "native timer is installed but inactive or disabled"
