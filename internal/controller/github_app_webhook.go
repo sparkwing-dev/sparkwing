@@ -1020,11 +1020,17 @@ func (s *Server) startGitHubAppRun(
 		request.PullRequest = runspec.Optional[runspec.PullRequest]{Set: true, Value: runspec.PullRequest{Number: int64(pr.Number), Action: pr.Action, BaseRepo: key, HeadRepo: head, Fork: head != key, BaseRef: pr.BaseRef, BaseSHA: pr.BaseSHA, HeadRef: pr.HeadRef, HeadSHA: pr.HeadSHA, Label: in.env["GITHUB_LABEL"], Merged: runspec.Optional[bool]{Set: in.env["GITHUB_MERGED"] != "", Value: in.env["GITHUB_MERGED"] == "true"}}}
 	}
 	_, credentialVerified, err := s.verifyIntakeSourceCredential(r.Context(), tenant.Team(), request)
+	unverifiedReason := ""
 	if err != nil {
-		return githubAppRun{}, err
+		var unavailable *intakeCompareUnavailable
+		if !errors.As(err, &unavailable) {
+			return githubAppRun{}, err
+		}
+		// safety: deliveries are not retried, so an outage must seal less trust instead of dropping the run.
+		unverifiedReason = "Run is unverified because " + unavailable.Error()
 	}
 	result, err := admitWithFlood(r.Context(), s, func(ctx context.Context) (store.AdmissionResult, error) {
-		return tenant.AdmitGitHubAppRun(ctx, store.GitHubAppAdmission{Request: request, Installation: installation, Subscription: plan.subscription, Automation: plan.automation, Event: r.Header.Get("X-GitHub-Event"), SourceCredentialVerified: credentialVerified})
+		return tenant.AdmitGitHubAppRun(ctx, store.GitHubAppAdmission{Request: request, Installation: installation, Subscription: plan.subscription, Automation: plan.automation, Event: r.Header.Get("X-GitHub-Event"), SourceCredentialVerified: credentialVerified, UnverifiedReason: unverifiedReason})
 	})
 	if errors.Is(err, store.ErrGitHubAppAutomationRevoked) {
 		return githubAppRun{Pipeline: plan.pipeline, Status: "ignored"}, nil

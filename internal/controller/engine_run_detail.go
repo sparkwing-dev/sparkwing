@@ -81,6 +81,9 @@ func runDetailResponse(target capability.Target, facts RunStatusFacts) (controll
 		Notices: append([]engineid.Notice{}, facts.Notices...), StartedAt: run.StartedAt,
 		FinishedAt: run.FinishedAt, CancelRequestedAt: run.CancelRequestedAt,
 	}
+	if reason := run.Request.Provenance.UnverifiedReason(); reason != "" {
+		detail.Notices = append(detail.Notices, engineid.Notice{Kind: engineid.NoticeUnverified, Reason: reason})
+	}
 	if run.Spec != nil {
 		if run.Spec.Request.RunID != run.Request.RunID || run.Spec.Request.Request.Team != target.Team || run.Spec.Request.Hash != run.Request.Hash {
 			return controllerwire.RunDetail{}, errors.New("invalid persisted run seals")

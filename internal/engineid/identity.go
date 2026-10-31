@@ -56,6 +56,7 @@ const (
 	NoticePinDisabled       NoticeKind = "engine_pin_disabled"
 	NoticePolicyUnavailable NoticeKind = "version_policy_unavailable"
 	NoticeUnclaimed         NoticeKind = "unclaimed_work"
+	NoticeUnverified        NoticeKind = "unverified_run"
 	NoticeCreditHold        NoticeKind = "credit_hold"
 	NoticeNoEligibleRunner  NoticeKind = "no_eligible_runner"
 )

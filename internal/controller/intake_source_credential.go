@@ -3,6 +3,8 @@ package controller
 import (
 	"context"
 	"errors"
+	"fmt"
+	"net"
 	"strconv"
 	"strings"
 
@@ -12,6 +14,12 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/source"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
+
+type intakeCompareUnavailable struct {
+	error
+}
+
+func (e *intakeCompareUnavailable) Unwrap() error { return e.error }
 
 func (s *Server) verifyIntakeSourceCredential(ctx context.Context, team store.Team, request runspec.Request) (store.FetchedRepository, bool, error) {
 	here := request.Options.Runner.Set && request.Options.Runner.Value.Kind == runspec.RunnerHere
@@ -87,8 +95,15 @@ func (s *Server) verifyIntakeSourceCredential(ctx context.Context, team store.Te
 			}
 		}
 		verified, err := s.githubApp.client.CommitReachable(ctx, installation.InstallationID, id, repo.Owner, repo.Name, comparison.sha, ref)
-		if err != nil || !verified {
+		if err != nil {
+			var network net.Error
+			if errors.Is(err, githubapp.ErrUnavailable) || errors.As(err, &network) {
+				return store.FetchedRepository{}, false, &intakeCompareUnavailable{fmt.Errorf("GitHub compare unavailable: %w", err)}
+			}
 			return store.FetchedRepository{}, false, err
+		}
+		if !verified {
+			return store.FetchedRepository{}, false, nil
 		}
 	}
 	// safety: repository proof requires App-selected code and a GitHub reachability check.

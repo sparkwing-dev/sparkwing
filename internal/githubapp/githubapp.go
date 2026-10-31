@@ -62,6 +62,8 @@ const (
 var (
 	ErrRejected     = errors.New("githubapp: github rejected the credential")
 	ErrNotInstalled = errors.New("githubapp: the app is not installed there")
+	// ErrUnavailable means GitHub answered with a server error.
+	ErrUnavailable = errors.New("githubapp: GitHub is unavailable")
 	// ErrPermissionMissing means the installation has not granted a
 	// permission the request needs, as when its owner has not yet accepted
 	// one the App added.
@@ -71,6 +73,10 @@ var (
 type apiError struct {
 	op     string
 	status int
+}
+
+func (e *apiError) Is(target error) bool {
+	return target == ErrUnavailable && e.status >= http.StatusInternalServerError
 }
 
 func (e *apiError) Error() string {
@@ -818,7 +824,7 @@ func (c *Client) getJSON(ctx context.Context, path, authorization string, out an
 	case status == http.StatusUnauthorized || status == http.StatusForbidden:
 		return fmt.Errorf("%w: %s answered %d", ErrRejected, req.URL.Path, status)
 	case status != http.StatusOK:
-		return fmt.Errorf("githubapp: %s answered %d", req.URL.Path, status)
+		return &apiError{op: req.URL.Path, status: status}
 	}
 	return nil
 }

@@ -14,6 +14,7 @@ import (
 // GitHubAppAdmission carries provider-verified delivery facts from the trusted webhook adapter.
 type GitHubAppAdmission struct {
 	SourceCredentialVerified bool
+	UnverifiedReason         string
 	Request                  runspec.Request
 	Installation             GitHubAppInstallation
 	Subscription             *GitHubAppTrigger

@@ -1225,3 +1225,34 @@ controller marks it as the owner's machine and both source envelopes carry
 valid, unproven provenance. Its remote-source check still applies. Shared enrollment still requires nonempty repository
 patterns. Existing explicit scopes keep the proven-only rule on every host.
 This narrows the earlier proposal, which also allowed unscoped shared runners.
+
+
+## 2026-10-31 Korey approved: compare outages, trust restrictions and store reset
+
+This ratifies the trust restrictions from the 2026-10-30 sealed repository proof
+and host-classification decision, including its personal enrollment follow-on.
+
+- F3: when the intake-time GitHub compare cannot reach GitHub, times out or
+  receives a 5xx, accept the webhook delivery because GitHub does not retry it.
+  Admit the run sealed as unverified/asserted, with no repository proof, job
+  credentials, proven-repository secrets or proven OIDC claims. Run status says
+  why verification failed. Definite negative answers, including diverged,
+  behind and 404, retain their existing behavior.
+- Personal machines enrolled with `--repos` get no work. Their host class
+  rejects proven work and their repository scope rejects unproven work.
+  Self-hosted launchers set to `any` launch only proven runs. Host-wide Git
+  credentials no longer reach uploaded runs.
+- Personal runners may enroll without `--repos` and execute only their owner's
+  own unproven work. The F5 retry edge is accepted: a retry retains the original
+  sealed writer, so a personal runner follows that owner even when another
+  authorized member requested the retry.
+- v0.68.3 ships schema 28 as a documented store reset. Before 1.0, schema
+  changes may require moving the local store aside or recreating a server
+  database. The binary refuses a mismatched store and gives the move-aside
+  remedy for an older local store. Real forward migrations start after launch.
+- GitHub Actions workflows for repositories bound to the wiped production stay
+  disabled until the final production wipe, then those repositories are
+  re-registered.
+- The final production wipe to schema 28 is approved after v0.68.3 is cut and
+  the staging grid is clean. This decision authorizes that later operation.
+  This change performs no deployment or wipe.

@@ -426,7 +426,7 @@ func TestOlderSchemaRequiresBackupBeforeDiscard(t *testing.T) {
 	if err == nil {
 		t.Fatal("accepted an older schema")
 	}
-	for _, want := range []string{"older than this binary", "back up the store", "only for a disposable store"} {
+	for _, want := range []string{"older than this binary", "back up the store", "move ", "-wal", "-shm", "aside"} {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("error %q lacks %q", err, want)
 		}
