@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
+	"github.com/sparkwing-dev/sparkwing/internal/lease"
 	"github.com/sparkwing-dev/sparkwing/internal/limits"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
@@ -119,9 +120,7 @@ func (h *nodeExecutor) recordStep(ctx context.Context, input NodeInput, spec run
 			report.StartedAt = &finished
 		}
 		report.FinishedAt = &finished
-		var cancel context.CancelFunc
-		ctx, cancel = context.WithTimeout(context.WithoutCancel(ctx), limits.HeartbeatTimeout)
-		defer cancel()
+		ctx = lease.ExecutionContext(ctx)
 	}
 	if err := h.deps.Store.RecordStep(ctx, report); err != nil {
 		return &executorStepRecordError{err: err}
