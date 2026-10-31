@@ -449,8 +449,15 @@ immutable on replay, and the proxied reader verifies both before returning bytes
 `LogSegmentObjectKey` is shared with signing so a commit cannot substitute an
 object from another stream. Segments are contiguous and immutable. Final commits
 seal even empty streams, and only identical final bodies replay. Final-tail grace
-uses the persisted finish time and original writer. Completed trigger, plan and
-eval units accept only their awarded credential's logs before `LogSealGrace`
+uses the persisted finish time and original writer. Application retries retain
+the claim and advance the attempt ordinal. Each finished attempt accepts its
+original writer's tail within its own grace while the claim generation still
+matches, even after a later attempt starts or seals. Authentication accounts for
+all unsealed streams belonging to that claim. Submission checks the named
+attempt's holder and credential, rather than substituting the node's latest
+attempt. Every registered stream must seal successfully for a finished aggregate
+to complete. Completed trigger, plan and eval units accept only their awarded
+credential's logs before `LogSealGrace`
 ends. The current unit generation and eval source generation must still match.
 Credential ancestry stays live, and the allowance cannot renew or execute work.
 Maintenance waits for that grace before sealing an unfinished owner stream as

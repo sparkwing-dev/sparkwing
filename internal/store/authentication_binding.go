@@ -104,6 +104,13 @@ func authenticationNodeTx(ctx context.Context, tx *storeTx, c capability.Capabil
 		if err != nil {
 			return err
 		}
+		// safety: a retry's tail can still be uploading after the last attempt seals.
+		return tx.QueryRowContext(ctx, `SELECT NOT EXISTS (
+			SELECT 1 FROM log_streams l JOIN node_attempts a
+			ON a.team=l.team AND a.run_id=l.run_id AND a.node_id=l.node_id AND a.attempt=l.attempt AND a.generation=l.generation
+			WHERE l.team=? AND l.run_id=? AND l.subject_kind='job_attempt' AND l.node_id=? AND l.generation=?
+			AND (?=0 OR l.attempt=?) AND a.holder=? AND a.capability_prefix=? AND l.sealed_at IS NULL)`,
+			c.Team, c.Binding.RunID, c.Binding.NodeID, out.Current.Generation, c.Binding.Attempt, c.Binding.Attempt, c.Binding.Holder, c.Prefix).Scan(&out.LogSealed)
 	}
 	var sealed int
 	err = tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM log_streams WHERE team=? AND run_id=? AND subject_kind='job_attempt' AND node_id=? AND generation=? AND attempt=? AND sealed_at IS NOT NULL`, c.Team, c.Binding.RunID, c.Binding.NodeID, out.Current.Generation, out.Current.Attempt).Scan(&sealed)

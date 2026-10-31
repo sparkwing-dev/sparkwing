@@ -50,16 +50,16 @@ func (s *Server) logSubmission(r *http.Request, a capability.Authorized, propose
 	subject := blob.LogSubject{Team: a.Target.Team, RunID: a.Target.RunID}
 	if r.PathValue("job") != "" {
 		subject.Kind = blob.LogJobAttempt
-		e := s.engineController
-		tenant, err := e.runTransactions(r.Context(), a.Target.Team)
-		if err != nil {
-			return nil, subject, err
+		if proposed.Attempt != nil {
+			// safety: retry tails name a finished attempt whose stored writer and grace authorize the upload.
+			subject.Attempt = &runspec.AttemptIdentity{
+				Team: a.Target.Team, RunID: a.Target.RunID, NodeID: a.Target.NodeID,
+				Attempt: proposed.Attempt.Attempt, Generation: proposed.Attempt.Generation,
+			}
+			if a.Principal.Capability.Unit == capability.UnitNode {
+				subject.Attempt.Generation = a.Binding.Generation
+			}
 		}
-		attempt, err := reportingAttempt(r.Context(), tenant, a)
-		if err != nil {
-			return nil, subject, err
-		}
-		subject.Attempt = &attempt
 	} else {
 		c := a.Principal.Capability
 		if c.Unit != capability.UnitTrigger && c.Unit != capability.UnitPlan && c.Unit != capability.UnitEval {
