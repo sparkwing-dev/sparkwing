@@ -19,6 +19,7 @@ func TestKubernetesE2EChartRender(t *testing.T) {
 		}
 	}
 	cmd := exec.Command("bash", "k8s-e2e-render-test.sh")
+	cmd.Env = append(os.Environ(), "SPARKWING_K8S_E2E_TAG=123")
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("offline Kubernetes harness: %v\n%s", err, output)
@@ -35,7 +36,8 @@ func TestKubernetesE2EChartRender(t *testing.T) {
 				Template struct {
 					Spec struct {
 						Containers []struct {
-							Args []string `yaml:"args"`
+							Args  []string `yaml:"args"`
+							Image string   `yaml:"image"`
 						} `yaml:"containers"`
 						Volumes []struct {
 							Projected struct {
@@ -60,10 +62,18 @@ func TestKubernetesE2EChartRender(t *testing.T) {
 		}
 		component := doc.Metadata.Labels["app.kubernetes.io/component"]
 		counts[component]++
+		wantImage := "offline.invalid/test/sparkwing-" + component + ":123"
+		if image := doc.Spec.Template.Spec.Containers[0].Image; image != wantImage {
+			t.Errorf("%s image = %q, want %q", component, image, wantImage)
+		}
 		switch component {
 		case "controller":
 			args := doc.Spec.Template.Spec.Containers[0].Args
-			if !slices.Contains(args, "--deployment=team") || !slices.Contains(args, "--require-auth") || slices.Contains(args, "--insecure-cookies") {
+			deployment := "--deployment=local"
+			if counts[component] == 2 {
+				deployment = "--deployment=team"
+			}
+			if !slices.Contains(args, deployment) || !slices.Contains(args, "--require-auth") || slices.Contains(args, "--insecure-cookies") {
 				t.Fatalf("controller args: %v", args)
 			}
 			secrets := []string{}
@@ -72,10 +82,13 @@ func TestKubernetesE2EChartRender(t *testing.T) {
 					secrets = append(secrets, source.Secret.Name)
 				}
 			}
-			for _, name := range []string{"sparkwing-bootstrap-token", "sparkwing-e2e-credentials", "sparkwing-secrets-key"} {
+			for _, name := range []string{"sparkwing-bootstrap-token", "sparkwing-secrets-key"} {
 				if !slices.Contains(secrets, name) {
 					t.Errorf("controller is missing credential secret %s", name)
 				}
+			}
+			if slices.Contains(secrets, "sparkwing-e2e-credentials") != (counts[component] == 2) {
+				t.Errorf("license must be mounted only after team provisioning: %v", secrets)
 			}
 		case "runner":
 		default:

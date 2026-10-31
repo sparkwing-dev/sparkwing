@@ -41,6 +41,11 @@ unlock.
 
 ### Fixed
 
+- **kubernetes:** The E2E harness selects the controller data PVC, preserves numeric image tags and provisions its team before enabling licensed mode
+
+- **cli:** Session runner enrollment and logout work through HTTP loopback port-forwards
+  The client sends the licensed controller's `__Host-sw_csrf` cookie with the session proof.
+
 - **controller:** Failed-only retries reuse successful jobs on Cloud
   Reused jobs finish with zero attempts. Their outputs and artifacts feed dependents in the new run instead of releasing the jobs for fresh execution.
 - **runner:** Slow step-completion writes no longer fail otherwise successful jobs

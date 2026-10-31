@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"net/http"
+	"net/http/httptest"
 	"testing"
 	"testing/quick"
 	"time"
@@ -59,5 +60,42 @@ func TestPersonalEnrollmentTransportNeverPromotesCapabilityAncestryProperty(t *t
 	}
 	if err := quick.Check(property, &quick.Config{MaxCount: 32}); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestRunnerSessionEnrollmentAndLogoutOverLoopbackHTTP(t *testing.T) {
+	for _, personal := range []bool{false, true} {
+		t.Run(map[bool]string{false: "shared", true: "personal"}[personal], func(t *testing.T) {
+			cipher, err := secrets.NewCipher(make([]byte, secrets.KeySize))
+			if err != nil {
+				t.Fatal(err)
+			}
+			e, _ := engineServerFixture(t, deploymenttest.Team(t), func(s *Server) { s.WithSecretsCipher(cipher) })
+			engineSQL(t, e.Store, `INSERT INTO accounts(id,email,created_at,updated_at) VALUES ('account','a@example.test',1,1)`)
+			engineSQL(t, e.Store, `INSERT INTO memberships(team,account_id,role,created_at) VALUES ('a','account','owner',1)`)
+			raw, _, _, err := e.Store.AsOperator().CreateAccountSession(t.Context(), store.Account{ID: "account"}, "a", time.Hour)
+			if err != nil {
+				t.Fatal(err)
+			}
+			server := httptest.NewServer(e.Server.Handler())
+			defer server.Close()
+			manager, err := client.NewSessionRunnerTokenManager(t.Context(), client.EngineOptions{URL: server.URL, HTTP: server.Client()}, raw)
+			if err != nil {
+				t.Fatal(err)
+			}
+			enrolled, enrollErr := manager.EnrollRunner(t.Context(), controllerwire.EnrollRunnerRequest{Name: "loopback", Repos: []string{"github.com/acme/*"}, Personal: personal})
+			logoutErr := manager.Logout(t.Context())
+			if enrollErr != nil {
+				t.Errorf("HTTP loopback enrollment: %v", enrollErr)
+			} else if enrolled.Capability == "" {
+				t.Error("enrollment returned no runner credential")
+			}
+			if logoutErr != nil {
+				t.Errorf("HTTP loopback logout: %v", logoutErr)
+			}
+			if _, err := e.Store.AsOperator().LookupSession(t.Context(), raw); err == nil {
+				t.Error("logout left enrollment session live")
+			}
+		})
 	}
 }

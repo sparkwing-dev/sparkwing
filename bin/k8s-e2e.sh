@@ -91,7 +91,8 @@ usage() {
 usage: bin/k8s-e2e.sh [--preflight]
 
 SPARKWING_K8S_E2E_LICENSE_FILE must name a signed multi-team license.
-The test installs a team deployment; sessions require that licensed mode.
+The test provisions its team in local mode, then mounts the license and switches
+to team mode before session enrollment.
 
 Uploads a committed source bundle, then runs the Sparkwing controller/runner golden path against an explicit
 Kubernetes context. It requires caller-supplied image coordinates and an exact
@@ -329,12 +330,10 @@ write_bootstrap_values() {
 fullnameOverride: sparkwing-e2e
 controller:
   externalURL: http://sparkwing-e2e-controller.${namespace}.svc.cluster.local
-  deployment: team
-  credentialsSecret:
-    name: sparkwing-e2e-credentials
+  deployment: local
   image:
     repository: ${image_prefix}sparkwing-controller
-    tag: $image_tag
+    tag: "$image_tag"
     pullPolicy: $image_pull_policy
   bootstrapAdminToken:
     name: sparkwing-bootstrap-token
@@ -352,7 +351,7 @@ sparkwing-runner-bundle:
     replicas: 1
     image:
       repository: ${image_prefix}sparkwing-runner
-      tag: $image_tag
+      tag: "$image_tag"
       pullPolicy: $image_pull_policy
     labels: [cluster]
     maxClaimsBeforeRestart: 0
@@ -364,6 +363,10 @@ bootstrap_values="$artifact_dir/values-bootstrap.yaml"
 authenticated_values="$artifact_dir/values-authenticated.yaml"
 write_bootstrap_values "$bootstrap_values"
 cat >"$authenticated_values" <<'EOF'
+controller:
+  deployment: team
+  credentialsSecret:
+    name: sparkwing-e2e-credentials
 sparkwing-runner-bundle:
   runner:
     enabled: true
@@ -409,7 +412,9 @@ ready_pod_identity() {
 
 controller_deployment="$(resource_name deployment controller)"
 controller_service="$(resource_name service controller)"
-controller_pvc="$(resource_name pvc controller)"
+controller_pvc="$(kube --namespace "$namespace" get deployment "$controller_deployment" \
+  -o jsonpath='{.spec.template.spec.volumes[?(@.name=="data")].persistentVolumeClaim.claimName}')"
+[[ -n "$controller_pvc" ]] || die "controller deployment has no data PVC"
 
 kube --namespace "$namespace" wait deployment \
   -l "app.kubernetes.io/instance=$release_name" \
@@ -452,6 +457,13 @@ team_response="$(curl --fail --silent --show-error --max-time 10 \
   "http://127.0.0.1:${controller_port}/api/v1/operator/teams")"
 admin_token="$(jq -er '.capability' <<<"$team_response")"
 account_id="$(jq -er '.account_id' <<<"$team_response")"
+helm_e2e upgrade "$release_name" "$repo_root/charts/sparkwing-full" \
+  --namespace "$namespace" -f "$bootstrap_values" -f "$authenticated_values" \
+  --set sparkwing-runner-bundle.runner.enabled=false --timeout 5m --wait
+stop_forwards
+controller_port=""
+start_forward "$controller_service" 80 controller-team
+controller_port=$forward_port
 enrollment_session="$(kube --namespace "$namespace" exec "deployment/$controller_deployment" -- \
   /usr/local/bin/sparkwing-controller admin session --operator "$account_id" --team k8s-e2e \
   --reason 'Kubernetes E2E runner enrollment' --output plain)"

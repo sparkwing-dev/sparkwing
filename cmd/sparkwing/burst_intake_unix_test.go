@@ -326,7 +326,7 @@ func burstIntakeDeploymentController(t *testing.T, endpoint string, cfg deployme
 	})
 	var server *controller.Server
 	options = append(options, store.WithPolicies(func(state *store.Store) (store.Policies, error) {
-		server = controller.NewDeployment(state, cfg, nil).WithSecretsCipher(cipher).WithDashboard(controller.Dashboard{InsecureCookies: strings.HasPrefix(endpoint, "http://")}).WithDataObjects(objects)
+		server = controller.NewDeployment(state, cfg, nil).WithSecretsCipher(cipher).WithDashboard(controller.Dashboard{}).WithDataObjects(objects)
 		return server.StorePolicies(), nil
 	}))
 	state, err := teststore.Open(filepath.Join(t.TempDir(), "controller.db"), options...)
@@ -432,6 +432,12 @@ func TestBurstFixtureSupportsPublicSessionEnrollment(t *testing.T) {
 	}
 	if _, err := manager.EnrollRunner(t.Context(), controllerwire.EnrollRunnerRequest{Name: "desktop", Personal: true}); err != nil {
 		t.Fatal(err)
+	}
+	if err := manager.Logout(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := state.AsOperator().LookupSession(t.Context(), session); err == nil {
+		t.Fatal("logout left enrollment session live")
 	}
 }
 
