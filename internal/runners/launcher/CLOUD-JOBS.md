@@ -312,6 +312,15 @@ bootstrap mount is absent from Docker. Pipeline execution starts after source
 acquisition. Plan resolves the exact SDK pin. Eval and work use the accepted
 engine identity.
 
+Each job pod has its own DinD daemon and fresh writable storage. Docker image
+layers, BuildKit state and `RUN --mount=type=cache` directories can be reused
+within that job. They end with the pod. A later job gets a separate daemon and
+empty cache, even if it reuses the same node within a run. Cross-job build-layer
+reuse requires an explicit external cache, such as buildx registry
+`--cache-to` and `--cache-from`. The runner image includes buildx. See
+[Fast builds](../../../docs/fast-builds.md#reuse-build-layers-across-cloud-jobs)
+for a registry-cache example using the `docker-container` driver.
+
 The immutable Secret contains `bootstrap` and `award.json`. The metadata carries
 the awarded engine, complete source projection, binding, CPU and memory as
 `engine`, `source`, `binding`, `cpu_cores` and `memory_bytes`. The bootstrap is

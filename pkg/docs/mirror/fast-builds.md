@@ -30,12 +30,37 @@ RUN --mount=type=cache,target=/go/pkg/mod \
     CGO_ENABLED=0 go build -o /out/server ./cmd/server
 ```
 
-The cache mounts persist across builds on the same BuildKit daemon (local
-docker, or the runner pod's DinD). They survive image-layer
-invalidation - exactly the opposite of a `COPY`-cached `RUN go build`.
+The cache mounts persist across builds on the same BuildKit builder. On Cloud,
+each job pod gets a separate Docker-in-Docker (DinD) daemon and fresh storage.
+Builds within that job can reuse its cache. A later job starts with an empty
+cache, even on the same node or in the same run. The timings above require a
+warm builder.
+
+Cache mounts survive image-layer invalidation, so a changed source file can
+still reuse Go's compiler cache within the same job.
 
 Same pattern works for Rust (`/usr/local/cargo/registry`,
 `/app/target`), Node (`/app/node_modules`), Maven (`~/.m2`), etc.
+
+### Reuse build layers across Cloud jobs
+
+Export build layers to a registry and import them in the next job. The runner
+image includes buildx. After authenticating to your registry with `docker login`,
+create a builder with the `docker-container` driver:
+
+```bash
+docker buildx create --name cloud-build --driver docker-container --use
+docker buildx build --builder cloud-build \
+  --cache-from type=registry,ref=registry.example/team/app:buildcache \
+  --cache-to type=registry,ref=registry.example/team/app:buildcache,mode=max \
+  --tag registry.example/team/app:latest --push .
+```
+
+Use a cache reference separate from the output image tag. Each job must import
+and export it explicitly. This reuses build layers, while the Dockerfile's
+`RUN --mount=type=cache` directories remain local to the builder. See Docker's
+[registry cache documentation](https://docs.docker.com/build/cache/backends/registry/)
+for supported options and driver requirements.
 
 ## 2. Don't push to registries you don't need
 
