@@ -274,7 +274,7 @@ func TestBillingModelControllerWaitlistsThe101stAccount(t *testing.T) {
 	}
 	e, _ := engineServerFixture(t, deploymenttest.Team(t), func(s *Server) { s.WithSecretsCipher(cipher) })
 	zero := 0
-	if err := e.Store.AsOperator().WriteSignUpSettings(t.Context(), teststore.OperatorAuthorized(t, e.Store, ""), store.SignUpSettingsChange{HourlyLimit: &zero, DailyLimit: &zero, HourlyWarn: &zero, GitHubMinAccountDays: &zero, FreeTeamMembers: &zero}); err != nil {
+	if err := e.Store.AsOperator().WriteSignUpSettings(t.Context(), teststore.OperatorAuthorized(t, e.Store, ""), store.SignUpSettingsChange{HourlyLimit: &zero, DailyLimit: &zero, HourlyWarn: &zero, GitHubMinAccountDays: &zero}); err != nil {
 		t.Fatal(err)
 	}
 	s := e.Server.withProvider(store.ProviderGoogle, billingIdentityProvider{}, []string{"https://app.test/callback"})

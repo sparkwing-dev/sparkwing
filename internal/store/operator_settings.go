@@ -77,7 +77,6 @@ func (o *Operator) WriteSignUpSettings(ctx context.Context, a capability.Authori
 			{req.DailyLimit, &g.Limits.DailyLimit},
 			{req.HourlyWarn, &g.Limits.HourlyWarn},
 			{req.GitHubMinAccountDays, &g.Limits.GitHubMinAccountDays},
-			{req.FreeTeamMembers, &g.Limits.FreeTeamMembers},
 		} {
 			if field.supplied != nil {
 				if *field.supplied < 0 {

@@ -461,11 +461,6 @@ function InviteForm({
       </form>
       {created ? (
         <div className="px-4 pb-4 space-y-2">
-          {created.warning ? (
-            <p role="status" className="text-sm text-[var(--warning)]">
-              {created.warning}
-            </p>
-          ) : null}
           <div className="text-xs text-[var(--muted)]">
             {created.email_sent
               ? "Emailed an invitation to "

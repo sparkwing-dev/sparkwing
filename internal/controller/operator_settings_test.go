@@ -70,7 +70,7 @@ func (f *operatorSettingsFixture) WriteSignUpSettings(_ context.Context, a capab
 	for _, field := range []struct {
 		in  *int
 		out *int
-	}{{req.HourlyLimit, &f.gate.Limits.HourlyLimit}, {req.DailyLimit, &f.gate.Limits.DailyLimit}, {req.HourlyWarn, &f.gate.Limits.HourlyWarn}, {req.GitHubMinAccountDays, &f.gate.Limits.GitHubMinAccountDays}, {req.FreeTeamMembers, &f.gate.Limits.FreeTeamMembers}} {
+	}{{req.HourlyLimit, &f.gate.Limits.HourlyLimit}, {req.DailyLimit, &f.gate.Limits.DailyLimit}, {req.HourlyWarn, &f.gate.Limits.HourlyWarn}, {req.GitHubMinAccountDays, &f.gate.Limits.GitHubMinAccountDays}} {
 		if field.in != nil {
 			*field.out = *field.in
 		}
@@ -230,6 +230,7 @@ func TestOperatorSettingsHTTPInvalidBodiesDoNotWrite(t *testing.T) {
 		{"limits", `{"limits":{"unknown":1}}`},
 		{"signups", `{}`},
 		{"signups", `{"mode":"invalid"}`},
+		{"signups", `{"mode":"open","free_team_members":10}`},
 		{"signups", `{"mode":"waitlist","actor":"forged"}`},
 		{"object-store/settings", `{"run_retention_days":-1}`},
 		{"object-store/settings", `{"default_tier":"unknown"}`},

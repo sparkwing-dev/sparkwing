@@ -79,7 +79,6 @@ type signUpLimitsJSON struct {
 	DailyLimit           int `json:"daily_limit"`
 	HourlyWarn           int `json:"hourly_warn"`
 	GitHubMinAccountDays int `json:"github_min_account_days"`
-	FreeTeamMembers      int `json:"free_team_members"`
 }
 
 type signUpCountsJSON struct {
@@ -120,7 +119,6 @@ func (s *Server) signUpStatus(ctx context.Context, now time.Time) (signUpStatusJ
 		Limits: signUpLimitsJSON{
 			HourlyLimit: g.Limits.HourlyLimit, DailyLimit: g.Limits.DailyLimit,
 			HourlyWarn: g.Limits.HourlyWarn, GitHubMinAccountDays: g.Limits.GitHubMinAccountDays,
-			FreeTeamMembers: g.Limits.FreeTeamMembers,
 		},
 		Counts:          signUpCountsJSON{LastHour: counts.LastHour, LastDay: counts.LastDay, Waitlisted: counts.Waitlisted, Admitted: counts.Admitted},
 		VelocityWarning: g.Limits.HourlyWarn > 0 && counts.LastHour > g.Limits.HourlyWarn,

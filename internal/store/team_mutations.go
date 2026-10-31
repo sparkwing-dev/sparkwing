@@ -114,15 +114,6 @@ func (t *Tenant) CreateAuthorizedInvitation(ctx context.Context, a capability.Au
 				return err
 			}
 		}
-		gate, err := scanSignUpGate(tx.QueryRowContext(ctx, signUpGateSelect))
-		if err != nil {
-			return err
-		}
-		if err := checkTeamRoomTx(ctx, tx, t.team, gate.Limits.FreeTeamMembers); errors.Is(err, ErrTeamFull) {
-			out.Warning = "Invitation created. Membership is checked when accepted. " + err.Error()
-		} else if err != nil {
-			return err
-		}
 		return nil
 	})
 	if err != nil {

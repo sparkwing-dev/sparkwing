@@ -16,7 +16,6 @@
   ],
   "invitation": [
     "invitation_closed",
-    "invitation_not_found",
-    "team_full"
+    "invitation_not_found"
   ]
 }

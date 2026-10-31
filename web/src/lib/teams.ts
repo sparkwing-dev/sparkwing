@@ -239,7 +239,6 @@ export interface CreatedInvitation {
   // False when the controller mailed nothing: no mail service, or the
   // address reached its daily limit. The link still works either way.
   email_sent?: boolean;
-  warning?: string;
 }
 
 export type TokenFamily = "member" | "machine";

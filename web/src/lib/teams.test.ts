@@ -302,17 +302,6 @@ describe("team administration calls", () => {
     });
   });
 
-  it("keeps the configured member limit and remedy from an acceptance refusal", async () => {
-    const message = "free team member limit reached: 3 of 3 members; ask a team owner to add funds or remove a member; support@sparkwing.dev";
-    respond = () => new Response(JSON.stringify({ error: {
-      code: "forbidden", message, details: { reason: "team_full" },
-    } }), { status: 403 });
-    await assert.rejects(teams.acceptInvitation("inv1"), {
-      message: `Accept invitation: ${message}`,
-      reason: "team_full",
-    });
-  });
-
   it("has recovery advice for each fixed invitation refusal", () => {
     const reasons = (
       JSON.parse(
@@ -321,7 +310,7 @@ describe("team administration calls", () => {
     ).invitation;
     assert.deepEqual(
       Object.keys(teams.invitationRefusalText).sort(),
-      reasons.filter((reason) => reason !== "team_full").sort(),
+      reasons.sort(),
     );
   });
 

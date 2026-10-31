@@ -11,13 +11,9 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
 )
 
-// A team held over a disputed payment keeps nothing that payment bought: it
-// stores as an unfunded team and is held to the free member limit, until the
-// operator releases the hold.
-func TestAFrozenTeamIsNeitherFundedNorExemptFromTheMemberLimit(t *testing.T) {
+func TestAFrozenTeamIsUnfundedAndCanStillAddMembers(t *testing.T) {
 	ctx := context.Background()
 	st := storetest.Open(t)
-	setLimits(t, st, store.SignUpLimits{FreeTeamMembers: 2})
 	owner := signIn(t, st, "o", "o@example.com")
 	team := owner.Account.ActiveTeam
 	join := func(sub, email string) error {
@@ -39,8 +35,10 @@ func TestAFrozenTeamIsNeitherFundedNorExemptFromTheMemberLimit(t *testing.T) {
 	if got := standing(t, st, team); got.Tier == "funded" {
 		t.Fatalf("a frozen team with a positive balance = %+v, want not funded", got)
 	}
-	if err := join("m1", "m1@example.com"); !errors.Is(err, store.ErrTeamFull) {
-		t.Fatalf("a member past the free limit of a frozen paid team = %v, want ErrTeamFull", err)
+	for i := range 12 {
+		if err := join(fmt.Sprintf("held%d", i), fmt.Sprintf("held%d@example.com", i)); err != nil {
+			t.Fatalf("member %d while payment is frozen = %v", i+3, err)
+		}
 	}
 
 	if _, err := teststore.ForTeam(t, st, team).ReleaseCreditFreezes(ctx, "dp_frozen", "operator", ""); err != nil {
@@ -49,7 +47,7 @@ func TestAFrozenTeamIsNeitherFundedNorExemptFromTheMemberLimit(t *testing.T) {
 	if got := standing(t, st, team); got.Tier != "funded" {
 		t.Fatalf("after the hold is released = %+v, want funded again", got)
 	}
-	if err := join(fmt.Sprintf("m%d", 2), "m2@example.com"); err != nil {
+	if err := join("m2", "m2@example.com"); err != nil {
 		t.Fatalf("a member after the hold is released = %v", err)
 	}
 }
