@@ -279,6 +279,12 @@ The existing Karpenter NodePool `sparkwing-jobs-small` needs all of the followin
   VPC CNI network policy (`enableNetworkPolicy: "true"` in the `vpc-cni` add-on
   configuration). Sparkwing does not test enforcement at runtime; verifying it
   is the operator's periodic check.
+- Kubernetes NetworkPolicy allows traffic between a Pod and its own node even
+  when that node's IP is in an excluded range. Node-level controls must protect
+  this path. Disable kubelet anonymous authentication, enable webhook
+  authentication and authorization, and set `readOnlyPort: 0`. Job Pods mount
+  no Kubernetes service-account token. A reachable kubelet TCP port alone does
+  not establish access to its protected endpoints.
 
 The Cloud example enables `volumePermissions` so the controller owns `/data`
 and its epoch volume and can set their private mode to `0700`. `fsGroup: 65534` grants group access but
@@ -293,9 +299,9 @@ policies out of the job namespace. Chart RBAC
 cannot remove privileges granted by other bindings.
 
 The chart's policies select customer Jobs. The controller and launcher keep
-their infrastructure networking. Job code cannot reach the node network
-namespace, so Pod NetworkPolicy bounds its traffic. Rendering this chart proves
-neither EKS feature availability nor network isolation.
+their infrastructure networking. Job Pods use their own network namespace.
+Pod NetworkPolicy and node-level controls together bound their traffic.
+Rendering this chart proves neither EKS feature availability nor network isolation.
 
 ## Self-hosted runner pools
 

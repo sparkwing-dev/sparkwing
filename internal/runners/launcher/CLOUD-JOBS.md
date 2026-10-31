@@ -501,8 +501,12 @@ it before it claims work.
 
 Job Pods carry the labels the chart's default-deny ingress and egress policy and
 its `launcher.networkPolicy.egress` allow rule select: outbound internet on any
-port, and nothing in private, carrier-grade NAT or link-local ranges. The
-cluster must enforce NetworkPolicy. Sparkwing does not probe enforcement at
+port, with private, carrier-grade NAT and link-local ranges excluded. Kubernetes
+NetworkPolicy does not block a Pod's traffic to its own node. Protect that path
+with node-level controls. Disable kubelet anonymous authentication and its
+read-only port, and enable webhook authentication and authorization. Job Pods
+mount no Kubernetes service-account token. The cluster must enforce
+NetworkPolicy. Sparkwing does not probe enforcement at
 launch or at launcher start; verifying it is the operator's periodic check.
 Job Pods hold no node root, so Job code cannot reach the node network namespace.
 
