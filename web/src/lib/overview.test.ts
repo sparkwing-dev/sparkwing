@@ -175,3 +175,10 @@ describe("deltaPct", () => {
     assert.equal(deltaPct({ ...base, current: 5, previous: null }), null);
   });
 });
+
+it("excludes completed runs with zero start timestamps from build duration", () => {
+  const rows = [finishedAgo("normal", DAY_MS, "success"), {
+    ...finishedAgo("never-started", DAY_MS, "success"), started_at: "0001-01-01T00:00:00Z",
+  }];
+  assert.equal(medianBuildMs(rows, NOW - WEEK_MS, NOW), 60_000);
+});

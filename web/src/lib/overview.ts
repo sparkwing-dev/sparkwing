@@ -1,10 +1,6 @@
 
 import type { Run } from "./api";
-
-function durationMs(r: Run): number {
-  if (!r.finished_at) return 0;
-  return new Date(r.finished_at).getTime() - new Date(r.started_at).getTime();
-}
+import { hasTimestamp, runElapsedMs } from "./runTime";
 
 export const DAY_MS = 24 * 60 * 60 * 1000;
 export const WEEK_MS = 7 * DAY_MS;
@@ -37,7 +33,7 @@ export interface Overview {
 }
 
 export function completedAt(r: Run): number {
-  if (!r.finished_at) return NaN;
+  if (!hasTimestamp(r.finished_at)) return NaN;
   const t = new Date(r.finished_at).getTime();
   return Number.isNaN(t) ? NaN : t;
 }
@@ -85,7 +81,7 @@ export function medianBuildMs(
 ): number | null {
   const durations = completedIn(runs, start, end)
     .filter((r) => r.status === "success")
-    .map(durationMs)
+    .map((run) => runElapsedMs(run) ?? 0)
     .filter((ms) => ms > 0)
     .sort((a, b) => a - b);
   if (durations.length === 0) return null;

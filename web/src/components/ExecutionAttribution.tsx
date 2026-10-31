@@ -7,6 +7,7 @@ import {
   executionAttemptsNewestFirst,
   executionDisplay,
 } from "@/lib/executionAttribution";
+import { hasTimestamp } from "@/lib/runTime";
 import { fmtDateTime } from "@/lib/timeFormat";
 
 export function ExecutionIconPaths({ icon }: { icon: NonNullable<ReturnType<typeof executionDisplay>["icon"]> }) {
@@ -79,7 +80,7 @@ export function ExecutionAttributionPanel({ node }: { node: RunNode }) {
                     </Link>
                   </span>
                 )}
-                {attempt.started_at && <span className="text-[10px] opacity-80">started {fmtDateTime(attempt.started_at)}</span>}
+                {hasTimestamp(attempt.started_at) && <span className="text-[10px] opacity-80">started {fmtDateTime(attempt.started_at)}</span>}
                 {attempt.finished_at && <span className="text-[10px] opacity-80">ended {fmtDateTime(attempt.finished_at)}</span>}
                 {attempt.outcome && <span className="text-[10px]">outcome {attempt.outcome}</span>}
                 {attempt.failure_reason && <span className="text-[10px]">failure {attempt.failure_reason}</span>}

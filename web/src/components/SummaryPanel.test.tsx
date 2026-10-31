@@ -5,6 +5,17 @@ import type { Node as RunNode, Run } from "@/lib/api";
 import SummaryPanel from "./SummaryPanel";
 
 describe("SummaryPanel", () => {
+  it("labels a cancelled run that never started without a year-one date or duration", () => {
+    const run: Run = {
+      id: "cancelled-before-start", pipeline: "build", status: "cancelled",
+      started_at: "0001-01-01T00:00:00Z", created_at: "2026-10-30T10:00:00Z",
+      finished_at: "2026-10-30T10:01:00Z",
+    };
+    const html = renderToStaticMarkup(<SummaryPanel run={run} nodes={[]} collapsed={false} onToggle={() => {}} />);
+    assert.match(html, /Not started/);
+    assert.match(html, /queued /);
+    assert.doesNotMatch(html, /(?:Jan 1, 1|\d{6,}m)/);
+  });
   it("renders a failed step's colored output without raw escapes", () => {
     const run = {
       id: "run-one",

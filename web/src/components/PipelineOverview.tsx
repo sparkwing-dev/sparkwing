@@ -10,6 +10,7 @@ import {
   getRuns,
   runDurationMs,
 } from "@/lib/api";
+import { hasTimestamp, runElapsedMs, runStartedAt, runTimestamp } from "@/lib/runTime";
 import TriggerForm from "@/components/TriggerForm";
 import Tooltip from "@/components/Tooltip";
 import {
@@ -116,8 +117,8 @@ function buildRows(
 }
 
 function sortRows(a: PipelineRow, b: PipelineRow): number {
-  const at = a.lastRun ? new Date(a.lastRun.started_at).getTime() : 0;
-  const bt = b.lastRun ? new Date(b.lastRun.started_at).getTime() : 0;
+  const at = a.lastRun ? Date.parse(runTimestamp(a.lastRun) ?? "") || 0 : 0;
+  const bt = b.lastRun ? Date.parse(runTimestamp(b.lastRun) ?? "") || 0 : 0;
   if (at !== bt) return bt - at;
   return a.key.localeCompare(b.key);
 }
@@ -447,6 +448,12 @@ function PipelineCard({
       ? null
       : Math.round((stats.passed / Math.max(1, stats.total)) * 100);
   const recent = row.runs.slice(0, SPARK_SIZE);
+  const lastTimestamp = row.lastRun ? runTimestamp(row.lastRun) : undefined;
+  const lastRunTip = row.lastRun
+    ? runStartedAt(row.lastRun)
+      ? `Last run ${fmtFullDate(row.lastRun.started_at)}`
+      : `Not started${lastTimestamp ? ` · queued ${fmtFullDate(lastTimestamp)}` : ""}`
+    : "No runs yet in window";
 
   return (
     <div className="bg-[var(--surface)] border border-[var(--border)] rounded-lg overflow-hidden">
@@ -499,16 +506,10 @@ function PipelineCard({
             {stats.total} run{stats.total === 1 ? "" : "s"}
           </span>
         </Tooltip>
-        <Tooltip
-          content={
-            row.lastRun
-              ? `Last run ${fmtFullDate(row.lastRun.started_at)}`
-              : "No runs yet in window"
-          }
-        >
+        <Tooltip content={lastRunTip}>
           <span className="text-xs text-[var(--muted)] font-mono w-24 text-right inline-block">
             {row.lastRun ? (
-              <TimeAgo ts={row.lastRun.started_at} />
+              <TimeAgo ts={lastTimestamp ?? ""} />
             ) : (
               "never run"
             )}
@@ -610,12 +611,12 @@ function RunSummaryTip({ run }: { run: Run }) {
       </div>
       <div>
         <span className="text-[var(--muted)]">started </span>
-        <span>{fmtFullDate(run.started_at)}</span>
+        <span>{runStartedAt(run) ? fmtFullDate(run.started_at) : "Not started"}</span>
       </div>
       {run.error && (
         <div className="max-w-xs break-words text-red-300">{run.error}</div>
       )}
-      {run.finished_at && (
+      {hasTimestamp(run.finished_at) && (
         <div>
           <span className="text-[var(--muted)]">finished </span>
           <span>{fmtFullDate(run.finished_at)}</span>
@@ -628,7 +629,7 @@ function RunSummaryTip({ run }: { run: Run }) {
         </div>
       )}
       <div>
-        <span className="text-[var(--muted)]">{fmtAgo(run.started_at)}</span>
+        <span className="text-[var(--muted)]">{runTimestamp(run) ? fmtAgo(runTimestamp(run)!) : "Not started"}</span>
       </div>
     </div>
   );
@@ -805,7 +806,12 @@ function RunSummary({ run }: { run: Run }) {
 }
 
 function RunTimestampBlock({ run }: { run: Run }) {
-  const sinceTs = run.finished_at || run.started_at;
+  const timestamp = runTimestamp(run);
+  const started = runStartedAt(run);
+  const sinceTs = hasTimestamp(run.finished_at) ? run.finished_at : timestamp ?? "";
+  if (!started) {
+    return <span className="font-mono text-[11px] text-[var(--muted)]">Not started{timestamp ? ` · queued ${fmtAgo(timestamp)}` : ""}</span>;
+  }
   return (
     <Tooltip content={<RunSummaryTip run={run} />}>
       <span className="font-mono tabular-nums text-[11px] text-[var(--muted)] inline-flex items-center gap-1 shrink-0">
@@ -818,7 +824,7 @@ function RunTimestampBlock({ run }: { run: Run }) {
           {fmtClock(run.started_at)}
         </span>
         <span>→</span>
-        {run.finished_at &&
+        {hasTimestamp(run.finished_at) &&
           fmtDatePrefix(run.finished_at) &&
           fmtDatePrefix(run.finished_at) !== fmtDatePrefix(run.started_at) && (
             <span className="text-[var(--foreground)]">
@@ -826,7 +832,7 @@ function RunTimestampBlock({ run }: { run: Run }) {
             </span>
           )}
         <span className="text-[var(--foreground)]">
-          {run.finished_at ? fmtClock(run.finished_at) : "--"}
+          {hasTimestamp(run.finished_at) ? fmtClock(run.finished_at) : "--"}
         </span>
         <span>· {fmtAgo(sinceTs)}</span>
       </span>
@@ -836,14 +842,12 @@ function RunTimestampBlock({ run }: { run: Run }) {
 
 function RunDurationCell({ run }: { run: Run }) {
   const now = useCurrentTime(!run.finished_at);
-  const startedMs = new Date(run.started_at).getTime();
-  const finishedMs = run.finished_at ? new Date(run.finished_at).getTime() : 0;
-  const elapsedMs = (finishedMs || now) - startedMs;
-  if (elapsedMs <= 0) return <span />;
+  const elapsedMs = runElapsedMs(run, now);
+  if (elapsedMs === undefined || elapsedMs <= 0) return <span />;
   return (
     <Tooltip
       content={
-        run.finished_at
+        hasTimestamp(run.finished_at)
           ? `Duration: ${fmtMs(elapsedMs)}`
           : `Running for ${fmtMs(elapsedMs)}`
       }
@@ -929,6 +933,7 @@ function Footer() {
 
 function TimeAgo({ ts }: { ts: string }) {
   const now = useCurrentTime();
+  if (!hasTimestamp(ts)) return <span>Not started</span>;
   const sec = Math.floor((now - new Date(ts).getTime()) / 1000);
   if (sec < 60) return <span>{sec}s ago</span>;
   if (sec < 3600) return <span>{Math.floor(sec / 60)}m ago</span>;

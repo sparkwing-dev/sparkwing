@@ -32,3 +32,11 @@ describe("execution history", () => {
     assert.doesNotMatch(html, /Executor unknown/);
   });
 });
+
+it("omits the zero start timestamp for an attempt that never started", () => {
+  const html = renderToStaticMarkup(<ExecutionAttributionPanel node={{
+    id: "build", status: "pending", outcome: "", deps: [], duration_ms: 0,
+    execution_attempts: [{ attempt: 1, started_at: "0001-01-01T00:00:00Z", location: "local", executor_kind: "runner", executor_name: "moonborn" }],
+  }} />);
+  assert.doesNotMatch(html, /started /);
+});

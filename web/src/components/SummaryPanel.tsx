@@ -5,6 +5,7 @@ import { useMemo, useState } from "react";
 import Link from "next/link";
 import type { Node as RunNode, Run, RunInvocation } from "@/lib/api";
 import { fmtDateTime, fmtFullDate } from "@/lib/timeFormat";
+import { hasTimestamp, runElapsedMs, runStartedAt, runTimestamp } from "@/lib/runTime";
 import { ansiToHtml } from "@/lib/ansi";
 
 const legacyNoDispatch = "reaped: trigger consumer finished without dispatching the pipeline";
@@ -20,19 +21,12 @@ function fmtMs(ms: number): string {
 
 function nodeDuration(n: RunNode): number {
   if (n.duration_ms) return n.duration_ms;
-  if (n.started_at) {
+  if (hasTimestamp(n.started_at)) {
     const s = new Date(n.started_at).getTime();
-    const e = n.finished_at ? new Date(n.finished_at).getTime() : Date.now();
+    const e = hasTimestamp(n.finished_at) ? new Date(n.finished_at).getTime() : Date.now();
     return Math.max(0, e - s);
   }
   return 0;
-}
-
-function durationMs(run: Run): number {
-  if (!run.finished_at) return 0;
-  return (
-    new Date(run.finished_at).getTime() - new Date(run.started_at).getTime()
-  );
 }
 
 function outcomeGlyph(outcome: string): { glyph: string; cls: string } {
@@ -212,7 +206,9 @@ export default function SummaryPanel({
   ];
 
   const statusG = summaryStatusGlyph(run.status);
-  const dur = durationMs(run);
+  const dur = hasTimestamp(run.finished_at) ? runElapsedMs(run) ?? 0 : 0;
+  const started = runStartedAt(run);
+  const timestamp = runTimestamp(run);
 
   return (
     <div className={inline ? "" : "border-b border-[var(--border)] shrink-0"}>
@@ -242,14 +238,14 @@ export default function SummaryPanel({
                                                        }
           <div
             className="text-xs font-mono text-[var(--muted)]"
-            title={`Started ${fmtFullDate(run.started_at)}${
-              run.finished_at
+            title={`${started ? `Started ${fmtFullDate(started)}` : "Not started"}${
+              hasTimestamp(run.finished_at)
                 ? `\nFinished ${fmtFullDate(run.finished_at)}`
                 : ""
             }`}
           >
-            started {fmtDateTime(run.started_at, { seconds: true })}
-            {run.finished_at && (
+            {started ? `started ${fmtDateTime(started, { seconds: true })}` : `Not started${timestamp ? ` · queued ${fmtDateTime(timestamp, { seconds: true })}` : ""}`}
+            {hasTimestamp(run.finished_at) && (
               <>
                 {" · finished "}
                 {fmtDateTime(run.finished_at, { seconds: true })}

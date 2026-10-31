@@ -66,3 +66,9 @@ describe("Home latest failed pipelines", () => {
     assert.deepEqual(latestFailedPipelines([gitlab, github], false).map((r) => r.latest.id), ["gitlab-red"]);
   });
 });
+
+it("orders failures without a start by their creation time", () => {
+  const old = run("old", "owner/old", "main", "failed", 1);
+  const unstarted = { ...run("unstarted", "owner/new", "main", "failed", 2), started_at: "0001-01-01T00:00:00Z", created_at: "2026-09-24T18:02:00Z" };
+  assert.deepEqual(latestFailedPipelines([old, unstarted], false).map((row) => row.latest.id), ["unstarted", "old"]);
+});
