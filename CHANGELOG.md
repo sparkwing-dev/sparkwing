@@ -31,6 +31,8 @@ unlock.
 
 ### Fixed
 
+- **trust:** Merged PR jobs retain source credentials by comparing against their base branch. Intake checks both source and execution commits when they differ. Verified cache fallbacks use sealed repository proof, and unknown claimant shapes cannot claim proven work.
+
 - **GitHub App:** Existing-installation discovery survives canceled requests and GitHub API failures within the original browser session and team. The callback navigates once to the picker, and client cancellations log at info level. Connection refusals show their reason without blaming GitHub ownership. An already-used or expired connection explains how to start again.
 - **Cloud:** Unsupported size labels fail at admission or planning with the valid catalogue sizes. Remote requests that mark source as a working tree without a local checkout fail at intake with snapshot instructions instead of repeatedly losing launcher leases. Uploaded committed snapshots remain supported.
 - **GitHub App:** Release subscription refusals name the required `release_tags` filter in their HTTP 400 response
