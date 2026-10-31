@@ -190,6 +190,14 @@ func (l *dashboardLogins) serveSession(w http.ResponseWriter, r *http.Request, n
 	request := r.Clone(ctx)
 	// safety: the dashboard bearer proves this peer session, not a controller capability.
 	request.Header.Del("Authorization")
+	// safety: cookies from another listener must not replace the verified dashboard peer.
+	cookies := request.Cookies()
+	request.Header.Del("Cookie")
+	for _, cookie := range cookies {
+		if cookie.Name != "sw_session" && cookie.Name != "__Host-sw_session" {
+			request.AddCookie(cookie)
+		}
+	}
 	next.ServeHTTP(w, request)
 }
 

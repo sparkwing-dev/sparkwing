@@ -467,8 +467,9 @@ only to the origin the page names. A TCP request without a live bearer gets
 401, except that the static dashboard pages, which carry no run data, load
 signed out. The browser then acts as the socket peer that minted its link.
 After verifying the dashboard bearer, the gate consumes its Authorization header
-and forwards the verified peer to the shared controller API. The dashboard
-bearer is not a controller capability.
+and any controller session cookies, then forwards the verified peer to the shared
+controller API. A stale cookie from another port cannot replace that peer.
+The dashboard bearer is not a controller capability.
 A session ends after 12 hours without a request or 24 hours after sign-in,
 whichever comes first, and the dashboard's Log out button ends it at once with
 a bearer-authenticated `POST /logout`. The controller holds tokens and sessions

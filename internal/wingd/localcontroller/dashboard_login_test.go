@@ -40,7 +40,7 @@ func TestDashboardLoginAuthorizesControllerAPIAsMintingPeer(t *testing.T) {
 	}
 	browser := &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
 	t.Cleanup(browser.CloseIdleConnections)
-	request := func(method, target, session string, status int) []byte {
+	request := func(method, target, session string, status int, cookies ...*http.Cookie) []byte {
 		t.Helper()
 		r, err := http.NewRequestWithContext(t.Context(), method, target, nil)
 		if err != nil {
@@ -48,6 +48,9 @@ func TestDashboardLoginAuthorizesControllerAPIAsMintingPeer(t *testing.T) {
 		}
 		if session != "" {
 			r.Header.Set("Authorization", "Bearer "+session)
+		}
+		for _, cookie := range cookies {
+			r.AddCookie(cookie)
 		}
 		resp, err := browser.Do(r)
 		if err != nil {
@@ -85,6 +88,9 @@ func TestDashboardLoginAuthorizesControllerAPIAsMintingPeer(t *testing.T) {
 	subject, err := wingd.CurrentLocalSubject()
 	if err != nil || identity.Principal != subject {
 		t.Fatalf("dashboard principal %q, want minting peer %q (%v)", identity.Principal, subject, err)
+	}
+	for _, name := range []string{"sw_session", "__Host-sw_session"} {
+		request(http.MethodGet, base+"/api/v1/runs", session, http.StatusOK, &http.Cookie{Name: name, Value: "swses_stale_other_port"})
 	}
 	request(http.MethodPost, base+"/logout", session, http.StatusNoContent)
 	request(http.MethodGet, base+"/api/v1/runs", session, http.StatusUnauthorized)
