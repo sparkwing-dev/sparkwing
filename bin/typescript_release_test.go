@@ -42,7 +42,7 @@ func TestTypeScriptReleaseRequiresBothNativeBridges(t *testing.T) {
 		t.Fatal(err)
 	}
 	job := workflow.Jobs["typescript-native"]
-	if job.If != "" || job.Allow || !hasSDKDependency(job, "validate-tag") {
+	if job.If != "${{ !inputs.index_only }}" || job.Allow || !hasSDKDependency(job, "validate-tag") {
 		t.Fatal("native verification must be required after tag resolution")
 	}
 	want := map[string]string{"x64": "windows-2025", "arm64": "windows-11-arm"}
@@ -66,7 +66,7 @@ func TestTypeScriptReleaseRequiresBothNativeBridges(t *testing.T) {
 	checkSDKAction(t, job, "actions/upload-artifact@", "path", "sdk/typescript/native/win32-${{ matrix.arch }}")
 	checkSDKAction(t, job, "actions/upload-artifact@", "if-no-files-found", "error")
 	assembly := workflow.Jobs["typescript-package"]
-	if assembly.If != "${{ !inputs.verify_only }}" || assembly.Allow || !hasSDKDependency(assembly, "typescript-native") || !hasSDKDependency(assembly, "validate-tag") {
+	if assembly.If != "${{ !inputs.verify_only && !inputs.index_only }}" || assembly.Allow || !hasSDKDependency(assembly, "typescript-native") || !hasSDKDependency(assembly, "validate-tag") {
 		t.Fatal("package assembly must depend on successful native work and the resolved source")
 	}
 	checkSDKAction(t, assembly, "actions/checkout@", "ref", "${{ needs.validate-tag.outputs.source_sha }}")
@@ -79,7 +79,7 @@ func TestTypeScriptReleaseRequiresBothNativeBridges(t *testing.T) {
 		t.Fatal("npm provenance requires id-token: write on the publication job")
 	}
 	for _, name := range []string{"dashboard", "typescript-package", "release"} {
-		if workflow.Jobs[name].If != "${{ !inputs.verify_only }}" {
+		if workflow.Jobs[name].If != "${{ !inputs.verify_only && !inputs.index_only }}" {
 			t.Errorf("verification-only dispatch must skip %s", name)
 		}
 	}
