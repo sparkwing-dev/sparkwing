@@ -354,6 +354,9 @@ func (o *Operator) claimRefusalTx(ctx context.Context, tx *storeTx, demand UnitD
 		return diagnostic.refused
 	}
 	if err := checkClaimableUnitTx(ctx, tx, team, unit); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return notFound("claim unit", string(unit.RunID))
+		}
 		return err
 	}
 	diagnostic, err = explainUnitFundingTx(ctx, tx, team, unit, diagnostic)

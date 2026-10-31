@@ -360,3 +360,23 @@ func TestEngineClaimHTTPCommitsRunnerObservations(t *testing.T) {
 	}
 	t.Fatal("committed machine observation missing")
 }
+
+func TestEngineNamedClaimMissingOwnerKind(t *testing.T) {
+	for _, mutation := range []string{
+		`DELETE FROM triggers WHERE team='a' AND id='run'`,
+		`UPDATE triggers SET unit_kind='plan' WHERE team='a' AND id='run'`,
+	} {
+		t.Run(mutation, func(t *testing.T) {
+			e, _ := engineRuntimeStore(t)
+			raw := engineHTTPRoot(t, e, "a", "named-missing-kind", []capability.Grant{capability.TriggersClaim})
+			e.claimProfiles = engineProfileFake{}
+			e.RunnerPolicy = runnerAdmissionFunc(func(context.Context, string) error { return nil })
+			engineSQL(t, e.Store, mutation)
+			h := e.Server.WithEngineController(e.EngineController).Handler()
+			w := engineClaimHTTP(t, h, raw, "POST", "/api/v1/runs/run/claim", `{"runner_version":"v1","kinds":["trigger"]}`, http.StatusNotFound)
+			if !strings.Contains(w.Body.String(), `"code":"not_found"`) {
+				t.Fatalf("missing claim response: %s", w.Body)
+			}
+		})
+	}
+}

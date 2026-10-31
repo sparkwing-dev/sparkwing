@@ -118,6 +118,10 @@ and `details` retain their declared string and object types. Clients accept
 unknown additive fields and future codes. They reject duplicate keys, null
 required fields, malformed bodies and nested envelopes without echoing the body.
 
+A client-canceled request returns HTTP 499 (Client Closed Request) when its
+response headers have not been sent. A named claim for a missing execution unit
+returns HTTP 404. Neither case is a server fault.
+
 The route's retry policy governs the shared HTTP/socket transport. Exact-body
 retries preserve the body. Keyed intake keeps its idempotency key and body.
 Claims, named claims and reconciliation can return a fresh bearer once, so a lost

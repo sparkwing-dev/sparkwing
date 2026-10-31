@@ -50,8 +50,9 @@ Local daemon readiness reports whether its controller has opened and reconciled.
 A busy database writer does not make a readiness probe wait. Status requests
 still read committed database state and report database errors.
 
-HTTP failures caused by a canceled client request log at info. The request's
-status and audit records remain available. A canceled request does not lower
+HTTP failures caused by a canceled client request log at info. Before response
+headers are sent, these failures return HTTP 499 (Client Closed Request).
+The request's status and audit records remain available. A canceled request does not lower
 the log level of an unrelated server fault, which still logs at error. Rollback
 cleanup failures caused by closed connections or canceled contexts log at debug.
 Other rollback cleanup failures log at warn.

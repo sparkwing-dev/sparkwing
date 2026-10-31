@@ -590,7 +590,7 @@ func withRequestLog(
 		ctx, masker := withRequestMasker(r.Context())
 		ctx, rec := withAuditRecord(ctx, id, routeLabel(r))
 		r = r.WithContext(ctx)
-		rw := &statusRecorder{ResponseWriter: w, status: http.StatusOK}
+		rw := &statusRecorder{ResponseWriter: w, status: http.StatusOK, ctx: ctx}
 		writer := http.ResponseWriter(rw)
 		if _, ok := w.(http.Flusher); ok {
 			writer = &flushingStatusRecorder{statusRecorder: rw}
@@ -601,7 +601,7 @@ func withRequestLog(
 			if status == http.StatusNotFound && rec.route == otherLabel {
 				rec.path = sanitizedMissingPath(r.URL.EscapedPath(), masker.Mask)
 			}
-			if status >= http.StatusInternalServerError {
+			if status >= http.StatusInternalServerError || status == statusClientClosedRequest {
 				cause := rw.cause
 				if cause == nil {
 					cause = errors.New(http.StatusText(status))
@@ -635,10 +635,13 @@ func withRequestLog(
 	})
 }
 
+const statusClientClosedRequest = 499
+
 type statusRecorder struct {
 	http.ResponseWriter
 	status int
 	cause  error
+	ctx    context.Context
 }
 
 func (r *statusRecorder) ResponseError(err error) {
@@ -648,6 +651,9 @@ func (r *statusRecorder) ResponseError(err error) {
 }
 
 func (r *statusRecorder) WriteHeader(code int) {
+	if code >= http.StatusInternalServerError && r.ctx != nil && errors.Is(r.ctx.Err(), context.Canceled) && errors.Is(r.cause, context.Canceled) {
+		code = statusClientClosedRequest
+	}
 	r.status = code
 	r.ResponseWriter.WriteHeader(code)
 }
