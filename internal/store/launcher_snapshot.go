@@ -172,7 +172,7 @@ func launcherLogTailPendingTx(ctx context.Context, tx *storeTx, team Team, root 
 		JOIN log_streams l ON l.team=a.team AND l.run_id=a.run_id AND l.node_id=a.node_id AND l.attempt=a.attempt AND l.generation=a.generation
 		WHERE c.team=? AND c.parent_kind=? AND c.parent_id=? AND c.subject_kind=? AND c.subject_id=?
 		AND c.unit_kind=? AND c.unit_id=? AND c.bind_holder=? AND c.bind_generation=?
-		AND (c.revoked_at IS NULL OR c.revoked_at>?) AND (c.expires_at IS NULL OR c.expires_at>?)
+		AND `+liveCredentialSQL("c.")+`
 		AND n.status='done' AND a.finished_at>=? AND a.finished_at<=?
 		AND l.subject_kind='job_attempt' AND l.sealed_at IS NULL)`,
 		team, root.Kind, root.ID, subject.Kind, subject.ID, fence.Kind, fence.ID, fence.Holder, fence.Generation,
