@@ -29,6 +29,7 @@ import (
 const (
 	maxWorktreeSnapshotBytes int64 = 500 << 20
 	maxWorktreeSnapshotFiles       = 100_000
+	snapshotSizeRemedy             = "; exclude unneeded files with .gitignore (untrack tracked files with `git rm --cached PATH`), or commit and run `git push`, then trigger without --working-tree"
 )
 
 type worktreeSnapshotLimits struct {
@@ -211,7 +212,7 @@ func captureSnapshot(ctx context.Context, env []string, start string, limits wor
 		return fail(fmt.Errorf("inspect snapshot bundle: %w", err))
 	}
 	if info.Size() > maxWorktreeSnapshotBytes {
-		return fail(fmt.Errorf("working-tree snapshot bundle is %d bytes; limit is %d bytes", info.Size(), maxWorktreeSnapshotBytes))
+		return fail(fmt.Errorf("working-tree snapshot bundle is %d bytes; limit is %d bytes"+snapshotSizeRemedy, info.Size(), maxWorktreeSnapshotBytes))
 	}
 	snapshot.SHA = sha
 	snapshot.BundlePath = bundlePath
@@ -249,7 +250,7 @@ func (s *worktreeSnapshot) includeRevisions(ctx context.Context, remote string, 
 		return err
 	}
 	if info.Size() > maxWorktreeSnapshotBytes {
-		return fmt.Errorf("working-tree snapshot bundle is %d bytes; limit is %d bytes", info.Size(), maxWorktreeSnapshotBytes)
+		return fmt.Errorf("working-tree snapshot bundle is %d bytes; limit is %d bytes"+snapshotSizeRemedy, info.Size(), maxWorktreeSnapshotBytes)
 	}
 	s.BundleSize = info.Size()
 	return nil
@@ -336,7 +337,7 @@ func measureSnapshotTree(ctx context.Context, env []string, gitDir, tree string,
 		}
 		size, err := strconv.ParseInt(string(fields[3]), 10, 64)
 		if err != nil || size < 0 || total > limits.bytes-size {
-			return 0, 0, fmt.Errorf("working-tree snapshot exceeds the %d-byte uncompressed source limit", limits.bytes)
+			return 0, 0, fmt.Errorf("working-tree snapshot exceeds the %d-byte uncompressed source limit"+snapshotSizeRemedy, limits.bytes)
 		}
 		count++
 		if count > limits.files {

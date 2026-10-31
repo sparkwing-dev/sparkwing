@@ -33,7 +33,14 @@ The default clones the named commit and excludes uncommitted files.
 changes and untracked non-ignored files, uploads its Git bundle before trigger
 admission, and runs that exact snapshot without pushing it to the origin. The
 capture rejects conflicts, submodules, sparse checkouts, and Git content
-filters. It also requires a complete SHA-1 repository. The default requires an `origin` URL and a pushed commit. `--working-tree`
+filters. It also requires a complete SHA-1 repository.
+
+Snapshots and their bundles are limited to 500 MiB. If an upload exceeds this
+limit, exclude unneeded files with `.gitignore`. Tracked files must first be
+untracked with `git rm --cached PATH`. Alternatively, commit and run `git push`,
+then trigger without `--working-tree` to fetch the commit.
+
+The default requires an `origin` URL and a pushed commit. `--working-tree`
 needs a local Git checkout with a HEAD commit and an origin URL. It scans the
 final bundle and source metadata for configured local secret values and uploads the scanned copy
 through the controller's signed storage binding before admitting the run.

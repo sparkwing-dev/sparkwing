@@ -142,6 +142,17 @@ sparkwing queue list --profile prod --group deploy -o json
 sparkwing runs status --run RUN_ID --profile prod
 ```
 
+A waiting job's notice lists its required runner labels. For example, a job
+requiring `gpu-x` needs an online runner with that label. Ask a team
+administrator to enroll one for the repository:
+
+```bash
+sparkwing runners add --runner gpu-box --profile prod --label gpu-x --repos github.com/acme/repo --session-stdin
+```
+
+Provide an independent account session on stdin. Start an existing matching
+runner if one is already enrolled.
+
 New metered claims account for billable time that begins during issuance when
 computing the funded lease bound.
 
@@ -161,6 +172,9 @@ execution starts, the lapse consumes no disruption allowance. After start, it
 increments disruptions. The cap is three, separate from application retries.
 The same run continues. The owner decides whether released work becomes ready
 again. Concurrency holders and controller ownership retain their store contracts.
+
+Deleting a finished run created by someone else requires `team.admin`.
+Ask a team administrator to delete it. The run stays when deletion is refused.
 
 Cancellation of held work records a request. The holder keeps the authority
 needed to drain and report its result. Clients branch on canonical error codes

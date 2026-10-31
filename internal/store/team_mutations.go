@@ -222,7 +222,7 @@ func (t *Tenant) DeleteAuthorizedRun(ctx context.Context, a capability.Authorize
 				return err
 			}
 			if p.Capability.Subject.Kind != capability.SubjectAccount || kind != string(capability.SubjectAccount) || creator != p.Capability.Subject.ID {
-				return bindingRefusal()
+				return authorityError(apierr.Forbidden, "deleting a run created by someone else requires team.admin; ask a team administrator to delete it")
 			}
 		}
 		if run.FinishedAt == nil {

@@ -57,7 +57,8 @@ function CronsRoute() {
   const [detailMissing, setDetailMissing] = useState(false);
   const [loaded, setLoaded] = useState(false);
   const [showUndeclared, setShowUndeclared] = useState(false);
-  const [busyID, setBusyID] = useState<string | null>(null);
+  const [busyIDs, setBusyIDs] = useState(new Set<string>());
+  const runRequests = useRef(new Map<string, string>());
   const now = useCurrentTime();
 
   const selectedRef = useRef<string | null>(selected);
@@ -135,7 +136,8 @@ function CronsRoute() {
 
   const act = useCallback(
     async (s: CronSchedule, kind: "pause" | "resume" | "run") => {
-      setBusyID(s.id);
+      if (busyIDs.has(s.id)) return;
+      setBusyIDs((current) => new Set(current).add(s.id));
       try {
         if (kind === "pause") {
           await pauseCron(s.id);
@@ -144,17 +146,26 @@ function CronsRoute() {
           await resumeCron(s.id);
           toast(`Resumed ${s.name}`, "success");
         } else {
-          const started = await runCronNow(s.id);
+          const key = runRequests.current.get(s.id) ?? crypto.randomUUID();
+          runRequests.current.set(s.id, key);
+          const started = await runCronNow(s.id, key);
+          runRequests.current.delete(s.id);
           toast(`Started ${started.run_id}`, "success");
         }
       } catch (err) {
-        toast(err instanceof Error ? err.message : String(err), "error");
+        toast(kind === "run" && err instanceof TypeError
+          ? "Could not confirm whether the run started. Choose Run now again on this schedule to check the same request safely."
+          : err instanceof Error ? err.message : String(err), "error");
       } finally {
-        setBusyID(null);
+        setBusyIDs((current) => {
+          const next = new Set(current);
+          next.delete(s.id);
+          return next;
+        });
       }
       await refresh();
     },
-    [refresh],
+    [refresh, busyIDs],
   );
 
   const schedules = overview?.schedules ?? [];
@@ -201,7 +212,7 @@ function CronsRoute() {
                   }
                   now={now}
                   selected={selected}
-                  busyID={busyID}
+                  busyIDs={busyIDs}
                   onSelect={select}
                   onAct={act}
                 />
@@ -313,7 +324,7 @@ function ScheduleCards({
   detail,
   now,
   selected,
-  busyID,
+  busyIDs,
   onSelect,
   onAct,
 }: {
@@ -322,7 +333,7 @@ function ScheduleCards({
   detail: React.ReactNode;
   now: number;
   selected: string | null;
-  busyID: string | null;
+  busyIDs: Set<string>;
   onSelect: (id: string | null) => void;
   onAct: (s: CronSchedule, kind: "pause" | "resume" | "run") => void;
 }) {
@@ -395,12 +406,12 @@ function ScheduleCards({
             <div className="flex gap-1.5 ml-auto">
               <RowButton
                 label={s.paused ? "Resume" : "Pause"}
-                busy={busyID === s.id}
+                busy={busyIDs.has(s.id)}
                 onClick={() => onAct(s, s.paused ? "resume" : "pause")}
               />
               <RowButton
-                label="Run now"
-                busy={busyID === s.id}
+                label={busyIDs.has(s.id) ? "Working..." : "Run now"}
+                busy={busyIDs.has(s.id)}
                 onClick={() => onAct(s, "run")}
               />
             </div>

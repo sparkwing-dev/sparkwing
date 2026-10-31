@@ -13,6 +13,8 @@ let deleteRun!: typeof import("./api").deleteRun;
 let getNodeLogs!: typeof import("./api").getNodeLogs;
 let getConnectionStatus!: typeof import("./api").getConnectionStatus;
 let triggerRun!: typeof import("./api").triggerRun;
+let retryRun!: typeof import("./api").retryRun;
+let runCronNow!: typeof import("./api").runCronNow;
 let pipelinesByName!: typeof import("./api").pipelinesByName;
 let parseRunArgs!: typeof import("./api").parseRunArgs;
 let getNodeMetrics!: typeof import("./api").getNodeMetrics;
@@ -32,6 +34,8 @@ before(async () => {
       getNodeLogs,
       getConnectionStatus,
       triggerRun,
+      retryRun,
+      runCronNow,
       pipelinesByName,
       parseRunArgs,
       getNodeMetrics,
@@ -214,6 +218,50 @@ describe("triggerRun", () => {
     const first = await sentBody();
     const second = await sentBody();
     assert.notEqual(first.idempotency_key, second.idempotency_key);
+  });
+});
+
+describe("run admission requests", () => {
+  for (const action of ["trigger", "retry", "schedule"] as const) {
+    it(`${action} stays pending beyond the read deadline and accepts late success`, async (t) => {
+      t.mock.timers.enable({ apis: ["setTimeout"] });
+      const previousFetch = globalThis.fetch;
+      let signal: AbortSignal | null | undefined;
+      let complete!: (response: Response) => void;
+      globalThis.fetch = async (_input, init) => {
+        signal = init?.signal;
+        return new Promise<Response>((resolve) => { complete = resolve; });
+      };
+      try {
+        const pending = action === "trigger" ? triggerRun("build")
+          : action === "retry" ? retryRun("run-one") : runCronNow("daily");
+        t.mock.timers.tick(120_000);
+        const aborted = signal?.aborted ?? false;
+        complete(new Response(JSON.stringify({ run_id: "late-run" }), { status: 201 }));
+        assert.equal((await pending).run_id, "late-run");
+        assert.equal(aborted, false, "admission must not abort while the controller is still working");
+      } finally {
+        globalThis.fetch = previousFetch;
+      }
+    });
+  }
+
+  it("keeps the ordinary read deadline", async (t) => {
+    t.mock.timers.enable({ apis: ["setTimeout"] });
+    const previousFetch = globalThis.fetch;
+    let signal: AbortSignal | null | undefined;
+    globalThis.fetch = async (_input, init) => {
+      signal = init?.signal;
+      return new Response(null, { status: 204 });
+    };
+    try {
+      const pending = cancelRun("run-one");
+      t.mock.timers.tick(10_000);
+      assert.equal(signal?.aborted, true);
+      await pending;
+    } finally {
+      globalThis.fetch = previousFetch;
+    }
   });
 });
 

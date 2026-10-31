@@ -1014,90 +1014,10 @@ function Pipelines({ pivotTabs }: { pivotTabs: React.ReactNode }) {
                   </span>
                 </label>
               )}
-              <ActionMenu
-                align="end"
-                title="Rerun"
-                items={[
-                  {
-                    label: "Rerun from failed",
-                    description:
-                      "Reuse cached/passed nodes; re-execute only failed or unreached.",
-                    tone: "primary",
-                    disabled: checkedRuns.size !== 1,
-                    onSelect: async () => {
-                      if (checkedRuns.size !== 1) return;
-                      const [id] = checkedRuns;
-                      const fresh = await retryRun(id, {
-                        full: false,
-                      }).catch(() => null);
-                      if (fresh?.run_id) {
-                        toast(
-                          `Rerun (from failed) queued as ${fresh.run_id}`,
-                          "success",
-                        );
-                        window.dispatchEvent(
-                          new CustomEvent("sparkwing:runs-changed"),
-                        );
-                      } else {
-                        toast(`Rerun failed for ${id}`, "error");
-                      }
-                      refresh();
-                    },
-                  },
-                  {
-                    label: "Rerun all",
-                    description:
-                      "Re-execute every node from scratch, ignoring previous results.",
-                    tone: "primary",
-                    disabled: checkedRuns.size !== 1,
-                    onSelect: async () => {
-                      if (checkedRuns.size !== 1) return;
-                      const [id] = checkedRuns;
-                      const fresh = await retryRun(id, { full: true }).catch(
-                        () => null,
-                      );
-                      if (fresh?.run_id) {
-                        toast(
-                          `Rerun (all nodes) queued as ${fresh.run_id}`,
-                          "success",
-                        );
-                        window.dispatchEvent(
-                          new CustomEvent("sparkwing:runs-changed"),
-                        );
-                      } else {
-                        toast(`Rerun failed for ${id}`, "error");
-                      }
-                      refresh();
-                    },
-                  },
-                ]}
-                trigger={(open, toggle) => (
-                  <button
-                    disabled={checkedRuns.size !== 1}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      toggle();
-                    }}
-                    aria-expanded={open}
-                    title={
-                      checkedRuns.size === 0
-                        ? "Select a run to rerun"
-                        : checkedRuns.size > 1
-                          ? "Rerun supports one run at a time"
-                          : `Rerun ${[...checkedRuns][0]}`
-                    }
-                    className={`text-[10px] px-2 py-1 rounded border transition-colors disabled:opacity-40 disabled:cursor-not-allowed inline-flex items-center gap-1 ${
-                      open
-                        ? "border-indigo-400 text-indigo-200 bg-indigo-500/15"
-                        : "border-[var(--border)] text-[var(--muted)] hover:text-[var(--foreground)] hover:border-[var(--foreground)]"
-                    }`}
-                  >
-                    ↻ Rerun
-                    <span aria-hidden className="text-[10px] opacity-70">
-                      ▾
-                    </span>
-                  </button>
-                )}
+              <RetryButton
+                runId={[...checkedRuns][0] ?? ""}
+                disabled={checkedRuns.size !== 1}
+                onDone={refresh}
               />
               <ActionMenu
                 align="end"
@@ -6617,17 +6537,23 @@ function CancelButton({
   );
 }
 
-function RetryButton({ runId, onDone, runNow = false }: {
+function RetryButton({ runId, onDone, runNow = false, disabled = false }: {
   runId: string;
   onDone: () => void;
   runNow?: boolean;
+  disabled?: boolean;
 }) {
   const [loading, setLoading] = useState(false);
+  const submission = useRef<{ input: string; key: string } | null>(null);
 
   const submit = async (full: boolean) => {
+    if (loading || disabled) return;
     setLoading(true);
-    const fresh = await retryRun(runId, { full }).catch(() => null);
+    const input = JSON.stringify([runId, full]);
+    if (submission.current?.input !== input) submission.current = { input, key: crypto.randomUUID() };
+    const fresh = await retryRun(runId, { full, idempotencyKey: submission.current.key }).catch(() => null);
     if (fresh?.run_id) {
+      submission.current = null;
       toast(
         full
           ? `Rerun (all nodes) queued as ${fresh.run_id}`
@@ -6636,7 +6562,7 @@ function RetryButton({ runId, onDone, runNow = false }: {
       );
       window.dispatchEvent(new CustomEvent("sparkwing:runs-changed"));
     } else {
-      toast(`Rerun failed for ${runId}`, "error");
+      toast(`Could not confirm the rerun for ${runId}. Retry the same action to check the same request safely.`, "error");
     }
     onDone();
     setLoading(false);
@@ -6645,7 +6571,7 @@ function RetryButton({ runId, onDone, runNow = false }: {
   if (runNow) {
     return (
       <button
-        disabled={loading}
+        disabled={loading || disabled}
         onClick={(event) => {
           event.stopPropagation();
           void submit(true);
@@ -6667,7 +6593,7 @@ function RetryButton({ runId, onDone, runNow = false }: {
           description:
             "Reuse cached/passed nodes; re-execute only failed or unreached.",
           tone: "primary",
-          disabled: loading,
+          disabled: loading || disabled,
           onSelect: () => submit(false),
         },
         {
@@ -6675,7 +6601,7 @@ function RetryButton({ runId, onDone, runNow = false }: {
           description:
             "Re-execute every node from scratch, ignoring previous results.",
           tone: "primary",
-          disabled: loading,
+          disabled: loading || disabled,
           onSelect: () => submit(true),
         },
       ]}
@@ -6685,15 +6611,16 @@ function RetryButton({ runId, onDone, runNow = false }: {
             e.stopPropagation();
             toggle();
           }}
+          title={disabled ? "Select one run to rerun" : `Rerun ${runId}`}
           aria-expanded={open}
-          disabled={loading}
+          disabled={loading || disabled}
           className={`px-2 py-1 rounded text-xs font-medium border transition-colors inline-flex items-center gap-1 ${
             open
               ? "bg-indigo-500/30 text-indigo-200 border-indigo-400"
               : "bg-indigo-500/20 text-indigo-400 border-indigo-500/30 hover:bg-indigo-500/30"
           }`}
         >
-          {loading ? "..." : "Rerun"}
+          {loading ? "Starting..." : "Rerun"}
           <span aria-hidden className="text-[10px] opacity-70">
             ▾
           </span>

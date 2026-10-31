@@ -438,6 +438,13 @@ takes a pipeline name, a repository such as `https://github.com/acme/app`,
 and a branch (`main` unless you change it). The runner that claims it fetches
 the branch tip.
 
+Run submission and **Run now** stay pending while the controller admits the
+run, including repository access checks. They have no browser request deadline.
+If the connection drops, retry the same form or action to reuse its idempotency
+key and recover the admitted run without creating another. Keep the form open
+and its inputs unchanged for that retry. A new form or changed inputs start a
+new request.
+
 Selecting a run opens its detail beside the compact runs list. Switching to
 another run keeps both panes in place while its detail loads; clearing the
 selection closes the detail.

@@ -91,12 +91,13 @@ function endSession() {
 // never reads as the dashboard session ending, which would reload in a loop.
 export interface AuthFetchOptions {
   speaksForSession?: boolean;
+  timeoutMs?: number | null;
 }
 
 export function authFetch(
   url: string,
   opts: RequestInit = {},
-  { speaksForSession = true }: AuthFetchOptions = {},
+  { speaksForSession = true, timeoutMs = 10_000 }: AuthFetchOptions = {},
 ): Promise<Response> {
   if (_sessionEnded) {
     return Promise.reject(new Error("session ended -- sign in again"));
@@ -105,7 +106,7 @@ export function authFetch(
     return Promise.reject(new Error("rate-limited -- backing off"));
   }
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 10_000);
+  const timeout = timeoutMs === null ? undefined : setTimeout(() => controller.abort(), timeoutMs);
   return fetch(url, {
     ...opts,
     headers: {
@@ -751,12 +752,13 @@ export async function triggerRun(
   pipeline: string,
   args?: Record<string, string>,
   git?: TriggerGit,
+  idempotencyKey = crypto.randomUUID(),
 ): Promise<CreateRunResponse> {
   const res = await authFetch(`${API_URL}/api/v1/runs`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
-      idempotency_key: crypto.randomUUID(),
+      idempotency_key: idempotencyKey,
       request: {
         version: 1,
         pipeline,
@@ -770,7 +772,7 @@ export async function triggerRun(
         } : {}),
       },
     }),
-  });
+  }, { timeoutMs: null });
   if (!res.ok) {
     if (res.status >= 500) throw new TriggerRunError(serverErrorMessage(res));
     const body = await res.json().catch(() => null) as {
@@ -973,13 +975,13 @@ export interface CreateRunResponse {
 
 export async function retryRun(
   runID: string,
-  opts?: { full?: boolean },
+  opts?: { full?: boolean; idempotencyKey?: string },
 ): Promise<CreateRunResponse> {
   const res = await authFetch(`${API_URL}/api/v1/runs/${pathSegment(runID)}/retry`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ idempotency_key: crypto.randomUUID(), mode: opts?.full ? "all" : "failed" }),
-  });
+    body: JSON.stringify({ idempotency_key: opts?.idempotencyKey ?? crypto.randomUUID(), mode: opts?.full ? "all" : "failed" }),
+  }, { timeoutMs: null });
   if (!res.ok) throw new Error(`retry failed: ${res.status}`);
   return res.json();
 }
@@ -1440,10 +1442,11 @@ export async function getCron(id: string): Promise<CronDetail | null> {
   return res.json();
 }
 
-async function postCron<T>(id: string, action: string): Promise<T> {
+async function postCron<T>(id: string, action: string, idempotencyKey?: string): Promise<T> {
   const res = await authFetch(
     `${API_URL}/api/v1/schedules/${encodeURIComponent(id)}/${action}`,
-    { method: "POST", headers: action === "run" ? { "Idempotency-Key": crypto.randomUUID() } : undefined },
+    { method: "POST", headers: action === "run" ? { "Idempotency-Key": idempotencyKey ?? crypto.randomUUID() } : undefined },
+    { timeoutMs: action === "run" ? null : 10_000 },
   );
   if (!res.ok) {
     if (res.status >= 500) throw new Error(serverErrorMessage(res));
@@ -1465,6 +1468,7 @@ export async function resumeCron(id: string): Promise<CronSchedule> {
 
 export async function runCronNow(
   id: string,
+  idempotencyKey?: string,
 ): Promise<{ run_id: string; schedule: CronSchedule }> {
-  return postCron<{ run_id: string; schedule: CronSchedule }>(id, "run");
+  return postCron<{ run_id: string; schedule: CronSchedule }>(id, "run", idempotencyKey);
 }
