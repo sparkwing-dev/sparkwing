@@ -3,6 +3,7 @@ import { readCSRFCookie } from "./csrfCookie";
 import { localAuthHeaders } from "./localSession";
 import type { LogCompleteness } from "./logCompleteness";
 import type { TriggerGit } from "./triggerSource";
+import { hasTimestamp, runElapsedMs } from "./runTime";
 
 function getApiUrl(): string {
   if (typeof window !== "undefined") return "";
@@ -163,6 +164,7 @@ export interface Run {
   replay_of_node_id?: string;
   args?: Record<string, string>;
   error?: string;
+  created_at?: string;
   started_at: string;
   finished_at?: string;
   annotation_count?: number;
@@ -188,10 +190,7 @@ export interface RunInvocation {
 }
 
 export function runDurationMs(run: Run): number {
-  if (!run.finished_at) return 0;
-  return (
-    new Date(run.finished_at).getTime() - new Date(run.started_at).getTime()
-  );
+  return hasTimestamp(run.finished_at) ? runElapsedMs(run) ?? 0 : 0;
 }
 
 // Node is the run page's view of one job, projected from run detail by runDetailView.
@@ -373,7 +372,7 @@ export interface StepDetailWire {
 }
 
 function durationMs(started?: string, finished?: string): number {
-  if (!started || !finished) return 0;
+  if (!hasTimestamp(started) || !hasTimestamp(finished)) return 0;
   return Math.max(0, new Date(finished).getTime() - new Date(started).getTime());
 }
 
