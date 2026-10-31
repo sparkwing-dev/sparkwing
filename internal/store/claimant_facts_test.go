@@ -58,7 +58,7 @@ func TestOwnerMachineReadsTheSealedPersonalHereHost(t *testing.T) {
 }
 
 func TestUnknownClaimantsCannotExecuteProvenRepositoryRuns(t *testing.T) {
-	st, ctx := openTestStore(t)
+	st, ctx := authorityStore(t), t.Context()
 	machine := authorityRoot("unknown", "a")
 	machine.Grants = nil
 	authorityPersist(t, st, machine)
