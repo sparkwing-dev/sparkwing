@@ -43,7 +43,15 @@ Use `sparkwing operator teams show --team support-test --job-namespace sparkwing
 to read the team identity and its protected node label key and value. The value
 hashes the launcher's Cloud Job namespace with the team slug, so each deployment
 on a shared cluster has its own team nodes. Apply that
-value to the team's NodePool template label and taint. The underlying
+value to the team's NodePool template label and `NoSchedule` taint before
+Cloud work is admitted. The launcher has read-only NodePool `get` and `list`
+access. It creates no pools. Without a compatible team pool, a held award ends
+as `cloud_capacity_unconfigured`, releases its unstarted credit hold, and gives
+the customer support@sparkwing.dev and the run ID as a support reference.
+The operator log names the protected label value to configure. A compatible
+pool that is scaling or exhausted keeps the award pending, with “Waiting for
+dedicated Cloud capacity” and elapsed time in run status.
+The underlying
 `GET /api/v1/operator/teams/{team}` returns team ID and display name to deployment
 credentials. Financial and console details remain restricted to console sessions.
 

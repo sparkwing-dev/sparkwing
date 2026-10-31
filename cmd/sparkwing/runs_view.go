@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
+	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/engineid"
 )
@@ -227,7 +228,7 @@ func writeRunError(text *strings.Builder, detail controllerwire.RunDetail) {
 }
 
 func planFailureHint(detail controllerwire.RunDetail) string {
-	if detail.Failure == "" || detail.Status != "failed" || len(detail.Jobs) != 0 {
+	if detail.Failure == "" || detail.Status != "failed" || len(detail.Jobs) != 0 || detail.Reason == capability.CloudCapacityUnconfigured {
 		return ""
 	}
 	return fmt.Sprintf("the pipeline failed to plan, so no job ran; fix the error above, check it from the repository with `sparkwing pipeline plan --pipeline %s`, and trigger the run again", detail.Inputs.Pipeline)

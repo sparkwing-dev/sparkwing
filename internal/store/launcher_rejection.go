@@ -3,7 +3,9 @@ package store
 import (
 	"context"
 	"database/sql"
+	"fmt"
 
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
@@ -11,6 +13,10 @@ import (
 
 // rejectLauncherAwards fails only exact awards issued under the authenticated launcher's ancestry.
 func (s *Store) rejectLauncherAwards(ctx context.Context, authority capability.AuthorityRef, fences []capability.LeaseRef) error {
+	return s.failLauncherAwards(ctx, authority, fences, "pod_rejected")
+}
+
+func (s *Store) failLauncherAwards(ctx context.Context, authority capability.AuthorityRef, fences []capability.LeaseRef, reason string) error {
 	return s.inLauncherBatchTx(ctx, authority, fences, false, func(tx *storeTx) error {
 		chain, err := authorityChainTx(ctx, tx, authority, true)
 		if err != nil {
@@ -42,6 +48,13 @@ func (s *Store) rejectLauncherAwards(ctx context.Context, authority capability.A
 			if !live {
 				continue
 			}
+			message := "Cloud Pod failed verification"
+			if reason == capability.CloudCapacityUnconfigured {
+				if !capability.CloudLauncher(claimant) || award.Capability.Delivery != capability.DeliveryBootstrap || award.Capability.ExecutionHost != "" {
+					return bindingRefusal()
+				}
+				message = fmt.Sprintf("%s (Support reference: %s)", capability.CloudCapacityUnconfiguredMessage, award.Claim.RunID)
+			}
 			actor := runstate.Actor{Kind: runstate.ActorLauncher, Authority: authority, CapabilityPrefix: row.prefix, NodeFence: runspec.NodeFence{RunID: runspec.RunID(award.Claim.RunID), NodeID: runspec.NodeID(award.Claim.NodeID), Holder: fence.Holder, Generation: runspec.ClaimGeneration(fence.Generation)}}
 			target := expiredUnit{team: award.Claim.Team, ref: runspec.NodeRef{RunID: runspec.RunID(award.Claim.RunID), NodeID: runspec.NodeID(award.Claim.NodeID)}, kind: fence.Kind, sourceGeneration: award.Claim.SourceGeneration}
 			recovery := ownerRecovery{generation: fence.Generation, lease: sql.NullInt64{Valid: true, Int64: award.Claim.Award.LeaseExpiresAt.UnixNano()}}
@@ -56,16 +69,23 @@ func (s *Store) rejectLauncherAwards(ctx context.Context, authority capability.A
 			switch fence.Kind {
 			case capability.UnitNode:
 
-				_, err = transitionNodeTx(ctx, tx, target.team, nodeTransition{Ref: target.ref, To: runstate.NodeFailed, Actor: actor, Cause: runstate.CauseLaunchRejected, Extra: transitionExtra{Result: &runstate.NodeResult{Outcome: runstate.NodeFailed, Reason: "pod_rejected", MaskedError: "Cloud Pod failed verification"}}})
+				_, err = transitionNodeTx(ctx, tx, target.team, nodeTransition{Ref: target.ref, To: runstate.NodeFailed, Actor: actor, Cause: runstate.CauseLaunchRejected, Extra: transitionExtra{Result: &runstate.NodeResult{Outcome: runstate.NodeFailed, Reason: reason, MaskedError: message}}})
 			case capability.UnitPlan:
-				_, err = transitionRunTx(ctx, tx, target.team, runstate.RunTransition{RunID: target.ref.RunID, To: runstate.RunFailed, Actor: actor, Cause: runstate.RunLaunchRejected, Reason: "pod_rejected", MaskedError: "Cloud Pod failed verification"})
+				_, err = transitionRunTx(ctx, tx, target.team, runstate.RunTransition{RunID: target.ref.RunID, To: runstate.RunFailed, Actor: actor, Cause: runstate.RunLaunchRejected, Reason: reason, MaskedError: message})
 				if err == nil {
 					err = writeOwnerRecoveryTx(ctx, tx, target, recovery, "failed", actor, tx.now(ctx))
 				}
 			case capability.UnitEval:
 				err = writeEvalRecoveryTx(ctx, tx, target, recovery, "failed", tx.now(ctx))
 				if err == nil {
-					err = resolveExpansionLossTx(ctx, tx, target, "failed", tx.now(ctx))
+					if reason == capability.CloudCapacityUnconfigured {
+						err = resolveExpansionFailureTx(ctx, tx, target, runstate.ExpansionFailed, &ExpansionFailure{Code: apierr.Unavailable, MaskedError: message}, tx.now(ctx))
+						if err == nil {
+							_, err = tx.execContext(ctx, `UPDATE nodes SET failure_reason=?,error=? WHERE team=? AND run_id=? AND node_id=? AND generation=?`, reason, message, target.team, target.ref.RunID, target.ref.NodeID, target.sourceGeneration)
+						}
+					} else {
+						err = resolveExpansionLossTx(ctx, tx, target, "failed", tx.now(ctx))
+					}
 				}
 			}
 			if err != nil {

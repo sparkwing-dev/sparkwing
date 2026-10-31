@@ -121,7 +121,8 @@ type ClaimResponse struct {
 
 // LauncherCapacityObservation reports demand without an execution placement.
 type LauncherCapacityObservation struct {
-	Award capability.LeaseRef `json:"award"`
+	Award        capability.LeaseRef `json:"award"`
+	Unconfigured bool                `json:"unconfigured,omitempty"`
 }
 
 // LauncherSyncRequest reconciles Jobs and node reservations against the launcher's awards.
@@ -308,6 +309,7 @@ func (r RetryRequest) Validate() error {
 
 // JobDetail is a safe status view, not execution authority or a raw job declaration.
 type JobDetail struct {
+	Reason            string                 `json:"reason,omitempty"`
 	Annotations       []nodeproto.Annotation `json:"annotations,omitempty"`
 	ID                string                 `json:"id"`
 	Status            string                 `json:"status"`
@@ -346,6 +348,7 @@ type AttemptDetail struct {
 
 // RunDetail carries safe dashboard, local and remote status projections.
 type RunDetail struct {
+	Reason            string             `json:"reason,omitempty"`
 	ID                string             `json:"id"`
 	Number            int64              `json:"number"`
 	Team              string             `json:"team"`

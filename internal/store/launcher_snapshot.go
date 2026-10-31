@@ -79,6 +79,15 @@ func (o *Operator) ReconcileLauncherAwards(ctx context.Context, authority capabi
 			return nil, nil, err
 		}
 	}
+	for _, host := range hosts {
+		if host.CapacityUnconfigured {
+			if err := owner.apply(ctx, host.Award, func() error {
+				return o.s.failLauncherAwards(ctx, authority, []capability.LeaseRef{host.Award}, capability.CloudCapacityUnconfigured)
+			}); err != nil {
+				return nil, nil, err
+			}
+		}
+	}
 	tx, err := o.s.beginSnapshotReadTx(ctx)
 	if err != nil {
 		return nil, nil, err

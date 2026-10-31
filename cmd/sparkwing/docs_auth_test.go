@@ -79,3 +79,18 @@ func TestAuthGuideActionsExpiryUsesStoreClock(t *testing.T) {
 		}
 	}
 }
+
+func TestCloudCapacityGuidesMatchFailureContract(t *testing.T) {
+	for _, topic := range []string{"auth", "deployment", "cli-runs"} {
+		body, err := docs.ReadRaw(topic)
+		if err != nil {
+			t.Fatal(err)
+		}
+		body = strings.Join(strings.Fields(body), " ")
+		for _, text := range []string{capability.CloudCapacityUnconfigured, "support@sparkwing.dev", "Waiting for dedicated Cloud capacity", "elapsed"} {
+			if !strings.Contains(body, text) {
+				t.Errorf("%s omits %q", topic, text)
+			}
+		}
+	}
+}

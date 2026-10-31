@@ -441,6 +441,8 @@ components:
       properties:
         award:
           $ref: '#/components/schemas/internal.capability.LeaseRef'
+        capacity_unconfigured:
+          type: boolean
         rejected:
           type: boolean
         reservation:
@@ -1646,6 +1648,8 @@ components:
             - format: date-time
               type: string
             - type: "null"
+        reason:
+          type: string
         spec: {}
         spec_hash:
           type: string
@@ -1877,6 +1881,8 @@ components:
           type: string
         outcome:
           type: string
+        reason:
+          type: string
         started_at:
           anyOf:
             - format: date-time
@@ -2020,6 +2026,8 @@ components:
       properties:
         award:
           $ref: '#/components/schemas/internal.capability.LeaseRef'
+        unconfigured:
+          type: boolean
       required:
         - award
       type: object
@@ -3130,6 +3138,8 @@ components:
             - type: "null"
         number:
           type: integer
+        reason:
+          type: string
         retry:
           anyOf:
             - $ref: '#/components/schemas/internal.controllerwire.RetryDetail'
@@ -3408,6 +3418,8 @@ components:
           type: string
         ready:
           type: boolean
+        reason:
+          type: string
         started_at:
           anyOf:
             - format: date-time

@@ -169,6 +169,10 @@ func (w *burstLauncherWire) Claim(ctx context.Context, request controllerwire.Cl
 
 type burstCloudBoundary struct{ releases int }
 
+func (*burstCloudBoundary) CapacityConfigured(context.Context, launcher.CloudJobBinding, corev1.ResourceList) (bool, error) {
+	return true, nil
+}
+
 func (*burstCloudBoundary) Reserve(_ context.Context, binding launcher.CloudJobBinding, job string) (launcher.CloudNodeReservation, error) {
 	return launcher.CloudNodeReservation{NodeName: "cloud-node", NodeUID: "cloud-node-uid", Team: binding.Team, JobName: job, ReservationID: "burst-reservation", Award: binding.LeaseRef()}, nil
 }

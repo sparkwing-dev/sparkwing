@@ -103,7 +103,12 @@ func cloudProvisionerW8(node *corev1.Node, team string) dynamic.Interface {
 	}}
 	pool := &unstructured.Unstructured{Object: map[string]any{
 		"apiVersion": "karpenter.sh/v1", "kind": "NodePool", "metadata": map[string]any{"name": "pool", "uid": "pool-uid"},
-		"spec": map[string]any{"template": map[string]any{"metadata": map[string]any{"labels": map[string]any{launcher.TeamNodeLabel: launcher.TeamNodeValue("cloud", team)}}}},
+		"spec": map[string]any{"template": map[string]any{
+			"metadata": map[string]any{"labels": map[string]any{launcher.TeamNodeLabel: launcher.TeamNodeValue("cloud", team)}},
+			"spec": map[string]any{"taints": []any{map[string]any{
+				"key": launcher.TeamNodeLabel, "value": launcher.TeamNodeValue("cloud", team), "effect": "NoSchedule",
+			}}},
+		}},
 	}}
 	return dynamicfake.NewSimpleDynamicClient(runtime.NewScheme(), claim, pool)
 }

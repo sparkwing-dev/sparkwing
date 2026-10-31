@@ -26,6 +26,8 @@ credential model in `docs/auth.md`, and the decision log
 
 | Rule | Owner | Guard test |
 | --- | --- | --- |
+| Missing dedicated Cloud pool fails the exact award and refunds its unstarted credit hold once | `internal/runners/launcher/node_team.go`: `CapacityConfigured`, `internal/store/launcher_rejection.go`: `failLauncherAwards` | `TestPoolConfigurationIgnoresScalingAndExhaustion`, `TestUnconfiguredCloudCapacityFailsAndRefundsOnce`, `TestCloudCapacityFailureThroughController` |
+| Unactivated Cloud awards expose elapsed capacity waiting until activation | `internal/store/cloud_capacity_notice.go`: `readCloudCapacityWaitTx`, `internal/controller/engine_run_detail.go`: `runViewStatus` | `TestCloudCapacityNoticeEndsAtActivation`, `TestCloudCapacityNoticeUsesStoreElapsedTime`, `TestRunStatusDisplaysCloudCapacityWaitAndConfigurationFailure` |
 | Foreground cancellation waits for terminal state | `cmd/sparkwing/run_host.go`: `runLocalCommand`, `here_attach.go`: `observeHereRun` | `TestLocalRunInterruptCancelsAndWaitsForTerminalRun` |
 | Standalone controller survives intake through hosting | `cmd/sparkwing/run_host.go`: `runLocalCommand` joins preparation signal handling without canceling the controller | `TestStandaloneControllerContextSurvivesIntake`; `TestStandaloneRunOwnsControllerAndJoinsShutdown` |
 | A fresh scaffold previews before its first commit and explains the commit required for execution | `cmd/sparkwing/local_run.go`: `prepareNativeLocalRun` | `TestFreshScaffoldPlansAndExplainsInitialCommitBeforeRun` |

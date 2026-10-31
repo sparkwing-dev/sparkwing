@@ -47,6 +47,10 @@ func (b *boundaryFake) Reserve(_ context.Context, a CloudJobBinding, name string
 	return CloudNodeReservation{NodeName: "node", NodeUID: "uid", Team: a.Team, JobName: name, ReservationID: "reservation", Award: a.LeaseRef()}, nil
 }
 
+func (b *boundaryFake) CapacityConfigured(context.Context, CloudJobBinding, corev1.ResourceList) (bool, error) {
+	return true, nil
+}
+
 func (b *boundaryFake) Release(context.Context, CloudNodeReservation) error {
 	b.releases++
 	return b.err

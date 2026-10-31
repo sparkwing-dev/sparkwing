@@ -129,6 +129,29 @@ func (l *Launcher) deleteCapacityPod(ctx context.Context, pod *corev1.Pod) error
 	return err
 }
 
+func (l *Launcher) awaitCapacity(ctx context.Context, award CloudJobAward) error {
+	budget, err := cloudBudget(l.Config, award)
+	if err != nil {
+		return err
+	}
+	configured, err := l.Boundary.CapacityConfigured(ctx, award.Binding, budget)
+	if err != nil {
+		return err
+	}
+	if configured {
+		return errors.Join(ErrNoDedicatedNode, l.requestCapacity(ctx, award))
+	}
+	states, err := l.retirements(ctx, []CloudJobObservation{{Binding: award.Binding, JobName: jobName(award.Binding), Capacity: &CloudCapacityObservation{Unconfigured: true}}})
+	if err != nil {
+		return err
+	}
+	if !states[jobName(award.Binding)].Delete {
+		return errors.New("controller deferred unconfigured Cloud capacity")
+	}
+	l.logger().Error("Cloud capacity is not configured; configure the team's NodePool template label and taint", "team", award.Binding.Team, "node_label", TeamNodeLabel, "node_label_value", TeamNodeValue(l.Config.Namespace, award.Binding.Team), "support_reference", award.Binding.RunID)
+	return l.releaseCapacity(ctx, award.Binding)
+}
+
 func (l *Launcher) requestCapacity(ctx context.Context, award CloudJobAward) error {
 	d := demandFor(award)
 	pod, err := capacityPod(l.Config, d)

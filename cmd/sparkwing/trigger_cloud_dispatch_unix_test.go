@@ -282,8 +282,8 @@ func TestCloudTriggerWithoutCreditsNamesTheCreditHold(t *testing.T) {
 	if claimed, err := f.open(f.launcher, true).Claim(t.Context(), poll); err != nil || claimed.Claim == nil || claimed.Claim.RunID != created.RunID {
 		t.Fatalf("launcher did not claim funded work: %+v %v", claimed.Claim, err)
 	}
-	if detail, err = f.member.ReadRun(t.Context(), created.RunID); err != nil || len(detail.Notices) != 0 {
-		t.Fatalf("claimed run kept a notice: %+v %v", detail.Notices, err)
+	if detail, err = f.member.ReadRun(t.Context(), created.RunID); err != nil || len(detail.Notices) != 1 || detail.Notices[0].Kind != engineid.NoticeCloudCapacity || !strings.Contains(detail.Notices[0].Reason, "Waiting for dedicated Cloud capacity (elapsed ") {
+		t.Fatalf("funded award did not replace the credit notice with capacity waiting: %+v %v", detail.Notices, err)
 	}
 }
 
@@ -470,6 +470,10 @@ func (h cloudDispatchHost) Host(ctx context.Context, unit controllerwire.Claimed
 }
 
 type cloudDispatchBoundary struct{}
+
+func (cloudDispatchBoundary) CapacityConfigured(context.Context, launcher.CloudJobBinding, corev1.ResourceList) (bool, error) {
+	return true, nil
+}
 
 func (cloudDispatchBoundary) Reserve(_ context.Context, binding launcher.CloudJobBinding, job string) (launcher.CloudNodeReservation, error) {
 	return launcher.CloudNodeReservation{NodeName: "cloud-node", NodeUID: "cloud-node-uid", Team: binding.Team, JobName: job, ReservationID: "reservation-" + job, Award: binding.LeaseRef()}, nil

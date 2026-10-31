@@ -372,7 +372,7 @@ Views: summary, timeline, receipt, errors, tree. Summary includes recorded faili
 
 --follow streams observations until the run ends. Exit 0 means success or a completed dry run, 1 means a failed or cancelled run, 2 means invalid usage, 3 means the observation is incomplete and may be retried, and 4 means the run does not exist or the credential cannot read it, so polling again will not help. --exit-zero suppresses terminal failure only.
 
-JSON preserves run details and notices: one document per observation, so --follow and the errors view (one record per failed job) are NDJSON. The exit code carries the outcome, and no error document follows the observation. Plain summary prints the run status, every job's status and outcome, and failure details. Errors prints failed job IDs, tree prints run IDs, and receipt prints the receipt hash. --steps adds recorded steps to summary and tree output.
+Cloud awards awaiting activation show "Waiting for dedicated Cloud capacity" with elapsed time. Missing team pool configuration ends the unit as cloud_capacity_unconfigured, releases its credit hold, and gives support@sparkwing.dev a run reference. JSON preserves run details and notices: one document per observation, so --follow and the errors view (one record per failed job) are NDJSON. The exit code carries the outcome, and no error document follows the observation. Plain summary prints the run status, every job's status and outcome, and failure details. Errors prints failed job IDs, tree prints run IDs, and receipt prints the receipt hash. --steps adds recorded steps to summary and tree output.
 
 ### Flags
 

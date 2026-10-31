@@ -59,4 +59,5 @@ const (
 	NoticeUnverified        NoticeKind = "unverified_run"
 	NoticeCreditHold        NoticeKind = "credit_hold"
 	NoticeNoEligibleRunner  NoticeKind = "no_eligible_runner"
+	NoticeCloudCapacity     NoticeKind = "cloud_capacity_waiting"
 )

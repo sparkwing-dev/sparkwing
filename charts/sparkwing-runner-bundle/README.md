@@ -103,6 +103,12 @@ managed launcher, which still needs `jobImage` and `dockerImage` and must run as
 `system:serviceaccount:<release namespace>:<launcher.serviceAccountName>`, the
 only launcher identity the policies admit.
 Set `runner.enabled=false` when all work goes through Cloud Jobs.
+The launcher reads NodePools with `get` and `list` to distinguish unconfigured
+team capacity from scaling or exhaustion. Configure the protected team label
+and `NoSchedule` taint before submitting Cloud runs. Missing configuration ends
+the unit as `cloud_capacity_unconfigured`, refunds its unstarted credit hold,
+and returns support@sparkwing.dev with the run ID as a support reference.
+Configured pools keep waiting with elapsed time in API and CLI run status.
 
 `launcher.networkPolicy.egress` supplies allowed Job destinations alongside the
 selecting policy that denies all Job ingress and egress. Nothing needs to reach

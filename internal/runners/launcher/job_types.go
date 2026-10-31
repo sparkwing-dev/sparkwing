@@ -82,6 +82,7 @@ type CloudNodeReservation struct {
 // the cluster's NetworkPolicy enforcement, which the operator verifies.
 type CloudBoundary interface {
 	Reserve(context.Context, CloudJobBinding, string) (CloudNodeReservation, error)
+	CapacityConfigured(context.Context, CloudJobBinding, corev1.ResourceList) (bool, error)
 	Release(context.Context, CloudNodeReservation) error
 	Retire(context.Context, CloudNodeReservation) error
 }

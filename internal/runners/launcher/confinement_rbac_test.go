@@ -180,7 +180,7 @@ func chartLauncherGrant(group, resource, name, namespace, verb string) bool {
 	case "nodeclaims":
 		verbs = "get delete"
 	case "nodepools":
-		verbs = "get"
+		verbs = "get list"
 	case "validatingadmissionpolicies", "validatingadmissionpolicybindings":
 		if name == "sparkwing-cloud-pods-cloud-cloud-jobs" || name == "sparkwing-cloud-jobs-cloud-cloud-jobs" {
 			verbs = "get"
