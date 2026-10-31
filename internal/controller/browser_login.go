@@ -38,7 +38,7 @@ const loginHTML = `<!doctype html>
     .gsi:hover { background: #1f1f20; }
     .gh { background: #24292f; border: 1px solid #57606a; color: #ffffff; }
     .gh:hover { background: #2f363d; }
-    .or { display: flex; align-items: center; gap: 0.75rem; margin: 1.25rem 0; font-size: 0.75rem; color: #6e7681; }
+    .or { display: flex; align-items: center; gap: 0.75rem; margin: 1.25rem 0; font-size: 0.75rem; color: #8b949e; }
     .or::before, .or::after { content: ""; flex: 1; border-top: 1px solid #30363d; }
     summary.or { cursor: pointer; list-style: none; }
     summary.or::-webkit-details-marker { display: none; }
@@ -47,7 +47,8 @@ const loginHTML = `<!doctype html>
   </style>
 </head>
 <body>
-  <form class="card" method="POST" action="/login">
+  <main class="card">
+  <form method="POST" action="/login">
     <h1>Sparkwing</h1>
     {{if .Refused}}<p class="refused" role="alert">{{.Refused}} <a href="mailto:support@sparkwing.dev">Get help</a>.</p>{{end}}
     {{if .Google}}
@@ -71,6 +72,7 @@ const loginHTML = `<!doctype html>
     {{template "token" .}}
     {{end}}
   </form>
+  </main>
 </body>
 </html>
 {{define "token"}}
