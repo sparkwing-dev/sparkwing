@@ -129,6 +129,10 @@ installation, it returns HTTP 422 with the repository and ref to check.
 Confirm the repository URL, the controller's Git credentials and that the ref
 exists. The refused installation leaves the stored schedules unchanged.
 
+Installing an API schedule with an identity already owned by a GitHub App
+schedule returns HTTP 409 and preserves the existing declaration. Manage that
+schedule through the repository declaration or App automation.
+
 Local installation records the selected declarations and captured environment
 identity durably. Proofs and later pin changes use that captured environment.
 Environment values stay in private host storage and do not appear in schedule

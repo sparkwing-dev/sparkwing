@@ -61,6 +61,28 @@ func TestScheduleHTTPClientExplainsAppDeclarationRefusal(t *testing.T) {
 	}
 }
 
+func TestScheduleHTTPInstallConflictsWithAppIdentity(t *testing.T) {
+	for _, mode := range []string{"replace", "merge"} {
+		t.Run(mode, func(t *testing.T) {
+			f := newScheduleHTTPFixture(t)
+			row, _, err := f.writer.ArmCronSchedule(t.Context(), store.CronSchedule{
+				ID: "app-nightly", RepoPath: "https://github.com/acme/widgets.git", Pipeline: "nightly",
+				Cron: "0 3 * * *", TZ: "UTC", Where: store.CronWhereController,
+				GitHubInstallationID: 7, GitHubRepositoryID: 701, ArmedBy: "github-app:7",
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			body := strings.Replace(schedulePushJSON, `{`, `{"mode":"`+mode+`",`, 1)
+			f.call(t, "PUT", "/api/v1/schedules/repos", body, "", 409, nil)
+			after, err := f.writer.ListCronSchedules(t.Context())
+			if err != nil || len(after) != 1 || !reflect.DeepEqual(after[0], row) {
+				t.Fatalf("identity conflict changed schedules: %+v %v", after, err)
+			}
+		})
+	}
+}
+
 func TestScheduleHTTPClientPreservesOwnerAndArmer(t *testing.T) {
 	f := newScheduleHTTPFixture(t)
 	var pushed controllerwire.ScheduleRepoWritten
