@@ -197,7 +197,7 @@ clear the local or global setting. Check the setting before clearing it because
 other repositories may rely on global hooks.
 
 `status` compares each installed hook with the expected content and format and
-reports missing, modified, non-executable, obsolete, or shadowed hooks. Run it
+reports missing, modified, non-executable, no longer declared, or shadowed hooks. Run it
 in the affected repository, repair the reported hook or configuration, and
 reinstall there. `doctor` also reports a shadowed hook in the current repository.
 
