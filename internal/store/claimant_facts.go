@@ -11,6 +11,7 @@ import (
 const githubHostedRunner = "github-hosted"
 
 type claimantFacts struct {
+	HostKind                                                            capability.HostKind
 	Launcher, Personal, Shared, Cloud, Observable, PersistentKubernetes bool
 	OwnerAccount, Tier, OIDCKind, ExecutorClass                         string
 	// safety: FreshHost is a host no job of another run touched: a launcher or Cloud pod, whose warm node
@@ -26,6 +27,33 @@ func claimantFactsTx(ctx context.Context, tx *storeTx, chain []authorityNode, re
 		return facts, bindingRefusal()
 	}
 	leaf, root := chain[0].principal.Capability, chain[len(chain)-1].principal.Capability
+	if host := leaf.Host; host != nil {
+		facts.HostKind, facts.FreshHost, facts.OIDCKind = host.Kind, host.Fresh, host.RunnerKind
+		facts.Personal = host.Kind == capability.HostPersonal || host.Kind == capability.HostHere && host.RunnerKind == tierPersonal
+		facts.Shared = host.Kind == capability.HostSelfHosted
+		facts.OwnerAccount, facts.Host = host.OwnerAccountID, host.MachineID
+		facts.Cloud = host.Kind == capability.HostCloud && host.RunnerKind != tierActions
+		facts.Launcher, facts.Observable = capability.Launcher(leaf), true
+		facts.Tier, facts.ExecutorClass = tierSelfHosted, "runner"
+		if leaf.Billing != nil {
+			facts.ExecutorClass = leaf.Billing.ExecutorClass
+		}
+		switch host.Kind {
+		case capability.HostPersonal:
+			facts.Tier = tierPersonal
+		case capability.HostHere:
+			facts.Tier = tierHere
+		case capability.HostCloud:
+			facts.Tier = TierCloud
+		}
+		if facts.Personal && request.OriginMachine != "" && request.OriginMachine == host.MachineID {
+			facts.Tier = tierHere
+		}
+		if host.RunnerKind == tierActions {
+			facts.Tier = tierActions
+		}
+		return facts, nil
+	}
 	facts.Launcher = capability.Launcher(leaf)
 	facts.Observable = registeredClaimant(leaf) || actionsClaimant(leaf) || facts.Launcher || localClaimant(leaf)
 	facts.ExecutorClass, facts.OIDCKind = "runner", "user"
@@ -85,6 +113,16 @@ func claimantFactsTx(ctx context.Context, tx *storeTx, chain []authorityNode, re
 		if ancestor.principal.Capability.Purpose == capability.PurposeHere {
 			facts.ExecutorClass = tierHere
 		}
+	}
+	facts.HostKind = capability.HostPersonal
+	if !facts.Personal && (facts.Shared || registeredClaimant(leaf) || facts.Launcher || facts.Tier == tierActions) {
+		facts.HostKind = capability.HostSelfHosted
+	}
+	if root.Subject.Kind == capability.SubjectLocal || facts.ExecutorClass == tierHere {
+		facts.HostKind = capability.HostHere
+	}
+	if facts.Cloud || githubHosted {
+		facts.HostKind = capability.HostCloud
 	}
 	facts.FreshHost = facts.Launcher || facts.Cloud || facts.Tier == tierActions && githubHosted
 	return facts, nil

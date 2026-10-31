@@ -53,6 +53,29 @@ func TestMachineEnrollmentUsesStoreOrigin(t *testing.T) {
 	}
 }
 
+func TestUnscopedEnrollmentIsPersonalOnly(t *testing.T) {
+	for _, personal := range []bool{false, true} {
+		t.Run(fmt.Sprint(personal), func(t *testing.T) {
+			s, spec := machineEnrollment(t)
+			spec.Personal, spec.Repositories, spec.ReservedPools = personal, []string{}, nil
+			issued, err := s.AsOperator().ProvisionCapability(t.Context(), spec)
+			if !personal {
+				if err == nil || issued.Raw != "" {
+					t.Fatal("shared enrollment accepted an absent repository scope")
+				}
+				return
+			}
+			if err != nil || issued.Capability.Repositories != nil {
+				t.Fatalf("unscoped personal enrollment retained a repository restriction: %+v %v", issued.Capability.Repositories, err)
+			}
+			profile, err := s.AsOperator().ReadClaimProfile(t.Context(), capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: issued.Capability.Prefix})
+			if err != nil || profile.Accept != nil {
+				t.Fatalf("unscoped personal profile applied a repository filter: %+v %v", profile, err)
+			}
+		})
+	}
+}
+
 func TestMachineEnrollmentAuthorityProperty(t *testing.T) {
 	s, base := machineEnrollment(t)
 	check := func(change uint8, suffix uint16) bool {
@@ -226,8 +249,13 @@ func TestEnrolledClaimRepositoryAncestryProperty(t *testing.T) {
 		if foreign {
 			owner = fmt.Sprintf("foreign-%d", suffix)
 		}
-		request := sealWith(t, runspec.SealedRequest{Request: runspec.Request{Git: runspec.Git{Repository: runspec.Repository{Key: "gh:1", Display: "https://github.com/" + owner + fmt.Sprintf("/repo-%d", suffix)}}}}, assertedProvenance(t, "ci", "", ""))
-		rewriteSchemaExec(t, s.db, `UPDATE runs SET request_json=?,repo_display=?`, request, "https://github.com/"+owner+fmt.Sprintf("/repo-%d", suffix))
+		repository := owner + fmt.Sprintf("/repo-%d", suffix)
+		provenance, err := assertedProvenance(t, "ci", "", "").FetchedFrom(1, repository, "", "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		request := sealWith(t, runspec.SealedRequest{Request: runspec.Request{Git: runspec.Git{Repository: runspec.Repository{Key: "gh:1", Display: "https://github.com/" + repository}}}}, provenance)
+		rewriteSchemaExec(t, s.db, `UPDATE runs SET request_json=?,repo_display=?`, request, "https://github.com/"+repository)
 		demand.CapabilityPrefix = root.Capability.Prefix
 		if delegated {
 			demand.CapabilityPrefix = child.Capability.Prefix

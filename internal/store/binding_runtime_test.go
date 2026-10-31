@@ -66,6 +66,11 @@ func TestBindingSecretRequiresTheSealedDeclarationAndGrantedPool(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	setSourceHost(t, tenant, capability.Authorized{Principal: p}, &capability.HostFacts{Kind: capability.HostSelfHosted, RunnerKind: "runner", MachineID: "host"})
+	p, err = tenant.s.AsOperator().ResolveAuthority(t.Context(), request.Actor.Authority)
+	if err != nil {
+		t.Fatal(err)
+	}
 	for _, name := range []string{"TOKEN", "UNDECLARED"} {
 		err := tenant.s.AsOperator().CheckBinding(t.Context(), p, capability.BindDeclaredSecret, capability.Target{Team: "a", SecretName: name})
 		if (err == nil) != (name == "TOKEN") {

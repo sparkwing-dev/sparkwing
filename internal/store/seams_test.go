@@ -684,8 +684,8 @@ func (s *Store) approveOneOnce(ctx context.Context, id, actor string) (Account, 
 	return acct, changed, tx.Commit()
 }
 
-func (o *Operator) getLatestRun(ctx context.Context, pipeline string, statuses []string, maxAge time.Duration) (*Run, error) {
-	return o.s.getLatestRun(ctx, `SELECT team,id FROM runs WHERE pipeline=?`, []any{pipeline}, pipeline, statuses, maxAge)
+func (o *Operator) getLatestRun(ctx context.Context, pipeline string, statuses []string, maxAge time.Duration, fromAnyRun bool) (*Run, error) {
+	return o.s.getLatestRun(ctx, `SELECT team,id FROM runs WHERE pipeline=?`, []any{pipeline}, pipeline, statuses, maxAge, fromAnyRun)
 }
 
 func isTerminalRunStatus(status string) bool {

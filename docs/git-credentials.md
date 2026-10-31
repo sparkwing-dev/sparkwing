@@ -89,24 +89,26 @@ A team stores at most 50 credentials.
 
 ## Who receives it
 
-A credential scoped to a repository, and a GitHub App token, go only to a run
-whose code the host fetches from that repository. A run whose code its
-submitter supplied (a CLI upload, a working tree or a local checkout) proves no
-repository, even when it names one, so it receives only a host-wide credential
-for the host; with none stored, the release answers 404 naming the fix.
+Every job credential, including a host-wide stored credential or GitHub App
+token, requires a matching sealed repository proof and a successful GitHub
+compare check at intake. Sparkwing checks that the selected code commit is
+reachable from the requested source branch or tag, or the repository's default
+branch for a raw commit. GitHub's `ahead` and `identical` results pass. `behind`,
+`diverged` and a missing comparison do not. The result is sealed with the run,
+so credential release makes no new GitHub trust decision.
 
-A live authorized claim receives a stored credential or an App token only when
-its executor is Cloud work or a shared runner of the team. GitHub Actions
-runners use the workflow's own `GITHUB_TOKEN` and receive no team credential or App token. A personal machine
-never receives one, and no setting changes that: the release answers 403 with
-reason `personal_machine`. Cloud identity comes from the award and current
-enrollment. Shared or personal comes from the machine's enrollment record, not
-from anything the runner reports. A personal machine fetches with its owner's
-own git access, under the owner's repository allow-list. The controller marks a
-claim as the owner's own machine from the claimant's enrollment, and the host
-then uses the owner's Git configuration and credential helper and never asks the
-controller for a team credential. Every other host asks the controller and never
-reads the host account's Git credential helper.
+Uploaded code, local checkouts and unproven remote commits receive no team
+credential, even if they name a connected repository. A historical commit or
+locked schedule can qualify when the App selects its code and the compare
+check passes. Non-GitHub jobs cannot establish this proof. Controller-owned
+intake access used to select source is separate from job credential release.
+
+A live authorized claim receives a credential only on Sparkwing Cloud or a
+shared runner. GitHub Actions runners use the workflow's own `GITHUB_TOKEN`.
+Personal machines and here hosts receive no team credential. Host kind is
+sealed when the claim is awarded. Runner labels and later enrollment changes
+cannot replace that classification. A personal machine uses its owner's Git
+configuration and credential helper for its own asserted work.
 
 Each release records the repository, host, run, job, generation, machine,
 owner, capability prefix and store timestamp. Audit failure returns no

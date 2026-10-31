@@ -354,3 +354,13 @@ test("every cache resolver the SDK emits is one the host accepts", () => {
   const resolvers = plan.toDoc().jobs[0]!.caches!.map((cache) => cache.resolver);
   assert.deepEqual(resolvers.filter((resolver) => !accepted.includes(resolver!)), []);
 });
+
+
+test("latest reference trust opt-out is declared", () => {
+  const plan = new Plan();
+  const previous = refToLastRun<number>("build", "producer", { fromAnyRun: true });
+  plan.job("consumer", () => undefined).references(previous);
+  assert.deepEqual(plan.toDoc().jobs[0]?.pipeline_refs, [{ pipeline: "build", job: "producer", from_any_run: true }]);
+  assert.equal(previous.fromAnyRun, true);
+  assert.equal(refToLastRun<number>("build", "producer").fromAnyRun, undefined);
+});

@@ -10,7 +10,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 )
 
-func (s *Store) getLatestRun(ctx context.Context, query string, args []any, pipeline string, statuses []string, maxAge time.Duration) (*Run, error) {
+func (s *Store) getLatestRun(ctx context.Context, query string, args []any, pipeline string, statuses []string, maxAge time.Duration, fromAnyRun bool) (*Run, error) {
 	if pipeline == "" {
 		return nil, errors.New("GetLatestRun: pipeline is required")
 	}
@@ -19,6 +19,10 @@ func (s *Store) getLatestRun(ctx context.Context, query string, args []any, pipe
 		return nil, err
 	}
 	defer rollbackOrLog(tx)
+	q := claimSQL{dialect: s.dialect}
+	if !fromAnyRun {
+		query += " AND intake_mode<>'publish' AND " + q.defaultBranchWork(q.at(q.blob("request_json"), "provenance"))
+	}
 	if len(statuses) > 0 {
 		placeholders := make([]string, len(statuses))
 		for i, status := range statuses {

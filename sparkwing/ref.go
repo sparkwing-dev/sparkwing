@@ -21,7 +21,7 @@ import (
 //     makes the node depend on the referenced node.
 //
 //  2. Cross-pipeline, passive -- Ref points at a node in another
-//     pipeline's most recent successful run. Construct via
+//     pipeline's most recent successful verified default-branch run. Construct via
 //     RefToLastRun[T](pipeline, nodeID, opts...). Reading does NOT
 //     trigger a run; if you need fresh data, use RunAndAwait
 //     imperatively from a step body.
@@ -51,9 +51,12 @@ type Ref[T any] struct {
 	Pipeline string
 
 	// MaxAge bounds the freshness of a cross-pipeline run lookup.
-	// Zero means "any successful run, however old." Ignored for
+	// Zero means "any eligible successful run, however old." Ignored for
 	// in-run refs.
 	MaxAge time.Duration
+
+	// AnyRun permits cross-pipeline output from runs without verified default-branch provenance.
+	AnyRun bool
 }
 
 // Job returns the upstream node id this reference points at.
@@ -196,7 +199,7 @@ func (r Ref[T]) getCrossPipeline(ctx context.Context) (T, bool, error) {
 		return out, false, fmt.Errorf("sparkwing: Ref[%T].Get called without a pipeline resolver in context (pipeline=%q node=%q)",
 			out, r.Pipeline, r.JobID)
 	}
-	resolved, err := resolver.resolve(ctx, r.Pipeline, r.JobID, r.MaxAge)
+	resolved, err := resolver.resolve(ctx, r.Pipeline, r.JobID, r.MaxAge, r.AnyRun)
 	if err != nil {
 		return out, false, fmt.Errorf("sparkwing: Ref[%T].Get failed (pipeline=%q node=%q): %w",
 			out, r.Pipeline, r.JobID, err)
@@ -255,6 +258,7 @@ type RefOption func(*refOpts)
 
 type refOpts struct {
 	maxAge time.Duration
+	anyRun bool
 }
 
 // MaxAge bounds cross-pipeline ref resolution to runs whose
@@ -265,9 +269,16 @@ func MaxAge(d time.Duration) RefOption {
 	return func(o *refOpts) { o.maxAge = d }
 }
 
+// FromAnyRun permits a cross-pipeline reference to read successful runs from any
+// branch or intake, including uploads. Use it only when the consumer accepts
+// output that has no verified default-branch provenance.
+func FromAnyRun() RefOption {
+	return func(o *refOpts) { o.anyRun = true }
+}
+
 // RefToLastRun returns a Ref[T] pointing at node nodeID in the most
-// recent successful run of pipeline. Reading does NOT trigger a
-// new run; if you need fresh data tied to the current moment, call
+// recent successful verified default-branch run of pipeline. Reading does not
+// trigger a new run. For fresh data tied to the current moment, call
 // sparkwing.RunAndAwait imperatively from a step body.
 //
 // Cross-repo is the primary use case: pipeline A in repo foo can
@@ -301,6 +312,7 @@ func RefToLastRun[T any](pipeline, nodeID string, opts ...RefOption) Ref[T] {
 		JobID:    nodeID,
 		Pipeline: pipeline,
 		MaxAge:   o.maxAge,
+		AnyRun:   o.anyRun,
 	}
 }
 
@@ -325,7 +337,9 @@ func (n *JobNode) pipelineRefs() []refTarget {
 	return out
 }
 
-func (r Ref[T]) target() refTarget { return refTarget{Pipeline: r.Pipeline, NodeID: r.JobID} }
+func (r Ref[T]) target() refTarget {
+	return refTarget{Pipeline: r.Pipeline, NodeID: r.JobID, AnyRun: r.AnyRun}
+}
 
 type refField interface{ target() refTarget }
 
@@ -362,4 +376,5 @@ func collectRefs(job any) []refTarget {
 type refTarget struct {
 	Pipeline string
 	NodeID   string
+	AnyRun   bool
 }

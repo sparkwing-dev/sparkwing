@@ -48,6 +48,7 @@ func TestPlacementMeteringUsesEnrolledOriginProperty(t *testing.T) {
 			}
 			s, spec := provisionOrigin(t, kind)
 			s, demand := unitClaimFixtureStore(t, s)
+			proveClaimFixtureRepository(t, s)
 			operator := authorityRoot("enroller", "")
 			operator.Subject.Kind = capability.SubjectOperator
 			operator.Grants = []capability.Grant{capability.OperatorTokens}

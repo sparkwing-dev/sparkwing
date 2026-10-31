@@ -36,6 +36,7 @@ type trustMatrixRow struct {
 	principal  capability.Principal
 	schedule   *scheduleAdmission
 	parent     string
+	compared   bool
 }
 
 func matrixAccount(id string) capability.Principal {
@@ -94,16 +95,17 @@ func trustMatrixRows() []trustMatrixRow {
 	}
 	alice := matrixAccount("alice")
 	return []trustMatrixRow{
-		{key: "app-push-default", title: "GitHub App push to the default branch", request: IntakeRequest{VerifiedDeliveryID: "delivery", Request: matrixApp("push", "refs/heads/main", true)}},
+		{key: "app-push-default", title: "GitHub App push to the default branch", request: IntakeRequest{VerifiedDeliveryID: "delivery", Request: matrixApp("push", "refs/heads/main", true)}, compared: true},
 		{key: "app-push-branch", title: "GitHub App push to another branch", request: IntakeRequest{VerifiedDeliveryID: "delivery", Request: matrixApp("push", "refs/heads/feature", false)}},
 		{key: "app-pull-request", title: "GitHub App same-repository pull request", request: IntakeRequest{VerifiedDeliveryID: "delivery", Request: pr}},
 		{key: "app-push-branch-source-pin", title: "GitHub App push to the default branch whose pipeline source: pins a branch", request: IntakeRequest{VerifiedDeliveryID: "delivery", Request: branchPin}},
 		{key: "schedule-admin", title: "Admin-armed App schedule on the default branch, unmodified fire", request: matrixScheduleRequest(), schedule: matrixSchedule(nil)},
 		{key: "schedule-run-now", title: "Run-now of that schedule by a member", request: matrixScheduleRequest(), schedule: matrixSchedule(func(in *scheduleAdmission) { in.caller = &capability.Authorized{Principal: alice} })},
 		{key: "schedule-overridden", title: "Admin-armed App schedule with an override", request: matrixScheduleRequest(), schedule: matrixSchedule(func(in *scheduleAdmission) { in.schedule.Override = &CronOverride{} })},
-		{key: "schedule-locked", title: "Admin-armed App schedule locked to a commit", request: matrixScheduleRequest(), schedule: matrixSchedule(func(in *scheduleAdmission) { in.schedule.LockedRef = matrixMain })},
+		{key: "schedule-locked", title: "Admin-armed App schedule locked to a compared commit", request: matrixScheduleRequest(), schedule: matrixSchedule(func(in *scheduleAdmission) { in.schedule.LockedRef = matrixMain }), compared: true},
 		{key: "schedule-no-app", title: "Schedule with no App installation or consent (non-admin armer)", request: matrixScheduleRequest(), schedule: matrixSchedule(func(in *scheduleAdmission) { in.schedule.GitHubInstallationID, in.schedule.GitHubRepositoryID = 0, 0 })},
-		{key: "console-branch-head", title: "Console or CLI run at a branch head the controller fetched", request: IntakeRequest{FetchedRepository: FetchedRepository{ID: 7, Name: "acme/repo", Ref: "refs/heads/main", SHA: matrixMain}, Request: fetched}, principal: alice},
+		{key: "console-branch-head", title: "Console or CLI run at a branch head the controller fetched", request: IntakeRequest{FetchedRepository: FetchedRepository{ID: 7, Name: "acme/repo", Ref: "refs/heads/main", SHA: matrixMain}, Request: fetched}, principal: alice, compared: true},
+		{key: "console-compare-denied", title: "Fetched repository whose commit fails the intake GitHub compare check", request: IntakeRequest{FetchedRepository: FetchedRepository{ID: 7, Name: "acme/repo", Ref: "refs/heads/main", SHA: matrixMain}, Request: fetched}, principal: alice},
 		{key: "cli-upload", title: "CLI upload of a connected repository", request: IntakeRequest{Request: upload}, principal: alice},
 		{key: "local", title: "Local run or --runner here", request: IntakeRequest{Request: local}, principal: capability.Principal{Capability: capability.Capability{Team: matrixTeam, Subject: capability.Subject{Kind: capability.SubjectLocal, ID: "laptop"}}}},
 		{key: "actions-github-hosted", title: "GitHub Actions push binding, GitHub-hosted runner", request: IntakeRequest{Request: actions}, principal: push(githubHostedRunner)},
@@ -121,18 +123,20 @@ type matrixHost struct {
 	pools                 string
 	trust                 capability.Trust
 	launcher, persistentK bool
+	kind                  capability.HostKind
 }
 
-// The host and pool columns evaluate the claim query's own poolTrust and freshPod
-// fragments; a reserved pool is one a team secret is restricted to with only_on.
+// safety: exercise the SQL fragments so claim policy cannot drift from Go consumers.
 var matrixHosts = []matrixHost{
-	{column: "host_fresh_pod", pools: `[]`, launcher: true},
-	{column: "host_plain_machine", pools: `[]`},
-	{column: "host_persistent_k8s", pools: `[]`, persistentK: true},
-	{column: "pool_reserved", pools: `["deploy"]`, launcher: true},
-	{column: "pool_reserved_trust_any", pools: `["deploy"]`, trust: capability.TrustAny, launcher: true},
-	{column: "pool_verified_only", pools: `["main-only"]`, trust: capability.TrustVerifiedDefault, launcher: true},
-	{column: "pool_reserved_on_machine", pools: `["deploy"]`},
+	{column: "host_fresh_pod", pools: `[]`, launcher: true, kind: capability.HostCloud},
+	{column: "host_plain_machine", pools: `[]`, kind: capability.HostSelfHosted},
+	{column: "host_persistent_k8s", pools: `[]`, persistentK: true, kind: capability.HostSelfHosted},
+	{column: "host_personal", pools: `[]`, kind: capability.HostPersonal},
+	{column: "host_here", pools: `[]`, kind: capability.HostHere},
+	{column: "pool_reserved", pools: `["deploy"]`, launcher: true, kind: capability.HostSelfHosted},
+	{column: "pool_reserved_trust_any", pools: `["deploy"]`, trust: capability.TrustAny, launcher: true, kind: capability.HostSelfHosted},
+	{column: "pool_verified_only", pools: `["main-only"]`, trust: capability.TrustVerifiedDefault, launcher: true, kind: capability.HostSelfHosted},
+	{column: "pool_reserved_on_machine", pools: `["deploy"]`, kind: capability.HostSelfHosted},
 }
 
 func TestTrustMatrix(t *testing.T) {
@@ -227,6 +231,7 @@ func matrixSeal(ctx context.Context, s *Store, row trustMatrixRow, run string) (
 	}
 	defer func() { _ = tx.Rollback() }()
 	tx.scheduleAdmission = row.schedule
+	row.request.SourceCredentialVerified = row.compared
 	return sealProvenanceTx(ctx, tx, matrixTeam, row.request, row.principal, row.request.Request, run)
 }
 
@@ -252,6 +257,8 @@ func matrixCells(r runspec.SealedRequest) ([][2]string, error) {
 	}
 	return [][2]string{
 		{"trust", string(p.Trust())},
+		{"proven_repository", string(p.ProvenRepository())},
+		{"source_credential_compared", yesNo(p.SourceCredentialVerified())},
 		{"pipeline_secrets", pipeline},
 		{"shared_secrets", yesNo(selection.scope != secretNone)},
 		{"oidc_trigger", oidc.Trigger},
@@ -264,33 +271,22 @@ func matrixCells(r runspec.SealedRequest) ([][2]string, error) {
 	}, nil
 }
 
-// safety: these rows get a GitHub repository's source credential without proving that
-// repository (no OIDC repository claim); they pin today's rule until the M1 decision,
-// and a row that starts or stops contradicting fails the matrix.
-var sourceCredentialUnproven = map[string]bool{
-	"schedule-locked":    true,
-	"schedule-no-app":    true,
-	"child-other-commit": true,
-	"child-other-repo":   true,
-}
-
 func checkSourceCredentialProof(t *testing.T, key string, cells [][2]string) {
 	t.Helper()
 	value := map[string]string{}
 	for _, cell := range cells {
 		value[cell[0]] = cell[1]
 	}
-	contradicts := strings.HasPrefix(value["source_credential"], "repository gh:") && value["oidc_repository"] == "-"
-	if contradicts != sourceCredentialUnproven[key] {
-		t.Errorf("%s: source_credential %q with oidc_repository %q; update sourceCredentialUnproven only with the M1 decision", key, value["source_credential"], value["oidc_repository"])
+	if strings.HasPrefix(value["source_credential"], "repository gh:") && (value["oidc_repository"] == "-" || value["source_credential_compared"] != "yes") {
+		t.Errorf("%s: source credential %q lacks repository or compare proof", key, value["source_credential"])
 	}
 }
 
 func matrixSourceCredential(r runspec.SealedRequest) string {
-	if sourceRepositoryProven(r) {
+	if r.Provenance.ProvenRepository() == r.Request.Git.Repository.Key && r.Provenance.ProvenRepository() != "" && r.Provenance.SourceCredentialVerified() {
 		return "repository " + string(r.Request.Git.Repository.Key)
 	}
-	return "host-wide only"
+	return "no"
 }
 
 func matrixOr(name string, id int64) string {
@@ -367,9 +363,9 @@ func matrixClaimCells(ctx context.Context, d *matrixDialect, r runspec.SealedReq
 	q := claimSQL{dialect: d.dialect}
 	var cells []string
 	for _, h := range matrixHosts {
-		query := rewritePh(d.dialect, `WITH c(team,pools,trust,launcher,persistent_kubernetes,provenance) AS (SELECT CAST(? AS TEXT),CAST(? AS TEXT),CAST(? AS TEXT),CAST(? AS BIGINT),CAST(? AS BIGINT),CAST(? AS TEXT)) SELECT `+q.freshPod("c.persistent_kubernetes", "c.provenance")+` AND `+q.poolTrust("c.team", "c.pools", "c.trust", "c.launcher", "c.provenance")+` FROM c`)
+		query := rewritePh(d.dialect, `WITH c(team,pools,trust,launcher,persistent_kubernetes,provenance,host_kind) AS (SELECT CAST(? AS TEXT),CAST(? AS TEXT),CAST(? AS TEXT),CAST(? AS BIGINT),CAST(? AS BIGINT),CAST(? AS TEXT),CAST(? AS TEXT)) SELECT `+q.hostTrust("c.host_kind", "c.provenance")+` AND `+q.freshPod("c.persistent_kubernetes", "c.provenance")+` AND `+q.poolTrust("c.team", "c.pools", "c.trust", "c.launcher", "c.provenance")+` FROM c`)
 		var eligible bool
-		if err := d.conn.QueryRowContext(ctx, query, matrixTeam, h.pools, string(h.trust), boolInt(h.launcher), boolInt(h.persistentK), string(raw)).Scan(&eligible); err != nil {
+		if err := d.conn.QueryRowContext(ctx, query, matrixTeam, h.pools, string(h.trust), boolInt(h.launcher), boolInt(h.persistentK), string(raw), string(h.kind)).Scan(&eligible); err != nil {
 			return "", err
 		}
 		cells = append(cells, fmt.Sprintf("%-28s %s", h.column, yesNo(eligible)))
@@ -379,6 +375,12 @@ func matrixClaimCells(ctx context.Context, d *matrixDialect, r runspec.SealedReq
 		return "", err
 	}
 	cells = append(cells, fmt.Sprintf("%-28s %s", "default_branch_work_sql", yesNo(work)))
+	cells = append(cells, fmt.Sprintf("%-28s %s", "latest_default", yesNo(work && r.Request.Mode != runspec.IntakePublish)))
+	var repos bool
+	if err := d.conn.QueryRowContext(ctx, rewritePh(d.dialect, `WITH p(value) AS (SELECT CAST(? AS TEXT)) SELECT `+q.provenRepository("p.value")+`<>'' FROM p`), string(raw)).Scan(&repos); err != nil {
+		return "", err
+	}
+	cells = append(cells, fmt.Sprintf("%-28s %s", "repos_runner", yesNo(repos)))
 	cells = append(cells, fmt.Sprintf("%-28s %s", "fresh_host_required", yesNo(work)))
 	return strings.Join(cells, "\n") + "\n", nil
 }
@@ -436,6 +438,8 @@ const trustMatrixHeader = `# Within-team trust matrix: generated by TestTrustMat
 # with default branch main; the store holds a verified main cache record for it.
 #
 # trust                        Provenance.Trust() after sealing
+# proven_repository            the sealed repository every consumer reads
+# source_credential_compared   the intake-time GitHub compare proof, independent of repository proof
 # pipeline_secrets             runSecretSelection: repository and pipeline whose secrets the run reads, or no
 # shared_secrets               runSecretSelection: team-wide --shared secrets (only_on ones still need the pool,
 #                              and bindingSecretTx refuses them to --runner here)
@@ -445,25 +449,28 @@ const trustMatrixHeader = `# Within-team trust matrix: generated by TestTrustMat
 #                              reads it: fresh only on a fresh host, whatever the team's high_trust
 # cache_reads                  awardDataScope for a job claim (ReadRefs)
 # default_branch_work_go       Provenance.DefaultBranchWork()
-# source_credential            sourceRepositoryProven: a git credential or App token scoped to the run's repository,
-#                              or only a host-wide git credential (the CLI upload carries a bundle; local a checkout)
+# source_credential            repository proof plus intake-time compare proof, otherwise no team credential
 # actions_runner_fresh_host    claimantFactsTx FreshHost for the Actions binding's signed runner_environment
 # cache_write_<host>           awardDataScope WriteRef with awardCacheHostTx's writer for that host:
 #                              fresh_host (launcher pod, Cloud, GitHub-hosted Actions), long_lived (plain
 #                              machine, persistent or self-hosted runner) and long_lived_high_trust (the same
 #                              host on a team with high_trust on); host-<machine> stands for the host's hash
 # cache_write_default_branch_<host>  blob.Record.VerifiedDefault over runRefFacts: records others restore as main
-# host_* / pool_*              claim SQL freshPod AND poolTrust for that claimant (SQLite, and PostgreSQL when
+# host_* / pool_*              claim SQL hostTrust AND freshPod AND poolTrust (SQLite, and PostgreSQL when
 #                              SPARKWING_TEST_PG_URL is set, which must agree):
 #   host_fresh_pod             launcher pod, no pools, default trust
 #   host_plain_machine         plain machine runner, no pools, default trust
 #   host_persistent_k8s        persistent Kubernetes runner, no pools, default trust
+#   host_personal / host_here  personal or here hosts; neither may claim proven repository work
 #   pool_reserved              launcher pool a secret is only_on, default trust
 #   pool_reserved_trust_any    the same pool registered --trust=any
 #   pool_verified_only         launcher pool registered --trust=verified-default
 #   pool_reserved_on_machine   plain machine in a reserved pool, default trust
 # default_branch_work_sql      claim SQL defaultBranchWork
 # fresh_host_required          freshPod refuses persistent Kubernetes runners exactly when default_branch_work_sql
+# personal_* / here_*          every consumer behind claimSQL.hostTrust for that host; "not claimed" means
+#                              no award exists to read secrets, mint OIDC, release source credentials or use caches
+#                              latest_default and repos_runner show the corresponding run selection gates
 `
 
 // matrixHostCells renders the cells the claimant's host decides: whether an
@@ -519,6 +526,69 @@ func matrixHostCells(ctx context.Context, s *Store, row trustMatrixRow, r runspe
 			environment = "fresh"
 		}
 		cells = append(cells, [2]string{"cache_write_" + host.name, write}, [2]string{"cache_write_default_branch_" + host.name, yesNo(record.VerifiedDefault())}, [2]string{"oidc_runner_environment_" + host.name, environment})
+	}
+	personal, err := matrixPersonalCells(ctx, tx, r)
+	return append(cells, personal...), err
+}
+
+func matrixPersonalCells(ctx context.Context, tx *storeTx, r runspec.SealedRequest) ([][2]string, error) {
+	if _, err := tx.execContext(ctx, `UPDATE teams SET high_trust=0 WHERE name=?`, matrixTeam); err != nil {
+		return nil, err
+	}
+	raw, err := json.Marshal(r.Provenance)
+	if err != nil {
+		return nil, err
+	}
+	base, err := matrixCells(r)
+	if err != nil {
+		return nil, err
+	}
+	values := map[string]string{}
+	for _, cell := range base {
+		values[cell[0]] = cell[1]
+	}
+	q := claimSQL{dialect: tx.dialect}
+	var cells [][2]string
+	for _, host := range []struct {
+		name string
+		kind capability.HostKind
+	}{{"personal", capability.HostPersonal}, {"here", capability.HostHere}} {
+		var claim bool
+		if err := tx.QueryRowContext(ctx, `WITH c(kind,provenance) AS (SELECT CAST(? AS TEXT),CAST(? AS TEXT)) SELECT `+q.hostTrust("c.kind", "c.provenance")+` FROM c`, string(host.kind), string(raw)).Scan(&claim); err != nil {
+			return nil, err
+		}
+		if allowed := checkRunHost(capability.Capability{Host: &capability.HostFacts{Kind: host.kind}}, r.Provenance) == nil; allowed != claim {
+			return nil, fmt.Errorf("%s: claim SQL and the secret/OIDC host guard disagree", host.name)
+		}
+		cells = append(cells, [2]string{host.name + "_claim", yesNo(claim)})
+		for _, consumer := range []string{"pipeline_secrets", "shared_secrets", "oidc_repository", "cache_reads"} {
+			value := "not claimed"
+			if claim {
+				value = values[consumer]
+			}
+			cells = append(cells, [2]string{host.name + "_" + consumer, value})
+		}
+		for _, consumer := range []string{"source_credential", "cache_write", "latest_default", "repos_runner"} {
+			value := "not claimed"
+			if claim {
+				value = "no"
+				if consumer == "cache_write" {
+					writer, err := awardCacheHostTx(ctx, tx, matrixTeam, claimantFacts{HostKind: host.kind, Host: matrixTeam + "/machine"})
+					if err != nil {
+						return nil, err
+					}
+					scope, err := awardDataScope(awardRow{team: matrixTeam, run: r.RunID, node: "job", repo: string(r.Request.Git.Repository.Key), attempt: 1}, r, capability.Capability{Unit: capability.UnitNode}, writer)
+					if err != nil {
+						return nil, err
+					}
+					value = scope.WriteRef
+					if writer != "" {
+						value = strings.ReplaceAll(value, writer, hostWriterPrefix+"<machine>")
+					}
+				}
+			}
+			cells = append(cells, [2]string{host.name + "_" + consumer, value})
+		}
 	}
 	return cells, nil
 }

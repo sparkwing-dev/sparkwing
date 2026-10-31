@@ -20,7 +20,7 @@ func TestReviewNativeEnrollmentRepositoryClaim(t *testing.T) {
 			if err := json.Unmarshal(w.Body.Bytes(), &issued); err != nil {
 				t.Fatal(err)
 			}
-			engineSQL(t, s.store, `UPDATE runs SET repo_display=? WHERE id='run'`, display)
+			fetchedRunFixture(t, s.store, "a", "run", strings.TrimPrefix(display, "https://github.com/"))
 			claim, err := s.store.AsOperator().ClaimUnit(t.Context(), store.UnitDemand{CapabilityPrefix: issued.Prefix, Target: &store.UnitRef{Kind: capability.UnitTrigger, RunID: "run"}})
 			if display == "https://github.com/acme/repo" {
 				if err != nil || claim.RunID != "run" {

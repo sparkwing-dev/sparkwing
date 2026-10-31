@@ -36,6 +36,9 @@ type CapabilityOrigin struct {
 // Validate rejects incomplete or unknown persisted authority shapes.
 func (r CapabilityRecord) Validate() error {
 	c := r.Value
+	if c.Host != nil && !slices.Contains([]capability.HostKind{capability.HostCloud, capability.HostSelfHosted, capability.HostPersonal, capability.HostHere}, c.Host.Kind) {
+		return authorityError(apierr.IntegrityFailure, "invalid sealed host kind")
+	}
 	if r.Origin != nil && !validCapabilityOrigin(c, *r.Origin) {
 		return authorityError(apierr.IntegrityFailure, "invalid capability origin")
 	}
@@ -158,7 +161,7 @@ func optionalTime(v *time.Time) any {
 	return v.UnixNano()
 }
 
-var authorityColumns = []string{"prefix", "team", "subject_kind", "subject_id", "audience", "grants", "issuance", "authority_version", "parent_kind", "parent_id", "award_purpose", "delivery_purpose", "unit_id", "billing_unit", "bind_kind", "bind_run", "bind_node", "bind_generation", "bind_holder", "claim_by", "reserved_pools", "created_at", "expires_at", "revoked_at", "metered", "payer_team", "executor_class", "reservation_id", "billing_start", "unit_kind", "eval_unit_generation", "repo_key", "repo_scope", "ref_scope", "push_sha"}
+var authorityColumns = []string{"prefix", "team", "subject_kind", "subject_id", "audience", "grants", "issuance", "authority_version", "parent_kind", "parent_id", "award_purpose", "delivery_purpose", "unit_id", "billing_unit", "bind_kind", "bind_run", "bind_node", "bind_generation", "bind_holder", "claim_by", "reserved_pools", "created_at", "expires_at", "revoked_at", "metered", "payer_team", "executor_class", "reservation_id", "billing_start", "unit_kind", "eval_unit_generation", "repo_key", "repo_scope", "ref_scope", "push_sha", "host_kind"}
 
 func authorityProjection(c capability.Capability) ([]any, error) {
 	grants, err := json.Marshal(c.Grants)
@@ -198,6 +201,10 @@ func authorityProjection(c capability.Capability) ([]any, error) {
 		expansion = c.Binding.Expansion.Generation
 	}
 	repo, ref, sha := "", "", ""
+	hostKind := ""
+	if c.Host != nil {
+		hostKind = string(c.Host.Kind)
+	}
 	if c.Data != nil {
 		repo = c.Data.RepositoryKey
 		ref = c.Data.WriteRef
@@ -211,7 +218,7 @@ func authorityProjection(c capability.Capability) ([]any, error) {
 	if c.Binding.Generation != 0 || c.Unit == capability.UnitEval {
 		generation = c.Binding.Generation
 	}
-	return []any{c.Prefix, optionalString(c.Team), string(c.Subject.Kind), c.Subject.ID, string(c.Audience), grants, string(c.Issuance), int64(1), parentKind, parentID, optionalString(string(c.Purpose)), optionalString(string(c.Delivery)), optionalString(c.UnitID), billingUnit, string(c.Binding.Kind), optionalString(c.Binding.RunID), optionalString(c.Binding.NodeID), generation, optionalString(c.Binding.Holder), optionalTime(c.Binding.ClaimBy), pools, c.IssuedAt.UnixNano(), optionalTime(c.ExpiresAt), optionalTime(c.RevokedAt), metered, payer, executor, reservation, start, optionalString(string(c.Unit)), expansion, repo, repos, ref, sha}, nil
+	return []any{c.Prefix, optionalString(c.Team), string(c.Subject.Kind), c.Subject.ID, string(c.Audience), grants, string(c.Issuance), int64(1), parentKind, parentID, optionalString(string(c.Purpose)), optionalString(string(c.Delivery)), optionalString(c.UnitID), billingUnit, string(c.Binding.Kind), optionalString(c.Binding.RunID), optionalString(c.Binding.NodeID), generation, optionalString(c.Binding.Holder), optionalTime(c.Binding.ClaimBy), pools, c.IssuedAt.UnixNano(), optionalTime(c.ExpiresAt), optionalTime(c.RevokedAt), metered, payer, executor, reservation, start, optionalString(string(c.Unit)), expansion, repo, repos, ref, sha, hostKind}, nil
 }
 
 func (op *Operator) persistCapabilityTx(ctx context.Context, tx *storeTx, c capability.Capability, origin ...*CapabilityOrigin) error {

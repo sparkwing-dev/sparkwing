@@ -166,8 +166,8 @@ uploads, local runs or `publish` wrote, and they never restore what it wrote.
 A child at its parent's exact revision, and every retry, write under the scope
 of the run they inherit from. Retries preserve the sealed writer, code and
 inputs in full and failed modes. The retrier is recorded separately as an actor.
-Every run writes only its own scope. Every run also
-reads verified records of the repository's default branch, which intake learns
+Every run writes only its own scope. Repository-proven runs also
+read verified records of the proven repository's default branch, which intake learns
 from the verified records already stored, and a verified pull request also
 reads verified records of its base branch. One member's manual run therefore
 cannot feed memo or cache entries to another member's runs or to scheduled,

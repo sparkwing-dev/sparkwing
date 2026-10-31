@@ -50,7 +50,7 @@ func TestProductionRouterCanonicalRefusalsAndHardCut(t *testing.T) {
 		t.Fatal("undeclared secret reached resolver")
 		return "", false, nil
 	}
-	service.Latest = func(context.Context, capability.Authorized, string, string, time.Duration) (ProcessOutput, error) {
+	service.Latest = func(context.Context, capability.Authorized, string, string, time.Duration, bool) (ProcessOutput, error) {
 		t.Fatal("malformed latest reached backend")
 		return ProcessOutput{}, nil
 	}

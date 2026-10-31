@@ -108,7 +108,7 @@ func TestRunnersPersonalEnrollmentCLIThroughController(t *testing.T) {
 				}
 				return
 			}
-			args := []string{"--profile", "prod", "--runner", "desk", "--personal", "--session-stdin", "--repos", "github.com/acme/*", "--config", f.config, "--output", "json"}
+			args := []string{"--profile", "prod", "--runner", "desk", "--personal", "--session-stdin", "--config", f.config, "--output", "json"}
 			if mode == "shared" {
 				args = slices.DeleteFunc(args, func(arg string) bool { return arg == "--personal" })
 			}

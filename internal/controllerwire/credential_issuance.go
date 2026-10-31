@@ -29,7 +29,7 @@ type EnrollRunnerRequest struct {
 	Personal      bool       `json:"personal,omitempty"`
 	Platform      string     `json:"platform,omitempty"`
 	Name          string     `json:"name"`
-	Repos         []string   `json:"repos"`
+	Repos         []string   `json:"repos,omitempty"`
 	ReservedPools []string   `json:"reserved_pools,omitempty"`
 	Trust         string     `json:"trust,omitempty"`
 	Grants        []string   `json:"grants,omitempty"`

@@ -143,6 +143,23 @@ func (f *appFixture) enrollRunner(owner signedIn, name string, personal bool, po
 	if code := f.call("POST", "/api/v1/runners", owner.auth, body, &m); code != http.StatusCreated {
 		f.t.Fatalf("mint runner = %d", code)
 	}
+	var raw []byte
+	if err := teststore.SQL(f.t, f.store).QueryRow(`SELECT authority_json FROM capabilities WHERE prefix=?`, m.Prefix).Scan(&raw); err != nil {
+		f.t.Fatal(err)
+	}
+	var record store.CapabilityRecord
+	if err := json.Unmarshal(raw, &record); err != nil {
+		f.t.Fatal(err)
+	}
+	// safety: bypass placement scope so credential release must enforce its own proof boundary.
+	record.Value.Repositories = nil
+	raw, err := json.Marshal(record)
+	if err != nil {
+		f.t.Fatal(err)
+	}
+	if _, err := teststore.Exec(f.t.Context(), f.store, `UPDATE capabilities SET authority_json=?,repo_scope=? WHERE prefix=?`, raw, []byte(`null`), m.Prefix); err != nil {
+		f.t.Fatal(err)
+	}
 	return "Bearer " + m.Capability, m.Prefix
 }
 
@@ -176,7 +193,7 @@ func TestSourceCredential_AppScheduleUsesLiveAutomationConsent(t *testing.T) {
 	}
 	machine, _ := f.teamRunner(owner, "schedule-host")
 	var award controllerwire.ClaimResponse
-	if code := f.call("POST", "/api/v1/runners/claim", machine, githubClaimBody(capability.UnitPlan, admitted.RunID, ""), &award); code != http.StatusOK || award.Claim == nil || award.Claim.Request.Request.Git.App.Set || award.Claim.Request.Request.Git.DefaultBranch.Set {
+	if code := f.call("POST", "/api/v1/runners/claim", machine, githubClaimBody(capability.UnitPlan, admitted.RunID, ""), &award); code != http.StatusOK || award.Claim == nil || award.Claim.Request.Request.Git.App.Set || !award.Claim.Request.Provenance.SourceCredentialVerified() {
 		t.Fatalf("schedule award=%+v status=%d", award, code)
 	}
 	claim := "Bearer " + award.Claim.Capability
@@ -222,10 +239,7 @@ func TestSourceCredential_AppTokenReadsTheVerifiedRepository(t *testing.T) {
 	}
 }
 
-// A repository a run names by hand gets an App token only once the team
-// subscribed it, so an editor who types a private repository of the
-// installation into a run reaches nothing it could not already trigger.
-func TestSourceCredential_TypedRepositoryNeedsASubscription(t *testing.T) {
+func TestSourceCredential_SubscriptionCannotProveAnAssertedRun(t *testing.T) {
 	f := newAppFixture(t)
 	olga := f.ghUser(501, "olga")
 	f.connect(olga, 501, 7, acmeAdmin)
@@ -233,8 +247,8 @@ func TestSourceCredential_TypedRepositoryNeedsASubscription(t *testing.T) {
 	before := len(f.app.Minted())
 	got, code := f.sourceCredential(node, "run-plans")
 	if code != http.StatusNotFound || got.Error != "not_found" || got.Token != "" ||
-		!strings.Contains(got.Message, "subscribes it") {
-		t.Fatalf("an unsubscribed private repository = %d %+v, want not_found naming the subscription", code, got)
+		!strings.Contains(got.Message, "has not proven") {
+		t.Fatalf("an asserted private repository = %d %+v, want no credential", code, got)
 	}
 	if n := len(f.app.Minted()) - before; n != 0 {
 		t.Fatalf("the refusal minted %d tokens", n)
@@ -243,13 +257,8 @@ func TestSourceCredential_TypedRepositoryNeedsASubscription(t *testing.T) {
 		t.Fatalf("subscribe = %d", code)
 	}
 	got, code = f.sourceCredential(node, "run-plans")
-	if code != http.StatusOK || got.Kind != "github_app" || !f.app.TokenCovers(got.Token, "acme/plans") ||
-		f.app.TokenCovers(got.Token, "acme/widgets") {
-		t.Fatalf("a subscribed repository = %d %+v, want the App token for acme/plans alone", code, got)
-	}
-	minted := f.app.Minted()
-	if last := minted[len(minted)-1]; !slices.Equal(last.RepositoryIDs, []int64{702}) || last.Permissions["contents"] != "read" {
-		t.Fatalf("minted = %+v, want the subscription's repository id", last)
+	if code != http.StatusNotFound || got.Token != "" || !strings.Contains(got.Message, "has not proven") {
+		t.Fatalf("subscription replaced intake proof: %d %+v", code, got)
 	}
 }
 
@@ -265,8 +274,8 @@ func TestSourceCredential_NamesTheRemedy(t *testing.T) {
 		want string
 	}{
 		"uncovered github": {"https://github.com/someone/else.git", 999, "install the team's GitHub App on someone/else"},
-		"typed github":     {"https://github.com/acme/widgets.git", 0, "subscribes it"},
-		"another host":     {"https://gitlab.example.com/acme/tools.git", 0, "store a git credential for gitlab.example.com"},
+		"typed github":     {"https://github.com/acme/widgets.git", 0, "has not proven"},
+		"another host":     {"https://gitlab.example.com/acme/tools.git", 0, "has not proven"},
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -281,9 +290,6 @@ func TestSourceCredential_NamesTheRemedy(t *testing.T) {
 			}
 			if code != http.StatusNotFound || got.Error != "not_found" || !strings.Contains(got.Message, tc.want) {
 				t.Fatalf("source credential = %d %+v, want not_found naming %q", code, got, tc.want)
-			}
-			if !strings.Contains(got.Message, "Git credentials") {
-				t.Fatalf("the remedy %q does not name the team's git credentials", got.Message)
 			}
 		})
 	}

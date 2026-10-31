@@ -43,7 +43,7 @@ func TestIntakeSourceNumericIdentityProperty(t *testing.T) {
 		s, session := credentialSessionServer(t)
 		teststore.SeedGitHubInstallation(t, s.store, "a", store.GitHubAppInstallation{InstallationID: 7, AccountID: 70, AccountLogin: "acme", AccountType: "Organization", ConnectedBy: "member", GitHubUserID: 71}, time.Now())
 		cfg := githubapp.Config{AppID: 1, Slug: "test", ClientID: "id", ClientSecret: "secret", WebhookSecret: "webhook", PrivateKey: key, HTTP: &http.Client{Transport: intakeGitHubTransport(func(r *http.Request) (*http.Response, error) {
-			var payload string
+			status, payload := http.StatusOK, ""
 			switch r.URL.Path {
 			case "/repos/acme/app/installation":
 				payload = `{"id":7,"app_id":1,"account":{"id":70,"login":"acme","type":"Organization"}}`
@@ -51,10 +51,16 @@ func TestIntakeSourceNumericIdentityProperty(t *testing.T) {
 				payload = `{"token":"private","expires_at":"2100-01-01T00:00:00Z","permissions":{"metadata":"read"}}`
 			case "/installation/repositories":
 				payload = `{"total_count":1,"repositories":[{"id":42,"full_name":"acme/app","owner":{"id":70,"login":"acme"}}]}`
+			case "/repos/acme/app/git/ref/heads/main":
+				payload = `{"ref":"refs/heads/main","object":{"type":"commit","sha":"` + strings.Repeat("a", 40) + `"}}`
+			case "/repos/acme/app/compare/" + strings.Repeat("a", 40) + "...refs/heads/main":
+				payload = `{"status":"identical"}`
+			case "/repos/acme/app/git/ref/tags/main", "/repos/acme/app/contents/.sparkwing/sparkwing.yaml":
+				status, payload = http.StatusNotFound, `{}`
 			default:
 				return nil, fmt.Errorf("unexpected GitHub request %s", r.URL)
 			}
-			return &http.Response{StatusCode: http.StatusOK, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(payload))}, nil
+			return &http.Response{StatusCode: status, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(payload))}, nil
 		})}}
 		s.WithGitHubApp(cfg)
 		tenant, err := s.store.ForTeam(t.Context(), "a")
@@ -448,6 +454,8 @@ func TestConsoleTriggerAdmitsSelectedSourceAndProvesRepository(t *testing.T) {
 			payload = `{"total_count":1,"repositories":[{"id":42,"full_name":"acme/app","owner":{"id":70,"login":"acme"}}]}`
 		case "/repos/acme/app/git/ref/heads/main":
 			payload = `{"ref":"refs/heads/main","object":{"type":"commit","sha":"` + head + `"}}`
+		case "/repos/acme/app/compare/" + head + "...refs/heads/main":
+			payload = `{"status":"identical"}`
 		case "/repos/acme/app/git/ref/tags/main", "/repos/acme/app/contents/.sparkwing/sparkwing.yaml":
 			status, payload = 404, `{"message":"Not Found"}`
 		default:
@@ -475,7 +483,7 @@ func TestConsoleTriggerAdmitsSelectedSourceAndProvesRepository(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := run.Request
-	if got.Request.Git.SHA != head || got.Request.Source.Ref != head || got.Provenance.Trust() != runspec.TrustAsserted || got.Provenance.ProvenRepository() != "gh:42" {
+	if got.Request.Git.SHA != head || got.Request.Source.Ref != head || got.Provenance.Trust() != runspec.TrustAsserted || got.Provenance.ProvenRepository() != "gh:42" || !got.Provenance.SourceCredentialVerified() {
 		t.Fatalf("sealed git=%+v source ref=%q trust=%s proven=%q", got.Request.Git, got.Request.Source.Ref, got.Provenance.Trust(), got.Provenance.ProvenRepository())
 	}
 	if trigger, id, ref, sha := got.Provenance.OIDC(); trigger != "manual" || id != 42 || ref != "refs/heads/main" || sha != head || got.Provenance.Repository() != "acme/app" || got.Request.Git.Ref != "main" {

@@ -164,7 +164,14 @@ Each job is flat:
 | `closures`, `skip_if_budget_ms` | Opaque callback IDs and condition budget |
 | `approval` | Manual decision with message, timeout and timeout policy |
 | `memo`, `caches`, `artifacts`, `consumes`, `pipeline_refs` | Result reuse, files and declared read edges |
+
 | `env`, `requires`, `prefers`, `inline`, `concurrency` | Execution declarations |
+
+A `pipeline_refs` entry reads successful verified default-branch output by default.
+Its optional `from_any_run: true` permits other successful runs. The latest-output
+request must opt out with `from_any_run=true`, and the controller refuses that
+request unless the declared reference permits it. Direct job-output reads enforce
+the same default.
 
 Executable jobs declare one or more steps. An approval has no step body. Steps
 have `id`, optional `needs`, `groups`, `finally`, `risks`, `optional`,
@@ -298,7 +305,7 @@ error object in its `error` member.
 |---|---|---|---|
 | GET | `/node/v1/secrets/{name}` | None | `{value, masked}` |
 | GET | `/node/v1/jobs/{job}/output` | None | `{output}` |
-| GET | `/node/v1/pipelines/{name}/latest` | `job`, `max_age_ms` query | `{output}` |
+| GET | `/node/v1/pipelines/{name}/latest` | `job`, `max_age_ms`, optional `from_any_run=true` query | `{output}` |
 | POST | `/node/v1/oidc-token` | `{audience}` | `{token}` |
 | POST | `/node/v1/children` | `{pipeline, job, args, repo?, branch?}` | `{run_id}` |
 | GET | `/node/v1/children/{run}/await` | `job`, `wait_ms` query | `{status, output?, error?}` |

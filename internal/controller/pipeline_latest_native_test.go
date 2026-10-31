@@ -15,7 +15,7 @@ import (
 func TestPipelineLatestHTTPUsesNativeDeclaredJobReference(t *testing.T) {
 	e, handler, root := engineClaimHTTPFixture(t, []capability.Grant{capability.NodesClaim})
 	engineSQL(t, e.Store, `UPDATE nodes SET spec_json=? WHERE team='a' AND run_id='run' AND node_id='job'`,
-		[]byte(`{"id":"job","pipeline_refs":[{"pipeline":"producer","job":"output"}]}`))
+		[]byte(`{"id":"job","pipeline_refs":[{"pipeline":"producer","job":"output","from_any_run":true}]}`))
 	now := time.Now().UTC()
 	input := runspec.Request{
 		Version: 1, Team: "a", Pipeline: "producer", Mode: runspec.IntakeExecute, Dispatch: runspec.DispatchHost,
@@ -38,11 +38,14 @@ func TestPipelineLatestHTTPUsesNativeDeclaredJobReference(t *testing.T) {
 	if err := json.Unmarshal(response.Body.Bytes(), &award); err != nil || award.Claim == nil {
 		t.Fatalf("claim: %v %s", err, response.Body)
 	}
-	response = engineClaimHTTP(t, handler, award.Claim.Capability, "GET", "/api/v1/pipelines/producer/latest?max_age=2h", "", 200)
+	engineClaimHTTP(t, handler, award.Claim.Capability, "GET", "/api/v1/pipelines/producer/latest?max_age=2h", "", 404)
+	response = engineClaimHTTP(t, handler, award.Claim.Capability, "GET", "/api/v1/pipelines/producer/latest?from_any_run=true&max_age=2h", "", 200)
 	var latest store.Run
 	if err := json.Unmarshal(response.Body.Bytes(), &latest); err != nil || latest.ID != "producer-run" || latest.Args["secret"] != runspec.RedactedArgValue || latest.Args["public"] != "visible" || strings.Contains(response.Body.String(), "never-expose-secret") {
 		t.Fatalf("latest: %v %+v %s", err, latest, response.Body)
 	}
+	engineSQL(t, e.Store, `UPDATE nodes SET spec_json=? WHERE team='a' AND run_id='run' AND node_id='job'`, []byte(`{"id":"job","pipeline_refs":[{"pipeline":"producer","job":"output"}]}`))
+	engineClaimHTTP(t, handler, award.Claim.Capability, "GET", "/api/v1/pipelines/producer/latest?from_any_run=true", "", 403)
 	engineClaimHTTP(t, handler, award.Claim.Capability, "GET", "/api/v1/pipelines/undeclared/latest", "", 403)
 	engineSQL(t, e.Store, `UPDATE nodes SET spec_json=? WHERE team='a' AND run_id='run' AND node_id='job'`, []byte(`{"id":"job"}`))
 	engineClaimHTTP(t, handler, award.Claim.Capability, "GET", "/api/v1/pipelines/producer/latest", "", 403)
@@ -52,7 +55,7 @@ func TestOwnerEvaluationLatestUsesDeclaredReferenceBeforeWorkAward(t *testing.T)
 	engine, _ := engineRuntimeStore(t)
 	owner := engineRuntimeClaim(t, engine, capability.UnitTrigger)
 	raw := nativeClaimPresentation(t, engine, owner)
-	engineSQL(t, engine.Store, `INSERT INTO nodes(team,run_id,node_id,status,spec_json,execution_json) VALUES ('a','run','job','pending',?,?)`, []byte(`{"id":"job","pipeline_refs":[{"pipeline":"producer","job":"output"}]}`), []byte(`{}`))
+	engineSQL(t, engine.Store, `INSERT INTO nodes(team,run_id,node_id,status,spec_json,execution_json) VALUES ('a','run','job','pending',?,?)`, []byte(`{"id":"job","pipeline_refs":[{"pipeline":"producer","job":"output","from_any_run":true}]}`), []byte(`{}`))
 	server := New(engine.Store, nil)
 	engineClaimHTTP(t, server.Handler(), raw, "GET", "/api/v1/pipelines/producer/latest", "", 404)
 	engineClaimHTTP(t, server.Handler(), raw, "GET", "/api/v1/pipelines/undeclared/latest", "", 403)

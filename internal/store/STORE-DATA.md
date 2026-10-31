@@ -681,6 +681,28 @@ Upload tickets retain their run and job identifiers without cascading foreign
 keys. They survive run deletion because upload expiry still needs the digest to
 collect possible copied bytes and release every quota dimension.
 
+## Sealed execution trust
+
+`runs.request_json` holds the intake-sealed `Provenance`: `proven_repository`,
+`verified_default_branch` and `source_credential_verified`. Constructors set the
+first two facts. Only an intake GitHub compare check sets the third. Reads
+validate the stored shape and never infer a missing proof from source metadata.
+Retries and exact-revision children retain the seal. Other children lose proof.
+
+Award issuance classifies cloud, self-hosted, personal or here execution once.
+`Capability.Host` persists that classification, OIDC host facts and the cache
+scope in `capabilities.authority_json`. The checked `host_kind` projection must
+agree with the envelope. Delegates inherit the host unchanged. High-trust team
+settings affect cache scope when the award is issued, not on later reads.
+
+Claim SQL reads the sealed repository and default-branch facts. Personal and
+here hosts cannot claim a proven run. Repository-scoped claimants require proof.
+Secret and OIDC release check the same host boundary. Job source credentials
+also require the sealed compare result. Latest pipeline references use the
+verified default-branch fact and exclude publication, unless the sealed reference
+declares `FromAnyRun`. The trust matrix covers each consumer on personal and
+here hosts as well as shared and fresh hosts.
+
 ## Run-anywhere claim ranking
 
 `SelectDispatch` seals controller dispatch for an executing run with no runner
@@ -700,7 +722,9 @@ routing identities are normalized by the source URL owner when intake writes the
 
 `claim_contexts` groups work by immutable claim policy. Its hash covers the
 request and provenance, resolved options and guards, job execution settings,
-repository access, allowed pools and creator. It omits seal timestamps and
+repository access, allowed pools and creator. Repository proof and verified
+default-branch eligibility are part of the context, so asserted work cannot hide
+a proven run behind the same context head. It omits seal timestamps and
 unrelated jobs. Intake, plan acceptance and expansion insertion write context
 references with their source rows. The context table stores only identity,
 requirement set and unit kind; run policy remains on the run.

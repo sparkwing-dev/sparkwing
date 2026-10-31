@@ -430,6 +430,11 @@ that credential to a private file under `runner.credentials_dir`, then updates
 the `runner` section of the complete machine file. Labels, repository patterns
 and platform observations grant no authority beyond the controller's enrollment.
 
+`--repos` scopes a runner to repository-proven runs. An uploaded run's remote
+name cannot route it onto that runner. Personal machines and here hosts cannot
+claim repository-proven runs, even when the owner presses run-now or selects a
+burst `machines` step. Shared runners or Sparkwing Cloud execute those runs.
+
 `--label` and `--repos` accept repeated values. `--no-service` writes the
 configuration for a machine supervised separately. `--force` permits replacing
 an enrollment. A configuration or service-install failure revokes the newly

@@ -1019,8 +1019,12 @@ func (s *Server) startGitHubAppRun(
 		head := runspec.RepoKey(fmt.Sprintf("gh:%d", in.headRepo))
 		request.PullRequest = runspec.Optional[runspec.PullRequest]{Set: true, Value: runspec.PullRequest{Number: int64(pr.Number), Action: pr.Action, BaseRepo: key, HeadRepo: head, Fork: head != key, BaseRef: pr.BaseRef, BaseSHA: pr.BaseSHA, HeadRef: pr.HeadRef, HeadSHA: pr.HeadSHA, Label: in.env["GITHUB_LABEL"], Merged: runspec.Optional[bool]{Set: in.env["GITHUB_MERGED"] != "", Value: in.env["GITHUB_MERGED"] == "true"}}}
 	}
+	_, credentialVerified, err := s.verifyIntakeSourceCredential(r.Context(), tenant.Team(), request)
+	if err != nil {
+		return githubAppRun{}, err
+	}
 	result, err := admitWithFlood(r.Context(), s, func(ctx context.Context) (store.AdmissionResult, error) {
-		return tenant.AdmitGitHubAppRun(ctx, store.GitHubAppAdmission{Request: request, Installation: installation, Subscription: plan.subscription, Automation: plan.automation, Event: r.Header.Get("X-GitHub-Event")})
+		return tenant.AdmitGitHubAppRun(ctx, store.GitHubAppAdmission{Request: request, Installation: installation, Subscription: plan.subscription, Automation: plan.automation, Event: r.Header.Get("X-GitHub-Event"), SourceCredentialVerified: credentialVerified})
 	})
 	if errors.Is(err, store.ErrGitHubAppAutomationRevoked) {
 		return githubAppRun{Pipeline: plan.pipeline, Status: "ignored"}, nil

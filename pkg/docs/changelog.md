@@ -34,6 +34,9 @@ unlock.
   Update API clients using the [capacity-profile migration guide](docs/migrations/_unreleased.md#capacity-profiles-report-measured-data). Measured resource distributions and predecessor estimates remain available.
 - **release (Breaking):** Sparkwing releases use the native tag-and-publication flow
   Platform deployment is separate. Retire the platform repository's `release-all` pipeline and `bin/trigger-change-deploy.sh` callers when updating that repository.
+- **trust (Breaking):** Personal machines and here hosts never claim repository-proven runs, including run-now and burst `machines`. Repository-scoped runners accept only proven runs. Personal enrollment can omit `--repos` to serve the owner's asserted work; shared enrollment still requires a scope. Intake and claim seal repository and host trust once for secrets, OIDC, credentials and cache scopes. Schema baseline 27 adds the checked host-kind projection. See [migration](docs/migrations/v0.68.0.md#sealed-execution-trust).
+- **source credentials (Breaking):** Every job credential requires a matching proven repository and an intake GitHub compare check. Uploaded and unproven runs receive no host-wide fallback. App-selected historical commits and locked schedules can qualify when reachable from a repository branch or tag. See [migration](docs/migrations/v0.68.0.md#sealed-execution-trust).
+- **pipeline references (Breaking):** Latest outputs default to verified default-branch runs and exclude publication. Declare `sw.FromAnyRun()` (TypeScript `{fromAnyRun: true}`) to opt out. The direct output route enforces the same rule. See [migration](docs/migrations/v0.68.0.md#sealed-execution-trust).
 
 ### Fixed
 
@@ -50,6 +53,7 @@ unlock.
 - **runs logs:** Snapshot reads with pending final log segments report `logs incomplete` and exit 3 after printing all available pages. Use `--follow` to wait for the remaining output, including uploads after a job finishes.
 - **logs:** Paged reads of capped logs report truncation and name the 64 MiB attempt limit instead of returning a generic server error.
 - **metrics:** Completed Cloud jobs without resource samples return an explicit unavailable error instead of an empty success. Observability docs describe the native runtime's missing sampler.
+- **trust:** Merged PR jobs retain source credentials by comparing against their base branch. Intake checks both source and execution commits when they differ. Verified cache fallbacks use sealed repository proof, and unknown claimant shapes cannot claim proven work.
 
 ### Removed
 

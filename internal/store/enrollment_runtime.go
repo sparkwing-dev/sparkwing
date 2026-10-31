@@ -43,7 +43,7 @@ func machineAdministrationTx(ctx context.Context, tx *storeTx, p capability.Prin
 func authorizeEnrollmentTx(ctx context.Context, tx *storeTx, spec capability.ProvisionSpec) error {
 	allowed := []capability.Grant{capability.ClaimsLaunch, capability.OperatorLimits, capability.OperatorObjectStore, capability.OperatorTokens}
 	if spec.Kind == capability.ProvisionMachine {
-		if !ValidRunnerName(spec.Subject.ID) || spec.RegistrationID != "runner:"+spec.Team+":"+spec.Subject.ID || spec.Data != nil || len(spec.Repositories) == 0 || len(spec.Repositories) > 32 {
+		if !ValidRunnerName(spec.Subject.ID) || spec.RegistrationID != "runner:"+spec.Team+":"+spec.Subject.ID || spec.Data != nil || !spec.Personal && len(spec.Repositories) == 0 || len(spec.Repositories) > 32 {
 			return bindingRefusal()
 		}
 		allow, err := sourceurl.ParseRepoAllowlist(spec.Repositories)
@@ -130,7 +130,13 @@ func enrolledClaimProfileTx(ctx context.Context, tx *storeTx, chain []authorityN
 	var profile match.Profile
 	switch record.Origin.Kind {
 	case capability.ProvisionMachine:
-		profile.Accept, err = match.ParseAccept(root.Capability.Repositories)
+		facts, classifyErr := claimantFactsTx(ctx, tx, chain, runspec.Request{})
+		if classifyErr != nil {
+			return profile, classifyErr
+		}
+		if !facts.Personal || len(root.Capability.Repositories) > 0 {
+			profile.Accept, err = match.ParseAccept(root.Capability.Repositories)
+		}
 	case capability.ProvisionService:
 		if !launcherClaimant(root.Capability) {
 			return profile, bindingRefusal()

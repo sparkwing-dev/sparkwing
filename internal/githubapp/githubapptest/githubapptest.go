@@ -104,6 +104,7 @@ type GitHub struct {
 	users            map[string]*userCode
 	tokens           map[string]*issuedToken
 	commits          map[string]string
+	comparisons      map[string]string
 	files            map[string][]byte
 	aliases          map[string]string
 	failContents     int
@@ -126,14 +127,15 @@ func New(t testing.TB) *GitHub {
 	}
 	g := &GitHub{
 		Key: key, t: t,
-		insts:     map[int64]*Installation{},
-		codes:     map[string]*userCode{},
-		users:     map[string]*userCode{},
-		tokens:    map[string]*issuedToken{},
-		commits:   map[string]string{},
-		files:     map[string][]byte{},
-		aliases:   map[string]string{},
-		checkRuns: map[int64]CheckRunCall{},
+		insts:       map[int64]*Installation{},
+		codes:       map[string]*userCode{},
+		users:       map[string]*userCode{},
+		tokens:      map[string]*issuedToken{},
+		commits:     map[string]string{},
+		comparisons: map[string]string{},
+		files:       map[string][]byte{},
+		aliases:     map[string]string{},
+		checkRuns:   map[int64]CheckRunCall{},
 	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /login/oauth/access_token", g.handleAccessToken)
@@ -149,6 +151,7 @@ func New(t testing.TB) *GitHub {
 	mux.HandleFunc("GET /installation/repositories", g.handleInstallationRepos)
 	mux.HandleFunc("GET /repos/{owner}/{repo}/commits/{ref...}", g.handleCommit)
 	mux.HandleFunc("GET /repos/{owner}/{repo}/git/ref/{ref...}", g.handleCommit)
+	mux.HandleFunc("GET /repos/{owner}/{repo}/compare/{comparison...}", g.handleCompare)
 	mux.HandleFunc("GET /repos/{owner}/{repo}/commits/{sha}/check-runs", g.handleListCheckRuns)
 	mux.HandleFunc("POST /repos/{owner}/{repo}/check-runs", g.handleCheckRun)
 	mux.HandleFunc("PATCH /repos/{owner}/{repo}/check-runs/{id}", g.handleCheckRun)
@@ -191,6 +194,14 @@ func (g *GitHub) SetCommit(repo, ref, sha string) {
 		qualified = "heads/" + ref
 	}
 	g.commits[strings.ToLower(repo)+"/"+qualified] = sha
+}
+
+// SetComparison makes a repository's base...ref comparison answer status.
+// Status is identical, ahead, behind, diverged, or 404 for a missing comparison.
+func (g *GitHub) SetComparison(repo, base, ref, status string) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	g.comparisons[strings.ToLower(repo)+"/"+base+"..."+ref] = status
 }
 
 // SetFile makes path available at sha, or removes it when content is nil.
@@ -327,6 +338,39 @@ func (g *GitHub) handleCommit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"sha": sha})
+}
+
+func (g *GitHub) handleCompare(w http.ResponseWriter, r *http.Request) {
+	repo := strings.ToLower(r.PathValue("owner") + "/" + r.PathValue("repo"))
+	tok := g.installationToken(r)
+	if tok == nil || !tok.repos[repo] || tok.permissions["contents"] != "read" {
+		writeJSON(w, http.StatusForbidden, map[string]string{"message": "Forbidden"})
+		return
+	}
+	base, ref, ok := strings.Cut(r.PathValue("comparison"), "...")
+	if !ok {
+		writeJSON(w, http.StatusNotFound, map[string]string{"message": "Not Found"})
+		return
+	}
+	g.mu.Lock()
+	head := g.commits[repo+"/"+strings.TrimPrefix(ref, "refs/")]
+	status, configured := g.comparisons[repo+"/"+base+"..."+ref]
+	g.mu.Unlock()
+	if !configured {
+		switch {
+		case head == "":
+			status = "404"
+		case head == base:
+			status = "identical"
+		default:
+			status = "diverged"
+		}
+	}
+	if status == "404" {
+		writeJSON(w, http.StatusNotFound, map[string]string{"message": "Not Found"})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": status})
 }
 
 // SetChecksGranted records whether installation id's owner accepted the

@@ -182,6 +182,7 @@ func nativePlanBody(t *testing.T, e *engineFixture, tenant *store.Tenant, a capa
 
 func TestNativeControllerPlanReplayAfterOwnerHandoff(t *testing.T) {
 	e, tenant := engineRuntimeStore(t)
+	fetchedRunFixture(t, e.Store, "a", "run", "acme/repo")
 	if _, err := tenant.RecordCreditGrant(t.Context(), store.CreditGrantRequest{Kind: store.CreditGrantFree, AmountMicro: 100000000, Reference: "plan-replay", CreatedBy: "fixture"}); err != nil {
 		t.Fatal(err)
 	}

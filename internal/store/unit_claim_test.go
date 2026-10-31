@@ -201,6 +201,7 @@ func TestClaimUnitRepositoryEnrollmentAndMeteringDoNotGrantPlacement(t *testing.
 		for _, metered := range []bool{false, true} {
 			t.Run(map[bool]string{false: "named", true: "queue"}[queued]+"/"+map[bool]string{false: "unmetered", true: "metered"}[metered], func(t *testing.T) {
 				s, demand := unitClaimFixture(t)
+				proveClaimFixtureRepository(t, s)
 				if queued {
 					demand.Target = nil
 					demand.Kinds = []capability.UnitKind{capability.UnitNode}

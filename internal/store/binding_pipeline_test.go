@@ -59,3 +59,54 @@ func TestDeclaredPipelineReferenceProperty(t *testing.T) {
 		t.Fatal("replacement job retained old reference authority")
 	}
 }
+
+func TestPipelineReferenceOptOutMustBeDeclared(t *testing.T) {
+	s, demand := unitClaimFixture(t)
+	claim, err := s.AsOperator().ClaimUnit(t.Context(), demand)
+	if err != nil {
+		t.Fatal(err)
+	}
+	principal, err := s.AsOperator().ResolveAuthority(t.Context(), capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: claim.Award.CapabilityPrefix})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, declared := range []bool{false, true} {
+		spec, err := json.Marshal(nodeproto.JobSpec{ID: "job", References: []nodeproto.PipelineReference{{Pipeline: "producer", Job: "output", FromAnyRun: declared}}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		rewriteSchemaExec(t, s.db, `UPDATE nodes SET spec_json=? WHERE team='a' AND run_id='run' AND node_id='job'`, spec)
+		for _, requested := range []bool{false, true} {
+			target := capability.Target{Team: "a", Reference: &capability.PipelineReferenceTarget{Pipeline: "producer", JobID: "output", FromAnyRun: requested}}
+			err := s.AsOperator().CheckBinding(t.Context(), principal, capability.BindReadSet, target)
+			if (err == nil) != (!requested || declared) {
+				t.Fatalf("declared=%v requested=%v: %v", declared, requested, err)
+			}
+		}
+	}
+}
+
+func TestPipelineOutputRequiresVerifiedDefaultBranchOrDeclaredOptOut(t *testing.T) {
+	s, demand := unitClaimFixture(t)
+	claim, err := s.AsOperator().ClaimUnit(t.Context(), demand)
+	if err != nil {
+		t.Fatal(err)
+	}
+	principal, err := s.AsOperator().ResolveAuthority(t.Context(), capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: claim.Award.CapabilityPrefix})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rewriteSchemaExec(t, s.db, `INSERT INTO runs(team,id,number,pipeline,status,request_json,request_hash,request_sealed_at,repo_key,dispatch,intake_mode,created_principal,created_at,finished_at,log_retention_class,log_retention_days) VALUES ('a','producer-run',2,'producer','success',?,'producer',1,'gh:1','host','execute','account',1,2,'r30',30)`, []byte(`{"version":1,"request":{"pipeline":"producer"}}`))
+	rewriteSchemaExec(t, s.db, `INSERT INTO nodes(team,run_id,node_id,status,outcome,finished_at,spec_json,execution_json) VALUES ('a','producer-run','output','done','success',2,?,?)`, []byte(`{"id":"output"}`), []byte(`{}`))
+	for _, declared := range []bool{false, true} {
+		spec, err := json.Marshal(nodeproto.JobSpec{ID: "job", References: []nodeproto.PipelineReference{{Pipeline: "producer", Job: "output", FromAnyRun: declared}}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		rewriteSchemaExec(t, s.db, `UPDATE nodes SET spec_json=? WHERE team='a' AND run_id='run' AND node_id='job'`, spec)
+		err = s.AsOperator().CheckBinding(t.Context(), principal, capability.BindReadSet, capability.Target{Team: "a", RunID: "producer-run", NodeID: "output"})
+		if (err == nil) != declared {
+			t.Fatalf("direct unverified output, opt-out=%v: %v", declared, err)
+		}
+	}
+}

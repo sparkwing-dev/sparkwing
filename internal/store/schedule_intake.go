@@ -154,7 +154,8 @@ func (t *Tenant) admitSchedule(ctx context.Context, schedule CronSchedule, key s
 
 	input.Team, input.Pipeline, input.Origin = string(t.team), schedule.Pipeline, runspec.OriginSchedule
 	input.RequestedArgs = schedule.Effective().Args
-	request := IntakeRequest{Authority: in.authority(), IdempotencyKey: key, Request: input, Intent: &intent}
+	request := IntakeRequest{Authority: in.authority(), IdempotencyKey: key, Request: input, SourceCredentialVerified: input.SourceCredentialVerified, Intent: &intent}
+	request.Request.SourceCredentialVerified = false
 	var result AdmissionResult
 	err = t.s.inTx(ctx, func(tx *storeTx) error {
 		if err := in.lock(ctx, tx); err != nil {

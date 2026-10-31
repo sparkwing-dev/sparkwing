@@ -25,7 +25,7 @@ func TestCapacityLevelsBreakOpposingPlanJobCycle(t *testing.T) {
 				doc.Jobs[0].Concurrency = []nodeproto.ConcurrencySpec{group("Y")}
 			})
 			ctx := t.Context()
-			admitted, err := f.tenant.AdmitRun(ctx, store.IntakeRequest{Authority: f.plan.Seal.Request.AuthorityRef, Request: f.plan.Seal.Request.Request})
+			admitted, err := f.tenant.AdmitRun(ctx, store.IntakeRequest{Authority: f.plan.Seal.Request.AuthorityRef, Request: f.plan.Seal.Request.Request, FetchedRepository: store.FetchedRepository{ID: 1, Name: "acme/repo"}})
 			if err != nil {
 				t.Fatal(err)
 			}

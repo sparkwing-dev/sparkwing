@@ -1177,3 +1177,51 @@ Provider comparison, checked against primary documentation on 2026-10-30:
 | Lists | [REST pagination uses continuation links and per-page sizes](https://docs.github.com/en/rest/using-the-rest-api/using-pagination-in-the-rest-api). | [API v2 lists expose page tokens](https://circleci.com/docs/api/v2/). | Cursor pages, drained by first-party callers. |
 
 GitHub and CircleCI's cited pages do not establish an equivalent lifetime team-creation cap, OIDC mint quota, or customer-facing Stripe Checkout Session quota. The retained OIDC limit and new checkout limit are Sparkwing's own limits, not parity claims.
+
+## 2026-10-30 Korey approved: one sealed repository proof and host classification
+
+This supersedes consumer-specific repository and host trust rules in decisions
+68, 70 and 72. A run proves its repository because Sparkwing selects its code
+through the team's GitHub App or verifies Actions intake. Intake seals that
+repository and verified default-branch eligibility in `Provenance`. A raw commit
+or locked schedule needs an intake compare check plus App source selection to
+establish fetched repository proof. It receives no resolved-head OIDC claims.
+Retries and exact-revision children inherit their seal. Changed-revision and
+cross-repository children prove nothing.
+
+Claim issuance seals cloud, self-hosted, personal or here host kind, OIDC host
+facts and cache scope in award authority. Delegation copies it. Secret release,
+OIDC, source credentials and cache scope consume that seal, so later runner
+labels, enrollment or team settings cannot rewrite an active award's trust.
+
+- Personal machines and here hosts never claim proven-repository work. This also
+  applies to run-now and burst `machines` steps.
+- `--repos` runners accept only proven-repository work. Asserted remote names do
+  not establish eligibility.
+- Every job source credential, including a host-wide credential and an App token,
+  requires the matching repository proof and an intake-time GitHub compare check.
+  Compare the selected commit against its source branch or tag, or the default
+  branch for a raw SHA. Accept `ahead` or `identical`. Controller-owned intake
+  credentials remain separate from job release.
+- Latest pipeline references and direct reference-output reads use verified
+  default-branch runs by default and exclude publication. `sw.FromAnyRun()` opts
+  out explicitly. A job must declare the opt-out in its sealed reference before
+  an HTTP request can use it. TypeScript exposes `{fromAnyRun: true}`.
+- The matrix includes personal and here execution for every trust consumer.
+  Regression tests reproduce the personal claim, asserted scoped-runner claim,
+  unchecked credential and unverified latest-output failures on the old rules.
+
+Schema baseline 27 adds the checked host-kind projection directly. The sealed
+repository facts use the existing request envelope. There are no forward
+migrations. The lead wipes pre-release staging and production stores separately.
+No deployment is part of this change.
+
+Enrollment follow-on for lead ratification: `--repos` is optional for personal
+machines because mandatory repository scopes combined with B1/M2 leave them
+eligible for no work. The absent scope seals as `nil`, and its claim profile
+has no repository filter. The host and owner checks still restrict it to the
+owner's asserted work. The runtime accepts an unscoped award only when the
+controller marks it as the owner's machine and both source envelopes carry
+valid, unproven provenance. Its remote-source check still applies. Shared enrollment still requires nonempty repository
+patterns. Existing explicit scopes keep the proven-only rule on every host.
+This narrows the earlier proposal, which also allowed unscoped shared runners.

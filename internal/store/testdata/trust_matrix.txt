@@ -6,6 +6,8 @@
 # with default branch main; the store holds a verified main cache record for it.
 #
 # trust                        Provenance.Trust() after sealing
+# proven_repository            the sealed repository every consumer reads
+# source_credential_compared   the intake-time GitHub compare proof, independent of repository proof
 # pipeline_secrets             runSecretSelection: repository and pipeline whose secrets the run reads, or no
 # shared_secrets               runSecretSelection: team-wide --shared secrets (only_on ones still need the pool,
 #                              and bindingSecretTx refuses them to --runner here)
@@ -15,28 +17,33 @@
 #                              reads it: fresh only on a fresh host, whatever the team's high_trust
 # cache_reads                  awardDataScope for a job claim (ReadRefs)
 # default_branch_work_go       Provenance.DefaultBranchWork()
-# source_credential            sourceRepositoryProven: a git credential or App token scoped to the run's repository,
-#                              or only a host-wide git credential (the CLI upload carries a bundle; local a checkout)
+# source_credential            repository proof plus intake-time compare proof, otherwise no team credential
 # actions_runner_fresh_host    claimantFactsTx FreshHost for the Actions binding's signed runner_environment
 # cache_write_<host>           awardDataScope WriteRef with awardCacheHostTx's writer for that host:
 #                              fresh_host (launcher pod, Cloud, GitHub-hosted Actions), long_lived (plain
 #                              machine, persistent or self-hosted runner) and long_lived_high_trust (the same
 #                              host on a team with high_trust on); host-<machine> stands for the host's hash
 # cache_write_default_branch_<host>  blob.Record.VerifiedDefault over runRefFacts: records others restore as main
-# host_* / pool_*              claim SQL freshPod AND poolTrust for that claimant (SQLite, and PostgreSQL when
+# host_* / pool_*              claim SQL hostTrust AND freshPod AND poolTrust (SQLite, and PostgreSQL when
 #                              SPARKWING_TEST_PG_URL is set, which must agree):
 #   host_fresh_pod             launcher pod, no pools, default trust
 #   host_plain_machine         plain machine runner, no pools, default trust
 #   host_persistent_k8s        persistent Kubernetes runner, no pools, default trust
+#   host_personal / host_here  personal or here hosts; neither may claim proven repository work
 #   pool_reserved              launcher pool a secret is only_on, default trust
 #   pool_reserved_trust_any    the same pool registered --trust=any
 #   pool_verified_only         launcher pool registered --trust=verified-default
 #   pool_reserved_on_machine   plain machine in a reserved pool, default trust
 # default_branch_work_sql      claim SQL defaultBranchWork
 # fresh_host_required          freshPod refuses persistent Kubernetes runners exactly when default_branch_work_sql
+# personal_* / here_*          every consumer behind claimSQL.hostTrust for that host; "not claimed" means
+#                              no award exists to read secrets, mint OIDC, release source credentials or use caches
+#                              latest_default and repos_runner show the corresponding run selection gates
 
 == app-push-default: GitHub App push to the default branch
 trust                                              verified-default
+proven_repository                                  gh:7
+source_credential_compared                         yes
 pipeline_secrets                                   gh:7 pipeline ci
 shared_secrets                                     yes
 oidc_trigger                                       push
@@ -55,18 +62,42 @@ oidc_runner_environment_long_lived                 persistent
 cache_write_long_lived_high_trust                  refs/heads/main
 cache_write_default_branch_long_lived_high_trust   yes
 oidc_runner_environment_long_lived_high_trust      persistent
+personal_claim                                     no
+personal_pipeline_secrets                          not claimed
+personal_shared_secrets                            not claimed
+personal_oidc_repository                           not claimed
+personal_cache_reads                               not claimed
+personal_source_credential                         not claimed
+personal_cache_write                               not claimed
+personal_latest_default                            not claimed
+personal_repos_runner                              not claimed
+here_claim                                         no
+here_pipeline_secrets                              not claimed
+here_shared_secrets                                not claimed
+here_oidc_repository                               not claimed
+here_cache_reads                                   not claimed
+here_source_credential                             not claimed
+here_cache_write                                   not claimed
+here_latest_default                                not claimed
+here_repos_runner                                  not claimed
 host_fresh_pod               yes
 host_plain_machine           yes
 host_persistent_k8s          no
+host_personal                no
+host_here                    no
 pool_reserved                yes
 pool_reserved_trust_any      yes
 pool_verified_only           yes
 pool_reserved_on_machine     no
 default_branch_work_sql      yes
+latest_default               yes
+repos_runner                 yes
 fresh_host_required          yes
 
 == app-push-branch: GitHub App push to another branch
 trust                                              verified
+proven_repository                                  gh:7
+source_credential_compared                         no
 pipeline_secrets                                   gh:7 pipeline ci
 shared_secrets                                     yes
 oidc_trigger                                       push
@@ -75,7 +106,7 @@ oidc_ref                                           refs/heads/feature
 oidc_sha                                           main-head
 cache_reads                                        refs/heads/feature refs/heads/main
 default_branch_work_go                             no
-source_credential                                  repository gh:7
+source_credential                                  no
 cache_write_fresh_host                             refs/heads/feature
 cache_write_default_branch_fresh_host              no
 oidc_runner_environment_fresh_host                 fresh
@@ -85,18 +116,42 @@ oidc_runner_environment_long_lived                 persistent
 cache_write_long_lived_high_trust                  refs/heads/feature
 cache_write_default_branch_long_lived_high_trust   no
 oidc_runner_environment_long_lived_high_trust      persistent
+personal_claim                                     no
+personal_pipeline_secrets                          not claimed
+personal_shared_secrets                            not claimed
+personal_oidc_repository                           not claimed
+personal_cache_reads                               not claimed
+personal_source_credential                         not claimed
+personal_cache_write                               not claimed
+personal_latest_default                            not claimed
+personal_repos_runner                              not claimed
+here_claim                                         no
+here_pipeline_secrets                              not claimed
+here_shared_secrets                                not claimed
+here_oidc_repository                               not claimed
+here_cache_reads                                   not claimed
+here_source_credential                             not claimed
+here_cache_write                                   not claimed
+here_latest_default                                not claimed
+here_repos_runner                                  not claimed
 host_fresh_pod               yes
 host_plain_machine           yes
 host_persistent_k8s          yes
+host_personal                no
+host_here                    no
 pool_reserved                no
 pool_reserved_trust_any      yes
 pool_verified_only           no
 pool_reserved_on_machine     no
 default_branch_work_sql      no
+latest_default               no
+repos_runner                 yes
 fresh_host_required          no
 
 == app-pull-request: GitHub App same-repository pull request
 trust                                              verified
+proven_repository                                  gh:7
+source_credential_compared                         no
 pipeline_secrets                                   gh:7 pipeline ci
 shared_secrets                                     yes
 oidc_trigger                                       pull_request
@@ -105,7 +160,7 @@ oidc_ref                                           refs/pull/1/head
 oidc_sha                                           main-head
 cache_reads                                        refs/pull/1/head refs/heads/main
 default_branch_work_go                             no
-source_credential                                  repository gh:7
+source_credential                                  no
 cache_write_fresh_host                             refs/pull/1/head
 cache_write_default_branch_fresh_host              no
 oidc_runner_environment_fresh_host                 fresh
@@ -115,18 +170,42 @@ oidc_runner_environment_long_lived                 persistent
 cache_write_long_lived_high_trust                  refs/pull/1/head
 cache_write_default_branch_long_lived_high_trust   no
 oidc_runner_environment_long_lived_high_trust      persistent
+personal_claim                                     no
+personal_pipeline_secrets                          not claimed
+personal_shared_secrets                            not claimed
+personal_oidc_repository                           not claimed
+personal_cache_reads                               not claimed
+personal_source_credential                         not claimed
+personal_cache_write                               not claimed
+personal_latest_default                            not claimed
+personal_repos_runner                              not claimed
+here_claim                                         no
+here_pipeline_secrets                              not claimed
+here_shared_secrets                                not claimed
+here_oidc_repository                               not claimed
+here_cache_reads                                   not claimed
+here_source_credential                             not claimed
+here_cache_write                                   not claimed
+here_latest_default                                not claimed
+here_repos_runner                                  not claimed
 host_fresh_pod               yes
 host_plain_machine           yes
 host_persistent_k8s          yes
+host_personal                no
+host_here                    no
 pool_reserved                no
 pool_reserved_trust_any      yes
 pool_verified_only           no
 pool_reserved_on_machine     no
 default_branch_work_sql      no
+latest_default               no
+repos_runner                 yes
 fresh_host_required          no
 
 == app-push-branch-source-pin: GitHub App push to the default branch whose pipeline source: pins a branch
 trust                                              asserted
+proven_repository                                  gh:7
+source_credential_compared                         no
 pipeline_secrets                                   gh:7 pipeline ci
 shared_secrets                                     yes
 oidc_trigger                                       manual
@@ -135,7 +214,7 @@ oidc_ref                                           -
 oidc_sha                                           -
 cache_reads                                        manual:fetched/run/run-app-push-branch-source-pin:refs/heads/main refs/heads/main
 default_branch_work_go                             no
-source_credential                                  repository gh:7
+source_credential                                  no
 cache_write_fresh_host                             manual:fetched/run/run-app-push-branch-source-pin:refs/heads/main
 cache_write_default_branch_fresh_host              no
 oidc_runner_environment_fresh_host                 fresh
@@ -145,18 +224,42 @@ oidc_runner_environment_long_lived                 persistent
 cache_write_long_lived_high_trust                  manual:fetched/run/run-app-push-branch-source-pin:refs/heads/main
 cache_write_default_branch_long_lived_high_trust   no
 oidc_runner_environment_long_lived_high_trust      persistent
+personal_claim                                     no
+personal_pipeline_secrets                          not claimed
+personal_shared_secrets                            not claimed
+personal_oidc_repository                           not claimed
+personal_cache_reads                               not claimed
+personal_source_credential                         not claimed
+personal_cache_write                               not claimed
+personal_latest_default                            not claimed
+personal_repos_runner                              not claimed
+here_claim                                         no
+here_pipeline_secrets                              not claimed
+here_shared_secrets                                not claimed
+here_oidc_repository                               not claimed
+here_cache_reads                                   not claimed
+here_source_credential                             not claimed
+here_cache_write                                   not claimed
+here_latest_default                                not claimed
+here_repos_runner                                  not claimed
 host_fresh_pod               yes
 host_plain_machine           yes
 host_persistent_k8s          yes
+host_personal                no
+host_here                    no
 pool_reserved                no
 pool_reserved_trust_any      yes
 pool_verified_only           no
 pool_reserved_on_machine     no
 default_branch_work_sql      no
+latest_default               no
+repos_runner                 yes
 fresh_host_required          no
 
 == schedule-admin: Admin-armed App schedule on the default branch, unmodified fire
 trust                                              schedule
+proven_repository                                  gh:7
+source_credential_compared                         no
 pipeline_secrets                                   gh:7 pipeline ci
 shared_secrets                                     yes
 oidc_trigger                                       cron
@@ -165,7 +268,7 @@ oidc_ref                                           refs/heads/main
 oidc_sha                                           main-head
 cache_reads                                        manual:schedule/nightly:refs/heads/main refs/heads/main
 default_branch_work_go                             yes
-source_credential                                  repository gh:7
+source_credential                                  no
 cache_write_fresh_host                             manual:schedule/nightly:refs/heads/main
 cache_write_default_branch_fresh_host              no
 oidc_runner_environment_fresh_host                 fresh
@@ -175,18 +278,42 @@ oidc_runner_environment_long_lived                 persistent
 cache_write_long_lived_high_trust                  manual:schedule/nightly:refs/heads/main
 cache_write_default_branch_long_lived_high_trust   no
 oidc_runner_environment_long_lived_high_trust      persistent
+personal_claim                                     no
+personal_pipeline_secrets                          not claimed
+personal_shared_secrets                            not claimed
+personal_oidc_repository                           not claimed
+personal_cache_reads                               not claimed
+personal_source_credential                         not claimed
+personal_cache_write                               not claimed
+personal_latest_default                            not claimed
+personal_repos_runner                              not claimed
+here_claim                                         no
+here_pipeline_secrets                              not claimed
+here_shared_secrets                                not claimed
+here_oidc_repository                               not claimed
+here_cache_reads                                   not claimed
+here_source_credential                             not claimed
+here_cache_write                                   not claimed
+here_latest_default                                not claimed
+here_repos_runner                                  not claimed
 host_fresh_pod               yes
 host_plain_machine           yes
 host_persistent_k8s          no
+host_personal                no
+host_here                    no
 pool_reserved                yes
 pool_reserved_trust_any      yes
 pool_verified_only           yes
 pool_reserved_on_machine     no
 default_branch_work_sql      yes
+latest_default               yes
+repos_runner                 yes
 fresh_host_required          yes
 
 == schedule-run-now: Run-now of that schedule by a member
 trust                                              asserted
+proven_repository                                  gh:7
+source_credential_compared                         no
 pipeline_secrets                                   gh:7 pipeline ci
 shared_secrets                                     yes
 oidc_trigger                                       manual
@@ -195,7 +322,7 @@ oidc_ref                                           refs/heads/main
 oidc_sha                                           main-head
 cache_reads                                        manual:fetched/account/alice:refs/heads/main refs/heads/main
 default_branch_work_go                             no
-source_credential                                  repository gh:7
+source_credential                                  no
 cache_write_fresh_host                             manual:fetched/account/alice:refs/heads/main
 cache_write_default_branch_fresh_host              no
 oidc_runner_environment_fresh_host                 fresh
@@ -205,18 +332,42 @@ oidc_runner_environment_long_lived                 persistent
 cache_write_long_lived_high_trust                  manual:fetched/account/alice:refs/heads/main
 cache_write_default_branch_long_lived_high_trust   no
 oidc_runner_environment_long_lived_high_trust      persistent
+personal_claim                                     no
+personal_pipeline_secrets                          not claimed
+personal_shared_secrets                            not claimed
+personal_oidc_repository                           not claimed
+personal_cache_reads                               not claimed
+personal_source_credential                         not claimed
+personal_cache_write                               not claimed
+personal_latest_default                            not claimed
+personal_repos_runner                              not claimed
+here_claim                                         no
+here_pipeline_secrets                              not claimed
+here_shared_secrets                                not claimed
+here_oidc_repository                               not claimed
+here_cache_reads                                   not claimed
+here_source_credential                             not claimed
+here_cache_write                                   not claimed
+here_latest_default                                not claimed
+here_repos_runner                                  not claimed
 host_fresh_pod               yes
 host_plain_machine           yes
 host_persistent_k8s          yes
+host_personal                no
+host_here                    no
 pool_reserved                no
 pool_reserved_trust_any      yes
 pool_verified_only           no
 pool_reserved_on_machine     no
 default_branch_work_sql      no
+latest_default               no
+repos_runner                 yes
 fresh_host_required          no
 
 == schedule-overridden: Admin-armed App schedule with an override
 trust                                              asserted
+proven_repository                                  gh:7
+source_credential_compared                         no
 pipeline_secrets                                   gh:7 pipeline ci
 shared_secrets                                     yes
 oidc_trigger                                       manual
@@ -225,7 +376,7 @@ oidc_ref                                           refs/heads/main
 oidc_sha                                           main-head
 cache_reads                                        manual:fetched/run/run-schedule-overridden:refs/heads/main refs/heads/main
 default_branch_work_go                             no
-source_credential                                  repository gh:7
+source_credential                                  no
 cache_write_fresh_host                             manual:fetched/run/run-schedule-overridden:refs/heads/main
 cache_write_default_branch_fresh_host              no
 oidc_runner_environment_fresh_host                 fresh
@@ -235,57 +386,105 @@ oidc_runner_environment_long_lived                 persistent
 cache_write_long_lived_high_trust                  manual:fetched/run/run-schedule-overridden:refs/heads/main
 cache_write_default_branch_long_lived_high_trust   no
 oidc_runner_environment_long_lived_high_trust      persistent
+personal_claim                                     no
+personal_pipeline_secrets                          not claimed
+personal_shared_secrets                            not claimed
+personal_oidc_repository                           not claimed
+personal_cache_reads                               not claimed
+personal_source_credential                         not claimed
+personal_cache_write                               not claimed
+personal_latest_default                            not claimed
+personal_repos_runner                              not claimed
+here_claim                                         no
+here_pipeline_secrets                              not claimed
+here_shared_secrets                                not claimed
+here_oidc_repository                               not claimed
+here_cache_reads                                   not claimed
+here_source_credential                             not claimed
+here_cache_write                                   not claimed
+here_latest_default                                not claimed
+here_repos_runner                                  not claimed
 host_fresh_pod               yes
 host_plain_machine           yes
 host_persistent_k8s          yes
+host_personal                no
+host_here                    no
 pool_reserved                no
 pool_reserved_trust_any      yes
 pool_verified_only           no
 pool_reserved_on_machine     no
 default_branch_work_sql      no
+latest_default               no
+repos_runner                 yes
 fresh_host_required          no
 
-== schedule-locked: Admin-armed App schedule locked to a commit
+== schedule-locked: Admin-armed App schedule locked to a compared commit
 trust                                              asserted
-pipeline_secrets                                   no
+proven_repository                                  gh:7
+source_credential_compared                         yes
+pipeline_secrets                                   gh:7 pipeline ci
 shared_secrets                                     yes
 oidc_trigger                                       manual
-oidc_repository                                    -
+oidc_repository                                    7 acme/repo
 oidc_ref                                           -
 oidc_sha                                           -
-cache_reads                                        manual:run/run-schedule-locked:refs/heads/main refs/heads/main
+cache_reads                                        manual:fetched/run/run-schedule-locked:refs/heads/main refs/heads/main
 default_branch_work_go                             no
 source_credential                                  repository gh:7
-cache_write_fresh_host                             manual:run/run-schedule-locked:refs/heads/main
+cache_write_fresh_host                             manual:fetched/run/run-schedule-locked:refs/heads/main
 cache_write_default_branch_fresh_host              no
 oidc_runner_environment_fresh_host                 fresh
-cache_write_long_lived                             manual:host-<machine>/run/run-schedule-locked:refs/heads/main
+cache_write_long_lived                             manual:host-<machine>/fetched/run/run-schedule-locked:refs/heads/main
 cache_write_default_branch_long_lived              no
 oidc_runner_environment_long_lived                 persistent
-cache_write_long_lived_high_trust                  manual:run/run-schedule-locked:refs/heads/main
+cache_write_long_lived_high_trust                  manual:fetched/run/run-schedule-locked:refs/heads/main
 cache_write_default_branch_long_lived_high_trust   no
 oidc_runner_environment_long_lived_high_trust      persistent
+personal_claim                                     no
+personal_pipeline_secrets                          not claimed
+personal_shared_secrets                            not claimed
+personal_oidc_repository                           not claimed
+personal_cache_reads                               not claimed
+personal_source_credential                         not claimed
+personal_cache_write                               not claimed
+personal_latest_default                            not claimed
+personal_repos_runner                              not claimed
+here_claim                                         no
+here_pipeline_secrets                              not claimed
+here_shared_secrets                                not claimed
+here_oidc_repository                               not claimed
+here_cache_reads                                   not claimed
+here_source_credential                             not claimed
+here_cache_write                                   not claimed
+here_latest_default                                not claimed
+here_repos_runner                                  not claimed
 host_fresh_pod               yes
 host_plain_machine           yes
 host_persistent_k8s          yes
+host_personal                no
+host_here                    no
 pool_reserved                no
 pool_reserved_trust_any      yes
 pool_verified_only           no
 pool_reserved_on_machine     no
 default_branch_work_sql      no
+latest_default               no
+repos_runner                 yes
 fresh_host_required          no
 
 == schedule-no-app: Schedule with no App installation or consent (non-admin armer)
 trust                                              asserted
+proven_repository
+source_credential_compared                         no
 pipeline_secrets                                   no
 shared_secrets                                     yes
 oidc_trigger                                       manual
 oidc_repository                                    -
 oidc_ref                                           -
 oidc_sha                                           -
-cache_reads                                        manual:armer/alice:refs/heads/main refs/heads/main
+cache_reads                                        manual:armer/alice:refs/heads/main
 default_branch_work_go                             no
-source_credential                                  repository gh:7
+source_credential                                  no
 cache_write_fresh_host                             manual:armer/alice:refs/heads/main
 cache_write_default_branch_fresh_host              no
 oidc_runner_environment_fresh_host                 fresh
@@ -295,18 +494,42 @@ oidc_runner_environment_long_lived                 persistent
 cache_write_long_lived_high_trust                  manual:armer/alice:refs/heads/main
 cache_write_default_branch_long_lived_high_trust   no
 oidc_runner_environment_long_lived_high_trust      persistent
+personal_claim                                     yes
+personal_pipeline_secrets                          no
+personal_shared_secrets                            yes
+personal_oidc_repository                           -
+personal_cache_reads                               manual:armer/alice:refs/heads/main
+personal_source_credential                         no
+personal_cache_write                               manual:host-<machine>/armer/alice:refs/heads/main
+personal_latest_default                            no
+personal_repos_runner                              no
+here_claim                                         yes
+here_pipeline_secrets                              no
+here_shared_secrets                                yes
+here_oidc_repository                               -
+here_cache_reads                                   manual:armer/alice:refs/heads/main
+here_source_credential                             no
+here_cache_write                                   manual:host-<machine>/armer/alice:refs/heads/main
+here_latest_default                                no
+here_repos_runner                                  no
 host_fresh_pod               yes
 host_plain_machine           yes
 host_persistent_k8s          yes
+host_personal                yes
+host_here                    yes
 pool_reserved                no
 pool_reserved_trust_any      yes
 pool_verified_only           no
 pool_reserved_on_machine     no
 default_branch_work_sql      no
+latest_default               no
+repos_runner                 no
 fresh_host_required          no
 
 == console-branch-head: Console or CLI run at a branch head the controller fetched
 trust                                              asserted
+proven_repository                                  gh:7
+source_credential_compared                         yes
 pipeline_secrets                                   gh:7 pipeline ci
 shared_secrets                                     yes
 oidc_trigger                                       manual
@@ -325,27 +548,105 @@ oidc_runner_environment_long_lived                 persistent
 cache_write_long_lived_high_trust                  manual:fetched/account/alice:refs/heads/main
 cache_write_default_branch_long_lived_high_trust   no
 oidc_runner_environment_long_lived_high_trust      persistent
+personal_claim                                     no
+personal_pipeline_secrets                          not claimed
+personal_shared_secrets                            not claimed
+personal_oidc_repository                           not claimed
+personal_cache_reads                               not claimed
+personal_source_credential                         not claimed
+personal_cache_write                               not claimed
+personal_latest_default                            not claimed
+personal_repos_runner                              not claimed
+here_claim                                         no
+here_pipeline_secrets                              not claimed
+here_shared_secrets                                not claimed
+here_oidc_repository                               not claimed
+here_cache_reads                                   not claimed
+here_source_credential                             not claimed
+here_cache_write                                   not claimed
+here_latest_default                                not claimed
+here_repos_runner                                  not claimed
 host_fresh_pod               yes
 host_plain_machine           yes
 host_persistent_k8s          yes
+host_personal                no
+host_here                    no
 pool_reserved                no
 pool_reserved_trust_any      yes
 pool_verified_only           no
 pool_reserved_on_machine     no
 default_branch_work_sql      no
+latest_default               no
+repos_runner                 yes
+fresh_host_required          no
+
+== console-compare-denied: Fetched repository whose commit fails the intake GitHub compare check
+trust                                              asserted
+proven_repository                                  gh:7
+source_credential_compared                         no
+pipeline_secrets                                   gh:7 pipeline ci
+shared_secrets                                     yes
+oidc_trigger                                       manual
+oidc_repository                                    7 acme/repo
+oidc_ref                                           refs/heads/main
+oidc_sha                                           main-head
+cache_reads                                        manual:fetched/account/alice:refs/heads/main refs/heads/main
+default_branch_work_go                             no
+source_credential                                  no
+cache_write_fresh_host                             manual:fetched/account/alice:refs/heads/main
+cache_write_default_branch_fresh_host              no
+oidc_runner_environment_fresh_host                 fresh
+cache_write_long_lived                             manual:host-<machine>/fetched/account/alice:refs/heads/main
+cache_write_default_branch_long_lived              no
+oidc_runner_environment_long_lived                 persistent
+cache_write_long_lived_high_trust                  manual:fetched/account/alice:refs/heads/main
+cache_write_default_branch_long_lived_high_trust   no
+oidc_runner_environment_long_lived_high_trust      persistent
+personal_claim                                     no
+personal_pipeline_secrets                          not claimed
+personal_shared_secrets                            not claimed
+personal_oidc_repository                           not claimed
+personal_cache_reads                               not claimed
+personal_source_credential                         not claimed
+personal_cache_write                               not claimed
+personal_latest_default                            not claimed
+personal_repos_runner                              not claimed
+here_claim                                         no
+here_pipeline_secrets                              not claimed
+here_shared_secrets                                not claimed
+here_oidc_repository                               not claimed
+here_cache_reads                                   not claimed
+here_source_credential                             not claimed
+here_cache_write                                   not claimed
+here_latest_default                                not claimed
+here_repos_runner                                  not claimed
+host_fresh_pod               yes
+host_plain_machine           yes
+host_persistent_k8s          yes
+host_personal                no
+host_here                    no
+pool_reserved                no
+pool_reserved_trust_any      yes
+pool_verified_only           no
+pool_reserved_on_machine     no
+default_branch_work_sql      no
+latest_default               no
+repos_runner                 yes
 fresh_host_required          no
 
 == cli-upload: CLI upload of a connected repository
 trust                                              asserted
+proven_repository
+source_credential_compared                         no
 pipeline_secrets                                   no
 shared_secrets                                     yes
 oidc_trigger                                       manual
 oidc_repository                                    -
 oidc_ref                                           -
 oidc_sha                                           -
-cache_reads                                        manual:account/alice:refs/heads/main refs/heads/main
+cache_reads                                        manual:account/alice:refs/heads/main
 default_branch_work_go                             no
-source_credential                                  host-wide only
+source_credential                                  no
 cache_write_fresh_host                             manual:account/alice:refs/heads/main
 cache_write_default_branch_fresh_host              no
 oidc_runner_environment_fresh_host                 fresh
@@ -355,27 +656,51 @@ oidc_runner_environment_long_lived                 persistent
 cache_write_long_lived_high_trust                  manual:account/alice:refs/heads/main
 cache_write_default_branch_long_lived_high_trust   no
 oidc_runner_environment_long_lived_high_trust      persistent
+personal_claim                                     yes
+personal_pipeline_secrets                          no
+personal_shared_secrets                            yes
+personal_oidc_repository                           -
+personal_cache_reads                               manual:account/alice:refs/heads/main
+personal_source_credential                         no
+personal_cache_write                               manual:host-<machine>/account/alice:refs/heads/main
+personal_latest_default                            no
+personal_repos_runner                              no
+here_claim                                         yes
+here_pipeline_secrets                              no
+here_shared_secrets                                yes
+here_oidc_repository                               -
+here_cache_reads                                   manual:account/alice:refs/heads/main
+here_source_credential                             no
+here_cache_write                                   manual:host-<machine>/account/alice:refs/heads/main
+here_latest_default                                no
+here_repos_runner                                  no
 host_fresh_pod               yes
 host_plain_machine           yes
 host_persistent_k8s          yes
+host_personal                yes
+host_here                    yes
 pool_reserved                no
 pool_reserved_trust_any      yes
 pool_verified_only           no
 pool_reserved_on_machine     no
 default_branch_work_sql      no
+latest_default               no
+repos_runner                 no
 fresh_host_required          no
 
 == local: Local run or --runner here
 trust                                              asserted
+proven_repository
+source_credential_compared                         no
 pipeline_secrets                                   no
 shared_secrets                                     yes
 oidc_trigger                                       manual
 oidc_repository                                    -
 oidc_ref                                           -
 oidc_sha                                           -
-cache_reads                                        manual:local/laptop:refs/heads/main refs/heads/main
+cache_reads                                        manual:local/laptop:refs/heads/main
 default_branch_work_go                             no
-source_credential                                  host-wide only
+source_credential                                  no
 cache_write_fresh_host                             manual:local/laptop:refs/heads/main
 cache_write_default_branch_fresh_host              no
 oidc_runner_environment_fresh_host                 fresh
@@ -385,18 +710,42 @@ oidc_runner_environment_long_lived                 persistent
 cache_write_long_lived_high_trust                  manual:local/laptop:refs/heads/main
 cache_write_default_branch_long_lived_high_trust   no
 oidc_runner_environment_long_lived_high_trust      persistent
+personal_claim                                     yes
+personal_pipeline_secrets                          no
+personal_shared_secrets                            yes
+personal_oidc_repository                           -
+personal_cache_reads                               manual:local/laptop:refs/heads/main
+personal_source_credential                         no
+personal_cache_write                               manual:host-<machine>/local/laptop:refs/heads/main
+personal_latest_default                            no
+personal_repos_runner                              no
+here_claim                                         yes
+here_pipeline_secrets                              no
+here_shared_secrets                                yes
+here_oidc_repository                               -
+here_cache_reads                                   manual:local/laptop:refs/heads/main
+here_source_credential                             no
+here_cache_write                                   manual:host-<machine>/local/laptop:refs/heads/main
+here_latest_default                                no
+here_repos_runner                                  no
 host_fresh_pod               yes
 host_plain_machine           yes
 host_persistent_k8s          yes
+host_personal                yes
+host_here                    yes
 pool_reserved                no
 pool_reserved_trust_any      yes
 pool_verified_only           no
 pool_reserved_on_machine     no
 default_branch_work_sql      no
+latest_default               no
+repos_runner                 no
 fresh_host_required          no
 
 == actions-github-hosted: GitHub Actions push binding, GitHub-hosted runner
 trust                                              actions
+proven_repository                                  gh:7
+source_credential_compared                         no
 pipeline_secrets                                   gh:7 pipeline ci
 shared_secrets                                     yes
 oidc_trigger                                       actions
@@ -405,7 +754,7 @@ oidc_ref                                           refs/heads/main
 oidc_sha                                           main-head
 cache_reads                                        manual:actions:refs/heads/main refs/heads/main
 default_branch_work_go                             no
-source_credential                                  repository gh:7
+source_credential                                  no
 actions_runner_fresh_host                          yes
 cache_write_fresh_host                             manual:actions:refs/heads/main
 cache_write_default_branch_fresh_host              no
@@ -416,18 +765,42 @@ oidc_runner_environment_long_lived                 persistent
 cache_write_long_lived_high_trust                  manual:actions:refs/heads/main
 cache_write_default_branch_long_lived_high_trust   no
 oidc_runner_environment_long_lived_high_trust      persistent
+personal_claim                                     no
+personal_pipeline_secrets                          not claimed
+personal_shared_secrets                            not claimed
+personal_oidc_repository                           not claimed
+personal_cache_reads                               not claimed
+personal_source_credential                         not claimed
+personal_cache_write                               not claimed
+personal_latest_default                            not claimed
+personal_repos_runner                              not claimed
+here_claim                                         no
+here_pipeline_secrets                              not claimed
+here_shared_secrets                                not claimed
+here_oidc_repository                               not claimed
+here_cache_reads                                   not claimed
+here_source_credential                             not claimed
+here_cache_write                                   not claimed
+here_latest_default                                not claimed
+here_repos_runner                                  not claimed
 host_fresh_pod               yes
 host_plain_machine           yes
 host_persistent_k8s          yes
+host_personal                no
+host_here                    no
 pool_reserved                no
 pool_reserved_trust_any      yes
 pool_verified_only           no
 pool_reserved_on_machine     no
 default_branch_work_sql      no
+latest_default               no
+repos_runner                 yes
 fresh_host_required          no
 
 == actions-self-hosted: GitHub Actions push binding, self-hosted runner
 trust                                              actions
+proven_repository                                  gh:7
+source_credential_compared                         no
 pipeline_secrets                                   gh:7 pipeline ci
 shared_secrets                                     yes
 oidc_trigger                                       actions
@@ -436,7 +809,7 @@ oidc_ref                                           refs/heads/main
 oidc_sha                                           main-head
 cache_reads                                        manual:actions:refs/heads/main refs/heads/main
 default_branch_work_go                             no
-source_credential                                  repository gh:7
+source_credential                                  no
 actions_runner_fresh_host                          no
 cache_write_fresh_host                             manual:actions:refs/heads/main
 cache_write_default_branch_fresh_host              no
@@ -447,18 +820,42 @@ oidc_runner_environment_long_lived                 persistent
 cache_write_long_lived_high_trust                  manual:actions:refs/heads/main
 cache_write_default_branch_long_lived_high_trust   no
 oidc_runner_environment_long_lived_high_trust      persistent
+personal_claim                                     no
+personal_pipeline_secrets                          not claimed
+personal_shared_secrets                            not claimed
+personal_oidc_repository                           not claimed
+personal_cache_reads                               not claimed
+personal_source_credential                         not claimed
+personal_cache_write                               not claimed
+personal_latest_default                            not claimed
+personal_repos_runner                              not claimed
+here_claim                                         no
+here_pipeline_secrets                              not claimed
+here_shared_secrets                                not claimed
+here_oidc_repository                               not claimed
+here_cache_reads                                   not claimed
+here_source_credential                             not claimed
+here_cache_write                                   not claimed
+here_latest_default                                not claimed
+here_repos_runner                                  not claimed
 host_fresh_pod               yes
 host_plain_machine           yes
 host_persistent_k8s          yes
+host_personal                no
+host_here                    no
 pool_reserved                no
 pool_reserved_trust_any      yes
 pool_verified_only           no
 pool_reserved_on_machine     no
 default_branch_work_sql      no
+latest_default               no
+repos_runner                 yes
 fresh_host_required          no
 
 == child-same-commit: Child of the default-branch push at its parent's commit
 trust                                              verified-default
+proven_repository                                  gh:7
+source_credential_compared                         yes
 pipeline_secrets                                   gh:7 pipeline ci
 shared_secrets                                     yes
 oidc_trigger                                       push
@@ -477,48 +874,42 @@ oidc_runner_environment_long_lived                 persistent
 cache_write_long_lived_high_trust                  refs/heads/main
 cache_write_default_branch_long_lived_high_trust   yes
 oidc_runner_environment_long_lived_high_trust      persistent
+personal_claim                                     no
+personal_pipeline_secrets                          not claimed
+personal_shared_secrets                            not claimed
+personal_oidc_repository                           not claimed
+personal_cache_reads                               not claimed
+personal_source_credential                         not claimed
+personal_cache_write                               not claimed
+personal_latest_default                            not claimed
+personal_repos_runner                              not claimed
+here_claim                                         no
+here_pipeline_secrets                              not claimed
+here_shared_secrets                                not claimed
+here_oidc_repository                               not claimed
+here_cache_reads                                   not claimed
+here_source_credential                             not claimed
+here_cache_write                                   not claimed
+here_latest_default                                not claimed
+here_repos_runner                                  not claimed
 host_fresh_pod               yes
 host_plain_machine           yes
 host_persistent_k8s          no
+host_personal                no
+host_here                    no
 pool_reserved                yes
 pool_reserved_trust_any      yes
 pool_verified_only           yes
 pool_reserved_on_machine     no
 default_branch_work_sql      yes
+latest_default               yes
+repos_runner                 yes
 fresh_host_required          yes
 
 == child-other-commit: Child of the default-branch push at another commit
 trust                                              asserted
-pipeline_secrets                                   no
-shared_secrets                                     yes
-oidc_trigger                                       manual
-oidc_repository                                    -
-oidc_ref                                           -
-oidc_sha                                           -
-cache_reads                                        manual:run/run-app-push-default:refs/heads/main refs/heads/main
-default_branch_work_go                             no
-source_credential                                  repository gh:7
-cache_write_fresh_host                             manual:run/run-app-push-default:refs/heads/main
-cache_write_default_branch_fresh_host              no
-oidc_runner_environment_fresh_host                 fresh
-cache_write_long_lived                             manual:host-<machine>/run/run-app-push-default:refs/heads/main
-cache_write_default_branch_long_lived              no
-oidc_runner_environment_long_lived                 persistent
-cache_write_long_lived_high_trust                  manual:run/run-app-push-default:refs/heads/main
-cache_write_default_branch_long_lived_high_trust   no
-oidc_runner_environment_long_lived_high_trust      persistent
-host_fresh_pod               yes
-host_plain_machine           yes
-host_persistent_k8s          yes
-pool_reserved                no
-pool_reserved_trust_any      yes
-pool_verified_only           no
-pool_reserved_on_machine     no
-default_branch_work_sql      no
-fresh_host_required          no
-
-== child-other-repo: Child of the default-branch push in another repository
-trust                                              asserted
+proven_repository
+source_credential_compared                         no
 pipeline_secrets                                   no
 shared_secrets                                     yes
 oidc_trigger                                       manual
@@ -527,7 +918,7 @@ oidc_ref                                           -
 oidc_sha                                           -
 cache_reads                                        manual:run/run-app-push-default:refs/heads/main
 default_branch_work_go                             no
-source_credential                                  repository gh:8
+source_credential                                  no
 cache_write_fresh_host                             manual:run/run-app-push-default:refs/heads/main
 cache_write_default_branch_fresh_host              no
 oidc_runner_environment_fresh_host                 fresh
@@ -537,18 +928,96 @@ oidc_runner_environment_long_lived                 persistent
 cache_write_long_lived_high_trust                  manual:run/run-app-push-default:refs/heads/main
 cache_write_default_branch_long_lived_high_trust   no
 oidc_runner_environment_long_lived_high_trust      persistent
+personal_claim                                     yes
+personal_pipeline_secrets                          no
+personal_shared_secrets                            yes
+personal_oidc_repository                           -
+personal_cache_reads                               manual:run/run-app-push-default:refs/heads/main
+personal_source_credential                         no
+personal_cache_write                               manual:host-<machine>/run/run-app-push-default:refs/heads/main
+personal_latest_default                            no
+personal_repos_runner                              no
+here_claim                                         yes
+here_pipeline_secrets                              no
+here_shared_secrets                                yes
+here_oidc_repository                               -
+here_cache_reads                                   manual:run/run-app-push-default:refs/heads/main
+here_source_credential                             no
+here_cache_write                                   manual:host-<machine>/run/run-app-push-default:refs/heads/main
+here_latest_default                                no
+here_repos_runner                                  no
 host_fresh_pod               yes
 host_plain_machine           yes
 host_persistent_k8s          yes
+host_personal                yes
+host_here                    yes
 pool_reserved                no
 pool_reserved_trust_any      yes
 pool_verified_only           no
 pool_reserved_on_machine     no
 default_branch_work_sql      no
+latest_default               no
+repos_runner                 no
+fresh_host_required          no
+
+== child-other-repo: Child of the default-branch push in another repository
+trust                                              asserted
+proven_repository
+source_credential_compared                         no
+pipeline_secrets                                   no
+shared_secrets                                     yes
+oidc_trigger                                       manual
+oidc_repository                                    -
+oidc_ref                                           -
+oidc_sha                                           -
+cache_reads                                        manual:run/run-app-push-default:refs/heads/main
+default_branch_work_go                             no
+source_credential                                  no
+cache_write_fresh_host                             manual:run/run-app-push-default:refs/heads/main
+cache_write_default_branch_fresh_host              no
+oidc_runner_environment_fresh_host                 fresh
+cache_write_long_lived                             manual:host-<machine>/run/run-app-push-default:refs/heads/main
+cache_write_default_branch_long_lived              no
+oidc_runner_environment_long_lived                 persistent
+cache_write_long_lived_high_trust                  manual:run/run-app-push-default:refs/heads/main
+cache_write_default_branch_long_lived_high_trust   no
+oidc_runner_environment_long_lived_high_trust      persistent
+personal_claim                                     yes
+personal_pipeline_secrets                          no
+personal_shared_secrets                            yes
+personal_oidc_repository                           -
+personal_cache_reads                               manual:run/run-app-push-default:refs/heads/main
+personal_source_credential                         no
+personal_cache_write                               manual:host-<machine>/run/run-app-push-default:refs/heads/main
+personal_latest_default                            no
+personal_repos_runner                              no
+here_claim                                         yes
+here_pipeline_secrets                              no
+here_shared_secrets                                yes
+here_oidc_repository                               -
+here_cache_reads                                   manual:run/run-app-push-default:refs/heads/main
+here_source_credential                             no
+here_cache_write                                   manual:host-<machine>/run/run-app-push-default:refs/heads/main
+here_latest_default                                no
+here_repos_runner                                  no
+host_fresh_pod               yes
+host_plain_machine           yes
+host_persistent_k8s          yes
+host_personal                yes
+host_here                    yes
+pool_reserved                no
+pool_reserved_trust_any      yes
+pool_verified_only           no
+pool_reserved_on_machine     no
+default_branch_work_sql      no
+latest_default               no
+repos_runner                 no
 fresh_host_required          no
 
 == child-of-fetched: Child of the fetched console run at its parent's commit
 trust                                              asserted
+proven_repository                                  gh:7
+source_credential_compared                         yes
 pipeline_secrets                                   gh:7 pipeline ci
 shared_secrets                                     yes
 oidc_trigger                                       manual
@@ -567,12 +1036,34 @@ oidc_runner_environment_long_lived                 persistent
 cache_write_long_lived_high_trust                  manual:fetched/account/alice:refs/heads/main
 cache_write_default_branch_long_lived_high_trust   no
 oidc_runner_environment_long_lived_high_trust      persistent
+personal_claim                                     no
+personal_pipeline_secrets                          not claimed
+personal_shared_secrets                            not claimed
+personal_oidc_repository                           not claimed
+personal_cache_reads                               not claimed
+personal_source_credential                         not claimed
+personal_cache_write                               not claimed
+personal_latest_default                            not claimed
+personal_repos_runner                              not claimed
+here_claim                                         no
+here_pipeline_secrets                              not claimed
+here_shared_secrets                                not claimed
+here_oidc_repository                               not claimed
+here_cache_reads                                   not claimed
+here_source_credential                             not claimed
+here_cache_write                                   not claimed
+here_latest_default                                not claimed
+here_repos_runner                                  not claimed
 host_fresh_pod               yes
 host_plain_machine           yes
 host_persistent_k8s          yes
+host_personal                no
+host_here                    no
 pool_reserved                no
 pool_reserved_trust_any      yes
 pool_verified_only           no
 pool_reserved_on_machine     no
 default_branch_work_sql      no
+latest_default               no
+repos_runner                 yes
 fresh_host_required          no

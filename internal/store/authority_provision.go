@@ -21,6 +21,9 @@ func provisionCapabilityTx(ctx context.Context, tx *storeTx, spec capability.Pro
 	if err := capability.ValidateProvisionSeed(spec); err != nil {
 		return capability.Capability{}, err
 	}
+	if spec.Kind == capability.ProvisionMachine && spec.Personal && len(spec.Repositories) == 0 {
+		spec.Repositories = nil
+	}
 	c := capability.Capability{
 		Team: spec.Team, Subject: spec.Subject, Audience: capability.Controller,
 		Grants: slices.Clone(spec.Grants), Binding: spec.Binding, Issuance: capability.Delegate,

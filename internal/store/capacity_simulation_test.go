@@ -97,7 +97,7 @@ func simulateAdmission(t *testing.T, seed uint64, target *storetest.Target) {
 	}
 	s.machines[1] = issued.Capability.Prefix
 	for i := 1; i < 6; i++ {
-		intake, err := f.tenant.AdmitRun(t.Context(), store.IntakeRequest{Authority: f.plan.Seal.Request.AuthorityRef, Request: f.plan.Seal.Request.Request})
+		intake, err := f.tenant.AdmitRun(t.Context(), store.IntakeRequest{Authority: f.plan.Seal.Request.AuthorityRef, Request: f.plan.Seal.Request.Request, FetchedRepository: store.FetchedRepository{ID: 1, Name: "acme/repo"}})
 		if err != nil {
 			t.Fatal(err)
 		}

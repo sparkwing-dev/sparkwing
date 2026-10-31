@@ -572,7 +572,7 @@ func burstPublicPersonalRunner(t *testing.T, ctx context.Context, cli, repo stri
 	runnerHome := t.TempDir()
 	runnerState := filepath.Join(runnerHome, "state")
 	config := filepath.Join(runnerHome, "runner.yaml")
-	enroll := exec.CommandContext(ctx, cli, "runners", "add", "--personal", "--session-stdin", "--no-service", "--profile", "cloud", "--runner", "burst-desktop", "--repos", "example.test/acme/*", "--max-concurrent", "1", "--config", config, "-o=json")
+	enroll := exec.CommandContext(ctx, cli, "runners", "add", "--personal", "--session-stdin", "--no-service", "--profile", "cloud", "--runner", "burst-desktop", "--max-concurrent", "1", "--config", config, "-o=json")
 	enroll.Dir, enroll.Stdin = repo, strings.NewReader(session+"\n")
 	if output, err := enroll.CombinedOutput(); err != nil {
 		t.Fatalf("public personal-machine enrollment: %v\n%s", err, output)

@@ -10,7 +10,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/sourceurl"
-	"github.com/sparkwing-dev/sparkwing/pkg/match"
 )
 
 // ReleaseSourceCredential returns the sealed credential only after its authorization audit commits.
@@ -24,10 +23,7 @@ func (t *Tenant) ReleaseSourceCredential(ctx context.Context, authorized capabil
 		if err != nil {
 			return err
 		}
-		credential, err = scanGitCredential(tx.QueryRowContext(ctx, `SELECT `+gitCredentialCols+` FROM git_credentials WHERE team=? AND host=? AND (repository_key=? AND ?=1 OR host_wide=1) ORDER BY host_wide LIMIT 1`+tx.forUpdate(), t.team, request.Host, request.RepositoryKey, boolInt(request.RepositoryProven)))
-		if errors.Is(err, sql.ErrNoRows) && !request.RepositoryProven {
-			return errors.Join(ErrNotFound, &apierr.Error{Code: apierr.NotFound, Message: unprovenSourceRemedy(request.Host)})
-		}
+		credential, err = scanGitCredential(tx.QueryRowContext(ctx, `SELECT `+gitCredentialCols+` FROM git_credentials WHERE team=? AND host=? AND (repository_key=? OR host_wide=1) ORDER BY host_wide LIMIT 1`+tx.forUpdate(), t.team, request.Host, request.RepositoryKey))
 		if errors.Is(err, sql.ErrNoRows) {
 			return errors.Join(ErrNotFound, &apierr.Error{Code: apierr.NotFound, Message: "store a git credential for " + request.Host + " in the team's Git credentials"})
 		}
@@ -42,7 +38,7 @@ func (t *Tenant) ReleaseSourceCredential(ctx context.Context, authorized capabil
 		if err != nil {
 			return err
 		}
-		request.Executor, err = t.sourceExecutorTx(ctx, tx, chain, run)
+		request.Executor, err = t.sourceExecutor(chain, run)
 		if err != nil {
 			return err
 		}
@@ -115,21 +111,16 @@ func (t *Tenant) sourceReleaseRequestTx(ctx context.Context, tx *storeTx, author
 	if err != nil {
 		return capability.SourceReleaseRequest{}, authorityError(apierr.Forbidden, "sealed source has no credential host")
 	}
-	root := chain[len(chain)-1].principal.Capability
-	executor := capability.SourceExecutor{Team: string(t.team), MachineID: root.Subject.ID, AuthorizedRepositories: []string{string(run.Request.Request.Git.Repository.Key)}}
+	proof := run.Request.Provenance
+	if proof.ProvenRepository() == "" || proof.ProvenRepository() != run.Request.Request.Git.Repository.Key || !proof.SourceCredentialVerified() {
+		return capability.SourceReleaseRequest{}, errors.Join(ErrNotFound, &apierr.Error{Code: apierr.NotFound, Message: unprovenSourceRemedy(host)})
+	}
 	authorized = capability.Authorized{Principal: p, Binding: b, Target: capability.Target{Team: c.Team, RunID: b.RunID, NodeID: b.NodeID}, Access: capability.AccessRule{Grants: []capability.Grant{capability.SourceRead}, Binding: capability.BindSource, Liveness: capability.LiveSensitive}}
-	return capability.SourceReleaseRequest{Authorization: authorized, Executor: executor, RepositoryKey: string(run.Request.Request.Git.Repository.Key), Host: host, RepositoryProven: sourceRepositoryProven(run.Request)}, nil
-}
-
-// safety: code the submitter supplied (an upload, working tree or local checkout) proves no
-// repository, so it gets only a host-wide credential; intake bound the remote to the key.
-func sourceRepositoryProven(sealed runspec.SealedRequest) bool {
-	return sealed.Request.Git.Repository.Key != "" && sealed.Request.Source.FetchedFromRemote()
+	return capability.SourceReleaseRequest{Authorization: authorized, RepositoryKey: string(run.Request.Request.Git.Repository.Key), Host: host}, nil
 }
 
 func unprovenSourceRemedy(host string) string {
-	return "Sparkwing has not proven this run's repository, so it gets no credential scoped to that repository; run it from " +
-		"its repository (a GitHub App push, the console or a CLI run Sparkwing fetches) or store a host-wide git credential for " + host
+	return "Sparkwing has not proven this run's repository and checked that its code is reachable from a repository branch or tag, so it gets no team git credential for " + host + "; run code Sparkwing fetches through the GitHub App"
 }
 
 func checkSourceReleaseFenceTx(ctx context.Context, tx *storeTx, c capability.Capability) error {
@@ -147,39 +138,24 @@ func checkSourceReleaseFenceTx(ctx context.Context, tx *storeTx, c capability.Ca
 	return nil
 }
 
-func (t *Tenant) sourceExecutorTx(ctx context.Context, tx *storeTx, chain []authorityNode, run RunRow) (capability.SourceExecutor, error) {
-	if t.s.claimProfiles == nil {
-		return capability.SourceExecutor{}, authorityError(apierr.Unavailable, "source executor enrollment is unavailable")
-	}
+func (t *Tenant) sourceExecutor(chain []authorityNode, run RunRow) (capability.SourceExecutor, error) {
 	p := chain[0].principal
-	profile, err := t.s.claimProfiles.ResolveClaimProfile(ctx, p)
-	if err != nil {
-		return capability.SourceExecutor{}, err
-	}
 	repo := string(run.Request.Request.Git.Repository.Key)
 	if !slices.Contains(p.Capability.Repositories, repo) {
 		return capability.SourceExecutor{}, bindingRefusal()
 	}
-	demand := match.Demand{Trigger: true, Repo: &match.Repository{URL: run.Request.Request.Source.Location.RemoteURL}}
-	if !match.Evaluate(match.Profile{Accept: profile.Accept}, demand).OK() {
+	facts := p.Capability.Host
+	if facts == nil {
 		return capability.SourceExecutor{}, bindingRefusal()
 	}
-	root := chain[len(chain)-1].principal.Capability
-	facts, err := claimantFactsTx(ctx, tx, chain, run.Request.Request)
-	if err != nil {
-		return capability.SourceExecutor{}, err
-	}
-	executor := capability.SourceExecutor{Team: string(t.team), MachineID: root.Subject.ID, Cloud: facts.Cloud, Shared: facts.Shared, OwnerAccountID: facts.OwnerAccount, AuthorizedRepositories: []string{repo}}
-	if facts.OIDCKind == tierActions {
+	executor := capability.SourceExecutor{Team: string(t.team), MachineID: facts.MachineID, Cloud: facts.Kind == capability.HostCloud, Shared: facts.Kind == capability.HostSelfHosted, OwnerAccountID: facts.OwnerAccountID, AuthorizedRepositories: []string{repo}}
+	if facts.RunnerKind == tierActions {
 		return capability.SourceExecutor{}, apierr.Authorization(apierr.ReasonRepositoryUnauthorized, "Actions runners use their own repository credential")
 	}
-	if facts.Cloud {
+	if executor.Cloud {
 		return executor, nil
 	}
-	if root.Subject.Kind != capability.SubjectMachine || root.Team != string(t.team) {
-		return capability.SourceExecutor{}, bindingRefusal()
-	}
-	if !facts.Shared {
+	if !executor.Shared {
 		return capability.SourceExecutor{}, apierr.Authorization(apierr.ReasonPersonalMachine, "team git credentials are released only to shared runners and Cloud work, never to a personal machine")
 	}
 	return executor, nil

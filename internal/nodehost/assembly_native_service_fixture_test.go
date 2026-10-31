@@ -19,7 +19,7 @@ func completeServiceFixture(_ context.Context, p capability.Principal, job nodep
 		Output: func(context.Context, capability.Authorized, string) (json.RawMessage, error) {
 			return json.RawMessage(`null`), nil
 		},
-		Latest: func(context.Context, capability.Authorized, string, string, time.Duration) (ProcessOutput, error) {
+		Latest: func(context.Context, capability.Authorized, string, string, time.Duration, bool) (ProcessOutput, error) {
 			return ProcessOutput{}, nil
 		},
 		OIDC: func(context.Context, capability.Authorized, string) (ProcessOIDCToken, error) {

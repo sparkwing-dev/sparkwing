@@ -56,6 +56,7 @@ func delegateCapabilityTx(ctx context.Context, tx *storeTx, spec capability.Dele
 		Purpose: parent.Capability.Purpose, Delivery: parent.Capability.Delivery,
 		Billing:       parent.Capability.Billing,
 		ExecutionHost: parent.Capability.ExecutionHost,
+		Host:          parent.Capability.Host,
 	}, nil
 }
 

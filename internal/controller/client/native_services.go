@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/json"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 
@@ -91,12 +92,12 @@ func (c *NativeProcessClient) ChildOutput(ctx context.Context, run, job string) 
 	return result.Output, err
 }
 
-// Latest selects an authorized terminal pipeline result and its requested job.
-func (c *NativeProcessClient) Latest(ctx context.Context, pipeline, job string, age time.Duration) (string, json.RawMessage, error) {
+// Latest reads successful verified default-branch output unless fromAnyRun is true.
+func (c *NativeProcessClient) Latest(ctx context.Context, pipeline, job string, age time.Duration, fromAnyRun bool) (string, json.RawMessage, error) {
 	var result struct {
 		ID string `json:"id"`
 	}
-	query := url.Values{"job": {job}, "run": {c.run}, "max_age": {age.String()}}
+	query := url.Values{"job": {job}, "run": {c.run}, "max_age": {age.String()}, "from_any_run": {strconv.FormatBool(fromAnyRun)}}
 	err := c.transport.request(ctx, "GET", "/api/v1/pipelines/{name}/latest", "/api/v1/pipelines/"+url.PathEscape(pipeline)+"/latest?"+query.Encode(), "", nil, &result)
 	if err != nil {
 		return "", nil, err

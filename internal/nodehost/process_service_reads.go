@@ -69,7 +69,7 @@ func (s *ProcessServices) read(request *http.Request, auth capability.Authorized
 			return nil, 0, executorError(apierr.BadRequest, "latest output requires a job and valid max_age_ms")
 		}
 		var output ProcessOutput
-		output, err = s.Latest(ctx, auth, request.PathValue("name"), request.URL.Query().Get("job"), age)
+		output, err = s.Latest(ctx, auth, request.PathValue("name"), request.URL.Query().Get("job"), age, auth.Target.Reference.FromAnyRun)
 		if err == nil {
 			err = serviceOutput(output.Output)
 			if output.RunID == "" {

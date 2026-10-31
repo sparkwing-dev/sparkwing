@@ -2,6 +2,11 @@
 
 Reporting reads use the shared capability policy and the authorized resource's team. This includes run lists, receipts, attempts, steps, events, approvals, debug pauses, pipeline lists and latest runs, trends, runner views, sizing and logs. Unbound machine roots and deployment credentials cannot substitute for team membership. Work and trigger claims receive only the read alternatives declared for their bindings.
 
+Latest pipeline reads select verified default-branch runs by default. Pass
+`from_any_run=true` to include other runs. A job or owner capability can use that
+opt-out only when its plan declares `from_any_run: true` on the pipeline reference.
+Direct cross-run job-output reads enforce the same requirement.
+
 Run receipts use the same response on HTTP and the local API socket. Each step
 identifies its job with `job_id`. Receipts omit raw invocation metadata and local
 store locations.

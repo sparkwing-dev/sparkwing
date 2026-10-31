@@ -14,6 +14,7 @@ func TestRepositoryClaimScopeProperty(t *testing.T) {
 			for _, scope := range [][]string{nil, {}, {"github.com/acme/*"}, {"gh:1"}} {
 				t.Run(fmt.Sprint(i, scope, outside), func(t *testing.T) {
 					s, demand := unitClaimFixture(t)
+					proveClaimFixtureRepository(t, s)
 					root := authorityRoot("restricted", "a")
 					root.Repositories = scope
 					authorityPersist(t, s, root)

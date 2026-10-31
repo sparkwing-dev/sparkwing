@@ -104,6 +104,7 @@ type AuthorityRef struct {
 
 // Capability contains no reusable secret. Digest is SHA-256 of a generated reference token.
 type Capability struct {
+	Host            *HostFacts                `json:"host,omitempty"`
 	CredentialEpoch string                    `json:"credential_epoch,omitempty"`
 	Digest          [32]byte                  `json:"-"`
 	Prefix          string                    `json:"prefix"`

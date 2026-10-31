@@ -62,6 +62,49 @@ func TestMachineRunnerAdmitsSealedSourceBeforeHosting(t *testing.T) {
 	}
 }
 
+func TestUnscopedMachineHostsOnlyItsOwnersAssertedAwards(t *testing.T) {
+	for _, tc := range []struct {
+		name                                    string
+		owner, proven, acceptedProven, unsealed bool
+	}{
+		{name: "owner", owner: true},
+		{name: "shared"},
+		{name: "missing seal", owner: true, unsealed: true},
+		{name: "proven owner", owner: true, proven: true},
+		{name: "proven accepted source", owner: true, acceptedProven: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			unit := repositoryAward(capability.UnitNode, "https://github.com/acme/app.git")
+			provenance, err := runspec.AssertedProvenance(runspec.PrincipalWriter("account", "owner"), "refs/heads/main", unit.Request.Request.Git.SHA, "ci")
+			if err != nil {
+				t.Fatal(err)
+			}
+			proven, err := provenance.FetchedFrom(1, "acme/app", "refs/heads/main", unit.Request.Request.Git.SHA)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if tc.unsealed {
+				provenance = runspec.Provenance{}
+			}
+			unit.OwnerMachine, unit.Request.Provenance = tc.owner, provenance
+			unit.Accepted.Spec.Request.Provenance = provenance
+			if tc.proven {
+				unit.Request.Provenance = proven
+			}
+			if tc.acceptedProven {
+				unit.Accepted.Spec.Request.Provenance = proven
+			}
+			hosted := false
+			runner := repositoryRunner(t, unit, nil, hostFunc(func(context.Context, controllerwire.ClaimedUnit) error { hosted = true; return nil }))
+			err = runner.Run(t.Context())
+			want := tc.owner && !tc.proven && !tc.acceptedProven && !tc.unsealed
+			if hosted != want || (err == nil) != want || !want && !errors.Is(err, ErrRepoNotAllowed) {
+				t.Fatalf("hosted=%v want=%v: %v", hosted, want, err)
+			}
+		})
+	}
+}
+
 func FuzzMachineRunnerRepositoryFence(f *testing.F) {
 	f.Add("acme", "app", uint8(0), true)
 	f.Add("evil", "payload", uint8(1), false)

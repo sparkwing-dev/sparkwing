@@ -2,6 +2,8 @@ package controller_test
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"net/http"
 	"net/url"
@@ -28,18 +30,24 @@ func tenantRunClaim(t *testing.T, f *tenancyFixture) (controllerwire.CreateRunRe
 	t.Helper()
 	f.srv.WithEngineController(controller.NewEngineController(f.st, controller.EngineController{RunnerPolicy: tenantRunnerPolicy{}}))
 	body := computeIntake("build-b")
-	body.Request.Git.Repository = runspec.Repository{}
-	body.Request.Source.Location = runspec.SourceLocation{RemoteURL: "https://git.example.test/acme/widgets.git", PipelineDir: ".sparkwing"}
 	body.Request.Options.Runner = runspec.Setting[runspec.RunnerSelection]{Optional: runspec.Optional[runspec.RunnerSelection]{Set: true, Value: runspec.RunnerSelection{Kind: runspec.RunnerName, Value: "b-runner"}}, Origin: runspec.SettingOrigin{Layer: runspec.LayerFlag, Key: "runner"}}
 	if code, response := f.do("POST", "/api/v1/runs", f.runnerB, body); code != http.StatusForbidden {
 		t.Fatalf("runner admitted a run = %d: %s", code, response)
 	}
-	code, response := f.do("POST", "/api/v1/runs", f.ownerB, body)
-	var admitted controllerwire.CreateRunResponse
-	if code != http.StatusCreated || json.Unmarshal([]byte(response), &admitted) != nil || admitted.RunID == "" {
-		t.Fatalf("member intake = %d: %s", code, response)
+	// safety: scoped claim fixtures need fetched proof, which public intake cannot assert.
+	request := body.Request
+	request.Git.Repository.Display = "https://github.com/acme/widgets"
+	request.Source.Location.RemoteURL = request.Git.Repository.Display
+	digest := sha256.Sum256([]byte(strings.TrimPrefix(f.ownerB, "Session ")))
+	result, err := f.teamB.AdmitRun(controller.VerifiedIntakeContextForTest(t.Context(), request), store.IntakeRequest{
+		Authority: capability.AuthorityRef{Kind: capability.AuthoritySession, ID: hex.EncodeToString(digest[:])},
+		Request:   request, FetchedRepository: store.FetchedRepository{ID: 1, Name: "acme/widgets"},
+	})
+	if err != nil {
+		t.Fatal(err)
 	}
-	code, response = f.do("POST", "/api/v1/runners/claim?team="+string(f.teamA.Team()), f.runnerB, controllerwire.ClaimRequest{RunnerVersion: "v1", Kinds: []capability.UnitKind{capability.UnitTrigger}})
+	admitted := controllerwire.CreateRunResponse{RunID: result.RunID}
+	code, response := f.do("POST", "/api/v1/runners/claim?team="+string(f.teamA.Team()), f.runnerB, controllerwire.ClaimRequest{RunnerVersion: "v1", Kinds: []capability.UnitKind{capability.UnitTrigger}})
 	var claimed controllerwire.ClaimResponse
 	if code != http.StatusOK || json.Unmarshal([]byte(response), &claimed) != nil || claimed.Claim == nil || claimed.Claim.RunID != admitted.RunID || claimed.Claim.Capability == "" {
 		t.Fatalf("runner claim = %d: %s", code, response)

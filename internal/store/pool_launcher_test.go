@@ -354,6 +354,7 @@ func TestKubernetesRunnerNeedsAKubernetesEnrollment(t *testing.T) {
 	for _, platform := range []string{"", "kubernetes"} {
 		t.Run("platform="+platform, func(t *testing.T) {
 			s, demand := unitClaimFixture(t)
+			proveClaimFixtureRepository(t, s)
 			owner := authorityMember(t, s, "owner", RoleOwner)
 			issued, err := s.AsOperator().ProvisionCapability(t.Context(), capability.ProvisionSpec{
 				Kind: capability.ProvisionMachine, Authority: &owner.Authority, RegistrationID: "runner:a:pod", Team: "a",

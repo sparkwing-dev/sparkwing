@@ -28,6 +28,8 @@ type claimRepositoryPattern struct {
 }
 
 type claimFacts struct {
+	HostKind       capability.HostKind        `json:"host_kind"`
+	ProvenOnly     int                        `json:"proven_only,omitempty"`
 	FreeSlots      int                        `json:"free_slots,omitempty"`
 	Current        int                        `json:"current,omitempty"`
 	ObservedAt     int64                      `json:"observed_at,omitempty"`
@@ -119,6 +121,7 @@ func claimFactsTx(ctx context.Context, tx *storeTx, demand UnitDemand) (claimFac
 		}
 	}
 	f.Prefix, f.Team, f.Name = leaf.Prefix, leaf.Team, leaf.Subject.ID
+	f.HostKind = observed.HostKind
 	f.Cloud, f.Launcher, f.Metered = boolInt(capability.CloudLauncher(leaf)), boolInt(launcherClaimant(leaf)), boolInt(meteredPlacement(leaf, root))
 	f.PersistentPod = boolInt(observed.PersistentKubernetes)
 	f.Personal, f.Account, f.Tier, f.Trust = boolInt(observed.Personal), observed.OwnerAccount, observed.Tier, string(root.Trust)
@@ -136,6 +139,9 @@ func claimFactsTx(ctx context.Context, tx *storeTx, demand UnitDemand) (claimFac
 			f.HereRun = c.Binding.RunID
 		}
 		if c.Repositories != nil {
+			if c.Unit == "" {
+				f.ProvenOnly = 1
+			}
 			f.Scopes = append(f.Scopes, claimPatterns(c.Repositories))
 		}
 		if c.Binding.Kind == capability.BindingPush {
@@ -173,6 +179,7 @@ func claimFactsTx(ctx context.Context, tx *storeTx, demand UnitDemand) (claimFac
 	if profile.Accept != nil {
 		f.Accept = claimPatterns(profile.Accept.Patterns())
 		f.Filter = 1
+		f.ProvenOnly = 1
 	}
 	for _, kind := range []capability.UnitKind{capability.UnitNode, capability.UnitTrigger, capability.UnitPlan, capability.UnitEval} {
 		unit := UnitRef{Kind: kind, RunID: runspec.RunID(leaf.Binding.RunID)}
@@ -343,7 +350,7 @@ func (q *claimSQL) flag(name string) string { return q.number(q.fact(name)) }
 func (q *claimSQL) pushScopeMatches(provenance, push, repo string) string {
 	p := func(name string) string { return q.at(provenance, name) }
 	b := func(name string) string { return q.at(push, name) }
-	return `COALESCE((` + trustIn(p("trust"), runspec.GitHubEventTrust) + ` AND ` + b("workflow_run_id") + `<>'' AND ` + b("repo_key") + `=` + repo + ` AND ` + b("repo_key") + `='gh:'||CAST(` + p("repository_id") + ` AS TEXT) AND ` + b("ref") + `=` + p("ref") + ` AND ` + b("sha") + `=` + p("sha") + `),FALSE)`
+	return `COALESCE((` + trustIn(p("trust"), runspec.GitHubEventTrust) + ` AND ` + b("workflow_run_id") + `<>'' AND ` + b("repo_key") + `=` + repo + ` AND ` + b("repo_key") + `=` + q.provenRepository(provenance) + ` AND ` + b("ref") + `=` + p("ref") + ` AND ` + b("sha") + `=` + p("sha") + `),FALSE)`
 }
 
 func writerPrincipalSQL(writer, kind string) string {
@@ -359,10 +366,17 @@ func (q *claimSQL) poolTrust(team, pools, trust, launcher, provenance string) st
 	return `((NOT (` + reserved + ` OR (` + trust + `='` + string(capability.TrustVerifiedDefault) + `' AND ` + hasPools + `)) OR ` + launcher + `=1) AND (` + trust + `='` + string(capability.TrustAny) + `' OR (` + trust + `='' AND NOT (` + reserved + `)) OR ` + q.defaultBranchWork(provenance) + `))`
 }
 
-// safety: Provenance.DefaultBranchWork in SQL; TestDefaultBranchWorkSQLAgreesWithGo holds them together.
+// safety: use sealed facts so SQL and Go consumers cannot disagree on repository proof.
 func (q *claimSQL) defaultBranchWork(provenance string) string {
-	p := func(name string) string { return q.at(provenance, name) }
-	return `COALESCE((` + trustIn(p("trust"), runspec.DefaultBranchWorkTrust) + ` AND ` + p("default_branch") + `<>'' AND ` + p("ref") + `='refs/heads/'||` + p("default_branch") + `),FALSE)`
+	return `COALESCE(CAST(` + q.at(provenance, "verified_default_branch") + ` AS TEXT),'false') IN ('true','1')`
+}
+
+func (q *claimSQL) provenRepository(provenance string) string {
+	return `COALESCE(` + q.at(provenance, "proven_repository") + `,'')`
+}
+
+func (q *claimSQL) hostTrust(kind, provenance string) string {
+	return `(` + q.provenRepository(provenance) + `='' OR ` + kind + ` IN ('` + string(capability.HostCloud) + `','` + string(capability.HostSelfHosted) + `'))`
 }
 
 // safety: every SQL trust list renders here from a runspec set; TestStoreSQLTrustLiterals refuses hand-written ones.
@@ -435,7 +449,7 @@ func (q *claimSQL) predicate() string {
 		excluded = "1=1"
 	}
 	return strings.Join([]string{
-		labels, live, q.freshPod(n("persistent_kubernetes"), q.at("w.request", "provenance")), q.contains(f("kinds"), "w.kind"), excluded, bind, pushes, scopes, accepted, trust, personal, runner, burst, guards, reservation, `(` + foreground + `)`,
+		labels, live, q.hostTrust(f("host_kind"), q.at("w.request", "provenance")), `(` + n("proven_only") + `=0 OR ` + q.provenRepository(q.at("w.request", "provenance")) + `<>'')`, q.freshPod(n("persistent_kubernetes"), q.at("w.request", "provenance")), q.contains(f("kinds"), "w.kind"), excluded, bind, pushes, scopes, accepted, trust, personal, runner, burst, guards, reservation, `(` + foreground + `)`,
 	}, " AND ")
 }
 

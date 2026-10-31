@@ -53,6 +53,10 @@ func seedSourceRun(t *testing.T, st *store.Store, team, run, remote, key, ref, s
 		if err != nil {
 			t.Fatal(err)
 		}
+		provenance, err = provenance.WithSourceCredentialVerified()
+		if err != nil {
+			t.Fatal(err)
+		}
 		seal.Provenance = provenance
 	} else {
 		// Without App facts the run is one the fixture account submitted.

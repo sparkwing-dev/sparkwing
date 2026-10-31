@@ -192,6 +192,7 @@ func TestEngineBootstrapExchangeReturnsOriginalUnitOnce(t *testing.T) {
 	for _, kind := range []capability.UnitKind{capability.UnitPlan, capability.UnitNode} {
 		t.Run(string(kind), func(t *testing.T) {
 			server, tenant := engineRuntimeStore(t)
+			fetchedRunFixture(t, server.Store, "a", "run", "acme/repo")
 			if _, err := tenant.RecordCreditGrant(t.Context(), store.CreditGrantRequest{Kind: store.CreditGrantFree, AmountMicro: 100 * store.MicroCreditsPerCredit, Reference: "launcher-test", CreatedBy: "fixture"}); err != nil {
 				t.Fatal(err)
 			}

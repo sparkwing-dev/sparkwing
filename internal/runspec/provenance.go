@@ -35,10 +35,8 @@ type TrustSet []TrustClass
 func (s TrustSet) Has(c TrustClass) bool { return slices.Contains(s, c) }
 
 var (
-	// DefaultBranchWorkTrust is verified default-branch work: a signed push to the
-	// default branch, or an unmodified fire of an admin-armed default-branch schedule
-	// (decisions 31, 34, 60). Any other class on the default branch is ordinary work.
-	DefaultBranchWorkTrust = TrustSet{TrustVerifiedDefault, TrustSchedule}
+	// safety: a branch name alone cannot establish verified default-branch work.
+	defaultBranchWorkTrust = TrustSet{TrustVerifiedDefault, TrustSchedule}
 	// AppRepositoryTrust proved its repository through the GitHub App: a signed
 	// delivery or a schedule whose commit the App resolved. Pool access rules grant it.
 	AppRepositoryTrust = TrustSet{TrustVerified, TrustVerifiedDefault, TrustSchedule}
@@ -76,7 +74,7 @@ func AppProvenance(app AppFacts, pr Optional[PullRequest], pipeline string) (Pro
 	if app.DefaultBranchPush && app.Event == "push" && app.DefaultBranch != "" && app.Ref == "refs/heads/"+app.DefaultBranch {
 		p.identity.Trust = TrustVerifiedDefault
 	}
-	return p, p.validate()
+	return p.sealIdentity()
 }
 
 // ScheduleProvenance seals an unmodified fire of a schedule a team admin armed on
@@ -89,28 +87,28 @@ func ScheduleProvenance(schedule string, repositoryID int64, repository, default
 	if schedule == "" || NormalizedBranch(branch) == "" {
 		return Provenance{}, errors.New("schedule provenance requires the schedule and the branch it follows")
 	}
-	return p, p.validate()
+	return p.sealIdentity()
 }
 
 // ActionsProvenance seals a run whose credential is bound to one GitHub Actions push
 // of one repository.
 func ActionsProvenance(repositoryID int64, repository, ref, sha, pipeline string) (Provenance, error) {
 	p := Provenance{identity: provenanceJSON{Trust: TrustActions, RepositoryID: repositoryID, Repository: repository, Ref: ref, SHA: strings.ToLower(sha), Pipeline: pipeline, Writer: "actions"}}
-	return p, p.validate()
+	return p.sealIdentity()
 }
 
 // AssertedProvenance seals a run whose identity a principal chose. Writer keys its
 // data scope, so one writer's records never reach another writer's runs.
 func AssertedProvenance(writer Writer, ref, sha, pipeline string) (Provenance, error) {
 	p := Provenance{identity: provenanceJSON{Trust: TrustAsserted, Ref: ref, SHA: strings.ToLower(sha), Pipeline: pipeline, Writer: string(writer)}}
-	return p, p.validate()
+	return p.sealIdentity()
 }
 
 // AssertedChildProvenance seals a child that left its parent's revision. No
 // pipeline vouched for its code, so it reads only team-wide shared secrets.
 func AssertedChildProvenance(writer Writer, ref, sha, pipeline string) (Provenance, error) {
 	p := Provenance{identity: provenanceJSON{Trust: TrustAsserted, Ref: ref, SHA: strings.ToLower(sha), Pipeline: pipeline, Writer: string(writer), SharedOnly: true}}
-	return p, p.validate()
+	return p.sealIdentity()
 }
 
 // SharedSecretsOnly reports a run that may read only team-wide shared secrets.
@@ -125,29 +123,39 @@ func (p Provenance) SharedSecretsOnly() bool { return p.identity.SharedOnly }
 // 72); they are claimed in OIDC only. The trust class and pools stay
 // asserted, and the data scope is the writer's fetched scope (DataWriter).
 func (p Provenance) FetchedFrom(repositoryID int64, repository, ref, sha string) (Provenance, error) {
-	if p.identity.Trust != TrustAsserted || p.identity.SharedOnly || repositoryID <= 0 {
+	if p.identity.Trust != TrustAsserted || p.identity.SharedOnly || p.identity.ProvenRepository != "" || repositoryID <= 0 {
 		return Provenance{}, errors.New("only an asserted run the controller fetched names a fetched repository")
 	}
 	p.identity.Fetched, p.identity.Repository, p.identity.FetchedRef, p.identity.FetchedSHA = repositoryID, repository, ref, strings.ToLower(sha)
+	return p.sealIdentity()
+}
+
+// ProvenRepository returns the repository proof sealed at intake. Every release
+// of repository-scoped material reads this fact; asserted source metadata grants nothing.
+func (p Provenance) ProvenRepository() RepoKey { return p.identity.ProvenRepository }
+
+// WithSourceCredentialVerified records intake's successful GitHub compare check.
+func (p Provenance) WithSourceCredentialVerified() (Provenance, error) {
+	if p.ProvenRepository() == "" {
+		return Provenance{}, errors.New("source credentials require a proven repository")
+	}
+	p.identity.SourceCredentialVerified = true
 	return p, p.validate()
 }
 
-// ProvenRepository is the one repository identity this run proves, which
-// pipeline secret release reads. Source credentials and App tokens are not yet
-// bound to it: they follow where the host fetches the code from. It is the
-// GitHub repository a verified delivery, an Actions push or an admin-armed
-// schedule sealed, or the one the controller fetched an asserted run's code
-// from. A run whose code or repository the submitter supplied proves none and
-// returns "" (decision 68).
-func (p Provenance) ProvenRepository() RepoKey {
+// SourceCredentialVerified reports the compare check sealed at intake.
+func (p Provenance) SourceCredentialVerified() bool { return p.identity.SourceCredentialVerified }
+
+func (p Provenance) sealIdentity() (Provenance, error) {
 	id := p.identity.RepositoryID
-	if id <= 0 {
+	if id == 0 {
 		id = p.identity.Fetched
 	}
-	if id <= 0 {
-		return ""
+	if id > 0 {
+		p.identity.ProvenRepository = RepoKey("gh:" + strconv.FormatInt(id, 10))
 	}
-	return RepoKey("gh:" + strconv.FormatInt(id, 10))
+	p.identity.VerifiedDefaultBranch = defaultBranchWorkTrust.Has(p.identity.Trust) && p.identity.DefaultBranch != "" && p.identity.Ref == "refs/heads/"+p.identity.DefaultBranch
+	return p, p.validate()
 }
 
 // ReadingDefault adds the repository's verified default branch, which intake learned
@@ -187,6 +195,21 @@ func escapeWriter(s string) string {
 }
 
 func (p Provenance) validate() error {
+	id := p.identity.RepositoryID
+	if id == 0 {
+		id = p.identity.Fetched
+	}
+	var proven RepoKey
+	if id > 0 {
+		proven = RepoKey("gh:" + strconv.FormatInt(id, 10))
+	}
+	if p.identity.ProvenRepository != proven || p.identity.SourceCredentialVerified && proven == "" {
+		return errors.New("repository proof does not match the sealed identity")
+	}
+	verifiedDefault := defaultBranchWorkTrust.Has(p.identity.Trust) && p.identity.DefaultBranch != "" && p.identity.Ref == "refs/heads/"+p.identity.DefaultBranch
+	if p.identity.VerifiedDefaultBranch != verifiedDefault {
+		return errors.New("default-branch proof does not match the sealed identity")
+	}
 	if p.identity.Pipeline == "" {
 		return errors.New("provenance requires a pipeline")
 	}
@@ -247,10 +270,10 @@ func (p Provenance) Verified() bool { return AppDeliveryTrust.Has(p.identity.Tru
 
 // DefaultBranchWork reports verified default-branch work. Reserved pools, fresh-pod
 // placement, context sharing and the default-branch cache all read this one rule,
-// and the store's SQL renders the same test. Seal validation already pins both
-// classes to the default branch; the ref check keeps a stored seal honest.
+// and SQL read the intake-sealed fact. Seal validation pins the fact to its
+// verified ref and trust class.
 func (p Provenance) DefaultBranchWork() bool {
-	return DefaultBranchWorkTrust.Has(p.identity.Trust) && p.identity.DefaultBranch != "" && p.identity.Ref == "refs/heads/"+p.identity.DefaultBranch
+	return p.identity.VerifiedDefaultBranch
 }
 
 // Repository is the owner/name GitHub reported for RepositoryID when intake sealed
@@ -292,7 +315,7 @@ func (p Provenance) Writer() Writer { return Writer(p.identity.Writer) }
 // runs: the proof that releases its repository's secrets and OIDC claims also
 // keys its caches, so an upload cannot plant what a fetched run executes.
 func (p Provenance) DataWriter() Writer {
-	if p.identity.Fetched > 0 {
+	if p.ProvenRepository() != "" && p.Trust() == TrustAsserted {
 		return Writer("fetched/" + p.identity.Writer)
 	}
 	return Writer(p.identity.Writer)
@@ -303,33 +326,40 @@ func (p Provenance) DataWriter() Writer {
 // unless the controller fetched its code from a repository: it then claims that
 // repository, and the branch or tag head it ran when the App resolved one.
 func (p Provenance) OIDC() (trigger string, repositoryID int64, ref, sha string) {
+	id, err := strconv.ParseInt(strings.TrimPrefix(string(p.ProvenRepository()), "gh:"), 10, 64)
+	if err != nil {
+		return "manual", 0, "", ""
+	}
 	switch p.identity.Trust {
 	case TrustVerified, TrustVerifiedDefault:
-		return p.identity.Event, p.identity.RepositoryID, p.identity.Ref, p.identity.SHA
+		return p.identity.Event, id, p.identity.Ref, p.identity.SHA
 	case TrustSchedule:
-		return "cron", p.identity.RepositoryID, p.identity.Ref, p.identity.SHA
+		return "cron", id, p.identity.Ref, p.identity.SHA
 	case TrustActions:
-		return "actions", p.identity.RepositoryID, p.identity.Ref, p.identity.SHA
+		return "actions", id, p.identity.Ref, p.identity.SHA
 	}
-	return "manual", p.identity.Fetched, p.identity.FetchedRef, p.identity.FetchedSHA
+	return "manual", id, p.identity.FetchedRef, p.identity.FetchedSHA
 }
 
 type provenanceJSON struct {
-	Trust         TrustClass `json:"trust"`
-	RepositoryID  int64      `json:"repository_id,omitempty"`
-	Repository    string     `json:"repository,omitempty"`
-	Ref           string     `json:"ref,omitempty"`
-	SHA           string     `json:"sha,omitempty"`
-	Event         string     `json:"event,omitempty"`
-	Pipeline      string     `json:"pipeline,omitempty"`
-	DefaultBranch string     `json:"default_branch,omitempty"`
-	Base          string     `json:"pull_request_base,omitempty"`
-	Delivery      string     `json:"delivery,omitempty"`
-	Writer        string     `json:"writer,omitempty"`
-	SharedOnly    bool       `json:"shared_secrets_only,omitempty"`
-	Fetched       int64      `json:"fetched_repository_id,omitempty"`
-	FetchedRef    string     `json:"fetched_ref,omitempty"`
-	FetchedSHA    string     `json:"fetched_sha,omitempty"`
+	ProvenRepository         RepoKey    `json:"proven_repository,omitempty"`
+	VerifiedDefaultBranch    bool       `json:"verified_default_branch,omitempty"`
+	SourceCredentialVerified bool       `json:"source_credential_verified,omitempty"`
+	Trust                    TrustClass `json:"trust"`
+	RepositoryID             int64      `json:"repository_id,omitempty"`
+	Repository               string     `json:"repository,omitempty"`
+	Ref                      string     `json:"ref,omitempty"`
+	SHA                      string     `json:"sha,omitempty"`
+	Event                    string     `json:"event,omitempty"`
+	Pipeline                 string     `json:"pipeline,omitempty"`
+	DefaultBranch            string     `json:"default_branch,omitempty"`
+	Base                     string     `json:"pull_request_base,omitempty"`
+	Delivery                 string     `json:"delivery,omitempty"`
+	Writer                   string     `json:"writer,omitempty"`
+	SharedOnly               bool       `json:"shared_secrets_only,omitempty"`
+	Fetched                  int64      `json:"fetched_repository_id,omitempty"`
+	FetchedRef               string     `json:"fetched_ref,omitempty"`
+	FetchedSHA               string     `json:"fetched_sha,omitempty"`
 }
 
 // MarshalJSON persists the sealed fields inside the request seal.

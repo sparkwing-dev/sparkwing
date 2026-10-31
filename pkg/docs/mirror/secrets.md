@@ -27,9 +27,21 @@ supplies (an uploaded working tree or bundle, a local checkout, `--runner here`,
 or a controller without the GitHub App) reads only `--shared` secrets, like
 GitHub, where a local run never receives repository secrets.
 
-Only a branch or tag head counts: a run that names a commit the branch does not
-point at (GitHub may serve it from a fork), a pull request ref, or a schedule
-locked to a commit reads only `--shared` secrets. Fetching proves the repository
+A historical commit or locked schedule can also prove its repository when
+Sparkwing selects its code through the App and GitHub's compare API confirms
+that a branch or tag contains that commit. A fork-only or PR-only commit does
+not pass that check. Uploaded code and changed-revision children remain asserted.
+Fetching proves the repository for secrets and OIDC claims. Only a resolved
+branch or tag head adds `ref` and `sha` to a manual run's OIDC token. These runs
+keep their manual trust class for reserved pools, and their cache records stay
+in their own fetched scope.
+
+Personal machines and here hosts never claim repository-proven runs, including
+run-now and burst `machines` work. Use a shared runner or Sparkwing Cloud for
+those runs. A host's classification is sealed at claim time and is also checked
+when secrets or OIDC tokens are released.
+
+`--shared` secrets. Fetching proves the repository
 for secrets and OIDC claims: a run-now or dashboard run's token claims the
 repository and the branch or tag head it ran, with `trigger:manual`. It keeps its
 manual trust class for reserved pools, and its cache records stay in its own
@@ -46,14 +58,14 @@ from `sparkwing secrets list -o json`. The controller resolves it to the
 repository's GitHub ID, so a repository keeps its secrets when it is renamed.
 
 A pipeline secret is released to a run of any branch or tag head of its
-repository, the commit an App delivery names, or an unlocked schedule, so
+repository, the commit an App delivery names, or a historical commit the intake compare check proves, so
 everyone who can push a branch or start a run of a connected repository can
 read its pipeline secrets.
 
 | Run | Pipeline secrets of |
 | --- | --- |
 | App push or pull request, GitHub Actions job | The pipeline in the GitHub repository it proved |
-| Schedule fire or run-now of an App-connected repository | The schedule's repository and pipeline |
+| Schedule fire or run-now whose code the App proves | The schedule's repository and pipeline |
 | Dashboard, API or CLI run whose code the controller fetches through the App | The pipeline in that repository |
 | Uploaded, working-tree, local or `--runner here` run | None; it reads team-wide shared secrets only |
 | Child run at its parent's exact revision | The parent's repository and pipeline |

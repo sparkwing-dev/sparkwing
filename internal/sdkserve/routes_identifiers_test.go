@@ -34,7 +34,7 @@ func FuzzHostRouteIdentifiers(f *testing.F) {
 				return err
 			}},
 			{"GET /node/v1/pipelines/{id}/latest", `{"output":null}`, func(s *routeServices) error {
-				_, err := s.Latest(t.Context(), id, "job", time.Minute)
+				_, err := s.Latest(t.Context(), id, "job", time.Minute, false)
 				return err
 			}},
 			{"GET /node/v1/children/{id}/await", `{"status":"success","output":null}`, func(s *routeServices) error {

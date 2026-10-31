@@ -160,8 +160,9 @@ type RoutePolicy struct {
 
 // PipelineReferenceTarget names a declared output independently of the caller's run.
 type PipelineReferenceTarget struct {
-	Pipeline string
-	JobID    string
+	Pipeline   string
+	JobID      string
+	FromAnyRun bool
 }
 
 // Target contains server-resolved ownership plus decoded path/body selectors.

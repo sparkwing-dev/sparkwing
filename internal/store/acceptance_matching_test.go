@@ -79,7 +79,7 @@ func checkStoreClaimMatching(t *testing.T, named bool, scenario string) {
 	if scenario == "trigger_requirements" {
 		request := plan.Seal.Request.Request
 		request.Options.Requires.Set, request.Options.Requires.Value = true, []string{"gpu"}
-		admitted, err := tenant.AdmitRun(ctx, store.IntakeRequest{Authority: plan.Seal.Request.AuthorityRef, Request: request})
+		admitted, err := tenant.AdmitRun(ctx, store.IntakeRequest{Authority: plan.Seal.Request.AuthorityRef, Request: request, FetchedRepository: store.FetchedRepository{ID: 1, Name: "acme/repo"}})
 		if err != nil {
 			t.Fatal(err)
 		}

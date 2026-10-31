@@ -18,7 +18,7 @@ export interface JobSpec {
   env?: Record<string, { value: string; startup?: boolean }>;
   artifacts?: string[];
   consumes?: { producer: string; into?: string }[];
-  pipeline_refs?: { pipeline: string; job: string }[];
+  pipeline_refs?: { pipeline: string; job: string; from_any_run?: boolean }[];
   children?: { pipeline: string; repository?: string }[];
   approval?: { message?: string; timeout_ms?: number; on_timeout?: string };
   on_failure_of?: string;

@@ -17,8 +17,7 @@ import (
 // sealProvenanceTx derives the identity a new run speaks for from facts this
 // admission transaction verified, and never from what the request body claims.
 // Retries carry their source run's sealed identity unchanged.
-// An unverified run also learns the repository's verified default branch, which it
-// may read verified cache records from but never writes as.
+// Repository-proven work also learns the verified default branch for cache reads.
 func sealProvenanceTx(ctx context.Context, tx *storeTx, team Team, request IntakeRequest, p capability.Principal, input runspec.Request, run string) (runspec.Provenance, error) {
 	sealed, err := identityTx(ctx, tx, team, request, p, input, run)
 	if err != nil {
@@ -33,11 +32,16 @@ func sealProvenanceTx(ctx context.Context, tx *storeTx, team Team, request Intak
 			return sealed, err
 		}
 	}
-	if sealed.Verified() || sealed.DefaultBranch() != "" {
+	if request.SourceCredentialVerified && sealed.ProvenRepository() != "" {
+		if sealed, err = refused(sealed.WithSourceCredentialVerified()); err != nil {
+			return sealed, err
+		}
+	}
+	if sealed.Verified() || sealed.DefaultBranch() != "" || sealed.ProvenRepository() == "" {
 		return sealed, nil
 	}
 	var scope string
-	err = tx.QueryRowContext(ctx, `SELECT ref_scope FROM blob_records WHERE team=? AND repo_key=? AND verified_default_branch=1 ORDER BY created_at DESC LIMIT 1`, team, input.Git.Repository.Key).Scan(&scope)
+	err = tx.QueryRowContext(ctx, `SELECT ref_scope FROM blob_records WHERE team=? AND repo_key=? AND verified_default_branch=1 ORDER BY created_at DESC LIMIT 1`, team, sealed.ProvenRepository()).Scan(&scope)
 	if errors.Is(err, sql.ErrNoRows) {
 		return sealed, nil
 	}
@@ -50,9 +54,9 @@ func sealProvenanceTx(ctx context.Context, tx *storeTx, team Team, request Intak
 // fetchedRepositoryTx names the GitHub repository the controller itself fetches
 // this run's code from through the team's App installation, at a commit a
 // signed delivery named or a branch head the App resolved: a delivery's
-// repository, an unlocked App-bound schedule's (fires, overrides and run-now),
-// or a remote branch run the controller checked. Zero when the submitter
-// supplies the code, the repository claim or an arbitrary commit.
+// repository, an App-bound schedule's, or remote code the App selected and an
+// intake compare check proved reachable. Zero when the submitter supplies the
+// code or the selected commit has no repository proof.
 func fetchedRepositoryTx(tx *storeTx, request IntakeRequest, input runspec.Request) FetchedRepository {
 	// safety: the ref is a delivery's verified ref or a schedule's server-resolved
 	// branch, claimed only when the run's code ran at that head.
@@ -67,11 +71,14 @@ func fetchedRepositoryTx(tx *storeTx, request IntakeRequest, input runspec.Reque
 	case input.Origin == runspec.OriginApp && request.VerifiedDeliveryID != "" && input.Git.App.Set:
 		return head(input.Git.App.Value.RepositoryID, input.Git.App.Value.Repository)
 	case input.Origin == runspec.OriginSchedule && tx.scheduleAdmission != nil && tx.scheduleAdmission.authority() == request.Authority:
-		// safety: a schedule locked to a commit runs a SHA GitHub may serve from a
-		// fork, not a branch head the App resolved.
+		// safety: a locked commit needs compare proof because GitHub may serve
+		// objects from another repository in the fork network.
 		if s := tx.scheduleAdmission.schedule; s.GitHubInstallationID > 0 && s.LockedRef == "" {
 			// safety: the fire-time App lookup that proved the id reported the name, as for a verified fire.
 			return head(s.GitHubRepositoryID, request.Request.Git.RepositoryName.Value)
+		}
+		if request.SourceCredentialVerified {
+			return FetchedRepository{ID: tx.scheduleAdmission.schedule.GitHubRepositoryID, Name: request.Request.Git.RepositoryName.Value}
 		}
 		return FetchedRepository{}
 	}

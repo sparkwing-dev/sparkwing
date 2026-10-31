@@ -34,6 +34,8 @@ func TestAppScheduleFireResolvesBothRevisionsThroughGitHub(t *testing.T) {
 		refusal       bool
 		missingBranch bool
 		matchingTag   bool
+		locked        bool
+		unreachable   bool
 	}{
 		{name: "execution commit", trust: runspec.TrustSchedule},
 		{name: "branch pin", pin: "origin/code", trust: runspec.TrustAsserted},
@@ -45,9 +47,15 @@ func TestAppScheduleFireResolvesBothRevisionsThroughGitHub(t *testing.T) {
 		{name: "explicit tag pin", pin: "refs/tags/main", trust: runspec.TrustAsserted},
 		{name: "matching branch and tag pin", pin: "main", matchingTag: true, trust: runspec.TrustSchedule},
 		{name: "tag heads/main cannot replace missing execution branch", missingBranch: true, refusal: true},
+		{name: "reachable locked commit", locked: true, trust: runspec.TrustAsserted},
+		{name: "fork-only locked commit", locked: true, unreachable: true, trust: runspec.TrustAsserted},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			lookups := map[string]int{}
+			selectedExecution := execution
+			if tc.locked {
+				selectedExecution = pinned
+			}
 			cfg := githubapp.Config{AppID: 1, PrivateKey: key, WebhookSecret: "hook", HTTP: &http.Client{Transport: billingPageTransport(func(r *http.Request) (*http.Response, error) {
 				body := ""
 				status := http.StatusOK
@@ -83,12 +91,17 @@ func TestAppScheduleFireResolvesBothRevisionsThroughGitHub(t *testing.T) {
 				case "GET /repos/acme/widgets/git/ref/tags/code":
 					status = http.StatusNotFound
 				case "GET /repos/acme/widgets/contents/.sparkwing/sparkwing.yaml":
-					if got := r.URL.Query().Get("ref"); got != execution {
+					if got := r.URL.Query().Get("ref"); got != selectedExecution {
 						t.Fatalf("configuration read at %q, want fire-time execution commit", got)
 					}
 					body = "pipelines:\n  - name: nightly\n    entrypoint: Nightly\n"
 					if tc.pin != "" {
 						body += "    source: " + tc.pin + "\n"
+					}
+				case "GET /repos/acme/widgets/compare/" + execution + "...refs/heads/main", "GET /repos/acme/widgets/compare/" + pinned + "...refs/heads/main", "GET /repos/acme/widgets/compare/" + pinned + "...refs/heads/code", "GET /repos/acme/widgets/compare/" + pinned + "...refs/tags/main":
+					body = `{"status":"ahead"}`
+					if tc.unreachable {
+						body = `{"status":"diverged"}`
 					}
 				case "GET /repos/acme/widgets/git/ref/heads/" + pinned[:12], "GET /repos/acme/widgets/git/ref/tags/" + pinned[:12], "GET /repos/acme/widgets/git/ref/heads/main~1":
 					status = http.StatusNotFound
@@ -100,7 +113,11 @@ func TestAppScheduleFireResolvesBothRevisionsThroughGitHub(t *testing.T) {
 			e, tenant := engineServerFixture(t, deploymenttest.Team(t), func(s *Server) { s.WithGitHubApp(cfg) })
 			engineSQL(t, e.Store, `INSERT INTO github_app_installations(installation_id,team,account_id,account_login,account_type,created_at,updated_at) VALUES (7,'a',42,'acme','Organization',1,1)`)
 			engineSQL(t, e.Store, `INSERT INTO github_app_automation(team,repo_key,repository_id,repository,installation_id,enabled_by,enabled_at) VALUES ('a','gh:701',701,'acme/widgets',7,'owner',1)`)
-			row, _, err := tenant.ArmCronSchedule(t.Context(), store.CronSchedule{ID: "nightly", RepoPath: "https://github.com/acme/widgets.git", Pipeline: "nightly", Cron: "* * * * *", TZ: "UTC", Where: store.CronWhereController, GitBranch: "main", GitHubInstallationID: 7, GitHubRepositoryID: 701})
+			locked := ""
+			if tc.locked {
+				locked = pinned
+			}
+			row, _, err := tenant.ArmCronSchedule(t.Context(), store.CronSchedule{ID: "nightly", RepoPath: "https://github.com/acme/widgets.git", Pipeline: "nightly", Cron: "* * * * *", TZ: "UTC", Where: store.CronWhereController, GitBranch: "main", GitHubInstallationID: 7, GitHubRepositoryID: 701, LockedRef: locked})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -120,12 +137,24 @@ func TestAppScheduleFireResolvesBothRevisionsThroughGitHub(t *testing.T) {
 				t.Fatal(err)
 			}
 			request := admitted.Request.Request
-			wantSource := execution
+			wantSource := selectedExecution
 			if tc.pin != "" && tc.pin != "refs/heads/main" && !tc.matchingTag {
 				wantSource = pinned
 			}
-			if request.Git.SHA != execution || request.Source.Ref != wantSource || admitted.Request.Provenance.Trust() != tc.trust || lookups["main"] == 0 {
+			if request.Git.SHA != selectedExecution || request.Source.Ref != wantSource || admitted.Request.Provenance.Trust() != tc.trust || !tc.locked && lookups["main"] == 0 {
 				t.Fatalf("fire execution=%s source=%s trust=%s lookups=%v, want execution=%s source=%s trust=%s", request.Git.SHA, request.Source.Ref, admitted.Request.Provenance.Trust(), lookups, execution, wantSource, tc.trust)
+			}
+			if admitted.Request.Provenance.SourceCredentialVerified() == tc.unreachable {
+				t.Fatalf("source credential compare=%v, reachable=%v", admitted.Request.Provenance.SourceCredentialVerified(), !tc.unreachable)
+			}
+			if tc.locked {
+				proof := admitted.Request.Provenance
+				if (proof.ProvenRepository() == "gh:701") == tc.unreachable || proof.SourceCredentialVerified() == tc.unreachable {
+					t.Fatalf("locked commit: proven=%q credential checked=%v reachable=%v", proof.ProvenRepository(), proof.SourceCredentialVerified(), !tc.unreachable)
+				}
+				if _, _, ref, sha := proof.OIDC(); ref != "" || sha != "" {
+					t.Fatalf("locked commit acquired a branch-head claim: %q %q", ref, sha)
+				}
 			}
 			engineSQL(t, e.Store, `DELETE FROM github_app_automation`)
 			if _, err := tenant.AdmitScheduledRun(t.Context(), row, time.Now().Add(time.Minute)); !errors.Is(err, store.ErrGitHubAppAutomationRevoked) {

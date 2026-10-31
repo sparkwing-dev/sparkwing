@@ -19,7 +19,7 @@ type runnerEnrollmentRequest struct {
 	Personal      bool             `json:"personal,omitempty"`
 	Platform      string           `json:"platform,omitempty"`
 	Name          string           `json:"name"`
-	Repos         []string         `json:"repos"`
+	Repos         []string         `json:"repos,omitempty"`
 	ReservedPools []string         `json:"reserved_pools,omitempty"`
 	Trust         capability.Trust `json:"trust,omitempty"`
 	Grants        json.RawMessage  `json:"grants,omitempty"`
@@ -40,8 +40,8 @@ func (s *Server) handleEnrollRunner(w http.ResponseWriter, r *http.Request, a ca
 	if !request.Personal && !slices.Contains(a.Principal.Capability.Grants, capability.TeamAdmin) {
 		return apierr.Authorization(apierr.ReasonMissingGrant, "team runner enrollment requires team administration")
 	}
-	if !store.ValidRunnerName(request.Name) || len(request.Repos) == 0 || len(request.Repos) > maxRunnerRepos {
-		return invalidEngineBody("name must be 1 to 63 letters, digits, '-', '_' or '.'; repos must contain 1 to 32 patterns")
+	if !store.ValidRunnerName(request.Name) || !request.Personal && len(request.Repos) == 0 || len(request.Repos) > maxRunnerRepos {
+		return invalidEngineBody("name must be 1 to 63 letters, digits, '-', '_' or '.'; repos must contain at most 32 patterns and are required for shared runners")
 	}
 	allow, err := sourceurl.ParseRepoAllowlist(request.Repos)
 	if err != nil {

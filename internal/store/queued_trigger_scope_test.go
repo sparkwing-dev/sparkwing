@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"math/rand/v2"
 	"reflect"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -55,7 +56,7 @@ func TestQueuedTriggerRepositoryScopeProperty(t *testing.T) {
 			for i := range 65 + random.IntN(10) {
 				request := plan.Seal.Request.Request
 				request.Git.Repository = runspec.Repository{Key: runspec.RepoKey(fmt.Sprintf("gh:%d", i+100)), Display: fmt.Sprintf("https://github.com/acme/blocked-%x", random.Uint64())}
-				admitted, err := tenant.AdmitRun(t.Context(), store.IntakeRequest{Authority: authority, Request: request})
+				admitted, err := tenant.AdmitRun(t.Context(), store.IntakeRequest{Authority: authority, Request: request, FetchedRepository: store.FetchedRepository{ID: int64(i + 100), Name: strings.TrimPrefix(request.Git.Repository.Display, "https://github.com/")}})
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -67,7 +68,7 @@ func TestQueuedTriggerRepositoryScopeProperty(t *testing.T) {
 				now = now.Add(time.Nanosecond)
 				request := plan.Seal.Request.Request
 				request.Git.Repository = runspec.Repository{Key: "gh:999", Display: "https://github.com/acme/allowed"}
-				admitted, err := tenant.AdmitRun(t.Context(), store.IntakeRequest{Authority: authority, Request: request})
+				admitted, err := tenant.AdmitRun(t.Context(), store.IntakeRequest{Authority: authority, Request: request, FetchedRepository: store.FetchedRepository{ID: 999, Name: "acme/allowed"}})
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -149,7 +150,7 @@ func TestQueuedTriggerClaimsNeverCrossTeamsProperty(t *testing.T) {
 		for range 5 + random.IntN(4) {
 			request := plan.Seal.Request.Request
 			request.Team = string(team)
-			admitted, err := tenant.AdmitRun(t.Context(), store.IntakeRequest{Authority: authority, Request: request})
+			admitted, err := tenant.AdmitRun(t.Context(), store.IntakeRequest{Authority: authority, Request: request, FetchedRepository: store.FetchedRepository{ID: 1, Name: "acme/repo"}})
 			if err != nil {
 				t.Fatal(err)
 			}

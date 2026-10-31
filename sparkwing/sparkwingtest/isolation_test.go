@@ -83,7 +83,7 @@ func TestFakeHostCancelledServicesDoNotInvokeCallbacks(t *testing.T) {
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("child error = %v", err)
 	}
-	_, err = sdkserve.ServicesFrom(ctx).Latest(ctx, "pipeline", "job", 0)
+	_, err = sdkserve.ServicesFrom(ctx).Latest(ctx, "pipeline", "job", 0, false)
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("latest error = %v", err)
 	}

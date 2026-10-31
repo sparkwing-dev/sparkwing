@@ -81,16 +81,13 @@ func (t *Tenant) githubSourceReleaseTx(ctx context.Context, tx *storeTx, authori
 	if err != nil {
 		return out, err
 	}
-	request.Executor, err = t.sourceExecutorTx(ctx, tx, chain, run)
+	request.Executor, err = t.sourceExecutor(chain, run)
 	if err != nil {
 		return out, err
 	}
 	id, err := strconv.ParseInt(strings.TrimPrefix(request.RepositoryKey, "gh:"), 10, 64)
 	if err != nil || id <= 0 {
 		return out, bindingRefusal()
-	}
-	if !request.RepositoryProven {
-		return out, errors.Join(ErrNotFound, &apierr.Error{Code: apierr.NotFound, Message: unprovenSourceRemedy(request.Host)})
 	}
 	installation, slug, err := t.githubSourceInstallationTx(ctx, tx, run.Request, id)
 	if err != nil {

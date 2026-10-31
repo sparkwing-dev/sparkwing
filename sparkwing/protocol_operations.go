@@ -79,8 +79,8 @@ func (sdkOperations) Context(ctx context.Context, rc nodeproto.RunContext, runne
 		raw, err := s.Output(ctx, id)
 		return raw, referenceError(err, false)
 	})
-	ctx = context.WithValue(ctx, keyPipelineResolver, pipelineResolverFunc(func(ctx context.Context, p, j string, age time.Duration) (*resolvedPipelineRef, error) {
-		raw, err := s.Latest(ctx, p, j, age)
+	ctx = context.WithValue(ctx, keyPipelineResolver, pipelineResolverFunc(func(ctx context.Context, p, j string, age time.Duration, fromAnyRun bool) (*resolvedPipelineRef, error) {
+		raw, err := s.Latest(ctx, p, j, age, fromAnyRun)
 		return &resolvedPipelineRef{Data: raw}, referenceError(err, true)
 	}))
 	ctx = context.WithValue(ctx, keyPipelineAwaiter, pipelineAwaiterFunc(func(ctx context.Context, r awaitRequest) (*resolvedPipelineRef, error) {

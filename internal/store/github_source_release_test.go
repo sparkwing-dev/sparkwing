@@ -16,7 +16,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/quicktest"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
-	"github.com/sparkwing-dev/sparkwing/pkg/match"
 )
 
 type githubSourceFake struct {
@@ -85,6 +84,10 @@ func githubSourceFixture(t *testing.T, extra int64) (*Tenant, capability.Authori
 	if err != nil {
 		t.Fatal(err)
 	}
+	run.Request.Provenance, err = run.Request.Provenance.WithSourceCredentialVerified()
+	if err != nil {
+		t.Fatal(err)
+	}
 	body, err := json.Marshal(run.Request)
 	if err != nil {
 		t.Fatal(err)
@@ -140,7 +143,7 @@ func TestGitHubSourceReleaseCannotEscapeClaimOrConsentProperty(t *testing.T) {
 				rewriteSchemaExec(t, s.db, `UPDATE github_app_extra_repos SET extra_repo=?`, approved+"-changed")
 			}
 		case 15:
-			setMachineOrigin(t, s, "runner", &CapabilityOrigin{Personal: true, Kind: capability.ProvisionMachine, RegistrationID: "runner:a:runner"})
+			setSourceHost(t, tenant, auth, &capability.HostFacts{Kind: capability.HostPersonal})
 		}
 		token, err := releaseGitHubSourceForTest(t.Context(), tenant, auth, provider)
 		var count int
@@ -196,6 +199,10 @@ func TestGitHubScheduledSourceCannotEscapeConsentProperty(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
+			run.Request.Provenance, err = run.Request.Provenance.WithSourceCredentialVerified()
+			if err != nil {
+				t.Fatal(err)
+			}
 			switch mode {
 			case 1:
 				run.Request.AuthorityRef.ID += "-foreign"
@@ -247,7 +254,7 @@ func TestGitHubSourceReleaseRequiresMatchingSameTeamMachineProperty(t *testing.T
 			tenant, auth, provider := githubSourceFixture(t, int64(value)+10)
 			switch mode {
 			case 0:
-				tenant.s.claimProfiles = claimProfileFake{profile: match.Profile{Location: "remote", Accept: deniedSource(t)}}
+				setSourceHost(t, tenant, auth, nil)
 			case 1:
 				rewriteSchemaExec(t, tenant.s.db, `UPDATE capabilities SET subject_kind='service' WHERE prefix='runner'`)
 			case 2:
@@ -265,15 +272,6 @@ func TestGitHubSourceReleaseRequiresMatchingSameTeamMachineProperty(t *testing.T
 	if err := quick.Check(property, quicktest.Config(&quick.Config{MaxCount: 8})); err != nil {
 		t.Fatal(err)
 	}
-}
-
-func deniedSource(t *testing.T) match.RepoFilter {
-	t.Helper()
-	filter, err := match.ParseAccept([]string{"github.com/foreign/*"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	return filter
 }
 
 func TestGitHubSourceReleaseMintsOutsideTransactionsAndRechecksProperty(t *testing.T) {
@@ -345,8 +343,28 @@ func TestGitHubSourceReleaseMintsNoTokenForSuppliedCode(t *testing.T) {
 		t.Fatal(err)
 	}
 	run.Request.Request.Source.BundleDigest = runspec.Optional[string]{Set: true, Value: "sha256:" + fmt.Sprintf("%064x", 1)}
+	run.Request.Provenance, err = runspec.AssertedProvenance(runspec.PrincipalWriter("account", "owner"), "main", fixtureFeatureSHA, run.Pipeline)
+	if err != nil {
+		t.Fatal(err)
+	}
 	setRunRequest(t, tenant, run.Request)
 	if _, err := releaseGitHubSourceForTest(t.Context(), tenant, auth, provider); !errors.Is(err, ErrNotFound) || provider.calls != 0 {
 		t.Fatalf("an upload got a repository App token: %v, %d mints", err, provider.calls)
+	}
+}
+
+func TestGitHubSourceReleaseRequiresIntakeCompare(t *testing.T) {
+	tenant, auth, provider := githubSourceFixture(t, 2)
+	run, err := tenant.ReadRun(t.Context(), "run")
+	if err != nil {
+		t.Fatal(err)
+	}
+	run.Request.Provenance, err = runspec.AppProvenance(run.Request.Request.Git.App.Value, runspec.Optional[runspec.PullRequest]{}, run.Pipeline)
+	if err != nil {
+		t.Fatal(err)
+	}
+	setRunRequest(t, tenant, run.Request)
+	if _, err := releaseGitHubSourceForTest(t.Context(), tenant, auth, provider); !errors.Is(err, ErrNotFound) || provider.calls != 0 {
+		t.Fatalf("unchecked code got an App token: %v, %d mints", err, provider.calls)
 	}
 }

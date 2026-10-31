@@ -13,11 +13,12 @@ import (
 
 // GitHubAppAdmission carries provider-verified delivery facts from the trusted webhook adapter.
 type GitHubAppAdmission struct {
-	Request      runspec.Request
-	Installation GitHubAppInstallation
-	Subscription *GitHubAppTrigger
-	Automation   *GitHubAppAutomation
-	Event        string
+	SourceCredentialVerified bool
+	Request                  runspec.Request
+	Installation             GitHubAppInstallation
+	Subscription             *GitHubAppTrigger
+	Automation               *GitHubAppAutomation
+	Event                    string
 }
 
 func (in GitHubAppAdmission) authority() capability.AuthorityRef {
@@ -38,7 +39,7 @@ func (t *Tenant) AdmitGitHubAppRun(ctx context.Context, in GitHubAppAdmission) (
 		applied := false
 		result, err = githubDeliveryResultTx(ctx, tx, "admit:"+in.Request.Pipeline, func() (AdmissionResult, error) {
 			applied = true
-			return admitRun(ctx, tx, t.team, IntakeRequest{Authority: in.authority(), Request: in.Request, VerifiedDeliveryID: app.Value.DeliveryKey}, tx.now(ctx))
+			return admitRun(ctx, tx, t.team, IntakeRequest{Authority: in.authority(), Request: in.Request, VerifiedDeliveryID: app.Value.DeliveryKey, SourceCredentialVerified: in.SourceCredentialVerified}, tx.now(ctx))
 		})
 		if err == nil && !applied {
 			result.Replayed = true

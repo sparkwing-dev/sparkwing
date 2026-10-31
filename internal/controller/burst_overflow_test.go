@@ -72,7 +72,7 @@ func TestBurstCloudClaimsRespectUserOverflowAndLeavePersonalCapacityAvailable(t 
 			engineSQL(t, e.Store, `INSERT INTO sessions(hash,principal,scopes,created_at,expires_at,team,account_id) VALUES ('personal-session','account','runs.read,runs.write',1,?,'a','account')`, time.Now().Add(time.Hour).UnixNano())
 			engineSQL(t, e.Store, `INSERT INTO session_membership_epochs(session_hash,team,epoch) VALUES ('personal-session','a',0)`)
 			authority := capability.AuthorityRef{Kind: capability.AuthoritySession, ID: "personal-session"}
-			machine, err := e.Store.AsOperator().ProvisionCapability(t.Context(), capability.ProvisionSpec{Kind: capability.ProvisionMachine, Personal: true, Authority: &authority, RegistrationID: "runner:a:own-machine", Repositories: []string{"github.com/acme/*"}, Team: "a", Subject: capability.Subject{Kind: capability.SubjectMachine, ID: "own-machine"}, Grants: []capability.Grant{capability.NodesClaim}, Binding: capability.Binding{Kind: capability.BindingNone}})
+			machine, err := e.Store.AsOperator().ProvisionCapability(t.Context(), capability.ProvisionSpec{Kind: capability.ProvisionMachine, Personal: true, Authority: &authority, RegistrationID: "runner:a:own-machine", Team: "a", Subject: capability.Subject{Kind: capability.SubjectMachine, ID: "own-machine"}, Grants: []capability.Grant{capability.NodesClaim}, Binding: capability.Binding{Kind: capability.BindingNone}})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -188,7 +188,7 @@ func TestBurstPersonalEnrollmentAndClaimsUseTheAccountOwner(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	cli, err := manager.EnrollRunner(t.Context(), controllerwire.EnrollRunnerRequest{Name: "cli-desktop", Repos: []string{"github.com/acme/*"}, Personal: true})
+	cli, err := manager.EnrollRunner(t.Context(), controllerwire.EnrollRunnerRequest{Name: "cli-desktop", Personal: true})
 	if err == nil || cli != nil {
 		t.Fatalf("member bearer established independent personal enrollment: %+v %v", cli, err)
 	}
@@ -200,7 +200,7 @@ func TestBurstPersonalEnrollmentAndClaimsUseTheAccountOwner(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	enrolled, err := manager.EnrollRunner(t.Context(), controllerwire.EnrollRunnerRequest{Name: "desktop", Repos: []string{"github.com/acme/*"}, Personal: true})
+	enrolled, err := manager.EnrollRunner(t.Context(), controllerwire.EnrollRunnerRequest{Name: "desktop", Personal: true})
 	if err != nil {
 		t.Fatalf("personal enrollment: %v", err)
 	}
@@ -227,7 +227,7 @@ func TestBurstPersonalEnrollmentAndClaimsUseTheAccountOwner(t *testing.T) {
 	engineClaimHTTP(t, h, enrolled.Capability, "POST", "/api/v1/runners/claim", body, http.StatusUnauthorized)
 	engineSQL(t, e.Store, `UPDATE teams SET members_can_add_machines=1 WHERE name='a'`)
 	engineClaimHTTP(t, h, enrolled.Capability, "POST", "/api/v1/runners/claim", body, http.StatusUnauthorized)
-	enrolled, err = manager.EnrollRunner(t.Context(), controllerwire.EnrollRunnerRequest{Name: "desktop-again", Repos: []string{"github.com/acme/*"}, Personal: true})
+	enrolled, err = manager.EnrollRunner(t.Context(), controllerwire.EnrollRunnerRequest{Name: "desktop-again", Personal: true})
 	if err != nil {
 		t.Fatalf("personal enrollment after re-enabling: %v", err)
 	}

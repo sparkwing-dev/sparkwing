@@ -235,7 +235,11 @@ func burstCLIClaimantBoundary(t *testing.T, personal, listed, allowed bool, forg
 	if err != nil {
 		t.Fatal(err)
 	}
-	machine, err := manager.EnrollRunner(t.Context(), controllerwire.EnrollRunnerRequest{Name: "untrusted", Repos: []string{"example.test/acme/*"}, Personal: personal})
+	request := controllerwire.EnrollRunnerRequest{Name: "untrusted", Personal: personal}
+	if !personal {
+		request.Repos = []string{"example.test/acme/*"}
+	}
+	machine, err := manager.EnrollRunner(t.Context(), request)
 	if err != nil {
 		t.Fatal(err)
 	}

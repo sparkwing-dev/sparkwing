@@ -507,6 +507,29 @@ func (c *Client) ResolveCommit(ctx context.Context, installation int64, owner, r
 	return c.resolveCommit(ctx, "/repos/"+url.PathEscape(owner)+"/"+url.PathEscape(repo), "Bearer "+tok.Token, ref)
 }
 
+// CommitReachable reports whether a repository-owned branch or tag contains sha.
+// GitHub can serve fork-network commits through the parent repository, so merely
+// reading the commit does not establish that the repository contains its code.
+func (c *Client) CommitReachable(ctx context.Context, installation, repository int64, owner, repo, sha, ref string) (bool, error) {
+	if !runspec.IsCommitID(sha) || !strings.HasPrefix(ref, "refs/heads/") && !strings.HasPrefix(ref, "refs/tags/") || strings.Contains(ref, ":") {
+		return false, errors.New("githubapp: reachability requires a commit and repository branch or tag")
+	}
+	token, err := c.InstallationTokenByIDs(ctx, installation, []int64{repository}, map[string]string{"contents": "read"})
+	if err != nil {
+		return false, err
+	}
+	var comparison struct {
+		Status string `json:"status"`
+	}
+	path := "/repos/" + url.PathEscape(owner) + "/" + url.PathEscape(repo) + "/compare/" + url.PathEscape(sha) + "..." + url.PathEscape(ref) + "?per_page=1"
+	if err := c.getJSON(ctx, path, "Bearer "+token.Token, &comparison); errors.Is(err, errNotFound) {
+		return false, nil
+	} else if err != nil {
+		return false, err
+	}
+	return comparison.Status == "ahead" || comparison.Status == "identical", nil
+}
+
 type gitObject struct {
 	Type string `json:"type"`
 	SHA  string `json:"sha"`

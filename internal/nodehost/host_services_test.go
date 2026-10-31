@@ -117,7 +117,7 @@ func checkRegisteredServiceReads(t *testing.T, routes *processServiceRoutes, ser
 	service.Output = func(context.Context, capability.Authorized, string) (json.RawMessage, error) {
 		return json.RawMessage(`null`), nil
 	}
-	service.Latest = func(context.Context, capability.Authorized, string, string, time.Duration) (ProcessOutput, error) {
+	service.Latest = func(context.Context, capability.Authorized, string, string, time.Duration, bool) (ProcessOutput, error) {
 		return ProcessOutput{RunID: "prior", Output: json.RawMessage(`{"value":7}`)}, nil
 	}
 	service.OIDC = func(context.Context, capability.Authorized, string) (ProcessOIDCToken, error) {

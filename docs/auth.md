@@ -965,3 +965,19 @@ they can establish recovery behavior. Client fixtures do not establish config
 hot reload, hourly parking or automatic resumption.
 
 <!-- design:end -->
+
+## Sealed execution trust
+
+Intake seals the proven repository and verified default-branch fact in the
+request. Claim issuance seals the host kind and cache scope in award authority.
+Secret release, OIDC, source credentials, cache writes, latest-output reads and
+repository-scoped runners read those facts. A submitted repository name never
+establishes proof. Personal machines and here hosts cannot claim proven runs.
+Job credentials additionally require the GitHub compare result sealed at intake
+for both the source and execution commits when they differ. Pull refs compare
+against the same-repository PR head branch. Merged PR runs compare against their
+base branch. Verified cache fallbacks use the sealed repository proof. Unproven
+runs read and write their own data scope. Unknown claimant shapes use the
+personal host boundary and cannot claim repository-proven work.
+Latest pipeline references select verified default-branch work unless the
+pipeline declares `sw.FromAnyRun()`.

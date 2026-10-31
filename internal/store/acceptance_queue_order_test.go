@@ -36,6 +36,7 @@ func checkStoreQueueOrder(t *testing.T, preferred bool) {
 	tenant, plan, err := storePlanSealRequestWith(ctx, s, func(input *store.IntakeRequest, doc *nodeproto.PlanDoc) {
 		input.Request.Git.Ref, input.Request.Git.SHA = "refs/heads/main", "0123456789abcdef0123456789abcdef01234567"
 		input.Request.Git.Repository.Key = "gh:42"
+		input.FetchedRepository.ID = 42
 		doc.Jobs = []nodeproto.JobSpec{
 			{ID: "job", Steps: []nodeproto.StepSpec{{ID: "body"}}},
 			{ID: "z-preferred", Prefers: []string{"gpu"}, Steps: []nodeproto.StepSpec{{ID: "body"}}},

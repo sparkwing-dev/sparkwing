@@ -1291,6 +1291,7 @@ CREATE TABLE capabilities (
     issuance TEXT NOT NULL CHECK(issuance IN ('delegate','award','exchange')),
     authority_version BIGINT NOT NULL CHECK(authority_version = 1),
     authority_json BLOB NOT NULL,
+    host_kind TEXT NOT NULL DEFAULT '' CHECK(host_kind IN ('','cloud','self-hosted','personal','here')),
     parent_kind TEXT CHECK(parent_kind IN ('capability','session')),
     parent_id TEXT,
     award_purpose TEXT CHECK(award_purpose IN ('trigger','plan','work','eval','here')),

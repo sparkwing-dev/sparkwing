@@ -89,8 +89,8 @@ func TestTeamGitCredentialLosesToTheAppWhenTheAppCovers(t *testing.T) {
 	}
 	unsubscribed, _ := f.nodeClaim(f.olga, "run-else", "https://github.com/acme/plans.git", 0)
 	got, code = f.sourceCredential(unsubscribed, "run-else")
-	if code != http.StatusOK || got.Kind != "https" || got.Secret != "github_pat_x" {
-		t.Fatalf("unsubscribed repository = %d %+v; want the stored credential", code, got)
+	if code != http.StatusNotFound || got.Secret != "" || !strings.Contains(got.Message, "has not proven") {
+		t.Fatalf("unproven repository = %d %+v; want no stored credential", code, got)
 	}
 }
 
@@ -116,11 +116,12 @@ func TestTeamGitCredentialsNeverReachAPersonalMachine(t *testing.T) {
 			} `json:"error"`
 		}
 		code := f.call("POST", "/api/v1/runs/"+tc.run+"-laptop/source-credential", laptop, nil, &refused)
-		if code != http.StatusForbidden || refused.Error.Details.Reason != "personal_machine" {
+		if code != http.StatusNotFound {
 			t.Fatalf("%s on a personal machine = %d %v", tc.run, code, refused)
 		}
 		_, shared, _ := f.claimRunNodeOn(f.olga, tc.run+"-shared", tc.repo, tc.id, false)
-		if got, code := f.sourceCredential(shared, tc.run+"-shared"); code != http.StatusOK || got.Secret == "" {
+		got, code := f.sourceCredential(shared, tc.run+"-shared")
+		if tc.id > 0 && (code != http.StatusOK || got.Secret == "") || tc.id == 0 && (code != http.StatusNotFound || got.Secret != "") {
 			t.Fatalf("%s on a shared runner = %d %+v", tc.run, code, got)
 		}
 	}
