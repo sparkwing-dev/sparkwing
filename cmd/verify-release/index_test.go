@@ -60,10 +60,12 @@ func TestPublicIndexBackfillsPublishedStableReleases(t *testing.T) {
 func TestPublicIndexRetainsPolicyAndDeletedReleaseHistory(t *testing.T) {
 	now := time.Date(2026, 10, 31, 2, 0, 0, 0, time.UTC)
 	published := now.AddDate(0, -2, 0)
-	previous := engine.VersionIndex{Format: 1, PublishedAt: now.Add(-time.Hour), Latest: "v0.67.0",
+	previous := engine.VersionIndex{
+		Format: 1, PublishedAt: now.Add(-time.Hour), Latest: "v0.67.0",
 		Minimum:  engine.Restriction{Version: "v0.67.0", Security: true, Reason: "security fix", AnnouncedAt: published, EffectiveAt: published},
 		Revoked:  []engine.Restriction{{Version: "v0.66.0", Security: true, Reason: "unsafe", AnnouncedAt: published, EffectiveAt: published}},
-		Versions: []engineid.VersionInfo{{Version: "v0.66.0", PublishedAt: published, SupportUntil: published.AddDate(0, 12, 0)}, {Version: "v0.67.0", PublishedAt: published, SupportUntil: published.AddDate(0, 12, 0)}}}
+		Versions: []engineid.VersionInfo{{Version: "v0.66.0", PublishedAt: published, SupportUntil: published.AddDate(0, 12, 0)}, {Version: "v0.67.0", PublishedAt: published, SupportUntil: published.AddDate(0, 12, 0)}},
+	}
 	index, err := nextReleaseIndex(previous, []byte(releasedVersions), "v0.68.2", now)
 	if err != nil {
 		t.Fatal(err)
@@ -91,7 +93,7 @@ func TestIndexBootstrapRefusesSignedOrPolicyShapedInput(t *testing.T) {
 	keys := []ed25519.PublicKey{key.Public().(ed25519.PublicKey)}
 	path := filepath.Join(dir, "versions.json")
 	for _, body := range []string{`{"latest":"v0.67.0","versions":["v0.67.0"],"sources":{}}`, `{"format":1,"latest":"v0.67.0","versions":[]}`, `{"latest":"v0.67.0","versions":["v0.67.0"],"minimum":{}}`} {
-		if err := os.WriteFile(path, []byte(body), 0600); err != nil {
+		if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
 			t.Fatal(err)
 		}
 		_, err := readReleaseIndex(dir, true, keys, time.Now())
@@ -106,7 +108,7 @@ func TestIndexBootstrapRefusesSignedOrPolicyShapedInput(t *testing.T) {
 			t.Fatal("unsigned index accepted without bootstrap")
 		}
 	}
-	if err := os.WriteFile(filepath.Join(dir, "versions.json.sig"), []byte("invalid"), 0600); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "versions.json.sig"), []byte("invalid"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := readReleaseIndex(dir, true, keys, time.Now()); err == nil {

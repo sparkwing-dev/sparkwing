@@ -120,22 +120,22 @@ func TestReleaseIndexPublicationWritesOnlyVerifiedPairAndInvalidatesBoth(t *test
 		t.Run(tc.name, func(t *testing.T) {
 			dir := t.TempDir()
 			for _, sub := range []string{"tools", "remote"} {
-				if err := os.Mkdir(filepath.Join(dir, sub), 0700); err != nil {
+				if err := os.Mkdir(filepath.Join(dir, sub), 0o700); err != nil {
 					t.Fatal(err)
 				}
 			}
 			for _, tool := range []string{"aws", "go", "curl"} {
-				if err := os.WriteFile(filepath.Join(dir, "tools", tool), []byte(releaseIndexToolStub), 0700); err != nil {
+				if err := os.WriteFile(filepath.Join(dir, "tools", tool), []byte(releaseIndexToolStub), 0o700); err != nil {
 					t.Fatal(err)
 				}
 			}
 			for _, name := range []string{"remote/versions.json", "generated"} {
-				if err := os.WriteFile(filepath.Join(dir, name), []byte(`{"latest":"v0.68.2"}`), 0600); err != nil {
+				if err := os.WriteFile(filepath.Join(dir, name), []byte(`{"latest":"v0.68.2"}`), 0o600); err != nil {
 					t.Fatal(err)
 				}
 			}
 			if tc.signed {
-				if err := os.WriteFile(filepath.Join(dir, "remote/versions.json.sig"), []byte("old signature"), 0600); err != nil {
+				if err := os.WriteFile(filepath.Join(dir, "remote/versions.json.sig"), []byte("old signature"), 0o600); err != nil {
 					t.Fatal(err)
 				}
 			}

@@ -146,8 +146,8 @@ func writeReleaseIndex(out string, index engine.VersionIndex, key ed25519.Privat
 	if _, err := engine.VerifyIndex(engine.SignedIndex{Body: body, Signature: signature}, now, keys); err != nil {
 		return fmt.Errorf("refusing an index the client would reject: %w", err)
 	}
-	if err := os.WriteFile(filepath.Join(out, "versions.json"), body, 0600); err != nil {
+	if err := os.WriteFile(filepath.Join(out, "versions.json"), body, 0o600); err != nil {
 		return err
 	}
-	return os.WriteFile(filepath.Join(out, "versions.json.sig"), signature, 0600)
+	return os.WriteFile(filepath.Join(out, "versions.json.sig"), signature, 0o600)
 }
