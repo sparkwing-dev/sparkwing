@@ -41,6 +41,8 @@ unlock.
 
 ### Fixed
 
+- **logs:** Finished Cloud runs complete aggregate log reads after bootstrap owner requeues
+  Owner streams register when the runner exchanges its bootstrap credential. Awards that never reached a log writer no longer leave unsealed streams. Missing final seals from actual writers still report incomplete logs.
 - **TypeScript SDK:** Imports inside jobs retain CommonJS and ESM exports from symlinked packages
   Protocol pipe validation preserves Node's package path resolution, fixing empty `typescript` exports with pnpm dependencies.
 - **release:** Publish main and the annotated tag together with one atomic push of the recorded changelog commit

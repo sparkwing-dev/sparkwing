@@ -21,8 +21,87 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/limits"
 	"github.com/sparkwing-dev/sparkwing/internal/quicktest"
+	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
 )
+
+func TestRunLogPageAccountsForRequeuedPlanWriters(t *testing.T) {
+	for _, test := range []struct {
+		name, status string
+		exchanged    bool
+	}{
+		{"bootstrap success", "success", false},
+		{"bootstrap failure", "failed", false},
+		{"lost writer", "success", true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			logs, _, st := committedDashboardLogs(t, []byte("job output\n"))
+			tenant, err := st.ForTeam(t.Context(), "a")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := tenant.RecordCreditGrant(t.Context(), store.CreditGrantRequest{Kind: store.CreditGrantFree, AmountMicro: 100_000_000, Reference: "plan-logs", CreatedBy: "fixture"}); err != nil {
+				t.Fatal(err)
+			}
+			engineHTTPRoot(t, &engineFixture{Store: st}, "", "launcher", []capability.Grant{capability.ClaimsLaunch})
+			engineSQL(t, st, `UPDATE runs SET dispatch='controller'`)
+			engineSQL(t, st, `UPDATE triggers SET unit_kind='plan'`)
+			demand := store.UnitDemand{CapabilityPrefix: "launcher", Target: &store.UnitRef{Kind: capability.UnitPlan, RunID: "run"}}
+			for cycle := range 3 {
+				claim, err := st.AsOperator().ClaimUnit(t.Context(), demand)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if test.exchanged {
+					issued, err := st.AsOperator().ExchangeCapability(t.Context(), capability.ExchangeSpec{BootstrapPrefix: claim.Award.CapabilityPrefix})
+					if err != nil {
+						t.Fatal(err)
+					}
+					claim.Award.CapabilityPrefix = issued.Capability.Prefix
+				}
+				if cycle == 1 {
+					engineSQL(t, st, `UPDATE triggers SET lease_expires_at=?`, teststore.Now(st).UnixNano())
+					reaped, err := st.AsOperator().ReapUnits(t.Context(), 1)
+					if err != nil || len(reaped) != 1 || !reaped[0].Requeued {
+						t.Fatalf("expired plan: %+v %v", reaped, err)
+					}
+				} else if err := st.ReleaseUnit(t.Context(), claim, claim.Award.CapabilityPrefix); err != nil {
+					t.Fatal(err)
+				}
+			}
+			claim, err := st.AsOperator().ClaimUnit(t.Context(), demand)
+			if err != nil {
+				t.Fatal(err)
+			}
+			issued, err := st.AsOperator().ExchangeCapability(t.Context(), capability.ExchangeSpec{BootstrapPrefix: claim.Award.CapabilityPrefix})
+			if err != nil {
+				t.Fatal(err)
+			}
+			principal, err := st.AsOperator().ResolveAuthority(t.Context(), capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: issued.Capability.Prefix})
+			if err != nil {
+				t.Fatal(err)
+			}
+			subject := blob.LogSubject{Kind: blob.LogOwnerUnit, Team: "a", RunID: "run", Unit: &blob.LogUnit{Kind: blob.LogPlan, Generation: int64(claim.Award.Generation)}}
+			engineSQL(t, st, `UPDATE runs SET status=?,finished_at=?`, test.status, teststore.Now(st).UnixNano())
+			reader, _ := memberLogSearchReader(t, st, logs.objs.(blob.ObjectBackend))
+			jobPage, err := reader.ReadLogs(t.Context(), "run", controllerwire.LogQuery{Job: "job", NoEvents: true})
+			if err != nil || !jobPage.Complete {
+				t.Fatalf("job logs: %+v %v", jobPage, err)
+			}
+			page, err := reader.ReadLogs(t.Context(), "run", controllerwire.LogQuery{NoEvents: true})
+			if err != nil || page.Complete {
+				t.Fatalf("unsealed owner was hidden: complete=%v error=%v", page.Complete, err)
+			}
+			if err := tenant.RecordSegments(t.Context(), store.SegmentCommit{Actor: engineActor(capability.Authorized{Principal: principal, Binding: principal.Capability.Binding}), Subject: subject, Final: true, RetentionClass: "r30"}); err != nil {
+				t.Fatal(err)
+			}
+			page, err = reader.ReadLogs(t.Context(), "run", controllerwire.LogQuery{NoEvents: true})
+			if err != nil || page.Complete != !test.exchanged || len(page.Records) != 1 || page.Records[0].Line != "job output" {
+				t.Fatalf("finished run aggregate: complete=%v records=%v error=%v", page.Complete, page.Records, err)
+			}
+		})
+	}
+}
 
 func TestLogTreeTraversesEveryTenantDescendantProperty(t *testing.T) {
 	property := func(size uint8, order uint32) bool {

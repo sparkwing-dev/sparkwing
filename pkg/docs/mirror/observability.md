@@ -81,7 +81,11 @@ completion and node reporting. Those commits never wait for log uploads or closu
 Flush effort is bounded by the existing one-minute log tail window. Log I/O holds
 no lock shared across jobs. Log subjects use the committed attempt, without
 logging-only principal refreshes or node lookups. The store creates each stream
-in the transaction that starts its attempt or claims its owner unit. Hosts open
+in the transaction that starts its attempt or grants its owner log-writing authority.
+Direct owner claims register at award; Cloud owner claims register when the runner
+exchanges its bootstrap credential. A bootstrap award that is released or expires
+before exchange has no log stream because it cannot write logs. Once exchanged,
+an owner stream requires a final seal even if it produced no bytes. Hosts open
 spools without a registration request. Hosts also seal streams that produced no
 bytes, so quiet units do not keep log follow waiting after completion. Completed
 trigger, plan and eval claims can seal their own stream during the same tail window.
