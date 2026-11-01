@@ -407,8 +407,9 @@ file. Other syntax and workflow checks remain active.
   `GOMAXPROCS=1`. When touched and the host has capacity for two package
   processes, `internal/controller`, `internal/nodehost`, `cmd/sparkwing` and
   `internal/wingd/localcontroller` run after the module's ordinary packages.
-  Controller uses four exhaustive shards, and the other three packages use
-  two. The runner compiles and lists each package once, then queues every
+  Controller uses four exhaustive shards. Nodehost and the CLI use two.
+  Localcontroller keeps its full suite in one queued process because it fits
+  the package budget. The runner compiles and lists each package once, then queues every
   selected package's shards through the host's package-process allowance:
   two workers on four CPUs, and the existing Go step parallelism on larger
   hosts. A free worker can start the next package while another finishes a
@@ -627,15 +628,16 @@ file. Other syntax and workflow checks remain active.
   24, so these are contended local samples. Controller used four shards and
   two workers, with commands of the form
   `GOMAXPROCS=1 go test -race -count=1 -run "$pattern" ./internal/controller/`,
-  with each pattern selecting one sorted round-robin shard. The other two
-  packages used compiled race binaries with `GOMAXPROCS=1` and
-  `-test.count=1`. Every measurement ran the full test class.
+  with each pattern selecting one sorted round-robin shard. The CLI used
+  compiled race binaries with `GOMAXPROCS=1` and `-test.count=1`.
+  Localcontroller used `GOMAXPROCS=1 go test -race -count=1` on the whole
+  package. Every measurement ran the full test class.
 
   | Package | Listed names | Shard seconds, in order | Result |
   | --- | ---: | --- | --- |
   | `internal/controller` | 1,026 | 1040.73 / 1884.44 / 953.24 / 949.81 | All four passed |
   | `cmd/sparkwing` | 1,129 | 950.51 / 975.64 | Both passed |
-  | `internal/wingd/localcontroller` | 21 | 23.58 / 159.86 | 20 passed, one assertion failed |
+  | `internal/wingd/localcontroller` | 21 | 156.63 | Whole package passed |
 
   Two preliminary controller shards each hit a 35-minute measurement guard,
   after 508 and 263 of their 513 names, respectively.
@@ -644,11 +646,13 @@ file. Other syntax and workflow checks remain active.
   rerun with the configured 52m30s timeout. Together the final four samples
   cover 257, 257, 256 and 256 names, with no skips. Controller's sorted listing
   SHA-256 was `dc830a363f175b8cf17c1eb91083e7d1061f23936921989100ee5fd917b17770`.
-  CLI compilation took 126.75s and localcontroller compilation took 37.62s,
-  separately from the shard timings. Localcontroller's failing test was
-  `TestLocalControllerTwoJobProcessesUseIndependentAwards`, reporting
-  `unstarted local renewal changed claim`; it completed without a timeout or
-  race report. Full hosted batch completion remains unmeasured.
+  CLI compilation took 126.75s separately from its shard timings.
+  An exploratory two-process localcontroller run compiled in 37.62s,
+  took 23.58s and 159.86s in its two processes, and reported
+  `unstarted local renewal changed claim` in
+  `TestLocalControllerTwoJobProcessesUseIndependentAwards`. The final
+  one-process sample passed all 21 names, so the queue keeps this package
+  together. Full hosted batch completion remains unmeasured.
 
 - **Heavy packages:** run these by name rather than reaching for `./...`, and
   give the command a timeout the package actually fits in. Measured alone on an

@@ -91,8 +91,10 @@ func gateRaceShardsForPackage(pkg string) int {
 	switch pkg {
 	case "./internal/controller":
 		return 4
-	case "./internal/nodehost", "./cmd/sparkwing", "./internal/wingd/localcontroller":
+	case "./internal/nodehost", "./cmd/sparkwing":
 		return 2
+	case "./internal/wingd/localcontroller":
+		return 1
 	default:
 		return 0
 	}

@@ -283,7 +283,7 @@ func TestGateRaceUsesTheMeasuredShardCounts(t *testing.T) {
 		"./internal/controller":            4,
 		"./internal/nodehost":              2,
 		"./cmd/sparkwing":                  2,
-		"./internal/wingd/localcontroller": 2,
+		"./internal/wingd/localcontroller": 1,
 		"./internal/store":                 0,
 		"./jobs":                           0,
 		"./internal/ordinary":              0,

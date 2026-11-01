@@ -167,7 +167,7 @@ func runRaceShardsAtHome(ctx context.Context, home, module string, plans []raceP
 		if err != nil {
 			return err
 		}
-		sparkwing.Info(ctx, "%s race: %d listed tests, %d exhaustive shards, up to %d processes, list sha256=%s", pkg, len(names), shardCount, parallelism, raceTestDigest(names))
+		sparkwing.Info(ctx, "%s race: %d listed tests, exhaustive shards=%d, up to %d processes, list sha256=%s", pkg, len(names), shardCount, parallelism, raceTestDigest(names))
 		for i, shard := range shards {
 			sparkwing.Info(ctx, "%s race shard %d: %d tests, sha256=%s", pkg, i+1, len(shard), raceTestDigest(shard))
 			jobs = append(jobs, raceShardJob{pkg: pkg, binary: binary, packageDir: packageDir, number: i + 1, names: shard})
