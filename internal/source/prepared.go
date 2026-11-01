@@ -65,7 +65,7 @@ func (p *Prepared) validate() error {
 
 func preparedSource(spec Spec) Spec {
 	spec.Engine = nil
-	// Origins explain precedence; only the effective policy affects acquisition.
+	// safety: Only the effective checkout policy affects acquisition and its fingerprint.
 	spec.Checkout.Origins = nil
 	return spec
 }
@@ -118,7 +118,7 @@ func preparedTools(ctx context.Context, environment []string, sdk engineid.SDKKi
 		}
 		hashes = append(hashes, digest)
 	}
-	// Go can select another toolchain; its compiler version and architecture settings
+	// safety: Go can select another toolchain; its compiler version and architecture settings
 	// participate alongside the launcher image's tool executable bytes.
 	if sdk == engineid.GoSDK {
 		command := exec.CommandContext(ctx, "go", "env", "GOVERSION", "GOOS", "GOARCH", "GOEXPERIMENT", "GOAMD64", "GOARM64", "CGO_ENABLED", "CC", "CXX")
@@ -168,7 +168,7 @@ func (p *Prepared) publish(ctx context.Context, spec Spec, options Options, entr
 	if err != nil {
 		return err
 	}
-	// A replacement owner may build with different inputs. Keep the run index immutable;
+	// safety: A replacement owner may build with different inputs. Keep the run index immutable;
 	// consumers compare those inputs and build fresh when they differ.
 	if hit.Found {
 		return nil
@@ -207,13 +207,13 @@ func (p *Prepared) publish(ctx context.Context, spec Spec, options Options, entr
 		return err
 	}
 	defer func() { err = errors.Join(err, archive.Close(), os.Remove(archive.Name())) }()
-	// The payload digest covers every checkout/install byte, including local replaces,
+	// safety: The payload digest covers every checkout/install byte, including local replaces,
 	// submodules, LFS objects and the separately pinned pipeline checkout.
 	digest := sha256.New()
 	gz := gzip.NewWriter(io.MultiWriter(archive, digest))
 	snapshot := sha256.New()
 	tw := tar.NewWriter(io.MultiWriter(gz, snapshot))
-	// Use the identical headers for the complete input fingerprint and the artifact.
+	// safety: Identical tar headers bind the complete input fingerprint to the artifact.
 	roots := []struct{ name, path string }{{"checkout", entry.checkoutDirectory}}
 	if manifest.CodeRoot == "code" {
 		roots = append(roots, struct{ name, path string }{"code", entry.pipelineCheckout})

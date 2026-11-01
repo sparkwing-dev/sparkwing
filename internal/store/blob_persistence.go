@@ -65,7 +65,7 @@ func validBlobDigest(digest blob.Digest) bool {
 }
 
 type blobActor struct {
-	// Prepared artifacts cross worker host partitions within their sealed run.
+	// safety: Prepared artifacts cross worker host partitions only within their sealed run.
 	preparedFacts blob.RefFacts
 	owner         *runstate.Actor
 	authority     blob.Authority
