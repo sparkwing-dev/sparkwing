@@ -21,7 +21,7 @@ import (
 )
 
 func checkBlobCollection(t testing.TB, ctx context.Context, root string, objects blob.ObjectBackend, transfers blob.HTTPClient) (err error) {
-	s, err := teststore.OpenExisting(filepath.Join(root, "collection.db"))
+	s, err := teststore.OpenExisting(t, filepath.Join(root, "collection.db"))
 	if err != nil {
 		return err
 	}

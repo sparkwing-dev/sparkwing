@@ -135,7 +135,7 @@ func TestOperatorHTTPSeparatesConsoleActionsFromDeploymentReads(t *testing.T) {
 				var st *store.Store
 				if placementRead {
 					var err error
-					st, err = teststore.Open(filepath.Join(t.TempDir(), "state.db"))
+					st, err = teststore.Open(t, filepath.Join(t.TempDir(), "state.db"))
 					if err != nil {
 						t.Fatal(err)
 					}

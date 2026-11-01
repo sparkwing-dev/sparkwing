@@ -200,7 +200,7 @@ func TestTrendsRejectsStoreQueryFailures(t *testing.T) {
 	}
 	for _, failure := range []string{"query", "scan", "iteration"} {
 		t.Run(failure, func(t *testing.T) {
-			st, err := teststore.Open(filepath.Join(t.TempDir(), "store.db"))
+			st, err := teststore.Open(t, filepath.Join(t.TempDir(), "store.db"))
 			if err != nil {
 				t.Fatal(err)
 			}

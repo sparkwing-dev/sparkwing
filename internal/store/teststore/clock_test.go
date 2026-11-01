@@ -14,7 +14,7 @@ import (
 func TestDefaultFixtureClockDoesNotConsumeAuthorityDuringSetup(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		path := filepath.Join(t.TempDir(), "state.db")
-		s, err := teststore.Open(path)
+		s, err := teststore.Open(t, path)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -25,7 +25,7 @@ func TestDefaultFixtureClockDoesNotConsumeAuthorityDuringSetup(t *testing.T) {
 		if err := s.Close(); err != nil {
 			t.Fatal(err)
 		}
-		s, err = teststore.OpenExisting(path)
+		s, err = teststore.OpenExisting(t, path)
 		if err != nil {
 			t.Fatal(err)
 		}

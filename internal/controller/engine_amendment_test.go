@@ -89,7 +89,7 @@ func TestEngineClaimRequiresTrustedServicesBeforeAward(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	reopened, err := teststore.OpenExisting(strings.TrimPrefix(connection.Target, "sqlite:"))
+	reopened, err := teststore.OpenExisting(t, strings.TrimPrefix(connection.Target, "sqlite:"))
 	if err != nil {
 		t.Fatal(err)
 	}

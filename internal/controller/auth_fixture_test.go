@@ -15,7 +15,7 @@ func newStoreForAuth(t *testing.T, opts ...store.Option) *store.Store {
 	t.Helper()
 	dir := t.TempDir()
 	fixture := &serverFixture{}
-	s, err := teststore.Open(filepath.Join(dir, "test.db"), append([]store.Option{fixture.option(deploymenttest.Metered(t), nil)}, opts...)...)
+	s, err := teststore.Open(t, filepath.Join(dir, "test.db"), append([]store.Option{fixture.option(deploymenttest.Metered(t), nil)}, opts...)...)
 	if err != nil {
 		t.Fatalf("store open: %v", err)
 	}

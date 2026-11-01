@@ -41,7 +41,7 @@ func TestServerHandler_NoDuplicateRouteRegistrations(t *testing.T) {
 
 func TestController_SessionRoute_OutsideBearerAuth(t *testing.T) {
 	dir := t.TempDir()
-	st, err := teststore.Open(filepath.Join(dir, "state.db"))
+	st, err := teststore.Open(t, filepath.Join(dir, "state.db"))
 	if err != nil {
 		t.Fatalf("open: %v", err)
 	}

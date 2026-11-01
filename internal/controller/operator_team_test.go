@@ -298,7 +298,7 @@ func TestOperatorCreateTeamHTTPConcurrentReplicas(t *testing.T) {
 	var handlers []http.Handler
 	var raw string
 	for range 2 {
-		st, err := teststore.OpenExisting(path)
+		st, err := teststore.OpenExisting(t, path)
 		if err != nil {
 			t.Fatal(err)
 		}

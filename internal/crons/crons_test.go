@@ -116,7 +116,7 @@ func newHarness(t *testing.T, now time.Time) *harness {
 	t.Helper()
 	home := t.TempDir()
 	c := &clock{at: now}
-	st, err := teststore.OpenExisting(filepath.Join(home, "state.db"), teststore.WithClock(c.now))
+	st, err := teststore.OpenExisting(t, filepath.Join(home, "state.db"), teststore.WithClock(c.now))
 	if err != nil {
 		t.Fatalf("open store: %v", err)
 	}

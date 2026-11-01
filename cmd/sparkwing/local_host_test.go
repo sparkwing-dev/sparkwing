@@ -44,7 +44,7 @@ func TestLocalQueueReportsHostFailureWhileDraining(t *testing.T) {
 	t.Setenv("SPARKWING_CONFIG", filepath.Join(t.TempDir(), "config.yaml"))
 	t.Setenv("SPARKWING_SECRETS_KEY_FILE", filepath.Join(t.TempDir(), "secrets.key"))
 	home := t.TempDir()
-	owned, err := teststore.Open(filepath.Join(home, "state.db"))
+	owned, err := teststore.Open(t, filepath.Join(home, "state.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -89,7 +89,7 @@ func TestLocalQueueReportsHostFailureWhileDraining(t *testing.T) {
 
 func TestLocalQueueBindsAuthenticatedStorageBeforeOpeningProcessTransport(t *testing.T) {
 	t.Setenv("SPARKWING_CONFIG", filepath.Join(t.TempDir(), "missing.yaml"))
-	owned, err := teststore.Open(filepath.Join(t.TempDir(), "state.db"))
+	owned, err := teststore.Open(t, filepath.Join(t.TempDir(), "state.db"))
 	if err != nil {
 		t.Fatal(err)
 	}

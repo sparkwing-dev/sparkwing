@@ -14,7 +14,7 @@ import (
 )
 
 func TestNodeHostAdmissionReadsItsRealRun(t *testing.T) {
-	db, err := teststore.OpenExisting(filepath.Join(t.TempDir(), "runs.db"))
+	db, err := teststore.OpenExisting(t, filepath.Join(t.TempDir(), "runs.db"))
 	if err != nil {
 		t.Fatal(err)
 	}

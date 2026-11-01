@@ -75,7 +75,7 @@ func (runnerStorePolicyW8) CheckRunner(_ context.Context, version string) error 
 
 func newStoredRunnerW8(t *testing.T, kind capability.UnitKind) (*storedEngineW8, capability.Issued) {
 	t.Helper()
-	s, err := teststore.Open(filepath.Join(t.TempDir(), "runner.db"), runnerStoreOptionsW8())
+	s, err := teststore.Open(t, filepath.Join(t.TempDir(), "runner.db"), runnerStoreOptionsW8())
 	if err != nil {
 		t.Fatal(err)
 	}

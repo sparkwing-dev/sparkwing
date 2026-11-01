@@ -83,7 +83,7 @@ func (f *deploymentWrites) WriteStorageAllowance(_ context.Context, a capability
 }
 
 func TestDeploymentHTTPAuthorization(t *testing.T) {
-	st, err := teststore.Open(filepath.Join(t.TempDir(), "state.db"))
+	st, err := teststore.Open(t, filepath.Join(t.TempDir(), "state.db"))
 	if err != nil {
 		t.Fatal(err)
 	}

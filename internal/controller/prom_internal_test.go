@@ -393,7 +393,7 @@ func TestSamplersFillTheOperationalSeries(t *testing.T) {
 func TestReaperSamplesTheOperationalSeries(t *testing.T) {
 	restoreGlobals(t)
 
-	st, err := teststore.Open(filepath.Join(t.TempDir(), "state.db"))
+	st, err := teststore.Open(t, filepath.Join(t.TempDir(), "state.db"))
 	if err != nil {
 		t.Fatalf("open store: %v", err)
 	}

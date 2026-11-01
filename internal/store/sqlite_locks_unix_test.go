@@ -18,7 +18,7 @@ import (
 
 func TestReopeningStorePreservesLiveSQLiteFiles(t *testing.T) {
 	if path := os.Getenv("SPARKWING_STORE_LOCK_HELPER"); path != "" {
-		st, err := teststore.OpenExisting(path)
+		st, err := teststore.OpenExisting(t, path)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -33,7 +33,7 @@ func TestReopeningStorePreservesLiveSQLiteFiles(t *testing.T) {
 	for _, mode := range []os.FileMode{0o600, 0o644} {
 		t.Run(mode.String(), func(t *testing.T) {
 			path := filepath.Join(t.TempDir(), "state.db")
-			first, err := teststore.OpenExisting(path)
+			first, err := teststore.OpenExisting(t, path)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -42,7 +42,7 @@ func TestReopeningStorePreservesLiveSQLiteFiles(t *testing.T) {
 					t.Error(err)
 				}
 			})
-			reader, err := teststore.OpenExisting(path)
+			reader, err := teststore.OpenExisting(t, path)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -65,7 +65,7 @@ func TestReopeningStorePreservesLiveSQLiteFiles(t *testing.T) {
 				}
 				files[name] = info
 			}
-			second, err := teststore.OpenExisting(path)
+			second, err := teststore.OpenExisting(t, path)
 			if err != nil {
 				t.Fatal(err)
 			}

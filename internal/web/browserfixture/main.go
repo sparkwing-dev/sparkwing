@@ -272,7 +272,23 @@ func memberToken(ctx context.Context, st *store.Store) (string, error) {
 	return issued.Raw, nil
 }
 
+type fixtureLifetime struct {
+	cleanups []func()
+}
+
+func (*fixtureLifetime) Helper()                  {}
+func (*fixtureLifetime) Fatal(args ...any)        { log.Fatal(args...) }
+func (*fixtureLifetime) Context() context.Context { return context.Background() }
+func (f *fixtureLifetime) Cleanup(fn func())      { f.cleanups = append(f.cleanups, fn) }
+func (f *fixtureLifetime) close() {
+	for i := len(f.cleanups) - 1; i >= 0; i-- {
+		f.cleanups[i]()
+	}
+}
+
 func main() {
+	t := &fixtureLifetime{}
+	defer t.close()
 	config, err := parseFixtureConfig(os.Args[1:])
 	if err != nil {
 		log.Fatal(err)
@@ -370,7 +386,7 @@ func main() {
 			log.Printf("browser fixture store close: %v", err)
 		}
 	}()
-	teststore.RegisterSQLite(st, home.StateDB())
+	teststore.RegisterSQLite(t, st, home.StateDB())
 	ctx := context.Background()
 	token, err := memberToken(ctx, st)
 	if err != nil {

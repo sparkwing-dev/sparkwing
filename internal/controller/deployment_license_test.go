@@ -25,7 +25,7 @@ import (
 func TestLicenseExpiryWhileRunningKeepsTheModeAndHidesItFromPublicHealth(t *testing.T) {
 	cfg := deploymenttest.Parse(t, deployment.Inputs{Kind: "team", Now: time.Now().Add(-25 * time.Hour)}, license.FeatureMultiTeam)
 	var srv *controller.Server
-	st, err := teststore.Open(filepath.Join(t.TempDir(), "state.db"), store.WithPolicies(func(st *store.Store) (store.Policies, error) {
+	st, err := teststore.Open(t, filepath.Join(t.TempDir(), "state.db"), store.WithPolicies(func(st *store.Store) (store.Policies, error) {
 		srv = controller.NewDeployment(st, cfg, nil)
 		return srv.StorePolicies(), nil
 	}))

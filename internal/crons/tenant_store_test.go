@@ -11,7 +11,7 @@ import (
 
 func TestTickRefreshesAndEvaluatesThroughEachTenant(t *testing.T) {
 	now := time.Unix(1700000000, 37).UTC()
-	s, err := teststore.OpenExisting(filepath.Join(t.TempDir(), "schedules.db"), teststore.WithClock(func() time.Time { return now }))
+	s, err := teststore.OpenExisting(t, filepath.Join(t.TempDir(), "schedules.db"), teststore.WithClock(func() time.Time { return now }))
 	if err != nil {
 		t.Fatal(err)
 	}

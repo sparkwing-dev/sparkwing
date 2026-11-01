@@ -17,7 +17,7 @@ func TestOpenKeepsStateSeparate(t *testing.T) {
 	var fixtures [2]*store.Store
 	for i := range fixtures {
 		path := filepath.Join(t.TempDir(), "state.db")
-		st, err := teststore.Open(path)
+		st, err := teststore.Open(t, path)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -55,7 +55,7 @@ func TestOpenRefusesExistingFiles(t *testing.T) {
 	if err := os.WriteFile(path, []byte("preserve"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := teststore.Open(path); !errors.Is(err, os.ErrExist) {
+	if _, err := teststore.Open(t, path); !errors.Is(err, os.ErrExist) {
 		t.Fatalf("open existing file: %v", err)
 	}
 	got, err := os.ReadFile(path)

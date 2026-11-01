@@ -259,7 +259,7 @@ func checkNativeStoreOwnerW8(t *testing.T, mode string) {
 	} else {
 		cfg := localcontroller.Config{Bind: func(_ context.Context, binding localcontroller.Binding) (localcontroller.Services, error) {
 			s = binding.Store
-			teststore.RegisterSQLite(s, filepath.Join(binding.Home, "state.db"))
+			teststore.RegisterSQLite(t, s, filepath.Join(binding.Home, "state.db"))
 			server, root = seedStoredRunnerW8(t, s, capability.UnitTrigger)
 			prepareNativeStoreW8(t, s, capability.UnitTrigger)
 			binding.Controller.RunnerPolicy = server.RunnerPolicy

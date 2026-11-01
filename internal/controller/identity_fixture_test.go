@@ -67,7 +67,7 @@ func newIdentityFixtureWith(t *testing.T, o fixtureOpts) *identityFixture {
 	var srv *controller.Server
 	clock := new(atomic.Int64)
 	clock.Store(time.Now().UTC().UnixNano())
-	st, err := teststore.Open(filepath.Join(t.TempDir(), "state.db"), teststore.WithClock(func() time.Time { return time.Unix(0, clock.Load()).UTC() }), store.WithPolicies(func(st *store.Store) (store.Policies, error) {
+	st, err := teststore.Open(t, filepath.Join(t.TempDir(), "state.db"), teststore.WithClock(func() time.Time { return time.Unix(0, clock.Load()).UTC() }), store.WithPolicies(func(st *store.Store) (store.Policies, error) {
 		srv = controller.NewDeployment(st, deploymenttest.Cloud(t, "https://controller.test"), o.logger).WithSecretsCipher(testCipher(t)).
 			WithGoogleSignIn(googleauth.New(iss.Config()), []string{dashRedirect}).
 			WithGitHubSignIn(githubauth.New(gh.Config()), []string{githubRedirect}).

@@ -48,7 +48,7 @@ var snapshot = sync.OnceValues(func() (seed []byte, err error) {
 // Open creates an empty current-schema fixture at a new path, then opens it
 // with OpenExisting. Existing files are refused; reopening and compatibility
 // tests use OpenExisting, so SQL can still reach the store.
-func Open(path string, opts ...store.Option) (*store.Store, error) {
+func Open(t T, path string, opts ...store.Option) (*store.Store, error) {
 	seed, err := snapshot()
 	if err != nil {
 		return nil, err
@@ -61,5 +61,5 @@ func Open(path string, opts ...store.Option) (*store.Store, error) {
 	if err := errors.Join(err, f.Close()); err != nil {
 		return nil, err
 	}
-	return OpenExisting(path, opts...)
+	return OpenExisting(t, path, opts...)
 }

@@ -15,7 +15,7 @@ import (
 func TestFoldRunProfilesRequiresSingleContributingNode(t *testing.T) {
 	for _, mode := range []string{"overlap", "sequential", "clock-skew", "single", "memoized"} {
 		t.Run(mode, func(t *testing.T) {
-			st, err := teststore.Open(filepath.Join(t.TempDir(), "state.db"))
+			st, err := teststore.Open(t, filepath.Join(t.TempDir(), "state.db"))
 			if err != nil {
 				t.Fatal(err)
 			}

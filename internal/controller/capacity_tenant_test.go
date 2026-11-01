@@ -20,7 +20,7 @@ import (
 )
 
 func TestCapacityReadUsesRequestTenantProperty(t *testing.T) {
-	s, err := teststore.OpenExisting(filepath.Join(t.TempDir(), "state.db"))
+	s, err := teststore.OpenExisting(t, filepath.Join(t.TempDir(), "state.db"))
 	if err != nil {
 		t.Fatal(err)
 	}

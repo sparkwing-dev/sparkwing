@@ -83,7 +83,7 @@ func newDeploymentAppFixture(t *testing.T, cfg deployment.Config, opts ...func(*
 	var primary *controller.Server
 	clock := new(atomic.Int64)
 	clock.Store(time.Now().UTC().UnixNano())
-	st, err := teststore.Open(filepath.Join(t.TempDir(), "state.db"), teststore.WithClock(func() time.Time { return time.Unix(0, clock.Load()).UTC() }), store.WithPolicies(func(st *store.Store) (store.Policies, error) {
+	st, err := teststore.Open(t, filepath.Join(t.TempDir(), "state.db"), teststore.WithClock(func() time.Time { return time.Unix(0, clock.Load()).UTC() }), store.WithPolicies(func(st *store.Store) (store.Policies, error) {
 		primary = assemble(st)
 		policies := primary.StorePolicies()
 		policies.ClaimProfiles = githubClaimEnvironment{location: "cloud"}

@@ -49,7 +49,7 @@ func TestHostingLeavesRenewalWithNativeOwner(t *testing.T) {
 		state := hostingOwnerState{snapshot: original.snapshot}
 		state.snapshot.Run.State = runstate.RunRunning
 		state.snapshot.Run.Spec, state.snapshot.Run.Plan, state.snapshot.Run.PlanHash = &spec, unit.Accepted.Plan, "plan"
-		s, err := teststore.OpenExisting(filepath.Join(t.TempDir(), "state.db"))
+		s, err := teststore.OpenExisting(t, filepath.Join(t.TempDir(), "state.db"))
 		if err != nil {
 			t.Fatal(err)
 		}

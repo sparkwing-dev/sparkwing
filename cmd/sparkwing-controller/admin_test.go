@@ -213,7 +213,7 @@ func openState(t *testing.T) *store.Store {
 	if err != nil {
 		t.Fatal(err)
 	}
-	teststore.RegisterSQLite(st, p.StateDB())
+	teststore.RegisterSQLite(t, st, p.StateDB())
 	if _, err := teststore.SQL(t, st).ExecContext(t.Context(), `INSERT INTO accounts(id,email,created_at,updated_at) VALUES ('ops-admin','admin@example.test',1,1) ON CONFLICT DO NOTHING`); err != nil {
 		t.Fatal(err)
 	}

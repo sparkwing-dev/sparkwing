@@ -19,7 +19,7 @@ import (
 
 func checkBlobUploadIsolation(t testing.TB, ctx context.Context, root string, objects blob.ObjectBackend, transfers blob.HTTPClient) (err error) {
 	path := filepath.Join(root, "upload-isolation.db")
-	s, err := teststore.OpenExisting(path)
+	s, err := teststore.OpenExisting(t, path)
 	if err != nil {
 		return err
 	}
@@ -103,7 +103,7 @@ func checkBlobUploadIsolation(t testing.TB, ctx context.Context, root string, ob
 		if err := s.Close(); err != nil {
 			return err
 		}
-		reopened, err := teststore.OpenExisting(path)
+		reopened, err := teststore.OpenExisting(t, path)
 		if err != nil {
 			return err
 		}

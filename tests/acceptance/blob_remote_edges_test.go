@@ -16,7 +16,7 @@ import (
 )
 
 func checkBlobRemoteCacheEdges(t testing.TB, ctx context.Context, root string) (err error) {
-	s, err := teststore.OpenExisting(filepath.Join(root, "remote-edges.db"))
+	s, err := teststore.OpenExisting(t, filepath.Join(root, "remote-edges.db"))
 	if err != nil {
 		return err
 	}

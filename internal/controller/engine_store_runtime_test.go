@@ -42,7 +42,7 @@ func engineRuntimeStore(t *testing.T, opts ...store.Option) (*engineFixture, *st
 		})
 		return policies, nil
 	})
-	s, err := teststore.Open(filepath.Join(t.TempDir(), "state.db"), append([]store.Option{profiles}, opts...)...)
+	s, err := teststore.Open(t, filepath.Join(t.TempDir(), "state.db"), append([]store.Option{profiles}, opts...)...)
 	if err != nil {
 		t.Fatal(err)
 	}

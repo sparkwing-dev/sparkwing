@@ -87,7 +87,7 @@ func (poolRunnerPolicy) ResolveClaimProfile(context.Context, capability.Principa
 
 func poolControllerStore(t *testing.T) (*store.Store, string) {
 	t.Helper()
-	st, err := teststore.Open(filepath.Join(t.TempDir(), "pool.db"), store.WithPolicies(func(*store.Store) (store.Policies, error) {
+	st, err := teststore.Open(t, filepath.Join(t.TempDir(), "pool.db"), store.WithPolicies(func(*store.Store) (store.Policies, error) {
 		return store.Policies{ClaimProfiles: poolRunnerPolicy{}}, nil
 	}))
 	if err != nil {

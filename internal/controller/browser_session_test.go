@@ -47,7 +47,7 @@ func newDeploymentBrowserFixture(t *testing.T, cfg deployment.Config, d *control
 		srv = controller.NewDeployment(st, cfg, slog.New(slog.NewTextHandler(logs, nil))).WithSecretsCipher(testCipher(t))
 		return srv.StorePolicies(), nil
 	})
-	st, err := teststore.Open(filepath.Join(t.TempDir(), "state.db"), append([]store.Option{composition}, opts...)...)
+	st, err := teststore.Open(t, filepath.Join(t.TempDir(), "state.db"), append([]store.Option{composition}, opts...)...)
 	if err != nil {
 		t.Fatal(err)
 	}

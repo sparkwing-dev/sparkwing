@@ -329,7 +329,7 @@ func burstIntakeDeploymentController(t *testing.T, endpoint string, cfg deployme
 		server = controller.NewDeployment(state, cfg, nil).WithSecretsCipher(cipher).WithDashboard(controller.Dashboard{}).WithDataObjects(objects)
 		return server.StorePolicies(), nil
 	}))
-	state, err := teststore.Open(filepath.Join(t.TempDir(), "controller.db"), options...)
+	state, err := teststore.Open(t, filepath.Join(t.TempDir(), "controller.db"), options...)
 	if err != nil {
 		t.Fatal(err)
 	}

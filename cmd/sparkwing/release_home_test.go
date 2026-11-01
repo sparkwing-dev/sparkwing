@@ -28,7 +28,7 @@ func TestLocalReleaseRefusalPreservesPopulatedStoreAndShowsRemedy(t *testing.T) 
 	if err := os.MkdirAll(filepath.Dir(db), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	state, err := teststore.Open(db)
+	state, err := teststore.Open(t, db)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -29,7 +29,7 @@ import (
 
 func TestStorageSeededAuthorityUsesStoreClock(t *testing.T) {
 	now := time.Date(2000, 1, 1, 12, 0, 0, 0, time.UTC)
-	s, err := teststore.Open(filepath.Join(t.TempDir(), "state.db"), teststore.WithClock(func() time.Time { return now }))
+	s, err := teststore.Open(t, filepath.Join(t.TempDir(), "state.db"), teststore.WithClock(func() time.Time { return now }))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -54,7 +54,7 @@ func TestStorageSeededAuthorityUsesStoreClock(t *testing.T) {
 func checkBlobDepcache(t testing.TB, ctx context.Context, root string, objects blob.ObjectBackend, transfers blob.HTTPClient, corrupt func(string) error, seed [16]byte) (err error) {
 	path := filepath.Join(root, "archives.db")
 	now := time.Now().UTC()
-	s, dataController, err := openStorageData(path, objects, now)
+	s, dataController, err := openStorageData(t, path, objects, now)
 	if err != nil {
 		return err
 	}
@@ -156,7 +156,7 @@ func checkBlobDepcache(t testing.TB, ctx context.Context, root string, objects b
 	if err := s.Close(); err != nil {
 		return err
 	}
-	reopened, dataController, err := openStorageData(path, objects, now)
+	reopened, dataController, err := openStorageData(t, path, objects, now)
 	if err != nil {
 		return err
 	}
@@ -315,9 +315,9 @@ SELECT ?,?,team,subject_kind,subject_id,audience,?,'award',1,?,bind_kind,bind_ru
 	return authority, identity, nil
 }
 
-func openStorageData(path string, objects blob.ObjectBackend, now time.Time) (*store.Store, *controller.DataController, error) {
+func openStorageData(t teststore.T, path string, objects blob.ObjectBackend, now time.Time) (*store.Store, *controller.DataController, error) {
 	var data *controller.DataController
-	s, _, err := openControllerFixture(path, func(s *store.Store) *controller.Server {
+	s, _, err := openControllerFixture(t, path, func(s *store.Store) *controller.Server {
 		data = controller.NewDataController(s, controller.DataController{Objects: objects})
 		return controller.New(s, nil).WithDataController(data)
 	}, teststore.WithClock(func() time.Time { return now }))
