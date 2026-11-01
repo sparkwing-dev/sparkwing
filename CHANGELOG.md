@@ -44,6 +44,8 @@ unlock.
 
 ### Fixed
 
+- **controller:** Changed-revision children keep their parent lineage writer and shared-only secrets when GitHub compare or metadata checks fail
+  Intake admits these children without a fetch credential. Retries inherit a sealed child fetch permission and receive only a repository-scoped `contents: read` token.
 - **controller:** Routine idle-poll refusals log at debug, and successful or pending refund submissions log at info
   Declined refills, failed refunds and request-budget violations retain warning or error logs.
 - **local startup:** Upgrades drain older daemons before starting the installed executable, including v0.67 daemons at the previous socket path

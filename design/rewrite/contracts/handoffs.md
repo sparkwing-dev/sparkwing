@@ -1316,12 +1316,17 @@ asserted child at another commit, then failed before its secret check could run.
 - A changed-revision child in the same private repository may receive a fetch-only
   source credential when intake's GitHub compare proves both its execution and
   source commits reachable from a branch or tag of that repository. Keep the
-  existing `identical`/`ahead` compare rules. Fail closed for unreachable or unknown
-  results, cross-repository children and another team's authority.
+  existing `identical`/`ahead` compare rules. Unreachable or unknown results and
+  GitHub compare or metadata errors admit the child with its asserted child seal
+  and no fetch credential. The seal keeps shared-only secrets and the parent
+  lineage writer. Cross-repository children and another team's authority cannot
+  receive this credential.
 - Seal this permission as `child_source_repository`, separately from
   `proven_repository` and the general source-credential compare flag. The child
   stays asserted. It gains no execution repository proof, default-branch
   eligibility, secrets, stored Git credentials, extra repositories or OIDC.
+  A retry inherits this sealed permission without another compare and receives
+  the same fetch-only token scope.
 - Mint a GitHub App token with only `contents: read` for exactly that repository's
   numeric ID. Recheck the live attempt and team installation before minting and
   before committing the release audit. Stored credentials cannot enforce this

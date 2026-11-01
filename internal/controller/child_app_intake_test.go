@@ -3,7 +3,9 @@ package controller
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"path/filepath"
 	"slices"
@@ -25,7 +27,7 @@ import (
 
 func TestAppParentChildrenPreserveOnlyExactRevisionTrust(t *testing.T) {
 	const pinnedConfig = "pipelines:\n  - name: deploy\n    entrypoint: deploy\n    source: refs/heads/code\n"
-	for _, kind := range []string{"exact", "changed", "fetch-identical", "fetch-ahead", "fetch-unreachable", "fetch-behind", "fetch-unknown", "fetch-pinned", "fetch-pinned-source-unreachable", "fetch-pinned-execution-unreachable", "cross-repository"} {
+	for _, kind := range []string{"exact", "changed", "fetch-identical", "fetch-ahead", "fetch-unreachable", "fetch-behind", "fetch-unknown", "fetch-403", "fetch-422", "fetch-429", "fetch-503", "fetch-network", "fetch-metadata-403", "fetch-retry", "fetch-pinned", "fetch-pinned-source-unreachable", "fetch-pinned-execution-unreachable", "cross-repository"} {
 		t.Run(kind, func(t *testing.T) {
 			pinned := strings.HasPrefix(kind, "fetch-pinned")
 			repo, original := sourcetest.Repository(t)
@@ -67,7 +69,34 @@ func TestAppParentChildrenPreserveOnlyExactRevisionTrust(t *testing.T) {
 				}
 				app.SetComparison("acme/app", original, "refs/heads/code", sourceComparison)
 			}
-			e.Server.WithGitHubApp(app.Config())
+			compares := 0
+			config := app.Config()
+			config.HTTP = &http.Client{Transport: intakeGitHubTransport(func(r *http.Request) (*http.Response, error) {
+				status := 0
+				if strings.Contains(r.URL.Path, "/compare/") {
+					compares++
+					switch kind {
+					case "fetch-403":
+						status = http.StatusForbidden
+					case "fetch-422":
+						status = http.StatusUnprocessableEntity
+					case "fetch-429":
+						status = http.StatusTooManyRequests
+					case "fetch-503":
+						status = http.StatusServiceUnavailable
+					case "fetch-network":
+						return nil, errors.New("connection lost")
+					}
+				}
+				if kind == "fetch-metadata-403" && compares > 0 && r.URL.Path == "/installation/repositories" {
+					status = http.StatusForbidden
+				}
+				if status != 0 {
+					return &http.Response{StatusCode: status, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(`{"message":"unavailable"}`)), Request: r}, nil
+				}
+				return http.DefaultTransport.RoundTrip(r)
+			})}
+			e.Server.WithGitHubApp(config)
 			teststore.SeedGitHubInstallation(t, e.Store, "a", store.GitHubAppInstallation{InstallationID: 7, AccountID: 70, AccountLogin: "acme", AccountType: "Organization", ConnectedBy: "member", GitHubUserID: 71}, time.Now())
 			tenant := teststore.ForTeam(t, e.Store, "a")
 			parent, err := tenant.ReadRun(t.Context(), "run")
@@ -128,11 +157,11 @@ func TestAppParentChildrenPreserveOnlyExactRevisionTrust(t *testing.T) {
 				if got != proof {
 					t.Fatalf("exact child changed seal: %+v, want %+v", got, proof)
 				}
-			} else if got.Trust() != runspec.TrustAsserted || got.ProvenRepository() != "" || got.SourceCredentialVerified() || got.DefaultBranchWork() || (kind != "fetch-unknown" && !got.SharedSecretsOnly()) || child.Request.Request.Git.SHA != selected {
+			} else if got.Trust() != runspec.TrustAsserted || got.ProvenRepository() != "" || got.SourceCredentialVerified() || got.DefaultBranchWork() || !got.SharedSecretsOnly() || got.Writer() != runspec.RunWriter("run") || got.DataWriter() != runspec.RunWriter("run") || got.UnverifiedReason() != "" || child.Request.Request.Git.SHA != selected {
 				t.Fatalf("changed child retained proof or selected wrong commit: %+v", child.Request)
 			}
 			wantSource := runspec.RepoKey("")
-			if kind == "changed" || kind == "fetch-identical" || kind == "fetch-ahead" || kind == "fetch-pinned" {
+			if kind == "changed" || kind == "fetch-identical" || kind == "fetch-ahead" || kind == "fetch-pinned" || kind == "fetch-retry" {
 				wantSource = "gh:1"
 			}
 			if got.ChildSourceRepository() != wantSource {
@@ -140,6 +169,27 @@ func TestAppParentChildrenPreserveOnlyExactRevisionTrust(t *testing.T) {
 			}
 			if runner != runspec.RunnerAny {
 				return
+			}
+			if kind == "fetch-retry" {
+				before := compares
+				engineSQL(t, e.Store, `UPDATE runs SET status='failed',finished_at=2 WHERE team='a' AND id=?`, id)
+				bearer, _, err := teststore.ProvisionCredential(t.Context(), e.Store, capability.ProvisionSpec{Kind: capability.ProvisionMember, Team: "a", Subject: capability.Subject{Kind: capability.SubjectAccount, ID: "retrier"}, Binding: capability.Binding{Kind: capability.BindingNone}, Grants: []capability.Grant{capability.RunsControl}})
+				if err != nil {
+					t.Fatal(err)
+				}
+				w := engineClaimHTTP(t, h, bearer, "POST", "/api/v1/runs/"+id+"/retry", `{"mode":"all","idempotency_key":"child-retry"}`, http.StatusOK)
+				var retried controllerwire.CreateRunResponse
+				if err := json.Unmarshal(w.Body.Bytes(), &retried); err != nil {
+					t.Fatal(err)
+				}
+				child, err = tenant.ReadRun(t.Context(), retried.RunID)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if child.Request.Provenance != got || child.Lineage.RetryOf != id || compares != before || before == 0 {
+					t.Fatalf("retry lost child seal or repeated compare: proof=%+v lineage=%+v compares=%d, before=%d", child.Request.Provenance, child.Lineage, compares, before)
+				}
+				id = retried.RunID
 			}
 			engineSQL(t, e.Store, `INSERT INTO github_app_triggers(team,repository_id,pipeline,repository,installation_id,created_at,repo_key) VALUES ('a',1,'ci','acme/app',7,1,'gh:1')`)
 			if _, err := tenant.RecordCreditGrant(t.Context(), store.CreditGrantRequest{Kind: store.CreditGrantFree, AmountMicro: 100_000_000, Reference: "child-test", CreatedBy: "fixture"}); err != nil {
