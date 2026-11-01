@@ -22,7 +22,7 @@ func TestTakeoverFindsPreTokenDaemonAndJoinsBeforeSpawn(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// v0.67 used the home hash without the per-home socket token.
+	// hack: upgrades must find v0.67 sockets, which lack the per-home token.
 	hash := fmt.Sprintf("%x", sha256.Sum256([]byte(home)))[:12]
 	dir := filepath.Base(filepath.Dir(current))
 	prefix := dir[:strings.Index(dir, hash)]
