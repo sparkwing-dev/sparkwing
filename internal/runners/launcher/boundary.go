@@ -67,11 +67,14 @@ func (b *KubernetesBoundary) Reserve(ctx context.Context, binding CloudJobBindin
 			}
 			if index > 0 && node.Labels[usedRunLabel] != runNodeValue(b.Namespace, binding.RunID) {
 				// A larger node must be warm and never used, or already belong to this run.
+				if node.Labels[TeamNodeLabel] != "" || node.Labels[usedTeamLabel] != "" || node.Labels[usedRunLabel] != "" {
+					continue
+				}
 				warm, err := b.hasWarmPlaceholder(ctx, node)
 				if err != nil {
 					return CloudNodeReservation{}, err
 				}
-				if !warm || node.Labels[usedTeamLabel] != "" || node.Labels[usedRunLabel] != "" {
+				if !warm {
 					continue
 				}
 			}

@@ -281,7 +281,11 @@ func warmPlaceholder(pod corev1.Pod, namespace string) bool {
 }
 
 func (b *KubernetesBoundary) hasWarmPlaceholder(ctx context.Context, node corev1.Node) (bool, error) {
-	pods, err := b.Kube.CoreV1().Pods("").List(ctx, metav1.ListOptions{FieldSelector: "spec.nodeName=" + node.Name})
+	namespace := node.Labels[WarmNamespaceLabel]
+	if namespace == "" {
+		return false, nil
+	}
+	pods, err := b.Kube.CoreV1().Pods(namespace).List(ctx, metav1.ListOptions{FieldSelector: "spec.nodeName=" + node.Name})
 	if err != nil {
 		return false, err
 	}
