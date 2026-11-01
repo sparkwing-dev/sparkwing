@@ -41,6 +41,8 @@ unlock.
 
 ### Fixed
 
+- **controller:** Routine idle-poll refusals log at debug, and successful or pending refund submissions log at info
+  Declined refills, failed refunds and request-budget violations retain warning or error logs.
 - **kubernetes:** The E2E harness selects the controller data PVC, preserves numeric image tags and provisions its team before enabling licensed mode
 - **cli:** Session runner enrollment and logout work through HTTP loopback port-forwards
   The client sends the licensed controller's `__Host-sw_csrf` cookie with the session proof.
