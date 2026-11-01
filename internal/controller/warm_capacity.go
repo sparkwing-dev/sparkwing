@@ -1,10 +1,11 @@
 package controller
 
 import (
+	"net/http"
+
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
-	"net/http"
 )
 
 func (s *Server) handleWarmCapacity(w http.ResponseWriter, r *http.Request, _ capability.Authorized) error {

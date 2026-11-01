@@ -2,8 +2,9 @@ package controller
 
 import (
 	"encoding/json"
-	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"testing"
+
+	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
 
 func TestWarmCapacityConsoleCommitsAndRevocation(t *testing.T) {

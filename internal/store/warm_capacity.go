@@ -131,12 +131,8 @@ func (o *Operator) WarmCapacity(ctx context.Context) (WarmCapacity, error) {
 				h = append(h, float64(ns)/1e9)
 			}
 		}
-		e = errors.Join(e, r.Err())
+		e = errors.Join(e, r.Err(), r.Close())
 		if e != nil {
-			_ = r.Close()
-			return out, e
-		}
-		if e = r.Close(); e != nil {
 			return out, e
 		}
 		c.Start1h = warmPercentiles(h)

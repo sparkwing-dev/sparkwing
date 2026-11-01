@@ -279,6 +279,7 @@ func TestOperatorSettingsHTTPStoreFailuresStayPrivate(t *testing.T) {
 func (f *operatorSettingsFixture) WarmCapacity(context.Context) (store.WarmCapacity, error) {
 	return f.warm, f.failure
 }
+
 func (f *operatorSettingsFixture) WriteWarmCapacity(_ context.Context, a capability.Authorized, input store.WarmCapacitySettings) error {
 	f.seen = a
 	if f.failure != nil {
