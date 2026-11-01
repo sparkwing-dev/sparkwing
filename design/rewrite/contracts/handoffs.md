@@ -1305,3 +1305,15 @@ pools are not an option. Research and measurements:
   single-use nodes; a microVM spike on metal and nested-virtualization hosts;
   faster launcher handoffs; image pre-baking; a provider-neutral compute-driver
   seam for Cloudflare, GCP and bare metal.
+
+Security follow-up accepted by the lead on 2026-11-01:
+
+- Warm placeholders and their Pod get/delete and ReplicaSet get Role live in a
+  dedicated warm namespace. They mount no volumes and prove the expected
+  `sparkwing-cloud-warm-<vCPU>` Deployment through a UID-checked ReplicaSet.
+  The launcher pins the hardened EC2NodeClass name and refuses mismatched refs.
+- Opus finding L3 is accepted without code changes.
+- An upsizing-switch change during an in-flight award is accepted without
+  further code. The store rechecks the switch for the first committed upsize,
+  then preserves that placement on replay. Disabling the switch does not revoke
+  an already-committed placement.

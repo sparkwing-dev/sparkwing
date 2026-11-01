@@ -33,7 +33,7 @@ spec:
       labels:
         node-restriction.kubernetes.io/sparkwing-cloud-class: "2"
         sparkwing.dev/launcher-namespace: sparkwing-cloud-jobs
-        sparkwing.dev/warm-namespace: sparkwing
+        sparkwing.dev/warm-namespace: sparkwing-cloud-warm
     spec:
       taints:
         - key: sparkwing.dev/dedicated
@@ -88,7 +88,7 @@ spec:
       labels:
         node-restriction.kubernetes.io/sparkwing-cloud-class: "2"
         sparkwing.dev/launcher-namespace: sparkwing-staging-cloud-jobs
-        sparkwing.dev/warm-namespace: sparkwing-staging
+        sparkwing.dev/warm-namespace: sparkwing-staging-cloud-warm
     spec:
       taints:
         - key: sparkwing.dev/dedicated
@@ -147,13 +147,16 @@ resources:
 
 Add `sparkwing/warm-capacity.yaml` and
 `sparkwing-staging/warm-capacity.yaml` below. Add each filename to its local
-`kustomization.yaml` resources. These Deployments run in the trusted release
-namespaces, outside the customer Job namespace. Each pool's warm namespace
-must equal its launcher's release namespace. The chart grants the launcher Pod
-get/delete in that namespace. The launcher recognizes only
-Pods with the warm label and priority class, negative priority, and an apps/v1 ReplicaSet controller reference in the
-namespace proved by pool provenance. That namespace is trusted operator
-infrastructure.
+`kustomization.yaml` resources. The chart creates dedicated namespaces
+`sparkwing-cloud-warm` and `sparkwing-staging-cloud-warm`. Warm Pod get/delete
+and ReplicaSet get are bound only there. Delete old warm-capacity Roles and
+RoleBindings from `sparkwing` and `sparkwing-staging`.
+
+Each pool's warm namespace must equal its launcher's `launcher.warmNamespace`.
+The launcher checks the Pod's label, priority class, negative priority and lack
+of volumes. The Pod's ReplicaSet controller UID must match the actual
+ReplicaSet. Its apps/v1 Deployment controller must be named
+`sparkwing-cloud-warm-<vCPU>`. No release or customer Pod can qualify.
 The no-used-label affinity prevents a replacement placeholder from keeping an
 already-used node alive. Anti-affinity keeps one placeholder per warm node.
 
@@ -178,7 +181,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: sparkwing-cloud-warm-2
-  namespace: sparkwing
+  namespace: sparkwing-cloud-warm
   labels:
     sparkwing.dev/warm-placeholder: "true"
 spec:
@@ -203,7 +206,7 @@ spec:
         kubernetes.io/os: linux
         node-restriction.kubernetes.io/sparkwing-cloud-class: "2"
         sparkwing.dev/launcher-namespace: sparkwing-cloud-jobs
-        sparkwing.dev/warm-namespace: sparkwing
+        sparkwing.dev/warm-namespace: sparkwing-cloud-warm
       affinity:
         nodeAffinity:
           requiredDuringSchedulingIgnoredDuringExecution:
@@ -258,7 +261,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: sparkwing-cloud-warm-2
-  namespace: sparkwing-staging
+  namespace: sparkwing-staging-cloud-warm
   labels:
     sparkwing.dev/warm-placeholder: "true"
 spec:
@@ -283,7 +286,7 @@ spec:
         kubernetes.io/os: linux
         node-restriction.kubernetes.io/sparkwing-cloud-class: "2"
         sparkwing.dev/launcher-namespace: sparkwing-staging-cloud-jobs
-        sparkwing.dev/warm-namespace: sparkwing-staging
+        sparkwing.dev/warm-namespace: sparkwing-staging-cloud-warm
       affinity:
         nodeAffinity:
           requiredDuringSchedulingIgnoredDuringExecution:
@@ -331,6 +334,24 @@ spec:
               drop: [ALL]
 ```
 
+Set these launcher values in `sparkwing/helm-values.yaml`:
+
+```yaml
+sparkwing-runner-bundle:
+  launcher:
+    warmNamespace: sparkwing-cloud-warm
+    nodeClassName: sparkwing-jobs
+```
+
+And in `sparkwing-staging/helm-values.yaml`:
+
+```yaml
+sparkwing-runner-bundle:
+  launcher:
+    warmNamespace: sparkwing-staging-cloud-warm
+    nodeClassName: sparkwing-jobs
+```
+
 Replace the per-team NodePool comments under `launcher` in both
 `helm-values.yaml` files with the shared class/deployment contract. Preserve
 launcher ceilings, credentials, images and infrastructure-node placement.
@@ -357,3 +378,75 @@ keep requested resources. Check warm placeholder replacement after an awarded
 job claims a node. Verify a requested class with no shared pool fails clearly
 and refunds the unstarted credit hold. No cluster or AWS write is part of this
 proposal or its repository checks.
+
+## Warm-controls lane merge contract
+
+This proposal owns the shared pool, binding and capacity-fact contract. Replace
+the earlier `warm-capacity.md` proposal's conflicting pool, placeholder and RBAC
+sections with the manifests above. Keep its KEDA installation, reader role,
+operator modes and scaler ownership. Do not install a second placeholder
+Deployment per class. KEDA targets `sparkwing-cloud-warm-<vCPU>` in the warm
+namespace. Its ScaledObject, TriggerAuthentication and reader Secret also live
+there, because KEDA targets and authentication are namespaced. Resolve the warm
+namespace from `sparkwing-runner-bundle.launcher.warmNamespace`, falling back to
+`<release namespace>-cloud-warm`, so there is one namespace setting. Keep
+`warmCapacity.namespace` as the Cloud Job namespace used for node affinity.
+The Secret stays unmounted by placeholders.
+
+| Surface | Contract |
+| --- | --- |
+| Protected hardware label | `node-restriction.kubernetes.io/sparkwing-cloud-class=<vCPU>` |
+| Deployment provenance | `sparkwing.dev/launcher-namespace=<Cloud Job namespace>` |
+| Warm namespace | `sparkwing.dev/warm-namespace=<release namespace>-cloud-warm` |
+| Placeholder Deployment | `sparkwing-cloud-warm-<vCPU>` |
+| PriorityClass | `sparkwing-cloud-warm`, value -1000 |
+| Placeholder label | `sparkwing.dev/warm-placeholder=true` |
+| Placeholder volumes | None, including automatic ServiceAccount token volumes |
+| Warm Role | Pod get/delete and apps ReplicaSet get in the warm namespace only |
+| Controller setting | `cloud_upsize_enabled`, default true |
+| Capacity facts | `cloud_job_capacity`, schema 28, one row per billing reservation |
+
+Delete the warm-controls lane's duplicate telemetry columns from `nodes`:
+`requested_class`, `granted_class`, `fresh_node_wait`, `start_latency_ns`.
+Use the authoritative `cloud_job_capacity` fields `requested_class`,
+`granted_class`, `waited_for_fresh_node`, `claim_to_start_ns`, `claimed_at` and
+`started_at`. Class values are `sparkwing-<vCPU>cpu`. Keep retries distinct by
+reservation, so one job's earlier attempt does not overwrite its later attempt.
+Read work-job metrics by joining `billing_awards` on team/reservation and
+filtering `unit_kind='node'`. Plan/eval preparation facts remain available but
+must not enter job-start percentiles. Billing starts at the store-clock first
+execution renewal. `claimed_at` and `started_at` use that same clock.
+
+For example, replace the warm-controls view's source CTEs with these exact CTEs,
+then retain its `demand`, `targets`, `clamped` and final SELECT:
+
+```sql
+WITH jobs AS (
+    SELECT c.* FROM cloud_job_capacity c
+    JOIN billing_awards b ON b.team=c.team AND b.reservation_id=c.reservation_id
+    WHERE b.unit_kind='node'
+), starts AS (
+    SELECT requested_class AS class, claim_to_start_ns,
+           ROW_NUMBER() OVER (PARTITION BY requested_class ORDER BY claim_to_start_ns) AS position,
+           COUNT(*) OVER (PARTITION BY requested_class) AS total
+    FROM jobs
+    WHERE started_at >= DATABASE_TIMESTAMP - 3600000000000
+      AND started_at <= DATABASE_TIMESTAMP AND claim_to_start_ns IS NOT NULL
+), medians AS (
+    SELECT class, AVG(claim_to_start_ns / 1000000000.0) AS median_seconds
+    FROM starts WHERE position IN ((total + 1) / 2, (total + 2) / 2) GROUP BY class
+), waits AS (
+    SELECT requested_class AS class, (COUNT(*) + 1) / 2 AS desired
+    FROM jobs WHERE waited_for_fresh_node=1
+      AND COALESCE(started_at,claimed_at) >= DATABASE_TIMESTAMP - 1800000000000
+      AND COALESCE(started_at,claimed_at) <= DATABASE_TIMESTAMP
+    GROUP BY requested_class
+)
+```
+
+The launcher binds the fresh node before removing a placeholder. A forbidden
+Pod delete removes the reservation annotation and reservation taint, preserves
+the permanent team/run fences, and leaves the placeholder untouched. Capacity
+observations must use the protected class label, translate its numeric value to
+`sparkwing-<vCPU>cpu`, and scope by the launcher namespace label. Warm counts
+exclude every node with a team, used-team, used-run or reservation binding.
