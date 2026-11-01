@@ -68,10 +68,9 @@ func realBuildPolicyFixture(t *testing.T) string {
 	t.Setenv("SPARKWING_CONFIG", filepath.Join(home, "missing.yaml"))
 	t.Setenv("XDG_CACHE_HOME", filepath.Join(home, "cache"))
 	dir := t.TempDir()
-	root, err := filepath.Abs("../../..")
-	if err != nil {
-		t.Fatal(err)
-	}
+	// bug: a private SDK pin keeps checkout edits out of the cache key. The executable uses only the standard library.
+	root := t.TempDir()
+	writeInput(t, root, "go.mod", []byte("module "+engine.GoModule+"\ngo 1.26\n"))
 	writeInput(t, dir, "go.mod", []byte(fmt.Sprintf("module fixture\ngo 1.26\nrequire %s v0.20.0\nreplace %s => %q\n", engine.GoModule, engine.GoModule, root)))
 	writeInput(t, dir, "main.go", []byte("package main\nimport (_ \"embed\";\"fmt\")\n//go:embed payload\nvar payload string\nfunc main(){fmt.Print(payload)}\n"))
 	writeInput(t, dir, "payload", []byte("first"))
