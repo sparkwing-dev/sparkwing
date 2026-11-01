@@ -271,4 +271,6 @@ var schemaTables = []schemaTable{
 	{Name: "teams", Owner: schemaOperator},
 	{Name: "triggers", Owner: schemaTenant},
 	{Name: "uploads", Owner: schemaTenant},
+	{Name: "warm_pool_observations", Owner: schemaOperator},
+	{Name: "warm_pool_settings", Owner: schemaOperator},
 }

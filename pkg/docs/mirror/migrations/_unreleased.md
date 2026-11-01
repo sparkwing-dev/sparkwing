@@ -148,3 +148,34 @@ admission and pool changes together. Operator setting `cloud_upsize_enabled`
 defaults to true and controls use of an idle warm node one class larger. Billing
 and CPU/memory limits retain the requested class. No deployment is performed by
 this repository change.
+
+Warm capacity defaults to Off for every class, including after the baseline 28
+store reset above. Install KEDA separately, then enable `warmCapacity.enabled`
+with `controller.store=postgres`, the Cloud job namespace and the read-only
+connection Secret. KEDA scales `sparkwing-cloud-warm-<vCPU>` in the dedicated warm namespace.
+Its ScaledObject, TriggerAuthentication and reader Secret live there too.
+The controller's database owner creates `warm_pool_desired`; the scaler role
+needs SELECT only on that view. Placeholder containers receive no credentials.
+
+Open **Operator > Warm capacity**, or run:
+
+```bash
+sparkwing operator warm-capacity show --profile deployment
+sparkwing operator warm-capacity set --class sparkwing-2cpu --mode manual --count 2 --profile deployment
+sparkwing operator warm-capacity set --class sparkwing-2cpu --mode auto --min 0 --max 4 --start-time-target 10s --profile deployment
+sparkwing operator warm-capacity set --class sparkwing-2cpu --mode off --profile deployment
+```
+
+`set` replaces the selected policy. Omitted counts become zero and the target
+becomes 10s. Auto takes the larger of half the cold-start waits in 30 minutes,
+rounded up, and current warm nodes plus one when the last hour's median start
+exceeds the target. It clamps that result to the configured min/max. No demand
+samples gives the minimum. Counts must fit Kubernetes replicas (0..2147483647).
+The view owns the replica target; infrastructure NodePool budgets govern spend.
+
+Start percentiles group jobs by requested class, including upsized jobs. No start
+samples appears as an empty metric. Cold starts include jobs still waiting for a
+fresh node. Upsize counts use execution starts in both windows. Signups count
+accounts created, and active teams count teams that submitted runs, over 24h/7d.
+The launcher reports ready, unbound nodes each poll.
+Samples expire after 120 seconds so a stopped launcher cannot report stale warmth.

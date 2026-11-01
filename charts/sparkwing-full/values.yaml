@@ -444,3 +444,33 @@ sparkwing-runner-bundle:
       - cluster
     maxConcurrent: 2
     alsoClaimTriggers: true
+
+# Optional Cloud warm-node placeholders. Operator settings default every class to
+# Off; enabling this infrastructure alone reserves no warm capacity.
+warmCapacity:
+  enabled: false
+  # Create once per cluster; other releases reuse sparkwing-cloud-warm.
+  createPriorityClass: true
+  # Cloud job namespace used to scope the shared node pools. Placeholders and
+  # KEDA resources run in sparkwing-runner-bundle.launcher.warmNamespace.
+  namespace: ""
+  image: registry.k8s.io/pause:3.10
+  # Secret in the warm namespace; its DSN grants SELECT on warm_pool_desired only.
+  databaseSecret:
+    name: ""
+    key: dsn
+  # Reserve one catalog node; infrastructure must leave these resources
+  # allocatable after system and DaemonSet overhead.
+  classes:
+    sparkwing-2cpu:
+      requests: {cpu: "2", memory: "5529Mi", ephemeral-storage: "20Gi"}
+    sparkwing-4cpu:
+      requests: {cpu: "4", memory: "13107Mi", ephemeral-storage: "20Gi"}
+    sparkwing-8cpu:
+      requests: {cpu: "8", memory: "28262Mi", ephemeral-storage: "20Gi"}
+    sparkwing-16cpu:
+      requests: {cpu: "16", memory: "58572Mi", ephemeral-storage: "20Gi"}
+    sparkwing-32cpu:
+      requests: {cpu: "32", memory: "119193Mi", ephemeral-storage: "20Gi"}
+    sparkwing-64cpu:
+      requests: {cpu: "64", memory: "240435Mi", ephemeral-storage: "20Gi"}

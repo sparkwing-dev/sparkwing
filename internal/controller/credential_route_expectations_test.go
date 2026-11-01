@@ -200,6 +200,8 @@ func credentialRouteExpectations() []credentialRouteExpectation {
 		{"GET", "/api/v1/operator/health", "controller", "deployment", "capability", []string{"deployment_admin|operator.limits|none|credential", "operator_console_session|operator.console|none|credential"}},
 		{"GET", "/api/v1/operator/limits", "controller", "deployment", "capability", []string{"deployment_admin|operator.limits|none|credential", "operator_console_session|operator.console|none|credential"}},
 		{"PUT", "/api/v1/operator/limits", "controller", "deployment", "capability", []string{"deployment_admin|operator.limits|none|credential", "operator_console_session|operator.console|none|credential"}},
+		{"GET", "/api/v1/operator/warm-capacity", "controller", "deployment", "capability", []string{"deployment_admin|operator.limits|none|credential", "operator_console_session|operator.console|none|credential"}},
+		{"PUT", "/api/v1/operator/warm-capacity", "controller", "deployment", "capability", []string{"deployment_admin|operator.limits|none|credential", "operator_console_session|operator.console|none|credential"}},
 		{"GET", "/api/v1/operator/signups", "controller", "deployment", "capability", []string{"deployment_admin|operator.limits|none|credential", "operator_console_session|operator.console|none|credential"}},
 		{"PUT", "/api/v1/operator/signups", "controller", "deployment", "capability", []string{"deployment_admin|operator.limits|none|credential", "operator_console_session|operator.console|none|credential"}},
 		{"GET", "/api/v1/operator/object-store", "controller", "deployment", "capability", []string{"deployment_admin|operator.object_store|none|credential", "operator_console_session|operator.console|none|credential"}},

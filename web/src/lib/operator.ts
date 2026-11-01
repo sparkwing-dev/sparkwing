@@ -358,3 +358,48 @@ export function historyFacts(h: StandingHistory, now = Date.now()): string {
   }
   return parts.join(" · ");
 }
+
+export interface WarmCapacitySettings {
+  class: string;
+  mode: "off" | "manual" | "auto";
+  manual_count: number;
+  auto_min: number;
+  auto_max: number;
+  start_time_target_seconds: number;
+}
+
+export interface StartPercentiles {
+  p50_seconds: number | null;
+  p95_seconds: number | null;
+}
+
+export interface WarmCapacityClass extends WarmCapacitySettings {
+  warm: number;
+  desired: number;
+  start_1h: StartPercentiles;
+  start_24h: StartPercentiles;
+  cold_starts_24h: number;
+  cold_starts_7d: number;
+  upsizes_24h: number;
+  upsizes_7d: number;
+}
+
+export interface WarmCapacity {
+  classes: WarmCapacityClass[];
+  new_signups_24h: number;
+  new_signups_7d: number;
+  active_teams_24h: number;
+  active_teams_7d: number;
+}
+
+export async function getWarmCapacity(): Promise<WarmCapacity> {
+  return readJSON(await authFetch("/api/v1/operator/warm-capacity", {}, quiet));
+}
+
+export async function setWarmCapacity(settings: WarmCapacitySettings): Promise<void> {
+  await readJSON(await authFetch("/api/v1/operator/warm-capacity", {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(settings),
+  }, quiet));
+}

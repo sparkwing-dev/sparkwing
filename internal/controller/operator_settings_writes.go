@@ -10,6 +10,7 @@ import (
 
 // OperatorSettingsWriter rechecks current deployment authority in each committing transaction.
 type OperatorSettingsWriter interface {
+	WriteWarmCapacity(context.Context, capability.Authorized, store.WarmCapacitySettings) error
 	WriteComputeLimits(context.Context, capability.Authorized, map[string]int64) (store.ComputeLimits, error)
 	WriteSignUpSettings(context.Context, capability.Authorized, store.SignUpSettingsChange) error
 	WriteStorageSettings(context.Context, capability.Authorized, store.StorageSettings) error

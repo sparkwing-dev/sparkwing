@@ -20,8 +20,15 @@ unlock.
 
 ## [Unreleased]
 
+### Added
+
+- **operator:** Warm capacity controls in the console and `sparkwing operator warm-capacity show|set`
+  Each Cloud hardware class defaults to Off. Manual holds a count. Auto uses cold-start waits and median job start time, bounded by the operator's min/max and a 10-second default target. The page and CLI show warm/desired capacity, p50/p95 starts over 1h/24h, and cold starts, upsizes, signups and active teams over 24h/7d.
+
 ### Changed
 
+- **deployment (Breaking):** Shared Cloud pools replace hand-made per-team NodePools
+  Replace per-team pool manifests with one pool per hardware class and the generic dedicated taint. Optional warm placeholders use KEDA's PostgreSQL scaler and a read-only database role. See the [warm capacity migration](docs/migrations/_unreleased.md#shared-cloud-capacity) and [infrastructure proposal](design/rewrite/proposals/warm-capacity.md). Warm policies join schema baseline 28's store reset. Scalers and their reader Secrets live with the placeholders in the dedicated warm namespace; staging can leave the shared PriorityClass under production ownership with `warmCapacity.createPriorityClass=false`.
 - **Cloud (Breaking):** Confine warm placeholder authority to a dedicated namespace
   Move placeholders and their Pod get/delete and ReplicaSet get Role to `launcher.warmNamespace` (default `<release namespace>-cloud-warm`). Update pool warm-namespace labels and remove the old release-namespace warm Role and binding. Placeholders must be volume-free and owned by `sparkwing-cloud-warm-<vCPU>` through a verified ReplicaSet. `launcher.nodeClassName` / `launch --node-class` pins the hardened EC2NodeClass name (default `sparkwing-jobs`). Pools referencing a different class, group or kind are refused. Follow the [shared-capacity migration](docs/migrations/_unreleased.md#shared-cloud-capacity).
 - **Cloud (Breaking):** Replace per-team Karpenter NodePools with one shared pool per requested hardware class and deployment

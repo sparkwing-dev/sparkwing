@@ -1819,3 +1819,59 @@ CREATE INDEX idx_nodes_claim_context ON nodes(team,claim_requirements,claim_cont
 CREATE INDEX idx_triggers_claim_context ON triggers(team,claim_requirements,claim_context,unit_kind,available_at,id) WHERE status='pending' AND claimed_by IS NULL AND capability_prefix='' AND cancel_requested_at IS NULL;
 
 CREATE INDEX idx_runs_push_claim ON runs(team,repo_key,provenance_sha,provenance_ref,id);
+
+CREATE TABLE warm_pool_settings (
+    class TEXT PRIMARY KEY NOT NULL CHECK(class IN ('sparkwing-2cpu','sparkwing-4cpu','sparkwing-8cpu','sparkwing-16cpu','sparkwing-32cpu','sparkwing-64cpu')),
+    mode TEXT NOT NULL DEFAULT 'off' CHECK(mode IN ('off','manual','auto')),
+    manual_count BIGINT NOT NULL DEFAULT 0 CHECK(manual_count BETWEEN 0 AND 2147483647),
+    auto_min BIGINT NOT NULL DEFAULT 0 CHECK(auto_min >= 0),
+    auto_max BIGINT NOT NULL DEFAULT 0 CHECK(auto_max >= auto_min AND auto_max <= 2147483647),
+    start_time_target_seconds DOUBLE PRECISION NOT NULL DEFAULT 10 CHECK(start_time_target_seconds > 0)
+);
+INSERT INTO warm_pool_settings(class) VALUES ('sparkwing-2cpu'),('sparkwing-4cpu'),('sparkwing-8cpu'),('sparkwing-16cpu'),('sparkwing-32cpu'),('sparkwing-64cpu');
+
+CREATE TABLE warm_pool_observations (
+    class TEXT PRIMARY KEY NOT NULL REFERENCES warm_pool_settings(class),
+    warm BIGINT NOT NULL CHECK(warm >= 0),
+    observed_at BIGINT NOT NULL
+);
+
+CREATE VIEW warm_pool_desired AS
+WITH jobs AS (
+    SELECT c.* FROM cloud_job_capacity c
+    JOIN billing_awards b ON b.team=c.team AND b.reservation_id=c.reservation_id
+    WHERE b.unit_kind='node'
+), starts AS (
+    SELECT requested_class AS class, claim_to_start_ns,
+           ROW_NUMBER() OVER (PARTITION BY requested_class ORDER BY claim_to_start_ns) AS position,
+           COUNT(*) OVER (PARTITION BY requested_class) AS total
+    FROM jobs
+    WHERE started_at >= DATABASE_TIMESTAMP - 3600000000000
+      AND started_at <= DATABASE_TIMESTAMP AND claim_to_start_ns IS NOT NULL
+), medians AS (
+    SELECT class, AVG(claim_to_start_ns / 1000000000.0) AS median_seconds
+    FROM starts WHERE position IN ((total + 1) / 2, (total + 2) / 2) GROUP BY class
+), waits AS (
+    SELECT requested_class AS class, (COUNT(*) + 1) / 2 AS desired
+    FROM jobs WHERE waited_for_fresh_node=1
+      AND COALESCE(started_at,claimed_at) >= DATABASE_TIMESTAMP - 1800000000000
+      AND COALESCE(started_at,claimed_at) <= DATABASE_TIMESTAMP
+    GROUP BY requested_class
+), demand AS (
+    SELECT s.*, CASE WHEN o.observed_at >= DATABASE_TIMESTAMP - 120000000000
+                    THEN COALESCE(o.warm, 0) ELSE 0 END AS warm,
+           COALESCE(w.desired, 0) AS wait_desired,
+           COALESCE(m.median_seconds, 0) AS median_seconds
+    FROM warm_pool_settings s LEFT JOIN warm_pool_observations o ON o.class=s.class
+    LEFT JOIN waits w ON w.class=s.class LEFT JOIN medians m ON m.class=s.class
+), targets AS (
+    SELECT *, CASE WHEN median_seconds > start_time_target_seconds
+                   THEN warm + 1 ELSE 0 END AS latency_desired FROM demand
+), clamped AS (
+    SELECT *, CASE WHEN wait_desired > latency_desired THEN wait_desired ELSE latency_desired END AS auto_desired
+    FROM targets
+)
+SELECT class AS hardware_class, warm, CASE mode WHEN 'off' THEN 0 WHEN 'manual' THEN manual_count
+    ELSE CASE WHEN auto_desired < auto_min THEN auto_min
+              WHEN auto_desired > auto_max THEN auto_max ELSE auto_desired END END AS desired_replicas
+FROM clamped;

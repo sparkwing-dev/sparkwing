@@ -301,6 +301,8 @@ func runSparkwing(args []string) (result error) {
 		return runBilling(context.Background(), inv)
 	case strings.HasPrefix(inv.Command.Path, "sparkwing operator teams "):
 		return runOperatorTeams(inv)
+	case strings.HasPrefix(inv.Command.Path, "sparkwing operator warm-capacity "):
+		return runWarmCapacityCommand(context.Background(), inv, os.Stdout, resolveOperatorManager)
 	case strings.HasPrefix(inv.Command.Path, "sparkwing operator limits "):
 		return runOperatorLimits(inv)
 	case strings.HasPrefix(inv.Command.Path, "sparkwing operator object-store "):

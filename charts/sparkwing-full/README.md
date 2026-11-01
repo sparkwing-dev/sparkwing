@@ -209,7 +209,7 @@ Each deployment needs one shared Karpenter NodePool per hardware class:
 - Set `node-restriction.kubernetes.io/sparkwing-cloud-class` to the requested
   vCPU class, such as `"2"`, and `sparkwing.dev/launcher-namespace` to the
   launcher's Cloud Job namespace. Set `sparkwing.dev/warm-namespace` to the
-  trusted release namespace holding warm Deployments. Add `sparkwing.dev/dedicated=true:NoSchedule`.
+  dedicated warm namespace holding warm Deployments. Add `sparkwing.dev/dedicated=true:NoSchedule`.
   Start from [the shared NodePool example](examples/shared-nodepool.yaml).
   Keep team labels and team taints out of pool templates. Team creation requires
   no infrastructure change.
@@ -232,6 +232,29 @@ Each deployment needs one shared Karpenter NodePool per hardware class:
   idle warm node one class larger to avoid a cold start. Operator setting
   `cloud_upsize_enabled` defaults to true. Billing and cgroup limits retain the
   requested class, and cold requests never ask for a larger node.
+
+Set `warmCapacity.enabled=true`, `warmCapacity.namespace` to the launcher's job
+namespace and `warmCapacity.databaseSecret.name` to a separate read-only
+PostgreSQL DSN Secret. Infrastructure installs KEDA. The chart renders a
+low-priority pause Deployment and PostgreSQL ScaledObject per catalog class.
+Each volume-free placeholder holds one unused node, using the catalog's CPU, memory and scratch requests; infrastructure must provide enough allocatable resources after system
+and DaemonSet overhead. Real jobs evict the placeholder. Placeholders and KEDA resources run in
+`sparkwing-runner-bundle.launcher.warmNamespace`, defaulting to
+`<release namespace>-cloud-warm`. The DSN Secret must exist there and grant
+SELECT only on `warm_pool_desired`. Set `warmCapacity.createPriorityClass=false`
+for additional releases sharing the cluster; one release owns the fixed
+`sparkwing-cloud-warm` PriorityClass. Helm leaves replica
+counts to KEDA on upgrades.
+
+All classes default Off. The operator console's **Warm capacity** page and
+operator CLI set Off, Manual count, or Auto minimum/maximum and start target
+(default 10s). KEDA reads `warm_pool_desired`; Off requests zero. Auto uses the
+higher of half the last 30 minutes' cold-start waits (rounded up) and one more
+than current warm capacity when the last hour's median start exceeds target,
+clamped to the operator minimum/maximum. With no waits it returns the minimum.
+See [the infrastructure proposal](../../design/rewrite/proposals/warm-capacity.md)
+for exact KEDA manifests, the reader role and Secret, and shared-pool labels.
+
 - Nodes need the awarded CPU/memory plus system overhead and at least 20 GiB of
   allocatable ephemeral storage. The example's ceilings are 2 CPU and 8 GiB.
 - The cluster must support native sidecars, `PodLevelResources` and

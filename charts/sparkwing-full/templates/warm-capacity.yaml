@@ -1,0 +1,154 @@
+{{- if .Values.warmCapacity.enabled }}
+{{- if ne .Values.controller.store "postgres" }}
+{{- fail "warmCapacity requires controller.store=postgres" }}
+{{- end }}
+{{- $namespace := required "warmCapacity.namespace is required" .Values.warmCapacity.namespace }}
+{{- $secret := required "warmCapacity.databaseSecret.name is required" .Values.warmCapacity.databaseSecret.name }}
+{{- $bundle := index .Values "sparkwing-runner-bundle" }}
+{{- $warm := default (printf "%s-cloud-warm" .Release.Namespace) $bundle.launcher.warmNamespace }}
+{{- if or (eq $warm .Release.Namespace) (eq $warm $namespace) }}
+{{- fail "launcher.warmNamespace must differ from the release and job namespaces" }}
+{{- end }}
+{{- $base := "sparkwing-cloud" }}
+{{- if not .Values.warmCapacity.classes }}
+{{- fail "warmCapacity.classes must contain the shared hardware classes" }}
+{{- end }}
+{{- if not (and $bundle.enabled (or $bundle.launcher.enabled $bundle.launcher.serviceAccountName)) }}
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: {{ $warm | quote }}
+  labels:
+    pod-security.kubernetes.io/enforce: restricted
+---
+{{- end }}
+{{- if .Values.warmCapacity.createPriorityClass }}
+apiVersion: scheduling.k8s.io/v1
+kind: PriorityClass
+metadata:
+  name: {{ $base }}-warm
+value: -1000
+globalDefault: false
+preemptionPolicy: Never
+description: Evictable Sparkwing warm Cloud capacity.
+---
+{{- end }}
+apiVersion: keda.sh/v1alpha1
+kind: TriggerAuthentication
+metadata:
+  name: {{ $base }}-warm
+  namespace: {{ $warm }}
+spec:
+  secretTargetRef:
+    - parameter: connection
+      name: {{ $secret | quote }}
+      key: {{ .Values.warmCapacity.databaseSecret.key | quote }}
+{{- range $class, $config := .Values.warmCapacity.classes }}
+{{- if not (regexMatch "^sparkwing-(2|4|8|16|32|64)cpu$" $class) }}
+{{- fail "warmCapacity class must be a Cloud hardware class (sparkwing-<cores>cpu)" }}
+{{- end }}
+{{- $requests := required "warmCapacity class requests are required" $config.requests }}
+{{- $_ := required "warmCapacity class requests.cpu is required" $requests.cpu }}
+{{- $_ := required "warmCapacity class requests.memory is required" $requests.memory }}
+{{- $cores := trimSuffix "cpu" (trimPrefix "sparkwing-" $class) }}
+{{- $name := printf "%s-warm-%s" $base $cores }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $name }}
+  namespace: {{ $warm }}
+spec:
+  {{- /* KEDA owns replicas after installation; avoid resetting on Helm upgrades. */}}
+  {{- if not $.Release.IsUpgrade }}
+  replicas: 0
+  {{- end }}
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      sparkwing.dev/warm-placeholder: "true"
+      sparkwing.dev/cloud-class: {{ $cores | quote }}
+  template:
+    metadata:
+      labels:
+        sparkwing.dev/warm-placeholder: "true"
+        sparkwing.dev/cloud-class: {{ $cores | quote }}
+    spec:
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      nodeSelector:
+        kubernetes.io/os: linux
+        node-restriction.kubernetes.io/sparkwing-cloud-class: {{ $cores | quote }}
+        sparkwing.dev/launcher-namespace: {{ $namespace | quote }}
+        sparkwing.dev/warm-namespace: {{ $warm | quote }}
+      priorityClassName: {{ $base }}-warm
+      terminationGracePeriodSeconds: 0
+      tolerations:
+        - key: sparkwing.dev/dedicated
+          operator: Equal
+          value: "true"
+          effect: NoSchedule
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - key: node-restriction.kubernetes.io/sparkwing-team-node
+                    operator: DoesNotExist
+                  - key: node-restriction.kubernetes.io/sparkwing-used-team
+                    operator: DoesNotExist
+                  - key: node-restriction.kubernetes.io/sparkwing-used-run
+                    operator: DoesNotExist
+        podAntiAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            - labelSelector:
+                matchExpressions:
+                  - key: sparkwing.dev/warm-placeholder
+                    operator: Exists
+              topologyKey: kubernetes.io/hostname
+      containers:
+        - name: pause
+          image: {{ $.Values.warmCapacity.image | quote }}
+          resources:
+            requests:
+              {{- toYaml $requests | nindent 14 }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            runAsUser: 65534
+            capabilities:
+              drop: [ALL]
+            seccompProfile:
+              type: RuntimeDefault
+---
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: {{ $name }}
+  namespace: {{ $warm }}
+spec:
+  scaleTargetRef:
+    name: {{ $name }}
+  pollingInterval: 15
+  cooldownPeriod: 30
+  minReplicaCount: 0
+  # The view owns the operator's maximum; this is Kubernetes' replica range.
+  maxReplicaCount: 2147483647
+  advanced:
+    horizontalPodAutoscalerConfig:
+      behavior:
+        scaleDown:
+          stabilizationWindowSeconds: 0
+  triggers:
+    - type: postgresql
+      metricType: AverageValue
+      metadata:
+        query: {{ printf "SELECT desired_replicas FROM warm_pool_desired WHERE hardware_class = '%s'" $class | quote }}
+        targetQueryValue: "1"
+        activationTargetQueryValue: "0"
+      authenticationRef:
+        name: {{ $base }}-warm
+{{- end }}
+{{- end }}

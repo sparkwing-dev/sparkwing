@@ -100,6 +100,22 @@ may use an idle warm node one class above the requested class when no requested
 class warm node is free. The job keeps its requested billing class and CPU and
 memory cgroup limits. A cold capacity request always asks for the requested class.
 
+Warm capacity defaults Off for every class. The operator **Warm capacity** page
+and CLI show warm/desired nodes, start-time percentiles, cold starts and upsizes,
+with signup and active-team counts. Operators select Off, Manual count or Auto
+minimum/maximum and a start-time target (default 10s). Auto uses cold-start waits
+in the last 30 minutes and median start time in the last hour, clamped to the
+configured bounds; no waiting means the minimum.
+
+The chart's optional `warmCapacity` infrastructure creates low-priority pause
+placeholders and KEDA PostgreSQL scalers. Each placeholder reserves one catalog
+node. KEDA queries the `warm_pool_desired` view with a separate read-only role;
+its DSN Secret, TriggerAuthentication and ScaledObjects live in the dedicated
+warm namespace. Placeholder pods mount no volumes. Infrastructure installs KEDA and
+supplies shared NodePools. See the chart README and
+[proposed infrastructure manifests](../design/rewrite/proposals/warm-capacity.md)
+for role grants, Secret keys, resource sizing and scheduling labels.
+
 Self-hosted runner pools use `runner.repos`, `runner.alsoClaimTriggers` and pool
 scheduling values. They claim through HTTP and need no Kubernetes API token.
 

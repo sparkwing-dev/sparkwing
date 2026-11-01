@@ -45,6 +45,7 @@ func TestLauncherPollingW8Components(t *testing.T) {
 				}
 				_, config, _ := cloudFixture(launcher.CloudWork)
 				var claims []time.Time
+				warmReports := 0
 				control, err := launcher.NewControllerControl(launcherControllerW8{
 					claim: func(context.Context, controllerwire.ClaimRequest) (controllerwire.ClaimResponse, error) {
 						claims = append(claims, time.Now())
@@ -52,6 +53,18 @@ func TestLauncherPollingW8Components(t *testing.T) {
 							cancel()
 						}
 						return controllerwire.ClaimResponse{}, nil
+					},
+					sync: func(_ context.Context, request controllerwire.LauncherSyncRequest) (controllerwire.LauncherSyncResponse, error) {
+						if len(request.WarmPools) != 6 {
+							t.Fatalf("warm observations = %v, want all hardware classes", request.WarmPools)
+						}
+						for class, count := range request.WarmPools {
+							if count != 0 {
+								t.Fatalf("warm %s = %d, want 0", class, count)
+							}
+						}
+						warmReports++
+						return controllerwire.LauncherSyncResponse{}, nil
 					},
 				}, controllerwire.ClaimRequest{RunnerVersion: "v1.2.3", Kinds: []capability.UnitKind{capability.UnitNode}})
 				if err != nil {
@@ -71,6 +84,9 @@ func TestLauncherPollingW8Components(t *testing.T) {
 				}
 				if len(claims) != 2 || claims[1].Sub(claims[0]) != want {
 					t.Fatalf("launcher claim times = %v, want two claims %v apart", claims, want)
+				}
+				if warmReports != len(claims) {
+					t.Fatalf("warm reports = %d, want one per poll", warmReports)
 				}
 			})
 		})

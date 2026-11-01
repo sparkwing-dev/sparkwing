@@ -87,9 +87,14 @@ func TestCloudCapacityGuidesMatchFailureContract(t *testing.T) {
 			t.Fatal(err)
 		}
 		body = strings.Join(strings.Fields(body), " ")
-		for _, text := range []string{capability.CloudCapacityUnconfigured, "support@sparkwing.dev", "Waiting for dedicated Cloud capacity", "elapsed"} {
+		for _, text := range []string{capability.CloudCapacityUnconfigured, "support@sparkwing.dev", "Waiting for dedicated Cloud capacity", "elapsed", "shared pool", "hardware class"} {
 			if !strings.Contains(body, text) {
 				t.Errorf("%s omits %q", topic, text)
+			}
+		}
+		for _, obsolete := range []string{"team's NodePool template", "compatible team pool", "Missing team pool configuration"} {
+			if strings.Contains(body, obsolete) {
+				t.Errorf("%s retains superseded guidance %q", topic, obsolete)
 			}
 		}
 	}

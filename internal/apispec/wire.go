@@ -34,6 +34,8 @@ func query(name, kind string) schema {
 
 func wireOperations() map[string]wireOperation {
 	result := map[string]wireOperation{
+		"GET /api/v1/operator/warm-capacity":                   operation("Read warm capacity policies and start metrics", nil, wire.WarmCapacity{}),
+		"PUT /api/v1/operator/warm-capacity":                   operation("Set one hardware class warm capacity policy", wire.WarmCapacitySettings{}, wire.WarmCapacity{}),
 		"GET /api/v1/overflow":                                 operation("Read the account overflow allowance", nil, wire.OverflowControl{}),
 		"PUT /api/v1/overflow":                                 operation("Set the account overflow allowance", wire.OverflowControlWrite{}, wire.OverflowControl{}),
 		"GET /api/v1/operator/health":                          operation("Read the deployment's full health", nil, wire.OperatorHealth{}),

@@ -156,3 +156,7 @@ func TestLauncherCleanupRequiresPositiveAbsence(t *testing.T) {
 		}
 	}
 }
+
+func (launcherAwardSnapshot) RecordWarmPoolObservations(context.Context, capability.AuthorityRef, map[string]int64) error {
+	return nil
+}

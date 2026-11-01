@@ -23,6 +23,15 @@ credential model in `docs/auth.md`, and the decision log
 | Foreign-team refusal for an authority | `capabilities_contract.go`: `resolveTeamAuthorityTx`, `resolveTeamActorTx` (`sameTeam` / `sameTeamOrCloudLauncher`) | `team_authority_guard_test.go`: `TestTeamScopedFunctionsResolveThroughTeam` |
 | Every tenant-table statement carries `team` | the SQL in each tenant method | `tenant_sql_scope_guard_test.go`: `TestTenantSQLScope_EveryTenantTableStatementCarriesTheKey`; `tenant_writer_guard_test.go` |
 
+### Warm capacity
+
+| Rule | Owner | Guard test |
+| --- | --- | --- |
+| Off by default; Manual or clamped Auto uses reservation capacity facts for work jobs by requested class | `internal/store/schema.sql`: `warm_pool_desired`; `warm_capacity.go`: `WarmCapacity`, `WriteWarmCapacity` | `internal/store/warm_capacity_test.go`: `TestWarmCapacityModesAndDemand`; `warm_capacity_dialect_test.go`: `TestWarmCapacityPostgres` |
+| Only current deployment launcher authority reports ready, unbound nodes | `internal/runners/launcher/warm_capacity.go`: `reportWarmPools`; `internal/store/warm_capacity.go`: `RecordWarmPoolObservations` | `internal/runners/launcher/warm_capacity_test.go`: `TestWarmCapacityObservationThroughLauncherHTTP`; `internal/store/warm_capacity_test.go`: `TestWarmPoolObservationAuthority` |
+| Console and CLI use the operator route with committed authorization | `internal/controller/warm_capacity.go`; `cmd/sparkwing/warm_capacity.go`; `web/src/components/WarmCapacity.tsx` | `internal/controller/warm_capacity_test.go`: `TestWarmCapacityConsoleCommitsAndRevocation`; `cmd/sparkwing/warm_capacity_test.go`: `TestWarmCapacityCommandsUseControllerTransport`; `web/tests/browser/warm-capacity.spec.ts` |
+| KEDA owns volume-free placeholders and namespaced scaler credentials in the dedicated warm namespace | `charts/sparkwing-full/templates/warm-capacity.yaml` | `charts/warm_capacity_test.go`: `TestWarmCapacityRendersClassNodesAndSQLScaler` |
+
 ### Run execution
 
 | Rule | Owner | Guard test |

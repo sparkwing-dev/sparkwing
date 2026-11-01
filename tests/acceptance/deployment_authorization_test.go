@@ -24,6 +24,8 @@ var deploymentRequests = []struct {
 }{
 	{"GET", "/api/v1/operator/limits", capability.OperatorLimits},
 	{"PUT", "/api/v1/operator/limits", capability.OperatorLimits},
+	{"GET", "/api/v1/operator/warm-capacity", capability.OperatorLimits},
+	{"PUT", "/api/v1/operator/warm-capacity", capability.OperatorLimits},
 	{"GET", "/api/v1/operator/signups", capability.OperatorLimits},
 	{"PUT", "/api/v1/operator/signups", capability.OperatorLimits},
 	{"GET", "/api/v1/operator/object-store", capability.OperatorObjectStore},
@@ -55,6 +57,11 @@ func (f *deploymentWrites) WriteComputeLimits(_ context.Context, a capability.Au
 }
 
 func (f *deploymentWrites) WriteSignUpSettings(_ context.Context, a capability.Authorized, _ store.SignUpSettingsChange) error {
+	f.seen = append(f.seen, a)
+	return nil
+}
+
+func (f *deploymentWrites) WriteWarmCapacity(_ context.Context, a capability.Authorized, _ store.WarmCapacitySettings) error {
 	f.seen = append(f.seen, a)
 	return nil
 }
@@ -127,6 +134,9 @@ func TestDeploymentHTTPAuthorization(t *testing.T) {
 				s := controller.New(st, slog.New(slog.NewTextHandler(io.Discard, nil))).WithAuthorization(consoleAuthorization(b)).WithOperatorSettingsWriter(writes)
 				if name == "service" && strings.HasSuffix(route.path, "/signups") && route.method == "PUT" {
 					r.Body = io.NopCloser(strings.NewReader(`{"mode":"open"}`))
+				}
+				if name == "service" && strings.HasSuffix(route.path, "/warm-capacity") && route.method == "PUT" {
+					r.Body = io.NopCloser(strings.NewReader(`{"class":"sparkwing-2cpu","mode":"manual","manual_count":2,"start_time_target_seconds":10}`))
 				}
 				w := httptest.NewRecorder()
 				s.Handler().ServeHTTP(w, r)
