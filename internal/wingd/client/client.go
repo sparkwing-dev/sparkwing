@@ -577,7 +577,7 @@ func (cl *Client) takeover(ctx context.Context, opts Options) error {
 		_ = nc.SetReadDeadline(time.Now().Add(opts.dialTimeout()))
 	}
 	_, _ = cl.dec.read()
-	cl.Close()
+	_ = cl.Close()
 	if err := waitLockFree(ctx, opts.Home); err != nil {
 		return err
 	}
