@@ -41,14 +41,17 @@ response cannot recover the one-time credential.
 
 Use `sparkwing operator teams show --team support-test --job-namespace sparkwing-cloud-jobs --profile deployment -o json`
 to read the team identity and its protected node label key and value. The value
-hashes the launcher's Cloud Job namespace with the team slug, so each deployment
-on a shared cluster has its own team nodes. Apply that
-value to the team's NodePool template label and `NoSchedule` taint before
-Cloud work is admitted. The launcher has read-only NodePool `get` and `list`
-access. It creates no pools. Without a compatible team pool, a held award ends
+hashes the launcher's Cloud Job namespace with the team slug. The launcher binds
+that label once to a never-used node from a shared NodePool for the requested
+hardware class. Nodes serve only that run. Configure shared pools with the
+deployment namespace and hardware-class labels and the generic
+`sparkwing.dev/dedicated=true:NoSchedule` taint, as described in the
+[deployment guide](deployment.md). Do not create per-team NodePools.
+The launcher has read-only NodePool `get` and `list` access. It creates no pools.
+Without a compatible shared pool, a held award ends
 as `cloud_capacity_unconfigured`, releases its unstarted credit hold, and gives
 the customer support@sparkwing.dev and the run ID as a support reference.
-The operator log names the protected label value to configure. A compatible
+The operator log names the unconfigured hardware class. A compatible
 pool that is scaling or exhausted keeps the award pending, with “Waiting for
 dedicated Cloud capacity” and elapsed time in run status.
 The underlying

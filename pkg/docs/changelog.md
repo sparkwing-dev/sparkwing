@@ -23,7 +23,7 @@ unlock.
 ### Added
 
 - **operator:** Warm capacity controls in the console and `sparkwing operator warm-capacity show|set`
-  Each Cloud hardware class defaults to Off. Manual holds a count. Auto uses cold-start waits and median job start time, bounded by the operator's min/max and a 10-second default target. The page and CLI show warm/desired capacity, start percentiles, cold starts, upsizes, signups and active teams.
+  Each Cloud hardware class defaults to Off. Manual holds a count. Auto uses cold-start waits and median job start time, bounded by the operator's min/max and a 10-second default target. The page and CLI show warm/desired capacity, p50/p95 starts over 1h/24h, and cold starts, upsizes, signups and active teams over 24h/7d.
 
 ### Changed
 

@@ -64,8 +64,11 @@ Cloud capacity uses one shared NodePool per hardware class, carrying
 `sparkwing.dev/hardware-class=sparkwing-<cores>cpu` and the generic
 `sparkwing.dev/dedicated=true:NoSchedule` taint. A fresh node is bound once to
 one team and run. Jobs from that run may share it; a later run never reuses it.
-Per-team NodePools are superseded. The launcher reports an unconfigured class
-when no shared pool exists for that class; an exhausted pool keeps waiting.
+Per-team NodePools are superseded. When no shared pool exists for the requested
+hardware class, the award ends as `cloud_capacity_unconfigured`, releases its
+unstarted credit hold, and gives support@sparkwing.dev the run ID as a reference.
+A compatible pool that is scaling or exhausted keeps the award pending, showing
+"Waiting for dedicated Cloud capacity" with elapsed time in run status.
 
 Warm capacity defaults Off for every class. The operator **Warm capacity** page
 and CLI show warm/desired nodes, start-time percentiles, cold starts and upsizes,
