@@ -656,7 +656,7 @@ namespace, so Karpenter adds one node per team's demand.
   Running requests, are consumable. Another team's request, running or finished,
   keeps the node out of reach. Reservation rechecks occupants after persisting
   its fence and before consuming requests or creating a Job.
-- A stopped request is replaced, UID-fenced, only when its node holds another
+- A request, running or stopped, is replaced, UID-fenced, only when its node holds another
   team's Pod or is bound to another team or run. Otherwise the launcher waits,
   because recreating requests on an incompatible pool would keep provisioning
   unusable nodes. Adoption waits for a terminating old request to leave before
