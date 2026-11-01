@@ -168,6 +168,21 @@ func TestTakeoverStopsAfterOneReplacement(t *testing.T) {
 	}
 }
 
+func TestTakeoverMissingSuccessorDoesNotSpawnAgain(t *testing.T) {
+	home := shortHome(t)
+	runDaemon(t, home, "v0.67.0")
+	spawns := 0
+	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Second)
+	defer cancel()
+	_, err := EnsureDaemon(ctx, Options{
+		Home: home, Version: "v0.68.3", Backoff: time.Nanosecond,
+		Spawn: func(string, string) error { spawns++; return nil },
+	})
+	if !errors.Is(err, errDaemonUnreachable) || spawns != 1 {
+		t.Fatalf("missing successor: error=%v spawns=%d, want one replacement", err, spawns)
+	}
+}
+
 func TestTakeoverReplacesSameVersionDaemonWithoutNonBlockingAdmission(t *testing.T) {
 	for _, buildIdentity := range []string{"wingwire-v1-liveness", ""} {
 		t.Run(buildIdentity, func(t *testing.T) {

@@ -469,6 +469,8 @@ func (cl *Client) connectPaced(ctx context.Context, dialMax time.Duration) error
 				if terr := cl.takeover(ctx, opts); terr != nil {
 					return terr
 				}
+				spawns++
+				socketDeadline = time.Now().Add(daemonStartupBudget(opts))
 				continue
 			}
 			cl.Close()
@@ -485,6 +487,8 @@ func (cl *Client) connectPaced(ctx context.Context, dialMax time.Duration) error
 			if terr := cl.takeover(ctx, opts); terr != nil {
 				return terr
 			}
+			spawns++
+			socketDeadline = time.Now().Add(daemonStartupBudget(opts))
 			continue
 		}
 		if !servedDownLevel(ack) {
