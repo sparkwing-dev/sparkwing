@@ -341,6 +341,15 @@ func (cl *Client) connectPaced(ctx context.Context, dialMax time.Duration) error
 			return daemonUnreachable(opts.Home, cl.sock, spawns, err, lastDial)
 		}
 		nc, derr := dial(ctx, cl.sock, opts.dialTimeout())
+		if derr != nil && !opts.NoTakeover {
+			legacy, err := wingd.LegacySocketPath(opts.Home)
+			if err != nil {
+				return err
+			}
+			if old, err := dial(ctx, legacy, opts.dialTimeout()); err == nil {
+				nc, derr = old, nil
+			}
+		}
 		if derr != nil {
 			if opts.observeDialFailure != nil {
 				opts.observeDialFailure()
@@ -565,11 +574,11 @@ func (cl *Client) takeover(ctx context.Context, opts Options) error {
 	}
 	_, _ = cl.dec.read()
 	cl.Close()
+	if err := waitLockFree(ctx, opts.Home); err != nil {
+		return err
+	}
 	if err := opts.spawn(opts.Home, opts.Version); err != nil {
-		if errors.Is(err, errDaemonHostFailed) {
-			return err
-		}
-		opts.logf("spawn successor: %v", err)
+		return fmt.Errorf("wingd/client: start replacement daemon: %w", err)
 	}
 	_ = sleep(ctx, opts.backoff())
 	return nil

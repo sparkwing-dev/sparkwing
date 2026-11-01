@@ -3,6 +3,8 @@ package client
 import (
 	"context"
 	"errors"
+	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 
@@ -73,7 +75,8 @@ func (l *processLifecycle) ensure(ctx context.Context, opts wingd.LocalStartOpti
 		return l.LocalLifecycle.EnsureStarted(ctx, opts)
 	}
 	status, err := l.control.owner.Status(ctx)
-	if errors.Is(err, ErrNoDaemon) || (err == nil && !status.Running) {
+	if errors.Is(err, ErrNoDaemon) || errors.Is(err, errDaemonTooOld) || errors.Is(err, errDaemonLacksOperation) ||
+		(err == nil && (!status.Running || supersedes(opts.Version, status.Version))) {
 		status, err = l.start(ctx, opts)
 	}
 	if err != nil {
@@ -156,7 +159,9 @@ func ensureLocalProcess(ctx context.Context, opts wingd.LocalStartOptions) (wing
 	if opts.Standalone || !filepath.IsAbs(opts.Executable) || strings.TrimSpace(opts.Version) == "" {
 		return wingd.LocalStatus{}, errors.New("wingd/client: detached startup requires an absolute executable and version")
 	}
-	options := Options{Home: opts.Home, Version: opts.Version, NoTakeover: true, Spawn: func(home, version string) error {
+	options := Options{Home: opts.Home, Version: opts.Version, Logf: func(format string, args ...any) {
+		fmt.Fprintf(os.Stderr, "sparkwing: "+format+"\n", args...)
+	}, Spawn: func(home, version string) error {
 		return spawnDetached(opts.Executable, home, version)
 	}}
 	ctx, cancel := context.WithTimeout(ctx, daemonStartupBudget(options))

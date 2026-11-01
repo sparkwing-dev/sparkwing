@@ -3,11 +3,40 @@ package client
 import (
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
 	"sync"
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/wingd"
+	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
 )
+
+func TestLocalProcessAttemptsItsOwnExecutableAfterIncompatibleDaemon(t *testing.T) {
+	home := shortHome(t)
+	oneShotDaemon(t, home, wingwire.HelloAck{ProtocolMajor: wingd.ProtocolMajor - 1, BinaryVersion: "v0.67.0"})
+	_, err := ensureLocalProcess(t.Context(), wingd.LocalStartOptions{
+		Home: home, Version: "v0.68.3", Executable: filepath.Join(home, "missing-sparkwing"),
+	})
+	if !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("replacement did not attempt supplied executable: %v", err)
+	}
+}
+
+func TestLocalProcessLifecycleReplacesOlderOwner(t *testing.T) {
+	home := t.TempDir()
+	owner := &lifecycleOwner{status: wingd.LocalStatus{Running: true, PID: 72, Version: "v0.67.0"}}
+	starts := 0
+	lifecycle := newProcessLifecycle(home, &localRuntimeFixture{}, nil, owner, func(_ context.Context, opts wingd.LocalStartOptions) (wingd.LocalStatus, error) {
+		starts++
+		owner.status = wingd.LocalStatus{Running: true, PID: 84, Version: opts.Version}
+		return owner.status, nil
+	})
+	status, err := lifecycle.EnsureStarted(t.Context(), wingd.LocalStartOptions{Home: home, Version: "v0.68.3"})
+	if err != nil || starts != 1 || status.Version != "v0.68.3" || status.PID != 84 {
+		t.Fatalf("upgrade startup: %+v error=%v starts=%d", status, err, starts)
+	}
+}
 
 func TestLocalProcessLifecycleStartsDetachedAndReusesOwner(t *testing.T) {
 	home := t.TempDir()
@@ -30,7 +59,6 @@ func TestLocalProcessLifecycleStartsDetachedAndReusesOwner(t *testing.T) {
 		t.Fatalf("startup: %+v, %v, local=%d detached=%d dashboard=%d", status, err, local.starts, starts, owner.dashboards)
 	}
 	cancel()
-	opts.Version = "v3"
 	var callers sync.WaitGroup
 	for range 20 {
 		callers.Go(func() {
@@ -59,7 +87,7 @@ func FuzzLocalProcessLifecycleKeepsOwnership(f *testing.F) {
 		owner := &lifecycleOwner{err: ErrNoDaemon}
 		if present {
 			owner.err = nil
-			owner.status = wingd.LocalStatus{Running: true, PID: 72, Version: "v1"}
+			owner.status = wingd.LocalStatus{Running: true, PID: 72, Version: "v2"}
 		}
 		spawnFailure := errors.New("spawn failed")
 		starts := 0
