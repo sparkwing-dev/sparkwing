@@ -26,7 +26,12 @@ func checkStorageCAS(t *testing.T) {
 
 func storageProperty(t *testing.T, property any) {
 	t.Helper()
-	if err := quick.Check(property, &quick.Config{MaxCount: 128, Rand: rand.New(rand.NewSource(7))}); err != nil {
+	storagePropertyCases(t, property, 128)
+}
+
+func storagePropertyCases(t *testing.T, property any, cases int) {
+	t.Helper()
+	if err := quick.Check(property, &quick.Config{MaxCount: cases, Rand: rand.New(rand.NewSource(7))}); err != nil {
 		t.Fatal(err)
 	}
 }
