@@ -74,7 +74,7 @@ func TestNonBillingSchemaRejectsCounterexamples(t *testing.T) {
 
 func TestSQLiteBaselineRequiresStrictStorageForEveryTable(t *testing.T) {
 	st := storetest.OpenSQLite(t)
-	rows, err := st.DB().Query(`SELECT name, strict FROM pragma_table_list WHERE schema='main' AND name NOT LIKE 'sqlite_%'`)
+	rows, err := st.DB().Query(`SELECT name, strict FROM pragma_table_list WHERE schema='main' AND type='table' AND name NOT LIKE 'sqlite_%'`)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -38,6 +38,7 @@ var reviewedUnscopedSQL = map[string]string{
 	"(*Operator).discoverAccountDeletionLocks":   "deleting one deployment account discovers all affected memberships and ledger teams before taking the complete lock set",
 
 	"(*Operator).ComputeUsage":              "deployment capacity sums metered awards from every tenant",
+	"(*Operator).WarmCapacity":              "deployment warm capacity reports start distributions, cold waits, upsizes and active teams across all tenants",
 	"(*Operator).ListWaitingNodes":          "deployment attention samples every tenant queue before updating individual tenant nodes",
 	"(*Operator).MarkBlobTombstones":        "garbage collection compares every tenant blob with the complete live reference graph",
 	"(*Operator).SealAbandonedLogStreams":   "log maintenance discovers abandoned streams across every tenant",

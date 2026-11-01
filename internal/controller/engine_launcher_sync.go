@@ -57,7 +57,7 @@ func (s storeLauncherSync) ReadLauncherSync(ctx context.Context, ref capability.
 	if err != nil {
 		return controllerwire.LauncherSyncResponse{}, err
 	}
-	// Warm observations also arrive while idle, when there are no awards to reconcile.
+	// safety: idle warm observations must recheck launcher authority even without awards to reconcile.
 	if body.WarmPools != nil && len(observed) == 0 && len(body.Preparing) == 0 && len(body.Activations) == 0 {
 		err := s.store.RecordWarmPoolObservations(ctx, ref, body.WarmPools)
 		return controllerwire.LauncherSyncResponse{Awards: []controllerwire.ClaimedUnit{}, Retired: []capability.LeaseRef{}}, err
