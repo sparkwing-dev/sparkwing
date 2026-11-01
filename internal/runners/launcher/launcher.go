@@ -145,7 +145,8 @@ func (l *Launcher) Run(ctx context.Context) error {
 				} else if err != ErrNoDedicatedNode { //nolint:errorlint // Joined provisioning faults must remain WARN.
 					logger.Warn("launcher claim failed", failureAttrs(err)...)
 				}
-				cooldown = time.Now().Add(retryWait(err, 0))
+				// safety: a placement error during a controller-requested backoff must not shorten it.
+				cooldown = later(cooldown, time.Now().Add(retryWait(err, 0)))
 			}
 		}
 		timer := time.NewTimer(poll)
@@ -157,6 +158,13 @@ func (l *Launcher) Run(ctx context.Context) error {
 		}
 	}
 	return nil
+}
+
+func later(a, b time.Time) time.Time {
+	if a.After(b) {
+		return a
+	}
+	return b
 }
 
 func retryWait(err error, poll time.Duration) time.Duration {
