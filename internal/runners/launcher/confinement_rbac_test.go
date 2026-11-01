@@ -166,6 +166,8 @@ func chartLauncherGrant(group, resource, name, namespace, verb string) bool {
 		}
 		if namespace == "cloud-cloud-jobs" {
 			verbs = "create get delete"
+		} else if namespace == "cloud" {
+			verbs = "get delete"
 		}
 	case "jobs":
 		if namespace == "cloud-cloud-jobs" {

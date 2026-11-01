@@ -53,6 +53,30 @@ roleRef:
   name: {{ include "sparkwing-runner-bundle.runner.fullname" . }}-launcher
 ---
 apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ include "sparkwing-runner-bundle.runner.fullname" . }}-warm-capacity
+  namespace: {{ .Release.Namespace }}
+rules:
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "delete"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ include "sparkwing-runner-bundle.runner.fullname" . }}-warm-capacity
+  namespace: {{ .Release.Namespace }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "sparkwing-runner-bundle.launcher.serviceAccountName" . | quote }}
+    namespace: {{ .Release.Namespace }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ include "sparkwing-runner-bundle.runner.fullname" . }}-warm-capacity
+---
+apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
   name: {{ .Release.Namespace }}-{{ include "sparkwing-runner-bundle.runner.fullname" . }}-boundary
