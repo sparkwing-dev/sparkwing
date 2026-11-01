@@ -5,9 +5,10 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/sparkwing-dev/sparkwing/pkg/match"
 	appsv1 "k8s.io/api/apps/v1"
 	yaml "k8s.io/apimachinery/pkg/util/yaml"
+
+	"github.com/sparkwing-dev/sparkwing/pkg/match"
 )
 
 func TestWarmCapacityRendersClassNodesAndSQLScaler(t *testing.T) {

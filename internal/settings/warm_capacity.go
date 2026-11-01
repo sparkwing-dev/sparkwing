@@ -2,8 +2,9 @@ package settings
 
 import (
 	"fmt"
-	"github.com/sparkwing-dev/sparkwing/pkg/match"
 	"math"
+
+	"github.com/sparkwing-dev/sparkwing/pkg/match"
 )
 
 // WarmCapacitySettings controls the idle nodes held for one hardware class.
