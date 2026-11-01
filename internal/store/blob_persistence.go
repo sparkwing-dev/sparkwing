@@ -264,8 +264,13 @@ func readOwnBlobReceiptTx(ctx context.Context, tx *storeTx, source blob.UploadId
 	return runspec.Optional[blob.Receipt]{Set: true, Value: blob.Receipt{Identity: source, Digest: digest, CreatedAt: *stateTime(sql.NullInt64{Int64: at, Valid: true})}}, nil
 }
 
-func blobKindAllowed(source blob.UploadIdentity, kind blob.Kind) bool {
+func blobKindAllowed(a blobActor, kind blob.Kind) bool {
+	source := a.source
 	if kind == blob.KindPrepared {
+		// safety: Cloud jobs execute these bytes with run secrets without rebuilding.
+		if a.capability.Billing == nil || a.capability.Billing.ExecutorClass != TierCloud {
+			return false
+		}
 		return source.Kind == blob.UploadOwnerUnit && source.Unit.Set && (source.Unit.Value.Kind == blob.UploadPlanUnit || source.Unit.Value.Kind == blob.UploadTriggerUnit)
 	}
 	for _, rule := range blob.UploadRules {

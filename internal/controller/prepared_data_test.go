@@ -17,6 +17,15 @@ import (
 )
 
 func TestPreparedDataHTTPPublishAndUnstartedAwardRead(t *testing.T) {
+	testPreparedDataHTTPPublish(t, true)
+}
+
+func TestPreparedDataHTTPRefusesNativeTriggerPublisher(t *testing.T) {
+	testPreparedDataHTTPPublish(t, false)
+}
+
+func testPreparedDataHTTPPublish(t *testing.T, cloud bool) {
+	t.Helper()
 	objects, err := blob.NewFilesystem(blob.FilesystemOptions{Directory: t.TempDir(), Endpoint: "https://controller.test", SigningKey: []byte(strings.Repeat("k", 32))})
 	if err != nil {
 		t.Fatal(err)
@@ -34,8 +43,20 @@ func TestPreparedDataHTTPPublishAndUnstartedAwardRead(t *testing.T) {
 	run.Request.Request.Git.Ref = "main"
 	sealed := sealWith(t, run.Request, assertedProvenance(t, "ci", "main", run.Request.Request.Git.SHA))
 	engineSQL(t, e.Store, "UPDATE runs SET git_branch='main',request_json=? WHERE team='a' AND id='run'", sealed)
-	owner := engineRuntimeClaim(t, e, capability.UnitTrigger)
-	ownerRaw := nativeClaimPresentation(t, e, owner)
+	var ownerRaw string
+	if cloud {
+		engineSQL(t, e.Store, `UPDATE runs SET dispatch='controller'`)
+		engineSQL(t, e.Store, `UPDATE triggers SET unit_kind='plan'`)
+		ownerRaw = LauncherFixtureClaim(t, e.Store, "run", store.PlanNodeID)
+		engineHTTPRoot(t, e, "a", "runner", []capability.Grant{capability.NodesClaim})
+	} else {
+		fetchedRunFixture(t, e.Store, "a", "run", "acme/repo")
+		owner := engineRuntimeClaim(t, e, capability.UnitTrigger)
+		if owner.Principal.Capability.Host == nil || owner.Principal.Capability.Host.Kind != capability.HostSelfHosted {
+			t.Fatalf("expected self-hosted trigger: %+v", owner.Principal.Capability.Host)
+		}
+		ownerRaw = nativeClaimPresentation(t, e, owner)
+	}
 	h := e.Server.Handler()
 	body := "prepared executable and source"
 	digest := fmt.Sprintf("%x", sha256.Sum256([]byte(body)))
@@ -54,6 +75,10 @@ func TestPreparedDataHTTPPublishAndUnstartedAwardRead(t *testing.T) {
 		t.Fatalf("PUT: %d %s", putResult.Code, putResult.Body.String())
 	}
 	engineClaimHTTP(t, h, ownerRaw, "POST", "/api/v1/data/commit", fmt.Sprintf(`{"upload_id":%q}`, upload.UploadID), 200)
+	if !cloud {
+		engineClaimHTTP(t, h, ownerRaw, "POST", "/api/v1/data/records", fmt.Sprintf(`{"kind":"prepared","pipeline":"ci","name":"pipeline","key":"run","digest":%q}`, digest), http.StatusForbidden)
+		return
+	}
 	engineClaimHTTP(t, h, ownerRaw, "POST", "/api/v1/data/records", fmt.Sprintf(`{"kind":"prepared","pipeline":"ci","name":"pipeline","key":"run","digest":%q}`, digest), 200)
 	engineSQL(t, e.Store, `INSERT INTO nodes(team,run_id,node_id,status,ready_at,spec_json,execution_json) VALUES ('a','run','job','pending',1,?,?)`, []byte(`{"id":"job"}`), []byte(`{}`))
 	claim, err := e.Store.AsOperator().ClaimUnit(t.Context(), store.UnitDemand{CapabilityPrefix: "runner", Target: &store.UnitRef{Kind: capability.UnitNode, RunID: "run", NodeID: "job"}})

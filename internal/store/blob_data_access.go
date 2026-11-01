@@ -101,7 +101,7 @@ func checkBlobDataWriteTx(ctx context.Context, tx *storeTx, team Team, input blo
 	if (target.RunID != "" && target.RunID != source.RunID) || (target.NodeID != "" && (!source.Attempt.Set || target.NodeID != source.Attempt.Value.NodeID)) || (target.Attempt != 0 && (!source.Attempt.Set || target.Attempt != source.Attempt.Value.Attempt)) || (target.Generation != 0 && target.Generation != generation) {
 		return blob.ErrDigestNotReadable
 	}
-	if target.RecordKind != "" && !blobKindAllowed(source, blob.Kind(target.RecordKind)) {
+	if target.RecordKind != "" && !blobKindAllowed(resolved, blob.Kind(target.RecordKind)) {
 		return blob.ErrDigestNotReadable
 	}
 	if target.Operation == capability.DataRecord && target.Digest == "" && target.RecordKind == string(blob.KindMemo) && target.RecordName != "" {

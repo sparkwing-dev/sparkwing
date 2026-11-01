@@ -12,11 +12,16 @@ import (
 )
 
 func TestPreparedPipelineOwnerPublishAndAwardRead(t *testing.T) {
-	for _, kind := range []capability.UnitKind{capability.UnitTrigger, capability.UnitPlan} {
+	for _, kind := range []capability.UnitKind{capability.UnitPlan} {
 		t.Run(string(kind), func(t *testing.T) {
-			s, claim := releaseFixture(t, kind)
+			s, _, claim, _ := launcherSnapshotFixture(t, kind)
+			issuedOwner, err := s.AsOperator().ExchangeCapability(t.Context(), capability.ExchangeSpec{BootstrapPrefix: claim.Award.CapabilityPrefix})
+			if err != nil {
+				t.Fatal(err)
+			}
+			claim.Award.CapabilityPrefix = issuedOwner.Capability.Prefix
 			tenant := &Tenant{s: s, team: "a"}
-			identity := blob.UploadIdentity{Kind: blob.UploadOwnerUnit, Team: "a", RunID: "run", Principal: "machine", CapabilityRef: claim.Award.CapabilityPrefix, Unit: runspec.Optional[blob.UploadUnit]{Set: true, Value: blob.UploadUnit{Kind: blob.UploadUnitKind(kind), ID: "run", Generation: 7}}}
+			identity := blob.UploadIdentity{Kind: blob.UploadOwnerUnit, Team: "a", RunID: "run", Principal: "launcher", CapabilityRef: claim.Award.CapabilityPrefix, Unit: runspec.Optional[blob.UploadUnit]{Set: true, Value: blob.UploadUnit{Kind: blob.UploadUnitKind(kind), ID: "run", Generation: int64(claim.Award.Generation)}}}
 			authority := blob.Authority{CapabilityRef: identity.CapabilityRef}
 			setBlobRecordRef(t, s, identity.CapabilityRef)
 			rewriteSchemaExec(t, s.db, "UPDATE runs SET request_json=? WHERE team='a' AND id='run'", []byte(`{"version":1,"request":{"git":{"repository":{"key":"gh:1"},"ref":"main"}},"provenance":{"trust":"asserted","ref":"main","pipeline":"ci","writer":"account/fixture"}}`))
@@ -30,7 +35,7 @@ func TestPreparedPipelineOwnerPublishAndAwardRead(t *testing.T) {
 			key := blob.PreparedRecordKey("a", "run", "gh:1", "ci")
 			request := blob.CommitRecordRequest{Authority: authority, Source: identity, Key: key, Digest: ticket.Blob.Digest}
 			authorized := dataAccessAuthority(t, s, identity.CapabilityRef)
-			target := capability.DataTarget{Operation: capability.DataUpload, RunID: "run", Generation: 7, Digest: string(ticket.Blob.Digest)}
+			target := capability.DataTarget{Operation: capability.DataUpload, RunID: "run", Generation: int64(claim.Award.Generation), Digest: string(ticket.Blob.Digest)}
 			if err = tenant.CheckDataAccess(t.Context(), authorized, target); err != nil {
 				t.Fatalf("owner upload generation: %v", err)
 			}
@@ -77,20 +82,11 @@ func TestPreparedPipelineOwnerPublishAndAwardRead(t *testing.T) {
 					t.Fatalf("accepted forged %s", field)
 				}
 			}
-			unit, err := encodeAwardUnit(UnitRef{Kind: capability.UnitNode, RunID: "run", NodeID: "job"})
+			job, err := s.AsOperator().ClaimUnit(t.Context(), UnitDemand{CapabilityPrefix: "runner", Target: &UnitRef{Kind: capability.UnitNode, RunID: "run", NodeID: "job"}, Labels: []string{"team-4cpu"}})
 			if err != nil {
 				t.Fatal(err)
 			}
-			var issued capability.Issued
-			if err = s.inTx(t.Context(), func(tx *storeTx) error {
-				var e error
-				issued, e = issueFixtureAward(t, s, tx, capability.AwardSpec{Claimant: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: "machine"}, Unit: capability.UnitNode, UnitID: unit, Purpose: capability.PurposeWork, Delivery: capability.DeliveryDirect})
-				return e
-			}); err != nil {
-				t.Fatal(err)
-			}
-			rewriteSchemaExec(t, s.db, "UPDATE nodes SET capability_prefix=?,status='pending',started_at=NULL WHERE team='a' AND run_id='run' AND node_id='job'", issued.Capability.Prefix)
-			reader := blob.Authority{CapabilityRef: issued.Capability.Prefix}
+			reader := blob.Authority{CapabilityRef: job.Award.CapabilityPrefix}
 
 			hit, err := records.LookupRecord(t.Context(), blob.RecordLookup{Authority: reader, Key: key})
 			if err != nil || !hit.Found {
@@ -144,5 +140,30 @@ func TestPreparedPipelineEvalCannotPublish(t *testing.T) {
 	request := blob.CommitRecordRequest{Authority: upload.Intent.Authority, Source: upload.Intent.Identity, Key: blob.PreparedRecordKey("a", "run", "gh:1", "ci"), Digest: ticket.Blob.Digest}
 	if _, err = tenant.BlobRecords(nil).CommitRecord(t.Context(), request); err == nil {
 		t.Fatal("eval published prepared pipeline")
+	}
+}
+
+func TestPreparedPipelineNativeOwnersCannotPublish(t *testing.T) {
+	for _, kind := range []capability.UnitKind{capability.UnitTrigger, capability.UnitPlan} {
+		t.Run(string(kind), func(t *testing.T) {
+			s, claim := releaseFixture(t, kind)
+			tenant := &Tenant{s: s, team: "a"}
+			setBlobRecordRef(t, s, claim.Award.CapabilityPrefix)
+			authority, err := tenant.ResolveBlobAuthority(t.Context(), blob.Authority{CapabilityRef: claim.Award.CapabilityPrefix}, capability.DataWrite)
+			if err != nil {
+				t.Fatal(err)
+			}
+			ticket, err := tenant.ReserveBlobUpload(t.Context(), UploadReservationRequest{ID: "prepared", Intent: blob.UploadIntent{Authority: authority, Identity: authority.Upload.Value, Digest: blob.Digest(strings.Repeat("a", 64)), Size: 3}, ExpiresAt: s.now().Add(time.Hour)})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := tenant.CommitBlobUpload(t.Context(), verifiedUpload(ticket, authority)); err != nil {
+				t.Fatal(err)
+			}
+			request := blob.CommitRecordRequest{Authority: authority, Source: authority.Upload.Value, Key: blob.PreparedRecordKey("a", "run", "gh:1", "ci"), Digest: ticket.Blob.Digest}
+			if _, err := tenant.BlobRecords(nil).CommitRecord(t.Context(), request); err == nil {
+				t.Fatal("native owner published prepared pipeline")
+			}
+		})
 	}
 }

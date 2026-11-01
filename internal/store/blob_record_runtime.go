@@ -130,7 +130,7 @@ func (r *blobRecords) commitRecord(ctx context.Context, request blob.CommitRecor
 		if err != nil {
 			return blob.Record{}, err
 		}
-		if !reflect.DeepEqual(request.Source, a.source) || !blobKindAllowed(a.source, request.Key.Kind) {
+		if !reflect.DeepEqual(request.Source, a.source) || !blobKindAllowed(a, request.Key.Kind) {
 			return blob.Record{}, authorityError(apierr.Forbidden, "record is outside the uploader's authority")
 		}
 		if request.Key.Kind == blob.KindManifest && request.ManifestDigest.Set && request.ManifestDigest.Value != request.Digest {
@@ -203,7 +203,7 @@ func checkBlobWriteKey(a blobActor, key blob.RecordKey) error {
 	if key.Team != a.capability.Team || key.Scope.Repo != a.authority.Repo || key.Scope.Ref != ref || (key.Kind != blob.KindDepcache && key.Scope.Pipeline != a.pipeline) || key.Name == "" || !slices.Contains(blob.Kinds, key.Kind) {
 		return authorityError(apierr.Forbidden, "record key differs from sealed scope")
 	}
-	if key.Kind == blob.KindPrepared && (!blobKindAllowed(a.source, key.Kind) || key.Scope.Job != "" || key.Scope.Key != a.source.RunID || key.Name != "pipeline") {
+	if key.Kind == blob.KindPrepared && (!blobKindAllowed(a, key.Kind) || key.Scope.Job != "" || key.Scope.Key != a.source.RunID || key.Name != "pipeline") {
 		return blob.ErrDigestNotReadable
 	}
 	if blobIsCache(key.Kind) && !blobCacheRepositoryAllowed(a, key.Kind) {

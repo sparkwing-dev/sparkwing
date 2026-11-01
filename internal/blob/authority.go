@@ -67,6 +67,7 @@ func validUpload(i UploadIdentity) bool {
 }
 
 // AuthorizeUpload checks the upload kind against its bound identity.
+// The server also checks persisted Cloud award authority for prepared records.
 func AuthorizeUpload(a Authority, i UploadIdentity, kind Kind) error {
 	if kind == KindPrepared && (i.Kind != UploadOwnerUnit || !i.Unit.Set || (i.Unit.Value.Kind != UploadPlanUnit && i.Unit.Value.Kind != UploadTriggerUnit)) {
 		return ErrDigestNotReadable
