@@ -1145,6 +1145,10 @@ const NoMemo memoBypass = true
 ## Variables
 
 ```
+var ErrIsolatedHomeRequired error = apierr.IsolatedHomeRefusal()
+```
+
+```
 var ErrOIDCUnavailable = errors.New("sparkwing: no controller issues OIDC tokens for this run")
 ```
 

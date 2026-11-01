@@ -91,6 +91,7 @@ type EnvVarDoc struct {
 type EnvVarDocer interface {
 	EnvVars() []EnvVarDoc
 }
+var ErrIsolatedHomeRequired error = apierr.IsolatedHomeRefusal()
 var ErrOIDCUnavailable = errors.New("sparkwing: no controller issues OIDC tokens for this run")
 var ErrRefAbsent = errors.New("sparkwing: referenced output is absent")
 var ErrSecretMissing = secrets.ErrSecretMissing

@@ -33,6 +33,7 @@ const (
 	PayloadTooLarge       Code = "payload_too_large"
 	PlanInvalid           Code = "plan_invalid"
 	PlanFailed            Code = "plan_failed"
+	IsolatedHomeRequired  Code = "isolated_home_required"
 	LimitExceeded         Code = "limit_exceeded"
 	CapabilityUnsupported Code = "capability_unsupported"
 	SecretInIdentifier    Code = "secret_in_identifier"
@@ -85,6 +86,7 @@ var Codes = []Definition{
 	{PayloadTooLarge, 413, "The request exceeds the named size limit."},
 	{PlanInvalid, 422, "A plan or expansion violates its contract."},
 	{PlanFailed, 422, "Pipeline planning failed."},
+	{IsolatedHomeRequired, 422, "Pipeline requires a temporary home; the host supplies fixed recovery text before secret discovery completes."},
 	{LimitExceeded, 422, "An explicit setting exceeds its ceiling."},
 	{CapabilityUnsupported, 422, "The placement capability table refuses a declaration."},
 	{SecretInIdentifier, 422, "A stored identifier contains a registered secret value."},
@@ -142,6 +144,11 @@ type Error struct {
 	Message string         `json:"message"`
 	Hint    string         `json:"hint,omitempty"`
 	Details map[string]any `json:"details,omitempty"`
+}
+
+// IsolatedHomeRefusal supplies recovery text without echoing SDK error payloads.
+func IsolatedHomeRefusal() *Error {
+	return &Error{Code: IsolatedHomeRequired, Message: `pipeline requires an isolated Sparkwing home; retry with HOME="$(mktemp -d)" SPARKWING_HOME="$(mktemp -d)" before the sparkwing command`}
 }
 
 // Authorization constructs a forbidden error with its required reason.

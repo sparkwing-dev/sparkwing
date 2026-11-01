@@ -35,7 +35,11 @@ func describePipeline(ctx context.Context, reg *registration) (d nodeproto.Pipel
 			err = planningFailure(failure)
 		}
 		if err != nil {
-			err = sdkError(apierr.PlanFailed, fmt.Sprintf("describe pipeline %q: %v", reg.Name, err))
+			if errors.Is(err, ErrIsolatedHomeRequired) {
+				err = apierr.IsolatedHomeRefusal()
+			} else {
+				err = sdkError(apierr.PlanFailed, fmt.Sprintf("describe pipeline %q: %v", reg.Name, err))
+			}
 		}
 	}()
 	p := reg.instance()

@@ -17558,6 +17558,9 @@ x-sparkwing-error-codes:
   - code: plan_failed
     http_status: 422
     purpose: Pipeline planning failed.
+  - code: isolated_home_required
+    http_status: 422
+    purpose: Pipeline requires a temporary home; the host supplies fixed recovery text before secret discovery completes.
   - code: limit_exceeded
     http_status: 422
     purpose: An explicit setting exceeds its ceiling.

@@ -18,6 +18,9 @@ func TestReleaseRefusesOperationalHomeDuringPlanning(t *testing.T) {
 			if err == nil {
 				t.Fatalf("release planning = %v, want isolated-home refusal before intake", err)
 			}
+			if !strings.Contains(err.Error(), `HOME="$(mktemp -d)" SPARKWING_HOME="$(mktemp -d)"`) {
+				t.Fatalf("release discovery hid the temporary-home remedy: %v", err)
+			}
 			if _, err := newTestHost(t, sparkwingtest.Options{}).Plan(t.Context(), "Build", nil); err != nil {
 				t.Fatalf("another pipeline in the operational home: %v", err)
 			}
@@ -36,7 +39,7 @@ func TestReleaseRequiresIsolatedSparkwingHome(t *testing.T) {
 	if err == nil {
 		t.Fatal("release accepted the default shared Sparkwing home")
 	}
-	if !strings.Contains(err.Error(), `HOME="$(mktemp -d)" SPARKWING_HOME="$(mktemp -d)" sparkwing run release --sw-dry-run`) {
+	if !strings.Contains(err.Error(), `HOME="$(mktemp -d)" SPARKWING_HOME="$(mktemp -d)"`) {
 		t.Fatalf("error = %q, want actionable isolated-home guidance", err)
 	}
 }

@@ -60,3 +60,7 @@ payload masking, so their field names are never subject to matching. Size and
 idle flushes preserve complete UTF-8 boundaries.
 
 Pipeline code run without a Sparkwing host has no automatic masking.
+
+Discovery refusals with `isolated_home_required` show only fixed host text with
+a temporary-home remedy. SDK messages, hints, details and buffered logs stay
+private while secret declarations are incomplete.
