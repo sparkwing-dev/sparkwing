@@ -39,7 +39,7 @@ func (s *Server) verifyIntakeSourceCredential(ctx context.Context, team store.Te
 		if request.Git.Repository.Key != from.Git.Repository.Key || request.Source.Location != from.Source.Location || request.Git.SHA == from.Git.SHA && request.Git.Ref == from.Git.Ref && request.Source.Ref == from.Source.Ref {
 			return store.FetchedRepository{}, false, nil
 		}
-		// Child fetch proof is optional because admission already permits asserted children.
+		// safety: child fetch proof is optional because admission already permits asserted children.
 		defer func() {
 			if verificationErr != nil {
 				fetched, verified, verificationErr = store.FetchedRepository{}, false, nil
