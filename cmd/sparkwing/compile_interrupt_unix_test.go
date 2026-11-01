@@ -35,6 +35,8 @@ func TestMaterializeStopsTheToolchainOnTermination(t *testing.T) {
 		os.Exit(0)
 	}
 
+	t.Parallel()
+
 	scratch := initSnapshotRepo(t)
 	pipelineDir := filepath.Join(scratch, ".sparkwing")
 	if err := os.MkdirAll(pipelineDir, 0o750); err != nil {
