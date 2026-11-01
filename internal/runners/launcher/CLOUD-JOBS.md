@@ -559,6 +559,16 @@ associated ephemeral-state reclamation. Job code holds no node root, so it canno
 change host state outside its Pod. A node is reused only by later jobs of the
 run that first used it, so even within a team no run reaches another's node.
 
+Placement prefers a run's own nodes within each eligible class. If its matching
+node still holds an exact predecessor reservation whose UID-fenced Job is deleting
+with the cleanup finalizer, the successor waits up to 30 seconds before requesting
+fresh capacity. Only that predecessor's Pods and DaemonSets may occupy the node.
+Normal reconciliation retries teardown before placement. Live reservations still
+permit fanout. Foreign runs, damaged bindings and quarantined nodes never earn
+this wait. The deadline belongs to the held award and does not renew on retries.
+`TestSuccessorWaitsForPredecessorNode` and `TestTeardownWaitIsBoundedAndRunScoped`
+guard reuse and the fallback.
+
 ## Preparation leases
 
 Image startup and source checkout can take longer than a unit's

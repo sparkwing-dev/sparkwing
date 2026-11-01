@@ -67,7 +67,9 @@ class and deployment. Its template carries
 change. The launcher binds a never-used node to the exact protected team value
 and run when it reserves it. Permanent used-team and used-run fences prevent
 reuse across runs, including child runs. Later jobs of the same run may share
-its node.
+its node. If a matching node is finishing the previous job's fenced teardown,
+the successor waits up to 30 seconds before requesting another node. A live job
+still permits fanout onto fresh capacity.
 
 When no vacant Ready node fits, the launcher checks shared-pool provenance with
 read-only NodePool access. A compatible pool that is scaling or exhausted keeps

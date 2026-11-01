@@ -64,6 +64,7 @@ func (binding CloudJobBinding) LeaseRef() capability.LeaseRef {
 
 // CloudJobAward carries only a single-use bootstrap, never the launcher's root credential.
 type CloudJobAward struct {
+	teardownDeadline   time.Time
 	LeaseExpiresAt     time.Time          `json:"lease_expires_at"`
 	Engine             *engineid.Identity `json:"engine,omitempty"`
 	Source             source.Spec        `json:"source"`
@@ -84,9 +85,10 @@ type CloudNodeReservation struct {
 }
 
 type CloudPlacement struct {
-	RequestedClass     string
-	UpsizeEnabled      bool
-	WaitedForFreshNode bool
+	teardownWaitExpired bool
+	RequestedClass      string
+	UpsizeEnabled       bool
+	WaitedForFreshNode  bool
 }
 
 // CloudBoundary reserves one Job per permanently team/run-bound node. Network isolation is

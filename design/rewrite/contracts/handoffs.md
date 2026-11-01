@@ -1280,6 +1280,9 @@ pools are not an option. Research and measurements:
 
 - Isolation boundary: a Cloud node is never reused across runs. Jobs of the same
   run may share a node; a run that fans out may take several fresh nodes.
+  A successor waits up to 30 seconds for its matching-class predecessor's fenced
+  teardown before requesting fresh capacity. Live reservations permit fanout.
+  Team/run fences, exact reservation ownership and Pod vacancy remain required.
 - Capacity: one shared Karpenter NodePool per hardware class with a generic
   dedicated taint. A never-used node is bound to exactly one team and run when a
   job claims it (exact protected team label on the node, existing used-team and

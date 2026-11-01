@@ -223,6 +223,13 @@ func (l *Launcher) launch(ctx context.Context, award *CloudJobAward) (launched b
 	current.LeaseExpiresAt = expires
 	r, err := BuildJob(ctx, time.Now(), l.Config, current, l.Boundary)
 	if errors.Is(err, ErrNoDedicatedNode) {
+		if errors.Is(err, errPredecessorTeardown) {
+			if award.teardownDeadline.IsZero() {
+				award.teardownDeadline = time.Now().Add(30 * time.Second)
+			}
+			l.wait(award)
+			return true, ErrNoDedicatedNode
+		}
 		firstWait := !award.WaitedForFreshNode
 		award.WaitedForFreshNode = true
 		l.wait(award)

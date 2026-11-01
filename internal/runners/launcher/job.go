@@ -105,7 +105,7 @@ func BuildJob(ctx context.Context, now time.Time, cfg CloudJobConfig, award Clou
 	if err != nil {
 		return CloudJobResources{}, fmt.Errorf("invalid award binding: %w", err)
 	}
-	reservation, err := boundary.Reserve(ctx, b, name, CloudPlacement{RequestedClass: cpuClass(award.CPUCores), UpsizeEnabled: award.UpsizeEnabled, WaitedForFreshNode: award.WaitedForFreshNode})
+	reservation, err := boundary.Reserve(ctx, b, name, CloudPlacement{teardownWaitExpired: !award.teardownDeadline.IsZero() && !now.Before(award.teardownDeadline), RequestedClass: cpuClass(award.CPUCores), UpsizeEnabled: award.UpsizeEnabled, WaitedForFreshNode: award.WaitedForFreshNode})
 	if err != nil {
 		return CloudJobResources{}, fmt.Errorf("reserve Cloud boundary: %w", err)
 	}

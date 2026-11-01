@@ -24,6 +24,8 @@ import (
 // ErrNoDedicatedNode leaves the award unstarted when no exclusive placement is available.
 var ErrNoDedicatedNode = errors.New("no unoccupied team-dedicated Cloud node")
 
+var errPredecessorTeardown = fmt.Errorf("same-run predecessor is in teardown: %w", ErrNoDedicatedNode)
+
 const (
 	reservationNamespaceAnnotation = "sparkwing.dev/reservation-namespace"
 	reservationTaint               = "sparkwing.dev/cloud-reserved"
@@ -61,10 +63,25 @@ func (b *KubernetesBoundary) Reserve(ctx context.Context, binding CloudJobBindin
 			classes = append(classes, next)
 		}
 	}
+	// Same-run nodes come first so a fresh node cannot win a serial handoff.
+	run := runNodeValue(b.Namespace, binding.RunID)
+	slices.SortStableFunc(nodes.Items, func(a, c corev1.Node) int {
+		if (a.Labels[usedRunLabel] == run) == (c.Labels[usedRunLabel] == run) {
+			return 0
+		}
+		if a.Labels[usedRunLabel] == run {
+			return -1
+		}
+		return 1
+	})
 	for index, class := range classes {
+		pending := false
 		for _, node := range nodes.Items {
 			if !nodeReady(node) || quarantined(node) || node.Labels[CloudClassLabel] != class {
 				continue
+			}
+			if pending && node.Labels[usedRunLabel] != run && !placement.teardownWaitExpired {
+				return CloudNodeReservation{}, errPredecessorTeardown
 			}
 			if index > 0 && node.Labels[usedRunLabel] != runNodeValue(b.Namespace, binding.RunID) {
 				// safety: upsizing may avoid a cold start, but cannot reuse a node from another run.
@@ -80,6 +97,13 @@ func (b *KubernetesBoundary) Reserve(ctx context.Context, binding CloudJobBindin
 				}
 			}
 			reservation, err := b.reserveNode(ctx, node, binding, job, placement)
+			if errors.Is(err, ErrNoDedicatedNode) && node.Labels[usedRunLabel] == run {
+				waiting, lookupErr := b.predecessorTeardown(ctx, node, binding)
+				if lookupErr != nil {
+					return CloudNodeReservation{}, lookupErr
+				}
+				pending = pending || waiting
+			}
 			if apierrors.IsConflict(err) || errors.Is(err, ErrNoDedicatedNode) {
 				continue
 			}
@@ -90,6 +114,9 @@ func (b *KubernetesBoundary) Reserve(ctx context.Context, binding CloudJobBindin
 				return CloudNodeReservation{}, errors.Join(err, b.Release(ctx, reservation))
 			}
 			return reservation, nil
+		}
+		if pending && !placement.teardownWaitExpired {
+			return CloudNodeReservation{}, errPredecessorTeardown
 		}
 	}
 

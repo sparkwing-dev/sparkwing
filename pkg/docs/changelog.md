@@ -57,6 +57,9 @@ unlock.
 
 ### Fixed
 
+- **Cloud:** Serial jobs wait up to 30 seconds for the same run's node to finish teardown before requesting another node
+  This avoids provisioning extra capacity during a predecessor's deletion. Live jobs can still fan out, and nodes remain bound to one team and run.
+
 - **controller:** Log unavailable Cloud job metrics at info and retry database health network failures once before logging an error
 - **Cloud runner:** Reuse prepared pipelines when execution expands the planner's omitted checkout defaults
   Publication and restore compare effective checkout policy. Different history depth, submodule and LFS settings still build fresh.
