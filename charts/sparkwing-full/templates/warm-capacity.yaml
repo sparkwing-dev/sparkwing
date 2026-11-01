@@ -109,7 +109,8 @@ spec:
   pollingInterval: 15
   cooldownPeriod: 30
   minReplicaCount: 0
-  maxReplicaCount: {{ $config.maxReplicas | default 100 }}
+  # The view owns the operator's maximum; this is Kubernetes' replica range.
+  maxReplicaCount: 2147483647
   advanced:
     horizontalPodAutoscalerConfig:
       behavior:

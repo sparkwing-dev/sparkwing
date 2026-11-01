@@ -46,7 +46,7 @@ func TestWarmCapacityRendersClassNodesAndSQLScaler(t *testing.T) {
 			t.Fatalf("missing class SQL %s", class.Label)
 		}
 	}
-	for _, want := range []string{"kind: TriggerAuthentication", "parameter: connection", "name: \"warm-db\"", "type: postgresql", "metricType: AverageValue", "operator: DoesNotExist", "value: -1000", "sparkwing.dev/cloud-namespace", "sparkwing.dev/hardware-class", "sparkwing.dev/dedicated", "node-restriction.kubernetes.io/sparkwing-team-node"} {
+	for _, want := range []string{"kind: TriggerAuthentication", "parameter: connection", "name: \"warm-db\"", "type: postgresql", "metricType: AverageValue", "maxReplicaCount: 2147483647", "operator: DoesNotExist", "value: -1000", "sparkwing.dev/cloud-namespace", "sparkwing.dev/hardware-class", "sparkwing.dev/dedicated", "node-restriction.kubernetes.io/sparkwing-team-node"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("missing %s", want)
 		}

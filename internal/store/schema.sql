@@ -1810,9 +1810,9 @@ CREATE INDEX idx_runs_push_claim ON runs(team,repo_key,provenance_sha,provenance
 CREATE TABLE warm_pool_settings (
     class TEXT PRIMARY KEY NOT NULL CHECK(class IN ('sparkwing-2cpu','sparkwing-4cpu','sparkwing-8cpu','sparkwing-16cpu','sparkwing-32cpu','sparkwing-64cpu')),
     mode TEXT NOT NULL DEFAULT 'off' CHECK(mode IN ('off','manual','auto')),
-    manual_count BIGINT NOT NULL DEFAULT 0 CHECK(manual_count >= 0),
+    manual_count BIGINT NOT NULL DEFAULT 0 CHECK(manual_count BETWEEN 0 AND 2147483647),
     auto_min BIGINT NOT NULL DEFAULT 0 CHECK(auto_min >= 0),
-    auto_max BIGINT NOT NULL DEFAULT 0 CHECK(auto_max >= auto_min),
+    auto_max BIGINT NOT NULL DEFAULT 0 CHECK(auto_max >= auto_min AND auto_max <= 2147483647),
     start_time_target_seconds DOUBLE PRECISION NOT NULL DEFAULT 10 CHECK(start_time_target_seconds > 0)
 );
 INSERT INTO warm_pool_settings(class) VALUES ('sparkwing-2cpu'),('sparkwing-4cpu'),('sparkwing-8cpu'),('sparkwing-16cpu'),('sparkwing-32cpu'),('sparkwing-64cpu');

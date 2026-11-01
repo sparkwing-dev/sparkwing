@@ -461,19 +461,13 @@ warmCapacity:
   classes:
     sparkwing-2cpu:
       requests: {cpu: "2", memory: "5529Mi", ephemeral-storage: "20Gi"}
-      maxReplicas: 100
     sparkwing-4cpu:
       requests: {cpu: "4", memory: "13107Mi", ephemeral-storage: "20Gi"}
-      maxReplicas: 100
     sparkwing-8cpu:
       requests: {cpu: "8", memory: "28262Mi", ephemeral-storage: "20Gi"}
-      maxReplicas: 100
     sparkwing-16cpu:
       requests: {cpu: "16", memory: "58572Mi", ephemeral-storage: "20Gi"}
-      maxReplicas: 100
     sparkwing-32cpu:
       requests: {cpu: "32", memory: "119193Mi", ephemeral-storage: "20Gi"}
-      maxReplicas: 100
     sparkwing-64cpu:
       requests: {cpu: "64", memory: "240435Mi", ephemeral-storage: "20Gi"}
-      maxReplicas: 100

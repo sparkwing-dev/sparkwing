@@ -349,9 +349,9 @@ spec:
 ```
 
 Set NodePool cost limits in infrastructure before enabling Manual or Auto.
-The chart's `maxReplicas` is an infrastructure safety ceiling (100 per class by
-default); keep it at least the largest allowed operator maximum. KEDA reads
-`warm_pool_desired` every 15 seconds. Cooldown to zero takes 30 seconds; Off
+The operator's Manual count or Auto max is the only warm replica ceiling.
+KEDA's maximum permits Kubernetes' supported replica range, 0..2147483647,
+which operator writes validate. KEDA reads `warm_pool_desired` every 15 seconds. Cooldown to zero takes 30 seconds; Off
 converges to zero rather than deleting nodes synchronously. Helm omits replicas
 on upgrade so it does not overwrite KEDA's count. A KEDA or database outage
 retains the last replica count; operators can set the Deployment to zero during

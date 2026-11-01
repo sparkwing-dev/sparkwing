@@ -142,8 +142,8 @@ sparkwing operator warm-capacity set --class sparkwing-2cpu --mode off --profile
 becomes 10s. Auto takes the larger of half the cold-start waits in 30 minutes,
 rounded up, and current warm nodes plus one when the last hour's median start
 exceeds the target. It clamps that result to the configured min/max. No demand
-samples gives the minimum. The chart's `maxReplicas` is the infrastructure ceiling
-and must cover the selected manual count or auto maximum.
+samples gives the minimum. Counts must fit Kubernetes replicas (0..2147483647).
+The view owns the replica target; infrastructure NodePool budgets govern spend.
 
 Start percentiles group jobs by requested class, including upsized jobs. No start
 samples appears as an empty metric. Cold starts include jobs still waiting for a

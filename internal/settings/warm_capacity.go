@@ -22,8 +22,8 @@ func (w WarmCapacitySettings) Validate() error {
 	for _, c := range match.CloudSizes() {
 		valid = valid || c.Label == w.Class
 	}
-	if !valid || (w.Mode != "off" && w.Mode != "manual" && w.Mode != "auto") || w.ManualCount < 0 || w.AutoMin < 0 || w.AutoMax < w.AutoMin || w.StartTimeTargetSeconds <= 0 || math.IsNaN(w.StartTimeTargetSeconds) || math.IsInf(w.StartTimeTargetSeconds, 0) {
-		return fmt.Errorf("class, mode, nonnegative counts, ordered auto bounds and a positive target are required")
+	if !valid || (w.Mode != "off" && w.Mode != "manual" && w.Mode != "auto") || w.ManualCount < 0 || w.ManualCount > math.MaxInt32 || w.AutoMin < 0 || w.AutoMax < w.AutoMin || w.AutoMax > math.MaxInt32 || w.StartTimeTargetSeconds <= 0 || math.IsNaN(w.StartTimeTargetSeconds) || math.IsInf(w.StartTimeTargetSeconds, 0) {
+		return fmt.Errorf("class, mode, counts in 0..2147483647, ordered auto bounds and a positive target are required")
 	}
 	return nil
 }

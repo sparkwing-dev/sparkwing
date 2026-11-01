@@ -146,6 +146,14 @@ func WarmCapacityModesAndDemand(t *testing.T, s *Store) {
 }
 
 func TestWarmCapacityPolicyValidation(t *testing.T) {
+	for _, w := range []WarmCapacitySettings{
+		{Class: "sparkwing-2cpu", Mode: "manual", ManualCount: 2147483648, StartTimeTargetSeconds: 10},
+		{Class: "sparkwing-2cpu", Mode: "auto", AutoMax: 2147483648, StartTimeTargetSeconds: 10},
+	} {
+		if w.Validate() == nil {
+			t.Fatalf("accepted unsupported replica count %+v", w)
+		}
+	}
 	for _, w := range []WarmCapacitySettings{{Class: "bad", Mode: "off", StartTimeTargetSeconds: 10}, {Class: "sparkwing-2cpu", Mode: "bad", StartTimeTargetSeconds: 10}, {Class: "sparkwing-2cpu", Mode: "auto", AutoMin: 2, AutoMax: 1, StartTimeTargetSeconds: 10}} {
 		if w.Validate() == nil {
 			t.Fatalf("accepted %+v", w)
