@@ -1270,3 +1270,38 @@ and the accepting account's ownership of the invited address. Invitation
 expiry, withdrawal, replay and sending limits remain. Waitlisted acceptances
 still count toward signup admission velocity. No deployment is part of this
 decision. The lead owns the separate grid cell R16C19 expectation update.
+
+## 2026-11-01 Korey decision 75: launch Cloud capacity is a shared warm pool
+
+Supersedes the per-team NodePool requirement in decisions 12, 21 and the
+team-capacity sections of the deployment and auth guides. Hand-made per-team
+pools are not an option. Research and measurements:
+`~/code/ink-labs/wing/sweeps/COMPUTE-ISOLATION-OPTIONS.md` and `COLD-START.md`.
+
+- Isolation boundary: a Cloud node is never reused across runs. Jobs of the same
+  run may share a node; a run that fans out may take several fresh nodes.
+- Capacity: one shared Karpenter NodePool per hardware class with a generic
+  dedicated taint. A never-used node is bound to exactly one team and run when a
+  job claims it (exact protected team label on the node, existing used-team and
+  used-run fences kept). No per-team NodePools.
+- Warm capacity: a Deployment of low-priority placeholder pods per hardware class
+  holds warm nodes; a real job evicts a placeholder and takes its node, and
+  Karpenter backfills. KEDA's PostgreSQL scaler sets each Deployment's replicas
+  from a `warm_pool_desired` database view. Operator modes per class: Off (launch
+  default, zero warm nodes), Manual N, Auto (min, max). Auto takes the higher of
+  two triggers per requested class: cold-start waits in the last 30 minutes and
+  the median job start time over the last hour against an operator target
+  (default 10s). Nobody waiting means the minimum, which may be zero.
+- Upsizing: only to avoid a cold start, a job may take an idle warm node one
+  size larger when no warm node of its requested class is free. It is billed and
+  cgroup-capped at the requested size. Operator switch, on by default.
+- Operator controls at launch: a console page and CLI per hardware class showing
+  mode, warm and desired nodes, p50/p95 job start time (1h/24h), cold starts,
+  upsizes, and new signups and active teams (24h/7d).
+- Launch also includes the cold-start overhead cuts: prepare the pipeline once
+  per run and fetch source once per run.
+- After launch, not blocking release: a shared gVisor (`runsc`) RuntimeClass pool
+  for normal jobs across customers, with Docker/privileged jobs staying on
+  single-use nodes; a microVM spike on metal and nested-virtualization hosts;
+  faster launcher handoffs; image pre-baking; a provider-neutral compute-driver
+  seam for Cloudflare, GCP and bare metal.
