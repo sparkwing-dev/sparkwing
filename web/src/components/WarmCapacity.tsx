@@ -8,7 +8,7 @@ import {
   type WarmCapacity, type WarmCapacityClass, type WarmCapacitySettings,
 } from "@/lib/operator";
 
-const seconds = (n: number | null) => n === null ? "—" : `${n.toFixed(1)}s`;
+const seconds = (n: number | null) => n === null ? "-" : `${n.toFixed(1)}s`;
 
 export function WarmCapacityView() {
   const [data, setData] = useState<WarmCapacity | null>(null);

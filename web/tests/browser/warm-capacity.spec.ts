@@ -36,7 +36,7 @@ test("operator saves warm settings, sees metrics and recovers from a refused sav
   await expect(form.getByLabel("Start-time target (seconds)")).toHaveValue("10");
   await expect(page.getByText("Warm nodes: 2 · Desired nodes: 0")).toBeVisible();
   await expect(page.getByRole("cell", { name: "4.0s", exact: true })).toBeVisible();
-  await expect(page.getByRole("cell", { name: "—", exact: true })).toHaveCount(2);
+  await expect(page.getByRole("cell", { name: "-", exact: true })).toHaveCount(2);
   await expect(page.getByText("Cold starts (24h / 7d): 3 / 9. Upsizes (24h / 7d): 1 / 5.")).toBeVisible();
   await form.getByRole("combobox", { name: "Mode", exact: true }).selectOption("manual");
   await form.getByLabel("Manual count").fill("3");
