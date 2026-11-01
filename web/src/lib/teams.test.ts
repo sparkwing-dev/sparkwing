@@ -212,6 +212,7 @@ describe("getMe", () => {
         },
       ],
       waitlisted: true,
+      operator_console: true,
     };
     respond = () => new Response(JSON.stringify(body), { status: 200 });
     assert.deepEqual(await teams.getMe(), {
@@ -221,6 +222,7 @@ describe("getMe", () => {
         memberships: [],
         invitations: body.invitations,
         waitlisted: true,
+        operator_console: true,
       },
     });
   });

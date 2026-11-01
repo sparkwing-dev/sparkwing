@@ -67,6 +67,52 @@ func TestHashDetectsAFileThatChangesWhileHashing(t *testing.T) {
 	}
 }
 
+func TestHashIgnoresChangesToExcludedFiles(t *testing.T) {
+	for _, mutation := range []string{"rewrite", "create", "remove"} {
+		for _, hashAllFiles := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/hash_all_files=%t", mutation, hashAllFiles), func(t *testing.T) {
+				root := newGitPipelineDir(t)
+				writeFile(t, filepath.Join(root, ".gitignore"), "generated\n")
+				target := filepath.Join(root, "generated")
+				if mutation != "create" {
+					writeFile(t, target, "before")
+				}
+				var expected bytes.Buffer
+				if _, err := hashDirIntoCounted(&expected, root, allFiles, hashAllFiles); err != nil {
+					t.Fatal(err)
+				}
+				walks := 0
+				keep := func(name string) bool {
+					if name == "main.go" {
+						walks++
+						if walks == 2 {
+							if mutation == "remove" {
+								if err := os.Remove(target); err != nil {
+									t.Fatal(err)
+								}
+							} else {
+								writeFile(t, target, "after, and longer")
+							}
+						}
+					}
+					return true
+				}
+				var digest bytes.Buffer
+				_, err := hashDirIntoCounted(&digest, root, keep, hashAllFiles)
+				if hashAllFiles {
+					if !errors.Is(err, ErrUnstableInputs) || digest.Len() != 0 {
+						t.Fatalf("hash of changing included input = %q, %v", &digest, err)
+					}
+					return
+				}
+				if err != nil || !bytes.Equal(digest.Bytes(), expected.Bytes()) {
+					t.Fatalf("hash of changing excluded input = %q, %v; want %q", &digest, err, &expected)
+				}
+			})
+		}
+	}
+}
+
 func TestEmbeddedUnderscoreAndDotDirectoriesChangeTheKey(t *testing.T) {
 	for _, dir := range []string{"_assets", ".assets"} {
 		root := t.TempDir()

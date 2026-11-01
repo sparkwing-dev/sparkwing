@@ -275,11 +275,12 @@ type invitationRefJSON struct {
 }
 
 type meResp struct {
-	User        userJSONBody        `json:"user"`
-	ActiveTeam  *teamRefJSON        `json:"active_team"`
-	Memberships []teamRefJSON       `json:"memberships"`
-	Invitations []invitationRefJSON `json:"invitations"`
-	Waitlisted  bool                `json:"waitlisted"`
+	User            userJSONBody        `json:"user"`
+	ActiveTeam      *teamRefJSON        `json:"active_team"`
+	Memberships     []teamRefJSON       `json:"memberships"`
+	Invitations     []invitationRefJSON `json:"invitations"`
+	Waitlisted      bool                `json:"waitlisted"`
+	OperatorConsole bool                `json:"operator_console"`
 }
 
 func (s *Server) handleMe(w http.ResponseWriter, r *http.Request, a capability.Authorized) error {
@@ -297,10 +298,11 @@ func (s *Server) handleMe(w http.ResponseWriter, r *http.Request, a capability.A
 		return errors.New("inconsistent persisted account")
 	}
 	resp := meResp{
-		User:        userJSONBody{ID: acct.ID, Email: acct.Email, Name: acct.Name},
-		Memberships: []teamRefJSON{},
-		Invitations: []invitationRefJSON{},
-		Waitlisted:  acct.Waitlisted,
+		User:            userJSONBody{ID: acct.ID, Email: acct.Email, Name: acct.Name},
+		Memberships:     []teamRefJSON{},
+		Invitations:     []invitationRefJSON{},
+		Waitlisted:      acct.Waitlisted,
+		OperatorConsole: a.Principal.DirectAccountSession() && s.operatorAccount(accountID),
 	}
 	members, err := reader.AccountMemberships(ctx, accountID)
 	if err != nil {

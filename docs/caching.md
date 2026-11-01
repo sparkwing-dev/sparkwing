@@ -216,7 +216,9 @@ therefore compute the same key from different directories and share one
 compiled binary, instead of each building their own.
 
 **Files Git ignores are excluded from the key.** Directories outside a
-Git repository hash every file. Pass `sparkwing run --sw-hash-all-files`
+Git repository hash every file. Stability snapshots use the same exclusion,
+so changes to ignored generated files between snapshots do not force an
+uncached rebuild. Pass `sparkwing run --sw-hash-all-files`
 when a build depends on ignored files, including generated assets embedded
 by Go.
 

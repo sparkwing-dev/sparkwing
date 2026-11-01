@@ -465,13 +465,20 @@ type fileState struct {
 	modTime int64
 }
 
-func snapshotHashable(dir string, keep fileFilter) (map[string]fileState, error) {
+func snapshotHashable(dir string, keep fileFilter, hashAllFiles bool) (map[string]fileState, error) {
 	files, err := walkHashable(dir, keep)
 	if err != nil {
 		return nil, err
 	}
+	var ignored map[string]bool
+	if !hashAllFiles {
+		ignored = ignoredUnder(dir, files)
+	}
 	out := make(map[string]fileState, len(files))
 	for _, path := range files {
+		if ignored[path] {
+			continue
+		}
 		info, err := os.Lstat(path)
 		if errors.Is(err, fs.ErrNotExist) {
 			return nil, ErrUnstableInputs
@@ -485,7 +492,7 @@ func snapshotHashable(dir string, keep fileFilter) (map[string]fileState, error)
 }
 
 func hashDirIntoCounted(h io.Writer, dir string, keep fileFilter, hashAllFiles bool) (hashStats, error) {
-	before, err := snapshotHashable(dir, keep)
+	before, err := snapshotHashable(dir, keep, hashAllFiles)
 	if err != nil {
 		return hashStats{}, err
 	}
@@ -494,7 +501,7 @@ func hashDirIntoCounted(h io.Writer, dir string, keep fileFilter, hashAllFiles b
 	if err != nil {
 		return stats, err
 	}
-	after, err := snapshotHashable(dir, keep)
+	after, err := snapshotHashable(dir, keep, hashAllFiles)
 	if err != nil {
 		return stats, err
 	}

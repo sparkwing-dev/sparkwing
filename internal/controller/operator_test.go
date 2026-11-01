@@ -22,6 +22,28 @@ func operatorFixture(t *testing.T) (f *identityFixture, operator, owner signedIn
 	return f, operator, owner
 }
 
+func TestWaitlistedOperatorKeepsConsoleAccess(t *testing.T) {
+	f := newIdentityFixture(t)
+	f.setSignUp(map[string]any{"mode": "waitlist"})
+	out := f.signIn(person("waiting-op", "operator@example.com", "Operator"))
+	auth := sessionAuth(out.SessionID)
+	f.srv.WithOperatorAccounts([]string{out.User.ID})
+	var me struct {
+		Waitlisted      bool `json:"waitlisted"`
+		OperatorConsole bool `json:"operator_console"`
+	}
+	if code := f.call("GET", "/api/v1/me", auth, nil, &me); code != http.StatusOK || !me.Waitlisted || !me.OperatorConsole {
+		t.Fatalf("waitlisted operator /me = %d %+v", code, me)
+	}
+	if code := f.call("GET", "/api/v1/operator/teams", auth, nil, nil); code != http.StatusOK {
+		t.Fatalf("waitlisted operator console = %d", code)
+	}
+	f.srv.WithOperatorAccounts(nil)
+	if code := f.call("GET", "/api/v1/me", auth, nil, &me); code != http.StatusOK || !me.Waitlisted || me.OperatorConsole {
+		t.Fatalf("delisted operator /me = %d %+v", code, me)
+	}
+}
+
 func operatorRoutes(team string) [][2]string {
 	base := "/api/v1/operator/teams/" + team
 	return [][2]string{

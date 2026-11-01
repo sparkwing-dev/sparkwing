@@ -18,6 +18,7 @@ credential model in `docs/auth.md`, and the decision log
 
 | Rule | Owner | Guard test |
 | --- | --- | --- |
+| Waitlisted operators retain console routes and navigation while customer pages stay gated | `internal/controller/identity.go`: `handleMe`; `web/src/components/WaitlistGate.tsx`, `Nav.tsx` | `internal/controller/operator_test.go`: `TestWaitlistedOperatorKeepsConsoleAccess`; `web/tests/browser/waitlist.spec.ts` |
 | Team handle | `tenant.go`: `Store.ForTeam` returns `*Tenant`; `NormalizeTeam` is the one spelling | `tenant_test.go`: `TestForTeamRefusesTheEmptyTeam`, `TestTenantRunsAreInvisibleToAnotherTeam` |
 | Foreign-team refusal for an authority | `capabilities_contract.go`: `resolveTeamAuthorityTx`, `resolveTeamActorTx` (`sameTeam` / `sameTeamOrCloudLauncher`) | `team_authority_guard_test.go`: `TestTeamScopedFunctionsResolveThroughTeam` |
 | Every tenant-table statement carries `team` | the SQL in each tenant method | `tenant_sql_scope_guard_test.go`: `TestTenantSQLScope_EveryTenantTableStatementCarriesTheKey`; `tenant_writer_guard_test.go` |
@@ -241,6 +242,7 @@ credential model in `docs/auth.md`, and the decision log
 | Local owner-selected debug boundaries persist and follow release | `debug_pause_owner.go`: `Tenant.OwnerDebugPause`; `internal/nodehost/native_assembly.go` binds `storeDebugBoundary` | `internal/nodehost/native_debug_test.go`: `TestNativeForegroundOwnerPersistsDebugPauseUntilReleased` |
 | Run statistics include nearest-rank P50 | `cmd/sparkwing/runs_stats.go`: `aggregateRunDetails` | `cmd/sparkwing/runs_stats_median_test.go`: `TestRunStatisticsReportsNearestRankP50` |
 | Compiled pipeline reuse emits a cache-hit diagnostic | `internal/bincache/materialize.go`: `MaterializePipeline` | `internal/bincache/materialize_test.go`: `TestMaterializePipelineReusesBinaryWithoutGo` |
+| Binary-cache stability snapshots exclude the same gitignored files as the key unless hashing all files | `internal/bincache/bincache.go`: `snapshotHashable`, `hashDirIntoCounted` | `internal/bincache/replace_churn_test.go`: `TestHashIgnoresChangesToExcludedFiles`; `internal/engine/sdkinstall/build_policy_test.go`: `TestSDKInstallHashAllFilesIncludesIgnoredEmbeddedInputs` |
 | Missing local secrets carry local repair commands | `secret_preflight.go`: `secretPreflightTx`, `secretPreflightError.detail` | `secret_preflight_local_test.go`: `TestLocalSecretPreflightGivesLocalSetCommand` |
 | Required-secret plan refusals finish unaccepted runs | `internal/nodehost/owner.go`: `OwnerHost.accept`, `OwnerHost.preparationFailure` | `internal/nodehost/owner_secret_preflight_test.go`: `TestOwnerHostMissingRequiredSecretFinishesUnacceptedRun` |
 | Repository release home is checked before intake opens the store | `.sparkwing/jobs/release.go`: release factory captures `requireReleaseHome` and `Plan` returns a refusal during discovery | `.sparkwing/jobs/release_home_test.go`: `TestReleaseRefusesOperationalHomeDuringPlanning` |

@@ -112,6 +112,11 @@ export default function Nav() {
         onToggle={() => setOpen((v) => !v)}
         onClose={() => setOpen(false)}
       />
+      {(team.status === "ready" || team.status === "waitlisted") && team.me.operator_console ? (
+        <Link href="/operator" className="px-3 py-2 text-sm">
+          Operator
+        </Link>
+      ) : null}
       <HelpMenu />
       <LogoutControl />
       <LocalLogoutControl />
