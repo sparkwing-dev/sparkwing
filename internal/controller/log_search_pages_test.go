@@ -121,6 +121,19 @@ func TestPersistedLogSearchMissingCommittedBytesFailDespiteConsumedCursor(t *tes
 
 func logSearchCandidate(t *testing.T, st *store.Store, id string, number int, pipeline string) {
 	t.Helper()
+	logSearchCandidates(t, st, pipeline, []logCandidate{{id: id, number: number}})
+}
+
+type logCandidate struct {
+	id, parent string
+	number     int
+	started    *int64
+}
+
+// perf: one INSERT for every candidate, because each fixture statement opens a
+// connection that reparses the schema and reprojects every run.
+func logSearchCandidates(t *testing.T, st *store.Store, pipeline string, candidates []logCandidate) {
+	t.Helper()
 	tenant, err := st.ForTeam(t.Context(), "a")
 	if err != nil {
 		t.Fatal(err)
@@ -129,14 +142,28 @@ func logSearchCandidate(t *testing.T, st *store.Store, id string, number int, pi
 	if err != nil {
 		t.Fatal(err)
 	}
-	request := run.Request
-	request.RunID, request.Request.Pipeline = id, pipeline
-	request.Request.Git = runspec.Git{Ref: "noise", SHA: "def456", Repository: runspec.Repository{Key: "gh:2", Display: "acme/other"}}
-	body, err := json.Marshal(request)
-	if err != nil {
-		t.Fatal(err)
+	rows := make([]string, 0, len(candidates))
+	args := make([]any, 0, 5*len(candidates))
+	for _, candidate := range candidates {
+		request := run.Request
+		request.RunID, request.Request.Pipeline = candidate.id, pipeline
+		request.Request.Git = runspec.Git{Ref: "noise", SHA: "def456", Repository: runspec.Repository{Key: "gh:2", Display: "acme/other"}}
+		body, err := json.Marshal(request)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var parent any
+		if candidate.parent != "" {
+			parent = candidate.parent
+		}
+		var started any
+		if candidate.started != nil {
+			started = *candidate.started
+		}
+		rows = append(rows, "(?,?,?,?,?)")
+		args = append(args, candidate.id, candidate.number, body, parent, started)
 	}
-	engineSQL(t, st, `INSERT INTO runs(team,id,number,pipeline,status,request_json,request_hash,request_sealed_at,repo_key,dispatch,intake_mode,created_principal,created_at,finished_at,log_retention_class,log_retention_days) SELECT team,?,?,?,'success',?,request_hash,request_sealed_at,'gh:2',dispatch,intake_mode,created_principal,created_at,created_at,log_retention_class,log_retention_days FROM runs WHERE team='a' AND id='run'`, id, number, pipeline, body)
+	engineSQL(t, st, `INSERT INTO runs(team,id,number,pipeline,status,request_json,request_hash,request_sealed_at,repo_key,dispatch,intake_mode,created_principal,created_at,finished_at,log_retention_class,log_retention_days,parent_run_id,started_at) SELECT r.team,v.column1,v.column2,?,'success',v.column3,r.request_hash,r.request_sealed_at,'gh:2',r.dispatch,r.intake_mode,r.created_principal,r.created_at,r.created_at,r.log_retention_class,r.log_retention_days,v.column4,v.column5 FROM runs r, (VALUES `+strings.Join(rows, ",")+`) AS v WHERE r.team='a' AND r.id='run'`, append([]any{pipeline}, args...)...)
 }
 
 func TestPersistedLogSearchAppliesRunFiltersBeforeLimit(t *testing.T) {

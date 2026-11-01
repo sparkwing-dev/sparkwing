@@ -109,16 +109,22 @@ func TestLogTreeTraversesEveryTenantDescendantProperty(t *testing.T) {
 		st := engine.Store
 		count := 101 + int(size%7)
 		want := map[string]bool{}
+		candidates := make([]logCandidate, 0, count+1)
+		events := make([]string, 0, count+1)
+		eventArgs := make([]any, 0, 2*(count+1))
 		for i := range count + 1 {
 			id, parent := fmt.Sprintf("child-%03d", i), "run"
 			if i == count {
 				parent = "child-000"
 			}
 			want[id] = true
-			logSearchCandidate(t, st, id, i+2, "ci")
-			engineSQL(t, st, `UPDATE runs SET parent_run_id=?,started_at=? WHERE team='a' AND id=?`, parent, int64((uint32(i)+order)%3), id)
-			engineSQL(t, st, `INSERT INTO events(team,run_id,seq,kind,ts,payload) VALUES ('a',?,1,'run_started',1,?)`, id, []byte(`{}`))
+			started := int64((uint32(i) + order) % 3)
+			candidates = append(candidates, logCandidate{id: id, parent: parent, number: i + 2, started: &started})
+			events = append(events, "('a',?,1,'run_started',1,?)")
+			eventArgs = append(eventArgs, id, []byte(`{}`))
 		}
+		logSearchCandidates(t, st, "ci", candidates)
+		engineSQL(t, st, `INSERT INTO events(team,run_id,seq,kind,ts,payload) VALUES `+strings.Join(events, ","), eventArgs...)
 		engineSQL(t, st, `UPDATE runs SET parent_run_id=? WHERE team='a' AND id='run'`, fmt.Sprintf("child-%03d", count))
 		engineSQL(t, st, `INSERT INTO teams(name,created_at,updated_at) VALUES ('foreign',1,1)`)
 		engineSQL(t, st, `INSERT INTO runs(team,id,number,pipeline,status,request_json,request_hash,request_sealed_at,repo_key,dispatch,intake_mode,created_principal,created_at,parent_run_id,log_retention_class,log_retention_days) SELECT 'foreign','foreign-child',1,pipeline,status,request_json,request_hash,request_sealed_at,repo_key,dispatch,intake_mode,created_principal,created_at,'run',log_retention_class,log_retention_days FROM runs WHERE team='a' AND id='run'`)
