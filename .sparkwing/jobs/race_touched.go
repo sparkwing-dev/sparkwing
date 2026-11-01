@@ -78,8 +78,11 @@ func raceModules(ctx context.Context, targets map[string][]string, testRoot, hom
 }
 
 func gateRaceParallelism(h hostShape) int {
-	if h.cpus == overlappedGoSuiteCPUs || goStepParallelism(h) >= 2 {
+	if h.cpus == overlappedGoSuiteCPUs {
 		return 2
+	}
+	if parallelism := goStepParallelism(h); parallelism >= 2 {
+		return parallelism
 	}
 	return 0
 }

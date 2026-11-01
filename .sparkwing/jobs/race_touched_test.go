@@ -156,13 +156,24 @@ func TestRaces(t *testing.T) {
 `
 
 func TestGateRaceWorkersKeepTheHostsPackageBound(t *testing.T) {
-	for _, cpus := range []int{1, 2, 3, 4, 5, 8} {
-		want := 2
-		if cpus < 4 {
-			want = 0
-		}
-		if got := gateRaceParallelism(hostShape{cpus: cpus}); got != want {
-			t.Errorf("%d CPUs: %d gate race processes, want %d", cpus, got, want)
+	for _, tc := range []struct {
+		cpus, want   int
+		singleTenant bool
+	}{
+		{1, 0, false},
+		{2, 0, false},
+		{3, 0, false},
+		{4, 2, false},
+		{4, 2, true},
+		{5, 2, false},
+		{8, 3, false},
+		{8, 4, true},
+		{16, 7, false},
+		{16, 8, true},
+	} {
+		host := hostShape{cpus: tc.cpus, singleTenant: tc.singleTenant}
+		if got := gateRaceParallelism(host); got != tc.want {
+			t.Errorf("host %+v: %d gate race processes, want %d", host, got, tc.want)
 		}
 	}
 	args := gateRaceShardArgs([]string{"TestA", "TestB"})
