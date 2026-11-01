@@ -65,9 +65,9 @@ func securityShapes() string {
 // hostCommand pins a workload container's command and argument grammar. The
 // award's controller, run, generation and job values vary; every flag name and
 // path is fixed.
-func hostCommand(c, verb string) string {
+func hostCommand(c string) string {
 	award := CloudJobAward{Binding: CloudJobBinding{RunID: "\x00run", NodeID: "\x00job", Generation: 1}}
-	sample := hostContainer(CloudJobConfig{ControllerURL: "\x00controller"}, award, verb)
+	sample := hostContainer(CloudJobConfig{ControllerURL: "\x00controller"}, award)
 	args := sample.Args
 	rules := []string{c + ".?command.orValue([]) == " + celList(sample.Command), "!has(" + c + ".restartPolicy)"}
 	sizes := []string{"size(" + c + ".?args.orValue([])) == " + strconv.Itoa(len(args)-2)}

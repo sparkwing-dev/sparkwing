@@ -39,7 +39,7 @@ func TestLauncherRefusesAdmissionChangesBeforeBootstrap(t *testing.T) {
 		}},
 		{"pod_security", func(j *batchv1.Job) { j.Spec.Template.Spec.SecurityContext.RunAsUser = ptr(int64(1000)) }},
 		{"docker_sidecar", func(j *batchv1.Job) { j.Spec.Template.Spec.InitContainers[0].RestartPolicy = nil }},
-		{"source", func(j *batchv1.Job) { j.Spec.Template.Spec.InitContainers = j.Spec.Template.Spec.InitContainers[:1] }},
+		{"missing_docker", func(j *batchv1.Job) { j.Spec.Template.Spec.InitContainers = nil }},
 		{"host_command", func(j *batchv1.Job) { j.Spec.Template.Spec.Containers[0].Command = []string{"other"} }},
 		{"host_arguments", func(j *batchv1.Job) {
 			j.Spec.Template.Spec.Containers[0].Args = append(j.Spec.Template.Spec.Containers[0].Args, "--run", "foreign")

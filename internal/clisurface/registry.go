@@ -824,15 +824,6 @@ func Registry() []Command {
 			{Name: "hold", Argument: "HOLD"},
 		}},
 		{Path: "sparkwing-runner", Flags: []Flag{}},
-		{Path: "sparkwing-runner fetch-source", Hidden: true, Rules: []string{"Use the bootstrap file only for authorized source acquisition; clone the sealed SHA exactly."}, Flags: []Flag{
-			{Name: "controller", Argument: "URL", Required: true},
-			{Name: "run", Argument: "RUN", Required: true},
-			{Name: "job", Argument: "JOB"},
-			{Name: "generation", Argument: "N", Required: true},
-			{Name: "bootstrap-file", Argument: "PATH", Required: true},
-			{Name: "source-dir", Argument: "PATH", Required: true},
-			{Name: "module-cache", Argument: "PATH", Required: true},
-		}},
 		{Path: "sparkwing-runner launch", Hidden: true, Rules: []string{"Every Cloud Job uses root plus DinD on its own team-dedicated node with enforced egress; fixed 20 GiB scratch has no flag."}, Flags: []Flag{
 			{Name: "controller", Argument: "URL", Required: true},
 			{Name: "namespace", Argument: "NAMESPACE"},
@@ -851,7 +842,6 @@ func Registry() []Command {
 			{Name: "job", Argument: "JOB"},
 			{Name: "generation", Argument: "N", Required: true},
 			{Name: "bootstrap-file", Argument: "PATH", Required: true},
-			{Name: "source-dir", Argument: "PATH", Required: true},
 			{Name: "module-cache", Argument: "PATH", Required: true},
 		}},
 		{Path: "sparkwing-runner start", Rules: []string{"Read runner: from config.yaml; claim trigger and job units through the same matcher. Handle SIGTERM and SIGINT identically."}, Flags: []Flag{

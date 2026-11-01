@@ -76,9 +76,8 @@ spec:
     message: Pods mount only their scratch emptyDir, own bootstrap Secret
   - expression: '!variables.create || (variables.shape == ''job'' ? size(variables.spec.containers)
       == 1 && variables.spec.containers[0].name == ''run-node'' && variables.spec.containers[0].image
-      == variables.runnerImage && size(variables.inits) == 2 && variables.inits[0].name
-      == ''docker'' && variables.inits[0].image == variables.dockerImage && variables.inits[1].name
-      == ''fetch-source'' && variables.inits[1].image == variables.runnerImage : size(variables.spec.containers)
+      == variables.runnerImage && size(variables.inits) == 1 && variables.inits[0].name
+      == ''docker'' && variables.inits[0].image == variables.dockerImage : size(variables.spec.containers)
       == 1 && variables.spec.containers[0].image == variables.runnerImage && size(variables.inits)
       == 0)'
     message: Pods run only the launcher's container set and pinned images
@@ -99,24 +98,14 @@ spec:
       && !variables.spec.?enableServiceLinks.orValue(true) && !variables.spec.?priorityClassName.orValue('''').startsWith(''system-'')'
     message: Pods keep cluster DNS, the default scheduler, no service links and no
       system priority class
-  - expression: '!variables.create || variables.shape != ''job'' || size(variables.inits)
-      != 2 || variables.inits[1].?command.orValue([]) == ["sparkwing-runner"] && !has(variables.inits[1].restartPolicy)
-      && (size(variables.inits[1].?args.orValue([])) == 13 || size(variables.inits[1].?args.orValue([]))
-      == 15 && variables.inits[1].args[13] == ''--job'') && variables.inits[1].args[0]
-      == "fetch-source" && variables.inits[1].args[1] == "--controller" && variables.inits[1].args[3]
-      == "--run" && variables.inits[1].args[5] == "--generation" && variables.inits[1].args[7]
-      == "--source-dir" && variables.inits[1].args[8] == "/tmp/source" && variables.inits[1].args[9]
-      == "--module-cache" && variables.inits[1].args[10] == "/tmp/modules" && variables.inits[1].args[11]
-      == "--bootstrap-file" && variables.inits[1].args[12] == "/etc/sparkwing/bootstrap/bootstrap"
-      && variables.spec.containers[0].?command.orValue([]) == ["sparkwing-runner"]
-      && !has(variables.spec.containers[0].restartPolicy) && (size(variables.spec.containers[0].?args.orValue([]))
-      == 13 || size(variables.spec.containers[0].?args.orValue([])) == 15 && variables.spec.containers[0].args[13]
-      == ''--job'') && variables.spec.containers[0].args[0] == "run-node" && variables.spec.containers[0].args[1]
-      == "--controller" && variables.spec.containers[0].args[3] == "--run" && variables.spec.containers[0].args[5]
-      == "--generation" && variables.spec.containers[0].args[7] == "--source-dir"
-      && variables.spec.containers[0].args[8] == "/tmp/source" && variables.spec.containers[0].args[9]
-      == "--module-cache" && variables.spec.containers[0].args[10] == "/tmp/modules"
-      && variables.spec.containers[0].args[11] == "--bootstrap-file" && variables.spec.containers[0].args[12]
+  - expression: '!variables.create || variables.shape != ''job'' || variables.spec.containers[0].?command.orValue([])
+      == ["sparkwing-runner"] && !has(variables.spec.containers[0].restartPolicy)
+      && (size(variables.spec.containers[0].?args.orValue([])) == 11 || size(variables.spec.containers[0].?args.orValue([]))
+      == 13 && variables.spec.containers[0].args[11] == ''--job'') && variables.spec.containers[0].args[0]
+      == "run-node" && variables.spec.containers[0].args[1] == "--controller" && variables.spec.containers[0].args[3]
+      == "--run" && variables.spec.containers[0].args[5] == "--generation" && variables.spec.containers[0].args[7]
+      == "--module-cache" && variables.spec.containers[0].args[8] == "/tmp/modules"
+      && variables.spec.containers[0].args[9] == "--bootstrap-file" && variables.spec.containers[0].args[10]
       == "/etc/sparkwing/bootstrap/bootstrap"'
     message: the workload containers run only the launcher's sparkwing-runner commands
   - expression: '!variables.create || variables.shape == ''job'' ? has(variables.spec.securityContext)
@@ -334,9 +323,8 @@ spec:
     message: Pods mount only their scratch emptyDir, own bootstrap Secret
   - expression: '!variables.create || (variables.shape == ''job'' ? size(variables.spec.containers)
       == 1 && variables.spec.containers[0].name == ''run-node'' && variables.spec.containers[0].image
-      == variables.runnerImage && size(variables.inits) == 2 && variables.inits[0].name
-      == ''docker'' && variables.inits[0].image == variables.dockerImage && variables.inits[1].name
-      == ''fetch-source'' && variables.inits[1].image == variables.runnerImage : size(variables.spec.containers)
+      == variables.runnerImage && size(variables.inits) == 1 && variables.inits[0].name
+      == ''docker'' && variables.inits[0].image == variables.dockerImage : size(variables.spec.containers)
       == 1 && variables.spec.containers[0].image == variables.runnerImage && size(variables.inits)
       == 0)'
     message: Pods run only the launcher's container set and pinned images
@@ -357,24 +345,14 @@ spec:
       && !variables.spec.?enableServiceLinks.orValue(true) && !variables.spec.?priorityClassName.orValue('''').startsWith(''system-'')'
     message: Pods keep cluster DNS, the default scheduler, no service links and no
       system priority class
-  - expression: '!variables.create || variables.shape != ''job'' || size(variables.inits)
-      != 2 || variables.inits[1].?command.orValue([]) == ["sparkwing-runner"] && !has(variables.inits[1].restartPolicy)
-      && (size(variables.inits[1].?args.orValue([])) == 13 || size(variables.inits[1].?args.orValue([]))
-      == 15 && variables.inits[1].args[13] == ''--job'') && variables.inits[1].args[0]
-      == "fetch-source" && variables.inits[1].args[1] == "--controller" && variables.inits[1].args[3]
-      == "--run" && variables.inits[1].args[5] == "--generation" && variables.inits[1].args[7]
-      == "--source-dir" && variables.inits[1].args[8] == "/tmp/source" && variables.inits[1].args[9]
-      == "--module-cache" && variables.inits[1].args[10] == "/tmp/modules" && variables.inits[1].args[11]
-      == "--bootstrap-file" && variables.inits[1].args[12] == "/etc/sparkwing/bootstrap/bootstrap"
-      && variables.spec.containers[0].?command.orValue([]) == ["sparkwing-runner"]
-      && !has(variables.spec.containers[0].restartPolicy) && (size(variables.spec.containers[0].?args.orValue([]))
-      == 13 || size(variables.spec.containers[0].?args.orValue([])) == 15 && variables.spec.containers[0].args[13]
-      == ''--job'') && variables.spec.containers[0].args[0] == "run-node" && variables.spec.containers[0].args[1]
-      == "--controller" && variables.spec.containers[0].args[3] == "--run" && variables.spec.containers[0].args[5]
-      == "--generation" && variables.spec.containers[0].args[7] == "--source-dir"
-      && variables.spec.containers[0].args[8] == "/tmp/source" && variables.spec.containers[0].args[9]
-      == "--module-cache" && variables.spec.containers[0].args[10] == "/tmp/modules"
-      && variables.spec.containers[0].args[11] == "--bootstrap-file" && variables.spec.containers[0].args[12]
+  - expression: '!variables.create || variables.shape != ''job'' || variables.spec.containers[0].?command.orValue([])
+      == ["sparkwing-runner"] && !has(variables.spec.containers[0].restartPolicy)
+      && (size(variables.spec.containers[0].?args.orValue([])) == 11 || size(variables.spec.containers[0].?args.orValue([]))
+      == 13 && variables.spec.containers[0].args[11] == ''--job'') && variables.spec.containers[0].args[0]
+      == "run-node" && variables.spec.containers[0].args[1] == "--controller" && variables.spec.containers[0].args[3]
+      == "--run" && variables.spec.containers[0].args[5] == "--generation" && variables.spec.containers[0].args[7]
+      == "--module-cache" && variables.spec.containers[0].args[8] == "/tmp/modules"
+      && variables.spec.containers[0].args[9] == "--bootstrap-file" && variables.spec.containers[0].args[10]
       == "/etc/sparkwing/bootstrap/bootstrap"'
     message: the workload containers run only the launcher's sparkwing-runner commands
   - expression: '!variables.create || variables.shape == ''job'' ? has(variables.spec.securityContext)

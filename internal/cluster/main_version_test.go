@@ -80,7 +80,7 @@ func TestRunnerVersionHelpAndTopLevelUsage(t *testing.T) {
 	var topLevel bytes.Buffer
 	usage(&topLevel)
 	for _, want := range []string{
-		"start|warm|run-node|launch|fetch-source|version",
+		"start|warm|run-node|launch|version",
 		"run-node - execute a bootstrap-authorized Cloud unit",
 		"version  - print this executable's offline build identity",
 	} {

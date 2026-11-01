@@ -249,7 +249,7 @@ func productionNativeAward(t *testing.T, kind capability.UnitKind) (runners.Host
 		body, err := json.Marshal(response)
 		return &http.Response{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": {"application/json"}}, Body: io.NopCloser(bytes.NewReader(body))}, err
 	})}}
-	return productionHostingAt(filepath.Join(home, "state"), "v1.2.3", connection, "", "", false, procenv.SubmitAccept{}, nil), unit
+	return productionHostingAt(filepath.Join(home, "state"), "v1.2.3", connection, "", false, procenv.SubmitAccept{}, nil), unit
 }
 
 func productionAwardNode(unit controllerwire.ClaimedUnit, principal capability.Principal) runstate.NodeRow {
@@ -325,7 +325,7 @@ func TestProductionCloudExchangeReachesAwardRenewal(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			args := []string{"--controller=https://controller.invalid", "--run=run", fmt.Sprintf("--generation=%d", binding.Generation), "--bootstrap-file=" + filepath.Join(directory, "bootstrap"), "--source-dir=" + filepath.Join(directory, "source"), "--module-cache=" + filepath.Join(directory, "modules")}
+			args := []string{"--controller=https://controller.invalid", "--run=run", fmt.Sprintf("--generation=%d", binding.Generation), "--bootstrap-file=" + filepath.Join(directory, "bootstrap"), "--module-cache=" + filepath.Join(directory, "modules")}
 			if unit.JobID != "" {
 				args = append(args, "--job="+unit.JobID)
 			}
@@ -375,17 +375,15 @@ func TestInstalledRunnerRuntimeComposition(t *testing.T) {
 	}
 	image := "example.com/image@sha256:" + strings.Repeat("a", 64)
 	commands := map[string][]string{
-		"start":        {"--config=" + config},
-		"warm":         {"--controller=https://controller.example", "--credentials-dir=" + credentials},
-		"launch":       {"--controller=https://controller.example", "--image=" + image, "--docker-image=" + image, "--cpu-ceiling=1", "--memory-ceiling=1Gi", "--credentials-dir=" + credentials},
-		"fetch-source": bootstrapArguments(options),
-		"run-node":     bootstrapArguments(options),
+		"start":    {"--config=" + config},
+		"warm":     {"--controller=https://controller.example", "--credentials-dir=" + credentials},
+		"launch":   {"--controller=https://controller.example", "--image=" + image, "--docker-image=" + image, "--cpu-ceiling=1", "--memory-ceiling=1Gi", "--credentials-dir=" + credentials},
+		"run-node": bootstrapArguments(options),
 	}
 	operations := map[string]string{
-		"start":        "GET sparkwing.dev/versions.json",
-		"warm":         "GET sparkwing.dev/versions.json",
-		"fetch-source": "POST controller.example/api/v1/runs/run/source-credential",
-		"run-node":     "POST controller.example/api/v1/claims/exchange",
+		"start":    "GET sparkwing.dev/versions.json",
+		"warm":     "GET sparkwing.dev/versions.json",
+		"run-node": "POST controller.example/api/v1/claims/exchange",
 	}
 	for name, args := range commands {
 		t.Run(name, func(t *testing.T) {
@@ -563,7 +561,7 @@ func TestProductionRunnerSchedulesEligibleJobWithOptionalComputeAdmission(t *tes
 				body, err := json.Marshal(response)
 				return &http.Response{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": {"application/json"}}, Body: io.NopCloser(bytes.NewReader(body))}, err
 			})}}
-			hosting := productionHostingAt(home, "v1.2.3", connection, "", "", compute, procenv.SubmitAccept{}, nil)
+			hosting := productionHostingAt(home, "v1.2.3", connection, "", compute, procenv.SubmitAccept{}, nil)
 			controller, err := client.NewEngineClient(client.EngineOptions{URL: connection.URL, HTTP: connection.HTTP, Bearer: fixedBearer(unit.Capability)})
 			if err != nil {
 				t.Fatal(err)

@@ -47,7 +47,7 @@ func mainWithRuntime(version string, runtime clusterRuntime) {
 		}
 	case "start", "warm":
 		err = runtime.Runner.Run(ctx, os.Args[1], os.Args[2:], version)
-	case "run-node", "fetch-source":
+	case "run-node":
 		err = runtime.Bootstrap.Run(ctx, os.Args[1], os.Args[2:])
 	case "launch":
 		err = RunLaunchCLI(ctx, os.Args[2:], runtime.Launcher)
@@ -76,12 +76,11 @@ func writeRunnerError(writer io.Writer, command string, err error) {
 }
 
 func usage(writer io.Writer) {
-	fmt.Fprintln(writer, "usage: sparkwing-runner <start|warm|run-node|launch|fetch-source|version> [flags]")
+	fmt.Fprintln(writer, "usage: sparkwing-runner <start|warm|run-node|launch|version> [flags]")
 	fmt.Fprintln(writer, "  start    - run from the machine config's runner section")
 	fmt.Fprintln(writer, "  warm     - claim triggers and jobs with the shared runner")
 	fmt.Fprintln(writer, "  run-node - execute a bootstrap-authorized Cloud unit")
 	fmt.Fprintln(writer, "  launch   - run controller-dispatched nodes as Kubernetes Jobs (never runs pipeline code)")
-	fmt.Fprintln(writer, "  fetch-source - a launcher Job's init container: check out the run and its private modules")
 	fmt.Fprintln(writer, "  version  - print this executable's offline build identity")
 }
 

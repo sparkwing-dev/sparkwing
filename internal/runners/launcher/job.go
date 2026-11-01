@@ -219,7 +219,7 @@ func validateBoundary(binding CloudJobBinding, name string, r CloudNodeReservati
 
 func cloudPod(cfg CloudJobConfig, a CloudJobAward, r CloudNodeReservation, secret string, budget corev1.ResourceList) corev1.PodSpec {
 	scratch := resource.NewQuantity(limits.JobScratchBytes, resource.BinarySI)
-	main := hostContainer(cfg, a, "run-node")
+	main := hostContainer(cfg, a)
 	// safety: one container's ephemeral limit establishes the aggregate pod budget,
 	// including sidecar logs and writable layers.
 	main.Resources = corev1.ResourceRequirements{Requests: corev1.ResourceList{corev1.ResourceEphemeralStorage: *scratch}, Limits: corev1.ResourceList{corev1.ResourceEphemeralStorage: *scratch}}
@@ -234,17 +234,17 @@ func cloudPod(cfg CloudJobConfig, a CloudJobAward, r CloudNodeReservation, secre
 		// safety: the pod cgroup shares the awarded CPU and memory with DinD instead of doubling the billed allocation.
 		Resources:      &corev1.ResourceRequirements{Requests: budget, Limits: budget.DeepCopy()},
 		Volumes:        []corev1.Volume{{Name: "scratch", VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{SizeLimit: scratch}}}, {Name: "bootstrap", VolumeSource: corev1.VolumeSource{Secret: &corev1.SecretVolumeSource{SecretName: secret, DefaultMode: ptr(int32(0o400))}}}},
-		InitContainers: []corev1.Container{dockerContainer(cfg), hostContainer(cfg, a, "fetch-source")}, Containers: []corev1.Container{main},
+		InitContainers: []corev1.Container{dockerContainer(cfg)}, Containers: []corev1.Container{main},
 	}
 }
 
-func hostContainer(cfg CloudJobConfig, a CloudJobAward, verb string) corev1.Container {
+func hostContainer(cfg CloudJobConfig, a CloudJobAward) corev1.Container {
 	b := a.Binding
-	args := []string{verb, "--controller", cfg.ControllerURL, "--run", string(b.RunID), "--generation", strconv.FormatInt(int64(b.Generation), 10), "--source-dir", "/tmp/source", "--module-cache", "/tmp/modules", "--bootstrap-file", bootstrapPath}
+	args := []string{"run-node", "--controller", cfg.ControllerURL, "--run", string(b.RunID), "--generation", strconv.FormatInt(int64(b.Generation), 10), "--module-cache", "/tmp/modules", "--bootstrap-file", bootstrapPath}
 	if b.NodeID != "" {
 		args = append(args, "--job", string(b.NodeID))
 	}
-	return corev1.Container{Name: verb, Image: cfg.RunnerImage, ImagePullPolicy: corev1.PullIfNotPresent, Command: []string{JobBinary}, Args: args, WorkingDir: "/tmp", Env: []corev1.EnvVar{{Name: "HOME", Value: "/tmp"}, {Name: "DOCKER_HOST", Value: "unix:///tmp/docker.sock"}}, VolumeMounts: []corev1.VolumeMount{{Name: "scratch", MountPath: "/tmp"}, {Name: "bootstrap", MountPath: "/etc/sparkwing/bootstrap", ReadOnly: true}}, SecurityContext: workloadSecurity()}
+	return corev1.Container{Name: "run-node", Image: cfg.RunnerImage, ImagePullPolicy: corev1.PullIfNotPresent, Command: []string{JobBinary}, Args: args, WorkingDir: "/tmp", Env: []corev1.EnvVar{{Name: "HOME", Value: "/tmp"}, {Name: "DOCKER_HOST", Value: "unix:///tmp/docker.sock"}}, VolumeMounts: []corev1.VolumeMount{{Name: "scratch", MountPath: "/tmp"}, {Name: "bootstrap", MountPath: "/etc/sparkwing/bootstrap", ReadOnly: true}}, SecurityContext: workloadSecurity()}
 }
 
 // dockerCapabilities are namespaced to the Pod's user namespace. PTRACE lets

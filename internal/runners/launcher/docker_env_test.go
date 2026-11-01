@@ -15,7 +15,7 @@ func TestCloudWorkloadsUseTheSidecarSocket(t *testing.T) {
 		t.Fatal(err)
 	}
 	pod := result.Job.Spec.Template.Spec
-	for _, container := range []corev1.Container{pod.InitContainers[1], pod.Containers[0]} {
+	for _, container := range []corev1.Container{pod.Containers[0]} {
 		if !slices.Contains(container.Env, corev1.EnvVar{Name: "DOCKER_HOST", Value: "unix:///tmp/docker.sock"}) {
 			t.Fatalf("%s lacks the Docker sidecar endpoint", container.Name)
 		}
