@@ -9,10 +9,12 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
+	"github.com/sparkwing-dev/sparkwing/internal/race"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
 )
@@ -108,26 +110,38 @@ func TestRetryHistoryTraversesLongChainsAndCycles(t *testing.T) {
 	seedRetryHistory(t, s, "private-retry-value")
 	ids := []string{"run", "second", "sibling", "last"}
 	parent := "last"
+	rows := make([]string, 0, 270)
+	args := make([]any, 0, 4*270)
 	for i := range 270 {
 		id := fmt.Sprintf("retry-%d", i)
 		lineage, err := json.Marshal(runspec.Lineage{RetryOf: parent})
 		if err != nil {
 			t.Fatal(err)
 		}
-		engineSQL(t, s.store, `INSERT INTO runs(team,id,number,pipeline,status,request_json,request_hash,request_sealed_at,repo_key,dispatch,intake_mode,created_principal,created_at,log_retention_class,log_retention_days,retry_of,lineage_json) SELECT team,?,?,pipeline,status,request_json,request_hash,request_sealed_at,repo_key,dispatch,intake_mode,created_principal,?,log_retention_class,log_retention_days,?,? FROM runs WHERE id='run'`, id, i+5, i+5, parent, lineage)
+		rows = append(rows, "(?,?,?,?)")
+		args = append(args, id, i+5, parent, lineage)
 		ids = append(ids, id)
 		parent = id
 	}
+	// perf: one INSERT for the chain, because each fixture statement opens a
+	// connection that reparses the schema and reprojects every run.
+	engineSQL(t, s.store, `INSERT INTO runs(team,id,number,pipeline,status,request_json,request_hash,request_sealed_at,repo_key,dispatch,intake_mode,created_principal,created_at,log_retention_class,log_retention_days,retry_of,lineage_json) SELECT r.team,v.column1,v.column2,r.pipeline,r.status,r.request_json,r.request_hash,r.request_sealed_at,r.repo_key,r.dispatch,r.intake_mode,r.created_principal,v.column2,r.log_retention_class,r.log_retention_days,v.column3,v.column4 FROM runs r, (VALUES `+strings.Join(rows, ",")+`) AS v WHERE r.id='run'`, args...)
 	options, _ := selectorClientOptions(t, s, session, `{"grants":["runs.read"]}`)
 	raw, err := options.Bearer(t.Context())
 	if err != nil {
 		t.Fatal(err)
 	}
+	selectors := map[bool][]string{false: {"run", parent, "274"}, true: {"run", parent, "274"}}
+	if race.Enabled {
+		// perf: every page rewalks the whole tree, about 6s under the detector; the race build reads
+		// the history once per shape and the full suite reads it through every selector.
+		selectors = map[bool][]string{false: {"run"}, true: {"274"}}
+	}
 	for _, cycle := range []bool{false, true} {
 		if cycle {
 			engineSQL(t, s.store, `UPDATE runs SET retry_of=? WHERE id='run'`, parent)
 		}
-		for _, selector := range []string{"run", parent, "274"} {
+		for _, selector := range selectors[cycle] {
 			var history []json.RawMessage
 			cursor := ""
 			seen := map[string]bool{}

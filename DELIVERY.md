@@ -692,8 +692,29 @@ file. Other syntax and workflow checks remain active.
   groups ran 291 to 1145 s, the two longest holding those tests. The hosted-to-local ratio was 1.31 for
   acceptance and about 2.0 for launcher and source.
 
-  Projected plan on the former shared hosted runner for a batch touching all
-  six packages, at the 1.31 ratio, with `store-postgres` idle: the ordinary packages take about 4
+  Later the same day the three long poles got cheaper under race, measured
+  the same way on a quieter host (load average 4 to 6). Fixture inserts in
+  the controller tests became one statement each, because every
+  `teststore.Exec` reparses the schema and reprojects every run. Under race,
+  retry history reads its 270-link chain through one selector per shape
+  instead of three, and `TestStorage` checks the first 16 of its 128 depcache
+  cases per backend. The full suite without race still checks every selector
+  and all 128 cases. Test rows ran each test alone with `-run`.
+
+  | Test or package | Race before | Race after | No race before | No race after |
+  | --- | ---: | ---: | ---: | ---: |
+  | `TestStorage` | 1681.7 s | 271.0 s | 177.9 s | 148.5 s |
+  | `TestLogTreeTraversesEveryTenantDescendantProperty` | 585.9 s | 65.3 s | 99.8 s | 7.7 s |
+  | `TestRetryHistoryTraversesLongChainsAndCycles` | 564.7 s | 95.1 s | 95.6 s | 12.9 s |
+  | `tests/acceptance` | 2408.2 s | 890.5 s | | |
+  | `internal/controller` | 5112.8 s | 3836.4 s | | |
+
+  The package CPU (user+sys) after the change was 873.7 s for acceptance and
+  3680.9 s for controller. Retry history still costs about 6 s per page under
+  race because every page request rewalks the whole retry tree.
+
+  Projected plan on the former shared hosted runner, from the measurements
+  before those reductions, for a batch touching all six packages, at the 1.31 ratio, with `store-postgres` idle: the ordinary packages take about 4
   minutes, the three lead shards (about 37, 14 and 13 minutes) start first,
   two more workers join when the full Go suite ends near minute 32, and the
   queue drains at about minute 60 of a step that starts near minute 5 of the
