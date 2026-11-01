@@ -190,14 +190,12 @@ func (l *Launcher) requestCapacity(ctx context.Context, award CloudJobAward) err
 	}
 	// safety: only displacement needs fresh demand. Retrying an incompatible pool
 	// would keep provisioning nodes that this award can never reserve.
-	if podStopped(*admitted) {
-		displaced, err := l.capacityDisplaced(ctx, admitted, d.Binding)
-		if err != nil {
-			return err
-		}
-		if displaced {
-			return l.deleteCapacityPod(ctx, admitted)
-		}
+	displaced, err := l.capacityDisplaced(ctx, admitted, d.Binding)
+	if err != nil {
+		return err
+	}
+	if displaced {
+		return l.deleteCapacityPod(ctx, admitted)
 	}
 	return nil
 }
