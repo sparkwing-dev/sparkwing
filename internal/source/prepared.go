@@ -214,7 +214,6 @@ func (p *Prepared) publish(ctx context.Context, spec Spec, options Options, entr
 	gz := gzip.NewWriter(io.MultiWriter(archive, digest))
 	snapshot := sha256.New()
 	tw := tar.NewWriter(io.MultiWriter(gz, snapshot))
-	// Snapshot is a publisher-declared fingerprint, authenticated with the archive bytes.
 	roots := []struct{ name, path string }{{"checkout", entry.checkoutDirectory}}
 	if manifest.CodeRoot == "code" {
 		roots = append(roots, struct{ name, path string }{"code", entry.pipelineCheckout})

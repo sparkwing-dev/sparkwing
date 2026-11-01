@@ -145,7 +145,7 @@ func WarmCapacityModesAndDemand(t *testing.T, s *Store) {
 		t.Fatal(err)
 	}
 	assertDesired(2)
-	if _, err = s.exec(ctx, `UPDATE cloud_job_capacity SET claimed_at=?,started_at=CASE WHEN started_at IS NULL THEN NULL ELSE ? END`, now-int64(2*time.Hour), now-int64(2*time.Hour)); err != nil {
+	if _, err = s.exec(ctx, `UPDATE cloud_job_capacity SET claimed_at=?,started_at=CASE WHEN started_at IS NULL THEN NULL ELSE CAST(? AS BIGINT) END`, now-int64(2*time.Hour), now-int64(2*time.Hour)); err != nil {
 		t.Fatal(err)
 	}
 	assertDesired(1)
