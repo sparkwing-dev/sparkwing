@@ -52,7 +52,11 @@ still read committed database state and report database errors.
 
 HTTP failures caused by a canceled client request log at info. Before response
 headers are sent, these failures return HTTP 499 (Client Closed Request).
-The request's status and audit records remain available. A canceled request does not lower
+The request's status and audit records remain available. A database driver's
+`bad connection` error on a canceled request also follows this rule, because pgx
+can replace a cancellation error with that sentinel before sending SQL. The same
+connection error on a live request remains HTTP 500 and logs at error.
+A canceled request does not lower
 the log level of an unrelated server fault, which still logs at error. Rollback
 cleanup failures caused by closed connections or canceled contexts log at debug.
 Other rollback cleanup failures log at warn.

@@ -2,6 +2,7 @@ package controller
 
 import (
 	"context"
+	"database/sql/driver"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -607,7 +608,7 @@ func withRequestLog(
 					cause = errors.New(http.StatusText(status))
 				}
 				level := slog.LevelError
-				if errors.Is(ctx.Err(), context.Canceled) && errors.Is(cause, context.Canceled) {
+				if rw.clientCanceled() {
 					level = slog.LevelInfo
 				}
 				logger.Log(ctx, level, "http request failed", "request_id", masker.Mask(rec.id), "method", r.Method, "route", rec.route, "status", status, "err", masker.Mask(cause.Error()))
@@ -651,11 +652,17 @@ func (r *statusRecorder) ResponseError(err error) {
 	}
 }
 
+func (r *statusRecorder) clientCanceled() bool {
+	// pgx can replace a context error with ErrBadConn before sending a query.
+	return r.ctx != nil && errors.Is(r.ctx.Err(), context.Canceled) &&
+		(errors.Is(r.cause, context.Canceled) || errors.Is(r.cause, driver.ErrBadConn))
+}
+
 func (r *statusRecorder) WriteHeader(code int) {
 	if r.committed {
 		return
 	}
-	if code >= http.StatusInternalServerError && r.ctx != nil && errors.Is(r.ctx.Err(), context.Canceled) && errors.Is(r.cause, context.Canceled) {
+	if code >= http.StatusInternalServerError && r.clientCanceled() {
 		code = statusClientClosedRequest
 	}
 	if code < 100 || code >= 200 || code == http.StatusSwitchingProtocols {

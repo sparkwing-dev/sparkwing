@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
+	"database/sql/driver"
 	"encoding/json"
 	"errors"
 	"log/slog"
@@ -390,6 +391,7 @@ func TestLocalHostChildIntakeResolvesCapturedDefaults(t *testing.T) {
 type cancelSnapshotBinding struct {
 	capability.BindingChecker
 	cancel context.CancelFunc
+	err    error
 }
 
 func (b cancelSnapshotBinding) CheckBinding(ctx context.Context, p capability.Principal, rule capability.BindingRule, target capability.Target) error {
@@ -397,7 +399,7 @@ func (b cancelSnapshotBinding) CheckBinding(ctx context.Context, p capability.Pr
 		return err
 	}
 	b.cancel()
-	return nil
+	return b.err
 }
 
 func TestLocalHostSnapshotRejectsMalformedRunningState(t *testing.T) {
@@ -409,7 +411,7 @@ func TestLocalHostSnapshotRejectsMalformedRunningState(t *testing.T) {
 }
 
 func TestLocalHostSnapshotFailuresLogStoreCauseOnce(t *testing.T) {
-	for _, stage := range []string{"store", "handler_cancel", "authentication_cancel"} {
+	for _, stage := range []string{"store", "handler_cancel", "binding_bad_connection", "authentication_cancel"} {
 		t.Run(stage, func(t *testing.T) {
 			engine, _ := engineRuntimeStore(t)
 			engineRuntimeClaim(t, engine, capability.UnitNode)
@@ -429,8 +431,11 @@ func TestLocalHostSnapshotFailuresLogStoreCauseOnce(t *testing.T) {
 					t.Fatal(err)
 				}
 			case "handler_cancel":
-				server.authorization.Bindings = cancelSnapshotBinding{server.authorization.Bindings, cancel}
+				server.authorization.Bindings = cancelSnapshotBinding{BindingChecker: server.authorization.Bindings, cancel: cancel}
 				wantStatus, wantCause, wantLevel = statusClientClosedRequest, "context canceled", "INFO"
+			case "binding_bad_connection":
+				server.authorization.Bindings = cancelSnapshotBinding{BindingChecker: server.authorization.Bindings, cancel: cancel, err: driver.ErrBadConn}
+				wantStatus, wantCause, wantLevel = statusClientClosedRequest, "driver: bad connection", "INFO"
 			case "authentication_cancel":
 				cancel()
 				wantStatus, wantCause, wantLevel = statusClientClosedRequest, "context canceled", "INFO"
