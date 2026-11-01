@@ -13,6 +13,12 @@ The baseline version is 28. Both dialects are translated from `schema.sql`.
 Stores at another version require a backup and recreation. This baseline has
 no forward migration.
 
+`sparkwing_schema_version.baseline_digest` records SHA-256 of the neutral SQL
+with LF line endings. Open refuses a differing digest at the same version with
+the backup and reset remedy. A store without a digest must contain every table,
+view and explicit index declared by the baseline before Open records its digest.
+This legacy check compares names and types, not column definitions or constraints.
+
 Payment-event grants require a team so the composite grant foreign key applies.
 Standing requests carry neither decider nor decision time while open, and both
 when approved or declined. Team deletion is done exactly when it has a finish

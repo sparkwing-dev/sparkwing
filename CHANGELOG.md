@@ -57,6 +57,8 @@ unlock.
 
 ### Fixed
 
+- **store:** Refuse a changed schema baseline even when its version still matches
+  SQLite and PostgreSQL record the embedded baseline's SHA-256 digest and report both digests with the backup and reset remedy on mismatch. Stores without a digest are stamped only when every declared table, view and explicit index exists. Schema version stays 28. See the [baseline reset guide](docs/migrations/_unreleased.md#recreate-the-store-for-schema-baseline-28).
 - **Cloud:** Retire empty nodes after their run finishes instead of waiting for Karpenter consolidation
   The launcher confirms terminal run state, permanent team/run ownership and Pod vacancy, then UID-fences deletion of the owning NodeClaim. Reconciliation resumes this cleanup after restart without additional RBAC.
 

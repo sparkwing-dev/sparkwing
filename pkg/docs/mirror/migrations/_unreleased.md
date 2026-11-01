@@ -7,6 +7,17 @@ is no forward migration. Stores at another baseline refuse startup and remain
 unchanged. Before 1.0, schema changes may require moving the local store aside
 or recreating a server database. Forward migrations start after launch.
 
+Stores also record the SHA-256 digest of the embedded, dialect-neutral baseline
+in `sparkwing_schema_version.baseline_digest`. A matching version with a different
+digest refuses startup, names both digests and gives the same backup and reset
+remedy as an older schema. This catches earlier drafts of baseline 28.
+
+A store without a digest is checked once for every table, view and explicit
+index declared by the baseline. If all are present, startup records the digest
+and continues. Missing objects refuse startup without changing the store; use
+the reset steps below. This legacy check compares object names and types, not
+column definitions or constraints. Schema version 28 is unchanged.
+
 For a local store:
 
 1. Stop the local daemon with `sparkwing daemon stop`, then stop any standalone

@@ -44,10 +44,12 @@ func OpenExisting(ctx context.Context, dialect Dialect, target string, opts ...O
 	}
 	st := &Store{db: db, conn: conn, dialect: dialect}
 	label := target
+	path := target
 	if dialect == DialectPostgres {
 		label = "PostgreSQL target"
+		path = ""
 	}
-	if err := requireCurrentSchema(ctx, conn, driver, label); err != nil {
+	if err := st.requireCurrentSchema(ctx, label, path); err != nil {
 		return nil, errors.Join(err, st.Close())
 	}
 	for _, opt := range opts {
@@ -61,17 +63,27 @@ func OpenExisting(ctx context.Context, dialect Dialect, target string, opts ...O
 	return st, nil
 }
 
-func requireCurrentSchema(ctx context.Context, conn *sql.Conn, driver, label string) error {
+func (s *Store) requireCurrentSchema(ctx context.Context, label, path string) (err error) {
+	tx, err := s.beginTx(ctx)
+	if err != nil {
+		return err
+	}
+	defer func() { err = errors.Join(err, tx.Rollback()) }()
+	if s.dialect == DialectPostgres {
+		if _, err := tx.execContext(ctx, migrateAdvisoryLock); err != nil {
+			return err
+		}
+	}
 	exists := `SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'sparkwing_schema_version'`
-	if driver == "pgx" {
+	if s.dialect == DialectPostgres {
 		exists = `SELECT COUNT(*) FROM (SELECT to_regclass('sparkwing_schema_version') AS t) r WHERE r.t IS NOT NULL`
 	}
 	var n, version int
-	if err := conn.QueryRowContext(ctx, exists).Scan(&n); err != nil {
+	if err := tx.QueryRowContext(ctx, exists).Scan(&n); err != nil {
 		return fmt.Errorf("open existing store %s: %w", label, err)
 	}
 	if n > 0 {
-		if err := conn.QueryRowContext(ctx, `SELECT COALESCE(MAX(version), 0) FROM sparkwing_schema_version`).Scan(&version); err != nil {
+		if err := tx.QueryRowContext(ctx, `SELECT COALESCE(MAX(version), 0) FROM sparkwing_schema_version`).Scan(&version); err != nil {
 			return fmt.Errorf("open existing store %s: %w", label, err)
 		}
 	}
@@ -81,5 +93,8 @@ func requireCurrentSchema(ctx context.Context, conn *sql.Conn, driver, label str
 	if version != expectedSchemaVersion {
 		return fmt.Errorf("open existing store: %s holds no Sparkwing store at schema version %d (found %d); point this at the controller's own store", label, expectedSchemaVersion, version)
 	}
-	return nil
+	if err := verifySchemaBaseline(ctx, tx, path); err != nil {
+		return err
+	}
+	return tx.Commit()
 }

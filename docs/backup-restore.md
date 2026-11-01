@@ -47,6 +47,12 @@ names the move-aside remedy. A newer database needs its matching binary, and
 rollback needs a matching backup in a separate database. Forward migrations
 start after launch.
 
+The recorded baseline digest must also match the binary at the same schema
+version. A differing digest refuses startup with both digests and the backup and
+reset remedy below. Stores without a digest are stamped only when every table,
+view and explicit index declared by the baseline exists; missing objects refuse
+startup without changing the store.
+
 v0.68.3 ships schema baseline 28 on SQLite and PostgreSQL as a store reset, with
 no forward migration. Back up and recreate stores at every other baseline
 before starting it. Staging and production require the same schema wipe. Follow
@@ -64,6 +70,10 @@ sparkwing: store schema version 27 is older than this binary (expects 28); back 
 sparkwing: store schema version 27 is older than this binary (expects 28); back up the store and use a binary matching it; this build cannot upgrade it; to start fresh, point the server at an empty database and start again
 
 sparkwing: store schema version 29 is newer than this binary (expects 28); start a binary matching the store, or restore a backup matching this binary into a separate database
+
+sparkwing: store schema version 28 baseline digest "<recorded-digest>" differs from this binary's "<binary-digest>"; back up the store and use a binary matching it; this build cannot upgrade it; to start fresh, move <path> and any <path>-wal and <path>-shm files aside and start again
+
+sparkwing: store schema version 28 baseline digest "<missing>" differs from this binary's "<binary-digest>"; back up the store and use a binary matching it; this build cannot upgrade it; to start fresh, point the server at an empty database and start again
 
 sparkwing: ~/.sparkwing/state.db is a store from Sparkwing v0.67 or earlier (schema version 94); this release starts a new store and cannot read or import it, and left the old one unchanged; move it aside and run again: mv ~/.sparkwing/state.db ~/.sparkwing/state.db.v067 (move ~/.sparkwing/state.db-wal and ~/.sparkwing/state.db-shm with it if they exist)
 

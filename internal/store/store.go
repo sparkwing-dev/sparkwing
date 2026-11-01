@@ -1326,7 +1326,10 @@ func (s *Store) createBaseline(ctx context.Context, path string) error {
 	}
 	switch version {
 	case expectedSchemaVersion:
-		return nil
+		if err := verifySchemaBaseline(ctx, tx, path); err != nil {
+			return err
+		}
+		return tx.Commit()
 	case 0:
 		empty, err := databaseEmpty(ctx, tx)
 		if err != nil {
@@ -1358,8 +1361,8 @@ func (s *Store) createBaseline(ctx context.Context, path string) error {
 		return fmt.Errorf("protect audit history: %w", err)
 	}
 	if _, err := tx.execContext(ctx,
-		`INSERT INTO sparkwing_schema_version (version, applied_at) VALUES (?, ?)`,
-		expectedSchemaVersion, time.Now().UnixNano()); err != nil {
+		`INSERT INTO sparkwing_schema_version (version, applied_at, baseline_digest) VALUES (?, ?, ?)`,
+		expectedSchemaVersion, time.Now().UnixNano(), schemaBaselineDigest()); err != nil {
 		return fmt.Errorf("record schema version: %w", err)
 	}
 	if err := recordDefaultTeamTx(ctx, tx); err != nil {
