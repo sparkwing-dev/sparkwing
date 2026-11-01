@@ -14,15 +14,16 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"reflect"
 	"slices"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/engineid"
 	"github.com/sparkwing-dev/sparkwing/internal/fssecure"
+	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 	"github.com/sparkwing-dev/sparkwing/internal/releaseasset"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/tarsafe"
 )
 
@@ -67,8 +68,27 @@ func (p *Prepared) validate() error {
 func preparedSource(spec Spec) Spec {
 	spec.Engine = nil
 	// safety: Only the effective checkout policy affects acquisition and its fingerprint.
-	spec.Checkout.Origins = nil
+	policy := spec.Checkout.Policy
+	enabled := func(value *bool) bool { return value != nil && *value }
+	depth := checkoutDepth(policy)
+	spec.Checkout = runspec.CheckoutPolicy{Policy: nodeproto.SourceSpec{
+		FullHistory: new(depth == 0), Depth: new(depth), Tags: new(enabled(policy.Tags)),
+		Submodules: new(enabled(policy.Submodules)), LFS: new(enabled(policy.LFS)),
+	}}
 	return spec
+}
+
+func samePreparedSource(a, b Spec) bool {
+	a, b = preparedSource(a), preparedSource(b)
+	return a.RepoKey == b.RepoKey && a.RemoteURL == b.RemoteURL && a.SHA == b.SHA &&
+		a.PipelineSHA == b.PipelineSHA && a.CommittedCheckout == b.CommittedCheckout &&
+		a.DefaultBranch == b.DefaultBranch && a.LocalCheckout == b.LocalCheckout &&
+		a.PipelineDir == b.PipelineDir && a.NoBincache == b.NoBincache &&
+		a.HashAllFiles == b.HashAllFiles && a.BundleDigest == b.BundleDigest &&
+		*a.Checkout.Policy.Depth == *b.Checkout.Policy.Depth &&
+		*a.Checkout.Policy.Tags == *b.Checkout.Policy.Tags &&
+		*a.Checkout.Policy.Submodules == *b.Checkout.Policy.Submodules &&
+		*a.Checkout.Policy.LFS == *b.Checkout.Policy.LFS
 }
 
 func (p *Prepared) inputs(ctx context.Context, spec Spec, options Options, identity engineid.Identity, directory string) (preparedInputs, error) {
@@ -358,7 +378,7 @@ func (p *Prepared) restore(ctx context.Context, spec Spec, options Options) (ent
 	if comparable.DefaultBranch == "" {
 		comparable.DefaultBranch = manifest.DefaultBranch
 	}
-	if manifest.Inputs.Format != 1 || manifest.Inputs.RequestHash != p.RequestHash || !reflect.DeepEqual(manifest.Inputs.Source, comparable) || manifest.Inputs.Target != options.Target || spec.Engine != nil && manifest.Inputs.Engine != *spec.Engine {
+	if manifest.Inputs.Format != 1 || manifest.Inputs.RequestHash != p.RequestHash || !samePreparedSource(manifest.Inputs.Source, comparable) || manifest.Inputs.Target != options.Target || spec.Engine != nil && manifest.Inputs.Engine != *spec.Engine {
 		return nil, nil
 	}
 	spec.Engine = &manifest.Inputs.Engine

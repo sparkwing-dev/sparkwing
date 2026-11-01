@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"maps"
@@ -18,6 +19,9 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 )
+
+// ErrResponseNotObject marks a reply with no usable controller envelope.
+var ErrResponseNotObject = errors.New("controller response must be a JSON object")
 
 type engineClient struct {
 	base     string
@@ -173,7 +177,7 @@ func responseObject(data []byte) (map[string]json.RawMessage, error) {
 	d := json.NewDecoder(bytes.NewReader(data))
 	start, err := d.Token()
 	if err != nil || start != json.Delim('{') {
-		return nil, fmt.Errorf("controller response must be a JSON object")
+		return nil, ErrResponseNotObject
 	}
 	fields := make(map[string]json.RawMessage)
 	for d.More() {

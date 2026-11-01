@@ -382,6 +382,8 @@ Consumers download to a private temporary file and consume verified EOF before
 extracting through `tarsafe`. The manifest key covers the intake seal, source
 revisions and checkout policy, SDK/engine release identity, target, filtered install
 environment, runner/tool identities and the publisher-declared snapshot fingerprint.
+Publication and restore apply checkout defaults before fingerprinting, so an omitted
+policy matches explicit defaults. Origins do not affect the build inputs.
 Restore does not recompute that fingerprint. Integrity comes from the verified blob
 digest and the server's Cloud-only write authority. Consumers trust the Cloud
 planning publisher to capture the correct source and executable. The consumer
@@ -629,6 +631,12 @@ Run status projects unactivated Cloud bootstrap awards as
 elapsed time since award issuance. Activation seals the execution host and
 clears the notice. The initial slice is a credit hold, with usage starting at
 the executing Pod's first renewal. Cancellation retains the existing cleanup.
+
+The launcher logs the first provisioning wait for each held award at INFO;
+placement retries stay quiet. Failed capacity requests remain WARN. A controller
+reply without a JSON object is INFO for claims and warm observations: an
+undelivered claim returns after lease expiry, and the next complete warm sample
+replaces the missed observation. Other controller faults remain WARN.
 
 Capacity observations carry the award fence and an optional unconfigured
 capacity diagnosis to the controller. A capacity

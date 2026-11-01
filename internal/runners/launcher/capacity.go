@@ -139,7 +139,10 @@ func (l *Launcher) awaitCapacity(ctx context.Context, award CloudJobAward) error
 		return err
 	}
 	if configured {
-		return errors.Join(ErrNoDedicatedNode, l.requestCapacity(ctx, award))
+		if err := l.requestCapacity(ctx, award); err != nil {
+			return err
+		}
+		return ErrNoDedicatedNode
 	}
 	states, err := l.retirements(ctx, []CloudJobObservation{{Binding: award.Binding, JobName: jobName(award.Binding), Capacity: &CloudCapacityObservation{Unconfigured: true}}})
 	if err != nil {

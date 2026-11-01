@@ -19,6 +19,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	controllerclient "github.com/sparkwing-dev/sparkwing/internal/controller/client"
 	"github.com/sparkwing-dev/sparkwing/internal/limits"
 	"github.com/sparkwing-dev/sparkwing/pkg/match"
 )
@@ -112,7 +113,11 @@ func (l *Launcher) Run(ctx context.Context) error {
 	for ctx.Err() == nil {
 		// safety: claim backoff must not let held awards expire before placement.
 		if err := l.reportWarmPools(ctx); err != nil {
-			logger.Warn("warm capacity observation failed", "error", err)
+			if err == controllerclient.ErrResponseNotObject { //nolint:errorlint // Joined faults must remain WARN.
+				logger.Info("warm capacity observation deferred; the next complete sample replaces it", "error", err)
+			} else {
+				logger.Warn("warm capacity observation failed", "error", err)
+			}
 		}
 		synced := l.sync(ctx)
 		if blocking(synced) != nil {
@@ -123,7 +128,11 @@ func (l *Launcher) Run(ctx context.Context) error {
 		}
 		if blocking(synced) == nil && !time.Now().Before(cooldown) {
 			if _, err := l.LaunchOne(ctx); err != nil {
-				logger.Warn("launcher claim failed", failureAttrs(err)...)
+				if err == controllerclient.ErrResponseNotObject { //nolint:errorlint // Joined faults must remain WARN.
+					logger.Info("launcher claim response unavailable; any undelivered award returns after lease expiry", failureAttrs(err)...)
+				} else if err != ErrNoDedicatedNode { //nolint:errorlint // Joined provisioning faults must remain WARN.
+					logger.Warn("launcher claim failed", failureAttrs(err)...)
+				}
 				cooldown = time.Now().Add(retryWait(err, 0))
 			}
 		}
@@ -190,7 +199,7 @@ func (l *Launcher) placeWaiting(ctx context.Context) error {
 		if errors.Is(err, limits.ErrNoTime) || errors.As(err, &failure) && failure.Code == apierr.LockHeld {
 			errs = append(errs, l.releaseCapacity(ctx, award.Binding))
 		}
-		if err != nil && !errors.Is(err, ErrNoDedicatedNode) {
+		if err != nil && err != ErrNoDedicatedNode { //nolint:errorlint // Retain faults joined with the expected wait.
 			errs = append(errs, err)
 		}
 	}
@@ -214,9 +223,14 @@ func (l *Launcher) launch(ctx context.Context, award *CloudJobAward) (launched b
 	current.LeaseExpiresAt = expires
 	r, err := BuildJob(ctx, time.Now(), l.Config, current, l.Boundary)
 	if errors.Is(err, ErrNoDedicatedNode) {
+		firstWait := !award.WaitedForFreshNode
 		award.WaitedForFreshNode = true
 		l.wait(award)
-		return true, l.awaitCapacity(ctx, *award)
+		err := l.awaitCapacity(ctx, *award)
+		if err == ErrNoDedicatedNode && firstWait { //nolint:errorlint // Joined provisioning faults are not an expected wait.
+			l.logger().Info("Cloud award waiting for provisioned capacity", "team", award.Binding.Team, "run", award.Binding.RunID, "unit", award.Binding.UnitID)
+		}
+		return true, err
 	}
 	if err != nil {
 		return true, err
