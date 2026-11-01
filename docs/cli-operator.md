@@ -11,6 +11,7 @@ Manage deployment operations
 ### Subcommands
 
 - `teams` -- Create teams under operator authority
+- `warm-capacity` -- Manage warm Cloud capacity per hardware class
 - `limits` -- Manage deployment operational ceilings
 - `object-store` -- Operate the controller's object-store request budget
 - `secrets` -- Maintain the controller's sealed values
@@ -312,4 +313,60 @@ Rotate through the deployment token route. JSON includes the new bearer, metadat
 | `--token PREFIX` | Token identifier or prefix. (required) |
 | `--grace DURATION` | How long the old credential keeps working after rotation, in whole seconds or a duration, 24h by default; zero revokes it at once. |
 | `--ttl DURATION` | Lifetime of the replacement credential in whole seconds or a duration; omitted or zero keeps the old credential's remaining lifetime. |
+| `--profile NAME` | Controller connection profile from your config. Optional profiles use the saved default, then local; --profile= selects local. |
+
+## `sparkwing operator warm-capacity`
+
+Manage warm Cloud capacity per hardware class
+
+### Subcommands
+
+- `show` -- Show warm capacity policies and start-time metrics
+- `set` -- Set Off, Manual or Auto warm capacity for one class
+
+### Flags
+
+| Flag | Description |
+|---|---|
+| `-o, --output FORMAT` | Pretty on a terminal; JSON when piped; explicit format wins. Values: pretty, json, plain. |
+| `-C, --checkout PATH` | Resolve the project from this local checkout path. |
+| `-h, --help` | Show command help without executing. |
+| `--help-all` | Include uncommon flags in command help. |
+
+## `sparkwing operator warm-capacity set`
+
+Set Off, Manual or Auto warm capacity for one class
+
+Replace one class policy. Off is the default. Counts default to zero and the start-time target to 10s.
+
+Auto uses the higher of cold-start waits / 2 rounded up and current warm + 1 when the hourly median exceeds the target, clamped to min/max.
+
+### Flags
+
+| Flag | Description |
+|---|---|
+| `-o, --output FORMAT` | Pretty on a terminal; JSON when piped; explicit format wins. Values: pretty, json, plain. |
+| `-C, --checkout PATH` | Resolve the project from this local checkout path. |
+| `-h, --help` | Show command help without executing. |
+| `--help-all` | Include uncommon flags in command help. |
+| `--class CLASS` | Cloud hardware class, such as sparkwing-2cpu. (required) |
+| `--mode MODE` | off, manual or auto. (required) |
+| `--count N` | Warm nodes to hold in manual mode, zero by default. |
+| `--min N` | Minimum warm nodes in auto mode, zero by default. |
+| `--max N` | Maximum warm nodes in auto mode, zero by default. |
+| `--start-time-target DURATION` | Positive job start-time target as a duration, 10s by default. |
+| `--profile NAME` | Controller connection profile from your config. Optional profiles use the saved default, then local; --profile= selects local. |
+
+## `sparkwing operator warm-capacity show`
+
+Show warm capacity policies and start-time metrics
+
+### Flags
+
+| Flag | Description |
+|---|---|
+| `-o, --output FORMAT` | Pretty on a terminal; JSON when piped; explicit format wins. Values: pretty, json, plain. |
+| `-C, --checkout PATH` | Resolve the project from this local checkout path. |
+| `-h, --help` | Show command help without executing. |
+| `--help-all` | Include uncommon flags in command help. |
 | `--profile NAME` | Controller connection profile from your config. Optional profiles use the saved default, then local; --profile= selects local. |
