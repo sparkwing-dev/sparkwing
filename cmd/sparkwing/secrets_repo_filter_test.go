@@ -18,7 +18,7 @@ func TestSecretListRepositoryForms(t *testing.T) {
 			{Name: "REGION", Shared: true},
 		}}, nil
 	}}
-	for _, repo := range []string{"acme/web", "github.com/acme/web", "https://github.com/acme/web", "https://github.com/acme/web.git", "https://GitHub.com/ACME/Web.git/", "git@github.com:acme/web.git", "gh:1"} {
+	for _, repo := range []string{"acme/web", "acme/web/", "acme/web.git/", "github.com/acme/web", "github.com/acme/web/", "https://github.com/acme/web", "https://github.com/acme/web.git", "https://GitHub.com/ACME/Web.git/", "git@github.com:acme/web.git", "ssh://git@github.com/acme/web.git", "gh:1"} {
 		t.Run(repo, func(t *testing.T) {
 			var out bytes.Buffer
 			inv := secretInvocation(t, "list", "--repo", repo, "-o", "plain")
@@ -38,7 +38,7 @@ func TestSecretListRefusesInvalidRepository(t *testing.T) {
 		listed = true
 		return controllerwire.Secrets{}, nil
 	}}
-	for _, repo := range []string{"web", "github.com/acme", "github.com/acme/web/extra", "acme//web", "acme/../web", "https://github.com/acme/web?ref=main", "https://github.com/acme/web#main", "https://github.com/", "https://[", "gh:0", "gh:01", "gh:abc"} {
+	for _, repo := range []string{"web", "github.com/acme", "github.com/acme/web/extra", "acme//web", "acme/../web", "acme/*", "https://github.com/acme/web?ref=main", "https://github.com/acme/web#main", "git@github.com:acme/web?ref=main", "https://github.com/acme/web%3Fref", "https://github.com/acme/web:foo", "https://github.com/", "https://[", "gh:0", "gh:01", "gh:abc"} {
 		t.Run(repo, func(t *testing.T) {
 			var out bytes.Buffer
 			inv := secretInvocation(t, "list", "--repo", repo, "-o", "plain")

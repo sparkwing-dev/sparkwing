@@ -198,13 +198,16 @@ func secretListRepository(raw string) (string, error) {
 	} else {
 		if !strings.ContainsAny(raw, ":@") {
 			owner, _, _ := strings.Cut(raw, "/")
-			if strings.Count(raw, "/") == 1 && !strings.Contains(owner, ".") {
+			if strings.Count(strings.TrimRight(raw, "/"), "/") == 1 && !strings.Contains(owner, ".") {
 				raw = "github.com/" + raw
 			}
 			raw = "https://" + raw
 		}
 		repo, err = sourceurl.Identity(raw)
-		if err == nil && (!strings.HasPrefix(repo, "github.com/") || strings.Count(repo, "/") != 2) {
+		if err == nil {
+			_, err = sourceurl.ParseRepoPattern(repo)
+		}
+		if err == nil && (!strings.HasPrefix(repo, "github.com/") || strings.Count(repo, "/") != 2 || strings.ContainsAny(repo, "*:")) {
 			err = errors.New("repository must name a GitHub owner/name or gh:<id>")
 		}
 	}
