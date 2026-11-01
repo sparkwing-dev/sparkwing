@@ -175,6 +175,10 @@ CREATE TABLE nodes (
     requested_cores DOUBLE PRECISION NOT NULL DEFAULT 0 CHECK(requested_cores >= 0),
     requested_memory_bytes BIGINT NOT NULL DEFAULT 0 CHECK(requested_memory_bytes >= 0),
     requested_slots BIGINT NOT NULL DEFAULT 1 CHECK(requested_slots >= 0),
+    requested_class TEXT NOT NULL DEFAULT '',
+    granted_class TEXT NOT NULL DEFAULT '',
+    fresh_node_wait BIGINT NOT NULL DEFAULT 0 CHECK(fresh_node_wait IN (0,1)),
+    start_latency_ns BIGINT CHECK(start_latency_ns >= 0),
     offer_started_at BIGINT,
     placement_reason TEXT NOT NULL DEFAULT '',
     placement_hold_from BIGINT,
@@ -1802,3 +1806,58 @@ CREATE INDEX idx_nodes_claim_context ON nodes(team,claim_requirements,claim_cont
 CREATE INDEX idx_triggers_claim_context ON triggers(team,claim_requirements,claim_context,unit_kind,available_at,id) WHERE status='pending' AND claimed_by IS NULL AND capability_prefix='' AND cancel_requested_at IS NULL;
 
 CREATE INDEX idx_runs_push_claim ON runs(team,repo_key,provenance_sha,provenance_ref,id);
+
+CREATE TABLE warm_pool_settings (
+    class TEXT PRIMARY KEY NOT NULL CHECK(class IN ('sparkwing-2cpu','sparkwing-4cpu','sparkwing-8cpu','sparkwing-16cpu','sparkwing-32cpu','sparkwing-64cpu')),
+    mode TEXT NOT NULL DEFAULT 'off' CHECK(mode IN ('off','manual','auto')),
+    manual_count BIGINT NOT NULL DEFAULT 0 CHECK(manual_count >= 0),
+    auto_min BIGINT NOT NULL DEFAULT 0 CHECK(auto_min >= 0),
+    auto_max BIGINT NOT NULL DEFAULT 0 CHECK(auto_max >= auto_min),
+    start_time_target_seconds DOUBLE PRECISION NOT NULL DEFAULT 10 CHECK(start_time_target_seconds > 0)
+);
+INSERT INTO warm_pool_settings(class) VALUES ('sparkwing-2cpu'),('sparkwing-4cpu'),('sparkwing-8cpu'),('sparkwing-16cpu'),('sparkwing-32cpu'),('sparkwing-64cpu');
+
+CREATE TABLE warm_pool_observations (
+    class TEXT PRIMARY KEY NOT NULL REFERENCES warm_pool_settings(class),
+    warm BIGINT NOT NULL CHECK(warm >= 0),
+    observed_at BIGINT NOT NULL
+);
+
+CREATE INDEX idx_nodes_warm_starts ON nodes(execution_started_at,requested_class) WHERE start_latency_ns IS NOT NULL;
+CREATE INDEX idx_nodes_cold_waits ON nodes(COALESCE(execution_started_at,ready_at),requested_class) WHERE fresh_node_wait=1;
+
+CREATE VIEW warm_pool_desired AS
+WITH starts AS (
+    SELECT requested_class AS class, start_latency_ns,
+           ROW_NUMBER() OVER (PARTITION BY requested_class ORDER BY start_latency_ns) AS position,
+           COUNT(*) OVER (PARTITION BY requested_class) AS total
+    FROM nodes
+    WHERE execution_started_at >= DATABASE_TIMESTAMP - 3600000000000
+      AND execution_started_at <= DATABASE_TIMESTAMP AND start_latency_ns IS NOT NULL
+), medians AS (
+    SELECT class, AVG(start_latency_ns / 1000000000.0) AS median_seconds
+    FROM starts WHERE position IN ((total + 1) / 2, (total + 2) / 2) GROUP BY class
+), waits AS (
+    SELECT requested_class AS class, (COUNT(*) + 1) / 2 AS desired
+    FROM nodes WHERE fresh_node_wait = 1
+      AND COALESCE(execution_started_at, ready_at) >= DATABASE_TIMESTAMP - 1800000000000
+      AND COALESCE(execution_started_at, ready_at) <= DATABASE_TIMESTAMP
+    GROUP BY requested_class
+), demand AS (
+    SELECT s.*, CASE WHEN o.observed_at >= DATABASE_TIMESTAMP - 120000000000
+                    THEN COALESCE(o.warm, 0) ELSE 0 END AS warm,
+           COALESCE(w.desired, 0) AS wait_desired,
+           COALESCE(m.median_seconds, 0) AS median_seconds
+    FROM warm_pool_settings s LEFT JOIN warm_pool_observations o ON o.class=s.class
+    LEFT JOIN waits w ON w.class=s.class LEFT JOIN medians m ON m.class=s.class
+), targets AS (
+    SELECT *, CASE WHEN median_seconds > start_time_target_seconds
+                   THEN warm + 1 ELSE 0 END AS latency_desired FROM demand
+), clamped AS (
+    SELECT *, CASE WHEN wait_desired > latency_desired THEN wait_desired ELSE latency_desired END AS auto_desired
+    FROM targets
+)
+SELECT class AS hardware_class, warm, CASE mode WHEN 'off' THEN 0 WHEN 'manual' THEN manual_count
+    ELSE CASE WHEN auto_desired < auto_min THEN auto_min
+              WHEN auto_desired > auto_max THEN auto_max ELSE auto_desired END END AS desired_replicas
+FROM clamped;

@@ -921,3 +921,19 @@ Approval predicates and generated expansions use store-owned evaluation release
 permission. Approval callbacks hold no groups or compute. Controller-owned
 approvals use source-fenced evaluation units. Typed outcomes settle the source
 and evaluation through the existing state machine and derived verdict owner.
+
+## Warm capacity
+
+`warm_pool_settings` stores one operator policy for each Cloud class. Every row
+starts Off, all counts start at zero, and the start-time target is 10 seconds.
+`warm_pool_observations` holds the deployment launcher's last ready, never-bound
+node count. The `warm_pool_desired` view expires observations after 120 seconds
+and computes Off/Manual/Auto for both SQLite and PostgreSQL. Auto takes the higher
+of `ceil(cold waits in 30m / 2)` and warm plus one when the hourly median exceeds
+the target, then clamps to min/max.
+
+Job telemetry in `nodes` is grouped by `requested_class`; `granted_class` identifies
+upsizes, `fresh_node_wait` marks a cold wait, and nullable `start_latency_ns`
+records claim-to-start time. `execution_started_at` dates starts. Pending cold
+waits use `ready_at`. These columns belong to schema baseline 28, with no forward
+migration. The launcher binding lane owns recording their values.
