@@ -57,6 +57,9 @@ unlock.
 
 ### Fixed
 
+- **secrets:** Normalize the CLI list's repository filter
+  `--repo owner/name`, `github.com/owner/name`, and HTTPS or SSH clone URLs match the same pipeline secrets. Invalid filters report a usage error before contacting the controller. Repository keys still match exactly.
+
 - **CI:** Gate uploaded working trees without requiring `origin/main`
   Source checks and lint judge all tracked files against an empty Git tree when the baseline is unavailable, and report the wider scope.
 

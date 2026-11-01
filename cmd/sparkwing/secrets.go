@@ -19,7 +19,9 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/controller/client"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/fssecure"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
+	"github.com/sparkwing-dev/sparkwing/internal/sourceurl"
 	"github.com/sparkwing-dev/sparkwing/pkg/color"
 	"github.com/sparkwing-dev/sparkwing/pkg/secretname"
 )
@@ -56,6 +58,10 @@ func runSecret(inv clisurface.Invocation) error {
 }
 
 func validateSecretInvocation(inv clisurface.Invocation) error {
+	if inv.Command.Path == "sparkwing secrets list" {
+		_, err := secretListRepository(inv.Value("repo"))
+		return err
+	}
 	if inv.Has("secret") {
 		if err := secretname.Validate(inv.Value("secret")); err != nil {
 			return &clisurface.UsageError{Path: inv.Command.Path, Message: err.Error()}
@@ -181,13 +187,50 @@ func readSecretValue(inv clisurface.Invocation, in io.Reader) (string, error) {
 
 type secretFilter struct{ search, repo, pipeline string }
 
+func secretListRepository(raw string) (string, error) {
+	if raw == "" {
+		return "", nil
+	}
+	var err error
+	repo := raw
+	if strings.HasPrefix(raw, "gh:") {
+		err = runspec.ValidateRepoUse(runspec.RepoKey(raw), runspec.RepoAccessRule)
+	} else {
+		if !strings.ContainsAny(raw, ":@") {
+			owner, _, _ := strings.Cut(raw, "/")
+			if strings.Count(raw, "/") == 1 && !strings.Contains(owner, ".") {
+				raw = "github.com/" + raw
+			}
+			raw = "https://" + raw
+		}
+		repo, err = sourceurl.Identity(raw)
+		if err == nil && (!strings.HasPrefix(repo, "github.com/") || strings.Count(repo, "/") != 2) {
+			err = errors.New("repository must name a GitHub owner/name or gh:<id>")
+		}
+	}
+	if err != nil {
+		return "", &clisurface.UsageError{Path: "sparkwing secrets list", Message: "--repo: " + err.Error()}
+	}
+	return repo, nil
+}
+
 func (f secretFilter) match(row controllerwire.SecretMetadata) bool {
+	if f.repo != "" && row.RepoKey != f.repo {
+		repo, err := secretListRepository(row.Repo)
+		if err != nil || repo != f.repo {
+			return false
+		}
+	}
 	return strings.Contains(strings.ToLower(row.Name), strings.ToLower(f.search)) &&
-		(f.repo == "" || strings.EqualFold(row.Repo, f.repo) || row.RepoKey == f.repo) &&
 		(f.pipeline == "" || row.Pipeline == f.pipeline)
 }
 
 func renderSecrets(out io.Writer, rows []controllerwire.SecretMetadata, filter secretFilter, format string) error {
+	var err error
+	filter.repo, err = secretListRepository(filter.repo)
+	if err != nil {
+		return err
+	}
 	selected := make([]controllerwire.SecretMetadata, 0, len(rows))
 	for _, row := range rows {
 		if filter.match(row) {
