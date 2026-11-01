@@ -68,6 +68,9 @@ func validUpload(i UploadIdentity) bool {
 
 // AuthorizeUpload checks the upload kind against its bound identity.
 func AuthorizeUpload(a Authority, i UploadIdentity, kind Kind) error {
+	if kind == KindPrepared && (i.Kind != UploadOwnerUnit || !i.Unit.Set || (i.Unit.Value.Kind != UploadPlanUnit && i.Unit.Value.Kind != UploadTriggerUnit)) {
+		return ErrDigestNotReadable
+	}
 	if !validUpload(i) || a.Principal != i.Principal || a.CapabilityRef != i.CapabilityRef {
 		return ErrDigestNotReadable
 	}
@@ -108,6 +111,9 @@ func AuthorizeEdge(r EdgeRequest) error {
 	for _, edge := range r.ReadSet.Edges {
 		if edge.Reader != r.ReadSet.Reader || edge.Digest != r.Digest || !slices.Contains(edgeKinds, edge.Kind) {
 			continue
+		}
+		if edge.Kind == EdgePrepared && r.TargetKind == KindPrepared {
+			return nil
 		}
 		if a.Attempt.Set {
 			return nil

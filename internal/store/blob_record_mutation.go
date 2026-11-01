@@ -63,7 +63,12 @@ func (r *blobRecords) mutateRecordsTx(ctx context.Context, tx *storeTx, a blobAc
 		if err != nil {
 			return nil, err
 		}
-		if found && (record.Key.Kind == blob.KindOutput || record.Key.Kind == blob.KindManifest) {
+		if found && record.Key.Kind == blob.KindPrepared {
+			if prior.Digest != record.Digest || prior.ManifestDigest != record.ManifestDigest {
+				return nil, authorityError(apierr.Conflict, "prepared pipeline record is immutable")
+			}
+			replayed[i], result[i] = true, prior
+		} else if found && (record.Key.Kind == blob.KindOutput || record.Key.Kind == blob.KindManifest) {
 			if prior.Digest != record.Digest || (!copied && (prior.ManifestDigest != record.ManifestDigest || prior.ExpiresAt != record.ExpiresAt || !reflect.DeepEqual(prior.Source, record.Source))) {
 				return nil, authorityError(apierr.Conflict, "job output record is immutable")
 			}

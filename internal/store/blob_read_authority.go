@@ -51,6 +51,9 @@ func blobRecordReadableTx(ctx context.Context, tx *storeTx, a blobActor, key blo
 	if c.repo != string(key.Scope.Repo) || c.ref != key.Scope.Ref.CapabilityScope() || c.pipeline != key.Scope.Pipeline {
 		return blob.ErrDigestNotReadable
 	}
+	if key.Kind == blob.KindPrepared && (key.Scope.Key != a.source.RunID || key.Scope.Job != "" || key.Name != "pipeline") {
+		return blob.ErrDigestNotReadable
+	}
 	if key.Kind == blob.KindMemo && (!c.source.Attempt.Set || c.source.Attempt.Value.NodeID != key.Scope.Job) {
 		return blob.ErrDigestNotReadable
 	}
@@ -122,10 +125,16 @@ func blobCandidateEdgeTx(ctx context.Context, tx *storeTx, a blobActor, c blobRe
 	if c.kind == blob.KindMemo && c.run != "" {
 		return edge, false, nil
 	}
-	if ((c.kind != blob.KindOutput && c.kind != blob.KindManifest) && c.ref != c.facts.Scope.CapabilityScope()) || (c.facts.Scope.Verified && (c.facts.AppDeliveryKey == "" || c.facts.SHA == "")) || (c.facts.DefaultBranchVerified && (!c.facts.Scope.Verified || c.facts.Scope.Ref != c.facts.DefaultBranch)) {
+	if ((c.kind != blob.KindPrepared && c.kind != blob.KindOutput && c.kind != blob.KindManifest) && c.ref != c.facts.Scope.CapabilityScope()) || (c.facts.Scope.Verified && (c.facts.AppDeliveryKey == "" || c.facts.SHA == "")) || (c.facts.DefaultBranchVerified && (!c.facts.Scope.Verified || c.facts.Scope.Ref != c.facts.DefaultBranch)) {
 		return edge, false, nil
 	}
 	scope := a.capability.Data
+	if c.kind == blob.KindPrepared {
+		edge.Kind = blob.EdgePrepared
+		owner := a.source.Kind == blob.UploadOwnerUnit && a.source.Unit.Set && (a.source.Unit.Value.Kind == blob.UploadPlanUnit || a.source.Unit.Value.Kind == blob.UploadTriggerUnit)
+		node := a.capability.Unit == capability.UnitNode && a.capability.Binding.Kind == capability.BindingNode && scope.Use == capability.DataClaim && a.capability.Audience == capability.Controller
+		return edge, a.capability.Issuance != capability.Delegate && scope.Use != capability.DataRemoteCache && a.capability.Delivery != capability.DeliveryBootstrap && (owner || node) && c.run == a.source.RunID && c.source.RunID == c.run && c.name == "pipeline" && c.pipeline == a.pipeline && c.facts == a.preparedFacts, nil
+	}
 	if scope.Use == capability.DataRemoteCache {
 		allowed := c.facts.DefaultBranchVerified && slices.Contains(scope.ReadRefs, c.ref) && c.kind != blob.KindBinary && c.kind != blob.KindSourceBundle
 		edge.Kind = blob.EdgeMemoScope

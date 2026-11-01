@@ -23,11 +23,12 @@ const (
 	KindMemo         Kind = "memo"
 	KindDepcache     Kind = "depcache"
 	KindBinary       Kind = "binary"
+	KindPrepared     Kind = "prepared"
 	KindSourceBundle Kind = "source_bundle"
 )
 
 // Kinds is the complete record-kind registry for schema and wire drift checks.
-var Kinds = []Kind{KindOutput, KindManifest, KindMemo, KindDepcache, KindBinary, KindSourceBundle}
+var Kinds = []Kind{KindOutput, KindManifest, KindMemo, KindDepcache, KindBinary, KindSourceBundle, KindPrepared}
 
 // safety: Blob is existence truth; object storage alone cannot establish a live blob.
 type Blob struct {
@@ -121,6 +122,7 @@ type EdgeKind string
 const (
 	EdgeOwnUpload         EdgeKind = "own_upload"
 	EdgeSealedSource      EdgeKind = "sealed_source"
+	EdgePrepared          EdgeKind = "prepared"
 	EdgeDependency        EdgeKind = "dependency"
 	EdgeDeclaredReference EdgeKind = "declared_reference"
 	EdgeMemoHit           EdgeKind = "memo_hit"
@@ -128,7 +130,7 @@ const (
 )
 
 // edgeKinds is complete so authorization tests cannot silently omit an edge.
-var edgeKinds = []EdgeKind{EdgeSealedSource, EdgeOwnUpload, EdgeDependency, EdgeDeclaredReference, EdgeMemoHit, EdgeMemoScope}
+var edgeKinds = []EdgeKind{EdgePrepared, EdgeSealedSource, EdgeOwnUpload, EdgeDependency, EdgeDeclaredReference, EdgeMemoHit, EdgeMemoScope}
 
 // safety: ReadEdge records a server-derived ancestry or scoped-cache entitlement.
 type ReadEdge struct {
@@ -469,7 +471,7 @@ type UploadRule struct {
 // Publication with an imported attempt follows the final row rather than non-job publication.
 var UploadRules = []UploadRule{
 	{UploadJob, true, false, false, []Kind{KindOutput, KindManifest, KindMemo, KindDepcache, KindBinary, KindSourceBundle}},
-	{UploadOwnerUnit, false, true, false, []Kind{KindBinary, KindSourceBundle}},
+	{UploadOwnerUnit, false, true, false, []Kind{KindBinary, KindSourceBundle, KindPrepared}},
 	{UploadPublication, false, false, true, []Kind{KindBinary, KindSourceBundle}},
 	{UploadPublication, true, false, true, []Kind{KindOutput, KindManifest}},
 }

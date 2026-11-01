@@ -82,7 +82,7 @@ func checkBlobSelectionTx(ctx context.Context, tx *storeTx, team Team, input blo
 	if target.RecordName == "" || !slices.Contains(blob.Kinds, kind) {
 		return authorityError(apierr.BadRequest, "logical lookup requires a record kind and name")
 	}
-	if a.capability.Data.Use == capability.DataRemoteCache && (kind == blob.KindBinary || kind == blob.KindSourceBundle) {
+	if a.capability.Data.Use == capability.DataRemoteCache && (kind == blob.KindBinary || kind == blob.KindSourceBundle || kind == blob.KindPrepared) {
 		return blob.ErrDigestNotReadable
 	}
 	return nil

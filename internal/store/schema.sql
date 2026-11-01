@@ -1353,7 +1353,7 @@ CREATE TABLE blobs (
 -- safety: source_run_id is immutable provenance; output ownership uses the cascading run_id.
 CREATE TABLE blob_records (
     team TEXT NOT NULL REFERENCES teams(name),
-    kind TEXT NOT NULL CHECK(kind IN ('output','manifest','memo','depcache','binary','source_bundle')),
+    kind TEXT NOT NULL CHECK(kind IN ('output','manifest','memo','depcache','binary','source_bundle','prepared')),
     scope TEXT NOT NULL,
     name TEXT NOT NULL,
     digest TEXT NOT NULL,
