@@ -26,7 +26,7 @@ func boundaryBinding(team string) CloudJobBinding {
 }
 
 func boundaryFixture() (*KubernetesBoundary, *fake.Clientset) {
-	node := &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "node", UID: "uid", ResourceVersion: "1", OwnerReferences: []metav1.OwnerReference{{APIVersion: "karpenter.sh/v1", Kind: "NodeClaim", Name: "claim", UID: "claim-uid"}}, Labels: map[string]string{TeamNodeLabel: TeamNodeValue("cloud", "team")}}, Spec: corev1.NodeSpec{ProviderID: "aws:///zone/i-node"}, Status: corev1.NodeStatus{Conditions: []corev1.NodeCondition{{Type: corev1.NodeReady, Status: corev1.ConditionTrue}}}}
+	node := &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "node", UID: "uid", ResourceVersion: "1", OwnerReferences: []metav1.OwnerReference{{APIVersion: "karpenter.sh/v1", Kind: "NodeClaim", Name: "claim", UID: "claim-uid"}}, Labels: map[string]string{CloudClassLabel: "2", PoolNamespaceLabel: "cloud", WarmNamespaceLabel: "warm"}}, Spec: corev1.NodeSpec{ProviderID: "aws:///zone/i-node", Taints: []corev1.Taint{{Key: DedicatedTaint, Value: "true", Effect: corev1.TaintEffectNoSchedule}}}, Status: corev1.NodeStatus{Conditions: []corev1.NodeCondition{{Type: corev1.NodeReady, Status: corev1.ConditionTrue}}}}
 	kube := fake.NewClientset(node)
 	var mu sync.Mutex
 	kube.PrependReactor("update", "nodes", func(action ktesting.Action) (bool, runtime.Object, error) {
@@ -62,7 +62,7 @@ func TestBoundaryCompetingLaunchersCannotShareNode(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			_, err := b.Reserve(t.Context(), boundaryBinding("team"), job)
+			_, err := b.Reserve(t.Context(), boundaryBinding("team"), job, CloudPlacement{RequestedClass: "2"})
 			if err == nil {
 				wins.Add(1)
 			} else if !errors.Is(err, ErrNoDedicatedNode) {
@@ -78,14 +78,14 @@ func TestBoundaryCompetingLaunchersCannotShareNode(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if node.Annotations[reservationAnnotation] == "" || len(node.Spec.Taints) != 1 {
+	if node.Annotations[reservationAnnotation] == "" || len(node.Spec.Taints) != 2 {
 		t.Fatal("reservation was not durable or scheduling was not fenced")
 	}
 }
 
 func TestBoundaryReleasesOnlyAfterPodsLeave(t *testing.T) {
 	b, kube := boundaryFixture()
-	r, err := b.Reserve(t.Context(), boundaryBinding("team"), "job")
+	r, err := b.Reserve(t.Context(), boundaryBinding("team"), "job", CloudPlacement{RequestedClass: "2"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -102,7 +102,7 @@ func TestBoundaryReleasesOnlyAfterPodsLeave(t *testing.T) {
 	if err = b.Release(t.Context(), r); err != nil {
 		t.Fatal(err)
 	}
-	if _, err = b.Reserve(t.Context(), boundaryBinding("team"), "next"); err != nil {
+	if _, err = b.Reserve(t.Context(), boundaryBinding("team"), "next", CloudPlacement{RequestedClass: "2"}); err != nil {
 		t.Fatal(err)
 	}
 	if err = b.Release(t.Context(), r); err == nil {
@@ -112,16 +112,23 @@ func TestBoundaryReleasesOnlyAfterPodsLeave(t *testing.T) {
 
 func TestBoundaryRefusesOtherTeamAndCrossNamespaceReuse(t *testing.T) {
 	b, kube := boundaryFixture()
-	if _, err := b.Reserve(t.Context(), boundaryBinding("other"), "job"); !errors.Is(err, ErrNoDedicatedNode) {
+	original, err := b.Reserve(t.Context(), boundaryBinding("team"), "original", CloudPlacement{RequestedClass: "2"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = b.Release(t.Context(), original); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := b.Reserve(t.Context(), boundaryBinding("other"), "job", CloudPlacement{RequestedClass: "2"}); !errors.Is(err, ErrNoDedicatedNode) {
 		t.Fatalf("other team=%v", err)
 	}
-	if _, err := b.Reserve(t.Context(), boundaryBinding("team"), "job"); err != nil {
+	if _, err := b.Reserve(t.Context(), boundaryBinding("team"), "job", CloudPlacement{RequestedClass: "2"}); err != nil {
 		t.Fatal(err)
 	}
 	other := *b
 	other.Kube = kube
 	other.Namespace = "elsewhere"
-	if _, err := other.Reserve(t.Context(), boundaryBinding("team"), "job"); !errors.Is(err, ErrNoDedicatedNode) {
+	if _, err := other.Reserve(t.Context(), boundaryBinding("team"), "job", CloudPlacement{RequestedClass: "2"}); !errors.Is(err, ErrNoDedicatedNode) {
 		t.Fatalf("cross namespace=%v", err)
 	}
 }
@@ -129,10 +136,10 @@ func TestBoundaryRefusesOtherTeamAndCrossNamespaceReuse(t *testing.T) {
 func TestBoundaryCannotRecoverFromAnExpiryAnnotation(t *testing.T) {
 	b, kube := boundaryFixture()
 	binding := boundaryBinding("team")
-	if _, err := b.Reserve(t.Context(), binding, "orphan"); err != nil {
+	if _, err := b.Reserve(t.Context(), binding, "orphan", CloudPlacement{RequestedClass: "2"}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := b.Reserve(t.Context(), binding, "next"); !errors.Is(err, ErrNoDedicatedNode) {
+	if _, err := b.Reserve(t.Context(), binding, "next", CloudPlacement{RequestedClass: "2"}); !errors.Is(err, ErrNoDedicatedNode) {
 		t.Fatalf("live orphan was stolen: %v", err)
 	}
 	node, err := kube.CoreV1().Nodes().Get(t.Context(), "node", metav1.GetOptions{})
@@ -143,7 +150,7 @@ func TestBoundaryCannotRecoverFromAnExpiryAnnotation(t *testing.T) {
 	if _, err = kube.CoreV1().Nodes().Update(t.Context(), node, metav1.UpdateOptions{}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := b.Reserve(t.Context(), binding, "next"); !errors.Is(err, ErrNoDedicatedNode) {
+	if _, err := b.Reserve(t.Context(), binding, "next", CloudPlacement{RequestedClass: "2"}); !errors.Is(err, ErrNoDedicatedNode) {
 		t.Fatalf("annotation authorized recovery: %v", err)
 	}
 }
@@ -158,14 +165,14 @@ func TestBoundaryRefusesKubeletRelabeledNode(t *testing.T) {
 	if _, err = kube.CoreV1().Nodes().Update(t.Context(), node, metav1.UpdateOptions{}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err = b.Reserve(t.Context(), boundaryBinding("other"), "foreign-job"); !errors.Is(err, ErrNoDedicatedNode) {
+	if _, err = b.Reserve(t.Context(), boundaryBinding("other"), "foreign-job", CloudPlacement{RequestedClass: "2"}); !errors.Is(err, ErrNoDedicatedNode) {
 		t.Fatalf("relabeled node admitted another team: %v", err)
 	}
 }
 
 func TestBoundaryNeverReassignsUsedNode(t *testing.T) {
 	b, kube := boundaryFixture()
-	r, err := b.Reserve(t.Context(), boundaryBinding("team"), "original")
+	r, err := b.Reserve(t.Context(), boundaryBinding("team"), "original", CloudPlacement{RequestedClass: "2"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -201,7 +208,7 @@ func TestBoundaryNeverReassignsUsedNode(t *testing.T) {
 	if _, err = kube.CoreV1().Nodes().Update(t.Context(), node, metav1.UpdateOptions{}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err = b.Reserve(t.Context(), boundaryBinding("other"), "foreign-job"); !errors.Is(err, ErrNoDedicatedNode) {
+	if _, err = b.Reserve(t.Context(), boundaryBinding("other"), "foreign-job", CloudPlacement{RequestedClass: "2"}); !errors.Is(err, ErrNoDedicatedNode) {
 		t.Fatalf("used node admitted another team: %v", err)
 	}
 }
@@ -215,7 +222,7 @@ func FuzzBoundaryNeverCrossesTeams(f *testing.F) {
 		}
 		b, kube := boundaryFixture()
 		if used {
-			r, err := b.Reserve(t.Context(), boundaryBinding("team"), "original")
+			r, err := b.Reserve(t.Context(), boundaryBinding("team"), "original", CloudPlacement{RequestedClass: "2"})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -231,7 +238,7 @@ func FuzzBoundaryNeverCrossesTeams(f *testing.F) {
 		if _, err = kube.CoreV1().Nodes().Update(t.Context(), node, metav1.UpdateOptions{}); err != nil {
 			t.Fatal(err)
 		}
-		if _, err = b.Reserve(t.Context(), boundaryBinding(other), "foreign-job"); !errors.Is(err, ErrNoDedicatedNode) {
+		if _, err = b.Reserve(t.Context(), boundaryBinding(other), "foreign-job", CloudPlacement{RequestedClass: "2"}); !errors.Is(err, ErrNoDedicatedNode) {
 			t.Fatalf("cross-team reservation: used=%v err=%v", used, err)
 		}
 	})
@@ -240,12 +247,12 @@ func FuzzBoundaryNeverCrossesTeams(f *testing.F) {
 func karpenterFixture() dynamic.Interface {
 	claim := &unstructured.Unstructured{Object: map[string]any{
 		"apiVersion": "karpenter.sh/v1", "kind": "NodeClaim",
-		"metadata": map[string]any{"name": "claim", "uid": "claim-uid", "labels": map[string]any{TeamNodeLabel: TeamNodeValue("cloud", "team"), "karpenter.sh/nodepool": "pool"}, "ownerReferences": []any{map[string]any{"apiVersion": "karpenter.sh/v1", "kind": "NodePool", "name": "pool", "uid": "pool-uid"}}},
+		"metadata": map[string]any{"name": "claim", "uid": "claim-uid", "labels": map[string]any{CloudClassLabel: "2", PoolNamespaceLabel: "cloud", WarmNamespaceLabel: "warm", "karpenter.sh/nodepool": "pool"}, "ownerReferences": []any{map[string]any{"apiVersion": "karpenter.sh/v1", "kind": "NodePool", "name": "pool", "uid": "pool-uid"}}},
 		"status":   map[string]any{"nodeName": "node", "providerID": "aws:///zone/i-node"},
 	}}
 	pool := &unstructured.Unstructured{Object: map[string]any{
 		"apiVersion": "karpenter.sh/v1", "kind": "NodePool", "metadata": map[string]any{"name": "pool", "uid": "pool-uid"},
-		"spec": map[string]any{"template": map[string]any{"metadata": map[string]any{"labels": map[string]any{TeamNodeLabel: TeamNodeValue("cloud", "team")}}}},
+		"spec": map[string]any{"template": map[string]any{"metadata": map[string]any{"labels": map[string]any{CloudClassLabel: "2", PoolNamespaceLabel: "cloud", WarmNamespaceLabel: "warm"}}, "spec": map[string]any{"taints": []any{map[string]any{"key": DedicatedTaint, "value": "true", "effect": "NoSchedule"}}}}},
 	}}
 	return dynamicfake.NewSimpleDynamicClient(runtime.NewScheme(), claim, pool)
 }
@@ -258,7 +265,7 @@ func TestTeamLabelIsNodeRestrictionProtected(t *testing.T) {
 
 func TestBoundaryRetiresRejectedNode(t *testing.T) {
 	b, kube := boundaryFixture()
-	r, err := b.Reserve(t.Context(), boundaryBinding("team"), "job")
+	r, err := b.Reserve(t.Context(), boundaryBinding("team"), "job", CloudPlacement{RequestedClass: "2"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -285,7 +292,7 @@ func TestBoundaryRetiresRejectedNode(t *testing.T) {
 	if err = b.Release(t.Context(), r); err != nil {
 		t.Fatal(err)
 	}
-	if _, err = b.Reserve(t.Context(), boundaryBinding("team"), "next"); !errors.Is(err, ErrNoDedicatedNode) {
+	if _, err = b.Reserve(t.Context(), boundaryBinding("team"), "next", CloudPlacement{RequestedClass: "2"}); !errors.Is(err, ErrNoDedicatedNode) {
 		t.Fatalf("retired node was reused: %v", err)
 	}
 }
@@ -342,7 +349,7 @@ func FuzzBoundaryRequiresMatchingProvisioner(f *testing.F) {
 		if _, err = kube.CoreV1().Nodes().Update(t.Context(), node, metav1.UpdateOptions{}); err != nil {
 			t.Fatal(err)
 		}
-		if _, err = b.Reserve(t.Context(), boundaryBinding("team"), "job"); !errors.Is(err, ErrNoDedicatedNode) {
+		if _, err = b.Reserve(t.Context(), boundaryBinding("team"), "job", CloudPlacement{RequestedClass: "2"}); !errors.Is(err, ErrNoDedicatedNode) {
 			t.Fatalf("foreign provisioner accepted: mode=%d err=%v", mode, err)
 		}
 	})
@@ -354,7 +361,7 @@ func FuzzRetirementNeverTouchesReplacement(f *testing.F) {
 	}
 	f.Fuzz(func(t *testing.T, mode uint8, value string) {
 		b, kube := boundaryFixture()
-		r, err := b.Reserve(t.Context(), boundaryBinding("team"), "job")
+		r, err := b.Reserve(t.Context(), boundaryBinding("team"), "job", CloudPlacement{RequestedClass: "2"})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -392,21 +399,21 @@ func TestDeploymentsSharingATeamSlugNeverShareNodes(t *testing.T) {
 	}
 	b, _ := boundaryFixture()
 	b.Namespace = "staging-cloud-jobs"
-	if _, err := b.Reserve(t.Context(), boundaryBinding("team"), "job"); !errors.Is(err, ErrNoDedicatedNode) {
+	if _, err := b.Reserve(t.Context(), boundaryBinding("team"), "job", CloudPlacement{RequestedClass: "2"}); !errors.Is(err, ErrNoDedicatedNode) {
 		t.Fatalf("a second deployment reserved another deployment's team node: %v", err)
 	}
 	for _, namespace := range []string{"prod-cloud-jobs", "staging-cloud-jobs"} {
-		pod, err := capacityPod(CloudJobConfig{Namespace: namespace, CPUCeiling: 2, MemoryCeiling: 8 << 30}, capacityDemand{Binding: boundaryBinding("team"), CPUCores: 1, Memory: 1 << 30})
+		pod, err := capacityPod(CloudJobConfig{Namespace: namespace, CPUCeiling: 2, MemoryCeiling: 8 << 30}, capacityDemand{Binding: boundaryBinding("team"), CPUCores: 2, Memory: 1 << 30})
 		if err != nil {
 			t.Fatal(err)
 		}
 		want := TeamNodeValue(namespace, "team")
-		if pod.Spec.NodeSelector[TeamNodeLabel] != want || pod.Labels[TeamLabel] != want {
+		if pod.Spec.NodeSelector[PoolNamespaceLabel] != namespace || pod.Spec.NodeSelector[CloudClassLabel] != "2" || pod.Labels[TeamLabel] != want {
 			t.Fatalf("%s capacity pod selects %q, want %q", namespace, pod.Spec.NodeSelector[TeamNodeLabel], want)
 		}
 		tolerated := false
 		for _, toleration := range pod.Spec.Tolerations {
-			tolerated = tolerated || toleration.Key == TeamNodeLabel && toleration.Value == want
+			tolerated = tolerated || toleration.Key == DedicatedTaint && toleration.Value == "true"
 		}
 		if !tolerated {
 			t.Fatalf("%s capacity pod does not tolerate its own team taint", namespace)
@@ -422,7 +429,7 @@ func TestBoundaryDaemonExemptionRequiresAppsAPI(t *testing.T) {
 			if _, err := kube.CoreV1().Pods("system").Create(t.Context(), pod, metav1.CreateOptions{}); err != nil {
 				t.Fatal(err)
 			}
-			_, err := b.Reserve(t.Context(), boundaryBinding("team"), "job")
+			_, err := b.Reserve(t.Context(), boundaryBinding("team"), "job", CloudPlacement{RequestedClass: "2"})
 			if apiVersion == "apps/v1" {
 				if err != nil {
 					t.Fatal(err)
@@ -456,7 +463,7 @@ func TestBoundarySkipsErasedReservationIdentity(t *testing.T) {
 			if _, err := kube.CoreV1().Nodes().Update(t.Context(), node, metav1.UpdateOptions{}); err != nil {
 				t.Fatal(err)
 			}
-			if _, err := b.Reserve(t.Context(), boundaryBinding("team"), "job"); !errors.Is(err, ErrNoDedicatedNode) {
+			if _, err := b.Reserve(t.Context(), boundaryBinding("team"), "job", CloudPlacement{RequestedClass: "2"}); !errors.Is(err, ErrNoDedicatedNode) {
 				t.Fatalf("suspect node accepted placement: %v", err)
 			}
 		})
@@ -468,14 +475,14 @@ func TestBoundarySkipsErasedReservationIdentity(t *testing.T) {
 // never does. A used node that lacks the run label is refused.
 func TestBoundaryReusesAWarmNodeOnlyWithinItsRun(t *testing.T) {
 	b, kube := boundaryFixture()
-	r, err := b.Reserve(t.Context(), boundaryBinding("team"), "first")
+	r, err := b.Reserve(t.Context(), boundaryBinding("team"), "first", CloudPlacement{RequestedClass: "2"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if err = b.Release(t.Context(), r); err != nil {
 		t.Fatal(err)
 	}
-	r, err = b.Reserve(t.Context(), boundaryBinding("team"), "second")
+	r, err = b.Reserve(t.Context(), boundaryBinding("team"), "second", CloudPlacement{RequestedClass: "2"})
 	if err != nil {
 		t.Fatalf("the same run's next job refused its warm node: %v", err)
 	}
@@ -484,7 +491,7 @@ func TestBoundaryReusesAWarmNodeOnlyWithinItsRun(t *testing.T) {
 	}
 	other := boundaryBinding("team")
 	other.RunID = "child-run"
-	if _, err = b.Reserve(t.Context(), other, "foreign"); !errors.Is(err, ErrNoDedicatedNode) {
+	if _, err = b.Reserve(t.Context(), other, "foreign", CloudPlacement{RequestedClass: "2"}); !errors.Is(err, ErrNoDedicatedNode) {
 		t.Fatalf("another run took a used node: %v", err)
 	}
 	node, err := kube.CoreV1().Nodes().Get(t.Context(), "node", metav1.GetOptions{})
@@ -495,7 +502,7 @@ func TestBoundaryReusesAWarmNodeOnlyWithinItsRun(t *testing.T) {
 	if _, err = kube.CoreV1().Nodes().Update(t.Context(), node, metav1.UpdateOptions{}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err = b.Reserve(t.Context(), boundaryBinding("team"), "third"); !errors.Is(err, ErrNoDedicatedNode) {
+	if _, err = b.Reserve(t.Context(), boundaryBinding("team"), "third", CloudPlacement{RequestedClass: "2"}); !errors.Is(err, ErrNoDedicatedNode) {
 		t.Fatalf("a used node without its run label was reused: %v", err)
 	}
 }
@@ -503,7 +510,7 @@ func TestBoundaryReusesAWarmNodeOnlyWithinItsRun(t *testing.T) {
 // A capacity request selects only an unused node or its own run's node, so it
 // never parks on another run's warm node where reservation would refuse it.
 func TestCapacityRequestAvoidsOtherRunsNodes(t *testing.T) {
-	pod, err := capacityPod(CloudJobConfig{Namespace: "cloud", CPUCeiling: 2, MemoryCeiling: 8 << 30}, capacityDemand{Binding: boundaryBinding("team"), CPUCores: 1, Memory: 1 << 30})
+	pod, err := capacityPod(CloudJobConfig{Namespace: "cloud", CPUCeiling: 2, MemoryCeiling: 8 << 30}, capacityDemand{Binding: boundaryBinding("team"), CPUCores: 2, Memory: 1 << 30})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -528,7 +535,7 @@ func TestCapacityRequestAvoidsOtherRunsNodes(t *testing.T) {
 		}
 		return false
 	}
-	if !matches(map[string]string{}) || !matches(map[string]string{usedRunLabel: runNodeValue("cloud", "run")}) {
+	if !matches(map[string]string{}) || !matches(map[string]string{usedRunLabel: runNodeValue("cloud", "run"), usedTeamLabel: TeamNodeValue("cloud", "team"), TeamNodeLabel: TeamNodeValue("cloud", "team")}) {
 		t.Fatal("capacity request refused a fresh node or its own run's node")
 	}
 	if matches(map[string]string{usedRunLabel: runNodeValue("cloud", "other-run")}) {

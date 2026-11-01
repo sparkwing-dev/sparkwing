@@ -63,26 +63,36 @@ func (binding CloudJobBinding) LeaseRef() capability.LeaseRef {
 
 // CloudJobAward carries only a single-use bootstrap, never the launcher's root credential.
 type CloudJobAward struct {
-	LeaseExpiresAt time.Time          `json:"lease_expires_at"`
-	Engine         *engineid.Identity `json:"engine,omitempty"`
-	Source         source.Spec        `json:"source"`
-	Binding        CloudJobBinding    `json:"binding"`
-	Bootstrap      []byte             `json:"-"`
-	CPUCores       float64            `json:"cpu_cores"`
-	Memory         int64              `json:"memory_bytes"`
+	LeaseExpiresAt     time.Time          `json:"lease_expires_at"`
+	Engine             *engineid.Identity `json:"engine,omitempty"`
+	Source             source.Spec        `json:"source"`
+	Binding            CloudJobBinding    `json:"binding"`
+	Bootstrap          []byte             `json:"-"`
+	CPUCores           float64            `json:"cpu_cores"`
+	Memory             int64              `json:"memory_bytes"`
+	UpsizeEnabled      bool               `json:"upsize_enabled"`
+	WaitedForFreshNode bool               `json:"waited_for_fresh_node"`
 }
 
 // CloudNodeReservation is an exclusive placement fact held until the Job and DinD have stopped.
 type CloudNodeReservation struct {
 	NodeName, NodeUID, Team, JobName, ReservationID string
 	Award                                           capability.LeaseRef
+	RequestedClass, GrantedClass                    string
+	WaitedForFreshNode                              bool
 }
 
-// CloudBoundary reserves one Job per team-dedicated node. Network isolation is
+type CloudPlacement struct {
+	RequestedClass     string
+	UpsizeEnabled      bool
+	WaitedForFreshNode bool
+}
+
+// CloudBoundary reserves one Job per permanently team/run-bound node. Network isolation is
 // the cluster's NetworkPolicy enforcement, which the operator verifies.
 type CloudBoundary interface {
-	Reserve(context.Context, CloudJobBinding, string) (CloudNodeReservation, error)
-	CapacityConfigured(context.Context, CloudJobBinding, corev1.ResourceList) (bool, error)
+	Reserve(context.Context, CloudJobBinding, string, CloudPlacement) (CloudNodeReservation, error)
+	CapacityConfigured(context.Context, corev1.ResourceList) (bool, error)
 	Release(context.Context, CloudNodeReservation) error
 	Retire(context.Context, CloudNodeReservation) error
 }

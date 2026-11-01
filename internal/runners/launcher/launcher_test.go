@@ -39,15 +39,15 @@ type boundaryFake struct {
 	reserveErr   error
 }
 
-func (b *boundaryFake) Reserve(_ context.Context, a CloudJobBinding, name string) (CloudNodeReservation, error) {
+func (b *boundaryFake) Reserve(_ context.Context, a CloudJobBinding, name string, placement CloudPlacement) (CloudNodeReservation, error) {
 	b.reservations++
 	if b.reserveErr != nil {
 		return CloudNodeReservation{}, b.reserveErr
 	}
-	return CloudNodeReservation{NodeName: "node", NodeUID: "uid", Team: a.Team, JobName: name, ReservationID: "reservation", Award: a.LeaseRef()}, nil
+	return CloudNodeReservation{RequestedClass: placement.RequestedClass, GrantedClass: placement.RequestedClass, WaitedForFreshNode: placement.WaitedForFreshNode, NodeName: "node", NodeUID: "uid", Team: a.Team, JobName: name, ReservationID: "reservation", Award: a.LeaseRef()}, nil
 }
 
-func (b *boundaryFake) CapacityConfigured(context.Context, CloudJobBinding, corev1.ResourceList) (bool, error) {
+func (b *boundaryFake) CapacityConfigured(context.Context, corev1.ResourceList) (bool, error) {
 	return true, nil
 }
 

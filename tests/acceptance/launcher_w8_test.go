@@ -26,17 +26,17 @@ type cloudBoundaryFake struct {
 	released  int
 }
 
-func (*cloudBoundaryFake) CapacityConfigured(context.Context, launcher.CloudJobBinding, corev1.ResourceList) (bool, error) {
+func (*cloudBoundaryFake) CapacityConfigured(context.Context, corev1.ResourceList) (bool, error) {
 	return true, nil
 }
 
-func (b *cloudBoundaryFake) Reserve(_ context.Context, binding launcher.CloudJobBinding, name string) (launcher.CloudNodeReservation, error) {
+func (b *cloudBoundaryFake) Reserve(_ context.Context, binding launcher.CloudJobBinding, name string, placement launcher.CloudPlacement) (launcher.CloudNodeReservation, error) {
 	b.reserved++
 	team := binding.Team
 	if b.wrongTeam {
 		team = "other-team"
 	}
-	return launcher.CloudNodeReservation{NodeName: "node", NodeUID: "uid", Team: team, JobName: name, ReservationID: "reservation", Award: binding.LeaseRef()}, nil
+	return launcher.CloudNodeReservation{RequestedClass: placement.RequestedClass, GrantedClass: placement.RequestedClass, WaitedForFreshNode: placement.WaitedForFreshNode, NodeName: "node", NodeUID: "uid", Team: team, JobName: name, ReservationID: "reservation", Award: binding.LeaseRef()}, nil
 }
 
 func (b *cloudBoundaryFake) Release(context.Context, launcher.CloudNodeReservation) error {

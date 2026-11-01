@@ -105,7 +105,7 @@ func BuildJob(ctx context.Context, now time.Time, cfg CloudJobConfig, award Clou
 	if err != nil {
 		return CloudJobResources{}, fmt.Errorf("invalid award binding: %w", err)
 	}
-	reservation, err := boundary.Reserve(ctx, b, name)
+	reservation, err := boundary.Reserve(ctx, b, name, CloudPlacement{RequestedClass: cpuClass(award.CPUCores), UpsizeEnabled: award.UpsizeEnabled, WaitedForFreshNode: award.WaitedForFreshNode})
 	if err != nil {
 		return CloudJobResources{}, fmt.Errorf("reserve Cloud boundary: %w", err)
 	}
@@ -224,7 +224,7 @@ func cloudPod(cfg CloudJobConfig, a CloudJobAward, r CloudNodeReservation, secre
 	// including sidecar logs and writable layers.
 	main.Resources = corev1.ResourceRequirements{Requests: corev1.ResourceList{corev1.ResourceEphemeralStorage: *scratch}, Limits: corev1.ResourceList{corev1.ResourceEphemeralStorage: *scratch}}
 	return corev1.PodSpec{
-		Tolerations: teamTolerations(cfg.Namespace, a.Binding.Team),
+		Tolerations: cloudTolerations(),
 		NodeName:    r.NodeName, NodeSelector: map[string]string{TeamNodeLabel: TeamNodeValue(cfg.Namespace, a.Binding.Team)}, ServiceAccountName: ServiceAccount, AutomountServiceAccountToken: ptr(false), EnableServiceLinks: ptr(false), RestartPolicy: corev1.RestartPolicyNever,
 		// safety: a user-namespaced Pod's IDs map to unprivileged host IDs, so
 		// nothing in it, including the Docker sidecar's root, holds node root.

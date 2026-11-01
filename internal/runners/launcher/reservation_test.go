@@ -127,7 +127,7 @@ func FuzzBoundaryReleaseRequiresOwnAward(f *testing.F) {
 		mode %= 7
 		boundary, kube := boundaryFixture()
 		binding := boundaryBinding("team")
-		original, err := boundary.Reserve(t.Context(), binding, jobName(binding))
+		original, err := boundary.Reserve(t.Context(), binding, jobName(binding), CloudPlacement{RequestedClass: "2"})
 		if err != nil {
 			t.Fatal(err)
 		}
