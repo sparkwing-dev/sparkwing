@@ -569,6 +569,28 @@ this wait. The deadline belongs to the held award and does not renew on retries.
 `TestSuccessorWaitsForPredecessorNode` and `TestTeardownWaitIsBoundedAndRunScoped`
 guard reuse and the fallback.
 
+The first reservation also records `sparkwing.dev/used-run` with its team and run
+ID. Release retains it alongside the permanent protected labels. Each launcher
+sync can therefore find spent nodes after a restart. The `retire_run` query on
+the existing launcher sync endpoint checks current deployment launcher authority
+and its repository scope, and returns `run_terminal` only for a stored terminal state with a finish time.
+A retired job award, a missing run or an unavailable controller is insufficient.
+The query cannot be combined with award or warm-pool observations.
+
+For an unreserved node whose annotation matches all protected team/run labels,
+the launcher verifies shared NodePool and NodeClaim provenance and cordons the
+exact node using its resource version. It then confirms that no non-DaemonSet Pod
+remains in any namespace before deleting the owning NodeClaim with a UID
+precondition.
+Concurrent reservation or node replacement cancels retirement. Repeated passes
+accept an already-deleted claim. Retirement failures retain the node and retry
+without blocking other claims. Existing NodeClaim get/delete RBAC is sufficient.
+Nodes with missing ownership evidence, including nodes released by older
+launchers without the retained annotation, remain for Karpenter consolidation.
+`TestRestartRetiresOnlyEmptySpentNodesOfTerminalRuns`,
+`TestRunRetirementQueryThroughController` and
+`TestLauncherRunTerminalRequiresDeploymentAuthority` guard these rules.
+
 ## Preparation leases
 
 Image startup and source checkout can take longer than a unit's

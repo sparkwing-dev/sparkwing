@@ -29,7 +29,8 @@ func (b *KubernetesBoundary) predecessorTeardown(ctx context.Context, node corev
 		return false, err
 	}
 	recorded, reservation, err := jobOwnership(*job)
-	if err != nil || job.DeletionTimestamp == nil || job.Annotations[rejectedAnnotation] != "" || !slices.Contains(job.Finalizers, cleanupFinalizer) || reservation != held || !sameBinding(recorded, binding) {
+	matches := err == nil && reservation == held && sameBinding(recorded, binding)
+	if !matches || job.DeletionTimestamp == nil || job.Annotations[rejectedAnnotation] != "" || !slices.Contains(job.Finalizers, cleanupFinalizer) {
 		return false, nil
 	}
 	pods, err := b.Kube.CoreV1().Pods("").List(ctx, metav1.ListOptions{FieldSelector: "spec.nodeName=" + node.Name})

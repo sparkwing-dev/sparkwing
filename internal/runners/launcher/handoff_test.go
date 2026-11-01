@@ -2,13 +2,14 @@ package launcher
 
 import (
 	"errors"
-
 	"testing"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	ktesting "k8s.io/client-go/testing"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/match"
 )
@@ -47,6 +48,25 @@ func TestSuccessorWaitsForPredecessorNode(t *testing.T) {
 	if err = l.Sync(t.Context()); err != nil {
 		t.Fatal(err)
 	}
+	// A ready fresh node must not win the handoff while the old one is deleting.
+	fresh := node.DeepCopy()
+	fresh.Name, fresh.UID = "a-fresh", "fresh-uid"
+	fresh.OwnerReferences[0].Name, fresh.OwnerReferences[0].UID = "fresh-claim", "fresh-claim-uid"
+	claim, err := boundary.Karpenter.Resource(nodeClaims).Get(t.Context(), "claim", metav1.GetOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	claim.SetName("fresh-claim")
+	claim.SetUID("fresh-claim-uid")
+	if err = unstructured.SetNestedField(claim.Object, fresh.Name, "status", "nodeName"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = boundary.Karpenter.Resource(nodeClaims).Create(t.Context(), claim, metav1.CreateOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = kube.CoreV1().Nodes().Create(t.Context(), fresh, metav1.CreateOptions{}); err != nil {
+		t.Fatal(err)
+	}
 	successor := predecessor
 	successor.Binding.UnitID, successor.Binding.NodeID = "successor", "successor"
 	control.award, control.remove = &successor, false
@@ -73,6 +93,11 @@ func TestSuccessorWaitsForPredecessorNode(t *testing.T) {
 	_, reservation, err := jobOwnership(*next)
 	if err != nil || reservation.NodeUID != string(node.UID) {
 		t.Fatalf("successor lost original node: %+v, %v", reservation, err)
+	}
+	for _, action := range kube.Actions() {
+		if action.GetVerb() == "create" && action.GetResource().Resource == "pods" && action.(ktesting.CreateAction).GetObject().(*corev1.Pod).Labels[capacityLabel] == "true" {
+			t.Fatal("handoff created a provisioning Pod")
+		}
 	}
 	requests, err = l.capacityPods(t.Context())
 	if err != nil || len(requests) != 0 {

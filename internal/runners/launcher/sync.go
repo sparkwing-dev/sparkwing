@@ -34,6 +34,7 @@ func (l *Launcher) Sync(ctx context.Context) error {
 }
 
 func (l *Launcher) sync(ctx context.Context) (result error) {
+	defer func() { result = errors.Join(result, l.syncSpentNodes(ctx)) }()
 	defer func() { result = l.syncReservations(ctx, result) }()
 	defer func() { result = errors.Join(result, l.syncCapacity(ctx)) }()
 	var errs []error

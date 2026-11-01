@@ -71,6 +71,13 @@ its node. If a matching node is finishing the previous job's fenced teardown,
 the successor waits up to 30 seconds before requesting another node. A live job
 still permits fanout onto fresh capacity.
 
+After the run becomes terminal, the launcher retires its empty, unreserved nodes
+by deleting their UID-fenced NodeClaims. It checks the retained run identity,
+protected team/run labels and shared-pool provenance, and requires every
+non-DaemonSet Pod to have disappeared. Reconciliation finds these spent nodes
+after a launcher restart. Nodes of active runs stay available to that run.
+Older nodes without retained run identity fall back to Karpenter consolidation.
+
 When no vacant Ready node fits, the launcher checks shared-pool provenance with
 read-only NodePool access. A compatible pool that is scaling or exhausted keeps
 the award pending. An unbound, award-sized capacity-request Pod selects the

@@ -1283,6 +1283,11 @@ pools are not an option. Research and measurements:
   A successor waits up to 30 seconds for its matching-class predecessor's fenced
   teardown before requesting fresh capacity. Live reservations permit fanout.
   Team/run fences, exact reservation ownership and Pod vacancy remain required.
+  Once the run is terminal, the launcher retires empty, unreserved nodes bound
+  to it through UID-fenced NodeClaim deletion. Retained run identity is checked
+  against protected labels and controller terminal state on every reconcile,
+  including after restart. Unknown or active runs and foreign or unlabeled nodes
+  never authorize retirement. Existing NodeClaim RBAC is unchanged.
 - Capacity: one shared Karpenter NodePool per hardware class with a generic
   dedicated taint. A never-used node is bound to exactly one team and run when a
   job claims it (exact protected team label on the node, existing used-team and
