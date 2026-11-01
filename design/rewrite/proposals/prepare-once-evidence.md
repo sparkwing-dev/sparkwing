@@ -30,13 +30,15 @@ Measured in the focused prepared suite:
 
 | Path | Elapsed |
 | --- | ---: |
-| Fresh acquisition + Go build + artifact publication | 422.572 ms |
-| Download + verification + restored acquisition | 129.342 ms |
+| Fresh acquisition + Go build + artifact publication | 981.306 ms |
+| Download + verification + restored acquisition | 136.988 ms |
 
 Installation count was one. The original repository was removed before restore,
-and the restored executable produced its expected output. Another sample was
-386.999 ms / 122.925 ms. Source-transfer tests also revoke Git credentials after
-publication and prove that restoration requests no second credential or install.
+and the restored executable produced its expected output. Earlier samples ranged
+from 386.999 to 562.690 ms fresh and 122.925 to 183.789 ms restored. These are
+individual samples, not percentiles. Source-transfer tests also revoke Git
+credentials after publication and prove that restoration requests no second
+credential or install.
 
 Reproduce with the installed Go/Node tools on PATH and an isolated HOME:
 
@@ -68,37 +70,25 @@ No deployment, cluster or AWS write was performed. The rollout proposal contains
 local admission overlays for both GitOps environments; no infra change is needed
 for this lane. Published replacement image digests belong to the release owner.
 
-## Gate follow-up
+## Gate status
 
-A follow-up timing sample was 562.690 ms fresh / 183.789 ms restored, with
-one installation.
-
-The lead's gate found six untagged preparation comments. They now carry the
-required invariant tags. The lane-wide comment check, root build, source/store
-vet and lint, and focused source/store/controller preparation tests pass.
-
-The lead's full CLI package run exceeded its 30-minute budget while
-`TestLocalRunSelectionsReachPreparationSealingAndReplan` was installing an SDK.
-An isolated run of that test exceeded a five-minute budget in its second revision
-case, also during SDK installation. Neither run reported an assertion failure
-before timing out. The CLI package gate remains unresolved. This local source
-selection test does not enable prepared artifact reuse.
-
-## Continuation verification
+The lead's latest fast gate reported a CLI timeout. Its source and documentation
+checks passed. The full CLI package run exceeded the 30-minute budget in
+`TestLocalRunSelectionsReachPreparationSealingAndReplan`. Earlier isolated runs
+also timed out during SDK installation through fresh `source.Acquire`, without
+an assertion failure. This local source selection test does not enable prepared
+artifact reuse. The CLI-budget lane owns that failure; the full gate remains
+unresolved.
 
 The focused source, store, controller HTTP, bootstrap and launcher admission CEL
-suites pass. The real Go fixture measured 499.840 ms fresh / 167.038 ms restored,
-with one installation. The source suite includes corrupt-byte refusal and
-restoration after Git credential revocation.
+suites pass on the continuation check. The source suite includes corrupt-byte
+refusal and restoration after Git credential revocation. The timing table above
+records that check's real Go fixture. No product or test change was needed.
 
 Both rollout overlays now use readable YAML patches. Their parsed operations
 and CEL expressions are unchanged. All four policy patches apply in memory to
 the checked-in staging and production `kikd-gitops` manifests, including every
 old-value assertion. No file in that repository was written.
 
-The isolated CLI selection test reproduced the timeout at 90 seconds in its
-first revision case, after two SDK replacement warnings. Its stack was waiting
-in `engine.Resolved.InstallSDK` through fresh `source.Acquire`. The separate
-CLI-budget lane owns these repeated compilations and the package budget. No CLI
-test or product workaround was added here. The full gate and Opus review remain
-with the lead.
+The full gate and Opus review remain with the lead. The continuation check did
+not repeat the known failing CLI suite.
