@@ -121,10 +121,7 @@ exit 1
 			t.Setenv("PROBE_LOG", probeLog)
 			t.Setenv("PREPARE_LOG", prepareLog)
 			t.Setenv("BUILD_LOG", buildLog)
-			moduleRoot, err := moduleRoot()
-			if err != nil {
-				t.Fatal(err)
-			}
+			moduleRoot := sdkFixtureModuleRoot(t)
 			selectedModule, err := json.Marshal(map[string]any{"Version": "v0.0.0", "Replace": map[string]string{"Path": moduleRoot}})
 			if err != nil {
 				t.Fatal(err)

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -14,6 +15,8 @@ import (
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/cluster"
+	"github.com/sparkwing-dev/sparkwing/internal/engine"
+	"github.com/sparkwing-dev/sparkwing/internal/engineid"
 	"github.com/sparkwing-dev/sparkwing/internal/testleak"
 )
 
@@ -102,12 +105,118 @@ func seededBundleOverlay(dir string) (string, error) {
 	return overlay, nil
 }
 
-func writeSDKFixture(t *testing.T, sparkwingDir, source string) {
-	t.Helper()
+var (
+	sdkFixtureDir                 string
+	sdkFixtureEnvironment         = os.Environ()
+	sdkFixtureGo, sdkFixtureGoErr = exec.LookPath("go")
+)
+
+// perf: hash only the SDK's build inputs, and let installer re-execs reuse its compiled fixtures.
+var sdkFixtureModule = sync.OnceValues(func() (string, error) {
 	root, err := moduleRoot()
+	if err != nil {
+		return "", err
+	}
+	if sdkFixtureGoErr != nil {
+		return "", sdkFixtureGoErr
+	}
+	sdkFixtureDir, err = os.MkdirTemp("", "sparkwing-sdk-fixtures-")
+	if err != nil {
+		return "", err
+	}
+	stage := filepath.Join(sdkFixtureDir, "sdk")
+	list := exec.Command(sdkFixtureGo, "list", "-deps", "-json", "./sparkwing/...")
+	list.Dir, list.Env = root, sdkFixtureEnvironment
+	output, err := list.Output()
+	if err != nil {
+		return "", fmt.Errorf("list SDK fixture inputs: %w", err)
+	}
+	copyInput := func(input string) error {
+		relative, err := filepath.Rel(root, input)
+		if err != nil || filepath.IsAbs(relative) || relative == ".." || strings.HasPrefix(relative, ".."+string(filepath.Separator)) {
+			return fmt.Errorf("SDK fixture input escaped module: %s", input)
+		}
+		body, err := os.ReadFile(input)
+		if err != nil {
+			return err
+		}
+		destination := filepath.Join(stage, relative)
+		if err := os.MkdirAll(filepath.Dir(destination), 0o700); err != nil {
+			return err
+		}
+		return os.WriteFile(destination, body, 0o600)
+	}
+	decoder := json.NewDecoder(bytes.NewReader(output))
+	for decoder.More() {
+		var pkg struct {
+			Dir                           string
+			Module                        *struct{ Path string }
+			GoFiles, CgoFiles, EmbedFiles []string
+		}
+		if err := decoder.Decode(&pkg); err != nil {
+			return "", err
+		}
+		if pkg.Module == nil || pkg.Module.Path != engine.GoModule {
+			continue
+		}
+		for _, file := range append(append(pkg.GoFiles, pkg.CgoFiles...), pkg.EmbedFiles...) {
+			if err := copyInput(filepath.Join(pkg.Dir, file)); err != nil {
+				return "", err
+			}
+		}
+	}
+	for _, file := range []string{"go.mod", "go.sum"} {
+		if err := copyInput(filepath.Join(root, file)); err != nil {
+			return "", err
+		}
+	}
+	binary, err := os.Executable()
+	if err != nil {
+		return "", err
+	}
+	return stage, os.WriteFile(filepath.Join(sdkFixtureDir, "test-binary"), []byte(binary), 0o600)
+})
+
+func sdkFixtureModuleRoot(t *testing.T) string {
+	t.Helper()
+	root, err := sdkFixtureModule()
 	if err != nil {
 		t.Fatal(err)
 	}
+	return root
+}
+
+func reuseSDKFixtureCache() error {
+	directory, err := os.Getwd()
+	if err != nil {
+		return err
+	}
+	pin, err := engine.ReadPin(directory, engineid.GoSDK)
+	if err != nil || !filepath.IsAbs(pin.Replacement) {
+		return nil //nolint:nilerr // safety: the installer owns pin validation, including help without a module.
+	}
+	owner := filepath.Dir(pin.Replacement)
+	marker, err := os.ReadFile(filepath.Join(owner, "test-binary"))
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	binary, err := os.Executable()
+	if err != nil {
+		return err
+	}
+	if string(marker) != binary {
+		return nil
+	}
+	// perf: testleak's marker is filtered from installer environments, so each re-exec has a fresh home.
+	return os.Setenv("SPARKWING_HOME", filepath.Join(owner, "home"))
+}
+
+func writeSDKFixture(t *testing.T, sparkwingDir, source string) {
+	t.Helper()
+	root := sdkFixtureModuleRoot(t)
 	for _, name := range []string{"go.mod", "go.sum"} {
 		body, err := os.ReadFile(filepath.Join(root, name))
 		if err != nil {
@@ -135,7 +244,14 @@ func TestMain(m *testing.M) {
 	}
 	if len(os.Args) > 1 {
 		switch os.Args[1] {
-		case "wingd", "pipeline", "run", "runs", "runners", "overflow", "__sdk-install", "__host-trigger", "__tick", "__complete":
+		case "__sdk-install":
+			if err := reuseSDKFixtureCache(); err != nil {
+				fmt.Fprintln(os.Stderr, err)
+				os.Exit(1)
+			}
+			main()
+			return
+		case "wingd", "pipeline", "run", "runs", "runners", "overflow", "__host-trigger", "__tick", "__complete":
 			main()
 			return
 		case "__test-runner":
@@ -145,9 +261,11 @@ func TestMain(m *testing.M) {
 		}
 	}
 	code := m.Run()
-	if err := os.RemoveAll(submitCLIDir); err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		code = 1
+	for _, directory := range []string{submitCLIDir, sdkFixtureDir} {
+		if err := os.RemoveAll(directory); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			code = 1
+		}
 	}
 	if err := testleak.Check(); err != nil {
 		fmt.Fprintln(os.Stderr, err)

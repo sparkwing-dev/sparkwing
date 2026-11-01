@@ -655,18 +655,31 @@ file. Other syntax and workflow checks remain active.
   together. Full hosted batch completion remains unmeasured.
 
 - **Heavy packages:** run these by name rather than reaching for `./...`, and
-  give the command a timeout the package actually fits in. Measured alone on an
-  idle 16-core Linux box, `GOWORK=off go test -count=1 <pkg>`:
+  give the command a timeout the package actually fits in. Measured on a
+  16-core Linux box, `GOWORK=off go test -count=1 <pkg>`. The CLI sample
+  used Go 1.26.10 alongside other gates; the other samples ran alone:
 
-  | Package | Alone | Suggested `-timeout` |
+  | Package | Measured | Suggested `-timeout` |
   | --- | --- | --- |
-  | `./cmd/sparkwing/...` | 174s | 10m |
+  | `./cmd/sparkwing` | 399s package / 409s command wall | 10m |
   | `./internal/orchestrator` | 121s | 10m |
   | `./internal/cluster` | 4s | 2m |
 
-  Under contention from parallel agents the two heavy packages have been
-  observed at two to four times those figures, so the suggested budgets sit
-  well above the measurement.
+  The full CLI package passed all 1,130 top-level tests and fuzz targets in
+  398.535s. Command wall time was 408.661s. The measurement used
+  `go test -json -count=1 -timeout 90m ./cmd/sparkwing`, `GOWORK=off`,
+  `GOFLAGS=-buildvcs=false`, `GOCACHE=/tmp/sw-gocache`, private homes, and
+  `TMPDIR=/var/tmp/sw-lead-tmp`. Before fixture reuse, the same class took
+  775.644s (780.969s command wall). Pipeline build calls fell from 112 to 53;
+  both runs built the CLI three times and passed the same test names without
+  skips. These are ordinary runs, separate from the race-shard samples above.
+
+  SDK fixtures share a package-owned source snapshot and binary cache because
+  installer re-execs otherwise enter fresh test homes. Source changes,
+  ignored embedded inputs, uncached debug builds, and offline compilation
+  retain real compiler coverage. Independent subprocess tests run in parallel.
+  Contention can still extend these samples; the suggested timeouts leave
+  room above the measurements.
 
 - **Normal broad check:** `sparkwing run gate` covers every committed Go
   module, the dashboard TypeScript unit, full ESLint, production build,

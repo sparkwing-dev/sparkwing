@@ -129,6 +129,19 @@ func FuzzWithholdLocalSecretsLeavesNoConfiguredName(f *testing.F) {
 }
 
 func TestLocalEntryPointsWithholdSigningMaterial(t *testing.T) {
+	realGo, err := exec.LookPath("go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	tools := t.TempDir()
+	marker := filepath.Join(tools, "leaked")
+	wrapper := "#!/bin/sh\nif [ -n \"${SIGNING_MATERIAL+set}\" ]; then : > " + shellSingleQuote(marker) + "; fi\nif [ \"$1\" = mod ] && [ \"$2\" = download ] && [ \"$4\" = all ]; then exit 0; fi\nexec " + shellSingleQuote(realGo) + " \"$@\"\n"
+	if err := os.WriteFile(filepath.Join(tools, "go"), []byte(wrapper), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	// perf: a stable tool path lets all entry points use the same compiled SDK fixture.
+	t.Setenv("PATH", tools+string(os.PathListSeparator)+os.Getenv("PATH"))
+
 	for _, entry := range []string{"help", "describe", "plan", "preparation", "trigger", "trigger-working-tree"} {
 		t.Run(entry, func(t *testing.T) {
 			home := t.TempDir()
@@ -143,17 +156,6 @@ func TestLocalEntryPointsWithholdSigningMaterial(t *testing.T) {
 				t.Fatal(err)
 			}
 			t.Setenv("SIGNING_MATERIAL", signingMaterial)
-			realGo, err := exec.LookPath("go")
-			if err != nil {
-				t.Fatal(err)
-			}
-			tools := t.TempDir()
-			marker := filepath.Join(tools, "leaked")
-			wrapper := "#!/bin/sh\nif [ -n \"${SIGNING_MATERIAL+set}\" ]; then : > " + marker + "; fi\nif [ \"$1\" = mod ] && [ \"$2\" = download ] && [ \"$4\" = all ]; then exit 0; fi\nexec " + realGo + " \"$@\"\n"
-			if err := os.WriteFile(filepath.Join(tools, "go"), []byte(wrapper), 0o700); err != nil {
-				t.Fatal(err)
-			}
-			t.Setenv("PATH", tools+string(os.PathListSeparator)+os.Getenv("PATH"))
 			repo := burstIntakeRepository(t)
 			configBody, err := os.ReadFile(filepath.Join(repo, ".sparkwing", "sparkwing.yaml"))
 			if err != nil {
