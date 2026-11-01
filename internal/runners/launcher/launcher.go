@@ -20,6 +20,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	controllerclient "github.com/sparkwing-dev/sparkwing/internal/controller/client"
+	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/limits"
 	"github.com/sparkwing-dev/sparkwing/pkg/match"
 )
@@ -69,6 +70,10 @@ type Launcher struct {
 	Boundary CloudBoundary
 	Poll     time.Duration
 	Logger   *slog.Logger
+
+	retirementMu     sync.Mutex
+	nonTerminalRuns  map[controllerwire.LauncherRun]time.Time
+	retirementLogged time.Time
 
 	mu       sync.Mutex
 	waiting  map[string]*CloudJobAward

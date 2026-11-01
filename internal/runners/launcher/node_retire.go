@@ -4,11 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"time"
 
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 )
@@ -18,10 +20,23 @@ const usedRunAnnotation = "sparkwing.dev/used-run"
 // RunTerminal asks for an absorbing run state, independently of any job award.
 func (c *ControllerControl) RunTerminal(ctx context.Context, team string, run runspec.RunID) (bool, error) {
 	response, err := c.client.SyncLauncher(ctx, controllerwire.LauncherSyncRequest{RetireRun: &controllerwire.LauncherRun{Team: team, RunID: string(run)}})
-	return response.RunTerminal, err
+	var failure *apierr.Error
+	if errors.As(err, &failure) && failure.Code == apierr.Forbidden {
+		return false, nil
+	}
+	return err == nil && response.RunTerminal, err
 }
 
-func (l *Launcher) syncSpentNodes(ctx context.Context) error {
+func (l *Launcher) syncSpentNodes(ctx context.Context) {
+	l.retirementMu.Lock()
+	defer l.retirementMu.Unlock()
+	if err := l.retireSpentNodes(ctx); err != nil && (l.retirementLogged.IsZero() || time.Since(l.retirementLogged) >= time.Minute) {
+		l.retirementLogged = time.Now()
+		l.logger().Warn("spent node retirement failed; retrying on the next reconciliation", failureAttrs(err)...)
+	}
+}
+
+func (l *Launcher) retireSpentNodes(ctx context.Context) error {
 	boundary, ok := l.Boundary.(*KubernetesBoundary)
 	if !ok {
 		return nil
@@ -36,7 +51,7 @@ func (l *Launcher) syncSpentNodes(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	var errs []error
+	byRun := make(map[controllerwire.LauncherRun][]corev1.Node)
 	for _, node := range nodes.Items {
 		if node.DeletionTimestamp != nil || reservationEvidence(&node) {
 			continue
@@ -45,12 +60,30 @@ func (l *Launcher) syncSpentNodes(ctx context.Context) error {
 		if json.Unmarshal([]byte(node.Annotations[usedRunAnnotation]), &run) != nil || run.Team == "" || run.RunID == "" || node.Labels[usedRunLabel] != runNodeValue(l.Config.Namespace, runspec.RunID(run.RunID)) || node.Labels[usedTeamLabel] != TeamNodeValue(l.Config.Namespace, run.Team) || node.Labels[TeamNodeLabel] != node.Labels[usedTeamLabel] {
 			continue
 		}
-		terminal, err := control.RunTerminal(ctx, run.Team, runspec.RunID(run.RunID))
-		if err == nil && terminal {
-			err = boundary.retireSpentNode(ctx, node, run)
-		}
-		errs = append(errs, teardownFault(node.Name, err))
+		byRun[run] = append(byRun[run], node)
 	}
+	now := time.Now()
+	nonTerminal := make(map[controllerwire.LauncherRun]time.Time)
+	var errs []error
+	for run, spent := range byRun {
+		if until := l.nonTerminalRuns[run]; now.Before(until) {
+			nonTerminal[run] = until
+			continue
+		}
+		terminal, err := control.RunTerminal(ctx, run.Team, runspec.RunID(run.RunID))
+		if err != nil {
+			errs = append(errs, teardownFault(run.RunID, err))
+			continue
+		}
+		if !terminal {
+			nonTerminal[run] = now.Add(30 * time.Second)
+			continue
+		}
+		for _, node := range spent {
+			errs = append(errs, teardownFault(node.Name, boundary.retireSpentNode(ctx, node, run)))
+		}
+	}
+	l.nonTerminalRuns = nonTerminal
 	return errors.Join(errs...)
 }
 

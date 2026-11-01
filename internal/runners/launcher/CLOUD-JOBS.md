@@ -574,8 +574,10 @@ ID. Release retains it alongside the permanent protected labels. Each launcher
 sync can therefore find spent nodes after a restart. The `retire_run` query on
 the existing launcher sync endpoint checks current deployment launcher authority
 and its repository scope, and returns `run_terminal` only for a stored terminal state with a finish time.
-A retired job award, a missing run or an unavailable controller is insufficient.
-The query cannot be combined with award or warm-pool observations.
+A retired job award, a missing run, a refused query or an unavailable controller
+is insufficient. Each reconciliation queries a run once, regardless of its node
+count, and retains a non-terminal answer for 30 seconds. The query cannot be
+combined with award or warm-pool observations.
 
 For an unreserved node whose annotation matches all protected team/run labels,
 the launcher verifies shared NodePool and NodeClaim provenance and cordons the
@@ -584,11 +586,14 @@ remains in any namespace before deleting the owning NodeClaim with a UID
 precondition.
 Concurrent reservation or node replacement cancels retirement. Repeated passes
 accept an already-deleted claim. Retirement failures retain the node and retry
-without blocking other claims. Existing NodeClaim get/delete RBAC is sufficient.
+without blocking claims or preparation renewal. Retirement errors are logged at
+most once per minute. Existing NodeClaim get/delete RBAC is sufficient.
 Nodes with missing ownership evidence, including nodes released by older
 launchers without the retained annotation, remain for Karpenter consolidation.
 `TestRestartRetiresOnlyEmptySpentNodesOfTerminalRuns`,
-`TestRunRetirementQueryThroughController` and
+`TestRunRetirementQueryThroughController`,
+`TestSpentNodeQueriesEachRunOnceAndCachesNonTerminal`,
+`TestSpentNodeErrorsAreRateLimitedAndDoNotFailSync` and
 `TestLauncherRunTerminalRequiresDeploymentAuthority` guard these rules.
 
 ## Preparation leases
@@ -601,7 +606,9 @@ owns those requests. The bootstrap still grants only source read and one exchang
 `LaunchOne` checks preparation authority before reserving a node, then runs the
 shared lease keeper through activation. Renewal also reconciles existing Jobs,
 so a slow new reservation does not stop another Job's source checkout heartbeat.
-Each placement attempt builds against the preparation acknowledgement's committed
+Spent-node retirement runs only in normal reconciliation, outside preparation
+renewal. `TestPreparationRenewalIgnoresPersistentRetirementFailure` guards this
+separation. Each placement attempt builds against the preparation acknowledgement's committed
 lease expiry because a held award can wait beyond its original lease. Every return
 cancels and joins that keeper. Normal reconciliation keeps persisted
 Jobs alive until exchange. Exchanged claims receive no launcher renewal because

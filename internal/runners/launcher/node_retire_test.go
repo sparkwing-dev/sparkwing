@@ -1,11 +1,15 @@
 package launcher
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"testing/synctest"
+	"time"
 
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -14,6 +18,7 @@ import (
 	dynamicfake "k8s.io/client-go/dynamic/fake"
 	ktesting "k8s.io/client-go/testing"
 
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controller"
 	"github.com/sparkwing-dev/sparkwing/internal/controller/client"
@@ -32,7 +37,7 @@ func (c terminalControl) RunTerminal(context.Context, string, runspec.RunID) (bo
 }
 
 func TestRestartRetiresOnlyEmptySpentNodesOfTerminalRuns(t *testing.T) {
-	for _, scenario := range []string{"terminal", "running", "controller unavailable", "daemon pod", "work pod", "terminal pod", "warm pod", "foreign team", "foreign run", "unlabeled", "missing annotation", "foreign pool", "claim UID changed", "node replaced", "concurrent reservation"} {
+	for _, scenario := range []string{"terminal", "running", "controller unavailable", "daemon pod", "work pod", "terminal pod", "warm pod", "foreign team", "foreign run", "unlabeled", "missing annotation", "foreign pool", "claim UID changed", "node replaced", "concurrent reservation", "cordon conflict"} {
 		t.Run(scenario, func(t *testing.T) {
 			boundary, kube := boundaryFixture()
 			binding := boundaryBinding("team")
@@ -86,6 +91,25 @@ func TestRestartRetiresOnlyEmptySpentNodesOfTerminalRuns(t *testing.T) {
 					return true, changed, nil
 				})
 			}
+			if scenario == "cordon conflict" {
+				kube.PrependReactor("update", "nodes", func(action ktesting.Action) (bool, runtime.Object, error) {
+					candidate := action.(ktesting.UpdateAction).GetObject().(*corev1.Node)
+					if !candidate.Spec.Unschedulable {
+						t.Fatal("expected cordon update")
+					}
+					current, lookupErr := kube.Tracker().Get(corev1.SchemeGroupVersion.WithResource("nodes"), "", "node")
+					if lookupErr != nil {
+						t.Fatal(lookupErr)
+					}
+					reserved := current.(*corev1.Node).DeepCopy()
+					reserved.ResourceVersion = "999"
+					reserved.Annotations[reservationAnnotation] = "new reservation"
+					if updateErr := kube.Tracker().Update(corev1.SchemeGroupVersion.WithResource("nodes"), reserved, ""); updateErr != nil {
+						t.Fatal(updateErr)
+					}
+					return false, nil, nil
+				})
+			}
 			if scenario == "daemon pod" || scenario == "work pod" || scenario == "terminal pod" || scenario == "warm pod" {
 				pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "occupant", Namespace: "foreign"}, Spec: corev1.PodSpec{NodeName: "node"}}
 				if scenario == "daemon pod" {
@@ -110,12 +134,6 @@ func TestRestartRetiresOnlyEmptySpentNodesOfTerminalRuns(t *testing.T) {
 				return false, nil, nil
 			})
 			err = l.Sync(t.Context())
-			if scenario == "controller unavailable" {
-				if err == nil {
-					t.Fatal("lost controller error")
-				}
-				return
-			}
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -123,6 +141,21 @@ func TestRestartRetiresOnlyEmptySpentNodesOfTerminalRuns(t *testing.T) {
 			retired := scenario == "terminal" || scenario == "daemon pod"
 			if apierrors.IsNotFound(err) != retired {
 				t.Fatalf("retired=%v want=%v: %v", apierrors.IsNotFound(err), retired, err)
+			}
+			current, lookupErr := kube.CoreV1().Nodes().Get(t.Context(), "node", metav1.GetOptions{})
+			if lookupErr != nil {
+				t.Fatal(lookupErr)
+			}
+			if scenario == "work pod" || scenario == "terminal pod" || scenario == "warm pod" {
+				if !current.Spec.Unschedulable {
+					t.Fatal("occupied spent node was not cordoned")
+				}
+			}
+			if scenario == "cordon conflict" && (current.Spec.Unschedulable || current.Annotations[reservationAnnotation] != "new reservation") {
+				t.Fatalf("retirement overwrote concurrent reservation: %+v", current)
+			}
+			if scenario == "cordon conflict" {
+				return
 			}
 			if err = l.Sync(t.Context()); err != nil {
 				t.Fatalf("repeated reconciliation: %v", err)
@@ -172,4 +205,116 @@ func TestRunRetirementQueryThroughController(t *testing.T) {
 	if terminal, err := control.RunTerminal(t.Context(), "a", "run"); err == nil || terminal {
 		t.Fatalf("revoked launcher: %v, %v", terminal, err)
 	}
+}
+
+func TestRunRetirementRefusalIsNotTerminal(t *testing.T) {
+	wire := launcherWireFake{sync: func(context.Context, controllerwire.LauncherSyncRequest) (controllerwire.LauncherSyncResponse, error) {
+		return controllerwire.LauncherSyncResponse{}, &apierr.Error{Code: apierr.Forbidden, Message: "claimant repository scope excludes work"}
+	}}
+	control, err := NewControllerControl(wire, controllerwire.ClaimRequest{RunnerVersion: "dev", Kinds: []capability.UnitKind{capability.UnitPlan}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if terminal, err := control.RunTerminal(t.Context(), "team", "foreign-run"); err != nil || terminal {
+		t.Fatalf("scope refusal: terminal=%v error=%v", terminal, err)
+	}
+}
+
+type countingTerminalControl struct {
+	CloudControl
+	calls    map[controllerwire.LauncherRun]int
+	terminal bool
+	err      error
+}
+
+func (c *countingTerminalControl) RunTerminal(_ context.Context, team string, run runspec.RunID) (bool, error) {
+	c.calls[controllerwire.LauncherRun{Team: team, RunID: string(run)}]++
+	return c.terminal, c.err
+}
+
+func TestSpentNodeQueriesEachRunOnceAndCachesNonTerminal(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		boundary, kube := boundaryFixture()
+		binding := boundaryBinding("team")
+		held, err := boundary.Reserve(t.Context(), binding, jobName(binding), CloudPlacement{RequestedClass: "2"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err = boundary.Release(t.Context(), held); err != nil {
+			t.Fatal(err)
+		}
+		node, err := kube.CoreV1().Nodes().Get(t.Context(), "node", metav1.GetOptions{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		node.Name, node.UID, node.ResourceVersion = "second", "second-uid", ""
+		if _, err = kube.CoreV1().Nodes().Create(t.Context(), node, metav1.CreateOptions{}); err != nil {
+			t.Fatal(err)
+		}
+		l, _, _, control := fixture()
+		counted := &countingTerminalControl{CloudControl: control, calls: make(map[controllerwire.LauncherRun]int)}
+		l.Kube, l.Boundary, l.Control = kube, boundary, counted
+		ref := controllerwire.LauncherRun{Team: "team", RunID: "run"}
+		for i := range 3 {
+			if err = l.Sync(t.Context()); err != nil {
+				t.Fatal(err)
+			}
+			if counted.calls[ref] != 1 {
+				t.Fatalf("pass %d queried same run %d times", i, counted.calls[ref])
+			}
+			time.Sleep(5 * time.Second)
+		}
+		counted.terminal = true
+		time.Sleep(15 * time.Second)
+		if err = l.Sync(t.Context()); err != nil {
+			t.Fatal(err)
+		}
+		if counted.calls[ref] != 2 {
+			t.Fatalf("expired non-terminal answer was not refreshed: %d", counted.calls[ref])
+		}
+		if _, err = boundary.Karpenter.Resource(nodeClaims).Get(t.Context(), "claim", metav1.GetOptions{}); !apierrors.IsNotFound(err) {
+			t.Fatalf("terminal run retained its empty node: %v", err)
+		}
+		// A failed lookup is retried next pass, but still only once for that run.
+		counted.terminal, counted.err = false, errors.New("unavailable")
+		for want := 3; want <= 4; want++ {
+			if err = l.Sync(t.Context()); err != nil {
+				t.Fatal(err)
+			}
+			if counted.calls[ref] != want {
+				t.Fatalf("failed query count=%d want=%d", counted.calls[ref], want)
+			}
+		}
+	})
+}
+
+func TestSpentNodeErrorsAreRateLimitedAndDoNotFailSync(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		boundary, kube := boundaryFixture()
+		kube.PrependReactor("list", "nodes", func(action ktesting.Action) (bool, runtime.Object, error) {
+			if action.(ktesting.ListAction).GetListRestrictions().Labels.String() == "" {
+				return false, nil, nil
+			}
+			return true, nil, errors.New("retirement unavailable")
+		})
+		l, _, _, control := fixture()
+		var logs bytes.Buffer
+		l.Kube, l.Boundary, l.Control = kube, boundary, terminalControl{CloudControl: control}
+		l.Logger = slog.New(slog.NewTextHandler(&logs, nil))
+		for range 3 {
+			if err := l.Sync(t.Context()); err != nil {
+				t.Fatalf("retirement blocked sync: %v", err)
+			}
+		}
+		if got := bytes.Count(logs.Bytes(), []byte("retirement unavailable")); got != 1 {
+			t.Fatalf("logged error %d times", got)
+		}
+		time.Sleep(time.Minute)
+		if err := l.Sync(t.Context()); err != nil {
+			t.Fatal(err)
+		}
+		if got := bytes.Count(logs.Bytes(), []byte("retirement unavailable")); got != 2 {
+			t.Fatalf("persistent error was not logged again: %d", got)
+		}
+	})
 }
