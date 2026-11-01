@@ -95,5 +95,6 @@ pipelines:
   - name: escape-probe
     entrypoint: EscapeProbe
     args:
+      controller-url: https://api.sparkwing.dev
       rds: kikd-prod-sparkwing-postgres.cv04yywoevz8.us-west-2.rds.amazonaws.com:5432
       api-hosts: 10.0.41.86,10.0.59.73

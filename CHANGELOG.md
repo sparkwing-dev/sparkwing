@@ -57,8 +57,15 @@ unlock.
 
 ### Fixed
 
+- **CI:** Gate uploaded working trees without requiring `origin/main`
+  Source checks and lint judge all tracked files against an empty Git tree when the baseline is unavailable, and report the wider scope.
+
+- **secrets:** List pipeline-scoped secrets through the CLI again
+  Secret listings always include the shared flag, including false for pipeline-scoped secrets, as the client requires.
 - **store:** Refuse a changed schema baseline even when its version still matches
   SQLite and PostgreSQL record the embedded baseline's SHA-256 digest and report both digests with the backup and reset remedy on mismatch. Stores without a digest are stamped only when every declared table, view and explicit index exists. Schema version stays 28. See the [baseline reset guide](docs/migrations/_unreleased.md#recreate-the-store-for-schema-baseline-28).
+- **Cloud:** Teams asking for shared Cloud capacity at the same time no longer wait forever
+  Capacity requests repel other teams' Pods, so Karpenter adds one fresh node per team instead of placing both requests on one node that neither team could then bind. A finished request that did not win its node is deleted and created again on the next pass, so Karpenter sees the demand again. Requests created before the upgrade fail the placement check and are replaced.
 - **Cloud:** Retire empty nodes after their run finishes instead of waiting for Karpenter consolidation
   The launcher confirms terminal run state, permanent team/run ownership and Pod vacancy, then UID-fences deletion of the owning NodeClaim. Reconciliation resumes this cleanup after restart without additional RBAC.
 

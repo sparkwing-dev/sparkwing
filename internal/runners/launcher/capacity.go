@@ -5,10 +5,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/equality"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -76,15 +78,26 @@ func capacityPod(cfg CloudJobConfig, d capacityDemand) (*corev1.Pod, error) {
 			Tolerations: cloudTolerations(), NodeSelector: map[string]string{CloudClassLabel: cpuClass(d.CPUCores), PoolNamespaceLabel: cfg.Namespace},
 			// safety: a request that fit on another run's warm node would hold it without ever
 			// being placed there, and Karpenter would add no node for it.
-			Affinity: &corev1.Affinity{NodeAffinity: &corev1.NodeAffinity{RequiredDuringSchedulingIgnoredDuringExecution: &corev1.NodeSelector{NodeSelectorTerms: []corev1.NodeSelectorTerm{
-				{MatchExpressions: []corev1.NodeSelectorRequirement{{Key: usedRunLabel, Operator: corev1.NodeSelectorOpDoesNotExist}, {Key: usedTeamLabel, Operator: corev1.NodeSelectorOpDoesNotExist}, {Key: TeamNodeLabel, Operator: corev1.NodeSelectorOpDoesNotExist}}},
-				{MatchExpressions: []corev1.NodeSelectorRequirement{{Key: usedRunLabel, Operator: corev1.NodeSelectorOpIn, Values: []string{runNodeValue(cfg.Namespace, b.RunID)}}, {Key: usedTeamLabel, Operator: corev1.NodeSelectorOpIn, Values: []string{TeamNodeValue(cfg.Namespace, b.Team)}}, {Key: TeamNodeLabel, Operator: corev1.NodeSelectorOpIn, Values: []string{TeamNodeValue(cfg.Namespace, b.Team)}}}},
-			}}}},
+			Affinity: &corev1.Affinity{
+				NodeAffinity: &corev1.NodeAffinity{RequiredDuringSchedulingIgnoredDuringExecution: &corev1.NodeSelector{NodeSelectorTerms: []corev1.NodeSelectorTerm{
+					{MatchExpressions: []corev1.NodeSelectorRequirement{{Key: usedRunLabel, Operator: corev1.NodeSelectorOpDoesNotExist}, {Key: usedTeamLabel, Operator: corev1.NodeSelectorOpDoesNotExist}, {Key: TeamNodeLabel, Operator: corev1.NodeSelectorOpDoesNotExist}}},
+					{MatchExpressions: []corev1.NodeSelectorRequirement{{Key: usedRunLabel, Operator: corev1.NodeSelectorOpIn, Values: []string{runNodeValue(cfg.Namespace, b.RunID)}}, {Key: usedTeamLabel, Operator: corev1.NodeSelectorOpIn, Values: []string{TeamNodeValue(cfg.Namespace, b.Team)}}, {Key: TeamNodeLabel, Operator: corev1.NodeSelectorOpIn, Values: []string{TeamNodeValue(cfg.Namespace, b.Team)}}}},
+				}}},
+				// safety: Karpenter provisions a node per team's demand, so one fresh node
+				// never carries two teams' requests that each refuse to bind it.
+				PodAntiAffinity: &corev1.PodAntiAffinity{RequiredDuringSchedulingIgnoredDuringExecution: []corev1.PodAffinityTerm{{
+					TopologyKey: corev1.LabelHostname,
+					LabelSelector: &metav1.LabelSelector{MatchExpressions: []metav1.LabelSelectorRequirement{
+						{Key: TeamLabel, Operator: metav1.LabelSelectorOpExists},
+						{Key: TeamLabel, Operator: metav1.LabelSelectorOpNotIn, Values: []string{TeamNodeValue(cfg.Namespace, b.Team)}},
+					}},
+				}}},
+			},
 			ServiceAccountName: ServiceAccount, AutomountServiceAccountToken: ptr(false), EnableServiceLinks: ptr(false), RestartPolicy: corev1.RestartPolicyNever,
 			TerminationGracePeriodSeconds: ptr(int64(1)),
 			SecurityContext:               capacityPodSecurity(),
 			Containers: []corev1.Container{{
-				Name: "capacity", Image: cfg.RunnerImage, ImagePullPolicy: corev1.PullIfNotPresent, Command: []string{JobBinary}, Args: []string{"version"},
+				Name: "capacity", Image: cfg.RunnerImage, ImagePullPolicy: corev1.PullIfNotPresent, Command: []string{"/usr/bin/sleep"}, Args: []string{strconv.FormatFloat(max(0, time.Until(deadline).Seconds()), 'f', 9, 64)},
 				Resources:       corev1.ResourceRequirements{Requests: requests, Limits: requests.DeepCopy()},
 				SecurityContext: capacitySecurity(),
 			}},
@@ -102,7 +115,7 @@ func recordedDemand(pod *corev1.Pod) (capacityDemand, error) {
 
 func (l *Launcher) verifyCapacityPod(pod *corev1.Pod, d capacityDemand) error {
 	expected, err := capacityPod(l.Config, d)
-	if err == nil && (expected.Name != pod.Name || pod.Namespace != l.Config.Namespace || len(pod.OwnerReferences) != 0 || pod.Annotations[demandAnnotation] != expected.Annotations[demandAnnotation]) {
+	if err == nil && (expected.Name != pod.Name || pod.Namespace != l.Config.Namespace || len(pod.OwnerReferences) != 0 || pod.Annotations[demandAnnotation] != expected.Annotations[demandAnnotation] || !equality.Semantic.DeepEqual(expected.Spec.Affinity, pod.Spec.Affinity)) {
 		err = errors.New("capacity Pod identity does not match its award")
 	}
 	if err == nil {
@@ -169,10 +182,54 @@ func (l *Launcher) requestCapacity(ctx context.Context, award CloudJobAward) err
 	if err != nil {
 		return err
 	}
+	if admitted.DeletionTimestamp != nil {
+		return nil
+	}
 	if err := l.verifyCapacityPod(admitted, d); err != nil {
 		return errors.Join(err, l.deleteCapacityPod(ctx, admitted))
 	}
+	// safety: only displacement needs fresh demand. Retrying an incompatible pool
+	// would keep provisioning nodes that this award can never reserve.
+	displaced, err := l.capacityDisplaced(ctx, admitted, d.Binding)
+	if err != nil {
+		return err
+	}
+	if displaced {
+		return l.deleteCapacityPod(ctx, admitted)
+	}
 	return nil
+}
+
+func (l *Launcher) capacityDisplaced(ctx context.Context, pod *corev1.Pod, binding CloudJobBinding) (bool, error) {
+	if pod.Spec.NodeName == "" {
+		return false, nil
+	}
+	node, err := l.Kube.CoreV1().Nodes().Get(ctx, pod.Spec.NodeName, metav1.GetOptions{})
+	if apierrors.IsNotFound(err) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	team := TeamNodeValue(l.Config.Namespace, binding.Team)
+	for _, key := range []string{TeamNodeLabel, usedTeamLabel} {
+		if value := node.Labels[key]; value != "" && value != team {
+			return true, nil
+		}
+	}
+	if run := node.Labels[usedRunLabel]; run != "" && run != runNodeValue(l.Config.Namespace, binding.RunID) {
+		return true, nil
+	}
+	pods, err := l.Kube.CoreV1().Pods("").List(ctx, metav1.ListOptions{FieldSelector: "spec.nodeName=" + node.Name})
+	if err != nil {
+		return false, err
+	}
+	for _, other := range pods.Items {
+		if other.Spec.NodeName == node.Name && other.Labels[TeamLabel] != "" && other.Labels[TeamLabel] != team {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 func (l *Launcher) capacityPods(ctx context.Context) ([]corev1.Pod, error) {

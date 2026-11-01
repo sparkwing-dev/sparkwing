@@ -642,15 +642,34 @@ run ID. Customer guidance names support@sparkwing.dev and the run reference.
 With a compatible pool, the launcher keeps the award and creates
 `sw-capacity-<award hash>`: an unbound Pod with the requested shared class and
 launcher namespace selectors, the generic dedicated toleration, the award's CPU,
-memory and scratch requests, the runner image running `sparkwing-runner version`,
-and no volumes, environment or service account token. The Pod records its unit
-fence and size in `sparkwing.dev/capacity-demand`, never the bootstrap credential.
+memory and scratch requests, the runner image running `/usr/bin/sleep` for the
+remaining award budget, and no volumes, environment or service account token.
+The Pod records its unit fence and size in `sparkwing.dev/capacity-demand`,
+never the bootstrap credential.
+Required pod anti-affinity on `kubernetes.io/hostname` keeps it off any node
+running a Pod with another team's `sparkwing.dev/team` label in the job
+namespace, so Karpenter adds one node per team's demand.
+
+- A request stays Running until reservation consumes it or its award ends, so
+  later requests still see its anti-affinity. The launcher deletes it on release
+  or deadline cleanup. Only the requesting team's capacity requests, including
+  Running requests, are consumable. Another team's request, running or finished,
+  keeps the node out of reach. Reservation rechecks occupants after persisting
+  its fence and before consuming requests or creating a Job.
+- A request, running or stopped, is replaced, UID-fenced, only when its node holds another
+  team's Pod or is bound to another team or run. Otherwise the launcher waits,
+  because recreating requests on an incompatible pool would keep provisioning
+  unusable nodes. Adoption waits for a terminating old request to leave before
+  creating its replacement. `TestTwoTeamsOnAnEmptyPoolEachGetTheirOwnNode`
+  (grid cell R21C01), `TestCapacityArrivalBetweenReserveAndConsumeDefersJobUntilPodLeaves`,
+  `TestIncompatibleCapacityNodeDoesNotChurnRequests`, and
+  `TestTerminatingOldCapacityRequestWaitsForRemoval` guard these paths.
 
 - The hash covers the award generation, so a re-award creates its own request
   and never rebinds or deletes another generation's. Only the same award adopts
   an existing request.
 - Admission enforces the request's shape. The launcher compares its award
-  fields (name, demand record, class/deployment placement, image and resources) with demand
+  fields (name, demand record, class/deployment placement, affinity, image and resources) with demand
   taken from outside the Pod: the award on create and adoption, the held award
   on every sync, and the controller's binding and committed allocation on every
   reconciliation. A mismatch or an unknown allocation deletes it, UID-fenced,

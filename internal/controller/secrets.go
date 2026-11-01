@@ -38,7 +38,7 @@ type secretJSON struct {
 	Pipeline  string `json:"pipeline,omitempty"`
 	OnlyOn    string `json:"only_on,omitempty"`
 	Masked    bool   `json:"masked"`
-	Shared    bool   `json:"shared,omitempty"`
+	Shared    bool   `json:"shared"`
 	Bound     bool   `json:"bound"`
 	CreatedAt int64  `json:"created_at"`
 	UpdatedAt int64  `json:"updated_at"`

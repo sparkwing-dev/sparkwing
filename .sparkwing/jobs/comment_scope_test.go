@@ -97,18 +97,21 @@ func TestCommentStepLetsACallerBindItsOwnIndex(t *testing.T) {
 	}
 }
 
-func TestCommentStepRefusesWhenTheBaselineIsMissing(t *testing.T) {
+func TestCommentStepIncludesSnapshotFilesWhenTheBaselineIsMissing(t *testing.T) {
 	root := commentFixtureRepo(t)
 	runTestGit(t, root, "update-ref", "-d", "refs/remotes/"+gateBaselineRef)
-
-	_, _, err := commentCheckCommand(context.Background())
-	if err == nil {
-		t.Fatal("the step chose a range it cannot resolve")
+	command, scope, err := commentCheckCommand(t.Context())
+	if err != nil {
+		t.Fatal(err)
 	}
-	for _, want := range []string{"could not run", gateBaselineRef, "git fetch"} {
-		if !strings.Contains(err.Error(), want) {
-			t.Errorf("refusal %q omits %q", err.Error(), want)
-		}
+	if !strings.Contains(scope, "all tracked files") {
+		t.Fatalf("fallback scope = %q", scope)
+	}
+	fields := strings.Fields(command)
+	base := fields[len(fields)-2]
+	diff := gitOutput(t, root, "diff", "--name-only", base)
+	if !strings.Contains(diff, "internal/sound.go") {
+		t.Fatalf("checker baseline omits existing snapshot files: %s", diff)
 	}
 }
 

@@ -769,8 +769,11 @@ file. Other syntax and workflow checks remain active.
   local secrets themselves live in the home's own `state.db`, and the home
   does not import the machine's `secrets.env` or `config.env`. No variable
   moves `version-hold`.
-- **Lint rules:** golangci-lint judges only code new since origin/main. Among
-  the family set it also rejects `_ = call()` on an error-returning call, nil
+- **Lint rules:** golangci-lint judges only code new since origin/main. Uploaded
+  working trees may have no remote refs or parent history. In that case, the
+  gate compares against an empty Git tree, judges every tracked file, and
+  reports that wider scope. The same baseline drives scoped source checks
+  and lint. The enabled linters also reject `_ = call()` on an error-returning call, nil
   returned after an error was observed, and work started on a context that is
   not the caller's. Drop an error only through a helper that logs why.
 - **Dependency boundaries:** `.golangci.yml` keeps the depguard layering rules
