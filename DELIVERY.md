@@ -666,7 +666,7 @@ file. Other syntax and workflow checks remain active.
   | `./internal/cluster` | 4s | 2m |
 
   The full CLI package passed all 1,130 top-level tests and fuzz targets in
-  398.535s; command wall time was 408.661s. The measurement used
+  398.535s. Command wall time was 408.661s. The measurement used
   `go test -json -count=1 -timeout 90m ./cmd/sparkwing`, `GOWORK=off`,
   `GOFLAGS=-buildvcs=false`, `GOCACHE=/tmp/sw-gocache`, private homes, and
   `TMPDIR=/var/tmp/sw-lead-tmp`. Before fixture reuse, the same class took
