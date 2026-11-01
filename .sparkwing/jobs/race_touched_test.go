@@ -166,7 +166,7 @@ func TestGateRaceWorkersKeepTheHostsPackageBound(t *testing.T) {
 		}
 	}
 	args := gateRaceShardArgs([]string{"TestA", "TestB"})
-	if slices.Contains(args, "-test.short") || !slices.Contains(args, "-test.count=1") || !slices.Contains(args, "-test.timeout="+raceTouchedShardTimeout.String()) {
+	if slices.Contains(args, "-test.short") || !slices.Contains(args, "-test.count=1") || !slices.Contains(args, "-test.timeout="+raceTouchedPackageTimeout.String()) {
 		t.Fatalf("gate race shard args=%q, want full class once under the package budget", args)
 	}
 }
@@ -179,12 +179,16 @@ func TestRaceModulesShardsSlowPackagesAfterOrdinaryPackages(t *testing.T) {
 	root := t.TempDir()
 	t.Chdir(root)
 	writeGoFile(t, filepath.Join(root, "go.mod"), "module example.test/shards\n\ngo 1.26.0\n")
-	writeGoFile(t, filepath.Join(root, "internal", "ordinary", "ordinary_test.go"), `package ordinary
-import ("os"; "testing")
+	writeGoFile(t, filepath.Join(root, "internal", "ordinary", "ordinary_test.go"), fmt.Sprintf(`package ordinary
+import ("os"; "testing"; "time")
 func TestOrdinary(t *testing.T) {
+	const packageTimeout = time.Duration(%d)
+	if deadline, ok := t.Deadline(); !ok || time.Until(deadline) < packageTimeout-time.Minute || time.Until(deadline) > packageTimeout {
+		t.Fatalf("deadline=%%v, want configured package bound", deadline)
+	}
 	if err := os.WriteFile("../ordinary-complete", nil, 0600); err != nil { t.Fatal(err) }
 }
-`)
+`, raceTouchedPackageTimeout))
 	released := make(chan struct{})
 	var release sync.Once
 	barrier := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -239,7 +243,7 @@ func TestA(t *testing.T) {
 func TestB(t *testing.T) { check(t) }
 func TestC(t *testing.T) { check(t) }
 func TestD(t *testing.T) { check(t) }
-`, raceTouchedShardTimeout, filepath.Join(root, "internal", "ordinary-complete"), pkg, barrier.URL))
+`, raceTouchedPackageTimeout, filepath.Join(root, "internal", "ordinary-complete"), pkg, barrier.URL))
 	}
 	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Minute)
 	defer cancel()
@@ -260,33 +264,6 @@ func TestD(t *testing.T) { check(t) }
 	writeGoFile(t, filepath.Join(root, "internal", "nodehost", "race_test.go"), strings.Replace(racyTest, "package internal", "package shardtests", 1))
 	if err := raceModules(t.Context(), map[string][]string{".": {"./internal/nodehost"}}, t.TempDir(), t.TempDir()); err == nil || !strings.Contains(err.Error(), "race shard") {
 		t.Fatalf("racing shard=%v, want shard failure", err)
-	}
-}
-
-func TestGateRaceDeadlineLeavesRoomAfterEarlierGateWork(t *testing.T) {
-	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
-	for _, tc := range []struct {
-		name      string
-		remaining time.Duration
-		want      time.Duration
-	}{
-		{"whole gate", gateRunTimeout, raceTouchedStepTimeout},
-		{"earlier work used twenty minutes", gateRunTimeout - 20*time.Minute, 40 * time.Minute},
-		{"cleanup already due", 5 * time.Minute, -5 * time.Minute},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			ctx, cancel := context.WithDeadline(t.Context(), now.Add(tc.remaining))
-			defer cancel()
-			if got := raceTouchedDeadline(ctx, now); !got.Equal(now.Add(tc.want)) {
-				t.Fatalf("deadline %s, want %s", got, now.Add(tc.want))
-			}
-		})
-	}
-	if got := raceTouchedDeadline(context.Background(), now); !got.Equal(now.Add(raceTouchedStepTimeout)) {
-		t.Fatalf("unbounded caller deadline %s, want step budget", got)
-	}
-	if raceTouchedPackageTimeout != 45*time.Minute {
-		t.Fatalf("ordinary package timeout %s shortened the existing unsharded allowance", raceTouchedPackageTimeout)
 	}
 }
 

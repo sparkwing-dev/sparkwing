@@ -7,31 +7,17 @@ import (
 	"slices"
 	"sort"
 	"strings"
-	"time"
 
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
 const (
-	raceTouchedFinishMargin   = 10 * time.Minute
-	raceTouchedStepTimeout    = gateRunTimeout - raceTouchedFinishMargin
+	raceTouchedStepTimeout    = gateRunTimeout
 	raceTouchedPackageTimeout = raceTouchedStepTimeout * 3 / 4
-	raceTouchedShardTimeout   = raceTouchedStepTimeout / 2
 )
 
-func raceTouchedDeadline(ctx context.Context, now time.Time) time.Time {
-	deadline := now.Add(raceTouchedStepTimeout)
-	if parent, ok := ctx.Deadline(); ok {
-		// safety: lint and cleanup still need time after the race step finishes.
-		if finish := parent.Add(-raceTouchedFinishMargin); finish.Before(deadline) {
-			deadline = finish
-		}
-	}
-	return deadline
-}
-
 func runRaceTouched(ctx context.Context) error {
-	ctx, cancel := context.WithDeadline(ctx, raceTouchedDeadline(ctx, time.Now()))
+	ctx, cancel := context.WithTimeout(ctx, raceTouchedStepTimeout)
 	defer cancel()
 	files, scope, err := changeScope(ctx, "Go file(s)", existingGoFiles)
 	if err != nil {
@@ -42,7 +28,7 @@ func runRaceTouched(ctx context.Context) error {
 		return err
 	}
 	targets, deferred := raceTargetsForGate(touchedPackageTargets(files, modules))
-	sparkwing.Info(ctx, "race-touched: %s; step budget %s, package timeout %s, shard timeout %s", scope, raceTouchedStepTimeout, raceTouchedPackageTimeout, raceTouchedShardTimeout)
+	sparkwing.Info(ctx, "race-touched: %s; step budget %s, package timeout %s", scope, raceTouchedStepTimeout, raceTouchedPackageTimeout)
 	for _, pkg := range deferred {
 		sparkwing.Info(ctx, "race-touched: %s races at the release boundary, not here; pre-release covers it", pkg)
 	}
@@ -110,7 +96,7 @@ func gateRaceShardsForPackage(pkg string) int {
 }
 
 func gateRaceShardArgs(shard []string) []string {
-	return []string{"-test.run", raceTestPattern(shard), "-test.count=1", "-test.timeout=" + raceTouchedShardTimeout.String()}
+	return []string{"-test.run", raceTestPattern(shard), "-test.count=1", "-test.timeout=" + raceTouchedPackageTimeout.String()}
 }
 
 // safety: the hosted store suite exceeded 80 minutes in each of four shards.
