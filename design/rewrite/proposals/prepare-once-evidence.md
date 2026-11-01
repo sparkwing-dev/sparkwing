@@ -67,3 +67,19 @@ archive confinement checks. The lead owns the full gate and Opus security review
 No deployment, cluster or AWS write was performed. The rollout proposal contains
 local admission overlays for both GitOps environments; no infra change is needed
 for this lane. Published replacement image digests belong to the release owner.
+
+## Gate follow-up
+
+A follow-up timing sample was 562.690 ms fresh / 183.789 ms restored, with
+one installation.
+
+The lead's gate found six untagged preparation comments. They now carry the
+required invariant tags. The lane-wide comment check, root build, source/store
+vet and lint, and focused source/store/controller preparation tests pass.
+
+The lead's full CLI package run exceeded its 30-minute budget while
+`TestLocalRunSelectionsReachPreparationSealingAndReplan` was installing an SDK.
+An isolated run of that test exceeded a five-minute budget in its second revision
+case, also during SDK installation. Neither run reported an assertion failure
+before timing out. The CLI package gate remains unresolved. This local source
+selection test does not enable prepared artifact reuse.
