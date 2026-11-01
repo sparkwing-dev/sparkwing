@@ -224,15 +224,19 @@ func TestTeardownWaitIsBoundedAndRunScoped(t *testing.T) {
 
 type leasedControl struct {
 	*controlFake
-	mu      sync.Mutex
-	expires map[capability.LeaseRef]time.Time
-	lapsed  bool
-	claimed int
+	mu        sync.Mutex
+	expires   map[capability.LeaseRef]time.Time
+	lapsed    bool
+	claimed   int
+	cancelled bool
 }
 
 func (c *leasedControl) Prepare(ctx context.Context, fences []capability.LeaseRef) (time.Time, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	if c.cancelled {
+		return time.Time{}, &apierr.Error{Code: apierr.LockHeld, Message: "award cancelled"}
+	}
 	now := time.Now()
 	for _, fence := range fences {
 		if expires, ok := c.expires[fence]; ok && !now.Before(expires) {
@@ -316,6 +320,62 @@ func TestTeardownWaitRenewsThroughClaimBackoff(t *testing.T) {
 		}
 		if _, reservation, err := jobOwnership(*next); err != nil || reservation.NodeUID != string(node.UID) {
 			t.Fatalf("successor lost original node: %+v, %v", reservation, err)
+		}
+	})
+}
+
+func TestCancelledWaitingAwardPreservesClaimBackoff(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		const poll = 5 * time.Second
+		const backoff = 10 * time.Minute
+		l, _, boundary, control := fixture()
+		leased := &leasedControl{controlFake: control, expires: map[capability.LeaseRef]time.Time{}}
+		l.Control, l.Poll = leased, poll
+		boundary.reserveErr = errPredecessorTeardown
+		if _, err := l.launch(t.Context(), control.award); !errors.Is(err, ErrNoDedicatedNode) {
+			t.Fatalf("pending teardown: %v", err)
+		}
+		ctx, cancel := context.WithCancel(t.Context())
+		done := make(chan error)
+		go func() { done <- l.Run(ctx) }()
+		defer func() {
+			cancel()
+			if err := <-done; err != nil {
+				t.Fatal(err)
+			}
+		}()
+		synctest.Wait()
+		leased.mu.Lock()
+		claims := leased.claimed
+		leased.mu.Unlock()
+		if claims != 1 {
+			t.Fatalf("initial claims=%d, want one controller backoff", claims)
+		}
+		time.Sleep(poll)
+		synctest.Wait()
+		leased.mu.Lock()
+		leased.cancelled = true
+		leased.mu.Unlock()
+		time.Sleep(poll)
+		synctest.Wait()
+		if l.held(capacityName(control.award.Binding)) != nil {
+			t.Fatal("cancelled award is still waiting for placement")
+		}
+		time.Sleep(backoff - 2*poll - time.Nanosecond)
+		synctest.Wait()
+		leased.mu.Lock()
+		claims = leased.claimed
+		leased.mu.Unlock()
+		if claims != 1 {
+			t.Fatalf("claims before backoff deadline=%d, want 1", claims)
+		}
+		time.Sleep(poll)
+		synctest.Wait()
+		leased.mu.Lock()
+		claims = leased.claimed
+		leased.mu.Unlock()
+		if claims != 2 {
+			t.Fatalf("claims after backoff deadline=%d, want 2", claims)
 		}
 	})
 }
