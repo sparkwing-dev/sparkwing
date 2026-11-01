@@ -145,11 +145,18 @@ its Karpenter NodeClaim. Nodes keep their first team and run assignment through
 reservation cleanup. Do not annotate the customer ServiceAccount with an IRSA
 role or create a Pod Identity association for it.
 
-Warm placeholders run in the launcher's release namespace. Set each shared
-pool's `sparkwing.dev/warm-namespace` to that namespace. The chart grants the
-launcher Pod get/delete there, so it can inspect and consume a warm node.
-Placeholders must carry an apps/v1 ReplicaSet controller reference. Customer Job namespace
-admission remains separate.
+Warm placeholders run in their own namespace, `<release namespace>-cloud-warm`
+by default. `launcher.warmNamespace` overrides it and must differ from the
+release and customer Job namespaces. Set each shared pool's
+`sparkwing.dev/warm-namespace` to that namespace. The chart creates it and grants
+Pod get/delete and ReplicaSet get there. Placeholders must be volume-free, with
+an apps/v1 ReplicaSet controller whose UID matches and whose Deployment
+controller is `sparkwing-cloud-warm-<vCPU>`. Remove any old warm-capacity Role
+and RoleBinding from the release namespace.
+
+`launcher.nodeClassName` pins the hardened EC2NodeClass name (`sparkwing-jobs`
+by default). Pools must reference that name with group `karpenter.k8s.aws` and
+kind `EC2NodeClass`. The launcher never writes NodePools or NodeClasses.
 
 Upgrading from an install whose Jobs ran in another namespace: let Jobs and node
 reservations recorded under the old namespace drain first, or delete those Jobs

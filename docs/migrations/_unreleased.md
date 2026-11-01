@@ -123,7 +123,18 @@ removes the nodes. Never relabel a used node into a shared pool.
 Shared templates set `node-restriction.kubernetes.io/sparkwing-cloud-class` to
 the requested vCPU class, `sparkwing.dev/launcher-namespace` to the Cloud Job
 namespace and `sparkwing.dev/warm-namespace` to the trusted warm Deployment
-namespace. They use `sparkwing.dev/dedicated=true:NoSchedule` instead of the
+namespace. Warm placeholders must move to their own namespace, separate from
+both the release and customer Job namespaces. The chart creates
+`<release namespace>-cloud-warm` by default. Set `launcher.warmNamespace` to
+override it, and update the pool's warm-namespace label to match. Remove the old
+release-namespace warm-capacity Role and RoleBinding. The new Role grants Pod
+get/delete and ReplicaSet get only in the warm namespace. Placeholders must be
+volume-free and owned through a ReplicaSet by `sparkwing-cloud-warm-<vCPU>`.
+
+Set `launcher.nodeClassName` (or `sparkwing-runner launch --node-class`) to the
+hardened EC2NodeClass name. Both default to `sparkwing-jobs`. Pools whose
+nodeClassRef name, group or kind differs are refused. They use
+`sparkwing.dev/dedicated=true:NoSchedule` instead of the
 team taint. Pool templates carry no protected team label. The launcher binds
 that exact label and permanent team/run fences at first reservation.
 

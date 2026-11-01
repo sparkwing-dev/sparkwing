@@ -86,7 +86,15 @@ support@sparkwing.dev plus the run ID as a support reference. Configure that
 class's shared pool and trigger a new run. Pool-list failures retry. NodePools
 need `consolidateAfter` above the 3-minute award lease.
 
-Low-priority placeholder Deployments hold never-used warm nodes. Operator setting
+Low-priority, volume-free placeholder Deployments hold never-used warm nodes in
+`<release namespace>-cloud-warm` by default (`launcher.warmNamespace`). That
+namespace is separate from the release and customer Job namespaces. Pool warm
+labels must match it. The launcher checks the ReplicaSet UID and its owning
+Deployment name, `sparkwing-cloud-warm-<vCPU>`. `launcher.nodeClassName` pins the
+hardened EC2NodeClass (`sparkwing-jobs` by default). Shared pools must reference
+that exact name with group `karpenter.k8s.aws` and kind `EC2NodeClass`.
+
+Operator setting
 `cloud_upsize_enabled` defaults to true. Only to avoid a cold start, the launcher
 may use an idle warm node one class above the requested class when no requested
 class warm node is free. The job keeps its requested billing class and CPU and

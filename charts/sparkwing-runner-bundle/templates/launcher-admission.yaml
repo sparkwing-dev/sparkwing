@@ -192,7 +192,7 @@ spec:
       ''job'' ? variables.spec.?nodeSelector.orValue({})[?''node-restriction.kubernetes.io/sparkwing-team-node''].orValue('''')
       == variables.team : size(variables.spec.?nodeSelector.orValue({})) == 2 && variables.spec.?nodeSelector.orValue({})[?''node-restriction.kubernetes.io/sparkwing-cloud-class''].orValue('''')
       in variables.cloudClasses && variables.spec.?nodeSelector.orValue({})[?''sparkwing.dev/launcher-namespace''].orValue('''')
-      == variables.namespace) && variables.spec.?tolerations.orValue([]).filter(t,
+      == variables.jobNamespace) && variables.spec.?tolerations.orValue([]).filter(t,
       t.?key.orValue('''') == "sparkwing.dev/cpu-band" && t.?operator.orValue(''Equal'')
       == "Exists" && t.?value.orValue('''') == "" && t.?effect.orValue('''') == "NoSchedule"
       && !has(t.tolerationSeconds)).size() == 1 && variables.spec.?tolerations.orValue([]).filter(t,
@@ -242,7 +242,7 @@ spec:
   - expression: '''{{ $launcher }}'''
     name: launcher
   - expression: '''{{ $jobs }}'''
-    name: namespace
+    name: jobNamespace
   - expression: '["2", "4", "8", "16", "32", "64"]'
     name: cloudClasses
   - expression: '''{{ $runner }}'''
@@ -458,7 +458,7 @@ spec:
       ''job'' ? variables.spec.?nodeSelector.orValue({})[?''node-restriction.kubernetes.io/sparkwing-team-node''].orValue('''')
       == variables.team : size(variables.spec.?nodeSelector.orValue({})) == 2 && variables.spec.?nodeSelector.orValue({})[?''node-restriction.kubernetes.io/sparkwing-cloud-class''].orValue('''')
       in variables.cloudClasses && variables.spec.?nodeSelector.orValue({})[?''sparkwing.dev/launcher-namespace''].orValue('''')
-      == variables.namespace) && variables.spec.?tolerations.orValue([]).filter(t,
+      == variables.jobNamespace) && variables.spec.?tolerations.orValue([]).filter(t,
       t.?key.orValue('''') == "sparkwing.dev/cpu-band" && t.?operator.orValue(''Equal'')
       == "Exists" && t.?value.orValue('''') == "" && t.?effect.orValue('''') == "NoSchedule"
       && !has(t.tolerationSeconds)).size() == 1 && variables.spec.?tolerations.orValue([]).filter(t,
@@ -496,7 +496,7 @@ spec:
   - expression: '''{{ $launcher }}'''
     name: launcher
   - expression: '''{{ $jobs }}'''
-    name: namespace
+    name: jobNamespace
   - expression: '["2", "4", "8", "16", "32", "64"]'
     name: cloudClasses
   - expression: '''{{ $runner }}'''

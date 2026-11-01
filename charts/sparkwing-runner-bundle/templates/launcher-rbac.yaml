@@ -1,5 +1,6 @@
 {{- if or .Values.launcher.enabled .Values.launcher.serviceAccountName }}
 {{- $jobs := include "sparkwing-runner-bundle.jobNamespace" . }}
+{{- $warm := include "sparkwing-runner-bundle.warmNamespace" . }}
 {{- if .Values.launcher.createNamespace }}
 apiVersion: v1
 kind: Namespace
@@ -52,21 +53,31 @@ roleRef:
   kind: Role
   name: {{ include "sparkwing-runner-bundle.runner.fullname" . }}-launcher
 ---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: {{ $warm | quote }}
+  labels:
+    pod-security.kubernetes.io/enforce: restricted
+---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
   name: {{ include "sparkwing-runner-bundle.runner.fullname" . }}-warm-capacity
-  namespace: {{ .Release.Namespace }}
+  namespace: {{ $warm | quote }}
 rules:
   - apiGroups: [""]
     resources: ["pods"]
     verbs: ["get", "delete"]
+  - apiGroups: ["apps"]
+    resources: ["replicasets"]
+    verbs: ["get"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
 metadata:
   name: {{ include "sparkwing-runner-bundle.runner.fullname" . }}-warm-capacity
-  namespace: {{ .Release.Namespace }}
+  namespace: {{ $warm | quote }}
 subjects:
   - kind: ServiceAccount
     name: {{ include "sparkwing-runner-bundle.launcher.serviceAccountName" . | quote }}

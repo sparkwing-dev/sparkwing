@@ -20,6 +20,8 @@ unlock.
 
 ## [Unreleased]
 
+- **Cloud (Breaking):** Move warm placeholders and their Pod get/delete and ReplicaSet get Role into a dedicated warm namespace (`launcher.warmNamespace`, default `<release namespace>-cloud-warm`). Update pool warm-namespace labels and remove the old release-namespace warm Role and binding. Placeholders must be volume-free and owned by `sparkwing-cloud-warm-<vCPU>` through a verified ReplicaSet. `launcher.nodeClassName` / `launch --node-class` pins the hardened EC2NodeClass name (default `sparkwing-jobs`). Pools referencing a different class, group or kind are refused.
+
 ### Changed
 
 - **Cloud (Breaking):** Replace per-team Karpenter NodePools with one shared pool per requested hardware class and deployment

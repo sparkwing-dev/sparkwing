@@ -135,7 +135,7 @@ func TestSharedNodePoolExampleOutlivesTheAwardLease(t *testing.T) {
 		t.Fatal(err)
 	}
 	labels := pool.Spec.Template.Metadata.Labels
-	if labels[launcher.CloudClassLabel] != "2" || labels[launcher.PoolNamespaceLabel] != "sparkwing-cloud-jobs" || labels[launcher.WarmNamespaceLabel] != "sparkwing" || labels[launcher.TeamNodeLabel] != "" {
+	if labels[launcher.CloudClassLabel] != "2" || labels[launcher.PoolNamespaceLabel] != "sparkwing-cloud-jobs" || labels[launcher.WarmNamespaceLabel] != "sparkwing-cloud-warm" || labels[launcher.TeamNodeLabel] != "" {
 		t.Fatalf("shared NodePool labels = %v", labels)
 	}
 	wantTaints := []corev1.Taint{{Key: launcher.DedicatedTaint, Value: "true", Effect: corev1.TaintEffectNoSchedule}}

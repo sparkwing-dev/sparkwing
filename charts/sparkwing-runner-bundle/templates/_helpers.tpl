@@ -182,3 +182,11 @@ deployment template stays readable.
 {{- end -}}
 {{- printf "%s@%s" $image $digest -}}
 {{- end }}
+
+{{- define "sparkwing-runner-bundle.warmNamespace" -}}
+{{- $warm := default (printf "%s-cloud-warm" .Release.Namespace) .Values.launcher.warmNamespace -}}
+{{- if or (eq $warm .Release.Namespace) (eq $warm (include "sparkwing-runner-bundle.jobNamespace" .)) -}}
+{{- fail "sparkwing-runner-bundle: launcher.warmNamespace must differ from the release and job namespaces" -}}
+{{- end -}}
+{{- $warm -}}
+{{- end }}
