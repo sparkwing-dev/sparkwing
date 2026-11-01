@@ -62,7 +62,7 @@ func (b *KubernetesBoundary) retireSpentNode(ctx context.Context, observed corev
 	if err != nil {
 		return err
 	}
-	// A concurrent reservation or replacement must win over this cleanup pass.
+	// safety: a concurrent reservation or replacement must win over this cleanup pass.
 	if node.UID != observed.UID || node.ResourceVersion != observed.ResourceVersion || reservationEvidence(node) {
 		return nil
 	}
@@ -79,7 +79,7 @@ func (b *KubernetesBoundary) retireSpentNode(ctx context.Context, observed corev
 	if err != nil {
 		return err
 	}
-	// Cordon before the vacancy check so new placements cannot refill a spent node.
+	// safety: cordon before the vacancy check so new placements cannot refill a spent node.
 	node.Spec.Unschedulable = true
 	if _, err = b.Kube.CoreV1().Nodes().Update(ctx, node, metav1.UpdateOptions{}); apierrors.IsConflict(err) || apierrors.IsNotFound(err) {
 		return nil

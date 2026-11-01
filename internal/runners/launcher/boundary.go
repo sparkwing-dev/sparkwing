@@ -64,7 +64,7 @@ func (b *KubernetesBoundary) Reserve(ctx context.Context, binding CloudJobBindin
 			classes = append(classes, next)
 		}
 	}
-	// Same-run nodes come first so a fresh node cannot win a serial handoff.
+	// safety: same-run nodes come first so a fresh node cannot win a serial handoff.
 	run := runNodeValue(b.Namespace, binding.RunID)
 	slices.SortStableFunc(nodes.Items, func(a, c corev1.Node) int {
 		if (a.Labels[usedRunLabel] == run) == (c.Labels[usedRunLabel] == run) {

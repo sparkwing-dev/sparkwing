@@ -172,6 +172,12 @@ func restartedLauncherW8(t *testing.T, kube *fake.Clientset, boundary launcher.C
 					return controllerwire.ClaimResponse{}, nil
 				},
 				sync: func(_ context.Context, request controllerwire.LauncherSyncRequest) (controllerwire.LauncherSyncResponse, error) {
+					if request.RetireRun != nil {
+						if *request.RetireRun != (controllerwire.LauncherRun{Team: b.Team, RunID: string(b.RunID)}) || len(request.Observed)+len(request.Capacity)+len(request.Preparing)+len(request.Activations) != 0 || request.WarmPools != nil {
+							t.Fatalf("restart retirement query lost run identity or mixed award reconciliation: %+v", request)
+						}
+						return controllerwire.LauncherSyncResponse{RunTerminal: false}, nil
+					}
 					if len(request.Observed) != 1 {
 						t.Fatalf("restart observed %d Jobs", len(request.Observed))
 					}

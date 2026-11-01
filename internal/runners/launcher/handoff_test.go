@@ -48,7 +48,7 @@ func TestSuccessorWaitsForPredecessorNode(t *testing.T) {
 	if err = l.Sync(t.Context()); err != nil {
 		t.Fatal(err)
 	}
-	// A ready fresh node must not win the handoff while the old one is deleting.
+	// safety: a ready fresh node must not win the handoff while the old one is deleting.
 	fresh := node.DeepCopy()
 	fresh.Name, fresh.UID = "a-fresh", "fresh-uid"
 	fresh.OwnerReferences[0].Name, fresh.OwnerReferences[0].UID = "fresh-claim", "fresh-claim-uid"
