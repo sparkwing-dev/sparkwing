@@ -412,7 +412,7 @@ func offlineWriteFixture(t *testing.T, gitBin, toolPath, fixtureHome string) (re
 	writeFile(t, filepath.Join(sparkwingDir, "go.mod"), fmt.Sprintf(
 		"module %s\n\ngo 1.26.0\n\nrequire (\n\t%s v0.1.0\n\tgithub.com/sparkwing-dev/sparkwing v0.0.0\n)\n\n"+
 			"replace %s => %s\n\nreplace github.com/sparkwing-dev/sparkwing => %s\n",
-		offlineFixtureModule, offlineSparkModule, offlineSparkModule, sparkDir, offlineRepoRoot(t)))
+		offlineFixtureModule, offlineSparkModule, offlineSparkModule, sparkDir, sdkFixtureModuleRoot(t)))
 	writeFile(t, filepath.Join(sparkwingDir, "sparkwing.yaml"), fmt.Sprintf(
 		"pipelines:\n  - name: offline\n    entrypoint: offline\n    description: Runs with no network once its modules are on disk\n\n"+
 			"sparks:\n  - name: offline-spark\n    source: %s\n    version: v0.1.0\n", offlineSparkModule))
@@ -446,18 +446,6 @@ func offlineTrackLatest(t *testing.T, sparkwingDir string) {
 		t.Fatalf("%s carries no exact pin to loosen", path)
 	}
 	writeFile(t, path, tracking)
-}
-
-func offlineRepoRoot(t *testing.T) string {
-	t.Helper()
-	root, err := filepath.Abs(filepath.Join("..", ".."))
-	if err != nil {
-		t.Fatalf("resolve repository root: %v", err)
-	}
-	if _, err := os.Stat(filepath.Join(root, "go.mod")); err != nil {
-		t.Fatalf("resolve repository root: %v", err)
-	}
-	return root
 }
 
 const offlineFixtureJobs = `package jobs
