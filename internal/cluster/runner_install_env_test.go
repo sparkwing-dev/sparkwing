@@ -11,7 +11,7 @@ import (
 func TestRunnerInstallsUseTheRunnersGoCaches(t *testing.T) {
 	t.Setenv("GOCACHE", "/tmp/sparkwing/gocache")
 	for _, owner := range []bool{false, true} {
-		env, err := procenv.Build(procenv.Install, runnerInstallBase(owner, "", "/tmp/sparkwing/gomodcache"), procenv.Runtime{})
+		env, err := procenv.Build(procenv.Install, runnerInstallBase(owner, "/tmp/sparkwing/gomodcache"), procenv.Runtime{})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -27,7 +27,7 @@ func TestRunnerInstallsUseTheRunnersGoCaches(t *testing.T) {
 func TestCloudProcessesKeepTheSidecarDockerHost(t *testing.T) {
 	t.Setenv("DOCKER_HOST", "unix:///tmp/docker.sock")
 	for _, kind := range []procenv.Kind{procenv.Plan, procenv.Eval, procenv.Attempt, procenv.Install} {
-		env, err := procenv.Build(kind, runnerInstallBase(false, "/tmp/source", "/tmp/modules"), procenv.Runtime{})
+		env, err := procenv.Build(kind, runnerInstallBase(false, "/tmp/modules"), procenv.Runtime{})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -39,7 +39,7 @@ func TestCloudProcessesKeepTheSidecarDockerHost(t *testing.T) {
 
 func TestSharedRunnerDoesNotInheritAnUnconfiguredDockerHost(t *testing.T) {
 	t.Setenv("DOCKER_HOST", "unix:///operator/docker.sock")
-	env, err := procenv.Build(procenv.Attempt, runnerInstallBase(false, "", ""), procenv.Runtime{})
+	env, err := procenv.Build(procenv.Attempt, runnerInstallBase(false, ""), procenv.Runtime{})
 	if err != nil {
 		t.Fatal(err)
 	}

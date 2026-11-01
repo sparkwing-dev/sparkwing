@@ -17,8 +17,17 @@ func (s *boundData) recordScope(authority blob.Authority, key blob.RecordKey, wr
 	if !slices.Contains(blob.Kinds, key.Kind) {
 		return invalidEngineBody("unknown data record kind")
 	}
-	if scope.Use == capability.DataRemoteCache && (write || key.Kind == blob.KindBinary || key.Kind == blob.KindSourceBundle) {
+	if scope.Use == capability.DataRemoteCache && (write || key.Kind == blob.KindPrepared || key.Kind == blob.KindBinary || key.Kind == blob.KindSourceBundle) {
 		return dataForbidden()
+	}
+	if key.Kind == blob.KindPrepared {
+		if key.Scope.Ref != (blob.RefScope{}) || key.Scope.Key != s.authorized.Principal.Capability.Binding.RunID || key.Scope.Job != "" || key.Name != "pipeline" {
+			return dataForbidden()
+		}
+		if write {
+			return blob.AuthorizeUpload(authority, authority.Upload.Value, blob.KindPrepared)
+		}
+		return nil
 	}
 	if write {
 		if !authority.Upload.Set || key.Scope.Ref != authority.Ref.Scope {

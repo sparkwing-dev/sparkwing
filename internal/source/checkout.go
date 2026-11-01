@@ -30,7 +30,7 @@ func PrepareCheckout(ctx context.Context, spec Spec, options Options) (entry *En
 	if spec.RemoteURL, err = tenantRemote(spec.RemoteURL, options); err != nil {
 		return nil, err
 	}
-	if options.LocalBundle != "" && (spec.LocalCheckout == "" || !filepath.IsAbs(options.LocalBundle) || options.PreparedCheckout != "") {
+	if options.LocalBundle != "" && (spec.LocalCheckout == "" || !filepath.IsAbs(options.LocalBundle)) {
 		return nil, errors.New("local source bundle requires an absolute file and original checkout")
 	}
 	environment, err := sourceEnvironment(options, procenv.Git)
@@ -46,28 +46,6 @@ func PrepareCheckout(ctx context.Context, spec Spec, options Options) (entry *En
 	}()
 	checkout := spec.LocalCheckout
 	client := gitClient{owner: options.ownerGit(), env: gitEnvironment(environment), bundleTransport: options.BundleTransport, masker: options.Base.Masker}
-	if options.PreparedCheckout != "" {
-		if spec.LocalCheckout != "" || !filepath.IsAbs(options.PreparedCheckout) || spec.SHA == "" {
-			return entry, errors.New("prepared source requires an absolute checkout and sealed remote commit")
-		}
-		checkout = options.PreparedCheckout
-		remote, err := client.run(ctx, checkout, "", "remote", "get-url", "origin")
-		if err != nil {
-			return entry, err
-		}
-		actual, err := sourceurl.CaseIdentity(remote)
-		expected, expectedErr := sourceurl.CaseIdentity(spec.RemoteURL)
-		if err != nil || expectedErr != nil || actual != expected {
-			return entry, errors.New("prepared source origin differs from the sealed remote")
-		}
-		changes, err := client.run(ctx, checkout, "", "status", "--porcelain", "--untracked-files=all", "--ignored=matching")
-		if err != nil {
-			return entry, err
-		}
-		if changes != "" {
-			return entry, errors.New("prepared source differs from its sealed checkout")
-		}
-	}
 	if checkout == "" {
 		if !filepath.IsAbs(options.Workspace) {
 			return entry, errors.New("remote source requires an absolute host workspace")
@@ -125,7 +103,7 @@ func PrepareCheckout(ctx context.Context, spec Spec, options Options) (entry *En
 			return entry, errors.Join(err, refErr)
 		}
 	}
-	if entry.DefaultBranch == "" && (spec.LocalCheckout != "" || options.PreparedCheckout != "") {
+	if entry.DefaultBranch == "" && (spec.LocalCheckout != "") {
 		branch, err := client.run(ctx, checkout, "", "symbolic-ref", "--quiet", "refs/remotes/origin/HEAD")
 		if err == nil {
 			entry.DefaultBranch = strings.TrimPrefix(branch, "refs/remotes/origin/")
@@ -232,8 +210,6 @@ func PrepareCheckout(ctx context.Context, spec Spec, options Options) (entry *En
 	if spec.PipelineSHA != "" && (spec.PipelineSHA != actual || spec.LocalCheckout != "" && !spec.CommittedCheckout) {
 		code := spec.PipelineSource()
 		codeOptions := options
-		// bug: a prepared checkout can be shallow and lack the separately pinned pipeline commit.
-		codeOptions.PreparedCheckout = ""
 		entry.pipelineEntry, err = PrepareCheckout(ctx, code, codeOptions)
 		if err != nil {
 			return entry, err

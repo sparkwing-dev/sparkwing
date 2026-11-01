@@ -139,7 +139,7 @@ func readLocalCommitFile(ctx context.Context, spec Spec, sha, name string, optio
 	}
 	defer func() { err = errors.Join(err, os.RemoveAll(workspace)) }()
 	spec.SHA, spec.PipelineSHA, spec.PipelineDir, spec.CommittedCheckout = sha, "", ".", true
-	options.Workspace, options.PreparedCheckout = workspace, ""
+	options.Workspace = workspace
 	entry, err := PrepareCheckout(ctx, spec, options)
 	if err != nil {
 		return nil, false, err
