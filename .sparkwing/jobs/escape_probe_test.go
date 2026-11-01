@@ -2,6 +2,7 @@ package jobs
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"io/fs"
@@ -34,7 +35,7 @@ func (timeoutErr) Temporary() bool { return true }
 
 var (
 	refused     = &net.OpError{Op: "dial", Net: "tcp", Err: syscall.ECONNREFUSED}
-	dnsMiss     = &net.DNSError{Err: "no such host", Name: "dind", IsNotFound: true}
+	dnsMiss     = &net.DNSError{Err: "no such host", Name: "loki", IsNotFound: true}
 	errTLSBroke = errors.New("tls: handshake failure")
 )
 
@@ -64,8 +65,9 @@ func routeFile(path string) ([]byte, error) {
 
 func fencedProber(bearers *[]string) prober {
 	return prober{
-		args:       EscapeProbeArgs{RDS: "db:5432", APIHosts: "10.0.36.1"},
-		env:        []string{"PATH=/usr/bin", "HOME=/tmp", "SPARKWING_AGENT_TOKEN=" + secretValue, "SPARKWING_CONTROLLER_URL=http://controller", "SPARKWING_RUN_ID=run-probe"},
+		args:       EscapeProbeArgs{ControllerURL: "http://controller", RDS: "db:5432", APIHosts: "10.0.36.1"},
+		env:        []string{"PATH=/usr/bin", "HOME=/tmp"},
+		runID:      "run-probe",
 		readFile:   routeFile,
 		dial:       openInternet(func(string) error { return refused }),
 		httpClient: cluster(http.StatusForbidden, "", nil, bearers),
@@ -90,7 +92,7 @@ func byName(results []probeResult) map[string]probeResult {
 }
 
 // A fenced pod passes: every endpoint either denies it or the network drops
-// or refuses it, and its own claim token is not a leak.
+// or refuses it, and no credential reaches its environment.
 func TestEscapeProbe_AFencedPodPassesEveryProbe(t *testing.T) {
 	var bearers []string
 	for name, p := range map[string]prober{
@@ -125,7 +127,7 @@ func TestEscapeProbe_AnOpenPodFailsAndLeaksNoValue(t *testing.T) {
 	p.httpClient = cluster(http.StatusCreated, `{"status":{"resourceRules":[{"resources":["secrets"]}]}}`, nil, &bearers)
 	results := byName(p.run())
 	for _, name := range []string{
-		"env credential", "read token", "imds", "controller admin route", "controller source credential", "tcp rds", "tcp dind", "tcp loki",
+		"env credential", "read token", "imds", "controller admin route", "controller source credential", "tcp rds", "tcp docker plain API", "tcp docker TLS API", "tcp loki",
 		"kube-api kubernetes.default.svc:443 rules", "kube-api 10.0.36.1:443 dry-run job",
 		"kube-api 10.0.36.1:443 secrets", "kubelet 169.254.1.1",
 	} {
@@ -140,13 +142,12 @@ func TestEscapeProbe_AnOpenPodFailsAndLeaksNoValue(t *testing.T) {
 			}
 		}
 	}
-	var sawOwnToken, sawSAToken bool
+	var sawSAToken bool
 	for _, b := range bearers {
-		sawOwnToken = sawOwnToken || b == "Bearer "+secretValue
 		sawSAToken = sawSAToken || b == "Bearer sa-token-value"
 	}
-	if !sawOwnToken || !sawSAToken {
-		t.Fatalf("the admin route or API probes did not carry the pod's own credentials: %v", bearers)
+	if !sawSAToken {
+		t.Fatalf("the API probes did not carry the exposed service-account token: %v", bearers)
 	}
 }
 
@@ -167,7 +168,7 @@ func TestEscapeProbe_AnUnsettledProbeFailsTheGate(t *testing.T) {
 		p     prober
 		probe string
 	}{
-		"dns miss":         {dns, "tcp dind"},
+		"dns miss":         {dns, "tcp loki"},
 		"tls failure":      {tls, "kube-api 10.0.36.1:443 secrets"},
 		"tls on rules":     {tls, "kube-api kubernetes.default.svc:443 rules"},
 		"404 from the api": {notFound, "kube-api 10.0.36.1:443 dry-run job"},
@@ -187,18 +188,18 @@ func TestEscapeProbe_AMissingTargetFailsTheGate(t *testing.T) {
 	p := fencedProber(&bearers)
 	p.args = EscapeProbeArgs{}
 	results := byName(p.run())
-	for _, name := range []string{"tcp rds", "kube-api endpoints"} {
+	for _, name := range []string{"tcp rds", "kube-api endpoints", "controller admin route", "controller source credential"} {
 		if r := results[name]; !r.verdict.failsGate() || !strings.Contains(r.detail, "required") {
 			t.Errorf("%s: %+v, want an unprobed target to fail", name, r)
 		}
 	}
 }
 
-func TestEscapeProbe_EnvProbeSkipsOnlyTheClaimToken(t *testing.T) {
-	if (prober{env: []string{"SPARKWING_AGENT_TOKEN=x", "PATH=/usr/bin"}}).envProbe().verdict.failsGate() {
-		t.Fatal("the pod's own claim token failed the env probe")
+func TestEscapeProbe_EnvProbeRejectsEveryCredentialIncludingRemovedTransports(t *testing.T) {
+	if (prober{env: []string{"PATH=/usr/bin"}}).envProbe().verdict.failsGate() {
+		t.Fatal("a credential-free environment failed the env probe")
 	}
-	for _, kv := range []string{"GITHUB_TOKEN=x", "aws_access_key_id=x", "DB_PASSWORD=x", "SPARKWING_AGENT_TOKEN2=x"} {
+	for _, kv := range []string{"SPARKWING_AGENT_TOKEN=x", "SPARKWING_NODE_TOKEN=x", "GITHUB_TOKEN=x", "aws_access_key_id=x", "DB_PASSWORD=x", "SPARKWING_AGENT_TOKEN2=x"} {
 		if !(prober{env: []string{kv}}).envProbe().verdict.failsGate() {
 			t.Errorf("env probe missed %q", kv)
 		}
@@ -304,7 +305,7 @@ func TestEscapeProbe_TheRepositoryConfigNamesEveryRequiredTarget(t *testing.T) {
 	}
 	var bearers []string
 	p := fencedProber(&bearers)
-	p.args = EscapeProbeArgs{RDS: entry.Args["rds"], APIHosts: entry.Args["api-hosts"]}
+	p.args = EscapeProbeArgs{ControllerURL: entry.Args["controller-url"], RDS: entry.Args["rds"], APIHosts: entry.Args["api-hosts"]}
 	for _, r := range p.run() {
 		if strings.Contains(r.detail, "is required") {
 			t.Errorf("%s: %s", r.name, r.detail)
@@ -312,8 +313,8 @@ func TestEscapeProbe_TheRepositoryConfigNamesEveryRequiredTarget(t *testing.T) {
 	}
 }
 
-// A claim is refused another node's output and another run's; a pod that
-// reads either, or cannot settle the question, fails the gate.
+// Customer code has no controller authority; a pod that reads either output
+// or cannot settle the question fails the gate.
 func TestEscapeProbe_OutputProbesFenceNonAncestorsAndOtherRuns(t *testing.T) {
 	var bearers []string
 	p := fencedProber(&bearers)
@@ -324,8 +325,8 @@ func TestEscapeProbe_OutputProbesFenceNonAncestorsAndOtherRuns(t *testing.T) {
 		}
 	}
 	for _, b := range bearers {
-		if b != "Bearer "+secretValue {
-			t.Errorf("an output probe sent %q, want the pod's own claim token", b)
+		if b != "" {
+			t.Error("an output probe sent a controller credential")
 		}
 	}
 	open := p
@@ -376,5 +377,58 @@ func TestEscapeProbe_PlansOpenNoConnection(t *testing.T) {
 	_ = (&escapeProbeNode{}).probe(context.Background())
 	if len(attempts()) == 0 {
 		t.Fatal("the node probe opened no connection, so it no longer dials through probeDial")
+	}
+}
+
+func TestEscapeProbe_ControllerTargetsUseTypedRunAndCurrentRoutesWithoutCredentials(t *testing.T) {
+	var bearers []string
+	p := fencedProber(&bearers)
+	p.args.OtherRun = "run-earlier"
+	p.env = append(p.env, "SPARKWING_CONTROLLER_URL=http://obsolete", "SPARKWING_RUN_ID=obsolete", "SPARKWING_AGENT_TOKEN="+secretValue)
+	var paths []string
+	p.httpClient = &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		if r.URL.Host != "controller" || r.Header.Get("Authorization") != "" {
+			t.Errorf("unexpected controller origin or credential")
+		}
+		paths = append(paths, r.Method+" "+r.URL.Path)
+		return &http.Response{StatusCode: http.StatusForbidden, Body: http.NoBody}, nil
+	})}
+	p.adminRouteProbe()
+	p.sourceCredentialProbes()
+	p.outputProbes()
+	want := []string{"GET /api/v1/tokens", "POST /api/v1/runs/run-probe/source-credential", "GET /api/v1/runs/run-probe/jobs/output-sibling/output", "GET /api/v1/runs/run-earlier/jobs/output-sibling/output"}
+	if strings.Join(paths, "\n") != strings.Join(want, "\n") {
+		t.Fatalf("controller probes = %v, want %v", paths, want)
+	}
+}
+
+func TestEscapeProbe_SDKOutputRequiresExplicitReadSetDenial(t *testing.T) {
+	for name, tc := range map[string]struct {
+		read func()
+		want verdict
+	}{
+		"explicit denial": {func() { panic("sparkwing: Ref[jobs.siblingOut].Get: output is outside the evaluated job read set") }, denied},
+		"successful read": {func() {}, reached},
+		"network error":   {func() { panic("connection refused") }, inconclusive},
+		"no output":       {func() { panic("output not found") }, inconclusive},
+	} {
+		if r := sdkOutputProbe(name, tc.read); r.verdict != tc.want {
+			t.Errorf("%s = %s, want %s", name, r.verdict, tc.want)
+		}
+	}
+	ctx := newTestHost(t, sparkwingtest.Options{Outputs: map[string]json.RawMessage{outputSibling: json.RawMessage(`{"marker":"escape-probe"}`)}}).Context(t.Context())
+	if r := sdkOutputProbes(ctx)[0]; r.verdict != reached {
+		t.Fatalf("SDK returned a non-ancestor's output: %+v, want REACHED", r)
+	}
+	deniedCtx := newTestHost(t, sparkwingtest.Options{Latest: func(context.Context, string, string) (json.RawMessage, error) {
+		return nil, errors.New("output is outside the evaluated job read set")
+	}}).Context(t.Context())
+	if r := sdkOutputProbes(deniedCtx)[1]; r.verdict != denied {
+		t.Fatalf("SDK refused an undeclared pipeline reference: %+v, want denied", r)
+	}
+	for _, r := range sdkOutputProbes(context.Background()) {
+		if r.verdict != inconclusive {
+			t.Errorf("without SDK context: %+v, want INCONCLUSIVE", r)
+		}
 	}
 }

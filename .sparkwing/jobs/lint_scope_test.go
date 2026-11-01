@@ -103,28 +103,15 @@ func TestLintCoversEveryCommittedModule(t *testing.T) {
 	}
 }
 
-func TestLintRefusesToRunWhenTheBaselineRefIsMissing(t *testing.T) {
+func TestLintJudgesAllFilesWhenTheBaselineRefIsMissing(t *testing.T) {
 	root := lintFixtureRepo(t)
-	ctx := context.Background()
-
+	writeGoFile(t, filepath.Join(root, ".golangci.yml"), lintBaselineFixtureConfig)
+	writeGoFile(t, filepath.Join(root, "internal", "bad.go"), ineffassignViolation("internal"))
+	gitCommitAll(t, root, "uploaded snapshot with finding")
 	runTestGit(t, root, "update-ref", "-d", "refs/remotes/"+gateBaselineRef)
-
-	err := runGolangciLint(ctx)
-	if err == nil {
-		t.Fatal("lint ran without a baseline it could resolve")
-	}
-	got := err.Error()
-	if !strings.Contains(got, "could not run") {
-		t.Errorf("a missing baseline did not report could-not-run: %s", got)
-	}
-	if !strings.Contains(got, gateBaselineRef) {
-		t.Errorf("a missing baseline did not name the ref that went missing: %s", got)
-	}
-	if !strings.Contains(got, "git fetch") {
-		t.Errorf("a missing baseline did not name the fix: %s", got)
-	}
-	if strings.Contains(got, "ineffectual assignment") {
-		t.Errorf("the step linted anyway and charged the author for the result: %s", got)
+	err := runGolangciLint(t.Context())
+	if err == nil || !strings.Contains(err.Error(), "ineffectual assignment") {
+		t.Fatalf("lint did not judge snapshot finding: %v", err)
 	}
 }
 
@@ -141,7 +128,7 @@ func TestLintScopeLineNamesEveryModuleAndTheBaseline(t *testing.T) {
 func TestLintBaselineDescriptionCarriesTheResolvedCommit(t *testing.T) {
 	root := lintFixtureRepo(t)
 
-	got, err := resolveLintBaseline(context.Background())
+	_, got, err := resolveGateBase(context.Background())
 	if err != nil {
 		t.Fatalf("the fixture's baseline must resolve: %v", err)
 	}

@@ -57,6 +57,11 @@ unlock.
 
 ### Fixed
 
+- **CI:** Gate uploaded working trees without requiring `origin/main`
+  Source checks and lint judge all tracked files against an empty Git tree when the baseline is unavailable, and report the wider scope.
+
+- **secrets:** List pipeline-scoped secrets through the CLI again
+  Secret listings always include the shared flag, including false for pipeline-scoped secrets, as the client requires.
 - **store:** Refuse a changed schema baseline even when its version still matches
   SQLite and PostgreSQL record the embedded baseline's SHA-256 digest and report both digests with the backup and reset remedy on mismatch. Stores without a digest are stamped only when every declared table, view and explicit index exists. Schema version stays 28. See the [baseline reset guide](docs/migrations/_unreleased.md#recreate-the-store-for-schema-baseline-28).
 - **Cloud:** Retire empty nodes after their run finishes instead of waiting for Karpenter consolidation
