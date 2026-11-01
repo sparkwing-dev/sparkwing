@@ -58,9 +58,9 @@ func TestControllerLogsFormatCredentials(t *testing.T) {
 	}
 }
 
-func TestIdleClaimShedNeverLogsRunnerCredential(t *testing.T) {
+func TestIdleClaimShedLogsAtDebugWithoutRunnerCredential(t *testing.T) {
 	var logs bytes.Buffer
-	s := New(nil, slog.New(slog.NewJSONHandler(&logs, nil))).WithIdleClaimPoll(time.Second).WithIdleClaimPollEnforced(true)
+	s := New(nil, slog.New(slog.NewJSONHandler(&logs, &slog.HandlerOptions{Level: slog.LevelDebug}))).WithIdleClaimPoll(time.Second).WithIdleClaimPollEnforced(true)
 	s.recordQueueActivity(time.Now().Add(-time.Hour))
 	credential := "swk_" + strings.Repeat("x", 43)
 	r := httptest.NewRequest(http.MethodPost, "/api/v1/claims", nil)
@@ -72,8 +72,12 @@ func TestIdleClaimShedNeverLogsRunnerCredential(t *testing.T) {
 	if s.admitIdleClaimPoll(httptest.NewRecorder(), r, key) {
 		t.Fatal("second poll admitted")
 	}
-	if !strings.Contains(logs.String(), "claim shed") || strings.Contains(logs.String(), credential) || !strings.Contains(logs.String(), "[credential:") {
-		t.Fatalf("unsafe claim warning: %s", &logs)
+	records := auditLines(t, &logs, "claim shed")
+	if len(records) != 1 || records[0]["level"] != "DEBUG" || records[0]["route_class"] != budgetClassIdlePoll || records[0]["retry_after"] != float64(time.Second) {
+		t.Fatalf("idle refusal must log once at debug with retry advice: %s", &logs)
+	}
+	if strings.Contains(logs.String(), credential) || !strings.Contains(logs.String(), "[credential:") {
+		t.Fatalf("unsafe claim diagnostic: %s", &logs)
 	}
 }
 

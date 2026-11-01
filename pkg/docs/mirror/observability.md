@@ -50,6 +50,13 @@ Local daemon readiness reports whether its controller has opened and reconciled.
 A busy database writer does not make a readiness probe wait. Status requests
 still read committed database state and report database errors.
 
+Idle claim polls refused for arriving before the suggested interval log at debug.
+Their HTTP 429 response, `Retry-After` advice and `sparkwing_principal_throttled_total`
+counter remain available. Request-budget violations log at warn.
+Queued card refund submissions with `succeeded` or `pending` status log at info.
+Failed or canceled refund submissions and declined refills retain warning logs.
+Checkout service failures log at error.
+
 HTTP failures caused by a canceled client request log at info. Before response
 headers are sent, these failures return HTTP 499 (Client Closed Request).
 The request's status and audit records remain available. A database driver's

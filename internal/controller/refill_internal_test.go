@@ -205,8 +205,9 @@ func TestARefusedRefillStopsRefillsAndNotifiesTheOwners(t *testing.T) {
 			if micro, err := tenant.CreditBalanceMicro(t.Context()); err != nil || micro != 0 {
 				t.Fatalf("a refused refill granted %d: %v", micro, err)
 			}
-			if !strings.Contains(logs.String(), `"alert":"refill_failed"`) || !strings.Contains(logs.String(), tc.failure) {
-				t.Fatalf("a refused refill raised no alert: %s", logs.String())
+			records := auditLines(t, &logs, "billing alert: an automatic refill failed")
+			if len(records) != 1 || records[0]["level"] != "WARN" || records[0]["alert"] != "refill_failed" || records[0]["decline_code"] != tc.failure {
+				t.Fatalf("a refused refill must warn with its decline code: %s", &logs)
 			}
 			if len(mail.sent) != 1 || mail.sent[0].To != "owner@example.test" || !strings.Contains(mail.sent[0].Text, tc.failure) {
 				t.Fatalf("owner mail %+v; want one refill failure notice", mail.sent)

@@ -132,6 +132,10 @@ func TestRequestBudgetNeverLogsRunnerHeader(t *testing.T) {
 			if !strings.Contains(logs.String(), "request shed") || strings.Contains(logs.String(), credential) {
 				t.Fatalf("unsafe %s warning: %s", class, &logs)
 			}
+			records := auditLines(t, &logs, "request shed")
+			if len(records) != 1 || records[0]["level"] != "WARN" || records[0]["route_class"] != class {
+				t.Fatalf("request budget refusal must warn: %s", &logs)
+			}
 		}
 	}
 }

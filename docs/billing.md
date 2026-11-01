@@ -352,6 +352,8 @@ from Stripe again when a warning arrives. A warning that arrives before its
 payment settles refuses an unprotected payment, which grants nothing and is
 refunded. A refused payment raises the
 `card_payment_refused` alert, and each submitted refund raises `card_refund`.
+Refund submissions with `succeeded` or `pending` status log at info. Failed or
+canceled submissions retain warn logs, and checkout service failures log at error.
 
 Refunds, lost disputes and fraud warnings are kept against their payment
 whatever order Stripe delivers them in. A pending payment retains each reversal

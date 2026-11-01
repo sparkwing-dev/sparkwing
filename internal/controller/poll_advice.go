@@ -123,7 +123,7 @@ func (s *Server) admitIdleClaimPoll(w http.ResponseWriter, r *http.Request, key 
 	// real refill nor longer than one suggestion.
 	wait := s.idleClaimPoll
 	observePrincipalThrottled(budgetClassIdlePoll)
-	s.logger.Warn("claim shed",
+	s.logger.Debug("claim shed",
 		"runner", key, "route_class", budgetClassIdlePoll, "retry_after", wait,
 		"reason", "polled sooner than the suggested idle interval")
 	writeRetryAfter(w, wait, "poll again no sooner than the interval this controller suggested")
