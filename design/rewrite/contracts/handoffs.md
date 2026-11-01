@@ -1373,3 +1373,9 @@ read-only token permissions and exact repository scope, refused negative and
 unknown compares, cross-repository and cross-team refusals, attempt fences,
 secret selection, OIDC refusal and the generated trust matrix. The lead runs the
 full gate and the following Opus security review. No deployment is authorized.
+
+## 2026-11-01 Korey decision 77: production capacity sizing and lead calls ratified
+
+- Production Cloud capacity launches with all six shared class pools (2, 4, 8, 16, 32, 64), sized per the sizing proposal, and empty by default: idle pools cost nothing and every documented size is available. The EC2 On-Demand Standard vCPU quota increase from 128 to 1,024 (us-west-2) was filed on 2026-11-01; until AWS grants it, only class 2 is enabled in production.
+- Ratified: a changed-revision child's fetch-only token keeps GitHub's provider lifetime (at most one hour), issued only while its attempt is live; a child whose GitHub compare fails or is rate-limited is admitted unverified with no fetch credential rather than failing intake; only Cloud-awarded owners may publish prepared pipelines; kikd-infra owns one cluster-scoped warm placeholder PriorityClass and KEDA's cluster-scoped CRDs, with workload permissions limited to the staging warm namespace.
+- Ratified: a store recording a schema version must also match that version's baseline; a store at the current version whose schema differs from the embedded baseline is refused loudly rather than run with missing objects.
