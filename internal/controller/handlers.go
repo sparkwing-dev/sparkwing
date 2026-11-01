@@ -53,6 +53,9 @@ func (e *healthDatabaseFailure) Error() string {
 func (e *healthDatabaseFailure) Unwrap() error { return e.cause }
 
 func (s *Server) healthDatabaseResult(ctx context.Context, err error) error {
+	if requestClientCanceled(ctx, err) {
+		return fmt.Errorf("controller health database check: %w", err)
+	}
 	s.healthMu.Lock()
 	defer s.healthMu.Unlock()
 	if err == nil {

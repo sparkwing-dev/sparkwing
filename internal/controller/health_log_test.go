@@ -3,6 +3,7 @@ package controller
 import (
 	"bytes"
 	"context"
+	"database/sql/driver"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -35,6 +36,8 @@ func TestHealthDatabaseRetryLogLevel(t *testing.T) {
 		{"retry fault", []error{dns, fault}, false, http.StatusServiceUnavailable},
 		{"real fault", []error{fault}, false, http.StatusServiceUnavailable},
 		{"canceled request", []error{dns}, true, http.StatusServiceUnavailable},
+		{"client canceled", []error{context.Canceled}, true, statusClientClosedRequest},
+		{"connection closed by cancellation", []error{driver.ErrBadConn}, true, statusClientClosedRequest},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			ctx, cancel := context.WithCancel(t.Context())
@@ -68,8 +71,14 @@ func TestHealthDatabaseRetryLogLevel(t *testing.T) {
 				if len(diagnostics) != 0 {
 					t.Fatalf("recovered health failure logged: %s", logs)
 				}
-			} else if len(diagnostics) != 1 || diagnostics[0]["level"] != "WARN" || diagnostics[0]["err"] != "controller health database check: "+tc.failures[len(tc.failures)-1].Error() {
-				t.Fatalf("single health failure must log once at WARN with cause: %s", logs)
+			} else {
+				level := "WARN"
+				if tc.status == statusClientClosedRequest {
+					level = "INFO"
+				}
+				if len(diagnostics) != 1 || diagnostics[0]["level"] != level || diagnostics[0]["err"] != "controller health database check: "+tc.failures[len(tc.failures)-1].Error() {
+					t.Fatalf("single health failure must log once at %s with cause: %s", level, logs)
+				}
 			}
 		})
 	}
@@ -104,6 +113,20 @@ func TestHealthFailureLoggingAndRecovery(t *testing.T) {
 	probe(http.StatusOK)
 	if len(auditLines(t, &logs, "controller health database recovered")) != 0 {
 		t.Fatal("healthy startup logged a recovery")
+	}
+	logs.Reset()
+	for range 16 {
+		ctx, cancel := context.WithCancel(t.Context())
+		cancel()
+		out := httptest.NewRecorder()
+		h.ServeHTTP(out, httptest.NewRequest(http.MethodGet, "/api/v1/health", nil).WithContext(ctx))
+		if out.Code != statusClientClosedRequest {
+			t.Fatalf("canceled health status = %d, want 499", out.Code)
+		}
+	}
+	probe(http.StatusOK)
+	if len(auditLines(t, &logs, "controller health database recovered")) != 0 {
+		t.Fatal("canceled probes counted as a dependency outage")
 	}
 	failed, err := teststore.Open(filepath.Join(t.TempDir(), "failed.db"))
 	if err != nil {
