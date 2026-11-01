@@ -41,7 +41,7 @@ func TestReleaseLintWaitsForAnotherTree(t *testing.T) {
 	t.Setenv("RELEASE_TEST_READY", readyPath)
 	bin := filepath.Join(repo, "bin")
 	for name, body := range map[string]string{
-		"git": `case "$*" in *ls-files*) echo go.mod ;; *rev-parse*) echo aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa ;; *) exit 1 ;; esac`,
+		"git": `case "$*" in *ls-files*) echo go.mod ;; *merge-base*) echo aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa ;; *) exit 1 ;; esac`,
 		"go":  "echo fixture",
 		"golangci-lint": `exec 9>"$RELEASE_TEST_LOCK"
 if ! flock -n 9; then

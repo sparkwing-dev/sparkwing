@@ -2,6 +2,7 @@ package controller_test
 
 import (
 	"bytes"
+	"context"
 	"encoding/hex"
 	"encoding/json"
 	"net/http"
@@ -12,6 +13,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/controller"
+	"github.com/sparkwing-dev/sparkwing/internal/controller/client"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/quicktest"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
@@ -20,6 +22,40 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
 )
+
+func TestSecrets_ManagementClientListsScopedAndSharedSecrets(t *testing.T) {
+	f := newBrowserFixture(t, nil)
+	manager, err := client.NewSecretManager(client.EngineOptions{
+		URL: "http://controller", HTTP: &http.Client{Transport: childOutputTransport{handler: f.h}},
+		Bearer: func(context.Context) (string, error) { return f.token, nil },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]controllerwire.SecretMetadata{}
+	for _, input := range []controllerwire.SecretWrite{
+		{Name: "SCOPED", Value: "scoped-value", Repo: "gh:1", Pipeline: "ci", Masked: true, Shared: false, IdempotencyKey: "scoped"},
+		{Name: "SHARED", Value: "shared-value", Masked: true, Shared: true, IdempotencyKey: "shared"},
+	} {
+		written, err := manager.WriteSecret(t.Context(), input)
+		if err != nil {
+			t.Fatal(err)
+		}
+		want[input.Name] = written.Secret
+	}
+	listed, err := manager.ListSecrets(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(listed.Secrets) != len(want) {
+		t.Fatalf("listed %d secrets, want %d", len(listed.Secrets), len(want))
+	}
+	for _, got := range listed.Secrets {
+		if expected, ok := want[got.Name]; !ok || got != expected {
+			t.Fatalf("listed metadata %+v, want %+v", got, expected)
+		}
+	}
+}
 
 // secretClaim claims a job of a run GitHub proved, an App push to gh:1.
 func secretClaim(t *testing.T, f *browserFixture, team store.Team, pipeline string, names ...string) string {

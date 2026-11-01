@@ -154,8 +154,8 @@ func TestCredentialInventoryHTTPNeverExposesPrivateValues(t *testing.T) {
 			row := rows[0]
 			allowed := []string{"host", "repository", "host_wide", "kind", "confirmed", "created_by", "created_at", "updated_at"}
 			if key == "secrets" {
-				allowed = []string{"name", "principal", "pipeline", "masked", "bound", "created_at", "updated_at"}
-				if string(row["name"]) != `"SECRET"` || string(row["masked"]) != "true" {
+				allowed = []string{"name", "principal", "pipeline", "masked", "shared", "bound", "created_at", "updated_at"}
+				if string(row["name"]) != `"SECRET"` || string(row["masked"]) != "true" || string(row["shared"]) != "false" {
 					return false
 				}
 			} else if string(row["host"]) != `"git.invalid"` || string(row["repository"]) != `""` || string(row["host_wide"]) != "true" {

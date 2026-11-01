@@ -774,16 +774,38 @@ func TestFormattersCheckTheRangeWhenNothingIsStaged(t *testing.T) {
 	}
 }
 
-func TestFormattersRefuseToJudgeWithoutTheBaseline(t *testing.T) {
+func TestGateScopesJudgeAllFilesWithoutTheBaseline(t *testing.T) {
 	root := gateFixtureRepo(t)
-	gitCommitAll(t, root, "clean base")
-
-	err := runFormatters(context.Background())
-	if err == nil {
-		t.Fatal("the formatters step reported success without resolving a base")
+	gitCommitAll(t, root, "uploaded snapshot")
+	for _, scopeOf := range []scopeFunc{changeScope, pushRangeScope} {
+		files, scope, err := scopeOf(t.Context(), "Go files", existingGoFiles)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !slices.Contains(files, "internal/sound.go") || !slices.Contains(files, ".sparkwing/jobs.go") {
+			t.Fatalf("uploaded snapshot scope = %v, want all tracked Go files", files)
+		}
+		if !strings.Contains(scope, "all tracked files") || !strings.Contains(scope, "origin/main unavailable") {
+			t.Fatalf("scope does not disclose the fallback: %s", scope)
+		}
 	}
-	if !strings.Contains(err.Error(), "origin/main") || !strings.Contains(err.Error(), "git fetch") {
-		t.Errorf("the failure does not name the ref to fetch: %v", err)
+}
+
+func TestGateBaseRefusesAnUnreadableRepository(t *testing.T) {
+	t.Chdir(t.TempDir())
+	if _, _, err := resolveGateBase(t.Context()); err == nil {
+		t.Fatal("a missing repository produced a successful gate baseline")
+	}
+}
+
+func TestFormattersJudgeDriftWithoutTheBaseline(t *testing.T) {
+	root := gateFixtureRepo(t)
+	requireGolangciLint(t)
+	withFormattersConfig(t, root)
+	writeGoFile(t, filepath.Join(root, "internal", "drifted.go"), gofumptDrift)
+	gitCommitAll(t, root, "uploaded snapshot with drift")
+	if err := runFormatters(t.Context()); err == nil || !strings.Contains(err.Error(), "drifted.go") {
+		t.Fatalf("formatter did not judge snapshot drift: %v", err)
 	}
 }
 

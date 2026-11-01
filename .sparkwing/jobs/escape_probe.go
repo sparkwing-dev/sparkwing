@@ -29,10 +29,11 @@ import (
 // them too. A missing target fails the run, so the gate never passes by
 // skipping one.
 type EscapeProbeArgs struct {
-	RDS      string `flag:"rds" desc:"The RDS endpoint as host:port; required, and sparkwing.yaml sets the Cloud's."`
-	APIHosts string `flag:"api-hosts" desc:"Comma-separated API server endpoint IPs behind the kubernetes Service VIP; required, and sparkwing.yaml sets the Cloud's."`
-	Nodes    string `flag:"nodes" desc:"Comma-separated node IPs whose kubelet (10250) a pod must not reach, beyond its own node."`
-	OtherRun string `flag:"other-run" desc:"An earlier escape-probe run in the same team, whose output-sibling output the pod must not read; required."`
+	ControllerURL string `flag:"controller-url" desc:"Controller HTTP origin to probe without credentials; required, and sparkwing.yaml sets the Cloud's."`
+	RDS           string `flag:"rds" desc:"The RDS endpoint as host:port; required, and sparkwing.yaml sets the Cloud's."`
+	APIHosts      string `flag:"api-hosts" desc:"Comma-separated API server endpoint IPs behind the kubernetes Service VIP; required, and sparkwing.yaml sets the Cloud's."`
+	Nodes         string `flag:"nodes" desc:"Comma-separated node IPs whose kubelet (10250) a pod must not reach, beyond its own node."`
+	OtherRun      string `flag:"other-run" desc:"An earlier escape-probe run in the same team, whose output-sibling output the pod must not read; required."`
 }
 
 // EscapeProbe checks that a customer-code pod cannot reach the credentials and
@@ -50,11 +51,11 @@ func (EscapeProbe) ShortHelp() string {
 
 func (EscapeProbe) Help() string {
 	return "Runs a fixed set of probes in a node pod: service-account and IRSA token files, " +
-		"credential-named environment variables other than the pod's own claim token, Kubernetes API " +
+		"credential-named environment variables, Kubernetes API " +
 		"authorization at the Service VIP and each endpoint (SelfSubjectRulesReview, a dry-run Job mounting " +
-		"sparkwing-database, GET secrets), a controller admin route with the pod's own token, IMDSv2, the " +
-		"kubelet on its own and named nodes, TCP to dind, RDS, argocd, loki and tempo, and the output of a " +
-		"node it does not depend on and of another run (--other-run). It also requires " +
+		"sparkwing-database, GET secrets), anonymous controller admin and source-credential routes, IMDSv2, the " +
+		"kubelet on its own and named nodes, the per-pod Docker TCP ports, TCP to RDS, argocd, loki and tempo, and the output of a " +
+		"job it does not depend on and of another run (--other-run). It checks the SDK refuses undeclared local and cross-pipeline outputs. It also requires " +
 		"the public internet: HTTPS to github.com and TCP to a public resolver's port 53 must succeed. " +
 		"It prints a verdict per probe, never a value, and fails the run if a fenced probe succeeds, a " +
 		"public one fails, or a required target is missing. Run it in a throwaway team with no credit or secrets."
@@ -63,7 +64,7 @@ func (EscapeProbe) Help() string {
 func (EscapeProbe) Examples() []sparkwing.Example {
 	return []sparkwing.Example{{
 		Comment: "Probe from a node pod",
-		Command: "sparkwing run escape-probe -- --rds db.example:5432 --api-hosts 10.0.36.1,10.0.65.130 --other-run <earlier run>",
+		Command: "sparkwing run escape-probe -- --controller-url https://api.sparkwing.dev --rds db.example:5432 --api-hosts 10.0.36.1,10.0.65.130 --other-run <earlier run>",
 	}}
 }
 
@@ -129,6 +130,7 @@ func httpVerdict(code int, err error) verdict {
 
 type prober struct {
 	args       EscapeProbeArgs
+	runID      string
 	env        []string
 	readFile   func(string) ([]byte, error)
 	dial       func(network, address string, timeout time.Duration) (net.Conn, error)
@@ -161,10 +163,6 @@ func defaultProber(args EscapeProbeArgs) prober {
 	}
 }
 
-// safety: SPARKWING_AGENT_TOKEN is the pod's own claim token, the one credential
-// it is meant to hold, so the credential-name probe passes over that name alone.
-const ownTokenEnv = "SPARKWING_AGENT_TOKEN"
-
 // safety: the probe reports only whether an env key contains one of these,
 // never the key or its value.
 var credentialNames = []string{"TOKEN", "SECRET", "PASSWORD", "AWS_", "GITHUB_", "NETRC", "KEY"}
@@ -175,13 +173,14 @@ const (
 	apiVIP      = "kubernetes.default.svc:443"
 )
 
-// safety: these are the fenced in-cluster services; a probe that connects to
-// any of them fails the run.
+// safety: shared services are fenced, and the per-pod Docker sidecar exposes
+// only its Unix socket, never TCP listeners.
 var tcpTargets = map[string]string{
-	"dind":   "dind.sparkwing.svc.cluster.local:2375",
-	"argocd": "argocd-server.argocd.svc.cluster.local:443",
-	"loki":   "loki.monitoring.svc.cluster.local:3100",
-	"tempo":  "tempo.monitoring.svc.cluster.local:3200",
+	"docker plain API": "127.0.0.1:2375",
+	"docker TLS API":   "127.0.0.1:2376",
+	"argocd":           "argocd-server.argocd.svc.cluster.local:443",
+	"loki":             "loki.monitoring.svc.cluster.local:3100",
+	"tempo":            "tempo.monitoring.svc.cluster.local:3200",
 }
 
 // safety: Jobs are promised the internet on every port but SMTP, so failing
@@ -279,17 +278,14 @@ func (p prober) getenv(key string) string {
 func (p prober) envProbe() probeResult {
 	for _, kv := range p.env {
 		key, _, _ := strings.Cut(kv, "=")
-		if key == ownTokenEnv {
-			continue
-		}
 		up := strings.ToUpper(key)
 		for _, name := range credentialNames {
 			if strings.Contains(up, name) {
-				return probeResult{name: "env credential", verdict: reached, detail: "a credential-named variable other than the claim token is set"}
+				return probeResult{name: "env credential", verdict: reached, detail: "a credential-named variable is set"}
 			}
 		}
 	}
-	return probeResult{name: "env credential", verdict: denied, detail: "no credential-named variable other than the claim token is set"}
+	return probeResult{name: "env credential", verdict: denied, detail: "no credential-named variable is set"}
 }
 
 func closeConn(conn net.Conn) {
@@ -358,32 +354,31 @@ func (p prober) imdsProbe() probeResult {
 	return probeResult{name: "imds", verdict: httpVerdict(code, err), detail: "fetches an IMDSv2 token"}
 }
 
-// safety: the pod's own claim token must open no route beyond its claim, so an
-// operator route that answers 2xx to it is a breach.
+// safety: customer code has no controller credential; anonymous access to an
+// operator route would bypass that boundary.
 func (p prober) adminRouteProbe() probeResult {
-	base := p.getenv("SPARKWING_CONTROLLER_URL")
+	base := p.args.ControllerURL
 	if base == "" {
-		return missingTarget("controller admin route", "SPARKWING_CONTROLLER_URL")
+		return missingTarget("controller admin route", "--controller-url")
 	}
-	code, err := p.status(http.MethodGet, strings.TrimRight(base, "/")+"/api/v1/tokens", p.getenv(ownTokenEnv), nil, nil)
+	code, err := p.status(http.MethodGet, strings.TrimRight(base, "/")+"/api/v1/tokens", "", nil, nil)
 	return probeResult{
 		name: "controller admin route", verdict: httpVerdict(code, err),
-		detail: "lists tokens with the pod's own claim token",
+		detail: "lists tokens without a controller credential",
 	}
 }
 
-// safety: the pod's claim token must reach no source credential: its attempt
-// has started, so the claim's source credentials are spent.
+// safety: source acquisition credentials belong to the host, never customer code.
 func (p prober) sourceCredentialProbes() []probeResult {
-	base, run := p.getenv("SPARKWING_CONTROLLER_URL"), p.getenv("SPARKWING_RUN_ID")
+	base, run := p.args.ControllerURL, p.runID
 	if base == "" || run == "" {
-		return []probeResult{missingTarget("controller source credential", "SPARKWING_CONTROLLER_URL and SPARKWING_RUN_ID")}
+		return []probeResult{missingTarget("controller source credential", "--controller-url and the typed run ID")}
 	}
 	code, err := p.status(http.MethodPost, strings.TrimRight(base, "/")+"/api/v1/runs/"+url.PathEscape(run)+"/source-credential",
-		p.getenv(ownTokenEnv), []byte("{}"), nil)
+		"", []byte("{}"), nil)
 	return []probeResult{{
 		name: "controller source credential", verdict: httpVerdict(code, err),
-		detail: "asks for its own run's source-credential with the pod's claim token",
+		detail: "asks for its own run's source-credential without a controller credential",
 	}}
 }
 
@@ -514,41 +509,66 @@ func (escapeProbeSibling) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
 	}), nil
 }
 
-// safety: a claim reads only its own node's dependencies, so both the
-// sibling's output and another run's must be refused. A read still waiting
-// on an unfinished sibling settles nothing and fails the gate.
+// safety: controller outputs require authority the customer process never
+// receives. An unfinished sibling settles nothing and fails the gate.
 func (p prober) outputProbes() []probeResult {
-	base, run := strings.TrimRight(p.getenv("SPARKWING_CONTROLLER_URL"), "/"), p.getenv("SPARKWING_RUN_ID")
+	base, run := strings.TrimRight(p.args.ControllerURL, "/"), p.runID
 	if base == "" || run == "" {
-		return []probeResult{missingTarget("controller outputs", "SPARKWING_CONTROLLER_URL and SPARKWING_RUN_ID")}
+		return []probeResult{missingTarget("controller outputs", "--controller-url and the typed run ID")}
 	}
 	outputPath := func(runID string) string {
-		return base + "/api/v1/runs/" + url.PathEscape(runID) + "/nodes/" + outputSibling + "/output"
+		return base + "/api/v1/runs/" + url.PathEscape(runID) + "/jobs/" + outputSibling + "/output"
 	}
 	var code int
 	var err error
 	for deadline := time.Now().Add(p.siblingWait); ; time.Sleep(2 * time.Second) {
-		code, err = p.status(http.MethodGet, outputPath(run), p.getenv(ownTokenEnv), nil, nil)
+		code, err = p.status(http.MethodGet, outputPath(run), "", nil, nil)
 		if err != nil || code != http.StatusConflict || time.Now().After(deadline) {
 			break
 		}
 	}
 	out := []probeResult{{
 		name: "controller non-ancestor output", verdict: httpVerdict(code, err),
-		detail: "reads a finished node it does not depend on with the pod's claim token",
+		detail: "reads a finished job it does not depend on without a controller credential",
 	}}
 	return append(out, p.required("controller other run output", p.args.OtherRun, func(other string) probeResult {
-		code, err := p.status(http.MethodGet, outputPath(other), p.getenv(ownTokenEnv), nil, nil)
+		code, err := p.status(http.MethodGet, outputPath(other), "", nil, nil)
 		return probeResult{
 			name: "controller other run output", verdict: httpVerdict(code, err),
-			detail: "reads another run's output with the pod's claim token",
+			detail: "reads another run's output without a controller credential",
 		}
 	})...)
 }
 
+// safety: only the host's explicit read-set refusal proves confinement; a
+// missing output, resolver, network failure or other panic settles nothing.
+func sdkOutputProbe(name string, read func()) (result probeResult) {
+	result = probeResult{name: name, verdict: inconclusive, detail: "reads output outside the job's declared references through the SDK"}
+	defer func() {
+		if failure := recover(); failure != nil && strings.HasSuffix(fmt.Sprint(failure), ": output is outside the evaluated job read set") {
+			result.verdict = denied
+		}
+	}()
+	read()
+	result.verdict = reached
+	return result
+}
+
+func sdkOutputProbes(ctx context.Context) []probeResult {
+	return []probeResult{
+		sdkOutputProbe("node-host non-ancestor output", func() {
+			sparkwing.Ref[siblingOut]{JobID: outputSibling}.Get(ctx)
+		}),
+		sdkOutputProbe("node-host undeclared pipeline output", func() {
+			sparkwing.RefToLastRun[siblingOut]("escape-probe", outputSibling).Get(ctx)
+		}),
+	}
+}
+
 type escapeProbeNode struct {
 	sparkwing.Base
-	args EscapeProbeArgs
+	args  EscapeProbeArgs
+	runID string
 }
 
 func (j *escapeProbeNode) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
@@ -557,12 +577,13 @@ func (j *escapeProbeNode) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
 
 func (j *escapeProbeNode) probe(ctx context.Context) error {
 	p := defaultProber(j.args)
-	return reportProbes(ctx, "node", append(p.run(), p.outputProbes()...))
+	p.runID = j.runID
+	return reportProbes(ctx, "node", append(append(p.run(), p.outputProbes()...), sdkOutputProbes(ctx)...))
 }
 
-func (p *EscapeProbe) Plan(_ context.Context, plan *sparkwing.Plan, in EscapeProbeArgs, _ sparkwing.RunContext) error {
+func (p *EscapeProbe) Plan(_ context.Context, plan *sparkwing.Plan, in EscapeProbeArgs, run sparkwing.RunContext) error {
 	sparkwing.Job(plan, outputSibling, escapeProbeSibling{})
-	sparkwing.Job(plan, "probe-node", &escapeProbeNode{args: in})
+	sparkwing.Job(plan, "probe-node", &escapeProbeNode{args: in, runID: run.RunID})
 	return nil
 }
 

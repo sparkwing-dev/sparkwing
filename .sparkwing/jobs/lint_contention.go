@@ -23,7 +23,9 @@ const golangciTimeoutExit = 4
 
 const gateBaselineRef = "origin/main"
 
-func lintCommand() string { return "golangci-lint run --allow-serial-runners ./..." }
+func lintCommand(base string) string {
+	return "golangci-lint run --allow-serial-runners --new-from-merge-base= --new-from-rev=" + base + " ./..."
+}
 
 // perf: the subset that answers in about a second over the packages one push
 // touches. Every name is enabled in .golangci.yml, the whole set the release
@@ -59,7 +61,7 @@ func runGolangciLintWithin(ctx context.Context, deadline time.Duration) error {
 	if err != nil {
 		return fmt.Errorf("golangci-lint: could not run -- listing the modules to lint failed: %w", err)
 	}
-	baseline, err := resolveLintBaseline(ctx)
+	base, baseline, err := resolveGateBase(ctx)
 	if err != nil {
 		return err
 	}
@@ -80,7 +82,7 @@ func runGolangciLintWithin(ctx context.Context, deadline time.Duration) error {
 		}
 		stepStart := time.Now()
 		sparkwing.Info(lintCtx, "golangci-lint: %s waiting for the box-wide lock if held, then linting (deadline %s)", dir, deadline)
-		cmd := sparkwing.Bash(lintCtx, lintCommand()).
+		cmd := sparkwing.Bash(lintCtx, lintCommand(base)).
 			Dir(dir).
 			Env("GOLANGCI_LINT_CACHE", cacheDir)
 		if _, runErr := cmd.Run(); runErr != nil {
@@ -101,32 +103,6 @@ func runGolangciLintWithin(ctx context.Context, deadline time.Duration) error {
 func describeLintScope(dirs []string, baseline string) string {
 	return fmt.Sprintf("scope is %d committed module(s) -- %s (%s)",
 		len(dirs), strings.Join(dirs, ", "), baseline)
-}
-
-func resolveLintBaseline(ctx context.Context) (string, error) {
-	sha, err := sparkwing.Bash(ctx,
-		`git -C "$SPARKWING_WORKDIR" rev-parse --verify --quiet "$LINT_BASELINE_REF^{commit}"`,
-	).Env("SPARKWING_WORKDIR", sparkwing.Path()).
-		Env("LINT_BASELINE_REF", gateBaselineRef).
-		String()
-	sha = strings.TrimSpace(sha)
-	if err != nil || sha == "" {
-		return "", fmt.Errorf("golangci-lint: could not run -- .golangci.yml baselines findings against "+
-			"%s and this checkout cannot resolve it, so the linter would report every standing "+
-			"finding in the tree against this change. Run `%s`", gateBaselineRef, fetchBaselineHint())
-	}
-	if len(sha) > 12 {
-		sha = sha[:12]
-	}
-	return fmt.Sprintf("baseline %s at %s", gateBaselineRef, sha), nil
-}
-
-func fetchBaselineHint() string {
-	remote, branch, ok := strings.Cut(gateBaselineRef, "/")
-	if !ok || remote == "" || branch == "" {
-		return "git fetch --all"
-	}
-	return fmt.Sprintf("git fetch %s %s", remote, branch)
 }
 
 func describeLintFailure(ctx context.Context, waited time.Duration, err error) string {
