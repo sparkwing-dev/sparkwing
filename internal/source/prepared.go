@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -26,7 +27,7 @@ import (
 )
 
 // Prepared binds a same-run installation to authenticated storage and the intake seal.
-// Publish is reserved for the planning owner, before any pipeline code executes.
+// Publish is reserved for the Cloud-awarded planning owner, before any pipeline code executes.
 type Prepared struct {
 	Bytes       blob.Store
 	Records     blob.RecordStore
@@ -213,19 +214,23 @@ func (p *Prepared) publish(ctx context.Context, spec Spec, options Options, entr
 	gz := gzip.NewWriter(io.MultiWriter(archive, digest))
 	snapshot := sha256.New()
 	tw := tar.NewWriter(io.MultiWriter(gz, snapshot))
-	// safety: Identical tar headers bind the complete input fingerprint to the artifact.
+	// Snapshot is a publisher-declared fingerprint, authenticated with the archive bytes.
 	roots := []struct{ name, path string }{{"checkout", entry.checkoutDirectory}}
 	if manifest.CodeRoot == "code" {
 		roots = append(roots, struct{ name, path string }{"code", entry.pipelineCheckout})
 	}
 	for _, tree := range roots {
 		root, openErr := os.OpenRoot(tree.path)
-		if openErr != nil {
-			return openErr
+		captureErr := openErr
+		if captureErr == nil {
+			captureErr = errors.Join(tarsafe.WriteTarRoot(ctx, tw, root, tree.name), root.Close())
 		}
-		writeErr := tarsafe.WriteTarRoot(ctx, tw, root, tree.name)
-		if err := errors.Join(writeErr, root.Close()); err != nil {
-			return err
+		if captureErr != nil {
+			if cause := context.Cause(ctx); cause != nil {
+				return cause
+			}
+			slog.InfoContext(ctx, "skipping prepared pipeline publication: checkout cannot be captured safely", "error", captureErr)
+			return nil
 		}
 	}
 	if inputs.Engine.Pin.SDK == engineid.GoSDK {
@@ -369,6 +374,8 @@ func (p *Prepared) restore(ctx context.Context, spec Spec, options Options) (ent
 	if err != nil {
 		return nil, err
 	}
+	// safety: Snapshot is not recomputed on restore. Integrity comes from the verified
+	// blob digest and server-enforced Cloud-only write authority; the publisher is trusted.
 	inputs.Snapshot = manifest.Inputs.Snapshot
 	currentKey, err := hashJSON(inputs)
 	if err != nil {

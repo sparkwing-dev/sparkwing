@@ -6,9 +6,11 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -361,4 +363,39 @@ func TestAcquirePreparedRestoresPlanningOwnerAfterRestart(t *testing.T) {
 		t.Fatalf("planner restart rebuilt or republished: installs=%d record=%+v", f.installs, f.storage.record)
 	}
 	assertPreparedExecution(t, entry)
+}
+
+func TestAcquirePreparedSkipsUnsafeCheckout(t *testing.T) {
+	for _, target := range []string{"/outside", "../outside"} {
+		t.Run(target, func(t *testing.T) {
+			f := newPreparedFixture(t, engineid.GoSDK)
+			if err := os.Symlink(target, filepath.Join(f.spec.LocalCheckout, "unsafe")); err != nil {
+				t.Fatal(err)
+			}
+			var logs bytes.Buffer
+			previous := slog.Default()
+			slog.SetDefault(slog.New(slog.NewTextHandler(&logs, nil)))
+			t.Cleanup(func() { slog.SetDefault(previous) })
+			for attempt := range 2 {
+				entry, err := source.Acquire(t.Context(), f.spec, f.options)
+				if err != nil {
+					t.Fatal(err)
+				}
+				assertPreparedExecution(t, entry)
+				if err := entry.Close(); err != nil {
+					t.Fatal(err)
+				}
+				if len(f.storage.body) != 0 || f.storage.record.Digest != "" {
+					t.Fatal("unsafe checkout published prepared bytes or record")
+				}
+				if f.installs != attempt+1 {
+					t.Fatalf("installs=%d, want fresh preparation", f.installs)
+				}
+				f.options.Prepared.Publish = false
+			}
+			if strings.Count(logs.String(), "level=INFO") != 1 {
+				t.Fatalf("expected one info log: %s", logs.String())
+			}
+		})
+	}
 }
