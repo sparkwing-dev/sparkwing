@@ -48,7 +48,7 @@ func TestTakeoverFindsPreTokenDaemonAndJoinsBeforeSpawn(t *testing.T) {
 		r := newFrameReader(nc)
 		_, err = r.read()
 		if err == nil {
-			err = writeTestFrame(nc, &wingwire.HelloAck{ProtocolMajor: wingd.ProtocolMajor - 1, BinaryVersion: "v0.67.0"})
+			err = writeTestFrame(nc, &wingwire.HelloAck{ProtocolMajor: wingd.ProtocolMajor, BinaryVersion: "v0.67.0"})
 		}
 		if err == nil {
 			var message wingwire.Message
