@@ -65,10 +65,8 @@ func (b *KubernetesBoundary) Reserve(ctx context.Context, binding CloudJobBindin
 			if !nodeReady(node) || quarantined(node) || node.Labels[CloudClassLabel] != class {
 				continue
 			}
-			held, recorded, replay := nodeReservation(&node)
-			replay = replay && held.JobName == job && sameBinding(recorded, binding) && held.RequestedClass == placement.RequestedClass
-			if index > 0 && !replay {
-				// Upsizing consumes only an idle, never-used warm node, never cold capacity or another run's node.
+			if index > 0 && node.Labels[usedRunLabel] != runNodeValue(b.Namespace, binding.RunID) {
+				// A larger node must be warm and never used, or already belong to this run.
 				warm, err := b.hasWarmPlaceholder(ctx, node)
 				if err != nil {
 					return CloudNodeReservation{}, err

@@ -133,6 +133,21 @@ func TestSharedPoolUpsizesOnlyIntoIdleWarmNextClass(t *testing.T) {
 			if err != nil || replay != r {
 				t.Fatalf("replay=%+v err=%v", replay, err)
 			}
+			if err = b.Release(t.Context(), r); err != nil {
+				t.Fatal(err)
+			}
+			next, err := b.Reserve(t.Context(), boundaryBinding("team"), "same-run-next", CloudPlacement{RequestedClass: "2", UpsizeEnabled: true})
+			if err != nil || next.GrantedClass != "4" {
+				t.Fatalf("same run lost its warm node: %+v %v", next, err)
+			}
+			if err = b.Release(t.Context(), next); err != nil {
+				t.Fatal(err)
+			}
+			other := boundaryBinding("team")
+			other.RunID = "another-run"
+			if _, err = b.Reserve(t.Context(), other, "another-run", CloudPlacement{RequestedClass: "2", UpsizeEnabled: true}); !errors.Is(err, ErrNoDedicatedNode) {
+				t.Fatalf("another run reused warm node: %v", err)
+			}
 		})
 	}
 }
