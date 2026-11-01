@@ -19,7 +19,7 @@ import (
 // Retries carry their source run's sealed identity unchanged.
 // Repository-proven work also learns the verified default branch for cache reads.
 func sealProvenanceTx(ctx context.Context, tx *storeTx, team Team, request IntakeRequest, p capability.Principal, input runspec.Request, run string) (runspec.Provenance, error) {
-	if request.UnverifiedReason != "" {
+	if request.UnverifiedReason != "" && input.Lineage.ParentRunID == "" {
 		sealed, err := runspec.AssertedProvenance(runspec.PrincipalWriter(string(p.Capability.Subject.Kind), p.Capability.Subject.ID), input.Git.Ref, input.Git.SHA, input.Pipeline)
 		if err != nil {
 			return refused(sealed, err)
@@ -37,6 +37,16 @@ func sealProvenanceTx(ctx context.Context, tx *storeTx, team Team, request Intak
 		}
 		if sealed, err = refused(sealed.FetchedFrom(fetched.ID, fetched.Name, fetched.Ref, fetched.SHA)); err != nil {
 			return sealed, err
+		}
+	}
+	if request.SourceCredentialVerified && input.Lineage.ParentRunID != "" && sealed.SharedSecretsOnly() {
+		parent, err := readRunTx(ctx, tx, team, input.Lineage.ParentRunID)
+		if err != nil {
+			return sealed, err
+		}
+		compared := runspec.RepoKey("gh:" + strconv.FormatInt(request.FetchedRepository.ID, 10))
+		if compared == input.Git.Repository.Key && compared == parent.Request.Request.Git.Repository.Key {
+			return refused(sealed.WithChildSourceRepository(compared))
 		}
 	}
 	if request.SourceCredentialVerified && sealed.ProvenRepository() != "" {

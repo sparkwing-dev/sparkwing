@@ -97,6 +97,9 @@ func (s *SourceController) release(ctx context.Context, a capability.Authorized)
 		}
 	}
 	if s.Cipher == nil {
+		if appMissing != nil {
+			return SourceCredentialResponse{}, appMissing
+		}
 		return SourceCredentialResponse{}, routepolicy.MissingEndpointPolicy()
 	}
 	tenant, err := s.transactions(ctx, a.Target.Team)

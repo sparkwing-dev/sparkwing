@@ -33,6 +33,9 @@ func runSecretSelection(r runspec.SealedRequest) (secretSelection, error) {
 	if !p.Valid() {
 		return secretSelection{}, bindingRefusal()
 	}
+	if p.ChildSourceRepository() != "" {
+		return secretSelection{scope: secretNone}, nil
+	}
 	repo := string(p.ProvenRepository())
 	if p.SharedSecretsOnly() || repo == "" {
 		return secretSelection{scope: secretSharedOnly}, nil

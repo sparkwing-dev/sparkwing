@@ -23,6 +23,11 @@ func (t *Tenant) ReleaseSourceCredential(ctx context.Context, authorized capabil
 		if err != nil {
 			return err
 		}
+		if run, err := readRunTx(ctx, tx, t.team, request.Authorization.Binding.RunID); err != nil {
+			return err
+		} else if run.Request.Provenance.ChildSourceRepository() != "" {
+			return errors.Join(ErrNotFound, &apierr.Error{Code: apierr.NotFound, Message: "fetch-only children require a read-only GitHub App token for exactly their repository; stored Git credentials cannot be scoped to this attempt"})
+		}
 		credential, err = scanGitCredential(tx.QueryRowContext(ctx, `SELECT `+gitCredentialCols+` FROM git_credentials WHERE team=? AND host=? AND (repository_key=? OR host_wide=1) ORDER BY host_wide LIMIT 1`+tx.forUpdate(), t.team, request.Host, request.RepositoryKey))
 		if errors.Is(err, sql.ErrNoRows) {
 			return errors.Join(ErrNotFound, &apierr.Error{Code: apierr.NotFound, Message: "store a git credential for " + request.Host + " in the team's Git credentials"})
@@ -112,8 +117,12 @@ func (t *Tenant) sourceReleaseRequestTx(ctx context.Context, tx *storeTx, author
 		return capability.SourceReleaseRequest{}, authorityError(apierr.Forbidden, "sealed source has no credential host")
 	}
 	proof := run.Request.Provenance
-	if proof.ProvenRepository() == "" || proof.ProvenRepository() != run.Request.Request.Git.Repository.Key || !proof.SourceCredentialVerified() {
-		return capability.SourceReleaseRequest{}, errors.Join(ErrNotFound, &apierr.Error{Code: apierr.NotFound, Message: unprovenSourceRemedy(host)})
+	if repo := run.Request.Request.Git.Repository.Key; !(proof.ProvenRepository() != "" && proof.ProvenRepository() == repo && proof.SourceCredentialVerified()) && !(proof.ChildSourceRepository() != "" && proof.ChildSourceRepository() == repo) {
+		message := unprovenSourceRemedy(host)
+		if run.Request.Request.Lineage.ParentRunID != "" {
+			message = "fetch-only child source access requires an intake GitHub compare proving both commits reachable from a branch or tag of the parent's same repository; unreachable or unknown commits and cross-repository children receive no source credential; push the commit to that repository and start a new run, or upload the source"
+		}
+		return capability.SourceReleaseRequest{}, errors.Join(ErrNotFound, &apierr.Error{Code: apierr.NotFound, Message: message})
 	}
 	authorized = capability.Authorized{Principal: p, Binding: b, Target: capability.Target{Team: c.Team, RunID: b.RunID, NodeID: b.NodeID}, Access: capability.AccessRule{Grants: []capability.Grant{capability.SourceRead}, Binding: capability.BindSource, Liveness: capability.LiveSensitive}}
 	return capability.SourceReleaseRequest{Authorization: authorized, RepositoryKey: string(run.Request.Request.Git.Repository.Key), Host: host}, nil

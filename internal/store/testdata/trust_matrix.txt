@@ -6,7 +6,7 @@
 # with default branch main; the store holds a verified main cache record for it.
 #
 # trust                        Provenance.Trust() after sealing
-# proven_repository            the sealed repository every consumer reads
+# proven_repository            the sealed execution repository, separate from child fetch-only access
 # source_credential_compared   the intake-time GitHub compare proof, independent of repository proof
 # pipeline_secrets             runSecretSelection: repository and pipeline whose secrets the run reads, or no
 # shared_secrets               runSecretSelection: team-wide --shared secrets (only_on ones still need the pool,
@@ -17,7 +17,7 @@
 #                              reads it: fresh only on a fresh host, whatever the team's high_trust
 # cache_reads                  awardDataScope for a job claim (ReadRefs)
 # default_branch_work_go       Provenance.DefaultBranchWork()
-# source_credential            repository proof plus intake-time compare proof, otherwise no team credential
+# source_credential            repository proof plus intake-time compare, or same-repository child fetch-only access
 # actions_runner_fresh_host    claimantFactsTx FreshHost for the Actions binding's signed runner_environment
 # cache_write_<host>           awardDataScope WriteRef with awardCacheHostTx's writer for that host:
 #                              fresh_host (launcher pod, Cloud, GitHub-hosted Actions), long_lived (plain
@@ -905,6 +905,114 @@ default_branch_work_sql      yes
 latest_default               yes
 repos_runner                 yes
 fresh_host_required          yes
+
+== child-other-commit-compared: Same-repository child at another commit with a successful intake compare
+trust                                              asserted
+proven_repository
+source_credential_compared                         no
+pipeline_secrets                                   no
+shared_secrets                                     no
+oidc_trigger                                       refused
+oidc_repository                                    -
+oidc_ref                                           -
+oidc_sha                                           -
+cache_reads                                        manual:run/run-app-push-default:refs/heads/main
+default_branch_work_go                             no
+source_credential                                  fetch-only gh:7
+cache_write_fresh_host                             manual:run/run-app-push-default:refs/heads/main
+cache_write_default_branch_fresh_host              no
+oidc_runner_environment_fresh_host                 fresh
+cache_write_long_lived                             manual:host-<machine>/run/run-app-push-default:refs/heads/main
+cache_write_default_branch_long_lived              no
+oidc_runner_environment_long_lived                 persistent
+cache_write_long_lived_high_trust                  manual:run/run-app-push-default:refs/heads/main
+cache_write_default_branch_long_lived_high_trust   no
+oidc_runner_environment_long_lived_high_trust      persistent
+personal_claim                                     yes
+personal_pipeline_secrets                          no
+personal_shared_secrets                            no
+personal_oidc_repository                           -
+personal_cache_reads                               manual:run/run-app-push-default:refs/heads/main
+personal_source_credential                         no
+personal_cache_write                               manual:host-<machine>/run/run-app-push-default:refs/heads/main
+personal_latest_default                            no
+personal_repos_runner                              no
+here_claim                                         yes
+here_pipeline_secrets                              no
+here_shared_secrets                                no
+here_oidc_repository                               -
+here_cache_reads                                   manual:run/run-app-push-default:refs/heads/main
+here_source_credential                             no
+here_cache_write                                   manual:host-<machine>/run/run-app-push-default:refs/heads/main
+here_latest_default                                no
+here_repos_runner                                  no
+host_fresh_pod               yes
+host_plain_machine           yes
+host_persistent_k8s          yes
+host_personal                yes
+host_here                    yes
+pool_reserved                no
+pool_reserved_trust_any      yes
+pool_verified_only           no
+pool_reserved_on_machine     no
+default_branch_work_sql      no
+latest_default               no
+repos_runner                 no
+fresh_host_required          no
+
+== child-other-repo-compared: Cross-repository child with a compare result receives no fetch-only access
+trust                                              asserted
+proven_repository
+source_credential_compared                         no
+pipeline_secrets                                   no
+shared_secrets                                     yes
+oidc_trigger                                       manual
+oidc_repository                                    -
+oidc_ref                                           -
+oidc_sha                                           -
+cache_reads                                        manual:run/run-app-push-default:refs/heads/main
+default_branch_work_go                             no
+source_credential                                  no
+cache_write_fresh_host                             manual:run/run-app-push-default:refs/heads/main
+cache_write_default_branch_fresh_host              no
+oidc_runner_environment_fresh_host                 fresh
+cache_write_long_lived                             manual:host-<machine>/run/run-app-push-default:refs/heads/main
+cache_write_default_branch_long_lived              no
+oidc_runner_environment_long_lived                 persistent
+cache_write_long_lived_high_trust                  manual:run/run-app-push-default:refs/heads/main
+cache_write_default_branch_long_lived_high_trust   no
+oidc_runner_environment_long_lived_high_trust      persistent
+personal_claim                                     yes
+personal_pipeline_secrets                          no
+personal_shared_secrets                            yes
+personal_oidc_repository                           -
+personal_cache_reads                               manual:run/run-app-push-default:refs/heads/main
+personal_source_credential                         no
+personal_cache_write                               manual:host-<machine>/run/run-app-push-default:refs/heads/main
+personal_latest_default                            no
+personal_repos_runner                              no
+here_claim                                         yes
+here_pipeline_secrets                              no
+here_shared_secrets                                yes
+here_oidc_repository                               -
+here_cache_reads                                   manual:run/run-app-push-default:refs/heads/main
+here_source_credential                             no
+here_cache_write                                   manual:host-<machine>/run/run-app-push-default:refs/heads/main
+here_latest_default                                no
+here_repos_runner                                  no
+host_fresh_pod               yes
+host_plain_machine           yes
+host_persistent_k8s          yes
+host_personal                yes
+host_here                    yes
+pool_reserved                no
+pool_reserved_trust_any      yes
+pool_verified_only           no
+pool_reserved_on_machine     no
+default_branch_work_sql      no
+latest_default               no
+repos_runner                 no
+fresh_host_required          no
 
 == child-other-commit: Child of the default-branch push at another commit
 trust                                              asserted

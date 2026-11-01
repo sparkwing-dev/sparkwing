@@ -368,3 +368,71 @@ func TestGitHubSourceReleaseRequiresIntakeCompare(t *testing.T) {
 		t.Fatalf("unchecked code got an App token: %v, %d mints", err, provider.calls)
 	}
 }
+
+func TestFetchOnlyChildSourceReleaseKeepsOtherAuthorityClosed(t *testing.T) {
+	for _, problem := range []string{"", "other repository", "other team", "expired attempt", "started attempt", "cancelled", "revoked"} {
+		t.Run(problem, func(t *testing.T) {
+			tenant, auth, provider := githubSourceFixture(t, 2)
+			if _, err := mintTestOIDC(t.Context(), tenant, auth); err != nil {
+				t.Fatalf("proven parent OIDC: %v", err)
+			}
+			run, err := tenant.ReadRun(t.Context(), "run")
+			if err != nil {
+				t.Fatal(err)
+			}
+			proof, err := runspec.AssertedChildProvenance(runspec.RunWriter("parent"), run.Request.Request.Git.Ref, run.Request.Request.Git.SHA, run.Pipeline)
+			if err != nil {
+				t.Fatal(err)
+			}
+			proof, err = proof.WithChildSourceRepository("gh:1")
+			if err != nil {
+				t.Fatal(err)
+			}
+			run.Request.Provenance = proof
+			run.Request.Request.Git.App = runspec.Optional[runspec.AppFacts]{}
+			run.Request.Request.Lineage.ParentRunID = "parent"
+			setRunRequest(t, tenant, run.Request)
+			rewriteSchemaExec(t, tenant.s.db, `INSERT INTO github_app_triggers(team,repository_id,pipeline,repository,installation_id,created_at,repo_key) VALUES ('a',1,'p','acme/repo',7,1,'gh:1')`)
+			if selection, err := runSecretSelection(run.Request); err != nil || selection.scope != secretNone {
+				t.Fatalf("fetch-only child secret selection=%+v err=%v", selection, err)
+			}
+			if _, err := oidcIdentity("a", run); err == nil {
+				t.Fatal("fetch-only child received OIDC identity")
+			}
+			if minted, err := mintTestOIDC(t.Context(), tenant, auth); err == nil || minted.Token != "" {
+				t.Fatalf("fetch-only child minted OIDC: %v", err)
+			}
+			if credential, _, err := tenant.ReleaseSourceCredential(t.Context(), auth); err == nil || credential.Secret != "" {
+				t.Fatal("fetch-only child received stored Git credential")
+			}
+			switch problem {
+			case "other repository":
+				run.Request.Request.Git.Repository.Key = "gh:2"
+				setRunRequest(t, tenant, run.Request)
+			case "other team":
+				tenant.team = "b"
+			case "expired attempt":
+				rewriteSchemaExec(t, tenant.s.db, `UPDATE nodes SET lease_expires_at=1`)
+			case "started attempt":
+				rewriteSchemaExec(t, tenant.s.db, `UPDATE nodes SET started_at=1`)
+			case "cancelled":
+				rewriteSchemaExec(t, tenant.s.db, `UPDATE runs SET cancel_requested_at=1`)
+			case "revoked":
+				rewriteSchemaExec(t, tenant.s.db, `UPDATE capabilities SET revoked_at=1 WHERE prefix='runner'`)
+			}
+			credential, err := releaseGitHubSourceForTest(t.Context(), tenant, auth, provider)
+			if problem != "" {
+				if err == nil || credential.Secret != "" || provider.calls != 0 {
+					t.Fatalf("%s released credential: %v calls=%d", problem, err, provider.calls)
+				}
+				return
+			}
+			if err != nil || credential.Secret == "" || len(credential.ExtraRepositories) != 0 || !reflect.DeepEqual(provider.ids, []int64{1}) || !reflect.DeepEqual(provider.permissions, map[string]string{"contents": "read"}) {
+				t.Fatalf("fetch-only credential=%+v ids=%v permissions=%v err=%v", credential, provider.ids, provider.permissions, err)
+			}
+			if proof.Trust() != runspec.TrustAsserted || proof.ProvenRepository() != "" || proof.DefaultBranchWork() || proof.SourceCredentialVerified() {
+				t.Fatal("source release promoted child trust")
+			}
+		})
+	}
+}

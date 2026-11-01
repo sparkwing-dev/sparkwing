@@ -26,6 +26,8 @@ unlock.
   Move placeholders and their Pod get/delete and ReplicaSet get Role to `launcher.warmNamespace` (default `<release namespace>-cloud-warm`). Update pool warm-namespace labels and remove the old release-namespace warm Role and binding. Placeholders must be volume-free and owned by `sparkwing-cloud-warm-<vCPU>` through a verified ReplicaSet. `launcher.nodeClassName` / `launch --node-class` pins the hardened EC2NodeClass name (default `sparkwing-jobs`). Pools referencing a different class, group or kind are refused. Follow the [shared-capacity migration](docs/migrations/_unreleased.md#shared-cloud-capacity).
 - **Cloud (Breaking):** Replace per-team Karpenter NodePools with one shared pool per requested hardware class and deployment
   Nodes receive their permanent team/run binding at first reservation and never move between runs. Pools use protected class/deployment provenance and a generic dedicated taint. Idle warm nodes may serve jobs one class smaller with requested billing and cgroup limits, controlled by `cloud_upsize_enabled` (default true). Schema 28 records requested/granted class, fresh-capacity waits and claim-to-start latency per job. Follow the [shared-capacity migration](docs/migrations/_unreleased.md#shared-cloud-capacity).
+- **controller:** Same-repository children at a different commit can fetch private source after a successful intake GitHub compare
+  Fetch-only App tokens read exactly that repository. Issuance requires a live attempt. Tokens keep GitHub's provider lifetime of at most one hour, including after the attempt ends. Children stay asserted and receive no secrets, stored Git credentials, extra repositories or OIDC. Unreachable or unknown commits and cross-repository children receive no source credential.
 
 - **scaffold:** `const FallbackSDKVersion` pins v0.68.2, so a fresh scaffold compiles against that release.
 - **controller (Breaking):** List endpoints that returned whole collections now return cursor pages of 50 records by default, up to 200 per request
@@ -41,11 +43,13 @@ unlock.
 - **release (Breaking):** Sparkwing releases use the native tag-and-publication flow
   Platform deployment is separate. Retire the platform repository's `release-all` pipeline and `bin/trigger-change-deploy.sh` callers when updating that repository.
 - **trust (Breaking):** Personal machines and here hosts never claim repository-proven runs, including run-now and burst `machines`. Repository-scoped runners accept only proven runs. Personal enrollment can omit `--repos` to serve the owner's asserted work; shared enrollment still requires a scope. Intake and claim seal repository and host trust once for secrets, OIDC, credentials and cache scopes. The schema reset uses baseline 28. See [migration](docs/migrations/_unreleased.md#sealed-execution-trust).
-- **source credentials (Breaking):** Every job credential requires a matching proven repository and an intake GitHub compare check. Uploaded and unproven runs receive no host-wide fallback. App-selected historical commits and locked schedules can qualify when reachable from a repository branch or tag. See [migration](docs/migrations/_unreleased.md#sealed-execution-trust).
+- **source credentials (Breaking):** Job credentials require an intake GitHub compare check. They also require matching repository proof, except for fetch-only App tokens for same-repository children. Uploaded and unproven runs receive no host-wide fallback. App-selected historical commits and locked schedules can qualify when reachable from a repository branch or tag. See [migration](docs/migrations/_unreleased.md#sealed-execution-trust).
 - **pipeline references (Breaking):** Latest outputs default to verified default-branch runs and exclude publication. Declare `sw.FromAnyRun()` (TypeScript `{fromAnyRun: true}`) to opt out. The direct output route enforces the same rule. See [migration](docs/migrations/_unreleased.md#sealed-execution-trust).
 
 ### Fixed
 
+- **controller:** Changed-revision children keep their parent lineage writer and shared-only secrets when GitHub compare or metadata checks fail
+  Intake admits these children without a fetch credential. Retries inherit a sealed child fetch permission and receive only a repository-scoped `contents: read` token.
 - **controller:** Routine idle-poll refusals log at debug, and successful or pending refund submissions log at info
   Declined refills, failed refunds and request-budget violations retain warning or error logs.
 - **local startup:** Upgrades drain older daemons before starting the installed executable, including v0.67 daemons at the previous socket path

@@ -1329,3 +1329,39 @@ fork's installation appear on the base pull request, and close the gap if not.
 After launch: per-repository pull-request controls for public repositories (who may
 trigger runs, approval for first-time or outside contributors, which pipelines run
 on pull requests).
+
+## 2026-11-01 Korey approved: same-repository child fetch-only access
+
+Amends the source-credential restriction in the sealed repository proof decisions
+of 2026-10-30 and 2026-10-31. Grid cell R11C06 reached source acquisition with an
+asserted child at another commit, then failed before its secret check could run.
+
+- A changed-revision child in the same private repository may receive a fetch-only
+  source credential when intake's GitHub compare proves both its execution and
+  source commits reachable from a branch or tag of that repository. Keep the
+  existing `identical`/`ahead` compare rules. Unreachable or unknown results and
+  GitHub compare or metadata errors admit the child with its asserted child seal
+  and no fetch credential. The seal keeps shared-only secrets and the parent
+  lineage writer. Cross-repository children and another team's authority cannot
+  receive this credential.
+- Seal this permission as `child_source_repository`, separately from
+  `proven_repository` and the general source-credential compare flag. The child
+  stays asserted. It gains no execution repository proof, default-branch
+  eligibility, secrets, stored Git credentials, extra repositories or OIDC.
+  A retry inherits this sealed permission without another compare and receives
+  the same fetch-only token scope.
+- Mint a GitHub App token with only `contents: read` for exactly that repository's
+  numeric ID. Recheck the live attempt and team installation before minting and
+  before committing the release audit. Stored credentials cannot enforce this
+  scope and are refused.
+- Lead resolution, 2026-11-01: fetch-only tokens keep GitHub's provider lifetime
+  of at most one hour, matching the ratified rule "Actions credentials keep
+  GitHub's lifetime". Issuance stays fenced to the live attempt. Issued tokens
+  retain their provider expiration after the attempt ends. No token-recall
+  system is required.
+
+Tests cover the native child intake, actual checkout through the source client,
+read-only token permissions and exact repository scope, refused negative and
+unknown compares, cross-repository and cross-team refusals, attempt fences,
+secret selection, OIDC refusal and the generated trust matrix. The lead runs the
+full gate and the following Opus security review. No deployment is authorized.
