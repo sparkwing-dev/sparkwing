@@ -37,9 +37,11 @@ func (s *preparedStorage) Upload(_ context.Context, in blob.UploadIntent) (blob.
 	s.intent = in
 	return blob.UploadTicket{ID: "upload", Transfer: blob.SignedTransfer{Digest: in.Digest, Size: in.Size}}, nil
 }
+
 func (s *preparedStorage) Commit(_ context.Context, _ blob.CommitUpload) (blob.Receipt, error) {
 	return blob.Receipt{Identity: s.intent.Identity, Digest: s.intent.Digest}, nil
 }
+
 func (s *preparedStorage) Download(_ context.Context, req blob.GetRequest) (blob.SignedTransfer, error) {
 	if s.denied != nil {
 		return blob.SignedTransfer{}, s.denied
@@ -49,6 +51,7 @@ func (s *preparedStorage) Download(_ context.Context, req blob.GetRequest) (blob
 	}
 	return blob.SignedTransfer{Digest: req.Digest, Size: int64(len(s.body))}, nil
 }
+
 func (s *preparedStorage) Transfer(_ context.Context, _ blob.SignedTransfer, body io.Reader) (io.ReadCloser, error) {
 	if body != nil {
 		var err error
@@ -61,10 +64,12 @@ func (s *preparedStorage) Transfer(_ context.Context, _ blob.SignedTransfer, bod
 	}
 	return io.NopCloser(bytes.NewReader(data)), nil
 }
+
 func (s *preparedStorage) CommitRecord(_ context.Context, req blob.CommitRecordRequest) (blob.Record, error) {
 	s.record = blob.Record{Key: req.Key, Digest: req.Digest}
 	return s.record, nil
 }
+
 func (s *preparedStorage) LookupRecord(_ context.Context, _ blob.RecordLookup) (blob.RecordLookupResult, error) {
 	return blob.RecordLookupResult{Found: s.record.Digest != "", Record: s.record}, nil
 }

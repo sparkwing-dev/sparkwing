@@ -48,7 +48,7 @@ func (b BootstrapRuntime) run(ctx context.Context, command string, options Boots
 		return err
 	}
 	if !filepath.IsAbs(options.ModuleCache) {
-		return errors.New("Cloud bootstrap requires an absolute module-cache path")
+		return errors.New("cloud bootstrap requires an absolute module-cache path")
 	}
 	award, err := launcher.ReadBootstrapAward(options.BootstrapFile)
 	if err != nil {

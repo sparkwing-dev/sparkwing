@@ -80,13 +80,20 @@ func (p *Prepared) inputs(ctx context.Context, spec Spec, options Options, ident
 	if err != nil {
 		return preparedInputs{}, err
 	}
-	return preparedInputs{Format: 1, RequestHash: p.RequestHash, Source: preparedSource(spec), Engine: identity, Target: options.Target, Environment: hashJSON(environment), Tools: tools}, nil
+	environmentHash, err := hashJSON(environment)
+	if err != nil {
+		return preparedInputs{}, err
+	}
+	return preparedInputs{Format: 1, RequestHash: p.RequestHash, Source: preparedSource(spec), Engine: identity, Target: options.Target, Environment: environmentHash, Tools: tools}, nil
 }
 
-func hashJSON(value any) string {
-	body, _ := json.Marshal(value)
+func hashJSON(value any) (string, error) {
+	body, err := json.Marshal(value)
+	if err != nil {
+		return "", err
+	}
 	sum := sha256.Sum256(body)
-	return hex.EncodeToString(sum[:])
+	return hex.EncodeToString(sum[:]), nil
 }
 
 func preparedTools(ctx context.Context, environment []string, sdk engineid.SDKKind, directory string) (string, error) {
@@ -122,7 +129,7 @@ func preparedTools(ctx context.Context, environment []string, sdk engineid.SDKKi
 		}
 		hashes = append(hashes, string(body))
 	}
-	return hashJSON(hashes), nil
+	return hashJSON(hashes)
 }
 
 func fileDigest(ctx context.Context, name string) (string, error) {
@@ -227,7 +234,10 @@ func (p *Prepared) publish(ctx context.Context, spec Spec, options Options, entr
 		}
 	}
 	manifest.Inputs.Snapshot = hex.EncodeToString(snapshot.Sum(nil))
-	manifest.Key = hashJSON(manifest.Inputs)
+	manifest.Key, err = hashJSON(manifest.Inputs)
+	if err != nil {
+		return err
+	}
 	body, err := json.Marshal(manifest)
 	if err != nil {
 		return err
@@ -326,14 +336,18 @@ func (p *Prepared) restore(ctx context.Context, spec Spec, options Options) (ent
 		return nil, blob.ErrIntegrity
 	}
 	if err := extractPrepared(rootPath); err != nil {
-		return nil, fmt.Errorf("%w: prepared archive: %v", blob.ErrIntegrity, err)
+		return nil, fmt.Errorf("%w: prepared archive: %w", blob.ErrIntegrity, err)
 	}
 	body, err := os.ReadFile(filepath.Join(rootPath, "prepared.json"))
 	if err != nil {
 		return nil, errors.Join(blob.ErrIntegrity, err)
 	}
 	var manifest preparedManifest
-	if err := json.Unmarshal(body, &manifest); err != nil || manifest.Key != hashJSON(manifest.Inputs) || manifest.Inputs.Snapshot == "" {
+	if err := json.Unmarshal(body, &manifest); err != nil {
+		return nil, errors.Join(blob.ErrIntegrity, err)
+	}
+	manifestKey, err := hashJSON(manifest.Inputs)
+	if err != nil || manifest.Key != manifestKey || manifest.Inputs.Snapshot == "" {
 		return nil, blob.ErrIntegrity
 	}
 	comparable := preparedSource(spec)
@@ -356,7 +370,11 @@ func (p *Prepared) restore(ctx context.Context, spec Spec, options Options) (ent
 		return nil, err
 	}
 	inputs.Snapshot = manifest.Inputs.Snapshot
-	if hashJSON(inputs) != manifest.Key {
+	currentKey, err := hashJSON(inputs)
+	if err != nil {
+		return nil, err
+	}
+	if currentKey != manifest.Key {
 		return nil, nil
 	}
 	resolved, err := resolveEngine(ctx, spec, options, directory)

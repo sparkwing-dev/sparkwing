@@ -168,9 +168,11 @@ func productionHostingAt(home, version string, connection client.EngineOptions, 
 			if bindErr != nil {
 				return services, principal, bindErr
 			}
-			services.Config.Source.Prepared = &source.Prepared{Bytes: storage.Bytes, Records: storage.Records, Authority: storage.Authority,
+			services.Config.Source.Prepared = &source.Prepared{
+				Bytes: storage.Bytes, Records: storage.Records, Authority: storage.Authority,
 				Key:         blob.PreparedRecordKey(unit.Request.Request.Team, unit.RunID, storage.Authority.Repo, unit.Request.Request.Pipeline),
-				RequestHash: string(unit.Request.Hash), Publish: unit.Unit != capability.UnitNode}
+				RequestHash: string(unit.Request.Hash), Publish: unit.Unit != capability.UnitNode,
+			}
 		}
 		originalClose := services.Close
 		services.Close = func() error { return errors.Join(originalClose(), private.Close()) }
