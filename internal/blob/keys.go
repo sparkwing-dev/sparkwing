@@ -146,6 +146,12 @@ func ResolveWriteKey(a Authority, intent WriteScopeIntent) (RecordKey, error) {
 		}
 		return ResultRecordKey(i.Attempt.Value, a.Repo, a.Ref.Scope, intent.Pipeline, intent.Kind), nil
 	}
+	if intent.Kind == KindPrepared && (intent.Job != "" || intent.Key != i.RunID || intent.Name != "pipeline") {
+		return RecordKey{}, ErrDigestNotReadable
+	}
+	if intent.Kind == KindPrepared {
+		return PreparedRecordKey(i.Team, i.RunID, a.Repo, intent.Pipeline), nil
+	}
 	key := RecordKey{Team: i.Team, Kind: intent.Kind, Scope: Scope{Repo: a.Repo, Ref: a.Ref.Scope, Pipeline: intent.Pipeline, Job: intent.Job, Key: intent.Key}, Name: intent.Name}
 	if _, err := RecordNamespace(key); err != nil {
 		return RecordKey{}, err
@@ -156,4 +162,9 @@ func ResolveWriteKey(a Authority, intent WriteScopeIntent) (RecordKey, error) {
 // MaterializedRecordKey identifies a committed result without inventing an execution attempt.
 func MaterializedRecordKey(team, run, job string, seq int64, repo runspec.RepoKey, ref RefScope, pipeline string, kind Kind) RecordKey {
 	return RecordKey{Team: team, Kind: kind, Scope: Scope{Repo: repo, Ref: ref, Pipeline: pipeline, Job: job, Key: fmt.Sprintf("%s/result/%d", run, seq)}, Name: "result"}
+}
+
+// PreparedRecordKey identifies the pipeline executable sealed for one run.
+func PreparedRecordKey(team, run string, repo runspec.RepoKey, pipeline string) RecordKey {
+	return RecordKey{Team: team, Kind: KindPrepared, Scope: Scope{Repo: repo, Pipeline: pipeline, Key: run}, Name: "pipeline"}
 }

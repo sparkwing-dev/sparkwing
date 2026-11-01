@@ -130,7 +130,7 @@ func (r *blobRecords) commitRecord(ctx context.Context, request blob.CommitRecor
 		if err != nil {
 			return blob.Record{}, err
 		}
-		if !reflect.DeepEqual(request.Source, a.source) || !blobKindAllowed(a.source, request.Key.Kind) {
+		if !reflect.DeepEqual(request.Source, a.source) || !blobKindAllowed(a, request.Key.Kind) {
 			return blob.Record{}, authorityError(apierr.Forbidden, "record is outside the uploader's authority")
 		}
 		if request.Key.Kind == blob.KindManifest && request.ManifestDigest.Set && request.ManifestDigest.Value != request.Digest {
@@ -184,6 +184,9 @@ func (r *blobRecords) commitRecord(ctx context.Context, request blob.CommitRecor
 			}
 		}
 		record := blob.Record{Key: request.Key, Digest: request.Digest, ManifestDigest: request.ManifestDigest, Source: a.source, Uploader: a.authority.Principal, Provenance: blobActorProvenance(a), RefFacts: a.authority.Ref, CreatedAt: tx.now(ctx), ExpiresAt: request.ExpiresAt}
+		if request.Key.Kind == blob.KindPrepared {
+			record.RefFacts = a.preparedFacts
+		}
 		batch, err := r.mutateRecordsTx(ctx, tx, a, []blobRecordMutation{{record: record, scope: scope, members: members}}, false, nil)
 		if err != nil {
 			return blob.Record{}, err
@@ -193,8 +196,15 @@ func (r *blobRecords) commitRecord(ctx context.Context, request blob.CommitRecor
 }
 
 func checkBlobWriteKey(a blobActor, key blob.RecordKey) error {
-	if key.Team != a.capability.Team || key.Scope.Repo != a.authority.Repo || key.Scope.Ref != a.authority.Ref.Scope || (key.Kind != blob.KindDepcache && key.Scope.Pipeline != a.pipeline) || key.Name == "" || !slices.Contains(blob.Kinds, key.Kind) {
+	ref := a.authority.Ref.Scope
+	if key.Kind == blob.KindPrepared {
+		ref = blob.RefScope{}
+	}
+	if key.Team != a.capability.Team || key.Scope.Repo != a.authority.Repo || key.Scope.Ref != ref || (key.Kind != blob.KindDepcache && key.Scope.Pipeline != a.pipeline) || key.Name == "" || !slices.Contains(blob.Kinds, key.Kind) {
 		return authorityError(apierr.Forbidden, "record key differs from sealed scope")
+	}
+	if key.Kind == blob.KindPrepared && (!blobKindAllowed(a, key.Kind) || key.Scope.Job != "" || key.Scope.Key != a.source.RunID || key.Name != "pipeline") {
+		return blob.ErrDigestNotReadable
 	}
 	if blobIsCache(key.Kind) && !blobCacheRepositoryAllowed(a, key.Kind) {
 		return authorityError(apierr.Forbidden, "shared caches require a remote repository")
@@ -219,7 +229,7 @@ func checkBlobWriteKey(a blobActor, key blob.RecordKey) error {
 			return authorityError(apierr.Forbidden, "result key differs from attempt fence")
 		}
 	}
-	if a.capability.Data.WriteRef != key.Scope.Ref.CapabilityScope() {
+	if key.Kind != blob.KindPrepared && a.capability.Data.WriteRef != key.Scope.Ref.CapabilityScope() {
 		return authorityError(apierr.Forbidden, "record ref is outside the data grant")
 	}
 	return nil
@@ -244,6 +254,9 @@ func persistBlobRecordTx(ctx context.Context, tx *storeTx, record blob.Record, s
 	if record.Source.Attempt.Set {
 		a := record.Source.Attempt.Value
 		sourceNode, sourceAttempt, sourceGeneration = a.NodeID, a.Attempt, a.Generation
+	}
+	if record.Key.Kind == blob.KindPrepared {
+		run = record.Source.RunID
 	}
 	if record.Key.Kind == blob.KindMemo {
 		// A pending memo belongs to its producer until successful settlement.

@@ -65,12 +65,14 @@ func validBlobDigest(digest blob.Digest) bool {
 }
 
 type blobActor struct {
-	owner      *runstate.Actor
-	authority  blob.Authority
-	source     blob.UploadIdentity
-	capability capability.Capability
-	pipeline   string
-	mode       string
+	// safety: Prepared artifacts cross worker host partitions only within their sealed run.
+	preparedFacts blob.RefFacts
+	owner         *runstate.Actor
+	authority     blob.Authority
+	source        blob.UploadIdentity
+	capability    capability.Capability
+	pipeline      string
+	mode          string
 }
 
 func resolveBlobAuthorityTx(ctx context.Context, tx *storeTx, team Team, input blob.Authority, grant capability.Grant) (blobActor, error) {
@@ -113,11 +115,12 @@ func resolveBlobAuthorityTx(ctx context.Context, tx *storeTx, team Team, input b
 	if err := json.Unmarshal(request, &sealed); err != nil {
 		return a, err
 	}
-	facts, err := runRefFacts(sealed, grantHost(c.Data.WriteRef))
+	facts, err := provenanceRefFacts(sealed)
 	if err != nil {
 		return a, err
 	}
-	a.authority.Ref = facts
+	a.preparedFacts = facts
+	a.authority.Ref = hostRefFacts(facts, grantHost(c.Data.WriteRef))
 	a.source = blob.UploadIdentity{Team: string(team), RunID: c.Binding.RunID, Principal: a.authority.Principal, CapabilityRef: c.Prefix}
 	if grant == capability.SourceRead {
 		if c.Data.Use != capability.DataClaim && !(c.Data.Use == capability.DataExpansion && c.Unit == capability.UnitEval) || !sealed.Request.Source.BundleDigest.Set || sealed.Request.Source.BundleDigest.Value == "" {
@@ -261,7 +264,15 @@ func readOwnBlobReceiptTx(ctx context.Context, tx *storeTx, source blob.UploadId
 	return runspec.Optional[blob.Receipt]{Set: true, Value: blob.Receipt{Identity: source, Digest: digest, CreatedAt: *stateTime(sql.NullInt64{Int64: at, Valid: true})}}, nil
 }
 
-func blobKindAllowed(source blob.UploadIdentity, kind blob.Kind) bool {
+func blobKindAllowed(a blobActor, kind blob.Kind) bool {
+	source := a.source
+	if kind == blob.KindPrepared {
+		// safety: Cloud jobs execute these bytes with run secrets without rebuilding.
+		if a.capability.Billing == nil || a.capability.Billing.ExecutorClass != TierCloud {
+			return false
+		}
+		return source.Kind == blob.UploadOwnerUnit && source.Unit.Set && (source.Unit.Value.Kind == blob.UploadPlanUnit || source.Unit.Value.Kind == blob.UploadTriggerUnit)
+	}
 	for _, rule := range blob.UploadRules {
 		if rule.IdentityKind == source.Kind && rule.RequiresAttempt == source.Attempt.Set && rule.RequiresUnit == source.Unit.Set && slices.Contains(rule.RecordKinds, kind) {
 			return true

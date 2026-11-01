@@ -43,12 +43,12 @@ func awardMutations() map[string]func(*corev1.Pod) {
 			p.Spec.Containers[0].Resources.Limits[corev1.ResourceEphemeralStorage] = resource.MustParse("1Gi")
 		},
 		"container_cpu": func(p *corev1.Pod) {
-			p.Spec.InitContainers[1].Resources.Limits = corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("100m")}
+			p.Spec.Containers[0].Resources.Limits = corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("100m")}
 		},
 		"team_label":     func(p *corev1.Pod) { p.Labels[TeamLabel] = admission.TeamNodeHash("other-team") },
 		"team_selector":  func(p *corev1.Pod) { p.Spec.NodeSelector[TeamNodeLabel] = admission.TeamNodeHash("other-team") },
 		"node":           func(p *corev1.Pod) { p.Spec.NodeName = "other-node" },
-		"container_name": func(p *corev1.Pod) { p.Spec.InitContainers[1].Name = "renamed" },
+		"container_name": func(p *corev1.Pod) { p.Spec.Containers[0].Name = "renamed" },
 	}
 }
 
@@ -177,8 +177,8 @@ func TestSyncRejectsJobTemplateOffItsBinding(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	job.Spec.Template.Spec.Containers[0].Image = "registry/other@sha256:" + strings.Repeat("c", 64)
-	p.Spec.Containers[0].Image = job.Spec.Template.Spec.Containers[0].Image
+	job.Spec.Template.Spec.Containers[0].Resources.Limits = corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("100m")}
+	p.Spec.Containers[0].Resources = job.Spec.Template.Spec.Containers[0].Resources
 	if _, err = l.Kube.BatchV1().Jobs("cloud").Update(t.Context(), job, metav1.UpdateOptions{}); err != nil {
 		t.Fatal(err)
 	}

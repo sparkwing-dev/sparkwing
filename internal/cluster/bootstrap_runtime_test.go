@@ -6,7 +6,6 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
-	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -14,7 +13,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/controller/client"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/runners/launcher"
-	"github.com/sparkwing-dev/sparkwing/internal/source"
 )
 
 func bootstrapPlanFile(t testing.TB) (BootstrapOptions, launcher.CloudJobAward) {
@@ -31,11 +29,11 @@ func bootstrapPlanFile(t testing.TB) (BootstrapOptions, launcher.CloudJobAward) 
 			t.Fatal(err)
 		}
 	}
-	return BootstrapOptions{ControllerURL: "https://controller.example", RunID: "run", Generation: 7, BootstrapFile: filepath.Join(directory, "bootstrap"), SourceDir: filepath.Join(directory, "source"), ModuleCache: filepath.Join(directory, "modules")}, award
+	return BootstrapOptions{ControllerURL: "https://controller.example", RunID: "run", Generation: 7, BootstrapFile: filepath.Join(directory, "bootstrap"), ModuleCache: filepath.Join(directory, "modules")}, award
 }
 
 func bootstrapArguments(options BootstrapOptions) []string {
-	args := []string{"--controller=" + options.ControllerURL, "--run=" + options.RunID, "--generation=7", "--bootstrap-file=" + options.BootstrapFile, "--source-dir=" + options.SourceDir, "--module-cache=" + options.ModuleCache}
+	args := []string{"--controller=" + options.ControllerURL, "--run=" + options.RunID, "--generation=7", "--bootstrap-file=" + options.BootstrapFile, "--module-cache=" + options.ModuleCache}
 	if options.JobID != "" {
 		args = append(args, "--job="+options.JobID)
 	}
@@ -111,45 +109,12 @@ func TestBootstrapRuntimeJoinsPartialHostBinding(t *testing.T) {
 	}
 }
 
-func TestBootstrapRuntimeFetchBindsParsedControllerWithoutExchange(t *testing.T) {
-	options, award := bootstrapPlanFile(t)
-	award.Source = source.Spec{RepoKey: "git:github.com/team/repo", RemoteURL: "https://github.com/team/repo", SHA: strings.Repeat("a", 40)}
-	body, err := json.Marshal(award)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(filepath.Dir(options.BootstrapFile), "award.json"), body, 0o600); err != nil {
-		t.Fatal(err)
-	}
-	failure := errors.New("source-access boundary")
-	runtime := BootstrapRuntime{
-		Source: func(_ context.Context, got BootstrapOptions) (launcher.SourceInit, error) {
-			if got != options {
-				t.Fatal("source binding lost parsed paths or controller")
-			}
-			return launcher.SourceInit{Bind: func(_ context.Context, got launcher.CloudJobAward) (source.Options, func() error, error) {
-				if string(got.Bootstrap) != string(award.Bootstrap) || !reflect.DeepEqual(got.Source, award.Source) {
-					t.Fatal("source binding lost the private award")
-				}
-				return source.Options{}, nil, failure
-			}}, nil
-		},
-		Host: func(context.Context, BootstrapOptions) (launcher.BootstrapHost, func() error, error) {
-			t.Fatal("fetch-source constructed an exchange host")
-			return launcher.BootstrapHost{}, nil, nil
-		},
-	}
-	if err := runtime.Run(t.Context(), "fetch-source", bootstrapArguments(options)); !errors.Is(err, failure) {
-		t.Fatal(err)
-	}
-}
-
 func TestBootstrapFileCancellationPrecedesAcquisition(t *testing.T) {
 	ctx, cancel := context.WithCancelCause(t.Context())
 	failure := errors.New("host stopped")
 	cancel(failure)
 	directory := t.TempDir()
-	options := BootstrapOptions{ControllerURL: "https://controller.example", RunID: "run", Generation: 7, BootstrapFile: filepath.Join(directory, "absent"), SourceDir: filepath.Join(directory, "source"), ModuleCache: filepath.Join(directory, "modules")}
+	options := BootstrapOptions{ControllerURL: "https://controller.example", RunID: "run", Generation: 7, BootstrapFile: filepath.Join(directory, "absent"), ModuleCache: filepath.Join(directory, "modules")}
 	if err := (BootstrapRuntime{}).Run(ctx, "run-node", bootstrapArguments(options)); !errors.Is(err, failure) {
 		t.Fatal("cancelled host attempted private file acquisition")
 	}

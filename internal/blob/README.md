@@ -396,3 +396,14 @@ The implemented byte and record types live in `types.go`, tagged log subjects
 in `logs.go`, and the physical backend interface in `objects.go`. Their former
 contract files and forwarding declarations are removed. `internal/storage` has no
 legacy state-store interface. Native hosts use their existing tenant boundaries.
+
+## Prepared runs
+
+`prepared` records are immutable run-owned source and installation snapshots.
+`PreparedRecordKey` names the team, repository, pipeline and run independently of
+shared-cache ref/host partitions. The store assigns canonical sealed provenance;
+only a planning owner can publish, and only planning owners or awarded nodes of
+that same run can read. Bootstrap, delegated and remote-cache readers are refused.
+The prepared edge grants no access across runs, including retries in a new run.
+The record follows run retention. Bytes use the ordinary authenticated, verified
+upload/download path; a consumer must consume verified EOF before extraction.

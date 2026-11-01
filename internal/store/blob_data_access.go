@@ -82,7 +82,7 @@ func checkBlobSelectionTx(ctx context.Context, tx *storeTx, team Team, input blo
 	if target.RecordName == "" || !slices.Contains(blob.Kinds, kind) {
 		return authorityError(apierr.BadRequest, "logical lookup requires a record kind and name")
 	}
-	if a.capability.Data.Use == capability.DataRemoteCache && (kind == blob.KindBinary || kind == blob.KindSourceBundle) {
+	if a.capability.Data.Use == capability.DataRemoteCache && (kind == blob.KindBinary || kind == blob.KindSourceBundle || kind == blob.KindPrepared) {
 		return blob.ErrDigestNotReadable
 	}
 	return nil
@@ -94,10 +94,14 @@ func checkBlobDataWriteTx(ctx context.Context, tx *storeTx, team Team, input blo
 		return err
 	}
 	source := resolved.source
-	if (target.RunID != "" && target.RunID != source.RunID) || (target.NodeID != "" && (!source.Attempt.Set || target.NodeID != source.Attempt.Value.NodeID)) || (target.Attempt != 0 && (!source.Attempt.Set || target.Attempt != source.Attempt.Value.Attempt)) || (target.Generation != 0 && (!source.Attempt.Set || target.Generation != source.Attempt.Value.Generation)) {
+	generation := source.Attempt.Value.Generation
+	if source.Unit.Set {
+		generation = source.Unit.Value.Generation
+	}
+	if (target.RunID != "" && target.RunID != source.RunID) || (target.NodeID != "" && (!source.Attempt.Set || target.NodeID != source.Attempt.Value.NodeID)) || (target.Attempt != 0 && (!source.Attempt.Set || target.Attempt != source.Attempt.Value.Attempt)) || (target.Generation != 0 && target.Generation != generation) {
 		return blob.ErrDigestNotReadable
 	}
-	if target.RecordKind != "" && !blobKindAllowed(source, blob.Kind(target.RecordKind)) {
+	if target.RecordKind != "" && !blobKindAllowed(resolved, blob.Kind(target.RecordKind)) {
 		return blob.ErrDigestNotReadable
 	}
 	if target.Operation == capability.DataRecord && target.Digest == "" && target.RecordKind == string(blob.KindMemo) && target.RecordName != "" {

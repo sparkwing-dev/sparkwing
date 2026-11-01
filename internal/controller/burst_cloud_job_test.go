@@ -88,8 +88,8 @@ func configureBurstCloudJob(t *testing.T, proof *controller.BurstExecutionProof)
 			t.Fatalf("published Cloud Jobs: %+v %v", jobs, err)
 		}
 		job := jobs.Items[0]
-		if job.Spec.Suspend == nil || *job.Spec.Suspend || job.Spec.Template.Spec.ServiceAccountName != launcher.ServiceAccount || len(job.Spec.Template.Spec.InitContainers) != 2 || job.Spec.Template.Spec.InitContainers[1].Args[0] != "fetch-source" || job.Spec.Template.Spec.Containers[0].Args[0] != "run-node" {
-			t.Fatal("burst did not publish the source-init and execution Job")
+		if job.Spec.Suspend == nil || *job.Spec.Suspend || job.Spec.Template.Spec.ServiceAccountName != launcher.ServiceAccount || len(job.Spec.Template.Spec.InitContainers) != 1 || job.Spec.Template.Spec.InitContainers[0].Name != "docker" || job.Spec.Template.Spec.Containers[0].Args[0] != "run-node" {
+			t.Fatal("burst did not publish the Docker sidecar and execution Job")
 		}
 		secret, err := kube.CoreV1().Secrets("cloud").Get(t.Context(), job.Name, metav1.GetOptions{})
 		if err != nil {
@@ -120,17 +120,6 @@ func configureBurstCloudJob(t *testing.T, proof *controller.BurstExecutionProof)
 		return *observed.awarded
 	}
 	proof.ExchangeCloud = func(options client.EngineOptions, bootstrap controllerwire.ClaimedUnit) controllerwire.ClaimedUnit {
-		destination := filepath.Join(t.TempDir(), "cloud-source")
-		init := launcher.SourceInit{Bind: func(ctx context.Context, award launcher.CloudJobAward) (source.Options, func() error, error) {
-			access, err := client.NewSourceAccess(options, string(award.Binding.RunID), award.Source)
-			return source.Options{Access: access, BundleTransport: options.HTTP.Transport, BuildEnvironment: sourcetest.BuildEnvironment}, nil, err
-		}}
-		if err := init.Run(t.Context(), published, destination); err != nil {
-			t.Fatalf("burst Cloud source init: %v", err)
-		}
-		if sha := sourcetest.Git(t, destination, "rev-parse", "HEAD"); sha != published.Source.SHA {
-			t.Fatalf("Cloud initialized %s, want submitted %s", sha, published.Source.SHA)
-		}
 		var unit controllerwire.ClaimedUnit
 		host := launcher.BootstrapHost{ControllerURL: options.URL, HTTP: options.HTTP, Host: burstCloudHost(func(_ context.Context, award controllerwire.ClaimedUnit) error { unit = award; return nil })}
 		if err := host.Run(t.Context(), published); err != nil {
@@ -138,6 +127,23 @@ func configureBurstCloudJob(t *testing.T, proof *controller.BurstExecutionProof)
 		}
 		if unit.Capability == "" || unit.Capability == bootstrap.Capability || !reflect.DeepEqual(unit.Binding, bootstrap.Binding) {
 			t.Fatal("Cloud exchange changed the claim fence or retained bootstrap authority")
+		}
+		options.Bearer = func(context.Context) (string, error) { return unit.Capability, nil }
+		access, err := client.NewSourceAccess(options, unit.RunID, published.Source)
+		if err != nil {
+			t.Fatal(err)
+		}
+		checkout, err := source.PrepareCheckout(t.Context(), published.Source, source.Options{Access: access, Workspace: t.TempDir(), BundleTransport: options.HTTP.Transport, BuildEnvironment: sourcetest.BuildEnvironment})
+		if err != nil {
+			t.Fatalf("burst Cloud source acquisition: %v", err)
+		}
+		t.Cleanup(func() {
+			if err := checkout.Close(); err != nil {
+				t.Error(err)
+			}
+		})
+		if sha := sourcetest.Git(t, checkout.CheckoutDirectory(), "rev-parse", "HEAD"); sha != published.Source.SHA {
+			t.Fatalf("Cloud acquired %s, want submitted %s", sha, published.Source.SHA)
 		}
 		return unit
 	}

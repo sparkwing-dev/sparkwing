@@ -119,7 +119,7 @@ func TestCloudBootstrapGrammarW8Components(t *testing.T) {
 			}
 			pod := resources.Job.Spec.Template.Spec
 			bootstrapFile := writeBootstrapW8(t, resources.BootstrapSecret.Data)
-			for _, built := range [][]string{pod.InitContainers[1].Args, pod.Containers[0].Args} {
+			for _, built := range [][]string{pod.Containers[0].Args} {
 				args := append([]string(nil), built...)
 				for i := range args {
 					if args[i] == "--bootstrap-file" {
@@ -130,15 +130,11 @@ func TestCloudBootstrapGrammarW8Components(t *testing.T) {
 				boundary := errors.New("service boundary")
 				check := func(options cluster.BootstrapOptions) {
 					called = true
-					if options.RunID != string(award.Binding.RunID) || options.JobID != string(award.Binding.NodeID) || options.Generation != int64(award.Binding.Generation) || options.ControllerURL != cfg.ControllerURL || options.SourceDir != "/tmp/source" || options.ModuleCache != "/tmp/modules" || options.BootstrapFile != bootstrapFile {
+					if options.RunID != string(award.Binding.RunID) || options.JobID != string(award.Binding.NodeID) || options.Generation != int64(award.Binding.Generation) || options.ControllerURL != cfg.ControllerURL || options.ModuleCache != "/tmp/modules" || options.BootstrapFile != bootstrapFile {
 						t.Fatal("bootstrap entrypoint changed the awarded selectors or private paths")
 					}
 				}
 				runtime := cluster.BootstrapRuntime{
-					Source: func(_ context.Context, options cluster.BootstrapOptions) (launcher.SourceInit, error) {
-						check(options)
-						return launcher.SourceInit{}, boundary
-					},
 					Host: func(_ context.Context, options cluster.BootstrapOptions) (launcher.BootstrapHost, func() error, error) {
 						check(options)
 						return launcher.BootstrapHost{}, nil, boundary

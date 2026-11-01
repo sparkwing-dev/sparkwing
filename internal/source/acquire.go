@@ -30,6 +30,12 @@ func Acquire(ctx context.Context, spec Spec, options Options) (entry *Entry, err
 	if _, err := options.Target.Name(); err != nil {
 		return nil, err
 	}
+	if options.Prepared != nil {
+		restored, err := options.Prepared.restore(ctx, spec, options)
+		if restored != nil || err != nil {
+			return restored, err
+		}
+	}
 	entry, err = PrepareCheckout(ctx, spec, options)
 	if err != nil {
 		return nil, errors.Join(err, context.Cause(ctx))
@@ -94,6 +100,11 @@ func Acquire(ctx context.Context, spec Spec, options Options) (entry *Entry, err
 		}
 	}
 	entry.Command = append([]string{}, command.Command...)
+	if options.Prepared != nil && options.Prepared.Publish {
+		if err := options.Prepared.publish(ctx, spec, options, entry); err != nil {
+			return entry, fmt.Errorf("publish prepared pipeline: %w", err)
+		}
+	}
 	return entry, nil
 }
 

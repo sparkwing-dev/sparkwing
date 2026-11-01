@@ -10,7 +10,7 @@ import (
 
 func TestBootstrapCommandsPassImmutableAwardAndPrivatePaths(t *testing.T) {
 	options, _ := bootstrapPlanFile(t)
-	for _, command := range []string{"run-node", "fetch-source"} {
+	for _, command := range []string{"run-node"} {
 		t.Run(command, func(t *testing.T) {
 			boundary := errors.New("service boundary")
 			check := func(ctx context.Context, got BootstrapOptions) {
@@ -19,10 +19,6 @@ func TestBootstrapCommandsPassImmutableAwardAndPrivatePaths(t *testing.T) {
 				}
 			}
 			runtime := BootstrapRuntime{
-				Source: func(ctx context.Context, got BootstrapOptions) (launcher.SourceInit, error) {
-					check(ctx, got)
-					return launcher.SourceInit{}, boundary
-				},
 				Host: func(ctx context.Context, got BootstrapOptions) (launcher.BootstrapHost, func() error, error) {
 					check(ctx, got)
 					return launcher.BootstrapHost{}, nil, boundary
@@ -38,7 +34,7 @@ func TestBootstrapCommandsPassImmutableAwardAndPrivatePaths(t *testing.T) {
 func TestBootstrapCommandsRefuseUnfencedOrEnvironmentAuthority(t *testing.T) {
 	t.Setenv("SPARKWING_CONTROLLER_URL", "https://old.example")
 	t.Setenv("SPARKWING_AGENT_TOKEN", "old-token")
-	for _, command := range []string{"run-node", "fetch-source"} {
+	for _, command := range []string{"run-node"} {
 		for _, args := range [][]string{nil, {"run", "job"}, {"--token=secret"}, {"--node=job"}, {"--claim-generation=7"}} {
 			if err := (BootstrapRuntime{}).Run(t.Context(), command, args); err == nil {
 				t.Errorf("%s accepted %v", command, args)

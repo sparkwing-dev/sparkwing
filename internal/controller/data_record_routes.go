@@ -27,6 +27,9 @@ func (s *Server) handleDataRecordCommit(w http.ResponseWriter, r *http.Request, 
 	}
 	authority := binding.Authority
 	key := blob.RecordKey{Team: a.Target.Team, Kind: request.Kind, Scope: blob.Scope{Repo: authority.Repo, Ref: authority.Ref.Scope, Pipeline: request.Pipeline, Job: request.Job, Key: request.Key}, Name: request.Name}
+	if key.Kind == blob.KindPrepared {
+		key.Scope.Ref = blob.RefScope{}
+	}
 	commit := blob.CommitRecordRequest{Authority: authority, Source: authority.Upload.Value, Key: key, Digest: request.Digest}
 	if request.ManifestDigest != nil {
 		commit.ManifestDigest = runspec.Optional[blob.Digest]{Set: true, Value: *request.ManifestDigest}

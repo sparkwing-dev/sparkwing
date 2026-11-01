@@ -233,3 +233,16 @@ Sources for changed files:
    between a base ref and HEAD (a git diff; see
    [sdk-reference.md](sdk-reference.md))
 2. An explicit `--all`-style input on your pipeline to deploy everything
+
+### Same-run preparation
+
+Cloud planning publishes its source snapshot and installed pipeline through the
+controller's existing data store. Jobs of the same run verify and restore it;
+missing artifacts or different build inputs use fresh preparation. Corrupt
+artifacts fail before execution. Prepared records follow run retention and never
+provide cross-run or cross-team access.
+
+Update the controller, launcher, runner image and generated admission policies
+together. Job Pods contain the Docker sidecar and `run-node`; remove custom
+`fetch-source` init containers and `--source-dir` flags. Existing data storage and
+credentials suffice; there is no prepared-cache setting.

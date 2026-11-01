@@ -123,11 +123,11 @@ func TestLauncherCloudPodContract(t *testing.T) {
 			if pod.NodeName != "node" || pod.ServiceAccountName != launcher.ServiceAccount || pod.AutomountServiceAccountToken == nil || *pod.AutomountServiceAccountToken || pod.HostNetwork || pod.HostPID || pod.HostIPC {
 				t.Fatal("Cloud Job lost its placement or host boundary")
 			}
-			if len(pod.InitContainers) != 2 || pod.InitContainers[0].Name != "docker" || pod.InitContainers[0].RestartPolicy == nil || *pod.InitContainers[0].RestartPolicy != corev1.ContainerRestartPolicyAlways || pod.InitContainers[0].SecurityContext.Privileged != nil {
+			if len(pod.InitContainers) != 1 || pod.InitContainers[0].Name != "docker" || pod.InitContainers[0].RestartPolicy == nil || *pod.InitContainers[0].RestartPolicy != corev1.ContainerRestartPolicyAlways || pod.InitContainers[0].SecurityContext.Privileged != nil {
 				t.Fatal("Docker is not an unprivileged native sidecar")
 			}
-			if pod.InitContainers[1].Name != "fetch-source" || len(pod.Containers) != 1 {
-				t.Fatal("source must finish before the host")
+			if len(pod.Containers) != 1 || pod.Containers[0].Name != "run-node" {
+				t.Fatal("Cloud Job must run one host")
 			}
 			var scratch int64
 			for _, volume := range pod.Volumes {
@@ -173,7 +173,7 @@ func TestLauncherCloudPodContract(t *testing.T) {
 				t.Fatalf("deadline = %v", resources.JobDeadline)
 			}
 			args := strings.Join(pod.Containers[0].Args, " ")
-			for _, flag := range []string{"--controller", "--run", "--generation", "--source-dir", "--module-cache", "--bootstrap-file"} {
+			for _, flag := range []string{"--controller", "--run", "--generation", "--module-cache", "--bootstrap-file"} {
 				if !strings.Contains(args, flag) {
 					t.Fatalf("missing %s", flag)
 				}

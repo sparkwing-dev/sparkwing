@@ -11,6 +11,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controller/client"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
@@ -45,7 +46,7 @@ func productionRuntime(version string) clusterRuntime {
 				return runners.RuntimeConfig{}, err
 			}
 
-			hosting := &productionHost{UnitHost: productionHostingAt(home, version, client.EngineOptions{URL: *options.Config.Controller}, "", "", options.Config.LocalAdmission != nil && *options.Config.LocalAdmission, options.SubmitAccept, options.actions)}
+			hosting := &productionHost{UnitHost: productionHostingAt(home, version, client.EngineOptions{URL: *options.Config.Controller}, "", options.Config.LocalAdmission != nil && *options.Config.LocalAdmission, options.SubmitAccept, options.actions)}
 			installation, err := productionInstallation(options.ConfigPath, hosting)
 			if err != nil {
 				return runners.RuntimeConfig{}, err
@@ -61,17 +62,7 @@ func productionRuntime(version string) clusterRuntime {
 			}, nil
 		}},
 		Bootstrap: BootstrapRuntime{
-			Source: func(_ context.Context, options BootstrapOptions) (launcher.SourceInit, error) {
-				return launcher.SourceInit{Bind: func(_ context.Context, award launcher.CloudJobAward) (source.Options, func() error, error) {
-					access, err := client.NewSourceAccess(client.EngineOptions{URL: options.ControllerURL, Bearer: fixedBearer(string(award.Bootstrap))}, string(award.Binding.RunID), award.Source)
-					return source.Options{Access: access, Base: procenv.Base{Ambient: os.Environ(), Masker: secrets.NewMasker()}}, nil, err
-				}}, nil
-			},
 			Host: func(ctx context.Context, options BootstrapOptions) (launcher.BootstrapHost, func() error, error) {
-				// safety: source checkout tightens the shared /tmp volume; apt needs it writable by unprivileged users.
-				if err := os.Chmod(filepath.Dir(options.SourceDir), os.ModeSticky|0o777); err != nil {
-					return launcher.BootstrapHost{}, nil, err
-				}
 				if err := waitForDocker(ctx, os.Getenv("DOCKER_HOST"), dockerStartup); err != nil {
 					return launcher.BootstrapHost{}, nil, err
 				}
@@ -79,7 +70,7 @@ func productionRuntime(version string) clusterRuntime {
 				if err != nil {
 					return launcher.BootstrapHost{}, nil, err
 				}
-				return launcher.BootstrapHost{Host: productionHostingAt(home, version, client.EngineOptions{URL: options.ControllerURL}, options.SourceDir, options.ModuleCache, false, procenv.SubmitAcceptAll(), nil)}, nil, nil
+				return launcher.BootstrapHost{Host: productionHostingAt(home, version, client.EngineOptions{URL: options.ControllerURL}, options.ModuleCache, false, procenv.SubmitAcceptAll(), nil)}, nil, nil
 			},
 		},
 	}
@@ -90,7 +81,7 @@ func fixedBearer(raw string) func(context.Context) (string, error) {
 }
 
 // safety: a Cloud Job serves one claim and is then discarded, and a requester's own machine is its operator, so both accept every submittable name.
-func productionHostingAt(home, version string, connection client.EngineOptions, checkout, modules string, admission bool, accept procenv.SubmitAccept, actions *githubActionsSource) runners.Hosting {
+func productionHostingAt(home, version string, connection client.EngineOptions, modules string, admission bool, accept procenv.SubmitAccept, actions *githubActionsSource) runners.Hosting {
 	return runners.Hosting{ControllerURL: connection.URL, HTTP: connection.HTTP, Bind: func(ctx context.Context, unit controllerwire.ClaimedUnit, controller controllerwire.Controller) (services nodehost.NativeServices, principal capability.Principal, err error) {
 		options := connection
 		options.Bearer, options.Launcher = fixedBearer(unit.Capability), false
@@ -161,7 +152,7 @@ func productionHostingAt(home, version string, connection client.EngineOptions, 
 			Admission:    nodehost.ComposeStartGate(state, machineAdmission, false),
 			SubmittedEnv: unit.SubmittedEnv, SubmitAccept: submitted,
 			Home: home, Store: state, Parent: private, Bindings: private, Principal: principal, Refresh: refresh, Local: store.OwnerCanExecute(principal),
-			Source: source.Options{PreparedCheckout: checkout, Engines: engines, Access: access, SDK: engineid.GoSDK, Workspace: filepath.Join(home, "workspaces"), Target: releaseasset.Target{Binary: releaseasset.Sparkwing, GOOS: runtime.GOOS, GOARCH: runtime.GOARCH}, GitAccess: ownerGitAccess(unit.OwnerMachine), Base: runnerInstallBase(unit.OwnerMachine, checkout, modules)},
+			Source: source.Options{Engines: engines, Access: access, SDK: engineid.GoSDK, Workspace: filepath.Join(home, "workspaces"), Target: releaseasset.Target{Binary: releaseasset.Sparkwing, GOOS: runtime.GOOS, GOARCH: runtime.GOARCH}, GitAccess: ownerGitAccess(unit.OwnerMachine), Base: runnerInstallBase(unit.OwnerMachine, modules)},
 			Renew: func(ctx context.Context, _ string, computing bool) (runstate.LeaseBeat, error) {
 				return state.RenewOwner(ctx, runstate.Actor{}, computing)
 			},
@@ -172,9 +163,20 @@ func productionHostingAt(home, version string, connection client.EngineOptions, 
 
 		processes = services.Config.Processes
 		closeResources = func() error { return errors.Join(services.Close(), private.Close()) }
+		if modules != "" && (unit.Unit == capability.UnitPlan || unit.Unit == capability.UnitTrigger || unit.Unit == capability.UnitNode) {
+			storage, bindErr := private.BindStorage(ctx, principal)
+			if bindErr != nil {
+				return services, principal, bindErr
+			}
+			services.Config.Source.Prepared = &source.Prepared{
+				Bytes: storage.Bytes, Records: storage.Records, Authority: storage.Authority,
+				Key:         blob.PreparedRecordKey(unit.Request.Request.Team, unit.RunID, storage.Authority.Repo, unit.Request.Request.Pipeline),
+				RequestHash: string(unit.Request.Hash), Publish: unit.Unit != capability.UnitNode,
+			}
+		}
 		originalClose := services.Close
 		services.Close = func() error { return errors.Join(originalClose(), private.Close()) }
-		if checkout != "" {
+		if modules != "" {
 			docker, e := dockerClient(os.Getenv("DOCKER_HOST"))
 			if e != nil {
 				return services, principal, e
@@ -209,9 +211,9 @@ func ownerGitAccess(owner bool) source.GitAccess {
 }
 
 // perf: compiles keep the runner's GOCACHE and GOMODCACHE, as a local run does, so the cache volume stays warm.
-func runnerInstallBase(owner bool, checkout, modules string) procenv.Base {
+func runnerInstallBase(owner bool, modules string) procenv.Base {
 	allow := []string{"GOCACHE", "GOMODCACHE"}
-	if checkout != "" {
+	if modules != "" {
 		allow = append(allow, "DOCKER_HOST")
 	}
 	return procenv.Base{OwnerMachine: owner, Ambient: runnerToolEnvironment(modules), SubmitEnvAllow: allow, Masker: secrets.NewMasker()}

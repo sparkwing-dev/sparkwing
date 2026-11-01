@@ -8,6 +8,7 @@ import (
 	"io"
 	"io/fs"
 	"os"
+	"path"
 	"path/filepath"
 )
 
@@ -25,19 +26,27 @@ func WriteGzip(ctx context.Context, dst io.Writer, dir string) (err error) {
 func WriteGzipRoot(ctx context.Context, dst io.Writer, root *os.Root) (err error) {
 	gzipWriter := gzip.NewWriter(dst)
 	tarWriter := tar.NewWriter(gzipWriter)
-	err = fs.WalkDir(root.FS(), ".", func(name string, entry fs.DirEntry, walkErr error) error {
+	err = WriteTarRoot(ctx, tarWriter, root, "")
+	return errors.Join(err, tarWriter.Close(), gzipWriter.Close())
+}
+
+// WriteTarRoot captures an opened directory below prefix without following escaping symlinks.
+func WriteTarRoot(ctx context.Context, dst *tar.Writer, root *os.Root, prefix string) error {
+	if prefix != "" && (!filepath.IsLocal(prefix) || filepath.ToSlash(prefix) != prefix) {
+		return errors.New("archive prefix must be local")
+	}
+	return fs.WalkDir(root.FS(), ".", func(name string, entry fs.DirEntry, walkErr error) error {
 		if err := context.Cause(ctx); err != nil {
 			return err
 		}
 		if walkErr != nil || name == "." {
 			return walkErr
 		}
-		return writeEntry(ctx, tarWriter, root, name, entry)
+		return writeEntry(ctx, dst, root, name, path.Join(prefix, name), entry)
 	})
-	return errors.Join(err, tarWriter.Close(), gzipWriter.Close())
 }
 
-func writeEntry(ctx context.Context, dst *tar.Writer, root *os.Root, name string, entry fs.DirEntry) (err error) {
+func writeEntry(ctx context.Context, dst *tar.Writer, root *os.Root, name, archived string, entry fs.DirEntry) (err error) {
 	info, err := entry.Info()
 	if err != nil {
 		return err
@@ -73,7 +82,7 @@ func writeEntry(ctx context.Context, dst *tar.Writer, root *os.Root, name string
 	if err != nil {
 		return err
 	}
-	header.Name = name
+	header.Name = archived
 	header.Mode = int64(info.Mode().Perm())
 	if err := dst.WriteHeader(header); err != nil {
 		return err
