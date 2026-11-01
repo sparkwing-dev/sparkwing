@@ -61,11 +61,11 @@ func raceModules(ctx context.Context, targets map[string][]string, testRoot, hom
 	var failures []string
 	for _, module := range mapKeys(targets) {
 		pkgs := slices.Clone(targets[module])
-		var sharded []string
-		if module == "." && gateRaceShardCount(currentHost()) > 0 {
+		var sharded []racePackagePlan
+		if module == "." && gateRaceParallelism(currentHost()) > 0 {
 			pkgs = slices.DeleteFunc(pkgs, func(pkg string) bool {
-				if gateRaceShardedPackage(pkg) {
-					sharded = append(sharded, pkg)
+				if gateRaceShardsForPackage(pkg) > 0 {
+					sharded = append(sharded, racePackagePlan{pkg, gateRaceShardsForPackage(pkg)})
 					return true
 				}
 				return false
@@ -79,8 +79,8 @@ func raceModules(ctx context.Context, targets map[string][]string, testRoot, hom
 				failures = append(failures, fmt.Sprintf("%s: %v", module, runErr))
 			}
 		}
-		for _, pkg := range sharded {
-			if runErr := runRaceShardsAtHome(ctx, home, module, pkg, gateRaceShardCount(currentHost()), gateRaceShardArgs); runErr != nil {
+		if len(sharded) > 0 {
+			if runErr := runRaceShardsAtHome(ctx, home, module, sharded, gateRaceParallelism(currentHost()), gateRaceShardArgs); runErr != nil {
 				failures = append(failures, fmt.Sprintf("%s: %v", module, runErr))
 			}
 		}
@@ -91,19 +91,21 @@ func raceModules(ctx context.Context, targets map[string][]string, testRoot, hom
 	return fmt.Errorf("go test -race failed:\n  - %s", strings.Join(failures, "\n  - "))
 }
 
-func gateRaceShardCount(h hostShape) int {
+func gateRaceParallelism(h hostShape) int {
 	if h.cpus == overlappedGoSuiteCPUs || goStepParallelism(h) >= 2 {
 		return 2
 	}
 	return 0
 }
 
-func gateRaceShardedPackage(pkg string) bool {
+func gateRaceShardsForPackage(pkg string) int {
 	switch pkg {
-	case "./internal/controller", "./internal/nodehost", "./cmd/sparkwing", "./internal/wingd/localcontroller":
-		return true
+	case "./internal/controller":
+		return 4
+	case "./internal/nodehost", "./cmd/sparkwing", "./internal/wingd/localcontroller":
+		return 2
 	default:
-		return false
+		return 0
 	}
 }
 

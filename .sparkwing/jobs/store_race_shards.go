@@ -92,7 +92,19 @@ func raceTestDigest(names []string) string {
 	return fmt.Sprintf("%x", sha256.Sum256([]byte(strings.Join(names, "\n"))))
 }
 
+type racePackagePlan struct {
+	pkg        string
+	shardCount int
+}
+
+type raceShardJob struct {
+	pkg, binary, packageDir string
+	number                  int
+	names                   []string
+}
+
 type raceShardResult struct {
+	pkg    string
 	shard  int
 	count  int
 	output sparkwing.ExecResult
@@ -119,64 +131,78 @@ func runStoreRaceShardsAtHome(ctx context.Context, home string) error {
 	if _, err := raceExec(ctx, home, "go", "test", "-race", "-count=1", "./internal/store/internal/storetest").Env("GOMAXPROCS", "1").Run(); err != nil {
 		return fmt.Errorf("storetest race package: %w", err)
 	}
-	return runRaceShardsAtHome(ctx, home, ".", "./internal/store", storeRaceShardCount, storeRaceShardArgs)
+	return runRaceShardsAtHome(ctx, home, ".", []racePackagePlan{{"./internal/store", storeRaceShardCount}}, storeRaceShardCount, storeRaceShardArgs)
 }
 
-func runRaceShardsAtHome(ctx context.Context, home, module, pkg string, shardCount int, shardArgs func([]string) []string) (runErr error) {
+func runRaceShardsAtHome(ctx context.Context, home, module string, plans []racePackagePlan, parallelism int, shardArgs func([]string) []string) (runErr error) {
+	if parallelism < 1 {
+		return fmt.Errorf("race shard parallelism must be positive")
+	}
 	dir, err := os.MkdirTemp("", "sparkwing-race-*")
 	if err != nil {
 		return err
 	}
 	defer func() {
 		if err := os.RemoveAll(dir); err != nil {
-			runErr = errors.Join(runErr, fmt.Errorf("clean %s race binary: %w", pkg, err))
+			runErr = errors.Join(runErr, fmt.Errorf("clean race binaries: %w", err))
 		}
 	}()
-	binary := filepath.Join(dir, "package.test")
-	if _, err := raceExec(ctx, home, "go", "test", "-c", "-race", "-p", "2", "-o", binary, pkg).Dir(module).Env("GOMAXPROCS", "1").Env("TMPDIR", dir).Run(); err != nil {
-		return fmt.Errorf("compile %s race binary: %w", pkg, err)
+	var jobs []raceShardJob
+	for index, plan := range plans {
+		pkg, shardCount := plan.pkg, plan.shardCount
+		binary := filepath.Join(dir, fmt.Sprintf("package-%d.test", index))
+		if _, err := raceExec(ctx, home, "go", "test", "-c", "-race", "-p", "2", "-o", binary, pkg).Dir(module).Env("GOMAXPROCS", "1").Env("TMPDIR", dir).Run(); err != nil {
+			return fmt.Errorf("compile %s race binary: %w", pkg, err)
+		}
+		packageDir := filepath.Join(module, pkg)
+		listed, err := raceExec(ctx, home, binary, "-test.list", "^(Test|Example|Fuzz)").Dir(packageDir).Env("GOMAXPROCS", "1").Env("TMPDIR", dir).Capture()
+		if err != nil {
+			return fmt.Errorf("list %s race tests: %w", pkg, err)
+		}
+		names, err := raceTestNames(listed.Stdout, shardCount)
+		if err != nil {
+			return err
+		}
+		shards, err := raceTestShards(names, shardCount)
+		if err != nil {
+			return err
+		}
+		sparkwing.Info(ctx, "%s race: %d listed tests, %d exhaustive shards, up to %d processes, list sha256=%s", pkg, len(names), shardCount, parallelism, raceTestDigest(names))
+		for i, shard := range shards {
+			sparkwing.Info(ctx, "%s race shard %d: %d tests, sha256=%s", pkg, i+1, len(shard), raceTestDigest(shard))
+			jobs = append(jobs, raceShardJob{pkg: pkg, binary: binary, packageDir: packageDir, number: i + 1, names: shard})
+		}
 	}
-	packageDir := filepath.Join(module, pkg)
-	listed, err := raceExec(ctx, home, binary, "-test.list", "^(Test|Example|Fuzz)").Dir(packageDir).Env("GOMAXPROCS", "1").Env("TMPDIR", dir).Capture()
-	if err != nil {
-		return fmt.Errorf("list %s race tests: %w", pkg, err)
-	}
-	names, err := raceTestNames(listed.Stdout, shardCount)
-	if err != nil {
-		return err
-	}
-	shards, err := raceTestShards(names, shardCount)
-	if err != nil {
-		return err
-	}
-	sparkwing.Info(ctx, "%s race: %d listed tests, %d exhaustive shards, list sha256=%s", pkg, len(names), shardCount, raceTestDigest(names))
-	for i, shard := range shards {
-		sparkwing.Info(ctx, "%s race shard %d: %d tests, sha256=%s", pkg, i+1, len(shard), raceTestDigest(shard))
-	}
-
 	shardCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	results := make(chan raceShardResult, shardCount)
-	for i, shard := range shards {
+	results := make(chan raceShardResult, len(jobs))
+	pending := make(chan raceShardJob, len(jobs))
+	for _, job := range jobs {
+		pending <- job
+	}
+	close(pending)
+	for range min(parallelism, len(jobs)) {
 		go func() {
-			result, runErr := raceExec(shardCtx, home, binary, shardArgs(shard)...).
-				Dir(packageDir).Env("GOMAXPROCS", "1").Env("TMPDIR", dir).Capture()
-			results <- raceShardResult{shard: i + 1, count: len(shard), output: result, err: runErr}
+			for job := range pending {
+				result, runErr := raceExec(shardCtx, home, job.binary, shardArgs(job.names)...).
+					Dir(job.packageDir).Env("GOMAXPROCS", "1").Env("TMPDIR", dir).Capture()
+				results <- raceShardResult{pkg: job.pkg, shard: job.number, count: len(job.names), output: result, err: runErr}
+			}
 		}()
 	}
 	var firstErr error
-	for range shardCount {
+	for range jobs {
 		result := <-results
 		for _, line := range strings.Split(strings.TrimSpace(result.output.Stdout+"\n"+result.output.Stderr), "\n") {
 			if line != "" {
-				sparkwing.Info(ctx, "%s race shard %d: %s", pkg, result.shard, line)
+				sparkwing.Info(ctx, "%s race shard %d: %s", result.pkg, result.shard, line)
 			}
 		}
 		if result.err != nil && firstErr == nil {
-			firstErr = fmt.Errorf("%s race shard %d (%d tests): %w", pkg, result.shard, result.count, result.err)
+			firstErr = fmt.Errorf("%s race shard %d (%d tests): %w", result.pkg, result.shard, result.count, result.err)
 			cancel()
 		} else if result.err == nil {
-			sparkwing.Info(ctx, "%s race shard %d passed %d listed tests", pkg, result.shard, result.count)
+			sparkwing.Info(ctx, "%s race shard %d passed %d listed tests", result.pkg, result.shard, result.count)
 		}
 	}
 	return firstErr

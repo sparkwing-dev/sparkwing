@@ -3,11 +3,14 @@ package jobs
 import (
 	"context"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"reflect"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -152,14 +155,14 @@ func TestRaces(t *testing.T) {
 }
 `
 
-func TestGateRaceShardsKeepTheHostsPackageBound(t *testing.T) {
+func TestGateRaceWorkersKeepTheHostsPackageBound(t *testing.T) {
 	for _, cpus := range []int{1, 2, 3, 4, 5, 8} {
 		want := 2
 		if cpus < 4 {
 			want = 0
 		}
-		if got := gateRaceShardCount(hostShape{cpus: cpus}); got != want {
-			t.Errorf("%d CPUs: %d gate race shards, want %d", cpus, got, want)
+		if got := gateRaceParallelism(hostShape{cpus: cpus}); got != want {
+			t.Errorf("%d CPUs: %d gate race processes, want %d", cpus, got, want)
 		}
 	}
 	args := gateRaceShardArgs([]string{"TestA", "TestB"})
@@ -170,7 +173,7 @@ func TestGateRaceShardsKeepTheHostsPackageBound(t *testing.T) {
 
 func TestRaceModulesShardsSlowPackagesAfterOrdinaryPackages(t *testing.T) {
 	t.Setenv("GOMAXPROCS", "8")
-	if gateRaceShardCount(currentHost()) == 0 {
+	if gateRaceParallelism(currentHost()) == 0 {
 		t.Skip("host has capacity for only one package process")
 	}
 	root := t.TempDir()
@@ -182,10 +185,27 @@ func TestOrdinary(t *testing.T) {
 	if err := os.WriteFile("../ordinary-complete", nil, 0600); err != nil { t.Fatal(err) }
 }
 `)
+	released := make(chan struct{})
+	var release sync.Once
+	barrier := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/wait":
+			select {
+			case <-released:
+			case <-r.Context().Done():
+				return
+			}
+		case "/release":
+			release.Do(func() { close(released) })
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer barrier.Close()
 	packages := []string{"./internal/controller", "./internal/nodehost", "./cmd/sparkwing", "./internal/wingd/localcontroller"}
 	for _, pkg := range packages {
 		writeGoFile(t, filepath.Join(root, pkg, "shard_test.go"), fmt.Sprintf(`package shardtests
-import ("os"; "runtime"; "testing"; "time")
+import ("os"; "runtime"; "testing"; "time"; "net/http")
 const packageTimeout = time.Duration(%d)
 func init() {
 	if runtime.GOMAXPROCS(0) != 1 { panic("shard startup exceeded one runtime thread") }
@@ -201,15 +221,33 @@ func check(t *testing.T) {
 	if err != nil { t.Fatal("test ran more than once", err) }
 	if err := file.Close(); err != nil { t.Fatal(err) }
 }
-func TestA(t *testing.T) { check(t) }
+func TestA(t *testing.T) {
+ check(t)
+ path := ""
+ switch %q {
+ case "./internal/controller": path = "/wait"
+ case "./internal/nodehost": path = "/release"
+ default: return
+ }
+ req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, %q+path, nil)
+ if err != nil { t.Fatal(err) }
+ response, err := http.DefaultClient.Do(req)
+ if err != nil { t.Fatal(err) }
+ if err := response.Body.Close(); err != nil { t.Fatal(err) }
+ if response.StatusCode != http.StatusOK { t.Fatalf("barrier returned %%s", response.Status) }
+}
 func TestB(t *testing.T) { check(t) }
-`, raceTouchedShardTimeout, filepath.Join(root, "internal", "ordinary-complete")))
+func TestC(t *testing.T) { check(t) }
+func TestD(t *testing.T) { check(t) }
+`, raceTouchedShardTimeout, filepath.Join(root, "internal", "ordinary-complete"), pkg, barrier.URL))
 	}
-	if err := raceModules(t.Context(), map[string][]string{".": append(slices.Clone(packages), "./internal/ordinary")}, t.TempDir(), t.TempDir()); err != nil {
+	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Minute)
+	defer cancel()
+	if err := raceModules(ctx, map[string][]string{".": append(slices.Clone(packages), "./internal/ordinary")}, t.TempDir(), t.TempDir()); err != nil {
 		t.Fatal(err)
 	}
 	for _, pkg := range packages {
-		for _, name := range []string{"TestA", "TestB"} {
+		for _, name := range []string{"TestA", "TestB", "TestC", "TestD"} {
 			path := filepath.Join(root, pkg, name)
 			if _, err := os.Stat(path); err != nil {
 				t.Fatalf("%s shards omitted %s: %v", pkg, name, err)
@@ -252,15 +290,18 @@ func TestGateRaceDeadlineLeavesRoomAfterEarlierGateWork(t *testing.T) {
 	}
 }
 
-func TestGateRaceShardingOnlySelectsTheMeasuredPackages(t *testing.T) {
-	for _, pkg := range []string{"./internal/controller", "./internal/nodehost", "./cmd/sparkwing", "./internal/wingd/localcontroller"} {
-		if !gateRaceShardedPackage(pkg) {
-			t.Errorf("%s remains unsharded", pkg)
-		}
-	}
-	for _, pkg := range []string{"./internal/store", "./jobs", "./internal/ordinary"} {
-		if gateRaceShardedPackage(pkg) {
-			t.Errorf("%s unexpectedly sharded", pkg)
+func TestGateRaceUsesTheMeasuredShardCounts(t *testing.T) {
+	for pkg, want := range map[string]int{
+		"./internal/controller":            4,
+		"./internal/nodehost":              2,
+		"./cmd/sparkwing":                  2,
+		"./internal/wingd/localcontroller": 2,
+		"./internal/store":                 0,
+		"./jobs":                           0,
+		"./internal/ordinary":              0,
+	} {
+		if got := gateRaceShardsForPackage(pkg); got != want {
+			t.Errorf("%s: %d shards, want %d", pkg, got, want)
 		}
 	}
 }
