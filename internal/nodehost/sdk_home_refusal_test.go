@@ -28,7 +28,8 @@ func TestSDKIsolatedHomeRefusalShowsRemedyWithoutAuthorText(t *testing.T) {
 				if err := log(ctx, nodeproto.FrameLog{Message: private}); err != nil {
 					return nil, err
 				}
-				return nodeproto.DescribeDoc{Pipelines: []nodeproto.PipelineDescription{{Name: input.Run.Pipeline,
+				return nodeproto.DescribeDoc{Pipelines: []nodeproto.PipelineDescription{{
+					Name:  input.Run.Pipeline,
 					Error: &apierr.Error{Code: "isolated_home_required", Message: private, Hint: private, Details: map[string]any{"secret": private}},
 				}}}, nil
 			}
