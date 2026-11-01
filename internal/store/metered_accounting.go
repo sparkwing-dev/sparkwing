@@ -138,6 +138,11 @@ func recordBillingAwardTx(ctx context.Context, tx *storeTx, c capability.Capabil
 			return err
 		}
 	}
+	if b.ExecutorClass == TierCloud {
+		if err := recordCloudCapacityClaimTx(ctx, tx, Team(c.Team), b.ReservationID, price.Cores, now); err != nil {
+			return err
+		}
+	}
 	if b.Start == capability.BillingAtAward {
 		return startBillableIntervalTx(ctx, tx, Team(c.Team), b.ReservationID, "award", 0, tx.now(ctx))
 	}
@@ -181,6 +186,9 @@ func startBillableIntervalTx(ctx context.Context, tx *storeTx, team Team, reserv
 		return authorityError(apierr.Conflict, "compute intervals overlap")
 	}
 	_, err = tx.execContext(ctx, `INSERT INTO billable_intervals(team,id,run_id,node_id,attempt,generation,capability_prefix,reservation_id,payer_team,metered,executor_class,unit_kind,billing_unit,billing_start,started_at,charged_through) VALUES (?,?,?,?,?,?,?,?,?,1,?,?,?,?,?,?)`, team, id, a.run, a.node, attempt, a.generation, a.prefix, reservation, a.provenance.PayerTeam, a.provenance.ExecutorClass, a.unit, a.provenance.Unit, a.provenance.Start, at.UnixNano(), at.UnixNano())
+	if err == nil && a.provenance.ExecutorClass == TierCloud {
+		_, err = tx.execContext(ctx, `UPDATE cloud_job_capacity SET started_at=?,claim_to_start_ns=?-claimed_at WHERE team=? AND reservation_id=? AND started_at IS NULL`, at.UnixNano(), at.UnixNano(), team, reservation)
+	}
 	return err
 }
 

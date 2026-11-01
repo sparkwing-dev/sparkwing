@@ -104,6 +104,7 @@ func (s storeLauncherSync) ReadLauncherSync(ctx context.Context, ref capability.
 			unit.Execution = nil
 		}
 		unit.CloudResources = award.CloudResources
+		unit.CloudUpsizeEnabled = award.CloudUpsizeEnabled
 		if err := runners.ValidateAward(*unit, capability.DeliveryBootstrap); err != nil {
 			response.Deferred = append(response.Deferred, observation.Award)
 			continue
@@ -116,7 +117,7 @@ func (s storeLauncherSync) ReadLauncherSync(ctx context.Context, ref capability.
 func validateLauncherSync(body controllerwire.LauncherSyncRequest) ([]capability.LauncherObservation, error) {
 	observed := slices.Clone(body.Observed)
 	for _, demand := range body.Capacity {
-		observed = append(observed, capability.LauncherObservation{Award: demand.Award, Reservation: true, CapacityUnconfigured: demand.Unconfigured})
+		observed = append(observed, capability.LauncherObservation{Award: demand.Award, Reservation: true, CapacityUnconfigured: demand.Unconfigured, WaitedForFreshNode: !demand.Unconfigured})
 	}
 	activated := map[capability.LeaseRef]bool{}
 	for _, activation := range body.Activations {

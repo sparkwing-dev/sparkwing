@@ -53,7 +53,15 @@ func TestEngineLauncherSyncUsesStoreSnapshot(t *testing.T) {
 		if len(response.Awards) != 1 || len(response.Retired) != 0 || response.Awards[0].Capability != "" || response.Awards[0].UnitID != observation.Award.ID || response.Awards[0].Binding.Generation != int64(claim.Award.Generation) || response.Awards[0].Delivery != capability.DeliveryBootstrap || response.Awards[0].Execution == nil {
 			t.Fatalf("current award not retained: %+v", response)
 		}
+		if response.Awards[0].CloudUpsizeEnabled != (exchange == 0) {
+			t.Fatalf("sync lost operator upsize setting: %+v", response.Awards[0])
+		}
 		if exchange == 0 {
+			initial, err := e.claimedUnit(t.Context(), claim)
+			if err != nil || !initial.CloudUpsizeEnabled {
+				t.Fatalf("claim lost default upsize setting: %+v %v", initial, err)
+			}
+			engineSQL(t, e.Store, `INSERT INTO settings(key,value) VALUES ('cloud_upsize_enabled',?)`, []byte(`false`))
 			if _, err := e.Store.AsOperator().ExchangeCapability(t.Context(), capability.ExchangeSpec{BootstrapPrefix: claim.Award.CapabilityPrefix}); err != nil {
 				t.Fatal(err)
 			}

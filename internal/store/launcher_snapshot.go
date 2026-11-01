@@ -22,6 +22,7 @@ import (
 type LauncherAward struct {
 	// Gone confirms that the observed unit fence has ended or belongs to another launcher.
 	Gone                   bool
+	CloudUpsizeEnabled     bool
 	CloudResources         *match.Resources
 	Fence                  capability.LeaseRef
 	Failure                error
@@ -81,6 +82,11 @@ func (o *Operator) ReconcileLauncherAwards(ctx context.Context, authority capabi
 		}
 	}
 	for _, host := range hosts {
+		if host.WaitedForFreshNode {
+			if err := owner.apply(ctx, host.Award, func() error { return o.s.recordLauncherCapacityWait(ctx, authority, host.Award) }); err != nil {
+				return nil, nil, err
+			}
+		}
 		if host.CapacityUnconfigured {
 			if err := owner.apply(ctx, host.Award, func() error {
 				return o.s.failLauncherAwards(ctx, authority, []capability.LeaseRef{host.Award}, capability.CloudCapacityUnconfigured)
@@ -412,6 +418,9 @@ func readLauncherAwardTx(ctx context.Context, tx *storeTx, prefix string, claima
 		}
 	}
 	award.CloudResources, err = cloudAwardResourcesTx(ctx, tx, capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: prefix})
+	if err == nil && award.CloudResources != nil {
+		award.CloudUpsizeEnabled, err = cloudUpsizeEnabledTx(ctx, tx)
+	}
 	return award, err == nil, err
 }
 

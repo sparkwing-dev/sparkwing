@@ -259,6 +259,31 @@ server-derived authority, pricing and reservation size after taking claim locks.
 A capability prefix belongs to one reservation. Identical award replay writes
 nothing, and conflicting provenance or pricing fails.
 
+Schema baseline 28 records Cloud placement facts in `cloud_job_capacity`, keyed
+by `(team, reservation_id)` and joined to `billing_awards` for the run, job,
+unit kind and generation. Each Cloud award inserts `requested_class` and
+`claimed_at` from its committed billing class and the store clock. Class names
+are the Cloud catalog labels (`sparkwing-2cpu`, `sparkwing-4cpu`, and similar).
+A capacity-demand observation sets `waited_for_fresh_node` permanently for
+that award; activation may also set it. A later warm placement cannot erase a
+recorded cold wait. Authenticated activation records `granted_class`, which
+must equal the requested class or its next catalog size. The requested billing
+class remains unchanged. A granted class cannot change on reconciliation.
+
+`started_at` and `claim_to_start_ns` stay NULL during capacity waiting and
+Job publication. The first executing Pod renewal opens its compute interval
+and fills these fields from the store clock. `claim_to_start_ns` is the elapsed
+nanoseconds since the persisted claim, including provisioning, image pulls and
+runner preparation. Later renewals and resumptions preserve the first start.
+Unstarted awards keep NULL latency. These operational facts survive run
+retention, and team deletion removes them.
+
+The unsealed operator setting `cloud_upsize_enabled` holds a JSON boolean and
+defaults to `true` when absent. `Operator.WriteCloudUpsizeEnabled` requires live
+operator limits authority; claims and launcher sync return its current value
+as `cloud_upsize_enabled`. Turning it off refuses new next-size grants while
+preserving committed placements. Corrupt values fail the settings read.
+
 `startBillableIntervalTx` and `finishBillableIntervalTx` delimit compute. An
 executing claimant opens at award. A launcher reservation opens when execution
 starts. Pauses close the current interval, and resuming uses a fresh interval
