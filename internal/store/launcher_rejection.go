@@ -54,6 +54,9 @@ func (s *Store) failLauncherAwards(ctx context.Context, authority capability.Aut
 					return bindingRefusal()
 				}
 				message = fmt.Sprintf("%s (Support reference: %s)", capability.CloudCapacityUnconfiguredMessage, award.Claim.RunID)
+				if award.CloudResources != nil {
+					message = fmt.Sprintf("%s (Requested class: sparkwing-%dcpu; Support reference: %s)", capability.CloudCapacityUnconfiguredMessage, int64(award.CloudResources.Cores), award.Claim.RunID)
+				}
 			}
 			actor := runstate.Actor{Kind: runstate.ActorLauncher, Authority: authority, CapabilityPrefix: row.prefix, NodeFence: runspec.NodeFence{RunID: runspec.RunID(award.Claim.RunID), NodeID: runspec.NodeID(award.Claim.NodeID), Holder: fence.Holder, Generation: runspec.ClaimGeneration(fence.Generation)}}
 			target := expiredUnit{team: award.Claim.Team, ref: runspec.NodeRef{RunID: runspec.RunID(award.Claim.RunID), NodeID: runspec.NodeID(award.Claim.NodeID)}, kind: fence.Kind, sourceGeneration: award.Claim.SourceGeneration}

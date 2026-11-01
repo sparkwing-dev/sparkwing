@@ -43,7 +43,7 @@ func TestUnconfiguredCloudCapacityFailsAndRefundsOnce(t *testing.T) {
 			} else if err := s.DB().QueryRow(`SELECT error,failure_reason FROM nodes WHERE run_id='run' AND node_id='job'`).Scan(&message, &reason); err != nil {
 				t.Fatal(err)
 			}
-			if reason != capability.CloudCapacityUnconfigured || !strings.Contains(message, capability.CloudCapacityUnconfiguredMessage) || !strings.Contains(message, "Support reference: run") {
+			if reason != capability.CloudCapacityUnconfigured || !strings.Contains(message, capability.CloudCapacityUnconfiguredMessage) || !strings.Contains(message, "Support reference: run") || !strings.Contains(message, "Requested class: sparkwing-2cpu") {
 				t.Fatalf("customer failure: reason=%q message=%q", reason, message)
 			}
 		})
@@ -61,7 +61,7 @@ func TestCloudCapacityNoticeEndsAtActivation(t *testing.T) {
 			if err != nil || view.CloudCapacitySince == nil || now.Sub(*view.CloudCapacitySince) != 30*time.Second {
 				t.Fatalf("waiting capacity missing: %+v %v", view.CloudCapacitySince, err)
 			}
-			if err := s.sealLauncherHost(t.Context(), root, capability.LauncherActivation{Award: fence, NodeUID: "node", ReservationID: "reservation"}); err != nil {
+			if err := s.sealLauncherHost(t.Context(), root, capability.LauncherActivation{Award: fence, NodeUID: "node", ReservationID: "reservation", Capacity: &capability.CloudCapacityGrant{RequestedClass: "sparkwing-2cpu", GrantedClass: "sparkwing-2cpu"}}); err != nil {
 				t.Fatal(err)
 			}
 			view, err = tenant.ReadRunView(t.Context(), "run")
@@ -75,7 +75,7 @@ func TestCloudCapacityNoticeEndsAtActivation(t *testing.T) {
 func TestUnconfiguredCapacityCannotFailAnActivatedAward(t *testing.T) {
 	s, demand, claim, _ := launcherSnapshotFixture(t, capability.UnitNode)
 	root, fence := launcherMeteredFence(t, s, demand, claim, capability.UnitNode)
-	if err := s.sealLauncherHost(t.Context(), root, capability.LauncherActivation{Award: fence, NodeUID: "node", ReservationID: "reservation"}); err != nil {
+	if err := s.sealLauncherHost(t.Context(), root, capability.LauncherActivation{Award: fence, NodeUID: "node", ReservationID: "reservation", Capacity: &capability.CloudCapacityGrant{RequestedClass: "sparkwing-2cpu", GrantedClass: "sparkwing-2cpu"}}); err != nil {
 		t.Fatal(err)
 	}
 	observation := capability.LauncherObservation{Award: fence, Reservation: true, CapacityUnconfigured: true}

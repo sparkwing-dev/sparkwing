@@ -380,6 +380,21 @@ components:
         - kind
       type: object
       x-sparkwing-go-type: capability.Binding
+    internal.capability.CloudCapacityGrant:
+      additionalProperties: true
+      properties:
+        granted_class:
+          type: string
+        requested_class:
+          type: string
+        waited_for_fresh_node:
+          type: boolean
+      required:
+        - requested_class
+        - granted_class
+        - waited_for_fresh_node
+      type: object
+      x-sparkwing-go-type: capability.CloudCapacityGrant
     internal.capability.ConsoleProof:
       additionalProperties: true
       properties:
@@ -426,6 +441,10 @@ components:
       properties:
         award:
           $ref: '#/components/schemas/internal.capability.LeaseRef'
+        capacity:
+          anyOf:
+            - $ref: '#/components/schemas/internal.capability.CloudCapacityGrant'
+            - type: "null"
         node_uid:
           type: string
         reservation_id:
@@ -446,6 +465,8 @@ components:
         rejected:
           type: boolean
         reservation:
+          type: boolean
+        waited_for_fresh_node:
           type: boolean
       required:
         - award
@@ -849,6 +870,8 @@ components:
           anyOf:
             - $ref: '#/components/schemas/pkg.match.Resources'
             - type: "null"
+        cloud_upsize_enabled:
+          type: boolean
         delivery:
           type: string
         engine:
@@ -900,6 +923,7 @@ components:
         unit_id:
           type: string
       required:
+        - cloud_upsize_enabled
         - unit
         - purpose
         - delivery

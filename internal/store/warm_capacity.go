@@ -117,7 +117,7 @@ func (o *Operator) WarmCapacity(ctx context.Context) (WarmCapacity, error) {
 	for i := range out.Classes {
 		c := &out.Classes[i]
 		var h, d []float64
-		r, e := o.s.query(ctx, `SELECT execution_started_at,start_latency_ns FROM nodes WHERE requested_class=? AND execution_started_at>=? AND execution_started_at<=? AND start_latency_ns IS NOT NULL`, c.Class, day, now.UnixNano())
+		r, e := o.s.query(ctx, `SELECT c.started_at,c.claim_to_start_ns FROM cloud_job_capacity c JOIN billing_awards b ON b.team=c.team AND b.reservation_id=c.reservation_id WHERE b.unit_kind='node' AND c.requested_class=? AND c.started_at>=? AND c.started_at<=? AND c.claim_to_start_ns IS NOT NULL`, c.Class, day, now.UnixNano())
 		if e != nil {
 			return out, e
 		}
@@ -137,7 +137,7 @@ func (o *Operator) WarmCapacity(ctx context.Context) (WarmCapacity, error) {
 		}
 		c.Start1h = warmPercentiles(h)
 		c.Start24h = warmPercentiles(d)
-		e = o.s.queryRow(ctx, `SELECT COALESCE(SUM(CASE WHEN fresh_node_wait=1 AND COALESCE(execution_started_at,ready_at)>=? THEN 1 ELSE 0 END),0), COALESCE(SUM(fresh_node_wait),0),COALESCE(SUM(CASE WHEN granted_class<>'' AND granted_class<>requested_class AND execution_started_at>=? THEN 1 ELSE 0 END),0),COALESCE(SUM(CASE WHEN granted_class<>'' AND granted_class<>requested_class THEN 1 ELSE 0 END),0) FROM nodes WHERE requested_class=? AND COALESCE(execution_started_at,ready_at)>=? AND COALESCE(execution_started_at,ready_at)<=?`, day, day, c.Class, week, now.UnixNano()).Scan(&c.ColdStarts24h, &c.ColdStarts7d, &c.Upsizes24h, &c.Upsizes7d)
+		e = o.s.queryRow(ctx, `SELECT COALESCE(SUM(CASE WHEN waited_for_fresh_node=1 AND COALESCE(started_at,claimed_at)>=? THEN 1 ELSE 0 END),0), COALESCE(SUM(waited_for_fresh_node),0),COALESCE(SUM(CASE WHEN granted_class<>'' AND granted_class<>requested_class AND started_at>=? THEN 1 ELSE 0 END),0),COALESCE(SUM(CASE WHEN granted_class<>'' AND granted_class<>requested_class THEN 1 ELSE 0 END),0) FROM cloud_job_capacity c JOIN billing_awards b ON b.team=c.team AND b.reservation_id=c.reservation_id WHERE b.unit_kind='node' AND requested_class=? AND COALESCE(started_at,claimed_at)>=? AND COALESCE(started_at,claimed_at)<=?`, day, day, c.Class, week, now.UnixNano()).Scan(&c.ColdStarts24h, &c.ColdStarts7d, &c.Upsizes24h, &c.Upsizes7d)
 		if e != nil {
 			return out, e
 		}

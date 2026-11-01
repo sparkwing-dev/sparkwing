@@ -113,19 +113,44 @@ The unreleased schema baseline remains 28 and removes
 `signup_gate.free_team_members`. Recreate pre-release stores with the updated
 baseline using the instructions above.
 
-## Shared Cloud pools and warm capacity
+## Shared Cloud capacity
 
-Replace per-team Cloud NodePools with one shared pool per hardware class.
-Use the shared-pool example in the full chart. Pools carry
-`sparkwing.dev/hardware-class`, `sparkwing.dev/cloud-namespace`, and
-`sparkwing.dev/dedicated=true:NoSchedule`. Nodes keep their permanent team/run
-binding after first use. Review the [infrastructure proposal](../../design/rewrite/proposals/warm-capacity.md)
-for the exact pool, KEDA, reader role and Secret manifests.
+Replace per-team NodePools with one shared NodePool per requested vCPU class and
+deployment. Retire the old pools only after their runs finish and their nodes
+are empty. Keep their permanent used-team and used-run labels until Karpenter
+removes the nodes. Never relabel a used node into a shared pool.
+
+Shared templates set `node-restriction.kubernetes.io/sparkwing-cloud-class` to
+the requested vCPU class, `sparkwing.dev/launcher-namespace` to the Cloud Job
+namespace and `sparkwing.dev/warm-namespace` to the trusted warm Deployment
+namespace. Warm placeholders must move to their own namespace, separate from
+both the release and customer Job namespaces. The chart creates
+`<release namespace>-cloud-warm` by default. Set `launcher.warmNamespace` to
+override it, and update the pool's warm-namespace label to match. Remove the old
+release-namespace warm-capacity Role and RoleBinding. The new Role grants Pod
+get/delete and ReplicaSet get only in the warm namespace. Placeholders must be
+volume-free and owned through a ReplicaSet by `sparkwing-cloud-warm-<vCPU>`.
+
+Set `launcher.nodeClassName` (or `sparkwing-runner launch --node-class`) to the
+hardened EC2NodeClass name. Both default to `sparkwing-jobs`. Pools whose
+nodeClassRef name, group or kind differs are refused. They use
+`sparkwing.dev/dedicated=true:NoSchedule` instead of the
+team taint. Pool templates carry no protected team label. The launcher binds
+that exact label and permanent team/run fences at first reservation.
+
+Use the [shared pool example](../../charts/sparkwing-full/examples/shared-nodepool.yaml).
+The [infrastructure proposal](../../design/rewrite/proposals/shared-cloud-capacity.md)
+contains exact production and staging manifest replacements. Apply the launcher,
+admission and pool changes together. Operator setting `cloud_upsize_enabled`
+defaults to true and controls use of an idle warm node one class larger. Billing
+and CPU/memory limits retain the requested class. No deployment is performed by
+this repository change.
 
 Warm capacity defaults to Off for every class, including after the baseline 28
 store reset above. Install KEDA separately, then enable `warmCapacity.enabled`
 with `controller.store=postgres`, the Cloud job namespace and the read-only
-connection Secret. KEDA scales placeholders in the Helm release namespace.
+connection Secret. KEDA scales `sparkwing-cloud-warm-<vCPU>` in the dedicated warm namespace.
+Its ScaledObject, TriggerAuthentication and reader Secret live there too.
 The controller's database owner creates `warm_pool_desired`; the scaler role
 needs SELECT only on that view. Placeholder containers receive no credentials.
 

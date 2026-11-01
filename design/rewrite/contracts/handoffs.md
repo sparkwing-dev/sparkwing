@@ -1305,3 +1305,27 @@ pools are not an option. Research and measurements:
   single-use nodes; a microVM spike on metal and nested-virtualization hosts;
   faster launcher handoffs; image pre-baking; a provider-neutral compute-driver
   seam for Cloudflare, GCP and bare metal.
+
+Security follow-up accepted by the lead on 2026-11-01:
+
+- Warm placeholders and their Pod get/delete and ReplicaSet get Role live in a
+  dedicated warm namespace. They mount no volumes and prove the expected
+  `sparkwing-cloud-warm-<vCPU>` Deployment through a UID-checked ReplicaSet.
+  The launcher pins the hardened EC2NodeClass name and refuses mismatched refs.
+- Opus finding L3 is accepted without code changes.
+- An upsizing-switch change during an in-flight award is accepted without
+  further code. The store rechecks the switch for the first committed upsize,
+  then preserves that placement on replay. Disabling the switch does not revoke
+  an already-committed placement.
+
+## 2026-11-01 Korey decision 76: forks pay for their own CI
+
+One model for forked pull requests: the base repository never runs a fork's pull
+request. A contributor who wants CI installs Sparkwing on their fork under their
+own team; pushes to the fork run and bill there, with none of the base
+repository's secrets or trust. The base pull request shows a note explaining this.
+Follow-up: verify whether check runs created on the fork's head commit by the
+fork's installation appear on the base pull request, and close the gap if not.
+After launch: per-repository pull-request controls for public repositories (who may
+trigger runs, approval for first-time or outside contributors, which pipelines run
+on pull requests).

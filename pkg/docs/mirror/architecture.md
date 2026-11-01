@@ -56,7 +56,7 @@ protocol channels. Credentials and protocol handles do not travel in environment
 variables. Process environments come from the shared process policy.
 
 Cloud Jobs run rootful Docker-in-Docker inside a user-namespaced pod, never
-privileged, on exclusive team-dedicated nodes. Default-deny network enforcement and complete teardown require deployment
+privileged, on nodes permanently bound to one team and run. Default-deny network enforcement and complete teardown require deployment
 proof. Aggregate scratch includes DinD and remains bounded by the shared limit.
 
 A database has one active controller. PostgreSQL standbys wait on a dedicated

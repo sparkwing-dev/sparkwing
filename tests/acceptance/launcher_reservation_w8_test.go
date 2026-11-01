@@ -87,7 +87,7 @@ func reservationFixtureW8(t *testing.T) (*launcher.Launcher, *fake.Clientset, *s
 		}
 		return false, nil, nil
 	})
-	boundary := &launcher.KubernetesBoundary{Kube: kube, Karpenter: karpenter, Namespace: cfg.Namespace}
+	boundary := &launcher.KubernetesBoundary{Kube: kube, Karpenter: karpenter, Namespace: cfg.Namespace, NodeClassName: "sparkwing-jobs"}
 	runtime, err := launcher.NewLauncher(t.Context(), launcher.RuntimeConfig{
 		Kube: kube, Boundary: boundary, Jobs: cfg,
 		Demand: controllerwire.ClaimRequest{RunnerVersion: "v0.71.0", Kinds: []capability.UnitKind{capability.UnitNode}},

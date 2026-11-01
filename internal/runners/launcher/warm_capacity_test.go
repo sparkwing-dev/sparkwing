@@ -46,8 +46,8 @@ func TestWarmCapacityObservationThroughLauncherHTTP(t *testing.T) {
 	handler := controller.New(st, nil).WithEngineController(engine).Handler()
 	base, _, boundary, _ := fixture()
 	kube := fake.NewClientset()
-	node := corev1.Node{ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{warmClassLabel: "sparkwing-2cpu", warmNamespaceLabel: base.Config.Namespace}}, Status: corev1.NodeStatus{Conditions: []corev1.NodeCondition{{Type: corev1.NodeReady, Status: corev1.ConditionTrue}}}}
-	for _, kind := range []string{"ready", "used", "bound", "unready", "other-deployment", "reserved", "quarantined"} {
+	node := corev1.Node{ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{CloudClassLabel: "2", PoolNamespaceLabel: base.Config.Namespace}}, Status: corev1.NodeStatus{Conditions: []corev1.NodeCondition{{Type: corev1.NodeReady, Status: corev1.ConditionTrue}}}}
+	for _, kind := range []string{"ready", "used", "bound", "unready", "other-deployment", "reserved", "reserved-taint", "unknown-class", "used-team", "quarantined"} {
 		n := node.DeepCopy()
 		n.Name = kind
 		switch kind {
@@ -58,7 +58,13 @@ func TestWarmCapacityObservationThroughLauncherHTTP(t *testing.T) {
 		case "unready":
 			n.Status.Conditions[0].Status = corev1.ConditionFalse
 		case "other-deployment":
-			n.Labels[warmNamespaceLabel] = "other"
+			n.Labels[PoolNamespaceLabel] = "other"
+		case "reserved-taint":
+			n.Spec.Taints = []corev1.Taint{{Key: reservationTaint, Value: "held", Effect: corev1.TaintEffectNoSchedule}}
+		case "unknown-class":
+			n.Labels[CloudClassLabel] = "sparkwing-2cpu"
+		case "used-team":
+			n.Labels[usedTeamLabel] = "team-old"
 		case "reserved":
 			n.Annotations = map[string]string{reservationAnnotation: "held"}
 		case "quarantined":

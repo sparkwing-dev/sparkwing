@@ -40,6 +40,8 @@ func TestMaterialize_ColdCacheContactsNoController(t *testing.T) {
 		os.Exit(0)
 	}
 
+	t.Parallel()
+
 	var requests atomic.Int32
 	controller := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		requests.Add(1)
@@ -52,7 +54,8 @@ func TestMaterialize_ColdCacheContactsNoController(t *testing.T) {
 	if err := os.Mkdir(moduleDir, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	writeSDKFixture(t, moduleDir, "package main\nfunc main(){}\n")
+	// safety: a unique input keeps this cache cold even when installer helpers share fixture binaries.
+	writeSDKFixture(t, moduleDir, fmt.Sprintf("package main\nfunc main(){ _ = %q }\n", repo))
 	runSnapshotGit(t, repo, "add", ".")
 	runSnapshotGit(t, repo, "commit", "-qm", "fixture")
 	config := filepath.Join(t.TempDir(), "config.yaml")

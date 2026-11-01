@@ -17,10 +17,17 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/pkg/match"
 )
 
 const (
-	usedTeamLabel = "node-restriction.kubernetes.io/sparkwing-used-team"
+	CloudClassLabel      = "node-restriction.kubernetes.io/sparkwing-cloud-class"
+	PoolNamespaceLabel   = "sparkwing.dev/launcher-namespace"
+	WarmNamespaceLabel   = "sparkwing.dev/warm-namespace"
+	DedicatedTaint       = "sparkwing.dev/dedicated"
+	WarmPlaceholderLabel = "sparkwing.dev/warm-placeholder"
+	WarmPriorityClass    = "sparkwing-cloud-warm"
+	usedTeamLabel        = "node-restriction.kubernetes.io/sparkwing-used-team"
 	// usedRunLabel records the one run a node may serve: a job of another run
 	// must never find state an earlier run's job left behind, even within a team.
 	usedRunLabel = "node-restriction.kubernetes.io/sparkwing-used-run"
@@ -37,7 +44,7 @@ var (
 )
 
 // CapacityConfigured checks pool templates, never current nodes, readiness or fleet limits.
-func (b *KubernetesBoundary) CapacityConfigured(ctx context.Context, binding CloudJobBinding, budget corev1.ResourceList) (bool, error) {
+func (b *KubernetesBoundary) CapacityConfigured(ctx context.Context, budget corev1.ResourceList) (bool, error) {
 	if b.Karpenter == nil {
 		return false, errors.New("cloud boundary requires Karpenter")
 	}
@@ -45,9 +52,9 @@ func (b *KubernetesBoundary) CapacityConfigured(ctx context.Context, binding Clo
 	if err != nil {
 		return false, err
 	}
-	value := TeamNodeValue(b.Namespace, binding.Team)
+	value := cpuClass(budget.Cpu().AsApproximateFloat64())
 	for _, pool := range pools.Items {
-		compatible, err := compatibleTeamPool(pool, value, budget)
+		compatible, err := b.compatibleSharedPool(pool, value, budget)
 		if err != nil || compatible {
 			return compatible, err
 		}
@@ -55,9 +62,14 @@ func (b *KubernetesBoundary) CapacityConfigured(ctx context.Context, binding Clo
 	return false, nil
 }
 
-func compatibleTeamPool(pool unstructured.Unstructured, value string, budget corev1.ResourceList) (bool, error) {
+func (b *KubernetesBoundary) compatibleSharedPool(pool unstructured.Unstructured, class string, budget corev1.ResourceList) (bool, error) {
 	labels, _, err := unstructured.NestedStringMap(pool.Object, "spec", "template", "metadata", "labels")
-	if err != nil || labels[TeamNodeLabel] != value {
+	_, teamLabelPresent := labels[TeamNodeLabel]
+	if err != nil || class == "" || labels[PoolNamespaceLabel] != b.Namespace || labels[CloudClassLabel] != class || teamLabelPresent {
+		return false, err
+	}
+	ref, _, err := unstructured.NestedStringMap(pool.Object, "spec", "template", "spec", "nodeClassRef")
+	if err != nil || b.NodeClassName == "" || ref["name"] != b.NodeClassName || ref["group"] != "karpenter.k8s.aws" || ref["kind"] != "EC2NodeClass" {
 		return false, err
 	}
 	taints, _, err := unstructured.NestedSlice(pool.Object, "spec", "template", "spec", "taints")
@@ -70,7 +82,7 @@ func compatibleTeamPool(pool unstructured.Unstructured, value string, budget cor
 		if !ok {
 			return false, errors.New("invalid NodePool taint")
 		}
-		if taint["key"] == TeamNodeLabel && taint["value"] == value && taint["effect"] == string(corev1.TaintEffectNoSchedule) {
+		if taint["key"] == DedicatedTaint && taint["value"] == "true" && taint["effect"] == string(corev1.TaintEffectNoSchedule) {
 			protected = true
 		}
 	}
@@ -78,7 +90,7 @@ func compatibleTeamPool(pool unstructured.Unstructured, value string, budget cor
 		return false, nil
 	}
 	// safety: only contradictory template constraints prove incompatibility; readiness and fleet limits can recover.
-	known := map[string]string{TeamNodeLabel: value, corev1.LabelOSStable: "linux"}
+	known := map[string]string{CloudClassLabel: class, PoolNamespaceLabel: b.Namespace, corev1.LabelOSStable: "linux"}
 	if os, ok := labels[corev1.LabelOSStable]; ok && os != "linux" {
 		return false, nil
 	}
@@ -181,9 +193,38 @@ func (b *KubernetesBoundary) nodeClaim(ctx context.Context, node *corev1.Node) (
 	return nil, ErrNoDedicatedNode
 }
 
+func cpuClass(cores float64) string {
+	for _, size := range match.CloudSizes() {
+		if size.Resources.Cores == cores {
+			return strconv.Itoa(int(cores))
+		}
+	}
+	return ""
+}
+
+func nextCPUClass(class string) string {
+	sizes := match.CloudSizes()
+	for i, size := range sizes {
+		if cpuClass(size.Resources.Cores) == class && i+1 < len(sizes) {
+			return cpuClass(sizes[i+1].Resources.Cores)
+		}
+	}
+	return ""
+}
+
 func (b *KubernetesBoundary) verifyNodeTeam(ctx context.Context, node *corev1.Node, team string) error {
 	value := TeamNodeValue(b.Namespace, team)
-	if node.Labels[TeamNodeLabel] != value || (node.Labels[usedTeamLabel] != "" && node.Labels[usedTeamLabel] != value) {
+	usedTeam, teamUsed := node.Labels[usedTeamLabel]
+	usedRun, runUsed := node.Labels[usedRunLabel]
+	nodeTeam, teamBound := node.Labels[TeamNodeLabel]
+	// safety: an incomplete or foreign binding must never become fresh again; all three labels bind atomically.
+	if teamUsed || runUsed || teamBound {
+		if usedTeam != value || usedRun == "" || nodeTeam != value {
+			return ErrNoDedicatedNode
+		}
+	}
+	class := node.Labels[CloudClassLabel]
+	if class == "" || node.Labels[PoolNamespaceLabel] != b.Namespace || !hasDedicatedTaint(node.Spec.Taints) {
 		return ErrNoDedicatedNode
 	}
 	claim, err := b.nodeClaim(ctx, node)
@@ -193,7 +234,8 @@ func (b *KubernetesBoundary) verifyNodeTeam(ctx context.Context, node *corev1.No
 	if err != nil {
 		return err
 	}
-	if claim.GetDeletionTimestamp() != nil || claim.GetLabels()[TeamNodeLabel] != value {
+	_, claimTeamLabelPresent := claim.GetLabels()[TeamNodeLabel]
+	if claim.GetDeletionTimestamp() != nil || claimTeamLabelPresent {
 		return ErrNoDedicatedNode
 	}
 	for _, owner := range claim.GetOwnerReferences() {
@@ -211,11 +253,75 @@ func (b *KubernetesBoundary) verifyNodeTeam(ctx context.Context, node *corev1.No
 		if err != nil {
 			return err
 		}
-		if pool.GetUID() == owner.UID && pool.GetDeletionTimestamp() == nil && claim.GetLabels()["karpenter.sh/nodepool"] == owner.Name && labels[TeamNodeLabel] == value {
-			return nil
+		compatible, err := b.compatibleSharedPool(*pool, class, corev1.ResourceList{})
+		if err != nil {
+			return err
 		}
+		if pool.GetUID() != owner.UID || pool.GetDeletionTimestamp() != nil || claim.GetLabels()["karpenter.sh/nodepool"] != owner.Name || !compatible {
+			return ErrNoDedicatedNode
+		}
+		for _, key := range []string{CloudClassLabel, PoolNamespaceLabel, WarmNamespaceLabel} {
+			if node.Labels[key] != labels[key] || claim.GetLabels()[key] != labels[key] {
+				return ErrNoDedicatedNode
+			}
+		}
+		return nil
 	}
 	return ErrNoDedicatedNode
+}
+
+func hasDedicatedTaint(taints []corev1.Taint) bool {
+	return slices.ContainsFunc(taints, func(t corev1.Taint) bool {
+		return t.Key == DedicatedTaint && t.Value == "true" && t.Effect == corev1.TaintEffectNoSchedule
+	})
+}
+
+func (b *KubernetesBoundary) warmPlaceholder(ctx context.Context, pod corev1.Pod, node corev1.Node) (bool, error) {
+	namespace := node.Labels[WarmNamespaceLabel]
+	if namespace == "" || pod.Namespace != namespace || pod.Labels[WarmPlaceholderLabel] != "true" || pod.Spec.PriorityClassName != WarmPriorityClass || pod.Spec.Priority == nil || *pod.Spec.Priority >= 0 || len(pod.Spec.Volumes) != 0 {
+		return false, nil
+	}
+	for _, owner := range pod.OwnerReferences {
+		if owner.APIVersion != "apps/v1" || owner.Kind != "ReplicaSet" || owner.Name == "" || owner.UID == "" || owner.Controller == nil || !*owner.Controller {
+			continue
+		}
+		rs, err := b.Kube.AppsV1().ReplicaSets(namespace).Get(ctx, owner.Name, metav1.GetOptions{})
+		if apierrors.IsNotFound(err) {
+			return false, nil
+		}
+		if err != nil {
+			return false, err
+		}
+		if rs.UID != owner.UID {
+			return false, nil
+		}
+		for _, deployment := range rs.OwnerReferences {
+			if deployment.APIVersion == "apps/v1" && deployment.Kind == "Deployment" && deployment.Name == "sparkwing-cloud-warm-"+node.Labels[CloudClassLabel] && deployment.UID != "" && deployment.Controller != nil && *deployment.Controller {
+				return true, nil
+			}
+		}
+	}
+	return false, nil
+}
+
+func (b *KubernetesBoundary) hasWarmPlaceholder(ctx context.Context, node corev1.Node) (bool, error) {
+	namespace := node.Labels[WarmNamespaceLabel]
+	if namespace == "" {
+		return false, nil
+	}
+	pods, err := b.Kube.CoreV1().Pods(namespace).List(ctx, metav1.ListOptions{FieldSelector: "spec.nodeName=" + node.Name})
+	if err != nil {
+		return false, err
+	}
+	for _, pod := range pods.Items {
+		if pod.Spec.NodeName == node.Name {
+			warm, err := b.warmPlaceholder(ctx, pod, node)
+			if err != nil || warm {
+				return warm, err
+			}
+		}
+	}
+	return false, nil
 }
 
 // Retire cordons the exact reserved node and deletes its owning NodeClaim by UID.

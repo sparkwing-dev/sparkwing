@@ -4,10 +4,25 @@
 {{- end }}
 {{- $namespace := required "warmCapacity.namespace is required" .Values.warmCapacity.namespace }}
 {{- $secret := required "warmCapacity.databaseSecret.name is required" .Values.warmCapacity.databaseSecret.name }}
-{{- $base := include "sparkwing-full.fullname" . | trunc 40 | trimSuffix "-" }}
+{{- $bundle := index .Values "sparkwing-runner-bundle" }}
+{{- $warm := default (printf "%s-cloud-warm" .Release.Namespace) $bundle.launcher.warmNamespace }}
+{{- if or (eq $warm .Release.Namespace) (eq $warm $namespace) }}
+{{- fail "launcher.warmNamespace must differ from the release and job namespaces" }}
+{{- end }}
+{{- $base := "sparkwing-cloud" }}
 {{- if not .Values.warmCapacity.classes }}
 {{- fail "warmCapacity.classes must contain the shared hardware classes" }}
 {{- end }}
+{{- if not (and $bundle.enabled (or $bundle.launcher.enabled $bundle.launcher.serviceAccountName)) }}
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: {{ $warm | quote }}
+  labels:
+    pod-security.kubernetes.io/enforce: restricted
+---
+{{- end }}
+{{- if .Values.warmCapacity.createPriorityClass }}
 apiVersion: scheduling.k8s.io/v1
 kind: PriorityClass
 metadata:
@@ -17,11 +32,12 @@ globalDefault: false
 preemptionPolicy: Never
 description: Evictable Sparkwing warm Cloud capacity.
 ---
+{{- end }}
 apiVersion: keda.sh/v1alpha1
 kind: TriggerAuthentication
 metadata:
   name: {{ $base }}-warm
-  namespace: {{ $.Release.Namespace }}
+  namespace: {{ $warm }}
 spec:
   secretTargetRef:
     - parameter: connection
@@ -34,27 +50,38 @@ spec:
 {{- $requests := required "warmCapacity class requests are required" $config.requests }}
 {{- $_ := required "warmCapacity class requests.cpu is required" $requests.cpu }}
 {{- $_ := required "warmCapacity class requests.memory is required" $requests.memory }}
-{{- $name := printf "%s-warm-%s" $base $class }}
+{{- $cores := trimSuffix "cpu" (trimPrefix "sparkwing-" $class) }}
+{{- $name := printf "%s-warm-%s" $base $cores }}
 ---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: {{ $name }}
-  namespace: {{ $.Release.Namespace }}
+  namespace: {{ $warm }}
 spec:
   {{- /* KEDA owns replicas after installation; avoid resetting on Helm upgrades. */}}
   {{- if not $.Release.IsUpgrade }}
   replicas: 0
   {{- end }}
+  strategy:
+    type: Recreate
   selector:
     matchLabels:
-      sparkwing.dev/warm-placeholder: {{ $name }}
+      sparkwing.dev/warm-placeholder: "true"
+      sparkwing.dev/cloud-class: {{ $cores | quote }}
   template:
     metadata:
       labels:
-        sparkwing.dev/warm-placeholder: {{ $name }}
+        sparkwing.dev/warm-placeholder: "true"
+        sparkwing.dev/cloud-class: {{ $cores | quote }}
     spec:
       automountServiceAccountToken: false
+      enableServiceLinks: false
+      nodeSelector:
+        kubernetes.io/os: linux
+        node-restriction.kubernetes.io/sparkwing-cloud-class: {{ $cores | quote }}
+        sparkwing.dev/launcher-namespace: {{ $namespace | quote }}
+        sparkwing.dev/warm-namespace: {{ $warm | quote }}
       priorityClassName: {{ $base }}-warm
       terminationGracePeriodSeconds: 0
       tolerations:
@@ -67,13 +94,11 @@ spec:
           requiredDuringSchedulingIgnoredDuringExecution:
             nodeSelectorTerms:
               - matchExpressions:
-                  - key: sparkwing.dev/cloud-namespace
-                    operator: In
-                    values: [{{ $namespace | quote }}]
-                  - key: sparkwing.dev/hardware-class
-                    operator: In
-                    values: [{{ $class | quote }}]
                   - key: node-restriction.kubernetes.io/sparkwing-team-node
+                    operator: DoesNotExist
+                  - key: node-restriction.kubernetes.io/sparkwing-used-team
+                    operator: DoesNotExist
+                  - key: node-restriction.kubernetes.io/sparkwing-used-run
                     operator: DoesNotExist
         podAntiAffinity:
           requiredDuringSchedulingIgnoredDuringExecution:
@@ -102,7 +127,7 @@ apiVersion: keda.sh/v1alpha1
 kind: ScaledObject
 metadata:
   name: {{ $name }}
-  namespace: {{ $.Release.Namespace }}
+  namespace: {{ $warm }}
 spec:
   scaleTargetRef:
     name: {{ $name }}

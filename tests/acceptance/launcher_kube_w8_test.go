@@ -93,20 +93,22 @@ func cloudKubeW8(objects ...runtime.Object) *fake.Clientset {
 
 func cloudPtrW8[T any](v T) *T { return &v }
 
-func cloudProvisionerW8(node *corev1.Node, team string) dynamic.Interface {
+func cloudProvisionerW8(node *corev1.Node, _ string) dynamic.Interface {
 	node.OwnerReferences = []metav1.OwnerReference{{APIVersion: "karpenter.sh/v1", Kind: "NodeClaim", Name: "claim", UID: "claim-uid"}}
 	node.Spec.ProviderID = "aws:///zone/i-node"
+	node.Labels = map[string]string{launcher.CloudClassLabel: "2", launcher.PoolNamespaceLabel: "cloud", launcher.WarmNamespaceLabel: "warm"}
+	node.Spec.Taints = []corev1.Taint{{Key: launcher.DedicatedTaint, Value: "true", Effect: corev1.TaintEffectNoSchedule}}
 	claim := &unstructured.Unstructured{Object: map[string]any{
 		"apiVersion": "karpenter.sh/v1", "kind": "NodeClaim",
-		"metadata": map[string]any{"name": "claim", "uid": "claim-uid", "labels": map[string]any{launcher.TeamNodeLabel: launcher.TeamNodeValue("cloud", team), "karpenter.sh/nodepool": "pool"}, "ownerReferences": []any{map[string]any{"apiVersion": "karpenter.sh/v1", "kind": "NodePool", "name": "pool", "uid": "pool-uid"}}},
+		"metadata": map[string]any{"name": "claim", "uid": "claim-uid", "labels": map[string]any{launcher.CloudClassLabel: "2", launcher.PoolNamespaceLabel: "cloud", launcher.WarmNamespaceLabel: "warm", "karpenter.sh/nodepool": "pool"}, "ownerReferences": []any{map[string]any{"apiVersion": "karpenter.sh/v1", "kind": "NodePool", "name": "pool", "uid": "pool-uid"}}},
 		"status":   map[string]any{"nodeName": node.Name, "providerID": node.Spec.ProviderID},
 	}}
 	pool := &unstructured.Unstructured{Object: map[string]any{
 		"apiVersion": "karpenter.sh/v1", "kind": "NodePool", "metadata": map[string]any{"name": "pool", "uid": "pool-uid"},
 		"spec": map[string]any{"template": map[string]any{
-			"metadata": map[string]any{"labels": map[string]any{launcher.TeamNodeLabel: launcher.TeamNodeValue("cloud", team)}},
-			"spec": map[string]any{"taints": []any{map[string]any{
-				"key": launcher.TeamNodeLabel, "value": launcher.TeamNodeValue("cloud", team), "effect": "NoSchedule",
+			"metadata": map[string]any{"labels": map[string]any{launcher.CloudClassLabel: "2", launcher.PoolNamespaceLabel: "cloud", launcher.WarmNamespaceLabel: "warm"}},
+			"spec": map[string]any{"nodeClassRef": map[string]any{"group": "karpenter.k8s.aws", "kind": "EC2NodeClass", "name": "sparkwing-jobs"}, "taints": []any{map[string]any{
+				"key": launcher.DedicatedTaint, "value": "true", "effect": "NoSchedule",
 			}}},
 		}},
 	}}

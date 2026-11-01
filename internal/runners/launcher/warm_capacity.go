@@ -2,16 +2,14 @@ package launcher
 
 import (
 	"context"
+	"fmt"
+	"slices"
 
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/pkg/match"
-)
-
-const (
-	warmClassLabel     = "sparkwing.dev/hardware-class"
-	warmNamespaceLabel = "sparkwing.dev/cloud-namespace"
 )
 
 func (l *Launcher) reportWarmPools(ctx context.Context) error {
@@ -21,7 +19,7 @@ func (l *Launcher) reportWarmPools(ctx context.Context) error {
 	if !ok {
 		return nil
 	}
-	nodes, err := l.Kube.CoreV1().Nodes().List(ctx, metav1.ListOptions{LabelSelector: warmNamespaceLabel + "=" + l.Config.Namespace + "," + warmClassLabel})
+	nodes, err := l.Kube.CoreV1().Nodes().List(ctx, metav1.ListOptions{LabelSelector: PoolNamespaceLabel + "=" + l.Config.Namespace + "," + CloudClassLabel})
 	if err != nil {
 		return err
 	}
@@ -30,11 +28,11 @@ func (l *Launcher) reportWarmPools(ctx context.Context) error {
 		warm[size.Label] = 0
 	}
 	for _, node := range nodes.Items {
-		class := node.Labels[warmClassLabel]
+		class := fmt.Sprintf("sparkwing-%scpu", node.Labels[CloudClassLabel])
 		if _, known := warm[class]; !known {
 			continue
 		}
-		if !nodeReady(node) || quarantined(node) || node.Labels[TeamNodeLabel] != "" || node.Labels[usedTeamLabel] != "" || node.Labels[usedRunLabel] != "" || node.Annotations[reservationAnnotation] != "" {
+		if !nodeReady(node) || quarantined(node) || node.Labels[TeamNodeLabel] != "" || node.Labels[usedTeamLabel] != "" || node.Labels[usedRunLabel] != "" || node.Annotations[reservationAnnotation] != "" || slices.ContainsFunc(node.Spec.Taints, func(t corev1.Taint) bool { return t.Key == reservationTaint }) {
 			continue
 		}
 		warm[class]++

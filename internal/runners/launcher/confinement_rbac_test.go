@@ -93,6 +93,7 @@ func TestCompleteChartRBACConfinement(t *testing.T) {
 			resources := []confinementResource{
 				{"", "pods", "job", false},
 				{"batch", "jobs", "job", false},
+				{"apps", "replicasets", "warm", false},
 				{"", "secrets", "credential", false},
 				{"networking.k8s.io", "networkpolicies", "boundary", false},
 				{"discovery.k8s.io", "endpointslices", "kubernetes", false},
@@ -154,7 +155,7 @@ func subresource(resource string) string {
 }
 
 func chartLauncherGrant(group, resource, name, namespace, verb string) bool {
-	expectedGroups := map[string]string{"jobs": "batch", "networkpolicies": "networking.k8s.io", "endpointslices": "discovery.k8s.io", "nodeclaims": "karpenter.sh", "nodepools": "karpenter.sh", "validatingadmissionpolicies": "admissionregistration.k8s.io", "validatingadmissionpolicybindings": "admissionregistration.k8s.io"}
+	expectedGroups := map[string]string{"replicasets": "apps", "jobs": "batch", "networkpolicies": "networking.k8s.io", "endpointslices": "discovery.k8s.io", "nodeclaims": "karpenter.sh", "nodepools": "karpenter.sh", "validatingadmissionpolicies": "admissionregistration.k8s.io", "validatingadmissionpolicybindings": "admissionregistration.k8s.io"}
 	if group != expectedGroups[resource] {
 		return false
 	}
@@ -166,6 +167,12 @@ func chartLauncherGrant(group, resource, name, namespace, verb string) bool {
 		}
 		if namespace == "cloud-cloud-jobs" {
 			verbs = "create get delete"
+		} else if namespace == "cloud-cloud-warm" {
+			verbs = "get delete"
+		}
+	case "replicasets":
+		if namespace == "cloud-cloud-warm" {
+			verbs = "get"
 		}
 	case "jobs":
 		if namespace == "cloud-cloud-jobs" {

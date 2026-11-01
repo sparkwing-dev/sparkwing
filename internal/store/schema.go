@@ -181,6 +181,7 @@ var schemaTables = []schemaTable{
 	{Name: "approvals", Owner: schemaTenant},
 	{Name: "billable_intervals", Owner: schemaTenant, RetainOnTeamDeletion: true},
 	{Name: "billing_awards", Owner: schemaTenant, RetainOnTeamDeletion: true},
+	{Name: "cloud_job_capacity", Owner: schemaTenant},
 	{Name: "billing_pages", Owner: schemaTenant},
 	{Name: "blob_members", Owner: schemaTenant},
 	{Name: "blob_receipts", Owner: schemaTenant},

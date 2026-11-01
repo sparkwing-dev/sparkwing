@@ -20,6 +20,7 @@ import (
 	"k8s.io/apiserver/pkg/cel/environment"
 
 	swadmission "github.com/sparkwing-dev/sparkwing/internal/admission"
+	"github.com/sparkwing-dev/sparkwing/pkg/match"
 )
 
 const (
@@ -42,6 +43,7 @@ func newAdmissionFixture(t *testing.T) *admissionFixture {
 	l, _, boundary, control := fixture()
 	l.Config.DockerImage = testDockerImage
 	f := &admissionFixture{l: l, award: *control.award}
+	f.award.CPUCores, f.award.Memory = 2, match.CloudSizeMemoryBytes(2)
 	f.award.Binding.OwnerDeadline = time.Now().Add(time.Hour)
 	f.award.Binding.ParentCapabilityExpiry = time.Now().Add(2 * time.Hour)
 	var err error
@@ -108,6 +110,18 @@ func (f *admissionFixture) podCreates(t *testing.T, job *batchv1.Job) []admissio
 	}
 	cases := []admissionCase{
 		{name: "capacity", user: testLauncher, object: f.capacity(t)},
+		{name: "capacity_other_identity", user: testIntruder, object: f.capacity(t), reason: "only the launcher"},
+		{name: "capacity_team_selector", user: testLauncher, object: capacity(func(p *corev1.Pod) {
+			p.Spec.NodeSelector[TeamNodeLabel] = TeamNodeValue(f.l.Config.Namespace, f.award.Binding.Team)
+		}), reason: "shared class and launcher namespace"},
+		{name: "capacity_missing_selector", user: testLauncher, object: capacity(func(p *corev1.Pod) { p.Spec.NodeSelector = nil }), reason: "shared class and launcher namespace"},
+		{name: "capacity_missing_class", user: testLauncher, object: capacity(func(p *corev1.Pod) { delete(p.Spec.NodeSelector, CloudClassLabel) }), reason: "shared class and launcher namespace"},
+		{name: "capacity_invalid_class", user: testLauncher, object: capacity(func(p *corev1.Pod) { p.Spec.NodeSelector[CloudClassLabel] = "3" }), reason: "shared class and launcher namespace"},
+		{name: "capacity_other_namespace", user: testLauncher, object: capacity(func(p *corev1.Pod) { p.Spec.NodeSelector[PoolNamespaceLabel] = "other" }), reason: "shared class and launcher namespace"},
+		{name: "capacity_other_selector", user: testLauncher, object: capacity(func(p *corev1.Pod) { p.Spec.NodeSelector[corev1.LabelHostname] = "node" }), reason: "shared class and launcher namespace"},
+		{name: "capacity_team_toleration", user: testLauncher, object: capacity(func(p *corev1.Pod) {
+			p.Spec.Tolerations[1] = corev1.Toleration{Key: TeamNodeLabel, Value: TeamNodeValue(f.l.Config.Namespace, f.award.Binding.Team), Operator: corev1.TolerationOpEqual, Effect: corev1.TaintEffectNoSchedule}
+		}), reason: "dedicated tolerations"},
 		{name: "launcher_probe_pod", user: testLauncher, object: capacity(func(p *corev1.Pod) { p.Name = "sw-boundary-control-x" }), reason: "only Cloud Job and capacity Pods"},
 		{name: "job_pod", user: testJobController, object: jobPod(job)},
 		{name: "eks_mutated_job_pod", user: testJobController, object: pod(eksMutate)},
@@ -201,17 +215,25 @@ func (f *admissionFixture) podCreates(t *testing.T, job *batchv1.Job) []admissio
 			p.Spec.Containers[0].SecurityContext = &corev1.SecurityContext{Privileged: ptr(true)}
 		}), reason: "runs privileged"},
 		{name: "capacity_host_pid", user: testLauncher, object: capacity(func(p *corev1.Pod) { p.Spec.HostPID = true }), reason: "host namespaces"},
+		{name: "job_shared_pool_selector", user: testJobController, object: pod(func(p *corev1.Pod) {
+			p.Spec.NodeSelector = map[string]string{CloudClassLabel: "2", PoolNamespaceLabel: f.l.Config.Namespace}
+		}), reason: "own team's nodes"},
+		{name: "job_dedicated_toleration_exists", user: testJobController, object: pod(func(p *corev1.Pod) {
+			p.Spec.Tolerations[1].Operator = corev1.TolerationOpExists
+			p.Spec.Tolerations[1].Value = ""
+		}), reason: "dedicated tolerations"},
+		{name: "job_dedicated_toleration_wrong_value", user: testJobController, object: pod(func(p *corev1.Pod) { p.Spec.Tolerations[1].Value = "other" }), reason: "dedicated tolerations"},
 		{name: "missing_node_selector", user: testJobController, object: pod(func(p *corev1.Pod) { p.Spec.NodeSelector = nil }), reason: "own team's nodes"},
 		{name: "extra_toleration", user: testJobController, object: pod(func(p *corev1.Pod) {
 			p.Spec.Tolerations = append(p.Spec.Tolerations, corev1.Toleration{Operator: corev1.TolerationOpExists})
-		}), reason: "own team's nodes"},
+		}), reason: "dedicated tolerations"},
 		{name: "toleration_seconds", user: testJobController, object: pod(func(p *corev1.Pod) {
 			toleration := p.Spec.Tolerations[1]
 			toleration.Effect = corev1.TaintEffectNoExecute
 			toleration.TolerationSeconds = ptr(int64(30))
 			p.Spec.Tolerations = append(p.Spec.Tolerations, toleration)
-		}), reason: "own team's nodes"},
-		{name: "missing_toleration", user: testJobController, object: pod(func(p *corev1.Pod) { p.Spec.Tolerations = p.Spec.Tolerations[:1] }), reason: "own team's nodes"},
+		}), reason: "dedicated tolerations"},
+		{name: "missing_toleration", user: testJobController, object: pod(func(p *corev1.Pod) { p.Spec.Tolerations = p.Spec.Tolerations[:1] }), reason: "dedicated tolerations"},
 		{name: "wrong_team_label", user: testJobController, object: pod(func(p *corev1.Pod) { p.Labels[TeamLabel] = swadmission.TeamNodeHash("other-team") }), reason: "own team's nodes"},
 		{name: "injected_label", user: testJobController, object: pod(func(p *corev1.Pod) { p.Labels["escape"] = "true" }), reason: "launcher's labels"},
 		{name: "unknown_gate", user: testJobController, object: pod(func(p *corev1.Pod) {
@@ -436,19 +458,19 @@ func TestAdmissionPolicyNodeFailureTolerations(t *testing.T) {
 			toleration := corev1.Toleration{Key: corev1.TaintNodeNotReady, Operator: corev1.TolerationOpExists, Effect: corev1.TaintEffectNoExecute, TolerationSeconds: ptr(int64(300))}
 			mutate(&toleration)
 			p.Spec.Tolerations = append(p.Spec.Tolerations, toleration)
-			refused(t, celAdmit(t, f.policies(), admissionCase{operation: string(admissionv1.Create), user: testJobController, object: p}), "own team's nodes")
+			refused(t, celAdmit(t, f.policies(), admissionCase{operation: string(admissionv1.Create), user: testJobController, object: p}), "dedicated tolerations")
 		})
 	}
-	for name, index := range map[string]int{"duplicate_cpu": 0, "duplicate_team": 1, "duplicate_failure": 2} {
+	for name, index := range map[string]int{"duplicate_cpu": 0, "duplicate_dedicated": 1, "duplicate_failure": 2} {
 		t.Run(name, func(t *testing.T) {
 			p := jobPod(job)
 			p.Spec.Tolerations = append(p.Spec.Tolerations, corev1.Toleration{Key: corev1.TaintNodeNotReady, Operator: corev1.TolerationOpExists, Effect: corev1.TaintEffectNoExecute, TolerationSeconds: ptr(int64(300))})
 			p.Spec.Tolerations = append(p.Spec.Tolerations, p.Spec.Tolerations[index])
-			refused(t, celAdmit(t, f.policies(), admissionCase{operation: string(admissionv1.Create), user: testJobController, object: p}), "own team's nodes")
+			refused(t, celAdmit(t, f.policies(), admissionCase{operation: string(admissionv1.Create), user: testJobController, object: p}), "dedicated tolerations")
 		})
 	}
 	t.Run("job_template", func(t *testing.T) {
 		job.Spec.Template.Spec.Tolerations = append(job.Spec.Template.Spec.Tolerations, corev1.Toleration{Key: corev1.TaintNodeNotReady, Operator: corev1.TolerationOpExists, Effect: corev1.TaintEffectNoExecute, TolerationSeconds: ptr(int64(300))})
-		refused(t, celAdmit(t, f.policies(), admissionCase{operation: string(admissionv1.Create), user: testLauncher, object: job}), "own team's nodes")
+		refused(t, celAdmit(t, f.policies(), admissionCase{operation: string(admissionv1.Create), user: testLauncher, object: job}), "dedicated tolerations")
 	})
 }

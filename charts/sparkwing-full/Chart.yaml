@@ -35,7 +35,7 @@ maintainers:
 
 dependencies:
   - name: sparkwing-runner-bundle
-    version: "0.1.18"
+    version: "0.1.19"
     repository: "file://../sparkwing-runner-bundle"
     # condition lets operators disable the runner side entirely
     # (e.g. they already have runners deployed elsewhere and just

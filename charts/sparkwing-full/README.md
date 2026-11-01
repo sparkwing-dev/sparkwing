@@ -196,28 +196,54 @@ The example references an existing `sparkwing-tls` certificate Secret.
 ## Cloud node and network prerequisites
 
 The launcher runs on infrastructure nodes with its own Kubernetes identity. Job
-code runs as UID 1000 in a user-namespaced Pod whose DinD sidecar is root only
+code runs in a user-namespaced Pod whose DinD sidecar is root only
 inside that namespace, under `sparkwing-customer-job`,
 which has no API token or cloud annotations. Do not attach an IRSA role or create
 a Pod Identity association for this account. Customer Pods with AWS credential
 injections are rejected. Each Job carries `karpenter.sh/do-not-disrupt: "true"`. Jobs tolerate
-`sparkwing.dev/cpu-band:NoSchedule`, including the existing `small` band, and keep
+`sparkwing.dev/dedicated=true:NoSchedule`, and keep
 the fixed aggregate 20 GiB scratch budget including DinD.
 
-Cloud capacity uses one shared Karpenter NodePool per hardware class. Each pool
-sets `sparkwing.dev/hardware-class=sparkwing-<cores>cpu` and the generic
-`sparkwing.dev/dedicated=true:NoSchedule` taint. Never place team labels on a
-NodePool template. The launcher binds each fresh node to exactly one team and
-run, retains the protected used-team/run fences and retires it after that run.
-A bound node cannot return to the warm pool.
+Each deployment needs one shared Karpenter NodePool per hardware class:
+
+- Set `node-restriction.kubernetes.io/sparkwing-cloud-class` to the requested
+  vCPU class, such as `"2"`, and `sparkwing.dev/launcher-namespace` to the
+  launcher's Cloud Job namespace. Set `sparkwing.dev/warm-namespace` to the
+  dedicated warm namespace holding warm Deployments. Add `sparkwing.dev/dedicated=true:NoSchedule`.
+  Start from [the shared NodePool example](examples/shared-nodepool.yaml).
+  Keep team labels and team taints out of pool templates. Team creation requires
+  no infrastructure change.
+- Enable Node authorizer and NodeRestriction. The launcher proves the node's
+  NodeClaim UID, node name/provider identity, owning NodePool UID, and matching
+  shared class/deployment labels and dedicated taint. A first reservation binds
+  the exact protected team label and permanent used-team and used-run labels.
+  Clearing a reservation keeps all three. Used nodes never move to another
+  team or run. Jobs of the same run may share their node.
+- With no vacant Ready node, the launcher creates an unbound `sw-capacity-*` Pod
+  selecting only the requested class and deployment. Its resources remain the
+  award's resources. Karpenter supplies a node from the shared pool, which the
+  launcher then binds. The request remains until reservation or award cleanup.
+  A missing class pool ends the unit as `cloud_capacity_unconfigured` and
+  refunds the unstarted credit hold. Scaling or exhaustion keeps waiting.
+- Use `consolidationPolicy: WhenEmpty` and `consolidateAfter: 10m`, longer than
+  the 3-minute award lease, so a node survives a launcher restart until its
+  unit is re-awarded. Cap fleet cost with NodePool `limits`.
+- Low-priority placeholder Deployments hold warm nodes. Upsizing takes only an
+  idle warm node one class larger to avoid a cold start. Operator setting
+  `cloud_upsize_enabled` defaults to true. Billing and cgroup limits retain the
+  requested class, and cold requests never ask for a larger node.
 
 Set `warmCapacity.enabled=true`, `warmCapacity.namespace` to the launcher's job
 namespace and `warmCapacity.databaseSecret.name` to a separate read-only
 PostgreSQL DSN Secret. Infrastructure installs KEDA. The chart renders a
 low-priority pause Deployment and PostgreSQL ScaledObject per catalog class.
-Each placeholder holds one node, using the catalog's CPU, memory and scratch
-requests; infrastructure must provide enough allocatable resources after system
-and DaemonSet overhead. Real jobs evict the placeholder. Helm leaves replica
+Each volume-free placeholder holds one unused node, using the catalog's CPU, memory and scratch requests; infrastructure must provide enough allocatable resources after system
+and DaemonSet overhead. Real jobs evict the placeholder. Placeholders and KEDA resources run in
+`sparkwing-runner-bundle.launcher.warmNamespace`, defaulting to
+`<release namespace>-cloud-warm`. The DSN Secret must exist there and grant
+SELECT only on `warm_pool_desired`. Set `warmCapacity.createPriorityClass=false`
+for additional releases sharing the cluster; one release owns the fixed
+`sparkwing-cloud-warm` PriorityClass. Helm leaves replica
 counts to KEDA on upgrades.
 
 All classes default Off. The operator console's **Warm capacity** page and
@@ -233,13 +259,13 @@ for exact KEDA manifests, the reader role and Secret, and shared-pool labels.
   allocatable ephemeral storage. The example's ceilings are 2 CPU and 8 GiB.
 - The cluster must support native sidecars, `PodLevelResources` and
   `admissionregistration.k8s.io/v1` ValidatingAdmissionPolicy (Kubernetes 1.30+).
-- Job and team nodes run AL2023 (containerd 2.1 or later) with the kubelet's
+- Cloud nodes run AL2023 (containerd 2.1 or later) with the kubelet's
   `userNamespaces.idsPerPod` at 262144 and runc's `cgroup_writable = true`,
   set through a nodeadm NodeConfig. idsPerPod must be a power of two when the
   kubelet has no subuid entry. Without writable cgroups dockerd cannot create
   container cgroups. Bottlerocket exposes no `cgroup_writable` setting, so it
   cannot run Cloud Jobs.
-- Install the chart's `files/seccomp/sparkwing-dind.json` on every job and team
+- Install the chart's `files/seccomp/sparkwing-dind.json` on every Cloud
   node at `/var/lib/kubelet/seccomp/profiles/sparkwing-dind.json`. The Docker
   sidecar names it as a Localhost profile, so a node without it cannot start
   Job Pods. It is Docker's default profile with the `CAP_SYS_ADMIN` and

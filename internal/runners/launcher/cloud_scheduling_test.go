@@ -42,7 +42,7 @@ func FuzzCloudSchedulingPreservesTeamAndDocker(f *testing.F) {
 		teamTaint := false
 		found := false
 		for _, toleration := range pod.Spec.Tolerations {
-			if toleration.Key == TeamNodeLabel && toleration.Value == TeamNodeValue("cloud", team) && toleration.Operator == corev1.TolerationOpEqual && toleration.Effect == corev1.TaintEffectNoSchedule {
+			if toleration.Key == DedicatedTaint && toleration.Value == "true" && toleration.Operator == corev1.TolerationOpEqual && toleration.Effect == corev1.TaintEffectNoSchedule {
 				teamTaint = true
 			}
 			if toleration.Key == "sparkwing.dev/cpu-band" && toleration.Operator == corev1.TolerationOpExists && toleration.Effect == corev1.TaintEffectNoSchedule {

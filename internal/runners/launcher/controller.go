@@ -67,7 +67,7 @@ func (c *ControllerControl) Claim(ctx context.Context, namespace string, exclude
 	if resources == nil {
 		return nil, errors.New("Cloud award is missing its committed allocation")
 	}
-	award := &CloudJobAward{LeaseExpiresAt: unit.LeaseExpiresAt, Binding: binding, Bootstrap: []byte(unit.Capability), Engine: unit.Engine, CPUCores: resources.Cores, Memory: resources.MemoryBytes}
+	award := &CloudJobAward{LeaseExpiresAt: unit.LeaseExpiresAt, Binding: binding, Bootstrap: []byte(unit.Capability), Engine: unit.Engine, CPUCores: resources.Cores, Memory: resources.MemoryBytes, UpsizeEnabled: unit.CloudUpsizeEnabled}
 	if err := validateAward(*award); err != nil {
 		return nil, err
 	}
@@ -155,7 +155,7 @@ func (c *ControllerControl) Sync(ctx context.Context, observations []CloudJobObs
 				if r.Award != observed.Award || r.NodeUID != observation.NodeUID || r.JobName != observation.JobName || r.Team != observation.Binding.Team || r.NodeName == "" || r.ReservationID == "" || observation.ReservationID != "" || observation.Rejected {
 					return nil, errors.New("activation does not match the execution reservation")
 				}
-				request.Activations = append(request.Activations, capability.LauncherActivation{Award: r.Award, NodeUID: r.NodeUID, ReservationID: r.ReservationID})
+				request.Activations = append(request.Activations, capability.LauncherActivation{Award: r.Award, NodeUID: r.NodeUID, ReservationID: r.ReservationID, Capacity: &capability.CloudCapacityGrant{RequestedClass: "sparkwing-" + r.RequestedClass + "cpu", GrantedClass: "sparkwing-" + r.GrantedClass + "cpu", WaitedForFreshNode: r.WaitedForFreshNode}})
 			}
 		}
 		if !observation.Unheld {

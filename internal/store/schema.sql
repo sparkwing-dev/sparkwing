@@ -175,10 +175,6 @@ CREATE TABLE nodes (
     requested_cores DOUBLE PRECISION NOT NULL DEFAULT 0 CHECK(requested_cores >= 0),
     requested_memory_bytes BIGINT NOT NULL DEFAULT 0 CHECK(requested_memory_bytes >= 0),
     requested_slots BIGINT NOT NULL DEFAULT 1 CHECK(requested_slots >= 0),
-    requested_class TEXT NOT NULL DEFAULT '',
-    granted_class TEXT NOT NULL DEFAULT '',
-    fresh_node_wait BIGINT NOT NULL DEFAULT 0 CHECK(fresh_node_wait IN (0,1)),
-    start_latency_ns BIGINT CHECK(start_latency_ns >= 0),
     offer_started_at BIGINT,
     placement_reason TEXT NOT NULL DEFAULT '',
     placement_hold_from BIGINT,
@@ -1538,6 +1534,23 @@ CREATE INDEX idx_billing_awards_requester ON billing_awards(team,requester_accou
 
 CREATE UNIQUE INDEX idx_billing_awards_unit_generation ON billing_awards(team,run_id,node_id,unit_kind,generation);
 
+CREATE TABLE cloud_job_capacity (
+    team TEXT NOT NULL REFERENCES teams(name),
+    reservation_id TEXT NOT NULL,
+    requested_class TEXT NOT NULL,
+    granted_class TEXT,
+    waited_for_fresh_node BIGINT NOT NULL DEFAULT 0 CHECK(waited_for_fresh_node IN (0,1)),
+    claimed_at BIGINT NOT NULL,
+    started_at BIGINT,
+    claim_to_start_ns BIGINT CHECK(claim_to_start_ns >= 0),
+    PRIMARY KEY(team,reservation_id),
+    FOREIGN KEY(team,reservation_id) REFERENCES billing_awards(team,reservation_id) ON DELETE CASCADE,
+    CHECK((started_at IS NULL) = (claim_to_start_ns IS NULL)),
+    CHECK(started_at IS NULL OR started_at >= claimed_at)
+);
+
+CREATE INDEX idx_cloud_job_capacity_started ON cloud_job_capacity(started_at,requested_class);
+
 CREATE TABLE billable_intervals (
     team TEXT NOT NULL REFERENCES teams(name),
     id TEXT NOT NULL PRIMARY KEY,
@@ -1823,25 +1836,26 @@ CREATE TABLE warm_pool_observations (
     observed_at BIGINT NOT NULL
 );
 
-CREATE INDEX idx_nodes_warm_starts ON nodes(execution_started_at,requested_class) WHERE start_latency_ns IS NOT NULL;
-CREATE INDEX idx_nodes_cold_waits ON nodes(COALESCE(execution_started_at,ready_at),requested_class) WHERE fresh_node_wait=1;
-
 CREATE VIEW warm_pool_desired AS
-WITH starts AS (
-    SELECT requested_class AS class, start_latency_ns,
-           ROW_NUMBER() OVER (PARTITION BY requested_class ORDER BY start_latency_ns) AS position,
+WITH jobs AS (
+    SELECT c.* FROM cloud_job_capacity c
+    JOIN billing_awards b ON b.team=c.team AND b.reservation_id=c.reservation_id
+    WHERE b.unit_kind='node'
+), starts AS (
+    SELECT requested_class AS class, claim_to_start_ns,
+           ROW_NUMBER() OVER (PARTITION BY requested_class ORDER BY claim_to_start_ns) AS position,
            COUNT(*) OVER (PARTITION BY requested_class) AS total
-    FROM nodes
-    WHERE execution_started_at >= DATABASE_TIMESTAMP - 3600000000000
-      AND execution_started_at <= DATABASE_TIMESTAMP AND start_latency_ns IS NOT NULL
+    FROM jobs
+    WHERE started_at >= DATABASE_TIMESTAMP - 3600000000000
+      AND started_at <= DATABASE_TIMESTAMP AND claim_to_start_ns IS NOT NULL
 ), medians AS (
-    SELECT class, AVG(start_latency_ns / 1000000000.0) AS median_seconds
+    SELECT class, AVG(claim_to_start_ns / 1000000000.0) AS median_seconds
     FROM starts WHERE position IN ((total + 1) / 2, (total + 2) / 2) GROUP BY class
 ), waits AS (
     SELECT requested_class AS class, (COUNT(*) + 1) / 2 AS desired
-    FROM nodes WHERE fresh_node_wait = 1
-      AND COALESCE(execution_started_at, ready_at) >= DATABASE_TIMESTAMP - 1800000000000
-      AND COALESCE(execution_started_at, ready_at) <= DATABASE_TIMESTAMP
+    FROM jobs WHERE waited_for_fresh_node=1
+      AND COALESCE(started_at,claimed_at) >= DATABASE_TIMESTAMP - 1800000000000
+      AND COALESCE(started_at,claimed_at) <= DATABASE_TIMESTAMP
     GROUP BY requested_class
 ), demand AS (
     SELECT s.*, CASE WHEN o.observed_at >= DATABASE_TIMESTAMP - 120000000000

@@ -4,10 +4,10 @@ import (
 	"os"
 	"reflect"
 	"slices"
-	"strings"
 	"testing"
 	"time"
 
+	corev1 "k8s.io/api/core/v1"
 	utilyaml "k8s.io/apimachinery/pkg/util/yaml"
 
 	"github.com/sparkwing-dev/sparkwing/internal/controller"
@@ -111,25 +111,39 @@ func TestCloudLauncherDefaultPollHonorsTheControllerIdleInterval(t *testing.T) {
 }
 
 func TestSharedNodePoolExampleOutlivesTheAwardLease(t *testing.T) {
-	data, err := os.ReadFile("sparkwing-full/examples/shared-nodepools.yaml")
+	data, err := os.ReadFile("sparkwing-full/examples/shared-nodepool.yaml")
 	if err != nil {
 		t.Fatal(err)
 	}
 	var pool struct {
 		Spec struct {
+			Template struct {
+				Metadata struct {
+					Labels map[string]string `json:"labels"`
+				} `json:"metadata"`
+				Spec struct {
+					Taints []corev1.Taint `json:"taints"`
+				} `json:"spec"`
+			} `json:"template"`
 			Disruption struct {
 				ConsolidationPolicy string `json:"consolidationPolicy"`
 				ConsolidateAfter    string `json:"consolidateAfter"`
 			} `json:"disruption"`
 		} `json:"spec"`
 	}
-	for _, document := range strings.Split(string(data), "---") {
-		if err := utilyaml.Unmarshal([]byte(document), &pool); err != nil {
-			t.Fatal(err)
-		}
-		after, err := time.ParseDuration(pool.Spec.Disruption.ConsolidateAfter)
-		if err != nil || pool.Spec.Disruption.ConsolidationPolicy != "WhenEmpty" || after <= limits.DefaultLease {
-			t.Fatalf("shared NodePool disruption %+v must consolidate only empty nodes after more than %s: %v", pool.Spec.Disruption, limits.DefaultLease, err)
-		}
+	if err := utilyaml.Unmarshal(data, &pool); err != nil {
+		t.Fatal(err)
+	}
+	labels := pool.Spec.Template.Metadata.Labels
+	if labels[launcher.CloudClassLabel] != "2" || labels[launcher.PoolNamespaceLabel] != "sparkwing-cloud-jobs" || labels[launcher.WarmNamespaceLabel] != "sparkwing-cloud-warm" || labels[launcher.TeamNodeLabel] != "" {
+		t.Fatalf("shared NodePool labels = %v", labels)
+	}
+	wantTaints := []corev1.Taint{{Key: launcher.DedicatedTaint, Value: "true", Effect: corev1.TaintEffectNoSchedule}}
+	if !reflect.DeepEqual(pool.Spec.Template.Spec.Taints, wantTaints) {
+		t.Fatalf("shared NodePool taints = %v, want %v", pool.Spec.Template.Spec.Taints, wantTaints)
+	}
+	after, err := time.ParseDuration(pool.Spec.Disruption.ConsolidateAfter)
+	if err != nil || pool.Spec.Disruption.ConsolidationPolicy != "WhenEmpty" || after <= limits.DefaultLease {
+		t.Fatalf("shared NodePool disruption %+v must consolidate only empty nodes after more than %s: %v", pool.Spec.Disruption, limits.DefaultLease, err)
 	}
 }

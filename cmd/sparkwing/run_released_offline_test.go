@@ -221,50 +221,11 @@ func inspectReleasedOffline(t *testing.T, spec source.Spec, options source.Optio
 
 func releasedSDKProxy(t *testing.T, root, version string) string {
 	t.Helper()
-	stage := t.TempDir()
-	list := exec.Command("go", "list", "-deps", "-json", "./sparkwing")
-	list.Dir = root
-	output, err := list.Output()
-	if err != nil {
-		t.Fatal(err)
-	}
-	decoder := json.NewDecoder(bytes.NewReader(output))
-	for decoder.More() {
-		var pkg struct {
-			Dir                           string
-			Module                        *struct{ Path string }
-			GoFiles, CgoFiles, EmbedFiles []string
-		}
-		if err := decoder.Decode(&pkg); err != nil {
-			t.Fatal(err)
-		}
-		if pkg.Module == nil || pkg.Module.Path != engine.GoModule {
-			continue
-		}
-		for _, file := range append(append(pkg.GoFiles, pkg.CgoFiles...), pkg.EmbedFiles...) {
-			input := filepath.Join(pkg.Dir, file)
-			relative, err := filepath.Rel(root, input)
-			if err != nil || strings.HasPrefix(relative, "..") {
-				t.Fatalf("SDK fixture escaped root: %s: %v", input, err)
-			}
-			body, err := os.ReadFile(input)
-			if err != nil {
-				t.Fatal(err)
-			}
-			destination := filepath.Join(stage, relative)
-			if err := os.MkdirAll(filepath.Dir(destination), 0o700); err != nil {
-				t.Fatal(err)
-			}
-			if err := os.WriteFile(destination, body, 0o600); err != nil {
-				t.Fatal(err)
-			}
-		}
-	}
+	stage := sdkFixtureModuleRoot(t)
 	body, err := os.ReadFile(filepath.Join(root, "go.mod"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	writeFile(t, filepath.Join(stage, "go.mod"), string(body))
 	proxy := t.TempDir()
 	versions := filepath.Join(proxy, engine.GoModule, "@v")
 	if err := os.MkdirAll(versions, 0o700); err != nil {

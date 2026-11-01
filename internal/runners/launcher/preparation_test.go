@@ -91,12 +91,12 @@ type preparationBoundary struct {
 	ready <-chan struct{}
 }
 
-func (b preparationBoundary) Reserve(ctx context.Context, binding CloudJobBinding, name string) (CloudNodeReservation, error) {
+func (b preparationBoundary) Reserve(ctx context.Context, binding CloudJobBinding, name string, placement CloudPlacement) (CloudNodeReservation, error) {
 	select {
 	case <-ctx.Done():
 		return CloudNodeReservation{}, context.Cause(ctx)
 	case <-b.ready:
-		return b.CloudBoundary.Reserve(ctx, binding, name)
+		return b.CloudBoundary.Reserve(ctx, binding, name, placement)
 	}
 }
 

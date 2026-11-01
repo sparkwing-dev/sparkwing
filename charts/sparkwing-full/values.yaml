@@ -449,10 +449,13 @@ sparkwing-runner-bundle:
 # Off; enabling this infrastructure alone reserves no warm capacity.
 warmCapacity:
   enabled: false
+  # Create once per cluster; other releases reuse sparkwing-cloud-warm.
+  createPriorityClass: true
   # Cloud job namespace used to scope the shared node pools. Placeholders and
-  # KEDA resources themselves run in the release namespace.
+  # KEDA resources run in sparkwing-runner-bundle.launcher.warmNamespace.
   namespace: ""
   image: registry.k8s.io/pause:3.10
+  # Secret in the warm namespace; its DSN grants SELECT on warm_pool_desired only.
   databaseSecret:
     name: ""
     key: dsn

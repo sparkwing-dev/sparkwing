@@ -44,12 +44,12 @@ func capacityPodSecurity() *corev1.PodSecurityContext {
 	return &corev1.PodSecurityContext{RunAsUser: ptr(int64(65534)), RunAsGroup: ptr(int64(65534)), RunAsNonRoot: ptr(true), SeccompProfile: &corev1.SeccompProfile{Type: corev1.SeccompProfileTypeRuntimeDefault}}
 }
 
-func teamTolerations(namespace, team string) []corev1.Toleration {
-	return []corev1.Toleration{{Key: "sparkwing.dev/cpu-band", Operator: corev1.TolerationOpExists, Effect: corev1.TaintEffectNoSchedule}, {Key: TeamNodeLabel, Value: TeamNodeValue(namespace, team), Operator: corev1.TolerationOpEqual, Effect: corev1.TaintEffectNoSchedule}}
+func cloudTolerations() []corev1.Toleration {
+	return []corev1.Toleration{{Key: "sparkwing.dev/cpu-band", Operator: corev1.TolerationOpExists, Effect: corev1.TaintEffectNoSchedule}, {Key: DedicatedTaint, Value: "true", Operator: corev1.TolerationOpEqual, Effect: corev1.TaintEffectNoSchedule}}
 }
 
-// safety: the pod lands on an unused node of the team's own pool or this run's
-// warm node, never another run's, and carries nothing from the award beyond its unit fence, size and deadline.
+// safety: requests carry only a unit fence, size and deadline. They select fresh
+// shared capacity or this run's used node, never another run's node.
 func capacityPod(cfg CloudJobConfig, d capacityDemand) (*corev1.Pod, error) {
 	budget, err := cloudBudget(cfg, CloudJobAward{CPUCores: d.CPUCores, Memory: d.Memory})
 	if err != nil {
@@ -73,12 +73,12 @@ func capacityPod(cfg CloudJobConfig, d capacityDemand) (*corev1.Pod, error) {
 			Annotations: map[string]string{deadlineAnnotation: deadline.Format(time.RFC3339Nano), demandAnnotation: string(demand)},
 		},
 		Spec: corev1.PodSpec{
-			Tolerations: teamTolerations(cfg.Namespace, b.Team), NodeSelector: map[string]string{TeamNodeLabel: TeamNodeValue(cfg.Namespace, b.Team)},
+			Tolerations: cloudTolerations(), NodeSelector: map[string]string{CloudClassLabel: cpuClass(d.CPUCores), PoolNamespaceLabel: cfg.Namespace},
 			// safety: a request that fit on another run's warm node would hold it without ever
 			// being placed there, and Karpenter would add no node for it.
 			Affinity: &corev1.Affinity{NodeAffinity: &corev1.NodeAffinity{RequiredDuringSchedulingIgnoredDuringExecution: &corev1.NodeSelector{NodeSelectorTerms: []corev1.NodeSelectorTerm{
-				{MatchExpressions: []corev1.NodeSelectorRequirement{{Key: usedRunLabel, Operator: corev1.NodeSelectorOpDoesNotExist}}},
-				{MatchExpressions: []corev1.NodeSelectorRequirement{{Key: usedRunLabel, Operator: corev1.NodeSelectorOpIn, Values: []string{runNodeValue(cfg.Namespace, b.RunID)}}}},
+				{MatchExpressions: []corev1.NodeSelectorRequirement{{Key: usedRunLabel, Operator: corev1.NodeSelectorOpDoesNotExist}, {Key: usedTeamLabel, Operator: corev1.NodeSelectorOpDoesNotExist}, {Key: TeamNodeLabel, Operator: corev1.NodeSelectorOpDoesNotExist}}},
+				{MatchExpressions: []corev1.NodeSelectorRequirement{{Key: usedRunLabel, Operator: corev1.NodeSelectorOpIn, Values: []string{runNodeValue(cfg.Namespace, b.RunID)}}, {Key: usedTeamLabel, Operator: corev1.NodeSelectorOpIn, Values: []string{TeamNodeValue(cfg.Namespace, b.Team)}}, {Key: TeamNodeLabel, Operator: corev1.NodeSelectorOpIn, Values: []string{TeamNodeValue(cfg.Namespace, b.Team)}}}},
 			}}}},
 			ServiceAccountName: ServiceAccount, AutomountServiceAccountToken: ptr(false), EnableServiceLinks: ptr(false), RestartPolicy: corev1.RestartPolicyNever,
 			TerminationGracePeriodSeconds: ptr(int64(1)),
@@ -134,7 +134,7 @@ func (l *Launcher) awaitCapacity(ctx context.Context, award CloudJobAward) error
 	if err != nil {
 		return err
 	}
-	configured, err := l.Boundary.CapacityConfigured(ctx, award.Binding, budget)
+	configured, err := l.Boundary.CapacityConfigured(ctx, budget)
 	if err != nil {
 		return err
 	}
@@ -148,7 +148,7 @@ func (l *Launcher) awaitCapacity(ctx context.Context, award CloudJobAward) error
 	if !states[jobName(award.Binding)].Delete {
 		return errors.New("controller deferred unconfigured Cloud capacity")
 	}
-	l.logger().Error("Cloud capacity is not configured; configure the team's NodePool template label and taint", "team", award.Binding.Team, "node_label", TeamNodeLabel, "node_label_value", TeamNodeValue(l.Config.Namespace, award.Binding.Team), "support_reference", award.Binding.RunID)
+	l.logger().Error("Cloud capacity is not configured; configure the shared NodePool for the requested hardware class", "team", award.Binding.Team, "requested_class", cpuClass(award.CPUCores), "namespace", l.Config.Namespace, "support_reference", award.Binding.RunID)
 	return l.releaseCapacity(ctx, award.Binding)
 }
 

@@ -188,14 +188,17 @@ spec:
       && !has(e.valueFrom))))'
     message: containers carry only the launcher's environment and EKS region values,
       never AWS credentials
-  - expression: '!variables.create || variables.team != '''' && variables.spec.?nodeSelector.orValue({})[?''node-restriction.kubernetes.io/sparkwing-team-node''].orValue('''')
-      == variables.team && variables.spec.?tolerations.orValue([]).filter(t, t.?key.orValue('''')
-      == "sparkwing.dev/cpu-band" && t.?operator.orValue(''Equal'') == "Exists" &&
-      t.?value.orValue('''') == "" && t.?effect.orValue('''') == "NoSchedule" && !has(t.tolerationSeconds)).size()
-      == 1 && variables.spec.?tolerations.orValue([]).filter(t, t.?key.orValue('''')
-      == "node-restriction.kubernetes.io/sparkwing-team-node" && t.?operator.orValue(''Equal'')
-      == "Equal" && t.?value.orValue('''') == variables.team && t.?effect.orValue('''')
-      == "NoSchedule" && !has(t.tolerationSeconds)).size() == 1 && variables.spec.?tolerations.orValue([]).filter(t,
+  - expression: '!variables.create || variables.team != '''' && (variables.shape ==
+      ''job'' ? variables.spec.?nodeSelector.orValue({})[?''node-restriction.kubernetes.io/sparkwing-team-node''].orValue('''')
+      == variables.team : size(variables.spec.?nodeSelector.orValue({})) == 2 && variables.spec.?nodeSelector.orValue({})[?''node-restriction.kubernetes.io/sparkwing-cloud-class''].orValue('''')
+      in variables.cloudClasses && variables.spec.?nodeSelector.orValue({})[?''sparkwing.dev/launcher-namespace''].orValue('''')
+      == variables.jobNamespace) && variables.spec.?tolerations.orValue([]).filter(t,
+      t.?key.orValue('''') == "sparkwing.dev/cpu-band" && t.?operator.orValue(''Equal'')
+      == "Exists" && t.?value.orValue('''') == "" && t.?effect.orValue('''') == "NoSchedule"
+      && !has(t.tolerationSeconds)).size() == 1 && variables.spec.?tolerations.orValue([]).filter(t,
+      t.?key.orValue('''') == "sparkwing.dev/dedicated" && t.?operator.orValue(''Equal'')
+      == "Equal" && t.?value.orValue('''') == "true" && t.?effect.orValue('''') ==
+      "NoSchedule" && !has(t.tolerationSeconds)).size() == 1 && variables.spec.?tolerations.orValue([]).filter(t,
       t.?key.orValue('''') == "node.kubernetes.io/not-ready" && t.?operator.orValue(''Equal'')
       == "Exists" && t.?value.orValue('''') == "" && t.?effect.orValue('''') == "NoExecute"
       && has(t.tolerationSeconds) && t.tolerationSeconds >= 0).size() <= 1 && variables.spec.?tolerations.orValue([]).filter(t,
@@ -204,8 +207,8 @@ spec:
       && has(t.tolerationSeconds) && t.tolerationSeconds >= 0).size() <= 1 && variables.spec.?tolerations.orValue([]).all(t,
       (t.?key.orValue('''') == "sparkwing.dev/cpu-band" && t.?operator.orValue(''Equal'')
       == "Exists" && t.?value.orValue('''') == "" && t.?effect.orValue('''') == "NoSchedule"
-      && !has(t.tolerationSeconds)) || (t.?key.orValue('''') == "node-restriction.kubernetes.io/sparkwing-team-node"
-      && t.?operator.orValue(''Equal'') == "Equal" && t.?value.orValue('''') == variables.team
+      && !has(t.tolerationSeconds)) || (t.?key.orValue('''') == "sparkwing.dev/dedicated"
+      && t.?operator.orValue(''Equal'') == "Equal" && t.?value.orValue('''') == "true"
       && t.?effect.orValue('''') == "NoSchedule" && !has(t.tolerationSeconds)) ||
       (t.?key.orValue('''') == "node.kubernetes.io/not-ready" && t.?operator.orValue(''Equal'')
       == "Exists" && t.?value.orValue('''') == "" && t.?effect.orValue('''') == "NoExecute"
@@ -213,7 +216,8 @@ spec:
       == "node.kubernetes.io/unreachable" && t.?operator.orValue(''Equal'') == "Exists"
       && t.?value.orValue('''') == "" && t.?effect.orValue('''') == "NoExecute" &&
       has(t.tolerationSeconds) && t.tolerationSeconds >= 0))'
-    message: Pods select and tolerate only their own team's nodes
+    message: Job Pods select their own team's nodes; capacity Pods select only their
+      shared class and launcher namespace, with dedicated tolerations
   - expression: '!variables.create || (variables.shape == ''capacity'' ? variables.spec.?nodeName.orValue('''')
       == '''' : variables.spec.?nodeName.orValue('''') != '''')'
     message: Job Pods are bound to their reserved node; capacity requests are not
@@ -237,6 +241,10 @@ spec:
     name: create
   - expression: '''{{ $launcher }}'''
     name: launcher
+  - expression: '''{{ $jobs }}'''
+    name: jobNamespace
+  - expression: '["2", "4", "8", "16", "32", "64"]'
+    name: cloudClasses
   - expression: '''{{ $runner }}'''
     name: runnerImage
   - expression: '''{{ $docker }}'''
@@ -446,20 +454,24 @@ spec:
       && !has(e.valueFrom))))'
     message: containers carry only the launcher's environment and EKS region values,
       never AWS credentials
-  - expression: '!variables.create || variables.team != '''' && variables.spec.?nodeSelector.orValue({})[?''node-restriction.kubernetes.io/sparkwing-team-node''].orValue('''')
-      == variables.team && variables.spec.?tolerations.orValue([]).filter(t, t.?key.orValue('''')
-      == "sparkwing.dev/cpu-band" && t.?operator.orValue(''Equal'') == "Exists" &&
-      t.?value.orValue('''') == "" && t.?effect.orValue('''') == "NoSchedule" && !has(t.tolerationSeconds)).size()
-      == 1 && variables.spec.?tolerations.orValue([]).filter(t, t.?key.orValue('''')
-      == "node-restriction.kubernetes.io/sparkwing-team-node" && t.?operator.orValue(''Equal'')
-      == "Equal" && t.?value.orValue('''') == variables.team && t.?effect.orValue('''')
-      == "NoSchedule" && !has(t.tolerationSeconds)).size() == 1 && variables.spec.?tolerations.orValue([]).all(t,
+  - expression: '!variables.create || variables.team != '''' && (variables.shape ==
+      ''job'' ? variables.spec.?nodeSelector.orValue({})[?''node-restriction.kubernetes.io/sparkwing-team-node''].orValue('''')
+      == variables.team : size(variables.spec.?nodeSelector.orValue({})) == 2 && variables.spec.?nodeSelector.orValue({})[?''node-restriction.kubernetes.io/sparkwing-cloud-class''].orValue('''')
+      in variables.cloudClasses && variables.spec.?nodeSelector.orValue({})[?''sparkwing.dev/launcher-namespace''].orValue('''')
+      == variables.jobNamespace) && variables.spec.?tolerations.orValue([]).filter(t,
+      t.?key.orValue('''') == "sparkwing.dev/cpu-band" && t.?operator.orValue(''Equal'')
+      == "Exists" && t.?value.orValue('''') == "" && t.?effect.orValue('''') == "NoSchedule"
+      && !has(t.tolerationSeconds)).size() == 1 && variables.spec.?tolerations.orValue([]).filter(t,
+      t.?key.orValue('''') == "sparkwing.dev/dedicated" && t.?operator.orValue(''Equal'')
+      == "Equal" && t.?value.orValue('''') == "true" && t.?effect.orValue('''') ==
+      "NoSchedule" && !has(t.tolerationSeconds)).size() == 1 && variables.spec.?tolerations.orValue([]).all(t,
       (t.?key.orValue('''') == "sparkwing.dev/cpu-band" && t.?operator.orValue(''Equal'')
       == "Exists" && t.?value.orValue('''') == "" && t.?effect.orValue('''') == "NoSchedule"
-      && !has(t.tolerationSeconds)) || (t.?key.orValue('''') == "node-restriction.kubernetes.io/sparkwing-team-node"
-      && t.?operator.orValue(''Equal'') == "Equal" && t.?value.orValue('''') == variables.team
+      && !has(t.tolerationSeconds)) || (t.?key.orValue('''') == "sparkwing.dev/dedicated"
+      && t.?operator.orValue(''Equal'') == "Equal" && t.?value.orValue('''') == "true"
       && t.?effect.orValue('''') == "NoSchedule" && !has(t.tolerationSeconds)))'
-    message: Pods select and tolerate only their own team's nodes
+    message: Job Pods select their own team's nodes; capacity Pods select only their
+      shared class and launcher namespace, with dedicated tolerations
   - expression: '!variables.create || (variables.shape == ''capacity'' ? variables.spec.?nodeName.orValue('''')
       == '''' : variables.spec.?nodeName.orValue('''') != '''')'
     message: Job Pods are bound to their reserved node; capacity requests are not
@@ -483,6 +495,10 @@ spec:
     name: create
   - expression: '''{{ $launcher }}'''
     name: launcher
+  - expression: '''{{ $jobs }}'''
+    name: jobNamespace
+  - expression: '["2", "4", "8", "16", "32", "64"]'
+    name: cloudClasses
   - expression: '''{{ $runner }}'''
     name: runnerImage
   - expression: '''{{ $docker }}'''

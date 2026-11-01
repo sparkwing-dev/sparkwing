@@ -70,39 +70,45 @@ func WarmCapacityModesAndDemand(t *testing.T, s *Store) {
 		}
 	}
 	now := s.now().UnixNano()
-	if _, err = s.exec(ctx, `UPDATE nodes SET requested_class=?,granted_class=?,fresh_node_wait=1,start_latency_ns=20000000000,execution_started_at=?,ready_at=?`, w.Class, w.Class, now, now); err != nil {
-		t.Fatal(err)
-	}
-	var count int64
-	if err = s.queryRow(ctx, `SELECT COUNT(*) FROM nodes`).Scan(&count); err != nil {
-		t.Fatal(err)
-	}
-	if count != 1 {
-		t.Fatalf("fixture nodes: %d", count)
-	}
-	assertDesired(4)
-	if _, err = s.exec(ctx, `UPDATE nodes SET start_latency_ns=1000000000`); err != nil {
-		t.Fatal(err)
-	}
-	assertDesired(1)
-	if _, err := s.exec(ctx, `INSERT INTO nodes(team,run_id,node_id,status,spec_json,execution_json,requested_class,start_latency_ns,execution_started_at) VALUES ('a','run','median-peer','pending',?,?,?,19000000000,?)`, []byte(`{}`), []byte(`{}`), w.Class, now); err != nil {
-		t.Fatal(err)
-	}
-	assertDesired(1)
-	if _, err := s.exec(ctx, `UPDATE nodes SET start_latency_ns=21000000000 WHERE node_id='median-peer'`); err != nil {
-		t.Fatal(err)
-	}
-	assertDesired(4)
-	if _, err := s.exec(ctx, `DELETE FROM nodes WHERE node_id='median-peer'`); err != nil {
-		t.Fatal(err)
-	}
-	for i := 0; i < 6; i++ {
-		if _, err = s.exec(ctx, `INSERT INTO nodes(team,run_id,node_id,status,spec_json,execution_json,requested_class,granted_class,fresh_node_wait,ready_at) VALUES ('a','run',?,'pending',?,?,?,'',1,?)`, fmt.Sprint("cold-", i), []byte(`{}`), []byte(`{}`), w.Class, now); err != nil {
+	insertCapacity := func(id, kind string, started bool, latency int64, waited bool) {
+		t.Helper()
+		unit := kind
+		if kind == "node" {
+			unit = "job"
+		}
+		if _, err := s.exec(ctx, `INSERT INTO billing_awards(team,reservation_id,capability_prefix,run_id,node_id,generation,payer_team,metered,executor_class,billing_start,unit_kind,billing_unit,awarded_at) VALUES ('a',?,?,'run',?,1,'a',1,'cloud','at_start',?,?,?)`, id, id, id, kind, unit, now); err != nil {
+			t.Fatal(err)
+		}
+		var at, ns any
+		if started {
+			at, ns = now, latency
+		}
+		if _, err := s.exec(ctx, `INSERT INTO cloud_job_capacity(team,reservation_id,requested_class,granted_class,waited_for_fresh_node,claimed_at,started_at,claim_to_start_ns) VALUES ('a',?,?,?, ?,?,?,?)`, id, w.Class, w.Class, boolInt(waited), now-latency, at, ns); err != nil {
 			t.Fatal(err)
 		}
 	}
+	insertCapacity("job", "node", true, 20000000000, true)
 	assertDesired(4)
-	if _, err = s.exec(ctx, `UPDATE nodes SET granted_class='sparkwing-4cpu' WHERE node_id='job'`); err != nil {
+	if _, err = s.exec(ctx, `UPDATE cloud_job_capacity SET claim_to_start_ns=1000000000`); err != nil {
+		t.Fatal(err)
+	}
+	assertDesired(1)
+	insertCapacity("median-peer", "node", true, 19000000000, false)
+	assertDesired(1)
+	if _, err := s.exec(ctx, `UPDATE cloud_job_capacity SET claim_to_start_ns=21000000000 WHERE reservation_id='median-peer'`); err != nil {
+		t.Fatal(err)
+	}
+	assertDesired(4)
+	if _, err := s.exec(ctx, `DELETE FROM cloud_job_capacity WHERE reservation_id='median-peer'`); err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 6; i++ {
+		insertCapacity(fmt.Sprint("cold-", i), "node", false, 0, true)
+	}
+	assertDesired(4)
+	insertCapacity("preparation", "plan", true, 900000000000, true)
+	assertDesired(4)
+	if _, err = s.exec(ctx, `UPDATE cloud_job_capacity SET granted_class='sparkwing-4cpu' WHERE reservation_id='job'`); err != nil {
 		t.Fatal(err)
 	}
 	metrics, e := op.WarmCapacity(ctx)
@@ -128,7 +134,7 @@ func WarmCapacityModesAndDemand(t *testing.T, s *Store) {
 		t.Fatal(err)
 	}
 	assertDesired(2)
-	if _, err = s.exec(ctx, `UPDATE nodes SET ready_at=?,execution_started_at=?`, now-int64(2*time.Hour), now-int64(2*time.Hour)); err != nil {
+	if _, err = s.exec(ctx, `UPDATE cloud_job_capacity SET claimed_at=?,started_at=CASE WHEN started_at IS NULL THEN NULL ELSE ? END`, now-int64(2*time.Hour), now-int64(2*time.Hour)); err != nil {
 		t.Fatal(err)
 	}
 	assertDesired(1)
