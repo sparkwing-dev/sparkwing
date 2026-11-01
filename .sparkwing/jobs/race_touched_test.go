@@ -2,12 +2,14 @@ package jobs
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
 	"slices"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestRaceTargetsGroupChangedFilesByPackageAndModule(t *testing.T) {
@@ -150,25 +152,25 @@ func TestRaces(t *testing.T) {
 }
 `
 
-func TestNodehostRaceShardsKeepTheHostsPackageBound(t *testing.T) {
+func TestGateRaceShardsKeepTheHostsPackageBound(t *testing.T) {
 	for _, cpus := range []int{1, 2, 3, 4, 5, 8} {
 		want := 2
 		if cpus < 4 {
 			want = 0
 		}
-		if got := nodehostRaceShardCount(hostShape{cpus: cpus}); got != want {
-			t.Errorf("%d CPUs: %d nodehost shards, want %d", cpus, got, want)
+		if got := gateRaceShardCount(hostShape{cpus: cpus}); got != want {
+			t.Errorf("%d CPUs: %d gate race shards, want %d", cpus, got, want)
 		}
 	}
-	args := nodehostRaceShardArgs([]string{"TestA", "TestB"})
-	if slices.Contains(args, "-test.short") || !slices.Contains(args, "-test.count=1") || !slices.Contains(args, "-test.timeout=10m") {
-		t.Fatalf("nodehost race shard args=%q, want full class once under 10m", args)
+	args := gateRaceShardArgs([]string{"TestA", "TestB"})
+	if slices.Contains(args, "-test.short") || !slices.Contains(args, "-test.count=1") || !slices.Contains(args, "-test.timeout="+raceTouchedShardTimeout.String()) {
+		t.Fatalf("gate race shard args=%q, want full class once under the package budget", args)
 	}
 }
 
-func TestRaceModulesShardsNodehostAfterOrdinaryPackages(t *testing.T) {
+func TestRaceModulesShardsSlowPackagesAfterOrdinaryPackages(t *testing.T) {
 	t.Setenv("GOMAXPROCS", "8")
-	if nodehostRaceShardCount(currentHost()) == 0 {
+	if gateRaceShardCount(currentHost()) == 0 {
 		t.Skip("host has capacity for only one package process")
 	}
 	root := t.TempDir()
@@ -180,40 +182,85 @@ func TestOrdinary(t *testing.T) {
 	if err := os.WriteFile("../ordinary-complete", nil, 0600); err != nil { t.Fatal(err) }
 }
 `)
-	writeGoFile(t, filepath.Join(root, "internal", "nodehost", "host_test.go"), `package nodehost
+	packages := []string{"./internal/controller", "./internal/nodehost", "./cmd/sparkwing", "./internal/wingd/localcontroller"}
+	for _, pkg := range packages {
+		writeGoFile(t, filepath.Join(root, pkg, "shard_test.go"), fmt.Sprintf(`package shardtests
 import ("os"; "runtime"; "testing"; "time")
+const packageTimeout = time.Duration(%d)
 func init() {
-	if runtime.GOMAXPROCS(0) != 1 { panic("nodehost startup exceeded one runtime thread") }
+	if runtime.GOMAXPROCS(0) != 1 { panic("shard startup exceeded one runtime thread") }
 }
 func check(t *testing.T) {
-	if testing.Short() { t.Fatal("nodehost skipped the full class") }
-	if runtime.GOMAXPROCS(0) != 1 { t.Fatal("nodehost exceeded one runtime thread") }
-	if deadline, ok := t.Deadline(); !ok || time.Until(deadline) < 9*time.Minute || time.Until(deadline) > 10*time.Minute {
-		t.Fatalf("deadline=%v, want ten-minute shard bound", deadline)
+	if testing.Short() { t.Fatal("shard skipped the full class") }
+	if runtime.GOMAXPROCS(0) != 1 { t.Fatal("shard exceeded one runtime thread") }
+	if deadline, ok := t.Deadline(); !ok || time.Until(deadline) < packageTimeout-time.Minute || time.Until(deadline) > packageTimeout {
+		t.Fatalf("deadline=%%v, want configured package bound", deadline)
 	}
-	if _, err := os.Stat("../ordinary-complete"); err != nil { t.Fatal("ordinary packages did not finish before shards", err) }
+	if _, err := os.Stat(%q); err != nil { t.Fatal("ordinary packages did not finish before shards", err) }
 	file, err := os.OpenFile(t.Name(), os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0600)
 	if err != nil { t.Fatal("test ran more than once", err) }
 	if err := file.Close(); err != nil { t.Fatal(err) }
 }
 func TestA(t *testing.T) { check(t) }
 func TestB(t *testing.T) { check(t) }
-`)
-	if err := raceModules(t.Context(), map[string][]string{".": {"./internal/nodehost", "./internal/ordinary"}}, t.TempDir(), t.TempDir()); err != nil {
+`, raceTouchedShardTimeout, filepath.Join(root, "internal", "ordinary-complete")))
+	}
+	if err := raceModules(t.Context(), map[string][]string{".": append(slices.Clone(packages), "./internal/ordinary")}, t.TempDir(), t.TempDir()); err != nil {
 		t.Fatal(err)
 	}
-	for _, name := range []string{"TestA", "TestB"} {
-		if _, err := os.Stat(filepath.Join(root, "internal", "nodehost", name)); err != nil {
-			t.Fatalf("shards omitted %s: %v", name, err)
+	for _, pkg := range packages {
+		for _, name := range []string{"TestA", "TestB"} {
+			path := filepath.Join(root, pkg, name)
+			if _, err := os.Stat(path); err != nil {
+				t.Fatalf("%s shards omitted %s: %v", pkg, name, err)
+			}
+			if err := os.Remove(path); err != nil {
+				t.Fatal(err)
+			}
 		}
 	}
-	for _, name := range []string{"TestA", "TestB"} {
-		if err := os.Remove(filepath.Join(root, "internal", "nodehost", name)); err != nil {
-			t.Fatal(err)
-		}
-	}
-	writeGoFile(t, filepath.Join(root, "internal", "nodehost", "race_test.go"), strings.Replace(racyTest, "package internal", "package nodehost", 1))
+	writeGoFile(t, filepath.Join(root, "internal", "nodehost", "race_test.go"), strings.Replace(racyTest, "package internal", "package shardtests", 1))
 	if err := raceModules(t.Context(), map[string][]string{".": {"./internal/nodehost"}}, t.TempDir(), t.TempDir()); err == nil || !strings.Contains(err.Error(), "race shard") {
 		t.Fatalf("racing shard=%v, want shard failure", err)
+	}
+}
+
+func TestGateRaceDeadlineLeavesRoomAfterEarlierGateWork(t *testing.T) {
+	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	for _, tc := range []struct {
+		name      string
+		remaining time.Duration
+		want      time.Duration
+	}{
+		{"whole gate", gateRunTimeout, raceTouchedStepTimeout},
+		{"earlier work used twenty minutes", gateRunTimeout - 20*time.Minute, 40 * time.Minute},
+		{"cleanup already due", 5 * time.Minute, -5 * time.Minute},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx, cancel := context.WithDeadline(t.Context(), now.Add(tc.remaining))
+			defer cancel()
+			if got := raceTouchedDeadline(ctx, now); !got.Equal(now.Add(tc.want)) {
+				t.Fatalf("deadline %s, want %s", got, now.Add(tc.want))
+			}
+		})
+	}
+	if got := raceTouchedDeadline(context.Background(), now); !got.Equal(now.Add(raceTouchedStepTimeout)) {
+		t.Fatalf("unbounded caller deadline %s, want step budget", got)
+	}
+	if raceTouchedPackageTimeout != 45*time.Minute {
+		t.Fatalf("ordinary package timeout %s shortened the existing unsharded allowance", raceTouchedPackageTimeout)
+	}
+}
+
+func TestGateRaceShardingOnlySelectsTheMeasuredPackages(t *testing.T) {
+	for _, pkg := range []string{"./internal/controller", "./internal/nodehost", "./cmd/sparkwing", "./internal/wingd/localcontroller"} {
+		if !gateRaceShardedPackage(pkg) {
+			t.Errorf("%s remains unsharded", pkg)
+		}
+	}
+	for _, pkg := range []string{"./internal/store", "./jobs", "./internal/ordinary"} {
+		if gateRaceShardedPackage(pkg) {
+			t.Errorf("%s unexpectedly sharded", pkg)
+		}
 	}
 }

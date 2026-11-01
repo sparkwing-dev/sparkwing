@@ -7,11 +7,32 @@ import (
 	"slices"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
+const (
+	raceTouchedFinishMargin   = 10 * time.Minute
+	raceTouchedStepTimeout    = gateRunTimeout - raceTouchedFinishMargin
+	raceTouchedPackageTimeout = raceTouchedStepTimeout * 3 / 4
+	raceTouchedShardTimeout   = raceTouchedStepTimeout / 2
+)
+
+func raceTouchedDeadline(ctx context.Context, now time.Time) time.Time {
+	deadline := now.Add(raceTouchedStepTimeout)
+	if parent, ok := ctx.Deadline(); ok {
+		// safety: lint and cleanup still need time after the race step finishes.
+		if finish := parent.Add(-raceTouchedFinishMargin); finish.Before(deadline) {
+			deadline = finish
+		}
+	}
+	return deadline
+}
+
 func runRaceTouched(ctx context.Context) error {
+	ctx, cancel := context.WithDeadline(ctx, raceTouchedDeadline(ctx, time.Now()))
+	defer cancel()
 	files, scope, err := changeScope(ctx, "Go file(s)", existingGoFiles)
 	if err != nil {
 		return err
@@ -21,7 +42,7 @@ func runRaceTouched(ctx context.Context) error {
 		return err
 	}
 	targets, deferred := raceTargetsForGate(touchedPackageTargets(files, modules))
-	sparkwing.Info(ctx, "race-touched: %s", scope)
+	sparkwing.Info(ctx, "race-touched: %s; step budget %s, package timeout %s, shard timeout %s", scope, raceTouchedStepTimeout, raceTouchedPackageTimeout, raceTouchedShardTimeout)
 	for _, pkg := range deferred {
 		sparkwing.Info(ctx, "race-touched: %s races at the release boundary, not here; pre-release covers it", pkg)
 	}
@@ -40,24 +61,26 @@ func raceModules(ctx context.Context, targets map[string][]string, testRoot, hom
 	var failures []string
 	for _, module := range mapKeys(targets) {
 		pkgs := slices.Clone(targets[module])
-		shardNodehost := module == "." && slices.Contains(pkgs, "./internal/nodehost") && nodehostRaceShardCount(currentHost()) > 0
-		if shardNodehost {
-			pkgs = slices.DeleteFunc(pkgs, func(pkg string) bool { return pkg == "./internal/nodehost" })
+		var sharded []string
+		if module == "." && gateRaceShardCount(currentHost()) > 0 {
+			pkgs = slices.DeleteFunc(pkgs, func(pkg string) bool {
+				if gateRaceShardedPackage(pkg) {
+					sharded = append(sharded, pkg)
+					return true
+				}
+				return false
+			})
 		}
-		sparkwing.Info(ctx, "race-touched: %s: %s", module, strings.Join(pkgs, " "))
-		// safety: this catches a hang, and the gate's own execution deadline is
-		// what bounds the step. internal/controller legitimately races for 24
-		// minutes, so a 30-minute limit left a fifth of a margin and a loaded
-		// box spent it, failing work that was only slow.
-		cmd := raceGoCommand(currentHost(), "-race -count=1 -timeout 45m "+strings.Join(pkgs, " "))
+		sparkwing.Info(ctx, "race-touched: %s: %s", module, strings.Join(targets[module], " "))
+		cmd := raceGoCommand(currentHost(), "-race -count=1 -timeout "+raceTouchedPackageTimeout.String()+" "+strings.Join(pkgs, " "))
 		if len(pkgs) > 0 {
 			script := productTestScript(fmt.Sprintf("cd %q && %s", module, cmd), home)
 			if _, runErr := sparkwing.Bash(ctx, script).Env("TMPDIR", testRoot).Run(); runErr != nil {
 				failures = append(failures, fmt.Sprintf("%s: %v", module, runErr))
 			}
 		}
-		if shardNodehost {
-			if runErr := runRaceShardsAtHome(ctx, home, module, "./internal/nodehost", 2, nodehostRaceShardArgs); runErr != nil {
+		for _, pkg := range sharded {
+			if runErr := runRaceShardsAtHome(ctx, home, module, pkg, gateRaceShardCount(currentHost()), gateRaceShardArgs); runErr != nil {
 				failures = append(failures, fmt.Sprintf("%s: %v", module, runErr))
 			}
 		}
@@ -68,21 +91,28 @@ func raceModules(ctx context.Context, targets map[string][]string, testRoot, hom
 	return fmt.Errorf("go test -race failed:\n  - %s", strings.Join(failures, "\n  - "))
 }
 
-func nodehostRaceShardCount(h hostShape) int {
+func gateRaceShardCount(h hostShape) int {
 	if h.cpus == overlappedGoSuiteCPUs || goStepParallelism(h) >= 2 {
 		return 2
 	}
 	return 0
 }
 
-func nodehostRaceShardArgs(shard []string) []string {
-	return []string{"-test.run", raceTestPattern(shard), "-test.count=1", "-test.timeout=10m"}
+func gateRaceShardedPackage(pkg string) bool {
+	switch pkg {
+	case "./internal/controller", "./internal/nodehost", "./cmd/sparkwing", "./internal/wingd/localcontroller":
+		return true
+	default:
+		return false
+	}
 }
 
-// safety: internal/store does not finish under the race detector inside this tier.
-// It measures 2148s against the 1800s budget, and the cost is spread over 828
-// tests rather than a few, so there is nothing to trim that would fit it. Left
-// here it is a step that always times out, which is a check that cannot pass.
+func gateRaceShardArgs(shard []string) []string {
+	return []string{"-test.run", raceTestPattern(shard), "-test.count=1", "-test.timeout=" + raceTouchedShardTimeout.String()}
+}
+
+// safety: the hosted store suite exceeded 80 minutes in each of four shards.
+// Pre-release owns its race coverage, including the short-class restriction.
 const gateDeferredRaceTarget = "./internal/store"
 
 func raceTargetsForGate(targets map[string][]string) (map[string][]string, []string) {
