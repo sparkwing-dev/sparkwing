@@ -111,6 +111,9 @@ func (l *Launcher) Run(ctx context.Context) error {
 	var cooldown time.Time
 	for ctx.Err() == nil {
 		// safety: claim backoff must not let held awards expire before placement.
+		if err := l.reportWarmPools(ctx); err != nil {
+			logger.Warn("warm capacity observation failed", "error", err)
+		}
 		synced := l.sync(ctx)
 		if blocking(synced) != nil {
 			logger.Warn("launcher reconciliation failed", failureAttrs(synced)...)

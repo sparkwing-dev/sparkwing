@@ -112,6 +112,8 @@ type ObjectStoreBreaker struct {
 
 // OperatorManager manages team creation, operational guards and storage budgets under operator authority.
 type OperatorManager interface {
+	ReadWarmCapacity(context.Context) (WarmCapacity, error)
+	WriteWarmCapacity(context.Context, WarmCapacitySettings) (WarmCapacity, error)
 	CreateOperatorTeam(context.Context, OperatorTeamCreate) (OperatorTeamCreated, error)
 	ReadOperatorTeam(context.Context, string) (OperatorTeam, error)
 	ReadOperatorLimits(context.Context) (OperatorLimits, error)

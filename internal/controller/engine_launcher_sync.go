@@ -48,6 +48,7 @@ type storeLauncherSync struct {
 	store interface {
 		ReconcileLauncherAwards(context.Context, capability.AuthorityRef, []capability.LauncherObservation, []capability.LeaseRef, []capability.LeaseRef, []capability.LeaseRef, []capability.LauncherActivation) ([]store.LauncherAward, []store.LauncherPreparation, error)
 		RecordLauncherSyncFailure(context.Context, capability.AuthorityRef) error
+		RecordWarmPoolObservations(context.Context, capability.AuthorityRef, map[string]int64) error
 	}
 }
 
@@ -55,6 +56,11 @@ func (s storeLauncherSync) ReadLauncherSync(ctx context.Context, ref capability.
 	observed, err := validateLauncherSync(body)
 	if err != nil {
 		return controllerwire.LauncherSyncResponse{}, err
+	}
+	// Warm observations also arrive while idle, when there are no awards to reconcile.
+	if body.WarmPools != nil && len(observed) == 0 && len(body.Preparing) == 0 && len(body.Activations) == 0 {
+		err := s.store.RecordWarmPoolObservations(ctx, ref, body.WarmPools)
+		return controllerwire.LauncherSyncResponse{Awards: []controllerwire.ClaimedUnit{}, Retired: []capability.LeaseRef{}}, err
 	}
 	var reservations []capability.LeaseRef
 	for _, observation := range observed {
@@ -77,6 +83,11 @@ func (s storeLauncherSync) ReadLauncherSync(ctx context.Context, ref capability.
 	}
 	if err != nil {
 		return controllerwire.LauncherSyncResponse{}, err
+	}
+	if body.WarmPools != nil {
+		if err := s.store.RecordWarmPoolObservations(ctx, ref, body.WarmPools); err != nil {
+			return controllerwire.LauncherSyncResponse{}, err
+		}
 	}
 	current := make(map[capability.LeaseRef]store.LauncherAward, len(awards))
 	for _, award := range awards {
@@ -114,6 +125,12 @@ func (s storeLauncherSync) ReadLauncherSync(ctx context.Context, ref capability.
 }
 
 func validateLauncherSync(body controllerwire.LauncherSyncRequest) ([]capability.LauncherObservation, error) {
+	for class, count := range body.WarmPools {
+		policy := store.WarmCapacitySettings{Class: class, Mode: "off", StartTimeTargetSeconds: 10}
+		if count < 0 || policy.Validate() != nil {
+			return nil, invalidEngineBody("warm observations require known classes and nonnegative counts")
+		}
+	}
 	observed := slices.Clone(body.Observed)
 	for _, demand := range body.Capacity {
 		observed = append(observed, capability.LauncherObservation{Award: demand.Award, Reservation: true, CapacityUnconfigured: demand.Unconfigured})

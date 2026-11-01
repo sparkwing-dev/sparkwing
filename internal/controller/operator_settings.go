@@ -12,6 +12,7 @@ import (
 )
 
 type operatorSettingsStore interface {
+	WarmCapacity(context.Context) (store.WarmCapacity, error)
 	ComputeLimits(context.Context) (store.ComputeLimits, error)
 	ComputeUsage(context.Context) (store.ComputeUsage, error)
 	SignUpGate(context.Context) (store.SignUpGate, error)

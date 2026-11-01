@@ -2081,6 +2081,12 @@ components:
                 $ref: '#/components/schemas/internal.capability.LeaseRef'
               type: array
             - type: "null"
+        warm_pools:
+          anyOf:
+            - additionalProperties:
+                type: integer
+              type: object
+            - type: "null"
       required:
         - observed
       type: object
@@ -4219,6 +4225,95 @@ components:
         - detail
       type: object
       x-sparkwing-go-type: controllerwire.TimerStateView
+    internal.controllerwire.WarmCapacity:
+      additionalProperties: true
+      properties:
+        active_teams_7d:
+          type: integer
+        active_teams_24h:
+          type: integer
+        classes:
+          anyOf:
+            - items:
+                $ref: '#/components/schemas/internal.controllerwire.WarmCapacityClass'
+              type: array
+            - type: "null"
+        new_signups_7d:
+          type: integer
+        new_signups_24h:
+          type: integer
+      required:
+        - classes
+        - new_signups_24h
+        - new_signups_7d
+        - active_teams_24h
+        - active_teams_7d
+      type: object
+      x-sparkwing-go-type: controllerwire.WarmCapacity
+    internal.controllerwire.WarmCapacityClass:
+      additionalProperties: true
+      properties:
+        auto_max:
+          type: integer
+        auto_min:
+          type: integer
+        class:
+          type: string
+        cold_starts_7d:
+          type: integer
+        cold_starts_24h:
+          type: integer
+        desired:
+          type: integer
+        manual_count:
+          type: integer
+        mode:
+          type: string
+        start_1h:
+          $ref: '#/components/schemas/internal.controllerwire.WarmStartPercentiles'
+        start_24h:
+          $ref: '#/components/schemas/internal.controllerwire.WarmStartPercentiles'
+        start_time_target_seconds:
+          type: number
+        upsizes_7d:
+          type: integer
+        upsizes_24h:
+          type: integer
+        warm:
+          type: integer
+      required:
+        - class
+        - mode
+        - manual_count
+        - auto_min
+        - auto_max
+        - start_time_target_seconds
+        - warm
+        - desired
+        - start_1h
+        - start_24h
+        - cold_starts_24h
+        - cold_starts_7d
+        - upsizes_24h
+        - upsizes_7d
+      type: object
+      x-sparkwing-go-type: controllerwire.WarmCapacityClass
+    internal.controllerwire.WarmStartPercentiles:
+      additionalProperties: true
+      properties:
+        p50_seconds:
+          anyOf:
+            - type: number
+            - type: "null"
+        p95_seconds:
+          anyOf:
+            - type: number
+            - type: "null"
+      required:
+        - p50_seconds
+        - p95_seconds
+      type: object
+      x-sparkwing-go-type: controllerwire.WarmStartPercentiles
     internal.cronspec.Override:
       additionalProperties: true
       properties:
@@ -6773,6 +6868,30 @@ components:
         - StateActor
       type: object
       x-sparkwing-go-type: runstate.RunRow
+    internal.settings.WarmCapacitySettings:
+      additionalProperties: true
+      properties:
+        auto_max:
+          type: integer
+        auto_min:
+          type: integer
+        class:
+          type: string
+        manual_count:
+          type: integer
+        mode:
+          type: string
+        start_time_target_seconds:
+          type: number
+      required:
+        - class
+        - mode
+        - manual_count
+        - auto_min
+        - auto_max
+        - start_time_target_seconds
+      type: object
+      x-sparkwing-go-type: settings.WarmCapacitySettings
     pkg.match.Resources:
       additionalProperties: true
       properties:
@@ -9814,6 +9933,79 @@ paths:
             liveness: credential
         retry: idempotency_key
       x-sparkwing-wire: undocumented
+  /api/v1/operator/warm-capacity:
+    get:
+      responses:
+        2XX:
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/internal.controllerwire.WarmCapacity'
+          description: Successful response.
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/internal.apierr.Envelope'
+          description: Canonical API failure.
+      summary: Read warm capacity policies and start metrics
+      x-sparkwing-policy:
+        method: GET
+        path: /api/v1/operator/warm-capacity
+        audience: controller
+        owner: deployment
+        authentication: capability
+        access:
+          - credential: deployment_admin
+            grants:
+              - operator.limits
+            binding: none
+            liveness: credential
+          - credential: operator_console_session
+            grants:
+              - operator.console
+            binding: none
+            liveness: credential
+        retry: safe
+    put:
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/internal.settings.WarmCapacitySettings'
+        required: true
+      responses:
+        2XX:
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/internal.controllerwire.WarmCapacity'
+          description: Successful response.
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/internal.apierr.Envelope'
+          description: Canonical API failure.
+      summary: Set one hardware class warm capacity policy
+      x-sparkwing-policy:
+        method: PUT
+        path: /api/v1/operator/warm-capacity
+        audience: controller
+        owner: deployment
+        authentication: capability
+        access:
+          - credential: deployment_admin
+            grants:
+              - operator.limits
+            binding: none
+            liveness: credential
+          - credential: operator_console_session
+            grants:
+              - operator.console
+            binding: none
+            liveness: credential
+        retry: safe
   /api/v1/overflow:
     get:
       responses:

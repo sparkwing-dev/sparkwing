@@ -87,3 +87,29 @@ func (c *engineClient) ReadOperatorTeam(ctx context.Context, team string) (contr
 	}
 	return out, err
 }
+
+func (c *engineClient) ReadWarmCapacity(ctx context.Context) (controllerwire.WarmCapacity, error) {
+	var out controllerwire.WarmCapacity
+	err := c.request(ctx, "GET", "/api/v1/operator/warm-capacity", "/api/v1/operator/warm-capacity", "", nil, &out)
+	if err == nil && len(out.Classes) == 0 {
+		err = &apierr.Error{Code: apierr.ProtocolError, Message: "controller returned no warm capacity classes"}
+	}
+	return out, err
+}
+
+func (c *engineClient) WriteWarmCapacity(ctx context.Context, input controllerwire.WarmCapacitySettings) (controllerwire.WarmCapacity, error) {
+	var out controllerwire.WarmCapacity
+	if err := input.Validate(); err != nil {
+		return out, &apierr.Error{Code: apierr.InvalidArgs, Message: err.Error()}
+	}
+	err := c.request(ctx, "PUT", "/api/v1/operator/warm-capacity", "/api/v1/operator/warm-capacity", "", input, &out)
+	if err != nil {
+		return out, err
+	}
+	for _, class := range out.Classes {
+		if class.WarmCapacitySettings == input {
+			return out, nil
+		}
+	}
+	return out, &apierr.Error{Code: apierr.ProtocolError, Message: "controller did not confirm the requested warm capacity settings"}
+}

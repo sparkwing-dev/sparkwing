@@ -127,6 +127,7 @@ type LauncherCapacityObservation struct {
 
 // LauncherSyncRequest reconciles Jobs and node reservations against the launcher's awards.
 type LauncherSyncRequest struct {
+	WarmPools   map[string]int64                 `json:"warm_pools,omitempty"`
 	Observed    []capability.LauncherObservation `json:"observed"`
 	Capacity    []LauncherCapacityObservation    `json:"capacity,omitempty"`
 	Activations []capability.LauncherActivation  `json:"activations,omitempty"`

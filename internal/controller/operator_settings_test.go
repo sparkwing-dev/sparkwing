@@ -19,6 +19,7 @@ import (
 )
 
 type operatorSettingsFixture struct {
+	warm     store.WarmCapacity
 	limits   store.ComputeLimits
 	gate     store.SignUpGate
 	settings store.StorageSettings
@@ -273,4 +274,20 @@ func TestOperatorSettingsHTTPStoreFailuresStayPrivate(t *testing.T) {
 			t.Fatal("failed transaction changed settings")
 		}
 	}
+}
+
+func (f *operatorSettingsFixture) WarmCapacity(context.Context) (store.WarmCapacity, error) {
+	return f.warm, f.failure
+}
+func (f *operatorSettingsFixture) WriteWarmCapacity(_ context.Context, a capability.Authorized, input store.WarmCapacitySettings) error {
+	f.seen = a
+	if f.failure != nil {
+		return f.failure
+	}
+	if err := input.Validate(); err != nil {
+		return err
+	}
+	f.writes++
+	f.warm.Classes = []store.WarmCapacityClass{{WarmCapacitySettings: input}}
+	return nil
 }
