@@ -3,6 +3,7 @@ package controller
 import (
 	"bytes"
 	"context"
+	"database/sql/driver"
 	"encoding/base64"
 	"encoding/hex"
 	"errors"
@@ -27,15 +28,19 @@ func TestRequestCancellationLogLevel(t *testing.T) {
 	for _, writer := range []string{"policy", "legacy"} {
 		for _, method := range []string{http.MethodGet, http.MethodPost} {
 			for _, tc := range []struct {
-				name   string
-				ctxErr error
-				cause  error
-				level  string
+				name       string
+				ctxErr     error
+				cause      error
+				level      string
+				wantStatus int
 			}{
-				{"client canceled", context.Canceled, fmt.Errorf("read runs: %w", context.Canceled), "INFO"},
-				{"live request", nil, context.Canceled, "ERROR"},
-				{"server fault after cancellation", context.Canceled, errors.New("database unavailable"), "ERROR"},
-				{"deadline", context.DeadlineExceeded, context.DeadlineExceeded, "ERROR"},
+				{"client canceled", context.Canceled, fmt.Errorf("read runs: %w", context.Canceled), "INFO", statusClientClosedRequest},
+				{"connection closed by cancellation", context.Canceled, fmt.Errorf("read snapshot: %w", driver.ErrBadConn), "INFO", statusClientClosedRequest},
+				{"live bad connection", nil, driver.ErrBadConn, "ERROR", http.StatusInternalServerError},
+				{"bad connection after deadline", context.DeadlineExceeded, driver.ErrBadConn, "ERROR", http.StatusInternalServerError},
+				{"live request", nil, context.Canceled, "ERROR", http.StatusInternalServerError},
+				{"server fault after cancellation", context.Canceled, errors.New("database unavailable"), "ERROR", http.StatusInternalServerError},
+				{"deadline", context.DeadlineExceeded, context.DeadlineExceeded, "ERROR", http.StatusInternalServerError},
 			} {
 				t.Run(writer+"/"+method+"/"+tc.name, func(t *testing.T) {
 					ctx := t.Context()
@@ -48,7 +53,7 @@ func TestRequestCancellationLogLevel(t *testing.T) {
 						ctx, cancel = context.WithDeadline(ctx, time.Time{})
 						defer cancel()
 					}
-					path := "/api/v1/runs"
+					path := "/api/v1/runs/{run}/local-host/snapshot"
 					if method == http.MethodPost {
 						path = "/api/v1/claims/{claim}/heartbeat"
 					}
@@ -70,10 +75,7 @@ func TestRequestCancellationLogLevel(t *testing.T) {
 						msg = "audit"
 					}
 					status := auditLines(t, logs, msg)
-					wantStatus := http.StatusInternalServerError
-					if tc.name == "client canceled" {
-						wantStatus = 499
-					}
+					wantStatus := tc.wantStatus
 					if out.Code != wantStatus || len(status) != 1 || status[0]["status"] != float64(out.Code) || status[0]["level"] != "INFO" || status[0]["request_id"] != out.Header().Get(RequestIDHeader) {
 						t.Fatalf("HTTP %d, status/audit = %s", out.Code, logs)
 					}
@@ -200,12 +202,14 @@ func TestRequestCancellationPreservesCommittedStatus(t *testing.T) {
 		name   string
 		commit func(http.ResponseWriter)
 		want   int
+		cause  error
 	}{
-		{"explicit", func(w http.ResponseWriter) { w.WriteHeader(http.StatusAccepted) }, http.StatusAccepted},
-		{"body", func(w http.ResponseWriter) { _, _ = w.Write([]byte("started")) }, http.StatusOK},
-		{"flush", func(w http.ResponseWriter) { w.(http.Flusher).Flush() }, http.StatusOK},
-		{"informational", func(w http.ResponseWriter) { w.WriteHeader(http.StatusEarlyHints) }, statusClientClosedRequest},
-		{"switching protocols", func(w http.ResponseWriter) { w.WriteHeader(http.StatusSwitchingProtocols) }, http.StatusSwitchingProtocols},
+		{"explicit", func(w http.ResponseWriter) { w.WriteHeader(http.StatusAccepted) }, http.StatusAccepted, context.Canceled},
+		{"body", func(w http.ResponseWriter) { _, _ = w.Write([]byte("started")) }, http.StatusOK, context.Canceled},
+		{"flush", func(w http.ResponseWriter) { w.(http.Flusher).Flush() }, http.StatusOK, context.Canceled},
+		{"informational", func(w http.ResponseWriter) { w.WriteHeader(http.StatusEarlyHints) }, statusClientClosedRequest, context.Canceled},
+		{"switching protocols", func(w http.ResponseWriter) { w.WriteHeader(http.StatusSwitchingProtocols) }, http.StatusSwitchingProtocols, context.Canceled},
+		{"bad connection", func(w http.ResponseWriter) { w.WriteHeader(http.StatusAccepted) }, http.StatusAccepted, driver.ErrBadConn},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			ctx, cancel := context.WithCancel(t.Context())
@@ -213,7 +217,7 @@ func TestRequestCancellationPreservesCommittedStatus(t *testing.T) {
 			h, logs := auditHarness(t, "/api/v1/runs", func(w http.ResponseWriter, _ *http.Request) {
 				tc.commit(w)
 				cancel()
-				writeError(w, http.StatusInternalServerError, context.Canceled)
+				writeError(w, http.StatusInternalServerError, tc.cause)
 			})
 			wire := &committedStatusWriter{header: make(http.Header)}
 			h.ServeHTTP(wire, httptest.NewRequest(http.MethodGet, "/api/v1/runs", nil).WithContext(ctx))
@@ -248,5 +252,28 @@ func (w *committedStatusWriter) Write(body []byte) (int, error) {
 func (w *committedStatusWriter) Flush() {
 	if w.status == 0 {
 		w.WriteHeader(http.StatusOK)
+	}
+}
+
+func TestRequestCancellationPreservesClientRefusal(t *testing.T) {
+	for _, writer := range []string{"policy", "legacy"} {
+		t.Run(writer, func(t *testing.T) {
+			ctx, cancel := context.WithCancel(t.Context())
+			defer cancel()
+			h, logs := auditHarness(t, "/api/v1/runs/{run}/local-host/snapshot", func(w http.ResponseWriter, _ *http.Request) {
+				cancel()
+				cause := errors.Join(&apierr.Error{Code: apierr.NotFound, Message: "resource not found"}, driver.ErrBadConn)
+				if writer == "policy" {
+					routepolicy.WritePolicyError(w, cause)
+				} else {
+					writeError(w, http.StatusNotFound, cause)
+				}
+			})
+			out := httptest.NewRecorder()
+			h.ServeHTTP(out, httptest.NewRequest(http.MethodGet, "/api/v1/runs/run/local-host/snapshot", nil).WithContext(ctx))
+			if out.Code != http.StatusNotFound || len(auditLines(t, logs, "http request failed")) != 0 {
+				t.Fatalf("refusal HTTP %d: %s logs=%s", out.Code, out.Body, logs)
+			}
+		})
 	}
 }

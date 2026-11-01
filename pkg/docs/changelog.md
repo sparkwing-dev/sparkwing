@@ -60,6 +60,7 @@ unlock.
 - **source credentials:** Refusals explain that an unproven run cannot fetch a private repository
   Run private code through a separate App-verified or uploaded run. Fetch-only access follows the same repository-proof requirement as other job credentials.
 - **controller:** Client-canceled HTTP requests return HTTP 499 and log at info
+  This includes driver bad-connection errors on canceled requests; live connection failures remain HTTP 500.
   Responses whose headers were already sent retain their status. Status and audit records remain available.
   Rollback cleanup on closed or canceled connections logs at debug. Server faults still log at error.
 - **claims:** Named claims for a missing execution unit return HTTP 404 instead of a server error
