@@ -57,6 +57,8 @@ unlock.
 
 ### Fixed
 
+- **Cloud runner:** Reuse prepared pipelines when execution expands the planner's omitted checkout defaults
+  Publication and restore compare effective checkout policy. Different history depth, submodule and LFS settings still build fresh.
 - **controller:** Changed-revision children keep their parent lineage writer and shared-only secrets when GitHub compare or metadata checks fail
   Intake admits these children without a fetch credential. Retries inherit a sealed child fetch permission and receive only a repository-scoped `contents: read` token.
 - **controller:** Routine idle-poll refusals log at debug, and successful or pending refund submissions log at info

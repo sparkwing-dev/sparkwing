@@ -3,6 +3,7 @@ package source_test
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -17,6 +18,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
 	"github.com/sparkwing-dev/sparkwing/internal/engineid"
+	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
@@ -180,8 +182,41 @@ func TestAcquirePreparedRestoresExecutableWithoutSourceOrInstaller(t *testing.T)
 	}
 }
 
+func TestAcquirePreparedRestoresWithExpandedCheckoutDefaults(t *testing.T) {
+	f := newPreparedFixture(t, engineid.GoSDK)
+	if err := json.Unmarshal([]byte(`{"policy":{},"origins":null}`), &f.spec.Checkout); err != nil {
+		t.Fatal(err)
+	}
+	f.publish(t)
+	if err := json.Unmarshal([]byte(`{
+		"policy":{"full_history":false,"depth":1,"tags":false,"submodules":false,"lfs":false},
+		"origins":{
+			"depth":{"layer":"default","file":"","key":"source.depth"},
+			"full_history":{"layer":"default","file":"","key":"source.full_history"},
+			"tags":{"layer":"default","file":"","key":"source.tags"},
+			"submodules":{"layer":"default","file":"","key":"source.submodules"},
+			"lfs":{"layer":"default","file":"","key":"source.lfs"}
+		}
+	}`), &f.spec.Checkout); err != nil {
+		t.Fatal(err)
+	}
+	entry, err := source.Acquire(t.Context(), f.spec, f.options)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if err := entry.Close(); err != nil {
+			t.Error(err)
+		}
+	}()
+	if f.installs != 1 || entry.CheckoutDirectory() == f.spec.LocalCheckout {
+		t.Fatalf("expanded checkout defaults rebuilt preparation: installs=%d", f.installs)
+	}
+	assertPreparedExecution(t, entry)
+}
+
 func TestAcquirePreparedFallsBackForDifferentInputsAndAbsentBytes(t *testing.T) {
-	for _, change := range []string{"environment", "source", "engine", "request", "missing object", "missing record"} {
+	for _, change := range []string{"environment", "source", "checkout depth", "checkout submodules", "engine", "request", "missing object", "missing record"} {
 		t.Run(change, func(t *testing.T) {
 			f := newPreparedFixture(t, engineid.GoSDK)
 			f.publish(t)
@@ -190,6 +225,10 @@ func TestAcquirePreparedFallsBackForDifferentInputsAndAbsentBytes(t *testing.T) 
 				f.options.Base.Captured = append(f.options.Base.Captured, "HOME="+t.TempDir())
 			case "source":
 				f.spec.HashAllFiles = true
+			case "checkout depth":
+				f.spec.Checkout.Policy = nodeproto.SourceSpec{Depth: new(0)}
+			case "checkout submodules":
+				f.spec.Checkout.Policy = nodeproto.SourceSpec{Submodules: new(true)}
 			case "engine":
 				identity := f.resolver.resolved.Identity
 				identity.ManifestDigest = "another-engine"

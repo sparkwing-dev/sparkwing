@@ -382,6 +382,8 @@ Consumers download to a private temporary file and consume verified EOF before
 extracting through `tarsafe`. The manifest key covers the intake seal, source
 revisions and checkout policy, SDK/engine release identity, target, filtered install
 environment, runner/tool identities and the publisher-declared snapshot fingerprint.
+Publication and restore apply checkout defaults before fingerprinting, so an omitted
+policy matches explicit defaults. Origins do not affect the build inputs.
 Restore does not recompute that fingerprint. Integrity comes from the verified blob
 digest and the server's Cloud-only write authority. Consumers trust the Cloud
 planning publisher to capture the correct source and executable. The consumer
