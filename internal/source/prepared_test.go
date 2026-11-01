@@ -111,7 +111,7 @@ func newPreparedFixture(t *testing.T, sdk engineid.SDKKind) *preparedFixture {
 		return engine.SDKCommand{Directory: directory, Command: []string{command}}, nil
 	}
 	identity := blob.UploadIdentity{Kind: blob.UploadOwnerUnit, Team: "team", RunID: "run", Principal: "owner", CapabilityRef: "cap", Unit: runspec.Optional[blob.UploadUnit]{Set: true, Value: blob.UploadUnit{Kind: blob.UploadPlanUnit, ID: "run", Generation: 1}}}
-	f.options.Prepared = &source.Prepared{Bytes: blob.NewSignedStore(blob.SignedStoreOptions{Signer: f.storage, HTTPClient: f.storage}), Records: f.storage, Authority: blob.Authority{Upload: runspec.Optional[blob.UploadIdentity]{Set: true, Value: identity}}, Key: blob.PreparedRecordKey("team", "run", runspec.RepoKey(f.spec.RepoKey), blob.RefScope{}, "pipeline"), RequestHash: "sealed-request", Publish: true}
+	f.options.Prepared = &source.Prepared{Bytes: blob.NewSignedStore(blob.SignedStoreOptions{Signer: f.storage, HTTPClient: f.storage}), Records: f.storage, Authority: blob.Authority{Upload: runspec.Optional[blob.UploadIdentity]{Set: true, Value: identity}}, Key: blob.PreparedRecordKey("team", "run", runspec.RepoKey(f.spec.RepoKey), "pipeline"), RequestHash: "sealed-request", Publish: true}
 	return f
 }
 
@@ -331,4 +331,29 @@ func TestAcquirePreparedRealGoBuildTiming(t *testing.T) {
 		t.Fatalf("installs=%d, want one real Go build", f.installs)
 	}
 	t.Logf("real Go fixture, shared warm build cache: fresh Acquire+publication=%s; restored Acquire=%s; installs=%d", fresh, restore, f.installs)
+}
+
+func TestAcquirePreparedRestoresPlanningOwnerAfterRestart(t *testing.T) {
+	f := newPreparedFixture(t, engineid.GoSDK)
+	f.publish(t)
+	published := bytes.Clone(f.storage.body)
+	record := f.storage.record
+	f.spec.Engine = nil
+	f.options.Prepared.Publish = true
+	if err := os.RemoveAll(f.spec.LocalCheckout); err != nil {
+		t.Fatal(err)
+	}
+	entry, err := source.Acquire(t.Context(), f.spec, f.options)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if err := entry.Close(); err != nil {
+			t.Error(err)
+		}
+	}()
+	if f.installs != 1 || f.storage.record != record || !bytes.Equal(f.storage.body, published) {
+		t.Fatalf("planner restart rebuilt or republished: installs=%d record=%+v", f.installs, f.storage.record)
+	}
+	assertPreparedExecution(t, entry)
 }
