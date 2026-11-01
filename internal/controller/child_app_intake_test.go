@@ -24,9 +24,15 @@ import (
 )
 
 func TestAppParentChildrenPreserveOnlyExactRevisionTrust(t *testing.T) {
-	for _, kind := range []string{"exact", "changed", "fetch-identical", "fetch-ahead", "fetch-unreachable", "fetch-unknown", "cross-repository"} {
+	const pinnedConfig = "pipelines:\n  - name: deploy\n    entrypoint: deploy\n    source: refs/heads/code\n"
+	for _, kind := range []string{"exact", "changed", "fetch-identical", "fetch-ahead", "fetch-unreachable", "fetch-behind", "fetch-unknown", "fetch-pinned", "fetch-pinned-source-unreachable", "fetch-pinned-execution-unreachable", "cross-repository"} {
 		t.Run(kind, func(t *testing.T) {
+			pinned := strings.HasPrefix(kind, "fetch-pinned")
 			repo, original := sourcetest.Repository(t)
+			if pinned {
+				sourcetest.Git(t, repo, "branch", "code", original)
+				sourcetest.Write(t, filepath.Join(repo, ".sparkwing", "sparkwing.yaml"), pinnedConfig)
+			}
 			sourcetest.Git(t, repo, "checkout", "-qb", "deploy")
 			sourcetest.Write(t, filepath.Join(repo, ".sparkwing", "pipeline.go"), "package main // child\n")
 			sourcetest.Git(t, repo, "add", ".")
@@ -44,12 +50,23 @@ func TestAppParentChildrenPreserveOnlyExactRevisionTrust(t *testing.T) {
 			switch kind {
 			case "fetch-ahead":
 				comparison = "ahead"
-			case "fetch-unreachable":
+			case "fetch-unreachable", "fetch-pinned-execution-unreachable":
 				comparison = "diverged"
+			case "fetch-behind":
+				comparison = "behind"
 			case "fetch-unknown":
 				comparison = "unknown"
 			}
 			app.SetComparison("acme/app", selected, "refs/heads/deploy", comparison)
+			if pinned {
+				app.SetCommit("acme/app", "refs/heads/code", original)
+				app.SetFile("acme/app", selected, ".sparkwing/sparkwing.yaml", []byte(pinnedConfig))
+				sourceComparison := "ahead"
+				if kind == "fetch-pinned-source-unreachable" {
+					sourceComparison = "diverged"
+				}
+				app.SetComparison("acme/app", original, "refs/heads/code", sourceComparison)
+			}
 			e.Server.WithGitHubApp(app.Config())
 			teststore.SeedGitHubInstallation(t, e.Store, "a", store.GitHubAppInstallation{InstallationID: 7, AccountID: 70, AccountLogin: "acme", AccountType: "Organization", ConnectedBy: "member", GitHubUserID: 71}, time.Now())
 			tenant := teststore.ForTeam(t, e.Store, "a")
@@ -103,6 +120,9 @@ func TestAppParentChildrenPreserveOnlyExactRevisionTrust(t *testing.T) {
 			if child.Request.Request.Origin != runspec.OriginChild || child.Request.Request.Options.Runner.Value.Kind != runner {
 				t.Fatalf("child lost its origin or inherited owner: %+v", child.Request.Request)
 			}
+			if pinned && (child.Request.Request.Source.Ref != original || child.Request.Request.Git.SHA != selected) {
+				t.Fatalf("child lost separate source and execution revisions: %+v", child.Request.Request)
+			}
 			got := child.Request.Provenance
 			if kind == "exact" {
 				if got != proof {
@@ -112,7 +132,7 @@ func TestAppParentChildrenPreserveOnlyExactRevisionTrust(t *testing.T) {
 				t.Fatalf("changed child retained proof or selected wrong commit: %+v", child.Request)
 			}
 			wantSource := runspec.RepoKey("")
-			if kind == "changed" || kind == "fetch-identical" || kind == "fetch-ahead" {
+			if kind == "changed" || kind == "fetch-identical" || kind == "fetch-ahead" || kind == "fetch-pinned" {
 				wantSource = "gh:1"
 			}
 			if got.ChildSourceRepository() != wantSource {
@@ -160,6 +180,9 @@ func TestAppParentChildrenPreserveOnlyExactRevisionTrust(t *testing.T) {
 			spec, err := source.ForRequest(child.Request)
 			if err != nil {
 				t.Fatal(err)
+			}
+			if pinned && spec.PipelineSHA != original {
+				t.Fatalf("child checkout lost pinned pipeline commit: %+v", spec)
 			}
 			burstAcceptanceCheckout(t, client.EngineOptions{URL: "http://local", HTTP: &http.Client{Transport: childRecorderTransport{h}}, Bearer: func(context.Context) (string, error) { return token, nil }}, id, spec)
 		})
