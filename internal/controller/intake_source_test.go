@@ -309,7 +309,7 @@ func TestTrigger_RequiresAGitHubRepositorySlug(t *testing.T) {
 	}
 }
 
-func TestTrigger_ReservesGitHubProvenanceForTheWebhook(t *testing.T) {
+func TestTriggerIntakeReservesGitHubProvenanceForTheWebhook(t *testing.T) {
 	s, options, input, raw := sourceUploadFixture(t)
 	c, err := client.NewEngineClient(options)
 	if err != nil {

@@ -404,16 +404,31 @@ file. Other syntax and workflow checks remain active.
   run handle. On exactly four logical CPUs, the gate reserves 2.5 cores and
   starts the full Go suite and touched-package race suite together after the
   build. The race command can run two package binaries while each keeps
-  `GOMAXPROCS=1`. When nodehost is touched and the host has capacity for two
-  package processes, its race suite runs after the module's ordinary packages
-  in two exhaustive shards of one compiled binary. Each shard keeps
-  `GOMAXPROCS=1` and runs its assigned tests once, including the slow class,
-  with a ten-minute timeout.
-  Listing, coverage checks, failure cancellation and output collection use the
-  same runner as the store's release shards. The unsharded one-thread local
-  baseline took 687 seconds. Parallel tests within that runtime share the same
-  CPU bound. Hosts with capacity for one package retain the ordinary race
-  command. On a four-core single-tenant host, the ordinary and
+  `GOMAXPROCS=1`. When touched and the host has capacity for two package
+  processes, `internal/controller`, `internal/nodehost`, `cmd/sparkwing` and
+  `internal/wingd/localcontroller` run after the module's ordinary packages.
+  Controller uses four exhaustive shards. Nodehost and the CLI use two.
+  Localcontroller keeps its full suite in one queued process because it fits
+  the package budget. The runner compiles and lists each package once, then queues every
+  selected package's shards through the host's package-process allowance:
+  two workers on four CPUs, and the existing Go step parallelism on larger
+  hosts. A free worker can start the next package while another finishes a
+  long controller shard.
+  Each shard keeps `GOMAXPROCS=1` and runs its assigned tests once, including
+  the slow class. Listing, coverage checks, failure cancellation and output
+  collection use the same runner as the store's release shards. The runner
+  logs the sorted list's count and SHA-256, plus each shard's count and hash,
+  and rejects duplicate, missing or multiply assigned names.
+  `race-touched` uses the gate's existing 70-minute execution budget. Ordinary
+  package processes and shard processes have an explicit 52m30s timeout,
+  derived as three quarters of that budget. This raises the ordinary package
+  timeout from 45 minutes and replaces nodehost's ten-minute shard timeout.
+  The node deadline bounds the whole gate, including builds, listing, every
+  package and the remaining checks. Controller exceeded the former unsharded
+  45-minute timeout on hosted CI without a hung test. The unsharded one-thread
+  local nodehost baseline took 687 seconds. Parallel tests within a runtime
+  share the same CPU bound. Hosts with capacity for one package retain the
+  ordinary race command. On a four-core single-tenant host, the ordinary and
   PostgreSQL commands use the same one-thread, two-package bounds, so the
   overlapping commands allow four Go runtime threads rather than six.
   This corrects execution accounting; fitting the whole gate deadline and
@@ -425,11 +440,9 @@ file. Other syntax and workflow checks remain active.
   suite waits for the full Go suite, then uses its released two-package capacity while
   the race suite continues. Machines with one to three or more than four
   logical CPUs retain their existing dependency schedule and Go parallelism.
-  `internal/store` is not among the gate's race targets. It measures 2148 s under
-  the race detector against the step's 1800 s budget, and the cost is spread
-  over 828 tests rather than a few, so there is nothing to trim that fits it:
-  the 25 slowest account for 17.4 s of the 186 s the suite takes without race.
-  Left in, the step always times out, which is a check that cannot pass.
+  `internal/store` is not among the gate's race targets. Its full race suite
+  exceeded 80 minutes in every one of four shards on the hosted runner, so
+  adding it to the gate would restore a check that cannot pass.
   `pre-release` runs it instead, as `race-store`, and no release ships past it.
   That step compiles one race-enabled `internal/store` test binary, lists its top-level
   Test, Example and Fuzz names, sorts them and assigns each exactly once across
@@ -610,6 +623,37 @@ file. Other syntax and workflow checks remain active.
   caller's temporary-directory settings so Go can reuse passing results.
   Test fixtures own cleanup through `t.TempDir`, `t.Cleanup`, or deferred
   removal. Forced race and Postgres runs retain their per-run scratch roots.
+- **Single-core race shard costs:** measured on a 16-logical-CPU Linux host
+  with Go 1.26.10 during concurrent builds and tests. The load average exceeded
+  24, so these are contended local samples. Controller used four shards and
+  two workers, with commands of the form
+  `GOMAXPROCS=1 go test -race -count=1 -run "$pattern" ./internal/controller/`,
+  with each pattern selecting one sorted round-robin shard. The CLI used
+  compiled race binaries with `GOMAXPROCS=1` and `-test.count=1`.
+  Localcontroller used `GOMAXPROCS=1 go test -race -count=1` on the whole
+  package. Every measurement ran the full test class.
+
+  | Package | Listed names | Shard seconds, in order | Result |
+  | --- | ---: | --- | --- |
+  | `internal/controller` | 1,026 | 1040.73 / 1884.44 / 953.24 / 949.81 | All four passed |
+  | `cmd/sparkwing` | 1,129 | 950.51 / 975.64 | Both passed |
+  | `internal/wingd/localcontroller` | 21 | 156.63 | Whole package passed |
+
+  Two preliminary controller shards each hit a 35-minute measurement guard,
+  after 508 and 263 of their 513 names, respectively.
+  A four-shard trial with a 30-minute guard completed shards 1, 3 and 4, and
+  stopped shard 2 after 245 of its 257 names. The table uses shard 2's complete
+  rerun with the configured 52m30s timeout. Together the final four samples
+  cover 257, 257, 256 and 256 names, with no skips. Controller's sorted listing
+  SHA-256 was `dc830a363f175b8cf17c1eb91083e7d1061f23936921989100ee5fd917b17770`.
+  CLI compilation took 126.75s separately from its shard timings.
+  An exploratory two-process localcontroller run compiled in 37.62s,
+  took 23.58s and 159.86s in its two processes, and reported
+  `unstarted local renewal changed claim` in
+  `TestLocalControllerTwoJobProcessesUseIndependentAwards`. The final
+  one-process sample passed all 21 names, so the queue keeps this package
+  together. Full hosted batch completion remains unmeasured.
+
 - **Heavy packages:** run these by name rather than reaching for `./...`, and
   give the command a timeout the package actually fits in. Measured alone on an
   idle 16-core Linux box, `GOWORK=off go test -count=1 <pkg>`:

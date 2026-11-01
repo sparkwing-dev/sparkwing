@@ -8,7 +8,7 @@ import (
 )
 
 func TestRaceShardsCoverEveryListedNameOnce(t *testing.T) {
-	for _, shardCount := range []int{2, storeRaceShardCount} {
+	for _, shardCount := range []int{1, 2, storeRaceShardCount} {
 		names, err := raceTestNames("TestZ\nExampleA\nFuzzSeed\nTestA\nTestB\nTestC\nTestD\nTestE\n", shardCount)
 		if err != nil {
 			t.Fatal(err)
@@ -35,7 +35,11 @@ func TestRaceShardsCoverEveryListedNameOnce(t *testing.T) {
 			t.Fatalf("dropped test: %v, want coverage failure", err)
 		}
 		duplicated := slices.Clone(shards)
-		duplicated[0] = append(slices.Clone(duplicated[0]), duplicated[1][0])
+		duplicateName := shards[0][0]
+		if shardCount > 1 {
+			duplicateName = shards[1][0]
+		}
+		duplicated[0] = append(slices.Clone(duplicated[0]), duplicateName)
 		if err := checkRaceTestCoverage(names, duplicated, shardCount); err == nil || !strings.Contains(err.Error(), "multiple shards") {
 			t.Fatalf("duplicated test: %v, want disjointness failure", err)
 		}
