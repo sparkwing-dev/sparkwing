@@ -651,7 +651,8 @@ Unrelated Pods make the node unavailable.
 Operator setting `cloud_upsize_enabled` defaults to true. With no free warm node
 of the requested class, a job may take an idle, never-used warm node exactly one
 class larger to avoid a cold start. The class ladder is 2, 4, 8, 16, 32 and 64
-vCPU. Upsizing never launches a larger cold node or takes a used node. The job's
+vCPU. Upsizing never launches a larger cold node or takes another run's node.
+Later jobs of the same run may reuse its idle upsized node. The job's
 CPU and memory cgroup limits and billing retain the requested class. Capacity
 requests retain that class too. Per-job store observations record requested and
 granted class, whether the award waited for fresh capacity, and claim-to-start
