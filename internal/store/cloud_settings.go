@@ -13,12 +13,12 @@ import (
 const CloudUpsizeEnabledSetting = "cloud_upsize_enabled"
 
 // CloudUpsizeEnabled reads the operator switch; an absent setting enables upsizing.
-func (o *Operator) CloudUpsizeEnabled(ctx context.Context) (bool, error) {
+func (o *Operator) CloudUpsizeEnabled(ctx context.Context) (_ bool, err error) {
 	tx, err := o.s.beginSnapshotReadTx(ctx)
 	if err != nil {
 		return false, err
 	}
-	defer rollbackOrLog(tx)
+	defer rollbackUnlessDone(tx, &err)
 	enabled, err := cloudUpsizeEnabledTx(ctx, tx)
 	if err != nil {
 		return false, err

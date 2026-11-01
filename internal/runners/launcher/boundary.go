@@ -66,7 +66,7 @@ func (b *KubernetesBoundary) Reserve(ctx context.Context, binding CloudJobBindin
 				continue
 			}
 			if index > 0 && node.Labels[usedRunLabel] != runNodeValue(b.Namespace, binding.RunID) {
-				// A larger node must be warm and never used, or already belong to this run.
+				// safety: upsizing may avoid a cold start, but cannot reuse a node from another run.
 				if node.Labels[TeamNodeLabel] != "" || node.Labels[usedTeamLabel] != "" || node.Labels[usedRunLabel] != "" {
 					continue
 				}

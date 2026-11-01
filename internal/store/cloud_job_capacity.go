@@ -36,7 +36,7 @@ func recordCloudCapacityGrantTx(ctx context.Context, tx *storeTx, award Launcher
 	if requested != grant.RequestedClass || prior.Valid && prior.String != grant.GrantedClass {
 		return bindingRefusal()
 	}
-	// A committed placement survives an operator change while its Job is published.
+	// safety: an operator change cannot invalidate a committed placement while its Job is published.
 	if !prior.Valid && grant.GrantedClass != grant.RequestedClass {
 		enabled, err := cloudUpsizeEnabledTx(ctx, tx)
 		if err != nil {

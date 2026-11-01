@@ -177,7 +177,7 @@ func TestSharedPoolUpsizedJobKeepsRequestedCgroupBudget(t *testing.T) {
 
 func TestSharedPoolPrefersRequestedClassBeforeWarmUpsize(t *testing.T) {
 	b, kube := boundaryFixture()
-	// The larger node sorts first, so selection must rank classes before node names.
+	// hack: sorting the larger node first exposes selection that fails to prefer the requested class.
 	setSharedClass(t, b, "4")
 	warm := sharedWarmPod()
 	if _, err := kube.CoreV1().Pods(warm.Namespace).Create(t.Context(), warm, metav1.CreateOptions{}); err != nil {

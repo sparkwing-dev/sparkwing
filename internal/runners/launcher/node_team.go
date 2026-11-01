@@ -210,7 +210,7 @@ func nextCPUClass(class string) string {
 func (b *KubernetesBoundary) verifyNodeTeam(ctx context.Context, node *corev1.Node, team string) error {
 	value := TeamNodeValue(b.Namespace, team)
 	usedTeam, usedRun := node.Labels[usedTeamLabel], node.Labels[usedRunLabel]
-	// All three labels must be written together. An incomplete or foreign binding never becomes fresh again.
+	// safety: an incomplete or foreign binding must never become fresh again; all three labels bind atomically.
 	if usedTeam != "" || usedRun != "" || node.Labels[TeamNodeLabel] != "" {
 		if usedTeam != value || usedRun == "" || node.Labels[TeamNodeLabel] != value {
 			return ErrNoDedicatedNode
