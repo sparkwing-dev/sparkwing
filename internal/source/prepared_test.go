@@ -4,11 +4,13 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
@@ -144,6 +146,9 @@ func TestAcquirePreparedRestoresExecutableWithoutSourceOrInstaller(t *testing.T)
 		t.Run(string(sdk), func(t *testing.T) {
 			f := newPreparedFixture(t, sdk)
 			f.publish(t)
+			if sdk == engineid.TypeScriptSDK {
+				f.options.SDK = ""
+			}
 			if err := os.RemoveAll(f.spec.LocalCheckout); err != nil {
 				t.Fatal(err)
 			}
@@ -288,4 +293,42 @@ func TestAcquirePreparedRestoresAfterGitCredentialRevocation(t *testing.T) {
 	if authority.calls != 1 || f.installs != 1 {
 		t.Fatalf("restoration requested source: credentials=%d installs=%d", authority.calls, f.installs)
 	}
+}
+
+func TestAcquirePreparedRealGoBuildTiming(t *testing.T) {
+	f := newPreparedFixture(t, engineid.GoSDK)
+	sourcetest.Write(t, filepath.Join(f.spec.LocalCheckout, ".sparkwing", "pipeline.go"), "package main\nimport \"fmt\"\nfunc main() { fmt.Println(\"prepared execution\") }\n")
+	f.options.InstallSDK = func(ctx context.Context, _ engine.Resolved, req engine.SDKInstallRequest) (engine.SDKCommand, error) {
+		f.installs++
+		directory := filepath.Join(req.Directory, req.PipelineDir)
+		executable := filepath.Join(t.TempDir(), "pipeline")
+		build := exec.CommandContext(ctx, "go", "build", "-o", executable, "pipeline.go")
+		build.Dir, build.Env = directory, req.Environment
+		if output, err := build.CombinedOutput(); err != nil {
+			return engine.SDKCommand{}, fmt.Errorf("build fixture: %w: %s", err, output)
+		}
+		return engine.SDKCommand{Directory: directory, Command: []string{executable}}, nil
+	}
+	started := time.Now()
+	f.publish(t)
+	fresh := time.Since(started)
+	if err := os.RemoveAll(f.spec.LocalCheckout); err != nil {
+		t.Fatal(err)
+	}
+	started = time.Now()
+	restored, err := source.Acquire(t.Context(), f.spec, f.options)
+	restore := time.Since(started)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if err := restored.Close(); err != nil {
+			t.Error(err)
+		}
+	}()
+	assertPreparedExecution(t, restored)
+	if f.installs != 1 {
+		t.Fatalf("installs=%d, want one real Go build", f.installs)
+	}
+	t.Logf("real Go fixture, shared warm build cache: fresh Acquire+publication=%s; restored Acquire=%s; installs=%d", fresh, restore, f.installs)
 }
