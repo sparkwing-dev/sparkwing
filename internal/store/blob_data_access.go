@@ -94,7 +94,11 @@ func checkBlobDataWriteTx(ctx context.Context, tx *storeTx, team Team, input blo
 		return err
 	}
 	source := resolved.source
-	if (target.RunID != "" && target.RunID != source.RunID) || (target.NodeID != "" && (!source.Attempt.Set || target.NodeID != source.Attempt.Value.NodeID)) || (target.Attempt != 0 && (!source.Attempt.Set || target.Attempt != source.Attempt.Value.Attempt)) || (target.Generation != 0 && (!source.Attempt.Set || target.Generation != source.Attempt.Value.Generation)) {
+	generation := source.Attempt.Value.Generation
+	if source.Unit.Set {
+		generation = source.Unit.Value.Generation
+	}
+	if (target.RunID != "" && target.RunID != source.RunID) || (target.NodeID != "" && (!source.Attempt.Set || target.NodeID != source.Attempt.Value.NodeID)) || (target.Attempt != 0 && (!source.Attempt.Set || target.Attempt != source.Attempt.Value.Attempt)) || (target.Generation != 0 && target.Generation != generation) {
 		return blob.ErrDigestNotReadable
 	}
 	if target.RecordKind != "" && !blobKindAllowed(source, blob.Kind(target.RecordKind)) {

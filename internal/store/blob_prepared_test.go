@@ -28,6 +28,15 @@ func TestPreparedPipelineOwnerPublishAndAwardRead(t *testing.T) {
 			}
 			key := blob.PreparedRecordKey("a", "run", "gh:1", "ci")
 			request := blob.CommitRecordRequest{Authority: authority, Source: identity, Key: key, Digest: ticket.Blob.Digest}
+			authorized := dataAccessAuthority(t, s, identity.CapabilityRef)
+			target := capability.DataTarget{Operation: capability.DataUpload, RunID: "run", Generation: 7, Digest: string(ticket.Blob.Digest)}
+			if err = tenant.CheckDataAccess(t.Context(), authorized, target); err != nil {
+				t.Fatalf("owner upload generation: %v", err)
+			}
+			target.Generation++
+			if err = tenant.CheckDataAccess(t.Context(), authorized, target); err == nil {
+				t.Fatal("wrong owner generation accepted")
+			}
 			records := tenant.BlobRecords(nil)
 			if _, err = records.CommitRecord(t.Context(), request); err != nil {
 				t.Fatal(err)
