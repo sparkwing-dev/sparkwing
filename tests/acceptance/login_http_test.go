@@ -51,7 +51,6 @@ func TestLoginHTTPAccountCapabilitySession(t *testing.T) {
 	h := f.server.WithDashboard(controller.Dashboard{}).Handler()
 	r := loginRequest(root.Raw, "browser-proof", "/runs?run=selected")
 	r.AddCookie(&http.Cookie{Name: "__Host-sw_session", Value: f.raw})
-	started := time.Now()
 	w := httptest.NewRecorder()
 	h.ServeHTTP(w, r)
 	var raw string
@@ -73,8 +72,8 @@ func TestLoginHTTPAccountCapabilitySession(t *testing.T) {
 	if err != nil || session.AccountID != "member" || session.CapabilityPrefix != root.Capability.Prefix || session.Team != "team" {
 		t.Fatalf("session=%+v err=%v", session, err)
 	}
-	if session.ExpiresAt.Before(started.Add(7*24*time.Hour-time.Second)) || session.ExpiresAt.After(time.Now().Add(7*24*time.Hour+time.Second)) {
-		t.Fatalf("session lifetime: %s", session.ExpiresAt)
+	if want := teststore.Now(f.store).Add(7 * 24 * time.Hour); !session.ExpiresAt.Equal(want) {
+		t.Fatalf("session expiry: %s, want %s", session.ExpiresAt, want)
 	}
 	digest := sha256.Sum256([]byte(raw))
 	var stored, plaintext int
