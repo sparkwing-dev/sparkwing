@@ -645,12 +645,26 @@ launcher namespace selectors, the generic dedicated toleration, the award's CPU,
 memory and scratch requests, the runner image running `sparkwing-runner version`,
 and no volumes, environment or service account token. The Pod records its unit
 fence and size in `sparkwing.dev/capacity-demand`, never the bootstrap credential.
+Required pod anti-affinity on `kubernetes.io/hostname` keeps it off any node
+running a Pod with another team's `sparkwing.dev/team` label in the job
+namespace, so Karpenter adds one node per team's demand.
+
+- Only the requesting team's capacity requests are consumable at reservation. A
+  request from another team, running or finished, still keeps the node out of
+  reach. The scheduler ignores finished Pods for anti-affinity, so two teams'
+  requests can still finish on one node. A finished request no longer pends and
+  makes Karpenter add nothing, so a held award that could not reserve a node
+  deletes its finished request, UID-fenced, and creates a new one on the next
+  pass. The new request either takes a node no award has bound or pends until
+  Karpenter adds one. Another team's finished request leaves on that team's
+  next placement attempt, or with its award. `TestTwoTeamsOnAnEmptyPoolEachGetTheirOwnNode`
+  (grid cell R21C01) and `TestStoppedCapacityRequestIsReplaced` guard this.
 
 - The hash covers the award generation, so a re-award creates its own request
   and never rebinds or deletes another generation's. Only the same award adopts
   an existing request.
 - Admission enforces the request's shape. The launcher compares its award
-  fields (name, demand record, class/deployment placement, image and resources) with demand
+  fields (name, demand record, class/deployment placement, affinity, image and resources) with demand
   taken from outside the Pod: the award on create and adoption, the held award
   on every sync, and the controller's binding and committed allocation on every
   reconciliation. A mismatch or an unknown allocation deletes it, UID-fenced,

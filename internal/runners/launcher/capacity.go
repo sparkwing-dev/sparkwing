@@ -9,6 +9,7 @@ import (
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/equality"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -79,7 +80,17 @@ func capacityPod(cfg CloudJobConfig, d capacityDemand) (*corev1.Pod, error) {
 			Affinity: &corev1.Affinity{NodeAffinity: &corev1.NodeAffinity{RequiredDuringSchedulingIgnoredDuringExecution: &corev1.NodeSelector{NodeSelectorTerms: []corev1.NodeSelectorTerm{
 				{MatchExpressions: []corev1.NodeSelectorRequirement{{Key: usedRunLabel, Operator: corev1.NodeSelectorOpDoesNotExist}, {Key: usedTeamLabel, Operator: corev1.NodeSelectorOpDoesNotExist}, {Key: TeamNodeLabel, Operator: corev1.NodeSelectorOpDoesNotExist}}},
 				{MatchExpressions: []corev1.NodeSelectorRequirement{{Key: usedRunLabel, Operator: corev1.NodeSelectorOpIn, Values: []string{runNodeValue(cfg.Namespace, b.RunID)}}, {Key: usedTeamLabel, Operator: corev1.NodeSelectorOpIn, Values: []string{TeamNodeValue(cfg.Namespace, b.Team)}}, {Key: TeamNodeLabel, Operator: corev1.NodeSelectorOpIn, Values: []string{TeamNodeValue(cfg.Namespace, b.Team)}}}},
-			}}}},
+			}}},
+				// safety: Karpenter provisions a node per team's demand, so one fresh node
+				// never carries two teams' requests that each refuse to bind it.
+				PodAntiAffinity: &corev1.PodAntiAffinity{RequiredDuringSchedulingIgnoredDuringExecution: []corev1.PodAffinityTerm{{
+					TopologyKey: corev1.LabelHostname,
+					LabelSelector: &metav1.LabelSelector{MatchExpressions: []metav1.LabelSelectorRequirement{
+						{Key: TeamLabel, Operator: metav1.LabelSelectorOpExists},
+						{Key: TeamLabel, Operator: metav1.LabelSelectorOpNotIn, Values: []string{TeamNodeValue(cfg.Namespace, b.Team)}},
+					}},
+				}}},
+			},
 			ServiceAccountName: ServiceAccount, AutomountServiceAccountToken: ptr(false), EnableServiceLinks: ptr(false), RestartPolicy: corev1.RestartPolicyNever,
 			TerminationGracePeriodSeconds: ptr(int64(1)),
 			SecurityContext:               capacityPodSecurity(),
@@ -102,7 +113,7 @@ func recordedDemand(pod *corev1.Pod) (capacityDemand, error) {
 
 func (l *Launcher) verifyCapacityPod(pod *corev1.Pod, d capacityDemand) error {
 	expected, err := capacityPod(l.Config, d)
-	if err == nil && (expected.Name != pod.Name || pod.Namespace != l.Config.Namespace || len(pod.OwnerReferences) != 0 || pod.Annotations[demandAnnotation] != expected.Annotations[demandAnnotation]) {
+	if err == nil && (expected.Name != pod.Name || pod.Namespace != l.Config.Namespace || len(pod.OwnerReferences) != 0 || pod.Annotations[demandAnnotation] != expected.Annotations[demandAnnotation] || !equality.Semantic.DeepEqual(expected.Spec.Affinity, pod.Spec.Affinity)) {
 		err = errors.New("capacity Pod identity does not match its award")
 	}
 	if err == nil {
@@ -171,6 +182,11 @@ func (l *Launcher) requestCapacity(ctx context.Context, award CloudJobAward) err
 	}
 	if err := l.verifyCapacityPod(admitted, d); err != nil {
 		return errors.Join(err, l.deleteCapacityPod(ctx, admitted))
+	}
+	// safety: a finished request no longer pends, so Karpenter would never add a node for
+	// an award that could not take the node it ran on. The next pass requests afresh.
+	if podStopped(*admitted) {
+		return l.deleteCapacityPod(ctx, admitted)
 	}
 	return nil
 }

@@ -42,6 +42,7 @@ func capacityMutations() map[string]func(*corev1.Pod) {
 			p.Spec.Containers = append(p.Spec.Containers, corev1.Container{Name: "sidecar", Image: "other"})
 		},
 		"other_team":   func(p *corev1.Pod) { p.Spec.NodeSelector[TeamNodeLabel] = TeamNodeValue("cloud", "other") },
+		"co_scheduled": func(p *corev1.Pod) { p.Spec.Affinity.PodAntiAffinity = nil },
 		"other_demand": func(p *corev1.Pod) { p.Annotations[demandAnnotation] = `{"binding":{}}` },
 		"coordinated_size": func(p *corev1.Pod) {
 			var d capacityDemand
@@ -254,8 +255,13 @@ func TestReservationConsumesOnlyItsTeamsCapacityRequests(t *testing.T) {
 		pod     *corev1.Pod
 		reserve bool
 	}{
-		"own team":        {request("team", "cloud"), true},
-		"other team":      {request("other", "cloud"), false},
+		"own team":   {request("team", "cloud"), true},
+		"other team": {request("other", "cloud"), false},
+		"stopped other team": {func() *corev1.Pod {
+			pod := request("other", "cloud")
+			pod.Status.Phase = corev1.PodSucceeded
+			return pod
+		}(), false},
 		"other namespace": {request("team", "elsewhere"), false},
 		"unlabelled": {func() *corev1.Pod {
 			pod := request("team", "cloud")
