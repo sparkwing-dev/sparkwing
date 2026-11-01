@@ -13,7 +13,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 )
 
-func TestLocalDepcacheRoundTrip(t *testing.T) {
+func TestLocalCacheRoundTrip(t *testing.T) {
 	for _, ref := range []string{"", "main"} {
 		t.Run(ref, func(t *testing.T) {
 			s, records, intent := blobRecordFixture(t)
@@ -73,10 +73,10 @@ func TestLocalDepcacheRoundTrip(t *testing.T) {
 			}
 			memo := blob.MemoLookup{Authority: authority, Key: blob.MemoKey{Repo: repo, Ref: authority.Ref.Scope, Pipeline: "ci", Job: "job", Hash: fixtureMemoHash}}
 			if hit, err := records.LookupMemo(t.Context(), memo); err != nil || hit.Found {
-				t.Fatalf("local memo must miss: %+v %v", hit, err)
+				t.Fatalf("absent local memo must miss: %+v %v", hit, err)
 			}
 			if hit, err := records.CopyMemo(t.Context(), blob.CopyMemoRequest{Lookup: memo, Destination: authority.Attempt.Value}); err != nil || hit.Found {
-				t.Fatalf("local memo copy must miss: %+v %v", hit, err)
+				t.Fatalf("absent local memo copy must miss: %+v %v", hit, err)
 			}
 			for _, field := range []string{"repo", "local_repo", "pipeline", "job", "ref", "hash"} {
 				bad := memo
@@ -99,8 +99,8 @@ func TestLocalDepcacheRoundTrip(t *testing.T) {
 				}
 			}
 			memoKey := blob.RecordKey{Team: "a", Kind: blob.KindMemo, Scope: blob.Scope{Repo: repo, Ref: authority.Ref.Scope, Pipeline: "ci", Job: "job", Key: string(fixtureMemoHash)}, Name: blob.MemoRecordName}
-			if _, err := records.CommitRecord(t.Context(), blob.CommitRecordRequest{Authority: authority, Source: intent.Identity, Key: memoKey, Digest: intent.Digest}); err == nil {
-				t.Fatal("local repository published a memo")
+			if _, err := records.CommitRecord(t.Context(), blob.CommitRecordRequest{Authority: authority, Source: intent.Identity, Key: memoKey, Digest: intent.Digest}); err != nil {
+				t.Fatal(err)
 			}
 			intent.Authority.Upload = runspec.Optional[blob.UploadIdentity]{}
 			reader := addBlobJob(t, s, intent, "consumer")
@@ -124,39 +124,44 @@ func TestLocalDepcacheRoundTrip(t *testing.T) {
 	}
 }
 
-func TestLocalDepcacheWriteScopeProperty(t *testing.T) {
-	property := func(input []byte, ref string) bool {
-		if len(ref) > 128 {
-			return true
-		}
-		digest := sha256.Sum256(input)
-		repo := runspec.RepoKey("local:" + hex.EncodeToString(digest[:]))
-		scope := blob.RefScope{Ref: ref}
-		a := blobActor{capability: capability.Capability{Team: "a", Subject: capability.Subject{Kind: capability.SubjectLocal}, Data: &capability.DataScope{Use: capability.DataClaim, WriteRef: scope.CapabilityScope()}}, authority: blob.Authority{Repo: repo, Ref: blob.RefFacts{Scope: scope}}}
-		key := blob.RecordKey{Team: "a", Kind: blob.KindDepcache, Scope: blob.Scope{Repo: repo, Ref: scope, Key: "key"}, Name: "modules"}
-		if checkBlobWriteKey(a, key) != nil {
-			return false
-		}
-		for _, kind := range []capability.SubjectKind{capability.SubjectMachine, capability.SubjectAccount} {
-			other := a
-			other.capability.Subject.Kind = kind
-			if checkBlobWriteKey(other, key) == nil {
+func TestLocalCacheWriteScopeProperty(t *testing.T) {
+	for _, kind := range []blob.Kind{blob.KindDepcache, blob.KindMemo} {
+		property := func(input []byte, ref string) bool {
+			if len(ref) > 128 {
+				return true
+			}
+			digest := sha256.Sum256(input)
+			repo := runspec.RepoKey("local:" + hex.EncodeToString(digest[:]))
+			scope := blob.RefScope{Ref: ref}
+			a := blobActor{capability: capability.Capability{Team: "a", Subject: capability.Subject{Kind: capability.SubjectLocal}, Data: &capability.DataScope{Use: capability.DataClaim, WriteRef: scope.CapabilityScope()}}, authority: blob.Authority{Repo: repo, Ref: blob.RefFacts{Scope: scope}}}
+			key := blob.RecordKey{Team: "a", Kind: kind, Scope: blob.Scope{Repo: repo, Ref: scope, Key: "key"}, Name: "modules"}
+			if kind == blob.KindMemo {
+				key.Name = blob.MemoRecordName
+			}
+			if checkBlobWriteKey(a, key) != nil {
 				return false
 			}
-		}
-		for _, use := range []capability.DataUse{capability.DataPublish, capability.DataRemoteCache, capability.DataExpansion} {
-			other := a
-			data := *a.capability.Data
-			data.Use = use
-			other.capability.Data = &data
-			if checkBlobWriteKey(other, key) == nil {
-				return false
+			for _, kind := range []capability.SubjectKind{capability.SubjectMachine, capability.SubjectAccount} {
+				other := a
+				other.capability.Subject.Kind = kind
+				if checkBlobWriteKey(other, key) == nil {
+					return false
+				}
 			}
+			for _, use := range []capability.DataUse{capability.DataPublish, capability.DataRemoteCache, capability.DataExpansion} {
+				other := a
+				data := *a.capability.Data
+				data.Use = use
+				other.capability.Data = &data
+				if checkBlobWriteKey(other, key) == nil {
+					return false
+				}
+			}
+			key.Scope.Repo += "foreign"
+			return checkBlobWriteKey(a, key) != nil
 		}
-		key.Scope.Repo += "foreign"
-		return checkBlobWriteKey(a, key) != nil
-	}
-	if err := quick.Check(property, &quick.Config{MaxCount: 64}); err != nil {
-		t.Fatal(err)
+		if err := quick.Check(property, &quick.Config{MaxCount: 64}); err != nil {
+			t.Fatal(err)
+		}
 	}
 }

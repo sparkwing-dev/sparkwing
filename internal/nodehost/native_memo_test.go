@@ -12,6 +12,7 @@ import (
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
+	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
 	"github.com/sparkwing-dev/sparkwing/internal/engineid"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
@@ -21,17 +22,18 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/source"
 	"github.com/sparkwing-dev/sparkwing/internal/storage"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
+	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
 )
 
 func TestNativeExecutorMemoRecipeHitUsesClaimAndReleasesAdmission(t *testing.T) {
-	nativeExecutorMemoRuns(t, "gh:1", true)
+	nativeExecutorMemoRuns(t, "gh:1")
 }
 
-func TestNativeExecutorLocalRepositoryMemoRunsBody(t *testing.T) {
-	nativeExecutorMemoRuns(t, runspec.RepoKey("local:"+strings.Repeat("a", 64)), false)
+func TestNativeExecutorLocalRepositoryMemoReusesResult(t *testing.T) {
+	nativeExecutorMemoRuns(t, runspec.RepoKey("local:"+strings.Repeat("a", 64)))
 }
 
-func nativeExecutorMemoRuns(t *testing.T, repo runspec.RepoKey, reuse bool) {
+func nativeExecutorMemoRuns(t *testing.T, repo runspec.RepoKey) {
 	t.Helper()
 	ctx := t.Context()
 	objects, directory := nativeStoreObjects(t)
@@ -43,11 +45,26 @@ func nativeExecutorMemoRuns(t *testing.T, repo runspec.RepoKey, reuse bool) {
 	job.Artifacts = []string{"artifact.txt"}
 	plan := nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{job}}
 	request := runspec.Request{Version: 1, Team: string(store.DefaultTeam), Pipeline: "p", Mode: runspec.IntakeExecute, Origin: runspec.OriginTrigger, Dispatch: runspec.DispatchHost, Git: runspec.Git{Repository: runspec.Repository{Key: repo}, SHA: strings.Repeat("a", 40)}}
-	if !reuse {
+	if strings.HasPrefix(string(repo), "local:") {
 		request.Origin = runspec.OriginLocal
+		newStoreHostFixtureForRequest(t, database, plan, request)
+		principal, err := database.AsOperator().ResolveAuthority(ctx, capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: "host-fixture-root"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		credential := principal.Capability
+		credential.Subject.Kind = capability.SubjectLocal
+		body, err := json.Marshal(store.CapabilityRecord{Version: 1, Value: credential})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := teststore.SQL(t, database).ExecContext(ctx, "UPDATE capabilities SET subject_kind=?,authority_json=? WHERE prefix=?", credential.Subject.Kind, body, credential.Prefix); err != nil {
+			t.Fatal(err)
+		}
 	}
 	bodies := 0
-	for run := range 2 {
+	for run := range 3 {
+		request.Options.NoMemo = runspec.Setting[bool]{Optional: runspec.Optional[bool]{Set: true, Value: run == 2}}
 		f := newStoreHostFixtureForRequest(t, database, plan, request)
 		outputs := nativeStoreOutputRecords(t, ctx, f, request, objects)
 		bytesBackend := &scriptedStorage{onPut: outputs.Blobs.Put, onGet: func(_ context.Context, request blob.GetRequest) (blob.VerifiedReader, error) {
@@ -123,12 +140,12 @@ func nativeExecutorMemoRuns(t *testing.T, repo runspec.RepoKey, reuse bool) {
 		}
 		row, err := f.Tenant.ReadNode(ctx, ref)
 		want := runstate.NodeSuccess
-		if reuse && run == 1 {
+		if run == 1 {
 			want = runstate.NodeMemoized
 		}
-		wantBodies := run + 1
-		if reuse {
-			wantBodies = 1
+		wantBodies := 1
+		if run == 2 {
+			wantBodies++
 		}
 		if err != nil || row.Status != runstate.StatusDone || row.Outcome != want || row.Attempt != 1 || row.ClaimedBy != "" || row.OutputRecord == nil || row.ManifestRecord == nil || bodies != wantBodies {
 			t.Fatalf("run=%d row=%+v bodies=%d error=%v", run, row, bodies, err)
