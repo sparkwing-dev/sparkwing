@@ -83,3 +83,22 @@ An isolated run of that test exceeded a five-minute budget in its second revisio
 case, also during SDK installation. Neither run reported an assertion failure
 before timing out. The CLI package gate remains unresolved. This local source
 selection test does not enable prepared artifact reuse.
+
+## Continuation verification
+
+The focused source, store, controller HTTP, bootstrap and launcher admission CEL
+suites pass. The real Go fixture measured 499.840 ms fresh / 167.038 ms restored,
+with one installation. The source suite includes corrupt-byte refusal and
+restoration after Git credential revocation.
+
+Both rollout overlays now use readable YAML patches. Their parsed operations
+and CEL expressions are unchanged. All four policy patches apply in memory to
+the checked-in staging and production `kikd-gitops` manifests, including every
+old-value assertion. No file in that repository was written.
+
+The isolated CLI selection test reproduced the timeout at 90 seconds in its
+first revision case, after two SDK replacement warnings. Its stack was waiting
+in `engine.Resolved.InstallSDK` through fresh `source.Acquire`. The separate
+CLI-budget lane owns these repeated compilations and the package budget. No CLI
+test or product workaround was added here. The full gate and Opus review remain
+with the lead.

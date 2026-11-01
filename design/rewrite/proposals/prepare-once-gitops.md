@@ -1,4 +1,4 @@
-'# Same-run preparation rollout proposal
+# Same-run preparation rollout proposal
 
 Proposal only. No infrastructure or GitOps repository was changed.
 
@@ -35,49 +35,71 @@ patches:
     version: v1
     kind: ValidatingAdmissionPolicy
     name: sparkwing-cloud-pods-sparkwing-staging-cloud-jobs
-  patch: "[\n  {\n    \"op\": \"test\",\n    \"path\": \"/spec/validations/10/message\",\n    \"value\": \"Pods\
-    \ run only the launcher's container set and pinned images\"\n  },\n  {\n    \"op\": \"replace\",\n    \"path\"\
-    : \"/spec/validations/10\",\n    \"value\": {\n      \"expression\": \"!variables.create || (variables.shape\
-    \ == 'job' ? size(variables.spec.containers) == 1 && variables.spec.containers[0].name == 'run-node' && variables.spec.containers[0].image\
-    \ == variables.runnerImage && size(variables.inits) == 1 && variables.inits[0].name == 'docker' && variables.inits[0].image\
-    \ == variables.dockerImage : size(variables.spec.containers) == 1 && variables.spec.containers[0].image == variables.runnerImage\
-    \ && size(variables.inits) == 0)\",\n      \"message\": \"Pods run only the launcher's container set and pinned\
-    \ images\"\n    }\n  },\n  {\n    \"op\": \"test\",\n    \"path\": \"/spec/validations/15/message\",\n    \"\
-    value\": \"the workload containers run only the launcher's sparkwing-runner commands\"\n  },\n  {\n    \"op\"\
-    : \"replace\",\n    \"path\": \"/spec/validations/15\",\n    \"value\": {\n      \"expression\": \"!variables.create\
-    \ || variables.shape != 'job' || variables.spec.containers[0].?command.orValue([]) == [\\\"sparkwing-runner\\\
-    \"] && !has(variables.spec.containers[0].restartPolicy) && (size(variables.spec.containers[0].?args.orValue([]))\
-    \ == 11 || size(variables.spec.containers[0].?args.orValue([])) == 13 && variables.spec.containers[0].args[11]\
-    \ == '--job') && variables.spec.containers[0].args[0] == \\\"run-node\\\" && variables.spec.containers[0].args[1]\
-    \ == \\\"--controller\\\" && variables.spec.containers[0].args[3] == \\\"--run\\\" && variables.spec.containers[0].args[5]\
-    \ == \\\"--generation\\\" && variables.spec.containers[0].args[7] == \\\"--module-cache\\\" && variables.spec.containers[0].args[8]\
-    \ == \\\"/tmp/modules\\\" && variables.spec.containers[0].args[9] == \\\"--bootstrap-file\\\" && variables.spec.containers[0].args[10]\
-    \ == \\\"/etc/sparkwing/bootstrap/bootstrap\\\"\",\n      \"message\": \"the workload containers run only the\
-    \ launcher's sparkwing-runner commands\"\n    }\n  }\n]"
+  patch: |
+    - op: test
+      path: /spec/validations/10/message
+      value: Pods run only the launcher's container set and pinned images
+    - op: replace
+      path: /spec/validations/10
+      value:
+        expression: >-
+          !variables.create || (variables.shape == 'job' ? size(variables.spec.containers) == 1 && variables.spec.containers[0].name
+          == 'run-node' && variables.spec.containers[0].image == variables.runnerImage && size(variables.inits)
+          == 1 && variables.inits[0].name == 'docker' && variables.inits[0].image == variables.dockerImage
+          : size(variables.spec.containers) == 1 && variables.spec.containers[0].image == variables.runnerImage
+          && size(variables.inits) == 0)
+        message: Pods run only the launcher's container set and pinned images
+    - op: test
+      path: /spec/validations/15/message
+      value: the workload containers run only the launcher's sparkwing-runner commands
+    - op: replace
+      path: /spec/validations/15
+      value:
+        expression: >-
+          !variables.create || variables.shape != 'job' || variables.spec.containers[0].?command.orValue([])
+          == ["sparkwing-runner"] && !has(variables.spec.containers[0].restartPolicy) && (size(variables.spec.containers[0].?args.orValue([]))
+          == 11 || size(variables.spec.containers[0].?args.orValue([])) == 13 && variables.spec.containers[0].args[11]
+          == '--job') && variables.spec.containers[0].args[0] == "run-node" && variables.spec.containers[0].args[1]
+          == "--controller" && variables.spec.containers[0].args[3] == "--run" && variables.spec.containers[0].args[5]
+          == "--generation" && variables.spec.containers[0].args[7] == "--module-cache" && variables.spec.containers[0].args[8]
+          == "/tmp/modules" && variables.spec.containers[0].args[9] == "--bootstrap-file" && variables.spec.containers[0].args[10]
+          == "/etc/sparkwing/bootstrap/bootstrap"
+        message: the workload containers run only the launcher's sparkwing-runner commands
 - target:
     group: admissionregistration.k8s.io
     version: v1
     kind: ValidatingAdmissionPolicy
     name: sparkwing-cloud-jobs-sparkwing-staging-cloud-jobs
-  patch: "[\n  {\n    \"op\": \"test\",\n    \"path\": \"/spec/validations/8/message\",\n    \"value\": \"Pods run\
-    \ only the launcher's container set and pinned images\"\n  },\n  {\n    \"op\": \"replace\",\n    \"path\":\
-    \ \"/spec/validations/8\",\n    \"value\": {\n      \"expression\": \"!variables.create || (variables.shape\
-    \ == 'job' ? size(variables.spec.containers) == 1 && variables.spec.containers[0].name == 'run-node' && variables.spec.containers[0].image\
-    \ == variables.runnerImage && size(variables.inits) == 1 && variables.inits[0].name == 'docker' && variables.inits[0].image\
-    \ == variables.dockerImage : size(variables.spec.containers) == 1 && variables.spec.containers[0].image == variables.runnerImage\
-    \ && size(variables.inits) == 0)\",\n      \"message\": \"Pods run only the launcher's container set and pinned\
-    \ images\"\n    }\n  },\n  {\n    \"op\": \"test\",\n    \"path\": \"/spec/validations/13/message\",\n    \"\
-    value\": \"the workload containers run only the launcher's sparkwing-runner commands\"\n  },\n  {\n    \"op\"\
-    : \"replace\",\n    \"path\": \"/spec/validations/13\",\n    \"value\": {\n      \"expression\": \"!variables.create\
-    \ || variables.shape != 'job' || variables.spec.containers[0].?command.orValue([]) == [\\\"sparkwing-runner\\\
-    \"] && !has(variables.spec.containers[0].restartPolicy) && (size(variables.spec.containers[0].?args.orValue([]))\
-    \ == 11 || size(variables.spec.containers[0].?args.orValue([])) == 13 && variables.spec.containers[0].args[11]\
-    \ == '--job') && variables.spec.containers[0].args[0] == \\\"run-node\\\" && variables.spec.containers[0].args[1]\
-    \ == \\\"--controller\\\" && variables.spec.containers[0].args[3] == \\\"--run\\\" && variables.spec.containers[0].args[5]\
-    \ == \\\"--generation\\\" && variables.spec.containers[0].args[7] == \\\"--module-cache\\\" && variables.spec.containers[0].args[8]\
-    \ == \\\"/tmp/modules\\\" && variables.spec.containers[0].args[9] == \\\"--bootstrap-file\\\" && variables.spec.containers[0].args[10]\
-    \ == \\\"/etc/sparkwing/bootstrap/bootstrap\\\"\",\n      \"message\": \"the workload containers run only the\
-    \ launcher's sparkwing-runner commands\"\n    }\n  }\n]"
+  patch: |
+    - op: test
+      path: /spec/validations/8/message
+      value: Pods run only the launcher's container set and pinned images
+    - op: replace
+      path: /spec/validations/8
+      value:
+        expression: >-
+          !variables.create || (variables.shape == 'job' ? size(variables.spec.containers) == 1 && variables.spec.containers[0].name
+          == 'run-node' && variables.spec.containers[0].image == variables.runnerImage && size(variables.inits)
+          == 1 && variables.inits[0].name == 'docker' && variables.inits[0].image == variables.dockerImage
+          : size(variables.spec.containers) == 1 && variables.spec.containers[0].image == variables.runnerImage
+          && size(variables.inits) == 0)
+        message: Pods run only the launcher's container set and pinned images
+    - op: test
+      path: /spec/validations/13/message
+      value: the workload containers run only the launcher's sparkwing-runner commands
+    - op: replace
+      path: /spec/validations/13
+      value:
+        expression: >-
+          !variables.create || variables.shape != 'job' || variables.spec.containers[0].?command.orValue([])
+          == ["sparkwing-runner"] && !has(variables.spec.containers[0].restartPolicy) && (size(variables.spec.containers[0].?args.orValue([]))
+          == 11 || size(variables.spec.containers[0].?args.orValue([])) == 13 && variables.spec.containers[0].args[11]
+          == '--job') && variables.spec.containers[0].args[0] == "run-node" && variables.spec.containers[0].args[1]
+          == "--controller" && variables.spec.containers[0].args[3] == "--run" && variables.spec.containers[0].args[5]
+          == "--generation" && variables.spec.containers[0].args[7] == "--module-cache" && variables.spec.containers[0].args[8]
+          == "/tmp/modules" && variables.spec.containers[0].args[9] == "--bootstrap-file" && variables.spec.containers[0].args[10]
+          == "/etc/sparkwing/bootstrap/bootstrap"
+        message: the workload containers run only the launcher's sparkwing-runner commands
 ```
 
 ## sparkwing
@@ -97,45 +119,65 @@ patches:
     version: v1
     kind: ValidatingAdmissionPolicy
     name: sparkwing-cloud-pods-sparkwing-cloud-jobs
-  patch: "[\n  {\n    \"op\": \"test\",\n    \"path\": \"/spec/validations/10/message\",\n    \"value\": \"Pods\
-    \ run only the launcher's container set and pinned images\"\n  },\n  {\n    \"op\": \"replace\",\n    \"path\"\
-    : \"/spec/validations/10\",\n    \"value\": {\n      \"expression\": \"!variables.create || (variables.shape\
-    \ == 'job' ? size(variables.spec.containers) == 1 && variables.spec.containers[0].name == 'run-node' && variables.spec.containers[0].image\
-    \ == variables.runnerImage && size(variables.inits) == 1 && variables.inits[0].name == 'docker' && variables.inits[0].image\
-    \ == variables.dockerImage : size(variables.spec.containers) == 1 && variables.spec.containers[0].image == variables.runnerImage\
-    \ && size(variables.inits) == 0)\",\n      \"message\": \"Pods run only the launcher's container set and pinned\
-    \ images\"\n    }\n  },\n  {\n    \"op\": \"add\",\n    \"path\": \"/spec/validations/-\",\n    \"value\": {\n\
-    \      \"expression\": \"!variables.create || variables.shape != 'job' || variables.spec.containers[0].?command.orValue([])\
-    \ == [\\\"sparkwing-runner\\\"] && !has(variables.spec.containers[0].restartPolicy) && (size(variables.spec.containers[0].?args.orValue([]))\
-    \ == 11 || size(variables.spec.containers[0].?args.orValue([])) == 13 && variables.spec.containers[0].args[11]\
-    \ == '--job') && variables.spec.containers[0].args[0] == \\\"run-node\\\" && variables.spec.containers[0].args[1]\
-    \ == \\\"--controller\\\" && variables.spec.containers[0].args[3] == \\\"--run\\\" && variables.spec.containers[0].args[5]\
-    \ == \\\"--generation\\\" && variables.spec.containers[0].args[7] == \\\"--module-cache\\\" && variables.spec.containers[0].args[8]\
-    \ == \\\"/tmp/modules\\\" && variables.spec.containers[0].args[9] == \\\"--bootstrap-file\\\" && variables.spec.containers[0].args[10]\
-    \ == \\\"/etc/sparkwing/bootstrap/bootstrap\\\"\",\n      \"message\": \"the workload containers run only the\
-    \ launcher's sparkwing-runner commands\"\n    }\n  }\n]"
+  patch: |
+    - op: test
+      path: /spec/validations/10/message
+      value: Pods run only the launcher's container set and pinned images
+    - op: replace
+      path: /spec/validations/10
+      value:
+        expression: >-
+          !variables.create || (variables.shape == 'job' ? size(variables.spec.containers) == 1 && variables.spec.containers[0].name
+          == 'run-node' && variables.spec.containers[0].image == variables.runnerImage && size(variables.inits)
+          == 1 && variables.inits[0].name == 'docker' && variables.inits[0].image == variables.dockerImage
+          : size(variables.spec.containers) == 1 && variables.spec.containers[0].image == variables.runnerImage
+          && size(variables.inits) == 0)
+        message: Pods run only the launcher's container set and pinned images
+    - op: add
+      path: /spec/validations/-
+      value:
+        expression: >-
+          !variables.create || variables.shape != 'job' || variables.spec.containers[0].?command.orValue([])
+          == ["sparkwing-runner"] && !has(variables.spec.containers[0].restartPolicy) && (size(variables.spec.containers[0].?args.orValue([]))
+          == 11 || size(variables.spec.containers[0].?args.orValue([])) == 13 && variables.spec.containers[0].args[11]
+          == '--job') && variables.spec.containers[0].args[0] == "run-node" && variables.spec.containers[0].args[1]
+          == "--controller" && variables.spec.containers[0].args[3] == "--run" && variables.spec.containers[0].args[5]
+          == "--generation" && variables.spec.containers[0].args[7] == "--module-cache" && variables.spec.containers[0].args[8]
+          == "/tmp/modules" && variables.spec.containers[0].args[9] == "--bootstrap-file" && variables.spec.containers[0].args[10]
+          == "/etc/sparkwing/bootstrap/bootstrap"
+        message: the workload containers run only the launcher's sparkwing-runner commands
 - target:
     group: admissionregistration.k8s.io
     version: v1
     kind: ValidatingAdmissionPolicy
     name: sparkwing-cloud-jobs-sparkwing-cloud-jobs
-  patch: "[\n  {\n    \"op\": \"test\",\n    \"path\": \"/spec/validations/8/message\",\n    \"value\": \"Pods run\
-    \ only the launcher's container set and pinned images\"\n  },\n  {\n    \"op\": \"replace\",\n    \"path\":\
-    \ \"/spec/validations/8\",\n    \"value\": {\n      \"expression\": \"!variables.create || (variables.shape\
-    \ == 'job' ? size(variables.spec.containers) == 1 && variables.spec.containers[0].name == 'run-node' && variables.spec.containers[0].image\
-    \ == variables.runnerImage && size(variables.inits) == 1 && variables.inits[0].name == 'docker' && variables.inits[0].image\
-    \ == variables.dockerImage : size(variables.spec.containers) == 1 && variables.spec.containers[0].image == variables.runnerImage\
-    \ && size(variables.inits) == 0)\",\n      \"message\": \"Pods run only the launcher's container set and pinned\
-    \ images\"\n    }\n  },\n  {\n    \"op\": \"add\",\n    \"path\": \"/spec/validations/-\",\n    \"value\": {\n\
-    \      \"expression\": \"!variables.create || variables.shape != 'job' || variables.spec.containers[0].?command.orValue([])\
-    \ == [\\\"sparkwing-runner\\\"] && !has(variables.spec.containers[0].restartPolicy) && (size(variables.spec.containers[0].?args.orValue([]))\
-    \ == 11 || size(variables.spec.containers[0].?args.orValue([])) == 13 && variables.spec.containers[0].args[11]\
-    \ == '--job') && variables.spec.containers[0].args[0] == \\\"run-node\\\" && variables.spec.containers[0].args[1]\
-    \ == \\\"--controller\\\" && variables.spec.containers[0].args[3] == \\\"--run\\\" && variables.spec.containers[0].args[5]\
-    \ == \\\"--generation\\\" && variables.spec.containers[0].args[7] == \\\"--module-cache\\\" && variables.spec.containers[0].args[8]\
-    \ == \\\"/tmp/modules\\\" && variables.spec.containers[0].args[9] == \\\"--bootstrap-file\\\" && variables.spec.containers[0].args[10]\
-    \ == \\\"/etc/sparkwing/bootstrap/bootstrap\\\"\",\n      \"message\": \"the workload containers run only the\
-    \ launcher's sparkwing-runner commands\"\n    }\n  }\n]"
+  patch: |
+    - op: test
+      path: /spec/validations/8/message
+      value: Pods run only the launcher's container set and pinned images
+    - op: replace
+      path: /spec/validations/8
+      value:
+        expression: >-
+          !variables.create || (variables.shape == 'job' ? size(variables.spec.containers) == 1 && variables.spec.containers[0].name
+          == 'run-node' && variables.spec.containers[0].image == variables.runnerImage && size(variables.inits)
+          == 1 && variables.inits[0].name == 'docker' && variables.inits[0].image == variables.dockerImage
+          : size(variables.spec.containers) == 1 && variables.spec.containers[0].image == variables.runnerImage
+          && size(variables.inits) == 0)
+        message: Pods run only the launcher's container set and pinned images
+    - op: add
+      path: /spec/validations/-
+      value:
+        expression: >-
+          !variables.create || variables.shape != 'job' || variables.spec.containers[0].?command.orValue([])
+          == ["sparkwing-runner"] && !has(variables.spec.containers[0].restartPolicy) && (size(variables.spec.containers[0].?args.orValue([]))
+          == 11 || size(variables.spec.containers[0].?args.orValue([])) == 13 && variables.spec.containers[0].args[11]
+          == '--job') && variables.spec.containers[0].args[0] == "run-node" && variables.spec.containers[0].args[1]
+          == "--controller" && variables.spec.containers[0].args[3] == "--run" && variables.spec.containers[0].args[5]
+          == "--generation" && variables.spec.containers[0].args[7] == "--module-cache" && variables.spec.containers[0].args[8]
+          == "/tmp/modules" && variables.spec.containers[0].args[9] == "--bootstrap-file" && variables.spec.containers[0].args[10]
+          == "/etc/sparkwing/bootstrap/bootstrap"
+        message: the workload containers run only the launcher's sparkwing-runner commands
 ```
 
 ## Storage and behavior
