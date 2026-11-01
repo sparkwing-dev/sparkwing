@@ -405,15 +405,24 @@ file. Other syntax and workflow checks remain active.
   starts the full Go suite and touched-package race suite together after the
   build. The race command can run two package binaries while each keeps
   `GOMAXPROCS=1`. When touched and the host has capacity for two package
-  processes, `internal/controller`, `internal/nodehost`, `cmd/sparkwing` and
-  `internal/wingd/localcontroller` run after the module's ordinary packages.
-  Controller uses four exhaustive shards. Nodehost and the CLI use two.
-  Localcontroller keeps its full suite in one queued process because it fits
-  the package budget. The runner compiles and lists each package once, then queues every
+  processes, `internal/controller`, `internal/nodehost`, `cmd/sparkwing`,
+  `internal/wingd/localcontroller` and `tests/acceptance` run after the
+  module's ordinary packages. Measured long poles get a shard of their own,
+  queued ahead of every round-robin shard: `TestStorage` in acceptance, and
+  `TestLogTreeTraversesEveryTenantDescendantProperty` and
+  `TestRetryHistoryTraversesLongChainsAndCycles` in controller. Controller
+  splits its remaining tests into six round-robin shards and acceptance into
+  three. Nodehost and the CLI use two. Localcontroller keeps its full suite in
+  one queued process because it fits the package budget. A lead test that is
+  no longer listed fails the step, so a rename cannot silently drop it from
+  the plan. The runner compiles and lists each package once, then queues every
   selected package's shards through the host's package-process allowance:
   two workers on four CPUs, and the existing Go step parallelism on larger
-  hosts. A free worker can start the next package while another finishes a
-  long controller shard.
+  hosts. On four CPUs the queue grows to four workers once `store-postgres`
+  returns, which happens after the full Go suite and the conditional
+  PostgreSQL suite release their two cores, so race never adds a fifth
+  runtime thread to the box. A free worker can start the next package while
+  another finishes a long controller shard.
   Each shard keeps `GOMAXPROCS=1` and runs its assigned tests once, including
   the slow class. Listing, coverage checks, failure cancellation and output
   collection use the same runner as the store's release shards. The runner
@@ -653,6 +662,42 @@ file. Other syntax and workflow checks remain active.
   `TestLocalControllerTwoJobProcessesUseIndependentAwards`. The final
   one-process sample passed all 21 names, so the queue keeps this package
   together. Full hosted batch completion remains unmeasured.
+
+- **Touched-package race costs, 2026-11-01:** hosted run 41330942938 raced
+  six packages in one `go test -p 2` call and the gate job hit its 70-minute
+  deadline: `tests/acceptance` alone took 3150.5 s there, so the controller
+  shards could not start until minute 61. Local samples below ran on the
+  16-logical-CPU Linux host with Go 1.26.10, each package as
+  `GOMAXPROCS=1 go test -race -count=1 ./<pkg>` with a private home, six
+  packages at once beside other lanes (load average 4 to 12).
+
+  | Package | Local wall | Local CPU (user+sys) | Hosted wall (41330942938) |
+  | --- | ---: | ---: | ---: |
+  | `internal/controller` | 5112.8 s | 4724.8 s | not reached |
+  | `internal/controller/client` | 5.0 s | 4.0 s | 3.0 s |
+  | `internal/controllerwire` | 2.1 s | 1.0 s | 1.0 s |
+  | `internal/runners/launcher` | 102.6 s | 100.3 s | 205.5 s |
+  | `internal/source` | 37.2 s | 35.1 s | 70.0 s |
+  | `tests/acceptance` | 2408.2 s | 2345.6 s | 3150.5 s |
+
+  Both long packages are CPU-bound under race, so splitting them only helps
+  when a core is free. `TestStorage` took 1696.6 s of acceptance's total; a
+  four-way round-robin split of acceptance ran 1990.3, 257.8, 173.1 and
+  202.1 s, the long shard being the one holding `TestStorage`. Controller's
+  two property tests above took 663.9 and 604.2 s; split ten ways, its
+  groups ran 291 to 1145 s, the two longest holding those tests. The hosted-to-local ratio was 1.31 for
+  acceptance and about 2.0 for launcher and source.
+
+  Expected hosted plan for a batch touching all six packages, at the 1.31
+  ratio, with `store-postgres` idle: the ordinary packages take about 4
+  minutes, the three lead shards (about 37, 14 and 13 minutes) start first,
+  two more workers join when the full Go suite ends near minute 32, and the
+  queue drains at about minute 60 of a step that starts near minute 5 of the
+  70-minute job and still owes lint about 3 minutes. That leaves no headroom.
+  At a ratio of 1.6 or more, or when the batch also touches `internal/store`
+  and `store-postgres` holds two cores for its 23 minutes, the race work
+  (about 164 core-minutes for controller and acceptance at 1.31) exceeds what
+  four cores can supply inside the job deadline under any schedule.
 
 - **Heavy packages:** run these by name rather than reaching for `./...`, and
   give the command a timeout the package actually fits in. Measured on a

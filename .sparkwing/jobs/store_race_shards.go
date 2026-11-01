@@ -92,9 +92,36 @@ func raceTestDigest(names []string) string {
 	return fmt.Sprintf("%x", sha256.Sum256([]byte(strings.Join(names, "\n"))))
 }
 
+// perf: each lead test is a measured long pole that gets a shard of its own,
+// queued ahead of every round-robin shard so it never starts last.
 type racePackagePlan struct {
 	pkg        string
 	shardCount int
+	lead       []string
+}
+
+func raceLeadShards(names, lead []string, shardCount int) ([][]string, error) {
+	listed := make(map[string]bool, len(names))
+	for _, name := range names {
+		listed[name] = true
+	}
+	shards := make([][]string, 0, len(lead)+shardCount)
+	for _, name := range lead {
+		if !listed[name] {
+			return nil, fmt.Errorf("lead race test %q is not listed; update the gate's measured long poles", name)
+		}
+		shards = append(shards, []string{name})
+	}
+	rest := slices.DeleteFunc(slices.Clone(names), func(name string) bool { return slices.Contains(lead, name) })
+	if len(rest) < shardCount {
+		return nil, fmt.Errorf("test listing has %d names besides its lead tests, need at least %d", len(rest), shardCount)
+	}
+	tail, err := raceTestShards(rest, shardCount)
+	if err != nil {
+		return nil, err
+	}
+	shards = append(shards, tail...)
+	return shards, checkRaceTestCoverage(names, shards, len(shards))
 }
 
 type raceShardJob struct {
@@ -131,11 +158,19 @@ func runStoreRaceShardsAtHome(ctx context.Context, home string) error {
 	if _, err := raceExec(ctx, home, "go", "test", "-race", "-count=1", "./internal/store/internal/storetest").Env("GOMAXPROCS", "1").Run(); err != nil {
 		return fmt.Errorf("storetest race package: %w", err)
 	}
-	return runRaceShardsAtHome(ctx, home, ".", []racePackagePlan{{"./internal/store", storeRaceShardCount}}, storeRaceShardCount, storeRaceShardArgs)
+	return runRaceShardsAtHome(ctx, home, ".", []racePackagePlan{{pkg: "./internal/store", shardCount: storeRaceShardCount}}, raceWorkers{initial: storeRaceShardCount}, storeRaceShardArgs)
 }
 
-func runRaceShardsAtHome(ctx context.Context, home, module string, plans []racePackagePlan, parallelism int, shardArgs func([]string) []string) (runErr error) {
-	if parallelism < 1 {
+// perf: extra workers start once ready closes, when the steps that held those
+// cores have finished, so the queue never oversubscribes the host.
+type raceWorkers struct {
+	initial, extra int
+	ready          <-chan struct{}
+}
+
+func runRaceShardsAtHome(ctx context.Context, home, module string, plans []racePackagePlan, workers raceWorkers, shardArgs func([]string) []string) (runErr error) {
+	parallelism := workers.initial
+	if parallelism < 1 || workers.extra < 0 {
 		return fmt.Errorf("race shard parallelism must be positive")
 	}
 	dir, err := os.MkdirTemp("", "sparkwing-race-*")
@@ -147,7 +182,7 @@ func runRaceShardsAtHome(ctx context.Context, home, module string, plans []raceP
 			runErr = errors.Join(runErr, fmt.Errorf("clean race binaries: %w", err))
 		}
 	}()
-	var jobs []raceShardJob
+	var leads, jobs []raceShardJob
 	for index, plan := range plans {
 		pkg, shardCount := plan.pkg, plan.shardCount
 		binary := filepath.Join(dir, fmt.Sprintf("package-%d.test", index))
@@ -163,16 +198,22 @@ func runRaceShardsAtHome(ctx context.Context, home, module string, plans []raceP
 		if err != nil {
 			return err
 		}
-		shards, err := raceTestShards(names, shardCount)
+		shards, err := raceLeadShards(names, plan.lead, shardCount)
 		if err != nil {
 			return err
 		}
-		sparkwing.Info(ctx, "%s race: %d listed tests, exhaustive shards=%d, up to %d processes, list sha256=%s", pkg, len(names), shardCount, parallelism, raceTestDigest(names))
+		sparkwing.Info(ctx, "%s race: %d listed tests, exhaustive shards=%d (%d lead), up to %d processes (%d more once the full suites finish), list sha256=%s", pkg, len(names), len(shards), len(plan.lead), parallelism, workers.extra, raceTestDigest(names))
 		for i, shard := range shards {
 			sparkwing.Info(ctx, "%s race shard %d: %d tests, sha256=%s", pkg, i+1, len(shard), raceTestDigest(shard))
-			jobs = append(jobs, raceShardJob{pkg: pkg, binary: binary, packageDir: packageDir, number: i + 1, names: shard})
+			job := raceShardJob{pkg: pkg, binary: binary, packageDir: packageDir, number: i + 1, names: shard}
+			if i < len(plan.lead) {
+				leads = append(leads, job)
+			} else {
+				jobs = append(jobs, job)
+			}
 		}
 	}
+	jobs = append(leads, jobs...)
 	shardCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	results := make(chan raceShardResult, len(jobs))
@@ -181,12 +222,29 @@ func runRaceShardsAtHome(ctx context.Context, home, module string, plans []raceP
 		pending <- job
 	}
 	close(pending)
+	work := func() {
+		for job := range pending {
+			result, runErr := raceExec(shardCtx, home, job.binary, shardArgs(job.names)...).
+				Dir(job.packageDir).Env("GOMAXPROCS", "1").Env("TMPDIR", dir).Capture()
+			results <- raceShardResult{pkg: job.pkg, shard: job.number, count: len(job.names), output: result, err: runErr}
+		}
+	}
 	for range min(parallelism, len(jobs)) {
+		go work()
+	}
+	if workers.extra > 0 && len(jobs) > parallelism {
 		go func() {
-			for job := range pending {
-				result, runErr := raceExec(shardCtx, home, job.binary, shardArgs(job.names)...).
-					Dir(job.packageDir).Env("GOMAXPROCS", "1").Env("TMPDIR", dir).Capture()
-				results <- raceShardResult{pkg: job.pkg, shard: job.number, count: len(job.names), output: result, err: runErr}
+			select {
+			case <-workers.ready:
+			case <-shardCtx.Done():
+				return
+			}
+			if shardCtx.Err() != nil {
+				return
+			}
+			sparkwing.Info(ctx, "race shards: the full suites finished; starting %d more workers", workers.extra)
+			for range workers.extra {
+				go work()
 			}
 		}()
 	}
