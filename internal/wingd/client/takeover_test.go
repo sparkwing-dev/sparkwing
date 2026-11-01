@@ -2,6 +2,7 @@ package client
 
 import (
 	"context"
+	"crypto/sha256"
 	"errors"
 	"fmt"
 	"os"
@@ -14,6 +15,85 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/wingd"
 	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
 )
+
+func TestTakeoverFindsPreTokenDaemonAndJoinsBeforeSpawn(t *testing.T) {
+	home := shortHome(t)
+	current, err := wingd.EnsureSocketPath(home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// hack: upgrades must find v0.67 sockets, which lack the per-home token.
+	hash := fmt.Sprintf("%x", sha256.Sum256([]byte(home)))[:12]
+	dir := filepath.Base(filepath.Dir(current))
+	prefix := dir[:strings.Index(dir, hash)]
+	legacy := filepath.Join(filepath.Dir(filepath.Dir(current)), prefix+hash, "d.sock")
+	lock, err := wingd.AcquireControllerLock(home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer lock.Close()
+	ln, err := wingd.ListenSocket(legacy)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ln.Close()
+	done := make(chan error, 1)
+	go func() {
+		nc, err := ln.Accept()
+		if err != nil {
+			done <- err
+			return
+		}
+		defer nc.Close()
+		r := newFrameReader(nc)
+		_, err = r.read()
+		if err == nil {
+			err = writeTestFrame(nc, &wingwire.HelloAck{ProtocolMajor: wingd.ProtocolMajor, BinaryVersion: "v0.67.0"})
+		}
+		if err == nil {
+			var message wingwire.Message
+			message, err = r.read()
+			if _, ok := message.(*wingwire.DrainRequest); !ok && err == nil {
+				err = fmt.Errorf("expected drain, got %T", message)
+			}
+		}
+		if err == nil {
+			err = writeTestFrame(nc, &wingwire.DrainAck{})
+		}
+		_ = ln.Close()
+		_ = lock.Close()
+		done <- err
+	}()
+	defer func() {
+		_ = ln.Close()
+		if err := <-done; err != nil {
+			t.Error(err)
+		}
+	}()
+	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Second)
+	defer cancel()
+	spawns := 0
+	var messages strings.Builder
+	spawn := spawnInProcess(t, home)
+	cl, err := EnsureDaemon(ctx, Options{
+		Home: home, Version: "v1.0.0",
+		Spawn: func(h, v string) error {
+			spawns++
+			if held, err := wingd.LockHeld(home); err != nil || held {
+				t.Fatalf("spawn before predecessor joined: held=%t error=%v", held, err)
+			}
+			return spawn(h, v)
+		},
+		Logf: func(format string, args ...any) { fmt.Fprintf(&messages, format, args...) },
+	})
+	if err != nil {
+		t.Fatalf("upgrade startup: %v", err)
+	}
+	defer cl.Close()
+	if spawns != 1 || cl.DaemonVersion() != "v1.0.0" || !strings.Contains(messages.String(), "v0.67.0") {
+		t.Fatalf("upgrade: spawns=%d version=%q messages=%q", spawns, cl.DaemonVersion(), messages.String())
+	}
+}
 
 func stuckOlderDaemon(t *testing.T, home, version, buildIdentity string) *atomic.Int64 {
 	t.Helper()
@@ -85,6 +165,21 @@ func TestTakeoverStopsAfterOneReplacement(t *testing.T) {
 	}
 	if got := handshakes.Load(); got > 2 {
 		t.Fatalf("handshakes = %d; the takeover loop is unbounded", got)
+	}
+}
+
+func TestTakeoverMissingSuccessorDoesNotSpawnAgain(t *testing.T) {
+	home := shortHome(t)
+	runDaemon(t, home, "v0.67.0")
+	spawns := 0
+	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Second)
+	defer cancel()
+	_, err := EnsureDaemon(ctx, Options{
+		Home: home, Version: "v0.68.3", Backoff: time.Nanosecond,
+		Spawn: func(string, string) error { spawns++; return nil },
+	})
+	if !errors.Is(err, errDaemonUnreachable) || spawns != 1 {
+		t.Fatalf("missing successor: error=%v spawns=%d, want one replacement", err, spawns)
 	}
 }
 

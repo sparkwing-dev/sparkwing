@@ -312,7 +312,7 @@ func commitBlobBytesTx(ctx context.Context, tx *storeTx, team Team, object blob.
 }
 
 func blobCacheRepositoryAllowed(a blobActor, kind blob.Kind) bool {
-	return !blobLocalRepo(a.authority.Repo) || kind == blob.KindDepcache && a.capability.Subject.Kind == capability.SubjectLocal && a.capability.Data.Use == capability.DataClaim
+	return !blobLocalRepo(a.authority.Repo) || blobIsCache(kind) && a.capability.Subject.Kind == capability.SubjectLocal && a.capability.Data.Use == capability.DataClaim
 }
 
 // runRefFacts is the one owner of a run's data scope on one host: the scope it

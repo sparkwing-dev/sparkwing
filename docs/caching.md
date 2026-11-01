@@ -50,9 +50,9 @@ TypeScript provides `files`, `repoFiles`, `ignore`, `tree`, `env`, `parts`, `con
 `compose` with the same host semantics.
 
 A checkout without a remote repository identity uses a machine-local `local:`
-key. Its memo lookups miss and memo publication is skipped, so memoized jobs run
-normally on every invocation. Outputs and artifacts still pass to dependents,
-and dependency caches remain available locally.
+key. Local claims reuse memoized results and dependency caches within that
+repository and host scope. Remote-cache and publication profiles cannot read
+these records. `--sw-no-memo` executes the job body instead of reusing a memo.
 
 `MemoTTL` accepts at most 30 days. Missing or corrupt cached bytes produce a miss.
 Lookup refusals fail the job. Publication requires committed success.

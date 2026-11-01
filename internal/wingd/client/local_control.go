@@ -81,7 +81,10 @@ func (cl *Client) localControl(stay *bool) (wingd.LocalStatus, error) {
 	}
 	cl.ack = ack
 	if ack.ProtocolMajor != wingwire.ProtocolMajor {
-		return wingd.LocalStatus{}, fmt.Errorf("wingd/client: local controller protocol %d differs from %d", ack.ProtocolMajor, wingwire.ProtocolMajor)
+		if ack.ProtocolMajor < wingwire.ProtocolMajor {
+			return wingd.LocalStatus{}, daemonTooOld("", ack)
+		}
+		return wingd.LocalStatus{}, protocolTooOld("", ack)
 	}
 	if err := cl.write(&wingwire.LocalControl{Stay: stay}); err != nil {
 		return wingd.LocalStatus{}, err

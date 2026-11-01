@@ -24,9 +24,9 @@ then commits and atomically pushes that commit to `main` with an annotated
 which the pipeline requires so a
 newer embedded schema cannot migrate the operational runs store. The release
 factory validates the home before intake opens the store, including for a dry
-run. An unset `SPARKWING_HOME` or `$HOME/.sparkwing` is refused. Discovery may
-withhold the refusal's details under the secret policy, so set the isolated
-home before retrying a `plan_failed` release preview:
+run. An unset `SPARKWING_HOME` or `$HOME/.sparkwing` is refused with
+`isolated_home_required` and a temporary-home remedy. The host supplies that
+fixed guidance even before secret discovery completes:
 
 ```bash
 SPARKWING_HOME="$(mktemp -d)" sparkwing run release --sw-dry-run

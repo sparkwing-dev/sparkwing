@@ -122,6 +122,12 @@ retain their complete descriptions. The host refuses the failed pipeline with
 its sanitized cause before planning. It withholds describe output when any
 pipeline fails because that output may contain unclassified secrets.
 
+`isolated_home_required` is a fixed refusal for pipelines that must avoid an
+operational store. Go pipelines return or wrap `sparkwing.ErrIsolatedHomeRequired`
+from `Plan`. The host supplies a temporary `HOME` and `SPARKWING_HOME` remedy
+before intake, even when secret discovery fails. It discards the SDK's message,
+hint and details for this code and keeps other unclassified output withheld.
+
 ```text
 -> {"id":"3","op":"describe"}
 <- {"reply":"3","ok":true,"result":{"pipelines":[{"name":"ship","args":[{"name":"target","type":"string","required":false,"default":"staging"}],"secrets":[{"name":"DEPLOY_TOKEN"}]}]}}

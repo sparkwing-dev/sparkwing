@@ -249,7 +249,7 @@ func (r *blobRecords) lookupMemoTx(ctx context.Context, tx *storeTx, a blobActor
 			return result, err
 		}
 	}
-	if blobLocalRepo(key.Repo) {
+	if !blobCacheRepositoryAllowed(a, blob.KindMemo) {
 		return result, nil
 	}
 	refs := []blob.RefScope{a.authority.Ref.Scope}

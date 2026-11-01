@@ -219,6 +219,10 @@ func (p SDKPlanner) planningError(ctx context.Context, gate *runspec.Declaration
 	} else if errors.Is(err, context.DeadlineExceeded) {
 		code = apierr.DeadlineExceeded
 	}
+	if code == apierr.IsolatedHomeRequired {
+		// safety: unknown declarations permit only host text, never the SDK's payload.
+		return errors.Join(context.Cause(ctx), apierr.IsolatedHomeRefusal())
+	}
 	if !known && !slices.ContainsFunc(apierr.Codes, func(definition apierr.Definition) bool { return definition.Code == code }) {
 		code = apierr.SDKError
 	}

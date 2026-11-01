@@ -86,7 +86,7 @@ func TestLocalLifecycleReusesForeignOwner(t *testing.T) {
 	local := &localRuntimeFixture{}
 	owner := &lifecycleOwner{status: wingd.LocalStatus{Running: true, PID: 72, Version: "v1"}}
 	lifecycle := localLifecycleFixture(t, home, local, owner)
-	opts := wingd.LocalStartOptions{Home: home, Version: "v2", Stay: true, DashboardAddress: "127.0.0.1:9173", DashboardReadOnly: true}
+	opts := wingd.LocalStartOptions{Home: home, Version: "v1", Stay: true, DashboardAddress: "127.0.0.1:9173", DashboardReadOnly: true}
 	status, err := lifecycle.StartDashboard(t.Context(), opts)
 	if err != nil {
 		t.Fatal(err)

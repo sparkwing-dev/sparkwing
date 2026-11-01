@@ -177,6 +177,10 @@ func (g *DeclarationGate) refuseUnregistered(entrypoint string) error {
 
 // Error withholds unclassified author errors and sanitizes classified payloads.
 func (g *DeclarationGate) Error(err error) error {
+	var canonical *apierr.Error
+	if errors.As(err, &canonical) && canonical.Code == apierr.IsolatedHomeRequired {
+		return apierr.IsolatedHomeRefusal()
+	}
 	if g != nil && g.unregistered != nil && errors.Is(err, g.unregistered) {
 		return g.unregistered
 	}
@@ -188,7 +192,6 @@ func (g *DeclarationGate) Error(err error) error {
 		}
 		return &apierr.Error{Code: code, Message: "pipeline discovery failed (details withheld: secrets not yet known)"}
 	}
-	var canonical *apierr.Error
 	if errors.As(err, &canonical) {
 		return g.masker.Error(canonical)
 	}
