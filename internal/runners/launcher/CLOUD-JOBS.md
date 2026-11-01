@@ -50,13 +50,12 @@ digests are CEL literals.
   other Pod and creator is refused. The policy names the launcher as
   `system:serviceaccount:<release namespace>:<launcher ServiceAccount>`; an
   externally managed launcher must run under exactly that identity.
-- Job Pods run exactly `docker` (Docker image), `fetch-source` and `run-node`
+- Job Pods run exactly the `docker` sidecar (Docker image) and `run-node`
   (runner image). Capacity requests run one runner-image container.
 - The runner image includes the Docker CLI, buildx and Compose on amd64 and arm64.
   `DOCKER_HOST=unix:///tmp/docker.sock` survives the pipeline process environment
-  policy and reaches the sidecar through the shared scratch volume. Host
-  startup restores mode `1777` after source checkout and before customer code runs,
-  so package managers can create temporary files as unprivileged users.
+  policy and reaches the sidecar through the shared scratch volume. Source acquisition owns a private child directory and leaves the shared
+  scratch volume writable by package managers running as unprivileged users.
 - Environment names are `HOME`, `DOCKER_HOST` and the EKS region values.
   No `valueFrom` or `envFrom` is allowed.
   Capacity requests carry none. AWS role,
@@ -85,10 +84,8 @@ digests are CEL literals.
   links are off and no `system-` priority class may be named. The fields come
   from the vendored k8s.io/api, so a field a newer API server adds stays
   unpinned until that dependency moves.
-- `fetch-source` and
-  `run-node` dispatch `sparkwing-runner` with the launcher's fixed flag grammar.
-  Only the controller, run, generation and job values vary. `fetch-source`
-  cannot become a sidecar.
+- `run-node` dispatches `sparkwing-runner` with the launcher's fixed flag grammar.
+  Only the controller, run, generation and job values vary.
 - The sidecar's profile allows `unshare`, `clone` and `setns` without an
   argument filter, so a nested container can create its own user namespace,
   as Docker's default profile allows with `CAP_SYS_ADMIN`. Blocking
@@ -346,8 +343,7 @@ The shared source package validates and acquires its contents.
 `cluster.BootstrapRuntime` restores this award and passes it to
 `BootstrapHost.Run` for one-time exchange. Its `Run` method parses the built
 container arguments and compares their fence with the private award before
-constructing either source or host services. Fetch-source can read the award without
-exchanging it. The existing Kubernetes JSON decoder supplies strict decoding
+constructing host services. Source acquisition follows exchange. The existing Kubernetes JSON decoder supplies strict decoding
 because it checks nested duplicates without another parser implementation.
 Unit kind, attempt, eval-source fence and engine now travel in that file. The
 builder emits only the declared bootstrap arguments. Eval and work commands
@@ -355,23 +351,41 @@ pass the real shared parser. Plan commands omit `--job`. Eval and work name
 their job, checked against the private award before service construction.
 
 `cluster.BootstrapRuntime` reads the private award once and compares its run,
-job and generation with argv before constructing services. It sends fetch-source
-to `SourceInit` and run-node to `BootstrapHost`. A partial host binding closes
+job and generation with argv before constructing services. It sends run-node
+to `BootstrapHost`. A partial host binding closes
 on failure, and normal cleanup follows exchange and host execution. The runtime
 sets the exchange URL from the parsed controller argument. `MainWithRuntime`
 supplies one set of runner, launcher and bootstrap bindings to the executable.
 All commands share the process's SIGINT/SIGTERM context.
 
-`SourceInit` captures source and deadline fields before binding live source
-access. It uses `source.PrepareCheckout` because bootstrap authority permits
-checkout before exchange, while SDK execution belongs to the resulting work
-claim. Remote repository identity and the exact SHA are required. Eval/work
-source must retain the accepted engine. Checkout uses a private staging directory
-beside the destination. Publication moves only its matching checkout into the
-requested source directory. Existing destinations are refused. Temporary Git
-credentials and staging directories are removed before return. Source-access
-cleanup and cancellation causes remain errors. The initializer never exchanges
-the bootstrap or installs an SDK.
+### Prepared pipeline and source
+
+`source.Acquire` publishes a prepared artifact after verified engine selection and
+SDK installation, before invoking pipeline code. The artifact contains the source
+checkout, any separately pinned pipeline checkout, the compiled Go executable or
+TypeScript installation, and its build-input manifest. Temporary Git credential
+files live outside those roots and are removed before publication.
+
+The existing authenticated byte store verifies upload size and SHA-256, then the
+planning owner commits an immutable `prepared` record for that team, repository,
+pipeline and run. Its provenance comes from the persisted intake seal. Job,
+evaluation, delegated process, remote-cache and bootstrap credentials cannot
+publish it. Only live planning owners and awarded jobs of that same run can read
+it. Asserted cache host partitions do not partition this run-owned record.
+
+Consumers download to a private temporary file and consume verified EOF before
+extracting through `tarsafe`. The manifest key covers the intake seal, source
+revisions and checkout policy, SDK/engine release identity, target, filtered install
+environment, runner/tool identities and the complete snapshot bytes. The consumer
+compares its sealed inputs and re-verifies the selected engine and SDK pin.
+An absent record/object or mismatched inputs uses fresh source acquisition and
+installation. Integrity failures and authorization failures stop execution.
+The run index stays immutable when a replacement owner has different inputs;
+those consumers build fresh. Records follow the run's retention and deletion.
+
+The fetch init container and `fetch-source` command have been removed. Operators
+must update the launcher, runner image and generated admission policy together.
+No additional object store, credentials, shared volume or cache setting is needed.
 
 `NewControllerControl` binds the launcher's claim and sync operations to the
 shared controller wire interface. Its client must use `EngineOptions.Launcher`.
@@ -449,7 +463,7 @@ verifies Docker shutdown and kubelet reclamation.
 The resulting Cloud execution deadline must remain bounded. Exchange and host dispatch run under that deadline and any earlier caller
 deadline. Expired awards fail before transport construction. Expiry during
 exchange prevents dispatch, and expiry during hosting cancels and joins the host.
-The exchanged source must match the private projection used by fetch-source,
+The exchanged source must match the private bootstrap projection,
 including repository, remote, commit, pipeline directory, default branch, bundle,
 checkout policy and accepted engine. A matching run and generation alone cannot
 authorize another source.
