@@ -1326,10 +1326,11 @@ asserted child at another commit, then failed before its secret check could run.
   numeric ID. Recheck the live attempt and team installation before minting and
   before committing the release audit. Stored credentials cannot enforce this
   scope and are refused.
-- The approval requires credential scope for the life of the attempt. The
-  existing path fences issuance to that attempt but cannot recall an issued
-  GitHub token before its provider expiration. The lead must resolve that
-  lifetime boundary before landing. This change adds no token-recall system.
+- Lead resolution, 2026-11-01: fetch-only tokens keep GitHub's provider lifetime
+  of at most one hour, matching the ratified rule "Actions credentials keep
+  GitHub's lifetime". Issuance stays fenced to the live attempt. Issued tokens
+  retain their provider expiration after the attempt ends. No token-recall
+  system is required.
 
 Tests cover the native child intake, actual checkout through the source client,
 read-only token permissions and exact repository scope, refused negative and

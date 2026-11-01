@@ -1015,7 +1015,8 @@ asserted and receives no stored Git credentials, extra repositories, team or
 pipeline secrets, or OIDC tokens. The App token requests only `contents: read`
 for that repository's numeric ID. Issuance and its committed audit require the
 current source-acquisition attempt's live authority, lease and generation.
-GitHub-issued tokens retain their provider expiration after release. Public
+Fetch-only tokens keep GitHub's provider lifetime of at most one hour, including
+after the attempt ends. Sparkwing does not recall issued tokens. Public
 repositories can still be fetched anonymously. Shared-secret eligibility does
 not grant source credentials.
 Verified cache fallbacks use the sealed repository proof. Unproven

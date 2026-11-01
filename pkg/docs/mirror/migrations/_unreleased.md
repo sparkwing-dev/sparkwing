@@ -65,10 +65,13 @@ matches `--repos`. Omit `--repos` when enrolling a personal runner so it can
 claim its owner's asserted work. Shared enrollment still requires a repository
 scope.
 
-Job source credentials require both repository proof and a successful intake
-GitHub compare check. Host-wide credentials no longer bypass proof. Uploaded,
-local and unproven remote code receive no team credential. A historical commit
-or locked schedule can qualify after App source selection and a compare result
+Job source credentials require a successful intake GitHub compare check. They
+also require repository proof, except for the
+[fetch-only App token for same-repository children](../auth.md#sealed-execution-trust).
+That exception grants no repository proof, secrets, stored Git credentials, extra
+repositories or OIDC. Host-wide credentials no longer bypass proof. Uploaded,
+local and other unproven remote code receive no team credential. A historical
+commit or locked schedule can qualify after App source selection and a compare result
 of `ahead` or `identical` against a repository branch or tag for both source and
 execution commits when they differ. Merged PR runs compare against their base
 branch. If the intake compare cannot reach GitHub, times out, receives a 5xx or
