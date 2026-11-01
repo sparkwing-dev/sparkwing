@@ -192,7 +192,7 @@ func TestCapacityRequestLivesExactlyAsLongAsItsAward(t *testing.T) {
 		t.Fatal(err)
 	}
 	pod := capacityPods(t, kube)[0]
-	pod.Spec.NodeName = "ready"
+	pod.Spec.NodeName, pod.Status.Phase = "ready", corev1.PodRunning
 	if _, err := kube.CoreV1().Pods("cloud").Update(t.Context(), &pod, metav1.UpdateOptions{}); err != nil {
 		t.Fatal(err)
 	}
@@ -232,11 +232,28 @@ func TestExpiredCapacityRequestIsRemovedWithoutTheController(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	pod.Status.Phase = corev1.PodRunning
 	if _, err := kube.CoreV1().Pods("cloud").Create(t.Context(), pod, metav1.CreateOptions{}); err != nil {
 		t.Fatal(err)
 	}
 	if err := l.Sync(t.Context()); err != nil || len(capacityPods(t, kube)) != 0 {
 		t.Fatalf("expired demand survived: %v", err)
+	}
+}
+
+func TestReleaseCapacityDeletesRunningRequest(t *testing.T) {
+	l, kube, _, control := fixture()
+	pod, err := capacityPod(l.Config, demandFor(*control.award))
+	if err != nil {
+		t.Fatal(err)
+	}
+	pod.Status.Phase = corev1.PodRunning
+	if _, err := kube.CoreV1().Pods("cloud").Create(t.Context(), pod, metav1.CreateOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	l.wait(control.award)
+	if err := l.releaseCapacity(t.Context(), control.award.Binding); err != nil || len(capacityPods(t, kube)) != 0 || len(l.waitingAwards()) != 0 {
+		t.Fatalf("released Running demand survived: %v", err)
 	}
 }
 
@@ -255,7 +272,12 @@ func TestReservationConsumesOnlyItsTeamsCapacityRequests(t *testing.T) {
 		pod     *corev1.Pod
 		reserve bool
 	}{
-		"own team":   {request("team", "cloud"), true},
+		"own team": {request("team", "cloud"), true},
+		"running own team": {func() *corev1.Pod {
+			pod := request("team", "cloud")
+			pod.Status.Phase = corev1.PodRunning
+			return pod
+		}(), true},
 		"other team": {request("other", "cloud"), false},
 		"stopped other team": {func() *corev1.Pod {
 			pod := request("other", "cloud")

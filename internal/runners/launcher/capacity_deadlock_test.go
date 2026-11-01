@@ -5,16 +5,20 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/labels"
+	"k8s.io/apimachinery/pkg/runtime"
 	k8stypes "k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes/fake"
+	ktesting "k8s.io/client-go/testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 )
@@ -155,7 +159,7 @@ func (p *pool) schedule(serial bool) {
 	}
 	for _, pod := range p.pods() {
 		if pod.Labels[capacityLabel] == "true" && pod.Spec.NodeName != "" && pod.Status.Phase == "" {
-			pod.Status.Phase = corev1.PodSucceeded
+			pod.Status.Phase = corev1.PodRunning
 			if _, err := p.kube.CoreV1().Pods(pod.Namespace).Update(p.t.Context(), &pod, metav1.UpdateOptions{}); err != nil {
 				p.t.Fatal(err)
 			}
@@ -236,7 +240,6 @@ func TestTwoTeamsOnAnEmptyPoolEachGetTheirOwnNode(t *testing.T) {
 	}
 }
 
-// Capacity requests repel every other team's Pods in the namespace, never their own team's.
 func TestCapacityRequestRepelsOtherTeamsPods(t *testing.T) {
 	cfg := CloudJobConfig{Namespace: "cloud", CPUCeiling: 2, MemoryCeiling: 8 << 30}
 	request := func(team string) corev1.Pod {
@@ -247,6 +250,11 @@ func TestCapacityRequestRepelsOtherTeamsPods(t *testing.T) {
 		return *pod
 	}
 	own, other := request("team"), request("other")
+	for _, term := range own.Spec.Affinity.PodAntiAffinity.RequiredDuringSchedulingIgnoredDuringExecution {
+		if len(term.Namespaces) != 0 || term.NamespaceSelector != nil {
+			t.Fatalf("anti-affinity crosses the job namespace: %+v", term)
+		}
+	}
 	job := corev1.Pod{ObjectMeta: metav1.ObjectMeta{Namespace: "cloud", Labels: map[string]string{"app": "sparkwing-job", TeamLabel: TeamNodeValue("cloud", "other"), JobLabel: "sw-job"}}}
 	unlabelled := corev1.Pod{ObjectMeta: metav1.ObjectMeta{Namespace: "cloud", Labels: map[string]string{"app": "other"}}}
 	if !antiAffine(t, own, other) || !antiAffine(t, own, job) || !antiAffine(t, other, own) {
@@ -259,37 +267,224 @@ func TestCapacityRequestRepelsOtherTeamsPods(t *testing.T) {
 	}
 }
 
-// A finished request no longer pends, so the held award must request again for
-// Karpenter to see demand; a live request is left alone.
-func TestStoppedCapacityRequestIsReplaced(t *testing.T) {
-	for name, stopped := range map[string]bool{"stopped": true, "running": false} {
-		t.Run(name, func(t *testing.T) {
+func TestStoppedCapacityRequestIsReplacedOnlyAfterDisplacement(t *testing.T) {
+	for _, state := range []string{"foreign pod", "foreign team binding", "foreign run binding", "idle", "own pod", "running"} {
+		t.Run(state, func(t *testing.T) {
 			l, kube, _, control := fixture()
+			node := &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "spent-node", Labels: map[string]string{}}}
+			switch state {
+			case "foreign team binding":
+				node.Labels[TeamNodeLabel] = TeamNodeValue("cloud", "other")
+			case "foreign run binding":
+				node.Labels[usedRunLabel] = runNodeValue("cloud", "other")
+			case "foreign pod", "own pod", "running":
+				team := "other"
+				if state == "own pod" {
+					team = "team"
+				}
+				other := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "other", Namespace: "cloud", Labels: map[string]string{TeamLabel: TeamNodeValue("cloud", team)}}, Spec: corev1.PodSpec{NodeName: node.Name}}
+				if _, err := kube.CoreV1().Pods("cloud").Create(t.Context(), other, metav1.CreateOptions{}); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if _, err := kube.CoreV1().Nodes().Create(t.Context(), node, metav1.CreateOptions{}); err != nil {
+				t.Fatal(err)
+			}
 			if err := l.requestCapacity(t.Context(), *control.award); err != nil {
 				t.Fatal(err)
 			}
 			pod := capacityPods(t, kube)[0]
-			pod.UID, pod.Spec.NodeName, pod.Status.Phase = "first", "spent-node", corev1.PodRunning
-			if stopped {
-				pod.Status.Phase = corev1.PodSucceeded
+			pod.UID, pod.Spec.NodeName, pod.Status.Phase = "first", node.Name, corev1.PodSucceeded
+			if state == "running" {
+				pod.Status.Phase = corev1.PodRunning
 			}
 			if _, err := kube.CoreV1().Pods("cloud").Update(t.Context(), &pod, metav1.UpdateOptions{}); err != nil {
 				t.Fatal(err)
 			}
+			replace := strings.HasPrefix(state, "foreign")
 			if err := l.requestCapacity(t.Context(), *control.award); err != nil {
 				t.Fatal(err)
 			}
-			left := capacityPods(t, kube)
-			if stopped != (len(left) == 0) {
-				t.Fatalf("stopped=%t left=%d", stopped, len(left))
+			if left := capacityPods(t, kube); replace != (len(left) == 0) {
+				t.Fatalf("replace=%t left=%d", replace, len(left))
 			}
 			if err := l.requestCapacity(t.Context(), *control.award); err != nil {
 				t.Fatal(err)
 			}
 			again := capacityPods(t, kube)
-			if len(again) != 1 || stopped && again[0].Spec.NodeName != "" {
-				t.Fatalf("held award did not express fresh demand: %+v", again)
+			if len(again) != 1 || replace && again[0].Spec.NodeName != "" || !replace && again[0].UID != pod.UID {
+				t.Fatalf("held award did not preserve or replace its request: %+v", again)
 			}
 		})
+	}
+}
+
+func TestCapacityRequestSleepsWithinItsAwardBudget(t *testing.T) {
+	l, _, _, control := fixture()
+	control.award.Binding.AttemptDeadline = time.Now().Add(time.Minute)
+	before := time.Now()
+	pod, err := capacityPod(l.Config, demandFor(*control.award))
+	if err != nil {
+		t.Fatal(err)
+	}
+	c := pod.Spec.Containers[0]
+	if !slices.Equal(c.Command, []string{"/usr/bin/sleep"}) || len(c.Args) != 1 {
+		t.Fatalf("capacity request does not hold its node without a shell: %+v", c)
+	}
+	seconds, err := strconv.ParseFloat(c.Args[0], 64)
+	deadline := demandDeadline(control.award.Binding)
+	if err != nil || seconds <= 0 || seconds > deadline.Sub(before).Seconds() || seconds < time.Until(deadline).Seconds() {
+		t.Fatalf("sleep budget %q is outside the award deadline: %v", c.Args[0], err)
+	}
+}
+
+func TestTerminatingOldCapacityRequestWaitsForRemoval(t *testing.T) {
+	l, kube, _, control := fixture()
+	old, err := capacityPod(l.Config, demandFor(*control.award))
+	if err != nil {
+		t.Fatal(err)
+	}
+	old.UID, old.DeletionTimestamp = "old", ptr(metav1.Now())
+	old.Finalizers = []string{"test/termination"}
+	old.Spec.Affinity.PodAntiAffinity = nil
+	old.Spec.Containers[0].Command, old.Spec.Containers[0].Args = []string{JobBinary}, []string{"version"}
+	if _, err := kube.CoreV1().Pods("cloud").Create(t.Context(), old, metav1.CreateOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	kube.PrependReactor("delete", "pods", func(ktesting.Action) (bool, runtime.Object, error) {
+		t.Fatal("adoption tried to delete a terminating old request again")
+		return true, nil, nil
+	})
+	if err := l.requestCapacity(t.Context(), *control.award); err != nil {
+		t.Fatalf("AlreadyExists adoption rejected a terminating old request: %v", err)
+	}
+	if err := kube.Tracker().Delete(corev1.SchemeGroupVersion.WithResource("pods"), "cloud", old.Name); err != nil {
+		t.Fatal(err)
+	}
+	if err := l.requestCapacity(t.Context(), *control.award); err != nil {
+		t.Fatal(err)
+	}
+	pods := capacityPods(t, kube)
+	if len(pods) != 1 || pods[0].DeletionTimestamp != nil || pods[0].Spec.Affinity.PodAntiAffinity == nil || !slices.Equal(pods[0].Spec.Containers[0].Command, []string{"/usr/bin/sleep"}) {
+		t.Fatalf("old request was not replaced after removal: %+v", pods)
+	}
+}
+
+func capacityLauncherFixture(t *testing.T) (*Launcher, *fake.Clientset, *KubernetesBoundary, *controlFake) {
+	t.Helper()
+	l, kube, _, control := fixture()
+	control.award.CPUCores = 2
+	b, nodes := boundaryFixture()
+	node, err := nodes.CoreV1().Nodes().Get(t.Context(), "node", metav1.GetOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := kube.CoreV1().Nodes().Create(t.Context(), node, metav1.CreateOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	b.Kube, l.Boundary = kube, b
+	return l, kube, b, control
+}
+
+func TestIncompatibleCapacityNodeDoesNotChurnRequests(t *testing.T) {
+	l, kube, b, control := capacityLauncherFixture(t)
+	pool, err := b.Karpenter.Resource(nodePools).Get(t.Context(), "pool", metav1.GetOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	pool.SetName("incompatible")
+	pool.SetUID("incompatible-uid")
+	if err := unstructured.SetNestedField(pool.Object, "unhardened", "spec", "template", "spec", "nodeClassRef", "name"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := b.Karpenter.Resource(nodePools).Create(t.Context(), pool, metav1.CreateOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	claim, err := b.Karpenter.Resource(nodeClaims).Get(t.Context(), "claim", metav1.GetOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	claim.SetOwnerReferences([]metav1.OwnerReference{{APIVersion: "karpenter.sh/v1", Kind: "NodePool", Name: pool.GetName(), UID: pool.GetUID()}})
+	claimLabels := claim.GetLabels()
+	claimLabels["karpenter.sh/nodepool"] = pool.GetName()
+	claim.SetLabels(claimLabels)
+	if _, err := b.Karpenter.Resource(nodeClaims).Update(t.Context(), claim, metav1.UpdateOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := l.LaunchOne(t.Context()); !errors.Is(err, ErrNoDedicatedNode) {
+		t.Fatal(err)
+	}
+	pod := capacityPods(t, kube)[0]
+	pod.UID, pod.Spec.NodeName, pod.Status.Phase = "original", "node", corev1.PodSucceeded
+	if _, err := kube.CoreV1().Pods("cloud").Update(t.Context(), &pod, metav1.UpdateOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	control.award = nil
+	kube.PrependReactor("delete", "pods", func(ktesting.Action) (bool, runtime.Object, error) {
+		t.Fatal("incompatible capacity node triggered request recreation")
+		return true, nil, nil
+	})
+	for range 3 {
+		if _, err := l.LaunchOne(t.Context()); err != nil {
+			t.Fatal(err)
+		}
+		if pods := capacityPods(t, kube); len(pods) != 1 || pods[0].UID != pod.UID || len(l.waitingAwards()) != 1 {
+			t.Fatalf("incompatible capacity churned: %+v", pods)
+		}
+	}
+	if jobs, err := kube.BatchV1().Jobs("cloud").List(t.Context(), metav1.ListOptions{}); err != nil || len(jobs.Items) != 0 {
+		t.Fatalf("incompatible node launched a Job: %+v %v", jobs, err)
+	}
+}
+
+func TestCapacityArrivalBetweenReserveAndConsumeDefersJobUntilPodLeaves(t *testing.T) {
+	l, kube, _, control := capacityLauncherFixture(t)
+	award := *control.award
+	other, err := capacityPod(l.Config, demandFor(teamAward("other")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	other.Spec.NodeName, other.UID, other.Status.Phase = "node", "other-uid", corev1.PodRunning
+	injected := false
+	kube.PrependReactor("update", "nodes", func(action ktesting.Action) (bool, runtime.Object, error) {
+		node := action.(ktesting.UpdateAction).GetObject().(*corev1.Node)
+		if !injected && reservationEvidence(node) {
+			injected = true
+			if err := kube.Tracker().Add(other); err != nil {
+				t.Fatal(err)
+			}
+		}
+		return false, nil, nil
+	})
+	var first CloudNodeReservation
+	for pass := range 2 {
+		if _, err := l.launch(t.Context(), &award); !errors.Is(err, ErrNoDedicatedNode) {
+			t.Fatalf("pass %d: foreign capacity did not defer publication: %v", pass, err)
+		}
+		node, err := kube.CoreV1().Nodes().Get(t.Context(), "node", metav1.GetOptions{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		held, binding, ok := nodeReservation(node)
+		if !ok || !sameBinding(binding, award.Binding) || pass > 0 && held != first {
+			t.Fatalf("reservation was lost or rebound during replay: %+v", node)
+		}
+		first = held
+		if jobs, err := kube.BatchV1().Jobs("cloud").List(t.Context(), metav1.ListOptions{}); err != nil || len(jobs.Items) != 0 {
+			t.Fatalf("Job was published with foreign capacity present: %+v %v", jobs, err)
+		}
+		if _, err := kube.CoreV1().Pods("cloud").Get(t.Context(), other.Name, metav1.GetOptions{}); err != nil {
+			t.Fatalf("another team's request was consumed: %v", err)
+		}
+	}
+	if err := kube.CoreV1().Pods("cloud").Delete(t.Context(), other.Name, metav1.DeleteOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := l.launch(t.Context(), &award); err != nil {
+		t.Fatalf("reservation did not resume after the foreign Pod left: %v", err)
+	}
+	jobs, err := kube.BatchV1().Jobs("cloud").List(t.Context(), metav1.ListOptions{})
+	if err != nil || len(jobs.Items) != 1 || jobs.Items[0].Spec.Suspend == nil || *jobs.Items[0].Spec.Suspend || len(capacityPods(t, kube)) != 0 {
+		t.Fatalf("resumed reservation did not publish exactly one active Job: %+v %v", jobs, err)
 	}
 }
