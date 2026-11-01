@@ -60,7 +60,7 @@ func TestUpdateCommandRefreshesManagedUnitsAfterVerifiedInstall(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := []string{"units", "install v1.2.3", "refresh " + receipt.After.Path + " v1.2.3"}
-	if !reflect.DeepEqual(*calls, want) || receipt.ManagedUnits != "refreshed" {
+	if !reflect.DeepEqual(*calls, want) || receipt.ManagedUnits != "refreshed" || receipt.RunnerServices != updateRunnerServicesNote {
 		t.Fatalf("receipt=%+v calls=%v", receipt, *calls)
 	}
 }

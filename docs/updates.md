@@ -48,6 +48,10 @@ CLI it prints `Installed runner services update themselves from their
 controller.`, and the JSON receipt carries the same sentence in
 `runner_services`. A current CLI omits it.
 
+The invoking updater writes the receipt using its own version's format. An older
+updater can install a newer CLI without reporting fields added by that newer
+version. Run the installed CLI for subsequent updates to use its receipt format.
+
 If refresh fails after replacement, the CLI remains installed. The command fails
 without a success receipt and names the version, destination and retry command.
 A download or verification failure leaves managed units untouched.
