@@ -137,7 +137,7 @@ func (o *Operator) WarmCapacity(ctx context.Context) (WarmCapacity, error) {
 		}
 		c.Start1h = warmPercentiles(h)
 		c.Start24h = warmPercentiles(d)
-		e = o.s.queryRow(ctx, `SELECT COALESCE(SUM(CASE WHEN waited_for_fresh_node=1 AND COALESCE(started_at,claimed_at)>=? THEN 1 ELSE 0 END),0), COALESCE(SUM(waited_for_fresh_node),0),COALESCE(SUM(CASE WHEN granted_class<>'' AND granted_class<>requested_class AND started_at>=? THEN 1 ELSE 0 END),0),COALESCE(SUM(CASE WHEN granted_class<>'' AND granted_class<>requested_class THEN 1 ELSE 0 END),0) FROM cloud_job_capacity c JOIN billing_awards b ON b.team=c.team AND b.reservation_id=c.reservation_id WHERE b.unit_kind='node' AND requested_class=? AND COALESCE(started_at,claimed_at)>=? AND COALESCE(started_at,claimed_at)<=?`, day, day, c.Class, week, now.UnixNano()).Scan(&c.ColdStarts24h, &c.ColdStarts7d, &c.Upsizes24h, &c.Upsizes7d)
+		e = o.s.queryRow(ctx, `SELECT COALESCE(SUM(CASE WHEN waited_for_fresh_node=1 AND COALESCE(started_at,claimed_at)>=? THEN 1 ELSE 0 END),0), COALESCE(SUM(waited_for_fresh_node),0),COALESCE(SUM(CASE WHEN granted_class<>'' AND granted_class<>requested_class AND started_at>=? THEN 1 ELSE 0 END),0),COALESCE(SUM(CASE WHEN granted_class<>'' AND granted_class<>requested_class AND started_at IS NOT NULL THEN 1 ELSE 0 END),0) FROM cloud_job_capacity c JOIN billing_awards b ON b.team=c.team AND b.reservation_id=c.reservation_id WHERE b.unit_kind='node' AND requested_class=? AND COALESCE(started_at,claimed_at)>=? AND COALESCE(started_at,claimed_at)<=?`, day, day, c.Class, week, now.UnixNano()).Scan(&c.ColdStarts24h, &c.ColdStarts7d, &c.Upsizes24h, &c.Upsizes7d)
 		if e != nil {
 			return out, e
 		}

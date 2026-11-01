@@ -122,6 +122,17 @@ func WarmCapacityModesAndDemand(t *testing.T, s *Store) {
 	if metrics.Classes[1].ColdStarts24h != 0 || metrics.Classes[1].Upsizes24h != 0 {
 		t.Fatalf("upsizing changed requested-class metrics: %+v", metrics.Classes[1])
 	}
+	insertCapacity("pending-upsize", "node", false, 0, false)
+	if _, err := s.exec(ctx, `UPDATE cloud_job_capacity SET granted_class='sparkwing-4cpu' WHERE reservation_id='pending-upsize'`); err != nil {
+		t.Fatal(err)
+	}
+	metrics, err = op.WarmCapacity(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c := metrics.Classes[0]; c.Upsizes24h != 1 || c.Upsizes7d != 1 {
+		t.Fatalf("unstarted grant counted as an upsize: %+v", c)
+	}
 	if _, err := s.exec(ctx, `UPDATE warm_pool_observations SET observed_at=?`, now-int64(121*time.Second)); err != nil {
 		t.Fatal(err)
 	}

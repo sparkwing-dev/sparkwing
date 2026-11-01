@@ -172,6 +172,7 @@ The view owns the replica target; infrastructure NodePool budgets govern spend.
 
 Start percentiles group jobs by requested class, including upsized jobs. No start
 samples appears as an empty metric. Cold starts include jobs still waiting for a
-fresh node. Signups count accounts created, and active teams count teams that
-submitted runs, over 24h/7d. The launcher reports ready, unbound nodes each poll.
+fresh node. Upsize counts use execution starts in both windows. Signups count
+accounts created, and active teams count teams that submitted runs, over 24h/7d.
+The launcher reports ready, unbound nodes each poll.
 Samples expire after 120 seconds so a stopped launcher cannot report stale warmth.

@@ -963,5 +963,6 @@ grouped by `requested_class`. `granted_class` identifies upsizes,
 records claim-to-start time. `started_at` dates starts; pending cold waits use
 `claimed_at`. Warm demand and job-start metrics join `billing_awards` by team
 and reservation and include only `unit_kind='node'`, excluding plan/eval
-preparation. Retries retain separate reservation facts. These fields belong to
+preparation. Both upsize windows count execution starts, excluding granted awards
+that never start. Retries retain separate reservation facts. These fields belong to
 schema baseline 28, with no forward migration.
