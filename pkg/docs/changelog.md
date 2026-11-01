@@ -41,6 +41,11 @@ unlock.
 
 ### Fixed
 
+- **local startup:** Upgrades drain older daemons before starting the installed executable, including v0.67 daemons at the previous socket path
+  Startup names the versions being replaced. A second incompatible daemon reports a conflict after one replacement attempt.
+- **memo:** Repeated local runs reuse memoized results for checkouts without a remote repository identity
+  `--sw-no-memo` still executes the job body. Memo records retain repository, host, ref and job scope.
+- **release:** The isolated-home refusal and pipeline help include a temporary `HOME` and `SPARKWING_HOME` recovery command
 - **kubernetes:** The E2E harness selects the controller data PVC, preserves numeric image tags and provisions its team before enabling licensed mode
 - **cli:** Session runner enrollment and logout work through HTTP loopback port-forwards
   The client sends the licensed controller's `__Host-sw_csrf` cookie with the session proof.

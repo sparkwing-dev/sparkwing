@@ -150,7 +150,10 @@ for shutdown before starting the installed executable with the same home,
 dashboard address and stay policy. An incomplete drain or unready replacement
 returns an error without a success receipt.
 
-A client attempts one replacement when it finds an incompatible daemon. If
+A client attempts one replacement when it finds an incompatible daemon, including
+a v0.67 daemon at the socket path used before per-home socket tokens. Startup
+prints the old and new versions, drains the predecessor and waits for its
+election lock before starting the selected executable. If
 an incompatible daemon answers again, stop competing Sparkwing installations
 and run `sparkwing daemon restart`, or select a separate `SPARKWING_HOME`.
 The replacement still drains active runs before taking ownership.

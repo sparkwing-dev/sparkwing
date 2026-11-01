@@ -27,6 +27,7 @@ credential model in `docs/auth.md`, and the decision log
 
 | Rule | Owner | Guard test |
 | --- | --- | --- |
+| Local startup drains one incompatible predecessor, including the pre-token socket, before starting its executable | `internal/wingd/client/local_process.go`: `ensureLocalProcess`; `client.go`: `connectPaced`, `takeover` | `internal/wingd/client/takeover_test.go`: `TestTakeoverFindsPreTokenDaemonAndJoinsBeforeSpawn`, `TestTakeoverStopsAfterOneReplacement`; `local_process_test.go`: `TestLocalProcessAttemptsItsOwnExecutableAfterIncompatibleDaemon` |
 | Saturated native runner admission withdraws job offers while planning owners remain claimable | `internal/cluster/native_claim_capacity.go`: `nativeCapacityController.Claim`; `production_runtime.go`: `productionRuntime` | `internal/cluster/native_claim_capacity_test.go`: `TestProductionRunnerDoesNotAdvertiseSaturatedNativeJobCapacity`, `TestNativeClaimCapacityLeavesAdmissionAuthoritativeWithoutDaemon`; `internal/store/burst_placement_test.go`: `TestBurstCloudClaimsAfterBusyPersonalRelinquishes` |
 | A saturated here owner leaves burst jobs ready for other executors before taking a self-award | `internal/nodehost/owner_schedule.go`: `OwnerHost.execute`; `internal/wingd/client/query.go`: `HasJobCapacity` | `internal/nodehost/burst_owner_capacity_test.go`: `TestBurstHereOwnerLeavesSaturatedJobsUnclaimed`; `machine_admission_test.go`: `TestMachineCapacityPreflightLeavesMissingDaemonToAdmission` |
 | Uploaded Go pipelines install their SDK through the runner before planning | `internal/cluster/main.go`: `mainWithRuntime` | `cmd/sparkwing-runner/uploaded_plan_test.go`: `TestUploadedGoPipelinePlansThroughRunner` |
@@ -169,7 +170,7 @@ credential model in `docs/auth.md`, and the decision log
 
 | Rule | Owner | Guard test |
 | --- | --- | --- |
-| Local repository memo lookups miss after scope checks; publication is skipped | `blob_lookup.go`: `lookupMemoTx`; `internal/nodehost/executor_memo.go`: `saveMemo` | `blob_local_cache_test.go`: `TestLocalDepcacheRoundTrip`; `internal/nodehost/native_memo_test.go`: `TestNativeExecutorLocalRepositoryMemoRunsBody`; `internal/nodehost/executor_memo_test.go`: `TestExecutorLocalRepositorySkipsMemoPublication` |
+| Local claims reuse memoized results within repository, host, ref and job scope | `blob_lookup.go`: `lookupMemoTx`; `internal/nodehost/executor_memo.go`: `saveMemo` | `blob_local_cache_test.go`: `TestLocalCacheWriteScopeProperty`; `internal/nodehost/native_memo_test.go`: `TestNativeExecutorLocalRepositoryMemoReusesResult` |
 
 ### Metrics
 
@@ -245,7 +246,7 @@ credential model in `docs/auth.md`, and the decision log
 | Binary-cache stability snapshots exclude the same gitignored files as the key unless hashing all files | `internal/bincache/bincache.go`: `snapshotHashable`, `hashDirIntoCounted` | `internal/bincache/replace_churn_test.go`: `TestHashIgnoresChangesToExcludedFiles`; `internal/engine/sdkinstall/build_policy_test.go`: `TestSDKInstallHashAllFilesIncludesIgnoredEmbeddedInputs` |
 | Missing local secrets carry local repair commands | `secret_preflight.go`: `secretPreflightTx`, `secretPreflightError.detail` | `secret_preflight_local_test.go`: `TestLocalSecretPreflightGivesLocalSetCommand` |
 | Required-secret plan refusals finish unaccepted runs | `internal/nodehost/owner.go`: `OwnerHost.accept`, `OwnerHost.preparationFailure` | `internal/nodehost/owner_secret_preflight_test.go`: `TestOwnerHostMissingRequiredSecretFinishesUnacceptedRun` |
-| Repository release home is checked before intake opens the store | `.sparkwing/jobs/release.go`: release factory captures `requireReleaseHome` and `Plan` returns a refusal during discovery | `.sparkwing/jobs/release_home_test.go`: `TestReleaseRefusesOperationalHomeDuringPlanning` |
+| Repository release home is checked before intake opens the store; refusal and help name a temporary home remedy | `.sparkwing/jobs/release.go`: release factory captures `requireReleaseHome` and `Plan` returns a refusal during discovery | `.sparkwing/jobs/release_home_test.go`: `TestReleaseRefusesOperationalHomeDuringPlanning`, `TestReleaseHelpExplainsIsolatedHomeRecovery` |
 | Release schema checks compare the neutral SQL baseline with the previous tag | `.sparkwing/jobs/release.go`: `checkSchemaBreak`, `schemaSQLDrift` | `.sparkwing/jobs/release_schema_changelog_test.go`: `TestSchemaGateComparesTheNeutralBaseline` |
 | Release notes stay uncommitted until every gate passes | `.sparkwing/jobs/release.go`: `prepareChangelogJob`, `commitChangelogJob`, `Release.Plan` | `.sparkwing/jobs/release_atomic_test.go`: `TestReleaseGateFailureAfterPreparationLeavesHEADUnchanged`; `.sparkwing/jobs/release_plan_test.go`: `TestReleasePlanCommitsOnlyAfterAllGates` |
 | Release gates fetch comparison tags missing from a shallow job checkout | `.sparkwing/jobs/release.go`: `fileAtTag` | `.sparkwing/jobs/release_checkout_tags_test.go`: `TestReleaseGatesFetchThePreviousTagInTheJobCheckout`, `TestReleaseMissingTagExplainsTheJobCheckoutAndRecovery` |
