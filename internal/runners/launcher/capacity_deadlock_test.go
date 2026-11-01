@@ -267,55 +267,56 @@ func TestCapacityRequestRepelsOtherTeamsPods(t *testing.T) {
 	}
 }
 
-func TestStoppedCapacityRequestIsReplacedOnlyAfterDisplacement(t *testing.T) {
-	for _, state := range []string{"foreign pod", "foreign team binding", "foreign run binding", "idle", "own pod", "running"} {
-		t.Run(state, func(t *testing.T) {
-			l, kube, _, control := fixture()
-			node := &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "spent-node", Labels: map[string]string{}}}
-			switch state {
-			case "foreign team binding":
-				node.Labels[TeamNodeLabel] = TeamNodeValue("cloud", "other")
-			case "foreign run binding":
-				node.Labels[usedRunLabel] = runNodeValue("cloud", "other")
-			case "foreign pod", "own pod", "running":
-				team := "other"
-				if state == "own pod" {
-					team = "team"
+func TestCapacityRequestIsReplacedOnlyAfterDisplacement(t *testing.T) {
+	for _, phase := range []corev1.PodPhase{corev1.PodRunning, corev1.PodSucceeded} {
+		for _, state := range []string{"foreign pod", "foreign team binding", "foreign team use", "foreign run binding", "idle", "own pod"} {
+			t.Run(string(phase)+"/"+state, func(t *testing.T) {
+				l, kube, _, control := fixture()
+				node := &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "spent-node", Labels: map[string]string{}}}
+				switch state {
+				case "foreign team binding":
+					node.Labels[TeamNodeLabel] = TeamNodeValue("cloud", "other")
+				case "foreign team use":
+					node.Labels[usedTeamLabel] = TeamNodeValue("cloud", "other")
+				case "foreign run binding":
+					node.Labels[usedRunLabel] = runNodeValue("cloud", "other")
+				case "foreign pod", "own pod":
+					team := "other"
+					if state == "own pod" {
+						team = "team"
+					}
+					other := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "other", Namespace: "cloud", Labels: map[string]string{TeamLabel: TeamNodeValue("cloud", team)}}, Spec: corev1.PodSpec{NodeName: node.Name}}
+					if _, err := kube.CoreV1().Pods("cloud").Create(t.Context(), other, metav1.CreateOptions{}); err != nil {
+						t.Fatal(err)
+					}
 				}
-				other := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "other", Namespace: "cloud", Labels: map[string]string{TeamLabel: TeamNodeValue("cloud", team)}}, Spec: corev1.PodSpec{NodeName: node.Name}}
-				if _, err := kube.CoreV1().Pods("cloud").Create(t.Context(), other, metav1.CreateOptions{}); err != nil {
+				if _, err := kube.CoreV1().Nodes().Create(t.Context(), node, metav1.CreateOptions{}); err != nil {
 					t.Fatal(err)
 				}
-			}
-			if _, err := kube.CoreV1().Nodes().Create(t.Context(), node, metav1.CreateOptions{}); err != nil {
-				t.Fatal(err)
-			}
-			if err := l.requestCapacity(t.Context(), *control.award); err != nil {
-				t.Fatal(err)
-			}
-			pod := capacityPods(t, kube)[0]
-			pod.UID, pod.Spec.NodeName, pod.Status.Phase = "first", node.Name, corev1.PodSucceeded
-			if state == "running" {
-				pod.Status.Phase = corev1.PodRunning
-			}
-			if _, err := kube.CoreV1().Pods("cloud").Update(t.Context(), &pod, metav1.UpdateOptions{}); err != nil {
-				t.Fatal(err)
-			}
-			replace := strings.HasPrefix(state, "foreign")
-			if err := l.requestCapacity(t.Context(), *control.award); err != nil {
-				t.Fatal(err)
-			}
-			if left := capacityPods(t, kube); replace != (len(left) == 0) {
-				t.Fatalf("replace=%t left=%d", replace, len(left))
-			}
-			if err := l.requestCapacity(t.Context(), *control.award); err != nil {
-				t.Fatal(err)
-			}
-			again := capacityPods(t, kube)
-			if len(again) != 1 || replace && again[0].Spec.NodeName != "" || !replace && again[0].UID != pod.UID {
-				t.Fatalf("held award did not preserve or replace its request: %+v", again)
-			}
-		})
+				if err := l.requestCapacity(t.Context(), *control.award); err != nil {
+					t.Fatal(err)
+				}
+				pod := capacityPods(t, kube)[0]
+				pod.UID, pod.Spec.NodeName, pod.Status.Phase = "first", node.Name, phase
+				if _, err := kube.CoreV1().Pods("cloud").Update(t.Context(), &pod, metav1.UpdateOptions{}); err != nil {
+					t.Fatal(err)
+				}
+				replace := strings.HasPrefix(state, "foreign")
+				if err := l.requestCapacity(t.Context(), *control.award); err != nil {
+					t.Fatal(err)
+				}
+				if left := capacityPods(t, kube); replace != (len(left) == 0) {
+					t.Fatalf("replace=%t left=%d", replace, len(left))
+				}
+				if err := l.requestCapacity(t.Context(), *control.award); err != nil {
+					t.Fatal(err)
+				}
+				again := capacityPods(t, kube)
+				if len(again) != 1 || replace && again[0].Spec.NodeName != "" || !replace && again[0].UID != pod.UID {
+					t.Fatalf("held award did not preserve or replace its request: %+v", again)
+				}
+			})
+		}
 	}
 }
 
@@ -438,9 +439,12 @@ func TestIncompatibleCapacityNodeDoesNotChurnRequests(t *testing.T) {
 }
 
 func TestCapacityArrivalBetweenReserveAndConsumeDefersJobUntilPodLeaves(t *testing.T) {
-	l, kube, _, control := capacityLauncherFixture(t)
+	l, kube, boundary, control := capacityLauncherFixture(t)
 	award := *control.award
-	other, err := capacityPod(l.Config, demandFor(teamAward("other")))
+	otherAward := award
+	otherAward.Binding = teamAward("other").Binding
+	otherLauncher := &Launcher{Kube: kube, Control: &controlFake{award: &otherAward}, Boundary: boundary, Config: l.Config}
+	other, err := capacityPod(l.Config, demandFor(otherAward))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -477,14 +481,47 @@ func TestCapacityArrivalBetweenReserveAndConsumeDefersJobUntilPodLeaves(t *testi
 			t.Fatalf("another team's request was consumed: %v", err)
 		}
 	}
-	if err := kube.CoreV1().Pods("cloud").Delete(t.Context(), other.Name, metav1.DeleteOptions{}); err != nil {
-		t.Fatal(err)
+	deleted := false
+	kube.PrependReactor("delete", "pods", func(action ktesting.Action) (bool, runtime.Object, error) {
+		deletion := action.(ktesting.DeleteAction)
+		if deletion.GetName() == other.Name && !deleted {
+			preconditions := deletion.GetDeleteOptions().Preconditions
+			if preconditions == nil || preconditions.UID == nil || *preconditions.UID != other.UID {
+				t.Fatal("displaced request deletion lost its UID fence")
+			}
+			deleted = true
+		}
+		return false, nil, nil
+	})
+	if _, err := otherLauncher.launch(t.Context(), &otherAward); !errors.Is(err, ErrNoDedicatedNode) {
+		t.Fatalf("displaced award did not wait for eligible capacity: %v", err)
 	}
+	if !deleted {
+		t.Fatal("owning launcher left its Running request on another team's reserved node")
+	}
+	if _, err := otherLauncher.launch(t.Context(), &otherAward); !errors.Is(err, ErrNoDedicatedNode) {
+		t.Fatalf("displaced award did not recreate demand: %v", err)
+	}
+	replacement, err := kube.CoreV1().Pods("cloud").Get(t.Context(), other.Name, metav1.GetOptions{})
+	if err != nil || replacement.Spec.NodeName != "" {
+		t.Fatalf("displaced request did not recreate Pending demand: %+v %v", replacement, err)
+	}
+	p := &pool{t: t, b: boundary, kube: kube}
+	p.schedule(false)
 	if _, err := l.launch(t.Context(), &award); err != nil {
 		t.Fatalf("reservation did not resume after the foreign Pod left: %v", err)
 	}
+	if _, err := otherLauncher.launch(t.Context(), &otherAward); err != nil {
+		t.Fatalf("displaced award did not start on eligible capacity: %v", err)
+	}
 	jobs, err := kube.BatchV1().Jobs("cloud").List(t.Context(), metav1.ListOptions{})
-	if err != nil || len(jobs.Items) != 1 || jobs.Items[0].Spec.Suspend == nil || *jobs.Items[0].Spec.Suspend || len(capacityPods(t, kube)) != 0 {
-		t.Fatalf("resumed reservation did not publish exactly one active Job: %+v %v", jobs, err)
+	if err != nil || len(jobs.Items) != 2 || len(capacityPods(t, kube)) != 0 {
+		t.Fatalf("both teams did not publish Jobs and consume their demand: %+v %v", jobs, err)
+	}
+	wantNodes := map[string]string{jobName(award.Binding): "node", jobName(otherAward.Binding): "fresh-1"}
+	for _, job := range jobs.Items {
+		if job.Spec.Suspend == nil || *job.Spec.Suspend || job.Spec.Template.Spec.NodeName != wantNodes[job.Name] {
+			t.Fatalf("Job did not start on its team's eligible node: %+v", job)
+		}
 	}
 }
