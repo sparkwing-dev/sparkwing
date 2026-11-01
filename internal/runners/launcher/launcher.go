@@ -114,9 +114,11 @@ func (l *Launcher) Run(ctx context.Context) error {
 		poll = 5 * time.Second
 	}
 	logger := l.logger()
+	var retiring sync.WaitGroup
+	defer retiring.Wait()
+	retiring.Go(func() { l.retireLoop(ctx) })
 	var cooldown time.Time
 	for ctx.Err() == nil {
-		// safety: claim backoff must not let held awards expire before placement.
 		if err := l.reportWarmPools(ctx); err != nil {
 			if err == controllerclient.ErrResponseNotObject { //nolint:errorlint // Joined faults must remain WARN.
 				logger.Info("warm capacity observation deferred; the next complete sample replaces it", "error", err)
@@ -124,15 +126,20 @@ func (l *Launcher) Run(ctx context.Context) error {
 				logger.Warn("warm capacity observation failed", "error", err)
 			}
 		}
-		synced := l.sync(ctx)
+		synced := l.syncActive(ctx)
 		if blocking(synced) != nil {
 			logger.Warn("launcher reconciliation failed", failureAttrs(synced)...)
 			cooldown = time.Now().Add(retryWait(synced, 0))
 		} else if synced != nil {
 			logger.Error("Cloud node or Job teardown faults require operator inspection if they persist; suspect nodes are excluded from placement and quarantines use "+quarantineAnnotation+"; claiming continues", "error", synced)
 		}
-		if blocking(synced) == nil && !time.Now().Before(cooldown) {
-			if _, err := l.LaunchOne(ctx); err != nil {
+		if blocking(synced) == nil {
+			// safety: held awards without a Job or capacity Pod renew only here, so claim backoff must not skip them.
+			err := l.placeWaiting(ctx)
+			if err == nil && !time.Now().Before(cooldown) {
+				_, err = l.claim(ctx)
+			}
+			if err != nil {
 				if err == controllerclient.ErrResponseNotObject { //nolint:errorlint // Joined faults must remain WARN.
 					logger.Info("launcher claim response unavailable; any undelivered award returns after lease expiry", failureAttrs(err)...)
 				} else if err != ErrNoDedicatedNode { //nolint:errorlint // Joined provisioning faults must remain WARN.
@@ -182,6 +189,10 @@ func (l *Launcher) LaunchOne(ctx context.Context) (launched bool, err error) {
 	if err := l.placeWaiting(ctx); err != nil {
 		return false, err
 	}
+	return l.claim(ctx)
+}
+
+func (l *Launcher) claim(ctx context.Context) (bool, error) {
 	blocked := make([]string, 0, len(l.Config.StoppedTeams))
 	for _, team := range l.Config.StoppedTeams {
 		blocked = append(blocked, TeamNodeValue(l.Config.Namespace, team))

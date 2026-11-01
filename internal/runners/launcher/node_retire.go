@@ -27,6 +27,25 @@ func (c *ControllerControl) RunTerminal(ctx context.Context, team string, run ru
 	return err == nil && response.RunTerminal, err
 }
 
+const (
+	retirementInterval    = 30 * time.Second
+	retirementCallTimeout = 10 * time.Second
+)
+
+func (l *Launcher) retireLoop(ctx context.Context) {
+	// safety: retirement RPCs run beside reconciliation so a slow controller cannot delay award renewal or claims.
+	ticker := time.NewTicker(retirementInterval)
+	defer ticker.Stop()
+	for {
+		l.syncSpentNodes(ctx)
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+		}
+	}
+}
+
 func (l *Launcher) syncSpentNodes(ctx context.Context) {
 	l.retirementMu.Lock()
 	defer l.retirementMu.Unlock()
@@ -70,7 +89,10 @@ func (l *Launcher) retireSpentNodes(ctx context.Context) error {
 			nonTerminal[run] = until
 			continue
 		}
-		terminal, err := control.RunTerminal(ctx, run.Team, runspec.RunID(run.RunID))
+		// safety: client retries can outlast a lease; the bound keeps one run from holding the pass.
+		query, cancel := context.WithTimeout(ctx, retirementCallTimeout)
+		terminal, err := control.RunTerminal(query, run.Team, runspec.RunID(run.RunID))
+		cancel()
 		if err != nil {
 			errs = append(errs, teardownFault(run.RunID, err))
 			continue

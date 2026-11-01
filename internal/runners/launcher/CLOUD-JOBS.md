@@ -566,17 +566,20 @@ fresh capacity. Only that predecessor's Pods and DaemonSets may occupy the node.
 Normal reconciliation retries teardown before placement. Live reservations still
 permit fanout. Foreign runs, damaged bindings and quarantined nodes never earn
 this wait. The deadline belongs to the held award and does not renew on retries.
-`TestSuccessorWaitsForPredecessorNode` and `TestTeardownWaitIsBoundedAndRunScoped`
-guard reuse and the fallback.
+A held award has no Job or capacity Pod to renew it, so every pass retries its
+placement and renews its fence even while a claim backoff delays new claims.
+`TestSuccessorWaitsForPredecessorNode`, `TestTeardownWaitIsBoundedAndRunScoped`
+and `TestTeardownWaitRenewsThroughClaimBackoff` guard reuse, the fallback and renewal.
 
 The first reservation also records `sparkwing.dev/used-run` with its team and run
-ID. Release retains it alongside the permanent protected labels. Each launcher
-sync can therefore find spent nodes after a restart. The `retire_run` query on
+ID. Release retains it alongside the permanent protected labels. Retirement runs
+in its own loop every 30 seconds, beside reconciliation, so it finds spent nodes
+after a restart and slow queries never delay award renewal or claims. The `retire_run` query on
 the existing launcher sync endpoint checks current deployment launcher authority
 and its repository scope, and returns `run_terminal` only for a stored terminal state with a finish time.
 A retired job award, a missing run, a refused query or an unavailable controller
-is insufficient. Each reconciliation queries a run once, regardless of its node
-count, and retains a non-terminal answer for 30 seconds. The query cannot be
+is insufficient. Each pass queries a run once, regardless of its node count, bounds
+that query to 10 seconds, and retains a non-terminal answer for 30 seconds. The query cannot be
 combined with award or warm-pool observations.
 
 For an unreserved node whose annotation matches all protected team/run labels,
@@ -593,7 +596,8 @@ launchers without the retained annotation, remain for Karpenter consolidation.
 `TestRestartRetiresOnlyEmptySpentNodesOfTerminalRuns`,
 `TestRunRetirementQueryThroughController`,
 `TestSpentNodeQueriesEachRunOnceAndCachesNonTerminal`,
-`TestSpentNodeErrorsAreRateLimitedAndDoNotFailSync` and
+`TestSpentNodeErrorsAreRateLimitedAndDoNotFailSync`,
+`TestSlowRunQueryDoesNotDelayReconciliation` and
 `TestLauncherRunTerminalRequiresDeploymentAuthority` guard these rules.
 
 ## Preparation leases
@@ -606,8 +610,7 @@ owns those requests. The bootstrap still grants only source read and one exchang
 `LaunchOne` checks preparation authority before reserving a node, then runs the
 shared lease keeper through activation. Renewal also reconciles existing Jobs,
 so a slow new reservation does not stop another Job's source checkout heartbeat.
-Spent-node retirement runs only in normal reconciliation, outside preparation
-renewal. `TestPreparationRenewalIgnoresPersistentRetirementFailure` guards this
+Spent-node retirement runs in its own loop, outside preparation renewal. `TestPreparationRenewalIgnoresPersistentRetirementFailure` guards this
 separation. Each placement attempt builds against the preparation acknowledgement's committed
 lease expiry because a held award can wait beyond its original lease. Every return
 cancels and joins that keeper. Normal reconciliation keeps persisted
