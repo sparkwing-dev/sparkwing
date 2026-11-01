@@ -394,16 +394,25 @@ file. Other syntax and workflow checks remain active.
   0.11 s. `gate`
   and `pre-release` are the heavier classes: they carry no performance budget
   and run asynchronously, on demand and in hosted CI. The broad gate declares
-  a 70-minute execution deadline, which gives the dispatcher 71 minutes with
-  its drain margin, inside an 80-minute hosted job. Pre-release declares a
+  separate 70-minute execution deadlines for broad checks and touched-package
+  race tests. Each gets 71 minutes with the dispatcher's drain margin, inside
+  its own 80-minute hosted job. Hosted CI selects them with `sparkwing run gate
+  --sw-only gate` and `sparkwing run gate --sw-only race-touched`. Each job
+  owns a separate four-core runner, so race tests share no cores with the full
+  Go or PostgreSQL suite. `sparkwing run gate` runs both jobs locally. The
+  existing required `Canonical / gate` check succeeds only after the broad,
+  race and pre-release matrix jobs all succeed. A skipped, cancelled or failed
+  matrix cannot pass that check. Pre-release declares a
   120-minute execution deadline inside a 130-minute hosted job, leaving ten
   minutes beyond the node deadline for setup and cleanup.
+  Explicit `source_ref` or `release_tag` overrides run that source's complete
+  gate graph in one hosted job, because older refs do not declare a separate
+  race job. Normal pull requests and pushes use the split jobs.
   These are liveness boundaries, not claims that either check normally takes
   that long. A failed hosted canonical run gets
   two minutes to print its stored status and the last 500 log lines from the
-  run handle. On exactly four logical CPUs, the gate reserves 2.5 cores and
-  starts the full Go suite and touched-package race suite together after the
-  build. The race command can run two package binaries while each keeps
+  run handle. On exactly four logical CPUs, the ordinary race command can run
+  two package binaries while each keeps
   `GOMAXPROCS=1`. When touched and the host has capacity for two package
   processes, `internal/controller`, `internal/nodehost`, `cmd/sparkwing`,
   `internal/wingd/localcontroller` and `tests/acceptance` run after the
@@ -417,38 +426,33 @@ file. Other syntax and workflow checks remain active.
   no longer listed fails the step, so a rename cannot silently drop it from
   the plan. The runner compiles and lists each package once, then queues every
   selected package's shards through the host's package-process allowance:
-  two workers on four CPUs, and the existing Go step parallelism on larger
-  hosts. On four CPUs the queue grows to four workers once `store-postgres`
-  returns, which happens after the full Go suite and the conditional
-  PostgreSQL suite release their two cores, so race never adds a fifth
-  runtime thread to the box. A free worker can start the next package while
+  four workers immediately on the dedicated hosted four-core runner, two
+  workers on a shared four-core host, and the existing Go step parallelism on
+  larger hosts. A free worker can start the next package while
   another finishes a long controller shard.
   Each shard keeps `GOMAXPROCS=1` and runs its assigned tests once, including
   the slow class. Listing, coverage checks, failure cancellation and output
   collection use the same runner as the store's release shards. The runner
   logs the sorted list's count and SHA-256, plus each shard's count and hash,
   and rejects duplicate, missing or multiply assigned names.
-  `race-touched` uses the gate's existing 70-minute execution budget. Ordinary
+  `race-touched` has its own 70-minute execution budget. Ordinary
   package processes and shard processes have an explicit 52m30s timeout,
   derived as three quarters of that budget. This raises the ordinary package
   timeout from 45 minutes and replaces nodehost's ten-minute shard timeout.
-  The node deadline bounds the whole gate, including builds, listing, every
-  package and the remaining checks. Controller exceeded the former unsharded
+  The race node deadline bounds its builds, listing and every selected package.
+  Broad checks have their own deadline. Controller exceeded the former unsharded
   45-minute timeout on hosted CI without a hung test. The unsharded one-thread
   local nodehost baseline took 687 seconds. Parallel tests within a runtime
   share the same CPU bound. Hosts with capacity for one package retain the
   ordinary race command. On a four-core single-tenant host, the ordinary and
-  PostgreSQL commands use the same one-thread, two-package bounds, so the
-  overlapping commands allow four Go runtime threads rather than six.
-  This corrects execution accounting; fitting the whole gate deadline and
-  improving cold-start latency still require measured evidence. The full Go suite uses a 25-minute per-package timeout;
+  PostgreSQL commands use the same one-thread, two-package bounds on their
+  separate runner. Fitting each hosted deadline and improving cold-start
+  latency still require measured evidence. The full Go suite uses a 25-minute per-package timeout;
   hosted runs 36678720566 and 36689529462 hit Go's default 10-minute timeout
   in `internal/controller` or `internal/store` while the active tests had run for 0s.
-  The 25-minute value matches the existing `store-postgres` command. Lint waits
-  for both Go suites. The conditional PostgreSQL
-  suite waits for the full Go suite, then uses its released two-package capacity while
-  the race suite continues. Machines with one to three or more than four
-  logical CPUs retain their existing dependency schedule and Go parallelism.
+  Lint and the conditional PostgreSQL suite wait for the full Go suite.
+  Touched-package race tests run as an independent job on every host. Existing
+  per-command Go parallelism stays unchanged.
   `internal/store` is not among the gate's race targets. Its full race suite
   exceeded 80 minutes in every one of four shards on the hosted runner, so
   adding it to the gate would restore a check that cannot pass.
@@ -472,8 +476,8 @@ file. Other syntax and workflow checks remain active.
   with TestRefillModel alone at over a minute under race, so the shards run
   the short class (`-test.short`); the tests that guard themselves as slow keep
   running without race in `gate` and on PostgreSQL in `store-postgres`. Later checks remain under the 120-minute node deadline and a
-  130-minute hosted job deadline. The hosted `gate` job keeps its 80-minute
-  deadline.
+  130-minute hosted job deadline. The hosted broad and touched-package race
+  jobs each keep an 80-minute deadline.
   A Go step's own parallelism depends on who else holds the
   box. A shared host bounds each step to `(cpus-1)/2`, so one gate cannot
   saturate a machine another gate is running on. A host that sets `CI` carries
@@ -688,8 +692,8 @@ file. Other syntax and workflow checks remain active.
   groups ran 291 to 1145 s, the two longest holding those tests. The hosted-to-local ratio was 1.31 for
   acceptance and about 2.0 for launcher and source.
 
-  Expected hosted plan for a batch touching all six packages, at the 1.31
-  ratio, with `store-postgres` idle: the ordinary packages take about 4
+  Projected plan on the former shared hosted runner for a batch touching all
+  six packages, at the 1.31 ratio, with `store-postgres` idle: the ordinary packages take about 4
   minutes, the three lead shards (about 37, 14 and 13 minutes) start first,
   two more workers join when the full Go suite ends near minute 32, and the
   queue drains at about minute 60 of a step that starts near minute 5 of the
@@ -698,6 +702,17 @@ file. Other syntax and workflow checks remain active.
   and `store-postgres` holds two cores for its 23 minutes, the race work
   (about 164 core-minutes for controller and acceptance at 1.31) exceeds what
   four cores can supply inside the job deadline under any schedule.
+
+  Hosted CI therefore gives touched-package race tests a separate four-core
+  runner and a full 70-minute execution window. All four shard workers are
+  available from the start of that job. The full Go suite, conditional
+  PostgreSQL suite and lint consume another runner's budget. The package
+  selection, lead shards, ordinary packages, package timeouts and release-only
+  store race coverage stay unchanged. At 1.31, the measured 164 core-minutes
+  for controller and acceptance have up to 280 core-minutes available in the
+  dedicated window, before ordinary packages, compilation and listing. This
+  removes the shared-runner capacity shortfall. A complete hosted batch under
+  the split is still unmeasured.
 
 - **Heavy packages:** run these by name rather than reaching for `./...`, and
   give the command a timeout the package actually fits in. Measured on a

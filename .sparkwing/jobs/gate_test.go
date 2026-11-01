@@ -37,8 +37,8 @@ func TestGateReservesAndBoundsItsCPU(t *testing.T) {
 	})
 
 	nodes := plan.Jobs
-	if len(nodes) != 1 {
-		t.Fatalf("gate plan nodes = %d, want one", len(nodes))
+	if len(nodes) != 2 {
+		t.Fatalf("gate plan nodes = %d, want broad checks and touched-package race", len(nodes))
 	}
 	if got := time.Duration(nodes[0].TimeoutMS) * time.Millisecond; got != gateRunTimeout {
 		t.Fatalf("gate node timeout = %s, want declared workload deadline %s", got, gateRunTimeout)
@@ -82,30 +82,30 @@ func TestGateDeadlineAllowsTheHostedPostgresTail(t *testing.T) {
 	}
 }
 
-func TestGateOverlapsTestAndRaceOnlyOnFourCPUs(t *testing.T) {
-	for _, cpus := range []int{3, 8} {
-		w := inspectWork(t, testJob(func(w *sparkwing.Work) (*sparkwing.WorkStep, error) { return (&Gate{}).workForCPU(w, cpus) }))
-		if got := findStep(w, "race-touched").Needs; !slices.Equal(got, []string{"test"}) {
-			t.Errorf("race dependencies on %d CPUs = %v, want [test]", cpus, got)
-		}
-		for _, id := range []string{"lint", "store-postgres"} {
-			if got := findStep(w, id).Needs; !slices.Equal(got, []string{"test"}) {
-				t.Errorf("%s dependencies on %d CPUs = %v, want [test]", id, cpus, got)
-			}
-		}
+func TestGateKeepsRaceInAnIndependentRequiredJob(t *testing.T) {
+	plan := inspectPlan(t, func(plan *sparkwing.Plan) error {
+		return (&Gate{}).Plan(t.Context(), plan, sparkwing.NoInputs{}, sparkwing.RunContext{Pipeline: "gate"})
+	})
+	if len(plan.Jobs) != 2 {
+		t.Fatalf("gate jobs = %d, want broad checks and race", len(plan.Jobs))
 	}
-
-	w := inspectWork(t, testJob(func(w *sparkwing.Work) (*sparkwing.WorkStep, error) { return (&Gate{}).workForCPU(w, 4) }))
-	for _, id := range []string{"test", "race-touched"} {
-		if got := findStep(w, id).Needs; !slices.Equal(got, []string{"build"}) {
-			t.Errorf("%s dependencies on four CPUs = %v, want [build]", id, got)
+	for i, want := range []string{"gate", "race-touched"} {
+		job := plan.Jobs[i]
+		if job.ID != want || len(job.Needs) != 0 || job.Optional {
+			t.Errorf("gate job = %+v, want independent required %s", job, want)
 		}
 	}
-	if got := findStep(w, "lint").Needs; !slices.Equal(got, []string{"test", "race-touched"}) {
-		t.Errorf("lint dependencies on four CPUs = %v, want [test race-touched]", got)
+	if got := time.Duration(plan.Jobs[1].TimeoutMS) * time.Millisecond; got != raceTouchedStepTimeout {
+		t.Errorf("race job timeout = %s, want %s", got, raceTouchedStepTimeout)
 	}
-	if got := findStep(w, "store-postgres").Needs; !slices.Equal(got, []string{"test"}) {
-		t.Errorf("store-postgres dependencies on four CPUs = %v, want [test]", got)
+	w := inspectWork(t, &Gate{})
+	if findStep(w, "race-touched") != nil {
+		t.Fatal("broad checks still run race in their own process")
+	}
+	for _, id := range []string{"lint", "store-postgres"} {
+		if got := findStep(w, id).Needs; !slices.Equal(got, []string{"test"}) {
+			t.Errorf("%s dependencies = %v, want [test]", id, got)
+		}
 	}
 }
 

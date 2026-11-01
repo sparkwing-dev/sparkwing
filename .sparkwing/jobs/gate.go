@@ -12,7 +12,6 @@ import (
 	"runtime"
 	"sort"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/gitenv"
@@ -42,12 +41,22 @@ func (Gate) Examples() []sparkwing.Example {
 
 func (p *Gate) Plan(_ context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, rc sparkwing.RunContext) error {
 	sparkwing.Job(plan, rc.Pipeline, p).Timeout(gateRunTimeout).Cache(lintCache())
+	sparkwing.Job(plan, "race-touched", runGateRaceTouched).Timeout(raceTouchedStepTimeout)
 	return nil
 }
 
-// perf: the one logical-CPU count whose schedule starts the full Go suite and
-// the touched-package race suite together.
+// perf: four-core runners need explicit per-process limits for heavy suites.
 const overlappedGoSuiteCPUs = 4
+
+func runGateRaceTouched(ctx context.Context) error {
+	var suitesDone chan struct{}
+	if currentHost().singleTenant {
+		// perf: the hosted race job owns its runner, so all four workers can start immediately.
+		suitesDone = make(chan struct{})
+		close(suitesDone)
+	}
+	return runRaceTouched(ctx, suitesDone)
+}
 
 // safety: tenancy travels with the CPU count so a step's parallelism has no
 // input the caller cannot see, and a test says which host it describes.
@@ -90,37 +99,14 @@ func goCommandWithLimits(gomaxprocs, packageParallelism int, verb, args string) 
 }
 
 func (p *Gate) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
-	return p.workForCPU(w, runtime.NumCPU())
-}
-
-func (p *Gate) workForCPU(w *sparkwing.Work, cpuCount int) (*sparkwing.WorkStep, error) {
 	w.FailurePolicy(sparkwing.FailFast)
 	gofmtStep := sparkwing.Step(w, "gofmt", runGofmt)
 	formattersStep := sparkwing.Step(w, "formatters", runFormatters).Needs(gofmtStep)
 	vetStep := sparkwing.Step(w, "vet", runVet).Needs(formattersStep)
 	buildStep := sparkwing.Step(w, "build", runBuild).Needs(vetStep)
 	testStep := sparkwing.Step(w, "test", runTest).Needs(buildStep)
-	var raceDep sparkwing.WorkDep = testStep
-	lintDeps := []sparkwing.WorkDep{testStep}
-	// perf: four-core hosted runners otherwise spend the full test and touched
-	// race durations serially and cross the gate's liveness deadline.
-	if cpuCount == overlappedGoSuiteCPUs {
-		raceDep = buildStep
-	}
-	suitesDone := make(chan struct{})
-	releaseSuites := sync.OnceFunc(func() { close(suitesDone) })
-	raceStep := sparkwing.Step(w, "race-touched", func(ctx context.Context) error {
-		return runRaceTouched(ctx, suitesDone)
-	}).Needs(raceDep)
-	if cpuCount == overlappedGoSuiteCPUs {
-		lintDeps = append(lintDeps, raceStep)
-	}
-	sparkwing.Step(w, "lint", runGolangciLint).Needs(lintDeps...)
-	// perf: after test releases its Go slot, Postgres can use it while race keeps its two-slot bound.
-	sparkwing.Step(w, "store-postgres", func(ctx context.Context) error {
-		defer releaseSuites()
-		return runStorePostgresIfTouched(ctx)
-	}).Needs(testStep)
+	sparkwing.Step(w, "lint", runGolangciLint).Needs(testStep)
+	sparkwing.Step(w, "store-postgres", runStorePostgresIfTouched).Needs(testStep)
 	sparkwing.Step(w, "em-dashes", checkEmDashes)
 	sparkwing.Step(w, "tracker-ids", checkTrackerIDs)
 	sparkwing.Step(w, "tracked-binaries", checkTrackedBinaries)
