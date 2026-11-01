@@ -114,8 +114,8 @@ func gateRaceShardsForPackage(pkg string) int {
 	}
 }
 
-// perf: measured single-thread race long poles, each over ten minutes locally.
-// TestStorage alone is 70 percent of tests/acceptance under race.
+// perf: measured single-thread race long poles. TestStorage takes about 4.5 minutes,
+// a third of tests/acceptance under race; the controller pair takes 1 to 2 minutes each.
 func gateRaceLeadTests(pkg string) []string {
 	switch pkg {
 	case "./internal/controller":
