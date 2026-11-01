@@ -36,8 +36,14 @@ func TestReleaseRequiresIsolatedSparkwingHome(t *testing.T) {
 	if err == nil {
 		t.Fatal("release accepted the default shared Sparkwing home")
 	}
-	if !strings.Contains(err.Error(), "SPARKWING_HOME") || !strings.Contains(err.Error(), "isolated") {
+	if !strings.Contains(err.Error(), `HOME="$(mktemp -d)" SPARKWING_HOME="$(mktemp -d)" sparkwing run release --sw-dry-run`) {
 		t.Fatalf("error = %q, want actionable isolated-home guidance", err)
+	}
+}
+
+func TestReleaseHelpExplainsIsolatedHomeRecovery(t *testing.T) {
+	if !strings.Contains((Release{}).Help(), `HOME="$(mktemp -d)" SPARKWING_HOME="$(mktemp -d)" sparkwing run release --sw-dry-run`) {
+		t.Fatal("release help lacks the isolated preview command")
 	}
 }
 
