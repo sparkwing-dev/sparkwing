@@ -9,6 +9,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
@@ -321,6 +322,10 @@ func TestCapacityRequestIsReplacedOnlyAfterDisplacement(t *testing.T) {
 }
 
 func TestCapacityRequestSleepsWithinItsAwardBudget(t *testing.T) {
+	synctest.Test(t, testCapacityRequestSleepsWithinItsAwardBudget)
+}
+
+func testCapacityRequestSleepsWithinItsAwardBudget(t *testing.T) {
 	l, _, _, control := fixture()
 	control.award.Binding.AttemptDeadline = time.Now().Add(time.Minute)
 	before := time.Now()
@@ -334,7 +339,7 @@ func TestCapacityRequestSleepsWithinItsAwardBudget(t *testing.T) {
 	}
 	seconds, err := strconv.ParseFloat(c.Args[0], 64)
 	deadline := demandDeadline(control.award.Binding)
-	if err != nil || seconds <= 0 || seconds > deadline.Sub(before).Seconds() || seconds < time.Until(deadline).Seconds() {
+	if err != nil || seconds <= 0 || seconds != deadline.Sub(before).Seconds() {
 		t.Fatalf("sleep budget %q is outside the award deadline: %v", c.Args[0], err)
 	}
 }
