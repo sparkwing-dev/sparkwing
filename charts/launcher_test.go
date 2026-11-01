@@ -4,6 +4,7 @@ import (
 	"os"
 	"reflect"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -109,8 +110,8 @@ func TestCloudLauncherDefaultPollHonorsTheControllerIdleInterval(t *testing.T) {
 	}
 }
 
-func TestTeamNodePoolExampleOutlivesTheAwardLease(t *testing.T) {
-	data, err := os.ReadFile("sparkwing-full/examples/team-nodepool.yaml")
+func TestSharedNodePoolExampleOutlivesTheAwardLease(t *testing.T) {
+	data, err := os.ReadFile("sparkwing-full/examples/shared-nodepools.yaml")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -122,11 +123,13 @@ func TestTeamNodePoolExampleOutlivesTheAwardLease(t *testing.T) {
 			} `json:"disruption"`
 		} `json:"spec"`
 	}
-	if err := utilyaml.Unmarshal(data, &pool); err != nil {
-		t.Fatal(err)
-	}
-	after, err := time.ParseDuration(pool.Spec.Disruption.ConsolidateAfter)
-	if err != nil || pool.Spec.Disruption.ConsolidationPolicy != "WhenEmpty" || after <= limits.DefaultLease {
-		t.Fatalf("team NodePool disruption %+v must consolidate only empty nodes after more than %s: %v", pool.Spec.Disruption, limits.DefaultLease, err)
+	for _, document := range strings.Split(string(data), "---") {
+		if err := utilyaml.Unmarshal([]byte(document), &pool); err != nil {
+			t.Fatal(err)
+		}
+		after, err := time.ParseDuration(pool.Spec.Disruption.ConsolidateAfter)
+		if err != nil || pool.Spec.Disruption.ConsolidationPolicy != "WhenEmpty" || after <= limits.DefaultLease {
+			t.Fatalf("shared NodePool disruption %+v must consolidate only empty nodes after more than %s: %v", pool.Spec.Disruption, limits.DefaultLease, err)
+		}
 	}
 }

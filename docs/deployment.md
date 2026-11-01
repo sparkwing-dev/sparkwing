@@ -60,29 +60,28 @@ Jobs exchange a one-use bootstrap Secret for an in-memory awarded capability.
 
 The [Cloud chart](../charts/sparkwing-full/README.md) documents its values and
 node/network prerequisites. Team-node labels hash the Cloud Job namespace with the team slug.
-When a team has no vacant Ready node, the launcher lists NodePools read-only. A
-compatible pool has the exact protected team label and `NoSchedule` taint in
-its template and permits the job's Linux hardware class. Explicit instance CPU
-or memory bounds that exclude the award make a pool incompatible. Unknown
-instance availability keeps waiting. Pool readiness, limits and provider
-availability do not determine whether capacity is configured. With a compatible
-pool, the launcher holds the award and creates
-an unbound, award-sized capacity-request Pod that only the team's NodePool can
-satisfy, so Karpenter adds a node that the held award then reserves. Run status
-shows “Waiting for dedicated Cloud capacity” with elapsed time until activation.
-The launcher renews held awards during that wait, preserving the plan generation
-through placement retries and claim backoff. Losing the launcher owner allows
-the lease to expire and the controller to requeue the plan.
-The initial credit reservation is a hold. Usage billing begins with execution.
-Users can cancel while waiting.
+Cloud capacity uses one shared NodePool per hardware class, carrying
+`sparkwing.dev/hardware-class=sparkwing-<cores>cpu` and the generic
+`sparkwing.dev/dedicated=true:NoSchedule` taint. A fresh node is bound once to
+one team and run. Jobs from that run may share it; a later run never reuses it.
+Per-team NodePools are superseded. The launcher reports an unconfigured class
+when no shared pool exists for that class; an exhausted pool keeps waiting.
 
-When no compatible pool exists, the unit ends with reason
-`cloud_capacity_unconfigured` and “Cloud capacity is not configured for this
-team. Contact support@sparkwing.dev”, plus the run ID as a support reference.
-The controller releases the unstarted credit reservation in the terminal
-transaction, and the launcher deletes the capacity-request Pod. Its operator
-log names the protected team label value to configure. Pool-list failures keep
-the award pending for retry. Provision the team pool and trigger a new run. Team
+Warm capacity defaults Off for every class. The operator **Warm capacity** page
+and CLI show warm/desired nodes, start-time percentiles, cold starts and upsizes,
+with signup and active-team counts. Operators select Off, Manual count or Auto
+minimum/maximum and a start-time target (default 10s). Auto uses cold-start waits
+in the last 30 minutes and median start time in the last hour, clamped to the
+configured bounds; no waiting means the minimum.
+
+The chart's optional `warmCapacity` infrastructure creates low-priority pause
+placeholders and KEDA PostgreSQL scalers. Each placeholder reserves one catalog
+node. KEDA queries the `warm_pool_desired` view with a separate read-only role;
+its DSN Secret stays outside placeholder pods. Infrastructure installs KEDA and
+supplies shared NodePools. See the chart README and
+[proposed infrastructure manifests](../design/rewrite/proposals/warm-capacity.md)
+for role grants, Secret keys, resource sizing and scheduling labels.
+
 NodePools need `consolidateAfter` above the 3-minute award lease. Self-hosted runner pools use `runner.repos`,
 `runner.alsoClaimTriggers` and pool scheduling values. They claim through HTTP
 and need no Kubernetes API token.

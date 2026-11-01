@@ -112,3 +112,41 @@ must own the invited address.
 The unreleased schema baseline remains 28 and removes
 `signup_gate.free_team_members`. Recreate pre-release stores with the updated
 baseline using the instructions above.
+
+## Shared Cloud pools and warm capacity
+
+Replace per-team Cloud NodePools with one shared pool per hardware class.
+Use the shared-pool example in the full chart. Pools carry
+`sparkwing.dev/hardware-class`, `sparkwing.dev/cloud-namespace`, and
+`sparkwing.dev/dedicated=true:NoSchedule`. Nodes keep their permanent team/run
+binding after first use. Review the [infrastructure proposal](../../design/rewrite/proposals/warm-capacity.md)
+for the exact pool, KEDA, reader role and Secret manifests.
+
+Warm capacity defaults to Off for every class, including after the baseline 28
+store reset above. Install KEDA separately, then enable `warmCapacity.enabled`
+with `controller.store=postgres`, the Cloud job namespace and the read-only
+connection Secret. KEDA scales placeholders in the Helm release namespace.
+The controller's database owner creates `warm_pool_desired`; the scaler role
+needs SELECT only on that view. Placeholder containers receive no credentials.
+
+Open **Operator > Warm capacity**, or run:
+
+```bash
+sparkwing operator warm-capacity show --profile deployment
+sparkwing operator warm-capacity set --class sparkwing-2cpu --mode manual --count 2 --profile deployment
+sparkwing operator warm-capacity set --class sparkwing-2cpu --mode auto --min 0 --max 4 --start-time-target 10s --profile deployment
+sparkwing operator warm-capacity set --class sparkwing-2cpu --mode off --profile deployment
+```
+
+`set` replaces the selected policy. Omitted counts become zero and the target
+becomes 10s. Auto takes the larger of half the cold-start waits in 30 minutes,
+rounded up, and current warm nodes plus one when the last hour's median start
+exceeds the target. It clamps that result to the configured min/max. No demand
+samples gives the minimum. The chart's `maxReplicas` is the infrastructure ceiling
+and must cover the selected manual count or auto maximum.
+
+Start percentiles group jobs by requested class, including upsized jobs. No start
+samples appears as an empty metric. Cold starts include jobs still waiting for a
+fresh node. Signups count accounts created, and active teams count teams that
+submitted runs, over 24h/7d. The launcher reports ready, unbound nodes each poll.
+Samples expire after 120 seconds so a stopped launcher cannot report stale warmth.

@@ -204,39 +204,31 @@ injections are rejected. Each Job carries `karpenter.sh/do-not-disrupt: "true"`.
 `sparkwing.dev/cpu-band:NoSchedule`, including the existing `small` band, and keep
 the fixed aggregate 20 GiB scratch budget including DinD.
 
-The existing Karpenter NodePool `sparkwing-jobs-small` needs all of the following:
+Cloud capacity uses one shared Karpenter NodePool per hardware class. Each pool
+sets `sparkwing.dev/hardware-class=sparkwing-<cores>cpu` and the generic
+`sparkwing.dev/dedicated=true:NoSchedule` taint. Never place team labels on a
+NodePool template. The launcher binds each fresh node to exactly one team and
+run, retains the protected used-team/run fences and retires it after that run.
+A bound node cannot return to the warm pool.
 
-- Each team's nodes have `node-restriction.kubernetes.io/sparkwing-team-node` equal to the `node_label_value` from
-  `sparkwing operator teams show --team <team> --job-namespace <launcher job namespace> -o json`:
-  `sha256-` plus the first 40 lowercase hex characters of SHA-256 of
-  `<job namespace>/<team slug>` (for example `sparkwing-cloud-jobs/qa-team`).
-  The job namespace is unique to one deployment, so two deployments on one
-  cluster with the same team slug never select or tolerate each other's nodes.
-  Name each pool after the deployment as well as the team.
-  A presence-only label or a shared `small` value cannot establish team ownership.
-- Set that exact value in the team's NodePool template metadata labels and in a
-  `node-restriction.kubernetes.io/sparkwing-team-node=<hash>:NoSchedule` taint. Retain the existing
-  `sparkwing.dev/cpu-band=small:NoSchedule` taint. Start from
-  [the team NodePool example](examples/team-nodepool.yaml). Provision one
-  isolated node per concurrent Job. Enable Node authorizer and NodeRestriction.
-  Reservation checks the node's owning NodeClaim, its node name/provider identity,
-  and its NodePool UID and template label. A protected first-use label permanently
-  binds the node to one team. Clearing a reservation retains that label.
-  A rejected Pod cordons the node and deletes its exact NodeClaim. With no vacant
-  Ready team node, the launcher uses NodePool `get` and `list` access to check
-  for a matching template label and taint. No compatible pool ends the unit as
-  `cloud_capacity_unconfigured`, releases its credit hold and gives the customer
-  support@sparkwing.dev plus the run ID as a support reference. Provision the
-  pool and trigger a new run. A scaling or exhausted pool keeps waiting with
-  “Waiting for dedicated Cloud capacity” and elapsed time in run status.
-  With a compatible pool, the launcher holds the award and creates an unbound
-  `sw-capacity-*` Pod sized to the award, with the team node selector and the job
-  tolerations and no credentials, so Karpenter adds a node from the team's pool.
-  The request stays on the node until the award reserves it, and is deleted when
-  the award ends. Set the team NodePool's `disruption` to
-  `consolidationPolicy: WhenEmpty` with `consolidateAfter: 10m`; it must exceed
-  the 3-minute award lease, the longest a node can sit empty after a launcher
-  restart before its unit is re-awarded. Cap cost with the NodePool `limits`.
+Set `warmCapacity.enabled=true`, `warmCapacity.namespace` to the launcher's job
+namespace and `warmCapacity.databaseSecret.name` to a separate read-only
+PostgreSQL DSN Secret. Infrastructure installs KEDA. The chart renders a
+low-priority pause Deployment and PostgreSQL ScaledObject per catalog class.
+Each placeholder holds one node, using the catalog's CPU, memory and scratch
+requests; infrastructure must provide enough allocatable resources after system
+and DaemonSet overhead. Real jobs evict the placeholder. Helm leaves replica
+counts to KEDA on upgrades.
+
+All classes default Off. The operator console's **Warm capacity** page and
+operator CLI set Off, Manual count, or Auto minimum/maximum and start target
+(default 10s). KEDA reads `warm_pool_desired`; Off requests zero. Auto uses the
+higher of half the last 30 minutes' cold-start waits (rounded up) and one more
+than current warm capacity when the last hour's median start exceeds target,
+clamped to the operator minimum/maximum. With no waits it returns the minimum.
+See [the infrastructure proposal](../../design/rewrite/proposals/warm-capacity.md)
+for exact KEDA manifests, the reader role and Secret, and shared-pool labels.
+
 - Nodes need the awarded CPU/memory plus system overhead and at least 20 GiB of
   allocatable ephemeral storage. The example's ceilings are 2 CPU and 8 GiB.
 - The cluster must support native sidecars, `PodLevelResources` and

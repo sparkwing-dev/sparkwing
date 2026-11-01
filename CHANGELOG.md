@@ -20,7 +20,15 @@ unlock.
 
 ## [Unreleased]
 
+### Added
+
+- **operator:** Warm capacity controls in the console and `sparkwing operator warm-capacity show|set`
+  Each Cloud hardware class defaults to Off. Manual holds a count. Auto uses cold-start waits and median job start time, bounded by the operator's min/max and a 10-second default target. The page and CLI show warm/desired capacity, start percentiles, cold starts, upsizes, signups and active teams.
+
 ### Changed
+
+- **deployment (Breaking):** Shared Cloud pools replace hand-made per-team NodePools
+  Replace per-team pool manifests with one pool per hardware class and the generic dedicated taint. Optional warm placeholders use KEDA's PostgreSQL scaler and a read-only database role. See the [warm capacity migration](docs/migrations/_unreleased.md#shared-cloud-pools-and-warm-capacity) and [infrastructure proposal](design/rewrite/proposals/warm-capacity.md). Warm policy and job-start telemetry join schema baseline 28's store reset.
 
 - **scaffold:** `const FallbackSDKVersion` pins v0.68.2, so a fresh scaffold compiles against that release.
 - **controller (Breaking):** List endpoints that returned whole collections now return cursor pages of 50 records by default, up to 200 per request

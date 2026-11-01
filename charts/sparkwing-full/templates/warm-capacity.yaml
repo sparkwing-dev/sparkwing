@@ -1,0 +1,128 @@
+{{- if .Values.warmCapacity.enabled }}
+{{- if ne .Values.controller.store "postgres" }}
+{{- fail "warmCapacity requires controller.store=postgres" }}
+{{- end }}
+{{- $namespace := required "warmCapacity.namespace is required" .Values.warmCapacity.namespace }}
+{{- $secret := required "warmCapacity.databaseSecret.name is required" .Values.warmCapacity.databaseSecret.name }}
+{{- $base := include "sparkwing-full.fullname" . | trunc 40 | trimSuffix "-" }}
+{{- if not .Values.warmCapacity.classes }}
+{{- fail "warmCapacity.classes must contain the shared hardware classes" }}
+{{- end }}
+apiVersion: scheduling.k8s.io/v1
+kind: PriorityClass
+metadata:
+  name: {{ $base }}-warm
+value: -1000
+globalDefault: false
+preemptionPolicy: Never
+description: Evictable Sparkwing warm Cloud capacity.
+---
+apiVersion: keda.sh/v1alpha1
+kind: TriggerAuthentication
+metadata:
+  name: {{ $base }}-warm
+  namespace: {{ $.Release.Namespace }}
+spec:
+  secretTargetRef:
+    - parameter: connection
+      name: {{ $secret | quote }}
+      key: {{ .Values.warmCapacity.databaseSecret.key | quote }}
+{{- range $class, $config := .Values.warmCapacity.classes }}
+{{- if not (regexMatch "^sparkwing-(2|4|8|16|32|64)cpu$" $class) }}
+{{- fail "warmCapacity class must be a Cloud hardware class (sparkwing-<cores>cpu)" }}
+{{- end }}
+{{- $requests := required "warmCapacity class requests are required" $config.requests }}
+{{- $_ := required "warmCapacity class requests.cpu is required" $requests.cpu }}
+{{- $_ := required "warmCapacity class requests.memory is required" $requests.memory }}
+{{- $name := printf "%s-warm-%s" $base $class }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $name }}
+  namespace: {{ $.Release.Namespace }}
+spec:
+  {{- /* KEDA owns replicas after installation; avoid resetting on Helm upgrades. */}}
+  {{- if not $.Release.IsUpgrade }}
+  replicas: 0
+  {{- end }}
+  selector:
+    matchLabels:
+      sparkwing.dev/warm-placeholder: {{ $name }}
+  template:
+    metadata:
+      labels:
+        sparkwing.dev/warm-placeholder: {{ $name }}
+    spec:
+      automountServiceAccountToken: false
+      priorityClassName: {{ $base }}-warm
+      terminationGracePeriodSeconds: 0
+      tolerations:
+        - key: sparkwing.dev/dedicated
+          operator: Equal
+          value: "true"
+          effect: NoSchedule
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - key: sparkwing.dev/cloud-namespace
+                    operator: In
+                    values: [{{ $namespace | quote }}]
+                  - key: sparkwing.dev/hardware-class
+                    operator: In
+                    values: [{{ $class | quote }}]
+                  - key: node-restriction.kubernetes.io/sparkwing-team-node
+                    operator: DoesNotExist
+        podAntiAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            - labelSelector:
+                matchExpressions:
+                  - key: sparkwing.dev/warm-placeholder
+                    operator: Exists
+              topologyKey: kubernetes.io/hostname
+      containers:
+        - name: pause
+          image: {{ $.Values.warmCapacity.image | quote }}
+          resources:
+            requests:
+              {{- toYaml $requests | nindent 14 }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            runAsUser: 65534
+            capabilities:
+              drop: [ALL]
+            seccompProfile:
+              type: RuntimeDefault
+---
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: {{ $name }}
+  namespace: {{ $.Release.Namespace }}
+spec:
+  scaleTargetRef:
+    name: {{ $name }}
+  pollingInterval: 15
+  cooldownPeriod: 30
+  minReplicaCount: 0
+  maxReplicaCount: {{ $config.maxReplicas | default 100 }}
+  advanced:
+    horizontalPodAutoscalerConfig:
+      behavior:
+        scaleDown:
+          stabilizationWindowSeconds: 0
+  triggers:
+    - type: postgresql
+      metricType: AverageValue
+      metadata:
+        query: {{ printf "SELECT desired_replicas FROM warm_pool_desired WHERE hardware_class = '%s'" $class | quote }}
+        targetQueryValue: "1"
+        activationTargetQueryValue: "0"
+      authenticationRef:
+        name: {{ $base }}-warm
+{{- end }}
+{{- end }}

@@ -444,3 +444,36 @@ sparkwing-runner-bundle:
       - cluster
     maxConcurrent: 2
     alsoClaimTriggers: true
+
+# Optional Cloud warm-node placeholders. Operator settings default every class to
+# Off; enabling this infrastructure alone reserves no warm capacity.
+warmCapacity:
+  enabled: false
+  # Cloud job namespace used to scope the shared node pools. Placeholders and
+  # KEDA resources themselves run in the release namespace.
+  namespace: ""
+  image: registry.k8s.io/pause:3.10
+  databaseSecret:
+    name: ""
+    key: dsn
+  # Reserve one catalog node; infrastructure must leave these resources
+  # allocatable after system and DaemonSet overhead.
+  classes:
+    sparkwing-2cpu:
+      requests: {cpu: "2", memory: "5529Mi", ephemeral-storage: "20Gi"}
+      maxReplicas: 100
+    sparkwing-4cpu:
+      requests: {cpu: "4", memory: "13107Mi", ephemeral-storage: "20Gi"}
+      maxReplicas: 100
+    sparkwing-8cpu:
+      requests: {cpu: "8", memory: "28262Mi", ephemeral-storage: "20Gi"}
+      maxReplicas: 100
+    sparkwing-16cpu:
+      requests: {cpu: "16", memory: "58572Mi", ephemeral-storage: "20Gi"}
+      maxReplicas: 100
+    sparkwing-32cpu:
+      requests: {cpu: "32", memory: "119193Mi", ephemeral-storage: "20Gi"}
+      maxReplicas: 100
+    sparkwing-64cpu:
+      requests: {cpu: "64", memory: "240435Mi", ephemeral-storage: "20Gi"}
+      maxReplicas: 100
