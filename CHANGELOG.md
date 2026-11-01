@@ -57,6 +57,9 @@ unlock.
 
 ### Fixed
 
+- **CI:** Gate uploaded working trees without requiring `origin/main`
+  Source checks and lint judge all tracked files against an empty Git tree when the baseline is unavailable, and report the wider scope.
+
 - **secrets:** List pipeline-scoped secrets through the CLI again
   Secret listings always include the shared flag, including false for pipeline-scoped secrets, as the client requires.
 - **store:** Refuse a changed schema baseline even when its version still matches
