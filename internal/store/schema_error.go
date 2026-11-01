@@ -7,11 +7,19 @@ func schemaMismatchError(version int, path string) error {
 	if version > expectedSchemaVersion {
 		return fmt.Errorf("sparkwing: store schema version %d is newer than this binary (expects %d); start a binary matching the store, or restore a backup matching this binary into a separate database", version, expectedSchemaVersion)
 	}
+	return fmt.Errorf("sparkwing: store schema version %d is older than this binary (expects %d); %s", version, expectedSchemaVersion, schemaRecreateRemedy(path))
+}
+
+func schemaRecreateRemedy(path string) string {
 	remedy := "point the server at an empty database"
 	if path != "" {
 		remedy = "move " + path + " and any " + path + "-wal and " + path + "-shm files aside"
 	}
-	return fmt.Errorf("sparkwing: store schema version %d is older than this binary (expects %d); back up the store and use a binary matching it; this build cannot upgrade it; to start fresh, %s and start again", version, expectedSchemaVersion, remedy)
+	return fmt.Sprintf("back up the store and use a binary matching it; this build cannot upgrade it; to start fresh, %s and start again", remedy)
+}
+
+func schemaBaselineMismatchError(recorded, expected, path string) error {
+	return fmt.Errorf("sparkwing: store schema version %d baseline digest %q differs from this binary's %q; %s", expectedSchemaVersion, recorded, expected, schemaRecreateRemedy(path))
 }
 
 // safety: v0.68 replaced the store without an import, so a pre-rewrite store

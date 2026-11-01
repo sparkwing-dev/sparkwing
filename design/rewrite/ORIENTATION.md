@@ -14,6 +14,12 @@ credential model in `docs/auth.md`, and the decision log
 
 ## Owners and guards
 
+### Store baseline
+
+| Rule | Owner | Guard test |
+| --- | --- | --- |
+| Current-version stores match the embedded baseline digest; unstamped stores need every declared table, view and index before stamping | `internal/store/schema_baseline.go`: `verifySchemaBaseline` | `internal/store/schema_baseline_test.go`: `TestSchemaBaselineDigestRecordsAndReopens`, `TestSchemaBaselineDigestRefusesChangedBaseline`, `TestSchemaBaselineDigestLegacy` |
+
 ### Tenancy
 
 | Rule | Owner | Guard test |

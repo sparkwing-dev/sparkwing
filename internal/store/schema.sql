@@ -232,6 +232,7 @@ CREATE TABLE nodes (
 CREATE TABLE sparkwing_schema_version (
     version BIGINT NOT NULL,
     applied_at BIGINT NOT NULL,
+    baseline_digest TEXT NOT NULL DEFAULT '',
     PRIMARY KEY (version)
 );
 
