@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"sync"
 	"testing"
 	"testing/synctest"
 	"time"
@@ -314,6 +315,71 @@ func TestSpentNodeErrorsAreRateLimitedAndDoNotFailSync(t *testing.T) {
 		}
 		if got := bytes.Count(logs.Bytes(), []byte("retirement unavailable")); got != 2 {
 			t.Fatalf("persistent error was not logged again: %d", got)
+		}
+	})
+}
+
+type blockedTerminalControl struct {
+	*controlFake
+	mu      sync.Mutex
+	queried []time.Duration
+	claimed []time.Time
+}
+
+func (c *blockedTerminalControl) RunTerminal(ctx context.Context, _ string, _ runspec.RunID) (bool, error) {
+	start := time.Now()
+	<-ctx.Done()
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.queried = append(c.queried, time.Since(start))
+	return false, ctx.Err()
+}
+
+func (c *blockedTerminalControl) Claim(context.Context, string, []string) (*CloudJobAward, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.claimed = append(c.claimed, time.Now())
+	return nil, nil
+}
+
+func TestSlowRunQueryDoesNotDelayReconciliation(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		l, kube, _, control := fixture()
+		boundary, nodes := boundaryFixture()
+		node, err := nodes.CoreV1().Nodes().Get(t.Context(), "node", metav1.GetOptions{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err = kube.Tracker().Add(node); err != nil {
+			t.Fatal(err)
+		}
+		boundary.Kube, l.Boundary = kube, boundary
+		binding := boundaryBinding("team")
+		held, err := boundary.Reserve(t.Context(), binding, jobName(binding), CloudPlacement{RequestedClass: "2"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err = boundary.Release(t.Context(), held); err != nil {
+			t.Fatal(err)
+		}
+		blocked := &blockedTerminalControl{controlFake: control}
+		l.Control, l.Poll = blocked, time.Second
+		ctx, cancel := context.WithCancel(t.Context())
+		done := make(chan error)
+		start := time.Now()
+		go func() { done <- l.Run(ctx) }()
+		time.Sleep(retirementCallTimeout + time.Second)
+		cancel()
+		if err = <-done; err != nil {
+			t.Fatal(err)
+		}
+		blocked.mu.Lock()
+		defer blocked.mu.Unlock()
+		if len(blocked.queried) != 1 || blocked.queried[0] != retirementCallTimeout {
+			t.Fatalf("run queries %v, want one bounded by %v", blocked.queried, retirementCallTimeout)
+		}
+		if len(blocked.claimed) < 10 || blocked.claimed[9].Sub(start) >= retirementCallTimeout {
+			t.Fatalf("claims %v waited on the blocked run query", blocked.claimed)
 		}
 	})
 }

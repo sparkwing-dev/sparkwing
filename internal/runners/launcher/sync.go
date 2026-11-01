@@ -30,10 +30,6 @@ func (l *Launcher) Sync(ctx context.Context) error {
 	if err := l.validate(); err != nil {
 		return err
 	}
-	return l.sync(ctx)
-}
-
-func (l *Launcher) sync(ctx context.Context) error {
 	defer l.syncSpentNodes(ctx)
 	return l.syncActive(ctx)
 }

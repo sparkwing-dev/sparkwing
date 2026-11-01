@@ -1,7 +1,9 @@
 package launcher
 
 import (
+	"context"
 	"errors"
+	"sync"
 	"testing"
 	"testing/synctest"
 	"time"
@@ -12,6 +14,8 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	ktesting "k8s.io/client-go/testing"
 
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
+	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/pkg/match"
 )
 
@@ -216,4 +220,102 @@ func TestTeardownWaitIsBoundedAndRunScoped(t *testing.T) {
 			})
 		})
 	}
+}
+
+type leasedControl struct {
+	*controlFake
+	mu      sync.Mutex
+	expires map[capability.LeaseRef]time.Time
+	lapsed  bool
+	claimed int
+}
+
+func (c *leasedControl) Prepare(ctx context.Context, fences []capability.LeaseRef) (time.Time, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	now := time.Now()
+	for _, fence := range fences {
+		if expires, ok := c.expires[fence]; ok && !now.Before(expires) {
+			c.lapsed = true
+			return time.Time{}, &apierr.Error{Code: apierr.LockHeld, Message: "lease lapsed"}
+		}
+		c.expires[fence] = now.Add(time.Minute)
+	}
+	return now.Add(time.Minute), context.Cause(ctx)
+}
+
+func (c *leasedControl) Claim(context.Context, string, []string) (*CloudJobAward, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.claimed++
+	return nil, &apierr.Error{Code: apierr.RateLimited, Message: "poll later", Details: map[string]any{"retry_after_ms": float64(10 * time.Minute / time.Millisecond)}}
+}
+
+func TestTeardownWaitRenewsThroughClaimBackoff(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		l, kube, _, control := fixture()
+		boundary, nodes := boundaryFixture()
+		node, err := nodes.CoreV1().Nodes().Get(t.Context(), "node", metav1.GetOptions{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err = kube.Tracker().Add(node); err != nil {
+			t.Fatal(err)
+		}
+		boundary.Kube, l.Boundary = kube, boundary
+		l.Config.MemoryCeiling = 16 << 30
+		leased := &leasedControl{controlFake: control, expires: map[capability.LeaseRef]time.Time{}}
+		l.Control, l.Poll = leased, 5*time.Second
+		predecessor := *control.award
+		predecessor.CPUCores, predecessor.Memory = 2, match.CloudSizeMemoryBytes(2)
+		if _, err = l.launch(t.Context(), &predecessor); err != nil {
+			t.Fatal(err)
+		}
+		job, err := kube.BatchV1().Jobs("cloud").Get(t.Context(), jobName(predecessor.Binding), metav1.GetOptions{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		pod := &corev1.Pod{ObjectMeta: *job.Spec.Template.ObjectMeta.DeepCopy(), Spec: *job.Spec.Template.Spec.DeepCopy()}
+		pod.Name, pod.Namespace, pod.UID = "predecessor", "cloud", "predecessor-pod"
+		pod.OwnerReferences = []metav1.OwnerReference{{APIVersion: "batch/v1", Kind: "Job", Name: job.Name, UID: job.UID, Controller: ptr(true)}}
+		pod.Status.Phase = corev1.PodRunning
+		if _, err = kube.CoreV1().Pods("cloud").Create(t.Context(), pod, metav1.CreateOptions{}); err != nil {
+			t.Fatal(err)
+		}
+		control.remove = true
+		if err = l.Sync(t.Context()); err != nil {
+			t.Fatal(err)
+		}
+		control.remove = false
+		successor := predecessor
+		successor.Binding.UnitID, successor.Binding.NodeID = "successor", "successor"
+		control.award = &successor
+		if _, err = l.launch(t.Context(), &successor); !errors.Is(err, ErrNoDedicatedNode) {
+			t.Fatalf("pending teardown: %v", err)
+		}
+		ctx, cancel := context.WithCancel(t.Context())
+		done := make(chan error)
+		go func() { done <- l.Run(ctx) }()
+		time.Sleep(15 * time.Second)
+		if err = kube.CoreV1().Pods("cloud").Delete(t.Context(), pod.Name, metav1.DeleteOptions{}); err != nil {
+			t.Fatal(err)
+		}
+		time.Sleep(2 * time.Minute)
+		cancel()
+		if err = <-done; err != nil {
+			t.Fatal(err)
+		}
+		leased.mu.Lock()
+		defer leased.mu.Unlock()
+		if leased.lapsed || leased.claimed != 1 {
+			t.Fatalf("lapsed=%v claims=%d, want renewal through one long claim backoff", leased.lapsed, leased.claimed)
+		}
+		next, err := kube.BatchV1().Jobs("cloud").Get(t.Context(), jobName(successor.Binding), metav1.GetOptions{})
+		if err != nil {
+			t.Fatalf("successor was not placed during claim backoff: %v", err)
+		}
+		if _, reservation, err := jobOwnership(*next); err != nil || reservation.NodeUID != string(node.UID) {
+			t.Fatalf("successor lost original node: %+v, %v", reservation, err)
+		}
+	})
 }
