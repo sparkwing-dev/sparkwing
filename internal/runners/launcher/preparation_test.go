@@ -179,7 +179,6 @@ func TestPreparationRenewalIgnoresPersistentRetirementFailure(t *testing.T) {
 		if retirementCalls != 0 {
 			t.Fatalf("preparation queried retirement %d times", retirementCalls)
 		}
-		// Existing Job reconciliation still runs on preparation renewal.
 		listed := false
 		for _, action := range kube.Actions() {
 			listed = listed || action.GetVerb() == "list" && action.GetResource().Resource == "jobs"

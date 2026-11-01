@@ -275,7 +275,6 @@ func TestSpentNodeQueriesEachRunOnceAndCachesNonTerminal(t *testing.T) {
 		if _, err = boundary.Karpenter.Resource(nodeClaims).Get(t.Context(), "claim", metav1.GetOptions{}); !apierrors.IsNotFound(err) {
 			t.Fatalf("terminal run retained its empty node: %v", err)
 		}
-		// A failed lookup is retried next pass, but still only once for that run.
 		counted.terminal, counted.err = false, errors.New("unavailable")
 		for want := 3; want <= 4; want++ {
 			if err = l.Sync(t.Context()); err != nil {
