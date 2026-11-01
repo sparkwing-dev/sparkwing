@@ -72,6 +72,8 @@ type metricsPage struct {
 	NextCursor string         `json:"next_cursor,omitempty"`
 }
 
+var errCloudMetricsUnavailable = &apierr.Error{Code: apierr.Unavailable, Message: "metrics unavailable on Cloud runners: no resource samples were recorded for this job"}
+
 func metricsPageRequest(r *http.Request) (after time.Time, limit int, err error) {
 	limit = defaultMetricPage
 	if raw := r.URL.Query().Get("limit"); raw != "" {
@@ -134,7 +136,7 @@ func (s *Server) handleGetJobMetrics(w http.ResponseWriter, r *http.Request, a c
 			for _, attempt := range view.Attempts {
 				if attempt.Identity.NodeID == a.Target.NodeID && attempt.Identity.Attempt == int64(node.Attempt) && attempt.ExecutorLocation == "cloud" {
 					// hack: bypass policy redaction because this fixed 5xx explanation contains no private data.
-					return apierr.WriteHTTP(w, &apierr.Error{Code: apierr.Unavailable, Message: "metrics unavailable on Cloud runners: no resource samples were recorded for this job"})
+					return apierr.WriteHTTP(w, errCloudMetricsUnavailable)
 				}
 			}
 		}
