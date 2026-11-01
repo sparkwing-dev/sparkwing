@@ -93,7 +93,7 @@ available cgroup enforcement are separate controls. See
 ## Cloud boundary
 
 Every Cloud plan, eval and work Job runs as root of its own user namespace,
-with a DinD daemon that is root only there, so Job code holds no node root. A team-dedicated node serves one run:
+with a DinD daemon that is root only there, so Job code holds no node root. A node is permanently bound to one team and run:
 later Jobs of that run may reuse it warm, and no other run, of the same team
 or another, ever uses it.
 

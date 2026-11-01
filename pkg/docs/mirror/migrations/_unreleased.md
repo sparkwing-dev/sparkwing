@@ -112,3 +112,25 @@ must own the invited address.
 The unreleased schema baseline remains 28 and removes
 `signup_gate.free_team_members`. Recreate pre-release stores with the updated
 baseline using the instructions above.
+
+## Shared Cloud capacity
+
+Replace per-team NodePools with one shared NodePool per requested vCPU class and
+deployment. Retire the old pools only after their runs finish and their nodes
+are empty. Keep their permanent used-team and used-run labels until Karpenter
+removes the nodes. Never relabel a used node into a shared pool.
+
+Shared templates set `node-restriction.kubernetes.io/sparkwing-cloud-class` to
+the requested vCPU class, `sparkwing.dev/launcher-namespace` to the Cloud Job
+namespace and `sparkwing.dev/warm-namespace` to the trusted warm Deployment
+namespace. They use `sparkwing.dev/dedicated=true:NoSchedule` instead of the
+team taint. Pool templates carry no protected team label. The launcher binds
+that exact label and permanent team/run fences at first reservation.
+
+Use the [shared pool example](../../charts/sparkwing-full/examples/shared-nodepool.yaml).
+The [infrastructure proposal](../../design/rewrite/proposals/shared-cloud-capacity.md)
+contains exact production and staging manifest replacements. Apply the launcher,
+admission and pool changes together. Operator setting `cloud_upsize_enabled`
+defaults to true and controls use of an idle warm node one class larger. Billing
+and CPU/memory limits retain the requested class. No deployment is performed by
+this repository change.

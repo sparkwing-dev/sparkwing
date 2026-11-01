@@ -196,58 +196,53 @@ The example references an existing `sparkwing-tls` certificate Secret.
 ## Cloud node and network prerequisites
 
 The launcher runs on infrastructure nodes with its own Kubernetes identity. Job
-code runs as UID 1000 in a user-namespaced Pod whose DinD sidecar is root only
+code runs in a user-namespaced Pod whose DinD sidecar is root only
 inside that namespace, under `sparkwing-customer-job`,
 which has no API token or cloud annotations. Do not attach an IRSA role or create
 a Pod Identity association for this account. Customer Pods with AWS credential
 injections are rejected. Each Job carries `karpenter.sh/do-not-disrupt: "true"`. Jobs tolerate
-`sparkwing.dev/cpu-band:NoSchedule`, including the existing `small` band, and keep
+`sparkwing.dev/dedicated=true:NoSchedule`, and keep
 the fixed aggregate 20 GiB scratch budget including DinD.
 
-The existing Karpenter NodePool `sparkwing-jobs-small` needs all of the following:
+Each deployment needs one shared Karpenter NodePool per hardware class:
 
-- Each team's nodes have `node-restriction.kubernetes.io/sparkwing-team-node` equal to the `node_label_value` from
-  `sparkwing operator teams show --team <team> --job-namespace <launcher job namespace> -o json`:
-  `sha256-` plus the first 40 lowercase hex characters of SHA-256 of
-  `<job namespace>/<team slug>` (for example `sparkwing-cloud-jobs/qa-team`).
-  The job namespace is unique to one deployment, so two deployments on one
-  cluster with the same team slug never select or tolerate each other's nodes.
-  Name each pool after the deployment as well as the team.
-  A presence-only label or a shared `small` value cannot establish team ownership.
-- Set that exact value in the team's NodePool template metadata labels and in a
-  `node-restriction.kubernetes.io/sparkwing-team-node=<hash>:NoSchedule` taint. Retain the existing
-  `sparkwing.dev/cpu-band=small:NoSchedule` taint. Start from
-  [the team NodePool example](examples/team-nodepool.yaml). Provision one
-  isolated node per concurrent Job. Enable Node authorizer and NodeRestriction.
-  Reservation checks the node's owning NodeClaim, its node name/provider identity,
-  and its NodePool UID and template label. A protected first-use label permanently
-  binds the node to one team. Clearing a reservation retains that label.
-  A rejected Pod cordons the node and deletes its exact NodeClaim. With no vacant
-  Ready team node, the launcher uses NodePool `get` and `list` access to check
-  for a matching template label and taint. No compatible pool ends the unit as
-  `cloud_capacity_unconfigured`, releases its credit hold and gives the customer
-  support@sparkwing.dev plus the run ID as a support reference. Provision the
-  pool and trigger a new run. A scaling or exhausted pool keeps waiting with
-  “Waiting for dedicated Cloud capacity” and elapsed time in run status.
-  With a compatible pool, the launcher holds the award and creates an unbound
-  `sw-capacity-*` Pod sized to the award, with the team node selector and the job
-  tolerations and no credentials, so Karpenter adds a node from the team's pool.
-  The request stays on the node until the award reserves it, and is deleted when
-  the award ends. Set the team NodePool's `disruption` to
-  `consolidationPolicy: WhenEmpty` with `consolidateAfter: 10m`; it must exceed
-  the 3-minute award lease, the longest a node can sit empty after a launcher
-  restart before its unit is re-awarded. Cap cost with the NodePool `limits`.
+- Set `node-restriction.kubernetes.io/sparkwing-cloud-class` to the requested
+  vCPU class, such as `"2"`, and `sparkwing.dev/launcher-namespace` to the
+  launcher's Cloud Job namespace. Set `sparkwing.dev/warm-namespace` to the
+  trusted release namespace holding warm Deployments. Add `sparkwing.dev/dedicated=true:NoSchedule`.
+  Start from [the shared NodePool example](examples/shared-nodepool.yaml).
+  Keep team labels and team taints out of pool templates. Team creation requires
+  no infrastructure change.
+- Enable Node authorizer and NodeRestriction. The launcher proves the node's
+  NodeClaim UID, node name/provider identity, owning NodePool UID, and matching
+  shared class/deployment labels and dedicated taint. A first reservation binds
+  the exact protected team label and permanent used-team and used-run labels.
+  Clearing a reservation keeps all three. Used nodes never move to another
+  team or run. Jobs of the same run may share their node.
+- With no vacant Ready node, the launcher creates an unbound `sw-capacity-*` Pod
+  selecting only the requested class and deployment. Its resources remain the
+  award's resources. Karpenter supplies a node from the shared pool, which the
+  launcher then binds. The request remains until reservation or award cleanup.
+  A missing class pool ends the unit as `cloud_capacity_unconfigured` and
+  refunds the unstarted credit hold. Scaling or exhaustion keeps waiting.
+- Use `consolidationPolicy: WhenEmpty` and `consolidateAfter: 10m`, longer than
+  the 3-minute award lease, so a node survives a launcher restart until its
+  unit is re-awarded. Cap fleet cost with NodePool `limits`.
+- Low-priority placeholder Deployments hold warm nodes. Upsizing takes only an
+  idle warm node one class larger to avoid a cold start. Operator setting
+  `cloud_upsize_enabled` defaults to true. Billing and cgroup limits retain the
+  requested class, and cold requests never ask for a larger node.
 - Nodes need the awarded CPU/memory plus system overhead and at least 20 GiB of
   allocatable ephemeral storage. The example's ceilings are 2 CPU and 8 GiB.
 - The cluster must support native sidecars, `PodLevelResources` and
   `admissionregistration.k8s.io/v1` ValidatingAdmissionPolicy (Kubernetes 1.30+).
-- Job and team nodes run AL2023 (containerd 2.1 or later) with the kubelet's
+- Cloud nodes run AL2023 (containerd 2.1 or later) with the kubelet's
   `userNamespaces.idsPerPod` at 262144 and runc's `cgroup_writable = true`,
   set through a nodeadm NodeConfig. idsPerPod must be a power of two when the
   kubelet has no subuid entry. Without writable cgroups dockerd cannot create
   container cgroups. Bottlerocket exposes no `cgroup_writable` setting, so it
   cannot run Cloud Jobs.
-- Install the chart's `files/seccomp/sparkwing-dind.json` on every job and team
+- Install the chart's `files/seccomp/sparkwing-dind.json` on every Cloud
   node at `/var/lib/kubelet/seccomp/profiles/sparkwing-dind.json`. The Docker
   sidecar names it as a Localhost profile, so a node without it cannot start
   Job Pods. It is Docker's default profile with the `CAP_SYS_ADMIN` and

@@ -22,6 +22,9 @@ unlock.
 
 ### Changed
 
+- **Cloud (Breaking):** Replace per-team Karpenter NodePools with one shared pool per requested hardware class and deployment
+  Nodes receive their permanent team/run binding at first reservation and never move between runs. Pools use protected class/deployment provenance and a generic dedicated taint. Idle warm nodes may serve jobs one class smaller with requested billing and cgroup limits, controlled by `cloud_upsize_enabled` (default true). Schema 28 records requested/granted class, fresh-capacity waits and claim-to-start latency per job. Follow the [shared-capacity migration](docs/migrations/_unreleased.md#shared-cloud-capacity).
+
 - **scaffold:** `const FallbackSDKVersion` pins v0.68.2, so a fresh scaffold compiles against that release.
 - **controller (Breaking):** List endpoints that returned whole collections now return cursor pages of 50 records by default, up to 200 per request
   Follow `next_cursor` while `truncated` is true. CLI and console callers fetch subsequent pages. Raw-array lists now use named collection envelopes.

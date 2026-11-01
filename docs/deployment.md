@@ -52,40 +52,48 @@ checkout and is refused at intake when one is absent. The CLI's
 `pipeline trigger --working-tree` prepares the remote snapshot automatically.
 Sparkwing Cloud uses the launcher for plan, evaluation and work Jobs. Every Job
 runs a rootful DinD sidecar inside its user-namespaced pod, never privileged and
-with namespaced capabilities only, on a team-dedicated node, with
+with namespaced capabilities only, on a node bound to one team and run, with
 fixed 20 GiB aggregate scratch. Jobs keep their exact team-node reservation,
-tolerate the CPU-band taint and carry `karpenter.sh/do-not-disrupt`.
+tolerate the generic dedicated taint and carry `karpenter.sh/do-not-disrupt`.
 The launcher's Kubernetes identity is separate from the customer Job identity.
 Jobs exchange a one-use bootstrap Secret for an in-memory awarded capability.
 
 The [Cloud chart](../charts/sparkwing-full/README.md) documents its values and
-node/network prerequisites. Team-node labels hash the Cloud Job namespace with the team slug.
-When a team has no vacant Ready node, the launcher lists NodePools read-only. A
-compatible pool has the exact protected team label and `NoSchedule` taint in
-its template and permits the job's Linux hardware class. Explicit instance CPU
-or memory bounds that exclude the award make a pool incompatible. Unknown
-instance availability keeps waiting. Pool readiness, limits and provider
-availability do not determine whether capacity is configured. With a compatible
-pool, the launcher holds the award and creates
-an unbound, award-sized capacity-request Pod that only the team's NodePool can
-satisfy, so Karpenter adds a node that the held award then reserves. Run status
-shows “Waiting for dedicated Cloud capacity” with elapsed time until activation.
+node/network prerequisites. Configure one shared Karpenter NodePool per hardware
+class and deployment. Its template carries
+`node-restriction.kubernetes.io/sparkwing-cloud-class=<cores>` and
+`sparkwing.dev/launcher-namespace=<Cloud Job namespace>`, plus `sparkwing.dev/warm-namespace=<trusted warm namespace>` and the generic
+`sparkwing.dev/dedicated=true:NoSchedule` taint. Team creation needs no NodePool
+change. The launcher binds a never-used node to the exact protected team value
+and run when it reserves it. Permanent used-team and used-run fences prevent
+reuse across runs, including child runs. Later jobs of the same run may share
+its node.
+
+When no vacant Ready node fits, the launcher checks shared-pool provenance with
+read-only NodePool access. A compatible pool that is scaling or exhausted keeps
+the award pending. An unbound, award-sized capacity-request Pod selects the
+requested class and deployment so Karpenter can add a node. Run status shows
+“Waiting for dedicated Cloud capacity” with elapsed time until activation.
 The launcher renews held awards during that wait, preserving the plan generation
 through placement retries and claim backoff. Losing the launcher owner allows
 the lease to expire and the controller to requeue the plan.
 The initial credit reservation is a hold. Usage billing begins with execution.
 Users can cancel while waiting.
 
-When no compatible pool exists, the unit ends with reason
-`cloud_capacity_unconfigured` and “Cloud capacity is not configured for this
-team. Contact support@sparkwing.dev”, plus the run ID as a support reference.
-The controller releases the unstarted credit reservation in the terminal
-transaction, and the launcher deletes the capacity-request Pod. Its operator
-log names the protected team label value to configure. Pool-list failures keep
-the award pending for retry. Provision the team pool and trigger a new run. Team
-NodePools need `consolidateAfter` above the 3-minute award lease. Self-hosted runner pools use `runner.repos`,
-`runner.alsoClaimTriggers` and pool scheduling values. They claim through HTTP
-and need no Kubernetes API token.
+Missing shared capacity for the requested class ends the unit with
+`cloud_capacity_unconfigured`, releases its unstarted credit hold, and gives
+support@sparkwing.dev plus the run ID as a support reference. Configure that
+class's shared pool and trigger a new run. Pool-list failures retry. NodePools
+need `consolidateAfter` above the 3-minute award lease.
+
+Low-priority placeholder Deployments hold never-used warm nodes. Operator setting
+`cloud_upsize_enabled` defaults to true. Only to avoid a cold start, the launcher
+may use an idle warm node one class above the requested class when no requested
+class warm node is free. The job keeps its requested billing class and CPU and
+memory cgroup limits. A cold capacity request always asks for the requested class.
+
+Self-hosted runner pools use `runner.repos`, `runner.alsoClaimTriggers` and pool
+scheduling values. They claim through HTTP and need no Kubernetes API token.
 
 The runner does not care which cluster it lives in. The same pipeline
 binary runs everywhere - the only differences are the controller URL and

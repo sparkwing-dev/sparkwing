@@ -41,19 +41,25 @@ response cannot recover the one-time credential.
 
 Use `sparkwing operator teams show --team support-test --job-namespace sparkwing-cloud-jobs --profile deployment -o json`
 to read the team identity and its protected node label key and value. The value
-hashes the launcher's Cloud Job namespace with the team slug, so each deployment
-on a shared cluster has its own team nodes. Apply that
-value to the team's NodePool template label and `NoSchedule` taint before
-Cloud work is admitted. The launcher has read-only NodePool `get` and `list`
-access. It creates no pools. Without a compatible team pool, a held award ends
-as `cloud_capacity_unconfigured`, releases its unstarted credit hold, and gives
-the customer support@sparkwing.dev and the run ID as a support reference.
-The operator log names the protected label value to configure. A compatible
-pool that is scaling or exhausted keeps the award pending, with “Waiting for
+hashes the launcher's Cloud Job namespace with the team slug. The launcher sets
+that exact team value when it reserves a never-used node, together with permanent
+used-team and used-run fences. It never moves a used node to another team or run.
+Jobs of the same run may share the node.
+
+Cloud capacity uses one shared NodePool per hardware class and deployment. Its
+template identifies the class and Cloud Job namespace and carries the generic
+`sparkwing.dev/dedicated=true:NoSchedule` taint. The launcher verifies the node,
+NodeClaim and shared NodePool provenance before binding the team. It has read-only
+NodePool `get` and `list` access and creates no pools. Team creation requires no
+infrastructure change. Without a shared pool for the requested class, a held
+award ends as `cloud_capacity_unconfigured`, releases its unstarted credit hold,
+and gives the customer support@sparkwing.dev and the run ID as a support reference.
+Scaling or exhausted shared pools keep the award pending, with “Waiting for
 dedicated Cloud capacity” and elapsed time in run status.
-The underlying
-`GET /api/v1/operator/teams/{team}` returns team ID and display name to deployment
-credentials. Financial and console details remain restricted to console sessions.
+
+The underlying `GET /api/v1/operator/teams/{team}` returns team ID and display
+name to deployment credentials. Financial and console details remain restricted
+to console sessions.
 
 This is the Cloud operations, support and test-environment path. Local mode
 uses its default team and OS-verified socket. Self-hosted controller onboarding
@@ -593,8 +599,7 @@ ancestry, including the nearest here award.
 
 Same-uid pipeline code may still reach a runner's credential. A private pipe or
 filtered environment does not isolate hostile processes sharing an OS account.
-Cloud jobs run rootful Docker inside a user-namespaced pod on team-dedicated
-nodes, never privileged. Those are
+Cloud jobs run rootful Docker inside a user-namespaced pod on nodes bound to one team and run, never privileged. Those are
 accepted deployment boundaries, separate from the claim's API authority.
 
 A pod bootstrap has only source-read and exchange authority. A bootstrap-specific

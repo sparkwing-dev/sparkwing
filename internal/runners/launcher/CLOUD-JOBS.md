@@ -9,8 +9,7 @@ real store. Its transport invokes the handlers without sockets. The embedded
 local queue has no launcher adapter. The controller uses the transactional launcher sync reader.
 
 `BuildJob` builds plan, eval and work Jobs from an awarded binding. It checks
-images, resources, deadlines and engine identity before reserving an exclusive
-team node. `CloudBoundary` must return a matching placement.
+images, resources, deadlines and engine identity before reserving a node bound to one team and run. `CloudBoundary` must return a matching placement.
 A failed boundary check releases its reservation and returns no runnable object.
 Plan awards have no job or expansion source. Eval awards identify the terminal
 source job and generation, while work awards have no expansion source. The
@@ -97,9 +96,11 @@ digests are CEL literals.
   holds no more than the Job's own.
 - The service account is `sparkwing-customer-job` with
   `automountServiceAccountToken: false`.
-- Every Pod selects `node-restriction.kubernetes.io/sparkwing-team-node` equal
-  to its `sparkwing.dev/team` label and tolerates that team taint. Job Pods are
-  bound to a node; capacity requests are not.
+- Every Pod selects the shared hardware class and launcher namespace labels.
+  Job Pods additionally select `node-restriction.kubernetes.io/sparkwing-team-node`
+  equal to their `sparkwing.dev/team` label and bind a reserved node. Capacity
+  requests omit the team selector and remain unbound. Both tolerate only the
+  generic dedicated taint and the launcher's reservation taint where applicable.
 - Labels are limited to the launcher's keys for each shape, and Job and capacity
   Pods carry the labels that select the default-deny egress policy. Job Pods
   may also carry `topology.kubernetes.io/region` and
@@ -559,35 +560,36 @@ reconciliation of other live Jobs.
 ## Capacity requests
 
 Job pods are pre-bound to a reserved node and never pend, so they cannot make
-Karpenter add one. When reservation finds no vacant Ready team node, the
-launcher reads NodePool templates before requesting capacity. A compatible
-pool carries the exact protected team label and `NoSchedule` taint and permits
-Linux Cloud jobs. Readiness, limits, provider availability and deleting pools
-are not evidence of missing configuration. A failed list retries without
-ending the award. No compatible pool terminally reports
-`cloud_capacity_unconfigured` through the fenced launcher sync. The controller
-releases the unstarted credit reservation in the same transaction. The launcher
-deletes any demand Pod and logs the protected team label value and run ID.
-The customer sees “Cloud capacity is not configured for this team. Contact
-support@sparkwing.dev” with that run ID as a support reference.
+Karpenter add one. When reservation finds no vacant Ready node, the launcher
+reads shared NodePool templates. A compatible pool carries
+`node-restriction.kubernetes.io/sparkwing-cloud-class=<requested cores>`,
+`sparkwing.dev/launcher-namespace=<job namespace>` and the generic
+`sparkwing.dev/dedicated=true:NoSchedule` taint, and permits Linux Cloud jobs.
+Readiness, limits, provider availability and deleting pools do not prove missing
+configuration. A failed list retries. No compatible pool for the requested
+class terminally reports `cloud_capacity_unconfigured` through the fenced
+launcher sync. The controller releases the unstarted credit reservation in the
+same transaction. The launcher deletes demand and logs the requested class and
+run ID. Customer guidance names support@sparkwing.dev and the run reference.
 
-With a compatible pool, the launcher keeps the award and creates `sw-capacity-<award hash>`: an unbound Pod
-with the team node selector, the job tolerations, the award's CPU, memory and
-scratch requests, the runner image running `sparkwing-runner version`, and no
-volumes, environment or service account token. The Pod records its unit fence
-and size in `sparkwing.dev/capacity-demand`, never the bootstrap credential.
+With a compatible pool, the launcher keeps the award and creates
+`sw-capacity-<award hash>`: an unbound Pod with the requested shared class and
+launcher namespace selectors, the generic dedicated toleration, the award's CPU,
+memory and scratch requests, the runner image running `sparkwing-runner version`,
+and no volumes, environment or service account token. The Pod records its unit
+fence and size in `sparkwing.dev/capacity-demand`, never the bootstrap credential.
 
 - The hash covers the award generation, so a re-award creates its own request
   and never rebinds or deletes another generation's. Only the same award adopts
   an existing request.
 - Admission enforces the request's shape. The launcher compares its award
-  fields (name, demand record, team placement, image and resources) with demand
+  fields (name, demand record, class/deployment placement, image and resources) with demand
   taken from outside the Pod: the award on create and adoption, the held award
   on every sync, and the controller's binding and committed allocation on every
   reconciliation. A mismatch or an unknown allocation deletes it, UID-fenced,
   and a held award requests again.
-- Each launcher pass retries held awards. Reservation may consume the team's
-  own requests on a node: it persists the reservation and its taint first, then
+- Each launcher pass retries held awards. Reservation may consume the launcher's
+  requests on a node: it persists the reservation and its taint first, then
   deletes them and waits for their removal before Job creation. The NodePool's
   consolidateAfter covers the empty gap.
 - Sync observes each request through its recorded award. Awards this launcher
@@ -614,7 +616,7 @@ it on the award before the launcher unsuspends the Job. Ordinary sync and orphan
 reservation cleanup cannot change this host. Box concurrency waits for this
 activation and uses only the sealed identity after bootstrap exchange.
 
-Team NodePools need `disruption: {consolidationPolicy: WhenEmpty,
+Shared NodePools need `disruption: {consolidationPolicy: WhenEmpty,
 consolidateAfter: 10m}` or longer, above the award lease, so a node emptied by
 a launcher restart survives until its unit is re-awarded.
 [W8-SCALE-FROM-ZERO.md](../../../design/rewrite/W8-SCALE-FROM-ZERO.md) records
@@ -622,19 +624,37 @@ the rationale.
 
 ## Team identity and credential rotation
 
-`node-restriction.kubernetes.io/sparkwing-team-node` is the placement label and
-team NoSchedule taint key. Enable Node authorizer and NodeRestriction. Reservation
-checks the node's owning NodeClaim UID, status node name and provider ID, plus
-that claim's owning NodePool UID and protected template label. Both must match
-the award's team value. Two more protected labels,
-`node-restriction.kubernetes.io/sparkwing-used-team` and
-`node-restriction.kubernetes.io/sparkwing-used-run`, record first use and are
-never cleared. A warm node is reused only by later jobs of the same run; a child
-run is another run and gets its own node. A node is reused only when its
-used-run label names the run, so a node with a used-team label and no used-run
-label is refused. Neither reservation cleanup nor a NodePool template change can move a
-used node to another team or run; Karpenter consolidation removes nodes a
-finished run leaves empty. No LimitRange read permission is needed.
+Enable Node authorizer and NodeRestriction. The shared-pool template sets the
+protected `node-restriction.kubernetes.io/sparkwing-cloud-class` label, the
+`sparkwing.dev/launcher-namespace` label and generic dedicated taint. It carries
+no team assignment. Reservation proves the node's owning NodeClaim UID, status
+node name and provider ID, plus the claim's owning NodePool UID and the matching
+class/deployment provenance. The launcher atomically binds a never-used node by
+setting its exact `node-restriction.kubernetes.io/sparkwing-team-node` value
+alongside permanent `node-restriction.kubernetes.io/sparkwing-used-team` and
+`node-restriction.kubernetes.io/sparkwing-used-run` fences.
+
+A used node is accepted only for that same team and run. Missing or conflicting
+fences fail closed. Jobs of one run may share the node, while a child run is a
+separate run. Reservation cleanup never clears or changes the team/run fences.
+Karpenter removes empty nodes after the consolidation delay. No LimitRange read
+permission is needed.
+
+Warm placeholder Deployments live in the trusted namespace recorded by
+`sparkwing.dev/warm-namespace` on the shared pool, NodeClaim and node. The launcher
+recognizes only `sparkwing.dev/warm-placeholder=true` Pods with negative priority,
+`priorityClassName: sparkwing-cloud-warm` and an apps/v1 ReplicaSet controller
+reference there. The warm namespace is trusted operator infrastructure. It reserves the node before deleting those placeholders.
+Unrelated Pods make the node unavailable.
+
+Operator setting `cloud_upsize_enabled` defaults to true. With no free warm node
+of the requested class, a job may take an idle, never-used warm node exactly one
+class larger to avoid a cold start. The class ladder is 2, 4, 8, 16, 32 and 64
+vCPU. Upsizing never launches a larger cold node or takes a used node. The job's
+CPU and memory cgroup limits and billing retain the requested class. Capacity
+requests retain that class too. Per-job store observations record requested and
+granted class, whether the award waited for fresh capacity, and claim-to-start
+latency for the warm-capacity controls.
 
 The launcher rereads its private agent-token file for every controller request.
 A missing, unreadable or empty rotated file fails the request. The launcher does
