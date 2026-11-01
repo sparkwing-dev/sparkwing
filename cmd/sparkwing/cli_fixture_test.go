@@ -105,8 +105,11 @@ func seededBundleOverlay(dir string) (string, error) {
 	return overlay, nil
 }
 
-var sdkFixtureDir string
-var sdkFixtureEnvironment = os.Environ()
+var (
+	sdkFixtureDir                 string
+	sdkFixtureEnvironment         = os.Environ()
+	sdkFixtureGo, sdkFixtureGoErr = exec.LookPath("go")
+)
 
 // perf: hash only the SDK's build inputs, and let installer re-execs reuse its compiled fixtures.
 var sdkFixtureModule = sync.OnceValues(func() (string, error) {
@@ -114,12 +117,15 @@ var sdkFixtureModule = sync.OnceValues(func() (string, error) {
 	if err != nil {
 		return "", err
 	}
+	if sdkFixtureGoErr != nil {
+		return "", sdkFixtureGoErr
+	}
 	sdkFixtureDir, err = os.MkdirTemp("", "sparkwing-sdk-fixtures-")
 	if err != nil {
 		return "", err
 	}
 	stage := filepath.Join(sdkFixtureDir, "sdk")
-	list := exec.Command(filepath.Join(runtime.GOROOT(), "bin", "go"), "list", "-deps", "-json", "./sparkwing/...")
+	list := exec.Command(sdkFixtureGo, "list", "-deps", "-json", "./sparkwing/...")
 	list.Dir, list.Env = root, sdkFixtureEnvironment
 	output, err := list.Output()
 	if err != nil {
@@ -187,12 +193,15 @@ func reuseSDKFixtureCache() error {
 	}
 	pin, err := engine.ReadPin(directory, engineid.GoSDK)
 	if err != nil || !filepath.IsAbs(pin.Replacement) {
-		return nil
+		return nil //nolint:nilerr // safety: the installer owns pin validation, including help without a module.
 	}
 	owner := filepath.Dir(pin.Replacement)
 	marker, err := os.ReadFile(filepath.Join(owner, "test-binary"))
-	if err != nil {
+	if errors.Is(err, os.ErrNotExist) {
 		return nil
+	}
+	if err != nil {
+		return err
 	}
 	binary, err := os.Executable()
 	if err != nil {
