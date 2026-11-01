@@ -41,6 +41,8 @@ type Server struct {
 	operatorCapabilities CapabilityManager
 	resolveTenant        func(context.Context, store.Team) (TenantHandle, error)
 	logger               *slog.Logger
+	healthMu             sync.Mutex
+	healthFailures       int
 
 	hostKeyScan       func(ctx context.Context, host string, port int) (ssh.PublicKey, error)
 	identityLinkLimit perMinuteLimiter
@@ -608,7 +610,12 @@ func withRequestLog(
 					cause = errors.New(http.StatusText(status))
 				}
 				level := slog.LevelError
-				if rw.clientCanceled() || errors.Is(cause, errCloudMetricsUnavailable) {
+				var healthFailure *healthDatabaseFailure
+				if rw.clientCanceled() {
+					level = slog.LevelInfo
+				} else if errors.As(cause, &healthFailure) {
+					level = healthFailure.level
+				} else if errors.Is(cause, errCloudMetricsUnavailable) {
 					level = slog.LevelInfo
 				}
 				logger.Log(ctx, level, "http request failed", "request_id", masker.Mask(rec.id), "method", r.Method, "route", rec.route, "status", status, "err", masker.Mask(cause.Error()))
@@ -653,9 +660,13 @@ func (r *statusRecorder) ResponseError(err error) {
 }
 
 func (r *statusRecorder) clientCanceled() bool {
+	return requestClientCanceled(r.ctx, r.cause)
+}
+
+func requestClientCanceled(ctx context.Context, cause error) bool {
 	// hack: pgx can replace a context error with ErrBadConn before sending a query.
-	return r.ctx != nil && errors.Is(r.ctx.Err(), context.Canceled) &&
-		(errors.Is(r.cause, context.Canceled) || errors.Is(r.cause, driver.ErrBadConn))
+	return ctx != nil && errors.Is(ctx.Err(), context.Canceled) &&
+		(errors.Is(cause, context.Canceled) || errors.Is(cause, driver.ErrBadConn))
 }
 
 func (r *statusRecorder) WriteHeader(code int) {

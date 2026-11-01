@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"log/slog"
 	"mime"
 	"net"
 	"net/http"
@@ -31,16 +32,51 @@ import (
 // secret rotation, bucket, storage, egress and GitHub App state describe the
 // deployment to anyone who asks, so they are on the operator health route.
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
-	if err := pingHealthDatabase(r.Context(), s.operator.Ping); err != nil {
-		apierr.NoteResponseError(w, fmt.Errorf("controller health database check: %w", err))
+	if err := s.healthDatabaseResult(r.Context(), pingHealthDatabase(r.Context(), s.operator.Ping)); err != nil {
+		apierr.NoteResponseError(w, err)
 		writeJSON(w, http.StatusServiceUnavailable, health.Response{Status: "degraded", Auth: "enabled", Problems: []string{"db: unavailable"}})
 		return
 	}
 	writeJSON(w, http.StatusOK, health.Response{Status: "ok", Auth: "enabled"})
 }
 
+const healthFailureThreshold = 12
+
+type healthDatabaseFailure struct {
+	cause error
+	level slog.Level
+}
+
+func (e *healthDatabaseFailure) Error() string {
+	return "controller health database check: " + e.cause.Error()
+}
+func (e *healthDatabaseFailure) Unwrap() error { return e.cause }
+
+func (s *Server) healthDatabaseResult(ctx context.Context, err error) error {
+	if requestClientCanceled(ctx, err) {
+		return fmt.Errorf("controller health database check: %w", err)
+	}
+	s.healthMu.Lock()
+	defer s.healthMu.Unlock()
+	if err == nil {
+		if s.healthFailures > 0 {
+			s.logger.InfoContext(ctx, "controller health database recovered")
+		}
+		s.healthFailures = 0
+		return nil
+	}
+	s.healthFailures = min(s.healthFailures+1, healthFailureThreshold+1)
+	level := slog.LevelWarn
+	if s.healthFailures == healthFailureThreshold {
+		level = slog.LevelError
+	} else if s.healthFailures > healthFailureThreshold {
+		level = slog.LevelDebug
+	}
+	return &healthDatabaseFailure{cause: err, level: level}
+}
+
 // safety: a failed DNS lookup or connection can recover before the next probe;
-// only an exhausted network retry should reach the request's ERROR diagnostic.
+// retry once before reporting the dependency as unavailable.
 func pingHealthDatabase(ctx context.Context, ping func(context.Context) error) error {
 	err := ping(ctx)
 	var networkError net.Error
