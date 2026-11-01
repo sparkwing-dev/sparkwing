@@ -312,7 +312,7 @@ go -C $W run ./internal/commentcheck -base origin/main .
 - `go build ./cmd/sparkwing` collides with the `sparkwing/` SDK directory; use
   `go build -o /dev/null ./cmd/...`.
 
-## Decision index (handoffs.md, decisions 26-72)
+## Decision index (handoffs.md, decisions 26-75)
 
 Earlier numbers and lead rulings sit above these in the same file. A later
 decision amends an earlier one where noted.
@@ -369,3 +369,4 @@ decision amends an earlier one where noted.
 - 2026-10-30: One sealed repository proof and host classification supersede consumer-specific trust rules.
 - 2026-10-31: Compare outages admit asserted App runs. Trust restrictions and unscoped personal enrollment are ratified. v0.68.3 resets stores to schema 28. The final production wipe follows the release cut and a clean staging grid.
 - 74: Teams have no member cap, regardless of funding or payment holds; remove the setting, invitation warning and acceptance refusal.
+- 75: Shared Cloud pools bind never-used nodes to one team/run; idle warm nodes may serve one class smaller at requested billing and limits. Warm placeholder authority stays in a dedicated namespace and pools pin the hardened EC2NodeClass.

@@ -20,10 +20,10 @@ unlock.
 
 ## [Unreleased]
 
-- **Cloud (Breaking):** Move warm placeholders and their Pod get/delete and ReplicaSet get Role into a dedicated warm namespace (`launcher.warmNamespace`, default `<release namespace>-cloud-warm`). Update pool warm-namespace labels and remove the old release-namespace warm Role and binding. Placeholders must be volume-free and owned by `sparkwing-cloud-warm-<vCPU>` through a verified ReplicaSet. `launcher.nodeClassName` / `launch --node-class` pins the hardened EC2NodeClass name (default `sparkwing-jobs`). Pools referencing a different class, group or kind are refused.
-
 ### Changed
 
+- **Cloud (Breaking):** Confine warm placeholder authority to a dedicated namespace
+  Move placeholders and their Pod get/delete and ReplicaSet get Role to `launcher.warmNamespace` (default `<release namespace>-cloud-warm`). Update pool warm-namespace labels and remove the old release-namespace warm Role and binding. Placeholders must be volume-free and owned by `sparkwing-cloud-warm-<vCPU>` through a verified ReplicaSet. `launcher.nodeClassName` / `launch --node-class` pins the hardened EC2NodeClass name (default `sparkwing-jobs`). Pools referencing a different class, group or kind are refused. Follow the [shared-capacity migration](docs/migrations/_unreleased.md#shared-cloud-capacity).
 - **Cloud (Breaking):** Replace per-team Karpenter NodePools with one shared pool per requested hardware class and deployment
   Nodes receive their permanent team/run binding at first reservation and never move between runs. Pools use protected class/deployment provenance and a generic dedicated taint. Idle warm nodes may serve jobs one class smaller with requested billing and cgroup limits, controlled by `cloud_upsize_enabled` (default true). Schema 28 records requested/granted class, fresh-capacity waits and claim-to-start latency per job. Follow the [shared-capacity migration](docs/migrations/_unreleased.md#shared-cloud-capacity).
 

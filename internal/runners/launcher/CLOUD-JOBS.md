@@ -171,10 +171,12 @@ ServiceAccount must have no role annotation or Pod Identity association.
 
 RBAC grants Pod and Job creation in the job namespace only to the launcher, and
 admission refuses any other creator. Customer ServiceAccounts receive no API
-credential or role. Team nodes carry a team-specific NoSchedule taint. Among
-workload Pods only Job Pods and that team's capacity requests tolerate it, but cluster DaemonSets such as `aws-node`, `ebs-csi-node` and
-`kube-proxy` tolerate every taint and run privileged on team nodes. They and
-Kubernetes administrators remain trusted.
+credential or role. Shared nodes carry the generic
+`sparkwing.dev/dedicated=true:NoSchedule` taint, tolerated by Job Pods, capacity
+requests and warm placeholders. Permanent protected team/run labels and the
+launcher's reservation enforce exclusive placement. Cluster DaemonSets such as
+`aws-node`, `ebs-csi-node` and `kube-proxy` tolerate every taint and run privileged
+on these nodes. They and Kubernetes administrators remain trusted.
 
 ## Node faults
 
