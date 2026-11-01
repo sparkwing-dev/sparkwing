@@ -151,7 +151,7 @@ func Registry() []Command {
 		}},
 		{Path: "sparkwing operator", Flags: []Flag{}},
 		{Path: "sparkwing operator teams", Authority: deploymentAdmin, Flags: []Flag{}},
-		{Path: "sparkwing operator teams show", Authority: deploymentAdmin, Rules: []string{"Show the team's protected node label and value for its NodePool template.", "The value is derived from the deployment's Cloud Job namespace and the team, so two deployments on one cluster never share a team's nodes."}, Flags: []Flag{
+		{Path: "sparkwing operator teams show", Authority: deploymentAdmin, Rules: []string{"Show the team's protected node label and value when binding shared Cloud capacity.", "The value is derived from the deployment's Cloud Job namespace and the team, so two deployments on one cluster never share a team's nodes."}, Flags: []Flag{
 			{Name: "team", Argument: "SLUG", Required: true},
 			{Name: "job-namespace", Argument: "NAMESPACE", Required: true},
 			{Name: "profile", Argument: "NAME"},
@@ -598,7 +598,7 @@ func Registry() []Command {
 			"Read the same public run detail through a controller profile or the local controller. Numeric run selectors are per-team numbers.",
 			"Views: summary, timeline, receipt, errors, tree. Summary includes recorded failing steps and errors for failed jobs. --steps includes all recorded steps. Receipts retain the controller's hashes and settled cost.",
 			"--follow streams observations until the run ends. Exit 0 means success or a completed dry run, 1 means a failed or cancelled run, 2 means invalid usage, 3 means the observation is incomplete and may be retried, and 4 means the run does not exist or the credential cannot read it, so polling again will not help. --exit-zero suppresses terminal failure only.",
-			"Cloud awards awaiting activation show \"Waiting for dedicated Cloud capacity\" with elapsed time. Missing team pool configuration ends the unit as cloud_capacity_unconfigured, releases its credit hold, and gives support@sparkwing.dev a run reference. JSON preserves run details and notices: one document per observation, so --follow and the errors view (one record per failed job) are NDJSON. The exit code carries the outcome, and no error document follows the observation. Plain summary prints the run status, every job's status and outcome, and failure details. Errors prints failed job IDs, tree prints run IDs, and receipt prints the receipt hash. --steps adds recorded steps to summary and tree output.",
+			"Cloud awards awaiting activation show \"Waiting for dedicated Cloud capacity\" with elapsed time. Missing shared pool configuration for the requested hardware class ends the unit as cloud_capacity_unconfigured, releases its credit hold, and gives support@sparkwing.dev a run reference. JSON preserves run details and notices: one document per observation, so --follow and the errors view (one record per failed job) are NDJSON. The exit code carries the outcome, and no error document follows the observation. Plain summary prints the run status, every job's status and outcome, and failure details. Errors prints failed job IDs, tree prints run IDs, and receipt prints the receipt hash. --steps adds recorded steps to summary and tree output.",
 		}, Flags: []Flag{
 			{Name: "run", Argument: "RUN_ID", Required: true},
 			{Name: "follow", Short: "f"},
@@ -836,6 +836,7 @@ func Registry() []Command {
 		{Path: "sparkwing-runner launch", Hidden: true, Rules: []string{"Every Cloud Job uses root plus DinD on its own team-dedicated node with enforced egress; fixed 20 GiB scratch has no flag."}, Flags: []Flag{
 			{Name: "controller", Argument: "URL", Required: true},
 			{Name: "namespace", Argument: "NAMESPACE"},
+			{Name: "node-class", Argument: "NAME", Meaning: "Expected hardened EC2NodeClass name (default sparkwing-jobs)"},
 			{Name: "stop-team", Argument: "TEAM", Repeatable: true, CommaList: true, Meaning: "Operator emergency stop for new claims and placement; configure every launcher"},
 			{Name: "image", Argument: "IMAGE", Required: true},
 			{Name: "label", Argument: "LABEL", Repeatable: true, CommaList: true, Meaning: "Observed pool label for claim matching"},

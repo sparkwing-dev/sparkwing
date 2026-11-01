@@ -18,12 +18,12 @@ import (
 	ktesting "k8s.io/client-go/testing"
 )
 
-func teamPool(value string) *unstructured.Unstructured {
+func sharedPool(namespace string) *unstructured.Unstructured {
 	return &unstructured.Unstructured{Object: map[string]any{
-		"apiVersion": "karpenter.sh/v1", "kind": "NodePool", "metadata": map[string]any{"name": "team-pool"},
+		"apiVersion": "karpenter.sh/v1", "kind": "NodePool", "metadata": map[string]any{"name": "shared-pool"},
 		"spec": map[string]any{"template": map[string]any{
-			"metadata": map[string]any{"labels": map[string]any{TeamNodeLabel: value}},
-			"spec":     map[string]any{"taints": []any{map[string]any{"key": TeamNodeLabel, "value": value, "effect": "NoSchedule"}}},
+			"metadata": map[string]any{"labels": map[string]any{CloudClassLabel: "4", PoolNamespaceLabel: namespace}},
+			"spec":     map[string]any{"nodeClassRef": map[string]any{"group": "karpenter.k8s.aws", "kind": "EC2NodeClass", "name": "sparkwing-jobs"}, "taints": []any{map[string]any{"key": DedicatedTaint, "value": "true", "effect": "NoSchedule"}}},
 		}},
 	}}
 }
@@ -33,44 +33,49 @@ func poolClient(objects ...runtime.Object) *dynamicfake.FakeDynamicClient {
 }
 
 func TestPoolConfigurationIgnoresScalingAndExhaustion(t *testing.T) {
-	value := TeamNodeValue("cloud", "team")
+	value := "cloud"
 	for _, test := range []struct {
 		name       string
 		pool       *unstructured.Unstructured
 		configured bool
 	}{
 		{"missing", nil, false},
-		{"another team", teamPool(TeamNodeValue("cloud", "other")), false},
-		{"another deployment", teamPool(TeamNodeValue("staging", "team")), false},
-		{"no nodes", teamPool(value), true},
+		{"another team", sharedPool("other"), false},
+		{"another deployment", sharedPool("staging"), false},
+		{"no nodes", sharedPool(value), true},
+		{"wrong node class", func() *unstructured.Unstructured {
+			p := sharedPool(value)
+			_ = unstructured.SetNestedField(p.Object, "unhardened", "spec", "template", "spec", "nodeClassRef", "name")
+			return p
+		}(), false},
 		{"wrong CPU class", func() *unstructured.Unstructured {
-			p := teamPool(value)
+			p := sharedPool(value)
 			_ = unstructured.SetNestedSlice(p.Object, []any{map[string]any{"key": "karpenter.k8s.aws/instance-cpu", "operator": "In", "values": []any{"2"}}}, "spec", "template", "spec", "requirements")
 			return p
 		}(), false},
 		{"larger CPU class", func() *unstructured.Unstructured {
-			p := teamPool(value)
+			p := sharedPool(value)
 			_ = unstructured.SetNestedSlice(p.Object, []any{map[string]any{"key": "karpenter.k8s.aws/instance-cpu", "operator": "In", "values": []any{"2", "8"}}}, "spec", "template", "spec", "requirements")
 			return p
 		}(), true},
 		{"wrong memory class", func() *unstructured.Unstructured {
-			p := teamPool(value)
+			p := sharedPool(value)
 			_ = unstructured.SetNestedSlice(p.Object, []any{map[string]any{"key": "karpenter.k8s.aws/instance-memory", "operator": "Lt", "values": []any{"8192"}}}, "spec", "template", "spec", "requirements")
 			return p
 		}(), false},
 		{"not ready and exhausted", func() *unstructured.Unstructured {
-			p := teamPool(value)
+			p := sharedPool(value)
 			p.Object["status"] = map[string]any{"conditions": []any{map[string]any{"type": "Ready", "status": "False"}}, "resources": map[string]any{"cpu": "8"}}
 			p.Object["spec"].(map[string]any)["limits"] = map[string]any{"cpu": "8"}
 			return p
 		}(), true},
 		{"no protected taint", func() *unstructured.Unstructured {
-			p := teamPool(value)
+			p := sharedPool(value)
 			unstructured.RemoveNestedField(p.Object, "spec", "template", "spec", "taints")
 			return p
 		}(), false},
 		{"other hardware OS", func() *unstructured.Unstructured {
-			p := teamPool(value)
+			p := sharedPool(value)
 			_ = unstructured.SetNestedSlice(p.Object, []any{map[string]any{"key": corev1.LabelOSStable, "operator": "In", "values": []any{"windows"}}}, "spec", "template", "spec", "requirements")
 			return p
 		}(), false},
@@ -80,8 +85,8 @@ func TestPoolConfigurationIgnoresScalingAndExhaustion(t *testing.T) {
 			if test.pool != nil {
 				objects = append(objects, test.pool)
 			}
-			b := &KubernetesBoundary{Namespace: "cloud", Karpenter: poolClient(objects...)}
-			got, err := b.CapacityConfigured(t.Context(), boundaryBinding("team"), corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("4"), corev1.ResourceMemory: resource.MustParse("8Gi")})
+			b := &KubernetesBoundary{Namespace: "cloud", NodeClassName: "sparkwing-jobs", Karpenter: poolClient(objects...)}
+			got, err := b.CapacityConfigured(t.Context(), corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("4"), corev1.ResourceMemory: resource.MustParse("8Gi")})
 			if err != nil || got != test.configured {
 				t.Fatalf("configured=%t err=%v", got, err)
 			}
@@ -94,14 +99,14 @@ type capacityBoundary struct {
 	pools *KubernetesBoundary
 }
 
-func (b capacityBoundary) CapacityConfigured(ctx context.Context, binding CloudJobBinding, budget corev1.ResourceList) (bool, error) {
-	return b.pools.CapacityConfigured(ctx, binding, budget)
+func (b capacityBoundary) CapacityConfigured(ctx context.Context, budget corev1.ResourceList) (bool, error) {
+	return b.pools.CapacityConfigured(ctx, budget)
 }
 
 func TestUnconfiguredTeamDeletesDemandAndReportsOnce(t *testing.T) {
 	l, kube, boundary, control := fixture()
 	boundary.reserveErr = ErrNoDedicatedNode
-	l.Boundary = capacityBoundary{CloudBoundary: boundary, pools: &KubernetesBoundary{Namespace: "cloud", Karpenter: poolClient()}}
+	l.Boundary = capacityBoundary{CloudBoundary: boundary, pools: &KubernetesBoundary{Namespace: "cloud", NodeClassName: "sparkwing-jobs", Karpenter: poolClient()}}
 	var logs bytes.Buffer
 	l.Logger = slog.New(slog.NewTextHandler(&logs, nil))
 	if err := l.requestCapacity(t.Context(), *control.award); err != nil {
@@ -130,16 +135,17 @@ func TestUnconfiguredTeamDeletesDemandAndReportsOnce(t *testing.T) {
 	if err != nil || len(jobs.Items) != 0 || len(capacityPods(t, kube)) != 0 || len(l.waitingAwards()) != 0 || failures != 1 {
 		t.Fatalf("terminal capacity cleanup: failures=%d jobs=%d err=%v", failures, len(jobs.Items), err)
 	}
-	if strings.Count(logs.String(), "node_label_value=") != 1 || !strings.Contains(logs.String(), TeamNodeValue("cloud", "team")) {
+	if strings.Count(logs.String(), "requested_class=") != 1 || !strings.Contains(logs.String(), "namespace=cloud") {
 		t.Fatalf("operator guidance: %s", logs.String())
 	}
 }
 
 func TestPoolLookupFailureWaitsThenPoolAndNodeAppear(t *testing.T) {
 	l, kube, boundary, control := fixture()
+	control.award.CPUCores = 4
 	boundary.reserveErr = ErrNoDedicatedNode
 	pools := poolClient()
-	l.Boundary = capacityBoundary{CloudBoundary: boundary, pools: &KubernetesBoundary{Namespace: "cloud", Karpenter: pools}}
+	l.Boundary = capacityBoundary{CloudBoundary: boundary, pools: &KubernetesBoundary{Namespace: "cloud", NodeClassName: "sparkwing-jobs", Karpenter: pools}}
 	uncertain := true
 	pools.PrependReactor("list", "nodepools", func(ktesting.Action) (bool, runtime.Object, error) {
 		if uncertain {
@@ -154,7 +160,7 @@ func TestPoolLookupFailureWaitsThenPoolAndNodeAppear(t *testing.T) {
 		t.Fatal("uncertain diagnosis discarded award")
 	}
 	control.award = nil
-	if _, err := pools.Resource(nodePools).Create(t.Context(), teamPool(TeamNodeValue("cloud", "team")), metav1.CreateOptions{}); err != nil {
+	if _, err := pools.Resource(nodePools).Create(t.Context(), sharedPool("cloud"), metav1.CreateOptions{}); err != nil {
 		t.Fatal(err)
 	}
 	uncertain = false

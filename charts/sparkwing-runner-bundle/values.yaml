@@ -47,6 +47,9 @@ launcher:
   # when empty. Its admission policies admit only launcher-created Pods and Jobs.
   # Keep other NetworkPolicies and Pod Security labels out of it.
   jobNamespace: ""
+  # Separate namespace for volume-free warm placeholders. Defaults to <release namespace>-cloud-warm.
+  warmNamespace: ""
+  nodeClassName: sparkwing-jobs
   # The chart owns the job namespace. Disable only when the namespace is
   # created elsewhere with privileged Pod Security and nothing else in it.
   createNamespace: true

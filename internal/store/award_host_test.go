@@ -121,7 +121,7 @@ func testLauncherSealedBox(t *testing.T, kind capability.UnitKind) {
 	observation := capability.LauncherObservation{
 		Award: capability.LeaseRef{Kind: claim.Kind, ID: unitID, Generation: int64(claim.Award.Generation), Holder: claim.Award.Holder},
 	}
-	activation := capability.LauncherActivation{Award: observation.Award, NodeUID: "node-uid", ReservationID: "reservation"}
+	activation := capability.LauncherActivation{Award: observation.Award, NodeUID: "node-uid", ReservationID: "reservation", Capacity: &capability.CloudCapacityGrant{RequestedClass: "sparkwing-2cpu", GrantedClass: "sparkwing-2cpu"}}
 	for _, reservation := range []bool{false, true} {
 		observed := observation
 		observed.Reservation = reservation

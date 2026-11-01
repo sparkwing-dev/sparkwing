@@ -26,17 +26,17 @@ type cloudBoundaryFake struct {
 	released  int
 }
 
-func (*cloudBoundaryFake) CapacityConfigured(context.Context, launcher.CloudJobBinding, corev1.ResourceList) (bool, error) {
+func (*cloudBoundaryFake) CapacityConfigured(context.Context, corev1.ResourceList) (bool, error) {
 	return true, nil
 }
 
-func (b *cloudBoundaryFake) Reserve(_ context.Context, binding launcher.CloudJobBinding, name string) (launcher.CloudNodeReservation, error) {
+func (b *cloudBoundaryFake) Reserve(_ context.Context, binding launcher.CloudJobBinding, name string, placement launcher.CloudPlacement) (launcher.CloudNodeReservation, error) {
 	b.reserved++
 	team := binding.Team
 	if b.wrongTeam {
 		team = "other-team"
 	}
-	return launcher.CloudNodeReservation{NodeName: "node", NodeUID: "uid", Team: team, JobName: name, ReservationID: "reservation", Award: binding.LeaseRef()}, nil
+	return launcher.CloudNodeReservation{RequestedClass: placement.RequestedClass, GrantedClass: placement.RequestedClass, WaitedForFreshNode: placement.WaitedForFreshNode, NodeName: "node", NodeUID: "uid", Team: team, JobName: name, ReservationID: "reservation", Award: binding.LeaseRef()}, nil
 }
 
 func (b *cloudBoundaryFake) Release(context.Context, launcher.CloudNodeReservation) error {
@@ -48,7 +48,7 @@ func cloudFixture(kind launcher.CloudUnitKind) (time.Time, launcher.CloudJobConf
 	now := time.Date(2030, 1, 1, 0, 0, 0, 0, time.UTC)
 	image := "registry/runner@sha256:" + strings.Repeat("a", 64)
 	cfg := launcher.CloudJobConfig{Namespace: "cloud", RunnerImage: image, DockerImage: image, ControllerURL: "https://controller.example", CPUCeiling: 4, MemoryCeiling: 8 << 30}
-	award := launcher.CloudJobAward{LeaseExpiresAt: now.Add(10 * time.Minute), Binding: launcher.CloudJobBinding{UnitID: "unit", Kind: kind, Team: "team", RunID: "run", NodeID: "job", Holder: "holder", Generation: 1, Attempt: 1, OwnerDeadline: now.Add(time.Hour), AttemptDeadline: now.Add(10 * time.Minute), ParentCapabilityExpiry: now.Add(45 * time.Minute)}, Bootstrap: []byte("secret-bootstrap-value"), CPUCores: 1.5, Memory: 2 << 30}
+	award := launcher.CloudJobAward{LeaseExpiresAt: now.Add(10 * time.Minute), Binding: launcher.CloudJobBinding{UnitID: "unit", Kind: kind, Team: "team", RunID: "run", NodeID: "job", Holder: "holder", Generation: 1, Attempt: 1, OwnerDeadline: now.Add(time.Hour), AttemptDeadline: now.Add(10 * time.Minute), ParentCapabilityExpiry: now.Add(45 * time.Minute)}, Bootstrap: []byte("secret-bootstrap-value"), CPUCores: 2, Memory: 2 << 30}
 	if kind != launcher.CloudPlan {
 		award.Engine = &engineid.Identity{Pin: engineid.Pin{SDK: engineid.GoSDK, Version: "v1.2.3", InputsDigest: strings.Repeat("c", 64)}, Version: "v1.2.3", ManifestDigest: strings.Repeat("b", 64)}
 	} else {

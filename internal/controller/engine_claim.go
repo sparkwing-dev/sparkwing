@@ -175,6 +175,12 @@ func (s *EngineController) claimedUnit(ctx context.Context, claim store.UnitClai
 	if err != nil {
 		return controllerwire.ClaimedUnit{}, err
 	}
+	if unit.CloudResources != nil {
+		unit.CloudUpsizeEnabled, err = s.authority.CloudUpsizeEnabled(ctx)
+		if err != nil {
+			return controllerwire.ClaimedUnit{}, err
+		}
+	}
 	if principal.Capability.Delivery == capability.DeliveryDirect && run.Request.Request.Origin != runspec.OriginLocal && len(run.Request.Request.Env.Names) > 0 {
 		unit.SubmittedEnv, err = tenant.ReadSubmittedEnvironment(ctx, principal.Authority)
 		if err != nil {

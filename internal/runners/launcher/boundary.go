@@ -34,12 +34,13 @@ const (
 // A node is reused only within the run that first used it, so no Job state is cleared between
 // runs. Network isolation is the cluster's NetworkPolicy enforcement, which the operator verifies.
 type KubernetesBoundary struct {
-	Kube      kubernetes.Interface
-	Karpenter dynamic.Interface
-	Namespace string
+	Kube          kubernetes.Interface
+	Karpenter     dynamic.Interface
+	Namespace     string
+	NodeClassName string
 }
 
-func (b *KubernetesBoundary) Reserve(ctx context.Context, binding CloudJobBinding, job string) (CloudNodeReservation, error) {
+func (b *KubernetesBoundary) Reserve(ctx context.Context, binding CloudJobBinding, job string, placement CloudPlacement) (CloudNodeReservation, error) {
 	if b.Kube == nil || b.Namespace == "" || binding.Team == "" || binding.RunID == "" || job == "" {
 		return CloudNodeReservation{}, errors.New("Cloud boundary requires Kubernetes, namespace, team, run and Job")
 	}
@@ -50,30 +51,52 @@ func (b *KubernetesBoundary) Reserve(ctx context.Context, binding CloudJobBindin
 	if lease.Kind == "" || lease.ID == "" || lease.Holder == "" || lease.Generation <= 0 {
 		return CloudNodeReservation{}, errors.New("Cloud reservation requires a complete award fence")
 	}
-	nodes, err := b.Kube.CoreV1().Nodes().List(ctx, metav1.ListOptions{LabelSelector: TeamNodeLabel + "=" + TeamNodeValue(b.Namespace, binding.Team)})
+	nodes, err := b.Kube.CoreV1().Nodes().List(ctx, metav1.ListOptions{LabelSelector: PoolNamespaceLabel + "=" + b.Namespace})
 	if err != nil {
 		return CloudNodeReservation{}, err
 	}
-	for _, node := range nodes.Items {
-		if !nodeReady(node) || quarantined(node) {
-			continue
+	classes := []string{placement.RequestedClass}
+	if placement.UpsizeEnabled {
+		if next := nextCPUClass(placement.RequestedClass); next != "" {
+			classes = append(classes, next)
 		}
-		reservation, err := b.reserveNode(ctx, node, binding, job)
-		if apierrors.IsConflict(err) || errors.Is(err, ErrNoDedicatedNode) {
-			continue
-		}
-		if err != nil {
-			return CloudNodeReservation{}, err
-		}
-		if err = b.consumeCapacity(ctx, node.Name, binding.Team); err != nil {
-			return CloudNodeReservation{}, errors.Join(err, b.Release(ctx, reservation))
-		}
-		return reservation, nil
 	}
+	for index, class := range classes {
+		for _, node := range nodes.Items {
+			if !nodeReady(node) || quarantined(node) || node.Labels[CloudClassLabel] != class {
+				continue
+			}
+			if index > 0 && node.Labels[usedRunLabel] != runNodeValue(b.Namespace, binding.RunID) {
+				// safety: upsizing may avoid a cold start, but cannot reuse a node from another run.
+				if node.Labels[TeamNodeLabel] != "" || node.Labels[usedTeamLabel] != "" || node.Labels[usedRunLabel] != "" {
+					continue
+				}
+				warm, err := b.hasWarmPlaceholder(ctx, node)
+				if err != nil {
+					return CloudNodeReservation{}, err
+				}
+				if !warm {
+					continue
+				}
+			}
+			reservation, err := b.reserveNode(ctx, node, binding, job, placement)
+			if apierrors.IsConflict(err) || errors.Is(err, ErrNoDedicatedNode) {
+				continue
+			}
+			if err != nil {
+				return CloudNodeReservation{}, err
+			}
+			if err = b.consumeCapacity(ctx, node.Name, binding.Team); err != nil {
+				return CloudNodeReservation{}, errors.Join(err, b.Release(ctx, reservation))
+			}
+			return reservation, nil
+		}
+	}
+
 	return CloudNodeReservation{}, ErrNoDedicatedNode
 }
 
-func (b *KubernetesBoundary) reserveNode(ctx context.Context, node corev1.Node, binding CloudJobBinding, job string) (CloudNodeReservation, error) {
+func (b *KubernetesBoundary) reserveNode(ctx context.Context, node corev1.Node, binding CloudJobBinding, job string, placement CloudPlacement) (CloudNodeReservation, error) {
 	team := binding.Team
 	if err := b.verifyNodeTeam(ctx, &node, team); err != nil {
 		return CloudNodeReservation{}, err
@@ -93,7 +116,7 @@ func (b *KubernetesBoundary) reserveNode(ctx context.Context, node corev1.Node, 
 	if _, err := b.occupants(ctx, node.Name, team); err != nil {
 		return CloudNodeReservation{}, err
 	}
-	r := CloudNodeReservation{NodeName: node.Name, NodeUID: string(node.UID), Team: team, JobName: job, ReservationID: rand.Text(), Award: binding.LeaseRef()}
+	r := CloudNodeReservation{RequestedClass: placement.RequestedClass, GrantedClass: node.Labels[CloudClassLabel], WaitedForFreshNode: placement.WaitedForFreshNode, NodeName: node.Name, NodeUID: string(node.UID), Team: team, JobName: job, ReservationID: rand.Text(), Award: binding.LeaseRef()}
 	if node.UID == "" {
 		return CloudNodeReservation{}, errors.New("Cloud node has no Kubernetes UID")
 	}
@@ -108,6 +131,7 @@ func (b *KubernetesBoundary) reserveNode(ctx context.Context, node corev1.Node, 
 	if node.Annotations == nil {
 		node.Annotations = map[string]string{}
 	}
+	node.Labels[TeamNodeLabel] = TeamNodeValue(b.Namespace, team)
 	node.Labels[usedTeamLabel] = TeamNodeValue(b.Namespace, team)
 	node.Labels[usedRunLabel] = run
 	node.Annotations[reservationAnnotation] = string(raw)
@@ -175,9 +199,13 @@ func (b *KubernetesBoundary) vacant(ctx context.Context, node string) error {
 	return err
 }
 
-// safety: only the team's own unowned requests in the launcher namespace are
-// consumable; any other non-DaemonSet Pod keeps the node occupied.
+// safety: only this team's capacity requests and operator warm placeholders are
+// consumable. Other non-DaemonSet Pods keep the node occupied.
 func (b *KubernetesBoundary) occupants(ctx context.Context, node, team string) ([]corev1.Pod, error) {
+	bound, err := b.Kube.CoreV1().Nodes().Get(ctx, node, metav1.GetOptions{})
+	if err != nil {
+		return nil, err
+	}
 	pods, err := b.Kube.CoreV1().Pods("").List(ctx, metav1.ListOptions{FieldSelector: "spec.nodeName=" + node})
 	if err != nil {
 		return nil, err
@@ -188,6 +216,14 @@ func (b *KubernetesBoundary) occupants(ctx context.Context, node, team string) (
 			continue
 		}
 		if daemonPod(pod) {
+			continue
+		}
+		warm, err := b.warmPlaceholder(ctx, pod, *bound)
+		if err != nil {
+			return nil, err
+		}
+		if warm {
+			requests = append(requests, pod)
 			continue
 		}
 		if team != "" && pod.Namespace == b.Namespace && strings.HasPrefix(pod.Name, capacityPrefix) && len(pod.OwnerReferences) == 0 && pod.Labels[capacityLabel] == "true" && pod.Labels[TeamLabel] == TeamNodeValue(b.Namespace, team) {
@@ -208,8 +244,8 @@ func (b *KubernetesBoundary) consumeCapacity(ctx context.Context, node, team str
 	if err != nil {
 		return err
 	}
-	pods := b.Kube.CoreV1().Pods(b.Namespace)
 	for _, pod := range requests {
+		pods := b.Kube.CoreV1().Pods(pod.Namespace)
 		err := pods.Delete(ctx, pod.Name, metav1.DeleteOptions{Preconditions: &metav1.Preconditions{UID: &pod.UID}})
 		if err != nil && !apierrors.IsNotFound(err) {
 			return err
@@ -240,7 +276,7 @@ func nodeReady(node corev1.Node) bool {
 	return false
 }
 
-// TeamNodeValue is the collision-resistant value infrastructure must place on the team's dedicated nodes.
+// TeamNodeValue binds a node to one deployment and team without label collisions.
 func TeamNodeValue(namespace, team string) string { return admission.TeamNodeValue(namespace, team) }
 
 func daemonPod(pod corev1.Pod) bool {

@@ -1,0 +1,41 @@
+# One pool per deployment and requested hardware class.
+# sparkwing-jobs is the existing hardened EC2NodeClass.
+apiVersion: karpenter.sh/v1
+kind: NodePool
+metadata:
+  name: sparkwing-jobs-2
+spec:
+  disruption:
+    consolidationPolicy: WhenEmpty
+    consolidateAfter: 10m
+  template:
+    metadata:
+      labels:
+        node-restriction.kubernetes.io/sparkwing-cloud-class: "2"
+        sparkwing.dev/launcher-namespace: sparkwing-cloud-jobs
+        sparkwing.dev/warm-namespace: sparkwing-cloud-warm
+    spec:
+      nodeClassRef:
+        group: karpenter.k8s.aws
+        kind: EC2NodeClass
+        name: sparkwing-jobs
+      taints:
+        - key: sparkwing.dev/dedicated
+          value: "true"
+          effect: NoSchedule
+      requirements:
+        - key: kubernetes.io/os
+          operator: In
+          values: [linux]
+        - key: kubernetes.io/arch
+          operator: In
+          values: [amd64]
+        - key: karpenter.k8s.aws/instance-family
+          operator: In
+          values: [m6a, m6i, m7i]
+        - key: karpenter.k8s.aws/instance-cpu
+          operator: In
+          values: ["4"]
+        - key: karpenter.sh/capacity-type
+          operator: In
+          values: [on-demand]

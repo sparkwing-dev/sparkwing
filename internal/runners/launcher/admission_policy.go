@@ -12,6 +12,8 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/equality"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+
+	"github.com/sparkwing-dev/sparkwing/pkg/match"
 )
 
 // AdmissionConfig holds the per-install values the job namespace policies render into CEL.
@@ -56,7 +58,7 @@ func podValidations(pod bool) []admissionv1.Validation {
 		{Expression: `!variables.create || variables.containers.all(c, !has(c.lifecycle) && [c.?livenessProbe, c.?readinessProbe, c.?startupProbe].all(p, !p.hasValue() || !has(p.value().exec)))`, Message: "containers run no lifecycle hooks or exec probes"},
 		{Expression: `!variables.create || variables.shape != 'job' || size(variables.inits) == 0 || variables.inits[0].?command.orValue([]) == ` + celList(dockerCommand) + ` && variables.inits[0].?args.orValue([]) == ` + celList(dockerArgs), Message: "the Docker sidecar runs only the launcher's dockerd command"},
 		{Expression: `!variables.create || variables.containers.all(c, size(c.?envFrom.orValue([])) == 0 && c.?env.orValue([]).all(e, variables.shape == 'job' && (e.name in ` + celList(workloadEnv) + ` && !has(e.valueFrom))))`, Message: "containers carry only the launcher's environment and EKS region values, never AWS credentials"},
-		{Expression: `!variables.create || variables.team != '' && variables.spec.?nodeSelector.orValue({})[?'` + TeamNodeLabel + `'].orValue('') == variables.team && ` + exactTolerations(pod), Message: "Pods select and tolerate only their own team's nodes"},
+		{Expression: `!variables.create || variables.team != '' && (variables.shape == 'job' ? variables.spec.?nodeSelector.orValue({})[?'` + TeamNodeLabel + `'].orValue('') == variables.team : size(variables.spec.?nodeSelector.orValue({})) == 2 && variables.spec.?nodeSelector.orValue({})[?'` + CloudClassLabel + `'].orValue('') in variables.cloudClasses && variables.spec.?nodeSelector.orValue({})[?'` + PoolNamespaceLabel + `'].orValue('') == variables.jobNamespace) && ` + exactTolerations(pod), Message: "Job Pods select their own team's nodes; capacity Pods select only their shared class and launcher namespace, with dedicated tolerations"},
 		{Expression: `!variables.create || (variables.shape == 'capacity' ? variables.spec.?nodeName.orValue('') == '' : variables.spec.?nodeName.orValue('') != '')`, Message: "Job Pods are bound to their reserved node; capacity requests are not"},
 		{Expression: `!variables.create || (variables.shape == 'job' ? variables.labels.all(k, k in ` + celList(jobLabelKeys) + ` || k in variables.nodeTopology) && variables.labels[?'app'].orValue('') == 'sparkwing-job' && variables.labels[?'app.kubernetes.io/managed-by'].orValue('') == '` + managedByLauncher + `' && variables.labels[?'sparkwing.dev/job'].orValue('') != '' : variables.labels.all(k, k in ['app', 'app.kubernetes.io/managed-by', '` + capacityLabel + `', 'sparkwing.dev/team']) && variables.labels[?'app'].orValue('') == 'sparkwing-job' && variables.labels[?'app.kubernetes.io/managed-by'].orValue('') == '` + managedByLauncher + `' && variables.labels[?'` + capacityLabel + `'].orValue('') == 'true')`, Message: "Pods carry exactly the launcher's labels"},
 		{Expression: `!variables.create || variables.spec.?readinessGates.orValue([]).all(g, g.conditionType.startsWith('target-health.elbv2.k8s.aws/'))`, Message: "only AWS load balancer readiness gates are allowed"},
@@ -64,7 +66,7 @@ func podValidations(pod bool) []admissionv1.Validation {
 }
 
 func exactTolerations(pod bool) string {
-	tolerations := teamTolerations("", "")
+	tolerations := cloudTolerations()
 	required := len(tolerations)
 	// DefaultTolerationSeconds mutates Pods, but not Job templates; its timeouts are cluster settings.
 	if pod {
@@ -75,9 +77,6 @@ func exactTolerations(pod bool) string {
 	var checks, matches []string
 	for i, t := range tolerations {
 		value := strconv.Quote(t.Value)
-		if t.Key == TeamNodeLabel {
-			value = "variables.team"
-		}
 		seconds, count := "!has(t.tolerationSeconds)", "== 1"
 		if i >= required {
 			seconds, count = "has(t.tolerationSeconds) && t.tolerationSeconds >= 0", "<= 1"
@@ -91,9 +90,15 @@ func exactTolerations(pod bool) string {
 }
 
 func policyVariables(c AdmissionConfig, pod string) []admissionv1.Variable {
+	classes := make([]string, 0, len(match.CloudSizes()))
+	for _, size := range match.CloudSizes() {
+		classes = append(classes, strconv.FormatInt(size.CreditClass, 10))
+	}
 	return []admissionv1.Variable{
 		{Name: "create", Expression: `request.operation == 'CREATE'`},
 		{Name: "launcher", Expression: "'" + c.Launcher + "'"},
+		{Name: "jobNamespace", Expression: "'" + c.Namespace + "'"},
+		{Name: "cloudClasses", Expression: celList(classes)},
 		{Name: "runnerImage", Expression: "'" + c.RunnerImage + "'"},
 		{Name: "dockerImage", Expression: "'" + c.DockerImage + "'"},
 		{Name: "labels", Expression: pod + `.metadata.?labels.orValue({})`},

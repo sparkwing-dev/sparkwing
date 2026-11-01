@@ -1534,6 +1534,23 @@ CREATE INDEX idx_billing_awards_requester ON billing_awards(team,requester_accou
 
 CREATE UNIQUE INDEX idx_billing_awards_unit_generation ON billing_awards(team,run_id,node_id,unit_kind,generation);
 
+CREATE TABLE cloud_job_capacity (
+    team TEXT NOT NULL REFERENCES teams(name),
+    reservation_id TEXT NOT NULL,
+    requested_class TEXT NOT NULL,
+    granted_class TEXT,
+    waited_for_fresh_node BIGINT NOT NULL DEFAULT 0 CHECK(waited_for_fresh_node IN (0,1)),
+    claimed_at BIGINT NOT NULL,
+    started_at BIGINT,
+    claim_to_start_ns BIGINT CHECK(claim_to_start_ns >= 0),
+    PRIMARY KEY(team,reservation_id),
+    FOREIGN KEY(team,reservation_id) REFERENCES billing_awards(team,reservation_id) ON DELETE CASCADE,
+    CHECK((started_at IS NULL) = (claim_to_start_ns IS NULL)),
+    CHECK(started_at IS NULL OR started_at >= claimed_at)
+);
+
+CREATE INDEX idx_cloud_job_capacity_started ON cloud_job_capacity(started_at,requested_class);
+
 CREATE TABLE billable_intervals (
     team TEXT NOT NULL REFERENCES teams(name),
     id TEXT NOT NULL PRIMARY KEY,

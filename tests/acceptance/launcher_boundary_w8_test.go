@@ -97,7 +97,7 @@ func TestLauncherKubernetesBoundaryW8Components(t *testing.T) {
 				}
 				return false, nil, nil
 			})
-			boundary := &launcher.KubernetesBoundary{Kube: kube, Karpenter: karpenter, Namespace: cfg.Namespace}
+			boundary := &launcher.KubernetesBoundary{Kube: kube, Karpenter: karpenter, Namespace: cfg.Namespace, NodeClassName: "sparkwing-jobs"}
 			first := &launcher.Launcher{Kube: kube, Control: control, Boundary: boundary, Config: cfg}
 			if claimed, err := first.LaunchOne(t.Context()); err != nil || !claimed {
 				t.Fatalf("launch: %t %v", claimed, err)
@@ -107,7 +107,7 @@ func TestLauncherKubernetesBoundaryW8Components(t *testing.T) {
 				t.Fatalf("jobs: %+v %v", jobs, err)
 			}
 			job := jobs.Items[0]
-			if _, err := boundary.Reserve(t.Context(), award.Binding, "competing-job"); !errors.Is(err, launcher.ErrNoDedicatedNode) {
+			if _, err := boundary.Reserve(t.Context(), award.Binding, "competing-job", launcher.CloudPlacement{RequestedClass: "2"}); !errors.Is(err, launcher.ErrNoDedicatedNode) {
 				t.Fatalf("occupied node reused: %v", err)
 			}
 			pod := &corev1.Pod{ObjectMeta: *job.Spec.Template.ObjectMeta.DeepCopy(), Spec: job.Spec.Template.Spec, Status: corev1.PodStatus{Phase: corev1.PodRunning, InitContainerStatuses: []corev1.ContainerStatus{{Name: "docker", State: corev1.ContainerState{Running: &corev1.ContainerStateRunning{}}}}}}
@@ -145,7 +145,7 @@ func TestLauncherKubernetesBoundaryW8Components(t *testing.T) {
 			if err != nil || slices.Contains(finished.Finalizers, "sparkwing.dev/cloud-cleanup") {
 				t.Fatalf("teardown finalizer: %+v %v", finished, err)
 			}
-			if _, err := reconstructedBoundary.Reserve(t.Context(), award.Binding, "next-job"); err != nil {
+			if _, err := reconstructedBoundary.Reserve(t.Context(), award.Binding, "next-job", launcher.CloudPlacement{RequestedClass: "2"}); err != nil {
 				t.Fatalf("clean node could not be reused: %v", err)
 			}
 		})

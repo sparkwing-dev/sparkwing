@@ -56,6 +56,9 @@ func (s *Store) sealLauncherHost(ctx context.Context, authority capability.Autho
 		if err != nil || !live {
 			return err
 		}
+		if err := recordCloudCapacityGrantTx(ctx, tx, award, observation.Capacity); err != nil {
+			return err
+		}
 		host := "node:" + observation.NodeUID
 		if award.Capability.ExecutionHost != "" {
 			if award.Capability.ExecutionHost != host {

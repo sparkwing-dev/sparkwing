@@ -119,7 +119,7 @@ func TestReserveSkipsQuarantinedNode(t *testing.T) {
 	if _, err = kube.CoreV1().Nodes().Update(t.Context(), node, metav1.UpdateOptions{}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err = b.Reserve(t.Context(), boundaryBinding("team"), "job"); !errors.Is(err, ErrNoDedicatedNode) {
+	if _, err = b.Reserve(t.Context(), boundaryBinding("team"), "job", CloudPlacement{RequestedClass: "2"}); !errors.Is(err, ErrNoDedicatedNode) {
 		t.Fatalf("an uncordoned quarantined node was reserved: %v", err)
 	}
 }
@@ -419,7 +419,7 @@ func TestReservationBindingMismatchStaysExcludedDuringQuarantineConflicts(t *tes
 		boundary, kube := boundaryFixture()
 		binding := boundaryBinding("team")
 		job := jobName(binding)
-		original, err := boundary.Reserve(t.Context(), binding, job)
+		original, err := boundary.Reserve(t.Context(), binding, job, CloudPlacement{RequestedClass: "2"})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -447,7 +447,7 @@ func TestReservationBindingMismatchStaysExcludedDuringQuarantineConflicts(t *tes
 		if err := l.Sync(t.Context()); err == nil || blocking(err) != nil || patches == 0 {
 			t.Fatalf("suspect node was not reported without blocking healthy claims: patches=%d err=%v", patches, err)
 		}
-		if _, err := boundary.Reserve(t.Context(), binding, job); !errors.Is(err, ErrNoDedicatedNode) {
+		if _, err := boundary.Reserve(t.Context(), binding, job, CloudPlacement{RequestedClass: "2"}); !errors.Is(err, ErrNoDedicatedNode) {
 			t.Fatalf("resumed a suspect reservation while quarantine conflicted: %v", err)
 		}
 		node, err = kube.CoreV1().Nodes().Get(t.Context(), "node", metav1.GetOptions{})
@@ -462,7 +462,7 @@ func TestReservationBindingMismatchStaysExcludedDuringQuarantineConflicts(t *tes
 		if _, err = kube.CoreV1().Nodes().Update(t.Context(), node, metav1.UpdateOptions{}); err != nil {
 			t.Fatal(err)
 		}
-		resumed, err := boundary.Reserve(t.Context(), binding, job)
+		resumed, err := boundary.Reserve(t.Context(), binding, job, CloudPlacement{RequestedClass: "2"})
 		if err != nil || resumed != original {
 			t.Fatalf("repaired reservation did not resume: %+v %v", resumed, err)
 		}

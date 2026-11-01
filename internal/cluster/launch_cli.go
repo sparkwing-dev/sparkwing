@@ -29,11 +29,17 @@ func RunLaunchCLI(ctx context.Context, args []string, factory LauncherFactory) e
 		return parsedHelp(err)
 	}
 	cfg := launcher.CloudJobConfig{
-		ControllerURL: textFlag(fs, "controller"), Namespace: "sparkwing-jobs",
+		ControllerURL: textFlag(fs, "controller"), Namespace: "sparkwing-jobs", NodeClassName: "sparkwing-jobs",
 		RunnerImage: textFlag(fs, "image"), DockerImage: textFlag(fs, "docker-image"),
 	}
 	if fs.Changed("namespace") {
 		cfg.Namespace = textFlag(fs, "namespace")
+	}
+	if fs.Changed("node-class") {
+		cfg.NodeClassName = textFlag(fs, "node-class")
+		if cfg.NodeClassName == "" {
+			return errors.New("--node-class must name the hardened EC2NodeClass")
+		}
 	}
 	cfg.Labels, _ = fs.GetStringSlice("label")
 	cfg.StoppedTeams, _ = fs.GetStringSlice("stop-team")

@@ -152,8 +152,8 @@ func TestJobNamespaceCreationCanBeHandedOff(t *testing.T) {
 		}
 		found := false
 		for _, r := range renderedResources(t, helmRenderAll(t, "./sparkwing-runner-bundle", "sparkwing", "cloud", settings...)) {
-			if r.Kind == "Namespace" {
-				found = r.Metadata.Name == "cloud-cloud-jobs"
+			if r.Kind == "Namespace" && r.Metadata.Name == "cloud-cloud-jobs" {
+				found = true
 			}
 		}
 		if found != create {

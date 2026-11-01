@@ -71,7 +71,7 @@ func TestLaunchWithoutATeamNodeHoldsTheAwardAndRequestsOneNodePerUnit(t *testing
 		t.Fatalf("capacity requests = %d, held awards = %d, want 1 and 1", len(pods), len(l.waitingAwards()))
 	}
 	spec := pods[0].Spec
-	if spec.NodeName != "" || !reflect.DeepEqual(spec.NodeSelector, map[string]string{TeamNodeLabel: TeamNodeValue("cloud", "team")}) || !reflect.DeepEqual(spec.Tolerations, teamTolerations("cloud", "team")) {
+	if spec.NodeName != "" || !reflect.DeepEqual(spec.NodeSelector, map[string]string{CloudClassLabel: cpuClass(control.award.CPUCores), PoolNamespaceLabel: "cloud"}) || !reflect.DeepEqual(spec.Tolerations, cloudTolerations()) {
 		t.Fatalf("request is not confined to the team pool: %+v", spec)
 	}
 	if spec.ServiceAccountName != ServiceAccount || spec.AutomountServiceAccountToken == nil || *spec.AutomountServiceAccountToken || len(spec.Volumes) != 0 || len(spec.InitContainers) != 0 || len(spec.Containers) != 1 {
@@ -177,7 +177,7 @@ func TestCapacityRequestCarriesNoAwardCredentialProperty(t *testing.T) {
 			return false
 		}
 		raw, err := json.Marshal(pod)
-		return err == nil && !bytes.Contains(raw, award.Bootstrap) && pod.Spec.NodeSelector[TeamNodeLabel] == TeamNodeValue("cloud", team) && len(pod.Spec.Volumes) == 0
+		return err == nil && !bytes.Contains(raw, award.Bootstrap) && pod.Spec.NodeSelector[PoolNamespaceLabel] == "cloud" && pod.Spec.NodeSelector[TeamNodeLabel] == "" && len(pod.Spec.Volumes) == 0
 	}
 	if err := quick.Check(property, &quick.Config{MaxCount: 200}); err != nil {
 		t.Fatal(err)
@@ -268,7 +268,7 @@ func TestReservationConsumesOnlyItsTeamsCapacityRequests(t *testing.T) {
 			if _, err := kube.CoreV1().Pods(test.pod.Namespace).Create(t.Context(), test.pod, metav1.CreateOptions{}); err != nil {
 				t.Fatal(err)
 			}
-			_, err := b.Reserve(t.Context(), boundaryBinding("team"), "job")
+			_, err := b.Reserve(t.Context(), boundaryBinding("team"), "job", CloudPlacement{RequestedClass: "2"})
 			left, listErr := kube.CoreV1().Pods(test.pod.Namespace).List(t.Context(), metav1.ListOptions{})
 			if listErr != nil {
 				t.Fatal(listErr)

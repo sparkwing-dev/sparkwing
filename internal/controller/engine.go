@@ -94,6 +94,7 @@ type engineAuthority interface {
 	RecordRunnerPoll(context.Context, store.UnitDemand) error
 	ClaimUnit(context.Context, store.UnitDemand) (store.UnitClaim, error)
 	CloudAwardResources(context.Context, capability.AuthorityRef) (*match.Resources, error)
+	CloudUpsizeEnabled(context.Context) (bool, error)
 	ExchangeCapability(context.Context, capability.ExchangeSpec) (capability.Issued, error)
 	DelegateCapability(context.Context, capability.DelegateSpec) (capability.Issued, error)
 	ResupplyHereSecrets(context.Context, capability.AuthorityRef, map[string]string) error

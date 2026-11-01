@@ -33,7 +33,10 @@ credential model in `docs/auth.md`, and the decision log
 | Uploaded Go pipelines install their SDK through the runner before planning | `internal/cluster/main.go`: `mainWithRuntime` | `cmd/sparkwing-runner/uploaded_plan_test.go`: `TestUploadedGoPipelinePlansThroughRunner` |
 | Accepted controller-dispatched retries transfer to the controller during intake and schedule their preserved plan | `internal/store/intake_runtime.go`: `admitRun` | `internal/controller/retry_action_native_test.go`: `TestConsoleRetryAcceptedControllerPlanExecutes` |
 | Controller-owned failed-only retries materialize reusable successes without attempts and copy their outputs for dependents | `internal/store/controller_settlement.go`: `settleControllerTx`; `blob_materialize.go`: `materializationActorTx` | `internal/store/controller_retry_test.go`: `TestControllerRetryReusesSuccessfulJobWithoutAnAttempt`; `internal/controller/retry_action_native_test.go`: `TestConsoleFailedRetryReusesSuccessfulJobWithoutAnAttempt` |
-| Missing dedicated Cloud pool fails the exact award and refunds its unstarted credit hold once | `internal/runners/launcher/node_team.go`: `CapacityConfigured`, `internal/store/launcher_rejection.go`: `failLauncherAwards` | `TestPoolConfigurationIgnoresScalingAndExhaustion`, `TestUnconfiguredCloudCapacityFailsAndRefundsOnce`, `TestCloudCapacityFailureThroughController` |
+| Missing shared Cloud hardware class fails the exact award and refunds its unstarted credit hold once | `internal/runners/launcher/node_team.go`: `CapacityConfigured`, `internal/store/launcher_rejection.go`: `failLauncherAwards` | `TestPoolConfigurationIgnoresScalingAndExhaustion`, `TestUnconfiguredCloudCapacityFailsAndRefundsOnce`, `TestCloudCapacityFailureThroughController` |
+| Shared pool provenance precedes permanent team/run node binding. Upsizing uses only an idle warm node one class larger and keeps requested limits | `internal/runners/launcher/node_team.go`, `boundary.go`; `job.go` | `internal/runners/launcher/shared_pool_test.go`: `TestSharedPoolBindsOnlyOneTeamAndRun`, `TestSharedPoolUpsizesOnlyIntoIdleWarmNextClass` |
+| Shared pools pin the hardened EC2NodeClass. Volume-free warm Pods prove their owning Deployment through a UID-checked ReplicaSet. Warm RBAC stays outside release and Job namespaces | `internal/runners/launcher/node_team.go`; `charts/sparkwing-runner-bundle/templates/launcher-rbac.yaml` | `TestSharedPoolRefusesForeignProvenance`, `TestSharedPoolRefusesUnprovenWarmDeployment`, `TestSharedPoolForbiddenPlaceholderDeleteReleasesReservation`, `TestLauncherWarmCapacityRoleIsConfinedToWarmNamespace` |
+| Cloud capacity facts preserve requested billing, one-size grants, cold waits and store-clock first-start latency | `cloud_job_capacity.go`, `metered_accounting.go` | `TestCloudCapacityFactsFollowAwardPlacementAndActualStart`, `TestCloudUpsizeSwitchDefaultsOnAndRevalidatesOperator` |
 | Unverified unclaimed-work notices explain the reserved-pool push remedy | `internal/controller/unclaimed_notice.go`: `unclaimedNotice` | `TestAssertedPoolWaitingNoticeExplainsVerifiedDefaultRemedy` |
 | Held Cloud capacity awards survive placement retries, claim backoff and unrelated Job observation failures | `internal/runners/launcher/launcher.go`: `launch`, `Run`; `sync.go`: `sync` | `TestCloudCapacityWaitRenewsPlanDespiteOtherFailures` |
 | Concurrent deadline renewal preserves suspended publication; activation validates the controller's funded deadline | `internal/runners/launcher/launcher.go`: `retainBootstrap`, `launch` | `TestPublicationRechecksDeadlineAfterConcurrentRenewal`; `tests/acceptance/launcher_publication_w8_test.go`: `TestLauncherPublicationSurvivesConcurrentReconciliationW8Components` |
@@ -309,7 +312,7 @@ go -C $W run ./internal/commentcheck -base origin/main .
 - `go build ./cmd/sparkwing` collides with the `sparkwing/` SDK directory; use
   `go build -o /dev/null ./cmd/...`.
 
-## Decision index (handoffs.md, decisions 26-72)
+## Decision index (handoffs.md, decisions 26-75)
 
 Earlier numbers and lead rulings sit above these in the same file. A later
 decision amends an earlier one where noted.
@@ -366,3 +369,4 @@ decision amends an earlier one where noted.
 - 2026-10-30: One sealed repository proof and host classification supersede consumer-specific trust rules.
 - 2026-10-31: Compare outages admit asserted App runs. Trust restrictions and unscoped personal enrollment are ratified. v0.68.3 resets stores to schema 28. The final production wipe follows the release cut and a clean staging grid.
 - 74: Teams have no member cap, regardless of funding or payment holds; remove the setting, invitation warning and acceptance refusal.
+- 75: Shared Cloud pools bind never-used nodes to one team/run; idle warm nodes may serve one class smaller at requested billing and limits. Warm placeholder authority stays in a dedicated namespace and pools pin the hardened EC2NodeClass.

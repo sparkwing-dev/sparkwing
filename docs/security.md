@@ -36,7 +36,7 @@ that may use those permissions. Private files and filtered process environments
 reduce disclosure. They do not isolate hostile processes sharing an account.
 
 Cloud execution runs every Job container as root of its own Kubernetes user
-namespace on exclusive team-dedicated nodes; that root maps to an unprivileged
+namespace on nodes permanently bound to one team and run; that root maps to an unprivileged
 host UID. No Job container is privileged or holds node root. A launcher
 credential stays outside the Job. See [Runner Job placement](#runner-job-placement).
 
@@ -492,7 +492,7 @@ DinD sidecar. The sidecar adds namespaced `SYS_ADMIN`, `NET_ADMIN` and
 `SYS_PTRACE` and an unmasked `/proc`, under a Localhost seccomp profile that
 every customer container inherits. The kernel's user-namespace surface,
 nf_tables above all, is what an escape would use, so node kernel patch
-latency is part of this boundary. A team-dedicated node serves one run: later Jobs of
+latency is part of this boundary. A node is permanently bound to one team and run: later Jobs of
 that run may reuse it warm, and no other run, of the same team or another,
 ever uses it. Aggregate scratch,
 including DinD, is fixed at 20 GiB.

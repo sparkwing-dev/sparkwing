@@ -94,6 +94,7 @@ type ClaimRequest struct {
 type ClaimedUnit struct {
 	SubmittedEnv           map[string][]byte             `json:"submitted_env,omitempty"`
 	OwnerMachine           bool                          `json:"owner_machine,omitempty"`
+	CloudUpsizeEnabled     bool                          `json:"cloud_upsize_enabled"`
 	CloudResources         *match.Resources              `json:"cloud_resources,omitempty"`
 	Unit                   capability.UnitKind           `json:"unit"`
 	Purpose                capability.AwardPurpose       `json:"purpose"`
