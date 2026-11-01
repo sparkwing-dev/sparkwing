@@ -107,7 +107,7 @@ func TestRaceTouchedPassesWhenNoGoFileChanged(t *testing.T) {
 	gitCommitAll(t, root, "clean base")
 	runTestGit(t, root, "update-ref", "refs/remotes/origin/main", "HEAD")
 
-	if err := runRaceTouched(context.Background()); err != nil {
+	if err := runRaceTouched(context.Background(), nil); err != nil {
 		t.Fatalf("race-touched failed with nothing changed: %v", err)
 	}
 }
@@ -122,7 +122,7 @@ func TestRaceTouchedRunsTheRaceDetectorOnTheChangedPackage(t *testing.T) {
 	writeGoFile(t, filepath.Join(root, "internal", "racy_test.go"), racyTest)
 	gitAddAll(t, root)
 
-	err := runRaceTouched(context.Background())
+	err := runRaceTouched(context.Background(), nil)
 	if err == nil {
 		t.Fatal("race-touched passed a package whose test races")
 	}
@@ -254,15 +254,19 @@ func TestA(t *testing.T) {
 func TestB(t *testing.T) { check(t) }
 func TestC(t *testing.T) { check(t) }
 func TestD(t *testing.T) { check(t) }
+func TestE(t *testing.T) { check(t) }
+func TestF(t *testing.T) { check(t) }
+func TestLogTreeTraversesEveryTenantDescendantProperty(t *testing.T) { check(t) }
+func TestRetryHistoryTraversesLongChainsAndCycles(t *testing.T) { check(t) }
 `, raceTouchedPackageTimeout, filepath.Join(root, "internal", "ordinary-complete"), pkg, barrier.URL))
 	}
 	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Minute)
 	defer cancel()
-	if err := raceModules(ctx, map[string][]string{".": append(slices.Clone(packages), "./internal/ordinary")}, t.TempDir(), t.TempDir()); err != nil {
+	if err := raceModules(ctx, map[string][]string{".": append(slices.Clone(packages), "./internal/ordinary")}, t.TempDir(), t.TempDir(), nil); err != nil {
 		t.Fatal(err)
 	}
 	for _, pkg := range packages {
-		for _, name := range []string{"TestA", "TestB", "TestC", "TestD"} {
+		for _, name := range []string{"TestA", "TestB", "TestC", "TestD", "TestE", "TestF", "TestLogTreeTraversesEveryTenantDescendantProperty", "TestRetryHistoryTraversesLongChainsAndCycles"} {
 			path := filepath.Join(root, pkg, name)
 			if _, err := os.Stat(path); err != nil {
 				t.Fatalf("%s shards omitted %s: %v", pkg, name, err)
@@ -273,17 +277,18 @@ func TestD(t *testing.T) { check(t) }
 		}
 	}
 	writeGoFile(t, filepath.Join(root, "internal", "nodehost", "race_test.go"), strings.Replace(racyTest, "package internal", "package shardtests", 1))
-	if err := raceModules(t.Context(), map[string][]string{".": {"./internal/nodehost"}}, t.TempDir(), t.TempDir()); err == nil || !strings.Contains(err.Error(), "race shard") {
+	if err := raceModules(t.Context(), map[string][]string{".": {"./internal/nodehost"}}, t.TempDir(), t.TempDir(), nil); err == nil || !strings.Contains(err.Error(), "race shard") {
 		t.Fatalf("racing shard=%v, want shard failure", err)
 	}
 }
 
 func TestGateRaceUsesTheMeasuredShardCounts(t *testing.T) {
 	for pkg, want := range map[string]int{
-		"./internal/controller":            4,
+		"./internal/controller":            6,
 		"./internal/nodehost":              2,
 		"./cmd/sparkwing":                  2,
 		"./internal/wingd/localcontroller": 1,
+		"./tests/acceptance":               3,
 		"./internal/store":                 0,
 		"./jobs":                           0,
 		"./internal/ordinary":              0,
@@ -291,5 +296,74 @@ func TestGateRaceUsesTheMeasuredShardCounts(t *testing.T) {
 		if got := gateRaceShardsForPackage(pkg); got != want {
 			t.Errorf("%s: %d shards, want %d", pkg, got, want)
 		}
+	}
+}
+
+func TestGateRaceGrowsIntoTheFullSuitesCoresOnlyOnFourCPUs(t *testing.T) {
+	for _, tc := range []struct {
+		cpus, want int
+	}{{2, 0}, {3, 0}, {4, 2}, {8, 0}, {16, 0}} {
+		host := hostShape{cpus: tc.cpus, singleTenant: true}
+		if got := gateRaceExtraWorkers(host); got != tc.want {
+			t.Errorf("host %+v: %d extra race workers, want %d", host, got, tc.want)
+		}
+		if total := gateRaceParallelism(host) + gateRaceExtraWorkers(host); tc.cpus == overlappedGoSuiteCPUs && total != tc.cpus {
+			t.Errorf("four-core host grows to %d race processes, want one per core", total)
+		}
+	}
+}
+
+func TestRaceShardsStartExtraWorkersOnlyAfterTheSuitesFinish(t *testing.T) {
+	root := t.TempDir()
+	t.Chdir(root)
+	writeGoFile(t, filepath.Join(root, "go.mod"), "module example.test/grow\n\ngo 1.26.0\n")
+	waiting := make(chan struct{})
+	released := make(chan struct{})
+	var waitOnce, releaseOnce sync.Once
+	barrier := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/wait":
+			waitOnce.Do(func() { close(waiting) })
+			select {
+			case <-released:
+			case <-r.Context().Done():
+			}
+		case "/release":
+			releaseOnce.Do(func() { close(released) })
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer barrier.Close()
+	writeGoFile(t, filepath.Join(root, "grow", "grow_test.go"), fmt.Sprintf(`package grow
+import ("net/http"; "testing")
+func get(t *testing.T, path string) {
+	response, err := http.Get(%q + path)
+	if err != nil { t.Fatal(err) }
+	if err := response.Body.Close(); err != nil { t.Fatal(err) }
+}
+func TestA(t *testing.T) { get(t, "/wait") }
+func TestB(t *testing.T) { get(t, "/release") }
+`, barrier.URL))
+	ready := make(chan struct{})
+	done := make(chan error, 1)
+	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Minute)
+	defer cancel()
+	go func() {
+		done <- runRaceShardsAtHome(ctx, t.TempDir(), ".", []racePackagePlan{{pkg: "./grow", shardCount: 2}}, raceWorkers{initial: 1, extra: 1, ready: ready}, gateRaceShardArgs)
+	}()
+	select {
+	case <-waiting:
+	case err := <-done:
+		t.Fatalf("race finished before its blocked shard was released: %v", err)
+	}
+	select {
+	case <-released:
+		t.Fatal("a second shard started before the suites finished")
+	default:
+	}
+	close(ready)
+	if err := <-done; err != nil {
+		t.Fatal(err)
 	}
 }

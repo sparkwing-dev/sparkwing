@@ -106,3 +106,21 @@ func TestStoreRaceShardsRunTheShortClass(t *testing.T) {
 		t.Fatalf("store race shard args = %q, want the short class under the 80-minute bound", args)
 	}
 }
+
+func TestRaceLeadTestsGetTheirOwnShardsFirst(t *testing.T) {
+	names := []string{"TestA", "TestB", "TestC", "TestLong", "TestZ"}
+	shards, err := raceLeadShards(names, []string{"TestLong"}, 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := [][]string{{"TestLong"}, {"TestA", "TestC"}, {"TestB", "TestZ"}}
+	if !slices.EqualFunc(shards, want, slices.Equal[[]string]) {
+		t.Fatalf("shards=%v, want %v", shards, want)
+	}
+	if _, err := raceLeadShards(names, []string{"TestRenamed"}, 2); err == nil || !strings.Contains(err.Error(), "not listed") {
+		t.Fatalf("missing lead test: %v, want refusal", err)
+	}
+	if _, err := raceLeadShards(names, []string{"TestA", "TestB", "TestC", "TestLong"}, 2); err == nil {
+		t.Fatal("accepted fewer remaining names than round-robin shards")
+	}
+}

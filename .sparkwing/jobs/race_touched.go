@@ -16,7 +16,9 @@ const (
 	raceTouchedPackageTimeout = raceTouchedStepTimeout * 3 / 4
 )
 
-func runRaceTouched(ctx context.Context) error {
+// perf: suitesDone closes once the full Go and Postgres suites release their
+// cores; a nil channel keeps the race queue at its initial width.
+func runRaceTouched(ctx context.Context, suitesDone <-chan struct{}) error {
 	ctx, cancel := context.WithTimeout(ctx, raceTouchedStepTimeout)
 	defer cancel()
 	files, scope, err := changeScope(ctx, "Go file(s)", existingGoFiles)
@@ -38,12 +40,12 @@ func runRaceTouched(ctx context.Context) error {
 	}
 	return withGoTestScratch(func(testRoot string) error {
 		return withProductTestHome(func(home string) error {
-			return raceModules(ctx, targets, testRoot, home)
+			return raceModules(ctx, targets, testRoot, home, suitesDone)
 		})
 	})
 }
 
-func raceModules(ctx context.Context, targets map[string][]string, testRoot, home string) error {
+func raceModules(ctx context.Context, targets map[string][]string, testRoot, home string, suitesDone <-chan struct{}) error {
 	var failures []string
 	for _, module := range mapKeys(targets) {
 		pkgs := slices.Clone(targets[module])
@@ -51,7 +53,7 @@ func raceModules(ctx context.Context, targets map[string][]string, testRoot, hom
 		if module == "." && gateRaceParallelism(currentHost()) > 0 {
 			pkgs = slices.DeleteFunc(pkgs, func(pkg string) bool {
 				if gateRaceShardsForPackage(pkg) > 0 {
-					sharded = append(sharded, racePackagePlan{pkg, gateRaceShardsForPackage(pkg)})
+					sharded = append(sharded, racePackagePlan{pkg: pkg, shardCount: gateRaceShardsForPackage(pkg), lead: gateRaceLeadTests(pkg)})
 					return true
 				}
 				return false
@@ -66,7 +68,8 @@ func raceModules(ctx context.Context, targets map[string][]string, testRoot, hom
 			}
 		}
 		if len(sharded) > 0 {
-			if runErr := runRaceShardsAtHome(ctx, home, module, sharded, gateRaceParallelism(currentHost()), gateRaceShardArgs); runErr != nil {
+			workers := raceWorkers{initial: gateRaceParallelism(currentHost()), extra: gateRaceExtraWorkers(currentHost()), ready: suitesDone}
+			if runErr := runRaceShardsAtHome(ctx, home, module, sharded, workers, gateRaceShardArgs); runErr != nil {
 				failures = append(failures, fmt.Sprintf("%s: %v", module, runErr))
 			}
 		}
@@ -87,16 +90,40 @@ func gateRaceParallelism(h hostShape) int {
 	return 0
 }
 
+// perf: on the four-core runner the race queue shares the box with the full
+// and Postgres suites, which hold two cores; once they finish, race takes all four.
+func gateRaceExtraWorkers(h hostShape) int {
+	if h.cpus == overlappedGoSuiteCPUs {
+		return h.cpus - gateRaceParallelism(h)
+	}
+	return 0
+}
+
 func gateRaceShardsForPackage(pkg string) int {
 	switch pkg {
 	case "./internal/controller":
-		return 4
+		return 6
+	case "./tests/acceptance":
+		return 3
 	case "./internal/nodehost", "./cmd/sparkwing":
 		return 2
 	case "./internal/wingd/localcontroller":
 		return 1
 	default:
 		return 0
+	}
+}
+
+// perf: measured single-thread race long poles, each over ten minutes locally.
+// TestStorage alone is 70 percent of tests/acceptance under race.
+func gateRaceLeadTests(pkg string) []string {
+	switch pkg {
+	case "./internal/controller":
+		return []string{"TestLogTreeTraversesEveryTenantDescendantProperty", "TestRetryHistoryTraversesLongChainsAndCycles"}
+	case "./tests/acceptance":
+		return []string{"TestStorage"}
+	default:
+		return nil
 	}
 }
 

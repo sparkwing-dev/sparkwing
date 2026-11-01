@@ -12,6 +12,7 @@ import (
 	"runtime"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/gitenv"
@@ -106,13 +107,20 @@ func (p *Gate) workForCPU(w *sparkwing.Work, cpuCount int) (*sparkwing.WorkStep,
 	if cpuCount == overlappedGoSuiteCPUs {
 		raceDep = buildStep
 	}
-	raceStep := sparkwing.Step(w, "race-touched", runRaceTouched).Needs(raceDep)
+	suitesDone := make(chan struct{})
+	releaseSuites := sync.OnceFunc(func() { close(suitesDone) })
+	raceStep := sparkwing.Step(w, "race-touched", func(ctx context.Context) error {
+		return runRaceTouched(ctx, suitesDone)
+	}).Needs(raceDep)
 	if cpuCount == overlappedGoSuiteCPUs {
 		lintDeps = append(lintDeps, raceStep)
 	}
 	sparkwing.Step(w, "lint", runGolangciLint).Needs(lintDeps...)
 	// perf: after test releases its Go slot, Postgres can use it while race keeps its two-slot bound.
-	sparkwing.Step(w, "store-postgres", runStorePostgresIfTouched).Needs(testStep)
+	sparkwing.Step(w, "store-postgres", func(ctx context.Context) error {
+		defer releaseSuites()
+		return runStorePostgresIfTouched(ctx)
+	}).Needs(testStep)
 	sparkwing.Step(w, "em-dashes", checkEmDashes)
 	sparkwing.Step(w, "tracker-ids", checkTrackerIDs)
 	sparkwing.Step(w, "tracked-binaries", checkTrackedBinaries)
