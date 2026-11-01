@@ -201,7 +201,7 @@ JSON includes the one-time capability and account metadata. Plain and pretty pri
 
 Show a team and its protected node label
 
-Show the team's protected node label and value for its NodePool template.
+Show the team's protected node label and value when binding shared Cloud capacity.
 
 The value is derived from the deployment's Cloud Job namespace and the team, so two deployments on one cluster never share a team's nodes.
 
