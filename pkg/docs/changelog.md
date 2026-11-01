@@ -23,7 +23,7 @@ unlock.
 ### Changed
 
 - **Cloud runner (Breaking):** Prepare the pipeline and fetch its source once per run
-  Planning publishes an authenticated, verified source and SDK installation snapshot for jobs of that run. Missing or mismatched inputs build fresh; corrupt artifacts fail before execution. Update launcher, runner image and generated admission policy together: the fetch-source init container and command are removed. The unreleased schema baseline 28 includes run-owned prepared records.
+  Only Cloud-awarded planning owners publish source and SDK installation snapshots for jobs of that run. Jobs trust that publisher and verify the blob digest before execution. Missing or mismatched inputs build fresh; unsafe checkouts skip publication and build fresh on each job. Corrupt artifacts fail before execution. Update launcher, runner image and generated admission policy together: the fetch-source init container and command are removed. The unreleased schema baseline 28 includes run-owned prepared records.
 
 - **scaffold:** `const FallbackSDKVersion` pins v0.68.2, so a fresh scaffold compiles against that release.
 - **controller (Breaking):** List endpoints that returned whole collections now return cursor pages of 50 records by default, up to 200 per request

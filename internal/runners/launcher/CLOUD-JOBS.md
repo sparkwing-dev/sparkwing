@@ -367,17 +367,23 @@ TypeScript installation, and its build-input manifest. Temporary Git credential
 files live outside those roots and are removed before publication.
 
 The existing authenticated byte store verifies upload size and SHA-256, then the
-planning owner commits an immutable `prepared` record for that team, repository,
-pipeline and run. Its provenance comes from the persisted intake seal. Job,
-evaluation, delegated process, remote-cache and bootstrap credentials cannot
-publish it. Only live planning owners and awarded jobs of that same run can read
-it. Asserted cache host partitions do not partition this run-owned record.
+Cloud-awarded planning owner commits an immutable `prepared` record for that team,
+repository, pipeline and run. The server checks the persisted award's Cloud executor
+class. Its provenance comes from the persisted intake seal. Native and self-hosted
+owners cannot publish it. Neither can job, evaluation, delegated process,
+remote-cache or bootstrap credentials. Only live planning owners and awarded jobs
+of that same run can read it. Asserted cache host partitions do not partition this run-owned record.
 
 Consumers download to a private temporary file and consume verified EOF before
 extracting through `tarsafe`. The manifest key covers the intake seal, source
 revisions and checkout policy, SDK/engine release identity, target, filtered install
-environment, runner/tool identities and the complete snapshot bytes. The consumer
+environment, runner/tool identities and the publisher-declared snapshot fingerprint.
+Restore does not recompute that fingerprint. Integrity comes from the verified blob
+digest and the server's Cloud-only write authority. Consumers trust the Cloud
+planning publisher to capture the correct source and executable. The consumer
 compares its sealed inputs and re-verifies the selected engine and SDK pin.
+If a checkout cannot be captured safely, including an absolute or escaping symlink,
+planning skips publication with one info log and jobs build fresh.
 An absent record/object or mismatched inputs uses fresh source acquisition and
 installation. Integrity failures and authorization failures stop execution.
 The run index stays immutable when a replacement owner has different inputs;

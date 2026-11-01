@@ -2,13 +2,22 @@
 
 ## Behavior
 
-The planning host captures the acquired checkout, separately pinned pipeline
-checkout when present, and installed SDK command before SDK planning. It commits
-an immutable run index through authenticated data storage. The artifact manifest
-hash binds the request seal, source/checkout inputs, engine and SDK pin, target,
-install environment, tool identities and snapshot. Job hosts verify the complete
+The Cloud-awarded planning host captures the acquired checkout, separately pinned
+pipeline checkout when present, and installed SDK command before SDK planning.
+The server allows only Cloud-awarded planning owners to commit the immutable run
+index. Native and self-hosted owners cannot publish prepared records.
+
+Integrity comes from the verified blob SHA-256 digest plus the server's Cloud-only
+write authority. This assumes the Cloud planning publisher is trusted to capture
+the correct source and executable. The manifest hash covers the request seal,
+source/checkout inputs, engine and SDK pin, target, install environment, tool
+identities and publisher-declared snapshot fingerprint. Restore copies
+`Inputs.Snapshot` from the manifest without recomputing it. It does not independently
+prove that the executable was built from the checkout. Job hosts verify the complete
 download before extraction and compare their sealed inputs before use.
 
+Checkouts that cannot be captured safely, including absolute or escaping symlinks,
+skip publication with one info log. Planning continues and jobs build fresh.
 Absent records/objects and different inputs build fresh. Integrity and authority
 errors stop before installation or execution. Planning owner restarts can restore
 with the engine still unselected; the engine resolver verifies the stored identity
@@ -58,10 +67,10 @@ separate pipeline/source revisions, planning restarts, missing and mismatched
 inputs, corrupted bytes, unauthorized reads, immutable publication, canonical
 sealed provenance across host partitions, and foreign run/team refusal.
 
-The real controller HTTP path covers owner upload/commit, prepared-record commit,
-pending job lookup and signed verified download. It exposed an owner-upload
-fence check that required a job attempt; owner generations now use their live
-unit fence, with a regression for a changed generation.
+The real controller HTTP path covers Cloud owner upload/commit, prepared-record
+commit, native trigger publication refusal, pending job lookup and signed verified
+download. Owner generations use their live unit fence, with a regression for a
+changed generation.
 
 The fast gate covers build, vet, changed-package lint, focused controller/store
 and acceptance tests, source/launcher/blob/chart short suites, documentation and
