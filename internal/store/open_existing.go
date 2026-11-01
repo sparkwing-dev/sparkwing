@@ -63,12 +63,12 @@ func OpenExisting(ctx context.Context, dialect Dialect, target string, opts ...O
 	return st, nil
 }
 
-func (s *Store) requireCurrentSchema(ctx context.Context, label, path string) error {
+func (s *Store) requireCurrentSchema(ctx context.Context, label, path string) (err error) {
 	tx, err := s.beginTx(ctx)
 	if err != nil {
 		return err
 	}
-	defer rollbackOrLog(tx)
+	defer func() { err = errors.Join(err, tx.Rollback()) }()
 	if s.dialect == DialectPostgres {
 		if _, err := tx.execContext(ctx, migrateAdvisoryLock); err != nil {
 			return err
