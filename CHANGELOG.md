@@ -57,6 +57,12 @@ unlock.
 
 ### Fixed
 
+- **Cloud:** Retire empty nodes after their run finishes instead of waiting for Karpenter consolidation
+  The launcher confirms terminal run state, permanent team/run ownership and Pod vacancy, then UID-fences deletion of the owning NodeClaim. Reconciliation resumes this cleanup after restart without additional RBAC.
+
+- **Cloud:** Serial jobs wait up to 30 seconds for the same run's node to finish teardown before requesting another node
+  This avoids provisioning extra capacity during a predecessor's deletion. Live jobs can still fan out, and nodes remain bound to one team and run.
+
 - **controller:** Log unavailable Cloud job metrics at info and retry database health network failures once before logging an error
 - **Cloud runner:** Reuse prepared pipelines when execution expands the planner's omitted checkout defaults
   Publication and restore compare effective checkout policy. Different history depth, submodule and LFS settings still build fresh.

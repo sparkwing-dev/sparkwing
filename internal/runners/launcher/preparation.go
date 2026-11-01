@@ -60,7 +60,7 @@ func (l *Launcher) keepPreparation(ctx context.Context, fence capability.LeaseRe
 			initial = false
 			return lease.Beat{ExpiresAt: expires}, nil
 		}
-		if err := l.Sync(ctx); err != nil {
+		if err := l.syncActive(ctx); err != nil {
 			return lease.Beat{}, err
 		}
 		expiry, err := l.Control.Prepare(ctx, []capability.LeaseRef{fence})

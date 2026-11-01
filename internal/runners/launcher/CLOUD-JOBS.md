@@ -559,6 +559,43 @@ associated ephemeral-state reclamation. Job code holds no node root, so it canno
 change host state outside its Pod. A node is reused only by later jobs of the
 run that first used it, so even within a team no run reaches another's node.
 
+Placement prefers a run's own nodes within each eligible class. If its matching
+node still holds an exact predecessor reservation whose UID-fenced Job is deleting
+with the cleanup finalizer, the successor waits up to 30 seconds before requesting
+fresh capacity. Only that predecessor's Pods and DaemonSets may occupy the node.
+Normal reconciliation retries teardown before placement. Live reservations still
+permit fanout. Foreign runs, damaged bindings and quarantined nodes never earn
+this wait. The deadline belongs to the held award and does not renew on retries.
+`TestSuccessorWaitsForPredecessorNode` and `TestTeardownWaitIsBoundedAndRunScoped`
+guard reuse and the fallback.
+
+The first reservation also records `sparkwing.dev/used-run` with its team and run
+ID. Release retains it alongside the permanent protected labels. Each launcher
+sync can therefore find spent nodes after a restart. The `retire_run` query on
+the existing launcher sync endpoint checks current deployment launcher authority
+and its repository scope, and returns `run_terminal` only for a stored terminal state with a finish time.
+A retired job award, a missing run, a refused query or an unavailable controller
+is insufficient. Each reconciliation queries a run once, regardless of its node
+count, and retains a non-terminal answer for 30 seconds. The query cannot be
+combined with award or warm-pool observations.
+
+For an unreserved node whose annotation matches all protected team/run labels,
+the launcher verifies shared NodePool and NodeClaim provenance and cordons the
+exact node using its resource version. It then confirms that no non-DaemonSet Pod
+remains in any namespace before deleting the owning NodeClaim with a UID
+precondition.
+Concurrent reservation or node replacement cancels retirement. Repeated passes
+accept an already-deleted claim. Retirement failures retain the node and retry
+without blocking claims or preparation renewal. Retirement errors are logged at
+most once per minute. Existing NodeClaim get/delete RBAC is sufficient.
+Nodes with missing ownership evidence, including nodes released by older
+launchers without the retained annotation, remain for Karpenter consolidation.
+`TestRestartRetiresOnlyEmptySpentNodesOfTerminalRuns`,
+`TestRunRetirementQueryThroughController`,
+`TestSpentNodeQueriesEachRunOnceAndCachesNonTerminal`,
+`TestSpentNodeErrorsAreRateLimitedAndDoNotFailSync` and
+`TestLauncherRunTerminalRequiresDeploymentAuthority` guard these rules.
+
 ## Preparation leases
 
 Image startup and source checkout can take longer than a unit's
@@ -569,7 +606,9 @@ owns those requests. The bootstrap still grants only source read and one exchang
 `LaunchOne` checks preparation authority before reserving a node, then runs the
 shared lease keeper through activation. Renewal also reconciles existing Jobs,
 so a slow new reservation does not stop another Job's source checkout heartbeat.
-Each placement attempt builds against the preparation acknowledgement's committed
+Spent-node retirement runs only in normal reconciliation, outside preparation
+renewal. `TestPreparationRenewalIgnoresPersistentRetirementFailure` guards this
+separation. Each placement attempt builds against the preparation acknowledgement's committed
 lease expiry because a held award can wait beyond its original lease. Every return
 cancels and joins that keeper. Normal reconciliation keeps persisted
 Jobs alive until exchange. Exchanged claims receive no launcher renewal because

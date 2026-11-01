@@ -8,8 +8,13 @@ import (
 	"testing/synctest"
 	"time"
 
+	"k8s.io/apimachinery/pkg/runtime"
+	ktesting "k8s.io/client-go/testing"
+
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
+	"github.com/sparkwing-dev/sparkwing/internal/limits"
 )
 
 func TestLauncherPreparationTransportRequiresRetainedFence(t *testing.T) {
@@ -140,6 +145,46 @@ func TestPreparationKeeperRejectsAlreadyExpiredResponse(t *testing.T) {
 		}
 		if err == nil {
 			t.Fatal("an expired preparation response started the boundary")
+		}
+	})
+}
+
+func TestPreparationRenewalIgnoresPersistentRetirementFailure(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		boundary, kube := boundaryFixture()
+		l, _, _, control := fixture()
+		var retirementCalls, renewals int
+		kube.PrependReactor("list", "nodes", func(action ktesting.Action) (bool, runtime.Object, error) {
+			if action.(ktesting.ListAction).GetListRestrictions().Labels.String() == "" {
+				return false, nil, nil
+			}
+			retirementCalls++
+			return true, nil, &apierr.Error{Code: apierr.Forbidden, Message: "retirement denied"}
+		})
+		preparer := preparationControl{CloudControl: control, prepare: func(context.Context, []capability.LeaseRef) (time.Time, error) {
+			renewals++
+			return time.Now().Add(limits.DefaultLease), nil
+		}}
+		l.Kube, l.Boundary, l.Control = kube, boundary, terminalControl{CloudControl: preparer}
+		ctx, stop, _, err := l.keepPreparation(t.Context(), control.award.Binding.LeaseRef())
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer stop()
+		time.Sleep(4 * limits.Renew(limits.DefaultLease))
+		synctest.Wait()
+		if ctx.Err() != nil || renewals < 4 {
+			t.Fatalf("preparation failed: renewals=%d cause=%v", renewals, context.Cause(ctx))
+		}
+		if retirementCalls != 0 {
+			t.Fatalf("preparation queried retirement %d times", retirementCalls)
+		}
+		listed := false
+		for _, action := range kube.Actions() {
+			listed = listed || action.GetVerb() == "list" && action.GetResource().Resource == "jobs"
+		}
+		if !listed {
+			t.Fatal("preparation did not reconcile existing Jobs")
 		}
 	})
 }

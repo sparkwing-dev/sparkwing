@@ -48,6 +48,7 @@ type storeLauncherSync struct {
 	store interface {
 		ReconcileLauncherAwards(context.Context, capability.AuthorityRef, []capability.LauncherObservation, []capability.LeaseRef, []capability.LeaseRef, []capability.LeaseRef, []capability.LauncherActivation) ([]store.LauncherAward, []store.LauncherPreparation, error)
 		RecordLauncherSyncFailure(context.Context, capability.AuthorityRef) error
+		LauncherRunTerminal(context.Context, capability.AuthorityRef, string, string) (bool, error)
 		RecordWarmPoolObservations(context.Context, capability.AuthorityRef, map[string]int64) error
 	}
 }
@@ -56,6 +57,10 @@ func (s storeLauncherSync) ReadLauncherSync(ctx context.Context, ref capability.
 	observed, err := validateLauncherSync(body)
 	if err != nil {
 		return controllerwire.LauncherSyncResponse{}, err
+	}
+	if body.RetireRun != nil {
+		terminal, err := s.store.LauncherRunTerminal(ctx, ref, body.RetireRun.Team, body.RetireRun.RunID)
+		return controllerwire.LauncherSyncResponse{RunTerminal: terminal}, err
 	}
 	// safety: idle warm observations must recheck launcher authority even without awards to reconcile.
 	if body.WarmPools != nil && len(observed) == 0 && len(body.Preparing) == 0 && len(body.Activations) == 0 {
@@ -126,6 +131,9 @@ func (s storeLauncherSync) ReadLauncherSync(ctx context.Context, ref capability.
 }
 
 func validateLauncherSync(body controllerwire.LauncherSyncRequest) ([]capability.LauncherObservation, error) {
+	if run := body.RetireRun; run != nil && (run.Team == "" || run.RunID == "" || body.WarmPools != nil || len(body.Observed)+len(body.Capacity)+len(body.Activations)+len(body.Preparing) != 0) {
+		return nil, invalidEngineBody("run retirement query requires team and run only")
+	}
 	for class, count := range body.WarmPools {
 		policy := store.WarmCapacitySettings{Class: class, Mode: "off", StartTimeTargetSeconds: 10}
 		if count < 0 || policy.Validate() != nil {

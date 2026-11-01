@@ -33,7 +33,12 @@ func (l *Launcher) Sync(ctx context.Context) error {
 	return l.sync(ctx)
 }
 
-func (l *Launcher) sync(ctx context.Context) (result error) {
+func (l *Launcher) sync(ctx context.Context) error {
+	defer l.syncSpentNodes(ctx)
+	return l.syncActive(ctx)
+}
+
+func (l *Launcher) syncActive(ctx context.Context) (result error) {
 	defer func() { result = l.syncReservations(ctx, result) }()
 	defer func() { result = errors.Join(result, l.syncCapacity(ctx)) }()
 	var errs []error
