@@ -632,6 +632,12 @@ elapsed time since award issuance. Activation seals the execution host and
 clears the notice. The initial slice is a credit hold, with usage starting at
 the executing Pod's first renewal. Cancellation retains the existing cleanup.
 
+The launcher logs the first provisioning wait for each held award at INFO;
+placement retries stay quiet. Failed capacity requests remain WARN. A controller
+reply without a JSON object is INFO for claims and warm observations: an
+undelivered claim returns after lease expiry, and the next complete warm sample
+replaces the missed observation. Other controller faults remain WARN.
+
 Capacity observations carry the award fence and an optional unconfigured
 capacity diagnosis to the controller. A capacity
 Pod's UID and assigned node never become an execution host. After reserving a
