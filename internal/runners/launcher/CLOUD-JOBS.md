@@ -642,23 +642,28 @@ run ID. Customer guidance names support@sparkwing.dev and the run reference.
 With a compatible pool, the launcher keeps the award and creates
 `sw-capacity-<award hash>`: an unbound Pod with the requested shared class and
 launcher namespace selectors, the generic dedicated toleration, the award's CPU,
-memory and scratch requests, the runner image running `sparkwing-runner version`,
-and no volumes, environment or service account token. The Pod records its unit
-fence and size in `sparkwing.dev/capacity-demand`, never the bootstrap credential.
+memory and scratch requests, the runner image running `/usr/bin/sleep` for the
+remaining award budget, and no volumes, environment or service account token.
+The Pod records its unit fence and size in `sparkwing.dev/capacity-demand`,
+never the bootstrap credential.
 Required pod anti-affinity on `kubernetes.io/hostname` keeps it off any node
 running a Pod with another team's `sparkwing.dev/team` label in the job
 namespace, so Karpenter adds one node per team's demand.
 
-- Only the requesting team's capacity requests are consumable at reservation. A
-  request from another team, running or finished, still keeps the node out of
-  reach. The scheduler ignores finished Pods for anti-affinity, so two teams'
-  requests can still finish on one node. A finished request no longer pends and
-  makes Karpenter add nothing, so a held award that could not reserve a node
-  deletes its finished request, UID-fenced, and creates a new one on the next
-  pass. The new request either takes a node no award has bound or pends until
-  Karpenter adds one. Another team's finished request leaves on that team's
-  next placement attempt, or with its award. `TestTwoTeamsOnAnEmptyPoolEachGetTheirOwnNode`
-  (grid cell R21C01) and `TestStoppedCapacityRequestIsReplaced` guard this.
+- A request stays Running until reservation consumes it or its award ends, so
+  later requests still see its anti-affinity. The launcher deletes it on release
+  or deadline cleanup. Only the requesting team's capacity requests, including
+  Running requests, are consumable. Another team's request, running or finished,
+  keeps the node out of reach. Reservation rechecks occupants after persisting
+  its fence and before consuming requests or creating a Job.
+- A stopped request is replaced, UID-fenced, only when its node holds another
+  team's Pod or is bound to another team or run. Otherwise the launcher waits,
+  because recreating requests on an incompatible pool would keep provisioning
+  unusable nodes. Adoption waits for a terminating old request to leave before
+  creating its replacement. `TestTwoTeamsOnAnEmptyPoolEachGetTheirOwnNode`
+  (grid cell R21C01), `TestCapacityArrivalBetweenReserveAndConsumeDefersJobUntilPodLeaves`,
+  `TestIncompatibleCapacityNodeDoesNotChurnRequests`, and
+  `TestTerminatingOldCapacityRequestWaitsForRemoval` guard these paths.
 
 - The hash covers the award generation, so a re-award creates its own request
   and never rebinds or deletes another generation's. Only the same award adopts
