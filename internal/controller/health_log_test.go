@@ -1,15 +1,21 @@
 package controller
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
+	"github.com/sparkwing-dev/sparkwing/internal/health"
+	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
 )
 
 func TestHealthDatabaseRetryLogLevel(t *testing.T) {
@@ -37,6 +43,7 @@ func TestHealthDatabaseRetryLogLevel(t *testing.T) {
 				cancel()
 			}
 			calls := 0
+			s := New(nil, slog.New(slog.DiscardHandler))
 			h, logs := auditHarness(t, "/api/v1/health", func(w http.ResponseWriter, r *http.Request) {
 				err := pingHealthDatabase(r.Context(), func(context.Context) error {
 					if calls >= len(tc.failures) {
@@ -47,7 +54,7 @@ func TestHealthDatabaseRetryLogLevel(t *testing.T) {
 					return err
 				})
 				if err != nil {
-					apierr.NoteResponseError(w, fmt.Errorf("controller health database check: %w", err))
+					apierr.NoteResponseError(w, s.healthDatabaseResult(r.Context(), err))
 					w.WriteHeader(http.StatusServiceUnavailable)
 				}
 			})
@@ -61,9 +68,77 @@ func TestHealthDatabaseRetryLogLevel(t *testing.T) {
 				if len(diagnostics) != 0 {
 					t.Fatalf("recovered health failure logged: %s", logs)
 				}
-			} else if len(diagnostics) != 1 || diagnostics[0]["level"] != "ERROR" {
-				t.Fatalf("unrecovered health failure must log once at ERROR: %s", logs)
+			} else if len(diagnostics) != 1 || diagnostics[0]["level"] != "WARN" || diagnostics[0]["err"] != "controller health database check: "+tc.failures[len(tc.failures)-1].Error() {
+				t.Fatalf("single health failure must log once at WARN with cause: %s", logs)
 			}
 		})
+	}
+}
+
+func TestHealthFailureLoggingAndRecovery(t *testing.T) {
+	st, err := teststore.Open(filepath.Join(t.TempDir(), "state.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+	var logs bytes.Buffer
+	s := New(st, slog.New(slog.NewJSONHandler(&logs, nil)))
+	h := s.Handler()
+	probe := func(status int) {
+		t.Helper()
+		out := httptest.NewRecorder()
+		h.ServeHTTP(out, httptest.NewRequest(http.MethodGet, "/api/v1/health", nil))
+		if out.Code != status {
+			t.Fatalf("health status = %d, want %d: %s", out.Code, status, out.Body)
+		}
+		if status == http.StatusServiceUnavailable {
+			var body health.Response
+			if err := json.Unmarshal(out.Body.Bytes(), &body); err != nil {
+				t.Fatal(err)
+			}
+			if body.Status != "degraded" || body.Auth != "enabled" || len(body.Problems) != 1 || body.Problems[0] != "db: unavailable" {
+				t.Fatalf("health failure response changed: %s", out.Body)
+			}
+		}
+	}
+	probe(http.StatusOK)
+	if len(auditLines(t, &logs, "controller health database recovered")) != 0 {
+		t.Fatal("healthy startup logged a recovery")
+	}
+	failed, err := teststore.Open(filepath.Join(t.TempDir(), "failed.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := failed.Close(); err != nil {
+		t.Fatal(err)
+	}
+	for _, failures := range []int{1, 16, 16} {
+		s.operator = failed.AsOperator()
+		for i := range failures {
+			logs.Reset()
+			probe(http.StatusServiceUnavailable)
+			records := auditLines(t, &logs, "http request failed")
+			if i >= 12 {
+				if len(records) != 0 {
+					t.Fatalf("sustained outage repeated its diagnostic: %s", &logs)
+				}
+				continue
+			}
+			level := "WARN"
+			if i == 11 {
+				level = "ERROR"
+			}
+			if len(records) != 1 || records[0]["level"] != level || records[0]["err"] != "controller health database check: sql: database is closed" {
+				t.Fatalf("probe %d: want one %s with cause: %s", i+1, level, &logs)
+			}
+		}
+		s.operator = st.AsOperator()
+		logs.Reset()
+		probe(http.StatusOK)
+		probe(http.StatusOK)
+		records := auditLines(t, &logs, "controller health database recovered")
+		if len(records) != 1 || records[0]["level"] != "INFO" {
+			t.Fatalf("recovery must log INFO once: %s", &logs)
+		}
 	}
 }

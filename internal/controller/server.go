@@ -41,6 +41,8 @@ type Server struct {
 	operatorCapabilities CapabilityManager
 	resolveTenant        func(context.Context, store.Team) (TenantHandle, error)
 	logger               *slog.Logger
+	healthMu             sync.Mutex
+	healthFailures       int
 
 	hostKeyScan       func(ctx context.Context, host string, port int) (ssh.PublicKey, error)
 	identityLinkLimit perMinuteLimiter
@@ -608,7 +610,10 @@ func withRequestLog(
 					cause = errors.New(http.StatusText(status))
 				}
 				level := slog.LevelError
-				if rw.clientCanceled() || errors.Is(cause, errCloudMetricsUnavailable) {
+				var healthFailure *healthDatabaseFailure
+				if errors.As(cause, &healthFailure) {
+					level = healthFailure.level
+				} else if rw.clientCanceled() || errors.Is(cause, errCloudMetricsUnavailable) {
 					level = slog.LevelInfo
 				}
 				logger.Log(ctx, level, "http request failed", "request_id", masker.Mask(rec.id), "method", r.Method, "route", rec.route, "status", status, "err", masker.Mask(cause.Error()))

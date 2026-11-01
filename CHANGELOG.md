@@ -57,6 +57,9 @@ unlock.
 
 ### Fixed
 
+- **controller:** Keep transient readiness failures below ERROR
+  Failed database health probes return HTTP 503 and log WARN with the cause. Twelve consecutive failed probes produce one ERROR per outage. The first successful probe logs one INFO recovery and resets the streak.
+
 - **secrets:** Normalize the CLI list's repository filter
   `--repo owner/name`, `github.com/owner/name`, and HTTPS or SSH clone URLs match the same pipeline secrets. Invalid filters report a usage error before contacting the controller. Repository keys still match exactly.
 

@@ -510,7 +510,10 @@ configured, the same records also go to the collector.
 The controller logs the expected HTTP 503 for unavailable Cloud job metrics at
 `info`. Database health probes retry a network failure once before reporting a
 failure. A recovered probe writes the normal `info` request log. Exhausted
-network retries and other server faults retain `error` diagnostics.
+network retries on the readiness route return HTTP 503 and log at `warn` with
+the cause. Twelve consecutive failed probes produce one `error` diagnostic;
+later failures log at `debug`. The first successful probe logs one `info`
+recovery and resets the streak. Other server faults retain `error` diagnostics.
 
 ## OpenTelemetry
 
