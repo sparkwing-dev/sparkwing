@@ -96,11 +96,12 @@ digests are CEL literals.
   holds no more than the Job's own.
 - The service account is `sparkwing-customer-job` with
   `automountServiceAccountToken: false`.
-- Every Pod selects the shared hardware class and launcher namespace labels.
-  Job Pods additionally select `node-restriction.kubernetes.io/sparkwing-team-node`
-  equal to their `sparkwing.dev/team` label and bind a reserved node. Capacity
-  requests omit the team selector and remain unbound. Both tolerate only the
-  generic dedicated taint and the launcher's reservation taint where applicable.
+- Capacity requests select the shared hardware class and launcher namespace,
+  omit the team selector and remain unbound. Job Pods select
+  `node-restriction.kubernetes.io/sparkwing-team-node` equal to their
+  `sparkwing.dev/team` label and bind their reserved node by name. Both tolerate
+  the generic dedicated taint and the CPU-band taint. The reservation taint
+  blocks scheduler placement while the launcher binds execution by name.
 - Labels are limited to the launcher's keys for each shape, and Job and capacity
   Pods carry the labels that select the default-deny egress policy. Job Pods
   may also carry `topology.kubernetes.io/region` and
