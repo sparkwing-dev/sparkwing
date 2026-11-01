@@ -85,6 +85,20 @@ func TestRequestCancellationLogLevel(t *testing.T) {
 	}
 }
 
+func TestUnexpectedMetricsUnavailableLogsError(t *testing.T) {
+	h, logs := auditHarness(t, "/api/v1/runs/{run}/jobs/{job}/metrics", func(w http.ResponseWriter, _ *http.Request) {
+		if err := apierr.WriteHTTP(w, &apierr.Error{Code: apierr.Unavailable, Message: errCloudMetricsUnavailable.Message}); err != nil {
+			t.Fatal(err)
+		}
+	})
+	out := httptest.NewRecorder()
+	h.ServeHTTP(out, httptest.NewRequest(http.MethodGet, "/api/v1/runs/run/jobs/job/metrics", nil))
+	records := auditLines(t, logs, "http request failed")
+	if out.Code != http.StatusServiceUnavailable || len(records) != 1 || records[0]["level"] != "ERROR" {
+		t.Fatalf("unexpected metrics failure must stay at ERROR: status=%d logs=%s", out.Code, logs)
+	}
+}
+
 func TestServerFailuresLogMaskedCauseOnceProperty(t *testing.T) {
 	property := func(input []byte) bool {
 		secret := "private-" + hex.EncodeToString(input) + "/+?"

@@ -608,7 +608,7 @@ func withRequestLog(
 					cause = errors.New(http.StatusText(status))
 				}
 				level := slog.LevelError
-				if rw.clientCanceled() {
+				if rw.clientCanceled() || errors.Is(cause, errCloudMetricsUnavailable) {
 					level = slog.LevelInfo
 				}
 				logger.Log(ctx, level, "http request failed", "request_id", masker.Mask(rec.id), "method", r.Method, "route", rec.route, "status", status, "err", masker.Mask(cause.Error()))

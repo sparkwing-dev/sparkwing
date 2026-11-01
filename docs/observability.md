@@ -507,6 +507,11 @@ lowest level written: `debug`, `info` (the default), `warn` or `error`. A value
 the service does not know stops it at startup. With an OTLP logs endpoint
 configured, the same records also go to the collector.
 
+The controller logs the expected HTTP 503 for unavailable Cloud job metrics at
+`info`. Database health probes retry a network failure once before reporting a
+failure. A recovered probe writes the normal `info` request log. Exhausted
+network retries and other server faults retain `error` diagnostics.
+
 ## OpenTelemetry
 
 Every sparkwing service initializes OpenTelemetry and exposes a

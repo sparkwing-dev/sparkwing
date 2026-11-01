@@ -1,7 +1,9 @@
 package controller
 
 import (
+	"bytes"
 	"context"
+	"log/slog"
 	"net/http"
 	"strings"
 	"testing"
@@ -63,13 +65,24 @@ func TestMetricsHTTPCompletedCloudJobWithoutSamples(t *testing.T) {
 			})
 			f.facts.snapshot.Authorities[0].Principal.Capability.Team = "a"
 			f.s.WithEngineController(engine.EngineController)
+			var logs bytes.Buffer
+			f.s.logger = slog.New(slog.NewJSONHandler(&logs, nil))
 			w := engineClaimHTTP(t, f.s.Handler(), f.raw, http.MethodGet, "/api/v1/runs/run/jobs/job/metrics"+tc.query, "", tc.want)
+			diagnostics := auditLines(t, &logs, "http request failed")
 			if tc.want == http.StatusServiceUnavailable {
+				if len(diagnostics) != 1 || diagnostics[0]["level"] != "INFO" {
+					t.Fatalf("expected Cloud metrics diagnostic at INFO: %s", &logs)
+				}
 				if !strings.Contains(w.Body.String(), `"code":"unavailable"`) || !strings.Contains(w.Body.String(), "metrics unavailable on Cloud runners") {
 					t.Fatalf("missing explicit Cloud metrics failure: %s", w.Body.String())
 				}
-			} else if tc.samples > 0 && tc.query == "" && !strings.Contains(w.Body.String(), `"cpu_millicores":1000`) {
-				t.Fatalf("stored sample lost: %s", w.Body.String())
+			} else {
+				if len(diagnostics) != 0 {
+					t.Fatalf("successful metrics request logged failure: %s", &logs)
+				}
+				if tc.samples > 0 && tc.query == "" && !strings.Contains(w.Body.String(), `"cpu_millicores":1000`) {
+					t.Fatalf("stored sample lost: %s", w.Body.String())
+				}
 			}
 		})
 	}

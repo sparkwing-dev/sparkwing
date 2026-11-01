@@ -57,6 +57,7 @@ unlock.
 
 ### Fixed
 
+- **controller:** Log unavailable Cloud job metrics at info and retry database health network failures once before logging an error
 - **Cloud runner:** Reuse prepared pipelines when execution expands the planner's omitted checkout defaults
   Publication and restore compare effective checkout policy. Different history depth, submodule and LFS settings still build fresh.
 - **Cloud launcher:** Log provisioning waits once per claim at info

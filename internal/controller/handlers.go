@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io/fs"
 	"mime"
+	"net"
 	"net/http"
 	"os"
 	"strconv"
@@ -30,7 +31,7 @@ import (
 // secret rotation, bucket, storage, egress and GitHub App state describe the
 // deployment to anyone who asks, so they are on the operator health route.
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
-	if err := s.operator.Ping(r.Context()); err != nil {
+	if err := pingHealthDatabase(r.Context(), s.operator.Ping); err != nil {
 		apierr.NoteResponseError(w, fmt.Errorf("controller health database check: %w", err))
 		writeJSON(w, http.StatusServiceUnavailable, health.Response{Status: "degraded", Auth: "enabled", Problems: []string{"db: unavailable"}})
 		return
@@ -38,9 +39,20 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, health.Response{Status: "ok", Auth: "enabled"})
 }
 
+// safety: a failed DNS lookup or connection can recover before the next probe;
+// only an exhausted network retry should reach the request's ERROR diagnostic.
+func pingHealthDatabase(ctx context.Context, ping func(context.Context) error) error {
+	err := ping(ctx)
+	var networkError net.Error
+	if ctx.Err() == nil && errors.As(err, &networkError) {
+		return ping(ctx)
+	}
+	return err
+}
+
 func (s *Server) handleOperatorHealth(w http.ResponseWriter, r *http.Request, _ capability.Authorized) error {
 	out := controllerwire.OperatorHealth{Status: "ok", Database: s.storageHealth()}
-	if err := s.operator.Ping(r.Context()); err != nil {
+	if err := pingHealthDatabase(r.Context(), s.operator.Ping); err != nil {
 		apierr.NoteResponseError(w, fmt.Errorf("controller health database check: %w", err))
 		out.Problems = append(out.Problems, "db: unavailable")
 	}
