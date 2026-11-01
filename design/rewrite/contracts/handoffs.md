@@ -1305,3 +1305,15 @@ pools are not an option. Research and measurements:
   single-use nodes; a microVM spike on metal and nested-virtualization hosts;
   faster launcher handoffs; image pre-baking; a provider-neutral compute-driver
   seam for Cloudflare, GCP and bare metal.
+
+## 2026-11-01 Korey decision 76: forks pay for their own CI
+
+One model for forked pull requests: the base repository never runs a fork's pull
+request. A contributor who wants CI installs Sparkwing on their fork under their
+own team; pushes to the fork run and bill there, with none of the base
+repository's secrets or trust. The base pull request shows a note explaining this.
+Follow-up: verify whether check runs created on the fork's head commit by the
+fork's installation appear on the base pull request, and close the gap if not.
+After launch: per-repository pull-request controls for public repositories (who may
+trigger runs, approval for first-time or outside contributors, which pipelines run
+on pull requests).
