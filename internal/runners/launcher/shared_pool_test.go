@@ -7,10 +7,15 @@ import (
 	"testing"
 	"time"
 
+	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
+	ktesting "k8s.io/client-go/testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/pkg/match"
@@ -83,6 +88,10 @@ func setSharedClass(t *testing.T, b *KubernetesBoundary, class string) {
 	if _, err = b.Karpenter.Resource(nodePools).Update(t.Context(), pool, metav1.UpdateOptions{}); err != nil {
 		t.Fatal(err)
 	}
+	rs := &appsv1.ReplicaSet{ObjectMeta: metav1.ObjectMeta{Name: "warm", Namespace: "warm", UID: "rs-uid", OwnerReferences: []metav1.OwnerReference{{APIVersion: "apps/v1", Kind: "Deployment", Name: "sparkwing-cloud-warm-" + class, UID: "deployment-uid", Controller: ptr(true)}}}}
+	if _, err = b.Kube.AppsV1().ReplicaSets("warm").Create(t.Context(), rs, metav1.CreateOptions{}); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func sharedWarmPod() *corev1.Pod {
@@ -102,6 +111,10 @@ func TestSharedPoolUpsizesOnlyIntoIdleWarmNextClass(t *testing.T) {
 		{name: "two sizes up", class: "8", enabled: true, warm: true},
 		{name: "wrong namespace", class: "4", enabled: true, warm: true, mutate: func(p *corev1.Pod) { p.Namespace = "foreign" }},
 		{name: "unowned", class: "4", enabled: true, warm: true, mutate: func(p *corev1.Pod) { p.OwnerReferences = nil }},
+		{name: "volumes", class: "4", enabled: true, warm: true, mutate: func(p *corev1.Pod) {
+			p.Spec.Volumes = []corev1.Volume{{Name: "data", VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{}}}}
+			p.Spec.Containers = []corev1.Container{{Name: "pause", VolumeMounts: []corev1.VolumeMount{{Name: "data", MountPath: "/data"}}}}
+		}},
 		{name: "not low priority", class: "4", enabled: true, warm: true, mutate: func(p *corev1.Pod) { p.Spec.Priority = ptr(int32(0)) }},
 	} {
 		t.Run(test.name, func(t *testing.T) {
@@ -231,5 +244,80 @@ func TestSharedPoolPrefersRequestedClassBeforeWarmUpsize(t *testing.T) {
 	}
 	if _, err = kube.CoreV1().Pods("warm").Get(t.Context(), "warm", metav1.GetOptions{}); err != nil {
 		t.Fatalf("upsized placeholder consumed: %v", err)
+	}
+}
+
+func TestSharedPoolRefusesUnprovenWarmDeployment(t *testing.T) {
+	for _, change := range []string{"missing", "wrong uid", "wrong deployment", "not controller", "not deployment"} {
+		t.Run(change, func(t *testing.T) {
+			b, kube := boundaryFixture()
+			setSharedClass(t, b, "4")
+			rs, err := kube.AppsV1().ReplicaSets("warm").Get(t.Context(), "warm", metav1.GetOptions{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			switch change {
+			case "missing":
+				err = kube.AppsV1().ReplicaSets("warm").Delete(t.Context(), rs.Name, metav1.DeleteOptions{})
+			case "wrong uid":
+				rs.UID = "replaced"
+			case "wrong deployment":
+				rs.OwnerReferences[0].Name = "controller"
+			case "not controller":
+				rs.OwnerReferences[0].Controller = ptr(false)
+			case "not deployment":
+				rs.OwnerReferences[0].Kind = "StatefulSet"
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if change != "missing" {
+				if _, err = kube.AppsV1().ReplicaSets("warm").Update(t.Context(), rs, metav1.UpdateOptions{}); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if _, err = kube.CoreV1().Pods("warm").Create(t.Context(), sharedWarmPod(), metav1.CreateOptions{}); err != nil {
+				t.Fatal(err)
+			}
+			if _, err = b.Reserve(t.Context(), boundaryBinding("team"), "job", CloudPlacement{RequestedClass: "2", UpsizeEnabled: true}); !errors.Is(err, ErrNoDedicatedNode) {
+				t.Fatalf("reserve: %v", err)
+			}
+		})
+	}
+}
+
+func TestSharedPoolForbiddenPlaceholderDeleteReleasesReservation(t *testing.T) {
+	b, kube := boundaryFixture()
+	setSharedClass(t, b, "4")
+	if _, err := kube.CoreV1().Pods("warm").Create(t.Context(), sharedWarmPod(), metav1.CreateOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	kube.PrependReactor("delete", "pods", func(action ktesting.Action) (bool, runtime.Object, error) {
+		return true, nil, apierrors.NewForbidden(schema.GroupResource{Resource: "pods"}, action.(ktesting.DeleteAction).GetName(), errors.New("RBAC denied"))
+	})
+	if _, err := b.Reserve(t.Context(), boundaryBinding("team"), "job", CloudPlacement{RequestedClass: "2", UpsizeEnabled: true}); !apierrors.IsForbidden(err) {
+		t.Fatalf("reserve: %v", err)
+	}
+	node, err := kube.CoreV1().Nodes().Get(t.Context(), "node", metav1.GetOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if reservationEvidence(node) {
+		t.Fatal("failed delete retained reservation")
+	}
+	if node.Labels[TeamNodeLabel] != TeamNodeValue("cloud", "team") || node.Labels[usedTeamLabel] != TeamNodeValue("cloud", "team") || node.Labels[usedRunLabel] != runNodeValue("cloud", "run") {
+		t.Fatalf("permanent binding changed: %v", node.Labels)
+	}
+	if _, err = kube.CoreV1().Pods("warm").Get(t.Context(), "warm", metav1.GetOptions{}); err != nil {
+		t.Fatalf("placeholder: %v", err)
+	}
+	other := boundaryBinding("other")
+	if _, err = b.Reserve(t.Context(), other, "foreign", CloudPlacement{RequestedClass: "4"}); !errors.Is(err, ErrNoDedicatedNode) {
+		t.Fatalf("foreign team: %v", err)
+	}
+	other = boundaryBinding("team")
+	other.RunID = "other-run"
+	if _, err = b.Reserve(t.Context(), other, "foreign", CloudPlacement{RequestedClass: "4"}); !errors.Is(err, ErrNoDedicatedNode) {
+		t.Fatalf("foreign run: %v", err)
 	}
 }

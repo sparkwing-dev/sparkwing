@@ -34,9 +34,10 @@ const (
 // A node is reused only within the run that first used it, so no Job state is cleared between
 // runs. Network isolation is the cluster's NetworkPolicy enforcement, which the operator verifies.
 type KubernetesBoundary struct {
-	Kube      kubernetes.Interface
-	Karpenter dynamic.Interface
-	Namespace string
+	Kube          kubernetes.Interface
+	Karpenter     dynamic.Interface
+	Namespace     string
+	NodeClassName string
 }
 
 func (b *KubernetesBoundary) Reserve(ctx context.Context, binding CloudJobBinding, job string, placement CloudPlacement) (CloudNodeReservation, error) {
@@ -217,7 +218,11 @@ func (b *KubernetesBoundary) occupants(ctx context.Context, node, team string) (
 		if daemonPod(pod) {
 			continue
 		}
-		if team != "" && warmPlaceholder(pod, bound.Labels[WarmNamespaceLabel]) {
+		warm, err := b.warmPlaceholder(ctx, pod, *bound)
+		if err != nil {
+			return nil, err
+		}
+		if warm {
 			requests = append(requests, pod)
 			continue
 		}

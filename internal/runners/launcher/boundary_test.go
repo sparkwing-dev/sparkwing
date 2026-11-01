@@ -51,7 +51,7 @@ func boundaryFixture() (*KubernetesBoundary, *fake.Clientset) {
 		}
 		return true, candidate, nil
 	})
-	return &KubernetesBoundary{Kube: kube, Karpenter: karpenterFixture(), Namespace: "cloud"}, kube
+	return &KubernetesBoundary{Kube: kube, Karpenter: karpenterFixture(), Namespace: "cloud", NodeClassName: "sparkwing-jobs"}, kube
 }
 
 func TestBoundaryCompetingLaunchersCannotShareNode(t *testing.T) {
@@ -252,7 +252,7 @@ func karpenterFixture() dynamic.Interface {
 	}}
 	pool := &unstructured.Unstructured{Object: map[string]any{
 		"apiVersion": "karpenter.sh/v1", "kind": "NodePool", "metadata": map[string]any{"name": "pool", "uid": "pool-uid"},
-		"spec": map[string]any{"template": map[string]any{"metadata": map[string]any{"labels": map[string]any{CloudClassLabel: "2", PoolNamespaceLabel: "cloud", WarmNamespaceLabel: "warm"}}, "spec": map[string]any{"taints": []any{map[string]any{"key": DedicatedTaint, "value": "true", "effect": "NoSchedule"}}}}},
+		"spec": map[string]any{"template": map[string]any{"metadata": map[string]any{"labels": map[string]any{CloudClassLabel: "2", PoolNamespaceLabel: "cloud", WarmNamespaceLabel: "warm"}}, "spec": map[string]any{"nodeClassRef": map[string]any{"group": "karpenter.k8s.aws", "kind": "EC2NodeClass", "name": "sparkwing-jobs"}, "taints": []any{map[string]any{"key": DedicatedTaint, "value": "true", "effect": "NoSchedule"}}}}},
 	}}
 	return dynamicfake.NewSimpleDynamicClient(runtime.NewScheme(), claim, pool)
 }

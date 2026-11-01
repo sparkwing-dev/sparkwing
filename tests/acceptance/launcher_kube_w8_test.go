@@ -107,7 +107,7 @@ func cloudProvisionerW8(node *corev1.Node, _ string) dynamic.Interface {
 		"apiVersion": "karpenter.sh/v1", "kind": "NodePool", "metadata": map[string]any{"name": "pool", "uid": "pool-uid"},
 		"spec": map[string]any{"template": map[string]any{
 			"metadata": map[string]any{"labels": map[string]any{launcher.CloudClassLabel: "2", launcher.PoolNamespaceLabel: "cloud", launcher.WarmNamespaceLabel: "warm"}},
-			"spec": map[string]any{"taints": []any{map[string]any{
+			"spec": map[string]any{"nodeClassRef": map[string]any{"group": "karpenter.k8s.aws", "kind": "EC2NodeClass", "name": "sparkwing-jobs"}, "taints": []any{map[string]any{
 				"key": launcher.DedicatedTaint, "value": "true", "effect": "NoSchedule",
 			}}},
 		}},

@@ -630,7 +630,10 @@ protected `node-restriction.kubernetes.io/sparkwing-cloud-class` label, the
 `sparkwing.dev/launcher-namespace` label and generic dedicated taint. It carries
 no team assignment. Reservation proves the node's owning NodeClaim UID, status
 node name and provider ID, plus the claim's owning NodePool UID and the matching
-class/deployment provenance. The launcher atomically binds a never-used node by
+class/deployment provenance. The pool's nodeClassRef must match the configured
+`NodeClassName`, group `karpenter.k8s.aws` and kind `EC2NodeClass`.
+`sparkwing-runner launch --node-class` defaults to `sparkwing-jobs`.
+The launcher atomically binds a never-used node by
 setting its exact `node-restriction.kubernetes.io/sparkwing-team-node` value
 alongside permanent `node-restriction.kubernetes.io/sparkwing-used-team` and
 `node-restriction.kubernetes.io/sparkwing-used-run` fences.
@@ -641,12 +644,17 @@ separate run. Reservation cleanup never clears or changes the team/run fences.
 Karpenter removes empty nodes after the consolidation delay. No LimitRange read
 permission is needed.
 
-Warm placeholder Deployments live in the trusted namespace recorded by
-`sparkwing.dev/warm-namespace` on the shared pool, NodeClaim and node. The launcher
-recognizes only `sparkwing.dev/warm-placeholder=true` Pods with negative priority,
-`priorityClassName: sparkwing-cloud-warm` and an apps/v1 ReplicaSet controller
-reference there. The warm namespace is trusted operator infrastructure. It reserves the node before deleting those placeholders.
-Unrelated Pods make the node unavailable.
+Warm placeholder Deployments live in their own namespace, recorded by
+`sparkwing.dev/warm-namespace` on the shared pool, NodeClaim and node. The chart
+creates `<release namespace>-cloud-warm` by default. `launcher.warmNamespace`
+must differ from both release and Job namespaces. Pod get/delete and ReplicaSet
+get stay confined there. The launcher recognizes only volume-free
+`sparkwing.dev/warm-placeholder=true` Pods with negative priority and
+`priorityClassName: sparkwing-cloud-warm`. Their apps/v1 ReplicaSet controller
+UID must match the actual ReplicaSet, whose Deployment controller must be named
+`sparkwing-cloud-warm-<vCPU>`. It reserves the node before deleting placeholders.
+A forbidden delete releases the reservation and its taint while retaining the
+permanent team/run binding. Unrelated Pods make the node unavailable.
 
 Operator setting `cloud_upsize_enabled` defaults to true. With no free warm node
 of the requested class, a job may take an idle, never-used warm node exactly one

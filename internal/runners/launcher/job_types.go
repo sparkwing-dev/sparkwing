@@ -28,6 +28,7 @@ type CloudJobConfig struct {
 	Labels                                             []string
 	StoppedTeams                                       []string
 	Namespace, RunnerImage, DockerImage, ControllerURL string
+	NodeClassName                                      string
 	CPUCeiling                                         float64
 	MemoryCeiling                                      int64
 }

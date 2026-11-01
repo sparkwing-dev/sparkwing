@@ -54,7 +54,7 @@ func (b *KubernetesBoundary) CapacityConfigured(ctx context.Context, budget core
 	}
 	value := cpuClass(budget.Cpu().AsApproximateFloat64())
 	for _, pool := range pools.Items {
-		compatible, err := compatibleSharedPool(pool, b.Namespace, value, budget)
+		compatible, err := b.compatibleSharedPool(pool, value, budget)
 		if err != nil || compatible {
 			return compatible, err
 		}
@@ -62,9 +62,14 @@ func (b *KubernetesBoundary) CapacityConfigured(ctx context.Context, budget core
 	return false, nil
 }
 
-func compatibleSharedPool(pool unstructured.Unstructured, namespace, class string, budget corev1.ResourceList) (bool, error) {
+func (b *KubernetesBoundary) compatibleSharedPool(pool unstructured.Unstructured, class string, budget corev1.ResourceList) (bool, error) {
 	labels, _, err := unstructured.NestedStringMap(pool.Object, "spec", "template", "metadata", "labels")
-	if err != nil || class == "" || labels[PoolNamespaceLabel] != namespace || labels[CloudClassLabel] != class || labels[TeamNodeLabel] != "" {
+	_, teamLabelPresent := labels[TeamNodeLabel]
+	if err != nil || class == "" || labels[PoolNamespaceLabel] != b.Namespace || labels[CloudClassLabel] != class || teamLabelPresent {
+		return false, err
+	}
+	ref, _, err := unstructured.NestedStringMap(pool.Object, "spec", "template", "spec", "nodeClassRef")
+	if err != nil || b.NodeClassName == "" || ref["name"] != b.NodeClassName || ref["group"] != "karpenter.k8s.aws" || ref["kind"] != "EC2NodeClass" {
 		return false, err
 	}
 	taints, _, err := unstructured.NestedSlice(pool.Object, "spec", "template", "spec", "taints")
@@ -85,7 +90,7 @@ func compatibleSharedPool(pool unstructured.Unstructured, namespace, class strin
 		return false, nil
 	}
 	// safety: only contradictory template constraints prove incompatibility; readiness and fleet limits can recover.
-	known := map[string]string{CloudClassLabel: class, PoolNamespaceLabel: namespace, corev1.LabelOSStable: "linux"}
+	known := map[string]string{CloudClassLabel: class, PoolNamespaceLabel: b.Namespace, corev1.LabelOSStable: "linux"}
 	if os, ok := labels[corev1.LabelOSStable]; ok && os != "linux" {
 		return false, nil
 	}
@@ -209,10 +214,12 @@ func nextCPUClass(class string) string {
 
 func (b *KubernetesBoundary) verifyNodeTeam(ctx context.Context, node *corev1.Node, team string) error {
 	value := TeamNodeValue(b.Namespace, team)
-	usedTeam, usedRun := node.Labels[usedTeamLabel], node.Labels[usedRunLabel]
+	usedTeam, teamUsed := node.Labels[usedTeamLabel]
+	usedRun, runUsed := node.Labels[usedRunLabel]
+	nodeTeam, teamBound := node.Labels[TeamNodeLabel]
 	// safety: an incomplete or foreign binding must never become fresh again; all three labels bind atomically.
-	if usedTeam != "" || usedRun != "" || node.Labels[TeamNodeLabel] != "" {
-		if usedTeam != value || usedRun == "" || node.Labels[TeamNodeLabel] != value {
+	if teamUsed || runUsed || teamBound {
+		if usedTeam != value || usedRun == "" || nodeTeam != value {
 			return ErrNoDedicatedNode
 		}
 	}
@@ -227,7 +234,8 @@ func (b *KubernetesBoundary) verifyNodeTeam(ctx context.Context, node *corev1.No
 	if err != nil {
 		return err
 	}
-	if claim.GetDeletionTimestamp() != nil || claim.GetLabels()[TeamNodeLabel] != "" {
+	_, claimTeamLabelPresent := claim.GetLabels()[TeamNodeLabel]
+	if claim.GetDeletionTimestamp() != nil || claimTeamLabelPresent {
 		return ErrNoDedicatedNode
 	}
 	for _, owner := range claim.GetOwnerReferences() {
@@ -245,7 +253,7 @@ func (b *KubernetesBoundary) verifyNodeTeam(ctx context.Context, node *corev1.No
 		if err != nil {
 			return err
 		}
-		compatible, err := compatibleSharedPool(*pool, b.Namespace, class, corev1.ResourceList{})
+		compatible, err := b.compatibleSharedPool(*pool, class, corev1.ResourceList{})
 		if err != nil {
 			return err
 		}
@@ -268,16 +276,32 @@ func hasDedicatedTaint(taints []corev1.Taint) bool {
 	})
 }
 
-func warmPlaceholder(pod corev1.Pod, namespace string) bool {
-	if namespace == "" || pod.Namespace != namespace || pod.Labels[WarmPlaceholderLabel] != "true" || pod.Spec.PriorityClassName != WarmPriorityClass || pod.Spec.Priority == nil || *pod.Spec.Priority >= 0 {
-		return false
+func (b *KubernetesBoundary) warmPlaceholder(ctx context.Context, pod corev1.Pod, node corev1.Node) (bool, error) {
+	namespace := node.Labels[WarmNamespaceLabel]
+	if namespace == "" || pod.Namespace != namespace || pod.Labels[WarmPlaceholderLabel] != "true" || pod.Spec.PriorityClassName != WarmPriorityClass || pod.Spec.Priority == nil || *pod.Spec.Priority >= 0 || len(pod.Spec.Volumes) != 0 {
+		return false, nil
 	}
 	for _, owner := range pod.OwnerReferences {
-		if owner.APIVersion == "apps/v1" && owner.Kind == "ReplicaSet" && owner.UID != "" && owner.Controller != nil && *owner.Controller {
-			return true
+		if owner.APIVersion != "apps/v1" || owner.Kind != "ReplicaSet" || owner.Name == "" || owner.UID == "" || owner.Controller == nil || !*owner.Controller {
+			continue
+		}
+		rs, err := b.Kube.AppsV1().ReplicaSets(namespace).Get(ctx, owner.Name, metav1.GetOptions{})
+		if apierrors.IsNotFound(err) {
+			return false, nil
+		}
+		if err != nil {
+			return false, err
+		}
+		if rs.UID != owner.UID {
+			return false, nil
+		}
+		for _, deployment := range rs.OwnerReferences {
+			if deployment.APIVersion == "apps/v1" && deployment.Kind == "Deployment" && deployment.Name == "sparkwing-cloud-warm-"+node.Labels[CloudClassLabel] && deployment.UID != "" && deployment.Controller != nil && *deployment.Controller {
+				return true, nil
+			}
 		}
 	}
-	return false
+	return false, nil
 }
 
 func (b *KubernetesBoundary) hasWarmPlaceholder(ctx context.Context, node corev1.Node) (bool, error) {
@@ -290,8 +314,11 @@ func (b *KubernetesBoundary) hasWarmPlaceholder(ctx context.Context, node corev1
 		return false, err
 	}
 	for _, pod := range pods.Items {
-		if pod.Spec.NodeName == node.Name && warmPlaceholder(pod, node.Labels[WarmNamespaceLabel]) {
-			return true, nil
+		if pod.Spec.NodeName == node.Name {
+			warm, err := b.warmPlaceholder(ctx, pod, node)
+			if err != nil || warm {
+				return warm, err
+			}
 		}
 	}
 	return false, nil

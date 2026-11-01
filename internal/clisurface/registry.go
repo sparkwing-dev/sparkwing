@@ -836,6 +836,7 @@ func Registry() []Command {
 		{Path: "sparkwing-runner launch", Hidden: true, Rules: []string{"Every Cloud Job uses root plus DinD on its own team-dedicated node with enforced egress; fixed 20 GiB scratch has no flag."}, Flags: []Flag{
 			{Name: "controller", Argument: "URL", Required: true},
 			{Name: "namespace", Argument: "NAMESPACE"},
+			{Name: "node-class", Argument: "NAME", Meaning: "Expected hardened EC2NodeClass name (default sparkwing-jobs)"},
 			{Name: "stop-team", Argument: "TEAM", Repeatable: true, CommaList: true, Meaning: "Operator emergency stop for new claims and placement; configure every launcher"},
 			{Name: "image", Argument: "IMAGE", Required: true},
 			{Name: "label", Argument: "LABEL", Repeatable: true, CommaList: true, Meaning: "Observed pool label for claim matching"},

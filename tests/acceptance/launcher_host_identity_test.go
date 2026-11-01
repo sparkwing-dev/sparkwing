@@ -47,7 +47,7 @@ func TestLauncherCapacityWaitDoesNotSealExecutionHost(t *testing.T) {
 		}
 		return false, nil, nil
 	})
-	boundary := &launcher.KubernetesBoundary{Kube: kube, Karpenter: provisioner, Namespace: cfg.Namespace}
+	boundary := &launcher.KubernetesBoundary{Kube: kube, Karpenter: provisioner, Namespace: cfg.Namespace, NodeClassName: "sparkwing-jobs"}
 	runtime, err := launcher.NewLauncher(t.Context(), launcher.RuntimeConfig{Kube: kube, Boundary: boundary, Jobs: cfg, Demand: controllerwire.ClaimRequest{RunnerVersion: "v0.71.0", Kinds: []capability.UnitKind{capability.UnitNode}}, Bearer: func(context.Context) (string, error) { return root.Raw, nil }, NewController: func(options client.EngineOptions) (launcher.LauncherController, error) {
 		return cloudStoreClientW8(t, server)(options)
 	}})

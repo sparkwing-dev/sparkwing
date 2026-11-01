@@ -97,7 +97,7 @@ func TestLauncherKubernetesBoundaryW8Components(t *testing.T) {
 				}
 				return false, nil, nil
 			})
-			boundary := &launcher.KubernetesBoundary{Kube: kube, Karpenter: karpenter, Namespace: cfg.Namespace}
+			boundary := &launcher.KubernetesBoundary{Kube: kube, Karpenter: karpenter, Namespace: cfg.Namespace, NodeClassName: "sparkwing-jobs"}
 			first := &launcher.Launcher{Kube: kube, Control: control, Boundary: boundary, Config: cfg}
 			if claimed, err := first.LaunchOne(t.Context()); err != nil || !claimed {
 				t.Fatalf("launch: %t %v", claimed, err)

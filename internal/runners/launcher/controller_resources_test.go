@@ -236,7 +236,7 @@ func TestCloudCapacityFailureThroughController(t *testing.T) {
 	l, kube, boundary, _ := fixture()
 	boundary.reserveErr = ErrNoDedicatedNode
 	l.Control = control
-	l.Boundary = capacityBoundary{CloudBoundary: boundary, pools: &KubernetesBoundary{Namespace: "cloud", Karpenter: poolClient()}}
+	l.Boundary = capacityBoundary{CloudBoundary: boundary, pools: &KubernetesBoundary{Namespace: "cloud", NodeClassName: "sparkwing-jobs", Karpenter: poolClient()}}
 	if _, err := l.LaunchOne(t.Context()); err != nil {
 		t.Fatal(err)
 	}
