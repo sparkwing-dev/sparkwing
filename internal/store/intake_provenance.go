@@ -39,6 +39,16 @@ func sealProvenanceTx(ctx context.Context, tx *storeTx, team Team, request Intak
 			return sealed, err
 		}
 	}
+	if request.SourceCredentialVerified && input.Lineage.ParentRunID != "" && sealed.SharedSecretsOnly() {
+		parent, err := readRunTx(ctx, tx, team, input.Lineage.ParentRunID)
+		if err != nil {
+			return sealed, err
+		}
+		compared := runspec.RepoKey("gh:" + strconv.FormatInt(request.FetchedRepository.ID, 10))
+		if compared == input.Git.Repository.Key && compared == parent.Request.Request.Git.Repository.Key {
+			return refused(sealed.WithChildSourceRepository(compared))
+		}
+	}
 	if request.SourceCredentialVerified && sealed.ProvenRepository() != "" {
 		if sealed, err = refused(sealed.WithSourceCredentialVerified()); err != nil {
 			return sealed, err

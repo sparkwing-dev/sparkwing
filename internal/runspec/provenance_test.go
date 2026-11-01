@@ -190,3 +190,46 @@ func TestDisplayShowsSealedTrustClass(t *testing.T) {
 		}
 	}
 }
+
+func TestChildSourceRepositoryCannotBecomeExecutionProof(t *testing.T) {
+	child, err := runspec.AssertedChildProvenance(runspec.RunWriter("parent"), "refs/heads/feature", strings.Repeat("a", 40), "child")
+	if err != nil {
+		t.Fatal(err)
+	}
+	child, err = child.WithChildSourceRepository("gh:7")
+	if err != nil {
+		t.Fatal(err)
+	}
+	data, err := json.Marshal(child)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var restored runspec.Provenance
+	if err := json.Unmarshal(data, &restored); err != nil {
+		t.Fatal(err)
+	}
+	if restored != child || restored.ChildSourceRepository() != "gh:7" || restored.ProvenRepository() != "" || restored.Trust() != runspec.TrustAsserted || restored.DefaultBranchWork() {
+		t.Fatal("child source proof widened on roundtrip")
+	}
+	if _, id, ref, sha := restored.OIDC(); id != 0 || ref != "" || sha != "" {
+		t.Fatal("source proof became OIDC claims")
+	}
+	if _, err := restored.WithSourceCredentialVerified(); err == nil {
+		t.Fatal("source proof became general credential proof")
+	}
+	if _, err := restored.FetchedFrom(7, "acme/repo", "", ""); err == nil {
+		t.Fatal("source proof became fetched repository proof")
+	}
+	ordinary, err := runspec.AssertedProvenance(runspec.RunWriter("parent"), "refs/heads/feature", strings.Repeat("a", 40), "child")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ordinary.WithChildSourceRepository("gh:7"); err == nil {
+		t.Fatal("ordinary asserted run acquired child source access")
+	}
+	for _, repo := range []runspec.RepoKey{"other:7", "gh:0", "gh:-1", "gh:007"} {
+		if _, err := child.WithChildSourceRepository(repo); err == nil {
+			t.Fatalf("accepted invalid repository %q", repo)
+		}
+	}
+}

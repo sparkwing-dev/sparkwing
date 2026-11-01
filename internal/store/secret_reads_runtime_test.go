@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"math/rand/v2"
@@ -384,5 +385,36 @@ func TestShortStoredSecretReleasedOnlyToAuthorizedClaim(t *testing.T) {
 	a.Target.SecretName = "UNDECLARED"
 	if row, err := tenant.ReadSecret(t.Context(), a); err == nil || row != nil {
 		t.Fatal("undeclared short secret released")
+	}
+}
+
+func TestFetchOnlyChildRefusesPipelineAndSharedSecretRelease(t *testing.T) {
+	tenant, auth := secretReadStoreFixture(t)
+	if secret, err := tenant.ReadSecret(t.Context(), auth); err != nil || secret == nil {
+		t.Fatalf("proven parent secret: %v", err)
+	}
+	if err := seedSecret(t, tenant, Secret{Name: "KEY", Value: "shared-value", Shared: true, Masked: true}, tenant.s.now()); err != nil {
+		t.Fatal(err)
+	}
+	run, err := tenant.ReadRun(t.Context(), auth.Principal.Capability.Binding.RunID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	proof, err := runspec.AssertedChildProvenance(runspec.RunWriter("parent"), run.Request.Request.Git.Ref, run.Request.Request.Git.SHA, run.Pipeline)
+	if err != nil {
+		t.Fatal(err)
+	}
+	proof, err = proof.WithChildSourceRepository(runspec.RepoKey(fixtureRepo))
+	if err != nil {
+		t.Fatal(err)
+	}
+	run.Request.Provenance = proof
+	raw, err := json.Marshal(run.Request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rewriteSchemaExec(t, tenant.s.db, `UPDATE runs SET request_json=? WHERE team=? AND id=?`, raw, tenant.team, run.ID)
+	if secret, err := tenant.ReadSecret(t.Context(), auth); err == nil || secret != nil {
+		t.Fatalf("fetch-only child received secret: %v", err)
 	}
 }

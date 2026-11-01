@@ -130,9 +130,19 @@ func (p Provenance) FetchedFrom(repositoryID int64, repository, ref, sha string)
 	return p.sealIdentity()
 }
 
-// ProvenRepository returns the repository proof sealed at intake. Every release
-// of repository-scoped material reads this fact; asserted source metadata grants nothing.
+// ProvenRepository returns the repository proof sealed at intake. Fetch-only
+// child access is separate and grants no repository identity to other consumers.
 func (p Provenance) ProvenRepository() RepoKey { return p.identity.ProvenRepository }
+
+// WithChildSourceRepository seals a same-repository child's intake compare result.
+// It authorizes only source acquisition, without proving an execution identity.
+func (p Provenance) WithChildSourceRepository(repository RepoKey) (Provenance, error) {
+	p.identity.ChildSourceRepository = repository
+	return p, p.validate()
+}
+
+// ChildSourceRepository names the repository a changed child may fetch, or empty.
+func (p Provenance) ChildSourceRepository() RepoKey { return p.identity.ChildSourceRepository }
 
 // WithSourceCredentialVerified records intake's successful GitHub compare check.
 func (p Provenance) WithSourceCredentialVerified() (Provenance, error) {
@@ -206,6 +216,12 @@ func escapeWriter(s string) string {
 func (p Provenance) validate() error {
 	if p.identity.UnverifiedReason != "" && (p.Trust() != TrustAsserted || p.ProvenRepository() != "") {
 		return errors.New("an unverified reason requires asserted trust without repository proof")
+	}
+	if repo := p.identity.ChildSourceRepository; repo != "" {
+		id, err := strconv.ParseInt(strings.TrimPrefix(string(repo), "gh:"), 10, 64)
+		if err != nil || id <= 0 || repo != RepoKey("gh:"+strconv.FormatInt(id, 10)) || p.Trust() != TrustAsserted || !p.SharedSecretsOnly() || p.ProvenRepository() != "" || p.SourceCredentialVerified() || p.UnverifiedReason() != "" || !IsCommitID(p.identity.SHA) {
+			return errors.New("child source access requires an asserted child and a reachable GitHub repository commit")
+		}
 	}
 	id := p.identity.RepositoryID
 	if id == 0 {
@@ -354,6 +370,7 @@ func (p Provenance) OIDC() (trigger string, repositoryID int64, ref, sha string)
 }
 
 type provenanceJSON struct {
+	ChildSourceRepository    RepoKey    `json:"child_source_repository,omitempty"`
 	UnverifiedReason         string     `json:"unverified_reason,omitempty"`
 	ProvenRepository         RepoKey    `json:"proven_repository,omitempty"`
 	VerifiedDefaultBranch    bool       `json:"verified_default_branch,omitempty"`

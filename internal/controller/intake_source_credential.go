@@ -23,8 +23,22 @@ func (e *intakeCompareUnavailable) Unwrap() error { return e.error }
 
 func (s *Server) verifyIntakeSourceCredential(ctx context.Context, team store.Team, request runspec.Request) (store.FetchedRepository, bool, error) {
 	here := request.Options.Runner.Set && request.Options.Runner.Value.Kind == runspec.RunnerHere
-	if s.githubApp == nil || !request.Source.FetchedFromRemote() || here || request.Lineage.ParentRunID != "" || request.Lineage.RetryOf != "" {
+	if s.githubApp == nil || !request.Source.FetchedFromRemote() || here || request.Lineage.RetryOf != "" {
 		return store.FetchedRepository{}, false, nil
+	}
+	if request.Lineage.ParentRunID != "" {
+		tenant, err := s.tenantForTeam(ctx, team)
+		if err != nil {
+			return store.FetchedRepository{}, false, err
+		}
+		parent, err := tenant.ReadRun(ctx, request.Lineage.ParentRunID)
+		if err != nil {
+			return store.FetchedRepository{}, false, err
+		}
+		from := parent.Request.Request
+		if request.Git.Repository.Key != from.Git.Repository.Key || request.Source.Location != from.Source.Location || request.Git.SHA == from.Git.SHA && request.Git.Ref == from.Git.Ref && request.Source.Ref == from.Source.Ref {
+			return store.FetchedRepository{}, false, nil
+		}
 	}
 	key, github := strings.CutPrefix(string(request.Git.Repository.Key), "gh:")
 	if !github {

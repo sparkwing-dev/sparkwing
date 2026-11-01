@@ -110,6 +110,9 @@ func oidcIdentity(team Team, run RunRow) (capability.OIDCFacts, error) {
 	if !provenance.Valid() {
 		return capability.OIDCFacts{}, authorityError(apierr.IntegrityFailure, "run has no sealed provenance")
 	}
+	if provenance.ChildSourceRepository() != "" {
+		return capability.OIDCFacts{}, apierr.Authorization(apierr.ReasonRepositoryUnauthorized, "fetch-only child source access does not authorize OIDC")
+	}
 	facts := capability.OIDCFacts{Team: string(team), RunID: run.ID, Pipeline: provenance.Pipeline()}
 	facts.Trigger, facts.RepositoryID, facts.Ref, facts.SHA = provenance.OIDC()
 	facts.Repository = provenance.Repository()
