@@ -3,6 +3,7 @@ package jobs
 import (
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -138,7 +139,7 @@ func TestCanonicalWorkflowRunsTheCheckedOutEventChange(t *testing.T) {
 	requireWorkflowText(t, body,
 		"  workflow_call:\n",
 		"permissions:\n  contents: read\n",
-		"gate: [gate, pre-release]",
+		`gate: ${{ (inputs.source_ref != '' || inputs.release_tag != '') && fromJSON('["gate", "pre-release"]') || fromJSON('["gate", "race-touched", "pre-release"]') }}`,
 		"persist-credentials: false",
 		"Copy the immutable release verifier",
 		`cp bin/check-hosted-gate-clean.sh "$RUNNER_TEMP/check-hosted-gate-clean.sh"`,
@@ -149,7 +150,9 @@ func TestCanonicalWorkflowRunsTheCheckedOutEventChange(t *testing.T) {
 		"git tag --delete -- \"$RELEASE_TAG\"",
 		"-dropreplace=github.com/sparkwing-dev/sparkwing",
 		"pkg/scaffold/version.go",
-		"run gate",
+		"gate_selection=(--sw-only gate)",
+		"run gate --sw-only race-touched",
+		"- name: Stage the event change\n        if: matrix.gate != 'pre-release'",
 		"run pre-release",
 	)
 	if strings.Contains(body, ": write") {
@@ -170,6 +173,81 @@ func TestCanonicalWorkflowRunsTheCheckedOutEventChange(t *testing.T) {
 	preReleaseAt := strings.Index(body, `"$RUNNER_TEMP/sparkwing" run pre-release`)
 	if stageAt < 0 || regenAt < stageAt || copyAt < regenAt || hashAt < copyAt || preReleaseAt < hashAt {
 		t.Fatal("release self-pin snapshot is not regenerated before fingerprinting and pre-release")
+	}
+}
+
+func TestCanonicalSourceOverrideRetainsItsWholeGateGraph(t *testing.T) {
+	var doc yaml.Node
+	if err := yaml.Unmarshal([]byte(readHostedCIFile(t, ".github/workflows/canonical-gates.yaml")), &doc); err != nil {
+		t.Fatal(err)
+	}
+	steps := mappingValue(mappingValue(mappingValue(&doc, "jobs"), "gate"), "steps")
+	for _, step := range steps.Content {
+		name := mappingValue(step, "name")
+		if name == nil || name.Value != "Run canonical gate" {
+			continue
+		}
+		for _, tc := range []struct {
+			source, tag string
+		}{
+			{},
+			{source: "v0.68.2"},
+			{tag: "v0.68.2"},
+		} {
+			dir := t.TempDir()
+			if err := os.WriteFile(filepath.Join(dir, "sparkwing"), []byte("#!/bin/sh\nprintf '%s\\n' \"$@\"\n"), 0o700); err != nil {
+				t.Fatal(err)
+			}
+			cmd := exec.Command("bash", "-c", mappingValue(step, "run").Value)
+			cmd.Env = append(os.Environ(), "RUNNER_TEMP="+dir, "SOURCE_REF="+tc.source, "RELEASE_TAG="+tc.tag)
+			got, err := cmd.Output()
+			want := []string{"run", "gate"}
+			if tc.source == "" && tc.tag == "" {
+				want = append(want, "--sw-only", "gate")
+			}
+			want = append(want, "--sw-run-handle-file", filepath.Join(dir, "canonical-run.json"))
+			if err != nil || !slices.Equal(strings.Fields(string(got)), want) {
+				t.Errorf("source=%q tag=%q args=%s err=%v, want %v", tc.source, tc.tag, got, err, want)
+			}
+		}
+		return
+	}
+	t.Fatal("canonical workflow has no broad gate")
+}
+
+func TestCanonicalRequiredGateRejectsMissingOrFailedChecks(t *testing.T) {
+	body := readHostedCIFile(t, ".github/workflows/canonical-gates.yaml")
+	var doc yaml.Node
+	if err := yaml.Unmarshal([]byte(body), &doc); err != nil {
+		t.Fatal(err)
+	}
+	jobs := mappingValue(&doc, "jobs")
+	checks := mappingValue(jobs, "gate")
+	if got := mappingValue(checks, "name"); got == nil || got.Value != "Canonical / ${{ matrix.gate == 'gate' && 'gate-core' || matrix.gate }}" {
+		t.Fatal("matrix jobs must leave the required Canonical / gate name to the aggregate")
+	}
+	gate := mappingValue(jobs, "required-gate")
+	for key, want := range map[string]string{"name": "Canonical / gate", "needs": "gate", "if": "${{ always() }}"} {
+		if got := mappingValue(gate, key); got == nil || got.Value != want {
+			t.Fatalf("required gate %s = %v, want %s", key, got, want)
+		}
+	}
+	steps := mappingValue(gate, "steps")
+	if steps == nil || len(steps.Content) != 1 {
+		t.Fatal("required gate must check the combined matrix result")
+	}
+	step := steps.Content[0]
+	result := mappingValue(mappingValue(step, "env"), "RESULT")
+	command := mappingValue(step, "run")
+	if result == nil || result.Value != "${{ needs.gate.result }}" || command == nil {
+		t.Fatal("required gate does not consume the combined matrix result")
+	}
+	for _, result := range []string{"success", "failure", "cancelled", "skipped", ""} {
+		cmd := exec.Command("bash", "-c", command.Value)
+		cmd.Env = append(os.Environ(), "RESULT="+result)
+		if err := cmd.Run(); (err == nil) != (result == "success") {
+			t.Errorf("required gate result %q: %v", result, err)
+		}
 	}
 }
 
@@ -251,8 +329,8 @@ func TestCanonicalWorkflowPrintsStoredDiagnosticsAfterFailure(t *testing.T) {
 		"- name: Print failed canonical run diagnostics\n        if: ${{ failure() }}\n        continue-on-error: true\n        timeout-minutes: 2",
 		`bash "$reporter" "$RUNNER_TEMP/canonical-run.json" "$RUNNER_TEMP/sparkwing"`,
 	)
-	if got := strings.Count(body, `--sw-run-handle-file "$RUNNER_TEMP/canonical-run.json"`); got != 2 {
-		t.Fatalf("canonical run-handle publication count = %d, want gate and pre-release", got)
+	if got := strings.Count(body, `--sw-run-handle-file "$RUNNER_TEMP/canonical-run.json"`); got != 3 {
+		t.Fatalf("canonical run-handle publication count = %d, want broad gate, race and pre-release", got)
 	}
 }
 

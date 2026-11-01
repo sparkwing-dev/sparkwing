@@ -19,13 +19,13 @@ permissions:
 
 jobs:
   gate:
-    name: Canonical / ${{ matrix.gate }}
+    name: Canonical / ${{ matrix.gate == 'gate' && 'gate-core' || matrix.gate }}
     runs-on: ubuntu-latest
     timeout-minutes: ${{ matrix.gate == 'pre-release' && 130 || 80 }}
     strategy:
       fail-fast: false
       matrix:
-        gate: [gate, pre-release]
+        gate: ${{ (inputs.source_ref != '' || inputs.release_tag != '') && fromJSON('["gate", "pre-release"]') || fromJSON('["gate", "race-touched", "pre-release"]') }}
     env:
       GOWORK: "off"
     services:
@@ -119,7 +119,7 @@ jobs:
         run: go build -trimpath -o "$RUNNER_TEMP/sparkwing" ./cmd/sparkwing
 
       - name: Stage the event change
-        if: matrix.gate == 'gate'
+        if: matrix.gate != 'pre-release'
         env:
           PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
           PUSH_BEFORE_SHA: ${{ github.event.before }}
@@ -170,13 +170,25 @@ jobs:
         if: matrix.gate == 'gate'
         env:
           SPARKWING_HOME: ${{ runner.temp }}/sparkwing-home
+          SOURCE_REF: ${{ inputs.source_ref }}
+          RELEASE_TAG: ${{ inputs.release_tag }}
         run: |
-          "$RUNNER_TEMP/sparkwing" run gate --sw-run-handle-file "$RUNNER_TEMP/canonical-run.json"
-          if [ "${{ inputs.release_tag }}" = v0.37.2 ]; then
+          gate_selection=()
+          if [ -z "$SOURCE_REF" ] && [ -z "$RELEASE_TAG" ]; then
+            gate_selection=(--sw-only gate)
+          fi
+          "$RUNNER_TEMP/sparkwing" run gate "${gate_selection[@]}" --sw-run-handle-file "$RUNNER_TEMP/canonical-run.json"
+          if [ "$RELEASE_TAG" = v0.37.2 ]; then
             git apply --unidiff-zero --reverse --check "$RUNNER_TEMP/v0.37.2-test-oracle.patch"
             git apply --unidiff-zero --reverse "$RUNNER_TEMP/v0.37.2-test-oracle.patch"
             git diff --quiet
           fi
+
+      - name: Run canonical touched-package race
+        if: matrix.gate == 'race-touched'
+        env:
+          SPARKWING_HOME: ${{ runner.temp }}/sparkwing-home
+        run: '"$RUNNER_TEMP/sparkwing" run gate --sw-only race-touched --sw-run-handle-file "$RUNNER_TEMP/canonical-run.json"'
 
       - name: Run canonical pre-release
         if: matrix.gate == 'pre-release'
@@ -246,3 +258,15 @@ jobs:
             web/playwright-report/
           if-no-files-found: ignore
           retention-days: 14
+
+  required-gate:
+    name: Canonical / gate
+    if: ${{ always() }}
+    needs: gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 1
+    steps:
+      - name: Require every canonical result
+        env:
+          RESULT: ${{ needs.gate.result }}
+        run: test "$RESULT" = success
