@@ -22,6 +22,9 @@ unlock.
 
 ### Changed
 
+- **controller:** Same-repository children at a different commit can fetch private source after a successful intake GitHub compare
+  Fetch-only App tokens read exactly that repository. Children stay asserted and receive no secrets, stored Git credentials, extra repositories or OIDC. Unreachable or unknown commits and cross-repository children receive no source credential.
+
 - **scaffold:** `const FallbackSDKVersion` pins v0.68.2, so a fresh scaffold compiles against that release.
 - **controller (Breaking):** List endpoints that returned whole collections now return cursor pages of 50 records by default, up to 200 per request
   Follow `next_cursor` while `truncated` is true. CLI and console callers fetch subsequent pages. Raw-array lists now use named collection envelopes.

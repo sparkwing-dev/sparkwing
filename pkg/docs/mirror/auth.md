@@ -1001,14 +1001,23 @@ against the same-repository PR head branch. Merged PR runs compare against their
 base branch. An asserted run can still have repository proof: a branch-pinned
 `source:` selected through the App may receive a repository credential when both
 commits pass the intake compare check. The asserted trust class alone does not
-refuse that credential. Changed-revision and cross-repository children inherit
-no repository proof, while exact-revision children inherit their parent's seal.
-Without that proof, a remote run receives neither a team Git credential nor a
-GitHub App source token, including for fetch-only access. A changed-revision child
-therefore cannot fetch a private repository. Start a separate run whose code
-Sparkwing selects and verifies through the GitHub App, or supply the source in an
-upload. Public repositories can still be fetched anonymously. Shared-secret
-eligibility does not grant source credentials.
+refuse that credential. Exact-revision children inherit their parent's seal.
+Changed-revision and cross-repository children inherit no repository proof.
+A changed-revision child in the same repository may receive a fetch-only GitHub
+App token after intake compares both its source and execution commits against
+that repository's branch or tag. The compare must return `identical` or `ahead`.
+Unreachable commits, unknown compare results and cross-repository children receive
+no token. Push the commit to a branch or tag in the parent's repository and start
+a new run, or upload the source.
+
+Fetch-only permission is sealed separately from repository proof. The child stays
+asserted and receives no stored Git credentials, extra repositories, team or
+pipeline secrets, or OIDC tokens. The App token requests only `contents: read`
+for that repository's numeric ID. Issuance and its committed audit require the
+current source-acquisition attempt's live authority, lease and generation.
+GitHub-issued tokens retain their provider expiration after release. Public
+repositories can still be fetched anonymously. Shared-secret eligibility does
+not grant source credentials.
 Verified cache fallbacks use the sealed repository proof. Unproven
 runs read and write their own data scope. Unknown claimant shapes use the
 personal host boundary and cannot claim repository-proven work.

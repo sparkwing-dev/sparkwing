@@ -219,6 +219,11 @@ failures return 503. No token is returned after failed reauthorization or audit.
 App tokens and stored team credentials require the executor's repository match
 and either a same-team shared runner or verified Cloud placement. A personal
 machine never receives either.
+A same-repository child at a different commit can receive a fetch-only token
+when intake's GitHub compare proves its commits reachable from that repository's
+branch or tag. That token reads exactly the child's repository, with no approved
+extras. The child stays asserted and receives no secrets, stored Git credentials
+or OIDC tokens. See [sealed execution trust](auth.md#sealed-execution-trust).
 The store records each release before exposing a credential. The source owner
 passes credentials through memory or private fetch configuration, applies the
 shared Git environment policy and removes acquisition-owned files after use.

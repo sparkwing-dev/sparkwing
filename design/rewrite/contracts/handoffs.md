@@ -1305,3 +1305,34 @@ pools are not an option. Research and measurements:
   single-use nodes; a microVM spike on metal and nested-virtualization hosts;
   faster launcher handoffs; image pre-baking; a provider-neutral compute-driver
   seam for Cloudflare, GCP and bare metal.
+
+
+## 2026-11-01 Korey approved: same-repository child fetch-only access
+
+Amends the source-credential restriction in the sealed repository proof decisions
+of 2026-10-30 and 2026-10-31. Grid cell R11C06 reached source acquisition with an
+asserted child at another commit, then failed before its secret check could run.
+
+- A changed-revision child in the same private repository may receive a fetch-only
+  source credential when intake's GitHub compare proves both its execution and
+  source commits reachable from a branch or tag of that repository. Keep the
+  existing `identical`/`ahead` compare rules. Fail closed for unreachable or unknown
+  results, cross-repository children and another team's authority.
+- Seal this permission as `child_source_repository`, separately from
+  `proven_repository` and the general source-credential compare flag. The child
+  stays asserted. It gains no execution repository proof, default-branch
+  eligibility, secrets, stored Git credentials, extra repositories or OIDC.
+- Mint a GitHub App token with only `contents: read` for exactly that repository's
+  numeric ID. Recheck the live attempt and team installation before minting and
+  before committing the release audit. Stored credentials cannot enforce this
+  scope and are refused.
+- The approval requires credential scope for the life of the attempt. The
+  existing path fences issuance to that attempt but cannot recall an issued
+  GitHub token before its provider expiration. The lead must resolve that
+  lifetime boundary before landing. This change adds no token-recall system.
+
+Tests cover the native child intake, actual checkout through the source client,
+read-only token permissions and exact repository scope, refused negative and
+unknown compares, cross-repository and cross-team refusals, attempt fences,
+secret selection, OIDC refusal and the generated trust matrix. The lead runs the
+full gate and the following Opus security review. No deployment is authorized.
