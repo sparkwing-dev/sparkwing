@@ -653,7 +653,7 @@ func (r *statusRecorder) ResponseError(err error) {
 }
 
 func (r *statusRecorder) clientCanceled() bool {
-	// pgx can replace a context error with ErrBadConn before sending a query.
+	// hack: pgx can replace a context error with ErrBadConn before sending a query.
 	return r.ctx != nil && errors.Is(r.ctx.Err(), context.Canceled) &&
 		(errors.Is(r.cause, context.Canceled) || errors.Is(r.cause, driver.ErrBadConn))
 }
