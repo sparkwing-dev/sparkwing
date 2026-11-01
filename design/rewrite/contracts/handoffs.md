@@ -1383,3 +1383,7 @@ full gate and the following Opus security review. No deployment is authorized.
 ## 2026-11-01 Korey decision 78: KEDA in its own namespace
 
 KEDA moves out of the staging warm namespace into a neutral `keda` namespace before the production cutover. Each environment keeps its scaler database Secret and TriggerAuthentication in its own warm namespace with an environment-specific name, and KEDA's workload permissions cover only the staging and production warm namespaces. Production warm scaling therefore never depends on a staging namespace and cannot read the staging database by name collision.
+
+## 2026-11-01 Korey decision 79: the budget breaker guards against runaways, not growth
+
+The Sparkwing Cloud AWS budget breaker becomes a catastrophe guard: a 3,000 USD monthly budget that trips at 90%, a 400 USD daily budget, and email alerts to Korey at 50% and 80% of the monthly budget. Customer Cloud usage is prepaid, so ordinary growth is already paid for; the breaker only has to stop runaway provisioning or abuse. Before launch, a tripped breaker must give customers a clear "Cloud capacity is temporarily unavailable" error naming support, never a silent hang, and must not charge for runs it refused. Tying the limit to prepaid revenue is a post-launch option.
