@@ -2,6 +2,7 @@ package store_test
 
 import (
 	"encoding/hex"
+	"net/url"
 	"strings"
 	"testing"
 
@@ -108,6 +109,83 @@ func TestSchemaBaselineDigestLegacyEmpty(t *testing.T) {
 	}
 	if got := readSchemaBaselineDigest(t, target.Open(t)); got != expected {
 		t.Fatalf("legacy baseline digest = %q, want %q", got, expected)
+	}
+}
+
+func TestOpenExistingSchemaBaselineDigest(t *testing.T) {
+	for _, state := range []string{"matching", "different", "legacy", "missing"} {
+		t.Run(state, func(t *testing.T) {
+			target := storetest.New(t)
+			st := target.Open(t)
+			location := target.DSN()
+			if st.Dialect() == store.DialectSQLite {
+				id, err := st.Connection(t.Context())
+				if err != nil {
+					t.Fatal(err)
+				}
+				location = strings.TrimPrefix(id.Target, "sqlite:")
+			}
+			expected := readSchemaBaselineDigest(t, st)
+			var statements []string
+			switch state {
+			case "different":
+				statements = []string{`UPDATE sparkwing_schema_version SET baseline_digest = 'different'`}
+			case "legacy", "missing":
+				statements = []string{`ALTER TABLE sparkwing_schema_version DROP COLUMN baseline_digest`}
+				if state == "missing" {
+					statements = append(statements, `DROP VIEW warm_pool_desired`)
+				}
+			}
+			for _, statement := range statements {
+				if _, err := st.DB().Exec(statement); err != nil {
+					t.Fatal(err)
+				}
+			}
+			reopened, err := store.OpenExisting(t.Context(), st.Dialect(), location)
+			if err == nil {
+				defer func() { _ = reopened.Close() }()
+			}
+			if state == "different" || state == "missing" {
+				if err == nil || !strings.Contains(err.Error(), expected) || !strings.Contains(err.Error(), "back up the store") {
+					t.Fatalf("OpenExisting error = %v, want baseline refusal and remedy", err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := readSchemaBaselineDigest(t, st); got != expected {
+				t.Fatalf("baseline digest = %q, want %q", got, expected)
+			}
+		})
+	}
+}
+
+func TestSchemaBaselinePostgresSearchPath(t *testing.T) {
+	for _, legacy := range []bool{false, true} {
+		target := storetest.NewPostgres(t)
+		st := target.Open(t)
+		expected := readSchemaBaselineDigest(t, st)
+		if legacy {
+			if _, err := st.DB().Exec(`ALTER TABLE sparkwing_schema_version DROP COLUMN baseline_digest`); err != nil {
+				t.Fatal(err)
+			}
+		}
+		empty, _ := url.Parse(storetest.NewPostgres(t).DSN())
+		u, _ := url.Parse(target.DSN())
+		q := u.Query()
+		q.Set("search_path", empty.Query().Get("search_path")+","+q.Get("search_path"))
+		u.RawQuery = q.Encode()
+		reopened, err := store.OpenPostgres(t.Context(), u.String())
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := reopened.Close(); err != nil {
+			t.Fatal(err)
+		}
+		if got := readSchemaBaselineDigest(t, st); got != expected {
+			t.Fatalf("baseline digest = %q, want %q", got, expected)
+		}
 	}
 }
 

@@ -16,7 +16,7 @@ func verifySchemaBaseline(ctx context.Context, tx *storeTx, path string) error {
 	q := `SELECT COUNT(*) FROM pragma_table_info('sparkwing_schema_version') WHERE name = 'baseline_digest'`
 	if tx.dialect == DialectPostgres {
 		q = `SELECT COUNT(*) FROM information_schema.columns
-WHERE table_schema = current_schema() AND table_name = 'sparkwing_schema_version' AND column_name = 'baseline_digest'`
+WHERE table_schema = ` + postgresStoreSchema + ` AND table_name = 'sparkwing_schema_version' AND column_name = 'baseline_digest'`
 	}
 	var hasDigest int
 	if err := tx.QueryRowContext(ctx, q).Scan(&hasDigest); err != nil {
@@ -56,7 +56,7 @@ func checkLegacySchemaObjects(ctx context.Context, tx *storeTx) (err error) {
 	if tx.dialect == DialectPostgres {
 		q = `SELECT CASE c.relkind WHEN 'r' THEN 'table' WHEN 'v' THEN 'view' WHEN 'i' THEN 'index' END, c.relname
 FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
-WHERE n.nspname = current_schema() AND c.relkind IN ('r', 'v', 'i')`
+WHERE n.nspname = ` + postgresStoreSchema + ` AND c.relkind IN ('r', 'v', 'i')`
 	}
 	rows, err := tx.queryContext(ctx, q)
 	if err != nil {
