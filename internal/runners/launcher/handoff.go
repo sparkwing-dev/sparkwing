@@ -30,7 +30,9 @@ func (b *KubernetesBoundary) predecessorTeardown(ctx context.Context, node corev
 	}
 	recorded, reservation, err := jobOwnership(*job)
 	matches := err == nil && reservation == held && sameBinding(recorded, binding)
-	if !matches || job.DeletionTimestamp == nil || job.Annotations[rejectedAnnotation] != "" || !slices.Contains(job.Finalizers, cleanupFinalizer) {
+	// perf: work can be awarded before Kubernetes observes the planning Job's exit.
+	planHandoff := binding.Kind == CloudPlan && successor.Kind != CloudPlan
+	if !matches || job.DeletionTimestamp == nil && !planHandoff || job.Annotations[rejectedAnnotation] != "" || !slices.Contains(job.Finalizers, cleanupFinalizer) {
 		return false, nil
 	}
 	pods, err := b.Kube.CoreV1().Pods("").List(ctx, metav1.ListOptions{FieldSelector: "spec.nodeName=" + node.Name})

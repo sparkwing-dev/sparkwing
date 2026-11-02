@@ -61,6 +61,8 @@ unlock.
 
 ### Fixed
 
+- **Cloud:** Plan-to-job handoffs avoid an extra empty node on normal runs and retries
+  The launcher waits for the run's planning node to finish teardown even when Kubernetes has not yet marked its Job for deletion.
 - **Cloud launcher:** Start when the optional budget Secret is missing and keep capacity that already has a node
   A missing Secret or key leaves the breaker open. A scheduled capacity Pod keeps its award waiting to reserve that paid node even when the breaker closes.
 - **controller:** Keep transient readiness failures below ERROR

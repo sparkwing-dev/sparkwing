@@ -562,14 +562,18 @@ run that first used it, so even within a team no run reaches another's node.
 Placement prefers a run's own nodes within each eligible class. If its matching
 node still holds an exact predecessor reservation whose UID-fenced Job is deleting
 with the cleanup finalizer, the successor waits up to 30 seconds before requesting
-fresh capacity. Only that predecessor's Pods and DaemonSets may occupy the node.
-Normal reconciliation retries teardown before placement. Live reservations still
+fresh capacity. A work or eval award also waits for its planning Job before Kubernetes
+marks that Job for deletion: the controller can award work as planning exits.
+Only that predecessor's Pods and DaemonSets may occupy the node.
+Normal reconciliation retries teardown before placement. Live work reservations still
 permit fanout. Foreign runs, damaged bindings and quarantined nodes never earn
 this wait. The deadline belongs to the held award and does not renew on retries.
 A held award has no Job or capacity Pod to renew it, so every pass retries its
 placement and renews its fence even while a claim backoff delays new claims.
 `TestSuccessorWaitsForPredecessorNode`, `TestTeardownWaitIsBoundedAndRunScoped`
 and `TestTeardownWaitRenewsThroughClaimBackoff` guard reuse, the fallback and renewal.
+`TestRunAndRetryPlanHandoffCreateOnlyOneNodeClaim` guards the plan-to-work gap for
+normal runs and retries, including launcher restarts.
 
 The first reservation also records `sparkwing.dev/used-run` with its team and run
 ID. Release retains it alongside the permanent protected labels. Retirement runs
