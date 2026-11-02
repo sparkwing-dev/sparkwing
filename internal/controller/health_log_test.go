@@ -85,7 +85,7 @@ func TestHealthDatabaseRetryLogLevel(t *testing.T) {
 }
 
 func TestHealthFailureLoggingAndRecovery(t *testing.T) {
-	st, err := teststore.Open(filepath.Join(t.TempDir(), "state.db"))
+	st, err := teststore.Open(t, filepath.Join(t.TempDir(), "state.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -128,7 +128,7 @@ func TestHealthFailureLoggingAndRecovery(t *testing.T) {
 	if len(auditLines(t, &logs, "controller health database recovered")) != 0 {
 		t.Fatal("canceled probes counted as a dependency outage")
 	}
-	failed, err := teststore.Open(filepath.Join(t.TempDir(), "failed.db"))
+	failed, err := teststore.Open(t, filepath.Join(t.TempDir(), "failed.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
