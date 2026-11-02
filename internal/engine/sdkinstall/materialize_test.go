@@ -166,13 +166,68 @@ func TestRunGoSDKPreparesEffectiveInputsAndOwnsExecutable(t *testing.T) {
 	}
 }
 
-func writeProxyModule(t *testing.T, proxy, module, version, source string) {
+func TestRunGoSDKUpgradeWithStaleSparksOverlay(t *testing.T) {
+	root := t.TempDir()
+	t.Cleanup(func() {
+		_ = filepath.WalkDir(root, func(path string, entry os.DirEntry, err error) error {
+			if err == nil && entry.IsDir() {
+				return os.Chmod(path, 0o700)
+			}
+			return nil
+		})
+	})
+	t.Setenv("HOME", root)
+	t.Setenv("SPARKWING_HOME", filepath.Join(root, "home"))
+	t.Setenv("GOMODCACHE", filepath.Join(root, "modules"))
+	t.Setenv("GOWORK", "off")
+	t.Setenv("GOSUMDB", "off")
+	proxy := filepath.Join(root, "proxy")
+	t.Setenv("GOPROXY", "file://"+filepath.ToSlash(proxy))
+	writeProxyModule(t, proxy, engine.GoModule, "v0.10.0", "package sdk\nconst Value=\"old\"\n")
+	writeProxyModule(t, proxy, engine.GoModule, "v0.20.0", "package sdk\nconst Value=\"upgraded\"\n")
+	writeProxyModule(t, proxy, "example.com/spark", "v1.0.0", "package spark\nimport sdk \""+engine.GoModule+"\"\nconst Value=sdk.Value\n", engine.GoModule+" v0.10.0")
+	dir := filepath.Join(root, "pipeline")
+	if err := os.Mkdir(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	module := "module fixture\ngo 1.26\nrequire (\n" + engine.GoModule + " v0.20.0\nexample.com/spark v1.0.0\n)\n"
+	writeInput(t, dir, "go.mod", []byte(module))
+	writeInput(t, dir, "main.go", []byte("package main\nimport (\"fmt\"; \"example.com/spark\")\nfunc main(){fmt.Print(spark.Value)}\n"))
+	for _, uncached := range []bool{false, true} {
+		writeInput(t, dir, ".resolved.mod", []byte(strings.ReplaceAll(module, "v0.20.0", "v0.10.0")))
+		request, err := json.Marshal(engine.SDKInstallRequest{Directory: dir, SDK: engineid.GoSDK, ExecutableDirectory: t.TempDir(), NoBincache: uncached})
+		if err != nil {
+			t.Fatal(err)
+		}
+		var output, diagnostics bytes.Buffer
+		if err := Run(t.Context(), "v0.20.0", bytes.NewReader(request), &output, &diagnostics); err != nil {
+			t.Fatalf("upgrade installation (uncached=%v): %v: %s", uncached, err, &diagnostics)
+		}
+		var command engine.SDKCommand
+		if err := json.Unmarshal(output.Bytes(), &command); err != nil {
+			t.Fatal(err)
+		}
+		got, err := exec.CommandContext(t.Context(), command.Command[0]).CombinedOutput()
+		if err != nil || string(got) != "upgraded" {
+			t.Fatalf("upgraded SDK execution: %q: %v", got, err)
+		}
+		native, err := os.ReadFile(filepath.Join(dir, "go.mod"))
+		if err != nil || string(native) != module {
+			t.Fatalf("installation changed the native manifest: %s: %v", native, err)
+		}
+	}
+}
+
+func writeProxyModule(t *testing.T, proxy, module, version, source string, requirements ...string) {
 	t.Helper()
 	dir := filepath.Join(proxy, filepath.FromSlash(module), "@v")
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		t.Fatal(err)
 	}
 	mod := []byte("module " + module + "\ngo 1.26\n")
+	for _, requirement := range requirements {
+		mod = append(mod, []byte("require "+requirement+"\n")...)
+	}
 	writeInput(t, dir, version+".mod", mod)
 	writeInput(t, dir, version+".info", []byte(fmt.Sprintf(`{"Version":%q,"Time":"2026-01-01T00:00:00Z"}`, version)))
 	var body bytes.Buffer
