@@ -575,6 +575,11 @@ and `TestTeardownWaitRenewsThroughClaimBackoff` guard reuse, the fallback and re
 `TestRunAndRetryPlanHandoffCreateOnlyOneNodeClaim` guards the plan-to-work gap for
 normal runs and retries, including launcher restarts.
 
+The first claim after launcher startup logs a controller rate-limit reply at INFO,
+because the previous process's idle poll interval may still apply. Later refusals
+log at WARN. Both honor the controller's retry delay. `TestLauncherLogsOnlyFirstClaimRateLimitAsInfo`
+guards the levels; placement failures retain WARN.
+
 The first reservation also records `sparkwing.dev/used-run` with its team and run
 ID. Release retains it alongside the permanent protected labels. Retirement runs
 in its own loop every 30 seconds, beside reconciliation, so it finds spent nodes

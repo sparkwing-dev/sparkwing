@@ -12,6 +12,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	ktesting "k8s.io/client-go/testing"
 
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	controllerclient "github.com/sparkwing-dev/sparkwing/internal/controller/client"
 )
 
@@ -86,4 +87,70 @@ func TestLauncherLogsCapacityWaitOnceAndPreservesProvisioningFault(t *testing.T)
 	if _, err := l.LaunchOne(t.Context()); !errors.Is(err, fault) {
 		t.Fatalf("provisioning fault hidden: %v", err)
 	}
+}
+
+type rateLimitLoggingControl struct {
+	*controlFake
+	stop    context.CancelFunc
+	replies []error
+}
+
+func (c *rateLimitLoggingControl) Claim(context.Context, string, []string) (*CloudJobAward, error) {
+	if len(c.replies) == 0 {
+		c.stop()
+		return nil, nil
+	}
+	err := c.replies[0]
+	c.replies = c.replies[1:]
+	return nil, err
+}
+
+func TestLauncherLogsOnlyFirstClaimRateLimitAsInfo(t *testing.T) {
+	limited := &apierr.Error{Code: apierr.RateLimited, Message: "poll later", Details: map[string]any{"retry_after_ms": float64(2000)}}
+	for _, test := range []struct {
+		name       string
+		replies    []error
+		info, warn int
+	}{
+		{"restart interval and repeat", []error{limited, limited}, 1, 1},
+		{"successful first claim", []error{nil, limited}, 0, 1},
+		{"joined fault", []error{errors.Join(limited, errors.New("cleanup failed"))}, 0, 1},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				l, _, _, base := fixture()
+				base.award = nil
+				ctx, cancel := context.WithCancel(t.Context())
+				defer cancel()
+				control := &rateLimitLoggingControl{controlFake: base, stop: cancel, replies: test.replies}
+				var logs strings.Builder
+				l.Control, l.Poll, l.Logger = control, time.Second, slog.New(slog.NewTextHandler(&logs, nil))
+				if err := l.Run(ctx); err != nil {
+					t.Fatal(err)
+				}
+				if strings.Count(logs.String(), "level=INFO") != test.info || strings.Count(logs.String(), "level=WARN") != test.warn {
+					t.Fatal(logs.String())
+				}
+			})
+		})
+	}
+}
+
+func TestLauncherKeepsWaitingPlacementRateLimitAtWarn(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		l, _, boundary, base := fixture()
+		l.wait(base.award)
+		boundary.reserveErr = &apierr.Error{Code: apierr.RateLimited, Message: "placement refused"}
+		ctx, cancel := context.WithCancel(t.Context())
+		defer cancel()
+		time.AfterFunc(time.Second, cancel)
+		var logs strings.Builder
+		l.Poll, l.Logger = time.Second, slog.New(slog.NewTextHandler(&logs, nil))
+		if err := l.Run(ctx); err != nil {
+			t.Fatal(err)
+		}
+		if strings.Contains(logs.String(), "level=INFO") || !strings.Contains(logs.String(), "level=WARN") || base.claims != 0 {
+			t.Fatalf("claims=%d logs=%s", base.claims, logs.String())
+		}
+	})
 }
