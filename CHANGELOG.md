@@ -20,6 +20,7 @@ unlock.
 
 ## [Unreleased]
 
+## [v0.68.3] - 2026-11-02
 ### Added
 
 - **Cloud:** A closed budget breaker fails waiting Cloud work clearly instead of leaving it pending
@@ -32,11 +33,11 @@ unlock.
 ### Changed
 
 - **deployment (Breaking):** Shared Cloud pools replace hand-made per-team NodePools
-  Replace per-team pool manifests with one pool per hardware class and the generic dedicated taint. Optional warm placeholders use KEDA's PostgreSQL scaler and a read-only database role. See the [warm capacity migration](docs/migrations/_unreleased.md#shared-cloud-capacity) and [infrastructure proposal](design/rewrite/proposals/warm-capacity.md). Warm policies join schema baseline 28's store reset. Scalers and their reader Secrets live with the placeholders in the dedicated warm namespace; staging can leave the shared PriorityClass under production ownership with `warmCapacity.createPriorityClass=false`.
+  Replace per-team pool manifests with one pool per hardware class and the generic dedicated taint. Optional warm placeholders use KEDA's PostgreSQL scaler and a read-only database role. See the [warm capacity migration](docs/migrations/v0.68.3.md#shared-cloud-capacity) and [infrastructure proposal](design/rewrite/proposals/warm-capacity.md). Warm policies join schema baseline 28's store reset. Scalers and their reader Secrets live with the placeholders in the dedicated warm namespace; staging can leave the shared PriorityClass under production ownership with `warmCapacity.createPriorityClass=false`.
 - **Cloud (Breaking):** Confine warm placeholder authority to a dedicated namespace
-  Move placeholders and their Pod get/delete and ReplicaSet get Role to `launcher.warmNamespace` (default `<release namespace>-cloud-warm`). Update pool warm-namespace labels and remove the old release-namespace warm Role and binding. Placeholders must be volume-free and owned by `sparkwing-cloud-warm-<vCPU>` through a verified ReplicaSet. `launcher.nodeClassName` / `launch --node-class` pins the hardened EC2NodeClass name (default `sparkwing-jobs`). Pools referencing a different class, group or kind are refused. Follow the [shared-capacity migration](docs/migrations/_unreleased.md#shared-cloud-capacity).
+  Move placeholders and their Pod get/delete and ReplicaSet get Role to `launcher.warmNamespace` (default `<release namespace>-cloud-warm`). Update pool warm-namespace labels and remove the old release-namespace warm Role and binding. Placeholders must be volume-free and owned by `sparkwing-cloud-warm-<vCPU>` through a verified ReplicaSet. `launcher.nodeClassName` / `launch --node-class` pins the hardened EC2NodeClass name (default `sparkwing-jobs`). Pools referencing a different class, group or kind are refused. Follow the [shared-capacity migration](docs/migrations/v0.68.3.md#shared-cloud-capacity).
 - **Cloud (Breaking):** Replace per-team Karpenter NodePools with one shared pool per requested hardware class and deployment
-  Nodes receive their permanent team/run binding at first reservation and never move between runs. Pools use protected class/deployment provenance and a generic dedicated taint. Idle warm nodes may serve jobs one class smaller with requested billing and cgroup limits, controlled by `cloud_upsize_enabled` (default true). Schema 28 records requested/granted class, fresh-capacity waits and claim-to-start latency per job. Follow the [shared-capacity migration](docs/migrations/_unreleased.md#shared-cloud-capacity).
+  Nodes receive their permanent team/run binding at first reservation and never move between runs. Pools use protected class/deployment provenance and a generic dedicated taint. Idle warm nodes may serve jobs one class smaller with requested billing and cgroup limits, controlled by `cloud_upsize_enabled` (default true). Schema 28 records requested/granted class, fresh-capacity waits and claim-to-start latency per job. Follow the [shared-capacity migration](docs/migrations/v0.68.3.md#shared-cloud-capacity).
 - **controller:** Same-repository children at a different commit can fetch private source after a successful intake GitHub compare
   Fetch-only App tokens read exactly that repository. Issuance requires a live attempt. Tokens keep GitHub's provider lifetime of at most one hour, including after the attempt ends. Children stay asserted and receive no secrets, stored Git credentials, extra repositories or OIDC. Unreachable or unknown commits and cross-repository children receive no source credential.
 - **Cloud runner (Breaking):** Prepare the pipeline and fetch its source once per run
@@ -50,14 +51,14 @@ unlock.
 - **billing (Breaking):** Each team can create 20 Stripe Checkout Sessions per rolling hour across Add funds and saved-card setup
   Idempotent retries count once. Refusals report current usage, a retry delay and support guidance before calling the provider.
 - **store (Breaking):** The schema baseline advances to version 28 in v0.68.3 as a store reset
-  Before 1.0, schema changes may require moving the local store aside or recreating a server database. Mismatched stores refuse startup with a remedy. Forward migrations start after launch. Back up and recreate stores at any other version using the [local and server reset steps](docs/migrations/_unreleased.md#recreate-the-store-for-schema-baseline-28). The baseline records Checkout Session reservation times, removes unused columns and capacity profile pins, waits, contention counters and floors, and enforces financial row shapes plus one open billing interval per award. Staging and production stores must be recreated before this build starts.
+  Before 1.0, schema changes may require moving the local store aside or recreating a server database. Mismatched stores refuse startup with a remedy. Forward migrations start after launch. Back up and recreate stores at any other version using the [local and server reset steps](docs/migrations/v0.68.3.md#recreate-the-store-for-schema-baseline-28). The baseline records Checkout Session reservation times, removes unused columns and capacity profile pins, waits, contention counters and floors, and enforces financial row shapes plus one open billing interval per award. Staging and production stores must be recreated before this build starts.
 - **controller (Breaking):** Sizing and capacity responses drop stored resource pins, demand floors, queue waits, contention counters and drift
-  Update API clients using the [capacity-profile migration guide](docs/migrations/_unreleased.md#capacity-profiles-report-measured-data). Measured resource distributions and predecessor estimates remain available.
+  Update API clients using the [capacity-profile migration guide](docs/migrations/v0.68.3.md#capacity-profiles-report-measured-data). Measured resource distributions and predecessor estimates remain available.
 - **release (Breaking):** Sparkwing releases use the native tag-and-publication flow
   Platform deployment is separate. Retire the platform repository's `release-all` pipeline and `bin/trigger-change-deploy.sh` callers when updating that repository.
-- **trust (Breaking):** Personal machines and here hosts never claim repository-proven runs, including run-now and burst `machines`. Repository-scoped runners accept only proven runs. Personal enrollment can omit `--repos` to serve the owner's asserted work; shared enrollment still requires a scope. Intake and claim seal repository and host trust once for secrets, OIDC, credentials and cache scopes. The schema reset uses baseline 28. See [migration](docs/migrations/_unreleased.md#sealed-execution-trust).
-- **source credentials (Breaking):** Job credentials require an intake GitHub compare check. They also require matching repository proof, except for fetch-only App tokens for same-repository children. Uploaded and unproven runs receive no host-wide fallback. App-selected historical commits and locked schedules can qualify when reachable from a repository branch or tag. See [migration](docs/migrations/_unreleased.md#sealed-execution-trust).
-- **pipeline references (Breaking):** Latest outputs default to verified default-branch runs and exclude publication. Declare `sw.FromAnyRun()` (TypeScript `{fromAnyRun: true}`) to opt out. The direct output route enforces the same rule. See [migration](docs/migrations/_unreleased.md#sealed-execution-trust).
+- **trust (Breaking):** Personal machines and here hosts never claim repository-proven runs, including run-now and burst `machines`. Repository-scoped runners accept only proven runs. Personal enrollment can omit `--repos` to serve the owner's asserted work; shared enrollment still requires a scope. Intake and claim seal repository and host trust once for secrets, OIDC, credentials and cache scopes. The schema reset uses baseline 28. See [migration](docs/migrations/v0.68.3.md#sealed-execution-trust).
+- **source credentials (Breaking):** Job credentials require an intake GitHub compare check. They also require matching repository proof, except for fetch-only App tokens for same-repository children. Uploaded and unproven runs receive no host-wide fallback. App-selected historical commits and locked schedules can qualify when reachable from a repository branch or tag. See [migration](docs/migrations/v0.68.3.md#sealed-execution-trust).
+- **pipeline references (Breaking):** Latest outputs default to verified default-branch runs and exclude publication. Declare `sw.FromAnyRun()` (TypeScript `{fromAnyRun: true}`) to opt out. The direct output route enforces the same rule. See [migration](docs/migrations/v0.68.3.md#sealed-execution-trust).
 
 ### Fixed
 
@@ -79,7 +80,7 @@ unlock.
 - **secrets:** List pipeline-scoped secrets through the CLI again
   Secret listings always include the shared flag, including false for pipeline-scoped secrets, as the client requires.
 - **store:** Refuse a changed schema baseline even when its version still matches
-  SQLite and PostgreSQL record the embedded baseline's SHA-256 digest and report both digests with the backup and reset remedy on mismatch. Stores without a digest are stamped only when every declared table, view and explicit index exists. Schema version stays 28. See the [baseline reset guide](docs/migrations/_unreleased.md#recreate-the-store-for-schema-baseline-28).
+  SQLite and PostgreSQL record the embedded baseline's SHA-256 digest and report both digests with the backup and reset remedy on mismatch. Stores without a digest are stamped only when every declared table, view and explicit index exists. Schema version stays 28. See the [baseline reset guide](docs/migrations/v0.68.3.md#recreate-the-store-for-schema-baseline-28).
 - **Cloud:** Teams asking for shared Cloud capacity at the same time no longer wait forever
   Capacity requests repel other teams' Pods, so Karpenter adds one fresh node per team instead of placing both requests on one node that neither team could then bind. A finished request that did not win its node is deleted and created again on the next pass, so Karpenter sees the demand again. Requests created before the upgrade fail the placement check and are replaced.
 - **Cloud:** Retire empty nodes after their run finishes instead of waiting for Karpenter consolidation
@@ -215,7 +216,7 @@ unlock.
 ### Removed
 
 - **teams + controller (Breaking):** Teams have no member cap
-  Remove `free_team_members` from operator signup settings, invitation `warning` handling and the `team_full` refusal reason. The unreleased schema baseline 28 drops the setting column. See the [migration guide](docs/migrations/_unreleased.md#teams-have-no-member-cap).
+  Remove `free_team_members` from operator signup settings, invitation `warning` handling and the `team_full` refusal reason. The unreleased schema baseline 28 drops the setting column. See the [migration guide](docs/migrations/v0.68.3.md#teams-have-no-member-cap).
 - **teams (Breaking):** Accounts can create teams without a lifetime creation cap
   Deleting or leaving a team does not reduce future team-creation access.
 - **daemon (Breaking):** Removed the version-aware takeover ladder
