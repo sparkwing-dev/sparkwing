@@ -71,7 +71,7 @@ func TestReviewPublicDoctorSweepsAndWarnsForPrunedRun(t *testing.T) {
 	t.Setenv("SPARKWING_HOME", p.Root)
 	offlineStopDaemon(t, p.Root)
 	t.Setenv("SPARKWING_CONFIG", filepath.Join(t.TempDir(), "missing.yaml"))
-	st, err := teststore.Open(p.StateDB())
+	st, err := teststore.Open(t, p.StateDB())
 	if err != nil {
 		t.Fatal(err)
 	}

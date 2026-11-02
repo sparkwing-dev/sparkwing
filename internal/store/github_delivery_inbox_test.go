@@ -53,7 +53,7 @@ func TestGitHubDeliveryReplayAndEventBinding(t *testing.T) {
 
 func TestGitHubDeliveryInterruptedProcessingNeverRetries(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "inbox.db")
-	st, err := teststore.Open(path)
+	st, err := teststore.Open(t, path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -69,7 +69,7 @@ func TestGitHubDeliveryInterruptedProcessingNeverRetries(t *testing.T) {
 	if err := st.Close(); err != nil {
 		t.Fatal(err)
 	}
-	st, err = teststore.OpenExisting(path)
+	st, err = teststore.OpenExisting(t, path)
 	if err != nil {
 		t.Fatal(err)
 	}

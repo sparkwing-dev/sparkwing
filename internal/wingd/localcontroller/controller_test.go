@@ -82,7 +82,7 @@ func openFixture(t *testing.T, bind func(context.Context, Binding) (Services, er
 // stateSQL reaches the state database that Open created under the binding's home.
 func stateSQL(t testing.TB, b Binding) *sql.DB {
 	t.Helper()
-	teststore.RegisterSQLite(b.Store, filepath.Join(b.Home, "state.db"))
+	teststore.RegisterSQLite(t, b.Store, filepath.Join(b.Home, "state.db"))
 	return teststore.SQL(t, b.Store)
 }
 
@@ -145,7 +145,7 @@ func TestCompositionUsesOneStoreAndRecoversBeforeReadiness(t *testing.T) {
 	if err := binding.Store.AsOperator().Ping(t.Context()); err == nil {
 		t.Fatal("owned store remained open")
 	}
-	reopened, err := teststore.OpenExisting(filepath.Join(binding.Home, "state.db"))
+	reopened, err := teststore.OpenExisting(t, filepath.Join(binding.Home, "state.db"))
 	if err != nil {
 		t.Fatal(err)
 	}

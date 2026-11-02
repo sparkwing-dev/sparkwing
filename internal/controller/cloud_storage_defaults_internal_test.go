@@ -15,7 +15,7 @@ import (
 
 func cloudDefaultsServer(t *testing.T, cfg deployment.Config) (*Server, *store.Store) {
 	t.Helper()
-	s, err := teststore.OpenExisting(filepath.Join(t.TempDir(), "state.db"))
+	s, err := teststore.OpenExisting(t, filepath.Join(t.TempDir(), "state.db"))
 	if err != nil {
 		t.Fatal(err)
 	}

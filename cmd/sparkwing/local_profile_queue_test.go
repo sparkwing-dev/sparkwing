@@ -26,7 +26,7 @@ func TestLocalQueueCacheDoesNotDependOnOwnerWinningJobClaim(t *testing.T) {
 	for _, unit := range []capability.UnitKind{capability.UnitTrigger, capability.UnitNode} {
 		t.Run(string(unit), func(t *testing.T) {
 			home := t.TempDir()
-			owned, err := teststore.Open(filepath.Join(home, "state.db"))
+			owned, err := teststore.Open(t, filepath.Join(home, "state.db"))
 			if err != nil {
 				t.Fatal(err)
 			}

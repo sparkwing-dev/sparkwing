@@ -22,6 +22,7 @@ import (
 type location struct {
 	dialect store.Dialect
 	dsn     string
+	db      *sql.DB
 }
 
 var (
@@ -36,30 +37,59 @@ type poolKey struct {
 
 // OpenExisting opens path with store.Open and records it for SQL. Use it
 // to reopen a compatible database a test already created. Unless WithClock is
-// supplied, time stays pinned to when the fixture opened.
-func OpenExisting(path string, opts ...store.Option) (*store.Store, error) {
+// supplied, time stays pinned to when the fixture opened. The fixture
+// connection closes when t ends.
+func OpenExisting(t T, path string, opts ...store.Option) (*store.Store, error) {
 	st, err := store.Open(path, fixtureOptions(opts)...)
 	if err != nil {
 		return nil, err
 	}
-	RegisterSQLite(st, path)
+	if err := register(t, st, location{dialect: store.DialectSQLite, dsn: sqliteDSN(path)}); err != nil {
+		return nil, errors.Join(err, st.Close())
+	}
 	return st, nil
 }
 
 // OpenPostgres opens dsn with store.OpenPostgres and records it for SQL.
-func OpenPostgres(ctx context.Context, dsn string, opts ...store.Option) (*store.Store, error) {
+// Its fixture connection closes when t ends.
+func OpenPostgres(t T, ctx context.Context, dsn string, opts ...store.Option) (*store.Store, error) {
 	st, err := store.OpenPostgres(ctx, dsn, fixtureOptions(opts)...)
 	if err != nil {
 		return nil, err
 	}
-	locations.Store(st, location{dialect: store.DialectPostgres, dsn: dsn})
+	if err := register(t, st, location{dialect: store.DialectPostgres, dsn: dsn}); err != nil {
+		return nil, errors.Join(err, st.Close())
+	}
 	return st, nil
 }
 
 // RegisterSQLite records the file behind a store that production code
-// opened, so SQL can reach it.
-func RegisterSQLite(st *store.Store, path string) {
-	locations.Store(st, location{dialect: store.DialectSQLite, dsn: sqliteDSN(path)})
+// opened, so SQL and Exec can reach it until t ends.
+func RegisterSQLite(t T, st *store.Store, path string) {
+	t.Helper()
+	if err := register(t, st, location{dialect: store.DialectSQLite, dsn: sqliteDSN(path)}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func register(t T, st *store.Store, loc location) error {
+	db, err := openLocation(loc)
+	if err != nil {
+		return err
+	}
+	// perf: retain SQLite's parsed schema across fixture statements.
+	db.SetMaxOpenConns(1)
+	loc.db = db
+	if _, loaded := locations.LoadOrStore(st, loc); loaded {
+		return db.Close()
+	}
+	t.Cleanup(func() {
+		locations.Delete(st)
+		if err := db.Close(); err != nil {
+			t.Fatal(err)
+		}
+	})
+	return nil
 }
 
 func sqliteDSN(path string) string {
@@ -117,12 +147,7 @@ func open(st *store.Store) (*sql.DB, error) {
 	if !ok {
 		return nil, fmt.Errorf("teststore: store was not opened through teststore; open it with teststore.Open, OpenExisting or OpenPostgres, or call RegisterSQLite")
 	}
-	loc := value.(location)
-	driver := "sqlite"
-	if loc.dialect == store.DialectPostgres {
-		driver = "pgx"
-	}
-	db, err := sql.Open(driver, loc.dsn)
+	db, err := openLocation(value.(location))
 	if err != nil {
 		return nil, err
 	}
@@ -130,15 +155,23 @@ func open(st *store.Store) (*sql.DB, error) {
 	return db, nil
 }
 
-// Exec runs one statement through a short-lived fixture connection, for
-// seeders that have no test to own a pool. It projects repository routing and
-// claim indexes when declarations change. Use SQL for intentional corruption.
-func Exec(ctx context.Context, st *store.Store, query string, args ...any) (_ sql.Result, err error) {
-	db, err := open(st)
-	if err != nil {
-		return nil, err
+func openLocation(loc location) (*sql.DB, error) {
+	driver := "sqlite"
+	if loc.dialect == store.DialectPostgres {
+		driver = "pgx"
 	}
-	defer func() { err = errors.Join(err, db.Close()) }()
+	return sql.Open(driver, loc.dsn)
+}
+
+// Exec runs statements through the fixture's shared connection, closed by
+// the test that opened or registered st. It projects repository routing and
+// claim indexes when declarations change. Use SQL for intentional corruption.
+func Exec(ctx context.Context, st *store.Store, query string, args ...any) (sql.Result, error) {
+	value, ok := locations.Load(st)
+	if !ok {
+		return nil, fmt.Errorf("teststore: store was not opened or registered through teststore")
+	}
+	db := value.(location).db
 	result, err := db.ExecContext(ctx, rebind(st, query), args...)
 	if err != nil {
 		return nil, err

@@ -206,7 +206,7 @@ func requesterLocalSecretRelease(t *testing.T, value string) {
 		}
 	}
 	fixture := &serverFixture{}
-	other, err := teststore.OpenExisting(databasePath, fixture.option(s.deployment, func(server *Server) { server.WithSecretsCipher(s.secretsCipher) }))
+	other, err := teststore.OpenExisting(t, databasePath, fixture.option(s.deployment, func(server *Server) { server.WithSecretsCipher(s.secretsCipher) }))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -337,7 +337,7 @@ func httpIntakeReplayPrivateInputs(t *testing.T, value string) {
 		t.Fatal(err)
 	}
 	fixture := &serverFixture{}
-	other, err := teststore.OpenExisting(path, fixture.option(s.deployment, func(server *Server) { server.WithSecretsCipher(s.secretsCipher) }))
+	other, err := teststore.OpenExisting(t, path, fixture.option(s.deployment, func(server *Server) { server.WithSecretsCipher(s.secretsCipher) }))
 	if err != nil {
 		t.Fatal(err)
 	}

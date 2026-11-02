@@ -81,7 +81,7 @@ func TestOwnerAwardMismatchCannotReachBindingProperty(t *testing.T) {
 
 func TestOwnerInputMatchesPersistedTriggerFence(t *testing.T) {
 	award := localTestAward(t)
-	state, err := teststore.Open(filepath.Join(t.TempDir(), "state.db"))
+	state, err := teststore.Open(t, filepath.Join(t.TempDir(), "state.db"))
 	if err != nil {
 		t.Fatal(err)
 	}

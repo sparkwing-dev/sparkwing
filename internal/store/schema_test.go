@@ -367,7 +367,7 @@ func TestOpenRefusesANonEmptyForeignDatabase(t *testing.T) {
 		if err := db.Close(); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := teststore.OpenExisting(path); err == nil || !strings.Contains(err.Error(), "not empty") {
+		if _, err := teststore.OpenExisting(t, path); err == nil || !strings.Contains(err.Error(), "not empty") {
 			t.Fatalf("Open over a foreign database = %v, want the not-empty refusal", err)
 		}
 		db, err = sql.Open("sqlite", path)
@@ -387,7 +387,7 @@ func TestOpenRefusesANonEmptyForeignDatabase(t *testing.T) {
 		}
 		defer func() { _ = db.Close() }()
 		seedForeignTable(t, db)
-		if _, err := teststore.OpenPostgres(t.Context(), dsn); err == nil || !strings.Contains(err.Error(), "not empty") {
+		if _, err := teststore.OpenPostgres(t, t.Context(), dsn); err == nil || !strings.Contains(err.Error(), "not empty") {
 			t.Fatalf("OpenPostgres over a foreign schema = %v, want the not-empty refusal", err)
 		}
 		got := column(t, db, `SELECT table_name FROM information_schema.tables WHERE table_schema = current_schema()`)
@@ -448,7 +448,7 @@ func TestOpenRefusesAPreRewriteStore(t *testing.T) {
 		}
 		defer func() { _ = db.Close() }()
 		seedPreRewriteStore(t, db)
-		_, err = teststore.OpenExisting(path)
+		_, err = teststore.OpenExisting(t, path)
 		assertPreRewriteRefusal(t, err, "mv "+path+" "+path+".v067")
 		assertPreRewriteStoreIntact(t, db, `SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name`)
 	})
@@ -460,7 +460,7 @@ func TestOpenRefusesAPreRewriteStore(t *testing.T) {
 		}
 		defer func() { _ = db.Close() }()
 		seedPreRewriteStore(t, db)
-		_, err = teststore.OpenPostgres(t.Context(), dsn)
+		_, err = teststore.OpenPostgres(t, t.Context(), dsn)
 		assertPreRewriteRefusal(t, err, "point the server at an empty database")
 		assertPreRewriteStoreIntact(t, db, `SELECT table_name FROM information_schema.tables WHERE table_schema = current_schema() ORDER BY table_name`)
 	})

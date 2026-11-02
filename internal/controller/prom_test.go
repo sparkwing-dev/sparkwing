@@ -119,7 +119,7 @@ func TestMetrics_RequiresAdminWithAuthEnabled(t *testing.T) {
 }
 
 func TestMetricsAddr_MovesMetricsOffTheAPIListener(t *testing.T) {
-	st, err := teststore.Open(filepath.Join(t.TempDir(), "state.db"))
+	st, err := teststore.Open(t, filepath.Join(t.TempDir(), "state.db"))
 	if err != nil {
 		t.Fatalf("open store: %v", err)
 	}
@@ -186,7 +186,7 @@ func TestMetricsAddr_MovesMetricsOffTheAPIListener(t *testing.T) {
 }
 
 func TestMetricsAddr_FailsStartupWithoutAMetricsListener(t *testing.T) {
-	st, err := teststore.Open(filepath.Join(t.TempDir(), "state.db"))
+	st, err := teststore.Open(t, filepath.Join(t.TempDir(), "state.db"))
 	if err != nil {
 		t.Fatalf("open store: %v", err)
 	}
@@ -211,7 +211,7 @@ func apiListener(t *testing.T) net.Listener {
 }
 
 func TestServeWithRefusesAServerWithoutRunnerPolicy(t *testing.T) {
-	st, err := teststore.Open(filepath.Join(t.TempDir(), "state.db"))
+	st, err := teststore.Open(t, filepath.Join(t.TempDir(), "state.db"))
 	if err != nil {
 		t.Fatalf("open store: %v", err)
 	}
@@ -266,7 +266,7 @@ func TestMetrics_HTTPMethodLabelClampsInventedMethods(t *testing.T) {
 
 func newMetricsHTTPHandler(t *testing.T, grant capability.Grant) http.Handler {
 	t.Helper()
-	st, err := teststore.Open(filepath.Join(t.TempDir(), "state.db"))
+	st, err := teststore.Open(t, filepath.Join(t.TempDir(), "state.db"))
 	if err != nil {
 		t.Fatal(err)
 	}

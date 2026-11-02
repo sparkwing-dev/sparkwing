@@ -50,7 +50,7 @@ func newCronsFixture(t *testing.T, opts ...store.Option) *cronsFixture {
 		t.Fatalf("fixed schedule commit = %s", sha)
 	}
 	var s *controller.Server
-	st, err := teststore.Open(filepath.Join(t.TempDir(), "state.db"), append([]store.Option{store.WithPolicies(func(st *store.Store) (store.Policies, error) {
+	st, err := teststore.Open(t, filepath.Join(t.TempDir(), "state.db"), append([]store.Option{store.WithPolicies(func(st *store.Store) (store.Policies, error) {
 		s = controller.New(st, nil)
 		return s.StorePolicies(), nil
 	})}, opts...)...)

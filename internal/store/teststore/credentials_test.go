@@ -14,7 +14,7 @@ import (
 
 func TestProvisionCredentialUsesStoreClock(t *testing.T) {
 	now := time.Date(2026, time.January, 1, 12, 0, 0, 0, time.UTC)
-	s, err := teststore.Open(filepath.Join(t.TempDir(), "store.db"), teststore.WithClock(func() time.Time { return now }))
+	s, err := teststore.Open(t, filepath.Join(t.TempDir(), "store.db"), teststore.WithClock(func() time.Time { return now }))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -45,7 +45,7 @@ func TestProvisionCredentialUsesStoreClock(t *testing.T) {
 }
 
 func TestProvisionCredentialUsesCurrentIssuer(t *testing.T) {
-	s, err := teststore.Open(filepath.Join(t.TempDir(), "store.db"))
+	s, err := teststore.Open(t, filepath.Join(t.TempDir(), "store.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -75,7 +75,7 @@ func TestProvisionCredentialUsesCurrentIssuer(t *testing.T) {
 
 func TestFixtureAuthorityExpiresOnlyWhenClockAdvances(t *testing.T) {
 	now := time.Date(2026, time.January, 1, 12, 0, 0, 0, time.UTC)
-	s, err := teststore.Open(filepath.Join(t.TempDir(), "store.db"), teststore.WithClock(func() time.Time { return now }))
+	s, err := teststore.Open(t, filepath.Join(t.TempDir(), "store.db"), teststore.WithClock(func() time.Time { return now }))
 	if err != nil {
 		t.Fatal(err)
 	}

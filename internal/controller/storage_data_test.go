@@ -17,7 +17,7 @@ import (
 
 func storeDataServer(t *testing.T) *serverFixture {
 	t.Helper()
-	s, err := teststore.OpenExisting(filepath.Join(t.TempDir(), "state.db"))
+	s, err := teststore.OpenExisting(t, filepath.Join(t.TempDir(), "state.db"))
 	if err != nil {
 		t.Fatal(err)
 	}

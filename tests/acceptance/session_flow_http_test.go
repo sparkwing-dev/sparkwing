@@ -73,7 +73,7 @@ func (f *sessionFlow) restartWithCipher(t *testing.T, cipher *secrets.Cipher) {
 	if err := f.store.Close(); err != nil {
 		t.Fatal(err)
 	}
-	s, server, err := openControllerFixture(f.path, func(s *store.Store) *controller.Server { return f.newServer(s, cipher) })
+	s, server, err := openControllerFixture(t, f.path, func(s *store.Store) *controller.Server { return f.newServer(s, cipher) })
 	if err != nil {
 		t.Fatal(err)
 	}

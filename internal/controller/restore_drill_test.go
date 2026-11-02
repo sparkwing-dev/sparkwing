@@ -44,7 +44,7 @@ func checkRestoreDrill(t *testing.T, signOut bool) {
 			return store.Policies{Intake: scheduleIntakePolicy{}}, nil
 		}),
 	}
-	live, err := teststore.OpenExisting(livePath, append(options, store.WithCredentialEpoch(epoch))...)
+	live, err := teststore.OpenExisting(t, livePath, append(options, store.WithCredentialEpoch(epoch))...)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -120,7 +120,7 @@ func checkRestoreDrill(t *testing.T, signOut bool) {
 			t.Fatal(err)
 		}
 	}
-	restored, err := teststore.OpenExisting(restoredPath, append(options, store.WithCredentialEpoch(restoredEpoch))...)
+	restored, err := teststore.OpenExisting(t, restoredPath, append(options, store.WithCredentialEpoch(restoredEpoch))...)
 	if err != nil {
 		t.Fatal(err)
 	}

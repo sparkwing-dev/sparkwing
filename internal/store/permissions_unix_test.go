@@ -32,7 +32,7 @@ func TestOpenCreatesPrivateSQLiteFiles(t *testing.T) {
 
 	syscall.Umask(0)
 	path := filepath.Join(os.Getenv("SPARKWING_STORE_TEST_ROOT"), "state.db")
-	st, err := teststore.OpenExisting(path)
+	st, err := teststore.OpenExisting(t, path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -51,7 +51,7 @@ func TestOpenCreatesPrivateSQLiteFiles(t *testing.T) {
 
 func TestOpenTightensExistingSQLiteFiles(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "state.db")
-	first, err := teststore.OpenExisting(path)
+	first, err := teststore.OpenExisting(t, path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -66,7 +66,7 @@ func TestOpenTightensExistingSQLiteFiles(t *testing.T) {
 		}
 	}
 
-	second, err := teststore.OpenExisting(path)
+	second, err := teststore.OpenExisting(t, path)
 	if err != nil {
 		t.Fatal(err)
 	}

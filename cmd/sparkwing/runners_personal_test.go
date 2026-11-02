@@ -36,7 +36,7 @@ func TestRunnersPersonalEnrollmentCLIThroughController(t *testing.T) {
 				t.Fatal(err)
 			}
 			var server *controller.Server
-			state, err := teststore.Open(filepath.Join(t.TempDir(), "state.db"), store.WithPolicies(func(state *store.Store) (store.Policies, error) {
+			state, err := teststore.Open(t, filepath.Join(t.TempDir(), "state.db"), store.WithPolicies(func(state *store.Store) (store.Policies, error) {
 				server = controller.NewDeployment(state, deploymenttest.Team(t), nil).WithSecretsCipher(cipher)
 				return server.StorePolicies(), nil
 			}))

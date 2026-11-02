@@ -55,7 +55,7 @@ func newStoreForTick(t *testing.T) *store.Store {
 		return &http.Response{StatusCode: status, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(body)), Request: r}, nil
 	})}}
 	fixture := &serverFixture{}
-	st, err := teststore.Open(filepath.Join(t.TempDir(), "state.db"), fixture.option(deployment.Config{}, func(s *Server) { s.WithGitHubApp(cfg) }))
+	st, err := teststore.Open(t, filepath.Join(t.TempDir(), "state.db"), fixture.option(deployment.Config{}, func(s *Server) { s.WithGitHubApp(cfg) }))
 	if err != nil {
 		t.Fatalf("open store: %v", err)
 	}

@@ -71,7 +71,7 @@ func TestFreshScaffoldPlansAndExplainsInitialCommitBeforeRun(t *testing.T) {
 	})
 	if commandErr != nil {
 		t.Errorf("same scaffold after initial commit: %v\n%s", commandErr, output)
-		state, err := teststore.OpenExisting(filepath.Join(home, "state", "state.db"))
+		state, err := teststore.OpenExisting(t, filepath.Join(home, "state", "state.db"))
 		if err != nil {
 			t.Fatal(err)
 		}

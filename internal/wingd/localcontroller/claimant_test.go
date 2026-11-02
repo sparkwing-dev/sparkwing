@@ -20,7 +20,7 @@ func FuzzClaimantIdentityIgnoresAmbientInput(f *testing.F) {
 	f.Fuzz(func(t *testing.T, subject, bearer string) {
 		t.Setenv("SPARKWING_RUNNER_NAME", hex.EncodeToString([]byte(subject)))
 		t.Setenv("SPARKWING_TOKEN", hex.EncodeToString([]byte(bearer)))
-		s, err := teststore.OpenExisting(filepath.Join(t.TempDir(), "state.db"))
+		s, err := teststore.OpenExisting(t, filepath.Join(t.TempDir(), "state.db"))
 		if err != nil {
 			t.Fatal(err)
 		}

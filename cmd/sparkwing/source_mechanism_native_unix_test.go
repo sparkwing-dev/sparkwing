@@ -57,7 +57,7 @@ func main(){sw.Register("CI",func()sw.Pipeline[sw.NoInputs]{return pipeline{}});
 		return (localcontroller.Config{Bind: func(ctx context.Context, binding localcontroller.Binding) (localcontroller.Services, error) {
 			services, err := bindLocalController(ctx, binding)
 			if err == nil {
-				teststore.RegisterSQLite(binding.Store, filepath.Join(binding.Home, "state.db"))
+				teststore.RegisterSQLite(t, binding.Store, filepath.Join(binding.Home, "state.db"))
 				opened <- binding.Store
 			}
 			return services, err

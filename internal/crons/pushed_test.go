@@ -18,7 +18,7 @@ type pushedFixture struct {
 
 func pushedService(t *testing.T) *pushedFixture {
 	t.Helper()
-	st, err := teststore.OpenExisting(filepath.Join(t.TempDir(), "state.db"))
+	st, err := teststore.OpenExisting(t, filepath.Join(t.TempDir(), "state.db"))
 	if err != nil {
 		t.Fatal(err)
 	}

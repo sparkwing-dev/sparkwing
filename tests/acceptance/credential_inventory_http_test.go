@@ -25,7 +25,7 @@ import (
 )
 
 func TestCredentialInventoryHTTPUsesAuthorizedTenant(t *testing.T) {
-	s, err := teststore.OpenExisting(filepath.Join(t.TempDir(), "inventory.db"))
+	s, err := teststore.OpenExisting(t, filepath.Join(t.TempDir(), "inventory.db"))
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -26,7 +26,7 @@ func (failedDataDeletion) DeleteBlob(context.Context, blob.Blob) error {
 }
 
 func TestDataStorageCollectionFailureStillResetsZeroRateBilling(t *testing.T) {
-	st, err := teststore.OpenExisting(filepath.Join(t.TempDir(), "state.db"))
+	st, err := teststore.OpenExisting(t, filepath.Join(t.TempDir(), "state.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -64,7 +64,7 @@ func TestDataStorageCollectionFailureStillResetsZeroRateBilling(t *testing.T) {
 
 func TestDataStorageMaintenancePreservesReachableTenantBytes(t *testing.T) {
 	root := t.TempDir()
-	st, err := teststore.OpenExisting(filepath.Join(root, "state.db"))
+	st, err := teststore.OpenExisting(t, filepath.Join(root, "state.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -146,7 +146,7 @@ func TestDataStorageMaintenancePreservesReachableTenantBytes(t *testing.T) {
 
 func TestDataStorageMaintenanceRemovesExpiredLogBytes(t *testing.T) {
 	root := t.TempDir()
-	st, err := teststore.OpenExisting(filepath.Join(root, "state.db"))
+	st, err := teststore.OpenExisting(t, filepath.Join(root, "state.db"))
 	if err != nil {
 		t.Fatal(err)
 	}

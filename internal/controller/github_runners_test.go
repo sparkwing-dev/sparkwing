@@ -42,7 +42,7 @@ func newGHFixture(t *testing.T) *ghFixture {
 	t.Helper()
 	google, gh := googletest.New(t), githuboidctest.New(t)
 	var srv *controller.Server
-	st, err := teststore.Open(filepath.Join(t.TempDir(), "state.db"), store.WithPolicies(func(st *store.Store) (store.Policies, error) {
+	st, err := teststore.Open(t, filepath.Join(t.TempDir(), "state.db"), store.WithPolicies(func(st *store.Store) (store.Policies, error) {
 		srv = controller.NewDeployment(st, deploymenttest.Parse(t, deployment.Inputs{Kind: string(deployment.KindTeam), PublicOrigin: ghAudience}, license.FeatureMultiTeam), nil).WithSecretsCipher(testCipher(t)).
 			WithGoogleSignIn(googleauth.New(google.Config()), []string{dashRedirect}).
 			WithGitHubRunners(gh.Config(ghAudience)).

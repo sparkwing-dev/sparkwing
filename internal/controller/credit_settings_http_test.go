@@ -23,7 +23,7 @@ func creditPolicyFixture(t *testing.T) (*serverFixture, http.Handler, string, st
 		t.Fatal(err)
 	}
 	fixture := &serverFixture{}
-	st, err := teststore.Open(filepath.Join(t.TempDir(), "state.db"), fixture.option(deploymenttest.Team(t), func(s *Server) { s.WithSecretsCipher(cipher).WithOperatorAccounts([]string{"operator"}) }))
+	st, err := teststore.Open(t, filepath.Join(t.TempDir(), "state.db"), fixture.option(deploymenttest.Team(t), func(s *Server) { s.WithSecretsCipher(cipher).WithOperatorAccounts([]string{"operator"}) }))
 	if err != nil {
 		t.Fatal(err)
 	}

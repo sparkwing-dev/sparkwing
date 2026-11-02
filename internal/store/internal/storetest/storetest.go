@@ -35,6 +35,7 @@ func suiteRunsOnPostgres() bool {
 // Target is a store location that survives Close, so a test can open it
 // again the way a migration test reopens a database.
 type Target struct {
+	t       *testing.T
 	dialect store.Dialect
 	path    string
 	dsn     string
@@ -45,20 +46,20 @@ type Target struct {
 func New(t *testing.T) *Target {
 	t.Helper()
 	if !suiteRunsOnPostgres() {
-		return &Target{dialect: store.DialectSQLite, path: filepath.Join(t.TempDir(), "state.db")}
+		return &Target{t: t, dialect: store.DialectSQLite, path: filepath.Join(t.TempDir(), "state.db")}
 	}
 	dsn := os.Getenv(URLEnv)
 	if strings.TrimSpace(dsn) == "" {
 		t.Fatalf("%s=postgres requires %s to name a reachable Postgres", dialectEnv, URLEnv)
 	}
-	return &Target{dialect: store.DialectPostgres, dsn: newSchema(t, dsn)}
+	return &Target{t: t, dialect: store.DialectPostgres, dsn: newSchema(t, dsn)}
 }
 
 // NewSQLite reserves a SQLite file whatever the suite's dialect is, for
 // the few tests that name both dialects themselves.
 func NewSQLite(t *testing.T) *Target {
 	t.Helper()
-	return &Target{dialect: store.DialectSQLite, path: filepath.Join(t.TempDir(), "state.db")}
+	return &Target{t: t, dialect: store.DialectSQLite, path: filepath.Join(t.TempDir(), "state.db")}
 }
 
 // OpenSQLite opens a SQLite store whatever the suite's dialect is.
@@ -71,7 +72,7 @@ func OpenSQLite(t *testing.T, opts ...store.Option) *store.Store {
 // skipping the test when no server is configured and RequireEnv is unset.
 func NewPostgres(t *testing.T) *Target {
 	t.Helper()
-	return &Target{dialect: store.DialectPostgres, dsn: newSchema(t, PostgresURL(t))}
+	return &Target{t: t, dialect: store.DialectPostgres, dsn: newSchema(t, PostgresURL(t))}
 }
 
 // PostgresURL returns the configured server URL. A suite that selected
@@ -94,7 +95,7 @@ func Open(t *testing.T, opts ...store.Option) *store.Store {
 	if suiteRunsOnPostgres() {
 		return New(t).Open(t, opts...)
 	}
-	st, err := teststore.Open(filepath.Join(t.TempDir(), "state.db"), append(defaultOptions(), opts...)...)
+	st, err := teststore.Open(t, filepath.Join(t.TempDir(), "state.db"), append(defaultOptions(), opts...)...)
 	if err == nil {
 		err = configure(st)
 	}
@@ -143,13 +144,13 @@ func (tg *Target) TryOpen(opts ...store.Option) (*store.Store, error) {
 
 func (tg *Target) open(opts ...store.Option) (*store.Store, error) {
 	if tg.dialect == store.DialectPostgres {
-		st, err := teststore.OpenPostgres(context.Background(), tg.dsn, append(defaultOptions(), opts...)...)
+		st, err := teststore.OpenPostgres(tg.t, context.Background(), tg.dsn, append(defaultOptions(), opts...)...)
 		if err == nil {
 			err = configure(st)
 		}
 		return st, err
 	}
-	st, err := teststore.OpenExisting(tg.path, append(defaultOptions(), opts...)...)
+	st, err := teststore.OpenExisting(tg.t, tg.path, append(defaultOptions(), opts...)...)
 	if err == nil {
 		err = configure(st)
 	}

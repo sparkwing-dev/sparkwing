@@ -207,7 +207,7 @@ func TestServerPolicySessionsCheckCommittedIdentityAndCSRF(t *testing.T) {
 			keyCipher = wrong
 		}
 		fixture := &serverFixture{}
-		reopened, err := teststore.OpenExisting(strings.TrimPrefix(connection.Target, "sqlite:"), fixture.option(server.deployment, func(s *Server) { s.WithSecretsCipher(keyCipher) }))
+		reopened, err := teststore.OpenExisting(t, strings.TrimPrefix(connection.Target, "sqlite:"), fixture.option(server.deployment, func(s *Server) { s.WithSecretsCipher(keyCipher) }))
 		if err != nil {
 			t.Fatal(err)
 		}

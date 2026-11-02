@@ -22,7 +22,7 @@ import (
 )
 
 func TestWarmCapacityObservationThroughLauncherHTTP(t *testing.T) {
-	st, err := teststore.Open(filepath.Join(t.TempDir(), "warm.db"))
+	st, err := teststore.Open(t, filepath.Join(t.TempDir(), "warm.db"))
 	if err != nil {
 		t.Fatal(err)
 	}

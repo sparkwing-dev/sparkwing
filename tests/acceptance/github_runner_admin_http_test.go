@@ -173,7 +173,7 @@ func TestGitHubRunnerAdminHTTPInputAndMethods(t *testing.T) {
 }
 
 func TestGitHubRunnerAdminHTTPEmptyStoreAndMissingWriter(t *testing.T) {
-	st, err := teststore.OpenExisting(filepath.Join(t.TempDir(), "bindings.db"))
+	st, err := teststore.OpenExisting(t, filepath.Join(t.TempDir(), "bindings.db"))
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -149,7 +149,7 @@ func cloudResourceStore(t *testing.T, clocks ...func() time.Time) (*cloudResourc
 	if len(clocks) != 0 {
 		clock = clocks[0]
 	}
-	s, err := teststore.Open(filepath.Join(t.TempDir(), "state.db"), teststore.WithClock(clock), store.WithPolicies(func(*store.Store) (store.Policies, error) {
+	s, err := teststore.Open(t, filepath.Join(t.TempDir(), "state.db"), teststore.WithClock(clock), store.WithPolicies(func(*store.Store) (store.Policies, error) {
 		return store.Policies{ClaimProfiles: cloudResourceProfile(func(context.Context, capability.Principal) (match.Profile, error) {
 			return match.Profile{}, nil
 		})}, nil

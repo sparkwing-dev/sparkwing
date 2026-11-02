@@ -14,7 +14,7 @@ func TestStateReadinessDoesNotWaitForStoreWriter(t *testing.T) {
 	var hold atomic.Bool
 	entered, release := make(chan struct{}), make(chan struct{})
 	// safety: the clock barrier is reached after acquiring the store's writer connection.
-	owned, err := teststore.Open(filepath.Join(t.TempDir(), "state.db"), teststore.WithClock(func() time.Time {
+	owned, err := teststore.Open(t, filepath.Join(t.TempDir(), "state.db"), teststore.WithClock(func() time.Time {
 		if hold.CompareAndSwap(true, false) {
 			close(entered)
 			<-release

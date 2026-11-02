@@ -21,7 +21,7 @@ func TestRegisteredRunnerRequiresEveryRequestedLabel(t *testing.T) {
 		t.Fatal(err)
 	}
 	fixture := &serverFixture{}
-	st, err := teststore.OpenExisting(strings.TrimPrefix(connection.Target, "sqlite:"), fixture.option(original.deployment, nil))
+	st, err := teststore.OpenExisting(t, strings.TrimPrefix(connection.Target, "sqlite:"), fixture.option(original.deployment, nil))
 	if err != nil {
 		t.Fatal(err)
 	}

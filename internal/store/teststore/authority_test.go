@@ -10,7 +10,7 @@ import (
 )
 
 func TestAuthorityFixturesCommitAuthorizedWrites(t *testing.T) {
-	st, err := teststore.OpenExisting(filepath.Join(t.TempDir(), "state.db"))
+	st, err := teststore.OpenExisting(t, filepath.Join(t.TempDir(), "state.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -32,7 +32,7 @@ func TestAuthorityFixturesCommitAuthorizedWrites(t *testing.T) {
 func TestSeedCreditRatesMatchesTheConsoleWrite(t *testing.T) {
 	table := store.CreditRateTable{{Cores: 8, MicroPerSecond: 40}, {Cores: 4, MicroPerSecond: 20}}
 	read := func(seed func(*store.Store)) store.CreditSettings {
-		st, err := teststore.OpenExisting(filepath.Join(t.TempDir(), "state.db"))
+		st, err := teststore.OpenExisting(t, filepath.Join(t.TempDir(), "state.db"))
 		if err != nil {
 			t.Fatal(err)
 		}

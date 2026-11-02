@@ -45,7 +45,7 @@ func openPostgresStore(t *testing.T, opts ...store.Option) *store.Store {
 	}, t.Name())
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
-	admin, err := teststore.OpenPostgres(ctx, base)
+	admin, err := teststore.OpenPostgres(t, ctx, base)
 	if err != nil {
 		t.Fatalf("open postgres: %v", err)
 	}
@@ -55,7 +55,7 @@ func openPostgresStore(t *testing.T, opts ...store.Option) *store.Store {
 	}
 	_ = admin.Close()
 	t.Cleanup(func() {
-		cleanup, err := teststore.OpenPostgres(context.Background(), base)
+		cleanup, err := teststore.OpenPostgres(t, context.Background(), base)
 		if err != nil {
 			t.Errorf("open postgres to drop schema %s: %v", schema, err)
 			return
@@ -69,7 +69,7 @@ func openPostgresStore(t *testing.T, opts ...store.Option) *store.Store {
 	if strings.Contains(base, "?") {
 		sep = "&"
 	}
-	st, err := teststore.OpenPostgres(ctx, base+sep+"search_path="+schema, opts...)
+	st, err := teststore.OpenPostgres(t, ctx, base+sep+"search_path="+schema, opts...)
 	if err != nil {
 		t.Fatalf("open postgres schema %s: %v", schema, err)
 	}
@@ -79,7 +79,7 @@ func openPostgresStore(t *testing.T, opts ...store.Option) *store.Store {
 
 func openSQLiteStore(t *testing.T, opts ...store.Option) *store.Store {
 	t.Helper()
-	st, err := teststore.Open(filepath.Join(t.TempDir(), "state.db"), opts...)
+	st, err := teststore.Open(t, filepath.Join(t.TempDir(), "state.db"), opts...)
 	if err != nil {
 		t.Fatalf("open store: %v", err)
 	}

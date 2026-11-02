@@ -735,6 +735,86 @@ file. Other syntax and workflow checks remain active.
   removes the shared-runner capacity shortfall. A complete hosted batch under
   the split is still unmeasured.
 
+- **Fixture SQL connection reuse, 2026-11-01:** `teststore.Exec` retains one
+  connection per registered store, closed by the opening test's cleanup. Its
+  SQLite DSN keeps foreign keys, the busy timeout and immediate transactions.
+  `SQL(t, st)` keeps its separate pool for corruption tests. The retained
+  connection avoids reparsing the schema for every fixture statement.
+
+  Normal samples compared `6065a30b9` with `f06454e8f` on the
+  16-logical-CPU Linux host using Go 1.26.10, `GOMAXPROCS=4`, `GOWORK=off`,
+  `GOFLAGS=-buildvcs=false`, `GOCACHE=/tmp/sw-gocache`, private homes and a
+  private temporary directory. The command was `go test -p 12 -json -count=1
+  -timeout 120m ./internal/controller/... ./internal/store/...
+  ./tests/acceptance/...`. An `-exec` wrapper recorded each test binary's
+  start before executing it. The initial baseline binaries were compiled
+  before changing the helper. The updated helper suite adds two regressions.
+  Every other package ran the same top-level names.
+
+  | Normal sample | Initial baseline | Clean baseline repeat | After |
+  | --- | ---: | ---: | ---: |
+  | Full command wall | 1342.270 s | 935.440 s | 944.970 s |
+  | Full command CPU, user + system | 2257.300 s | 1941.110 s | 1878.300 s |
+  | `internal/controller` wall | 1235.251 s | 871.644 s | 863.498 s |
+  | `internal/store` wall | 1210.223 s | 927.453 s | 938.127 s |
+  | `tests/acceptance` wall | 513.305 s | 336.539 s | 381.005 s |
+  | `internal/store/teststore` wall | 2.660 s | 1.664 s | 1.496 s |
+
+  The updated command passed. The normal baseline lacked web `tsx` and the
+  TypeScript SDK's locked dependencies, so
+  `TestDashboardRequestsReachControllerHandlers` and `TestTypeScriptBoundary`
+  failed. Installing the locked dependencies made both focused reruns pass.
+  The dashboard rerun used its original binary. The clean baseline repeat
+  compiled the original Go sources through `-overlay` after dependency setup
+  and passed the full command. Its wall time is within 1.1% of the updated
+  sample, so these samples do not establish a gain in normal wall time. No
+  existing assertions changed. Command wall includes compilation. Runs
+  overlapped other samples and other lanes, with different cache warmth and
+  variable host load, so these are
+  observed shared-host costs.
+
+  Race samples used the same command with `-race`. All packages except the
+  unsharded `internal/store` completed successfully in both revisions.
+
+  | Race sample | Before | After |
+  | --- | ---: | ---: |
+  | Full command wall, store timeout | 7388.810 s | 7235.910 s |
+  | `internal/controller` wall | 6599.623 s | 4181.674 s |
+  | `tests/acceptance` wall | 3518.984 s | 3072.251 s |
+  | `internal/store/teststore` wall | 32.942 s | 11.366 s |
+  | Unsharded `internal/store` wall, timeout | 7200.338 s | 7200.288 s |
+
+  Both unsharded commands failed at the store's 120-minute timeout. The
+  baseline had passed 753 top-level tests and the updated run 787, with no
+  correctness failures reported before either timeout. These store samples
+  establish lower bounds rather than completed suite costs.
+
+  The full store race comparison therefore used four exhaustive sorted
+  round-robin shards, each running a retained race-enabled test binary once
+  with `GOMAXPROCS=1` and `-test.timeout=180m`. Both binaries list the same
+  1,856 top-level Test, Example and Fuzz names. Their sorted LF-terminated
+  list has SHA-256
+  `b0c3f77c2c408c9e0c033c9894d7c56c3ada90df51a32e60fbd18f832678e65d`.
+  Both runs include the slow class. Each name belongs to exactly one shard,
+  and completion checks reject missing names or test failures. The four
+  workers run concurrently within each revision, with the two revisions run
+  sequentially. Compiling and listing the package binaries are outside the
+  shard timing.
+
+  | Four-shard store race sample | Before | After |
+  | --- | ---: | ---: |
+  | Suite wall | 3943.941 s | 3255.259 s |
+  | Suite CPU, user + system | 13310.561 s | 11125.046 s |
+  | Shard 0 wall | 3425.553 s | 2822.166 s |
+  | Shard 1 wall | 3098.942 s | 2522.560 s |
+  | Shard 2 wall | 3158.799 s | 2591.540 s |
+  | Shard 3 wall | 3943.917 s | 3255.238 s |
+
+  Both full-class store runs passed 1,797 top-level names and retained the
+  same 59 conditional skips. All eight shards exited successfully, with no
+  missing or failed names. Wall time fell about 17% and CPU about 16% in
+  these shared-host samples.
+
 - **Heavy packages:** run these by name rather than reaching for `./...`, and
   give the command a timeout the package actually fits in. Measured on a
   16-core Linux box, `GOWORK=off go test -count=1 <pkg>`. The CLI sample

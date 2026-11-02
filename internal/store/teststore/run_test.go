@@ -15,7 +15,7 @@ import (
 
 func TestJobReportingSeedUsesCurrentSchemaAndRejectsMissingRun(t *testing.T) {
 	now := time.Unix(1700000000, 123).UTC()
-	s, err := teststore.Open(filepath.Join(t.TempDir(), "state.db"), teststore.WithClock(func() time.Time { return now }))
+	s, err := teststore.Open(t, filepath.Join(t.TempDir(), "state.db"), teststore.WithClock(func() time.Time { return now }))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -83,7 +83,7 @@ func TestJobReportingSeedUsesCurrentSchemaAndRejectsMissingRun(t *testing.T) {
 }
 
 func TestRunReportingSeedUsesSealedSchemaWithoutExecutableWork(t *testing.T) {
-	s, err := teststore.Open(filepath.Join(t.TempDir(), "state.db"))
+	s, err := teststore.Open(t, filepath.Join(t.TempDir(), "state.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
