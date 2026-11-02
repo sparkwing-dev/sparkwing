@@ -15,6 +15,8 @@ import (
 	"slices"
 	"strings"
 
+	"golang.org/x/mod/modfile"
+
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/bincache"
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
@@ -99,6 +101,30 @@ func GoEnvironment(ctx context.Context, dir string, pin engineid.Pin, environmen
 func installGoSDK(ctx context.Context, dir string, request engine.SDKInstallRequest, pin engineid.Pin, environment procenv.Env, diagnostics io.Writer, masker *secrets.Masker) (command []string, cachedExecutable string, result error) {
 	if !filepath.IsAbs(request.ExecutableDirectory) {
 		return nil, "", errors.New("SDK installation requires an owned executable directory")
+	}
+	// safety: generated sparks overlays can predate an SDK upgrade. The native
+	// manifest owns the engine pin, while the overlay owns the sparks versions.
+	if overlay := bincache.EffectiveOverlay(dir, []string{"GOWORK=off"}); overlay != "" {
+		body, err := os.ReadFile(overlay)
+		if err != nil {
+			return nil, "", err
+		}
+		file, err := modfile.Parse(overlay, body, nil)
+		if err != nil {
+			return nil, "", err
+		}
+		if err := file.AddRequire(engine.GoModule, pin.Version); err != nil {
+			return nil, "", err
+		}
+		updated, err := file.Format()
+		if err != nil {
+			return nil, "", err
+		}
+		if !bytes.Equal(body, updated) {
+			if err := os.WriteFile(overlay, updated, 0o600); err != nil {
+				return nil, "", err
+			}
+		}
 	}
 	environment, err := GoEnvironment(ctx, dir, pin, environment)
 	if err != nil {

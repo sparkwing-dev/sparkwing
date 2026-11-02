@@ -234,6 +234,12 @@ When a pipeline build resolves its sparks:
 5. Compile the pipeline with
    `go build -modfile=.sparkwing/.resolved.mod ...`.
 
+SDK installation refreshes the overlay's Sparkwing SDK requirement from
+`go.mod` before compiling. An overlay left by an earlier run, or a Sparkwing
+entry in `sparks:`, cannot undo `sparkwing upgrade`. Other resolved library
+versions remain in the overlay. SDK replacement mismatches and dependencies
+that select a different SDK version still fail verification.
+
 The git-tracked `go.mod` and `go.sum` remain pristine. The one file
 resolution touches is `.gitignore`: when `.sparkwing/.resolved.*` is not
 already ignored, sparkwing appends it to the `.gitignore` beside
