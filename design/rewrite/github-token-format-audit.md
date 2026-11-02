@@ -26,7 +26,7 @@ Line references describe the audited source tree.
 | `internal/envredact/envredact.go:605` | Credential-file scanning has a 16-byte minimum. A `ghs_` prefix recognizes installation tokens before the generic character-run heuristic, which resets on dots, underscores and hyphens. |
 | `pkg/docs/scrub_test.go:37` | Embedded-doc scanner recognizes `ghs_` followed by at least 20 letters, digits, dots, underscores or hyphens. Other GitHub token prefixes retain their separate alphanumeric pattern. |
 | `.gitleaks.toml:6`, `:11` | The installation-token rule accepts 36 or more letters, digits, dots, underscores or hyphens after `ghs_`. The fixed 36-character `ghu_` rule describes user tokens, outside this format change. |
-| `internal/githubapp/githubapptest/githubapptest.go:684` | The local fake issues a classic-shaped token. Production never depends on this shape. Dedicated token-format tests supply long tokens independently. |
+| `internal/githubapp/githubapptest/githubapptest.go:684`, `:841` | The local fake prepends `ghs_` to 32 hex characters from a 16-byte random buffer. Production never depends on this fixture shape. Dedicated token-format tests supply long tokens independently. |
 
 ## Transport, storage and masking
 
