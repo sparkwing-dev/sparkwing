@@ -726,25 +726,28 @@ file. Other syntax and workflow checks remain active.
   private temporary directory. The command was `go test -p 12 -json -count=1
   -timeout 120m ./internal/controller/... ./internal/store/...
   ./tests/acceptance/...`. An `-exec` wrapper recorded each test binary's
-  start before executing it. All baseline binaries were compiled before
-  changing the helper. The updated helper suite adds two regressions. Every
+  start before executing it. The initial baseline binaries were compiled
+  before changing the helper. The updated helper suite adds two regressions. Every
   other package ran the same top-level names.
 
-  | Normal sample | Before | After |
-  | --- | ---: | ---: |
-  | Full command wall | 1342.270 s | 944.970 s |
-  | Full command CPU, user + system | 2257.300 s | 1878.300 s |
-  | `internal/controller` wall | 1235.251 s | 863.498 s |
-  | `internal/store` wall | 1210.223 s | 938.127 s |
-  | `tests/acceptance` wall | 513.305 s | 381.005 s |
-  | `internal/store/teststore` wall | 2.660 s | 1.496 s |
+  | Normal sample | Initial baseline | Clean baseline repeat | After |
+  | --- | ---: | ---: | ---: |
+  | Full command wall | 1342.270 s | 935.440 s | 944.970 s |
+  | Full command CPU, user + system | 2257.300 s | 1941.110 s | 1878.300 s |
+  | `internal/controller` wall | 1235.251 s | 871.644 s | 863.498 s |
+  | `internal/store` wall | 1210.223 s | 927.453 s | 938.127 s |
+  | `tests/acceptance` wall | 513.305 s | 336.539 s | 381.005 s |
+  | `internal/store/teststore` wall | 2.660 s | 1.664 s | 1.496 s |
 
   The updated command passed. The normal baseline lacked web `tsx` and the
   TypeScript SDK's locked dependencies, so
   `TestDashboardRequestsReachControllerHandlers` and `TestTypeScriptBoundary`
   failed. Installing the locked dependencies made both focused reruns pass.
-  The dashboard rerun used its original binary. No existing assertions changed.
-  Command wall includes compilation. Runs overlapped other samples and other
+  The dashboard rerun used its original binary. The clean baseline repeat
+  compiled the original Go sources through `-overlay` after dependency setup
+  and passed the full command. Its wall time is within 1.1% of the updated
+  sample, so these samples do not establish a normal wall-time gain. No
+  existing assertions changed. Command wall includes compilation. Runs overlapped other samples and other
   lanes, with different cache warmth and variable host load, so these are
   observed shared-host costs.
 
