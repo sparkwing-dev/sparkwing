@@ -16,7 +16,7 @@ import (
 )
 
 func checkBlobRemoteCacheEdges(t testing.TB, ctx context.Context, root string) (err error) {
-	s, err := teststore.OpenExisting(t, filepath.Join(root, "remote-edges.db"))
+	s, err := teststore.OpenExisting(t, filepath.Join(root, "remote-edges.db")) //nolint:contextcheck // SQLite fixture setup uses store.Open, which has no context parameter.
 	if err != nil {
 		return err
 	}

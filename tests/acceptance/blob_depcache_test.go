@@ -54,7 +54,7 @@ func TestStorageSeededAuthorityUsesStoreClock(t *testing.T) {
 func checkBlobDepcache(t testing.TB, ctx context.Context, root string, objects blob.ObjectBackend, transfers blob.HTTPClient, corrupt func(string) error, seed [16]byte) (err error) {
 	path := filepath.Join(root, "archives.db")
 	now := time.Now().UTC()
-	s, dataController, err := openStorageData(t, path, objects, now)
+	s, dataController, err := openStorageData(t, path, objects, now) //nolint:contextcheck // SQLite fixture setup uses store.Open, which has no context parameter.
 	if err != nil {
 		return err
 	}
@@ -156,7 +156,7 @@ func checkBlobDepcache(t testing.TB, ctx context.Context, root string, objects b
 	if err := s.Close(); err != nil {
 		return err
 	}
-	reopened, dataController, err := openStorageData(t, path, objects, now)
+	reopened, dataController, err := openStorageData(t, path, objects, now) //nolint:contextcheck // SQLite fixture setup uses store.Open, which has no context parameter.
 	if err != nil {
 		return err
 	}

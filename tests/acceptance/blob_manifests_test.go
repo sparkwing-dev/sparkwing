@@ -21,7 +21,7 @@ import (
 
 func checkBlobManifestRecords(t testing.TB, ctx context.Context, root string, objects blob.ObjectBackend, transfers blob.HTTPClient) (err error) {
 	path := filepath.Join(root, "manifest-records.db")
-	s, err := teststore.OpenExisting(t, path)
+	s, err := teststore.OpenExisting(t, path) //nolint:contextcheck // SQLite fixture setup uses store.Open, which has no context parameter.
 	if err != nil {
 		return err
 	}
@@ -128,7 +128,7 @@ func checkBlobManifestRecords(t testing.TB, ctx context.Context, root string, ob
 		if err := s.Close(); err != nil {
 			return err
 		}
-		reopened, err := teststore.OpenExisting(t, path)
+		reopened, err := teststore.OpenExisting(t, path) //nolint:contextcheck // SQLite fixture setup uses store.Open, which has no context parameter.
 		if err != nil {
 			return err
 		}
