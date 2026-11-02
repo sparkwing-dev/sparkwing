@@ -34,7 +34,7 @@ var scrubPatterns = []struct {
 		"a credential",
 	},
 	{
-		"GitHub token", regexp.MustCompile(`\bgh[pousr]_[A-Za-z0-9]{20,}\b`),
+		"GitHub token", regexp.MustCompile(`\b(?:gh[pour]_[A-Za-z0-9]{20,}\b|ghs_[A-Za-z0-9_.-]{20,})`),
 		"a credential",
 	},
 	{
@@ -117,6 +117,7 @@ func TestScrubPatternsMatchWhatTheyClaimTo(t *testing.T) {
 		{"kubernetes service dns is public knowledge", "svc.cluster.local", false},
 		{"aws key", "AKIAIOSFODNN7EXAMPLE", true},
 		{"github token", "ghp_abcdefghijklmnopqrstuvwxyz0123456789", true},
+		{"stateless GitHub installation token", "ghs_123_" + strings.Repeat("aB1_-.", 85) + "xy", true},
 		{"private key", "-----BEGIN RSA PRIVATE KEY-----", true},
 		{"sibling tool", "for Makefile-style work use dowing", true},
 		{"sparkwing's own daemon is not a sibling", "the sparkwing wingd daemon", false},

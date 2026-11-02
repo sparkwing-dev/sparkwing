@@ -39,6 +39,11 @@ exists; bytes already emitted cannot be recalled. The host therefore registers
 known values before spawning author code and lazily issued values before
 releasing them.
 
+GitHub installation tokens use the same literal registration, including
+stateless tokens longer than 40 bytes. Masking does not infer a token's length
+or alphabet from its prefix. Source authentication registers both the complete
+token and its Basic authorization value before git starts.
+
 The host's shared masker owns accepted secrets, runtime secret reads and issued
 OIDC tokens. Every live job sees new host registrations without copying them into
 its registry. Explicit mask registrations apply only to the registering job's

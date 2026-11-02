@@ -9,6 +9,19 @@ contains `kind`, `host`, `secret`, optional `username` and optional
 `known_hosts`. The host already has the checkout URL, SHA and policy in its
 sealed execution input.
 
+GitHub App installation tokens are opaque strings. Both the classic format
+and longer stateless tokens with dots, underscores and hyphens pass through
+unchanged. The source host registers the full token and its Basic authorization
+header with the log masker before invoking git.
+
+Tests and staging harnesses that construct `githubapp.Config` can set
+`StatelessInstallationTokens: true` to send
+`X-GitHub-Stateless-S2S-Token: enabled` when minting installation tokens.
+The default leaves the header absent. GitHub documents the header in its
+[per-request override announcement](https://github.blog/changelog/2026-05-15-github-app-installation-tokens-per-request-override-header/).
+Its [rollout completion announcement](https://github.blog/changelog/2026-10-02-stateless-github-app-installation-tokens-rolled-out/)
+schedules the header's retirement for November 30, 2026.
+
 The controller derives the credential's host from the sealed source location.
 The store checks live ancestry, the current claim fence, repository permission
 and executor enrollment in one transaction. It commits
@@ -80,7 +93,8 @@ A credential is one of these kinds:
 - **An HTTPS token** (`kind: https`, `token`, optional `username`), such as a
   GitLab or Bitbucket access token or a fine-grained GitHub token. The
   username defaults to `x-access-token`; Bitbucket repository access tokens
-  need `x-token-auth`. It is usable once stored.
+  need `x-token-auth`. Tokens accept up to 4,096 printable ASCII characters
+  without spaces. It is usable once stored.
 
 Prefer a read-only deploy key or token scoped to the repositories the team
 builds.

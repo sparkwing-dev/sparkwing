@@ -15,15 +15,38 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/controller/client"
 	"github.com/sparkwing-dev/sparkwing/internal/quicktest"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
+	"github.com/sparkwing-dev/sparkwing/internal/source"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
 	"github.com/sparkwing-dev/sparkwing/pkg/match"
 
 	"golang.org/x/crypto/ssh"
 )
+
+func TestGitHubInstallationTokenStoredAndReleasedOverHTTP(t *testing.T) {
+	f := newGitReleaseFixture(t)
+	server := httptest.NewServer(f.s.Handler())
+	defer server.Close()
+	sealed := source.Spec{RepoKey: "gh:1", RemoteURL: "https://github.com/acme/tools.git"}
+	access, err := client.NewSourceAccess(client.EngineOptions{URL: server.URL, HTTP: server.Client(), Bearer: func(context.Context) (string, error) { return f.claim, nil }}, "run", sealed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, size := range []int{520, 4096} {
+		token := "ghs_" + strings.Repeat("aB1_-.", (size-4)/6) + strings.Repeat("z", (size-4)%6)
+		f.put(token)
+		credential, err := access.GitCredential(t.Context(), sealed)
+		if err != nil || credential.Secret != token || credential.Username != "x-access-token" {
+			t.Fatalf("%d-byte stored token did not reach the source client intact: %v", size, err)
+		}
+	}
+	f.request("POST", "/api/v1/team/git-credentials", `{"host_wide":true,"host":"github.com","kind":"https","token":"ghs_`+strings.Repeat("x", 4093)+`"}`, 400)
+	f.request("POST", "/api/v1/team/git-credentials", `{"host_wide":true,"host":"github.com","kind":"https","token":"ghs_unsafe\nline"}`, 400)
+}
 
 type gitReleaseFixture struct {
 	t                    *testing.T

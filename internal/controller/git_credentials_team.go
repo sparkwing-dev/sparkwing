@@ -161,7 +161,7 @@ func (s *Server) handlePutGitCredential(w http.ResponseWriter, r *http.Request, 
 			return invalidEngineBody("username is up to 128 printable characters with no space")
 		}
 		if !credentialProtocolValue(req.Token) {
-			return invalidEngineBody("token is up to 1024 printable characters with no space")
+			return invalidEngineBody("token is up to 4096 printable characters with no space")
 		}
 		secret = req.Token
 	default:
@@ -234,7 +234,7 @@ func validGitCredentialHost(host string) bool {
 }
 
 func credentialProtocolValue(v string) bool {
-	if v == "" || len(v) > 1024 {
+	if v == "" || len(v) > 4096 {
 		return false
 	}
 	for _, c := range v {

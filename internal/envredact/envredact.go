@@ -610,6 +610,9 @@ func credentialSecretValue(value string) bool {
 	if len(v) < minCredentialValueLength || strings.ContainsAny(v, " \t") {
 		return false
 	}
+	if strings.HasPrefix(v, "ghs_") {
+		return true
+	}
 	return tokenRunIn(v)
 }
 
