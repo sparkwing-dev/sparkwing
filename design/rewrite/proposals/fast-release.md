@@ -82,7 +82,7 @@ The whole path runs the same way locally and on Cloud; only placement changes. T
 
 - Lint, build, affected and critical tests, and the AI review run on the developer's machine through the local controller, as they do for `sparkwing run gate` today.
 - The staging gate, deploy jobs and the verification cron prefer Korey's own runners (the WSL workstation and the Mac), and overflow to Sparkwing Cloud only when those are busy or offline.
-- Trust decides which machine may deploy. Personal machines never claim repository-proven runs, so a job that needs deploy secrets or OIDC cannot run on a personal enrollment. Enrolling the same hardware as a repository-scoped runner for `sparkwing-dev/sparkwing` gives it proven runs, so deploys can run at home without widening the trust model.
+- Trust decides which machine may deploy. Personal machines never claim repository-proven runs, so a job that needs deploy secrets or OIDC cannot run on a personal enrollment. Both of Korey's machines (the WSL workstation and the Mac) are enrolled as repository-scoped runners for `sparkwing-dev/sparkwing`, so both may deploy (Korey, decision 82). Deploy jobs get short-lived OIDC credentials minted per run rather than long-lived keys on disk, so nothing durable sits beside the agents that also run on the workstation.
 - Cost reporting shows how many job-minutes ran on owned machines versus Cloud, which is the number worth posting.
 
 ## Exceptions that keep a gate

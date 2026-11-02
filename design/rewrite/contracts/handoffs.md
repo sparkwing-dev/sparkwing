@@ -1395,3 +1395,7 @@ The schema-28 baseline gains `idx_runs_retry_of ON runs(team, retry_of)` before 
 ## 2026-11-02 Korey decision 81: production cutover choices
 
 Korey approved the v0.68.3 production cutover per the reviewed runbook, and these choices: keep his operator account row through the wipe; KEDA runs on the production system node; each of the two QA fixture teams gets a USD 10 free credit grant; the local `pg_dump` (personal data) is deleted after 14 days and the RDS snapshot kept 30 days; the old `sparkwing-team-qa-team` pool retires after the production grid passes; the qa.16 rollback images are pinned in ECR so they cannot expire.
+
+## 2026-11-02 Korey decision 82: both owned machines may deploy
+
+Korey's WSL workstation and Mac are both trusted to run Sparkwing deploy jobs, enrolled as repository-scoped runners for `sparkwing-dev/sparkwing` so they receive repository-proven runs. Deploy jobs use per-run short-lived OIDC credentials, not long-lived keys stored on either machine. Cloud remains overflow.
