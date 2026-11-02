@@ -87,6 +87,7 @@ spec:
               {{- if .name }}
               - secret:
                   name: {{ .name | quote }}
+                  optional: true
                   items:
                     - key: {{ required "launcher.budgetStateSecret.key is required" .key | quote }}
                       path: budget-state

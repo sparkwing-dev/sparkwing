@@ -114,7 +114,14 @@ support reference. Configured pools keep waiting with elapsed time in run status
 `launcher.budgetStateSecret` mounts the Cloud budget breaker flag as
 `budget-state`. While it reads `closed`, awards needing a fresh node end as
 `cloud_capacity_unavailable` with the same refund and support reference. Leave
-`name` empty on clusters without a breaker.
+`name` empty on clusters without a breaker. The projection is optional, so a
+missing Secret or key permits launcher startup with the breaker open.
+An award whose capacity Pod already has a node keeps waiting to reserve it.
+Breaker failure applies per waiting unit. A run can fail partway through, with
+executed units billed correctly and only the failing unit's unstarted hold
+refunded. Deploy the controller before or with the launcher. An older controller
+returns HTTP 400 for the new `unavailable` field and leaves the award waiting
+until the controller is upgraded.
 
 `launcher.networkPolicy.egress` supplies allowed Job destinations alongside the
 selecting policy that denies all Job ingress and egress. Nothing needs to reach

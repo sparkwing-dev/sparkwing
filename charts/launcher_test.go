@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	utilyaml "k8s.io/apimachinery/pkg/util/yaml"
 
@@ -14,6 +15,38 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/limits"
 	"github.com/sparkwing-dev/sparkwing/internal/runners/launcher"
 )
+
+func TestCloudLauncherBudgetStateSecretIsOptional(t *testing.T) {
+	for chart, prefix := range map[string]string{"./sparkwing-runner-bundle": "", "./sparkwing-full": "sparkwing-runner-bundle."} {
+		for _, name := range []string{"", "budget-flag"} {
+			t.Run(chart+"/"+name, func(t *testing.T) {
+				settings := append(launcherImages(prefix), prefix+"launcher.enabled=true", prefix+"launcher.tokenSecret.name=launcher-token", prefix+"controller.url=https://controller.example", prefix+"launcher.image.repository=registry.example/runner", prefix+"launcher.image.tag=test", prefix+"launcher.cpuCeiling=4", prefix+"launcher.memoryCeiling=8Gi", prefix+"launcher.budgetStateSecret.name="+name, prefix+"launcher.budgetStateSecret.key=state")
+				template := "templates/launcher-deployment.yaml"
+				if prefix != "" {
+					template = "charts/sparkwing-runner-bundle/" + template
+				}
+				var deployment appsv1.Deployment
+				if err := utilyaml.Unmarshal([]byte(helmRenderInNamespace(t, chart, template, "sparkwing", "cloud", settings...)), &deployment); err != nil {
+					t.Fatal(err)
+				}
+				var projections []corev1.VolumeProjection
+				for _, volume := range deployment.Spec.Template.Spec.Volumes {
+					if volume.Projected != nil {
+						projections = append(projections, volume.Projected.Sources...)
+					}
+				}
+				want := []corev1.VolumeProjection{{Secret: &corev1.SecretProjection{LocalObjectReference: corev1.LocalObjectReference{Name: "launcher-token"}, Items: []corev1.KeyToPath{{Key: "token", Path: "agent-token"}}}}}
+				if name != "" {
+					optional := true
+					want = append(want, corev1.VolumeProjection{Secret: &corev1.SecretProjection{LocalObjectReference: corev1.LocalObjectReference{Name: name}, Optional: &optional, Items: []corev1.KeyToPath{{Key: "state", Path: "budget-state"}}}})
+				}
+				if !reflect.DeepEqual(projections, want) {
+					t.Fatalf("credential projections = %+v, want required token and optional budget Secret %q", projections, name)
+				}
+			})
+		}
+	}
+}
 
 func TestCloudLauncherSecretPermissions(t *testing.T) {
 	resources := renderedResources(t, helmRenderAll(t, "./sparkwing-runner-bundle", "sparkwing", "cloud", append(launcherImages(""), "launcher.serviceAccountName=cloud-launcher")...))
