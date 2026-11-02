@@ -1391,3 +1391,7 @@ The Sparkwing Cloud AWS budget breaker becomes a catastrophe guard: a 3,000 USD 
 ## 2026-11-02 Korey decision 80: index retry lookups before release
 
 The schema-28 baseline gains `idx_runs_retry_of ON runs(team, retry_of)` before v0.68.3 freezes it, so retry-tree pages and the "retried as" field on run listings stay fast as history grows. Schema 28 is unreleased, so the version does not change; the baseline digest does. Staging is reconciled by hand once (snapshot, create the index, record the new digest); production is created fresh at the cutover wipe.
+
+## 2026-11-02 Korey decision 81: production cutover choices
+
+Korey approved the v0.68.3 production cutover per the reviewed runbook, and these choices: keep his operator account row through the wipe; KEDA runs on the production system node; each of the two QA fixture teams gets a USD 10 free credit grant; the local `pg_dump` (personal data) is deleted after 14 days and the RDS snapshot kept 30 days; the old `sparkwing-team-qa-team` pool retires after the production grid passes; the qa.16 rollback images are pinned in ECR so they cannot expire.
