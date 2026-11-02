@@ -2,6 +2,7 @@ package envredact
 
 import (
 	"bytes"
+	"strings"
 	"testing"
 )
 
@@ -217,6 +218,7 @@ func TestCredentialFileContent(t *testing.T) {
 			"{\n  \"type\": \"service_account\",\n  \"private_key\": \"-----BEGIN PRIVATE KEY-----\\nMIIEv\\n-----END PRIVATE KEY-----\\n\"\n}", true,
 		},
 		{"json long token value", "deploy/api.json", `{"api_token":"ghp_A1b2C3d4E5f6G7h8I9j0"}`, true},
+		{"stateless GitHub installation token", "deploy/api.json", `{"api_token":"ghs_123_` + strings.Repeat("aB1_-.", 85) + `xy"}`, true},
 		{
 			"yaml field naming a remote secret", "k8s/external-secret.yaml",
 			"spec:\n  data:\n    - secretKey: api-token\n      remoteRef:\n        key: prod/api\n", false,

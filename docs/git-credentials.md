@@ -9,6 +9,11 @@ contains `kind`, `host`, `secret`, optional `username` and optional
 `known_hosts`. The host already has the checkout URL, SHA and policy in its
 sealed execution input.
 
+GitHub App installation tokens are opaque strings. Both the classic format
+and longer stateless tokens with dots, underscores and hyphens pass through
+unchanged. The source host registers the full token and its Basic authorization
+header with the log masker before invoking git.
+
 The controller derives the credential's host from the sealed source location.
 The store checks live ancestry, the current claim fence, repository permission
 and executor enrollment in one transaction. It commits
@@ -80,7 +85,8 @@ A credential is one of these kinds:
 - **An HTTPS token** (`kind: https`, `token`, optional `username`), such as a
   GitLab or Bitbucket access token or a fine-grained GitHub token. The
   username defaults to `x-access-token`; Bitbucket repository access tokens
-  need `x-token-auth`. It is usable once stored.
+  need `x-token-auth`. Tokens accept up to 4,096 printable ASCII characters
+  without spaces. It is usable once stored.
 
 Prefer a read-only deploy key or token scoped to the repositories the team
 builds.

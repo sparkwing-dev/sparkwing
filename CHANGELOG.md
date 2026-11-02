@@ -67,6 +67,9 @@ unlock.
 
 ### Fixed
 
+- **GitHub:** Accept stateless installation tokens through source checkout, storage and log masking
+  Stored HTTPS credentials and the console accept tokens up to 4,096 characters. Secret scanners recognize the longer installation-token format, including dots, underscores and hyphens. GitHub Actions runners preserve the full `GITHUB_TOKEN` for source checkout.
+
 - **Cloud:** A controller rate-limit reply to the launcher's first claim logs at INFO
   The previous process's idle poll interval may still apply after a restart. Repeated refusals retain WARN, and the launcher honors the controller's retry delay in both cases.
 - **Cloud:** Plan-to-job handoffs avoid an extra empty node on normal runs and retries

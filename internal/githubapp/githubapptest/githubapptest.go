@@ -681,7 +681,15 @@ func (g *GitHub) handleMint(w http.ResponseWriter, r *http.Request) {
 			tok.repos[strings.ToLower(repo.FullName)] = true
 		}
 	}
-	raw := "ghs_" + randomHex()
+	var b [384]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"message": "token generation failed"})
+		return
+	}
+	raw := "ghs_" + strconv.Itoa(AppID) + "_" +
+		base64.RawURLEncoding.EncodeToString(b[:24]) + "." +
+		base64.RawURLEncoding.EncodeToString(b[24:312]) + "." +
+		base64.RawURLEncoding.EncodeToString(b[312:])
 	g.tokens[raw] = tok
 	g.minted = append(g.minted, MintedToken{
 		Installation: inst.ID, Repositories: req.Repositories, RepositoryIDs: req.RepositoryIDs, Permissions: req.Permissions,

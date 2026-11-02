@@ -126,7 +126,7 @@ describe("draftProblem", () => {
     assert.notEqual(lib.draftProblem({ ...https, token: "" }), null);
     assert.notEqual(lib.draftProblem({ ...https, token: "a b" }), null);
     assert.notEqual(
-      lib.draftProblem({ ...https, token: "x".repeat(1025) }),
+      lib.draftProblem({ ...https, token: "x".repeat(4097) }),
       null,
     );
     assert.notEqual(lib.draftProblem({ ...https, username: "a b" }), null);
@@ -134,6 +134,25 @@ describe("draftProblem", () => {
       lib.draftProblem({ ...https, username: " x-token-auth " }),
       null,
     );
+  });
+
+  it("preserves long GitHub installation tokens in the write body", () => {
+    for (const size of [520, 4096]) {
+      const token =
+        "ghs_" +
+        "aB1_-.".repeat(Math.floor((size - 4) / 6)) +
+        "z".repeat((size - 4) % 6);
+      const draft = { ...https, host: "github.com", token };
+      assert.equal(lib.draftProblem(draft), null);
+      assert.equal(lib.draftBody(draft).kind, "https");
+      assert.deepEqual(lib.draftBody(draft), {
+        host: "github.com",
+        repository: draft.repository.trim(),
+        host_wide: draft.host_wide,
+        kind: "https",
+        token,
+      });
+    }
   });
 
   it("reports a bad host first", () => {

@@ -121,8 +121,8 @@ export function draftProblem(draft: GitCredentialDraft): string | null {
     return "Use a username of up to 128 printable characters with no spaces.";
   }
   if (draft.token === "") return "Enter the token.";
-  if (draft.token.length > 1024 || !printable.test(draft.token)) {
-    return "Use a token of up to 1024 printable characters with no spaces.";
+  if (draft.token.length > 4096 || !printable.test(draft.token)) {
+    return "Use a token of up to 4096 printable characters with no spaces.";
   }
   return null;
 }

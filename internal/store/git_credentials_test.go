@@ -4,11 +4,35 @@ import (
 	"crypto/sha256"
 	"errors"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 )
+
+func TestSourceGitCredentialLongInstallationTokenStorage(t *testing.T) {
+	tenant, admin, source := sourceGitCredentialFixture(t)
+	for _, size := range []int{520, 4096} {
+		token := "ghs_" + strings.Repeat("aB1_-.", (size-4)/6) + strings.Repeat("z", (size-4)%6)
+		_, err := tenant.WriteGitCredential(t.Context(), admin, sealedGitFixture(t, tenant, GitCredential{HostWide: true, Host: "github.com", Kind: GitCredentialHTTPS, Secret: token}))
+		if err != nil {
+			t.Fatal(err)
+		}
+		row, _, err := tenant.ReleaseSourceCredential(t.Context(), source)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if row.Secret == token {
+			t.Fatal("token persisted without encryption")
+		}
+		plain, err := fixtureSecretCipher(t).OpenBound(secrets.PurposeGitCredential, string(tenant.team), "git-credential:"+row.Host, row.CredentialScope(), false, true, row.Secret)
+		if err != nil || plain != token {
+			t.Fatalf("stored %d-byte credential did not round trip: %v", size, err)
+		}
+	}
+}
 
 func sourceGitCredentialFixture(t *testing.T) (*Tenant, capability.Authorized, capability.Authorized) {
 	t.Helper()
