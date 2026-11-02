@@ -2,10 +2,12 @@ package store
 
 import (
 	"encoding/json"
+	"errors"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 )
 
@@ -92,21 +94,49 @@ func TestCloudCapacityNoticeEndsAtActivation(t *testing.T) {
 
 func TestCapacityFailureCannotFailAnActivatedAward(t *testing.T) {
 	for _, failure := range capacityFailures {
+		for _, kind := range []capability.UnitKind{capability.UnitPlan, capability.UnitEval, capability.UnitNode} {
+			t.Run(failure.reason+"/"+string(kind), func(t *testing.T) {
+				s, demand, claim, _ := launcherSnapshotFixture(t, kind)
+				root, fence := launcherMeteredFence(t, s, demand, claim, kind)
+				if err := s.sealLauncherHost(t.Context(), root, capability.LauncherActivation{Award: fence, NodeUID: "node", ReservationID: "reservation", Capacity: &capability.CloudCapacityGrant{RequestedClass: "sparkwing-2cpu", GrantedClass: "sparkwing-2cpu"}}); err != nil {
+					t.Fatal(err)
+				}
+				reserved := chargedMicro(t, s)
+				if _, _, err := s.AsOperator().ReconcileLauncherAwards(t.Context(), root, []capability.LauncherObservation{failure.observe(fence)}, nil, nil, nil, nil); err == nil {
+					t.Fatal("activated award accepted a capacity failure")
+				}
+				if got := chargedMicro(t, s); reserved <= 0 || got != reserved {
+					t.Fatalf("activated award charge changed from %d to %d", reserved, got)
+				}
+				awards, _, err := s.AsOperator().ReconcileLauncherAwards(t.Context(), root, nil, nil, nil, nil, nil)
+				if err != nil || len(awards) != 1 || awards[0].Gone || awards[0].Claim.Award != claim.Award {
+					t.Fatalf("capacity report changed activated award: %+v %v", awards, err)
+				}
+			})
+		}
+	}
+}
+
+func TestSelfHostedLauncherCannotReportCloudCapacityFailure(t *testing.T) {
+	for _, failure := range capacityFailures {
 		t.Run(failure.reason, func(t *testing.T) {
-			s, demand, claim, _ := launcherSnapshotFixture(t, capability.UnitNode)
-			root, fence := launcherMeteredFence(t, s, demand, claim, capability.UnitNode)
-			if err := s.sealLauncherHost(t.Context(), root, capability.LauncherActivation{Award: fence, NodeUID: "node", ReservationID: "reservation", Capacity: &capability.CloudCapacityGrant{RequestedClass: "sparkwing-2cpu", GrantedClass: "sparkwing-2cpu"}}); err != nil {
+			s, demand := poolLauncherFixture(t)
+			claim, err := s.AsOperator().ClaimUnit(t.Context(), demand)
+			if err != nil {
 				t.Fatal(err)
 			}
-			if _, _, err := s.AsOperator().ReconcileLauncherAwards(t.Context(), root, []capability.LauncherObservation{failure.observe(fence)}, nil, nil, nil, nil); err == nil {
-				t.Fatal("activated award accepted a capacity failure")
+			root, fence := launcherMeteredFence(t, s, demand, claim, capability.UnitNode)
+			_, _, err = s.AsOperator().ReconcileLauncherAwards(t.Context(), root, []capability.LauncherObservation{failure.observe(fence)}, nil, nil, nil, nil)
+			var refusal *apierr.Error
+			if !errors.As(err, &refusal) || refusal.Code != apierr.Forbidden {
+				t.Fatalf("self-hosted capacity report must be refused: %v", err)
 			}
-			if chargedMicro(t, s) <= 0 {
-				t.Fatal("activated award refunded")
+			awards, _, err := s.AsOperator().ReconcileLauncherAwards(t.Context(), root, nil, nil, nil, nil, nil)
+			if err != nil || len(awards) != 1 || awards[0].Gone || awards[0].Claim.Award != claim.Award {
+				t.Fatalf("refused report changed self-hosted award: %+v %v", awards, err)
 			}
-			var status string
-			if err := s.DB().QueryRow(`SELECT status FROM nodes WHERE run_id='run' AND node_id='job'`).Scan(&status); err != nil || status == "failed" {
-				t.Fatalf("activated node status=%q err=%v", status, err)
+			if got := chargedMicro(t, s); got != 0 {
+				t.Fatalf("self-hosted award charged %d", got)
 			}
 		})
 	}
