@@ -20,7 +20,7 @@ func (s *Server) handleListAttempts(w http.ResponseWriter, r *http.Request, auth
 		return engineLookupError(err)
 	}
 
-	runs, metadata, err := pageCollection(r, authorized, runs, func(row *store.Run) string {
+	runs, metadata, err := pageCollection(r, authorized, runs, func(row store.RetryTreeMember) string {
 		return fmt.Sprintf("%016x/%020d/%s", uint64(row.CreatedAt.UnixNano())^(1<<63), row.Number, row.ID)
 	})
 	if err != nil {
