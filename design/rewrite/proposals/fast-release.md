@@ -38,6 +38,30 @@ A green staging gate deploys production automatically, then runs a production sm
 
 A Sparkwing Cloud cron runs only when there has been a deploy since its last run, debounced so a burst of deploys costs one run. It fans the long suites out across Cloud nodes: full race, the PostgreSQL store suite, acceptance, and a production grid sample. A failure pages and names the deploy, with a one-command rollback. Stormwing keeps probing production independently.
 
+## Where testing happens: on the tree, not on main
+
+A gate result belongs to a tree, not a branch. Sparkwing records "tree T passed gate G on runner R at engine E". A commit whose tree equals T inherits that result, wherever and on whichever branch it was produced.
+
+- An agent rebases its branch onto current main, runs the gate on its own machine, and lands by fast-forwarding main to that commit. Main's tree is then exactly the tree that passed, so main is tested without running anything again.
+- If main moved before the fast-forward, the fast-forward is refused, the agent rebases again, and the tree changes, so the gate runs again. There is no "tested on an older main" case.
+- The result is trusted because Korey trusts his own machines; that is the point. The record still names the runner, so a result from an unexpected machine is visible.
+- Main's own pipeline, on push, first asks whether its tree already has a passing gate result. If yes it skips straight to deploy; if no (a direct push, a merge commit, a hand edit) it runs the gate itself.
+- The engine and the gate definition are part of the result key, so changing the gate or upgrading Sparkwing invalidates old results instead of silently reusing them.
+
+## The agent landing workflow (Bitwing)
+
+Sparkwing executes and records; Bitwing makes agents follow the landing procedure and refuses to finish without evidence. A `sparkwing-land` Bitwing workflow, beside the existing `sparkwing-release` workflow:
+
+1. `rebase`: rebase onto current main. Evidence: the base commit.
+2. `gate`: `sparkwing run gate` on the rebased commit. Evidence: the run id and tree hash.
+3. `review`: the AI review job for the same tree, resumed from the branch's reviewer session if one exists. Evidence: review run id with no P0 or P1 findings.
+4. `land`: fast-forward main to the tested commit. Evidence: main's new head, which must equal the tested commit.
+5. `watch`: the staging gate, production promotion and smoke for that commit. Evidence: the deploy run ids.
+
+If any step fails, the workflow points back to the failing step; a review failure sends the agent back to fix, then re-run gate and review with the same reviewer. `workflow finish` succeeds only when every step has its evidence, which makes "did the agent actually run the pipeline after rebasing" a recorded fact instead of a hope.
+
+Several agents landing at once serialize naturally: only one fast-forward can win, the others rebase and re-gate. A cheap affected-test gate keeps that retry short.
+
 ## Compute placement: your own machines first
 
 The whole path runs the same way locally and on Cloud; only placement changes. The point is the product's promise: CI compute on machines you already own, with Cloud as overflow.
