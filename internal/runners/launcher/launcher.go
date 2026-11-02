@@ -123,6 +123,7 @@ func (l *Launcher) Run(ctx context.Context) error {
 	defer retiring.Wait()
 	retiring.Go(func() { l.retireLoop(ctx) })
 	var cooldown time.Time
+	firstClaim := true
 	for ctx.Err() == nil {
 		if err := l.reportWarmPools(ctx); err != nil {
 			if err == controllerclient.ErrResponseNotObject { //nolint:errorlint // Joined faults must remain WARN.
@@ -141,11 +142,18 @@ func (l *Launcher) Run(ctx context.Context) error {
 		if blocking(synced) == nil {
 			// safety: held awards without a Job or capacity Pod renew only here, so claim backoff must not skip them.
 			err := l.placeWaiting(ctx)
+			startupRateLimit := false
 			if err == nil && !time.Now().Before(cooldown) {
-				_, err = l.claim(ctx)
+				var launched bool
+				launched, err = l.claim(ctx)
+				failure, ok := err.(*apierr.Error) //nolint:errorlint // Joined faults must remain WARN.
+				startupRateLimit = firstClaim && !launched && ok && failure.Code == apierr.RateLimited
+				firstClaim = false
 			}
 			if err != nil {
-				if err == controllerclient.ErrResponseNotObject { //nolint:errorlint // Joined faults must remain WARN.
+				if startupRateLimit {
+					logger.Info("launcher initial claim deferred by controller rate limit", failureAttrs(err)...)
+				} else if err == controllerclient.ErrResponseNotObject { //nolint:errorlint // Joined faults must remain WARN.
 					logger.Info("launcher claim response unavailable; any undelivered award returns after lease expiry", failureAttrs(err)...)
 				} else if err != ErrNoDedicatedNode { //nolint:errorlint // Joined provisioning faults must remain WARN.
 					logger.Warn("launcher claim failed", failureAttrs(err)...)

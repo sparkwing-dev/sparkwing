@@ -111,7 +111,7 @@ func TestSuccessorWaitsForPredecessorNode(t *testing.T) {
 }
 
 func TestTeardownWaitIsBoundedAndRunScoped(t *testing.T) {
-	for _, scenario := range []string{"same run", "other run", "other team", "live predecessor", "foreign pod", "wrong class", "quarantined", "wrong binding", "expired wait"} {
+	for _, scenario := range []string{"same run", "planning predecessor", "other run", "other team", "live predecessor", "foreign pod", "wrong class", "quarantined", "wrong binding", "expired wait"} {
 		t.Run(scenario, func(t *testing.T) {
 			synctest.Test(t, func(t *testing.T) {
 				l, kube, _, control := fixture()
@@ -127,6 +127,10 @@ func TestTeardownWaitIsBoundedAndRunScoped(t *testing.T) {
 				l.Config.MemoryCeiling = 16 << 30
 				predecessor := *control.award
 				predecessor.CPUCores, predecessor.Memory = 2, match.CloudSizeMemoryBytes(2)
+				if scenario == "planning predecessor" {
+					predecessor.Binding.Kind, predecessor.Binding.NodeID = CloudPlan, ""
+					predecessor.Binding.Attempt = 0
+				}
 				if _, err = l.launch(t.Context(), &predecessor); err != nil {
 					t.Fatal(err)
 				}
@@ -134,13 +138,14 @@ func TestTeardownWaitIsBoundedAndRunScoped(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				if scenario != "live predecessor" {
+				if scenario != "live predecessor" && scenario != "planning predecessor" {
 					foreground := metav1.DeletePropagationForeground
 					if err = kube.BatchV1().Jobs("cloud").Delete(t.Context(), job.Name, metav1.DeleteOptions{PropagationPolicy: &foreground, Preconditions: &metav1.Preconditions{UID: &job.UID}}); err != nil {
 						t.Fatal(err)
 					}
 				}
 				successor := predecessor
+				successor.Binding.Kind = CloudWork
 				successor.Binding.UnitID, successor.Binding.NodeID = "next", "next"
 				switch scenario {
 				case "other run":
@@ -181,13 +186,13 @@ func TestTeardownWaitIsBoundedAndRunScoped(t *testing.T) {
 				}
 				requests, err := l.capacityPods(t.Context())
 				want := 1
-				if scenario == "same run" {
+				if scenario == "same run" || scenario == "planning predecessor" {
 					want = 0
 				}
 				if err != nil || len(requests) != want {
 					t.Fatalf("requests=%d want=%d: %v", len(requests), want, err)
 				}
-				if scenario == "same run" {
+				if scenario == "same run" || scenario == "planning predecessor" {
 					deadline := successor.teardownDeadline
 					if !deadline.Equal(time.Now().Add(30 * time.Second)) {
 						t.Fatalf("unexpected initial deadline: %v", deadline)
