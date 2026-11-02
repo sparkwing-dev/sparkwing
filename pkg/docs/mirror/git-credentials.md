@@ -14,14 +14,6 @@ and longer stateless tokens with dots, underscores and hyphens pass through
 unchanged. The source host registers the full token and its Basic authorization
 header with the log masker before invoking git.
 
-Tests and staging harnesses that construct `githubapp.Config` can set
-`StatelessInstallationTokens: true` to send
-`X-GitHub-Stateless-S2S-Token: enabled` when minting installation tokens.
-The default leaves the header absent. GitHub documents the header in its
-[per-request override announcement](https://github.blog/changelog/2026-05-15-github-app-installation-tokens-per-request-override-header/).
-Its [rollout completion announcement](https://github.blog/changelog/2026-10-02-stateless-github-app-installation-tokens-rolled-out/)
-schedules the header's retirement for November 30, 2026.
-
 The controller derives the credential's host from the sealed source location.
 The store checks live ancestry, the current claim fence, repository permission
 and executor enrollment in one transaction. It commits
