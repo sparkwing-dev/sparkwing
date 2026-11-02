@@ -89,6 +89,7 @@ the installed External Secrets CRDs.
 | `controller.secretsKey` | `sparkwing-secrets-key` | `key` | `secrets-key` |
 | `controller.credentialsSecret` | `sparkwing-credentials` | file-named keys below | each key keeps its name |
 | `sparkwing-runner-bundle.launcher.tokenSecret` | `sparkwing-launcher-token` | `token` | `agent-token` |
+| `sparkwing-runner-bundle.launcher.budgetStateSecret` (optional) | `sparkwing-budget-state` | `state` | `budget-state` |
 
 Generate the bootstrap seed and encryption key outside Helm, with private files:
 

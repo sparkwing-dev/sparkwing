@@ -151,21 +151,55 @@ func (l *Launcher) awaitCapacity(ctx context.Context, award CloudJobAward) error
 	if err != nil {
 		return err
 	}
-	if configured {
-		if err := l.requestCapacity(ctx, award); err != nil {
+	if !configured {
+		if err := l.failCapacity(ctx, award, CloudCapacityObservation{Unconfigured: true}); err != nil {
 			return err
 		}
-		return ErrNoDedicatedNode
+		l.logger().Error("Cloud capacity is not configured; configure the shared NodePool for the requested hardware class", "team", award.Binding.Team, "requested_class", cpuClass(award.CPUCores), "namespace", l.Config.Namespace, "support_reference", award.Binding.RunID)
+		return l.releaseCapacity(ctx, award.Binding)
 	}
-	states, err := l.retirements(ctx, []CloudJobObservation{{Binding: award.Binding, JobName: jobName(award.Binding), Capacity: &CloudCapacityObservation{Unconfigured: true}}})
+	if l.breakerClosed(ctx) {
+		pod, err := l.Kube.CoreV1().Pods(l.Config.Namespace).Get(ctx, capacityName(award.Binding), metav1.GetOptions{})
+		if err != nil && !apierrors.IsNotFound(err) {
+			return err
+		}
+		// perf: scheduled demand already has a node to pay for, even before that node is Ready.
+		if apierrors.IsNotFound(err) || pod.Spec.NodeName == "" {
+			if err := l.failCapacity(ctx, award, CloudCapacityObservation{Unavailable: true}); err != nil {
+				return err
+			}
+			l.logger().Error("Cloud budget breaker is closed; failed a waiting award instead of requesting a job node", "team", award.Binding.Team, "requested_class", cpuClass(award.CPUCores), "namespace", l.Config.Namespace, "support_reference", award.Binding.RunID)
+			return l.releaseCapacity(ctx, award.Binding)
+		}
+	}
+	if err := l.requestCapacity(ctx, award); err != nil {
+		return err
+	}
+	return ErrNoDedicatedNode
+}
+
+// safety: only a readable closed flag trips, so a read fault never fails a run.
+func (l *Launcher) breakerClosed(ctx context.Context) bool {
+	if l.Breaker == nil {
+		return false
+	}
+	closed, err := l.Breaker(ctx)
+	if err != nil {
+		l.logger().Warn("Cloud budget state unreadable; treating the breaker as open", "error", err)
+		return false
+	}
+	return closed
+}
+
+func (l *Launcher) failCapacity(ctx context.Context, award CloudJobAward, capacity CloudCapacityObservation) error {
+	states, err := l.retirements(ctx, []CloudJobObservation{{Binding: award.Binding, JobName: jobName(award.Binding), Capacity: &capacity}})
 	if err != nil {
 		return err
 	}
 	if !states[jobName(award.Binding)].Delete {
-		return errors.New("controller deferred unconfigured Cloud capacity")
+		return errors.New("controller deferred a Cloud capacity failure")
 	}
-	l.logger().Error("Cloud capacity is not configured; configure the shared NodePool for the requested hardware class", "team", award.Binding.Team, "requested_class", cpuClass(award.CPUCores), "namespace", l.Config.Namespace, "support_reference", award.Binding.RunID)
-	return l.releaseCapacity(ctx, award.Binding)
+	return nil
 }
 
 func (l *Launcher) requestCapacity(ctx context.Context, award CloudJobAward) error {

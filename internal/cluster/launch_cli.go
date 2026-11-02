@@ -14,7 +14,27 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/runners/launcher"
 )
 
-const agentTokenCredential = "agent-token"
+const (
+	agentTokenCredential  = "agent-token"
+	budgetStateCredential = "budget-state"
+)
+
+// safety: an absent flag means no breaker is published and never trips; each
+// check rereads the file so a refreshed projected Secret applies without a restart.
+func budgetBreaker(creds credentials.Dir) func(context.Context) (bool, error) {
+	return func(context.Context) (bool, error) {
+		state, err := creds.Read(budgetStateCredential)
+		switch {
+		case err != nil:
+			return false, err
+		case state == "" || state == "open":
+			return false, nil
+		case state == "closed":
+			return true, nil
+		}
+		return false, fmt.Errorf("credential %s holds %q, want open or closed", budgetStateCredential, state)
+	}
+}
 
 // LauncherFactory binds the shared controller transport and the verified Cloud
 // boundary to the launcher. The bearer remains in the transport, never a Job.
@@ -103,5 +123,6 @@ func RunLaunchCLI(ctx context.Context, args []string, factory LauncherFactory) e
 	if fs.Changed("poll") {
 		runner.Poll = poll
 	}
+	runner.Breaker = budgetBreaker(creds)
 	return runner.Run(ctx)
 }

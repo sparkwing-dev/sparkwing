@@ -124,6 +124,8 @@ type ClaimResponse struct {
 type LauncherCapacityObservation struct {
 	Award        capability.LeaseRef `json:"award"`
 	Unconfigured bool                `json:"unconfigured,omitempty"`
+	// Unavailable reports that the Cloud budget breaker refuses new job nodes.
+	Unavailable bool `json:"unavailable,omitempty"`
 }
 
 // LauncherRun identifies a run whose spent Cloud nodes may be retired.

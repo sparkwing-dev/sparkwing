@@ -173,6 +173,8 @@ export interface Run {
   replay_of_node_id?: string;
   args?: Record<string, string>;
   error?: string;
+  // failure_reason is the run's terminal reason code, such as cloud_capacity_unavailable.
+  failure_reason?: string;
   created_at?: string;
   started_at: string;
   finished_at?: string;
@@ -311,6 +313,7 @@ export interface RunDetailWire {
   number: number;
   team: string;
   status: "pending" | "running" | "success" | "dry_run" | "failed" | "cancelled";
+  reason?: string;
   failure?: string;
   state_seq: number;
   inputs: {
@@ -481,6 +484,7 @@ export function runDetailView(
     parent_run_id: inputs.lineage.parent_run_id || undefined,
     args: inputs.args ?? inputs.requested_args ?? undefined,
     error: wire.failure || undefined,
+    failure_reason: wire.reason || undefined,
     started_at: wire.started_at ?? "",
     finished_at: wire.finished_at,
     retry_mode: wire.retry?.mode === "all" ? "all" : wire.retry ? "failed" : undefined,
@@ -535,6 +539,7 @@ export function runDetailView(
 // planFailureHint is the CLI's hint for a run that failed before planning any job.
 export function planFailureHint(run: Run, nodes: Node[]): string | null {
   if (!run.error || run.status !== "failed" || nodes.length > 0) return null;
+  if (run.failure_reason === "cloud_capacity_unconfigured" || run.failure_reason === "cloud_capacity_unavailable") return null;
   return `The pipeline failed to plan, so no job ran. Fix the error above, check it from the repository with \`sparkwing pipeline plan --pipeline ${run.pipeline}\`, and trigger the run again.`;
 }
 

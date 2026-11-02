@@ -72,6 +72,7 @@ sparkwing-runner-bundle:
       repository: ghcr.io/sparkwing-dev/sparkwing-runner
       tag: rewrite-cloud
     tokenSecret: {name: sparkwing-launcher-token, key: token}
+    budgetStateSecret: {name: sparkwing-budget-state, key: state}
     jobImage:
       repository: ghcr.io/sparkwing-dev/sparkwing-runner
       tag: rewrite-cloud

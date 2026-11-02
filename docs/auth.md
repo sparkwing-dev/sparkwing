@@ -54,6 +54,8 @@ NodePool `get` and `list` access and creates no pools. Team creation requires no
 infrastructure change. Without a shared pool for the requested class, a held
 award ends as `cloud_capacity_unconfigured`, releases its unstarted credit hold,
 and gives the customer support@sparkwing.dev and the run ID as a support reference.
+A closed Cloud budget breaker ends such an award the same way as
+`cloud_capacity_unavailable` (see [deployment](deployment.md)).
 Scaling or exhausted shared pools keep the award pending, with “Waiting for
 dedicated Cloud capacity” and elapsed time in run status.
 

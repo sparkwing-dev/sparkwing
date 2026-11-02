@@ -83,4 +83,14 @@ spec:
                   items:
                     - key: {{ required "launcher.tokenSecret.key is required" $credential.key | quote }}
                       path: agent-token
+              {{- with $launcher.budgetStateSecret }}
+              {{- if .name }}
+              - secret:
+                  name: {{ .name | quote }}
+                  optional: true
+                  items:
+                    - key: {{ required "launcher.budgetStateSecret.key is required" .key | quote }}
+                      path: budget-state
+              {{- end }}
+              {{- end }}
 {{- end }}

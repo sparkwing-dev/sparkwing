@@ -58,6 +58,12 @@ launcher:
   tokenSecret:
     name: ""
     key: token
+  # Optional Cloud budget breaker flag holding "open" or "closed", usually an
+  # ExternalSecret over the budget-state SSM parameter. While it reads closed,
+  # awards waiting for a fresh job node fail as cloud_capacity_unavailable.
+  budgetStateSecret:
+    name: ""
+    key: state
   jobImage: {}
   # docker:<version>-dind, digest-pinned. It runs as root of the Job Pod's user
   # namespace with namespaced capabilities, never privileged.

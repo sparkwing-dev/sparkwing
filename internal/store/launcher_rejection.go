@@ -49,13 +49,18 @@ func (s *Store) failLauncherAwards(ctx context.Context, authority capability.Aut
 				continue
 			}
 			message := "Cloud Pod failed verification"
-			if reason == capability.CloudCapacityUnconfigured {
+			capacity := reason == capability.CloudCapacityUnconfigured || reason == capability.CloudCapacityUnavailable
+			if capacity {
 				if !capability.CloudLauncher(claimant) || award.Capability.Delivery != capability.DeliveryBootstrap || award.Capability.ExecutionHost != "" {
 					return bindingRefusal()
 				}
-				message = fmt.Sprintf("%s (Support reference: %s)", capability.CloudCapacityUnconfiguredMessage, award.Claim.RunID)
+				base := capability.CloudCapacityUnconfiguredMessage
+				if reason == capability.CloudCapacityUnavailable {
+					base = capability.CloudCapacityUnavailableMessage
+				}
+				message = fmt.Sprintf("%s (Support reference: %s)", base, award.Claim.RunID)
 				if award.CloudResources != nil {
-					message = fmt.Sprintf("%s (Requested class: sparkwing-%dcpu; Support reference: %s)", capability.CloudCapacityUnconfiguredMessage, int64(award.CloudResources.Cores), award.Claim.RunID)
+					message = fmt.Sprintf("%s (Requested class: sparkwing-%dcpu; Support reference: %s)", base, int64(award.CloudResources.Cores), award.Claim.RunID)
 				}
 			}
 			actor := runstate.Actor{Kind: runstate.ActorLauncher, Authority: authority, CapabilityPrefix: row.prefix, NodeFence: runspec.NodeFence{RunID: runspec.RunID(award.Claim.RunID), NodeID: runspec.NodeID(award.Claim.NodeID), Holder: fence.Holder, Generation: runspec.ClaimGeneration(fence.Generation)}}
@@ -81,7 +86,7 @@ func (s *Store) failLauncherAwards(ctx context.Context, authority capability.Aut
 			case capability.UnitEval:
 				err = writeEvalRecoveryTx(ctx, tx, target, recovery, "failed", tx.now(ctx))
 				if err == nil {
-					if reason == capability.CloudCapacityUnconfigured {
+					if capacity {
 						err = resolveExpansionFailureTx(ctx, tx, target, runstate.ExpansionFailed, &ExpansionFailure{Code: apierr.Unavailable, MaskedError: message}, tx.now(ctx))
 						if err == nil {
 							_, err = tx.execContext(ctx, `UPDATE nodes SET failure_reason=?,error=? WHERE team=? AND run_id=? AND node_id=? AND generation=?`, reason, message, target.team, target.ref.RunID, target.ref.NodeID, target.sourceGeneration)

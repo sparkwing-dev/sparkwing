@@ -87,9 +87,16 @@ func (o *Operator) ReconcileLauncherAwards(ctx context.Context, authority capabi
 				return nil, nil, err
 			}
 		}
-		if host.CapacityUnconfigured {
+		reason := ""
+		switch {
+		case host.CapacityUnconfigured:
+			reason = capability.CloudCapacityUnconfigured
+		case host.CapacityUnavailable:
+			reason = capability.CloudCapacityUnavailable
+		}
+		if reason != "" {
 			if err := owner.apply(ctx, host.Award, func() error {
-				return o.s.failLauncherAwards(ctx, authority, []capability.LeaseRef{host.Award}, capability.CloudCapacityUnconfigured)
+				return o.s.failLauncherAwards(ctx, authority, []capability.LeaseRef{host.Award}, reason)
 			}); err != nil {
 				return nil, nil, err
 			}

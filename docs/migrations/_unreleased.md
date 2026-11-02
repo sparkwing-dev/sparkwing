@@ -129,6 +129,12 @@ baseline using the instructions above.
 
 ## Shared Cloud capacity
 
+Deploy the controller before or with the launcher. An older controller returns
+HTTP 400 for the new `unavailable` capacity field and leaves the award waiting
+until the controller is upgraded. This is harmless. Breaker failure applies per
+waiting unit, so a run can fail partway through with executed units billed
+correctly. Only the failing unit's unstarted credit hold is refunded.
+
 Replace per-team NodePools with one shared NodePool per requested vCPU class and
 deployment. Retire the old pools only after their runs finish and their nodes
 are empty. Keep their permanent used-team and used-run labels until Karpenter
