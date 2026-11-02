@@ -105,6 +105,9 @@ type Config struct {
 	// APIURL is api.github.com.
 	APIURL string
 	HTTP   *http.Client
+	// StatelessInstallationTokens requests GitHub's temporary stateless-token
+	// override on token creation only. Leave false to follow GitHub's rollout.
+	StatelessInstallationTokens bool
 }
 
 // Validate reports what is missing from c.
@@ -428,6 +431,9 @@ func (c *Client) mintToken(ctx context.Context, installation int64, request map[
 	}
 	c.apiHeaders(req, "Bearer "+jwt)
 	req.Header.Set("Content-Type", "application/json")
+	if c.cfg.StatelessInstallationTokens {
+		req.Header.Set("X-GitHub-Stateless-S2S-Token", "enabled")
+	}
 	status, raw, err := c.send(req)
 	if err != nil {
 		return Token{}, err
