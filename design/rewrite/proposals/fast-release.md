@@ -48,6 +48,20 @@ A gate result belongs to a tree, not a branch. Sparkwing records "tree T passed 
 - Main's own pipeline, on push, first asks whether its tree already has a passing gate result. If yes it skips straight to deploy; if no (a direct push, a merge commit, a hand edit) it runs the gate itself.
 - The engine and the gate definition are part of the result key, so changing the gate or upgrading Sparkwing invalidates old results instead of silently reusing them.
 
+## One DAG, two entry points
+
+There are no pull requests. One pipeline definition serves both moments; jobs skip themselves when their result is already proven.
+
+| Job | Before merge (agent's branch, own machine) | After merge (main) |
+| --- | --- | --- |
+| Lint, build, affected and critical tests | runs | skipped when the tree already passed; runs otherwise |
+| AI review | runs; P0 or P1 fails the run | never runs: review happens before merge only |
+| Staging deploy and integration gate | not run | runs |
+| Production promotion and smoke | not run | runs |
+| Verification after deploy | not run | the debounced cron picks it up |
+
+Skipping uses `SkipIf` with the tree-keyed lookup, so the run record still shows every job and says why it was skipped. A merge without a prior passing tree (a hand edit on main) runs the gate before deploying, with no review.
+
 ## The agent landing workflow (Bitwing)
 
 Sparkwing executes and records; Bitwing makes agents follow the landing procedure and refuses to finish without evidence. A `sparkwing-land` Bitwing workflow, beside the existing `sparkwing-release` workflow:
