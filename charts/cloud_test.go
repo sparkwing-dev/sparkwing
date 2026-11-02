@@ -204,7 +204,7 @@ func checkCloudBindings(t *testing.T, manifest []byte) {
 						jobNamespace = ns
 					}
 				}
-				if paths["agent-token"] != "sparkwing-launcher-token/token" {
+				if paths["agent-token"] != "sparkwing-launcher-token/token" || paths["budget-state"] != "sparkwing-budget-state/state" {
 					t.Errorf("launcher credential = %v", paths)
 				}
 			}

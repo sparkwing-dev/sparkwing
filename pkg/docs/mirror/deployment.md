@@ -95,6 +95,21 @@ support@sparkwing.dev plus the run ID as a support reference. Configure that
 class's shared pool and trigger a new run. Pool-list failures retry. NodePools
 need `consolidateAfter` above the 3-minute award lease.
 
+A Cloud budget breaker stops Karpenter from launching job nodes and publishes
+its state, `open` or `closed`, to a flag. Mount that flag in the launcher's
+credentials directory as `budget-state` (chart value
+`launcher.budgetStateSecret`, usually an ExternalSecret with a one-minute
+refresh). While it reads `closed`, an award that needs a fresh node ends with
+`cloud_capacity_unavailable` and "Cloud capacity is temporarily unavailable.
+Contact support@sparkwing.dev" with the run ID as a support reference. Its
+unstarted credit hold is released, so refused runs cost nothing. Units already
+placed on a node keep running, and an award that finds a vacant node still
+runs. An absent flag never trips. An unreadable or unknown value logs a
+warning and keeps the award waiting, so a read fault never fails a run.
+
+Refused runs do not resume. After the breaker reopens (the deny detached and
+the flag back to `open`), affected customers trigger their runs again.
+
 Low-priority, volume-free placeholder Deployments hold never-used warm nodes in
 `<release namespace>-cloud-warm` by default (`launcher.warmNamespace`). That
 namespace is separate from the release and customer Job namespaces. Pool warm

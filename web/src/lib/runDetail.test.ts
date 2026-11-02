@@ -86,6 +86,16 @@ describe("runDetailView", () => {
     }
   });
 
+  it("shows a Cloud capacity failure without the plan hint", () => {
+    const wire = fixture("run-detail-plan-failure.json");
+    wire.reason = "cloud_capacity_unavailable";
+    wire.failure = "Cloud capacity is temporarily unavailable. Contact support@sparkwing.dev (Support reference: run-plan)";
+    const { run, nodes } = api.runDetailView(wire);
+    assert.equal(run.failure_reason, "cloud_capacity_unavailable");
+    assert.match(run.error ?? "", /temporarily unavailable\. Contact support@sparkwing\.dev/);
+    assert.equal(api.planFailureHint(run, nodes), null);
+  });
+
   it("shows a run that failed to plan with its error and the CLI's hint", () => {
     const { run, nodes } = api.runDetailView(
       fixture("run-detail-plan-failure.json"),

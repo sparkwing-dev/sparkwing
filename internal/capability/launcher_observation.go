@@ -12,8 +12,11 @@ func (o LauncherObservation) Validate() error {
 	}
 	switch o.Award.Kind {
 	case UnitPlan, UnitEval, UnitNode:
-		if o.CapacityUnconfigured && (!o.Reservation || o.Rejected) {
-			return &apierr.Error{Code: apierr.BadRequest, Message: "unconfigured capacity requires a demand observation"}
+		if (o.CapacityUnconfigured || o.CapacityUnavailable) && (!o.Reservation || o.Rejected) {
+			return &apierr.Error{Code: apierr.BadRequest, Message: "a capacity failure requires a demand observation"}
+		}
+		if o.CapacityUnconfigured && o.CapacityUnavailable {
+			return &apierr.Error{Code: apierr.BadRequest, Message: "capacity cannot be both unconfigured and unavailable"}
 		}
 		if o.Reservation && o.Rejected {
 			return &apierr.Error{Code: apierr.BadRequest, Message: "launcher reservation cannot report a rejected Job"}
@@ -62,6 +65,7 @@ type LauncherObservation struct {
 	Rejected             bool     `json:"rejected,omitempty"`
 	WaitedForFreshNode   bool     `json:"waited_for_fresh_node,omitempty"`
 	CapacityUnconfigured bool     `json:"capacity_unconfigured,omitempty"`
+	CapacityUnavailable  bool     `json:"capacity_unavailable,omitempty"`
 }
 
 // LauncherActivation binds a verified execution reservation before its Job is unsuspended.
@@ -77,3 +81,10 @@ const CloudCapacityUnconfigured = "cloud_capacity_unconfigured"
 
 // CloudCapacityUnconfiguredMessage gives customers the support path for a missing hardware-class pool.
 const CloudCapacityUnconfiguredMessage = "Cloud capacity is not configured for the requested hardware class. Contact support@sparkwing.dev"
+
+// CloudCapacityUnavailable names a terminal failure before execution while the
+// Cloud budget breaker refuses new job nodes.
+const CloudCapacityUnavailable = "cloud_capacity_unavailable"
+
+// CloudCapacityUnavailableMessage gives customers the support path while new Cloud capacity is stopped.
+const CloudCapacityUnavailableMessage = "Cloud capacity is temporarily unavailable. Contact support@sparkwing.dev"

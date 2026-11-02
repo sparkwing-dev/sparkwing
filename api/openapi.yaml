@@ -460,6 +460,8 @@ components:
       properties:
         award:
           $ref: '#/components/schemas/internal.capability.LeaseRef'
+        capacity_unavailable:
+          type: boolean
         capacity_unconfigured:
           type: boolean
         rejected:
@@ -2050,6 +2052,8 @@ components:
       properties:
         award:
           $ref: '#/components/schemas/internal.capability.LeaseRef'
+        unavailable:
+          type: boolean
         unconfigured:
           type: boolean
       required:

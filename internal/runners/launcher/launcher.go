@@ -37,6 +37,8 @@ type CloudControl interface {
 type CloudCapacityObservation struct {
 	PodUID       string
 	Unconfigured bool
+	// Unavailable reports that the Cloud budget breaker refuses new job nodes.
+	Unavailable bool
 }
 
 // CloudJobObservation retains the identities needed to reconcile after launcher restart.
@@ -70,6 +72,9 @@ type Launcher struct {
 	Boundary CloudBoundary
 	Poll     time.Duration
 	Logger   *slog.Logger
+	// Breaker reports whether the Cloud budget breaker is closed. Nil means no
+	// breaker, as on self-hosted clusters.
+	Breaker func(context.Context) (bool, error)
 
 	retirementMu     sync.Mutex
 	nonTerminalRuns  map[controllerwire.LauncherRun]time.Time

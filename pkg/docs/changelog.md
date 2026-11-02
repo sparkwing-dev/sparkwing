@@ -22,6 +22,8 @@ unlock.
 
 ### Added
 
+- **Cloud:** A closed budget breaker fails waiting Cloud work clearly instead of leaving it pending
+  The launcher reads the breaker flag from `budget-state` in its credentials directory (chart value `launcher.budgetStateSecret`). While it reads `closed`, an award that needs a fresh job node ends as `cloud_capacity_unavailable` with "Cloud capacity is temporarily unavailable. Contact support@sparkwing.dev" and the run ID as a support reference, and its unstarted credit hold is released. Units already on a node are untouched. An absent flag never trips, and an unreadable one logs a warning and keeps waiting. Run status and the console show the message, and the console no longer offers the plan-fix hint for either Cloud capacity failure.
 - **operator:** Warm capacity controls in the console and `sparkwing operator warm-capacity show|set`
   Each Cloud hardware class defaults to Off. Manual holds a count. Auto uses cold-start waits and median job start time, bounded by the operator's min/max and a 10-second default target. The page and CLI show warm/desired capacity, p50/p95 starts over 1h/24h, and cold starts, upsizes, signups and active teams over 24h/7d.
 

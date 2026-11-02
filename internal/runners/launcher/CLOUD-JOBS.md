@@ -639,6 +639,15 @@ launcher sync. The controller releases the unstarted credit reservation in the
 same transaction. The launcher deletes demand and logs the requested class and
 run ID. Customer guidance names support@sparkwing.dev and the run reference.
 
+With a compatible pool, the launcher reads `budget-state` from its credentials
+directory before creating demand. `closed` means the Cloud budget breaker has
+stopped job node launches, so the award terminally reports
+`cloud_capacity_unavailable` through the same fenced sync, with the same credit
+release and support guidance. An absent file or `open` creates demand. A read
+error or another value logs a warning and keeps the award waiting. The check runs
+only for awards that found no vacant node, so units already on a node and awards
+that find one are unaffected.
+
 With a compatible pool, the launcher keeps the award and creates
 `sw-capacity-<award hash>`: an unbound Pod with the requested shared class and
 launcher namespace selectors, the generic dedicated toleration, the award's CPU,
