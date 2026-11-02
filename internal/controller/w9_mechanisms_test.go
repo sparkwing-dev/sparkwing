@@ -90,8 +90,15 @@ func w9Entry(t *testing.T) (*source.Entry, runspec.Source, string) {
 	return entry, code, sha
 }
 
+func w9ProcessBase(base procenv.Base) procenv.Base {
+	// safety: the race runtime's exit sleep competes with the SDK shutdown grace.
+	base.Ambient = append(base.Ambient, "GORACE=atexit_sleep_ms=0")
+	base.SubmitEnvAllow = append(base.SubmitEnvAllow, "GORACE")
+	return base
+}
+
 func w9Planner(entry *source.Entry, base procenv.Base) nodehost.SDKPlanner {
-	sessions := nodehost.ProtocolSessionConfig{Environments: nodehost.SDKEnvironment{Base: base}}
+	sessions := nodehost.ProtocolSessionConfig{Environments: nodehost.SDKEnvironment{Base: w9ProcessBase(base)}}
 	return nodehost.SDKPlanner{Start: sessions.StartPlanning, Masker: base.Masker, EnsureEngine: func(context.Context, engineid.Identity, releaseasset.Target) (engine.Resolved, error) {
 		return entry.Engine, nil
 	}, Log: func(context.Context, nodeproto.FrameLog) error { return nil }}
@@ -273,7 +280,7 @@ func TestCloudSubmittedEnvironmentGeneratorCompletesEvaluation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	sessions := nodehost.ProtocolSessionConfig{Revoke: func() error { return nil }, Environments: nodehost.SDKEnvironment{Store: tenant, Base: base}}
+	sessions := nodehost.ProtocolSessionConfig{Revoke: func() error { return nil }, Environments: nodehost.SDKEnvironment{Store: tenant, Base: w9ProcessBase(base)}}
 	accepted := nodehost.AcceptedRun{RunID: "run", Spec: rawSpec, SpecHash: string(spec.Hash), Plan: doc, PlanHash: string(spec.PlanHash)}
 	process, err := sessions.StartEvaluation(t.Context(), nodehost.EvaluationInput{Entry: entry, Accepted: accepted, NodeID: "source", Generation: 7, SpecHash: string(declarationHash), GrantedRunner: claim.Runner})
 	if err != nil {
