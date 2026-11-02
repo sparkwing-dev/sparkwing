@@ -714,6 +714,40 @@ file. Other syntax and workflow checks remain active.
   removes the shared-runner capacity shortfall. A complete hosted batch under
   the split is still unmeasured.
 
+- **Fixture SQL connection reuse, 2026-11-01:** `teststore.Exec` retains one
+  connection per registered store, closed by the opening test's cleanup. Its
+  SQLite DSN keeps foreign keys, the busy timeout and immediate transactions.
+  `SQL(t, st)` keeps its separate pool for corruption tests. The retained
+  connection avoids reparsing the schema for every fixture statement.
+
+  Normal samples compared `6065a30b9` with `f06454e8f` on the
+  16-logical-CPU Linux host using Go 1.26.10, `GOMAXPROCS=4`, `GOWORK=off`,
+  `GOFLAGS=-buildvcs=false`, `GOCACHE=/tmp/sw-gocache`, private homes and a
+  private temporary directory. The command was `go test -p 12 -json -count=1
+  -timeout 120m ./internal/controller/... ./internal/store/...
+  ./tests/acceptance/...`. An `-exec` wrapper recorded each test binary's
+  start before executing it. All baseline binaries were compiled before
+  changing the helper. The updated helper suite adds two regressions. Every
+  other package ran the same top-level names.
+
+  | Normal sample | Before | After |
+  | --- | ---: | ---: |
+  | Full command wall | 1342.270 s | 944.970 s |
+  | Full command CPU, user + system | 2257.300 s | 1878.300 s |
+  | `internal/controller` wall | 1235.251 s | 863.498 s |
+  | `internal/store` wall | 1210.223 s | 938.127 s |
+  | `tests/acceptance` wall | 513.305 s | 381.005 s |
+  | `internal/store/teststore` wall | 2.660 s | 1.496 s |
+
+  The updated command passed. The normal baseline lacked web `tsx` and the
+  TypeScript SDK's locked dependencies, so
+  `TestDashboardRequestsReachControllerHandlers` and `TestTypeScriptBoundary`
+  failed. Installing the locked dependencies made both focused reruns pass.
+  The dashboard rerun used its original binary. No existing assertions changed.
+  Command wall includes compilation. Runs overlapped other samples and other
+  lanes, with different cache warmth and variable host load, so these are
+  observed shared-host costs.
+
 - **Heavy packages:** run these by name rather than reaching for `./...`, and
   give the command a timeout the package actually fits in. Measured on a
   16-core Linux box, `GOWORK=off go test -count=1 <pkg>`. The CLI sample
