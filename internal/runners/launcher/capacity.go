@@ -159,11 +159,18 @@ func (l *Launcher) awaitCapacity(ctx context.Context, award CloudJobAward) error
 		return l.releaseCapacity(ctx, award.Binding)
 	}
 	if l.breakerClosed(ctx) {
-		if err := l.failCapacity(ctx, award, CloudCapacityObservation{Unavailable: true}); err != nil {
+		pod, err := l.Kube.CoreV1().Pods(l.Config.Namespace).Get(ctx, capacityName(award.Binding), metav1.GetOptions{})
+		if err != nil && !apierrors.IsNotFound(err) {
 			return err
 		}
-		l.logger().Error("Cloud budget breaker is closed; failed a waiting award instead of requesting a job node", "team", award.Binding.Team, "requested_class", cpuClass(award.CPUCores), "namespace", l.Config.Namespace, "support_reference", award.Binding.RunID)
-		return l.releaseCapacity(ctx, award.Binding)
+		// perf: scheduled demand already has a node to pay for, even before that node is Ready.
+		if apierrors.IsNotFound(err) || pod.Spec.NodeName == "" {
+			if err := l.failCapacity(ctx, award, CloudCapacityObservation{Unavailable: true}); err != nil {
+				return err
+			}
+			l.logger().Error("Cloud budget breaker is closed; failed a waiting award instead of requesting a job node", "team", award.Binding.Team, "requested_class", cpuClass(award.CPUCores), "namespace", l.Config.Namespace, "support_reference", award.Binding.RunID)
+			return l.releaseCapacity(ctx, award.Binding)
+		}
 	}
 	if err := l.requestCapacity(ctx, award); err != nil {
 		return err

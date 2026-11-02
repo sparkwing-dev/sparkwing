@@ -33,7 +33,7 @@ func breakerFixture(t *testing.T) (*Launcher, *bytes.Buffer, *int) {
 				states[i] = CloudJobState{Binding: observation.Binding, Delete: true}
 				continue
 			}
-			states[i] = CloudJobState{Binding: observation.Binding}
+			states[i] = CloudJobState{Binding: observation.Binding, LeaseExpiresAt: observation.Binding.OwnerDeadline}
 		}
 		return states, nil
 	}}
@@ -107,5 +107,33 @@ func TestClosedBreakerLaunchesOnAvailableNode(t *testing.T) {
 	jobs, err := kube.BatchV1().Jobs("cloud").List(t.Context(), metav1.ListOptions{})
 	if err != nil || len(jobs.Items) != 1 || asked {
 		t.Fatalf("an award with a node consulted the breaker or did not run: jobs=%d asked=%t err=%v", len(jobs.Items), asked, err)
+	}
+}
+
+func TestClosedBreakerKeepsScheduledCapacity(t *testing.T) {
+	l, _, failures := breakerFixture(t)
+	pods, err := l.Kube.CoreV1().Pods("cloud").List(t.Context(), metav1.ListOptions{LabelSelector: capacityLabel + "=true"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	pod := &pods.Items[0]
+	pod.Spec.NodeName = "node"
+	if _, err := l.Kube.CoreV1().Pods("cloud").Update(t.Context(), pod, metav1.UpdateOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	l.Breaker = func(context.Context) (bool, error) { return true, nil }
+	if _, err := l.LaunchOne(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if *failures != 0 || len(l.waitingAwards()) != 1 {
+		t.Fatalf("scheduled demand failed before its node became ready: failures=%d waiting=%d", *failures, len(l.waitingAwards()))
+	}
+	l.Boundary.(*boundaryFake).reserveErr = nil
+	if _, err := l.LaunchOne(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	jobs, err := l.Kube.BatchV1().Jobs("cloud").List(t.Context(), metav1.ListOptions{})
+	if err != nil || len(jobs.Items) != 1 || *failures != 0 || len(l.waitingAwards()) != 0 {
+		t.Fatalf("scheduled capacity did not launch: jobs=%v failures=%d waiting=%d err=%v", jobs, *failures, len(l.waitingAwards()), err)
 	}
 }

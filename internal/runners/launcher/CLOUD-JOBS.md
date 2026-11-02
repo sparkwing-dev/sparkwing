@@ -645,8 +645,19 @@ stopped job node launches, so the award terminally reports
 `cloud_capacity_unavailable` through the same fenced sync, with the same credit
 release and support guidance. An absent file or `open` creates demand. A read
 error or another value logs a warning and keeps the award waiting. The check runs
-only for awards that found no vacant node, so units already on a node and awards
-that find one are unaffected.
+only for awards that found no vacant node. A capacity Pod with `spec.nodeName`
+already has a paid node, so its award keeps waiting to reserve that node even
+when the breaker closes. Units already on a node and awards that find one are
+unaffected. The chart's budget Secret projection is optional, so a missing
+Secret or key leaves the flag absent and permits launcher startup.
+
+Breaker failure applies per waiting unit. A run can fail partway through while
+units that already executed retain their correct charges. Only the failing
+unit's unstarted credit hold is refunded.
+
+Deploy the controller before or with the launcher. An older controller returns
+HTTP 400 for the new `unavailable` capacity field. The award keeps waiting until
+the controller is upgraded, without a capacity failure or refund.
 
 With a compatible pool, the launcher keeps the award and creates
 `sw-capacity-<award hash>`: an unbound Pod with the requested shared class and
