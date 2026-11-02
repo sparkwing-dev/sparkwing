@@ -90,7 +90,7 @@ credential model in `docs/auth.md`, and the decision log
 | Repository cache fallbacks require sealed proof; awards use the proven key | `intake_provenance.go`: `sealProvenanceTx`; `authority_issue.go`: `awardDataScope` | `cache_provenance_test.go`: `TestCacheDefaultLookupRequiresProvenRepository` |
 | Latest pipeline references | `latest_run.go`, `binding_execution.go`; sealed reference `FromAnyRun` opt-out | `latest_run_test.go`; `binding_pipeline_test.go` |
 | OIDC claims | `Provenance.OIDC`; `internal/oidcissuer/issuer.go`: `Claims`, `runnerEnvironment`; `authority_oidc.go`: `Tenant.MintOIDCToken` | `oidc_repository_test.go`: `TestOIDCRepositoryClaimReadsSealedProvenance`; `pool_launcher_test.go`: `TestLauncherPodOIDCIsFresh` |
-| OIDC without an issuer preserves `not_found` and explains controller setup | `internal/nodehost/process_service_reads.go`: `ProcessServices.oidc` | `internal/nodehost/routes_oidc_test.go`: `TestOIDCWithoutIssuerExplainsControllerSetup` |
+| OIDC without an issuer preserves `not_found`, explains controller setup and matches Go `ErrOIDCUnavailable` | `internal/nodehost/process_service_reads.go`: `ProcessServices.oidc`; `sparkwing/protocol_operations.go`: `sdkOperations.Context` | `internal/nodehost/routes_oidc_test.go`: `TestOIDCWithoutIssuerExplainsControllerSetup`; `sparkwing/oidc_unavailable_internal_test.go`: `TestProtocolOIDCUnavailableSentinelPreservesWireFailure` |
 
 ### Claims and placement
 

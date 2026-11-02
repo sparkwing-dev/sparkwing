@@ -22,6 +22,9 @@ unlock.
 
 ### Fixed
 
+- **Go SDK:** Match `ErrOIDCUnavailable` when the controller has no OIDC issuer
+  `errors.Is` can recognize the missing-issuer response while the error retains its `not_found` code and setup guidance. Authorization and transport failures remain errors.
+
 - **upgrade:** Refresh the SDK requirement in generated sparks overlays before installation
   An overlay left from an earlier run could retain the old SDK pin and make `sparkwing upgrade` fail with "Go dependency selection changed the SDK pin". Installation now takes the SDK requirement from `go.mod` while preserving resolved sparks versions.
 
