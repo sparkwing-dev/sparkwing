@@ -1399,3 +1399,7 @@ Korey approved the v0.68.3 production cutover per the reviewed runbook, and thes
 ## 2026-11-02 Korey decision 82: both owned machines may deploy
 
 Korey's WSL workstation and Mac are both trusted to run Sparkwing deploy jobs, enrolled as repository-scoped runners for `sparkwing-dev/sparkwing` so they receive repository-proven runs. Deploy jobs use per-run short-lived OIDC credentials, not long-lived keys stored on either machine. Cloud remains overflow.
+
+## 2026-11-02 Korey decision 83: review policy starts as a tool-neutral spec
+
+Code review behaviour is configured by a repository-root `.review.yaml`, specified tool-neutrally at ink-labs `wing/review-spec.md`; it is not a Sparkwing feature. Reviews block only when the change fails its objective, carries significant security or usability risk, or breaks a declared design rule; nits and rare non-catastrophic edge cases never block. P0 and P1 require re-review by the same reviewer; P2 and lower are optional and may skip re-review with a recorded reason. A Sparkwing review job is the first consumer and Bitwing's landing workflow enforces the review record; a standalone review product waits until the format settles.
