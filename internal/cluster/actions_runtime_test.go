@@ -12,9 +12,12 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/runners"
+	"github.com/sparkwing-dev/sparkwing/internal/source"
 )
 
 func TestProductionWarmExchangesActionsIdentity(t *testing.T) {
+	token := "ghs_123_" + strings.Repeat("aB1_-", 40) + "." + strings.Repeat("cD2_-", 40) + "." + strings.Repeat("eF3_-", 22)
+	t.Setenv("GITHUB_TOKEN", token)
 	expires := time.Now().Add(time.Hour)
 	push := capability.PushScope{RepositoryKey: "gh:42", Repository: "acme/repo", Ref: "refs/heads/main", SHA: strings.Repeat("a", 40), WorkflowRunID: "123"}
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -47,6 +50,10 @@ func TestProductionWarmExchangesActionsIdentity(t *testing.T) {
 		raw, err := options.Bearer(ctx)
 		if raw != "runner-secret" || err != nil || options.actions.repository != "gh:42" || options.Loop.ClaimUntil.Unix() != expires.Unix() {
 			t.Fatal("lost server-issued Actions authority")
+		}
+		credential, err := options.actions.GitCredential(ctx, source.Spec{RepoKey: "gh:42", RemoteURL: "https://github.com/acme/repo.git"})
+		if err != nil || credential.Secret != token || credential.Username != "x-access-token" {
+			t.Fatalf("Actions source did not preserve its installation token: %v", err)
 		}
 		return runners.RuntimeConfig{}, boundary
 	}
