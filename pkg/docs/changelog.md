@@ -20,6 +20,11 @@ unlock.
 
 ## [Unreleased]
 
+### Fixed
+
+- **upgrade:** Refresh the SDK requirement in generated sparks overlays before installation
+  An overlay left from an earlier run could retain the old SDK pin and make `sparkwing upgrade` fail with "Go dependency selection changed the SDK pin". Installation now takes the SDK requirement from `go.mod` while preserving resolved sparks versions.
+
 ## [v0.68.3] - 2026-11-02
 ### Added
 
@@ -62,8 +67,6 @@ unlock.
 
 ### Fixed
 
-- **upgrade:** Refresh the SDK requirement in generated sparks overlays before installation
-  An overlay left from an earlier run could retain the old SDK pin and make `sparkwing upgrade` fail with "Go dependency selection changed the SDK pin". Installation now takes the SDK requirement from `go.mod` while preserving resolved sparks versions.
 - **Cloud:** A controller rate-limit reply to the launcher's first claim logs at INFO
   The previous process's idle poll interval may still apply after a restart. Repeated refusals retain WARN, and the launcher honors the controller's retry delay in both cases.
 - **Cloud:** Plan-to-job handoffs avoid an extra empty node on normal runs and retries
