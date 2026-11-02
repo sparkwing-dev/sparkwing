@@ -1387,3 +1387,7 @@ KEDA moves out of the staging warm namespace into a neutral `keda` namespace bef
 ## 2026-11-01 Korey decision 79: the budget breaker guards against runaways, not growth
 
 The Sparkwing Cloud AWS budget breaker becomes a catastrophe guard: a 3,000 USD monthly budget that trips at 90%, a 400 USD daily budget, and email alerts to Korey at 50% and 80% of the monthly budget. Customer Cloud usage is prepaid, so ordinary growth is already paid for; the breaker only has to stop runaway provisioning or abuse. Before launch, a tripped breaker must give customers a clear "Cloud capacity is temporarily unavailable" error naming support, never a silent hang, and must not charge for runs it refused. Tying the limit to prepaid revenue is a post-launch option.
+
+## 2026-11-02 Korey decision 80: index retry lookups before release
+
+The schema-28 baseline gains `idx_runs_retry_of ON runs(team, retry_of)` before v0.68.3 freezes it, so retry-tree pages and the "retried as" field on run listings stay fast as history grows. Schema 28 is unreleased, so the version does not change; the baseline digest does. Staging is reconciled by hand once (snapshot, create the index, record the new digest); production is created fresh at the cutover wipe.

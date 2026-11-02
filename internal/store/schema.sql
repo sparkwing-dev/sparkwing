@@ -1586,6 +1586,8 @@ CREATE INDEX idx_runs_sha_started ON runs(team,git_sha, started_at DESC);
 
 CREATE INDEX idx_runs_branch_started ON runs(team,git_branch, started_at DESC);
 
+CREATE INDEX idx_runs_retry_of ON runs(team,retry_of);
+
 CREATE INDEX idx_claim_requirement_labels ON claim_requirement_terms(label,team,requirements,term);
 
 CREATE INDEX idx_nodes_claim_requirements ON nodes(team,claim_requirements,ready_at,run_id,node_id) WHERE status='pending' AND ready_at IS NOT NULL AND claimed_by IS NULL AND capability_prefix='' AND cancel_requested_at IS NULL;
