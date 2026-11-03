@@ -5,8 +5,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
@@ -181,5 +183,25 @@ func TestBurstConnectionFailureFallsBackBeforeIntake(t *testing.T) {
 				t.Fatalf("local=%v notice=%q error=%v", local, &out, err)
 			}
 		})
+	}
+}
+
+func TestRoutedRunDeadTokenHintNamesTheRoutingProfile(t *testing.T) {
+	cloud, profile := "cloud", "o'work"
+	err := runRoutedCommand(t.Context(), "test", runFlags{}, nil, userconfig.RunRouting{Route: &cloud, Profile: &profile}, &bytes.Buffer{}, burstRunDependencies{
+		connect: func(context.Context, string) (client.EngineOptions, func(), error) {
+			return client.EngineOptions{}, func() {}, nil
+		},
+		probe: func(context.Context, client.EngineOptions) error {
+			return &apierr.Error{Code: apierr.Unauthenticated, Message: "credential is not live"}
+		},
+		local: func(context.Context, string, runFlags, []string) error { t.Fatal("dead credential fell back to a local run"); return nil },
+	})
+	var hint string
+	if writeErr := writeInvocationError(io.Discard, err, func(_ io.Writer, failure *apierr.Error) error { hint = failure.Hint; return nil }); writeErr != nil {
+		t.Fatal(writeErr)
+	}
+	if want := "--profile 'o'\\''work' --token-stdin"; !strings.Contains(hint, want) {
+		t.Fatalf("hint does not name the routing profile %q: %s", want, hint)
 	}
 }
