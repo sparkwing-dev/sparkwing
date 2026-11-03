@@ -55,7 +55,8 @@ startup without changing the store.
 
 v0.68.3 ships schema baseline 28 on SQLite and PostgreSQL as a store reset, with
 no forward migration. Back up and recreate stores at every other baseline
-before starting it.
+before starting it, following
+[the v0.68.3 reset steps](migrations/v0.68.3.md#recreate-the-store-for-schema-baseline-28).
 
 Schema 29 is the first forward migration. On SQLite and PostgreSQL, the first
 open of a v0.68.3 or later 0.68 store (schema 28 with the v0.68.3 baseline
@@ -64,8 +65,9 @@ transaction; existing jobs read as untrusted. On PostgreSQL the migration
 advisory lock lets one of several controllers starting together run it. Every
 other store is refused unchanged: a version older than 28, schema 28 with any
 other digest, or a version newer than the binary. Take a snapshot first; rolling
-back to 0.68 means restoring it. Staging and production require the same schema wipe. Follow
-[the local and server reset steps](migrations/_unreleased.md#recreate-the-store-for-schema-baseline-28).
+back to 0.68 means restoring it. Staging and production upgrade the same way;
+follow
+[the in-place upgrade steps](migrations/_unreleased.md#upgrade-the-store-in-place-to-schema-baseline-29).
 
 v0.68.0 replaced the store. It cannot read or import a store written by v0.67
 or earlier, refuses one with the move-aside remedy below, and leaves it
