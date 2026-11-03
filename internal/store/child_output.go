@@ -2,12 +2,18 @@ package store
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 )
+
+// ErrNoOutput reports a job that has no readable committed output: unfinished,
+// skipped, run without a dry-run body, or its record expired. It wraps
+// blob.ErrNotFound; bytes missing behind a live record stay a plain blob.ErrNotFound.
+var ErrNoOutput = fmt.Errorf("job has no committed output: %w", blob.ErrNotFound)
 
 // ReadChildOutput selects the child's committed output under its creating job's live authority.
 func (t *Tenant) ReadChildOutput(ctx context.Context, supplied capability.Authorized) (blob.Blob, error) {
@@ -59,7 +65,7 @@ func (t *Tenant) readOutput(ctx context.Context, supplied capability.Authorized,
 		return blob.Blob{}, err
 	}
 	if row.Status != runstate.StatusDone || row.OutputRecord == nil {
-		return blob.Blob{}, blob.ErrNotFound
+		return blob.Blob{}, ErrNoOutput
 	}
 	key := *row.OutputRecord
 	if key.Team != string(t.team) || key.Kind != blob.KindOutput || runspec.NodeID(key.Scope.Job) != row.Ref.NodeID {
@@ -74,7 +80,7 @@ func (t *Tenant) readOutput(ctx context.Context, supplied capability.Authorized,
 		return blob.Blob{}, err
 	}
 	if !found || !record.Pinned && record.ExpiresAt.Set && !record.ExpiresAt.Value.After(tx.now(ctx)) {
-		return blob.Blob{}, blob.ErrNotFound
+		return blob.Blob{}, ErrNoOutput
 	}
 	size, err := requireBlobTx(ctx, tx, t.team, record.Digest)
 	if err != nil {

@@ -95,8 +95,14 @@ test("optional references suppress only genuine absence through the protocol", a
     {
       name: "absent upstream",
       status: 404,
-      body: { error: { code: "blob_missing", message: "blob is absent or tombstoned" } },
+      body: { error: { code: "not_found", message: "job has no committed output", details: { reason: "no_output" } } },
       code: undefined,
+    },
+    {
+      name: "lost bytes",
+      status: 404,
+      body: { error: { code: "blob_missing", message: "blob is absent or tombstoned" } },
+      code: "blob_missing",
     },
     {
       name: "forbidden",

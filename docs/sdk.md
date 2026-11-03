@@ -188,8 +188,8 @@ sw.Job(plan, "report", func(ctx context.Context) error {
 `Ref.Get(ctx)` returns the decoded value. `Ref.TryGet(ctx)` also reports
 presence. An upstream that was skipped, has not finished, or ran in a dry run
 without a dry-run body is absent, as is an expired output; TypeScript `tryGet`
-returns `undefined` for the same cases. A transport or decoding failure fails
-the callback. For a cross-run
+returns `undefined` for the same cases. Bytes missing behind a recorded output,
+a transport failure or a decoding failure fail the callback. For a cross-run
 reference, JSON null is absent. An in-run null output is present and decodes to
 the type's zero value. Typed job and step outputs are bounded to 16 MiB each.
 

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"strings"
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
@@ -91,7 +92,12 @@ func proveGoDependencyOutput(t *testing.T, binding nodeproto.ProcessBinding, pip
 		}
 		if request.ID == "read" {
 			var result nodeproto.RunResult
-			if err := json.Unmarshal(reply.Result, &result); err != nil || result.Outcome != "success" || string(result.Output) != want {
+			err := json.Unmarshal(reply.Result, &result)
+			if failure, failed := strings.CutPrefix(want, "failed: "); failed {
+				if err != nil || result.Outcome != "failed" || result.Error == nil || !strings.Contains(result.Error.Message, failure) {
+					t.Fatalf("Go %s did not fail with %q: %+v %v", pipeline, failure, result, err)
+				}
+			} else if err != nil || result.Outcome != "success" || string(result.Output) != want {
 				t.Fatalf("Go %s: %+v %v", pipeline, result, err)
 			}
 		}

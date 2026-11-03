@@ -114,7 +114,7 @@ func (r Ref[T]) Get(ctx context.Context) T {
 // changes which branch runs.
 //
 // TryGet panics for the failures a pipeline author cannot handle at
-// runtime: no resolver in context, which happens only outside a
+// runtime: recorded output whose stored bytes are gone, no resolver in context, which happens only outside a
 // dispatched step; stored output that does not fit T; a cancelled or
 // expired context, which is the step being torn down rather than an
 // upstream that is absent; and a resolver failure that carries no
