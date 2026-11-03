@@ -169,7 +169,7 @@ func (r RepoGates) hookProblem(h HookObservation) string {
 	path := filepath.Join(r.HooksDir, h.Name)
 	switch {
 	case !h.Declared:
-		return fmt.Sprintf("%s runs pipelines, but no pipeline declares it now; delete %s", h.Name, path)
+		return fmt.Sprintf("%s is a sparkwing hook that no pipeline declares now; delete %s", h.Name, path)
 	case !h.Present:
 		return h.Name + " is declared but not installed"
 	case !h.Managed:
@@ -259,7 +259,7 @@ func Survey(git Git, repoRoot string, expected Expectations) RepoGates {
 		default:
 			h.Present, h.Body = true, string(body)
 			h.Managed = strings.Contains(h.Body, Marker)
-			h.Forwarder = h.Managed && !wanted && !strings.Contains(h.Body, pipelineCall)
+			h.Forwarder = !wanted && h.Body == legacyForwarder(name)
 			h.ContentMatches = wanted && h.Body == spec.Content
 			h.VersionMatches = strings.Contains(h.Body, "# "+Marker+" "+Format)
 			info, statErr := os.Stat(path)
@@ -313,6 +313,20 @@ func Survey(git Git, repoRoot string, expected Expectations) RepoGates {
 		row.State = GateArmed
 	}
 	return row
+}
+
+// safety: Sparkwing v0.50 through v0.67 wrote exactly this body to chain a global hook it
+// ran no pipeline for; any other marked script that no pipeline declares stays a conflict.
+func legacyForwarder(name string) string {
+	body := "#!/bin/sh\n# " + Marker + " -- do not edit; use `sparkwing pipeline hooks (un)install`\n"
+	if name != "post-commit" {
+		body += "set -e\n"
+	}
+	return body + "global=\"$(git config --global --type=path core.hooksPath 2>/dev/null)\" || exit 0\n" +
+		"[ -n \"$global\" ] || exit 0\n" +
+		"hook=\"$global/" + name + "\"\n" +
+		"[ -x \"$hook\" ] || exit 0\n" +
+		"exec \"$hook\" \"$@\"\n"
 }
 
 func broken(repoRoot string, err error) RepoGates {
