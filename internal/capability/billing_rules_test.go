@@ -2,6 +2,7 @@ package capability
 
 import "testing"
 
+//sparkwing:critical
 func TestBillingMinimumsMatchContract(t *testing.T) {
 	want := map[BillingUnit]int64{
 		BillingPlan: 0,

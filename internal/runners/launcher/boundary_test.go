@@ -110,6 +110,7 @@ func TestBoundaryReleasesOnlyAfterPodsLeave(t *testing.T) {
 	}
 }
 
+//sparkwing:critical
 func TestBoundaryRefusesOtherTeamAndCrossNamespaceReuse(t *testing.T) {
 	b, kube := boundaryFixture()
 	original, err := b.Reserve(t.Context(), boundaryBinding("team"), "original", CloudPlacement{RequestedClass: "2"})

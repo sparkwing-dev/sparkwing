@@ -326,6 +326,7 @@ func runScoped(pattern string) bool {
 	return strings.HasPrefix(path, "/api/v1/runs/{run}")
 }
 
+//sparkwing:critical
 func TestTeamBoundary_EveryRunRouteHidesOtherTeamsResources(t *testing.T) {
 	tenancyDialects(t, func(t *testing.T, f *tenancyFixture) {
 		routes := controller.New(nil, nil).Registrations()

@@ -6,6 +6,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/secrets/masktest"
 )
 
+//sparkwing:critical
 func TestMaskingConformanceVectors(t *testing.T) {
 	vectors, err := masktest.Load("testdata/masking.json")
 	if err != nil {

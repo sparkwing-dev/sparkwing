@@ -7,6 +7,7 @@ import (
 	"testing"
 )
 
+//sparkwing:critical
 func TestGitHubInstallationTokensMaskEveryStreamBoundary(t *testing.T) {
 	for _, size := range []int{40, 520, 4096} {
 		t.Run(fmt.Sprint(size), func(t *testing.T) {

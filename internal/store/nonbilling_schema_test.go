@@ -8,6 +8,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/store/internal/storetest"
 )
 
+//sparkwing:critical
 func TestNonBillingSchemaRejectsCounterexamples(t *testing.T) {
 	st := storetest.Open(t)
 	exec := func(q string, args ...any) {
@@ -72,6 +73,7 @@ func TestNonBillingSchemaRejectsCounterexamples(t *testing.T) {
 	}
 }
 
+//sparkwing:critical
 func TestSQLiteBaselineRequiresStrictStorageForEveryTable(t *testing.T) {
 	st := storetest.OpenSQLite(t)
 	rows, err := st.DB().Query(`SELECT name, strict FROM pragma_table_list WHERE schema='main' AND type='table' AND name NOT LIKE 'sqlite_%'`)

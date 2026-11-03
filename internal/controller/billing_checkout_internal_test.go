@@ -44,6 +44,7 @@ func TestHostedPagesOnlyLeaveForStripe(t *testing.T) {
 }
 
 // A queued refund names the controller's deployment, which the checkout service checks against the payment's stamp.
+//sparkwing:critical
 func TestAQueuedRefundNamesItsDeployment(t *testing.T) {
 	var sent map[string]string
 	checkout := &billingCheckout{url: "https://checkout.test", token: "credential", http: &http.Client{Transport: billingPageTransport(func(r *http.Request) (*http.Response, error) {

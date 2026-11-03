@@ -94,6 +94,7 @@ func TestPaymentProviderOutcomes(t *testing.T) {
 	}
 }
 
+//sparkwing:critical
 func TestNonRefundPaymentEventsRequireObjectMode(t *testing.T) {
 	objects := financialObjects(PaymentTest)
 	objects["payment_intent.requires_action"] = strings.Replace(objects["payment_intent.payment_failed"], "requires_payment_method", "requires_action", 1)

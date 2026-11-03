@@ -241,6 +241,7 @@ func FuzzDepcacheNamespaceKeepsAbsentRefDistinct(f *testing.F) {
 	})
 }
 
+//sparkwing:critical
 func TestFetchedRunWritesApartFromItsSubmittersUploads(t *testing.T) {
 	writer := runspec.PrincipalWriter("account", "alice")
 	upload, err := runspec.AssertedProvenance(writer, "refs/heads/main", "0000000000000000000000000000000000000a11", "ci")

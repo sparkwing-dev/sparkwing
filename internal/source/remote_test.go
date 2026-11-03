@@ -321,6 +321,7 @@ func uncredentialedSSHCommands(t *testing.T, remote string, base procenv.Base) [
 	return commands
 }
 
+//sparkwing:critical
 func TestTenantUncredentialedSSHIgnoresAmbientConfiguration(t *testing.T) {
 	for _, ssh := range uncredentialedSSHCommands(t, "ssh://git@8.8.8.8:2222/team/repo.git", procenv.Base{Ambient: sourcetest.Environment(t)}) {
 		for _, want := range []string{"-F '/dev/null'", "-o IdentitiesOnly=yes", "-o IdentityAgent=none", "-o IdentityFile=none", "-o HostName='8.8.8.8'"} {

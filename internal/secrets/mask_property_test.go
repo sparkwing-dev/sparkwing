@@ -47,6 +47,7 @@ func TestMaskHidesEveryJSONEscapeSpelling(t *testing.T) {
 // after decoding JSON escapes, however its characters are escaped or overlap
 // others. A '*' beside a replacement marker is the accepted residual MASKING.md
 // describes, so the alphabet leaves it out.
+//sparkwing:critical
 func TestMaskLeavesNoSecretVisibleProperty(t *testing.T) {
 	r := rand.New(rand.NewSource(817))
 	alpha := []rune(`ab/"\é`)

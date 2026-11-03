@@ -52,6 +52,7 @@ func rewriteSchemaCount(t *testing.T, db *sql.DB, table string, want int) {
 	}
 }
 
+//sparkwing:critical
 func TestRewriteSchemaClassifiesEveryCreatedTable(t *testing.T) {
 	db := rewriteSchemaDB(t)
 	rows, err := db.Query("SELECT name FROM sqlite_master WHERE type = 'table'")
