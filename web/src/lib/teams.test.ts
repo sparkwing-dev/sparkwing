@@ -466,13 +466,17 @@ describe("parseRepoPatterns", () => {
   });
 });
 
+// The CLI registry writes this fixture and fails when it drifts, so these
+// checks follow the flags the parser accepts.
+function cliFlags(): Record<string, string[]> {
+  return JSON.parse(readFileSync(join(__dirname, "testdata", "cli-flags.json"), "utf8"));
+}
+
 describe("cliProfileCommand", () => {
   it("saves the token with a command sparkwing profiles add accepts", () => {
     const cmd = teams.cliProfileCommand("acme", "https://controller.example");
     assert.equal(cmd, "sparkwing profiles add --controller https://controller.example --profile acme --token-stdin");
-    const registry = readFileSync(join(process.cwd(), "..", "internal", "clisurface", "registry.go"), "utf8");
-    const add = registry.slice(registry.indexOf('{Path: "sparkwing profiles add"'));
-    const accepted = new Set([...add.slice(0, add.indexOf("}},")).matchAll(/Name: "([a-z-]+)"/g)].map((m) => m[1]));
+    const accepted = new Set(cliFlags()["sparkwing profiles add"]);
     for (const [, flag] of cmd.matchAll(/--([a-z-]+)/g)) {
       assert.ok(accepted.has(flag), `--${flag} is not a sparkwing profiles add flag`);
     }
@@ -503,9 +507,7 @@ describe("runnerConnectCommand", () => {
   });
 
   it("names only flags sparkwing-runner warm accepts", () => {
-    const registry = readFileSync(join(process.cwd(), "..", "internal", "clisurface", "registry.go"), "utf8");
-    const warm = registry.slice(registry.indexOf('{Path: "sparkwing-runner warm"'));
-    const accepted = new Set([...warm.slice(0, warm.indexOf("}},")).matchAll(/Name: "([a-z-]+)"/g)].map((m) => m[1]));
+    const accepted = new Set(cliFlags()["sparkwing-runner warm"]);
     for (const grants of [["nodes.claim"], ["triggers.claim"], ["nodes.claim", "triggers.claim"]]) {
       const cmd = teams.runnerConnectCommand({ capability: "swk_secret", grants }, ["github.com/acme/*"], "https://controller.example");
       const runner = cmd.slice(cmd.indexOf("sparkwing-runner warm"));

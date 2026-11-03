@@ -1,0 +1,34 @@
+{
+  "sparkwing profiles add": [
+    "output",
+    "checkout",
+    "help",
+    "help-all",
+    "controller",
+    "profile",
+    "token-stdin",
+    "force",
+    "no-probe"
+  ],
+  "sparkwing-runner warm": [
+    "output",
+    "checkout",
+    "help",
+    "help-all",
+    "controller",
+    "poll",
+    "max-concurrent",
+    "metrics-addr",
+    "max-claims-before-restart",
+    "also-claim-triggers",
+    "claim-jobs",
+    "local-admission",
+    "github-actions",
+    "team",
+    "idle-exit",
+    "label",
+    "repos",
+    "credentials-dir",
+    "submit-env-allow"
+  ]
+}
