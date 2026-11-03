@@ -231,6 +231,7 @@ func composeRuntime(env map[string]string, k Kind, rt Runtime) {
 	put("SPARKWING_REPO", rt.Repo)
 	put("SPARKWING_TRIGGER_SOURCE", rt.TriggerSource)
 	put("SPARKWING_GATE_INDEX", rt.GateIndex)
+	put("SPARKWING_ENGINE_VERSION", rt.EngineVersion)
 }
 
 func registerMasks(masker *secrets.Masker, name, value string, maskValue bool) error {

@@ -20,6 +20,11 @@ unlock.
 
 ## [Unreleased]
 
+### Added
+
+- **runtime:** Jobs receive `SPARKWING_ENGINE_VERSION`
+  Every job attempt sees the version of the engine executing it, so a pipeline can key a recorded result on the engine that produced it and stop reusing it after an upgrade.
+
 ### Fixed
 
 - **upgrade:** Refresh the SDK requirement in generated sparks overlays before installation

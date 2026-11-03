@@ -49,7 +49,7 @@ func TestSDKEnvironmentProjectsSealedValuesAndPersistedGeneratedJob(t *testing.T
 				if gotKind != kind || !reflect.DeepEqual(gotBase, base) {
 					t.Fatal("environment policy lost process kind or captured inputs")
 				}
-				want := procenv.Runtime{RunID: "run", JobID: "generated", Runner: procenv.RunnerInfo{Name: "awarded", Type: "cloud", Labels: []string{"gpu"}}, DryRun: true, Branch: "feature", Commit: "sealed-sha", Repo: "acme/repo", TriggerSource: "github_app", Startup: []procenv.Assignment{{Name: "STARTUP", Value: "interpreter", Startup: true}}}
+				want := procenv.Runtime{RunID: "run", JobID: "generated", Runner: procenv.RunnerInfo{Name: "awarded", Type: "cloud", Labels: []string{"gpu"}}, DryRun: true, Branch: "feature", Commit: "sealed-sha", Repo: "acme/repo", TriggerSource: "github_app", EngineVersion: engineVersion(), Startup: []procenv.Assignment{{Name: "STARTUP", Value: "interpreter", Startup: true}}}
 				if !reflect.DeepEqual(runtime, want) {
 					t.Fatalf("runtime = %+v", runtime)
 				}
@@ -154,4 +154,10 @@ func testProcessEnv(t testing.TB, values ...string) procenv.Env {
 		t.Fatal(err)
 	}
 	return env
+}
+
+func TestSDKRuntimeNamesTheEngineVersion(t *testing.T) {
+	if got := sdkRuntime(nodeproto.RunContext{RunID: "run"}, nodeproto.RunnerIdentity{}).EngineVersion; got == "" || got != engineVersion() {
+		t.Fatalf("EngineVersion = %q, want the node host's own build %q", got, engineVersion())
+	}
 }

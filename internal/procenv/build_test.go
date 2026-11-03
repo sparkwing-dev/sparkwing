@@ -22,7 +22,7 @@ func envMap(env []string) map[string]string {
 
 func TestCapturedEnvironmentAndClaimIdentity(t *testing.T) {
 	gate := "/private/hook-index"
-	rt := Runtime{RunID: "run", JobID: "job", Runner: RunnerInfo{Name: "granted", Type: "runner", Labels: []string{"linux", "pool=build"}}, Branch: "trunk", Commit: "abc", Repo: "repo", TriggerSource: "push", DryRun: true, GateIndex: gate}
+	rt := Runtime{RunID: "run", JobID: "job", Runner: RunnerInfo{Name: "granted", Type: "runner", Labels: []string{"linux", "pool=build"}}, Branch: "trunk", Commit: "abc", Repo: "repo", TriggerSource: "push", DryRun: true, GateIndex: gate, EngineVersion: "v9.9.9"}
 	b := Base{Local: true, Captured: []string{"PATH=/bin", "CUSTOM=captured", "SPARKWING_CUSTOM=yes", "SPARKWING_RUNNER_NAME=forged", "CI=no", "SPARKWING_NODE_TOKEN=secret", "AWS_ACCESS_KEY_ID=secret", "MY_API_TOKEN=secret", "SPARKWING_NODE_URL=http://old"}, Ambient: []string{"CUSTOM=daemon"}}
 	for _, kind := range []Kind{Plan, Attempt, Eval} {
 		env, err := buildEntries(kind, b, rt)
@@ -30,7 +30,7 @@ func TestCapturedEnvironmentAndClaimIdentity(t *testing.T) {
 			t.Fatal(err)
 		}
 		got := envMap(env)
-		for name, want := range map[string]string{"CUSTOM": "captured", "SPARKWING_CUSTOM": "yes", "SPARKWING_RUNNER_NAME": "granted", "CI": "true", "SPARKWING_RUN_ID": "run", "SPARKWING_BRANCH": "trunk", "SPARKWING_COMMIT": "abc", "SPARKWING_DRY_RUN": "true", "SPARKWING_GATE_INDEX": gate} {
+		for name, want := range map[string]string{"CUSTOM": "captured", "SPARKWING_CUSTOM": "yes", "SPARKWING_RUNNER_NAME": "granted", "CI": "true", "SPARKWING_RUN_ID": "run", "SPARKWING_BRANCH": "trunk", "SPARKWING_COMMIT": "abc", "SPARKWING_DRY_RUN": "true", "SPARKWING_GATE_INDEX": gate, "SPARKWING_ENGINE_VERSION": "v9.9.9"} {
 			if got[name] != want {
 				t.Errorf("kind %d %s=%q want %q", kind, name, got[name], want)
 			}
@@ -51,7 +51,7 @@ func TestCapturedEnvironmentAndClaimIdentity(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, name := range []string{"SPARKWING_BRANCH", "SPARKWING_COMMIT", "SPARKWING_REPO", "SPARKWING_TRIGGER_SOURCE"} {
+	for _, name := range []string{"SPARKWING_BRANCH", "SPARKWING_COMMIT", "SPARKWING_REPO", "SPARKWING_TRIGGER_SOURCE", "SPARKWING_ENGINE_VERSION"} {
 		if _, ok := envMap(env)[name]; ok {
 			t.Errorf("invented %s", name)
 		}
