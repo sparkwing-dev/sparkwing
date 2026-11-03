@@ -22,6 +22,9 @@ unlock.
 
 ### Fixed
 
+- **logs:** Return retained retry logs with an explicit incomplete marker when their writer is lost
+  JSON log pages finish with an `incomplete` list naming each affected subject and reason, including `writer_lost`, instead of returning HTTP 409 or 500. Available bytes and continuation cursors remain readable before and after log maintenance. The CLI drains retained output and reports incomplete logs with exit 3.
+
 - **upgrade:** Refresh the SDK requirement in generated sparks overlays before installation
   An overlay left from an earlier run could retain the old SDK pin and make `sparkwing upgrade` fail with "Go dependency selection changed the SDK pin". Installation now takes the SDK requirement from `go.mod` while preserving resolved sparks versions.
 - **GitHub:** Accept stateless installation tokens through source checkout, storage and log masking

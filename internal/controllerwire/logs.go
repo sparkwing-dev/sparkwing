@@ -97,14 +97,23 @@ func (r LogRecord) Validate() error {
 	return nil
 }
 
-// Complete means persisted terminal state and final log segments are observed.
+// LogIncomplete identifies a terminal log whose retained bytes may omit output.
+type LogIncomplete struct {
+	Subject blob.LogSubject `json:"subject"`
+	Reason  string          `json:"reason"`
+}
+
+// LogPage reports whether terminal state and all available log segments have been observed.
+// Incomplete marks subjects whose writers ended without preserving all output.
 // An idle live page retains its cursor. Truncated pages require immediate reads;
-// a nontruncated, incomplete page requires a later follow poll at NextCursor.
+// a nontruncated page with Complete=false requires a later follow poll at NextCursor.
 type LogPage struct {
 	Records    []LogRecord `json:"records"`
 	NextCursor string      `json:"next_cursor"`
 	Truncated  bool        `json:"truncated"`
 	Complete   bool        `json:"complete"`
+
+	Incomplete []LogIncomplete `json:"incomplete,omitempty"`
 }
 
 func (p LogPage) Validate(cursor string) error {
@@ -132,6 +141,8 @@ type LogSearchPage struct {
 	Matches    []LogRecord `json:"matches"`
 	NextCursor string      `json:"next_cursor"`
 	Truncated  bool        `json:"truncated"`
+
+	Incomplete []LogIncomplete `json:"incomplete,omitempty"`
 }
 
 func (p LogSearchPage) Validate(cursor string) error {

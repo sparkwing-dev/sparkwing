@@ -390,7 +390,9 @@ func (t *Tenant) ReadLogSegments(ctx context.Context, actor runstate.Actor, requ
 			}
 		}
 		var completeness string
-		err = tx.QueryRowContext(ctx, "SELECT completeness,incomplete_reason FROM log_streams WHERE team = ? AND run_id = ? AND id = ? AND generation = ?", t.team, request.Subject.RunID, identity.id, identity.generation).Scan(&completeness, &result.IncompleteReason)
+		var abandoned bool
+		args := append(abandonedLogStreamArgs(tx.now(ctx)), t.team, request.Subject.RunID, identity.id, identity.generation)
+		err = tx.QueryRowContext(ctx, "SELECT completeness,incomplete_reason,CASE WHEN "+abandonedLogStreamSQL+" THEN 1 ELSE 0 END FROM log_streams l WHERE l.team = ? AND l.run_id = ? AND l.id = ? AND l.generation = ?", args...).Scan(&completeness, &result.IncompleteReason, &abandoned)
 		if errors.Is(err, sql.ErrNoRows) {
 			return result, ErrNotFound
 		}
@@ -398,6 +400,9 @@ func (t *Tenant) ReadLogSegments(ctx context.Context, actor runstate.Actor, requ
 			return result, err
 		}
 		result.Complete = completeness == "complete"
+		if abandoned {
+			result.IncompleteReason = "writer_lost"
+		}
 		rows, err := tx.queryContext(ctx, "SELECT n,start_offset,end_offset-start_offset,stored_bytes,sha256,object_key FROM log_segments WHERE team = ? AND run_id = ? AND stream_id = ? AND generation = ? AND end_offset > ? ORDER BY n", t.team, request.Subject.RunID, identity.id, identity.generation, request.Offset)
 		if err != nil {
 			return result, err

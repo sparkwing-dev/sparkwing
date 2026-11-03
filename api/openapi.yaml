@@ -2187,11 +2187,29 @@ components:
         - state
       type: object
       x-sparkwing-go-type: controllerwire.LockView
+    internal.controllerwire.LogIncomplete:
+      additionalProperties: true
+      properties:
+        reason:
+          type: string
+        subject:
+          $ref: '#/components/schemas/internal.blob.LogSubject'
+      required:
+        - subject
+        - reason
+      type: object
+      x-sparkwing-go-type: controllerwire.LogIncomplete
     internal.controllerwire.LogPage:
       additionalProperties: true
       properties:
         complete:
           type: boolean
+        incomplete:
+          anyOf:
+            - items:
+                $ref: '#/components/schemas/internal.controllerwire.LogIncomplete'
+              type: array
+            - type: "null"
         next_cursor:
           type: string
         records:
@@ -2242,6 +2260,12 @@ components:
     internal.controllerwire.LogSearchPage:
       additionalProperties: true
       properties:
+        incomplete:
+          anyOf:
+            - items:
+                $ref: '#/components/schemas/internal.controllerwire.LogIncomplete'
+              type: array
+            - type: "null"
         matches:
           anyOf:
             - items:

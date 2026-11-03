@@ -273,6 +273,14 @@ records; the final commit's `manifest` names the manifest's stored `size` and
 from trigger, plan and eval units. A final log-tail exception cannot reopen work
 or write another attempt's logs.
 
+JSON log pages set `complete=true` once terminal execution and all available
+segments have been observed. Missing output is reported separately in the optional
+`incomplete` list, with `subject` and `reason` for each affected stream. An abandoned
+writer reports `writer_lost` after the final-tail grace, even before maintenance
+persists its incomplete seal. Retained bytes and continuation cursors remain readable;
+known incompleteness does not return HTTP 409 or 500. Pages with `truncated=true`
+still require immediate continuation reads.
+
 An interrupted or incomplete observation remains visible independently of the
 recorded run verdict. The CLI returns exit 3 when it cannot establish a complete
 observation, and exit 4 when the controller refuses the read (`not_found`,

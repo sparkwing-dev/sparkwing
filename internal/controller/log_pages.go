@@ -21,7 +21,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/egress"
-	"github.com/sparkwing-dev/sparkwing/internal/limits"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
@@ -210,7 +209,6 @@ func (s *Server) readLogPage(ctx context.Context, tenant *store.Tenant, reader s
 	budget, cancel := newLogBudget(ctx)
 	defer cancel()
 	page := controllerwire.LogPage{Records: []controllerwire.LogRecord{}, Complete: true}
-	unsealed := false
 	var pattern *regexp.Regexp
 	if q.Grep != "" {
 		var err error
@@ -276,16 +274,10 @@ func (s *Server) readLogPage(ctx context.Context, tenant *store.Tenant, reader s
 				return page, err
 			}
 		}
-		if finished := view.Snapshot.Run.FinishedAt; finished != nil && !page.Complete && !view.Snapshot.StoreNow.Before(finished.Add(limits.LogSealGrace)) {
-			unsealed = true
-		}
 		page.Complete = previousComplete && page.Complete
 		if page.Truncated {
 			break
 		}
-	}
-	if unsealed && !page.Truncated && len(page.Records) == 0 {
-		return page, &apierr.Error{Code: apierr.Conflict, Message: "logs incomplete: the runner never sealed this log"}
 	}
 	encoded, err := json.Marshal(cursor)
 	if err != nil {
@@ -360,6 +352,9 @@ func appendSubjectLines(reader segmentLogs, subject blob.LogSubject, q controlle
 		return nil
 	}}
 	result, err := reader.read(budget.ctx, subject, cursor.Offsets[key], scan)
+	if result.IncompleteReason != "" {
+		page.Incomplete = append(page.Incomplete, controllerwire.LogIncomplete{Subject: subject, Reason: result.IncompleteReason})
+	}
 	if errors.Is(err, errLogPageFull) {
 		return nil
 	}
@@ -370,13 +365,7 @@ func appendSubjectLines(reader segmentLogs, subject blob.LogSubject, q controlle
 	if err != nil {
 		return err
 	}
-	if result.IncompleteReason == "byte cap" {
-		return &apierr.Error{Code: apierr.Conflict, Message: "logs truncated: the node log reached its 64 MiB cap"}
-	}
-	if result.IncompleteReason != "" {
-		return &apierr.Error{Code: apierr.IntegrityFailure, Message: "logs incomplete: " + result.IncompleteReason}
-	}
-	page.Complete = page.Complete && result.Complete
+	page.Complete = page.Complete && (result.Complete || result.IncompleteReason != "")
 	return nil
 }
 
