@@ -5,5 +5,8 @@
   "main": "main.ts",
   "dependencies": {
     "@sparkwing/sdk": "file:../../../sdk/typescript"
+  },
+  "scripts": {
+    "test": "node --test main.test.mjs"
   }
 }

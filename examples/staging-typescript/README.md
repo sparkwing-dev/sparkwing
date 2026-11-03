@@ -5,6 +5,17 @@ Independent jobs exercise outputs, children, caches, artifacts, memo reuse and
 run lifecycle operations. Secrets, OIDC and Docker report skip reasons when
 unavailable.
 
+Run the SDK protocol checks from the repository root with Node 22.18 or newer:
+
+```bash
+npm --prefix examples/staging-typescript/.sparkwing test
+```
+
+These checks drive the real SDK host with controlled services. They verify
+output and generator replay, skip predicates, OIDC signature rejection, stale
+artifact rejection and memo reuse assertions. Cache storage and run lifecycle
+still need the pipeline's integration run.
+
 Ordinary CLI execution is blocked in this checkout. The checked-in TypeScript
 SDK has version `0.0.0`, so the local file dependency selects engine `v0.0.0`.
 The CLI requires a matching verified engine for TypeScript pins. Its installed

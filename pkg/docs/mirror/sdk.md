@@ -605,8 +605,15 @@ run and requires successful `hello` and `docker-test` jobs. Set
 job uses an independent trigger rather than `RunAndAwait`.
 
 A TypeScript twin lives in `examples/staging-typescript` as a separate project
-because SDK selection applies to the whole pipeline directory. Its native
-feature assertions can be tested through the SDK protocol. Running the twin
+because SDK selection applies to the whole pipeline directory. Test its native
+feature assertions through the SDK protocol with Node 22.18 or newer:
+
+```bash
+npm --prefix examples/staging-typescript/.sparkwing test
+```
+
+These checks cover output replay, skip reasons, OIDC signatures, stale artifacts
+and memo reuse assertions with controlled host services. Running the twin
 through the candidate CLI is blocked: its local-file SDK dependency resolves
 the development version `0.0.0`, which requires a verified `v0.0.0` engine. The
 Go local replacement path can use the candidate CLI, while TypeScript has no
