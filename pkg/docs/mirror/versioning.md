@@ -157,7 +157,8 @@ store. v0.68.0 starts a new store and refuses one from v0.67 or earlier.
 Before 1.0, schema changes may require moving the local store aside or
 recreating a server database. The binary refuses a mismatched store with a
 move-aside remedy for an older local store. v0.68.3 ships baseline 28 as a store
-reset. Forward migrations start after launch. See
+reset. Schema 29 is the first forward migration: a v0.68.3 baseline store upgrades
+in place on its first open, and an older binary then refuses it. See
 [Schema compatibility](backup-restore.md#schema-compatibility). Explicit standalone CI mode uses the same controller code in process.
 See [Local execution](local-execution.md) and [Controller HTTP API](api.md).
 

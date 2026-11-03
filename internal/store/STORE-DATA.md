@@ -9,9 +9,14 @@ counter domains, boolean flags, and nonempty concurrency keys. Installations
 are referenced with their tenant. Job receipts reference the exact attempt and
 generation. Sessions, memberships and identities reference an existing account.
 The schema counterexample suites exercise these rules against either dialect.
-The baseline version is 28. Both dialects are translated from `schema.sql`.
-Stores at another version require a backup and recreation. This baseline has
-no forward migration.
+The baseline version is 29. Both dialects are translated from `schema.sql`.
+A fresh store gets the baseline whole. `schemaUpgrades` in `schema_upgrade.go`
+lists the forward steps, each keyed by the version and baseline digest a release
+recorded: a v0.68.3 schema-28 store gains `nodes.trusted_host` and records
+version 29 and its digest in the open transaction, under the migration advisory
+lock on PostgreSQL. A step adds a column at the end of its table so the upgraded
+schema matches a fresh one. Any other version or digest requires a backup and
+recreation, and there are no down migrations.
 
 `sparkwing_schema_version.baseline_digest` records SHA-256 of the neutral SQL
 with LF line endings. Open refuses a differing digest at the same version with

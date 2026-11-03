@@ -19,6 +19,7 @@ credential model in `docs/auth.md`, and the decision log
 | Rule | Owner | Guard test |
 | --- | --- | --- |
 | Current-version stores match the embedded baseline digest; unstamped stores need every declared table, view and index before stamping | `internal/store/schema_baseline.go`: `verifySchemaBaseline` | `internal/store/schema_baseline_test.go`: `TestSchemaBaselineDigestRecordsAndReopens`, `TestSchemaBaselineDigestRefusesChangedBaseline`, `TestSchemaBaselineDigestLegacy` |
+| Only a released baseline named by version and digest upgrades forward, in the open transaction, to a schema identical to a fresh one; every other store is refused unchanged (decision 90) | `internal/store/schema_upgrade.go`: `schemaUpgrades`, `upgradeSchemaTx` | `internal/store/schema_upgrade_test.go`: `TestSchemaUpgradesAReleasedV0683StoreInPlace`, `TestSchemaUpgradeRefusesEveryOtherStore`, `TestPostgresSchemaUpgradeRunsOnceUnderConcurrentOpens` |
 
 ### Tenancy
 
@@ -390,5 +391,6 @@ decision amends an earlier one where noted.
 
 - 2026-10-30: One sealed repository proof and host classification supersede consumer-specific trust rules.
 - 2026-10-31: Compare outages admit asserted App runs. Trust restrictions and unscoped personal enrollment are ratified. v0.68.3 resets stores to schema 28. The final production wipe follows the release cut and a clean staging grid.
+- 2026-11-03: Schema 29 is the first forward migration: a v0.68.3 baseline store upgrades in place on first open, and every other store is refused unchanged (decision 90).
 - 74: Teams have no member cap, regardless of funding or payment holds; remove the setting, invitation warning and acceptance refusal.
 - 75: Shared Cloud pools bind never-used nodes to one team/run; idle warm nodes may serve one class smaller at requested billing and limits. Warm placeholder authority stays in a dedicated namespace and pools pin the hardened EC2NodeClass.
