@@ -30,8 +30,8 @@ func (t *Tenant) GetLatestProvenRunAtCommit(ctx context.Context, pipeline, job, 
 		return nil, notFound("pipeline run", pipeline)
 	}
 	// safety: a newer run that skipped the job holds no output, and must not hide an older run that has one.
-	query += ` AND EXISTS (SELECT 1 FROM nodes WHERE nodes.team=runs.team AND nodes.run_id=runs.id AND nodes.node_id=? AND nodes.status='done' AND nodes.outcome IN ('success','memoized'))`
-	return t.s.getLatestRun(ctx, query, append(args, job), pipeline, statuses, maxAge, true)
+	query += ` AND EXISTS (SELECT 1 FROM nodes WHERE nodes.team=? AND nodes.run_id=runs.id AND nodes.node_id=? AND nodes.status='done' AND nodes.outcome IN ('success','memoized'))`
+	return t.s.getLatestRun(ctx, query, append(args, t.team, job), pipeline, statuses, maxAge, true)
 }
 
 // safety: the output read after a proven lookup re-proves the run, so a run id
