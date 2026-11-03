@@ -59,12 +59,13 @@ func (l *Launcher) retireEndedPredecessors(ctx context.Context, successor CloudJ
 	}
 	var observations []CloudJobObservation
 	live := map[string]int{}
+	reservations := map[string]CloudNodeReservation{}
 	for i, job := range jobs.Items {
 		binding, reservation, err := jobOwnership(job)
 		if err != nil || job.DeletionTimestamp != nil || job.Annotations[rejectedAnnotation] != "" || binding.Team != successor.Team || binding.RunID != successor.RunID || sameBinding(binding, successor) {
 			continue
 		}
-		live[job.Name] = i
+		live[job.Name], reservations[job.Name] = i, reservation
 		observations = append(observations, CloudJobObservation{Binding: binding, JobNamespace: job.Namespace, JobName: job.Name, JobUID: string(job.UID), NodeUID: reservation.NodeUID})
 	}
 	if len(observations) == 0 {
@@ -81,8 +82,7 @@ func (l *Launcher) retireEndedPredecessors(ctx context.Context, successor CloudJ
 			continue
 		}
 		job := &jobs.Items[live[observation.JobName]]
-		_, reservation, _ := jobOwnership(*job)
-		errs = append(errs, teardownFault(job.Name, l.teardown(ctx, job, reservation)))
+		errs = append(errs, teardownFault(job.Name, l.teardown(ctx, job, reservations[job.Name])))
 		retired = true
 	}
 	return retired, errors.Join(errs...)
