@@ -412,10 +412,11 @@ file. Other syntax and workflow checks remain active.
   owns a separate four-core runner, so race tests share no cores with the full
   Go or PostgreSQL suite. `sparkwing run gate` runs both jobs locally. The
   existing required `Canonical / gate` check succeeds only after the broad,
-  race and pre-release matrix jobs all succeed. A skipped, cancelled or failed
-  matrix cannot pass that check. Pre-release declares a
-  120-minute execution deadline inside a 130-minute hosted job, leaving ten
-  minutes beyond the node deadline for setup and cleanup.
+  race, pre-release and three `race-store-k-of-3` matrix jobs all succeed. A
+  skipped, cancelled or failed matrix cannot pass that check. Pre-release
+  declares a 120-minute execution deadline inside a 130-minute hosted job,
+  leaving ten minutes beyond the node deadline for setup and cleanup; the
+  race-store lanes run the same pipeline and keep the same deadlines.
   Explicit `source_ref` or `release_tag` overrides run that source's complete
   gate graph in one hosted job, because older refs do not declare a separate
   race job. Normal pull requests and pushes use the split jobs.
@@ -470,8 +471,20 @@ file. Other syntax and workflow checks remain active.
   `pre-release` runs it instead, as `race-store`, and no release ships past it.
   That step compiles one race-enabled `internal/store` test binary, lists its top-level
   Test, Example and Fuzz names, sorts them and assigns each exactly once across
-  four processes. Every shard runs with `GOMAXPROCS=1`; the separate
-  `internal/store/internal/storetest` package runs once. The step stops sibling
+  four processes per part, longest first onto the least loaded shard using the
+  measured costs in `.sparkwing/jobs/store_race_costs.txt`. A name the table
+  does not know costs the mean of the names it does, and a stale line is
+  ignored. `--race-store-part k/n` (pipeline input) computes the same
+  assignment over `4n` shards on every runner and runs only part k's four;
+  the default runs all four shards of one part. On normal pull requests and
+  pushes, hosted CI runs `--sw-start-at race-store --sw-stop-at race-store --
+  --race-store-part k/3` in three `race-store-k-of-3` lanes, each on its own
+  four-core runner, and the pre-release lane passes `--race-store-part none`,
+  which runs no shard. `TestCanonicalStoreRacePartsCoverEveryPartOnce` fails
+  unless the lanes cover parts 1 to n exactly once whenever pre-release passes
+  `none`. Source and release-tag overrides keep the whole store race inside
+  their one pre-release job. Every shard runs with `GOMAXPROCS=1`; the separate
+  `internal/store/internal/storetest` package runs once, in part 1. The step stops sibling
   processes on a failure and retains each shard's output in the run log. It
   gives the suite a fresh `SPARKWING_HOME`, clears inherited runner credentials
   and service bindings, and passes `GOWORK=off` into Go commands in worktrees.
@@ -487,7 +500,46 @@ file. Other syntax and workflow checks remain active.
   with TestRefillModel alone at over a minute under race, so the shards run
   the short class (`-test.short`); the tests that guard themselves as slow keep
   running without race in `gate` and on PostgreSQL in `store-postgres`. Later checks remain under the 120-minute node deadline and a
-  130-minute hosted job deadline. The hosted broad and touched-package race
+  130-minute hosted job deadline.
+  **Store race costs, 2026-11-03:** hosted runs 41578268161 and 41590717553
+  each spent about 82 s on `storetest`, 71 s compiling
+  and listing 1,860 names, then four round-robin shards of 54m51s to 64m51s.
+  A local run at c6dff62df (four shards, `CI=1`, `GOMAXPROCS=1`, pinned with
+  `taskset` to four cores of a loaded 16-core host) took 28m11s to 31m49s per
+  shard over 1,862 names, 7,096 s of test time in all, the longest test 189 s.
+  Those runs left `SPARKWING_TEST_PG_URL` unset, so the PostgreSQL store
+  tests skipped. With it naming a PostgreSQL 18 server, a repeat took 27m43s
+  to 33m54s per shard, 7,185 s in all, with no skip; the checked-in table
+  holds that run's costs.
+  Hosted shards ran 1.93 to 2.13 times their local cost, about 2.03 on
+  average, so the suite is about 240 hosted core-minutes. Round-robin's
+  slowest shard held 7% more than the mean; cost-balanced shards land within
+  a second of each other on the measured table, so balancing alone saves
+  about four hosted minutes of 65. On the same four pinned cores, the
+  balanced four-shard assignment ran 29m52s to 30m38s against round-robin's
+  28m11s to 31m49s, and the pipeline's own part 2 of 3 took 11m21s
+  including pipeline and race compilation. Three parts of four shards hold about
+  599 local seconds, about 20 hosted minutes, per shard. Each lane starts the
+  same `postgres:17` service as pre-release and sets `SPARKWING_TEST_PG_URL`
+  and `SPARKWING_REQUIRE_PG=1`; with that variable set, `race-store` fails
+  before compiling when the URL is empty instead of letting the PostgreSQL
+  store tests skip, and `TestCanonicalPreReleaseUsesItsPostgresService`
+  fails unless every lane carries both. Projected per lane: about 2.5
+  minutes of setup including the service, 2.5 minutes of pipeline and race compilation and
+  `storetest` in part 1, and 20 minutes of shards, about 25 to 26 minutes, under
+  the broad gate's 32-minute hosted job. Pre-release without the store race
+  takes about 20 minutes: setup, the other checks (10 minutes in run
+  41590717553), and `store-postgres`, which took 7m25s locally on four pinned
+  cores of the same loaded host. With the store race inside it, the same job
+  measured 6,000 s before the PostgreSQL rewrite and projects to about 85
+  minutes after it. The CI workflow's critical path
+  moves from pre-release (100m09s from creation to completion in run
+  41590717553) to the broad gate, about 33 minutes. Runner time rises by
+  about 11 minutes per run, from about 85 to about 96 four-core minutes
+  across pre-release and the race-store lanes, for setup, PostgreSQL service
+  start and compilation on three more runners. These are projections from the timings
+  above until a hosted run measures them.
+  The hosted broad and touched-package race
   jobs each keep an 80-minute deadline.
   A Go step's own parallelism depends on who else holds the
   box. A shared host bounds each step to `(cpus-1)/2`, so one gate cannot

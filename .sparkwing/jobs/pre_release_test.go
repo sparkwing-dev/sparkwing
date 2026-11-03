@@ -169,7 +169,7 @@ func TestPreReleaseReferenceChecksPassOnTheCommittedTree(t *testing.T) {
 	t.Chdir(root)
 	t.Setenv("GOWORK", "off")
 	references := map[string]bool{"cli-reference": true, "config-reference": true, "sdk-reference": true, "api-reference": true}
-	for _, check := range preReleaseChecks() {
+	for _, check := range preReleaseChecks(raceStorePart{index: 1, count: 1}) {
 		if !references[check.id] {
 			continue
 		}

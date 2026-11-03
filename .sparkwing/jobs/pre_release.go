@@ -83,6 +83,12 @@ func runReleaseBinaryVulnerabilityScan(jobContext context.Context) (resultErr er
 
 type PreRelease struct {
 	sparkwing.Base
+
+	raceStorePart raceStorePart
+}
+
+type PreReleaseArgs struct {
+	RaceStorePart string `flag:"race-store-part" desc:"Run part k of n of the race-store shards, as k/n; the parts together cover every test once. none runs no shard, for hosted CI, whose race-store lanes run every part with --sw-start-at race-store --sw-stop-at race-store. Default: every shard."`
 }
 
 func (PreRelease) ShortHelp() string {
@@ -109,7 +115,12 @@ func (PreRelease) Examples() []sparkwing.Example {
 	}
 }
 
-func (preRelease *PreRelease) Plan(_ context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, runContext sparkwing.RunContext) error {
+func (preRelease *PreRelease) Plan(_ context.Context, plan *sparkwing.Plan, in PreReleaseArgs, runContext sparkwing.RunContext) error {
+	part, err := parseRaceStorePart(in.RaceStorePart)
+	if err != nil {
+		return err
+	}
+	preRelease.raceStorePart = part
 	sparkwing.Job(plan, runContext.Pipeline, preRelease).Timeout(preReleaseRunTimeout).Cache(lintCache())
 	return nil
 }
@@ -120,7 +131,7 @@ type preReleaseCheck struct {
 }
 
 func (preRelease *PreRelease) Work(work *sparkwing.Work) (*sparkwing.WorkStep, error) {
-	addPreReleaseChecks(work, preReleaseChecks())
+	addPreReleaseChecks(work, preReleaseChecks(preRelease.raceStorePart))
 	return nil, nil
 }
 
@@ -135,7 +146,7 @@ func addPreReleaseChecks(work *sparkwing.Work, checks []preReleaseCheck) {
 	}
 }
 
-func preReleaseChecks() []preReleaseCheck {
+func preReleaseChecks(part raceStorePart) []preReleaseCheck {
 	return []preReleaseCheck{
 		{id: "no-replace", run: checkNoReplaceDirectivesInCommittedGoMods},
 		{id: "no-go-work", run: checkNoCommittedGoWorkFiles},
@@ -152,7 +163,9 @@ func preReleaseChecks() []preReleaseCheck {
 		{id: "lint", run: runGolangciLint},
 		{id: "race", run: preReleaseShell("go -C .sparkwing test -race ./...")},
 		// safety: the gate defers this race suite to the release boundary.
-		{id: "race-store", run: runStoreRaceShards},
+		{id: "race-store", run: func(ctx context.Context) error {
+			return runStoreRaceShards(ctx, part)
+		}},
 		{id: "store-postgres", run: checkPreReleaseStorePostgres},
 		{id: "chaos", run: preReleaseShell("go test -count=1 -run TestChaos_CI ./internal/chaos")},
 		{id: "release-vulnerability", run: runReleaseBinaryVulnerabilityScan},
@@ -343,5 +356,5 @@ func checkNoCommittedGoWorkFiles(jobContext context.Context) error {
 }
 
 func init() {
-	sparkwing.Register("PreRelease", func() sparkwing.Pipeline[sparkwing.NoInputs] { return &PreRelease{} })
+	sparkwing.Register("PreRelease", func() sparkwing.Pipeline[PreReleaseArgs] { return &PreRelease{} })
 }

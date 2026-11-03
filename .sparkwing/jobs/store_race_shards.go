@@ -1,20 +1,150 @@
 package jobs
 
 import (
+	"cmp"
 	"context"
 	"crypto/sha256"
+	_ "embed"
 	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
 const storeRaceShardCount = 4
+
+// perf: measured per-test race seconds; round-robin left the slowest of four
+// hosted shards well past the average, and the gap is the critical path.
+//
+//go:embed store_race_costs.txt
+var storeRaceCostTable string
+
+func parseRaceCosts(table string) (map[string]float64, error) {
+	costs := make(map[string]float64)
+	for number, line := range strings.Split(table, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		fields := strings.Fields(line)
+		if len(fields) != 2 || !raceTestName.MatchString(fields[1]) {
+			return nil, fmt.Errorf("race cost line %d: want \"<seconds> <test>\", got %q", number+1, line)
+		}
+		seconds, err := strconv.ParseFloat(fields[0], 64)
+		if err != nil || seconds < 0 {
+			return nil, fmt.Errorf("race cost line %d: bad seconds %q", number+1, fields[0])
+		}
+		if _, dup := costs[fields[1]]; dup {
+			return nil, fmt.Errorf("race cost line %d: duplicate test %q", number+1, fields[1])
+		}
+		costs[fields[1]] = seconds
+	}
+	if len(costs) == 0 {
+		return nil, errors.New("race cost table is empty")
+	}
+	return costs, nil
+}
+
+// perf: greedy longest-first onto the least loaded shard. A name the table
+// does not know costs the mean of the names it does, so a new test lands
+// somewhere sensible until the table is refreshed.
+func raceCostShards(names []string, costs map[string]float64, shardCount int) ([][]string, error) {
+	if len(names) < shardCount {
+		return nil, fmt.Errorf("test listing has %d names, need at least %d", len(names), shardCount)
+	}
+	var known, total float64
+	for _, name := range names {
+		if cost, ok := costs[name]; ok {
+			known++
+			total += cost
+		}
+	}
+	fallback := 1.0
+	if known > 0 {
+		fallback = total / known
+	}
+	// safety: a zero cost would let two names tie on an empty shard and
+	// leave another shard empty.
+	const floor = 0.001
+	weight := func(name string) float64 {
+		cost, ok := costs[name]
+		if !ok {
+			cost = fallback
+		}
+		return max(cost, floor)
+	}
+	ordered := slices.Clone(names)
+	slices.SortStableFunc(ordered, func(a, b string) int {
+		if c := cmp.Compare(weight(b), weight(a)); c != 0 {
+			return c
+		}
+		return strings.Compare(a, b)
+	})
+	shards := make([][]string, shardCount)
+	loads := make([]float64, shardCount)
+	for _, name := range ordered {
+		lightest := 0
+		for i := range loads {
+			if loads[i] < loads[lightest] {
+				lightest = i
+			}
+		}
+		shards[lightest] = append(shards[lightest], name)
+		loads[lightest] += weight(name)
+	}
+	for _, shard := range shards {
+		slices.Sort(shard)
+	}
+	return shards, checkRaceTestCoverage(names, shards, shardCount)
+}
+
+// safety: the PostgreSQL store tests skip without a URL and the shard still
+// passes, so a lane that promises them refuses to start instead.
+func requireRacePostgres(getenv func(string) string) error {
+	if getenv("SPARKWING_REQUIRE_PG") != "" && strings.TrimSpace(getenv(storePostgresURLEnv)) == "" {
+		return fmt.Errorf("race-store: SPARKWING_REQUIRE_PG is set, so %s must name a reachable Postgres; without it the PostgreSQL store tests skip", storePostgresURLEnv)
+	}
+	return nil
+}
+
+// perf: one of count hosted runners splitting the store race; count 1 runs
+// every shard on this host, and count 0 runs none because other lanes do.
+type raceStorePart struct{ index, count int }
+
+const (
+	maxRaceStoreParts       = 8
+	raceStorePartsElsewhere = "none"
+)
+
+func parseRaceStorePart(value string) (raceStorePart, error) {
+	switch value {
+	case "":
+		return raceStorePart{index: 1, count: 1}, nil
+	case raceStorePartsElsewhere:
+		return raceStorePart{}, nil
+	}
+	index, count, found := strings.Cut(value, "/")
+	k, kErr := strconv.Atoi(index)
+	n, nErr := strconv.Atoi(count)
+	if !found || kErr != nil || nErr != nil || n < 1 || n > maxRaceStoreParts || k < 1 || k > n {
+		return raceStorePart{}, fmt.Errorf("race-store part %q: want k/n with 1 <= k <= n <= %d, or %s", value, maxRaceStoreParts, raceStorePartsElsewhere)
+	}
+	return raceStorePart{index: k, count: n}, nil
+}
+
+// safety: every part computes the same exhaustive assignment over all
+// count*perPart shards from the same listing and table, then keeps its own
+// contiguous run, so the parts together cover each name exactly once.
+func (p raceStorePart) shards(all [][]string) [][]string {
+	per := len(all) / p.count
+	return all[(p.index-1)*per : p.index*per]
+}
 
 var raceTestName = regexp.MustCompile(`^(Test|Example|Fuzz)[^[:space:]/]*$`)
 
@@ -98,6 +228,8 @@ type racePackagePlan struct {
 	pkg        string
 	shardCount int
 	lead       []string
+	costs      map[string]float64
+	part       raceStorePart
 }
 
 func raceLeadShards(names, lead []string, shardCount int) ([][]string, error) {
@@ -148,17 +280,33 @@ func raceExec(ctx context.Context, home, name string, args ...string) *sparkwing
 	return sparkwing.Exec(ctx, "env", envArgs...)
 }
 
-func runStoreRaceShards(ctx context.Context) error {
+func runStoreRaceShards(ctx context.Context, part raceStorePart) error {
 	return withProductTestHome(func(home string) error {
-		return runStoreRaceShardsAtHome(ctx, home)
+		return runStoreRaceShardsAtHome(ctx, home, part)
 	})
 }
 
-func runStoreRaceShardsAtHome(ctx context.Context, home string) error {
-	if _, err := raceExec(ctx, home, "go", "test", "-race", "-count=1", "./internal/store/internal/storetest").Env("GOMAXPROCS", "1").Run(); err != nil {
-		return fmt.Errorf("storetest race package: %w", err)
+func runStoreRaceShardsAtHome(ctx context.Context, home string, part raceStorePart) error {
+	if part.count == 0 {
+		// safety: the hosted workflow's coverage test requires a lane for
+		// every part whenever pre-release passes this.
+		sparkwing.Warn(ctx, "race-store: --race-store-part %s; separate race-store lanes run every part", raceStorePartsElsewhere)
+		return nil
 	}
-	return runRaceShardsAtHome(ctx, home, ".", []racePackagePlan{{pkg: "./internal/store", shardCount: storeRaceShardCount}}, raceWorkers{initial: storeRaceShardCount}, storeRaceShardArgs)
+	if err := requireRacePostgres(os.Getenv); err != nil {
+		return err
+	}
+	costs, err := parseRaceCosts(storeRaceCostTable)
+	if err != nil {
+		return err
+	}
+	if part.index == 1 {
+		if _, err := raceExec(ctx, home, "go", "test", "-race", "-count=1", "./internal/store/internal/storetest").Env("GOMAXPROCS", "1").Run(); err != nil {
+			return fmt.Errorf("storetest race package: %w", err)
+		}
+	}
+	plan := racePackagePlan{pkg: "./internal/store", shardCount: part.count * storeRaceShardCount, costs: costs, part: part}
+	return runRaceShardsAtHome(ctx, home, ".", []racePackagePlan{plan}, raceWorkers{initial: storeRaceShardCount}, storeRaceShardArgs)
 }
 
 // perf: extra workers start once ready closes, when the steps that held those
@@ -198,14 +346,26 @@ func runRaceShardsAtHome(ctx context.Context, home, module string, plans []raceP
 		if err != nil {
 			return err
 		}
-		shards, err := raceLeadShards(names, plan.lead, shardCount)
+		var shards [][]string
+		if plan.costs != nil {
+			shards, err = raceCostShards(names, plan.costs, shardCount)
+		} else {
+			shards, err = raceLeadShards(names, plan.lead, shardCount)
+		}
 		if err != nil {
 			return err
 		}
 		sparkwing.Info(ctx, "%s race: %d listed tests, exhaustive shards=%d (%d lead), up to %d processes (%d more once the full suites finish), list sha256=%s", pkg, len(names), len(shards), len(plan.lead), parallelism, workers.extra, raceTestDigest(names))
+		first := 0
+		if plan.part.count > 1 {
+			first = (plan.part.index - 1) * len(shards) / plan.part.count
+			shards = plan.part.shards(shards)
+			sparkwing.Info(ctx, "%s race: part %d of %d runs shards %d-%d; the other parts run the rest", pkg, plan.part.index, plan.part.count, first+1, first+len(shards))
+		}
 		for i, shard := range shards {
-			sparkwing.Info(ctx, "%s race shard %d: %d tests, sha256=%s", pkg, i+1, len(shard), raceTestDigest(shard))
-			job := raceShardJob{pkg: pkg, binary: binary, packageDir: packageDir, number: i + 1, names: shard}
+			number := first + i + 1
+			sparkwing.Info(ctx, "%s race shard %d: %d tests, sha256=%s", pkg, number, len(shard), raceTestDigest(shard))
+			job := raceShardJob{pkg: pkg, binary: binary, packageDir: packageDir, number: number, names: shard}
 			if i < len(plan.lead) {
 				leads = append(leads, job)
 			} else {

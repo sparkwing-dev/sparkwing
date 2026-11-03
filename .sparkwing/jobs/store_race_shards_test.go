@@ -1,6 +1,7 @@
 package jobs
 
 import (
+	"fmt"
 	"regexp"
 	"slices"
 	"strings"
@@ -122,5 +123,119 @@ func TestRaceLeadTestsGetTheirOwnShardsFirst(t *testing.T) {
 	}
 	if _, err := raceLeadShards(names, []string{"TestA", "TestB", "TestC", "TestLong"}, 2); err == nil {
 		t.Fatal("accepted fewer remaining names than round-robin shards")
+	}
+}
+
+func TestRaceCostShardsBalanceLongestFirst(t *testing.T) {
+	names := []string{"TestA", "TestB", "TestC", "TestD", "TestE", "TestNew"}
+	costs := map[string]float64{"TestA": 10, "TestB": 6, "TestC": 5, "TestD": 4, "TestE": 1, "TestGone": 99}
+	shards, err := raceCostShards(names, costs, 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := [][]string{{"TestA", "TestC", "TestE"}, {"TestB", "TestD", "TestNew"}}
+	if !slices.EqualFunc(shards, want, slices.Equal[[]string]) {
+		t.Fatalf("shards=%v, want %v", shards, want)
+	}
+	reversed := slices.Clone(names)
+	slices.Reverse(reversed)
+	again, err := raceCostShards(reversed, costs, 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.EqualFunc(again, want, slices.Equal[[]string]) {
+		t.Fatalf("listing order changed the assignment: %v", again)
+	}
+	if _, err := raceCostShards(names[:1], costs, 2); err == nil {
+		t.Fatal("accepted fewer names than shards")
+	}
+}
+
+func TestRaceCostShardsFillEveryShardWhenCostsAreZero(t *testing.T) {
+	names := []string{"TestA", "TestB", "TestC", "TestD"}
+	costs := map[string]float64{"TestA": 0, "TestB": 0, "TestC": 0, "TestD": 0}
+	shards, err := raceCostShards(names, costs, 4)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i, shard := range shards {
+		if len(shard) != 1 {
+			t.Fatalf("shard %d = %v, want one name", i+1, shard)
+		}
+	}
+}
+
+func TestRaceStorePartsTogetherRunEveryShardOnce(t *testing.T) {
+	names := make([]string, 0, 64)
+	for i := range 64 {
+		names = append(names, fmt.Sprintf("Test%02d", i))
+	}
+	for count := 1; count <= maxRaceStoreParts; count++ {
+		all, err := raceCostShards(names, map[string]float64{"Test07": 30}, count*storeRaceShardCount)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var union [][]string
+		for index := 1; index <= count; index++ {
+			part := raceStorePart{index: index, count: count}
+			mine := part.shards(all)
+			if len(mine) != storeRaceShardCount {
+				t.Fatalf("part %d/%d runs %d shards, want %d", index, count, len(mine), storeRaceShardCount)
+			}
+			union = append(union, mine...)
+		}
+		if err := checkRaceTestCoverage(names, union, len(all)); err != nil {
+			t.Fatalf("%d parts: %v", count, err)
+		}
+	}
+}
+
+func TestParseRaceStorePart(t *testing.T) {
+	if part, err := parseRaceStorePart(""); err != nil || part != (raceStorePart{index: 1, count: 1}) {
+		t.Fatalf("default part = %v, %v; want every shard", part, err)
+	}
+	if part, err := parseRaceStorePart("none"); err != nil || part.count != 0 {
+		t.Fatalf("none = %v, %v; want no shard", part, err)
+	}
+	if part, err := parseRaceStorePart("2/3"); err != nil || part != (raceStorePart{index: 2, count: 3}) {
+		t.Fatalf("2/3 = %v, %v", part, err)
+	}
+	for _, bad := range []string{"0/3", "4/3", "3", "a/3", "1/0", "1/9", "1/3/4", " 1/3"} {
+		if part, err := parseRaceStorePart(bad); err == nil {
+			t.Errorf("accepted %q as %v", bad, part)
+		}
+	}
+}
+
+func TestStoreRaceCostTableParses(t *testing.T) {
+	costs, err := parseRaceCosts(storeRaceCostTable)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(costs) < 1000 {
+		t.Fatalf("cost table has %d names; regenerate it from a full race run", len(costs))
+	}
+	for _, bad := range []string{"", "# only a comment\n", "1.5\n", "x TestA\n", "-1 TestA\n", "1 TestA/sub\n", "1 TestA\n2 TestA\n"} {
+		if _, err := parseRaceCosts(bad); err == nil {
+			t.Errorf("accepted cost table %q", bad)
+		}
+	}
+}
+
+func TestStoreRaceRefusesToSkipPostgresWhenRequired(t *testing.T) {
+	env := func(values map[string]string) func(string) string {
+		return func(name string) string { return values[name] }
+	}
+	if err := requireRacePostgres(env(map[string]string{"SPARKWING_REQUIRE_PG": "1"})); err == nil {
+		t.Fatal("required PostgreSQL without a URL was accepted")
+	}
+	if err := requireRacePostgres(env(map[string]string{"SPARKWING_REQUIRE_PG": "1", storePostgresURLEnv: " "})); err == nil {
+		t.Fatal("required PostgreSQL with a blank URL was accepted")
+	}
+	if err := requireRacePostgres(env(map[string]string{"SPARKWING_REQUIRE_PG": "1", storePostgresURLEnv: "postgres://localhost/postgres"})); err != nil {
+		t.Fatal(err)
+	}
+	if err := requireRacePostgres(env(nil)); err != nil {
+		t.Fatalf("a local run without PostgreSQL must keep skipping: %v", err)
 	}
 }
