@@ -903,6 +903,21 @@ test("renders the empty production dashboard and passes accessibility smoke", as
   ).toEqual([]);
 });
 
+test("the console has one main landmark and a skip link into it", async ({ page }) => {
+  await installMockAPI(page);
+  await page.goto("/runs");
+
+  await expect(page.getByRole("main")).toHaveCount(1);
+  await expect(page.getByRole("banner")).toHaveCount(1);
+  await expect(page.getByRole("navigation", { name: "Primary" })).toBeVisible();
+  await page.keyboard.press("Tab");
+  const skip = page.getByRole("link", { name: "Skip to content" });
+  await expect(skip).toBeFocused();
+  await expect(skip).toBeVisible();
+  await page.keyboard.press("Enter");
+  await expect(page.getByRole("main")).toBeFocused();
+});
+
 test("surfaces controller authentication failures", async ({ page }) => {
   await installMockAPI(page, { unauthorized: true });
   await page.goto("/");

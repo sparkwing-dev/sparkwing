@@ -22,6 +22,8 @@ unlock.
 
 ### Fixed
 
+- **web:** Give the console main, banner and navigation landmarks and a skip link
+  Page content sits in one `main` landmark, the top bar is a banner with a "Primary" navigation, and the first Tab stop is a "Skip to content" link that moves focus into the page.
 - **web:** Choose the Analytics trend range
   Analytics offers 24 hours, 3 days, 7 days and 14 days, the controller's limit, and keeps the choice in the URL as `?range=`. The default stays at 3 days. Chart labels include the date when the range spans more than a day.
 - **web:** Say when a linked run does not exist
