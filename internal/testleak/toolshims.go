@@ -7,11 +7,10 @@ import (
 	"strings"
 )
 
-// safety: asdf and mise shims find the real tool through files under HOME (the
-// data dir, ~/.tool-versions, the mise config dir). The sandbox moves HOME, so
-// a test that runs go or helm through a shim would get "No version is set".
-// These pins name the real locations and versions while HOME stays private;
-// a variable the developer already set is left alone.
+// safety: asdf and mise shims resolve a tool through files under HOME, which the
+// sandbox moves, so go or helm run through a shim failed with "No version is
+// set". These pins name the real locations and versions while HOME stays
+// private; a variable the developer already set is left alone.
 func toolResolutionEnv(realHome, cwd string, getenv func(string) string) map[string]string {
 	env := map[string]string{}
 	if realHome == "" {
