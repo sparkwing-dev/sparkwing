@@ -210,7 +210,7 @@ func fillJobDeclarations(jobs []controllerwire.JobDetail, nodes map[string]runst
 			}
 		}
 		if len(blocked) > 0 {
-			jobs[i].StatusDetail = "upstream_failed: blocked by " + strings.Join(blocked, ", ")
+			jobs[i].StatusDetail = "upstream_failed: blocked by " + strings.Join(blocked, ", ") + "; fix the dependency and retry the run"
 		}
 	}
 	return nil
