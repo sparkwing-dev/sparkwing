@@ -1097,6 +1097,29 @@ test("names a cache hit without requesting execution metrics", async ({ page }) 
   expect(metricRequests).toBe(0);
 });
 
+test("says resource metrics are unavailable when the metrics endpoint refuses", async ({
+  page,
+}) => {
+  await installMockAPI(page, {
+    runs: [finishedRun],
+    details: { [finishedRun.id]: finishedDetail },
+    onNodeMetrics: async (route) => {
+      await route.fulfill({
+        status: 503,
+        json: { error: { code: "unavailable", message: "metrics unavailable" } },
+      });
+      return true;
+    },
+  });
+  await page.goto(`/runs?run=${finishedRun.id}&node=verify&tab=resources`);
+  await page.getByRole("button", { name: "Resources", exact: true }).click();
+
+  await expect(
+    page.getByText("Resource metrics are unavailable for this node."),
+  ).toBeVisible();
+  await expect(page.getByText("Loading resource evidence…")).toHaveCount(0);
+});
+
 test("ignores an older node metrics response after switching runs", async ({
   page,
 }) => {

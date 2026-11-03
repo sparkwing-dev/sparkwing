@@ -66,15 +66,23 @@ export default function ResourceChart({
   const cacheHit = node.outcome === "memoized";
   const [snapshot, setSnapshot] = useState<{
     identity: string;
-    metrics: NodeMetrics;
+    metrics: NodeMetrics | null;
   } | null>(null);
-  const metrics = snapshot?.identity === identity ? snapshot.metrics : null;
+  const current = snapshot?.identity === identity ? snapshot : null;
+  const metrics = current?.metrics ?? null;
 
   useEffect(() => {
     if (cacheHit) return;
     return startSerialPolling({
       load: () => getNodeMetrics(runID, node.id),
       publish: (next) => setSnapshot({ identity, metrics: next }),
+      // A failed refresh keeps evidence already shown; only a node with none says unavailable.
+      fail: () =>
+        setSnapshot((prev) =>
+          prev?.identity === identity && prev.metrics
+            ? prev
+            : { identity, metrics: null },
+        ),
       intervalMS: isRunning ? 5_000 : null,
     });
   }, [cacheHit, identity, isRunning, node.id, runID]);
@@ -90,8 +98,12 @@ export default function ResourceChart({
 
   if (!metrics) {
     return (
-      <div className="text-xs text-[var(--muted)]">
-        Loading resource evidence…
+      <div className="text-xs text-[var(--muted)]" role={current ? "status" : undefined}>
+        {current
+          ? isRunning
+            ? "Resource metrics are unavailable right now. Retrying."
+            : "Resource metrics are unavailable for this node."
+          : "Loading resource evidence…"}
       </div>
     );
   }

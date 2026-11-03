@@ -150,6 +150,30 @@ test("serial polling retries after a rejected response", async () => {
   assert.equal(attempts, 2);
 });
 
+test("serial polling reports a rejected response to its caller", async () => {
+  const failures: unknown[] = [];
+  let failed!: () => void;
+  const reported = new Promise<void>((resolve) => {
+    failed = resolve;
+  });
+  const stop = startSerialPolling({
+    load: async () => {
+      throw new Error("metrics failed: 503");
+    },
+    publish: () => assert.fail("a rejected load must not publish"),
+    fail: (error) => {
+      failures.push(error);
+      failed();
+    },
+    intervalMS: null,
+  });
+
+  await reported;
+  stop();
+  assert.equal(failures.length, 1);
+  assert.match(String(failures[0]), /503/);
+});
+
 test("node summary separates interval and command samples", () => {
   const node: Node = {
     id: "build",

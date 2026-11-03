@@ -22,6 +22,8 @@ unlock.
 
 ### Fixed
 
+- **web:** Say resource metrics are unavailable instead of loading forever
+  When the metrics endpoint refuses, such as a Cloud `503 unavailable` for a job with no readings, the Resources tab now says the metrics are unavailable. A running job keeps retrying, and evidence already shown stays on screen through a failed refresh.
 - **SDK install:** Refuse a generated overlay that is not a regular file
   A repository could commit `.resolved.mod` as a symlink, and the installer's pin refresh would then rewrite the file it pointed to on the runner. Installation now refuses the overlay instead.
 - **child pipelines:** Keep parent job and step selections out of child runs
