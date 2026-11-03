@@ -48,6 +48,7 @@ type recordingEmitter struct {
 func (r *recordingEmitter) Log(level, message string) {
 	r.Emit(LogRecord{Level: level, Msg: message})
 }
+
 func (r *recordingEmitter) Emit(record LogRecord) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
