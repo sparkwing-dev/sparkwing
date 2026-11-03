@@ -160,7 +160,7 @@ func (l *Launcher) awaitCapacity(ctx context.Context, award CloudJobAward) error
 		if err := l.failCapacity(ctx, award, CloudCapacityObservation{Unconfigured: true}); err != nil {
 			return err
 		}
-		l.logger().Error("Cloud capacity is not configured; configure the shared NodePool for the requested hardware class", "team", award.Binding.Team, "requested_class", cpuClass(award.CPUCores), "requested_cpu", award.CPUCores, "available_cpu", l.Config.CPUCeiling, "requested_memory", award.Memory, "available_memory", l.Config.MemoryCeiling, "namespace", l.Config.Namespace, "support_reference", award.Binding.RunID)
+		l.logger().Error("Cloud capacity is not configured; configure the shared NodePool and launcher resource ceilings for the requested hardware class", "team", award.Binding.Team, "requested_class", cpuClass(award.CPUCores), "requested_cpu", award.CPUCores, "available_cpu", l.Config.CPUCeiling, "requested_memory", award.Memory, "available_memory", l.Config.MemoryCeiling, "namespace", l.Config.Namespace, "support_reference", award.Binding.RunID)
 		return l.releaseCapacity(ctx, award.Binding)
 	}
 	if l.breakerClosed(ctx) {
