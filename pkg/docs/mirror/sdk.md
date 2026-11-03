@@ -591,6 +591,8 @@ of a shorter nested deadline. This leaves the job one budget for admission and
 execution.
 The cancellation probe waits for the long job's body log before requesting
 cancellation, so it exercises running work rather than SDK startup.
+Use `--sw-only dynamic-child` to focus that assertion. The child resolves its
+own job and step selections, so its `stamp` job still runs.
 
 ```bash
 sparkwing run example -- --fail-once

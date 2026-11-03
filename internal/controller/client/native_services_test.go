@@ -112,6 +112,48 @@ func TestNativeChildPreservesOmittedRepositoryIntent(t *testing.T) {
 	}
 }
 
+func TestNativeChildrenUseTheirOwnJobAndStepSelections(t *testing.T) {
+	selected := func(value string) runspec.Setting[string] {
+		return runspec.Setting[string]{Optional: runspec.Optional[string]{Set: true, Value: value}}
+	}
+	for _, tc := range []struct {
+		name    string
+		options runspec.Options
+	}{
+		{"job", runspec.Options{Only: selected("dynamic-child")}},
+		{"step-window", runspec.Options{StartAt: selected("compile"), StopAt: selected("package")}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			options := tc.options
+			options.NoMemo = runspec.Setting[bool]{Optional: runspec.Optional[bool]{Set: true, Value: true}}
+			transport := testEngine(t, func(request *http.Request) (*http.Response, error) {
+				var body struct {
+					Request runspec.Request `json:"request"`
+				}
+				if err := json.NewDecoder(request.Body).Decode(&body); err != nil {
+					t.Fatal(err)
+				}
+				got := body.Request.Options
+				if got.Only.Set || got.StartAt.Set || got.StopAt.Set {
+					t.Errorf("child inherited parent selectors: only=%+v, start=%+v, stop=%+v", got.Only, got.StartAt, got.StopAt)
+				}
+				if !got.NoMemo.Set || !got.NoMemo.Value {
+					t.Error("child lost the inherited memo preference")
+				}
+				response, err := json.Marshal(controllerwire.CreateRunResponse{RunID: "child", Number: 2})
+				return engineResponse(http.StatusCreated, string(response)), err
+			})
+			process := &NativeProcessClient{transport: transport, run: "parent", job: "dynamic-child", request: runspec.Request{Options: options}}
+			if _, err := process.StartChild(t.Context(), "weather-report", nil, "", ""); err != nil {
+				t.Fatal(err)
+			}
+			if !reflect.DeepEqual(process.request.Options, options) {
+				t.Fatal("child creation changed parent selections")
+			}
+		})
+	}
+}
+
 func FuzzNativeChildrenResolveTheirOwnLocalSecretNames(f *testing.F) {
 	f.Add("TOKEN PASSWORD", "", "")
 	f.Add("TOKEN", "git:example.test/team/other", "main")

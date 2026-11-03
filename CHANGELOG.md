@@ -22,6 +22,9 @@ unlock.
 
 ### Fixed
 
+- **child pipelines:** Keep parent job and step selections out of child runs
+  Focusing the example with `--sw-only dynamic-child` now lets the weather child's `stamp` job run. Child pipelines retain other inherited run preferences and resolve their own job and step selections.
+
 - **controller:** Local child pipelines inherit local owner deadlines
   An authenticated local parent can start a child with its unbounded local owner deadline. Remote callers retain the remote deadline ceiling even when they request local placement.
 
