@@ -140,7 +140,8 @@ func TestCanonicalWorkflowRunsTheCheckedOutEventChange(t *testing.T) {
 	requireWorkflowText(t, body,
 		"  workflow_call:\n",
 		"permissions:\n  contents: read\n",
-		`gate: ${{ (inputs.source_ref != '' || inputs.release_tag != '') && fromJSON('["gate", "pre-release"]') || fromJSON('["gate", "race-touched", "pre-release", `,
+		`gate: ${{ (inputs.source_ref != '' || inputs.release_tag != '') && fromJSON('["gate", "pre-release"]') || ((github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') && fromJSON('["gate", "race-touched", "pre-release", `,
+		`|| fromJSON('["gate", "race-touched"]')) }}`,
 		"persist-credentials: false",
 		"Copy the immutable release verifier",
 		`cp bin/check-hosted-gate-clean.sh "$RUNNER_TEMP/check-hosted-gate-clean.sh"`,
@@ -200,7 +201,7 @@ func TestCanonicalSourceOverrideRetainsItsWholeGateGraph(t *testing.T) {
 				t.Fatal(err)
 			}
 			cmd := exec.Command("bash", "-c", mappingValue(step, "run").Value)
-			cmd.Env = append(os.Environ(), "RUNNER_TEMP="+dir, "SOURCE_REF="+tc.source, "RELEASE_TAG="+tc.tag)
+			cmd.Env = append(os.Environ(), "RUNNER_TEMP="+dir, "SOURCE_REF="+tc.source, "RELEASE_TAG="+tc.tag, "GITHUB_EVENT_NAME=schedule")
 			got, err := cmd.Output()
 			want := []string{"run", "gate"}
 			if tc.source == "" && tc.tag == "" {
@@ -384,10 +385,11 @@ func TestCanonicalStoreRacePartsCoverEveryPartOnce(t *testing.T) {
 	}
 	job := mappingValue(mappingValue(&doc, "jobs"), "gate")
 	matrix := mappingValue(mappingValue(mappingValue(job, "strategy"), "matrix"), "gate").Value
-	at := strings.LastIndex(matrix, "fromJSON('")
-	end := strings.LastIndex(matrix, "')")
+	// safety: the nightly lane list is the one that carries the store race parts.
+	at := strings.LastIndex(matrix[:strings.Index(matrix, "race-store-")], "fromJSON('")
+	end := at + strings.Index(matrix[at:], "')")
 	if at < 0 || end < at {
-		t.Fatalf("matrix %q has no normal lane list", matrix)
+		t.Fatalf("matrix %q has no nightly lane list", matrix)
 	}
 	var lanes []string
 	if err := json.Unmarshal([]byte(matrix[at+len("fromJSON('"):end]), &lanes); err != nil {

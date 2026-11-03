@@ -27,7 +27,9 @@ jobs:
       matrix:
         # perf: each race-store lane races one part of internal/store on its
         # own four-core runner, so pre-release leaves that step to them.
-        gate: ${{ (inputs.source_ref != '' || inputs.release_tag != '') && fromJSON('["gate", "pre-release"]') || fromJSON('["gate", "race-touched", "pre-release", "race-store-1-of-3", "race-store-2-of-3", "race-store-3-of-3"]') }}
+        # perf: pushes and pull requests verify only what changed (decision 96); the full suite,
+        # pre-release and the store race run nightly, on dispatch and for releases.
+        gate: ${{ (inputs.source_ref != '' || inputs.release_tag != '') && fromJSON('["gate", "pre-release"]') || ((github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') && fromJSON('["gate", "race-touched", "pre-release", "race-store-1-of-3", "race-store-2-of-3", "race-store-3-of-3"]') || fromJSON('["gate", "race-touched"]')) }}
     env:
       GOWORK: "off"
     services:
@@ -174,6 +176,19 @@ jobs:
           RELEASE_TAG: ${{ inputs.release_tag }}
         run: bash "$RUNNER_TEMP/apply-release-test-repair.sh" "$RELEASE_TAG" "$SOURCE_SHA" "$RUNNER_TEMP/v0.37.2-test-oracle.patch"
 
+      - name: Pin the change base for affected checks
+        if: inputs.source_ref == '' && inputs.release_tag == '' && (github.event_name == 'push' || github.event_name == 'pull_request')
+        env:
+          CHANGE_BASE: ${{ github.event_name == 'push' && github.event.before || github.event.pull_request.base.sha }}
+        run: |
+          # safety: the gate scopes to the change since origin/main; on a push HEAD already is
+          # origin/main, so point it at the commit before this push (or the PR base).
+          if [ -n "$CHANGE_BASE" ] && [ "$CHANGE_BASE" != 0000000000000000000000000000000000000000 ] && git cat-file -e "$CHANGE_BASE^{commit}" 2>/dev/null; then
+            git update-ref refs/remotes/origin/main "$CHANGE_BASE"
+          else
+            git update-ref -d refs/remotes/origin/main || true
+          fi
+
       - name: Run canonical gate
         if: matrix.gate == 'gate'
         env:
@@ -185,7 +200,9 @@ jobs:
           gate_args=()
           if [ -z "$SOURCE_REF" ] && [ -z "$RELEASE_TAG" ]; then
             gate_selection=(--sw-only gate)
-            gate_args=(-- --full)
+            if [ "$GITHUB_EVENT_NAME" = schedule ] || [ "$GITHUB_EVENT_NAME" = workflow_dispatch ]; then
+              gate_args=(-- --full)
+            fi
           fi
           "$RUNNER_TEMP/sparkwing" run gate "${gate_selection[@]}" --sw-run-handle-file "$RUNNER_TEMP/canonical-run.json" "${gate_args[@]}"
           if [ "$RELEASE_TAG" = v0.37.2 ]; then

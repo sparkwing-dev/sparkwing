@@ -396,8 +396,11 @@ file. Other syntax and workflow checks remain active.
   pre-merge-commit; neither hook tier proves source policy over those resulting
   trees. Run `gate` when that evidence is required. Everything
   else is `gate` (the broad check) and `pre-release` (the release boundary),
-  which `sparkwing run <name>` runs on demand and which hosted CI runs on every
-  pull request and every push to main; no git hook fires either.
+  which `sparkwing run <name>` runs on demand; no git hook fires either. Hosted
+  CI verifies, it does not gate (decision 96): every pull request and push to
+  main runs `gate` and `race-touched` over the change since the push's previous
+  commit (or the pull request base), and the full suite, `pre-release`, the
+  store race lanes and Postgres conformance run nightly and on dispatch.
   `sparkwing pipeline hooks install` arms the two hooks in a checkout and
   `sparkwing pipeline hooks status` checks the active hook directory and compares
   each hook's presence, content, format version, and executability. Blocking

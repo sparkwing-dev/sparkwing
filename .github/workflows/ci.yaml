@@ -4,6 +4,10 @@ on:
   pull_request:
   push:
     branches: [main, tenancy]
+  # perf: pushes verify only what changed; the full suite runs nightly (decision 96).
+  schedule:
+    - cron: "17 9 * * *"
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -17,6 +21,7 @@ jobs:
 
   postgres:
     name: Postgres conformance
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     timeout-minutes: 45
     permissions:
