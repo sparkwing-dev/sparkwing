@@ -1427,3 +1427,7 @@ Sparkwing should support pipelines that coordinate agents and people: durable st
 ## 2026-11-03 Korey decision 92: deploy the next release to production after staging
 
 Korey authorized deploying the release after v0.68.5 to production once it passes staging, so production grid 2 runs against the code that fixes grid 1. The production upgrade takes an RDS snapshot first, verifies and copies the signed release images by digest, changes only image pins through GitOps, and keeps the previous release's images pinned for rollback. Grid 2 runs as QA fixture teams only.
+
+## 2026-11-03 Korey decision 93: every change is reviewed
+
+Every change landing on main gets an AI review, including docs-only and comment-only changes: the reviewer checks correctness and alignment with Korey's standards, not just code risk. No size or path makes review optional. How standards and reviewer context are injected into the review is a later design (Korey is revising the standards); until then the review job keeps loading them as it does today.
