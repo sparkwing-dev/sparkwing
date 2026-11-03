@@ -566,13 +566,19 @@ with the cleanup finalizer, the successor waits up to 30 seconds before requesti
 fresh capacity. A work or eval award also waits for its planning Job before Kubernetes
 marks that Job for deletion: the controller can award work as planning exits.
 Only that predecessor's Pods and DaemonSets may occupy the node.
-Normal reconciliation retries teardown before placement. Live work reservations still
-permit fanout. Foreign runs, damaged bindings and quarantined nodes never earn
+Normal reconciliation retries teardown before placement. The controller can also
+end a work predecessor and award its dependent between reconciliation and claim.
+So before a fresh award's first capacity request, the launcher asks the controller
+about the run's other live Jobs, tears down those whose awards ended and places
+again, and the successor waits for that teardown instead of creating demand that
+cannot fit on the reserved node and would make Karpenter add one. Live work
+reservations still permit fanout. Foreign runs, damaged bindings and quarantined nodes never earn
 this wait. The deadline belongs to the held award and does not renew on retries.
 A held award has no Job or capacity Pod to renew it, so every pass retries its
 placement and renews its fence even while a claim backoff delays new claims.
 `TestSuccessorWaitsForPredecessorNode`, `TestTeardownWaitIsBoundedAndRunScoped`
 and `TestTeardownWaitRenewsThroughClaimBackoff` guard reuse, the fallback and renewal.
+`TestSuccessorAwardedBeforePredecessorRetirementReusesNode` guards the work-to-work gap.
 `TestRunAndRetryPlanHandoffCreateOnlyOneNodeClaim` guards the plan-to-work gap for
 normal runs and retries, including launcher restarts.
 

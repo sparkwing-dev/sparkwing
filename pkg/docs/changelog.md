@@ -22,6 +22,8 @@ unlock.
 
 ### Fixed
 
+- **Cloud:** Reuse a run's node for a dependent job without provisioning another
+  When the controller awarded a dependent job just after its predecessor finished, but before the launcher retired the predecessor's Kubernetes Job, the launcher requested fresh capacity and Karpenter added a node that stayed empty while the job ran on the original. The launcher now retires ended predecessors before it requests capacity, so the dependent job waits for the original node.
 - **web:** Make run cards usable with a keyboard and a screen reader
   The Runs pane is a "Runs" list of cards. Each card has a button named with the run's repository, pipeline, branch, start time and status that reports selection as pressed and opens or closes the run with Enter or Space. Each bulk-action checkbox names its run.
 - **web:** Give the console main, banner and navigation landmarks and a skip link

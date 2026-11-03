@@ -51,3 +51,39 @@ func (b *KubernetesBoundary) predecessorTeardown(ctx context.Context, node corev
 	}
 	return true, nil
 }
+
+func (l *Launcher) retireEndedPredecessors(ctx context.Context, successor CloudJobBinding) (bool, error) {
+	jobs, err := l.Kube.BatchV1().Jobs(l.Config.Namespace).List(ctx, metav1.ListOptions{LabelSelector: "app.kubernetes.io/managed-by=" + managedByLauncher})
+	if err != nil {
+		return false, err
+	}
+	var observations []CloudJobObservation
+	live := map[string]int{}
+	for i, job := range jobs.Items {
+		binding, reservation, err := jobOwnership(job)
+		if err != nil || job.DeletionTimestamp != nil || job.Annotations[rejectedAnnotation] != "" || binding.Team != successor.Team || binding.RunID != successor.RunID || sameBinding(binding, successor) {
+			continue
+		}
+		live[job.Name] = i
+		observations = append(observations, CloudJobObservation{Binding: binding, JobNamespace: job.Namespace, JobName: job.Name, JobUID: string(job.UID), NodeUID: reservation.NodeUID})
+	}
+	if len(observations) == 0 {
+		return false, nil
+	}
+	states, err := l.retirements(ctx, observations)
+	if err != nil {
+		return false, err
+	}
+	retired := false
+	var errs []error
+	for _, observation := range observations {
+		if state := states[observation.JobName]; !state.Delete || state.Deferred {
+			continue
+		}
+		job := &jobs.Items[live[observation.JobName]]
+		_, reservation, _ := jobOwnership(*job)
+		errs = append(errs, teardownFault(job.Name, l.teardown(ctx, job, reservation)))
+		retired = true
+	}
+	return retired, errors.Join(errs...)
+}
