@@ -170,6 +170,7 @@ CREATE TABLE nodes (
     execution_started_at BIGINT,
     generation BIGINT NOT NULL DEFAULT 0 CHECK(generation >= 0),
     executor_location TEXT NOT NULL DEFAULT 'unknown',
+    trusted_host BIGINT NOT NULL DEFAULT 0 CHECK(trusted_host IN (0,1)),
     needs_labels BLOB,
     prefers_labels BLOB,
     requested_cores DOUBLE PRECISION NOT NULL DEFAULT 0 CHECK(requested_cores >= 0),

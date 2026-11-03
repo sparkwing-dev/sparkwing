@@ -435,7 +435,7 @@ func Registry() []Command {
 			{Name: "no-service"},
 			{Name: "profile", Argument: "NAME"},
 			{Name: "reserved-for", Argument: "POOL", Repeatable: true, CommaList: true},
-			{Name: "trust", Argument: "CLASS", Values: []string{"verified-default", "any"}},
+			{Name: "trust", Argument: "CLASS", Values: []string{"verified-default", "verified", "any"}},
 			{Name: "platform", Argument: "PLATFORM", Values: []string{"kubernetes"}, Meaning: "Record a shared Kubernetes runner at admin enrollment; a runner in a pod stops at its first poll without it."},
 			{Name: "launcher", Meaning: "Enroll only claims.launch for a shared reserved pool and skip the persistent runner service."},
 		}},

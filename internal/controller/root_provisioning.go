@@ -55,7 +55,7 @@ func (s *Server) handleEnrollRunner(w http.ResponseWriter, r *http.Request, a ca
 		seen[pool] = true
 	}
 	if !request.Trust.Valid() || request.Personal && request.Trust != "" {
-		return invalidEngineBody("trust must be verified-default or any, on a shared runner only")
+		return invalidEngineBody("trust must be verified-default, verified or any, on a shared runner only")
 	}
 	expires, err := provisionExpiry(request.ExpiresAt)
 	if err != nil {

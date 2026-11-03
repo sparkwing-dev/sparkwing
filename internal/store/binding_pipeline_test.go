@@ -155,7 +155,7 @@ func TestProvenPipelineOutputNeedsADeclaredProvenReferenceAndACleanRun(t *testin
 		if err := tenant.TestOnlySeedSealedRun(t.Context(), "producer-run", "producer", provenRepo, provenSHA, candidate, tc.options, time.Unix(1700000000, 0)); err != nil {
 			t.Fatal(err)
 		}
-		rewriteSchemaExec(t, s.db, `INSERT INTO nodes(team,run_id,node_id,status,outcome,finished_at,spec_json,execution_json) VALUES ('a','producer-run','output','done','success',2,?,?)`, []byte(`{"id":"output"}`), []byte(`{}`))
+		rewriteSchemaExec(t, s.db, `INSERT INTO nodes(team,run_id,node_id,status,outcome,finished_at,spec_json,execution_json,trusted_host) VALUES ('a','producer-run','output','done','success',2,?,?,1)`, []byte(`{"id":"output"}`), []byte(`{}`))
 		spec, err := json.Marshal(nodeproto.JobSpec{ID: "job", References: []nodeproto.PipelineReference{{Pipeline: "producer", Job: "output", FromAnyRun: tc.anyRun, FromProvenRun: tc.provenRun}}})
 		if err != nil {
 			t.Fatal(err)

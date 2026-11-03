@@ -66,11 +66,12 @@ func (t *Tenant) TestOnlySeedSealedRun(ctx context.Context, id, pipeline string,
 	})
 }
 
-// TestOnlySeedNode inserts a finished node with outcome into an existing run.
-func (t *Tenant) TestOnlySeedNode(ctx context.Context, runID, nodeID, outcome string) error {
+// TestOnlySeedNode inserts a finished node with outcome into an existing run,
+// recording whether it ran on a trusted host.
+func (t *Tenant) TestOnlySeedNode(ctx context.Context, runID, nodeID, outcome string, trustedHost bool) error {
 	return t.s.inTx(ctx, func(tx *storeTx) error {
-		_, err := tx.execContext(ctx, `INSERT INTO nodes(team,run_id,node_id,status,outcome,finished_at,spec_json,execution_json) VALUES (?,?,?,'done',?,1,?,?)`,
-			t.team, runID, nodeID, outcome, []byte(`{"id":"`+nodeID+`"}`), []byte(`{}`))
+		_, err := tx.execContext(ctx, `INSERT INTO nodes(team,run_id,node_id,status,outcome,finished_at,spec_json,execution_json,trusted_host) VALUES (?,?,?,'done',?,1,?,?,?)`,
+			t.team, runID, nodeID, outcome, []byte(`{"id":"`+nodeID+`"}`), []byte(`{}`), boolInt(trustedHost))
 		return err
 	})
 }

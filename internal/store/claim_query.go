@@ -363,7 +363,13 @@ func writerPrincipalSQL(writer, kind string) string {
 func (q *claimSQL) poolTrust(team, pools, trust, launcher, provenance string) string {
 	reserved := `EXISTS (SELECT 1 FROM secrets s WHERE s.team=` + team + ` AND ` + q.contains(pools, "s.only_on") + `)`
 	hasPools := `EXISTS (SELECT 1 FROM ` + q.array(pools, "pool") + `)`
-	return `((NOT (` + reserved + ` OR (` + trust + `='` + string(capability.TrustVerifiedDefault) + `' AND ` + hasPools + `)) OR ` + launcher + `=1) AND (` + trust + `='` + string(capability.TrustAny) + `' OR (` + trust + `='' AND NOT (` + reserved + `)) OR ` + q.defaultBranchWork(provenance) + `))`
+	return `((NOT (` + reserved + ` OR (` + trust + `='` + string(capability.TrustVerifiedDefault) + `' AND ` + hasPools + `)) OR ` + launcher + `=1) AND (` + trust + `='` + string(capability.TrustAny) + `' OR (` + trust + `='' AND NOT (` + reserved + `)) OR (` + trust + `='` + string(capability.TrustVerified) + `' AND ` + q.provenCommit(provenance) + `) OR ` + q.defaultBranchWork(provenance) + `))`
+}
+
+// safety: the SQL form of Provenance.ProvenSHA, so a verified root and the proven
+// reference agree on which runs GitHub or the controller's own fetch proved.
+func (q *claimSQL) provenCommit(provenance string) string {
+	return `(` + q.provenRepository(provenance) + `<>'' AND (` + trustIn(q.at(provenance, "trust"), runspec.GitHubCommitTrust) + ` OR COALESCE(` + q.at(provenance, "fetched_sha") + `,'')<>''))`
 }
 
 // safety: use sealed facts so SQL and Go consumers cannot disagree on repository proof.

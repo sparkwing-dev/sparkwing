@@ -65,16 +65,18 @@ func provenRunAtCommitQuery(dialect Dialect, team Team, pipeline string, reader 
 	q := claimSQL{dialect: dialect}
 	request := q.blob("request_json")
 	provenance := q.at(request, "provenance")
-	clean := make([]string, 0, 5)
+	clean := make([]string, 0, 6)
 	for _, option := range []string{"start_at", "stop_at", "only"} {
 		clean = append(clean, "COALESCE("+q.at(request, "request", "options", option, "value")+",'')=''")
 	}
 	clean = append(clean, "COALESCE(CAST("+q.at(request, "request", "options", "dry_run", "value")+" AS TEXT),'false') NOT IN ('true','1')")
 	clean = append(clean, "NOT EXISTS (SELECT 1 FROM "+q.array(q.at(request, "request", "env", "names"), "env_name")+")")
+	// safety: an untrusted host may have run asserted work that left HOME, GOFLAGS or the build cache poisoned.
+	clean = append(clean, "NOT EXISTS (SELECT 1 FROM nodes n WHERE n.team=? AND n.run_id=runs.id AND n.outcome<>'skipped' AND n.trusted_host=0)")
 	return `SELECT team,id FROM runs WHERE team=? AND repo_key=? AND provenance_sha=? AND pipeline=? AND intake_mode='execute' AND ` +
 			q.provenRepository(provenance) + `=? AND ((` + trustIn(q.at(provenance, "trust"), runspec.GitHubCommitTrust) + ` AND ` +
 			q.at(provenance, "sha") + `=?) OR ` + q.at(provenance, "fetched_sha") + `=?) AND ` + strings.Join(clean, " AND "),
-		[]any{team, string(repository), sha, pipeline, string(repository), sha, sha}, true
+		[]any{team, string(repository), sha, pipeline, string(repository), sha, sha, team}, true
 }
 
 func (s *Store) getLatestRun(ctx context.Context, query string, args []any, pipeline string, statuses []string, maxAge time.Duration, fromAnyRun bool) (*Run, error) {

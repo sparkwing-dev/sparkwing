@@ -101,7 +101,7 @@ func seedProven(t *testing.T, tenant *store.Tenant, id, pipeline string, seed pr
 	if err := tenant.TestOnlySeedSealedRun(t.Context(), id, pipeline, seed.repo, seed.sha, seed.proof(t), seed.options, finished, seed.env...); err != nil {
 		t.Fatal(err)
 	}
-	if err := tenant.TestOnlySeedNode(t.Context(), id, provenJob, "success"); err != nil {
+	if err := tenant.TestOnlySeedNode(t.Context(), id, provenJob, "success", true); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -189,7 +189,7 @@ func TestProvenRunAtCommitPassesOverNewerRunsWhoseJobDidNotSucceed(t *testing.T)
 			t.Fatal(err)
 		}
 		if outcome != "" {
-			if err := tenant.TestOnlySeedNode(t.Context(), id, provenJob, outcome); err != nil {
+			if err := tenant.TestOnlySeedNode(t.Context(), id, provenJob, outcome, true); err != nil {
 				t.Fatal(err)
 			}
 		}
@@ -201,5 +201,37 @@ func TestProvenRunAtCommitPassesOverNewerRunsWhoseJobDidNotSucceed(t *testing.T)
 	}
 	if got, err := tenant.GetLatestProvenRunAtCommit(t.Context(), "gate", "other-job", "reader", []string{"success"}, 0); !errors.Is(err, store.ErrNotFound) {
 		t.Fatalf("a run without the named job satisfied the reader: %+v %v", got, err)
+	}
+}
+
+func TestProvenRunAtCommitNeedsEveryJobThatRanOnATrustedHost(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		outcome string
+		trusted bool
+		want    bool
+	}{
+		{name: "every job on a trusted host", outcome: "success", trusted: true, want: true},
+		{name: "a job on a host that takes asserted work", outcome: "success"},
+		{name: "a memoized job whose host is unknown", outcome: "memoized"},
+		{name: "a skipped job ran nowhere", outcome: "skipped", want: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			st := storetest.Open(t)
+			tenant := provenTenant(t, st, "a")
+			now := time.Unix(1700000000, 0)
+			seedProven(t, tenant, "candidate", "gate", provenSeed{repo: provenRepo, sha: provenSHA, proof: appProof(1, provenSHA, false)}, now.Add(-time.Minute))
+			if err := tenant.TestOnlySeedNode(t.Context(), "candidate", "race", tc.outcome, tc.trusted); err != nil {
+				t.Fatal(err)
+			}
+			seedProven(t, tenant, "reader", "main-ci", provenSeed{repo: provenRepo, sha: provenSHA, proof: appProof(1, provenSHA, true)}, now)
+			got, err := tenant.GetLatestProvenRunAtCommit(t.Context(), "gate", provenJob, "reader", []string{"success"}, 0)
+			if tc.want && (err != nil || got.ID != "candidate") {
+				t.Fatalf("want the candidate, got %+v %v", got, err)
+			}
+			if !tc.want && !errors.Is(err, store.ErrNotFound) {
+				t.Fatalf("want no proven run, got %+v %v", got, err)
+			}
+		})
 	}
 }

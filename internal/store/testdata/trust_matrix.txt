@@ -34,6 +34,7 @@
 #   pool_reserved_trust_any    the same pool registered --trust=any
 #   pool_verified_only         launcher pool registered --trust=verified-default
 #   pool_reserved_on_machine   plain machine in a reserved pool, default trust
+#   machine_trust_verified     plain machine registered --trust=verified: runs whose commit GitHub or the controller proved
 # default_branch_work_sql      claim SQL defaultBranchWork
 # fresh_host_required          freshPod refuses persistent Kubernetes runners exactly when default_branch_work_sql
 # personal_* / here_*          every consumer behind claimSQL.hostTrust for that host; "not claimed" means
@@ -89,6 +90,7 @@ pool_reserved                yes
 pool_reserved_trust_any      yes
 pool_verified_only           yes
 pool_reserved_on_machine     no
+machine_trust_verified       yes
 default_branch_work_sql      yes
 latest_default               yes
 repos_runner                 yes
@@ -143,6 +145,7 @@ pool_reserved                no
 pool_reserved_trust_any      yes
 pool_verified_only           no
 pool_reserved_on_machine     no
+machine_trust_verified       yes
 default_branch_work_sql      no
 latest_default               no
 repos_runner                 yes
@@ -197,6 +200,7 @@ pool_reserved                no
 pool_reserved_trust_any      yes
 pool_verified_only           no
 pool_reserved_on_machine     no
+machine_trust_verified       yes
 default_branch_work_sql      no
 latest_default               no
 repos_runner                 yes
@@ -251,6 +255,7 @@ pool_reserved                no
 pool_reserved_trust_any      yes
 pool_verified_only           no
 pool_reserved_on_machine     no
+machine_trust_verified       no
 default_branch_work_sql      no
 latest_default               no
 repos_runner                 yes
@@ -305,6 +310,7 @@ pool_reserved                yes
 pool_reserved_trust_any      yes
 pool_verified_only           yes
 pool_reserved_on_machine     no
+machine_trust_verified       yes
 default_branch_work_sql      yes
 latest_default               yes
 repos_runner                 yes
@@ -359,6 +365,7 @@ pool_reserved                no
 pool_reserved_trust_any      yes
 pool_verified_only           no
 pool_reserved_on_machine     no
+machine_trust_verified       yes
 default_branch_work_sql      no
 latest_default               no
 repos_runner                 yes
@@ -413,6 +420,7 @@ pool_reserved                no
 pool_reserved_trust_any      yes
 pool_verified_only           no
 pool_reserved_on_machine     no
+machine_trust_verified       yes
 default_branch_work_sql      no
 latest_default               no
 repos_runner                 yes
@@ -467,6 +475,7 @@ pool_reserved                no
 pool_reserved_trust_any      yes
 pool_verified_only           no
 pool_reserved_on_machine     no
+machine_trust_verified       no
 default_branch_work_sql      no
 latest_default               no
 repos_runner                 yes
@@ -521,6 +530,7 @@ pool_reserved                no
 pool_reserved_trust_any      yes
 pool_verified_only           no
 pool_reserved_on_machine     no
+machine_trust_verified       no
 default_branch_work_sql      no
 latest_default               no
 repos_runner                 no
@@ -575,6 +585,7 @@ pool_reserved                no
 pool_reserved_trust_any      yes
 pool_verified_only           no
 pool_reserved_on_machine     no
+machine_trust_verified       yes
 default_branch_work_sql      no
 latest_default               no
 repos_runner                 yes
@@ -629,6 +640,7 @@ pool_reserved                no
 pool_reserved_trust_any      yes
 pool_verified_only           no
 pool_reserved_on_machine     no
+machine_trust_verified       yes
 default_branch_work_sql      no
 latest_default               no
 repos_runner                 yes
@@ -683,6 +695,7 @@ pool_reserved                no
 pool_reserved_trust_any      yes
 pool_verified_only           no
 pool_reserved_on_machine     no
+machine_trust_verified       no
 default_branch_work_sql      no
 latest_default               no
 repos_runner                 no
@@ -737,6 +750,7 @@ pool_reserved                no
 pool_reserved_trust_any      yes
 pool_verified_only           no
 pool_reserved_on_machine     no
+machine_trust_verified       no
 default_branch_work_sql      no
 latest_default               no
 repos_runner                 no
@@ -792,6 +806,7 @@ pool_reserved                no
 pool_reserved_trust_any      yes
 pool_verified_only           no
 pool_reserved_on_machine     no
+machine_trust_verified       yes
 default_branch_work_sql      no
 latest_default               no
 repos_runner                 yes
@@ -847,6 +862,7 @@ pool_reserved                no
 pool_reserved_trust_any      yes
 pool_verified_only           no
 pool_reserved_on_machine     no
+machine_trust_verified       yes
 default_branch_work_sql      no
 latest_default               no
 repos_runner                 yes
@@ -901,6 +917,7 @@ pool_reserved                yes
 pool_reserved_trust_any      yes
 pool_verified_only           yes
 pool_reserved_on_machine     no
+machine_trust_verified       yes
 default_branch_work_sql      yes
 latest_default               yes
 repos_runner                 yes
@@ -955,6 +972,7 @@ pool_reserved                no
 pool_reserved_trust_any      yes
 pool_verified_only           no
 pool_reserved_on_machine     no
+machine_trust_verified       no
 default_branch_work_sql      no
 latest_default               no
 repos_runner                 no
@@ -1009,6 +1027,7 @@ pool_reserved                no
 pool_reserved_trust_any      yes
 pool_verified_only           no
 pool_reserved_on_machine     no
+machine_trust_verified       no
 default_branch_work_sql      no
 latest_default               no
 repos_runner                 no
@@ -1063,6 +1082,7 @@ pool_reserved                no
 pool_reserved_trust_any      yes
 pool_verified_only           no
 pool_reserved_on_machine     no
+machine_trust_verified       no
 default_branch_work_sql      no
 latest_default               no
 repos_runner                 no
@@ -1117,6 +1137,7 @@ pool_reserved                no
 pool_reserved_trust_any      yes
 pool_verified_only           no
 pool_reserved_on_machine     no
+machine_trust_verified       no
 default_branch_work_sql      no
 latest_default               no
 repos_runner                 no
@@ -1171,6 +1192,7 @@ pool_reserved                no
 pool_reserved_trust_any      yes
 pool_verified_only           no
 pool_reserved_on_machine     no
+machine_trust_verified       yes
 default_branch_work_sql      no
 latest_default               no
 repos_runner                 yes

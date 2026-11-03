@@ -197,8 +197,8 @@ output from any successful run, including pull requests and uploads. The opt-out
 must be declared in that job field. Runtime requests cannot widen it.
 `sw.FromProvenRunAtCommit()` instead reads only a successful run at the reading
 run's own commit, on any branch, that was proven for the reader's repository and
-selected every job without dry run, sealed no environment variables, and in
-which the referenced job succeeded. A controller that predates it is refused.
+selected every job without dry run, sealed no environment variables, ran every
+job on a trusted host, and in which the referenced job succeeded. A controller that predates it is refused.
 It cannot be combined with `sw.FromAnyRun()`.
 TypeScript uses `refToLastRun(pipeline, jobID, { fromAnyRun: true })`.
 
