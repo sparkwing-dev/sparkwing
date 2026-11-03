@@ -22,6 +22,8 @@ unlock.
 
 ### Fixed
 
+- **web:** Make run cards usable with a keyboard and a screen reader
+  The Runs pane is a "Runs" list of cards. Each card has a button named with the run's repository, pipeline, branch, start time and status that reports selection as pressed and opens or closes the run with Enter or Space. Each bulk-action checkbox names its run.
 - **web:** Give the console main, banner and navigation landmarks and a skip link
   Page content sits in one `main` landmark, the top bar is a banner with a "Primary" navigation, and the first Tab stop is a "Skip to content" link that moves focus into the page.
 - **web:** Choose the Analytics trend range

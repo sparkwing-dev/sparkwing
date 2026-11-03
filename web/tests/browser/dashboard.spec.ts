@@ -993,7 +993,7 @@ test("keeps run panes the same size while switching selected runs", async ({ pag
 
   await page.evaluate((firstRunID) => {
     const row = document.querySelector(`[data-run-id="${firstRunID}"]`);
-    const sidebar = row?.parentElement?.parentElement;
+    const sidebar = row?.closest("#runs-column");
     const panes = sidebar?.parentElement;
     if (!sidebar || !panes) throw new Error("run panes missing");
     const samples: { sidebar: number; detail: number; row: number }[] = [];
@@ -1326,6 +1326,37 @@ test("Analytics keeps its trend range in the URL", async ({ page }) => {
   await expect.poll(() => requested.at(-1)).toBe("24");
 });
 
+test("run cards expose names, status, selection and keyboard activation", async ({
+  page,
+}) => {
+  await installMockAPI(page, {
+    runs: [finishedRun, runningRun],
+    details: { [finishedRun.id]: finishedDetail },
+  });
+  await page.goto("/runs");
+
+  const list = page.getByRole("list", { name: "Runs" });
+  await expect(list.getByRole("listitem")).toHaveCount(2);
+  const open = list.getByRole("button", {
+    name: /^Run sparkwing-dev\/sparkwing \/ deploy-production \/ main \/ .* \/ success$/,
+  });
+  await expect(open).toHaveAttribute("aria-pressed", "false");
+  await expect(
+    list.getByRole("checkbox", { name: /^Select sparkwing-dev\/sparkwing \/ pre-commit .* running for bulk actions$/ }),
+  ).toBeVisible();
+  const axe = await new AxeBuilder({ page }).include('[role="list"][aria-label="Runs"]').analyze();
+  expect(axe.violations.map((violation) => violation.id)).toEqual([]);
+
+  await open.focus();
+  await page.keyboard.press("Enter");
+  await expect(page).toHaveURL(new RegExp(`run=${finishedRun.id}`));
+  await expect(open).toHaveAttribute("aria-pressed", "true");
+  await expect(open).toBeFocused();
+  await page.keyboard.press("Space");
+  await expect(page).not.toHaveURL(/run=/);
+  await expect(open).toHaveAttribute("aria-pressed", "false");
+});
+
 test("opens a selected DAG step when logs mount", async ({ page }) => {
   await installMockAPI(page, {
     runs: [finishedRun],
@@ -1432,7 +1463,7 @@ test("run rows keep their height while the detail pane closes", async (
     .poll(() =>
       rows
         .first()
-        .evaluate((row) => row.parentElement!.parentElement!.getBoundingClientRect().width),
+        .evaluate((row) => row.closest("#runs-column")!.getBoundingClientRect().width),
     )
     .toBe(208);
 
@@ -1445,7 +1476,7 @@ test("run rows keep their height while the detail pane closes", async (
       heights.push({
         height: row.getBoundingClientRect().height,
         width: row.getBoundingClientRect().width,
-        pane: row.parentElement!.parentElement!.getBoundingClientRect().width,
+        pane: row.closest("#runs-column")!.getBoundingClientRect().width,
       });
     }
     return heights;
@@ -1467,7 +1498,7 @@ test("run rows keep their height while the detail pane closes", async (
     .poll(() =>
       rows
         .first()
-        .evaluate((row) => row.parentElement!.parentElement!.getBoundingClientRect().width),
+        .evaluate((row) => row.closest("#runs-column")!.getBoundingClientRect().width),
     )
     .toBe(208);
   await rows.first().click();

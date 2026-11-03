@@ -127,6 +127,11 @@ function usePaneScrollbar() {
   return { scrolling, onScroll };
 }
 
+// runLabel names a run for assistive technology wherever its row is only a dot or a card.
+function runLabel(r: Run): string {
+  return `${r.repo || r.github_repo || "unknown"} / ${r.pipeline} / ${r.git_branch || "unknown branch"} / ${runStartedAt(r) ? fmtFullDate(r.started_at) : `Not started · Queued ${fmtFullDate(runTimestamp(r) ?? "")}`} / ${r.status === "dry_run" ? "dry run" : r.status}`;
+}
+
 function statusDot(status: string): string {
   switch (status) {
     case "success":
@@ -1146,7 +1151,7 @@ function Pipelines({ pivotTabs }: { pivotTabs: React.ReactNode }) {
                 kind="runs"
                 items={topLevel.map((r) => ({
                   id: r.id,
-                  label: `${r.repo || r.github_repo || "unknown"} / ${r.pipeline} / ${r.git_branch || "unknown branch"} / ${runStartedAt(r) ? fmtFullDate(r.started_at) : `Not started · Queued ${fmtFullDate(runTimestamp(r) ?? "")}`} / ${r.status === "dry_run" ? "dry run" : r.status}`,
+                  label: runLabel(r),
                   dotClass: statusDot(r.status),
                 }))}
                 selectedID={selectedRun}
@@ -1165,21 +1170,24 @@ function Pipelines({ pivotTabs }: { pivotTabs: React.ReactNode }) {
                 {runsError}
               </div>
             )}
+            <div role="list" aria-label="Runs">
             {topLevel.map((r) => {
               const isActive = selectedRun === r.id;
               const isChecked = checkedRuns.has(r.id);
               const isFocused = focusedRun === r.id;
               const isActiveFocus = isFocused && focusedColumn === "runs";
+              const label = runLabel(r);
               return (
                 <div
                   key={r.id}
+                  role="listitem"
                   data-run-id={r.id}
                   onClick={() => {
                     setFocusedRun(r.id);
                     setFocusedColumn("runs");
                     selectRun(isActive ? null : r.id);
                   }}
-                  className={`h-14 overflow-hidden px-3 py-2 border-b border-[var(--border)] border-l-4 cursor-pointer hover:bg-[var(--surface-raised)] transition-colors flex items-start gap-2 ${
+                  className={`relative h-14 overflow-hidden px-3 py-2 border-b border-[var(--border)] border-l-4 cursor-pointer hover:bg-[var(--surface-raised)] transition-colors flex items-start gap-2 ${
                     isChecked
                       ? "bg-violet-500/15 border-l-violet-400"
                       : "border-l-transparent"
@@ -1191,6 +1199,19 @@ function Pipelines({ pivotTabs }: { pivotTabs: React.ReactNode }) {
                         : ""
                   }`}
                 >
+                  {/* The card holds filter, retry and checkbox controls, so it cannot be one
+                      button itself; this button's click bubbles to the card's handler. */}
+                  <button
+                    type="button"
+                    data-run-select
+                    aria-pressed={isActive}
+                    aria-label={`Run ${label}`}
+                    onFocus={() => {
+                      setFocusedRun(r.id);
+                      setFocusedColumn("runs");
+                    }}
+                    className="sr-only"
+                  />
                   {!paneOpen && (
                     <label
                       onClick={(e) => e.stopPropagation()}
@@ -1201,7 +1222,7 @@ function Pipelines({ pivotTabs }: { pivotTabs: React.ReactNode }) {
                         type="checkbox"
                         checked={isChecked}
                         onChange={() => toggleChecked(r.id)}
-                        aria-label="select run"
+                        aria-label={`Select ${label} for bulk actions`}
                         className="mt-1 cursor-pointer accent-violet-500"
                       />
                     </label>
@@ -1217,6 +1238,7 @@ function Pipelines({ pivotTabs }: { pivotTabs: React.ReactNode }) {
                 </div>
               );
             })}
+            </div>
             {topLevel.length === 0 && !runsError && (
               <div className="p-8 text-center text-[var(--muted)] text-sm">
                 {pageRef.kind !== "latest"
