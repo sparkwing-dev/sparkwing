@@ -563,3 +563,52 @@ Planning cannot read service answers because it has no execution binding.
 Execution uses the same SDK declarations and operation rules as protocol
 serving. The fake host provides focused author tests. Real-host acceptance tests
 cover scheduling, storage and authorization integration.
+
+## Runnable staging integration gate
+
+In the Sparkwing source checkout, `sparkwing run example` runs the SDK tour
+and named integration assertions in parallel. The default local path needs no
+Cloud or Docker and targets a wall time below two minutes. The tour includes
+an approval that approves after 20 seconds and an optional failing canary.
+Those canary failures demonstrate collected errors and do not fail the run.
+
+The assertions cover a two-axis matrix, job and predecessor step outputs,
+generated jobs, a dynamic same-repository child, dependency cache save and
+restore, memo reuse, artifacts, cancellation, and CLI reads of controller logs
+and run history. `memoized-step` puts one step in a memoized job because memo
+policies belong to jobs. Lifecycle assertions start the small `example-probe`
+pipeline as separate runs through the CLI. Use `--api-profile NAME` to exercise
+a configured controller instead of the local controller, and `--cli PATH` to
+select its matching CLI. No profile means local.
+
+```bash
+sparkwing run example -- --fail-once
+sparkwing run example -- --secret-name EXAMPLE_GATE_SECRET
+sparkwing run example -- --smoke-profile staging --smoke-checkout /path/to/sparkwing-ci-smoke
+```
+
+`--fail-once` asks the probe to fail on its first attempt. The failed-only retry
+must reuse its successful predecessors, read their outputs and finish green.
+`--secret-name` selects the declared optional secret `EXAMPLE_GATE_SECRET`.
+The secret job skips with a reason when no name or stored value is configured.
+OIDC skips only when the run has no issuer. Otherwise it mints a token and
+asserts its audience, run, pipeline, issuer, subject and validity window.
+Docker skips with a reason unless the runner advertises Docker or has a usable
+daemon. `--child-branch` selects another same-repository branch tip when source
+provenance is available.
+
+The final `reference-pipeline` job submits `reference` from the supplied
+`sparkwing-ci-smoke` checkout through `pipeline trigger`, waits for the separate
+run and requires successful `hello` and `docker-test` jobs. Set
+`--smoke-pipeline` if that repository uses another pipeline name. It skips when
+`--smoke-profile` is absent. Cross-repository child runs are refused, so this
+job uses an independent trigger rather than `RunAndAwait`.
+
+A TypeScript twin lives in `examples/staging-typescript` as a separate project
+because SDK selection applies to the whole pipeline directory. Its native
+feature assertions can be tested through the SDK protocol. Running the twin
+through the candidate CLI is blocked: its local-file SDK dependency resolves
+the development version `0.0.0`, which requires a verified `v0.0.0` engine. The
+Go local replacement path can use the candidate CLI, while TypeScript has no
+corresponding path. The twin's README names the stamped SDK and matching engine
+prerequisites. The Go example remains the executable candidate staging gate.

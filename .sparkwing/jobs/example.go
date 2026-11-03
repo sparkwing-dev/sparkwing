@@ -13,16 +13,19 @@ import (
 type Example struct{ sparkwing.Base }
 
 func (Example) ShortHelp() string {
-	return "Reference pipeline: a runnable tour of every major SDK feature"
+	return "Staging integration gate and runnable SDK tour"
 }
 
 func (Example) Help() string {
-	return "A self-contained pipeline that exercises the SDK end-to-end: Plan-layer Jobs and JobFanOut (JobGroup), Plan.Approval gate (auto-approves 20s after it opens if nobody answers), multi-step Work with GroupSteps (StepGroup), typed Ref[T] outputs via Produces[T] and StepGet[T], the full modifier set (Retry, Timeout, BeforeRun, AfterRun, OnFailure), Plan-layer and Work-layer SkipIf, and Annotate for persistent node-level summaries. It also drives cross-pipeline RunAndAwait against the weather-report pipeline in this same module, an Optional() node whose Work collects every sibling failure (FailurePolicy(CollectAll)), and Summary markdown step summaries. Every step sleeps briefly and emits an Annotate so the dashboard surfaces a readable narrative without digging into logs."
+	return "Runs the SDK tour alongside named integration assertions for matrix, job and step outputs, generated jobs, dynamic child pipelines, scoped secrets, OIDC, dependency cache restore, memo reuse, artifacts, cancellation and API logs/history. The optional error canary remains a dashboard demonstration. Secrets and OIDC skip with a reason when unavailable. Docker runs on capable runners. Pass --fail-once to exercise failed-only retry and predecessor outputs. Pass --smoke-profile plus --smoke-checkout to trigger and await sparkwing-ci-smoke as a separate run. Memoization belongs to jobs, so the memoized job contains one step. The default local run needs no Cloud or Docker."
 }
 
 func (Example) Examples() []sparkwing.Example {
 	return []sparkwing.Example{
-		{Comment: "Run the full tour", Command: "sparkwing run example"},
+		{Comment: "Run the local integration gate and SDK tour", Command: "sparkwing run example"},
+		{Comment: "Assert failed-only retry and predecessor outputs", Command: "sparkwing run example -- --fail-once"},
+		{Comment: "Include the second repository on staging", Command: "sparkwing run example -- --smoke-profile staging --smoke-checkout /path/to/sparkwing-ci-smoke"},
+		{Comment: "Read the optional declared secret", Command: "sparkwing run example -- --secret-name EXAMPLE_GATE_SECRET"},
 		{Comment: "Render the DAG without running", Command: "sparkwing pipeline plan --pipeline example"},
 		{Comment: "Skip the rollout step via Work-layer SkipIf", Command: "DRY_RUN=1 sparkwing run example"},
 	}
@@ -34,7 +37,8 @@ type BuildOut struct {
 	SizeMB int    `json:"size_mb"`
 }
 
-func (p *Example) Plan(_ context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, _ sparkwing.RunContext) error {
+func (p *Example) Plan(_ context.Context, plan *sparkwing.Plan, in ExampleInputs, rc sparkwing.RunContext) error {
+	features := exampleIntegration(plan, in, rc)
 	configure := sparkwing.Job(plan, "configure", configureFn).
 		Inline().
 		BeforeRun(func(ctx context.Context) error {
@@ -96,7 +100,7 @@ func (p *Example) Plan(_ context.Context, plan *sparkwing.Plan, _ sparkwing.NoIn
 	metricsCheck := sparkwing.Job(plan, "metrics-check", metricsCheckFn).Needs(deploy)
 	verify := sparkwing.GroupJobs(plan, "post-deploy-verify", smokeTest, metricsCheck)
 
-	sparkwing.Job(plan, "notify", notifyFn).
+	notify := sparkwing.Job(plan, "notify", notifyFn).
 		Needs(verify).
 		Inline().
 		SkipIf(func(ctx context.Context) bool {
@@ -106,6 +110,10 @@ func (p *Example) Plan(_ context.Context, plan *sparkwing.Plan, _ sparkwing.NoIn
 			sparkwing.Annotate(ctx, sparkwing.Annotation{Message: "notify dispatched"})
 		})
 
+	reference := sparkwing.Job(plan, "reference-pipeline", exampleReference(in)).Needs(features, notify).Inline()
+	if in.SmokeProfile == "" {
+		reference.SkipIf(exampleSkip("no --smoke-profile configured for the separate sparkwing-ci-smoke run"))
+	}
 	return nil
 }
 
@@ -139,6 +147,9 @@ func checkFn(name string) func(ctx context.Context) error {
 func publishFn(target string, buildRef sparkwing.Ref[BuildOut]) func(ctx context.Context) error {
 	return func(ctx context.Context) error {
 		out := buildRef.Get(ctx)
+		if out.Tag != "example:sha-abc1234" || out.SizeMB != 14 || out.Digest == "" {
+			return fmt.Errorf("publish-%s: invalid build output: %+v", target, out)
+		}
 		lines := []string{
 			fmt.Sprintf("authenticating to registry for %s", target),
 			fmt.Sprintf("inspecting local image %s", out.Tag),
@@ -227,6 +238,9 @@ func weatherCheckFn(ctx context.Context) error {
 	)
 	if err != nil {
 		return fmt.Errorf("weather-report: %w", err)
+	}
+	if out.Forecast == "" || out.TempF < 55 || out.TempF >= 90 || out.At.IsZero() {
+		return fmt.Errorf("weather-check: invalid output: %+v", out)
 	}
 	sparkwing.Info(ctx, "weather-report returned: %s, %d°F", out.Forecast, out.TempF)
 	sparkwing.Annotate(ctx, sparkwing.Annotation{Message: fmt.Sprintf("weather: %s · %d°F (from weather-report pipeline)", out.Forecast, out.TempF)})
@@ -524,5 +538,5 @@ func nap(ctx context.Context, ms int) error {
 }
 
 func init() {
-	sparkwing.Register("Example", func() sparkwing.Pipeline[sparkwing.NoInputs] { return &Example{} })
+	sparkwing.Register("Example", func() sparkwing.Pipeline[ExampleInputs] { return &Example{} })
 }
