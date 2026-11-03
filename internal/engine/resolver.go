@@ -14,8 +14,6 @@ import (
 	"runtime"
 	"time"
 
-	"golang.org/x/mod/semver"
-
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/engineid"
 	"github.com/sparkwing-dev/sparkwing/internal/releaseasset"
@@ -130,7 +128,7 @@ func (r *Resolver) resolve(ctx context.Context, identity engineid.Identity, targ
 	}
 	release, err := r.fetchRelease(ctx, identity.Version, target)
 	if err != nil {
-		return Resolved{}, predatesEngine(identity.Version, err)
+		return Resolved{}, err
 	}
 	if identity.ManifestDigest != "" && digest(release.bundle.Manifest) != identity.ManifestDigest {
 		return Resolved{}, integrity(fmt.Errorf("release manifest differs from accepted engine identity"))
@@ -138,23 +136,6 @@ func (r *Resolver) resolve(ctx context.Context, identity engineid.Identity, targ
 	resolved, err := r.storeVerified(ctx, identity.Pin, release)
 	resolved.Notices = notices
 	return resolved, err
-}
-
-// safety: earlier releases do not speak the node protocol this CLI hosts.
-const firstEngineRelease = "v0.68.0"
-
-// safety: only the diagnosis changes; an older pin's refused release stays unexecuted.
-func predatesEngine(version string, err error) error {
-	var failure *apierr.Error
-	if semver.Compare(version, firstEngineRelease+"-0") >= 0 || !errors.As(err, &failure) || failure.Code != apierr.IntegrityFailure {
-		return err
-	}
-	return &apierr.Error{
-		Code:    apierr.VersionUnsupported,
-		Message: fmt.Sprintf("SDK pin %s is older than %s, the oldest release this CLI can run as a pipeline engine; its release was not executed", version, firstEngineRelease),
-		Hint:    "Run `" + UpgradeCommand + "` in this repository to move the pin to the latest release, then fix the pipeline code it reports; see https://sparkwing.dev/docs/migration-guide/",
-		Details: map[string]any{"version": version, "minimum": firstEngineRelease, "cause": failure.Message},
-	}
 }
 
 func (r *Resolver) findCached(ctx context.Context, identity engineid.Identity, target releaseasset.Target) (Resolved, bool, error) {

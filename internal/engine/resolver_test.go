@@ -440,31 +440,46 @@ func TestUnpublishedEngineNamesThePinAsTheFix(t *testing.T) {
 	}
 }
 
-func TestPreEnginePinRefusalNamesTheUpgrade(t *testing.T) {
-	refused := integrity(errors.New("release manifest has duplicate, unknown or malformed entries"))
-	err := predatesEngine("v0.66.4", refused)
-	var failure *apierr.Error
-	if !errors.As(err, &failure) || failure.Code != apierr.VersionUnsupported {
-		t.Fatalf("old pin error = %v", err)
+func TestPreEnginePinNamesTheUpgradeButTamperingStaysAnIntegrityFailure(t *testing.T) {
+	version := "v0.10.2"
+	target := releaseasset.Target{Binary: releaseasset.Sparkwing, GOOS: runtime.GOOS, GOARCH: runtime.GOARCH}
+	_, other, err := ed25519.GenerateKey(nil)
+	if err != nil {
+		t.Fatal(err)
 	}
-	for _, want := range []string{"v0.66.4 is older than v0.68.0", "not executed"} {
-		if !strings.Contains(failure.Message, want) {
-			t.Fatalf("message %q lacks %q", failure.Message, want)
-		}
-	}
-	if !strings.Contains(failure.Hint, "`sparkwing upgrade`") {
-		t.Fatalf("hint %q does not name the upgrade", failure.Hint)
-	}
-	for _, kept := range []struct {
-		version string
-		err     error
+	for _, tc := range []struct {
+		name   string
+		mutate func(b *ReleaseBundle)
+		want   apierr.Code
 	}{
-		{"v0.68.0", refused},
-		{"v0.68.0-qa.3", refused},
-		{"v0.66.4", &apierr.Error{Code: apierr.NotFound, Message: "v0.66.4 is not published"}},
+		{"legacy layout", func(*ReleaseBundle) {}, apierr.VersionUnsupported},
+		{"manifest signature", func(b *ReleaseBundle) { b.ManifestSignature = ed25519.Sign(other, b.Manifest) }, apierr.IntegrityFailure},
+		{"asset signature", func(b *ReleaseBundle) { b.AssetSignature = ed25519.Sign(other, b.Asset) }, apierr.IntegrityFailure},
+		{"corrupted asset", func(b *ReleaseBundle) { b.Asset = append(bytes.Clone(b.Asset), 'x') }, apierr.IntegrityFailure},
 	} {
-		if got := predatesEngine(kept.version, kept.err); !errors.Is(got, kept.err) || got.Error() != kept.err.Error() {
-			t.Fatalf("%s: %v rewritten to %v", kept.version, kept.err, got)
-		}
+		t.Run(tc.name, func(t *testing.T) {
+			r, transport, key, _, _ := fixtureResolver(t)
+			bundle := signedBundle(t, key, version, target, []byte("pre-engine release"))
+			// hack: releases before v0.68 also published log and web executables.
+			bundle.Manifest = append(bundle.Manifest, []byte(digest(nil)+"  sparkwing-logs-linux-amd64\n")...)
+			bundle.ManifestSignature = ed25519.Sign(key, bundle.Manifest)
+			tc.mutate(&bundle)
+			transport.release(t, version, target, bundle)
+			resolved, err := r.Resolve(t.Context(), engineid.Pin{SDK: engineid.GoSDK, Version: version}, target)
+			var failure *apierr.Error
+			if !errors.As(err, &failure) || failure.Code != tc.want || resolved.Executable != "" {
+				t.Fatalf("resolve = %+v, %v; want %s", resolved, err, tc.want)
+			}
+			if upgrade := strings.Contains(failure.Hint, "`sparkwing upgrade`"); upgrade != (tc.want == apierr.VersionUnsupported) {
+				t.Fatalf("hint %q", failure.Hint)
+			}
+			name, _ := target.NameForVersion(version)
+			_ = filepath.WalkDir(r.config.CacheDirectory, func(path string, entry os.DirEntry, err error) error {
+				if err == nil && entry.Name() == name {
+					t.Fatalf("refused release left an executable at %s", path)
+				}
+				return nil
+			})
+		})
 	}
 }

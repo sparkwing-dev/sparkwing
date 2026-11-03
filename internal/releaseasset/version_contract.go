@@ -4,6 +4,7 @@ import (
 	"crypto/ed25519"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"slices"
 	"sort"
@@ -72,6 +73,10 @@ func (target Target) NameForVersion(version string) (string, error) {
 	return name, nil
 }
 
+// ErrUnexpectedLayout reports an authenticated release whose executables differ from the
+// asset set this build expects for its version.
+var ErrUnexpectedLayout = errors.New("release lists a different set of executables than this build expects")
+
 // VerifyForVersion authenticates the exact closed release set and selected executable.
 func VerifyForVersion(keys []ed25519.PublicKey, version string, manifest, manifestSignature []byte, target Target, asset, assetSignature []byte) (Verified, error) {
 	names, err := NamesForVersion(version)
@@ -82,29 +87,39 @@ func VerifyForVersion(keys []ed25519.PublicKey, version string, manifest, manife
 	if err != nil {
 		return Verified{}, err
 	}
+	var verified Verified
+	authenticated := false
+	for _, key := range keys {
+		if verified, err = verifyWithKey(key, manifest, manifestSignature, name, asset, assetSignature); err == nil {
+			authenticated = true
+			break
+		}
+	}
+	if !authenticated {
+		return Verified{}, fmt.Errorf("release signatures or digest do not match the trusted manifest")
+	}
 	expected := make(map[string]bool, len(names))
 	for _, name := range names {
 		expected[name] = true
 	}
+	seen := make(map[string]bool, len(names))
 	for _, line := range strings.Split(strings.TrimSpace(string(manifest)), "\n") {
 		fields := strings.Fields(line)
-		if len(fields) != 2 || !expected[fields[1]] {
-			return Verified{}, fmt.Errorf("release manifest has duplicate, unknown or malformed entries")
+		if len(fields) != 2 || seen[fields[1]] {
+			return Verified{}, fmt.Errorf("release manifest has duplicate or malformed entries")
 		}
 		digest, err := hex.DecodeString(fields[0])
 		if err != nil || len(digest) != sha256.Size {
 			return Verified{}, fmt.Errorf("release manifest has malformed digest")
 		}
+		seen[fields[1]] = true
+		if !expected[fields[1]] {
+			return Verified{}, fmt.Errorf("%w: unexpected %s", ErrUnexpectedLayout, fields[1])
+		}
 		delete(expected, fields[1])
 	}
 	if len(expected) != 0 {
-		return Verified{}, fmt.Errorf("release manifest is missing %d executables", len(expected))
+		return Verified{}, fmt.Errorf("%w: missing %d executables", ErrUnexpectedLayout, len(expected))
 	}
-	for _, key := range keys {
-		verified, err := verifyWithKey(key, manifest, manifestSignature, name, asset, assetSignature)
-		if err == nil {
-			return verified, nil
-		}
-	}
-	return Verified{}, fmt.Errorf("release signatures or digest do not match the trusted manifest")
+	return verified, nil
 }
