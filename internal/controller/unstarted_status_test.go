@@ -16,7 +16,7 @@ import (
 func TestRunDetailExplainsJobsThatNeverStarted(t *testing.T) {
 	for _, tc := range []struct{ reason, outcome, explanation string }{
 		{"queue_timeout", "failed", "waiting to start"},
-		{"upstream_failed", "cancelled", "b"},
+		{"upstream_failed", "cancelled", `"b" (failed); fix the dependency and retry the run`},
 	} {
 		t.Run(tc.reason, func(t *testing.T) {
 			server, _ := engineRuntimeStore(t)
@@ -57,7 +57,7 @@ func TestRunDetailNamesOnlyBlockingDependencies(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, job := range detail.Jobs {
-		if job.ID == "job" && job.StatusDetail != `upstream_failed: blocked by "hard" (failed)` {
+		if job.ID == "job" && job.StatusDetail != `upstream_failed: blocked by "hard" (failed); fix the dependency and retry the run` {
 			t.Fatalf("blocking dependency detail: %s", job.StatusDetail)
 		}
 	}
@@ -91,7 +91,7 @@ func TestRunDetailNamesFailedGeneratedDependency(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, job := range detail.Jobs {
-		if job.ID == "consumer" && job.StatusDetail != `upstream_failed: blocked by "failed-member" (failed)` {
+		if job.ID == "consumer" && job.StatusDetail != `upstream_failed: blocked by "failed-member" (failed); fix the dependency and retry the run` {
 			t.Fatalf("generated dependency detail: %s", job.StatusDetail)
 		}
 	}

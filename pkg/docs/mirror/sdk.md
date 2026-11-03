@@ -262,7 +262,8 @@ sources settle the barrier without running the generator.
 The host rejects retry declarations above its ceiling of 10. Backoff doubles
 between retries, up to five minutes. Application retries keep the claim and
 advance the attempt ordinal. Lease-loss recovery has a separate disruption
-allowance.
+allowance. When all application attempts fail, the final job error reports the
+attempt count and last error. Fix that error before retrying the run.
 
 `Timeout(duration)` bounds each attempt. `NoProgressTimeout(duration)` bounds
 inactivity during the body and verification. Observable log records reset the
@@ -497,7 +498,10 @@ shell script for a step. Use Exec to run a command such as `go test ./...`.
 Both return a command builder with `Dir`, `Env` and `EnvMap`.
 Terminators include `Run`, `Capture`, `String`, `Lines`, `JSON` and `MustBeEmpty`.
 Handle returned errors to fail the step. `ExecError` carries exit status and
-captured output. `WorkDir()` returns the repository working directory.
+captured output. When a context deadline kills a command, `Terminated` is
+`"timeout"` and the error names the deadline. `errors.Is(err, context.DeadlineExceeded)`
+recognizes the cause. Increase the context timeout or make the command faster.
+`WorkDir()` returns the repository working directory.
 It reads the process working directory. In author tests, use `t.Chdir(root)`
 to select a fixture repository. Go restores the directory after the test.
 
