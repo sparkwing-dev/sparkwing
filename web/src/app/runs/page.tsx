@@ -78,6 +78,7 @@ import DebugPausePanel from "@/components/DebugPausePanel";
 import Tooltip from "@/components/Tooltip";
 import RunRail from "@/components/RunRail";
 import ExecutionWaterfall from "@/components/ExecutionWaterfall";
+import StepProgressBar from "@/components/StepProgressBar";
 import ResourceChart from "@/components/ResourceChart";
 import LogBucketView from "@/components/LogBucketView";
 import LogCompletenessLine from "@/components/LogCompletenessLine";
@@ -2165,6 +2166,10 @@ function GroupHeader({
   );
 }
 
+// The node list's bar stretches to the row, so it lays out against a
+// nominal width close to a typical row.
+const NODE_ROW_BAR_UNITS = 200;
+
 function NodeRow({
   n,
   selected,
@@ -2197,7 +2202,7 @@ function NodeRow({
     <>
       <div
         data-node-id={n.id}
-        className={`${indent ? "pl-4 pr-2" : "px-2"} py-1.5 border-b border-[var(--border)] border-l-4 cursor-pointer hover:bg-[var(--surface-raised)] transition-colors ${
+        className={`relative ${indent ? "pl-4 pr-2" : "px-2"} py-1.5 border-b border-[var(--border)] border-l-4 cursor-pointer hover:bg-[var(--surface-raised)] transition-colors ${
           selected
             ? "bg-violet-500/15 border-l-violet-400"
             : "border-l-transparent"
@@ -2250,6 +2255,21 @@ function NodeRow({
             </span>
           )}
         </div>
+        {hasSteps && (
+          <svg
+            className={`absolute ${indent ? "left-4" : "left-2"} right-2 bottom-0.5 h-[2px] pointer-events-none`}
+            viewBox={`0 0 ${NODE_ROW_BAR_UNITS} 2`}
+            preserveAspectRatio="none"
+          >
+            <StepProgressBar
+              steps={steps}
+              x={0}
+              y={0}
+              width={NODE_ROW_BAR_UNITS}
+              height={2}
+            />
+          </svg>
+        )}
       </div>
       {hasSteps && expanded && (
         <div className="bg-[#0a0f17]">
@@ -5044,6 +5064,20 @@ function DAG({
                   >
                     {n.id}
                   </text>
+                  {(n.work?.steps?.length ?? 0) > 0 && (
+                    <StepProgressBar
+                      steps={n.work!.steps!}
+                      x={8}
+                      y={nodeH - 10}
+                      width={p.w - 16}
+                      height={3}
+                      onTip={(tip) => {
+                        cancelHover();
+                        setHover(null);
+                        setChipHover(tip);
+                      }}
+                    />
+                  )}
                 </g>
                 <text
                   x={p.w - 8}
