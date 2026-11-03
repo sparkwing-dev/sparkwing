@@ -81,10 +81,14 @@ func TestAffectedTestStepRunsTheChangeAndTheCriticalSetOnly(t *testing.T) {
 		"package quiet\n\nimport \"testing\"\n\nfunc TestUnrelated(t *testing.T) { t.Fatal(\"unaffected package ran\") }\n")
 	gitCommitAll(t, root, "base")
 	runTestGit(t, root, "update-ref", "refs/remotes/origin/main", "HEAD")
+	writeGoFile(t, filepath.Join(root, "changed", "changed.go"), "package changed\n")
+	writeGoFile(t, filepath.Join(root, "changed", "changed_test.go"),
+		"package changed\n\nimport \"testing\"\n\nfunc TestChanged(t *testing.T) { t.Fatal(\"changed package ran\") }\n")
+	gitCommitAll(t, root, "change")
 	ctx := context.Background()
 	err := runAffectedTest(ctx)
-	if err == nil || !strings.Contains(err.Error(), "critical ran") || strings.Contains(err.Error(), "unaffected package ran") {
-		t.Fatalf("err = %v, want the critical test run and the unrelated package left alone", err)
+	if err == nil || !strings.Contains(err.Error(), "changed package ran") || !strings.Contains(err.Error(), "critical ran") || strings.Contains(err.Error(), "unaffected package ran") {
+		t.Fatalf("err = %v, want the changed package and the critical test run and the unrelated package left alone", err)
 	}
 }
 
