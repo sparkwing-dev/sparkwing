@@ -128,7 +128,7 @@ func exampleIntegration(plan *sparkwing.Plan, in ExampleInputs, rc sparkwing.Run
 		}
 		return false
 	}))
-	cachePath := ".sparkwing/cache/example-deps"
+	cachePath := filepath.Join(".sparkwing/cache/example-deps", rc.RunID)
 	cache := sparkwing.Dir(cachePath, sparkwing.KeyFromFile(".sparkwing/go.sum"))
 	reset := sparkwing.Job(plan, "dependency-cache-reset", func(context.Context) error { return os.RemoveAll(sparkwing.Path(cachePath)) }).Inline()
 	seed := sparkwing.Job(plan, "dependency-cache-seed", func(context.Context) error {

@@ -111,7 +111,7 @@ test("OIDC assertion checks signed claims and rejects a signature from another k
 });
 
 test("cache reset removes stale local bytes before the cache-bearing seed", async () => {
-  const cache = `${root}/.sparkwing/cache/example-ts-deps`;
+  const cache = `${root}/.sparkwing/cache/example-ts-deps/ts-test`;
   await mkdir(cache, { recursive: true });
   await writeFile(`${cache}/stale`, "old-home-data");
   const { host, jobs } = await session("dependency-cache-reset");
@@ -142,7 +142,7 @@ test("artifact assertion rejects stale bytes and accepts this run's producer byt
 });
 
 test("cache assertion rejects a previous run's restored marker", async () => {
-  const cache = `${root}/.sparkwing/cache/example-ts-deps`;
+  const cache = `${root}/.sparkwing/cache/example-ts-deps/ts-test`;
   await mkdir(cache, { recursive: true });
   for (const marker of ["previous-run", "ts-test"]) {
     await writeFile(`${cache}/value`, marker);

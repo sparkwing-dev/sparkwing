@@ -10,7 +10,6 @@ import {
 import type { CleanupRegistration, Context, Job, Plan } from "../../../sdk/typescript/index.d.ts";
 
 const goCheckout = fileURLToPath(new URL("../../../", import.meta.url));
-const cacheDirectory = ".sparkwing/cache/example-ts-deps";
 const artifactFile = ".sparkwing/cache/example-ts-artifact.txt";
 const audience = "sparkwing-example-gate";
 
@@ -100,7 +99,8 @@ async function verifyOIDC(ctx: Context): Promise<void> {
   assert.ok(verify("RSA-SHA256", Buffer.from(`${header64}.${claims64}`), createPublicKey({ key, format: "jwk" }), Buffer.from(signature64, "base64url")), "OIDC signature must verify");
 }
 
-function nativeAssertions(plan: Plan): Job<unknown>[] {
+function nativeAssertions(plan: Plan, runID: string): Job<unknown>[] {
+  const cacheDirectory = `.sparkwing/cache/example-ts-deps/${runID}`;
   const checks: Job<unknown>[] = [];
   const matrix: Job<{ platform: string; version: number }>[] = [];
   for (const platform of ["linux", "darwin"]) {
@@ -274,8 +274,8 @@ definePipeline({
     { name: "smoke-pipeline", type: "string", default: "reference", description: "Reference pipeline containing hello and docker-test" },
   ],
   secrets: [{ name: "EXAMPLE_GATE_SECRET", optional: true }],
-  plan(plan) {
-    const checks = [...nativeAssertions(plan), ...lifecycleAssertions(plan)];
+  plan(plan, run) {
+    const checks = [...nativeAssertions(plan, run.id), ...lifecycleAssertions(plan)];
     const summary = plan.job("summary", async (ctx) => {
       await ctx.summary("TypeScript staging integration assertions passed. Unavailable secrets, OIDC and Docker report skip reasons in their jobs.");
     }).needs(...checks);

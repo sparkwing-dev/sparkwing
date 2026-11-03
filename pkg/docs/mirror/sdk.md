@@ -584,6 +584,8 @@ cleanup for detached probes until the gate observes a terminal state, including
 for the optional reference run. A failed or interrupted observation keeps that
 cleanup armed. Cache and artifact assertions require the current run's marker
 so older stored bytes cannot satisfy a failed save or delivery.
+The dependency-cache path includes the run ID to force a cold seed, because
+restored cache keys are not saved again.
 Child waits use their job's 90-second deadline, including queue time, instead
 of a shorter nested deadline. This leaves the job one budget for admission and
 execution.

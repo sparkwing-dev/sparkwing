@@ -36,6 +36,7 @@ native memo reuse, artifact delivery, Docker output, hooks, approval timeout,
 optional failures, skip conditions and collected failures. Independent jobs run
 in parallel. The cache probe clears stale local files before preparing its seed
 cache. Restored cache and artifact contents must match the current run ID.
+The dependency-cache path includes that ID so the seed saves under a cold key.
 
 `native-memo-reuse-assert` starts the TypeScript `memo-probe` child twice with a
 token unique to the parent run. The child's memoized job returns its producing
