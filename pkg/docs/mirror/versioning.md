@@ -119,6 +119,21 @@ workflow built. Self-hosted runners still claim only as a listed release that is
 neither revoked nor below the minimum. Any other unreleased stamp, such as
 `commit-<sha>` or `-dev`, is a development build.
 
+`sparkwing run build-images` stamps images with that form by default. It
+fetches tags from `origin` (unshallowing a shallow clone), runs
+`git describe --tags --long --abbrev=12` against the newest stable `vX.Y.Z`
+tag, and fails the build when the result is not `vX.Y.Z-N-gSHA`. `--tag`
+still overrides the stamp.
+
+Cloud components refuse to run customer work from a development build. A
+controller with `--deployment=cloud` refuses to start unless it is given
+`--allow-development-build`. A launcher refuses to start unless
+`SPARKWING_DEVELOPMENT_BUILD=1` is set. A Cloud job refuses to run, with no
+override, because admission keeps the launcher's environment out of job pods.
+Each refusal names the build's version and how to fix it. Local and team
+controllers, self-hosted runners and the local CLI keep the development-build
+behavior above.
+
 Warnings appear in run output and the dashboard before enforcement, with signed
 reason and fix guidance. A revoked or unsupported release fails loudly and names
 `sparkwing upgrade`. The CLI renders the same notice data as run status.

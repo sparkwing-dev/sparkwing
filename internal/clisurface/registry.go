@@ -805,6 +805,7 @@ func Registry() []Command {
 			{Name: "requests-per-minute-alarm", Argument: "N", Meaning: "Request rate, across every caller, past which this controller logs at warn and counts sparkwing_request_rate_alarm_total."},
 			{Name: "requests-per-token-minute", Argument: "N", Meaning: "Request budget on every route one token can reach, per rolling minute, keyed on the token prefix."},
 			{Name: "require-auth", Meaning: "Refuse to start until a live deployment administrator capability exists; private routes always require credentials."},
+			{Name: "allow-development-build", Meaning: "Let a cloud deployment start from a development build, which skips signed version policy for every run's engine. Only for a development cluster; deploy a release or a main build stamped vX.Y.Z-N-gSHA instead."},
 			{Name: "runners-per-token", Argument: "N", Meaning: "Most self-named runners one caller may hold at once on the claim routes, where the runner name is the caller's own word and each name gets its own request budget."},
 			{Name: "shed-queue-depth", Argument: "N", Meaning: "Pending-trigger depth of one team past which that team's new webhook deliveries and API submissions are shed with 503 and a Retry-After rather than queued."},
 			{Name: "signup-gate", Argument: "VALUE", Meaning: "Open or waitlist."},

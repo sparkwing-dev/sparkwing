@@ -63,6 +63,11 @@ func productionRuntime(version string) clusterRuntime {
 		}},
 		Bootstrap: BootstrapRuntime{
 			Host: func(ctx context.Context, options BootstrapOptions) (launcher.BootstrapHost, func() error, error) {
+				// safety: admission lets a Cloud job carry only the launcher's environment, so a job has no development
+				// override and a development job image always refuses customer work.
+				if err := engine.RequirePolicyBuild("Cloud job", version, "", false); err != nil {
+					return launcher.BootstrapHost{}, nil, err
+				}
 				if err := waitForDocker(ctx, os.Getenv("DOCKER_HOST"), dockerStartup); err != nil {
 					return launcher.BootstrapHost{}, nil, err
 				}

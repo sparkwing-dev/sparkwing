@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"strings"
 	"testing"
 	"time"
 
@@ -74,4 +75,24 @@ func TestMainBuildEnforcesSignedEnginePolicy(t *testing.T) {
 	requireCode(t, err, apierr.VersionUnsupported)
 	_, err = Evaluate(index.Index, config.BuildVersion, now)
 	requireCode(t, err, apierr.VersionUnsupported)
+}
+
+func TestRequirePolicyBuildRefusesDevelopmentUnlessAllowed(t *testing.T) {
+	for _, version := range []string{"", "v0.68.6", "v0.68.6-3-gabc1234"} {
+		if err := RequirePolicyBuild("launcher", version, "X=1", false); err != nil {
+			t.Fatalf("policy build %q refused: %v", version, err)
+		}
+	}
+	for _, version := range []string{"commit-0123456", "v0.68.6-dev+abc1234", "(devel)"} {
+		err := RequirePolicyBuild("launcher", version, "X=1", false)
+		if err == nil || !strings.Contains(err.Error(), version) || !strings.Contains(err.Error(), "vX.Y.Z-N-gSHA") || !strings.Contains(err.Error(), "set X=1") {
+			t.Fatalf("development build %q: %v", version, err)
+		}
+		if err := RequirePolicyBuild("launcher", version, "X=1", true); err != nil {
+			t.Fatalf("explicit override refused %q: %v", version, err)
+		}
+	}
+	if err := RequirePolicyBuild("Cloud job", "commit-0123456", "", false); err == nil || strings.Contains(err.Error(), "development cluster set") {
+		t.Fatalf("job without an override: %v", err)
+	}
 }

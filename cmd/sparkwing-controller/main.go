@@ -275,6 +275,9 @@ func run(args []string) error {
 			"cookies then travel readable to every hop on the path")
 	requireAuth := fs.Bool("require-auth", false,
 		"refuse to start until a live deployment administrator capability exists; private routes always require credentials")
+	allowDevelopmentBuild := fs.Bool("allow-development-build", false,
+		"let a cloud deployment start from a development build, which skips signed version policy for every run's engine. "+
+			"Only for a development cluster; deploy a release or a main build stamped vX.Y.Z-N-gSHA instead")
 	fs.Usage = func() {
 		fmt.Fprintln(fs.Output(), "usage: sparkwing-controller [flags]\n       sparkwing-controller admin freeze|unfreeze|grant|session [flags]\n       sparkwing-controller restore prepare|acknowledge [flags]\n\nController flags:")
 		fs.PrintDefaults()
@@ -306,6 +309,11 @@ func run(args []string) error {
 	}, creds, time.Now())
 	if err != nil {
 		return err
+	}
+	if cfg.Hosted() {
+		if err := engine.RequirePolicyBuild("controller", readProvenance().Version, "--allow-development-build", *allowDevelopmentBuild); err != nil {
+			return err
+		}
 	}
 	paymentVerifier, err := readPaymentAuthenticator(*credentialsDir, string(cfg.PaymentMode()))
 	if err != nil {
