@@ -2,10 +2,16 @@ package jobs
 
 import (
 	"crypto/sha256"
+	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"time"
+
+	"go.yaml.in/yaml/v3"
+	"golang.org/x/mod/semver"
 )
 
 // safety: every external system the deploy touches is named here, so a test
@@ -28,8 +34,52 @@ type deployConfig struct {
 	Production     deployEnv
 	SmokeTeams     []string
 	ArgoTimeout    time.Duration
+	RolloutTimeout time.Duration
 	RunTimeout     time.Duration
+	SmokeTimeout   time.Duration
 	PollInterval   time.Duration
+	ToolDir        string
+}
+
+func (c deployConfig) toolDirInUse() bool {
+	info, err := os.Stat(c.ToolDir)
+	return c.ToolDir != "" && err == nil && info.IsDir()
+}
+
+// safety: until the Sparkwing apps move (deploy-pipeline-iam.md, GitOps
+// scope), deploys write kikd-gitops; the move flips one name here or in the
+// deploy entry's args, and the deploy key parameter moves with it.
+var deployGitopsLayouts = map[string]struct{ url, keyParam string }{
+	"kikd-gitops":      {"git@github.com:koreyGambill/kikd-gitops.git", "/kikd-prod/sparkwing/deploy/gitops-deploy-key"},
+	"sparkwing-gitops": {"git@github.com:koreyGambill/sparkwing-gitops.git", "/kikd-prod/sparkwing/deploy/sparkwing-gitops-deploy-key"},
+}
+
+const deployDefaultGitopsLayout = "kikd-gitops"
+
+func (c *deployConfig) useGitopsLayout(name string) error {
+	layout, ok := deployGitopsLayouts[name]
+	if !ok {
+		return fmt.Errorf("unknown GitOps layout %q; use kikd-gitops or sparkwing-gitops", name)
+	}
+	c.GitopsURL, c.Params.GitopsKey = layout.url, layout.keyParam
+	return nil
+}
+
+// safety: each phase waits for Argo and then the rollout; rollback repeats
+// both phases, so the production budget holds a deploy, a smoke and a full
+// rollback, and a job timeout cannot cut a rollback short.
+func (c deployConfig) phaseWait() time.Duration { return c.ArgoTimeout + c.RolloutTimeout }
+
+func (c deployConfig) rollbackBudget() time.Duration { return 2*c.phaseWait() + 5*time.Minute }
+
+func (c deployConfig) buildBudget() time.Duration { return 45 * time.Minute }
+
+func (c deployConfig) stagingBudget() time.Duration { return 2*c.phaseWait() + 15*time.Minute }
+
+func (c deployConfig) gateBudget() time.Duration { return 2*c.RunTimeout + 15*time.Minute }
+
+func (c deployConfig) productionBudget() time.Duration {
+	return 2*c.phaseWait() + c.SmokeTimeout + c.rollbackBudget() + 15*time.Minute
 }
 
 type deployParams struct {
@@ -93,10 +143,13 @@ func defaultDeployConfig() deployConfig {
 			LauncherDeployment:   "sparkwing-sparkwing-runner-bundle-launcher",
 			ControllerURL:        "https://api.sparkwing.dev",
 		},
-		SmokeTeams:   []string{"qa-team", "qa-team-b"},
-		ArgoTimeout:  10 * time.Minute,
-		RunTimeout:   45 * time.Minute,
-		PollInterval: 5 * time.Second,
+		SmokeTeams:     []string{"qa-team", "qa-team-b"},
+		ArgoTimeout:    10 * time.Minute,
+		RolloutTimeout: 5 * time.Minute,
+		RunTimeout:     45 * time.Minute,
+		SmokeTimeout:   20 * time.Minute,
+		PollInterval:   5 * time.Second,
+		ToolDir:        "/opt/sparkwing-deploy/bin",
 	}
 }
 
@@ -145,6 +198,7 @@ type envDeployment struct {
 type stagingGateRecord struct {
 	Images       deployImages `json:"images"`
 	RunID        string       `json:"run_id"`
+	GatedAt      string       `json:"gated_at"`
 	ExampleRun   string       `json:"example_run"`
 	ReferenceRun string       `json:"reference_run"`
 }
@@ -152,7 +206,45 @@ type stagingGateRecord struct {
 const (
 	deployStoreSchema = "internal/store/schema.sql"
 	deployChart       = "charts/sparkwing-full"
+	deployDirPrefix   = "sparkwing-deploy-"
 )
+
+func sweepStaleDeployDirs(root string, now time.Time, maxAge time.Duration) error {
+	entries, err := os.ReadDir(root)
+	if err != nil {
+		return err
+	}
+	var errs []error
+	for _, e := range entries {
+		if !e.IsDir() || !strings.HasPrefix(e.Name(), deployDirPrefix) {
+			continue
+		}
+		info, err := e.Info()
+		if err != nil || now.Sub(info.ModTime()) <= maxAge {
+			continue
+		}
+		errs = append(errs, os.RemoveAll(filepath.Join(root, e.Name())))
+	}
+	return errors.Join(errs...)
+}
+
+var fullCommitRE = regexp.MustCompile(`^[0-9a-f]{40}([0-9a-f]{24})?$`)
+
+// safety: GitOps values and image labels are data someone else wrote; a value
+// reaches git only as a full commit id or a semver tag, never as an option.
+func gitRevision(rev string) (string, error) {
+	if !fullCommitRE.MatchString(rev) {
+		return "", fmt.Errorf("%q is not a full commit id", rev)
+	}
+	return rev, nil
+}
+
+func gitTag(tag string) (string, error) {
+	if !semver.IsValid(tag) || strings.HasPrefix(tag, "-") {
+		return "", fmt.Errorf("%q is not a semver tag", tag)
+	}
+	return tag, nil
+}
 
 // safety: the store records sha256 of the embedded schema.sql with CRLF folded
 // to LF, and refuses to open under a binary whose digest differs.
@@ -302,9 +394,10 @@ func dirtyLogLines(logs string) []string {
 	return out
 }
 
-// safety: an untagged commit's version sorts below the next patch release, and
-// the image tags it names are immutable, so one commit maps to one version.
-func deployVersion(newest, newestCommit, commit string) (string, error) {
+// safety: an untagged commit's version sorts below the next patch release and,
+// through its commit time, after every earlier commit's; the image tags it
+// names are immutable, so one commit maps to one version.
+func deployVersion(newest, newestCommit, commit string, committed int64) (string, error) {
 	if newest != "" && newestCommit == commit {
 		return newest, nil
 	}
@@ -318,5 +411,65 @@ func deployVersion(newest, newestCommit, commit string) (string, error) {
 	if len(commit) < 12 {
 		return "", fmt.Errorf("commit %q is not a full hash", commit)
 	}
-	return next + "-main.g" + commit[:12], nil
+	return fmt.Sprintf("%s-main.%d.g%s", next, committed, commit[:12]), nil
+}
+
+type renderedDoc struct {
+	text string
+	key  string
+}
+
+func splitRendered(rendered string) ([]renderedDoc, error) {
+	var docs []renderedDoc
+	for _, part := range regexp.MustCompile(`(?m)^---[ \t]*$`).Split(rendered, -1) {
+		var meta struct {
+			Kind     string
+			Metadata struct{ Name, Namespace string }
+		}
+		if err := yaml.Unmarshal([]byte(part), &meta); err != nil {
+			return nil, err
+		}
+		key := ""
+		if meta.Kind != "" {
+			key = meta.Kind + "/" + meta.Metadata.Namespace + "/" + meta.Metadata.Name
+		}
+		docs = append(docs, renderedDoc{text: part, key: key})
+	}
+	return docs, nil
+}
+
+// safety: the controller ships alone, so its commit keeps every other object
+// exactly as rendered before and takes only the controller Deployment from
+// the new render; chart changes to anything else land with the launcher.
+func spliceControllerDeployment(previous, next, namespace, deployment string) (string, error) {
+	want := "Deployment/" + namespace + "/" + deployment
+	oldDocs, err := splitRendered(previous)
+	if err != nil {
+		return "", fmt.Errorf("parse the current render: %w", err)
+	}
+	newDocs, err := splitRendered(next)
+	if err != nil {
+		return "", fmt.Errorf("parse the new render: %w", err)
+	}
+	var replacement *renderedDoc
+	for i := range newDocs {
+		if newDocs[i].key == want {
+			replacement = &newDocs[i]
+		}
+	}
+	if replacement == nil {
+		return "", fmt.Errorf("the new render has no %s", want)
+	}
+	found := false
+	parts := make([]string, len(oldDocs))
+	for i, doc := range oldDocs {
+		parts[i] = doc.text
+		if doc.key == want {
+			parts[i], found = replacement.text, true
+		}
+	}
+	if !found {
+		return "", fmt.Errorf("the current render has no %s", want)
+	}
+	return strings.Join(parts, "---"), nil
 }

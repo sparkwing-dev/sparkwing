@@ -9,8 +9,11 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"slices"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -19,6 +22,7 @@ import (
 	"github.com/google/go-containerregistry/pkg/name"
 	"github.com/google/go-containerregistry/pkg/v1/remote"
 	"github.com/google/go-containerregistry/pkg/v1/remote/transport"
+	"golang.org/x/mod/semver"
 
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
@@ -54,6 +58,7 @@ type deployTools struct {
 	oidc     func(context.Context, string) (string, error)
 	wait     func(context.Context, time.Duration) error
 	now      func() time.Time
+	lookPath func(string) (string, error)
 	say      func(context.Context, string)
 	mask     func(context.Context, string) error
 }
@@ -73,9 +78,10 @@ func realDeployTools() deployTools {
 				return nil
 			}
 		},
-		now:  time.Now,
-		say:  func(ctx context.Context, msg string) { sparkwing.Info(ctx, "%s", msg) },
-		mask: sparkwing.Mask,
+		now:      time.Now,
+		lookPath: exec.LookPath,
+		say:      func(ctx context.Context, msg string) { sparkwing.Info(ctx, "%s", msg) },
+		mask:     sparkwing.Mask,
 	}
 }
 
@@ -115,14 +121,16 @@ func shellJoin(args []string) string {
 // safety: every external effect goes through act, so --dry-run prints the
 // same sequence a real run performs and performs none of it.
 type deployer struct {
-	tools   deployTools
-	cfg     deployConfig
-	dry     bool
-	runID   string
-	repoDir string
-	tmp     string
-	aws     map[string]string
-	ecrPass string
+	tools     deployTools
+	cfg       deployConfig
+	dry       bool
+	runID     string
+	repoDir   string
+	tmp       string
+	aws       map[string]string
+	resolved  map[string]string
+	awsExpiry time.Time
+	ecrPass   string
 }
 
 func (d *deployer) act(ctx context.Context, desc string, fn func() error) error {
@@ -138,7 +146,46 @@ func (d *deployer) act(ctx context.Context, desc string, fn func() error) error 
 }
 
 func (d *deployer) cmd(ctx context.Context, c deployCommand) (string, error) {
+	if !filepath.IsAbs(c.Name) {
+		path, err := d.tool(c.Name)
+		if err != nil {
+			return "", err
+		}
+		c.Name = path
+	}
+	if d.cfg.toolDirInUse() {
+		env := make(map[string]string, len(c.Env)+1)
+		for k, v := range c.Env {
+			env[k] = v
+		}
+		env["PATH"] = d.cfg.ToolDir + ":/usr/bin:/bin"
+		c.Env = env
+	}
 	return d.tools.run(ctx, c)
+}
+
+// safety: another job on the same runner can plant a binary early on PATH, so
+// tools resolve once from the fixed toolchain directory when it exists, and
+// every child, kubectl's aws credential plugin included, gets only that PATH.
+func (d *deployer) tool(name string) (string, error) {
+	if path, ok := d.resolved[name]; ok {
+		return path, nil
+	}
+	var path string
+	var err error
+	if d.cfg.toolDirInUse() {
+		path = filepath.Join(d.cfg.ToolDir, name)
+		if _, err = os.Stat(path); err != nil {
+			return "", fmt.Errorf("%s is not in the deploy toolchain %s: %w", name, d.cfg.ToolDir, err)
+		}
+	} else if path, err = d.tools.lookPath(name); err != nil {
+		return "", err
+	}
+	if d.resolved == nil {
+		d.resolved = map[string]string{}
+	}
+	d.resolved[name] = path
+	return path, nil
 }
 
 func (d *deployer) secretFile(name, value string) (string, error) {
@@ -186,6 +233,7 @@ func (d *deployer) assumeRole(ctx context.Context) error {
 				AccessKeyID     string `json:"AccessKeyId"`
 				SecretAccessKey string
 				SessionToken    string
+				Expiration      time.Time
 			}
 		}
 		if err := json.Unmarshal([]byte(out), &resp); err != nil || resp.Credentials.SessionToken == "" {
@@ -199,9 +247,24 @@ func (d *deployer) assumeRole(ctx context.Context) error {
 		base["AWS_ACCESS_KEY_ID"] = resp.Credentials.AccessKeyID
 		base["AWS_SECRET_ACCESS_KEY"] = resp.Credentials.SecretAccessKey
 		base["AWS_SESSION_TOKEN"] = resp.Credentials.SessionToken
-		d.aws = base
+		if kube := d.aws["KUBECONFIG"]; kube != "" {
+			base["KUBECONFIG"] = kube
+		}
+		d.aws, d.awsExpiry = base, resp.Credentials.Expiration
 		return nil
 	})
+}
+
+// safety: the STS session lasts an hour and a deploy, smoke and rollback can
+// outlast it, so later steps renew it; when the run can no longer mint a
+// token, a session with ten minutes left is still used rather than giving up.
+func (d *deployer) refreshRole(ctx context.Context) error {
+	err := d.assumeRole(ctx)
+	if err != nil && !d.awsExpiry.IsZero() && d.awsExpiry.Sub(d.tools.now()) > 10*time.Minute {
+		d.tools.say(ctx, "keeping the current role session until "+d.awsExpiry.UTC().Format(time.RFC3339)+": "+err.Error())
+		return nil
+	}
+	return err
 }
 
 func (d *deployer) env(extra ...string) map[string]string {
@@ -264,6 +327,10 @@ const githubKnownHosts = "github.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnk
 // safety: git reads no user or system config, so a deploy commit carries the
 // configured bot identity and no host's signing or hook settings.
 func (d *deployer) gitEnv(ctx context.Context, keyParam, keyName string) (map[string]string, error) {
+	ssh, err := d.tool("ssh")
+	if err != nil {
+		return nil, err
+	}
 	key, err := d.param(ctx, keyParam)
 	if err != nil {
 		return nil, err
@@ -281,7 +348,7 @@ func (d *deployer) gitEnv(ctx context.Context, keyParam, keyName string) (map[st
 		return nil, err
 	}
 	return map[string]string{
-		"GIT_SSH_COMMAND":     "ssh -i " + keyFile + " -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile=" + hosts,
+		"GIT_SSH_COMMAND":     ssh + " -i " + keyFile + " -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile=" + hosts,
 		"GIT_TERMINAL_PROMPT": "0",
 		"GIT_CONFIG_GLOBAL":   global,
 		"GIT_CONFIG_NOSYSTEM": "1",
@@ -320,12 +387,20 @@ func (d *deployer) buildCandidate(ctx context.Context, version string) (deployIm
 			}
 			newestCommit := ""
 			if newest != "" {
-				c, err := d.sourceGit(ctx, "rev-list", "-n", "1", newest)
+				c, err := d.sourceGit(ctx, "rev-list", "-n", "1", "--end-of-options", newest)
 				if err == nil {
 					newestCommit = strings.TrimSpace(c)
 				}
 			}
-			if out.Version, err = deployVersion(newest, newestCommit, out.Commit); err != nil {
+			stamp, err := d.sourceGit(ctx, "show", "-s", "--format=%ct", "HEAD")
+			if err != nil {
+				return err
+			}
+			committed, err := strconv.ParseInt(strings.TrimSpace(stamp), 10, 64)
+			if err != nil {
+				return err
+			}
+			if out.Version, err = deployVersion(newest, newestCommit, out.Commit, committed); err != nil {
 				return err
 			}
 		}
@@ -419,6 +494,23 @@ func (d *deployer) buildCandidate(ctx context.Context, version string) (deployIm
 	return out, err
 }
 
+// safety: a retry keeps its original run's outputs and OIDC identity, so a
+// deploy job proves its commit is still main's tip before changing anything;
+// a retried or late run of older code stops here.
+func (d *deployer) requireMainTip(ctx context.Context, commit string) error {
+	return d.act(ctx, "check that "+commit+" is still the tip of origin/main", func() error {
+		out, err := d.sourceGit(ctx, "ls-remote", "--exit-code", "origin", "refs/heads/main")
+		if err != nil {
+			return err
+		}
+		fields := strings.Fields(out)
+		if len(fields) == 0 || fields[0] != commit {
+			return fmt.Errorf("origin/main is at %q, not %s; only main's tip deploys, so a retried or superseded run stops", strings.Join(fields, " "), commit)
+		}
+		return nil
+	})
+}
+
 func writeSHA256Sums(dist string) error {
 	entries, err := os.ReadDir(dist)
 	if err != nil {
@@ -493,6 +585,7 @@ func (d *deployer) deployEnvironment(ctx context.Context, env deployEnv, images 
 	}); err != nil {
 		return rec, err
 	}
+	rec.WindowStart = d.tools.now().UTC().Format(time.RFC3339)
 	if !d.dry && rec.Previous.Controller.Digest == images.Controller.Digest && rec.Previous.Launcher.Digest == images.Runner.Digest {
 		d.tools.say(ctx, env.Name+" already runs controller "+images.Controller.Digest+" and runner "+images.Runner.Digest)
 		return rec, nil
@@ -502,7 +595,13 @@ func (d *deployer) deployEnvironment(ctx context.Context, env deployEnv, images 
 	}); err != nil {
 		return rec, err
 	}
-	rec.WindowStart = d.tools.now().UTC().Format(time.RFC3339)
+	if env.Name == d.cfg.Production.Name {
+		if err := d.act(ctx, "check that "+images.Version+" is not older than the production version", func() error {
+			return d.requireNotOlder(env, rec.Previous, images)
+		}); err != nil {
+			return rec, err
+		}
+	}
 	for _, phase := range deployPhases {
 		want := phase.want(images)
 		if !d.dry && phase.current(rec.Previous).Digest == want.Digest {
@@ -527,24 +626,31 @@ func (d *deployer) checkStoreBaseline(ctx context.Context, env deployEnv, deploy
 		return err
 	}
 	if rev == "" {
-		out, err := d.sourceGit(ctx, "rev-list", "-n", "1", deployed.Tag)
+		tag, terr := gitTag(deployed.Tag)
+		if terr != nil {
+			return d.firstDeployError(env, deployed, "it carries no org.opencontainers.image.revision label and its tag is not a release tag")
+		}
+		out, err := d.sourceGit(ctx, "rev-list", "-n", "1", "--end-of-options", "refs/tags/"+tag)
 		if err != nil {
-			if _, ferr := d.sourceGit(ctx, "fetch", "--quiet", "origin", "tag", deployed.Tag); ferr != nil {
-				return fmt.Errorf("%s carries no revision label and %s is not a tag here, so its store baseline is unknown; run the full gate and deploy by hand", deployed.ref(), deployed.Tag)
+			if _, ferr := d.sourceGit(ctx, "fetch", "--quiet", "--end-of-options", "origin", "refs/tags/"+tag+":refs/tags/"+tag); ferr != nil {
+				return d.firstDeployError(env, deployed, "it carries no revision label and tag "+tag+" is not in origin")
 			}
-			if out, err = d.sourceGit(ctx, "rev-list", "-n", "1", deployed.Tag); err != nil {
+			if out, err = d.sourceGit(ctx, "rev-list", "-n", "1", "--end-of-options", "refs/tags/"+tag); err != nil {
 				return err
 			}
 		}
 		rev = strings.TrimSpace(out)
 	}
+	if rev, err = gitRevision(rev); err != nil {
+		return fmt.Errorf("%s names its source as %w", deployed.ref(), err)
+	}
 	spec := rev + ":" + deployStoreSchema
-	schema, err := d.sourceGit(ctx, "show", spec)
+	schema, err := d.sourceGit(ctx, "show", "--end-of-options", spec)
 	if err != nil {
-		if _, ferr := d.sourceGit(ctx, "fetch", "--quiet", "origin", rev); ferr != nil {
+		if _, ferr := d.sourceGit(ctx, "fetch", "--quiet", "--end-of-options", "origin", rev); ferr != nil {
 			return fmt.Errorf("read %s: %w", spec, err)
 		}
-		if schema, err = d.sourceGit(ctx, "show", spec); err != nil {
+		if schema, err = d.sourceGit(ctx, "show", "--end-of-options", spec); err != nil {
 			return err
 		}
 	}
@@ -552,6 +658,28 @@ func (d *deployer) checkStoreBaseline(ctx context.Context, env deployEnv, deploy
 		return fmt.Errorf("%s runs store baseline %s (from %s) and the candidate needs %s; a store change takes the full gate and the store runbook, not this pipeline", env.Name, got, rev, candidate)
 	}
 	return nil
+}
+
+func (d *deployer) requireNotOlder(env deployEnv, previous valuesPins, images deployImages) error {
+	for _, pin := range []imagePin{previous.Controller, previous.Launcher} {
+		if !semver.IsValid(pin.Tag) {
+			return d.firstDeployError(env, pin, "its tag is not a version this pipeline can order")
+		}
+		if semver.Compare(images.Version, pin.Tag) < 0 {
+			return fmt.Errorf("%s runs %s, newer than the candidate %s; this pipeline never moves an environment back, so roll back by reverting the GitOps commit", env.Name, pin.Tag, images.Version)
+		}
+	}
+	return nil
+}
+
+// safety: an image this pipeline cannot trace to a commit hides the store
+// baseline it runs, so the first deploy over it is done by hand once.
+func (d *deployer) firstDeployError(env deployEnv, deployed imagePin, why string) error {
+	return fmt.Errorf("%s runs %s, and %s. Deploy once by hand: confirm the live store with "+
+		"`SELECT version, baseline_digest FROM sparkwing_schema_version` matches this candidate's baseline, pin controller.image.tag and "+
+		"sparkwing-runner-bundle.launcher.image.tag, jobImage.tag and jobImage.digest in %s/helm-values.yaml to images built by this "+
+		"pipeline (they carry the revision label), render with `helm template %s charts/sparkwing-full --namespace %s -f %s/helm-values.yaml > %s/rendered.yaml`, "+
+		"and push; later deploys then run here", env.Name, deployed.ref(), why, env.GitopsDir, env.HelmRelease, env.Namespace, env.GitopsDir, env.GitopsDir)
 }
 
 func (d *deployer) pinAndPush(ctx context.Context, env deployEnv, dir string, phase deployPhase, images deployImages, gitEnv map[string]string) (string, error) {
@@ -581,6 +709,15 @@ func (d *deployer) pinAndPush(ctx context.Context, env deployEnv, dir string, ph
 		}
 		if !strings.Contains(out, "@"+want.Digest) {
 			return fmt.Errorf("the render does not reference %s", want.Digest)
+		}
+		if phase.name == deployPhaseController {
+			previous, err := os.ReadFile(filepath.Join(dir, rendered))
+			if err != nil {
+				return err
+			}
+			if out, err = spliceControllerDeployment(string(previous), out, env.Namespace, env.ControllerDeployment); err != nil {
+				return err
+			}
 		}
 		return os.WriteFile(filepath.Join(dir, rendered), []byte(out), 0o644)
 	}); err != nil {
@@ -617,9 +754,6 @@ func shortCommit(c string) string {
 
 func (d *deployer) waitRollout(ctx context.Context, env deployEnv, commit string, phase deployPhase, digest string) error {
 	if err := d.act(ctx, "wait for Argo application "+env.ArgoApp+" to be Synced and Healthy at "+commit, func() error {
-		if _, err := d.kubectl(ctx, "-n", "argocd", "annotate", "application", env.ArgoApp, "argocd.argoproj.io/refresh=hard", "--overwrite"); err != nil {
-			return err
-		}
 		deadline := d.tools.now().Add(d.cfg.ArgoTimeout)
 		last := ""
 		for {
@@ -652,7 +786,7 @@ func (d *deployer) waitRollout(ctx context.Context, env deployEnv, commit string
 	}
 	deployment := phase.deployment(env)
 	return d.act(ctx, "wait for deployment "+env.Namespace+"/"+deployment+" to roll out "+digest, func() error {
-		if _, err := d.kubectl(ctx, "-n", env.Namespace, "rollout", "status", "deployment/"+deployment, "--timeout=5m"); err != nil {
+		if _, err := d.kubectl(ctx, "-n", env.Namespace, "rollout", "status", "deployment/"+deployment, "--timeout="+d.cfg.RolloutTimeout.String()); err != nil {
 			return err
 		}
 		image, err := d.kubectl(ctx, "-n", env.Namespace, "get", "deployment", deployment, "-o",
@@ -665,6 +799,18 @@ func (d *deployer) waitRollout(ctx context.Context, env deployEnv, commit string
 		}
 		return nil
 	})
+}
+
+// safety: a cancelled or timed-out job still owes production its rollback, so
+// it runs detached from the job's cancellation under its own deadline, with a
+// renewed role session because the deploy and smoke may have used up the hour.
+func (d *deployer) rollbackDetached(ctx context.Context, env deployEnv, rec envDeployment, gitEnv map[string]string) error {
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), d.cfg.rollbackBudget())
+	defer cancel()
+	if err := d.refreshRole(ctx); err != nil {
+		return err
+	}
+	return d.rollback(ctx, env, rec, gitEnv)
 }
 
 // safety: rollback reverts this run's GitOps commits newest first, so the
@@ -684,7 +830,11 @@ func (d *deployer) rollback(ctx context.Context, env deployEnv, rec envDeploymen
 			if _, err := d.git(ctx, gitEnv, dir, "checkout", "--quiet", "-B", d.cfg.GitopsBranch, "FETCH_HEAD"); err != nil {
 				return err
 			}
-			if _, err := d.git(ctx, gitEnv, dir, "revert", "--no-edit", change.Commit); err != nil {
+			commit, err := gitRevision(change.Commit)
+			if err != nil {
+				return err
+			}
+			if _, err := d.git(ctx, gitEnv, dir, "revert", "--no-edit", "--end-of-options", commit); err != nil {
 				return err
 			}
 			head, err := d.git(ctx, gitEnv, dir, "rev-parse", "HEAD")
@@ -776,9 +926,16 @@ func acceptedRunID(out string) string {
 	}
 }
 
+func (d *deployer) runTimeout(profile string) time.Duration {
+	if slices.Contains(d.cfg.SmokeTeams, profile) {
+		return d.cfg.SmokeTimeout
+	}
+	return d.cfg.RunTimeout
+}
+
 func (d *deployer) followRun(ctx context.Context, profile string, runID *string) error {
 	return d.act(ctx, "follow the run on "+profile+" until it succeeds", func() error {
-		_, err := d.sw(ctx, "", "runs", "status", "--run", *runID, "--profile", profile, "--follow", "--timeout", d.cfg.RunTimeout.String(), "-o", "json")
+		_, err := d.sw(ctx, "", "runs", "status", "--run", *runID, "--profile", profile, "--follow", "--timeout", d.runTimeout(profile).String(), "-o", "json")
 		if err != nil {
 			return fmt.Errorf("run %s did not succeed: %w", *runID, err)
 		}
@@ -787,7 +944,7 @@ func (d *deployer) followRun(ctx context.Context, profile string, runID *string)
 }
 
 func (d *deployer) stagingGate(ctx context.Context, images deployImages) (stagingGateRecord, error) {
-	rec := stagingGateRecord{Images: images, RunID: d.runID}
+	rec := stagingGateRecord{Images: images, RunID: d.runID, GatedAt: d.tools.now().UTC().Format(time.RFC3339)}
 	if err := d.assumeRole(ctx); err != nil {
 		return rec, err
 	}
@@ -855,6 +1012,9 @@ func (d *deployer) productionSmoke(ctx context.Context, images deployImages, sin
 		}
 		for {
 			observeErr := d.observeClaims(ctx, runs, claims)
+			if observeErr != nil && d.refreshRole(ctx) == nil {
+				observeErr = d.observeClaims(ctx, runs, claims)
+			}
 			select {
 			case <-done:
 				return errors.Join(append(errs, observeErr)...)
@@ -870,6 +1030,9 @@ func (d *deployer) productionSmoke(ctx context.Context, images deployImages, sin
 		}
 	})
 	if err != nil {
+		return err
+	}
+	if err := d.refreshRole(ctx); err != nil {
 		return err
 	}
 	return d.act(ctx, "check each smoke run used one NodeClaim and the "+env.Name+" logs since "+since+" hold no WARN or ERROR", func() error {

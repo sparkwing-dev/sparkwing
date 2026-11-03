@@ -15,6 +15,8 @@ import (
 	"testing"
 	"time"
 
+	"golang.org/x/mod/semver"
+
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 	"github.com/sparkwing-dev/sparkwing/sparkwing/sparkwingtest"
 )
@@ -118,13 +120,85 @@ func TestDeployVersion(t *testing.T) {
 	commit := strings.Repeat("ab", 20)
 	for _, tc := range []struct{ newest, newestCommit, want string }{
 		{"v0.68.3", commit, "v0.68.3"},
-		{"v0.68.3", "other", "v0.68.4-main.gabababababab"},
-		{"", "", "v0.0.1-main.gabababababab"},
+		{"v0.68.3", "other", "v0.68.4-main.1762000000.gabababababab"},
+		{"", "", "v0.0.1-main.1762000000.gabababababab"},
 	} {
-		got, err := deployVersion(tc.newest, tc.newestCommit, commit)
+		got, err := deployVersion(tc.newest, tc.newestCommit, commit, 1762000000)
 		if err != nil || got != tc.want {
 			t.Errorf("deployVersion(%q) = %q, %v; want %q", tc.newest, got, err, tc.want)
 		}
+	}
+	earlier, _ := deployVersion("v0.68.3", "", commit, 1762000000)
+	later, _ := deployVersion("v0.68.3", "", strings.Repeat("01", 20), 1762000001)
+	if semver.Compare(earlier, later) >= 0 || semver.Compare(later, "v0.68.4") >= 0 || semver.Compare(later, "v0.68.3") <= 0 {
+		t.Fatalf("main versions do not order by commit time between releases: %s, %s", earlier, later)
+	}
+}
+
+func TestDeployRefValidation(t *testing.T) {
+	for _, bad := range []string{"--upload-pack=touch /tmp/x", "-v", "abc", strings.Repeat("g", 40)} {
+		if _, err := gitRevision(bad); err == nil {
+			t.Errorf("gitRevision accepted %q", bad)
+		}
+	}
+	if _, err := gitRevision(strings.Repeat("a", 40)); err != nil {
+		t.Error(err)
+	}
+	for _, bad := range []string{"-v0.68.3", "commit-9fe8aca9f", "--output=x", "main"} {
+		if _, err := gitTag(bad); err == nil {
+			t.Errorf("gitTag accepted %q", bad)
+		}
+	}
+	if _, err := gitTag("v0.68.3"); err != nil {
+		t.Error(err)
+	}
+}
+
+func TestSweepStaleDeployDirs(t *testing.T) {
+	root := t.TempDir()
+	now := time.Date(2026, 11, 2, 12, 0, 0, 0, time.UTC)
+	dirs := map[string]time.Time{
+		deployDirPrefix + "run-old-production-1": now.Add(-5 * time.Hour),
+		deployDirPrefix + "run-new-production-2": now.Add(-time.Minute),
+		"other-old":                              now.Add(-5 * time.Hour),
+	}
+	for name, mtime := range dirs {
+		path := filepath.Join(root, name)
+		if err := os.MkdirAll(filepath.Join(path, "inner"), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(path, "gitops-key"), []byte("key"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Chtimes(path, mtime, mtime); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := sweepStaleDeployDirs(root, now, 3*time.Hour); err != nil {
+		t.Fatal(err)
+	}
+	for name := range dirs {
+		_, err := os.Stat(filepath.Join(root, name))
+		if gone := os.IsNotExist(err); gone != (name == deployDirPrefix+"run-old-production-1") {
+			t.Errorf("%s gone = %v", name, gone)
+		}
+	}
+}
+
+func TestSpliceControllerDeployment(t *testing.T) {
+	old := testRendered("sparkwing", testPins("v1", testDigest("c1"), testDigest("r1")), "old-chart")
+	next := testRendered("sparkwing", testPins("v2", testDigest("c2"), testDigest("r2")), "new-chart")
+	spliced, err := spliceControllerDeployment(old, next, "sparkwing", "sparkwing-sparkwing-full-controller")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(spliced, "@"+testDigest("c2")) || strings.Contains(spliced, "@"+testDigest("c1")) ||
+		!strings.Contains(spliced, "@"+testDigest("r1")) || strings.Contains(spliced, "@"+testDigest("r2")) ||
+		!strings.Contains(spliced, "chart: old-chart") || strings.Contains(spliced, "new-chart") {
+		t.Fatalf("controller phase render:\n%s", spliced)
+	}
+	if _, err := spliceControllerDeployment(old, next, "sparkwing", "missing"); err == nil {
+		t.Fatal("spliced a deployment neither render has")
 	}
 }
 
@@ -166,7 +240,7 @@ func TestDeployPlanShape(t *testing.T) {
 		t.Fatalf("stop-after staging plan = %v", got)
 	}
 	proven := deps(map[string]string{"promote-proven": "true"})
-	if _, ok := proven["staging-deploy"]; ok || fmt.Sprint(proven["production"]) != "[build-images]" {
+	if _, ok := proven["staging-deploy"]; ok || proven["staging-gate"] != nil || fmt.Sprint(proven["production"]) != "[build-images staging-gate]" {
 		t.Fatalf("promote-proven plan = %v", proven)
 	}
 	if _, err := host.Plan(t.Context(), "Deploy", map[string]string{"stop-after": "qa"}); err == nil {
@@ -176,39 +250,55 @@ func TestDeployPlanShape(t *testing.T) {
 
 func TestRequireStagingPass(t *testing.T) {
 	images := deployImages{Controller: imagePin{Digest: testDigest("c")}, Runner: imagePin{Digest: testDigest("r")}}
-	record := func(img deployImages) json.RawMessage {
-		raw, err := json.Marshal(stagingGateRecord{Images: img, RunID: "run-1"})
-		if err != nil {
-			t.Fatal(err)
-		}
-		return raw
-	}
 	gate := sparkwing.Ref[stagingGateRecord]{JobID: "staging-gate"}
-	proven := sparkwing.Ref[stagingGateRecord]{JobID: "staging-gate", Pipeline: "deploy"}
-	ctx := newTestHost(t, sparkwingtest.Options{Outputs: map[string]json.RawMessage{"staging-gate": record(images)}}).Context(t.Context())
-	if err := requireStagingPass(ctx, images, gate, sparkwing.Ref[stagingGateRecord]{}); err != nil {
-		t.Fatalf("same digests in this run: %v", err)
+	ctx := newTestHost(t, sparkwingtest.Options{Outputs: map[string]json.RawMessage{"staging-gate": gateRecord(t, images, "")}}).Context(t.Context())
+	if err := requireStagingPass(ctx, images, gate); err != nil {
+		t.Fatalf("same digests: %v", err)
 	}
 	other := images
 	other.Runner.Digest = testDigest("other")
-	if err := requireStagingPass(ctx, other, gate, sparkwing.Ref[stagingGateRecord]{}); err == nil || !strings.Contains(err.Error(), "passed controller") {
+	if err := requireStagingPass(ctx, other, gate); err == nil || !strings.Contains(err.Error(), "passed controller") {
 		t.Fatalf("different digests: %v", err)
 	}
-	latest := newTestHost(t, sparkwingtest.Options{Latest: func(_ context.Context, pipeline, node string) (json.RawMessage, error) {
-		if pipeline != "deploy" || node != "staging-gate" {
-			return nil, fmt.Errorf("unexpected reference %s/%s", pipeline, node)
-		}
-		return record(images), nil
-	}}).Context(t.Context())
-	if err := requireStagingPass(latest, images, sparkwing.Ref[stagingGateRecord]{}, proven); err != nil {
-		t.Fatalf("recorded proven run: %v", err)
-	}
-	if err := requireStagingPass(latest, other, sparkwing.Ref[stagingGateRecord]{}, proven); err == nil {
-		t.Fatal("a recorded run for other digests promoted")
-	}
 	empty := newTestHost(t, sparkwingtest.Options{}).Context(t.Context())
-	if err := requireStagingPass(empty, images, gate, sparkwing.Ref[stagingGateRecord]{}); err == nil || !strings.Contains(err.Error(), "no staging-gate record") {
+	if err := requireStagingPass(empty, images, gate); err == nil || !strings.Contains(err.Error(), "no staging-gate record") {
 		t.Fatalf("absent gate record: %v", err)
+	}
+}
+
+func gateRecord(t *testing.T, images deployImages, gatedAt string) json.RawMessage {
+	t.Helper()
+	raw, err := json.Marshal(stagingGateRecord{Images: images, RunID: "run-1", GatedAt: gatedAt})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return raw
+}
+
+func TestProvenGateRecord(t *testing.T) {
+	images := deployImages{Controller: imagePin{Digest: testDigest("c")}, Runner: imagePin{Digest: testDigest("r")}}
+	proven := sparkwing.Ref[stagingGateRecord]{JobID: "staging-gate", Pipeline: "deploy"}
+	now := time.Date(2026, 11, 2, 12, 0, 0, 0, time.UTC)
+	latest := func(raw json.RawMessage) context.Context {
+		return newTestHost(t, sparkwingtest.Options{Latest: func(_ context.Context, pipeline, node string) (json.RawMessage, error) {
+			if pipeline != "deploy" || node != "staging-gate" {
+				return nil, fmt.Errorf("unexpected reference %s/%s", pipeline, node)
+			}
+			return raw, nil
+		}}).Context(t.Context())
+	}
+	rec, err := provenGateRecord(latest(gateRecord(t, images, "2026-11-01T12:00:00Z")), proven, now, 48*time.Hour)
+	if err != nil || !rec.Images.sameDigests(images) {
+		t.Fatalf("recent record = %+v, %v", rec, err)
+	}
+	if _, err := provenGateRecord(latest(gateRecord(t, images, "2026-10-01T12:00:00Z")), proven, now, 48*time.Hour); err == nil || !strings.Contains(err.Error(), "longer ago") {
+		t.Fatalf("old record: %v", err)
+	}
+	if _, err := provenGateRecord(latest(gateRecord(t, images, "")), proven, now, 48*time.Hour); err == nil {
+		t.Fatal("a record without a gate time promoted")
+	}
+	if _, err := provenGateRecord(newTestHost(t, sparkwingtest.Options{}).Context(t.Context()), proven, now, 48*time.Hour); err == nil {
+		t.Fatal("no recorded run promoted")
 	}
 }
 
@@ -262,6 +352,83 @@ type fakeDeploy struct {
 	claimsPerRun int
 	dirtyLogs    bool
 	clock        time.Time
+	sessions     int
+	expired      int
+	oidcDown     bool
+	onSmoke      func(run string) error
+}
+
+func testPins(version, ctl, run string) valuesPins {
+	return valuesPins{
+		Controller: imagePin{testRegistry + "/sparkwing-controller", version, ctl},
+		Launcher:   imagePin{testRegistry + "/sparkwing-runner", version, run},
+		Job:        imagePin{testRegistry + "/sparkwing-runner", version, run},
+	}
+}
+
+func testRendered(release string, pins valuesPins, chart string) string {
+	return `---
+# Source: sparkwing-full/templates/controller.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ` + release + `-sparkwing-full-controller
+  namespace: ` + release + `
+spec:
+  template:
+    spec:
+      containers:
+        - name: controller
+          image: "` + pins.Controller.ref() + `"
+---
+# Source: sparkwing-full/charts/sparkwing-runner-bundle/templates/launcher.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ` + release + `-sparkwing-runner-bundle-launcher
+  namespace: ` + release + `
+spec:
+  template:
+    spec:
+      containers:
+        - name: launcher
+          image: "` + pins.Launcher.ref() + `"
+          args:
+            - "--image=` + pins.Job.Repository + ":" + pins.Job.Tag + "@" + pins.Job.Digest + `"
+---
+# Source: sparkwing-full/templates/chart.yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: sparkwing-chart
+  namespace: ` + release + `
+data:
+  chart: ` + chart + `
+`
+}
+
+func (f *fakeDeploy) session(env map[string]string) error {
+	var n int
+	if _, err := fmt.Sscanf(env["AWS_SESSION_TOKEN"], "session-%d", &n); err != nil || n == 0 {
+		return fmt.Errorf("no role session")
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if n <= f.expired {
+		return fmt.Errorf("ExpiredToken: session-%d has expired", n)
+	}
+	return nil
+}
+
+func (f *fakeDeploy) commitValues(dir, values string) {
+	f.t.Helper()
+	work := filepath.Join(f.t.TempDir(), "edit")
+	gitIn(f.t, filepath.Dir(work), "clone", "--quiet", f.bare, work)
+	if err := os.WriteFile(filepath.Join(work, dir, "helm-values.yaml"), []byte(values), 0o644); err != nil {
+		f.t.Fatal(err)
+	}
+	gitIn(f.t, work, "commit", "--quiet", "-am", "hand edit")
+	gitIn(f.t, work, "push", "--quiet", "origin", "HEAD:main")
 }
 
 func gitIn(t *testing.T, dir string, args ...string) string {
@@ -295,6 +462,8 @@ func newFakeDeploy(t *testing.T) *fakeDeploy {
 	gitIn(t, f.repo, "add", "-A")
 	gitIn(t, f.repo, "commit", "--quiet", "-m", "source")
 	f.head = gitIn(t, f.repo, "rev-parse", "HEAD")
+	gitIn(t, root, "clone", "--quiet", "--bare", f.repo, filepath.Join(root, "source.git"))
+	gitIn(t, f.repo, "remote", "add", "origin", filepath.Join(root, "source.git"))
 
 	f.old = deployImages{
 		Commit: f.head, Version: "v0.68.3", SchemaDigest: schemaBaselineDigestOf(schema),
@@ -312,10 +481,11 @@ func newFakeDeploy(t *testing.T) *fakeDeploy {
 	gitIn(t, work, "init", "--quiet", "-b", "main")
 	for _, dir := range []string{"sparkwing", "sparkwing-staging"} {
 		values := testValues("v0.68.3", f.old.Controller.Digest, f.old.Runner.Digest)
+		rendered := testRendered(dir, testPins("v0.68.3", f.old.Controller.Digest, f.old.Runner.Digest), "old-chart")
 		if err := os.MkdirAll(filepath.Join(work, dir), 0o755); err != nil {
 			t.Fatal(err)
 		}
-		for name, body := range map[string]string{"helm-values.yaml": values, "rendered.yaml": values} {
+		for name, body := range map[string]string{"helm-values.yaml": values, "rendered.yaml": rendered} {
 			if err := os.WriteFile(filepath.Join(work, dir, name), []byte(body), 0o644); err != nil {
 				t.Fatal(err)
 			}
@@ -329,7 +499,7 @@ func newFakeDeploy(t *testing.T) *fakeDeploy {
 
 func (f *fakeDeploy) candidate() deployImages {
 	c := f.old
-	c.Version = "v0.68.4-main.g" + f.head[:12]
+	c.Version = "v0.68.4-main.1762000000.g" + f.head[:12]
 	c.Controller = imagePin{c.Controller.Repository, c.Version, testDigest("new-ctl")}
 	c.Runner = imagePin{c.Runner.Repository, c.Version, testDigest("new-run")}
 	return c
@@ -340,6 +510,7 @@ func (f *fakeDeploy) config() deployConfig {
 	cfg.Registry = testRegistry
 	cfg.GitopsURL = f.bare
 	cfg.ReferenceURL = f.repo
+	cfg.ToolDir = ""
 	return cfg
 }
 
@@ -347,8 +518,16 @@ func (f *fakeDeploy) deployer(dry bool) *deployer {
 	tools := deployTools{
 		run:      f.run,
 		registry: f.registry,
-		oidc:     func(context.Context, string) (string, error) { return "oidc-token", nil },
+		oidc: func(context.Context, string) (string, error) {
+			f.mu.Lock()
+			defer f.mu.Unlock()
+			if f.oidcDown {
+				return "", errors.New("the run's claim has ended")
+			}
+			return "oidc-token", nil
+		},
 		wait:     func(context.Context, time.Duration) error { return nil },
+		lookPath: func(name string) (string, error) { return name, nil },
 		now: func() time.Time {
 			f.mu.Lock()
 			defer f.mu.Unlock()
@@ -413,10 +592,14 @@ func (f *fakeDeploy) run(ctx context.Context, c deployCommand) (string, error) {
 			if c.Env["AWS_PROFILE"] != "" || c.Env["AWS_CONFIG_FILE"] == "" {
 				return "", fmt.Errorf("sts call can read the machine's AWS config: %v", c.Env)
 			}
-			return `{"Credentials":{"AccessKeyId":"AKIA","SecretAccessKey":"secret","SessionToken":"session"}}`, nil
+			f.mu.Lock()
+			f.sessions++
+			n, expires := f.sessions, f.clock.Add(time.Hour).Format(time.RFC3339)
+			f.mu.Unlock()
+			return fmt.Sprintf(`{"Credentials":{"AccessKeyId":"AKIA","SecretAccessKey":"secret","SessionToken":"session-%d","Expiration":%q}}`, n, expires), nil
 		case strings.HasPrefix(joined, "ssm get-parameter"):
-			if c.Env["AWS_SESSION_TOKEN"] != "session" {
-				return "", fmt.Errorf("ssm read without the role session")
+			if err := f.session(c.Env); err != nil {
+				return "", err
 			}
 			return "value-of-" + arg("--name") + "\n", nil
 		case strings.HasPrefix(joined, "ecr get-login-password"):
@@ -426,7 +609,14 @@ func (f *fakeDeploy) run(ctx context.Context, c deployCommand) (string, error) {
 		}
 	case name == "helm":
 		body, err := os.ReadFile(arg("-f"))
-		return string(body), err
+		if err != nil {
+			return "", err
+		}
+		pins, err := readValuesPins(string(body))
+		if err != nil {
+			return "", err
+		}
+		return testRendered(c.Args[1], pins, "new-chart"), nil
 	case name == "bash":
 		if strings.Contains(joined, "build-release-target") {
 			dist := filepath.Join(c.Dir, "dist")
@@ -454,6 +644,11 @@ func (f *fakeDeploy) run(ctx context.Context, c deployCommand) (string, error) {
 		case strings.HasPrefix(joined, "pipeline trigger"):
 			return fmt.Sprintf(`{"run_id":"run-%s-%s"}`+"\n", c.Args[2], arg("--profile")), nil
 		case strings.HasPrefix(joined, "runs status"):
+			if f.onSmoke != nil && strings.Contains(arg("--run"), "deploy-smoke") {
+				if err := f.onSmoke(arg("--run")); err != nil {
+					return "", err
+				}
+			}
 			if f.failRuns[arg("--run")] {
 				return "", fmt.Errorf("exit 1")
 			}
@@ -464,10 +659,13 @@ func (f *fakeDeploy) run(ctx context.Context, c deployCommand) (string, error) {
 }
 
 func (f *fakeDeploy) kubectl(c deployCommand) (string, error) {
+	if err := f.session(c.Env); err != nil {
+		return "", err
+	}
 	joined := strings.Join(c.Args, " ")
 	envDir := map[string]string{"sparkwing-staging": "sparkwing-staging", "sparkwing": "sparkwing"}
 	switch {
-	case strings.Contains(joined, "annotate application"), strings.Contains(joined, "rollout status"):
+	case strings.Contains(joined, "rollout status"):
 		return "", nil
 	case strings.Contains(joined, "get application"):
 		app := c.Args[len(c.Args)-3]
@@ -579,6 +777,17 @@ func TestDeployStagingGateThenProduction(t *testing.T) {
 	if author := gitIn(t, f.bare, "log", "-1", "--format=%an <%ae>", "main"); author != "Sparkwing deploy <deploy@sparkwing.dev>" {
 		t.Fatalf("deploy commit author = %q", author)
 	}
+	if slices.ContainsFunc(f.calls, func(c string) bool { return strings.Contains(c, "annotate") || strings.Contains(c, "patch") }) {
+		t.Fatalf("the deploy wrote to an Argo application: %q", f.calls)
+	}
+	controllerRender := gitIn(t, f.bare, "show", "main~1:sparkwing-staging/rendered.yaml")
+	if !strings.Contains(controllerRender, "@"+images.Controller.Digest) || !strings.Contains(controllerRender, "@"+f.old.Runner.Digest) ||
+		!strings.Contains(controllerRender, "chart: old-chart") {
+		t.Fatalf("the controller commit changed more than the controller Deployment:\n%s", controllerRender)
+	}
+	if final := gitIn(t, f.bare, "show", "main:sparkwing-staging/rendered.yaml"); !strings.Contains(final, "chart: new-chart") || strings.Contains(final, "@"+f.old.Runner.Digest) {
+		t.Fatalf("the launcher commit did not carry the rest of the chart:\n%s", final)
+	}
 
 	gate, err := f.deployer(false).stagingGate(t.Context(), images)
 	if err != nil {
@@ -608,8 +817,182 @@ func TestDeployStagingGateThenProduction(t *testing.T) {
 	}
 
 	again, _, err := f.deployer(false).deployTo(t.Context(), f.config().Staging, images)
-	if err != nil || len(again.Changes) != 0 {
+	if err != nil || len(again.Changes) != 0 || again.WindowStart == "" {
 		t.Fatalf("redeploying the same digests = %+v, %v", again, err)
+	}
+	if _, err := f.deployer(false).promote(t.Context(), images); err != nil {
+		t.Fatalf("promoting digests production already runs: %v", err)
+	}
+	if !slices.ContainsFunc(f.calls, func(c string) bool { return strings.Contains(c, " logs ") && !strings.Contains(c, "--since-time= ") }) {
+		t.Fatalf("the log check ran without a window: %q", f.calls)
+	}
+}
+
+func TestDeployToolchainAndGitopsLayout(t *testing.T) {
+	f := newFakeDeploy(t)
+	d := f.deployer(false)
+	d.cfg.ToolDir = t.TempDir()
+	if err := os.WriteFile(filepath.Join(d.cfg.ToolDir, "aws"), nil, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	var seen deployCommand
+	d.tools.run = func(_ context.Context, c deployCommand) (string, error) {
+		seen = c
+		return "", nil
+	}
+	if _, err := d.cmd(t.Context(), deployCommand{Name: "aws", Env: map[string]string{"A": "b"}}); err != nil {
+		t.Fatal(err)
+	}
+	if seen.Name != filepath.Join(d.cfg.ToolDir, "aws") || seen.Env["PATH"] != d.cfg.ToolDir+":/usr/bin:/bin" || seen.Env["A"] != "b" {
+		t.Fatalf("command = %+v", seen)
+	}
+	if _, err := d.cmd(t.Context(), deployCommand{Name: "kubectl"}); err == nil || !strings.Contains(err.Error(), "deploy toolchain") {
+		t.Fatalf("a tool missing from the toolchain: %v", err)
+	}
+
+	cfg := defaultDeployConfig()
+	if cfg.GitopsURL != deployGitopsLayouts[deployDefaultGitopsLayout].url || cfg.Params.GitopsKey != deployGitopsLayouts[deployDefaultGitopsLayout].keyParam {
+		t.Fatalf("default config does not match the default layout: %+v", cfg)
+	}
+	if err := cfg.useGitopsLayout("sparkwing-gitops"); err != nil || !strings.Contains(cfg.GitopsURL, "sparkwing-gitops") || !strings.Contains(cfg.Params.GitopsKey, "sparkwing-gitops") {
+		t.Fatalf("sparkwing-gitops layout = %+v, %v", cfg, err)
+	}
+	if err := cfg.useGitopsLayout("elsewhere"); err == nil {
+		t.Fatal("an unknown layout was accepted")
+	}
+	if _, err := newTestHost(t, sparkwingtest.Options{}).Plan(t.Context(), "Deploy", map[string]string{"gitops-layout": "elsewhere"}); err == nil {
+		t.Fatal("an unknown --gitops-layout planned")
+	}
+}
+
+func TestDeployRefusesSupersededCommit(t *testing.T) {
+	f := newFakeDeploy(t)
+	images := f.candidate()
+	if err := os.WriteFile(filepath.Join(f.repo, "NEXT"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	gitIn(t, f.repo, "add", "NEXT")
+	gitIn(t, f.repo, "commit", "--quiet", "-m", "next")
+	gitIn(t, f.repo, "push", "--quiet", "origin", "HEAD:main")
+	before := gitIn(t, f.bare, "rev-parse", "main")
+	for _, env := range []deployEnv{f.config().Staging, f.config().Production} {
+		if _, _, err := f.deployer(false).deployTo(t.Context(), env, images); err == nil || !strings.Contains(err.Error(), "only main's tip deploys") {
+			t.Fatalf("%s deploy of a superseded commit: %v", env.Name, err)
+		}
+	}
+	if gitIn(t, f.bare, "rev-parse", "main") != before {
+		t.Fatal("a superseded commit reached GitOps")
+	}
+}
+
+func TestDeployRefusesProductionDowngrade(t *testing.T) {
+	f := newFakeDeploy(t)
+	images := f.candidate()
+	images.Version = "v0.68.2"
+	images.Controller.Tag, images.Runner.Tag = images.Version, images.Version
+	before := gitIn(t, f.bare, "rev-parse", "main")
+	if _, err := f.deployer(false).promote(t.Context(), images); err == nil || !strings.Contains(err.Error(), "never moves an environment back") {
+		t.Fatalf("production downgrade: %v", err)
+	}
+	if gitIn(t, f.bare, "rev-parse", "main") != before {
+		t.Fatal("a downgrade reached GitOps")
+	}
+}
+
+func TestDeployFirstDeployOverUntracedImageNeedsAPerson(t *testing.T) {
+	f := newFakeDeploy(t)
+	f.commitValues("sparkwing", testValues("commit-9fe8aca9f", f.old.Controller.Digest, f.old.Runner.Digest))
+	f.registry.revisions = map[string]string{}
+	before := gitIn(t, f.bare, "rev-parse", "main")
+	_, err := f.deployer(false).promote(t.Context(), f.candidate())
+	if err == nil || !strings.Contains(err.Error(), "Deploy once by hand") || !strings.Contains(err.Error(), "helm template sparkwing charts/sparkwing-full --namespace sparkwing") {
+		t.Fatalf("first deploy over an untraced image: %v", err)
+	}
+	if gitIn(t, f.bare, "rev-parse", "main") != before {
+		t.Fatal("a refused first deploy reached GitOps")
+	}
+
+	f.registry.revisions = map[string]string{f.old.Controller.Repository + "@" + f.old.Controller.Digest: "--upload-pack=touch /tmp/pwned"}
+	if _, err := f.deployer(false).promote(t.Context(), f.candidate()); err == nil || !strings.Contains(err.Error(), "not a full commit id") {
+		t.Fatalf("an option-shaped revision label: %v", err)
+	}
+}
+
+type expiringContext struct {
+	context.Context
+	done chan struct{}
+}
+
+func (c expiringContext) Done() <-chan struct{} { return c.done }
+
+func (c expiringContext) Err() error {
+	select {
+	case <-c.done:
+		return context.DeadlineExceeded
+	default:
+		return nil
+	}
+}
+
+func TestDeployRollbackOutlivesCancelTimeoutAndSession(t *testing.T) {
+	for name, setup := range map[string]func(*fakeDeploy) context.Context{
+		"cancelled job": func(f *fakeDeploy) context.Context {
+			ctx, cancel := context.WithCancel(t.Context())
+			f.onSmoke = func(string) error {
+				cancel()
+				f.mu.Lock()
+				f.oidcDown = true
+				f.mu.Unlock()
+				return context.Canceled
+			}
+			return ctx
+		},
+		"job timeout": func(f *fakeDeploy) context.Context {
+			ctx := expiringContext{Context: t.Context(), done: make(chan struct{})}
+			var once sync.Once
+			f.onSmoke = func(string) error {
+				once.Do(func() { close(ctx.done) })
+				return context.DeadlineExceeded
+			}
+			return ctx
+		},
+		"expired session": func(f *fakeDeploy) context.Context {
+			f.onSmoke = func(string) error {
+				f.mu.Lock()
+				f.expired = f.sessions
+				f.mu.Unlock()
+				return errors.New("exit 1")
+			}
+			return t.Context()
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			f := newFakeDeploy(t)
+			ctx := setup(f)
+			_, err := f.deployer(false).promote(ctx, f.candidate())
+			if err == nil || !strings.Contains(err.Error(), "rolled back") {
+				t.Fatalf("promote = %v, want a rollback", err)
+			}
+			if got := f.pinsOnMain("sparkwing"); got.Controller != f.old.Controller || got.Launcher != f.old.Runner {
+				t.Fatalf("production after rollback = %+v", got)
+			}
+		})
+	}
+}
+
+func TestDeploySmokeLogCheckRenewsAnExpiredSession(t *testing.T) {
+	f := newFakeDeploy(t)
+	f.onSmoke = func(string) error {
+		f.mu.Lock()
+		f.expired = f.sessions
+		f.mu.Unlock()
+		return nil
+	}
+	if _, err := f.deployer(false).promote(t.Context(), f.candidate()); err != nil {
+		t.Fatalf("promote across a session expiry: %v", err)
+	}
+	if got := f.pinsOnMain("sparkwing"); got.Controller != f.candidate().Controller {
+		t.Fatalf("production = %+v", got)
 	}
 }
 
@@ -686,9 +1069,10 @@ func TestDeployDryRunPrintsEveryActionAndTakesNone(t *testing.T) {
 		"commit \"deploy(staging): controller", "wait for Argo application sparkwing-staging", "wait for deployment sparkwing-staging/sparkwing-staging-sparkwing-full-controller",
 		"pin the staging launcher", "wait for deployment sparkwing-staging/sparkwing-staging-sparkwing-runner-bundle-launcher",
 		"build the candidate CLI", "add CLI profile staging", "trigger example", "trigger hello",
+		"is still the tip of origin/main", "is not older than the production version",
 		"pin the production controller", "wait for Argo application sparkwing to be", "pin the production launcher",
 		"add CLI profile qa-team ", "trigger deploy-smoke", "add CLI profile qa-team-b", "follow both smoke runs", "check each smoke run used one NodeClaim",
-		"on a failed production deploy or smoke, would revert",
+		"on a failed production deploy or smoke, would renew the role session and revert",
 	}
 	next := 0
 	for _, line := range f.said {
