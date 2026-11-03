@@ -141,6 +141,19 @@ test("artifact assertion rejects stale bytes and accepts this run's producer byt
   try { await step(current.host, "artifacts-assert"); } finally { await current.host.close(); }
 });
 
+test("cache assertion rejects a previous run's restored marker", async () => {
+  const cache = `${root}/.sparkwing/cache/example-ts-deps`;
+  await mkdir(cache, { recursive: true });
+  for (const marker of ["previous-run", "ts-test"]) {
+    await writeFile(`${cache}/value`, marker);
+    const { host } = await session("dependency-cache-assert");
+    try {
+      const reply = await host.send({ id: "cache", op: "run_step", job: "dependency-cache-assert", step: "run", attempt: 1, settled: [] });
+      assert.equal(reply.result.outcome, marker === "ts-test" ? "success" : "failed", JSON.stringify(reply));
+    } finally { await host.close(); }
+  }
+});
+
 test("native memo child publishes its run ID under the supplied token key", async () => {
   for (const run of ["memo-first", "memo-second"]) {
     const { host, jobs } = await session("memo", {}, { token: "parent-token" }, "memo-probe", run);

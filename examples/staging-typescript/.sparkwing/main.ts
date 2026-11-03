@@ -7,8 +7,7 @@ import { fileURLToPath } from "node:url";
 import {
   definePipeline, dir, docker, ExecError, main, parts, path, SDKError,
 } from "../../../sdk/typescript/src/index.ts";
-import type { Context, Job, Plan } from "../../../sdk/typescript/index.d.ts";
-import type { CleanupRegistration } from "../../../sdk/typescript/index.d.ts";
+import type { CleanupRegistration, Context, Job, Plan } from "../../../sdk/typescript/index.d.ts";
 
 const goCheckout = fileURLToPath(new URL("../../../", import.meta.url));
 const cacheDirectory = ".sparkwing/cache/example-ts-deps";
@@ -136,9 +135,9 @@ function nativeAssertions(plan: Plan): Job<unknown>[] {
   const generator = discovery.generate((generated, output) => {
     for (const city of output.cities) {
       generated.job(`dynamic-${city.toLowerCase()}`, async (ctx) => {
-        const weather = await ctx.runPipeline<{ forecast: string; city: string }>("weather-report", "stamp", { inputs: { city }, timeoutMs: 30_000 });
+        const weather = await ctx.runPipeline<{ forecast: string; city: string }>("weather-report", "stamp", { inputs: { city } });
         assert.deepEqual(weather, { forecast: "sunny", city });
-      }).startsChildren("weather-report");
+      }).startsChildren("weather-report").timeout(90_000);
     }
   });
   checks.push(plan.job("dynamic-children-assert", async (ctx) => {
@@ -169,17 +168,17 @@ function nativeAssertions(plan: Plan): Job<unknown>[] {
 
   const cache = dir(cacheDirectory, ".sparkwing/package.json");
   const reset = plan.job("dependency-cache-reset", () => rm(path(cacheDirectory), { recursive: true, force: true }));
-  const seed = plan.job("dependency-cache-seed", async () => {
+  const seed = plan.job("dependency-cache-seed", async (ctx) => {
     await mkdir(path(cacheDirectory), { recursive: true });
-    await writeFile(path(cacheDirectory, "value"), "typescript-cache-roundtrip");
+    await writeFile(path(cacheDirectory, "value"), ctx.run.id);
   }).needs(reset).cache(cache);
   const clear = plan.job("dependency-cache-clear", () => rm(path(cacheDirectory), { recursive: true, force: true })).needs(seed);
-  checks.push(plan.job("dependency-cache-assert", async () => {
-    assert.equal(await readFile(path(cacheDirectory, "value"), "utf8"), "typescript-cache-roundtrip");
+  checks.push(plan.job("dependency-cache-assert", async (ctx) => {
+    assert.equal(await readFile(path(cacheDirectory, "value"), "utf8"), ctx.run.id);
   }).needs(clear).cache(cache));
 
   checks.push(plan.job("native-memo-reuse-assert", async (ctx) => {
-    const options = { inputs: { token: `${ctx.run.id}-ts-native-memo` }, timeoutMs: 30_000 };
+    const options = { inputs: { token: `${ctx.run.id}-ts-native-memo` } };
     const first = await ctx.runPipeline<{ run: string }>("memo-probe", "memo", options);
     const second = await ctx.runPipeline<{ run: string }>("memo-probe", "memo", options);
     assert.ok(first.run, "memo seed must return its child run ID");

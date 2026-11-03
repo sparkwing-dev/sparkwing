@@ -13,8 +13,9 @@ npm --prefix examples/staging-typescript/.sparkwing test
 
 These checks drive the real SDK host with controlled services. They verify
 output and generator replay, skip predicates, OIDC signature rejection, stale
-artifact rejection and memo reuse assertions. Cache storage and run lifecycle
-still need the pipeline's integration run.
+cache and artifact rejection, memo reuse assertions and lifecycle cleanup
+registration. Cache storage and run lifecycle still need the pipeline's
+integration run.
 
 Ordinary CLI execution is blocked in this checkout. The checked-in TypeScript
 SDK has version `0.0.0`, so the local file dependency selects engine `v0.0.0`.
@@ -34,7 +35,7 @@ children, scoped secrets, OIDC claims and signatures, dependency cache restore,
 native memo reuse, artifact delivery, Docker output, hooks, approval timeout,
 optional failures, skip conditions and collected failures. Independent jobs run
 in parallel. The cache probe clears stale local files before preparing its seed
-cache. Artifact contents must match the current run ID.
+cache. Restored cache and artifact contents must match the current run ID.
 
 `native-memo-reuse-assert` starts the TypeScript `memo-probe` child twice with a
 token unique to the parent run. The child's memoized job returns its producing
@@ -52,7 +53,9 @@ After the assertions, `reference-pipeline-assert` can trigger a separate run in
 `sparkwing-ci-smoke`. Supply `--smoke-profile` and `--smoke-checkout` to enable it.
 The target pipeline defaults to `reference`; `--smoke-pipeline` overrides it.
 Both `hello` and `docker-test` must succeed. Without a target profile the job
-skips with a reason.
+skips with a reason. The host retains cancellation cleanup for detached probes
+and reference runs until the gate observes a terminal state, so an interrupted
+gate does not abandon them.
 
 This is a standalone project because Sparkwing chooses one SDK language for
 each `.sparkwing` directory. Its child `weather-report` uses the TypeScript SDK

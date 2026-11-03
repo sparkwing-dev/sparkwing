@@ -579,7 +579,14 @@ and run history. `memoized-step` puts one step in a memoized job because memo
 policies belong to jobs. Lifecycle assertions start the small `example-probe`
 pipeline as separate runs through the CLI. Use `--api-profile NAME` to exercise
 a configured controller instead of the local controller, and `--cli PATH` to
-select its matching CLI. No profile means local.
+select its matching CLI. No profile means local. The host retains cancellation
+cleanup for detached probes until the gate observes a terminal state, including
+for the optional reference run. A failed or interrupted observation keeps that
+cleanup armed. Cache and artifact assertions require the current run's marker
+so older stored bytes cannot satisfy a failed save or delivery.
+Child waits use their job's 90-second deadline, including queue time, instead
+of a shorter nested deadline. This leaves the job one budget for admission and
+execution.
 
 ```bash
 sparkwing run example -- --fail-once

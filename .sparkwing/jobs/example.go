@@ -69,7 +69,7 @@ func (p *Example) Plan(_ context.Context, plan *sparkwing.Plan, in ExampleInputs
 	invWarm := sparkwing.Job(plan, "inventory-warm", offshootFn("inventory-warm", 4)).Needs(invCache)
 	sparkwing.Job(plan, "inventory-report", offshootFn("inventory-report", 2)).Needs(invWarm).Inline()
 
-	sparkwing.Job(plan, "weather-check", weatherCheckFn).Needs(configure).Inline().StartsChildren("weather-report")
+	sparkwing.Job(plan, "weather-check", weatherCheckFn).Needs(configure).Inline().StartsChildren("weather-report").Timeout(90 * time.Second)
 
 	sparkwing.Job(plan, "error-canary", &ExampleErrorCanary{}).Needs(configure).Optional()
 
@@ -234,7 +234,6 @@ func weatherCheckFn(ctx context.Context) error {
 	sparkwing.Info(ctx, "calling weather-report pipeline via RunAndAwait")
 	out, err := sparkwing.RunAndAwait[WeatherOut, sparkwing.NoInputs](
 		ctx, "weather-report", "stamp",
-		sparkwing.WithFreshTimeout(30*time.Second),
 	)
 	if err != nil {
 		return fmt.Errorf("weather-report: %w", err)

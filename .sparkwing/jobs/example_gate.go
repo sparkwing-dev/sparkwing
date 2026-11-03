@@ -78,7 +78,7 @@ func exampleIntegration(plan *sparkwing.Plan, in ExampleInputs, rc sparkwing.Run
 	})
 	all = append(all, sparkwing.Job(plan, "dynamic-child", func(ctx context.Context) error {
 		pipeline := strings.Join([]string{"weather", "report"}, "-")
-		opts := []sparkwing.AwaitOption{sparkwing.WithFreshTimeout(30 * time.Second)}
+		var opts []sparkwing.AwaitOption
 		if in.ChildBranch != "" {
 			if rc.Git == nil || rc.Git.Repo == "" {
 				return fmt.Errorf("dynamic-child: --child-branch needs repository provenance")
@@ -93,7 +93,7 @@ func exampleIntegration(plan *sparkwing.Plan, in ExampleInputs, rc sparkwing.Run
 			return fmt.Errorf("dynamic child: missing weather output")
 		}
 		return nil
-	}).NeedsGenerated(generator).StartsChildren("weather-report").Inline())
+	}).NeedsGenerated(generator).StartsChildren("weather-report").Inline().Timeout(90*time.Second))
 	secret := sparkwing.Job(plan, "scoped-secrets", func(ctx context.Context) error {
 		value, err := sparkwing.Secret(ctx, in.SecretName)
 		if err != nil {
@@ -132,11 +132,11 @@ func exampleIntegration(plan *sparkwing.Plan, in ExampleInputs, rc sparkwing.Run
 	cache := sparkwing.Dir(cachePath, sparkwing.KeyFromFile(".sparkwing/go.sum"))
 	reset := sparkwing.Job(plan, "dependency-cache-reset", func(context.Context) error { return os.RemoveAll(sparkwing.Path(cachePath)) }).Inline()
 	seed := sparkwing.Job(plan, "dependency-cache-seed", func(context.Context) error {
-		return exampleWriteFile(filepath.Join(cachePath, "proof"), "example-dependency-cache-v1")
+		return exampleWriteFile(filepath.Join(cachePath, "proof"), rc.RunID)
 	}).Needs(reset).Cache(cache)
 	clearCache := sparkwing.Job(plan, "dependency-cache-clear", func(context.Context) error { return os.RemoveAll(sparkwing.Path(cachePath)) }).Needs(seed).Inline()
 	all = append(all, sparkwing.Job(plan, "dependency-cache-assert", func(context.Context) error {
-		return exampleFileEquals(filepath.Join(cachePath, "proof"), "example-dependency-cache-v1")
+		return exampleFileEquals(filepath.Join(cachePath, "proof"), rc.RunID)
 	}).Needs(clearCache).Cache(cache))
 	artifactPath := ".sparkwing/cache/example-artifact/proof"
 	producer := sparkwing.Job(plan, "artifact-producer", func(context.Context) error { return exampleWriteFile(artifactPath, rc.RunID) }).Artifacts(artifactPath)
@@ -443,10 +443,8 @@ func exampleCancelCheck(in ExampleInputs, rc sparkwing.RunContext) func(context.
 		if err != nil {
 			return err
 		}
-		ready, cancel := context.WithTimeout(ctx, 30*time.Second)
-		defer cancel()
 		for {
-			detail, err := exampleStatus(ready, in, run.id, false)
+			detail, err := exampleStatus(ctx, in, run.id, false)
 			if err != nil {
 				return err
 			}
@@ -459,7 +457,7 @@ func exampleCancelCheck(in ExampleInputs, rc sparkwing.RunContext) func(context.
 			if running {
 				break
 			}
-			if err := nap(ready, 100); err != nil {
+			if err := nap(ctx, 100); err != nil {
 				return fmt.Errorf("long job never started: %w", err)
 			}
 		}
