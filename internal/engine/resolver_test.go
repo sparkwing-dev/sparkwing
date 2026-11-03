@@ -463,7 +463,7 @@ func TestPreEnginePinRefusalNamesTheUpgrade(t *testing.T) {
 		{"v0.68.0-qa.3", refused},
 		{"v0.66.4", &apierr.Error{Code: apierr.NotFound, Message: "v0.66.4 is not published"}},
 	} {
-		if got := predatesEngine(kept.version, kept.err); got != kept.err {
+		if got := predatesEngine(kept.version, kept.err); !errors.Is(got, kept.err) || got.Error() != kept.err.Error() {
 			t.Fatalf("%s: %v rewritten to %v", kept.version, kept.err, got)
 		}
 	}
