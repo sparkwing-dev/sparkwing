@@ -1439,3 +1439,10 @@ A run records that an agent started it on a person's behalf: "requested by Korey
 ## 2026-11-03 Korey decision 95: machine labels apply to local runs
 
 `runner.labels` in machine configuration applies to everything the machine runs, including its own local `sparkwing run` work, not only controller work claimed by an enrolled runner. A pipeline that pins a job to a machine with a custom label (for example `Requires("host=moonborn")`) runs locally on that machine. Labels remain self-reported matching preferences: they never grant pools, secrets or trust, which still come from the machine's credentials and access rules.
+
+## 2026-11-03 Korey decision 96: ship fast; CI verifies, it does not gate
+
+Korey directed executive speed: "make these process changes, push them through aggressively ... fix the process that is slowing everything." Consequences:
+- Hosted CI on main verifies after landing; it does not gate landing, releases or deploys. A red hosted run blocks the next production deploy until fixed.
+- The service (controller, console, launcher, checkout) deploys continuously from main commits; versioned releases (CLI, SDKs, engine, runner binaries, signed index) tag an already-deployed main commit on their own rhythm. Production controllers stay compatible with released CLIs and SDKs (additive wire changes, fallbacks).
+- UI, process, tooling and docs changes land on their own tests plus the land pipeline's AI review (decision 93); no extra review rounds. Separate security reviews remain for auth, trust, billing and schema/migration changes.
