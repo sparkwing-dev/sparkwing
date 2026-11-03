@@ -16,18 +16,19 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/engineid"
+	"github.com/sparkwing-dev/sparkwing/internal/paths"
 	"github.com/sparkwing-dev/sparkwing/internal/releaseasset"
 	"github.com/sparkwing-dev/sparkwing/internal/releaseauth"
 	"github.com/sparkwing-dev/sparkwing/internal/toolchain"
 )
 
-// defaultCacheDirectory is shared by execution placements on this machine.
+// safety: local runs, the local controller, update and upgrade must read and refresh one policy cache.
 func defaultCacheDirectory() (string, error) {
-	dir, err := os.UserCacheDir()
+	p, err := paths.DefaultPaths()
 	if err != nil {
 		return "", err
 	}
-	return filepath.Join(dir, "sparkwing", "engines"), nil
+	return filepath.Join(p.Root, "engines"), nil
 }
 
 // NewResolver initializes private machine storage and host-owned transport.

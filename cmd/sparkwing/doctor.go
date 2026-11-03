@@ -45,6 +45,7 @@ type doctorReport struct {
 	GoToolchain       *opsview.DoctorGoToolchain     `json:"go_toolchain,omitempty"`
 	ShadowedHooks     *githooks.Shadow               `json:"shadowed_hooks,omitempty"`
 	InstallConflict   *opsview.DoctorInstallConflict `json:"install_conflict,omitempty"`
+	VersionPolicy     *versionPolicyStatus           `json:"version_policy,omitempty"`
 }
 
 type doctorDependencies struct {
@@ -127,7 +128,8 @@ func inspectDoctor(ctx context.Context, dryRun bool, deps doctorDependencies) (d
 
 func inspectDoctorMachine(ctx context.Context) doctorReport {
 	git := func(dir string, args ...string) (string, error) { return runGitContext(ctx, dir, args...) }
-	report := doctorReport{GoToolchain: diagnoseGoToolchain(ctx), ShadowedHooks: shadowedHooks(git)}
+	policy := cachedVersionPolicy(ctx)
+	report := doctorReport{GoToolchain: diagnoseGoToolchain(ctx), ShadowedHooks: shadowedHooks(git), VersionPolicy: &policy}
 	if self, err := installsite.Self(); err == nil {
 		home, _ := os.UserHomeDir()
 		report.InstallConflict = opsview.InstallConflict(self, installsite.SearchDirs(os.Getenv, home))
@@ -176,6 +178,13 @@ func renderDoctorMachine(text *bytes.Buffer, report doctorReport) {
 		if toolchain.Error != "" {
 			fmt.Fprintf(text, "go_toolchain_error\t%s\n", toolchain.Error)
 		}
+	}
+	if policy := report.VersionPolicy; policy != nil {
+		published, latest := "-", "-"
+		if policy.PublishedAt != nil {
+			published, latest = policy.PublishedAt.Format(time.RFC3339)+" ("+policy.Age+" ago)", policy.Latest
+		}
+		fmt.Fprintf(text, "version_policy\t%s\t%s\t%s\t%s\n", policy.Status, latest, published, policy.Reason)
 	}
 	if shadow := report.ShadowedHooks; shadow != nil {
 		fmt.Fprintf(text, "shadowed_hooks\t%s\n%s\n", shadow.Summary(), shadow.Remedy())

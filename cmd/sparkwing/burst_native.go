@@ -71,7 +71,7 @@ func runNativeBurst(ctx context.Context, pipeline string, flags runFlags, args [
 			deps := defaultHereDependencies(flags.outputFormat)
 			if handlePath != "" {
 				deps.admitted = func(response controllerwire.CreateRunResponse) error {
-					return orchestrator.PublishRunHandle(handlePath, orchestrator.NewRunHandle(response.RunID, pipeline, "pending"))
+					return orchestrator.PublishRunHandle(handlePath, orchestrator.NewRunHandle(response.RunID, pipeline))
 				}
 			}
 			return errors.Join(cancelErr, handoffHereRun(ctx, connection, response, deps))
@@ -178,8 +178,8 @@ func prepareNativeBurst(ctx context.Context, pipeline string, flags runFlags, ar
 	if err != nil {
 		return request, err
 	}
-	if err := enforceRiskGate(pipeline, risksIn(schema), runFlags{allow: request.Request.Options.AllowRisk.Value, dryRun: request.Request.Options.DryRun.Value}); err != nil {
-		return request, described.Error(err)
+	if err := enforceRiskGate(pipeline, risksIn(schema), riskFlags(request.Request.Options)); err != nil {
+		return request, riskRefusal(described, err)
 	}
 	request.LocalSecrets, err = resolveBurstSecrets(ctx, environment.names, schema.Secrets, held)
 	if err != nil {

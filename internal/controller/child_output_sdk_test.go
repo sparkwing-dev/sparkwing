@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/fs"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -310,7 +311,8 @@ func finishChildOutput(t *testing.T, st *store.Store, handler http.Handler, http
 }
 
 func TestJobOutputThroughNativeClientAndCurrentReadSet(t *testing.T) {
-	objects, err := blob.NewFilesystem(blob.FilesystemOptions{Directory: t.TempDir(), Endpoint: "http://local", SigningKey: bytes.Repeat([]byte{42}, 32)})
+	objectDirectory := t.TempDir()
+	objects, err := blob.NewFilesystem(blob.FilesystemOptions{Directory: objectDirectory, Endpoint: "http://local", SigningKey: bytes.Repeat([]byte{42}, 32)})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -432,7 +434,9 @@ func TestJobOutputThroughNativeClientAndCurrentReadSet(t *testing.T) {
 		if err := host.CheckBinding(t.Context(), principal, capability.BindOwnNode, capability.Target{Team: "a", RunID: "run", NodeID: "stamp"}); !forbidden(err) {
 			t.Fatalf("dependency ownership binding: %v", err)
 		}
-		t.Run("go", func(t *testing.T) { proveGoDependencyOutput(t, grant.Binding) })
+		t.Run("go", func(t *testing.T) {
+			proveGoDependencyOutput(t, grant.Binding, "dependency-output-fixture", `{"weather":"clear","degrees":72}`)
+		})
 		t.Run("typescript", func(t *testing.T) {
 			node, err := exec.LookPath("node")
 			if err != nil {
@@ -451,6 +455,75 @@ func TestJobOutputThroughNativeClientAndCurrentReadSet(t *testing.T) {
 				t.Fatalf("TypeScript dependency output: %v\n%s", err, output)
 			}
 		})
+		for _, tc := range []struct {
+			name, goWant, tsCheck string
+			remove                func(t *testing.T) func()
+		}{
+			{
+				name: "absent output is an optional miss", goWant: `{"weather":"absent","degrees":0}`, tsCheck: `if (value !== undefined) throw new Error(JSON.stringify(value));`,
+				remove: func(t *testing.T) func() {
+					var record []byte
+					if err := teststore.SQL(t, e.Store).QueryRowContext(t.Context(), `SELECT output_record FROM nodes WHERE team='a' AND run_id='run' AND node_id='stamp'`).Scan(&record); err != nil {
+						t.Fatal(err)
+					}
+					childOutputSQL(t, e.Store, `UPDATE nodes SET output_record=NULL WHERE team='a' AND run_id='run' AND node_id='stamp'`)
+					return func() {
+						childOutputSQL(t, e.Store, `UPDATE nodes SET output_record=? WHERE team='a' AND run_id='run' AND node_id='stamp'`, record)
+					}
+				},
+			},
+			{
+				name: "missing bytes behind a live record fail the reader", goWant: "failed: blob is absent or tombstoned", tsCheck: `throw new Error("lost bytes read as " + JSON.stringify(value));`,
+				remove: func(t *testing.T) func() {
+					var moved []string
+					if err := filepath.WalkDir(objectDirectory, func(path string, entry fs.DirEntry, err error) error {
+						if err != nil || !entry.Type().IsRegular() {
+							return err
+						}
+						moved = append(moved, path)
+						return os.Rename(path, path+".aside")
+					}); err != nil {
+						t.Fatal(err)
+					}
+					return func() {
+						for _, path := range moved {
+							if err := os.Rename(path+".aside", path); err != nil {
+								t.Error(err)
+							}
+						}
+					}
+				},
+			},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				restore := tc.remove(t)
+				defer restore()
+				if _, err := process.Output(t.Context(), "run", "stamp"); err == nil {
+					t.Fatal("a missing output returned a value")
+				}
+				proveGoDependencyOutput(t, grant.Binding, "optional-output-fixture", tc.goWant)
+				node, err := exec.LookPath("node")
+				if err != nil {
+					t.Skip("TypeScript output proof requires Node.js")
+				}
+				routes, err := json.Marshal(grant.Binding.Routes)
+				if err != nil {
+					t.Fatal(err)
+				}
+				routesModule, err := filepath.Abs("../../sdk/typescript/src/routes.ts")
+				if err != nil {
+					t.Fatal(err)
+				}
+				planModule, err := filepath.Abs("../../sdk/typescript/src/plan.ts")
+				if err != nil {
+					t.Fatal(err)
+				}
+				script := `const { NodeRoutes } = await import(process.argv[1]); const { refTo } = await import(process.argv[2]); const routes = new NodeRoutes(JSON.parse(process.argv[3])); const signal = new AbortController().signal; let value; try { value = await refTo({ id: "stamp" }).tryGet({ output: (job) => routes.output(job.id, signal) }); } catch (error) { if (error.code === "blob_missing") process.exit(0); throw error; } ` + tc.tsCheck
+				if output, err := exec.CommandContext(t.Context(), node, "--input-type=module", "-e", script, routesModule, planModule, string(routes)).CombinedOutput(); err != nil {
+					t.Fatalf("TypeScript optional output: %v\n%s", err, output)
+				}
+			})
+		}
 	})
 	tenant, err := e.Store.ForTeam(t.Context(), "a")
 	if err != nil {

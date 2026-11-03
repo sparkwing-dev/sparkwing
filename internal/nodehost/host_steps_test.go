@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -214,6 +215,13 @@ func TestNativeExecutorSteps(t *testing.T) {
 			}
 			if !maps.Equal(states, wantStates[id]) {
 				t.Fatalf("native step records=%v, want=%v", states, wantStates[id])
+			}
+			for _, sibling := range []string{"slow", "pending"} {
+				if id == "failfast" && !slices.ContainsFunc(records.steps, func(report store.StepReport) bool {
+					return report.StepID == sibling && report.State == "cancelled" && report.MaskedError == `cancelled because step "reject" failed`
+				}) {
+					t.Fatalf("fail-fast sibling %s did not name the failed step: %+v", sibling, records.steps)
+				}
 			}
 			outcomes := map[string]string{}
 			failedAt, firstCancel, failFastCount := -1, -1, 0

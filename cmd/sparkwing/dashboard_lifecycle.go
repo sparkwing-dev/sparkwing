@@ -34,6 +34,7 @@ type dashboardResult struct {
 	Version   string            `json:"version,omitempty"`
 	Stay      bool              `json:"stay"`
 	Installed bool              `json:"installed"`
+	URL       string            `json:"url,omitempty"`
 	Activity  dashboardActivity `json:"activity"`
 	Warning   string            `json:"warning,omitempty"`
 }
@@ -45,7 +46,7 @@ func localStatusResult(service, action string, status wingd.LocalStatus) dashboa
 	}
 	return dashboardResult{
 		Kind: "service", Tool: "sparkwing", Service: service, Action: action, State: state,
-		PID: status.PID, Version: status.Version, Stay: status.Stay, Installed: status.Installed,
+		PID: status.PID, Version: status.Version, Stay: status.Stay, Installed: status.Installed, URL: status.DashboardURL,
 		Activity: dashboardActivity{IdleSince: status.Activity.IdleSince, Runs: status.Activity.Runs, QueuedTriggers: status.Activity.QueuedTriggers, HeldLeases: status.Activity.HeldLeases, DashboardConnections: status.Activity.DashboardConnections},
 	}
 }
@@ -106,7 +107,13 @@ func renderDashboard(out io.Writer, result dashboardResult, mode string) error {
 		_, err := fmt.Fprintln(out, result.State)
 		return err
 	default:
-		_, err := fmt.Fprintf(out, "Local controller: %s\npid: %d\nversion: %s\nstay: %t\ninstalled: %t\nactivity: %d runs, %d queued triggers, %d held leases, %d dashboard connections\n", result.State, result.PID, result.Version, result.Stay, result.Installed, result.Activity.Runs, result.Activity.QueuedTriggers, result.Activity.HeldLeases, result.Activity.DashboardConnections)
+		_, err := fmt.Fprintf(out, "Local controller: %s\npid: %d\nversion: %s\nstay: %t\ninstalled: %t\n", result.State, result.PID, result.Version, result.Stay, result.Installed)
+		if err == nil && result.URL != "" {
+			_, err = fmt.Fprintf(out, "dashboard: %s (sign in with sparkwing dashboard open)\n", result.URL)
+		}
+		if err == nil {
+			_, err = fmt.Fprintf(out, "activity: %d runs, %d queued triggers, %d held leases, %d dashboard connections\n", result.Activity.Runs, result.Activity.QueuedTriggers, result.Activity.HeldLeases, result.Activity.DashboardConnections)
+		}
 		if err == nil && result.Warning != "" {
 			_, err = fmt.Fprintf(out, "warning: %s\n", result.Warning)
 		}

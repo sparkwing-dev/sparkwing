@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"slices"
 	"strings"
 	"testing"
 
@@ -149,4 +150,48 @@ func FuzzSDKDescribeIsolatesFailuresAndSecretDeclarations(f *testing.F) {
 			}
 		}
 	})
+}
+
+func TestWithheldPlanningOutputExplainsIncompleteDiscovery(t *testing.T) {
+	const private = "private-describe-output"
+	for _, tc := range []struct {
+		code apierr.Code
+		want string
+	}{
+		{apierr.IsolatedHomeRequired, `1 registered pipeline failed discovery (isolated_home_required), so its secret declarations are unknown; to see this output, retry with HOME="$(mktemp -d)" SPARKWING_HOME="$(mktemp -d)" before the sparkwing command`},
+		{apierr.PlanFailed, "1 registered pipeline failed discovery (plan_failed), so its secret declarations are unknown; this output and its errors stay hidden until every registered pipeline plans without error"},
+	} {
+		t.Run(string(tc.code), func(t *testing.T) {
+			p, input, fixture, _ := sdkPlanningFixture(t)
+			input.Run.Pipeline = "build"
+			var logs []string
+			p.Log = func(_ context.Context, log nodeproto.FrameLog) error { logs = append(logs, log.Message); return nil }
+			start := p.Start
+			p.Start = func(ctx context.Context, in PlanningProcessInput, log func(context.Context, nodeproto.FrameLog) error) (ExecutorProcess, error) {
+				process, err := start(ctx, in, log)
+				proc := process.(*executorProcess)
+				answer := proc.answer
+				proc.answer = func(ctx context.Context, req nodeproto.Request) (any, error) {
+					if req.Op == nodeproto.OpDescribe {
+						if err := log(ctx, nodeproto.FrameLog{Message: private}); err != nil {
+							return nil, err
+						}
+						return nodeproto.DescribeDoc{Pipelines: []nodeproto.PipelineDescription{
+							{Name: "build", Args: []nodeproto.ArgumentDescription{}},
+							{Name: "release", Args: []nodeproto.ArgumentDescription{}, Error: &apierr.Error{Code: tc.code, Message: private}},
+						}}, nil
+					}
+					return answer(ctx, req)
+				}
+				return process, err
+			}
+			if _, err := p.Prepare(t.Context(), input, fixture.input); err != nil {
+				t.Fatal(err)
+			}
+			want := "sparkwing: output withheld because secret declarations were unavailable (1 lines): " + tc.want
+			if !slices.Contains(logs, want) || slices.ContainsFunc(logs, func(log string) bool { return strings.Contains(log, private) }) {
+				t.Fatalf("withheld output was not explained or leaked: %q", logs)
+			}
+		})
+	}
 }

@@ -38,6 +38,20 @@ func TestDashboardLoginAuthorizesControllerAPIAsMintingPeer(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	origin, _, _ := strings.Cut(login.URL, "/login?")
+	local, err := lifecycle.Status(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	remote, err := wingclient.QueryLocalController(t.Context(), home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, status := range []wingd.LocalStatus{local, remote} {
+		if status.DashboardURL == "" || status.DashboardURL != origin || strings.Contains(status.DashboardURL, "token") {
+			t.Fatalf("status dashboard URL %q, want the sign-in origin %q", status.DashboardURL, origin)
+		}
+	}
 	browser := &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
 	t.Cleanup(browser.CloseIdleConnections)
 	request := func(method, target, session string, status int, cookies ...*http.Cookie) []byte {

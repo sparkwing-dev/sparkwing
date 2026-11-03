@@ -15,7 +15,7 @@ func (d *Daemon) handleLocalControl(c *conn, request *wingwire.LocalControl) boo
 		Running: status.Running, Stay: status.Stay, PID: status.PID, Version: status.Version,
 		Runs: status.Activity.Runs, QueuedTriggers: status.Activity.QueuedTriggers,
 		HeldLeases: status.Activity.HeldLeases, DashboardConnections: status.Activity.DashboardConnections,
-		IdleSince: status.Activity.IdleSince,
+		IdleSince: status.Activity.IdleSince, DashboardURL: status.DashboardURL,
 	}) != nil
 }
 

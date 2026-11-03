@@ -186,7 +186,10 @@ sw.Job(plan, "report", func(ctx context.Context) error {
 ```
 
 `Ref.Get(ctx)` returns the decoded value. `Ref.TryGet(ctx)` also reports
-presence. A transport or decoding failure fails the callback. For a cross-run
+presence. An upstream that was skipped, has not finished, or ran in a dry run
+without a dry-run body is absent, as is an expired output; TypeScript `tryGet`
+returns `undefined` for the same cases. Bytes missing behind a recorded output,
+a transport failure or a decoding failure fail the callback. For a cross-run
 reference, JSON null is absent. An in-run null output is present and decodes to
 the type's zero value. Typed job and step outputs are bounded to 16 MiB each.
 
@@ -498,7 +501,8 @@ shell script for a step. Use Exec to run a command such as `go test ./...`.
 Both return a command builder with `Dir`, `Env` and `EnvMap`.
 Terminators include `Run`, `Capture`, `String`, `Lines`, `JSON` and `MustBeEmpty`.
 Handle returned errors to fail the step. `ExecError` carries exit status and
-captured output. When a context deadline kills a command, `Terminated` is
+captured output. Its message repeats at most 512 bytes of the command and counts
+the rest; the `Command` field keeps it whole. When a context deadline kills a command, `Terminated` is
 `"timeout"` and the error names the deadline. `errors.Is(err, context.DeadlineExceeded)`
 recognizes the cause. Increase the context timeout or make the command faster.
 `WorkDir()` returns the repository working directory.
@@ -519,7 +523,9 @@ Annotation and summary write failures fail the callback.
 
 A step can declare `Risk(labels...)`, `DryRun(callback)` and
 `SafeWithoutDryRun()`. The host enforces approved risks and chooses the dry-run
-body. `sw.IsDryRun(ctx)` reads the mode inside a callback.
+body. A run must allow, with `--sw-allow-risk`, every risk on a step its
+selection runs; steps that `--sw-only`, `--sw-start-at` or `--sw-stop-at` leave
+out need no allowance. `sw.IsDryRun(ctx)` reads the mode inside a callback.
 
 `cleanup.Register(ctx, cleanup.Spec{Argv: argv, Description: text})` registers an
 idempotent teardown command for a resource outside the process tree. It returns

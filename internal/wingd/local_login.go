@@ -67,6 +67,12 @@ func (l *dashboardLogins) serving(origin string) {
 	l.origin = origin
 }
 
+func (l *dashboardLogins) servingOrigin() string {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.origin
+}
+
 func (l *dashboardLogins) socketRoutes(api http.Handler) http.Handler {
 	if api == nil {
 		return nil

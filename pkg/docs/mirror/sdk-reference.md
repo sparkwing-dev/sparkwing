@@ -368,7 +368,7 @@ type ExecError struct {
 }
 ```
 
-- `func (e *ExecError) Error() string`
+- `func (e *ExecError) Error() string` -- Error repeats at most 512 bytes of the command and counts the rest, so a generated argument list cannot bury the failure; Command keeps it whole.
 - `func (e *ExecError) Unwrap() error`
 
 ### type ExecResult

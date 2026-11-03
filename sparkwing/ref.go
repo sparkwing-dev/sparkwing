@@ -102,7 +102,8 @@ func (r Ref[T]) Get(ctx context.Context) T {
 // pipeline's first run, and Get panics there.
 //
 // ok is false for a genuine absence: an in-run node that has not
-// completed, a run that stored no output, and a cross-pipeline resolver
+// completed, was skipped, or ran in a dry run without a dry-run body, a run
+// that stored no output or whose output expired, and a cross-pipeline resolver
 // failure marked with ErrRefAbsent. A store cannot tell a misspelled
 // pipeline name from one that has never run, so both are misses, and
 // every miss is logged at warn naming the pipeline and node.
@@ -113,7 +114,7 @@ func (r Ref[T]) Get(ctx context.Context) T {
 // changes which branch runs.
 //
 // TryGet panics for the failures a pipeline author cannot handle at
-// runtime: no resolver in context, which happens only outside a
+// runtime: recorded output whose stored bytes are gone, no resolver in context, which happens only outside a
 // dispatched step; stored output that does not fit T; a cancelled or
 // expired context, which is the step being torn down rather than an
 // upstream that is absent; and a resolver failure that carries no

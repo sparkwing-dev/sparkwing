@@ -139,6 +139,8 @@ sparkwing doctor -o json
 
 Daemon status, stop and restart use the shared local lifecycle. JSON reports
 `state`, `version`, `pid`, `stay`, `installed` and the four activity counts.
+While the dashboard serves, they also report its address as `url`, and pretty
+output prints it; `sparkwing dashboard open` mints the sign-in link.
 Stop and restart also report `stopped`, `restarted` and `previous_version`.
 Plain output is the resulting state. Store and API diagnostics come from doctor.
 Doctor also sweeps stray step sessions through the controller. A successful
@@ -234,7 +236,9 @@ sparkwing run build --sw-run-handle-file /tmp/build-run.json
 ```
 
 The run handle identifies the run for observations and cancellation. It carries
-no credential. `--sw-output` chooses pretty, JSON or plain output for foreground
+no credential. The CLI writes it once at intake with `schema_version`, `run_id`
+and `pipeline`, and never updates it; read the run's current state with
+`sparkwing runs status --run RUN_ID`. `--sw-output` chooses pretty, JSON or plain output for foreground
 and detached commands. List commands emit one JSON record per line.
 
 ## Which checkout runs

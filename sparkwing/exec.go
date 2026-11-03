@@ -14,6 +14,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+	"unicode/utf8"
 
 	"github.com/sparkwing-dev/sparkwing/internal/execdiag"
 	"github.com/sparkwing-dev/sparkwing/internal/procenv"
@@ -60,13 +61,25 @@ type ExecError struct {
 	Terminated string
 }
 
+const execErrorCommandBytes = 512
+
+// Error repeats at most 512 bytes of the command and counts the rest, so a
+// generated argument list cannot bury the failure; Command keeps it whole.
 func (e *ExecError) Error() string {
 	var b strings.Builder
+	command := e.Command
+	if len(command) > execErrorCommandBytes {
+		cut := execErrorCommandBytes
+		for cut > 0 && !utf8.RuneStart(command[cut]) {
+			cut--
+		}
+		command = fmt.Sprintf("%s... [%d more bytes]", command[:cut], len(e.Command)-cut)
+	}
 	if e.Terminated != "" {
 		if e.Terminated == "timeout" {
-			fmt.Fprintf(&b, "command timed out: %s", e.Command)
+			fmt.Fprintf(&b, "command timed out: %s", command)
 		} else {
-			fmt.Fprintf(&b, "command terminated by %s: %s", e.Terminated, e.Command)
+			fmt.Fprintf(&b, "command terminated by %s: %s", e.Terminated, command)
 		}
 		if e.Cause != nil {
 			fmt.Fprintf(&b, " (%v)", e.Cause)
@@ -77,13 +90,13 @@ func (e *ExecError) Error() string {
 		return b.String()
 	}
 	if e.ExitCode == ExitNotStarted {
-		fmt.Fprintf(&b, "command failed to start: %s", e.Command)
+		fmt.Fprintf(&b, "command failed to start: %s", command)
 		if e.Cause != nil {
 			fmt.Fprintf(&b, ": %v", e.Cause)
 		}
 		return b.String()
 	}
-	fmt.Fprintf(&b, "command failed (exit %d): %s", e.ExitCode, e.Command)
+	fmt.Fprintf(&b, "command failed (exit %d): %s", e.ExitCode, command)
 	out := strings.TrimSpace(e.Stderr)
 	if out == "" {
 		out = strings.TrimSpace(e.Stdout)

@@ -156,3 +156,28 @@ func TestEmptySecretArgumentIsNoValue(t *testing.T) {
 		})
 	}
 }
+
+func TestRiskRefusalNamesLabelsWhileDiscoveryIsIncomplete(t *testing.T) {
+	private := "undiscovered-private-value"
+	for _, complete := range []bool{false, true} {
+		pipelines := []nodeproto.PipelineDescription{{Name: "land", Args: []nodeproto.ArgumentDescription{}}}
+		if !complete {
+			pipelines = append(pipelines, nodeproto.PipelineDescription{Name: "broken", Error: &apierr.Error{Code: apierr.SDKError, Message: private}})
+		}
+		gate, err := NewDeclarationGate(nodeproto.DescribeDoc{Pipelines: pipelines}, secrets.NewMasker())
+		if err != nil {
+			t.Fatal(err)
+		}
+		refusal := gate.RefuseRisk("land", "push", []string{"prod", "remote"})
+		var failure *apierr.Error
+		if !errors.As(gate.Error(refusal), &failure) || failure.Code != apierr.BadRequest {
+			t.Fatalf("complete=%v: risk refusal was withheld: %v", complete, gate.Error(refusal))
+		}
+		if !strings.Contains(failure.Message, `pipeline "land" requires --sw-allow-risk prod,remote`) || strings.Contains(failure.Message, "withheld") {
+			t.Fatalf("complete=%v: refusal does not name labels and flag: %q", complete, failure.Message)
+		}
+		if strings.Contains(failure.Message, `step "push"`) != complete {
+			t.Fatalf("complete=%v: step attribution %q", complete, failure.Message)
+		}
+	}
+}

@@ -91,13 +91,16 @@ func (r *Resolver) localIndex(now time.Time) IndexResult {
 		}
 	}
 	if r.index.index.Format == 0 {
-		notice := engineid.Notice{Kind: engineid.NoticePolicyUnavailable, Reason: "No verified version policy is cached; local-only execution continues without policy enforcement.", Hint: "Controller runners still require a verified version policy."}
+		notice := engineid.Notice{Kind: engineid.NoticePolicyUnavailable, Reason: "No verified version policy is cached; local-only execution continues without policy enforcement.", Hint: PolicyRefreshHint}
 		if err != nil {
 			notice.Reason += fmt.Sprintf(" Cached policy could not be read: %v", err)
 		}
 		return IndexResult{Index: VerifiedIndex{offline: true}, Notices: []engineid.Notice{notice}}
 	}
 	result := indexResult(r.index, errors.Join(fmt.Errorf("local-only execution uses cached policy without a network refresh"), err))
+	for i := range result.Notices {
+		result.Notices[i].Hint = PolicyRefreshHint
+	}
 	result.Index.localCache = true
 	return result
 }

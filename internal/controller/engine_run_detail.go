@@ -36,6 +36,8 @@ type RunStatusFacts struct {
 	Failures   []store.RunFailure
 	JobResults []store.JobResult
 	Notices    []engineid.Notice
+	// HostIneligible explains ready jobs a local run's hosting machine cannot execute.
+	HostIneligible map[string]string
 }
 
 func (s *EngineController) handleRunDetail(w http.ResponseWriter, r *http.Request, a capability.Authorized) error {
@@ -118,6 +120,9 @@ func runDetailResponse(target capability.Target, facts RunStatusFacts) (controll
 		job := snapshotJob(row)
 		job.Error = errorsByJob[job.ID]
 		job.Summary, job.Annotations = results[job.ID].Summary, results[job.ID].Annotations
+		if reason := facts.HostIneligible[job.ID]; reason != "" && job.StatusDetail == "" {
+			job.StatusDetail = reason
+		}
 		detail.Jobs = append(detail.Jobs, job)
 	}
 	if err := fillJobDeclarations(detail.Jobs, nodes, facts.Snapshot); err != nil {
@@ -265,7 +270,7 @@ func (s *EngineController) readStoredRunStatus(ctx context.Context, team store.T
 }
 
 func (s *EngineController) runViewStatus(ctx context.Context, view store.RunView) (RunStatusFacts, error) {
-	facts := RunStatusFacts{Reason: view.Reason, Snapshot: view.Snapshot, Attempts: view.Attempts, Logs: view.Logs, Failures: view.Failures, JobResults: view.JobResults}
+	facts := RunStatusFacts{Reason: view.Reason, Snapshot: view.Snapshot, Attempts: view.Attempts, Logs: view.Logs, Failures: view.Failures, JobResults: view.JobResults, HostIneligible: view.HostIneligible}
 	if view.Snapshot.Run.Spec != nil {
 		if s.VersionPolicy == nil {
 			return RunStatusFacts{}, versionPolicyUnavailable()

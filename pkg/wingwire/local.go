@@ -22,6 +22,8 @@ type LocalControlStatus struct {
 	HeldLeases           int       `json:"held_leases"`
 	DashboardConnections int       `json:"dashboard_connections"`
 	IdleSince            time.Time `json:"idle_since"`
+	// DashboardURL is the dashboard origin while it serves, never a sign-in link.
+	DashboardURL string `json:"dashboard_url,omitempty"`
 }
 
 func (*LocalControl) wireType() MessageType       { return TypeLocalControl }

@@ -21,6 +21,7 @@ type DeclarationGate struct {
 	defaults []SecretValue
 	// safety: pointer identity is what proves a refusal is the host's own text.
 	unregistered *apierr.Error
+	risk         *apierr.Error
 }
 
 // DeclaredArguments is the resolved argument set and its sealing projection.
@@ -64,6 +65,39 @@ func NewDeclarationGate(doc nodeproto.DescribeDoc, masker *secrets.Masker) (*Dec
 }
 
 func (g *DeclarationGate) Complete() bool { return g != nil && g.complete }
+
+// IncompleteReason explains, from host-classified codes only, why discovery is
+// incomplete and what makes withheld output visible. It is empty when complete.
+func (g *DeclarationGate) IncompleteReason() string {
+	if g == nil || g.complete {
+		return ""
+	}
+	var codes []string
+	failed := 0
+	for _, pipeline := range g.doc.Pipelines {
+		if pipeline.Error == nil {
+			continue
+		}
+		failed++
+		code := apierr.SDKError
+		if slices.ContainsFunc(apierr.Codes, func(definition apierr.Definition) bool { return definition.Code == pipeline.Error.Code }) {
+			code = pipeline.Error.Code
+		}
+		if !slices.Contains(codes, string(code)) {
+			codes = append(codes, string(code))
+		}
+	}
+	slices.Sort(codes)
+	noun, pronoun := "pipelines", "their"
+	if failed == 1 {
+		noun, pronoun = "pipeline", "its"
+	}
+	reason := fmt.Sprintf("%d registered %s failed discovery (%s), so %s secret declarations are unknown", failed, noun, strings.Join(codes, ", "), pronoun)
+	if len(codes) == 1 && codes[0] == string(apierr.IsolatedHomeRequired) {
+		return reason + `; to see this output, retry with HOME="$(mktemp -d)" SPARKWING_HOME="$(mktemp -d)" before the sparkwing command`
+	}
+	return reason + "; this output and " + pronoun + " errors stay hidden until every registered pipeline plans without error"
+}
 
 func (g *DeclarationGate) Resolve(name string, args map[string]string, secretArgs []string) (DeclaredArguments, error) {
 	return g.resolve(name, args, secretArgs, false)
@@ -175,6 +209,27 @@ func (g *DeclarationGate) refuseUnregistered(entrypoint string) error {
 	return g.unregistered
 }
 
+// RefuseRisk composes the refusal for risk labels the run did not allow. Label
+// names and the invoked pipeline stay visible because the caller must repeat
+// them on the command line; the step name is author text, withheld until every
+// pipeline's declarations are known.
+func (g *DeclarationGate) RefuseRisk(pipeline, step string, labels []string) error {
+	masked := make([]string, len(labels))
+	for i, label := range labels {
+		masked[i] = g.masker.Mask(label)
+	}
+	subject := fmt.Sprintf("pipeline %q", g.masker.Mask(pipeline))
+	if g.Complete() && step != "" {
+		subject = fmt.Sprintf("step %q in %s", g.masker.Mask(step), subject)
+	}
+	g.risk = &apierr.Error{
+		Code:    apierr.BadRequest,
+		Message: fmt.Sprintf("%s requires --sw-allow-risk %s to confirm (or --sw-dry-run to preview)", subject, strings.Join(masked, ",")),
+		Hint:    "a run narrowed with --sw-only, --sw-start-at or --sw-stop-at needs only the risks of the steps it selects",
+	}
+	return g.risk
+}
+
 // Error withholds unclassified author errors and sanitizes classified payloads.
 func (g *DeclarationGate) Error(err error) error {
 	var canonical *apierr.Error
@@ -183,6 +238,9 @@ func (g *DeclarationGate) Error(err error) error {
 	}
 	if g != nil && g.unregistered != nil && errors.Is(err, g.unregistered) {
 		return g.unregistered
+	}
+	if g != nil && g.risk != nil && errors.Is(err, g.risk) {
+		return g.risk
 	}
 	if !g.Complete() {
 		code := apierr.SDKError

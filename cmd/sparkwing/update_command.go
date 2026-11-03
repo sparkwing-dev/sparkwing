@@ -21,6 +21,8 @@ type updateCommand struct {
 	check    func(string, bool, bool) updateCheckReport
 	install  func(string, bool, bool) (updateReceipt, error)
 	units    func(context.Context) (wingd.ManagedUnitManager, error)
+	policy   func(context.Context) versionPolicyStatus
+	cached   func(context.Context) versionPolicyStatus
 }
 
 func runUpdate(inv clisurface.Invocation) error {
@@ -29,7 +31,7 @@ func runUpdate(inv clisurface.Invocation) error {
 		check: func(version string, force, override bool) updateCheckReport {
 			return gatherUpdateCheck("cli", version, force, override)
 		},
-		units: resolveUpdateUnits,
+		units: resolveUpdateUnits, policy: refreshVersionPolicy, cached: cachedVersionPolicy,
 	}
 	return command.run(context.Background(), inv)
 }
@@ -48,7 +50,12 @@ func (c updateCommand) run(ctx context.Context, inv clisurface.Invocation) error
 		return &clisurface.UsageError{Path: inv.Command.Path, Message: "--version must be a canonical release tag such as v0.48.1; omit it for latest"}
 	}
 	if inv.Bool("dry-run") {
-		return renderUpdateCheck(c.out, c.check(inv.Value("version"), inv.Bool("force"), inv.Bool("override-hold")), mode)
+		report := c.check(inv.Value("version"), inv.Bool("force"), inv.Bool("override-hold"))
+		if c.cached != nil {
+			policy := c.cached(ctx)
+			report.VersionPolicy = &policy
+		}
+		return renderUpdateCheck(c.out, report, mode)
 	}
 	units, err := c.units(ctx)
 	if err != nil {
@@ -68,6 +75,7 @@ func (c updateCommand) run(ctx context.Context, inv clisurface.Invocation) error
 		return fmt.Errorf("CLI %s is installed at %s, but managed-unit refresh failed: %w; run sparkwing doctor, then sparkwing update --version %s to retry", result.After.Version, result.After.Path, err, result.After.Version)
 	}
 	result.ManagedUnits = "refreshed"
+	result.VersionPolicy = c.refreshPolicy(ctx)
 	if result.Status == "updated" {
 		result.RunnerServices = updateRunnerServicesNote
 	}
@@ -81,4 +89,12 @@ func validateManagedUpdate(result updateReceipt) error {
 		return &apierr.Error{Code: apierr.IntegrityFailure, Message: "installed CLI identity is unconfirmed; managed units were not refreshed", Hint: "inspect the installed binary with sparkwing doctor"}
 	}
 	return nil
+}
+
+func (c updateCommand) refreshPolicy(ctx context.Context) *versionPolicyStatus {
+	if c.policy == nil {
+		return nil
+	}
+	status := c.policy(ctx)
+	return &status
 }

@@ -2,8 +2,10 @@ package controller
 
 import (
 	"context"
+	"errors"
 	"net/http"
 
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
@@ -47,6 +49,10 @@ func (s *Server) handleOutput(w http.ResponseWriter, r *http.Request, a capabili
 		read = tenant.ReadChildOutput
 	}
 	object, err := read(r.Context(), a)
+	if errors.Is(err, store.ErrNoOutput) {
+		// safety: only absence is no_output; bytes missing behind a live record stay blob_missing and fail readers.
+		return &apierr.Error{Code: apierr.NotFound, Message: "job has no committed output", Details: map[string]any{"reason": apierr.ReasonNoOutput}}
+	}
 	if err != nil {
 		return dataRouteError(err)
 	}

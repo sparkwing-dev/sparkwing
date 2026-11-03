@@ -32,6 +32,7 @@ type planningLogs struct {
 	err            error
 	timer          *time.Timer
 	closed         bool
+	withheld       string
 }
 
 func (l *planningLogs) write(ctx context.Context, record nodeproto.FrameLog) error {
@@ -74,6 +75,12 @@ func (l *planningLogs) gate() {
 	}
 }
 
+func (l *planningLogs) explain(reason string) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.withheld = reason
+}
+
 func (l *planningLogs) release(ctx context.Context) error {
 	l.mu.Lock()
 	defer l.mu.Unlock()
@@ -100,7 +107,11 @@ func (l *planningLogs) finish(ctx context.Context) error {
 		l.timer = nil
 	}
 	if l.err == nil && !l.known && len(l.buffer)+l.dropped > 0 {
-		l.err = l.sink(ctx, l.masker.Log(nodeproto.FrameLog{Level: "warn", Message: fmt.Sprintf("sparkwing: output withheld because secret declarations were unavailable (%d lines)", len(l.buffer)+l.dropped)}))
+		message := fmt.Sprintf("sparkwing: output withheld because secret declarations were unavailable (%d lines)", len(l.buffer)+l.dropped)
+		if l.withheld != "" {
+			message += ": " + l.withheld
+		}
+		l.err = l.sink(ctx, l.masker.Log(nodeproto.FrameLog{Level: "warn", Message: message}))
 	}
 	if l.known && l.err == nil && l.presenter != nil {
 		for _, frame := range l.presenter.Flush() {

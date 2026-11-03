@@ -1,11 +1,13 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
 
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 )
 
 type stepRiskFinding struct {
@@ -38,12 +40,14 @@ func risksIn(schema nodeproto.PipelineDescription) []stepRiskFinding {
 	return out
 }
 
+// safety: a narrowed run defers to plan acceptance, the first point that knows
+// which jobs and steps its selection keeps.
 func enforceRiskGate(
 	pipelineName string,
 	findings []stepRiskFinding,
 	wf runFlags,
 ) error {
-	if wf.dryRun {
+	if wf.dryRun || wf.only != "" || wf.startAt != "" || wf.stopAt != "" {
 		return nil
 	}
 
@@ -90,6 +94,23 @@ func enforceRiskGate(
 		StepID:        stepID,
 		MissingLabels: allMissing,
 	}
+}
+
+func riskFlags(options runspec.Options) runFlags {
+	return runFlags{
+		allow: options.AllowRisk.Value, dryRun: options.DryRun.Value,
+		only: options.Only.Value, startAt: options.StartAt.Value, stopAt: options.StopAt.Value,
+	}
+}
+
+// hack: the gate composes the refusal so incomplete discovery names labels
+// instead of withholding the whole message.
+func riskRefusal(gate *runspec.DeclarationGate, err error) error {
+	var blocked *riskBlockedError
+	if errors.As(err, &blocked) {
+		return gate.RefuseRisk(blocked.Pipeline, blocked.StepID, blocked.MissingLabels)
+	}
+	return gate.Error(err)
 }
 
 func contains(xs []string, s string) bool {

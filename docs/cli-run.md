@@ -59,6 +59,6 @@ Cache-from reads only authorized verified-default-branch memo/artifacts/depcache
 | `--sw-hash-all-files` | Include all files when computing the local binary cache key. |
 | `--sw-allow-unadmitted` | Use an exclusive in-process local controller for CI admission. |
 | `--sw-dry-run` | Preview using declared dry-run bodies and steps marked safe. |
-| `--sw-allow-risk LABEL[,LABEL...]` | Authorize the listed pipeline risks. Repeatable; comma-separated values are accepted. |
+| `--sw-allow-risk LABEL[,LABEL...]` | Authorize the listed pipeline risks. A run narrowed with --sw-only, --sw-start-at or --sw-stop-at needs only the risks of the steps it selects. Repeatable; comma-separated values are accepted. |
 | `--sw-index PATH` | Capture a Git index for local staged-content checks. |
-| `--sw-run-handle-file PATH` | Write the submitted run handle to this file. |
+| `--sw-run-handle-file PATH` | Write the submitted run handle to this file once at intake; it names the run and does not track its status. |

@@ -530,6 +530,8 @@ func referenceError(err error, latest bool) error {
 		return err
 	}
 	reason := fmt.Sprint(e.Details["reason"])
+	// safety: hosts report an unfinished, skipped, dry-run or expired output as not_found with reason no_output;
+	// blob_missing means bytes behind a live record are gone, which must fail the reader.
 	if (e.Code == apierr.NotFound && (latest || reason == string(apierr.ReasonNoOutput))) || (e.Code == apierr.Conflict && reason == string(apierr.ReasonNotReady)) {
 		return errors.Join(ErrRefAbsent, err)
 	}

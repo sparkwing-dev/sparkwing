@@ -73,6 +73,8 @@ type LocalStatus struct {
 	PID                      int
 	Version                  string
 	Activity                 LocalActivity
+	// DashboardURL is the serving dashboard's origin, empty while it is not serving.
+	DashboardURL string
 }
 
 // ManagedUnitKind gives schedules and the controller one upgrade path.

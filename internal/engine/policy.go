@@ -96,6 +96,9 @@ func validateRestriction(r Restriction, p VersionIndex, minimum bool) error {
 	return nil
 }
 
+// PolicyRefreshHint names the command that caches a verified version policy for local runs, which never fetch it.
+const PolicyRefreshHint = "Run `sparkwing update` to cache the verified version policy; controller runners still require one."
+
 // Policy returns an independent policy snapshot.
 func (v VerifiedIndex) Policy() VersionIndex {
 	p := v.index
@@ -117,7 +120,7 @@ func Evaluate(index VerifiedIndex, version string, now time.Time) ([]engineid.No
 	}
 	// safety: a release newer than the never-refreshed cache cannot be restricted by it.
 	if index.localCache && !slices.ContainsFunc(index.index.Versions, func(v engineid.VersionInfo) bool { return v.Version == version }) {
-		return []engineid.Notice{{Kind: engineid.NoticePolicyUnavailable, Version: version, Reason: "The cached version policy does not list this release; local-only execution continues without policy enforcement.", Hint: "Controller runners still require a verified version policy."}}, nil
+		return []engineid.Notice{{Kind: engineid.NoticePolicyUnavailable, Version: version, Reason: "The cached version policy does not list this release; local-only execution continues without policy enforcement.", Hint: PolicyRefreshHint}}, nil
 	}
 	return evaluate(index, version, now, UpgradeCommand)
 }

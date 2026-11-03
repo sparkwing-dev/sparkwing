@@ -22,11 +22,12 @@ export class ExecError extends Error implements ExecResult {
   readonly terminated: Termination;
 
   constructor(result: ExecResult, terminated: Termination = "", cause?: unknown) {
+    const command = boundedCommand(result.command);
     let message = terminated
-      ? `command terminated by ${terminated}: ${result.command}`
+      ? `command terminated by ${terminated}: ${command}`
       : result.exitCode === exitNotStarted
-        ? `command failed to start: ${result.command}`
-        : `command failed (exit ${result.exitCode}): ${result.command}`;
+        ? `command failed to start: ${command}`
+        : `command failed (exit ${result.exitCode}): ${command}`;
     const output = result.stderr.trim() || result.stdout.trim();
     if (cause instanceof Error && (terminated || result.exitCode === exitNotStarted)) message += `: ${cause.message}`;
     else if (output) message += `\n${output}`;
@@ -38,6 +39,17 @@ export class ExecError extends Error implements ExecResult {
     this.exitCode = result.exitCode;
     this.terminated = terminated;
   }
+}
+
+const execErrorCommandBytes = 512;
+
+// The message repeats a bounded prefix so a generated argument list cannot bury the failure; command keeps it whole.
+function boundedCommand(command: string): string {
+  const bytes = Buffer.from(command);
+  if (bytes.length <= execErrorCommandBytes) return command;
+  let cut = execErrorCommandBytes;
+  while (cut > 0 && ((bytes[cut] ?? 0) & 0xc0) === 0x80) cut--;
+  return `${bytes.subarray(0, cut).toString()}... [${bytes.length - cut} more bytes]`;
 }
 
 export function registerCommandContext(ctx: Context, emit: Emitter, env: Readonly<Record<string, string>> = {}): void {

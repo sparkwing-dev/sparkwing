@@ -159,3 +159,14 @@ func TestEnforceRiskGate_AuthorDefinedLabel(t *testing.T) {
 		t.Fatalf("--sw-allow rotates-key should pass: %v", err)
 	}
 }
+
+func TestEnforceRiskGate_NarrowedRunDefersToPlanAcceptance(t *testing.T) {
+	for _, wf := range []runFlags{{only: "review"}, {stopAt: "review"}, {startAt: "gate"}} {
+		if err := enforceRiskGate("land", prodFinding(), wf); err != nil {
+			t.Fatalf("%+v: narrowed run refused before its selection was known: %v", wf, err)
+		}
+	}
+	if err := enforceRiskGate("land", prodFinding(), runFlags{}); err == nil {
+		t.Fatal("whole-plan run skipped the risk gate")
+	}
+}

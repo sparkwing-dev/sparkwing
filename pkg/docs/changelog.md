@@ -20,6 +20,11 @@ unlock.
 
 ## [Unreleased]
 
+### Added
+
+- **CLI:** `sparkwing dashboard status` prints the dashboard URL
+  Status said the dashboard was running but not where. While it serves, `dashboard status` and `daemon status` now report its address as `url` in JSON and a `dashboard:` line in pretty output. The URL is the dashboard origin, not a sign-in link; `sparkwing dashboard open` still mints that. The local controller reports it in a new optional `dashboard_url` field of `local_control_status`; an older controller leaves it out.
+
 ### Fixed
 
 - **Cloud:** Name the pool ceiling when a job asks for more CPU or memory than it allows
@@ -41,8 +46,24 @@ unlock.
 - **CLI:** Say a pre-v0.68 SDK pin needs `sparkwing upgrade`
   Running a repository whose SDK pin predates v0.68.0 failed with `integrity_failure: release manifest has duplicate, unknown or malformed entries` and told the user not to execute unverified bytes. When the release's signatures and digest verify and only its list of executables is the older layout, it now fails with `version_unsupported`, says the pin is older than v0.68.0, the oldest release the CLI can run as a pipeline engine, and names `sparkwing upgrade` as the fix. A bad signature or digest stays `integrity_failure`, and the older release is never executed.
 
+- **CLI:** Check risk labels only on the steps a narrowed run executes, and name them when discovery is incomplete
+  `--sw-only`, `--sw-start-at` and `--sw-stop-at` runs still had to pass `--sw-allow-risk` for risky steps they left out, so running a pipeline's checks without its risky push meant allowing the push. Plan acceptance now refuses only when a selected step carries an unallowed label, before any job starts, naming the step, job, labels and flag. A run of the whole plan is still refused before intake. When another pipeline's discovery had failed, the refusal read `pipeline discovery failed (details withheld: secrets not yet known)`; it now names the pipeline, the missing labels and `--sw-allow-risk`, withholding only the step name.
+- **SDK:** `Ref.TryGet` and TypeScript `tryGet` report a skipped or dry-run upstream as absent
+  Reading an upstream job's output when that job was skipped, had not finished, or ran in a dry run without a dry-run body failed the step with `blob is absent or tombstoned`, and Go `TryGet` panicked. The controller's job output route now reports a job with no committed output, including an expired one, as `not_found` with reason `no_output`, and both SDKs return no value for it. Bytes missing behind a recorded output stay `blob_missing` and still fail the step. `Get` still fails on any missing output. An older controller keeps reporting the absent case as `blob_missing`, so `TryGet` fails there as before.
+- **CLI:** Say why planning output is withheld and how to see it
+  When any registered pipeline failed discovery, every run printed `output withheld because secret declarations were unavailable (N lines)` with no cause. The notice now gives how many pipelines failed and their error codes. When the only failure is a pipeline that requires an isolated home, it says to retry with `HOME="$(mktemp -d)" SPARKWING_HOME="$(mktemp -d)"`. Otherwise it says the output stays hidden until every registered pipeline plans without error. Pipeline names and error text stay withheld.
+- **runner:** A step cancelled by fail-fast says which sibling failed
+  When one step failed and fail-fast cancelled its running siblings, each sibling reported the error its own body returned for the interrupted command, often with that step's own remedy, as if it had failed on its own. Cancelled siblings, started or not, now report `cancelled because step "NAME" failed`; the failed step keeps its error.
+- **SDK:** Command failure messages cap a long command line
+  `ExecError` messages in Go and TypeScript repeated the whole command, so a step that passed hundreds of test names to `-test.run` buried the failure under the argument list. The message now repeats the first 512 bytes of the command followed by `... [N more bytes]`; the `Command` / `command` field keeps the full text and the command's output still follows.
+- **CLI + web:** Say why a local run's job waits when its machine cannot run it
+  A local run whose job required runner labels the machine running it does not report, such as `Requires("host=build-box")` on a laptop, left the job `pending` with an empty detail for as long as the run lived, because only that machine ever executes a local run's jobs. `runs status` (pretty and JSON `status_detail`) and the dashboard now say the job waits on those labels, list the labels the machine reports, and say to cancel the run and start it where the labels apply or change the job's requirements.
+- **CLI:** `sparkwing update` caches the version policy local runs read, and doctor reports it
+  Every local run warned that no verified version policy was cached, because local runs never fetch it and the commands that did kept it in `~/.cache/sparkwing/engines` while local runs read `<sparkwing home>/engines`. Engine releases and the policy now share `<sparkwing home>/engines`; previously cached engines download again once. `sparkwing update` refreshes the signed policy there and reports it as `version_policy`. `update --dry-run` and `doctor` report the cached policy's status, latest release, publication time and age without writing anything, and the local-run warning now says to run `sparkwing update`. Local runs stay offline.
 ### Changed
 
+- **CLI (Breaking):** `--sw-run-handle-file` writes an identity-only handle without `status`
+  The handle recorded `"status":"pending"` at intake and kept it after the run finished, so a reader polling it saw a run that never ended. The handle is a write-once identity: it now holds only `schema_version`, `run_id` and `pipeline`. Read `run_id` and query `sparkwing runs status --run RUN_ID` for the current state. See the [migration guide](docs/migrations/_unreleased.md#run-handle-files-carry-no-status).
 - **scaffold:** `const FallbackSDKVersion` pins v0.68.6, so a fresh scaffold compiles against that release.
 
 ## [v0.68.6] - 2026-11-03
