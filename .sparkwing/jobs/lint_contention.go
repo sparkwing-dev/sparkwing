@@ -63,10 +63,14 @@ func fastLintCommand(cores int, pkgs []string) string {
 }
 
 func runGolangciLintWithin(ctx context.Context, deadline time.Duration) error {
-	return lintModules(ctx, deadline, lintCommand, "waiting for the box-wide lock if held, then linting")
+	return lintModules(ctx, deadline, lintCommand, false)
 }
 
-func lintModules(ctx context.Context, deadline time.Duration, command func(base string) string, doing string) error {
+func lintModules(ctx context.Context, deadline time.Duration, command func(base string) string, holdsLock bool) error {
+	doing := "waiting for the box-wide lock if held, then linting"
+	if holdsLock {
+		doing = "holding the box-wide lock, linting"
+	}
 	dirs, err := committedModuleDirs(ctx)
 	if err != nil {
 		return fmt.Errorf("golangci-lint: could not run -- listing the modules to lint failed: %w", err)
@@ -97,7 +101,7 @@ func lintModules(ctx context.Context, deadline time.Duration, command func(base 
 			Env("GOLANGCI_LINT_CACHE", cacheDir)
 		if _, runErr := cmd.Run(); runErr != nil {
 			failures = append(failures,
-				fmt.Sprintf("%s: %s", dir, describeLintFailure(lintCtx, time.Since(stepStart), runErr)))
+				fmt.Sprintf("%s: %s", dir, describeLintFailure(lintCtx, time.Since(stepStart), runErr, holdsLock)))
 			continue
 		}
 		sparkwing.Info(lintCtx, "golangci-lint: %s clean (%s)", dir, time.Since(stepStart).Round(time.Second))
@@ -115,7 +119,7 @@ func describeLintScope(dirs []string, baseline string) string {
 		len(dirs), strings.Join(dirs, ", "), baseline)
 }
 
-func describeLintFailure(ctx context.Context, waited time.Duration, err error) string {
+func describeLintFailure(ctx context.Context, waited time.Duration, err error, holdsLock bool) string {
 	var execErr *sparkwing.ExecError
 	if errors.As(err, &execErr) && strings.Contains(execErr.Stdout+execErr.Stderr, golangciContention) {
 		return "golangci-lint: could not run -- another golangci-lint holds the box-wide " +
@@ -127,6 +131,10 @@ func describeLintFailure(ctx context.Context, waited time.Duration, err error) s
 			"so the packages it never reached were not judged and anything it printed is partial. "+
 			"Raise run.timeout in .golangci.yml rather than acting on the findings above.",
 			waited.Round(time.Second))
+	}
+	if errors.Is(ctx.Err(), context.DeadlineExceeded) && holdsLock {
+		return fmt.Sprintf("golangci-lint: could not finish -- linting itself took more than its deadline "+
+			"(%s so far, the box-wide lock held throughout), so nothing was learned about this tree.", waited.Round(time.Second))
 	}
 	if errors.Is(ctx.Err(), context.DeadlineExceeded) {
 		return fmt.Sprintf("golangci-lint: could not run -- no result after %s. Most often "+

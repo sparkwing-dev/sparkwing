@@ -18,7 +18,7 @@ func TestLintCommandWaitsForTheBoxWideLockInsteadOfFailingOnIt(t *testing.T) {
 }
 
 func TestDescribeLintFailureOnAnExpiredWaitReportsTheWaitNotACause(t *testing.T) {
-	got := describeLintFailure(expiredContext(t), 7*time.Second, errors.New("command failed (exit 1)"))
+	got := describeLintFailure(expiredContext(t), 7*time.Second, errors.New("command failed (exit 1)"), false)
 
 	if !strings.Contains(got, "could not run") {
 		t.Fatalf("expired wait did not report could-not-run: %s", got)
@@ -44,7 +44,7 @@ func TestDescribeLintFailureNamesContentionFromTheLinterOwnMessage(t *testing.T)
 		ExitCode: 3,
 	}
 
-	got := describeLintFailure(context.Background(), time.Second, err)
+	got := describeLintFailure(context.Background(), time.Second, err, false)
 
 	if !strings.Contains(got, "could not run") {
 		t.Fatalf("contention signature did not report could-not-run: %s", got)
@@ -61,7 +61,7 @@ func TestDescribeLintFailureReportsRealFindingsUnchanged(t *testing.T) {
 		ExitCode: 1,
 	}
 
-	got := describeLintFailure(context.Background(), time.Second, err)
+	got := describeLintFailure(context.Background(), time.Second, err, false)
 
 	if strings.Contains(got, "could not run") {
 		t.Fatalf("a genuine finding was excused as contention: %s", got)
@@ -87,7 +87,7 @@ func TestDescribeLintFailureSeparatesTheLinterOwnTimeoutFromFindings(t *testing.
 		ExitCode: 4,
 	}
 
-	got := describeLintFailure(context.Background(), 5*time.Minute, err)
+	got := describeLintFailure(context.Background(), 5*time.Minute, err, false)
 
 	if !strings.Contains(got, "could not finish") {
 		t.Fatalf("a run that stopped early read as a completed one: %s", got)
@@ -107,9 +107,16 @@ func TestDescribeLintFailureDoesNotExcuseAFindingThatEchoesTheTimeoutText(t *tes
 		ExitCode: 1,
 	}
 
-	got := describeLintFailure(context.Background(), time.Second, err)
+	got := describeLintFailure(context.Background(), time.Second, err, false)
 
 	if strings.Contains(got, "could not finish") {
 		t.Fatalf("a finding quoting the timeout text was excused as an unfinished run: %s", got)
+	}
+}
+
+func TestDescribeLintFailureWhileHoldingTheLockBlamesTheLintTime(t *testing.T) {
+	got := describeLintFailure(expiredContext(t), 4*time.Minute, errors.New("command failed (exit 1)"), true)
+	if !strings.Contains(got, "linting itself took more than its deadline") || strings.Contains(got, "held by another run") {
+		t.Fatalf("a lint that ran out of time under its own lock was blamed on contention: %s", got)
 	}
 }
