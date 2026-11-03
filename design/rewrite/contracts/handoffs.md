@@ -1423,3 +1423,7 @@ Sparkwing should support pipelines that coordinate agents and people: durable st
 
 - 90: the `nodes.trusted_host` column ships as schema 29 with the first real forward migration, not a store reset. Opening a schema-28 store adds the column (default 0) and records version 29, on SQLite and PostgreSQL alike; production and staging upgrade in place. Migrations are forward-only: an older binary still refuses a newer store, so a rollback restores the database snapshot too. This supersedes the decision-73 note that real forward migrations wait for launch.
 - 91: a launcher job requesting more CPU or memory than its pool's ceiling fails at once with an error naming the ceiling and the request, and its unstarted credit hold is refunded, instead of pending until cancelled. Ceilings are unchanged. For comparison, CircleCI rejects an unavailable resource class at submission; GitHub Actions keeps a job for an unavailable runner queued up to 24 hours, then fails it.
+
+## 2026-11-03 Korey decision 92: deploy the next release to production after staging
+
+Korey authorized deploying the release after v0.68.5 to production once it passes staging, so production grid 2 runs against the code that fixes grid 1. The production upgrade takes an RDS snapshot first, verifies and copies the signed release images by digest, changes only image pins through GitOps, and keeps the previous release's images pinned for rollback. Grid 2 runs as QA fixture teams only.
