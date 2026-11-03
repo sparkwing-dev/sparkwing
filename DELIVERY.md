@@ -12,6 +12,34 @@ main, then applies Xwing's default archive retention. Public releases remain
 separate. Stateful CLI commands use their normal configuration; use a candidate
 launcher when testing isolated tool state.
 
+## Landing a change
+
+Agents and the lead land every change with `sparkwing run land`, so each
+landing goes through Sparkwing itself. From a clean, rebased work branch:
+
+```bash
+sparkwing run land --sw-dry-run                           # preview; nothing is pushed
+sparkwing run land --sw-stop-at verify                    # gate and review, stop before the push
+sparkwing run land --sw-allow-risk destructive,prod       # land on main
+```
+
+The `preconditions` job refuses a dirty checkout, a detached HEAD, `main`
+itself and a branch that does not contain a freshly fetched `origin/main`, and
+names the command that fixes each. The gate (the same jobs as
+`sparkwing run gate`) and the review (the same job as `sparkwing run review`,
+under `.review.yaml`) then run in parallel. Every change is reviewed, docs and
+comment changes included; the review job never skips by size or path. Pass
+`-- --brief '...'` or `-- --skip 'F2=reason'` as for the review pipeline.
+
+The `land` job's `verify` step requires the review record's tree to be HEAD's
+tree with result `pass`, HEAD unchanged since the preconditions and
+`origin/main` still its ancestor. Its `push` step runs
+`git push origin <HEAD>:refs/heads/main` without force and carries the
+`destructive` and `prod` risks, as release's `push-tag` does. A rejected push
+means main moved: rebase onto `origin/main` and rerun. The job's output is the
+landing record (branch, commit, tree, base, gate run, review record path and
+result). The gate's `test` step summary lists the slowest packages and tests.
+
 ## Checks
 
 ### Cutting a release
