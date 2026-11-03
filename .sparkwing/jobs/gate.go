@@ -40,9 +40,18 @@ func (Gate) Examples() []sparkwing.Example {
 }
 
 func (p *Gate) Plan(_ context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, rc sparkwing.RunContext) error {
-	sparkwing.Job(plan, rc.Pipeline, p).Timeout(gateRunTimeout).Cache(lintCache())
-	sparkwing.Job(plan, "race-touched", runGateRaceTouched).Timeout(raceTouchedStepTimeout)
+	gateJobs(plan, p, rc.Pipeline)
 	return nil
+}
+
+// safety: land composes the gate through this one function and orders its
+// push after every node returned, so a job added to the gate here is one the
+// push waits for.
+func gateJobs(plan *sparkwing.Plan, p *Gate, id string) []*sparkwing.JobNode {
+	return []*sparkwing.JobNode{
+		sparkwing.Job(plan, id, p).Timeout(gateRunTimeout).Cache(lintCache()),
+		sparkwing.Job(plan, "race-touched", runGateRaceTouched).Timeout(raceTouchedStepTimeout),
+	}
 }
 
 // perf: four-core runners need explicit per-process limits for heavy suites.
@@ -694,6 +703,11 @@ func forEachGoModule(ctx context.Context, label, cmd, home string) error {
 	if err != nil {
 		return err
 	}
+	var timings *goTestTimings
+	if label == "go test" {
+		timings = &goTestTimings{}
+		defer timings.report(ctx, time.Now())
+	}
 	var failures []string
 	for _, dir := range dirs {
 		packages, err := modulePackageArgs(ctx, dir, label != "go build")
@@ -709,7 +723,7 @@ func forEachGoModule(ctx context.Context, label, cmd, home string) error {
 		if home != "" {
 			script = productTestScript(script, home)
 		}
-		if _, err := sparkwing.Bash(ctx, script).Run(); err != nil {
+		if err := runModuleCommand(ctx, script, timings); err != nil {
 			failures = append(failures, describeModuleFailure(dir, err))
 		}
 	}
