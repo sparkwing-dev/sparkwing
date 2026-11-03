@@ -131,3 +131,35 @@ func TestTestStepNamesTheFailingTestThroughJSON(t *testing.T) {
 		t.Errorf("failure carries raw JSON events:\n%v", err)
 	}
 }
+
+func TestGoTestTranscriptKeepsATimedOutTestsOutput(t *testing.T) {
+	tr := newGoTestTranscript(nil)
+	for _, line := range []string{
+		`{"Action":"output","Package":"ex/t","Test":"TestHang","Output":"=== RUN   TestHang\n"}`,
+		`{"Action":"output","Package":"ex/t","Test":"TestHang","Output":"panic: test timed out after 1s\n"}`,
+		`{"Action":"output","Package":"ex/t","Output":"FAIL\tex/t\t1.010s\n"}`,
+		`{"Action":"fail","Package":"ex/t","Elapsed":1.01}`,
+	} {
+		tr.add([]byte(line))
+	}
+	if !strings.Contains(tr.plain(), "panic: test timed out after 1s") {
+		t.Fatalf("the timeout panic was dropped:\n%s", tr.plain())
+	}
+}
+
+func TestGoTestTimingsLeaveOutTestsACachedPackageReplays(t *testing.T) {
+	tr := newGoTestTranscript(nil)
+	for _, line := range []string{
+		`{"Action":"pass","Package":"ex/c","Test":"TestOld","Elapsed":9}`,
+		`{"Action":"output","Package":"ex/c","Output":"ok  \tex/c\t(cached)\n"}`,
+		`{"Action":"pass","Package":"ex/c","Elapsed":9}`,
+		`{"Action":"pass","Package":"ex/n","Test":"TestNew","Elapsed":1}`,
+		`{"Action":"output","Package":"ex/n","Output":"ok  \tex/n\t1.0s\n"}`,
+		`{"Action":"pass","Package":"ex/n","Elapsed":1}`,
+	} {
+		tr.add([]byte(line))
+	}
+	if len(tr.tests) != 1 || tr.tests[0].test != "TestNew" {
+		t.Fatalf("ranked tests = %+v; want only the test that ran", tr.tests)
+	}
+}

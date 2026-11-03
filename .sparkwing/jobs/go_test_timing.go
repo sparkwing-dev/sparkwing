@@ -189,12 +189,13 @@ type goTestTranscript struct {
 	lines    []string
 	buffered map[string][]string
 	cached   map[string]bool
+	pending  map[string][]goTestTiming
 	packages []goPackageTiming
 	tests    []goTestTiming
 }
 
 func newGoTestTranscript(emit func(string)) *goTestTranscript {
-	return &goTestTranscript{emit: emit, buffered: map[string][]string{}, cached: map[string]bool{}}
+	return &goTestTranscript{emit: emit, buffered: map[string][]string{}, cached: map[string]bool{}, pending: map[string][]goTestTiming{}}
 }
 
 func (tr *goTestTranscript) print(line string) {
@@ -247,9 +248,7 @@ func (tr *goTestTranscript) output(ev goTestEvent) {
 
 func (tr *goTestTranscript) result(ev goTestEvent) {
 	if ev.Test == "" {
-		if ev.Package != "" && (ev.Action != "skip" || ev.Elapsed > 0) {
-			tr.packages = append(tr.packages, goPackageTiming{pkg: ev.Package, elapsed: ev.Elapsed, cached: tr.cached[ev.Package], failed: ev.Action == "fail"})
-		}
+		tr.packageResult(ev)
 		return
 	}
 	key := ev.Package + "\x00" + ev.Test
@@ -259,8 +258,37 @@ func (tr *goTestTranscript) result(ev goTestEvent) {
 		}
 	}
 	delete(tr.buffered, key)
-	if !strings.Contains(ev.Test, "/") && !tr.cached[ev.Package] {
-		tr.tests = append(tr.tests, goTestTiming{pkg: ev.Package, test: ev.Test, elapsed: ev.Elapsed})
+	if !strings.Contains(ev.Test, "/") {
+		tr.pending[ev.Package] = append(tr.pending[ev.Package], goTestTiming{pkg: ev.Package, test: ev.Test, elapsed: ev.Elapsed})
+	}
+}
+
+// safety: a cached package replays its tests before the result line that says
+// so, and a timed-out test never reports its own result, so test timings and
+// unreported output settle only at the package's result.
+func (tr *goTestTranscript) packageResult(ev goTestEvent) {
+	prefix := ev.Package + "\x00"
+	var orphans []string
+	for key := range tr.buffered {
+		if strings.HasPrefix(key, prefix) {
+			orphans = append(orphans, key)
+		}
+	}
+	sort.Strings(orphans)
+	for _, key := range orphans {
+		if ev.Action == "fail" {
+			for _, line := range tr.buffered[key] {
+				tr.print(line)
+			}
+		}
+		delete(tr.buffered, key)
+	}
+	if !tr.cached[ev.Package] {
+		tr.tests = append(tr.tests, tr.pending[ev.Package]...)
+	}
+	delete(tr.pending, ev.Package)
+	if ev.Package != "" && (ev.Action != "skip" || ev.Elapsed > 0) {
+		tr.packages = append(tr.packages, goPackageTiming{pkg: ev.Package, elapsed: ev.Elapsed, cached: tr.cached[ev.Package], failed: ev.Action == "fail"})
 	}
 }
 
