@@ -30,6 +30,8 @@ unlock.
   Analytics offers 24 hours, 3 days, 7 days and 14 days, the controller's limit, and keeps the choice in the URL as `?range=`. The default stays at 3 days. Chart labels include the date when the range spans more than a day.
 - **web:** Say when a linked run does not exist
   Opening `/runs?run=<id>` for a run the controller does not return now shows "Run not found" with a button back to all runs, instead of an empty detail pane.
+- **web:** Show "Run not found" after leaving a run for a missing one
+  Moving from an open run to a run the controller does not return, or reopening a run that was deleted, kept the previous run's detail on screen. The pane now shows "Run not found", and a failed request for the new run no longer leaves the old run in its place.
 - **web:** Say resource metrics are unavailable instead of loading forever
   When the metrics endpoint refuses, such as a Cloud `503 unavailable` for a job with no readings, the Resources tab now says the metrics are unavailable. A running job keeps retrying, and evidence already shown stays on screen through a failed refresh.
 - **API:** Say why an engine request body failed to decode
