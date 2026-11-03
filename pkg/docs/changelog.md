@@ -58,12 +58,12 @@ unlock.
   `ExecError` messages in Go and TypeScript repeated the whole command, so a step that passed hundreds of test names to `-test.run` buried the failure under the argument list. The message now repeats the first 512 bytes of the command followed by `... [N more bytes]`; the `Command` / `command` field keeps the full text and the command's output still follows.
 - **CLI + web:** Say why a local run's job waits when its machine cannot run it
   A local run whose job required runner labels the machine running it does not report, such as `Requires("host=build-box")` on a laptop, left the job `pending` with an empty detail for as long as the run lived, because only that machine ever executes a local run's jobs. `runs status` (pretty and JSON `status_detail`) and the dashboard now say the job waits on those labels, list the labels the machine reports, and say to cancel the run and start it where the labels apply or change the job's requirements.
-- **CLI:** `--sw-run-handle-file` no longer writes a `status` that never changes
-  The handle recorded `"status":"pending"` at intake and kept it after the run finished, so a reader polling it saw a run that never ended. The handle is a write-once identity: it now holds only `schema_version`, `run_id` and `pipeline`. Read the run's current state with `sparkwing runs status --run RUN_ID`.
 - **CLI:** `sparkwing update` caches the version policy local runs read, and doctor reports it
   Every local run warned that no verified version policy was cached, because local runs never fetch it and the commands that did kept it in `~/.cache/sparkwing/engines` while local runs read `<sparkwing home>/engines`. Engine releases and the policy now share `<sparkwing home>/engines`; previously cached engines download again once. `sparkwing update` refreshes the signed policy there and reports it as `version_policy`. `update --dry-run` and `doctor` report the cached policy's status, latest release, publication time and age without writing anything, and the local-run warning now says to run `sparkwing update`. Local runs stay offline.
 ### Changed
 
+- **CLI (Breaking):** `--sw-run-handle-file` writes an identity-only handle without `status`
+  The handle recorded `"status":"pending"` at intake and kept it after the run finished, so a reader polling it saw a run that never ended. The handle is a write-once identity: it now holds only `schema_version`, `run_id` and `pipeline`. Read `run_id` and query `sparkwing runs status --run RUN_ID` for the current state. See the [migration guide](docs/migrations/_unreleased.md#run-handle-files-carry-no-status).
 - **scaffold:** `const FallbackSDKVersion` pins v0.68.6, so a fresh scaffold compiles against that release.
 
 ## [v0.68.6] - 2026-11-03
