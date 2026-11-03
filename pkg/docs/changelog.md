@@ -22,6 +22,9 @@ unlock.
 
 ### Fixed
 
+- **runner:** Exhausted application retries report the attempt count and last error
+  The final job error says all attempts failed and directs users to fix the last error before retrying.
+
 - **sdk:** Command deadline failures name the timeout and deadline
   The error preserves the deadline cause and suggests increasing the context timeout or speeding up the command.
 

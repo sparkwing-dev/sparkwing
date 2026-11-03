@@ -262,7 +262,8 @@ sources settle the barrier without running the generator.
 The host rejects retry declarations above its ceiling of 10. Backoff doubles
 between retries, up to five minutes. Application retries keep the claim and
 advance the attempt ordinal. Lease-loss recovery has a separate disruption
-allowance.
+allowance. When all application attempts fail, the final job error reports the
+attempt count and last error. Fix that error before retrying the run.
 
 `Timeout(duration)` bounds each attempt. `NoProgressTimeout(duration)` bounds
 inactivity during the body and verification. Observable log records reset the
