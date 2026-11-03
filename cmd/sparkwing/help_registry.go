@@ -410,7 +410,7 @@ var flagDescriptions = map[string]string{
 	"sw-allow-unadmitted": "Use an exclusive in-process local controller for CI admission.",
 	"sw-dry-run":          "Preview using declared dry-run bodies and steps marked safe.",
 	"sw-index":            "Capture a Git index for local staged-content checks.",
-	"sw-run-handle-file":  "Write the submitted run handle to this file.",
+	"sw-run-handle-file":  "Write the submitted run handle to this file once at intake; it names the run and does not track its status.",
 	"controller":          "Controller URL for this connection profile.",
 	"token-stdin":         "Read the controller credential from standard input.",
 	"scope":               "Credential scope.",

@@ -9,20 +9,20 @@ import (
 
 const runHandleSchemaVersion = 1
 
-// RunHandle identifies one accepted run through every execution mode.
+// RunHandle identifies one accepted run through every execution mode. It is
+// written once at intake and carries no status; `sparkwing runs status --run`
+// reads the run's current state.
 type RunHandle struct {
 	SchemaVersion int    `json:"schema_version"`
 	RunID         string `json:"run_id"`
 	Pipeline      string `json:"pipeline"`
-	Status        string `json:"status,omitempty"`
 }
 
-func NewRunHandle(runID, pipeline, status string) RunHandle {
+func NewRunHandle(runID, pipeline string) RunHandle {
 	return RunHandle{
 		SchemaVersion: runHandleSchemaVersion,
 		RunID:         runID,
 		Pipeline:      pipeline,
-		Status:        status,
 	}
 }
 

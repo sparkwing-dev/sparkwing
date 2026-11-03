@@ -71,7 +71,7 @@ func runNativeBurst(ctx context.Context, pipeline string, flags runFlags, args [
 			deps := defaultHereDependencies(flags.outputFormat)
 			if handlePath != "" {
 				deps.admitted = func(response controllerwire.CreateRunResponse) error {
-					return orchestrator.PublishRunHandle(handlePath, orchestrator.NewRunHandle(response.RunID, pipeline, "pending"))
+					return orchestrator.PublishRunHandle(handlePath, orchestrator.NewRunHandle(response.RunID, pipeline))
 				}
 			}
 			return errors.Join(cancelErr, handoffHereRun(ctx, connection, response, deps))
