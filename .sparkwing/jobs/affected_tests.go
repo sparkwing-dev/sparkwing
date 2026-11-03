@@ -31,7 +31,6 @@ var wholeModuleTriggers = map[string]string{
 type modulePackage struct {
 	importPath string
 	dir        string
-	imports    []string
 }
 
 type affectedTestPlan struct {
@@ -137,18 +136,9 @@ func planAffectedTests(module string, modules, files []string, packages []module
 			changed[pkg] = true
 		}
 	}
-	affected := map[string]bool{}
-	for pkg := range changed {
-		affected[pkg] = true
-	}
-	for _, pkg := range packages {
-		for _, imported := range pkg.imports {
-			if changed[imported] {
-				affected[pkg.importPath] = true
-				break
-			}
-		}
-	}
+	// safety: importers still compile and vet in the build and vet steps; their
+	// tests run after deploy, with every other suite, under --full.
+	affected := changed
 	p.packages = mapKeys(affected)
 	p.critical = map[string][]string{}
 	for dir, tests := range critical {
@@ -191,7 +181,7 @@ func owningPackage(rel string, byDir map[string]string) string {
 }
 
 func listModulePackages(ctx context.Context, module string) ([]modulePackage, error) {
-	format := `{{.ImportPath}}{{"\t"}}{{.Dir}}{{"\t"}}{{join .Imports " "}} {{join .TestImports " "}} {{join .XTestImports " "}}`
+	format := `{{.ImportPath}}{{"\t"}}{{.Dir}}`
 	out, err := sparkwing.Bash(ctx, fmt.Sprintf("cd %q && go list -e -f %s ./...", module, shellQuote(format))).String()
 	if err != nil {
 		return nil, fmt.Errorf("list module packages: %w", err)
@@ -204,21 +194,21 @@ func listModulePackages(ctx context.Context, module string) ([]modulePackage, er
 	scanner := bufio.NewScanner(strings.NewReader(out))
 	scanner.Buffer(make([]byte, 1<<20), 16<<20)
 	for scanner.Scan() {
-		fields := strings.SplitN(scanner.Text(), "\t", 3)
-		if len(fields) != 3 || strings.Contains("/"+fields[0]+"/", "/node_modules/") {
+		fields := strings.SplitN(scanner.Text(), "\t", 2)
+		if len(fields) != 2 || strings.Contains("/"+fields[0]+"/", "/node_modules/") {
 			continue
 		}
 		rel, err := filepath.Rel(root, fields[1])
 		if err != nil || strings.HasPrefix(rel, "..") {
 			continue
 		}
-		packages = append(packages, modulePackage{importPath: fields[0], dir: filepath.ToSlash(rel), imports: strings.Fields(fields[2])})
+		packages = append(packages, modulePackage{importPath: fields[0], dir: filepath.ToSlash(rel)})
 	}
 	return packages, scanner.Err()
 }
 
 // safety: deletions and renames count, because removing a file changes what
-// its package and the importers compile; and an untracked file the gate will
+// its package compiles; and an untracked file the gate will
 // judge counts when nothing is staged.
 func affectedChangeScope(ctx context.Context) ([]string, string, error) {
 	staged, err := stagedNames(ctx)

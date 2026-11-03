@@ -400,8 +400,8 @@ file. Other syntax and workflow checks remain active.
   --sw-only gate -- --full` and `sparkwing run gate --sw-only race-touched`. Each job
   owns a separate four-core runner, so race tests share no cores with the full
   Go or PostgreSQL suite. `sparkwing run gate` runs both jobs locally. Without
-  `--full` its test step runs the changed packages, their direct importers and
-  the tests marked `//sparkwing:critical` on the line above them; a change to a
+  `--full` its test step runs the changed packages (importers still build and
+  vet; their tests run after deploy) and the tests marked `//sparkwing:critical` on the line above them; a change to a
   `go.mod`, `go.sum` or `internal/store/schema.sql` runs its whole module. After
   both jobs pass on a clean checkout, `record-tree` appends HEAD's tree, the
   `.sparkwing` definition fingerprint, the mode, the engine version and the

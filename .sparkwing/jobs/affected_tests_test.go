@@ -10,17 +10,16 @@ import (
 
 var affectedFixturePackages = []modulePackage{
 	{importPath: "m/leaf", dir: "leaf"},
-	{importPath: "m/mid", dir: "mid", imports: []string{"m/leaf"}},
-	{importPath: "m/top", dir: "top", imports: []string{"m/mid"}},
-	{importPath: "m/tested", dir: "tested", imports: []string{"testing", "m/leaf"}},
+	{importPath: "m/mid", dir: "mid"},
+	{importPath: "m/top", dir: "top"},
 	{importPath: "m/billing", dir: "billing"},
 }
 
-func TestAffectedTestsCoverChangedPackagesAndTheirDirectImporters(t *testing.T) {
-	critical := map[string][]string{"billing": {"TestRefund"}, "mid": {"TestMid"}}
-	p := planAffectedTests(".", []string{"."}, []string{"leaf/leaf.go", "docs/readme.md"}, affectedFixturePackages, critical)
-	if want := []string{"m/leaf", "m/mid", "m/tested"}; !slices.Equal(p.packages, want) {
-		t.Fatalf("affected = %v, want the changed package and its direct importers %v", p.packages, want)
+func TestAffectedTestsCoverOnlyTheChangedPackages(t *testing.T) {
+	critical := map[string][]string{"billing": {"TestRefund"}, "leaf": {"TestLeaf"}}
+	p := planAffectedTests(".", []string{"."}, []string{"leaf/leaf.go", "leaf/old.go", "docs/readme.md"}, affectedFixturePackages, critical)
+	if want := []string{"m/leaf"}; !slices.Equal(p.packages, want) {
+		t.Fatalf("affected = %v, want only the changed package %v; importers run after deploy", p.packages, want)
 	}
 	if want := map[string][]string{"m/billing": {"TestRefund"}}; len(p.critical) != 1 || !slices.Equal(p.critical["m/billing"], want["m/billing"]) {
 		t.Fatalf("critical = %v, want only the critical tests outside the affected set", p.critical)

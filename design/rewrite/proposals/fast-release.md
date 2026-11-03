@@ -18,7 +18,9 @@ A change goes from commit to production in about ten minutes, mostly on the deve
 
 ### Affected and critical tests
 
-The gate tests changed packages and their direct importers, with results cached by input hash so unchanged packages cost nothing. A small set of tests tagged critical always runs regardless of what changed: team and run isolation, billing and refund invariants, trust and source credentials, secret masking, store baseline checks. The tag lives next to the test so the list cannot drift from the code.
+The gate tests only the changed packages, with results cached by input hash (Go's test cache) so unchanged packages cost nothing. Importers still build and vet before merge; their tests, and every other suite, run after deploy under `sparkwing run gate -- --full`, which hosted CI also runs (lead, delegated by Korey, 2026-11-02). A change to a `go.mod`, a `go.sum` or `internal/store/schema.sql` runs its whole module. A small set of tests tagged `//sparkwing:critical` always runs regardless of what changed: team and run isolation, billing and refund invariants, trust and source credentials, secret masking, store baseline checks. The tag lives on the line above the test so the list cannot drift from the code.
+
+Measured on the WSL workstation under other load (2026-11-02): a one-line change to a lightly imported package took 148 s for `sparkwing run gate` (gate job 1 m 56 s, lint 64 s the long pole), against about 15 minutes for the full gate. A change to a package that the store, controller, CLI or acceptance suites import took 14 minutes with direct importers included, which is why importers moved after deploy.
 
 ### AI review
 
@@ -45,6 +47,7 @@ A gate result belongs to a tree, not a branch. Sparkwing records "tree T passed 
 - An agent rebases its branch onto current main, runs the gate on its own machine, and lands by fast-forwarding main to that commit. Main's tree is then exactly the tree that passed, so main is tested without running anything again.
 - If main moved before the fast-forward, the fast-forward is refused, the agent rebases again, and the tree changes, so the gate runs again. There is no "tested on an older main" case.
 - The result is trusted because Korey trusts his own machines; that is the point. The record still names the runner, so a result from an unexpected machine is visible.
+- Which results may satisfy main's skip (lead, delegated by Korey, 2026-11-02): a result from a repository-proven run, or from a run on a runner a team admin designated trusted for that repository (approver kind `trusted-runner`). That designation affects gate-result reuse only, never secrets, OIDC or source credentials. A result from an untrusted machine, another team or another repository never satisfies it. The record lives on the controller, bound to run provenance, not in pipeline-local files a modified pipeline could forge (decision 84). Status: the storage and designation are not built; the first slice keeps a developer-local git note, which only skips on the machine that wrote it.
 - Main's own pipeline, on push, first asks whether its tree already has a passing gate result. If yes it skips straight to deploy; if no (a direct push, a merge commit, a hand edit) it runs the gate itself.
 - The engine and the gate definition are part of the result key, so changing the gate or upgrading Sparkwing invalidates old results instead of silently reusing them.
 
