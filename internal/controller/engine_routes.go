@@ -7,8 +7,10 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
+	"strings"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
@@ -276,12 +278,30 @@ func decodeEngineRequest(r *http.Request, body any) error {
 	decoder := json.NewDecoder(bytes.NewReader(data))
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(body); err != nil {
-		return invalidEngineBody("invalid engine request")
+		return invalidEngineBody(engineDecodeMessage(err))
 	}
 	if _, err := decoder.Token(); !errors.Is(err, io.EOF) {
 		return invalidEngineBody("request requires one JSON object")
 	}
 	return nil
+}
+
+// engineDecodeMessage names the class of a decode failure. Decoder errors quote
+// request bytes, so only offsets and fixed text reach the caller.
+func engineDecodeMessage(err error) string {
+	var syntax *json.SyntaxError
+	var mistyped *json.UnmarshalTypeError
+	switch {
+	case errors.As(err, &syntax):
+		return fmt.Sprintf("invalid engine request: body is not valid JSON at byte %d; send one complete JSON object", syntax.Offset)
+	case errors.Is(err, io.ErrUnexpectedEOF):
+		return "invalid engine request: body ends before its JSON object is complete; send one complete JSON object"
+	case errors.As(err, &mistyped):
+		return fmt.Sprintf("invalid engine request: value at byte %d has the wrong JSON type for its field", mistyped.Offset)
+	case strings.HasPrefix(err.Error(), "json: unknown field "):
+		return "invalid engine request: body has a field this endpoint does not accept"
+	}
+	return "invalid engine request"
 }
 
 func engineLookupError(err error) error {

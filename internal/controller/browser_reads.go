@@ -70,6 +70,9 @@ type recheckedEvents struct {
 
 const eventStreamRecheckEvery = 8
 
+// Unwrap lets backend helpers reach the store's log completeness; it adds no read path.
+func (b *recheckedEvents) Unwrap() backend.Backend { return b.Backend }
+
 func (b *recheckedEvents) ListEventsAfter(ctx context.Context, runID string, afterSeq int64, limit int) ([]store.Event, error) {
 	b.polls++
 	if b.polls%eventStreamRecheckEvery == 0 {

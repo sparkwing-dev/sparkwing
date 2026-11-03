@@ -566,7 +566,7 @@ func TestStalledLogsDoNotDelayLifecycleCommits(t *testing.T) {
 					t.Fatal(err)
 				}
 				state := logHostStore{NativeHostStore: f.Tenant, logs: logs}
-				ctx, cancel := context.WithTimeout(t.Context(), 2*time.Second)
+				ctx, cancel := context.WithTimeout(t.Context(), limits.RetryLogSealWait+2*time.Second)
 				defer cancel()
 				var command store.NodeCommand = store.ReportNode{Ref: ref, Actor: actor, SourceAttempt: &started.Attempt, Outcome: runstate.NodeSuccess, Result: &runstate.NodeResult{Outcome: runstate.NodeSuccess}}
 				if operation == "retry" {
@@ -672,4 +672,53 @@ func TestNativeLogsSealFiftyMillionPayloadBytes(t *testing.T) {
 	if err != nil || !read.Complete || bytes.Count(body.Bytes(), []byte("x")) != 50_000_000 || !bytes.Contains(body.Bytes(), []byte("EMIT_DONE")) {
 		t.Fatalf("large log incomplete or lost payload: complete=%v bytes=%d error=%v", read.Complete, body.Len(), err)
 	}
+}
+
+func TestRetrySealsPreviousAttemptBeforeFenceAdvances(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		now := time.Now()
+		f := newStoreHostFixture(t, nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{{ID: "job", Retry: &nodeproto.RetrySpec{Attempts: 3}, Steps: []nodeproto.StepSpec{{ID: "body"}}}}}, teststore.WithClock(func() time.Time { return now }))
+		input := storedExecutionInput(t, f, &ClaimedNodeHost{})
+		ref := runspec.NodeRef{RunID: runspec.RunID(input.Accepted.RunID), NodeID: "job"}
+		actor := executorActor(input)
+		if err := awaitStart(t.Context(), f.Tenant, runstate.CapacityBinding{RunID: string(ref.RunID), NodeID: "job", Generation: int64(actor.Generation)}, actor, nil); err != nil {
+			t.Fatal(err)
+		}
+		started, err := f.Tenant.TransitionNode(t.Context(), store.StartNode{Ref: ref, Actor: actor, SourceAttempt: &input.Attempt})
+		if err != nil {
+			t.Fatal(err)
+		}
+		principal, err := f.Store.AsOperator().ResolveAuthority(t.Context(), actor.Authority)
+		if err != nil {
+			t.Fatal(err)
+		}
+		gate := make(chan struct{})
+		close(gate)
+		first := blob.LogSubject{Kind: blob.LogJobAttempt, Team: principal.Capability.Team, RunID: input.Accepted.RunID, Attempt: &runspec.AttemptIdentity{Team: principal.Capability.Team, RunID: input.Accepted.RunID, NodeID: "job", Generation: int64(input.Generation), Attempt: int64(started.Attempt)}}
+		uploader := &fencedLogUploader{tenant: f.Tenant, commit: store.SegmentCommit{Subject: first, Actor: actor, RetentionClass: "r30"}, gate: gate}
+		logs := &localLogs{run: input.Accepted.RunID, masker: secrets.NewMasker(), upload: func(context.Context, capability.Principal, blob.LogSubject) (logseg.Uploader, error) {
+			return uploader, nil
+		}}
+		t.Cleanup(logs.flushes.Wait)
+		logs.bind(principal, int64(started.Attempt))
+		if err := logs.write(t.Context(), input.Accepted.RunID, "job", nodeproto.FrameLog{Message: "attempt one output"}); err != nil {
+			t.Fatal(err)
+		}
+		state := logHostStore{NativeHostStore: f.Tenant, logs: logs}
+		command := store.BindNodeCommand(store.RetryNode{Ref: ref, Actor: actor, SourceAttempt: &started.Attempt, Result: &runstate.NodeResult{Outcome: runstate.NodeFailed}}, ref, actor)
+		if _, err := state.TransitionNode(t.Context(), command); err != nil {
+			t.Fatal(err)
+		}
+		if uploader.refused {
+			t.Fatal("retry advanced the writer fence before the previous attempt's tail landed")
+		}
+		_, reader, err := teststore.ProvisionCredential(t.Context(), f.Store, capability.ProvisionSpec{Kind: capability.ProvisionMember, Team: string(store.DefaultTeam), Subject: capability.Subject{Kind: capability.SubjectAccount, ID: "log-reader"}, Grants: []capability.Grant{capability.LogsRead}, Binding: capability.Binding{Kind: capability.BindingNone}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		stream, err := f.Tenant.ReadLogSegments(t.Context(), runstate.Actor{Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: reader.Prefix}}, blob.LogReadRequest{Subject: first})
+		if err != nil || !stream.Complete || len(stream.Segments) != 1 {
+			t.Fatalf("previous attempt's logs were lost or left unsealed: %+v %v", stream, err)
+		}
+	})
 }

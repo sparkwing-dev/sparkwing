@@ -17,9 +17,22 @@ type logStoreHolder interface {
 
 func (b *StoreBackend) nodeLogStore() storage.LogStore { return b.logStore }
 
+// Unwrapper is a decorating Backend that names the Backend it delegates to,
+// so helpers that need the store's private surface can reach it.
+type Unwrapper interface {
+	Unwrap() Backend
+}
+
 // NodeLogCompleteness reports the controller's verdict or StateUnknown when unavailable.
 func NodeLogCompleteness(ctx context.Context, b Backend, runID, nodeID string) (logseg.Completeness, error) {
 	unknown := logseg.Completeness{State: logseg.StateUnknown}
+	for {
+		wrapper, ok := b.(Unwrapper)
+		if !ok {
+			break
+		}
+		b = wrapper.Unwrap()
+	}
 	holder, ok := b.(logStoreHolder)
 	if !ok {
 		return unknown, nil

@@ -32,6 +32,12 @@ unlock.
   Opening `/runs?run=<id>` for a run the controller does not return now shows "Run not found" with a button back to all runs, instead of an empty detail pane.
 - **web:** Say resource metrics are unavailable instead of loading forever
   When the metrics endpoint refuses, such as a Cloud `503 unavailable` for a job with no readings, the Resources tab now says the metrics are unavailable. A running job keeps retrying, and evidence already shown stays on screen through a failed refresh.
+- **API:** Say why an engine request body failed to decode
+  A malformed JSON body returned only `invalid engine request`. The 400 response now says whether the body is not valid JSON (with the byte offset), ends early, has a value of the wrong type, or has a field the endpoint does not accept. The message never repeats request bytes.
+- **console:** Report log completeness to signed-in readers
+  `GET /api/v1/runs/{run}/jobs/{job}/logs/completeness` answered `unknown` with zero lines for every session or credential reader, including a finished job that printed nothing, because the reauthorizing read wrapper hid the log store. It now returns the stored verdict.
+- **logs:** Keep a failed attempt's logs when its job retries
+  A retry advanced the log writer to the next attempt before the failed attempt's final segment and seal reached storage, so the failed attempt's output was refused and its stream never completed. A retry now waits up to five seconds for that seal before it commits.
 - **SDK install:** Refuse a generated overlay that is not a regular file
   A repository could commit `.resolved.mod` as a symlink, and the installer's pin refresh would then rewrite the file it pointed to on the runner. Installation now refuses the overlay instead.
 - **child pipelines:** Keep parent job and step selections out of child runs
