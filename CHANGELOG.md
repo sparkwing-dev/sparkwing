@@ -20,6 +20,7 @@ unlock.
 
 ## [Unreleased]
 
+## [v0.68.4] - 2026-11-03
 ### Fixed
 
 - **SDK install:** Refuse a generated overlay that is not a regular file
