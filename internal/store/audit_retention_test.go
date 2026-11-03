@@ -126,7 +126,8 @@ func assertBackdatedOccurrenceCannotExpireAudit(t *testing.T, s *store.Store) {
 	if err := s.DB().QueryRow(storetest.Rebind(s, `SELECT ts,recorded_at FROM audit_events WHERE account=? AND kind='account.admitted'`), signed.Account.ID).Scan(&occurred, &recorded); err != nil {
 		t.Fatal(err)
 	}
-	if occurred != old.UnixNano() || recorded < now.UnixNano() {
+	// safety: stores keep recorded_at at millisecond precision, so a row written in now's millisecond can read earlier.
+	if occurred != old.UnixNano() || recorded < now.Truncate(time.Millisecond).UnixNano() {
 		t.Fatalf("occurrence=%d recording=%d", occurred, recorded)
 	}
 	if _, err := s.DB().Exec(`DELETE FROM audit_events`); err == nil {
