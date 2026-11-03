@@ -52,6 +52,7 @@ type runFlags struct {
 	detached       bool
 	pipelineRef    string
 	requestID      string
+	agent          string
 	idempotencyKey string
 	outputFormat   string
 	outputOrigin   settings.Origin
@@ -76,6 +77,10 @@ func runFlagsFromInvocation(inv clisurface.Invocation) (runFlags, []string) {
 		return runFlags{parseErr: fmt.Errorf("SPARKWING_LOG_FORMAT=%q must be pretty, json or plain; "+
 			"a git hook installed before v0.68 sets quiet, so reinstall it with `sparkwing pipeline hooks install`", output)}, nil
 	}
+	agent, err := resolveRunAgent(inv.Value("agent"), inv.Has("agent"), os.Getenv)
+	if err != nil {
+		return runFlags{parseErr: err}, nil
+	}
 	workers, _ := strconv.Atoi(inv.Value("sw-workers"))
 	var pause *bool
 	if inv.Has("sw-pause-on-failure") {
@@ -96,6 +101,7 @@ func runFlagsFromInvocation(inv clisurface.Invocation) (runFlags, []string) {
 		dryRun: inv.Bool("sw-dry-run"), allow: inv.Flags["sw-allow-risk"],
 		index: inv.Value("sw-index"), runHandleFile: inv.Value("sw-run-handle-file"),
 		detached: inv.Bool("sw-detached"), idempotencyKey: inv.Value("sw-idempotency-key"), requestID: inv.Value("sw-request-id"),
+		agent:        agent,
 		outputFormat: output, outputOrigin: outputOrigin,
 	}, inv.Args
 }

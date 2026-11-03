@@ -42,6 +42,7 @@ func TestParseGrammar(t *testing.T) {
 		{"secrets", "set", "--secret", "NAME", "--value", "sensitive", "--file", "f"},
 		{"runs", "list", "--limit", "1", "--limit", "2"},
 		{"pipeline", "trigger", "check", "--detach", "--sw-workers", "2", "--profile", "prod"},
+		{"pipeline", "trigger", "--resume", "r1", "--agent", "codex", "--profile", "prod"},
 	} {
 		t.Run(strings.Join(args, " "), func(t *testing.T) {
 			_, err := Parse("sparkwing", args)
@@ -53,6 +54,8 @@ func TestParseGrammar(t *testing.T) {
 	}
 	for _, args := range [][]string{
 		{"run", "check", "--sw-workers", "1", "--", "--x=1"},
+		{"run", "check", "--agent", "claude-code:land-agent", "--", "--x=1"},
+		{"pipeline", "trigger", "check", "--agent", "none", "--profile", "prod"},
 		{"__complete", "--kind=verbs", "--word=", "-o", "plain"},
 		{"pipeline", "trigger", "--resume", "r1", "--profile", "prod"},
 		{"runs", "cancel", "--run", "-"},

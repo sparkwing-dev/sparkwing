@@ -303,7 +303,7 @@ func (i *Invocation) validate() error {
 		if i.Has("runner") && i.Value("runner") != "here" {
 			return i.invalid("--resume requires --runner here or no --runner")
 		}
-		for _, name := range []string{"reason", "ref", "pipeline-ref", "working-tree", "allow-secret-file", "detach"} {
+		for _, name := range []string{"reason", "agent", "ref", "pipeline-ref", "working-tree", "allow-secret-file", "detach"} {
 			if i.Has(name) {
 				return i.invalid("--resume cannot be combined with --%s", name)
 			}

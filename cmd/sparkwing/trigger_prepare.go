@@ -227,6 +227,7 @@ type triggerRequestInput struct {
 	submittedEnv   map[string][]byte
 	idempotencyKey string
 	reason         string
+	agent          string
 	source         preparedTriggerSource
 	settings       settings.Inputs
 	declarations   *runspec.DeclarationGate
@@ -290,7 +291,7 @@ func prepareTriggerRequest(input triggerRequestInput) (request controllerwire.Cr
 		key = rand.Text()
 	}
 	return controllerwire.CreateRunRequest{IdempotencyKey: key, SubmittedEnv: input.submittedEnv, Request: runspec.Request{
-		Version: 1, Pipeline: pipeline, Mode: runspec.IntakeExecute, Origin: runspec.OriginTrigger, Reason: input.reason,
+		Version: 1, Pipeline: pipeline, Mode: runspec.IntakeExecute, Origin: runspec.OriginTrigger, Reason: input.reason, Agent: input.agent,
 		Git: input.source.git, Source: input.source.source, Options: options, Env: env, EnvironmentSource: runspec.EnvironmentSubmitted,
 		RequestedArgs: args, SecretArgs: runspec.Optional[[]string]{Set: true, Value: secretArgs},
 	}}, nil

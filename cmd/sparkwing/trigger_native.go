@@ -112,7 +112,7 @@ func prepareNativeTrigger(ctx context.Context, flags triggerFlags) (result contr
 	if flags.runner != "" {
 		input.Flags.Runner.Set, input.Flags.Runner.Value = true, runnerFlagSelection(flags.runner)
 	}
-	result, err = prepareTriggerRequest(triggerRequestInput{home: home, source: selected, settings: input, declarations: described, reason: flags.reason, args: flags.passthrough, submittedEnv: submitted})
+	result, err = prepareTriggerRequest(triggerRequestInput{home: home, source: selected, settings: input, declarations: described, reason: flags.reason, agent: flags.agent, args: flags.passthrough, submittedEnv: submitted})
 	if err != nil || snapshot == nil {
 		return result, err
 	}
