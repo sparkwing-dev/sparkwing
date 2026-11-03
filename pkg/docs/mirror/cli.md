@@ -100,7 +100,9 @@ request. Retries and `--publish` keep it, and `runs status`, `runs list`, the
 API and the console show it. The label is self-declared and display-only:
 trust class, secrets, OIDC, cache scope, approvals and claims never read it.
 `pipeline trigger --resume` refuses `--agent` because the sealed request is
-authoritative.
+authoritative. A controller older than the label refuses the field before writing
+anything; the CLI then resends once without it and prints a notice that the
+label was dropped.
 
 ## Command groups
 
