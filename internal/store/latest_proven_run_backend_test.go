@@ -16,6 +16,7 @@ const (
 	provenOther = runspec.RepoKey("gh:2")
 	provenSHA   = "89abcdef0123456789abcdef0123456789abcdef"
 	otherSHA    = "0123456789abcdef0123456789abcdef01234567"
+	provenJob   = "record"
 )
 
 type provenSeed struct {
@@ -100,6 +101,9 @@ func seedProven(t *testing.T, tenant *store.Tenant, id, pipeline string, seed pr
 	if err := tenant.TestOnlySeedSealedRun(t.Context(), id, pipeline, seed.repo, seed.sha, seed.proof(t), seed.options, finished, seed.env...); err != nil {
 		t.Fatal(err)
 	}
+	if err := tenant.TestOnlySeedNode(t.Context(), id, provenJob, "success"); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func TestProvenRunAtCommitAcceptsOnlyCleanProvenRunsOfTheReadersRepositoryAndCommit(t *testing.T) {
@@ -147,7 +151,7 @@ func TestProvenRunAtCommitAcceptsOnlyCleanProvenRunsOfTheReadersRepositoryAndCom
 				tc.reader = reader
 			}
 			seedProven(t, tenant, "reader", "main-ci", tc.reader, now)
-			got, err := tenant.GetLatestProvenRunAtCommit(t.Context(), "gate", "reader", []string{"success"}, 0)
+			got, err := tenant.GetLatestProvenRunAtCommit(t.Context(), "gate", provenJob, "reader", []string{"success"}, 0)
 			if tc.want && (err != nil || got.ID != "candidate") {
 				t.Fatalf("want the candidate, got %+v %v", got, err)
 			}
@@ -165,10 +169,37 @@ func TestProvenRunAtCommitNeverCrossesTeams(t *testing.T) {
 	now := time.Unix(1700000000, 0)
 	seedProven(t, own, "reader", "main-ci", provenSeed{repo: provenRepo, sha: provenSHA, proof: appProof(1, provenSHA, true)}, now)
 	seedProven(t, other, "foreign", "gate", provenSeed{repo: provenRepo, sha: provenSHA, proof: appProof(1, provenSHA, false)}, now)
-	if got, err := own.GetLatestProvenRunAtCommit(t.Context(), "gate", "reader", []string{"success"}, 0); !errors.Is(err, store.ErrNotFound) {
+	if got, err := own.GetLatestProvenRunAtCommit(t.Context(), "gate", provenJob, "reader", []string{"success"}, 0); !errors.Is(err, store.ErrNotFound) {
 		t.Fatalf("another team's run satisfied the reader: %+v %v", got, err)
 	}
-	if _, err := other.GetLatestProvenRunAtCommit(t.Context(), "gate", "reader", nil, 0); err == nil {
+	if _, err := other.GetLatestProvenRunAtCommit(t.Context(), "gate", provenJob, "reader", nil, 0); err == nil {
 		t.Fatal("a reader outside the team was accepted")
+	}
+}
+
+func TestProvenRunAtCommitPassesOverNewerRunsWhoseJobDidNotSucceed(t *testing.T) {
+	st := storetest.Open(t)
+	tenant := provenTenant(t, st, "a")
+	now := time.Unix(1700000000, 0)
+	candidate := provenSeed{repo: provenRepo, sha: provenSHA, proof: appProof(1, provenSHA, false)}
+	seedProven(t, tenant, "older", "gate", candidate, now.Add(-3*time.Minute))
+	for i, outcome := range []string{"skipped", "failed", ""} {
+		id := fmt.Sprintf("newer-%d", i)
+		if err := tenant.TestOnlySeedSealedRun(t.Context(), id, "gate", candidate.repo, candidate.sha, candidate.proof(t), candidate.options, now.Add(time.Duration(i-2)*time.Minute)); err != nil {
+			t.Fatal(err)
+		}
+		if outcome != "" {
+			if err := tenant.TestOnlySeedNode(t.Context(), id, provenJob, outcome); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	seedProven(t, tenant, "reader", "main-ci", provenSeed{repo: provenRepo, sha: provenSHA, proof: appProof(1, provenSHA, true)}, now)
+	got, err := tenant.GetLatestProvenRunAtCommit(t.Context(), "gate", provenJob, "reader", []string{"success"}, 0)
+	if err != nil || got.ID != "older" {
+		t.Fatalf("want the older run whose job succeeded, got %+v %v", got, err)
+	}
+	if got, err := tenant.GetLatestProvenRunAtCommit(t.Context(), "gate", "other-job", "reader", []string{"success"}, 0); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("a run without the named job satisfied the reader: %+v %v", got, err)
 	}
 }

@@ -287,7 +287,8 @@ func FromAnyRun() RefOption {
 // Actions push, a schedule, or code the controller fetched from GitHub. The run
 // must have selected every job and step: none of only, start-at or stop-at,
 // and not dry run. It must also have sealed no environment variables, since a
-// submitted GOFLAGS or the like can change what its jobs judged. A reader with no proven repository matches nothing, and a
+// submitted GOFLAGS or the like can change what its jobs judged. The newest
+// such run in which the referenced job succeeded answers. A reader with no proven repository matches nothing, and a
 // controller that predates the filter is refused rather than ignored. It cannot
 // be combined with FromAnyRun.
 func FromProvenRunAtCommit() RefOption {

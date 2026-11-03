@@ -65,3 +65,12 @@ func (t *Tenant) TestOnlySeedSealedRun(ctx context.Context, id, pipeline string,
 		return err
 	})
 }
+
+// TestOnlySeedNode inserts a finished node with outcome into an existing run.
+func (t *Tenant) TestOnlySeedNode(ctx context.Context, runID, nodeID, outcome string) error {
+	return t.s.inTx(ctx, func(tx *storeTx) error {
+		_, err := tx.execContext(ctx, `INSERT INTO nodes(team,run_id,node_id,status,outcome,finished_at,spec_json,execution_json) VALUES (?,?,?,'done',?,1,?,?)`,
+			t.team, runID, nodeID, outcome, []byte(`{"id":"`+nodeID+`"}`), []byte(`{}`))
+		return err
+	})
+}

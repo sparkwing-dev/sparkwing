@@ -14,9 +14,10 @@ import (
 // GetLatestProvenRunAtCommit returns the newest run of pipeline at the reading
 // run's own sealed commit whose repository was proven, by GitHub or by the
 // controller's own fetch, as the reader's proven repository, and whose sealed
-// options selected every job and step without dry run and that sealed no
-// environment variables. Returns ErrNotFound when none qualifies.
-func (t *Tenant) GetLatestProvenRunAtCommit(ctx context.Context, pipeline, readerRunID string, statuses []string, maxAge time.Duration) (*Run, error) {
+// options selected every job and step without dry run, that sealed no
+// environment variables, and whose job succeeded. Returns ErrNotFound when none
+// qualifies.
+func (t *Tenant) GetLatestProvenRunAtCommit(ctx context.Context, pipeline, job, readerRunID string, statuses []string, maxAge time.Duration) (*Run, error) {
 	if t.team == "" {
 		return nil, ErrNoTeam
 	}
@@ -28,7 +29,9 @@ func (t *Tenant) GetLatestProvenRunAtCommit(ctx context.Context, pipeline, reade
 	if !ok {
 		return nil, notFound("pipeline run", pipeline)
 	}
-	return t.s.getLatestRun(ctx, query, args, pipeline, statuses, maxAge, true)
+	// safety: a newer run that skipped the job holds no output, and must not hide an older run that has one.
+	query += ` AND EXISTS (SELECT 1 FROM nodes WHERE nodes.team=runs.team AND nodes.run_id=runs.id AND nodes.node_id=? AND nodes.status='done' AND nodes.outcome IN ('success','memoized'))`
+	return t.s.getLatestRun(ctx, query, append(args, job), pipeline, statuses, maxAge, true)
 }
 
 // safety: the output read after a proven lookup re-proves the run, so a run id
@@ -51,12 +54,9 @@ func provenAtCommitForReaderTx(ctx context.Context, tx *storeTx, team Team, read
 	return err == nil, err
 }
 
-// safety: the commit and repository come from the reader's sealed request,
-// never from the caller, and an asserted run proves neither. A run whose
-// submitter narrowed it with only, start-at or stop-at, or ran it dry, skipped
-// work its output does not admit to, so it never counts. Neither does a run
-// given a submitted environment, because GOFLAGS and the like can reshape what
-// its jobs judged.
+// safety: the commit and repository come from the reader's sealed request, never the caller, and an asserted run
+// proves neither. A run narrowed by only, start-at or stop-at, or run dry, skipped work its output does not admit
+// to, and a sealed environment such as GOFLAGS can reshape what its jobs judged, so neither counts.
 func provenRunAtCommitQuery(dialect Dialect, team Team, pipeline string, reader runspec.SealedRequest) (string, []any, bool) {
 	repository, sha := reader.Provenance.ProvenRepository(), reader.Provenance.ProvenSHA()
 	if repository == "" || sha == "" {

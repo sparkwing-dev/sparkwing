@@ -156,11 +156,44 @@ type recordTree struct {
 	sparkwing.Base
 	sparkwing.Produces[gatePass]
 	Proven sparkwing.Ref[gatePass]
+	Gate   sparkwing.Ref[bool]
+	Race   sparkwing.Ref[bool]
 	mode   gateMode
 }
 
 func (r *recordTree) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
-	return sparkwing.Step(w, "run", func(ctx context.Context) (gatePass, error) { return recordTreePass(ctx, r.mode) }), nil
+	return sparkwing.Step(w, "run", r.record), nil
+}
+
+func (r *recordTree) record(ctx context.Context) (gatePass, error) {
+	if why := skippedGateJob(ctx, r.Gate, r.Race); why != "" {
+		sparkwing.Info(ctx, "tree-gate: recording no pass: %s", why)
+		return gatePass{Reason: why}, nil
+	}
+	return recordTreePass(ctx, r.mode)
+}
+
+// safety: a skipped upstream satisfies Needs, and each job's proven lookup runs
+// on its own, so record-tree can run after jobs that tested nothing. Such a run
+// must not record a pass naming its own runner.
+func skippedGateJob(ctx context.Context, jobs ...sparkwing.Ref[bool]) string {
+	for _, job := range jobs {
+		if !gateJobRan(ctx, job) {
+			return job.Job() + " did not run in this run"
+		}
+	}
+	return ""
+}
+
+// safety: an output that cannot be read counts as a job that did not run.
+func gateJobRan(ctx context.Context, job sparkwing.Ref[bool]) (ran bool) {
+	defer func() {
+		if recover() != nil {
+			ran = false
+		}
+	}()
+	value, found := job.TryGet(ctx)
+	return found && value
 }
 
 // safety: a checkout that moved during the run records no pass, because the

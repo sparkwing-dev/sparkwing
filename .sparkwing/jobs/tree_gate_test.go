@@ -49,6 +49,34 @@ func TestRecordTreeOutputsAPassOnlyForACleanUnmovedCheckout(t *testing.T) {
 	}
 }
 
+func TestRecordTreeRecordsOnlyWhenBothGateJobsRanInItsRun(t *testing.T) {
+	treeGateRepo(t)
+	ran := json.RawMessage("true")
+	record := &recordTree{Gate: sparkwing.Ref[bool]{JobID: "gate"}, Race: sparkwing.Ref[bool]{JobID: "race-touched"}, mode: gateFull}
+	for name, tc := range map[string]struct {
+		outputs map[string]json.RawMessage
+		want    bool
+	}{
+		"both ran":       {outputs: map[string]json.RawMessage{"gate": ran, "race-touched": ran}, want: true},
+		"gate skipped":   {outputs: map[string]json.RawMessage{"race-touched": ran}},
+		"race skipped":   {outputs: map[string]json.RawMessage{"gate": ran}},
+		"both skipped":   {},
+		"unreadable":     {outputs: map[string]json.RawMessage{"gate": json.RawMessage(`"yes"`), "race-touched": ran}},
+		"reported false": {outputs: map[string]json.RawMessage{"gate": json.RawMessage("false"), "race-touched": ran}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			ctx := newTestHost(t, sparkwingtest.Options{Outputs: tc.outputs}).Context(t.Context())
+			pass, err := record.record(ctx)
+			if err != nil || pass.Recorded != tc.want {
+				t.Fatalf("pass = %+v, %v; want recorded %v", pass, err, tc.want)
+			}
+			if !tc.want && !strings.Contains(pass.Reason, "did not run") {
+				t.Fatalf("reason %q does not say which job did not run", pass.Reason)
+			}
+		})
+	}
+}
+
 func TestOnlyAFullPassProvesItsTreeGateAndEngine(t *testing.T) {
 	key := gateKey{Tree: "tree", Fingerprint: "gate", Engine: "v1"}
 	pass := gatePass{gateKey: key, Recorded: true, Mode: gateFull}

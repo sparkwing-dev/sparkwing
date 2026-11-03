@@ -403,13 +403,17 @@ file. Other syntax and workflow checks remain active.
   `--full` its test step runs the changed packages (importers still build and
   vet; their tests run after deploy) and the tests marked `//sparkwing:critical` on the line above them; a change to a
   `go.mod`, `go.sum` or `internal/store/schema.sql` runs its whole module. After
-  both jobs pass on a clean checkout, `record-tree` outputs HEAD's tree, the
+  both jobs run and pass on a clean checkout, `record-tree` outputs HEAD's tree, the
   `.sparkwing` definition fingerprint, the mode and the engine version. Each
   gate job reads that output through a `sw.FromProvenRunAtCommit()` reference
   and skips itself, naming the runner that proved it, when the controller finds
   a full-mode pass at the same commit from a run proven for this repository
   (from GitHub, or fetched by the controller) that selected every job without
-  dry run, and that pass names the same tree, fingerprint and engine. A plain
+  dry run and sealed no environment variables, and that pass names the same tree, fingerprint and engine.
+  `record-tree` reads both jobs' in-run outputs and records nothing when
+  either skipped, and the lookup passes over a run whose `record-tree` did not
+  succeed, so a run that skipped everything neither records a pass of its own
+  nor hides the older pass it skipped on. A plain
   local run proves no repository, so it never lets another run skip. The
   existing required `Canonical / gate` check succeeds only after the broad,
   race and pre-release matrix jobs all succeed. A skipped, cancelled or failed
