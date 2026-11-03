@@ -158,7 +158,7 @@ func (s *Server) readLogSearchPage(ctx context.Context, tenant *store.Tenant, a 
 			cursor.prepareLogs()
 		}
 	}
-	result := controllerwire.LogSearchPage{Matches: page.Records, Truncated: page.Truncated}
+	result := controllerwire.LogSearchPage{Matches: page.Records, Truncated: page.Truncated, Incomplete: page.Incomplete}
 	if !result.Truncated && cursor.Through > q.Runs.AfterNumber {
 		views, err := tenant.ListRunViews(ctx, q.Runs.AfterNumber, cursor.Through, 1)
 		if err != nil {

@@ -413,3 +413,28 @@ func TestRunLogsReportsUnsealedSnapshotAfterDrainingPages(t *testing.T) {
 		})
 	}
 }
+
+func TestRunLogsDrainsLostWriterOutputAndReportsIncomplete(t *testing.T) {
+	reader := fakeLogReader{read: func(_ context.Context, _ string, q controllerwire.LogQuery) (controllerwire.LogPage, error) {
+		if q.Cursor == "" {
+			return controllerwire.LogPage{Records: []controllerwire.LogRecord{jobLogRecord("r1", "retained prefix")}, Truncated: true, NextCursor: "tail"}, nil
+		}
+		return controllerwire.LogPage{Complete: true, NextCursor: "done", Incomplete: []controllerwire.LogIncomplete{{Reason: "writer_lost"}}}, nil
+	}}
+	var output bytes.Buffer
+	err := observeRunLogs(t.Context(), logInvocation(t, "logs", "--run", "r1", "--follow"), reader, nil, &output, &output, func(context.Context, time.Duration) error { t.Fatal("lost writer kept following"); return nil })
+	if err == nil || !strings.Contains(err.Error(), "writer_lost") || exitCodeFor(err) != 3 || !strings.Contains(output.String(), "retained prefix") {
+		t.Fatalf("output=%q error=%v", output.String(), err)
+	}
+}
+
+func TestRunLogSearchPreservesMatchesFromIncompleteLogs(t *testing.T) {
+	reader := fakeLogReader{search: func(context.Context, controllerwire.LogSearchQuery) (controllerwire.LogSearchPage, error) {
+		return controllerwire.LogSearchPage{Matches: []controllerwire.LogRecord{jobLogRecord("r1", "retained match")}, Incomplete: []controllerwire.LogIncomplete{{Reason: "writer_lost"}}}, nil
+	}}
+	var output bytes.Buffer
+	err := observeRunLogs(t.Context(), logInvocation(t, "grep", "--grep", "retained", "-o", "plain"), reader, nil, &output, &output, nil)
+	if err == nil || !strings.Contains(err.Error(), "writer_lost") || exitCodeFor(err) != 3 || !strings.Contains(output.String(), "retained match") {
+		t.Fatalf("output=%q error=%v", output.String(), err)
+	}
+}

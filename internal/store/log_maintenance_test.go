@@ -160,22 +160,21 @@ func TestLogPersistenceMaintenanceBoundsAndRollsBackTheBatch(t *testing.T) {
 			reader := authorityMember(t, s, "batch-log-reader", RoleReader)
 			countSeals := func(want int) {
 				t.Helper()
-				sealed := 0
 				for _, subject := range []blob.LogSubject{commit.Subject, other} {
 					got, err := tenant.ReadLogSegments(t.Context(), reader, blob.LogReadRequest{Subject: subject})
-					if err != nil || got.Complete {
+					if err != nil || got.Complete || got.IncompleteReason != "writer_lost" {
 						t.Fatalf("batch read: %+v, %v", got, err)
 					}
-					if got.IncompleteReason == "writer_lost" {
-						sealed++
-					} else if got.IncompleteReason != "" {
-						t.Fatalf("unexpected log reason: %q", got.IncompleteReason)
-					}
+				}
+				var sealed int
+				if err := s.db.QueryRowContext(t.Context(), `SELECT COUNT(*) FROM log_streams WHERE team='a' AND run_id='run' AND sealed_at IS NOT NULL AND completeness='incomplete' AND incomplete_reason='writer_lost'`).Scan(&sealed); err != nil {
+					t.Fatal(err)
 				}
 				if sealed != want {
 					t.Fatalf("sealed %d streams, want %d", sealed, want)
 				}
 			}
+			countSeals(0)
 			if fail {
 				first, err := logIdentity(commit.Subject)
 				if err != nil {

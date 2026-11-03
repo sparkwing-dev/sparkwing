@@ -50,7 +50,13 @@ func searchRunLogs(ctx context.Context, inv clisurface.Invocation, reader contro
 			return err
 		}
 	}
-	return writePageInfo(out, diagnostics, page.NextCursor, page.Truncated, format, inv.Bool("quiet"))
+	if err := writePageInfo(out, diagnostics, page.NextCursor, page.Truncated, format, inv.Bool("quiet")); err != nil {
+		return err
+	}
+	if len(page.Incomplete) > 0 {
+		return fmt.Errorf("logs incomplete: %s", page.Incomplete[0].Reason)
+	}
+	return nil
 }
 
 func parseLogSearch(inv clisurface.Invocation, now time.Time) (controllerwire.LogSearchQuery, error) {
