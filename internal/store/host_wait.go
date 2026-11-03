@@ -37,7 +37,7 @@ func readHostIneligibleTx(ctx context.Context, tx *storeTx, team Team, snapshot 
 	if err != nil {
 		return nil, err
 	}
-	chain, err := authorityChainTx(ctx, tx, capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: prefix}, false)
+	chain, err := teamAuthorityChainTx(ctx, tx, team, capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: prefix}, false, sameTeam)
 	if err != nil || len(chain) == 0 {
 		// safety: an owner whose authority lapsed mid-read is a transient state, not a reason to fail the page.
 		return nil, nil
