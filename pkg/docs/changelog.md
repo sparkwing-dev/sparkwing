@@ -20,11 +20,8 @@ unlock.
 
 ## [Unreleased]
 
-## [v0.68.5] - 2026-11-03
 ### Fixed
 
-- **release:** Publish `@sparkwing/sdk` through npm Trusted Publishing with GitHub Actions OIDC
-  Publication uses pinned npm 11.6.2 and automatic provenance without an npm token secret. v0.68.4 was tagged but never published, because its workflow still required the removed token; v0.68.5 carries its changes.
 - **web:** Make run cards usable with a keyboard and a screen reader
   The Runs pane is a "Runs" list of cards. Each card has a button named with the run's repository, pipeline, branch, start time and status that reports selection as pressed and opens or closes the run with Enter or Space. Each bulk-action checkbox names its run.
 - **web:** Give the console main, banner and navigation landmarks and a skip link
@@ -59,6 +56,12 @@ unlock.
   Controller scheduling preserves the dependency failure reason so cancelled jobs show which dependency blocked them.
 - **Cloud:** Start declared same-source children from uploaded working-tree snapshots
   Children reuse their parent's retained source bundle only for the same repository, ref, execution commit and pipeline commit. Upload ownership checks still reject unrelated submissions.
+
+## [v0.68.5] - 2026-11-03
+### Fixed
+
+- **release:** Publish `@sparkwing/sdk` through npm Trusted Publishing with GitHub Actions OIDC
+  Publication uses pinned npm 11.6.2 and automatic provenance without an npm token secret. v0.68.4 was tagged but never published, because its workflow still required the removed token; v0.68.5 carries its changes.
 
 ### Changed
 
