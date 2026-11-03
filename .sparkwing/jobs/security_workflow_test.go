@@ -84,6 +84,28 @@ func TestReleasePublicationRetainsItsSerializedQueue(t *testing.T) {
 	}
 }
 
+func TestReleasePublicationUsesTokenlessNpmOIDC(t *testing.T) {
+	body := readHostedCIFile(t, ".github/workflows/release.yaml")
+	for _, forbidden := range []string{"NPM_TOKEN", "NODE_AUTH_TOKEN", "Check npm publication credential"} {
+		if strings.Contains(body, forbidden) {
+			t.Errorf("release workflow must use npm trusted publishing without %s", forbidden)
+		}
+	}
+	var doc yaml.Node
+	if err := yaml.Unmarshal([]byte(body), &doc); err != nil {
+		t.Fatal(err)
+	}
+	publication := mappingValue(mappingValue(&doc, "jobs"), "release")
+	permission := mappingValue(mappingValue(publication, "permissions"), "id-token")
+	if permission == nil || permission.Value != "write" {
+		t.Fatal("npm trusted publishing requires id-token: write on the publication job")
+	}
+	runner := mappingValue(publication, "runs-on")
+	if runner == nil || runner.Value != "ubuntu-latest" {
+		t.Fatal("npm trusted publishing requires a GitHub-hosted publication runner")
+	}
+}
+
 func TestReleaseQueueContractRefusesUnsafeOrUncoveredConfiguration(t *testing.T) {
 	const valid = "jobs:\n  release:\n    concurrency:\n      group: release-publication\n      queue: max\n      cancel-in-progress: false\n"
 	if err := releaseQueueContract(valid); err != nil {

@@ -348,15 +348,15 @@ jobs:
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: "22.18.0"
-          registry-url: https://registry.npmjs.org
+      - name: Install npm for trusted publishing
+        run: |
+          set -euo pipefail
+          npm install -g npm@11.6.2
+          npm --version
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           name: release-typescript
           path: typescript-dist
-      - name: Check npm publication credential
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-        run: test -n "$NODE_AUTH_TOKEN"
       - name: Ad-hoc-sign macOS binaries (rcodesign)
         working-directory: dist
         run: |
@@ -486,12 +486,10 @@ jobs:
 
       - name: Publish TypeScript package
         env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
           TAG: ${{ inputs.tag || github.ref_name }}
           LATEST: ${{ steps.latest.outputs.eligible }}
         run: |
           set -euo pipefail
-          test -n "$NODE_AUTH_TOKEN"
           packages=(typescript-dist/*.tgz)
           test "${#packages[@]}" -eq 1
           npm_tag="release-${TAG#v}"

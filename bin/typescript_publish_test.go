@@ -178,7 +178,7 @@ process.exit(Number(process.env[dryRun ? "DRY_RUN_STATUS" : "PUBLISH_STATUS"] ||
 		}
 	}
 	var want [][]string
-	args := []string{"publish", file, "--access", "public", "--tag", test.tag, "--ignore-scripts", "--provenance", "--json"}
+	args := []string{"publish", file, "--access", "public", "--tag", test.tag, "--ignore-scripts", "--json"}
 	if test.publish || test.preview {
 		want = append(want, append(append([]string{}, args...), "--dry-run"))
 		if !strings.Contains(string(output), `"size":1234`) || !strings.Contains(string(output), `"path":"index.js"`) {
