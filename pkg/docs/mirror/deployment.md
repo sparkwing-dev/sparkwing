@@ -50,6 +50,9 @@ Remote API submissions must describe uploaded snapshots as committed checkouts
 with their bundle digest. The `source.working_tree` field requires a local
 checkout and is refused at intake when one is absent. The CLI's
 `pipeline trigger --working-tree` prepares the remote snapshot automatically.
+Declared children in the same team reuse the parent's retained bundle when the
+repository, ref, execution commit, pipeline commit and bundle digest all match.
+Unrelated runs require their own committed upload.
 Sparkwing Cloud uses the launcher for plan, evaluation and work Jobs. Every Job
 runs a rootful DinD sidecar inside its user-namespaced pod, never privileged and
 with namespaced capabilities only, on a node bound to one team and run, with

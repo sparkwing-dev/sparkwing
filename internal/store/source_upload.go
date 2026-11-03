@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"slices"
 	"time"
 
@@ -164,7 +165,19 @@ func bindSourceUploadTx(ctx context.Context, tx *storeTx, team Team, request Int
 		return nil
 	}
 	if request.Request.Lineage.RetryOf != "" {
-		return copyRetrySourceRecordTx(ctx, tx, team, request.Request.Lineage.RetryOf, result.RunID)
+		return copySubmissionSourceRecordTx(ctx, tx, team, request.Request.Lineage.RetryOf, result.RunID, input.Source.BundleDigest.Value)
+	}
+	if input.Lineage.ParentRunID != "" {
+		parent, err := readRunTx(ctx, tx, team, input.Lineage.ParentRunID)
+		if err != nil {
+			return err
+		}
+		from := parent.Request.Request
+		// safety: intake has fenced the live parent job; its bundle authority extends only to the exact source.
+		if input.Git.Repository.Key != from.Git.Repository.Key || input.Git.Ref != from.Git.Ref || input.Git.SHA != from.Git.SHA || input.Source.Ref != from.Source.Ref || input.Source.BundleDigest != from.Source.BundleDigest {
+			return authorityError(apierr.Forbidden, "child source bundle differs from its parent's source")
+		}
+		return copySubmissionSourceRecordTx(ctx, tx, team, parent.ID, result.RunID, input.Source.BundleDigest.Value)
 	}
 	var id string
 	err := tx.QueryRowContext(ctx, `SELECT id FROM source_uploads WHERE team=? AND authority_kind=? AND authority_id=? AND repo_key=? AND execution_sha=? AND pipeline_sha=? AND digest=? AND committed_at>0 AND expires_at>? AND bound_run_id IS NULL ORDER BY id LIMIT 1`+tx.forUpdate(), team, request.Authority.Kind, request.Authority.ID, input.Git.Repository.Key, input.Git.SHA, input.Source.Ref, input.Source.BundleDigest.Value, tx.now(ctx).UnixNano()).Scan(&id)
@@ -216,12 +229,19 @@ func bindSourceUploadTx(ctx context.Context, tx *storeTx, team Team, request Int
 	return err
 }
 
-func copyRetrySourceRecordTx(ctx context.Context, tx *storeTx, team Team, previous, run string) error {
-	result, err := tx.execContext(ctx, `INSERT INTO blob_records(team,kind,scope,name,digest,run_id,repo_key,ref_scope,uploader_principal,provenance,source_identity_json,source_kind,source_run_id,verified_ref,verified_default_branch,source_sha,ref_facts_json,pipeline,created_at) SELECT team,kind,?,name,digest,?,repo_key,ref_scope,uploader_principal,provenance,source_identity_json,source_kind,source_run_id,verified_ref,verified_default_branch,source_sha,ref_facts_json,pipeline,? FROM blob_records WHERE team=? AND run_id=? AND kind='source_bundle' AND source_kind='submission'`, run, run, tx.now(ctx).UnixNano(), team, previous)
+func copySubmissionSourceRecordTx(ctx context.Context, tx *storeTx, team Team, previous, run, digest string) error {
+	result, err := tx.execContext(ctx, `INSERT INTO blob_records(team,kind,scope,name,digest,run_id,repo_key,ref_scope,uploader_principal,provenance,source_identity_json,source_kind,source_run_id,verified_ref,verified_default_branch,source_sha,ref_facts_json,pipeline,created_at) SELECT team,kind,?,name,digest,?,repo_key,ref_scope,uploader_principal,provenance,source_identity_json,source_kind,source_run_id,verified_ref,verified_default_branch,source_sha,ref_facts_json,pipeline,? FROM blob_records WHERE team=? AND run_id=? AND kind='source_bundle' AND source_kind='submission' AND digest=?`, run, run, tx.now(ctx).UnixNano(), team, previous, digest)
 	if err != nil {
 		return err
 	}
-	return requireOneRow(result, "retry source binding")
+	count, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if count == 0 {
+		return authorityError(apierr.IntegrityFailure, fmt.Sprintf("uploaded-bundle source record is missing for run %q and digest %q", previous, digest))
+	}
+	return requireOneRow(result, "submission source binding")
 }
 
 // ExpireSourceUploads removes staged source bytes before releasing tickets.
