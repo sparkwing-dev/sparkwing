@@ -26,14 +26,6 @@ unlock.
   A job above the launcher's resource ceiling failed with "Cloud capacity is not configured for the requested hardware class", and the launcher logged the refusal at ERROR. The error now names the requested class, CPU and memory and the pool's CPU and memory ceiling, and says to request a smaller hardware class or contact support@sparkwing.dev to raise the ceiling. The launcher logs this expected refusal at INFO. A class with no configured pool keeps the previous message and ERROR log.
 - **Cloud:** Reuse a run's node for a dependent job without provisioning another
   When the controller awarded a dependent job just after its predecessor finished, but before the launcher retired the predecessor's Kubernetes Job, the launcher requested fresh capacity and Karpenter added a node that stayed empty while the job ran on the original. The launcher now retires ended predecessors before it requests capacity, so the dependent job waits for the original node.
-
-### Changed
-
-- **scaffold:** `const FallbackSDKVersion` pins v0.68.6, so a fresh scaffold compiles against that release.
-
-## [v0.68.6] - 2026-11-03
-### Fixed
-
 - **CLI:** Install `sparkwing-runner` from the signed release with `install.sh --runner`
   Neither `install.sh` nor `sparkwing update` installed `sparkwing-runner`, and `sparkwing runners add` told users to `go install` it. `install.sh --runner` now installs it beside `sparkwing` after the same signature, digest and version checks, and installs neither binary when either fails a check or its destination is not a file. If writing the runner fails, the previous `sparkwing` is put back. `runners add`, `sparkwing update --help` and the getting-started and local execution docs name that command; an installed runner keeps updating itself from verified release assets.
 - **CLI:** Report a still-running v0.67 dashboard and say to stop old processes before moving an old store
@@ -48,6 +40,14 @@ unlock.
   The console's "Connect a machine" form required repository patterns for a personal machine, but a personal machine with a repository scope never claims work: it takes only its owner's runs, which a scope refuses. The form now asks for patterns only for a shared runner. The command it printed also called `sparkwing-runner runner` with flags that no longer exist; it now runs `sparkwing-runner warm` with `--repos`, `--also-claim-triggers=false` and `--claim-jobs=false` as the token's grants require.
 - **CLI:** Say a pre-v0.68 SDK pin needs `sparkwing upgrade`
   Running a repository whose SDK pin predates v0.68.0 failed with `integrity_failure: release manifest has duplicate, unknown or malformed entries` and told the user not to execute unverified bytes. When the release's signatures and digest verify and only its list of executables is the older layout, it now fails with `version_unsupported`, says the pin is older than v0.68.0, the oldest release the CLI can run as a pipeline engine, and names `sparkwing upgrade` as the fix. A bad signature or digest stays `integrity_failure`, and the older release is never executed.
+
+### Changed
+
+- **scaffold:** `const FallbackSDKVersion` pins v0.68.6, so a fresh scaffold compiles against that release.
+
+## [v0.68.6] - 2026-11-03
+### Fixed
+
 - **web:** Make run cards usable with a keyboard and a screen reader
   The Runs pane is a "Runs" list of cards. Each card has a button named with the run's repository, pipeline, branch, start time and status that reports selection as pressed and opens or closes the run with Enter or Space. Each bulk-action checkbox names its run.
 - **web:** Give the console main, banner and navigation landmarks and a skip link
