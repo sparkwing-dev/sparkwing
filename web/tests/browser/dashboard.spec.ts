@@ -1414,6 +1414,103 @@ test("opens a selected DAG step when logs mount", async ({ page }) => {
   ).toBeVisible();
 });
 
+test("DAG job nodes show one progress segment per step without moving", async ({
+  page,
+}) => {
+  // "pending" is a status the console does not know, so it reads as not started.
+  const step = (id: string, status = "pending") => ({ id, status });
+  const gateSteps = [step("a", "passed"), step("b", "passed"), step("c", "running"), step("d")];
+  const detail = {
+    run: runningRun,
+    nodes: [
+      {
+        id: "gate",
+        status: "running",
+        outcome: "",
+        deps: [],
+        started_at: "2026-08-27T18:05:00Z",
+        work: { steps: gateSteps },
+      },
+      {
+        id: "matrix",
+        status: "running",
+        outcome: "",
+        deps: [],
+        started_at: "2026-08-27T18:05:00Z",
+        work: {
+          steps: Array.from({ length: 60 }, (_, i) => step(`m${i}`, i < 45 ? "passed" : undefined)),
+        },
+      },
+    ],
+  };
+  let release: (() => void) | undefined;
+  const advanced = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  await installMockAPI(page, {
+    runs: [runningRun],
+    details: { [runningRun.id]: detail },
+    onEventStream: async (route) => {
+      await advanced;
+      await route.fulfill({
+        contentType: "text/event-stream",
+        body: `event: job_started\ndata: ${JSON.stringify({ run_id: runningRun.id, seq: 2, node_id: "gate", kind: "job_started" })}\n\nevent: stream_end\ndata: {}\n\n`,
+      });
+    },
+  });
+  await page.goto(`/runs?run=${runningRun.id}`);
+  await page.getByRole("button", { name: /^DAG/ }).click();
+
+  const gate = page.locator('g[data-node-id="gate"]');
+  const bar = gate.getByTestId("step-progress");
+  const segments = bar.locator("[data-step-segment]");
+  await expect(segments).toHaveCount(4);
+  await expect(bar).toHaveAttribute("data-mode", "segments");
+  await expect(bar).toHaveAttribute("aria-label", "2 of 4 steps succeeded, 1 running, 1 pending");
+  expect(await segments.evaluateAll((els) => els.map((el) => el.getAttribute("data-step-state")))).toEqual([
+    "succeeded",
+    "succeeded",
+    "running",
+    "pending",
+  ]);
+  const fills = await segments.evaluateAll((els) => els.map((el) => el.getAttribute("fill")));
+  expect(fills[0]).toBe(fills[1]);
+  expect(new Set(fills).size).toBe(3);
+
+  const running = segments.nth(2);
+  const box = (await running.boundingBox())!;
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+  await expect(page.getByText("c · running", { exact: true })).toBeVisible();
+  await page.mouse.move(0, 0);
+
+  const nodeBox = await gate.locator("rect").first().boundingBox();
+  const barBox = await bar.boundingBox();
+
+  const matrix = page.locator('g[data-node-id="matrix"]').getByTestId("step-progress");
+  await expect(matrix).toHaveAttribute("data-mode", "proportional");
+  await expect(matrix).toHaveAttribute("aria-label", "45 of 60 steps succeeded, 15 pending");
+  await expect(matrix.locator("[data-step-run]")).toHaveCount(2);
+  const matrixBar = (await matrix.boundingBox())!;
+  const matrixNode = (await page.locator('g[data-node-id="matrix"] rect').first().boundingBox())!;
+  expect(matrixBar.x + matrixBar.width).toBeLessThanOrEqual(matrixNode.x + matrixNode.width);
+
+  gateSteps[2] = step("c", "failed");
+  gateSteps[3] = step("d", "running");
+  release?.();
+  await expect(bar).toHaveAttribute("aria-label", "2 of 4 steps succeeded, 1 running, 1 failed");
+  expect(await segments.evaluateAll((els) => els.map((el) => el.getAttribute("data-step-state")))).toEqual([
+    "succeeded",
+    "succeeded",
+    "failed",
+    "running",
+  ]);
+  expect(await gate.locator("rect").first().boundingBox()).toEqual(nodeBox);
+  expect(await bar.boundingBox()).toEqual(barBox);
+
+  const listBar = page.locator('div[data-node-id="gate"]').getByTestId("step-progress");
+  await expect(listBar.locator("[data-step-segment]")).toHaveCount(4);
+});
+
 test("focuses an exact line after expanding its selected step", async ({
   page,
 }) => {
