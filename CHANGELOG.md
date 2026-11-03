@@ -22,6 +22,8 @@ unlock.
 
 ### Fixed
 
+- **web:** Choose the Analytics trend range
+  Analytics offers 24 hours, 3 days, 7 days and 14 days, the controller's limit, and keeps the choice in the URL as `?range=`. The default stays at 3 days. Chart labels include the date when the range spans more than a day.
 - **web:** Say when a linked run does not exist
   Opening `/runs?run=<id>` for a run the controller does not return now shows "Run not found" with a button back to all runs, instead of an empty detail pane.
 - **web:** Say resource metrics are unavailable instead of loading forever

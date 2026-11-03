@@ -1287,6 +1287,30 @@ test("a deep link to a missing run says so and leads back to the runs", async ({
   await expect(page.locator(`[data-run-id="${finishedRun.id}"]`)).toBeVisible();
 });
 
+test("Analytics keeps its trend range in the URL", async ({ page }) => {
+  const requested: string[] = [];
+  await installMockAPI(page, {
+    onRequest: (route) => {
+      const url = new URL(route.request().url());
+      if (url.pathname === "/api/v1/trends") {
+        requested.push(url.searchParams.get("hours") ?? "");
+      }
+    },
+  });
+  await page.goto("/analytics");
+  const range = page.getByLabel("Range");
+  await expect(range).toHaveValue("3d");
+  await expect.poll(() => requested.at(-1)).toBe("72");
+
+  await range.selectOption("7d");
+  await expect(page).toHaveURL(/\/analytics\?range=7d$/);
+  await expect.poll(() => requested.at(-1)).toBe("168");
+
+  await page.goto("/analytics?range=24h");
+  await expect(page.getByLabel("Range")).toHaveValue("24h");
+  await expect.poll(() => requested.at(-1)).toBe("24");
+});
+
 test("opens a selected DAG step when logs mount", async ({ page }) => {
   await installMockAPI(page, {
     runs: [finishedRun],
