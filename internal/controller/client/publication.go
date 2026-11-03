@@ -6,6 +6,7 @@ import (
 	"errors"
 	"io"
 	"slices"
+	"strings"
 
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
@@ -196,8 +197,11 @@ func publishLocalLogs(ctx context.Context, publisher ProfileData, reader control
 	if err != nil {
 		return err
 	}
+	// safety: Complete only says observation ended, so the source's loss markers travel to the destination
+	// manifest; a published copy of a lost or byte-capped log must stay marked incomplete.
+	var lost []string
 	defer func() {
-		_, err := sink.Close(ctx, logseg.End{Stopped: resultErr != nil})
+		_, err := sink.Close(ctx, logseg.End{Stopped: resultErr != nil, IncompleteReason: strings.Join(lost, "; ")})
 		resultErr = errors.Join(resultErr, err)
 	}()
 	cursor := ""
@@ -205,6 +209,11 @@ func publishLocalLogs(ctx context.Context, publisher ProfileData, reader control
 		page, err := reader.ReadLogs(ctx, string(ref.RunID), controllerwire.LogQuery{Job: string(ref.NodeID), Cursor: cursor, NoEvents: true})
 		if err != nil {
 			return err
+		}
+		for _, marker := range page.Incomplete {
+			if marker.Subject.Attempt != nil && !slices.Contains(lost, marker.Reason) {
+				lost = append(lost, marker.Reason)
+			}
 		}
 		for _, record := range page.Records {
 			if record.Subject == nil || record.Subject.Attempt == nil {

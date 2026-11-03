@@ -509,7 +509,7 @@ function Pipelines({ pivotTabs }: { pivotTabs: React.ReactNode }) {
     }
     detailRequestRef.current.committed = request;
     setMissingRun(d ? null : runID);
-    if (d) setDetail(d);
+    setDetail(d);
     setDetailError(null);
   }, []);
 
@@ -629,7 +629,10 @@ function Pipelines({ pivotTabs }: { pivotTabs: React.ReactNode }) {
     setFinishedAfter: filterState.setFinishedAfter,
     setFinishedBefore: filterState.setFinishedBefore,
   };
-  const activeDetail = selectedRun ? detail : null;
+  // safety: the previous run's detail holds the panes steady only while the new run's request is pending;
+  // a refused request or a missing run must never leave it standing in for the selected run.
+  const activeDetail =
+    selectedRun && detail && (detail.run.id === selectedRun || !detailError) ? detail : null;
   const detailRun = activeDetail?.run ?? null;
   const topLevel = useMemo(() => {
     const withSelected =

@@ -1302,6 +1302,42 @@ test("a deep link to a missing run says so and leads back to the runs", async ({
   await expect(page.locator(`[data-run-id="${finishedRun.id}"]`)).toBeVisible();
 });
 
+test("navigating from a run to a missing run replaces the old detail", async ({
+  page,
+}) => {
+  await installMockAPI(page, {
+    runs: [finishedRun],
+    details: { [finishedRun.id]: finishedDetail },
+  });
+  await page.goto(`/runs?run=${finishedRun.id}`);
+  await expect(page.getByText("Nodes (1)", { exact: true })).toBeVisible();
+
+  await page.evaluate(() => {
+    history.pushState(null, "", "/runs?run=run-does-not-exist");
+  });
+  const notFound = page.getByRole("alert").filter({ hasText: "Run not found" });
+  await expect(notFound).toContainText("run-does-not-exist");
+  await expect(page.getByText("Nodes (1)", { exact: true })).toHaveCount(0);
+});
+
+test("a run that disappears while open says it is not found", async ({
+  page,
+}) => {
+  const details: Record<string, Record<string, unknown>> = {
+    [finishedRun.id]: finishedDetail,
+  };
+  await page.clock.install();
+  await installMockAPI(page, { runs: [finishedRun], details });
+  await page.goto(`/runs?run=${finishedRun.id}`);
+  await expect(page.getByText("Nodes (1)", { exact: true })).toBeVisible();
+
+  delete details[finishedRun.id];
+  await page.clock.runFor(8_000);
+  const notFound = page.getByRole("alert").filter({ hasText: "Run not found" });
+  await expect(notFound).toContainText(finishedRun.id);
+  await expect(page.getByText("Nodes (1)", { exact: true })).toHaveCount(0);
+});
+
 test("Analytics keeps its trend range in the URL", async ({ page }) => {
   const requested: string[] = [];
   await installMockAPI(page, {
