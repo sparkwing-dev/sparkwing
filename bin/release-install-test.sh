@@ -45,6 +45,7 @@ GOARCH="$(GOWORK=off go -C "$ROOT" env GOARCH)"
 EXT=""
 if [ "$GOOS" = windows ]; then EXT=".exe"; fi
 ASSET="sparkwing-${GOOS}-${GOARCH}${EXT}"
+RUNNER_ASSET="sparkwing-runner-${GOOS}-${GOARCH}${EXT}"
 
 # The one fixture the whole suite runs on: the real CLI, stamped like a release.
 note "building $ASSET from ./cmd/sparkwing stamped $TAG"
@@ -55,6 +56,9 @@ if [ "$reported" != "$TAG" ]; then
   echo "release-install-test: the staged build reports $reported, not $TAG" >&2
   exit 1
 fi
+note "building $RUNNER_ASSET from ./cmd/sparkwing-runner stamped $TAG"
+GOWORK=off go -C "$ROOT" build -trimpath -ldflags "-s -w -X main.Version=$TAG" \
+  -o "$WORK/$RUNNER_ASSET" ./cmd/sparkwing-runner
 
 # stage_release <dir> <tag>: a complete, correctly signed release. Cases mutate
 # a copy of it, so every refusal is one difference away from an install.
@@ -62,9 +66,11 @@ stage_release() {
   stage_dir="$1/$2"
   mkdir -p "$stage_dir"
   cp "$WORK/$ASSET" "$stage_dir/$ASSET"
-  (cd "$stage_dir" && sha256sum "$ASSET" >SHA256SUMS)
+  cp "$WORK/$RUNNER_ASSET" "$stage_dir/$RUNNER_ASSET"
+  (cd "$stage_dir" && sha256sum "$ASSET" "$RUNNER_ASSET" >SHA256SUMS)
   sign "$WORK/signing.pem" "$stage_dir/SHA256SUMS" "$stage_dir/SHA256SUMS.sig"
   sign "$WORK/signing.pem" "$stage_dir/$ASSET" "$stage_dir/$ASSET.sig"
+  sign "$WORK/signing.pem" "$stage_dir/$RUNNER_ASSET" "$stage_dir/$RUNNER_ASSET.sig"
 }
 
 # The installer trusts the release key; the staged release is signed by a
@@ -102,7 +108,7 @@ run_install() {
   env "$@" \
     HOME="$run_home" SPARKWING_HOME="$run_home/.sparkwing" \
     SPARKWING_RELEASE_BASE_URL="$release_url" \
-    "${SHELL_UNDER_TEST:-sh}" "$INSTALLER" --version "$run_tag" --prefix "$install_prefix" \
+    "${SHELL_UNDER_TEST:-sh}" "$INSTALLER" --version "$run_tag" --prefix "$install_prefix" ${RUNNER_UNDER_TEST:+--runner} \
     >"$WORK/$run_name.out" 2>"$WORK/$run_name.err"
   run_status=$?
   set -e
@@ -159,6 +165,23 @@ for shell_under_test in sh bash; do
     case_failed "shell-$shell_under_test" "failed under $shell_under_test: $(tr '\n' ' ' <"$WORK/shell-$shell_under_test.err")"
   fi
 done
+
+# --runner installs sparkwing-runner from the same release, verified the same
+# way, and a bad runner asset leaves neither binary behind.
+RUNNER_UNDER_TEST=1 run_install runner "$GOOD" "$TAG"
+if [ "$run_status" -ne 0 ]; then
+  case_failed runner "refused a correctly signed runner: $(tr '\n' ' ' <"$WORK/runner.err")"
+elif [ "$("$WORK/prefix-runner/sparkwing-runner$EXT" version -o plain --offline)" != "$TAG" ]; then
+  case_failed runner "installed a runner that does not report $TAG"
+fi
+TAMPERED_RUNNER="$WORK/releases-tampered-runner"
+stage_release "$TAMPERED_RUNNER" "$TAG"
+printf 'malicious' >>"$TAMPERED_RUNNER/$TAG/$RUNNER_ASSET"
+RUNNER_UNDER_TEST=1 run_install tampered-runner "$TAMPERED_RUNNER" "$TAG"
+refuses tampered-runner "$RUNNER_ASSET does not match its SHA256SUMS entry"
+if [ -e "$WORK/prefix-tampered-runner/sparkwing-runner$EXT" ]; then
+  case_failed tampered-runner "left a runner behind after refusing"
+fi
 
 TAMPERED="$WORK/releases-tampered"
 stage_release "$TAMPERED" "$TAG"
