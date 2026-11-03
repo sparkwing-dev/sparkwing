@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"runtime"
@@ -127,8 +128,9 @@ func (p *Gate) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
 	sparkwing.Step(w, "changelog", checkChangelogRequired)
 	sparkwing.Step(w, "api-spec", checkAPISpec)
 	sparkwing.Step(w, "api-snapshot", checkAPISnapshot)
-	frontendUnit := sparkwing.Step(w, "frontend-unit", runFrontendUnit)
-	frontendLint := sparkwing.Step(w, "frontend-lint", runFrontendLint)
+	frontendDeps := sparkwing.Step(w, "frontend-deps", runFrontendDeps)
+	frontendUnit := sparkwing.Step(w, "frontend-unit", runFrontendUnit).Needs(frontendDeps)
+	frontendLint := sparkwing.Step(w, "frontend-lint", runFrontendLint).Needs(frontendDeps)
 	frontendBuild := sparkwing.Step(w, "frontend-build", runFrontendBuild).Needs(frontendUnit, frontendLint)
 	sparkwing.Step(w, "frontend-browser", runFrontendBrowser).Needs(frontendBuild)
 	sparkwing.Step(w, "sdk-typescript", runTypeScriptSDK)
@@ -141,6 +143,25 @@ func runTypeScriptSDK(ctx context.Context) error {
 	const sdk = "npm --prefix sdk/typescript"
 	if _, err := sparkwing.Bash(ctx, sdk+" ci --ignore-scripts --no-audit --no-fund && "+sdk+" run typecheck && "+sdk+" test").Run(); err != nil {
 		return fmt.Errorf("TypeScript SDK suite: %w", err)
+	}
+	return nil
+}
+
+const frontendInstall = "pnpm --dir web install --frozen-lockfile --prefer-offline --ignore-scripts"
+
+// safety: a checkout without web/node_modules failed the frontend steps with
+// exit 127 and no remedy. The frozen install matches hosted CI's and is a fast
+// no-op when the dependencies already match the lockfile.
+func runFrontendDeps(ctx context.Context) error {
+	if _, err := exec.LookPath("pnpm"); err != nil {
+		if _, statErr := os.Stat(filepath.Join(sparkwing.WorkDir(), "web", "node_modules")); statErr == nil {
+			sparkwing.Warn(ctx, "pnpm is not on PATH, so web/node_modules was not checked against the lockfile")
+			return nil
+		}
+		return fmt.Errorf("frontend dependencies: web/node_modules is missing and pnpm is not on PATH; install pnpm (corepack enable pnpm), then run: %s", frontendInstall)
+	}
+	if _, err := sparkwing.Bash(ctx, frontendInstall).Run(); err != nil {
+		return fmt.Errorf("frontend dependencies: %w\nrun: %s", err, frontendInstall)
 	}
 	return nil
 }

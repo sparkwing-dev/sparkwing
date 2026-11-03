@@ -722,7 +722,18 @@ file. Other syntax and workflow checks remain active.
   `goleak` option from its `TestMain` and says why in a `safety:` comment. A
   helper process a test spawns by re-executing the test binary runs without the
   check, so a goroutine such a helper leaves behind fails nothing; the check
-  covers the suite, not the children it starts.
+  covers the suite, not the children it starts. The same package moves HOME,
+  SPARKWING_HOME and XDG_CONFIG_HOME into a private sandbox. Before it does,
+  it puts the suite's own `go env GOROOT`/bin first on PATH and pins asdf and
+  mise to the developer's real data dir, config and tool versions
+  (`ASDF_DATA_DIR`, `ASDF_<TOOL>_VERSION`, `MISE_DATA_DIR`, `MISE_CONFIG_DIR`),
+  so `go` and `helm` started through a shim still resolve. A variable already
+  set is left alone.
+- **Frontend dependencies:** the gate's `frontend-deps` step runs
+  `pnpm --dir web install --frozen-lockfile --prefer-offline --ignore-scripts`
+  before the frontend steps, a no-op when `web/node_modules` matches the
+  lockfile. Without pnpm and without `web/node_modules` it fails naming that
+  command.
 - **Go result caching:** ordinary `test` and `gate` checks preserve the
   caller's temporary-directory settings so Go can reuse passing results.
   Test fixtures own cleanup through `t.TempDir`, `t.Cleanup`, or deferred

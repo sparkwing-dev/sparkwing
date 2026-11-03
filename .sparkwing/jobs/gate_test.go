@@ -339,8 +339,8 @@ func TestGateRunsFrontendUnitSuiteAsAnIndependentStep(t *testing.T) {
 	if step == nil {
 		t.Fatal("pre-commit does not run frontend-unit")
 	}
-	if deps := step.Needs; len(deps) != 0 {
-		t.Fatalf("frontend-unit dependencies = %v, want an independent fast check", deps)
+	if deps := step.Needs; !slices.Equal(deps, []string{"frontend-deps"}) {
+		t.Fatalf("frontend-unit dependencies = %v, want only the dependency install", deps)
 	}
 }
 
@@ -362,8 +362,11 @@ func TestGateRunsFrontendChecksBeforeBrowserSmoke(t *testing.T) {
 			t.Fatalf("pre-commit does not run %s", id)
 		}
 	}
-	if deps := findStep(w, "frontend-lint").Needs; len(deps) != 0 {
-		t.Fatalf("frontend-lint dependencies = %v, want an independent fast check", deps)
+	if deps := findStep(w, "frontend-lint").Needs; !slices.Equal(deps, []string{"frontend-deps"}) {
+		t.Fatalf("frontend-lint dependencies = %v, want only the dependency install", deps)
+	}
+	if deps := findStep(w, "frontend-deps").Needs; len(deps) != 0 {
+		t.Fatalf("frontend-deps dependencies = %v, want it to start at once", deps)
 	}
 	if !stepWaitsOn(w, "frontend-build", "frontend-unit") {
 		t.Fatal("frontend-build does not wait on frontend-unit")
@@ -1116,5 +1119,38 @@ func TestScopedStepsStayOnTheCommitWhenItStagesNoFileOfTheirKind(t *testing.T) {
 	}
 	if scope != "0 staged Go file(s)" {
 		t.Errorf("scope = %q, want the staged change; this fixture has no origin/main to fall back to", scope)
+	}
+}
+
+func TestFrontendDepsInstallsFromTheLockfileOrNamesTheCommand(t *testing.T) {
+	root := t.TempDir()
+	t.Chdir(root)
+	bin := t.TempDir()
+	log := filepath.Join(root, "pnpm-args")
+	writeGoFile(t, filepath.Join(bin, "pnpm"), "#!/bin/sh\necho \"$@\" > "+shellQuote(log)+"\n")
+	if err := os.Chmod(filepath.Join(bin, "pnpm"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	if err := runFrontendDeps(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	args, err := os.ReadFile(log)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.TrimSpace(string(args)); got != "--dir web install --frozen-lockfile --prefer-offline --ignore-scripts" {
+		t.Fatalf("pnpm args = %q", got)
+	}
+
+	t.Setenv("PATH", t.TempDir())
+	err = runFrontendDeps(context.Background())
+	if err == nil || !strings.Contains(err.Error(), "run: "+frontendInstall) {
+		t.Fatalf("missing pnpm and node_modules: err = %v, want the install command", err)
+	}
+	writeGoFile(t, filepath.Join(root, "web", "node_modules", ".modules.yaml"), "")
+	if err := runFrontendDeps(context.Background()); err != nil {
+		t.Fatalf("installed dependencies without pnpm were refused: %v", err)
 	}
 }
