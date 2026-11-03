@@ -195,7 +195,10 @@ func TestRoutedRunDeadTokenHintNamesTheRoutingProfile(t *testing.T) {
 		probe: func(context.Context, client.EngineOptions) error {
 			return &apierr.Error{Code: apierr.Unauthenticated, Message: "credential is not live"}
 		},
-		local: func(context.Context, string, runFlags, []string) error { t.Fatal("dead credential fell back to a local run"); return nil },
+		local: func(context.Context, string, runFlags, []string) error {
+			t.Fatal("dead credential fell back to a local run")
+			return nil
+		},
 	})
 	var hint string
 	if writeErr := writeInvocationError(io.Discard, err, func(_ io.Writer, failure *apierr.Error) error { hint = failure.Hint; return nil }); writeErr != nil {
