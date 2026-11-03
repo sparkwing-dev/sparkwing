@@ -653,9 +653,14 @@ configuration. A failed list retries. Requests above the launcher's CPU or
 memory ceiling and requests with no compatible pool for the requested
 class terminally report `cloud_capacity_unconfigured` through the fenced
 launcher sync. The controller releases the unstarted credit reservation in the
-same transaction. The launcher deletes demand and logs the requested class,
-requested CPU and memory, configured ceilings and run ID. Customer guidance names support@sparkwing.dev
-and the run reference.
+same transaction. The launcher deletes demand. A request above a ceiling reports
+the launcher's CPU and memory ceilings with the failure, and its customer error
+names the requested class, CPU and memory, the ceilings, and the remedies of a
+smaller hardware class or asking support@sparkwing.dev to raise the ceiling. The
+launcher logs that customer-caused refusal at INFO with the requested and
+configured sizes. A missing pool keeps the generic guidance naming
+support@sparkwing.dev and the run reference, and logs at ERROR because the
+operator must configure it.
 
 With a compatible pool, the launcher reads `budget-state` from its credentials
 directory before creating demand. `closed` means the Cloud budget breaker has

@@ -280,8 +280,9 @@ that immutable source projection. `LauncherObservation.Award` is the existing
 `capability.LeaseRef` tuple of kind, ID, holder and generation. An eval uses its own
 lease generation, separately from the immutable source generation. Observations
 carry that fence, a reservation-only marker, and a Job rejection marker.
-`LauncherCapacityObservation` carries only the award fence in the separate
-`LauncherSyncRequest.Capacity` list. It cannot name an execution host.
+`LauncherCapacityObservation` carries the award fence in the separate
+`LauncherSyncRequest.Capacity` list, plus the launcher's CPU and memory ceiling
+when an unconfigured failure is a request above that ceiling. It cannot name an execution host.
 `LauncherSyncRequest.Activations` carries `LauncherActivation` with the award
 fence, execution Node UID and reservation ID. The authenticated launcher sends it
 only after verifying its reserved node and suspended Job, before unsuspending

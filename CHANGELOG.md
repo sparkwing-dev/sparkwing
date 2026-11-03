@@ -22,6 +22,8 @@ unlock.
 
 ### Fixed
 
+- **Cloud:** Name the pool ceiling when a job asks for more CPU or memory than it allows
+  A job above the launcher's resource ceiling failed with "Cloud capacity is not configured for the requested hardware class", and the launcher logged the refusal at ERROR. The error now names the requested class, CPU and memory and the pool's CPU and memory ceiling, and says to request a smaller hardware class or contact support@sparkwing.dev to raise the ceiling. The launcher logs this expected refusal at INFO. A class with no configured pool keeps the previous message and ERROR log.
 - **Cloud:** Reuse a run's node for a dependent job without provisioning another
   When the controller awarded a dependent job just after its predecessor finished, but before the launcher retired the predecessor's Kubernetes Job, the launcher requested fresh capacity and Karpenter added a node that stayed empty while the job ran on the original. The launcher now retires ended predecessors before it requests capacity, so the dependent job waits for the original node.
 - **web:** Make run cards usable with a keyboard and a screen reader

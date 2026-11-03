@@ -39,6 +39,8 @@ type CloudCapacityObservation struct {
 	Unconfigured bool
 	// Unavailable reports that the Cloud budget breaker refuses new job nodes.
 	Unavailable bool
+	// Ceiling names the launcher's resource ceiling when the request exceeded it.
+	Ceiling *match.Resources
 }
 
 // CloudJobObservation retains the identities needed to reconcile after launcher restart.

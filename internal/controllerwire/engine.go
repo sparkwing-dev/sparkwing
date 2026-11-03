@@ -126,6 +126,8 @@ type LauncherCapacityObservation struct {
 	Unconfigured bool                `json:"unconfigured,omitempty"`
 	// Unavailable reports that the Cloud budget breaker refuses new job nodes.
 	Unavailable bool `json:"unavailable,omitempty"`
+	// Ceiling is the launcher's resource ceiling when an unconfigured request exceeded it.
+	Ceiling *match.Resources `json:"ceiling,omitempty"`
 }
 
 // LauncherRun identifies a run whose spent Cloud nodes may be retired.
