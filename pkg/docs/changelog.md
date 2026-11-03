@@ -24,6 +24,8 @@ unlock.
 
 - **upgrade:** Refresh the SDK requirement in generated sparks overlays before installation
   An overlay left from an earlier run could retain the old SDK pin and make `sparkwing upgrade` fail with "Go dependency selection changed the SDK pin". Installation now takes the SDK requirement from `go.mod` while preserving resolved sparks versions.
+- **GitHub:** Accept stateless installation tokens through source checkout, storage and log masking
+  Stored HTTPS credentials and the console accept tokens up to 4,096 characters. Secret scanners recognize the longer installation-token format, including dots, underscores and hyphens. GitHub Actions runners preserve the full `GITHUB_TOKEN` for source checkout.
 
 ## [v0.68.3] - 2026-11-02
 ### Added
@@ -66,9 +68,6 @@ unlock.
 - **pipeline references (Breaking):** Latest outputs default to verified default-branch runs and exclude publication. Declare `sw.FromAnyRun()` (TypeScript `{fromAnyRun: true}`) to opt out. The direct output route enforces the same rule. See [migration](docs/migrations/v0.68.3.md#sealed-execution-trust).
 
 ### Fixed
-
-- **GitHub:** Accept stateless installation tokens through source checkout, storage and log masking
-  Stored HTTPS credentials and the console accept tokens up to 4,096 characters. Secret scanners recognize the longer installation-token format, including dots, underscores and hyphens. GitHub Actions runners preserve the full `GITHUB_TOKEN` for source checkout.
 
 - **Cloud:** A controller rate-limit reply to the launcher's first claim logs at INFO
   The previous process's idle poll interval may still apply after a restart. Repeated refusals retain WARN, and the launcher honors the controller's retry delay in both cases.
