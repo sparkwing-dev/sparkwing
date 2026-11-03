@@ -3,6 +3,7 @@ package sparkwing
 import (
 	"context"
 	"encoding/json"
+	"sync"
 	"testing"
 )
 
@@ -26,10 +27,16 @@ func jobFnNoop() func(context.Context) error {
 	return func(context.Context) error { return nil }
 }
 
-type recordingLogger struct{ lines []string }
+// safety: Bash streams stdout and stderr from separate goroutines into one logger.
+type recordingLogger struct {
+	mu    sync.Mutex
+	lines []string
+}
 
-func (r *recordingLogger) Log(level, message string) { r.lines = append(r.lines, level+": "+message) }
+func (r *recordingLogger) Log(level, message string) { r.Emit(LogRecord{Level: level, Msg: message}) }
 func (r *recordingLogger) Emit(record LogRecord) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	r.lines = append(r.lines, record.Level+": "+record.Msg)
 }
 
