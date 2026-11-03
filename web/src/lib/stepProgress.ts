@@ -24,7 +24,7 @@ export const STEP_STATE_COLOR: Record<StepState, string> = {
   running: "rgba(129,140,248,0.95)",
   pending: "rgba(129,140,248,0.30)",
   failed: "rgba(248,113,113,0.95)",
-  cancelled: "rgba(148,163,184,0.45)",
+  cancelled: "rgba(251,191,36,0.95)",
   skipped: "rgba(148,163,184,0.45)",
 };
 

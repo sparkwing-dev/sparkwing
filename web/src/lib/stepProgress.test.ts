@@ -1,6 +1,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import {
+  STEP_STATE_COLOR,
   layoutStepProgress,
   stepIndexAt,
   stepProgressLabel,
@@ -13,6 +14,13 @@ describe("stepState", () => {
     assert.equal(stepState("passed"), "succeeded");
     assert.equal(stepState("running"), "running");
     assert.equal(stepState(undefined), "pending");
+  });
+});
+
+describe("STEP_STATE_COLOR", () => {
+  it("shows cancelled in the console's amber and keeps skipped muted", () => {
+    assert.equal(STEP_STATE_COLOR.cancelled, "rgba(251,191,36,0.95)");
+    assert.notEqual(STEP_STATE_COLOR.skipped, STEP_STATE_COLOR.cancelled);
   });
 });
 

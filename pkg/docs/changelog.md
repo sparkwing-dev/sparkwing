@@ -31,7 +31,7 @@ unlock.
 - **runtime:** Jobs receive `SPARKWING_ENGINE_VERSION`
   Every job attempt sees the version of the engine executing it, so a pipeline can key a recorded result on the engine that produced it and stop reusing it after an upgrade.
 - **console:** Run DAG job nodes show step progress
-  Each job node in the run's DAG carries a thin bar with one segment per step, in step order, colored by the step's state: green succeeded, indigo running, dim indigo not started, red failed, muted cancelled or skipped. Hovering a segment names the step and its state, and the bar's accessible label counts them, such as "14 of 22 steps succeeded, 1 running, 7 pending". When steps would get thinner than 3px the bar fills each run of same-state steps proportionally instead. The bar sits inside the node, so state changes never resize or move it. The node list shows the same bar along the bottom of each job row.
+  Each job node in the run's DAG carries a thin bar with one segment per step, in step order, colored by the step's state: green succeeded, indigo running, dim indigo not started, red failed, amber cancelled, muted skipped. Hovering a segment names the step and its state, and the bar's accessible label counts them, such as "14 of 22 steps succeeded, 1 running, 7 pending". When steps would get thinner than 3px the bar fills each run of same-state steps proportionally instead. The bar sits inside the node, so state changes never resize or move it. The node list shows the same bar along the bottom of each job row.
 
 ### Changed
 
