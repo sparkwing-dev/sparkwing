@@ -34,6 +34,7 @@ const hostPressureWindowMS = 5 * 60 * 1000;
 interface SerialPollingOptions<T> {
   load: () => Promise<T>;
   publish: (value: T) => void;
+  fail?: (error: unknown) => void;
   intervalMS: number | null;
   active?: () => boolean;
 }
@@ -41,6 +42,7 @@ interface SerialPollingOptions<T> {
 export function startSerialPolling<T>({
   load,
   publish,
+  fail,
   intervalMS,
   active,
 }: SerialPollingOptions<T>): () => void {
@@ -60,8 +62,10 @@ export function startSerialPolling<T>({
     try {
       const value = await load();
       if (!stopped) publish(value);
-    } catch {
-      // A failed decode drops one sample so the next poll can recover live updates.
+    } catch (error) {
+      // A failure drops one sample so the next poll can recover live updates;
+      // the caller still hears about it, or a first failure looks like loading forever.
+      if (!stopped) fail?.(error);
     } finally {
       schedule();
     }

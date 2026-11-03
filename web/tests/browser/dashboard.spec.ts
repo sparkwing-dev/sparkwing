@@ -903,6 +903,21 @@ test("renders the empty production dashboard and passes accessibility smoke", as
   ).toEqual([]);
 });
 
+test("the console has one main landmark and a skip link into it", async ({ page }) => {
+  await installMockAPI(page);
+  await page.goto("/runs");
+
+  await expect(page.getByRole("main")).toHaveCount(1);
+  await expect(page.getByRole("banner")).toHaveCount(1);
+  await expect(page.getByRole("navigation", { name: "Primary" })).toBeVisible();
+  await page.keyboard.press("Tab");
+  const skip = page.getByRole("link", { name: "Skip to content" });
+  await expect(skip).toBeFocused();
+  await expect(skip).toBeVisible();
+  await page.keyboard.press("Enter");
+  await expect(page.getByRole("main")).toBeFocused();
+});
+
 test("surfaces controller authentication failures", async ({ page }) => {
   await installMockAPI(page, { unauthorized: true });
   await page.goto("/");
@@ -978,9 +993,9 @@ test("keeps run panes the same size while switching selected runs", async ({ pag
 
   await page.evaluate((firstRunID) => {
     const row = document.querySelector(`[data-run-id="${firstRunID}"]`);
-    const sidebar = row?.parentElement?.parentElement;
+    const sidebar = row?.closest("#runs-column");
     const panes = sidebar?.parentElement;
-    if (!sidebar || !panes) throw new Error("run panes missing");
+    if (!row || !sidebar || !panes) throw new Error("run panes missing");
     const samples: { sidebar: number; detail: number; row: number }[] = [];
     const state = window as typeof window & {
       __runPaneSamples?: typeof samples;
@@ -1095,6 +1110,29 @@ test("names a cache hit without requesting execution metrics", async ({ page }) 
 
   await expect(page.getByText(/Cache hit\. Sparkwing reused/)).toBeVisible();
   expect(metricRequests).toBe(0);
+});
+
+test("says resource metrics are unavailable when the metrics endpoint refuses", async ({
+  page,
+}) => {
+  await installMockAPI(page, {
+    runs: [finishedRun],
+    details: { [finishedRun.id]: finishedDetail },
+    onNodeMetrics: async (route) => {
+      await route.fulfill({
+        status: 503,
+        json: { error: { code: "unavailable", message: "metrics unavailable" } },
+      });
+      return true;
+    },
+  });
+  await page.goto(`/runs?run=${finishedRun.id}&node=verify&tab=resources`);
+  await page.getByRole("button", { name: "Resources", exact: true }).click();
+
+  await expect(
+    page.getByText("Resource metrics are unavailable for this node."),
+  ).toBeVisible();
+  await expect(page.getByText("Loading resource evidence…")).toHaveCount(0);
 });
 
 test("ignores an older node metrics response after switching runs", async ({
@@ -1250,6 +1288,75 @@ test("does not restore an older run after the new detail request fails", async (
   await expect(page).toHaveURL(new RegExp(`run=${runningRun.id}`));
 });
 
+test("a deep link to a missing run says so and leads back to the runs", async ({
+  page,
+}) => {
+  await installMockAPI(page, { runs: [finishedRun] });
+  await page.goto("/runs?run=run-does-not-exist");
+
+  const notFound = page.getByRole("alert").filter({ hasText: "Run not found" });
+  await expect(notFound).toContainText("run-does-not-exist");
+  await notFound.getByRole("button", { name: "Back to all runs" }).click();
+  await expect(page).not.toHaveURL(/run=/);
+  await expect(page.getByText("Run not found")).toHaveCount(0);
+  await expect(page.locator(`[data-run-id="${finishedRun.id}"]`)).toBeVisible();
+});
+
+test("Analytics keeps its trend range in the URL", async ({ page }) => {
+  const requested: string[] = [];
+  await installMockAPI(page, {
+    onRequest: (route) => {
+      const url = new URL(route.request().url());
+      if (url.pathname === "/api/v1/trends") {
+        requested.push(url.searchParams.get("hours") ?? "");
+      }
+    },
+  });
+  await page.goto("/analytics");
+  const range = page.getByLabel("Range");
+  await expect(range).toHaveValue("3d");
+  await expect.poll(() => requested.at(-1)).toBe("72");
+
+  await range.selectOption("7d");
+  await expect(page).toHaveURL(/\/analytics\?range=7d$/);
+  await expect.poll(() => requested.at(-1)).toBe("168");
+
+  await page.goto("/analytics?range=24h");
+  await expect(page.getByLabel("Range")).toHaveValue("24h");
+  await expect.poll(() => requested.at(-1)).toBe("24");
+});
+
+test("run cards expose names, status, selection and keyboard activation", async ({
+  page,
+}) => {
+  await installMockAPI(page, {
+    runs: [finishedRun, runningRun],
+    details: { [finishedRun.id]: finishedDetail },
+  });
+  await page.goto("/runs");
+
+  const list = page.getByRole("list", { name: "Runs" });
+  await expect(list.getByRole("listitem")).toHaveCount(2);
+  const open = list.getByRole("button", {
+    name: /^Run sparkwing-dev\/sparkwing \/ deploy-production \/ main \/ .* \/ success$/,
+  });
+  await expect(open).toHaveAttribute("aria-pressed", "false");
+  await expect(
+    list.getByRole("checkbox", { name: /^Select sparkwing-dev\/sparkwing \/ pre-commit .* running for bulk actions$/ }),
+  ).toBeVisible();
+  const axe = await new AxeBuilder({ page }).include('[role="list"][aria-label="Runs"]').analyze();
+  expect(axe.violations.map((violation) => violation.id)).toEqual([]);
+
+  await open.focus();
+  await page.keyboard.press("Enter");
+  await expect(page).toHaveURL(new RegExp(`run=${finishedRun.id}`));
+  await expect(open).toHaveAttribute("aria-pressed", "true");
+  await expect(open).toBeFocused();
+  await page.keyboard.press("Space");
+  await expect(page).not.toHaveURL(/run=/);
+  await expect(open).toHaveAttribute("aria-pressed", "false");
+});
+
 test("opens a selected DAG step when logs mount", async ({ page }) => {
   await installMockAPI(page, {
     runs: [finishedRun],
@@ -1356,7 +1463,7 @@ test("run rows keep their height while the detail pane closes", async (
     .poll(() =>
       rows
         .first()
-        .evaluate((row) => row.parentElement!.parentElement!.getBoundingClientRect().width),
+        .evaluate((row) => row.closest("#runs-column")!.getBoundingClientRect().width),
     )
     .toBe(208);
 
@@ -1369,7 +1476,7 @@ test("run rows keep their height while the detail pane closes", async (
       heights.push({
         height: row.getBoundingClientRect().height,
         width: row.getBoundingClientRect().width,
-        pane: row.parentElement!.parentElement!.getBoundingClientRect().width,
+        pane: row.closest("#runs-column")!.getBoundingClientRect().width,
       });
     }
     return heights;
@@ -1391,7 +1498,7 @@ test("run rows keep their height while the detail pane closes", async (
     .poll(() =>
       rows
         .first()
-        .evaluate((row) => row.parentElement!.parentElement!.getBoundingClientRect().width),
+        .evaluate((row) => row.closest("#runs-column")!.getBoundingClientRect().width),
     )
     .toBe(208);
   await rows.first().click();

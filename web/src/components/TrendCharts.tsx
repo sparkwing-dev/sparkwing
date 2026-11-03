@@ -26,11 +26,27 @@ function fmtMs(ms: number): string {
   return `${m}m ${Math.round(s % 60)}s`;
 }
 
-function fmtTime(iso: string): string {
-  return new Date(iso).toLocaleTimeString([], {
-    hour: "2-digit",
-    minute: "2-digit",
-  });
+// The controller caps trends at 14 days and widens buckets past 48 hours.
+export const TREND_RANGES = [
+  { key: "24h", label: "24 hours", hours: 24 },
+  { key: "3d", label: "3 days", hours: 72 },
+  { key: "7d", label: "7 days", hours: 7 * 24 },
+  { key: "14d", label: "14 days", hours: 14 * 24 },
+] as const;
+export const DEFAULT_TREND_RANGE = "3d";
+
+export function trendRange(key: string | null): (typeof TREND_RANGES)[number] {
+  return (
+    TREND_RANGES.find((r) => r.key === key) ??
+    TREND_RANGES.find((r) => r.key === DEFAULT_TREND_RANGE)!
+  );
+}
+
+function fmtTime(iso: string, hours: number): string {
+  const time = { hour: "2-digit", minute: "2-digit" } as const;
+  return hours > 24
+    ? new Date(iso).toLocaleString([], { month: "short", day: "numeric", ...time })
+    : new Date(iso).toLocaleTimeString([], time);
 }
 
 const tooltipStyle = {
@@ -79,7 +95,7 @@ export default function TrendCharts({
 
   const data = points.map((p) => ({
     ...p,
-    time: fmtTime(p.bucket),
+    time: fmtTime(p.bucket, hours),
   }));
 
   return (
