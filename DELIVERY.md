@@ -999,19 +999,24 @@ file. Other syntax and workflow checks remain active.
   `SPARKWING_TEST_STORE=postgres`, so every store test that opens through
   `internal/store/storetest` exercises the Postgres dialect instead of a SQLite
   file. It compiles one `internal/store` test binary, lists its top-level
-  Test, Example and Fuzz names, and selects the external `store_test` package
-  plus the internal tests whose source reaches `SPARKWING_TEST_PG_URL` or the
-  `pgx` driver, directly or through a helper or constant in the internal test
-  files. The internal package cannot import `storetest`, so its other tests and
-  fuzz seeds only ever open SQLite; the full Go suite already runs them, and
-  they cost 432 s of a 24m32s hosted-profile run. `TestClaimSecurityRegressions`
-  follows the suite's dialect and so repeats `TestPostgresClaimSecurityRegressions`
-  here; only the PostgreSQL copy runs. The step logs the count and SHA-256 of the
+  Test, Example and Fuzz names, and runs every one except two kinds. The
+  internal tests in the files named by
+  `.sparkwing/jobs/store_postgres_sqlite_only.txt` are skipped: the internal
+  package cannot import `storetest`, so those tests and fuzz seeds only ever
+  open SQLite, the full Go suite already runs them, and they cost 432 s of a
+  24m32s hosted-profile run. `TestClaimSecurityRegressions` follows the suite's
+  dialect and so repeats `TestPostgresClaimSecurityRegressions` here; only the
+  PostgreSQL copy runs. Any other test runs, including every test in a new
+  file, so a PostgreSQL path the source scan cannot see, such as a non-test
+  helper, is still exercised. The step logs the count and SHA-256 of the
   listed, selected and skipped names, and fails when a listed name has no
-  declaration, is placed other than exactly once, or the duplicate pair is no
-  longer listed. `TestStorePostgresSelectionCoversTheStoreInventory` in
-  `.sparkwing/jobs` holds every external test and the known internal PostgreSQL
-  tests in the selection. The sorted selection is assigned round-robin, each
+  declaration or is placed other than exactly once, or the duplicate pair is
+  no longer listed. It also fails, as does
+  `TestStorePostgresSelectionCoversTheStoreInventory` in `.sparkwing/jobs`,
+  when a named file is missing, declares no internal test, or reaches
+  `SPARKWING_TEST_PG_URL` or the `pgx` driver directly or through a helper or
+  constant in the internal test files; remove such a file from the list. The
+  sorted selection is assigned round-robin, each
   name exactly once, to one `GOMAXPROCS=1` shard process per core a Go step
   may hold: four on the hosted four-core runner, the Go step bound
   (`(cpus-1)/2` shared, `cpus/2` under `CI`) elsewhere. Each shard gets a

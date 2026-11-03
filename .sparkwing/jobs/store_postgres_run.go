@@ -73,7 +73,7 @@ func runStorePostgresShards(ctx context.Context, home, scratch, dsn string, shar
 	if err != nil {
 		return err
 	}
-	sel, err := selectStorePostgresTests(names, storePostgresPackageDir)
+	sel, err := selectStorePostgresTests(names, storePostgresPackageDir, storePostgresSQLiteOnlyFiles(storePostgresSQLiteOnlyList))
 	if err != nil {
 		return err
 	}

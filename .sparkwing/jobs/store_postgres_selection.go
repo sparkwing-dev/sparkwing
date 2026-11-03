@@ -1,6 +1,7 @@
 package jobs
 
 import (
+	_ "embed"
 	"fmt"
 	"go/ast"
 	"go/parser"
@@ -13,13 +14,16 @@ import (
 )
 
 // perf: the full Go suite already runs the internal package's SQLite-only
-// tests and fuzz seeds, so this job keeps the external package, whose tests
-// open through storetest, and the internal tests that reach the server.
+// tests and fuzz seeds, so this job skips the internal test files listed in
+// store_postgres_sqlite_only.txt; every other test, and any new file, runs.
 const (
 	storePostgresPackage    = "./internal/store"
 	storePostgresPackageDir = "internal/store"
 	storePostgresURLEnv     = "SPARKWING_TEST_PG_URL"
 )
+
+//go:embed store_postgres_sqlite_only.txt
+var storePostgresSQLiteOnlyList string
 
 // perf: both names run one helper; under SPARKWING_TEST_STORE=postgres the
 // dialect-following copy repeats the PostgreSQL one, so only the latter runs.
@@ -32,13 +36,44 @@ type storePostgresSelection struct {
 }
 
 type storeTestDecl struct {
+	file               string
 	external, postgres bool
 }
 
-func selectStorePostgresTests(listed []string, packageDir string) (storePostgresSelection, error) {
-	decls, err := storeTestDeclarations(packageDir)
+type storeTestFile struct {
+	external, postgres bool
+	tests              int
+}
+
+func storePostgresSQLiteOnlyFiles(list string) []string {
+	var files []string
+	for _, line := range strings.Split(list, "\n") {
+		if line = strings.TrimSpace(line); line != "" && !strings.HasPrefix(line, "#") {
+			files = append(files, line)
+		}
+	}
+	return files
+}
+
+func selectStorePostgresTests(listed []string, packageDir string, sqliteOnly []string) (storePostgresSelection, error) {
+	decls, files, err := storeTestDeclarations(packageDir)
 	if err != nil {
 		return storePostgresSelection{}, err
+	}
+	excluded := make(map[string]bool, len(sqliteOnly))
+	for _, name := range sqliteOnly {
+		file, ok := files[name]
+		switch {
+		case excluded[name]:
+			return storePostgresSelection{}, fmt.Errorf("SQLite-only file %s is listed twice", name)
+		case !ok:
+			return storePostgresSelection{}, fmt.Errorf("SQLite-only file %s is not a test file in %s; remove it from store_postgres_sqlite_only.txt", name, packageDir)
+		case file.external || file.tests == 0:
+			return storePostgresSelection{}, fmt.Errorf("SQLite-only file %s declares no internal top-level test; remove it from store_postgres_sqlite_only.txt", name)
+		case file.postgres:
+			return storePostgresSelection{}, fmt.Errorf("SQLite-only file %s now reaches %s or the pgx driver; remove it from store_postgres_sqlite_only.txt so its tests run on postgres", name, storePostgresURLEnv)
+		}
+		excluded[name] = true
 	}
 	var sel storePostgresSelection
 	for _, name := range listed {
@@ -46,23 +81,17 @@ func selectStorePostgresTests(listed []string, packageDir string) (storePostgres
 		if !ok {
 			return storePostgresSelection{}, fmt.Errorf("listed test %q has no declaration in %s/*_test.go, so the postgres selection cannot place it", name, packageDir)
 		}
-		if _, duplicate := storePostgresDuplicates[name]; duplicate {
+		_, duplicate := storePostgresDuplicates[name]
+		if duplicate || (!decl.external && excluded[decl.file]) {
 			sel.skipped = append(sel.skipped, name)
-			continue
-		}
-		if decl.external || decl.postgres {
-			sel.run = append(sel.run, name)
 		} else {
-			sel.skipped = append(sel.skipped, name)
+			sel.run = append(sel.run, name)
 		}
 	}
 	for duplicate, kept := range storePostgresDuplicates {
 		if !slices.Contains(listed, duplicate) || !slices.Contains(sel.run, kept) {
 			return storePostgresSelection{}, fmt.Errorf("postgres duplicate %q or the copy it defers to, %q, is no longer listed; update storePostgresDuplicates", duplicate, kept)
 		}
-	}
-	if len(sel.run) == 0 {
-		return storePostgresSelection{}, fmt.Errorf("no listed test in %s exercises postgres", packageDir)
 	}
 	return sel, checkStorePostgresPartition(listed, sel)
 }
@@ -84,14 +113,14 @@ func checkStorePostgresPartition(listed []string, sel storePostgresSelection) er
 	return nil
 }
 
-// safety: the graph spans the internal package's test files, so a test reaches
-// the server through a helper or constant as well as directly; a reference
-// to any same-named declaration counts, which can only add tests.
-func storeTestDeclarations(packageDir string) (map[string]storeTestDecl, error) {
+// safety: the graph only vetoes a SQLite-only listing; it sees test files alone,
+// so a path through a non-test helper is caught by tests defaulting to run.
+func storeTestDeclarations(packageDir string) (map[string]storeTestDecl, map[string]storeTestFile, error) {
 	entries, err := os.ReadDir(packageDir)
 	if err != nil {
-		return nil, fmt.Errorf("read %s for the postgres selection: %w", packageDir, err)
+		return nil, nil, fmt.Errorf("read %s for the postgres selection: %w", packageDir, err)
 	}
+	files := map[string]storeTestFile{}
 	fset := token.NewFileSet()
 	decls := map[string]storeTestDecl{}
 	refs := map[string]map[string]bool{}
@@ -121,9 +150,11 @@ func storeTestDeclarations(packageDir string) (map[string]storeTestDecl, error) 
 		}
 		file, err := parser.ParseFile(fset, filepath.Join(packageDir, entry.Name()), nil, parser.SkipObjectResolution)
 		if err != nil {
-			return nil, fmt.Errorf("parse %s for the postgres selection: %w", entry.Name(), err)
+			return nil, nil, fmt.Errorf("parse %s for the postgres selection: %w", entry.Name(), err)
 		}
 		external := strings.HasSuffix(file.Name.Name, "_test")
+		info := files[entry.Name()]
+		info.external = external
 		for _, decl := range file.Decls {
 			switch decl := decl.(type) {
 			case *ast.FuncDecl:
@@ -131,13 +162,18 @@ func storeTestDeclarations(packageDir string) (map[string]storeTestDecl, error) 
 				if decl.Recv == nil && isTopLevelTestName(name) {
 					d := decls[name]
 					d.external = d.external || external
+					d.file = entry.Name()
 					decls[name] = d
+					info.tests++
 					if !external {
 						internal = append(internal, name)
 					}
 				}
 				if !external {
 					note(name, decl)
+					if direct[name] {
+						info.postgres = true
+					}
 				}
 			case *ast.GenDecl:
 				if external {
@@ -147,11 +183,15 @@ func storeTestDeclarations(packageDir string) (map[string]storeTestDecl, error) 
 					if value, ok := spec.(*ast.ValueSpec); ok {
 						for _, ident := range value.Names {
 							note(ident.Name, value)
+							if direct[ident.Name] {
+								info.postgres = true
+							}
 						}
 					}
 				}
 			}
 		}
+		files[entry.Name()] = info
 	}
 	reaches := map[string]bool{}
 	var visit func(string, map[string]bool) bool
@@ -176,9 +216,12 @@ func storeTestDeclarations(packageDir string) (map[string]storeTestDecl, error) 
 			d := decls[name]
 			d.postgres = true
 			decls[name] = d
+			info := files[d.file]
+			info.postgres = true
+			files[d.file] = info
 		}
 	}
-	return decls, nil
+	return decls, files, nil
 }
 
 func isTopLevelTestName(name string) bool {

@@ -30,11 +30,12 @@ func (StorePostgres) Help() string {
 	return "Runs the internal/store tests that exercise Postgres with SPARKWING_TEST_STORE=postgres, " +
 		"so every store test that opens through internal/store/storetest exercises the Postgres dialect " +
 		"instead of a SQLite file. It compiles one internal/store test binary, lists its top-level " +
-		"tests and runs the external store_test package plus the internal tests whose source reaches " +
-		"SPARKWING_TEST_PG_URL or the pgx driver; the internal SQLite-only tests and fuzz seeds are left " +
-		"to the full Go suite, and TestClaimSecurityRegressions defers to its PostgreSQL copy. The run " +
-		"logs each list's count and SHA-256 and fails when a listed name has no declaration or is not " +
-		"placed exactly once. The sorted selection is assigned round-robin, each name exactly once, " +
+		"tests and runs every one except the internal tests in the files named by " +
+		".sparkwing/jobs/store_postgres_sqlite_only.txt, which only open SQLite and which the full Go " +
+		"suite runs, and TestClaimSecurityRegressions, which defers to its PostgreSQL copy. A test in " +
+		"any other file, including a new one, runs. The run logs each list's count and SHA-256 and fails " +
+		"when a listed name has no declaration or is not placed exactly once, or when a named file is " +
+		"missing, declares no internal test, or reaches SPARKWING_TEST_PG_URL or the pgx driver. The sorted selection is assigned round-robin, each name exactly once, " +
 		"to one GOMAXPROCS=1 process per core a Go step may hold (four on the hosted four-core " +
 		"runner, the shared-host Go step bound elsewhere). Each shard runs against a database of " +
 		"its own, which the run creates on the server and drops with FORCE afterwards, because the " +
