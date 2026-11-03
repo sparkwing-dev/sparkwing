@@ -182,5 +182,8 @@ func storeTestDeclarations(packageDir string) (map[string]storeTestDecl, error) 
 }
 
 func isTopLevelTestName(name string) bool {
+	if name == "TestMain" {
+		return false
+	}
 	return strings.HasPrefix(name, "Test") || strings.HasPrefix(name, "Fuzz") || strings.HasPrefix(name, "Example")
 }

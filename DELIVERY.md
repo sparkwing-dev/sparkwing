@@ -444,9 +444,9 @@ file. Other syntax and workflow checks remain active.
   45-minute timeout on hosted CI without a hung test. The unsharded one-thread
   local nodehost baseline took 687 seconds. Parallel tests within a runtime
   share the same CPU bound. Hosts with capacity for one package retain the
-  ordinary race command. On a four-core single-tenant host, the ordinary and
-  PostgreSQL commands use the same one-thread, two-package bounds on their
-  separate runner. Fitting each hosted deadline and improving cold-start
+  ordinary race command. On a four-core single-tenant host, the ordinary
+  command uses one-thread, two-package bounds on its separate runner, and the
+  PostgreSQL suite runs four one-thread shard processes. Fitting each hosted deadline and improving cold-start
   latency still require measured evidence. The full Go suite uses a 25-minute per-package timeout;
   hosted runs 36678720566 and 36689529462 hit Go's default 10-minute timeout
   in `internal/controller` or `internal/store` while the active tests had run for 0s.
@@ -1011,8 +1011,24 @@ file. Other syntax and workflow checks remain active.
   declaration, is placed other than exactly once, or the duplicate pair is no
   longer listed. `TestStorePostgresSelectionCoversTheStoreInventory` in
   `.sparkwing/jobs` holds every external test and the known internal PostgreSQL
-  tests in the selection. `internal/store/internal/storetest` and
-  `internal/store/teststore` run whole. It reuses `SPARKWING_TEST_PG_URL` when
+  tests in the selection. The sorted selection is assigned round-robin, each
+  name exactly once, to one `GOMAXPROCS=1` shard process per core a Go step
+  may hold: four on the hosted four-core runner, the Go step bound
+  (`(cpus-1)/2` shared, `cpus/2` under `CI`) elsewhere. Each shard gets a
+  database of its own, created on the server before the shards start and
+  dropped `WITH (FORCE)` afterwards, because the store's migration advisory
+  lock is per database: shards sharing one database queue every fixture's
+  schema apply behind each other. A run killed outright can leave
+  `sparkwing_store_shard_*` databases on a configured server. A failing shard
+  stops the others. `internal/store/internal/storetest` and
+  `internal/store/teststore` run whole. Measured on 2026-11-02 on a loaded
+  16-core host pinned to four cores with `CI=1` against a shared PostgreSQL 18
+  server: the former single `go test ./internal/store/...` took 28m12s for
+  1,876 top-level tests; selection alone took 14m26s; selection with four shards
+  took 7m10s, and a verbose repeat 6m07s whose shards took 3m10s to 6m04s with
+  each of the 508 selected names passing exactly once. Round-robin leaves
+  `TestAdmissionDeterministicSimulation` (about two minutes) in the longest
+  shard. It reuses `SPARKWING_TEST_PG_URL` when
   that is set and otherwise starts an embedded Postgres on a free port (data
   under a temporary root, binaries cached in `$TMPDIR`), then stops it and
   removes the data directory whether the suite passes, fails, or is
@@ -1021,13 +1037,8 @@ file. Other syntax and workflow checks remain active.
   which embedded-postgres only makes available once the server has stopped.
   A server that will not start is retried once on a fresh port and then
   fails the step. `pre-release` runs it after the race gate, under a
-  thirty-minute timeout. The Go package has a fixed 25-minute timeout because
-  its 1,199 top-level tests run serially in one package binary and took 789
-  seconds in the pipeline with seven workers on an otherwise idle 16-core
-  host, 88 percent of the earlier 15-minute limit. The pipeline took 801
-  seconds end to end. The limit leaves room for the gate's concurrent race
-  suite and stays inside the step's thirty minutes, so a hung test still
-  reports its stack. The first run may also download the Postgres binaries.
+  thirty-minute timeout. Each shard has a 25-minute Go timeout, inside the
+  step's thirty minutes, so a hung test still reports its stack. The first run may also download the Postgres binaries.
 
 - **Hosted pre-release PostgreSQL:** the canonical pre-release job supplies a
   PostgreSQL 17 service through `SPARKWING_TEST_PG_URL`, so `store-postgres`

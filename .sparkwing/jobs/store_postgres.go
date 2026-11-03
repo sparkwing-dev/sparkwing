@@ -34,7 +34,13 @@ func (StorePostgres) Help() string {
 		"SPARKWING_TEST_PG_URL or the pgx driver; the internal SQLite-only tests and fuzz seeds are left " +
 		"to the full Go suite, and TestClaimSecurityRegressions defers to its PostgreSQL copy. The run " +
 		"logs each list's count and SHA-256 and fails when a listed name has no declaration or is not " +
-		"placed exactly once. The storetest and teststore packages run whole. " +
+		"placed exactly once. The sorted selection is assigned round-robin, each name exactly once, " +
+		"to one GOMAXPROCS=1 process per core a Go step may hold (four on the hosted four-core " +
+		"runner, the shared-host Go step bound elsewhere). Each shard runs against a database of " +
+		"its own, which the run creates on the server and drops with FORCE afterwards, because the " +
+		"store's migration advisory lock is per database. A run killed outright can leave " +
+		"sparkwing_store_shard_* databases on a configured server. A failing shard stops the others. " +
+		"The storetest and teststore packages run whole. " +
 		"When SPARKWING_TEST_PG_URL is already set the run uses " +
 		"that server; otherwise it starts an embedded Postgres on a free port, with its data " +
 		"directory under a temporary root and its binaries under the persistent tool cache, " +
