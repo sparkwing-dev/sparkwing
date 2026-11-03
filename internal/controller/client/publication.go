@@ -22,6 +22,8 @@ type PublicationInput struct {
 	State    runstate.LocalPublication
 	OpenBlob func(context.Context, blob.Digest) (io.ReadCloser, int64, error)
 	Logs     controllerwire.LogReader
+	// Notice receives one-line notices, such as an older controller dropping the agent label.
+	Notice io.Writer
 }
 
 // PublishLocalRun imports local history without admitting executable work.
@@ -42,7 +44,7 @@ func PublishLocalRun(ctx context.Context, options EngineOptions, input Publicati
 	request.Env = runspec.EnvSnapshot{}
 	request.Lineage, request.Burst = runspec.Lineage{}, nil
 	request.Options.Publish.Value, request.Options.CacheFrom.Value = "", ""
-	response, err := controller.CreateRun(ctx, controllerwire.CreateRunRequest{Request: request, IdempotencyKey: "publication/" + local.ID})
+	response, err := CreateRun(ctx, controller, controllerwire.CreateRunRequest{Request: request, IdempotencyKey: "publication/" + local.ID}, input.Notice)
 	if err != nil {
 		return "", err
 	}

@@ -17,6 +17,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
+	"github.com/sparkwing-dev/sparkwing/internal/controller/client"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator"
@@ -162,7 +163,7 @@ func runLocalCommand(ctx context.Context, pipeline string, flags runFlags, args 
 		}
 		request.Request.Options.Priority.Value = rank
 	}
-	response, err := runtime.controller.CreateRun(ctx, request)
+	response, err := client.CreateRun(ctx, runtime.controller, request, os.Stderr)
 	masker.Register(response.HereBearer)
 	if err != nil {
 		return err
