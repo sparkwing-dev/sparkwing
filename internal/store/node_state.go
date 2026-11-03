@@ -715,6 +715,10 @@ func applyNodeEdgeTx(ctx context.Context, tx *storeTx, team Team, row *runstate.
 			row.QueueStartedAt = &now
 		}
 	case runstate.NodeClaimed:
+		// safety: a holder can finish without starting, so a new claim must not inherit the last attempt's trusted host.
+		if _, err := tx.execContext(ctx, `UPDATE nodes SET trusted_host=0 WHERE team=? AND run_id=? AND node_id=?`, team, row.Ref.RunID, row.Ref.NodeID); err != nil {
+			return err
+		}
 		award := change.Extra.Claim
 		row.ClaimedBy = award.Holder
 		row.CapabilityPrefix = award.CapabilityPrefix

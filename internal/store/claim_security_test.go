@@ -28,6 +28,7 @@ func ClaimSecurityRegressions(t *testing.T, open func(*testing.T) *Store) {
 	t.Run("push provenance parity", func(t *testing.T) { pushClaimProvenanceParity(t, fixture) })
 	t.Run("pool branch rules", func(t *testing.T) { poolBranchRulesMatchLikePathGlobs(t, fixture) })
 	t.Run("trusted producer host", func(t *testing.T) { trustedHostRecordedAtAttemptStart(t, fixture) })
+	t.Run("trusted host cleared by claim", func(t *testing.T) { trustedHostClearedByClaim(t, fixture) })
 }
 
 // safety: a registered machine produces counted passes only when its admin-set trust never takes asserted work.
@@ -98,6 +99,26 @@ func trustedHostRecordedAtAttemptStart(t *testing.T, open func(*testing.T) *Stor
 				t.Fatalf("trusted_host = %d, want %v", trusted, tc.trusted)
 			}
 		})
+	}
+}
+
+// safety: a holder can finish without starting, so its claim alone must clear the previous attempt's flag.
+func trustedHostClearedByClaim(t *testing.T, open func(*testing.T) *Store) {
+	s, demand := unitClaimFixtureStore(t, open(t))
+	s.testOnlyExec(t, `UPDATE nodes SET trusted_host=1 WHERE team='a' AND run_id='run' AND node_id='job'`)
+	root := authorityRoot("shared", "a")
+	authorityPersist(t, s, root)
+	demand.CapabilityPrefix = root.Prefix
+	indexFixtureUnit(t, s, "a", *demand.Target)
+	if _, err := s.AsOperator().ClaimUnit(t.Context(), demand); err != nil {
+		t.Fatal(err)
+	}
+	var trusted int
+	if err := s.db.QueryRowContext(t.Context(), `SELECT trusted_host FROM nodes WHERE team='a' AND run_id='run' AND node_id='job'`).Scan(&trusted); err != nil {
+		t.Fatal(err)
+	}
+	if trusted != 0 {
+		t.Fatal("a new claim inherited the previous attempt's trusted host")
 	}
 }
 
