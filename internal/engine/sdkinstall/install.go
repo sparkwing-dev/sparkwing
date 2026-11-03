@@ -237,14 +237,14 @@ func installDiagnostic(output io.Writer, masker *secrets.Masker, body []byte, to
 	return errors.Join(toolErr, err)
 }
 
-func refreshOverlayPin(overlay, version string) error {
+func refreshOverlayPin(overlay, version string) (result error) {
 	// safety: the overlay sits in repository content, so a committed symlink must not redirect this
 	// rewrite to a file outside the pipeline directory on the runner.
 	root, err := os.OpenRoot(filepath.Dir(overlay))
 	if err != nil {
 		return err
 	}
-	defer root.Close()
+	defer func() { result = errors.Join(result, root.Close()) }()
 	name := filepath.Base(overlay)
 	info, err := root.Lstat(name)
 	if err != nil {
