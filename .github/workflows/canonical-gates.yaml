@@ -32,7 +32,7 @@ jobs:
       GOWORK: "off"
     services:
       postgres:
-        image: ${{ matrix.gate == 'pre-release' && 'postgres:17' || '' }}
+        image: ${{ (matrix.gate == 'pre-release' || startsWith(matrix.gate, 'race-store-')) && 'postgres:17' || '' }}
         env:
           POSTGRES_USER: postgres
           POSTGRES_PASSWORD: postgres
@@ -228,6 +228,8 @@ jobs:
         if: startsWith(matrix.gate, 'race-store-')
         env:
           SPARKWING_HOME: ${{ runner.temp }}/sparkwing-home
+          SPARKWING_TEST_PG_URL: postgres://postgres:postgres@localhost:5432/postgres?sslmode=disable
+          SPARKWING_REQUIRE_PG: "1"
           LANE: ${{ matrix.gate }}
         run: |
           set -euo pipefail

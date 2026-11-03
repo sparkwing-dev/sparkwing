@@ -104,6 +104,15 @@ func raceCostShards(names []string, costs map[string]float64, shardCount int) ([
 	return shards, checkRaceTestCoverage(names, shards, shardCount)
 }
 
+// safety: the PostgreSQL store tests skip without a URL and the shard still
+// passes, so a lane that promises them refuses to start instead.
+func requireRacePostgres(getenv func(string) string) error {
+	if getenv("SPARKWING_REQUIRE_PG") != "" && strings.TrimSpace(getenv(storePostgresURLEnv)) == "" {
+		return fmt.Errorf("race-store: SPARKWING_REQUIRE_PG is set, so %s must name a reachable Postgres; without it the PostgreSQL store tests skip", storePostgresURLEnv)
+	}
+	return nil
+}
+
 // perf: one of count hosted runners splitting the store race; count 1 runs
 // every shard on this host, and count 0 runs none because other lanes do.
 type raceStorePart struct{ index, count int }
@@ -283,6 +292,9 @@ func runStoreRaceShardsAtHome(ctx context.Context, home string, part raceStorePa
 		// every part whenever pre-release passes this.
 		sparkwing.Warn(ctx, "race-store: --race-store-part %s; separate race-store lanes run every part", raceStorePartsElsewhere)
 		return nil
+	}
+	if err := requireRacePostgres(os.Getenv); err != nil {
+		return err
 	}
 	costs, err := parseRaceCosts(storeRaceCostTable)
 	if err != nil {
