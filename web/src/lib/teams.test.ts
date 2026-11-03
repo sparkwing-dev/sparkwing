@@ -466,6 +466,19 @@ describe("parseRepoPatterns", () => {
   });
 });
 
+describe("cliProfileCommand", () => {
+  it("saves the token with a command sparkwing profiles add accepts", () => {
+    const cmd = teams.cliProfileCommand("acme", "https://controller.example");
+    assert.equal(cmd, "sparkwing profiles add --controller https://controller.example --profile acme --token-stdin");
+    const registry = readFileSync(join(process.cwd(), "..", "internal", "clisurface", "registry.go"), "utf8");
+    const add = registry.slice(registry.indexOf('{Path: "sparkwing profiles add"'));
+    const accepted = new Set([...add.slice(0, add.indexOf("}},")).matchAll(/Name: "([a-z-]+)"/g)].map((m) => m[1]));
+    for (const [, flag] of cmd.matchAll(/--([a-z-]+)/g)) {
+      assert.ok(accepted.has(flag), `--${flag} is not a sparkwing profiles add flag`);
+    }
+  });
+});
+
 describe("runnerConnectCommand", () => {
   it("uses the bearer only in its private credential-file setup", () => {
     const cmd = teams.runnerConnectCommand({ capability: "swk_secret", grants: ["nodes.claim", "triggers.claim"] }, [

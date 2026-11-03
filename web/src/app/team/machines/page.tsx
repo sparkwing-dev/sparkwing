@@ -19,6 +19,7 @@ import {
   type TeamToken,
   canConnectMachines,
   canManageTeam,
+  cliProfileCommand,
   cliTokenStartsRuns,
   listMembers,
   getTeamSettings,
@@ -250,7 +251,7 @@ function CLIAccess({
               <div className="text-[10px] font-bold uppercase tracking-wider text-[var(--muted)] mb-1">
                 1. Save it as the {minted.team} profile
               </div>
-              <CopyField value={`sparkwing cloud connect --controller ${window.location.origin} --name ${minted.team} --token-stdin`} label="Setup command" multiline />
+              <CopyField value={cliProfileCommand(minted.team, window.location.origin)} label="Setup command" multiline />
               <div className="text-xs text-[var(--muted)] mt-1">
                 Paste the token below when the command asks for it.
               </div>

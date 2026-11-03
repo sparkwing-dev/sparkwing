@@ -469,6 +469,10 @@ export function runnerConnectCommand(
   ].join(" ");
 }
 
+export function cliProfileCommand(team: string, controllerURL: string): string {
+  return `sparkwing profiles add --controller ${controllerURL} --profile ${team} --token-stdin`;
+}
+
 // A CLI token without runs.write reads runs but cannot start one, which is
 // what a reader's token is; the page says so rather than letting the first
 // trigger find out.

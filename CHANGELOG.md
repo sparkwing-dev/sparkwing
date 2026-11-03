@@ -22,6 +22,8 @@ unlock.
 
 ### Fixed
 
+- **web:** Show a CLI token setup command that exists
+  After "Create CLI token" the console told users to run `sparkwing cloud connect`, which v0.68 removed. It now shows `sparkwing profiles add --controller URL --profile TEAM --token-stdin`.
 - **web:** Connect a personal machine without repository patterns, with a runner command that starts
   The console's "Connect a machine" form required repository patterns for a personal machine, but a personal machine with a repository scope never claims work: it takes only its owner's runs, which a scope refuses. The form now asks for patterns only for a shared runner. The command it printed also called `sparkwing-runner runner` with flags that no longer exist; it now runs `sparkwing-runner warm` with `--repos`, `--also-claim-triggers=false` and `--claim-jobs=false` as the token's grants require.
 - **CLI:** Say a pre-v0.68 SDK pin needs `sparkwing upgrade`
