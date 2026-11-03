@@ -27,6 +27,8 @@ type RunView struct {
 	JobResults         []JobResult
 	Waiting            *UnclaimedUnit
 	CloudCapacitySince *time.Time
+	// HostIneligible maps each ready job the hosting machine of a local run cannot execute to why it waits.
+	HostIneligible map[string]string
 }
 
 // JobResult is a job's persisted masked summary and annotations written outside any step.
@@ -97,6 +99,9 @@ func readRunViewTx(ctx context.Context, tx *storeTx, team Team, runID string) (R
 		return RunView{}, err
 	}
 	if view.CloudCapacitySince, err = readCloudCapacityWaitTx(ctx, tx, team, view.Snapshot.Run); err != nil {
+		return RunView{}, err
+	}
+	if view.HostIneligible, err = readHostIneligibleTx(ctx, tx, team, view.Snapshot); err != nil {
 		return RunView{}, err
 	}
 	return view, nil

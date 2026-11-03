@@ -56,6 +56,8 @@ unlock.
   When one step failed and fail-fast cancelled its running siblings, each sibling reported the error its own body returned for the interrupted command, often with that step's own remedy, as if it had failed on its own. Cancelled siblings, started or not, now report `cancelled because step "NAME" failed`; the failed step keeps its error.
 - **SDK:** Command failure messages cap a long command line
   `ExecError` messages in Go and TypeScript repeated the whole command, so a step that passed hundreds of test names to `-test.run` buried the failure under the argument list. The message now repeats the first 512 bytes of the command followed by `... [N more bytes]`; the `Command` / `command` field keeps the full text and the command's output still follows.
+- **CLI + web:** Say why a local run's job waits when its machine cannot run it
+  A local run whose job required runner labels the machine running it does not report, such as `Requires("host=build-box")` on a laptop, left the job `pending` with an empty detail for as long as the run lived, because only that machine ever executes a local run's jobs. `runs status` (pretty and JSON `status_detail`) and the dashboard now say the job waits on those labels, list the labels the machine reports, and say to cancel the run and start it where the labels apply or change the job's requirements.
 ### Changed
 
 - **scaffold:** `const FallbackSDKVersion` pins v0.68.6, so a fresh scaffold compiles against that release.
