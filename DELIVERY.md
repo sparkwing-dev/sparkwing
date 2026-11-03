@@ -103,7 +103,7 @@ job and lint deadline allow 40 minutes total: the ten-minute check allowance
 plus 30 minutes for contention. The tier measures that combined wall time,
 including waiting. Other lint callers keep their five-minute deadline.
 
-The gate's `lint` step keeps five minutes for linting itself, and waiting for
+The gate's `lint` step allows ten minutes for linting itself (decision 96; both modules measure four to five minutes under load), and waiting for
 the box-wide golangci-lint lock does not count against it (lead decision,
 2026-11-03). On Unix the step takes golangci-lint's own lock,
 `$TMPDIR/golangci-lint.lock`, before it lints, then runs golangci-lint with

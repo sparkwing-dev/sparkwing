@@ -12,6 +12,9 @@ import (
 
 const lintLockWait = 5 * time.Minute
 
+// perf: linting both modules measures about four to five minutes on a loaded box; the gate allows ten (decision 96).
+const gateLintDeadline = 10 * time.Minute
+
 // safety: the gate waits for a neighbor's lint on this separate bound, so a
 // held lock fails by name instead of eating the lint deadline.
 const gateLintLockWait = 20 * time.Minute

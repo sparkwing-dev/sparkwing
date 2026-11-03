@@ -27,7 +27,7 @@ func runGolangciLint(ctx context.Context) error {
 		return err
 	}
 	defer release()
-	return lintModules(ctx, lintLockWait, lockedLintCommand, true)
+	return lintModules(ctx, gateLintDeadline, lockedLintCommand, true)
 }
 
 func lintLockPath() string { return filepath.Join(os.TempDir(), "golangci-lint.lock") }
