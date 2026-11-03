@@ -204,6 +204,7 @@ func (f *admissionFixture) podCreates(t *testing.T, job *batchv1.Job) []admissio
 		{name: "other_scheduler", user: testJobController, object: pod(func(p *corev1.Pod) { p.Spec.SchedulerName = "custom" }), reason: "cluster DNS"},
 		{name: "service_links", user: testJobController, object: pod(func(p *corev1.Pod) { p.Spec.EnableServiceLinks = ptr(true) }), reason: "cluster DNS"},
 		{name: "run_node_command", user: testJobController, object: pod(func(p *corev1.Pod) { p.Spec.Containers[0].Command = []string{"/bin/sh"} }), reason: "sparkwing-runner commands"},
+		{name: "run_node_scratch_mode", user: testJobController, object: pod(func(p *corev1.Pod) { p.Spec.Containers[0].Command[2] = `chmod 0777 /tmp && exec "$@"` }), reason: "sparkwing-runner commands"},
 		{name: "run_node_flag", user: testJobController, object: pod(func(p *corev1.Pod) { p.Spec.Containers[0].Args[9] = "--bootstrap-dir" }), reason: "sparkwing-runner commands"},
 		{name: "run_node_sidecar", user: testJobController, object: pod(func(p *corev1.Pod) {
 			p.Spec.Containers[0].RestartPolicy = ptr(corev1.ContainerRestartPolicyAlways)

@@ -83,7 +83,8 @@ digests are CEL literals.
   links are off and no `system-` priority class may be named. The fields come
   from the vendored k8s.io/api, so a field a newer API server adds stays
   unpinned until that dependency moves.
-- `run-node` dispatches `sparkwing-runner` with the launcher's fixed flag grammar.
+- `run-node` sets the scratch mount at `/tmp` to mode `1777` before execing
+  `sparkwing-runner` with the launcher's fixed flag grammar.
   Only the controller, run, generation and job values vary.
 - The sidecar's profile allows `unshare`, `clone` and `setns` without an
   argument filter, so a nested container can create its own user namespace,
@@ -642,11 +643,13 @@ reads shared NodePool templates. A compatible pool carries
 `sparkwing.dev/launcher-namespace=<job namespace>` and the generic
 `sparkwing.dev/dedicated=true:NoSchedule` taint, and permits Linux Cloud jobs.
 Readiness, limits, provider availability and deleting pools do not prove missing
-configuration. A failed list retries. No compatible pool for the requested
-class terminally reports `cloud_capacity_unconfigured` through the fenced
+configuration. A failed list retries. Requests above the launcher's CPU or
+memory ceiling and requests with no compatible pool for the requested
+class terminally report `cloud_capacity_unconfigured` through the fenced
 launcher sync. The controller releases the unstarted credit reservation in the
-same transaction. The launcher deletes demand and logs the requested class and
-run ID. Customer guidance names support@sparkwing.dev and the run reference.
+same transaction. The launcher deletes demand and logs the requested class,
+requested CPU and memory, configured ceilings and run ID. Customer guidance names support@sparkwing.dev
+and the run reference.
 
 With a compatible pool, the launcher reads `budget-state` from its credentials
 directory before creating demand. `closed` means the Cloud budget breaker has

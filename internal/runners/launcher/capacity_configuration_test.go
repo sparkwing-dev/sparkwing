@@ -176,3 +176,25 @@ func TestPoolLookupFailureWaitsThenPoolAndNodeAppear(t *testing.T) {
 		t.Fatalf("scaled capacity did not run: jobs=%d err=%v", len(jobs.Items), err)
 	}
 }
+
+func TestOverCeilingAwardRetriesCapacityFailure(t *testing.T) {
+	l, _, _, control := fixture()
+	l.Config.CPUCeiling = 1
+	unavailable := true
+	l.Control = publicationControl{CloudControl: control, sync: func(observations []CloudJobObservation) ([]CloudJobState, error) {
+		if unavailable {
+			return nil, errors.New("controller unavailable")
+		}
+		if len(observations) != 1 || observations[0].Capacity == nil || !observations[0].Capacity.Unconfigured {
+			t.Fatal("missing configuration diagnosis")
+		}
+		return []CloudJobState{{Binding: observations[0].Binding, Delete: true}}, nil
+	}}
+	if _, err := l.LaunchOne(t.Context()); err == nil || len(l.waitingAwards()) != 1 {
+		t.Fatalf("failure lost its award before acknowledgement: %v", err)
+	}
+	unavailable, control.award = false, nil
+	if _, err := l.LaunchOne(t.Context()); err != nil || len(l.waitingAwards()) != 0 {
+		t.Fatalf("capacity failure did not retry: %v", err)
+	}
+}

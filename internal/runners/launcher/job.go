@@ -163,10 +163,10 @@ func cloudDeadline(now time.Time, binding CloudJobBinding) (time.Time, error) {
 
 func cloudBudget(cfg CloudJobConfig, award CloudJobAward) (corev1.ResourceList, error) {
 	if award.CPUCores > cfg.CPUCeiling {
-		return nil, fmt.Errorf("requested CPU %g exceeds operator ceiling %g", award.CPUCores, cfg.CPUCeiling)
+		return nil, fmt.Errorf("%w: requested CPU %g exceeds operator ceiling %g", errCapacityUnconfigured, award.CPUCores, cfg.CPUCeiling)
 	}
 	if award.Memory > cfg.MemoryCeiling {
-		return nil, fmt.Errorf("requested memory %d exceeds operator ceiling %d", award.Memory, cfg.MemoryCeiling)
+		return nil, fmt.Errorf("%w: requested memory %d exceeds operator ceiling %d", errCapacityUnconfigured, award.Memory, cfg.MemoryCeiling)
 	}
 	cpu, err := resource.ParseQuantity(strconv.FormatFloat(award.CPUCores, 'f', -1, 64))
 	if err != nil {
@@ -175,7 +175,7 @@ func cloudBudget(cfg CloudJobConfig, award CloudJobAward) (corev1.ResourceList, 
 	// safety: decimal conversion avoids binary-float drift adding a millicore to exact requests.
 	rounded := resource.NewMilliQuantity(cpu.MilliValue(), resource.DecimalSI)
 	if rounded.AsFloat64Slow() > cfg.CPUCeiling {
-		return nil, fmt.Errorf("requested CPU %g requires %s at Kubernetes precision, exceeding operator ceiling %g", award.CPUCores, rounded.String(), cfg.CPUCeiling)
+		return nil, fmt.Errorf("%w: requested CPU %g requires %s at Kubernetes precision, exceeding operator ceiling %g", errCapacityUnconfigured, award.CPUCores, rounded.String(), cfg.CPUCeiling)
 	}
 	return corev1.ResourceList{corev1.ResourceCPU: *rounded, corev1.ResourceMemory: *resource.NewQuantity(award.Memory, resource.BinarySI)}, nil
 }
@@ -240,11 +240,11 @@ func cloudPod(cfg CloudJobConfig, a CloudJobAward, r CloudNodeReservation, secre
 
 func hostContainer(cfg CloudJobConfig, a CloudJobAward) corev1.Container {
 	b := a.Binding
-	args := []string{"run-node", "--controller", cfg.ControllerURL, "--run", string(b.RunID), "--generation", strconv.FormatInt(int64(b.Generation), 10), "--module-cache", "/tmp/modules", "--bootstrap-file", bootstrapPath}
+	args := []string{JobBinary, "run-node", "--controller", cfg.ControllerURL, "--run", string(b.RunID), "--generation", strconv.FormatInt(int64(b.Generation), 10), "--module-cache", "/tmp/modules", "--bootstrap-file", bootstrapPath}
 	if b.NodeID != "" {
 		args = append(args, "--job", string(b.NodeID))
 	}
-	return corev1.Container{Name: "run-node", Image: cfg.RunnerImage, ImagePullPolicy: corev1.PullIfNotPresent, Command: []string{JobBinary}, Args: args, WorkingDir: "/tmp", Env: []corev1.EnvVar{{Name: "HOME", Value: "/tmp"}, {Name: "DOCKER_HOST", Value: "unix:///tmp/docker.sock"}}, VolumeMounts: []corev1.VolumeMount{{Name: "scratch", MountPath: "/tmp"}, {Name: "bootstrap", MountPath: "/etc/sparkwing/bootstrap", ReadOnly: true}}, SecurityContext: workloadSecurity()}
+	return corev1.Container{Name: "run-node", Image: cfg.RunnerImage, ImagePullPolicy: corev1.PullIfNotPresent, Command: []string{"/bin/sh", "-c", `chmod 1777 /tmp && exec "$@"`, "sparkwing-job"}, Args: args, WorkingDir: "/tmp", Env: []corev1.EnvVar{{Name: "HOME", Value: "/tmp"}, {Name: "DOCKER_HOST", Value: "unix:///tmp/docker.sock"}}, VolumeMounts: []corev1.VolumeMount{{Name: "scratch", MountPath: "/tmp"}, {Name: "bootstrap", MountPath: "/etc/sparkwing/bootstrap", ReadOnly: true}}, SecurityContext: workloadSecurity()}
 }
 
 // dockerCapabilities are namespaced to the Pod's user namespace. PTRACE lets
