@@ -976,7 +976,12 @@ func TestLocalPreparationGatesDeclarationErrors(t *testing.T) {
 			input.declarations = declarationFixture(t, pipelines)
 			for _, args := range [][]string{{"--region", "invalid"}, {}} {
 				_, err := prepareLocalRunRequest(t.Context(), input, runFlags{}, args)
-				if err == nil || strings.Contains(err.Error(), private) || (!complete && !strings.Contains(err.Error(), "details withheld")) {
+				// safety: the risk refusal is host text naming only the invoked pipeline and its labels.
+				want := "details withheld"
+				if len(args) == 0 {
+					want = `pipeline "ci" requires --sw-allow-risk prod`
+				}
+				if err == nil || strings.Contains(err.Error(), private) || (!complete && !strings.Contains(err.Error(), want)) {
 					t.Fatalf("private declaration escaped: %v", err)
 				}
 			}
