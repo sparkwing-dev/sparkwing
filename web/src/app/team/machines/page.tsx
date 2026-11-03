@@ -27,7 +27,7 @@ import {
   memberScopesForRole,
   mintMachineToken,
   mintMemberToken,
-  parseRepoPatterns,
+  machineRepos,
   revokeTeamToken,
   runnerConnectCommand,
 } from "@/lib/teams";
@@ -335,12 +335,12 @@ function ConnectForm({
     (MintedMachineToken & { name: string; repos: string[] }) | null
   >(null);
 
-  const repoPatterns = parseRepoPatterns(repos);
+  const repoPatterns = machineRepos(personal, repos);
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
     const n = name.trim();
-    if (!n || repoPatterns.length === 0) return;
+    if (!n || repoPatterns === null) return;
     setMinting(true);
     try {
       const out = await mintMachineToken(n, repoPatterns, personal);
@@ -356,7 +356,7 @@ function ConnectForm({
   }
 
   const command = minted
-    ? runnerConnectCommand(minted, minted.name, minted.repos, window.location.origin)
+    ? runnerConnectCommand(minted, minted.repos, window.location.origin)
     : "";
 
   return (
@@ -384,32 +384,39 @@ function ConnectForm({
           <button
             type="submit"
             className={buttonClass}
-            disabled={minting || repoPatterns.length === 0}
+            disabled={minting || repoPatterns === null}
           >
             {minting ? "Creating token…" : "Create token"}
           </button>
         </div>
-        <div>
-          <label
-            htmlFor="machine-repos"
-            className="block text-[10px] font-bold uppercase tracking-wider text-[var(--muted)] mb-1"
-          >
-            Repositories this machine may build
-          </label>
-          <textarea
-            id="machine-repos"
-            required
-            rows={2}
-            placeholder="github.com/acme/*"
-            className={`${inputClass} w-full font-mono`}
-            value={repos}
-            onChange={(e) => setRepos(e.target.value)}
-          />
-          <p className="text-xs text-[var(--muted)] mt-1">
-            This machine will run pipeline code from these repositories as your
-            user.
+        {personal ? (
+          <p className="text-xs text-[var(--muted)]">
+            A personal machine takes only your own runs, from any repository.
+            It never takes another member&apos;s run or a repository-proven
+            run.
           </p>
-        </div>
+        ) : (
+          <div>
+            <label
+              htmlFor="machine-repos"
+              className="block text-[10px] font-bold uppercase tracking-wider text-[var(--muted)] mb-1"
+            >
+              Repositories this machine may build
+            </label>
+            <textarea
+              id="machine-repos"
+              required
+              rows={2}
+              placeholder="github.com/acme/*"
+              className={`${inputClass} w-full font-mono`}
+              value={repos}
+              onChange={(e) => setRepos(e.target.value)}
+            />
+            <p className="text-xs text-[var(--muted)] mt-1">
+              This runner will run team pipeline code from these repositories.
+            </p>
+          </div>
+        )}
       </form>
       {minted ? (
         <div className="px-4 pb-4 space-y-3">

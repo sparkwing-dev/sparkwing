@@ -468,24 +468,45 @@ describe("parseRepoPatterns", () => {
 
 describe("runnerConnectCommand", () => {
   it("uses the bearer only in its private credential-file setup", () => {
-    const cmd = teams.runnerConnectCommand({ capability: "swk_secret", grants: ["nodes.claim", "triggers.claim"] }, "Korey's laptop", [
+    const cmd = teams.runnerConnectCommand({ capability: "swk_secret", grants: ["nodes.claim", "triggers.claim"] }, [
       "github.com/acme/*",
     ], "https://controller.example");
     const dir = '\"$HOME/.config/sparkwing/runner-credentials\"';
     assert.ok(cmd.includes("printf '%s' swk_secret"));
-    const runner = cmd.slice(cmd.indexOf("sparkwing-runner runner"));
+    const runner = cmd.slice(cmd.indexOf("sparkwing-runner warm"));
     assert.equal(runner.includes("swk_secret"), false);
     assert.ok(runner.includes(`--credentials-dir ${dir}`));
     assert.ok(runner.includes("--controller https://controller.example"));
-    assert.ok(runner.includes("--allow-repo 'github.com/acme/*'"));
-    assert.ok(runner.includes("--holder-prefix 'Korey'"));
+    assert.ok(runner.includes("--repos 'github.com/acme/*'"));
+  });
+
+  it("enrolls a personal machine without a repository scope", () => {
+    const repos = teams.machineRepos(true, "github.com/acme/*");
+    assert.deepEqual(repos, []);
+    const cmd = teams.runnerConnectCommand({ capability: "swk_secret", grants: ["nodes.claim", "triggers.claim"] }, repos ?? [], "https://controller.example");
+    assert.equal(cmd.includes("--repos"), false);
+    assert.equal(teams.machineRepos(false, " "), null);
+    assert.deepEqual(teams.machineRepos(false, "github.com/acme/a, github.com/acme/b"), ["github.com/acme/a", "github.com/acme/b"]);
+  });
+
+  it("names only flags sparkwing-runner warm accepts", () => {
+    const registry = readFileSync(join(process.cwd(), "..", "internal", "clisurface", "registry.go"), "utf8");
+    const warm = registry.slice(registry.indexOf('{Path: "sparkwing-runner warm"'));
+    const accepted = new Set([...warm.slice(0, warm.indexOf("}},")).matchAll(/Name: "([a-z-]+)"/g)].map((m) => m[1]));
+    for (const grants of [["nodes.claim"], ["triggers.claim"], ["nodes.claim", "triggers.claim"]]) {
+      const cmd = teams.runnerConnectCommand({ capability: "swk_secret", grants }, ["github.com/acme/*"], "https://controller.example");
+      const runner = cmd.slice(cmd.indexOf("sparkwing-runner warm"));
+      for (const [, flag] of runner.matchAll(/--([a-z-]+)/g)) {
+        assert.ok(accepted.has(flag), `--${flag} is not a sparkwing-runner warm flag`);
+      }
+    }
   });
 
   it("runs only the claim loops its grants allow", () => {
     for (const grants of [["nodes.claim"], ["triggers.claim"], ["nodes.claim", "triggers.claim"]]) {
-      const cmd = teams.runnerConnectCommand({ capability: "swk_private", grants }, "builder", ["github.com/acme/*"], "https://controller.example");
-      assert.equal(cmd.includes("--also-claim-triggers"), grants.includes("triggers.claim"));
-      assert.equal(cmd.includes("--claim-nodes=false"), !grants.includes("nodes.claim"));
+      const cmd = teams.runnerConnectCommand({ capability: "swk_private", grants }, ["github.com/acme/*"], "https://controller.example");
+      assert.equal(cmd.includes("--also-claim-triggers=false"), !grants.includes("triggers.claim"));
+      assert.equal(cmd.includes("--claim-jobs=false"), !grants.includes("nodes.claim"));
     }
   });
 
@@ -499,7 +520,7 @@ describe("runnerConnectCommand", () => {
       const bin = join(home, "bin");
       mkdirSync(bin);
       writeFileSync(join(bin, "sparkwing-runner"), '#!/bin/sh\nprintf "%s\\n" "$@" > "$HOME/argv"\n', { mode: 0o755 });
-      const cmd = teams.runnerConnectCommand({ capability: "swk_private", grants: ["nodes.claim", "triggers.claim"] }, "builder", ["github.com/acme/*", "gitlab.example/team/repo"], "https://controller.example");
+      const cmd = teams.runnerConnectCommand({ capability: "swk_private", grants: ["nodes.claim", "triggers.claim"] }, ["github.com/acme/*", "gitlab.example/team/repo"], "https://controller.example");
       const result = spawnSync("sh", ["-c", cmd], { env: { ...process.env, HOME: home, PATH: bin+delimiter+process.env.PATH }, encoding: "utf8", stdio: "inherit" });
       assert.equal(result.error, undefined);
       assert.equal(result.status, 0, result.stderr);
@@ -527,7 +548,7 @@ describe("runnerConnectCommand", () => {
       mkdirSync(bin);
       writeFileSync(join(bin, "sparkwing-runner"), '#!/bin/sh\ntouch "$HOME/started"\n', { mode: 0o755 });
       chmodSync(credentials, 0o555);
-      const cmd = teams.runnerConnectCommand({ capability: "swk_private", grants: ["nodes.claim"] }, "builder", ["github.com/acme/*"], "https://controller.example");
+      const cmd = teams.runnerConnectCommand({ capability: "swk_private", grants: ["nodes.claim"] }, ["github.com/acme/*"], "https://controller.example");
       const result = spawnSync("sh", ["-c", cmd], { env: { ...process.env, HOME: home, PATH: bin+delimiter+process.env.PATH }, encoding: "utf8", stdio: "inherit" });
       assert.equal(result.error, undefined);
       assert.notEqual(result.status, 0);

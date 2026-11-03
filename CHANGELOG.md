@@ -22,6 +22,8 @@ unlock.
 
 ### Fixed
 
+- **web:** Connect a personal machine without repository patterns, with a runner command that starts
+  The console's "Connect a machine" form required repository patterns for a personal machine, but a personal machine with a repository scope never claims work: it takes only its owner's runs, which a scope refuses. The form now asks for patterns only for a shared runner. The command it printed also called `sparkwing-runner runner` with flags that no longer exist; it now runs `sparkwing-runner warm` with `--repos`, `--also-claim-triggers=false` and `--claim-jobs=false` as the token's grants require.
 - **CLI:** Say a pre-v0.68 SDK pin needs `sparkwing upgrade`
   Running a repository whose SDK pin predates v0.68.0 failed with `integrity_failure: release manifest has duplicate, unknown or malformed entries` and told the user not to execute unverified bytes. It now fails with `version_unsupported`, says the pin is older than v0.68.0, the oldest release the CLI can run as a pipeline engine, and names `sparkwing upgrade` as the fix. The older release is still never executed.
 - **web:** Make run cards usable with a keyboard and a screen reader
