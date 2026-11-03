@@ -27,9 +27,26 @@ func (StorePostgres) ShortHelp() string {
 }
 
 func (StorePostgres) Help() string {
-	return "Runs `go test ./internal/store/...` with SPARKWING_TEST_STORE=postgres, so every " +
-		"store test that opens through internal/store/storetest exercises the Postgres dialect " +
-		"instead of a SQLite file. When SPARKWING_TEST_PG_URL is already set the run uses " +
+	return "Runs the internal/store tests that exercise Postgres with SPARKWING_TEST_STORE=postgres, " +
+		"so every store test that opens through internal/store/storetest exercises the Postgres dialect " +
+		"instead of a SQLite file. It compiles one internal/store test binary, lists its top-level " +
+		"tests and runs every one except the internal tests in the files named by " +
+		".sparkwing/jobs/store_postgres_sqlite_only.txt, which only open SQLite and which the full Go " +
+		"suite runs, and TestClaimSecurityRegressions, which defers to its PostgreSQL copy. A test in " +
+		"any other file, including a new one, runs. The run logs each list's count and SHA-256 and fails " +
+		"when a listed name has no declaration or is not placed exactly once, or when a named file is " +
+		"missing, declares no internal test, or reaches SPARKWING_TEST_PG_URL or the pgx driver. The sorted selection is assigned round-robin, each name exactly once, " +
+		"to one GOMAXPROCS=1 process per core a Go step may hold (four on the hosted four-core " +
+		"runner, the shared-host Go step bound elsewhere). Each shard runs against a database of " +
+		"its own, which the run creates on the server and drops with FORCE afterwards, because the " +
+		"store's migration advisory lock is per database. A run killed outright can leave " +
+		"sparkwing_store_shard_* databases on a configured server, as can a CREATE DATABASE whose " +
+		"success reply was lost; drop them with DROP DATABASE <name> WITH (FORCE). The shard URL drops " +
+		"dbname and database query options and refuses a service reference. A failing shard stops the " +
+		"others. Shards time out at 25 minutes, so a hung test prints its stack only when preparation " +
+		"finished inside the step's other five minutes. " +
+		"The storetest and teststore packages run whole. " +
+		"When SPARKWING_TEST_PG_URL is already set the run uses " +
 		"that server; otherwise it starts an embedded Postgres on a free port, with its data " +
 		"directory under a temporary root and its binaries under the persistent tool cache, " +
 		"and stops the server and removes the data directory whether the suite passes, " +
@@ -234,31 +251,6 @@ func lastLines(text string, n int) string {
 		lines = lines[len(lines)-n:]
 	}
 	return strings.Join(lines, "\n")
-}
-
-func runStoreSuiteAgainst(ctx context.Context, dsn string) error {
-	return withGoTestScratch(func(testRoot string) error {
-		return withProductTestHome(func(home string) error {
-			script := productTestScript(storePostgresGoCommand(currentHost()), home)
-			_, err := sparkwing.Bash(ctx, script).
-				Env("TMPDIR", testRoot).
-				Env("SPARKWING_TEST_STORE", "postgres").
-				Env("SPARKWING_TEST_PG_URL", dsn).
-				Run()
-			if err != nil {
-				return fmt.Errorf("store suite against postgres: %w", err)
-			}
-			sparkwing.Info(ctx, "go test ./internal/store/...: passed against postgres")
-			return nil
-		})
-	})
-}
-
-func storePostgresGoCommand(h hostShape) string {
-	if h.cpus == overlappedGoSuiteCPUs && h.singleTenant {
-		return goCommandWithLimits(1, 2, "test", "-timeout 40m -count=1 ./internal/store/...")
-	}
-	return boundedGoCommand(h, "test", "-timeout 40m -count=1 ./internal/store/...")
 }
 
 func init() {
