@@ -39,6 +39,8 @@ unlock.
 
 ### Fixed
 
+- **local controller:** A signed-in dashboard keeps the local controller up for 30 minutes after its last request
+  The controller exited after five idle minutes once the browser's connections closed, so a dashboard started without `--stay` lost its server while its tab was still open, and the next run or schedule brought the controller back without one. A signed-in dashboard request, or a redeemed sign-in link, now holds idle exit for 30 minutes; a tab left alone longer stops holding it.
 - **CLI:** `sparkwing dashboard open` works against a controller that `sparkwing run` started
   A controller started on demand by a run or a schedule serves no dashboard, so `dashboard open` failed with "the dashboard is not serving" until the controller was stopped and started again with `dashboard start`. When no dashboard serves, `dashboard open` now asks the running controller to serve one at 127.0.0.1:4343, starting the controller too if none runs, then prints the sign-in link.
 - **Cloud:** Name the pool ceiling when a job asks for more CPU or memory than it allows

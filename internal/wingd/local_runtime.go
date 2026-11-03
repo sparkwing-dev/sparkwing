@@ -137,6 +137,7 @@ func (r *localRuntime) Run(ctx context.Context, opts LocalStartOptions) (err err
 	d.cfg.Runs = controller
 	d.localControl = func(stay *bool) LocalStatus { return r.control(session, stay) }
 	d.localDashboard = r.EnsureDashboard
+	d.dashboardSeen = session.logins.lastSignedInRequest
 	return r.serve(ctx, session, controller, opts.DashboardAddress, opts.DashboardReadOnly)
 }
 

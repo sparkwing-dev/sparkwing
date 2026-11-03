@@ -77,7 +77,7 @@ Print a one-time sign-in link for the local dashboard. When no dashboard serves,
 
 Start the local dashboard and controller on demand
 
-Starts the local controller on demand; --stay pins it until stopped. Runs, queued work, held leases and dashboard connections prevent idle exit.
+Starts the local controller on demand; --stay pins it until stopped. Runs, queued work, held leases, dashboard connections and a signed-in dashboard request in the last 30 minutes prevent idle exit.
 
 ### Flags
 
