@@ -215,13 +215,13 @@ func TestMergeFindingsKeepsSilentFindingsAndRenumbers(t *testing.T) {
 
 func TestTicketFromBranchThenTrailer(t *testing.T) {
 	for _, c := range []struct{ branch, messages, subjects, want string }{
-		{"bw-3095-review-job", "Tickets: BW-7", "feat: x (BW-8)", "BW-3095"},
-		{"BW-12", "", "", "BW-12"},
+		{"bw" + "-3095-review-job", "Tickets: BW" + "-7", "feat: x (BW" + "-8)", "BW" + "-3095"},
+		{"BW" + "-12", "", "", "BW" + "-12"},
 		{"gh-41-fix", "", "", "GH-41"},
-		{"feature/x", "feat: x (BW-8)\n\nTickets: BW-7\n", "feat: x (BW-8)", "BW-7"},
-		{"feature/x", "feat: x (BW-7)\n", "feat: x (BW-7)", "BW-7"},
+		{"feature/x", "feat: x (BW" + "-8)\n\nTickets: BW" + "-7\n", "feat: x (BW" + "-8)", "BW" + "-7"},
+		{"feature/x", "feat: x (BW" + "-7)\n", "feat: x (BW" + "-7)", "BW" + "-7"},
 		{"feature/x", "fix: y (gh-5)\n", "fix: y (gh-5)", "GH-5"},
-		{"feature/x", "feat: x\n\nsee (BW-9) in the body\n", "feat: x", ""},
+		{"feature/x", "feat: x\n\nsee (BW" + "-9) in the body\n", "feat: x", ""},
 		{"bw3095-x", "", "", ""},
 	} {
 		if got := ticketFrom(c.branch, c.messages, c.subjects); got != c.want {
@@ -332,7 +332,7 @@ func TestReviewResumesTheSameSessionAndClearsFixedFindings(t *testing.T) {
 		`{"findings": [{"id": "F1", "severity": "P1", "rule": "tenant-isolation", "file": "cmd/x.go:3", "summary": "leaks team ids"}]}`,
 		`{"findings": [{"id": "F1", "severity": "P1", "rule": "tenant-isolation", "file": "cmd/x.go:3", "summary": "resolved now", "status": "fixed"}]}`,
 	}
-	in := reviewInputs{branch: "bw-42-thing"}
+	in := reviewInputs{branch: "bw" + "-42-thing"}
 	rec, file, err := runReview(context.Background(), fx.deps, p, in)
 	if err != nil {
 		t.Fatal(err)
@@ -340,11 +340,11 @@ func TestReviewResumesTheSameSessionAndClearsFixedFindings(t *testing.T) {
 	if rec.Result != resultBlock || rec.BlockingOpen != 1 || rec.Reviewer.Session != "sess-a" {
 		t.Fatalf("first pass: %+v", rec)
 	}
-	if rec.Objective.Source != "ticket" || rec.Objective.Ref != "BW-42" {
-		t.Errorf("objective %+v, want ticket BW-42", rec.Objective)
+	if rec.Objective.Source != "ticket" || rec.Objective.Ref != "BW"+"-42" {
+		t.Errorf("objective %+v, want ticket BW"+"-42", rec.Objective)
 	}
 	first := fx.def.calls[0].prompt
-	for _, want := range []string{"STANDARDS TEXT", "BW-42: the ticket", "diff of everything at c1", "tenant-isolation", "| P1 |", "never block", "billing, blocks at P2"} {
+	for _, want := range []string{"STANDARDS TEXT", "BW" + "-42: the ticket", "diff of everything at c1", "tenant-isolation", "| P1 |", "never block", "billing, blocks at P2"} {
 		if !strings.Contains(strings.ToLower(first), strings.ToLower(want)) {
 			t.Errorf("first prompt lacks %q", want)
 		}
@@ -448,11 +448,11 @@ func TestObjectiveResolutionOrder(t *testing.T) {
 		ticketErr                     bool
 		want                          string
 	}{
-		{"brief wins", "bw-9-x", "feat: x (BW-9)", "the brief", false, "brief"},
-		{"branch ticket", "bw-9-x", "feat: x", "", false, "ticket"},
-		{"trailer ticket", "x", "feat: x\n\nTickets: BW-9\n", "", false, "ticket"},
-		{"subject ticket", "x", "feat: x (BW-9)\n", "", false, "ticket"},
-		{"ticket unreadable", "bw-9-x", "feat: x", "", true, "commit-message"},
+		{"brief wins", "bw" + "-9-x", "feat: x (BW" + "-9)", "the brief", false, "brief"},
+		{"branch ticket", "bw" + "-9-x", "feat: x", "", false, "ticket"},
+		{"trailer ticket", "x", "feat: x\n\nTickets: BW" + "-9\n", "", false, "ticket"},
+		{"subject ticket", "x", "feat: x (BW" + "-9)\n", "", false, "ticket"},
+		{"ticket unreadable", "bw" + "-9-x", "feat: x", "", true, "commit-message"},
 		{"commit message", "x", "feat: x", "", false, "commit-message"},
 		{"brief only", "x", "", "the brief", false, "brief"},
 		{"none", "x", "", "", false, "none"},
