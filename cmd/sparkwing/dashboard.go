@@ -93,11 +93,13 @@ func validateDashboardInvocation(inv clisurface.Invocation, goos string) error {
 	return nil
 }
 
+const defaultDashboardAddress = "127.0.0.1:4343"
+
 func dashboardAddress(inv clisurface.Invocation) string {
 	if inv.Has("addr") {
 		return inv.Value("addr")
 	}
-	return "127.0.0.1:4343"
+	return defaultDashboardAddress
 }
 
 func executeDashboard(ctx context.Context, inv clisurface.Invocation, services dashboardServices) (dashboardResult, error) {

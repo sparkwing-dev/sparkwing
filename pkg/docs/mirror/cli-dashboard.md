@@ -14,7 +14,7 @@ Manage the local dashboard
 - `logs` -- Read a bounded dashboard log tail
 - `open` -- Print a one-time sign-in link for the local dashboard
 - `start` -- Start the local dashboard and controller on demand
-- `status` -- Report whether the dashboard is running and its URL
+- `status` -- Report whether the controller runs and where the dashboard serves
 - `stop` -- Stop a running dashboard server
 - `uninstall` -- Remove the dashboard login service
 
@@ -62,7 +62,7 @@ Read a bounded dashboard log tail
 
 Print a one-time sign-in link for the local dashboard
 
-Print a one-time sign-in link for the running local dashboard. It is minted over the local socket, works once and expires after 60 seconds; visiting it gives that browser tab a session it sends as an Authorization bearer header, never a cookie. Every TCP API request needs that header; the local socket needs none.
+Print a one-time sign-in link for the local dashboard. When no dashboard serves, it first starts one at 127.0.0.1:4343, and the local controller too when none runs, whoever started the controller. The link is minted over the local socket, works once and expires after 60 seconds; visiting it gives that browser tab a session it sends as an Authorization bearer header, never a cookie. Every TCP API request needs that header; the local socket needs none.
 
 ### Flags
 
@@ -94,7 +94,7 @@ Starts the local controller on demand; --stay pins it until stopped. Runs, queue
 
 ## `sparkwing dashboard status`
 
-Report whether the dashboard is running and its URL
+Report whether the controller runs and where the dashboard serves
 
 ### Flags
 

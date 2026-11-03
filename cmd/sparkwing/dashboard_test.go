@@ -124,9 +124,9 @@ func TestDashboardStatusPrintsTheServingURL(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		want := `"url":"http://127.0.0.1:4343"`
+		want := `"dashboard":"serving","url":"http://127.0.0.1:4343"`
 		if mode == "pretty" {
-			want = "dashboard: http://127.0.0.1:4343 (sign in with sparkwing dashboard open)\n"
+			want = "Local controller: running\npid: 123\nversion: v1.2.3\nstay: false\ninstalled: false\ndashboard: serving at http://127.0.0.1:4343 (sign in with sparkwing dashboard open)\n"
 		}
 		if !strings.Contains(output.String(), want) {
 			t.Fatalf("%s status lacks the dashboard URL: %s", mode, &output)
@@ -136,8 +136,14 @@ func TestDashboardStatusPrintsTheServingURL(t *testing.T) {
 	var output bytes.Buffer
 	if err := runDashboardCommandArgs(t.Context(), []string{"status", "-o", "json"}, &output, "linux", func(context.Context) (dashboardServices, error) {
 		return dashboardServices{lifecycle: lifecycle}, nil
-	}); err != nil || strings.Contains(output.String(), `"url"`) {
+	}); err != nil || strings.Contains(output.String(), `"url"`) || !strings.Contains(output.String(), `"state":"running","pid":123,"version":"v1.2.3","stay":false,"installed":false,"dashboard":"not_serving"`) {
 		t.Fatalf("status without a serving dashboard named a URL: %s %v", &output, err)
+	}
+	output.Reset()
+	if err := runDashboardCommandArgs(t.Context(), []string{"status", "-o", "pretty"}, &output, "linux", func(context.Context) (dashboardServices, error) {
+		return dashboardServices{lifecycle: lifecycle}, nil
+	}); err != nil || !strings.Contains(output.String(), "Local controller: running\n") || !strings.Contains(output.String(), "dashboard: not serving (sparkwing dashboard open starts it") {
+		t.Fatalf("pretty status does not separate the controller from a dashboard that is not serving: %s %v", &output, err)
 	}
 }
 
@@ -269,6 +275,36 @@ func TestDashboardOpenPrintsSocketMintedLink(t *testing.T) {
 		})
 	}
 	failure := &apierr.Error{Code: apierr.Unavailable, Message: "the dashboard is not serving", Hint: "run sparkwing dashboard start"}
+	t.Run("starts a dashboard that is not serving", func(t *testing.T) {
+		lifecycle := &dashboardLifecycleFake{status: wingd.LocalStatus{Running: true, PID: 123, Version: "v1.2.3"}}
+		minted := 0
+		services := dashboardServices{lifecycle: lifecycle, options: wingd.LocalStartOptions{Home: "/private/home", Version: "v1.2.3"}, mintLogin: func(context.Context) (wingd.DashboardLogin, error) {
+			minted++
+			if len(lifecycle.calls) == 0 {
+				return wingd.DashboardLogin{}, failure
+			}
+			return login, nil
+		}}
+		var output bytes.Buffer
+		if err := runDashboardCommandArgs(t.Context(), []string{"open", "-o", "plain"}, &output, "linux", func(context.Context) (dashboardServices, error) { return services, nil }); err != nil {
+			t.Fatal(err)
+		}
+		want := services.options
+		want.DashboardAddress = defaultDashboardAddress
+		if minted != 2 || !reflect.DeepEqual(lifecycle.calls, []string{"start"}) || lifecycle.options != want || output.String() != login.URL+"\n" {
+			t.Fatalf("minted=%d calls=%v options=%+v output=%q", minted, lifecycle.calls, lifecycle.options, &output)
+		}
+	})
+	t.Run("keeps a refused start", func(t *testing.T) {
+		refused := errors.New("dashboard listen: address already in use")
+		lifecycle := &dashboardLifecycleFake{err: refused}
+		services := dashboardServices{lifecycle: lifecycle, mintLogin: func(context.Context) (wingd.DashboardLogin, error) { return wingd.DashboardLogin{}, failure }}
+		var output bytes.Buffer
+		err := runDashboardCommandArgs(t.Context(), []string{"open"}, &output, "linux", func(context.Context) (dashboardServices, error) { return services, nil })
+		if !errors.Is(err, refused) || output.Len() != 0 {
+			t.Fatalf("error=%v output=%q", err, &output)
+		}
+	})
 	var output bytes.Buffer
 	err := runDashboardCommandArgs(t.Context(), []string{"open"}, &output, "linux", func(context.Context) (dashboardServices, error) {
 		return dashboardServices{mintLogin: func(context.Context) (wingd.DashboardLogin, error) { return wingd.DashboardLogin{}, failure }}, nil
