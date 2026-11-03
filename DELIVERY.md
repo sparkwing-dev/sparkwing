@@ -103,6 +103,16 @@ job and lint deadline allow 40 minutes total: the ten-minute check allowance
 plus 30 minutes for contention. The tier measures that combined wall time,
 including waiting. Other lint callers keep their five-minute deadline.
 
+The gate's `lint` step keeps five minutes for linting itself, and waiting for
+the box-wide golangci-lint lock does not count against it (lead decision,
+2026-11-03). On Unix the step takes golangci-lint's own lock,
+`$TMPDIR/golangci-lint.lock`, before it lints, then runs golangci-lint with
+`--allow-parallel-runners` while holding it, so serial runners elsewhere still
+queue behind it. The wait has its own 20-minute bound; when it expires the step
+fails naming the golangci-lint processes running at the time and saying
+nothing was learned about the tree. Elsewhere the gate keeps golangci-lint's
+own serial wait inside the five minutes.
+
 Version freshness excludes `testdata` fixture modules, matching the committed-module checks.
 
 `push-tag` declares the `destructive` and `prod` risk labels, so only the

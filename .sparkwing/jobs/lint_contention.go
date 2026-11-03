@@ -12,6 +12,10 @@ import (
 
 const lintLockWait = 5 * time.Minute
 
+// safety: the gate waits for a neighbor's lint on this separate bound, so a
+// held lock fails by name instead of eating the lint deadline.
+const gateLintLockWait = 20 * time.Minute
+
 const golangciContention = "parallel golangci-lint is running"
 
 const golangciTimeout = "Timeout exceeded"
@@ -25,6 +29,12 @@ const gateBaselineRef = "origin/main"
 
 func lintCommand(base string) string {
 	return "golangci-lint run --allow-serial-runners --new-from-merge-base= --new-from-rev=" + base + " ./..."
+}
+
+// safety: only for a caller that already holds the box-wide lock itself, so
+// golangci-lint must not wait on the lock its own parent holds.
+func lockedLintCommand(base string) string {
+	return "golangci-lint run --allow-parallel-runners --new-from-merge-base= --new-from-rev=" + base + " ./..."
 }
 
 // perf: the subset that answers in about a second over the packages one push
@@ -52,11 +62,11 @@ func fastLintCommand(cores int, pkgs []string) string {
 		cores, shellQuote(pipelineCacheDir("golangci-lint")), cores, strings.Join(prePushLinters, ","), strings.Join(pkgs, " "))
 }
 
-func runGolangciLint(ctx context.Context) error {
-	return runGolangciLintWithin(ctx, lintLockWait)
+func runGolangciLintWithin(ctx context.Context, deadline time.Duration) error {
+	return lintModules(ctx, deadline, lintCommand, "waiting for the box-wide lock if held, then linting")
 }
 
-func runGolangciLintWithin(ctx context.Context, deadline time.Duration) error {
+func lintModules(ctx context.Context, deadline time.Duration, command func(base string) string, doing string) error {
 	dirs, err := committedModuleDirs(ctx)
 	if err != nil {
 		return fmt.Errorf("golangci-lint: could not run -- listing the modules to lint failed: %w", err)
@@ -81,8 +91,8 @@ func runGolangciLintWithin(ctx context.Context, deadline time.Duration) error {
 			continue
 		}
 		stepStart := time.Now()
-		sparkwing.Info(lintCtx, "golangci-lint: %s waiting for the box-wide lock if held, then linting (deadline %s)", dir, deadline)
-		cmd := sparkwing.Bash(lintCtx, lintCommand(base)).
+		sparkwing.Info(lintCtx, "golangci-lint: %s %s (deadline %s)", dir, doing, deadline)
+		cmd := sparkwing.Bash(lintCtx, command(base)).
 			Dir(dir).
 			Env("GOLANGCI_LINT_CACHE", cacheDir)
 		if _, runErr := cmd.Run(); runErr != nil {
