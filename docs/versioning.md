@@ -108,6 +108,17 @@ needs an explicit `--version` when upgrading a repository because it does not
 fetch the latest-version index. Released controller runners retain signed policy checks, regardless of the
 version reported by a runner or selected by a pipeline.
 
+A service build deployed from a main commit is stamped `vX.Y.Z-N-gSHA`, the
+output of `git describe --tags --long`, and enforces signed policy like a
+release. Its own version never enters the index: the signed index governs the
+engine each run selects, which every job checks before it executes pipeline
+code, and revoked or below-minimum engines still refuse. The deployment's Cloud
+launcher, which holds an operator-issued service token, claims work without its
+own version being looked up, because it is the signed service image the deploy
+workflow built. Self-hosted runners still claim only as a listed release that is
+neither revoked nor below the minimum. Any other unreleased stamp, such as
+`commit-<sha>` or `-dev`, is a development build.
+
 Warnings appear in run output and the dashboard before enforcement, with signed
 reason and fix guidance. A revoked or unsupported release fails loudly and names
 `sparkwing upgrade`. The CLI renders the same notice data as run status.

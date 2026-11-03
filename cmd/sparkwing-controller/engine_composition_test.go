@@ -135,12 +135,20 @@ func TestControllerCompositionEnforcesSignedRunnerPolicy(t *testing.T) {
 		t.Fatal(err)
 	}
 	transport := &http.Client{Transport: signedPolicyTransport{body: body, signature: ed25519.Sign(key, body)}}
-	for name, claims := range composedClaimants(t, "v0.30.0", engine.Config{HTTPClient: transport, TrustedKeys: []ed25519.PublicKey{public}}) {
-		for version, want := range map[string]apierr.Code{"v0.10.0": apierr.VersionUnsupported, "v0.25.0": apierr.VersionRevoked, "v0.40.0": apierr.VersionUnsupported, "v0.30.0": ""} {
-			err := claimAs(t, claims, version)
-			var failure *apierr.Error
-			if want == "" && err != nil || want != "" && (!errors.As(err, &failure) || failure.Code != want) {
-				t.Fatalf("%s claim as %s: %v, want %q", name, version, err, want)
+	runnerWant := map[string]apierr.Code{"v0.10.0": apierr.VersionUnsupported, "v0.25.0": apierr.VersionRevoked, "v0.40.0": apierr.VersionUnsupported, "v0.30.0-4-g0123abc": apierr.VersionUnsupported, "v0.30.0": ""}
+	// safety: a controller deployed from a main commit must enforce the same runner policy as a release.
+	for _, controllerVersion := range []string{"v0.30.0", "v0.30.0-4-g0123abc"} {
+		for name, claims := range composedClaimants(t, controllerVersion, engine.Config{HTTPClient: transport, TrustedKeys: []ed25519.PublicKey{public}}) {
+			for version, want := range runnerWant {
+				// safety: the deployment's own launcher is the signed service image, so an unreleased build still claims.
+				if name == "launcher" {
+					want = ""
+				}
+				err := claimAs(t, claims, version)
+				var failure *apierr.Error
+				if want == "" && err != nil || want != "" && (!errors.As(err, &failure) || failure.Code != want) {
+					t.Fatalf("%s controller, %s claim as %s: %v, want %q", controllerVersion, name, version, err, want)
+				}
 			}
 		}
 	}
