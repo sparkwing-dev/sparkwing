@@ -286,8 +286,7 @@ func decodeEngineRequest(r *http.Request, body any) error {
 	return nil
 }
 
-// engineDecodeMessage names the class of a decode failure. Decoder errors quote
-// request bytes, so only offsets and fixed text reach the caller.
+// safety: decoder errors quote request bytes, so only offsets and fixed text reach the caller.
 func engineDecodeMessage(err error) string {
 	var syntax *json.SyntaxError
 	var mistyped *json.UnmarshalTypeError
