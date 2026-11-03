@@ -22,6 +22,8 @@ unlock.
 
 ### Fixed
 
+- **console:** Report log completeness to signed-in readers
+  `GET /api/v1/runs/{run}/jobs/{job}/logs/completeness` answered `unknown` with zero lines for every session or credential reader, including a finished job that printed nothing, because the reauthorizing read wrapper hid the log store. It now returns the stored verdict.
 - **logs:** Keep a failed attempt's logs when its job retries
   A retry advanced the log writer to the next attempt before the failed attempt's final segment and seal reached storage, so the failed attempt's output was refused and its stream never completed. A retry now waits up to five seconds for that seal before it commits.
 - **SDK install:** Refuse a generated overlay that is not a regular file
