@@ -172,7 +172,16 @@ func (s *Server) handlePipelineLatest(w http.ResponseWriter, r *http.Request, au
 	if err != nil {
 		return engineLookupError(err)
 	}
-	run, err := tenant.GetLatestRun(r.Context(), name, statuses, maxAge, authorized.Target.Reference.FromAnyRun)
+	reference := authorized.Target.Reference
+	if reference.FromAnyRun && reference.FromTrustedRun {
+		return invalidEngineBody("from_any_run and from_trusted_run cannot be combined")
+	}
+	var run *store.Run
+	if reference.FromTrustedRun {
+		run, err = tenant.GetLatestTrustedRun(r.Context(), name, authorized.Principal.Capability.Binding.RunID, statuses, maxAge)
+	} else {
+		run, err = tenant.GetLatestRun(r.Context(), name, statuses, maxAge, reference.FromAnyRun)
+	}
 	if err != nil {
 		return engineLookupError(err)
 	}

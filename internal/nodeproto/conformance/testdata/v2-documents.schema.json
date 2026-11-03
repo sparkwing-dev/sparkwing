@@ -512,6 +512,9 @@
         "from_any_run": {
           "type": "boolean"
         },
+        "from_trusted_run": {
+          "type": "boolean"
+        },
         "job": {
           "type": "string"
         },

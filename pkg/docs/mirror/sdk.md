@@ -195,6 +195,10 @@ successful verified default-branch run without starting another run. Store it in
 a job field so planning can declare the read edge. Add `sw.FromAnyRun()` to accept
 output from any successful run, including pull requests and uploads. The opt-out
 must be declared in that job field. Runtime requests cannot widen it.
+`sw.FromTrustedRun()` instead reads only a successful run at the reading run's
+own commit, on any branch, that was proven for the reader's repository or was
+published by a runner the operator trusts for it (`--trusted-gate-runners`).
+It cannot be combined with `sw.FromAnyRun()`.
 TypeScript uses `refToLastRun(pipeline, jobID, { fromAnyRun: true })`.
 
 `sw.RunAndAwait[Out, In](ctx, pipeline, jobID, options...)` starts a child run and

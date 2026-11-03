@@ -141,6 +141,9 @@ func (v *planValidator) validateJob(job JobSpec, path string) error {
 		if err := v.identifier(ref.Job, at+".job"); err != nil {
 			return err
 		}
+		if ref.FromAnyRun && ref.FromTrustedRun {
+			return planInvalid(at, "a reference reads from any run or from trusted runs, not both")
+		}
 	}
 	for i, child := range job.Children {
 		if err := v.identifier(child.Pipeline, fmt.Sprintf("%s.children[%d].pipeline", path, i)); err != nil {

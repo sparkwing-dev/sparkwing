@@ -798,6 +798,7 @@ func Registry() []Command {
 			{Name: "oauth-redirect-uris", Argument: "VALUE", Meaning: "Comma-separated dashboard callback URLs a sign-in may return to, such as https://app.example.com/auth/google/callback."},
 			{Name: "object-store-budget", Argument: "VALUE", Meaning: "Per-process object-store request budgets, as comma-separated class:window=count entries such as put:minute=600,get:day=0, where class is put, get, list or delete, window is minute or day, and 0 leaves that window unlimited."},
 			{Name: "oidc-token-ttl", Argument: "DURATION", Meaning: "Lifetime of an OIDC ID token, from 1m to 1h."},
+			{Name: "trusted-gate-runners", Argument: "VALUE", Meaning: "Operator-only: semicolon-separated <repo_key>=machine:<id>[,machine:<id>] entries naming runners whose published gate results may let another run of that repository skip its gate; it grants no secrets, OIDC claims or source access."},
 			{Name: "operator-accounts", Argument: "VALUE", Meaning: "Comma-separated account ids whose signed-in dashboard sessions may use the operator console, and which are admitted past the sign-up waitlist at sign-in."},
 			{Name: "payment-mode", Argument: "VALUE", Meaning: "Stripe callback mode: test or live."},
 			{Name: "placement-hold", Argument: "DURATION", Meaning: "How long a node is held back from a claim-mode runner that does not advertise its preference, measured from the node's ready time, while a runner that does advertise it is live and has a slot."},

@@ -163,6 +163,21 @@ type PipelineReferenceTarget struct {
 	Pipeline   string
 	JobID      string
 	FromAnyRun bool
+	// FromTrustedRun reads a run at the reader's commit that a proven repository
+	// or an operator-trusted runner produced. With FromAnyRun it describes a read
+	// of such a run that a declared trusted reference also admits.
+	FromTrustedRun bool
+}
+
+// AdmittedBy reports whether a declared reference with these flags permits the read.
+func (t PipelineReferenceTarget) AdmittedBy(fromAnyRun, fromTrustedRun bool) bool {
+	switch {
+	case t.FromAnyRun:
+		return fromAnyRun || t.FromTrustedRun && fromTrustedRun
+	case t.FromTrustedRun:
+		return fromTrustedRun
+	}
+	return true
 }
 
 // Target contains server-resolved ownership plus decoded path/body selectors.

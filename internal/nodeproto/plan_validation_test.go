@@ -368,3 +368,19 @@ func TestPlanAcceptanceRefusesAnUnknownCacheResolver(t *testing.T) {
 	}
 	checkPlan(t, `{"jobs":[{"id":"a","caches":[{"name":"go-modules","resolver":"gomod","key_files":["go.sum"]}],"steps":[{"id":"s"}]}]}`, planContext(), apierr.PlanInvalid)
 }
+
+func TestPipelineReferenceReadsAnyRunOrTrustedRunsNotBoth(t *testing.T) {
+	for _, tc := range []struct {
+		flags string
+		valid bool
+	}{
+		{`"from_trusted_run":true`, true},
+		{`"from_any_run":true`, true},
+		{`"from_any_run":true,"from_trusted_run":true`, false},
+	} {
+		plan := `{"jobs":[{"id":"job","steps":[{"id":"run"}],"pipeline_refs":[{"pipeline":"gate","job":"record-tree",` + tc.flags + `}]}]}`
+		if _, err := ValidatePlan(json.RawMessage(plan), planContext()); (err == nil) != tc.valid {
+			t.Errorf("%s: err = %v, want valid=%v", tc.flags, err, tc.valid)
+		}
+	}
+}

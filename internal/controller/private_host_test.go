@@ -60,7 +60,7 @@ func FuzzLocalHostCloseRetiresProcessClients(f *testing.F) {
 		case 4:
 			_, err = process.Output(t.Context(), "run", "job")
 		case 5:
-			_, _, err = process.Latest(t.Context(), "ci", "job", time.Hour, false)
+			_, _, err = process.Latest(t.Context(), "ci", "job", time.Hour, false, false)
 		case 6:
 			_, err = process.StartChild(t.Context(), "ci", map[string]string{"value": value}, "", "")
 		case 7:

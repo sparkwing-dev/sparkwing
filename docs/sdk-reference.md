@@ -823,6 +823,10 @@ type Ref[T any] struct {
 
     // AnyRun permits cross-pipeline output from runs without verified default-branch provenance.
     AnyRun bool
+
+    // TrustedRun reads only a run at the reader's own commit that its proven
+    // repository or an operator-trusted runner produced. See FromTrustedRun.
+    TrustedRun bool
 }
 ```
 
@@ -841,6 +845,7 @@ type RefOption func(*refOpts)
 ```
 
 - `func FromAnyRun() RefOption` -- FromAnyRun permits a cross-pipeline reference to read successful runs from any branch or intake, including uploads.
+- `func FromTrustedRun() RefOption` -- FromTrustedRun narrows a cross-pipeline reference to successful runs at the reading run's own commit that either ran with their repository proven (a GitHub App delivery, an Actions push, a schedule, or code the controller fetched from the repository) in the reader's proven repository, or were published by a runner the operator trusts for the reader's repository (the controller's --trusted-gate-runners).
 - `func MaxAge(d time.Duration) RefOption` -- MaxAge bounds cross-pipeline ref resolution to runs whose finished_at is within d.
 
 ### type RetryConfig

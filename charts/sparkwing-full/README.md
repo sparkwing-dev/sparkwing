@@ -191,7 +191,10 @@ client IDs under `controller.github`/`google` and their secrets in
 GitHub App webhook URL to **https://api.sparkwing.dev/webhooks/github-app**.
 Use the App's numeric ID and slug in `controller.github.appID` and `appSlug`.
 `operatorAccounts` is a comma-separated list of account IDs allowed to use the
-operator console. The nginx Ingress sends both hosts to the controller Service.
+operator console. `trustedGateRunners` (operator-only) names the machine
+credentials whose published gate results may let another run of the same
+repository skip its gate, as `<repo_key>=machine:<id>[,machine:<id>]` entries
+separated by `;`. The nginx Ingress sends both hosts to the controller Service.
 The example references an existing `sparkwing-tls` certificate Secret.
 
 ## Cloud node and network prerequisites

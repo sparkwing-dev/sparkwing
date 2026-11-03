@@ -52,7 +52,13 @@ func bindingDeclaredReadTx(ctx context.Context, tx *storeTx, c capability.Capabi
 		if run.State != runstate.RunSuccess || run.FinishedAt == nil || row.Status != runstate.StatusDone || row.Outcome != runstate.NodeSuccess && row.Outcome != runstate.NodeMemoized || runspec.ClaimGeneration(target.SourceGeneration) != 0 && row.Generation != runspec.ClaimGeneration(target.SourceGeneration) {
 			return bindingRefusal()
 		}
-		return bindingPipelineReferenceTx(ctx, tx, c, capability.PipelineReferenceTarget{Pipeline: run.Request.Request.Pipeline, JobID: target.NodeID, FromAnyRun: !run.Request.Provenance.DefaultBranchWork() || run.Request.Request.Mode == runspec.IntakePublish})
+		reference := capability.PipelineReferenceTarget{Pipeline: run.Request.Request.Pipeline, JobID: target.NodeID, FromAnyRun: !run.Request.Provenance.DefaultBranchWork() || run.Request.Request.Mode == runspec.IntakePublish}
+		if reference.FromAnyRun {
+			if reference.FromTrustedRun, err = trustedForReaderTx(ctx, tx, Team(c.Team), b.RunID, run); err != nil {
+				return err
+			}
+		}
+		return bindingPipelineReferenceTx(ctx, tx, c, reference)
 	}
 	if b.RunID == "" || b.RunID != target.RunID || target.NodeID == "" {
 		return bindingRefusal()
@@ -139,7 +145,7 @@ func bindingPipelineReferenceTx(ctx context.Context, tx *storeTx, c capability.C
 			return err
 		}
 		for _, ref := range spec.References {
-			if (!target.FromAnyRun || ref.FromAnyRun) && ref.Pipeline == target.Pipeline && ref.Job != "" && (target.JobID == "" || target.JobID == ref.Job) {
+			if target.AdmittedBy(ref.FromAnyRun, ref.FromTrustedRun) && ref.Pipeline == target.Pipeline && ref.Job != "" && (target.JobID == "" || target.JobID == ref.Job) {
 				return nil
 			}
 		}

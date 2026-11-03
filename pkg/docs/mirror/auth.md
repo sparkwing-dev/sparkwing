@@ -1040,4 +1040,11 @@ negative compare answers, including diverged, behind and 404, retain their
 existing behavior.
 
 Latest pipeline references select verified default-branch work unless the
-pipeline declares `sw.FromAnyRun()`.
+pipeline declares `sw.FromAnyRun()`. A reference declared with
+`sw.FromTrustedRun()` reads only a run at the reader's own sealed commit: one
+whose repository was proven (an App delivery, an Actions push, a schedule, or
+code the controller fetched) as the reader's proven repository, or one published
+under a machine credential the operator names for the reader's repository in
+`--trusted-gate-runners`. That setting is operator-only and is read by nothing
+else: it grants no secrets, OIDC claims or source access, and an asserted run
+proves no repository through it.

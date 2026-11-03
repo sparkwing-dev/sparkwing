@@ -265,6 +265,12 @@ controller:
   # operator console (--operator-accounts).
   operatorAccounts: ""
 
+  # Operator-only. Runners whose published gate results may let another run of
+  # the same repository skip its gate (--trusted-gate-runners), as
+  # semicolon-separated <repo_key>=machine:<id>[,machine:<id>] entries. It
+  # grants no secrets, OIDC claims or source access.
+  trustedGateRunners: ""
+
   # Dashboard sign-in providers. Each secret is a credential file:
   # github-client-secret and google-client-secret in credentialsSecret.
   github:

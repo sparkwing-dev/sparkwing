@@ -94,7 +94,7 @@ func testGoSDKClosedFakeHostServices(t *testing.T) {
 		"mask":     func() error { return sparkwing.Mask(ctx, "after-close") },
 		"oidc":     func() error { _, err := sparkwing.OIDCToken(ctx, "audience"); return err },
 		"latest": func() error {
-			_, err := sdkserve.ServicesFrom(ctx).Latest(ctx, "pipeline", "job", 0, false)
+			_, err := sdkserve.ServicesFrom(ctx).Latest(ctx, "pipeline", "job", 0, false, false)
 			return err
 		},
 		"child": func() error {
@@ -183,7 +183,7 @@ func testGoSDKFakeHostCloseJoinsWork(t *testing.T) {
 					case "oidc":
 						_, err = sparkwing.OIDCToken(ctx, "audience")
 					case "latest":
-						_, err = sdkserve.ServicesFrom(ctx).Latest(ctx, "pipeline", "job", 0, false)
+						_, err = sdkserve.ServicesFrom(ctx).Latest(ctx, "pipeline", "job", 0, false, false)
 					case "child":
 						_, err = sparkwing.RunAndAwait[any, sparkwing.NoInputs](ctx, "pipeline", "job")
 					}

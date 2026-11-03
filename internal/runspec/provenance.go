@@ -45,6 +45,9 @@ var (
 	// GitHubEventTrust carries a ref and commit GitHub proved for one event, from an
 	// App delivery or an Actions push, which an Actions push binding can match.
 	GitHubEventTrust = TrustSet{TrustActions, TrustVerified, TrustVerifiedDefault}
+	// GitHubCommitTrust names the classes whose commit GitHub itself proved: an App
+	// delivery, an Actions push or a schedule fire the App resolved.
+	GitHubCommitTrust = TrustSet{TrustVerifiedDefault, TrustVerified, TrustActions, TrustSchedule}
 	// AllTrust lists every class.
 	AllTrust = TrustSet{TrustVerifiedDefault, TrustVerified, TrustActions, TrustSchedule, TrustAsserted}
 )
@@ -302,6 +305,18 @@ func (p Provenance) Verified() bool { return AppDeliveryTrust.Has(p.identity.Tru
 // verified ref and trust class.
 func (p Provenance) DefaultBranchWork() bool {
 	return p.identity.VerifiedDefaultBranch
+}
+
+// ProvenSHA is the commit GitHub or the controller's own fetch proved for the
+// proven repository, and empty when nothing proved one.
+func (p Provenance) ProvenSHA() string {
+	if p.identity.ProvenRepository == "" {
+		return ""
+	}
+	if GitHubCommitTrust.Has(p.identity.Trust) {
+		return p.identity.SHA
+	}
+	return p.identity.FetchedSHA
 }
 
 // Repository is the owner/name GitHub reported for RepositoryID when intake sealed
