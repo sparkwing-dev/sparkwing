@@ -221,21 +221,3 @@ func TestStoreRaceCostTableParses(t *testing.T) {
 		}
 	}
 }
-
-func TestStoreRaceRefusesToSkipPostgresWhenRequired(t *testing.T) {
-	env := func(values map[string]string) func(string) string {
-		return func(name string) string { return values[name] }
-	}
-	if err := requireRacePostgres(env(map[string]string{"SPARKWING_REQUIRE_PG": "1"})); err == nil {
-		t.Fatal("required PostgreSQL without a URL was accepted")
-	}
-	if err := requireRacePostgres(env(map[string]string{"SPARKWING_REQUIRE_PG": "1", storePostgresURLEnv: " "})); err == nil {
-		t.Fatal("required PostgreSQL with a blank URL was accepted")
-	}
-	if err := requireRacePostgres(env(map[string]string{"SPARKWING_REQUIRE_PG": "1", storePostgresURLEnv: "postgres://localhost/postgres"})); err != nil {
-		t.Fatal(err)
-	}
-	if err := requireRacePostgres(env(nil)); err != nil {
-		t.Fatalf("a local run without PostgreSQL must keep skipping: %v", err)
-	}
-}

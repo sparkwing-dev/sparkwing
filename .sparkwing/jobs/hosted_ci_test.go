@@ -277,8 +277,8 @@ func TestCanonicalPreReleaseUsesItsPostgresService(t *testing.T) {
 	}
 	job := mappingValue(mappingValue(&doc, "jobs"), "gate")
 	image := mappingValue(mappingValue(mappingValue(job, "services"), "postgres"), "image")
-	if image == nil || image.Value != "${{ (matrix.gate == 'pre-release' || startsWith(matrix.gate, 'race-store-')) && 'postgres:17' || '' }}" {
-		t.Fatal("PostgreSQL service must start only for pre-release and the store race lanes")
+	if image == nil || image.Value != "${{ matrix.gate == 'pre-release' && 'postgres:17' || '' }}" {
+		t.Fatal("PostgreSQL service must start only for pre-release")
 	}
 	if mappingValue(mappingValue(job, "env"), "SPARKWING_TEST_PG_URL") != nil {
 		t.Fatal("PostgreSQL URL must be scoped to the pre-release step")
@@ -287,26 +287,21 @@ func TestCanonicalPreReleaseUsesItsPostgresService(t *testing.T) {
 	if steps == nil {
 		t.Fatal("canonical workflow has no steps")
 	}
-	found := map[string]bool{}
+	found := false
 	for _, step := range steps.Content {
 		name := mappingValue(step, "name")
 		url := mappingValue(mappingValue(step, "env"), "SPARKWING_TEST_PG_URL")
-		if name != nil && (name.Value == "Run canonical pre-release" || name.Value == "Run canonical store race part") {
-			found[name.Value] = true
+		if name != nil && name.Value == "Run canonical pre-release" {
+			found = true
 			if url == nil || url.Value != "postgres://postgres:postgres@localhost:5432/postgres?sslmode=disable" {
-				t.Fatalf("%s does not address its PostgreSQL service", name.Value)
-			}
-			// safety: without a URL the PostgreSQL store tests skip under
-			// race and the lane still passes.
-			if require := mappingValue(mappingValue(step, "env"), "SPARKWING_REQUIRE_PG"); name.Value == "Run canonical store race part" && (require == nil || require.Value != "1") {
-				t.Fatal("store race lanes must refuse to run without PostgreSQL")
+				t.Fatal("pre-release does not address its PostgreSQL service")
 			}
 		} else if url != nil {
-			t.Fatal("PostgreSQL URL escaped the pre-release and store race steps")
+			t.Fatal("PostgreSQL URL escaped the pre-release step")
 		}
 	}
-	if len(found) != 2 {
-		t.Fatalf("canonical workflow PostgreSQL steps = %v, want pre-release and the store race part", found)
+	if !found {
+		t.Fatal("canonical workflow has no pre-release step")
 	}
 }
 

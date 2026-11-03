@@ -483,7 +483,10 @@ file. Other syntax and workflow checks remain active.
   which runs no shard. `TestCanonicalStoreRacePartsCoverEveryPartOnce` fails
   unless the lanes cover parts 1 to n exactly once whenever pre-release passes
   `none`. Source and release-tag overrides keep the whole store race inside
-  their one pre-release job. Every shard runs with `GOMAXPROCS=1`; the separate
+  their one pre-release job. The store race runs without PostgreSQL: a job's
+  environment never inherits `SPARKWING_TEST_*` names, so the PostgreSQL store
+  tests skip under race and run unraced in `store-postgres` against its own
+  embedded server. Every shard runs with `GOMAXPROCS=1`; the separate
   `internal/store/internal/storetest` package runs once, in part 1. The step stops sibling
   processes on a failure and retains each shard's output in the run log. It
   gives the suite a fresh `SPARKWING_HOME`, clears inherited runner credentials
@@ -507,10 +510,6 @@ file. Other syntax and workflow checks remain active.
   A local run at c6dff62df (four shards, `CI=1`, `GOMAXPROCS=1`, pinned with
   `taskset` to four cores of a loaded 16-core host) took 28m11s to 31m49s per
   shard over 1,862 names, 7,096 s of test time in all, the longest test 189 s.
-  Those runs left `SPARKWING_TEST_PG_URL` unset, so the PostgreSQL store
-  tests skipped. With it naming a PostgreSQL 18 server, a repeat took 27m43s
-  to 33m54s per shard, 7,185 s in all, with no skip; the checked-in table
-  holds that run's costs.
   Hosted shards ran 1.93 to 2.13 times their local cost, about 2.03 on
   average, so the suite is about 240 hosted core-minutes. Round-robin's
   slowest shard held 7% more than the mean; cost-balanced shards land within
@@ -519,14 +518,9 @@ file. Other syntax and workflow checks remain active.
   balanced four-shard assignment ran 29m52s to 30m38s against round-robin's
   28m11s to 31m49s, and the pipeline's own part 2 of 3 took 11m21s
   including pipeline and race compilation. Three parts of four shards hold about
-  599 local seconds, about 20 hosted minutes, per shard. Each lane starts the
-  same `postgres:17` service as pre-release and sets `SPARKWING_TEST_PG_URL`
-  and `SPARKWING_REQUIRE_PG=1`; with that variable set, `race-store` fails
-  before compiling when the URL is empty instead of letting the PostgreSQL
-  store tests skip, and `TestCanonicalPreReleaseUsesItsPostgresService`
-  fails unless every lane carries both. Projected per lane: about 2.5
-  minutes of setup including the service, 2.5 minutes of pipeline and race compilation and
-  `storetest` in part 1, and 20 minutes of shards, about 25 to 26 minutes, under
+  591 local seconds, about 20 hosted minutes, per shard. Projected per lane:
+  about 2 minutes of setup, 2.5 minutes of pipeline and race compilation and
+  `storetest` in part 1, and 20 minutes of shards, about 25 minutes, under
   the broad gate's 32-minute hosted job. Pre-release without the store race
   takes about 20 minutes: setup, the other checks (10 minutes in run
   41590717553), and `store-postgres`, which took 7m25s locally on four pinned
@@ -535,9 +529,9 @@ file. Other syntax and workflow checks remain active.
   minutes after it. The CI workflow's critical path
   moves from pre-release (100m09s from creation to completion in run
   41590717553) to the broad gate, about 33 minutes. Runner time rises by
-  about 11 minutes per run, from about 85 to about 96 four-core minutes
-  across pre-release and the race-store lanes, for setup, PostgreSQL service
-  start and compilation on three more runners. These are projections from the timings
+  about 10 minutes per run, from about 85 to about 95 four-core minutes
+  across pre-release and the race-store lanes, for setup and compilation on
+  three more runners. These are projections from the timings
   above until a hosted run measures them.
   The hosted broad and touched-package race
   jobs each keep an 80-minute deadline.
