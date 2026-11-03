@@ -1403,3 +1403,13 @@ Korey's WSL workstation and Mac are both trusted to run Sparkwing deploy jobs, e
 ## 2026-11-02 Korey decision 83: review policy starts as a tool-neutral spec
 
 Code review behaviour is configured by a repository-root `.review.yaml`, specified tool-neutrally at ink-labs `wing/review-spec.md`; it is not a Sparkwing feature. Reviews block only when the change fails its objective, carries significant security or usability risk, or breaks a declared design rule; nits and rare non-catastrophic edge cases never block. P0 and P1 require re-review by the same reviewer; P2 and lower are optional and may skip re-review with a recorded reason. A Sparkwing review job is the first consumer and Bitwing's landing workflow enforces the review record; a standalone review product waits until the format settles.
+
+## 2026-11-02 Korey decision 84: agentic orchestration is proven on fast release first
+
+Sparkwing should support pipelines that coordinate agents and people: durable state keyed by a subject, typed approvals (human, agent, policy), controller-enforced rules and resumable agent sessions (`design/rewrite/proposals/agentic-orchestration.md`). Fast release builds only the smallest server-side pieces it needs; the general feature is extracted when a second use needs the same pieces.
+
+## 2026-11-02 Korey decisions 85-87: gate trust and deploy confinement
+
+- 85 (delegated to the lead): before merge the gate tests the changed packages plus the `//sparkwing:critical` set; importers and full suites move to verification after deploy. A gate result lets main skip only when it comes from a repository-proven run with no selection options (start-at, stop-at, only, dry-run) at main's commit. Korey's machines supply that proof as repository-scoped runners fetching pushed branches; an operator-designated trusted-runner list was built and then removed after its security review found it spoofable.
+- 86: the workstation deploy runner stays under Korey's own user beside the agents; the exposure (agents could read a running deploy's session and key) is accepted and documented, with per-run directories, stale-directory sweeps and pinned tool paths as mitigations.
+- 87: the deploy credential is confined to Sparkwing: its values move to a dedicated `sparkwing-gitops` repository, an Argo AppProject fences its apps to Sparkwing namespaces, and the deploy role loses `patch` on Argo applications.
