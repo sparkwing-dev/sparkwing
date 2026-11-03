@@ -98,7 +98,7 @@ func TestStorePostgresStepPassesWithoutPostgresWhenTheStoreIsUntouched(t *testin
 	gitAddAll(t, root)
 	t.Setenv("SPARKWING_TEST_PG_URL", "postgres://nobody@127.0.0.1:1/unreachable")
 
-	if err := runStorePostgresIfTouched(context.Background()); err != nil {
+	if err := runStorePostgresIfTouched(context.Background(), gateAffected); err != nil {
 		t.Fatalf("store-postgres ran or failed with internal/store untouched: %v", err)
 	}
 }

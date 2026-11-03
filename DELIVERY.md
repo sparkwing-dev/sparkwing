@@ -402,7 +402,12 @@ file. Other syntax and workflow checks remain active.
   Go or PostgreSQL suite. `sparkwing run gate` runs both jobs locally. Without
   `--full` its test step runs the changed packages (importers still build and
   vet; their tests run after deploy) and the tests marked `//sparkwing:critical` on the line above them; a change to a
-  `go.mod`, `go.sum` or `internal/store/schema.sql` runs its whole module. After
+  `go.mod`, `go.sum` or `internal/store/schema.sql` runs its whole module. With
+  `--full`, race tests cover every package but `internal/store` and the
+  PostgreSQL suite always runs, so a full pass does not depend on the
+  producer's `origin/main`. The broad job's 70-minute deadline already allows
+  the full Go suite and the 30-minute PostgreSQL limit; hosted CI runs the race
+  job without `--full`, so its touched-package budget is unchanged. After
   both jobs run and pass on a clean checkout, `record-tree` outputs HEAD's tree, the
   `.sparkwing` definition fingerprint, the mode and the engine version. Each
   gate job reads that output through a `sw.FromProvenRunAtCommit()` reference
@@ -465,7 +470,7 @@ file. Other syntax and workflow checks remain active.
   latency still require measured evidence. The full Go suite uses a 25-minute per-package timeout;
   hosted runs 36678720566 and 36689529462 hit Go's default 10-minute timeout
   in `internal/controller` or `internal/store` while the active tests had run for 0s.
-  Lint and the conditional PostgreSQL suite wait for the full Go suite.
+  Lint and the PostgreSQL suite, conditional outside `--full`, wait for the full Go suite.
   Touched-package race tests run as an independent job on every host. Existing
   per-command Go parallelism stays unchanged.
   `internal/store` is not among the gate's race targets. Its full race suite

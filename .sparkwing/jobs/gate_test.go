@@ -794,6 +794,28 @@ func TestGateScopesJudgeAllFilesWithoutTheBaseline(t *testing.T) {
 	}
 }
 
+func TestFullModeScopeJudgesEveryTrackedFileWhateverTheBaseline(t *testing.T) {
+	root := gateFixtureRepo(t)
+	gitCommitAll(t, root, "base")
+	runTestGit(t, root, "update-ref", "refs/remotes/origin/main", "HEAD")
+	affected, _, err := gateScope(t.Context(), gateAffected, "Go files", existingGoFiles)
+	if err != nil || len(affected) != 0 {
+		t.Fatalf("affected scope at origin/main = %v, %v; want nothing changed", affected, err)
+	}
+	for _, mode := range []gateMode{gateFull, ""} {
+		files, scope, err := gateScope(t.Context(), mode, "Go files", existingGoFiles)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !slices.Contains(files, "internal/sound.go") || !slices.Contains(files, ".sparkwing/jobs.go") {
+			t.Fatalf("mode %q scope = %v, want all tracked Go files", mode, files)
+		}
+		if !strings.Contains(scope, "full mode") {
+			t.Fatalf("mode %q scope does not say it judged everything: %s", mode, scope)
+		}
+	}
+}
+
 func TestGateBaseRefusesAnUnreadableRepository(t *testing.T) {
 	t.Chdir(t.TempDir())
 	if _, _, err := resolveGateBase(t.Context()); err == nil {
