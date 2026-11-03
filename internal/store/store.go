@@ -88,7 +88,6 @@ type Store struct {
 	csrfKey          []byte
 	csrfCipher       SessionKeyCipher
 	githubCheckMu    sync.Mutex
-	trustedRunners   atomic.Pointer[TrustedRunners]
 }
 
 // Dialect reports the SQL dialect this Store was opened against.

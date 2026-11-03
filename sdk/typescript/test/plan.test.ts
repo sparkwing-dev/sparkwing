@@ -367,8 +367,8 @@ test("latest reference trust opt-out is declared", () => {
 
 test("trusted latest reference is declared and exclusive", () => {
   const plan = new Plan();
-  const trusted = refToLastRun<number>("gate", "record-tree", { fromTrustedRun: true });
+  const trusted = refToLastRun<number>("gate", "record-tree", { fromProvenRunAtCommit: true });
   plan.job("consumer", () => undefined).references(trusted);
-  assert.deepEqual(plan.toDoc().jobs[0]?.pipeline_refs, [{ pipeline: "gate", job: "record-tree", from_trusted_run: true }]);
-  assert.throws(() => refToLastRun<number>("gate", "record-tree", { fromAnyRun: true, fromTrustedRun: true }));
+  assert.deepEqual(plan.toDoc().jobs[0]?.pipeline_refs, [{ pipeline: "gate", job: "record-tree", from_proven_run: true }]);
+  assert.throws(() => refToLastRun<number>("gate", "record-tree", { fromAnyRun: true, fromProvenRunAtCommit: true }));
 });

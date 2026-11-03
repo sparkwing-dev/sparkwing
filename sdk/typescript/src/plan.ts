@@ -371,7 +371,7 @@ export class Job<T = unknown> extends Declaration implements API.Job<T> {
           pipeline: ref.pipeline,
           job: ref.jobId,
           ...(ref.fromAnyRun ? { from_any_run: true } : {}),
-          ...(ref.fromTrustedRun ? { from_trusted_run: true } : {}),
+          ...(ref.fromProvenRunAtCommit ? { from_proven_run: true } : {}),
         });
     return this;
   }
@@ -743,7 +743,7 @@ export function refTo<T>(job: API.Job<T>): API.Ref<T> {
 export function refToLastRun<T>(pipeline: string, jobId: string, options: API.RefOptions = {}): API.PipelineRef<T> {
   identifier("pipeline", pipeline);
   identifier("job", jobId);
-  if (options.fromAnyRun && options.fromTrustedRun) throw new Error("a reference reads from any run or from trusted runs, not both");
+  if (options.fromAnyRun && options.fromProvenRunAtCommit) throw new Error("a reference reads from any run or from a proven run at its commit, not both");
   const ref: API.PipelineRef<T> = {
     pipeline,
     jobId,
@@ -754,7 +754,7 @@ export function refToLastRun<T>(pipeline: string, jobId: string, options: API.Re
       return tryReference(() => ctx.latest(ref));
     },
     ...(options.fromAnyRun ? { fromAnyRun: true } : {}),
-    ...(options.fromTrustedRun ? { fromTrustedRun: true } : {}),
+    ...(options.fromProvenRunAtCommit ? { fromProvenRunAtCommit: true } : {}),
     ...(options.maxAgeMs === undefined ? {} : { maxAgeMs: integer("reference max age", options.maxAgeMs) }),
   };
   return Object.freeze(ref);

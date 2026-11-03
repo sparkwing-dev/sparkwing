@@ -538,7 +538,7 @@
         "from_any_run": {
           "type": "boolean"
         },
-        "from_trusted_run": {
+        "from_proven_run": {
           "type": "boolean"
         },
         "job": {

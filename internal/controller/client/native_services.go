@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/json"
+	"fmt"
 	"net/url"
 	"strconv"
 	"strings"
@@ -94,18 +95,21 @@ func (c *NativeProcessClient) ChildOutput(ctx context.Context, run, job string) 
 }
 
 // Latest reads successful verified default-branch output unless fromAnyRun is
-// true; fromTrustedRun reads a trusted run at this run's own commit instead.
-func (c *NativeProcessClient) Latest(ctx context.Context, pipeline, job string, age time.Duration, fromAnyRun, fromTrustedRun bool) (string, json.RawMessage, error) {
-	var result struct {
-		ID string `json:"id"`
-	}
+// true; fromProvenRun reads a proven run at this run's own commit instead.
+func (c *NativeProcessClient) Latest(ctx context.Context, pipeline, job string, age time.Duration, fromAnyRun, fromProvenRun bool) (string, json.RawMessage, error) {
+	var result controllerwire.LatestRun
 	query := url.Values{"job": {job}, "run": {c.run}, "max_age": {age.String()}, "from_any_run": {strconv.FormatBool(fromAnyRun)}}
-	if fromTrustedRun {
-		query.Set("from_trusted_run", "true")
+	if fromProvenRun {
+		query.Set("from_proven_run", "true")
 	}
 	err := c.transport.request(ctx, "GET", "/api/v1/pipelines/{name}/latest", "/api/v1/pipelines/"+url.PathEscape(pipeline)+"/latest?"+query.Encode(), "", nil, &result)
 	if err != nil {
 		return "", nil, err
+	}
+	// safety: a controller that predates proven references ignores the filter and
+	// answers with its latest default-branch run, so its answer is refused.
+	if fromProvenRun && !result.ProvenAtCommit {
+		return "", nil, fmt.Errorf("the controller does not support proven-at-commit references; upgrade it before reading %s/%s", pipeline, job)
 	}
 	output, err := c.Output(ctx, result.ID, job)
 	return result.ID, output, err

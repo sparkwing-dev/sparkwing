@@ -54,7 +54,7 @@ func bindingDeclaredReadTx(ctx context.Context, tx *storeTx, c capability.Capabi
 		}
 		reference := capability.PipelineReferenceTarget{Pipeline: run.Request.Request.Pipeline, JobID: target.NodeID, FromAnyRun: !run.Request.Provenance.DefaultBranchWork() || run.Request.Request.Mode == runspec.IntakePublish}
 		if reference.FromAnyRun {
-			if reference.FromTrustedRun, err = trustedForReaderTx(ctx, tx, Team(c.Team), b.RunID, run); err != nil {
+			if reference.FromProvenRun, err = provenAtCommitForReaderTx(ctx, tx, Team(c.Team), b.RunID, run); err != nil {
 				return err
 			}
 		}
@@ -145,7 +145,7 @@ func bindingPipelineReferenceTx(ctx context.Context, tx *storeTx, c capability.C
 			return err
 		}
 		for _, ref := range spec.References {
-			if target.AdmittedBy(ref.FromAnyRun, ref.FromTrustedRun) && ref.Pipeline == target.Pipeline && ref.Job != "" && (target.JobID == "" || target.JobID == ref.Job) {
+			if target.AdmittedBy(ref.FromAnyRun, ref.FromProvenRun) && ref.Pipeline == target.Pipeline && ref.Job != "" && (target.JobID == "" || target.JobID == ref.Job) {
 				return nil
 			}
 		}

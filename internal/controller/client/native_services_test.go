@@ -10,6 +10,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 )
 
 func TestNativeAnnotationPreservesLocationAndStep(t *testing.T) {
@@ -136,4 +137,30 @@ func FuzzNativeChildrenResolveTheirOwnLocalSecretNames(f *testing.F) {
 			t.Fatal(err)
 		}
 	})
+}
+
+func TestProvenLatestRefusesAControllerThatIgnoredTheFilter(t *testing.T) {
+	for _, marked := range []bool{false, true} {
+		transport := testEngine(t, func(request *http.Request) (*http.Response, error) {
+			if strings.HasSuffix(request.URL.Path, "/output") {
+				return engineResponse(http.StatusOK, `{"output":{"tree":"t"}}`), nil
+			}
+			if request.URL.Query().Get("from_proven_run") != "true" {
+				t.Fatalf("proven filter not requested: %s", request.URL)
+			}
+			body, err := json.Marshal(controllerwire.LatestRun{RunSummary: runstate.RunSummary{ID: "source"}, ProvenAtCommit: marked})
+			if err != nil {
+				t.Fatal(err)
+			}
+			return engineResponse(http.StatusOK, string(body)), nil
+		})
+		process := &NativeProcessClient{transport: transport, run: "run", job: "job"}
+		run, _, err := process.Latest(t.Context(), "gate", "record-tree", 0, false, true)
+		if marked && (err != nil || run != "source") {
+			t.Fatalf("marked answer refused: %q %v", run, err)
+		}
+		if !marked && err == nil {
+			t.Fatal("an answer from a controller that ignored the proven filter was accepted")
+		}
+	}
 }

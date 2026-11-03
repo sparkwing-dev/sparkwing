@@ -3,8 +3,11 @@ package store
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"testing"
 	"time"
+
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 )
 
 // DB exposes the store's own pool to this package's tests.
@@ -47,3 +50,18 @@ func (o *Operator) TestOnlyCreateTeam(ctx context.Context, team Team) error {
 
 // CloudSizeLabelSQL exposes the claim query's size-label rule to the dialect parity test.
 var CloudSizeLabelSQL = cloudSizeLabelSQL
+
+// TestOnlySeedSealedRun inserts a successful executed run with a sealed
+// provenance and options, bypassing intake.
+func (t *Tenant) TestOnlySeedSealedRun(ctx context.Context, id, pipeline string, repo runspec.RepoKey, sha string, provenance runspec.Provenance, options runspec.Options, finished time.Time) error {
+	body, err := json.Marshal(runspec.SealedRequest{Version: 1, Request: runspec.Request{Pipeline: pipeline, Git: runspec.Git{SHA: sha, Repository: runspec.Repository{Key: repo}}, Options: options}, Provenance: provenance})
+	if err != nil {
+		return err
+	}
+	return t.s.inTx(ctx, func(tx *storeTx) error {
+		_, err := tx.execContext(ctx, `INSERT INTO runs(team,id,number,pipeline,status,request_json,request_hash,request_sealed_at,git_sha,provenance_sha,repo_key,dispatch,intake_mode,created_subject_kind,created_principal,created_at,started_at,finished_at,log_retention_class,log_retention_days)
+			SELECT ?,?,COALESCE(MAX(number),0)+1,?,'success',?,?,1,?,?,?,'host','execute','account','fixture',?,?,?,'r30',30 FROM runs WHERE team=?`,
+			t.team, id, pipeline, body, id, sha, provenance.SHA(), string(repo), finished.UnixNano(), finished.UnixNano(), finished.UnixNano(), t.team)
+		return err
+	})
+}

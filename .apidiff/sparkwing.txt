@@ -134,7 +134,7 @@ type FailureRecoveryFn func(ctx context.Context, f Failure) error
 type FailureStage int
 func (s FailureStage) String() string
 func FromAnyRun() RefOption
-func FromTrustedRun() RefOption
+func FromProvenRunAtCommit() RefOption
 type GenerateFn func(context.Context, *Plan) error
 type Generator struct {
 }
@@ -310,7 +310,7 @@ type Ref[T any] struct {
 
 	AnyRun bool
 
-	TrustedRun bool
+	ProvenRun bool
 }
 func (r Ref[T]) Get(ctx context.Context) T
 func (r Ref[T]) Job() string

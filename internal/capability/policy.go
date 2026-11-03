@@ -163,19 +163,19 @@ type PipelineReferenceTarget struct {
 	Pipeline   string
 	JobID      string
 	FromAnyRun bool
-	// FromTrustedRun reads a run at the reader's commit that a proven repository
-	// or an operator-trusted runner produced. With FromAnyRun it describes a read
-	// of such a run that a declared trusted reference also admits.
-	FromTrustedRun bool
+	// FromProvenRun reads a run at the reader's sealed commit, proven for the
+	// reader's repository, that selected every job and step. With FromAnyRun it
+	// describes a read of such a run that a declared proven reference also admits.
+	FromProvenRun bool
 }
 
 // AdmittedBy reports whether a declared reference with these flags permits the read.
-func (t PipelineReferenceTarget) AdmittedBy(fromAnyRun, fromTrustedRun bool) bool {
+func (t PipelineReferenceTarget) AdmittedBy(fromAnyRun, fromProvenRun bool) bool {
 	switch {
 	case t.FromAnyRun:
-		return fromAnyRun || t.FromTrustedRun && fromTrustedRun
-	case t.FromTrustedRun:
-		return fromTrustedRun
+		return fromAnyRun || t.FromProvenRun && fromProvenRun
+	case t.FromProvenRun:
+		return fromProvenRun
 	}
 	return true
 }

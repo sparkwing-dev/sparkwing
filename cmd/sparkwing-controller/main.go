@@ -94,10 +94,6 @@ func run(args []string) error {
 	storeKind := fs.String("store", string(deployment.StoreSQLite),
 		"where state lives: sqlite (state.db under SPARKWING_HOME) or postgres (the "+credPGURL+" credential)")
 	paymentMode := fs.String("payment-mode", "", "Stripe callback mode: test or live. Requires stripe-api-key and stripe-webhook-secret in --credentials-dir. Empty disables settlement.")
-	trustedGateRunners := fs.String("trusted-gate-runners", "",
-		"operator-only: runners whose published gate results may let another run of the same "+
-			"repository skip its gate, as semicolon-separated <repo_key>=machine:<id>[,machine:<id>] "+
-			"entries. It grants no secrets, OIDC claims or source access. Empty trusts no runner.")
 	operatorAccounts := fs.String("operator-accounts", "",
 		"comma-separated account ids whose signed-in dashboard sessions may use the "+
 			"operator console, and which are admitted past the sign-up waitlist at sign-in. "+
@@ -516,10 +512,6 @@ func run(args []string) error {
 	}
 	defer func() { _ = tel.Shutdown(context.Background()) }()
 
-	trustedRunners, err := store.ParseTrustedRunners(*trustedGateRunners)
-	if err != nil {
-		return err
-	}
 	var srv *controller.Server
 	var closeObjects func() error
 	epochDir := credentialEpochDirectory(*credentialEpochDir, *credentialsDir, p.Root)
@@ -533,7 +525,6 @@ func run(args []string) error {
 		if err != nil {
 			return store.Policies{}, err
 		}
-		st.SetTrustedRunners(trustedRunners)
 		srv = srv.
 			WithTrustedProxyCIDRs(proxyCIDRs).
 			WithTeamDownloadCaps(*teamDownloadFree, *teamDownloadFunded).

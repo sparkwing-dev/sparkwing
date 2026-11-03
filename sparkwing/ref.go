@@ -58,9 +58,9 @@ type Ref[T any] struct {
 	// AnyRun permits cross-pipeline output from runs without verified default-branch provenance.
 	AnyRun bool
 
-	// TrustedRun reads only a run at the reader's own commit that its proven
-	// repository or an operator-trusted runner produced. See FromTrustedRun.
-	TrustedRun bool
+	// ProvenRun reads only a run at the reader's own commit that was proven for
+	// the reader's repository and selected every job. See FromProvenRunAtCommit.
+	ProvenRun bool
 }
 
 // Job returns the upstream node id this reference points at.
@@ -203,7 +203,7 @@ func (r Ref[T]) getCrossPipeline(ctx context.Context) (T, bool, error) {
 		return out, false, fmt.Errorf("sparkwing: Ref[%T].Get called without a pipeline resolver in context (pipeline=%q node=%q)",
 			out, r.Pipeline, r.JobID)
 	}
-	resolved, err := resolver.resolve(ctx, r.Pipeline, r.JobID, r.MaxAge, r.AnyRun, r.TrustedRun)
+	resolved, err := resolver.resolve(ctx, r.Pipeline, r.JobID, r.MaxAge, r.AnyRun, r.ProvenRun)
 	if err != nil {
 		return out, false, fmt.Errorf("sparkwing: Ref[%T].Get failed (pipeline=%q node=%q): %w",
 			out, r.Pipeline, r.JobID, err)
@@ -261,9 +261,9 @@ func RefTo[T any](n *JobNode) Ref[T] {
 type RefOption func(*refOpts)
 
 type refOpts struct {
-	maxAge     time.Duration
-	anyRun     bool
-	trustedRun bool
+	maxAge    time.Duration
+	anyRun    bool
+	provenRun bool
 }
 
 // MaxAge bounds cross-pipeline ref resolution to runs whose
@@ -281,15 +281,16 @@ func FromAnyRun() RefOption {
 	return func(o *refOpts) { o.anyRun = true }
 }
 
-// FromTrustedRun narrows a cross-pipeline reference to successful runs at the
-// reading run's own commit that either ran with their repository proven (a
-// GitHub App delivery, an Actions push, a schedule, or code the controller
-// fetched from the repository) in the reader's proven repository, or were
-// published by a runner the operator trusts for the reader's repository
-// (the controller's --trusted-gate-runners). Any branch qualifies. It cannot be
-// combined with FromAnyRun.
-func FromTrustedRun() RefOption {
-	return func(o *refOpts) { o.trustedRun = true }
+// FromProvenRunAtCommit narrows a cross-pipeline reference to successful runs
+// at the reading run's own sealed commit, on any branch, whose repository was
+// proven as the reader's proven repository: by a GitHub App delivery, an
+// Actions push, a schedule, or code the controller fetched from GitHub. The run
+// must have selected every job and step: none of only, start-at or stop-at,
+// and not dry run. A reader with no proven repository matches nothing, and a
+// controller that predates the filter is refused rather than ignored. It cannot
+// be combined with FromAnyRun.
+func FromProvenRunAtCommit() RefOption {
+	return func(o *refOpts) { o.provenRun = true }
 }
 
 // RefToLastRun returns a Ref[T] pointing at node nodeID in the most
@@ -325,11 +326,11 @@ func RefToLastRun[T any](pipeline, nodeID string, opts ...RefOption) Ref[T] {
 		opt(&o)
 	}
 	return Ref[T]{
-		JobID:      nodeID,
-		Pipeline:   pipeline,
-		MaxAge:     o.maxAge,
-		AnyRun:     o.anyRun,
-		TrustedRun: o.trustedRun,
+		JobID:     nodeID,
+		Pipeline:  pipeline,
+		MaxAge:    o.maxAge,
+		AnyRun:    o.anyRun,
+		ProvenRun: o.provenRun,
 	}
 }
 
@@ -355,7 +356,7 @@ func (n *JobNode) pipelineRefs() []refTarget {
 }
 
 func (r Ref[T]) target() refTarget {
-	return refTarget{Pipeline: r.Pipeline, NodeID: r.JobID, AnyRun: r.AnyRun, TrustedRun: r.TrustedRun}
+	return refTarget{Pipeline: r.Pipeline, NodeID: r.JobID, AnyRun: r.AnyRun, ProvenRun: r.ProvenRun}
 }
 
 type refField interface{ target() refTarget }
@@ -391,8 +392,8 @@ func collectRefs(job any) []refTarget {
 // via collectRefs. Dashboard / audit code uses it to
 // annotate cross-pipeline dependencies.
 type refTarget struct {
-	Pipeline   string
-	NodeID     string
-	AnyRun     bool
-	TrustedRun bool
+	Pipeline  string
+	NodeID    string
+	AnyRun    bool
+	ProvenRun bool
 }

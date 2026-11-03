@@ -164,7 +164,6 @@ spec:
                   (dict "flag" "--external-url" "value" $c.externalURL)
                   (dict "flag" "--oauth-redirect-uris" "value" $c.oauthRedirectURIs)
                   (dict "flag" "--operator-accounts" "value" $c.operatorAccounts)
-                  (dict "flag" "--trusted-gate-runners" "value" $c.trustedGateRunners)
                   (dict "flag" "--github-client-id" "value" (($c.github | default dict).clientID))
                   (dict "flag" "--github-app-id" "value" (($c.github | default dict).appID))
                   (dict "flag" "--github-app-slug" "value" (($c.github | default dict).appSlug))

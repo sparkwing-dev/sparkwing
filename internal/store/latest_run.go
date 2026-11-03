@@ -4,60 +4,19 @@ import (
 	"context"
 	"database/sql"
 	"errors"
-	"fmt"
 	"strings"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 )
 
-// TrustedRunners names, per repository, the runner subjects an operator trusts
-// to publish results a trusted reference may read. It grants nothing else.
-type TrustedRunners map[runspec.RepoKey][]capability.Subject
-
-// ParseTrustedRunners reads the operator's --trusted-gate-runners value:
-// semicolon-separated <repo_key>=machine:<id>[,machine:<id>]... entries, where
-// repo_key is a gh: or git: repository key. An empty value trusts no runner.
-func ParseTrustedRunners(spec string) (TrustedRunners, error) {
-	trusted := TrustedRunners{}
-	for _, entry := range strings.Split(spec, ";") {
-		entry = strings.TrimSpace(entry)
-		if entry == "" {
-			continue
-		}
-		repo, subjects, ok := strings.Cut(entry, "=")
-		key := runspec.RepoKey(strings.TrimSpace(repo))
-		if !ok || runspec.ValidateRepoUse(key, runspec.RepoAccessRule) != nil {
-			return nil, fmt.Errorf("trusted gate runners: %q needs a gh: or git: repository key before =", entry)
-		}
-		for _, subject := range strings.Split(subjects, ",") {
-			kind, id, ok := strings.Cut(strings.TrimSpace(subject), ":")
-			if !ok || capability.SubjectKind(kind) != capability.SubjectMachine || id == "" {
-				return nil, fmt.Errorf("trusted gate runners: %q is not a machine:<id> runner subject", subject)
-			}
-			trusted[key] = append(trusted[key], capability.Subject{Kind: capability.SubjectMachine, ID: id})
-		}
-	}
-	return trusted, nil
-}
-
-// SetTrustedRunners replaces the operator's trusted runners; nil trusts none.
-func (s *Store) SetTrustedRunners(trusted TrustedRunners) { s.trustedRunners.Store(&trusted) }
-
-func (s *Store) trusted() TrustedRunners {
-	if trusted := s.trustedRunners.Load(); trusted != nil {
-		return *trusted
-	}
-	return nil
-}
-
-// GetLatestTrustedRun returns the newest run of pipeline at the reading run's
-// own commit that either proved that commit in the reader's proven repository,
-// or was published by a runner the operator trusts for the reader's repository.
-// Returns ErrNotFound when no run qualifies.
-func (t *Tenant) GetLatestTrustedRun(ctx context.Context, pipeline, readerRunID string, statuses []string, maxAge time.Duration) (*Run, error) {
+// GetLatestProvenRunAtCommit returns the newest run of pipeline at the reading
+// run's own sealed commit whose repository was proven, by GitHub or by the
+// controller's own fetch, as the reader's proven repository, and whose sealed
+// options selected every job and step without dry run. Returns ErrNotFound when
+// none qualifies.
+func (t *Tenant) GetLatestProvenRunAtCommit(ctx context.Context, pipeline, readerRunID string, statuses []string, maxAge time.Duration) (*Run, error) {
 	if t.team == "" {
 		return nil, ErrNoTeam
 	}
@@ -65,21 +24,21 @@ func (t *Tenant) GetLatestTrustedRun(ctx context.Context, pipeline, readerRunID 
 	if err != nil {
 		return nil, err
 	}
-	query, args, ok := trustedRunQuery(t.s.dialect, t.team, pipeline, reader.Request, t.s.trusted())
+	query, args, ok := provenRunAtCommitQuery(t.s.dialect, t.team, pipeline, reader.Request)
 	if !ok {
 		return nil, notFound("pipeline run", pipeline)
 	}
 	return t.s.getLatestRun(ctx, query, args, pipeline, statuses, maxAge, true)
 }
 
-// safety: the output read after a trusted lookup re-proves the run, so a run
-// id the reader learned elsewhere cannot borrow the trusted reference.
-func trustedForReaderTx(ctx context.Context, tx *storeTx, team Team, readerRunID string, candidate RunRow) (bool, error) {
+// safety: the output read after a proven lookup re-proves the run, so a run id
+// the reader learned elsewhere cannot borrow the proven reference.
+func provenAtCommitForReaderTx(ctx context.Context, tx *storeTx, team Team, readerRunID string, candidate RunRow) (bool, error) {
 	reader, err := readRunTx(ctx, tx, team, readerRunID)
 	if err != nil {
 		return false, err
 	}
-	query, args, ok := trustedRunQuery(tx.dialect, team, candidate.Pipeline, reader.Request, tx.store.trusted())
+	query, args, ok := provenRunAtCommitQuery(tx.dialect, team, candidate.Pipeline, reader.Request)
 	if !ok {
 		return false, nil
 	}
@@ -92,38 +51,27 @@ func trustedForReaderTx(ctx context.Context, tx *storeTx, team Team, readerRunID
 	return err == nil, err
 }
 
-// safety: the commit comes from the reader's sealed request, never from the
-// caller, and an asserted run proves no repository, so it matches only through
-// an operator-trusted publisher.
-func trustedRunQuery(dialect Dialect, team Team, pipeline string, reader runspec.SealedRequest, trusted TrustedRunners) (string, []any, bool) {
-	q := claimSQL{dialect: dialect}
-	provenance := q.at(q.blob("request_json"), "provenance")
-	var clauses []string
-	var args []any
-	if repository, sha := reader.Provenance.ProvenRepository(), reader.Provenance.ProvenSHA(); repository != "" && sha != "" {
-		clauses = append(clauses, "(intake_mode='execute' AND "+q.provenRepository(provenance)+"=? AND (("+
-			trustIn(q.at(provenance, "trust"), runspec.GitHubCommitTrust)+" AND "+q.at(provenance, "sha")+"=?) OR "+
-			q.at(provenance, "fetched_sha")+"=?))")
-		args = append(args, string(repository), sha, sha)
-	}
-	sha := reader.Provenance.ProvenSHA()
-	if sha == "" {
-		sha = strings.ToLower(reader.Request.Git.SHA)
-	}
-	if subjects := trusted[reader.Request.Git.Repository.Key]; len(subjects) > 0 && sha != "" {
-		publishers := make([]string, len(subjects))
-		args = append(args, sha)
-		for i, subject := range subjects {
-			publishers[i] = "(created_subject_kind=? AND created_principal=?)"
-			args = append(args, string(subject.Kind), subject.ID)
-		}
-		clauses = append(clauses, "(intake_mode='publish' AND git_sha=? AND ("+strings.Join(publishers, " OR ")+"))")
-	}
-	if len(clauses) == 0 {
+// safety: the commit and repository come from the reader's sealed request,
+// never from the caller, and an asserted run proves neither. A run whose
+// submitter narrowed it with only, start-at or stop-at, or ran it dry, skipped
+// work its output does not admit to, so it never counts.
+func provenRunAtCommitQuery(dialect Dialect, team Team, pipeline string, reader runspec.SealedRequest) (string, []any, bool) {
+	repository, sha := reader.Provenance.ProvenRepository(), reader.Provenance.ProvenSHA()
+	if repository == "" || sha == "" {
 		return "", nil, false
 	}
-	return `SELECT team,id FROM runs WHERE team=? AND pipeline=? AND (` + strings.Join(clauses, " OR ") + `)`,
-		append([]any{team, pipeline}, args...), true
+	q := claimSQL{dialect: dialect}
+	request := q.blob("request_json")
+	provenance := q.at(request, "provenance")
+	clean := make([]string, 0, 4)
+	for _, option := range []string{"start_at", "stop_at", "only"} {
+		clean = append(clean, "COALESCE("+q.at(request, "request", "options", option, "value")+",'')=''")
+	}
+	clean = append(clean, "COALESCE(CAST("+q.at(request, "request", "options", "dry_run", "value")+" AS TEXT),'false') NOT IN ('true','1')")
+	return `SELECT team,id FROM runs WHERE team=? AND repo_key=? AND provenance_sha=? AND pipeline=? AND intake_mode='execute' AND ` +
+			q.provenRepository(provenance) + `=? AND ((` + trustIn(q.at(provenance, "trust"), runspec.GitHubCommitTrust) + ` AND ` +
+			q.at(provenance, "sha") + `=?) OR ` + q.at(provenance, "fetched_sha") + `=?) AND ` + strings.Join(clean, " AND "),
+		[]any{team, string(repository), sha, pipeline, string(repository), sha, sha}, true
 }
 
 func (s *Store) getLatestRun(ctx context.Context, query string, args []any, pipeline string, statuses []string, maxAge time.Duration, fromAnyRun bool) (*Run, error) {

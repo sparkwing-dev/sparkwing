@@ -5,9 +5,11 @@ import (
 	"fmt"
 	"math/rand/v2"
 	"testing"
+	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 )
 
 func TestDeclaredPipelineReferenceProperty(t *testing.T) {
@@ -111,7 +113,7 @@ func TestPipelineOutputRequiresVerifiedDefaultBranchOrDeclaredOptOut(t *testing.
 	}
 }
 
-func TestTrustedPipelineOutputNeedsADeclaredTrustedReferenceAndADesignatedPublisher(t *testing.T) {
+func TestProvenPipelineOutputNeedsADeclaredProvenReferenceAndACleanRun(t *testing.T) {
 	s, demand := unitClaimFixture(t)
 	claim, err := s.AsOperator().ClaimUnit(t.Context(), demand)
 	if err != nil {
@@ -126,46 +128,41 @@ func TestTrustedPipelineOutputNeedsADeclaredTrustedReferenceAndADesignatedPublis
 	if err != nil {
 		t.Fatal(err)
 	}
-	reader.Request.Request.Git.SHA, reader.Request.Request.Git.Repository.Key = trustedSHA, trustedRepo
-	rewriteSchemaExec(t, s.db, `UPDATE runs SET request_json=?,git_sha=? WHERE team='a' AND id='run'`, sealWith(t, reader.Request, reader.Request.Provenance), trustedSHA)
-	rewriteSchemaExec(t, s.db, `INSERT INTO runs(team,id,number,pipeline,status,request_json,request_hash,request_sealed_at,git_sha,repo_key,dispatch,intake_mode,created_subject_kind,created_principal,created_at,finished_at,log_retention_class,log_retention_days) VALUES ('a','producer-run',2,'producer','success',?,'producer',1,?,'local:x','host','publish','machine','workstation',1,2,'r30',30)`, []byte(`{"version":1,"request":{"pipeline":"producer"}}`), trustedSHA)
-	rewriteSchemaExec(t, s.db, `INSERT INTO nodes(team,run_id,node_id,status,outcome,finished_at,spec_json,execution_json) VALUES ('a','producer-run','output','done','success',2,?,?)`, []byte(`{"id":"output"}`), []byte(`{}`))
+	proof, err := assertedProvenance(t, "ci", "refs/heads/main", provenSHA).FetchedFrom(1, "acme/repo", "refs/heads/main", provenSHA)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reader.Request.Request.Git.SHA, reader.Request.Request.Git.Repository.Key = provenSHA, provenRepo
+	rewriteSchemaExec(t, s.db, `UPDATE runs SET request_json=?,git_sha=?,repo_key=? WHERE team='a' AND id='run'`, sealWith(t, reader.Request, proof), provenSHA, string(provenRepo))
+	candidate, err := assertedProvenance(t, "producer", "refs/heads/agent", provenSHA).FetchedFrom(1, "acme/repo", "refs/heads/agent", provenSHA)
+	if err != nil {
+		t.Fatal(err)
+	}
 	read := capability.Target{Team: "a", RunID: "producer-run", NodeID: "output"}
 	for _, tc := range []struct {
-		name               string
-		anyRun, trustedRun bool
-		trusted            TrustedRunners
-		want               bool
+		name              string
+		anyRun, provenRun bool
+		options           runspec.Options
+		want              bool
 	}{
-		{name: "trusted reference, designated publisher", trustedRun: true, trusted: TrustedRunners{trustedRepo: {trustedMachine}}, want: true},
-		{name: "trusted reference, no designation", trustedRun: true},
-		{name: "trusted reference, publisher designated for another repository", trustedRun: true, trusted: TrustedRunners{trustedOtherRepo: {trustedMachine}}},
-		{name: "default reference, designated publisher", trusted: TrustedRunners{trustedRepo: {trustedMachine}}},
-		{name: "any-run reference", anyRun: true, want: true},
+		{name: "proven reference, clean run", provenRun: true, want: true},
+		{name: "proven reference, start-at run", provenRun: true, options: runspec.Options{StartAt: runspec.Setting[string]{Optional: runspec.Optional[string]{Set: true, Value: "sdk-typescript"}}}},
+		{name: "default reference, clean run"},
+		{name: "any-run reference, start-at run", anyRun: true, options: runspec.Options{StartAt: runspec.Setting[string]{Optional: runspec.Optional[string]{Set: true, Value: "sdk-typescript"}}}, want: true},
 	} {
-		s.SetTrustedRunners(tc.trusted)
-		spec, err := json.Marshal(nodeproto.JobSpec{ID: "job", References: []nodeproto.PipelineReference{{Pipeline: "producer", Job: "output", FromAnyRun: tc.anyRun, FromTrustedRun: tc.trustedRun}}})
+		rewriteSchemaExec(t, s.db, `DELETE FROM nodes WHERE team='a' AND run_id='producer-run'`)
+		rewriteSchemaExec(t, s.db, `DELETE FROM runs WHERE team='a' AND id='producer-run'`)
+		if err := tenant.TestOnlySeedSealedRun(t.Context(), "producer-run", "producer", provenRepo, provenSHA, candidate, tc.options, time.Unix(1700000000, 0)); err != nil {
+			t.Fatal(err)
+		}
+		rewriteSchemaExec(t, s.db, `INSERT INTO nodes(team,run_id,node_id,status,outcome,finished_at,spec_json,execution_json) VALUES ('a','producer-run','output','done','success',2,?,?)`, []byte(`{"id":"output"}`), []byte(`{}`))
+		spec, err := json.Marshal(nodeproto.JobSpec{ID: "job", References: []nodeproto.PipelineReference{{Pipeline: "producer", Job: "output", FromAnyRun: tc.anyRun, FromProvenRun: tc.provenRun}}})
 		if err != nil {
 			t.Fatal(err)
 		}
 		rewriteSchemaExec(t, s.db, `UPDATE nodes SET spec_json=? WHERE team='a' AND run_id='run' AND node_id='job'`, spec)
 		if err := s.AsOperator().CheckBinding(t.Context(), principal, capability.BindReadSet, read); (err == nil) != tc.want {
 			t.Fatalf("%s: %v", tc.name, err)
-		}
-	}
-}
-
-func TestParseTrustedRunners(t *testing.T) {
-	got, err := ParseTrustedRunners(" gh:1=machine:workstation, machine:laptop ; git:example.com/acme/repo=machine:ci ")
-	if err != nil || len(got[trustedRepo]) != 2 || got[trustedRepo][1].ID != "laptop" || len(got["git:example.com/acme/repo"]) != 1 {
-		t.Fatalf("parsed = %+v, %v", got, err)
-	}
-	if got, err := ParseTrustedRunners(""); err != nil || len(got) != 0 {
-		t.Fatalf("empty setting = %+v, %v; want no trusted runner", got, err)
-	}
-	for _, bad := range []string{"machine:workstation", "local:" + trustedSHA + trustedSHA[:24] + "=machine:x", "gh:1=account:korey", "gh:1=machine:", "gh:1=workstation"} {
-		if _, err := ParseTrustedRunners(bad); err == nil {
-			t.Errorf("%q was accepted", bad)
 		}
 	}
 }

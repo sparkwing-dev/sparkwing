@@ -27,7 +27,7 @@ var DefaultOperations Operations
 type Services interface {
 	Secret(context.Context, string) (string, bool, error)
 	Output(context.Context, string) (json.RawMessage, error)
-	Latest(ctx context.Context, pipeline, job string, maxAge time.Duration, fromAnyRun, fromTrustedRun bool) (json.RawMessage, error)
+	Latest(ctx context.Context, pipeline, job string, maxAge time.Duration, fromAnyRun, fromProvenRun bool) (json.RawMessage, error)
 	RunPipeline(context.Context, ChildRequest) (json.RawMessage, error)
 	OIDC(context.Context, string) (string, error)
 	Mask(context.Context, string) error

@@ -60,7 +60,7 @@ func WithClient(cfg NativeConfig, c *client.LocalHostClient) NativeConfig {
 			return remote.Output(ctx, service.RunID, job)
 		}
 		service.Latest = func(ctx context.Context, auth capability.Authorized, pipeline, job string, age time.Duration, fromAnyRun bool) (ProcessOutput, error) {
-			trusted := auth.Target.Reference != nil && auth.Target.Reference.FromTrustedRun
+			trusted := auth.Target.Reference != nil && auth.Target.Reference.FromProvenRun
 			run, output, err := remote.Latest(ctx, pipeline, job, age, fromAnyRun, trusted)
 			return ProcessOutput{RunID: run, Output: output}, err
 		}

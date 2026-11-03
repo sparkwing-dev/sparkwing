@@ -256,16 +256,6 @@ Controller log messages and attribute values, including nested groups and errors
 replace Sparkwing credential shapes with `[credential:<digest>]` fingerprints
 before writing to stderr or telemetry. Public token prefixes remain readable.
 
-### Trusted gate runners
-
-`--trusted-gate-runners='gh:123=machine:workstation,machine:laptop'` names, per
-repository, the machine credentials whose published runs a
-`sw.FromTrustedRun()` reference may read, so a pipeline can skip work a trusted
-machine already did at the same commit. Separate repositories with `;`. The full
-chart takes the same value in `controller.trustedGateRunners`. It is
-operator-only, read by that lookup alone, and changes no secret, OIDC or source
-trust. The empty default trusts no runner.
-
 ### Client addresses behind proxies
 
 Set `--trusted-proxy-cidrs=10.0.0.0/8,2001:db8:ffff::/48` to the networks of
