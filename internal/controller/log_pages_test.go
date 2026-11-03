@@ -47,6 +47,7 @@ func TestRunLogPageAccountsForRequeuedPlanWriters(t *testing.T) {
 			engineSQL(t, st, `UPDATE runs SET dispatch='controller'`)
 			engineSQL(t, st, `UPDATE triggers SET unit_kind='plan'`)
 			demand := store.UnitDemand{CapabilityPrefix: "launcher", Target: &store.UnitRef{Kind: capability.UnitPlan, RunID: "run"}}
+			var wantIncomplete []controllerwire.LogIncomplete
 			for cycle := range 3 {
 				claim, err := st.AsOperator().ClaimUnit(t.Context(), demand)
 				if err != nil {
@@ -60,6 +61,12 @@ func TestRunLogPageAccountsForRequeuedPlanWriters(t *testing.T) {
 					claim.Award.CapabilityPrefix = issued.Capability.Prefix
 				}
 				if cycle == 1 {
+					if test.exchanged {
+						wantIncomplete = append(wantIncomplete, controllerwire.LogIncomplete{
+							Subject: blob.LogSubject{Kind: blob.LogOwnerUnit, Team: "a", RunID: "run", Unit: &blob.LogUnit{Kind: blob.LogPlan, Generation: int64(claim.Award.Generation)}},
+							Reason:  "writer_lost",
+						})
+					}
 					engineSQL(t, st, `UPDATE triggers SET lease_expires_at=?`, teststore.Now(st).UnixNano())
 					reaped, err := st.AsOperator().ReapUnits(t.Context(), 1)
 					if err != nil || len(reaped) != 1 || !reaped[0].Requeued {
@@ -85,7 +92,7 @@ func TestRunLogPageAccountsForRequeuedPlanWriters(t *testing.T) {
 			engineSQL(t, st, `UPDATE runs SET status=?,finished_at=?`, test.status, teststore.Now(st).UnixNano())
 			reader, _ := memberLogSearchReader(t, st, logs.objs.(blob.ObjectBackend))
 			jobPage, err := reader.ReadLogs(t.Context(), "run", controllerwire.LogQuery{Job: "job", NoEvents: true})
-			if err != nil || !jobPage.Complete {
+			if err != nil || !jobPage.Complete || len(jobPage.Incomplete) != 0 {
 				t.Fatalf("job logs: %+v %v", jobPage, err)
 			}
 			page, err := reader.ReadLogs(t.Context(), "run", controllerwire.LogQuery{NoEvents: true})
@@ -96,8 +103,11 @@ func TestRunLogPageAccountsForRequeuedPlanWriters(t *testing.T) {
 				t.Fatal(err)
 			}
 			page, err = reader.ReadLogs(t.Context(), "run", controllerwire.LogQuery{NoEvents: true})
-			if err != nil || page.Complete != !test.exchanged || len(page.Records) != 1 || page.Records[0].Line != "job output" {
+			if err != nil || !page.Complete || len(page.Records) != 1 || page.Records[0].Line != "job output" {
 				t.Fatalf("finished run aggregate: complete=%v records=%v error=%v", page.Complete, page.Records, err)
+			}
+			if !reflect.DeepEqual(page.Incomplete, wantIncomplete) {
+				t.Fatalf("finished run incomplete markers: got %+v, want %+v", page.Incomplete, wantIncomplete)
 			}
 		})
 	}
