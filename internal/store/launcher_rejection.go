@@ -9,14 +9,15 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
+	"github.com/sparkwing-dev/sparkwing/pkg/match"
 )
 
 // rejectLauncherAwards fails only exact awards issued under the authenticated launcher's ancestry.
 func (s *Store) rejectLauncherAwards(ctx context.Context, authority capability.AuthorityRef, fences []capability.LeaseRef) error {
-	return s.failLauncherAwards(ctx, authority, fences, "pod_rejected")
+	return s.failLauncherAwards(ctx, authority, fences, "pod_rejected", nil)
 }
 
-func (s *Store) failLauncherAwards(ctx context.Context, authority capability.AuthorityRef, fences []capability.LeaseRef, reason string) error {
+func (s *Store) failLauncherAwards(ctx context.Context, authority capability.AuthorityRef, fences []capability.LeaseRef, reason string, ceiling *match.Resources) error {
 	return s.inLauncherBatchTx(ctx, authority, fences, false, func(tx *storeTx) error {
 		chain, err := authorityChainTx(ctx, tx, authority, true)
 		if err != nil {
@@ -61,6 +62,10 @@ func (s *Store) failLauncherAwards(ctx context.Context, authority capability.Aut
 				message = fmt.Sprintf("%s (Support reference: %s)", base, award.Claim.RunID)
 				if award.CloudResources != nil {
 					message = fmt.Sprintf("%s (Requested class: sparkwing-%dcpu; Support reference: %s)", base, int64(award.CloudResources.Cores), award.Claim.RunID)
+				}
+				// safety: a ceiling the committed request fits under would contradict itself, so it keeps the generic guidance.
+				if requested := award.CloudResources; requested != nil && ceiling != nil && reason == capability.CloudCapacityUnconfigured && (requested.Cores > ceiling.Cores || requested.MemoryBytes > ceiling.MemoryBytes) {
+					message = capability.CloudCapacityCeilingMessage(*requested, *ceiling, award.Claim.RunID)
 				}
 			}
 			actor := runstate.Actor{Kind: runstate.ActorLauncher, Authority: authority, CapabilityPrefix: row.prefix, NodeFence: runspec.NodeFence{RunID: runspec.RunID(award.Claim.RunID), NodeID: runspec.NodeID(award.Claim.NodeID), Holder: fence.Holder, Generation: runspec.ClaimGeneration(fence.Generation)}}

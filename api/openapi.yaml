@@ -460,6 +460,10 @@ components:
       properties:
         award:
           $ref: '#/components/schemas/internal.capability.LeaseRef'
+        capacity_ceiling:
+          anyOf:
+            - $ref: '#/components/schemas/pkg.match.Resources'
+            - type: "null"
         capacity_unavailable:
           type: boolean
         capacity_unconfigured:
@@ -2052,6 +2056,10 @@ components:
       properties:
         award:
           $ref: '#/components/schemas/internal.capability.LeaseRef'
+        ceiling:
+          anyOf:
+            - $ref: '#/components/schemas/pkg.match.Resources'
+            - type: "null"
         unavailable:
           type: boolean
         unconfigured:

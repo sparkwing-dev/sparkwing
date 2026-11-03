@@ -95,7 +95,11 @@ Users can cancel while waiting.
 Missing shared capacity for the requested class ends the unit with
 `cloud_capacity_unconfigured`, releases its unstarted credit hold, and gives
 support@sparkwing.dev plus the run ID as a support reference. Configure that
-class's shared pool and trigger a new run. Pool-list failures retry. NodePools
+class's shared pool and trigger a new run. A request above the launcher's CPU or
+memory ceiling ends the same way, but its error names the requested class, CPU
+and memory and the ceilings, and says to request a smaller class or ask
+support@sparkwing.dev to raise the ceiling. The launcher logs that refusal at
+INFO. Pool-list failures retry. NodePools
 need `consolidateAfter` above the 3-minute award lease.
 
 A Cloud budget breaker stops Karpenter from launching job nodes and publishes

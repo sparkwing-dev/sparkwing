@@ -17,6 +17,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/limits"
+	"github.com/sparkwing-dev/sparkwing/pkg/match"
 )
 
 const (
@@ -149,18 +150,24 @@ func (l *Launcher) awaitCapacity(ctx context.Context, award CloudJobAward) error
 	if err != nil && !errors.Is(err, errCapacityUnconfigured) {
 		return err
 	}
-	configured := false
-	if err == nil {
-		configured, err = l.Boundary.CapacityConfigured(ctx, budget)
-		if err != nil {
+	if err != nil {
+		ceiling := &match.Resources{Cores: l.Config.CPUCeiling, MemoryBytes: l.Config.MemoryCeiling}
+		if err := l.failCapacity(ctx, award, CloudCapacityObservation{Unconfigured: true, Ceiling: ceiling}); err != nil {
 			return err
 		}
+		// safety: an oversized request is the customer's choice, not a launcher fault, so it stays below WARN.
+		l.logger().Info("Cloud request exceeds the launcher resource ceilings; failed the award and refunded its hold", "team", award.Binding.Team, "requested_class", cpuClass(award.CPUCores), "requested_cpu", award.CPUCores, "available_cpu", l.Config.CPUCeiling, "requested_memory", award.Memory, "available_memory", l.Config.MemoryCeiling, "namespace", l.Config.Namespace, "support_reference", award.Binding.RunID)
+		return l.releaseCapacity(ctx, award.Binding)
+	}
+	configured, err := l.Boundary.CapacityConfigured(ctx, budget)
+	if err != nil {
+		return err
 	}
 	if !configured {
 		if err := l.failCapacity(ctx, award, CloudCapacityObservation{Unconfigured: true}); err != nil {
 			return err
 		}
-		l.logger().Error("Cloud capacity is not configured; configure the shared NodePool and launcher resource ceilings for the requested hardware class", "team", award.Binding.Team, "requested_class", cpuClass(award.CPUCores), "requested_cpu", award.CPUCores, "available_cpu", l.Config.CPUCeiling, "requested_memory", award.Memory, "available_memory", l.Config.MemoryCeiling, "namespace", l.Config.Namespace, "support_reference", award.Binding.RunID)
+		l.logger().Error("Cloud capacity is not configured; configure the shared NodePool for the requested hardware class", "team", award.Binding.Team, "requested_class", cpuClass(award.CPUCores), "namespace", l.Config.Namespace, "support_reference", award.Binding.RunID)
 		return l.releaseCapacity(ctx, award.Binding)
 	}
 	if l.breakerClosed(ctx) {

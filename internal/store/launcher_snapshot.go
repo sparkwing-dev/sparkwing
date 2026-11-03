@@ -96,7 +96,7 @@ func (o *Operator) ReconcileLauncherAwards(ctx context.Context, authority capabi
 		}
 		if reason != "" {
 			if err := owner.apply(ctx, host.Award, func() error {
-				return o.s.failLauncherAwards(ctx, authority, []capability.LeaseRef{host.Award}, reason)
+				return o.s.failLauncherAwards(ctx, authority, []capability.LeaseRef{host.Award}, reason, host.CapacityCeiling)
 			}); err != nil {
 				return nil, nil, err
 			}
