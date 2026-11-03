@@ -33,12 +33,12 @@ func gateFixtureRepo(t *testing.T) string {
 
 func TestGateReservesAndBoundsItsCPU(t *testing.T) {
 	plan := inspectPlan(t, func(plan *sparkwing.Plan) error {
-		return (&Gate{}).Plan(context.Background(), plan, sparkwing.NoInputs{}, sparkwing.RunContext{Pipeline: "gate"})
+		return (&Gate{}).Plan(context.Background(), plan, GateArgs{}, sparkwing.RunContext{Pipeline: "gate"})
 	})
 
 	nodes := plan.Jobs
-	if len(nodes) != 2 {
-		t.Fatalf("gate plan nodes = %d, want broad checks and touched-package race", len(nodes))
+	if len(nodes) != 3 {
+		t.Fatalf("gate plan nodes = %d, want broad checks, touched-package race and the tree record", len(nodes))
 	}
 	if got := time.Duration(nodes[0].TimeoutMS) * time.Millisecond; got != gateRunTimeout {
 		t.Fatalf("gate node timeout = %s, want declared workload deadline %s", got, gateRunTimeout)
@@ -71,7 +71,7 @@ func TestGateReservesAndBoundsItsCPU(t *testing.T) {
 
 func TestGateDeadlineAllowsTheHostedPostgresTail(t *testing.T) {
 	plan := inspectPlan(t, func(plan *sparkwing.Plan) error {
-		return (&Gate{}).Plan(t.Context(), plan, sparkwing.NoInputs{}, sparkwing.RunContext{Pipeline: "gate"})
+		return (&Gate{}).Plan(t.Context(), plan, GateArgs{}, sparkwing.RunContext{Pipeline: "gate"})
 	})
 	// safety: the hosted full-suite chain took 35m32s before Postgres could start.
 	const beforePostgres = 35*time.Minute + 32*time.Second
@@ -84,16 +84,19 @@ func TestGateDeadlineAllowsTheHostedPostgresTail(t *testing.T) {
 
 func TestGateKeepsRaceInAnIndependentRequiredJob(t *testing.T) {
 	plan := inspectPlan(t, func(plan *sparkwing.Plan) error {
-		return (&Gate{}).Plan(t.Context(), plan, sparkwing.NoInputs{}, sparkwing.RunContext{Pipeline: "gate"})
+		return (&Gate{}).Plan(t.Context(), plan, GateArgs{}, sparkwing.RunContext{Pipeline: "gate"})
 	})
-	if len(plan.Jobs) != 2 {
-		t.Fatalf("gate jobs = %d, want broad checks and race", len(plan.Jobs))
+	if len(plan.Jobs) != 3 {
+		t.Fatalf("gate jobs = %d, want broad checks, race and the tree record", len(plan.Jobs))
 	}
 	for i, want := range []string{"gate", "race-touched"} {
 		job := plan.Jobs[i]
-		if job.ID != want || len(job.Needs) != 0 || job.Optional {
-			t.Errorf("gate job = %+v, want independent required %s", job, want)
+		if job.ID != want || len(job.Needs) != 0 || job.Optional || len(job.Closures.SkipIf) != 1 {
+			t.Errorf("gate job = %+v, want independent required %s that skips a proven tree", job, want)
 		}
+	}
+	if record := plan.Jobs[2]; record.ID != "record-tree" || !slices.Equal(record.Needs, []string{"gate", "race-touched"}) || record.Optional {
+		t.Errorf("record job = %+v, want a required record-tree after both gate jobs", record)
 	}
 	if got := time.Duration(plan.Jobs[1].TimeoutMS) * time.Millisecond; got != raceTouchedStepTimeout {
 		t.Errorf("race job timeout = %s, want %s", got, raceTouchedStepTimeout)

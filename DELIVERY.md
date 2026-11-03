@@ -397,9 +397,18 @@ file. Other syntax and workflow checks remain active.
   separate 70-minute execution deadlines for broad checks and touched-package
   race tests. Each gets 71 minutes with the dispatcher's drain margin, inside
   its own 80-minute hosted job. Hosted CI selects them with `sparkwing run gate
-  --sw-only gate` and `sparkwing run gate --sw-only race-touched`. Each job
+  --sw-only gate -- --full` and `sparkwing run gate --sw-only race-touched`. Each job
   owns a separate four-core runner, so race tests share no cores with the full
-  Go or PostgreSQL suite. `sparkwing run gate` runs both jobs locally. The
+  Go or PostgreSQL suite. `sparkwing run gate` runs both jobs locally. Without
+  `--full` its test step runs the changed packages, their direct importers and
+  the tests marked `//sparkwing:critical` on the line above them; a change to a
+  `go.mod`, `go.sum` or `internal/store/schema.sql` runs its whole module. After
+  both jobs pass on a clean checkout, `record-tree` appends HEAD's tree, the
+  `.sparkwing` definition fingerprint, the mode, the engine version and the
+  runner to a git note under `refs/notes/sparkwing-gate`. Each gate job skips
+  itself, logging the run that proved it, when that tree already passed at that
+  engine, on any branch. A full pass proves an affected run, not the reverse.
+  Notes are local until `git push origin refs/notes/sparkwing-gate`. The
   existing required `Canonical / gate` check succeeds only after the broad,
   race and pre-release matrix jobs all succeed. A skipped, cancelled or failed
   matrix cannot pass that check. Pre-release declares a

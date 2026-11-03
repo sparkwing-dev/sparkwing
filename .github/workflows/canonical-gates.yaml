@@ -174,10 +174,12 @@ jobs:
           RELEASE_TAG: ${{ inputs.release_tag }}
         run: |
           gate_selection=()
+          gate_args=()
           if [ -z "$SOURCE_REF" ] && [ -z "$RELEASE_TAG" ]; then
             gate_selection=(--sw-only gate)
+            gate_args=(-- --full)
           fi
-          "$RUNNER_TEMP/sparkwing" run gate "${gate_selection[@]}" --sw-run-handle-file "$RUNNER_TEMP/canonical-run.json"
+          "$RUNNER_TEMP/sparkwing" run gate "${gate_selection[@]}" --sw-run-handle-file "$RUNNER_TEMP/canonical-run.json" "${gate_args[@]}"
           if [ "$RELEASE_TAG" = v0.37.2 ]; then
             git apply --unidiff-zero --reverse --check "$RUNNER_TEMP/v0.37.2-test-oracle.patch"
             git apply --unidiff-zero --reverse "$RUNNER_TEMP/v0.37.2-test-oracle.patch"

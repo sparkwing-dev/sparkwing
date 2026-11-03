@@ -53,7 +53,7 @@ func TestPrePushAdmitsAheadOfTheBroadGate(t *testing.T) {
 		return (&PrePush{}).Plan(t.Context(), prepush, sparkwing.NoInputs{}, sparkwing.RunContext{Pipeline: "pre-push"})
 	})
 	gate := inspectPlan(t, func(gate *sparkwing.Plan) error {
-		return (&Gate{}).Plan(t.Context(), gate, sparkwing.NoInputs{}, sparkwing.RunContext{Pipeline: "gate"})
+		return (&Gate{}).Plan(t.Context(), gate, GateArgs{}, sparkwing.RunContext{Pipeline: "gate"})
 	})
 	if prepush.Priority <= gate.Priority {
 		t.Fatalf("pre-push priority %d, gate priority %d: a tier a human waits on, queued behind a ten-minute one, is not a fast tier",
