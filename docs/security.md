@@ -67,7 +67,10 @@ is removed. Remote environment values still use their separate twelve-byte
 registration threshold. Plain submitted config is preserved when it is too short
 to register a mask. Planning output waits until declarations are known.
 Failed discovery withholds output. A healthy selected pipeline can still plan
-when a sibling fails discovery, with planning output withheld. Private
+when a sibling fails discovery, with planning output withheld. The withheld
+notice names how many pipelines failed and their error codes, never their names,
+and gives the isolated-home retry when that refusal is the only failure. A
+missing risk allowance is still named with its labels. Private
 declarations drive lookup, flag parsing and routing. Help, display and the
 describe cache use a separate presentation type. Incomplete discovery withholds
 all unclassified presentation text, including names and job IDs. Help reports the

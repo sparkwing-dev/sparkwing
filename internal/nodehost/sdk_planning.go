@@ -101,6 +101,7 @@ func (p SDKPlanner) prepare(ctx context.Context, input PlanningProcessInput, pla
 		var complete bool
 		prepared, complete, err = p.describe(raw, input, declarationsOnly)
 		if !complete {
+			logs.explain(prepared.Declarations.IncompleteReason())
 			return err
 		}
 		return errors.Join(err, logs.release(ctx))

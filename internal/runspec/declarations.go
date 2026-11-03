@@ -66,6 +66,39 @@ func NewDeclarationGate(doc nodeproto.DescribeDoc, masker *secrets.Masker) (*Dec
 
 func (g *DeclarationGate) Complete() bool { return g != nil && g.complete }
 
+// IncompleteReason explains, from host-classified codes only, why discovery is
+// incomplete and what makes withheld output visible. It is empty when complete.
+func (g *DeclarationGate) IncompleteReason() string {
+	if g == nil || g.complete {
+		return ""
+	}
+	var codes []string
+	failed := 0
+	for _, pipeline := range g.doc.Pipelines {
+		if pipeline.Error == nil {
+			continue
+		}
+		failed++
+		code := apierr.SDKError
+		if slices.ContainsFunc(apierr.Codes, func(definition apierr.Definition) bool { return definition.Code == pipeline.Error.Code }) {
+			code = pipeline.Error.Code
+		}
+		if !slices.Contains(codes, string(code)) {
+			codes = append(codes, string(code))
+		}
+	}
+	slices.Sort(codes)
+	noun, pronoun := "pipelines", "their"
+	if failed == 1 {
+		noun, pronoun = "pipeline", "its"
+	}
+	reason := fmt.Sprintf("%d registered %s failed discovery (%s), so %s secret declarations are unknown", failed, noun, strings.Join(codes, ", "), pronoun)
+	if len(codes) == 1 && codes[0] == string(apierr.IsolatedHomeRequired) {
+		return reason + `; to see this output, retry with HOME="$(mktemp -d)" SPARKWING_HOME="$(mktemp -d)" before the sparkwing command`
+	}
+	return reason + "; this output and " + pronoun + " errors stay hidden until every registered pipeline plans without error"
+}
+
 func (g *DeclarationGate) Resolve(name string, args map[string]string, secretArgs []string) (DeclaredArguments, error) {
 	return g.resolve(name, args, secretArgs, false)
 }
