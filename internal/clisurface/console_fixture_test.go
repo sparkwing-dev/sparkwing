@@ -1,11 +1,11 @@
 package clisurface
 
 import (
-	"bytes"
 	"encoding/json"
 	"flag"
 	"os"
 	"path/filepath"
+	"reflect"
 	"testing"
 )
 
@@ -47,7 +47,11 @@ func TestConsoleCommandFlagsFixture(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !bytes.Equal(got, want) {
+	var recorded map[string][]string
+	if err := json.Unmarshal(got, &recorded); err != nil {
+		t.Fatalf("%s: %v", path, err)
+	}
+	if !reflect.DeepEqual(recorded, inventory) {
 		t.Errorf("%s differs from the CLI registry; rerun with -update-console-commands and check the console commands", path)
 	}
 }
