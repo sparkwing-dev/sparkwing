@@ -2,11 +2,13 @@ package jobs
 
 import (
 	"context"
+	"encoding/json"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/sparkwingtest"
 )
 
 func treeGateRepo(t *testing.T) string {
@@ -16,99 +18,118 @@ func treeGateRepo(t *testing.T) string {
 	t.Setenv("SPARKWING_ENGINE_VERSION", "v0.0.1")
 	t.Setenv("SPARKWING_COMMIT", "")
 	t.Setenv("SPARKWING_RUNNER_NAME", "workstation")
-	t.Setenv("SPARKWING_RUN_ID", "run-1")
-	t.Setenv("GIT_AUTHOR_NAME", "gate")
-	t.Setenv("GIT_AUTHOR_EMAIL", "gate@example.com")
-	t.Setenv("GIT_COMMITTER_NAME", "gate")
-	t.Setenv("GIT_COMMITTER_EMAIL", "gate@example.com")
 	return root
 }
 
-func TestATreeThatPassedSkipsOnEveryBranchUntilItChanges(t *testing.T) {
+func TestRecordTreeOutputsAPassOnlyForACleanUnmovedCheckout(t *testing.T) {
 	root := treeGateRepo(t)
 	ctx := context.Background()
-	if pass, reason := provenPass(ctx, gateAffected); pass != nil || !strings.Contains(reason, "no recorded") {
-		t.Fatalf("fresh tree proven = %+v (%s), want a miss", pass, reason)
+	pass, err := recordTreePass(ctx, gateAffected)
+	if err != nil || !pass.Recorded || pass.Tree == "" || pass.Runner != "workstation" || pass.Mode != gateAffected {
+		t.Fatalf("clean checkout pass = %+v, %v", pass, err)
 	}
-	if err := recordTreePass(gateAffected)(ctx); err != nil {
-		t.Fatal(err)
-	}
-	pass, reason := provenPass(ctx, gateAffected)
-	if pass == nil {
-		t.Fatalf("recorded tree not proven: %s", reason)
-	}
-	if pass.Runner != "workstation" || pass.RunID != "run-1" || pass.Commit == "" {
-		t.Fatalf("record = %+v, want the runner, run and commit that proved it", pass)
-	}
-	if !skipWhenTreePassed(gateAffected)(ctx) {
-		t.Fatal("a proven tree did not skip its gate job")
+	key, err := currentGateKey(ctx)
+	if err != nil || key != pass.gateKey {
+		t.Fatalf("recorded key %+v, current key %+v (%v)", pass.gateKey, key, err)
 	}
 
-	runTestGit(t, root, "checkout", "-q", "-b", "elsewhere")
-	runTestGit(t, root, "-c", "commit.gpgsign=false", "commit", "-q", "--allow-empty", "-m", "same tree, new commit")
-	if pass, reason := provenPass(ctx, gateAffected); pass == nil {
-		t.Fatalf("a commit with the same tree on another branch lost the pass: %s", reason)
-	}
-
-	writeGoFile(t, filepath.Join(root, "internal", "sound.go"), "package internal\n\nfunc Sound() int { return 2 }\n")
-	if pass, reason := provenPass(ctx, gateAffected); pass != nil || !strings.Contains(reason, "uncommitted") {
-		t.Fatalf("dirty checkout proven = %+v (%s), want no key", pass, reason)
-	}
-	gitCommitAll(t, root, "new tree")
-	if pass, _ := provenPass(ctx, gateAffected); pass != nil {
-		t.Fatal("a changed tree inherited the old tree's pass")
-	}
-}
-
-func TestAPassBindsTheEngineTheGateDefinitionAndTheMode(t *testing.T) {
-	root := treeGateRepo(t)
-	ctx := context.Background()
-	if err := recordTreePass(gateAffected)(ctx); err != nil {
-		t.Fatal(err)
-	}
-	if pass, _ := provenPass(ctx, gateFull); pass != nil {
-		t.Fatal("an affected-test pass proved a full gate")
-	}
-	t.Setenv("SPARKWING_ENGINE_VERSION", "v0.0.2")
-	if pass, reason := provenPass(ctx, gateAffected); pass != nil || !strings.Contains(reason, "none for gate") {
-		t.Fatalf("another engine proven = %+v (%s), want a miss", pass, reason)
-	}
-	if err := recordTreePass(gateFull)(ctx); err != nil {
-		t.Fatal(err)
-	}
-	if pass, _ := provenPass(ctx, gateAffected); pass == nil || pass.Mode != gateFull {
-		t.Fatalf("a full pass did not prove the affected gate: %+v", pass)
-	}
-
-	before, err := currentGateKey(ctx)
-	if err != nil {
-		t.Fatal(err)
-	}
-	writeGoFile(t, filepath.Join(root, ".sparkwing", "jobs.go"), "package pipelines\n\nfunc Jobs() int { return 2 }\n")
-	gitCommitAll(t, root, "change the gate")
-	after, err := currentGateKey(ctx)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if before.Fingerprint == after.Fingerprint {
-		t.Fatal("changing the pipeline module kept the gate fingerprint")
-	}
-}
-
-func TestNothingIsRecordedForAnUnknownEngineOrAMovedHead(t *testing.T) {
-	treeGateRepo(t)
-	ctx := context.Background()
 	t.Setenv("SPARKWING_COMMIT", strings.Repeat("0", 40))
-	if err := recordTreePass(gateAffected)(ctx); err != nil {
-		t.Fatal(err)
+	if pass, err := recordTreePass(ctx, gateAffected); err != nil || pass.Recorded || !strings.Contains(pass.Reason, "moved") {
+		t.Fatalf("moved HEAD pass = %+v, %v", pass, err)
 	}
+	t.Setenv("SPARKWING_COMMIT", "")
+	writeGoFile(t, filepath.Join(root, "internal", "sound.go"), "package internal\n\nfunc Sound() int { return 2 }\n")
+	if pass, err := recordTreePass(ctx, gateAffected); err != nil || pass.Recorded || !strings.Contains(pass.Reason, "uncommitted") {
+		t.Fatalf("dirty checkout pass = %+v, %v", pass, err)
+	}
+	gitCommitAll(t, root, "dirty work committed")
 	t.Setenv("SPARKWING_ENGINE_VERSION", "")
-	if err := recordTreePass(gateAffected)(ctx); err != nil {
+	if pass, err := recordTreePass(ctx, gateAffected); err != nil || pass.Recorded {
+		t.Fatalf("unknown engine pass = %+v, %v", pass, err)
+	}
+}
+
+func TestAPassProvesOnlyItsTreeGateEngineAndMode(t *testing.T) {
+	key := gateKey{Tree: "tree", Fingerprint: "gate", Engine: "v1"}
+	pass := gatePass{gateKey: key, Recorded: true, Mode: gateAffected}
+	if ok, why := passProves(pass, key, gateAffected); !ok {
+		t.Fatalf("matching pass refused: %s", why)
+	}
+	for name, mutate := range map[string]func(*gatePass){
+		"unrecorded":     func(p *gatePass) { p.Recorded = false },
+		"another tree":   func(p *gatePass) { p.Tree = "other" },
+		"another gate":   func(p *gatePass) { p.Fingerprint = "other" },
+		"another engine": func(p *gatePass) { p.Engine = "v2" },
+	} {
+		changed := pass
+		mutate(&changed)
+		if ok, _ := passProves(changed, key, gateAffected); ok {
+			t.Errorf("%s: proved the tree", name)
+		}
+	}
+	if ok, _ := passProves(pass, key, gateFull); ok {
+		t.Error("an affected pass proved a full gate")
+	}
+	full := pass
+	full.Mode = gateFull
+	if ok, _ := passProves(full, key, gateAffected); !ok {
+		t.Error("a full pass did not prove the affected gate")
+	}
+}
+
+func TestTheGateSkipsOnlyWhenTheTrustedLookupReturnsAMatchingPass(t *testing.T) {
+	treeGateRepo(t)
+	key, err := currentGateKey(context.Background())
+	if err != nil {
 		t.Fatal(err)
 	}
-	t.Setenv("SPARKWING_ENGINE_VERSION", "v0.0.1")
-	if pass, _ := provenPass(ctx, gateAffected); pass != nil {
-		t.Fatalf("recorded a pass for a run whose HEAD moved or whose engine was unknown: %+v", pass)
+	for name, tc := range map[string]struct {
+		latest func(context.Context, string, string) (json.RawMessage, error)
+		skip   bool
+	}{
+		"matching pass": {latest: passFor(gatePass{gateKey: key, Recorded: true, Mode: gateAffected}), skip: true},
+		"another tree":  {latest: passFor(gatePass{gateKey: gateKey{Tree: "other", Fingerprint: key.Fingerprint, Engine: key.Engine}, Recorded: true, Mode: gateAffected})},
+		"no trusted run": {latest: func(context.Context, string, string) (json.RawMessage, error) {
+			return nil, sparkwing.ErrRefAbsent
+		}},
+		"lookup refused": {latest: func(context.Context, string, string) (json.RawMessage, error) {
+			return nil, context.DeadlineExceeded
+		}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			var asked []string
+			latest := tc.latest
+			host := newTestHost(t, sparkwingtest.Options{Latest: func(ctx context.Context, pipeline, job string) (json.RawMessage, error) {
+				asked = append(asked, pipeline+"/"+job)
+				return latest(ctx, pipeline, job)
+			}})
+			ctx := host.Context(t.Context())
+			if got := skipWhenTreePassed(gateAffected, provenGatePass("gate"))(ctx); got != tc.skip {
+				t.Fatalf("skip = %v, want %v", got, tc.skip)
+			}
+			if len(asked) != 1 || asked[0] != "gate/"+recordTreeJob {
+				t.Fatalf("lookups = %v, want gate/%s", asked, recordTreeJob)
+			}
+		})
+	}
+}
+
+func passFor(pass gatePass) func(context.Context, string, string) (json.RawMessage, error) {
+	return func(context.Context, string, string) (json.RawMessage, error) { return json.Marshal(pass) }
+}
+
+func TestEveryGateJobDeclaresTheTrustedLookup(t *testing.T) {
+	plan := inspectPlan(t, func(plan *sparkwing.Plan) error {
+		return (&Gate{}).Plan(t.Context(), plan, GateArgs{}, sparkwing.RunContext{Pipeline: "gate"})
+	})
+	for _, job := range plan.Jobs {
+		if len(job.References) != 1 {
+			t.Fatalf("%s references = %+v, want the trusted gate lookup", job.ID, job.References)
+		}
+		ref := job.References[0]
+		if ref.Pipeline != "gate" || ref.Job != recordTreeJob || !ref.FromTrustedRun || ref.FromAnyRun {
+			t.Errorf("%s reference = %+v, want a trusted-only read of gate/%s", job.ID, ref, recordTreeJob)
+		}
 	}
 }
 
@@ -124,5 +145,23 @@ func TestGateModeFollowsTheFullFlag(t *testing.T) {
 		if g.mode != tc.want {
 			t.Errorf("Plan(%+v) mode = %q, want %q", tc.in, g.mode, tc.want)
 		}
+	}
+}
+
+func TestChangingThePipelineModuleChangesTheFingerprint(t *testing.T) {
+	root := treeGateRepo(t)
+	ctx := context.Background()
+	before, err := currentGateKey(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeGoFile(t, filepath.Join(root, ".sparkwing", "jobs.go"), "package pipelines\n\nfunc Jobs() int { return 2 }\n")
+	gitCommitAll(t, root, "change the gate")
+	after, err := currentGateKey(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if before.Fingerprint == after.Fingerprint {
+		t.Fatal("changing the pipeline module kept the gate fingerprint")
 	}
 }

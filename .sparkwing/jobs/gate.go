@@ -21,7 +21,19 @@ import (
 
 type Gate struct {
 	sparkwing.Base
-	mode gateMode
+	Proven sparkwing.Ref[gatePass]
+	mode   gateMode
+}
+
+// safety: a struct job, because only a reference held in a job field is
+// declared in the plan, and the skip predicate reads one.
+type raceTouchedJob struct {
+	sparkwing.Base
+	Proven sparkwing.Ref[gatePass]
+}
+
+func (j *raceTouchedJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
+	return sparkwing.Step(w, "run", runGateRaceTouched), nil
 }
 
 type GateArgs struct {
@@ -37,7 +49,7 @@ func (Gate) ShortHelp() string {
 }
 
 func (Gate) Help() string {
-	return "Runs gofmt over the tree and go vet / go build / golangci-lint in every committed Go module (today the repo root and .sparkwing/), runs go test on the packages the change touches (staged, or changed since origin/main) and every test tagged //sparkwing:critical, or on every package with -- --full, which hosted CI passes, runs go test -race on the packages that hold the staged Go files (or the Go files changed since origin/main when nothing is staged, with all tracked files judged if that baseline is unavailable) apart from internal/store, which cannot finish inside the step's budget and races in pre-release instead, runs the internal/store suite against an embedded Postgres when that change touches internal/store, runs the dashboard's TypeScript unit, full ESLint, production-build, and Playwright browser-smoke suites, plus the configured formatters (gofumpt + goimports), no em dashes, and no internal tracker IDs (IMP-/SDK-/LOCAL-/RUN-/ORG-/REG-/TOD- uppercase, BW- in either case) over the staged files, or over the files changed since origin/main when nothing is staged, and no disallowed comments (only GoDoc on exported APIs and // hack:/safety:/bug:/perf: tags) in the staged change, or in the change since origin/main plus every untracked Go file when nothing is staged, and no test that sleeps or waits on the wall clock over that same scope, and repo-wide, that the embedded pkg/docs/ copies match the docs/ and CHANGELOG.md sources (via `bin/sync-docs.sh --check`; run bin/sync-docs.sh without the flag if it drifted) and that no product file resolves the sparkwing home itself, by reading SPARKWING_HOME or by joining a home directory with .sparkwing, instead of through internal/paths.DefaultPaths. The formatters, comment, em-dash, and tracker-ID steps name the mode they ran in, and the lint step names the modules it covered and the baseline it judged against. It also requires a CHANGELOG.md entry for every covered surface the change touches (bin/check-changelog.sh), api/openapi.yaml agreeing with the controller's route table (bin/check-api-spec.sh), and the public API surface matching the .apidiff/ snapshot (bin/check-api-snapshot.sh). Set SPARKWING_REGEX_SWEEP_ALL=1 to sweep the whole tree for em dashes and tracker IDs. No git hook runs this pipeline: `sparkwing run gate` runs it on demand and hosted CI runs it on every pull request and every push to main. The two hook tiers are the far cheaper subsets pre-commit and pre-push. A clean run that passes records HEAD's tree, the gate definition and the engine version as a git note under refs/notes/sparkwing-gate, and every job then skips itself on any commit with that tree, saying which run proved it; push that ref to share the record."
+	return "Runs gofmt over the tree and go vet / go build / golangci-lint in every committed Go module (today the repo root and .sparkwing/), runs go test on the packages the change touches (staged, or changed since origin/main) and every test tagged //sparkwing:critical, or on every package with -- --full, which hosted CI passes, runs go test -race on the packages that hold the staged Go files (or the Go files changed since origin/main when nothing is staged, with all tracked files judged if that baseline is unavailable) apart from internal/store, which cannot finish inside the step's budget and races in pre-release instead, runs the internal/store suite against an embedded Postgres when that change touches internal/store, runs the dashboard's TypeScript unit, full ESLint, production-build, and Playwright browser-smoke suites, plus the configured formatters (gofumpt + goimports), no em dashes, and no internal tracker IDs (IMP-/SDK-/LOCAL-/RUN-/ORG-/REG-/TOD- uppercase, BW- in either case) over the staged files, or over the files changed since origin/main when nothing is staged, and no disallowed comments (only GoDoc on exported APIs and // hack:/safety:/bug:/perf: tags) in the staged change, or in the change since origin/main plus every untracked Go file when nothing is staged, and no test that sleeps or waits on the wall clock over that same scope, and repo-wide, that the embedded pkg/docs/ copies match the docs/ and CHANGELOG.md sources (via `bin/sync-docs.sh --check`; run bin/sync-docs.sh without the flag if it drifted) and that no product file resolves the sparkwing home itself, by reading SPARKWING_HOME or by joining a home directory with .sparkwing, instead of through internal/paths.DefaultPaths. The formatters, comment, em-dash, and tracker-ID steps name the mode they ran in, and the lint step names the modules it covered and the baseline it judged against. It also requires a CHANGELOG.md entry for every covered surface the change touches (bin/check-changelog.sh), api/openapi.yaml agreeing with the controller's route table (bin/check-api-spec.sh), and the public API surface matching the .apidiff/ snapshot (bin/check-api-snapshot.sh). Set SPARKWING_REGEX_SWEEP_ALL=1 to sweep the whole tree for em dashes and tracker IDs. No git hook runs this pipeline: `sparkwing run gate` runs it on demand and hosted CI runs it on every pull request and every push to main. The two hook tiers are the far cheaper subsets pre-commit and pre-push. A clean run that passes outputs HEAD's tree, the gate definition fingerprint and the engine version from its record-tree job. A later run at the same commit, on any branch, skips every job when the controller finds such a pass from a run proven for this repository or published by a runner the operator trusts for it (--trusted-gate-runners), and says which runner proved it."
 }
 
 func (Gate) Examples() []sparkwing.Example {
@@ -52,10 +64,12 @@ func (p *Gate) Plan(_ context.Context, plan *sparkwing.Plan, in GateArgs, rc spa
 	if in.Full {
 		p.mode = gateFull
 	}
-	proven := skipWhenTreePassed(p.mode)
+	ref := provenGatePass(rc.Pipeline)
+	p.Proven = ref
+	proven := skipWhenTreePassed(p.mode, ref)
 	broad := sparkwing.Job(plan, rc.Pipeline, p).Timeout(gateRunTimeout).Cache(lintCache()).SkipIf(proven)
-	race := sparkwing.Job(plan, "race-touched", runGateRaceTouched).Timeout(raceTouchedStepTimeout).SkipIf(proven)
-	sparkwing.Job(plan, "record-tree", recordTreePass(p.mode)).Needs(broad, race).SkipIf(proven)
+	race := sparkwing.Job(plan, "race-touched", &raceTouchedJob{Proven: ref}).Timeout(raceTouchedStepTimeout).SkipIf(proven)
+	sparkwing.Job(plan, recordTreeJob, &recordTree{Proven: ref, mode: p.mode}).Needs(broad, race).SkipIf(proven)
 	return nil
 }
 

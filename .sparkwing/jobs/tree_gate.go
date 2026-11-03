@@ -4,23 +4,19 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
 	"strings"
-	"time"
 
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
-// safety: a note travels with the repository rather than with a branch or a
-// cache scope, so a pass recorded on an agent's branch is visible to main's
-// run on the same machine, and anywhere else this ref is fetched.
-const gateNotesRef = "refs/notes/sparkwing-gate"
+// safety: bump when the record's meaning changes, so older passes stop matching.
+const gateRecordFormat = "gate-record-v2"
 
-// safety: bump when the record's meaning changes, so older notes stop matching.
-const gateRecordFormat = "gate-record-v1"
+// safety: the job whose output records a pass; the trusted reference reads it by this id.
+const recordTreeJob = "record-tree"
 
 type gateMode string
 
@@ -41,16 +37,23 @@ type gateKey struct {
 	Engine      string `json:"engine"`
 }
 
-type gateRecord struct {
+// safety: Runner and Host are what the producing run reported. The controller
+// decides whose passes count: a proven run of this repository, or one an
+// operator-trusted runner published.
+type gatePass struct {
 	gateKey
-	Mode       gateMode  `json:"mode"`
-	Commit     string    `json:"commit"`
-	Branch     string    `json:"branch,omitempty"`
-	Runner     string    `json:"runner,omitempty"`
-	RunnerType string    `json:"runner_type,omitempty"`
-	Host       string    `json:"host,omitempty"`
-	RunID      string    `json:"run_id,omitempty"`
-	RecordedAt time.Time `json:"recorded_at"`
+	Recorded bool     `json:"recorded"`
+	Reason   string   `json:"reason,omitempty"`
+	Mode     gateMode `json:"mode,omitempty"`
+	Commit   string   `json:"commit,omitempty"`
+	Runner   string   `json:"runner,omitempty"`
+	Host     string   `json:"host,omitempty"`
+}
+
+// safety: the controller answers only with a run at this run's own commit, in
+// its repository, that was proven or published by an operator-trusted runner.
+func provenGatePass(pipeline string) sparkwing.Ref[gatePass] {
+	return sparkwing.RefToLastRun[gatePass](pipeline, recordTreeJob, sparkwing.FromTrustedRun())
 }
 
 // safety: a checkout without a key can neither skip a gate nor record a pass.
@@ -100,116 +103,100 @@ func gitRevParse(ctx context.Context, rev string) (string, error) {
 	return out, nil
 }
 
-func readGateRecords(ctx context.Context, tree string) ([]gateRecord, error) {
-	res, err := sparkwing.Bash(ctx, "git notes --ref="+gateNotesRef+" show "+tree+" 2>/dev/null || true").Capture()
-	if err != nil {
-		return nil, fmt.Errorf("read gate notes for tree %s: %w", tree, err)
-	}
-	var records []gateRecord
-	for _, line := range strings.Split(res.Stdout, "\n") {
-		line = strings.TrimSpace(line)
-		if line == "" {
-			continue
+// safety: a lookup the controller refuses or cannot answer runs the gate.
+func readGatePass(ctx context.Context, ref sparkwing.Ref[gatePass]) (pass gatePass, found bool, why string) {
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			pass, found, why = gatePass{}, false, fmt.Sprintf("the trusted gate lookup failed: %v", recovered)
 		}
-		var r gateRecord
-		// safety: a line that does not parse proves nothing, so it is a miss.
-		if json.Unmarshal([]byte(line), &r) == nil {
-			records = append(records, r)
-		}
+	}()
+	pass, found = ref.TryGet(ctx)
+	if !found {
+		return pass, false, "no proven or trusted-runner gate run exists at this commit"
 	}
-	return records, nil
+	return pass, true, ""
 }
 
-func matchingPass(records []gateRecord, key gateKey, mode gateMode) *gateRecord {
-	for i := len(records) - 1; i >= 0; i-- {
-		if records[i].gateKey == key && records[i].Mode.covers(mode) {
-			return &records[i]
-		}
+func passProves(pass gatePass, key gateKey, mode gateMode) (bool, string) {
+	switch {
+	case !pass.Recorded:
+		return false, "the gate run at this commit recorded no pass: " + pass.Reason
+	case pass.Tree != key.Tree:
+		return false, fmt.Sprintf("that pass judged tree %s, not %s", short(pass.Tree), short(key.Tree))
+	case pass.Fingerprint != key.Fingerprint:
+		return false, fmt.Sprintf("that pass ran gate %s, not %s", pass.Fingerprint, key.Fingerprint)
+	case pass.Engine != key.Engine:
+		return false, fmt.Sprintf("that pass ran at engine %s, not %s", pass.Engine, key.Engine)
+	case !pass.Mode.covers(mode):
+		return false, fmt.Sprintf("that pass ran in %s mode, which does not prove %s", pass.Mode, mode)
 	}
-	return nil
+	return true, ""
 }
 
-func provenPass(ctx context.Context, mode gateMode) (*gateRecord, string) {
-	key, err := currentGateKey(ctx)
-	if err != nil {
-		return nil, err.Error()
-	}
-	records, err := readGateRecords(ctx, key.Tree)
-	if err != nil {
-		return nil, err.Error()
-	}
-	if pass := matchingPass(records, key, mode); pass != nil {
-		return pass, ""
-	}
-	if len(records) == 0 {
-		return nil, fmt.Sprintf("tree %s has no recorded %s gate pass", short(key.Tree), mode)
-	}
-	return nil, fmt.Sprintf("tree %s has %d recorded pass(es), none for gate %s at engine %s in %s mode",
-		short(key.Tree), len(records), key.Fingerprint, key.Engine, mode)
-}
-
-// safety: the skip names the run that proved the tree, so a pass from an unexpected machine is visible.
-func skipWhenTreePassed(mode gateMode) sparkwing.SkipPredicate {
+// safety: the skip names the runner and host that proved the tree, so a pass from an unexpected machine is visible.
+func skipWhenTreePassed(mode gateMode, ref sparkwing.Ref[gatePass]) sparkwing.SkipPredicate {
 	return func(ctx context.Context) bool {
-		pass, reason := provenPass(ctx, mode)
-		if pass == nil {
-			sparkwing.Info(ctx, "tree-gate: running: %s", reason)
+		key, err := currentGateKey(ctx)
+		if err != nil {
+			sparkwing.Info(ctx, "tree-gate: running: %v", err)
 			return false
 		}
-		sparkwing.Info(ctx, "tree-gate: skipping: tree %s passed gate %s at engine %s in %s mode on runner %s (host %s, run %s, commit %s, %s)",
-			short(pass.Tree), pass.Fingerprint, pass.Engine, pass.Mode, pass.Runner, pass.Host, pass.RunID, short(pass.Commit),
-			pass.RecordedAt.Format(time.RFC3339))
-		return true
+		pass, found, why := readGatePass(ctx, ref)
+		if found {
+			var proves bool
+			proves, why = passProves(pass, key, mode)
+			if proves {
+				sparkwing.Info(ctx, "tree-gate: skipping: tree %s passed gate %s at engine %s in %s mode on runner %s (host %s, commit %s)",
+					short(pass.Tree), pass.Fingerprint, pass.Engine, pass.Mode, pass.Runner, pass.Host, short(pass.Commit))
+				return true
+			}
+		}
+		sparkwing.Info(ctx, "tree-gate: running: %s", why)
+		return false
 	}
 }
 
-// safety: a checkout that moved during the run records nothing, because the
+type recordTree struct {
+	sparkwing.Base
+	sparkwing.Produces[gatePass]
+	Proven sparkwing.Ref[gatePass]
+	mode   gateMode
+}
+
+func (r *recordTree) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
+	return sparkwing.Step(w, "run", func(ctx context.Context) (gatePass, error) { return recordTreePass(ctx, r.mode) }), nil
+}
+
+// safety: a checkout that moved during the run records no pass, because the
 // tree it ended on is not the tree the jobs judged.
-func recordTreePass(mode gateMode) func(context.Context) error {
-	return func(ctx context.Context) error {
-		key, err := currentGateKey(ctx)
-		var noKey errNoGateKey
-		if errors.As(err, &noKey) {
-			sparkwing.Info(ctx, "tree-gate: recording nothing: %s", noKey.reason)
-			return nil
-		}
-		if err != nil {
-			return err
-		}
-		commit, err := gitRevParse(ctx, "HEAD")
-		if err != nil {
-			return err
-		}
-		if started := os.Getenv("SPARKWING_COMMIT"); started != "" && started != commit {
-			sparkwing.Info(ctx, "tree-gate: recording nothing: HEAD moved from %s to %s during the run", short(started), short(commit))
-			return nil
-		}
-		host, err := os.Hostname()
-		if err != nil {
-			host = "unknown: " + err.Error()
-		}
-		record := gateRecord{
-			gateKey:    key,
-			Mode:       mode,
-			Commit:     commit,
-			Branch:     os.Getenv("SPARKWING_BRANCH"),
-			Runner:     os.Getenv("SPARKWING_RUNNER_NAME"),
-			RunnerType: os.Getenv("SPARKWING_RUNNER_TYPE"),
-			Host:       host,
-			RunID:      os.Getenv("SPARKWING_RUN_ID"),
-			RecordedAt: time.Now().UTC(),
-		}
-		line, err := json.Marshal(record)
-		if err != nil {
-			return err
-		}
-		if _, err := sparkwing.Bash(ctx, "git notes --ref="+gateNotesRef+" append -m "+shellQuote(string(line))+" "+key.Tree).Run(); err != nil {
-			return fmt.Errorf("record the gate pass for tree %s: %w", short(key.Tree), err)
-		}
-		sparkwing.Info(ctx, "tree-gate: recorded tree %s passing gate %s at engine %s in %s mode; publish with `git push origin %s`",
-			short(key.Tree), key.Fingerprint, key.Engine, mode, gateNotesRef)
-		return nil
+func recordTreePass(ctx context.Context, mode gateMode) (gatePass, error) {
+	key, err := currentGateKey(ctx)
+	var noKey errNoGateKey
+	if errors.As(err, &noKey) {
+		sparkwing.Info(ctx, "tree-gate: recording no pass: %s", noKey.reason)
+		return gatePass{Reason: noKey.reason}, nil
 	}
+	if err != nil {
+		return gatePass{}, err
+	}
+	commit, err := gitRevParse(ctx, "HEAD")
+	if err != nil {
+		return gatePass{}, err
+	}
+	if started := os.Getenv("SPARKWING_COMMIT"); started != "" && started != commit {
+		reason := fmt.Sprintf("HEAD moved from %s to %s during the run", short(started), short(commit))
+		sparkwing.Info(ctx, "tree-gate: recording no pass: %s", reason)
+		return gatePass{Reason: reason}, nil
+	}
+	host, err := os.Hostname()
+	if err != nil {
+		host = "unknown: " + err.Error()
+	}
+	pass := gatePass{gateKey: key, Recorded: true, Mode: mode, Commit: commit, Runner: os.Getenv("SPARKWING_RUNNER_NAME"), Host: host}
+	sparkwing.Info(ctx, "tree-gate: recorded tree %s passing gate %s at engine %s in %s mode; it lets another run at commit %s skip "+
+		"only when this run was proven for its repository or an operator-trusted runner published it",
+		short(key.Tree), key.Fingerprint, key.Engine, mode, short(commit))
+	return pass, nil
 }
 
 func short(sha string) string {
