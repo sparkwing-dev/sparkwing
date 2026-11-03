@@ -520,6 +520,15 @@ func TestLocalPreparationRiskRefusalPrecedesIntake(t *testing.T) {
 	if err != nil || !reflect.DeepEqual(request.Request.Options.AllowRisk.Value, []string{"prod"}) {
 		t.Fatalf("risk authorization did not seal: %+v %v", request.Request.Options.AllowRisk, err)
 	}
+	if _, err := prepareLocalRunRequest(t.Context(), input, runFlags{only: "build"}, []string{"--password", "private-value"}); err != nil {
+		t.Fatalf("narrowed run was refused before plan acceptance knew its selection: %v", err)
+	}
+	broken := append(doc.Pipelines, nodeproto.PipelineDescription{Name: "broken", Error: &apierr.Error{Code: apierr.SDKError, Message: "undiscovered"}})
+	input.declarations = declarationFixture(t, broken)
+	_, err = prepareLocalRunRequest(t.Context(), input, runFlags{}, []string{"--password", "private-value"})
+	if err == nil || !strings.Contains(err.Error(), "requires --sw-allow-risk prod") || strings.Contains(err.Error(), "withheld") {
+		t.Fatalf("incomplete discovery hid the risk refusal: %v", err)
+	}
 }
 
 func TestLocalReceiptAndPrivateRunHandleSurviveCancellationAfterIntake(t *testing.T) {

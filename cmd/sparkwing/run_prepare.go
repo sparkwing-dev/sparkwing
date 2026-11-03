@@ -98,8 +98,8 @@ func prepareLocalRunRequest(ctx context.Context, input localRunPreparation, flag
 	if err != nil {
 		return controllerwire.CreateRunRequest{}, err
 	}
-	if err := enforceRiskGate(input.identity.Name, risksIn(schema), runFlags{allow: options.AllowRisk.Value, dryRun: options.DryRun.Value}); err != nil {
-		return controllerwire.CreateRunRequest{}, input.declarations.Error(err)
+	if err := enforceRiskGate(input.identity.Name, risksIn(schema), riskFlags(options)); err != nil {
+		return controllerwire.CreateRunRequest{}, riskRefusal(input.declarations, err)
 	}
 	secretArgs := []string{}
 	for _, argument := range schema.Args {

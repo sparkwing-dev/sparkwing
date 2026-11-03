@@ -41,6 +41,8 @@ unlock.
 - **CLI:** Say a pre-v0.68 SDK pin needs `sparkwing upgrade`
   Running a repository whose SDK pin predates v0.68.0 failed with `integrity_failure: release manifest has duplicate, unknown or malformed entries` and told the user not to execute unverified bytes. When the release's signatures and digest verify and only its list of executables is the older layout, it now fails with `version_unsupported`, says the pin is older than v0.68.0, the oldest release the CLI can run as a pipeline engine, and names `sparkwing upgrade` as the fix. A bad signature or digest stays `integrity_failure`, and the older release is never executed.
 
+- **CLI:** Check risk labels only on the steps a narrowed run executes, and name them when discovery is incomplete
+  `--sw-only`, `--sw-start-at` and `--sw-stop-at` runs still had to pass `--sw-allow-risk` for risky steps they left out, so running a pipeline's checks without its risky push meant allowing the push. Plan acceptance now refuses only when a selected step carries an unallowed label, before any job starts, naming the step, job, labels and flag. A run of the whole plan is still refused before intake. When another pipeline's discovery had failed, the refusal read `pipeline discovery failed (details withheld: secrets not yet known)`; it now names the pipeline, the missing labels and `--sw-allow-risk`, withholding only the step name.
 ### Changed
 
 - **scaffold:** `const FallbackSDKVersion` pins v0.68.6, so a fresh scaffold compiles against that release.

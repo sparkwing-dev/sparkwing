@@ -21,6 +21,7 @@ type DeclarationGate struct {
 	defaults []SecretValue
 	// safety: pointer identity is what proves a refusal is the host's own text.
 	unregistered *apierr.Error
+	risk         *apierr.Error
 }
 
 // DeclaredArguments is the resolved argument set and its sealing projection.
@@ -175,6 +176,27 @@ func (g *DeclarationGate) refuseUnregistered(entrypoint string) error {
 	return g.unregistered
 }
 
+// RefuseRisk composes the refusal for risk labels the run did not allow. Label
+// names and the invoked pipeline stay visible because the caller must repeat
+// them on the command line; the step name is author text, withheld until every
+// pipeline's declarations are known.
+func (g *DeclarationGate) RefuseRisk(pipeline, step string, labels []string) error {
+	masked := make([]string, len(labels))
+	for i, label := range labels {
+		masked[i] = g.masker.Mask(label)
+	}
+	subject := fmt.Sprintf("pipeline %q", g.masker.Mask(pipeline))
+	if g.Complete() && step != "" {
+		subject = fmt.Sprintf("step %q in %s", g.masker.Mask(step), subject)
+	}
+	g.risk = &apierr.Error{
+		Code:    apierr.BadRequest,
+		Message: fmt.Sprintf("%s requires --sw-allow-risk %s to confirm (or --sw-dry-run to preview)", subject, strings.Join(masked, ",")),
+		Hint:    "a run narrowed with --sw-only, --sw-start-at or --sw-stop-at needs only the risks of the steps it selects",
+	}
+	return g.risk
+}
+
 // Error withholds unclassified author errors and sanitizes classified payloads.
 func (g *DeclarationGate) Error(err error) error {
 	var canonical *apierr.Error
@@ -183,6 +205,9 @@ func (g *DeclarationGate) Error(err error) error {
 	}
 	if g != nil && g.unregistered != nil && errors.Is(err, g.unregistered) {
 		return g.unregistered
+	}
+	if g != nil && g.risk != nil && errors.Is(err, g.risk) {
+		return g.risk
 	}
 	if !g.Complete() {
 		code := apierr.SDKError

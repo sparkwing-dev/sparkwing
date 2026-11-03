@@ -519,7 +519,9 @@ Annotation and summary write failures fail the callback.
 
 A step can declare `Risk(labels...)`, `DryRun(callback)` and
 `SafeWithoutDryRun()`. The host enforces approved risks and chooses the dry-run
-body. `sw.IsDryRun(ctx)` reads the mode inside a callback.
+body. A run must allow, with `--sw-allow-risk`, every risk on a step its
+selection runs; steps that `--sw-only`, `--sw-start-at` or `--sw-stop-at` leave
+out need no allowance. `sw.IsDryRun(ctx)` reads the mode inside a callback.
 
 `cleanup.Register(ctx, cleanup.Spec{Argv: argv, Description: text})` registers an
 idempotent teardown command for a resource outside the process tree. It returns

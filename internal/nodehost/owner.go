@@ -299,7 +299,8 @@ func (h *OwnerHost) accept(ctx context.Context, input RunInput, row store.RunRow
 	if err != nil {
 		return AcceptedRun{}, h.preparationFailure(ctx, input, row, err)
 	}
-	if _, err := selectionSkips(plan.Plan, row.Request.Request.Options); err != nil {
+	jobSkips, err := selectionSkips(plan.Plan, row.Request.Request.Options)
+	if err != nil {
 		return AcceptedRun{}, h.preparationFailure(ctx, input, row, err)
 	}
 	if prepared.Resolve != nil {
@@ -307,6 +308,9 @@ func (h *OwnerHost) accept(ctx context.Context, input RunInput, row store.RunRow
 		if err != nil {
 			return AcceptedRun{}, h.preparationFailure(ctx, input, row, err)
 		}
+	}
+	if err := unapprovedRisk(plan.Plan, prepared.Resolved.Settings.Options, jobSkips); err != nil {
+		return AcceptedRun{}, h.preparationFailure(ctx, input, row, err)
 	}
 	if row.Request.Request.SecretArgs.Set {
 		for _, name := range row.Request.Request.SecretArgs.Value {

@@ -249,3 +249,44 @@ func TestDryRunEnvHandsTheSwitchToTheNode(t *testing.T) {
 		}
 	}
 }
+
+func TestRiskAllowanceCoversOnlySelectedSteps(t *testing.T) {
+	plan := nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{
+		{ID: "gate", Steps: []nodeproto.StepSpec{{ID: "test"}}},
+		{ID: "review", Needs: []string{"gate"}, Steps: []nodeproto.StepSpec{{ID: "review"}}},
+		{ID: "land", Needs: []string{"review"}, Steps: []nodeproto.StepSpec{{ID: "merge"}, {ID: "push", Needs: []string{"merge"}, Risks: []string{"remote"}}}},
+	}}
+	for _, tc := range []struct {
+		name                string
+		only, start, stop   string
+		allow               []string
+		dryRun, wantRefusal bool
+	}{
+		{name: "whole plan", wantRefusal: true},
+		{name: "allowed", allow: []string{"remote"}},
+		{name: "dry run", dryRun: true},
+		{name: "only excludes the risky job", only: "review"},
+		{name: "only includes the risky job", only: "land", wantRefusal: true},
+		{name: "stop before the risky step", stop: "merge"},
+		{name: "stop at the risky step", stop: "push", wantRefusal: true},
+		{name: "stop in another job keeps the risky job", stop: "review", wantRefusal: true},
+		{name: "start at the risky step", start: "push", wantRefusal: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var options runspec.Options
+			options.Only.Value, options.StartAt.Value, options.StopAt.Value = tc.only, tc.start, tc.stop
+			options.AllowRisk.Value, options.DryRun.Value = tc.allow, tc.dryRun
+			skips, err := selectionSkips(plan, options)
+			if err != nil {
+				t.Fatal(err)
+			}
+			err = unapprovedRisk(plan, options, skips)
+			if (err != nil) != tc.wantRefusal {
+				t.Fatalf("refusal=%v, want %v", err, tc.wantRefusal)
+			}
+			if err != nil && err.Error() != `step "push" in job "land" requires --sw-allow-risk remote to confirm (or --sw-dry-run to preview)` {
+				t.Fatalf("refusal text %q", err)
+			}
+		})
+	}
+}
