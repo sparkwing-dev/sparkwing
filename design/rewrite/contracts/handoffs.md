@@ -1435,3 +1435,7 @@ Every change landing on main gets an AI review, including docs-only and comment-
 ## 2026-11-03 Korey decision 94: runs show when an agent started them
 
 A run records that an agent started it on a person's behalf: "requested by Korey, via agent claude-code[:name]". The CLI detects known coding-agent environments automatically (for example Claude Code's CLAUDECODE=1) and accepts `--agent NAME` to set or name it and `--agent none` to opt out. The value is sealed with the run request, kept by retries, and shown with an agent icon and the name in the console and CLI run views. It is self-declared and display-only: it never grants or limits authority. Verified agent identity (an agent-scoped credential, needed for approval policies that treat agents and people differently) comes later with agentic orchestration (decision 84).
+
+## 2026-11-03 Korey decision 95: machine labels apply to local runs
+
+`runner.labels` in machine configuration applies to everything the machine runs, including its own local `sparkwing run` work, not only controller work claimed by an enrolled runner. A pipeline that pins a job to a machine with a custom label (for example `Requires("host=moonborn")`) runs locally on that machine. Labels remain self-reported matching preferences: they never grant pools, secrets or trust, which still come from the machine's credentials and access rules.
