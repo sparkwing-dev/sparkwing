@@ -53,7 +53,7 @@ func localStatusResult(service, action string, status wingd.LocalStatus) dashboa
 // safety: v0.67 and earlier ran the dashboard as its own process recorded in this file, which v0.68 never writes.
 const olderDashboardPIDFile = "dashboard.pid"
 
-var processRunning = func(pid int) bool {
+func processRunning(pid int) bool {
 	process, err := os.FindProcess(pid)
 	return err == nil && process.Signal(syscall.Signal(0)) == nil
 }

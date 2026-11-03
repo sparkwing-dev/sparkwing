@@ -5,9 +5,13 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"reflect"
+	"runtime"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -261,16 +265,30 @@ func TestDashboardRemoteStartUsesAuthenticatedController(t *testing.T) {
 }
 
 func TestDashboardStopReportsAnOlderDashboardStillRunning(t *testing.T) {
-	home := t.TempDir()
-	if err := os.WriteFile(filepath.Join(home, olderDashboardPIDFile), []byte("4242\n"), 0o600); err != nil {
+	if runtime.GOOS == "windows" {
+		t.Skip("older dashboards ran only where signal 0 probes a pid")
+	}
+	live := exec.Command("cat")
+	stdin, err := live.StdinPipe()
+	if err != nil {
 		t.Fatal(err)
 	}
-	running := map[int]bool{4242: true}
-	previous := processRunning
-	processRunning = func(pid int) bool { return running[pid] }
-	t.Cleanup(func() { processRunning = previous })
-	for _, alive := range []bool{true, false} {
-		running[4242] = alive
+	if err := live.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = stdin.Close(); _ = live.Wait() })
+	reaped := exec.Command("true")
+	if err := reaped.Run(); err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		pid   int
+		alive bool
+	}{{live.Process.Pid, true}, {reaped.Process.Pid, false}} {
+		home := t.TempDir()
+		if err := os.WriteFile(filepath.Join(home, olderDashboardPIDFile), []byte(strconv.Itoa(tc.pid)+"\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
 		lifecycle := &dashboardLifecycleFake{status: wingd.LocalStatus{Running: true}}
 		services := dashboardServices{lifecycle: lifecycle, options: wingd.LocalStartOptions{Home: home}}
 		var output bytes.Buffer
@@ -281,8 +299,8 @@ func TestDashboardStopReportsAnOlderDashboardStillRunning(t *testing.T) {
 		if err := json.Unmarshal(output.Bytes(), &got); err != nil {
 			t.Fatal(err)
 		}
-		if got.State != "stopped" || alive != strings.Contains(got.Warning, "kill 4242") {
-			t.Fatalf("alive=%v: %+v", alive, got)
+		if got.State != "stopped" || tc.alive != strings.Contains(got.Warning, fmt.Sprintf("kill %d", tc.pid)) {
+			t.Fatalf("pid %d alive=%v: %+v", tc.pid, tc.alive, got)
 		}
 	}
 }
