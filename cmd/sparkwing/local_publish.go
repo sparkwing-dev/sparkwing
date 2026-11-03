@@ -34,7 +34,7 @@ func publishLocalProfile(ctx context.Context, home string, local client.EngineOp
 		return err
 	}
 	defer closeConnection()
-	_, err = client.PublishLocalRun(ctx, options, client.PublicationInput{State: state, Logs: reader, OpenBlob: func(ctx context.Context, digest blob.Digest) (io.ReadCloser, int64, error) {
+	_, err = client.PublishLocalRun(ctx, options, client.PublicationInput{State: state, Logs: reader, Notice: os.Stderr, OpenBlob: func(ctx context.Context, digest blob.Digest) (io.ReadCloser, int64, error) {
 		if err := ctx.Err(); err != nil {
 			return nil, 0, err
 		}

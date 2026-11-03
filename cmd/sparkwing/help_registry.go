@@ -386,6 +386,7 @@ var flagDescriptions = map[string]string{
 	"body":                "Include document bodies in search results.",
 	"full":                "Read the full documentation topic.",
 	"publish":             "Copy this local run's results to the named controller profile.",
+	"agent":               "Coding agent starting this run, such as claude-code:land-agent; none records no agent. Display-only.",
 	"sw-cache-from":       "Read authorized cache entries from the named controller profile; empty disables the machine default.",
 	"sw-no-memo":          "Execute jobs without reusing memoized results.",
 	"sw-allow-risk":       "Authorize the listed pipeline risks. A run narrowed with --sw-only, --sw-start-at or --sw-stop-at needs only the risks of the steps it selects.",

@@ -24,6 +24,9 @@ func SealRequest(request Request, facts IntakeFacts) (SealedRequest, error) {
 			return SealedRequest{}, err
 		}
 	}
+	if err := ValidateAgent(request.Agent); err != nil {
+		return SealedRequest{}, &apierr.Error{Code: apierr.BadRequest, Message: err.Error()}
+	}
 	if request.Version != 1 {
 		return SealedRequest{}, errors.New("unsupported request version")
 	}

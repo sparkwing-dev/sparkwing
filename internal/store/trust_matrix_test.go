@@ -151,6 +151,24 @@ var matrixHosts = []matrixHost{
 }
 
 func TestTrustMatrix(t *testing.T) {
+	got := renderTrustMatrix(t, trustMatrixRows())
+	if os.Getenv("SPARKWING_UPDATE_TRUST_MATRIX") == "1" {
+		if err := os.WriteFile(trustMatrixFile, []byte(got), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		return
+	}
+	want, err := os.ReadFile(trustMatrixFile)
+	if err != nil {
+		t.Fatalf("%v; run with SPARKWING_UPDATE_TRUST_MATRIX=1 to write it", err)
+	}
+	if diff := matrixDiff(string(want), got); diff != "" {
+		t.Fatalf("within-team trust changed; review the cells below and rerun with SPARKWING_UPDATE_TRUST_MATRIX=1 to accept them (- file, + code):\n%s", diff)
+	}
+}
+
+func renderTrustMatrix(t *testing.T, rows []trustMatrixRow) string {
+	t.Helper()
 	ctx := t.Context()
 	s, err := Open(t.TempDir() + "/matrix.db")
 	if err != nil {
@@ -174,7 +192,7 @@ func TestTrustMatrix(t *testing.T) {
 	sealed := map[string]runspec.SealedRequest{}
 	var out strings.Builder
 	out.WriteString(trustMatrixHeader)
-	for _, row := range trustMatrixRows() {
+	for _, row := range rows {
 		if row.parent != "" {
 			parent := sealed[row.parent]
 			raw, err := json.Marshal(parent)
@@ -217,20 +235,7 @@ func TestTrustMatrix(t *testing.T) {
 		}
 		out.WriteString(claim)
 	}
-	got := out.String()
-	if os.Getenv("SPARKWING_UPDATE_TRUST_MATRIX") == "1" {
-		if err := os.WriteFile(trustMatrixFile, []byte(got), 0o644); err != nil {
-			t.Fatal(err)
-		}
-		return
-	}
-	want, err := os.ReadFile(trustMatrixFile)
-	if err != nil {
-		t.Fatalf("%v; run with SPARKWING_UPDATE_TRUST_MATRIX=1 to write it", err)
-	}
-	if diff := matrixDiff(string(want), got); diff != "" {
-		t.Fatalf("within-team trust changed; review the cells below and rerun with SPARKWING_UPDATE_TRUST_MATRIX=1 to accept them (- file, + code):\n%s", diff)
-	}
+	return out.String()
 }
 
 // matrixSeal runs intake's own identity sealing: identityTx, the fetched

@@ -137,6 +137,9 @@ const (
 	ReasonNoOutput               Reason = "no_output"
 )
 
+// DetailUnknownField names, in Error.Details, a request field a controller refused because it does not know it.
+const DetailUnknownField = "unknown_field"
+
 // Error emits Message, Hint and Details as given, so callers must supply safe, masked values.
 // For secret_in_identifier, identify the identifier's field/path, never echo its value.
 type Error struct {

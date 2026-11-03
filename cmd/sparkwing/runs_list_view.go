@@ -49,11 +49,16 @@ func writeListedRun(out io.Writer, run controllerwire.RunDetail, format string, 
 			Status     string     `json:"status"`
 			Ref        string     `json:"ref,omitempty"`
 			SHA        string     `json:"sha,omitempty"`
+			Agent      string     `json:"agent,omitempty"`
 			StartedAt  *time.Time `json:"started_at,omitempty"`
 			FinishedAt *time.Time `json:"finished_at,omitempty"`
-		}{run.ID, run.Number, run.Inputs.Pipeline, run.Status, run.Inputs.Git.Ref, run.Inputs.Git.SHA, run.StartedAt, run.FinishedAt})
+		}{run.ID, run.Number, run.Inputs.Pipeline, run.Status, run.Inputs.Git.Ref, run.Inputs.Git.SHA, run.Inputs.Agent, run.StartedAt, run.FinishedAt})
 	}
-	_, err := fmt.Fprintf(out, "%s (#%d)  %s  %s  %s  %s\n", run.ID, run.Number, run.Inputs.Pipeline, run.Status, run.Inputs.Git.Ref, shortSHAOrDash(run.Inputs.Git.SHA))
+	agent := ""
+	if run.Inputs.Agent != "" {
+		agent = "  via agent " + run.Inputs.Agent
+	}
+	_, err := fmt.Fprintf(out, "%s (#%d)  %s  %s  %s  %s%s\n", run.ID, run.Number, run.Inputs.Pipeline, run.Status, run.Inputs.Git.Ref, shortSHAOrDash(run.Inputs.Git.SHA), agent)
 	return err
 }
 

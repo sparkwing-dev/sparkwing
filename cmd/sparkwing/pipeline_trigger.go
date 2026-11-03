@@ -28,6 +28,7 @@ type triggerFlags struct {
 	allowSecretFiles                 []string
 	runner                           string
 	reason                           string
+	agent                            string
 	passthrough                      []string
 	resume, ref, pipelineRef, output string
 }
@@ -44,6 +45,11 @@ func triggerFlagsFromInvocation(inv clisurface.Invocation) (triggerFlags, error)
 		if err := checkHereFlags(flags); err != nil {
 			return triggerFlags{}, &clisurface.UsageError{Path: inv.Command.Path, Message: err.Error()}
 		}
+		agent, err := resolveRunAgent(inv.Value("agent"), inv.Has("agent"), os.Getenv)
+		if err != nil {
+			return triggerFlags{}, &clisurface.UsageError{Path: inv.Command.Path, Message: err.Error()}
+		}
+		flags.agent = agent
 	}
 	return flags, nil
 }

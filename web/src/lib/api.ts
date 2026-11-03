@@ -155,6 +155,10 @@ export interface Run {
   pipeline: string;
   status: string;
   trigger_source?: string;
+  // trigger_user is the requester; agent names the coding agent that started
+  // the run on their behalf. The agent is self-declared and display-only.
+  trigger_user?: string;
+  agent?: string;
   git_branch?: string;
   git_sha?: string;
   repo?: string;
@@ -322,6 +326,8 @@ export interface RunDetailWire {
     requested_args: Record<string, string> | null;
     args: Record<string, string> | null;
     secret_args: string[] | null;
+    actor?: { kind: string; id: string; display: string };
+    agent?: string;
     git: {
       repository: { key: string; display: string };
       ref: string;
@@ -476,6 +482,8 @@ export function runDetailView(
     id: wire.id,
     pipeline: inputs.pipeline,
     trust_class: inputs.trust_class,
+    trigger_user: inputs.actor?.display || inputs.actor?.id || undefined,
+    agent: inputs.agent || undefined,
     status: wire.status,
     git_branch: inputs.git.ref || undefined,
     git_sha: inputs.git.sha || undefined,

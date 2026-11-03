@@ -43,6 +43,13 @@ unlock.
 
 - **CLI:** `sparkwing dashboard open` works against a controller that `sparkwing run` started
   A controller started on demand by a run or a schedule serves no dashboard, so `dashboard open` failed with "the dashboard is not serving" until the controller was stopped and started again with `dashboard start`. When no dashboard serves, `dashboard open` now asks the running controller to serve one at 127.0.0.1:4343, starting the controller too if none runs, then prints the sign-in link.
+- **CLI, API, web:** Show when a coding agent started a run
+  `sparkwing run` and `sparkwing pipeline trigger` record the coding agent that starts a run on a person's behalf. `--agent NAME` sets or names it, such as `claude-code:land-agent`, and `--agent none` opts out; without the flag, `SPARKWING_AGENT` applies, then a detected Claude Code (`CLAUDECODE=1`), Codex (`CODEX_THREAD_ID`) or Gemini CLI (`GEMINI_CLI=1`) environment. Intake seals the label with the run request; retries and `--publish` keep it. `runs status` and `runs list` show it in every output mode, the run API returns it as `agent`, and the console shows an agent icon and name beside the requester. The label is self-declared and display-only: trust, secrets, OIDC, cache scope, approvals and claims never read it. A controller older than the label refuses the field; the CLI then resends once without it and prints a one-line notice. See [Agent-started runs](docs/cli.md#agent-started-runs).
+
+### Fixed
+
+- **API:** Name the request field a controller does not accept and say to upgrade it
+  A client newer than its controller failed with "body has a field this endpoint does not accept". The refusal now names the field, such as `agent`, in the message and in `details.unknown_field`, and says to upgrade the controller or use a client no newer than it.
 - **Cloud:** Name the pool ceiling when a job asks for more CPU or memory than it allows
   A job above the launcher's resource ceiling failed with "Cloud capacity is not configured for the requested hardware class", and the launcher logged the refusal at ERROR. The error now names the requested class, CPU and memory and the pool's CPU and memory ceiling, and says to request a smaller hardware class or contact support@sparkwing.dev to raise the ceiling. The launcher logs this expected refusal at INFO. A class with no configured pool keeps the previous message and ERROR log.
 - **Cloud:** Reuse a run's node for a dependent job without provisioning another

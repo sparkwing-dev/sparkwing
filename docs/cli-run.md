@@ -16,6 +16,8 @@ Set route: cloud and profile: NAME in machine run.routing to opt in. Repository 
 
 Publication is one-way run/results/logs with local provenance; a publication failure never changes the local run verdict.
 
+--agent NAME records the coding agent that starts the run on your behalf, such as claude-code:land-agent, and --agent none records none. Without the flag, SPARKWING_AGENT applies, then a detected coding-agent environment (Claude Code, Codex, Gemini CLI). The label is sealed with the request, kept by retries and publication, and shown in run views; it never grants or limits authority.
+
 Cache-from reads only authorized verified-default-branch memo/artifacts/depcache; no shared writes or remote binary fetch.
 
 --sw-output applies to foreground and detached runs; explicit --sw-output beats -o, then SPARKWING_LOG_FORMAT, then terminal detection.
@@ -37,6 +39,7 @@ Cache-from reads only authorized verified-default-branch memo/artifacts/depcache
 | `-h, --help` | Show command help without executing. |
 | `--help-all` | Include uncommon flags in command help. |
 | `--publish PROFILE` | Copy this local run's results to the named controller profile. |
+| `--agent NAME` | Coding agent starting this run, such as claude-code:land-agent; none records no agent. Display-only. |
 | `--sw-cache-from PROFILE` | Read the authorized remote cache; an empty value disables the machine default. |
 | `--sw-pause-before JOB` | Pause before the selected job. Repeatable; comma-separated values are accepted. |
 | `--sw-pause-after JOB` | Pause after the selected job. Repeatable; comma-separated values are accepted. |

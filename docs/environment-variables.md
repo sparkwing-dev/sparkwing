@@ -32,6 +32,7 @@ the files in `--credentials-dir`, so no service configuration appears here.
 |---|---|
 | `SPARKWING_CONFIG` | [ci-embedded](ci-embedded.md), [local-execution](local-execution.md), [machine-config](machine-config.md), [profiles](cli-profiles.md) |
 | `SPARKWING_HOME` | [architecture](architecture.md), [caching](caching.md), [schedules](schedules.md), [deployment-modes](deployment-modes.md), [diagnosing-admission](diagnosing-admission.md), [local-execution](local-execution.md), [machine-config](machine-config.md), [native-mode](native-mode.md), [sdk](sdk.md), [security](security.md), [versioning](versioning.md), [cli-cache](cli-cache.md), [runners](cli-runners.md), [profiles](cli-profiles.md), [cli-doctor](cli-doctor.md), [cli-queue](cli-queue.md), [cli-runs](cli-runs.md), [cli-secrets](cli-secrets.md), [dashboard](cli-dashboard.md), [cli-version](cli-version.md) |
+| `SPARKWING_AGENT` | [cli](cli.md#agent-started-runs) |
 | `SPARKWING_LOG_FORMAT` | [hooks](hooks.md), [cli-run](cli-run.md) |
 | `SPARKWING_SECRETS_KEY` | [git-credentials](git-credentials.md), [machine-config](machine-config.md), [security](security.md), [cli-secrets](cli-secrets.md) |
 | `SPARKWING_SECRETS_KEY_FILE` | [machine-config](machine-config.md), [cli-secrets](cli-secrets.md) |
@@ -104,6 +105,9 @@ Sparkwing code. See [node protocol](node-protocol.md).
 | `XDG_CONFIG_HOME` | XDG Base Directory specification |
 | `XDG_RUNTIME_DIR` | XDG Base Directory specification |
 | `CI` | CI providers |
+| `CLAUDECODE` | Claude Code; marks an agent-started run, see [cli](cli.md#agent-started-runs) |
+| `CODEX_THREAD_ID` | Codex CLI; marks an agent-started run |
+| `GEMINI_CLI` | Gemini CLI; marks an agent-started run |
 | `CLICOLOR_FORCE` | terminal convention |
 | `NO_COLOR` | terminal convention |
 

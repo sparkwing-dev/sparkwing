@@ -44,10 +44,11 @@
       }
     },
     "actor": {
-      "kind": "",
-      "id": "",
-      "display": ""
+      "kind": "account",
+      "id": "account",
+      "display": "octocat"
     },
+    "agent": "claude-code:land-agent",
     "pull_request": {
       "set": false,
       "value": {

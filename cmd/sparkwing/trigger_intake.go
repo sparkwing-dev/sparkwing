@@ -7,9 +7,11 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
+	"github.com/sparkwing-dev/sparkwing/internal/controller/client"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
@@ -61,7 +63,7 @@ func submitTriggeredRun(ctx context.Context, input controllerwire.CreateRunReque
 	if input.IdempotencyKey == "" {
 		input.IdempotencyKey = rand.Text()
 	}
-	response, err := connection.CreateRun(ctx, input)
+	response, err := client.CreateRun(ctx, connection.Controller, input, os.Stderr)
 	masker.Register(response.HereBearer)
 	if err != nil {
 		return err

@@ -8,6 +8,7 @@ var Registry = []Var{
 	{Name: "SPARKWING_HOME", Prefix: false, Class: user, Owner: "user", Doc: "CLI setting; service equivalents are flags."},
 	{Name: "SPARKWING_CONFIG", Prefix: false, Class: user, Owner: "user", Doc: "CLI setting; service equivalents are flags."},
 	{Name: "SPARKWING_LOG_FORMAT", Prefix: false, Class: user, Owner: "user", Doc: "CLI setting; service equivalents are flags."},
+	{Name: "SPARKWING_AGENT", Prefix: false, Class: user, Owner: "user", Doc: "CLI setting; names the coding agent that starts a run."},
 	{Name: "SPARKWING_TOOLCHAIN", Prefix: false, Class: user, Owner: "user", Doc: "CLI setting; service equivalents are flags."},
 	{Name: "SPARKWING_DEBUG", Prefix: false, Class: diagnostic, Owner: "user", Doc: "SDK diagnostic output selection."},
 	{Name: "SPARKWING_SECRETS_KEY_FILE", Prefix: false, Class: user, Owner: "engine", Doc: "CLI key-file selector; never inherited by pipeline code."},

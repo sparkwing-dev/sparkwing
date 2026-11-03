@@ -191,6 +191,9 @@ func writeRunDetail(out io.Writer, detail controllerwire.RunDetail, opts runStat
 	if detail.Engine != nil {
 		fmt.Fprintf(&text, "engine\t%s\n", detail.Engine.Version)
 	}
+	if detail.Inputs.Agent != "" {
+		fmt.Fprintf(&text, "agent\t%s\n", detail.Inputs.Agent)
+	}
 	if err := writeEngineNotices(&text, detail.Notices); err != nil {
 		return err
 	}

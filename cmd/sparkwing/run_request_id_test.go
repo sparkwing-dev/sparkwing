@@ -50,12 +50,15 @@ func main() { sw.Register("check", func() sw.Pipeline[sw.NoInputs] { return pipe
 	if err != nil {
 		t.Fatal(err)
 	}
-	flags, args := parseRunFlagsArgs([]string{"--sw-detached", "--sw-request-id=trace-42"})
+	flags, args := parseRunFlagsArgs([]string{"--sw-detached", "--sw-request-id=trace-42", "--agent=claude-code:land-agent"})
 	request, err := prepareLocalRunRequest(t.Context(), prepared, flags, args)
 	if err != nil {
 		t.Fatal(err)
 	}
 	checkRequestID(t, request.Request, "trace-42")
+	if request.Request.Agent != "claude-code:land-agent" {
+		t.Fatalf("prepared request agent = %q", request.Request.Agent)
+	}
 	controller, err := client.NewEngineClient(connection)
 	if err != nil {
 		t.Fatal(err)
@@ -65,6 +68,9 @@ func main() { sw.Register("check", func() sw.Pipeline[sw.NoInputs] { return pipe
 		t.Fatal(err)
 	}
 	checkRequestID(t, first, "trace-42")
+	if first.Inputs.Agent != "claude-code:land-agent" {
+		t.Fatalf("admitted agent = %q", first.Inputs.Agent)
+	}
 	claimed, err := controller.Claim(t.Context(), controllerwire.ClaimRequest{RunID: first.RunID, Kinds: []capability.UnitKind{capability.UnitTrigger}, RunnerVersion: installedVersion()})
 	if err != nil || claimed.Claim == nil {
 		t.Fatalf("owner claim: %v", err)
@@ -81,6 +87,9 @@ func main() { sw.Register("check", func() sw.Pipeline[sw.NoInputs] { return pipe
 		t.Fatal(err)
 	}
 	checkRequestID(t, carried.Request.Request, "trace-42")
+	if carried.Request.Request.Agent != "claude-code:land-agent" {
+		t.Fatalf("retry agent = %q", carried.Request.Request.Agent)
+	}
 	var output bytes.Buffer
 	if err := emitLocalRunReceipt(&output, first, "json"); err != nil {
 		t.Fatal(err)
