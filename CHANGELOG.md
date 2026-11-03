@@ -22,6 +22,8 @@ unlock.
 
 ### Fixed
 
+- **logs:** Keep a failed attempt's logs when its job retries
+  A retry advanced the log writer to the next attempt before the failed attempt's final segment and seal reached storage, so the failed attempt's output was refused and its stream never completed. A retry now waits up to five seconds for that seal before it commits.
 - **SDK install:** Refuse a generated overlay that is not a regular file
   A repository could commit `.resolved.mod` as a symlink, and the installer's pin refresh would then rewrite the file it pointed to on the runner. Installation now refuses the overlay instead.
 - **child pipelines:** Keep parent job and step selections out of child runs
