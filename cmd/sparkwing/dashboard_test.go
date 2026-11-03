@@ -5,7 +5,13 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"reflect"
+	"runtime"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -255,5 +261,46 @@ func TestDashboardRemoteStartUsesAuthenticatedController(t *testing.T) {
 	}
 	if !reflect.DeepEqual(lifecycle.calls, []string{"start"}) || lifecycle.options.DashboardAddress != "192.0.2.1:4343" || !lifecycle.options.DashboardReadOnly {
 		t.Fatalf("start options: %+v calls: %v", lifecycle.options, lifecycle.calls)
+	}
+}
+
+func TestDashboardStopReportsAnOlderDashboardStillRunning(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("older dashboards ran only where signal 0 probes a pid")
+	}
+	live := exec.Command("cat")
+	stdin, err := live.StdinPipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := live.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = stdin.Close(); _ = live.Wait() })
+	reaped := exec.Command("true")
+	if err := reaped.Run(); err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		pid   int
+		alive bool
+	}{{live.Process.Pid, true}, {reaped.Process.Pid, false}} {
+		home := t.TempDir()
+		if err := os.WriteFile(filepath.Join(home, olderDashboardPIDFile), []byte(strconv.Itoa(tc.pid)+"\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		lifecycle := &dashboardLifecycleFake{status: wingd.LocalStatus{Running: true}}
+		services := dashboardServices{lifecycle: lifecycle, options: wingd.LocalStartOptions{Home: home}}
+		var output bytes.Buffer
+		if err := runDashboardCommandArgs(t.Context(), []string{"stop", "-o", "json"}, &output, "linux", func(context.Context) (dashboardServices, error) { return services, nil }); err != nil {
+			t.Fatal(err)
+		}
+		var got dashboardResult
+		if err := json.Unmarshal(output.Bytes(), &got); err != nil {
+			t.Fatal(err)
+		}
+		if got.State != "stopped" || tc.alive != strings.Contains(got.Warning, fmt.Sprintf("kill %d", tc.pid)) {
+			t.Fatalf("pid %d alive=%v: %+v", tc.pid, tc.alive, got)
+		}
 	}
 }

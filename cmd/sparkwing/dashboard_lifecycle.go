@@ -5,6 +5,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"os"
+	"path/filepath"
+	"strconv"
+	"strings"
+	"syscall"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
@@ -30,6 +35,7 @@ type dashboardResult struct {
 	Stay      bool              `json:"stay"`
 	Installed bool              `json:"installed"`
 	Activity  dashboardActivity `json:"activity"`
+	Warning   string            `json:"warning,omitempty"`
 }
 
 func localStatusResult(service, action string, status wingd.LocalStatus) dashboardResult {
@@ -42,6 +48,28 @@ func localStatusResult(service, action string, status wingd.LocalStatus) dashboa
 		PID: status.PID, Version: status.Version, Stay: status.Stay, Installed: status.Installed,
 		Activity: dashboardActivity{IdleSince: status.Activity.IdleSince, Runs: status.Activity.Runs, QueuedTriggers: status.Activity.QueuedTriggers, HeldLeases: status.Activity.HeldLeases, DashboardConnections: status.Activity.DashboardConnections},
 	}
+}
+
+// safety: v0.67 and earlier ran the dashboard as its own process recorded in this file, which v0.68 never writes.
+const olderDashboardPIDFile = "dashboard.pid"
+
+func processRunning(pid int) bool {
+	process, err := os.FindProcess(pid)
+	return err == nil && process.Signal(syscall.Signal(0)) == nil
+}
+
+func olderDashboardWarning(home string) string {
+	path := filepath.Join(home, olderDashboardPIDFile)
+	body, err := os.ReadFile(path)
+	if err != nil {
+		return ""
+	}
+	pid, err := strconv.Atoi(strings.TrimSpace(string(body)))
+	if err != nil || pid <= 0 || !processRunning(pid) {
+		return ""
+	}
+	return fmt.Sprintf("a dashboard from Sparkwing v0.67 or earlier recorded pid %d in %s, and a process with that pid is running; this command does not stop it. "+
+		"If `ps -p %d` shows sparkwing, stop it with `kill %d` and delete %s before moving an old store aside", pid, path, pid, pid, path)
 }
 
 func stopLocalController(ctx context.Context, lifecycle wingd.LocalLifecycle) (wingd.LocalStatus, error) {
@@ -72,10 +100,16 @@ func renderDashboard(out io.Writer, result dashboardResult, mode string) error {
 	case "json":
 		return json.NewEncoder(out).Encode(result)
 	case "plain":
+		if result.Warning != "" {
+			fmt.Fprintln(os.Stderr, "warning: "+result.Warning)
+		}
 		_, err := fmt.Fprintln(out, result.State)
 		return err
 	default:
 		_, err := fmt.Fprintf(out, "Local controller: %s\npid: %d\nversion: %s\nstay: %t\ninstalled: %t\nactivity: %d runs, %d queued triggers, %d held leases, %d dashboard connections\n", result.State, result.PID, result.Version, result.Stay, result.Installed, result.Activity.Runs, result.Activity.QueuedTriggers, result.Activity.HeldLeases, result.Activity.DashboardConnections)
+		if err == nil && result.Warning != "" {
+			_, err = fmt.Fprintf(out, "warning: %s\n", result.Warning)
+		}
 		return err
 	}
 }

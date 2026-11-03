@@ -37,6 +37,14 @@ It detects your OS and architecture, pulls the matching release binary,
 and drops `sparkwing` into `~/.local/bin`. For a specific version:
 `curl -fsSL https://sparkwing.dev/install.sh | sh -s -- --version vX.Y.Z`.
 
+A machine that runs work for a controller, through `sparkwing runners add`,
+also needs `sparkwing-runner`. `--runner` installs it beside `sparkwing` from
+the same release after the same checks:
+`curl -fsSL https://sparkwing.dev/install.sh | sh -s -- --runner`.
+`sparkwing update` updates only the CLI. An installed runner updates itself
+from verified release assets when the signed version index names a newer
+release.
+
 To place the binary yourself, download the asset for your platform from
 GitHub Releases:
 

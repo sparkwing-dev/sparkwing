@@ -1403,3 +1403,35 @@ Korey's WSL workstation and Mac are both trusted to run Sparkwing deploy jobs, e
 ## 2026-11-02 Korey decision 83: review policy starts as a tool-neutral spec
 
 Code review behaviour is configured by a repository-root `.review.yaml`, specified tool-neutrally at ink-labs `wing/review-spec.md`; it is not a Sparkwing feature. Reviews block only when the change fails its objective, carries significant security or usability risk, or breaks a declared design rule; nits and rare non-catastrophic edge cases never block. P0 and P1 require re-review by the same reviewer; P2 and lower are optional and may skip re-review with a recorded reason. A Sparkwing review job is the first consumer and Bitwing's landing workflow enforces the review record; a standalone review product waits until the format settles.
+
+## 2026-11-02 Korey decision 84: agentic orchestration is proven on fast release first
+
+Sparkwing should support pipelines that coordinate agents and people: durable state keyed by a subject, typed approvals (human, agent, policy), controller-enforced rules and resumable agent sessions (`design/rewrite/proposals/agentic-orchestration.md`). Fast release builds only the smallest server-side pieces it needs; the general feature is extracted when a second use needs the same pieces.
+
+## 2026-11-02 Korey decisions 85-87: gate trust and deploy confinement
+
+- 85 (delegated to the lead): before merge the gate tests the changed packages plus the `//sparkwing:critical` set; importers and full suites move to verification after deploy. A gate result lets main skip only when it comes from a repository-proven run with no selection options (start-at, stop-at, only, dry-run) at main's commit. Korey's machines supply that proof as repository-scoped runners fetching pushed branches; an operator-designated trusted-runner list was built and then removed after its security review found it spoofable.
+- 86: the workstation deploy runner stays under Korey's own user beside the agents; the exposure (agents could read a running deploy's session and key) is accepted and documented, with per-run directories, stale-directory sweeps and pinned tool paths as mitigations.
+- 87: the deploy credential is confined to Sparkwing: its values move to a dedicated `sparkwing-gitops` repository, an Argo AppProject fences its apps to Sparkwing namespaces, and the deploy role loses `patch` on Argo applications.
+
+## 2026-11-02 Korey decisions 88-89: trusted machines produce gate passes
+
+- 88: a gate pass lets CI skip only when every job that produced it ran on a trusted host: a fresh host (Cloud, launcher, GitHub-hosted Actions) or a machine root an admin registered with trust `verified` (new; proven work on any branch, never asserted) or `verified-default`. Roots that accept asserted work never produce counted passes, because an earlier job can poison HOME, `GOFLAGS` or the Go cache. "Trusted" is the concept; freshness is one way to earn it, and later trusted hosts need not be fresh. Korey's desktop and laptop register as `verified`.
+- 89: shifting left, a plain local `sparkwing run gate` on a registered trusted machine, opted into explicitly, produces a pass CI trusts, signed with that machine's controller-issued credential. It requires a clean checkout (a file-hash proof of a dirty tree is deferred) and CI skips only when the tree it fetched equals the recorded tree. Local caches (Go build and test cache, binary cache) stay usable on trusted machines so the local gate is fast; the trust boundary is the machine, not the run.
+
+## 2026-11-03 Korey decisions 90-91: first forward migration; over-limit jobs fail fast
+
+- 90: the `nodes.trusted_host` column ships as schema 29 with the first real forward migration, not a store reset. Opening a schema-28 store adds the column (default 0) and records version 29, on SQLite and PostgreSQL alike; production and staging upgrade in place. Migrations are forward-only: an older binary still refuses a newer store, so a rollback restores the database snapshot too. This supersedes the decision-73 note that real forward migrations wait for launch.
+- 91: a launcher job requesting more CPU or memory than its pool's ceiling fails at once with an error naming the ceiling and the request, and its unstarted credit hold is refunded, instead of pending until cancelled. Ceilings are unchanged. For comparison, CircleCI rejects an unavailable resource class at submission; GitHub Actions keeps a job for an unavailable runner queued up to 24 hours, then fails it.
+
+## 2026-11-03 Korey decision 92: deploy the next release to production after staging
+
+Korey authorized deploying the release after v0.68.5 to production once it passes staging, so production grid 2 runs against the code that fixes grid 1. The production upgrade takes an RDS snapshot first, verifies and copies the signed release images by digest, changes only image pins through GitOps, and keeps the previous release's images pinned for rollback. Grid 2 runs as QA fixture teams only.
+
+## 2026-11-03 Korey decision 93: every change is reviewed
+
+Every change landing on main gets an AI review, including docs-only and comment-only changes: the reviewer checks correctness and alignment with Korey's standards, not just code risk. No size or path makes review optional. How standards and reviewer context are injected into the review is a later design (Korey is revising the standards); until then the review job keeps loading them as it does today.
+
+## 2026-11-03 Korey decision 94: runs show when an agent started them
+
+A run records that an agent started it on a person's behalf: "requested by Korey, via agent claude-code[:name]". The CLI detects known coding-agent environments automatically (for example Claude Code's CLAUDECODE=1) and accepts `--agent NAME` to set or name it and `--agent none` to opt out. The value is sealed with the run request, kept by retries, and shown with an agent icon and the name in the console and CLI run views. It is self-declared and display-only: it never grants or limits authority. Verified agent identity (an agent-scoped credential, needed for approval policies that treat agents and people differently) comes later with agentic orchestration (decision 84).

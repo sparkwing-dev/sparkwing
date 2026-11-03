@@ -47,6 +47,7 @@ func TestRunLogPageAccountsForRequeuedPlanWriters(t *testing.T) {
 			engineSQL(t, st, `UPDATE runs SET dispatch='controller'`)
 			engineSQL(t, st, `UPDATE triggers SET unit_kind='plan'`)
 			demand := store.UnitDemand{CapabilityPrefix: "launcher", Target: &store.UnitRef{Kind: capability.UnitPlan, RunID: "run"}}
+			var wantIncomplete []controllerwire.LogIncomplete
 			for cycle := range 3 {
 				claim, err := st.AsOperator().ClaimUnit(t.Context(), demand)
 				if err != nil {
@@ -60,6 +61,12 @@ func TestRunLogPageAccountsForRequeuedPlanWriters(t *testing.T) {
 					claim.Award.CapabilityPrefix = issued.Capability.Prefix
 				}
 				if cycle == 1 {
+					if test.exchanged {
+						wantIncomplete = append(wantIncomplete, controllerwire.LogIncomplete{
+							Subject: blob.LogSubject{Kind: blob.LogOwnerUnit, Team: "a", RunID: "run", Unit: &blob.LogUnit{Kind: blob.LogPlan, Generation: int64(claim.Award.Generation)}},
+							Reason:  "writer_lost",
+						})
+					}
 					engineSQL(t, st, `UPDATE triggers SET lease_expires_at=?`, teststore.Now(st).UnixNano())
 					reaped, err := st.AsOperator().ReapUnits(t.Context(), 1)
 					if err != nil || len(reaped) != 1 || !reaped[0].Requeued {
@@ -85,7 +92,7 @@ func TestRunLogPageAccountsForRequeuedPlanWriters(t *testing.T) {
 			engineSQL(t, st, `UPDATE runs SET status=?,finished_at=?`, test.status, teststore.Now(st).UnixNano())
 			reader, _ := memberLogSearchReader(t, st, logs.objs.(blob.ObjectBackend))
 			jobPage, err := reader.ReadLogs(t.Context(), "run", controllerwire.LogQuery{Job: "job", NoEvents: true})
-			if err != nil || !jobPage.Complete {
+			if err != nil || !jobPage.Complete || len(jobPage.Incomplete) != 0 {
 				t.Fatalf("job logs: %+v %v", jobPage, err)
 			}
 			page, err := reader.ReadLogs(t.Context(), "run", controllerwire.LogQuery{NoEvents: true})
@@ -96,8 +103,11 @@ func TestRunLogPageAccountsForRequeuedPlanWriters(t *testing.T) {
 				t.Fatal(err)
 			}
 			page, err = reader.ReadLogs(t.Context(), "run", controllerwire.LogQuery{NoEvents: true})
-			if err != nil || page.Complete != !test.exchanged || len(page.Records) != 1 || page.Records[0].Line != "job output" {
+			if err != nil || !page.Complete || len(page.Records) != 1 || page.Records[0].Line != "job output" {
 				t.Fatalf("finished run aggregate: complete=%v records=%v error=%v", page.Complete, page.Records, err)
+			}
+			if !reflect.DeepEqual(page.Incomplete, wantIncomplete) {
+				t.Fatalf("finished run incomplete markers: got %+v, want %+v", page.Incomplete, wantIncomplete)
 			}
 		})
 	}
@@ -196,9 +206,9 @@ func TestPersistedLogByteCapNamesTheTruncationLimit(t *testing.T) {
 	logs, _, st := committedDashboardLogs(t, []byte("last retained line\n[sparkwing] truncated: the node log reached its 64 MiB cap\n"))
 	engineSQL(t, st, `UPDATE log_streams SET completeness='incomplete',incomplete_reason='byte cap' WHERE team='a' AND run_id='run'`)
 	reader, _ := memberLogSearchReader(t, st, logs.objs.(blob.ObjectBackend))
-	_, err := reader.ReadLogs(t.Context(), "run", controllerwire.LogQuery{Job: "job", NoEvents: true})
-	if err == nil || !strings.Contains(err.Error(), "truncated") || !strings.Contains(err.Error(), "64 MiB") {
-		t.Fatalf("missing public truncation limit: %v", err)
+	page, err := reader.ReadLogs(t.Context(), "run", controllerwire.LogQuery{Job: "job", NoEvents: true})
+	if err != nil || len(page.Records) != 2 || len(page.Incomplete) != 1 || page.Incomplete[0].Reason != "byte cap" || !strings.Contains(page.Records[1].Line, "64 MiB") {
+		t.Fatalf("missing retained output or truncation marker: %+v %v", page, err)
 	}
 }
 
@@ -392,7 +402,7 @@ func TestPersistedLogPageEndsUnsealedTerminalObservationAfterGrace(t *testing.T)
 		}{
 			{"running", 2 * limits.LogSealGrace, false, false, false},
 			{"tail grace", limits.LogSealGrace - time.Nanosecond, true, false, false},
-			{"exact grace", limits.LogSealGrace, true, false, true},
+			{"exact grace", limits.LogSealGrace, true, false, false},
 			{"abandoned", 2 * limits.LogSealGrace, true, false, true},
 			{"sealed", 2 * limits.LogSealGrace, true, true, false},
 		} {
@@ -401,29 +411,33 @@ func TestPersistedLogPageEndsUnsealedTerminalObservationAfterGrace(t *testing.T)
 				now := teststore.Now(st)
 				if kind == "owner_unit" {
 					completeness := "open"
+					var sealedAt any
 					if test.sealed {
-						completeness = "complete"
+						completeness, sealedAt = "complete", int64(1)
 					}
 					owner := blob.LogSubject{Kind: blob.LogOwnerUnit, Team: "a", RunID: "run", Unit: &blob.LogUnit{Kind: blob.LogTrigger, Generation: 1}}
 					encoded, err := json.Marshal(owner)
 					if err != nil {
 						t.Fatal(err)
 					}
-					engineSQL(t, st, `INSERT INTO log_streams(team,run_id,id,subject_kind,generation,unit_kind,prefix,retention_class,completeness,created_at,updated_at) VALUES ('a','run',?,'owner_unit',1,'trigger','fixture','r30',?,1,1)`, fmt.Sprintf("%x", sha256.Sum256(encoded)), completeness)
+					engineSQL(t, st, `INSERT INTO log_streams(team,run_id,id,subject_kind,generation,unit_kind,prefix,retention_class,completeness,sealed_at,created_at,updated_at) VALUES ('a','run',?,'owner_unit',1,'trigger','fixture','r30',?,?,1,1)`, fmt.Sprintf("%x", sha256.Sum256(encoded)), completeness, sealedAt)
 				} else if !test.sealed {
 					engineSQL(t, st, `UPDATE log_streams SET completeness='open',sealed_at=NULL WHERE team='a' AND run_id='run'`)
 				}
 				if test.terminal {
-					engineSQL(t, st, `UPDATE runs SET status='failed',finished_at=? WHERE team='a' AND id='run'`, now.Add(-test.age).UnixNano())
+					finished := now.Add(-test.age).UnixNano()
+					engineSQL(t, st, `UPDATE runs SET status='failed',started_at=?,finished_at=? WHERE team='a' AND id='run'`, finished, finished)
+					engineSQL(t, st, `UPDATE node_attempts SET outcome='failed',started_at=?,finished_at=? WHERE team='a' AND run_id='run'`, finished, finished)
+					engineSQL(t, st, `UPDATE triggers SET status='done',generation=1,started_at=?,finished_at=?,lease_expires_at=NULL WHERE team='a' AND id='run'`, finished, finished)
 				}
 				reader, _ := memberLogSearchReader(t, st, logs.objs.(blob.ObjectBackend))
 				page, err := reader.ReadLogs(t.Context(), "run", controllerwire.LogQuery{NoEvents: true})
-				if test.incomplete {
-					if err != nil || len(page.Records) != 1 || page.Complete {
+				if test.incomplete || kind == "owner_unit" && test.age == limits.LogSealGrace {
+					if err != nil || len(page.Records) != 1 || !page.Complete || len(page.Incomplete) != 1 {
 						t.Fatalf("abandoned logs lost their committed tail: %+v %v", page, err)
 					}
 					page, err = reader.ReadLogs(t.Context(), "run", controllerwire.LogQuery{NoEvents: true, Cursor: page.NextCursor})
-					if err == nil || !strings.Contains(err.Error(), "logs incomplete: the runner never sealed this log") {
+					if err != nil || !page.Complete || len(page.Records) != 0 || len(page.Incomplete) != 1 || page.Incomplete[0].Reason != "writer_lost" {
 						t.Fatalf("abandoned logs kept observation open: %+v %v", page, err)
 					}
 					return

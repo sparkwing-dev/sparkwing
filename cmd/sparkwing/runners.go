@@ -656,9 +656,9 @@ func runnerBinaryPath() string {
 
 func errRunnerBinaryMissing() error {
 	return fmt.Errorf("%s is not on PATH and does not sit beside this binary. "+
-		"Install it with `go install github.com/sparkwing-dev/sparkwing/cmd/%s@latest` or from the release assets, "+
+		"Install it from the signed release with `curl -fsSL https://sparkwing.dev/install.sh | sh -s -- --runner`, "+
 		"then run this command again; `--no-service` writes the config without it",
-		runnerBinaryName, runnerBinaryName)
+		runnerBinaryName)
 }
 
 func cleanupNewRunnerService(host runnerservice.Host, path string) error {

@@ -88,7 +88,8 @@ func configureBurstCloudJob(t *testing.T, proof *controller.BurstExecutionProof)
 			t.Fatalf("published Cloud Jobs: %+v %v", jobs, err)
 		}
 		job := jobs.Items[0]
-		if job.Spec.Suspend == nil || *job.Spec.Suspend || job.Spec.Template.Spec.ServiceAccountName != launcher.ServiceAccount || len(job.Spec.Template.Spec.InitContainers) != 1 || job.Spec.Template.Spec.InitContainers[0].Name != "docker" || job.Spec.Template.Spec.Containers[0].Args[0] != "run-node" {
+		runnerArgs := job.Spec.Template.Spec.Containers[0].Args
+		if job.Spec.Suspend == nil || *job.Spec.Suspend || job.Spec.Template.Spec.ServiceAccountName != launcher.ServiceAccount || len(job.Spec.Template.Spec.InitContainers) != 1 || job.Spec.Template.Spec.InitContainers[0].Name != "docker" || len(runnerArgs) < 2 || runnerArgs[0] != launcher.JobBinary || runnerArgs[1] != "run-node" {
 			t.Fatal("burst did not publish the Docker sidecar and execution Job")
 		}
 		secret, err := kube.CoreV1().Secrets("cloud").Get(t.Context(), job.Name, metav1.GetOptions{})

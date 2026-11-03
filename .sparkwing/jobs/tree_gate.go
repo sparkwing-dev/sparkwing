@@ -231,10 +231,3 @@ func recordTreePass(ctx context.Context, mode gateMode) (gatePass, error) {
 		short(key.Tree), key.Fingerprint, key.Engine, mode, short(commit))
 	return pass, nil
 }
-
-func short(sha string) string {
-	if len(sha) > 12 {
-		return sha[:12]
-	}
-	return sha
-}

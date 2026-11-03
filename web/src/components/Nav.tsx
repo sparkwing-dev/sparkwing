@@ -38,7 +38,7 @@ export default function Nav() {
   }, []);
 
   return (
-    <div className="flex flex-wrap sm:flex-nowrap items-center gap-1 px-4 border-b border-[var(--border)] bg-[var(--surface)]">
+    <header className="flex flex-wrap sm:flex-nowrap items-center gap-1 px-4 border-b border-[var(--border)] bg-[var(--surface)]">
       <Link
         href="/"
         prefetch={false}
@@ -51,7 +51,7 @@ export default function Nav() {
       </Link>
       <VersionPill />
       <TeamSwitcher />
-      <div className="order-last sm:order-none flex items-center gap-1 w-full sm:w-auto sm:flex-1 min-w-0 overflow-x-auto ml-0 sm:ml-4 whitespace-nowrap">
+      <nav aria-label="Primary" className="order-last sm:order-none flex items-center gap-1 w-full sm:w-auto sm:flex-1 min-w-0 overflow-x-auto ml-0 sm:ml-4 whitespace-nowrap">
         {visibleTabs.map((tab) => {
           const active = tab.external
             ? false
@@ -105,7 +105,7 @@ export default function Nav() {
             </Link>
           );
         })}
-      </div>
+      </nav>
       <ApprovalsBadge
         pending={pending}
         open={open}
@@ -120,7 +120,7 @@ export default function Nav() {
       <HelpMenu />
       <LogoutControl />
       <LocalLogoutControl />
-    </div>
+    </header>
   );
 }
 

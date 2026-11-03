@@ -105,25 +105,8 @@ func installGoSDK(ctx context.Context, dir string, request engine.SDKInstallRequ
 	// safety: generated sparks overlays can predate an SDK upgrade. The native
 	// manifest owns the engine pin, while the overlay owns the sparks versions.
 	if overlay := bincache.EffectiveOverlay(dir, []string{"GOWORK=off"}); overlay != "" {
-		body, err := os.ReadFile(overlay)
-		if err != nil {
+		if err := refreshOverlayPin(overlay, pin.Version); err != nil {
 			return nil, "", err
-		}
-		file, err := modfile.Parse(overlay, body, nil)
-		if err != nil {
-			return nil, "", err
-		}
-		if err := file.AddRequire(engine.GoModule, pin.Version); err != nil {
-			return nil, "", err
-		}
-		updated, err := file.Format()
-		if err != nil {
-			return nil, "", err
-		}
-		if !bytes.Equal(body, updated) {
-			if err := os.WriteFile(overlay, updated, 0o600); err != nil {
-				return nil, "", err
-			}
 		}
 	}
 	environment, err := GoEnvironment(ctx, dir, pin, environment)
@@ -252,4 +235,41 @@ func installTool(ctx context.Context, dir string, environment procenv.Env, name 
 func installDiagnostic(output io.Writer, masker *secrets.Masker, body []byte, toolErr error) error {
 	_, err := io.WriteString(output, masker.Mask(string(body)))
 	return errors.Join(toolErr, err)
+}
+
+func refreshOverlayPin(overlay, version string) (result error) {
+	// safety: the overlay sits in repository content, so a committed symlink must not redirect this
+	// rewrite to a file outside the pipeline directory on the runner.
+	root, err := os.OpenRoot(filepath.Dir(overlay))
+	if err != nil {
+		return err
+	}
+	defer func() { result = errors.Join(result, root.Close()) }()
+	name := filepath.Base(overlay)
+	info, err := root.Lstat(name)
+	if err != nil {
+		return err
+	}
+	if !info.Mode().IsRegular() {
+		return fmt.Errorf("SDK installation refuses overlay %s: it is not a regular file", overlay)
+	}
+	body, err := root.ReadFile(name)
+	if err != nil {
+		return err
+	}
+	file, err := modfile.Parse(overlay, body, nil)
+	if err != nil {
+		return err
+	}
+	if err := file.AddRequire(engine.GoModule, version); err != nil {
+		return err
+	}
+	updated, err := file.Format()
+	if err != nil {
+		return err
+	}
+	if bytes.Equal(body, updated) {
+		return nil
+	}
+	return root.WriteFile(name, updated, 0o600)
 }

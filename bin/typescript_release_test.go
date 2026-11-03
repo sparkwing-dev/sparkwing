@@ -76,7 +76,23 @@ func TestTypeScriptReleaseRequiresBothNativeBridges(t *testing.T) {
 	checkSDKStep(t, assembly, "Assemble TypeScript package", "release:pack", "--version", "--destination")
 	publication := workflow.Jobs["release"]
 	if publication.Permissions["id-token"] != "write" {
-		t.Fatal("npm provenance requires id-token: write on the publication job")
+		t.Fatal("npm trusted publishing requires id-token: write on the publication job")
+	}
+	checkSDKStep(t, publication, "Install npm for trusted publishing", "npm install -g npm@11.6.2", "npm --version")
+	nodeReady, npmReady := false, false
+	for _, step := range publication.Steps {
+		if strings.HasPrefix(step.Uses, "actions/setup-node@") {
+			nodeReady = true
+		}
+		if step.Name == "Install npm for trusted publishing" {
+			if !nodeReady {
+				t.Fatal("pinned npm must be installed after Node setup")
+			}
+			npmReady = true
+		}
+		if step.Name == "Publish TypeScript package" && !npmReady {
+			t.Fatal("npm must support OIDC before publishing")
+		}
 	}
 	for _, name := range []string{"dashboard", "typescript-package", "release"} {
 		if workflow.Jobs[name].If != "${{ !inputs.verify_only && !inputs.index_only }}" {

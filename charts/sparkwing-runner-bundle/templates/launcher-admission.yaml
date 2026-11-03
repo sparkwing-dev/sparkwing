@@ -99,13 +99,14 @@ spec:
     message: Pods keep cluster DNS, the default scheduler, no service links and no
       system priority class
   - expression: '!variables.create || variables.shape != ''job'' || variables.spec.containers[0].?command.orValue([])
-      == ["sparkwing-runner"] && !has(variables.spec.containers[0].restartPolicy)
-      && (size(variables.spec.containers[0].?args.orValue([])) == 11 || size(variables.spec.containers[0].?args.orValue([]))
-      == 13 && variables.spec.containers[0].args[11] == ''--job'') && variables.spec.containers[0].args[0]
-      == "run-node" && variables.spec.containers[0].args[1] == "--controller" && variables.spec.containers[0].args[3]
-      == "--run" && variables.spec.containers[0].args[5] == "--generation" && variables.spec.containers[0].args[7]
-      == "--module-cache" && variables.spec.containers[0].args[8] == "/tmp/modules"
-      && variables.spec.containers[0].args[9] == "--bootstrap-file" && variables.spec.containers[0].args[10]
+      == ["/bin/sh", "-c", "chmod 1777 /tmp && exec \"$@\"", "sparkwing-job"] && !has(variables.spec.containers[0].restartPolicy)
+      && (size(variables.spec.containers[0].?args.orValue([])) == 12 || size(variables.spec.containers[0].?args.orValue([]))
+      == 14 && variables.spec.containers[0].args[12] == ''--job'') && variables.spec.containers[0].args[0]
+      == "sparkwing-runner" && variables.spec.containers[0].args[1] == "run-node"
+      && variables.spec.containers[0].args[2] == "--controller" && variables.spec.containers[0].args[4]
+      == "--run" && variables.spec.containers[0].args[6] == "--generation" && variables.spec.containers[0].args[8]
+      == "--module-cache" && variables.spec.containers[0].args[9] == "/tmp/modules"
+      && variables.spec.containers[0].args[10] == "--bootstrap-file" && variables.spec.containers[0].args[11]
       == "/etc/sparkwing/bootstrap/bootstrap"'
     message: the workload containers run only the launcher's sparkwing-runner commands
   - expression: '!variables.create || variables.shape == ''job'' ? has(variables.spec.securityContext)
@@ -354,13 +355,14 @@ spec:
     message: Pods keep cluster DNS, the default scheduler, no service links and no
       system priority class
   - expression: '!variables.create || variables.shape != ''job'' || variables.spec.containers[0].?command.orValue([])
-      == ["sparkwing-runner"] && !has(variables.spec.containers[0].restartPolicy)
-      && (size(variables.spec.containers[0].?args.orValue([])) == 11 || size(variables.spec.containers[0].?args.orValue([]))
-      == 13 && variables.spec.containers[0].args[11] == ''--job'') && variables.spec.containers[0].args[0]
-      == "run-node" && variables.spec.containers[0].args[1] == "--controller" && variables.spec.containers[0].args[3]
-      == "--run" && variables.spec.containers[0].args[5] == "--generation" && variables.spec.containers[0].args[7]
-      == "--module-cache" && variables.spec.containers[0].args[8] == "/tmp/modules"
-      && variables.spec.containers[0].args[9] == "--bootstrap-file" && variables.spec.containers[0].args[10]
+      == ["/bin/sh", "-c", "chmod 1777 /tmp && exec \"$@\"", "sparkwing-job"] && !has(variables.spec.containers[0].restartPolicy)
+      && (size(variables.spec.containers[0].?args.orValue([])) == 12 || size(variables.spec.containers[0].?args.orValue([]))
+      == 14 && variables.spec.containers[0].args[12] == ''--job'') && variables.spec.containers[0].args[0]
+      == "sparkwing-runner" && variables.spec.containers[0].args[1] == "run-node"
+      && variables.spec.containers[0].args[2] == "--controller" && variables.spec.containers[0].args[4]
+      == "--run" && variables.spec.containers[0].args[6] == "--generation" && variables.spec.containers[0].args[8]
+      == "--module-cache" && variables.spec.containers[0].args[9] == "/tmp/modules"
+      && variables.spec.containers[0].args[10] == "--bootstrap-file" && variables.spec.containers[0].args[11]
       == "/etc/sparkwing/bootstrap/bootstrap"'
     message: the workload containers run only the launcher's sparkwing-runner commands
   - expression: '!variables.create || variables.shape == ''job'' ? has(variables.spec.securityContext)

@@ -7,8 +7,9 @@ toolchain go1.26.10
 require (
 	github.com/fergusstrange/embedded-postgres v1.34.0
 	github.com/google/go-containerregistry v0.22.1
+	github.com/lib/pq v1.10.9
 	github.com/sparkwing-dev/sparks-core/templates v0.33.5
-	github.com/sparkwing-dev/sparkwing v0.68.2
+	github.com/sparkwing-dev/sparkwing v0.68.6
 	go.yaml.in/yaml/v3 v3.0.4
 	golang.org/x/mod v0.41.0
 	golang.org/x/sys v0.48.0
@@ -18,7 +19,6 @@ require (
 	github.com/docker/cli v29.7.2+incompatible // indirect
 	github.com/docker/docker-credential-helpers v0.9.3 // indirect
 	github.com/klauspost/compress v1.19.2 // indirect
-	github.com/lib/pq v1.10.9 // indirect
 	github.com/opencontainers/go-digest v1.0.0 // indirect
 	github.com/opencontainers/image-spec v1.1.1 // indirect
 	github.com/sirupsen/logrus v1.9.4 // indirect

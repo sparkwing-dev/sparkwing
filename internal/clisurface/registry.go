@@ -392,7 +392,7 @@ func Registry() []Command {
 			"Publication is one-way run/results/logs with local provenance; a publication failure never changes the local run verdict.",
 			"Cache-from reads only authorized verified-default-branch memo/artifacts/depcache; no shared writes or remote binary fetch.",
 			"--sw-output applies to foreground and detached runs; explicit --sw-output beats -o, then SPARKWING_LOG_FORMAT, then terminal detection.",
-			"--sw-only keeps matching jobs and their dependencies. Other declared jobs are skipped. Recovery jobs and jobs added by generators retain their normal rules. --sw-start-at and --sw-stop-at select a window in each job containing the named steps. A job containing neither bound runs all its steps. Unknown step names fail before work starts. --sw-only cannot be combined with either step bound. All three selections are sealed at intake and survive resume and retry.",
+			"--sw-only keeps matching jobs and their dependencies. Other declared jobs are skipped. Recovery jobs and jobs added by generators retain their normal rules. --sw-start-at and --sw-stop-at select a window in each job containing the named steps. A job containing neither bound runs all its steps. Unknown step names fail before work starts. --sw-only cannot be combined with either step bound. All three selections are sealed at intake and survive resume and retry. Child pipelines resolve their own job and step selections because their jobs and steps have separate names.",
 			"--sw-allow-unadmitted selects standalone CI with an exclusive in-process local controller. Give it a private SPARKWING_HOME. Its admission queue and concurrency rules remain active; it does not join shared machine admission. The CLI joins controller shutdown before returning. Detached runs and Cloud routing cannot use this mode.",
 		}, Flags: []Flag{
 			{Name: "publish", Argument: "PROFILE"},
@@ -733,7 +733,7 @@ func Registry() []Command {
 			{Name: "version", Argument: "TAG"},
 			{Name: "dry-run"},
 		}},
-		{Path: "sparkwing update", Rules: []string{"Update installed machine software using verified release assets. Re-render managed timers and restart an installed local-controller service through one upgrade hook, preserving schedules and configuration. A CLI update reports that installed runner services update themselves from their controller; it does not restart them. Repository SDK pins use sparkwing upgrade. --dry-run performs neither action."}, Flags: []Flag{
+		{Path: "sparkwing update", Rules: []string{"Update installed machine software using verified release assets. Re-render managed timers and restart an installed local-controller service through one upgrade hook, preserving schedules and configuration. A CLI update reports that installed runner services update themselves from their controller; it does not restart them. Install sparkwing-runner beside the CLI with install.sh --runner; it then updates itself from verified release assets. Repository SDK pins use sparkwing upgrade. --dry-run performs neither action."}, Flags: []Flag{
 			{Name: "dry-run"},
 			{Name: "force"},
 			{Name: "override-hold"},

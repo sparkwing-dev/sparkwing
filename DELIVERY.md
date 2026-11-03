@@ -199,14 +199,25 @@ tarball. Different bytes, missing integrity, failed lookup and failed publicatio
 stop the job. Package lifecycle scripts run during assembly, with publishing scripts
 disabled when uploading the checked tarball. An identical retry skips publishing
 and leaves all npm tags unchanged. Before each real upload, the publisher runs
-`npm publish --dry-run` with the same arguments, including `--provenance`, and logs
-the JSON file list and packed size. A failed dry run stops the upload. The release
-job grants `id-token: write` for npm provenance.
+`npm publish --dry-run` with the same arguments and logs the JSON file list and
+packed size. A failed dry run stops the upload.
 
-The release repository needs an `NPM_TOKEN` Actions secret authorized to publish
-`@sparkwing/sdk`. An empty secret fails before the publication job signs assets. Native workflow
-definitions and local graph checks do not establish Windows runtime support.
-Both Windows jobs must execute successfully before that evidence is claimed.
+The release job publishes `@sparkwing/sdk` through
+[npm Trusted Publishing](https://docs.npmjs.com/trusted-publishers) with OIDC and
+`id-token: write` on a GitHub-hosted runner. It installs pinned npm 11.6.2 and
+prints its version. Trusted publishing requires npm 11.5.1 or newer and Node
+22.14.0 or newer. npm generates provenance automatically for the public package
+and repository.
+
+In the package's npm settings, configure a GitHub Actions trusted publisher with
+organization `sparkwing-dev`, repository `sparkwing`, and workflow filename
+`release.yaml`. Leave the environment name unset and allow direct `npm publish`.
+Publication needs no Actions secret. Do not set a Node auth token, even to an
+empty value.
+
+Native workflow definitions and local graph checks do not establish Windows
+runtime support. Both Windows jobs must execute successfully before that
+evidence is claimed.
 
 After publication-tool fixes reach `main`, rebuild an existing tag with a new
 dispatch, rather than rerunning an old workflow attempt:
@@ -218,7 +229,7 @@ gh workflow run release.yaml --repo sparkwing-dev/sparkwing --ref main \
 
 This builds `v0.68.1` source, uses `main`'s publication tools (including the npm
 guards), and publishes release assets with image publication skipped. It does
-not create or move the Git tag. `NPM_TOKEN` must already be configured.
+not create or move the Git tag. The trusted publisher must already be configured.
 
 For an accidental npm publication, first move `latest` to a verified good `0.x`
 version and check the result:
@@ -423,10 +434,11 @@ file. Other syntax and workflow checks remain active.
   nor hides the older pass it skipped on. A plain
   local run proves no repository, so it never lets another run skip. The
   existing required `Canonical / gate` check succeeds only after the broad,
-  race and pre-release matrix jobs all succeed. A skipped, cancelled or failed
-  matrix cannot pass that check. Pre-release declares a
-  120-minute execution deadline inside a 130-minute hosted job, leaving ten
-  minutes beyond the node deadline for setup and cleanup.
+  race, pre-release and three `race-store-k-of-3` matrix jobs all succeed. A
+  skipped, cancelled or failed matrix cannot pass that check. Pre-release
+  declares a 120-minute execution deadline inside a 130-minute hosted job,
+  leaving ten minutes beyond the node deadline for setup and cleanup; the
+  race-store lanes run the same pipeline and keep the same deadlines.
   Explicit `source_ref` or `release_tag` overrides run that source's complete
   gate graph in one hosted job, because older refs do not declare a separate
   race job. Normal pull requests and pushes use the split jobs.
@@ -466,9 +478,9 @@ file. Other syntax and workflow checks remain active.
   45-minute timeout on hosted CI without a hung test. The unsharded one-thread
   local nodehost baseline took 687 seconds. Parallel tests within a runtime
   share the same CPU bound. Hosts with capacity for one package retain the
-  ordinary race command. On a four-core single-tenant host, the ordinary and
-  PostgreSQL commands use the same one-thread, two-package bounds on their
-  separate runner. Fitting each hosted deadline and improving cold-start
+  ordinary race command. On a four-core single-tenant host, the ordinary
+  command uses one-thread, two-package bounds on its separate runner, and the
+  PostgreSQL suite runs four one-thread shard processes. Fitting each hosted deadline and improving cold-start
   latency still require measured evidence. The full Go suite uses a 25-minute per-package timeout;
   hosted runs 36678720566 and 36689529462 hit Go's default 10-minute timeout
   in `internal/controller` or `internal/store` while the active tests had run for 0s.
@@ -481,8 +493,23 @@ file. Other syntax and workflow checks remain active.
   `pre-release` runs it instead, as `race-store`, and no release ships past it.
   That step compiles one race-enabled `internal/store` test binary, lists its top-level
   Test, Example and Fuzz names, sorts them and assigns each exactly once across
-  four processes. Every shard runs with `GOMAXPROCS=1`; the separate
-  `internal/store/internal/storetest` package runs once. The step stops sibling
+  four processes per part, longest first onto the least loaded shard using the
+  measured costs in `.sparkwing/jobs/store_race_costs.txt`. A name the table
+  does not know costs the mean of the names it does, and a stale line is
+  ignored. `--race-store-part k/n` (pipeline input) computes the same
+  assignment over `4n` shards on every runner and runs only part k's four;
+  the default runs all four shards of one part. On normal pull requests and
+  pushes, hosted CI runs `--sw-start-at race-store --sw-stop-at race-store --
+  --race-store-part k/3` in three `race-store-k-of-3` lanes, each on its own
+  four-core runner, and the pre-release lane passes `--race-store-part none`,
+  which runs no shard. `TestCanonicalStoreRacePartsCoverEveryPartOnce` fails
+  unless the lanes cover parts 1 to n exactly once whenever pre-release passes
+  `none`. Source and release-tag overrides keep the whole store race inside
+  their one pre-release job. The store race runs without PostgreSQL: a job's
+  environment never inherits `SPARKWING_TEST_*` names, so the PostgreSQL store
+  tests skip under race and run unraced in `store-postgres` against its own
+  embedded server. Every shard runs with `GOMAXPROCS=1`; the separate
+  `internal/store/internal/storetest` package runs once, in part 1. The step stops sibling
   processes on a failure and retains each shard's output in the run log. It
   gives the suite a fresh `SPARKWING_HOME`, clears inherited runner credentials
   and service bindings, and passes `GOWORK=off` into Go commands in worktrees.
@@ -498,7 +525,37 @@ file. Other syntax and workflow checks remain active.
   with TestRefillModel alone at over a minute under race, so the shards run
   the short class (`-test.short`); the tests that guard themselves as slow keep
   running without race in `gate` and on PostgreSQL in `store-postgres`. Later checks remain under the 120-minute node deadline and a
-  130-minute hosted job deadline. The hosted broad and touched-package race
+  130-minute hosted job deadline.
+  **Store race costs, 2026-11-03:** hosted runs 41578268161 and 41590717553
+  each spent about 82 s on `storetest`, 71 s compiling
+  and listing 1,860 names, then four round-robin shards of 54m51s to 64m51s.
+  A local run at c6dff62df (four shards, `CI=1`, `GOMAXPROCS=1`, pinned with
+  `taskset` to four cores of a loaded 16-core host) took 28m11s to 31m49s per
+  shard over 1,862 names, 7,096 s of test time in all, the longest test 189 s.
+  Hosted shards ran 1.93 to 2.13 times their local cost, about 2.03 on
+  average, so the suite is about 240 hosted core-minutes. Round-robin's
+  slowest shard held 7% more than the mean; cost-balanced shards land within
+  a second of each other on the measured table, so balancing alone saves
+  about four hosted minutes of 65. On the same four pinned cores, the
+  balanced four-shard assignment ran 29m52s to 30m38s against round-robin's
+  28m11s to 31m49s, and the pipeline's own part 2 of 3 took 11m21s
+  including pipeline and race compilation. Three parts of four shards hold about
+  591 local seconds, about 20 hosted minutes, per shard. Projected per lane:
+  about 2 minutes of setup, 2.5 minutes of pipeline and race compilation and
+  `storetest` in part 1, and 20 minutes of shards, about 25 minutes, under
+  the broad gate's 32-minute hosted job. Pre-release without the store race
+  takes about 20 minutes: setup, the other checks (10 minutes in run
+  41590717553), and `store-postgres`, which took 7m25s locally on four pinned
+  cores of the same loaded host. With the store race inside it, the same job
+  measured 6,000 s before the PostgreSQL rewrite and projects to about 85
+  minutes after it. The CI workflow's critical path
+  moves from pre-release (100m09s from creation to completion in run
+  41590717553) to the broad gate, about 33 minutes. Runner time rises by
+  about 10 minutes per run, from about 85 to about 95 four-core minutes
+  across pre-release and the race-store lanes, for setup and compilation on
+  three more runners. These are projections from the timings
+  above until a hosted run measures them.
+  The hosted broad and touched-package race
   jobs each keep an 80-minute deadline.
   A Go step's own parallelism depends on who else holds the
   box. A shared host bounds each step to `(cpus-1)/2`, so one gate cannot
@@ -1016,10 +1073,56 @@ file. Other syntax and workflow checks remain active.
   are atomic, and recording prunes anything older than 14 days. Delete the
   directory to force full verification without `--exhaustive`.
 
-- **Store dialect matrix:** `sparkwing run store-postgres` runs
-  `go test ./internal/store/...` with `SPARKWING_TEST_STORE=postgres`, so every
-  store test that opens through `internal/store/storetest` exercises the Postgres
-  dialect instead of a SQLite file. It reuses `SPARKWING_TEST_PG_URL` when
+- **Store dialect matrix:** `sparkwing run store-postgres` runs the
+  `internal/store` tests that exercise PostgreSQL with
+  `SPARKWING_TEST_STORE=postgres`, so every store test that opens through
+  `internal/store/storetest` exercises the Postgres dialect instead of a SQLite
+  file. It compiles one `internal/store` test binary, lists its top-level
+  Test, Example and Fuzz names, and runs every one except two kinds. The
+  internal tests in the files named by
+  `.sparkwing/jobs/store_postgres_sqlite_only.txt` are skipped: the internal
+  package cannot import `storetest`, so those tests and fuzz seeds only ever
+  open SQLite, the full Go suite already runs them, and they cost 432 s of a
+  24m32s hosted-profile run. `TestClaimSecurityRegressions` follows the suite's
+  dialect and so repeats `TestPostgresClaimSecurityRegressions` here; only the
+  PostgreSQL copy runs. Any other test runs, including every test in a new
+  file, so a PostgreSQL path the source scan cannot see, such as a non-test
+  helper, is still exercised. The step logs the count and SHA-256 of the
+  listed, selected and skipped names, and fails when a listed name has no
+  declaration or is placed other than exactly once, or the duplicate pair is
+  no longer listed. It also fails, as does
+  `TestStorePostgresSelectionCoversTheStoreInventory` in `.sparkwing/jobs`,
+  when a named file is missing, declares no internal test, or reaches
+  `SPARKWING_TEST_PG_URL` or the `pgx` driver directly or through a helper or
+  constant in the internal test files; remove such a file from the list. The
+  sorted selection is assigned round-robin, each
+  name exactly once, to one `GOMAXPROCS=1` shard process per core a Go step
+  may hold: four on the hosted four-core runner, the Go step bound
+  (`(cpus-1)/2` shared, `cpus/2` under `CI`) elsewhere. Each shard gets a
+  database of its own, created on the server before the shards start and
+  dropped `WITH (FORCE)` afterwards, because the store's migration advisory
+  lock is per database: shards sharing one database queue every fixture's
+  schema apply behind each other. The shard URL drops `dbname` and `database`
+  query options, which pgx reads over the URL path, and a `service` reference
+  is refused. A run killed outright can leave `sparkwing_store_shard_*`
+  databases on a configured server, and so can a `CREATE DATABASE` whose
+  success reply is lost: the server committed it, but the job saw an error and
+  never tracked the name. Both are rare and fail the run; drop the leftovers
+  by hand with `DROP DATABASE <name> WITH (FORCE)` once no run is using them. A failing shard
+  stops the others. `internal/store/internal/storetest` and
+  `internal/store/teststore` run whole. Measured on 2026-11-02 on a loaded
+  16-core host pinned to four cores with `CI=1` against a shared PostgreSQL 18
+  server: the former single `go test ./internal/store/...` took 28m12s for
+  1,876 top-level tests; selection alone took 14m26s; selection with four shards
+  took 7m10s, and a verbose repeat 6m07s whose shards took 3m10s to 6m04s with
+  each of the 508 selected names passing exactly once. After the selection
+  moved to a reviewed file list, 514 names run: the five other tests in
+  `claim_requirements_test.go` and `TestStoreSQLTrustLiterals` share a file
+  with a PostgreSQL test. A verbose four-shard run on the same pinned cores,
+  with the host otherwise idle, took 5m37s, shards 3m15s to 5m34s, each of the
+  514 passing exactly once. Round-robin leaves
+  `TestAdmissionDeterministicSimulation` (about two minutes) in the longest
+  shard. It reuses `SPARKWING_TEST_PG_URL` when
   that is set and otherwise starts an embedded Postgres on a free port (data
   under a temporary root, binaries cached in `$TMPDIR`), then stops it and
   removes the data directory whether the suite passes, fails, or is
@@ -1028,13 +1131,11 @@ file. Other syntax and workflow checks remain active.
   which embedded-postgres only makes available once the server has stopped.
   A server that will not start is retried once on a fresh port and then
   fails the step. `pre-release` runs it after the race gate, under a
-  thirty-minute timeout. The Go package has a fixed 25-minute timeout because
-  its 1,199 top-level tests run serially in one package binary and took 789
-  seconds in the pipeline with seven workers on an otherwise idle 16-core
-  host, 88 percent of the earlier 15-minute limit. The pipeline took 801
-  seconds end to end. The limit leaves room for the gate's concurrent race
-  suite and stays inside the step's thirty minutes, so a hung test still
-  reports its stack. The first run may also download the Postgres binaries.
+  thirty-minute timeout. Each shard has a 25-minute Go timeout, so a hung test
+  reports its own stack only when the work before the shards start (embedded
+  server start or download, the helper packages, compiling, listing and
+  creating the databases) finishes within the step's other five minutes; past
+  that, the step's thirty-minute deadline cancels the shards without a stack. The first run may also download the Postgres binaries.
 
 - **Hosted pre-release PostgreSQL:** the canonical pre-release job supplies a
   PostgreSQL 17 service through `SPARKWING_TEST_PG_URL`, so `store-postgres`

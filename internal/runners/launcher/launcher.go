@@ -39,6 +39,8 @@ type CloudCapacityObservation struct {
 	Unconfigured bool
 	// Unavailable reports that the Cloud budget breaker refuses new job nodes.
 	Unavailable bool
+	// Ceiling names the launcher's resource ceiling when the request exceeded it.
+	Ceiling *match.Resources
 }
 
 // CloudJobObservation retains the identities needed to reconcile after launcher restart.
@@ -259,6 +261,19 @@ func (l *Launcher) launch(ctx context.Context, award *CloudJobAward) (launched b
 	current := *award
 	current.LeaseExpiresAt = expires
 	r, err := BuildJob(ctx, time.Now(), l.Config, current, l.Boundary)
+	// perf: the controller can end a same-run predecessor after this pass's reconciliation.
+	// Its live Job would hide the handoff, and the demand it prompted would leave Karpenter a
+	// tainted node to replace. Retiring ended awards first makes reuse a teardown wait.
+	if errors.Is(err, ErrNoDedicatedNode) && !errors.Is(err, errPredecessorTeardown) && !award.WaitedForFreshNode && award.teardownDeadline.IsZero() {
+		// safety: a failed check falls back to fresh demand, which the reconciliation loop reports.
+		if retired, retireErr := l.retireEndedPredecessors(ctx, award.Binding); retired && retireErr == nil {
+			r, err = BuildJob(ctx, time.Now(), l.Config, current, l.Boundary)
+		}
+	}
+	if errors.Is(err, errCapacityUnconfigured) {
+		l.wait(award)
+		return true, l.awaitCapacity(ctx, *award)
+	}
 	if errors.Is(err, ErrNoDedicatedNode) {
 		if errors.Is(err, errPredecessorTeardown) {
 			if award.teardownDeadline.IsZero() {

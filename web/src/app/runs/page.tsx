@@ -127,6 +127,11 @@ function usePaneScrollbar() {
   return { scrolling, onScroll };
 }
 
+// runLabel names a run for assistive technology wherever its row is only a dot or a card.
+function runLabel(r: Run): string {
+  return `${r.repo || r.github_repo || "unknown"} / ${r.pipeline} / ${r.git_branch || "unknown branch"} / ${runStartedAt(r) ? fmtFullDate(r.started_at) : `Not started · Queued ${fmtFullDate(runTimestamp(r) ?? "")}`} / ${r.status === "dry_run" ? "dry run" : r.status}`;
+}
+
 function statusDot(status: string): string {
   switch (status) {
     case "success":
@@ -413,6 +418,7 @@ function Pipelines({ pivotTabs }: { pivotTabs: React.ReactNode }) {
   }>({ older: null, newer: null });
   const [runsError, setRunsError] = useState<string | null>(null);
   const [detailError, setDetailError] = useState<string | null>(null);
+  const [missingRun, setMissingRun] = useState<string | null>(null);
   const runsRequest = useRef({ filterState, pageRef, viewKey });
   runsRequest.current = { filterState, pageRef, viewKey };
   const runsSeq = useRef({ next: 0, applied: 0 });
@@ -495,7 +501,6 @@ function Pipelines({ pivotTabs }: { pivotTabs: React.ReactNode }) {
       return;
     }
     if (
-      !d ||
       detailSelectionRef.current !== selection ||
       selection.runID !== runID ||
       request < detailRequestRef.current.committed
@@ -503,6 +508,7 @@ function Pipelines({ pivotTabs }: { pivotTabs: React.ReactNode }) {
       return;
     }
     detailRequestRef.current.committed = request;
+    setMissingRun(d ? null : runID);
     setDetail(d);
     setDetailError(null);
   }, []);
@@ -623,7 +629,10 @@ function Pipelines({ pivotTabs }: { pivotTabs: React.ReactNode }) {
     setFinishedAfter: filterState.setFinishedAfter,
     setFinishedBefore: filterState.setFinishedBefore,
   };
-  const activeDetail = selectedRun ? detail : null;
+  // safety: the previous run's detail holds the panes steady only while the new run's request is pending;
+  // a refused request or a missing run must never leave it standing in for the selected run.
+  const activeDetail =
+    selectedRun && detail && (detail.run.id === selectedRun || !detailError) ? detail : null;
   const detailRun = activeDetail?.run ?? null;
   const topLevel = useMemo(() => {
     const withSelected =
@@ -1145,7 +1154,7 @@ function Pipelines({ pivotTabs }: { pivotTabs: React.ReactNode }) {
                 kind="runs"
                 items={topLevel.map((r) => ({
                   id: r.id,
-                  label: `${r.repo || r.github_repo || "unknown"} / ${r.pipeline} / ${r.git_branch || "unknown branch"} / ${runStartedAt(r) ? fmtFullDate(r.started_at) : `Not started · Queued ${fmtFullDate(runTimestamp(r) ?? "")}`} / ${r.status === "dry_run" ? "dry run" : r.status}`,
+                  label: runLabel(r),
                   dotClass: statusDot(r.status),
                 }))}
                 selectedID={selectedRun}
@@ -1164,21 +1173,24 @@ function Pipelines({ pivotTabs }: { pivotTabs: React.ReactNode }) {
                 {runsError}
               </div>
             )}
+            <div role="list" aria-label="Runs">
             {topLevel.map((r) => {
               const isActive = selectedRun === r.id;
               const isChecked = checkedRuns.has(r.id);
               const isFocused = focusedRun === r.id;
               const isActiveFocus = isFocused && focusedColumn === "runs";
+              const label = runLabel(r);
               return (
                 <div
                   key={r.id}
+                  role="listitem"
                   data-run-id={r.id}
                   onClick={() => {
                     setFocusedRun(r.id);
                     setFocusedColumn("runs");
                     selectRun(isActive ? null : r.id);
                   }}
-                  className={`h-14 overflow-hidden px-3 py-2 border-b border-[var(--border)] border-l-4 cursor-pointer hover:bg-[var(--surface-raised)] transition-colors flex items-start gap-2 ${
+                  className={`relative h-14 overflow-hidden px-3 py-2 border-b border-[var(--border)] border-l-4 cursor-pointer hover:bg-[var(--surface-raised)] transition-colors flex items-start gap-2 ${
                     isChecked
                       ? "bg-violet-500/15 border-l-violet-400"
                       : "border-l-transparent"
@@ -1190,6 +1202,19 @@ function Pipelines({ pivotTabs }: { pivotTabs: React.ReactNode }) {
                         : ""
                   }`}
                 >
+                  {/* The card holds filter, retry and checkbox controls, so it cannot be one
+                      button itself; this button's click bubbles to the card's handler. */}
+                  <button
+                    type="button"
+                    data-run-select
+                    aria-pressed={isActive}
+                    aria-label={`Run ${label}`}
+                    onFocus={() => {
+                      setFocusedRun(r.id);
+                      setFocusedColumn("runs");
+                    }}
+                    className="sr-only"
+                  />
                   {!paneOpen && (
                     <label
                       onClick={(e) => e.stopPropagation()}
@@ -1200,7 +1225,7 @@ function Pipelines({ pivotTabs }: { pivotTabs: React.ReactNode }) {
                         type="checkbox"
                         checked={isChecked}
                         onChange={() => toggleChecked(r.id)}
-                        aria-label="select run"
+                        aria-label={`Select ${label} for bulk actions`}
                         className="mt-1 cursor-pointer accent-violet-500"
                       />
                     </label>
@@ -1216,6 +1241,7 @@ function Pipelines({ pivotTabs }: { pivotTabs: React.ReactNode }) {
                 </div>
               );
             })}
+            </div>
             {topLevel.length === 0 && !runsError && (
               <div className="p-8 text-center text-[var(--muted)] text-sm">
                 {pageRef.kind !== "latest"
@@ -1325,6 +1351,21 @@ function Pipelines({ pivotTabs }: { pivotTabs: React.ReactNode }) {
 
         {
                                                                  }
+        {!run && selectedRun && missingRun === selectedRun && (
+          <div role="alert" className="flex-1 flex flex-col items-center justify-center gap-3 p-8 text-center text-sm">
+            <h2 className="font-bold">Run not found</h2>
+            <p className="text-[var(--muted)]">
+              No run <span className="font-mono">{selectedRun}</span> exists in this team, or you cannot see it.
+            </p>
+            <button
+              type="button"
+              onClick={() => selectRun(null)}
+              className="text-xs px-3 py-1.5 rounded border border-[var(--border)] text-[var(--foreground)] hover:bg-[var(--surface-raised)]"
+            >
+              Back to all runs
+            </button>
+          </div>
+        )}
         {run && (
           <div className="flex-1 flex flex-col overflow-hidden">
             <RunDetailPane

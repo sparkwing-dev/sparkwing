@@ -92,7 +92,7 @@ func TestGateRaceTargetsDropAModuleLeftEmpty(t *testing.T) {
 // release that dropped the step would ship a store race nothing looked for.
 func TestPreReleaseRacesTheStore(t *testing.T) {
 	var found string
-	for _, check := range preReleaseChecks() {
+	for _, check := range preReleaseChecks(raceStorePart{index: 1, count: 1}) {
 		if check.id == "race-store" {
 			found = check.id
 		}

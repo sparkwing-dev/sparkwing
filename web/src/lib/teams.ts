@@ -443,9 +443,16 @@ export function parseRepoPatterns(input: string): string[] {
     .filter((s) => s.length > 0);
 }
 
+// A personal machine claims only its owner's asserted runs, which a repository
+// scope refuses, so it enrolls unscoped; a shared runner needs a scope.
+export function machineRepos(personal: boolean, input: string): string[] | null {
+  if (personal) return [];
+  const repos = parseRepoPatterns(input);
+  return repos.length > 0 ? repos : null;
+}
+
 export function runnerConnectCommand(
   minted: Pick<MintedMachineToken, "capability" | "grants">,
-  name: string,
   repos: string[],
   controllerURL: string,
 ): string {
@@ -454,14 +461,16 @@ export function runnerConnectCommand(
   const dir = '"$HOME/.config/sparkwing/runner-credentials"';
   return [
     `(umask 077 && mkdir -p ${dir} && rm -f ${dir}/agent-token && printf '%s' ${quoted(minted.capability)} > ${dir}/agent-token) &&`,
-    `sparkwing-runner runner --credentials-dir ${dir}`,
+    `sparkwing-runner warm --credentials-dir ${dir}`,
     `--controller ${quoted(controllerURL)}`,
-    ...repos.map((r) => `--allow-repo '${r.replace(/'/g, `'\\''`)}'`),
-    ...(minted.grants.includes("triggers.claim") ? ["--also-claim-triggers"] : []),
-    ...(!minted.grants.includes("nodes.claim") ? ["--claim-nodes=false"] : []),
-    "--max-claims-before-restart 0 --metrics-addr=",
-    `--holder-prefix ${quoted(name)}`,
+    ...repos.map((r) => `--repos '${r.replace(/'/g, `'\\''`)}'`),
+    ...(!minted.grants.includes("triggers.claim") ? ["--also-claim-triggers=false"] : []),
+    ...(!minted.grants.includes("nodes.claim") ? ["--claim-jobs=false"] : []),
   ].join(" ");
+}
+
+export function cliProfileCommand(team: string, controllerURL: string): string {
+  return `sparkwing profiles add --controller ${controllerURL} --profile ${team} --token-stdin`;
 }
 
 // A CLI token without runs.write reads runs but cannot start one, which is

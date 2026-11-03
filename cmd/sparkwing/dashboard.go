@@ -138,5 +138,9 @@ func executeDashboard(ctx context.Context, inv clisurface.Invocation, services d
 	if err != nil {
 		return result, err
 	}
-	return localStatusResult("dashboard", action, status), nil
+	result = localStatusResult("dashboard", action, status)
+	if action == "stop" || action == "status" {
+		result.Warning = olderDashboardWarning(services.options.Home)
+	}
+	return result, nil
 }

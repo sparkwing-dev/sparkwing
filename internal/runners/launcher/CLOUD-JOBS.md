@@ -83,7 +83,8 @@ digests are CEL literals.
   links are off and no `system-` priority class may be named. The fields come
   from the vendored k8s.io/api, so a field a newer API server adds stays
   unpinned until that dependency moves.
-- `run-node` dispatches `sparkwing-runner` with the launcher's fixed flag grammar.
+- `run-node` sets the scratch mount at `/tmp` to mode `1777` before execing
+  `sparkwing-runner` with the launcher's fixed flag grammar.
   Only the controller, run, generation and job values vary.
 - The sidecar's profile allows `unshare`, `clone` and `setns` without an
   argument filter, so a nested container can create its own user namespace,
@@ -565,13 +566,22 @@ with the cleanup finalizer, the successor waits up to 30 seconds before requesti
 fresh capacity. A work or eval award also waits for its planning Job before Kubernetes
 marks that Job for deletion: the controller can award work as planning exits.
 Only that predecessor's Pods and DaemonSets may occupy the node.
-Normal reconciliation retries teardown before placement. Live work reservations still
-permit fanout. Foreign runs, damaged bindings and quarantined nodes never earn
+Normal reconciliation retries teardown before placement. The controller can also
+end a work predecessor and award its dependent between reconciliation and claim.
+So before a fresh award's first capacity request, the launcher asks the controller
+about the run's other live Jobs, tears down those whose awards ended and places
+again, and the successor waits for that teardown instead of creating demand that
+cannot fit on the reserved node and would make Karpenter add one. Live work
+reservations still permit fanout. Known residual: while an ended predecessor's
+log stream is still unsealed, the controller defers its retirement for up to the
+log seal grace, so this check leaves it alone and the successor still requests
+fresh capacity. That can add one node that the run never uses. Foreign runs, damaged bindings and quarantined nodes never earn
 this wait. The deadline belongs to the held award and does not renew on retries.
 A held award has no Job or capacity Pod to renew it, so every pass retries its
 placement and renews its fence even while a claim backoff delays new claims.
 `TestSuccessorWaitsForPredecessorNode`, `TestTeardownWaitIsBoundedAndRunScoped`
 and `TestTeardownWaitRenewsThroughClaimBackoff` guard reuse, the fallback and renewal.
+`TestSuccessorAwardedBeforePredecessorRetirementReusesNode` guards the work-to-work gap.
 `TestRunAndRetryPlanHandoffCreateOnlyOneNodeClaim` guards the plan-to-work gap for
 normal runs and retries, including launcher restarts.
 
@@ -642,11 +652,21 @@ reads shared NodePool templates. A compatible pool carries
 `sparkwing.dev/launcher-namespace=<job namespace>` and the generic
 `sparkwing.dev/dedicated=true:NoSchedule` taint, and permits Linux Cloud jobs.
 Readiness, limits, provider availability and deleting pools do not prove missing
-configuration. A failed list retries. No compatible pool for the requested
-class terminally reports `cloud_capacity_unconfigured` through the fenced
+configuration. A failed list retries. Requests above the launcher's CPU or
+memory ceiling and requests with no compatible pool for the requested
+class terminally report `cloud_capacity_unconfigured` through the fenced
 launcher sync. The controller releases the unstarted credit reservation in the
-same transaction. The launcher deletes demand and logs the requested class and
-run ID. Customer guidance names support@sparkwing.dev and the run reference.
+same transaction. The launcher deletes demand. A request above a ceiling reports
+the launcher's CPU and memory ceilings with the failure, and its customer error
+names the requested class, CPU and memory, the ceilings, and the remedies of a
+smaller hardware class or asking support@sparkwing.dev to raise the ceiling. The
+launcher logs that customer-caused refusal at INFO with the requested and
+configured sizes. A controller older than the ceiling field refuses the whole
+sync before writing anything, so the launcher resends that sync without ceilings
+and the customer gets the generic guidance. An older launcher never sends the
+field, and the current controller treats its failure the same way. A missing pool keeps the generic guidance naming
+support@sparkwing.dev and the run reference, and logs at ERROR because the
+operator must configure it.
 
 With a compatible pool, the launcher reads `budget-state` from its credentials
 directory before creating demand. `closed` means the Cloud budget breaker has

@@ -26,17 +26,43 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
 )
 
-type publicationLogReader struct{ controllerwire.LogReader }
+type publicationLogReader struct {
+	controllerwire.LogReader
+	lost string
+}
 
-func (publicationLogReader) ReadLogs(_ context.Context, run string, _ controllerwire.LogQuery) (controllerwire.LogPage, error) {
+func (r publicationLogReader) ReadLogs(_ context.Context, run string, q controllerwire.LogQuery) (controllerwire.LogPage, error) {
 	a := runspec.AttemptIdentity{Team: "local", RunID: run, NodeID: "job", Attempt: 1, Generation: 1}
-	return controllerwire.LogPage{Complete: true, Records: []controllerwire.LogRecord{{RunID: run, LineNo: 1, Line: "masked local output ***", Subject: &blob.LogSubject{Kind: blob.LogJobAttempt, Team: "local", RunID: run, Attempt: &a}}}}, nil
+	subject := blob.LogSubject{Kind: blob.LogJobAttempt, Team: "local", RunID: run, Attempt: &a}
+	record := func(n int64, line string) controllerwire.LogRecord {
+		return controllerwire.LogRecord{RunID: run, LineNo: n, Line: line, Subject: &subject}
+	}
+	if r.lost == "" {
+		return controllerwire.LogPage{Complete: true, Records: []controllerwire.LogRecord{record(1, "masked local output ***")}}, nil
+	}
+	if q.Cursor == "" {
+		return controllerwire.LogPage{Truncated: true, NextCursor: "tail", Records: []controllerwire.LogRecord{record(1, "masked local output ***")}, Incomplete: []controllerwire.LogIncomplete{{Subject: subject, Reason: r.lost}}}, nil
+	}
+	return controllerwire.LogPage{Complete: true, NextCursor: "end", Records: []controllerwire.LogRecord{record(2, "retained tail")}}, nil
 }
 
 func TestProfilePublicationImportsRecordsAndLogsWithoutClaims(t *testing.T) {
 	for _, outcome := range []string{"success", "failed"} {
 		t.Run(outcome, func(t *testing.T) {
-			profilePublication(t, outcome, "CLAUDE_CODE_MESSAGING_TOKEN", "AWS_PAGER", "KUBECONFIG", "WSL_DISTRO_NAME")
+			if page := profilePublication(t, outcome, publicationLogReader{}, "CLAUDE_CODE_MESSAGING_TOKEN", "AWS_PAGER", "KUBECONFIG", "WSL_DISTRO_NAME"); len(page.Incomplete) != 0 {
+				t.Fatalf("complete local logs published as incomplete: %+v", page.Incomplete)
+			}
+		})
+	}
+}
+
+func TestProfilePublicationKeepsSourceLogLossMarkers(t *testing.T) {
+	for _, reason := range []string{"writer_lost", "byte cap"} {
+		t.Run(reason, func(t *testing.T) {
+			page := profilePublication(t, "success", publicationLogReader{lost: reason})
+			if len(page.Records) != 2 || len(page.Incomplete) != 1 || page.Incomplete[0].Reason != reason {
+				t.Fatalf("published copy dropped the source loss marker %q: %+v", reason, page)
+			}
 		})
 	}
 }
@@ -51,11 +77,11 @@ func FuzzProfilePublicationExcludesShellEnvironment(f *testing.F) {
 		if len(raw) > 128 {
 			t.Skip()
 		}
-		profilePublication(t, "failed", "PRIVATE_SHELL_"+hex.EncodeToString(raw))
+		profilePublication(t, "failed", publicationLogReader{}, "PRIVATE_SHELL_"+hex.EncodeToString(raw))
 	})
 }
 
-func profilePublication(t *testing.T, outcome string, shellNames ...string) {
+func profilePublication(t *testing.T, outcome string, logs publicationLogReader, shellNames ...string) controllerwire.LogPage {
 	t.Helper()
 	objects, err := blob.NewFilesystem(blob.FilesystemOptions{Directory: t.TempDir(), Endpoint: "https://objects.test", SigningKey: bytes.Repeat([]byte{1}, 32)})
 	if err != nil {
@@ -138,7 +164,7 @@ func profilePublication(t *testing.T, outcome string, shellNames ...string) {
 		}
 		state.Records = append(state.Records, record)
 	}
-	run, err := client.PublishLocalRun(t.Context(), options, client.PublicationInput{State: runstate.LocalPublication{RunSnapshot: state.RunSnapshot.ExecutionSnapshot(), Records: state.Records, Results: state.Results}, Logs: publicationLogReader{}, OpenBlob: func(_ context.Context, digest blob.Digest) (io.ReadCloser, int64, error) {
+	run, err := client.PublishLocalRun(t.Context(), options, client.PublicationInput{State: runstate.LocalPublication{RunSnapshot: state.RunSnapshot.ExecutionSnapshot(), Records: state.Records, Results: state.Results}, Logs: logs, OpenBlob: func(_ context.Context, digest blob.Digest) (io.ReadCloser, int64, error) {
 		body, ok := content[digest]
 		if !ok {
 			return nil, 0, fmt.Errorf("unselected digest %s", digest)
@@ -192,7 +218,7 @@ func profilePublication(t *testing.T, outcome string, shellNames ...string) {
 		t.Fatal(err)
 	}
 	page, err := reader.ReadLogs(t.Context(), run, controllerwire.LogQuery{Job: "job", NoEvents: true})
-	if err != nil || !page.Complete || len(page.Records) != 1 || !strings.Contains(page.Records[0].Line, "masked local output ***") {
+	if err != nil || !page.Complete || len(page.Records) == 0 || !strings.Contains(page.Records[0].Line, "masked local output ***") {
 		t.Fatalf("published retained logs: %+v %v", page, err)
 	}
 	if outcome == "success" {
@@ -202,6 +228,7 @@ func profilePublication(t *testing.T, outcome string, shellNames ...string) {
 	if err := teststore.SQL(t, s.store).QueryRowContext(t.Context(), `SELECT count(*) FROM capabilities WHERE bind_run=? AND revoked_at IS NULL`, run).Scan(&active); err != nil || active != 0 {
 		t.Fatalf("publication left live credentials: %d %v", active, err)
 	}
+	return page
 }
 
 func profileCacheRead(t *testing.T, state *store.Store, options client.EngineOptions, output, manifest blob.RecordKey) {

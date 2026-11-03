@@ -267,7 +267,8 @@ sources settle the barrier without running the generator.
 The host rejects retry declarations above its ceiling of 10. Backoff doubles
 between retries, up to five minutes. Application retries keep the claim and
 advance the attempt ordinal. Lease-loss recovery has a separate disruption
-allowance.
+allowance. When all application attempts fail, the final job error reports the
+attempt count and last error. Fix that error before retrying the run.
 
 `Timeout(duration)` bounds each attempt. `NoProgressTimeout(duration)` bounds
 inactivity during the body and verification. Observable log records reset the
@@ -502,7 +503,10 @@ shell script for a step. Use Exec to run a command such as `go test ./...`.
 Both return a command builder with `Dir`, `Env` and `EnvMap`.
 Terminators include `Run`, `Capture`, `String`, `Lines`, `JSON` and `MustBeEmpty`.
 Handle returned errors to fail the step. `ExecError` carries exit status and
-captured output. `WorkDir()` returns the repository working directory.
+captured output. When a context deadline kills a command, `Terminated` is
+`"timeout"` and the error names the deadline. `errors.Is(err, context.DeadlineExceeded)`
+recognizes the cause. Increase the context timeout or make the command faster.
+`WorkDir()` returns the repository working directory.
 It reads the process working directory. In author tests, use `t.Chdir(root)`
 to select a fixture repository. Go restores the directory after the test.
 
@@ -568,3 +572,80 @@ Planning cannot read service answers because it has no execution binding.
 Execution uses the same SDK declarations and operation rules as protocol
 serving. The fake host provides focused author tests. Real-host acceptance tests
 cover scheduling, storage and authorization integration.
+
+## Runnable staging integration gate
+
+In the Sparkwing source checkout, `sparkwing run example` runs the SDK tour
+and named integration assertions in parallel. The default local path needs no
+Cloud or Docker and targets a wall time below two minutes. The tour includes
+an approval that approves after one second and an optional failing canary.
+Those canary failures demonstrate collected errors and do not fail the run.
+The tour emits its simulated build and deploy logs without pacing delays so
+idle waits do not hold integration capacity.
+
+The assertions cover a two-axis matrix, job and predecessor step outputs,
+generated jobs, a dynamic same-repository child, dependency cache save and
+restore, memo reuse, artifacts, cancellation, and CLI reads of controller logs
+and run history. `memoized-step` puts one step in a memoized job because memo
+policies belong to jobs. Lifecycle assertions start the small `example-probe`
+pipeline as separate runs through the CLI. Use `--api-profile NAME` to exercise
+a configured controller instead of the local controller, and `--cli PATH` to
+select its matching CLI. No profile means local. The host retains cancellation
+cleanup for detached probes until the gate observes a terminal state, including
+for the optional reference run. A failed or interrupted observation keeps that
+cleanup armed. Cache and artifact assertions require the current run's marker
+so older stored bytes cannot satisfy a failed save or delivery.
+
+With a local SDK replacement, keep tool caches in Git-ignored paths such as
+`.sparkwing/cache/golangci-lint`. The pipeline binary cache hashes non-ignored
+replacement files, so an active tool cache inside the checkout can invalidate
+binary reuse.
+
+The dependency-cache path includes the run ID to force a cold seed, because
+restored cache keys are not saved again.
+Child waits use their job's 90-second deadline, including queue time, instead
+of a shorter nested deadline. This leaves the job one budget for admission and
+execution.
+The cancellation probe waits for the long job's body log before requesting
+cancellation, so it exercises running work rather than SDK startup.
+Use `--sw-only dynamic-child` to focus that assertion. The child resolves its
+own job and step selections, so its `stamp` job still runs.
+
+```bash
+sparkwing run example -- --fail-once
+sparkwing run example -- --secret-name EXAMPLE_GATE_SECRET
+sparkwing run example -- --smoke-profile staging --smoke-checkout /path/to/sparkwing-ci-smoke
+```
+
+`--fail-once` asks the probe to fail on its first attempt. The failed-only retry
+must reuse its successful predecessors, read their outputs and finish green.
+`--secret-name` selects the declared optional secret `EXAMPLE_GATE_SECRET`.
+The secret job skips with a reason when no name or stored value is configured.
+OIDC skips only when the run has no issuer. Otherwise it mints a token and
+asserts its audience, run, pipeline, issuer, subject and validity window.
+Docker skips with a reason unless the runner advertises Docker or has a usable
+daemon. `--child-branch` selects another same-repository branch tip when source
+provenance is available.
+
+The final `reference-pipeline` job submits `reference` from the supplied
+`sparkwing-ci-smoke` checkout through `pipeline trigger`, waits for the separate
+run and requires successful `hello` and `docker-test` jobs. Set
+`--smoke-pipeline` if that repository uses another pipeline name. It skips when
+`--smoke-profile` is absent. Cross-repository child runs are refused, so this
+job uses an independent trigger rather than `RunAndAwait`.
+
+A TypeScript twin lives in `examples/staging-typescript` as a separate project
+because SDK selection applies to the whole pipeline directory. Test its native
+feature assertions through the SDK protocol with Node 22.18 or newer:
+
+```bash
+npm --prefix examples/staging-typescript/.sparkwing test
+```
+
+These checks cover output replay, skip reasons, OIDC signatures, stale artifacts
+and memo reuse assertions with controlled host services. Running the twin
+through the candidate CLI is blocked: its local-file SDK dependency resolves
+the development version `0.0.0`, which requires a verified `v0.0.0` engine. The
+Go local replacement path can use the candidate CLI, while TypeScript has no
+corresponding path. The twin's README names the stamped SDK and matching engine
+prerequisites. The Go example remains the executable candidate staging gate.

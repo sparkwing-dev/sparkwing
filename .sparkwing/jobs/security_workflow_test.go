@@ -84,6 +84,28 @@ func TestReleasePublicationRetainsItsSerializedQueue(t *testing.T) {
 	}
 }
 
+func TestReleasePublicationUsesTokenlessNpmOIDC(t *testing.T) {
+	body := readHostedCIFile(t, ".github/workflows/release.yaml")
+	for _, forbidden := range []string{"NPM_TOKEN", "NODE_AUTH_TOKEN", "Check npm publication credential"} {
+		if strings.Contains(body, forbidden) {
+			t.Errorf("release workflow must use npm trusted publishing without %s", forbidden)
+		}
+	}
+	var doc yaml.Node
+	if err := yaml.Unmarshal([]byte(body), &doc); err != nil {
+		t.Fatal(err)
+	}
+	publication := mappingValue(mappingValue(&doc, "jobs"), "release")
+	permission := mappingValue(mappingValue(publication, "permissions"), "id-token")
+	if permission == nil || permission.Value != "write" {
+		t.Fatal("npm trusted publishing requires id-token: write on the publication job")
+	}
+	runner := mappingValue(publication, "runs-on")
+	if runner == nil || runner.Value != "ubuntu-latest" {
+		t.Fatal("npm trusted publishing requires a GitHub-hosted publication runner")
+	}
+}
+
 func TestReleaseQueueContractRefusesUnsafeOrUncoveredConfiguration(t *testing.T) {
 	const valid = "jobs:\n  release:\n    concurrency:\n      group: release-publication\n      queue: max\n      cancel-in-progress: false\n"
 	if err := releaseQueueContract(valid); err != nil {
@@ -349,13 +371,22 @@ func TestSecurityWorkflowHasNoPrivateInfrastructureSurface(t *testing.T) {
 
 func TestGitleaksExclusionsCannotHideRepositoryPaths(t *testing.T) {
 	body := readHostedCIFile(t, ".gitleaks.toml")
+	for _, global := range strings.Split(body, "[[allowlists]]")[1:] {
+		if strings.Contains(strings.SplitN(global, "[[rules", 2)[0], "paths =") {
+			t.Fatal("global gitleaks allow-list excludes a repository path")
+		}
+	}
 	sections := strings.Split(body, "[[rules]]")
 	if strings.Contains(sections[0], "paths =") {
 		t.Fatal("global gitleaks allow-list excludes a repository path")
 	}
 	for _, section := range sections[1:] {
 		blocks := strings.Split(section, "[[rules.allowlists]]")
-		rule := strings.TrimSpace(blocks[0])
+		rule := strings.TrimSpace(strings.SplitN(blocks[0], "[[allowlists]]", 2)[0])
+		// safety: a rule with its own regex and no exceptions only adds detection, so it cannot hide a path.
+		if len(blocks) == 1 && strings.Contains(rule, "regex = ") && !strings.Contains(rule, "paths") && !strings.Contains(rule, "allowlist") {
+			continue
+		}
 		if rule != `id = "generic-api-key"` && rule != `id = "private-key"` && rule != `id = "curl-auth-header"` {
 			t.Fatalf("unexpected gitleaks rule override: %s", rule)
 		}

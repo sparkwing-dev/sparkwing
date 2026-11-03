@@ -50,6 +50,9 @@ Remote API submissions must describe uploaded snapshots as committed checkouts
 with their bundle digest. The `source.working_tree` field requires a local
 checkout and is refused at intake when one is absent. The CLI's
 `pipeline trigger --working-tree` prepares the remote snapshot automatically.
+Declared children in the same team reuse the parent's retained bundle when the
+repository, ref, execution commit, pipeline commit and bundle digest all match.
+Unrelated runs require their own committed upload.
 Sparkwing Cloud uses the launcher for plan, evaluation and work Jobs. Every Job
 runs a rootful DinD sidecar inside its user-namespaced pod, never privileged and
 with namespaced capabilities only, on a node bound to one team and run, with
@@ -92,7 +95,11 @@ Users can cancel while waiting.
 Missing shared capacity for the requested class ends the unit with
 `cloud_capacity_unconfigured`, releases its unstarted credit hold, and gives
 support@sparkwing.dev plus the run ID as a support reference. Configure that
-class's shared pool and trigger a new run. Pool-list failures retry. NodePools
+class's shared pool and trigger a new run. A request above the launcher's CPU or
+memory ceiling ends the same way, but its error names the requested class, CPU
+and memory and the ceilings, and says to request a smaller class or ask
+support@sparkwing.dev to raise the ceiling. The launcher logs that refusal at
+INFO. Pool-list failures retry. NodePools
 need `consolidateAfter` above the 3-minute award lease.
 
 A Cloud budget breaker stops Karpenter from launching job nodes and publishes

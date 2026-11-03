@@ -6,9 +6,11 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 )
 
 func TestStorePostgresLayoutKeepsDataOutOfTheToolCache(t *testing.T) {
@@ -60,19 +62,6 @@ func TestFreeLocalPortReturnsAnUnprivilegedPort(t *testing.T) {
 	}
 	if other == port {
 		t.Fatalf("two reservations returned the same port %d", port)
-	}
-}
-
-func TestStorePostgresCommandBoundsParallelismAndPackageTime(t *testing.T) {
-	t.Parallel()
-	if got, want := storePostgresGoCommand(hostShape{cpus: 4, singleTenant: true}), "GOMAXPROCS=1 go test -p 2 -timeout 40m -count=1 ./internal/store/..."; got != want {
-		t.Fatalf("four-core hosted command = %q, want %q", got, want)
-	}
-	if got, want := storePostgresGoCommand(hostShape{cpus: 4}), "GOMAXPROCS=1 go test -p 1 -timeout 40m -count=1 ./internal/store/..."; got != want {
-		t.Fatalf("four-core shared command = %q, want %q", got, want)
-	}
-	if got, want := storePostgresGoCommand(hostShape{cpus: 14}), "GOMAXPROCS=6 go test -p 6 -timeout 40m -count=1 ./internal/store/..."; got != want {
-		t.Fatalf("store-postgres go command = %q, want %q", got, want)
 	}
 }
 
@@ -219,5 +208,64 @@ func TestStorePostgresRunKeepsRemovingWhenTheServerWillNotStart(t *testing.T) {
 	}
 	if !removed.Load() {
 		t.Error("a failed start left the data directory behind")
+	}
+}
+
+func TestStorePostgresShardsFollowTheGoStepBound(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		host hostShape
+		want int
+	}{
+		{hostShape{cpus: 4, singleTenant: true}, 4},
+		{hostShape{cpus: 4}, 1},
+		{hostShape{cpus: 8, singleTenant: true}, 4},
+		{hostShape{cpus: 16}, 7},
+		{hostShape{cpus: 2}, 1},
+	} {
+		if got := storePostgresShardCount(tc.host); got != tc.want {
+			t.Errorf("storePostgresShardCount(%+v) = %d, want %d", tc.host, got, tc.want)
+		}
+	}
+}
+
+func TestStorePostgresShardDatabaseKeepsTheServerAndOptions(t *testing.T) {
+	t.Parallel()
+	got, err := storePostgresDatabaseURL("postgres://sw:sw@127.0.0.1:55432/sw?sslmode=disable", "sparkwing_store_shard_ab_1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := "postgres://sw:sw@127.0.0.1:55432/sparkwing_store_shard_ab_1?sslmode=disable"; got != want {
+		t.Fatalf("shard URL = %q, want %q", got, want)
+	}
+	for base, want := range map[string]string{
+		"postgres://sw:sw@127.0.0.1:55432/sw?dbname=shared&sslmode=disable": "postgres://sw:sw@127.0.0.1:55432/sparkwing_store_shard_ab_1?sslmode=disable",
+		"postgresql://sw@127.0.0.1/?database=shared":                        "postgresql://sw@127.0.0.1/sparkwing_store_shard_ab_1",
+	} {
+		got, err := storePostgresDatabaseURL(base, "sparkwing_store_shard_ab_1")
+		if err != nil || got != want {
+			t.Errorf("shard URL from %q = %q, %v, want %q without the overriding option", base, got, err, want)
+		}
+	}
+	for _, dsn := range []string{"host=localhost user=sw dbname=sw", "mysql://localhost/sw", "postgres://localhost/sw?service=ci"} {
+		if _, err := storePostgresDatabaseURL(dsn, "x"); err == nil {
+			t.Errorf("accepted %q, which names no postgres:// URL", dsn)
+		}
+	}
+}
+
+func TestStorePostgresShardTimeoutEndsInsideTheStep(t *testing.T) {
+	t.Parallel()
+	args := storePostgresShardArgs([]string{"TestA"})
+	i := slices.IndexFunc(args, func(arg string) bool { return strings.HasPrefix(arg, "-test.timeout=") })
+	if i < 0 {
+		t.Fatalf("shard args %q set no timeout", args)
+	}
+	timeout, err := time.ParseDuration(strings.TrimPrefix(args[i], "-test.timeout="))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if timeout >= storePostgresPrePushTimeout {
+		t.Fatalf("shard timeout %s does not end before the step's %s, so a hung test would print no stack", timeout, storePostgresPrePushTimeout)
 	}
 }

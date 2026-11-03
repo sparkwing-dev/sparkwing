@@ -7,12 +7,14 @@ import (
 	"fmt"
 	"net/http"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controller/client"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
+	"github.com/sparkwing-dev/sparkwing/internal/limits"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/storage/logseg"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
@@ -165,5 +167,48 @@ func retryLogUploads(t *testing.T, timing string, cloud bool, outcome string) {
 		}) {
 			t.Fatalf("missing attempt %d output: %+v", ordinal, page.Records)
 		}
+	}
+}
+
+func TestRetryLogPagesReturnLostWriterBeforeAndAfterMaintenance(t *testing.T) {
+	for _, maintained := range []bool{false, true} {
+		t.Run(fmt.Sprintf("maintained=%v", maintained), func(t *testing.T) {
+			var body strings.Builder
+			for i := range logPageRecords + 1 {
+				fmt.Fprintf(&body, "retained %d\n", i)
+			}
+			logs, subject, st := committedDashboardLogs(t, []byte(body.String()))
+			finished := teststore.Now(st).Add(-2 * limits.LogSealGrace).UnixNano()
+			engineSQL(t, st, `UPDATE log_streams SET completeness='open',sealed_at=NULL WHERE subject_kind='job_attempt'`)
+			engineSQL(t, st, `UPDATE node_attempts SET outcome='failed',started_at=?,finished_at=? WHERE team='a' AND run_id='run'`, finished, finished)
+			engineSQL(t, st, `UPDATE nodes SET attempt=attempt+1 WHERE team='a' AND run_id='run'`)
+			engineSQL(t, st, `UPDATE runs SET status='success',started_at=?,finished_at=? WHERE team='a' AND id='run'`, finished, finished)
+			if maintained {
+				if n, err := st.AsOperator().SealAbandonedLogStreams(t.Context(), 10); err != nil || n != 1 {
+					t.Fatalf("maintenance: %d %v", n, err)
+				}
+			}
+			reader, _ := memberLogSearchReader(t, st, logs.objs.(blob.ObjectBackend))
+			q := controllerwire.LogQuery{Job: "job", NoEvents: true}
+			for i := range 3 {
+				page, err := reader.ReadLogs(t.Context(), "run", q)
+				if err != nil {
+					t.Fatalf("page %d: %v", i, err)
+				}
+				want := []int{logPageRecords, 1, 0}[i]
+				if len(page.Records) != want || page.Truncated != (i == 0) || page.Complete != (i > 0) {
+					t.Fatalf("page %d: %+v", i, page)
+				}
+				for j, record := range page.Records {
+					if record.Line != fmt.Sprintf("retained %d", i*logPageRecords+j) {
+						t.Fatalf("page %d repeated or skipped output: %+v", i, record)
+					}
+				}
+				if len(page.Incomplete) != 1 || page.Incomplete[0].Reason != "writer_lost" || page.Incomplete[0].Subject.Attempt == nil || *page.Incomplete[0].Subject.Attempt != *subject.Attempt {
+					t.Fatalf("missing lost-writer marker: %+v", page.Incomplete)
+				}
+				q.Cursor = page.NextCursor
+			}
+		})
 	}
 }

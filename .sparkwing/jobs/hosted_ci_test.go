@@ -1,6 +1,7 @@
 package jobs
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
@@ -139,7 +140,7 @@ func TestCanonicalWorkflowRunsTheCheckedOutEventChange(t *testing.T) {
 	requireWorkflowText(t, body,
 		"  workflow_call:\n",
 		"permissions:\n  contents: read\n",
-		`gate: ${{ (inputs.source_ref != '' || inputs.release_tag != '') && fromJSON('["gate", "pre-release"]') || fromJSON('["gate", "race-touched", "pre-release"]') }}`,
+		`gate: ${{ (inputs.source_ref != '' || inputs.release_tag != '') && fromJSON('["gate", "pre-release"]') || fromJSON('["gate", "race-touched", "pre-release", `,
 		"persist-credentials: false",
 		"Copy the immutable release verifier",
 		`cp bin/check-hosted-gate-clean.sh "$RUNNER_TEMP/check-hosted-gate-clean.sh"`,
@@ -152,7 +153,7 @@ func TestCanonicalWorkflowRunsTheCheckedOutEventChange(t *testing.T) {
 		"pkg/scaffold/version.go",
 		"gate_selection=(--sw-only gate)",
 		"run gate --sw-only race-touched",
-		"- name: Stage the event change\n        if: matrix.gate != 'pre-release'",
+		"- name: Stage the event change\n        if: matrix.gate == 'gate' || matrix.gate == 'race-touched'",
 		"run pre-release",
 	)
 	if strings.Contains(body, ": write") {
@@ -318,7 +319,7 @@ func TestCanonicalWorkflowLeavesRoomAroundDeclaredDeadlines(t *testing.T) {
 	if minutesNode == nil {
 		t.Fatal("canonical gate job declares no workflow timeout")
 	}
-	want := fmt.Sprintf("${{ matrix.gate == 'pre-release' && %d || %d }}",
+	want := fmt.Sprintf("${{ (matrix.gate == 'pre-release' || startsWith(matrix.gate, 'race-store-')) && %d || %d }}",
 		int((preReleaseRunTimeout+10*time.Minute)/time.Minute),
 		int((gateRunTimeout+10*time.Minute)/time.Minute))
 	if minutesNode.Value != want {
@@ -333,8 +334,8 @@ func TestCanonicalWorkflowPrintsStoredDiagnosticsAfterFailure(t *testing.T) {
 		"- name: Print failed canonical run diagnostics\n        if: ${{ failure() }}\n        continue-on-error: true\n        timeout-minutes: 2",
 		`bash "$reporter" "$RUNNER_TEMP/canonical-run.json" "$RUNNER_TEMP/sparkwing"`,
 	)
-	if got := strings.Count(body, `--sw-run-handle-file "$RUNNER_TEMP/canonical-run.json"`); got != 3 {
-		t.Fatalf("canonical run-handle publication count = %d, want broad gate, race and pre-release", got)
+	if got := strings.Count(body, `--sw-run-handle-file "$RUNNER_TEMP/canonical-run.json"`); got != 4 {
+		t.Fatalf("canonical run-handle publication count = %d, want broad gate, race, pre-release and store race part", got)
 	}
 }
 
@@ -371,4 +372,105 @@ func TestREADMEPublishesStableCIBadge(t *testing.T) {
 		"actions/workflows/ci.yaml/badge.svg?branch=main",
 		"actions/workflows/ci.yaml)",
 	)
+}
+
+// safety: the store race is split across hosted lanes only because every part
+// runs somewhere; a lane dropped from the matrix would ship a store race
+// nothing looked at.
+func TestCanonicalStoreRacePartsCoverEveryPartOnce(t *testing.T) {
+	var doc yaml.Node
+	if err := yaml.Unmarshal([]byte(readHostedCIFile(t, ".github/workflows/canonical-gates.yaml")), &doc); err != nil {
+		t.Fatal(err)
+	}
+	job := mappingValue(mappingValue(&doc, "jobs"), "gate")
+	matrix := mappingValue(mappingValue(mappingValue(job, "strategy"), "matrix"), "gate").Value
+	at := strings.LastIndex(matrix, "fromJSON('")
+	end := strings.LastIndex(matrix, "')")
+	if at < 0 || end < at {
+		t.Fatalf("matrix %q has no normal lane list", matrix)
+	}
+	var lanes []string
+	if err := json.Unmarshal([]byte(matrix[at+len("fromJSON('"):end]), &lanes); err != nil {
+		t.Fatal(err)
+	}
+	scripts := map[string]string{}
+	for _, step := range mappingValue(job, "steps").Content {
+		if name := mappingValue(step, "name"); name != nil {
+			if run := mappingValue(step, "run"); run != nil {
+				scripts[name.Value] = run.Value
+			}
+		}
+	}
+	run := func(script string, env ...string) []string {
+		t.Helper()
+		dir := t.TempDir()
+		for path, body := range map[string]string{
+			"sparkwing":                      "#!/bin/sh\nprintf '%s\\n' \"$@\" >\"$RUNNER_TEMP/args\"\n",
+			"git":                            "#!/bin/sh\necho 0123456789abcdef0123456789abcdef01234567\n",
+			"bin/check-hosted-gate-clean.sh": "exit 0\n",
+		} {
+			if err := os.MkdirAll(filepath.Dir(filepath.Join(dir, path)), 0o700); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(dir, path), []byte(body), 0o700); err != nil {
+				t.Fatal(err)
+			}
+		}
+		cmd := exec.Command("bash", "-c", script)
+		cmd.Dir = dir
+		cmd.Env = append(os.Environ(), append([]string{"RUNNER_TEMP=" + dir, "PATH=" + dir + string(os.PathListSeparator) + os.Getenv("PATH")}, env...)...)
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("step failed: %v\n%s", err, out)
+		}
+		args, err := os.ReadFile(filepath.Join(dir, "args"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return strings.Fields(string(args))
+	}
+	partOf := func(args []string) raceStorePart {
+		t.Helper()
+		at := slices.Index(args, "--race-store-part")
+		if at < 1 || at+2 != len(args) || args[at-1] != "--" {
+			t.Fatalf("args %v do not end with -- --race-store-part k/n", args)
+		}
+		part, err := parseRaceStorePart(args[at+1])
+		if err != nil {
+			t.Fatal(err)
+		}
+		return part
+	}
+
+	preRelease := scripts["Run canonical pre-release"]
+	if args := run(preRelease, "SOURCE_REF=", "RELEASE_TAG="); !slices.Equal(args[len(args)-3:], []string{"--", "--race-store-part", raceStorePartsElsewhere}) {
+		t.Fatalf("pre-release args %v, want the store race left to its lanes", args)
+	}
+	var parts []raceStorePart
+	if args := run(preRelease, "SOURCE_REF=v0.68.2", "RELEASE_TAG="); slices.Contains(args, "--race-store-part") {
+		t.Fatalf("source override %v must race every store shard in its one pre-release job", args)
+	}
+	for _, lane := range lanes {
+		if !strings.HasPrefix(lane, "race-store-") {
+			continue
+		}
+		args := run(scripts["Run canonical store race part"], "LANE="+lane)
+		if !slices.Equal(args[:5], []string{"run", "pre-release", "--sw-start-at", "race-store", "--sw-stop-at"}) || args[5] != "race-store" {
+			t.Fatalf("lane %s args %v, want only the race-store step", lane, args)
+		}
+		parts = append(parts, partOf(args))
+	}
+	if len(parts) == 0 {
+		t.Fatal("no race-store lane")
+	}
+	count := parts[0].count
+	seen := map[int]bool{}
+	for _, part := range parts {
+		if part.count != count || seen[part.index] {
+			t.Fatalf("parts %v disagree on the count or repeat one", parts)
+		}
+		seen[part.index] = true
+	}
+	if len(seen) != count || count < 2 {
+		t.Fatalf("parts %v do not cover 1..%d", parts, count)
+	}
 }

@@ -55,7 +55,8 @@ func (s *Server) ResolveIntake(ctx context.Context, resolver capability.Authorit
 		return store.IntakePolicyFacts{}, &apierr.Error{Code: apierr.Forbidden, Message: "executable local origin requires local peer authority"}
 	}
 	placement := store.RequestPlacement(request.Request)
-	options, err := settings.ResolveIntake(request.Request.Options, operator, settings.Context{Origin: request.Request.Origin, Local: placement == nodeproto.PlacementLocal, NumCPU: runtime.NumCPU()})
+	local := placement == nodeproto.PlacementLocal || localPeer && placement == nodeproto.PlacementLocalTriggered
+	options, err := settings.ResolveIntake(request.Request.Options, operator, settings.Context{Origin: request.Request.Origin, Local: local, NumCPU: runtime.NumCPU()})
 	if err != nil {
 		return store.IntakePolicyFacts{}, err
 	}

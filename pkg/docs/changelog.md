@@ -33,11 +33,104 @@ unlock.
 
 - **store (Breaking):** The schema baseline advances to version 29, the first forward migration: a store at schema 28 with the v0.68.3 baseline digest (v0.68.3 and later 0.68 releases) upgrades in place on its first open
   The upgrade adds `nodes.trusted_host` and records version 29 and its digest in one transaction on SQLite and PostgreSQL; on PostgreSQL the migration advisory lock lets controllers starting together run it once. Older versions, schema 28 with any other digest, and newer versions are refused unchanged with a remedy. An older binary refuses the upgraded store, so snapshot the store first; rollback means restoring that snapshot. See the [store upgrade migration](docs/migrations/_unreleased.md#upgrade-the-store-in-place-to-schema-baseline-29).
+- **scaffold:** `const FallbackSDKVersion` pins v0.68.6, so a fresh scaffold compiles against that release.
 
 ### Fixed
 
+- **Cloud:** Name the pool ceiling when a job asks for more CPU or memory than it allows
+  A job above the launcher's resource ceiling failed with "Cloud capacity is not configured for the requested hardware class", and the launcher logged the refusal at ERROR. The error now names the requested class, CPU and memory and the pool's CPU and memory ceiling, and says to request a smaller hardware class or contact support@sparkwing.dev to raise the ceiling. The launcher logs this expected refusal at INFO. A class with no configured pool keeps the previous message and ERROR log.
+- **Cloud:** Reuse a run's node for a dependent job without provisioning another
+  When the controller awarded a dependent job just after its predecessor finished, but before the launcher retired the predecessor's Kubernetes Job, the launcher requested fresh capacity and Karpenter added a node that stayed empty while the job ran on the original. The launcher now retires ended predecessors before it requests capacity, so the dependent job waits for the original node.
+- **CLI:** Install `sparkwing-runner` from the signed release with `install.sh --runner`
+  Neither `install.sh` nor `sparkwing update` installed `sparkwing-runner`, and `sparkwing runners add` told users to `go install` it. `install.sh --runner` now installs it beside `sparkwing` after the same signature, digest and version checks, and installs neither binary when either fails a check or its destination is not a file. If writing the runner fails, the previous `sparkwing` is put back. `runners add`, `sparkwing update --help` and the getting-started and local execution docs name that command; an installed runner keeps updating itself from verified release assets.
+- **CLI:** Report a still-running v0.67 dashboard and say to stop old processes before moving an old store
+  `sparkwing dashboard stop` reported `stopped` while a dashboard from v0.67 or earlier kept running and held the old `state.db` open. `dashboard stop` and `status` now report such a dashboard, found through the `dashboard.pid` file it wrote, with its pid and how to stop it, in a `warning` field in JSON. The pre-v0.68 store refusal now says to stop every older Sparkwing process using the store before moving it aside.
+- **CLI:** Name the routing profile in a cloud-routed run's dead-token hint
+  When `sparkwing run` routed to Cloud through machine `run.routing` and the profile's token was no longer live, the hint said `sparkwing profiles set --profile 'NAME' --token-stdin`. It now names the profile from `run.routing`.
+- **CLI:** `sparkwing pipeline hooks install` leaves an older forwarder hook alone and names a stale hook
+  A `prepare-commit-msg` or other hook that Sparkwing before v0.68 wrote only to forward to the global `core.hooksPath` hook made install exit 1 with `internal: ... is missing or differs from expected content/format`, even though it runs no pipeline. Install now leaves such a forwarder in place and succeeds when the file is exactly what that version wrote, and `status` notes it and marks its record `forwarder: true`. Any other Sparkwing hook that no pipeline declares fails install with `conflict`, naming the file to delete; a declared hook blocked by a hand-written one names that file too.
+- **web:** Show a CLI token setup command that exists
+  After "Create CLI token" the console told users to run `sparkwing cloud connect`, which v0.68 removed. It now shows `sparkwing profiles add --controller URL --profile TEAM --token-stdin`.
+- **web:** Connect a personal machine without repository patterns, with a runner command that starts
+  The console's "Connect a machine" form required repository patterns for a personal machine, but a personal machine with a repository scope never claims work: it takes only its owner's runs, which a scope refuses. The form now asks for patterns only for a shared runner. The command it printed also called `sparkwing-runner runner` with flags that no longer exist; it now runs `sparkwing-runner warm` with `--repos`, `--also-claim-triggers=false` and `--claim-jobs=false` as the token's grants require.
+- **CLI:** Say a pre-v0.68 SDK pin needs `sparkwing upgrade`
+  Running a repository whose SDK pin predates v0.68.0 failed with `integrity_failure: release manifest has duplicate, unknown or malformed entries` and told the user not to execute unverified bytes. When the release's signatures and digest verify and only its list of executables is the older layout, it now fails with `version_unsupported`, says the pin is older than v0.68.0, the oldest release the CLI can run as a pipeline engine, and names `sparkwing upgrade` as the fix. A bad signature or digest stays `integrity_failure`, and the older release is never executed.
+
+## [v0.68.6] - 2026-11-03
+### Fixed
+
+- **web:** Make run cards usable with a keyboard and a screen reader
+  The Runs pane is a "Runs" list of cards. Each card has a button named with the run's repository, pipeline, branch, start time and status that reports selection as pressed and opens or closes the run with Enter or Space. Each bulk-action checkbox names its run.
+- **web:** Give the console main, banner and navigation landmarks and a skip link
+  Page content sits in one `main` landmark, the top bar is a banner with a "Primary" navigation, and the first Tab stop is a "Skip to content" link that moves focus into the page.
+- **web:** Choose the Analytics trend range
+  Analytics offers 24 hours, 3 days, 7 days and 14 days, the controller's limit, and keeps the choice in the URL as `?range=`. The default stays at 3 days. Chart labels include the date when the range spans more than a day.
+- **web:** Say when a linked run does not exist
+  Opening `/runs?run=<id>` for a run the controller does not return now shows "Run not found" with a button back to all runs, instead of an empty detail pane.
+- **web:** Show "Run not found" after leaving a run for a missing one
+  Moving from an open run to a run the controller does not return, or reopening a run that was deleted, kept the previous run's detail on screen. The pane now shows "Run not found", and a failed request for the new run no longer leaves the old run in its place.
+- **web:** Say resource metrics are unavailable instead of loading forever
+  When the metrics endpoint refuses, such as a Cloud `503 unavailable` for a job with no readings, the Resources tab now says the metrics are unavailable. A running job keeps retrying, and evidence already shown stays on screen through a failed refresh.
+- **API:** Say why an engine request body failed to decode
+  A malformed JSON body returned only `invalid engine request`. The 400 response now says whether the body is not valid JSON (with the byte offset), ends early, has a value of the wrong type, or has a field the endpoint does not accept. The message never repeats request bytes.
+- **console:** Report log completeness to signed-in readers
+  `GET /api/v1/runs/{run}/jobs/{job}/logs/completeness` answered `unknown` with zero lines for every session or credential reader, including a finished job that printed nothing, because the reauthorizing read wrapper hid the log store. It now returns the stored verdict.
+- **run:** Keep the incomplete marker on logs that `--publish` copies
+  `sparkwing run --publish` copied a job's log into Cloud as complete even when the local log was marked incomplete, such as `writer_lost` or a byte cap, because it read the page's `complete` flag as proof that every byte survived. The published log now carries the same incomplete reason, and `runs logs` against Cloud reports it.
+- **logs:** Keep a failed attempt's logs when its job retries
+  A retry advanced the log writer to the next attempt before the failed attempt's final segment and seal reached storage, so the failed attempt's output was refused and its stream never completed. A retry now waits up to five seconds for that seal before it commits.
+- **logs:** Return retained retry logs with an explicit incomplete marker when their writer is lost
+  JSON log pages finish with an `incomplete` list naming each affected subject and reason, including `writer_lost`, instead of returning HTTP 409 or 500. Available bytes and continuation cursors remain readable before and after log maintenance. The CLI drains retained output and reports incomplete logs with exit 3.
+- **Cloud:** Fail requests above launcher resource ceilings and refund their unstarted credit holds
+  These requests end as `cloud_capacity_unconfigured` instead of waiting for owner cancellation. Launcher logs name requested CPU and memory alongside configured ceilings.
+- **Cloud runner:** Set the job scratch mount at `/tmp` to mode `1777` before starting the runner
+  Update the launcher and generated admission policy together.
+- **runner:** Exhausted application retries report the attempt count and last error
+  The final job error says all attempts failed and directs users to fix the last error before retrying.
+- **sdk:** Command deadline failures name the timeout and deadline
+  The error preserves the deadline cause and suggests increasing the context timeout or speeding up the command.
+- **controller:** Unstarted jobs name their failed dependencies and explain how to retry
+  Controller scheduling preserves the dependency failure reason so cancelled jobs show which dependency blocked them.
+- **Cloud:** Start declared same-source children from uploaded working-tree snapshots
+  Children reuse their parent's retained source bundle only for the same repository, ref, execution commit and pipeline commit. Upload ownership checks still reject unrelated submissions.
+
+### Changed
+
+- **scaffold:** `const FallbackSDKVersion` pins v0.68.5, so a fresh scaffold compiles against that release.
+
+## [v0.68.5] - 2026-11-03
+### Fixed
+
+- **release:** Publish `@sparkwing/sdk` through npm Trusted Publishing with GitHub Actions OIDC
+  Publication uses pinned npm 11.6.2 and automatic provenance without an npm token secret. v0.68.4 was tagged but never published, because its workflow still required the removed token; v0.68.5 carries its changes.
+
+### Changed
+
+- **scaffold:** `const FallbackSDKVersion` pins v0.68.4, so a fresh scaffold compiles against that release.
+
+## [v0.68.4] - 2026-11-03
+### Fixed
+
+- **SDK install:** Refuse a generated overlay that is not a regular file
+  A repository could commit `.resolved.mod` as a symlink, and the installer's pin refresh would then rewrite the file it pointed to on the runner. Installation now refuses the overlay instead.
+- **child pipelines:** Keep parent job and step selections out of child runs
+  Focusing the example with `--sw-only dynamic-child` now lets the weather child's `stamp` job run. Child pipelines retain other inherited run preferences and resolve their own job and step selections.
+
+- **controller:** Local child pipelines inherit local owner deadlines
+  An authenticated local parent can start a child with its unbounded local owner deadline. Remote callers retain the remote deadline ceiling even when they request local placement.
+
+- **Go SDK:** Match `ErrOIDCUnavailable` when the controller has no OIDC issuer
+  `errors.Is` can recognize the missing-issuer response while the error retains its `not_found` code and setup guidance. Authorization and transport failures remain errors.
+
 - **upgrade:** Refresh the SDK requirement in generated sparks overlays before installation
   An overlay left from an earlier run could retain the old SDK pin and make `sparkwing upgrade` fail with "Go dependency selection changed the SDK pin". Installation now takes the SDK requirement from `go.mod` while preserving resolved sparks versions.
+- **GitHub:** Accept stateless installation tokens through source checkout, storage and log masking
+  Stored HTTPS credentials and the console accept tokens up to 4,096 characters. Secret scanners recognize the longer installation-token format, including dots, underscores and hyphens. GitHub Actions runners preserve the full `GITHUB_TOKEN` for source checkout.
+
+### Docs
+
+- **examples:** Expand the SDK tour into a staging integration gate
+  The Go example asserts feature results and can trigger the reference pipeline in a second repository. A TypeScript twin includes runnable SDK protocol checks and documents its matching-engine prerequisite.
 
 ## [v0.68.3] - 2026-11-02
 ### Added
@@ -80,9 +173,6 @@ unlock.
 - **pipeline references (Breaking):** Latest outputs default to verified default-branch runs and exclude publication. Declare `sw.FromAnyRun()` (TypeScript `{fromAnyRun: true}`) to opt out. The direct output route enforces the same rule. See [migration](docs/migrations/v0.68.3.md#sealed-execution-trust).
 
 ### Fixed
-
-- **GitHub:** Accept stateless installation tokens through source checkout, storage and log masking
-  Stored HTTPS credentials and the console accept tokens up to 4,096 characters. Secret scanners recognize the longer installation-token format, including dots, underscores and hyphens. GitHub Actions runners preserve the full `GITHUB_TOKEN` for source checkout.
 
 - **Cloud:** A controller rate-limit reply to the launcher's first claim logs at INFO
   The previous process's idle poll interval may still apply after a restart. Repeated refusals retain WARN, and the launcher honors the controller's retry delay in both cases.

@@ -27,25 +27,33 @@ func jobFnNoop() func(context.Context) error {
 	return func(context.Context) error { return nil }
 }
 
-// safety: Bash streams stdout and stderr from separate goroutines into one logger.
+// safety: Exec streams stdout and stderr on separate goroutines, so recorders lock.
 type recordingLogger struct {
 	mu    sync.Mutex
 	lines []string
 }
 
-func (r *recordingLogger) Log(level, message string) { r.Emit(LogRecord{Level: level, Msg: message}) }
-func (r *recordingLogger) Emit(record LogRecord) {
+func (r *recordingLogger) Log(level, message string) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	r.lines = append(r.lines, record.Level+": "+record.Msg)
+	r.lines = append(r.lines, level+": "+message)
 }
+func (r *recordingLogger) Emit(record LogRecord) { r.Log(record.Level, record.Msg) }
 
-type recordingEmitter struct{ records []LogRecord }
+type recordingEmitter struct {
+	mu      sync.Mutex
+	records []LogRecord
+}
 
 func (r *recordingEmitter) Log(level, message string) {
 	r.Emit(LogRecord{Level: level, Msg: message})
 }
-func (r *recordingEmitter) Emit(record LogRecord) { r.records = append(r.records, record) }
+
+func (r *recordingEmitter) Emit(record LogRecord) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.records = append(r.records, record)
+}
 
 func TestPlanJobAndNeeds(t *testing.T) {
 	plan := NewPlan()

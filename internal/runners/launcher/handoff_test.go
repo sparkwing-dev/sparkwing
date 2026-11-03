@@ -384,3 +384,65 @@ func TestCancelledWaitingAwardPreservesClaimBackoff(t *testing.T) {
 		}
 	})
 }
+
+func TestSuccessorAwardedBeforePredecessorRetirementReusesNode(t *testing.T) {
+	l, kube, _, control := fixture()
+	boundary, nodes := boundaryFixture()
+	node, err := nodes.CoreV1().Nodes().Get(t.Context(), "node", metav1.GetOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = kube.Tracker().Add(node); err != nil {
+		t.Fatal(err)
+	}
+	boundary.Kube, l.Boundary = kube, boundary
+	l.Config.MemoryCeiling = 16 << 30
+	control.award.CPUCores, control.award.Memory = 2, match.CloudSizeMemoryBytes(2)
+	predecessor := *control.award
+	if _, err = l.launch(t.Context(), &predecessor); err != nil {
+		t.Fatal(err)
+	}
+	job, err := kube.BatchV1().Jobs("cloud").Get(t.Context(), jobName(predecessor.Binding), metav1.GetOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	pod := &corev1.Pod{ObjectMeta: *job.Spec.Template.ObjectMeta.DeepCopy(), Spec: *job.Spec.Template.Spec.DeepCopy()}
+	pod.Name, pod.Namespace, pod.UID = "predecessor", "cloud", "predecessor-pod"
+	pod.OwnerReferences = []metav1.OwnerReference{{APIVersion: "batch/v1", Kind: "Job", Name: job.Name, UID: job.UID, Controller: ptr(true)}}
+	pod.Status.Phase = corev1.PodRunning
+	if _, err = kube.CoreV1().Pods("cloud").Create(t.Context(), pod, metav1.CreateOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	// bug: the controller can award a dependent before reconciliation retires its ended predecessor's Job.
+	successor := predecessor
+	successor.Binding.UnitID, successor.Binding.NodeID = "successor", "successor"
+	control.award, control.remove = &successor, true
+	if _, err = l.launch(t.Context(), &successor); !errors.Is(err, ErrNoDedicatedNode) || successor.teardownDeadline.IsZero() {
+		t.Fatalf("successor did not wait for the ended predecessor: %v", err)
+	}
+	if requests, err := l.capacityPods(t.Context()); err != nil || len(requests) != 0 {
+		t.Fatalf("successor requested a fresh node during same-run reuse: %d requests, %v", len(requests), err)
+	}
+	control.remove = false
+	if err = kube.CoreV1().Pods("cloud").Delete(t.Context(), pod.Name, metav1.DeleteOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	if err = l.Sync(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if err = l.placeWaiting(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	next, err := kube.BatchV1().Jobs("cloud").Get(t.Context(), jobName(successor.Binding), metav1.GetOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, reservation, err := jobOwnership(*next); err != nil || reservation.NodeUID != string(node.UID) {
+		t.Fatalf("successor lost original node: %+v, %v", reservation, err)
+	}
+	for _, action := range kube.Actions() {
+		if action.GetVerb() == "create" && action.GetResource().Resource == "pods" && action.(ktesting.CreateAction).GetObject().(*corev1.Pod).Labels[capacityLabel] == "true" {
+			t.Fatal("same-run reuse created a provisioning Pod")
+		}
+	}
+}

@@ -38,11 +38,22 @@ export default function RootLayout({
         <script src="/sparkwing-runtime.js" />
       </head>
       <body className="h-full flex flex-col">
+        <a
+          href="#main-content"
+          className="sr-only focus:not-sr-only focus:fixed focus:left-2 focus:top-2 focus:z-[200] focus:px-3 focus:py-2 focus:rounded-sm focus:border focus:border-[var(--accent)] focus:bg-[var(--surface)] focus:text-sm"
+        >
+          Skip to content
+        </a>
         <Nav />
         <ConnectionBanner />
-        <div className="flex-1 flex flex-col overflow-hidden">
+        {/* tabIndex lets the skip link move focus, not just scroll, into main. */}
+        <main
+          id="main-content"
+          tabIndex={-1}
+          className="flex-1 flex flex-col overflow-hidden focus:outline-none"
+        >
           <WaitlistGate>{children}</WaitlistGate>
-        </div>
+        </main>
         <Toaster />
       </body>
     </html>

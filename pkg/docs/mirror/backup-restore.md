@@ -90,7 +90,7 @@ sparkwing: store schema version 29 baseline digest "<recorded-digest>" differs f
 
 sparkwing: store schema version 29 baseline digest "<missing>" differs from this binary's "<binary-digest>"; back up the store and use a binary matching it; this build cannot upgrade it; to start fresh, point the server at an empty database and start again
 
-sparkwing: ~/.sparkwing/state.db is a store from Sparkwing v0.67 or earlier (schema version 94); this release starts a new store and cannot read or import it, and left the old one unchanged; move it aside and run again: mv ~/.sparkwing/state.db ~/.sparkwing/state.db.v067 (move ~/.sparkwing/state.db-wal and ~/.sparkwing/state.db-shm with it if they exist)
+sparkwing: ~/.sparkwing/state.db is a store from Sparkwing v0.67 or earlier (schema version 94); this release starts a new store and cannot read or import it, and left the old one unchanged; stop every older Sparkwing process still using it, such as a v0.67 dashboard or daemon, then move it aside and run again: mv ~/.sparkwing/state.db ~/.sparkwing/state.db.v067 (move ~/.sparkwing/state.db-wal and ~/.sparkwing/state.db-shm with it if they exist)
 
 sparkwing: this database is a store from Sparkwing v0.67 or earlier (schema version 94); this release starts a new store and cannot read or import it, and left the old one unchanged; back up this database, then point the server at an empty database
 ```

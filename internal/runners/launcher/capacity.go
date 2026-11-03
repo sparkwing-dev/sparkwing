@@ -17,6 +17,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/limits"
+	"github.com/sparkwing-dev/sparkwing/pkg/match"
 )
 
 const (
@@ -24,6 +25,8 @@ const (
 	capacityPrefix   = "sw-capacity-"
 	demandAnnotation = "sparkwing.dev/capacity-demand"
 )
+
+var errCapacityUnconfigured = errors.New("cloud capacity is not configured")
 
 type capacityDemand struct {
 	Binding  CloudJobBinding `json:"binding"`
@@ -144,8 +147,17 @@ func (l *Launcher) deleteCapacityPod(ctx context.Context, pod *corev1.Pod) error
 
 func (l *Launcher) awaitCapacity(ctx context.Context, award CloudJobAward) error {
 	budget, err := cloudBudget(l.Config, award)
-	if err != nil {
+	if err != nil && !errors.Is(err, errCapacityUnconfigured) {
 		return err
+	}
+	if err != nil {
+		ceiling := &match.Resources{Cores: l.Config.CPUCeiling, MemoryBytes: l.Config.MemoryCeiling}
+		if err := l.failCapacity(ctx, award, CloudCapacityObservation{Unconfigured: true, Ceiling: ceiling}); err != nil {
+			return err
+		}
+		// safety: an oversized request is the customer's choice, not a launcher fault, so it stays below WARN.
+		l.logger().Info("Cloud request exceeds the launcher resource ceilings; failed the award and refunded its hold", "team", award.Binding.Team, "requested_class", cpuClass(award.CPUCores), "requested_cpu", award.CPUCores, "available_cpu", l.Config.CPUCeiling, "requested_memory", award.Memory, "available_memory", l.Config.MemoryCeiling, "namespace", l.Config.Namespace, "support_reference", award.Binding.RunID)
+		return l.releaseCapacity(ctx, award.Binding)
 	}
 	configured, err := l.Boundary.CapacityConfigured(ctx, budget)
 	if err != nil {

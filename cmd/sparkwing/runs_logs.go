@@ -119,6 +119,9 @@ func observeRunLogs(ctx context.Context, inv clisurface.Invocation, reader contr
 			if err := writeUnloggedFailures(ctx, inv, runs, query.Job, out); err != nil {
 				return err
 			}
+			if len(page.Incomplete) > 0 {
+				return fmt.Errorf("logs incomplete: %s", page.Incomplete[0].Reason)
+			}
 			if !page.Complete {
 				return fmt.Errorf("logs incomplete: final log segments are still pending; use --follow to wait for the remaining output")
 			}

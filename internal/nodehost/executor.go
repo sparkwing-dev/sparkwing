@@ -314,6 +314,9 @@ func (h *nodeExecutor) attempts(ctx context.Context, input *NodeInput, spec runs
 			return h.failure(context.Cause(ctx)), context.Cause(ctx)
 		}
 		if err != nil || result.Outcome != runstate.NodeFailed || retry >= remaining {
+			if err == nil && result.Outcome == runstate.NodeFailed && input.Execution.Retry.Value > 0 && retry >= remaining {
+				result.MaskedError = limits.Error(fmt.Sprintf("all %d attempts failed; fix the last error and retry the run: %s", row.ApplicationRetries+retry+1, result.MaskedError))
+			}
 			return result, err
 		}
 		if input.Attempt == math.MaxInt64 {

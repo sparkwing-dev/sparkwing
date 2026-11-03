@@ -120,7 +120,10 @@ func TestCloudBootstrapGrammarW8Components(t *testing.T) {
 			pod := resources.Job.Spec.Template.Spec
 			bootstrapFile := writeBootstrapW8(t, resources.BootstrapSecret.Data)
 			for _, built := range [][]string{pod.Containers[0].Args} {
-				args := append([]string(nil), built...)
+				if len(built) < 2 || built[0] != launcher.JobBinary {
+					t.Fatalf("job startup does not invoke the runner: %v", built)
+				}
+				args := append([]string(nil), built[1:]...)
 				for i := range args {
 					if args[i] == "--bootstrap-file" {
 						args[i+1] = bootstrapFile

@@ -137,6 +137,7 @@ func settleControllerTx(ctx context.Context, tx *storeTx, team Team, runID strin
 				change.To, change.Cause = runstate.NodeApprovalPending, runstate.CauseApprovalOpen
 			case DecisionTerminal:
 				change.To, change.Cause = runstate.NodeState(node.Outcome), causeDependency
+				change.Extra.Result = &runstate.NodeResult{Outcome: change.To, Reason: node.Reason}
 			case DecisionCancelHolder:
 				change.To, change.Cause = runstate.NodeCancelled, causeCancel
 			default:

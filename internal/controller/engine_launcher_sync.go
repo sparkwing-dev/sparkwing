@@ -142,7 +142,7 @@ func validateLauncherSync(body controllerwire.LauncherSyncRequest) ([]capability
 	}
 	observed := slices.Clone(body.Observed)
 	for _, demand := range body.Capacity {
-		observed = append(observed, capability.LauncherObservation{Award: demand.Award, Reservation: true, CapacityUnconfigured: demand.Unconfigured, CapacityUnavailable: demand.Unavailable, WaitedForFreshNode: !demand.Unconfigured && !demand.Unavailable})
+		observed = append(observed, capability.LauncherObservation{Award: demand.Award, Reservation: true, CapacityUnconfigured: demand.Unconfigured, CapacityUnavailable: demand.Unavailable, CapacityCeiling: demand.Ceiling, WaitedForFreshNode: !demand.Unconfigured && !demand.Unavailable})
 	}
 	activated := map[capability.LeaseRef]bool{}
 	for _, activation := range body.Activations {

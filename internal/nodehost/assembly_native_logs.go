@@ -64,7 +64,17 @@ func (s logHostStore) TransitionNode(ctx context.Context, request store.NodeComm
 	switch payload.Cause {
 	case runstate.CauseReport, runstate.CauseRetry, runstate.CauseRelease:
 		ref, _ := store.NodeCommandAuthority(request)
-		s.logs.finish(context.WithoutCancel(ctx), string(ref.NodeID))
+		sealed := s.logs.finish(context.WithoutCancel(ctx), string(ref.NodeID))
+		if payload.Cause == runstate.CauseRetry {
+			// safety: the retry advances the writer fence, after which storage refuses the previous attempt's tail.
+			timer := time.NewTimer(limits.RetryLogSealWait)
+			select {
+			case <-sealed:
+			case <-timer.C:
+			case <-ctx.Done():
+			}
+			timer.Stop()
+		}
 	}
 	return s.NativeHostStore.TransitionNode(ctx, request)
 }
