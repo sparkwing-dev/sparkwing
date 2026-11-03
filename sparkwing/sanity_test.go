@@ -27,7 +27,7 @@ func jobFnNoop() func(context.Context) error {
 	return func(context.Context) error { return nil }
 }
 
-// Exec streams stdout and stderr on separate goroutines, so recorders lock.
+// safety: Exec streams stdout and stderr on separate goroutines, so recorders lock.
 type recordingLogger struct {
 	mu    sync.Mutex
 	lines []string
