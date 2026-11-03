@@ -569,8 +569,10 @@ cover scheduling, storage and authorization integration.
 In the Sparkwing source checkout, `sparkwing run example` runs the SDK tour
 and named integration assertions in parallel. The default local path needs no
 Cloud or Docker and targets a wall time below two minutes. The tour includes
-an approval that approves after 20 seconds and an optional failing canary.
+an approval that approves after one second and an optional failing canary.
 Those canary failures demonstrate collected errors and do not fail the run.
+The tour emits its simulated build and deploy logs without pacing delays so
+idle waits do not hold integration capacity.
 
 The assertions cover a two-axis matrix, job and predecessor step outputs,
 generated jobs, a dynamic same-repository child, dependency cache save and
@@ -584,6 +586,12 @@ cleanup for detached probes until the gate observes a terminal state, including
 for the optional reference run. A failed or interrupted observation keeps that
 cleanup armed. Cache and artifact assertions require the current run's marker
 so older stored bytes cannot satisfy a failed save or delivery.
+
+With a local SDK replacement, keep tool caches in Git-ignored paths such as
+`.sparkwing/cache/golangci-lint`. The pipeline binary cache hashes non-ignored
+replacement files, so an active tool cache inside the checkout can invalidate
+binary reuse.
+
 The dependency-cache path includes the run ID to force a cold seed, because
 restored cache keys are not saved again.
 Child waits use their job's 90-second deadline, including queue time, instead
