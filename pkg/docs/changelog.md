@@ -22,6 +22,8 @@ unlock.
 
 ### Fixed
 
+- **SDK install:** Refuse a generated overlay that is not a regular file
+  A repository could commit `.resolved.mod` as a symlink, and the installer's pin refresh would then rewrite the file it pointed to on the runner. Installation now refuses the overlay instead.
 - **upgrade:** Refresh the SDK requirement in generated sparks overlays before installation
   An overlay left from an earlier run could retain the old SDK pin and make `sparkwing upgrade` fail with "Go dependency selection changed the SDK pin". Installation now takes the SDK requirement from `go.mod` while preserving resolved sparks versions.
 - **GitHub:** Accept stateless installation tokens through source checkout, storage and log masking
