@@ -349,13 +349,22 @@ func TestSecurityWorkflowHasNoPrivateInfrastructureSurface(t *testing.T) {
 
 func TestGitleaksExclusionsCannotHideRepositoryPaths(t *testing.T) {
 	body := readHostedCIFile(t, ".gitleaks.toml")
+	for _, global := range strings.Split(body, "[[allowlists]]")[1:] {
+		if strings.Contains(strings.SplitN(global, "[[rules", 2)[0], "paths =") {
+			t.Fatal("global gitleaks allow-list excludes a repository path")
+		}
+	}
 	sections := strings.Split(body, "[[rules]]")
 	if strings.Contains(sections[0], "paths =") {
 		t.Fatal("global gitleaks allow-list excludes a repository path")
 	}
 	for _, section := range sections[1:] {
 		blocks := strings.Split(section, "[[rules.allowlists]]")
-		rule := strings.TrimSpace(blocks[0])
+		rule := strings.TrimSpace(strings.SplitN(blocks[0], "[[allowlists]]", 2)[0])
+		// safety: a rule with its own regex and no exceptions only adds detection, so it cannot hide a path.
+		if len(blocks) == 1 && strings.Contains(rule, "regex = ") && !strings.Contains(rule, "paths") && !strings.Contains(rule, "allowlist") {
+			continue
+		}
 		if rule != `id = "generic-api-key"` && rule != `id = "private-key"` && rule != `id = "curl-auth-header"` {
 			t.Fatalf("unexpected gitleaks rule override: %s", rule)
 		}
