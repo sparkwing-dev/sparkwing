@@ -27,6 +27,10 @@ unlock.
 - **Cloud:** Reuse a run's node for a dependent job without provisioning another
   When the controller awarded a dependent job just after its predecessor finished, but before the launcher retired the predecessor's Kubernetes Job, the launcher requested fresh capacity and Karpenter added a node that stayed empty while the job ran on the original. The launcher now retires ended predecessors before it requests capacity, so the dependent job waits for the original node.
 
+### Changed
+
+- **scaffold:** `const FallbackSDKVersion` pins v0.68.6, so a fresh scaffold compiles against that release.
+
 ## [v0.68.6] - 2026-11-03
 ### Fixed
 
