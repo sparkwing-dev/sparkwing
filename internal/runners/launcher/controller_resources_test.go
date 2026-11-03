@@ -8,6 +8,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -209,14 +210,16 @@ func cloudResourceRoot(t *testing.T, e *cloudResourceFixture) string {
 
 func TestCloudCapacityFailureThroughController(t *testing.T) {
 	for _, failure := range []struct {
-		name, reason, message, level string
-		ceiling                      float64
-		memoryCeiling                int64
+		name, reason, message, level, peer string
+		ceiling                            float64
+		memoryCeiling                      int64
 	}{
-		{"missing_pool", capability.CloudCapacityUnconfigured, capability.CloudCapacityUnconfiguredMessage, "ERROR", 4, store.CPUClassMemoryBytes(4)},
-		{"cpu_ceiling", capability.CloudCapacityUnconfigured, "ceiling of 2 CPU", "INFO", 2, store.CPUClassMemoryBytes(4)},
-		{"memory_ceiling", capability.CloudCapacityUnconfigured, "ceiling of 4 CPU and 5.4 GiB memory", "INFO", 4, store.CPUClassMemoryBytes(2)},
-		{"breaker", capability.CloudCapacityUnavailable, capability.CloudCapacityUnavailableMessage, "ERROR", 4, store.CPUClassMemoryBytes(4)},
+		{"missing_pool", capability.CloudCapacityUnconfigured, capability.CloudCapacityUnconfiguredMessage, "ERROR", "", 4, store.CPUClassMemoryBytes(4)},
+		{"cpu_ceiling", capability.CloudCapacityUnconfigured, "ceiling of 2 CPU", "INFO", "", 2, store.CPUClassMemoryBytes(4)},
+		{"memory_ceiling", capability.CloudCapacityUnconfigured, "ceiling of 4 CPU and 5.4 GiB memory", "INFO", "", 4, store.CPUClassMemoryBytes(2)},
+		{"ceiling_old_controller", capability.CloudCapacityUnconfigured, capability.CloudCapacityUnconfiguredMessage, "INFO", "old controller", 2, store.CPUClassMemoryBytes(4)},
+		{"ceiling_old_launcher", capability.CloudCapacityUnconfigured, capability.CloudCapacityUnconfiguredMessage, "INFO", "old launcher", 2, store.CPUClassMemoryBytes(4)},
+		{"breaker", capability.CloudCapacityUnavailable, capability.CloudCapacityUnavailableMessage, "ERROR", "", 4, store.CPUClassMemoryBytes(4)},
 	} {
 		t.Run(failure.name, func(t *testing.T) {
 			e, tenant := cloudResourceStore(t)
@@ -235,7 +238,11 @@ func TestCloudCapacityFailureThroughController(t *testing.T) {
 			raw := cloudResourceRoot(t, e)
 			e.RunnerPolicy = cloudResourcePolicy(func(context.Context, string) error { return nil })
 			handler := controller.New(e.Store, nil).WithEngineController(e.EngineController).Handler()
+			refusals := 0
 			transport := &http.Client{Transport: cloudResourceTransport(func(r *http.Request) (*http.Response, error) {
+				if r.URL.Path == "/api/v1/launcher/sync" && failure.peer != "" {
+					peerSyncBody(t, r, failure.peer, &refusals)
+				}
 				w := httptest.NewRecorder()
 				handler.ServeHTTP(w, r)
 				return w.Result(), nil
@@ -278,6 +285,9 @@ func TestCloudCapacityFailureThroughController(t *testing.T) {
 				}
 			}
 			ceilingMessage := strings.Contains(failure.message, "ceiling")
+			if (failure.peer == "old controller") != (refusals > 0) {
+				t.Fatalf("old controller refusals: %d", refusals)
+			}
 			detail, err := e.RunDetail(t.Context(), capability.Authorized{Target: capability.Target{Team: "a", RunID: "run"}})
 			if err != nil || detail.Status != "failed" || detail.Reason != failure.reason || !strings.Contains(detail.Failure, failure.message) || !strings.Contains(detail.Failure, "Support reference: run") {
 				t.Fatalf("customer status: %+v %v", detail, err)
@@ -413,4 +423,47 @@ func (c capacityBackoffControl) Claim(context.Context, string, []string) (*Cloud
 		return nil, nil
 	}
 	return nil, &apierr.Error{Code: apierr.RateLimited, Message: "poll later", Details: map[string]any{"retry_after_ms": float64(240000)}}
+}
+
+// hack: an old controller's strict decoder refuses the ceiling field, so the real handler gets an
+// unknown field to produce that same refusal. An old launcher's body simply lacks the field.
+func peerSyncBody(t *testing.T, r *http.Request, peer string, refusals *int) {
+	t.Helper()
+	data, err := io.ReadAll(r.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	switch peer {
+	case "old controller":
+		var old struct {
+			RetireRun   json.RawMessage `json:"retire_run"`
+			WarmPools   json.RawMessage `json:"warm_pools"`
+			Observed    json.RawMessage `json:"observed"`
+			Activations json.RawMessage `json:"activations"`
+			Preparing   json.RawMessage `json:"preparing"`
+			Capacity    []struct {
+				Award        capability.LeaseRef `json:"award"`
+				Unconfigured bool                `json:"unconfigured,omitempty"`
+				Unavailable  bool                `json:"unavailable,omitempty"`
+			} `json:"capacity"`
+		}
+		decoder := json.NewDecoder(bytes.NewReader(data))
+		decoder.DisallowUnknownFields()
+		if decoder.Decode(&old) != nil {
+			*refusals++
+			data = append([]byte(`{"unknown_to_old_controller":true,`), bytes.TrimPrefix(bytes.TrimSpace(data), []byte("{"))...)
+		}
+	case "old launcher":
+		var request controllerwire.LauncherSyncRequest
+		if err := json.Unmarshal(data, &request); err != nil {
+			t.Fatal(err)
+		}
+		for i := range request.Capacity {
+			request.Capacity[i].Ceiling = nil
+		}
+		if data, err = json.Marshal(request); err != nil {
+			t.Fatal(err)
+		}
+	}
+	r.Body, r.ContentLength = io.NopCloser(bytes.NewReader(data)), int64(len(data))
 }

@@ -6,6 +6,7 @@ import (
 	"slices"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	runners "github.com/sparkwing-dev/sparkwing/internal/runners/award"
@@ -167,6 +168,12 @@ func (c *ControllerControl) Sync(ctx context.Context, observations []CloudJobObs
 		return nil, nil
 	}
 	response, err := c.client.SyncLauncher(ctx, request)
+	var refused *apierr.Error
+	if errors.As(err, &refused) && refused.Code == apierr.BadRequest && withoutCeilings(request.Capacity) {
+		// safety: a controller older than the ceiling field rejects the whole sync before any write,
+		// so the field-free form still settles the failure and refunds its hold.
+		response, err = c.client.SyncLauncher(ctx, request)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -207,3 +214,12 @@ func (c *ControllerControl) Sync(ctx context.Context, observations []CloudJobObs
 }
 
 var _ CloudControl = (*ControllerControl)(nil)
+
+func withoutCeilings(capacity []controllerwire.LauncherCapacityObservation) bool {
+	stripped := false
+	for i := range capacity {
+		stripped = stripped || capacity[i].Ceiling != nil
+		capacity[i].Ceiling = nil
+	}
+	return stripped
+}

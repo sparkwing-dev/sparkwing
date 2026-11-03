@@ -658,7 +658,10 @@ the launcher's CPU and memory ceilings with the failure, and its customer error
 names the requested class, CPU and memory, the ceilings, and the remedies of a
 smaller hardware class or asking support@sparkwing.dev to raise the ceiling. The
 launcher logs that customer-caused refusal at INFO with the requested and
-configured sizes. A missing pool keeps the generic guidance naming
+configured sizes. A controller older than the ceiling field refuses the whole
+sync before writing anything, so the launcher resends that sync without ceilings
+and the customer gets the generic guidance. An older launcher never sends the
+field, and the current controller treats its failure the same way. A missing pool keeps the generic guidance naming
 support@sparkwing.dev and the run reference, and logs at ERROR because the
 operator must configure it.
 
