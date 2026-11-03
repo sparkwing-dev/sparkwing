@@ -22,6 +22,8 @@ unlock.
 
 ### Fixed
 
+- **API:** Say why an engine request body failed to decode
+  A malformed JSON body returned only `invalid engine request`. The 400 response now says whether the body is not valid JSON (with the byte offset), ends early, has a value of the wrong type, or has a field the endpoint does not accept. The message never repeats request bytes.
 - **console:** Report log completeness to signed-in readers
   `GET /api/v1/runs/{run}/jobs/{job}/logs/completeness` answered `unknown` with zero lines for every session or credential reader, including a finished job that printed nothing, because the reauthorizing read wrapper hid the log store. It now returns the stored verdict.
 - **logs:** Keep a failed attempt's logs when its job retries
