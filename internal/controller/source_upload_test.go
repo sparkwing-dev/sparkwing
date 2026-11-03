@@ -105,7 +105,7 @@ func TestSourceSnapshotRealClientStorageAndIntake(t *testing.T) {
 	if err := teststore.SQL(t, s.store).QueryRow("SELECT bytes,objects FROM storage_run_usage WHERE team='a' AND run_id=?", created.RunID).Scan(&used, &objects); err != nil || used != info.Size() || objects != 1 {
 		t.Fatalf("run storage: bytes=%d objects=%d %v", used, objects, err)
 	}
-	runner := engineHTTPRoot(t, newEngineFixture(s.store, EngineController{}), "a", "snapshot-runner", []capability.Grant{capability.TriggersClaim})
+	runner := engineHTTPRoot(t, newEngineFixture(s.store, EngineController{}), "a", "snapshot-runner", []capability.Grant{capability.TriggersClaim, capability.NodesClaim})
 	s.engine.claimProfiles = engineProfileFake{}
 	claim, err := s.store.AsOperator().ClaimUnit(t.Context(), store.UnitDemand{CapabilityPrefix: "snapshot-runner", Target: &store.UnitRef{Kind: capability.UnitPlan, RunID: runspec.RunID(created.RunID)}})
 	if err != nil || len(claim.Bearer) == 0 {
@@ -127,6 +127,53 @@ func TestSourceSnapshotRealClientStorageAndIntake(t *testing.T) {
 	}
 	if err := entry.Close(); err != nil {
 		t.Fatal(err)
+	}
+	engineSQL(t, s.store, `INSERT INTO nodes(team,run_id,node_id,status,ready_at,spec_json,execution_json) VALUES ('a',?,'parent','pending',1,?,?)`, created.RunID, []byte(`{"id":"parent","children":[{"pipeline":"child"}]}`), []byte(`{}`))
+	if err := teststore.SeedNodeReady(s.store, t.Context(), created.RunID, "parent"); err != nil {
+		t.Fatal(err)
+	}
+	parentClaim, err := s.store.AsOperator().ClaimUnit(t.Context(), store.UnitDemand{CapabilityPrefix: "snapshot-runner", Target: &store.UnitRef{Kind: capability.UnitNode, RunID: runspec.RunID(created.RunID), NodeID: "parent"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	parentBearer := string(parentClaim.Bearer)
+	engineAdmitBearer(t, s.store, parentBearer)
+	engineClaimHTTP(t, s.Handler(), parentBearer, "POST", "/api/v1/runs/"+created.RunID+"/jobs/parent/transition", `{"to":"running","cause":"start","source_attempt":0}`, 200)
+	parentOptions := options
+	parentOptions.Bearer = func(context.Context) (string, error) { return parentBearer, nil }
+	host, err := client.NewNodeHostClient(parentOptions, created.RunID, "parent")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := host.Close(); err != nil {
+			t.Error(err)
+		}
+	})
+	principal, err := host.Principal(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	process, err := host.ProcessClient(t.Context(), principal, "parent")
+	if err != nil {
+		t.Fatal(err)
+	}
+	child, err := process.StartChild(t.Context(), "child", nil, "", "")
+	if err != nil {
+		t.Fatalf("uploaded-source child: %v", err)
+	}
+	childClaim, err := s.store.AsOperator().ClaimUnit(t.Context(), store.UnitDemand{CapabilityPrefix: "snapshot-runner", Target: &store.UnitRef{Kind: capability.UnitPlan, RunID: runspec.RunID(child)}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	childOptions := options
+	childOptions.Bearer = func(context.Context) (string, error) { return string(childClaim.Bearer), nil }
+	childAccess, err := client.NewSourceAccess(childOptions, child, spec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := childAccess.BundleURL(t.Context(), digest); err != nil {
+		t.Fatalf("child cannot read inherited source: %v", err)
 	}
 	if err := teststore.SQL(t, s.store).QueryRow(`SELECT COUNT(*) FROM audit_events WHERE kind='git_credential.released' AND team='a' AND run_id=?`, created.RunID).Scan(&count); err != nil || count != 0 {
 		t.Fatalf("complete bundle released a source credential: audits=%d: %v", count, err)

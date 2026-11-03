@@ -7,7 +7,72 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
+	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 )
+
+func TestChildSourceBundleRequiresExactParentSource(t *testing.T) {
+	for _, mutation := range []string{"none", "digest", "repository", "execution revision", "pipeline revision", "ref", "missing record", "foreign run record", "foreign team record", "unrelated submitter"} {
+		t.Run(mutation, func(t *testing.T) {
+			tenant, request := childIntakeFixture(t)
+			s := tenant.s
+			digest := strings.Repeat("a", 64)
+			seedSourceSetupBundle(t, s, digest)
+			parent, err := tenant.ReadRun(t.Context(), "run")
+			if err != nil {
+				t.Fatal(err)
+			}
+			parent.Request.Request.Git.SHA = request.Request.Git.SHA
+			parent.Request.Request.Source.Ref = request.Request.Source.Ref
+			rewriteSchemaExec(t, s.db, `UPDATE runs SET request_json=? WHERE team='a' AND id='run'`, sealWith(t, parent.Request, parent.Request.Provenance))
+			request.Request.Git = parent.Request.Request.Git
+			request.Request.Source = parent.Request.Request.Source
+			switch mutation {
+			case "digest":
+				request.Request.Source.BundleDigest.Value = strings.Repeat("b", 64)
+			case "repository":
+				request.Request.Git.Repository.Key = "gh:2"
+			case "execution revision":
+				request.Request.Git.SHA = strings.Repeat("b", 40)
+			case "pipeline revision":
+				request.Request.Source.Ref = strings.Repeat("b", 40)
+			case "ref":
+				request.Request.Git.Ref = "other"
+			case "missing record":
+				rewriteSchemaExec(t, s.db, `DELETE FROM blob_records WHERE kind='source_bundle'`)
+			case "foreign run record":
+				rewriteSchemaExec(t, s.db, `UPDATE blob_records SET run_id=NULL WHERE kind='source_bundle'`)
+			case "foreign team record":
+				rewriteSchemaExec(t, s.db, `INSERT INTO blobs(team,digest,size,created_at) VALUES ('b',?,3,1)`, digest)
+				rewriteSchemaExec(t, s.db, `UPDATE blob_records SET team='b',run_id=NULL WHERE kind='source_bundle'`)
+			case "unrelated submitter":
+				request.Request.Lineage = runspec.Lineage{}
+				root := authorityRoot("submitter", "a")
+				root.Grants = []capability.Grant{capability.RunsWrite}
+				authorityPersist(t, s, root)
+				request.Authority.ID = root.Prefix
+			}
+			admitted, err := tenant.AdmitRun(t.Context(), request)
+			if mutation != "none" {
+				if err == nil {
+					t.Fatal("unrelated source bundle accepted")
+				}
+				rewriteSchemaCount(t, s.db, "runs", 1)
+				return
+			}
+			if err != nil {
+				t.Fatalf("same-source child admission: %v", err)
+			}
+			var boundDigest, sourceRun string
+			if err := s.db.QueryRow(`SELECT digest,source_run_id FROM blob_records WHERE team='a' AND run_id=? AND kind='source_bundle'`, admitted.RunID).Scan(&boundDigest, &sourceRun); err != nil || boundDigest != digest || sourceRun != "run" {
+				t.Fatalf("child source binding: digest=%s source=%s: %v", boundDigest, sourceRun, err)
+			}
+			if replay, err := tenant.AdmitRun(t.Context(), request); err != nil || !replay.Replayed || replay.RunID != admitted.RunID {
+				t.Fatalf("child replay: %+v: %v", replay, err)
+			}
+		})
+	}
+}
 
 func FuzzSourceUploadExpiryTenantScope(f *testing.F) {
 	f.Add("same-id", false)

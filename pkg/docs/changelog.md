@@ -22,6 +22,8 @@ unlock.
 
 ### Fixed
 
+- **Cloud:** Start declared same-source children from uploaded working-tree snapshots
+  Children reuse their parent's retained source bundle only for the same repository, ref, execution commit and pipeline commit. Upload ownership checks still reject unrelated submissions.
 - **upgrade:** Refresh the SDK requirement in generated sparks overlays before installation
   An overlay left from an earlier run could retain the old SDK pin and make `sparkwing upgrade` fail with "Go dependency selection changed the SDK pin". Installation now takes the SDK requirement from `go.mod` while preserving resolved sparks versions.
 - **GitHub:** Accept stateless installation tokens through source checkout, storage and log masking
