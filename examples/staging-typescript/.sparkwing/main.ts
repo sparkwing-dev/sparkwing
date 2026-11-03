@@ -8,6 +8,7 @@ import {
   definePipeline, dir, docker, ExecError, main, parts, path, SDKError,
 } from "../../../sdk/typescript/src/index.ts";
 import type { Context, Job, Plan } from "../../../sdk/typescript/index.d.ts";
+import type { CleanupRegistration } from "../../../sdk/typescript/index.d.ts";
 
 const goCheckout = fileURLToPath(new URL("../../../", import.meta.url));
 const cacheDirectory = ".sparkwing/cache/example-ts-deps";
@@ -53,13 +54,25 @@ async function status(ctx: Context, id: string, follow = false, targetProfile = 
   return lastDetail(output);
 }
 
-async function trigger(ctx: Context, token: string, ...args: string[]): Promise<string> {
+interface ProbeRun { id: string; cleanup: CleanupRegistration }
+
+async function trigger(ctx: Context, token: string, ...args: string[]): Promise<ProbeRun> {
   const command = ctx.args["api-profile"]
     ? ["pipeline", "trigger", "example-probe", profile(ctx), "--detach", "-o", "plain"]
     : ["run", "example-probe", "--sw-detached", "--sw-output", "plain"];
   const id = (await cli(ctx, ...command, "--", "--token", token, "--cli", ctx.args["cli"] || "sparkwing", "--api-profile", ctx.args["api-profile"] || "", ...args)).trim();
   assert.match(id, /^[A-Za-z0-9_-]+$/, "trigger returned no plain run ID");
-  return id;
+  return { id, cleanup: await trackRun(ctx, id) };
+}
+
+async function trackRun(ctx: Context, id: string, targetProfile = ctx.args["api-profile"] || ""): Promise<CleanupRegistration> {
+  return ctx.cleanup({ argv: [ctx.args["cli"] || "sparkwing", "runs", "cancel", "--run", id, `--profile=${targetProfile}`], description: "Cancel TypeScript gate probe" });
+}
+
+async function awaitProbe(ctx: Context, run: ProbeRun, targetProfile = ctx.args["api-profile"] || ""): Promise<RunDetail> {
+  const detail = await status(ctx, run.id, true, targetProfile);
+  if (["success", "failed", "cancelled"].includes(detail.status)) await run.cleanup.unregister();
+  return detail;
 }
 
 async function verifyOIDC(ctx: Context): Promise<void> {
@@ -209,41 +222,36 @@ function nativeAssertions(plan: Plan): Job<unknown>[] {
 function lifecycleAssertions(plan: Plan): Job<unknown>[] {
   const checks: Job<unknown>[] = [];
   checks.push(plan.job("logs-history-api-assert", async (ctx) => {
-    const id = await trigger(ctx, `${ctx.run.id}-ts-logs`);
-    const detail = await status(ctx, id, true);
-    assert.equal(detail.id, id);
+    const run = await trigger(ctx, `${ctx.run.id}-ts-logs`);
+    const detail = await awaitProbe(ctx, run);
+    assert.equal(detail.id, run.id);
     assert.equal(detail.status, "success");
-    const logs = await cli(ctx, "runs", "logs", "--run", id, profile(ctx), "-o", "json", "--follow");
+    const logs = await cli(ctx, "runs", "logs", "--run", run.id, profile(ctx), "-o", "json", "--follow");
     assert.ok(logs.includes("example-probe-output-ok"), "API logs must include the probe source marker");
     const history = await cli(ctx, "runs", "list", "--pipeline", "example-probe", profile(ctx), "-o", "plain", "--limit", "100");
-    assert.ok(history.split(/\s+/).includes(id), "completed probe must appear in run history");
+    assert.ok(history.split(/\s+/).includes(run.id), "completed probe must appear in run history");
   }).timeout(90_000));
   checks.push(plan.job("failed-only-retry-assert", async (ctx) => {
     const original = await trigger(ctx, `${ctx.run.id}-ts-retry`, "--fail-once");
-    assert.equal((await status(ctx, original, true)).status, "failed");
-    const retried = (await cli(ctx, "runs", "retry", "--run", original, "--failed", profile(ctx), "-o", "plain")).trim();
-    const detail = await status(ctx, retried, true);
+    assert.equal((await awaitProbe(ctx, original)).status, "failed");
+    const id = (await cli(ctx, "runs", "retry", "--run", original.id, "--failed", profile(ctx), "-o", "plain")).trim();
+    const detail = await awaitProbe(ctx, { id, cleanup: await trackRun(ctx, id) });
     assert.equal(detail.status, "success");
     assert.equal(detail.retry?.mode, "failed");
     for (const name of ["source", "memo"]) assert.ok(detail.retry?.reused.includes(name), `failed-only retry must reuse ${name} output`);
   }).skipIf((ctx) => ctx.args["fail-once"] === "true" ? false : skip(ctx, "--fail-once was not requested")).timeout(90_000));
   checks.push(plan.job("cancellation-assert", async (ctx) => {
-    const id = await trigger(ctx, `${ctx.run.id}-ts-cancel`, "--long");
-    const cleanup = await ctx.cleanup({ argv: [ctx.args["cli"] || "sparkwing", "-C", ctx.args["go-checkout"] || goCheckout, "runs", "cancel", "--run", id, profile(ctx), "-o", "plain"], description: "Cancel TypeScript gate long-job probe" });
-    try {
-      for (;;) {
-        const detail = await status(ctx, id);
-        if (detail.jobs.some((job) => job.id === "long" && job.status === "running")) break;
-        assert.ok(!["failed", "success", "cancelled"].includes(detail.status), "long probe ended before cancellation");
-        await delay(100, undefined, { signal: ctx.signal });
-      }
-    } finally {
-      await cli(ctx, "runs", "cancel", "--run", id, profile(ctx), "-o", "plain");
+    const run = await trigger(ctx, `${ctx.run.id}-ts-cancel`, "--long");
+    for (;;) {
+      const detail = await status(ctx, run.id);
+      if (detail.jobs.some((job) => job.id === "long" && job.status === "running")) break;
+      assert.ok(!["failed", "success", "cancelled"].includes(detail.status), "long probe ended before cancellation");
+      await delay(100, undefined, { signal: ctx.signal });
     }
-    const detail = await status(ctx, id, true);
+    await cli(ctx, "runs", "cancel", "--run", run.id, profile(ctx), "-o", "plain");
+    const detail = await awaitProbe(ctx, run);
     assert.equal(detail.status, "cancelled");
     assert.ok(detail.jobs.some((job) => job.id === "long" && job.outcome === "cancelled"), "long job must report cancellation");
-    await cleanup.unregister();
   }).timeout(90_000));
   return checks;
 }
@@ -277,7 +285,7 @@ definePipeline({
       assert.ok(checkout, "--smoke-checkout is required with --smoke-profile");
       const id = (await ctx.exec([ctx.args["cli"] || "sparkwing", "-C", checkout, "pipeline", "trigger", ctx.args["smoke-pipeline"] || "reference", "--profile", ctx.args["smoke-profile"]!, "--detach", "-o", "plain"]).string()).trim();
       assert.match(id, /^[A-Za-z0-9_-]+$/, "reference trigger returned no plain run ID");
-      const detail = await status(ctx, id, true, ctx.args["smoke-profile"]);
+      const detail = await awaitProbe(ctx, { id, cleanup: await trackRun(ctx, id, ctx.args["smoke-profile"]) }, ctx.args["smoke-profile"]);
       assert.equal(detail.status, "success");
       for (const name of ["hello", "docker-test"]) {
         assert.ok(detail.jobs.some((job) => job.id === name && job.outcome === "success"), `reference job ${name} must succeed`);

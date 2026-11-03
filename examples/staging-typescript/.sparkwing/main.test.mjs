@@ -169,3 +169,30 @@ test("native memo assertion calls the declared child twice and rejects a rerun b
     } finally { await host.close(); }
   }
 });
+
+test("lifecycle cleanup stays armed on a failed observation and releases after completion", { skip: process.platform === "win32" }, async () => {
+  const binary = join(root, "probe-cli");
+  for (const observed of [true, false]) {
+    await writeFile(binary, `#!/bin/sh
+case "$3 $4" in
+  'run example-probe') printf 'probe-test\\n' ;;
+  'runs status') ${observed ? `printf '%s\\n' '{"id":"probe-test","status":"success","jobs":[]}'` : "exit 1"} ;;
+  'runs logs') printf 'example-probe-output-ok\\n' ;;
+  'runs list') printf 'probe-test\\n' ;;
+  *) exit 2 ;;
+esac
+`, { mode: 0o700 });
+    let registration;
+    let released = false;
+    const { host } = await session("logs-history-api-assert", { cleanup: async (spec) => {
+      registration = spec;
+      return { unregister: async () => { released = true; } };
+    } }, { cli: binary });
+    try {
+      const reply = await host.send({ id: "lifecycle", op: "run_step", job: "logs-history-api-assert", step: "run", attempt: 1, settled: [] });
+      assert.equal(reply.result.outcome, observed ? "success" : "failed", JSON.stringify(reply));
+      assert.deepEqual(registration.argv, [binary, "runs", "cancel", "--run", "probe-test", "--profile="]);
+      assert.equal(released, observed);
+    } finally { await host.close(); }
+  }
+});

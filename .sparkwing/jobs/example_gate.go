@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/cleanup"
 	"github.com/sparkwing-dev/sparkwing/sparkwing/docker"
 	"github.com/sparkwing-dev/sparkwing/sparkwing/inputs"
 )
@@ -279,7 +280,20 @@ func exampleCLI(ctx context.Context, in ExampleInputs, args ...string) (string, 
 	return strings.TrimSpace(result.Stdout), nil
 }
 
-func exampleStart(ctx context.Context, in ExampleInputs, token string, extra ...string) (string, error) {
+type exampleProbeRun struct {
+	id      string
+	release func()
+}
+
+func (r exampleProbeRun) await(ctx context.Context, in ExampleInputs) (exampleRunDetail, error) {
+	detail, err := exampleStatus(ctx, in, r.id, true)
+	if err == nil && (detail.Status == "success" || detail.Status == "failed" || detail.Status == "cancelled") {
+		r.release()
+	}
+	return detail, err
+}
+
+func exampleStart(ctx context.Context, in ExampleInputs, token string, extra ...string) (exampleProbeRun, error) {
 	args := []string{"-C", sparkwing.WorkDir()}
 	if in.APIProfile == "" {
 		args = append(args, "run", "example-probe", "--sw-detached", "--sw-output", "plain")
@@ -288,7 +302,24 @@ func exampleStart(ctx context.Context, in ExampleInputs, token string, extra ...
 	}
 	args = append(args, "--", "--token", token, "--cli", in.CLI, "--api-profile", in.APIProfile)
 	args = append(args, extra...)
-	return exampleCLI(ctx, in, args...)
+	id, err := exampleCLI(ctx, in, args...)
+	if err != nil {
+		return exampleProbeRun{}, err
+	}
+	return exampleTrackRun(ctx, in, id)
+}
+
+func exampleTrackRun(ctx context.Context, in ExampleInputs, id string) (exampleProbeRun, error) {
+	args := []string{in.CLI, "runs", "cancel", "--run", id, "--profile=" + in.APIProfile}
+	// safety: detached probes outlive their SDK process, so the host owns cancellation until a terminal observation.
+	release, err := cleanup.Register(ctx, cleanup.Spec{Argv: args, Description: "Cancel example gate probe"})
+	if err != nil {
+		stopCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+		defer cancel()
+		_, stopErr := exampleCLI(stopCtx, in, args[1:]...)
+		return exampleProbeRun{}, errors.Join(err, stopErr)
+	}
+	return exampleProbeRun{id: id, release: release}, nil
 }
 
 func exampleStatus(ctx context.Context, in ExampleInputs, id string, follow bool) (exampleRunDetail, error) {
@@ -336,11 +367,11 @@ func exampleDecodeStatus(result string) (exampleRunDetail, error) {
 func exampleMemoCheck(in ExampleInputs, rc sparkwing.RunContext) func(context.Context) error {
 	return func(ctx context.Context) error {
 		for i := range 2 {
-			id, err := exampleStart(ctx, in, rc.RunID+"-memo")
+			run, err := exampleStart(ctx, in, rc.RunID+"-memo")
 			if err != nil {
 				return err
 			}
-			detail, err := exampleStatus(ctx, in, id, true)
+			detail, err := run.await(ctx, in)
 			if err != nil {
 				return err
 			}
@@ -365,22 +396,26 @@ func exampleMemoCheck(in ExampleInputs, rc sparkwing.RunContext) func(context.Co
 
 func exampleRetryCheck(in ExampleInputs, rc sparkwing.RunContext) func(context.Context) error {
 	return func(ctx context.Context) error {
-		id, err := exampleStart(ctx, in, rc.RunID+"-retry", "--fail-once")
+		run, err := exampleStart(ctx, in, rc.RunID+"-retry", "--fail-once")
 		if err != nil {
 			return err
 		}
-		detail, err := exampleStatus(ctx, in, id, true)
+		detail, err := run.await(ctx, in)
 		if err != nil {
 			return err
 		}
 		if detail.Status != "failed" {
 			return fmt.Errorf("failed-only-retry: initial status %s, want failed", detail.Status)
 		}
-		retryID, err := exampleCLI(ctx, in, "runs", "retry", "--run", id, "--failed", "--profile="+in.APIProfile, "-o", "plain")
+		retryID, err := exampleCLI(ctx, in, "runs", "retry", "--run", run.id, "--failed", "--profile="+in.APIProfile, "-o", "plain")
 		if err != nil {
 			return err
 		}
-		retried, err := exampleStatus(ctx, in, retryID, true)
+		retry, err := exampleTrackRun(ctx, in, retryID)
+		if err != nil {
+			return err
+		}
+		retried, err := retry.await(ctx, in)
 		if err != nil {
 			return err
 		}
@@ -404,21 +439,14 @@ func exampleRetryCheck(in ExampleInputs, rc sparkwing.RunContext) func(context.C
 
 func exampleCancelCheck(in ExampleInputs, rc sparkwing.RunContext) func(context.Context) error {
 	return func(ctx context.Context) error {
-		id, err := exampleStart(ctx, in, rc.RunID+"-cancel", "--long")
+		run, err := exampleStart(ctx, in, rc.RunID+"-cancel", "--long")
 		if err != nil {
 			return err
 		}
-		defer func() {
-			cleanup, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
-			defer cancel()
-			if _, err := exampleCLI(cleanup, in, "runs", "cancel", "--run", id, "--profile="+in.APIProfile); err != nil {
-				sparkwing.Warn(ctx, "cancel probe cleanup: %v", err)
-			}
-		}()
 		ready, cancel := context.WithTimeout(ctx, 30*time.Second)
 		defer cancel()
 		for {
-			detail, err := exampleStatus(ready, in, id, false)
+			detail, err := exampleStatus(ready, in, run.id, false)
 			if err != nil {
 				return err
 			}
@@ -435,10 +463,10 @@ func exampleCancelCheck(in ExampleInputs, rc sparkwing.RunContext) func(context.
 				return fmt.Errorf("long job never started: %w", err)
 			}
 		}
-		if _, err := exampleCLI(ctx, in, "runs", "cancel", "--run", id, "--profile="+in.APIProfile); err != nil {
+		if _, err := exampleCLI(ctx, in, "runs", "cancel", "--run", run.id, "--profile="+in.APIProfile); err != nil {
 			return err
 		}
-		detail, err := exampleStatus(ctx, in, id, true)
+		detail, err := run.await(ctx, in)
 		if err != nil {
 			return err
 		}
@@ -456,18 +484,18 @@ func exampleCancelCheck(in ExampleInputs, rc sparkwing.RunContext) func(context.
 
 func exampleLogsHistory(in ExampleInputs, rc sparkwing.RunContext) func(context.Context) error {
 	return func(ctx context.Context) error {
-		id, err := exampleStart(ctx, in, rc.RunID+"-logs")
+		run, err := exampleStart(ctx, in, rc.RunID+"-logs")
 		if err != nil {
 			return err
 		}
-		detail, err := exampleStatus(ctx, in, id, true)
+		detail, err := run.await(ctx, in)
 		if err != nil {
 			return err
 		}
 		if detail.Status != "success" {
 			return fmt.Errorf("logs-history: probe ended %s", detail.Status)
 		}
-		logs, err := exampleCLI(ctx, in, "runs", "logs", "--run", id, "--profile="+in.APIProfile, "--follow", "-o", "json")
+		logs, err := exampleCLI(ctx, in, "runs", "logs", "--run", run.id, "--profile="+in.APIProfile, "--follow", "-o", "json")
 		if err != nil {
 			return err
 		}
@@ -479,7 +507,7 @@ func exampleLogsHistory(in ExampleInputs, rc sparkwing.RunContext) func(context.
 			return err
 		}
 		for _, recorded := range strings.Fields(history) {
-			if recorded == id {
+			if recorded == run.id {
 				return nil
 			}
 		}
@@ -502,7 +530,11 @@ func exampleReference(in ExampleInputs) func(context.Context) error {
 		}
 		target := in
 		target.APIProfile = in.SmokeProfile
-		detail, err := exampleStatus(ctx, target, repo, true)
+		run, err := exampleTrackRun(ctx, target, repo)
+		if err != nil {
+			return err
+		}
+		detail, err := run.await(ctx, target)
 		if err != nil {
 			return err
 		}

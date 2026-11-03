@@ -4,12 +4,43 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"os"
+	"path/filepath"
+	"runtime"
 	"testing"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 	"github.com/sparkwing-dev/sparkwing/sparkwing/sparkwingtest"
 )
+
+func TestExampleProbeCleanupRemainsUntilTerminalObservation(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("status fixture uses a POSIX executable")
+	}
+	for _, tc := range []struct {
+		status string
+		exit   int
+		want   bool
+	}{
+		{"success", 0, true}, {"failed", 0, true}, {"cancelled", 0, true},
+		{"running", 3, false}, {"", 1, false},
+	} {
+		t.Run(fmt.Sprintf("%s-exit-%d", tc.status, tc.exit), func(t *testing.T) {
+			cli := filepath.Join(t.TempDir(), "status")
+			script := fmt.Sprintf("#!/bin/sh\nprintf '%%s\\n' '{\"id\":\"probe\",\"status\":\"%s\"}'\nexit %d\n", tc.status, tc.exit)
+			if err := os.WriteFile(cli, []byte(script), 0o700); err != nil {
+				t.Fatal(err)
+			}
+			released := false
+			run := exampleProbeRun{id: "probe", release: func() { released = true }}
+			_, err := run.await(t.Context(), ExampleInputs{CLI: cli})
+			if (err != nil) != (tc.exit == 1) || released != tc.want {
+				t.Fatalf("released=%t, error=%v", released, err)
+			}
+		})
+	}
+}
 
 func TestExampleOutputAssertionsReadJobAndStepPredecessors(t *testing.T) {
 	host := sparkwingtest.New(sparkwingtest.Options{Outputs: map[string]json.RawMessage{"source": []byte(`"example-output-v1"`)}})
