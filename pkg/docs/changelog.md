@@ -59,6 +59,10 @@ unlock.
 - **Cloud:** Start declared same-source children from uploaded working-tree snapshots
   Children reuse their parent's retained source bundle only for the same repository, ref, execution commit and pipeline commit. Upload ownership checks still reject unrelated submissions.
 
+### Changed
+
+- **scaffold:** `const FallbackSDKVersion` pins v0.68.4, so a fresh scaffold compiles against that release.
+
 ## [v0.68.4] - 2026-11-03
 ### Fixed
 
