@@ -1431,3 +1431,7 @@ Korey authorized deploying the release after v0.68.5 to production once it passe
 ## 2026-11-03 Korey decision 93: every change is reviewed
 
 Every change landing on main gets an AI review, including docs-only and comment-only changes: the reviewer checks correctness and alignment with Korey's standards, not just code risk. No size or path makes review optional. How standards and reviewer context are injected into the review is a later design (Korey is revising the standards); until then the review job keeps loading them as it does today.
+
+## 2026-11-03 Korey decision 94: runs show when an agent started them
+
+A run records that an agent started it on a person's behalf: "requested by Korey, via agent claude-code[:name]". The CLI detects known coding-agent environments automatically (for example Claude Code's CLAUDECODE=1) and accepts `--agent NAME` to set or name it and `--agent none` to opt out. The value is sealed with the run request, kept by retries, and shown with an agent icon and the name in the console and CLI run views. It is self-declared and display-only: it never grants or limits authority. Verified agent identity (an agent-scoped credential, needed for approval policies that treat agents and people differently) comes later with agentic orchestration (decision 84).
