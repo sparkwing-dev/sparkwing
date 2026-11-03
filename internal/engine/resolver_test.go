@@ -439,3 +439,32 @@ func TestUnpublishedEngineNamesThePinAsTheFix(t *testing.T) {
 		t.Fatalf("hint %q does not name the pin fix %q", failure.Hint, want)
 	}
 }
+
+func TestPreEnginePinRefusalNamesTheUpgrade(t *testing.T) {
+	refused := integrity(errors.New("release manifest has duplicate, unknown or malformed entries"))
+	err := predatesEngine("v0.66.4", refused)
+	var failure *apierr.Error
+	if !errors.As(err, &failure) || failure.Code != apierr.VersionUnsupported {
+		t.Fatalf("old pin error = %v", err)
+	}
+	for _, want := range []string{"v0.66.4 is older than v0.68.0", "not executed"} {
+		if !strings.Contains(failure.Message, want) {
+			t.Fatalf("message %q lacks %q", failure.Message, want)
+		}
+	}
+	if !strings.Contains(failure.Hint, "`sparkwing upgrade`") {
+		t.Fatalf("hint %q does not name the upgrade", failure.Hint)
+	}
+	for _, kept := range []struct {
+		version string
+		err     error
+	}{
+		{"v0.68.0", refused},
+		{"v0.68.0-qa.3", refused},
+		{"v0.66.4", &apierr.Error{Code: apierr.NotFound, Message: "v0.66.4 is not published"}},
+	} {
+		if got := predatesEngine(kept.version, kept.err); got != kept.err {
+			t.Fatalf("%s: %v rewritten to %v", kept.version, kept.err, got)
+		}
+	}
+}

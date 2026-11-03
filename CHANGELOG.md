@@ -22,6 +22,8 @@ unlock.
 
 ### Fixed
 
+- **CLI:** Say a pre-v0.68 SDK pin needs `sparkwing upgrade`
+  Running a repository whose SDK pin predates v0.68.0 failed with `integrity_failure: release manifest has duplicate, unknown or malformed entries` and told the user not to execute unverified bytes. It now fails with `version_unsupported`, says the pin is older than v0.68.0, the oldest release the CLI can run as a pipeline engine, and names `sparkwing upgrade` as the fix. The older release is still never executed.
 - **web:** Make run cards usable with a keyboard and a screen reader
   The Runs pane is a "Runs" list of cards. Each card has a button named with the run's repository, pipeline, branch, start time and status that reports selection as pressed and opens or closes the run with Enter or Space. Each bulk-action checkbox names its run.
 - **web:** Give the console main, banner and navigation landmarks and a skip link
