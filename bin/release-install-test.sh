@@ -183,6 +183,22 @@ if [ -e "$WORK/prefix-tampered-runner/sparkwing-runner$EXT" ]; then
   case_failed tampered-runner "left a runner behind after refusing"
 fi
 
+# A runner destination that cannot be replaced is found before the CLI changes.
+mkdir -p "$WORK/prefix-blocked-runner/sparkwing-runner$EXT"
+printf 'previous' >"$WORK/prefix-blocked-runner/sparkwing$EXT"
+blocked_url="file://$GOOD"
+if [ "$GOOS" = windows ]; then blocked_url="file:///$(cygpath -m -- "$GOOD")"; fi
+set +e
+HOME="$WORK/home-blocked-runner" SPARKWING_HOME="$WORK/home-blocked-runner/.sparkwing" SPARKWING_RELEASE_BASE_URL="$blocked_url" \
+  sh "$INSTALLER" --version "$TAG" --prefix "$WORK/prefix-blocked-runner" --runner >/dev/null 2>"$WORK/blocked-runner.err"
+blocked_status=$?
+set -e
+if [ "$blocked_status" -eq 0 ] || ! grep -qF "is not a file" "$WORK/blocked-runner.err"; then
+  case_failed blocked-runner "did not refuse a runner destination that is a directory: $(tr '\n' ' ' <"$WORK/blocked-runner.err")"
+elif [ "$(cat "$WORK/prefix-blocked-runner/sparkwing$EXT")" != previous ]; then
+  case_failed blocked-runner "replaced the CLI before refusing the runner destination"
+fi
+
 TAMPERED="$WORK/releases-tampered"
 stage_release "$TAMPERED" "$TAG"
 printf 'malicious' >>"$TAMPERED/$TAG/$ASSET"

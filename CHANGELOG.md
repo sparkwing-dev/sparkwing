@@ -23,7 +23,7 @@ unlock.
 ### Fixed
 
 - **CLI:** Install `sparkwing-runner` from the signed release with `install.sh --runner`
-  Neither `install.sh` nor `sparkwing update` installed `sparkwing-runner`, and `sparkwing runners add` told users to `go install` it. `install.sh --runner` now installs it beside `sparkwing` after the same signature, digest and version checks, and installs neither binary when either fails. `runners add`, `sparkwing update --help` and the getting-started and local execution docs name that command; an installed runner keeps updating itself from verified release assets.
+  Neither `install.sh` nor `sparkwing update` installed `sparkwing-runner`, and `sparkwing runners add` told users to `go install` it. `install.sh --runner` now installs it beside `sparkwing` after the same signature, digest and version checks, and installs neither binary when either fails a check or its destination is not a file. If writing the runner fails, the previous `sparkwing` is put back. `runners add`, `sparkwing update --help` and the getting-started and local execution docs name that command; an installed runner keeps updating itself from verified release assets.
 - **CLI:** Report a still-running v0.67 dashboard and say to stop old processes before moving an old store
   `sparkwing dashboard stop` reported `stopped` while a dashboard from v0.67 or earlier kept running and held the old `state.db` open. `dashboard stop` and `status` now report such a dashboard, found through the `dashboard.pid` file it wrote, with its pid and how to stop it, in a `warning` field in JSON. The pre-v0.68 store refusal now says to stop every older Sparkwing process using the store before moving it aside.
 - **CLI:** Name the routing profile in a cloud-routed run's dead-token hint

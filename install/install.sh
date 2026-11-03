@@ -276,9 +276,31 @@ done
 if [ "$GOOS" != windows ] || [ ! -d "$PREFIX" ]; then
   mkdir -p "$PREFIX"
 fi
+for binary in $BINARIES; do
+  if [ -e "$PREFIX/$binary$EXT" ] && [ ! -f "$PREFIX/$binary$EXT" ]; then
+    err "$PREFIX/$binary$EXT exists and is not a file. Refusing to install; nothing was replaced."
+  fi
+done
+# A runner that cannot be written puts the previous sparkwing back, so the
+# two binaries never come from different releases.
+had_previous=0
+if [ "$RUNNER" = 1 ] && [ -f "$PREFIX/sparkwing$EXT" ]; then
+  cp -p "$PREFIX/sparkwing$EXT" "$WORK/previous-sparkwing$EXT" ||
+    err "could not keep a copy of $PREFIX/sparkwing$EXT. Refusing to install; nothing was replaced."
+  had_previous=1
+fi
 # `install` replaces the binary atomically, so a running sparkwing survives.
 for binary in $BINARIES; do
-  install -m 0755 "$WORK/$binary-${GOOS}-${GOARCH}${EXT}" "$PREFIX/$binary$EXT"
+  if ! install -m 0755 "$WORK/$binary-${GOOS}-${GOARCH}${EXT}" "$PREFIX/$binary$EXT"; then
+    if [ "$binary" != sparkwing ]; then
+      if [ "$had_previous" = 1 ]; then
+        install -m 0755 "$WORK/previous-sparkwing$EXT" "$PREFIX/sparkwing$EXT"
+      else
+        rm -f "$PREFIX/sparkwing$EXT"
+      fi
+    fi
+    err "could not write $PREFIX/$binary$EXT. The previous sparkwing is unchanged."
+  fi
   log "installed $PREFIX/$binary$EXT"
 done
 
