@@ -24,10 +24,24 @@ unlock.
 
 - **SDK install:** Refuse a generated overlay that is not a regular file
   A repository could commit `.resolved.mod` as a symlink, and the installer's pin refresh would then rewrite the file it pointed to on the runner. Installation now refuses the overlay instead.
+- **child pipelines:** Keep parent job and step selections out of child runs
+  Focusing the example with `--sw-only dynamic-child` now lets the weather child's `stamp` job run. Child pipelines retain other inherited run preferences and resolve their own job and step selections.
+
+- **controller:** Local child pipelines inherit local owner deadlines
+  An authenticated local parent can start a child with its unbounded local owner deadline. Remote callers retain the remote deadline ceiling even when they request local placement.
+
+- **Go SDK:** Match `ErrOIDCUnavailable` when the controller has no OIDC issuer
+  `errors.Is` can recognize the missing-issuer response while the error retains its `not_found` code and setup guidance. Authorization and transport failures remain errors.
+
 - **upgrade:** Refresh the SDK requirement in generated sparks overlays before installation
   An overlay left from an earlier run could retain the old SDK pin and make `sparkwing upgrade` fail with "Go dependency selection changed the SDK pin". Installation now takes the SDK requirement from `go.mod` while preserving resolved sparks versions.
 - **GitHub:** Accept stateless installation tokens through source checkout, storage and log masking
   Stored HTTPS credentials and the console accept tokens up to 4,096 characters. Secret scanners recognize the longer installation-token format, including dots, underscores and hyphens. GitHub Actions runners preserve the full `GITHUB_TOKEN` for source checkout.
+
+### Docs
+
+- **examples:** Expand the SDK tour into a staging integration gate
+  The Go example asserts feature results and can trigger the reference pipeline in a second repository. A TypeScript twin includes runnable SDK protocol checks and documents its matching-engine prerequisite.
 
 ## [v0.68.3] - 2026-11-02
 ### Added

@@ -1,0 +1,12 @@
+{
+  "name": "sparkwing-staging-typescript",
+  "private": true,
+  "type": "module",
+  "main": "main.ts",
+  "dependencies": {
+    "@sparkwing/sdk": "file:../../../sdk/typescript"
+  },
+  "scripts": {
+    "test": "node --test main.test.mjs"
+  }
+}

@@ -88,6 +88,9 @@ pipelines:
   - name: example
     entrypoint: Example
 
+  - name: example-probe
+    entrypoint: ExampleProbe
+
   - name: weather-report
     entrypoint: WeatherReport
 

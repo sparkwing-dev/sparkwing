@@ -33,9 +33,13 @@ func ResolveIntake(options runspec.Options, operator OperatorInputs, ctx Context
 
 // InheritedOptions captures a parent's winners as child intake inputs. Their
 // original policy layers cannot be asserted by a new request; intake reapplies
-// the controller's ceilings and parent-only owner checks.
+// the controller's ceilings and parent-only owner checks. Job and step selections
+// apply to the parent's pipeline and are resolved separately for each child.
 func InheritedOptions(options runspec.Options) runspec.Options {
 	options = cloneOptions(options)
+	options.Only = runspec.Setting[string]{}
+	options.StartAt = runspec.Setting[string]{}
+	options.StopAt = runspec.Setting[string]{}
 	for _, origin := range intakeOrigins(&options) {
 		origin.Layer = runspec.LayerSealed
 	}

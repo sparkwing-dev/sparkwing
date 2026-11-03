@@ -13,6 +13,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"testing"
 
@@ -53,8 +54,10 @@ func TestClaimedRunDescribesRepositoryExampleOverSDKPipes(t *testing.T) {
 		t.Fatalf("plain describe: %v", err)
 	}
 	pipeline, found := doc.Declarations().Pipeline("Example")
-	if !found || pipeline.Args == nil || len(pipeline.Args) != 0 {
-		t.Fatal("repository example must declare an empty arguments array")
+	if !found || !slices.ContainsFunc(pipeline.Args, func(arg nodeproto.ArgumentDescription) bool {
+		return arg.Name == "fail-once" && arg.Type == "bool" && !arg.Required
+	}) {
+		t.Fatalf("repository example must declare the optional retry probe: %+v", pipeline)
 	}
 	_, handler, bearer := controller.EngineClaimHTTPFixture(t, []capability.Grant{capability.NodesClaim})
 	response := controller.EngineClaimHTTP(t, handler, bearer, "POST", "/api/v1/runners/claim", `{"runner_version":"v1.2.3","kinds":["node"]}`, 200)
@@ -87,7 +90,7 @@ func TestClaimedRunDescribesRepositoryExampleOverSDKPipes(t *testing.T) {
 	if err != nil {
 		t.Fatalf("run-path describe: %v", err)
 	}
-	if prepared.Description.Name != "Example" || prepared.Description.Args == nil || len(prepared.Args) != 0 {
+	if prepared.Description.Name != "Example" || len(prepared.Description.Args) != len(pipeline.Args) || prepared.Args["secret-name"] != "EXAMPLE_GATE_SECRET" {
 		t.Fatalf("run-path description: %+v", prepared)
 	}
 	raw, err := prepared.Plan(t.Context())
@@ -95,7 +98,7 @@ func TestClaimedRunDescribesRepositoryExampleOverSDKPipes(t *testing.T) {
 		t.Fatalf("run-path plan: %v", err)
 	}
 	var plan nodeproto.PlanDoc
-	if err := json.Unmarshal(raw, &plan); err != nil || len(plan.Jobs) == 0 || plan.Jobs[0].ID != "configure" {
+	if err := json.Unmarshal(raw, &plan); err != nil || !slices.ContainsFunc(plan.Jobs, func(job nodeproto.JobSpec) bool { return job.ID == "configure" }) {
 		t.Fatalf("repository example plan: %s: %v", raw, err)
 	}
 	acceptLocalExample(t, root, raw, selected)
@@ -209,7 +212,12 @@ func acceptLocalExample(t *testing.T, root string, raw []byte, selected engine.R
 		t.Fatal(err)
 	}
 	decision := store.Decide(scheduling)
-	if snapshot.Run.Spec == nil || len(snapshot.Nodes) != len(plan.Jobs) || len(decision.Nodes) != 1 || decision.Nodes[0].NodeID != "configure" || decision.Nodes[0].Kind != store.DecisionReady {
+	if snapshot.Run.Spec == nil || len(snapshot.Nodes) != len(plan.Jobs) {
+		t.Fatalf("accepted example lost its plan: %+v", snapshot)
+	}
+	if !slices.ContainsFunc(decision.Nodes, func(node store.NodeDecision) bool {
+		return node.NodeID == "configure" && node.Kind == store.DecisionReady
+	}) {
 		t.Fatalf("accepted example cannot schedule configure: %+v", decision)
 	}
 }

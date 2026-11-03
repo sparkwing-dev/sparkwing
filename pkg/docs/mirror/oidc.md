@@ -150,7 +150,7 @@ A GitHub Actions job holding a claim can request a token too, with `runner:githu
 token, err := sparkwing.OIDCToken(ctx, "sts.amazonaws.com")
 ```
 
-`OIDCToken` works in any node a runner executes against a controller. A run with no controller behind it, such as a local run, gets `sparkwing.ErrOIDCUnavailable`.
+`OIDCToken` works in any node a runner executes against a controller. A run without an OIDC issuer gets an error matching `sparkwing.ErrOIDCUnavailable` through `errors.Is`. This includes a local controller with no signing key. The error retains the controller's `not_found` code and setup guidance. Authorization and transport failures remain errors.
 
 The AWS SDKs and CLI read a web identity token from a file named by `AWS_WEB_IDENTITY_TOKEN_FILE`:
 

@@ -74,7 +74,14 @@ func (sdkOperations) Context(ctx context.Context, rc nodeproto.RunContext, runne
 		}
 		return v, masked, err
 	}))
-	ctx = context.WithValue(ctx, oidcTokenSourceKey{}, oIDCTokenSource(func(ctx context.Context, a string) (string, error) { return s.OIDC(ctx, a) }))
+	ctx = context.WithValue(ctx, oidcTokenSourceKey{}, oIDCTokenSource(func(ctx context.Context, a string) (string, error) {
+		token, err := s.OIDC(ctx, a)
+		var failure *apierr.Error
+		if errors.As(err, &failure) && failure.Code == apierr.NotFound {
+			err = errors.Join(ErrOIDCUnavailable, err)
+		}
+		return token, err
+	}))
 	ctx = context.WithValue(ctx, keyJSONRefResolver, func(ctx context.Context, id string) ([]byte, error) {
 		raw, err := s.Output(ctx, id)
 		return raw, referenceError(err, false)

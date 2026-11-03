@@ -13,16 +13,19 @@ import (
 type Example struct{ sparkwing.Base }
 
 func (Example) ShortHelp() string {
-	return "Reference pipeline: a runnable tour of every major SDK feature"
+	return "Staging integration gate and runnable SDK tour"
 }
 
 func (Example) Help() string {
-	return "A self-contained pipeline that exercises the SDK end-to-end: Plan-layer Jobs and JobFanOut (JobGroup), Plan.Approval gate (auto-approves 20s after it opens if nobody answers), multi-step Work with GroupSteps (StepGroup), typed Ref[T] outputs via Produces[T] and StepGet[T], the full modifier set (Retry, Timeout, BeforeRun, AfterRun, OnFailure), Plan-layer and Work-layer SkipIf, and Annotate for persistent node-level summaries. It also drives cross-pipeline RunAndAwait against the weather-report pipeline in this same module, an Optional() node whose Work collects every sibling failure (FailurePolicy(CollectAll)), and Summary markdown step summaries. Every step sleeps briefly and emits an Annotate so the dashboard surfaces a readable narrative without digging into logs."
+	return "Runs the SDK tour alongside named integration assertions for matrix, job and step outputs, generated jobs, dynamic child pipelines, scoped secrets, OIDC, dependency cache restore, memo reuse, artifacts, cancellation and API logs/history. The optional error canary remains a dashboard demonstration. Secrets and OIDC skip with a reason when unavailable. Docker runs on capable runners. Pass --fail-once to exercise failed-only retry and predecessor outputs. Pass --smoke-profile plus --smoke-checkout to trigger and await sparkwing-ci-smoke as a separate run. Memoization belongs to jobs, so the memoized job contains one step. The default local run needs no Cloud or Docker."
 }
 
 func (Example) Examples() []sparkwing.Example {
 	return []sparkwing.Example{
-		{Comment: "Run the full tour", Command: "sparkwing run example"},
+		{Comment: "Run the local integration gate and SDK tour", Command: "sparkwing run example"},
+		{Comment: "Assert failed-only retry and predecessor outputs", Command: "sparkwing run example -- --fail-once"},
+		{Comment: "Include the second repository on staging", Command: "sparkwing run example -- --smoke-profile staging --smoke-checkout /path/to/sparkwing-ci-smoke"},
+		{Comment: "Read the optional declared secret", Command: "sparkwing run example -- --secret-name EXAMPLE_GATE_SECRET"},
 		{Comment: "Render the DAG without running", Command: "sparkwing pipeline plan --pipeline example"},
 		{Comment: "Skip the rollout step via Work-layer SkipIf", Command: "DRY_RUN=1 sparkwing run example"},
 	}
@@ -34,7 +37,8 @@ type BuildOut struct {
 	SizeMB int    `json:"size_mb"`
 }
 
-func (p *Example) Plan(_ context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, _ sparkwing.RunContext) error {
+func (p *Example) Plan(_ context.Context, plan *sparkwing.Plan, in ExampleInputs, rc sparkwing.RunContext) error {
+	features := exampleIntegration(plan, in, rc)
 	configure := sparkwing.Job(plan, "configure", configureFn).
 		Inline().
 		BeforeRun(func(ctx context.Context) error {
@@ -65,7 +69,7 @@ func (p *Example) Plan(_ context.Context, plan *sparkwing.Plan, _ sparkwing.NoIn
 	invWarm := sparkwing.Job(plan, "inventory-warm", offshootFn("inventory-warm", 4)).Needs(invCache)
 	sparkwing.Job(plan, "inventory-report", offshootFn("inventory-report", 2)).Needs(invWarm).Inline()
 
-	sparkwing.Job(plan, "weather-check", weatherCheckFn).Needs(configure).Inline().StartsChildren("weather-report")
+	sparkwing.Job(plan, "weather-check", weatherCheckFn).Needs(configure).Inline().StartsChildren("weather-report").Timeout(90 * time.Second)
 
 	sparkwing.Job(plan, "error-canary", &ExampleErrorCanary{}).Needs(configure).Optional()
 
@@ -82,13 +86,12 @@ func (p *Example) Plan(_ context.Context, plan *sparkwing.Plan, _ sparkwing.NoIn
 
 	approveDeploy := plan.Approval("approve-deploy", sparkwing.ApprovalConfig{
 		Message:   "Promote example:sha-abc1234 to prod?",
-		Timeout:   20 * time.Second,
+		Timeout:   time.Second,
 		OnTimeout: sparkwing.ApprovalApprove,
 	}).Needs(publishImages)
 
 	deploy := sparkwing.Job(plan, "deploy", &ExampleDeploy{Build: buildRef}).
 		Needs(approveDeploy).
-		// safety: the steps sleep 8.7s; the rest of the timeout is headroom for a loaded machine.
 		Timeout(30 * time.Second)
 	deploy.OnFailure("deploy-rollback", rollbackFn)
 
@@ -96,7 +99,7 @@ func (p *Example) Plan(_ context.Context, plan *sparkwing.Plan, _ sparkwing.NoIn
 	metricsCheck := sparkwing.Job(plan, "metrics-check", metricsCheckFn).Needs(deploy)
 	verify := sparkwing.GroupJobs(plan, "post-deploy-verify", smokeTest, metricsCheck)
 
-	sparkwing.Job(plan, "notify", notifyFn).
+	notify := sparkwing.Job(plan, "notify", notifyFn).
 		Needs(verify).
 		Inline().
 		SkipIf(func(ctx context.Context) bool {
@@ -106,11 +109,15 @@ func (p *Example) Plan(_ context.Context, plan *sparkwing.Plan, _ sparkwing.NoIn
 			sparkwing.Annotate(ctx, sparkwing.Annotation{Message: "notify dispatched"})
 		})
 
+	reference := sparkwing.Job(plan, "reference-pipeline", exampleReference(in)).Needs(features, notify).Inline()
+	if in.SmokeProfile == "" {
+		reference.SkipIf(exampleSkip("no --smoke-profile configured for the separate sparkwing-ci-smoke run"))
+	}
 	return nil
 }
 
 func configureFn(ctx context.Context) error {
-	if err := chatter(ctx, 800, []string{
+	if err := chatter(ctx, []string{
 		"reading .sparkwing/sparkwing.yaml",
 		"resolving 14 config keys",
 		"merging trigger env (4 keys)",
@@ -124,7 +131,7 @@ func configureFn(ctx context.Context) error {
 
 func checkFn(name string) func(ctx context.Context) error {
 	return func(ctx context.Context) error {
-		if err := chatter(ctx, 600, []string{
+		if err := chatter(ctx, []string{
 			fmt.Sprintf("%s: starting", name),
 			fmt.Sprintf("%s: scanning workspace", name),
 			fmt.Sprintf("%s: applying ruleset", name),
@@ -139,6 +146,9 @@ func checkFn(name string) func(ctx context.Context) error {
 func publishFn(target string, buildRef sparkwing.Ref[BuildOut]) func(ctx context.Context) error {
 	return func(ctx context.Context) error {
 		out := buildRef.Get(ctx)
+		if out.Tag != "example:sha-abc1234" || out.SizeMB != 14 || out.Digest == "" {
+			return fmt.Errorf("publish-%s: invalid build output: %+v", target, out)
+		}
 		lines := []string{
 			fmt.Sprintf("authenticating to registry for %s", target),
 			fmt.Sprintf("inspecting local image %s", out.Tag),
@@ -148,7 +158,7 @@ func publishFn(target string, buildRef sparkwing.Ref[BuildOut]) func(ctx context
 			"pushing layer 4/4 (config, 0.3 MiB)",
 			fmt.Sprintf("signing manifest with cosign (digest %s)", out.Digest),
 		}
-		if err := chatter(ctx, 1800, lines); err != nil {
+		if err := chatter(ctx, lines); err != nil {
 			return err
 		}
 		sparkwing.Annotate(ctx, sparkwing.Annotation{Message: fmt.Sprintf("%s: pushed %s", target, out.Tag)})
@@ -157,7 +167,7 @@ func publishFn(target string, buildRef sparkwing.Ref[BuildOut]) func(ctx context
 }
 
 func notifyFn(ctx context.Context) error {
-	if err := chatter(ctx, 400, []string{
+	if err := chatter(ctx, []string{
 		"resolving Slack webhook from secrets",
 		"posting message to #releases",
 	}); err != nil {
@@ -223,10 +233,12 @@ func weatherCheckFn(ctx context.Context) error {
 	sparkwing.Info(ctx, "calling weather-report pipeline via RunAndAwait")
 	out, err := sparkwing.RunAndAwait[WeatherOut, sparkwing.NoInputs](
 		ctx, "weather-report", "stamp",
-		sparkwing.WithFreshTimeout(30*time.Second),
 	)
 	if err != nil {
 		return fmt.Errorf("weather-report: %w", err)
+	}
+	if out.Forecast == "" || out.TempF < 55 || out.TempF >= 90 || out.At.IsZero() {
+		return fmt.Errorf("weather-check: invalid output: %+v", out)
 	}
 	sparkwing.Info(ctx, "weather-report returned: %s, %d°F", out.Forecast, out.TempF)
 	sparkwing.Annotate(ctx, sparkwing.Annotation{Message: fmt.Sprintf("weather: %s · %d°F (from weather-report pipeline)", out.Forecast, out.TempF)})
@@ -239,7 +251,7 @@ func offshootFn(id string, lines int) func(ctx context.Context) error {
 		for i := range msgs {
 			msgs[i] = fmt.Sprintf("%s: phase %d/%d", id, i+1, lines)
 		}
-		if err := chatter(ctx, 600, msgs); err != nil {
+		if err := chatter(ctx, msgs); err != nil {
 			return err
 		}
 		sparkwing.Annotate(ctx, sparkwing.Annotation{Message: fmt.Sprintf("%s: ok", id)})
@@ -248,7 +260,7 @@ func offshootFn(id string, lines int) func(ctx context.Context) error {
 }
 
 func smokeTestFn(ctx context.Context) error {
-	if err := chatter(ctx, 1100, []string{
+	if err := chatter(ctx, []string{
 		"GET /healthz",
 		"200 OK · uptime=4s",
 		"GET /api/v1/version",
@@ -270,7 +282,7 @@ func smokeTestFn(ctx context.Context) error {
 }
 
 func metricsCheckFn(ctx context.Context) error {
-	if err := chatter(ctx, 900, []string{
+	if err := chatter(ctx, []string{
 		"querying Prometheus: rate(http_requests_total[1m])",
 		"querying Prometheus: histogram_quantile(0.95, http_request_duration_seconds_bucket)",
 		"p95 latency: 42ms (threshold 500ms)",
@@ -296,7 +308,7 @@ type ExampleBuild struct {
 }
 
 func (j *ExampleBuild) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
-	fetchRefs := chattyStep(w, "fetch-refs", 1200, "fetched 142 objects · 1.3 MiB", []string{
+	fetchRefs := chattyStep(w, "fetch-refs", "fetched 142 objects · 1.3 MiB", []string{
 		"connecting to origin (git@github.com:example/app.git)",
 		"negotiating protocol v2",
 		"enumerating remote refs",
@@ -304,14 +316,14 @@ func (j *ExampleBuild) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
 		"receiving objects: 142/142 (1.3 MiB)",
 		"resolving deltas: 38/38",
 	})
-	fetchCheckout := chattyStep(w, "fetch-checkout", 400, "worktree clean at sha abc1234", []string{
+	fetchCheckout := chattyStep(w, "fetch-checkout", "worktree clean at sha abc1234", []string{
 		"checking out abc1234",
 		"git status: clean",
 	}).Needs(fetchRefs)
 
 	ci := sparkwing.GroupSteps(
 		w, "ci",
-		chattyStep(w, "lint", 1500, "gofmt: 0 files reformatted", []string{
+		chattyStep(w, "lint", "gofmt: 0 files reformatted", []string{
 			"scanning 87 .go files",
 			"running gofmt -l",
 			"running revive",
@@ -319,14 +331,14 @@ func (j *ExampleBuild) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
 			"running ineffassign",
 			"all linters: clean",
 		}).Needs(fetchCheckout),
-		chattyStep(w, "vet", 1200, "vet: 12 packages clean", []string{
+		chattyStep(w, "vet", "vet: 12 packages clean", []string{
 			"loading package graph",
 			"go vet ./pkg/...",
 			"go vet ./internal/...",
 			"go vet ./cmd/...",
 			"vet: 12 packages, 0 findings",
 		}).Needs(fetchCheckout),
-		chattyStep(w, "test", 4500, "33 tests passed across 3 packages", []string{
+		chattyStep(w, "test", "33 tests passed across 3 packages", []string{
 			"discovering test packages: 3 found",
 			"compiling test binaries",
 			"=== RUN   TestStore_CreateRun",
@@ -357,7 +369,7 @@ func (j *ExampleBuild) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
 			"linking cmd/app",
 			"emitting bin/app (14.2 MiB)",
 		}
-		if err := chatter(ctx, 3500, lines); err != nil {
+		if err := chatter(ctx, lines); err != nil {
 			return BuildOut{}, err
 		}
 		out := BuildOut{Tag: "example:sha-abc1234", SizeMB: 14}
@@ -367,7 +379,7 @@ func (j *ExampleBuild) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
 
 	strip := sparkwing.Step(w, "strip", func(ctx context.Context) error {
 		out := sparkwing.StepGet[BuildOut](ctx, compile)
-		if err := chatter(ctx, 600, []string{
+		if err := chatter(ctx, []string{
 			"reading bin/app",
 			"removing debug symbols",
 			"removing unused sections",
@@ -381,7 +393,7 @@ func (j *ExampleBuild) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
 
 	return sparkwing.Step(w, "package", func(ctx context.Context) (BuildOut, error) {
 		out := sparkwing.StepGet[BuildOut](ctx, compile)
-		if err := chatter(ctx, 900, []string{
+		if err := chatter(ctx, []string{
 			"writing Dockerfile.runtime",
 			"copying bin/app into stage",
 			"writing layer manifest",
@@ -417,7 +429,7 @@ type ExampleDeploy struct {
 func (j *ExampleDeploy) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
 	render := sparkwing.Step(w, "render", func(ctx context.Context) error {
 		out := j.Build.Get(ctx)
-		return chatter(ctx, 700, []string{
+		return chatter(ctx, []string{
 			fmt.Sprintf("rendering manifests for %s", out.Tag),
 			"templating k8s/deployment.yaml",
 			"templating k8s/service.yaml",
@@ -437,7 +449,7 @@ func (j *ExampleDeploy) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
 			"service/example-app created",
 			"deployment.apps/example-app created",
 		}
-		if err := chatter(ctx, 3000, lines); err != nil {
+		if err := chatter(ctx, lines); err != nil {
 			return err
 		}
 		sparkwing.Annotate(ctx, sparkwing.Annotation{Message: "applied 6 manifests (Deployment, Service, ConfigMap, ...)"})
@@ -463,7 +475,7 @@ func (j *ExampleDeploy) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
 			"pod example-app-7d9c4-ghi56 Ready",
 			"replicas: 3/3 ready",
 		}
-		if err := chatter(ctx, 5000, lines); err != nil {
+		if err := chatter(ctx, lines); err != nil {
 			return err
 		}
 		sparkwing.Annotate(ctx, sparkwing.Annotation{Message: "rolled out 3/3 replicas to kind-local"})
@@ -488,9 +500,9 @@ func (j *ExampleDeploy) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
 	}), nil
 }
 
-func chattyStep(w *sparkwing.Work, id string, totalMs int, summary string, lines []string) *sparkwing.WorkStep {
+func chattyStep(w *sparkwing.Work, id, summary string, lines []string) *sparkwing.WorkStep {
 	return sparkwing.Step(w, id, func(ctx context.Context) error {
-		if err := chatter(ctx, totalMs, lines); err != nil {
+		if err := chatter(ctx, lines); err != nil {
 			return err
 		}
 		sparkwing.Annotate(ctx, sparkwing.Annotation{Message: summary})
@@ -498,20 +510,14 @@ func chattyStep(w *sparkwing.Work, id string, totalMs int, summary string, lines
 	})
 }
 
-func chatter(ctx context.Context, totalMs int, lines []string) error {
-	if len(lines) == 0 {
-		return nap(ctx, totalMs)
-	}
-	tick := time.Duration(totalMs) * time.Millisecond / time.Duration(len(lines))
+func chatter(ctx context.Context, lines []string) error {
 	for _, line := range lines {
-		sparkwing.Info(ctx, "%s", line)
-		select {
-		case <-time.After(tick):
-		case <-ctx.Done():
-			return ctx.Err()
+		if err := ctx.Err(); err != nil {
+			return err
 		}
+		sparkwing.Info(ctx, "%s", line)
 	}
-	return nil
+	return ctx.Err()
 }
 
 func nap(ctx context.Context, ms int) error {
@@ -524,5 +530,5 @@ func nap(ctx context.Context, ms int) error {
 }
 
 func init() {
-	sparkwing.Register("Example", func() sparkwing.Pipeline[sparkwing.NoInputs] { return &Example{} })
+	sparkwing.Register("Example", func() sparkwing.Pipeline[ExampleInputs] { return &Example{} })
 }

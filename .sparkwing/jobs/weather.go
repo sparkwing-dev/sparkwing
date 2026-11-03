@@ -41,7 +41,7 @@ func (j *weatherStamp) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
 }
 
 func (j *weatherStamp) run(ctx context.Context) (WeatherOut, error) {
-	if err := chatter(ctx, 400, []string{
+	if err := chatter(ctx, []string{
 		"querying NOAA endpoint",
 		"parsing response",
 		"computing local forecast",
