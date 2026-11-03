@@ -85,6 +85,12 @@ pipelines:
   - name: template-verify
     entrypoint: TemplateVerify
 
+  - name: deploy
+    entrypoint: Deploy
+
+  - name: deploy-smoke
+    entrypoint: DeploySmoke
+
   - name: example
     entrypoint: Example
 
