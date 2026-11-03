@@ -357,7 +357,6 @@ type ExecError struct {
     Stderr   string
     ExitCode int
     Cause    error
-
     // Terminated names why a started process was killed rather than
     // exiting on its own: "timeout" when its context deadline expired,
     // "cancellation" when the context was cancelled,
@@ -366,7 +365,6 @@ type ExecError struct {
     // collides with ExitNotStarted, so this field -- not ExitCode -- is
     // what tells a kill apart from a failed launch.
     Terminated string
-    // contains filtered or unexported fields
 }
 ```
 

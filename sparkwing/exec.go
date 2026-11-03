@@ -50,7 +50,6 @@ type ExecError struct {
 	Stderr   string
 	ExitCode int
 	Cause    error
-	deadline time.Time
 	// Terminated names why a started process was killed rather than
 	// exiting on its own: "timeout" when its context deadline expired,
 	// "cancellation" when the context was cancelled,
@@ -65,11 +64,7 @@ func (e *ExecError) Error() string {
 	var b strings.Builder
 	if e.Terminated != "" {
 		if e.Terminated == "timeout" {
-			b.WriteString("command timed out")
-			if !e.deadline.IsZero() {
-				fmt.Fprintf(&b, " at deadline %s", e.deadline.UTC().Format(time.RFC3339Nano))
-			}
-			fmt.Fprintf(&b, ": %s", e.Command)
+			fmt.Fprintf(&b, "command timed out: %s", e.Command)
 		} else {
 			fmt.Fprintf(&b, "command terminated by %s: %s", e.Terminated, e.Command)
 		}
@@ -470,8 +465,10 @@ func execCmd(ctx context.Context, name string, args []string, dir string, extraE
 				Terminated: terminationReason(ctx, ee, job.wasCancelled()),
 			}
 			if failure.Terminated == "timeout" {
-				failure.deadline, _ = ctx.Deadline()
 				failure.Cause = errors.Join(waitErr, context.Cause(ctx))
+				if deadline, ok := ctx.Deadline(); ok {
+					failure.Cause = fmt.Errorf("deadline %s: %w", deadline.UTC().Format(time.RFC3339Nano), failure.Cause)
+				}
 			}
 			return res, failure
 		}
