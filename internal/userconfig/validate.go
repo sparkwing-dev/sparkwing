@@ -1,6 +1,7 @@
 package userconfig
 
 import (
+	"fmt"
 	"math"
 	"net/url"
 	"strings"
@@ -9,6 +10,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/limits"
 	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 	"github.com/sparkwing-dev/sparkwing/internal/sourceurl"
+	"github.com/sparkwing-dev/sparkwing/pkg/match"
 )
 
 // Decode validates the complete machine schema without filling defaults.
@@ -92,8 +94,16 @@ func validURL(raw string) bool {
 
 func validateRunner(r RunnerConfig) error {
 	for _, label := range r.Labels {
-		if strings.HasPrefix(strings.TrimSpace(label), "sparkwing-") {
+		label = strings.TrimSpace(label)
+		switch {
+		case label == "":
+			return Invalid("runner.labels", "labels must not be blank")
+		case strings.HasPrefix(label, "sparkwing-"):
 			return Invalid("runner.labels", "labels beginning with sparkwing- belong to Sparkwing Cloud; use another prefix for self-hosted, personal or pool runners")
+		case len(match.SelfAsserted([]string{label})) == 0:
+			// safety: name, class, location, team and pool are granted by the machine's credentials, so a
+			// configured label that names one would read as authority it never carries.
+			return Invalid("runner.labels", fmt.Sprintf("%q names a fact Sparkwing grants from the machine's credentials (name, class, location, team, pool or local); remove it, since matching already uses the granted value", label))
 		}
 	}
 	if r.Controller != nil && !validURL(*r.Controller) {

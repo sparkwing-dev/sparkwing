@@ -21,7 +21,7 @@ func TestLocalClaimantW8UsesPersistedPeerAuthority(t *testing.T) {
 			t.Error(err)
 		}
 	})
-	claimant, err := NewClaimant(s)
+	claimant, err := NewClaimant(t.Context(), s, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

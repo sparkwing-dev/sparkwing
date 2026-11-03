@@ -2,6 +2,7 @@ package store
 
 import (
 	"encoding/json"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -14,6 +15,48 @@ import (
 )
 
 func TestRunViewExplainsLocalJobItsHostCannotExecute(t *testing.T) {
+	view := localHostWaitView(t, []string{"host=laptop"})
+	reason := view.HostIneligible["elsewhere"]
+	if _, explained := view.HostIneligible["here"]; explained || !strings.Contains(reason, "requires runner labels host=moonborn") || !strings.Contains(reason, "host=laptop") || !strings.Contains(reason, "runner.labels") {
+		t.Fatalf("host ineligibility = %+v", view.HostIneligible)
+	}
+}
+
+// A local machine whose configuration lists a job's custom label executes that job itself.
+func TestLocalOwnerExecutesJobWithConfiguredMachineLabel(t *testing.T) {
+	view := localHostWaitView(t, []string{"host=laptop", "host=moonborn"})
+	if len(view.HostIneligible) != 0 {
+		t.Fatalf("configured label left jobs waiting: %+v", view.HostIneligible)
+	}
+}
+
+// Configured labels are preferences: they leave every granted fact of the local profile unchanged.
+func TestLocalLabelsGrantNoAuthority(t *testing.T) {
+	ctx := t.Context()
+	tenant, _, _ := intakeFixture(t)
+	s := tenant.s
+	root := authorityRoot("local-owner", "a")
+	root.Subject.Kind = capability.SubjectLocal
+	root.Grants = []capability.Grant{capability.NodesClaim, capability.TriggersClaim}
+	authorityPersist(t, s, root)
+	ref := capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: root.Prefix}
+	read := func(labels []string) match.Profile {
+		s.claimProfiles = claimProfileFake{profile: match.Profile{Labels: labels}}
+		profile, err := s.AsOperator().ReadClaimProfile(ctx, ref)
+		if err != nil {
+			t.Fatal(err)
+		}
+		profile.Labels = nil
+		return profile
+	}
+	bare, withLabels := read(nil), read([]string{"host=moonborn", "pool=prod", "location=cloud", "class=cloud", "name=other", "team=b"})
+	if !reflect.DeepEqual(bare, withLabels) || len(withLabels.ReservedPools) != 0 || withLabels.Class != match.ClassCoordinator || withLabels.Name != root.Subject.ID {
+		t.Fatalf("labels changed authority: %+v != %+v", withLabels, bare)
+	}
+}
+
+func localHostWaitView(t *testing.T, labels []string) RunView {
+	t.Helper()
 	ctx := t.Context()
 	tenant, in, _ := intakeFixture(t)
 	s := tenant.s
@@ -21,7 +64,7 @@ func TestRunViewExplainsLocalJobItsHostCannotExecute(t *testing.T) {
 	root.Subject.Kind = capability.SubjectLocal
 	root.Grants = []capability.Grant{capability.RunsWrite, capability.NodesClaim, capability.TriggersClaim}
 	authorityPersist(t, s, root)
-	s.claimProfiles = claimProfileFake{profile: match.Profile{Labels: []string{"host=laptop"}}}
+	s.claimProfiles = claimProfileFake{profile: match.Profile{Labels: labels}}
 	in.Authority = capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: root.Prefix}
 	in.Request.Origin, in.Request.Dispatch = runspec.OriginLocal, runspec.DispatchHost
 	in.Request.Git.Repository.Key = "git:example.com/repo"
@@ -29,7 +72,7 @@ func TestRunViewExplainsLocalJobItsHostCannotExecute(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	award, err := s.AsOperator().ClaimUnit(ctx, UnitDemand{CapabilityPrefix: root.Prefix, Labels: []string{"host=laptop"}, Target: &UnitRef{Kind: capability.UnitTrigger, RunID: runspec.RunID(admitted.RunID)}})
+	award, err := s.AsOperator().ClaimUnit(ctx, UnitDemand{CapabilityPrefix: root.Prefix, Labels: labels, Target: &UnitRef{Kind: capability.UnitTrigger, RunID: runspec.RunID(admitted.RunID)}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -59,8 +102,5 @@ func TestRunViewExplainsLocalJobItsHostCannotExecute(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	reason := view.HostIneligible["elsewhere"]
-	if _, explained := view.HostIneligible["here"]; explained || !strings.Contains(reason, "requires runner labels host=moonborn") || !strings.Contains(reason, "host=laptop") {
-		t.Fatalf("host ineligibility = %+v", view.HostIneligible)
-	}
+	return view
 }

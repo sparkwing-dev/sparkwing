@@ -22,6 +22,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
 	"github.com/sparkwing-dev/sparkwing/internal/paths"
 	"github.com/sparkwing-dev/sparkwing/internal/runners"
+	"github.com/sparkwing-dev/sparkwing/internal/userconfig"
 	"github.com/sparkwing-dev/sparkwing/internal/web"
 	"github.com/sparkwing-dev/sparkwing/internal/wingd"
 	wingdclient "github.com/sparkwing-dev/sparkwing/internal/wingd/client"
@@ -140,7 +141,11 @@ func bindLocalController(ctx context.Context, b localcontroller.Binding) (_ loca
 			err = errors.Join(err, objects.Close())
 		}
 	}()
-	claimant, err := localcontroller.NewClaimant(b.Store)
+	var machineRunner userconfig.RunnerConfig
+	if _, _, err := userconfig.ReadDefault(userconfig.Runner, &machineRunner); err != nil {
+		return localcontroller.Services{}, err
+	}
+	claimant, err := localcontroller.NewClaimant(ctx, b.Store, machineRunner.Labels)
 	if err != nil {
 		return localcontroller.Services{}, err
 	}

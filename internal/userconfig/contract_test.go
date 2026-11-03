@@ -53,6 +53,18 @@ func TestRunnerLabelsReserveCloudPrefix(t *testing.T) {
 	}
 }
 
+func TestRunnerLabelsRefuseGrantedFacts(t *testing.T) {
+	for _, label := range []string{"name=desk", "class=agent", "location=cloud", "team=acme", "pool=prod", "local", "''"} {
+		_, err := Decode("machine.yaml", []byte("runner: {labels: [host=moonborn, "+label+"]}"))
+		if err == nil || !strings.Contains(err.Error(), "runner.labels") {
+			t.Fatalf("granted label %s: %v", label, err)
+		}
+	}
+	if _, err := Decode("machine.yaml", []byte("runner: {labels: [host=moonborn, os=linux, arch=amd64, gpu]}")); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestErrorsDoNotEchoTokens(t *testing.T) {
 	for _, raw := range []string{"profiles: {p: {controller: {url: [secret-token], token: secret-token}}}", "profiles: {p: {controller: {url: secret-token, token: secret-token}}}", "profiles: {p: {controller: {token: {secret-token: x}}}}"} {
 		_, err := Decode("machine.yaml", []byte(raw))

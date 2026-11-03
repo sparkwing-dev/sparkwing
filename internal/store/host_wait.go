@@ -61,7 +61,7 @@ func readHostIneligibleTx(ctx context.Context, tx *storeTx, team Team, snapshot 
 			if len(demand.Labels) > 0 {
 				reported = strings.Join(demand.Labels, ", ")
 			}
-			reason = fmt.Sprintf("waiting: requires runner labels %s, which the machine hosting this run does not report (it reports: %s); a local run executes only on that machine, so cancel it and run it where those labels apply, or change the job's requirements", strings.Join(requires, ", "), reported)
+			reason = fmt.Sprintf("waiting: requires runner labels %s, which the machine hosting this run does not report (it reports: %s); a local run executes only on that machine, so cancel it, then list them under runner.labels in that machine's configuration and run sparkwing daemon restart --force before running it again, run it where those labels apply, or change the job's requirements", strings.Join(requires, ", "), reported)
 		}
 		reasons[string(node.Ref.NodeID)] = reason
 	}

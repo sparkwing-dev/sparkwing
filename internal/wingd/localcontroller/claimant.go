@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"runtime"
+	"slices"
 	"sync"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
@@ -18,6 +19,7 @@ type Claimant struct {
 	operator *store.Operator
 	tenant   *store.Tenant
 	subject  string
+	labels   []string
 	mu       sync.Mutex
 	issued   capability.Issued
 	closed   bool
@@ -25,7 +27,9 @@ type Claimant struct {
 }
 
 // NewClaimant captures the process's verified OS identity without request input.
-func NewClaimant(s *store.Store) (*Claimant, error) {
+// Labels are the machine configuration's runner.labels, read once per controller start;
+// they steer placement only, so granted facts among them are dropped.
+func NewClaimant(ctx context.Context, s *store.Store, labels []string) (*Claimant, error) {
 	if s == nil {
 		return nil, errors.New("local claimant requires its controller store")
 	}
@@ -33,11 +37,11 @@ func NewClaimant(s *store.Store) (*Claimant, error) {
 	if err != nil {
 		return nil, err
 	}
-	tenant, err := s.ForTeam(context.Background(), store.DefaultTeam)
+	tenant, err := s.ForTeam(ctx, store.DefaultTeam)
 	if err != nil {
 		return nil, err
 	}
-	return &Claimant{operator: s.AsOperator(), tenant: tenant, subject: subject}, nil
+	return &Claimant{operator: s.AsOperator(), tenant: tenant, subject: subject, labels: match.SelfAsserted(labels)}, nil
 }
 
 // Bearer delegates queue authority through the shared peer authentication and issuance policy.
@@ -92,6 +96,8 @@ func (c *Claimant) Close() (err error) {
 }
 
 // ResolveClaimProfile binds local placement facts to the captured OS account.
+// Configured labels join the observed platform; the store grants name, class,
+// location and pools from the capability, so labels never widen authority.
 func (c *Claimant) ResolveClaimProfile(ctx context.Context, principal capability.Principal) (match.Profile, error) {
 	if err := context.Cause(ctx); err != nil {
 		return match.Profile{}, err
@@ -100,5 +106,5 @@ func (c *Claimant) ResolveClaimProfile(ctx context.Context, principal capability
 	if c.subject == "" || p.Subject != (capability.Subject{Kind: capability.SubjectLocal, ID: c.subject}) || p.Team != string(store.DefaultTeam) || p.Audience != capability.Controller || principal.Authority != (capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: p.Prefix}) || p.Prefix == "" {
 		return match.Profile{}, errors.New("local claim profile requires the controller account's authenticated capability")
 	}
-	return match.Profile{Name: c.subject, OS: runtime.GOOS, Arch: runtime.GOARCH}, nil
+	return match.Profile{Name: c.subject, Labels: slices.Clone(c.labels), OS: runtime.GOOS, Arch: runtime.GOARCH}, nil
 }

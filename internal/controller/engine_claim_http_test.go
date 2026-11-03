@@ -46,13 +46,18 @@ func revokeEngineMachine(t *testing.T, s *store.Store, prefix string) {
 
 func engineHTTPRoot(t *testing.T, e *engineFixture, team, prefix string, grants []capability.Grant) string {
 	t.Helper()
-	secret := sha256.Sum256([]byte(prefix))
-	raw := "swk_" + base64.RawURLEncoding.EncodeToString(secret[:])
-	digest := sha256.Sum256([]byte(raw))
 	kind := capability.SubjectMachine
 	if team == "" {
 		kind = capability.SubjectService
 	}
+	return engineHTTPRootAs(t, e, kind, team, prefix, grants)
+}
+
+func engineHTTPRootAs(t *testing.T, e *engineFixture, kind capability.SubjectKind, team, prefix string, grants []capability.Grant) string {
+	t.Helper()
+	secret := sha256.Sum256([]byte(prefix))
+	raw := "swk_" + base64.RawURLEncoding.EncodeToString(secret[:])
+	digest := sha256.Sum256([]byte(raw))
 	c := capability.Capability{
 		Prefix: prefix, Team: team, Subject: capability.Subject{Kind: kind, ID: prefix},
 		Audience: capability.Controller, Grants: grants, Binding: capability.Binding{Kind: capability.BindingNone},

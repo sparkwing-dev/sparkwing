@@ -38,3 +38,17 @@ current state instead:
 run_id="$(jq -r .run_id /tmp/build-run.json)"
 sparkwing runs status --run "$run_id" -o json
 ```
+
+## Runner labels apply to local runs
+
+`runner.labels` in the machine configuration now applies to the machine's own
+local `sparkwing run` work as well as to an enrolled runner. A job that requires
+`host=NAME` runs locally on the machine whose configuration lists `host=NAME`.
+
+Validation now refuses labels that name a fact Sparkwing grants: `local`,
+`name=`, `class=`, `location=`, `team=` and `pool=`, and blank labels. Until you
+remove them, every command fails with the file, line and label. They never
+matched as written, because placement already used the granted values.
+
+After editing the labels, run `sparkwing daemon restart --force` so the local
+controller reads them. See [Runner labels](../machine-config.md#runner-labels).

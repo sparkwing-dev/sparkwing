@@ -110,7 +110,7 @@ func acceptLocalExample(t *testing.T, root string, raw []byte, selected engine.R
 	var server *controller.Server
 	st, err := teststore.Open(t, filepath.Join(t.TempDir(), "state.db"), store.WithPolicies(func(st *store.Store) (store.Policies, error) {
 		var err error
-		claimant, err = localcontroller.NewClaimant(st)
+		claimant, err = localcontroller.NewClaimant(t.Context(), st, nil)
 		if err != nil {
 			return store.Policies{}, err
 		}

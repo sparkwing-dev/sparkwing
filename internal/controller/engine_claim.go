@@ -86,6 +86,11 @@ func (s *EngineController) claim(ctx context.Context, authorized capability.Auth
 		profile.OS, profile.Arch = body.OS, body.Arch
 	}
 	c := principal.Capability
+	if c.Subject.Kind == capability.SubjectLocal {
+		// safety: the local controller owns its machine's configured labels, so a claim over the
+		// socket advertises those rather than whatever the request names.
+		body.Labels = profile.Labels
+	}
 	if (len(body.ExcludedTeamLabels) > 0 || body.JobNamespace != "") && !capability.Launcher(c) {
 		return controllerwire.ClaimResponse{}, invalidEngineBody("only a launcher can report its job namespace or exclude faulted teams")
 	}
