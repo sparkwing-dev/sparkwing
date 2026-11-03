@@ -90,14 +90,14 @@ func runRoutedCommand(ctx context.Context, pipeline string, flags runFlags, args
 		err = deps.cloud(ctx, pipeline, flags, args, route, options)
 		var beforeIntake *burstBeforeIntakeError
 		if !errors.As(err, &beforeIntake) {
-			return err
+			return withProfile(*route.Profile, err)
 		}
 	}
 	if ctx.Err() != nil {
 		return ctx.Err()
 	}
 	if !burstControllerUnreachable(err) {
-		return err
+		return withProfile(*route.Profile, err)
 	}
 	if _, err := fmt.Fprintln(out, "Cloud controller is unreachable; running locally."); err != nil {
 		return err

@@ -505,7 +505,9 @@ until local and remote jobs finish cancelling. Secret reads remain refused
 during this drain. A second interrupt stops hosting.
 Nodes use the existing claim, lease and
 fencing rules. The local controller supplies this machine's admission only.
-Other machines register as runners with Cloud. `sparkwing runners add --runner NAME
+Other machines register as runners with Cloud. They need `sparkwing-runner`
+beside `sparkwing`, which `curl -fsSL https://sparkwing.dev/install.sh | sh -s -- --runner`
+installs from the signed release. `sparkwing runners add --runner NAME
 --personal --session-stdin --profile work` reads an existing independent account
 session from stdin and reserves the machine for that user's asserted runs.
 Omit `--repos` for a personal runner. Repository scopes require proven code,

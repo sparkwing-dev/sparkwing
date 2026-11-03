@@ -34,6 +34,20 @@ unlock.
 ## [v0.68.6] - 2026-11-03
 ### Fixed
 
+- **CLI:** Install `sparkwing-runner` from the signed release with `install.sh --runner`
+  Neither `install.sh` nor `sparkwing update` installed `sparkwing-runner`, and `sparkwing runners add` told users to `go install` it. `install.sh --runner` now installs it beside `sparkwing` after the same signature, digest and version checks, and installs neither binary when either fails a check or its destination is not a file. If writing the runner fails, the previous `sparkwing` is put back. `runners add`, `sparkwing update --help` and the getting-started and local execution docs name that command; an installed runner keeps updating itself from verified release assets.
+- **CLI:** Report a still-running v0.67 dashboard and say to stop old processes before moving an old store
+  `sparkwing dashboard stop` reported `stopped` while a dashboard from v0.67 or earlier kept running and held the old `state.db` open. `dashboard stop` and `status` now report such a dashboard, found through the `dashboard.pid` file it wrote, with its pid and how to stop it, in a `warning` field in JSON. The pre-v0.68 store refusal now says to stop every older Sparkwing process using the store before moving it aside.
+- **CLI:** Name the routing profile in a cloud-routed run's dead-token hint
+  When `sparkwing run` routed to Cloud through machine `run.routing` and the profile's token was no longer live, the hint said `sparkwing profiles set --profile 'NAME' --token-stdin`. It now names the profile from `run.routing`.
+- **CLI:** `sparkwing pipeline hooks install` leaves an older forwarder hook alone and names a stale hook
+  A `prepare-commit-msg` or other hook that Sparkwing before v0.68 wrote only to forward to the global `core.hooksPath` hook made install exit 1 with `internal: ... is missing or differs from expected content/format`, even though it runs no pipeline. Install now leaves such a forwarder in place and succeeds when the file is exactly what that version wrote, and `status` notes it and marks its record `forwarder: true`. Any other Sparkwing hook that no pipeline declares fails install with `conflict`, naming the file to delete; a declared hook blocked by a hand-written one names that file too.
+- **web:** Show a CLI token setup command that exists
+  After "Create CLI token" the console told users to run `sparkwing cloud connect`, which v0.68 removed. It now shows `sparkwing profiles add --controller URL --profile TEAM --token-stdin`.
+- **web:** Connect a personal machine without repository patterns, with a runner command that starts
+  The console's "Connect a machine" form required repository patterns for a personal machine, but a personal machine with a repository scope never claims work: it takes only its owner's runs, which a scope refuses. The form now asks for patterns only for a shared runner. The command it printed also called `sparkwing-runner runner` with flags that no longer exist; it now runs `sparkwing-runner warm` with `--repos`, `--also-claim-triggers=false` and `--claim-jobs=false` as the token's grants require.
+- **CLI:** Say a pre-v0.68 SDK pin needs `sparkwing upgrade`
+  Running a repository whose SDK pin predates v0.68.0 failed with `integrity_failure: release manifest has duplicate, unknown or malformed entries` and told the user not to execute unverified bytes. When the release's signatures and digest verify and only its list of executables is the older layout, it now fails with `version_unsupported`, says the pin is older than v0.68.0, the oldest release the CLI can run as a pipeline engine, and names `sparkwing upgrade` as the fix. A bad signature or digest stays `integrity_failure`, and the older release is never executed.
 - **web:** Make run cards usable with a keyboard and a screen reader
   The Runs pane is a "Runs" list of cards. Each card has a button named with the run's repository, pipeline, branch, start time and status that reports selection as pressed and opens or closes the run with Enter or Space. Each bulk-action checkbox names its run.
 - **web:** Give the console main, banner and navigation landmarks and a skip link

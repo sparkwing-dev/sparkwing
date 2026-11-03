@@ -4,6 +4,7 @@
 #   curl -fsSL https://sparkwing.dev/install.sh | sh
 #   curl -fsSL https://sparkwing.dev/install.sh | sh -s -- --version v0.49.0
 #   curl -fsSL https://sparkwing.dev/install.sh | sh -s -- --prefix /usr/local/bin
+#   curl -fsSL https://sparkwing.dev/install.sh | sh -s -- --runner
 #
 # Every install checks the release signature over SHA256SUMS, the asset's
 # digest against its SHA256SUMS line, and the asset's own signature, against a
@@ -36,16 +37,18 @@ RELEASE_LATEST_URL="${SPARKWING_RELEASE_LATEST_URL:-https://github.com/${REPO}/r
 
 PREFIX=""
 VERSION=""
+RUNNER=0
 
 log() { printf '\033[36m==>\033[0m %s\n' "$*"; }
 err() { printf '\033[31m==>\033[0m %s\n' "$*" >&2; exit 1; }
 
 usage() {
   cat <<EOF
-Usage: install.sh [--version vX.Y.Z] [--prefix DIR]
+Usage: install.sh [--version vX.Y.Z] [--prefix DIR] [--runner]
 
   --version  Pin a specific release tag. Default: latest.
   --prefix   Install directory. Default: \$HOME/.local/bin.
+  --runner   Also install sparkwing-runner beside sparkwing, verified the same way.
 
 Environment:
   SPARKWING_RELEASE_REPO  Override the release owner/repo (used for staging tests).
@@ -59,6 +62,7 @@ while [ $# -gt 0 ]; do
     --version=*) VERSION="${1#--version=}"; shift ;;
     --prefix) [ $# -ge 2 ] || err "--prefix needs a directory"; PREFIX="$2"; shift 2 ;;
     --prefix=*) PREFIX="${1#--prefix=}"; shift ;;
+    --runner) RUNNER=1; shift ;;
     -h|--help) usage; exit 0 ;;
     *) printf 'install.sh: unknown flag: %s\n' "$1" >&2; usage >&2; exit 2 ;;
   esac
@@ -160,7 +164,6 @@ EXT=""
 if [ "$GOOS" = windows ]; then
   EXT=".exe"
 fi
-ASSET="sparkwing-${GOOS}-${GOARCH}${EXT}"
 
 if [ -z "$VERSION" ]; then
   resolved="$(curl -fsSL -o /dev/null -w '%{url_effective}' "$RELEASE_LATEST_URL")" ||
@@ -183,12 +186,15 @@ fi
 
 fetch() { curl -fsSL "$1" -o "$2" || err "could not download $1"; }
 
-log "installing sparkwing $VERSION ($GOOS/$GOARCH)"
+BINARIES="sparkwing"
+if [ "$RUNNER" = 1 ]; then
+  BINARIES="sparkwing sparkwing-runner"
+fi
+
+log "installing $BINARIES $VERSION ($GOOS/$GOARCH)"
 base="${RELEASE_BASE_URL%/}/${VERSION}"
 fetch "$base/SHA256SUMS" "$WORK/SHA256SUMS"
 fetch "$base/SHA256SUMS.sig" "$WORK/SHA256SUMS.sig"
-fetch "$base/$ASSET" "$WORK/$ASSET"
-fetch "$base/$ASSET.sig" "$WORK/$ASSET.sig"
 
 # The key that signed the manifest must also have signed the asset, so a
 # rotation cannot leave one file checked against a retired key.
@@ -214,46 +220,89 @@ fresh copy carries the current key:
   curl -fsSL https://sparkwing.dev/install.sh | sh -s -- --version $VERSION"
 log "verified the release signature over SHA256SUMS"
 
-matches="$(awk -v want="$ASSET" '$2 == want || $2 == "*" want { print $1 }' "$WORK/SHA256SUMS")"
-[ -n "$matches" ] ||
-  err "SHA256SUMS for $VERSION has no line for $ASSET, so the download cannot be checked. Refusing to install."
-[ "$(printf '%s\n' "$matches" | wc -l)" -eq 1 ] ||
-  err "SHA256SUMS for $VERSION lists $ASSET more than once. Refusing to install."
-got="$(digest_of "$WORK/$ASSET")" || err "openssl could not hash the download. Refusing to install."
-[ "$matches" = "$got" ] ||
-  err "$ASSET does not match its SHA256SUMS entry for $VERSION.
+# verify_asset <binary>: downloads and checks one executable of the release.
+# Every asset is checked before any is installed, so a refusal leaves the
+# install directory as it was.
+verify_asset() {
+  ASSET="$1-${GOOS}-${GOARCH}${EXT}"
+  fetch "$base/$ASSET" "$WORK/$ASSET"
+  fetch "$base/$ASSET.sig" "$WORK/$ASSET.sig"
+  matches="$(awk -v want="$ASSET" '$2 == want || $2 == "*" want { print $1 }' "$WORK/SHA256SUMS")"
+  [ -n "$matches" ] ||
+    err "SHA256SUMS for $VERSION has no line for $ASSET, so the download cannot be checked. Refusing to install."
+  [ "$(printf '%s\n' "$matches" | wc -l)" -eq 1 ] ||
+    err "SHA256SUMS for $VERSION lists $ASSET more than once. Refusing to install."
+  got="$(digest_of "$WORK/$ASSET")" || err "openssl could not hash the download. Refusing to install."
+  [ "$matches" = "$got" ] ||
+    err "$ASSET does not match its SHA256SUMS entry for $VERSION.
 
   expected $matches
   got      $got
 
 Refusing to install."
-log "verified the asset digest against SHA256SUMS"
+  log "verified the $ASSET digest against SHA256SUMS"
 
-verify_signature "$SIGNING_KEY_PEM" "$WORK/$ASSET" "$WORK/$ASSET.sig" ||
-  err "the signature over $ASSET does not verify against the key that signed SHA256SUMS. Refusing to install."
-log "verified the release signature over $ASSET"
+  verify_signature "$SIGNING_KEY_PEM" "$WORK/$ASSET" "$WORK/$ASSET.sig" ||
+    err "the signature over $ASSET does not verify against the key that signed SHA256SUMS. Refusing to install."
+  log "verified the release signature over $ASSET"
 
-# A signature covers bytes, not a tag, so an older signed release served under
-# a newer tag would pass every check above. The binary's own report is what
-# catches that substitution.
-chmod 755 "$WORK/$ASSET"
-identity="$("$WORK/$ASSET" version -o json --offline 2>/dev/null)" ||
-  err "the verified $ASSET did not report its version. Refusing to install."
-case "$identity" in
-  *"\"installed\":\"$VERSION\""*) ;;
-  *) err "$ASSET is a signed sparkwing release, but not $VERSION: it reports a different version.
+  # A signature covers bytes, not a tag, so an older signed release served under
+  # a newer tag would pass every check above. The binary's own report is what
+  # catches that substitution.
+  chmod 755 "$WORK/$ASSET"
+  if [ "$1" = sparkwing ]; then
+    identity="$("$WORK/$ASSET" version -o json --offline 2>/dev/null)" ||
+      err "the verified $ASSET did not report its version. Refusing to install."
+    case "$identity" in
+      *"\"installed\":\"$VERSION\""*) ;;
+      *) identity="" ;;
+    esac
+  else
+    identity="$("$WORK/$ASSET" version -o plain --offline 2>/dev/null)" ||
+      err "the verified $ASSET did not report its version. Refusing to install."
+    [ "$identity" = "$VERSION" ] || identity=""
+  fi
+  [ -n "$identity" ] || err "$ASSET is a signed sparkwing release, but not $VERSION: it reports a different version.
 
 Refusing to install. A release asset served under another release's tag is
-either a mistake in the release or a downgrade attempt." ;;
-esac
-log "verified the binary reports $VERSION"
+either a mistake in the release or a downgrade attempt."
+  log "verified $ASSET reports $VERSION"
+}
+
+for binary in $BINARIES; do
+  verify_asset "$binary"
+done
 
 if [ "$GOOS" != windows ] || [ ! -d "$PREFIX" ]; then
   mkdir -p "$PREFIX"
 fi
+for binary in $BINARIES; do
+  if [ -e "$PREFIX/$binary$EXT" ] && [ ! -f "$PREFIX/$binary$EXT" ]; then
+    err "$PREFIX/$binary$EXT exists and is not a file. Refusing to install; nothing was replaced."
+  fi
+done
+# A runner that cannot be written puts the previous sparkwing back, so the
+# two binaries never come from different releases.
+had_previous=0
+if [ "$RUNNER" = 1 ] && [ -f "$PREFIX/sparkwing$EXT" ]; then
+  cp -p "$PREFIX/sparkwing$EXT" "$WORK/previous-sparkwing$EXT" ||
+    err "could not keep a copy of $PREFIX/sparkwing$EXT. Refusing to install; nothing was replaced."
+  had_previous=1
+fi
 # `install` replaces the binary atomically, so a running sparkwing survives.
-install -m 0755 "$WORK/$ASSET" "$PREFIX/sparkwing$EXT"
-log "installed $PREFIX/sparkwing$EXT"
+for binary in $BINARIES; do
+  if ! install -m 0755 "$WORK/$binary-${GOOS}-${GOARCH}${EXT}" "$PREFIX/$binary$EXT"; then
+    if [ "$binary" != sparkwing ]; then
+      if [ "$had_previous" = 1 ]; then
+        install -m 0755 "$WORK/previous-sparkwing$EXT" "$PREFIX/sparkwing$EXT"
+      else
+        rm -f "$PREFIX/sparkwing$EXT"
+      fi
+    fi
+    err "could not write $PREFIX/$binary$EXT. The previous sparkwing is unchanged."
+  fi
+  log "installed $PREFIX/$binary$EXT"
+done
 
 case ":${PATH:-}:" in
   *":$PREFIX:"*) ;;

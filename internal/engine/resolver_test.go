@@ -439,3 +439,47 @@ func TestUnpublishedEngineNamesThePinAsTheFix(t *testing.T) {
 		t.Fatalf("hint %q does not name the pin fix %q", failure.Hint, want)
 	}
 }
+
+func TestPreEnginePinNamesTheUpgradeButTamperingStaysAnIntegrityFailure(t *testing.T) {
+	version := "v0.10.2"
+	target := releaseasset.Target{Binary: releaseasset.Sparkwing, GOOS: runtime.GOOS, GOARCH: runtime.GOARCH}
+	_, other, err := ed25519.GenerateKey(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		name   string
+		mutate func(b *ReleaseBundle)
+		want   apierr.Code
+	}{
+		{"legacy layout", func(*ReleaseBundle) {}, apierr.VersionUnsupported},
+		{"manifest signature", func(b *ReleaseBundle) { b.ManifestSignature = ed25519.Sign(other, b.Manifest) }, apierr.IntegrityFailure},
+		{"asset signature", func(b *ReleaseBundle) { b.AssetSignature = ed25519.Sign(other, b.Asset) }, apierr.IntegrityFailure},
+		{"corrupted asset", func(b *ReleaseBundle) { b.Asset = append(bytes.Clone(b.Asset), 'x') }, apierr.IntegrityFailure},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			r, transport, key, _, _ := fixtureResolver(t)
+			bundle := signedBundle(t, key, version, target, []byte("pre-engine release"))
+			// hack: releases before v0.68 also published log and web executables.
+			bundle.Manifest = append(bundle.Manifest, []byte(digest(nil)+"  sparkwing-logs-linux-amd64\n")...)
+			bundle.ManifestSignature = ed25519.Sign(key, bundle.Manifest)
+			tc.mutate(&bundle)
+			transport.release(t, version, target, bundle)
+			resolved, err := r.Resolve(t.Context(), engineid.Pin{SDK: engineid.GoSDK, Version: version}, target)
+			var failure *apierr.Error
+			if !errors.As(err, &failure) || failure.Code != tc.want || resolved.Executable != "" {
+				t.Fatalf("resolve = %+v, %v; want %s", resolved, err, tc.want)
+			}
+			if upgrade := strings.Contains(failure.Hint, "`sparkwing upgrade`"); upgrade != (tc.want == apierr.VersionUnsupported) {
+				t.Fatalf("hint %q", failure.Hint)
+			}
+			name, _ := target.NameForVersion(version)
+			_ = filepath.WalkDir(r.config.CacheDirectory, func(path string, entry os.DirEntry, err error) error {
+				if err == nil && entry.Name() == name {
+					t.Fatalf("refused release left an executable at %s", path)
+				}
+				return nil
+			})
+		})
+	}
+}

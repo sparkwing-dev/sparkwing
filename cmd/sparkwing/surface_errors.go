@@ -64,6 +64,10 @@ func writeInvocationError(w io.Writer, err error, encode func(io.Writer, *apierr
 	}
 	if failure.Code == apierr.Unauthenticated && failure.Hint == "" {
 		profile := inv.Value("profile")
+		var routed *profileError
+		if profile == "" && errors.As(err, &routed) {
+			profile = routed.profile
+		}
 		if profile == "" {
 			profile = "NAME"
 		}
@@ -90,6 +94,22 @@ func writeInvocationError(w io.Writer, err error, encode func(io.Writer, *apierr
 		return writeErr
 	}
 	return nil
+}
+
+// hack: run picks its profile from machine routing, not --profile, so the dead-token hint reads it here.
+type profileError struct {
+	profile string
+	err     error
+}
+
+func (e *profileError) Error() string { return e.err.Error() }
+func (e *profileError) Unwrap() error { return e.err }
+
+func withProfile(profile string, err error) error {
+	if err == nil {
+		return nil
+	}
+	return &profileError{profile: profile, err: err}
 }
 
 type maskedCLIError struct {

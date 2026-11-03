@@ -29,5 +29,5 @@ func preRewriteStoreError(version int, path string) error {
 	if path == "" {
 		return fmt.Errorf(lead+"back up this database, then point the server at an empty database", "this database", version)
 	}
-	return fmt.Errorf(lead+"move it aside and run again: mv %s %s.v067 (move %s-wal and %s-shm with it if they exist)", path, version, path, path, path, path)
+	return fmt.Errorf(lead+"stop every older Sparkwing process still using it, such as a v0.67 dashboard or daemon, then move it aside and run again: mv %s %s.v067 (move %s-wal and %s-shm with it if they exist)", path, version, path, path, path, path)
 }

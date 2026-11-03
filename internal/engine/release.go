@@ -13,6 +13,8 @@ import (
 	"runtime/debug"
 	"strings"
 
+	"golang.org/x/mod/semver"
+
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/releaseasset"
 )
@@ -20,6 +22,9 @@ import (
 // VerifyRelease authenticates bytes and inspects their build identity without executing them.
 func VerifyRelease(version string, target releaseasset.Target, bundle ReleaseBundle, keys []ed25519.PublicKey) (VerifiedRelease, error) {
 	asset, err := releaseasset.VerifyForVersion(keys, version, bundle.Manifest, bundle.ManifestSignature, target, bundle.Asset, bundle.AssetSignature)
+	if errors.Is(err, releaseasset.ErrUnexpectedLayout) && semver.Compare(version, firstEngineRelease+"-0") < 0 {
+		return VerifiedRelease{}, predatesEngine(version, err)
+	}
 	if err != nil {
 		return VerifiedRelease{}, integrity(err)
 	}
@@ -43,6 +48,19 @@ func VerifyRelease(version string, target releaseasset.Target, bundle ReleaseBun
 	}
 	copyBundle := ReleaseBundle{Manifest: bytes.Clone(bundle.Manifest), ManifestSignature: bytes.Clone(bundle.ManifestSignature), Asset: bytes.Clone(bundle.Asset), AssetSignature: bytes.Clone(bundle.AssetSignature)}
 	return VerifiedRelease{version: version, target: target, asset: asset, bundle: copyBundle}, nil
+}
+
+// safety: earlier releases do not speak the node protocol this CLI hosts, and their
+// authenticated manifests list executables this build no longer expects.
+const firstEngineRelease = "v0.68.0"
+
+func predatesEngine(version string, cause error) error {
+	return &apierr.Error{
+		Code:    apierr.VersionUnsupported,
+		Message: fmt.Sprintf("SDK pin %s is older than %s, the oldest release this CLI can run as a pipeline engine; its release was not executed", version, firstEngineRelease),
+		Hint:    "Run `" + UpgradeCommand + "` in this repository to move the pin to the latest release, then fix the pipeline code it reports; see https://sparkwing.dev/docs/migration-guide/",
+		Details: map[string]any{"version": version, "minimum": firstEngineRelease, "cause": cause.Error()},
+	}
 }
 
 func executableVersion(info *debug.BuildInfo) (string, error) {
