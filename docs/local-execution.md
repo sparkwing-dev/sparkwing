@@ -139,8 +139,11 @@ sparkwing doctor -o json
 
 Daemon status, stop and restart use the shared local lifecycle. JSON reports
 `state`, `version`, `pid`, `stay`, `installed` and the four activity counts.
-While the dashboard serves, they also report its address as `url`, and pretty
-output prints it; `sparkwing dashboard open` mints the sign-in link.
+They report the dashboard apart from the controller: `dashboard` is `serving`
+or `not_serving`, and while it serves, `url` is its address. Pretty output
+prints a `dashboard:` line either way. A controller that `sparkwing run` or a
+schedule started serves no dashboard; `sparkwing dashboard open` starts one at
+127.0.0.1:4343 when none serves, then mints the sign-in link.
 Stop and restart also report `stopped`, `restarted` and `previous_version`.
 Plain output is the resulting state. Store and API diagnostics come from doctor.
 Doctor also sweeps stray step sessions through the controller. A successful

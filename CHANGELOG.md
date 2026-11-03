@@ -22,8 +22,8 @@ unlock.
 
 ### Added
 
-- **CLI:** `sparkwing dashboard status` prints the dashboard URL
-  Status said the dashboard was running but not where. While it serves, `dashboard status` and `daemon status` now report its address as `url` in JSON and a `dashboard:` line in pretty output. The URL is the dashboard origin, not a sign-in link; `sparkwing dashboard open` still mints that. The local controller reports it in a new optional `dashboard_url` field of `local_control_status`; an older controller leaves it out.
+- **CLI:** `sparkwing dashboard status` reports the dashboard apart from the controller, with its URL
+  Status said the dashboard was running when only the controller was, and never said where the dashboard served. `dashboard status` and `daemon status` now report a `dashboard` field, `serving` or `not_serving`, beside the controller's `state`, and while it serves its address as `url`; pretty output prints `dashboard: serving at URL` or `dashboard: not serving`. The URL is the dashboard origin, not a sign-in link; `sparkwing dashboard open` still mints that. The local controller reports it in a new optional `dashboard_url` field of `local_control_status`; an older controller leaves it out.
 - **runners:** `sparkwing runners add --trust verified` registers a shared runner that takes runs on any branch whose commit GitHub or the controller's own fetch proved, and never asserted work
   The controller records at each attempt's start whether the job ran on a trusted host: a fresh host (launcher pod, Sparkwing Cloud, GitHub-hosted Actions) or a machine registered with `--trust verified-default` or `--trust verified`. `sw.FromProvenRunAtCommit()` counts a run only when every job that did not skip ran on a trusted host. The column arrives with store schema 29.
 - **sdk:** `sw.FromProvenRunAtCommit()` narrows a `RefToLastRun` reference to successful runs at the reader's own commit
@@ -39,6 +39,8 @@ unlock.
 
 ### Fixed
 
+- **CLI:** `sparkwing dashboard open` works against a controller that `sparkwing run` started
+  A controller started on demand by a run or a schedule serves no dashboard, so `dashboard open` failed with "the dashboard is not serving" until the controller was stopped and started again with `dashboard start`. When no dashboard serves, `dashboard open` now asks the running controller to serve one at 127.0.0.1:4343, starting the controller too if none runs, then prints the sign-in link.
 - **Cloud:** Name the pool ceiling when a job asks for more CPU or memory than it allows
   A job above the launcher's resource ceiling failed with "Cloud capacity is not configured for the requested hardware class", and the launcher logged the refusal at ERROR. The error now names the requested class, CPU and memory and the pool's CPU and memory ceiling, and says to request a smaller hardware class or contact support@sparkwing.dev to raise the ceiling. The launcher logs this expected refusal at INFO. A class with no configured pool keeps the previous message and ERROR log.
 - **Cloud:** Reuse a run's node for a dependent job without provisioning another
