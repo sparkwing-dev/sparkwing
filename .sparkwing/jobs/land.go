@@ -209,7 +209,7 @@ func (j *landJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
 	push := sparkwing.Step(w, "push", func(ctx context.Context) error {
 		return pushLanding(ctx, gitIn(j.RepoDir), j.RepoDir, j.Head.Get(ctx).Commit)
 	}).DryRun(func(ctx context.Context) error {
-		sparkwing.Info(ctx, "dry run: would run git push %s", strings.Join(landPushArgs(j.Head.Get(ctx).Commit), " "))
+		sparkwing.Info(ctx, "dry run: would run git %s", strings.Join(landPushArgs(j.Head.Get(ctx).Commit), " "))
 		return nil
 	}).Risk("destructive", "prod").Needs(verify)
 	return sparkwing.Step(w, "record", func(ctx context.Context) (landingRecord, error) {
