@@ -209,3 +209,27 @@ esac
     } finally { await host.close(); }
   }
 });
+
+test("cancellation waits for the long body's marker before revoking its run", { skip: process.platform === "win32" }, async () => {
+  const binary = join(root, "cancel-cli");
+  await writeFile(binary, `#!/bin/sh
+case "$3 $4" in
+  'run example-probe') printf 'long-probe\\n' ;;
+  'runs status')
+    if test -f "$0.cancelled"; then
+      printf '%s\\n' '{"id":"long-probe","status":"cancelled","jobs":[{"id":"long","status":"done","outcome":"cancelled"}]}'
+    else
+      printf '%s\\n' '{"id":"long-probe","status":"running","jobs":[{"id":"long","status":"running"}]}'
+    fi ;;
+  'runs logs') printf ready > "$0.ready"; printf 'example-probe-long-running\\n'; exit 3 ;;
+  'runs cancel') test -f "$0.ready" || exit 2; printf cancelled > "$0.cancelled" ;;
+  *) exit 2 ;;
+esac
+`, { mode: 0o700 });
+  let released = false;
+  const { host } = await session("cancellation-assert", { cleanup: async () => ({ unregister: async () => { released = true; } }) }, { cli: binary });
+  try {
+    await step(host, "cancellation-assert");
+    assert.equal(released, true);
+  } finally { await host.close(); }
+});

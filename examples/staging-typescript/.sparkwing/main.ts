@@ -41,15 +41,17 @@ function lastDetail(text: string): RunDetail {
   return { ...detail, jobs: detail.jobs || [] };
 }
 
-async function status(ctx: Context, id: string, follow = false, targetProfile = ctx.args["api-profile"] || ""): Promise<RunDetail> {
-  let output: string;
+async function observation(ctx: Context, ...args: string[]): Promise<string> {
   try {
-    output = await cli(ctx, "runs", "status", "--run", id, `--profile=${targetProfile}`, "-o", "json", "--exit-zero", ...(follow ? ["--follow"] : []));
+    return await cli(ctx, ...args);
   } catch (error) {
     if (!(error instanceof ExecError) || error.exitCode !== 3) throw error;
-    output = error.stdout;
+    return error.stdout;
   }
-  return lastDetail(output);
+}
+
+async function status(ctx: Context, id: string, follow = false, targetProfile = ctx.args["api-profile"] || ""): Promise<RunDetail> {
+  return lastDetail(await observation(ctx, "runs", "status", "--run", id, `--profile=${targetProfile}`, "-o", "json", "--exit-zero", ...(follow ? ["--follow"] : [])));
 }
 
 interface ProbeRun { id: string; cleanup: CleanupRegistration }
@@ -243,7 +245,10 @@ function lifecycleAssertions(plan: Plan): Job<unknown>[] {
     const run = await trigger(ctx, `${ctx.run.id}-ts-cancel`, "--long");
     for (;;) {
       const detail = await status(ctx, run.id);
-      if (detail.jobs.some((job) => job.id === "long" && job.status === "running")) break;
+      if (detail.jobs.some((job) => job.id === "long" && job.status === "running")) {
+        const logs = await observation(ctx, "runs", "logs", "--run", run.id, profile(ctx), "-o", "json");
+        if (logs.includes("example-probe-long-running")) break;
+      }
       assert.ok(!["failed", "success", "cancelled"].includes(detail.status), "long probe ended before cancellation");
       await delay(100, undefined, { signal: ctx.signal });
     }

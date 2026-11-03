@@ -327,16 +327,16 @@ func exampleStatus(ctx context.Context, in ExampleInputs, id string, follow bool
 	if follow {
 		args = append(args, "--follow")
 	}
-	result, err := sparkwingCLIStatus(ctx, in, args)
+	result, err := exampleObservation(ctx, in, args)
 	if err != nil {
 		return exampleRunDetail{}, err
 	}
 	return exampleDecodeStatus(result)
 }
 
-func sparkwingCLIStatus(ctx context.Context, in ExampleInputs, args []string) (string, error) {
+func exampleObservation(ctx context.Context, in ExampleInputs, args []string) (string, error) {
 	result, err := sparkwing.Exec(ctx, in.CLI, args...).Capture()
-	// safety: Incomplete snapshots still carry the current job's attempt ordinal.
+	// safety: incomplete observations still carry current job attempts and persisted log records.
 	var exit *sparkwing.ExecError
 	if err != nil && !(errors.As(err, &exit) && exit.ExitCode == 3) {
 		return "", err
@@ -455,7 +455,13 @@ func exampleCancelCheck(in ExampleInputs, rc sparkwing.RunContext) func(context.
 				}
 			}
 			if running {
-				break
+				logs, err := exampleObservation(ctx, in, []string{"runs", "logs", "--run", run.id, "--profile=" + in.APIProfile, "-o", "json"})
+				if err != nil {
+					return err
+				}
+				if strings.Contains(logs, "example-probe-long-running") {
+					break
+				}
 			}
 			if err := nap(ctx, 100); err != nil {
 				return fmt.Errorf("long job never started: %w", err)
@@ -584,7 +590,11 @@ func (ExampleProbe) Plan(_ context.Context, plan *sparkwing.Plan, in ExampleProb
 		}
 		return nil
 	}).Needs(source, memo)
-	long := sparkwing.Job(plan, "long", func(ctx context.Context) error { <-ctx.Done(); return ctx.Err() }).Timeout(45 * time.Second)
+	long := sparkwing.Job(plan, "long", func(ctx context.Context) error {
+		sparkwing.Info(ctx, "example-probe-long-running")
+		<-ctx.Done()
+		return ctx.Err()
+	}).Timeout(45 * time.Second)
 	if !in.Long {
 		long.SkipIf(exampleSkip("long probe not requested"))
 	}
