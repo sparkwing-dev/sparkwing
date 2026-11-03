@@ -756,7 +756,7 @@ async function tryReference<T>(read: () => Promise<T | undefined>): Promise<T | 
   try {
     return await read();
   } catch (error) {
-    if (error instanceof SDKError && error.code === "not_found") return undefined;
+    if (error instanceof SDKError && (error.code === "not_found" || error.code === "blob_missing")) return undefined;
     throw error;
   }
 }

@@ -432,7 +432,9 @@ func TestJobOutputThroughNativeClientAndCurrentReadSet(t *testing.T) {
 		if err := host.CheckBinding(t.Context(), principal, capability.BindOwnNode, capability.Target{Team: "a", RunID: "run", NodeID: "stamp"}); !forbidden(err) {
 			t.Fatalf("dependency ownership binding: %v", err)
 		}
-		t.Run("go", func(t *testing.T) { proveGoDependencyOutput(t, grant.Binding) })
+		t.Run("go", func(t *testing.T) {
+			proveGoDependencyOutput(t, grant.Binding, "dependency-output-fixture", `{"weather":"clear","degrees":72}`)
+		})
 		t.Run("typescript", func(t *testing.T) {
 			node, err := exec.LookPath("node")
 			if err != nil {
@@ -449,6 +451,38 @@ func TestJobOutputThroughNativeClientAndCurrentReadSet(t *testing.T) {
 			script := `const { NodeRoutes } = await import(process.argv[1]); const routes = new NodeRoutes(JSON.parse(process.argv[2])); const output = await routes.output("stamp", new AbortController().signal); if (output.weather !== "clear" || output.degrees !== 72) throw new Error(JSON.stringify(output));`
 			if output, err := exec.CommandContext(t.Context(), node, "--input-type=module", "-e", script, module, string(routes)).CombinedOutput(); err != nil {
 				t.Fatalf("TypeScript dependency output: %v\n%s", err, output)
+			}
+		})
+		t.Run("absent output is an optional miss", func(t *testing.T) {
+			var record []byte
+			if err := teststore.SQL(t, e.Store).QueryRowContext(t.Context(), `SELECT output_record FROM nodes WHERE team='a' AND run_id='run' AND node_id='stamp'`).Scan(&record); err != nil {
+				t.Fatal(err)
+			}
+			childOutputSQL(t, e.Store, `UPDATE nodes SET output_record=NULL WHERE team='a' AND run_id='run' AND node_id='stamp'`)
+			defer childOutputSQL(t, e.Store, `UPDATE nodes SET output_record=? WHERE team='a' AND run_id='run' AND node_id='stamp'`, record)
+			if _, err := process.Output(t.Context(), "run", "stamp"); err == nil {
+				t.Fatal("a skipped upstream returned an output")
+			}
+			proveGoDependencyOutput(t, grant.Binding, "optional-output-fixture", `{"weather":"absent","degrees":0}`)
+			node, err := exec.LookPath("node")
+			if err != nil {
+				t.Skip("TypeScript output proof requires Node.js")
+			}
+			routes, err := json.Marshal(grant.Binding.Routes)
+			if err != nil {
+				t.Fatal(err)
+			}
+			routesModule, err := filepath.Abs("../../sdk/typescript/src/routes.ts")
+			if err != nil {
+				t.Fatal(err)
+			}
+			planModule, err := filepath.Abs("../../sdk/typescript/src/plan.ts")
+			if err != nil {
+				t.Fatal(err)
+			}
+			script := `const { NodeRoutes } = await import(process.argv[1]); const { refTo } = await import(process.argv[2]); const routes = new NodeRoutes(JSON.parse(process.argv[3])); const signal = new AbortController().signal; const value = await refTo({ id: "stamp" }).tryGet({ output: (job) => routes.output(job.id, signal) }); if (value !== undefined) throw new Error(JSON.stringify(value));`
+			if output, err := exec.CommandContext(t.Context(), node, "--input-type=module", "-e", script, routesModule, planModule, string(routes)).CombinedOutput(); err != nil {
+				t.Fatalf("TypeScript optional output: %v\n%s", err, output)
 			}
 		})
 	})

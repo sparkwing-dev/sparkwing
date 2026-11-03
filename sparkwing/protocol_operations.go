@@ -530,7 +530,9 @@ func referenceError(err error, latest bool) error {
 		return err
 	}
 	reason := fmt.Sprint(e.Details["reason"])
-	if (e.Code == apierr.NotFound && (latest || reason == string(apierr.ReasonNoOutput))) || (e.Code == apierr.Conflict && reason == string(apierr.ReasonNotReady)) {
+	// safety: the host reports an unfinished, skipped or dry-run upstream, and an
+	// expired output record, as blob_missing; every one is an absent value.
+	if e.Code == apierr.BlobMissing || (e.Code == apierr.NotFound && (latest || reason == string(apierr.ReasonNoOutput))) || (e.Code == apierr.Conflict && reason == string(apierr.ReasonNotReady)) {
 		return errors.Join(ErrRefAbsent, err)
 	}
 	return err

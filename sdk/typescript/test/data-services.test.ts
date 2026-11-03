@@ -92,6 +92,7 @@ test("artifact edges, output references and child results reach the bound routes
 test("optional references suppress only genuine absence through the protocol", async (t) => {
   const cases = [
     { name: "missing", status: 404, body: { error: { code: "not_found", message: "missing output" } }, code: undefined },
+    { name: "absent upstream", status: 404, body: { error: { code: "blob_missing", message: "blob is absent or tombstoned" } }, code: undefined },
     {
       name: "forbidden",
       status: 403,

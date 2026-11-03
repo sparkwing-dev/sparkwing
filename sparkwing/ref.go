@@ -102,7 +102,8 @@ func (r Ref[T]) Get(ctx context.Context) T {
 // pipeline's first run, and Get panics there.
 //
 // ok is false for a genuine absence: an in-run node that has not
-// completed, a run that stored no output, and a cross-pipeline resolver
+// completed, was skipped, or ran in a dry run without a dry-run body, a run
+// that stored no output or whose output expired, and a cross-pipeline resolver
 // failure marked with ErrRefAbsent. A store cannot tell a misspelled
 // pipeline name from one that has never run, so both are misses, and
 // every miss is logged at warn naming the pipeline and node.
