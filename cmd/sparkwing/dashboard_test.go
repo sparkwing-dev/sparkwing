@@ -5,6 +5,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -255,5 +257,32 @@ func TestDashboardRemoteStartUsesAuthenticatedController(t *testing.T) {
 	}
 	if !reflect.DeepEqual(lifecycle.calls, []string{"start"}) || lifecycle.options.DashboardAddress != "192.0.2.1:4343" || !lifecycle.options.DashboardReadOnly {
 		t.Fatalf("start options: %+v calls: %v", lifecycle.options, lifecycle.calls)
+	}
+}
+
+func TestDashboardStopReportsAnOlderDashboardStillRunning(t *testing.T) {
+	home := t.TempDir()
+	if err := os.WriteFile(filepath.Join(home, olderDashboardPIDFile), []byte("4242\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	running := map[int]bool{4242: true}
+	previous := processRunning
+	processRunning = func(pid int) bool { return running[pid] }
+	t.Cleanup(func() { processRunning = previous })
+	for _, alive := range []bool{true, false} {
+		running[4242] = alive
+		lifecycle := &dashboardLifecycleFake{status: wingd.LocalStatus{Running: true}}
+		services := dashboardServices{lifecycle: lifecycle, options: wingd.LocalStartOptions{Home: home}}
+		var output bytes.Buffer
+		if err := runDashboardCommandArgs(t.Context(), []string{"stop", "-o", "json"}, &output, "linux", func(context.Context) (dashboardServices, error) { return services, nil }); err != nil {
+			t.Fatal(err)
+		}
+		var got dashboardResult
+		if err := json.Unmarshal(output.Bytes(), &got); err != nil {
+			t.Fatal(err)
+		}
+		if got.State != "stopped" || alive != strings.Contains(got.Warning, "kill 4242") {
+			t.Fatalf("alive=%v: %+v", alive, got)
+		}
 	}
 }

@@ -22,6 +22,8 @@ unlock.
 
 ### Fixed
 
+- **CLI:** Report a still-running v0.67 dashboard and say to stop old processes before moving an old store
+  `sparkwing dashboard stop` reported `stopped` while a dashboard from v0.67 or earlier kept running and held the old `state.db` open. `dashboard stop` and `status` now report such a dashboard, found through the `dashboard.pid` file it wrote, with its pid and how to stop it, in a `warning` field in JSON. The pre-v0.68 store refusal now says to stop every older Sparkwing process using the store before moving it aside.
 - **CLI:** Name the routing profile in a cloud-routed run's dead-token hint
   When `sparkwing run` routed to Cloud through machine `run.routing` and the profile's token was no longer live, the hint said `sparkwing profiles set --profile 'NAME' --token-stdin`. It now names the profile from `run.routing`.
 - **CLI:** `sparkwing pipeline hooks install` leaves an older forwarder hook alone and names a stale hook
