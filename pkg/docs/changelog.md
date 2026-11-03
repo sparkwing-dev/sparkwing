@@ -19,14 +19,11 @@ unlock.
 ---
 
 ## [Unreleased]
+
 ### Fixed
 
 - **release:** Publish `@sparkwing/sdk` through npm Trusted Publishing with GitHub Actions OIDC
   Publication uses pinned npm 11.6.2 and automatic provenance without an npm token secret. v0.68.4 was tagged but never published, because its workflow still required the removed token; v0.68.5 carries its changes.
-
-## [v0.68.4] - 2026-11-03
-### Fixed
-
 - **web:** Make run cards usable with a keyboard and a screen reader
   The Runs pane is a "Runs" list of cards. Each card has a button named with the run's repository, pipeline, branch, start time and status that reports selection as pressed and opens or closes the run with Enter or Space. Each bulk-action checkbox names its run.
 - **web:** Give the console main, banner and navigation landmarks and a skip link
@@ -47,6 +44,24 @@ unlock.
   `sparkwing run --publish` copied a job's log into Cloud as complete even when the local log was marked incomplete, such as `writer_lost` or a byte cap, because it read the page's `complete` flag as proof that every byte survived. The published log now carries the same incomplete reason, and `runs logs` against Cloud reports it.
 - **logs:** Keep a failed attempt's logs when its job retries
   A retry advanced the log writer to the next attempt before the failed attempt's final segment and seal reached storage, so the failed attempt's output was refused and its stream never completed. A retry now waits up to five seconds for that seal before it commits.
+- **logs:** Return retained retry logs with an explicit incomplete marker when their writer is lost
+  JSON log pages finish with an `incomplete` list naming each affected subject and reason, including `writer_lost`, instead of returning HTTP 409 or 500. Available bytes and continuation cursors remain readable before and after log maintenance. The CLI drains retained output and reports incomplete logs with exit 3.
+- **Cloud:** Fail requests above launcher resource ceilings and refund their unstarted credit holds
+  These requests end as `cloud_capacity_unconfigured` instead of waiting for owner cancellation. Launcher logs name requested CPU and memory alongside configured ceilings.
+- **Cloud runner:** Set the job scratch mount at `/tmp` to mode `1777` before starting the runner
+  Update the launcher and generated admission policy together.
+- **runner:** Exhausted application retries report the attempt count and last error
+  The final job error says all attempts failed and directs users to fix the last error before retrying.
+- **sdk:** Command deadline failures name the timeout and deadline
+  The error preserves the deadline cause and suggests increasing the context timeout or speeding up the command.
+- **controller:** Unstarted jobs name their failed dependencies and explain how to retry
+  Controller scheduling preserves the dependency failure reason so cancelled jobs show which dependency blocked them.
+- **Cloud:** Start declared same-source children from uploaded working-tree snapshots
+  Children reuse their parent's retained source bundle only for the same repository, ref, execution commit and pipeline commit. Upload ownership checks still reject unrelated submissions.
+
+## [v0.68.4] - 2026-11-03
+### Fixed
+
 - **SDK install:** Refuse a generated overlay that is not a regular file
   A repository could commit `.resolved.mod` as a symlink, and the installer's pin refresh would then rewrite the file it pointed to on the runner. Installation now refuses the overlay instead.
 - **child pipelines:** Keep parent job and step selections out of child runs
@@ -57,24 +72,7 @@ unlock.
 
 - **Go SDK:** Match `ErrOIDCUnavailable` when the controller has no OIDC issuer
   `errors.Is` can recognize the missing-issuer response while the error retains its `not_found` code and setup guidance. Authorization and transport failures remain errors.
-- **logs:** Return retained retry logs with an explicit incomplete marker when their writer is lost
-  JSON log pages finish with an `incomplete` list naming each affected subject and reason, including `writer_lost`, instead of returning HTTP 409 or 500. Available bytes and continuation cursors remain readable before and after log maintenance. The CLI drains retained output and reports incomplete logs with exit 3.
 
-- **Cloud:** Fail requests above launcher resource ceilings and refund their unstarted credit holds
-  These requests end as `cloud_capacity_unconfigured` instead of waiting for owner cancellation. Launcher logs name requested CPU and memory alongside configured ceilings.
-- **Cloud runner:** Set the job scratch mount at `/tmp` to mode `1777` before starting the runner
-  Update the launcher and generated admission policy together.
-- **runner:** Exhausted application retries report the attempt count and last error
-  The final job error says all attempts failed and directs users to fix the last error before retrying.
-
-- **sdk:** Command deadline failures name the timeout and deadline
-  The error preserves the deadline cause and suggests increasing the context timeout or speeding up the command.
-
-- **controller:** Unstarted jobs name their failed dependencies and explain how to retry
-  Controller scheduling preserves the dependency failure reason so cancelled jobs show which dependency blocked them.
-
-- **Cloud:** Start declared same-source children from uploaded working-tree snapshots
-  Children reuse their parent's retained source bundle only for the same repository, ref, execution commit and pipeline commit. Upload ownership checks still reject unrelated submissions.
 - **upgrade:** Refresh the SDK requirement in generated sparks overlays before installation
   An overlay left from an earlier run could retain the old SDK pin and make `sparkwing upgrade` fail with "Go dependency selection changed the SDK pin". Installation now takes the SDK requirement from `go.mod` while preserving resolved sparks versions.
 - **GitHub:** Accept stateless installation tokens through source checkout, storage and log masking
