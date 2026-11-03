@@ -387,6 +387,9 @@ type Request struct {
 	ExecutionLocation        string                `json:"execution_location"`
 	// OriginMachine names the personal machine whose credential intake verified for the submitter; requests cannot set it.
 	OriginMachine string `json:"origin_machine,omitempty"`
+	// Agent names the coding agent that started the run on the actor's behalf, such as claude-code:land-agent.
+	// The requester declares it; it is display-only and never grants or limits authority.
+	Agent string `json:"agent,omitempty"`
 }
 
 // safety: IntakeFacts are server-derived, with opaque authority IDs resolved only by C2.
@@ -544,6 +547,7 @@ type Display struct {
 	SecretArgs    []string              `json:"secret_args"`
 	Git           Git                   `json:"git"`
 	Actor         Actor                 `json:"actor"`
+	Agent         string                `json:"agent,omitempty"`
 	PullRequest   Optional[PullRequest] `json:"pull_request"`
 	Lineage       Lineage               `json:"lineage"`
 	EnvNames      []string              `json:"env_names"`
