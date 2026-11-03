@@ -216,6 +216,12 @@ a runner that takes asserted work, which could leave `HOME`, `GOFLAGS` or the
 build cache poisoned for later jobs, never produces a counted pass. Runners
 registered with `--trust any` or no trust never do.
 
+Two gaps remain. A team's own launcher credential counts as a fresh host
+whatever trust class it was registered with, because each claim gets a pod no
+other run has used. The host that evaluates the plan is not covered by the
+trusted-host check, because only jobs record it; `record-tree` reads the other
+jobs' outputs itself rather than trusting the plan to say they ran.
+
 A verified run on a host that outlives its jobs (plain-machine runners,
 persistent Kubernetes runners and self-hosted GitHub Actions runners) writes
 memo, depcache and output records only to that host's own cache scope. Fresh
