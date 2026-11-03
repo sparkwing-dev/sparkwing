@@ -199,14 +199,25 @@ tarball. Different bytes, missing integrity, failed lookup and failed publicatio
 stop the job. Package lifecycle scripts run during assembly, with publishing scripts
 disabled when uploading the checked tarball. An identical retry skips publishing
 and leaves all npm tags unchanged. Before each real upload, the publisher runs
-`npm publish --dry-run` with the same arguments, including `--provenance`, and logs
-the JSON file list and packed size. A failed dry run stops the upload. The release
-job grants `id-token: write` for npm provenance.
+`npm publish --dry-run` with the same arguments and logs the JSON file list and
+packed size. A failed dry run stops the upload.
 
-The release repository needs an `NPM_TOKEN` Actions secret authorized to publish
-`@sparkwing/sdk`. An empty secret fails before the publication job signs assets. Native workflow
-definitions and local graph checks do not establish Windows runtime support.
-Both Windows jobs must execute successfully before that evidence is claimed.
+The release job publishes `@sparkwing/sdk` through
+[npm Trusted Publishing](https://docs.npmjs.com/trusted-publishers) with OIDC and
+`id-token: write` on a GitHub-hosted runner. It installs pinned npm 11.6.2 and
+prints its version. Trusted publishing requires npm 11.5.1 or newer and Node
+22.14.0 or newer. npm generates provenance automatically for the public package
+and repository.
+
+In the package's npm settings, configure a GitHub Actions trusted publisher with
+organization `sparkwing-dev`, repository `sparkwing`, and workflow filename
+`release.yaml`. Leave the environment name unset and allow direct `npm publish`.
+Publication needs no Actions secret. Do not set a Node auth token, even to an
+empty value.
+
+Native workflow definitions and local graph checks do not establish Windows
+runtime support. Both Windows jobs must execute successfully before that
+evidence is claimed.
 
 After publication-tool fixes reach `main`, rebuild an existing tag with a new
 dispatch, rather than rerunning an old workflow attempt:
@@ -218,7 +229,7 @@ gh workflow run release.yaml --repo sparkwing-dev/sparkwing --ref main \
 
 This builds `v0.68.1` source, uses `main`'s publication tools (including the npm
 guards), and publishes release assets with image publication skipped. It does
-not create or move the Git tag. `NPM_TOKEN` must already be configured.
+not create or move the Git tag. The trusted publisher must already be configured.
 
 For an accidental npm publication, first move `latest` to a verified good `0.x`
 version and check the result:

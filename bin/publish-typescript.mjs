@@ -57,7 +57,7 @@ if (metadata !== undefined) {
     if (newer) throw new Error("latest requires a stable version newer than every published stable 0.x version");
   }
   // npm reads a relative "dir/file.tgz" as a GitHub owner/repo shorthand.
-  const args = ["publish", resolve(archive), "--access", "public", "--tag", tag, "--ignore-scripts", "--provenance", "--json"];
+  const args = ["publish", resolve(archive), "--access", "public", "--tag", tag, "--ignore-scripts", "--json"];
   for (const dryRun of [true, false]) {
     const published = spawnSync("npm", [...args, ...(dryRun ? ["--dry-run"] : [])], { stdio: "inherit" });
     if (published.error) throw published.error;

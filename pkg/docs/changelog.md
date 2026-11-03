@@ -19,7 +19,12 @@ unlock.
 ---
 
 ## [Unreleased]
+### Fixed
 
+- **release:** Publish `@sparkwing/sdk` through npm Trusted Publishing with GitHub Actions OIDC
+  Publication uses pinned npm 11.6.2 and automatic provenance without an npm token secret. v0.68.4 was tagged but never published, because its workflow still required the removed token; v0.68.5 carries its changes.
+
+## [v0.68.4] - 2026-11-03
 ### Fixed
 
 - **web:** Make run cards usable with a keyboard and a screen reader
