@@ -30,10 +30,10 @@ type jobDocument struct {
 		SkipIf []string `json:"skip_if"`
 	}
 	References []struct {
-		Pipeline       string
-		Job            string
-		FromAnyRun     bool `json:"from_any_run"`
-		FromTrustedRun bool `json:"from_trusted_run"`
+		Pipeline      string
+		Job           string
+		FromAnyRun    bool `json:"from_any_run"`
+		FromProvenRun bool `json:"from_proven_run"`
 	} `json:"pipeline_refs"`
 	FailurePolicy sparkwing.ParallelFailurePolicy `json:"failure_policy"`
 	Concurrency   []struct {

@@ -15,7 +15,7 @@ import (
 // safety: bump when the record's meaning changes, so older passes stop matching.
 const gateRecordFormat = "gate-record-v2"
 
-// safety: the job whose output records a pass; the trusted reference reads it by this id.
+// safety: the job whose output records a pass; the proven reference reads it by this id.
 const recordTreeJob = "record-tree"
 
 type gateMode string
@@ -25,11 +25,6 @@ const (
 	gateFull     gateMode = "full"
 )
 
-// safety: a full pass runs every test an affected run would, so it proves both.
-func (m gateMode) covers(want gateMode) bool {
-	return m == want || m == gateFull
-}
-
 // safety: a pass proves only this tree, under this gate definition, judged by this engine.
 type gateKey struct {
 	Tree        string `json:"tree"`
@@ -38,8 +33,7 @@ type gateKey struct {
 }
 
 // safety: Runner and Host are what the producing run reported. The controller
-// decides whose passes count: a proven run of this repository, or one an
-// operator-trusted runner published.
+// decides which passes count: a clean run proven for this repository.
 type gatePass struct {
 	gateKey
 	Recorded bool     `json:"recorded"`
@@ -50,10 +44,10 @@ type gatePass struct {
 	Host     string   `json:"host,omitempty"`
 }
 
-// safety: the controller answers only with a run at this run's own commit, in
-// its repository, that was proven or published by an operator-trusted runner.
+// safety: the controller answers only with a run at this run's own commit,
+// proven for its repository, that selected every job without dry run.
 func provenGatePass(pipeline string) sparkwing.Ref[gatePass] {
-	return sparkwing.RefToLastRun[gatePass](pipeline, recordTreeJob, sparkwing.FromTrustedRun())
+	return sparkwing.RefToLastRun[gatePass](pipeline, recordTreeJob, sparkwing.FromProvenRunAtCommit())
 }
 
 // safety: a checkout without a key can neither skip a gate nor record a pass.
@@ -107,17 +101,19 @@ func gitRevParse(ctx context.Context, rev string) (string, error) {
 func readGatePass(ctx context.Context, ref sparkwing.Ref[gatePass]) (pass gatePass, found bool, why string) {
 	defer func() {
 		if recovered := recover(); recovered != nil {
-			pass, found, why = gatePass{}, false, fmt.Sprintf("the trusted gate lookup failed: %v", recovered)
+			pass, found, why = gatePass{}, false, fmt.Sprintf("the proven gate lookup failed: %v", recovered)
 		}
 	}()
 	pass, found = ref.TryGet(ctx)
 	if !found {
-		return pass, false, "no proven or trusted-runner gate run exists at this commit"
+		return pass, false, "no clean proven gate run exists at this commit"
 	}
 	return pass, true, ""
 }
 
-func passProves(pass gatePass, key gateKey, mode gateMode) (bool, string) {
+// safety: only a full pass proves a tree. An affected pass judged the change
+// against a baseline the reader cannot check, so it helps its own developer only.
+func passProves(pass gatePass, key gateKey) (bool, string) {
 	switch {
 	case !pass.Recorded:
 		return false, "the gate run at this commit recorded no pass: " + pass.Reason
@@ -127,14 +123,14 @@ func passProves(pass gatePass, key gateKey, mode gateMode) (bool, string) {
 		return false, fmt.Sprintf("that pass ran gate %s, not %s", pass.Fingerprint, key.Fingerprint)
 	case pass.Engine != key.Engine:
 		return false, fmt.Sprintf("that pass ran at engine %s, not %s", pass.Engine, key.Engine)
-	case !pass.Mode.covers(mode):
-		return false, fmt.Sprintf("that pass ran in %s mode, which does not prove %s", pass.Mode, mode)
+	case pass.Mode != gateFull:
+		return false, fmt.Sprintf("that pass ran in %s mode; only a full pass proves a tree", pass.Mode)
 	}
 	return true, ""
 }
 
 // safety: the skip names the runner and host that proved the tree, so a pass from an unexpected machine is visible.
-func skipWhenTreePassed(mode gateMode, ref sparkwing.Ref[gatePass]) sparkwing.SkipPredicate {
+func skipWhenTreePassed(ref sparkwing.Ref[gatePass]) sparkwing.SkipPredicate {
 	return func(ctx context.Context) bool {
 		key, err := currentGateKey(ctx)
 		if err != nil {
@@ -144,7 +140,7 @@ func skipWhenTreePassed(mode gateMode, ref sparkwing.Ref[gatePass]) sparkwing.Sk
 		pass, found, why := readGatePass(ctx, ref)
 		if found {
 			var proves bool
-			proves, why = passProves(pass, key, mode)
+			proves, why = passProves(pass, key)
 			if proves {
 				sparkwing.Info(ctx, "tree-gate: skipping: tree %s passed gate %s at engine %s in %s mode on runner %s (host %s, commit %s)",
 					short(pass.Tree), pass.Fingerprint, pass.Engine, pass.Mode, pass.Runner, pass.Host, short(pass.Commit))
@@ -170,6 +166,10 @@ func (r *recordTree) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
 // safety: a checkout that moved during the run records no pass, because the
 // tree it ended on is not the tree the jobs judged.
 func recordTreePass(ctx context.Context, mode gateMode) (gatePass, error) {
+	if sparkwing.IsDryRun(ctx) {
+		sparkwing.Info(ctx, "tree-gate: recording no pass: a dry run judges nothing")
+		return gatePass{Reason: "dry run"}, nil
+	}
 	key, err := currentGateKey(ctx)
 	var noKey errNoGateKey
 	if errors.As(err, &noKey) {
@@ -194,7 +194,7 @@ func recordTreePass(ctx context.Context, mode gateMode) (gatePass, error) {
 	}
 	pass := gatePass{gateKey: key, Recorded: true, Mode: mode, Commit: commit, Runner: os.Getenv("SPARKWING_RUNNER_NAME"), Host: host}
 	sparkwing.Info(ctx, "tree-gate: recorded tree %s passing gate %s at engine %s in %s mode; it lets another run at commit %s skip "+
-		"only when this run was proven for its repository or an operator-trusted runner published it",
+		"only when this run was proven for its repository, selected every job, and ran in full mode",
 		short(key.Tree), key.Fingerprint, key.Engine, mode, short(commit))
 	return pass, nil
 }

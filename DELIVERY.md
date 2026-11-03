@@ -405,13 +405,12 @@ file. Other syntax and workflow checks remain active.
   `go.mod`, `go.sum` or `internal/store/schema.sql` runs its whole module. After
   both jobs pass on a clean checkout, `record-tree` outputs HEAD's tree, the
   `.sparkwing` definition fingerprint, the mode and the engine version. Each
-  gate job reads that output through a `sw.FromTrustedRun()` reference and
-  skips itself, naming the runner that proved it, when the controller finds a
-  pass at the same commit from a run proven for this repository or published
-  by a machine the operator lists in `--trusted-gate-runners`, and that pass
-  names the same tree, fingerprint and engine. A full pass proves an affected
-  run, not the reverse. A local run reads its local controller, which trusts no
-  runner, so it never skips on its own pass. The
+  gate job reads that output through a `sw.FromProvenRunAtCommit()` reference
+  and skips itself, naming the runner that proved it, when the controller finds
+  a full-mode pass at the same commit from a run proven for this repository
+  (from GitHub, or fetched by the controller) that selected every job without
+  dry run, and that pass names the same tree, fingerprint and engine. A plain
+  local run proves no repository, so it never lets another run skip. The
   existing required `Canonical / gate` check succeeds only after the broad,
   race and pre-release matrix jobs all succeed. A skipped, cancelled or failed
   matrix cannot pass that check. Pre-release declares a

@@ -49,35 +49,28 @@ func TestRecordTreeOutputsAPassOnlyForACleanUnmovedCheckout(t *testing.T) {
 	}
 }
 
-func TestAPassProvesOnlyItsTreeGateEngineAndMode(t *testing.T) {
+func TestOnlyAFullPassProvesItsTreeGateAndEngine(t *testing.T) {
 	key := gateKey{Tree: "tree", Fingerprint: "gate", Engine: "v1"}
-	pass := gatePass{gateKey: key, Recorded: true, Mode: gateAffected}
-	if ok, why := passProves(pass, key, gateAffected); !ok {
-		t.Fatalf("matching pass refused: %s", why)
+	pass := gatePass{gateKey: key, Recorded: true, Mode: gateFull}
+	if ok, why := passProves(pass, key); !ok {
+		t.Fatalf("matching full pass refused: %s", why)
 	}
 	for name, mutate := range map[string]func(*gatePass){
 		"unrecorded":     func(p *gatePass) { p.Recorded = false },
 		"another tree":   func(p *gatePass) { p.Tree = "other" },
 		"another gate":   func(p *gatePass) { p.Fingerprint = "other" },
 		"another engine": func(p *gatePass) { p.Engine = "v2" },
+		"affected mode":  func(p *gatePass) { p.Mode = gateAffected },
 	} {
 		changed := pass
 		mutate(&changed)
-		if ok, _ := passProves(changed, key, gateAffected); ok {
+		if ok, _ := passProves(changed, key); ok {
 			t.Errorf("%s: proved the tree", name)
 		}
 	}
-	if ok, _ := passProves(pass, key, gateFull); ok {
-		t.Error("an affected pass proved a full gate")
-	}
-	full := pass
-	full.Mode = gateFull
-	if ok, _ := passProves(full, key, gateAffected); !ok {
-		t.Error("a full pass did not prove the affected gate")
-	}
 }
 
-func TestTheGateSkipsOnlyWhenTheTrustedLookupReturnsAMatchingPass(t *testing.T) {
+func TestTheGateSkipsOnlyWhenTheProvenLookupReturnsAFullMatchingPass(t *testing.T) {
 	treeGateRepo(t)
 	key, err := currentGateKey(context.Background())
 	if err != nil {
@@ -87,9 +80,10 @@ func TestTheGateSkipsOnlyWhenTheTrustedLookupReturnsAMatchingPass(t *testing.T) 
 		latest func(context.Context, string, string) (json.RawMessage, error)
 		skip   bool
 	}{
-		"matching pass": {latest: passFor(gatePass{gateKey: key, Recorded: true, Mode: gateAffected}), skip: true},
-		"another tree":  {latest: passFor(gatePass{gateKey: gateKey{Tree: "other", Fingerprint: key.Fingerprint, Engine: key.Engine}, Recorded: true, Mode: gateAffected})},
-		"no trusted run": {latest: func(context.Context, string, string) (json.RawMessage, error) {
+		"matching full pass": {latest: passFor(gatePass{gateKey: key, Recorded: true, Mode: gateFull}), skip: true},
+		"affected pass":      {latest: passFor(gatePass{gateKey: key, Recorded: true, Mode: gateAffected})},
+		"another tree":       {latest: passFor(gatePass{gateKey: gateKey{Tree: "other", Fingerprint: key.Fingerprint, Engine: key.Engine}, Recorded: true, Mode: gateFull})},
+		"no proven run": {latest: func(context.Context, string, string) (json.RawMessage, error) {
 			return nil, sparkwing.ErrRefAbsent
 		}},
 		"lookup refused": {latest: func(context.Context, string, string) (json.RawMessage, error) {
@@ -104,7 +98,7 @@ func TestTheGateSkipsOnlyWhenTheTrustedLookupReturnsAMatchingPass(t *testing.T) 
 				return latest(ctx, pipeline, job)
 			}})
 			ctx := host.Context(t.Context())
-			if got := skipWhenTreePassed(gateAffected, provenGatePass("gate"))(ctx); got != tc.skip {
+			if got := skipWhenTreePassed(provenGatePass("gate"))(ctx); got != tc.skip {
 				t.Fatalf("skip = %v, want %v", got, tc.skip)
 			}
 			if len(asked) != 1 || asked[0] != "gate/"+recordTreeJob {
@@ -118,17 +112,17 @@ func passFor(pass gatePass) func(context.Context, string, string) (json.RawMessa
 	return func(context.Context, string, string) (json.RawMessage, error) { return json.Marshal(pass) }
 }
 
-func TestEveryGateJobDeclaresTheTrustedLookup(t *testing.T) {
+func TestEveryGateJobDeclaresTheProvenLookup(t *testing.T) {
 	plan := inspectPlan(t, func(plan *sparkwing.Plan) error {
 		return (&Gate{}).Plan(t.Context(), plan, GateArgs{}, sparkwing.RunContext{Pipeline: "gate"})
 	})
 	for _, job := range plan.Jobs {
 		if len(job.References) != 1 {
-			t.Fatalf("%s references = %+v, want the trusted gate lookup", job.ID, job.References)
+			t.Fatalf("%s references = %+v, want the proven gate lookup", job.ID, job.References)
 		}
 		ref := job.References[0]
-		if ref.Pipeline != "gate" || ref.Job != recordTreeJob || !ref.FromTrustedRun || ref.FromAnyRun {
-			t.Errorf("%s reference = %+v, want a trusted-only read of gate/%s", job.ID, ref, recordTreeJob)
+		if ref.Pipeline != "gate" || ref.Job != recordTreeJob || !ref.FromProvenRun || ref.FromAnyRun {
+			t.Errorf("%s reference = %+v, want a proven-only read of gate/%s", job.ID, ref, recordTreeJob)
 		}
 	}
 }
