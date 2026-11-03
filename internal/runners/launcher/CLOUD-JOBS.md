@@ -572,7 +572,10 @@ So before a fresh award's first capacity request, the launcher asks the controll
 about the run's other live Jobs, tears down those whose awards ended and places
 again, and the successor waits for that teardown instead of creating demand that
 cannot fit on the reserved node and would make Karpenter add one. Live work
-reservations still permit fanout. Foreign runs, damaged bindings and quarantined nodes never earn
+reservations still permit fanout. Known residual: while an ended predecessor's
+log stream is still unsealed, the controller defers its retirement for up to the
+log seal grace, so this check leaves it alone and the successor still requests
+fresh capacity. That can add one node that the run never uses. Foreign runs, damaged bindings and quarantined nodes never earn
 this wait. The deadline belongs to the held award and does not renew on retries.
 A held award has no Job or capacity Pod to renew it, so every pass retries its
 placement and renews its fence even while a claim backoff delays new claims.
