@@ -1,12 +1,14 @@
 package launcher
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -17,6 +19,7 @@ import (
 	"time"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
@@ -205,16 +208,23 @@ func cloudResourceRoot(t *testing.T, e *cloudResourceFixture) string {
 }
 
 func TestCloudCapacityFailureThroughController(t *testing.T) {
-	for _, failure := range []struct{ reason, message string }{
-		{capability.CloudCapacityUnconfigured, capability.CloudCapacityUnconfiguredMessage},
-		{capability.CloudCapacityUnavailable, capability.CloudCapacityUnavailableMessage},
+	for _, failure := range []struct {
+		name, reason, message string
+		ceiling               float64
+		memoryCeiling         int64
+	}{
+		{"missing_pool", capability.CloudCapacityUnconfigured, capability.CloudCapacityUnconfiguredMessage, 4, store.CPUClassMemoryBytes(4)},
+		{"cpu_ceiling", capability.CloudCapacityUnconfigured, capability.CloudCapacityUnconfiguredMessage, 2, store.CPUClassMemoryBytes(4)},
+		{"memory_ceiling", capability.CloudCapacityUnconfigured, capability.CloudCapacityUnconfiguredMessage, 4, store.CPUClassMemoryBytes(2)},
+		{"breaker", capability.CloudCapacityUnavailable, capability.CloudCapacityUnavailableMessage, 4, store.CPUClassMemoryBytes(4)},
 	} {
-		t.Run(failure.reason, func(t *testing.T) {
+		t.Run(failure.name, func(t *testing.T) {
 			e, tenant := cloudResourceStore(t)
 			run, err := tenant.ReadRun(t.Context(), "run")
 			if err != nil {
 				t.Fatal(err)
 			}
+			run.Request.Request.Options.Requires = runspec.Setting[[]string]{Optional: runspec.Optional[[]string]{Set: true, Value: []string{"sparkwing-4cpu"}}}
 			run.Request.Request.Git.SHA = strings.Repeat("a", 40)
 			run.Request.Request.Source.Location = runspec.SourceLocation{RemoteURL: "https://github.com/team/repo", PipelineDir: ".sparkwing"}
 			body, err := json.Marshal(run.Request)
@@ -239,9 +249,19 @@ func TestCloudCapacityFailureThroughController(t *testing.T) {
 				t.Fatal(err)
 			}
 			l, kube, boundary, _ := fixture()
+			l.Config.CPUCeiling = failure.ceiling
+			l.Config.MemoryCeiling = failure.memoryCeiling
+			var logs bytes.Buffer
+			l.Logger = slog.New(slog.NewTextHandler(&logs, nil))
 			boundary.reserveErr = ErrNoDedicatedNode
 			l.Control = control
-			l.Boundary = capacityBoundary{CloudBoundary: boundary, pools: &KubernetesBoundary{Namespace: "cloud", NodeClassName: "sparkwing-jobs", Karpenter: poolClient()}}
+			l.Boundary = capacityBoundary{CloudBoundary: boundary, pools: &KubernetesBoundary{Namespace: "cloud", NodeClassName: "sparkwing-jobs", Karpenter: poolClient(func() *unstructured.Unstructured {
+				p := sharedPool("cloud")
+				if err := unstructured.SetNestedField(p.Object, "2", "spec", "template", "metadata", "labels", CloudClassLabel); err != nil {
+					t.Fatal(err)
+				}
+				return p
+			}())}}
 			if failure.reason == capability.CloudCapacityUnavailable {
 				l.Boundary = boundary
 				l.Breaker = func(context.Context) (bool, error) { return true, nil }
@@ -249,12 +269,18 @@ func TestCloudCapacityFailureThroughController(t *testing.T) {
 			if _, err := l.LaunchOne(t.Context()); err != nil {
 				t.Fatal(err)
 			}
+			if failure.ceiling == 2 && (!strings.Contains(logs.String(), "requested_cpu=4") || !strings.Contains(logs.String(), "available_cpu=2")) {
+				t.Fatalf("missing requested and available sizes: %s", logs.String())
+			}
 			detail, err := e.RunDetail(t.Context(), capability.Authorized{Target: capability.Target{Team: "a", RunID: "run"}})
 			if err != nil || detail.Status != "failed" || detail.Reason != failure.reason || !strings.Contains(detail.Failure, failure.message) || !strings.Contains(detail.Failure, "Support reference: run") {
 				t.Fatalf("customer status: %+v %v", detail, err)
 			}
-			if len(detail.Notices) != 0 || len(capacityPods(t, kube)) != 0 {
+			if len(detail.Notices) != 0 || len(capacityPods(t, kube)) != 0 || len(l.waitingAwards()) != 0 {
 				t.Fatal("failure retained transient demand")
+			}
+			if claimed, err := l.LaunchOne(t.Context()); err != nil || claimed {
+				t.Fatalf("failed award was claimed again: %t %v", claimed, err)
 			}
 			charges, err := tenant.ListCreditCharges(t.Context(), 10)
 			if err != nil || len(charges) != 2 {

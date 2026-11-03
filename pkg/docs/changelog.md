@@ -22,6 +22,10 @@ unlock.
 
 ### Fixed
 
+- **Cloud:** Fail requests above launcher resource ceilings and refund their unstarted credit holds
+  These requests end as `cloud_capacity_unconfigured` instead of waiting for owner cancellation. Launcher logs name requested CPU and memory alongside configured ceilings.
+- **Cloud runner:** Set the job scratch mount at `/tmp` to mode `1777` before starting the runner
+  Update the launcher and generated admission policy together.
 - **upgrade:** Refresh the SDK requirement in generated sparks overlays before installation
   An overlay left from an earlier run could retain the old SDK pin and make `sparkwing upgrade` fail with "Go dependency selection changed the SDK pin". Installation now takes the SDK requirement from `go.mod` while preserving resolved sparks versions.
 - **GitHub:** Accept stateless installation tokens through source checkout, storage and log masking

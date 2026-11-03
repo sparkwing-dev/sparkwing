@@ -259,6 +259,10 @@ func (l *Launcher) launch(ctx context.Context, award *CloudJobAward) (launched b
 	current := *award
 	current.LeaseExpiresAt = expires
 	r, err := BuildJob(ctx, time.Now(), l.Config, current, l.Boundary)
+	if errors.Is(err, errCapacityUnconfigured) {
+		l.wait(award)
+		return true, l.awaitCapacity(ctx, *award)
+	}
 	if errors.Is(err, ErrNoDedicatedNode) {
 		if errors.Is(err, errPredecessorTeardown) {
 			if award.teardownDeadline.IsZero() {

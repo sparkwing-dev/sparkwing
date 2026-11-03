@@ -25,6 +25,8 @@ const (
 	demandAnnotation = "sparkwing.dev/capacity-demand"
 )
 
+var errCapacityUnconfigured = errors.New("cloud capacity is not configured")
+
 type capacityDemand struct {
 	Binding  CloudJobBinding `json:"binding"`
 	CPUCores float64         `json:"cpu_cores"`
@@ -144,18 +146,21 @@ func (l *Launcher) deleteCapacityPod(ctx context.Context, pod *corev1.Pod) error
 
 func (l *Launcher) awaitCapacity(ctx context.Context, award CloudJobAward) error {
 	budget, err := cloudBudget(l.Config, award)
-	if err != nil {
+	if err != nil && !errors.Is(err, errCapacityUnconfigured) {
 		return err
 	}
-	configured, err := l.Boundary.CapacityConfigured(ctx, budget)
-	if err != nil {
-		return err
+	configured := false
+	if err == nil {
+		configured, err = l.Boundary.CapacityConfigured(ctx, budget)
+		if err != nil {
+			return err
+		}
 	}
 	if !configured {
 		if err := l.failCapacity(ctx, award, CloudCapacityObservation{Unconfigured: true}); err != nil {
 			return err
 		}
-		l.logger().Error("Cloud capacity is not configured; configure the shared NodePool for the requested hardware class", "team", award.Binding.Team, "requested_class", cpuClass(award.CPUCores), "namespace", l.Config.Namespace, "support_reference", award.Binding.RunID)
+		l.logger().Error("Cloud capacity is not configured; configure the shared NodePool for the requested hardware class", "team", award.Binding.Team, "requested_class", cpuClass(award.CPUCores), "requested_cpu", award.CPUCores, "available_cpu", l.Config.CPUCeiling, "requested_memory", award.Memory, "available_memory", l.Config.MemoryCeiling, "namespace", l.Config.Namespace, "support_reference", award.Binding.RunID)
 		return l.releaseCapacity(ctx, award.Binding)
 	}
 	if l.breakerClosed(ctx) {
