@@ -14,6 +14,7 @@ import (
 	"path/filepath"
 	"runtime/debug"
 	"strings"
+	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 
@@ -30,30 +31,32 @@ type updateIdentity struct {
 
 type updateCheckReport struct {
 	localBuild    bool
-	Kind          string         `json:"kind"`
-	Tool          string         `json:"tool"`
-	Target        string         `json:"target"`
-	Strategy      string         `json:"strategy"`
-	Status        string         `json:"status"`
-	Installed     updateIdentity `json:"installed"`
-	Available     updateIdentity `json:"available"`
-	Reason        string         `json:"reason,omitempty"`
-	BlockedReason string         `json:"blocked_reason,omitempty"`
+	Kind          string               `json:"kind"`
+	Tool          string               `json:"tool"`
+	Target        string               `json:"target"`
+	Strategy      string               `json:"strategy"`
+	Status        string               `json:"status"`
+	Installed     updateIdentity       `json:"installed"`
+	Available     updateIdentity       `json:"available"`
+	Reason        string               `json:"reason,omitempty"`
+	BlockedReason string               `json:"blocked_reason,omitempty"`
+	VersionPolicy *versionPolicyStatus `json:"version_policy,omitempty"`
 }
 
 type updateReceipt struct {
-	Kind            string         `json:"kind"`
-	Tool            string         `json:"tool"`
-	Target          string         `json:"target"`
-	Strategy        string         `json:"strategy"`
-	Status          string         `json:"status"`
-	Before          updateIdentity `json:"before"`
-	After           updateIdentity `json:"after"`
-	Digest          string         `json:"sha256,omitempty"`
-	Replacement     string         `json:"sdk_replace,omitempty"`
-	ResolvedRelease string         `json:"resolved_release,omitempty"`
-	ManagedUnits    string         `json:"managed_units,omitempty"`
-	RunnerServices  string         `json:"runner_services,omitempty"`
+	Kind            string               `json:"kind"`
+	Tool            string               `json:"tool"`
+	Target          string               `json:"target"`
+	Strategy        string               `json:"strategy"`
+	Status          string               `json:"status"`
+	Before          updateIdentity       `json:"before"`
+	After           updateIdentity       `json:"after"`
+	Digest          string               `json:"sha256,omitempty"`
+	Replacement     string               `json:"sdk_replace,omitempty"`
+	ResolvedRelease string               `json:"resolved_release,omitempty"`
+	ManagedUnits    string               `json:"managed_units,omitempty"`
+	RunnerServices  string               `json:"runner_services,omitempty"`
+	VersionPolicy   *versionPolicyStatus `json:"version_policy,omitempty"`
 }
 
 func installedArtifactIdentity(path string) updateIdentity {
@@ -548,6 +551,7 @@ func writeUpdateCheck(w io.Writer, report updateCheckReport, mode string) error 
 	if report.BlockedReason != "" {
 		fmt.Fprintf(&text, "  blocked:   %s\n", report.BlockedReason)
 	}
+	writeVersionPolicyLine(&text, report.VersionPolicy)
 	_, err := io.WriteString(w, text.String())
 	return err
 }
@@ -580,6 +584,21 @@ func writeUpdateReceipt(w io.Writer, result updateReceipt, mode string) error {
 	if result.RunnerServices != "" {
 		fmt.Fprintf(&text, "%s\n", result.RunnerServices)
 	}
+	writeVersionPolicyLine(&text, result.VersionPolicy)
 	_, err := io.WriteString(w, text.String())
 	return err
+}
+
+func writeVersionPolicyLine(text *strings.Builder, policy *versionPolicyStatus) {
+	if policy == nil {
+		return
+	}
+	line := policy.Status
+	if policy.PublishedAt != nil {
+		line += fmt.Sprintf(", %s published %s (%s ago)", policy.Latest, policy.PublishedAt.Format(time.RFC3339), policy.Age)
+	}
+	if policy.Reason != "" {
+		line += ": " + policy.Reason
+	}
+	fmt.Fprintf(text, "  policy:    %s\n", line)
 }

@@ -3,6 +3,7 @@ package engine
 import (
 	"context"
 	"net/http"
+	"path/filepath"
 	"runtime"
 	"slices"
 	"strings"
@@ -124,5 +125,41 @@ func TestLocalPolicyAdmitsAReleaseNewerThanTheCache(t *testing.T) {
 	}
 	if len(transport.requests) != 0 {
 		t.Fatalf("local policy accessed the network: %v", transport.requests)
+	}
+}
+
+func TestUpdateRefreshFillsThePolicyCacheLocalRunsRead(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("SPARKWING_HOME", home)
+	key := testSigningKey(t)
+	policy, now := policyFixture()
+	transport := &fixtureTransport{responses: map[string][]byte{}}
+	transport.policy(t, key, policy)
+	local, err := NewResolver(Config{TrustedKeys: signingKeys(key), LocalOnly: true, HTTPClient: &http.Client{Transport: transport}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if local.config.CacheDirectory != filepath.Join(home, "engines") {
+		t.Fatalf("local runs read %s, not the Sparkwing home", local.config.CacheDirectory)
+	}
+	empty, err := local.Index(t.Context(), now)
+	if err != nil || !empty.Index.Offline() || len(empty.Notices) != 1 || empty.Notices[0].Hint != PolicyRefreshHint || len(transport.requests) != 0 {
+		t.Fatalf("empty local cache: %+v %v requests=%v", empty, err, transport.requests)
+	}
+	refresh, err := NewResolver(Config{TrustedKeys: signingKeys(key), HTTPClient: &http.Client{Transport: transport}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := refresh.Index(t.Context(), now); err != nil {
+		t.Fatal(err)
+	}
+	transport.requests = nil
+	local, err = NewResolver(Config{TrustedKeys: signingKeys(key), LocalOnly: true, HTTPClient: &http.Client{Transport: transport}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cached, err := local.Index(t.Context(), now)
+	if err != nil || cached.Index.Offline() || !cached.Index.Policy().PublishedAt.Equal(policy.PublishedAt) || len(transport.requests) != 0 {
+		t.Fatalf("local run did not read the refreshed policy offline: %+v %v requests=%v", cached, err, transport.requests)
 	}
 }

@@ -79,6 +79,11 @@ refuse rollback and retain the last verified copy when refresh fails. There is
 no fallback-age cutoff. Local-only execution reads cached policy without any
 network refresh. Without a verified cached policy, or for a release newer than
 the cached one lists, it proceeds with a warning.
+`sparkwing update` refreshes the policy into `<sparkwing home>/engines`, the one
+cache local runs, the local controller, `upgrade` and `cache warm` share.
+`sparkwing update --dry-run` and `sparkwing doctor` report the cached policy's
+status, latest release, publication time and age as `version_policy`, without
+writing anything.
 Cached restrictions still apply, and executable signatures and exact pins remain
 required. Controller runners fail closed when no verified policy is available.
 

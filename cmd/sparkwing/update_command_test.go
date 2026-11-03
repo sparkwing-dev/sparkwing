@@ -6,10 +6,13 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/wingd"
 )
@@ -272,3 +275,44 @@ func TestUpdateCommandOutputDefaultsAndOverrides(t *testing.T) {
 type updateFailWriter struct{}
 
 func (updateFailWriter) Write([]byte) (int, error) { return 0, io.ErrClosedPipe }
+
+func TestUpdateCachesTheVersionPolicyLocalRunsRead(t *testing.T) {
+	published := time.Date(2026, 11, 3, 0, 0, 0, 0, time.UTC)
+	for _, dryRun := range []bool{false, true} {
+		command, out, calls := updateCommandFixture(t)
+		command.policy = func(context.Context) versionPolicyStatus {
+			*calls = append(*calls, "refresh")
+			return versionPolicyStatus{Status: "cached", Latest: "v1.2.3", PublishedAt: &published, Age: "1h0m0s"}
+		}
+		command.cached = func(context.Context) versionPolicyStatus {
+			*calls = append(*calls, "read")
+			return versionPolicyStatus{Status: "missing"}
+		}
+		args, want := []string{"--version", "v1.2.3", "--force", "--override-hold", "-o", "json"}, "cached"
+		if dryRun {
+			args, want = []string{"--dry-run", "--version", "v1.2.3", "-o", "json"}, "missing"
+		}
+		_ = command.runArgs(t.Context(), args)
+		var record struct {
+			VersionPolicy *versionPolicyStatus `json:"version_policy"`
+		}
+		if err := json.Unmarshal(out.Bytes(), &record); err != nil || record.VersionPolicy == nil || record.VersionPolicy.Status != want {
+			t.Fatalf("dry-run=%t: policy status not reported: %s %v", dryRun, out, err)
+		}
+		if slices.Contains(*calls, "refresh") == dryRun {
+			t.Fatalf("dry-run=%t refreshed=%t; only update itself may write the cache", dryRun, !dryRun)
+		}
+	}
+}
+
+func TestCachedVersionPolicyIsReadOnlyAndNamesTheRefreshCommand(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("SPARKWING_HOME", home)
+	status := cachedVersionPolicy(t.Context())
+	if status.Status != "missing" || !strings.Contains(status.Reason, "sparkwing update") {
+		t.Fatalf("empty cache = %+v", status)
+	}
+	if entries, err := os.ReadDir(home); err != nil || len(entries) != 0 {
+		t.Fatalf("reading the policy wrote %v %v", entries, err)
+	}
+}
