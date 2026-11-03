@@ -187,6 +187,14 @@ A signed-in dashboard request (a session request or a redeemed sign-in link)
 also holds idle exit for `limits.LocalDashboardSessionHold`, 30 minutes, so a
 tab whose browser drops idle sockets keeps its server, and an abandoned tab
 stops holding the controller once that window passes.
+
+The runtime records the address and read-only policy of the dashboard it last
+served in `wingd/dashboard.json` under its home. A controller started without a
+dashboard address, other than a standalone one, serves that dashboard again, so
+an idle exit followed by an on-demand start from a run or schedule keeps the
+dashboard. A failed bind on that restore is logged and the controller starts
+without it. `sparkwing dashboard stop` and `sparkwing daemon stop` clear the
+record with `ForgetDashboard`; `daemon restart` keeps it.
 Admission holders and waiting runs also remain active. `setStay` pins the
 daemon. The client `Probe` API observes the handshake without requesting queue work.
 Health probes, repeated unchanged counts and idle API connections do

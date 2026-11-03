@@ -15,9 +15,10 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/testhome"
+	wingdclient "github.com/sparkwing-dev/sparkwing/internal/wingd/client"
 )
 
-func TestDashboardOpenServesAControllerARunStarted(t *testing.T) {
+func TestDashboardServesAControllerARunStarted(t *testing.T) {
 	if testing.Short() {
 		t.Skip("starts a detached local controller; run without -short")
 	}
@@ -90,5 +91,31 @@ func TestDashboardOpenServesAControllerARunStarted(t *testing.T) {
 	origin := link.Scheme + "://" + link.Host
 	if after.State != "running" || after.PID != started.PID || after.Dashboard != "serving" || after.URL != origin {
 		t.Fatalf("status should report the same controller running and the dashboard serving at %s: %+v", origin, after)
+	}
+
+	// safety: a drain outside the CLI's stop command exits the way an idle controller does.
+	if err := wingdclient.Stop(ctx, wingdclient.Options{Home: home}); err != nil {
+		t.Fatalf("drain the controller: %v", err)
+	}
+	if _, err := ensureLocalController(ctx, home, func(ctx context.Context) (dashboardServices, error) {
+		return resolveLocalServicesAt(ctx, home)
+	}); err != nil {
+		t.Fatalf("on-demand controller restart: %v", err)
+	}
+	if restarted := status(); restarted.State != "running" || restarted.PID == started.PID || restarted.Dashboard != "serving" {
+		t.Fatalf("a controller restarted on demand should serve its dashboard again: %+v", restarted)
+	}
+
+	out.Reset()
+	if err := runDashboardCommandArgs(ctx, []string{"stop", "-o", "json"}, &out, runtime.GOOS, resolveLocalServices); err != nil {
+		t.Fatalf("dashboard stop: %v", err)
+	}
+	if _, err := ensureLocalController(ctx, home, func(ctx context.Context) (dashboardServices, error) {
+		return resolveLocalServicesAt(ctx, home)
+	}); err != nil {
+		t.Fatalf("on-demand controller start after stop: %v", err)
+	}
+	if stopped := status(); stopped.State != "running" || stopped.Dashboard != "not_serving" {
+		t.Fatalf("an explicitly stopped dashboard came back: %+v", stopped)
 	}
 }

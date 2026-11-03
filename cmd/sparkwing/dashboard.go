@@ -118,6 +118,9 @@ func executeDashboard(ctx context.Context, inv clisurface.Invocation, services d
 		status, err = services.lifecycle.StartDashboard(ctx, options)
 	case "stop":
 		status, err = stopLocalController(ctx, services.lifecycle)
+		if err == nil {
+			err = forgetDashboard(services.options.Home)
+		}
 	case "status":
 		status, err = services.lifecycle.Status(ctx)
 	case "install", "uninstall":
