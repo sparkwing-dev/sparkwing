@@ -20,6 +20,7 @@ unlock.
 
 ## [Unreleased]
 
+## [v0.68.5] - 2026-11-03
 ### Fixed
 
 - **release:** Publish `@sparkwing/sdk` through npm Trusted Publishing with GitHub Actions OIDC
