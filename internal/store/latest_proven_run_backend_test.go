@@ -23,6 +23,7 @@ type provenSeed struct {
 	sha     string
 	proof   func(t *testing.T) runspec.Provenance
 	options runspec.Options
+	env     []string
 }
 
 func appProof(id int64, sha string, defaultBranch bool) func(t *testing.T) runspec.Provenance {
@@ -96,7 +97,7 @@ func provenTenant(t *testing.T, st *store.Store, team store.Team) *store.Tenant 
 
 func seedProven(t *testing.T, tenant *store.Tenant, id, pipeline string, seed provenSeed, finished time.Time) {
 	t.Helper()
-	if err := tenant.TestOnlySeedSealedRun(t.Context(), id, pipeline, seed.repo, seed.sha, seed.proof(t), seed.options, finished); err != nil {
+	if err := tenant.TestOnlySeedSealedRun(t.Context(), id, pipeline, seed.repo, seed.sha, seed.proof(t), seed.options, finished, seed.env...); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -129,6 +130,13 @@ func TestProvenRunAtCommitAcceptsOnlyCleanProvenRunsOfTheReadersRepositoryAndCom
 			want      bool
 		}{candidate: narrowed}
 	}
+	withEnv := clean(appProof(1, provenSHA, false))
+	withEnv.env = []string{"GOFLAGS"}
+	cases["proven run with a submitted environment"] = struct {
+		reader    provenSeed
+		candidate provenSeed
+		want      bool
+	}{candidate: withEnv}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
 			st := storetest.Open(t)

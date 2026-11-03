@@ -23,7 +23,7 @@ unlock.
 ### Added
 
 - **sdk:** `sw.FromProvenRunAtCommit()` narrows a `RefToLastRun` reference to successful runs at the reader's own commit
-  The run must be proven for the reader's repository (an App delivery, an Actions push, a schedule, or code the controller fetched) on any branch, and must have selected every job and step without dry run. `Ref` gains a `ProvenRun` field, the TypeScript SDK a `fromProvenRunAtCommit` option, and plans carry `from_proven_run` on pipeline references, so an engine older than this release refuses a plan that uses it, and the SDK refuses an answer from a controller that ignored the filter.
+  The run must be proven for the reader's repository (an App delivery, an Actions push, a schedule, or code the controller fetched) on any branch, and must have selected every job and step without dry run and sealed no environment variables. `Ref` gains a `ProvenRun` field, the TypeScript SDK a `fromProvenRunAtCommit` option, and plans carry `from_proven_run` on pipeline references, so an engine older than this release refuses a plan that uses it, and the SDK refuses an answer from a controller that ignored the filter.
 - **runtime:** Jobs receive `SPARKWING_ENGINE_VERSION`
   Every job attempt sees the version of the engine executing it, so a pipeline can key a recorded result on the engine that produced it and stop reusing it after an upgrade.
 

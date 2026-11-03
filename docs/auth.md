@@ -1045,6 +1045,8 @@ pipeline declares `sw.FromAnyRun()`. A reference declared with
 whose repository was proven (an App delivery, an Actions push, a schedule, or
 code the controller fetched from GitHub) as the reader's proven repository, and
 whose sealed options selected every job and step: no `--sw-only`,
-`--sw-start-at` or `--sw-stop-at`, and no dry run. An asserted run, such as a
+`--sw-start-at` or `--sw-stop-at`, and no dry run. The run must also have
+sealed no environment variables, because a submitted `GOFLAGS` or similar can
+change what its jobs judged. An asserted run, such as a
 plain local run, proves no repository, so it neither reads nor satisfies such
 a reference.

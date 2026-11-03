@@ -14,8 +14,8 @@ import (
 // GetLatestProvenRunAtCommit returns the newest run of pipeline at the reading
 // run's own sealed commit whose repository was proven, by GitHub or by the
 // controller's own fetch, as the reader's proven repository, and whose sealed
-// options selected every job and step without dry run. Returns ErrNotFound when
-// none qualifies.
+// options selected every job and step without dry run and that sealed no
+// environment variables. Returns ErrNotFound when none qualifies.
 func (t *Tenant) GetLatestProvenRunAtCommit(ctx context.Context, pipeline, readerRunID string, statuses []string, maxAge time.Duration) (*Run, error) {
 	if t.team == "" {
 		return nil, ErrNoTeam
@@ -54,7 +54,9 @@ func provenAtCommitForReaderTx(ctx context.Context, tx *storeTx, team Team, read
 // safety: the commit and repository come from the reader's sealed request,
 // never from the caller, and an asserted run proves neither. A run whose
 // submitter narrowed it with only, start-at or stop-at, or ran it dry, skipped
-// work its output does not admit to, so it never counts.
+// work its output does not admit to, so it never counts. Neither does a run
+// given a submitted environment, because GOFLAGS and the like can reshape what
+// its jobs judged.
 func provenRunAtCommitQuery(dialect Dialect, team Team, pipeline string, reader runspec.SealedRequest) (string, []any, bool) {
 	repository, sha := reader.Provenance.ProvenRepository(), reader.Provenance.ProvenSHA()
 	if repository == "" || sha == "" {
@@ -63,11 +65,12 @@ func provenRunAtCommitQuery(dialect Dialect, team Team, pipeline string, reader 
 	q := claimSQL{dialect: dialect}
 	request := q.blob("request_json")
 	provenance := q.at(request, "provenance")
-	clean := make([]string, 0, 4)
+	clean := make([]string, 0, 5)
 	for _, option := range []string{"start_at", "stop_at", "only"} {
 		clean = append(clean, "COALESCE("+q.at(request, "request", "options", option, "value")+",'')=''")
 	}
 	clean = append(clean, "COALESCE(CAST("+q.at(request, "request", "options", "dry_run", "value")+" AS TEXT),'false') NOT IN ('true','1')")
+	clean = append(clean, "NOT EXISTS (SELECT 1 FROM "+q.array(q.at(request, "request", "env", "names"), "env_name")+")")
 	return `SELECT team,id FROM runs WHERE team=? AND repo_key=? AND provenance_sha=? AND pipeline=? AND intake_mode='execute' AND ` +
 			q.provenRepository(provenance) + `=? AND ((` + trustIn(q.at(provenance, "trust"), runspec.GitHubCommitTrust) + ` AND ` +
 			q.at(provenance, "sha") + `=?) OR ` + q.at(provenance, "fetched_sha") + `=?) AND ` + strings.Join(clean, " AND "),
