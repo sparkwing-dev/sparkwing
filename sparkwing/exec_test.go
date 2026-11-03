@@ -180,6 +180,23 @@ func TestExecError_MessageIncludesCommandAndOutput(t *testing.T) {
 	}
 }
 
+func TestExecError_MessageCapsALongCommandAndKeepsTheField(t *testing.T) {
+	pattern := "^(" + strings.Repeat("TestSomethingLong|", 200) + "Té)$"
+	command := "race.test -test.run " + pattern
+	e := &ExecError{Command: command, ExitCode: 1, Stderr: "FAIL: TestSomethingLong"}
+	msg := e.Error()
+	if len(msg) > 700 || !strings.HasPrefix(msg, "command failed (exit 1): race.test -test.run ^(TestSomethingLong|") || !strings.Contains(msg, "more bytes]") || !strings.HasSuffix(msg, "\nFAIL: TestSomethingLong") {
+		t.Fatalf("long command was not capped: %d bytes: %q", len(msg), msg)
+	}
+	if e.Command != command {
+		t.Fatal("capping the message changed the Command field")
+	}
+	short := &ExecError{Command: "go test ./...", ExitCode: 2}
+	if got := short.Error(); got != "command failed (exit 2): go test ./..." {
+		t.Fatalf("short command changed: %q", got)
+	}
+}
+
 func TestBash_EnvInjects(t *testing.T) {
 	ctx := withTestLogger(context.Background(), &recordingLogger{})
 	res, err := Bash(ctx, `if [[ -n "$SPARKWING_TEST_VAR" ]]; then echo got-$SPARKWING_TEST_VAR; fi`).

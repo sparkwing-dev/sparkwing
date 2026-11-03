@@ -501,7 +501,8 @@ shell script for a step. Use Exec to run a command such as `go test ./...`.
 Both return a command builder with `Dir`, `Env` and `EnvMap`.
 Terminators include `Run`, `Capture`, `String`, `Lines`, `JSON` and `MustBeEmpty`.
 Handle returned errors to fail the step. `ExecError` carries exit status and
-captured output. When a context deadline kills a command, `Terminated` is
+captured output. Its message repeats at most 512 bytes of the command and counts
+the rest; the `Command` field keeps it whole. When a context deadline kills a command, `Terminated` is
 `"timeout"` and the error names the deadline. `errors.Is(err, context.DeadlineExceeded)`
 recognizes the cause. Increase the context timeout or make the command faster.
 `WorkDir()` returns the repository working directory.

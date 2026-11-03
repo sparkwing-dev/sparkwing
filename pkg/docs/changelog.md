@@ -49,6 +49,8 @@ unlock.
   When any registered pipeline failed discovery, every run printed `output withheld because secret declarations were unavailable (N lines)` with no cause. The notice now gives how many pipelines failed and their error codes. When the only failure is a pipeline that requires an isolated home, it says to retry with `HOME="$(mktemp -d)" SPARKWING_HOME="$(mktemp -d)"`. Otherwise it says the output stays hidden until every registered pipeline plans without error. Pipeline names and error text stay withheld.
 - **runner:** A step cancelled by fail-fast says which sibling failed
   When one step failed and fail-fast cancelled its running siblings, each sibling reported the error its own body returned for the interrupted command, often with that step's own remedy, as if it had failed on its own. Cancelled siblings, started or not, now report `cancelled because step "NAME" failed`; the failed step keeps its error.
+- **SDK:** Command failure messages cap a long command line
+  `ExecError` messages in Go and TypeScript repeated the whole command, so a step that passed hundreds of test names to `-test.run` buried the failure under the argument list. The message now repeats the first 512 bytes of the command followed by `... [N more bytes]`; the `Command` / `command` field keeps the full text and the command's output still follows.
 ### Changed
 
 - **scaffold:** `const FallbackSDKVersion` pins v0.68.6, so a fresh scaffold compiles against that release.

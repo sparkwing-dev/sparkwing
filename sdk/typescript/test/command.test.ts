@@ -98,11 +98,19 @@ test("run streams complete and trailing lines while capture preserves exact byte
     assert.equal(result.stderr, "warning\n");
     assert.equal(result.exitCode, 0);
     const forwarded = events.filter((value) => value.event === "exec_chunk");
-    for (const [source, expected] of [["stdout", result.stdout], ["stderr", result.stderr]] as const) {
+    for (const [source, expected] of [
+      ["stdout", result.stdout],
+      ["stderr", result.stderr],
+    ] as const) {
       const frames = forwarded.filter((value) => value.attrs.source === source);
       assert.equal(frames.filter((value) => value.attrs.end === true).length, 1);
       assert.equal(new Set(frames.map((value) => value.attrs.stream)).size, 1);
-      assert.equal(Buffer.concat(frames.filter((value) => typeof value.attrs.data === "string").map((value) => Buffer.from(String(value.attrs.data), "base64"))).toString(), expected);
+      assert.equal(
+        Buffer.concat(
+          frames.filter((value) => typeof value.attrs.data === "string").map((value) => Buffer.from(String(value.attrs.data), "base64")),
+        ).toString(),
+        expected,
+      );
     }
     assert.equal(events[0]?.event, "exec_start");
     assert.equal(events.at(-1)?.event, "exec_end");
@@ -391,4 +399,17 @@ test("commands do not inherit either protocol descriptor", async (t) => {
   });
   assert.equal(status, 0, stderr);
   assert.deepEqual(JSON.parse(stdout), { inherited: false });
+});
+
+test("exec errors cap a long command in the message and keep the field whole", () => {
+  const command = `race.test -test.run ^(${"TestSomethingLong|".repeat(200)}Té)$`;
+  const error = new ExecError({ command, stdout: "", stderr: "FAIL: TestSomethingLong", exitCode: 1 });
+  assert.ok(error.message.length < 700, error.message);
+  assert.ok(error.message.startsWith("command failed (exit 1): race.test -test.run ^(TestSomethingLong|"));
+  assert.match(error.message, /\.\.\. \[\d+ more bytes\]\nFAIL: TestSomethingLong$/);
+  assert.equal(error.command, command);
+  assert.equal(
+    new ExecError({ command: "go test ./...", stdout: "", stderr: "", exitCode: 2 }).message,
+    "command failed (exit 2): go test ./...",
+  );
 });
