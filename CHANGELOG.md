@@ -22,6 +22,9 @@ unlock.
 
 ### Fixed
 
+- **sdk:** Command deadline failures name the timeout and deadline
+  The error preserves the deadline cause and suggests increasing the context timeout or speeding up the command.
+
 - **controller:** Unstarted jobs name their failed dependencies and explain how to retry
   Controller scheduling preserves the dependency failure reason so cancelled jobs show which dependency blocked them.
 

@@ -50,8 +50,10 @@ type ExecError struct {
 	Stderr   string
 	ExitCode int
 	Cause    error
+	deadline time.Time
 	// Terminated names why a started process was killed rather than
-	// exiting on its own: "cancellation" when the run's context ended,
+	// exiting on its own: "timeout" when its context deadline expired,
+	// "cancellation" when the context was cancelled,
 	// "signal" for any other kill. Empty for a normal exit or a process
 	// that never started. A signalled process reports ExitCode -1, which
 	// collides with ExitNotStarted, so this field -- not ExitCode -- is
@@ -62,9 +64,20 @@ type ExecError struct {
 func (e *ExecError) Error() string {
 	var b strings.Builder
 	if e.Terminated != "" {
-		fmt.Fprintf(&b, "command terminated by %s: %s", e.Terminated, e.Command)
+		if e.Terminated == "timeout" {
+			b.WriteString("command timed out")
+			if !e.deadline.IsZero() {
+				fmt.Fprintf(&b, " at deadline %s", e.deadline.UTC().Format(time.RFC3339Nano))
+			}
+			fmt.Fprintf(&b, ": %s", e.Command)
+		} else {
+			fmt.Fprintf(&b, "command terminated by %s: %s", e.Terminated, e.Command)
+		}
 		if e.Cause != nil {
 			fmt.Fprintf(&b, " (%v)", e.Cause)
+		}
+		if e.Terminated == "timeout" {
+			b.WriteString("; increase the context timeout or make the command faster")
 		}
 		return b.String()
 	}
@@ -448,7 +461,7 @@ func execCmd(ctx context.Context, name string, args []string, dir string, extraE
 	if waitErr != nil {
 		var ee *exec.ExitError
 		if errors.As(waitErr, &ee) {
-			return res, &ExecError{
+			failure := &ExecError{
 				Command:    display,
 				Stdout:     res.Stdout,
 				Stderr:     res.Stderr,
@@ -456,6 +469,11 @@ func execCmd(ctx context.Context, name string, args []string, dir string, extraE
 				Cause:      waitErr,
 				Terminated: terminationReason(ctx, ee, job.wasCancelled()),
 			}
+			if failure.Terminated == "timeout" {
+				failure.deadline, _ = ctx.Deadline()
+				failure.Cause = errors.Join(waitErr, context.Cause(ctx))
+			}
+			return res, failure
 		}
 		return res, &ExecError{
 			Command:  display,
@@ -471,6 +489,9 @@ func terminationReason(ctx context.Context, ee *exec.ExitError, cancelled bool) 
 		return ""
 	}
 	if ctx.Err() != nil {
+		if errors.Is(ctx.Err(), context.DeadlineExceeded) || errors.Is(context.Cause(ctx), context.DeadlineExceeded) {
+			return "timeout"
+		}
 		return "cancellation"
 	}
 	return "signal"

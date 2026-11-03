@@ -497,7 +497,10 @@ shell script for a step. Use Exec to run a command such as `go test ./...`.
 Both return a command builder with `Dir`, `Env` and `EnvMap`.
 Terminators include `Run`, `Capture`, `String`, `Lines`, `JSON` and `MustBeEmpty`.
 Handle returned errors to fail the step. `ExecError` carries exit status and
-captured output. `WorkDir()` returns the repository working directory.
+captured output. When a context deadline kills a command, `Terminated` is
+`"timeout"` and the error names the deadline. `errors.Is(err, context.DeadlineExceeded)`
+recognizes the cause. Increase the context timeout or make the command faster.
+`WorkDir()` returns the repository working directory.
 It reads the process working directory. In author tests, use `t.Chdir(root)`
 to select a fixture repository. Go restores the directory after the test.
 
