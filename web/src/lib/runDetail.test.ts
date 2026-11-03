@@ -46,6 +46,16 @@ describe("runDetailView", () => {
     delete wire.inputs.trust_class;
     assert.equal(api.runDetailView(wire).run.trust_class, undefined);
   });
+  it("shows the requester and the agent that started the run, and no agent when absent", () => {
+    const wire = fixture("run-detail-jobs.json");
+    const { run } = api.runDetailView(wire);
+    assert.equal(run.trigger_user, "octocat");
+    assert.equal(run.agent, "claude-code:land-agent");
+    const listed = fixture<{ runs: import("./api").Run[] }>("runs-list.json").runs[0];
+    assert.equal(listed.agent, "claude-code:land-agent");
+    const plain = api.runDetailView(fixture("run-detail-plan-failure.json")).run;
+    assert.equal("agent" in plain, false);
+  });
   it("does not invent durations for jobs and runs that never started", () => {
     const wire = fixture("run-detail-jobs.json");
     wire.started_at = "0001-01-01T00:00:00Z";

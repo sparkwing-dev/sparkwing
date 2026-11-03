@@ -74,6 +74,7 @@ import {
 } from "@/lib/timeFormat";
 import TriggerForm from "@/components/TriggerForm";
 import StatusLabel from "@/components/StatusLabel";
+import RunRequester from "@/components/RunRequester";
 import DebugPausePanel from "@/components/DebugPausePanel";
 import Tooltip from "@/components/Tooltip";
 import RunRail from "@/components/RunRail";
@@ -2433,6 +2434,7 @@ const FullRunRow = memo(function FullRunRow({
             </span>
           </FilterableValue>
         )}
+        <RunRequester requester={r.trigger_user} agent={r.agent} className="shrink" />
         {(r.retry_of || r.retried_as) && (
           <AttemptsDropdown currentRunID={r.id} dense />
         )}
@@ -2575,7 +2577,7 @@ const CompactFullRunRow = memo(function CompactFullRunRow({
     return "";
   };
 
-  const fullTitle = `${r.status === "dry_run" ? "DRY RUN" : r.status.toUpperCase()} · ${repo}/${r.pipeline}${r.git_branch ? ` · ⎇ ${r.git_branch}` : ""}${sha7 ? ` · ${sha7}` : ""}${r.trigger_source ? ` · trigger: ${r.trigger_source}` : ""}\n${started ? `Started ${fmtFullDate(started)}` : `Not started · Queued ${fmtFullDate(timestamp)}`}${r.finished_at ? ` · Finished ${fmtFullDate(r.finished_at)}` : ""}`;
+  const fullTitle = `${r.status === "dry_run" ? "DRY RUN" : r.status.toUpperCase()} · ${repo}/${r.pipeline}${r.git_branch ? ` · ⎇ ${r.git_branch}` : ""}${sha7 ? ` · ${sha7}` : ""}${r.trigger_source ? ` · trigger: ${r.trigger_source}` : ""}${r.trigger_user ? ` · by ${r.trigger_user}` : ""}${r.agent ? ` · via agent ${r.agent}` : ""}\n${started ? `Started ${fmtFullDate(started)}` : `Not started · Queued ${fmtFullDate(timestamp)}`}${r.finished_at ? ` · Finished ${fmtFullDate(r.finished_at)}` : ""}`;
   const datePrefix = fmtDatePrefix(timestamp);
   const [repoShort, pipelineShort, branchShort] = waterFill(
     [repo, r.pipeline, r.git_branch || ""],
@@ -2622,6 +2624,7 @@ const CompactFullRunRow = memo(function CompactFullRunRow({
               runNow
             />
           )}
+          <RunRequester requester={r.trigger_user} agent={r.agent} className="shrink" />
           {(r.retry_of || r.retried_as) && (
             <AttemptsDropdown currentRunID={r.id} dense />
           )}
@@ -3172,6 +3175,7 @@ function RunDetailPane({
           >
             #{run.id}
           </span>
+          <RunRequester requester={run.trigger_user} agent={run.agent} className="text-xs" />
           {
 
 

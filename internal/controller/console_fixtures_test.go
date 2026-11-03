@@ -110,6 +110,9 @@ func (c *consoleRun) seedRun(t *testing.T, id string, number int64, retryOf stri
 		Git:    runspec.Git{Repository: runspec.Repository{Key: "git:gitlab.com/acme/app", Display: "gitlab.com/acme/app"}, Ref: "main", SHA: consoleFixtureSHA},
 		Source: runspec.Source{Ref: consoleFixtureSHA},
 	}}
+	if retryOf != "" {
+		request.Request.Actor, request.Request.Agent = runspec.Actor{Kind: "account", ID: "account", Display: "octocat"}, "claude-code:land-agent"
+	}
 	raw, err := json.Marshal(withProvenance(request, assertedProvenance(t, "hello", "main", consoleFixtureSHA)))
 	if err != nil {
 		t.Fatal(err)
@@ -298,7 +301,7 @@ func handBuiltConsoleFixtures() map[string]any {
 		ID: "run-jobs", Number: 15, Pipeline: "hello", Status: "failed", TriggerSource: "github", GitBranch: "main",
 		GitSHA: consoleFixtureSHA, Args: map[string]string{"target": "prod"}, Error: "build failed",
 		CreatedAt: started, StartedAt: started, FinishedAt: &finished, DeclaredRepo: "acme/app", RepoURL: "https://github.com/acme/app",
-		GithubOwner: "acme", GithubRepo: "app", RetryOf: "run-earlier", TriggerUser: "octocat",
+		GithubOwner: "acme", GithubRepo: "app", RetryOf: "run-earlier", TriggerUser: "octocat", Agent: "claude-code:land-agent",
 	}
 	schedule := controllerwire.ScheduleView{
 		Owner: "acme", ArmedBy: "account:owner",

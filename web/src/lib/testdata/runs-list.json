@@ -20,7 +20,8 @@
       "github_owner": "acme",
       "github_repo": "app",
       "retry_of": "run-earlier",
-      "trigger_user": "octocat"
+      "trigger_user": "octocat",
+      "agent": "claude-code:land-agent"
     }
   ]
 }
