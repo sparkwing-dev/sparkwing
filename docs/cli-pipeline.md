@@ -297,9 +297,11 @@ Submit a pipeline run to a controller
 
 Flags including --profile may precede the verb; unknown engine flags before -- are usage errors.
 
---resume reattaches only a here run; --runner must be absent or here. The existing sealed spec is authoritative; reject new args, reason, source flags and detach on resume.
+--resume reattaches only a here run; --runner must be absent or here. The existing sealed spec is authoritative; reject new args, reason, agent, source flags and detach on resume.
 
 Without --resume, one pipeline positional is required. Runner accepts here, cloud, a runner name, or label=<label>.
+
+--agent NAME records the coding agent that starts the run on your behalf, such as claude-code:land-agent, and --agent none records none. Without the flag, SPARKWING_AGENT applies, then a detected coding-agent environment (Claude Code, Codex, Gemini CLI). The label is sealed with the request, kept by retries and publication, and shown in run views; it never grants or limits authority.
 
 Against Sparkwing Cloud, a run without --runner executes on Cloud unless a repository pool route rule requires a pool, which keeps it on that pool's self-hosted runners. cloud keeps it on Cloud, a runner name or label=<label> keeps it on matching self-hosted runners, and here hosts it in this CLI.
 
@@ -321,6 +323,7 @@ Against Sparkwing Cloud, a run without --runner executes on Cloud unless a repos
 | `--allow-secret-file PATH` | Include this repository-relative file in a --working-tree snapshot even though its name or content looks like a secret; the trigger fails if no snapshot file has that path, the secret-value scan still applies, and it is refused without --working-tree. Repeatable; comma-separated values are accepted. |
 | `--runner RUNNER` | Where the run executes: here in this CLI, cloud on Sparkwing Cloud, a self-hosted runner by name, or matching self-hosted runners with label=<label>; without it, the team's routing decides. |
 | `--reason TEXT` | Text the run records to explain why it ran in this CLI; required with --runner here and refused with any other runner. |
+| `--agent NAME` | Coding agent starting this run, such as claude-code:land-agent; none records no agent. Display-only. |
 | `--resume RUN` | Host an interrupted --runner here run again in this CLI, using the credential this machine saved and the run's original pipeline and arguments. |
 | `--ref REF` | Git revision of this checkout to run, resolved locally, HEAD by default. |
 | `--pipeline-ref REF` | Git revision to load the pipeline definitions from when it differs from the revision being run; it must match any source pin in the repository's configuration. |

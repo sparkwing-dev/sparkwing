@@ -75,6 +75,33 @@ caller cannot replace the original source, risk permissions or captured
 environment. Local, detached and initial-trigger execution still need their
 final native bindings. See [rewrite integration](architecture.md).
 
+### Agent-started runs
+
+A run records the coding agent that started it on a person's behalf: run
+views show "requested by alice, via agent claude-code". `sparkwing run` and
+`sparkwing pipeline trigger` choose the label in this order:
+
+1. `--agent NAME` sets or names the agent, such as
+   `--agent claude-code:land-agent`; `--agent none` records no agent.
+2. `SPARKWING_AGENT` does the same when the flag is absent, so an agent
+   harness can name its lane once for every command it runs.
+3. Otherwise the CLI detects a known coding-agent environment:
+
+| Variable | Label | Source |
+|---|---|---|
+| `CODEX_THREAD_ID` set | `codex` | Codex CLI sets it in the commands it runs (observed in Codex CLI 0.160.0; the same signal Vercel's `@vercel/detect-agent` uses) |
+| `GEMINI_CLI=1` | `gemini-cli` | [Gemini CLI shell tool](https://github.com/google-gemini/gemini-cli/blob/main/docs/tools/shell.md) |
+| `CLAUDECODE=1` | `claude-code` | [Claude Code environment variables](https://code.claude.com/docs/en/env-vars); IDE extensions also set it in their integrated terminals |
+
+An agent started from another inherits its parent's variables, so Codex and
+Gemini CLI win over Claude Code. A label is at most 64 letters, digits, `.`,
+`_`, `-` and `:` and starts with a letter or digit. Intake seals it with the
+request. Retries and `--publish` keep it, and `runs status`, `runs list`, the
+API and the console show it. The label is self-declared and display-only:
+trust class, secrets, OIDC, cache scope, approvals and claims never read it.
+`pipeline trigger --resume` refuses `--agent` because the sealed request is
+authoritative.
+
 ## Command groups
 
 Top-level groups, each with its own `--help` and a full per-group page

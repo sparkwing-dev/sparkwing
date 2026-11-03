@@ -5305,6 +5305,8 @@ components:
       properties:
         actor:
           $ref: '#/components/schemas/internal.runspec.Actor'
+        agent:
+          type: string
         args:
           anyOf:
             - additionalProperties:
@@ -5854,6 +5856,8 @@ components:
       properties:
         actor:
           $ref: '#/components/schemas/internal.runspec.Actor'
+        agent:
+          type: string
         burst:
           anyOf:
             - $ref: '#/components/schemas/internal.runspec.BurstPlacement'

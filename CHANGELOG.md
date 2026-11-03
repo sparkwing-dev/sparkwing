@@ -20,6 +20,11 @@ unlock.
 
 ## [Unreleased]
 
+### Added
+
+- **CLI, API, web:** Show when a coding agent started a run
+  `sparkwing run` and `sparkwing pipeline trigger` record the coding agent that starts a run on a person's behalf. `--agent NAME` sets or names it, such as `claude-code:land-agent`, and `--agent none` opts out; without the flag, `SPARKWING_AGENT` applies, then a detected Claude Code (`CLAUDECODE=1`), Codex (`CODEX_THREAD_ID`) or Gemini CLI (`GEMINI_CLI=1`) environment. Intake seals the label with the run request; retries and `--publish` keep it. `runs status` and `runs list` show it in every output mode, the run API returns it as `agent`, and the console shows an agent icon and name beside the requester. The label is self-declared and display-only: trust, secrets, OIDC, cache scope, approvals and claims never read it. See [Agent-started runs](docs/cli.md#agent-started-runs).
+
 ### Fixed
 
 - **Cloud:** Name the pool ceiling when a job asks for more CPU or memory than it allows
