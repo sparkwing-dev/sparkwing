@@ -340,7 +340,8 @@ func isDirective(text string) bool {
 		strings.HasPrefix(text, "//nolint:") ||
 		strings.HasPrefix(text, "// sleepcheck:external-boundary ") ||
 		strings.HasPrefix(text, "//lint:ignore ") ||
-		strings.HasPrefix(text, "//lint:file-ignore ")
+		strings.HasPrefix(text, "//lint:file-ignore ") ||
+		text == "//sparkwing:critical"
 }
 
 func firstLine(text string) string {

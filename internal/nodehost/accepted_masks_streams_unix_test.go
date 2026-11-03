@@ -24,6 +24,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/source"
 )
 
+//sparkwing:critical
 func TestSealedSecretsStayMaskedInNativeSDKStreams(t *testing.T) {
 	property := func(seed [24]byte) bool {
 		value := "sealed-" + hex.EncodeToString(seed[:])

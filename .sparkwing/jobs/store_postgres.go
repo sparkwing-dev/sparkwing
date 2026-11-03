@@ -257,8 +257,8 @@ func init() {
 	sparkwing.Register("StorePostgres", func() sparkwing.Pipeline[sparkwing.NoInputs] { return &StorePostgres{} })
 }
 
-func runStorePostgresIfTouched(ctx context.Context) error {
-	files, scope, err := changeScope(ctx, "internal/store file(s)", storeFiles)
+func runStorePostgresIfTouched(ctx context.Context, mode gateMode) error {
+	files, scope, err := gateScope(ctx, mode, "internal/store file(s)", storeFiles)
 	if err != nil {
 		return err
 	}

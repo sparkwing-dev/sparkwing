@@ -1288,8 +1288,8 @@ func scanApproval(rs rowScanner) (*Approval, error) {
 //go:embed schema.sql
 var schemaNeutral string
 
-// safety: the baseline is the only schema; a store recording any other version is refused, never upgraded.
-const expectedSchemaVersion = 28
+// safety: fresh stores get this baseline whole; an older store upgrades only through schemaUpgrades.
+const expectedSchemaVersion = 29
 
 // ExpectedSchemaVersion returns the schema version this binary
 // understands. Useful for diagnostics, version-mismatch reporting,
@@ -1348,7 +1348,13 @@ func (s *Store) createBaseline(ctx context.Context, path string) error {
 		if preRewrite {
 			return preRewriteStoreError(version, path)
 		}
-		return schemaMismatchError(version, path)
+		if version > expectedSchemaVersion {
+			return schemaMismatchError(version, path)
+		}
+		if err := upgradeSchemaTx(ctx, tx, version, path); err != nil {
+			return err
+		}
+		return tx.Commit()
 	}
 	translated, err := translateSchema(schemaNeutral, s.dialect)
 	if err == nil {

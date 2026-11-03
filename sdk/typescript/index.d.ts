@@ -147,10 +147,10 @@ export interface Ref<T> {
   /** safety: Only genuine absence returns undefined; decode, transport and cancellation errors reject. */
   tryGet(ctx: Context): Promise<T | undefined>;
 }
-/** contract: Latest references read successful verified default-branch runs unless fromAnyRun is set. */
-export interface PipelineRef<T> extends Ref<T> { readonly pipeline: string; readonly jobId: string; readonly maxAgeMs?: number; readonly fromAnyRun?: boolean; }
-/** contract: Max age bounds freshness; fromAnyRun permits output without verified default-branch provenance. */
-export interface RefOptions { maxAgeMs?: number; fromAnyRun?: boolean; }
+/** contract: Latest references read successful verified default-branch runs unless fromAnyRun or fromProvenRunAtCommit is set. */
+export interface PipelineRef<T> extends Ref<T> { readonly pipeline: string; readonly jobId: string; readonly maxAgeMs?: number; readonly fromAnyRun?: boolean; readonly fromProvenRunAtCommit?: boolean; }
+/** contract: Max age bounds freshness; fromAnyRun permits output without verified default-branch provenance; fromProvenRunAtCommit reads only a run at the reader's commit, proven for its repository, that selected every job without dry run. */
+export interface RefOptions { maxAgeMs?: number; fromAnyRun?: boolean; fromProvenRunAtCommit?: boolean; }
 /** contract: A job output reference retains its declared result type. */
 export declare function refTo<T>(job: Job<T>): Ref<T>;
 /** contract: Declarative references let the host authorize cross-pipeline reads. */

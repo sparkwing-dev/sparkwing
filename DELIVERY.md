@@ -408,9 +408,31 @@ file. Other syntax and workflow checks remain active.
   separate 70-minute execution deadlines for broad checks and touched-package
   race tests. Each gets 71 minutes with the dispatcher's drain margin, inside
   its own 80-minute hosted job. Hosted CI selects them with `sparkwing run gate
-  --sw-only gate` and `sparkwing run gate --sw-only race-touched`. Each job
+  --sw-only gate -- --full` and `sparkwing run gate --sw-only race-touched`. Each job
   owns a separate four-core runner, so race tests share no cores with the full
-  Go or PostgreSQL suite. `sparkwing run gate` runs both jobs locally. The
+  Go or PostgreSQL suite. `sparkwing run gate` runs both jobs locally. Without
+  `--full` its test step runs the changed packages (importers still build and
+  vet; their tests run after deploy) and the tests marked `//sparkwing:critical` on the line above them; a change to a
+  `go.mod`, `go.sum` or `internal/store/schema.sql` runs its whole module. With
+  `--full`, race tests cover every package but `internal/store` and the
+  PostgreSQL suite always runs, so a full pass does not depend on the
+  producer's `origin/main`. The broad job's 70-minute deadline already allows
+  the full Go suite and the 30-minute PostgreSQL limit; hosted CI runs the race
+  job without `--full`, so its touched-package budget is unchanged. After
+  both jobs run and pass on a clean checkout, `record-tree` outputs HEAD's tree, the
+  `.sparkwing` definition fingerprint, the mode and the engine version. Each
+  gate job reads that output through a `sw.FromProvenRunAtCommit()` reference
+  and skips itself, naming the runner that proved it, when the controller finds
+  a full-mode pass at the same commit from a run proven for this repository
+  (from GitHub, or fetched by the controller) that selected every job without
+  dry run, sealed no environment variables and ran every job on a trusted host
+  (a fresh host, or a runner registered with `--trust verified` or
+  `--trust verified-default`), and that pass names the same tree, fingerprint and engine.
+  `record-tree` reads both jobs' in-run outputs and records nothing when
+  either skipped, and the lookup passes over a run whose `record-tree` did not
+  succeed, so a run that skipped everything neither records a pass of its own
+  nor hides the older pass it skipped on. A plain
+  local run proves no repository, so it never lets another run skip. The
   existing required `Canonical / gate` check succeeds only after the broad,
   race, pre-release and three `race-store-k-of-3` matrix jobs all succeed. A
   skipped, cancelled or failed matrix cannot pass that check. Pre-release
@@ -462,7 +484,7 @@ file. Other syntax and workflow checks remain active.
   latency still require measured evidence. The full Go suite uses a 25-minute per-package timeout;
   hosted runs 36678720566 and 36689529462 hit Go's default 10-minute timeout
   in `internal/controller` or `internal/store` while the active tests had run for 0s.
-  Lint and the conditional PostgreSQL suite wait for the full Go suite.
+  Lint and the PostgreSQL suite, conditional outside `--full`, wait for the full Go suite.
   Touched-package race tests run as an independent job on every host. Existing
   per-command Go parallelism stays unchanged.
   `internal/store` is not among the gate's race targets. Its full race suite

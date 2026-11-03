@@ -60,7 +60,7 @@ func FuzzLocalHostCloseRetiresProcessClients(f *testing.F) {
 		case 4:
 			_, err = process.Output(t.Context(), "run", "job")
 		case 5:
-			_, _, err = process.Latest(t.Context(), "ci", "job", time.Hour, false)
+			_, _, err = process.Latest(t.Context(), "ci", "job", time.Hour, false, false)
 		case 6:
 			_, err = process.StartChild(t.Context(), "ci", map[string]string{"value": value}, "", "")
 		case 7:
@@ -466,4 +466,23 @@ func transitionLocalNode(ctx context.Context, host *client.LocalHostClient, comm
 		return runstate.Applied{}, err
 	}
 	return host.TransitionNode(ctx, ref, actor, payload)
+}
+
+func TestLocalHostBindingAdmitsDeclaredPipelineReferences(t *testing.T) {
+	server, host, _, owner := localHostFixture(t)
+	engineSQL(t, server.store, `INSERT INTO nodes(team,run_id,node_id,status,spec_json,execution_json) VALUES ('a','run','job','pending',?,?)`,
+		[]byte(`{"id":"job","pipeline_refs":[{"pipeline":"gate","job":"record-tree","from_proven_run":true}]}`), []byte(`{}`))
+	declared := capability.Target{Team: "a", Reference: &capability.PipelineReferenceTarget{Pipeline: "gate", JobID: "record-tree", FromProvenRun: true}}
+	if err := host.CheckBinding(t.Context(), owner, capability.BindReadSet, declared); err != nil {
+		t.Fatalf("a declared proven reference was refused on the local host: %v", err)
+	}
+	for name, target := range map[string]capability.Target{
+		"undeclared pipeline": {Team: "a", Reference: &capability.PipelineReferenceTarget{Pipeline: "other", JobID: "record-tree", FromProvenRun: true}},
+		"widened to any run":  {Team: "a", Reference: &capability.PipelineReferenceTarget{Pipeline: "gate", JobID: "record-tree", FromAnyRun: true}},
+		"foreign team":        {Team: "b", Reference: &capability.PipelineReferenceTarget{Pipeline: "gate", JobID: "record-tree", FromProvenRun: true}},
+	} {
+		if err := host.CheckBinding(t.Context(), owner, capability.BindReadSet, target); err == nil {
+			t.Errorf("%s: the local host admitted it", name)
+		}
+	}
 }

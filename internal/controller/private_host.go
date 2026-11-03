@@ -270,7 +270,16 @@ func (s *Server) localHostBinding(w http.ResponseWriter, r *http.Request, a capa
 	return nil
 }
 
+// safety: a pipeline reference names another run by its declaration, so stamping the
+// host's run or job onto it would make the store refuse every declared reference.
 func localHostTarget(a capability.Authorized, target capability.Target) (capability.Target, error) {
+	if target.Reference != nil {
+		if target.Team != "" && target.Team != a.Target.Team {
+			return capability.Target{}, localHostRefusal()
+		}
+		target.Team = a.Target.Team
+		return target, nil
+	}
 	if a.Principal.Capability.Unit == capability.UnitNode && target.NodeID == "" {
 		target.NodeID = a.Target.NodeID
 	}

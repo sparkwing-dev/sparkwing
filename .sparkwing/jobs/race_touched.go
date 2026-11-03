@@ -18,10 +18,10 @@ const (
 
 // perf: suitesDone closes once the full Go and Postgres suites release their
 // cores; a nil channel keeps the race queue at its initial width.
-func runRaceTouched(ctx context.Context, suitesDone <-chan struct{}) error {
+func runRaceTouched(ctx context.Context, mode gateMode, suitesDone <-chan struct{}) error {
 	ctx, cancel := context.WithTimeout(ctx, raceTouchedStepTimeout)
 	defer cancel()
-	files, scope, err := changeScope(ctx, "Go file(s)", existingGoFiles)
+	files, scope, err := gateScope(ctx, mode, "Go file(s)", existingGoFiles)
 	if err != nil {
 		return err
 	}

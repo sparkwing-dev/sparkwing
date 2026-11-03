@@ -5,9 +5,11 @@ import (
 	"fmt"
 	"math/rand/v2"
 	"testing"
+	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 )
 
 func TestDeclaredPipelineReferenceProperty(t *testing.T) {
@@ -107,6 +109,60 @@ func TestPipelineOutputRequiresVerifiedDefaultBranchOrDeclaredOptOut(t *testing.
 		err = s.AsOperator().CheckBinding(t.Context(), principal, capability.BindReadSet, capability.Target{Team: "a", RunID: "producer-run", NodeID: "output"})
 		if (err == nil) != declared {
 			t.Fatalf("direct unverified output, opt-out=%v: %v", declared, err)
+		}
+	}
+}
+
+func TestProvenPipelineOutputNeedsADeclaredProvenReferenceAndACleanRun(t *testing.T) {
+	s, demand := unitClaimFixture(t)
+	claim, err := s.AsOperator().ClaimUnit(t.Context(), demand)
+	if err != nil {
+		t.Fatal(err)
+	}
+	principal, err := s.AsOperator().ResolveAuthority(t.Context(), capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: claim.Award.CapabilityPrefix})
+	if err != nil {
+		t.Fatal(err)
+	}
+	tenant := &Tenant{s: s, team: "a"}
+	reader, err := tenant.ReadRun(t.Context(), "run")
+	if err != nil {
+		t.Fatal(err)
+	}
+	proof, err := assertedProvenance(t, "ci", "refs/heads/main", provenSHA).FetchedFrom(1, "acme/repo", "refs/heads/main", provenSHA)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reader.Request.Request.Git.SHA, reader.Request.Request.Git.Repository.Key = provenSHA, provenRepo
+	rewriteSchemaExec(t, s.db, `UPDATE runs SET request_json=?,git_sha=?,repo_key=? WHERE team='a' AND id='run'`, sealWith(t, reader.Request, proof), provenSHA, string(provenRepo))
+	candidate, err := assertedProvenance(t, "producer", "refs/heads/agent", provenSHA).FetchedFrom(1, "acme/repo", "refs/heads/agent", provenSHA)
+	if err != nil {
+		t.Fatal(err)
+	}
+	read := capability.Target{Team: "a", RunID: "producer-run", NodeID: "output"}
+	for _, tc := range []struct {
+		name              string
+		anyRun, provenRun bool
+		options           runspec.Options
+		want              bool
+	}{
+		{name: "proven reference, clean run", provenRun: true, want: true},
+		{name: "proven reference, start-at run", provenRun: true, options: runspec.Options{StartAt: runspec.Setting[string]{Optional: runspec.Optional[string]{Set: true, Value: "sdk-typescript"}}}},
+		{name: "default reference, clean run"},
+		{name: "any-run reference, start-at run", anyRun: true, options: runspec.Options{StartAt: runspec.Setting[string]{Optional: runspec.Optional[string]{Set: true, Value: "sdk-typescript"}}}, want: true},
+	} {
+		rewriteSchemaExec(t, s.db, `DELETE FROM nodes WHERE team='a' AND run_id='producer-run'`)
+		rewriteSchemaExec(t, s.db, `DELETE FROM runs WHERE team='a' AND id='producer-run'`)
+		if err := tenant.TestOnlySeedSealedRun(t.Context(), "producer-run", "producer", provenRepo, provenSHA, candidate, tc.options, time.Unix(1700000000, 0)); err != nil {
+			t.Fatal(err)
+		}
+		rewriteSchemaExec(t, s.db, `INSERT INTO nodes(team,run_id,node_id,status,outcome,finished_at,spec_json,execution_json,trusted_host) VALUES ('a','producer-run','output','done','success',2,?,?,1)`, []byte(`{"id":"output"}`), []byte(`{}`))
+		spec, err := json.Marshal(nodeproto.JobSpec{ID: "job", References: []nodeproto.PipelineReference{{Pipeline: "producer", Job: "output", FromAnyRun: tc.anyRun, FromProvenRun: tc.provenRun}}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		rewriteSchemaExec(t, s.db, `UPDATE nodes SET spec_json=? WHERE team='a' AND run_id='run' AND node_id='job'`, spec)
+		if err := s.AsOperator().CheckBinding(t.Context(), principal, capability.BindReadSet, read); (err == nil) != tc.want {
+			t.Fatalf("%s: %v", tc.name, err)
 		}
 	}
 }

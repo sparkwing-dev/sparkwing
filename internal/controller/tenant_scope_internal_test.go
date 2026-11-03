@@ -42,6 +42,7 @@ func TestRequestTenantSharesOneHandleAcrossPorts(t *testing.T) {
 	}
 }
 
+//sparkwing:critical
 func TestRequestTenantRejectsForeignOrMissingHandle(t *testing.T) {
 	for _, tc := range []struct {
 		name   string

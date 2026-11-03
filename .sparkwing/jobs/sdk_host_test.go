@@ -26,8 +26,17 @@ type jobDocument struct {
 	Inline          bool
 	ContinueOnError bool `json:"continue_on_error"`
 	Optional        bool
-	FailurePolicy   sparkwing.ParallelFailurePolicy `json:"failure_policy"`
-	Concurrency     []struct {
+	Closures        struct {
+		SkipIf []string `json:"skip_if"`
+	}
+	References []struct {
+		Pipeline      string
+		Job           string
+		FromAnyRun    bool `json:"from_any_run"`
+		FromProvenRun bool `json:"from_proven_run"`
+	} `json:"pipeline_refs"`
+	FailurePolicy sparkwing.ParallelFailurePolicy `json:"failure_policy"`
+	Concurrency   []struct {
 		Group    string
 		Scope    sparkwing.Scope
 		OnLimit  sparkwing.OnLimit `json:"on_limit"`

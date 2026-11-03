@@ -11,6 +11,7 @@ import (
 
 const provenanceSHA = "0123456789abcdef0123456789abcdef01234567"
 
+//sparkwing:critical
 func TestProvenanceRoundTripsAndRefusesForgedSeals(t *testing.T) {
 	app := runspec.AppFacts{Repository: "acme/repo", Event: "push", DeliveryKey: "d", RepositoryID: 7, Ref: "refs/heads/main", SHA: provenanceSHA, DefaultBranch: "main", DefaultBranchPush: true, VerifiedAt: time.Unix(1, 0)}
 	verified, err := runspec.AppProvenance(app, runspec.Optional[runspec.PullRequest]{}, "deploy")
@@ -131,6 +132,7 @@ func TestRepositoryProofAndCompareAreSealed(t *testing.T) {
 	}
 }
 
+//sparkwing:critical
 func TestUnverifiedProvenanceCannotAcquireRepositoryProof(t *testing.T) {
 	asserted, err := runspec.AssertedProvenance(runspec.RunWriter("run"), "refs/heads/main", provenanceSHA, "ci")
 	if err != nil {
@@ -191,6 +193,7 @@ func TestDisplayShowsSealedTrustClass(t *testing.T) {
 	}
 }
 
+//sparkwing:critical
 func TestChildSourceRepositoryCannotBecomeExecutionProof(t *testing.T) {
 	child, err := runspec.AssertedChildProvenance(runspec.RunWriter("parent"), "refs/heads/feature", strings.Repeat("a", 40), "child")
 	if err != nil {

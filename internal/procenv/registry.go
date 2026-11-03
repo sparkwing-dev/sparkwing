@@ -26,6 +26,7 @@ var Registry = []Var{
 	{Name: "SPARKWING_COMMIT", Prefix: false, Class: runtimeClass, Owner: "engine", Doc: "Composed from the sealed run and granted runner identity."},
 	{Name: "SPARKWING_REPO", Prefix: false, Class: runtimeClass, Owner: "engine", Doc: "Composed from the sealed run and granted runner identity."},
 	{Name: "SPARKWING_TRIGGER_SOURCE", Prefix: false, Class: runtimeClass, Owner: "engine", Doc: "Composed from the sealed run and granted runner identity."},
+	{Name: "SPARKWING_ENGINE_VERSION", Prefix: false, Class: runtimeClass, Owner: "engine", Doc: "Version of the engine executing the job."},
 	{Name: "SPARKWING_TOOLCHAIN_ACTIVE", Prefix: false, Class: Protocol, Owner: "engine", Doc: "CLI or test marker; no pipeline inheritance."},
 	{Name: "SPARKWING_TEST_", Prefix: true, Class: Protocol, Owner: "engine", Doc: "CLI or test marker; no pipeline inheritance."},
 	{Name: "SPARKWING_TESTLEAK_HOST", Prefix: false, Class: Protocol, Owner: "engine", Doc: "CLI or test marker; no pipeline inheritance."},

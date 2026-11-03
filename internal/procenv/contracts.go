@@ -77,6 +77,7 @@ type Runtime struct {
 	DryRun                              bool
 	Branch, Commit, Repo, TriggerSource string
 	GateIndex                           string
+	EngineVersion                       string
 	Startup                             []Assignment
 	AttemptEnv                          Env
 }

@@ -215,6 +215,7 @@ CREATE TABLE nodes (
     expansion_body BLOB,
     expansion_registration BLOB,
     expansion_failure BLOB,
+    trusted_host BIGINT NOT NULL DEFAULT 0 CHECK(trusted_host IN (0,1)),
     PRIMARY KEY (team, run_id, node_id),
     CHECK((claimed_by IS NULL AND capability_prefix = '' AND lease_expires_at IS NULL) OR (claimed_by IS NOT NULL AND claimed_by <> '' AND capability_prefix <> '' AND lease_expires_at IS NOT NULL AND generation > 0)),
     CHECK(status <> 'running' OR (claimed_by IS NOT NULL AND started_at IS NOT NULL AND attempt > 0)),

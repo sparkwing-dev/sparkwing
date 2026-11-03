@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 )
 
 // PauseHistory contains the fields exposed by the controller.
@@ -83,4 +84,12 @@ type StepObservation struct {
 	FinishedAt  *time.Time             `json:"finished_at,omitempty"`
 	Annotations []nodeproto.Annotation `json:"annotations,omitempty"`
 	Summary     string                 `json:"summary,omitempty"`
+}
+
+// LatestRun is a pipeline's latest matching run. ProvenAtCommit confirms the
+// controller applied a proven-at-commit filter, which an older controller
+// ignores rather than refuses.
+type LatestRun struct {
+	runstate.RunSummary
+	ProvenAtCommit bool `json:"proven_at_commit,omitempty"`
 }

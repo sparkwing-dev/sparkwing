@@ -12,18 +12,26 @@ func schemaBaselineDigest() string {
 	return fmt.Sprintf("%x", sha256.Sum256([]byte(strings.ReplaceAll(schemaNeutral, "\r\n", "\n"))))
 }
 
-func verifySchemaBaseline(ctx context.Context, tx *storeTx, path string) error {
+func hasBaselineDigestColumnTx(ctx context.Context, tx *storeTx) (bool, error) {
 	q := `SELECT COUNT(*) FROM pragma_table_info('sparkwing_schema_version') WHERE name = 'baseline_digest'`
 	if tx.dialect == DialectPostgres {
 		q = `SELECT COUNT(*) FROM information_schema.columns
 WHERE table_schema = ` + postgresStoreSchema + ` AND table_name = 'sparkwing_schema_version' AND column_name = 'baseline_digest'`
 	}
-	var hasDigest int
-	if err := tx.QueryRowContext(ctx, q).Scan(&hasDigest); err != nil {
-		return fmt.Errorf("inspect schema digest column: %w", err)
+	var n int
+	if err := tx.QueryRowContext(ctx, q).Scan(&n); err != nil {
+		return false, fmt.Errorf("inspect schema digest column: %w", err)
+	}
+	return n != 0, nil
+}
+
+func verifySchemaBaseline(ctx context.Context, tx *storeTx, path string) error {
+	hasDigest, err := hasBaselineDigestColumnTx(ctx, tx)
+	if err != nil {
+		return err
 	}
 	var recorded string
-	if hasDigest != 0 {
+	if hasDigest {
 		if err := tx.QueryRowContext(ctx,
 			`SELECT COALESCE(baseline_digest, '') FROM sparkwing_schema_version WHERE version = ?`, expectedSchemaVersion).Scan(&recorded); err != nil {
 			return fmt.Errorf("read schema baseline digest: %w", err)
@@ -39,12 +47,12 @@ WHERE table_schema = ` + postgresStoreSchema + ` AND table_name = 'sparkwing_sch
 	if err := checkLegacySchemaObjects(ctx, tx); err != nil {
 		return fmt.Errorf("%w; %w", schemaBaselineMismatchError("<missing>", expected, path), err)
 	}
-	if hasDigest == 0 {
+	if !hasDigest {
 		if _, err := tx.execContext(ctx, `ALTER TABLE sparkwing_schema_version ADD COLUMN baseline_digest TEXT NOT NULL DEFAULT ''`); err != nil {
 			return fmt.Errorf("add schema baseline digest: %w", err)
 		}
 	}
-	_, err := tx.execContext(ctx, `UPDATE sparkwing_schema_version SET baseline_digest = ? WHERE version = ?`, expected, expectedSchemaVersion)
+	_, err = tx.execContext(ctx, `UPDATE sparkwing_schema_version SET baseline_digest = ? WHERE version = ?`, expected, expectedSchemaVersion)
 	return err
 }
 

@@ -151,6 +151,9 @@ type PipelineReference struct {
 	Pipeline   string `json:"pipeline"`
 	Job        string `json:"job"`
 	FromAnyRun bool   `json:"from_any_run,omitempty"`
+	// FromProvenRun reads only a run at the reader's sealed commit, proven for
+	// the reader's repository, that selected every job without dry run.
+	FromProvenRun bool `json:"from_proven_run,omitempty"`
 }
 
 // SecretMatcher avoids copying secret values into validation errors or persisted plans.

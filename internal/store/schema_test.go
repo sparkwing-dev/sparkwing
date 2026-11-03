@@ -34,11 +34,12 @@ func TestSchemaDocumentationNamesBaseline(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if strings.Contains(string(raw), fmt.Sprintf("Recreate the store for schema baseline %d", want)) {
+		if strings.Contains(string(raw), fmt.Sprintf("Recreate the store for schema baseline %d", want)) ||
+			strings.Contains(string(raw), fmt.Sprintf("Upgrade the store in place to schema baseline %d", want)) {
 			return
 		}
 	}
-	t.Errorf("no migration guide has a \"Recreate the store for schema baseline %d\" section", want)
+	t.Errorf("no migration guide has a \"Recreate the store for schema baseline %d\" or \"Upgrade the store in place to schema baseline %d\" section", want, want)
 }
 
 // safety: neutral-schema translation must preserve every table, column, key,
@@ -415,8 +416,9 @@ func TestOlderSchemaRequiresBackupBeforeDiscard(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// safety: schema 28 upgrades in place, so 27 is the newest version still refused as older.
 	if _, err := st.DB().Exec(storetest.Rebind(st,
-		`UPDATE sparkwing_schema_version SET version = ?`), store.ExpectedSchemaVersion()-1); err != nil {
+		`UPDATE sparkwing_schema_version SET version = ?`), store.ExpectedSchemaVersion()-2); err != nil {
 		t.Fatal(err)
 	}
 	remedy := []string{"move ", "-wal", "-shm", "aside"}

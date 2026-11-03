@@ -158,7 +158,7 @@ func serviceEvidence(request *http.Request, pattern string) (capability.RequestE
 	case "/node/v1/secrets/{name}":
 		evidence.Target.SecretName = request.PathValue("name")
 	case "/node/v1/pipelines/{name}/latest":
-		evidence.Target = capability.Target{Reference: &capability.PipelineReferenceTarget{Pipeline: request.PathValue("name"), JobID: request.URL.Query().Get("job"), FromAnyRun: request.URL.Query().Get("from_any_run") == "true"}}
+		evidence.Target = capability.Target{Reference: &capability.PipelineReferenceTarget{Pipeline: request.PathValue("name"), JobID: request.URL.Query().Get("job"), FromAnyRun: request.URL.Query().Get("from_any_run") == "true", FromProvenRun: request.URL.Query().Get("from_proven_run") == "true"}}
 	}
 	if evidence.Target.Reference == nil && evidence.Target.NodeID == "" {
 		evidence.Target.NodeID = request.URL.Query().Get("job")

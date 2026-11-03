@@ -7,8 +7,10 @@ import (
 	"slices"
 	"sort"
 	"strings"
+	"sync"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
+	"github.com/sparkwing-dev/sparkwing/internal/buildinfo"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
@@ -151,7 +153,8 @@ func (e SDKEnvironment) build(ctx context.Context, kind procenv.Kind, seal runsp
 func sdkRuntime(run nodeproto.RunContext, runner nodeproto.RunnerIdentity) procenv.Runtime {
 	runtime := procenv.Runtime{
 		RunID: run.RunID, DryRun: run.DryRun,
-		Runner: procenv.RunnerInfo{Name: runner.Name, Type: runner.Type, Labels: slices.Clone(runner.Labels)},
+		Runner:        procenv.RunnerInfo{Name: runner.Name, Type: runner.Type, Labels: slices.Clone(runner.Labels)},
+		EngineVersion: engineVersion(),
 	}
 	if run.Git != nil {
 		runtime.Branch, runtime.Commit, runtime.Repo = run.Git.Branch, run.Git.SHA, run.Git.Repo
@@ -161,3 +164,15 @@ func sdkRuntime(run nodeproto.RunContext, runner nodeproto.RunnerIdentity) proce
 	}
 	return runtime
 }
+
+// safety: the node host is the engine executing the job, so its build names the engine.
+var engineVersion = sync.OnceValue(func() string {
+	id := buildinfo.Read("sparkwing", "")
+	if (id.Version == "(devel)" || id.Version == "(unknown)") && id.Commit != "" {
+		if id.Modified {
+			return "devel-" + id.Commit + "-dirty"
+		}
+		return "devel-" + id.Commit
+	}
+	return id.Version
+})

@@ -7,7 +7,20 @@ func schemaMismatchError(version int, path string) error {
 	if version > expectedSchemaVersion {
 		return fmt.Errorf("sparkwing: store schema version %d is newer than this binary (expects %d); start a binary matching the store, or restore a backup matching this binary into a separate database", version, expectedSchemaVersion)
 	}
+	if step, ok := schemaUpgradeFrom(version); ok {
+		return fmt.Errorf("sparkwing: store schema version %d is older than this binary (expects %d); start the controller with this binary once to upgrade the %s store in place, then run this again", version, expectedSchemaVersion, step.release)
+	}
 	return fmt.Errorf("sparkwing: store schema version %d is older than this binary (expects %d); %s", version, expectedSchemaVersion, schemaRecreateRemedy(path))
+}
+
+// safety: an upgrade changes only the exact released baseline it names; any other
+// store at that version is refused unchanged.
+func schemaUpgradeDigestError(step schemaUpgrade, recorded, path string) error {
+	if recorded == "" {
+		recorded = "<missing>"
+	}
+	return fmt.Errorf("sparkwing: store schema version %d baseline digest %q is not the %s baseline %q this binary upgrades, so it left the store unchanged; open it once with Sparkwing %s to record its digest, then start this binary; or %s",
+		step.from, recorded, step.release, step.digest, step.release, schemaRecreateRemedy(path))
 }
 
 func schemaRecreateRemedy(path string) string {

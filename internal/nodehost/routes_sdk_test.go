@@ -113,7 +113,7 @@ func TestSDKHTTPServicesUseTheRegisteredProductionRouter(t *testing.T) {
 			if err != nil || string(raw) != `{"image":"ready"}` {
 				return errors.New("SDK output service failed")
 			}
-			raw, err = services.Latest(ctx, "compile", "build", time.Minute, false)
+			raw, err = services.Latest(ctx, "compile", "build", time.Minute, false, false)
 			if err != nil || string(raw) != `{"image":"ready"}` {
 				return errors.New("SDK latest service failed")
 			}

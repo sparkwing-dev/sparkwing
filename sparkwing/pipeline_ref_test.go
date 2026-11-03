@@ -21,7 +21,7 @@ type stubResolver struct {
 	err   error
 }
 
-func (s *stubResolver) resolve(_ context.Context, pipeline, nodeID string, maxAge time.Duration, fromAnyRun bool) (*resolvedPipelineRef, error) {
+func (s *stubResolver) resolve(_ context.Context, pipeline, nodeID string, maxAge time.Duration, fromAnyRun, _ bool) (*resolvedPipelineRef, error) {
 	s.lastPipeline = pipeline
 	s.lastNodeID = nodeID
 	s.lastMaxAge = maxAge
@@ -129,7 +129,7 @@ func TestCollectRefs_DiscoversFilledRefFields(t *testing.T) {
 
 func TestPipelineResolverFunc_AdaptsPlainFunction(t *testing.T) {
 	called := false
-	fn := pipelineResolverFunc(func(_ context.Context, pipeline, nodeID string, maxAge time.Duration, fromAnyRun bool) (*resolvedPipelineRef, error) {
+	fn := pipelineResolverFunc(func(_ context.Context, pipeline, nodeID string, maxAge time.Duration, fromAnyRun, _ bool) (*resolvedPipelineRef, error) {
 		called = true
 		return &resolvedPipelineRef{RunID: "fn-run", Data: []byte(`{"digest":"z","tag":"z"}`)}, nil
 	})

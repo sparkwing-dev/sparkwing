@@ -5,6 +5,7 @@ import (
 	"time"
 )
 
+//sparkwing:critical
 func TestBillingSettlement(t *testing.T) {
 	start := time.Date(2026, 10, 14, 0, 0, 0, 0, time.UTC)
 	for _, tc := range []struct {

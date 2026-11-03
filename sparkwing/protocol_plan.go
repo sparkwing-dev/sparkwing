@@ -84,7 +84,7 @@ func jobDocument(p *Plan, n *JobNode) nodeproto.JobSpec {
 		s.Consumes = append(s.Consumes, nodeproto.ArtifactInput{Producer: e.producer, Into: e.into})
 	}
 	for _, r := range n.pipelineRefs() {
-		s.References = append(s.References, nodeproto.PipelineReference{Pipeline: r.Pipeline, Job: r.NodeID, FromAnyRun: r.AnyRun})
+		s.References = append(s.References, nodeproto.PipelineReference{Pipeline: r.Pipeline, Job: r.NodeID, FromAnyRun: r.AnyRun, FromProvenRun: r.ProvenRun})
 	}
 	for _, c := range n.dirCaches {
 		s.Caches = append(s.Caches, c.spec)

@@ -208,6 +208,23 @@ Personal enrollment may omit `--repos` because personal machines take only
 their owner's asserted runs. They never claim repository-proven work. Shared
 runner enrollment requires repository scopes, which accept only proven work.
 
+A pass that `sw.FromProvenRunAtCommit()` counts must come from trusted hosts
+only. When a job's attempt starts, the controller records from the claimant's
+authority chain, never from names the runner reports, whether its host is
+trusted: a fresh host (a launcher pod, a Sparkwing Cloud node or a
+GitHub-hosted Actions runner), or a machine whose team admin registered it with
+`--trust verified-default` or `--trust verified`, which never take asserted
+work. A run counts only if every job that did not skip ran on a trusted host, so
+a runner that takes asserted work, which could leave `HOME`, `GOFLAGS` or the
+build cache poisoned for later jobs, never produces a counted pass. Runners
+registered with `--trust any` or no trust never do.
+
+Two gaps remain. A team's own launcher credential counts as a fresh host
+whatever trust class it was registered with, because each claim gets a pod no
+other run has used. The host that evaluates the plan is not covered by the
+trusted-host check, because only jobs record it; `record-tree` reads the other
+jobs' outputs itself rather than trusting the plan to say they ran.
+
 A verified run on a host that outlives its jobs (plain-machine runners,
 persistent Kubernetes runners and self-hosted GitHub Actions runners) writes
 memo, depcache and output records only to that host's own cache scope. Fresh

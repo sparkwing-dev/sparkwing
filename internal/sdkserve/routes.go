@@ -112,13 +112,16 @@ func (s *routeServices) Output(ctx context.Context, job string) (json.RawMessage
 	return out.Output, err
 }
 
-func (s *routeServices) Latest(ctx context.Context, pipeline, job string, age time.Duration, fromAnyRun bool) (json.RawMessage, error) {
+func (s *routeServices) Latest(ctx context.Context, pipeline, job string, age time.Duration, fromAnyRun, fromProvenRun bool) (json.RawMessage, error) {
 	var out struct {
 		Output json.RawMessage `json:"output"`
 	}
 	path := "/node/v1/pipelines/" + routeSegment(pipeline) + "/latest?job=" + url.QueryEscape(job) + "&max_age_ms=" + strconv.FormatInt(age.Milliseconds(), 10)
 	if fromAnyRun {
 		path += "&from_any_run=true"
+	}
+	if fromProvenRun {
+		path += "&from_proven_run=true"
 	}
 	err := s.call(ctx, "GET", path, nil, &out)
 	if err == nil && out.Output == nil {

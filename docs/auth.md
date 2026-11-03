@@ -1040,4 +1040,18 @@ negative compare answers, including diverged, behind and 404, retain their
 existing behavior.
 
 Latest pipeline references select verified default-branch work unless the
-pipeline declares `sw.FromAnyRun()`.
+pipeline declares `sw.FromAnyRun()`. A reference declared with
+`sw.FromProvenRunAtCommit()` reads only a run at the reader's own sealed commit
+whose repository was proven (an App delivery, an Actions push, a schedule, or
+code the controller fetched from GitHub) as the reader's proven repository, and
+whose sealed options selected every job and step: no `--sw-only`,
+`--sw-start-at` or `--sw-stop-at`, no dry run, no debug and no
+`--sw-pause-before`, `--sw-pause-after` or `--sw-pause-on-failure`, because a
+paused job can be attached to and edited. The run must also have
+sealed no environment variables, because a submitted `GOFLAGS` or similar can
+change what its jobs judged, and every job that did not skip must have run on a
+trusted host (see [security](security.md)). The newest such run in which the referenced job
+succeeded answers, so a newer run that skipped the job does not hide an older
+one that ran it. An asserted run, such as a
+plain local run, proves no repository, so it neither reads nor satisfies such
+a reference.

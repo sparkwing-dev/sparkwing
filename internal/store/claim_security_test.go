@@ -11,6 +11,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 )
 
 // ClaimSecurityRegressions runs claim and award trust checks in the supplied dialect.
@@ -26,6 +27,99 @@ func ClaimSecurityRegressions(t *testing.T, open func(*testing.T) *Store) {
 	t.Run("fresh pod explanation", func(t *testing.T) { freshPodWaitingExplanation(t, fixture) })
 	t.Run("push provenance parity", func(t *testing.T) { pushClaimProvenanceParity(t, fixture) })
 	t.Run("pool branch rules", func(t *testing.T) { poolBranchRulesMatchLikePathGlobs(t, fixture) })
+	t.Run("trusted producer host", func(t *testing.T) { trustedHostRecordedAtAttemptStart(t, fixture) })
+	t.Run("trusted host cleared by claim", func(t *testing.T) { trustedHostClearedByClaim(t, fixture) })
+}
+
+// safety: a registered machine produces counted passes only when its admin-set trust never takes asserted work.
+func trustedHostRecordedAtAttemptStart(t *testing.T, open func(*testing.T) *Store) {
+	for _, tc := range []struct {
+		source  string
+		trust   capability.Trust
+		claims  bool
+		trusted bool
+	}{
+		{source: "verified-feature", trust: capability.TrustVerified, claims: true, trusted: true},
+		{source: "verified-default", trust: capability.TrustVerifiedDefault, claims: true, trusted: true},
+		{source: "verified-feature", trust: capability.TrustAny, claims: true},
+		{source: "verified-feature", trust: "", claims: true},
+		{source: "asserted-main", trust: capability.TrustVerified},
+	} {
+		t.Run(fmt.Sprint(tc.source, "/", tc.trust), func(t *testing.T) {
+			s, demand := unitClaimFixtureStore(t, open(t))
+			ctx := t.Context()
+			seal := runspec.SealedRequest{Request: runspec.Request{Mode: runspec.IntakeExecute, Dispatch: runspec.DispatchController, Git: runspec.Git{Repository: runspec.Repository{Key: "gh:1", Display: "https://github.com/acme/repo"}}}}
+			seal.Provenance = assertedProvenance(t, "ci", "refs/heads/main", referenceMain)
+			if tc.source != "asserted-main" {
+				branch := "feature"
+				if tc.source == "verified-default" {
+					branch = "main"
+				}
+				var err error
+				seal.Provenance, err = runspec.AppProvenance(runspec.AppFacts{Repository: "acme/repo", Event: "push", RepositoryID: 1, DeliveryKey: "delivery", VerifiedAt: s.now(), Ref: "refs/heads/" + branch, SHA: referenceMain, DefaultBranch: "main", DefaultBranchPush: tc.source == "verified-default"}, runspec.Optional[runspec.PullRequest]{}, "ci")
+				if err != nil {
+					t.Fatal(err)
+				}
+			}
+			body, err := json.Marshal(seal)
+			if err != nil {
+				t.Fatal(err)
+			}
+			s.testOnlyExec(t, `UPDATE runs SET request_json=?,dispatch='controller' WHERE id='run'`, body)
+			s.testOnlyExec(t, `UPDATE triggers SET status='done',finished_at=1 WHERE id='run'`)
+			owner := referenceMember(t, s, "owner", RoleOwner)
+			subject := capability.Subject{Kind: capability.SubjectMachine, ID: "desktop"}
+			issued, err := s.AsOperator().ProvisionCapability(ctx, capability.ProvisionSpec{Kind: capability.ProvisionMachine, Authority: &owner.Authority, RegistrationID: "runner:a:desktop", Team: "a", Subject: subject, Grants: []capability.Grant{capability.NodesClaim}, Binding: capability.Binding{Kind: capability.BindingNone}, Repositories: []string{"github.com/acme/*"}, Trust: tc.trust})
+			if err != nil {
+				t.Fatal(err)
+			}
+			demand.CapabilityPrefix = issued.Capability.Prefix
+			indexFixtureUnit(t, s, "a", *demand.Target)
+			claim, err := s.AsOperator().ClaimUnit(ctx, demand)
+			if (err == nil) != tc.claims {
+				t.Fatalf("claim = %+v, %v; want claimed %v", claim, err, tc.claims)
+			}
+			if !tc.claims {
+				return
+			}
+			actor := runstate.Actor{Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: claim.Award.CapabilityPrefix}, Kind: runstate.ActorHolder, CapabilityPrefix: claim.Award.CapabilityPrefix, NodeFence: runspec.NodeFence{RunID: runspec.RunID(claim.RunID), NodeID: runspec.NodeID(claim.NodeID), Holder: claim.Award.Holder, Generation: claim.Award.Generation}}
+			identity := runspec.AttemptIdentity{Team: "a", RunID: claim.RunID, NodeID: claim.NodeID, Attempt: 1, Generation: int64(claim.Award.Generation)}
+			tenant := &Tenant{s: s, team: "a"}
+			admitExecution(t, tenant, actor)
+			// safety: the runner's own report names a fresh cloud host; only the authority chain may decide.
+			reported := &runstate.NodeAttempt{Identity: identity, ExecutorKind: "kubernetes", ExecutorName: "fresh", ExecutorLocation: TierCloud}
+			if _, err := tenant.TransitionNode(ctx, nodeTransition{Ref: runspec.NodeRef{RunID: runspec.RunID(claim.RunID), NodeID: runspec.NodeID(claim.NodeID)}, To: runstate.NodeRunning, Cause: runstate.CauseStart, Actor: actor, SourceAttempt: new(runspec.AttemptOrdinal), Extra: transitionExtra{Attempt: reported}}); err != nil {
+				t.Fatal(err)
+			}
+			var trusted int
+			if err := s.db.QueryRowContext(ctx, rewritePh(s.dialect, `SELECT trusted_host FROM nodes WHERE team='a' AND run_id=? AND node_id=?`), claim.RunID, claim.NodeID).Scan(&trusted); err != nil {
+				t.Fatal(err)
+			}
+			if (trusted == 1) != tc.trusted {
+				t.Fatalf("trusted_host = %d, want %v", trusted, tc.trusted)
+			}
+		})
+	}
+}
+
+// safety: a holder can finish without starting, so its claim alone must clear the previous attempt's flag.
+func trustedHostClearedByClaim(t *testing.T, open func(*testing.T) *Store) {
+	s, demand := unitClaimFixtureStore(t, open(t))
+	s.testOnlyExec(t, `UPDATE nodes SET trusted_host=1 WHERE team='a' AND run_id='run' AND node_id='job'`)
+	root := authorityRoot("shared", "a")
+	authorityPersist(t, s, root)
+	demand.CapabilityPrefix = root.Prefix
+	indexFixtureUnit(t, s, "a", *demand.Target)
+	if _, err := s.AsOperator().ClaimUnit(t.Context(), demand); err != nil {
+		t.Fatal(err)
+	}
+	var trusted int
+	if err := s.db.QueryRowContext(t.Context(), `SELECT trusted_host FROM nodes WHERE team='a' AND run_id='run' AND node_id='job'`).Scan(&trusted); err != nil {
+		t.Fatal(err)
+	}
+	if trusted != 0 {
+		t.Fatal("a new claim inherited the previous attempt's trusted host")
+	}
 }
 
 func poolBranchRulesMatchLikePathGlobs(t *testing.T, open func(*testing.T) *Store) {

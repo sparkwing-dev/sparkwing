@@ -80,7 +80,7 @@ func TestPreCommitAdmitsAheadOfTheBroadGate(t *testing.T) {
 		return (&PreCommit{}).Plan(t.Context(), precommit, sparkwing.NoInputs{}, sparkwing.RunContext{Pipeline: "pre-commit"})
 	})
 	gate := inspectPlan(t, func(gate *sparkwing.Plan) error {
-		return (&Gate{}).Plan(t.Context(), gate, sparkwing.NoInputs{}, sparkwing.RunContext{Pipeline: "gate"})
+		return (&Gate{}).Plan(t.Context(), gate, GateArgs{}, sparkwing.RunContext{Pipeline: "gate"})
 	})
 	if precommit.Priority <= gate.Priority {
 		t.Fatalf("pre-commit priority %d, gate priority %d: a ten-second tier queued behind a ten-minute one is not a ten-second tier",

@@ -24,6 +24,18 @@ unlock.
 
 - **CLI:** `sparkwing dashboard status` prints the dashboard URL
   Status said the dashboard was running but not where. While it serves, `dashboard status` and `daemon status` now report its address as `url` in JSON and a `dashboard:` line in pretty output. The URL is the dashboard origin, not a sign-in link; `sparkwing dashboard open` still mints that. The local controller reports it in a new optional `dashboard_url` field of `local_control_status`; an older controller leaves it out.
+- **runners:** `sparkwing runners add --trust verified` registers a shared runner that takes runs on any branch whose commit GitHub or the controller's own fetch proved, and never asserted work
+  The controller records at each attempt's start whether the job ran on a trusted host: a fresh host (launcher pod, Sparkwing Cloud, GitHub-hosted Actions) or a machine registered with `--trust verified-default` or `--trust verified`. `sw.FromProvenRunAtCommit()` counts a run only when every job that did not skip ran on a trusted host. The column arrives with store schema 29.
+- **sdk:** `sw.FromProvenRunAtCommit()` narrows a `RefToLastRun` reference to successful runs at the reader's own commit
+  The run must be proven for the reader's repository (an App delivery, an Actions push, a schedule, or code the controller fetched) on any branch, and must have selected every job and step without dry run, pauses or debug and sealed no environment variables. A newer run in which the referenced job did not succeed, for example because it skipped, does not hide an older one in which it did. `Ref` gains a `ProvenRun` field, the TypeScript SDK a `fromProvenRunAtCommit` option, and plans carry `from_proven_run` on pipeline references, so an engine older than this release refuses a plan that uses it, and the SDK refuses an answer from a controller that ignored the filter.
+- **runtime:** Jobs receive `SPARKWING_ENGINE_VERSION`
+  Every job attempt sees the version of the engine executing it, so a pipeline can key a recorded result on the engine that produced it and stop reusing it after an upgrade.
+
+### Changed
+
+- **store (Breaking):** The schema baseline advances to version 29, the first forward migration: a store at schema 28 with the v0.68.3 baseline digest (v0.68.3 and later 0.68 releases) upgrades in place on its first open
+  The upgrade adds `nodes.trusted_host` and records version 29 and its digest in one transaction on SQLite and PostgreSQL; on PostgreSQL the migration advisory lock lets controllers starting together run it once. Older versions, schema 28 with any other digest, and newer versions are refused unchanged with a remedy. An older binary refuses the upgraded store, so snapshot the store first; rollback means restoring that snapshot. See the [store upgrade migration](docs/migrations/_unreleased.md#upgrade-the-store-in-place-to-schema-baseline-29).
+- **scaffold:** `const FallbackSDKVersion` pins v0.68.6, so a fresh scaffold compiles against that release.
 
 ### Fixed
 

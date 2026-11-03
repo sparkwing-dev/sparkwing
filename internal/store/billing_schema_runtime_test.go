@@ -49,6 +49,7 @@ func TestBillingAwardProjectsActiveUsageAndPrice(t *testing.T) {
 	}
 }
 
+//sparkwing:critical
 func TestBillingAwardUniqueIdentitiesAreSchemaConstraints(t *testing.T) {
 	for _, identity := range []string{"capability", "unit_generation"} {
 		t.Run(identity, func(t *testing.T) {

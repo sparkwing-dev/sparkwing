@@ -207,6 +207,10 @@ func TestCanonicalSourceOverrideRetainsItsWholeGateGraph(t *testing.T) {
 				want = append(want, "--sw-only", "gate")
 			}
 			want = append(want, "--sw-run-handle-file", filepath.Join(dir, "canonical-run.json"))
+			// safety: the hosted broad gate keeps every Go test; an override's older source may not know the flag.
+			if tc.source == "" && tc.tag == "" {
+				want = append(want, "--", "--full")
+			}
 			if err != nil || !slices.Equal(strings.Fields(string(got)), want) {
 				t.Errorf("source=%q tag=%q args=%s err=%v, want %v", tc.source, tc.tag, got, err, want)
 			}
