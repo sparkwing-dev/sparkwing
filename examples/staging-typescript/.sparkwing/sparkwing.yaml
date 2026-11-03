@@ -1,0 +1,5 @@
+pipelines:
+  - name: example-ts
+    entrypoint: example-ts
+  - name: weather-report
+    entrypoint: weather-report
