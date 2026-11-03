@@ -22,6 +22,8 @@ unlock.
 
 ### Fixed
 
+- **web:** Say when a linked run does not exist
+  Opening `/runs?run=<id>` for a run the controller does not return now shows "Run not found" with a button back to all runs, instead of an empty detail pane.
 - **web:** Say resource metrics are unavailable instead of loading forever
   When the metrics endpoint refuses, such as a Cloud `503 unavailable` for a job with no readings, the Resources tab now says the metrics are unavailable. A running job keeps retrying, and evidence already shown stays on screen through a failed refresh.
 - **SDK install:** Refuse a generated overlay that is not a regular file

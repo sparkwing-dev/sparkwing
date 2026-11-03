@@ -1273,6 +1273,20 @@ test("does not restore an older run after the new detail request fails", async (
   await expect(page).toHaveURL(new RegExp(`run=${runningRun.id}`));
 });
 
+test("a deep link to a missing run says so and leads back to the runs", async ({
+  page,
+}) => {
+  await installMockAPI(page, { runs: [finishedRun] });
+  await page.goto("/runs?run=run-does-not-exist");
+
+  const notFound = page.getByRole("alert").filter({ hasText: "Run not found" });
+  await expect(notFound).toContainText("run-does-not-exist");
+  await notFound.getByRole("button", { name: "Back to all runs" }).click();
+  await expect(page).not.toHaveURL(/run=/);
+  await expect(page.getByText("Run not found")).toHaveCount(0);
+  await expect(page.locator(`[data-run-id="${finishedRun.id}"]`)).toBeVisible();
+});
+
 test("opens a selected DAG step when logs mount", async ({ page }) => {
   await installMockAPI(page, {
     runs: [finishedRun],

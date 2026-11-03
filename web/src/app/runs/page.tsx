@@ -413,6 +413,7 @@ function Pipelines({ pivotTabs }: { pivotTabs: React.ReactNode }) {
   }>({ older: null, newer: null });
   const [runsError, setRunsError] = useState<string | null>(null);
   const [detailError, setDetailError] = useState<string | null>(null);
+  const [missingRun, setMissingRun] = useState<string | null>(null);
   const runsRequest = useRef({ filterState, pageRef, viewKey });
   runsRequest.current = { filterState, pageRef, viewKey };
   const runsSeq = useRef({ next: 0, applied: 0 });
@@ -495,7 +496,6 @@ function Pipelines({ pivotTabs }: { pivotTabs: React.ReactNode }) {
       return;
     }
     if (
-      !d ||
       detailSelectionRef.current !== selection ||
       selection.runID !== runID ||
       request < detailRequestRef.current.committed
@@ -503,7 +503,8 @@ function Pipelines({ pivotTabs }: { pivotTabs: React.ReactNode }) {
       return;
     }
     detailRequestRef.current.committed = request;
-    setDetail(d);
+    setMissingRun(d ? null : runID);
+    if (d) setDetail(d);
     setDetailError(null);
   }, []);
 
@@ -1325,6 +1326,21 @@ function Pipelines({ pivotTabs }: { pivotTabs: React.ReactNode }) {
 
         {
                                                                  }
+        {!run && selectedRun && missingRun === selectedRun && (
+          <div role="alert" className="flex-1 flex flex-col items-center justify-center gap-3 p-8 text-center text-sm">
+            <h2 className="font-bold">Run not found</h2>
+            <p className="text-[var(--muted)]">
+              No run <span className="font-mono">{selectedRun}</span> exists in this team, or you cannot see it.
+            </p>
+            <button
+              type="button"
+              onClick={() => selectRun(null)}
+              className="text-xs px-3 py-1.5 rounded border border-[var(--border)] text-[var(--foreground)] hover:bg-[var(--surface-raised)]"
+            >
+              Back to all runs
+            </button>
+          </div>
+        )}
         {run && (
           <div className="flex-1 flex flex-col overflow-hidden">
             <RunDetailPane
