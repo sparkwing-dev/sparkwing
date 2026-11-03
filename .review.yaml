@@ -1,0 +1,66 @@
+# Review policy for this repository, in the tool-neutral format of the
+# ink-labs review spec (wing/review-spec.md). `sparkwing run review` reads it.
+version: 1
+
+objective:
+  sources: [ticket, commit-message, brief]
+
+rules:
+  - id: standards
+    from: overwing-standards
+  - id: no-secrets-in-logs
+    text: Secrets and credentials never reach logs, errors, run output or API responses unmasked.
+  - id: tenant-isolation
+    text: One team's runs, secrets, code or logs are never visible to another team.
+
+# Each entry only makes review stricter: a P2 on these paths blocks, and the
+# security reviewer reads the part of the diff they cover.
+strict:
+  - name: billing
+    paths:
+      - internal/**/*billing*
+      - internal/**/*payment*
+      - internal/**/*refund*
+      - internal/limits/**
+      - cmd/**/*billing*
+    block_at: P2
+    reviewer: security
+  - name: tenant-isolation
+    paths:
+      - internal/**/*tenant*
+      - internal/controller/team_*
+      - internal/store/team_*
+    block_at: P2
+    reviewer: security
+  - name: trust-and-source-credentials
+    paths:
+      - internal/**/*trust*
+      - internal/**/*credential*
+      - internal/credentials/**
+      - internal/source/**
+      - internal/releaseauth/**
+      - cmd/sparkwing-controller/credentials.go
+    block_at: P2
+    reviewer: security
+  - name: secret-masking
+    paths:
+      - internal/secrets/**
+      - internal/localsecrets/**
+      - internal/procenv/**
+      - internal/**/*mask*
+      - internal/**/*secret*
+    block_at: P2
+    reviewer: security
+
+never_block:
+  - style and naming preferences
+  - rare non-catastrophic races that recover on their own
+  - reconcilable edge cases that have a documented manual recovery
+
+reviewers:
+  default: { model: codex-sol }
+  security: { model: claude-opus }
+
+rereview:
+  same_reviewer: true
+  skip_allowed_from: P2

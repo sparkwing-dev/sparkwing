@@ -38,6 +38,9 @@ pipelines:
   - name: security-scan
     entrypoint: SecurityScan
 
+  - name: review
+    entrypoint: Review
+
   - name: integration
     entrypoint: Integration
 
