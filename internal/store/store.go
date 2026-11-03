@@ -661,6 +661,7 @@ func scanRun(rs rowScanner, tail ...any) (*Run, error) {
 	if r.TriggerUser == "" {
 		r.TriggerUser = display.Actor.ID
 	}
+	r.Agent = display.Agent
 	if display.PullRequest.Set {
 		pr := display.PullRequest.Value
 		r.PullRequest = &runstate.SummaryPullRequest{Number: int(pr.Number), Action: pr.Action, BaseRef: pr.BaseRef, BaseSHA: pr.BaseSHA, HeadRef: pr.HeadRef, HeadSHA: pr.HeadSHA}

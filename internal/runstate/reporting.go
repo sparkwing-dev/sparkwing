@@ -39,6 +39,7 @@ type RunSummary struct {
 	Annotations     []string            `json:"annotations,omitempty"`
 	NeedsAttention  string              `json:"needs_attention,omitempty"`
 	TriggerUser     string              `json:"trigger_user,omitempty"`
+	Agent           string              `json:"agent,omitempty"`
 	PullRequest     *SummaryPullRequest `json:"pull_request,omitempty"`
 }
 
