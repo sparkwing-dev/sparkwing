@@ -21,11 +21,13 @@ jobs:
   gate:
     name: Canonical / ${{ matrix.gate == 'gate' && 'gate-core' || matrix.gate }}
     runs-on: ubuntu-latest
-    timeout-minutes: ${{ matrix.gate == 'pre-release' && 130 || 80 }}
+    timeout-minutes: ${{ (matrix.gate == 'pre-release' || startsWith(matrix.gate, 'race-store-')) && 130 || 80 }}
     strategy:
       fail-fast: false
       matrix:
-        gate: ${{ (inputs.source_ref != '' || inputs.release_tag != '') && fromJSON('["gate", "pre-release"]') || fromJSON('["gate", "race-touched", "pre-release"]') }}
+        # perf: each race-store lane races one part of internal/store on its
+        # own four-core runner, so pre-release leaves that step to them.
+        gate: ${{ (inputs.source_ref != '' || inputs.release_tag != '') && fromJSON('["gate", "pre-release"]') || fromJSON('["gate", "race-touched", "pre-release", "race-store-1-of-3", "race-store-2-of-3", "race-store-3-of-3"]') }}
     env:
       GOWORK: "off"
     services:
@@ -80,9 +82,11 @@ jobs:
         run: echo "SOURCE_SHA=$(git rev-parse HEAD)" >>"$GITHUB_ENV"
 
       - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+        if: ${{ !startsWith(matrix.gate, 'race-store-') }}
         with:
           version: 12.6.0
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        if: ${{ !startsWith(matrix.gate, 'race-store-') }}
         with:
           node-version: "22"
           cache: pnpm
@@ -93,6 +97,7 @@ jobs:
         run: pnpm install --frozen-lockfile --ignore-scripts --dir web
 
       - name: Install golangci-lint
+        if: ${{ !startsWith(matrix.gate, 'race-store-') }}
         uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
         with:
           version: v2.12.2
@@ -109,6 +114,9 @@ jobs:
       - name: Verify hosted tools
         run: |
           set -euo pipefail
+          case "${{ matrix.gate }}" in
+            race-store-*) exit 0 ;;
+          esac
           command -v golangci-lint
           if [ "${{ matrix.gate }}" = pre-release ]; then
             command -v shellcheck
@@ -119,7 +127,7 @@ jobs:
         run: go build -trimpath -o "$RUNNER_TEMP/sparkwing" ./cmd/sparkwing
 
       - name: Stage the event change
-        if: matrix.gate != 'pre-release'
+        if: matrix.gate == 'gate' || matrix.gate == 'race-touched'
         env:
           PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
           PUSH_BEFORE_SHA: ${{ github.event.before }}
@@ -195,11 +203,16 @@ jobs:
         env:
           SPARKWING_HOME: ${{ runner.temp }}/sparkwing-home
           SPARKWING_TEST_PG_URL: postgres://postgres:postgres@localhost:5432/postgres?sslmode=disable
+          SOURCE_REF: ${{ inputs.source_ref }}
           RELEASE_TAG: ${{ inputs.release_tag }}
         run: |
           set -euo pipefail
           target_sha="$(git rev-parse HEAD)"
-          "$RUNNER_TEMP/sparkwing" run pre-release --sw-run-handle-file "$RUNNER_TEMP/canonical-run.json"
+          race_store_part=()
+          if [ -z "$SOURCE_REF" ] && [ -z "$RELEASE_TAG" ]; then
+            race_store_part=(-- --race-store-part none)
+          fi
+          "$RUNNER_TEMP/sparkwing" run pre-release --sw-run-handle-file "$RUNNER_TEMP/canonical-run.json" "${race_store_part[@]}"
           if [ -n "$RELEASE_TAG" ]; then
             if [ "$RELEASE_TAG" = v0.37.2 ]; then
               git apply --unidiff-zero --reverse --check "$RUNNER_TEMP/v0.37.2-test-oracle.patch"
@@ -210,6 +223,19 @@ jobs:
           else
             bash bin/check-hosted-gate-clean.sh "$target_sha"
           fi
+
+      - name: Run canonical store race part
+        if: startsWith(matrix.gate, 'race-store-')
+        env:
+          SPARKWING_HOME: ${{ runner.temp }}/sparkwing-home
+          LANE: ${{ matrix.gate }}
+        run: |
+          set -euo pipefail
+          target_sha="$(git rev-parse HEAD)"
+          part="${LANE#race-store-}"
+          part="${part/-of-//}"
+          "$RUNNER_TEMP/sparkwing" run pre-release --sw-start-at race-store --sw-stop-at race-store --sw-run-handle-file "$RUNNER_TEMP/canonical-run.json" -- --race-store-part "$part"
+          bash bin/check-hosted-gate-clean.sh "$target_sha"
 
       - name: Export canonical run timings
         if: ${{ always() }}

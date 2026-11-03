@@ -16,7 +16,7 @@ import (
 
 func TestPreReleasePlanAllowsStoreRace(t *testing.T) {
 	plan := inspectPlan(t, func(plan *sparkwing.Plan) error {
-		return (&PreRelease{}).Plan(t.Context(), plan, sparkwing.NoInputs{}, sparkwing.RunContext{Pipeline: "pre-release"})
+		return (&PreRelease{}).Plan(t.Context(), plan, PreReleaseArgs{}, sparkwing.RunContext{Pipeline: "pre-release"})
 	})
 	nodes := plan.Jobs
 	if len(nodes) != 1 {
@@ -29,7 +29,7 @@ func TestPreReleasePlanAllowsStoreRace(t *testing.T) {
 
 func TestPreReleaseWorkKeepsEveryCheckInOrder(t *testing.T) {
 	plan := inspectPlan(t, func(plan *sparkwing.Plan) error {
-		return (&PreRelease{}).Plan(t.Context(), plan, sparkwing.NoInputs{}, sparkwing.RunContext{Pipeline: "pre-release"})
+		return (&PreRelease{}).Plan(t.Context(), plan, PreReleaseArgs{}, sparkwing.RunContext{Pipeline: "pre-release"})
 	})
 	nodes := plan.Jobs
 	if len(nodes) != 1 || nodes[0].ID != "pre-release" {
