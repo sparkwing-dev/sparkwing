@@ -1129,8 +1129,9 @@ function Pipelines({ pivotTabs }: { pivotTabs: React.ReactNode }) {
             }
           }}
         >
-          {paneOpen && (
-            <div className="h-8 shrink-0 border-b border-[var(--border)]">
+          {/* The bar keeps its height without a pane so opening a run does not push the rows down. */}
+          <div className="h-8 shrink-0 border-b border-[var(--border)]">
+            {paneOpen && (
               <Tooltip content={nextColumnsAction}>
                 <button
                   type="button"
@@ -1146,8 +1147,8 @@ function Pipelines({ pivotTabs }: { pivotTabs: React.ReactNode }) {
                   </svg>
                 </button>
               </Tooltip>
-            </div>
-          )}
+            )}
+          </div>
           {showRunsRail && paneOpen ? (
             <div className="pane-scrollbar flex-1 overflow-y-auto overflow-x-hidden" tabIndex={0} aria-label="Runs pane" data-scrolling={runsScrollbar.scrolling} onScroll={runsScrollbar.onScroll}>
               <RunRail
@@ -2373,7 +2374,6 @@ const FullRunRow = memo(function FullRunRow({
           />
           {r.status === "dry_run" && <StatusLabel status={r.status} />}
         </FilterableValue>
-        {r.trust_class && <span className="shrink-0 text-[var(--muted)]">Trust: {r.trust_class}</span>}
         <FilterableValue
           facet="repo"
           value={repo}
@@ -2593,7 +2593,6 @@ const CompactFullRunRow = memo(function CompactFullRunRow({
             className={`inline-block align-middle w-2.5 h-2.5 rounded-full shrink-0 ${statusDot(r.status)} ${styleFor("status", r.status)}`}
           />
           {r.status === "dry_run" && <StatusLabel status={r.status} />}
-          {r.trust_class && <span className="shrink-0 text-[var(--muted)]">Trust: {r.trust_class}</span>}
           <span
             className={`text-cyan-400/70 min-w-0 truncate ${styleFor("repo", repo)}`}
           >

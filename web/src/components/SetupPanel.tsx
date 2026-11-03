@@ -218,6 +218,9 @@ export default function SetupPanel({
               {run.trigger_source}
             </LabelRow>
           )}
+          {run.trust_class && (
+            <LabelRow label="trust">{run.trust_class}</LabelRow>
+          )}
           <LabelRow label="started">
             <span title={started ? fmtFullDate(started) : "Not started"}>
               {started ? fmtDateTime(started, { seconds: true }) : "Not started"}

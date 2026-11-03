@@ -3032,3 +3032,47 @@ test("Search keeps visible filters aligned with same-view navigation", async ({ 
   await expect(page.getByText("Commit must be a hexadecimal SHA prefix.")).toBeVisible();
   expect(searched).toHaveLength(beforeInvalid);
 });
+
+test("runs list rows lead with status and stay put while the columns collapse", async ({ page }) => {
+  await page.setViewportSize({ width: 1300, height: 800 });
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  const assertedRun = { ...finishedRun, trust_class: "asserted" };
+  await installMockAPI(page, {
+    runs: [assertedRun, { ...runningRun, trust_class: "asserted" }],
+    details: { [finishedRun.id]: { ...finishedDetail, run: assertedRun } },
+  });
+  await page.goto("/runs");
+  const rows = page.locator("[data-run-id]");
+  await expect(rows).toHaveCount(2);
+  await expect(rows.filter({ hasText: "Trust:" })).toHaveCount(0);
+  const firstItemTop = () =>
+    page.evaluate(() => {
+      const column = document.querySelector("#runs-column")!;
+      const item = column.querySelector("[data-run-id], [data-rail-id]")!;
+      return item.getBoundingClientRect().top;
+    });
+  const top = await firstItemTop();
+
+  await rows.first().click();
+  await expect(page).toHaveURL(/run=run-20260827-001/);
+  await expect(rows.filter({ hasText: "Trust:" })).toHaveCount(0);
+  expect(await firstItemTop()).toBe(top);
+
+  await page.getByRole("button", { name: "Collapse Runs" }).click();
+  await expect(page.getByLabel("Runs rail")).toBeVisible();
+  expect(await firstItemTop()).toBe(top);
+  await page.getByRole("button", { name: "Collapse Nodes" }).click();
+  await expect(page.getByLabel("Nodes rail")).toBeVisible();
+  expect(await firstItemTop()).toBe(top);
+  await page.getByRole("button", { name: "Expand Runs and Nodes" }).hover();
+  await expect(page.getByRole("tooltip")).toBeVisible();
+  expect(await firstItemTop()).toBe(top);
+  await page.getByRole("button", { name: "Expand Runs and Nodes" }).click();
+  await expect(page.getByLabel("Runs rail")).toHaveCount(0);
+  expect(await firstItemTop()).toBe(top);
+  await expect(rows.first()).toHaveClass(/ring-violet-300/);
+  expect(await firstItemTop()).toBe(top);
+
+  await page.locator('[data-tab-key="setup"]').click();
+  await expect(page.getByText("asserted", { exact: true })).toBeVisible();
+});
