@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"slices"
 	"sync"
 	"time"
@@ -84,7 +85,11 @@ func (g stepGraph) run(ctx, parent context.Context) (json.RawMessage, error) {
 				continue
 			}
 			if parent.Err() != nil || writeFailed || (fatal || ctx.Err() != nil) && !step.Finally || blocked && !step.Finally {
-				if err := g.record(ctx, step.ID, "cancelled", "", nil, nil); err != nil {
+				var why error
+				if fatalStep != "" && !step.Finally {
+					why = fmt.Errorf("cancelled because step %q failed", fatalStep)
+				}
+				if err := g.record(ctx, step.ID, "cancelled", "", nil, why); err != nil {
 					writeFailed = true
 					firstErr = errors.Join(firstErr, err)
 					abort(err)
@@ -155,7 +160,13 @@ func (g stepGraph) run(ctx, parent context.Context) (json.RawMessage, error) {
 				state = "cancelled"
 			}
 		}
-		if err := g.record(ctx, result.id, state, result.reason, started[result.id], result.err); err != nil {
+		recorded := result.err
+		if state == "cancelled" && cancelled[result.id] && fatalStep != "" {
+			// safety: a sibling cancelled by fail-fast reports why it stopped, not
+			// the remedy its own body attaches to an interrupted command.
+			recorded = fmt.Errorf("cancelled because step %q failed", fatalStep)
+		}
+		if err := g.record(ctx, result.id, state, result.reason, started[result.id], recorded); err != nil {
 			writeFailed = true
 			result.err = errors.Join(result.err, err)
 			abort(err)

@@ -47,6 +47,8 @@ unlock.
   Reading an upstream job's output when that job was skipped, had not finished, or ran in a dry run without a dry-run body failed the step with `blob is absent or tombstoned`, because the optional readers did not recognise the host's `blob_missing` code; Go `TryGet` panicked. Both SDKs now return no value for it. `Get` still fails on a missing output.
 - **CLI:** Say why planning output is withheld and how to see it
   When any registered pipeline failed discovery, every run printed `output withheld because secret declarations were unavailable (N lines)` with no cause. The notice now gives how many pipelines failed and their error codes. When the only failure is a pipeline that requires an isolated home, it says to retry with `HOME="$(mktemp -d)" SPARKWING_HOME="$(mktemp -d)"`. Otherwise it says the output stays hidden until every registered pipeline plans without error. Pipeline names and error text stay withheld.
+- **runner:** A step cancelled by fail-fast says which sibling failed
+  When one step failed and fail-fast cancelled its running siblings, each sibling reported the error its own body returned for the interrupted command, often with that step's own remedy, as if it had failed on its own. Cancelled siblings, started or not, now report `cancelled because step "NAME" failed`; the failed step keeps its error.
 ### Changed
 
 - **scaffold:** `const FallbackSDKVersion` pins v0.68.6, so a fresh scaffold compiles against that release.
