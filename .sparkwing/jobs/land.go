@@ -224,9 +224,11 @@ func (j *landJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
 
 // safety: only a dry run, whose review job does not run, may land without a
 // review record; a real run still fails on the absent output.
+// bug: the host reports a dry-run job's missing output as a read failure
+// rather than an absence, so TryGet panics; a dry run must not resolve it.
 func (j *landJob) review(ctx context.Context) (reviewRecord, bool) {
 	if sparkwing.IsDryRun(ctx) {
-		return j.Review.TryGet(ctx)
+		return reviewRecord{}, false
 	}
 	return j.Review.Get(ctx), true
 }
