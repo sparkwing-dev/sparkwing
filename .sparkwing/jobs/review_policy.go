@@ -67,7 +67,7 @@ func parseReviewPolicy(data []byte) (reviewPolicy, error) {
 		return reviewPolicy{}, fmt.Errorf(".review.yaml: version %d is not supported; this job reads version 1", p.Version)
 	}
 	if len(p.Objective.Sources) == 0 {
-		p.Objective.Sources = []string{"ticket", "commit-message", "brief"}
+		p.Objective.Sources = []string{"brief", "ticket", "commit-message"}
 	}
 	for _, s := range p.Objective.Sources {
 		if !objectiveSources[s] {

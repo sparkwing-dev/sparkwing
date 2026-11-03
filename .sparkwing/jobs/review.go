@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -18,7 +19,7 @@ import (
 
 // ReviewArgs are the author's inputs to a review run.
 type ReviewArgs struct {
-	Brief string `flag:"brief" desc:"The change's objective, used when neither a ticket nor a commit message supplies one."`
+	Brief string `flag:"brief" desc:"The change's objective; when set it wins over the ticket and the commit messages."`
 	Skip  string `flag:"skip" desc:"Findings to skip with a reason, as 'F3=reason; F4=reason'. Only P2 and P3 findings off strict paths may be skipped."`
 }
 
@@ -31,8 +32,8 @@ func (Review) ShortHelp() string {
 }
 
 func (Review) Help() string {
-	return "Reads .review.yaml, resolves the change's objective (the bw-<n> ticket from the branch name or a Tickets trailer, " +
-		"then the commit messages, then --brief), and asks the default reviewer, plus the security reviewer when the diff " +
+	return "Reads .review.yaml, resolves the change's objective (--brief when given, then the bw-<n> or gh-<n> ticket from the branch name, " +
+		"a Tickets trailer or a (BW-<n>) or (GH-<n>) commit subject, then the commit messages), and asks the default reviewer, plus the security reviewer when the diff " +
 		"touches a strict path, for JSON findings. The record lands in <git common dir>/sparkwing-review/<branch>.json " +
 		"and is the job's output. A re-run on the same branch resumes each reviewer's session so it re-checks its open " +
 		"findings; an unchanged tree reuses the record without a model call. The run fails when a P0 or P1, or a P2 on a " +
@@ -103,7 +104,7 @@ func (j *reviewJob) run(ctx context.Context) (reviewRecord, error) {
 	deps := reviewDeps{
 		root:       root,
 		git:        git,
-		showTicket: showBitwingTicket,
+		showTicket: showTicket,
 		standards:  func(ctx context.Context, diff string) (string, error) { return overwingStandards(ctx, root, diff) },
 		reviewer:   newReviewer,
 		recordDir:  filepath.Join(common, "sparkwing-review"),
@@ -334,15 +335,19 @@ func (p reviewPolicy) usesStandards() bool {
 }
 
 var (
-	ticketBranchRE  = regexp.MustCompile(`(?i)^bw-(\d+)(?:-|$)`)
-	ticketTrailerRE = regexp.MustCompile(`(?mi)^Tickets?:[ \t]*(BW-\d+)`)
+	ticketBranchRE  = regexp.MustCompile(`(?i)^(bw|gh)-(\d+)(?:-|$)`)
+	ticketTrailerRE = regexp.MustCompile(`(?mi)^Tickets?:[ \t]*((?:BW|GH)-\d+)`)
+	ticketSubjectRE = regexp.MustCompile(`(?i)\(((?:BW|GH)-\d+)\)`)
 )
 
-func ticketFrom(branch, messages string) string {
+func ticketFrom(branch, messages, subjects string) string {
 	if m := ticketBranchRE.FindStringSubmatch(branch); m != nil {
-		return "BW-" + m[1]
+		return strings.ToUpper(m[1]) + "-" + m[2]
 	}
 	if m := ticketTrailerRE.FindStringSubmatch(messages); m != nil {
+		return strings.ToUpper(m[1])
+	}
+	if m := ticketSubjectRE.FindStringSubmatch(subjects); m != nil {
 		return strings.ToUpper(m[1])
 	}
 	return ""
@@ -355,10 +360,17 @@ func resolveObjective(ctx context.Context, d reviewDeps, p reviewPolicy, in revi
 		notes = append(notes, "commit messages unreadable: "+err.Error())
 		messages = ""
 	}
+	subjects, err := d.git(ctx, "log", "--format=%s", base+"..HEAD")
+	if err != nil {
+		subjects = ""
+	}
+	if brief := strings.TrimSpace(in.brief); brief != "" && slices.Contains(p.Objective.Sources, "brief") {
+		return reviewObjective{Source: "brief", text: brief}, notes
+	}
 	for _, source := range p.Objective.Sources {
 		switch source {
 		case "ticket":
-			id := ticketFrom(in.branch, messages)
+			id := ticketFrom(in.branch, messages, subjects)
 			if id == "" {
 				continue
 			}
@@ -372,10 +384,6 @@ func resolveObjective(ctx context.Context, d reviewDeps, p reviewPolicy, in revi
 			if strings.TrimSpace(messages) != "" {
 				return reviewObjective{Source: "commit-message", Ref: "HEAD", text: strings.TrimSpace(messages)}, notes
 			}
-		case "brief":
-			if strings.TrimSpace(in.brief) != "" {
-				return reviewObjective{Source: "brief", text: strings.TrimSpace(in.brief)}, notes
-			}
 		}
 	}
 	return reviewObjective{Source: "none"}, append(notes, "no objective resolved, so the objective-not-met rule could not fire")
@@ -383,8 +391,14 @@ func resolveObjective(ctx context.Context, d reviewDeps, p reviewPolicy, in revi
 
 const maxTicketBody = 12 << 10
 
-func showBitwingTicket(ctx context.Context, id string) (string, error) {
-	out, err := sparkwing.Exec(ctx, "bitwing", "ticket", "show", "-i", id, "-o", "json").String()
+func showTicket(ctx context.Context, id string) (string, error) {
+	var out string
+	var err error
+	if num, ok := strings.CutPrefix(id, "GH-"); ok {
+		out, err = sparkwing.Exec(ctx, "gh", "issue", "view", num, "--json", "title,body").String()
+	} else {
+		out, err = sparkwing.Exec(ctx, "bitwing", "ticket", "show", "-i", id, "-o", "json").String()
+	}
 	if err != nil {
 		return "", err
 	}
@@ -394,7 +408,7 @@ func showBitwingTicket(ctx context.Context, id string) (string, error) {
 		Body  string `json:"body"`
 	}
 	if err := json.Unmarshal([]byte(out), &t); err != nil {
-		return "", fmt.Errorf("bitwing printed no ticket JSON: %w", err)
+		return "", fmt.Errorf("%s: no ticket JSON: %w", id, err)
 	}
 	return fmt.Sprintf("%s: %s\n\n%s", id, t.Title, clip(t.Body, maxTicketBody)), nil
 }

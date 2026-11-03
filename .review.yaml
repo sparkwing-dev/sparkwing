@@ -3,7 +3,7 @@
 version: 1
 
 objective:
-  sources: [ticket, commit-message, brief]
+  sources: [brief, ticket, commit-message]
 
 rules:
   - id: standards

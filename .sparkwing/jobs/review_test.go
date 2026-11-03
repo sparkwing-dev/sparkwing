@@ -14,7 +14,7 @@ func testPolicy(t *testing.T) reviewPolicy {
 	t.Helper()
 	p, err := parseReviewPolicy([]byte(`version: 1
 objective:
-  sources: [ticket, commit-message, brief]
+  sources: [brief, ticket, commit-message]
 rules:
   - id: standards
     from: overwing-standards
@@ -214,15 +214,18 @@ func TestMergeFindingsKeepsSilentFindingsAndRenumbers(t *testing.T) {
 }
 
 func TestTicketFromBranchThenTrailer(t *testing.T) {
-	for _, c := range []struct{ branch, messages, want string }{
-		{"bw-3095-review-job", "Tickets: BW-7", "BW-3095"},
-		{"BW-12", "", "BW-12"},
-		{"feature/x", "feat: x\n\nTickets: BW-7\n", "BW-7"},
-		{"feature/x", "feat: x (BW-7)\n", ""},
-		{"bw3095-x", "", ""},
+	for _, c := range []struct{ branch, messages, subjects, want string }{
+		{"bw-3095-review-job", "Tickets: BW-7", "feat: x (BW-8)", "BW-3095"},
+		{"BW-12", "", "", "BW-12"},
+		{"gh-41-fix", "", "", "GH-41"},
+		{"feature/x", "feat: x (BW-8)\n\nTickets: BW-7\n", "feat: x (BW-8)", "BW-7"},
+		{"feature/x", "feat: x (BW-7)\n", "feat: x (BW-7)", "BW-7"},
+		{"feature/x", "fix: y (gh-5)\n", "fix: y (gh-5)", "GH-5"},
+		{"feature/x", "feat: x\n\nsee (BW-9) in the body\n", "feat: x", ""},
+		{"bw3095-x", "", "", ""},
 	} {
-		if got := ticketFrom(c.branch, c.messages); got != c.want {
-			t.Errorf("ticketFrom(%q, %q) = %q, want %q", c.branch, c.messages, got, c.want)
+		if got := ticketFrom(c.branch, c.messages, c.subjects); got != c.want {
+			t.Errorf("ticketFrom(%q, %q, %q) = %q, want %q", c.branch, c.messages, c.subjects, got, c.want)
 		}
 	}
 }
@@ -243,6 +246,9 @@ func (g *fakeGit) run(_ context.Context, args ...string) (string, error) {
 		return g.base, nil
 	case "log --format=%B%n":
 		return g.messages, nil
+	case "log --format=%s":
+		subject, _, _ := strings.Cut(g.messages, "\n")
+		return subject, nil
 	case "diff --name-only":
 		return strings.Join(g.files, "\n"), nil
 	case "diff --no-color":
@@ -442,11 +448,13 @@ func TestObjectiveResolutionOrder(t *testing.T) {
 		ticketErr                     bool
 		want                          string
 	}{
-		{"branch ticket", "bw-9-x", "feat: x", "brief", false, "ticket"},
-		{"trailer ticket", "x", "feat: x\n\nTickets: BW-9\n", "brief", false, "ticket"},
+		{"brief wins", "bw-9-x", "feat: x (BW-9)", "the brief", false, "brief"},
+		{"branch ticket", "bw-9-x", "feat: x", "", false, "ticket"},
+		{"trailer ticket", "x", "feat: x\n\nTickets: BW-9\n", "", false, "ticket"},
+		{"subject ticket", "x", "feat: x (BW-9)\n", "", false, "ticket"},
 		{"ticket unreadable", "bw-9-x", "feat: x", "", true, "commit-message"},
-		{"commit message", "x", "feat: x", "brief", false, "commit-message"},
-		{"brief", "x", "", "the brief", false, "brief"},
+		{"commit message", "x", "feat: x", "", false, "commit-message"},
+		{"brief only", "x", "", "the brief", false, "brief"},
 		{"none", "x", "", "", false, "none"},
 	} {
 		fx := newReviewFixture(t)
