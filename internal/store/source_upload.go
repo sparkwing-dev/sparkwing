@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"slices"
 	"time"
 
@@ -232,6 +233,13 @@ func copySubmissionSourceRecordTx(ctx context.Context, tx *storeTx, team Team, p
 	result, err := tx.execContext(ctx, `INSERT INTO blob_records(team,kind,scope,name,digest,run_id,repo_key,ref_scope,uploader_principal,provenance,source_identity_json,source_kind,source_run_id,verified_ref,verified_default_branch,source_sha,ref_facts_json,pipeline,created_at) SELECT team,kind,?,name,digest,?,repo_key,ref_scope,uploader_principal,provenance,source_identity_json,source_kind,source_run_id,verified_ref,verified_default_branch,source_sha,ref_facts_json,pipeline,? FROM blob_records WHERE team=? AND run_id=? AND kind='source_bundle' AND source_kind='submission' AND digest=?`, run, run, tx.now(ctx).UnixNano(), team, previous, digest)
 	if err != nil {
 		return err
+	}
+	count, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if count == 0 {
+		return authorityError(apierr.IntegrityFailure, fmt.Sprintf("uploaded-bundle source record is missing for run %q and digest %q", previous, digest))
 	}
 	return requireOneRow(result, "submission source binding")
 }
