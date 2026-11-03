@@ -238,7 +238,16 @@ func TestStorePostgresShardDatabaseKeepsTheServerAndOptions(t *testing.T) {
 	if want := "postgres://sw:sw@127.0.0.1:55432/sparkwing_store_shard_ab_1?sslmode=disable"; got != want {
 		t.Fatalf("shard URL = %q, want %q", got, want)
 	}
-	for _, dsn := range []string{"host=localhost user=sw dbname=sw", "mysql://localhost/sw"} {
+	for base, want := range map[string]string{
+		"postgres://sw:sw@127.0.0.1:55432/sw?dbname=shared&sslmode=disable": "postgres://sw:sw@127.0.0.1:55432/sparkwing_store_shard_ab_1?sslmode=disable",
+		"postgresql://sw@127.0.0.1/?database=shared":                        "postgresql://sw@127.0.0.1/sparkwing_store_shard_ab_1",
+	} {
+		got, err := storePostgresDatabaseURL(base, "sparkwing_store_shard_ab_1")
+		if err != nil || got != want {
+			t.Errorf("shard URL from %q = %q, %v, want %q without the overriding option", base, got, err, want)
+		}
+	}
+	for _, dsn := range []string{"host=localhost user=sw dbname=sw", "mysql://localhost/sw", "postgres://localhost/sw?service=ci"} {
 		if _, err := storePostgresDatabaseURL(dsn, "x"); err == nil {
 			t.Errorf("accepted %q, which names no postgres:// URL", dsn)
 		}

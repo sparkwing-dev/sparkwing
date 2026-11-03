@@ -176,6 +176,15 @@ func storePostgresDatabaseURL(baseDSN, database string) (string, error) {
 	if err != nil || (u.Scheme != "postgres" && u.Scheme != "postgresql") {
 		return "", fmt.Errorf("%s must be a postgres:// URL so each shard can get a database of its own", storePostgresURLEnv)
 	}
-	u.Path, u.RawPath = "/"+database, ""
+	query := u.Query()
+	// safety: pgx lets a service entry name the database, which would put every
+	// shard back in one database and its migration lock.
+	if query.Has("service") || query.Has("servicefile") {
+		return "", fmt.Errorf("%s names a pg_service entry, which can choose the database; give the server as a plain postgres:// URL so each shard can get a database of its own", storePostgresURLEnv)
+	}
+	// safety: pgx reads dbname and database query options over the URL path.
+	query.Del("dbname")
+	query.Del("database")
+	u.Path, u.RawPath, u.RawQuery = "/"+database, "", query.Encode()
 	return u.String(), nil
 }
