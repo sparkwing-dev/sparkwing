@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/fssecure"
 	"github.com/sparkwing-dev/sparkwing/internal/githooks"
 )
@@ -546,5 +547,48 @@ func TestHooksInstall_RefusesGlobalHooksPathWithoutChangingFilesOrConfig(t *test
 	}
 	if got := readRepoFile(t, hook); got != prior {
 		t.Fatalf("installation changed prior hook: %q", got)
+	}
+}
+
+// hack: a verbatim copy of the v0.66 forwarder, since this version no longer renders one.
+const olderForwarder = "#!/bin/sh\n# " + sparkwingHookMarker + " -- do not edit; use `sparkwing pipeline hooks (un)install`\n" +
+	"global=\"$(git config --global --type=path core.hooksPath 2>/dev/null)\" || exit 0\n" +
+	"[ -n \"$global\" ] || exit 0\nhook=\"$global/prepare-commit-msg\"\n[ -x \"$hook\" ] || exit 0\nexec \"$hook\" \"$@\"\n"
+
+func TestHooksInstall_LeavesAnOlderForwarderInPlace(t *testing.T) {
+	repo := gateRepo(t)
+	path := filepath.Join(repo, ".git", "hooks", "prepare-commit-msg")
+	writeRepoFile(t, path, olderForwarder)
+	if err := os.Chmod(path, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	installInto(t, (&fakeGit{}).run, repo)
+	if got := readRepoFile(t, path); got != olderForwarder {
+		t.Fatalf("install changed the forwarder:\n%s", got)
+	}
+	survey := githooks.Survey((&fakeGit{}).run, repo, expectedHooks)
+	if survey.State != githooks.GateArmed || len(survey.NotFiring()) != 0 {
+		t.Fatalf("forwarder made the survey %s, not firing %v: %s", survey.State, survey.NotFiring(), survey.Summary())
+	}
+}
+
+func TestHooksInstall_NamesAStalePipelineHookAndHowToRemoveIt(t *testing.T) {
+	repo := gateRepo(t)
+	path := filepath.Join(repo, ".git", "hooks", "prepare-commit-msg")
+	writeRepoFile(t, path, "#!/bin/sh\n# "+sparkwingHookMarker+"\nsparkwing run 'old' --sw-local-only\n")
+	if err := os.Chmod(path, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	var err error
+	captureStderr(t, func() { _, err = installHooks((&fakeGit{}).run, repo, filepath.Join(repo, ".sparkwing")) })
+	var failure *apierr.Error
+	if !errors.As(err, &failure) || failure.Code != apierr.Conflict {
+		t.Fatalf("install error = %#v", err)
+	}
+	if !strings.Contains(failure.Message, "prepare-commit-msg runs pipelines, but no pipeline declares it now; delete "+path) {
+		t.Fatalf("message does not name the hook and its fix: %s", failure.Message)
+	}
+	if strings.Contains(failure.Message, "pre-commit") || failure.Hint == "" {
+		t.Fatalf("message blames an installed hook or lacks a remedy: %+v", failure)
 	}
 }

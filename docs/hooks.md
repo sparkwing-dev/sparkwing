@@ -171,6 +171,11 @@ running pipelines; run a gate manually with `sparkwing run <pipeline>` to check 
 Each managed hook carries a marker comment so `uninstall` and `status`
 can distinguish sparkwing-installed hooks from hand-written ones.
 Existing unmanaged hooks are skipped on install with a warning.
+A managed hook that runs pipelines but that no pipeline declares any more
+makes install fail with `conflict`, naming the file to delete. A hook that
+Sparkwing before v0.68 wrote only to forward to the global `core.hooksPath`
+hook runs no pipeline, so install leaves it in place, and `status` notes it
+and marks its record `forwarder: true`. Delete it to stop forwarding.
 `sparkwing info` puts the repair command first in its next steps whenever a
 declared hook is missing or not firing.
 

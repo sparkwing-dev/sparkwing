@@ -13,6 +13,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/paths"
 
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
 	"github.com/sparkwing-dev/sparkwing/pkg/color"
 
@@ -99,7 +100,7 @@ func installHooks(git githooks.Git, repoRoot, sparkwingDir string) (bool, error)
 		return false, survey.Err
 	}
 	if survey.State == githooks.GateBroken {
-		return false, errors.New(survey.Summary())
+		return false, &apierr.Error{Code: apierr.Conflict, Message: survey.Summary(), Hint: survey.Remedy()}
 	}
 	return survey.Gated(), nil
 }
@@ -203,6 +204,7 @@ type managedHookStatus struct {
 	Name      string   `json:"name"`
 	Pipelines []string `json:"pipelines"`
 	Current   bool     `json:"current"`
+	Forwarder bool     `json:"forwarder,omitempty"`
 }
 
 type hooksStatusSummary struct {
@@ -226,10 +228,14 @@ func statusHooks(git githooks.Git, repoRoot, mode string) error {
 		if pipes == nil {
 			pipes = []string{}
 		}
-		hooks = append(hooks, managedHookStatus{Kind: "hook", Name: h.Name, Pipelines: pipes, Current: h.Current()})
+		if h.Forwarder {
+			fmt.Fprintf(os.Stderr, "note: %s only forwards to your global core.hooksPath hook, as Sparkwing before v0.68 wrote it; it runs no pipeline, so install leaves it. Delete %s to stop forwarding.\n",
+				h.Name, filepath.Join(survey.HooksDir, h.Name))
+		}
+		hooks = append(hooks, managedHookStatus{Kind: "hook", Name: h.Name, Pipelines: pipes, Current: h.Current(), Forwarder: h.Forwarder})
 	}
 	for _, hook := range hooks {
-		if !hook.Current {
+		if !hook.Current && !hook.Forwarder {
 			fmt.Fprintf(os.Stderr, "warning: %s differs from the expected hook content or format version; run sparkwing pipeline hooks install\n", hook.Name)
 		}
 		if mode == "json" {

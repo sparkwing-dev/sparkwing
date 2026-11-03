@@ -46,6 +46,7 @@ type HookObservation struct {
 	Declared       bool   `json:"declared"`
 	Active         bool   `json:"active"`
 	Borrowed       bool   `json:"borrowed"`
+	Forwarder      bool   `json:"forwarder,omitempty"`
 	Error          string `json:"error,omitempty"`
 	Body           string `json:"-"`
 }
@@ -86,7 +87,7 @@ type RepoGates struct {
 func (r RepoGates) NotFiring() []string {
 	var names []string
 	for _, h := range r.Hooks {
-		if !h.Borrowed && (!h.Current() || !h.Active) {
+		if !h.Borrowed && !h.Forwarder && (!h.Current() || !h.Active) {
 			names = append(names, h.Name)
 		}
 	}
@@ -141,7 +142,7 @@ func (r RepoGates) Summary() string {
 		if h.Error != "" {
 			parts = append(parts, h.Error)
 		} else if h.Required && !h.Current() && !h.Borrowed {
-			parts = append(parts, h.Name+" is missing or differs from expected content/format")
+			parts = append(parts, r.hookProblem(h))
 		}
 	}
 	if !r.declaresBlocking() {
@@ -162,6 +163,22 @@ func (r RepoGates) Summary() string {
 		return fmt.Sprintf("%s: %s", r.Repo, r.State)
 	}
 	return r.Repo + ": " + strings.Join(parts, "; ")
+}
+
+func (r RepoGates) hookProblem(h HookObservation) string {
+	path := filepath.Join(r.HooksDir, h.Name)
+	switch {
+	case !h.Declared:
+		return fmt.Sprintf("%s runs pipelines, but no pipeline declares it now; delete %s", h.Name, path)
+	case !h.Present:
+		return h.Name + " is declared but not installed"
+	case !h.Managed:
+		return fmt.Sprintf("%s is declared, but %s is not a sparkwing hook and install leaves it in place; move it aside", h.Name, path)
+	case !h.Executable:
+		return fmt.Sprintf("%s is not executable; make it executable or delete it", path)
+	default:
+		return h.Name + " differs from the hook this version installs"
+	}
 }
 
 func undeclaredGateSummary(fires []string) string {
@@ -242,6 +259,7 @@ func Survey(git Git, repoRoot string, expected Expectations) RepoGates {
 		default:
 			h.Present, h.Body = true, string(body)
 			h.Managed = strings.Contains(h.Body, Marker)
+			h.Forwarder = h.Managed && !wanted && !strings.Contains(h.Body, pipelineCall)
 			h.ContentMatches = wanted && h.Body == spec.Content
 			h.VersionMatches = strings.Contains(h.Body, "# "+Marker+" "+Format)
 			info, statErr := os.Stat(path)
@@ -254,7 +272,8 @@ func Survey(git Git, repoRoot string, expected Expectations) RepoGates {
 		if !wanted && !h.Managed && h.Error == "" {
 			continue
 		}
-		h.Required = h.Required || (h.Managed && !wanted)
+		// safety: a pre-v0.68 forwarder only execs the global hook, so it stays and does not fail install.
+		h.Required = h.Required || (h.Managed && !wanted && !h.Forwarder)
 		row.Hooks = append(row.Hooks, h)
 		if h.Declared {
 			row.Declared = append(row.Declared, name)

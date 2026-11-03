@@ -22,6 +22,8 @@ unlock.
 
 ### Fixed
 
+- **CLI:** `sparkwing pipeline hooks install` leaves an older forwarder hook alone and names a stale hook
+  A `prepare-commit-msg` or other hook that Sparkwing before v0.68 wrote only to forward to the global `core.hooksPath` hook made install exit 1 with `internal: ... is missing or differs from expected content/format`, even though it runs no pipeline. Install now leaves such a forwarder in place and succeeds, and `status` notes it and marks its record `forwarder: true`. A managed hook that still runs pipelines no pipeline declares fails install with `conflict`, naming the file to delete; a declared hook blocked by a hand-written one names that file too.
 - **web:** Show a CLI token setup command that exists
   After "Create CLI token" the console told users to run `sparkwing cloud connect`, which v0.68 removed. It now shows `sparkwing profiles add --controller URL --profile TEAM --token-stdin`.
 - **web:** Connect a personal machine without repository patterns, with a runner command that starts
