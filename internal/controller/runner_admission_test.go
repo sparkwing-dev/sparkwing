@@ -2,14 +2,23 @@ package controller
 
 import (
 	"bytes"
+	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
+	"errors"
 	"io"
 	"log/slog"
 	"net/http"
 	"strings"
 	"testing"
 	"testing/quick"
+	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
+	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
+	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
 
 func TestRunnerPolicyBuildKinds(t *testing.T) {
@@ -70,5 +79,46 @@ func TestReleasedBuildRunnerInputCannotDisablePolicy(t *testing.T) {
 		return err != nil && strings.Contains(err.Error(), "HTTP 403")
 	}, nil); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestOnlyTheDeploymentLauncherSkipsRunnerVersionPolicy(t *testing.T) {
+	server, _ := engineRuntimeStore(t)
+	var checked []string
+	server.RunnerPolicy = runnerAdmissionFunc(func(_ context.Context, version string) error {
+		checked = append(checked, version)
+		return &apierr.Error{Code: apierr.VersionUnsupported, Message: "Release is not listed in the verified version index"}
+	})
+	insert := func(prefix, team, kind string, pools []string) {
+		root := capability.Capability{Prefix: prefix, Team: team, Subject: capability.Subject{Kind: capability.SubjectKind(kind), ID: prefix}, Audience: capability.Controller, Grants: []capability.Grant{capability.ClaimsLaunch}, Binding: capability.Binding{Kind: capability.BindingNone}, Issuance: capability.Delegate, ReservedPools: pools, Repositories: []string{"gh:1"}, IssuedAt: time.Unix(0, 1).UTC()}
+		envelope, err := json.Marshal(store.CapabilityRecord{Version: 1, Value: root})
+		if err != nil {
+			t.Fatal(err)
+		}
+		poolJSON, err := json.Marshal(pools)
+		if err != nil {
+			t.Fatal(err)
+		}
+		digest := sha256.Sum256([]byte(prefix + "-secret"))
+		var teamColumn any
+		if team != "" {
+			teamColumn = team
+		}
+		engineSQL(t, server.Store, `INSERT INTO capabilities(digest,prefix,team,subject_kind,subject_id,audience,grants,issuance,authority_version,authority_json,bind_kind,reserved_pools,repo_scope,created_at,created_by) VALUES (?,?,?,?,?,'controller',?,'delegate',1,?,'none',?,?,1,?)`,
+			hex.EncodeToString(digest[:]), prefix, teamColumn, kind, prefix, []byte(`["claims.launch"]`), envelope, poolJSON, []byte(`["gh:1"]`), prefix)
+	}
+	insert("launcher", "", "service", []string{})
+	insert("pool-launcher", "a", "machine", []string{"pool"})
+	principal, err := server.CheckRunner(t.Context(), capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: "pool-launcher"}, "v0.68.6-3-gabc1234")
+	var failure *apierr.Error
+	if !capability.Launcher(principal.Capability) || capability.CloudLauncher(principal.Capability) || !errors.As(err, &failure) || failure.Code != apierr.VersionUnsupported {
+		t.Fatalf("team-pool launcher at an unlisted version: launcher=%v cloud=%v: %v", capability.Launcher(principal.Capability), capability.CloudLauncher(principal.Capability), err)
+	}
+	principal, err = server.CheckRunner(t.Context(), capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: "launcher"}, "v0.68.6-3-gabc1234")
+	if err != nil || !capability.CloudLauncher(principal.Capability) {
+		t.Fatalf("deployment launcher at an unlisted version: %v", err)
+	}
+	if len(checked) != 1 || checked[0] != "v0.68.6-3-gabc1234" {
+		t.Fatalf("runner policy saw %v, want only the team-pool launcher", checked)
 	}
 }
