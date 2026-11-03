@@ -121,6 +121,9 @@ func OpenPostgres(t *testing.T) *store.Store {
 // under SQLite.
 func (tg *Target) DSN() string { return tg.dsn }
 
+// Path is the SQLite file the target opens, empty under Postgres.
+func (tg *Target) Path() string { return tg.path }
+
 // Open opens the target and closes the store when the test ends.
 func (tg *Target) Open(t *testing.T, opts ...store.Option) *store.Store {
 	t.Helper()

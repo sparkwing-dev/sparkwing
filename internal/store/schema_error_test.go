@@ -24,9 +24,13 @@ func TestSchemaErrorDocumentation(t *testing.T) {
 	if start < 0 || finish < start {
 		t.Fatal("missing generated schema error markers")
 	}
-	want := fmt.Sprintf("%s\n```text\n%s\n\n%s\n\n%s\n\n%s\n\n%s\n\n%s\n\n%s\n```\n", begin,
-		schemaMismatchError(expectedSchemaVersion-1, "<path>"),
-		schemaMismatchError(expectedSchemaVersion-1, ""),
+	oldest := schemaUpgrades[0]
+	want := fmt.Sprintf("%s\n```text\n%s\n\n%s\n\n%s\n\n%s\n\n%s\n\n%s\n\n%s\n\n%s\n\n%s\n\n%s\n```\n", begin,
+		schemaMismatchError(oldest.from-1, "<path>"),
+		schemaMismatchError(oldest.from-1, ""),
+		schemaMismatchError(oldest.from, ""),
+		schemaUpgradeDigestError(oldest, "<recorded-digest>", "<path>"),
+		schemaUpgradeDigestError(oldest, "", ""),
 		schemaMismatchError(expectedSchemaVersion+1, "<path>"),
 		schemaBaselineMismatchError("<recorded-digest>", "<binary-digest>", "<path>"),
 		schemaBaselineMismatchError("<missing>", "<binary-digest>", ""),
