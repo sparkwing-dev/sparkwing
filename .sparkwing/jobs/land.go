@@ -199,7 +199,12 @@ type landJob struct {
 
 func (j *landJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
 	verify := sparkwing.Step(w, "verify", func(ctx context.Context) error {
-		return verifyLanding(ctx, gitIn(j.RepoDir), j.RepoDir, j.Head.Get(ctx), j.Review.Get(ctx))
+		review, ok := j.review(ctx)
+		if !ok {
+			sparkwing.Info(ctx, "dry run: the review job has no dry-run body, so no review record is checked")
+			review = reviewRecord{Tree: j.Head.Get(ctx).Tree, Result: resultPass}
+		}
+		return verifyLanding(ctx, gitIn(j.RepoDir), j.RepoDir, j.Head.Get(ctx), review)
 	}).SafeWithoutDryRun()
 	push := sparkwing.Step(w, "push", func(ctx context.Context) error {
 		return pushLanding(ctx, gitIn(j.RepoDir), j.RepoDir, j.Head.Get(ctx).Commit)
@@ -217,9 +222,21 @@ func (j *landJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
 	}).SafeWithoutDryRun().Needs(push), nil
 }
 
+// safety: only a dry run, whose review job does not run, may land without a
+// review record; a real run still fails on the absent output.
+func (j *landJob) review(ctx context.Context) (reviewRecord, bool) {
+	if sparkwing.IsDryRun(ctx) {
+		return j.Review.TryGet(ctx)
+	}
+	return j.Review.Get(ctx), true
+}
+
 func (j *landJob) record(ctx context.Context) (landingRecord, error) {
 	head := j.Head.Get(ctx)
-	review := j.Review.Get(ctx)
+	review, ok := j.review(ctx)
+	if !ok {
+		review = reviewRecord{Branch: head.Branch, Result: "not run (dry run)"}
+	}
 	common, err := gitIn(j.RepoDir)(ctx, "rev-parse", "--path-format=absolute", "--git-common-dir")
 	if err != nil {
 		return landingRecord{}, fmt.Errorf("land: locate the git common dir: %w", err)
