@@ -219,6 +219,7 @@ func TestCloudCapacityFailureThroughController(t *testing.T) {
 		{"memory_ceiling", capability.CloudCapacityUnconfigured, "ceiling of 4 CPU and 5.4 GiB memory", "INFO", "", 4, store.CPUClassMemoryBytes(2)},
 		{"ceiling_old_controller", capability.CloudCapacityUnconfigured, capability.CloudCapacityUnconfiguredMessage, "INFO", "old controller", 2, store.CPUClassMemoryBytes(4)},
 		{"ceiling_old_launcher", capability.CloudCapacityUnconfigured, capability.CloudCapacityUnconfiguredMessage, "INFO", "old launcher", 2, store.CPUClassMemoryBytes(4)},
+		{"ceiling_above_request", capability.CloudCapacityUnconfigured, capability.CloudCapacityUnconfiguredMessage, "INFO", "inflated ceiling", 2, store.CPUClassMemoryBytes(4)},
 		{"breaker", capability.CloudCapacityUnavailable, capability.CloudCapacityUnavailableMessage, "ERROR", "", 4, store.CPUClassMemoryBytes(4)},
 	} {
 		t.Run(failure.name, func(t *testing.T) {
@@ -426,7 +427,7 @@ func (c capacityBackoffControl) Claim(context.Context, string, []string) (*Cloud
 }
 
 // hack: an old controller's strict decoder refuses the ceiling field, so the real handler gets an
-// unknown field to produce that same refusal. An old launcher's body simply lacks the field.
+// unknown field to produce that same refusal. An old launcher's body lacks the field.
 func peerSyncBody(t *testing.T, r *http.Request, peer string, refusals *int) {
 	t.Helper()
 	data, err := io.ReadAll(r.Body)
@@ -453,13 +454,16 @@ func peerSyncBody(t *testing.T, r *http.Request, peer string, refusals *int) {
 			*refusals++
 			data = append([]byte(`{"unknown_to_old_controller":true,`), bytes.TrimPrefix(bytes.TrimSpace(data), []byte("{"))...)
 		}
-	case "old launcher":
+	case "old launcher", "inflated ceiling":
 		var request controllerwire.LauncherSyncRequest
 		if err := json.Unmarshal(data, &request); err != nil {
 			t.Fatal(err)
 		}
 		for i := range request.Capacity {
 			request.Capacity[i].Ceiling = nil
+			if peer == "inflated ceiling" {
+				request.Capacity[i].Ceiling = &match.Resources{Cores: 64, MemoryBytes: 256 << 30}
+			}
 		}
 		if data, err = json.Marshal(request); err != nil {
 			t.Fatal(err)

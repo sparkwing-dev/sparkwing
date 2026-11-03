@@ -63,7 +63,8 @@ func (s *Store) failLauncherAwards(ctx context.Context, authority capability.Aut
 				if award.CloudResources != nil {
 					message = fmt.Sprintf("%s (Requested class: sparkwing-%dcpu; Support reference: %s)", base, int64(award.CloudResources.Cores), award.Claim.RunID)
 				}
-				if requested := award.CloudResources; requested != nil && ceiling != nil && reason == capability.CloudCapacityUnconfigured {
+				// safety: a ceiling the committed request fits under would contradict itself, so it keeps the generic guidance.
+				if requested := award.CloudResources; requested != nil && ceiling != nil && reason == capability.CloudCapacityUnconfigured && (requested.Cores > ceiling.Cores || requested.MemoryBytes > ceiling.MemoryBytes) {
 					message = capability.CloudCapacityCeilingMessage(*requested, *ceiling, award.Claim.RunID)
 				}
 			}
