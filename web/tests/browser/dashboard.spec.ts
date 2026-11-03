@@ -995,7 +995,7 @@ test("keeps run panes the same size while switching selected runs", async ({ pag
     const row = document.querySelector(`[data-run-id="${firstRunID}"]`);
     const sidebar = row?.closest("#runs-column");
     const panes = sidebar?.parentElement;
-    if (!sidebar || !panes) throw new Error("run panes missing");
+    if (!row || !sidebar || !panes) throw new Error("run panes missing");
     const samples: { sidebar: number; detail: number; row: number }[] = [];
     const state = window as typeof window & {
       __runPaneSamples?: typeof samples;
