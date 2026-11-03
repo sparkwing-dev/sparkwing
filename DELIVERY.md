@@ -511,7 +511,10 @@ file. Other syntax and workflow checks remain active.
   average, so the suite is about 240 hosted core-minutes. Round-robin's
   slowest shard held 7% more than the mean; cost-balanced shards land within
   a second of each other on the measured table, so balancing alone saves
-  about four hosted minutes of 65. Three parts of four shards hold about
+  about four hosted minutes of 65. On the same four pinned cores, the
+  balanced four-shard assignment ran 29m52s to 30m38s against round-robin's
+  28m11s to 31m49s, and the pipeline's own part 2 of 3 took 11m21s
+  including pipeline and race compilation. Three parts of four shards hold about
   591 local seconds, about 20 hosted minutes, per shard. Projected per lane:
   about 2 minutes of setup, 2.5 minutes of pipeline and race compilation and
   `storetest` in part 1, and 20 minutes of shards, about 25 minutes, under
