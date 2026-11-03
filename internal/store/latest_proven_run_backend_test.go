@@ -80,6 +80,20 @@ func selected(option string) runspec.Options {
 		o.Only = set
 	case "dry_run":
 		o.DryRun = runspec.Setting[bool]{Optional: runspec.Optional[bool]{Set: true, Value: true}}
+	case "debug":
+		o.Debug = runspec.Setting[bool]{Optional: runspec.Optional[bool]{Set: true, Value: true}}
+	case "pause_before", "pause_after", "pause_on_failure":
+		var pause runspec.PauseSelection
+		jobs := runspec.Setting[[]string]{Optional: runspec.Optional[[]string]{Set: true, Value: []string{"gate"}}}
+		switch option {
+		case "pause_before":
+			pause.Before = jobs
+		case "pause_after":
+			pause.After = jobs
+		default:
+			pause.OnFailure = runspec.Setting[bool]{Optional: runspec.Optional[bool]{Set: true, Value: true}}
+		}
+		o.Pause = runspec.Setting[runspec.PauseSelection]{Optional: runspec.Optional[runspec.PauseSelection]{Set: true, Value: pause}}
 	}
 	return o
 }
@@ -125,7 +139,7 @@ func TestProvenRunAtCommitAcceptsOnlyCleanProvenRunsOfTheReadersRepositoryAndCom
 		"asserted reader borrows no proof":     {reader: provenSeed{repo: provenRepo, sha: provenSHA, proof: assertedProof(provenSHA)}, candidate: clean(appProof(1, provenSHA, false))},
 		"reader proven for another repository": {reader: provenSeed{repo: provenOther, sha: provenSHA, proof: appProof(2, provenSHA, true)}, candidate: clean(appProof(1, provenSHA, false))},
 	}
-	for _, option := range []string{"start_at", "stop_at", "only", "dry_run"} {
+	for _, option := range []string{"start_at", "stop_at", "only", "dry_run", "debug", "pause_before", "pause_after", "pause_on_failure"} {
 		narrowed := clean(appProof(1, provenSHA, false))
 		narrowed.options = selected(option)
 		cases["proven run with "+option] = struct {

@@ -65,11 +65,17 @@ func provenRunAtCommitQuery(dialect Dialect, team Team, pipeline string, reader 
 	q := claimSQL{dialect: dialect}
 	request := q.blob("request_json")
 	provenance := q.at(request, "provenance")
-	clean := make([]string, 0, 6)
+	clean := make([]string, 0, 10)
 	for _, option := range []string{"start_at", "stop_at", "only"} {
 		clean = append(clean, "COALESCE("+q.at(request, "request", "options", option, "value")+",'')=''")
 	}
-	clean = append(clean, "COALESCE(CAST("+q.at(request, "request", "options", "dry_run", "value")+" AS TEXT),'false') NOT IN ('true','1')")
+	// safety: a paused or debugged job can be attached to and edited before its output is recorded.
+	for _, flag := range [][]string{{"dry_run", "value"}, {"debug", "value"}, {"pause", "value", "on_failure", "value"}} {
+		clean = append(clean, "COALESCE(CAST("+q.at(request, append([]string{"request", "options"}, flag...)...)+" AS TEXT),'false') NOT IN ('true','1')")
+	}
+	for _, list := range []string{"before", "after"} {
+		clean = append(clean, "NOT EXISTS (SELECT 1 FROM "+q.array(q.at(request, "request", "options", "pause", "value", list, "value"), "pause_"+list)+")")
+	}
 	clean = append(clean, "NOT EXISTS (SELECT 1 FROM "+q.array(q.at(request, "request", "env", "names"), "env_name")+")")
 	// safety: an untrusted host may have run asserted work that left HOME, GOFLAGS or the build cache poisoned.
 	clean = append(clean, "NOT EXISTS (SELECT 1 FROM nodes n WHERE n.team=? AND n.run_id=runs.id AND n.outcome<>'skipped' AND n.trusted_host=0)")
