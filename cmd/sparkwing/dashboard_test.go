@@ -113,6 +113,34 @@ func TestDashboardUsesLocalControllerLifecycle(t *testing.T) {
 	}
 }
 
+func TestDashboardStatusPrintsTheServingURL(t *testing.T) {
+	status := wingd.LocalStatus{Running: true, PID: 123, Version: "v1.2.3", DashboardURL: "http://127.0.0.1:4343"}
+	for _, mode := range []string{"json", "pretty"} {
+		lifecycle := &dashboardLifecycleFake{status: status}
+		var output bytes.Buffer
+		err := runDashboardCommandArgs(t.Context(), []string{"status", "-o", mode}, &output, "linux", func(context.Context) (dashboardServices, error) {
+			return dashboardServices{lifecycle: lifecycle}, nil
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		want := `"url":"http://127.0.0.1:4343"`
+		if mode == "pretty" {
+			want = "dashboard: http://127.0.0.1:4343 (sign in with sparkwing dashboard open)\n"
+		}
+		if !strings.Contains(output.String(), want) {
+			t.Fatalf("%s status lacks the dashboard URL: %s", mode, &output)
+		}
+	}
+	lifecycle := &dashboardLifecycleFake{status: wingd.LocalStatus{Running: true, PID: 123, Version: "v1.2.3"}}
+	var output bytes.Buffer
+	if err := runDashboardCommandArgs(t.Context(), []string{"status", "-o", "json"}, &output, "linux", func(context.Context) (dashboardServices, error) {
+		return dashboardServices{lifecycle: lifecycle}, nil
+	}); err != nil || strings.Contains(output.String(), `"url"`) {
+		t.Fatalf("status without a serving dashboard named a URL: %s %v", &output, err)
+	}
+}
+
 func TestDashboardDefaultStartDoesNotPinController(t *testing.T) {
 	f := &dashboardLifecycleFake{}
 	var output bytes.Buffer

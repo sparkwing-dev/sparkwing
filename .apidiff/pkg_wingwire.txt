@@ -281,6 +281,8 @@ type LocalControlStatus struct {
 	HeldLeases           int
 	DashboardConnections int
 	IdleSince            time.Time
+
+	DashboardURL string
 }
 type LocalDashboard struct {
 	Address  string

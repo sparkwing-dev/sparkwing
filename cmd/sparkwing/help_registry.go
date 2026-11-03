@@ -444,7 +444,7 @@ var commandSynopses = map[string]string{
 	"sparkwing dashboard logs":                      "Read a bounded dashboard log tail",
 	"sparkwing dashboard open":                      "Print a one-time sign-in link for the local dashboard",
 	"sparkwing dashboard start":                     "Start the local dashboard and controller on demand",
-	"sparkwing dashboard status":                    "Report whether the dashboard is running",
+	"sparkwing dashboard status":                    "Report whether the dashboard is running and its URL",
 	"sparkwing dashboard stop":                      "Stop a running dashboard server",
 	"sparkwing dashboard uninstall":                 "Remove the dashboard login service",
 	"sparkwing debug":                               "Interactive debugging for pipeline runs",

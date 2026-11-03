@@ -412,7 +412,7 @@ func (r *localRuntime) statusLocked(session *localRuntimeSession) LocalStatus {
 	if !hasLocalActivity(activity) {
 		activity.IdleSince = d.lastActivity
 	}
-	return LocalStatus{Running: session.ready && !d.shuttingDown && !d.draining, PID: os.Getpid(), Version: d.cfg.Version, Stay: d.stay, Activity: activity}
+	return LocalStatus{Running: session.ready && !d.shuttingDown && !d.draining, PID: os.Getpid(), Version: d.cfg.Version, Stay: d.stay, Activity: activity, DashboardURL: session.logins.servingOrigin()}
 }
 
 func (r *localRuntime) control(session *localRuntimeSession, stay *bool) LocalStatus {

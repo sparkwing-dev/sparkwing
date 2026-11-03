@@ -453,6 +453,11 @@
           "name": "idle_since",
           "kind": "struct",
           "omitempty": false
+        },
+        {
+          "name": "dashboard_url",
+          "kind": "string",
+          "omitempty": true
         }
       ]
     },

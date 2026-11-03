@@ -112,5 +112,6 @@ func (cl *Client) localControl(stay *bool) (wingd.LocalStatus, error) {
 			Runs: reply.Runs, QueuedTriggers: reply.QueuedTriggers,
 			HeldLeases: reply.HeldLeases, DashboardConnections: reply.DashboardConnections, IdleSince: reply.IdleSince,
 		},
+		DashboardURL: reply.DashboardURL,
 	}, nil
 }

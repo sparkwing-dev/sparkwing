@@ -14,7 +14,7 @@ Manage the local dashboard
 - `logs` -- Read a bounded dashboard log tail
 - `open` -- Print a one-time sign-in link for the local dashboard
 - `start` -- Start the local dashboard and controller on demand
-- `status` -- Report whether the dashboard is running
+- `status` -- Report whether the dashboard is running and its URL
 - `stop` -- Stop a running dashboard server
 - `uninstall` -- Remove the dashboard login service
 
@@ -94,7 +94,7 @@ Starts the local controller on demand; --stay pins it until stopped. Runs, queue
 
 ## `sparkwing dashboard status`
 
-Report whether the dashboard is running
+Report whether the dashboard is running and its URL
 
 ### Flags
 
