@@ -323,20 +323,28 @@ images with buildx under QEMU and joins both architectures under one index per t
 The `deploy` pipeline replaces the manual staging and production lanes. `build-images` builds the
 linux binaries with `bin/build-release-target.sh` and publishes them through `publish-images`
 logic, reusing the images when the commit's version tag already exists. `staging-deploy` pins the
-digests in kikd-gitops, renders with the candidate chart and pushes the controller, then the
-launcher, each after Argo reports Synced/Healthy and the deployment has rolled out. It refuses an
+digests in kikd-gitops and renders with the candidate chart. It pushes the controller Deployment
+alone and waits for Argo Synced/Healthy and the rollout, then does the same for the launcher with
+every other chart change. It refuses an
 environment whose store baseline differs from the candidate's, since a store change takes the full
 gate. `staging-gate` runs `example` and the `sparkwing-ci-smoke` reference pipeline on staging
 Cloud. `production` requires a staging-gate record for the same digests, deploys the same way,
 runs `deploy-smoke` in `qa-team` and `qa-team-b` (one NodeClaim each, no controller or launcher
 WARN or ERROR), and reverts its GitOps commits on failure. Each environment's deployed and previous
-digests are its job output. Credentials come from the run's OIDC token through the role proposed in
+digests are its job output. `--gitops-layout` picks kikd-gitops today or the proposed
+Sparkwing-only repository after the move. Credentials come from the run's OIDC token through the role proposed in
 [deploy-pipeline-iam.md](design/rewrite/proposals/deploy-pipeline-iam.md), which is not applied yet.
 
+Only a run the GitHub App started for a push to main can assume that role, so a terminal can only
+preview. `--stop-after`, `--promote-proven` and `--version` reach a real deploy as `args:` on the
+`deploy` entry in `.sparkwing/sparkwing.yaml`. Each deploy job refuses a commit that is no longer
+main's tip, and production refuses a version below the one it runs, so a retried old run cannot
+roll production back.
+
 ```bash
-sparkwing run deploy -- --dry-run              # print every action, take none
-sparkwing run deploy -- --stop-after staging   # deploy and gate staging only
-sparkwing run deploy -- --promote-proven       # promote the last staging-proven digests
+sparkwing run deploy -- --dry-run                         # print every action, take none
+sparkwing run deploy -- --dry-run --stop-after staging    # preview a staging-only deploy
+sparkwing run deploy -- --dry-run --promote-proven        # preview promoting the last staging-proven digests
 ```
 
 ### Check tiers
