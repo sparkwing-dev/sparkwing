@@ -123,7 +123,7 @@ func runStorePostgresShards(ctx context.Context, home, scratch, dsn string, shar
 	return firstErr
 }
 
-// safety: inside the step's thirty minutes, so a hung test reports its stack before the step is killed.
+// safety: five minutes under the step deadline, so a hung test reports its stack unless preparation ran long.
 func storePostgresShardArgs(names []string) []string {
 	return []string{"-test.run", raceTestPattern(names), "-test.count=1", "-test.timeout=25m"}
 }

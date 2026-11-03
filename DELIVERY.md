@@ -1023,15 +1023,25 @@ file. Other syntax and workflow checks remain active.
   database of its own, created on the server before the shards start and
   dropped `WITH (FORCE)` afterwards, because the store's migration advisory
   lock is per database: shards sharing one database queue every fixture's
-  schema apply behind each other. A run killed outright can leave
-  `sparkwing_store_shard_*` databases on a configured server. A failing shard
+  schema apply behind each other. The shard URL drops `dbname` and `database`
+  query options, which pgx reads over the URL path, and a `service` reference
+  is refused. A run killed outright can leave `sparkwing_store_shard_*`
+  databases on a configured server, and so can a `CREATE DATABASE` whose
+  success reply is lost: the server committed it, but the job saw an error and
+  never tracked the name. Both are rare and fail the run; drop the leftovers
+  by hand with `DROP DATABASE <name> WITH (FORCE)` once no run is using them. A failing shard
   stops the others. `internal/store/internal/storetest` and
   `internal/store/teststore` run whole. Measured on 2026-11-02 on a loaded
   16-core host pinned to four cores with `CI=1` against a shared PostgreSQL 18
   server: the former single `go test ./internal/store/...` took 28m12s for
   1,876 top-level tests; selection alone took 14m26s; selection with four shards
   took 7m10s, and a verbose repeat 6m07s whose shards took 3m10s to 6m04s with
-  each of the 508 selected names passing exactly once. Round-robin leaves
+  each of the 508 selected names passing exactly once. After the selection
+  moved to a reviewed file list, 514 names run: the five other tests in
+  `claim_requirements_test.go` and `TestStoreSQLTrustLiterals` share a file
+  with a PostgreSQL test. A verbose four-shard run on the same pinned cores,
+  with the host otherwise idle, took 5m37s, shards 3m15s to 5m34s, each of the
+  514 passing exactly once. Round-robin leaves
   `TestAdmissionDeterministicSimulation` (about two minutes) in the longest
   shard. It reuses `SPARKWING_TEST_PG_URL` when
   that is set and otherwise starts an embedded Postgres on a free port (data
@@ -1042,8 +1052,11 @@ file. Other syntax and workflow checks remain active.
   which embedded-postgres only makes available once the server has stopped.
   A server that will not start is retried once on a fresh port and then
   fails the step. `pre-release` runs it after the race gate, under a
-  thirty-minute timeout. Each shard has a 25-minute Go timeout, inside the
-  step's thirty minutes, so a hung test still reports its stack. The first run may also download the Postgres binaries.
+  thirty-minute timeout. Each shard has a 25-minute Go timeout, so a hung test
+  reports its own stack only when the work before the shards start (embedded
+  server start or download, the helper packages, compiling, listing and
+  creating the databases) finishes within the step's other five minutes; past
+  that, the step's thirty-minute deadline cancels the shards without a stack. The first run may also download the Postgres binaries.
 
 - **Hosted pre-release PostgreSQL:** the canonical pre-release job supplies a
   PostgreSQL 17 service through `SPARKWING_TEST_PG_URL`, so `store-postgres`

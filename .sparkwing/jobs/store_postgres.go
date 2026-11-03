@@ -40,7 +40,11 @@ func (StorePostgres) Help() string {
 		"runner, the shared-host Go step bound elsewhere). Each shard runs against a database of " +
 		"its own, which the run creates on the server and drops with FORCE afterwards, because the " +
 		"store's migration advisory lock is per database. A run killed outright can leave " +
-		"sparkwing_store_shard_* databases on a configured server. A failing shard stops the others. " +
+		"sparkwing_store_shard_* databases on a configured server, as can a CREATE DATABASE whose " +
+		"success reply was lost; drop them with DROP DATABASE <name> WITH (FORCE). The shard URL drops " +
+		"dbname and database query options and refuses a service reference. A failing shard stops the " +
+		"others. Shards time out at 25 minutes, so a hung test prints its stack only when preparation " +
+		"finished inside the step's other five minutes. " +
 		"The storetest and teststore packages run whole. " +
 		"When SPARKWING_TEST_PG_URL is already set the run uses " +
 		"that server; otherwise it starts an embedded Postgres on a free port, with its data " +
