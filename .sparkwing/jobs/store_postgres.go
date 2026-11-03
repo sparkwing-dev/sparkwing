@@ -27,9 +27,15 @@ func (StorePostgres) ShortHelp() string {
 }
 
 func (StorePostgres) Help() string {
-	return "Runs `go test ./internal/store/...` with SPARKWING_TEST_STORE=postgres, so every " +
-		"store test that opens through internal/store/storetest exercises the Postgres dialect " +
-		"instead of a SQLite file. When SPARKWING_TEST_PG_URL is already set the run uses " +
+	return "Runs the internal/store tests that exercise Postgres with SPARKWING_TEST_STORE=postgres, " +
+		"so every store test that opens through internal/store/storetest exercises the Postgres dialect " +
+		"instead of a SQLite file. It compiles one internal/store test binary, lists its top-level " +
+		"tests and runs the external store_test package plus the internal tests whose source reaches " +
+		"SPARKWING_TEST_PG_URL or the pgx driver; the internal SQLite-only tests and fuzz seeds are left " +
+		"to the full Go suite, and TestClaimSecurityRegressions defers to its PostgreSQL copy. The run " +
+		"logs each list's count and SHA-256 and fails when a listed name has no declaration or is not " +
+		"placed exactly once. The storetest and teststore packages run whole. " +
+		"When SPARKWING_TEST_PG_URL is already set the run uses " +
 		"that server; otherwise it starts an embedded Postgres on a free port, with its data " +
 		"directory under a temporary root and its binaries under the persistent tool cache, " +
 		"and stops the server and removes the data directory whether the suite passes, " +
@@ -234,31 +240,6 @@ func lastLines(text string, n int) string {
 		lines = lines[len(lines)-n:]
 	}
 	return strings.Join(lines, "\n")
-}
-
-func runStoreSuiteAgainst(ctx context.Context, dsn string) error {
-	return withGoTestScratch(func(testRoot string) error {
-		return withProductTestHome(func(home string) error {
-			script := productTestScript(storePostgresGoCommand(currentHost()), home)
-			_, err := sparkwing.Bash(ctx, script).
-				Env("TMPDIR", testRoot).
-				Env("SPARKWING_TEST_STORE", "postgres").
-				Env("SPARKWING_TEST_PG_URL", dsn).
-				Run()
-			if err != nil {
-				return fmt.Errorf("store suite against postgres: %w", err)
-			}
-			sparkwing.Info(ctx, "go test ./internal/store/...: passed against postgres")
-			return nil
-		})
-	})
-}
-
-func storePostgresGoCommand(h hostShape) string {
-	if h.cpus == overlappedGoSuiteCPUs && h.singleTenant {
-		return goCommandWithLimits(1, 2, "test", "-timeout 40m -count=1 ./internal/store/...")
-	}
-	return boundedGoCommand(h, "test", "-timeout 40m -count=1 ./internal/store/...")
 }
 
 func init() {

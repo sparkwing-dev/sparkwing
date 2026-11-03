@@ -63,19 +63,6 @@ func TestFreeLocalPortReturnsAnUnprivilegedPort(t *testing.T) {
 	}
 }
 
-func TestStorePostgresCommandBoundsParallelismAndPackageTime(t *testing.T) {
-	t.Parallel()
-	if got, want := storePostgresGoCommand(hostShape{cpus: 4, singleTenant: true}), "GOMAXPROCS=1 go test -p 2 -timeout 40m -count=1 ./internal/store/..."; got != want {
-		t.Fatalf("four-core hosted command = %q, want %q", got, want)
-	}
-	if got, want := storePostgresGoCommand(hostShape{cpus: 4}), "GOMAXPROCS=1 go test -p 1 -timeout 40m -count=1 ./internal/store/..."; got != want {
-		t.Fatalf("four-core shared command = %q, want %q", got, want)
-	}
-	if got, want := storePostgresGoCommand(hostShape{cpus: 14}), "GOMAXPROCS=6 go test -p 6 -timeout 40m -count=1 ./internal/store/..."; got != want {
-		t.Fatalf("store-postgres go command = %q, want %q", got, want)
-	}
-}
-
 func TestStoreFilesKeepOnlyTheStorePackage(t *testing.T) {
 	got := storeFiles([]string{
 		"internal/store/store.go",

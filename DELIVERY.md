@@ -994,10 +994,25 @@ file. Other syntax and workflow checks remain active.
   are atomic, and recording prunes anything older than 14 days. Delete the
   directory to force full verification without `--exhaustive`.
 
-- **Store dialect matrix:** `sparkwing run store-postgres` runs
-  `go test ./internal/store/...` with `SPARKWING_TEST_STORE=postgres`, so every
-  store test that opens through `internal/store/storetest` exercises the Postgres
-  dialect instead of a SQLite file. It reuses `SPARKWING_TEST_PG_URL` when
+- **Store dialect matrix:** `sparkwing run store-postgres` runs the
+  `internal/store` tests that exercise PostgreSQL with
+  `SPARKWING_TEST_STORE=postgres`, so every store test that opens through
+  `internal/store/storetest` exercises the Postgres dialect instead of a SQLite
+  file. It compiles one `internal/store` test binary, lists its top-level
+  Test, Example and Fuzz names, and selects the external `store_test` package
+  plus the internal tests whose source reaches `SPARKWING_TEST_PG_URL` or the
+  `pgx` driver, directly or through a helper or constant in the internal test
+  files. The internal package cannot import `storetest`, so its other tests and
+  fuzz seeds only ever open SQLite; the full Go suite already runs them, and
+  they cost 432 s of a 24m32s hosted-profile run. `TestClaimSecurityRegressions`
+  follows the suite's dialect and so repeats `TestPostgresClaimSecurityRegressions`
+  here; only the PostgreSQL copy runs. The step logs the count and SHA-256 of the
+  listed, selected and skipped names, and fails when a listed name has no
+  declaration, is placed other than exactly once, or the duplicate pair is no
+  longer listed. `TestStorePostgresSelectionCoversTheStoreInventory` in
+  `.sparkwing/jobs` holds every external test and the known internal PostgreSQL
+  tests in the selection. `internal/store/internal/storetest` and
+  `internal/store/teststore` run whole. It reuses `SPARKWING_TEST_PG_URL` when
   that is set and otherwise starts an embedded Postgres on a free port (data
   under a temporary root, binaries cached in `$TMPDIR`), then stops it and
   removes the data directory whether the suite passes, fails, or is
