@@ -10,6 +10,8 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"regexp"
+	"strconv"
 	"strings"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
@@ -278,7 +280,11 @@ func decodeEngineRequest(r *http.Request, body any) error {
 	decoder := json.NewDecoder(bytes.NewReader(data))
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(body); err != nil {
-		return invalidEngineBody(engineDecodeMessage(err))
+		refusal := invalidEngineBody(engineDecodeMessage(err))
+		if field, ok := unknownEngineField(err); ok {
+			refusal.Details = map[string]any{apierr.DetailUnknownField: field}
+		}
+		return refusal
 	}
 	if _, err := decoder.Token(); !errors.Is(err, io.EOF) {
 		return invalidEngineBody("request requires one JSON object")
@@ -298,9 +304,27 @@ func engineDecodeMessage(err error) string {
 	case errors.As(err, &mistyped):
 		return fmt.Sprintf("invalid engine request: value at byte %d has the wrong JSON type for its field", mistyped.Offset)
 	case strings.HasPrefix(err.Error(), "json: unknown field "):
-		return "invalid engine request: body has a field this endpoint does not accept"
+		if field, ok := unknownEngineField(err); ok {
+			return fmt.Sprintf("invalid engine request: this controller does not accept the field %q, which a newer client sends; upgrade the controller, or use a client no newer than the controller", field)
+		}
+		return "invalid engine request: body has a field this endpoint does not accept; upgrade the controller, or use a client no newer than the controller"
 	}
 	return "invalid engine request"
+}
+
+// safety: the field name comes from request bytes, so only a short identifier is echoed back.
+var engineFieldName = regexp.MustCompile(`^[a-z][a-z0-9_]{0,63}$`)
+
+func unknownEngineField(err error) (string, bool) {
+	quoted, found := strings.CutPrefix(err.Error(), "json: unknown field ")
+	if !found {
+		return "", false
+	}
+	field, unquoteErr := strconv.Unquote(quoted)
+	if unquoteErr != nil || !engineFieldName.MatchString(field) {
+		return "", false
+	}
+	return field, true
 }
 
 func engineLookupError(err error) error {
