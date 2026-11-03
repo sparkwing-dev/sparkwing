@@ -103,6 +103,9 @@ type End struct {
 	// Stopped reports a writer that did not finish on its own: it was
 	// killed, cancelled, or never started.
 	Stopped bool
+	// IncompleteReason carries a source log's loss marker when the sink republishes bytes
+	// another writer already failed to preserve, so the copy never reads as complete.
+	IncompleteReason string
 }
 
 type cutSegment struct {
@@ -483,6 +486,8 @@ func (s *Sink) manifestLocked(allUploaded bool, end End) Manifest {
 		m.Status, m.Reason = statusIncomplete, "log persistence failed"
 	case !allUploaded:
 		m.Status, m.Reason = statusIncomplete, reasonUploadFailed
+	case end.IncompleteReason != "":
+		m.Status, m.Reason = statusIncomplete, end.IncompleteReason
 	case s.truncated:
 		m.Status, m.Reason = statusCutOff, reasonByteCap
 	case end.Stopped:

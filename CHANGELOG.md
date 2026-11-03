@@ -36,6 +36,8 @@ unlock.
   A malformed JSON body returned only `invalid engine request`. The 400 response now says whether the body is not valid JSON (with the byte offset), ends early, has a value of the wrong type, or has a field the endpoint does not accept. The message never repeats request bytes.
 - **console:** Report log completeness to signed-in readers
   `GET /api/v1/runs/{run}/jobs/{job}/logs/completeness` answered `unknown` with zero lines for every session or credential reader, including a finished job that printed nothing, because the reauthorizing read wrapper hid the log store. It now returns the stored verdict.
+- **run:** Keep the incomplete marker on logs that `--publish` copies
+  `sparkwing run --publish` copied a job's log into Cloud as complete even when the local log was marked incomplete, such as `writer_lost` or a byte cap, because it read the page's `complete` flag as proof that every byte survived. The published log now carries the same incomplete reason, and `runs logs` against Cloud reports it.
 - **logs:** Keep a failed attempt's logs when its job retries
   A retry advanced the log writer to the next attempt before the failed attempt's final segment and seal reached storage, so the failed attempt's output was refused and its stream never completed. A retry now waits up to five seconds for that seal before it commits.
 - **SDK install:** Refuse a generated overlay that is not a regular file
