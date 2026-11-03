@@ -20,6 +20,7 @@ unlock.
 
 ## [Unreleased]
 
+## [v0.68.6] - 2026-11-03
 ### Fixed
 
 - **web:** Make run cards usable with a keyboard and a screen reader
