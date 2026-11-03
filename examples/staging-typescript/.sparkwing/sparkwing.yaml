@@ -3,3 +3,5 @@ pipelines:
     entrypoint: example-ts
   - name: weather-report
     entrypoint: weather-report
+  - name: memo-probe
+    entrypoint: memo-probe

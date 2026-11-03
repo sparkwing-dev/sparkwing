@@ -1,9 +1,9 @@
 # TypeScript staging integration gate
 
-This twin has passed strict source typechecking and SDK protocol checks for
-matrix outputs, typed outputs, predecessor settlement, generated child replay,
-optional capability skips and OIDC signature verification. It has not completed
-an integration run through the candidate CLI.
+This twin asserts staging integration behavior through the TypeScript SDK.
+Independent jobs exercise outputs, children, caches, artifacts, memo reuse and
+run lifecycle operations. Secrets, OIDC and Docker report skip reasons when
+unavailable.
 
 Ordinary CLI execution is blocked in this checkout. The checked-in TypeScript
 SDK has version `0.0.0`, so the local file dependency selects engine `v0.0.0`.
@@ -20,9 +20,15 @@ named `example-ts`.
 
 The jobs assert matrix fan-out, typed job and predecessor outputs, generated
 children, scoped secrets, OIDC claims and signatures, dependency cache restore,
-memoized output, artifact delivery, Docker output, hooks, approval timeout,
+native memo reuse, artifact delivery, Docker output, hooks, approval timeout,
 optional failures, skip conditions and collected failures. Independent jobs run
-in parallel. Secrets, OIDC and Docker report skip reasons when unavailable.
+in parallel. The cache probe clears stale local files before preparing its seed
+cache. Artifact contents must match the current run ID.
+
+`native-memo-reuse-assert` starts the TypeScript `memo-probe` child twice with a
+token unique to the parent run. The child's memoized job returns its producing
+run ID. Both calls must return the same ID, proving the second child reused the
+first child's result.
 
 Lifecycle jobs drive the Go `example-probe` through the CLI and read the API's
 run history and logs. `--go-checkout` defaults to this repository's root.
@@ -40,6 +46,5 @@ skips with a reason.
 This is a standalone project because Sparkwing chooses one SDK language for
 each `.sparkwing` directory. Its child `weather-report` uses the TypeScript SDK
 too. The SDK supports job memoization. A memoized job can contain a single step,
-but individual steps do not have a separate memo policy. The lifecycle memo
-check verifies reuse through the Go fixture because the SDK has no run history
-client.
+but individual steps do not have a separate memo policy. Lifecycle checks use
+the CLI because the SDK has no run history client.

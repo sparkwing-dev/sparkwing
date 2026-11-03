@@ -155,26 +155,30 @@ function nativeAssertions(plan: Plan): Job<unknown>[] {
   }));
 
   const cache = dir(cacheDirectory, ".sparkwing/package.json");
+  const reset = plan.job("dependency-cache-reset", () => rm(path(cacheDirectory), { recursive: true, force: true }));
   const seed = plan.job("dependency-cache-seed", async () => {
     await mkdir(path(cacheDirectory), { recursive: true });
     await writeFile(path(cacheDirectory, "value"), "typescript-cache-roundtrip");
-  }).cache(cache);
+  }).needs(reset).cache(cache);
   const clear = plan.job("dependency-cache-clear", () => rm(path(cacheDirectory), { recursive: true, force: true })).needs(seed);
   checks.push(plan.job("dependency-cache-assert", async () => {
     assert.equal(await readFile(path(cacheDirectory, "value"), "utf8"), "typescript-cache-roundtrip");
   }).needs(clear).cache(cache));
 
-  const memo = plan.job("memoized-step", () => ({ value: "typescript-memo", step: "body" })).memo(parts("typescript-example", 1));
-  checks.push(plan.job("memoized-output-assert", async (ctx) => {
-    assert.deepEqual(await ctx.output(memo), { value: "typescript-memo", step: "body" });
-  }).needs(memo));
+  checks.push(plan.job("native-memo-reuse-assert", async (ctx) => {
+    const options = { inputs: { token: `${ctx.run.id}-ts-native-memo` }, timeoutMs: 30_000 };
+    const first = await ctx.runPipeline<{ run: string }>("memo-probe", "memo", options);
+    const second = await ctx.runPipeline<{ run: string }>("memo-probe", "memo", options);
+    assert.ok(first.run, "memo seed must return its child run ID");
+    assert.equal(second.run, first.run, "second TypeScript child must reuse the first child's memo output");
+  }).startsChildren("memo-probe").timeout(90_000));
 
-  const artifacts = plan.job("artifacts-produce", async () => {
+  const artifacts = plan.job("artifacts-produce", async (ctx) => {
     await mkdir(path(".sparkwing/cache"), { recursive: true });
-    await writeFile(path(artifactFile), "typescript-artifact-roundtrip");
+    await writeFile(path(artifactFile), ctx.run.id);
   }).artifacts(artifactFile);
-  checks.push(plan.job("artifacts-assert", async () => {
-    assert.equal(await readFile(path(".sparkwing/cache/example-ts-consumed", artifactFile), "utf8"), "typescript-artifact-roundtrip");
+  checks.push(plan.job("artifacts-assert", async (ctx) => {
+    assert.equal(await readFile(path(".sparkwing/cache/example-ts-consumed", artifactFile), "utf8"), ctx.run.id);
   }).consumes(artifacts, { into: ".sparkwing/cache/example-ts-consumed" }));
 
   checks.push(plan.job("docker-assert", async (ctx) => {
@@ -204,27 +208,16 @@ function nativeAssertions(plan: Plan): Job<unknown>[] {
 
 function lifecycleAssertions(plan: Plan): Job<unknown>[] {
   const checks: Job<unknown>[] = [];
-  const memo = plan.job("memo-reuse-api-assert", async (ctx) => {
-    const token = `${ctx.run.id}-ts-memo`;
-    const first = await trigger(ctx, token);
-    assert.equal((await status(ctx, first, true)).status, "success");
-    const second = await trigger(ctx, token);
-    const detail = await status(ctx, second, true);
-    assert.equal(detail.status, "success");
-    assert.ok(detail.jobs.some((job) => job.id === "memo" && job.outcome === "memoized"), "second run must reuse memo output");
-    return { id: second, token };
-  }).timeout(90_000);
   checks.push(plan.job("logs-history-api-assert", async (ctx) => {
-    const previous = await ctx.output(memo);
-    assert.ok(previous);
-    const detail = await status(ctx, previous.id);
-    assert.equal(detail.id, previous.id);
+    const id = await trigger(ctx, `${ctx.run.id}-ts-logs`);
+    const detail = await status(ctx, id, true);
+    assert.equal(detail.id, id);
     assert.equal(detail.status, "success");
-    const logs = await cli(ctx, "runs", "logs", "--run", previous.id, profile(ctx), "-o", "json", "--follow");
+    const logs = await cli(ctx, "runs", "logs", "--run", id, profile(ctx), "-o", "json", "--follow");
     assert.ok(logs.includes("example-probe-output-ok"), "API logs must include the probe source marker");
     const history = await cli(ctx, "runs", "list", "--pipeline", "example-probe", profile(ctx), "-o", "plain", "--limit", "100");
-    assert.ok(history.split(/\s+/).includes(previous.id), "completed probe must appear in run history");
-  }).needs(memo).timeout(90_000));
+    assert.ok(history.split(/\s+/).includes(id), "completed probe must appear in run history");
+  }).timeout(90_000));
   checks.push(plan.job("failed-only-retry-assert", async (ctx) => {
     const original = await trigger(ctx, `${ctx.run.id}-ts-retry`, "--fail-once");
     assert.equal((await status(ctx, original, true)).status, "failed");
@@ -252,7 +245,6 @@ function lifecycleAssertions(plan: Plan): Job<unknown>[] {
     assert.ok(detail.jobs.some((job) => job.id === "long" && job.outcome === "cancelled"), "long job must report cancellation");
     await cleanup.unregister();
   }).timeout(90_000));
-  checks.push(memo);
   return checks;
 }
 
@@ -291,6 +283,15 @@ definePipeline({
         assert.ok(detail.jobs.some((job) => job.id === name && job.outcome === "success"), `reference job ${name} must succeed`);
       }
     }).needs(summary).skipIf((ctx) => ctx.args["smoke-profile"] ? false : skip(ctx, "--smoke-profile was not configured for the separate reference run"));
+  },
+});
+
+definePipeline({
+  name: "memo-probe",
+  short: "Return the producing child run ID so the TypeScript gate can assert memo reuse",
+  args: [{ name: "token", type: "string", required: true }],
+  plan(plan, run) {
+    plan.job("memo", (ctx) => ({ run: ctx.run.id })).memo(parts("typescript-native-memo", run.args["token"] || ""));
   },
 });
 
