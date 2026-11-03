@@ -129,19 +129,19 @@ func TestLandPushIsAFastForwardOfTheGatedCommit(t *testing.T) {
 		t.Fatal(err)
 	}
 	push := g.calls[len(g.calls)-1]
-	if push != "push --no-verify origin c0ffee00:refs/heads/main" {
+	if push != "push origin c0ffee00:refs/heads/main" {
 		t.Fatalf("push = %q", push)
 	}
 	for _, arg := range strings.Fields(push) {
-		if strings.HasPrefix(arg, "+") || strings.HasPrefix(arg, "--force") || arg == "-f" {
-			t.Fatalf("push forces with %q", arg)
+		if strings.HasPrefix(arg, "+") || strings.HasPrefix(arg, "--force") || arg == "-f" || arg == "--no-verify" {
+			t.Fatalf("push forces or skips the pre-push hook with %q", arg)
 		}
 	}
 }
 
 func TestLandPushRejectionSaysRebaseAndRerun(t *testing.T) {
 	g := landableGit()
-	g.fail["push --no-verify origin c0ffee00:refs/heads/main"] = errors.New(" ! [rejected]        c0ffee00 -> main (fetch first)")
+	g.fail["push origin c0ffee00:refs/heads/main"] = errors.New(" ! [rejected]        c0ffee00 -> main (fetch first)")
 	err := pushLanding(t.Context(), g.run, "/repo", "c0ffee00")
 	if err == nil || !strings.Contains(err.Error(), "moved since the gate ran") || !strings.Contains(err.Error(), "rerun sparkwing run land") {
 		t.Fatalf("err = %v", err)

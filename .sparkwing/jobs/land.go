@@ -32,7 +32,7 @@ func (Land) Help() string {
 func (Land) Examples() []sparkwing.Example {
 	return []sparkwing.Example{
 		{Comment: "Preview the landing without pushing", Command: "sparkwing run land --sw-dry-run"},
-		{Comment: "Gate and review without pushing", Command: "sparkwing run land --sw-stop-at verify"},
+		{Comment: "Gate and review without pushing (the risk check still covers the skipped push)", Command: "sparkwing run land --sw-stop-at verify --sw-allow-risk destructive,prod"},
 		{Comment: "Land the branch on main", Command: "sparkwing run land --sw-allow-risk destructive,prod"},
 	}
 }
@@ -295,10 +295,10 @@ func verifyLanding(ctx context.Context, git gitRunner, dir string, head landHead
 }
 
 // safety: no --force and an explicit commit, so the remote accepts the push
-// only as a fast-forward to exactly the gated commit. --no-verify because the
-// gate that just passed is a superset of the pre-push tier the hook would run.
+// only as a fast-forward to exactly the gated commit. The pre-push hook still
+// runs, because the gate does not cover every check that tier makes.
 func landPushArgs(commit string) []string {
-	return []string{"push", "--no-verify", landBaseRemote, commit + ":refs/heads/" + landBaseBranch}
+	return []string{"push", landBaseRemote, commit + ":refs/heads/" + landBaseBranch}
 }
 
 func pushLanding(ctx context.Context, git gitRunner, dir, commit string) error {

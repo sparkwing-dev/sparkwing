@@ -19,9 +19,14 @@ landing goes through Sparkwing itself. From a clean, rebased work branch:
 
 ```bash
 sparkwing run land --sw-dry-run                           # preview; nothing is pushed
-sparkwing run land --sw-stop-at verify                    # gate and review, stop before the push
-sparkwing run land --sw-allow-risk destructive,prod       # land on main
+sparkwing run land --sw-stop-at verify --sw-allow-risk destructive,prod   # gate and review, stop before the push
+sparkwing run land --sw-allow-risk destructive,prod                         # land on main
 ```
+
+The risk check covers the whole plan even when `--sw-stop-at verify` leaves
+the push out, so the stop-at form needs the risks too; the push step still
+skips. Without them the run fails as "pipeline discovery failed (details
+withheld)".
 
 The `preconditions` job refuses a dirty checkout, a detached HEAD, `main`
 itself and a branch that does not contain a freshly fetched `origin/main`, and
@@ -34,7 +39,8 @@ comment changes included; the review job never skips by size or path. Pass
 The `land` job's `verify` step requires the review record's tree to be HEAD's
 tree with result `pass`, HEAD unchanged since the preconditions and
 `origin/main` still its ancestor. Its `push` step runs
-`git push origin <HEAD>:refs/heads/main` without force and carries the
+`git push origin <HEAD>:refs/heads/main` without force, so the pre-push hook
+still runs, and carries the
 `destructive` and `prod` risks, as release's `push-tag` does. A rejected push
 means main moved: rebase onto `origin/main` and rerun. The job's output is the
 landing record (branch, commit, tree, base, gate run, review record path and
