@@ -23,8 +23,11 @@ func TestExampleProbeCleanupRemainsUntilTerminalObservation(t *testing.T) {
 		exit   int
 		want   bool
 	}{
-		{"success", 0, true}, {"failed", 0, true}, {"cancelled", 0, true},
-		{"running", 3, false}, {"", 1, false},
+		{"success", 0, true},
+		{"failed", 0, true},
+		{"cancelled", 0, true},
+		{"running", 3, false},
+		{"", 1, false},
 	} {
 		t.Run(fmt.Sprintf("%s-exit-%d", tc.status, tc.exit), func(t *testing.T) {
 			cli := filepath.Join(t.TempDir(), "status")
