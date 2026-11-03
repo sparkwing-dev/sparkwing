@@ -20,6 +20,7 @@ unlock.
 
 ## [Unreleased]
 
+## [v0.68.6] - 2026-11-03
 ### Fixed
 
 - **Cloud:** Name the pool ceiling when a job asks for more CPU or memory than it allows
