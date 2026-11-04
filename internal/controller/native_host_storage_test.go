@@ -7,13 +7,14 @@ import (
 	"net/http"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controller/client"
 	"github.com/sparkwing-dev/sparkwing/internal/deployment"
+	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/storage/logseg"
 )
 
@@ -52,12 +53,12 @@ func TestNativeHostStorageAndLogsUsePublicRecordReaders(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	output := blob.OutputData{Bytes: storage.Bytes, Records: storage.Records, Authority: storage.Authority, Identity: storage.Authority.Upload.Value, Pipeline: run.Request.Request.Pipeline, Budget: blob.Budget{Deadline: time.Now().Add(time.Minute)}}
+	output := blob.OutputData{Bytes: storage.Bytes, Records: storage.Records, Authority: storage.Authority, Identity: storage.Authority.Upload.Value, Pipeline: run.Request.Request.Pipeline}
 	record, err := output.Put(t.Context(), []byte(`{"value":"stored"}`))
 	if err != nil {
 		t.Fatal(err)
 	}
-	body, err := output.Read(t.Context(), record.Key)
+	body, err := (nodehost.OutputRecords{Blobs: storage.Bytes, Records: storage.Records}).ReadResult(t.Context(), runstate.NodeRow{Status: runstate.StatusDone, OutputRecord: &record.Key}, storage.Authority)
 	if err != nil || string(body) != `{"value":"stored"}` {
 		t.Fatalf("canonical output roundtrip: %s %v", body, err)
 	}

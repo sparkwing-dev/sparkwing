@@ -7,20 +7,17 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"io"
 
 	"github.com/sparkwing-dev/sparkwing/internal/limits"
 )
 
 // OutputData binds job outputs to their exact uploader and authorized records.
-// Budget covers the complete record lookup and read, including EOF verification.
 type OutputData struct {
 	Bytes     Store
 	Records   RecordStore
 	Authority Authority
 	Identity  UploadIdentity
 	Pipeline  string
-	Budget    Budget
 }
 
 // Put commits an output record after obtaining the exact uploader's receipt.
@@ -64,57 +61,4 @@ func (d OutputData) Put(ctx context.Context, body []byte) (Record, error) {
 		return Record{}, ErrIntegrity
 	}
 	return record, nil
-}
-
-// Read resolves an output record under the reader's authority and consumes its
-// verified bytes. Missing records, missing objects and incomplete reads fail.
-func (d OutputData) Read(ctx context.Context, key RecordKey) ([]byte, error) {
-	if err := ctx.Err(); err != nil {
-		return nil, err
-	}
-	if d.Bytes == nil || d.Records == nil {
-		return nil, fmt.Errorf("output requires records and bytes")
-	}
-	if key.Kind != KindOutput {
-		return nil, ErrDigestNotReadable
-	}
-	if d.Budget.Deadline.IsZero() {
-		return nil, ErrBudget
-	}
-	ctx, cancel := context.WithDeadline(ctx, d.Budget.Deadline)
-	defer cancel()
-	if err := ctx.Err(); err != nil {
-		return nil, budgetError(err)
-	}
-	result, err := d.Records.LookupRecord(ctx, RecordLookup{Authority: d.Authority, Key: key, Budget: d.Budget})
-	if err != nil {
-		return nil, budgetError(err)
-	}
-	if !result.Found {
-		return nil, ErrNotFound
-	}
-	if result.Record.Key != key {
-		return nil, ErrDigestNotReadable
-	}
-	body, err := readOutputBytes(ctx, d.Bytes, d.Authority, result.Record.Digest)
-	return body, budgetError(err)
-}
-
-func readOutputBytes(ctx context.Context, store Store, authority Authority, digest Digest) ([]byte, error) {
-	if err := ctx.Err(); err != nil {
-		return nil, err
-	}
-	r, err := store.Get(ctx, GetRequest{Authority: authority, Digest: digest})
-	if err != nil {
-		return nil, err
-	}
-	body, err := io.ReadAll(io.LimitReader(&contextReader{ctx: ctx, reader: r}, limits.NodeOutputBytes+1))
-	err = errors.Join(err, r.Close(), ctx.Err())
-	if err != nil {
-		return nil, err
-	}
-	if !r.Verified() || int64(len(body)) > limits.NodeOutputBytes {
-		return nil, ErrIntegrity
-	}
-	return body, nil
 }
