@@ -100,7 +100,7 @@ func checkStoreScheduleBoundary(t *testing.T) (err error) {
 		return fmt.Errorf("persisted tick: %+v, %v", got, err)
 	}
 	if err := local.DeleteCronSchedule(ctx, before.ID); err != nil {
-		return fmt.Errorf("tenant schedule deletion: %v", err)
+		return fmt.Errorf("tenant schedule deletion: %w", err)
 	}
 	other, err := s.ForTeam(ctx, "other")
 	if err != nil {
