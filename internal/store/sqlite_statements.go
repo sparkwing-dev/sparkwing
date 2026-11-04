@@ -99,11 +99,11 @@ func (s reusedStatement) Close() error {
 func (s reusedStatement) NumInput() int { return s.cached.NumInput() }
 
 func (s reusedStatement) Exec(args []driver.Value) (driver.Result, error) {
-	return s.cached.Exec(args) //nolint:staticcheck // database/sql calls ExecContext; this satisfies driver.Stmt
+	return s.cached.Exec(args)
 }
 
 func (s reusedStatement) Query(args []driver.Value) (driver.Rows, error) {
-	return s.cached.Query(args) //nolint:staticcheck // database/sql calls QueryContext; this satisfies driver.Stmt
+	return s.cached.Query(args)
 }
 
 func (s reusedStatement) ExecContext(ctx context.Context, args []driver.NamedValue) (driver.Result, error) {
