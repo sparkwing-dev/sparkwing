@@ -22,7 +22,6 @@ func roundTripMessages() []Message {
 				{Name: "deploy-lock", Cost: 1, Capacity: 1, Policy: PolicyQueue, QueueTimeoutMS: 60_000},
 				{Name: "db", Cost: 4, Capacity: 8, Policy: PolicyCancelOthers},
 			},
-			ParentLeaseToken: "lease-abc123",
 		},
 		&Grant{
 			RunID:      "deploy-20260710-120000",

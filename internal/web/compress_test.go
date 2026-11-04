@@ -304,3 +304,15 @@ func TestCompressibleTypeCoversTheBundlesMediaTypes(t *testing.T) {
 		}
 	}
 }
+
+func TestBuildAssetsAreCachedImmutablyAndPagesAreNot(t *testing.T) {
+	for _, header := range []http.Header{{}, {"Accept-Encoding": {"gzip"}}} {
+		rec := requestBundle(t, compressionBundle(), "/"+compressibleChunkPath, header)
+		if got := rec.Header().Get("Cache-Control"); got != "public, max-age=31536000, immutable" {
+			t.Errorf("build asset Cache-Control %q (Accept-Encoding %q), want public immutable", got, header.Get("Accept-Encoding"))
+		}
+	}
+	if got := requestBundle(t, compressionBundle(), "/", nil).Header().Get("Cache-Control"); got != "no-store" {
+		t.Errorf("page Cache-Control %q, want no-store because pages carry a per-request nonce", got)
+	}
+}

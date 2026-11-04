@@ -94,9 +94,6 @@ func explainEvent(r journal.Record) string {
 	}
 	switch r.Kind {
 	case "request":
-		if r.Data["child_attach"] == true {
-			return "Requested child attachment"
-		}
 		resources, _ := r.Data["resources"].(map[string]any)
 		cores, _ := resources["cores"].(float64)
 		memory, _ := resources["memory_bytes"].(float64)
@@ -135,8 +132,6 @@ func explainEvent(r journal.Record) string {
 		return "Connection handshake completed with " + peer
 	case "connection_closed":
 		return "Connection closed for " + peer + " (" + field("role") + ")"
-	case "child_attach_request":
-		return "Requested child attachment to " + field("requested_parent")
 	case "reattach_accepted":
 		if r.Incarnation >= 1_000_000_000_000_000 {
 			return "Reattached after daemon replacement"
@@ -146,8 +141,6 @@ func explainEvent(r journal.Record) string {
 		return "Requested lease reattachment"
 	case "reattach_refused":
 		return "Reattachment refused: " + field("reason")
-	case "child_attach":
-		return "Attached child to run " + field("resolved_parent")
 	case "cancel":
 		requester := "an unknown peer"
 		if known, _ := r.Data["pid_known"].(bool); known {

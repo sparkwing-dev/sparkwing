@@ -28,8 +28,7 @@ import (
 )
 
 type localRunOptions struct {
-	standaloneReason, stateDB, environmentFile string
-	standalone                                 bool
+	standalone bool
 }
 
 type localRunRuntime struct {
@@ -41,7 +40,7 @@ type localRunRuntime struct {
 	remoteCache      blob.RemoteCache
 	openCache        func(context.Context, string, *runspec.Request) (blob.RemoteCache, func() error, error)
 	publish          func(context.Context, string, string) error
-	follow           func(context.Context, string, string, io.Writer) error
+	follow           func(context.Context, string, string, io.Writer, <-chan struct{}) error
 }
 
 type localRunDependencies struct {
@@ -186,11 +185,13 @@ func runLocalCommand(ctx context.Context, pipeline string, flags runFlags, args 
 	if err := emitLocalRunEvent(out, format, "run_start", response.RunID, pipeline, ""); err != nil {
 		return fmt.Errorf("run %s is admitted but its start record could not be written: %w", response.RunID, err)
 	}
+	hosted := make(chan struct{})
 	host := func(ctx context.Context) (nodehost.RunCompletion, error) {
+		defer close(hosted)
 		return hostLocalRun(ctx, runtime, response.RunID, "", deps.version)
 	}
 	completion, err := observeHereRun(ctx, response.RunID, hereObservation{host: host, follow: func(ctx context.Context) error {
-		return runtime.follow(ctx, response.RunID, request.Request.Options.Output.Value, out)
+		return runtime.follow(ctx, response.RunID, request.Request.Options.Output.Value, out, hosted)
 	}, cancel: func(ctx context.Context) error {
 		_, writeErr := fmt.Fprintf(os.Stderr, "cancelling %s; interrupt again to stop hosting without waiting\n", response.RunID)
 		_, cancelErr := runtime.controller.Cancel(ctx, response.RunID, controllerwire.CancelRequest{Reason: "interrupted by local host"})

@@ -5,9 +5,6 @@
 Pipelines as Go code. The public CLI + SDK for sparkwing.
 
 > **Status:** pre-release. Tester binaries are available; APIs may change.
-> This source revision is in a rewrite. Native host, controller and managed-service
-> integration remains incomplete. Released binaries and this worktree have different
-> implementation coverage. See [local dashboard integration](docs/native-mode.md).
 
 ## Two paths
 

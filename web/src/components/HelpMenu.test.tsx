@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { renderToStaticMarkup } from "react-dom/server";
-import HelpMenu, { HelpPanel } from "./HelpMenu";
+import HelpMenu, { HelpPanel, viewportShift } from "./HelpMenu";
 import { limitHelp, supportContact } from "@/lib/support";
 
 describe("HelpMenu", () => {
@@ -33,6 +33,21 @@ describe("HelpMenu", () => {
     assert.match(html, /Contact your Sparkwing administrator/);
     assert.match(html, /href="https:\/\/sparkwing.dev\/docs\/"/);
     assert.doesNotMatch(html, /mailto:/);
+  });
+});
+
+describe("viewportShift", () => {
+  it("leaves a panel that already fits", () => {
+    assert.equal(viewportShift(20, 340, 360), 0);
+  });
+
+  it("pulls a panel back from either edge into the gutter", () => {
+    assert.equal(viewportShift(-74, 246, 360), 82);
+    assert.equal(viewportShift(100, 420, 360), -68);
+  });
+
+  it("keeps the left edge of a panel wider than the viewport", () => {
+    assert.equal(viewportShift(-10, 400, 300), 18);
   });
 });
 

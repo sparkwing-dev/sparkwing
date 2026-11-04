@@ -110,9 +110,9 @@ func TestAppAdmissionRevokedInstallationInClaim(t *testing.T) {
 			t.Run(fmt.Sprintf("automatic=%t/%s", automatic, revoke), func(t *testing.T) {
 				s, tenant, in := appAdmissionFixture(t, automatic, "fixture")
 				defer s.Close()
-				ctx, now, op := t.Context(), s.clock(), s.AsOperator()
+				ctx, op := t.Context(), s.AsOperator()
 				body := []byte(`{"installation":{"id":7}}`)
-				if err := op.EnqueueGitHubDelivery(ctx, "queued", "push", body, now); err != nil {
+				if err := op.EnqueueGitHubDelivery(ctx, "queued", "push", body); err != nil {
 					t.Fatal(err)
 				}
 				claim, err := op.ClaimGitHubDelivery(ctx)
@@ -281,10 +281,10 @@ func TestAppAdmissionFencesDeliveryAndOriginalTeam(t *testing.T) {
 		t.Run(state, func(t *testing.T) {
 			s, tenant, in := appAdmissionFixture(t, true, "fixture")
 			defer s.Close()
-			ctx, now := t.Context(), s.clock()
+			ctx := t.Context()
 			body := []byte(`{"installation":{"id":7}}`)
 			op := s.AsOperator()
-			if err := op.EnqueueGitHubDelivery(ctx, "queued", "push", body, now); err != nil {
+			if err := op.EnqueueGitHubDelivery(ctx, "queued", "push", body); err != nil {
 				t.Fatal(err)
 			}
 			first, err := op.ClaimGitHubDelivery(ctx)

@@ -618,8 +618,8 @@ managed services and timers before restart. Schedules survive without reinstall.
    runner file credentials use runner.credentials_dir. Bulk actions use
    --all-repos/--all-jobs/--all-pipelines/--all-entries so --all retains its single
    hidden-entry meaning; docs uses --full. Resume may omit the pipeline positional
-   and always uses the sealed spec. Explicit --sw-output beats -o, then env, then
-   terminal detection. These fill gaps without retaining aliases; ratify before
+   and always uses the sealed spec. Explicit -o beats env, then terminal
+   detection. These fill gaps without retaining aliases; ratify before
    implementing parsers.
 5. **Scratch accounting.** The fixed 20Gi budget is interpreted as aggregate Job
    scratch including DinD storage, not 20Gi per container. Kubernetes enforcement

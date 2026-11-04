@@ -28,7 +28,7 @@ func TestConsoleDefaultCompositionCommitsEveryDeclaredWrite(t *testing.T) {
 		{"DELETE", "/api/v1/operator/teams/b", "", 202, `SELECT COUNT(*) FROM team_deletions WHERE slug='b' AND requested_by='operator'`},
 		{"DELETE", "/api/v1/operator/accounts/victim@example.test", "", 200, `SELECT COUNT(*) FROM accounts WHERE id='operator' AND NOT EXISTS(SELECT 1 FROM accounts WHERE id='victim')`},
 		{"POST", "/api/v1/operator/waitlist/approve", `{"account_ids":["waiting"]}`, 200, `SELECT COUNT(*) FROM accounts WHERE id='waiting' AND waitlisted_at=0`},
-		{"PUT", "/api/v1/operator/credits/settings", `{"warm_cpu_class_cores":1}`, 200, ""},
+		{"PUT", "/api/v1/operator/credits/settings", `{"storage_free_allowance_bytes":1}`, 200, ""},
 		{"DELETE", "/api/v1/operator/github-app/installations/17", "", 204, `SELECT COUNT(*) FROM teams WHERE name='b' AND NOT EXISTS(SELECT 1 FROM github_app_installations WHERE installation_id=17)`},
 	}
 	for _, tc := range cases {
@@ -71,7 +71,7 @@ func TestConsoleDefaultCompositionCommitsEveryDeclaredWrite(t *testing.T) {
 				}
 			} else {
 				settings, err := st.AsOperator().CreditSettings(t.Context())
-				if err != nil || settings.WarmCPUClassCores != 1 {
+				if err != nil || settings.StorageFreeAllowanceBytes != 1 {
 					t.Fatalf("settings: %+v %v", settings, err)
 				}
 			}

@@ -15,7 +15,7 @@ launcher when testing isolated tool state.
 ## Landing a change
 
 Agents and the lead land every change with `sparkwing run land`, so each
-landing goes through Sparkwing itself. From a clean, rebased work branch:
+landing goes through Sparkwing itself. From a clean work branch:
 
 ```bash
 sparkwing run land --sw-dry-run                           # preview; nothing is pushed
@@ -29,22 +29,45 @@ skips. Without them the run fails as "pipeline discovery failed (details
 withheld)".
 
 The `preconditions` job refuses a dirty checkout, a detached HEAD, `main`
-itself and a branch that does not contain a freshly fetched `origin/main`, and
-names the command that fixes each. The gate (the same jobs as
+itself and a branch whose merge with a freshly fetched `origin/main`
+conflicts, and names the command that fixes each; a branch behind main that
+merges cleanly goes ahead. The gate (the same jobs as
 `sparkwing run gate`) and the review (the same job as `sparkwing run review`,
 under `.review.yaml`) then run in parallel. Every change is reviewed, docs and
-comment changes included; the review job never skips by size or path. Pass
+comment changes included; the review job never skips by size or path. The
+gate selects its checks from the change scope (decision 96): vet, build, lint,
+the critical tests and the TypeScript SDK suite run only when the change
+reaches Go source, a non-Markdown file inside a Go package, module files,
+`.golangci.yml`, the store schema or, for the SDK suite, `sdk/typescript/`.
+A docs, UI or process change runs its own tests (affected packages, frontend
+suites when `web/` changed, the docs mirror and source-policy sweeps) plus the
+review. `sparkwing run gate -- --full` keeps the broad verification. Pass
 `-- --brief '...'` or `-- --skip 'F2=reason'` as for the review pipeline.
 
 The `land` job's `verify` step requires the review record's tree to be HEAD's
-tree with result `pass`, HEAD unchanged since the preconditions and
-`origin/main` still its ancestor. Its `push` step runs
-`git push origin <HEAD>:refs/heads/main` without force, so the pre-push hook
-still runs, and carries the
+tree with result `pass` and HEAD unchanged since the preconditions. Its `push`
+step fetches `origin/main` and runs
+`git push --no-verify origin <HEAD>:refs/heads/main` without force when the
+pushed commit's tree is the tree the gate and review judged (the gate runs
+every check the pre-push hook makes, the qatrust vet included); a merged tree
+pushes through the hook. It carries the
 `destructive` and `prod` risks, as release's `push-tag` does. A rejected push
-means main moved: rebase onto `origin/main` and rerun. The job's output is the
-landing record (branch, commit, tree, base, gate run, review record path and
-result). The gate's `test` step summary lists the slowest packages and tests.
+means main moved; the step then merges it, as below. The job's output is the
+landing record (branch, the commit and tree pushed, the gated tree, base,
+merges, gate run, review record path and result). The gate's `test` step summary lists the slowest packages and tests.
+
+When `origin/main` is not an ancestor of HEAD at push time, the `push` step
+merges it into the branch in the checkout (`git merge --no-ff`, the default
+git identity and signing; never a rebase), runs `go build` in every module
+and the affected-test selection over the files that differ between the gated
+tree and the merged tree, then pushes the merge. The review is not run again:
+it judged the branch's own diff, and the re-check covers what the merge
+brought in. It
+merges at most three times per land. A conflict aborts the merge, leaves the
+branch as the gate judged it and names `git merge origin/main` to run by hand.
+A re-check failure leaves the merge on the branch. The `record-tree` pass
+names only the gated tree; the merged tree records no gate pass, and the
+landing record names both.
 
 ## Checks
 
@@ -103,15 +126,23 @@ job and lint deadline allow 40 minutes total: the ten-minute check allowance
 plus 30 minutes for contention. The tier measures that combined wall time,
 including waiting. Other lint callers keep their five-minute deadline.
 
-The gate's `lint` step allows ten minutes for linting itself (decision 96; both modules measure four to five minutes under load), and waiting for
-the box-wide golangci-lint lock does not count against it (lead decision,
-2026-11-03). On Unix the step takes golangci-lint's own lock,
-`$TMPDIR/golangci-lint.lock`, before it lints, then runs golangci-lint with
-`--allow-parallel-runners` while holding it, so serial runners elsewhere still
-queue behind it. The wait has its own 20-minute bound; when it expires the step
-fails naming the golangci-lint processes running at the time and saying
-nothing was learned about the tree. Elsewhere the gate keeps golangci-lint's
-own serial wait inside the five minutes.
+golangci-lint keeps one cache per worktree under that worktree's git
+directory (`<git-dir>/sparkwing-cache/golangci-lint`), outside the tree the
+pipeline binary's source key walks and removed with the worktree. A cache
+shared between trees replays findings under the other tree's paths, so it is
+never shared.
+
+The gate's `lint` step allows ten minutes (decision 96; both modules measure
+four to five minutes under load). It runs golangci-lint with
+`--allow-serial-runners`, so a neighbor's lint queues it on golangci-lint's own
+lock, `$TMPDIR/golangci-lint.lock`, and that wait counts against the ten
+minutes (Korey, 2026-11-04, replacing the gate's own lock manager).
+
+When the lint step fails with "no result after" its deadline, look for the
+neighboring run with `ps -eo pid,etime,args | grep '[g]olangci-lint'`. Rerun
+the gate once it finishes, or stop it if it is stuck. Nothing was learned about
+the tree. An exit 4 saying "Timeout exceeded" is golangci-lint's own
+`run.timeout` instead: raise it in `.golangci.yml`.
 
 Version freshness excludes `testdata` fixture modules, matching the committed-module checks.
 
@@ -395,10 +426,75 @@ preview. `--stop-after`, `--promote-proven` and `--version` reach a real deploy 
 main's tip, and production refuses a version below the one it runs, so a retried old run cannot
 roll production back.
 
+The deploy writes no cluster-scoped object to GitOps: the AppProject `sparkwing` permits no
+cluster-scoped kinds, so a GitOps commit cannot grant cluster-wide access. The render drops the
+chart's namespaces, ClusterRole, ClusterRoleBinding, admission policies and similar, logs each one
+it left out, and fails on any other object without a namespace. kikd-infra keeps them in
+`k8s/sparkwing-cluster/staging.yaml` and `production.yaml`, applied by the Argo application
+`sparkwing-cluster` in project `kikd`. An image-only release leaves them alone: the Cloud job
+admission policies read the runner and Docker images from the ConfigMap `sparkwing-cloud-admission`
+in the job namespace, which the render keeps, so the policies are the same across releases and
+rollbacks. A release whose chart changes a rule, the RBAC or the namespaces updates kikd-infra
+before its deploy, staging first, then production:
+
+1. Render the chart at the new tag with `helm template <release> charts/sparkwing-full --namespace <ns> -f <env dir>/helm-values.yaml`.
+2. Copy its cluster-scoped documents into the environment's file in kikd-infra `k8s/sparkwing-cluster/`.
+3. Land that on kikd-infra main and wait for `sparkwing-cluster` to report Synced.
+
+Add permissions before the deploy and remove them after the old version is gone. That application
+prunes, so deleting an object from the file deletes it from the cluster; a Namespace leaves the
+file only on purpose, because deleting it deletes everything in it.
+
 ```bash
 sparkwing run deploy -- --dry-run                         # print every action, take none
 sparkwing run deploy -- --dry-run --stop-after staging    # preview a staging-only deploy
 sparkwing run deploy -- --dry-run --promote-proven        # preview promoting the last staging-proven digests
+```
+
+#### Deploy toolchain
+
+A real deploy runs `aws`, `kubectl`, `helm`, `git`, `ssh`, `go`, `bash`, `node` and `pnpm` only from
+`/opt/sparkwing-deploy/bin`, and gives every child process `PATH=/opt/sparkwing-deploy/bin:/usr/bin:/bin`.
+The directory must be owned by root and not writable by the runner's user, so another job on the same
+runner cannot plant a binary that a later deploy runs with production credentials. When the directory is
+missing, every deploy job refuses before it fetches a credential; there is no fallback to the runner's
+`PATH`. A `--dry-run` preview holds no credentials and still resolves tools from `PATH`. Install the tools
+as root, at the versions the deploy machines already use:
+
+```bash
+sudo install -d -o root -g root -m 0755 /opt/sparkwing-deploy /opt/sparkwing-deploy/bin
+cd "$(mktemp -d)"
+# Go, matching go.mod's toolchain line
+curl -fsSLO https://go.dev/dl/go1.26.10.linux-amd64.tar.gz
+curl -fsSL "https://go.dev/dl/?mode=json&include=all" | grep -A3 '"go1.26.10.linux-amd64.tar.gz"' | grep sha256  # compare
+sha256sum go1.26.10.linux-amd64.tar.gz
+sudo tar -C /opt/sparkwing-deploy -xzf go1.26.10.linux-amd64.tar.gz
+sudo ln -sf /opt/sparkwing-deploy/go/bin/go /opt/sparkwing-deploy/bin/go
+# kubectl
+curl -fsSLO https://dl.k8s.io/release/v1.37.0/bin/linux/amd64/kubectl
+echo "$(curl -fsSL https://dl.k8s.io/release/v1.37.0/bin/linux/amd64/kubectl.sha256)  kubectl" | sha256sum -c
+sudo install -o root -g root -m 0755 kubectl /opt/sparkwing-deploy/bin/kubectl
+# helm
+curl -fsSLO https://get.helm.sh/helm-v4.2.4-linux-amd64.tar.gz
+curl -fsSL https://get.helm.sh/helm-v4.2.4-linux-amd64.tar.gz.sha256sum | sha256sum -c
+tar -xzf helm-v4.2.4-linux-amd64.tar.gz
+sudo install -o root -g root -m 0755 linux-amd64/helm /opt/sparkwing-deploy/bin/helm
+# AWS CLI v2
+curl -fsSL https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip -o awscliv2.zip
+unzip -q awscliv2.zip
+sudo ./aws/install -i /opt/sparkwing-deploy/aws-cli -b /opt/sparkwing-deploy/bin
+# Node and pnpm for bin/build-web.sh
+curl -fsSLO https://nodejs.org/dist/v22.23.1/node-v22.23.1-linux-x64.tar.xz
+curl -fsSL https://nodejs.org/dist/v22.23.1/SHASUMS256.txt | grep ' node-v22.23.1-linux-x64.tar.xz$' | sha256sum -c
+sudo tar -C /opt/sparkwing-deploy -xJf node-v22.23.1-linux-x64.tar.xz
+sudo mv /opt/sparkwing-deploy/node-v22.23.1-linux-x64 /opt/sparkwing-deploy/node
+sudo env PATH=/opt/sparkwing-deploy/node/bin:/usr/bin:/bin npm install -g --prefix /opt/sparkwing-deploy/node pnpm@12.5.1
+sudo ln -sf /opt/sparkwing-deploy/node/bin/node /opt/sparkwing-deploy/bin/node
+sudo ln -sf /opt/sparkwing-deploy/node/bin/pnpm /opt/sparkwing-deploy/bin/pnpm
+# git, ssh and bash from the root-owned system packages
+for t in git ssh bash; do sudo ln -sf "/usr/bin/$t" "/opt/sparkwing-deploy/bin/$t"; done
+sudo chown -R root:root /opt/sparkwing-deploy && sudo chmod -R go-w /opt/sparkwing-deploy
+ls -l /opt/sparkwing-deploy/bin && /opt/sparkwing-deploy/bin/go version
 ```
 
 ### Check tiers
@@ -488,7 +584,14 @@ file. Other syntax and workflow checks remain active.
   Go or PostgreSQL suite. `sparkwing run gate` runs both jobs locally. Without
   `--full` its test step runs the changed packages (importers still build and
   vet; their tests run after deploy) and the tests marked `//sparkwing:critical` on the line above them; a change to a
-  `go.mod`, `go.sum` or `internal/store/schema.sql` runs its whole module. With
+  `go.mod`, `go.sum` or `internal/store/schema.sql` runs its whole module. A
+  file outside every package runs the packages whose tests read it, from the
+  `nonPackageReaders` table in `.sparkwing/jobs/affected_tests.go` (`.github/`
+  and `bin/` run `.sparkwing/jobs`, `docs/` runs `internal/doccheck` and
+  `cmd/sparkwing`, and so on); `CHANGELOG.md` is left to the docs-mirror and
+  changelog steps. Its lint step lints only the packages holding changed Go
+  files (every package when `go.mod`, `go.sum` or `.golangci.yml` changed),
+  since `--new-from-rev` drops findings outside the change anyway. With
   `--full`, race tests cover every package but `internal/store` and the
   PostgreSQL suite always runs, so a full pass does not depend on the
   producer's `origin/main`. The broad job's 70-minute deadline already allows
@@ -501,8 +604,7 @@ file. Other syntax and workflow checks remain active.
   a full-mode pass at the same commit from a run proven for this repository
   (from GitHub, or fetched by the controller) that selected every job without
   dry run, sealed no environment variables and ran every job on a trusted host
-  (a fresh host, or a runner registered with `--trust verified` or
-  `--trust verified-default`), and that pass names the same tree, fingerprint and engine.
+  (a fresh host, or a runner scoped to repositories with `--repos`), and that pass names the same tree, fingerprint and engine.
   `record-tree` reads both jobs' in-run outputs and records nothing when
   either skipped, and the lookup passes over a run whose `record-tree` did not
   succeed, so a run that skipped everything neither records a pass of its own
@@ -699,6 +801,21 @@ file. Other syntax and workflow checks remain active.
   do not establish a ceiling for every cold input. A change to a Go file also
   invalidates the cached `.sparkwing/` pipeline binary, so the first hook run
   after one pays about 2.5 s to recompile it outside the timed job span.
+- **Gate and land speed fixes, measured 2026-11-04** on this 16-core host at
+  load 13 to 35 (raw data in the sweep's `speed-data/ci/fixes/`).
+  Hosted CI: a per-commit Go cache key saved from main pushes took the CLI
+  build from 112 s cold (99 s median on the stale cache) to 6 s plus a 15 s
+  restore on gate-core, 74 s to 15 s plus 26 s on race-touched, and vet from
+  297 s cold (161 s median) to 6 s; each save is about 930 MiB. Locally, with
+  the lint cache in the tree `sparkwing pipeline list` took 61 to 75 s and
+  with it in the git directory 2.5 s. A cold whole-module lint of the root
+  measured 551 s; a change outside the root module now skips it, while a deep
+  package (`internal/bincache`) still took 465 s cold because golangci-lint
+  loads every dependency. A stable test home made `internal/paths` and
+  `internal/bincache` replay from the cache on a rerun; `cmd/sparkwing`
+  (400 to 630 s) still reruns. Land's push skipped a pre-push run that had cost
+  37 to 632 s. The old `gofmt -l .` failed 2 of 150 runs beside a looping
+  `npm ci`; the pruned walk failed none.
 - **Which tier decides a merge:** the hooks judge what they can in seconds and
   nothing more, so main may go red. Follow the [release failure policy](#release-failure-policy).
   Main is where the broad checks run:
@@ -709,8 +826,17 @@ file. Other syntax and workflow checks remain active.
 - **What a test step inherits:** every step that starts a product suite
   (`test`, `race-touched`, `store-postgres`, and the release contract
   preflight) clears the bindings `internal/runners/local/env.go` injects into a
-  node child and pins `SPARKWING_HOME` to a fresh directory of its own, which
-  holds no `dev.env` for a CLI verb to find a dashboard through. A gate runs inside a sparkwing node, which hands its children the
+  node child and pins `SPARKWING_HOME` to an empty directory of its own, which
+  holds no `dev.env` for a CLI verb to find a dashboard through. The gate's
+  `test` step, the short suite and the `test` pipeline key that directory by
+  checkout and step under `$TMPDIR` and empty it before and after each run, so
+  `go test` can replay a passing package that reads the home; a fresh path per
+  run defeated its cache. Every product test step also pins
+  `SPARKWING_TEST_REPO_STATE` (HEAD's tree plus a hash of uncommitted changes
+  and of untracked files' names and contents), which the pipeline module's
+  `TestCheckoutStateKeysTheTestCache` reads: go test never hashes files above
+  the module and records a variable only while a test runs, so without it a
+  change to `.github/` or `bin/` would replay that module's cached pass. A gate runs inside a sparkwing node, which hands its children the
   machine's admission socket, the dispatcher's service URLs and the run's own
   credentials, so a suite that read one would reach a live service and fail
   only under the gate. The node consumes its WorkStep window before the body

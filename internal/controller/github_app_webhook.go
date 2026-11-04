@@ -98,7 +98,7 @@ func (s *Server) handleGitHubAppWebhook(w http.ResponseWriter, r *http.Request) 
 		writeError(w, http.StatusBadRequest, fmt.Errorf("decode delivery: %w", err))
 		return
 	}
-	if err := s.operator.EnqueueGitHubDelivery(r.Context(), delivery, event, body, time.Now()); err != nil {
+	if err := s.operator.EnqueueGitHubDelivery(r.Context(), delivery, event, body); err != nil {
 		if errors.Is(err, store.ErrGitHubDeliveryConflict) {
 			writeError(w, http.StatusConflict, err)
 		} else {

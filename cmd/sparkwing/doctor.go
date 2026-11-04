@@ -18,7 +18,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/controller/client"
 	"github.com/sparkwing-dev/sparkwing/internal/githooks"
 	"github.com/sparkwing-dev/sparkwing/internal/gotoolchain"
-	"github.com/sparkwing-dev/sparkwing/internal/installsite"
 	"github.com/sparkwing-dev/sparkwing/internal/localhostwire"
 	"github.com/sparkwing-dev/sparkwing/internal/opsview"
 	"github.com/sparkwing-dev/sparkwing/internal/wingd"
@@ -39,14 +38,13 @@ type doctorFinding struct {
 }
 
 type doctorReport struct {
-	DryRun            bool                           `json:"dry_run"`
-	ControllerChecked bool                           `json:"controller_checked"`
-	ControllerError   string                         `json:"controller_error,omitempty"`
-	Findings          []doctorFinding                `json:"findings"`
-	GoToolchain       *opsview.DoctorGoToolchain     `json:"go_toolchain,omitempty"`
-	ShadowedHooks     *githooks.Shadow               `json:"shadowed_hooks,omitempty"`
-	InstallConflict   *opsview.DoctorInstallConflict `json:"install_conflict,omitempty"`
-	VersionPolicy     *versionPolicyStatus           `json:"version_policy,omitempty"`
+	DryRun            bool                       `json:"dry_run"`
+	ControllerChecked bool                       `json:"controller_checked"`
+	ControllerError   string                     `json:"controller_error,omitempty"`
+	Findings          []doctorFinding            `json:"findings"`
+	GoToolchain       *opsview.DoctorGoToolchain `json:"go_toolchain,omitempty"`
+	ShadowedHooks     *githooks.Shadow           `json:"shadowed_hooks,omitempty"`
+	VersionPolicy     *versionPolicyStatus       `json:"version_policy,omitempty"`
 }
 
 type doctorDependencies struct {
@@ -135,10 +133,6 @@ func inspectDoctorMachine(ctx context.Context) doctorReport {
 	git := func(dir string, args ...string) (string, error) { return runGitContext(ctx, dir, args...) }
 	policy := cachedVersionPolicy(ctx)
 	report := doctorReport{GoToolchain: diagnoseGoToolchain(ctx), ShadowedHooks: shadowedHooks(git), VersionPolicy: &policy}
-	if self, err := installsite.Self(); err == nil {
-		home, _ := os.UserHomeDir()
-		report.InstallConflict = opsview.InstallConflict(self, installsite.SearchDirs(os.Getenv, home))
-	}
 	return report
 }
 
@@ -193,12 +187,6 @@ func renderDoctorMachine(text *bytes.Buffer, report doctorReport) {
 	}
 	if shadow := report.ShadowedHooks; shadow != nil {
 		fmt.Fprintf(text, "shadowed_hooks\t%s\n%s\n", shadow.Summary(), shadow.Remedy())
-	}
-	if conflict := report.InstallConflict; conflict != nil {
-		fmt.Fprintf(text, "executable\t%s\n", conflict.Self)
-		for _, copy := range conflict.Competing {
-			fmt.Fprintf(text, "competing_install\t%s\t%s\t%s\t%s\n", copy.Path, installsite.RetireRemedy(copy.Path).Text(), copy.Modified, copy.Resolved)
-		}
 	}
 }
 

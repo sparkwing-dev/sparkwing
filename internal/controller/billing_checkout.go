@@ -27,7 +27,8 @@ type billingCheckout struct {
 	http  *http.Client
 
 	now func() time.Time
-	// safety: set once the misconfiguration alert is logged, so it fires once, and cleared by the next answered call.
+	// safety: only the billing worker's goroutine touches misconfigured: set once the alert is logged, so it fires
+	// once, and cleared by the worker's next successful call.
 	misconfigured bool
 	// safety: only the billing worker's goroutine touches retries, keyed by idempotency key; a restart forgets
 	// them and starts the backoff again.
@@ -62,7 +63,7 @@ var errCheckoutMisconfigured = errors.New("the checkout service and this control
 var checkoutMisconfigurations = map[int]string{
 	http.StatusUnauthorized:       "the checkout service refused the billing-token credential; it must equal the service's BILLING_CHECKOUT_TOKEN",
 	http.StatusNotFound:           "the checkout service has no such route; --billing-url must name the checkout service",
-	http.StatusMisdirectedRequest: "the checkout service serves another deployment; its BILLING_DEPLOYMENT must be this controller's deployment",
+	http.StatusMisdirectedRequest: "the checkout service serves another deployment; set its BILLING_DEPLOYMENT to this alert's deployment value, which the controller also logs at startup",
 }
 
 var errCheckoutRefused = errors.New("the checkout service refused the request")
@@ -153,7 +154,6 @@ func (c *billingCheckout) post(ctx context.Context, path string, in, out any) er
 		}
 		return err
 	}
-	c.misconfigured = false
 	if err := json.Unmarshal(payload, out); err != nil {
 		return fmt.Errorf("%w: decode: %w", errCheckoutRefused, err)
 	}
@@ -199,17 +199,19 @@ func (c *billingCheckout) settled(key string) { delete(c.retries, key) }
 const checkoutMisconfiguredAlert = "checkout_misconfigured"
 
 func (s *Server) alertCheckoutMisconfigured(err error) {
-	if !errors.Is(err, errCheckoutMisconfigured) || s.checkout.misconfigured {
-		return
+	switch {
+	case err == nil:
+		s.checkout.misconfigured = false
+	case errors.Is(err, errCheckoutMisconfigured) && !s.checkout.misconfigured:
+		s.checkout.misconfigured = true
+		s.logger.Error("billing alert: refills and refunds are retried until the pairing is fixed",
+			"alert", checkoutMisconfiguredAlert, "deployment", s.paymentDeployment, "err", err)
 	}
-	s.checkout.misconfigured = true
-	s.logger.Error("billing alert: refills and refunds are retried until the pairing is fixed",
-		"alert", checkoutMisconfiguredAlert, "deployment", s.paymentDeployment, "err", err)
 }
 
 // refillRequest and refillResponse are the checkout service's POST /internal/refill contract, which creates and
-// confirms one off-session payment under the refill id. testdata/checkout_contract.json pins it with the other routes;
-// the checkout service tests its handler against a byte-identical copy, so the two copies change together.
+// confirms one off-session payment under the refill id. testdata/checkout_contract.json pins it with the other routes.
+// sparkwing-platform keeps its own copy and nothing compares the two, so a change here updates both.
 type refillRequest struct {
 	Team        string `json:"team"`
 	Deployment  string `json:"deployment"`

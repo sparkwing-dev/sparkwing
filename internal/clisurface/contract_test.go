@@ -78,7 +78,7 @@ func TestLaunchCriticalSurfaces(t *testing.T) {
 		commands[c.Path] = c
 	}
 	required := map[string][]string{
-		"sparkwing run":               {"publish", "sw-cache-from", "sw-output", "sw-pause-before", "sw-no-memo", "sw-allow-risk"},
+		"sparkwing run":               {"publish", "sw-cache-from", "sw-pause-before", "sw-no-memo", "sw-allow-risk"},
 		"sparkwing pipeline trigger":  {"resume", "runner", "profile"},
 		"sparkwing dashboard start":   {"stay"},
 		"sparkwing dashboard install": {}, "sparkwing dashboard uninstall": {}, "sparkwing __tick": {},
@@ -128,44 +128,16 @@ func TestRegistryReturnsOwnedData(t *testing.T) {
 	}
 }
 
-func TestRunOutputMatchesGlobalModes(t *testing.T) {
-	var global, run []string
-	for _, f := range GlobalFlags() {
-		if f.Name == "output" {
-			global = f.Values
-		}
-	}
-	for _, c := range Registry() {
-		if c.Path == "sparkwing run" {
-			for _, f := range c.Flags {
-				if f.Name == "sw-output" {
-					run = f.Values
-				}
-			}
-		}
-	}
-	if !slices.Equal(global, run) || !slices.Equal(global, []string{"pretty", "json", "plain"}) {
-		t.Fatalf("output modes differ: global=%v run=%v", global, run)
-	}
-}
-
-func TestForegroundWorkersAndHostReason(t *testing.T) {
+func TestForegroundWorkersContract(t *testing.T) {
 	var workers Flag
-	var reason bool
 	for _, c := range Registry() {
 		for _, f := range c.Flags {
 			if c.Path == "sparkwing run" && f.Name == "sw-workers" {
 				workers = f
 			}
-			if c.Path == "sparkwing __host-trigger" && f.Name == "standalone-reason" {
-				reason = f.Argument == "REASON"
-			}
 		}
 	}
 	if workers.Argument != "N" || !workers.HasMinimum || workers.Minimum != 1 || !slices.Contains(workers.Conflicts, "sw-detached") {
 		t.Fatalf("invalid workers contract: %+v", workers)
-	}
-	if !reason {
-		t.Fatal("host-trigger lacks standalone reason")
 	}
 }

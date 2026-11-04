@@ -9,10 +9,9 @@ func TestGitHubDeliveryLeaseUsesDatabaseClock(t *testing.T) {
 	s := authorityStore(t)
 	databaseNow := time.Date(2026, 10, 23, 12, 0, 0, 0, time.UTC)
 	s.SetTestClock(t, func() time.Time { return databaseNow })
-	controllerNow := databaseNow.Add(-3 * time.Minute)
 	ctx := t.Context()
 	op := s.AsOperator()
-	if err := op.EnqueueGitHubDelivery(ctx, "behind-clock", "push", []byte(`{}`), controllerNow); err != nil {
+	if err := op.EnqueueGitHubDelivery(ctx, "behind-clock", "push", []byte(`{}`)); err != nil {
 		t.Fatal(err)
 	}
 	delivery, err := op.ClaimGitHubDelivery(ctx)

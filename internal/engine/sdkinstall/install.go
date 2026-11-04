@@ -120,6 +120,8 @@ func installGoSDK(ctx context.Context, dir string, request engine.SDKInstallRequ
 		name += ".exe"
 	}
 	path := filepath.Join(request.ExecutableDirectory, name)
+	selection := startSelection(ctx, dir, environment)
+	defer selection.wait()
 	var lease *bincache.Lease
 	uncached := request.NoBincache
 	if !uncached {
@@ -139,12 +141,7 @@ func installGoSDK(ctx context.Context, dir string, request engine.SDKInstallRequ
 	if err := installDiagnostic(diagnostics, masker, buildDiagnostics.Bytes(), err); err != nil {
 		return nil, "", err
 	}
-	args := []string{"list"}
-	if overlay := bincache.EffectiveOverlay(dir, slices.Collect(environment.Values())); overlay != "" {
-		args = append(args, "-modfile="+overlay)
-	}
-	args = append(args, "-m", "-json", engine.GoModule)
-	body, err := installTool(ctx, dir, environment, "go", args...)
+	body, err := selection.result(ctx, dir, environment)
 	if err != nil {
 		return nil, "", installDiagnostic(diagnostics, masker, body, err)
 	}
@@ -173,6 +170,55 @@ func installGoSDK(ctx context.Context, dir string, request engine.SDKInstallRequ
 		return nil, "", err
 	}
 	return []string{binary.Path()}, lease.CachedPath(), nil
+}
+
+// perf: the SDK pin check's `go list -m` (150-300 ms) runs while the pipeline key is computed; the answer is
+// used only if the module files and overlay it read are unchanged afterwards, otherwise it runs again.
+type pendingSelection struct {
+	args   []string
+	inputs string
+	done   chan struct{}
+	body   []byte
+	err    error
+}
+
+func startSelection(ctx context.Context, dir string, environment procenv.Env) *pendingSelection {
+	args, inputs := selectionInputs(dir, environment)
+	p := &pendingSelection{args: args, inputs: inputs, done: make(chan struct{})}
+	go func() {
+		defer close(p.done)
+		p.body, p.err = installTool(ctx, dir, environment, "go", p.args...)
+	}()
+	return p
+}
+
+func (p *pendingSelection) wait() { <-p.done }
+
+func (p *pendingSelection) result(ctx context.Context, dir string, environment procenv.Env) ([]byte, error) {
+	p.wait()
+	args, inputs := selectionInputs(dir, environment)
+	if slices.Equal(args, p.args) && inputs == p.inputs {
+		return p.body, p.err
+	}
+	return installTool(ctx, dir, environment, "go", args...)
+}
+
+func selectionInputs(dir string, environment procenv.Env) ([]string, string) {
+	args := []string{"list"}
+	files := []string{filepath.Join(dir, "go.mod"), filepath.Join(dir, "go.sum")}
+	if overlay := bincache.EffectiveOverlay(dir, slices.Collect(environment.Values())); overlay != "" {
+		args = append(args, "-modfile="+overlay)
+		files = append(files, overlay, strings.TrimSuffix(overlay, ".mod")+".sum")
+	}
+	var inputs strings.Builder
+	for _, file := range files {
+		if info, err := os.Stat(file); err == nil {
+			fmt.Fprintf(&inputs, "%s:%d:%d;", file, info.Size(), info.ModTime().UnixNano())
+		} else {
+			fmt.Fprintf(&inputs, "%s:absent;", file)
+		}
+	}
+	return append(args, "-m", "-json", engine.GoModule), inputs.String()
 }
 
 func installTypeScriptSDK(ctx context.Context, dir string, pin engineid.Pin, environment procenv.Env, diagnostics io.Writer, masker *secrets.Masker) ([]string, error) {

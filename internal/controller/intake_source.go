@@ -120,7 +120,7 @@ func (s *Server) keyedRepositoryDisplay(ctx context.Context, team string, reques
 // the same source; one that names commits must match it exactly. Its name is
 // the owner/name the selector's App lookup reported. It is zero when the
 // submitter supplies the code (an upload, a working tree, a local checkout or
-// a run on the submitter's own machine), names a commit no branch
+// --runner here), names a commit no branch
 // head selects (GitHub may serve it from a fork) or a pull request ref, or
 // when selection disagrees with the request.
 func (s *Server) selectFetchedSource(ctx context.Context, request *runspec.Request, selectSource func(context.Context, runspec.Request) (runspec.Git, runspec.Source, error)) (store.FetchedRepository, error) {

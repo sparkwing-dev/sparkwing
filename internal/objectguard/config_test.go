@@ -22,8 +22,8 @@ func TestParseBudgetOverridesOneWindowAndKeepsTheRest(t *testing.T) {
 	if !cfg.Enabled || cfg.Reset != tripResetDay {
 		t.Fatalf("breaker = %v reset %q, want the defaults", cfg.Enabled, cfg.Reset)
 	}
-	if empty, err := ParseBudget(""); err != nil || empty.Limits[ClassList].PerMinute != defaultListPerMinute {
-		t.Fatalf("empty spec = %+v, %v; want the defaults", empty, err)
+	if got := cfg.Limits[classGet].PerMinute; got != 0 {
+		t.Fatalf("get per-minute is %d, want no default shared minute stop", got)
 	}
 }
 
@@ -36,15 +36,32 @@ func TestParseBudgetRejectsAMalformedEntry(t *testing.T) {
 	}
 }
 
-func TestDailyEmergencyBrakeIsOptIn(t *testing.T) {
+func TestSharedBrakesAreOptIn(t *testing.T) {
 	cfg, err := ParseBudget("")
 	if err != nil {
 		t.Fatal(err)
 	}
 	for _, class := range classes() {
-		if got := cfg.Limits[class].PerDay; got != 0 {
-			t.Errorf("%s default daily limit = %d, want unlimited", class, got)
+		if got := cfg.Limits[class]; got != (Limit{}) {
+			t.Errorf("%s default limit = %+v, want unlimited", class, got)
 		}
+	}
+	unlimited := New(cfg)
+	for range 100_000 {
+		if err := unlimited.Allow(classPut); err != nil {
+			t.Fatalf("default budget refused a put: %v", err)
+		}
+	}
+	cfg, err = ParseBudget("put:minute=1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	minute := New(cfg)
+	if err := minute.Allow(classPut); err != nil {
+		t.Fatal(err)
+	}
+	if err := minute.Allow(classPut); err == nil {
+		t.Fatal("opt-in minute brake did not trip")
 	}
 	cfg, err = ParseBudget("put:day=1")
 	if err != nil {

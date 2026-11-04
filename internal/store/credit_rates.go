@@ -16,9 +16,6 @@ const (
 
 	// maxCreditRateTableEntries bounds the table an operator may store, which keeps the settings row small enough to read on every claim.
 	maxCreditRateTableEntries = 32
-
-	// DefaultWarmCPUClassCores is the class a warm runner pool serves when no operator set one.
-	DefaultWarmCPUClassCores = 2
 )
 
 // CPUClassMemoryBytes returns the catalog allocation for a billed class in whole mebibytes.

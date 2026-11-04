@@ -73,7 +73,7 @@ func checkBlobDepcache(t testing.TB, ctx context.Context, root string, objects b
 		return err
 	}
 	data := artifacts.Data{Bytes: blob.NewSignedStore(blob.SignedStoreOptions{Signer: binding.Signer, HTTPClient: transfers}), Records: binding.Records, Authority: authority, Identity: identity, Pipeline: "fixture", Budget: blob.Budget{Deadline: time.Now().Add(time.Minute)}}
-	output := blob.OutputData{Bytes: data.Bytes, Records: data.Records, Authority: authority, Identity: identity, Pipeline: "fixture", Budget: data.Budget}
+	output := blob.OutputData{Bytes: data.Bytes, Records: data.Records, Authority: authority, Identity: identity, Pipeline: "fixture"}
 	attempt := identity.Attempt.Value
 	accepted := runspec.Spec{Hash: "spec", PlanHash: "plan", Request: runspec.SealedRequest{Request: runspec.Request{Team: identity.Team, Pipeline: "fixture", Git: runspec.Git{Repository: runspec.Repository{Key: authority.Repo}}}}}
 	raw, err := json.Marshal(accepted)
@@ -87,6 +87,7 @@ func checkBlobDepcache(t testing.TB, ctx context.Context, root string, objects b
 	}
 	var result blob.Record
 	if body == nil {
+		body = []byte("null")
 		result, err = output.Put(ctx, body)
 	} else {
 		body, err = json.Marshal(seed)
@@ -171,9 +172,8 @@ func checkBlobDepcache(t testing.TB, ctx context.Context, root string, objects b
 	data.Bytes = blob.NewSignedStore(blob.SignedStoreOptions{Signer: binding.Signer, HTTPClient: transfers})
 	data.Records = binding.Records
 	input.Storage.Bytes, input.Storage.Records = data.Bytes, data.Records
-	output.Bytes = data.Bytes
-	output.Records = data.Records
-	if got, err := output.Read(ctx, result.Key); err != nil || !bytes.Equal(got, body) {
+	reader := nodehost.OutputRecords{Blobs: data.Bytes, Records: data.Records}
+	if got, err := reader.ReadResult(ctx, runstate.NodeRow{Status: runstate.StatusDone, OutputRecord: &result.Key}, authority); err != nil || !bytes.Equal(got, body) {
 		return fmt.Errorf("reopened physical output differs: %v", err)
 	}
 	artifactData.Bytes, artifactData.Records = data.Bytes, data.Records

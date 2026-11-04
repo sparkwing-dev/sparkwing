@@ -1,0 +1,11 @@
+[
+  {"patterns": ["secret.env"], "path": "secret.env", "ignored": true},
+  {"patterns": ["secret.env"], "path": "app/secret.env", "ignored": true},
+  {"patterns": ["*.md", "!README.md"], "path": "README.md", "ignored": false},
+  {"patterns": ["*.md", "!README.md"], "path": "NOTES.md", "ignored": true},
+  {"patterns": ["*.md", "!README.md", "README.md"], "path": "README.md", "ignored": true},
+  {"patterns": ["ignored"], "path": "ignored/payload.txt", "ignored": true},
+  {"patterns": ["ignored", "!ignored/keep.txt"], "path": "ignored/keep.txt", "ignored": false},
+  {"patterns": ["ignored", "!ignored/keep.txt"], "path": "ignored/other.txt", "ignored": true},
+  {"patterns": ["!a.txt"], "path": "a.txt", "ignored": false}
+]

@@ -475,20 +475,29 @@ type fileState struct {
 	modTime int64
 }
 
-func snapshotHashable(dir string, keep fileFilter, hashAllFiles bool) (map[string]fileState, error) {
-	files, err := walkHashable(dir, keep)
-	if err != nil {
-		return nil, err
-	}
-	var ignored map[string]bool
+func hashable(dir string, keep fileFilter, hashAllFiles bool) ([]string, int, error) {
+	var prune, ignored map[string]bool
 	if !hashAllFiles {
-		ignored = ignoredUnder(dir, files)
+		prune, ignored = ignoredUnder(dir)
 	}
-	out := make(map[string]fileState, len(files))
+	files, pruned, err := walkHashable(dir, keep, prune)
+	if err != nil || len(ignored) == 0 {
+		return files, pruned, err
+	}
+	kept := files[:0]
 	for _, path := range files {
 		if ignored[path] {
-			continue
+			pruned++
+		} else {
+			kept = append(kept, path)
 		}
+	}
+	return kept, pruned, nil
+}
+
+func snapshotHashable(files []string) (map[string]fileState, error) {
+	out := make(map[string]fileState, len(files))
+	for _, path := range files {
 		info, err := os.Lstat(path)
 		if errors.Is(err, fs.ErrNotExist) {
 			return nil, ErrUnstableInputs
@@ -502,16 +511,21 @@ func snapshotHashable(dir string, keep fileFilter, hashAllFiles bool) (map[strin
 }
 
 func hashDirIntoCounted(h io.Writer, dir string, keep fileFilter, hashAllFiles bool) (hashStats, error) {
-	before, err := snapshotHashable(dir, keep, hashAllFiles)
+	before, err := listedSnapshot(dir, keep, hashAllFiles)
+	if err != nil {
+		return hashStats{}, err
+	}
+	files, ignored, err := hashable(dir, keep, hashAllFiles)
 	if err != nil {
 		return hashStats{}, err
 	}
 	var digest bytes.Buffer
-	stats, err := hashFilesInto(&digest, dir, keep, hashAllFiles)
+	stats, err := hashFilesInto(&digest, dir, files)
+	stats.Ignored = ignored
 	if err != nil {
 		return stats, err
 	}
-	after, err := snapshotHashable(dir, keep, hashAllFiles)
+	after, err := listedSnapshot(dir, keep, hashAllFiles)
 	if err != nil {
 		return stats, err
 	}
@@ -522,44 +536,91 @@ func hashDirIntoCounted(h io.Writer, dir string, keep fileFilter, hashAllFiles b
 	return stats, err
 }
 
-func hashFilesInto(h io.Writer, dir string, keep fileFilter, hashAllFiles bool) (hashStats, error) {
-	var stats hashStats
-	files, err := walkHashable(dir, keep)
+func listedSnapshot(dir string, keep fileFilter, hashAllFiles bool) (map[string]fileState, error) {
+	files, _, err := hashable(dir, keep, hashAllFiles)
 	if err != nil {
-		return stats, err
+		return nil, err
 	}
-	var ignored map[string]bool
-	if !hashAllFiles {
-		ignored = ignoredUnder(dir, files)
+	return snapshotHashable(files)
+}
+
+// perf: hashing a few thousand files one at a time took most of a replace target's key; files hash in
+// parallel and their lines are written in walk order.
+func hashFilesInto(h io.Writer, dir string, files []string) (hashStats, error) {
+	var stats hashStats
+	memo := openDigestMemo(dir)
+	digests := make([][]byte, len(files))
+	sizes := make([]int64, len(files))
+	errs := make([]error, len(files))
+	var next sync.Mutex
+	index := 0
+	var wg sync.WaitGroup
+	for range min(runtime.GOMAXPROCS(0), 8, len(files)) {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for {
+				next.Lock()
+				i := index
+				index++
+				next.Unlock()
+				if i >= len(files) {
+					return
+				}
+				rel, err := filepath.Rel(dir, files[i])
+				if err != nil {
+					errs[i] = err
+					continue
+				}
+				digests[i], sizes[i], errs[i] = hashFile(files[i], rel, memo)
+			}
+		}()
 	}
-	for _, path := range files {
-		if ignored[path] {
-			stats.Ignored++
-			continue
+	wg.Wait()
+	for i, path := range files {
+		if errs[i] != nil {
+			return stats, errs[i]
 		}
 		rel, _ := filepath.Rel(dir, path)
-		f, err := os.Open(path)
-		if errors.Is(err, fs.ErrNotExist) {
-			return stats, ErrUnstableInputs
-		}
-		if err != nil {
-			return stats, err
-		}
-		fileH := sha256.New()
-		n, copyErr := io.Copy(fileH, f)
-		f.Close()
-		if copyErr != nil {
-			return stats, copyErr
-		}
 		stats.Files++
-		stats.Bytes += n
-		fmt.Fprintf(h, "%s\x00%x\n", rel, fileH.Sum(nil))
+		stats.Bytes += sizes[i]
+		fmt.Fprintf(h, "%s\x00%x\n", rel, digests[i])
 	}
+	memo.save()
 	return stats, nil
 }
 
-func walkHashable(dir string, keep fileFilter) ([]string, error) {
+func hashFile(path, rel string, memo *digestMemo) ([]byte, int64, error) {
+	f, err := os.Open(path)
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil, 0, ErrUnstableInputs
+	}
+	if err != nil {
+		return nil, 0, err
+	}
+	defer f.Close()
+	info, err := f.Stat()
+	if err != nil {
+		return nil, 0, err
+	}
+	sum, identity, found := memo.lookup(rel, info)
+	if found {
+		return sum, info.Size(), nil
+	}
+	fileH := sha256.New()
+	n, err := io.Copy(fileH, f)
+	if err != nil {
+		return nil, 0, err
+	}
+	sum = fileH.Sum(nil)
+	memo.record(rel, identity, sum)
+	return sum, n, nil
+}
+
+// perf: wholly ignored directories in prune are never walked; each counts as one excluded path.
+func walkHashable(dir string, keep fileFilter, prune map[string]bool) ([]string, int, error) {
 	var files []string
+	pruned := 0
 	err := filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			if path != dir && errors.Is(err, fs.ErrNotExist) {
@@ -570,6 +631,10 @@ func walkHashable(dir string, keep fileFilter) ([]string, error) {
 		if d.IsDir() {
 			switch d.Name() {
 			case "node_modules", ".git", ".claude-scratch":
+				return filepath.SkipDir
+			}
+			if prune[path] {
+				pruned++
 				return filepath.SkipDir
 			}
 			return nil
@@ -585,7 +650,7 @@ func walkHashable(dir string, keep fileFilter) ([]string, error) {
 		files = append(files, path)
 		return nil
 	})
-	return files, err
+	return files, pruned, err
 }
 
 type replaceTarget struct {

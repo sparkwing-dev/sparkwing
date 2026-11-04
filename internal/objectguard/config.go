@@ -14,8 +14,8 @@ const budgetFlag = "--object-store-budget"
 // ParseBudget layers spec onto defaultConfig. spec is a comma-separated list
 // of class:window=count entries, such as "put:minute=600,get:day=0", where
 // class is put, get, list or delete, window is minute or day, and 0 leaves
-// that window unlimited. A class and window spec does not name keeps its
-// default. It reports the first malformed entry rather than keeping a
+// that window unlimited. A class and window spec does not name stays
+// unlimited. It reports the first malformed entry rather than keeping a
 // default, because a typo in a budget is a budget that does not apply.
 func ParseBudget(spec string) (Config, error) {
 	cfg := defaultConfig()

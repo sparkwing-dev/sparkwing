@@ -57,7 +57,7 @@ func githubDeliveryInstallation(body []byte) int64 {
 
 // EnqueueGitHubDelivery durably binds the delivery ID and the SHA-256 digest
 // of body to event. Replaying an identical delivery or body is idempotent.
-func (o *Operator) EnqueueGitHubDelivery(ctx context.Context, deliveryID, event string, body []byte, now time.Time) error {
+func (o *Operator) EnqueueGitHubDelivery(ctx context.Context, deliveryID, event string, body []byte) error {
 	if deliveryID == "" || event == "" || body == nil {
 		return ErrInvalidInput
 	}
@@ -78,7 +78,7 @@ func (o *Operator) EnqueueGitHubDelivery(ctx context.Context, deliveryID, event 
 	_, err = tx.execContext(ctx, `INSERT INTO github_app_deliveries
 		(digest,delivery_id,received_at,event,body,state,queue_team,installation_id,connection_generation)
 		VALUES (?,?,?,?,?,'pending',?,?,?)
-		ON CONFLICT DO NOTHING`, digest, deliveryID, now.UnixNano(), event, body, queueTeam, installation, generation)
+		ON CONFLICT DO NOTHING`, digest, deliveryID, tx.now(ctx).UnixNano(), event, body, queueTeam, installation, generation)
 	if err != nil {
 		return err
 	}

@@ -145,8 +145,8 @@ func grantPool(ctx context.Context, s *store.Store, team store.Team, run, pool, 
 
 // A verified run on a host that outlives its jobs writes only that host's
 // cache scope, which fresh pods, Cloud and remote readers never restore, while
-// still reading the verified default branch. A launcher's fresh pods and a
-// high-trust team write the shared verified scope.
+// still reading the verified default branch. A team's own launcher pod is not
+// fresh. A trusted host of a high-trust team writes the shared verified scope.
 func TestVerifiedWorkOnAPersistentHostWritesItsHostScope(t *testing.T) {
 	for _, tc := range []struct {
 		name                string
@@ -154,8 +154,9 @@ func TestVerifiedWorkOnAPersistentHostWritesItsHostScope(t *testing.T) {
 		shared              bool
 	}{
 		{name: "plain machine runner"},
-		{name: "launcher pod", launcher: true, shared: true},
+		{name: "launcher pod", launcher: true},
 		{name: "high-trust team", highTrust: true, shared: true},
+		{name: "launcher pod of a high-trust team", launcher: true, highTrust: true, shared: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			ctx := t.Context()

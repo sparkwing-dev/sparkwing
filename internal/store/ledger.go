@@ -174,26 +174,6 @@ func (l *ledgerTx) insertCharge(ctx context.Context, c CreditCharge) error {
 	return nil
 }
 
-// safety: usage not paid ahead, such as retained storage, draws at most the team's positive balance, so it never
-// puts a team into debt; what the balance cannot pay is forgiven, not carried.
-func (l *ledgerTx) debitFunded(ctx context.Context, c CreditCharge) (*CreditCharge, error) {
-	if c.Team != l.team {
-		return nil, fmt.Errorf("ledger: charge for %q under %q's lock", c.Team, l.team)
-	}
-	if cause, err := teamHoldTx(ctx, l.storeTx, l.team); err != nil || cause != "" {
-		return nil, err
-	}
-	balance, err := l.balance(ctx)
-	if err != nil {
-		return nil, err
-	}
-	c.AmountMicro = min(c.AmountMicro, max(balance, 0))
-	if c.AmountMicro <= 0 {
-		return nil, nil
-	}
-	return &c, l.insertCharge(ctx, c)
-}
-
 func (l *ledgerTx) balance(ctx context.Context) (int64, error) {
 	return l.view().balance(ctx)
 }

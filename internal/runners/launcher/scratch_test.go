@@ -1,6 +1,7 @@
 package launcher
 
 import (
+	"maps"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -45,5 +46,24 @@ func TestJobScratchIsStickyBeforeRunnerStarts(t *testing.T) {
 	}
 	if !strings.HasPrefix(string(output), "run-node\n--controller\nhttps://controller.example\n") || !strings.HasSuffix(string(output), "--job\njob\n") {
 		t.Fatalf("runner arguments changed: %s", output)
+	}
+}
+
+func TestJobPodRetriesDNSAfterOneSecond(t *testing.T) {
+	l, _, boundary, control := fixture()
+	resources, err := BuildJob(t.Context(), time.Now(), l.Config, *control.award, boundary)
+	if err != nil {
+		t.Fatal(err)
+	}
+	spec := resources.Job.Spec.Template.Spec
+	if spec.DNSPolicy != "" || spec.DNSConfig == nil || len(spec.DNSConfig.Nameservers) != 0 || len(spec.DNSConfig.Searches) != 0 {
+		t.Fatalf("DNS policy %q, config %+v; want cluster DNS with options only", spec.DNSPolicy, spec.DNSConfig)
+	}
+	got := map[string]string{}
+	for _, o := range spec.DNSConfig.Options {
+		got[o.Name] = *o.Value
+	}
+	if want := map[string]string{"timeout": "1", "attempts": "5"}; !maps.Equal(got, want) {
+		t.Fatalf("DNS options = %v, want %v", got, want)
 	}
 }

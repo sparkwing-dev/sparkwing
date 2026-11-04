@@ -1,6 +1,7 @@
 package web
 
 import (
+	"io/fs"
 	"strings"
 	"testing"
 	"testing/fstest"
@@ -29,5 +30,18 @@ func TestVerifyBundleRefusesASuppliedBundleWithNoIndex(t *testing.T) {
 	}
 	if err := verifyBundle(fstest.MapFS{"index.html": &fstest.MapFile{Data: []byte("<title>Sparkwing</title>")}}); err != nil {
 		t.Errorf("a supplied bundle rooted at index.html must be served: %v", err)
+	}
+}
+
+func TestVerifiedBundleIsNilWithoutAnIndex(t *testing.T) {
+	if verifiedBundle(fstest.MapFS{"next-out/.keep": {}}) != nil {
+		t.Fatal("a bundle without index.html was served, which answers 404 on every page")
+	}
+	bundle := verifiedBundle(fstest.MapFS{"next-out/index.html": {Data: []byte("<html>")}})
+	if bundle == nil {
+		t.Fatal("a built bundle was refused")
+	}
+	if _, err := fs.Stat(bundle, "index.html"); err != nil {
+		t.Fatalf("bundle is not rooted at index.html: %v", err)
 	}
 }

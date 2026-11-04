@@ -300,6 +300,10 @@ func (d *claimBenchmarkDriver) Open(name string) (driver.Conn, error) {
 	if err != nil {
 		return nil, err
 	}
+	// safety: statement counting intercepts each call, which the store's statement cache would route around.
+	if cached, ok := conn.(*statementCachingConn); ok {
+		conn = cached.Conn
+	}
 	return &claimBenchmarkConn{Conn: conn, probe: d.probe, runProbe: d.runProbe, contextProbe: d.contextProbe, trace: d.trace}, nil
 }
 
