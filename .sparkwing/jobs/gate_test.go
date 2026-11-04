@@ -37,10 +37,10 @@ func TestGateReservesAndBoundsItsCPU(t *testing.T) {
 	})
 
 	nodes := plan.Jobs
-	if len(nodes) != 3 {
-		t.Fatalf("gate plan nodes = %d, want broad checks, touched-package race and the tree record", len(nodes))
+	if len(nodes) != 4 {
+		t.Fatalf("gate plan nodes = %d, want policy, broad checks, touched-package race and the tree record", len(nodes))
 	}
-	if got := time.Duration(nodes[0].TimeoutMS) * time.Millisecond; got != gateRunTimeout {
+	if got := time.Duration(nodes[1].TimeoutMS) * time.Millisecond; got != gateRunTimeout {
 		t.Fatalf("gate node timeout = %s, want declared workload deadline %s", got, gateRunTimeout)
 	}
 	for _, tc := range []struct{ cpus, parallelism int }{{1, 1}, {2, 1}, {3, 1}, {4, 1}, {8, 3}, {14, 6}, {16, 7}} {
@@ -77,7 +77,7 @@ func TestGateDeadlineAllowsTheHostedPostgresTail(t *testing.T) {
 	const beforePostgres = 35*time.Minute + 32*time.Second
 	const cleanupMargin = 2 * time.Minute
 	want := beforePostgres + storePostgresPrePushTimeout + cleanupMargin
-	if got := time.Duration(plan.Jobs[0].TimeoutMS) * time.Millisecond; got < want {
+	if got := time.Duration(plan.Jobs[1].TimeoutMS) * time.Millisecond; got < want {
 		t.Fatalf("gate deadline %s cuts off Postgres after the measured hosted test chain; need at least %s", got, want)
 	}
 }
@@ -86,19 +86,22 @@ func TestGateKeepsRaceInAnIndependentRequiredJob(t *testing.T) {
 	plan := inspectPlan(t, func(plan *sparkwing.Plan) error {
 		return (&Gate{}).Plan(t.Context(), plan, GateArgs{}, sparkwing.RunContext{Pipeline: "gate"})
 	})
-	if len(plan.Jobs) != 3 {
-		t.Fatalf("gate jobs = %d, want broad checks, race and the tree record", len(plan.Jobs))
+	if len(plan.Jobs) != 4 {
+		t.Fatalf("gate jobs = %d, want policy, broad checks, race and the tree record", len(plan.Jobs))
+	}
+	if policy := plan.Jobs[0]; policy.ID != policyJobID || len(policy.Needs) != 0 || policy.Optional || len(policy.Closures.SkipIf) != 1 {
+		t.Errorf("policy job = %+v, want a required first job that skips a proven tree", policy)
 	}
 	for i, want := range []string{"gate", "race-touched"} {
-		job := plan.Jobs[i]
-		if job.ID != want || len(job.Needs) != 0 || job.Optional || len(job.Closures.SkipIf) != 1 {
-			t.Errorf("gate job = %+v, want independent required %s that skips a proven tree", job, want)
+		job := plan.Jobs[i+1]
+		if job.ID != want || !slices.Equal(job.Needs, []string{policyJobID}) || job.Optional || len(job.Closures.SkipIf) != 1 {
+			t.Errorf("gate job = %+v, want required %s that waits only on the policy job and skips a proven tree", job, want)
 		}
 	}
-	if record := plan.Jobs[2]; record.ID != "record-tree" || !slices.Equal(record.Needs, []string{"gate", "race-touched"}) || record.Optional {
+	if record := plan.Jobs[3]; record.ID != "record-tree" || !slices.Equal(record.Needs, []string{"gate", "race-touched"}) || record.Optional {
 		t.Errorf("record job = %+v, want a required record-tree after both gate jobs", record)
 	}
-	if got := time.Duration(plan.Jobs[1].TimeoutMS) * time.Millisecond; got != raceTouchedStepTimeout {
+	if got := time.Duration(plan.Jobs[2].TimeoutMS) * time.Millisecond; got != raceTouchedStepTimeout {
 		t.Errorf("race job timeout = %s, want %s", got, raceTouchedStepTimeout)
 	}
 	w := inspectWork(t, &Gate{})
@@ -324,7 +327,7 @@ func TestGoStepsSkipACommittedModuleWithNoPackages(t *testing.T) {
 
 func TestEachMandatoryStepWaitsOnTheOneBeforeIt(t *testing.T) {
 	w := inspectWork(t, &Gate{})
-	chain := []string{"gofmt", "formatters", "vet", "build", "test", "lint"}
+	chain := []string{"vet", "build", "test", "lint"}
 	for i := 1; i < len(chain); i++ {
 		if findStep(w, chain[i]) == nil {
 			t.Errorf("the gate must run step %q", chain[i])
@@ -336,19 +339,40 @@ func TestEachMandatoryStepWaitsOnTheOneBeforeIt(t *testing.T) {
 	}
 }
 
-func TestGatePolicyFailuresDoNotCancelTheTestSuite(t *testing.T) {
+func TestGateHeavyFailuresDoNotCancelEachOther(t *testing.T) {
 	w := inspectWork(t, &Gate{})
 	if w.FailurePolicy != sparkwing.CollectAll {
-		t.Fatalf("gate failure policy = %q, want collect_all so a policy failure cannot hide test failures", w.FailurePolicy)
+		t.Fatalf("gate failure policy = %q, want collect_all so one heavy failure cannot hide another", w.FailurePolicy)
 	}
-	for _, id := range []string{"tracker-ids", "changelog-links", "em-dashes", "comments", "changelog"} {
+}
+
+func TestThePolicyJobRunsEveryCheapCheckAndNothingHeavy(t *testing.T) {
+	w := inspectWork(t, &policyJob{})
+	if w.FailurePolicy != sparkwing.CollectAll {
+		t.Fatalf("policy failure policy = %q, want collect_all so one run names every policy finding", w.FailurePolicy)
+	}
+	for _, id := range []string{
+		"gofmt", "formatters", "tracker-ids", "em-dashes", "comments", "test-sleeps", "tracked-binaries",
+		"docs-mirror", "changelog-links", "home-resolution", "changelog", "api-spec", "api-snapshot", "cli-docs",
+	} {
 		step := findStep(w, id)
 		if step == nil {
-			t.Errorf("gate does not run %q", id)
+			t.Errorf("the policy job does not run %q", id)
 			continue
 		}
 		if len(step.Needs) != 0 {
-			t.Errorf("%q needs %v; policy sweeps stay independent of the Go chain", id, step.Needs)
+			t.Errorf("%q needs %v; every policy check starts at once", id, step.Needs)
+		}
+	}
+	heavy := inspectWork(t, &Gate{})
+	for _, s := range w.Steps {
+		if findStep(heavy, s.ID) != nil {
+			t.Errorf("the heavy gate job repeats policy step %q, which already ran before it", s.ID)
+		}
+	}
+	for _, id := range []string{"vet", "build", "test", "lint", "store-postgres", "frontend-browser"} {
+		if findStep(w, id) != nil {
+			t.Errorf("the policy job runs %q; a heavy step there delays every policy verdict", id)
 		}
 	}
 }

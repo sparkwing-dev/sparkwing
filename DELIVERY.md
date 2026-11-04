@@ -31,9 +31,17 @@ withheld)".
 The `preconditions` job refuses a dirty checkout, a detached HEAD, `main`
 itself and a branch whose merge with a freshly fetched `origin/main`
 conflicts, and names the command that fixes each; a branch behind main that
-merges cleanly goes ahead. The gate (the same jobs as
-`sparkwing run gate`) and the review (the same job as `sparkwing run review`,
-under `.review.yaml`) then run in parallel. Every change is reviewed, docs and
+merges cleanly goes ahead. The gate's `policy` job runs next, alone: gofmt,
+the formatters, em dashes, tracker IDs, comments, test sleeps, tracked
+binaries, home resolution, the docs mirror, changelog lint and links, the
+required changelog entry, the OpenAPI and API-snapshot checks and the
+generated CLI reference (`bin/gen-cli-docs.sh --check`). Each answers in
+seconds with a warm build cache, so a policy finding fails the land in under
+a minute instead of after a twenty-minute gate. Once it passes, the rest of
+the gate (the same jobs as `sparkwing run gate`) and the review (the same job
+as `sparkwing run review`, under `.review.yaml`) run in parallel. The policy
+job collects every finding before it fails; the heavy `gate` job likewise lets
+every heavy step report. Every change is reviewed, docs and
 comment changes included; the review job never skips by size or path. The
 gate selects its checks from the change scope (decision 96): vet, build, lint,
 the critical tests and the TypeScript SDK suite run only when the change
@@ -552,24 +560,27 @@ file. Other syntax and workflow checks remain active.
   were installed when the pre-push hook ran `gate` keeps running `gate` until
   `sparkwing pipeline hooks install` rewrites them.
 - **The three check classes and their budgets:** `pre-commit` is the source
-  policy at 3 seconds, `pre-push` the fast tier with a one-minute hard limit,
+  policy at 3 seconds, `pre-push` the fast tier with a one-minute budget,
   and the release cut, the `release-cut-checks` job the `release` pipeline runs
   before it tags, 40 minutes including 30 minutes of lint-lock allowance
   and ten minutes for build, full lint, the short test suite,
   published-version, Go-directive and SDK-pin checks, and changelog-link checks
   in parallel.
-  Each of those jobs times its own steps and fails when the class overruns,
-  naming the slowest step and its cost, so a class cannot regrow unnoticed.
-  Above 25 changed Go files, the two hook tiers waive only their time budgets
-  and still report the span and slowest step. Every selected check still runs.
-  At or below 25 files, both hook budgets are enforced. The release cut always
-  enforces its combined forty-minute wall budget, regardless of change size.
+  Each of those jobs times its own steps and warns when its slowest step's
+  own run time overruns the class, naming the step and its cost, so a class
+  cannot regrow unnoticed. A tier whose checks all passed still passes: when
+  the budget failed green tiers, authors under machine load committed with
+  `--no-verify`, which skips every check, and lands then found the policy
+  failures twenty minutes later.
   A tier whose scope holds no Go file still runs and passes every step, so it warns and
   names the scope it read: a push judged against an empty
   `origin/main..HEAD` range reports success over nothing, and uncommitted
   work is outside what `pre-push` reads. The
-  budget judges the span the job's own steps cover, not the admission wait or
-  the 2.5 s the pipeline binary takes to recompile after a Go change. The
+  budget judges the slowest step's own run time, not the admission wait, the
+  time a step waits for a core or a step slot, or the 2.5 s the pipeline
+  binary takes to recompile after a Go change. On a host at load 28, a
+  pre-commit whose slowest check took 473 ms spanned 3.8 s and failed the
+  old span budget. The verdict line reports both numbers. The
   formatters are the per-file cost in the commit tier, and `goimports` inside
   `golangci-lint fmt` is all of it: over a hundred Go files `gofumpt` measured
   0.38 s, `goimports` 10.9 s and `gofmt` 0.09 s, so a Go file costs about
@@ -581,7 +592,10 @@ file. Other syntax and workflow checks remain active.
   its own 80-minute hosted job. Hosted CI selects them with `sparkwing run gate
   --sw-only gate -- --full` and `sparkwing run gate --sw-only race-touched`. Each job
   owns a separate four-core runner, so race tests share no cores with the full
-  Go or PostgreSQL suite. `sparkwing run gate` runs both jobs locally. Without
+  Go or PostgreSQL suite. `--sw-only` keeps a job's dependencies, so each lane
+  runs the `policy` job first; on a fresh runner its first compile of the
+  checkers and the CLI is the cost. `sparkwing run gate` runs the policy job,
+  then both jobs, locally. Without
   `--full` its test step runs the changed packages (importers still build and
   vet; their tests run after deploy) and the tests marked `//sparkwing:critical` on the line above them; a change to a
   `go.mod`, `go.sum` or `internal/store/schema.sql` runs its whole module. A
@@ -797,7 +811,7 @@ file. Other syntax and workflow checks remain active.
   integrated run over 13 changed Go files took 10.678 s and missed the target;
   fast lint took 10.678 s and build took 9.782 s. A controlled cold run of the
   same functional checks took 24.432 s, and broader cold parallel samples took
-  51.182 s and 56.923 s. These observations fit the one-minute hard limit but
+  51.182 s and 56.923 s. These observations fit the one-minute budget but
   do not establish a ceiling for every cold input. A change to a Go file also
   invalidates the cached `.sparkwing/` pipeline binary, so the first hook run
   after one pays about 2.5 s to recompile it outside the timed job span.

@@ -17,80 +17,91 @@ import (
 )
 
 func TestBudgetPassesATierInsideItsClass(t *testing.T) {
-	line, err := budgetVerdict("pre-commit", 3*time.Second, 900*time.Millisecond,
+	line, overrun := budgetVerdict("pre-commit", 3*time.Second, 900*time.Millisecond,
 		[]stepTiming{{"gofmt", 200 * time.Millisecond}, {"comments", 880 * time.Millisecond}}, false, -1)
-	if err != nil {
-		t.Fatalf("a tier inside its budget failed: %v", err)
+	if overrun != "" {
+		t.Fatalf("a tier inside its budget warned: %s", overrun)
 	}
 	if !strings.Contains(line, "comments") {
 		t.Errorf("the verdict does not name the slowest step: %q", line)
 	}
 }
 
-func TestPrePushBudgetPassesAnElevenSecondSpan(t *testing.T) {
-	line, err := budgetVerdict("pre-push", prePushBudget, 11*time.Second,
+func TestBudgetJudgesTheSlowestCheckNotTheSpan(t *testing.T) {
+	// safety: the shape pre-commit showed on a loaded host: checks queued for a
+	// slot, so the span ran past the budget while no check came near it.
+	line, overrun := budgetVerdict("pre-commit", preCommitBudget, 3808*time.Millisecond,
+		[]stepTiming{{"gofmt", 300 * time.Millisecond}, {"test-sleeps", 473 * time.Millisecond}}, false, -1)
+	if overrun != "" {
+		t.Fatalf("time spent waiting for a slot counted against the checks: %s", overrun)
+	}
+	if !strings.Contains(line, "473ms") || !strings.Contains(line, "3.808s") {
+		t.Errorf("the verdict does not report both the slowest check and the span: %q", line)
+	}
+}
+
+func TestPrePushBudgetPassesAnElevenSecondCheck(t *testing.T) {
+	line, overrun := budgetVerdict("pre-push", prePushBudget, 11*time.Second,
 		[]stepTiming{{"build-touched", 10 * time.Second}, {"lint-touched", 11 * time.Second}}, false, -1)
-	if err != nil {
-		t.Fatalf("an eleven-second pre-push span failed its hard budget: %v", err)
+	if overrun != "" {
+		t.Fatalf("an eleven-second pre-push check warned: %s", overrun)
 	}
 	if !strings.Contains(line, "lint-touched") {
 		t.Errorf("the verdict does not name the slowest step: %q", line)
 	}
 }
 
-func TestPrePushBudgetFailsPastOneMinuteNamingTheSlowestStep(t *testing.T) {
-	_, err := budgetVerdict("pre-push", prePushBudget, time.Minute+time.Millisecond,
+func TestPrePushBudgetWarnsPastOneMinuteNamingTheSlowestStep(t *testing.T) {
+	_, overrun := budgetVerdict("pre-push", prePushBudget, time.Minute+time.Millisecond,
 		[]stepTiming{{"build-touched", 59 * time.Second}, {"lint-touched", time.Minute + time.Millisecond}}, false, -1)
-	if err == nil {
-		t.Fatal("a pre-push span past one minute passed")
+	if overrun == "" {
+		t.Fatal("a pre-push check past one minute did not warn")
 	}
-	if !strings.Contains(err.Error(), "lint-touched") || !strings.Contains(err.Error(), "1m0.001s") {
-		t.Errorf("the failure names neither the slowest step nor its cost: %v", err)
+	if !strings.Contains(overrun, "lint-touched") || !strings.Contains(overrun, "1m0.001s") {
+		t.Errorf("the warning names neither the slowest step nor its cost: %s", overrun)
 	}
 }
 
 func TestReleaseCutBudgetAcceptsTheMeasuredTestClass(t *testing.T) {
-	span := 7*time.Minute + 19*time.Second + 746*time.Millisecond
-	_, err := budgetVerdict("release cut", releaseCutBudget+releaseLintLockAllowance, span,
-		[]stepTiming{{"test", span}}, false, -1)
-	if err != nil {
-		t.Fatalf("the measured release test class failed its budget: %v", err)
+	took := 7*time.Minute + 19*time.Second + 746*time.Millisecond
+	if _, overrun := budgetVerdict("release cut", releaseCutBudget+releaseLintLockAllowance, took,
+		[]stepTiming{{"test", took}}, false, -1); overrun != "" {
+		t.Fatalf("the measured release test class overran its budget: %s", overrun)
 	}
 }
 
 func TestReleaseCutBudgetAcceptsContentionAndChecks(t *testing.T) {
-	span := 30*time.Minute + 7*time.Minute + 19*time.Second
-	_, err := budgetVerdict("release cut", releaseCutBudget+releaseLintLockAllowance, span,
-		[]stepTiming{{"lint", span}}, false, -1)
-	if err != nil {
-		t.Fatalf("lint waiting for another tree exhausted the check allowance: %v", err)
+	took := 30*time.Minute + 7*time.Minute + 19*time.Second
+	if _, overrun := budgetVerdict("release cut", releaseCutBudget+releaseLintLockAllowance, took,
+		[]stepTiming{{"lint", took}}, false, -1); overrun != "" {
+		t.Fatalf("lint waiting for another tree exhausted the check allowance: %s", overrun)
 	}
 }
 
-func TestReleaseCutBudgetFailsPastFortyMinutesNamingTheSlowestStep(t *testing.T) {
-	span := 40*time.Minute + time.Millisecond
-	_, err := budgetVerdict("release cut", releaseCutBudget+releaseLintLockAllowance, span,
-		[]stepTiming{{"test", span}}, false, -1)
-	if err == nil {
-		t.Fatal("a release cut past forty minutes passed")
+func TestReleaseCutBudgetWarnsPastFortyMinutesNamingTheSlowestStep(t *testing.T) {
+	took := 40*time.Minute + time.Millisecond
+	_, overrun := budgetVerdict("release cut", releaseCutBudget+releaseLintLockAllowance, took,
+		[]stepTiming{{"test", took}}, false, -1)
+	if overrun == "" {
+		t.Fatal("a release cut check past forty minutes did not warn")
 	}
-	if !strings.Contains(err.Error(), "test") || !strings.Contains(err.Error(), "40m0.001s") {
-		t.Errorf("the failure names neither the slowest step nor its cost: %v", err)
+	if !strings.Contains(overrun, "test") || !strings.Contains(overrun, "40m0.001s") {
+		t.Errorf("the warning names neither the slowest step nor its cost: %s", overrun)
 	}
 }
 
 func TestBudgetLeavesTheVerdictToTheCheckThatFailed(t *testing.T) {
-	_, err := budgetVerdict("pre-push", 10*time.Second, 21*time.Second,
+	_, overrun := budgetVerdict("pre-push", 10*time.Second, 21*time.Second,
 		[]stepTiming{{"gofmt", 20 * time.Second}}, true, -1)
-	if err != nil {
-		t.Fatalf("the budget judged a tier whose own check failed, so the push reports the wrong cause: %v", err)
+	if overrun != "" {
+		t.Fatalf("the budget judged a tier whose own check failed, so the push reports the wrong cause: %s", overrun)
 	}
 }
 
 func TestBudgetJudgesNothingWhenNoStepRan(t *testing.T) {
-	line, err := budgetVerdict("pre-commit", 3*time.Second, time.Hour, nil, false, -1)
-	if err != nil || line != "" {
-		t.Fatalf("budgetVerdict(no steps) = %q, %v; want silence", line, err)
+	line, overrun := budgetVerdict("pre-commit", 3*time.Second, time.Hour, nil, false, -1)
+	if line != "" || overrun != "" {
+		t.Fatalf("budgetVerdict(no steps) = %q, %q; want silence", line, overrun)
 	}
 }
 
@@ -105,7 +116,7 @@ func TestBudgetTimesEveryStepTheTierDeclares(t *testing.T) {
 		w := inspectWork(t, work)
 		verdict := findStep(w, budgetStepID)
 		if verdict == nil {
-			t.Errorf("%s declares no %q step, so nothing fails when the tier outgrows its class", tier, budgetStepID)
+			t.Errorf("%s declares no %q step, so nothing warns when the tier outgrows its class", tier, budgetStepID)
 			continue
 		}
 		var checks []string
@@ -137,10 +148,9 @@ func TestBudgetRecordsACompletedStep(t *testing.T) {
 	}
 }
 
-func TestBudgetFailsTheTierWhenItsRecordedStepsOverrun(t *testing.T) {
-	err := runBudgetVerdict(t, recordedOverrun())
-	if err == nil || !strings.Contains(err.Error(), "slow") {
-		t.Fatalf("overrun = %v, want slow step failure", err)
+func TestBudgetPassesAGreenTierThatOverruns(t *testing.T) {
+	if err := runBudgetVerdict(t, recordedOverrun()); err != nil {
+		t.Fatalf("a tier whose checks all passed failed on time alone: %v", err)
 	}
 }
 
@@ -181,11 +191,6 @@ func filesetOf(count int) scopeFunc {
 	}
 }
 
-func overrunWithFileset(t *testing.T, count int) error {
-	t.Helper()
-	return runBudgetVerdict(t, recordedOverrun().over(filesetOf(count)))
-}
-
 func runBudgetVerdict(t *testing.T, b *tierBudget) error {
 	t.Helper()
 	host, plan, _ := prepareWork(t, testJob(func(w *sparkwing.Work) (*sparkwing.WorkStep, error) { b.verdict(w); return nil, nil }))
@@ -200,23 +205,6 @@ func recordedOverrun() *tierBudget {
 	return b
 }
 
-func TestBudgetEnforcesUpToTheFilesetATierIsBudgetedFor(t *testing.T) {
-	for _, count := range []int{24, 25} {
-		if err := overrunWithFileset(t, count); err == nil {
-			t.Fatalf("a tier past its budget over %d Go files passed; the budget stops meaning anything", count)
-		}
-	}
-}
-
-func TestBudgetIsWaivedForAFilesetWiderThanATierIsBudgetedFor(t *testing.T) {
-	for _, count := range []int{26, 27} {
-		if err := overrunWithFileset(t, count); err != nil {
-			t.Fatalf("a %d-file change failed the budget; these steps cost per file, so a wide change is not a tier that grew: %v",
-				count, err)
-		}
-	}
-}
-
 func TestBudgetSaysWhenATierJudgedNoGoFile(t *testing.T) {
 	b := newTierBudget("probe", 3*time.Second).over(filesetOf(0))
 	count, scope := b.changedGoFiles(t.Context())
@@ -226,16 +214,6 @@ func TestBudgetSaysWhenATierJudgedNoGoFile(t *testing.T) {
 	notice := emptyScopeNotice("probe", scope)
 	if !strings.Contains(notice, scope) || !strings.Contains(notice, "covers nothing") {
 		t.Errorf("an empty-scope verdict does not name what it covered: %q", notice)
-	}
-}
-
-func TestBudgetEnforcesWhenTheFilesetCannotBeRead(t *testing.T) {
-	b := recordedOverrun().over(
-		func(context.Context, string, func([]string) []string) ([]string, string, error) {
-			return nil, "", errors.New("no baseline")
-		})
-	if err := runBudgetVerdict(t, b); err == nil {
-		t.Fatal("a tier that cannot size its change stopped keeping its promise")
 	}
 }
 
