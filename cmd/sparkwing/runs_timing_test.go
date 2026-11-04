@@ -145,7 +145,7 @@ func TestRunsTimingReadsFinishedRunsAndEmitsNDJSON(t *testing.T) {
 			}
 		}
 	}
-	if kinds["run"] != 2 || kinds["job"] != 2 || kinds["failure"] != 1 || kinds["summary"] != 1 {
+	if kinds["run"] != 2 || kinds["job"] != 2 || kinds["failure"] != 1 || kinds["summary"] != 1 || kinds["page"] != 1 {
 		t.Fatalf("records %v", kinds)
 	}
 	if summary.Runs != 2 || summary.Success != 1 || summary.Failed != 1 || summary.RepeatedCommits != 1 || summary.Admit.P50 != 40*time.Second+500*time.Millisecond {
@@ -196,5 +196,22 @@ func TestRunsTimingJobFilterBoundsTheSections(t *testing.T) {
 	}
 	if strings.Contains(out.String(), "sdk_error") || !strings.Contains(out.String(), "build") {
 		t.Fatalf("filtered output:\n%s", out.String())
+	}
+}
+
+func TestRunTimingAlignsEachAttemptToItsOwnStart(t *testing.T) {
+	run := controllerwire.RunDetail{ID: "r1", Number: 1, Status: "success", StartedAt: at(0), FinishedAt: at(130)}
+	run.Jobs = []controllerwire.JobDetail{{ID: "build", Outcome: "success", Attempt: 2}}
+	steps := []controllerwire.StepDetail{
+		{JobID: "build", ID: "a", Attempt: 1, Status: "failed", StartedAt: at(-8), FinishedAt: at(-5)},
+		{JobID: "build", ID: "a", Attempt: 2, Status: "passed", StartedAt: at(111), FinishedAt: at(119)},
+	}
+	events := []controllerwire.LogRecord{
+		timingEvent(1, "build", "job_ready", 0), timingEvent(2, "build", "job_claimed", 0), timingEvent(3, "build", "job_started", 0),
+		timingEvent(4, "build", "job_retrying", 100), timingEvent(5, "build", "job_succeeded", 120),
+	}
+	got := measureRun(run, steps, events)
+	if build := got.Jobs["build"]; build.Phases[phaseRunning] != 11*time.Second || got.StepShift != 8*time.Second {
+		t.Fatalf("build %+v shift %v", build, got.StepShift)
 	}
 }

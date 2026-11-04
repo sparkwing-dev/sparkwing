@@ -44,6 +44,11 @@ func (p phaseDurations) sum() time.Duration {
 	return total
 }
 
+type change struct {
+	at    time.Time
+	phase timingPhase
+}
+
 type timingSpan struct {
 	from, to time.Time
 	phase    timingPhase
@@ -129,6 +134,15 @@ type timingJobRecord struct {
 	Running  percentiles `json:"running"`
 	Gap      percentiles `json:"gap"`
 	Total    percentiles `json:"total"`
+}
+
+type timingPage struct {
+	Kind                  string `json:"kind"`
+	Jobs                  int    `json:"jobs"`
+	JobsReturned          int    `json:"jobs_returned"`
+	FailureGroups         int    `json:"failure_groups"`
+	FailureGroupsReturned int    `json:"failure_groups_returned"`
+	Truncated             bool   `json:"truncated"`
 }
 
 type timingFailureRecord struct {
@@ -262,9 +276,6 @@ func measureRun(run controllerwire.RunDetail, steps []controllerwire.StepDetail,
 	for _, job := range run.Jobs {
 		jobSpans, shift := jobTimeline(byJob[job.ID], stepsByJob[job.ID], end)
 		spans = append(spans, jobSpans...)
-		if shift < 0 {
-			shift = -shift
-		}
 		timing.StepShift = max(timing.StepShift, shift)
 		requested := run.CancelRequestedAt != nil || job.CancelRequestedAt != nil || cancelRequested(byJob[job.ID])
 		if job.Outcome == "failed" || job.Outcome == "cancelled" && !requested && job.Reason != "upstream_failed" {
@@ -333,6 +344,44 @@ func alignStepClock(steps []controllerwire.StepDetail, started, end time.Time) (
 	return moved, shift
 }
 
+// safety: each attempt may run on a different runner, so each attempt's steps align to their own start event.
+func alignAttempts(steps []controllerwire.StepDetail, changes []change, end time.Time) ([]controllerwire.StepDetail, time.Duration) {
+	var starts []time.Time
+	for _, c := range changes {
+		if c.phase == phaseSetup {
+			starts = append(starts, c.at)
+		}
+	}
+	byAttempt := map[int64][]controllerwire.StepDetail{}
+	var order []int64
+	for _, step := range steps {
+		if _, seen := byAttempt[step.Attempt]; !seen {
+			order = append(order, step.Attempt)
+		}
+		byAttempt[step.Attempt] = append(byAttempt[step.Attempt], step)
+	}
+	var aligned []controllerwire.StepDetail
+	var largest time.Duration
+	for _, attempt := range order {
+		var from time.Time
+		to := end
+		if n := len(starts); n > 0 {
+			i := min(max(int(attempt), 1), n) - 1
+			from = starts[i]
+			if i+1 < n {
+				to = starts[i+1]
+			}
+		}
+		moved, shift := alignStepClock(byAttempt[attempt], from, to)
+		aligned = append(aligned, moved...)
+		if shift < 0 {
+			shift = -shift
+		}
+		largest = max(largest, shift)
+	}
+	return aligned, largest
+}
+
 func cancelRequested(events []controllerwire.LogRecord) bool {
 	for _, event := range events {
 		if event.Event == "job_cancel_requested" {
@@ -357,10 +406,6 @@ func failingSteps(steps []controllerwire.StepDetail, attempt int64) []string {
 
 func jobTimeline(events []controllerwire.LogRecord, steps []controllerwire.StepDetail, runEnd time.Time) ([]timingSpan, time.Duration) {
 	sort.SliceStable(events, func(i, j int) bool { return events[i].LineNo < events[j].LineNo })
-	type change struct {
-		at    time.Time
-		phase timingPhase
-	}
 	var changes []change
 	var end time.Time
 	for _, event := range events {
@@ -389,14 +434,7 @@ func jobTimeline(events []controllerwire.LogRecord, steps []controllerwire.StepD
 	if end.IsZero() || end.After(runEnd) {
 		end = runEnd
 	}
-	var started time.Time
-	for _, c := range changes {
-		if c.phase == phaseSetup {
-			started = c.at
-			break
-		}
-	}
-	steps, shift := alignStepClock(steps, started, end)
+	steps, shift := alignAttempts(steps, changes, end)
 	type interval struct{ from, to time.Time }
 	var ran []interval
 	cuts := []time.Time{end}
@@ -609,17 +647,24 @@ func writeRunsTiming(out io.Writer, pipeline string, jobFilter []string, timings
 				return err
 			}
 		}
-		for _, job := range jobs {
+		for _, job := range jobs[:min(len(jobs), timingTextRows)] {
 			if err := enc.Encode(job); err != nil {
 				return err
 			}
 		}
-		for _, failure := range failures {
+		for _, failure := range failures[:min(len(failures), timingTextRows)] {
 			if err := enc.Encode(failure); err != nil {
 				return err
 			}
 		}
-		return enc.Encode(summary)
+		if err := enc.Encode(summary); err != nil {
+			return err
+		}
+		return enc.Encode(timingPage{
+			Kind: "page", Jobs: len(jobs), JobsReturned: min(len(jobs), timingTextRows),
+			FailureGroups: len(failures), FailureGroupsReturned: min(len(failures), timingTextRows),
+			Truncated: len(jobs) > timingTextRows || len(failures) > timingTextRows,
+		})
 	case "plain":
 		for _, job := range jobs {
 			if _, err := fmt.Fprintln(out, job.Job); err != nil {
@@ -662,7 +707,7 @@ func writeRunsTiming(out io.Writer, pipeline string, jobFilter []string, timings
 		return err
 	}
 	if len(jobs) > timingTextRows {
-		fmt.Fprintf(out, "%d more jobs: select them with --job, or read every job with -o json.\n", len(jobs)-timingTextRows)
+		fmt.Fprintf(out, "%d more jobs: select them with --job.\n", len(jobs)-timingTextRows)
 	}
 	fmt.Fprintln(out, "\nJob columns are P50 / P90. Wait is queue (ready to claimed), admit (claimed to started: admission and source checkout) and approval.")
 	type longWait struct {
@@ -707,7 +752,7 @@ func writeRunsTiming(out io.Writer, pipeline string, jobFilter []string, timings
 		return err
 	}
 	if len(failures) > timingTextRows {
-		fmt.Fprintf(out, "%d more failure groups: select jobs with --job, or read every group with -o json.\n", len(failures)-timingTextRows)
+		fmt.Fprintf(out, "%d more failure groups: select their jobs with --job.\n", len(failures)-timingTextRows)
 	}
 	return nil
 }
