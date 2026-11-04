@@ -426,6 +426,25 @@ preview. `--stop-after`, `--promote-proven` and `--version` reach a real deploy 
 main's tip, and production refuses a version below the one it runs, so a retried old run cannot
 roll production back.
 
+The deploy writes no cluster-scoped object to GitOps: the AppProject `sparkwing` permits no
+cluster-scoped kinds, so a GitOps commit cannot grant cluster-wide access. The render drops the
+chart's namespaces, ClusterRole, ClusterRoleBinding, admission policies and similar, logs each one
+it left out, and fails on any other object without a namespace. kikd-infra keeps them in
+`k8s/sparkwing-cluster/staging.yaml` and `production.yaml`, applied by the Argo application
+`sparkwing-cluster` in project `kikd`. An image-only release leaves them alone: the Cloud job
+admission policies read the runner and Docker images from the ConfigMap `sparkwing-cloud-admission`
+in the job namespace, which the render keeps, so the policies are the same across releases and
+rollbacks. A release whose chart changes a rule, the RBAC or the namespaces updates kikd-infra
+before its deploy, staging first, then production:
+
+1. Render the chart at the new tag with `helm template <release> charts/sparkwing-full --namespace <ns> -f <env dir>/helm-values.yaml`.
+2. Copy its cluster-scoped documents into the environment's file in kikd-infra `k8s/sparkwing-cluster/`.
+3. Land that on kikd-infra main and wait for `sparkwing-cluster` to report Synced.
+
+Add permissions before the deploy and remove them after the old version is gone. That application
+prunes, so deleting an object from the file deletes it from the cluster; a Namespace leaves the
+file only on purpose, because deleting it deletes everything in it.
+
 ```bash
 sparkwing run deploy -- --dry-run                         # print every action, take none
 sparkwing run deploy -- --dry-run --stop-after staging    # preview a staging-only deploy

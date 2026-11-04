@@ -54,9 +54,8 @@ func newAdmissionFixture(t *testing.T) *admissionFixture {
 	return f
 }
 
-func (f *admissionFixture) policies() []*admissionv1.ValidatingAdmissionPolicy {
-	policies, _ := AdmissionPolicies(AdmissionConfig{Namespace: "cloud", Launcher: testLauncher, RunnerImage: f.l.Config.RunnerImage, DockerImage: testDockerImage})
-	return policies
+func (f *admissionFixture) admission() AdmissionConfig {
+	return AdmissionConfig{Namespace: "cloud", Launcher: testLauncher, RunnerImage: f.l.Config.RunnerImage, DockerImage: testDockerImage}
 }
 
 func (f *admissionFixture) capacity(t *testing.T) *corev1.Pod {
@@ -362,8 +361,10 @@ func (f *admissionFixture) updates(job *batchv1.Job) []admissionCase {
 	return cases
 }
 
-func celAdmit(t *testing.T, policies []*admissionv1.ValidatingAdmissionPolicy, c admissionCase) error {
+func (f *admissionFixture) admit(t *testing.T, c admissionCase) error {
 	t.Helper()
+	policies, _ := AdmissionPolicies(f.admission())
+	params := AdmissionParams(f.admission())
 	gvk, gvr, policy := corev1.SchemeGroupVersion.WithKind("Pod"), corev1.SchemeGroupVersion.WithResource("pods"), policies[0]
 	if _, ok := c.object.(*batchv1.Job); ok {
 		gvk, gvr, policy = batchv1.SchemeGroupVersion.WithKind("Job"), batchv1.SchemeGroupVersion.WithResource("jobs"), policies[1]
@@ -372,7 +373,7 @@ func celAdmit(t *testing.T, policies []*admissionv1.ValidatingAdmissionPolicy, c
 	if err != nil {
 		t.Fatal(err)
 	}
-	options := cel.OptionalVariableDeclarations{HasAuthorizer: true}
+	options := cel.OptionalVariableDeclarations{HasParams: true, HasAuthorizer: true}
 	variables := make([]cel.NamedExpressionAccessor, len(policy.Spec.Variables))
 	for i, v := range policy.Spec.Variables {
 		variables[i] = &validating.Variable{Name: v.Name, Expression: v.Expression}
@@ -399,7 +400,7 @@ func celAdmit(t *testing.T, policies []*admissionv1.ValidatingAdmissionPolicy, c
 	attributes := admission.NewAttributesRecord(c.object, old, gvk, "cloud", name, gvr, c.subresource, admission.Operation(c.operation), nil, false, &user.DefaultInfo{Name: c.user})
 	versioned := &admission.VersionedAttributes{Attributes: attributes, VersionedKind: gvk, VersionedObject: c.object, VersionedOldObject: old}
 	namespace := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "cloud", Labels: map[string]string{"kubernetes.io/metadata.name": "cloud"}}}
-	result := validator.Validate(t.Context(), gvr, versioned, nil, namespace, celconfig.RuntimeCELCostBudget, nil)
+	result := validator.Validate(t.Context(), gvr, versioned, params, namespace, celconfig.RuntimeCELCostBudget, nil)
 	var denials []error
 	for _, decision := range result.Decisions {
 		if decision.Action == validating.ActionDeny {
@@ -416,7 +417,7 @@ func TestAdmissionPolicyCEL(t *testing.T) {
 	cases := append(append(f.podCreates(t, job), f.jobCreates()...), f.updates(job)...)
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			err := celAdmit(t, f.policies(), c)
+			err := f.admit(t, c)
 			if c.reason == "" {
 				if err != nil {
 					t.Fatalf("refused: %v", err)
@@ -443,7 +444,7 @@ func TestAdmissionPolicyNodeFailureTolerations(t *testing.T) {
 				if name == "job" {
 					identity = testJobController
 				}
-				if err := celAdmit(t, f.policies(), admissionCase{operation: string(admissionv1.Create), user: identity, object: p}); err != nil {
+				if err := f.admit(t, admissionCase{operation: string(admissionv1.Create), user: identity, object: p}); err != nil {
 					t.Fatalf("API node-failure tolerations refused: %v", err)
 				}
 			})
@@ -463,7 +464,7 @@ func TestAdmissionPolicyNodeFailureTolerations(t *testing.T) {
 			toleration := corev1.Toleration{Key: corev1.TaintNodeNotReady, Operator: corev1.TolerationOpExists, Effect: corev1.TaintEffectNoExecute, TolerationSeconds: ptr(int64(300))}
 			mutate(&toleration)
 			p.Spec.Tolerations = append(p.Spec.Tolerations, toleration)
-			refused(t, celAdmit(t, f.policies(), admissionCase{operation: string(admissionv1.Create), user: testJobController, object: p}), "dedicated tolerations")
+			refused(t, f.admit(t, admissionCase{operation: string(admissionv1.Create), user: testJobController, object: p}), "dedicated tolerations")
 		})
 	}
 	for name, index := range map[string]int{"duplicate_cpu": 0, "duplicate_dedicated": 1, "duplicate_failure": 2} {
@@ -471,11 +472,11 @@ func TestAdmissionPolicyNodeFailureTolerations(t *testing.T) {
 			p := jobPod(job)
 			p.Spec.Tolerations = append(p.Spec.Tolerations, corev1.Toleration{Key: corev1.TaintNodeNotReady, Operator: corev1.TolerationOpExists, Effect: corev1.TaintEffectNoExecute, TolerationSeconds: ptr(int64(300))})
 			p.Spec.Tolerations = append(p.Spec.Tolerations, p.Spec.Tolerations[index])
-			refused(t, celAdmit(t, f.policies(), admissionCase{operation: string(admissionv1.Create), user: testJobController, object: p}), "dedicated tolerations")
+			refused(t, f.admit(t, admissionCase{operation: string(admissionv1.Create), user: testJobController, object: p}), "dedicated tolerations")
 		})
 	}
 	t.Run("job_template", func(t *testing.T) {
 		job.Spec.Template.Spec.Tolerations = append(job.Spec.Template.Spec.Tolerations, corev1.Toleration{Key: corev1.TaintNodeNotReady, Operator: corev1.TolerationOpExists, Effect: corev1.TaintEffectNoExecute, TolerationSeconds: ptr(int64(300))})
-		refused(t, celAdmit(t, f.policies(), admissionCase{operation: string(admissionv1.Create), user: testLauncher, object: job}), "dedicated tolerations")
+		refused(t, f.admit(t, admissionCase{operation: string(admissionv1.Create), user: testLauncher, object: job}), "dedicated tolerations")
 	})
 }

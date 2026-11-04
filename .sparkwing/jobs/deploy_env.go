@@ -407,8 +407,11 @@ func deployVersion(newest, newestCommit, commit string, committed int64) (string
 }
 
 type renderedDoc struct {
-	text string
-	key  string
+	text      string
+	key       string
+	kind      string
+	namespace string
+	name      string
 }
 
 func splitRendered(rendered string) ([]renderedDoc, error) {
@@ -425,9 +428,41 @@ func splitRendered(rendered string) ([]renderedDoc, error) {
 		if meta.Kind != "" {
 			key = meta.Kind + "/" + meta.Metadata.Namespace + "/" + meta.Metadata.Name
 		}
-		docs = append(docs, renderedDoc{text: part, key: key})
+		docs = append(docs, renderedDoc{text: part, key: key, kind: meta.Kind, namespace: meta.Metadata.Namespace, name: meta.Metadata.Name})
 	}
 	return docs, nil
+}
+
+// safety: the sparkwing Argo project admits no cluster-scoped kinds, so a
+// GitOps commit cannot grant cluster-wide access; kikd-infra applies these.
+var clusterScopedKinds = map[string]bool{
+	"Namespace": true, "ClusterRole": true, "ClusterRoleBinding": true, "PriorityClass": true,
+	"ValidatingAdmissionPolicy": true, "ValidatingAdmissionPolicyBinding": true,
+	"MutatingAdmissionPolicy": true, "MutatingAdmissionPolicyBinding": true,
+	"ValidatingWebhookConfiguration": true, "MutatingWebhookConfiguration": true,
+	"CustomResourceDefinition": true, "StorageClass": true, "IngressClass": true, "PersistentVolume": true,
+}
+
+// safety: any other document without a namespace fails the render, so an
+// object the list does not know is never dropped or applied to the wrong
+// namespace.
+func dropClusterScoped(rendered string) (string, []string, error) {
+	docs, err := splitRendered(rendered)
+	if err != nil {
+		return "", nil, err
+	}
+	var kept, dropped []string
+	for _, doc := range docs {
+		switch {
+		case clusterScopedKinds[doc.kind]:
+			dropped = append(dropped, doc.kind+"/"+doc.name)
+		case doc.kind != "" && doc.namespace == "":
+			return "", nil, fmt.Errorf("%s/%s has no metadata.namespace and is not a known cluster-scoped kind", doc.kind, doc.name)
+		default:
+			kept = append(kept, doc.text)
+		}
+	}
+	return strings.Join(kept, "---"), dropped, nil
 }
 
 // safety: the controller ships alone, so its commit keeps every other object

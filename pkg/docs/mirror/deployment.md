@@ -277,6 +277,9 @@ artifacts fail before execution. Prepared records follow run retention and never
 provide cross-run or cross-team access.
 
 Update the controller, launcher, runner image and generated admission policies
-together. Job Pods contain the Docker sidecar and `run-node`; remove custom
+together. The policies read the runner and Docker images from the ConfigMap
+`sparkwing-cloud-admission` in the job namespace, so an installation that
+applies the chart's cluster-scoped objects separately changes only that
+namespaced ConfigMap when the images move. Job Pods contain the Docker sidecar and `run-node`; remove custom
 `fetch-source` init containers and `--source-dir` flags. Existing data storage and
 credentials suffice; there is no prepared-cache setting.

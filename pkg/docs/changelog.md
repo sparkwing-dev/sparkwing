@@ -122,6 +122,12 @@ unlock.
   option, such as `--cache-from`, a checkout policy, a risk acknowledgement or job default overrides, and any option added
   later, keeps the run from counting. Runs from earlier releases are not eligible, so the first gate after upgrading runs
   in full. A job's host is recorded as trusted when it is claimed rather than when it starts.
+- **helm + launcher:** The Cloud job admission policies read the runner and Docker images from a ConfigMap
+  The chart renders `sparkwing-cloud-admission` in the job namespace, and the two ValidatingAdmissionPolicies bind to
+  it through `paramRef` with `parameterNotFoundAction: Deny`, so the cluster-scoped policies and bindings stay the same
+  when a release moves the images. An installation that applies them apart from the namespaced chart updates them once
+  for this release, after the ConfigMap exists. The launcher refuses to start unless that ConfigMap holds exactly its
+  own images, and its job namespace Role gains `get` on it.
 
 ### Fixed
 

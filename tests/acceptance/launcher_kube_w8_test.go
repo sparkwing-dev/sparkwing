@@ -23,7 +23,11 @@ func admitW8(kube *fake.Clientset, cfg launcher.CloudJobConfig) *fake.Clientset 
 	kube.PrependReactor("create", "selfsubjectreviews", func(ktesting.Action) (bool, runtime.Object, error) {
 		return true, &authenticationv1.SelfSubjectReview{Status: authenticationv1.SelfSubjectReviewStatus{UserInfo: authenticationv1.UserInfo{Username: identity}}}, nil
 	})
-	policies, bindings := launcher.AdmissionPolicies(launcher.AdmissionConfig{Namespace: cfg.Namespace, Launcher: identity, RunnerImage: cfg.RunnerImage, DockerImage: cfg.DockerImage})
+	admission := launcher.AdmissionConfig{Namespace: cfg.Namespace, Launcher: identity, RunnerImage: cfg.RunnerImage, DockerImage: cfg.DockerImage}
+	policies, bindings := launcher.AdmissionPolicies(admission)
+	if err := kube.Tracker().Add(launcher.AdmissionParams(admission)); err != nil {
+		panic(err)
+	}
 	for i := range policies {
 		if err := kube.Tracker().Add(policies[i]); err != nil {
 			panic(err)

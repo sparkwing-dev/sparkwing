@@ -5,6 +5,15 @@
 {{- $runner := include "sparkwing-runner-bundle.digestImage" .Values.launcher.jobImage }}
 {{- $docker := include "sparkwing-runner-bundle.digestImage" .Values.launcher.dockerImage }}
 ---
+apiVersion: v1
+data:
+  dockerImage: '{{ $docker }}'
+  runnerImage: '{{ $runner }}'
+kind: ConfigMap
+metadata:
+  name: sparkwing-cloud-admission
+  namespace: '{{ $jobs }}'
+---
 apiVersion: admissionregistration.k8s.io/v1
 kind: ValidatingAdmissionPolicy
 metadata:
@@ -42,6 +51,9 @@ spec:
       - pods/portforward
       - pods/proxy
       scope: Namespaced
+  paramKind:
+    apiVersion: v1
+    kind: ConfigMap
   validations:
   - expression: request.operation != 'CONNECT'
     message: exec, attach, port-forward and proxy are not allowed in the Sparkwing
@@ -241,9 +253,9 @@ spec:
     name: jobNamespace
   - expression: '["2", "4", "8", "16", "32", "64"]'
     name: cloudClasses
-  - expression: '''{{ $runner }}'''
+  - expression: params.data.runnerImage
     name: runnerImage
-  - expression: '''{{ $docker }}'''
+  - expression: params.data.dockerImage
     name: dockerImage
   - expression: object.metadata.?labels.orValue({})
     name: labels
@@ -277,6 +289,10 @@ spec:
       matchLabels:
         kubernetes.io/metadata.name: '{{ $jobs }}'
     objectSelector: {}
+  paramRef:
+    name: sparkwing-cloud-admission
+    namespace: '{{ $jobs }}'
+    parameterNotFoundAction: Deny
   policyName: sparkwing-cloud-pods-{{ $jobs }}
   validationActions:
   - Deny
@@ -304,6 +320,9 @@ spec:
       resources:
       - jobs
       scope: Namespaced
+  paramKind:
+    apiVersion: v1
+    kind: ConfigMap
   validations:
   - expression: '!variables.create || request.userInfo.username == variables.launcher'
     message: only the launcher creates Jobs here
@@ -491,9 +510,9 @@ spec:
     name: jobNamespace
   - expression: '["2", "4", "8", "16", "32", "64"]'
     name: cloudClasses
-  - expression: '''{{ $runner }}'''
+  - expression: params.data.runnerImage
     name: runnerImage
-  - expression: '''{{ $docker }}'''
+  - expression: params.data.dockerImage
     name: dockerImage
   - expression: object.spec.template.metadata.?labels.orValue({})
     name: labels
@@ -521,6 +540,10 @@ spec:
       matchLabels:
         kubernetes.io/metadata.name: '{{ $jobs }}'
     objectSelector: {}
+  paramRef:
+    name: sparkwing-cloud-admission
+    namespace: '{{ $jobs }}'
+    parameterNotFoundAction: Deny
   policyName: sparkwing-cloud-jobs-{{ $jobs }}
   validationActions:
   - Deny

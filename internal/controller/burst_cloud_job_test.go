@@ -31,8 +31,9 @@ func configureBurstCloudJob(t *testing.T, proof *controller.BurstExecutionProof)
 	t.Helper()
 	const identity = "system:serviceaccount:sparkwing:sparkwing-launcher"
 	image := "runner@sha256:" + strings.Repeat("a", 64)
-	policies, bindings := launcher.AdmissionPolicies(launcher.AdmissionConfig{Namespace: "cloud", Launcher: identity, RunnerImage: image, DockerImage: image})
-	objects := []k8sruntime.Object{&corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "cloud", Labels: map[string]string{"kubernetes.io/metadata.name": "cloud"}}}}
+	admission := launcher.AdmissionConfig{Namespace: "cloud", Launcher: identity, RunnerImage: image, DockerImage: image}
+	policies, bindings := launcher.AdmissionPolicies(admission)
+	objects := []k8sruntime.Object{&corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "cloud", Labels: map[string]string{"kubernetes.io/metadata.name": "cloud"}}}, launcher.AdmissionParams(admission)}
 	for i := range policies {
 		objects = append(objects, policies[i], bindings[i])
 	}
