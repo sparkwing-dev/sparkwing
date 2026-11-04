@@ -5,8 +5,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"os"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
@@ -281,6 +283,23 @@ func displayTime(value *time.Time) string {
 		return "-"
 	}
 	return value.Format(time.RFC3339Nano)
+}
+
+var shownEngineNotices sync.Map
+
+func writeEngineNoticesOnce(out io.Writer, notices []engineid.Notice) error {
+	// safety: only process streams are shared by the stages of one command; a buffer is its own report.
+	if _, stream := out.(*os.File); !stream {
+		return writeEngineNotices(out, notices)
+	}
+	var fresh []engineid.Notice
+	for _, notice := range notices {
+		key := string(notice.Kind) + "\x00" + notice.Version + "\x00" + notice.Reason
+		if _, shown := shownEngineNotices.LoadOrStore(key, struct{}{}); !shown {
+			fresh = append(fresh, notice)
+		}
+	}
+	return writeEngineNotices(out, fresh)
 }
 
 func writeEngineNotices(out io.Writer, notices []engineid.Notice) error {

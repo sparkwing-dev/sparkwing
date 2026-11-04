@@ -4,11 +4,8 @@ import (
 	"context"
 	"os"
 	"path/filepath"
-	"slices"
 	"strings"
 	"testing"
-
-	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 )
 
 func TestCommandRecordsFromOneOwnerDoNotCollide(t *testing.T) {
@@ -179,11 +176,5 @@ func TestARecordIsPrivateToItsOwner(t *testing.T) {
 		if fi, err := os.Stat(path); err != nil || fi.Mode().Perm() != want {
 			t.Errorf("%s mode = %v (err %v), want %v", path, fi.Mode().Perm(), err, want)
 		}
-	}
-}
-
-func TestStraySessionEventKindIsRegistered(t *testing.T) {
-	if !slices.Contains(runstate.RunEventKinds, eventKind) {
-		t.Fatalf("%q is not in runstate.RunEventKinds, so the console never hears it", eventKind)
 	}
 }

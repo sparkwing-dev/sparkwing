@@ -1,4 +1,4 @@
-package secrets_test
+package ciphertest_test
 
 import (
 	"testing"
@@ -7,6 +7,13 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/controller/ciphertest"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 )
+
+// perf: these checks live outside internal/secrets because `go mod tidy` in a pipeline loads that package's
+// tests, and a secrets test importing the controller downloaded the controller's dependencies.
+
+var _ controller.Cipher = (*secrets.Cipher)(nil)
+
+var _ controller.BoundCipher = (*secrets.Cipher)(nil)
 
 func TestConformance_Cipher(t *testing.T) {
 	key, err := secrets.GenerateKey()

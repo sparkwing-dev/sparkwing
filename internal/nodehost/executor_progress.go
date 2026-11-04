@@ -22,7 +22,25 @@ func executorAttemptTimeout(ctx context.Context) error {
 	}
 }
 
+type awaitNotifyKey struct{}
+
+// WithAwaitNotify reports when a job hosted under ctx starts and stops waiting on
+// child runs, so a runner can stop counting it against its job slots. Nested
+// waits report once. notify must not block.
+func WithAwaitNotify(ctx context.Context, notify func(awaiting bool)) context.Context {
+	return context.WithValue(ctx, awaitNotifyKey{}, notify)
+}
+
+// AwaitNotify returns the hook WithAwaitNotify installed, or a no-op.
+func AwaitNotify(ctx context.Context) func(awaiting bool) {
+	if notify, ok := ctx.Value(awaitNotifyKey{}).(func(bool)); ok {
+		return notify
+	}
+	return func(bool) {}
+}
+
 func executorProgressContext(parent context.Context, idle time.Duration) (context.Context, ExecutorActivity, func()) {
+	notify := AwaitNotify(parent)
 	ctx, cancel := context.WithCancelCause(parent)
 	var mu sync.Mutex
 	var timer *time.Timer
@@ -59,6 +77,9 @@ func executorProgressContext(parent context.Context, idle time.Duration) (contex
 		Await: func() func() {
 			mu.Lock()
 			paused++
+			if paused == 1 {
+				notify(true)
+			}
 			reset()
 			mu.Unlock()
 			var once sync.Once
@@ -67,6 +88,9 @@ func executorProgressContext(parent context.Context, idle time.Duration) (contex
 					mu.Lock()
 					defer mu.Unlock()
 					paused--
+					if paused == 0 {
+						notify(false)
+					}
 					reset()
 				})
 			}
