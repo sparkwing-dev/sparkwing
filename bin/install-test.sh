@@ -83,67 +83,6 @@ fi
 grep -q "set SPARKWING_INSTALL_BIN" "$CASE_ROOT/out2" \
   || fail "no-DEST refusal does not name the remedy" "$CASE_ROOT/out2"
 
-dest3="$CASE_ROOT/dest three"
-rivaldir="$CASE_ROOT/rival dir"
-mkdir -p "$rivaldir"
-printf '#!/bin/sh\nexit 0\n' >"$rivaldir/sparkwing"
-chmod +x "$rivaldir/sparkwing"
-if ! env -u HOME -u GOBIN SKIP_WEB_BUILD=1 \
-  PATH="$STUB:$rivaldir:/usr/bin:/bin" \
-  SPARKWING_INSTALL_BIN="$dest3" FAKE_GOPATH="$CASE_ROOT/gopath" \
-  bash "$REPO/bin/install.sh" >"$CASE_ROOT/out3" 2>&1; then
-  fail "install beside a rival failed; the report must never fail the install" "$CASE_ROOT/out3"
-fi
-grep -qF "another sparkwing is installed at $rivaldir/sparkwing" "$CASE_ROOT/out3" \
-  || fail "rival under a spaced directory went unreported" "$CASE_ROOT/out3"
-remedy="$(sed -n 's/.*to retire it: \(.*\)   (undo.*/\1/p' "$CASE_ROOT/out3" | head -n1)"
-[ -n "$remedy" ] || fail "no retire remedy printed for the rival" "$CASE_ROOT/out3"
-eval "$remedy"
-[ -e "$rivaldir/sparkwing.superseded" ] && [ ! -e "$rivaldir/sparkwing" ] \
-  || fail "pasting the remedy did not retire exactly the rival: $remedy" "$CASE_ROOT/out3"
-
-dest4="$CASE_ROOT/dest4"
-rival4="$CASE_ROOT/rival collision/sparkwing"
-mkdir -p "$(dirname "$rival4")"
-printf '#!/bin/sh\n# source\nexit 0\n' >"$rival4"
-rival4_content="$(cat "$rival4")"
-chmod +x "$rival4"
-printf 'existing destination\n' >"$rival4.superseded"
-if ! env -u HOME -u GOBIN SKIP_WEB_BUILD=1 \
-  PATH="$STUB:$(dirname "$rival4"):/usr/bin:/bin" \
-  SPARKWING_INSTALL_BIN="$dest4" FAKE_GOPATH="$CASE_ROOT/gopath" \
-  bash "$REPO/bin/install.sh" >"$CASE_ROOT/out4" 2>&1; then
-  fail "install beside a retirement collision failed; reporting must stay read-only" "$CASE_ROOT/out4"
-fi
-remedy4="$(sed -n 's/.*to retire it: \(.*\)   (undo.*/\1/p' "$CASE_ROOT/out4" | head -n1)"
-[ -n "$remedy4" ] || fail "no guarded remedy printed for the collision" "$CASE_ROOT/out4"
-if eval "$remedy4"; then
-  fail "collision remedy reported success instead of refusing the existing destination" "$CASE_ROOT/out4"
-fi
-[ "$(cat "$rival4")" = "$rival4_content" ] \
-  || fail "collision remedy changed the source" "$CASE_ROOT/out4"
-[ "$(cat "$rival4.superseded")" = "existing destination" ] \
-  || fail "collision remedy overwrote the existing destination" "$CASE_ROOT/out4"
-
-race_stub="$CASE_ROOT/race-stub"
-mkdir -p "$race_stub"
-cat >"$race_stub/mv" <<'EOF'
-#!/bin/sh
-destination=""
-for argument in "$@"; do destination="$argument"; done
-printf 'raced destination\n' >"$destination"
-exec /bin/mv "$@"
-EOF
-chmod +x "$race_stub/mv"
-rm "$rival4.superseded"
-if (PATH="$race_stub:/usr/bin:/bin"; eval "$remedy4"); then
-  fail "remedy hid a destination race instead of failing its postcondition" "$CASE_ROOT/out4"
-fi
-[ "$(cat "$rival4")" = "$rival4_content" ] \
-  || fail "racing remedy changed the source" "$CASE_ROOT/out4"
-[ "$(cat "$rival4.superseded")" = "raced destination" ] \
-  || fail "racing remedy overwrote the destination" "$CASE_ROOT/out4"
-
 gp1="$CASE_ROOT/gp1"
 gp2="$CASE_ROOT/gp2"
 mkdir -p "$gp1/bin" "$gp2/bin"
@@ -207,14 +146,12 @@ grep -q 'dashboard.*unavailable' "$CASE_ROOT/out8" \
   || fail "install did not warn that its dashboard is unavailable" "$CASE_ROOT/out8"
 
 windows_root="$CASE_ROOT/windows"
-mkdir -p "$windows_root/dest" "$windows_root/go path/bin" "$windows_root/other go/bin" "$windows_root/rival dir"
+mkdir -p "$windows_root/dest" "$windows_root/go path/bin" "$windows_root/other go/bin"
 touch "$windows_root/dest/sparkwing-cache.exe" "$windows_root/dest/sparkwing-cache"
 touch "$windows_root/go path/bin/sparkwing-local-ws.exe"
-printf '#!/bin/sh\nexit 0\n' >"$windows_root/rival dir/sparkwing.exe"
-chmod +x "$windows_root/rival dir/sparkwing.exe"
 windows_log="$CASE_ROOT/windows-argv.log"
 if ! run_install SPARKWING_INSTALL_BIN='C:\fixture\dest' \
-  GOBIN='C:\fixture\rival dir' FAKE_UNAME=MINGW64_NT-10.0 \
+  FAKE_UNAME=MINGW64_NT-10.0 \
   FAKE_WINDOWS_ROOT="$windows_root" FAKE_GOPATH='C:\fixture\go path;C:\fixture\other go' \
   ARGV_LOG="$windows_log" >"$CASE_ROOT/out-windows" 2>&1; then
   fail "Git Bash install failed with native Windows paths" "$CASE_ROOT/out-windows"
@@ -229,8 +166,6 @@ grep -qF "stale $windows_root/go path/bin/sparkwing-local-ws.exe" "$CASE_ROOT/ou
   || fail "Windows GOPATH lost its drive letter or semicolon boundary" "$CASE_ROOT/out-windows"
 [ -e "$windows_root/go path/bin/sparkwing-local-ws.exe" ] \
   || fail "Windows stale report modified a file outside DEST" "$CASE_ROOT/out-windows"
-grep -qF "another sparkwing is installed at $windows_root/rival dir/sparkwing.exe" "$CASE_ROOT/out-windows" \
-  || fail "Windows rival from native GOBIN went unreported" "$CASE_ROOT/out-windows"
 named_dest="$windows_root/named"
 mkdir -p "$named_dest"
 printf 'existing main\n' >"$named_dest/sparkwing.exe"

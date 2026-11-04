@@ -94,10 +94,10 @@ sparkwing doctor --timeout 15s -o pretty
 sparkwing doctor --dry-run -o plain
 ```
 
-Doctor inspects the project Go toolchain, repository hooks and competing CLI
-installs. Local controller findings come through its lifecycle interface.
-Both modes use the same diagnostic path. The CLI never opens `state.db`,
-repairs private-home permissions or reaps processes during this command.
+Doctor inspects the project Go toolchain and repository hooks. Local
+controller findings come through its lifecycle interface. Both modes use the
+same diagnostic path. The CLI never opens `state.db`, repairs private-home
+permissions or reaps processes during this command.
 
 JSON output is one report. `controller_checked` is true only after the lifecycle
 check completes. `findings` retains each finding's `code`, `message`, optional

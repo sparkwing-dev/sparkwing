@@ -66,8 +66,8 @@ curl -fsSL https://github.com/sparkwing-dev/sparkwing/releases/latest/download/s
     -o ~/.local/bin/sparkwing && chmod +x ~/.local/bin/sparkwing
 ```
 
-Keep to one location: `sparkwing doctor` reports competing copies on
-PATH, and a second copy shadows the first.
+Keep to one location; a second copy on PATH shadows the first (see
+[If the wrong sparkwing runs](#if-the-wrong-sparkwing-runs)).
 
 The install script checks what it downloads. It verifies the ed25519
 signature over `SHA256SUMS`, then the asset's digest against its line in
@@ -133,6 +133,20 @@ release binary has no such limitation.
 The bundled `sparkwing-runner` service installer supports Linux and macOS.
 On Windows, supervise `sparkwing-runner.exe agent` yourself or use the Linux
 installer inside WSL when systemd user services are enabled.
+
+### If the wrong sparkwing runs
+
+Your shell runs the first `sparkwing` on PATH, and a job or service with a
+different PATH can pick another copy. List every copy and check the one that
+runs:
+
+```bash
+which -a sparkwing
+sparkwing version
+```
+
+Remove the installation you do not want, or call the one you do by its
+absolute path in scripts and services.
 
 ## Quick Start
 
