@@ -299,7 +299,9 @@ func FromProvenRunAtCommit() RefOption {
 
 // RefToLastRun returns a Ref[T] pointing at node nodeID in the most
 // recent successful verified default-branch run of pipeline. Reading does not
-// trigger a new run. For fresh data tied to the current moment, call
+// trigger a new run. A reference to the reading run's own pipeline reads only
+// runs of the reader's repository, since repositories in one team can share a
+// pipeline name. For fresh data tied to the current moment, call
 // sparkwing.RunAndAwait imperatively from a step body.
 //
 // Cross-repo is the primary use case: pipeline A in repo foo can

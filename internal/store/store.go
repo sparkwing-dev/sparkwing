@@ -611,12 +611,15 @@ func prefixUpperBound(prefix string) (string, bool) {
 
 // GetLatestRun returns t's newest run for pipeline matching statuses within
 // maxAge. Runs need verified default-branch provenance unless fromAnyRun is true.
-// Returns ErrNotFound on miss.
-func (t *Tenant) GetLatestRun(ctx context.Context, pipeline string, statuses []string, maxAge time.Duration, fromAnyRun bool) (*Run, error) {
+// When readerRunID names a run of the same pipeline, only runs of the reader's
+// repository count. Returns ErrNotFound on miss.
+func (t *Tenant) GetLatestRun(ctx context.Context, pipeline string, statuses []string, maxAge time.Duration, fromAnyRun bool, readerRunID string) (*Run, error) {
 	if t.team == "" {
 		return nil, ErrNoTeam
 	}
-	return t.s.getLatestRun(ctx, `SELECT team,id FROM runs WHERE team=? AND pipeline=?`, []any{t.team, pipeline}, pipeline, statuses, maxAge, fromAnyRun)
+	// safety: repositories in one team can share a pipeline name, so a pipeline's
+	// own last run, such as the staging pass a promotion relies on, must be this repository's.
+	return t.s.getLatestRun(ctx, `SELECT team,id FROM runs WHERE team=? AND pipeline=? AND NOT EXISTS (SELECT 1 FROM runs reader WHERE reader.team=runs.team AND reader.id=? AND reader.pipeline=runs.pipeline AND reader.repo_key<>runs.repo_key)`, []any{t.team, pipeline, readerRunID}, pipeline, statuses, maxAge, fromAnyRun)
 }
 
 type rowScanner interface {

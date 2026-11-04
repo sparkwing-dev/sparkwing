@@ -38,6 +38,10 @@ unlock.
 
 ### Fixed
 
+- **sdk:** A `RefToLastRun` reference to the reading run's own pipeline reads only runs of the reader's repository
+  Repositories in one team can share a pipeline name, so `sparkwing run deploy -- --promote-proven` could read a
+  staging-gate record another repository's `deploy` pipeline published. References to other pipelines still read
+  across the team's repositories.
 - **runners:** A job waiting in `RunAndAwait` no longer holds its runner's slot
   A self-hosted runner defaults to `max_concurrent: 1`, and a child run goes back to the same runners, so the first `RunAndAwait` on a one-runner team hung until its timeout. A job blocked on its children now leaves its slot free, and so does the owner of a named-runner run while one of its jobs waits, until the last wait returns. A resumed job can briefly put the runner over `max_concurrent` until other jobs finish.
 

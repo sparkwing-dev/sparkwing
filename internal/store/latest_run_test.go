@@ -118,7 +118,7 @@ func TestGetLatestRun_TenantExcludesNewerForeignRun(t *testing.T) {
 	other := &Tenant{s: tenant.s, team: "b"}
 	request.Authority.ID, request.Request.Team = "other", "b"
 	foreign := seedLatestRun(t, other, request, "shared", "success", time.Minute, time.Minute)
-	got, err := tenant.GetLatestRun(t.Context(), "shared", nil, 0, true)
+	got, err := tenant.GetLatestRun(t.Context(), "shared", nil, 0, true, "")
 	if err != nil || got.ID != own {
 		t.Fatalf("tenant latest: %+v %v", got, err)
 	}
@@ -157,7 +157,7 @@ func TestGetLatestRun_PrivateInputProjectionProperty(t *testing.T) {
 			rewriteSchemaExec(t, tenant.s.db, `UPDATE runs SET spec_json=?,spec_hash='private-spec-hash',plan_json=?,plan_hash='private-plan-hash',sealed_at=? WHERE team=? AND id=?`,
 				spec, []byte(`{"jobs":[]}`), tenant.s.now().UnixNano(), tenant.team, id)
 		}
-		got, err := tenant.GetLatestRun(t.Context(), "private-inputs", nil, 0, true)
+		got, err := tenant.GetLatestRun(t.Context(), "private-inputs", nil, 0, true, "")
 		if err != nil || got.ID != id {
 			return false
 		}
@@ -190,16 +190,16 @@ func TestLatestRunDefaultsToVerifiedDefaultBranch(t *testing.T) {
 	}
 	rewriteSchemaExec(t, tenant.s.db, `UPDATE runs SET request_json=? WHERE team=? AND id=?`, sealWith(t, row.Request, provenance), tenant.team, main)
 	uploaded := seedLatestRun(t, tenant, request, "build", "success", 10*time.Minute, 5*time.Minute)
-	got, err := tenant.GetLatestRun(t.Context(), "build", []string{"success"}, 0, false)
+	got, err := tenant.GetLatestRun(t.Context(), "build", []string{"success"}, 0, false, "")
 	if err != nil || got.ID != main {
 		t.Fatalf("default selected unverified upload: got=%+v err=%v", got, err)
 	}
-	got, err = tenant.GetLatestRun(t.Context(), "build", []string{"success"}, 0, true)
+	got, err = tenant.GetLatestRun(t.Context(), "build", []string{"success"}, 0, true, "")
 	if err != nil || got.ID != uploaded {
 		t.Fatalf("explicit opt-out: got=%+v err=%v", got, err)
 	}
 	rewriteSchemaExec(t, tenant.s.db, `UPDATE runs SET intake_mode='publish',request_json=? WHERE team=? AND id=?`, sealWith(t, row.Request, provenance), tenant.team, uploaded)
-	got, err = tenant.GetLatestRun(t.Context(), "build", []string{"success"}, 0, false)
+	got, err = tenant.GetLatestRun(t.Context(), "build", []string{"success"}, 0, false, "")
 	if err != nil || got.ID != main {
 		t.Fatalf("default selected publication: got=%+v err=%v", got, err)
 	}
@@ -208,7 +208,51 @@ func TestLatestRunDefaultsToVerifiedDefaultBranch(t *testing.T) {
 func TestLatestRunDoesNotFallBackToUnverifiedOutput(t *testing.T) {
 	tenant, request, _ := intakeFixture(t)
 	seedLatestRun(t, tenant, request, "build", "success", time.Minute, 0)
-	if _, err := tenant.GetLatestRun(t.Context(), "build", []string{"success"}, 0, false); !errors.Is(err, ErrNotFound) {
+	if _, err := tenant.GetLatestRun(t.Context(), "build", []string{"success"}, 0, false, ""); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("unverified-only pipeline: want not found, got %v", err)
+	}
+}
+
+func TestLatestRunOwnPipelineReadsOnlyReaderRepository(t *testing.T) {
+	tenant, request, _ := intakeFixture(t)
+	provenance, err := runspec.AppProvenance(runspec.AppFacts{
+		Repository: "acme/repo", Event: "push", RepositoryID: 1, DeliveryKey: "latest-own",
+		VerifiedAt: tenant.s.now(), Ref: "refs/heads/main", SHA: fixtureOtherSHA,
+		DefaultBranch: "main", DefaultBranchPush: true,
+	}, runspec.Optional[runspec.PullRequest]{}, "deploy")
+	if err != nil {
+		t.Fatal(err)
+	}
+	verified := func(id, repo string) {
+		row, err := tenant.ReadRun(t.Context(), id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		rewriteSchemaExec(t, tenant.s.db, `UPDATE runs SET request_json=?,repo_key=? WHERE team=? AND id=?`, sealWith(t, row.Request, provenance), repo, tenant.team, id)
+	}
+	own := seedLatestRun(t, tenant, request, "deploy", "success", time.Hour, 45*time.Minute)
+	verified(own, "gh:1")
+	foreign := seedLatestRun(t, tenant, request, "deploy", "success", 10*time.Minute, 5*time.Minute)
+	verified(foreign, "gh:2")
+	reader := seedLatestRun(t, tenant, request, "deploy", "running", time.Minute, 0)
+	rewriteSchemaExec(t, tenant.s.db, `UPDATE runs SET repo_key='gh:1' WHERE team=? AND id=?`, tenant.team, reader)
+	consumer := seedLatestRun(t, tenant, request, "notify", "running", time.Minute, 0)
+	rewriteSchemaExec(t, tenant.s.db, `UPDATE runs SET repo_key='gh:1' WHERE team=? AND id=?`, tenant.team, consumer)
+
+	for _, c := range []struct {
+		name, reader, want string
+	}{
+		{"own pipeline skips another repository's newer run", reader, own},
+		{"another pipeline reads across repositories", consumer, foreign},
+		{"no reader reads across repositories", "", foreign},
+	} {
+		got, err := tenant.GetLatestRun(t.Context(), "deploy", []string{"success"}, 0, false, c.reader)
+		if err != nil || got.ID != c.want {
+			t.Fatalf("%s: got=%+v err=%v, want %s", c.name, got, err, c.want)
+		}
+	}
+	rewriteSchemaExec(t, tenant.s.db, `UPDATE runs SET repo_key='gh:3' WHERE team=? AND id=?`, tenant.team, reader)
+	if _, err := tenant.GetLatestRun(t.Context(), "deploy", []string{"success"}, 0, false, reader); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("reader repository with no run: want not found, got %v", err)
 	}
 }
