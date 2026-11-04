@@ -106,7 +106,8 @@ Sparkwing Cloud. `os=` and `arch=` labels are accepted but never override the
 platform the machine observes.
 
 The local controller reads `runner.labels` when it starts. After changing them,
-run `sparkwing daemon restart --force` so local runs report the new labels. An
+run `sparkwing daemon restart --force` so local runs report the new labels.
+`sparkwing runners list` shows the labels the running daemon read. An
 enrolled runner reads them when its service starts.
 
 ## Permissions and writes

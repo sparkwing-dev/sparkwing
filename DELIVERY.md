@@ -1219,8 +1219,10 @@ file. Other syntax and workflow checks remain active.
   that is set and otherwise starts an embedded Postgres on a free port (data
   under a temporary root, binaries cached in `$TMPDIR`), then stops it and
   removes the data directory whether the suite passes, fails, or is
-  interrupted; a run killed outright before its teardown finishes can leave a
-  `sparkwing-store-postgres-*` directory under `TMPDIR`. No Docker. A failing suite prints the tail of the server log,
+  interrupted. A run killed outright before its teardown finishes, as a
+  cancelled run is one second after it is asked to stop, leaves a
+  `sparkwing-store-postgres-*` directory under `TMPDIR`; the next run removes
+  every such directory whose owning process is gone. No Docker. A failing suite prints the tail of the server log,
   which embedded-postgres only makes available once the server has stopped.
   A server that will not start is retried once on a fresh port and then
   fails the step. `pre-release` runs it after the race gate, under a
