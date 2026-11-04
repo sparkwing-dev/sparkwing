@@ -602,33 +602,6 @@ type failingLocalWriter struct{}
 
 func (failingLocalWriter) Write([]byte) (int, error) { return 0, errors.New("closed output") }
 
-func TestStandaloneHostUsesFinalFlagsAndSharedHost(t *testing.T) {
-	award := localTestAward(t)
-	var calls []string
-	deps := localRuntimeFor(t, award, false, &calls)
-	resolve := deps.resolve
-	db := filepath.Join(t.TempDir(), "state.db")
-	env := filepath.Join(t.TempDir(), "environment.json")
-	deps.resolve = func(ctx context.Context, opts localRunOptions) (localRunRuntime, error) {
-		if opts.stateDB != db || opts.environmentFile != env || opts.standaloneReason != "isolated CI" {
-			t.Fatalf("standalone input=%+v", opts)
-		}
-		return resolve(ctx, opts)
-	}
-	err := runLocalHostCommandArgs(t.Context(), []string{"--run", award.RunID, "--state-db", db, "--env-file", env, "--standalone-reason", "isolated CI"}, io.Discard, deps)
-	if err != nil || !reflect.DeepEqual(calls, []string{"resolve", "claim", "bind", "host", "host-close", "close"}) {
-		t.Fatalf("standalone calls=%v error=%v", calls, err)
-	}
-	for _, args := range [][]string{{"--program", "pipeline", "run"}, {"--run", "r", "--state-db", "relative", "--standalone-reason", "CI"}, {"--run", "r", "--state-db", db}} {
-		if err := runLocalHostCommandArgs(t.Context(), args, io.Discard, localRunDependencies{resolve: func(context.Context, localRunOptions) (localRunRuntime, error) {
-			t.Fatal("invalid host arguments reached native composition")
-			return localRunRuntime{}, nil
-		}}); err == nil {
-			t.Fatalf("accepted invalid host argv %v", args)
-		}
-	}
-}
-
 func FuzzLocalOwnerSealCannotChange(f *testing.F) {
 	f.Add("private", "foreign", int64(7))
 	f.Fuzz(func(t *testing.T, value, foreign string, generation int64) {

@@ -490,20 +490,6 @@ type SealInput struct {
 	Now          time.Time
 }
 
-// safety: projections supplies write-once indexed fields derived only from the sealed spec.
-type projections struct {
-	RepoKey       RepoKey
-	RepoDisplay   string
-	Pipeline      string
-	SHA           string
-	Ref           string
-	DefaultBranch string
-	Dispatch      Dispatch
-	RequestHash   Hash
-	SpecHash      Hash
-	PlanHash      Hash
-}
-
 // safety: RetryInput carries source code and inputs with the authenticated retrier.
 type RetryInput struct {
 	Request     SealedRequest

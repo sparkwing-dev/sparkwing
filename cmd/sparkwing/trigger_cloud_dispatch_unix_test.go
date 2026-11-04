@@ -569,7 +569,7 @@ func TestCloudJobReportsThroughTheNodeHostRoute(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := sink.Append([]byte(`{"msg":"hello from the Cloud step"}`+"\n"), "", 0, 0); err != nil {
+	if err := sink.Append([]byte(`{"msg":"hello from the Cloud step"}` + "\n")); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := sink.Close(t.Context(), logseg.End{}); err != nil {

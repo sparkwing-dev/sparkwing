@@ -34,11 +34,8 @@ Empty output is an explicit
 blob and record. The store still rechecks liveness and reference authority in
 the record transaction.
 
-`OutputData.Read` requires an authorized output record lookup and consumes its
-bytes under the lookup budget. It returns bytes only after EOF verification and
-successful close. Missing records and missing objects both fail. Memo reads use
-the same bounded output reader. Hosts must attach the resulting record key in
-their result transition. `DataController.BindData` supplies the authenticated
+Hosts read outputs through `nodehost.OutputRecords`, and must attach the
+resulting record key in their result transition. `DataController.BindData` supplies the authenticated
 signer and record store. Production host construction must supply that binding.
 The common host output publisher calls `OutputData.Put` after checking SDK JSON
 and its exact-attempt result key.

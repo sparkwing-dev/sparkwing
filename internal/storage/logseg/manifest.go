@@ -23,9 +23,6 @@ const (
 const (
 	reasonUploadFailed = "upload failed"
 	reasonByteCap      = "byte cap"
-	reasonSequenceGap  = "sequence gap"
-	reasonDropped      = "writer dropped lines"
-	reasonUnsealed     = "writer did not seal"
 	reasonStopped      = "node stopped before its log was finished"
 )
 
@@ -89,34 +86,6 @@ func (m Manifest) Marshal() ([]byte, error) {
 // errBadManifest marks a manifest object that does not decode, or that
 // names a version or status this package does not know.
 var errBadManifest = errors.New("logseg: unreadable manifest")
-
-// parseManifest decodes a manifest object and checks its shape.
-func parseManifest(raw []byte) (*Manifest, error) {
-	var m Manifest
-	if err := json.Unmarshal(raw, &m); err != nil {
-		return nil, fmt.Errorf("%w: %w", errBadManifest, err)
-	}
-	if m.Version != manifestVersion {
-		return nil, fmt.Errorf("%w: version %d", errBadManifest, m.Version)
-	}
-	if m.Subject == nil {
-		return nil, errBadManifest
-	}
-	if err := m.Subject.Validate(); err != nil {
-		return nil, fmt.Errorf("%w: %w", errBadManifest, err)
-	}
-	switch m.Status {
-	case StatusComplete, statusIncomplete, statusCutOff:
-	default:
-		return nil, fmt.Errorf("%w: status %q", errBadManifest, m.Status)
-	}
-	for i, seg := range m.Segments {
-		if seg.N != i+1 {
-			return nil, fmt.Errorf("%w: segment %d listed at position %d", errBadManifest, seg.N, i+1)
-		}
-	}
-	return &m, nil
-}
 
 // Completeness states a reader reports for one node's log.
 const (

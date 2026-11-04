@@ -149,23 +149,16 @@ func TestRunOutputMatchesGlobalModes(t *testing.T) {
 	}
 }
 
-func TestForegroundWorkersAndHostReason(t *testing.T) {
+func TestForegroundWorkersContract(t *testing.T) {
 	var workers Flag
-	var reason bool
 	for _, c := range Registry() {
 		for _, f := range c.Flags {
 			if c.Path == "sparkwing run" && f.Name == "sw-workers" {
 				workers = f
 			}
-			if c.Path == "sparkwing __host-trigger" && f.Name == "standalone-reason" {
-				reason = f.Argument == "REASON"
-			}
 		}
 	}
 	if workers.Argument != "N" || !workers.HasMinimum || workers.Minimum != 1 || !slices.Contains(workers.Conflicts, "sw-detached") {
 		t.Fatalf("invalid workers contract: %+v", workers)
-	}
-	if !reason {
-		t.Fatal("host-trigger lacks standalone reason")
 	}
 }

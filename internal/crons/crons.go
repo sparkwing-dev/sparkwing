@@ -221,14 +221,11 @@ type ScheduleStore interface {
 	ArmCronSchedule(ctx context.Context, sched store.CronSchedule) (store.CronSchedule, bool, error)
 	ListCronSchedules(ctx context.Context) ([]store.CronSchedule, error)
 	GetCronSchedule(ctx context.Context, id string) (store.CronSchedule, error)
-	SetCronSchedulePaused(ctx context.Context, id string, paused bool) error
 	SetCronScheduleDeclared(ctx context.Context, id string, declared bool) error
 	SetCronScheduleNextDue(ctx context.Context, id string, next *time.Time) error
 	SetCronScheduleLock(ctx context.Context, id string, lock store.CronLock) error
 	SetCronOverride(ctx context.Context, id string, o store.CronOverride) error
-	ClearCronOverride(ctx context.Context, id string) error
 	DeleteCronSchedule(ctx context.Context, id string) error
-	DeleteCronSchedulesForRepo(ctx context.Context, repoPath string) (int, error)
 	ResolveCronDue(ctx context.Context, id string, cursor time.Time, next *time.Time, fire *store.CronFire) error
 	ListCronFires(ctx context.Context, scheduleID string, limit int) ([]store.CronFire, error)
 }

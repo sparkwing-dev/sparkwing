@@ -247,7 +247,7 @@ func TestRejectedRevocationsDoNotLogCommittedTargets(t *testing.T) {
 		method, path, body string
 		status             int
 	}{
-		{"DELETE", "/api/v1/tokens/swk_abcdefghijkl", "", http.StatusUnauthorized},
+		{"DELETE", "/api/v1/tokens/swk_abcdefghijkl", "", http.StatusForbidden},
 		{"DELETE", "/api/v1/team/members/0123456789abcdef", "", http.StatusNotFound},
 		{"PATCH", "/api/v1/team/members/member", `{"role":"reader"}`, http.StatusConflict},
 	} {

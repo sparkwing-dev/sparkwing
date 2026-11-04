@@ -21,6 +21,7 @@ unlock.
 ## [Unreleased]
 ### Changed
 
+- **sdk:** `NewConcurrencyGroup` in Go and `ConcurrencyGroup` in TypeScript no longer check `Scope` and `OnLimit` themselves. The host still refuses an unknown value as `plan_invalid` when it validates the plan, so both SDKs fail the same way.
 - **run:** A first run reuses the installed CLI as the pipeline engine when it is the pinned release
   The engine was downloaded again (73 MB) and verified twice; now the installed bytes are checked against the signed
   release files and verified once.
@@ -66,6 +67,11 @@ unlock.
   `WithFreshBranch` alone runs that branch's tip in the parent's repository, and naming the parent's own repository with `WithFreshRepo` inherits the parent's source.
 - **docs:** Correct the secrets and versioning pages
   `--only-on` secrets reach unverified runs on a runner enrolled with `--trust=any`, and every launcher, self-hosted ones included, refuses a development build unless `SPARKWING_DEVELOPMENT_BUILD=1` is set.
+### Removed
+
+- **cli (Breaking):** Remove the hidden `sparkwing __host-trigger` command. It refused every invocation because standalone hosting is not available; the local controller hosts queued triggers.
+- **tooling (Breaking):** Delete `bin/pre-release-test.sh` and `bin/status.sh`, which tested removed packages and queried removed `/agents` and `/jobs` routes. Use `sparkwing run pre-release`, `sparkwing runners list` and `sparkwing runs` instead.
+
 
 ## [v0.68.7] - 2026-11-04
 ### Added
