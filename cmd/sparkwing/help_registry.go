@@ -206,7 +206,7 @@ var commandFlagDescriptions = map[string]string{
 	"sparkwing repos update --version":                         "SDK release tag to move repositories to, latest by default.",
 	"sparkwing runners add --config":                           "Machine config file to write the runner section into, the standard Sparkwing config file by default.",
 	"sparkwing runners add --label":                            "Labels this runner advertises, matched against the labels jobs ask for or prefer.",
-	"sparkwing runners add --max-concurrent":                   "Most jobs this runner holds at once, written to its config.",
+	"sparkwing runners add --max-concurrent":                   "Most jobs this runner works on at once, written to its config; a job waiting in `RunAndAwait` does not count until its child finishes, so a one-slot runner can run the child.",
 	"sparkwing runners add --no-service":                       "Write the runner config and credential without installing or starting the runner service.",
 	"sparkwing runners add --repos":                            "Repository patterns this runner takes jobs for; a job on a runner serving several repositories can claim the others' jobs and their secrets, so scope it to repositories that trust each other.",
 	"sparkwing runners add --reserved-for":                     "Reserved pools this shared runner holds, which lets a --launcher runner take work and secrets restricted to those pools; a persistent runner holding a pool that a reserved secret names takes no work, and it requires team administration.",

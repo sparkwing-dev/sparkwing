@@ -19,6 +19,7 @@ unlock.
 ---
 
 ## [Unreleased]
+
 ### Changed
 
 - **delivery:** Docs, UI and process landings run their own checks plus the review
@@ -50,9 +51,6 @@ unlock.
   Activating a virtualenv or Node version manager keeps the compiled pipeline; upgrading Go behind the same `PATH`
   rebuilds it.
 - **run:** Each engine notice, such as the missing version policy warning, prints once per command instead of three times
-
-### Fixed
-
 - **runners:** A job waiting in `RunAndAwait` no longer holds its runner's slot
   A self-hosted runner defaults to `max_concurrent: 1`, and a child run goes back to the same runners, so the first `RunAndAwait` on a one-runner team hung until its timeout. A job blocked on its children now leaves its slot free, and so does the owner of a named-runner run while one of its jobs waits, until the last wait returns. A resumed job can briefly put the runner over `max_concurrent` until other jobs finish.
 
@@ -77,7 +75,6 @@ unlock.
   They still said native host, controller and managed-service integration was incomplete and that card, refund, fraud-warning and dispute settlement needed store work. Both shipped.
 - **docs:** Configuration guidance names each component's real input
   Machine configuration no longer says installation uses submitted values (only planning and execution do), and the git-credentials page says the controller reads its secrets key from the `secrets-key` file in `--credentials-dir`, not `SPARKWING_SECRETS_KEY`.
-
 
 ## [v0.68.7] - 2026-11-04
 ### Added
