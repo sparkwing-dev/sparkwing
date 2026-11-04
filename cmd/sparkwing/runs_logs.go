@@ -201,7 +201,9 @@ func writeLogRecord(out io.Writer, record controllerwire.LogRecord, format strin
 			_, timestampError := time.Parse(time.RFC3339Nano, frame.TS)
 			if timestampError == nil || (frame.Message != "" || frame.Event != "") && (frame.Level != "" || frame.Event != "" || frame.Step != "" || len(frame.Attrs) > 0) {
 				line = frame.Message
-				if line == "" {
+				// safety: a blank exec_line is a blank line of command output;
+				// printing the event name there invented text the command never wrote.
+				if line == "" && frame.Event != "exec_line" {
 					line = frame.Event
 				}
 				if detail := eventValue(frame.Attrs); detail != "" {

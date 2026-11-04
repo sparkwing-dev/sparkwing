@@ -359,6 +359,8 @@ func TestRunLogsRendersWarningsWithoutTimestampsAndKeepsAttributes(t *testing.T)
 		{`{"ts":"","event":"checkpoint","attrs":{"attempt":2}}`, "checkpoint: attempt=2"},
 		{`{"ts":"2026-10-30T17:35:04Z","level":"info","attrs":{"answer":42}}`, "answer=42"},
 		{`{"ts":"2026-10-30T17:35:04Z","level":"info"}`, ""},
+		{`{"ts":"2026-10-30T17:35:04Z","level":"info","event":"exec_line"}`, ""},
+		{`{"ts":"2026-10-30T17:35:04Z","level":"info","event":"exec_line","msg":"compiled"}`, "compiled"},
 	} {
 		for _, format := range []string{"plain", "pretty", "json"} {
 			for _, search := range []bool{false, true} {
