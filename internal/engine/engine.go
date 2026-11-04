@@ -44,6 +44,7 @@ type VerifiedRelease struct {
 	target  releaseasset.Target
 	asset   releaseasset.Verified
 	bundle  ReleaseBundle
+	keys    []ed25519.PublicKey
 }
 
 // Config supplies machine-owned storage and transport, never repository-selected trust roots or URLs.

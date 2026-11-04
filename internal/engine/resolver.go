@@ -12,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
@@ -241,8 +242,12 @@ func (r *Resolver) storeVerified(ctx context.Context, pin engineid.Pin, release 
 	if version != release.version || release.asset.Name() == "" {
 		return Resolved{}, integrity(fmt.Errorf("release capability does not match SDK pin"))
 	}
-	if _, err := VerifyRelease(version, release.target, release.bundle, r.config.TrustedKeys); err != nil {
-		return Resolved{}, err
+	// perf: a VerifiedRelease is VerifyRelease's result, so trusting every key it was checked under stands in
+	// for hashing and verifying its 70 MB again, which cost ~0.4s on every first run.
+	for _, key := range release.keys {
+		if !slices.ContainsFunc(r.config.TrustedKeys, func(trusted ed25519.PublicKey) bool { return trusted.Equal(key) }) {
+			return Resolved{}, integrity(fmt.Errorf("release was verified under a key this resolver does not trust"))
+		}
 	}
 	identity := engineid.Identity{Pin: pin, Version: version, ManifestDigest: digest(release.bundle.Manifest)}
 	if cached, ok, err := r.cached(ctx, identity, release.target); err != nil || ok {

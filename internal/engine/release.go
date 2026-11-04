@@ -49,7 +49,11 @@ func VerifyRelease(version string, target releaseasset.Target, bundle ReleaseBun
 		return VerifiedRelease{}, integrity(fmt.Errorf("embedded release version %q does not match %s", embedded, version))
 	}
 	copyBundle := ReleaseBundle{Manifest: bytes.Clone(bundle.Manifest), ManifestSignature: bytes.Clone(bundle.ManifestSignature), Asset: bytes.Clone(bundle.Asset), AssetSignature: bytes.Clone(bundle.AssetSignature)}
-	return VerifiedRelease{version: version, target: target, asset: asset, bundle: copyBundle}, nil
+	trusted := make([]ed25519.PublicKey, len(keys))
+	for i, key := range keys {
+		trusted[i] = bytes.Clone(key)
+	}
+	return VerifiedRelease{version: version, target: target, asset: asset, bundle: copyBundle, keys: trusted}, nil
 }
 
 // safety: earlier releases do not speak the node protocol this CLI hosts, and their
