@@ -687,7 +687,14 @@ func (d *deployer) pinAndPush(ctx context.Context, env deployEnv, dir string, ph
 	values := filepath.Join(env.GitopsDir, "helm-values.yaml")
 	rendered := filepath.Join(env.GitopsDir, "rendered.yaml")
 	if err := d.act(ctx, "pin the "+env.Name+" "+phase.name+" to "+want.ref()+" in "+values, func() error {
-		body, err := os.ReadFile(filepath.Join(dir, values))
+		// safety: the clone is repository content, so a symlinked values file must not
+		// redirect this rewrite outside the clone.
+		root, err := os.OpenRoot(dir)
+		if err != nil {
+			return err
+		}
+		defer root.Close() //nolint:errcheck // read-only handle; the write below reports its own error.
+		body, err := root.ReadFile(values)
 		if err != nil {
 			return err
 		}
@@ -695,7 +702,7 @@ func (d *deployer) pinAndPush(ctx context.Context, env deployEnv, dir string, ph
 		if err != nil {
 			return err
 		}
-		return os.WriteFile(filepath.Join(dir, values), []byte(pinned), 0o644)
+		return root.WriteFile(values, []byte(pinned), 0o644)
 	}); err != nil {
 		return "", err
 	}
