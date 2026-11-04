@@ -111,7 +111,7 @@ func build(k Kind, b Base, rt Runtime) ([]string, error) {
 		}
 		env[envKey(name)] = name + "=" + value
 	}
-	if k == Plan || k == Attempt || k == Eval || k == runHost || k == nodeHost {
+	if k == Plan || k == Attempt || k == Eval {
 		composeRuntime(env, k, rt)
 	}
 	if k == Attempt || k == Eval {
@@ -179,14 +179,6 @@ func inherited(k Kind, row Var, known bool, name string, b Base) bool {
 	switch k {
 	case CLI:
 		return row.Class == tool || (known && (row.Class == user || row.Class == diagnostic))
-	case daemonSpawn:
-		return row.RemoteBase || strings.HasPrefix(name, "XDG_")
-	case controller, runner, launcher:
-		return row.Class == tool
-	case runHost, nodeHost:
-		return false
-	case jobContainer:
-		return row.RemoteBase || name == "GOCACHE" || name == "GOMODCACHE" || name == "npm_config_cache" || name == "XDG_CACHE_HOME"
 	case HostChild:
 		return row.Class != diagnostic
 	case Plan, Attempt, Eval, Install:

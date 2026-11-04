@@ -19,16 +19,10 @@ const (
 // Kind identifies the process boundary at which Build applies policy.
 type Kind uint8
 
-// safety: hosts and services need explicit policies even when they execute no pipeline code themselves.
+// safety: trusted control children take ControlCommand or HostCommand; only
+// repository-controlled children take a run kind, so each kind has a caller.
 const (
 	CLI Kind = iota
-	daemonSpawn
-	controller
-	runner
-	launcher
-	runHost
-	nodeHost
-	jobContainer
 	Plan
 	Attempt
 	Eval
