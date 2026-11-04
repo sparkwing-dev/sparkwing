@@ -12,6 +12,40 @@ main, then applies Xwing's default archive retention. Public releases remain
 separate. Stateful CLI commands use their normal configuration; use a candidate
 launcher when testing isolated tool state.
 
+## Landing a change
+
+Agents and the lead land every change with `sparkwing run land`, so each
+landing goes through Sparkwing itself. From a clean, rebased work branch:
+
+```bash
+sparkwing run land --sw-dry-run                           # preview; nothing is pushed
+sparkwing run land --sw-stop-at verify --sw-allow-risk destructive,prod   # gate and review, stop before the push
+sparkwing run land --sw-allow-risk destructive,prod                         # land on main
+```
+
+The risk check covers the whole plan even when `--sw-stop-at verify` leaves
+the push out, so the stop-at form needs the risks too; the push step still
+skips. Without them the run fails as "pipeline discovery failed (details
+withheld)".
+
+The `preconditions` job refuses a dirty checkout, a detached HEAD, `main`
+itself and a branch that does not contain a freshly fetched `origin/main`, and
+names the command that fixes each. The gate (the same jobs as
+`sparkwing run gate`) and the review (the same job as `sparkwing run review`,
+under `.review.yaml`) then run in parallel. Every change is reviewed, docs and
+comment changes included; the review job never skips by size or path. Pass
+`-- --brief '...'` or `-- --skip 'F2=reason'` as for the review pipeline.
+
+The `land` job's `verify` step requires the review record's tree to be HEAD's
+tree with result `pass`, HEAD unchanged since the preconditions and
+`origin/main` still its ancestor. Its `push` step runs
+`git push origin <HEAD>:refs/heads/main` without force, so the pre-push hook
+still runs, and carries the
+`destructive` and `prod` risks, as release's `push-tag` does. A rejected push
+means main moved: rebase onto `origin/main` and rerun. The job's output is the
+landing record (branch, commit, tree, base, gate run, review record path and
+result). The gate's `test` step summary lists the slowest packages and tests.
+
 ## Checks
 
 ### Cutting a release
@@ -68,6 +102,16 @@ then uses `--allow-serial-runners` to wait and lint in sequence. The release
 job and lint deadline allow 40 minutes total: the ten-minute check allowance
 plus 30 minutes for contention. The tier measures that combined wall time,
 including waiting. Other lint callers keep their five-minute deadline.
+
+The gate's `lint` step allows ten minutes for linting itself (decision 96; both modules measure four to five minutes under load), and waiting for
+the box-wide golangci-lint lock does not count against it (lead decision,
+2026-11-03). On Unix the step takes golangci-lint's own lock,
+`$TMPDIR/golangci-lint.lock`, before it lints, then runs golangci-lint with
+`--allow-parallel-runners` while holding it, so serial runners elsewhere still
+queue behind it. The wait has its own 20-minute bound; when it expires the step
+fails naming the golangci-lint processes running at the time and saying
+nothing was learned about the tree. Elsewhere the gate keeps golangci-lint's
+own serial wait inside the five minutes.
 
 Version freshness excludes `testdata` fixture modules, matching the committed-module checks.
 
@@ -742,7 +786,18 @@ file. Other syntax and workflow checks remain active.
   `goleak` option from its `TestMain` and says why in a `safety:` comment. A
   helper process a test spawns by re-executing the test binary runs without the
   check, so a goroutine such a helper leaves behind fails nothing; the check
-  covers the suite, not the children it starts.
+  covers the suite, not the children it starts. The same package moves HOME,
+  SPARKWING_HOME and XDG_CONFIG_HOME into a private sandbox. Before it does,
+  it puts the suite's own `go env GOROOT`/bin first on PATH and pins asdf and
+  mise to the developer's real data dir, config and tool versions
+  (`ASDF_DATA_DIR`, `ASDF_<TOOL>_VERSION`, `MISE_DATA_DIR`, `MISE_CONFIG_DIR`),
+  so `go` and `helm` started through a shim still resolve. A variable already
+  set is left alone.
+- **Frontend dependencies:** the gate's `frontend-deps` step runs
+  `pnpm --dir web install --frozen-lockfile --prefer-offline --ignore-scripts`
+  before the frontend steps, a no-op when `web/node_modules` matches the
+  lockfile. Without pnpm and without `web/node_modules` it fails naming that
+  command.
 - **Go result caching:** ordinary `test` and `gate` checks preserve the
   caller's temporary-directory settings so Go can reuse passing results.
   Test fixtures own cleanup through `t.TempDir`, `t.Cleanup`, or deferred

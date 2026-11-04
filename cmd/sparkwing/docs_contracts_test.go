@@ -82,6 +82,7 @@ func TestDocsMentionEnvVarRequiresWholeIdentifierToken(t *testing.T) {
 
 var userNamedEnvReads = map[string]string{
 	"cmd/sparkwing/local_run_host.go: name": "the user's machine config names the local secrets a burst run reads",
+	"internal/testleak/toolshims.go: key":   "asdf's ASDF_<TOOL>_VERSION, named from the tools the developer's .tool-versions lists",
 }
 
 // safety: a computed read hides the names it produces, so each one is listed

@@ -104,6 +104,10 @@ Sparkwing code. See [node protocol](node-protocol.md).
 | `XDG_CACHE_HOME` | XDG Base Directory specification |
 | `XDG_CONFIG_HOME` | XDG Base Directory specification |
 | `XDG_RUNTIME_DIR` | XDG Base Directory specification |
+| `XDG_DATA_HOME` | XDG Base Directory specification; the test sandbox in `internal/testleak` finds mise's data dir through it |
+| `ASDF_CONFIG_FILE` | asdf; the test sandbox in `internal/testleak` pins it so shims keep working after it moves HOME |
+| `ASDF_DATA_DIR` | asdf; pinned by the test sandbox the same way |
+| `ASDF_DEFAULT_TOOL_VERSIONS_FILENAME` | asdf; the test sandbox reads it to find the tool versions it pins as `ASDF_<TOOL>_VERSION` |
 | `CI` | CI providers |
 | `CLAUDECODE` | Claude Code; marks an agent-started run, see [cli](cli.md#agent-started-runs) |
 | `CODEX_THREAD_ID` | Codex CLI; marks an agent-started run |

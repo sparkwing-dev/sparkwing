@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"runtime"
@@ -63,18 +64,26 @@ func (Gate) Examples() []sparkwing.Example {
 }
 
 func (p *Gate) Plan(_ context.Context, plan *sparkwing.Plan, in GateArgs, rc sparkwing.RunContext) error {
+	gateJobs(plan, p, rc.Pipeline, in.Full)
+	return nil
+}
+
+// safety: land composes the gate through this one function and orders its
+// push after every node returned, so a job added to the gate here is one the
+// push waits for.
+func gateJobs(plan *sparkwing.Plan, p *Gate, id string, full bool) []*sparkwing.JobNode {
 	p.mode = gateAffected
-	if in.Full {
+	if full {
 		p.mode = gateFull
 	}
-	ref := provenGatePass(rc.Pipeline)
+	ref := provenGatePass(id)
 	p.Proven = ref
 	proven := skipWhenTreePassed(ref)
-	broad := sparkwing.Job(plan, rc.Pipeline, p).Timeout(gateRunTimeout).Cache(lintCache()).SkipIf(proven)
+	broad := sparkwing.Job(plan, id, p).Timeout(gateRunTimeout).Cache(lintCache()).SkipIf(proven)
 	race := sparkwing.Job(plan, "race-touched", &raceTouchedJob{Proven: ref, mode: p.mode}).Timeout(raceTouchedStepTimeout).SkipIf(proven)
 	record := &recordTree{Proven: ref, Gate: sparkwing.RefTo[bool](broad), Race: sparkwing.RefTo[bool](race), mode: p.mode}
-	sparkwing.Job(plan, recordTreeJob, record).Needs(broad, race).SkipIf(proven)
-	return nil
+	tree := sparkwing.Job(plan, recordTreeJob, record).Needs(broad, race).SkipIf(proven)
+	return []*sparkwing.JobNode{broad, race, tree}
 }
 
 // perf: four-core runners need explicit per-process limits for heavy suites.
@@ -156,8 +165,9 @@ func (p *Gate) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
 	sparkwing.Step(w, "changelog", checkChangelogRequired)
 	sparkwing.Step(w, "api-spec", checkAPISpec)
 	sparkwing.Step(w, "api-snapshot", checkAPISnapshot)
-	frontendUnit := sparkwing.Step(w, "frontend-unit", runFrontendUnit)
-	frontendLint := sparkwing.Step(w, "frontend-lint", runFrontendLint)
+	frontendDeps := sparkwing.Step(w, "frontend-deps", runFrontendDeps)
+	frontendUnit := sparkwing.Step(w, "frontend-unit", runFrontendUnit).Needs(frontendDeps)
+	frontendLint := sparkwing.Step(w, "frontend-lint", runFrontendLint).Needs(frontendDeps)
 	frontendBuild := sparkwing.Step(w, "frontend-build", runFrontendBuild).Needs(frontendUnit, frontendLint)
 	frontendBrowser := sparkwing.Step(w, "frontend-browser", runFrontendBrowser).Needs(frontendBuild)
 	if p.mode == gateAffected {
@@ -178,6 +188,25 @@ func runTypeScriptSDK(ctx context.Context) error {
 	const sdk = "npm --prefix sdk/typescript"
 	if _, err := sparkwing.Bash(ctx, sdk+" ci --ignore-scripts --no-audit --no-fund && "+sdk+" run typecheck && "+sdk+" test").Run(); err != nil {
 		return fmt.Errorf("TypeScript SDK suite: %w", err)
+	}
+	return nil
+}
+
+const frontendInstall = "pnpm --dir web install --frozen-lockfile --prefer-offline --ignore-scripts"
+
+// safety: a checkout without web/node_modules failed the frontend steps with
+// exit 127 and no remedy. The frozen install matches hosted CI's and is a fast
+// no-op when the dependencies already match the lockfile.
+func runFrontendDeps(ctx context.Context) error {
+	if _, err := exec.LookPath("pnpm"); err != nil {
+		if _, statErr := os.Stat(filepath.Join(sparkwing.WorkDir(), "web", "node_modules")); statErr == nil {
+			sparkwing.Warn(ctx, "pnpm is not on PATH, so web/node_modules was not checked against the lockfile")
+			return nil
+		}
+		return fmt.Errorf("frontend dependencies: web/node_modules is missing and pnpm is not on PATH; install pnpm (corepack enable pnpm), then run: %s", frontendInstall)
+	}
+	if _, err := sparkwing.Bash(ctx, frontendInstall).Run(); err != nil {
+		return fmt.Errorf("frontend dependencies: %w\nrun: %s", err, frontendInstall)
 	}
 	return nil
 }
@@ -755,6 +784,11 @@ func forEachGoModule(ctx context.Context, label, cmd, home string) error {
 	if err != nil {
 		return err
 	}
+	var timings *goTestTimings
+	if label == "go test" {
+		timings = &goTestTimings{}
+		defer timings.report(ctx, time.Now())
+	}
 	var failures []string
 	for _, dir := range dirs {
 		packages, err := modulePackageArgs(ctx, dir, label != "go build")
@@ -770,7 +804,7 @@ func forEachGoModule(ctx context.Context, label, cmd, home string) error {
 		if home != "" {
 			script = productTestScript(script, home)
 		}
-		if _, err := sparkwing.Bash(ctx, script).Run(); err != nil {
+		if err := runModuleCommand(ctx, script, timings); err != nil {
 			failures = append(failures, describeModuleFailure(dir, err))
 		}
 	}

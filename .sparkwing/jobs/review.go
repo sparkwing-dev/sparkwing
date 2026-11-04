@@ -52,11 +52,17 @@ func (p *Review) Plan(_ context.Context, plan *sparkwing.Plan, in ReviewArgs, ru
 	if run.Git != nil {
 		branch = run.Git.Branch
 	}
-	sparkwing.Job(plan, "review", &reviewJob{args: in, branch: branch}).
+	reviewJobNode(plan, in, branch)
+	return nil
+}
+
+// safety: land declares its review through this function too, so the review it
+// requires before pushing main is the job `sparkwing run review` runs.
+func reviewJobNode(plan *sparkwing.Plan, in ReviewArgs, branch string) *sparkwing.JobNode {
+	return sparkwing.Job(plan, "review", &reviewJob{args: in, branch: branch}).
 		Inline().
 		Timeout(45 * time.Minute).
 		NoProgressTimeout(30 * time.Minute)
-	return nil
 }
 
 func init() {

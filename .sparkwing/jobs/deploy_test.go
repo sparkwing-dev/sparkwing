@@ -423,15 +423,15 @@ func (f *fakeDeploy) session(env map[string]string) error {
 func (f *fakeDeploy) commitValues(dir, values string) {
 	f.t.Helper()
 	work := filepath.Join(f.t.TempDir(), "edit")
-	gitIn(f.t, filepath.Dir(work), "clone", "--quiet", f.bare, work)
+	deployGitIn(f.t, filepath.Dir(work), "clone", "--quiet", f.bare, work)
 	if err := os.WriteFile(filepath.Join(work, dir, "helm-values.yaml"), []byte(values), 0o644); err != nil {
 		f.t.Fatal(err)
 	}
-	gitIn(f.t, work, "commit", "--quiet", "-am", "hand edit")
-	gitIn(f.t, work, "push", "--quiet", "origin", "HEAD:main")
+	deployGitIn(f.t, work, "commit", "--quiet", "-am", "hand edit")
+	deployGitIn(f.t, work, "push", "--quiet", "origin", "HEAD:main")
 }
 
-func gitIn(t *testing.T, dir string, args ...string) string {
+func deployGitIn(t *testing.T, dir string, args ...string) string {
 	t.Helper()
 	cmd := exec.Command("git", args...)
 	cmd.Dir = dir
@@ -458,12 +458,12 @@ func newFakeDeploy(t *testing.T) *fakeDeploy {
 	if err := os.WriteFile(filepath.Join(f.repo, deployStoreSchema), []byte(schema), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	gitIn(t, f.repo, "init", "--quiet", "-b", "main")
-	gitIn(t, f.repo, "add", "-A")
-	gitIn(t, f.repo, "commit", "--quiet", "-m", "source")
-	f.head = gitIn(t, f.repo, "rev-parse", "HEAD")
-	gitIn(t, root, "clone", "--quiet", "--bare", f.repo, filepath.Join(root, "source.git"))
-	gitIn(t, f.repo, "remote", "add", "origin", filepath.Join(root, "source.git"))
+	deployGitIn(t, f.repo, "init", "--quiet", "-b", "main")
+	deployGitIn(t, f.repo, "add", "-A")
+	deployGitIn(t, f.repo, "commit", "--quiet", "-m", "source")
+	f.head = deployGitIn(t, f.repo, "rev-parse", "HEAD")
+	deployGitIn(t, root, "clone", "--quiet", "--bare", f.repo, filepath.Join(root, "source.git"))
+	deployGitIn(t, f.repo, "remote", "add", "origin", filepath.Join(root, "source.git"))
 
 	f.old = deployImages{
 		Commit: f.head, Version: "v0.68.3", SchemaDigest: schemaBaselineDigestOf(schema),
@@ -478,7 +478,7 @@ func newFakeDeploy(t *testing.T) *fakeDeploy {
 	if err := os.MkdirAll(work, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	gitIn(t, work, "init", "--quiet", "-b", "main")
+	deployGitIn(t, work, "init", "--quiet", "-b", "main")
 	for _, dir := range []string{"sparkwing", "sparkwing-staging"} {
 		values := testValues("v0.68.3", f.old.Controller.Digest, f.old.Runner.Digest)
 		rendered := testRendered(dir, testPins("v0.68.3", f.old.Controller.Digest, f.old.Runner.Digest), "old-chart")
@@ -491,9 +491,9 @@ func newFakeDeploy(t *testing.T) *fakeDeploy {
 			}
 		}
 	}
-	gitIn(t, work, "add", "-A")
-	gitIn(t, work, "commit", "--quiet", "-m", "seed")
-	gitIn(t, root, "clone", "--quiet", "--bare", work, f.bare)
+	deployGitIn(t, work, "add", "-A")
+	deployGitIn(t, work, "commit", "--quiet", "-m", "seed")
+	deployGitIn(t, root, "clone", "--quiet", "--bare", work, f.bare)
 	return f
 }
 
@@ -546,7 +546,7 @@ func (f *fakeDeploy) deployer(dry bool) *deployer {
 
 func (f *fakeDeploy) pinsOnMain(dir string) valuesPins {
 	f.t.Helper()
-	pins, err := readValuesPins(gitIn(f.t, f.bare, "show", "main:"+dir+"/helm-values.yaml"))
+	pins, err := readValuesPins(deployGitIn(f.t, f.bare, "show", "main:"+dir+"/helm-values.yaml"))
 	if err != nil {
 		f.t.Fatal(err)
 	}
@@ -554,7 +554,7 @@ func (f *fakeDeploy) pinsOnMain(dir string) valuesPins {
 }
 
 func (f *fakeDeploy) subjects() []string {
-	return strings.Split(gitIn(f.t, f.bare, "log", "--format=%s", "main"), "\n")
+	return strings.Split(deployGitIn(f.t, f.bare, "log", "--format=%s", "main"), "\n")
 }
 
 func (f *fakeDeploy) run(ctx context.Context, c deployCommand) (string, error) {
@@ -672,7 +672,7 @@ func (f *fakeDeploy) kubectl(c deployCommand) (string, error) {
 		if _, ok := envDir[app]; !ok {
 			return "", fmt.Errorf("unknown app %s", app)
 		}
-		head := gitIn(f.t, f.bare, "rev-parse", "main")
+		head := deployGitIn(f.t, f.bare, "rev-parse", "main")
 		return fmt.Sprintf(`{"status":{"sync":{"status":"Synced","revision":%q},"health":{"status":"Healthy"}}}`, head), nil
 	case strings.Contains(joined, "get deployment"):
 		ns := c.Args[1]
@@ -774,18 +774,18 @@ func TestDeployStagingGateThenProduction(t *testing.T) {
 	if !strings.HasPrefix(subjects[1], "deploy(staging): controller") || !strings.HasPrefix(subjects[0], "deploy(staging): launcher") {
 		t.Fatalf("GitOps history = %q", subjects)
 	}
-	if author := gitIn(t, f.bare, "log", "-1", "--format=%an <%ae>", "main"); author != "Sparkwing deploy <deploy@sparkwing.dev>" {
+	if author := deployGitIn(t, f.bare, "log", "-1", "--format=%an <%ae>", "main"); author != "Sparkwing deploy <deploy@sparkwing.dev>" {
 		t.Fatalf("deploy commit author = %q", author)
 	}
 	if slices.ContainsFunc(f.calls, func(c string) bool { return strings.Contains(c, "annotate") || strings.Contains(c, "patch") }) {
 		t.Fatalf("the deploy wrote to an Argo application: %q", f.calls)
 	}
-	controllerRender := gitIn(t, f.bare, "show", "main~1:sparkwing-staging/rendered.yaml")
+	controllerRender := deployGitIn(t, f.bare, "show", "main~1:sparkwing-staging/rendered.yaml")
 	if !strings.Contains(controllerRender, "@"+images.Controller.Digest) || !strings.Contains(controllerRender, "@"+f.old.Runner.Digest) ||
 		!strings.Contains(controllerRender, "chart: old-chart") {
 		t.Fatalf("the controller commit changed more than the controller Deployment:\n%s", controllerRender)
 	}
-	if final := gitIn(t, f.bare, "show", "main:sparkwing-staging/rendered.yaml"); !strings.Contains(final, "chart: new-chart") || strings.Contains(final, "@"+f.old.Runner.Digest) {
+	if final := deployGitIn(t, f.bare, "show", "main:sparkwing-staging/rendered.yaml"); !strings.Contains(final, "chart: new-chart") || strings.Contains(final, "@"+f.old.Runner.Digest) {
 		t.Fatalf("the launcher commit did not carry the rest of the chart:\n%s", final)
 	}
 
@@ -871,16 +871,16 @@ func TestDeployRefusesSupersededCommit(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(f.repo, "NEXT"), []byte("x"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	gitIn(t, f.repo, "add", "NEXT")
-	gitIn(t, f.repo, "commit", "--quiet", "-m", "next")
-	gitIn(t, f.repo, "push", "--quiet", "origin", "HEAD:main")
-	before := gitIn(t, f.bare, "rev-parse", "main")
+	deployGitIn(t, f.repo, "add", "NEXT")
+	deployGitIn(t, f.repo, "commit", "--quiet", "-m", "next")
+	deployGitIn(t, f.repo, "push", "--quiet", "origin", "HEAD:main")
+	before := deployGitIn(t, f.bare, "rev-parse", "main")
 	for _, env := range []deployEnv{f.config().Staging, f.config().Production} {
 		if _, _, err := f.deployer(false).deployTo(t.Context(), env, images); err == nil || !strings.Contains(err.Error(), "only main's tip deploys") {
 			t.Fatalf("%s deploy of a superseded commit: %v", env.Name, err)
 		}
 	}
-	if gitIn(t, f.bare, "rev-parse", "main") != before {
+	if deployGitIn(t, f.bare, "rev-parse", "main") != before {
 		t.Fatal("a superseded commit reached GitOps")
 	}
 }
@@ -890,11 +890,11 @@ func TestDeployRefusesProductionDowngrade(t *testing.T) {
 	images := f.candidate()
 	images.Version = "v0.68.2"
 	images.Controller.Tag, images.Runner.Tag = images.Version, images.Version
-	before := gitIn(t, f.bare, "rev-parse", "main")
+	before := deployGitIn(t, f.bare, "rev-parse", "main")
 	if _, err := f.deployer(false).promote(t.Context(), images); err == nil || !strings.Contains(err.Error(), "never moves an environment back") {
 		t.Fatalf("production downgrade: %v", err)
 	}
-	if gitIn(t, f.bare, "rev-parse", "main") != before {
+	if deployGitIn(t, f.bare, "rev-parse", "main") != before {
 		t.Fatal("a downgrade reached GitOps")
 	}
 }
@@ -903,12 +903,12 @@ func TestDeployFirstDeployOverUntracedImageNeedsAPerson(t *testing.T) {
 	f := newFakeDeploy(t)
 	f.commitValues("sparkwing", testValues("commit-9fe8aca9f", f.old.Controller.Digest, f.old.Runner.Digest))
 	f.registry.revisions = map[string]string{}
-	before := gitIn(t, f.bare, "rev-parse", "main")
+	before := deployGitIn(t, f.bare, "rev-parse", "main")
 	_, err := f.deployer(false).promote(t.Context(), f.candidate())
 	if err == nil || !strings.Contains(err.Error(), "Deploy once by hand") || !strings.Contains(err.Error(), "helm template sparkwing charts/sparkwing-full --namespace sparkwing") {
 		t.Fatalf("first deploy over an untraced image: %v", err)
 	}
-	if gitIn(t, f.bare, "rev-parse", "main") != before {
+	if deployGitIn(t, f.bare, "rev-parse", "main") != before {
 		t.Fatal("a refused first deploy reached GitOps")
 	}
 
@@ -1027,12 +1027,12 @@ func TestDeployRefusesStoreBaselineChange(t *testing.T) {
 	f := newFakeDeploy(t)
 	images := f.candidate()
 	images.SchemaDigest = schemaBaselineDigestOf("CREATE TABLE other (id TEXT);\n")
-	before := gitIn(t, f.bare, "rev-parse", "main")
+	before := deployGitIn(t, f.bare, "rev-parse", "main")
 	_, err := f.deployer(false).promote(t.Context(), images)
 	if err == nil || !strings.Contains(err.Error(), "store change takes the full gate") {
 		t.Fatalf("promote across a store change = %v", err)
 	}
-	if after := gitIn(t, f.bare, "rev-parse", "main"); after != before {
+	if after := deployGitIn(t, f.bare, "rev-parse", "main"); after != before {
 		t.Fatal("a refused deploy pushed to GitOps")
 	}
 }

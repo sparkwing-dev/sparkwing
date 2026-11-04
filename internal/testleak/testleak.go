@@ -49,6 +49,18 @@ func enterSandbox() string {
 	// HOME without pinning them sends every build a test runs to an empty cache
 	// and a module download.
 	goEnv := resolveGoEnv()
+	tools := map[string]string{}
+	if realHome, err := os.UserHomeDir(); err == nil {
+		cwd, err := os.Getwd()
+		if err != nil {
+			cwd = ""
+		}
+		tools = toolResolutionEnv(realHome, cwd, os.Getenv)
+	}
+	if path := goRootFirstOnPath(goEnv["GOROOT"], os.Getenv("PATH")); path != "" {
+		tools["PATH"] = path
+	}
+	delete(goEnv, "GOROOT")
 	// safety: named rather than created, because a helper started with a
 	// replaced environment cannot tell it is one and never removes what it
 	// made; the code under test creates the directories it writes.
@@ -69,6 +81,9 @@ func enterSandbox() string {
 			env[k] = v
 		}
 	}
+	for k, v := range tools {
+		env[k] = v
+	}
 	for k, v := range env {
 		if err := os.Setenv(k, v); err != nil {
 			fmt.Fprintf(os.Stderr, "testleak: cannot enter the sandbox home %s: %v\n", root, err)
@@ -79,7 +94,7 @@ func enterSandbox() string {
 }
 
 func resolveGoEnv() map[string]string {
-	out, err := procenv.HostCommand("go", "env", "-json", "GOENV", "GOPATH", "GOCACHE", "GOMODCACHE").Output()
+	out, err := procenv.HostCommand("go", "env", "-json", "GOENV", "GOPATH", "GOCACHE", "GOMODCACHE", "GOROOT").Output()
 	if err != nil {
 		return nil
 	}

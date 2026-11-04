@@ -19,7 +19,6 @@ unlock.
 ---
 
 ## [Unreleased]
-
 ### Added
 
 - **CLI:** `sparkwing dashboard status` reports the dashboard apart from the controller, with its URL
@@ -39,6 +38,11 @@ unlock.
   The upgrade adds `nodes.trusted_host` and records version 29 and its digest in one transaction on SQLite and PostgreSQL; on PostgreSQL the migration advisory lock lets controllers starting together run it once. Older versions, schema 28 with any other digest, and newer versions are refused unchanged with a remedy. An older binary refuses the upgraded store, so snapshot the store first; rollback means restoring that snapshot. See the [store upgrade migration](docs/migrations/_unreleased.md#upgrade-the-store-in-place-to-schema-baseline-29).
 - **scaffold:** `const FallbackSDKVersion` pins v0.68.6, so a fresh scaffold compiles against that release.
 
+
+- **CLI (Breaking):** `--sw-run-handle-file` writes an identity-only handle without `status`
+  The handle recorded `"status":"pending"` at intake and kept it after the run finished, so a reader polling it saw a run that never ended. The handle is a write-once identity: it now holds only `schema_version`, `run_id` and `pipeline`. Read `run_id` and query `sparkwing runs status --run RUN_ID` for the current state. See the [migration guide](docs/migrations/_unreleased.md#run-handle-files-carry-no-status).
+- **scaffold:** `const FallbackSDKVersion` pins v0.68.6, so a fresh scaffold compiles against that release.
+
 ### Fixed
 
 - **CLI:** `sparkwing dashboard open` works against a controller that `sparkwing run` started
@@ -46,7 +50,6 @@ unlock.
 - **CLI, API, web:** Show when a coding agent started a run
   `sparkwing run` and `sparkwing pipeline trigger` record the coding agent that starts a run on a person's behalf. `--agent NAME` sets or names it, such as `claude-code:land-agent`, and `--agent none` opts out; without the flag, `SPARKWING_AGENT` applies, then a detected Claude Code (`CLAUDECODE=1`), Codex (`CODEX_THREAD_ID`) or Gemini CLI (`GEMINI_CLI=1`) environment. Intake seals the label with the run request; retries and `--publish` keep it. `runs status` and `runs list` show it in every output mode, the run API returns it as `agent`, and the console shows an agent icon and name beside the requester. The label is self-declared and display-only: trust, secrets, OIDC, cache scope, approvals and claims never read it. A controller older than the label refuses the field; the CLI then resends once without it and prints a one-line notice. See [Agent-started runs](docs/cli.md#agent-started-runs).
 
-### Fixed
 
 - **API:** Name the request field a controller does not accept and say to upgrade it
   A client newer than its controller failed with "body has a field this endpoint does not accept". The refusal now names the field, such as `agent`, in the message and in `details.unknown_field`, and says to upgrade the controller or use a client no newer than it.
@@ -85,11 +88,6 @@ unlock.
   A local run whose job required runner labels the machine running it does not report, such as `Requires("host=build-box")` on a laptop, left the job `pending` with an empty detail for as long as the run lived, because only that machine ever executes a local run's jobs. `runs status` (pretty and JSON `status_detail`) and the dashboard now say the job waits on those labels, list the labels the machine reports, and say to cancel the run and start it where the labels apply or change the job's requirements.
 - **CLI:** `sparkwing update` caches the version policy local runs read, and doctor reports it
   Every local run warned that no verified version policy was cached, because local runs never fetch it and the commands that did kept it in `~/.cache/sparkwing/engines` while local runs read `<sparkwing home>/engines`. Engine releases and the policy now share `<sparkwing home>/engines`; previously cached engines download again once. `sparkwing update` refreshes the signed policy there and reports it as `version_policy`. `update --dry-run` and `doctor` report the cached policy's status, latest release, publication time and age without writing anything, and the local-run warning now says to run `sparkwing update`. Local runs stay offline.
-### Changed
-
-- **CLI (Breaking):** `--sw-run-handle-file` writes an identity-only handle without `status`
-  The handle recorded `"status":"pending"` at intake and kept it after the run finished, so a reader polling it saw a run that never ended. The handle is a write-once identity: it now holds only `schema_version`, `run_id` and `pipeline`. Read `run_id` and query `sparkwing runs status --run RUN_ID` for the current state. See the [migration guide](docs/migrations/_unreleased.md#run-handle-files-carry-no-status).
-- **scaffold:** `const FallbackSDKVersion` pins v0.68.6, so a fresh scaffold compiles against that release.
 
 ## [v0.68.6] - 2026-11-03
 ### Fixed
