@@ -5,8 +5,8 @@ const goToolchainDoc = "Go toolchain; inherited on the requester's own machine w
 // Registry is the single classification table for environment generation and reference documentation.
 // Removed names remain deny-only rows so stale parent environments cannot restore a credential transport.
 var Registry = []Var{
-	{Name: "SPARKWING_HOME", Prefix: false, Class: user, Owner: "user", Doc: "CLI setting; service equivalents are flags."},
-	{Name: "SPARKWING_CONFIG", Prefix: false, Class: user, Owner: "user", Doc: "CLI setting; service equivalents are flags."},
+	{Name: "SPARKWING_HOME", Prefix: false, Class: user, Owner: "user", Doc: "State home for the CLI, controller and runner; a native runner service records it."},
+	{Name: "SPARKWING_CONFIG", Prefix: false, Class: user, Owner: "user", Doc: "Machine configuration path for the CLI and runner."},
 	{Name: "SPARKWING_LOG_FORMAT", Prefix: false, Class: user, Owner: "user", Doc: "CLI setting; service equivalents are flags."},
 	{Name: "SPARKWING_AGENT", Prefix: false, Class: user, Owner: "user", Doc: "CLI setting; names the coding agent that starts a run."},
 	{Name: "SPARKWING_TOOLCHAIN", Prefix: false, Class: user, Owner: "user", Doc: "CLI setting; service equivalents are flags."},

@@ -414,3 +414,26 @@ func TestXMLTextEscapesMarkupAndKeepsSpaces(t *testing.T) {
 		t.Errorf("plistConfigPath after escaping = %q, want %q", got, h.ConfigPath)
 	}
 }
+
+func TestInstallCarriesANondefaultStateHome(t *testing.T) {
+	for _, newHost := range []func(*testing.T, *fakeExec) Host{linuxHost, darwinHost} {
+		h := newHost(t, &fakeExec{})
+		h.StateHome = filepath.Join(t.TempDir(), "srv sparkwing")
+		if _, err := Install(t.Context(), h); err != nil {
+			t.Fatalf("%s Install: %v", h.GOOS, err)
+		}
+		path := UnitPath(h)
+		want := "Environment=" + unitfile.Assignment("SPARKWING_HOME", h.StateHome)
+		if h.GOOS == "darwin" {
+			path = plistPath(h)
+			want = "<key>SPARKWING_HOME</key>\n    <string>" + unitfile.XMLText(h.StateHome) + "</string>"
+		}
+		body, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(string(body), want) {
+			t.Errorf("%s registration does not carry the state home %q:\n%s", h.GOOS, want, body)
+		}
+	}
+}

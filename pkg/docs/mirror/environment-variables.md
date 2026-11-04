@@ -22,8 +22,12 @@ Kinds:
   decision to document it or remove it.
 
 The services (`sparkwing-controller` and
-`sparkwing-runner`) read their settings from flags and their secrets from
-the files in `--credentials-dir`, so no service configuration appears here.
+`sparkwing-runner`) read most settings from flags and their secrets from
+the files in `--credentials-dir`. Both also read `SPARKWING_HOME` for their
+state, and the runner reads `SPARKWING_CONFIG`. A native runner service that
+`sparkwing runners add` installs records the resolved `SPARKWING_HOME` in its
+systemd unit or LaunchAgent, so the service uses the state home the installer
+chose.
 
 
 ## Configuration: the `sparkwing` CLI and local runs

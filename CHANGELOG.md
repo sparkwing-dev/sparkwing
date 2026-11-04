@@ -26,6 +26,8 @@ unlock.
 
 ### Fixed
 
+- **runners:** A native runner service keeps a custom `SPARKWING_HOME`
+  `sparkwing runners add` placed the log under the selected state home, but the systemd unit and LaunchAgent did not carry it, so the started runner used `~/.sparkwing`. Both now set `SPARKWING_HOME` to the home the installer resolved; reinstall an existing service to pick it up.
 - **runner:** `sparkwing-runner version -o json` writes one JSON record on one line
   It printed an indented document, which a reader taking one JSON object per line could not parse.
 - **launcher:** Stop warning about Cloud reservations that belong to another job namespace
