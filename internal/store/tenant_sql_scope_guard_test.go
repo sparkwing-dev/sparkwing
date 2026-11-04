@@ -795,9 +795,12 @@ func flattenSQL(e ast.Expr, consts map[string]string) (string, bool) {
 	case *ast.ParenExpr:
 		return flattenSQL(v.X, consts)
 	case *ast.CallExpr:
-		// safety: these claimSQL helpers render a table function over one value, never a stored relation.
+		// safety: these claimSQL helpers render a table function over one value, never a stored relation; only a
+		// call on the claimSQL receiver q is trusted, so a same-named helper elsewhere is still judged.
 		if sel, ok := v.Fun.(*ast.SelectorExpr); ok && slices.Contains([]string{"array", "indexed", "alternatives"}, sel.Sel.Name) {
-			return "json_each", true
+			if recv, ok := sel.X.(*ast.Ident); ok && recv.Name == "q" {
+				return "json_each", true
+			}
 		}
 	}
 	return "", false
