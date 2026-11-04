@@ -132,9 +132,10 @@ CGO_ENABLED=1 sparkwing run build
 ```
 
 In GitHub Actions, set it on the step or job (`env: CGO_ENABLED: "1"`). A
-run cannot submit `CGO_*` names to Cloud or shared runners, so there the
-setting comes from the runner's own environment; a self-hosted runner sets
-it in the service environment it starts with.
+run cannot submit `CGO_*` names to a remote runner, so there the setting comes
+from the runner's own environment: set `CGO_ENABLED=1` in the environment the
+runner service starts with. Sparkwing Cloud runners carry no C compiler, so a
+cgo pipeline did not build there before this release either.
 `go env -w CGO_ENABLED=1` does not count: Sparkwing reads the process
 environment, and its `CGO_ENABLED=0` overrides Go's configuration file.
 
