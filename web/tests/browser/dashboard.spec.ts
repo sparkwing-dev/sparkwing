@@ -2625,8 +2625,11 @@ test("keeps every run header control inside the phone viewport", async ({ page }
   await page.setViewportSize({ width: 375, height: 900 });
   await page.goto(`/runs?run=${run.id}`);
   const rerun = page.getByRole("button", { name: "Rerun", exact: true }).last();
-  await expect(rerun).toBeVisible();
-  const header = page.locator("div").filter({ has: rerun }).filter({ has: page.getByRole("button", { name: "Run", exact: true }) }).last();
+  const runButton = page.getByRole("button", { name: "Run", exact: true });
+  // The runs toolbar has its own Rerun, so wait for the detail header's Run.
+  await expect(runButton).toBeVisible();
+  const header = page.locator("div").filter({ has: rerun }).filter({ has: runButton }).last();
+  await expect(header.getByRole("button", { name: "Cancel", exact: true })).toBeVisible();
   const checkControls = async () => {
     const controls = header.locator("button, a, input, select, [role=button]");
     expect(await controls.count()).toBeGreaterThanOrEqual(3);
@@ -2640,9 +2643,11 @@ test("keeps every run header control inside the phone viewport", async ({ page }
   };
   await checkControls();
   await page.getByRole("button", { name: "Cancel", exact: true }).click();
+  await expect(header.getByRole("button", { name: "Confirm cancel" })).toBeVisible();
   await checkControls();
   await page.getByRole("button", { name: "Confirm cancel" }).click();
   await rerun.click();
+  await expect(page.getByRole("menuitem").first()).toBeVisible();
   for (const item of await page.getByRole("menuitem").all()) {
     const box = await item.boundingBox();
     expect(box).not.toBeNull();
