@@ -991,12 +991,14 @@ export interface CreateRunResponse {
 
 export async function retryRun(
   runID: string,
-  opts?: { full?: boolean; idempotencyKey?: string },
+  opts?: { full?: boolean; idempotencyKey?: string; reason?: string },
 ): Promise<CreateRunResponse> {
+  const body: Record<string, string> = { idempotency_key: opts?.idempotencyKey ?? crypto.randomUUID(), mode: opts?.full ? "all" : "failed" };
+  if (opts?.reason) body.reason = opts.reason;
   const res = await authFetch(`${API_URL}/api/v1/runs/${pathSegment(runID)}/retry`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ idempotency_key: opts?.idempotencyKey ?? crypto.randomUUID(), mode: opts?.full ? "all" : "failed" }),
+    body: JSON.stringify(body),
   }, { timeoutMs: null });
   if (!res.ok) throw new Error(`retry failed: ${res.status}`);
   return res.json();

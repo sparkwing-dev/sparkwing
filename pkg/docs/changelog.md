@@ -23,11 +23,12 @@ unlock.
 
 - **cli + controller:** `runs retry --reason TEXT` records why the retry should pass
   The new run keeps the reason in its lineage (`retry_reason`), and `runs status`, `runs list`, the API and the
-  console run view show it. A reason is one line of at most 1024 bytes without control characters.
+  console run view show it, and the console's Rerun menu takes one. A reason is one line of at most 1024 bytes without
+  control characters.
 
 ### Changed
 
-- **cli + controller:** An agent's retry must give `--reason`
+- **cli + controller (Breaking):** An agent's retry must give `--reason`
   When `runs retry` runs under a detected coding agent (Claude Code, Codex, Gemini CLI), `--agent` or
   `SPARKWING_AGENT`, it refuses to retry without `--reason`, and the controller refuses a retry request that names
   an agent without a reason. Fix it by saying why the retry should pass, such as

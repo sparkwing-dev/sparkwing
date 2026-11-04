@@ -246,6 +246,25 @@ describe("run admission requests", () => {
     });
   }
 
+  it("sends a retry reason only when one is given", async () => {
+    const previousFetch = globalThis.fetch;
+    const bodies: Record<string, string>[] = [];
+    globalThis.fetch = async (_input, init) => {
+      bodies.push(JSON.parse(String(init?.body)));
+      return new Response(JSON.stringify({ run_id: "new", number: 2 }), { status: 200 });
+    };
+    try {
+      await retryRun("run-one", { idempotencyKey: "a" });
+      await retryRun("run-one", { full: true, idempotencyKey: "b", reason: "flake: DNS timeout in TestX" });
+    } finally {
+      globalThis.fetch = previousFetch;
+    }
+    assert.deepEqual(bodies, [
+      { idempotency_key: "a", mode: "failed" },
+      { idempotency_key: "b", mode: "all", reason: "flake: DNS timeout in TestX" },
+    ]);
+  });
+
   it("keeps the ordinary read deadline", async (t) => {
     t.mock.timers.enable({ apis: ["setTimeout"] });
     const previousFetch = globalThis.fetch;
