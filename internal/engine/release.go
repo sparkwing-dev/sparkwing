@@ -10,6 +10,8 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"os"
+	"runtime"
 	"runtime/debug"
 	"strings"
 
@@ -47,7 +49,11 @@ func VerifyRelease(version string, target releaseasset.Target, bundle ReleaseBun
 		return VerifiedRelease{}, integrity(fmt.Errorf("embedded release version %q does not match %s", embedded, version))
 	}
 	copyBundle := ReleaseBundle{Manifest: bytes.Clone(bundle.Manifest), ManifestSignature: bytes.Clone(bundle.ManifestSignature), Asset: bytes.Clone(bundle.Asset), AssetSignature: bytes.Clone(bundle.AssetSignature)}
-	return VerifiedRelease{version: version, target: target, asset: asset, bundle: copyBundle}, nil
+	trusted := make([]ed25519.PublicKey, len(keys))
+	for i, key := range keys {
+		trusted[i] = bytes.Clone(key)
+	}
+	return VerifiedRelease{version: version, target: target, asset: asset, bundle: copyBundle, keys: trusted}, nil
 }
 
 // safety: earlier releases do not speak the node protocol this CLI hosts, and their
@@ -98,20 +104,55 @@ func (r *Resolver) fetchRelease(ctx context.Context, version string, target rele
 	}
 	base := ReleaseBase + "/" + version + "/"
 	var bundle ReleaseBundle
+	get := func(name string, body *[]byte) error {
+		fetched, err := r.fetch(ctx, base+name, true)
+		if errors.Is(err, errNotPublished) {
+			return unpublishedRelease(version, err)
+		}
+		*body = fetched
+		return err
+	}
 	for _, item := range []struct {
 		name string
 		body *[]byte
-	}{{"SHA256SUMS", &bundle.Manifest}, {"SHA256SUMS.sig", &bundle.ManifestSignature}, {name, &bundle.Asset}, {name + ".sig", &bundle.AssetSignature}} {
-		body, err := r.fetch(ctx, base+item.name, true)
-		if errors.Is(err, errNotPublished) {
-			return VerifiedRelease{}, unpublishedRelease(version, err)
-		}
-		if err != nil {
+	}{{"SHA256SUMS", &bundle.Manifest}, {"SHA256SUMS.sig", &bundle.ManifestSignature}, {name + ".sig", &bundle.AssetSignature}} {
+		if err := get(item.name, item.body); err != nil {
 			return VerifiedRelease{}, err
 		}
-		*item.body = body
+	}
+	// perf: the installed CLI is usually the pinned release itself, and its bytes pass the same signature
+	// checks, so a first run skips downloading the same 70 MB executable again.
+	if bundle.Asset = r.installedAsset(version, target); bundle.Asset != nil {
+		if verified, err := VerifyRelease(version, target, bundle, r.config.TrustedKeys); err == nil {
+			return verified, nil
+		}
+	}
+	if err := get(name, &bundle.Asset); err != nil {
+		return VerifiedRelease{}, err
 	}
 	return VerifyRelease(version, target, bundle, r.config.TrustedKeys)
+}
+
+func (r *Resolver) installedAsset(version string, target releaseasset.Target) []byte {
+	if r.installed == nil || target.Binary != releaseasset.Sparkwing || target.GOOS != runtime.GOOS || target.GOARCH != runtime.GOARCH {
+		return nil
+	}
+	path, err := r.installed()
+	if err != nil {
+		return nil
+	}
+	info, err := buildinfo.ReadFile(path)
+	if err != nil {
+		return nil
+	}
+	if embedded, err := executableVersion(info); err != nil || embedded != version {
+		return nil
+	}
+	body, err := os.ReadFile(path)
+	if err != nil {
+		return nil
+	}
+	return body
 }
 
 func (r *Resolver) fetch(ctx context.Context, address string, release bool) ([]byte, error) {

@@ -188,6 +188,8 @@ not transfer pipeline executables.
 checkout compiles its pipeline. A TypeScript checkout installs dependencies.
 When a Go pipeline reuses a compiled binary, the CLI prints
 `Cache hit: pipeline binary`, including on the run after a successful warmup.
+A run that compiles prints `Cache miss: pipeline binary compiled in <duration>`,
+so a cache that a CI provider failed to restore shows up in the run output.
 See [Warmup](sparks.md#warmup) for receipts and the process-policy integration.
 
 ### The key
@@ -201,7 +203,10 @@ Captured Go build settings, including `GOFLAGS`, `GOTOOLCHAIN`, `GOEXPERIMENT`,
 `GOINSECURE`, `GOPRIVATE` and `GONOPROXY`, also contribute to the key, so a
 binary built with checksum verification relaxed is never reused by a run with it
 on. Different build settings produce
-different cache entries.
+different cache entries. `PATH` itself is not part of the key: the `go`, C
+compiler and `pkg-config` executables it resolves to are, by resolved path, size
+and modification time. Activating a virtualenv or a Node version manager keeps
+the compiled pipeline; upgrading Go behind the same `PATH` rebuilds it.
 
 Every file Go could embed is hashed, including directories whose names begin
 with `.` or `_`. When a file vanishes or changes while the key is computed, the
