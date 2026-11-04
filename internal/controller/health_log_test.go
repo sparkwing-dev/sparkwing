@@ -14,7 +14,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
+	"github.com/sparkwing-dev/sparkwing/internal/apierrhttp"
 	"github.com/sparkwing-dev/sparkwing/internal/health"
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
 )
@@ -57,7 +57,7 @@ func TestHealthDatabaseRetryLogLevel(t *testing.T) {
 					return err
 				})
 				if err != nil {
-					apierr.NoteResponseError(w, s.healthDatabaseResult(r.Context(), err))
+					apierrhttp.NoteResponseError(w, s.healthDatabaseResult(r.Context(), err))
 					w.WriteHeader(http.StatusServiceUnavailable)
 				}
 			})

@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
+	"github.com/sparkwing-dev/sparkwing/internal/apierrhttp"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 )
@@ -282,7 +283,7 @@ func WritePolicyError(w http.ResponseWriter, err error) {
 		failure = &apierr.Error{Code: apierr.Internal, Message: "request failed"}
 	}
 	if apierr.Status(failure.Code) >= http.StatusInternalServerError {
-		apierr.NoteResponseError(w, err)
+		apierrhttp.NoteResponseError(w, err)
 		safe := &apierr.Error{Code: failure.Code, Message: "request failed"}
 		switch delay := failure.Details["retry_after_ms"].(type) {
 		case int, int64, float64:
@@ -290,7 +291,7 @@ func WritePolicyError(w http.ResponseWriter, err error) {
 		}
 		failure = safe
 	}
-	if err := apierr.WriteHTTP(w, failure); err != nil {
+	if err := apierrhttp.Write(w, failure); err != nil {
 		// safety: internal errors may contain credentials; log only the safe code.
 		slog.Error("write API error response", "code", failure.Code)
 	}

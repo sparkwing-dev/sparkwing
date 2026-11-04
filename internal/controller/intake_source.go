@@ -9,6 +9,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/envredact"
+	"github.com/sparkwing-dev/sparkwing/internal/githubapp"
 	"github.com/sparkwing-dev/sparkwing/internal/routepolicy"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
@@ -271,7 +272,7 @@ func (s *Server) intakeGitHubRepositoryID(ctx context.Context, team, slug string
 	if credential.Kind == store.GitCredentialHTTPS {
 		token = credential.Secret
 	}
-	id, err := sourceurl.GitHubRepositoryID(ctx, "https://github.com/"+slug, token)
+	id, err := githubapp.RepositoryID(ctx, "https://github.com/"+slug, token)
 	if err != nil {
 		return 0, err
 	}

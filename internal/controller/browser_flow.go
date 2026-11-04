@@ -11,7 +11,7 @@ import (
 	"net/url"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
+	"github.com/sparkwing-dev/sparkwing/internal/apierrhttp"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/web"
 )
@@ -69,7 +69,7 @@ const flowCookieTTL = 10 * time.Minute
 func setFlowCookie(w http.ResponseWriter, name string, v any, secure bool) bool {
 	raw, err := json.Marshal(v)
 	if err != nil {
-		apierr.NoteResponseError(w, err)
+		apierrhttp.NoteResponseError(w, err)
 		return false
 	}
 	writeFlowCookie(w, name, base64.RawURLEncoding.EncodeToString(raw), int(flowCookieTTL/time.Second), secure)
@@ -161,7 +161,7 @@ func renderFlowPage(w http.ResponseWriter, status int, page flowPage) {
 func renderPage(w http.ResponseWriter, status int, tmpl *template.Template, data any) {
 	var body bytes.Buffer
 	if err := tmpl.Execute(&body, data); err != nil {
-		apierr.NoteResponseError(w, err)
+		apierrhttp.NoteResponseError(w, err)
 		http.Error(w, "could not render this page", http.StatusInternalServerError)
 		return
 	}
