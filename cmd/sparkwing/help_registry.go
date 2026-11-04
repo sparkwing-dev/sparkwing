@@ -324,6 +324,7 @@ var commandFlagDescriptions = map[string]string{
 	"sparkwing-runner launch --cpu-ceiling":                    "Largest CPU request, as a Kubernetes quantity, one Job may receive; larger awards are refused.",
 	"sparkwing-runner launch --credentials-dir":                "Directory holding the launcher's agent-token file, which is re-read for each controller request and never passed into a Job.",
 	"sparkwing-runner launch --docker-image":                   "Docker-in-Docker sidecar image, pinned by sha256 digest, that each Job runs beside its workload.",
+	"sparkwing-runner launch --idle-grace":                     "How long a used Cloud node may sit unreserved before the launcher retires it, 60s by default; at least --poll plus 30s.",
 	"sparkwing-runner launch --image":                          "sparkwing-runner container image, pinned by sha256 digest, that each Job uses to fetch source and run.",
 	"sparkwing-runner launch --memory-ceiling":                 "Largest memory request, as a Kubernetes quantity, one Job may receive; larger awards are refused.",
 	"sparkwing-runner launch --namespace":                      "Kubernetes namespace where Cloud Jobs are created, sparkwing-jobs by default.",

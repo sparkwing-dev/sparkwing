@@ -413,6 +413,10 @@ Transport failures never trigger a second claim in the adapter.
 `sparkwing-runner launch --poll <duration>` sets the interval between claim and
 reconciliation cycles. The duration must be positive. Omitting it keeps the
 runtime's configured interval, which defaults to five seconds.
+`--idle-grace <duration>` sets how long a used node may sit unreserved before
+retirement. It defaults to 60 seconds and must be at least the claim poll plus
+the 30-second retirement interval, so a ready successor is claimed and reserves
+the node first; without the flag a longer poll raises the grace to that floor.
 
 The adapter projects plan source through `source.ForRequest`, and eval/work
 through `source.ForExecution` using the accepted spec and matching engine.
@@ -593,31 +597,41 @@ guards the levels; placement failures retain WARN.
 The first reservation also records `sparkwing.dev/used-run` with its team and run
 ID. Release retains it alongside the permanent protected labels. Retirement runs
 in its own loop every 30 seconds, beside reconciliation, so it finds spent nodes
-after a restart and slow queries never delay award renewal or claims. The `retire_run` query on
-the existing launcher sync endpoint checks current deployment launcher authority
-and its repository scope, and returns `run_terminal` only for a stored terminal state with a finish time.
-A retired job award, a missing run, a refused query or an unavailable controller
-is insufficient. Each pass queries a run once, regardless of its node count, bounds
-that query to 10 seconds, and retains a non-terminal answer for 30 seconds. The query cannot be
-combined with award or warm-pool observations.
+after a restart and a slow pass never delays award renewal or claims.
 
-For an unreserved node whose annotation matches all protected team/run labels,
+A used node retires once the launcher has seen it unreserved for the idle grace
+(60 seconds by default), whatever state its run is in. The run's state is never
+consulted: a run waiting on an approval, or a fan-out waiting on one long job,
+does not hold its empty nodes. Each pass records when it first saw a node
+unreserved, and a reservation clears that record, so a successor that reserves
+the node inside the grace keeps it and restarts the clock when it releases.
+Plan-to-work and work-to-work handoffs never start the clock, because the
+successor takes the node while the predecessor's reservation is still on it.
+Same-run successors measured on staging became ready within 0.16 seconds of
+their predecessor ending, so the launcher claims them within one poll. A launcher restart starts every clock again, which costs at most
+one extra grace. A job that becomes ready after the grace boots a fresh node.
+
+For an unreserved node past the grace whose annotation matches all protected team/run labels,
 the launcher verifies shared NodePool and NodeClaim provenance and cordons the
 exact node using its resource version. It then confirms that no non-DaemonSet Pod
 remains in any namespace before deleting the owning NodeClaim with a UID
-precondition.
+precondition. When a Pod remains, such as a successor's capacity Pod that bound
+between the cordon and the check, the launcher uncordons the node with the
+cordon's resource version, because the boundary refuses to reserve a cordoned
+node and the successor would otherwise wait with no new node coming. A conflict
+leaves the next pass to retry. The launcher marks its own cordon with
+`sparkwing.dev/retirement-cordon` and uncordons only a node carrying that mark,
+so a node an operator cordoned stays cordoned.
 Concurrent reservation or node replacement cancels retirement. Repeated passes
 accept an already-deleted claim. Retirement failures retain the node and retry
 without blocking claims or preparation renewal. Retirement errors are logged at
 most once per minute. Existing NodeClaim get/delete RBAC is sufficient.
 Nodes with missing ownership evidence, including nodes released by older
 launchers without the retained annotation, remain for Karpenter consolidation.
-`TestRestartRetiresOnlyEmptySpentNodesOfTerminalRuns`,
-`TestRunRetirementQueryThroughController`,
-`TestSpentNodeQueriesEachRunOnceAndCachesNonTerminal`,
-`TestSpentNodeErrorsAreRateLimitedAndDoNotFailSync`,
-`TestSlowRunQueryDoesNotDelayReconciliation` and
-`TestLauncherRunTerminalRequiresDeploymentAuthority` guard these rules.
+`TestRestartRetiresOnlyEmptySpentNodesAfterIdleGrace`,
+`TestIdleGraceRetiresSpentNodesWhateverTheRunState`,
+`TestIdleGraceMustOutlastClaimPollAndRetirementPass` and
+`TestSpentNodeErrorsAreRateLimitedAndDoNotFailSync` guard these rules.
 
 ## Preparation leases
 

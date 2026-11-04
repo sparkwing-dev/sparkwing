@@ -67,6 +67,8 @@ unlock.
   Each process hashed its ~100 MB executable (about 280ms) before resolving a replacement-pin engine. The digest is now reused while the file's device, inode, size, modification and change times are unchanged.
 - **cache:** Pipeline key inputs reuse the digest of each unchanged file from `SPARKWING_HOME/cache/file-digests`
   Each SDK install re-read every file of the pipeline module and its `replace` targets, 37 MB in the Sparkwing repository and 300-700ms under load, twice per local run. Keys are unchanged.
+- **Cloud (Breaking):** A used Cloud node retires once the launcher has seen it unreserved and empty for 60 seconds, whatever state its run is in
+  The launcher kept a run's empty nodes until the run ended, so a run waiting on an approval, or a fan-out waiting on one long job, held idle nodes that other teams' jobs could not use until Karpenter consolidated them. A successor that reserves the node within the grace still reuses it; one that arrives later, such as a job after an approval, boots a fresh node. `sparkwing-runner launch --idle-grace` sets the grace, which must be at least `--poll` plus 30 seconds. The launcher no longer asks the controller whether a run has ended: the `retire_run` request and `run_terminal` response are gone from launcher sync, so deploy the controller and launcher from the same release. See the [migration guide](docs/migrations/_unreleased.md#cloud-nodes-retire-after-an-idle-grace).
 
 ### Fixed
 

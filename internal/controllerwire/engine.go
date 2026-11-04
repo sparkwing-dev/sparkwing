@@ -130,15 +130,8 @@ type LauncherCapacityObservation struct {
 	Ceiling *match.Resources `json:"ceiling,omitempty"`
 }
 
-// LauncherRun identifies a run whose spent Cloud nodes may be retired.
-type LauncherRun struct {
-	Team  string `json:"team"`
-	RunID string `json:"run_id"`
-}
-
 // LauncherSyncRequest reconciles Jobs and node reservations against the launcher's awards.
 type LauncherSyncRequest struct {
-	RetireRun   *LauncherRun                     `json:"retire_run,omitempty"`
 	WarmPools   map[string]int64                 `json:"warm_pools,omitempty"`
 	Observed    []capability.LauncherObservation `json:"observed"`
 	Capacity    []LauncherCapacityObservation    `json:"capacity,omitempty"`
@@ -154,11 +147,10 @@ type LauncherPreparation struct {
 
 // LauncherSyncResponse carries execution inputs and retired award fences without bearers.
 type LauncherSyncResponse struct {
-	RunTerminal bool                  `json:"run_terminal,omitempty"`
-	Deferred    []capability.LeaseRef `json:"deferred,omitempty"`
-	Prepared    []LauncherPreparation `json:"prepared,omitempty"`
-	Awards      []ClaimedUnit         `json:"awards"`
-	Retired     []capability.LeaseRef `json:"retired"`
+	Deferred []capability.LeaseRef `json:"deferred,omitempty"`
+	Prepared []LauncherPreparation `json:"prepared,omitempty"`
+	Awards   []ClaimedUnit         `json:"awards"`
+	Retired  []capability.LeaseRef `json:"retired"`
 }
 
 // ExchangeResponse returns the original unit with its exchanged in-memory authority once.

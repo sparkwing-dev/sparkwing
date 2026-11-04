@@ -843,6 +843,7 @@ func Registry() []Command {
 			{Name: "memory-ceiling", Argument: "BYTES", Required: true},
 			{Name: "docker-image", Argument: "IMAGE", Required: true},
 			{Name: "poll", Argument: "DURATION"},
+			{Name: "idle-grace", Argument: "DURATION"},
 			{Name: "credentials-dir", Argument: "PATH", Required: true},
 		}},
 		{Path: "sparkwing-runner run-node", Hidden: true, Rules: []string{"Read the bootstrap file once, exchange it and keep the capability in memory; no bearer in argv or env."}, Flags: []Flag{

@@ -19,7 +19,6 @@ import (
 	"k8s.io/client-go/util/retry"
 
 	"github.com/sparkwing-dev/sparkwing/internal/admission"
-	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 )
 
 // ErrNoDedicatedNode leaves the award unstarted when no exclusive placement is available.
@@ -162,7 +161,7 @@ func (b *KubernetesBoundary) reserveNode(ctx context.Context, node corev1.Node, 
 	node.Labels[TeamNodeLabel] = TeamNodeValue(b.Namespace, team)
 	node.Labels[usedTeamLabel] = TeamNodeValue(b.Namespace, team)
 	node.Labels[usedRunLabel] = run
-	used, err := json.Marshal(controllerwire.LauncherRun{Team: team, RunID: string(binding.RunID)})
+	used, err := json.Marshal(usedRun{Team: team, RunID: string(binding.RunID)})
 	if err != nil {
 		return CloudNodeReservation{}, err
 	}
