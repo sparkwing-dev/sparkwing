@@ -1,6 +1,6 @@
-// Package crons drives the local cron scheduler: it turns the schedules a
-// repository declares into armed rows in this home's runs store, and turns one
-// per-minute tick into runs.
+// Package crons is the schedule evaluator shared by the local scheduler and the
+// controller: it turns the schedules a repository declares into armed rows in
+// the runs store, and turns one per-minute tick into runs for its [Service.Side].
 //
 // The package is pure orchestration. Every tick decision reads the clock
 // through [Service.Now], every launch through a [Launcher] the caller supplies, and

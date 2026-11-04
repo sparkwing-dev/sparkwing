@@ -146,19 +146,19 @@ var reviewedOperatorTableSQL = map[string]string{
 	"paymentEventReplayTx|payment_events":        "a provider event replays by its own id before any team is known",
 }
 
-// safety: queue_team routes an App delivery after verification and is filtered by hand; the guard's
-// predicate reader knows only team, so this table is reviewed here rather than silently skipped.
-// safety: claim search reads every claimable team; this statement binds each row's team from the
-// proof heads the caller passed as one JSON parameter, so the guard cannot see the binding.
 // safety: each entry joins a tenant relation pinned by a key other than team, with the reason that key is safe.
 var reviewedForeignKeyedJoins = map[string]string{
 	"(*Tenant).recordSessionMembershipTx": "a session is keyed by its hash across teams; m.team binds the tenant the row is written for",
 }
 
+// safety: claim search reads every claimable team; this statement binds each row's team from the
+// proof heads the caller passed as one JSON parameter, so the guard cannot see the binding.
 var reviewedClaimSearchSQL = map[string]string{
 	"claimProofFactsTx": "joins requirement terms on each proof head's own team and requirements, both bound per head",
 }
 
+// safety: queue_team routes an App delivery after verification and is filtered by hand; the guard's
+// predicate reader knows only team, so this table is reviewed here rather than silently skipped.
 var reviewedTeamColumnTables = map[string]string{
 	"github_app_deliveries": "an operator inbox keyed by delivery; queue_team is set only after the delivery verifies",
 }
@@ -427,11 +427,12 @@ func sqlRelations(tokens []string) (tables, problems []string) {
 	return tables, problems
 }
 
-// safety: the flattener leaves a clause word where it dropped an unresolved table fragment; that
-// fragment is judged where it is built, so the word is not a relation to refuse.
 // safety: these words modify a relation rather than name one; the reader does not interpret them.
 var sqlRelationModifiers = []string{"or", "lateral", "natural", "recursive"}
 
+// safety: the flattener leaves a clause word where it dropped an unresolved fragment, so the word is
+// not a relation to refuse. Nothing judges that fragment: a table name or WHERE clause built at run
+// time escapes this guard and needs review where it is built.
 var sqlClauseWords = []string{"where", "join", "left", "inner", "cross", "on", "as", "set", "order", "group", "limit", "union", "returning", "select", "values", "default"}
 
 var scopeIdentRe = regexp.MustCompile(`^[a-z_][a-z0-9_$]*$`)

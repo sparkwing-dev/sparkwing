@@ -6,9 +6,8 @@ import (
 	"testing"
 )
 
-// The Stripe metadata keys the controller settles by are the ones the checkout service stamps: both sides test against
-// a byte-identical copy of the checkout contract, so renaming a key on either side fails a suite instead of leaving
-// every payment event ignored.
+// The Stripe metadata keys the controller settles by match this repository's copy of the checkout contract. The
+// checkout service tests against its own copy, which nothing compares with this one, so renaming a key updates both.
 func TestPaymentMetadataMatchesTheCheckoutContract(t *testing.T) {
 	data, err := os.ReadFile("../controller/testdata/checkout_contract.json")
 	if err != nil {

@@ -52,7 +52,8 @@ type localRuntimeSession struct {
 }
 
 // NewLocalRuntime constructs the elected local process used by LocalLifecycle.
-// An empty DashboardAddress serves api.sock only; the CLI supplies its dashboard address.
+// An empty DashboardAddress restores the last dashboard address the runtime served, unless
+// Standalone; with nothing remembered it serves api.sock only.
 // Another process's election is refused without opening its store.
 func NewLocalRuntime(cfg LocalRuntimeConfig) (LocalRuntime, error) {
 	if cfg.Open == nil || cfg.Admission.Runs != nil || cfg.Admission.ServeAPI != nil {
@@ -126,9 +127,6 @@ func (r *localRuntime) Run(ctx context.Context, opts LocalStartOptions) (err err
 		return err
 	}
 	if err := d.setLocalActivity(activity); err != nil {
-		return err
-	}
-	if err := ctx.Err(); err != nil {
 		return err
 	}
 	if err := ctx.Err(); err != nil {
