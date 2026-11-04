@@ -34,6 +34,8 @@ unlock.
 
 ### Fixed
 
+- **billing:** A refund Stripe fails after reporting it succeeded logs `alert=refund_failed_after_success` at error level
+  No operator view listed it, so the customer was the only one who could notice. [Cloud billing](docs/billing.md) has the manual reconciliation.
 - **controller:** `GET /api/v1/team/github-app/automation` accepts `limit` and its own `next_cursor`
   An older query check refused both with 400, so a team with more than 50 automations could not read past the first page.
 - **CLI:** A source build without the dashboard bundle refuses `dashboard start` and `dashboard open`

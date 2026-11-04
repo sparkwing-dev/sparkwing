@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -99,7 +100,7 @@ func (m *digestMemo) save() {
 		fmt.Fprintf(writer, "%s\x00%s\n", rel, entry)
 	}
 	if writer.Flush() != nil || stage.Close() != nil || os.Rename(stage.Name(), m.path) != nil {
-		_ = os.Remove(stage.Name())
+		discardStage(stage.Name())
 	}
 }
 
@@ -113,4 +114,11 @@ func sameEntries(a, b map[string]string) bool {
 		}
 	}
 	return true
+}
+
+// safety: a stage left behind only costs disk next to a memo that was never required, so it is logged, not returned.
+func discardStage(path string) {
+	if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+		slog.Default().Warn("bincache: digest memo stage outlived its write", "path", path, "error", err)
+	}
 }

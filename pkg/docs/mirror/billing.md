@@ -385,7 +385,11 @@ same payment fails with `charge_already_refunded` and moves no money.
 The team's owners get one email saying the refund of that amount for the payment
 on its date could not be completed and that Sparkwing will follow up. A
 terminal refund outcome survives a later pending delivery, and a conflicting
-terminal outcome is refused.
+terminal outcome is refused, except that Stripe may fail a refund it reported
+succeeded. That case logs `alert=refund_failed_after_success` at error level
+with the mode, refund, payment and amount, and no console view lists it.
+Runbook: open the payment in Stripe, confirm the refund failed and no later
+refund returned the money, then refund it by hand and tell the team's owners.
 
 Team deletion never waits for money to finish moving. Purge removes operational
 data, refill settings and the team's Stripe customer ID, retaining the team id
