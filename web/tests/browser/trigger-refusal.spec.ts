@@ -70,7 +70,8 @@ test("the run toolbar fits a 375px viewport without scrolling", async ({ page })
   expect(await page.evaluate(() => window.scrollX)).toBe(0);
 });
 
-test("run rows show the sealed trust class rather than guessing from main", async ({ page }) => {
+// Rows no longer show trust (the Setup tab shows the sealed class); they must still never guess one from the branch.
+test("run rows never guess a trust class from main", async ({ page }) => {
   await page.route("**/api/v1/**", async (route) => {
     const path = new URL(route.request().url()).pathname;
     await route.fulfill({ json: path === "/api/v1/runs" ? { runs: [{
@@ -80,8 +81,9 @@ test("run rows show the sealed trust class rather than guessing from main", asyn
     }] } : {} });
   });
   await page.goto("/runs");
-  await expect(page.locator('[data-run-id="sealed-run"]').getByText("Trust: asserted", { exact: true })).toBeVisible();
-  await expect(page.locator("body")).not.toContainText("Trust: verified-default");
+  await expect(page.locator('[data-run-id="sealed-run"]')).toBeVisible();
+  await expect(page.locator('[data-run-id="sealed-run"]')).not.toContainText("Trust:");
+  await expect(page.locator("body")).not.toContainText("verified-default");
 });
 
 test("a run detail server failure shows support and its request id", async ({ page }) => {
