@@ -89,8 +89,9 @@ func TestDeviceLoginIssuesTheApproversCLITokenOnce(t *testing.T) {
 	if poll.Status != controllerwire.DeviceApproved || poll.Credential == nil || poll.Credential.Team != "a" || !slices.Equal(poll.Credential.Grants, want) || poll.Credential.Principal != "member" {
 		t.Fatalf("approved poll = %+v", poll)
 	}
-	if poll.Credential.ExpiresAt == nil || time.Until(*poll.Credential.ExpiresAt) < 89*24*time.Hour {
-		t.Fatalf("expiry %v, want the 90-day member default", poll.Credential.ExpiresAt)
+	var lifetime int64
+	if err := teststore.SQL(t, s.store).QueryRow(`SELECT expires_at - created_at FROM capabilities WHERE prefix=?`, poll.Credential.Prefix).Scan(&lifetime); err != nil || time.Duration(lifetime) != 90*24*time.Hour {
+		t.Fatalf("token lifetime %v %v, want the 90-day member default", time.Duration(lifetime), err)
 	}
 	engineClaimHTTP(t, s.Handler(), poll.Credential.Capability, "GET", "/api/v1/auth/whoami", "", 200)
 
