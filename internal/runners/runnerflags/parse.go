@@ -46,8 +46,11 @@ func Parse(command string, args []string, stdout, diagnostics io.Writer) (*flag.
 		return nil, err
 	}
 	for _, definition := range definitions {
-		value, _ := fs.GetString(definition.Name)
-		if fs.Changed(definition.Name) && len(definition.Values) > 0 && !slices.Contains(definition.Values, value) {
+		if !fs.Changed(definition.Name) || len(definition.Values) == 0 {
+			continue
+		}
+		value, err := fs.GetString(definition.Name)
+		if err != nil || !slices.Contains(definition.Values, value) {
 			return nil, fmt.Errorf("invalid --%s", definition.Name)
 		}
 	}
@@ -73,7 +76,10 @@ func Parse(command string, args []string, stdout, diagnostics io.Writer) (*flag.
 }
 
 func writeHelp(stdout io.Writer, fs *flag.FlagSet, text string) error {
-	output, _ := fs.GetString("output")
+	output, err := fs.GetString("output")
+	if err != nil {
+		return err
+	}
 	if output == "" && !color.IsInteractiveStdout() {
 		output = "json"
 	}
@@ -83,6 +89,6 @@ func writeHelp(stdout io.Writer, fs *flag.FlagSet, text string) error {
 			Text string `json:"text"`
 		}{Kind: "help", Text: text})
 	}
-	_, err := io.WriteString(stdout, text)
+	_, err = io.WriteString(stdout, text)
 	return err
 }

@@ -44,8 +44,11 @@ func requireDashboardBundle(inv clisurface.Invocation, verify func() error) erro
 		return nil
 	}
 	if err := verify(); err != nil {
-		return &apierr.Error{Code: apierr.Unavailable, Message: "this sparkwing build carries no dashboard bundle",
-			Hint: "install a release binary, or from a sparkwing checkout run bash bin/build-web.sh and then go install ./cmd/sparkwing"}
+		return &apierr.Error{
+			Code:    apierr.Unavailable,
+			Message: "this sparkwing build carries no dashboard bundle",
+			Hint:    "install a release binary, or from a sparkwing checkout run bash bin/build-web.sh and then go install ./cmd/sparkwing",
+		}
 	}
 	return nil
 }
