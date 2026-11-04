@@ -135,8 +135,9 @@ Warm capacity defaults Off for every class. The operator **Warm capacity** page
 and CLI show warm/desired nodes, start-time percentiles, cold starts and upsizes,
 with signup and active-team counts. Operators select Off, Manual count or Auto
 minimum/maximum and a start-time target (default 10s). Auto uses cold-start waits
-in the last 30 minutes and median start time in the last hour, clamped to the
-configured bounds; no waiting means the minimum.
+in the last 30 minutes and, while a job is waiting for a fresh node, median start
+time in the last hour, clamped to the configured bounds; no waiting means the
+minimum.
 
 The chart's optional `warmCapacity` infrastructure creates low-priority pause
 placeholders and KEDA PostgreSQL scalers. Each placeholder reserves one catalog

@@ -95,7 +95,7 @@ func TestSchemaUpgradeRefusesEveryOtherStore(t *testing.T) {
 		"unknown 28 digest": {`UPDATE sparkwing_schema_version SET baseline_digest='other'`, []string{`"other" is not the v0.68.3 baseline`, "left the store unchanged", "open it once with Sparkwing v0.68.3"}},
 		"missing 28 digest": {`UPDATE sparkwing_schema_version SET baseline_digest=''`, []string{`"<missing>" is not the v0.68.3 baseline`, "left the store unchanged"}},
 		"older than 28":     {`UPDATE sparkwing_schema_version SET version=27`, []string{"version 27 is older", "this build cannot upgrade it", "back up the store"}},
-		"newer than binary": {`UPDATE sparkwing_schema_version SET version=30`, []string{"version 30 is newer", "start a binary matching the store"}},
+		"newer than binary": {`UPDATE sparkwing_schema_version SET version=31`, []string{"version 31 is newer", "start a binary matching the store"}},
 	} {
 		t.Run(name, func(t *testing.T) {
 			target := storetest.New(t)
@@ -155,6 +155,21 @@ func TestPostgresSchemaUpgradeRunsOnceUnderConcurrentOpens(t *testing.T) {
 	}
 }
 
+// safety: KEDA reads warm_pool_desired through a manually granted role, so replacing the view must keep its grants.
+func TestPostgresSchemaUpgradeKeepsWarmViewGrants(t *testing.T) {
+	target := storetest.NewPostgres(t)
+	releasedStore(t, target)
+	mutate(t, store.DialectPostgres, target.DSN(), `GRANT SELECT ON warm_pool_desired TO PUBLIC`)
+	st := target.Open(t)
+	var granted int
+	if err := st.DB().QueryRow(`SELECT COUNT(*) FROM information_schema.role_table_grants WHERE table_schema = current_schema() AND table_name = 'warm_pool_desired' AND grantee = 'PUBLIC' AND privilege_type = 'SELECT'`).Scan(&granted); err != nil {
+		t.Fatal(err)
+	}
+	if granted != 1 {
+		t.Fatal("upgrading the store revoked the warm_pool_desired grant")
+	}
+}
+
 func mutate(t *testing.T, dialect store.Dialect, location, statement string) {
 	t.Helper()
 	if err := store.ExecRawForTest(t.Context(), dialect, location, statement); err != nil {
@@ -169,13 +184,14 @@ func schemaShape(t *testing.T, st *store.Store) string {
 	queries := []string{
 		`SELECT m.name || '.' || p.cid || '.' || p.name || '.' || p.type || '.' || p."notnull" || '.' || COALESCE(p.dflt_value, '') FROM sqlite_master m JOIN pragma_table_xinfo(m.name) p WHERE m.type = 'table' ORDER BY m.name, p.cid`,
 		`SELECT type || ' ' || name || ' ' || tbl_name FROM sqlite_master WHERE type <> 'table' AND name NOT LIKE 'sqlite_%' ORDER BY type, name`,
+		`SELECT name || ' ' || sql FROM sqlite_master WHERE type = 'view' ORDER BY name`,
 	}
 	if st.Dialect() == store.DialectPostgres {
 		queries = []string{
 			`SELECT table_name || '.' || ordinal_position || '.' || column_name || '.' || data_type || '.' || is_nullable || '.' || COALESCE(column_default, '') || '.' || COALESCE(generation_expression, '') FROM information_schema.columns WHERE table_schema = current_schema() ORDER BY table_name, ordinal_position`,
 			`SELECT conrelid::regclass::text || ' ' || conname || ' ' || pg_get_constraintdef(oid) FROM pg_constraint WHERE connamespace = current_schema()::regnamespace ORDER BY 1`,
 			`SELECT indexname || ' ' || tablename FROM pg_indexes WHERE schemaname = current_schema() ORDER BY 1`,
-			`SELECT table_name FROM information_schema.views WHERE table_schema = current_schema() ORDER BY 1`,
+			`SELECT table_name || ' ' || view_definition FROM information_schema.views WHERE table_schema = current_schema() ORDER BY 1`,
 			`SELECT event_object_table || ' ' || trigger_name || ' ' || event_manipulation FROM information_schema.triggers WHERE trigger_schema = current_schema() ORDER BY 1`,
 		}
 	}

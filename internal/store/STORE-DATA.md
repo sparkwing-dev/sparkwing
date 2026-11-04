@@ -253,8 +253,9 @@ Open intervals stop at `charged_through` in reports. Closed intervals use their
 persisted finish time. This keeps a late disruption from refunding time that a
 report counted only because the reaper had not run yet.
 Grant requests use `Tenant.RecordCreditGrant`. Its raw Store twin is removed.
-Deployment price and policy reads use `Operator.CreditSettings`,
-`Operator.CreditRateTable` and `Operator.WarmCPUClassCores`.
+Deployment price and policy reads use `Operator.CreditSettings` and
+`Operator.CreditRateTable`. Warm capacity policy lives only in
+`warm_pool_settings`; a leftover `warm_cpu_class_cores` settings row is inert.
 Billing-policy writes use `Operator.SetCreditSettings`. Once a table is stored,
 change prices through `CreditSettingsUpdate.RateTable`. A scalar update is
 refused before any sibling settings change. An absent table derives the default
@@ -966,7 +967,10 @@ starts Off, all counts start at zero, and the start-time target is 10 seconds.
 node count. The `warm_pool_desired` view expires observations after 120 seconds
 and computes Off/Manual/Auto for both SQLite and PostgreSQL. Auto takes the higher
 of `ceil(cold waits in 30m / 2)` and warm plus one when the hourly median exceeds
-the target, then clamps to min/max.
+the target while a job is still waiting for a fresh node (an unstarted, unsettled
+cold wait), then clamps to min/max. Without that live wait, the latency trigger
+would feed on its own output: each new warm node raises `warm`, so the pool would
+climb to the maximum whenever any start in the last hour was slow.
 
 Job telemetry in `cloud_job_capacity` is scoped to billing reservations and
 grouped by `requested_class`. `granted_class` identifies upsizes,

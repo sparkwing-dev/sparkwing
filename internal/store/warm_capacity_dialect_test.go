@@ -10,3 +10,7 @@ import (
 func TestWarmCapacityPostgres(t *testing.T) {
 	store.WarmCapacityModesAndDemand(t, storetest.OpenPostgres(t))
 }
+
+func TestWarmCapacityAutoReturnsToMinimumPostgres(t *testing.T) {
+	store.WarmCapacityAutoReturnsToMinimumWithNobodyWaiting(t, storetest.OpenPostgres(t))
+}
