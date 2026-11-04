@@ -2,6 +2,7 @@ package jobs
 
 import (
 	"context"
+	"path"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -153,5 +154,55 @@ func TestBrowserFixtureIgnoresMarkdownAndTestsInPackagesItBuilds(t *testing.T) {
 	}
 	if why := fixtureChange([]string{"go.mod"}, modules, byDir, built); why == "" {
 		t.Fatal("a module requirement change skipped the browser smoke")
+	}
+}
+
+// TestAffectedTestsRunTheReadersOfFilesOutsideEveryPackage plants changes the
+// import graph cannot see and requires the packages whose tests read them.
+func TestAffectedTestsRunTheReadersOfFilesOutsideEveryPackage(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: lists both modules' packages; the fast class runs under -short")
+	}
+	root := sourceTreeRoot()
+	if root == "" {
+		t.Fatal("could not locate the repository root from this file's compile-time path")
+	}
+	t.Chdir(root)
+	ctx := context.Background()
+	modules, err := committedModuleDirs(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	packages := map[string][]modulePackage{}
+	known := map[string]bool{}
+	for _, m := range modules {
+		pkgs, err := listModulePackages(ctx, m)
+		if err != nil {
+			t.Fatal(err)
+		}
+		packages[m] = pkgs
+		for _, pkg := range pkgs {
+			known[path.Join(m, pkg.dir)] = true
+		}
+	}
+	for _, r := range nonPackageReaders {
+		for _, dir := range r.dirs {
+			if !known[dir] {
+				t.Errorf("%s names %s, which is not a package in this repository", r.prefix, dir)
+			}
+		}
+	}
+	for file, want := range map[string]string{
+		".github/workflows/canonical-gates.yaml": "sparkwing-pipelines/jobs",
+		"docs/pipelines.md":                      "github.com/sparkwing-dev/sparkwing/internal/doccheck",
+		"bin/check-changelog.sh":                 "sparkwing-pipelines/jobs",
+	} {
+		var selected []string
+		for _, m := range modules {
+			selected = append(selected, planAffectedTests(m, modules, []string{file}, packages[m], nil).packages...)
+		}
+		if !slices.Contains(selected, want) {
+			t.Errorf("a change to %s selected %v, want %s among them", file, selected, want)
+		}
 	}
 }
