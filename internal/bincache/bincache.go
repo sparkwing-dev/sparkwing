@@ -465,20 +465,32 @@ type fileState struct {
 	modTime int64
 }
 
-func snapshotHashable(dir string, keep fileFilter, hashAllFiles bool) (map[string]fileState, error) {
-	files, err := walkHashable(dir, keep)
-	if err != nil {
-		return nil, err
-	}
-	var ignored map[string]bool
+// hashable lists the files a key part covers and how many gitignored paths it left out.
+func hashable(dir string, keep fileFilter, hashAllFiles bool) ([]string, int, error) {
+	var prune map[string]bool
 	if !hashAllFiles {
-		ignored = ignoredUnder(dir, files)
+		prune = ignoredDirsUnder(dir)
 	}
+	files, pruned, err := walkHashable(dir, keep, prune)
+	if err != nil || hashAllFiles {
+		return files, pruned, err
+	}
+	ignored := ignoredUnder(dir, files)
+	if len(ignored) == 0 {
+		return files, pruned, nil
+	}
+	kept := files[:0]
+	for _, path := range files {
+		if !ignored[path] {
+			kept = append(kept, path)
+		}
+	}
+	return kept, pruned + len(ignored), nil
+}
+
+func snapshotHashable(files []string) (map[string]fileState, error) {
 	out := make(map[string]fileState, len(files))
 	for _, path := range files {
-		if ignored[path] {
-			continue
-		}
 		info, err := os.Lstat(path)
 		if errors.Is(err, fs.ErrNotExist) {
 			return nil, ErrUnstableInputs
@@ -492,16 +504,21 @@ func snapshotHashable(dir string, keep fileFilter, hashAllFiles bool) (map[strin
 }
 
 func hashDirIntoCounted(h io.Writer, dir string, keep fileFilter, hashAllFiles bool) (hashStats, error) {
-	before, err := snapshotHashable(dir, keep, hashAllFiles)
+	before, err := listedSnapshot(dir, keep, hashAllFiles)
+	if err != nil {
+		return hashStats{}, err
+	}
+	files, ignored, err := hashable(dir, keep, hashAllFiles)
 	if err != nil {
 		return hashStats{}, err
 	}
 	var digest bytes.Buffer
-	stats, err := hashFilesInto(&digest, dir, keep, hashAllFiles)
+	stats, err := hashFilesInto(&digest, dir, files)
+	stats.Ignored = ignored
 	if err != nil {
 		return stats, err
 	}
-	after, err := snapshotHashable(dir, keep, hashAllFiles)
+	after, err := listedSnapshot(dir, keep, hashAllFiles)
 	if err != nil {
 		return stats, err
 	}
@@ -512,21 +529,17 @@ func hashDirIntoCounted(h io.Writer, dir string, keep fileFilter, hashAllFiles b
 	return stats, err
 }
 
-func hashFilesInto(h io.Writer, dir string, keep fileFilter, hashAllFiles bool) (hashStats, error) {
-	var stats hashStats
-	files, err := walkHashable(dir, keep)
+func listedSnapshot(dir string, keep fileFilter, hashAllFiles bool) (map[string]fileState, error) {
+	files, _, err := hashable(dir, keep, hashAllFiles)
 	if err != nil {
-		return stats, err
+		return nil, err
 	}
-	var ignored map[string]bool
-	if !hashAllFiles {
-		ignored = ignoredUnder(dir, files)
-	}
+	return snapshotHashable(files)
+}
+
+func hashFilesInto(h io.Writer, dir string, files []string) (hashStats, error) {
+	var stats hashStats
 	for _, path := range files {
-		if ignored[path] {
-			stats.Ignored++
-			continue
-		}
 		rel, _ := filepath.Rel(dir, path)
 		f, err := os.Open(path)
 		if errors.Is(err, fs.ErrNotExist) {
@@ -548,8 +561,10 @@ func hashFilesInto(h io.Writer, dir string, keep fileFilter, hashAllFiles bool) 
 	return stats, nil
 }
 
-func walkHashable(dir string, keep fileFilter) ([]string, error) {
+// walkHashable skips the directories named in prune, counting each as one path.
+func walkHashable(dir string, keep fileFilter, prune map[string]bool) ([]string, int, error) {
 	var files []string
+	pruned := 0
 	err := filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			if path != dir && errors.Is(err, fs.ErrNotExist) {
@@ -560,6 +575,10 @@ func walkHashable(dir string, keep fileFilter) ([]string, error) {
 		if d.IsDir() {
 			switch d.Name() {
 			case "node_modules", ".git", ".claude-scratch":
+				return filepath.SkipDir
+			}
+			if prune[path] {
+				pruned++
 				return filepath.SkipDir
 			}
 			return nil
@@ -575,7 +594,7 @@ func walkHashable(dir string, keep fileFilter) ([]string, error) {
 		files = append(files, path)
 		return nil
 	})
-	return files, err
+	return files, pruned, err
 }
 
 type replaceTarget struct {

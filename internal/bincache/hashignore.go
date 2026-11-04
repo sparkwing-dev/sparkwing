@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"errors"
 	"os/exec"
+	"path/filepath"
 	"strings"
 
 	"github.com/sparkwing-dev/sparkwing/internal/procenv"
@@ -34,4 +35,22 @@ func ignoredUnder(dir string, candidates []string) map[string]bool {
 		}
 	}
 	return ignored
+}
+
+// perf: pruning wholly ignored directories keeps a large build cache inside the
+// tree from being walked and handed to check-ignore path by path.
+func ignoredDirsUnder(dir string) map[string]bool {
+	cmd := procenv.HostCommand("git", "ls-files", "-z", "--others", "--ignored", "--exclude-standard", "--directory")
+	cmd.Dir = dir
+	out, err := cmd.Output()
+	if err != nil {
+		return nil
+	}
+	dirs := make(map[string]bool)
+	for _, p := range strings.Split(string(out), "\x00") {
+		if rel, ok := strings.CutSuffix(p, "/"); ok && rel != "" {
+			dirs[filepath.Join(dir, filepath.FromSlash(rel))] = true
+		}
+	}
+	return dirs
 }
