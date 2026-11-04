@@ -23,7 +23,7 @@ unlock.
 ### Added
 
 - **CLI:** `sparkwing pipeline trigger --trusted` runs HEAD on this machine's own runner so its gate pass counts for CI
-  It refuses unless this machine's runner is enrolled with `--repos` against the profile's controller, the checkout is clean, and HEAD is the head of the same branch on origin, then pins the run to that runner and submits no environment. `sparkwing pipeline trigger gate --profile P --trusted -- --full` produces a pass `sw.FromProvenRunAtCommit` counts, under the controller's existing rules (decision 89). A plain `sparkwing run gate` still never counts.
+  It refuses unless this machine's runner is enrolled with `--repos` against the profile's controller, the checkout is clean, and HEAD is the head of the same branch on origin, then pins the run to that runner and submits no environment. `sparkwing pipeline trigger gate --profile P --trusted -- --full` produces a pass `sw.FromProvenRunAtCommit` counts, under the controller's existing rules (decision 89). A plain `sparkwing run gate` still never counts. On a workstation the trust boundary is the OS account the runner service runs as, since any process running as that user can read the runner's credential; enroll one with `--repos` only for people the team would let bypass the required gate check, or run the service under a dedicated OS user.
 
 ### Changed
 

@@ -214,7 +214,9 @@ authority chain, never from names the runner reports, whether its host is
 trusted: a fresh host, which its provider attests no other run touched (a
 Sparkwing Cloud node or a GitHub-hosted Actions runner), or a machine its team
 admin scoped to repositories with `--repos`, which takes only
-repository-proven work and never asserted work. Every shared runner and every
+repository-proven work and never asserted work from Sparkwing. The controller
+cannot see what else runs under the runner's OS account, so that account is
+the trust boundary; see the next paragraph. Every shared runner and every
 team launcher needs `--repos`, so they are trusted; a team launcher's pods take
 the trust of the credential that started them and are not fresh. Personal
 machines, which take their owner's asserted runs, and self-hosted Actions
@@ -239,9 +241,17 @@ checkout is clean and HEAD is the pushed head of its branch, then pins the run
 to that runner and submits no environment. The controller fetches the commit
 from GitHub and the runner checks it out itself, so every rule above still
 decides whether the pass counts; `--trusted` adds no trust of its own. A plain
-`sparkwing run gate` stays asserted and never counts, and a machine that also
-takes asserted work under the same user shares that user's caches with its
-runner, which decision 89 accepts: the trust boundary is the machine.
+`sparkwing run gate` stays asserted and never counts.
+
+On a developer's machine the trust boundary is the OS account the runner
+service runs as (decision 89): any process running as that user (the
+developer, coding agents, tests and tools from asserted local runs) can read
+the runner's credential and report a pass directly, and shares its HOME, Go
+configuration and build cache, Sparkwing home and PATH with the runner. Enroll
+a workstation with `--repos` only for people the team would let bypass the
+required gate check, or run the runner service under a dedicated OS user with
+its own HOME and SPARKWING_HOME. Such a runner also runs any pushed branch of
+its repositories as that user.
 
 The host that evaluates the plan is not covered by the trusted-host check,
 because only jobs record it; `record-tree` reads the other jobs' outputs itself
