@@ -17,10 +17,21 @@ const (
 	loginClientWindow = time.Minute
 )
 
-type loginLimiter struct{ clients *ratelimit.Limiter }
+// safety: matches the identity link limit of ten attempts per account per minute.
+const deviceAccountBurst = 10
+
+type loginLimiter struct{ clients, accounts *ratelimit.Limiter }
 
 func newLoginLimiter() *loginLimiter {
-	return &loginLimiter{clients: ratelimit.New(loginClientBurst, loginClientWindow)}
+	return &loginLimiter{clients: ratelimit.New(loginClientBurst, loginClientWindow), accounts: ratelimit.New(deviceAccountBurst, loginClientWindow)}
+}
+
+// safety: device user codes are short, so a signed-in account may try only a few per minute.
+func (l *loginLimiter) admitAccount(account string) error {
+	if !l.accounts.Allow(account, time.Now()) {
+		return &apierr.Error{Code: apierr.RateLimited, Message: fmt.Sprintf("device code entry is limited to %d attempts per account per minute; wait a minute and enter the code again", deviceAccountBurst), Details: map[string]any{"retry_after_ms": loginClientWindow.Milliseconds()}}
+	}
+	return nil
 }
 
 func (l *loginLimiter) admit(r *http.Request) error {

@@ -1,6 +1,7 @@
 package controller
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -40,48 +41,66 @@ func (s *Server) handleEnrollRunner(w http.ResponseWriter, r *http.Request, a ca
 	if !request.Personal && !slices.Contains(a.Principal.Capability.Grants, capability.TeamAdmin) {
 		return apierr.Authorization(apierr.ReasonMissingGrant, "team runner enrollment requires team administration")
 	}
+	spec, err := runnerEnrollmentSpec(request, a.Principal.Authority, a.Target.Team)
+	if err != nil {
+		return err
+	}
+	return s.provisionRoot(w, r, spec)
+}
+
+// safety: the store rechecks the authority's grants when it issues the spec.
+func runnerEnrollmentSpec(request runnerEnrollmentRequest, authority capability.AuthorityRef, team string) (capability.ProvisionSpec, error) {
 	if !store.ValidRunnerName(request.Name) || !request.Personal && len(request.Repos) == 0 || len(request.Repos) > maxRunnerRepos {
-		return invalidEngineBody("name must be 1 to 63 letters, digits, '-', '_' or '.'; repos must contain at most 32 patterns and are required for shared runners")
+		return capability.ProvisionSpec{}, invalidEngineBody("name must be 1 to 63 letters, digits, '-', '_' or '.'; repos must contain at most 32 patterns and are required for shared runners")
 	}
 	allow, err := sourceurl.ParseRepoAllowlist(request.Repos)
 	if err != nil {
-		return invalidEngineBody("repos must contain valid host/path patterns")
+		return capability.ProvisionSpec{}, invalidEngineBody("repos must contain valid host/path patterns")
 	}
 	seen := make(map[string]bool, len(request.ReservedPools))
 	for _, pool := range request.ReservedPools {
 		if strings.TrimSpace(pool) == "" || seen[pool] {
-			return invalidEngineBody("reserved_pools must contain unique nonempty names")
+			return capability.ProvisionSpec{}, invalidEngineBody("reserved_pools must contain unique nonempty names")
 		}
 		seen[pool] = true
 	}
 	if !request.Trust.Valid() || request.Personal && request.Trust != "" {
-		return invalidEngineBody("trust must be verified-default or any, on a shared runner only")
+		return capability.ProvisionSpec{}, invalidEngineBody("trust must be verified-default, verified or any, on a shared runner only")
 	}
 	expires, err := provisionExpiry(request.ExpiresAt)
 	if err != nil {
-		return err
+		return capability.ProvisionSpec{}, err
 	}
-	grants := []capability.Grant{capability.NodesClaim, capability.TriggersClaim}
-	if request.Grants != nil {
-		if json.Unmarshal(request.Grants, &grants) != nil || len(grants) == 0 {
-			return invalidEngineBody("grants must contain nodes.claim or triggers.claim")
-		}
-		if err := validateCredentialRequest(credentialRequest{Grants: grants}); err != nil {
-			return err
-		}
-		for _, grant := range grants {
-			if grant != capability.NodesClaim && grant != capability.TriggersClaim && grant != capability.ClaimsLaunch {
-				return invalidEngineBody("machine grants must be nodes.claim, triggers.claim or claims.launch")
-			}
-		}
+	grants, err := runnerGrants(request.Grants)
+	if err != nil {
+		return capability.ProvisionSpec{}, err
 	}
-	return s.provisionRoot(w, r, capability.ProvisionSpec{
-		Kind: capability.ProvisionMachine, Personal: request.Personal, Platform: request.Platform, Authority: &a.Principal.Authority,
-		RegistrationID: "runner:" + a.Target.Team + ":" + request.Name,
-		Subject:        capability.Subject{Kind: capability.SubjectMachine, ID: request.Name}, Team: a.Target.Team,
+	return capability.ProvisionSpec{
+		Kind: capability.ProvisionMachine, Personal: request.Personal, Platform: request.Platform, Authority: &authority,
+		RegistrationID: "runner:" + team + ":" + request.Name,
+		Subject:        capability.Subject{Kind: capability.SubjectMachine, ID: request.Name}, Team: team,
 		Grants: grants, Binding: capability.Binding{Kind: capability.BindingNone},
 		Repositories: allow.Patterns(), ReservedPools: request.ReservedPools, Trust: request.Trust, ExpiresAt: expires,
-	})
+	}, nil
+}
+
+func runnerGrants(raw json.RawMessage) ([]capability.Grant, error) {
+	grants := []capability.Grant{capability.NodesClaim, capability.TriggersClaim}
+	if raw == nil {
+		return grants, nil
+	}
+	if json.Unmarshal(raw, &grants) != nil || len(grants) == 0 {
+		return nil, invalidEngineBody("grants must contain nodes.claim or triggers.claim")
+	}
+	if err := validateCredentialRequest(credentialRequest{Grants: grants}); err != nil {
+		return nil, err
+	}
+	for _, grant := range grants {
+		if grant != capability.NodesClaim && grant != capability.TriggersClaim && grant != capability.ClaimsLaunch {
+			return nil, invalidEngineBody("machine grants must be nodes.claim, triggers.claim or claims.launch")
+		}
+	}
+	return grants, nil
 }
 
 func (s *Server) handleIssueServiceCredential(w http.ResponseWriter, r *http.Request, a capability.Authorized) error {
@@ -123,24 +142,32 @@ func provisionExpiry(raw json.RawMessage) (*time.Time, error) {
 }
 
 func (s *Server) provisionRoot(w http.ResponseWriter, r *http.Request, spec capability.ProvisionSpec) error {
-	if s.credentialIssuer == nil {
-		return routepolicy.MissingEndpointPolicy()
+	issued, err := s.issueRoot(r.Context(), spec)
+	if err != nil {
+		return err
 	}
-	issued, err := s.credentialIssuer.ProvisionCapability(r.Context(), spec)
+	writeJSON(w, http.StatusCreated, issued)
+	return nil
+}
+
+func (s *Server) issueRoot(ctx context.Context, spec capability.ProvisionSpec) (credentialResponse, error) {
+	if s.credentialIssuer == nil {
+		return credentialResponse{}, routepolicy.MissingEndpointPolicy()
+	}
+	issued, err := s.credentialIssuer.ProvisionCapability(ctx, spec)
 	if err != nil {
 		if errors.Is(err, store.ErrAgentNameTaken) {
-			return &apierr.Error{Code: apierr.Conflict, Message: "an enrolled credential already uses this name"}
+			return credentialResponse{}, &apierr.Error{Code: apierr.Conflict, Message: "an enrolled credential already uses this name"}
 		}
 		if errors.Is(err, store.ErrRunnerTokenLimit) {
-			return &apierr.Error{Code: apierr.QuotaExceeded, Message: err.Error()}
+			return credentialResponse{}, &apierr.Error{Code: apierr.QuotaExceeded, Message: err.Error()}
 		}
-		return engineLookupError(err)
+		return credentialResponse{}, engineLookupError(err)
 	}
-	noteAuditTarget(r.Context(), "token_prefix", tokenPrefixTarget(issued.Capability.Prefix))
-	writeJSON(w, http.StatusCreated, credentialResponse{
+	noteAuditTarget(ctx, "token_prefix", tokenPrefixTarget(issued.Capability.Prefix))
+	return credentialResponse{
 		Capability: issued.Raw, Prefix: issued.Capability.Prefix,
 		Team: issued.Capability.Team, Grants: append([]capability.Grant{}, issued.Capability.Grants...), ExpiresAt: issued.Capability.ExpiresAt,
 		Principal: issued.Capability.Subject.ID,
-	})
-	return nil
+	}, nil
 }
