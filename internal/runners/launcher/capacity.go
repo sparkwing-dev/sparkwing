@@ -100,13 +100,19 @@ func capacityPod(cfg CloudJobConfig, d capacityDemand) (*corev1.Pod, error) {
 			TerminationGracePeriodSeconds: ptr(int64(1)),
 			SecurityContext:               capacityPodSecurity(),
 			Containers: []corev1.Container{{
-				Name: "capacity", Image: cfg.RunnerImage, ImagePullPolicy: corev1.PullIfNotPresent, Command: []string{"/usr/bin/sleep"}, Args: []string{strconv.FormatFloat(max(0, time.Until(deadline).Seconds()), 'f', 9, 64)},
+				// perf: sleep as PID 1 ignores SIGTERM, so every delete waited out the kubelet's
+				// 2s minimum grace on the cold-start path. The trapped shell exits at once and the
+				// kubelet still frees the requests before the API removes the Pod.
+				Name: "capacity", Image: cfg.RunnerImage, ImagePullPolicy: corev1.PullIfNotPresent, Command: capacityCommand, Args: []string{strconv.FormatFloat(max(0, time.Until(deadline).Seconds()), 'f', 9, 64)},
 				Resources:       corev1.ResourceRequirements{Requests: requests, Limits: requests.DeepCopy()},
 				SecurityContext: capacitySecurity(),
 			}},
 		},
 	}, nil
 }
+
+// The deadline travels as $1, never spliced into the script.
+var capacityCommand = []string{"/bin/sh", "-c", `trap 'exit 0' TERM; /usr/bin/sleep "$1" & wait`, "capacity"}
 
 func recordedDemand(pod *corev1.Pod) (capacityDemand, error) {
 	var d capacityDemand

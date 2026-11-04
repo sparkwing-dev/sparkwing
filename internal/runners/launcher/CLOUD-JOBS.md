@@ -694,8 +694,10 @@ the controller is upgraded, without a capacity failure or refund.
 With a compatible pool, the launcher keeps the award and creates
 `sw-capacity-<award hash>`: an unbound Pod with the requested shared class and
 launcher namespace selectors, the generic dedicated toleration, the award's CPU,
-memory and scratch requests, the runner image running `/usr/bin/sleep` for the
-remaining award budget, and no volumes, environment or service account token.
+memory and scratch requests, the runner image's `/bin/sh` sleeping for the
+remaining award budget and exiting on SIGTERM, and no volumes, environment or
+service account token. A bare `sleep` as PID 1 ignores SIGTERM, so every delete
+on the cold-start path waited for the kubelet's kill.
 The Pod records its unit fence and size in `sparkwing.dev/capacity-demand`,
 never the bootstrap credential.
 Required pod anti-affinity on `kubernetes.io/hostname` keeps it off any node
