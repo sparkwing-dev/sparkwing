@@ -62,7 +62,7 @@ func TestEmbeddedOwnerSealsLogsDuringCancelledHostCleanup(t *testing.T) {
 			return nodehost.NativeServices{}, err
 		}
 		t.Cleanup(func() { _, _ = sink.Close(context.WithoutCancel(ctx), logseg.End{}) })
-		if err := sink.Append([]byte("last owner line\n"), "", 0, 0); err != nil {
+		if err := sink.Append([]byte("last owner line\n")); err != nil {
 			return nodehost.NativeServices{}, err
 		}
 		cancel()

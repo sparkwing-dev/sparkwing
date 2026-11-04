@@ -95,7 +95,7 @@ func retryLogUploads(t *testing.T, timing string, cloud bool, outcome string) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if err := sink.Append(fmt.Appendf(nil, "attempt %d output\n", ordinal), "", 0, 0); err != nil {
+		if err := sink.Append(fmt.Appendf(nil, "attempt %d output\n", ordinal)); err != nil {
 			t.Fatal(err)
 		}
 		return sink

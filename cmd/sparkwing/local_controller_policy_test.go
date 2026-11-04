@@ -320,7 +320,7 @@ func exerciseLocalRun(t *testing.T, options client.EngineOptions, admitted contr
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := sink.Append([]byte("production local log\n"), "", 0, 0); err != nil {
+	if err := sink.Append([]byte("production local log\n")); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := sink.Close(ctx, logseg.End{}); err != nil {

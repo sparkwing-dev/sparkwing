@@ -70,7 +70,7 @@ func TestNativeHostStorageAndLogsUsePublicRecordReaders(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := sink.Append([]byte("public local log\n"), "", 0, 0); err != nil {
+	if err := sink.Append([]byte("public local log\n")); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := sink.Close(t.Context(), logseg.End{}); err != nil {
