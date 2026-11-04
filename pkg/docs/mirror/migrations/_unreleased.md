@@ -27,7 +27,7 @@ digest, or recreate it), and a version newer than the binary. See
 
 ## Run handle files carry no status
 
-`sparkwing run --sw-run-handle-file PATH` writes the handle once at intake. It
+`sparkwing run PIPELINE --sw-run-handle-file PATH` writes the handle once at intake. It
 no longer includes `status`, which stayed `pending` after the run finished. The
 file now holds only `schema_version`, `run_id` and `pipeline`.
 
