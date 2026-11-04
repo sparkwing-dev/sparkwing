@@ -16,12 +16,9 @@ import (
 
 const storePostgresOwnerLock = "owner.lock"
 
-// safety: the host gives a cancelled step's process one second before
-// SIGKILL, too little to stop Postgres and delete a data directory that can
-// reach gigabytes. The kernel drops this flock with the process however it
-// dies, so the next run can tell an abandoned root from a live one.
-// The lock is taken under a temporary name and renamed into place, so a
-// sweeper never finds the owner lock file before it is held.
+// safety: a cancelled step gets one second before SIGKILL, too little to delete gigabytes.
+// The kernel drops this flock however the process dies, so the next run can tell an abandoned
+// root from a live one; the rename publishes the lock file only once it is held.
 func claimStorePostgresRoot(root string) (func(), error) {
 	pending := filepath.Join(root, storePostgresOwnerLock+".new")
 	f, err := os.OpenFile(pending, os.O_CREATE|os.O_EXCL|os.O_RDWR, 0o600)
@@ -39,9 +36,7 @@ func claimStorePostgresRoot(root string) (func(), error) {
 	return func() { _ = f.Close() }, nil
 }
 
-// sweepAbandonedStorePostgresRoots removes every store-postgres root under dir
-// whose owner lock no live process holds. A root without the lock file is
-// left alone: it may belong to a run that is still creating it.
+// safety: a root without the lock file is left alone, since its run may still be creating it.
 func sweepAbandonedStorePostgresRoots(ctx context.Context, dir string) {
 	roots, err := filepath.Glob(filepath.Join(dir, storePostgresRootPrefix+"*"))
 	if err != nil {
@@ -60,7 +55,7 @@ func sweepAbandonedStorePostgresRoots(ctx context.Context, dir string) {
 			}
 			continue
 		}
-		removeErr := os.RemoveAll(root)
+		removeErr := removeStorePostgresRoot(root)
 		_ = f.Close()
 		if removeErr != nil {
 			sparkwing.Warn(ctx, "store-postgres: remove the abandoned root %s: %v", root, removeErr)

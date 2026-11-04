@@ -266,7 +266,6 @@ func warnIgnoredRunnerLabels(path string) {
 	}
 }
 
-// localRunnerName names this machine in the runner inventory.
 func localRunnerName() string {
 	if host, err := os.Hostname(); err == nil && host != "" {
 		return host

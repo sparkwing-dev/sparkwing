@@ -183,13 +183,31 @@ func (p *StorePostgres) run(ctx context.Context) error {
 			}
 			return server.Stop()
 		},
-		remove: func() error { return os.RemoveAll(root) },
+		remove: func() error { return removeStorePostgresRoot(root) },
 		suite:  runStoreSuiteAgainst,
 		serverLog: func() string {
 			return lastLines(serverLog.String(), storePostgresLogLines)
 		},
 		report: func(tail string) { sparkwing.Info(ctx, "postgres server log:\n%s", tail) },
 	})
+}
+
+// safety: the owner lock goes last, so a run killed mid-delete still leaves a root the next
+// sweep recognizes as abandoned instead of a lockless one it must skip.
+func removeStorePostgresRoot(root string) error {
+	entries, err := os.ReadDir(root)
+	if err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	for _, entry := range entries {
+		if entry.Name() == storePostgresOwnerLock {
+			continue
+		}
+		if err := os.RemoveAll(filepath.Join(root, entry.Name())); err != nil {
+			return err
+		}
+	}
+	return os.RemoveAll(root)
 }
 
 type storePostgresRun struct {
