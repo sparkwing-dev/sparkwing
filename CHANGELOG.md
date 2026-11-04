@@ -38,6 +38,10 @@ unlock.
   a hold was open, so the unpaid part was forgiven. It is now charged at the published rate like compute overage:
   the balance can go negative, a hold no longer pauses the charge, and the next Add funds covers it. A team at zero
   or below still cannot grow its storage or start new Cloud work.
+- **controller:** The shared object-store request budget no longer has a per-minute stop by default
+  The controller used to refuse every team's uploads, downloads and deletes for the rest of a minute once all teams
+  together sent 1,200 writes, 3,000 reads, or 600 listings or deletes. The budget now counts requests and refuses
+  nothing unless the operator sets one with `--object-store-budget`, such as `put:minute=1200`, which keeps working.
 
 ### Fixed
 

@@ -184,6 +184,18 @@ to disabled. The output window is thirty days, with the newest-success pin.
 Free and funded log retention classes are thirty and ninety days respectively.
 See [self-hosting](self-hosting.md#bound-storage-growth).
 
+## Shared stops the deployment does not ship
+
+A limit shared by every team refuses healthy customers once aggregate demand
+grows, so the shipped defaults leave these off and keep each one as explicit
+operator configuration. Korey decided each on 2026-11-04.
+
+- Object-store request budget: no per-minute stop by default, extending
+  decision 56.2, which made the per-day stop opt-in. Set
+  `--object-store-budget` for an emergency brake. GitHub scopes cache request
+  limits to a repository, and CircleCI limits concurrency per account and
+  resource class; neither stops every customer on aggregate traffic.
+
 ## Billing and overload protection
 
 Each metered award snapshots its payer, rate, executor and start facts. Job
