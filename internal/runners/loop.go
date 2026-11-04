@@ -140,9 +140,9 @@ func (l *Loop) run(ctx context.Context) (policyErr, runErr error) {
 	defer timer.Stop()
 	results := make(chan unitResult, l.Config.MaxConcurrent)
 	active := make(map[capability.LeaseRef]struct{})
-	// safety: a job blocked in RunAndAwait holds no job slot, or its child could never run here.
+	// safety: a unit whose job is blocked in RunAndAwait holds no slot, or its child could never run here.
 	var awaitMu sync.Mutex
-	awaiting := make(map[capability.LeaseRef]bool)
+	awaiting := make(map[capability.LeaseRef]int)
 	awaitChanged := make(chan struct{}, 1)
 	idleSince, pollAt, backoffUntil := time.Now(), time.Time{}, time.Time{}
 	claimed := 0
@@ -193,18 +193,19 @@ func (l *Loop) run(ctx context.Context) (policyErr, runErr error) {
 		}
 		active[key] = struct{}{}
 		claimed++
-		hostCtx := ctx
-		if unit.Unit != capability.UnitTrigger {
-			hostCtx = nodehost.WithAwaitNotify(ctx, func(on bool) {
-				awaitMu.Lock()
-				awaiting[key] = on
-				awaitMu.Unlock()
-				select {
-				case awaitChanged <- struct{}{}:
-				default:
-				}
-			})
-		}
+		hostCtx := nodehost.WithAwaitNotify(ctx, func(on bool) {
+			awaitMu.Lock()
+			if on {
+				awaiting[key]++
+			} else if awaiting[key]--; awaiting[key] <= 0 {
+				delete(awaiting, key)
+			}
+			awaitMu.Unlock()
+			select {
+			case awaitChanged <- struct{}{}:
+			default:
+			}
+		})
 		go func() { results <- unitResult{key: key, err: l.Host.Host(hostCtx, unit)} }()
 		return nil
 	}
@@ -238,9 +239,10 @@ func (l *Loop) run(ctx context.Context) (policyErr, runErr error) {
 		awaitMu.Lock()
 		for key := range active {
 			switch {
+			case awaiting[key] > 0:
 			case key.Kind == capability.UnitTrigger:
 				owners++
-			case !awaiting[key]:
+			default:
 				working++
 			}
 		}
