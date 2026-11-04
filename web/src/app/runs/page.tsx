@@ -13,6 +13,7 @@ import {
   useState,
 } from "react";
 import { createPortal } from "react-dom";
+import { useFocusTrap } from "@/lib/useFocusTrap";
 import { useRouter, useSearchParams } from "next/navigation";
 import MarkdownBody from "@/components/MarkdownBody";
 import PipelineOverview from "@/components/PipelineOverview";
@@ -355,6 +356,8 @@ function Pipelines({ pivotTabs }: { pivotTabs: React.ReactNode }) {
   const { openDropdown, setOpenDropdown, filterRef } = useFilterDropdownState();
   const [showTrigger, setShowTrigger] = useState(false);
   const [showNewRun, setShowNewRun] = useState(false);
+  const newRunDialogRef = useRef<HTMLDivElement>(null);
+  useFocusTrap(newRunDialogRef, showNewRun);
   useEffect(() => {
     if (!showNewRun) return;
     const close = (event: KeyboardEvent) => {
@@ -958,7 +961,7 @@ function Pipelines({ pivotTabs }: { pivotTabs: React.ReactNode }) {
             if (event.target === event.currentTarget) setShowNewRun(false);
           }}
         >
-          <div role="dialog" aria-modal="true" aria-label="Start a run" className="w-full max-w-2xl max-h-[calc(100vh-2rem)] overflow-y-auto shadow-2xl">
+          <div ref={newRunDialogRef} tabIndex={-1} role="dialog" aria-modal="true" aria-label="Start a run" className="w-full max-w-2xl max-h-[calc(100vh-2rem)] overflow-y-auto shadow-2xl">
             <TriggerForm
               onTriggered={() => {
                 toast("Run submitted", "success");
@@ -3610,6 +3613,7 @@ function NodeLogSummary({ node }: { node: RunNode }) {
     !isRunning &&
     !node.failure_reason &&
     !node.error &&
+    !node.status_detail &&
     annotations.length === 0
   ) {
     return null;
