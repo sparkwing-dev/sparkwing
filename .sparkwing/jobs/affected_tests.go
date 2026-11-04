@@ -378,17 +378,26 @@ func frontendChange(ctx context.Context, browser bool) (string, error) {
 	for _, dep := range strings.Fields(deps) {
 		built[dep] = true
 	}
+	return fixtureChange(files, modules, byDir, built), nil
+}
+
+// perf: Markdown and tests in a package the fixture builds leave what it serves
+// unchanged, and nearly every change carries a changelog entry into pkg/docs.
+func fixtureChange(files, modules []string, byDir map[string]string, built map[string]bool) string {
 	for _, f := range files {
 		rel, ok := moduleRelative(".", modules, f)
 		if !ok {
 			continue
 		}
 		if _, whole := wholeModuleTriggers[rel]; whole {
-			return f + " changed", nil
+			return f + " changed"
+		}
+		if strings.HasSuffix(rel, ".md") || strings.HasSuffix(rel, "_test.go") {
+			continue
 		}
 		if pkg := owningPackage(rel, byDir); built[pkg] {
-			return fmt.Sprintf("%s changed, which the browser fixture builds", pkg), nil
+			return fmt.Sprintf("%s changed, which the browser fixture builds", pkg)
 		}
 	}
-	return "", nil
+	return ""
 }

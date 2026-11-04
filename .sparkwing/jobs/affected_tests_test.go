@@ -139,3 +139,19 @@ func TestFrontendSuitesRunOnlyWhenTheirInputsChange(t *testing.T) {
 		t.Fatalf("a web change did not run the dashboard suites: %q, %v", why, err)
 	}
 }
+
+func TestBrowserFixtureIgnoresMarkdownAndTestsInPackagesItBuilds(t *testing.T) {
+	byDir := map[string]string{"pkg/docs": "m/pkg/docs", "internal/runners/launcher": "m/launcher", "internal/web": "m/web"}
+	built := map[string]bool{"m/pkg/docs": true, "m/web": true}
+	modules := []string{"."}
+	quiet := []string{"CHANGELOG.md", "pkg/docs/changelog.md", "internal/web/server_test.go", "internal/runners/launcher/launcher.go"}
+	if why := fixtureChange(quiet, modules, byDir, built); why != "" {
+		t.Fatalf("a changelog, a test and an unbuilt package ran the browser smoke: %q", why)
+	}
+	if why := fixtureChange(append(quiet, "internal/web/server.go"), modules, byDir, built); !strings.Contains(why, "m/web") {
+		t.Fatalf("a source change in a package the fixture builds skipped the browser smoke: %q", why)
+	}
+	if why := fixtureChange([]string{"go.mod"}, modules, byDir, built); why == "" {
+		t.Fatal("a module requirement change skipped the browser smoke")
+	}
+}
