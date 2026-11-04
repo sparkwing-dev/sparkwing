@@ -79,7 +79,10 @@ digests are CEL literals.
   later API adds, is refused. Capacity requests run as UID 65534
   with every capability dropped. `runtimeClassName`, `shareProcessNamespace`,
   resource claims and health-check `host` fields must stay unset, as must
-  `dnsConfig` and `hostAliases`; the scheduler is the default one, service
+  `hostAliases`. Job Pods set exactly the `dnsConfig` resolver options
+  `timeout:1` and `attempts:5`, with no nameservers or search domains, so the
+  first lookup outlasts the strict network-policy attach window; capacity
+  Pods set no `dnsConfig`. The scheduler is the default one, service
   links are off and no `system-` priority class may be named. The fields come
   from the vendored k8s.io/api, so a field a newer API server adds stays
   unpinned until that dependency moves.
@@ -705,8 +708,10 @@ the controller is upgraded, without a capacity failure or refund.
 With a compatible pool, the launcher keeps the award and creates
 `sw-capacity-<award hash>`: an unbound Pod with the requested shared class and
 launcher namespace selectors, the generic dedicated toleration, the award's CPU,
-memory and scratch requests, the runner image running `/usr/bin/sleep` for the
-remaining award budget, and no volumes, environment or service account token.
+memory and scratch requests, the runner image's `/bin/sh` sleeping for the
+remaining award budget and exiting on SIGTERM, and no volumes, environment or
+service account token. A bare `sleep` as PID 1 ignores SIGTERM, so every delete
+on the cold-start path waited for the kubelet's kill.
 The Pod records its unit fence and size in `sparkwing.dev/capacity-demand`,
 never the bootstrap credential.
 Required pod anti-affinity on `kubernetes.io/hostname` keeps it off any node

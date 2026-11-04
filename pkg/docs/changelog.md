@@ -42,6 +42,17 @@ unlock.
   It printed an indented document, which a reader taking one JSON object per line could not parse.
 - **delivery:** Gate and land runs start faster and redo less work
   The golangci-lint cache moved from `.sparkwing/cache/` to the worktree's git directory, so starting a run in a checkout that had linted no longer hashes its 80,000 files (`sparkwing pipeline list` 67 s to 2.5 s). Without `--full` the gate lints only the packages holding changed Go files, its test steps keep one `SPARKWING_HOME` per checkout so `go test` replays unchanged passes, a change outside every package (`.github/`, `docs/`, `bin/` and similar) runs the packages whose tests read it, and land pushes the tree it gated without re-running the pre-push hook. Hosted CI refreshes its Go build cache from every push to main.
+- **launcher:** Cloud Job Pods retry DNS after 1s instead of 5s
+  Under strict VPC CNI network policy a new Pod's egress drops for about 2s, so the first controller lookup used to stall for the full 5s resolver timeout. Job Pods now set the resolver options `timeout:1` and `attempts:5`, and admission accepts exactly those options on Job Pods.
+- **launcher:** Cold-start capacity placeholders leave a reserved node about 2s sooner
+  The `sw-capacity-*` placeholder ran `sleep` as PID 1, which ignores SIGTERM, so each delete before Job creation waited for the kubelet to kill it. It now runs a `/bin/sh` that sleeps for the same budget and exits on SIGTERM. Deletion stays graceful, so the placeholder's requests are still freed before the Job is placed.
+- **runner image:** Cloud jobs skip downloading and compiling the runner's own SDK
+  A release runner image now ships a Go module cache and build cache primed for its own SDK version under `/usr/local/share/sparkwing/go-seed`, and a Cloud Job copies them into its empty `/tmp` caches while the Docker sidecar starts. A Cloud plan already pins that version, so its pipeline build drops from about 24s to a few seconds; dependencies beyond the SDK's own still download as before, with `go.sum` checks unchanged. The image grows by about 200 MB uncompressed (about 60 MB compressed).
+
+### Fixed
+
+- **launcher:** `sparkwing-runner launch` refuses `--poll` below 2s at startup
+  The controller never suggests an idle claim poll under 2s, and one enforcing idle polls answered a faster launcher with a rate-limit warning on every tick. The launcher now fails at startup and names the controller's `--idle-claim-poll`.
 - **run:** A first run reuses the installed CLI as the pipeline engine when it is the pinned release
   The engine was downloaded again (73 MB) and verified twice; now the installed bytes are checked against the signed
   release files and verified once.
@@ -129,7 +140,6 @@ unlock.
 - **docs:** Configuration guidance names each component's real input
   Machine configuration no longer says installation uses submitted values (only planning and execution do), and the git-credentials page says the controller reads its secrets key from the `secrets-key` file in `--credentials-dir`, not `SPARKWING_SECRETS_KEY`.
 - **docs:** The API guide shows a read-only bearer request, and the versioning guide links the latest stable release
-
 
 ## [v0.68.7] - 2026-11-04
 ### Added

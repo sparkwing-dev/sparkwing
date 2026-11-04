@@ -93,9 +93,15 @@ spec:
       && (!has(p.value().tcpSocket) || !has(p.value().tcpSocket.host))))'
     message: Pods use the default runtime class, private process namespaces, no resource
       claims and probes against their own address
-  - expression: '!variables.create || !has(variables.spec.dnsConfig) && !has(variables.spec.hostAliases)
-      && variables.spec.?schedulerName.orValue(''default-scheduler'') == ''default-scheduler''
-      && !variables.spec.?enableServiceLinks.orValue(true) && !variables.spec.?priorityClassName.orValue('''').startsWith(''system-'')'
+  - expression: '!variables.create || !has(variables.spec.dnsConfig) || variables.shape
+      == ''job'' && size(variables.spec.dnsConfig.?nameservers.orValue([])) == 0 &&
+      size(variables.spec.dnsConfig.?searches.orValue([])) == 0 && variables.spec.dnsConfig.?options.orValue([]).map(o,
+      o.?name.orValue('''') + ''='' + o.?value.orValue('''')) == ["timeout=1", "attempts=5"]'
+    message: Job Pods keep cluster DNS with only the launcher's resolver options;
+      capacity Pods set none
+  - expression: '!variables.create || !has(variables.spec.hostAliases) && variables.spec.?schedulerName.orValue(''default-scheduler'')
+      == ''default-scheduler'' && !variables.spec.?enableServiceLinks.orValue(true)
+      && !variables.spec.?priorityClassName.orValue('''').startsWith(''system-'')'
     message: Pods keep cluster DNS, the default scheduler, no service links and no
       system priority class
   - expression: '!variables.create || variables.shape != ''job'' || variables.spec.containers[0].?command.orValue([])
@@ -349,9 +355,15 @@ spec:
       && (!has(p.value().tcpSocket) || !has(p.value().tcpSocket.host))))'
     message: Pods use the default runtime class, private process namespaces, no resource
       claims and probes against their own address
-  - expression: '!variables.create || !has(variables.spec.dnsConfig) && !has(variables.spec.hostAliases)
-      && variables.spec.?schedulerName.orValue(''default-scheduler'') == ''default-scheduler''
-      && !variables.spec.?enableServiceLinks.orValue(true) && !variables.spec.?priorityClassName.orValue('''').startsWith(''system-'')'
+  - expression: '!variables.create || !has(variables.spec.dnsConfig) || variables.shape
+      == ''job'' && size(variables.spec.dnsConfig.?nameservers.orValue([])) == 0 &&
+      size(variables.spec.dnsConfig.?searches.orValue([])) == 0 && variables.spec.dnsConfig.?options.orValue([]).map(o,
+      o.?name.orValue('''') + ''='' + o.?value.orValue('''')) == ["timeout=1", "attempts=5"]'
+    message: Job Pods keep cluster DNS with only the launcher's resolver options;
+      capacity Pods set none
+  - expression: '!variables.create || !has(variables.spec.hostAliases) && variables.spec.?schedulerName.orValue(''default-scheduler'')
+      == ''default-scheduler'' && !variables.spec.?enableServiceLinks.orValue(true)
+      && !variables.spec.?priorityClassName.orValue('''').startsWith(''system-'')'
     message: Pods keep cluster DNS, the default scheduler, no service links and no
       system priority class
   - expression: '!variables.create || variables.shape != ''job'' || variables.spec.containers[0].?command.orValue([])

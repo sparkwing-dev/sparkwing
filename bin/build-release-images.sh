@@ -16,6 +16,7 @@ for binary in sparkwing-controller sparkwing-runner; do
   docker buildx build --file "$recipe" --target release \
     --platform "linux/$GOARCH" \
     --build-arg "BINARY=$binary" \
+    --build-arg "SPARKWING_VERSION=$TAG" \
     --build-arg "SPARKWING_IMAGE_REFRESH=$SPARKWING_IMAGE_REFRESH" \
     --label "org.opencontainers.image.version=$TAG" \
     --label "org.opencontainers.image.revision=${SOURCE_SHA:?source SHA is required}" \
