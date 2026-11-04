@@ -165,7 +165,7 @@ func TestPreparationRenewalIgnoresPersistentRetirementFailure(t *testing.T) {
 			renewals++
 			return time.Now().Add(limits.DefaultLease), nil
 		}}
-		l.Kube, l.Boundary, l.Control = kube, boundary, terminalControl{CloudControl: preparer}
+		l.Kube, l.Boundary, l.Control = kube, boundary, preparer
 		ctx, stop, _, err := l.keepPreparation(t.Context(), control.award.Binding.LeaseRef())
 		if err != nil {
 			t.Fatal(err)

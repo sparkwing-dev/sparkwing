@@ -2,6 +2,7 @@ package controller_test
 
 import (
 	"net/http"
+	"net/url"
 	"strings"
 	"testing"
 
@@ -246,5 +247,38 @@ func TestGitHubAppRunsAnywhereUnlessTheRepositoryPinsCloud(t *testing.T) {
 	claimed = controllerwire.ClaimResponse{}
 	if code := f.call("POST", "/api/v1/runners/claim", machine, githubClaimBody(capability.UnitPlan, "", ""), &claimed); code != http.StatusOK || claimed.Claim != nil {
 		t.Fatalf("team runner took the Cloud-pinned plan: %d %+v", code, claimed.Claim)
+	}
+}
+
+func TestGitHubAppAutomationListingReadsAContinuationPage(t *testing.T) {
+	f := newDeploymentAppFixture(t, deploymenttest.Cloud(t, "https://controller.test"))
+	olga := f.ghUser(501, "olga")
+	f.connect(olga, 501, 7, acmeAdmin)
+	for _, repo := range []string{"acme/widgets", "acme/plans"} {
+		f.app.SetCommit(repo, "main", headSHA)
+		f.app.SetFile(repo, headSHA, ".sparkwing/sparkwing.yaml", []byte(automationConfig))
+		if code := f.call("PUT", "/api/v1/team/github-app/automation", olga.auth, map[string]string{"repository": repo, "runner": "cloud"}, nil); code != http.StatusOK {
+			t.Fatalf("enable %s = %d", repo, code)
+		}
+	}
+	var first struct {
+		Automation []controllerwire.GitHubAppAutomation `json:"automation"`
+		NextCursor string                               `json:"next_cursor"`
+	}
+	if code := f.call("GET", "/api/v1/team/github-app/automation?limit=1", olga.auth, nil, &first); code != http.StatusOK || len(first.Automation) != 1 || first.NextCursor == "" {
+		t.Fatalf("first page = %d %+v, want one row and a continuation", code, first)
+	}
+	var second struct {
+		Automation []controllerwire.GitHubAppAutomation `json:"automation"`
+		NextCursor string                               `json:"next_cursor"`
+	}
+	if code := f.call("GET", "/api/v1/team/github-app/automation?limit=1&cursor="+url.QueryEscape(first.NextCursor), olga.auth, nil, &second); code != http.StatusOK || len(second.Automation) != 1 || second.NextCursor != "" {
+		t.Fatalf("continuation page = %d %+v, want the last row", code, second)
+	}
+	if first.Automation[0].Repository == second.Automation[0].Repository {
+		t.Fatalf("both pages returned %s", first.Automation[0].Repository)
+	}
+	if code := f.call("GET", "/api/v1/team/github-app/automation?repository=acme/widgets&limit=1", olga.auth, nil, nil); code != http.StatusBadRequest {
+		t.Fatalf("repository preview with a page size = %d, want 400", code)
 	}
 }

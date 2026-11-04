@@ -95,6 +95,8 @@ func TestCompleteChartRBACConfinement(t *testing.T) {
 				{"batch", "jobs", "job", false},
 				{"apps", "replicasets", "warm", false},
 				{"", "secrets", "credential", false},
+				{"", "configmaps", "sparkwing-cloud-admission", false},
+				{"", "configmaps", "other", false},
 				{"networking.k8s.io", "networkpolicies", "boundary", false},
 				{"discovery.k8s.io", "endpointslices", "kubernetes", false},
 				{"", "serviceaccounts", "sparkwing-customer-job", false},
@@ -181,6 +183,10 @@ func chartLauncherGrant(group, resource, name, namespace, verb string) bool {
 	case "secrets":
 		if namespace == "cloud-cloud-jobs" {
 			verbs = "create delete"
+		}
+	case "configmaps":
+		if namespace == "cloud-cloud-jobs" && name == AdmissionParamsName {
+			verbs = "get"
 		}
 	case "nodes":
 		verbs = "get list update patch"

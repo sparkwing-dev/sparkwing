@@ -35,7 +35,7 @@ func TestGitHubRunnerWorkflowUsesCurrentGrammar(t *testing.T) {
 	if len(words) == 0 {
 		t.Fatal("workflow contains no runner command")
 	}
-	if _, err := runnerflags.Parse(words[0], words[1:], io.Discard); err != nil {
+	if _, err := runnerflags.Parse(words[0], words[1:], io.Discard, io.Discard); err != nil {
 		t.Fatal(err)
 	}
 }

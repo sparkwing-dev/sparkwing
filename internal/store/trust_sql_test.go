@@ -36,7 +36,7 @@ func TestStoreSQLTrustLiterals(t *testing.T) {
 			if !ok || lit.Kind != token.STRING {
 				return true
 			}
-			for _, class := range runspec.AllTrust {
+			for _, class := range runspec.AllTrust() {
 				if strings.Contains(lit.Value, `'`+string(class)+`'`) {
 					t.Errorf("%s: trust class %q written into SQL by hand; render it with trustIn and a runspec trust set", fset.Position(lit.Pos()), class)
 				}

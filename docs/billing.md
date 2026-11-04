@@ -263,9 +263,11 @@ dependency settlement decides which descendants can run. When it stops the
 run's owner itself (a trigger or plan running on Cloud), the whole run stops,
 including jobs on customer-owned runners, because its orchestrator has stopped.
 
-Retained storage is charged only from the balance there is: once the balance
-reaches zero, storage accounting advances without a debit. The unfunded part
-is forgiven and is not collected after a top-up.
+Retained storage past the free allowance is charged in full at the published
+rate, even when that takes the balance negative, like a clawback. A hold does
+not pause the charge. The next Add funds covers the negative balance, and while
+the balance is zero or below the team cannot grow its storage past the free
+allowance or start new Cloud work.
 
 ## Holds
 
@@ -305,7 +307,10 @@ ledger effect because its charge total repeats those individual refunds.
 
 Each controller store holds a random payment deployment id, created once at
 first start and never changed by configuration, so renaming the controller's
-host leaves its in-flight payments its own. The checkout service stamps that id as
+host leaves its in-flight payments its own. The controller logs it at start as
+`payment deployment`, and the checkout service's `BILLING_DEPLOYMENT` must be
+set to that value; a reset or restored store with another id breaks the pairing
+until it is updated. The checkout service stamps that id as
 `metadata[sparkwing_deployment]` on every Checkout Session, setup intent,
 payment intent and customer it creates for the controller. Deployments that
 share one Stripe account each receive the other's events at `/webhooks/stripe`.
@@ -380,7 +385,11 @@ same payment fails with `charge_already_refunded` and moves no money.
 The team's owners get one email saying the refund of that amount for the payment
 on its date could not be completed and that Sparkwing will follow up. A
 terminal refund outcome survives a later pending delivery, and a conflicting
-terminal outcome is refused.
+terminal outcome is refused, except that Stripe may fail a refund it reported
+succeeded. That case logs `alert=refund_failed_after_success` at error level
+with the mode, refund, payment and amount, and no console view lists it.
+Runbook: open the payment in Stripe, confirm the refund failed and no later
+refund returned the money, then refund it by hand and tell the team's owners.
 
 Team deletion never waits for money to finish moving. Purge removes operational
 data, refill settings and the team's Stripe customer ID, retaining the team id

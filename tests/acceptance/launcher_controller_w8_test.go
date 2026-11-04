@@ -34,7 +34,7 @@ func (c launcherControllerW8) SyncLauncher(ctx context.Context, request controll
 }
 
 func TestLauncherPollingW8Components(t *testing.T) {
-	for _, option := range []string{"--poll=1s", ""} {
+	for _, option := range []string{"--poll=2s", ""} {
 		t.Run(option, func(t *testing.T) {
 			synctest.Test(t, func(t *testing.T) {
 				ctx, cancel := context.WithTimeout(t.Context(), 2*time.Hour)
@@ -74,7 +74,7 @@ func TestLauncherPollingW8Components(t *testing.T) {
 				want := time.Hour
 				if option != "" {
 					args = append(args, option)
-					want = time.Second
+					want = 2 * time.Second
 				}
 				err = cluster.RunLaunchCLI(ctx, args, func(_ context.Context, cfg launcher.CloudJobConfig, _ func(context.Context) (string, error)) (*launcher.Launcher, error) {
 					return &launcher.Launcher{Config: cfg, Kube: cloudKubeW8(), Control: control, Boundary: &cloudBoundaryFake{}, Poll: time.Hour}, nil

@@ -233,6 +233,15 @@ func bindingTokenTx(ctx context.Context, tx *storeTx, c capability.Capability, t
 	if target.TokenPrefix == "" {
 		return bindingRefusal()
 	}
+	// safety: scope the target to the caller's team before loading it, so a foreign token and an absent one refuse alike.
+	var scoped int
+	err := tx.QueryRowContext(ctx, `SELECT 1 FROM capabilities WHERE prefix=? AND COALESCE(team,'')=?`, target.TokenPrefix, c.Team).Scan(&scoped)
+	if errors.Is(err, sql.ErrNoRows) {
+		return bindingRefusal()
+	}
+	if err != nil {
+		return err
+	}
 	_, metadata, err := capabilityMetadataTx(ctx, tx, target.TokenPrefix)
 	if err != nil {
 		return err

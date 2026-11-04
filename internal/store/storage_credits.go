@@ -98,6 +98,9 @@ type storageCharge struct {
 
 // safety: the row carries no cpu class and no per-second rate, because neither
 // priced it; the bytes and the interval it covered are what explain the amount.
+// Storage is billed in arrears at the full published rate, like compute overage:
+// the charge may take the balance negative, a hold does not pause it, and the
+// out-of-credit block on storage growth applies once the balance reaches zero.
 func insertStorageChargeTx(ctx context.Context, tx *storeTx, c storageCharge) (*CreditCharge, error) {
 	id, err := newCreditID("charge")
 	if err != nil {
@@ -112,5 +115,5 @@ func insertStorageChargeTx(ctx context.Context, tx *storeTx, c storageCharge) (*
 		Seconds: c.Seconds, AmountMicro: c.AmountMicro, StorageBytes: c.Bytes,
 		ChargedAt: time.Unix(0, c.NowNS).UTC(),
 	}
-	return l.debitFunded(ctx, charge)
+	return &charge, l.insertCharge(ctx, charge)
 }

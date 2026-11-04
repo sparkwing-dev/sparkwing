@@ -61,7 +61,7 @@ func TestGitHubAppRemovalListingFailureIsTargeted(t *testing.T) {
 				engineSQL(t, s.store, `INSERT INTO github_app_automation(team,repository_id,repository,installation_id,enabled_by,enabled_at,repo_key) VALUES ('a',?,?,7,'member',1,?)`, id, fmt.Sprintf("acme/r%d", id), fmt.Sprintf("gh:%d", id))
 			}
 			body := fmt.Sprintf(`{"action":"removed","installation":{"id":7},"repositories_removed":%s}`, tc.removed)
-			if err := s.operator.EnqueueGitHubDelivery(t.Context(), "removal", "installation_repositories", []byte(body), now); err != nil {
+			if err := s.operator.EnqueueGitHubDelivery(t.Context(), "removal", "installation_repositories", []byte(body)); err != nil {
 				t.Fatal(err)
 			}
 			var receipt string

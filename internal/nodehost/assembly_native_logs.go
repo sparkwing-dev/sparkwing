@@ -144,7 +144,7 @@ func (s *localLogStream) write(ctx context.Context, body []byte) error {
 			s.sink.MarkIncomplete()
 		}
 	}
-	return s.sink.Append(body, "", 0, 0)
+	return s.sink.Append(body)
 }
 
 func (s *localLogStream) close(ctx context.Context) error {

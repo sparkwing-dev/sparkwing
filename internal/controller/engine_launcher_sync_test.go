@@ -160,7 +160,3 @@ func TestLauncherCleanupRequiresPositiveAbsence(t *testing.T) {
 func (launcherAwardSnapshot) RecordWarmPoolObservations(context.Context, capability.AuthorityRef, map[string]int64) error {
 	return nil
 }
-
-func (launcherAwardSnapshot) LauncherRunTerminal(context.Context, capability.AuthorityRef, string, string) (bool, error) {
-	return false, errors.New("unexpected terminal-run query")
-}

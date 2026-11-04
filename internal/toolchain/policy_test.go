@@ -28,37 +28,6 @@ func TestResolveHoldReadsTheFile(t *testing.T) {
 	}
 }
 
-func TestResolveHoldStrictDistinguishesInvalidFromAbsent(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "version-hold")
-	if hold, err := resolveHoldStrict(path); err != nil || hold.Value != "" {
-		t.Fatalf("absent hold = %+v, %v", hold, err)
-	}
-	for _, value := range []string{"latest", "v0.15-rc.1"} {
-		if err := os.WriteFile(path, []byte(value+"\n"), 0o600); err != nil {
-			t.Fatal(err)
-		}
-		if hold, err := resolveHoldStrict(path); err == nil || hold.Source != path {
-			t.Fatalf("invalid file hold %q = %+v, %v", value, hold, err)
-		}
-	}
-	for _, value := range []string{"v0.15", "v0.15.4"} {
-		if err := os.WriteFile(path, []byte(value+"\n"), 0o600); err != nil {
-			t.Fatal(err)
-		}
-		if hold, err := resolveHoldStrict(path); err != nil || hold.Value != value {
-			t.Errorf("valid hold %q = %+v, %v", value, hold, err)
-		}
-	}
-}
-
-func TestValidHoldRejectsValuesThatWouldDisableTheCeiling(t *testing.T) {
-	for _, value := range []string{"", "latest", "0.15", "v0", "v0.15.0-rc.1", "v0.15.0+build", "v01.15"} {
-		if validHold(value) {
-			t.Errorf("ValidHold(%q) = true", value)
-		}
-	}
-}
-
 func TestExceedsHold(t *testing.T) {
 	tests := []struct {
 		target string

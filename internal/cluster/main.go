@@ -89,7 +89,7 @@ func runRunnerVersion(writer io.Writer, args []string, version string) error {
 }
 
 func runRunnerVersionIO(writer, diagnostics io.Writer, args []string, version string) error {
-	fs, err := runnerflags.Parse("version", args, diagnostics)
+	fs, err := runnerflags.Parse("version", args, writer, diagnostics)
 	if err != nil {
 		return parsedHelp(err)
 	}
@@ -103,9 +103,7 @@ func runRunnerVersionIO(writer, diagnostics io.Writer, args []string, version st
 	}
 	switch format {
 	case "json":
-		encoder := json.NewEncoder(writer)
-		encoder.SetIndent("", "  ")
-		return encoder.Encode(identity)
+		return json.NewEncoder(writer).Encode(identity)
 	case "plain":
 		fmt.Fprintln(writer, identity.Version)
 		return nil

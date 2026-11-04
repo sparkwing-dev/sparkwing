@@ -197,7 +197,13 @@ func (s *Server) handleGitHubAppAutomation(w http.ResponseWriter, r *http.Reques
 	if r.Method == http.MethodDelete {
 		queryKey = "repository_id"
 	}
+	// safety: the unfiltered listing takes only the shared page parameters, which
+	// collectionSelection validates; the preview and mutations keep this whitelist.
+	listing := r.Method == http.MethodGet && !query.Has("repository")
 	for key, values := range query {
+		if listing && (key == "limit" || key == "cursor") {
+			continue
+		}
 		if key != queryKey || len(values) != 1 || (r.Method == http.MethodPut) {
 			return githubAppRequestError(http.StatusBadRequest, errors.New("invalid automation query"))
 		}
@@ -235,12 +241,9 @@ func (s *Server) handleGitHubAppAutomation(w http.ResponseWriter, r *http.Reques
 			return githubAppRequestError(http.StatusBadRequest, err)
 		}
 		slug = req.Repository
-	} else if slug == "" {
-		for name := range r.URL.Query() {
-			if name != "limit" && name != "cursor" {
-				return githubAppRequestError(http.StatusBadRequest, errors.New("repository must be owner/name"))
-			}
-		}
+	} else if slug == "" && !listing {
+		return githubAppRequestError(http.StatusBadRequest, errors.New("repository must be owner/name"))
+	} else if listing {
 		list, err := tenant.GitHubAppAutomations(r.Context())
 		if err != nil {
 			return engineLookupError(err)

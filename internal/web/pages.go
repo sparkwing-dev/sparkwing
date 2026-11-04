@@ -94,6 +94,10 @@ func spaHandler(bundleFS fs.FS) http.Handler {
 		}
 
 		if info, err := fs.Stat(bundleFS, p); err == nil && !info.IsDir() {
+			// safety: Next names everything under _next/static by content hash or build ID.
+			if strings.HasPrefix(p, "_next/static/") {
+				w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+			}
 			if serveBundleAsset(w, r, bundleFS, p, assets) {
 				return
 			}

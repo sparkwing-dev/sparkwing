@@ -124,6 +124,9 @@ func (j *deployJob) deployer() (*deployer, func(), error) {
 	if j.tools != nil {
 		tools = *j.tools
 	}
+	if _, err := j.Cfg.toolDirInUse(j.Dry); err != nil {
+		return nil, nil, err
+	}
 	if err := sweepStaleDeployDirs(os.TempDir(), tools.now(), j.Cfg.productionBudget()); err != nil {
 		return nil, nil, err
 	}

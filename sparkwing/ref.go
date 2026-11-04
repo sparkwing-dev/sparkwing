@@ -286,10 +286,11 @@ func FromAnyRun() RefOption {
 // at the reading run's own sealed commit, on any branch, whose repository was
 // proven as the reader's proven repository: by a GitHub App delivery, an
 // Actions push, a schedule, or code the controller fetched from GitHub. The run
-// must have selected every job and step: none of only, start-at or stop-at,
-// and not dry run, paused or debugged. It must also have sealed no environment variables, since a
-// submitted GOFLAGS or the like can change what its jobs judged, and every job
-// that did not skip must have run on a host the controller trusts. The newest
+// must have set no run option beyond those that only place, schedule or present
+// it, so none of only, start-at, stop-at, dry run, pause or debug, and sealed no
+// environment variables, since a submitted GOFLAGS or the like can change what
+// its jobs judged. Every job that did not skip must have run on a host the
+// controller trusts. The newest
 // such run in which the referenced job succeeded answers. A reader with no proven repository matches nothing, and a
 // controller that predates the filter is refused rather than ignored. It cannot
 // be combined with FromAnyRun.

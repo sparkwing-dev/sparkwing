@@ -20,9 +20,10 @@
 # source_credential            repository proof plus intake-time compare, or same-repository child fetch-only access
 # actions_runner_fresh_host    claimantFactsTx FreshHost for the Actions binding's signed runner_environment
 # cache_write_<host>           awardDataScope WriteRef with awardCacheHostTx's writer for that host:
-#                              fresh_host (launcher pod, Cloud, GitHub-hosted Actions), long_lived (plain
-#                              machine, persistent or self-hosted runner) and long_lived_high_trust (the same
-#                              host on a team with high_trust on); host-<machine> stands for the host's hash
+#                              fresh_host (Cloud, GitHub-hosted Actions), long_lived (a machine that takes
+#                              asserted work, or a self-hosted Actions runner), trusted_long_lived (a machine or
+#                              team launcher scoped to repositories), each _high_trust on a team with high_trust
+#                              on; only a trusted host writes the shared scope; host-<machine> stands for the host's hash
 # cache_write_default_branch_<host>  blob.Record.VerifiedDefault over runRefFacts: records others restore as main
 # host_* / pool_*              claim SQL hostTrust AND freshPod AND poolTrust (SQLite, and PostgreSQL when
 #                              SPARKWING_TEST_PG_URL is set, which must agree):
@@ -34,7 +35,6 @@
 #   pool_reserved_trust_any    the same pool registered --trust=any
 #   pool_verified_only         launcher pool registered --trust=verified-default
 #   pool_reserved_on_machine   plain machine in a reserved pool, default trust
-#   machine_trust_verified     plain machine registered --trust=verified: runs whose commit GitHub or the controller proved
 # default_branch_work_sql      claim SQL defaultBranchWork
 # fresh_host_required          freshPod refuses persistent Kubernetes runners exactly when default_branch_work_sql
 # personal_* / here_*          every consumer behind claimSQL.hostTrust for that host; "not claimed" means
@@ -60,9 +60,15 @@ oidc_runner_environment_fresh_host                 fresh
 cache_write_long_lived                             manual:host-<machine>:refs/heads/main
 cache_write_default_branch_long_lived              no
 oidc_runner_environment_long_lived                 persistent
-cache_write_long_lived_high_trust                  refs/heads/main
-cache_write_default_branch_long_lived_high_trust   yes
+cache_write_long_lived_high_trust                  manual:host-<machine>:refs/heads/main
+cache_write_default_branch_long_lived_high_trust   no
 oidc_runner_environment_long_lived_high_trust      persistent
+cache_write_trusted_long_lived                     manual:host-<machine>:refs/heads/main
+cache_write_default_branch_trusted_long_lived      no
+oidc_runner_environment_trusted_long_lived         persistent
+cache_write_trusted_long_lived_high_trust          refs/heads/main
+cache_write_default_branch_trusted_long_lived_high_trust yes
+oidc_runner_environment_trusted_long_lived_high_trust persistent
 personal_claim                                     no
 personal_pipeline_secrets                          not claimed
 personal_shared_secrets                            not claimed
@@ -90,7 +96,6 @@ pool_reserved                yes
 pool_reserved_trust_any      yes
 pool_verified_only           yes
 pool_reserved_on_machine     no
-machine_trust_verified       yes
 default_branch_work_sql      yes
 latest_default               yes
 repos_runner                 yes
@@ -115,9 +120,15 @@ oidc_runner_environment_fresh_host                 fresh
 cache_write_long_lived                             manual:host-<machine>:refs/heads/feature
 cache_write_default_branch_long_lived              no
 oidc_runner_environment_long_lived                 persistent
-cache_write_long_lived_high_trust                  refs/heads/feature
+cache_write_long_lived_high_trust                  manual:host-<machine>:refs/heads/feature
 cache_write_default_branch_long_lived_high_trust   no
 oidc_runner_environment_long_lived_high_trust      persistent
+cache_write_trusted_long_lived                     manual:host-<machine>:refs/heads/feature
+cache_write_default_branch_trusted_long_lived      no
+oidc_runner_environment_trusted_long_lived         persistent
+cache_write_trusted_long_lived_high_trust          refs/heads/feature
+cache_write_default_branch_trusted_long_lived_high_trust no
+oidc_runner_environment_trusted_long_lived_high_trust persistent
 personal_claim                                     no
 personal_pipeline_secrets                          not claimed
 personal_shared_secrets                            not claimed
@@ -145,7 +156,6 @@ pool_reserved                no
 pool_reserved_trust_any      yes
 pool_verified_only           no
 pool_reserved_on_machine     no
-machine_trust_verified       yes
 default_branch_work_sql      no
 latest_default               no
 repos_runner                 yes
@@ -170,9 +180,15 @@ oidc_runner_environment_fresh_host                 fresh
 cache_write_long_lived                             manual:host-<machine>:refs/pull/1/head
 cache_write_default_branch_long_lived              no
 oidc_runner_environment_long_lived                 persistent
-cache_write_long_lived_high_trust                  refs/pull/1/head
+cache_write_long_lived_high_trust                  manual:host-<machine>:refs/pull/1/head
 cache_write_default_branch_long_lived_high_trust   no
 oidc_runner_environment_long_lived_high_trust      persistent
+cache_write_trusted_long_lived                     manual:host-<machine>:refs/pull/1/head
+cache_write_default_branch_trusted_long_lived      no
+oidc_runner_environment_trusted_long_lived         persistent
+cache_write_trusted_long_lived_high_trust          refs/pull/1/head
+cache_write_default_branch_trusted_long_lived_high_trust no
+oidc_runner_environment_trusted_long_lived_high_trust persistent
 personal_claim                                     no
 personal_pipeline_secrets                          not claimed
 personal_shared_secrets                            not claimed
@@ -200,7 +216,6 @@ pool_reserved                no
 pool_reserved_trust_any      yes
 pool_verified_only           no
 pool_reserved_on_machine     no
-machine_trust_verified       yes
 default_branch_work_sql      no
 latest_default               no
 repos_runner                 yes
@@ -225,9 +240,15 @@ oidc_runner_environment_fresh_host                 fresh
 cache_write_long_lived                             manual:host-<machine>/fetched/run/run-app-push-branch-source-pin:refs/heads/main
 cache_write_default_branch_long_lived              no
 oidc_runner_environment_long_lived                 persistent
-cache_write_long_lived_high_trust                  manual:fetched/run/run-app-push-branch-source-pin:refs/heads/main
+cache_write_long_lived_high_trust                  manual:host-<machine>/fetched/run/run-app-push-branch-source-pin:refs/heads/main
 cache_write_default_branch_long_lived_high_trust   no
 oidc_runner_environment_long_lived_high_trust      persistent
+cache_write_trusted_long_lived                     manual:host-<machine>/fetched/run/run-app-push-branch-source-pin:refs/heads/main
+cache_write_default_branch_trusted_long_lived      no
+oidc_runner_environment_trusted_long_lived         persistent
+cache_write_trusted_long_lived_high_trust          manual:fetched/run/run-app-push-branch-source-pin:refs/heads/main
+cache_write_default_branch_trusted_long_lived_high_trust no
+oidc_runner_environment_trusted_long_lived_high_trust persistent
 personal_claim                                     no
 personal_pipeline_secrets                          not claimed
 personal_shared_secrets                            not claimed
@@ -255,7 +276,6 @@ pool_reserved                no
 pool_reserved_trust_any      yes
 pool_verified_only           no
 pool_reserved_on_machine     no
-machine_trust_verified       no
 default_branch_work_sql      no
 latest_default               no
 repos_runner                 yes
@@ -280,9 +300,15 @@ oidc_runner_environment_fresh_host                 fresh
 cache_write_long_lived                             manual:host-<machine>/schedule/nightly:refs/heads/main
 cache_write_default_branch_long_lived              no
 oidc_runner_environment_long_lived                 persistent
-cache_write_long_lived_high_trust                  manual:schedule/nightly:refs/heads/main
+cache_write_long_lived_high_trust                  manual:host-<machine>/schedule/nightly:refs/heads/main
 cache_write_default_branch_long_lived_high_trust   no
 oidc_runner_environment_long_lived_high_trust      persistent
+cache_write_trusted_long_lived                     manual:host-<machine>/schedule/nightly:refs/heads/main
+cache_write_default_branch_trusted_long_lived      no
+oidc_runner_environment_trusted_long_lived         persistent
+cache_write_trusted_long_lived_high_trust          manual:schedule/nightly:refs/heads/main
+cache_write_default_branch_trusted_long_lived_high_trust no
+oidc_runner_environment_trusted_long_lived_high_trust persistent
 personal_claim                                     no
 personal_pipeline_secrets                          not claimed
 personal_shared_secrets                            not claimed
@@ -310,7 +336,6 @@ pool_reserved                yes
 pool_reserved_trust_any      yes
 pool_verified_only           yes
 pool_reserved_on_machine     no
-machine_trust_verified       yes
 default_branch_work_sql      yes
 latest_default               yes
 repos_runner                 yes
@@ -335,9 +360,15 @@ oidc_runner_environment_fresh_host                 fresh
 cache_write_long_lived                             manual:host-<machine>/fetched/account/alice:refs/heads/main
 cache_write_default_branch_long_lived              no
 oidc_runner_environment_long_lived                 persistent
-cache_write_long_lived_high_trust                  manual:fetched/account/alice:refs/heads/main
+cache_write_long_lived_high_trust                  manual:host-<machine>/fetched/account/alice:refs/heads/main
 cache_write_default_branch_long_lived_high_trust   no
 oidc_runner_environment_long_lived_high_trust      persistent
+cache_write_trusted_long_lived                     manual:host-<machine>/fetched/account/alice:refs/heads/main
+cache_write_default_branch_trusted_long_lived      no
+oidc_runner_environment_trusted_long_lived         persistent
+cache_write_trusted_long_lived_high_trust          manual:fetched/account/alice:refs/heads/main
+cache_write_default_branch_trusted_long_lived_high_trust no
+oidc_runner_environment_trusted_long_lived_high_trust persistent
 personal_claim                                     no
 personal_pipeline_secrets                          not claimed
 personal_shared_secrets                            not claimed
@@ -365,7 +396,6 @@ pool_reserved                no
 pool_reserved_trust_any      yes
 pool_verified_only           no
 pool_reserved_on_machine     no
-machine_trust_verified       yes
 default_branch_work_sql      no
 latest_default               no
 repos_runner                 yes
@@ -390,9 +420,15 @@ oidc_runner_environment_fresh_host                 fresh
 cache_write_long_lived                             manual:host-<machine>/fetched/run/run-schedule-overridden:refs/heads/main
 cache_write_default_branch_long_lived              no
 oidc_runner_environment_long_lived                 persistent
-cache_write_long_lived_high_trust                  manual:fetched/run/run-schedule-overridden:refs/heads/main
+cache_write_long_lived_high_trust                  manual:host-<machine>/fetched/run/run-schedule-overridden:refs/heads/main
 cache_write_default_branch_long_lived_high_trust   no
 oidc_runner_environment_long_lived_high_trust      persistent
+cache_write_trusted_long_lived                     manual:host-<machine>/fetched/run/run-schedule-overridden:refs/heads/main
+cache_write_default_branch_trusted_long_lived      no
+oidc_runner_environment_trusted_long_lived         persistent
+cache_write_trusted_long_lived_high_trust          manual:fetched/run/run-schedule-overridden:refs/heads/main
+cache_write_default_branch_trusted_long_lived_high_trust no
+oidc_runner_environment_trusted_long_lived_high_trust persistent
 personal_claim                                     no
 personal_pipeline_secrets                          not claimed
 personal_shared_secrets                            not claimed
@@ -420,7 +456,6 @@ pool_reserved                no
 pool_reserved_trust_any      yes
 pool_verified_only           no
 pool_reserved_on_machine     no
-machine_trust_verified       yes
 default_branch_work_sql      no
 latest_default               no
 repos_runner                 yes
@@ -445,9 +480,15 @@ oidc_runner_environment_fresh_host                 fresh
 cache_write_long_lived                             manual:host-<machine>/fetched/run/run-schedule-locked:refs/heads/main
 cache_write_default_branch_long_lived              no
 oidc_runner_environment_long_lived                 persistent
-cache_write_long_lived_high_trust                  manual:fetched/run/run-schedule-locked:refs/heads/main
+cache_write_long_lived_high_trust                  manual:host-<machine>/fetched/run/run-schedule-locked:refs/heads/main
 cache_write_default_branch_long_lived_high_trust   no
 oidc_runner_environment_long_lived_high_trust      persistent
+cache_write_trusted_long_lived                     manual:host-<machine>/fetched/run/run-schedule-locked:refs/heads/main
+cache_write_default_branch_trusted_long_lived      no
+oidc_runner_environment_trusted_long_lived         persistent
+cache_write_trusted_long_lived_high_trust          manual:fetched/run/run-schedule-locked:refs/heads/main
+cache_write_default_branch_trusted_long_lived_high_trust no
+oidc_runner_environment_trusted_long_lived_high_trust persistent
 personal_claim                                     no
 personal_pipeline_secrets                          not claimed
 personal_shared_secrets                            not claimed
@@ -475,7 +516,6 @@ pool_reserved                no
 pool_reserved_trust_any      yes
 pool_verified_only           no
 pool_reserved_on_machine     no
-machine_trust_verified       no
 default_branch_work_sql      no
 latest_default               no
 repos_runner                 yes
@@ -500,9 +540,15 @@ oidc_runner_environment_fresh_host                 fresh
 cache_write_long_lived                             manual:host-<machine>/armer/alice:refs/heads/main
 cache_write_default_branch_long_lived              no
 oidc_runner_environment_long_lived                 persistent
-cache_write_long_lived_high_trust                  manual:armer/alice:refs/heads/main
+cache_write_long_lived_high_trust                  manual:host-<machine>/armer/alice:refs/heads/main
 cache_write_default_branch_long_lived_high_trust   no
 oidc_runner_environment_long_lived_high_trust      persistent
+cache_write_trusted_long_lived                     manual:host-<machine>/armer/alice:refs/heads/main
+cache_write_default_branch_trusted_long_lived      no
+oidc_runner_environment_trusted_long_lived         persistent
+cache_write_trusted_long_lived_high_trust          manual:armer/alice:refs/heads/main
+cache_write_default_branch_trusted_long_lived_high_trust no
+oidc_runner_environment_trusted_long_lived_high_trust persistent
 personal_claim                                     yes
 personal_pipeline_secrets                          no
 personal_shared_secrets                            yes
@@ -530,7 +576,6 @@ pool_reserved                no
 pool_reserved_trust_any      yes
 pool_verified_only           no
 pool_reserved_on_machine     no
-machine_trust_verified       no
 default_branch_work_sql      no
 latest_default               no
 repos_runner                 no
@@ -555,9 +600,15 @@ oidc_runner_environment_fresh_host                 fresh
 cache_write_long_lived                             manual:host-<machine>/fetched/account/alice:refs/heads/main
 cache_write_default_branch_long_lived              no
 oidc_runner_environment_long_lived                 persistent
-cache_write_long_lived_high_trust                  manual:fetched/account/alice:refs/heads/main
+cache_write_long_lived_high_trust                  manual:host-<machine>/fetched/account/alice:refs/heads/main
 cache_write_default_branch_long_lived_high_trust   no
 oidc_runner_environment_long_lived_high_trust      persistent
+cache_write_trusted_long_lived                     manual:host-<machine>/fetched/account/alice:refs/heads/main
+cache_write_default_branch_trusted_long_lived      no
+oidc_runner_environment_trusted_long_lived         persistent
+cache_write_trusted_long_lived_high_trust          manual:fetched/account/alice:refs/heads/main
+cache_write_default_branch_trusted_long_lived_high_trust no
+oidc_runner_environment_trusted_long_lived_high_trust persistent
 personal_claim                                     no
 personal_pipeline_secrets                          not claimed
 personal_shared_secrets                            not claimed
@@ -585,7 +636,6 @@ pool_reserved                no
 pool_reserved_trust_any      yes
 pool_verified_only           no
 pool_reserved_on_machine     no
-machine_trust_verified       yes
 default_branch_work_sql      no
 latest_default               no
 repos_runner                 yes
@@ -610,9 +660,15 @@ oidc_runner_environment_fresh_host                 fresh
 cache_write_long_lived                             manual:host-<machine>/fetched/account/alice:refs/heads/main
 cache_write_default_branch_long_lived              no
 oidc_runner_environment_long_lived                 persistent
-cache_write_long_lived_high_trust                  manual:fetched/account/alice:refs/heads/main
+cache_write_long_lived_high_trust                  manual:host-<machine>/fetched/account/alice:refs/heads/main
 cache_write_default_branch_long_lived_high_trust   no
 oidc_runner_environment_long_lived_high_trust      persistent
+cache_write_trusted_long_lived                     manual:host-<machine>/fetched/account/alice:refs/heads/main
+cache_write_default_branch_trusted_long_lived      no
+oidc_runner_environment_trusted_long_lived         persistent
+cache_write_trusted_long_lived_high_trust          manual:fetched/account/alice:refs/heads/main
+cache_write_default_branch_trusted_long_lived_high_trust no
+oidc_runner_environment_trusted_long_lived_high_trust persistent
 personal_claim                                     no
 personal_pipeline_secrets                          not claimed
 personal_shared_secrets                            not claimed
@@ -640,7 +696,6 @@ pool_reserved                no
 pool_reserved_trust_any      yes
 pool_verified_only           no
 pool_reserved_on_machine     no
-machine_trust_verified       yes
 default_branch_work_sql      no
 latest_default               no
 repos_runner                 yes
@@ -665,9 +720,15 @@ oidc_runner_environment_fresh_host                 fresh
 cache_write_long_lived                             manual:host-<machine>/account/alice:refs/heads/main
 cache_write_default_branch_long_lived              no
 oidc_runner_environment_long_lived                 persistent
-cache_write_long_lived_high_trust                  manual:account/alice:refs/heads/main
+cache_write_long_lived_high_trust                  manual:host-<machine>/account/alice:refs/heads/main
 cache_write_default_branch_long_lived_high_trust   no
 oidc_runner_environment_long_lived_high_trust      persistent
+cache_write_trusted_long_lived                     manual:host-<machine>/account/alice:refs/heads/main
+cache_write_default_branch_trusted_long_lived      no
+oidc_runner_environment_trusted_long_lived         persistent
+cache_write_trusted_long_lived_high_trust          manual:account/alice:refs/heads/main
+cache_write_default_branch_trusted_long_lived_high_trust no
+oidc_runner_environment_trusted_long_lived_high_trust persistent
 personal_claim                                     yes
 personal_pipeline_secrets                          no
 personal_shared_secrets                            yes
@@ -695,7 +756,6 @@ pool_reserved                no
 pool_reserved_trust_any      yes
 pool_verified_only           no
 pool_reserved_on_machine     no
-machine_trust_verified       no
 default_branch_work_sql      no
 latest_default               no
 repos_runner                 no
@@ -720,9 +780,15 @@ oidc_runner_environment_fresh_host                 fresh
 cache_write_long_lived                             manual:host-<machine>/local/laptop:refs/heads/main
 cache_write_default_branch_long_lived              no
 oidc_runner_environment_long_lived                 persistent
-cache_write_long_lived_high_trust                  manual:local/laptop:refs/heads/main
+cache_write_long_lived_high_trust                  manual:host-<machine>/local/laptop:refs/heads/main
 cache_write_default_branch_long_lived_high_trust   no
 oidc_runner_environment_long_lived_high_trust      persistent
+cache_write_trusted_long_lived                     manual:host-<machine>/local/laptop:refs/heads/main
+cache_write_default_branch_trusted_long_lived      no
+oidc_runner_environment_trusted_long_lived         persistent
+cache_write_trusted_long_lived_high_trust          manual:local/laptop:refs/heads/main
+cache_write_default_branch_trusted_long_lived_high_trust no
+oidc_runner_environment_trusted_long_lived_high_trust persistent
 personal_claim                                     yes
 personal_pipeline_secrets                          no
 personal_shared_secrets                            yes
@@ -750,7 +816,6 @@ pool_reserved                no
 pool_reserved_trust_any      yes
 pool_verified_only           no
 pool_reserved_on_machine     no
-machine_trust_verified       no
 default_branch_work_sql      no
 latest_default               no
 repos_runner                 no
@@ -776,9 +841,15 @@ oidc_runner_environment_fresh_host                 fresh
 cache_write_long_lived                             manual:host-<machine>/actions:refs/heads/main
 cache_write_default_branch_long_lived              no
 oidc_runner_environment_long_lived                 persistent
-cache_write_long_lived_high_trust                  manual:actions:refs/heads/main
+cache_write_long_lived_high_trust                  manual:host-<machine>/actions:refs/heads/main
 cache_write_default_branch_long_lived_high_trust   no
 oidc_runner_environment_long_lived_high_trust      persistent
+cache_write_trusted_long_lived                     manual:host-<machine>/actions:refs/heads/main
+cache_write_default_branch_trusted_long_lived      no
+oidc_runner_environment_trusted_long_lived         persistent
+cache_write_trusted_long_lived_high_trust          manual:actions:refs/heads/main
+cache_write_default_branch_trusted_long_lived_high_trust no
+oidc_runner_environment_trusted_long_lived_high_trust persistent
 personal_claim                                     no
 personal_pipeline_secrets                          not claimed
 personal_shared_secrets                            not claimed
@@ -806,7 +877,6 @@ pool_reserved                no
 pool_reserved_trust_any      yes
 pool_verified_only           no
 pool_reserved_on_machine     no
-machine_trust_verified       yes
 default_branch_work_sql      no
 latest_default               no
 repos_runner                 yes
@@ -832,9 +902,15 @@ oidc_runner_environment_fresh_host                 fresh
 cache_write_long_lived                             manual:host-<machine>/actions:refs/heads/main
 cache_write_default_branch_long_lived              no
 oidc_runner_environment_long_lived                 persistent
-cache_write_long_lived_high_trust                  manual:actions:refs/heads/main
+cache_write_long_lived_high_trust                  manual:host-<machine>/actions:refs/heads/main
 cache_write_default_branch_long_lived_high_trust   no
 oidc_runner_environment_long_lived_high_trust      persistent
+cache_write_trusted_long_lived                     manual:host-<machine>/actions:refs/heads/main
+cache_write_default_branch_trusted_long_lived      no
+oidc_runner_environment_trusted_long_lived         persistent
+cache_write_trusted_long_lived_high_trust          manual:actions:refs/heads/main
+cache_write_default_branch_trusted_long_lived_high_trust no
+oidc_runner_environment_trusted_long_lived_high_trust persistent
 personal_claim                                     no
 personal_pipeline_secrets                          not claimed
 personal_shared_secrets                            not claimed
@@ -862,7 +938,6 @@ pool_reserved                no
 pool_reserved_trust_any      yes
 pool_verified_only           no
 pool_reserved_on_machine     no
-machine_trust_verified       yes
 default_branch_work_sql      no
 latest_default               no
 repos_runner                 yes
@@ -887,9 +962,15 @@ oidc_runner_environment_fresh_host                 fresh
 cache_write_long_lived                             manual:host-<machine>:refs/heads/main
 cache_write_default_branch_long_lived              no
 oidc_runner_environment_long_lived                 persistent
-cache_write_long_lived_high_trust                  refs/heads/main
-cache_write_default_branch_long_lived_high_trust   yes
+cache_write_long_lived_high_trust                  manual:host-<machine>:refs/heads/main
+cache_write_default_branch_long_lived_high_trust   no
 oidc_runner_environment_long_lived_high_trust      persistent
+cache_write_trusted_long_lived                     manual:host-<machine>:refs/heads/main
+cache_write_default_branch_trusted_long_lived      no
+oidc_runner_environment_trusted_long_lived         persistent
+cache_write_trusted_long_lived_high_trust          refs/heads/main
+cache_write_default_branch_trusted_long_lived_high_trust yes
+oidc_runner_environment_trusted_long_lived_high_trust persistent
 personal_claim                                     no
 personal_pipeline_secrets                          not claimed
 personal_shared_secrets                            not claimed
@@ -917,7 +998,6 @@ pool_reserved                yes
 pool_reserved_trust_any      yes
 pool_verified_only           yes
 pool_reserved_on_machine     no
-machine_trust_verified       yes
 default_branch_work_sql      yes
 latest_default               yes
 repos_runner                 yes
@@ -942,9 +1022,15 @@ oidc_runner_environment_fresh_host                 fresh
 cache_write_long_lived                             manual:host-<machine>/run/run-app-push-default:refs/heads/main
 cache_write_default_branch_long_lived              no
 oidc_runner_environment_long_lived                 persistent
-cache_write_long_lived_high_trust                  manual:run/run-app-push-default:refs/heads/main
+cache_write_long_lived_high_trust                  manual:host-<machine>/run/run-app-push-default:refs/heads/main
 cache_write_default_branch_long_lived_high_trust   no
 oidc_runner_environment_long_lived_high_trust      persistent
+cache_write_trusted_long_lived                     manual:host-<machine>/run/run-app-push-default:refs/heads/main
+cache_write_default_branch_trusted_long_lived      no
+oidc_runner_environment_trusted_long_lived         persistent
+cache_write_trusted_long_lived_high_trust          manual:run/run-app-push-default:refs/heads/main
+cache_write_default_branch_trusted_long_lived_high_trust no
+oidc_runner_environment_trusted_long_lived_high_trust persistent
 personal_claim                                     yes
 personal_pipeline_secrets                          no
 personal_shared_secrets                            no
@@ -972,7 +1058,6 @@ pool_reserved                no
 pool_reserved_trust_any      yes
 pool_verified_only           no
 pool_reserved_on_machine     no
-machine_trust_verified       no
 default_branch_work_sql      no
 latest_default               no
 repos_runner                 no
@@ -997,9 +1082,15 @@ oidc_runner_environment_fresh_host                 fresh
 cache_write_long_lived                             manual:host-<machine>/run/run-app-push-default:refs/heads/main
 cache_write_default_branch_long_lived              no
 oidc_runner_environment_long_lived                 persistent
-cache_write_long_lived_high_trust                  manual:run/run-app-push-default:refs/heads/main
+cache_write_long_lived_high_trust                  manual:host-<machine>/run/run-app-push-default:refs/heads/main
 cache_write_default_branch_long_lived_high_trust   no
 oidc_runner_environment_long_lived_high_trust      persistent
+cache_write_trusted_long_lived                     manual:host-<machine>/run/run-app-push-default:refs/heads/main
+cache_write_default_branch_trusted_long_lived      no
+oidc_runner_environment_trusted_long_lived         persistent
+cache_write_trusted_long_lived_high_trust          manual:run/run-app-push-default:refs/heads/main
+cache_write_default_branch_trusted_long_lived_high_trust no
+oidc_runner_environment_trusted_long_lived_high_trust persistent
 personal_claim                                     yes
 personal_pipeline_secrets                          no
 personal_shared_secrets                            yes
@@ -1027,7 +1118,6 @@ pool_reserved                no
 pool_reserved_trust_any      yes
 pool_verified_only           no
 pool_reserved_on_machine     no
-machine_trust_verified       no
 default_branch_work_sql      no
 latest_default               no
 repos_runner                 no
@@ -1052,9 +1142,15 @@ oidc_runner_environment_fresh_host                 fresh
 cache_write_long_lived                             manual:host-<machine>/run/run-app-push-default:refs/heads/main
 cache_write_default_branch_long_lived              no
 oidc_runner_environment_long_lived                 persistent
-cache_write_long_lived_high_trust                  manual:run/run-app-push-default:refs/heads/main
+cache_write_long_lived_high_trust                  manual:host-<machine>/run/run-app-push-default:refs/heads/main
 cache_write_default_branch_long_lived_high_trust   no
 oidc_runner_environment_long_lived_high_trust      persistent
+cache_write_trusted_long_lived                     manual:host-<machine>/run/run-app-push-default:refs/heads/main
+cache_write_default_branch_trusted_long_lived      no
+oidc_runner_environment_trusted_long_lived         persistent
+cache_write_trusted_long_lived_high_trust          manual:run/run-app-push-default:refs/heads/main
+cache_write_default_branch_trusted_long_lived_high_trust no
+oidc_runner_environment_trusted_long_lived_high_trust persistent
 personal_claim                                     yes
 personal_pipeline_secrets                          no
 personal_shared_secrets                            yes
@@ -1082,7 +1178,6 @@ pool_reserved                no
 pool_reserved_trust_any      yes
 pool_verified_only           no
 pool_reserved_on_machine     no
-machine_trust_verified       no
 default_branch_work_sql      no
 latest_default               no
 repos_runner                 no
@@ -1107,9 +1202,15 @@ oidc_runner_environment_fresh_host                 fresh
 cache_write_long_lived                             manual:host-<machine>/run/run-app-push-default:refs/heads/main
 cache_write_default_branch_long_lived              no
 oidc_runner_environment_long_lived                 persistent
-cache_write_long_lived_high_trust                  manual:run/run-app-push-default:refs/heads/main
+cache_write_long_lived_high_trust                  manual:host-<machine>/run/run-app-push-default:refs/heads/main
 cache_write_default_branch_long_lived_high_trust   no
 oidc_runner_environment_long_lived_high_trust      persistent
+cache_write_trusted_long_lived                     manual:host-<machine>/run/run-app-push-default:refs/heads/main
+cache_write_default_branch_trusted_long_lived      no
+oidc_runner_environment_trusted_long_lived         persistent
+cache_write_trusted_long_lived_high_trust          manual:run/run-app-push-default:refs/heads/main
+cache_write_default_branch_trusted_long_lived_high_trust no
+oidc_runner_environment_trusted_long_lived_high_trust persistent
 personal_claim                                     yes
 personal_pipeline_secrets                          no
 personal_shared_secrets                            yes
@@ -1137,7 +1238,6 @@ pool_reserved                no
 pool_reserved_trust_any      yes
 pool_verified_only           no
 pool_reserved_on_machine     no
-machine_trust_verified       no
 default_branch_work_sql      no
 latest_default               no
 repos_runner                 no
@@ -1162,9 +1262,15 @@ oidc_runner_environment_fresh_host                 fresh
 cache_write_long_lived                             manual:host-<machine>/fetched/account/alice:refs/heads/main
 cache_write_default_branch_long_lived              no
 oidc_runner_environment_long_lived                 persistent
-cache_write_long_lived_high_trust                  manual:fetched/account/alice:refs/heads/main
+cache_write_long_lived_high_trust                  manual:host-<machine>/fetched/account/alice:refs/heads/main
 cache_write_default_branch_long_lived_high_trust   no
 oidc_runner_environment_long_lived_high_trust      persistent
+cache_write_trusted_long_lived                     manual:host-<machine>/fetched/account/alice:refs/heads/main
+cache_write_default_branch_trusted_long_lived      no
+oidc_runner_environment_trusted_long_lived         persistent
+cache_write_trusted_long_lived_high_trust          manual:fetched/account/alice:refs/heads/main
+cache_write_default_branch_trusted_long_lived_high_trust no
+oidc_runner_environment_trusted_long_lived_high_trust persistent
 personal_claim                                     no
 personal_pipeline_secrets                          not claimed
 personal_shared_secrets                            not claimed
@@ -1192,7 +1298,6 @@ pool_reserved                no
 pool_reserved_trust_any      yes
 pool_verified_only           no
 pool_reserved_on_machine     no
-machine_trust_verified       yes
 default_branch_work_sql      no
 latest_default               no
 repos_runner                 yes

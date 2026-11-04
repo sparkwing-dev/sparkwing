@@ -55,29 +55,37 @@ async function hasRepository(directory: string): Promise<boolean> {
   }
 }
 
+// As in Docker, the last matching pattern wins and a leading ! re-includes, so a re-included build input changes
+// the hash.
+export function dockerignoreMatcher(lines: string[]): (file: string) => boolean {
+  const rules = lines
+    .map((line) => line.trim())
+    .filter((line) => line && !line.startsWith("#"))
+    .map((line) => {
+      const include = line.startsWith("!");
+      const pattern = include ? line.slice(1) : line;
+      const matches = inputMatcher(pattern);
+      return { include, matches: (file: string) => matches(file) || file.startsWith(pattern + "/") };
+    });
+  return (file) => rules.reduce((ignored, rule) => (rule.matches(file) ? !rule.include : ignored), false);
+}
+
 async function filesetHash(ctx: Context, directory: string): Promise<string> {
   assertExecution();
   const root = path(directory || ".");
   const names = (await hasRepository(root))
     ? (await command(ctx, root, "ls-files", "-z", "--cached", "--others", "--exclude-standard")).split("\0").filter(Boolean)
     : await regularFiles(root, ctx.signal, new Set([".git", "node_modules", "vendor", "dist", "build", ".sparkwing"]));
-  let ignores: ((file: string) => boolean)[] = [];
+  let ignored = (_file: string) => false;
   try {
-    ignores = (await fs.readFile(paths.join(root, ".dockerignore"), "utf8"))
-      .split("\n")
-      .map((line) => line.trim())
-      .filter((line) => line && !line.startsWith("#"))
-      .map((pattern) => {
-        const matches = inputMatcher(pattern);
-        return (file: string) => matches(file) || file.startsWith(pattern + "/");
-      });
+    ignored = dockerignoreMatcher((await fs.readFile(paths.join(root, ".dockerignore"), "utf8")).split("\n"));
   } catch (error) {
     if (!isMissing(error)) throw error;
   }
   const hash = createHash("sha256");
   for (const name of [...new Set(names)].sort()) {
     ctx.signal.throwIfAborted();
-    if (ignores.some((ignore) => ignore(name))) continue;
+    if (ignored(name)) continue;
     const file = paths.join(root, name);
     let stat;
     try {

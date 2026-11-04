@@ -37,20 +37,32 @@ func (s TrustSet) Has(c TrustClass) bool { return slices.Contains(s, c) }
 var (
 	// safety: a branch name alone cannot establish verified default-branch work.
 	defaultBranchWorkTrust = TrustSet{TrustVerifiedDefault, TrustSchedule}
-	// AppRepositoryTrust proved its repository through the GitHub App: a signed
-	// delivery or a schedule whose commit the App resolved. Pool access rules grant it.
-	AppRepositoryTrust = TrustSet{TrustVerified, TrustVerifiedDefault, TrustSchedule}
-	// AppDeliveryTrust is a signed GitHub App delivery on any branch.
-	AppDeliveryTrust = TrustSet{TrustVerified, TrustVerifiedDefault}
-	// GitHubEventTrust carries a ref and commit GitHub proved for one event, from an
-	// App delivery or an Actions push, which an Actions push binding can match.
-	GitHubEventTrust = TrustSet{TrustActions, TrustVerified, TrustVerifiedDefault}
-	// GitHubCommitTrust names the classes whose commit GitHub itself proved: an App
-	// delivery, an Actions push or a schedule fire the App resolved.
-	GitHubCommitTrust = TrustSet{TrustVerifiedDefault, TrustVerified, TrustActions, TrustSchedule}
-	// AllTrust lists every class.
-	AllTrust = TrustSet{TrustVerifiedDefault, TrustVerified, TrustActions, TrustSchedule, TrustAsserted}
+	appRepositoryTrust     = TrustSet{TrustVerified, TrustVerifiedDefault, TrustSchedule}
+	appDeliveryTrust       = TrustSet{TrustVerified, TrustVerifiedDefault}
+	gitHubEventTrust       = TrustSet{TrustActions, TrustVerified, TrustVerifiedDefault}
+	gitHubCommitTrust      = TrustSet{TrustVerifiedDefault, TrustVerified, TrustActions, TrustSchedule}
+	allTrust               = TrustSet{TrustVerifiedDefault, TrustVerified, TrustActions, TrustSchedule, TrustAsserted}
 )
+
+// AppRepositoryTrust returns the classes that proved their repository through the
+// GitHub App: a signed delivery or a schedule whose commit the App resolved. Pool
+// access rules grant it.
+func AppRepositoryTrust() TrustSet { return slices.Clone(appRepositoryTrust) }
+
+// AppDeliveryTrust returns the classes of a signed GitHub App delivery on any branch.
+func AppDeliveryTrust() TrustSet { return slices.Clone(appDeliveryTrust) }
+
+// GitHubEventTrust returns the classes carrying a ref and commit GitHub proved for
+// one event, from an App delivery or an Actions push, which an Actions push binding
+// can match.
+func GitHubEventTrust() TrustSet { return slices.Clone(gitHubEventTrust) }
+
+// GitHubCommitTrust returns the classes whose commit GitHub itself proved: an App
+// delivery, an Actions push or a schedule fire the App resolved.
+func GitHubCommitTrust() TrustSet { return slices.Clone(gitHubCommitTrust) }
+
+// AllTrust returns every class.
+func AllTrust() TrustSet { return slices.Clone(allTrust) }
 
 // appEvents are the signed delivery events that may seal verified provenance.
 var appEvents = []string{"push", "pull_request", "release", "create", "delete"}
@@ -297,7 +309,7 @@ func (p Provenance) Valid() bool { return p.validate() == nil }
 func (p Provenance) Trust() TrustClass { return p.identity.Trust }
 
 // Verified reports a signed GitHub App delivery, on any branch.
-func (p Provenance) Verified() bool { return AppDeliveryTrust.Has(p.identity.Trust) }
+func (p Provenance) Verified() bool { return appDeliveryTrust.Has(p.identity.Trust) }
 
 // DefaultBranchWork reports verified default-branch work. Reserved pools, fresh-pod
 // placement, context sharing and the default-branch cache all read this one rule,
@@ -313,7 +325,7 @@ func (p Provenance) ProvenSHA() string {
 	if p.identity.ProvenRepository == "" {
 		return ""
 	}
-	if GitHubCommitTrust.Has(p.identity.Trust) {
+	if gitHubCommitTrust.Has(p.identity.Trust) {
 		return p.identity.SHA
 	}
 	return p.identity.FetchedSHA

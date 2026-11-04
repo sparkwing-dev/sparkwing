@@ -209,35 +209,47 @@ their owner's asserted runs. They never claim repository-proven work. Shared
 runner enrollment requires repository scopes, which accept only proven work.
 
 A pass that `sw.FromProvenRunAtCommit()` counts must come from trusted hosts
-only. When a job's attempt starts, the controller records from the claimant's
+only. When a job is claimed, the controller records from the claimant's
 authority chain, never from names the runner reports, whether its host is
-trusted: a fresh host (a launcher pod, a Sparkwing Cloud node or a
-GitHub-hosted Actions runner), or a machine whose team admin registered it with
-`--trust verified-default` or `--trust verified`, which never take asserted
-work. A run counts only if every job that did not skip ran on a trusted host, so
-a runner that takes asserted work, which could leave `HOME`, `GOFLAGS` or the
-build cache poisoned for later jobs, never produces a counted pass. Runners
-registered with `--trust any` or no trust never do.
+trusted: a fresh host, which its provider attests no other run touched (a
+Sparkwing Cloud node or a GitHub-hosted Actions runner), or a machine its team
+admin scoped to repositories with `--repos`, which takes only
+repository-proven work and never asserted work. Every shared runner and every
+team launcher needs `--repos`, so they are trusted; a team launcher's pods take
+the trust of the credential that started them and are not fresh. Personal
+machines, which take their owner's asserted runs, and self-hosted Actions
+runners, which run whatever workflow GitHub sends them, are never trusted. A
+run counts only if every job that did not skip was claimed on a trusted host,
+so a host that takes asserted work, which could leave `HOME`, `GOFLAGS` or the
+build cache poisoned for later jobs, never produces a counted pass.
 
-Two gaps remain. A team's own launcher credential counts as a fresh host
-whatever trust class it was registered with, because each claim gets a pod no
-other run has used. The host that evaluates the plan is not covered by the
-trusted-host check, because only jobs record it; `record-tree` reads the other
-jobs' outputs itself rather than trusting the plan to say they ran.
+A run counts only if intake found it proof eligible: it sealed no environment
+variables and set no run option outside an allow-list of options that only
+place, schedule or present a run (runner selection, priority, admission class,
+claim wait, owner timeout, requires, prefers, no-memo, workers, output, pause
+timeout, submitted-environment allow-list, repository location and profile).
+Any other option, such as `--sw-only`, a dry run, a pause, debug, a risk
+acknowledgement, `--cache-from`, a checkout policy or job default overrides,
+and any option added later, keeps the run from counting.
 
-A verified run on a host that outlives its jobs (plain-machine runners,
-persistent Kubernetes runners and self-hosted GitHub Actions runners) writes
-memo, depcache and output records only to that host's own cache scope. Fresh
-pods, Sparkwing Cloud and remote cache readers restore only the shared verified
-scope, which launcher pods, Cloud pods and GitHub-hosted Actions runners write,
-as GitHub's signed `runner_environment` claim reports, so state an earlier job left on a long-lived host never
-reaches them through the cache. Runs on that host still read the verified
-default branch. A team administrator can turn on the `high_trust` team setting
-(console team settings, or `sparkwing team settings set --high-trust true`; off
-by default and audited), meant for teams whose every job on those runners is
-trusted, to let them write the shared verified scope. A verified default-branch
-run reads only cache records that carry default-branch evidence, including in
-its own ref scope.
+The host that evaluates the plan is not covered by the trusted-host check,
+because only jobs record it; `record-tree` reads the other jobs' outputs itself
+rather than trusting the plan to say they ran.
+
+A verified run on a host that outlives its jobs (plain-machine runners, team
+launcher pods, persistent Kubernetes runners and self-hosted GitHub Actions
+runners) writes memo, depcache and output records only to that host's own
+cache scope. Fresh pods, Sparkwing Cloud and remote cache readers restore only
+the shared verified scope, which Cloud pods and GitHub-hosted Actions runners
+write, as GitHub's signed `runner_environment` claim reports, so state an
+earlier job left on a long-lived host never reaches them through the cache.
+Runs on that host still read the verified default branch. A team administrator
+can turn on the `high_trust` team setting (console team settings, or `sparkwing
+team settings set --high-trust true`; off by default and audited) to let
+trusted hosts that outlive their jobs write the shared verified scope too. It
+never lets an untrusted host write it, so a counted pass never restores bytes
+an untrusted host wrote. A verified default-branch run reads only cache records
+that carry default-branch evidence, including in its own ref scope.
 
 Each Sparkwing Cloud node serves one team and one run. Later jobs of the same
 run may reuse a warm node; every other run, a child run included, gets a node no

@@ -676,10 +676,9 @@ and checks its identity, payment and test/live mode. It keeps no card details. M
 credit, attempt or billing authority.
 
 Settlement derives the team and ledger effect from committed billing records
-and deduplicates provider events in its transaction. Checkout settlement is
-implemented. Settlement of card, refund, warning and dispute events still needs
-the store integration. A provider retry cannot safely be treated as a new
-credit grant.
+and deduplicates provider events in its transaction. Checkout, card, refund,
+early fraud warning and dispute events all settle there, so a provider retry is
+never treated as a new credit grant.
 
 Test and live Stripe keys select configuration for the same implementation.
 Checkout, payment history, card operations, payment holds and reversals retain
@@ -1044,10 +1043,12 @@ pipeline declares `sw.FromAnyRun()`. A reference declared with
 `sw.FromProvenRunAtCommit()` reads only a run at the reader's own sealed commit
 whose repository was proven (an App delivery, an Actions push, a schedule, or
 code the controller fetched from GitHub) as the reader's proven repository, and
-whose sealed options selected every job and step: no `--sw-only`,
-`--sw-start-at` or `--sw-stop-at`, no dry run, no debug and no
-`--sw-pause-before`, `--sw-pause-after` or `--sw-pause-on-failure`, because a
-paused job can be attached to and edited. The run must also have
+that intake sealed as proof eligible: it set no run option outside an
+allow-list of options that only place, schedule or present a run, so no
+`--sw-only`, `--sw-start-at` or `--sw-stop-at`, no dry run, no debug and no
+`--sw-pause-before`, `--sw-pause-after` or `--sw-pause-on-failure` (a paused
+job can be attached to and edited), and any option added later also keeps it
+from counting (see [security](security.md)). The run must also have
 sealed no environment variables, because a submitted `GOFLAGS` or similar can
 change what its jobs judged, and every job that did not skip must have run on a
 trusted host (see [security](security.md)). The newest such run in which the referenced job

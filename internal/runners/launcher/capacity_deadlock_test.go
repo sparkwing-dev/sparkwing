@@ -334,8 +334,8 @@ func testCapacityRequestSleepsWithinItsAwardBudget(t *testing.T) {
 		t.Fatal(err)
 	}
 	c := pod.Spec.Containers[0]
-	if !slices.Equal(c.Command, []string{"/usr/bin/sleep"}) || len(c.Args) != 1 {
-		t.Fatalf("capacity request does not hold its node without a shell: %+v", c)
+	if !slices.Equal(c.Command, capacityCommand) || len(c.Args) != 1 {
+		t.Fatalf("capacity request does not hold its node with a fixed script and its budget as an argument: %+v", c)
 	}
 	seconds, err := strconv.ParseFloat(c.Args[0], 64)
 	deadline := demandDeadline(control.award.Binding)
@@ -371,7 +371,7 @@ func TestTerminatingOldCapacityRequestWaitsForRemoval(t *testing.T) {
 		t.Fatal(err)
 	}
 	pods := capacityPods(t, kube)
-	if len(pods) != 1 || pods[0].DeletionTimestamp != nil || pods[0].Spec.Affinity.PodAntiAffinity == nil || !slices.Equal(pods[0].Spec.Containers[0].Command, []string{"/usr/bin/sleep"}) {
+	if len(pods) != 1 || pods[0].DeletionTimestamp != nil || pods[0].Spec.Affinity.PodAntiAffinity == nil || !slices.Equal(pods[0].Spec.Containers[0].Command, capacityCommand) {
 		t.Fatalf("old request was not replaced after removal: %+v", pods)
 	}
 }

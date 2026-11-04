@@ -17,7 +17,7 @@ func commandFlags(command string, args []string) (_ *flag.FlagSet, parseErr erro
 			parseErr = &usageError{parseErr}
 		}
 	}()
-	return runnerflags.Parse(command, args, os.Stderr)
+	return runnerflags.Parse(command, args, os.Stdout, os.Stderr)
 }
 
 func textFlag(fs *flag.FlagSet, name string) string { value, _ := fs.GetString(name); return value }

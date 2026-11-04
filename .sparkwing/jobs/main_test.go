@@ -25,3 +25,11 @@ func TestMain(m *testing.M) {
 	_ = os.RemoveAll(home)
 	os.Exit(code)
 }
+
+// TestCheckoutStateKeysTheTestCache reads the checkout state the gate pins, so
+// it joins this package's test-cache key: go test does not hash the files above
+// the module that these tests read. go test records a variable only while a
+// test runs; TestMain's own reads, before m.Run, never reach the key.
+func TestCheckoutStateKeysTheTestCache(t *testing.T) {
+	_ = os.Getenv(productTestRepoStateVar)
+}

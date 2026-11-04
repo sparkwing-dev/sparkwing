@@ -1,5 +1,11 @@
 package store
 
+import "time"
+
+// MinIdleClaimPoll is the narrowest idle poll a controller ever suggests, so
+// a claim loop polling faster is refused once the queue has been idle.
+const MinIdleClaimPoll = 2 * time.Second
+
 const (
 
 	// ClaimPollAfterHeader carries the whole number of seconds a controller

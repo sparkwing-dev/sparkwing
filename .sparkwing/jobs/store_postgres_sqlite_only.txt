@@ -180,7 +180,6 @@ launcher_multiteam_test.go
 launcher_preparation_test.go
 launcher_queue_test.go
 launcher_rejection_test.go
-launcher_run_test.go
 launcher_snapshot_test.go
 launcher_strict_test.go
 launcher_sync_failure_test.go

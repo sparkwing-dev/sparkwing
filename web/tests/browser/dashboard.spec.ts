@@ -3178,3 +3178,69 @@ test("runs list rows lead with status and stay put while the columns collapse", 
   await page.locator('[data-tab-key="setup"]').click();
   await expect(page.getByText("asserted", { exact: true })).toBeVisible();
 });
+
+test("Start a run keeps keyboard focus inside the dialog and returns it on close", async ({ page }) => {
+  await installMockAPI(page, { runs: [finishedRun] });
+  await page.goto("/runs");
+  const opener = page.getByRole("button", { name: "+ Start a run" });
+  await opener.click();
+  const dialog = page.getByRole("dialog", { name: "Start a run" });
+  await expect(dialog).toBeVisible();
+  const focusInDialog = () =>
+    dialog.evaluate((element) => element.contains(document.activeElement));
+  await expect.poll(focusInDialog).toBe(true);
+  const stops = await dialog.evaluate(
+    (element) => element.querySelectorAll("button, input, a[href]").length,
+  );
+  for (const key of ["Tab", "Shift+Tab"]) {
+    for (let i = 0; i <= stops + 1; i++) {
+      await page.keyboard.press(key);
+      expect(await focusInDialog()).toBe(true);
+    }
+  }
+  await page.keyboard.press("Escape");
+  await expect(dialog).toHaveCount(0);
+  await expect(opener).toBeFocused();
+});
+
+test("Help stays inside a narrow viewport", async ({ page }) => {
+  await page.setViewportSize({ width: 360, height: 800 });
+  await installMockAPI(page, { runs: [finishedRun] });
+  await page.goto("/runs");
+  await page.getByRole("button", { name: "Help", exact: true }).focus();
+  await page.keyboard.press("Enter");
+  const panel = page.getByRole("dialog", { name: "Help" });
+  await expect(panel).toBeVisible();
+  const box = await panel.boundingBox();
+  expect(box).not.toBeNull();
+  expect(box!.x).toBeGreaterThanOrEqual(0);
+  expect(box!.x + box!.width).toBeLessThanOrEqual(360);
+});
+
+test("a dependent cancelled before it started explains why in its logs", async ({ page }) => {
+  const failedRun = { ...finishedRun, status: "failed" };
+  const detail = {
+    run: failedRun,
+    nodes: [
+      { ...finishedDetail.nodes[0], id: "build", status: "failed", outcome: "failed", error: "exit status 1", work: undefined },
+      {
+        id: "deploy",
+        status: "cancelled",
+        outcome: "cancelled",
+        deps: ["build"],
+        attempt: 0,
+        status_detail: 'upstream_failed: blocked by "build" (failed); fix the dependency and retry the run',
+        finished_at: "2026-08-27T18:01:30Z",
+        duration_ms: 0,
+      },
+    ],
+  };
+  await installMockAPI(page, { runs: [failedRun], details: { [failedRun.id]: detail } });
+  await page.route(/\/api\/v1\/runs\/[^/]+\/jobs\/deploy\/logs(\?|$)/, (route) =>
+    route.fulfill({ contentType: "application/x-ndjson", body: "" }),
+  );
+  await page.goto(`/runs?run=${failedRun.id}&node=deploy`);
+  await page.getByRole("button", { name: "Logs", exact: true }).click();
+  await expect(page.getByText("No logs captured for this node.")).toBeVisible();
+  await expect(page.getByText(detail.nodes[1].status_detail as string, { exact: true })).toBeVisible();
+});

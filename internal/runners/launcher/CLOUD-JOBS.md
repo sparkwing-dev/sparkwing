@@ -39,9 +39,16 @@ and a namespace selector on `kubernetes.io/metadata.name` of that namespace
 only. The Pod policy covers Pod CREATE and UPDATE, `pods/ephemeralcontainers`,
 `pods/resize` and CONNECT on `pods/exec`, `pods/attach` and `pods/portforward`;
 the Job policy covers Job CREATE and UPDATE. Validating admission runs after
-every mutating webhook, so the rules judge the final object. They take no
-params: the namespace, the launcher's username and the runner and Docker
-digests are CEL literals.
+every mutating webhook, so the rules judge the final object. The namespace and
+the launcher's username are CEL literals. The runner and Docker images, which
+change every release, come from the param ConfigMap `sparkwing-cloud-admission`
+in the job namespace (`AdmissionParams`, `paramKind` ConfigMap, `paramRef` with
+`parameterNotFoundAction: Deny`), so the cluster-scoped policies and bindings
+stay the same across releases and rollbacks, and an installation that applies
+them separately from the namespaced chart need not touch them for an image
+change. A missing ConfigMap or key denies every Pod and Job write there. The
+ConfigMap names images the launcher already runs and is written by the same
+deploy that sets the launcher's image; the launcher has `get` on it only.
 
 - Only the launcher creates Jobs and capacity requests (`sw-capacity-`). Only
   `system:serviceaccount:kube-system:job-controller` creates Pods, each
@@ -79,7 +86,10 @@ digests are CEL literals.
   later API adds, is refused. Capacity requests run as UID 65534
   with every capability dropped. `runtimeClassName`, `shareProcessNamespace`,
   resource claims and health-check `host` fields must stay unset, as must
-  `dnsConfig` and `hostAliases`; the scheduler is the default one, service
+  `hostAliases`. Job Pods set exactly the `dnsConfig` resolver options
+  `timeout:1` and `attempts:5`, with no nameservers or search domains, so the
+  first lookup outlasts the strict network-policy attach window; capacity
+  Pods set no `dnsConfig`. The scheduler is the default one, service
   links are off and no `system-` priority class may be named. The fields come
   from the vendored k8s.io/api, so a field a newer API server adds stays
   unpinned until that dependency moves.
@@ -122,10 +132,11 @@ digests are CEL literals.
 
 `Run` first reads its own username through a SelfSubjectReview, then refuses to
 start unless both policies and bindings exist with exactly the specs
-`AdmissionPolicies` builds for that username, its job namespace and images. It
+`AdmissionPolicies` builds for that username and job namespace, and the param
+ConfigMap holds exactly its own runner and Docker images. It
 checks once, at start, which catches a chart and launcher mismatch after an
 upgrade; it does not re-prove the environment on later passes.
-The launcher can read only those four objects.
+The launcher can read only those five objects.
 
 The job namespace must hold no other NetworkPolicies, since an additive policy
 would widen Job egress or ingress, and no Pod Security labels besides the
@@ -147,7 +158,7 @@ template matched the award at creation and admission keeps it unchanged. A Pod
 the Job controller has not created yet is not an error. VPC Pod ENI resources
 are ignored.
 
-After a chart upgrade changes the pinned digests, admission refuses new Pods for
+After a chart upgrade changes the param ConfigMap's digests, admission refuses new Pods for
 Jobs whose templates still name the old images. Sync fails such a Job's award
 as soon as it sees the template on other images with no owned Pod, without
 retiring the node, which never ran it. Jobs whose Pods already run continue.
@@ -413,6 +424,10 @@ Transport failures never trigger a second claim in the adapter.
 `sparkwing-runner launch --poll <duration>` sets the interval between claim and
 reconciliation cycles. The duration must be positive. Omitting it keeps the
 runtime's configured interval, which defaults to five seconds.
+`--idle-grace <duration>` sets how long a used node may sit unreserved before
+retirement. It defaults to 60 seconds and must be at least the claim poll plus
+the 30-second retirement interval, so a ready successor is claimed and reserves
+the node first; without the flag a longer poll raises the grace to that floor.
 
 The adapter projects plan source through `source.ForRequest`, and eval/work
 through `source.ForExecution` using the accepted spec and matching engine.
@@ -593,31 +608,41 @@ guards the levels; placement failures retain WARN.
 The first reservation also records `sparkwing.dev/used-run` with its team and run
 ID. Release retains it alongside the permanent protected labels. Retirement runs
 in its own loop every 30 seconds, beside reconciliation, so it finds spent nodes
-after a restart and slow queries never delay award renewal or claims. The `retire_run` query on
-the existing launcher sync endpoint checks current deployment launcher authority
-and its repository scope, and returns `run_terminal` only for a stored terminal state with a finish time.
-A retired job award, a missing run, a refused query or an unavailable controller
-is insufficient. Each pass queries a run once, regardless of its node count, bounds
-that query to 10 seconds, and retains a non-terminal answer for 30 seconds. The query cannot be
-combined with award or warm-pool observations.
+after a restart and a slow pass never delays award renewal or claims.
 
-For an unreserved node whose annotation matches all protected team/run labels,
+A used node retires once the launcher has seen it unreserved for the idle grace
+(60 seconds by default), whatever state its run is in. The run's state is never
+consulted: a run waiting on an approval, or a fan-out waiting on one long job,
+does not hold its empty nodes. Each pass records when it first saw a node
+unreserved, and a reservation clears that record, so a successor that reserves
+the node inside the grace keeps it and restarts the clock when it releases.
+Plan-to-work and work-to-work handoffs never start the clock, because the
+successor takes the node while the predecessor's reservation is still on it.
+Same-run successors measured on staging became ready within 0.16 seconds of
+their predecessor ending, so the launcher claims them within one poll. A launcher restart starts every clock again, which costs at most
+one extra grace. A job that becomes ready after the grace boots a fresh node.
+
+For an unreserved node past the grace whose annotation matches all protected team/run labels,
 the launcher verifies shared NodePool and NodeClaim provenance and cordons the
 exact node using its resource version. It then confirms that no non-DaemonSet Pod
 remains in any namespace before deleting the owning NodeClaim with a UID
-precondition.
+precondition. When a Pod remains, such as a successor's capacity Pod that bound
+between the cordon and the check, the launcher uncordons the node with the
+cordon's resource version, because the boundary refuses to reserve a cordoned
+node and the successor would otherwise wait with no new node coming. A conflict
+leaves the next pass to retry. The launcher marks its own cordon with
+`sparkwing.dev/retirement-cordon` and uncordons only a node carrying that mark,
+so a node an operator cordoned stays cordoned.
 Concurrent reservation or node replacement cancels retirement. Repeated passes
 accept an already-deleted claim. Retirement failures retain the node and retry
 without blocking claims or preparation renewal. Retirement errors are logged at
 most once per minute. Existing NodeClaim get/delete RBAC is sufficient.
 Nodes with missing ownership evidence, including nodes released by older
 launchers without the retained annotation, remain for Karpenter consolidation.
-`TestRestartRetiresOnlyEmptySpentNodesOfTerminalRuns`,
-`TestRunRetirementQueryThroughController`,
-`TestSpentNodeQueriesEachRunOnceAndCachesNonTerminal`,
-`TestSpentNodeErrorsAreRateLimitedAndDoNotFailSync`,
-`TestSlowRunQueryDoesNotDelayReconciliation` and
-`TestLauncherRunTerminalRequiresDeploymentAuthority` guard these rules.
+`TestRestartRetiresOnlyEmptySpentNodesAfterIdleGrace`,
+`TestIdleGraceRetiresSpentNodesWhateverTheRunState`,
+`TestIdleGraceMustOutlastClaimPollAndRetirementPass` and
+`TestSpentNodeErrorsAreRateLimitedAndDoNotFailSync` guard these rules.
 
 ## Preparation leases
 
@@ -691,8 +716,10 @@ the controller is upgraded, without a capacity failure or refund.
 With a compatible pool, the launcher keeps the award and creates
 `sw-capacity-<award hash>`: an unbound Pod with the requested shared class and
 launcher namespace selectors, the generic dedicated toleration, the award's CPU,
-memory and scratch requests, the runner image running `/usr/bin/sleep` for the
-remaining award budget, and no volumes, environment or service account token.
+memory and scratch requests, the runner image's `/bin/sh` sleeping for the
+remaining award budget and exiting on SIGTERM, and no volumes, environment or
+service account token. A bare `sleep` as PID 1 ignores SIGTERM, so every delete
+on the cold-start path waited for the kubelet's kill.
 The Pod records its unit fence and size in `sparkwing.dev/capacity-demand`,
 never the bootstrap credential.
 Required pod anti-affinity on `kubernetes.io/hostname` keeps it off any node
