@@ -20,6 +20,11 @@ unlock.
 
 ## [Unreleased]
 
+### Added
+
+- **CLI:** `sparkwing pipeline trigger --trusted` runs HEAD on this machine's own runner so its gate pass counts for CI
+  It refuses unless this machine's runner is enrolled with `--repos` against the profile's controller, the checkout is clean, and HEAD is the head of the same branch on origin, then pins the run to that runner and submits no environment. `sparkwing pipeline trigger gate --profile P --trusted -- --full` produces a pass `sw.FromProvenRunAtCommit` counts, under the controller's existing rules (decision 89). A plain `sparkwing run gate` still never counts.
+
 ### Changed
 
 - **warm capacity:** The default Auto start-time target is 20 seconds instead of 10. New stores seed every class at 20 seconds, and the schema 30 upgrade moves classes still at 10 seconds to 20; a class set to any other target keeps it. `sparkwing operator warm-capacity set` without `--start-time-target` now sends 20s.

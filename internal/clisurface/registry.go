@@ -269,6 +269,7 @@ func Registry() []Command {
 			{Name: "detach"},
 			{Name: "working-tree"},
 			{Name: "allow-secret-file", Argument: "PATH", Repeatable: true, CommaList: true},
+			{Name: "trusted"},
 			{Name: "runner", Argument: "RUNNER"},
 			{Name: "reason", Argument: "TEXT"},
 			{Name: "agent", Argument: "NAME"},

@@ -48,6 +48,10 @@ func prepareNativeTrigger(ctx context.Context, flags triggerFlags) (result contr
 	if err != nil {
 		return result, err
 	}
+	// safety: a sealed environment keeps a run from counting toward a proven pass, so a trusted trigger submits none.
+	if flags.trusted {
+		submitted = nil
+	}
 	defer func() {
 		if resultErr != nil {
 			resultErr = &maskedCLIError{err: resultErr, masker: masker}

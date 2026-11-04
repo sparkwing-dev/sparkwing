@@ -232,6 +232,17 @@ Any other option, such as `--sw-only`, a dry run, a pause, debug, a risk
 acknowledgement, `--cache-from`, a checkout policy or job default overrides,
 and any option added later, keeps the run from counting.
 
+A developer's own machine produces a counted pass only through its
+registered runner: `sparkwing pipeline trigger gate --profile P --trusted --
+--full` refuses unless this machine's runner is enrolled with `--repos`, the
+checkout is clean and HEAD is the pushed head of its branch, then pins the run
+to that runner and submits no environment. The controller fetches the commit
+from GitHub and the runner checks it out itself, so every rule above still
+decides whether the pass counts; `--trusted` adds no trust of its own. A plain
+`sparkwing run gate` stays asserted and never counts, and a machine that also
+takes asserted work under the same user shares that user's caches with its
+runner, which decision 89 accepts: the trust boundary is the machine.
+
 The host that evaluates the plan is not covered by the trusted-host check,
 because only jobs record it; `record-tree` reads the other jobs' outputs itself
 rather than trusting the plan to say they ran.

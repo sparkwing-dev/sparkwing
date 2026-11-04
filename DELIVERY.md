@@ -609,7 +609,9 @@ file. Other syntax and workflow checks remain active.
   either skipped, and the lookup passes over a run whose `record-tree` did not
   succeed, so a run that skipped everything neither records a pass of its own
   nor hides the older pass it skipped on. A plain
-  local run proves no repository, so it never lets another run skip. The
+  local run proves no repository, so it never lets another run skip;
+  `sparkwing pipeline trigger gate --profile P --trusted -- --full` runs the
+  same commit on this machine's repository-scoped runner instead, which can. The
   existing required `Canonical / gate` check succeeds only after the broad,
   race, pre-release and three `race-store-k-of-3` matrix jobs all succeed. A
   skipped, cancelled or failed matrix cannot pass that check. Pre-release
