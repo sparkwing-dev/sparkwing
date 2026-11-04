@@ -19,6 +19,10 @@ unlock.
 ---
 
 ## [Unreleased]
+### Changed
+
+- **sdk:** `NewConcurrencyGroup` in Go and `ConcurrencyGroup` in TypeScript no longer check `Scope` and `OnLimit` themselves. The host still refuses an unknown value as `plan_invalid` when it validates the plan, so both SDKs fail the same way.
+
 ### Fixed
 
 - **launcher:** Stop warning about Cloud reservations that belong to another job namespace

@@ -39,9 +39,6 @@ export class ConcurrencyGroup implements API.ConcurrencyGroup {
     identifier("concurrency group", name);
     if (limit.capacity !== undefined) integer("concurrency capacity", limit.capacity, 1);
     if (limit.queueTimeoutMs !== undefined) integer("concurrency queue timeout", limit.queueTimeoutMs);
-    if (limit.scope !== undefined && !["global", "run", "box"].includes(limit.scope)) throw new Error("invalid concurrency scope");
-    if (limit.onLimit !== undefined && !["queue", "fail", "skip", "cancel_others"].includes(limit.onLimit))
-      throw new Error("invalid concurrency onLimit");
     this.name = name;
     this.limit = Object.freeze({ ...limit });
   }
