@@ -132,11 +132,11 @@ The cheap mitigations the pipeline applies:
 
 - Each job writes secrets only into its own directory, `sparkwing-deploy-<run id>-<job>-*` under the temporary directory, mode 0600 files, removed when the job ends.
 - Each job first removes any `sparkwing-deploy-*` directory older than the longest job budget, so a killed job's secrets do not outlive it.
-- Tool binaries (`aws`, `kubectl`, `helm`, `git`, `ssh`, `go`, `bash`) resolve to absolute paths in `/opt/sparkwing-deploy/bin` when that directory exists, and every child process, including kubectl's `aws` credential plugin, gets only that directory plus `/usr/bin:/bin` on PATH. Installing pinned tools there, owned by root and not writable by Korey's user, is what makes this a defence; without the directory the pipeline falls back to the runner's PATH.
+- Tool binaries (`aws`, `kubectl`, `helm`, `git`, `ssh`, `go`, `bash`, and `node` and `pnpm` for the dashboard build) resolve to absolute paths in `/opt/sparkwing-deploy/bin`, and every child process, including kubectl's `aws` credential plugin, gets only that directory plus `/usr/bin:/bin` on PATH. Installing pinned tools there, owned by root and not writable by Korey's user, is what makes this a defence. A real deploy refuses to start without the directory and never falls back to the runner's PATH (decision 86); only a credential-free `--dry-run` resolves from PATH. DELIVERY.md's "Deploy toolchain" section has the install commands.
 
 ## GitOps scope (decided: confine the deploy credential to Sparkwing)
 
-A GitHub deploy key reaches its whole repository, so a write key on kikd-gitops can change every application there (bitwing, moonborn, okbot, stormwing and the rest). Korey chose to confine it.
+A GitHub deploy key reaches its whole repository, so a write key on kikd-gitops can change every application there (bitwing, moonborn, okbot, stormwing and the rest). Korey chose to confine it. Even confined, the GitOps deploy key is effectively production root, because it can deploy a pod that reads the controller's OIDC signing key; that is acceptable while the deploy machines already hold cluster admin.
 
 **Chosen: a separate repository, `sparkwing-dev/sparkwing-gitops`,** holding the `sparkwing` and `sparkwing-staging` directories unchanged. The alternative is a branch of kikd-gitops tracked only by the two Sparkwing applications.
 

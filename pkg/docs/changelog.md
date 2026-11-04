@@ -84,6 +84,8 @@ unlock.
   A clean merge (a merge commit, never a rebase) re-checks only the files the merge changed, with `go build` and the
   affected tests, then pushes; the review does not run again. It merges at most three times, and a conflict fails
   naming `git merge origin/main`. Preconditions accept a branch behind main that merges cleanly.
+- **controller:** The controller logs its payment deployment id at start, and a checkout pairing alert says which setting to fix
+  A 421 from the checkout service now tells the operator to set its `BILLING_DEPLOYMENT` to the `deployment` value on the alert, which the start-up `payment deployment` line also prints.
 
 ### Fixed
 

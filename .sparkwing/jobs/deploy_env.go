@@ -41,9 +41,20 @@ type deployConfig struct {
 	ToolDir        string
 }
 
-func (c deployConfig) toolDirInUse() bool {
-	info, err := os.Stat(c.ToolDir)
-	return c.ToolDir != "" && err == nil && info.IsDir()
+// safety: a real deploy holds production credentials, so it refuses a missing
+// toolchain instead of trusting the runner's PATH (decision 86). A dry run holds
+// none and previews from PATH, as do tests, which leave ToolDir empty.
+func (c deployConfig) toolDirInUse(dry bool) (bool, error) {
+	if c.ToolDir == "" {
+		return false, nil
+	}
+	if info, err := os.Stat(c.ToolDir); err == nil && info.IsDir() {
+		return true, nil
+	}
+	if dry {
+		return false, nil
+	}
+	return false, fmt.Errorf("deploy toolchain %s is missing: install the pinned deploy tools there as DELIVERY.md's \"Deploy toolchain\" section describes; a real deploy never falls back to PATH", c.ToolDir)
 }
 
 // safety: each phase waits for Argo and then the rollout; rollback repeats

@@ -851,6 +851,26 @@ func TestDeployToolchain(t *testing.T) {
 	}
 }
 
+func TestDeployRefusesMissingToolchain(t *testing.T) {
+	missing := filepath.Join(t.TempDir(), "bin")
+	f := newFakeDeploy(t)
+	d := f.deployer(false)
+	d.cfg.ToolDir = missing
+	if _, err := d.cmd(t.Context(), deployCommand{Name: "aws"}); err == nil || !strings.Contains(err.Error(), missing+" is missing") || !strings.Contains(err.Error(), "Deploy toolchain") {
+		t.Fatalf("a real deploy without its toolchain: %v", err)
+	}
+	job := deployJob{Cfg: f.config(), Name: "production"}
+	job.Cfg.ToolDir = missing
+	if _, _, err := job.deployer(); err == nil || !strings.Contains(err.Error(), missing) {
+		t.Fatalf("a real deploy job without its toolchain: %v", err)
+	}
+	dry := f.deployer(true)
+	dry.cfg.ToolDir = missing
+	if path, err := dry.tool("git"); err != nil || path != "git" {
+		t.Fatalf("a dry run previews from PATH: %q %v", path, err)
+	}
+}
+
 func TestDeployRefusesSupersededCommit(t *testing.T) {
 	f := newFakeDeploy(t)
 	images := f.candidate()
