@@ -190,7 +190,7 @@ func TestMixedResourceETAUsesTheLaterKnownBoundOrUnknown(t *testing.T) {
 	}
 }
 
-func TestAtomicMultiKeyETAAllowsBackfillWithoutPartialReservation(t *testing.T) {
+func TestAtomicMultiKeyETAHoldsBackfillBehindTheHeadsReservation(t *testing.T) {
 	qs := wingwire.QueueState{
 		Holders: []wingwire.Holder{{RunID: "holder-a", Semaphores: []string{"a"}, ExpectedDurationMS: 10000}},
 		Waiters: []wingwire.Waiter{
@@ -211,11 +211,11 @@ func TestAtomicMultiKeyETAAllowsBackfillWithoutPartialReservation(t *testing.T) 
 	}
 	annotateSemaphoreETA(&qs, snap)
 	assertETA(t, "w1 ExpectedStartMS", qs.Waiters[0].ExpectedStartMS, 10000)
-	assertETA(t, "w2 ExpectedStartMS", qs.Waiters[1].ExpectedStartMS, 0)
-	assertETA(t, "ExpectedClearMS", qs.ExpectedClearMS, 15000)
+	assertETA(t, "w2 ExpectedStartMS", qs.Waiters[1].ExpectedStartMS, 15000)
+	assertETA(t, "ExpectedClearMS", qs.ExpectedClearMS, 17000)
 }
 
-func TestJointETAAllowsHostBackfill(t *testing.T) {
+func TestJointETAHoldsHostBackfillThatWouldDelayTheHead(t *testing.T) {
 	qs := wingwire.QueueState{
 		Holders: []wingwire.Holder{{RunID: "holder", Resources: wingwire.HostResources{Cores: 3}, ExpectedDurationMS: 10000}},
 		Waiters: []wingwire.Waiter{
@@ -233,8 +233,8 @@ func TestJointETAAllowsHostBackfill(t *testing.T) {
 	}
 	annotateSemaphoreETA(&qs, snap)
 	assertETA(t, "large ExpectedStartMS", qs.Waiters[0].ExpectedStartMS, 10000)
-	assertETA(t, "small ExpectedStartMS", qs.Waiters[1].ExpectedStartMS, 0)
-	assertETA(t, "ExpectedClearMS", qs.ExpectedClearMS, 15000)
+	assertETA(t, "small ExpectedStartMS", qs.Waiters[1].ExpectedStartMS, 15000)
+	assertETA(t, "ExpectedClearMS", qs.ExpectedClearMS, 17000)
 }
 
 func TestJointETAUsesExactLargeResourceBudgets(t *testing.T) {

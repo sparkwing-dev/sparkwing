@@ -419,13 +419,13 @@ func TestFailPolicy_QueuesWhenOnlyHostBlocks(t *testing.T) {
 	}
 }
 
-func TestFailPolicy_BackfillsPastWaiterBlockedByOlderHolder(t *testing.T) {
+func TestFailPolicy_BackfillsWhenItCannotDelayTheHead(t *testing.T) {
 	l := testLedger(t, 0, 0)
-	mustGrant(t, l, Request{ID: "a", Semaphores: []SemaphoreClaim{sem("k", 2, 1, PolicyQueue)}})
-	mustQueue(t, l, Request{ID: "b", Semaphores: []SemaphoreClaim{sem("k", 2, 2, PolicyQueue)}})
-	d, events := submit(t, l, Request{ID: "c", Semaphores: []SemaphoreClaim{sem("k", 2, 1, policyFail)}})
+	mustGrant(t, l, Request{ID: "a", Semaphores: []SemaphoreClaim{sem("k", 3, 2, PolicyQueue)}})
+	mustQueue(t, l, Request{ID: "b", Semaphores: []SemaphoreClaim{sem("k", 3, 2, PolicyQueue)}})
+	d, events := submit(t, l, Request{ID: "c", Semaphores: []SemaphoreClaim{sem("k", 3, 1, policyFail)}})
 	if d.Kind != DecisionGranted {
-		t.Fatalf("decision = %+v, want granted: budget fits and the heavy head waits only on an older holder", d)
+		t.Fatalf("decision = %+v, want granted: b still fits beside c once the older holder ends", d)
 	}
 	wantKinds(t, events, EventBackfilled, EventGranted)
 	if events[0].RequestID != "b" || events[0].BypassedBy != "c" || events[0].BackfillCount != 1 {
@@ -433,16 +433,13 @@ func TestFailPolicy_BackfillsPastWaiterBlockedByOlderHolder(t *testing.T) {
 	}
 }
 
-func TestFailPolicy_FailsBehindProtectedWaiter(t *testing.T) {
+func TestFailPolicy_FailsWhenBackfillWouldDelayTheHead(t *testing.T) {
 	l := testLedger(t, 0, 0)
-	older := mustGrant(t, l, Request{ID: "older", Semaphores: []SemaphoreClaim{sem("k", 10, 5, PolicyQueue)}})
-	mustQueue(t, l, Request{ID: "heavy", Semaphores: []SemaphoreClaim{sem("k", 10, 8, PolicyQueue)}})
-	mustGrant(t, l, Request{ID: "younger", Semaphores: []SemaphoreClaim{sem("k", 10, 5, PolicyQueue)}})
-	events := mustRelease(t, l, older.ID, "older")
-	wantKinds(t, events, EventReleased)
-	d, _ := submit(t, l, Request{ID: "c", Semaphores: []SemaphoreClaim{sem("k", 10, 3, policyFail)}})
+	mustGrant(t, l, Request{ID: "a", Semaphores: []SemaphoreClaim{sem("k", 2, 1, PolicyQueue)}})
+	mustQueue(t, l, Request{ID: "b", Semaphores: []SemaphoreClaim{sem("k", 2, 2, PolicyQueue)}})
+	d, _ := submit(t, l, Request{ID: "c", Semaphores: []SemaphoreClaim{sem("k", 2, 1, policyFail)}})
 	if d.Kind != DecisionFailed || d.Key != "k" {
-		t.Fatalf("decision = %+v, want failed: the heavy head is protected by a younger holder", d)
+		t.Fatalf("decision = %+v, want failed: running c would hold b out after the older holder ends", d)
 	}
 }
 
@@ -595,10 +592,10 @@ func TestReplaceWaiterUpdatesDemandBeforePromotion(t *testing.T) {
 
 func TestWeighted_LightArrivalBackfillsPastHeavyHead(t *testing.T) {
 	l := testLedger(t, 0, 0)
-	leaseA := mustGrant(t, l, Request{ID: "a", Semaphores: []SemaphoreClaim{sem("k", 3, 2, PolicyQueue)}})
-	mustQueue(t, l, Request{ID: "heavy", Semaphores: []SemaphoreClaim{sem("k", 3, 3, PolicyQueue)}})
+	leaseA := mustGrant(t, l, Request{ID: "a", Semaphores: []SemaphoreClaim{sem("k", 4, 3, PolicyQueue)}})
+	mustQueue(t, l, Request{ID: "heavy", Semaphores: []SemaphoreClaim{sem("k", 4, 3, PolicyQueue)}})
 
-	d, events := submit(t, l, Request{ID: "light", Semaphores: []SemaphoreClaim{sem("k", 3, 1, PolicyQueue)}})
+	d, events := submit(t, l, Request{ID: "light", Semaphores: []SemaphoreClaim{sem("k", 4, 1, PolicyQueue)}})
 	if d.Kind != DecisionGranted {
 		t.Fatalf("light = %+v, want granted as backfill past the heavy head", d)
 	}
@@ -611,12 +608,11 @@ func TestWeighted_LightArrivalBackfillsPastHeavyHead(t *testing.T) {
 	}
 
 	events = mustRelease(t, l, leaseA.ID, "a")
-	wantKinds(t, events, EventReleased)
-	events = mustRelease(t, l, d.Lease.ID, "light")
 	wantKinds(t, events, EventReleased, EventPromoted)
 	if events[1].RequestID != "heavy" {
-		t.Fatalf("promoted %q, want the heavy head once budget frees", events[1].RequestID)
+		t.Fatalf("promoted %q, want the heavy head beside the backfill once the older holder ends", events[1].RequestID)
 	}
+	mustRelease(t, l, d.Lease.ID, "light")
 }
 
 func TestFIFO_DisjointResourcesBypassBlockedQueue(t *testing.T) {

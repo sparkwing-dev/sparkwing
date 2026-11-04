@@ -2324,27 +2324,22 @@ func TestWaiterDisconnect_UnblocksProtectedFollower(t *testing.T) {
 	heavyPos, _ := acquireAsync(heavy, semReq("heavy", "k", 10, 8, wingwire.PolicyQueue))
 	waitForQueue(t, heavyPos)
 
-	light1 := ensure(t, home, "")
-	mustAcquire(t, light1, semReq("light-1", "k", 10, 5, wingwire.PolicyQueue))
-
-	light2 := ensure(t, home, "")
-	light2Pos, light2Result := acquireAsync(light2, semReq("light-2", "k", 10, 5, wingwire.PolicyQueue))
-	waitForQueue(t, light2Pos)
-
-	older.Close()
+	light := ensure(t, home, "")
+	lightPos, lightResult := acquireAsync(light, semReq("light", "k", 10, 5, wingwire.PolicyQueue))
+	waitForQueue(t, lightPos)
 	select {
-	case r := <-light2Result:
-		t.Fatalf("light-2 jumped the protected heavy head: %+v", r)
+	case r := <-lightResult:
+		t.Fatalf("light jumped the protected heavy head it would delay: %+v", r)
 	case <-time.After(300 * time.Millisecond):
 	}
 
 	heavy.Close()
-	r := waitResult(t, light2Result, 2*time.Second)
+	r := waitResult(t, lightResult, 2*time.Second)
 	if r.err != nil {
-		t.Fatalf("light-2 should promote once the heavy head leaves, got %v", r.err)
+		t.Fatalf("light should promote once the heavy head leaves, got %v", r.err)
 	}
-	if r.lease.RunID != "light-2" {
-		t.Fatalf("promoted %q, want light-2", r.lease.RunID)
+	if r.lease.RunID != "light" {
+		t.Fatalf("promoted %q, want light", r.lease.RunID)
 	}
 }
 

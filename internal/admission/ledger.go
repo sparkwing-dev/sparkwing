@@ -837,14 +837,16 @@ func (l *Ledger) fifoBlocked(s spec) bool {
 
 func (l *Ledger) scanWaiters(findFit bool, arrival spec) (int, map[resource]bool) {
 	blocked := map[resource]bool{}
-	var protected []*waiter
+	reserved := newReservations()
 	for i, w := range l.waiters {
 		if arrival.id != "" && !l.waiterPrecedesSpec(w, arrival) {
 			break
 		}
 		rs := w.spec.fifoResources()
-		if l.violatesReservation(w.spec, protected) {
-			markAll(blocked, rs)
+		if reserved.violatedBy(w.spec) {
+			// safety: a waiter held back by an older head's reservation reserves in turn rather than
+			// blocking, so work small enough to delay neither still starts
+			l.reserve(reserved, w)
 			continue
 		}
 		if anyIn(blocked, rs) {
@@ -858,59 +860,94 @@ func (l *Ledger) scanWaiters(findFit bool, arrival spec) (int, map[resource]bool
 			markAll(blocked, rs)
 			continue
 		}
-		if w.backfillCount > 0 {
-			protected = append(protected, w)
-			continue
-		}
+		l.reserve(reserved, w)
 		for _, r := range rs {
 			if l.starvedByYounger(w.spec, r) {
 				blocked[r] = true
 			}
 		}
 	}
-	if arrival.id != "" && l.violatesReservation(arrival, protected) {
+	if arrival.id != "" && reserved.violatedBy(arrival) {
 		markAll(blocked, arrival.fifoResources())
 	}
 	return -1, blocked
 }
 
-func (l *Ledger) violatesReservation(candidate spec, protected []*waiter) bool {
-	for _, w := range protected {
-		for _, r := range w.spec.fifoResources() {
-			candidateCost, ok := specResourceCost(candidate, r)
-			if !ok || candidateCost == 0 {
+// perf: every queued head that does not fit reserves, so the least room per resource is kept once per scan
+// rather than rechecked head by head; only heads with delay budget left are kept apart.
+type reservations struct {
+	all      map[resource]int64
+	strict   map[resource]int64
+	flexible []flexibleReservation
+}
+
+type flexibleReservation struct {
+	slackMS   int64
+	remaining map[resource]int64
+}
+
+func newReservations() *reservations {
+	return &reservations{all: map[resource]int64{}, strict: map[resource]int64{}}
+}
+
+func (l *Ledger) reserve(reserved *reservations, w *waiter) {
+	remaining := map[resource]int64{}
+	for _, r := range w.spec.fifoResources() {
+		limits, ok := l.resourceCapacity(w.spec, r)
+		if !ok {
+			continue
+		}
+		used, _ := specResourceCost(w.spec, r)
+		for _, le := range l.leases {
+			if le.admit <= w.spec.admit || leaseConflictsWithWaiter(le, w.spec) {
 				continue
 			}
-			demand, _ := specResourceCost(w.spec, r)
-			limits, ok := l.resourceCapacity(w.spec, r)
-			if !ok {
-				continue
-			}
-			var surviving int64
-			for _, le := range l.leases {
-				if le.admit <= w.spec.admit || leaseConflictsWithWaiter(le, w.spec) {
-					continue
-				}
-				cost, _ := leaseResourceCost(le, r)
-				surviving += cost
-			}
-			// safety: a head squeezed out by host pressure regains its fit when the pressure lifts, so
-			// the reservation is judged against the capacity the host recovers to, not what it offers now
-			if !fitsCost(surviving+demand, candidateCost, limits.recovered) &&
-				!l.delayBoundedBackfill(candidate, w) {
-				return true
-			}
+			cost, _ := leaseResourceCost(le, r)
+			used += cost
+		}
+		// safety: judged against the capacity the host offers now, so steady external load cannot let a
+		// stream of younger work hold the head out; a head larger than that waits for the idle floor
+		remaining[r] = limits.now - used
+	}
+	keepLeast(reserved.all, remaining)
+	budget := l.scheduling.backfillDelayMS(w.spec.class)
+	if slack := budget - w.backfillDelayMS; budget > 0 && slack > 0 {
+		reserved.flexible = append(reserved.flexible, flexibleReservation{slackMS: slack, remaining: remaining})
+		return
+	}
+	keepLeast(reserved.strict, remaining)
+}
+
+func keepLeast(into, from map[resource]int64) {
+	for r, room := range from {
+		if prior, ok := into[r]; !ok || room < prior {
+			into[r] = room
+		}
+	}
+}
+
+func (r *reservations) violatedBy(candidate spec) bool {
+	if candidate.expectedP99MS <= 0 {
+		return overruns(candidate, r.all)
+	}
+	if overruns(candidate, r.strict) {
+		return true
+	}
+	for _, f := range r.flexible {
+		if candidate.expectedP99MS > f.slackMS && overruns(candidate, f.remaining) {
+			return true
 		}
 	}
 	return false
 }
 
-func (l *Ledger) delayBoundedBackfill(candidate spec, protected *waiter) bool {
-	if candidate.expectedP99MS <= 0 {
-		return false
+func overruns(candidate spec, remaining map[resource]int64) bool {
+	for r, room := range remaining {
+		if cost, ok := specResourceCost(candidate, r); ok && cost > 0 && cost > room {
+			return true
+		}
 	}
-	budget := l.scheduling.backfillDelayMS(protected.spec.class)
-	return budget > 0 && protected.backfillDelayMS <= budget-candidate.expectedP99MS
+	return false
 }
 
 func specResourceCost(s spec, r resource) (int64, bool) {
@@ -1060,16 +1097,15 @@ func (l *Ledger) resourceBudget(w spec, r resource) (demand, used, usedOlder, ca
 }
 
 type capacityLimits struct {
-	now       int64
-	recovered int64
+	now int64
 }
 
 func (l *Ledger) resourceCapacity(w spec, r resource) (capacityLimits, bool) {
 	switch r {
 	case resourceCores:
-		return capacityLimits{now: min(l.totalMilliCores, l.headroomMilliCores), recovered: l.totalMilliCores}, true
+		return capacityLimits{now: min(l.totalMilliCores, l.headroomMilliCores)}, true
 	case resourceMemory:
-		return capacityLimits{now: int64(min(l.totalMemory, l.headroomMemory)), recovered: int64(l.totalMemory)}, true
+		return capacityLimits{now: int64(min(l.totalMemory, l.headroomMemory))}, true
 	default:
 		key := semKeyOf(r)
 		c, found := w.claim(key)
@@ -1077,7 +1113,7 @@ func (l *Ledger) resourceCapacity(w spec, r resource) (capacityLimits, bool) {
 			return capacityLimits{}, false
 		}
 		effective := int64(l.semEffectiveCapacity(key, c.capacity))
-		return capacityLimits{now: effective, recovered: effective}, true
+		return capacityLimits{now: effective}, true
 	}
 }
 
