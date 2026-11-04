@@ -191,18 +191,6 @@ func CheckSeal(existing, proposed Spec) (bool, error) {
 	return true, nil
 }
 
-// project derives every indexed input from its immutable owner.
-func project(s Spec) projections {
-	r := s.Request.Request
-	branch := ""
-	if s.Resolved.DefaultBranch.Set {
-		branch = s.Resolved.DefaultBranch.Value
-	} else if r.Git.DefaultBranch.Set {
-		branch = r.Git.DefaultBranch.Value
-	}
-	return projections{RepoKey: r.Git.Repository.Key, RepoDisplay: r.Git.Repository.Display, Pipeline: r.Pipeline, SHA: r.Git.SHA, Ref: r.Git.Ref, DefaultBranch: branch, Dispatch: r.Dispatch, RequestHash: s.Request.Hash, SpecHash: s.Hash, PlanHash: s.PlanHash}
-}
-
 // CarryRetry preserves the sealed code, writer and inputs, recording the retrier separately.
 func CarryRetry(input RetryInput) (RetrySnapshot, error) {
 	if err := verifyRequest(input.Request); err != nil {
