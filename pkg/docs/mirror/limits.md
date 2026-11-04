@@ -184,6 +184,38 @@ to disabled. The output window is thirty days, with the newest-success pin.
 Free and funded log retention classes are thirty and ninety days respectively.
 See [self-hosting](self-hosting.md#bound-storage-growth).
 
+## Shared stops the deployment does not ship
+
+A limit shared by every team refuses healthy customers once aggregate demand
+grows, so the shipped defaults leave these off and keep each one as explicit
+operator configuration. Korey decided each on 2026-11-04.
+
+- Object-store request budget: no per-minute stop by default, extending
+  decision 56.2, which made the per-day stop opt-in. Set
+  `--object-store-budget` for an emergency brake. GitHub scopes cache request
+  limits to a repository, and CircleCI limits concurrency per account and
+  resource class; neither stops every customer on aggregate traffic.
+- Team request budget: the `cloud` and `cloud-free` limits profiles no longer
+  size one request bucket that all of a team's tokens share. Per-runner claim
+  and heartbeat budgets and the controller's request-rate alarm stay, and
+  `--requests-per-token-minute` remains an operator setting. GitHub publishes
+  limits on runner scale rather than a shared request bucket, and CircleCI
+  queues work at its concurrency limit instead of refusing it.
+- Hourly run cap: the limits profiles no longer cap runs per principal (600 an
+  hour, 60 on `cloud-free`). A GitHub App delivery the cap refused became a
+  failed delivery an admin had to process again (decision 41), so ordinary
+  push volume turned into manual recovery. The team queue shed depth stays,
+  and `--max-runs-per-principal-hour` remains an operator setting. GitHub
+  allows 500 workflow runs per ten seconds per repository, and CircleCI queues
+  concurrency-limited work instead of refusing it.
+- GitHub Actions enrollment: no cap of 20 bound repositories per metered team
+  and none of 20 live Actions credentials per team. A credential lives about an
+  hour after its job ends, so the credential cap limited workflow throughput,
+  not concurrency. Verified OIDC identity, one exchange per workflow run
+  attempt, and the one-hour credential lifetime of decision 67 stay. GitHub
+  permits far higher workflow concurrency, and CircleCI bounds active
+  execution through plan and resource-class limits rather than credentials.
+
 ## Billing and overload protection
 
 Each metered award snapshots its payer, rate, executor and start facts. Job

@@ -86,6 +86,28 @@ unlock.
   naming `git merge origin/main`. Preconditions accept a branch behind main that merges cleanly.
 - **controller:** The controller logs its payment deployment id at start, and a checkout pairing alert says which setting to fix
   A 421 from the checkout service now tells the operator to set its `BILLING_DEPLOYMENT` to the `deployment` value on the alert, which the start-up `payment deployment` line also prints.
+- **billing:** Retained storage is charged in full, even when that takes the balance negative
+  Storage past the free allowance used to be charged only from the positive balance, and nothing was charged while
+  a hold was open, so the unpaid part was forgiven. It is now charged at the published rate like compute overage:
+  the balance can go negative, a hold no longer pauses the charge, and the next Add funds covers it. A team at zero
+  or below still cannot grow its storage or start new Cloud work.
+- **controller:** The shared object-store request budget no longer has a per-minute stop by default
+  The controller used to refuse every team's uploads, downloads and deletes for the rest of a minute once all teams
+  together sent 1,200 writes, 3,000 reads, or 600 listings or deletes. The budget now counts requests and refuses
+  nothing unless the operator sets one with `--object-store-budget`, such as `put:minute=1200`, which keeps working.
+- **controller:** The `cloud` and `cloud-free` limits profiles no longer cap a team's total request rate
+  All of a team's tokens shared one bucket of 3,600 requests a minute (600 on `cloud-free`), so a team that added
+  runners could see its heartbeats and state writes refused with `429`. Per-runner claim and heartbeat budgets and
+  the request-rate alarm still apply, and `--requests-per-token-minute` still sets a budget when the operator names one.
+- **controller:** The `cloud` and `cloud-free` limits profiles no longer cap runs per hour
+  A team's GitHub App pushes, API submissions and schedules shared a cap of 600 runs an hour (60 on `cloud-free`), and
+  a push the cap refused became a failed delivery that a team admin had to process again. The per-team queue shed
+  depth still answers `503` past its threshold, and `--max-runs-per-principal-hour` still sets a cap when the
+  operator names one.
+- **controller:** GitHub Actions runners no longer cap bound repositories or live credentials at 20 per team
+  A credential lives about an hour after its job ends, so a team that ran 20 short workflows in an hour had its next
+  exchange refused with `429`, and a metered team could not bind a 21st repository. Both caps are removed. Each
+  workflow run attempt still exchanges once, against verified GitHub identity, for a one-hour credential.
 
 ### Fixed
 

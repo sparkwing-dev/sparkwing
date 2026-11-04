@@ -171,7 +171,7 @@ func run(args []string) error {
 			"sized for. Zero raises no alarm.")
 	limitsProfile := fs.String("limits-profile", "",
 		fmt.Sprintf("named set of abuse guards this controller runs with: %s. A profile "+
-			"supplies the per-runner and per-token request budgets, the request rate "+
+			"supplies the per-runner request budgets, the request rate "+
 			"alarm, the egress alarm, stream and download caps, and idle-poll enforcement, "+
 			"and it fills a guard only where the command line and the environment "+
 			"named none, so an explicit setting always wins, zero included. Empty, "+
@@ -186,8 +186,8 @@ func run(args []string) error {
 	objectStoreBudget := fs.String("object-store-budget", "",
 		"per-process object-store request budgets, as comma-separated class:window=count entries such as "+
 			"put:minute=600,get:day=0, where class is put, get, list or delete, window is minute or day, and 0 "+
-			"leaves that window unlimited. Daily stops are off by default; set a day count for an emergency brake. "+
-			"A class and window the list does not name keeps its built-in budget")
+			"leaves that window unlimited. Minute and daily stops are off by default; set a count for an emergency brake. "+
+			"A class and window the list does not name stays unlimited")
 	maxBucketBytes := fs.Int64("max-bucket-bytes", 0,
 		"stored bytes across the whole object store at or above which the controller freezes "+
 			"object writes: existing runs finish, new writes are refused naming the ceiling, "+
@@ -362,11 +362,9 @@ func run(args []string) error {
 	}, guardsNamed{
 		ClaimsPerRunnerMinute:     fs.Changed(flagClaimsPerRunnerMinute),
 		HeartbeatsPerRunnerMinute: fs.Changed(flagHeartbeatsPerRunnerMinute),
-		RequestsPerTokenMinute:    fs.Changed(flagRequestsPerTokenMinute),
 		RequestsPerMinuteAlarm:    fs.Changed(flagRequestsPerMinuteAlarm),
 		MaxLogStreamsPerPrincipal: egressNamed.MaxLogStreams,
 		MaxDownloadsPerPrincipal:  egressNamed.MaxDownloads,
-		RunsPerPrincipalHour:      fs.Changed("max-runs-per-principal-hour"),
 		ShedQueueDepth:            fs.Changed("shed-queue-depth"),
 		EgressDailyAlarmBytes:     egressNamed.DailyAlarmBytes,
 	})
@@ -722,11 +720,9 @@ type guardValues struct {
 type guardsNamed struct {
 	ClaimsPerRunnerMinute     bool
 	HeartbeatsPerRunnerMinute bool
-	RequestsPerTokenMinute    bool
 	RequestsPerMinuteAlarm    bool
 	MaxLogStreamsPerPrincipal bool
 	MaxDownloadsPerPrincipal  bool
-	RunsPerPrincipalHour      bool
 	ShedQueueDepth            bool
 	EgressDailyAlarmBytes     bool
 }
@@ -741,9 +737,6 @@ func applyLimitsProfile(profile controller.LimitsProfileValues, set guardValues,
 	if !named.HeartbeatsPerRunnerMinute {
 		set.HeartbeatsPerRunnerMinute = profile.HeartbeatsPerRunnerMinute
 	}
-	if !named.RequestsPerTokenMinute {
-		set.RequestsPerTokenMinute = profile.RequestsPerTokenMinute
-	}
 	if !named.RequestsPerMinuteAlarm {
 		set.RequestsPerMinuteAlarm = profile.RequestsPerMinuteAlarm
 	}
@@ -752,9 +745,6 @@ func applyLimitsProfile(profile controller.LimitsProfileValues, set guardValues,
 	}
 	if !named.MaxDownloadsPerPrincipal {
 		set.MaxDownloadsPerPrincipal = profile.MaxDownloadsPerPrincipal
-	}
-	if !named.RunsPerPrincipalHour {
-		set.RunsPerPrincipalHour = profile.RunsPerPrincipalHour
 	}
 	if !named.ShedQueueDepth {
 		set.ShedQueueDepth = profile.ShedQueueDepth

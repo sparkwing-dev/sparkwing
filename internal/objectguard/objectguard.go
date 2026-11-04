@@ -2,7 +2,8 @@
 // object store.
 //
 // One Limiter per process counts PUT, GET, LIST and DELETE separately,
-// against a per-minute rate and an optional per-day emergency budget.
+// against an optional per-minute rate and an optional per-day emergency
+// budget, both off unless an operator sets them.
 // Exceeding a configured budget trips that class: every further request is
 // refused with a *budgetError and nothing is queued. Classes are
 // independent, so a tripped PUT budget leaves reads working on their
@@ -110,26 +111,14 @@ type Config struct {
 	Ceiling CeilingConfig
 }
 
-// Default minute rates stop runaway retry loops. Shared daily budgets are
-// opt-in emergency brakes; ordinary enforcement uses per-team budgets.
-const (
-	defaultPutPerMinute    = 1200
-	defaultGetPerMinute    = 3000
-	defaultListPerMinute   = 600
-	defaultDeletePerMinute = 600
-)
-
-// defaultConfig returns the built-in budgets.
+// defaultConfig counts every class and refuses nothing. One process-wide
+// budget cannot tell a runaway caller from healthy aggregate demand, so a
+// minute or day stop is an operator's opt-in emergency brake.
 func defaultConfig() Config {
 	return Config{
 		Enabled: true,
 		Reset:   tripResetDay,
-		Limits: map[Class]Limit{
-			classPut:    {PerMinute: defaultPutPerMinute},
-			classGet:    {PerMinute: defaultGetPerMinute},
-			ClassList:   {PerMinute: defaultListPerMinute},
-			classDelete: {PerMinute: defaultDeletePerMinute},
-		},
+		Limits:  map[Class]Limit{classPut: {}, classGet: {}, ClassList: {}, classDelete: {}},
 	}
 }
 

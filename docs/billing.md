@@ -263,9 +263,11 @@ dependency settlement decides which descendants can run. When it stops the
 run's owner itself (a trigger or plan running on Cloud), the whole run stops,
 including jobs on customer-owned runners, because its orchestrator has stopped.
 
-Retained storage is charged only from the balance there is: once the balance
-reaches zero, storage accounting advances without a debit. The unfunded part
-is forgiven and is not collected after a top-up.
+Retained storage past the free allowance is charged in full at the published
+rate, even when that takes the balance negative, like a clawback. A hold does
+not pause the charge. The next Add funds covers the negative balance, and while
+the balance is zero or below the team cannot grow its storage past the free
+allowance or start new Cloud work.
 
 ## Holds
 
