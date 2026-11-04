@@ -19,6 +19,7 @@ unlock.
 ---
 
 ## [Unreleased]
+
 ### Added
 
 - **sdk:** `JobNode.Cores(n)`, `JobGroup.Cores(n)` and TypeScript `job.cores(n)` declare the CPU a job asks local admission to reserve
@@ -34,10 +35,6 @@ unlock.
 - **daemon:** A later local waiter starts before a blocked older one only when it cannot delay it
   The `classic` mode allowed one backfill past a blocked head with no check; now every blocked waiter keeps the
   capacity it needs at the headroom the machine offers now, and a smaller waiter goes first only within that.
-
-
-### Changed
-
 - **warm capacity:** The default Auto start-time target is 20 seconds instead of 10. New stores seed every class at 20 seconds, and the schema 30 upgrade moves classes still at 10 seconds to 20; a class set to any other target keeps it. `sparkwing operator warm-capacity set` without `--start-time-target` now sends 20s.
 - **sdk:** `NewConcurrencyGroup` in Go and `ConcurrencyGroup` in TypeScript no longer check `Scope` and `OnLimit` themselves. The host still refuses an unknown value as `plan_invalid` when it validates the plan, so both SDKs fail the same way.
 - **delivery:** Docs, UI and process landings run their own checks plus the review
