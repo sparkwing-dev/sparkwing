@@ -66,23 +66,18 @@ const (
 	cloudFreeClaimHeadroom = 2
 )
 
-// safety: neither profile sets a team's aggregate request budget. A team's
-// tokens share that one bucket, so a fixed size couples control-plane capacity
-// to runner count and starves heartbeats of a team that adds runners; the
-// per-runner budgets bound each runner, and --requests-per-token-minute stays
-// an operator's explicit setting.
+// safety: neither profile sets a team's aggregate request budget: one shared bucket would starve the
+// heartbeats of a team that adds runners. Per-runner budgets bound each runner, and
+// --requests-per-token-minute stays an operator's explicit setting.
 
 // safety: the alarm is what one controller pod is sized to serve, so it
 // speaks when several tenants at once, or a pod carrying more tenants than it
 // was planned for, are driving it.
 const cloudRequestRateAlarm = 5000
 
-// safety: the shed depth is each team's backstop against pending triggers
-// nobody claims, sized so one team's queue scan stays a fraction of a second.
-// Neither profile sets an hourly run cap: a GitHub App delivery the cap
-// refuses becomes a failed delivery an admin must process again (decision 41),
-// so ordinary push volume would turn into manual recovery. The cap stays an
-// operator's explicit --max-runs-per-principal-hour.
+// safety: the shed depth bounds each team's unclaimed triggers so one queue scan stays a fraction of a
+// second. No profile sets an hourly run cap: a refused GitHub App delivery needs an admin to process it
+// again (decision 41), so the cap stays an operator's explicit --max-runs-per-principal-hour.
 const (
 	cloudShedQueueDepth     = 5000
 	cloudFreeShedQueueDepth = 1000

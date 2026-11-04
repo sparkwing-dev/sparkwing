@@ -39,7 +39,7 @@ func (r *localRuntime) rememberedDashboard() (dashboardMemory, bool, error) {
 	if err := json.Unmarshal(body, &memory); err != nil || memory.Address == "" {
 		return dashboardMemory{}, false, fmt.Errorf("wingd: remembered dashboard %s is unreadable", dashboardMemoryFile)
 	}
-	// --allow-remote consents for one explicit start, so a restore never reopens a remote listener.
+	// safety: --allow-remote consents for one explicit start, so a restore never reopens a remote listener.
 	if !originguard.LoopbackHost(memory.Address) {
 		_, port, err := net.SplitHostPort(memory.Address)
 		if err != nil {

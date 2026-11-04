@@ -111,9 +111,8 @@ type Config struct {
 	Ceiling CeilingConfig
 }
 
-// defaultConfig counts every class and refuses nothing. One process-wide
-// budget cannot tell a runaway caller from healthy aggregate demand, so a
-// minute or day stop is an operator's opt-in emergency brake.
+// safety: the default counts every class and refuses nothing, because one process-wide budget cannot
+// tell a runaway caller from healthy demand; a minute or day stop is an operator's opt-in brake.
 func defaultConfig() Config {
 	return Config{
 		Enabled: true,
