@@ -18,7 +18,7 @@ func fileIdentity(info os.FileInfo, now time.Time) (string, bool) {
 	if !ok {
 		return "", false
 	}
-	changed := time.Unix(int64(stat.Ctim.Sec), int64(stat.Ctim.Nsec))
+	changed := changeTime(stat)
 	// safety: a file changed within the clock's granularity of now could change again unseen.
 	if now.Sub(changed) < stableAfter || now.Sub(info.ModTime()) < stableAfter {
 		return "", false
