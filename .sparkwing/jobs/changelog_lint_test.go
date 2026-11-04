@@ -65,6 +65,9 @@ func TestLintChangelog_Dedupe_DuplicateAdded(t *testing.T) {
 	if !strings.Contains(i.Message, "first at line 5") {
 		t.Errorf("message missing first-occurrence line: %q", i.Message)
 	}
+	if !strings.Contains(i.Message, "bash bin/check-changelog.sh --fix") {
+		t.Errorf("message does not name the fix command: %q", i.Message)
+	}
 }
 
 func TestLintChangelog_Dedupe_MultipleCategoriesDuplicated(t *testing.T) {
