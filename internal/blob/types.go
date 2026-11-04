@@ -3,11 +3,10 @@
 package blob
 
 import (
-	"slices"
-
 	"context"
 	"errors"
 	"io"
+	"slices"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"

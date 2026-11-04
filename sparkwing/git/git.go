@@ -292,7 +292,7 @@ func matchesIgnorePattern(path, p string) bool {
 	if strings.HasSuffix(p, "/") && (strings.HasPrefix(path, p) || strings.HasPrefix(path+"/", p)) {
 		return true
 	}
-	if matched, _ := filepath.Match(p, filepath.Base(path)); matched {
+	if matched, err := filepath.Match(p, filepath.Base(path)); err == nil && matched {
 		return true
 	}
 	return strings.HasPrefix(path, p+"/") || path == p
