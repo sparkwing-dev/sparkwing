@@ -196,6 +196,11 @@ unlock.
   `--repos`, which every shared runner needs, already limits a runner to repository-proven work, and a runner scoped by
   it is now a trusted host whose jobs can produce a counted pass. See the
   [migration guide](docs/migrations/_unreleased.md#runners-add---trust-verified-is-gone).
+### Removed
+
+- **wingwire (Breaking):** `AdmissionRequest` drops `ParentLeaseToken`, `ParentRunID` and `ParentNodeID`, and the admission daemon no longer attaches a child run to its parent's lease
+  No Sparkwing client sent these fields. The daemon journal no longer records `child_attach_request` or `child_attach`.
+
 
 ## [v0.68.7] - 2026-11-04
 ### Added
