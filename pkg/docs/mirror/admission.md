@@ -113,8 +113,11 @@ sparkwing.Job(plan, "test", &Test{}).Cores(6)              // runs go test -p 6
 plan.job("test", test).cores(6);
 ```
 
-Declare what the job actually runs in parallel and size its tools to match,
-for example `go test -p 6` beside `Cores(6)`. A request larger than the machine
+A small request lets a job that mostly waits start beside running work. A
+larger request reserves cores in queue order, so the job does not share them,
+at the cost of fewer jobs running at once; a job left at the default may run
+more processes than it is charged, and the machine is then overcommitted, as
+with fixed runner slots. A request larger than the machine
 is charged the whole machine. Hosts without local admission ignore the request.
 A host older than this setting does not name it in its handshake, so the SDK
 leaves it out of the plan and the job keeps the one-core charge there.
@@ -122,14 +125,13 @@ leaves it out of the plan and the job keeps the one-core charge there.
 ## External load
 
 Admission subtracts CPU that other programs use from what it grants. CPU used
-by a job's own processes is not external: on Linux, Windows and macOS the
+by a job's own processes is never external: on Linux, Windows and macOS the
 daemon follows the process tree of the host process that started the job and
-counts that tree's CPU as the job's, up to the cores the job was charged. CPU
-beyond the charge still counts against the machine, because admission has not
-reserved it. A job that runs eight processes while charged one core therefore
-still holds the machine as if it used eight; declaring `Cores(8)` reserves
-them in queue order instead. Where the daemon cannot read process CPU, all
-host load counts as external.
+counts all of that tree's CPU as Sparkwing load. Admission charges the job its
+declared request, so a job charged one core that runs eight processes
+overcommits the machine, as a fixed runner slot would; it does not shrink what
+other jobs are granted. Where the daemon cannot read process CPU, all host
+load counts as external.
 
 ## Custom policy
 

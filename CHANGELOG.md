@@ -28,9 +28,9 @@ unlock.
 ### Changed
 
 - **daemon:** A job's own processes no longer count as external load
-  Node-host leases now carry the host process ID, so CPU used by a job's process tree counts as that job's, up to the
-  cores it was charged. Before, a gate running `go test -p 7` while charged one core showed all of its CPU as external
-  load and starved every other waiter.
+  Node-host leases now carry the host process ID, so all CPU used by a job's process tree counts as Sparkwing load, not
+  external load. Before, a gate running `go test -p 7` while charged one core showed all of its CPU as external load
+  and starved every other waiter.
 - **daemon:** A later local waiter starts before a blocked older one only when it cannot delay it
   The `classic` mode allowed one backfill past a blocked head with no check; now every blocked waiter keeps the
   capacity it needs at the headroom the machine offers now, and a smaller waiter goes first only within that.

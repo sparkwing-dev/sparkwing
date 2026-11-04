@@ -94,8 +94,7 @@ limit. By default admission grants
 the whole machine less a 20% reserve and less the CPU and memory other
 programs are using. Adding `ignore-external` stops subtracting other
 programs' load, which suits a machine that runs only Sparkwing work. CPU used
-by a job's own processes counts as that job's, up to the cores it declared or
-the one-core default; see [Local admission](admission.md#external-load). The
+by a job's own processes is never external; see [Local admission](admission.md#external-load). The
 daemon reads the budget at start, so restart it after a change.
 
 ## Runner labels

@@ -486,11 +486,13 @@ file. Other syntax and workflow checks remain active.
   --sw-only gate -- --full` and `sparkwing run gate --sw-only race-touched`. Each job
   owns a separate four-core runner, so race tests share no cores with the full
   Go or PostgreSQL suite. `sparkwing run gate` runs both jobs locally. There
-  each declares its Go parallelism as its core request (`Cores`), two fifths
-  of a shared machine (6 on 16 cores, `go test -p 6`), so `land` runs the pair
-  side by side inside the 80% of the machine local admission grants. The
-  `preconditions`, `review`, `record-tree` and `land` jobs declare a quarter
-  core, so they start beside running gates instead of queueing behind them.
+  both keep the one-core admission charge while running half the machine's
+  cores, overcommitting like fixed runner slots; local admission counts their
+  CPU as Sparkwing load, not external. The `preconditions`, `review`,
+  `record-tree` and `land` jobs declare a quarter core (`Cores(0.25)`), so they
+  start beside running gates instead of queueing behind them. A simulation of
+  six concurrent lands found declaring 4 or 6 cores for the gate pair slower
+  than this under external load.
   Without
   `--full` its test step runs the changed packages (importers still build and
   vet; their tests run after deploy) and the tests marked `//sparkwing:critical` on the line above them; a change to a
