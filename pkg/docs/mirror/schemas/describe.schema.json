@@ -317,6 +317,10 @@
         "continue_on_error": {
           "type": "boolean"
         },
+        "cores": {
+          "minimum": 0.25,
+          "type": "number"
+        },
         "deps": {
           "items": {
             "type": "string"

@@ -86,12 +86,13 @@ func TestSimulateAdmissionETA_AgreesWithTheLedgerUnderAHeadroomSqueeze(t *testin
 	if err != nil {
 		t.Fatalf("submit small: %v", err)
 	}
-	if decision.Kind != admission.DecisionGranted {
-		t.Fatalf("ledger answered small with %s, want %s", decision.Kind, admission.DecisionGranted)
+	if decision.Kind != admission.DecisionQueued {
+		t.Fatalf("ledger answered small with %s, want %s: under the squeeze heavy no longer fits beside the backfill",
+			decision.Kind, admission.DecisionQueued)
 	}
-	if starts[1] != 0 {
-		t.Fatalf("estimated start for small = %v, want 0: the ledger admits it now, so an estimate "+
-			"promising a wait describes a queue this daemon does not have", starts[1])
+	if starts[1] == 0 {
+		t.Fatal("estimated start for small = 0, want a wait: the ledger holds it behind heavy, so an estimate " +
+			"promising an immediate start describes a queue this daemon does not have")
 	}
 }
 

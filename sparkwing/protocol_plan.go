@@ -101,6 +101,10 @@ func jobDocument(p *Plan, n *JobNode) nodeproto.JobSpec {
 	if n.noProgressSet {
 		s.NoProgressTimeoutMS = milliseconds(n.noProgressTimeout)
 	}
+	if n.cores != 0 {
+		cores := n.cores
+		s.Cores = &cores
+	}
 	if n.memoKey != nil || n.memoInput != nil {
 		s.Memo = &nodeproto.MemoSpec{Input: n.memoInput}
 		if n.memoOptions.ttl != nil {
