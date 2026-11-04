@@ -33,7 +33,11 @@ itself and a branch that does not contain a freshly fetched `origin/main`, and
 names the command that fixes each. The gate (the same jobs as
 `sparkwing run gate`) and the review (the same job as `sparkwing run review`,
 under `.review.yaml`) then run in parallel. Every change is reviewed, docs and
-comment changes included; the review job never skips by size or path. Pass
+comment changes included; the review job never skips by size or path. A diff
+whose every file matches `.review.yaml`'s `docs_only` paths (`docs/`, any
+`*.md`, `CHANGELOG*`) runs the default review on the cheaper `docs` reviewer
+(Claude Haiku) instead of the default model; any other file keeps the default.
+The record's `reviewer.model` names the model that ran. Pass
 `-- --brief '...'` or `-- --skip 'F2=reason'` as for the review pipeline.
 
 The `land` job's `verify` step requires the review record's tree to be HEAD's

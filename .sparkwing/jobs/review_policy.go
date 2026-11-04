@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"path"
+	"slices"
 	"strings"
 
 	"go.yaml.in/yaml/v3"
@@ -17,6 +18,7 @@ type reviewPolicy struct {
 	} `yaml:"objective"`
 	Rules      []reviewRule               `yaml:"rules"`
 	Strict     []strictPaths              `yaml:"strict"`
+	DocsOnly   docsOnlyRoute              `yaml:"docs_only"`
 	NeverBlock []string                   `yaml:"never_block"`
 	Reviewers  map[string]reviewerProfile `yaml:"reviewers"`
 	Rereview   struct {
@@ -35,6 +37,13 @@ type strictPaths struct {
 	Name     string   `yaml:"name"`
 	Paths    []string `yaml:"paths"`
 	BlockAt  string   `yaml:"block_at"`
+	Reviewer string   `yaml:"reviewer"`
+}
+
+// docsOnlyRoute moves the default review to a cheaper reviewer's model when
+// every changed file matches Paths; the review itself still runs.
+type docsOnlyRoute struct {
+	Paths    []string `yaml:"paths"`
 	Reviewer string   `yaml:"reviewer"`
 }
 
@@ -91,6 +100,14 @@ func parseReviewPolicy(data []byte) (reviewPolicy, error) {
 			return reviewPolicy{}, fmt.Errorf(".review.yaml: rule %q: from %q is not supported; use %s", r.ID, r.From, standardsRuleFrom)
 		}
 	}
+	if len(p.DocsOnly.Paths) > 0 {
+		if p.Reviewers[p.DocsOnly.Reviewer].Model == "" {
+			return reviewPolicy{}, fmt.Errorf(".review.yaml: docs_only names reviewer %q, which reviewers does not define", p.DocsOnly.Reviewer)
+		}
+		if err := checkPatterns(p.DocsOnly.Paths); err != nil {
+			return reviewPolicy{}, fmt.Errorf(".review.yaml: docs_only: %w", err)
+		}
+	}
 	for i := range p.Strict {
 		s := &p.Strict[i]
 		if s.Name == "" {
@@ -105,15 +122,36 @@ func parseReviewPolicy(data []byte) (reviewPolicy, error) {
 		if p.Reviewers[s.Reviewer].Model == "" {
 			return reviewPolicy{}, fmt.Errorf(".review.yaml: strict %q names reviewer %q, which reviewers does not define", s.Name, s.Reviewer)
 		}
-		for _, pat := range s.Paths {
-			for _, seg := range strings.Split(pat, "/") {
-				if _, err := path.Match(seg, ""); err != nil {
-					return reviewPolicy{}, fmt.Errorf(".review.yaml: strict %q: bad path pattern %q", s.Name, pat)
-				}
-			}
+		if err := checkPatterns(s.Paths); err != nil {
+			return reviewPolicy{}, fmt.Errorf(".review.yaml: strict %q: %w", s.Name, err)
 		}
 	}
 	return p, nil
+}
+
+func checkPatterns(patterns []string) error {
+	for _, pat := range patterns {
+		for _, seg := range strings.Split(pat, "/") {
+			if _, err := path.Match(seg, ""); err != nil {
+				return fmt.Errorf("bad path pattern %q", pat)
+			}
+		}
+	}
+	return nil
+}
+
+// defaultModel is the model the default reviewer runs on for this diff: the
+// docs_only reviewer's when every changed file is documentation.
+func (p reviewPolicy) defaultModel(files []string) string {
+	if len(p.DocsOnly.Paths) == 0 || len(files) == 0 {
+		return p.Reviewers[defaultReviewer].Model
+	}
+	for _, f := range files {
+		if !slices.ContainsFunc(p.DocsOnly.Paths, func(pat string) bool { return globMatch(pat, f) }) {
+			return p.Reviewers[defaultReviewer].Model
+		}
+	}
+	return p.Reviewers[p.DocsOnly.Reviewer].Model
 }
 
 func severityRank(s string) int {

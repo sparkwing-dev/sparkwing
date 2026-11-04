@@ -66,6 +66,22 @@ func TestRepositoryReviewPolicyParses(t *testing.T) {
 	if got := p.strictReviewers([]string{"internal/controller/runs.go"}); len(got) != 0 {
 		t.Errorf("an ordinary file is strict: %v", got)
 	}
+	if _, err := newReviewer(p.Reviewers[p.DocsOnly.Reviewer].Model); err != nil {
+		t.Errorf("docs_only reviewer: %v", err)
+	}
+	docs := []string{"docs/admission.md", "pkg/docs/changelog.md", "CHANGELOG.md", "README.md", "design/rewrite/ORIENTATION.md"}
+	if got := p.defaultModel(docs); got != "claude-haiku" {
+		t.Errorf("docs-only diff routes to %q, want claude-haiku", got)
+	}
+	for _, mixed := range [][]string{
+		append([]string{"pkg/docs/docs.go"}, docs...),
+		{"docs/admission.md", ".review.yaml"},
+		{},
+	} {
+		if got := p.defaultModel(mixed); got != "codex-sol" {
+			t.Errorf("%v routes to %q, want codex-sol", mixed, got)
+		}
+	}
 }
 
 func TestReviewPolicyRejectsLooserOrMistypedSettings(t *testing.T) {
@@ -413,6 +429,42 @@ func TestReviewRunsTheSecurityReviewerOnStrictPaths(t *testing.T) {
 	}
 	if rec.session("security").Session == "" {
 		t.Errorf("security session not recorded: %+v", rec.Reviewers)
+	}
+}
+
+func TestReviewRoutesDocsOnlyDiffsToTheDocsModel(t *testing.T) {
+	fx := newReviewFixture(t)
+	p := testPolicy(t)
+	p.DocsOnly = docsOnlyRoute{Paths: []string{"docs/**", "**/*.md"}, Reviewer: "docs"}
+	p.Reviewers["docs"] = reviewerProfile{Model: "fake-docs"}
+	var models []string
+	reviewerFor := fx.deps.reviewer
+	fx.deps.reviewer = func(model string) (reviewer, error) {
+		models = append(models, model)
+		return reviewerFor(model)
+	}
+	fx.git.files = []string{"docs/a.md", "README.md"}
+	fx.def.replies = []string{`{"findings": []}`, `{"findings": []}`}
+	in := reviewInputs{branch: "feature/docs"}
+	rec, _, err := runReview(context.Background(), fx.deps, p, in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rec.Reviewer.Profile != defaultReviewer || rec.Reviewer.Model != "fake-docs" {
+		t.Errorf("docs-only record reviewer %+v, want default on fake-docs", rec.Reviewer)
+	}
+
+	fx.git.head, fx.git.tree = "c2", "t2"
+	fx.git.files = []string{"docs/a.md", "cmd/x.go"}
+	rec, _, err = runReview(context.Background(), fx.deps, p, in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rec.Reviewer.Model != "fake-default" || fx.def.calls[1].session != "" {
+		t.Errorf("mixed diff reviewer %+v, call %+v; want a fresh fake-default session", rec.Reviewer, fx.def.calls[1])
+	}
+	if strings.Join(models, ",") != "fake-docs,fake-default" {
+		t.Errorf("models %v", models)
 	}
 }
 
