@@ -19,6 +19,18 @@ unlock.
 ---
 
 ## [Unreleased]
+### Changed
+
+- **cli:** Local commands no longer read gitignored trees when keying the pipeline binary
+  `sparkwing run`, `pipeline list`, `info` and `cache explain` walked every file under the pipeline module and its local `replace` targets and passed each path to `git check-ignore`; an 80,000-file ignored lint cache made each take 60-90 seconds. One `git ls-files` call now names ignored files and wholly ignored directories, which are skipped, and the remaining files hash in parallel. Keys are unchanged.
+- **run:** A foreground `sparkwing run` shows step output and exits within 200ms of the run finishing
+  It followed its own machine's controller on the one-second remote poll. Remote follows keep one second.
+- **run:** Local runs start faster in repositories that replace the SDK
+  The running engine is hashed once per process instead of about eight times, and each job reads its run snapshot once while binding its process services.
+- **local:** The local controller reuses prepared SQLite statements
+  Every store call parsed and planned its SQL again, about 40% of the local controller's CPU during a run. Each connection now keeps up to 512 prepared statements, which cuts the controller's share of a local job's start from roughly 0.8 seconds to 0.2 seconds.
+- **run:** SDK installs check the SDK pin while the pipeline key is computed, and a foreground run reads its final logs as soon as hosting ends
+
 ### Fixed
 
 - **launcher:** Stop warning about Cloud reservations that belong to another job namespace
