@@ -33,6 +33,9 @@ unlock.
   Activating a virtualenv or Node version manager keeps the compiled pipeline; upgrading Go behind the same `PATH`
   rebuilds it.
 - **run:** Each engine notice, such as the missing version policy warning, prints once per command instead of three times
+- **run:** (Breaking) Go pipelines compile with `CGO_ENABLED=0` unless the environment sets `CGO_ENABLED`
+  An uncached first compile is 4-6s faster on a two-vCPU runner. A pipeline that imports a cgo package sets
+  `CGO_ENABLED=1`; see the [migration guide](docs/migrations/_unreleased.md#pipelines-compile-without-cgo).
 
 ### Fixed
 

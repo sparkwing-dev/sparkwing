@@ -103,6 +103,15 @@ type CompileOptions struct {
 	HashAllFiles bool
 }
 
+func pipelineBuildEnvironment(env []string) []string {
+	// perf: an uncached compile with cgo builds runtime/cgo and the cgo variants of net and os/user,
+	// 4-6s on a 2-vCPU CI runner; a pipeline that links C sets CGO_ENABLED=1 itself.
+	if value, _ := gotoolchain.LookupEnv(env, "CGO_ENABLED"); value != "" || env == nil {
+		return env
+	}
+	return append(append([]string(nil), env...), "CGO_ENABLED=0")
+}
+
 func CompilePipeline(ctx context.Context, sparkwingDir, dest string, options CompileOptions) error {
 	return compilePipeline(ctx, sparkwingDir, dest, pipelineBuildFlags, options)
 }
@@ -119,6 +128,7 @@ func compilePipeline(ctx context.Context, sparkwingDir, dest string, flags []str
 	if err := ctx.Err(); err != nil {
 		return err
 	}
+	options.Environment = pipelineBuildEnvironment(options.Environment)
 	tool, err := gotoolchain.Executable(options.Environment)
 	if err != nil {
 		return fmt.Errorf(
@@ -341,7 +351,7 @@ func keyParts(sparkwingDir, goos, goarch string, env []string, hashAllFiles bool
 
 	flags := strings.Join(pipelineBuildFlags, " ")
 	add("build flags", flags, []byte("buildflags:"+flags+"\n"))
-	add("build environment", "captured Go build settings", buildEnvironmentKey(env))
+	add("build environment", "captured Go build settings", buildEnvironmentKey(pipelineBuildEnvironment(env)))
 
 	var moduleBuf bytes.Buffer
 	moduleStats, err := hashDirIntoCounted(&moduleBuf, sparkwingDir, allFiles, hashAllFiles)
