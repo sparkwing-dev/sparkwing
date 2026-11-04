@@ -79,7 +79,10 @@ digests are CEL literals.
   later API adds, is refused. Capacity requests run as UID 65534
   with every capability dropped. `runtimeClassName`, `shareProcessNamespace`,
   resource claims and health-check `host` fields must stay unset, as must
-  `dnsConfig` and `hostAliases`; the scheduler is the default one, service
+  `hostAliases`. Job Pods set exactly the `dnsConfig` resolver options
+  `timeout:1` and `attempts:5`, with no nameservers or search domains, so the
+  first lookup outlasts the strict network-policy attach window; capacity
+  Pods set no `dnsConfig`. The scheduler is the default one, service
   links are off and no `system-` priority class may be named. The fields come
   from the vendored k8s.io/api, so a field a newer API server adds stays
   unpinned until that dependency moves.

@@ -198,6 +198,10 @@ func (f *admissionFixture) podCreates(t *testing.T, job *batchv1.Job) []admissio
 		{name: "dns_config", user: testJobController, object: pod(func(p *corev1.Pod) {
 			p.Spec.DNSConfig = &corev1.PodDNSConfig{Options: []corev1.PodDNSConfigOption{{Name: "ndots", Value: ptr("1")}}}
 		}), reason: "cluster DNS"},
+		{name: "dns_nameserver", user: testJobController, object: pod(func(p *corev1.Pod) { p.Spec.DNSConfig.Nameservers = []string{"10.0.0.1"} }), reason: "cluster DNS"},
+		{name: "dns_search", user: testJobController, object: pod(func(p *corev1.Pod) { p.Spec.DNSConfig.Searches = []string{"attacker.example"} }), reason: "cluster DNS"},
+		{name: "dns_options_removed", user: testJobController, object: pod(func(p *corev1.Pod) { p.Spec.DNSConfig.Options = nil }), reason: "cluster DNS"},
+		{name: "capacity_dns_config", user: testLauncher, object: capacity(func(p *corev1.Pod) { p.Spec.DNSConfig = jobDNSConfig() }), reason: "cluster DNS"},
 		{name: "host_aliases", user: testJobController, object: pod(func(p *corev1.Pod) {
 			p.Spec.HostAliases = []corev1.HostAlias{{IP: "10.0.0.1", Hostnames: []string{"api.sparkwing.dev"}}}
 		}), reason: "cluster DNS"},

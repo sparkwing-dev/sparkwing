@@ -19,6 +19,11 @@ unlock.
 ---
 
 ## [Unreleased]
+### Changed
+
+- **launcher:** Cloud Job Pods retry DNS after 1s instead of 5s
+  Under strict VPC CNI network policy a new Pod's egress drops for about 2s, so the first controller lookup used to stall for the full 5s resolver timeout. Job Pods now set the resolver options `timeout:1` and `attempts:5`, and admission accepts exactly those options on Job Pods.
+
 ### Fixed
 
 - **launcher:** Stop warning about Cloud reservations that belong to another job namespace

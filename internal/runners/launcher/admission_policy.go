@@ -52,7 +52,8 @@ func podValidations(pod bool) []admissionv1.Validation {
 		{Expression: `!variables.create || variables.containers.all(c, !c.?securityContext.?privileged.orValue(false))`, Message: "no container runs privileged"},
 		{Expression: `!variables.create || variables.shape != 'job' || variables.spec.?hostUsers.orValue(true) == ` + strconv.FormatBool(jobHostUsers), Message: "Job Pods run in their own user namespace"},
 		{Expression: `!variables.create || !has(variables.spec.runtimeClassName) && !variables.spec.?shareProcessNamespace.orValue(false) && size(variables.spec.?resourceClaims.orValue([])) == 0 && variables.containers.all(c, size(c.?resources.?claims.orValue([])) == 0 && [c.?livenessProbe, c.?readinessProbe, c.?startupProbe].all(p, !p.hasValue() || (!has(p.value().httpGet) || !has(p.value().httpGet.host)) && (!has(p.value().tcpSocket) || !has(p.value().tcpSocket.host))))`, Message: "Pods use the default runtime class, private process namespaces, no resource claims and probes against their own address"},
-		{Expression: `!variables.create || !has(variables.spec.dnsConfig) && !has(variables.spec.hostAliases) && variables.spec.?schedulerName.orValue('default-scheduler') == 'default-scheduler' && !variables.spec.?enableServiceLinks.orValue(true) && !variables.spec.?priorityClassName.orValue('').startsWith('system-')`, Message: "Pods keep cluster DNS, the default scheduler, no service links and no system priority class"},
+		{Expression: `!variables.create || !has(variables.spec.dnsConfig) || variables.shape == 'job' && size(variables.spec.dnsConfig.?nameservers.orValue([])) == 0 && size(variables.spec.dnsConfig.?searches.orValue([])) == 0 && variables.spec.dnsConfig.?options.orValue([]).map(o, o.?name.orValue('') + '=' + o.?value.orValue('')) == ` + celList(dnsOptions(jobDNSConfig())), Message: "Job Pods keep cluster DNS with only the launcher's resolver options; capacity Pods set none"},
+		{Expression: `!variables.create || !has(variables.spec.hostAliases) && variables.spec.?schedulerName.orValue('default-scheduler') == 'default-scheduler' && !variables.spec.?enableServiceLinks.orValue(true) && !variables.spec.?priorityClassName.orValue('').startsWith('system-')`, Message: "Pods keep cluster DNS, the default scheduler, no service links and no system priority class"},
 		{Expression: `!variables.create || variables.shape != 'job' || ` + hostCommand("variables.spec.containers[0]"), Message: "the workload containers run only the launcher's sparkwing-runner commands"},
 		{Expression: `!variables.create || ` + securityShapes(), Message: "each container runs exactly its shape's security context, with no SELinux, Windows or other override"},
 		{Expression: `!variables.create || variables.containers.all(c, !has(c.lifecycle) && [c.?livenessProbe, c.?readinessProbe, c.?startupProbe].all(p, !p.hasValue() || !has(p.value().exec)))`, Message: "containers run no lifecycle hooks or exec probes"},
@@ -120,6 +121,14 @@ func admissionMatch(namespace string, rules ...admissionv1.NamedRuleWithOperatio
 		MatchPolicy:       ptr(admissionv1.Equivalent),
 		ResourceRules:     rules,
 	}
+}
+
+func dnsOptions(c *corev1.PodDNSConfig) []string {
+	options := make([]string, len(c.Options))
+	for i, o := range c.Options {
+		options[i] = o.Name + "=" + *o.Value
+	}
+	return options
 }
 
 func celList(values []string) string {
