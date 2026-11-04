@@ -64,11 +64,11 @@ func TestRunnerVersionOutputModes(t *testing.T) {
 
 func TestRunnerVersionHelpAndTopLevelUsage(t *testing.T) {
 	var stdout, diagnostics bytes.Buffer
-	if err := runRunnerVersionIO(&stdout, &diagnostics, []string{"--help"}, "v1.2.3"); err != nil {
+	if err := runRunnerVersionIO(&stdout, &diagnostics, []string{"--help", "-o", "plain"}, "v1.2.3"); err != nil {
 		t.Fatal(err)
 	}
-	if stdout.Len() != 0 {
-		t.Fatalf("version help wrote identity output: %q", stdout.String())
+	if diagnostics.Len() != 0 || bytes.Contains(stdout.Bytes(), []byte(`"binary"`)) {
+		t.Fatalf("version help wrote diagnostics %q or identity output %q", diagnostics.String(), stdout.String())
 	}
 	for _, want := range []string{
 		"usage: sparkwing-runner version",
@@ -76,9 +76,21 @@ func TestRunnerVersionHelpAndTopLevelUsage(t *testing.T) {
 		"--output",
 		"--help-all",
 	} {
-		if !bytes.Contains(diagnostics.Bytes(), []byte(want)) {
-			t.Errorf("version help %q does not contain %q", diagnostics.String(), want)
+		if !bytes.Contains(stdout.Bytes(), []byte(want)) {
+			t.Errorf("version help %q does not contain %q", stdout.String(), want)
 		}
+	}
+
+	stdout.Reset()
+	if err := runRunnerVersionIO(&stdout, &diagnostics, []string{"--help", "-o", "json"}, "v1.2.3"); err != nil {
+		t.Fatal(err)
+	}
+	var help struct{ Kind, Text string }
+	if err := json.Unmarshal(stdout.Bytes(), &help); err != nil || help.Kind != "help" || !strings.Contains(help.Text, "usage: sparkwing-runner version") {
+		t.Fatalf("JSON help = %q (%v), want one help record", stdout.String(), err)
+	}
+	if err := runRunnerVersionIO(&bytes.Buffer{}, &bytes.Buffer{}, []string{"--help", "-o", "bogus"}, "v1.2.3"); err == nil {
+		t.Fatal("help accepted an invalid output mode")
 	}
 
 	var topLevel bytes.Buffer

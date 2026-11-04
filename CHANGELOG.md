@@ -26,6 +26,8 @@ unlock.
 
 ### Fixed
 
+- **runner:** `sparkwing-runner` help follows the output contract the CLI uses
+  Help now goes to stdout, as one `{"kind":"help","text":...}` record under `-o json` or a pipe, and an invalid `-o` value is refused before help prints. It went to stderr in every mode, and `--help -o bogus` succeeded.
 - **runners:** A native runner service keeps a custom `SPARKWING_HOME`
   `sparkwing runners add` placed the log under the selected state home, but the systemd unit and LaunchAgent did not carry it, so the started runner used `~/.sparkwing`. Both now set `SPARKWING_HOME` to the home the installer resolved; reinstall an existing service to pick it up.
 - **runner:** `sparkwing-runner version -o json` writes one JSON record on one line

@@ -271,7 +271,7 @@ func configArgument(words []string) string {
 	if len(words) < 2 || words[1] != "start" {
 		return ""
 	}
-	flags, err := runnerflags.Parse("start", words[2:], io.Discard)
+	flags, err := runnerflags.Parse("start", words[2:], io.Discard, io.Discard)
 	if err != nil {
 		return ""
 	}
