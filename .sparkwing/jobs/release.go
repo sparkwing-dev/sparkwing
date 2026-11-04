@@ -79,7 +79,7 @@ func (r *Release) Plan(_ context.Context, plan *sparkwing.Plan, in ReleaseArgs, 
 	// before prepare-changelog writes, so no lint or suite reads a checkout
 	// that changes under it.
 	cutChecks := sparkwing.Job(plan, "release-cut-checks", &releaseCutChecksJob{}).
-		Cache(lintCache()).Timeout(releaseCutBudget + releaseLintLockAllowance)
+		Timeout(releaseCutBudget + releaseLintLockAllowance)
 
 	changelog := sparkwing.Job(plan, "prepare-changelog", &prepareChangelogJob{
 		RepoDir: repoDir,

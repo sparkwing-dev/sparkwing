@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/sparkwing-dev/sparkwing/sparkwing/sparkwingtest"
 )
 
 var productDirs = []string{"cmd", "internal", "pkg", "sparkwing"}
@@ -145,4 +147,41 @@ func gitOutput(t *testing.T, dir string, args ...string) string {
 		t.Fatalf("git %v: %v", args, err)
 	}
 	return string(out)
+}
+
+// TestTouchedLintJudgesOnlyThePackagesTheChangeHolds plants a finding in one
+// changed package and requires the run to name only that package's module.
+func TestTouchedLintJudgesOnlyThePackagesTheChangeHolds(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: real golangci-lint runs; the fast class runs under -short")
+	}
+	root := lintFixtureRepo(t)
+	writeGoFile(t, filepath.Join(root, "internal", "negative_control.go"), ineffassignViolation("internal"))
+	gitAddAll(t, root)
+	host := newTestHost(t, sparkwingtest.Options{})
+	err := runGolangciLintTouched(host.Context(t.Context()))
+	if err == nil || !strings.Contains(err.Error(), "ineffectual assignment") {
+		t.Fatalf("touched lint missed the finding in the changed package: %v", err)
+	}
+	var log strings.Builder
+	for _, record := range host.Records() {
+		log.WriteString(record.Msg + "\n")
+	}
+	if !strings.Contains(log.String(), ".sparkwing holds no changed Go package") {
+		t.Fatalf("touched lint judged a module the change does not reach:\n%s", log.String())
+	}
+
+	writeGoFile(t, filepath.Join(root, ".golangci.yml"), lintFixtureConfig+"# changed\n")
+	gitAddAll(t, root)
+	host = newTestHost(t, sparkwingtest.Options{})
+	if err := runGolangciLintTouched(host.Context(t.Context())); err == nil {
+		t.Fatal("a whole-module lint passed the planted finding")
+	}
+	log.Reset()
+	for _, record := range host.Records() {
+		log.WriteString(record.Msg + "\n")
+	}
+	if !strings.Contains(log.String(), "every package is linted") || strings.Contains(log.String(), "holds no changed Go package") {
+		t.Fatalf("a lint configuration change did not lint every package:\n%s", log.String())
+	}
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"path"
 	"strings"
 	"time"
 
@@ -62,14 +63,43 @@ var prePushLinters = []string{
 // vet-touched measured over 77 s.
 func fastLintCommand(cores int, pkgs []string) string {
 	return fmt.Sprintf("GOMAXPROCS=%d GOLANGCI_LINT_CACHE=%s golangci-lint run --allow-parallel-runners -j %d --timeout 5m --enable-only %s %s",
-		cores, shellQuote(pipelineCacheDir("golangci-lint")), cores, strings.Join(prePushLinters, ","), strings.Join(pkgs, " "))
+		cores, shellQuote(lintCacheDir()), cores, strings.Join(prePushLinters, ","), strings.Join(pkgs, " "))
 }
 
 func runGolangciLintWithin(ctx context.Context, deadline time.Duration) error {
-	return lintModules(ctx, deadline, lintCommand, false)
+	return lintModules(ctx, deadline, lintCommand, false, nil)
 }
 
-func lintModules(ctx context.Context, deadline time.Duration, command func(base string) string, holdsLock bool) error {
+// perf: --new-from-rev drops findings outside the change, so linting only the
+// packages holding changed Go files reaches the same verdict (cold: 561 s for
+// the root module, 10 to 110 s for one package). Broken importers fail the
+// build step; a module or lint configuration change lints everything.
+func runGolangciLintTouched(ctx context.Context) error {
+	files, scope, err := affectedChangeScope(ctx)
+	if err != nil {
+		return err
+	}
+	for _, f := range files {
+		switch path.Base(f) {
+		case "go.mod", "go.sum", ".golangci.yml":
+			sparkwing.Info(ctx, "golangci-lint: %s changed, so every package is linted", f)
+			return runGolangciLintOver(ctx, nil)
+		}
+	}
+	modules, err := committedModuleDirs(ctx)
+	if err != nil {
+		return err
+	}
+	targets := touchedPackageTargets(existingGoFiles(files), modules)
+	for module, pkgs := range targets {
+		targets[module] = defaultBuildPackages(module, pkgs, true)
+	}
+	sparkwing.Info(ctx, "golangci-lint: linting the packages that hold changed Go files (%s)", scope)
+	return runGolangciLintOver(ctx, targets)
+}
+
+// safety: nil targets lint every package; a module absent from targets is skipped.
+func lintModules(ctx context.Context, deadline time.Duration, command func(base string) string, holdsLock bool, targets map[string][]string) error {
 	doing := "waiting for the box-wide lock if held, then linting"
 	if holdsLock {
 		doing = "holding the box-wide lock, linting"
@@ -84,22 +114,26 @@ func lintModules(ctx context.Context, deadline time.Duration, command func(base 
 	}
 	sparkwing.Info(ctx, "golangci-lint: %s", describeLintScope(dirs, baseline))
 
-	// safety: each worktree keeps its own cache. A cache shared between trees
-	// replays findings under the path of the tree that filled it, and those sit
-	// outside this tree's diff, so the baseline filter drops every one.
-	cacheDir := pipelineCacheDir("golangci-lint")
+	cacheDir := lintCacheDir()
 	lintCtx, cancel := context.WithTimeout(ctx, deadline)
 	defer cancel()
 
 	var failures []string
 	for _, dir := range dirs {
-		if empty, emptyErr := moduleHasNoPackages(lintCtx, dir); emptyErr == nil && empty {
+		script := command(base)
+		if targets != nil {
+			if len(targets[dir]) == 0 {
+				sparkwing.Info(lintCtx, "golangci-lint: %s holds no changed Go package", dir)
+				continue
+			}
+			script = strings.TrimSuffix(script, "./...") + strings.Join(targets[dir], " ")
+		} else if empty, emptyErr := moduleHasNoPackages(lintCtx, dir); emptyErr == nil && empty {
 			sparkwing.Info(lintCtx, "golangci-lint: %s holds no packages to lint", dir)
 			continue
 		}
 		stepStart := time.Now()
 		sparkwing.Info(lintCtx, "golangci-lint: %s %s (deadline %s)", dir, doing, deadline)
-		cmd := sparkwing.Bash(lintCtx, command(base)).
+		cmd := sparkwing.Bash(lintCtx, script).
 			Dir(dir).
 			Env("GOLANGCI_LINT_CACHE", cacheDir)
 		if _, runErr := cmd.Run(); runErr != nil {

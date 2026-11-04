@@ -22,12 +22,16 @@ import (
 // the separate wait bound instead. golangci-lint locks this same file with
 // flock(2), so serial runners elsewhere still queue behind the gate.
 func runGolangciLint(ctx context.Context) error {
+	return runGolangciLintOver(ctx, nil)
+}
+
+func runGolangciLintOver(ctx context.Context, targets map[string][]string) error {
 	release, err := acquireLintLock(ctx, lintLockPath(), gateLintLockWait, lintLockHolders)
 	if err != nil {
 		return err
 	}
 	defer release()
-	return lintModules(ctx, gateLintDeadline, lockedLintCommand, true)
+	return lintModules(ctx, gateLintDeadline, lockedLintCommand, true, targets)
 }
 
 func lintLockPath() string { return filepath.Join(os.TempDir(), "golangci-lint.lock") }

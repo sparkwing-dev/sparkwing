@@ -28,6 +28,56 @@ var wholeModuleTriggers = map[string]string{
 	"internal/store/schema.sql": "the store schema changed, and a redeploy cannot undo a schema change",
 }
 
+// perf: tests read these files through paths the import graph cannot see, so a
+// change under a prefix runs the packages beside it. CHANGELOG.md is left out:
+// nearly every change edits it, the docs-mirror and changelog steps judge it
+// on every run, and its other readers run under --full.
+var nonPackageReaders = []struct {
+	prefix string
+	dirs   []string
+}{
+	{".github/", []string{".sparkwing/jobs"}},
+	{".github/workflows/release.yaml", []string{"cmd/sparkwing"}},
+	{"bin/", []string{".sparkwing/jobs"}},
+	{"docs/", []string{"internal/doccheck", "cmd/sparkwing"}},
+	{"docs/migrations/", []string{"internal/store"}},
+	{"docs/billing.md", []string{"internal/store"}},
+	{"docs/backup-restore.md", []string{"internal/store"}},
+	{"docs/github-actions-runners.md", []string{"internal/controller"}},
+	{"docs/observability.md", []string{"internal/controller"}},
+	{"docs/api-reference.md", []string{"internal/apiref"}},
+	{"api/", []string{"internal/apispec"}},
+	{"install/", []string{"cmd/sparkwing", "internal/releaseauth"}},
+	{"examples/", []string{"internal/doccheck"}},
+	{"design/rewrite/contracts/", []string{"tests/acceptance"}},
+	{"AGENTS.md", []string{"cmd/sparkwing"}},
+	{"DELIVERY.md", []string{".sparkwing/jobs", "internal/doccheck"}},
+	{"README.md", []string{"internal/doccheck"}},
+	{"VERSIONING.md", []string{"internal/doccheck"}},
+}
+
+func readerPackages(module string, modules []string, file string, byDir map[string]string) []string {
+	var out []string
+	for _, r := range nonPackageReaders {
+		if file != r.prefix && !(strings.HasSuffix(r.prefix, "/") && strings.HasPrefix(file, r.prefix)) {
+			continue
+		}
+		for _, dir := range r.dirs {
+			if owningModule(dir, modules) != module {
+				continue
+			}
+			rel := dir
+			if module != "." {
+				rel = strings.TrimPrefix(dir, module+"/")
+			}
+			if pkg, ok := byDir[rel]; ok {
+				out = append(out, pkg)
+			}
+		}
+	}
+	return out
+}
+
 type modulePackage struct {
 	importPath string
 	dir        string
@@ -71,7 +121,7 @@ func runAffectedTest(ctx context.Context) error {
 			plans[i].critical = nil
 		}
 	}
-	return withProductTestHome(func(home string) error {
+	return withStableProductTestHome("gate-test", func(home string) error {
 		var failures []string
 		for _, p := range plans {
 			for _, command := range p.commands(currentHost()) {
@@ -132,6 +182,9 @@ func planAffectedTests(module string, modules, files []string, packages []module
 	}
 	changed := map[string]bool{}
 	for _, f := range files {
+		for _, pkg := range readerPackages(module, modules, f, byDir) {
+			changed[pkg] = true
+		}
 		rel, ok := moduleRelative(module, modules, f)
 		if !ok {
 			continue

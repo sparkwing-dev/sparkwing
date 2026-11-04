@@ -46,8 +46,10 @@ review. `sparkwing run gate -- --full` keeps the broad verification. Pass
 The `land` job's `verify` step requires the review record's tree to be HEAD's
 tree with result `pass`, HEAD unchanged since the preconditions and
 `origin/main` still its ancestor. Its `push` step runs
-`git push origin <HEAD>:refs/heads/main` without force, so the pre-push hook
-still runs, and carries the
+`git push --no-verify origin <HEAD>:refs/heads/main` without force when the
+pushed commit's tree is the tree the gate and review judged (the gate runs
+every check the pre-push hook makes, the qatrust vet included), and pushes
+through the hook otherwise. It carries the
 `destructive` and `prod` risks, as release's `push-tag` does. A rejected push
 means main moved: rebase onto `origin/main` and rerun. The job's output is the
 landing record (branch, commit, tree, base, gate run, review record path and
@@ -109,6 +111,12 @@ then uses `--allow-serial-runners` to wait and lint in sequence. The release
 job and lint deadline allow 40 minutes total: the ten-minute check allowance
 plus 30 minutes for contention. The tier measures that combined wall time,
 including waiting. Other lint callers keep their five-minute deadline.
+
+golangci-lint keeps one cache per worktree under that worktree's git
+directory (`<git-dir>/sparkwing-cache/golangci-lint`), outside the tree the
+pipeline binary's source key walks and removed with the worktree. A cache
+shared between trees replays findings under the other tree's paths, so it is
+never shared.
 
 The gate's `lint` step allows ten minutes for linting itself (decision 96; both modules measure four to five minutes under load), and waiting for
 the box-wide golangci-lint lock does not count against it (lead decision,
@@ -495,7 +503,14 @@ file. Other syntax and workflow checks remain active.
   Go or PostgreSQL suite. `sparkwing run gate` runs both jobs locally. Without
   `--full` its test step runs the changed packages (importers still build and
   vet; their tests run after deploy) and the tests marked `//sparkwing:critical` on the line above them; a change to a
-  `go.mod`, `go.sum` or `internal/store/schema.sql` runs its whole module. With
+  `go.mod`, `go.sum` or `internal/store/schema.sql` runs its whole module. A
+  file outside every package runs the packages whose tests read it, from the
+  `nonPackageReaders` table in `.sparkwing/jobs/affected_tests.go` (`.github/`
+  and `bin/` run `.sparkwing/jobs`, `docs/` runs `internal/doccheck` and
+  `cmd/sparkwing`, and so on); `CHANGELOG.md` is left to the docs-mirror and
+  changelog steps. Its lint step lints only the packages holding changed Go
+  files (every package when `go.mod`, `go.sum` or `.golangci.yml` changed),
+  since `--new-from-rev` drops findings outside the change anyway. With
   `--full`, race tests cover every package but `internal/store` and the
   PostgreSQL suite always runs, so a full pass does not depend on the
   producer's `origin/main`. The broad job's 70-minute deadline already allows
@@ -706,6 +721,21 @@ file. Other syntax and workflow checks remain active.
   do not establish a ceiling for every cold input. A change to a Go file also
   invalidates the cached `.sparkwing/` pipeline binary, so the first hook run
   after one pays about 2.5 s to recompile it outside the timed job span.
+- **Gate and land speed fixes, measured 2026-11-04** on this 16-core host at
+  load 13 to 35 (raw data in the sweep's `speed-data/ci/fixes/`).
+  Hosted CI: a per-commit Go cache key saved from main pushes took the CLI
+  build from 112 s cold (99 s median on the stale cache) to 6 s plus a 15 s
+  restore on gate-core, 74 s to 15 s plus 26 s on race-touched, and vet from
+  297 s cold (161 s median) to 6 s; each save is about 930 MiB. Locally, with
+  the lint cache in the tree `sparkwing pipeline list` took 61 to 75 s and
+  with it in the git directory 2.5 s. A cold whole-module lint of the root
+  measured 551 s; a change outside the root module now skips it, while a deep
+  package (`internal/bincache`) still took 465 s cold because golangci-lint
+  loads every dependency. A stable test home made `internal/paths` and
+  `internal/bincache` replay from the cache on a rerun; `cmd/sparkwing`
+  (400 to 630 s) still reruns. Land's push skipped a pre-push run that had cost
+  37 to 632 s. The old `gofmt -l .` failed 2 of 150 runs beside a looping
+  `npm ci`; the pruned walk failed none.
 - **Which tier decides a merge:** the hooks judge what they can in seconds and
   nothing more, so main may go red. Follow the [release failure policy](#release-failure-policy).
   Main is where the broad checks run:
@@ -716,8 +746,17 @@ file. Other syntax and workflow checks remain active.
 - **What a test step inherits:** every step that starts a product suite
   (`test`, `race-touched`, `store-postgres`, and the release contract
   preflight) clears the bindings `internal/runners/local/env.go` injects into a
-  node child and pins `SPARKWING_HOME` to a fresh directory of its own, which
-  holds no `dev.env` for a CLI verb to find a dashboard through. A gate runs inside a sparkwing node, which hands its children the
+  node child and pins `SPARKWING_HOME` to an empty directory of its own, which
+  holds no `dev.env` for a CLI verb to find a dashboard through. The gate's
+  `test` step, the short suite and the `test` pipeline key that directory by
+  checkout and step under `$TMPDIR` and empty it before and after each run, so
+  `go test` can replay a passing package that reads the home; a fresh path per
+  run defeated its cache. Every product test step also pins
+  `SPARKWING_TEST_REPO_STATE` (HEAD's tree plus a hash of uncommitted changes
+  and of untracked files' names and contents), which the pipeline module's
+  `TestCheckoutStateKeysTheTestCache` reads: go test never hashes files above
+  the module and records a variable only while a test runs, so without it a
+  change to `.github/` or `bin/` would replay that module's cached pass. A gate runs inside a sparkwing node, which hands its children the
   machine's admission socket, the dispatcher's service URLs and the run's own
   credentials, so a suite that read one would reach a live service and fail
   only under the gate. The node consumes its WorkStep window before the body

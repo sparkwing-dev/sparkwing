@@ -40,6 +40,8 @@ unlock.
   `sparkwing runners add` placed the log under the selected state home, but the systemd unit and LaunchAgent did not carry it, so the started runner used `~/.sparkwing`. Both now set `SPARKWING_HOME` to the home the installer resolved; reinstall an existing service to pick it up.
 - **runner:** `sparkwing-runner version -o json` writes one JSON record on one line
   It printed an indented document, which a reader taking one JSON object per line could not parse.
+- **delivery:** Gate and land runs start faster and redo less work
+  The golangci-lint cache moved from `.sparkwing/cache/` to the worktree's git directory, so starting a run in a checkout that had linted no longer hashes its 80,000 files (`sparkwing pipeline list` 67 s to 2.5 s). Without `--full` the gate lints only the packages holding changed Go files, its test steps keep one `SPARKWING_HOME` per checkout so `go test` replays unchanged passes, a change outside every package (`.github/`, `docs/`, `bin/` and similar) runs the packages whose tests read it, and land pushes the tree it gated without re-running the pre-push hook. Hosted CI refreshes its Go build cache from every push to main.
 - **run:** A first run reuses the installed CLI as the pipeline engine when it is the pinned release
   The engine was downloaded again (73 MB) and verified twice; now the installed bytes are checked against the signed
   release files and verified once.
