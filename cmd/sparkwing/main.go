@@ -361,6 +361,8 @@ func runSparkwing(args []string) (result error) {
 		return runReposInfo(inv)
 	case "sparkwing repos update":
 		return runReposUpdate(inv)
+	case "sparkwing login":
+		return runLogin(inv)
 	case "sparkwing runners add":
 		return runRunnersAdd(inv)
 	case "sparkwing runners remove":
