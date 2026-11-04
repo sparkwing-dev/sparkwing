@@ -184,8 +184,6 @@ if [ "$GOOS" = windows ]; then
   PREFIX="$(cygpath -u -- "$PREFIX")"
 fi
 
-fetch() { curl -fsSL "$1" -o "$2" || err "could not download $1"; }
-
 BINARIES="sparkwing"
 if [ "$RUNNER" = 1 ]; then
   BINARIES="sparkwing sparkwing-runner"
@@ -193,8 +191,23 @@ fi
 
 log "installing $BINARIES $VERSION ($GOOS/$GOARCH)"
 base="${RELEASE_BASE_URL%/}/${VERSION}"
-fetch "$base/SHA256SUMS" "$WORK/SHA256SUMS"
-fetch "$base/SHA256SUMS.sig" "$WORK/SHA256SUMS.sig"
+# One curl process reuses its connections to the release host and the host it
+# redirects to, where a call per file sets both up again. Nothing is trusted
+# until the checks below pass.
+FILES="SHA256SUMS SHA256SUMS.sig"
+for binary in $BINARIES; do
+  FILES="$FILES $binary-${GOOS}-${GOARCH}${EXT} $binary-${GOOS}-${GOARCH}${EXT}.sig"
+done
+set --
+for name in $FILES; do
+  set -- "$@" "$base/$name" -o "$WORK/$name"
+done
+if ! curl -fsSL --fail-early "$@"; then
+  for name in $FILES; do
+    [ -s "$WORK/$name" ] || err "could not download $base/$name"
+  done
+  err "could not download the $VERSION release files from $base"
+fi
 
 # The key that signed the manifest must also have signed the asset, so a
 # rotation cannot leave one file checked against a retired key.
@@ -220,13 +233,11 @@ fresh copy carries the current key:
   curl -fsSL https://sparkwing.dev/install.sh | sh -s -- --version $VERSION"
 log "verified the release signature over SHA256SUMS"
 
-# verify_asset <binary>: downloads and checks one executable of the release.
+# verify_asset <binary>: checks one downloaded executable of the release.
 # Every asset is checked before any is installed, so a refusal leaves the
 # install directory as it was.
 verify_asset() {
   ASSET="$1-${GOOS}-${GOARCH}${EXT}"
-  fetch "$base/$ASSET" "$WORK/$ASSET"
-  fetch "$base/$ASSET.sig" "$WORK/$ASSET.sig"
   matches="$(awk -v want="$ASSET" '$2 == want || $2 == "*" want { print $1 }' "$WORK/SHA256SUMS")"
   [ -n "$matches" ] ||
     err "SHA256SUMS for $VERSION has no line for $ASSET, so the download cannot be checked. Refusing to install."

@@ -102,6 +102,9 @@ func TestMaterializePipelineUsesTheCompilationWorkspace(t *testing.T) {
 			if strings.Contains(diagnostics.String(), "Cache hit:") {
 				t.Fatalf("newly compiled pipeline reported a hit: %q", diagnostics.String())
 			}
+			if !strings.Contains(diagnostics.String(), "Cache miss: pipeline binary compiled in ") {
+				t.Fatalf("a compile did not report the miss and its duration: %q", diagnostics.String())
+			}
 			t.Cleanup(func() {
 				if err := lease.Release(); err != nil {
 					t.Error(err)
