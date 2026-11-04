@@ -111,7 +111,7 @@ func capacityPod(cfg CloudJobConfig, d capacityDemand) (*corev1.Pod, error) {
 	}, nil
 }
 
-// The deadline travels as $1, never spliced into the script.
+// safety: the deadline travels as $1, never spliced into the script.
 var capacityCommand = []string{"/bin/sh", "-c", `trap 'exit 0' TERM; /usr/bin/sleep "$1" & wait`, "capacity"}
 
 func recordedDemand(pod *corev1.Pod) (capacityDemand, error) {

@@ -19,6 +19,7 @@ unlock.
 ---
 
 ## [Unreleased]
+
 ### Changed
 
 - **launcher:** Cloud Job Pods retry DNS after 1s instead of 5s
@@ -44,9 +45,6 @@ unlock.
   Activating a virtualenv or Node version manager keeps the compiled pipeline; upgrading Go behind the same `PATH`
   rebuilds it.
 - **run:** Each engine notice, such as the missing version policy warning, prints once per command instead of three times
-
-### Fixed
-
 - **runners:** A job waiting in `RunAndAwait` no longer holds its runner's slot
   A self-hosted runner defaults to `max_concurrent: 1`, and a child run goes back to the same runners, so the first `RunAndAwait` on a one-runner team hung until its timeout. A job blocked on its children now leaves its slot free, and so does the owner of a named-runner run while one of its jobs waits, until the last wait returns. A resumed job can briefly put the runner over `max_concurrent` until other jobs finish.
 
@@ -56,7 +54,6 @@ unlock.
   `sparkwing runs logs -o plain` printed the word `exec_line` wherever a command wrote an empty line.
 - **cli:** List this machine in `sparkwing runners list` against the local controller
   The local runner appeared only while it held a job, without its `runner.labels`, and with a `last_seen` that stopped at the last claim before a daemon restart. It is now always listed, named after the host, with the labels the daemon read at start and a `last_seen` of the read time.
-
 
 ## [v0.68.7] - 2026-11-04
 ### Added

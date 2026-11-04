@@ -9,14 +9,12 @@ import (
 	"path/filepath"
 )
 
-// goSeedRoot is where build/Dockerfile.runner primes, per SDK version, a module cache and a build cache.
+// safety: build/Dockerfile.runner primes a module cache and a build cache here, per SDK version.
 const goSeedRoot = "/usr/local/share/sparkwing/go-seed"
 
-// seedGoCaches copies the image's primed caches for version into empty cache paths.
-//
-// perf: a Cloud plan pins the runner's own SDK version, so the seed turns its
-// SDK download and compile into a copy. The root filesystem is read-only, so
-// Go cannot use the seed in place; an existing cache is left alone.
+// perf: a Cloud plan pins the runner's own SDK version, so copying the image's primed
+// caches into empty cache paths turns its SDK download and compile into a copy. The root
+// filesystem is read-only, so Go cannot use the seed in place; an existing cache is left alone.
 func seedGoCaches(root, version, modules, gocache string) error {
 	var errs []error
 	for _, cache := range []struct{ seed, target string }{{"modules", modules}, {"gocache", gocache}} {
@@ -46,7 +44,7 @@ func exists(path string) bool {
 	return !errors.Is(err, fs.ErrNotExist)
 }
 
-// copyTree copies regular files and directories; directories stay writable so go can add to the cache.
+// safety: copied directories stay writable so go can add to the cache.
 func copyTree(source, target string) error {
 	return filepath.WalkDir(source, func(path string, entry fs.DirEntry, err error) error {
 		if err != nil {

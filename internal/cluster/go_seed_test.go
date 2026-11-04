@@ -17,7 +17,7 @@ func TestGoSeedFillsOnlyEmptyCachesForTheRunnersVersion(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	// go leaves extracted modules read-only; the copy must still let go add modules beside them.
+	// safety: go leaves extracted modules read-only; the copy must still let go add modules beside them.
 	if err := os.Chmod(filepath.Join(root, "v1.2.3/modules/example.com/m@v1.0.0"), 0o555); err != nil {
 		t.Fatal(err)
 	}

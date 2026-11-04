@@ -20,7 +20,7 @@ func TestCapacityCommandExitsPromptlyOnSIGTERM(t *testing.T) {
 		}
 	}
 	cmd := exec.Command(capacityCommand[0], append(capacityCommand[1:], "86400")...) // #nosec G204 -- the launcher's fixed capacity script
-	// PID 1 of a new PID namespace, as in the container: the kernel drops signals
+	// safety: PID 1 of a new PID namespace, as in the container: the kernel drops signals
 	// PID 1 has no handler for, and its exit takes the namespace's sleep with it.
 	cmd.SysProcAttr = &syscall.SysProcAttr{
 		Cloneflags:  syscall.CLONE_NEWUSER | syscall.CLONE_NEWPID,
@@ -32,7 +32,7 @@ func TestCapacityCommandExitsPromptlyOnSIGTERM(t *testing.T) {
 		t.Skipf("unprivileged PID namespaces are unavailable: %v", err)
 	}
 	t.Cleanup(func() { _ = cmd.Process.Kill() })
-	// The script arms its trap before it forks the sleep, so once PID 1 has a
+	// safety: the script arms its trap before it forks the sleep, so once PID 1 has a
 	// child its signal dispositions are final; no delay is guessed.
 	children := fmt.Sprintf("/proc/%d/task/%d/children", cmd.Process.Pid, cmd.Process.Pid)
 	for {
