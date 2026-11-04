@@ -7,8 +7,6 @@ import (
 	"runtime"
 	"sort"
 	"time"
-
-	"github.com/sparkwing-dev/sparkwing/internal/admission"
 )
 
 const loadEMAAlpha = 0.4
@@ -78,14 +76,14 @@ func (d *Daemon) sampleHostAndOwned(roots []OwnedRoot) (HostStat, map[int]float6
 func (d *Daemon) applyHeadroomSample(stat HostStat, ownedByRoot map[int]float64, ownedMeasured bool) {
 	d.mu.Lock()
 	now := d.now()
-	ownedBusy, creditedBusy, withoutProcess, awaitingMeasure, processGone := d.ownedBusyLocked(ownedByRoot)
+	ownedBusy, withoutProcess, awaitingMeasure, processGone := d.ownedBusyLocked(ownedByRoot)
 	impossible := false
 	if stat.CPUMeasured && ownedBusy > stat.BusyCores {
 		// safety: this daemon's runs cannot have used more CPU than the host ran. A
 		// larger figure is impossible, and trimming it to fit would leave external at
 		// zero -- which is the over-admission it was meant to stop -- so the reading
 		// is treated as one that measured nothing and charges the host in full.
-		ownedBusy, creditedBusy, ownedMeasured, impossible = 0, 0, false, true
+		ownedBusy, ownedMeasured, impossible = 0, false, true
 	}
 	if stat.CPUMeasured {
 		d.attribution.samples++
@@ -120,7 +118,7 @@ func (d *Daemon) applyHeadroomSample(stat HostStat, ownedByRoot map[int]float64,
 		d.measuredAt = now
 	}
 
-	rawExternal := coresExternal(stat, stat.BusyCores, creditedBusy, ownedMeasured)
+	rawExternal := coresExternal(stat, stat.BusyCores, ownedBusy, ownedMeasured)
 	if !d.loadInit {
 		d.smoothedLoad = stat.LoadAverage
 		d.loadInit = true
@@ -169,7 +167,7 @@ func (d *Daemon) applyHeadroomSample(stat HostStat, ownedByRoot map[int]float64,
 		d.cpuMeasured != stat.CPUMeasured ||
 		d.memMeasured != stat.MemoryMeasured ||
 		now.Sub(d.headroomAt) >= d.cfg.headroomMaxAge()
-	d.recordJournal("headroom_sample", nil, map[string]any{"total_cores": stat.TotalCores, "total_memory": stat.TotalMemoryBytes, "reserved_cores": reservedCores, "reserved_memory": reservedMem, "external_cores": externalCores, "owned_cores": ownedBusy, "credited_cores": creditedBusy, "external_memory": externalMem, "budget": journalBudget(d.cfg.Budget), "target_cores": targetCores, "target_memory": targetMem, "changed": changed})
+	d.recordJournal("headroom_sample", nil, map[string]any{"total_cores": stat.TotalCores, "total_memory": stat.TotalMemoryBytes, "reserved_cores": reservedCores, "reserved_memory": reservedMem, "external_cores": externalCores, "external_memory": externalMem, "budget": journalBudget(d.cfg.Budget), "target_cores": targetCores, "target_memory": targetMem, "changed": changed})
 	if !changed {
 		d.mu.Unlock()
 		return
@@ -254,22 +252,8 @@ type externalAttribution struct {
 	attributed          int64
 }
 
-// safety: a holder's process tree is credited only up to the cores its leases were charged. The ledger already
-// holds that charge against capacity, so CPU past it is load admission has not accounted for and stays external.
-func (d *Daemon) ownedBusyLocked(ownedByRoot map[int]float64) (owned, credited float64, withoutProcess, awaitingMeasure, processGone bool) {
+func (d *Daemon) ownedBusyLocked(ownedByRoot map[int]float64) (owned float64, withoutProcess, awaitingMeasure, processGone bool) {
 	counted := map[int]struct{}{}
-	charged := map[int]float64{}
-	chargedLeases := map[admission.LeaseID]struct{}{}
-	for _, c := range d.byRun {
-		if c.role != roleHolder || c.pid <= 0 {
-			continue
-		}
-		if _, done := chargedLeases[c.leaseID]; done && c.leaseID != "" {
-			continue
-		}
-		chargedLeases[c.leaseID] = struct{}{}
-		charged[c.pid] += c.resources.Cores
-	}
 	for _, c := range d.byRun {
 		if c.role != roleHolder {
 			continue
@@ -297,14 +281,13 @@ func (d *Daemon) ownedBusyLocked(ownedByRoot map[int]float64) (owned, credited f
 		}
 		d.measuredPIDs[c.pid] = struct{}{}
 		owned += cores
-		credited += min(cores, charged[c.pid])
 	}
 	for pid := range d.measuredPIDs {
 		if _, held := counted[pid]; !held {
 			delete(d.measuredPIDs, pid)
 		}
 	}
-	return owned, credited, withoutProcess, awaitingMeasure, processGone
+	return owned, withoutProcess, awaitingMeasure, processGone
 }
 
 func (d *Daemon) holderSample() []OwnedRoot {

@@ -46,7 +46,7 @@ func newAttributionDaemon(t *testing.T, byRoot map[int]float64) *Daemon {
 		reported[pid] = cores
 	}
 	d.ownedSampler = &perRootOwnedSampler{byRoot: reported, measured: true}
-	d.byRun["holder"] = &conn{runID: "holder", role: roleHolder, resources: wholeBox, pid: 4242}
+	d.byRun["holder"] = &conn{runID: "holder", role: roleHolder, pid: 4242}
 	d.byRun["watcher"] = &conn{runID: "watcher", role: roleWaiter, pid: 7777}
 	return d
 }
@@ -78,7 +78,7 @@ func TestRefreshHeadroom_ChargesOnlyUnownedCPUAsExternal(t *testing.T) {
 func TestRefreshHeadroom_HolderThatStartsIsNotYetCredited(t *testing.T) {
 	d := newAttributionDaemon(t, map[int]float64{4242: 6.5})
 	d.refreshHeadroom()
-	d.byRun["second"] = &conn{runID: "second", role: roleHolder, resources: wholeBox, pid: 5150}
+	d.byRun["second"] = &conn{runID: "second", role: roleHolder, pid: 5150}
 
 	d.refreshHeadroom()
 
@@ -193,7 +193,7 @@ func TestRefreshHeadroom_CountsAHolderThatReportsNoProcess(t *testing.T) {
 func TestRefreshHeadroom_CountsAHolderWithNoReadingYet(t *testing.T) {
 	d := newAttributionDaemon(t, map[int]float64{4242: 6.5})
 	d.refreshHeadroom()
-	d.byRun["fresh"] = &conn{runID: "fresh", role: roleHolder, resources: wholeBox, pid: 5150}
+	d.byRun["fresh"] = &conn{runID: "fresh", role: roleHolder, pid: 5150}
 
 	d.refreshHeadroom()
 
@@ -206,7 +206,7 @@ func TestRefreshHeadroom_CountsAHolderWithNoReadingYet(t *testing.T) {
 
 func TestRefreshHeadroom_CountsOneHolderPerProcessID(t *testing.T) {
 	d := newAttributionDaemon(t, map[int]float64{4242: 6.5})
-	d.byRun["second"] = &conn{runID: "second", role: roleHolder, resources: wholeBox, pid: 4242}
+	d.byRun["second"] = &conn{runID: "second", role: roleHolder, pid: 4242}
 
 	d.refreshHeadroom()
 
@@ -240,7 +240,7 @@ func TestRefreshHeadroom_ForgetsARunItNoLongerHolds(t *testing.T) {
 	delete(d.byRun, "holder")
 	d.refreshHeadroom()
 
-	d.byRun["holder"] = &conn{runID: "holder", role: roleHolder, resources: wholeBox, pid: 4242}
+	d.byRun["holder"] = &conn{runID: "holder", role: roleHolder, pid: 4242}
 	d.ownedSampler = &perRootOwnedSampler{byRoot: map[int]float64{}, measured: true}
 	d.refreshHeadroom()
 
@@ -311,7 +311,7 @@ func TestRefreshHeadroom_AShortRunIsCreditedFromItsFirstReading(t *testing.T) {
 		d.sampler = &countingHostSampler{stat: attributionHost(total, longCores+shortCores+foreign)}
 		sampler := &baselineOwnedSampler{cores: map[int]float64{1000: longCores}, seen: map[int]bool{}}
 		d.ownedSampler = sampler
-		d.byRun["long"] = &conn{runID: "long", role: roleHolder, resources: wholeBox, pid: 1000}
+		d.byRun["long"] = &conn{runID: "long", role: roleHolder, pid: 1000}
 
 		pid := 2000
 		for reading := range 60 {
@@ -320,7 +320,7 @@ func TestRefreshHeadroom_AShortRunIsCreditedFromItsFirstReading(t *testing.T) {
 				pid++
 				sampler.cores[pid] = shortCores
 			}
-			d.byRun["short"] = &conn{runID: "short", role: roleHolder, resources: wholeBox, pid: pid, startAt: d.now()}
+			d.byRun["short"] = &conn{runID: "short", role: roleHolder, pid: pid, startAt: d.now()}
 			d.refreshHeadroom()
 		}
 
@@ -377,8 +377,8 @@ func TestRefreshHeadroom_SharedTreeTakesTheEarliestHold(t *testing.T) {
 	sampler := &perRootOwnedSampler{byRoot: map[int]float64{}, measured: true}
 	d.ownedSampler = sampler
 	now := d.now()
-	d.byRun["early"] = &conn{runID: "early", role: roleHolder, resources: wholeBox, pid: 4242, startAt: now.Add(-time.Hour)}
-	d.byRun["late"] = &conn{runID: "late", role: roleHolder, resources: wholeBox, pid: 4242, startAt: now}
+	d.byRun["early"] = &conn{runID: "early", role: roleHolder, pid: 4242, startAt: now.Add(-time.Hour)}
+	d.byRun["late"] = &conn{runID: "late", role: roleHolder, pid: 4242, startAt: now}
 
 	d.refreshHeadroom()
 
@@ -411,11 +411,11 @@ func TestRefreshHeadroom_ChurnDoesNotCostTheRunsAlreadyMeasured(t *testing.T) {
 	d := newHeadroomDaemon(t, 10, 0.2)
 	d.sampler = &countingHostSampler{stat: attributionHost(10, 8.5)}
 	d.ownedSampler = &baselineOwnedSampler{cores: map[int]float64{4242: 6.5}, seen: map[int]bool{}}
-	d.byRun["long"] = &conn{runID: "long", role: roleHolder, resources: wholeBox, pid: 4242}
+	d.byRun["long"] = &conn{runID: "long", role: roleHolder, pid: 4242}
 	d.refreshHeadroom()
 
 	for i := range 40 {
-		d.byRun["short"] = &conn{runID: "short", role: roleHolder, resources: wholeBox, pid: 5150 + i}
+		d.byRun["short"] = &conn{runID: "short", role: roleHolder, pid: 5150 + i}
 		d.refreshHeadroom()
 		delete(d.byRun, "short")
 		d.refreshHeadroom()
@@ -427,37 +427,5 @@ func TestRefreshHeadroom_ChurnDoesNotCostTheRunsAlreadyMeasured(t *testing.T) {
 	}
 	if got := queueAttribution(t, d); got.RunsAwaitingMeasure == 0 {
 		t.Error("runs-awaiting-measure = 0, want the arrivals counted: a run charged to the machine because it has no figure yet must be visible, not silent")
-	}
-}
-
-// safety: fixture holders are charged more than the machine, so the cap on their credit never binds
-// in tests about how CPU is measured.
-var wholeBox = wingwire.HostResources{Cores: 64}
-
-func TestRefreshHeadroom_CPUPastAHoldersChargeStaysExternal(t *testing.T) {
-	d := newAttributionDaemon(t, map[int]float64{4242: 6.5})
-	d.byRun["holder"].resources = wingwire.HostResources{Cores: 1}
-
-	d.refreshHeadroom()
-
-	cores := queueRow(t, queueState(t, d), "cores")
-	if math.Abs(cores.External-7.5) > coresEpsilon {
-		t.Errorf("external cores = %.2f, want 7.50: the holder is charged one core, so the 5.5 it ran past "+
-			"that charge is load the ledger does not hold and must still shrink headroom", cores.External)
-	}
-}
-
-func TestRefreshHeadroom_CreditsSharedTreeUpToEveryLeaseOnIt(t *testing.T) {
-	d := newAttributionDaemon(t, map[int]float64{4242: 6.5})
-	d.byRun["holder"].resources = wingwire.HostResources{Cores: 4}
-	d.byRun["holder"].leaseID = "lease-1"
-	d.byRun["sibling"] = &conn{runID: "sibling", role: roleHolder, pid: 4242, leaseID: "lease-2", resources: wingwire.HostResources{Cores: 2}}
-
-	d.refreshHeadroom()
-
-	cores := queueRow(t, queueState(t, d), "cores")
-	if math.Abs(cores.External-2.5) > coresEpsilon {
-		t.Errorf("external cores = %.2f, want 2.50: two jobs of one run share the host process tree and "+
-			"together are charged 6 of the 6.5 it ran", cores.External)
 	}
 }
