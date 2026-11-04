@@ -77,7 +77,7 @@ Print a one-time sign-in link for the local dashboard. When no dashboard serves,
 
 Start the local dashboard and controller on demand
 
-Starts the local controller on demand; --stay pins it until stopped. Runs, queued work, held leases and dashboard connections prevent idle exit.
+Starts the local controller on demand; --stay pins it until stopped. Runs, queued work, held leases, dashboard connections and a signed-in dashboard request in the last 30 minutes prevent idle exit.
 
 ### Flags
 
@@ -108,6 +108,8 @@ Report whether the controller runs and where the dashboard serves
 ## `sparkwing dashboard stop`
 
 Stop a running dashboard server
+
+Stops the local controller and its dashboard. The dashboard no longer returns when a run or schedule next starts the controller; until this stop, a controller that exits idle and restarts on demand serves it again at the same address and read-only policy.
 
 ### Flags
 

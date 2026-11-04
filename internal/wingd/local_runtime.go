@@ -137,7 +137,16 @@ func (r *localRuntime) Run(ctx context.Context, opts LocalStartOptions) (err err
 	d.cfg.Runs = controller
 	d.localControl = func(stay *bool) LocalStatus { return r.control(session, stay) }
 	d.localDashboard = r.EnsureDashboard
-	return r.serve(ctx, session, controller, opts.DashboardAddress, opts.DashboardReadOnly)
+	d.dashboardSeen = session.logins.lastSignedInRequest
+	dashboard, restore := dashboardMemory{Address: opts.DashboardAddress, ReadOnly: opts.DashboardReadOnly}, false
+	if dashboard.Address == "" && !opts.Standalone {
+		remembered, ok, err := r.rememberedDashboard()
+		if err != nil {
+			d.cfg.logf("not restoring the dashboard: %v", err)
+		}
+		dashboard, restore = remembered, ok
+	}
+	return r.serve(ctx, session, controller, dashboard, restore)
 }
 
 func (r *localRuntime) begin(d *Daemon, cancel context.CancelFunc) (*localRuntimeSession, error) {
@@ -160,7 +169,7 @@ func (r *localRuntime) changed() {
 	r.change = make(chan struct{})
 }
 
-func (r *localRuntime) serve(ctx context.Context, session *localRuntimeSession, controller LocalController, dashboard string, readOnly bool) error {
+func (r *localRuntime) serve(ctx context.Context, session *localRuntimeSession, controller LocalController, dashboard dashboardMemory, restore bool) error {
 	d := session.daemon
 	var workers sync.WaitGroup
 	var failuresMu sync.Mutex
@@ -228,6 +237,9 @@ func (r *localRuntime) serve(ctx context.Context, session *localRuntimeSession, 
 			return fmt.Errorf("wingd: dashboard listen: %w", err)
 		}
 		dashboardListener, dashboardAddress, dashboardReadOnly = ln, address, requestedReadOnly
+		if err := r.rememberDashboard(dashboardMemory{Address: address, ReadOnly: requestedReadOnly}); err != nil {
+			d.cfg.logf("the dashboard will not return after an idle exit: %v", err)
+		}
 		dashboardReady = make(chan struct{})
 		logins.serving("http://" + ln.Addr().String())
 		workers.Go(func() {
@@ -238,11 +250,17 @@ func (r *localRuntime) serve(ctx context.Context, session *localRuntimeSession, 
 		})
 		return nil
 	}
-	if dashboard != "" {
-		if err := startDashboard(ctx, dashboard, readOnly); err != nil {
-			return err
-		}
-	} else {
+	var dashboardErr error
+	if dashboard.Address != "" {
+		dashboardErr = startDashboard(ctx, dashboard.Address, dashboard.ReadOnly)
+	}
+	if dashboardErr != nil && !restore {
+		return dashboardErr
+	}
+	if dashboardErr != nil {
+		d.cfg.logf("not restoring the dashboard at %s: %v", dashboard.Address, dashboardErr)
+	}
+	if dashboardListener == nil {
 		dashboardReady = make(chan struct{})
 		close(dashboardReady)
 	}

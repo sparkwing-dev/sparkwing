@@ -65,7 +65,7 @@ func Registry() []Command {
 			{Name: "force"},
 		}},
 		{Path: "sparkwing daemon status", Flags: []Flag{}},
-		{Path: "sparkwing daemon stop", Flags: []Flag{}},
+		{Path: "sparkwing daemon stop", Rules: []string{"Stops the local controller and its dashboard. The dashboard no longer returns when a run or schedule next starts the controller; until this stop, a controller that exits idle and restarts on demand serves it again at the same address and read-only policy."}, Flags: []Flag{}},
 		{Path: "sparkwing dashboard", Flags: []Flag{}},
 		{Path: "sparkwing dashboard install", Platforms: []string{"linux", "darwin"}, Rules: []string{"Install a login service with restart on failure using systemd user or launchd; no socket activation. Refuse Windows with --stay guidance."}, Flags: []Flag{
 			{Name: "force"},
@@ -75,14 +75,14 @@ func Registry() []Command {
 			{Name: "follow", Short: "f"},
 		}},
 		{Path: "sparkwing dashboard open", Rules: []string{"Print a one-time sign-in link for the local dashboard. When no dashboard serves, it first starts one at 127.0.0.1:4343, and the local controller too when none runs, whoever started the controller. The link is minted over the local socket, works once and expires after 60 seconds; visiting it gives that browser tab a session it sends as an Authorization bearer header, never a cookie. Every TCP API request needs that header; the local socket needs none."}, Flags: []Flag{}},
-		{Path: "sparkwing dashboard start", Rules: []string{"Starts the local controller on demand; --stay pins it until stopped. Runs, queued work, held leases and dashboard connections prevent idle exit."}, Flags: []Flag{
+		{Path: "sparkwing dashboard start", Rules: []string{"Starts the local controller on demand; --stay pins it until stopped. Runs, queued work, held leases, dashboard connections and a signed-in dashboard request in the last 30 minutes prevent idle exit."}, Flags: []Flag{
 			{Name: "addr", Argument: "HOST:PORT"},
 			{Name: "allow-remote"},
 			{Name: "read-only"},
 			{Name: "stay"},
 		}},
 		{Path: "sparkwing dashboard status", Flags: []Flag{}},
-		{Path: "sparkwing dashboard stop", Flags: []Flag{}},
+		{Path: "sparkwing dashboard stop", Rules: []string{"Stops the local controller and its dashboard. The dashboard no longer returns when a run or schedule next starts the controller; until this stop, a controller that exits idle and restarts on demand serves it again at the same address and read-only policy."}, Flags: []Flag{}},
 		{Path: "sparkwing dashboard uninstall", Platforms: []string{"linux", "darwin"}, Rules: []string{"Remove the managed login service; Windows uses --stay only."}, Flags: []Flag{}},
 		{Path: "sparkwing debug", Flags: []Flag{}},
 		{Path: "sparkwing debug attach", Flags: []Flag{

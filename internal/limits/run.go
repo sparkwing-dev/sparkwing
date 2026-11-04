@@ -7,6 +7,8 @@ const (
 	RunDeadline time.Duration = 6 * time.Hour
 	// LocalControllerIdleTimeout bounds idle local controller exit delay.
 	LocalControllerIdleTimeout time.Duration = 5 * time.Minute
+	// LocalDashboardSessionHold keeps an idle local controller up this long after a signed-in dashboard request.
+	LocalDashboardSessionHold time.Duration = 30 * time.Minute
 	// ClaimWait bounds default queue wait, separately bounded by a finite owner deadline.
 	ClaimWait time.Duration = 24 * time.Hour
 	// DebugPause bounds default debug pause.

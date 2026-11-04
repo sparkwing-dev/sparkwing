@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"time"
+
+	"github.com/sparkwing-dev/sparkwing/internal/limits"
 )
 
 func (d *Daemon) idleLoop(ctx context.Context) {
@@ -47,6 +49,11 @@ func (d *Daemon) idleElapsedLocked() time.Duration {
 	}
 	if len(d.reattachWait) > 0 {
 		return 0
+	}
+	if d.dashboardSeen != nil {
+		if seen := d.dashboardSeen(); !seen.IsZero() && d.now().Sub(seen) < limits.LocalDashboardSessionHold {
+			return 0
+		}
 	}
 	snap := d.ledger.Snapshot()
 	if len(snap.Leases) > 0 || len(snap.Waiters) > 0 {

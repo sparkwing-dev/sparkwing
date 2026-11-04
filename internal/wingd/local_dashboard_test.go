@@ -168,3 +168,62 @@ func TestLocalDashboardReadinessAndJoinedShutdown(t *testing.T) {
 		}
 	})
 }
+
+func TestLocalDashboardReturnsWithAnOnDemandRestart(t *testing.T) {
+	f := &runtimeControllerFixture{}
+	r := newRuntimeFixture(t, f)
+	var binds []string
+	var refuse atomic.Bool
+	r.listen = func(network, address string) (net.Listener, error) {
+		if network == "tcp" {
+			if refuse.Load() {
+				return nil, errors.New("dashboard address is occupied")
+			}
+			binds = append(binds, address)
+		}
+		return &runtimeListener{closed: make(chan struct{})}, nil
+	}
+	lifecycle := NewLocalLifecycle(r, nil)
+	onDemand := LocalStartOptions{Home: f.home, Version: "v1"}
+	restart := func() LocalStatus {
+		t.Helper()
+		if err := lifecycle.Stop(t.Context()); err != nil {
+			t.Fatal(err)
+		}
+		status, err := lifecycle.EnsureStarted(t.Context(), onDemand)
+		if err != nil || !status.Running {
+			t.Fatalf("on-demand restart: %+v %v", status, err)
+		}
+		return status
+	}
+	t.Cleanup(func() {
+		if err := lifecycle.Stop(context.Background()); err != nil {
+			t.Error(err)
+		}
+	})
+	if status := restart(); status.DashboardURL != "" || len(binds) != 0 {
+		t.Fatalf("a controller that never served a dashboard started one: %+v %v", status, binds)
+	}
+	serving := onDemand
+	serving.DashboardAddress, serving.DashboardReadOnly = "127.0.0.1:4343", true
+	if _, err := lifecycle.StartDashboard(t.Context(), serving); err != nil {
+		t.Fatal(err)
+	}
+	if status := restart(); status.DashboardURL == "" || len(binds) != 2 || binds[1] != serving.DashboardAddress {
+		t.Fatalf("the dashboard did not return at its address: %+v %v", status, binds)
+	}
+	if _, err := lifecycle.StartDashboard(t.Context(), serving); err != nil {
+		t.Fatalf("the restored dashboard lost its read-only policy: %v", err)
+	}
+	refuse.Store(true)
+	if status := restart(); status.DashboardURL != "" {
+		t.Fatalf("an occupied address served a dashboard: %+v", status)
+	}
+	refuse.Store(false)
+	if err := ForgetDashboard(f.home); err != nil {
+		t.Fatal(err)
+	}
+	if status := restart(); status.DashboardURL != "" || len(binds) != 2 {
+		t.Fatalf("a forgotten dashboard returned: %+v %v", status, binds)
+	}
+}

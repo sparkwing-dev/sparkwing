@@ -93,6 +93,8 @@ Report local controller status
 
 Stop the local controller
 
+Stops the local controller and its dashboard. The dashboard no longer returns when a run or schedule next starts the controller; until this stop, a controller that exits idle and restarts on demand serves it again at the same address and read-only policy.
+
 ### Flags
 
 | Flag | Description |

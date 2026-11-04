@@ -101,6 +101,13 @@ func stopLocalController(ctx context.Context, lifecycle wingd.LocalLifecycle) (w
 	return status, nil
 }
 
+func forgetDashboard(home string) error {
+	if home == "" {
+		return nil
+	}
+	return wingd.ForgetDashboard(home)
+}
+
 func renderDashboard(out io.Writer, result dashboardResult, mode string) error {
 	switch mode {
 	case "json":

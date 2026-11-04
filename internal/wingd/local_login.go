@@ -50,6 +50,7 @@ type dashboardLogins struct {
 	now      func() time.Time
 	mu       sync.Mutex
 	origin   string
+	lastSeen time.Time
 	pending  map[[sha256.Size]byte]pendingLogin
 	sessions map[[sha256.Size]byte]dashboardSession
 }
@@ -65,6 +66,12 @@ func (l *dashboardLogins) serving(origin string) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	l.origin = origin
+}
+
+func (l *dashboardLogins) lastSignedInRequest() time.Time {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.lastSeen
 }
 
 func (l *dashboardLogins) servingOrigin() string {
@@ -145,6 +152,7 @@ func (l *dashboardLogins) redeem(token string) (string, bool) {
 			l.endLocked(key)
 		}
 	}
+	l.lastSeen = now
 	l.sessions[sha256.Sum256([]byte(session))] = dashboardSession{peer: login.peer, lastSeen: now, expires: now.Add(dashboardSessionLifetime), ended: make(chan struct{})}
 	return session, true
 }
@@ -177,7 +185,7 @@ func (l *dashboardLogins) session(r *http.Request) (dashboardSession, time.Durat
 		l.endLocked(key)
 		return dashboardSession{}, 0, false
 	}
-	current.lastSeen = now
+	current.lastSeen, l.lastSeen = now, now
 	l.sessions[key] = current
 	current.peer = current.peer.Clone()
 	return current, current.expires.Sub(now), true
