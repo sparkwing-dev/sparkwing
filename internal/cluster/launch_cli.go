@@ -70,6 +70,13 @@ func RunLaunchCLI(ctx context.Context, args []string, factory LauncherFactory) e
 			return errors.New("--poll must be a positive duration")
 		}
 	}
+	var idleGrace time.Duration
+	if fs.Changed("idle-grace") {
+		idleGrace, err = time.ParseDuration(textFlag(fs, "idle-grace"))
+		if err != nil || idleGrace <= 0 {
+			return errors.New("--idle-grace must be a positive duration")
+		}
+	}
 	cpuQuantity, err := resource.ParseQuantity(textFlag(fs, "cpu-ceiling"))
 	if err != nil {
 		return fmt.Errorf("--cpu-ceiling: %w", err)
@@ -123,6 +130,7 @@ func RunLaunchCLI(ctx context.Context, args []string, factory LauncherFactory) e
 	if fs.Changed("poll") {
 		runner.Poll = poll
 	}
+	runner.IdleGrace = idleGrace
 	runner.Breaker = budgetBreaker(creds)
 	return runner.Run(ctx)
 }

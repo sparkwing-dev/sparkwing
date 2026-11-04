@@ -33,6 +33,8 @@ unlock.
   Activating a virtualenv or Node version manager keeps the compiled pipeline; upgrading Go behind the same `PATH`
   rebuilds it.
 - **run:** Each engine notice, such as the missing version policy warning, prints once per command instead of three times
+- **Cloud (Breaking):** A used Cloud node retires once the launcher has seen it unreserved and empty for 60 seconds, whatever state its run is in
+  The launcher kept a run's empty nodes until the run ended, so a run waiting on an approval, or a fan-out waiting on one long job, held idle nodes that other teams' jobs could not use until Karpenter consolidated them. A successor that reserves the node within the grace still reuses it; one that arrives later, such as a job after an approval, boots a fresh node. `sparkwing-runner launch --idle-grace` sets the grace, which must be at least `--poll` plus 30 seconds. The launcher no longer asks the controller whether a run has ended: the `retire_run` request and `run_terminal` response are gone from launcher sync, so deploy the controller and launcher from the same release. See the [migration guide](docs/migrations/_unreleased.md#cloud-nodes-retire-after-an-idle-grace).
 
 ### Fixed
 
