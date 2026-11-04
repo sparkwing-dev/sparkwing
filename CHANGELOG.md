@@ -26,6 +26,10 @@ unlock.
 
 - **launcher:** Stop warning about Cloud reservations that belong to another job namespace
   Staging and production can share a cluster, so each launcher logged a warning for every node the other environment reserved. That is now a debug message.
+- **cli:** Print blank command output lines as blank lines in plain run logs
+  `sparkwing runs logs -o plain` printed the word `exec_line` wherever a command wrote an empty line.
+- **cli:** List this machine in `sparkwing runners list` against the local controller
+  The local runner appeared only while it held a job, without its `runner.labels`, and with a `last_seen` that stopped at the last claim before a daemon restart. It is now always listed, named after the host, with the labels the daemon read at start and a `last_seen` of the read time.
 
 
 ## [v0.68.7] - 2026-11-04

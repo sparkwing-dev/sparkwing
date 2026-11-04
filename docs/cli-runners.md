@@ -56,7 +56,7 @@ All runner enrollment requires an independent account session through --session-
 
 List runners and their capacity
 
-Read the same runner details from the local controller or a selected profile. JSON retains granted identity, reservations, labels, capacity, active jobs and headroom. Plain emits names; quiet JSON emits name objects.
+Read the same runner details from the local controller or a selected profile. The local controller lists this machine as one local runner named after its host, with the runner.labels the daemon read at start and a last_seen of the read time. JSON retains granted identity, reservations, labels, capacity, active jobs and headroom. Plain emits names; quiet JSON emits name objects.
 
 ### Flags
 
