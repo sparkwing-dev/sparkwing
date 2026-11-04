@@ -23,6 +23,8 @@ unlock.
 
 - **launcher:** Cloud Job Pods retry DNS after 1s instead of 5s
   Under strict VPC CNI network policy a new Pod's egress drops for about 2s, so the first controller lookup used to stall for the full 5s resolver timeout. Job Pods now set the resolver options `timeout:1` and `attempts:5`, and admission accepts exactly those options on Job Pods.
+- **runner image:** Cloud jobs skip downloading and compiling the runner's own SDK
+  A release runner image now ships a Go module cache and build cache primed for its own SDK version under `/usr/local/share/sparkwing/go-seed`, and a Cloud Job copies them into its empty `/tmp` caches while the Docker sidecar starts. A Cloud plan already pins that version, so its pipeline build drops from about 24s to a few seconds; dependencies beyond the SDK's own still download as before, with `go.sum` checks unchanged. The image grows by about 200 MB uncompressed (about 60 MB compressed).
 
 ### Fixed
 
