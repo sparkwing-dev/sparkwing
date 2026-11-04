@@ -17,7 +17,6 @@ type etaClaim struct {
 type etaRun struct {
 	waiter    int
 	admit     uint64
-	backfill  uint64
 	cores     int64
 	softCores bool
 	mem       uint64
@@ -66,7 +65,6 @@ func simulateAdmissionETA(qs *wingwire.QueueState, snap admission.Snapshot) ([]f
 		sim.waiting = append(sim.waiting, &etaRun{
 			waiter:    i,
 			admit:     waiter.Admit,
-			backfill:  waiter.BackfillCount,
 			cores:     waiter.MilliCores,
 			softCores: waiter.SoftCores,
 			mem:       waiter.MemoryBytes,
@@ -83,11 +81,6 @@ func simulateAdmissionETA(qs *wingwire.QueueState, snap admission.Snapshot) ([]f
 	for len(sim.waiting) > 0 {
 		if index := sim.nextPromotable(); index >= 0 {
 			run := sim.waiting[index]
-			for i := 0; i < index; i++ {
-				if !sim.fits(sim.waiting[i]) && etaRunsCompete(sim.waiting[i], run) {
-					sim.waiting[i].backfill++
-				}
-			}
 			sim.waiting = append(sim.waiting[:index], sim.waiting[index+1:]...)
 			sim.grant(run)
 			run.finish = now + run.duration
@@ -143,17 +136,18 @@ func (s *etaSimulation) nextPromotable() int {
 	reservations := map[string]uint64{}
 	for i, run := range s.waiting {
 		resources := etaFIFOResources(run)
-		if etaViolatesReservation(run, reservations) || etaAnyBlocked(blocked, resources) {
+		if etaViolatesReservation(run, reservations) {
+			s.reserve(run, reservations)
+			continue
+		}
+		if etaAnyBlocked(blocked, resources) {
 			etaMarkBlocked(blocked, resources)
 			continue
 		}
 		if s.fits(run) {
 			return i
 		}
-		if run.backfill > 0 {
-			s.reserve(run, reservations)
-			continue
-		}
+		s.reserve(run, reservations)
 		for _, resource := range resources {
 			if s.starvedByYounger(run, resource) {
 				blocked[resource] = true
@@ -374,16 +368,15 @@ func (s *etaSimulation) resourceBudget(run *etaRun, resource string) (demand, us
 }
 
 type etaCapacityLimits struct {
-	now       uint64
-	recovered uint64
+	now uint64
 }
 
 func (s *etaSimulation) resourceCapacity(run *etaRun, resource string) (etaCapacityLimits, bool) {
 	switch resource {
 	case "cores":
-		return etaCapacityLimits{now: nonnegativeInt64(s.capCores), recovered: nonnegativeInt64(s.totalCores)}, true
+		return etaCapacityLimits{now: nonnegativeInt64(s.capCores)}, true
 	case "memory":
-		return etaCapacityLimits{now: s.capMem, recovered: s.totalMem}, true
+		return etaCapacityLimits{now: s.capMem}, true
 	}
 	key := resource[len("semaphore:"):]
 	claim, found := etaClaimFor(run, key)
@@ -391,7 +384,7 @@ func (s *etaSimulation) resourceCapacity(run *etaRun, resource string) (etaCapac
 		return etaCapacityLimits{}, false
 	}
 	_, effective := s.semaphoreBudget(key, claim.capacity)
-	return etaCapacityLimits{now: effective, recovered: effective}, true
+	return etaCapacityLimits{now: effective}, true
 }
 
 func etaFitsCost(used, cost, capacity uint64) bool {
@@ -423,8 +416,8 @@ func (s *etaSimulation) reserve(waiter *etaRun, reservations map[string]uint64) 
 			used = saturatingAddUint64(used, cost)
 		}
 		var remaining uint64
-		if used < limits.recovered {
-			remaining = limits.recovered - used
+		if used < limits.now {
+			remaining = limits.now - used
 		}
 		if previous, exists := reservations[resource]; !exists || remaining < previous {
 			reservations[resource] = remaining
@@ -460,23 +453,6 @@ func etaRunsConflict(holder, waiter *etaRun) bool {
 		}
 		for _, held := range holder.claims {
 			if held.key == wanted.key && held.policy != admission.PolicyCancelOthers && held.cost > 0 && !etaFitsCost(held.cost, wanted.cost, wanted.capacity) {
-				return true
-			}
-		}
-	}
-	return false
-}
-
-func etaRunsCompete(left, right *etaRun) bool {
-	if left.cores > 0 && right.cores > 0 || left.mem > 0 && right.mem > 0 {
-		return true
-	}
-	for _, a := range left.claims {
-		if a.policy == admission.PolicyCancelOthers || a.cost == 0 {
-			continue
-		}
-		for _, b := range right.claims {
-			if b.policy != admission.PolicyCancelOthers && b.cost > 0 && a.key == b.key {
 				return true
 			}
 		}

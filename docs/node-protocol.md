@@ -55,6 +55,10 @@ Hello occurs exactly once. A major mismatch returns `protocol_mismatch` with
 `supported_majors` in error details. The selected major applies to the process.
 Documents and HTTP requests carry their own data without another version stamp.
 The SDK's optional operations are advertised in hello's `features` array.
+The host's hello request may carry its own `features` array naming optional
+plan declarations it accepts. An SDK leaves a declaration out of the plan when
+the host does not name it, so a newer pipeline still plans on an older host.
+Today the only host feature is `job_cores`, which admits a job's `cores`.
 
 ## Framing
 
@@ -103,7 +107,7 @@ allow the host to wait for cleanup before closing the process.
 
 | Operation | Request fields after `id` and `op` | Result |
 |---|---|---|
-| `hello` | `protocol`, `engine`, `runner`, optional `binding` | `protocol`, `sdk`, `features` |
+| `hello` | `protocol`, `engine`, `runner`, optional `binding` and `features` | `protocol`, `sdk`, `features` |
 | `describe` | None | `pipelines` |
 | `plan` | `pipeline`, `args`, `run` | Flat plan document |
 | `run_step` | `job`, `step`, positive `attempt`, `settled`, optional `failure` | `outcome`, optional `output` or `error` |
@@ -170,6 +174,7 @@ Each job is flat:
 | `deps`, `deps_if_present`, `needs_generated` | Required, optional and generated dependencies |
 | `steps`, `result_step`, `failure_policy` | Step graph, selected typed result and failure handling |
 | `retry`, `timeout_ms`, `no_progress_timeout_ms` | Application retry and execution deadlines |
+| `cores` | CPU the job asks local admission to reserve, at least 0.25; absent means one core |
 | `optional`, `continue_on_error`, `on_failure_of` | Failure propagation and recovery |
 | `closures`, `skip_if_budget_ms` | Opaque callback IDs and condition budget |
 | `approval` | Manual decision with message, timeout and timeout policy |

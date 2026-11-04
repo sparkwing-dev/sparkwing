@@ -18,6 +18,7 @@ test("flat declarations keep zero and false settings and leave authority to the 
     .retry(0, { backoffMs: 0 })
     .timeout(0)
     .noProgressTimeout(0)
+    .cores(0.25)
     .memo(() => "key", { ttlMs: 0 })
     .env("CI", "1")
     .env("NODE_OPTIONS", "--stack-trace-limit=50", startup());
@@ -39,6 +40,8 @@ test("flat declarations keep zero and false settings and leave authority to the 
   assert.deepEqual(job.retry, { attempts: 0, backoff_ms: 0 });
   assert.equal(job.timeout_ms, 0);
   assert.equal(job.no_progress_timeout_ms, 0);
+  assert.equal(job.cores, 0.25);
+  assert.throws(() => plan.job("tiny", () => 1).cores(0.1), /at least 0.25/);
   assert.deepEqual(job.memo, { ttl_ms: 0 });
   assert.deepEqual(job.env, { CI: { value: "1" }, NODE_OPTIONS: { value: "--stack-trace-limit=50", startup: true } });
   assert.deepEqual(job.caches, [
@@ -268,6 +271,7 @@ test("group execution policy reaches every member without losing tool selectors"
     .needsGenerated(gen)
     .timeout(0)
     .noProgressTimeout(0)
+    .cores(2)
     .skipIf(() => false, { budgetMs: 0 })
     .beforeRun(() => {})
     .verify(() => {})
@@ -290,6 +294,7 @@ test("group execution policy reaches every member without losing tool selectors"
   assert.equal(first.inline, true);
   assert.equal(first.timeout_ms, 0);
   assert.equal(first.skip_if_budget_ms, 0);
+  assert.equal(first.cores, 2);
 });
 
 test("sealed declarations reject predicate mutations while accepting fresh expansion code", async () => {

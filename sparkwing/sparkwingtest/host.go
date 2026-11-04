@@ -75,6 +75,7 @@ func (h *host) context(ctx context.Context, job string) context.Context {
 	ctx, _ = h.linkedContext(ctx)
 	rc := h.runContext(h.opts.Run.Pipeline)
 	r := h.opts.Runner
+	ctx = sdkserve.WithHostFeatures(ctx, nodeproto.HostFeatures())
 	return sdkserve.DefaultOperations.Context(ctx, rc, nodeproto.RunnerIdentity{Name: r.Name, Type: r.Type, Labels: r.Labels}, boundServices{host: h, ctx: ctx, job: job})
 }
 

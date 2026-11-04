@@ -22,8 +22,9 @@ type reviewAnswer struct {
 }
 
 var reviewerModels = map[string]func() reviewer{
-	"codex-sol":   func() reviewer { return codexReviewer{model: "gpt-6.1-sol"} },
-	"claude-opus": func() reviewer { return claudeReviewer{model: "opus"} },
+	"codex-sol":    func() reviewer { return codexReviewer{model: "gpt-6.1-sol"} },
+	"claude-opus":  func() reviewer { return claudeReviewer{model: "opus"} },
+	"claude-haiku": func() reviewer { return claudeReviewer{model: "claude-haiku-5-5"} },
 }
 
 func newReviewer(model string) (reviewer, error) {

@@ -120,7 +120,7 @@ func (h *sdkCode) hello(ctx context.Context, session *executorSession, input Nod
 
 func sdkHello(ctx context.Context, session *executorSession, identity engineid.Identity, runner nodeproto.RunnerIdentity, binding *nodeproto.ProcessBinding) error {
 	var hello nodeproto.HelloResult
-	err := session.call(ctx, nodeproto.Request{Op: nodeproto.OpHello, Protocol: nodeproto.Version, Engine: &nodeproto.EngineIdentity{Version: identity.Version}, Runner: &runner, Binding: binding}, &hello, "")
+	err := session.call(ctx, nodeproto.Request{Op: nodeproto.OpHello, Protocol: nodeproto.Version, Engine: &nodeproto.EngineIdentity{Version: identity.Version}, Runner: &runner, Binding: binding, Features: nodeproto.HostFeatures()}, &hello, "")
 	if err != nil {
 		return err
 	}
