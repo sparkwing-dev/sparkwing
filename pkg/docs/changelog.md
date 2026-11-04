@@ -31,6 +31,8 @@ unlock.
   The local runner appeared only while it held a job, without its `runner.labels`, and with a `last_seen` that stopped at the last claim before a daemon restart. It is now always listed, named after the host, with the labels the daemon read at start and a `last_seen` of the read time.
 - **sdk:** `FilesetHash` honors `!pattern` re-inclusions in `.dockerignore`, in Go and TypeScript
   Both SDKs dropped a file as soon as any pattern matched, so `*.md` then `!README.md` still left `README.md` out of the hash, and a deployment tag from `docker.ComputeTagsIn` stayed the same when that build input changed. As in Docker, the last matching pattern now decides.
+- **protocol:** The published node protocol schemas reject the requests the host and SDKs already reject
+  `node-protocol.schema.json` accepted `run_step` without `settled`, and `job`, `step` or `failure` on `eval`, and `describe.schema.json` accepted any cache `resolver`. The host decoder, its validator and the schema generator now read one per-operation field rule, and the resolver lists `go-modules` and `npm`.
 
 
 ## [v0.68.7] - 2026-11-04

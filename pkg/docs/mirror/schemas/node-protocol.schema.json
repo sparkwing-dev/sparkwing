@@ -405,6 +405,13 @@
               {
                 "not": {
                   "required": [
+                    "settled"
+                  ]
+                }
+              },
+              {
+                "not": {
+                  "required": [
                     "failure"
                   ]
                 }
@@ -524,6 +531,13 @@
               {
                 "not": {
                   "required": [
+                    "settled"
+                  ]
+                }
+              },
+              {
+                "not": {
+                  "required": [
                     "failure"
                   ]
                 }
@@ -611,6 +625,13 @@
                 "not": {
                   "required": [
                     "attempt"
+                  ]
+                }
+              },
+              {
+                "not": {
+                  "required": [
+                    "settled"
                   ]
                 }
               },
@@ -730,7 +751,8 @@
             "required": [
               "job",
               "step",
-              "attempt"
+              "attempt",
+              "settled"
             ]
           }
         },
@@ -786,6 +808,27 @@
                 "not": {
                   "required": [
                     "run"
+                  ]
+                }
+              },
+              {
+                "not": {
+                  "required": [
+                    "job"
+                  ]
+                }
+              },
+              {
+                "not": {
+                  "required": [
+                    "step"
+                  ]
+                }
+              },
+              {
+                "not": {
+                  "required": [
+                    "failure"
                   ]
                 }
               },
@@ -868,6 +911,13 @@
                 "not": {
                   "required": [
                     "attempt"
+                  ]
+                }
+              },
+              {
+                "not": {
+                  "required": [
+                    "settled"
                   ]
                 }
               },

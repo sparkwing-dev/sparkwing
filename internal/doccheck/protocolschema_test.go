@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
+	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto/conformance"
 )
 
@@ -149,5 +150,32 @@ func TestProtocolGuideExamplesMatchSchemas(t *testing.T) {
 	}
 	if checked == 0 {
 		t.Fatal("guide contains no protocol examples")
+	}
+}
+
+// The published request schema and the host's decoder judge the same requests alike.
+func TestRequestSchemaAgreesWithTheDecoder(t *testing.T) {
+	schema, err := conformance.LoadSchema(filepath.Join("..", "..", "docs", "schemas", "node-protocol.schema.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	shape, _ := schema.Def("request")
+	for request, valid := range map[string]bool{
+		`{"id":"1","op":"run_step","job":"j","step":"s","attempt":1,"settled":[]}`:                      true,
+		`{"id":"1","op":"run_step","job":"j","step":"s","attempt":1}`:                                   false,
+		`{"id":"1","op":"eval","closure":"c","attempt":1,"settled":["a"],"input":{}}`:                   true,
+		`{"id":"1","op":"eval","closure":"c","job":"j"}`:                                                false,
+		`{"id":"1","op":"eval","closure":"c","failure":{"job":"j","stage":"run","error":{"code":"x"}}}`: false,
+		`{"id":"1","op":"cancel","target":"2"}`:                                                         true,
+		`{"id":"1","op":"plan","pipeline":"p","args":{},"run":{"run_id":"r","pipeline":"p"},"job":"j"}`: false,
+	} {
+		var value map[string]any
+		if err := json.Unmarshal([]byte(request), &value); err != nil {
+			t.Fatal(err)
+		}
+		_, decodeErr := nodeproto.ParseRequest([]byte(request))
+		if failures := schema.Validate(shape, value, "request"); (len(failures) == 0) != valid || (decodeErr == nil) != valid {
+			t.Errorf("%s: schema failures %v, decoder %v; want valid=%v", request, failures, decodeErr, valid)
+		}
 	}
 }
