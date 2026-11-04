@@ -33,6 +33,11 @@ unlock.
   Activating a virtualenv or Node version manager keeps the compiled pipeline; upgrading Go behind the same `PATH`
   rebuilds it.
 - **run:** Each engine notice, such as the missing version policy warning, prints once per command instead of three times
+- **billing:** Retained storage is charged in full, even when that takes the balance negative
+  Storage past the free allowance used to be charged only from the positive balance, and nothing was charged while
+  a hold was open, so the unpaid part was forgiven. It is now charged at the published rate like compute overage:
+  the balance can go negative, a hold no longer pauses the charge, and the next Add funds covers it. A team at zero
+  or below still cannot grow its storage or start new Cloud work.
 
 ### Fixed
 

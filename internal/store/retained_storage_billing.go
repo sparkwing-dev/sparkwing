@@ -81,6 +81,11 @@ func (o *Operator) chargeRetainedTeam(ctx context.Context, team Team, rate, free
 }
 
 func chargeRetainedTeamTx(ctx context.Context, tx *storeTx, team Team, rate, free int64) (*CreditCharge, error) {
+	// safety: a team that admission never refuses for credit is never billed, so no charge can take it into debt it
+	// has no block for.
+	if !tx.store.holdsFreeAllowance(team) {
+		return nil, nil
+	}
 	if _, err := lockLedgerTx(ctx, tx, team); err != nil {
 		return nil, err
 	}
