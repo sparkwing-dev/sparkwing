@@ -1796,7 +1796,6 @@
 0.31 TestTheGateClosesItselfPastTheHourlyLimit
 0.20 TestTheMigrationSeedsTheGateRow
 0.29 TestTheOperatorsTeamIsNotRefusedForItsBalance
-0.20 TestTheWarmCPUClassDefaultsToTwoCoresAndRefusesANegative
 0.00 TestTransactionClockCancellationAfterAutomaticRollback
 0.00 TestTransactionClockFailureRefusesReadAndWrite
 4.94 TestTransactionClockFailureRollsBackWrites

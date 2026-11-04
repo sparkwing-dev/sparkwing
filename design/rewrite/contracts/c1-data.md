@@ -2707,8 +2707,8 @@ fake. The SQLite billing-start boundary uses C2's production calculator through
 final settlement and replay after reopening. The retention proof
 also checks exact deployment totals across pruning and reopening, with storage
 seconds excluded. The unused `Store.RunFinished` pruning query is removed.
-`Operator.CreditSettings`, `Operator.CreditRateTable` and
-`Operator.WarmCPUClassCores` own deployment price and policy reads.
+`Operator.CreditSettings` and `Operator.CreditRateTable` own deployment price
+and policy reads.
 `Operator.SetCreditSettings` owns every billing-policy update. A stored rate
 table refuses a scalar price update before any setting changes. The separate
 `SetOperatorCreditSettings` writer and the reader override for older binaries

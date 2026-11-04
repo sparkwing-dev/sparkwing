@@ -150,7 +150,7 @@ func TestBrowserSensitiveChangesUseStoreClock(t *testing.T) {
 				if stale {
 					now = now.Add(11 * time.Minute)
 				}
-				request := f.cookieRequest(http.MethodPut, "/api/v1/operator/credits/settings", `{"warm_cpu_class_cores":1}`)
+				request := f.cookieRequest(http.MethodPut, "/api/v1/operator/credits/settings", `{"storage_free_allowance_bytes":1}`)
 				if change == "identity-link" {
 					request = f.cookieRequest(http.MethodPost, "/auth/github/link", "csrf_token="+f.csrf)
 					request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
