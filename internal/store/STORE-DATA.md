@@ -9,13 +9,14 @@ counter domains, boolean flags, and nonempty concurrency keys. Installations
 are referenced with their tenant. Job receipts reference the exact attempt and
 generation. Sessions, memberships and identities reference an existing account.
 The schema counterexample suites exercise these rules against either dialect.
-The baseline version is 30. Both dialects are translated from `schema.sql`.
+The baseline version is 31. Both dialects are translated from `schema.sql`.
 A fresh store gets the baseline whole. `schemaUpgrades` in `schema_upgrade.go`
 lists the forward steps, each keyed by the version and baseline digest a release
 recorded, and an older supported store takes every later step in the same open
 transaction, under the migration advisory lock on PostgreSQL: a v0.68.3
 schema-28 store gains `nodes.trusted_host` (version 29), and a v0.68.7 schema-29
-store gets the replaced `warm_pool_desired` view (version 30). A step adds a
+store gets the replaced `warm_pool_desired` view (version 30), and a schema-30
+store gains the `device_logins` table (version 31). A step adds a
 column at the end of its table so the upgraded schema matches a fresh one. A
 view is replaced with `CREATE OR REPLACE VIEW`, which keeps PostgreSQL grants;
 SQLite drops and recreates it. Any other version or digest requires a backup
@@ -736,6 +737,21 @@ Refill settlement scopes its checkout and grant to the same team. Every new job 
 Upload tickets retain their run and job identifiers without cascading foreign
 keys. They survive run deletion because upload expiry still needs the digest to
 collect possible copied bytes and release every quota dimension.
+
+## Device sign-in
+
+`device_logins` is operator-owned: a row has no tenant until a direct account
+session approves it. It keeps the SHA-256 digest of the device code, never the
+code, and the typed user code, which is unique while the row lives. Approval
+and denial are one conditional `UPDATE` from `pending`, and record the
+approver's team, account, session hash and the exact grants shown. A poll reads
+the row by digest, refuses expired, denied and redeemed rows, then slows a poll
+inside the interval by five seconds (to at most a minute). An approved row turns
+`redeemed` in the same transaction that hands it to the controller, which then
+issues the credential through `Store.Issue` under the recorded session, so the
+store's member and machine provisioning checks, and the session's liveness,
+apply at redemption. Retention deletes expired rows; the session, account and
+team foreign keys cascade.
 
 ## Sealed execution trust
 

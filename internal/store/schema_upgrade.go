@@ -33,6 +33,29 @@ var schemaUpgrades = []schemaUpgrade{
 			`UPDATE warm_pool_settings SET start_time_target_seconds=20 WHERE start_time_target_seconds=10`,
 		},
 	},
+	{
+		from: 30, release: "v0.68.8", digest: "17470e5f1be1a34b3488099c1c08500449c0c55b3b6e19071637c5fbd52cc0c3",
+		statements: []string{
+			`CREATE TABLE device_logins (
+    id TEXT NOT NULL PRIMARY KEY,
+    device_digest TEXT NOT NULL UNIQUE,
+    user_code TEXT NOT NULL UNIQUE,
+    request TEXT NOT NULL,
+    state TEXT NOT NULL CHECK(state IN ('pending','approved','denied','redeemed')),
+    created_at BIGINT NOT NULL,
+    expires_at BIGINT NOT NULL,
+    poll_interval BIGINT NOT NULL CHECK(poll_interval > 0),
+    polled_at BIGINT,
+    team TEXT REFERENCES teams(name) ON DELETE CASCADE,
+    account_id TEXT REFERENCES accounts(id) ON DELETE CASCADE,
+    session_hash TEXT REFERENCES sessions(hash) ON DELETE CASCADE,
+    grants TEXT NOT NULL DEFAULT '',
+    decided_at BIGINT,
+    CHECK(state NOT IN ('approved','redeemed') OR (team IS NOT NULL AND account_id IS NOT NULL AND session_hash IS NOT NULL AND decided_at IS NOT NULL))
+)`,
+			`CREATE INDEX idx_device_logins_expiry ON device_logins(expires_at)`,
+		},
+	},
 }
 
 func schemaUpgradeFrom(version int) (schemaUpgrade, bool) {

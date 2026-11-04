@@ -257,6 +257,11 @@ type auditOIDCMint struct {
 	Subject   string      `json:"subject"`
 	ExpiresAt int64       `json:"expires_at"`
 }
+// safety: the login id is opaque and the decision is one of two words, so the row names no device or person.
+type auditDeviceLogin struct {
+	LoginID  string `json:"-"`
+	Decision string `json:"decision"`
+}
 type auditSourceRelease struct {
 	AccountID        string      `json:"-"`
 	RunID            string      `json:"-"`
@@ -295,6 +300,7 @@ func (auditRefill) isAuditPayload()               {}
 func (auditSecretRelease) isAuditPayload()        {}
 func (auditSourceRelease) isAuditPayload()        {}
 func (auditOIDCMint) isAuditPayload()             {}
+func (auditDeviceLogin) isAuditPayload()          {}
 
 func auditOneOf[T ~string](value T, choices ...string) bool {
 	for _, choice := range choices {
@@ -415,6 +421,9 @@ func (op *Operator) recordAudit(ctx context.Context, tx *storeTx, c auditContext
 	case auditOIDCMint:
 		ev.Kind, ev.SubjectID, ev.RunID, repeat = "oidc.minted", p.Node.String(), p.RunID, true
 		valid = p.Audience != "" && !strings.ContainsAny(p.Audience, "\r\n\t ") && p.TokenID != "" && p.Subject != "" && p.ExpiresAt > 0
+	case auditDeviceLogin:
+		ev.Kind, ev.SubjectID = "device_login.decided", p.LoginID
+		valid = auditOneOf(p.Decision, "approved", "denied") && p.LoginID != ""
 	case auditSourceRelease:
 		ev.Kind, ev.SubjectID, ev.RunID, ev.Account, repeat = "git_credential.released", p.CredentialID.String(), p.RunID, p.AccountID, true
 	default:
