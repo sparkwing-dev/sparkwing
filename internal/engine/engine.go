@@ -66,6 +66,7 @@ type Resolver struct {
 	indexErr  error
 	notice    sync.Once
 	command   func(context.Context, string, string, ...string) error
+	installed func() (string, error)
 }
 
 // Restriction carries signed notice and enforcement dates; an empty Version means no restriction.

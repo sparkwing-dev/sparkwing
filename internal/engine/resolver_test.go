@@ -13,6 +13,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -481,5 +482,56 @@ func TestPreEnginePinNamesTheUpgradeButTamperingStaysAnIntegrityFailure(t *testi
 				return nil
 			})
 		})
+	}
+}
+
+func TestInstalledReleaseStandsInForTheEngineDownload(t *testing.T) {
+	r, transport, key, _, _ := fixtureResolver(t)
+	ctx := context.Background()
+	target := releaseasset.Target{Binary: releaseasset.Sparkwing, GOOS: runtime.GOOS, GOARCH: runtime.GOARCH}
+	pin := engineid.Pin{SDK: engineid.GoSDK, Version: "v0.10.2"}
+	asset := fixtureExecutable(t, pin.Version, target)
+	bundle := signedBundle(t, key, pin.Version, target, asset)
+	transport.release(t, pin.Version, target, bundle)
+	name, err := target.NameForVersion(pin.Version)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assetURL := ReleaseBase + "/" + pin.Version + "/" + name
+	installed := filepath.Join(t.TempDir(), "sparkwing")
+	r.installed = func() (string, error) { return installed, nil }
+
+	writeFixture(t, filepath.Dir(installed), "sparkwing", asset)
+	resolved, err := r.Resolve(ctx, pin, target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resolved.Identity.ManifestDigest != digest(bundle.Manifest) {
+		t.Fatalf("wrong engine: %+v", resolved)
+	}
+	for _, request := range transport.requests {
+		if request == assetURL {
+			t.Fatal("downloaded the engine although the installed CLI is that signed release")
+		}
+	}
+
+	// safety: a same-version executable with other bytes must fail the signature and be downloaded instead.
+	r, err = NewResolver(Config{TrustedKeys: signingKeys(key), CacheDirectory: t.TempDir(), HTTPClient: r.config.HTTPClient})
+	if err != nil {
+		t.Fatal(err)
+	}
+	transport.requests = nil
+	r.installed = func() (string, error) { return installed, nil }
+	writeFixture(t, filepath.Dir(installed), "sparkwing", fixtureExecutableSource(t, pin.Version, target, "package main\nvar Version=\"dev\"\nfunc main(){println(Version, 2)}\n"))
+	resolved, err = r.Resolve(ctx, pin, target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	stored, err := os.ReadFile(resolved.Executable)
+	if err != nil || !bytes.Equal(stored, asset) {
+		t.Fatalf("stored engine is not the signed release bytes (err %v)", err)
+	}
+	if !slices.Contains(transport.requests, assetURL) {
+		t.Fatal("an unsigned installed executable was accepted without a download")
 	}
 }

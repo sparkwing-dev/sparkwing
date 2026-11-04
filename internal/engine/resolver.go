@@ -65,7 +65,7 @@ func NewResolver(config Config) (*Resolver, error) {
 	if config.HTTPClient == nil {
 		config.HTTPClient = http.DefaultClient
 	}
-	return &Resolver{config: config}, nil
+	return &Resolver{config: config, installed: os.Executable}, nil
 }
 
 // Resolve obtains the exact pin's permitted executable, including on a warm cache.
