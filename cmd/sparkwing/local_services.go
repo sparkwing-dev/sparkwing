@@ -157,7 +157,7 @@ func bindLocalController(ctx context.Context, b localcontroller.Binding) (_ loca
 		}
 	}()
 	server := controller.New(b.Store, nil).WithEngineController(b.Controller).WithSecretsCipher(cipher).WithDataObjects(objects).
-		WithDashboard(controller.Dashboard{Local: true, Version: installedVersion(), Paths: paths.PathsAt(b.Home), Bundle: web.BundleFS()})
+		WithDashboard(controller.Dashboard{Local: true, Version: installedVersion(), Paths: paths.PathsAt(b.Home), Bundle: web.VerifiedBundle()})
 	snapshots, err := nodehost.NewFileEnvironmentSnapshots(filepath.Join(b.Home, "environments"))
 	if err != nil {
 		return localcontroller.Services{}, err

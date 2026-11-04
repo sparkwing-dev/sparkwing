@@ -26,6 +26,8 @@ unlock.
 
 ### Fixed
 
+- **CLI:** A source build without the dashboard bundle refuses `dashboard start` and `dashboard open`
+  The README promised this, but the local controller served the empty embed and every page answered 404. Start and open now fail with a hint naming `bin/build-web.sh` or a release binary, and the local controller serves its missing-bundle page instead of a 404. Runs never need the bundle.
 - **controller:** GitHub check summaries count a memoized job as `memoized`, not `other`
   The summary kept its own list of outcomes, which had retired names and lacked `memoized`. It now counts the outcome the store records.
 - **runner:** `sparkwing-runner` help follows the output contract the CLI uses

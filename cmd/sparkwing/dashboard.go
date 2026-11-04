@@ -16,6 +16,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
+	"github.com/sparkwing-dev/sparkwing/internal/web"
 	"github.com/sparkwing-dev/sparkwing/internal/wingd"
 	"github.com/sparkwing-dev/sparkwing/pkg/color"
 )
@@ -32,7 +33,21 @@ type dashboardServices struct {
 func runDashboard(inv clisurface.Invocation) error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+	if err := requireDashboardBundle(inv, web.VerifyBundleEmbedded); err != nil {
+		return err
+	}
 	return runDashboardCommand(ctx, inv, os.Stdout, runtime.GOOS, resolveLocalServices)
+}
+
+func requireDashboardBundle(inv clisurface.Invocation, verify func() error) error {
+	if inv.Help() || inv.Command.Path != "sparkwing dashboard start" && inv.Command.Path != "sparkwing dashboard open" {
+		return nil
+	}
+	if err := verify(); err != nil {
+		return &apierr.Error{Code: apierr.Unavailable, Message: "this sparkwing build carries no dashboard bundle",
+			Hint: "install a release binary, or from a sparkwing checkout run bash bin/build-web.sh and then go install ./cmd/sparkwing"}
+	}
+	return nil
 }
 
 func dashboardUnavailable(dependency string) error {
