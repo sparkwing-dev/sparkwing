@@ -26,6 +26,8 @@ unlock.
 
 ### Fixed
 
+- **controller:** `GET /api/v1/team/github-app/automation` accepts `limit` and its own `next_cursor`
+  An older query check refused both with 400, so a team with more than 50 automations could not read past the first page.
 - **CLI:** A source build without the dashboard bundle refuses `dashboard start` and `dashboard open`
   The README promised this, but the local controller served the empty embed and every page answered 404. Start and open now fail with a hint naming `bin/build-web.sh` or a release binary, and the local controller serves its missing-bundle page instead of a 404. Runs never need the bundle.
 - **controller:** GitHub check summaries count a memoized job as `memoized`, not `other`
