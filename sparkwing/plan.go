@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"iter"
+	"math"
 	"reflect"
 	"slices"
 	"strings"
@@ -222,6 +223,7 @@ type JobNode struct {
 	retryBackoff      time.Duration
 	timeout           time.Duration
 	noProgressTimeout time.Duration
+	cores             float64
 
 	onFailure *JobNode
 
@@ -367,6 +369,23 @@ func (n *JobNode) Retry(attempts int, opts ...RetryOption) *JobNode {
 func (n *JobNode) Timeout(d time.Duration) *JobNode {
 	n.timeoutSet = true
 	n.timeout = d
+	return n
+}
+
+// Cores sets the CPU this job asks local admission to reserve while it runs.
+// The default is one core. Fractional requests are allowed down to 0.25, so a
+// job that mostly waits on git or the network can declare 0.25 and let more
+// work share the machine, and a job that runs n processes in parallel should
+// declare n. A request larger than the machine reserves the whole machine.
+// Hosts without local admission ignore it.
+//
+//	sw.Job(plan, "preconditions", &Check{}).Cores(0.25)
+//	sw.Job(plan, "test", &Test{}).Cores(6)
+func (n *JobNode) Cores(cores float64) *JobNode {
+	if math.IsNaN(cores) || math.IsInf(cores, 0) || cores < nodeproto.MinJobCores {
+		panic(fmt.Sprintf("sparkwing: job %q core request %v must be a finite number of at least %g", n.id, cores, nodeproto.MinJobCores))
+	}
+	n.cores = cores
 	return n
 }
 

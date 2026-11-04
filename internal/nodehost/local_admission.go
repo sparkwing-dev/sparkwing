@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
 
 	"github.com/sparkwing-dev/sparkwing/internal/lease"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
@@ -55,6 +56,10 @@ func (a *LocalAdmission) machine(ctx context.Context, accepted AcceptedRun, row 
 		RunID:        wingwire.NodeHostParticipant(a.holderRunID(accepted.RunID), string(row.Ref.NodeID)),
 		DisplayRunID: accepted.RunID + "/" + string(row.Ref.NodeID), Pipeline: spec.Request.Request.Pipeline,
 		Priority: options.Priority.Value, Class: options.AdmissionClass.Value, NonBlocking: nonblocking,
+		Resources: wingwire.HostResources{Cores: row.Execution.Cores},
+		// safety: job processes descend from this host process, so the daemon counts their CPU as this
+		// lease's load up to its charge; without a pid every job's CPU reads as external load.
+		PID: os.Getpid(),
 	}
 	return a.hold(ctx, row.Ref, request, func(ctx context.Context, _ Lease) error { return body(ctx) })
 }

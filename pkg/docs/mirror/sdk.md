@@ -291,6 +291,17 @@ Recovery callbacks can accept `sw.Failure` to inspect `Stage` and `Err`.
 Local and runner hosts load this failure from the persisted source job.
 Calling `OnFailure` on the returned job declares the next recovery in the chain.
 
+## Core requests
+
+Local admission charges each job one core unless the job declares its CPU.
+`job.Cores(n)` declares `n` cores, fractions allowed down to `0.25`. Give a job
+that mostly waits on git or the network a small request such as `0.25`. A
+larger request reserves cores for a job that must not share them, at the cost
+of fewer jobs running at once. `JobGroup.Cores` sets every member. A request
+larger than the machine reserves the whole machine. Hosts without local
+admission, and hosts older than the setting, keep the one-core default. See
+[Local admission](admission.md#core-requests).
+
 ## Approvals
 
 Use `plan.Approval(id, sw.ApprovalConfig{...})` for a manual decision.

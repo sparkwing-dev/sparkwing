@@ -30,6 +30,9 @@ func TestWindowsVerifyReservesFourCores(t *testing.T) {
 	if len(plan.Jobs) != 1 {
 		t.Fatalf("Windows jobs = %d, want one sequential check job", len(plan.Jobs))
 	}
+	if plan.Jobs[0].Cores != 4 {
+		t.Fatalf("Windows core request = %v, want 4", plan.Jobs[0].Cores)
+	}
 }
 
 func TestWindowsVerifyKeepsRaceFailuresAndRunsLaterChecksInOrder(t *testing.T) {

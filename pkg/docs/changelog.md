@@ -20,8 +20,21 @@ unlock.
 
 ## [Unreleased]
 
+### Added
+
+- **sdk:** `JobNode.Cores(n)`, `JobGroup.Cores(n)` and TypeScript `job.cores(n)` declare the CPU a job asks local admission to reserve
+  The default stays one core; requests go down to 0.25. The plan carries `cores` only to a host whose hello names the
+  new `job_cores` feature, so a pipeline using it still plans on an older host, which keeps the one-core charge.
+
 ### Changed
 
+- **daemon:** A job's own processes no longer count as external load
+  Node-host leases now carry the host process ID, so all CPU used by a job's process tree counts as Sparkwing load, not
+  external load. Before, a gate running `go test -p 7` while charged one core showed all of its CPU as external load
+  and starved every other waiter.
+- **daemon:** A later local waiter starts before a blocked older one only when it cannot delay it
+  The `classic` mode allowed one backfill past a blocked head with no check; now every blocked waiter keeps the
+  capacity it needs at the headroom the machine offers now, and a smaller waiter goes first only within that.
 - **warm capacity:** The default Auto start-time target is 20 seconds instead of 10. New stores seed every class at 20 seconds, and the schema 30 upgrade moves classes still at 10 seconds to 20; a class set to any other target keeps it. `sparkwing operator warm-capacity set` without `--start-time-target` now sends 20s.
 - **sdk:** `NewConcurrencyGroup` in Go and `ConcurrencyGroup` in TypeScript no longer check `Scope` and `OnLimit` themselves. The host still refuses an unknown value as `plan_invalid` when it validates the plan, so both SDKs fail the same way.
 - **delivery:** Docs, UI and process landings run their own checks plus the review

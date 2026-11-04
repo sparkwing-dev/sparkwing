@@ -915,3 +915,24 @@ test("standalone generator returns author error for host sanitization", async ()
     await host.close();
   }
 });
+
+test("core requests reach only a host that names job_cores in hello", async () => {
+  resetPipelines();
+  definePipeline({
+    name: "fixture",
+    plan(plan) {
+      plan.job("light", () => null).cores(0.25);
+    },
+  });
+  for (const [features, want] of [
+    [undefined, undefined],
+    [["job_cores"], 0.25],
+  ] as const) {
+    const host = new Host();
+    assert.equal((await host.send(features ? { ...hello, features } : hello)).ok, true);
+    const reply = await host.send(planRequest);
+    assert.equal(reply.ok, true);
+    assert.equal(reply.result.jobs[0].cores, want);
+    await host.close();
+  }
+});

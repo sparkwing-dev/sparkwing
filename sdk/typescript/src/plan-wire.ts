@@ -25,6 +25,7 @@ export interface JobSpec {
   retry?: { attempts: number; backoff_ms?: number };
   timeout_ms?: number;
   no_progress_timeout_ms?: number;
+  cores?: number;
   requires?: string[];
   prefers?: string[];
   inline?: boolean;

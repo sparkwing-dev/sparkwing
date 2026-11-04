@@ -165,6 +165,7 @@ func constrainProtocolSchema(name string, def protocolSchema) {
 		for _, f := range []string{"timeout_ms", "no_progress_timeout_ms", "skip_if_budget_ms"} {
 			minimum(f, 0)
 		}
+		props["cores"].(protocolSchema)["minimum"] = nodeproto.MinJobCores
 	case "step":
 		nonempty("id")
 	case "concurrency":
