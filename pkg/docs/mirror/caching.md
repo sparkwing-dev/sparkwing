@@ -229,7 +229,7 @@ by Go.
 
 Builds run with `CGO_ENABLED=0` unless the environment sets `CGO_ENABLED`.
 Without cgo an uncached compile skips the C toolchain and the cgo variants
-of `runtime`, `net` and `os/user`, about 4 to 6 seconds on a two-vCPU CI
+of `runtime`, `net` and `os/user`, 1 to 3 seconds on a two-vCPU CI
 runner. A pipeline that imports a package written with cgo sets
 `CGO_ENABLED=1` in its environment; the key records the effective value,
 so an unset `CGO_ENABLED` and `CGO_ENABLED=0` share a binary.

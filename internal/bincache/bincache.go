@@ -105,7 +105,7 @@ type CompileOptions struct {
 
 func pipelineBuildEnvironment(env []string) []string {
 	// perf: an uncached compile with cgo builds runtime/cgo and the cgo variants of net and os/user,
-	// 4-6s on a 2-vCPU CI runner; a pipeline that links C sets CGO_ENABLED=1 itself.
+	// 1-3s on a 2-vCPU CI runner; a pipeline that links C sets CGO_ENABLED=1 itself.
 	if value, _ := gotoolchain.LookupEnv(env, "CGO_ENABLED"); value != "" || env == nil {
 		return env
 	}

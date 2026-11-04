@@ -37,7 +37,7 @@ unlock.
   It reaches its node host over loopback with a small HTTP/1.1 client, so a pipeline that does not import `net/http`
   itself skips `net/http`, `crypto/tls` and `crypto/x509` on an uncached compile.
 - **run:** (Breaking) Go pipelines compile with `CGO_ENABLED=0` unless the environment sets `CGO_ENABLED`
-  An uncached first compile is 4-6s faster on a two-vCPU runner. A pipeline that imports a cgo package sets
+  An uncached compile is 1-3s faster on a two-vCPU runner. A pipeline that imports a cgo package sets
   `CGO_ENABLED=1`; see the [migration guide](docs/migrations/_unreleased.md#pipelines-compile-without-cgo).
 
 ### Fixed
