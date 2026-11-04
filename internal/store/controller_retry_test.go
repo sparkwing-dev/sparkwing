@@ -17,8 +17,10 @@ func TestControllerRetryReusesSuccessfulJobWithoutAnAttempt(t *testing.T) {
 			s := tenant.s
 			records := &blobRecords{manifests: fakeBlobManifests{}}
 			s.resultRecords, s.materializations = records, records
-			rewriteSchemaExec(t, s.db, `UPDATE teams SET high_trust=1 WHERE name='a'`)
-			actor := controllerJobActor(t, tenant, plan.RunID)
+			// safety: a fresh host writes the shared scope the retry reads its reused output from.
+			actor := controllerJobActor(t, tenant, plan.RunID, func(c *capability.Capability) {
+				c.Host = &capability.HostFacts{Kind: capability.HostCloud, Fresh: true}
+			})
 			startNext := func(run string) runstate.Actor {
 				claim, err := s.AsOperator().ClaimUnit(t.Context(), UnitDemand{CapabilityPrefix: "runner", Target: &UnitRef{Kind: capability.UnitNode, RunID: runspec.RunID(run), NodeID: "next"}})
 				if err != nil {

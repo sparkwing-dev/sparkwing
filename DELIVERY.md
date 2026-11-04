@@ -501,8 +501,7 @@ file. Other syntax and workflow checks remain active.
   a full-mode pass at the same commit from a run proven for this repository
   (from GitHub, or fetched by the controller) that selected every job without
   dry run, sealed no environment variables and ran every job on a trusted host
-  (a fresh host, or a runner registered with `--trust verified` or
-  `--trust verified-default`), and that pass names the same tree, fingerprint and engine.
+  (a fresh host, or a runner scoped to repositories with `--repos`), and that pass names the same tree, fingerprint and engine.
   `record-tree` reads both jobs' in-run outputs and records nothing when
   either skipped, and the lookup passes over a run whose `record-tree` did not
   succeed, so a run that skipped everything neither records a pass of its own

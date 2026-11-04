@@ -133,15 +133,13 @@ func claimFactsTx(ctx context.Context, tx *storeTx, demand UnitDemand) (claimFac
 	f.Local = boolInt(leaf.Subject.Kind == capability.SubjectLocal)
 	// safety: indexed head rechecks name a candidate without changing a queued poll into foreground intent.
 	f.Named = boolInt(demand.Target != nil)
+	f.ProvenOnly = boolInt(repositoryScoped(chain))
 	for _, node := range chain {
 		c := node.principal.Capability
 		if c.Purpose == capability.PurposeHere {
 			f.HereRun = c.Binding.RunID
 		}
 		if c.Repositories != nil {
-			if c.Unit == "" {
-				f.ProvenOnly = 1
-			}
 			f.Scopes = append(f.Scopes, claimPatterns(c.Repositories))
 		}
 		if c.Binding.Kind == capability.BindingPush {
@@ -363,13 +361,7 @@ func writerPrincipalSQL(writer, kind string) string {
 func (q *claimSQL) poolTrust(team, pools, trust, launcher, provenance string) string {
 	reserved := `EXISTS (SELECT 1 FROM secrets s WHERE s.team=` + team + ` AND ` + q.contains(pools, "s.only_on") + `)`
 	hasPools := `EXISTS (SELECT 1 FROM ` + q.array(pools, "pool") + `)`
-	return `((NOT (` + reserved + ` OR (` + trust + `='` + string(capability.TrustVerifiedDefault) + `' AND ` + hasPools + `)) OR ` + launcher + `=1) AND (` + trust + `='` + string(capability.TrustAny) + `' OR (` + trust + `='' AND NOT (` + reserved + `)) OR (` + trust + `='` + string(capability.TrustVerified) + `' AND ` + q.provenCommit(provenance) + `) OR ` + q.defaultBranchWork(provenance) + `))`
-}
-
-// safety: the SQL form of Provenance.ProvenSHA, so a verified root and the proven
-// reference agree on which runs GitHub or the controller's own fetch proved.
-func (q *claimSQL) provenCommit(provenance string) string {
-	return `(` + q.provenRepository(provenance) + `<>'' AND (` + trustIn(q.at(provenance, "trust"), runspec.GitHubCommitTrust) + ` OR COALESCE(` + q.at(provenance, "fetched_sha") + `,'')<>''))`
+	return `((NOT (` + reserved + ` OR (` + trust + `='` + string(capability.TrustVerifiedDefault) + `' AND ` + hasPools + `)) OR ` + launcher + `=1) AND (` + trust + `='` + string(capability.TrustAny) + `' OR (` + trust + `='' AND NOT (` + reserved + `)) OR ` + q.defaultBranchWork(provenance) + `))`
 }
 
 // safety: use sealed facts so SQL and Go consumers cannot disagree on repository proof.

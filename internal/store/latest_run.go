@@ -13,10 +13,9 @@ import (
 
 // GetLatestProvenRunAtCommit returns the newest run of pipeline at the reading
 // run's own sealed commit whose repository was proven, by GitHub or by the
-// controller's own fetch, as the reader's proven repository, and whose sealed
-// options selected every job and step without dry run, that sealed no
-// environment variables, and whose job succeeded. Returns ErrNotFound when none
-// qualifies.
+// controller's own fetch, as the reader's proven repository, that intake sealed
+// as proof eligible, whose every job that did not skip was claimed on a trusted
+// host, and whose job succeeded. Returns ErrNotFound when none qualifies.
 func (t *Tenant) GetLatestProvenRunAtCommit(ctx context.Context, pipeline, job, readerRunID string, statuses []string, maxAge time.Duration) (*Run, error) {
 	if t.team == "" {
 		return nil, ErrNoTeam
@@ -55,8 +54,8 @@ func provenAtCommitForReaderTx(ctx context.Context, tx *storeTx, team Team, read
 }
 
 // safety: the commit and repository come from the reader's sealed request, never the caller, and an asserted run
-// proves neither. A run narrowed by only, start-at or stop-at, or run dry, skipped work its output does not admit
-// to, and a sealed environment such as GOFLAGS can reshape what its jobs judged, so neither counts.
+// proves neither. Intake's allow-list of run options decides proof eligibility, and an untrusted host may have run
+// asserted work that left HOME, GOFLAGS or the build cache poisoned.
 func provenRunAtCommitQuery(dialect Dialect, team Team, pipeline string, reader runspec.SealedRequest) (string, []any, bool) {
 	repository, sha := reader.Provenance.ProvenRepository(), reader.Provenance.ProvenSHA()
 	if repository == "" || sha == "" {
@@ -65,20 +64,10 @@ func provenRunAtCommitQuery(dialect Dialect, team Team, pipeline string, reader 
 	q := claimSQL{dialect: dialect}
 	request := q.blob("request_json")
 	provenance := q.at(request, "provenance")
-	clean := make([]string, 0, 10)
-	for _, option := range []string{"start_at", "stop_at", "only"} {
-		clean = append(clean, "COALESCE("+q.at(request, "request", "options", option, "value")+",'')=''")
+	clean := []string{
+		"COALESCE(CAST(" + q.at(request, "proof_eligible") + " AS TEXT),'false') IN ('true','1')",
+		"NOT EXISTS (SELECT 1 FROM nodes n WHERE n.team=? AND n.run_id=runs.id AND n.outcome<>'skipped' AND n.trusted_host=0)",
 	}
-	// safety: a paused or debugged job can be attached to and edited before its output is recorded.
-	for _, flag := range [][]string{{"dry_run", "value"}, {"debug", "value"}, {"pause", "value", "on_failure", "value"}} {
-		clean = append(clean, "COALESCE(CAST("+q.at(request, append([]string{"request", "options"}, flag...)...)+" AS TEXT),'false') NOT IN ('true','1')")
-	}
-	for _, list := range []string{"before", "after"} {
-		clean = append(clean, "NOT EXISTS (SELECT 1 FROM "+q.array(q.at(request, "request", "options", "pause", "value", list, "value"), "pause_"+list)+")")
-	}
-	clean = append(clean, "NOT EXISTS (SELECT 1 FROM "+q.array(q.at(request, "request", "env", "names"), "env_name")+")")
-	// safety: an untrusted host may have run asserted work that left HOME, GOFLAGS or the build cache poisoned.
-	clean = append(clean, "NOT EXISTS (SELECT 1 FROM nodes n WHERE n.team=? AND n.run_id=runs.id AND n.outcome<>'skipped' AND n.trusted_host=0)")
 	return `SELECT team,id FROM runs WHERE team=? AND repo_key=? AND provenance_sha=? AND pipeline=? AND intake_mode='execute' AND ` +
 			q.provenRepository(provenance) + `=? AND ((` + trustIn(q.at(provenance, "trust"), runspec.GitHubCommitTrust) + ` AND ` +
 			q.at(provenance, "sha") + `=?) OR ` + q.at(provenance, "fetched_sha") + `=?) AND ` + strings.Join(clean, " AND "),

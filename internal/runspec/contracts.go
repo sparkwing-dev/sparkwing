@@ -410,7 +410,9 @@ type SealedRequest struct {
 	AuthorityRef capability.AuthorityRef `json:"authority_ref"`
 	Ceilings     Ceilings                `json:"ceilings"`
 	Provenance   Provenance              `json:"provenance"`
-	Hash         Hash                    `json:"hash"`
+	// ProofEligible is Request.ProofEligible at intake.
+	ProofEligible bool `json:"proof_eligible,omitempty"`
+	Hash          Hash `json:"hash"`
 }
 
 // safety: DefaultBranchSource limits discovery to App facts or the acquired origin HEAD.

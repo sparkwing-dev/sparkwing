@@ -33,6 +33,20 @@ unlock.
   Activating a virtualenv or Node version manager keeps the compiled pipeline; upgrading Go behind the same `PATH`
   rebuilds it.
 - **run:** Each engine notice, such as the missing version policy warning, prints once per command instead of three times
+- **runners (Breaking):** A team's own launcher pods are no longer fresh hosts
+  They take the trust of the launcher credential that started them: jobs on them mint OIDC tokens with
+  `runner_environment` `persistent` instead of `fresh` and write that launcher's own cache scope unless the team has
+  `high_trust` on. Only Sparkwing Cloud nodes and GitHub-hosted Actions runners, which their provider attests, are fresh.
+  See the [migration guide](docs/migrations/_unreleased.md#team-launcher-pods-are-not-fresh-hosts).
+- **cache (Breaking):** `high_trust` lets only trusted hosts write the shared verified cache
+  A trusted host is a fresh host or a machine scoped with `--repos`. Personal machines and self-hosted Actions runners
+  now write only their own host's cache whatever `high_trust` says, so a pass `sw.FromProvenRunAtCommit()` counts never
+  restores bytes such a host wrote.
+- **sdk:** `sw.FromProvenRunAtCommit()` counts a run only when intake sealed it proof eligible
+  Intake checks the run's options against an allow-list of options that only place, schedule or present a run; any other
+  option, such as `--cache-from`, a checkout policy, a risk acknowledgement or job default overrides, and any option added
+  later, keeps the run from counting. Runs from earlier releases are not eligible, so the first gate after upgrading runs
+  in full. A job's host is recorded as trusted when it is claimed rather than when it starts.
 
 ### Fixed
 
@@ -46,6 +60,13 @@ unlock.
 - **cli:** List this machine in `sparkwing runners list` against the local controller
   The local runner appeared only while it held a job, without its `runner.labels`, and with a `last_seen` that stopped at the last claim before a daemon restart. It is now always listed, named after the host, with the labels the daemon read at start and a `last_seen` of the read time.
 
+
+### Removed
+
+- **runners (Breaking):** `sparkwing runners add --trust verified` is gone
+  `--repos`, which every shared runner needs, already limits a runner to repository-proven work, and a runner scoped by
+  it is now a trusted host whose jobs can produce a counted pass. See the
+  [migration guide](docs/migrations/_unreleased.md#runners-add---trust-verified-is-gone).
 
 ## [v0.68.7] - 2026-11-04
 ### Added

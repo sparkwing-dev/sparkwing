@@ -473,7 +473,7 @@ func TestActionsRunnerEnvironmentDecidesFreshness(t *testing.T) {
 			if facts, err = claimantFactsTx(t.Context(), tx, chain, runspec.Request{}); err != nil {
 				return err
 			}
-			host, err = awardCacheHostTx(t.Context(), tx, tenant.team, facts)
+			host, err = awardCacheHostTx(t.Context(), tx, tenant.team, facts, hostTrusted(chain, facts))
 			return err
 		}); err != nil {
 			t.Fatal(err)

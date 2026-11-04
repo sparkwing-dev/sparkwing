@@ -27,23 +27,23 @@ func ClaimSecurityRegressions(t *testing.T, open func(*testing.T) *Store) {
 	t.Run("fresh pod explanation", func(t *testing.T) { freshPodWaitingExplanation(t, fixture) })
 	t.Run("push provenance parity", func(t *testing.T) { pushClaimProvenanceParity(t, fixture) })
 	t.Run("pool branch rules", func(t *testing.T) { poolBranchRulesMatchLikePathGlobs(t, fixture) })
-	t.Run("trusted producer host", func(t *testing.T) { trustedHostRecordedAtAttemptStart(t, fixture) })
+	t.Run("trusted producer host", func(t *testing.T) { trustedHostRecordedAtClaim(t, fixture) })
 	t.Run("trusted host cleared by claim", func(t *testing.T) { trustedHostClearedByClaim(t, fixture) })
 }
 
-// safety: a registered machine produces counted passes only when its admin-set trust never takes asserted work.
-func trustedHostRecordedAtAttemptStart(t *testing.T, open func(*testing.T) *Store) {
+// safety: a registered machine produces counted passes only when its repository scope keeps asserted work off it;
+// trustedHostClearedByClaim covers an unscoped machine.
+func trustedHostRecordedAtClaim(t *testing.T, open func(*testing.T) *Store) {
 	for _, tc := range []struct {
 		source  string
 		trust   capability.Trust
 		claims  bool
 		trusted bool
 	}{
-		{source: "verified-feature", trust: capability.TrustVerified, claims: true, trusted: true},
+		{source: "verified-feature", trust: capability.TrustAny, claims: true, trusted: true},
+		{source: "verified-feature", trust: "", claims: true, trusted: true},
 		{source: "verified-default", trust: capability.TrustVerifiedDefault, claims: true, trusted: true},
-		{source: "verified-feature", trust: capability.TrustAny, claims: true},
-		{source: "verified-feature", trust: "", claims: true},
-		{source: "asserted-main", trust: capability.TrustVerified},
+		{source: "asserted-main", trust: capability.TrustAny},
 	} {
 		t.Run(fmt.Sprint(tc.source, "/", tc.trust), func(t *testing.T) {
 			s, demand := unitClaimFixtureStore(t, open(t))
