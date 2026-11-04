@@ -8,10 +8,14 @@ import (
 	"errors"
 	"io"
 	"os"
+	"path/filepath"
 	"runtime"
+	"strings"
 	"sync"
+	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/engineid"
+	"github.com/sparkwing-dev/sparkwing/internal/paths"
 	"github.com/sparkwing-dev/sparkwing/internal/releaseasset"
 )
 
@@ -74,6 +78,20 @@ func executableDigest(ctx context.Context, path string) (string, error) {
 	if previous := selfDigest.info; previous != nil && os.SameFile(previous, info) && previous.Size() == info.Size() && previous.ModTime().Equal(info.ModTime()) {
 		return selfDigest.digest, nil
 	}
+	identity, stable := fileIdentity(info, time.Now())
+	record := ""
+	// hack: go test binaries resolve themselves as the engine; they must not leave records in a real home.
+	if !strings.HasSuffix(filepath.Base(path), ".test") {
+		record = selfDigestRecord()
+	}
+	if stable && record != "" {
+		if body, err := os.ReadFile(record); err == nil {
+			if recorded, digest, ok := strings.Cut(strings.TrimSpace(string(body)), " "); ok && recorded == path+"|"+identity && validDigest(digest) {
+				selfDigest.info, selfDigest.digest = info, digest
+				return digest, nil
+			}
+		}
+	}
 	file, err := os.Open(path)
 	if err != nil {
 		return "", err
@@ -84,5 +102,35 @@ func executableDigest(ctx context.Context, path string) (string, error) {
 		return "", err
 	}
 	selfDigest.info, selfDigest.digest = info, hex.EncodeToString(hash.Sum(nil))
+	if after, err := os.Stat(path); stable && record != "" && err == nil {
+		if again, ok := fileIdentity(after, time.Now()); ok && again == identity {
+			writeSelfDigestRecord(record, path+"|"+identity+" "+selfDigest.digest)
+		}
+	}
 	return selfDigest.digest, nil
+}
+
+// perf: each sparkwing process hashed its own 100 MB executable (250 ms) before running a replacement-pin
+// pipeline; the digest is kept on disk under the exact file identity, so only a new binary is hashed.
+func selfDigestRecord() string {
+	p, err := paths.DefaultPaths()
+	if err != nil || p.Root == "" {
+		return ""
+	}
+	return filepath.Join(p.Root, "cache", "engine-self-digest")
+}
+
+// safety: a lost or torn record only costs one hash; the read requires an exact identity and a valid digest.
+func writeSelfDigestRecord(record, line string) {
+	if err := os.MkdirAll(filepath.Dir(record), 0o700); err != nil {
+		return
+	}
+	stage, err := os.CreateTemp(filepath.Dir(record), ".engine-self-digest-")
+	if err != nil {
+		return
+	}
+	_, writeErr := stage.WriteString(line + "\n")
+	if errors.Join(writeErr, stage.Close()) != nil || os.Rename(stage.Name(), record) != nil {
+		_ = os.Remove(stage.Name())
+	}
 }

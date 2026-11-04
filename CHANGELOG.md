@@ -30,6 +30,8 @@ unlock.
 - **local:** The local controller reuses prepared SQLite statements
   Every store call parsed and planned its SQL again, about 40% of the local controller's CPU during a run. Each connection now keeps up to 512 prepared statements, which cuts the controller's share of a local job's start from roughly 0.8 seconds to 0.2 seconds.
 - **run:** SDK installs check the SDK pin while the pipeline key is computed, and a foreground run reads its final logs as soon as hosting ends
+- **run:** The engine's own digest is kept in `SPARKWING_HOME/cache` across processes
+  Each process hashed its ~100 MB executable (about 280ms) before resolving a replacement-pin engine. The digest is now reused while the file's device, inode, size, modification and change times are unchanged.
 
 ### Fixed
 
