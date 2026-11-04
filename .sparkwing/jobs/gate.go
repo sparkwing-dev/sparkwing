@@ -139,8 +139,12 @@ func goCommandWithLimits(gomaxprocs, packageParallelism int, verb, args string) 
 	return fmt.Sprintf("GOMAXPROCS=%d go %s -p %d %s", gomaxprocs, verb, packageParallelism, args)
 }
 
+// safety: CollectAll lets a cheap policy failure (tracker IDs, changelog
+// links) finish beside the test suite instead of cancelling it, so one run
+// reports every failure. Needs still require success, so a step whose
+// prerequisite failed is still never run.
 func (p *Gate) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
-	w.FailurePolicy(sparkwing.FailFast)
+	w.FailurePolicy(sparkwing.CollectAll)
 	gofmtStep := sparkwing.Step(w, "gofmt", runGofmt)
 	formattersStep := sparkwing.Step(w, "formatters", runFormatters).Needs(gofmtStep)
 	vetStep := sparkwing.Step(w, "vet", runVet).Needs(formattersStep)
