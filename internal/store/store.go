@@ -144,7 +144,7 @@ func Open(path string, opts ...Option) (*Store, error) {
 	} else if err := tightenExistingSQLite(path); err != nil {
 		return nil, err
 	}
-	st, err := openSQL(context.Background(), "sqlite", sqliteDSN(path), DialectSQLite, path, opts)
+	st, err := openSQL(context.Background(), cachedSQLiteDriver, sqliteDSN(path), DialectSQLite, path, opts)
 	if err != nil {
 		return nil, err
 	}

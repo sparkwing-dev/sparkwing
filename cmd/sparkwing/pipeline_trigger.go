@@ -98,7 +98,7 @@ func runTriggerCommand(ctx context.Context, inv clisurface.Invocation, out io.Wr
 			return handoffHereRun(ctx, options, response, defaultHereDependencies(flags.output))
 		},
 		follow: func(ctx context.Context, run string) (string, error) {
-			followErr := followControllerRunLogs(ctx, options, run, flags.output, out)
+			followErr := followControllerRunLogs(ctx, options, run, flags.output, out, waitStatusPoll)
 			reader, err := client.NewRunReader(options)
 			if err != nil {
 				return "", errors.Join(followErr, err)
