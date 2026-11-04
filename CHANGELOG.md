@@ -27,6 +27,9 @@ unlock.
   It followed its own machine's controller on the one-second remote poll. Remote follows keep one second.
 - **run:** Local runs start faster in repositories that replace the SDK
   The running engine is hashed once per process instead of about eight times, and each job reads its run snapshot once while binding its process services.
+- **local:** The local controller reuses prepared SQLite statements
+  Every store call parsed and planned its SQL again, about 40% of the local controller's CPU during a run. Each connection now keeps up to 512 prepared statements, which cuts the controller's share of a local job's start from roughly 0.8 seconds to 0.2 seconds.
+- **run:** SDK installs check the SDK pin while the pipeline key is computed, and a foreground run reads its final logs as soon as hosting ends
 
 ### Fixed
 
