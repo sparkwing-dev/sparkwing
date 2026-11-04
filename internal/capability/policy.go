@@ -169,7 +169,9 @@ type PipelineReferenceTarget struct {
 	FromProvenRun bool
 }
 
-// AdmittedBy reports whether a declared reference with these flags permits the read.
+// AdmittedBy reports whether a declared reference with these flags permits the read. Every
+// declaration, proven-only included, admits a read with neither flag, because that read takes
+// only verified default-branch output.
 func (t PipelineReferenceTarget) AdmittedBy(fromAnyRun, fromProvenRun bool) bool {
 	switch {
 	case t.FromAnyRun:

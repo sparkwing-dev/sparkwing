@@ -166,8 +166,8 @@ type gitopsChange struct {
 	Commit string `json:"commit"`
 }
 
-// safety: rollback and the post-deploy cron find what an environment runs
-// through RefToLastRun("deploy", "staging-deploy" or "production").
+// safety: a failed promote rolls back from this run's own record: it reverts
+// Changes newest first and names Previous as what production returns to.
 type envDeployment struct {
 	Environment string         `json:"environment"`
 	Images      deployImages   `json:"images"`

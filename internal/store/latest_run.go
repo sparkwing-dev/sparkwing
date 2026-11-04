@@ -13,10 +13,10 @@ import (
 
 // GetLatestProvenRunAtCommit returns the newest run of pipeline at the reading
 // run's own sealed commit whose repository was proven, by GitHub or by the
-// controller's own fetch, as the reader's proven repository, and whose sealed
-// options selected every job and step without dry run, that sealed no
-// environment variables, and whose job succeeded. Returns ErrNotFound when none
-// qualifies.
+// controller's own fetch, as the reader's proven repository, whose sealed
+// options selected every job and step without dry run, debug or pause, that
+// sealed no environment variables, whose every job that ran ran on a trusted
+// host, and whose job succeeded. Returns ErrNotFound when none qualifies.
 func (t *Tenant) GetLatestProvenRunAtCommit(ctx context.Context, pipeline, job, readerRunID string, statuses []string, maxAge time.Duration) (*Run, error) {
 	if t.team == "" {
 		return nil, ErrNoTeam

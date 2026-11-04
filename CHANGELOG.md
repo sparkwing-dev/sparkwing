@@ -60,6 +60,12 @@ unlock.
 - **cli:** List this machine in `sparkwing runners list` against the local controller
   The local runner appeared only while it held a job, without its `runner.labels`, and with a `last_seen` that stopped at the last claim before a daemon restart. It is now always listed, named after the host, with the labels the daemon read at start and a `last_seen` of the read time.
 
+### Docs
+
+- **sdk:** Describe how `WithFreshRepo` and `WithFreshBranch` select a child's source
+  `WithFreshBranch` alone runs that branch's tip in the parent's repository, and naming the parent's own repository with `WithFreshRepo` inherits the parent's source.
+- **docs:** Correct the secrets and versioning pages
+  `--only-on` secrets reach unverified runs on a runner enrolled with `--trust=any`, and every launcher, self-hosted ones included, refuses a development build unless `SPARKWING_DEVELOPMENT_BUILD=1` is set.
 
 ## [v0.68.7] - 2026-11-04
 ### Added
