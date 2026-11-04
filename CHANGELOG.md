@@ -24,6 +24,10 @@ unlock.
 - **launcher:** Stop warning about Cloud reservations that belong to another job namespace
   Staging and production can share a cluster, so each launcher logged a warning for every node the other environment reserved. That is now a debug message.
 
+### Removed
+
+- **cli (Breaking):** Remove the hidden `sparkwing __host-trigger` command. It refused every invocation because standalone hosting is not available; the local controller hosts queued triggers.
+
 
 ## [v0.68.7] - 2026-11-04
 ### Added

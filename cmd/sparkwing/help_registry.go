@@ -102,9 +102,6 @@ func surfaceCommand(path string) Command {
 
 var commandFlagDescriptions = map[string]string{
 	"sparkwing __complete --kind":                              "Which completion candidates to print for the given command words.",
-	"sparkwing __host-trigger --env-file":                      "Absolute path to an environment file for the hosted run; this build refuses any invocation that sets it because standalone hosting is not available.",
-	"sparkwing __host-trigger --standalone-reason":             "Reason for hosting the run outside the local controller; this build refuses any invocation that sets it because standalone hosting is not available.",
-	"sparkwing __host-trigger --state-db":                      "Absolute path to the state database for the hosted run; this build refuses any invocation that sets it because standalone hosting is not available.",
 	"sparkwing billing request-tier --message":                 "What you need, sent to the operators with the team's standing and payment history.",
 	"sparkwing billing request-tier --tier":                    "Standing tier to request.",
 	"sparkwing cache info --all-entries":                       "List every managed cache entry instead of the 10 most recently used.",
@@ -425,7 +422,6 @@ var commandSynopses = map[string]string{
 	"sparkwing operator teams create":               "Create a team and issue its first administrator credential",
 	"sparkwing":                                     "Run and inspect pipelines",
 	"sparkwing __complete":                          "Print completion candidates for the shell scripts",
-	"sparkwing __host-trigger":                      "Host one claimed local trigger's run (spawned by the trigger loop)",
 	"sparkwing __tick":                              "Evaluate every armed schedule once (the OS timer's entry point)",
 	"sparkwing cache":                               "Inspect or trim the compiled pipeline binary cache",
 	"sparkwing cache explain":                       "Show a pipeline's cache key and the inputs behind it",

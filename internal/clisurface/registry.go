@@ -9,12 +9,6 @@ func Registry() []Command {
 			{Name: "kind", Argument: "KIND", Repeatable: true, CommaList: true},
 			{Name: "word", Argument: "VALUE", Meaning: "Command words to complete; empty selects the root."},
 		}},
-		{Path: "sparkwing __host-trigger", Hidden: true, Flags: []Flag{
-			{Name: "standalone-reason", Argument: "REASON"},
-			{Name: "run", Argument: "RUN"},
-			{Name: "state-db", Argument: "PATH"},
-			{Name: "env-file", Argument: "PATH"},
-		}},
 		{Path: "sparkwing __tick", Hidden: true, Rules: []string{"Stable managed-timer entrypoint; start the local controller on demand. No crons tick alias."}, Flags: []Flag{
 			{Name: "home", Argument: "PATH", Meaning: "Explicit state home captured by the managed timer."},
 			{Name: "dry-run"},

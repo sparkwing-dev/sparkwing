@@ -28,8 +28,7 @@ import (
 )
 
 type localRunOptions struct {
-	standaloneReason, stateDB, environmentFile string
-	standalone                                 bool
+	standalone bool
 }
 
 type localRunRuntime struct {
