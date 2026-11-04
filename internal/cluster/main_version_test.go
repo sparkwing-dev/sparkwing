@@ -28,8 +28,12 @@ func TestRunnerVersionReportsStampedOfflineIdentity(t *testing.T) {
 	if err := runRunnerVersion(&output, []string{"-o", "json", "--offline"}, "v9.9.9"); err != nil {
 		t.Fatal(err)
 	}
+	lines := strings.Split(strings.TrimSuffix(output.String(), "\n"), "\n")
+	if len(lines) != 1 {
+		t.Fatalf("version wrote %d lines, want one JSON record: %q", len(lines), output.String())
+	}
 	var identity buildinfo.Identity
-	if err := json.Unmarshal(output.Bytes(), &identity); err != nil {
+	if err := json.Unmarshal([]byte(lines[0]), &identity); err != nil {
 		t.Fatalf("decode identity: %v (%q)", err, output.String())
 	}
 	if identity.Binary != "sparkwing-runner" || identity.Version != "v9.9.9" || identity.GOOS != runtime.GOOS || identity.GOARCH != runtime.GOARCH {

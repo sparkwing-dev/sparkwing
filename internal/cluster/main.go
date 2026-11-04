@@ -103,9 +103,7 @@ func runRunnerVersionIO(writer, diagnostics io.Writer, args []string, version st
 	}
 	switch format {
 	case "json":
-		encoder := json.NewEncoder(writer)
-		encoder.SetIndent("", "  ")
-		return encoder.Encode(identity)
+		return json.NewEncoder(writer).Encode(identity)
 	case "plain":
 		fmt.Fprintln(writer, identity.Version)
 		return nil

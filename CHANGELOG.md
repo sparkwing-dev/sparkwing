@@ -26,6 +26,8 @@ unlock.
 
 ### Fixed
 
+- **runner:** `sparkwing-runner version -o json` writes one JSON record on one line
+  It printed an indented document, which a reader taking one JSON object per line could not parse.
 - **launcher:** Stop warning about Cloud reservations that belong to another job namespace
   Staging and production can share a cluster, so each launcher logged a warning for every node the other environment reserved. That is now a debug message.
 
