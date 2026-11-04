@@ -165,6 +165,11 @@ unlock.
   Machine configuration no longer says installation uses submitted values (only planning and execution do), and the git-credentials page says the controller reads its secrets key from the `secrets-key` file in `--credentials-dir`, not `SPARKWING_SECRETS_KEY`.
 - **docs:** The API guide shows a read-only bearer request, and the versioning guide links the latest stable release
 
+### Removed
+
+- **CLI (Breaking):** Sparkwing no longer searches for other installed copies of itself
+  `sparkwing doctor` drops `install_conflict` and its `executable` and `competing_install` lines, `sparkwing info` drops `executable.other_installs` and its warning, and `sparkwing update` and `bin/install.sh` no longer print rename commands for other copies. Your shell decides which copy runs: check with `which -a sparkwing` and `sparkwing version`, then remove the unwanted install or call the one you want by its absolute path. See [If the wrong sparkwing runs](docs/getting-started.md#if-the-wrong-sparkwing-runs).
+
 ## [v0.68.7] - 2026-11-04
 ### Added
 

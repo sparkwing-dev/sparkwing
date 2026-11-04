@@ -9,8 +9,7 @@ source. They do not fall back to a separate dashboard server or open another
 state store.
 
 Doctor reports an incomplete controller inspection when its lifecycle binding is
-absent. Its project toolchain, hook survey and competing-install checks still
-run. An incomplete inspection is an error, even when those machine checks pass.
+absent. Its project toolchain and hook survey checks still run. An incomplete inspection is an error, even when those machine checks pass.
 
 <!-- design:begin -->
 ## Controller lifecycle contract

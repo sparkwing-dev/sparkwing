@@ -132,15 +132,17 @@ pipeline binary's source key walks and removed with the worktree. A cache
 shared between trees replays findings under the other tree's paths, so it is
 never shared.
 
-The gate's `lint` step allows ten minutes for linting itself (decision 96; both modules measure four to five minutes under load), and waiting for
-the box-wide golangci-lint lock does not count against it (lead decision,
-2026-11-03). On Unix the step takes golangci-lint's own lock,
-`$TMPDIR/golangci-lint.lock`, before it lints, then runs golangci-lint with
-`--allow-parallel-runners` while holding it, so serial runners elsewhere still
-queue behind it. The wait has its own 20-minute bound; when it expires the step
-fails naming the golangci-lint processes running at the time and saying
-nothing was learned about the tree. Elsewhere the gate keeps golangci-lint's
-own serial wait inside the five minutes.
+The gate's `lint` step allows ten minutes (decision 96; both modules measure
+four to five minutes under load). It runs golangci-lint with
+`--allow-serial-runners`, so a neighbor's lint queues it on golangci-lint's own
+lock, `$TMPDIR/golangci-lint.lock`, and that wait counts against the ten
+minutes (Korey, 2026-11-04, replacing the gate's own lock manager).
+
+When the lint step fails with "no result after" its deadline, look for the
+neighboring run with `ps -eo pid,etime,args | grep '[g]olangci-lint'`. Rerun
+the gate once it finishes, or stop it if it is stuck. Nothing was learned about
+the tree. An exit 4 saying "Timeout exceeded" is golangci-lint's own
+`run.timeout` instead: raise it in `.golangci.yml`.
 
 Version freshness excludes `testdata` fixture modules, matching the committed-module checks.
 

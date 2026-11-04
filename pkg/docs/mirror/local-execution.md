@@ -161,8 +161,9 @@ A client attempts one replacement when it finds an incompatible daemon, includin
 a v0.67 daemon at the socket path used before per-home socket tokens. Startup
 prints the old and new versions, drains the predecessor and waits for its
 election lock before starting the selected executable. If
-an incompatible daemon answers again, stop competing Sparkwing installations
-and run `sparkwing daemon restart`, or select a separate `SPARKWING_HOME`.
+an incompatible daemon answers again, remove the other Sparkwing installation
+(`which -a sparkwing` lists them) and run `sparkwing daemon restart`, or select
+a separate `SPARKWING_HOME`.
 The replacement still drains active runs before taking ownership.
 
 Active runs, queued triggers, held leases and open dashboard connections keep
