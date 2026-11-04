@@ -32,6 +32,8 @@ unlock.
 - **run:** SDK installs check the SDK pin while the pipeline key is computed, and a foreground run reads its final logs as soon as hosting ends
 - **run:** The engine's own digest is kept in `SPARKWING_HOME/cache` across processes
   Each process hashed its ~100 MB executable (about 280ms) before resolving a replacement-pin engine. The digest is now reused while the file's device, inode, size, modification and change times are unchanged.
+- **cache:** Pipeline key inputs reuse the digest of each unchanged file from `SPARKWING_HOME/cache/file-digests`
+  Each SDK install re-read every file of the pipeline module and its `replace` targets, 37 MB in the Sparkwing repository and 300-700ms under load, twice per local run. Keys are unchanged.
 
 ### Fixed
 

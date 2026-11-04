@@ -538,6 +538,7 @@ func listedSnapshot(dir string, keep fileFilter, hashAllFiles bool) (map[string]
 // parallel and their lines are written in walk order.
 func hashFilesInto(h io.Writer, dir string, files []string) (hashStats, error) {
 	var stats hashStats
+	memo := openDigestMemo(dir)
 	digests := make([][]byte, len(files))
 	sizes := make([]int64, len(files))
 	errs := make([]error, len(files))
@@ -556,7 +557,8 @@ func hashFilesInto(h io.Writer, dir string, files []string) (hashStats, error) {
 				if i >= len(files) {
 					return
 				}
-				digests[i], sizes[i], errs[i] = hashFile(files[i])
+				rel, _ := filepath.Rel(dir, files[i])
+				digests[i], sizes[i], errs[i] = hashFile(files[i], rel, memo)
 			}
 		}()
 	}
@@ -570,10 +572,11 @@ func hashFilesInto(h io.Writer, dir string, files []string) (hashStats, error) {
 		stats.Bytes += sizes[i]
 		fmt.Fprintf(h, "%s\x00%x\n", rel, digests[i])
 	}
+	memo.save()
 	return stats, nil
 }
 
-func hashFile(path string) ([]byte, int64, error) {
+func hashFile(path, rel string, memo *digestMemo) ([]byte, int64, error) {
 	f, err := os.Open(path)
 	if errors.Is(err, fs.ErrNotExist) {
 		return nil, 0, ErrUnstableInputs
@@ -582,12 +585,22 @@ func hashFile(path string) ([]byte, int64, error) {
 		return nil, 0, err
 	}
 	defer f.Close()
+	info, err := f.Stat()
+	if err != nil {
+		return nil, 0, err
+	}
+	sum, identity, found := memo.lookup(rel, info)
+	if found {
+		return sum, info.Size(), nil
+	}
 	fileH := sha256.New()
 	n, err := io.Copy(fileH, f)
 	if err != nil {
 		return nil, 0, err
 	}
-	return fileH.Sum(nil), n, nil
+	sum = fileH.Sum(nil)
+	memo.record(rel, identity, sum)
+	return sum, n, nil
 }
 
 // perf: wholly ignored directories in prune are never walked; each counts as one excluded path.
