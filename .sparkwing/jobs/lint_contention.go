@@ -10,14 +10,9 @@ import (
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
-const lintLockWait = 5 * time.Minute
-
-// perf: linting both modules measures about four to five minutes on a loaded box; the gate allows ten (decision 96).
+// perf: linting both modules measures about four to five minutes on a loaded box; the gate allows ten,
+// including any wait for a neighbor's lint (decision 96).
 const gateLintDeadline = 10 * time.Minute
-
-// safety: the gate waits for a neighbor's lint on this separate bound, so a
-// held lock fails by name instead of eating the lint deadline.
-const gateLintLockWait = 20 * time.Minute
 
 const golangciContention = "parallel golangci-lint is running"
 
@@ -32,12 +27,6 @@ const gateBaselineRef = "origin/main"
 
 func lintCommand(base string) string {
 	return "golangci-lint run --allow-serial-runners --new-from-merge-base= --new-from-rev=" + base + " ./..."
-}
-
-// safety: only for a caller that already holds the box-wide lock itself, so
-// golangci-lint must not wait on the lock its own parent holds.
-func lockedLintCommand(base string) string {
-	return "golangci-lint run --allow-parallel-runners --new-from-merge-base= --new-from-rev=" + base + " ./..."
 }
 
 // perf: the subset that answers in about a second over the packages one push
@@ -65,15 +54,19 @@ func fastLintCommand(cores int, pkgs []string) string {
 		cores, shellQuote(pipelineCacheDir("golangci-lint")), cores, strings.Join(prePushLinters, ","), strings.Join(pkgs, " "))
 }
 
-func runGolangciLintWithin(ctx context.Context, deadline time.Duration) error {
-	return lintModules(ctx, deadline, lintCommand, false)
+// safety: golangci-lint queues serial runners on its own box-wide lock, and
+// that wait counts against the deadline; a lint timeout means checking for the
+// neighboring run (DELIVERY.md).
+func runGolangciLint(ctx context.Context) error {
+	return runGolangciLintWithin(ctx, gateLintDeadline)
 }
 
-func lintModules(ctx context.Context, deadline time.Duration, command func(base string) string, holdsLock bool) error {
-	doing := "waiting for the box-wide lock if held, then linting"
-	if holdsLock {
-		doing = "holding the box-wide lock, linting"
-	}
+func runGolangciLintWithin(ctx context.Context, deadline time.Duration) error {
+	return lintModules(ctx, deadline, lintCommand)
+}
+
+func lintModules(ctx context.Context, deadline time.Duration, command func(base string) string) error {
+	const doing = "waiting for the box-wide lock if held, then linting"
 	dirs, err := committedModuleDirs(ctx)
 	if err != nil {
 		return fmt.Errorf("golangci-lint: could not run -- listing the modules to lint failed: %w", err)
@@ -104,7 +97,7 @@ func lintModules(ctx context.Context, deadline time.Duration, command func(base 
 			Env("GOLANGCI_LINT_CACHE", cacheDir)
 		if _, runErr := cmd.Run(); runErr != nil {
 			failures = append(failures,
-				fmt.Sprintf("%s: %s", dir, describeLintFailure(lintCtx, time.Since(stepStart), runErr, holdsLock)))
+				fmt.Sprintf("%s: %s", dir, describeLintFailure(lintCtx, time.Since(stepStart), runErr)))
 			continue
 		}
 		sparkwing.Info(lintCtx, "golangci-lint: %s clean (%s)", dir, time.Since(stepStart).Round(time.Second))
@@ -122,7 +115,7 @@ func describeLintScope(dirs []string, baseline string) string {
 		len(dirs), strings.Join(dirs, ", "), baseline)
 }
 
-func describeLintFailure(ctx context.Context, waited time.Duration, err error, holdsLock bool) string {
+func describeLintFailure(ctx context.Context, waited time.Duration, err error) string {
 	var execErr *sparkwing.ExecError
 	if errors.As(err, &execErr) && strings.Contains(execErr.Stdout+execErr.Stderr, golangciContention) {
 		return "golangci-lint: could not run -- another golangci-lint holds the box-wide " +
@@ -134,10 +127,6 @@ func describeLintFailure(ctx context.Context, waited time.Duration, err error, h
 			"so the packages it never reached were not judged and anything it printed is partial. "+
 			"Raise run.timeout in .golangci.yml rather than acting on the findings above.",
 			waited.Round(time.Second))
-	}
-	if errors.Is(ctx.Err(), context.DeadlineExceeded) && holdsLock {
-		return fmt.Sprintf("golangci-lint: could not finish -- linting itself took more than its deadline "+
-			"(%s so far, the box-wide lock held throughout), so nothing was learned about this tree.", waited.Round(time.Second))
 	}
 	if errors.Is(ctx.Err(), context.DeadlineExceeded) {
 		return fmt.Sprintf("golangci-lint: could not run -- no result after %s. Most often "+
