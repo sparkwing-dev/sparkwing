@@ -2,6 +2,7 @@ package controller
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math"
 	"path/filepath"
@@ -57,6 +58,9 @@ func (s *Server) ResolveIntake(ctx context.Context, resolver capability.Authorit
 	placement := store.RequestPlacement(request.Request)
 	local := placement == nodeproto.PlacementLocal || localPeer && placement == nodeproto.PlacementLocalTriggered
 	options, err := settings.ResolveIntake(request.Request.Options, operator, settings.Context{Origin: request.Request.Origin, Local: local, NumCPU: runtime.NumCPU()})
+	if setting := (*settings.Error)(nil); errors.As(err, &setting) {
+		return store.IntakePolicyFacts{}, &apierr.Error{Code: apierr.BadRequest, Message: setting.Error()}
+	}
 	if err != nil {
 		return store.IntakePolicyFacts{}, err
 	}

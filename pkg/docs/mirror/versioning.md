@@ -3,6 +3,10 @@
 A repository's SDK pin selects its engine. The Go SDK, TypeScript SDK and engine
 release together. Spark libraries use their own module versions.
 
+The current stable release and its notes are at
+[GitHub releases/latest](https://github.com/sparkwing-dev/sparkwing/releases/latest);
+`sparkwing update --dry-run` reports which release this machine would move to.
+
 ## Versioning per repo
 
 Go pipelines pin `github.com/sparkwing-dev/sparkwing` in `.sparkwing/go.mod`.

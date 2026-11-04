@@ -72,6 +72,16 @@ unlock.
 
 ### Fixed
 
+- **controller:** Run intake refuses an invalid setting, such as an unsupported Cloud size, as `400 bad_request`
+  A request naming `sparkwing-3cpu` returned `500 internal` "request failed". The refusal now carries the setting error, which for a size lists the valid ones.
+- **console:** The Start a run dialog keeps keyboard focus inside it
+  Tab and Shift+Tab cycle through the dialog's controls instead of reaching the runs list behind it, and closing the dialog returns focus to the button that opened it.
+- **console:** The Help panel stays on screen at narrow widths
+  At 360px the panel, and its support link, started off the left edge of the viewport.
+- **console:** A job cancelled before it started shows why in its Logs card
+  The card showed only "No logs captured for this node"; it now shows the status detail the API reports, such as the failed dependency and the retry remedy.
+- **console:** Content-addressed build assets are served with `Cache-Control: public, max-age=31536000, immutable`
+  Files under `/_next/static/` had no caching policy, so browsers revalidated them on every load.
 - **runners:** A job waiting in `RunAndAwait` no longer holds its runner's slot
   A self-hosted runner defaults to `max_concurrent: 1`, and a child run goes back to the same runners, so the first `RunAndAwait` on a one-runner team hung until its timeout. A job blocked on its children now leaves its slot free, and so does the owner of a named-runner run while one of its jobs waits, until the last wait returns. A resumed job can briefly put the runner over `max_concurrent` until other jobs finish.
 - **cli:** `sparkwing runners add --help` says a job waiting in `RunAndAwait` does not count toward `--max-concurrent`
@@ -114,6 +124,8 @@ unlock.
   They still said native host, controller and managed-service integration was incomplete and that card, refund, fraud-warning and dispute settlement needed store work. Both shipped.
 - **docs:** Configuration guidance names each component's real input
   Machine configuration no longer says installation uses submitted values (only planning and execution do), and the git-credentials page says the controller reads its secrets key from the `secrets-key` file in `--credentials-dir`, not `SPARKWING_SECRETS_KEY`.
+- **docs:** The API guide shows a read-only bearer request, and the versioning guide links the latest stable release
+
 
 ## [v0.68.7] - 2026-11-04
 ### Added

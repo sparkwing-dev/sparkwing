@@ -97,6 +97,15 @@ GitHub Actions OIDC, browser CSRF/nonce or exact signed-object URL. A missing or
 invalid credential returns 401. A live credential without the route's authority
 returns 403. Resource conflicts use their canonical code, including `lock_held`.
 
+A read-only member token lists the team's runs. `runs.read` grants reads and
+nothing else; the token expires after one day:
+
+```bash
+SPARKWING_TOKEN=$(sparkwing tokens create --scope runs.read --ttl 1d -o plain)
+curl -fsS -H "Authorization: Bearer $SPARKWING_TOKEN" \
+  https://api.sparkwing.dev/api/v1/runs
+```
+
 Machine enrollment at `POST /api/v1/runners` requires a direct account session
 with `runs.write` for a personal runner or `team.admin` for a shared runner.
 The issuing transaction rechecks that authority, repository patterns, reserved
