@@ -88,7 +88,7 @@ func AuthorizeUpload(a Authority, i UploadIdentity, kind Kind) error {
 	if (a.Upload.Set && a.Upload.Value != i) || (i.Kind != UploadJob && !a.Upload.Set) {
 		return ErrDigestNotReadable
 	}
-	for _, rule := range UploadRules {
+	for _, rule := range uploadRules {
 		if rule.IdentityKind == i.Kind && rule.RequiresAttempt == i.Attempt.Set && rule.RequiresUnit == i.Unit.Set && slices.Contains(rule.RecordKinds, kind) {
 			return nil
 		}

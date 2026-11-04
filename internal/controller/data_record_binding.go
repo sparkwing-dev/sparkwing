@@ -37,7 +37,7 @@ func (s *boundData) recordScope(authority blob.Authority, key blob.RecordKey, wr
 			return dataForbidden()
 		}
 		identity := authority.Upload.Value
-		for _, rule := range blob.UploadRules {
+		for _, rule := range blob.UploadRules() {
 			if identity.Kind == rule.IdentityKind && identity.Attempt.Set == rule.RequiresAttempt && identity.Unit.Set == rule.RequiresUnit && slices.Contains(rule.RecordKinds, key.Kind) {
 				return nil
 			}
