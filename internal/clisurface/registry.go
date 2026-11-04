@@ -65,7 +65,7 @@ func Registry() []Command {
 			{Name: "force"},
 		}},
 		{Path: "sparkwing daemon status", Flags: []Flag{}},
-		{Path: "sparkwing daemon stop", Rules: []string{"Stops the local controller and its dashboard. The dashboard no longer returns when a run or schedule next starts the controller; until this stop, a controller that exits idle and restarts on demand serves it again at the same address and read-only policy."}, Flags: []Flag{}},
+		{Path: "sparkwing daemon stop", Rules: []string{"Stops the local controller and its dashboard. The dashboard no longer returns when a run or schedule next starts the controller; until this stop, a controller that exits idle and restarts on demand serves it again with the same port and read-only policy, on loopback only; a remote address needs `dashboard start --allow-remote` again."}, Flags: []Flag{}},
 		{Path: "sparkwing dashboard", Flags: []Flag{}},
 		{Path: "sparkwing dashboard install", Platforms: []string{"linux", "darwin"}, Rules: []string{"Install a login service with restart on failure using systemd user or launchd; no socket activation. Refuse Windows with --stay guidance."}, Flags: []Flag{
 			{Name: "force"},
@@ -82,7 +82,7 @@ func Registry() []Command {
 			{Name: "stay"},
 		}},
 		{Path: "sparkwing dashboard status", Flags: []Flag{}},
-		{Path: "sparkwing dashboard stop", Rules: []string{"Stops the local controller and its dashboard. The dashboard no longer returns when a run or schedule next starts the controller; until this stop, a controller that exits idle and restarts on demand serves it again at the same address and read-only policy."}, Flags: []Flag{}},
+		{Path: "sparkwing dashboard stop", Rules: []string{"Stops the local controller and its dashboard. The dashboard no longer returns when a run or schedule next starts the controller; until this stop, a controller that exits idle and restarts on demand serves it again with the same port and read-only policy, on loopback only; a remote address needs `dashboard start --allow-remote` again."}, Flags: []Flag{}},
 		{Path: "sparkwing dashboard uninstall", Platforms: []string{"linux", "darwin"}, Rules: []string{"Remove the managed login service; Windows uses --stay only."}, Flags: []Flag{}},
 		{Path: "sparkwing debug", Flags: []Flag{}},
 		{Path: "sparkwing debug attach", Flags: []Flag{

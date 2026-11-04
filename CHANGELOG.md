@@ -36,6 +36,9 @@ unlock.
 
 ### Fixed
 
+- **dashboard:** A dashboard restored after an idle exit binds loopback only
+  A dashboard started with `--allow-remote` on a non-loopback address came back on that address whenever a run or schedule restarted the controller, so the consent outlived the network it was given on. The restore now keeps the port and read-only policy but binds `127.0.0.1`; run `sparkwing dashboard start --allow-remote` again to serve remotely.
+
 - **runners:** A job waiting in `RunAndAwait` no longer holds its runner's slot
   A self-hosted runner defaults to `max_concurrent: 1`, and a child run goes back to the same runners, so the first `RunAndAwait` on a one-runner team hung until its timeout. A job blocked on its children now leaves its slot free, and so does the owner of a named-runner run while one of its jobs waits, until the last wait returns. A resumed job can briefly put the runner over `max_concurrent` until other jobs finish.
 
