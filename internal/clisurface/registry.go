@@ -436,7 +436,7 @@ func Registry() []Command {
 			{Name: "platform", Argument: "PLATFORM", Values: []string{"kubernetes"}, Meaning: "Record a shared Kubernetes runner at admin enrollment; a runner in a pod stops at its first poll without it."},
 			{Name: "launcher", Meaning: "Enroll only claims.launch for a shared reserved pool and skip the persistent runner service."},
 		}},
-		{Path: "sparkwing runners list", Authority: teamCredential, Rules: []string{"Read the same runner details from the local controller or a selected profile. JSON retains granted identity, reservations, labels, capacity, active jobs and headroom. Plain emits names; quiet JSON emits name objects."}, Flags: []Flag{
+		{Path: "sparkwing runners list", Authority: teamCredential, Rules: []string{"Read the same runner details from the local controller or a selected profile. The local controller lists this machine as one local runner named after its host, with the runner.labels the daemon read at start and a last_seen of the read time. JSON retains granted identity, reservations, labels, capacity, active jobs and headroom. Plain emits names; quiet JSON emits name objects."}, Flags: []Flag{
 			{Name: "profile", Argument: "NAME"},
 			{Name: "quiet", Short: "q"},
 		}},
