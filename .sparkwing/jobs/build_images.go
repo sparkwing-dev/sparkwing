@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"regexp"
 	"strings"
 
 	sparkwing "github.com/sparkwing-dev/sparkwing/sparkwing"
@@ -22,7 +23,7 @@ type BuildImages struct {
 type BuildImagesArgs struct {
 	Registry    string `flag:"registry" desc:"Optional registry prefix (e.g. an ECR host). When set, images are tagged <registry>/<component>:<tag>."`
 	Push        bool   `flag:"push" desc:"Build multi-arch (linux/amd64,linux/arm64) and push to the registry. Requires --registry."`
-	Tag         string `flag:"tag" desc:"Override the image tag. Default: commit-<short-sha> resolved from the current HEAD."`
+	Tag         string `flag:"tag" desc:"Override the image tag. Default: the service build stamp vX.Y.Z-N-gSHA from git describe, after fetching tags from origin."`
 	SkipWeb     bool   `flag:"skip-web-bundle" desc:"Skip the Next.js SPA build. Use when internal/web/next-out/ is already current (faster iteration)."`
 	RuntimeBase bool   `flag:"runtime-base" desc:"Build each Dockerfile's runtime stage, without a binary, as <component>-base for publish-images to append signed binaries to. Requires --push; the builder must run linux/arm64 natively or under emulation."`
 	QATrust     bool   `flag:"qatrust" desc:"Build with the qatrust tag: trust the QA release key and read policy and engines from https://qa-releases.sparkwing.dev. Pair with --tag set to the QA pre-release version (e.g. v0.68.0-qa.1). Never for production images."`
@@ -49,7 +50,7 @@ func (BuildImages) Help() string {
 
 func (BuildImages) Examples() []sparkwing.Example {
 	return []sparkwing.Example{
-		{Comment: "Local single-arch build, tagged commit-<sha>", Command: "sparkwing run build-images"},
+		{Comment: "Local single-arch build, tagged vX.Y.Z-N-gSHA", Command: "sparkwing run build-images"},
 		{Comment: "Push multi-arch to a registry", Command: "sparkwing run build-images -- --registry=123456789012.dkr.ecr.us-west-2.amazonaws.com --push"},
 		{Comment: "Reuse a current SPA bundle to skip the slow npm step", Command: "sparkwing run build-images -- --skip-web-bundle"},
 		{Comment: "QA-flavored images for a QA pre-release", Command: "sparkwing run build-images -- --qatrust --tag v0.68.0-qa.1 --registry=123456789012.dkr.ecr.us-west-2.amazonaws.com --push"},
@@ -113,11 +114,11 @@ func (p *BuildImages) resolveTag(ctx context.Context) error {
 	if p.args.Tag != "" {
 		p.tag = p.args.Tag
 	} else {
-		sha, err := sparkwing.Exec(ctx, "git", "rev-parse", "--short", "HEAD").String()
+		tag, err := describeServiceBuild(ctx)
 		if err != nil {
-			return fmt.Errorf("resolve git sha: %w", err)
+			return err
 		}
-		p.tag = "commit-" + sha
+		p.tag = tag
 	}
 
 	prefix := ""
@@ -136,6 +137,33 @@ func (p *BuildImages) resolveTag(ctx context.Context) error {
 	sparkwing.Info(ctx, "resolved tag=%s; %d images to build", p.tag, len(p.refs))
 	sparkwing.Annotate(ctx, sparkwing.Annotation{Message: "tag: " + p.tag})
 	return nil
+}
+
+// safety: the controller and runner enforce signed version policy only for a release or this exact stamp; any
+// other version is a development build, which a hosted controller and Cloud launcher refuse to run.
+var serviceBuildStamp = regexp.MustCompile(`^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)-(0|[1-9][0-9]*)-g[0-9a-f]{7,40}$`)
+
+func describeServiceBuild(ctx context.Context) (string, error) {
+	shallow, err := sparkwing.Exec(ctx, "git", "rev-parse", "--is-shallow-repository").String()
+	if err != nil {
+		return "", fmt.Errorf("inspect checkout depth: %w", err)
+	}
+	fetch := []string{"fetch", "--quiet", "--tags", "origin"}
+	if shallow == "true" {
+		fetch = append(fetch, "--unshallow")
+	}
+	if _, err := sparkwing.Exec(ctx, "git", fetch...).Run(); err != nil {
+		return "", fmt.Errorf("fetch release tags so the image version names its release base, or pass --tag: %w", err)
+	}
+	tag, err := sparkwing.Exec(ctx, "git", "describe", "--tags", "--long", "--abbrev=12",
+		"--match", "v[0-9]*.[0-9]*.[0-9]*", "--exclude", "*-*", "HEAD").String()
+	if err != nil {
+		return "", fmt.Errorf("describe HEAD from its newest stable release tag: %w", err)
+	}
+	if !serviceBuildStamp.MatchString(tag) {
+		return "", fmt.Errorf("git describe gave %q, not the service build stamp vX.Y.Z-N-gSHA; fetch the stable release tags or pass --tag", tag)
+	}
+	return tag, nil
 }
 
 func (p *BuildImages) buildWebBundle(ctx context.Context) error {

@@ -9,7 +9,10 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"regexp"
 	"time"
+
+	"golang.org/x/mod/semver"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/buildinfo"
@@ -79,7 +82,38 @@ func (r *Resolver) Index(ctx context.Context, now time.Time) (IndexResult, error
 
 // safety: a qatrust pre-release enforces the QA policy instead of passing as a development build.
 func releaseBuild(version string) bool {
-	return buildinfo.IsReleaseVersion(version) || QATrust && releaseVersion(version)
+	return buildinfo.IsReleaseVersion(version) || mainBuild(version) || QATrust && releaseVersion(version)
+}
+
+// DevelopmentBuildEnv set to 1 lets a launcher run a development build on a development cluster.
+const DevelopmentBuildEnv = "SPARKWING_DEVELOPMENT_BUILD"
+
+// RequirePolicyBuild refuses a development build, which skips signed version policy, for a component that runs
+// customer work, unless allowed reports the explicit override a development cluster set. An empty override means
+// the component has none. An unset version enforces policy, as the resolver does.
+func RequirePolicyBuild(component, version, override string, allowed bool) error {
+	if version == "" || releaseBuild(version) || allowed {
+		return nil
+	}
+	fix := "deploy a release vX.Y.Z or a main build stamped vX.Y.Z-N-gSHA (sparkwing run build-images stamps it)"
+	if override != "" {
+		fix += ", or on a development cluster set " + override
+	}
+	return fmt.Errorf("%s build %q is a development build, which skips signed version policy, so it refuses customer work: %s",
+		component, version, fix)
+}
+
+var describeSuffix = regexp.MustCompile(`^-(0|[1-9][0-9]*)-g[0-9a-f]{7,40}$`)
+
+// safety: a service build from a main commit, stamped `vX.Y.Z-N-gSHA` by `git describe --tags --long`,
+// enforces the signed engine policy like a release; its own version is absent from the index and must not
+// switch policy off.
+func mainBuild(version string) bool {
+	if !semver.IsValid(version) || semver.Build(version) != "" {
+		return false
+	}
+	suffix := semver.Prerelease(version)
+	return describeSuffix.MatchString(suffix) && buildinfo.IsReleaseVersion(version[:len(version)-len(suffix)])
 }
 
 func (r *Resolver) localIndex(now time.Time) IndexResult {

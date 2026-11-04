@@ -4,9 +4,11 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/engineid"
 	"github.com/sparkwing-dev/sparkwing/internal/releaseasset"
 )
@@ -34,5 +36,63 @@ func TestDevelopmentPolicySkipsIndexAndRunnerUpdates(t *testing.T) {
 	cancel()
 	if _, err := r.Index(ctx, time.Now()); !errors.Is(err, context.Canceled) {
 		t.Fatal(err)
+	}
+}
+
+func TestMainBuildStampIsNarrow(t *testing.T) {
+	for version, want := range map[string]bool{
+		"v0.68.6-0-gabc1234": true, "v0.68.6-12-g0123456789abcdef0123456789abcdef01234567": true,
+		"v0.68.6": false, "v0.68.6-dev+abc1234": false, "commit-0123456": false, "(devel)": false, "development": false,
+		"v0.68.6-3-gABC1234": false, "v0.68.6-03-gabc1234": false, "v0.68.6-3-gabc12": false, "v0.68.6-3-gabc1234+dirty": false,
+		"v0.68-3-gabc1234": false, "v0.68.6-qa.1-3-gabc1234": false,
+	} {
+		if mainBuild(version) != want {
+			t.Errorf("mainBuild(%q) = %v, want %v", version, !want, want)
+		}
+	}
+}
+
+func TestMainBuildEnforcesSignedEnginePolicy(t *testing.T) {
+	fixture, transport, key, policy, now := fixtureResolver(t)
+	policy.Revoked = []Restriction{{Version: "v0.10.2", Reason: "revocation fixture", Security: true, AnnouncedAt: now, EffectiveAt: now}}
+	transport.policy(t, key, policy)
+	config := fixture.config
+	config.BuildVersion = "v0.20.0-3-gabc1234"
+	r, err := NewResolver(config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	index, err := r.Index(t.Context(), now)
+	if err != nil || index.Index.Development() || len(transport.requests) == 0 {
+		t.Fatalf("main build skipped signed policy: %+v: %v", index, err)
+	}
+	if _, err := Evaluate(index.Index, "v0.20.0", now); err != nil {
+		t.Fatalf("listed engine refused: %v", err)
+	}
+	_, err = Evaluate(index.Index, "v0.10.2", now)
+	requireCode(t, err, apierr.VersionRevoked)
+	_, err = Evaluate(index.Index, "v0.30.0", now)
+	requireCode(t, err, apierr.VersionUnsupported)
+	_, err = Evaluate(index.Index, config.BuildVersion, now)
+	requireCode(t, err, apierr.VersionUnsupported)
+}
+
+func TestRequirePolicyBuildRefusesDevelopmentUnlessAllowed(t *testing.T) {
+	for _, version := range []string{"", "v0.68.6", "v0.68.6-3-gabc1234"} {
+		if err := RequirePolicyBuild("launcher", version, "X=1", false); err != nil {
+			t.Fatalf("policy build %q refused: %v", version, err)
+		}
+	}
+	for _, version := range []string{"commit-0123456", "v0.68.6-dev+abc1234", "(devel)"} {
+		err := RequirePolicyBuild("launcher", version, "X=1", false)
+		if err == nil || !strings.Contains(err.Error(), version) || !strings.Contains(err.Error(), "vX.Y.Z-N-gSHA") || !strings.Contains(err.Error(), "set X=1") {
+			t.Fatalf("development build %q: %v", version, err)
+		}
+		if err := RequirePolicyBuild("launcher", version, "X=1", true); err != nil {
+			t.Fatalf("explicit override refused %q: %v", version, err)
+		}
+	}
+	if err := RequirePolicyBuild("Cloud job", "commit-0123456", "", false); err == nil || strings.Contains(err.Error(), "development cluster set") {
+		t.Fatalf("job without an override: %v", err)
 	}
 }

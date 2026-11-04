@@ -52,6 +52,12 @@ func (s *EngineController) CheckRunner(ctx context.Context, authority capability
 	if err != nil {
 		return capability.Principal{}, err
 	}
+	// safety: only an operator issues a service launcher token, and that launcher is the signed service image
+	// the deploy workflow built, so its own version is not a release to look up. Every job it starts still
+	// checks the run's engine against the signed index before executing pipeline code.
+	if capability.CloudLauncher(principal.Capability) {
+		return principal, nil
+	}
 	policy := s.RunnerPolicy
 	if principal.Capability.Subject.Kind == capability.SubjectLocal && s.LocalRunnerPolicy != nil {
 		policy = s.LocalRunnerPolicy
