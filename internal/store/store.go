@@ -1290,7 +1290,7 @@ func scanApproval(rs rowScanner) (*Approval, error) {
 var schemaNeutral string
 
 // safety: fresh stores get this baseline whole; an older store upgrades only through schemaUpgrades.
-const expectedSchemaVersion = 31
+const expectedSchemaVersion = 30
 
 // ExpectedSchemaVersion returns the schema version this binary
 // understands. Useful for diagnostics, version-mismatch reporting,

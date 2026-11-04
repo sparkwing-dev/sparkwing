@@ -95,7 +95,7 @@ func TestSchemaUpgradeRefusesEveryOtherStore(t *testing.T) {
 		"unknown 28 digest": {`UPDATE sparkwing_schema_version SET baseline_digest='other'`, []string{`"other" is not the v0.68.3 baseline`, "left the store unchanged", "open it once with Sparkwing v0.68.3"}},
 		"missing 28 digest": {`UPDATE sparkwing_schema_version SET baseline_digest=''`, []string{`"<missing>" is not the v0.68.3 baseline`, "left the store unchanged"}},
 		"older than 28":     {`UPDATE sparkwing_schema_version SET version=27`, []string{"version 27 is older", "this build cannot upgrade it", "back up the store"}},
-		"newer than binary": {`UPDATE sparkwing_schema_version SET version=32`, []string{"version 32 is newer", "start a binary matching the store"}},
+		"newer than binary": {`UPDATE sparkwing_schema_version SET version=31`, []string{"version 31 is newer", "start a binary matching the store"}},
 	} {
 		t.Run(name, func(t *testing.T) {
 			target := storetest.New(t)

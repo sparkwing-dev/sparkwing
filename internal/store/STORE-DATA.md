@@ -9,14 +9,14 @@ counter domains, boolean flags, and nonempty concurrency keys. Installations
 are referenced with their tenant. Job receipts reference the exact attempt and
 generation. Sessions, memberships and identities reference an existing account.
 The schema counterexample suites exercise these rules against either dialect.
-The baseline version is 31. Both dialects are translated from `schema.sql`.
+The baseline version is 30. Both dialects are translated from `schema.sql`.
 A fresh store gets the baseline whole. `schemaUpgrades` in `schema_upgrade.go`
 lists the forward steps, each keyed by the version and baseline digest a release
 recorded, and an older supported store takes every later step in the same open
 transaction, under the migration advisory lock on PostgreSQL: a v0.68.3
 schema-28 store gains `nodes.trusted_host` (version 29), and a v0.68.7 schema-29
-store gets the replaced `warm_pool_desired` view (version 30), and a schema-30
-store gains the `device_logins` table (version 31). A step adds a
+store gets the replaced `warm_pool_desired` view and the `device_logins` table
+(version 30). A step adds a
 column at the end of its table so the upgraded schema matches a fresh one. A
 view is replaced with `CREATE OR REPLACE VIEW`, which keeps PostgreSQL grants;
 SQLite drops and recreates it. Any other version or digest requires a backup

@@ -257,6 +257,7 @@ type auditOIDCMint struct {
 	Subject   string      `json:"subject"`
 	ExpiresAt int64       `json:"expires_at"`
 }
+
 // safety: the login id is opaque and the decision is one of two words, so the row names no device or person.
 type auditDeviceLogin struct {
 	LoginID  string `json:"-"`

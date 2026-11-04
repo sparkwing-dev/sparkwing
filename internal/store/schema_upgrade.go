@@ -31,11 +31,6 @@ var schemaUpgrades = []schemaUpgrade{
 		statements: []string{
 			strings.TrimSpace(warmPoolDesiredV30),
 			`UPDATE warm_pool_settings SET start_time_target_seconds=20 WHERE start_time_target_seconds=10`,
-		},
-	},
-	{
-		from: 30, release: "v0.68.8", digest: "17470e5f1be1a34b3488099c1c08500449c0c55b3b6e19071637c5fbd52cc0c3",
-		statements: []string{
 			`CREATE TABLE device_logins (
     id TEXT NOT NULL PRIMARY KEY,
     device_digest TEXT NOT NULL UNIQUE,
