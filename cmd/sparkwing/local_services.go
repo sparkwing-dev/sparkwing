@@ -27,6 +27,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/wingd"
 	wingdclient "github.com/sparkwing-dev/sparkwing/internal/wingd/client"
 	"github.com/sparkwing-dev/sparkwing/internal/wingd/localcontroller"
+	"github.com/sparkwing-dev/sparkwing/pkg/match"
 	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
 )
 
@@ -172,6 +173,7 @@ func bindLocalController(ctx context.Context, b localcontroller.Binding) (_ loca
 	}
 	schedules.NativeTimer = &timerHost
 	server.WithLocalSessions(paths.PathsAt(b.Home).SessionLedgerDir())
+	server.WithLocalRunner(controller.LocalRunner{Name: localRunnerName(), Labels: match.SelfAsserted(machineRunner.Labels)})
 	server.WithLocalAdmission(func(ctx context.Context) (wingwire.QueueState, error) {
 		// safety: a daemon can hold its socket and go quiet before or after its hello; the bound answers the
 		// console's poll with the public refusal well before the browser abandons the request at ten seconds.
@@ -262,4 +264,12 @@ func warnIgnoredRunnerLabels(path string) {
 	for _, label := range ignored {
 		slog.Warn(label.String())
 	}
+}
+
+// localRunnerName names this machine in the runner inventory.
+func localRunnerName() string {
+	if host, err := os.Hostname(); err == nil && host != "" {
+		return host
+	}
+	return "local"
 }
