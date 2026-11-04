@@ -429,3 +429,16 @@ func TestRefreshHeadroom_ChurnDoesNotCostTheRunsAlreadyMeasured(t *testing.T) {
 		t.Error("runs-awaiting-measure = 0, want the arrivals counted: a run charged to the machine because it has no figure yet must be visible, not silent")
 	}
 }
+
+func TestRefreshHeadroom_CPUPastAHoldersChargeIsStillItsOwn(t *testing.T) {
+	d := newAttributionDaemon(t, map[int]float64{4242: 6.5})
+	d.byRun["holder"].resources = wingwire.HostResources{Cores: 1}
+
+	d.refreshHeadroom()
+
+	cores := queueRow(t, queueState(t, d), "cores")
+	if math.Abs(cores.External-2) > coresEpsilon {
+		t.Errorf("external cores = %.2f, want 2.00: a job charged one core that runs 6.5 is Sparkwing load, "+
+			"so none of it is external, as with a fixed runner slot", cores.External)
+	}
+}

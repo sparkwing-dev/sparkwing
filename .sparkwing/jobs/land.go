@@ -59,7 +59,7 @@ func (p *Land) Plan(_ context.Context, plan *sparkwing.Plan, in ReviewArgs, rc s
 	if rc.Git != nil {
 		branch = rc.Git.Branch
 	}
-	pre := sparkwing.Job(plan, "preconditions", &landPreconditionsJob{RepoDir: repoDir}).Inline()
+	pre := sparkwing.Job(plan, "preconditions", &landPreconditionsJob{RepoDir: repoDir}).Inline().Cores(lightJobCores)
 
 	gate := gateJobs(plan, &Gate{}, "gate", false)
 	needs := make([]sparkwing.Dep, 0, len(gate)+1)
@@ -78,7 +78,7 @@ func (p *Land) Plan(_ context.Context, plan *sparkwing.Plan, in ReviewArgs, rc s
 		RunID:   rc.RunID,
 		Head:    sparkwing.RefTo[landHead](pre),
 		Review:  sparkwing.RefTo[reviewRecord](review),
-	}).Inline().Needs(needs...)
+	}).Inline().Cores(lightJobCores).Needs(needs...)
 	return nil
 }
 

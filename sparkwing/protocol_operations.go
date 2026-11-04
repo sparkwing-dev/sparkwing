@@ -141,7 +141,7 @@ func (sdkOperations) Plan(ctx context.Context, name string, args map[string]stri
 		return nil, nodeproto.PlanDoc{}, sdkError(code, err.Error())
 	}
 	p.registration = reg
-	doc := planDocument(p)
+	doc := documentForHost(ctx, planDocument(p))
 	raw, err := json.Marshal(doc)
 	if err != nil {
 		return nil, doc, sdkError(apierr.PlanFailed, "plan cannot be encoded")
@@ -377,7 +377,7 @@ func evaluate(ctx context.Context, p *Plan, n *JobNode, id string, input json.Ra
 			GroupJobs(expansion, ancestor, members...)
 		}
 		registerRecoveryArgs(expansion)
-		doc := planDocument(expansion)
+		doc := documentForHost(ctx, planDocument(expansion))
 		raw, err := json.Marshal(doc)
 		if err != nil {
 			return nil, err
@@ -416,6 +416,18 @@ func evaluate(ctx context.Context, p *Plan, n *JobNode, id string, input json.Ra
 		return doc.Jobs, nil
 	}
 	return nil, sdkError(apierr.UnknownClosure, "closure is not declared")
+}
+
+// safety: a host older than a declaration refuses the whole plan as an unknown field, so a core request
+// it never named is left out and the job keeps that host's default charge.
+func documentForHost(ctx context.Context, doc nodeproto.PlanDoc) nodeproto.PlanDoc {
+	if sdkserve.HostAccepts(ctx, nodeproto.FeatureJobCores) {
+		return doc
+	}
+	for i := range doc.Jobs {
+		doc.Jobs[i].Cores = nil
+	}
+	return doc
 }
 
 func sdkError(code apierr.Code, message string) *apierr.Error {

@@ -245,6 +245,8 @@ type JobExecutionSettings struct {
 	MemoTTL           Setting[time.Duration] `json:"memo_ttl"`
 	Requires          Setting[[]string]      `json:"requires"`
 	Prefers           Setting[[]string]      `json:"prefers"`
+	// Cores is the job's declared core request; zero leaves local admission's default.
+	Cores float64 `json:"cores,omitempty"`
 }
 
 // GuardDeclarations contains author predicates before evaluation adds a verdict.

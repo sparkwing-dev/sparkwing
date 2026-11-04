@@ -52,9 +52,9 @@ admission:
 
 The modes are:
 
-- `classic` keeps strict priority and FIFO ordering, permits one opportunistic
-  backfill past a blocked head, then protects that head. It is the default so
-  upgrading Sparkwing does not change admission behavior.
+- `classic` keeps strict priority and FIFO ordering. A later waiter starts
+  before a blocked head only when doing so cannot delay that head (see
+  [Queue order](#queue-order)). It is the default.
 - `off` does not gate CPU or memory. The daemon still owns run lifecycle,
   measurement and machine queue visibility. Store-owned concurrency groups still apply.
 - `auto` uses measured duration and resource profiles, weighted workload
@@ -82,10 +82,56 @@ Admission class is resolved into the sealed execution options. Local run and
 job admission consume that winner. Explicit request settings outrank pipeline
 declarations, which outrank the inferred class.
 
-Auto backfill uses measured p99 duration. Unknown-duration jobs receive the
-single opportunistic backfill retained for first-run liveness, but cannot keep
-passing a protected waiter. Measured short jobs may continue using spare
-capacity until the older waiter's delay budget is spent.
+Auto backfill uses measured p99 duration. Measured short jobs may also use
+capacity a blocked head has reserved, until the head's delay budget is spent.
+Unknown-duration jobs never pass a head that way.
+
+## Queue order
+
+Within one priority and class, waiters start in arrival order: an older waiter
+that fits is never passed by a newer one. When the oldest waiter does not fit,
+a later, smaller waiter may start first only if the older one would still fit
+beside it, and beside every job admitted after the older one, as soon as the
+jobs admitted before the older one end. The check uses the CPU and memory the
+machine offers now, after its reserve and external load, so steady load from
+other programs cannot let a stream of small jobs keep a large one waiting.
+A waiter larger than that waits until the queue ahead of it drains; when no
+Sparkwing work holds the machine, the oldest waiter starts even if it asks
+for more than the machine offers.
+
+## Core requests
+
+Each job is charged one core unless it declares otherwise. A job declares the
+CPU it uses with `Cores`, down to a quarter core:
+
+```go
+sparkwing.Job(plan, "preconditions", &Check{}).Cores(0.25) // mostly git and network waits
+sparkwing.Job(plan, "test", &Test{}).Cores(6)              // runs go test -p 6
+```
+
+```ts
+plan.job("test", test).cores(6);
+```
+
+A small request lets a job that mostly waits start beside running work. A
+larger request reserves cores in queue order, so the job does not share them,
+at the cost of fewer jobs running at once; a job left at the default may run
+more processes than it is charged, and the machine is then overcommitted, as
+with fixed runner slots. A request larger than the machine
+is charged the whole machine. Hosts without local admission ignore the request.
+A host older than this setting does not name it in its handshake, so the SDK
+leaves it out of the plan and the job keeps the one-core charge there.
+
+## External load
+
+Admission subtracts CPU that other programs use from what it grants. CPU used
+by a job's own processes is never external: on Linux, Windows and macOS the
+daemon follows the process tree of the host process that started the job and
+counts all of that tree's CPU as Sparkwing load. Admission charges the job its
+declared request, so a job charged one core that runs eight processes
+overcommits the machine, as a fixed runner slot would; it does not shrink what
+other jobs are granted. Where the daemon cannot read process CPU, all host
+load counts as external.
 
 ## Custom policy
 

@@ -49,7 +49,16 @@ type Request struct {
 	Input    json.RawMessage   `json:"input,omitempty"`
 	// Target identifies the active request cancelled by OpCancel, including eval without job/step.
 	Target string `json:"target,omitempty"`
+	// Features names the optional plan declarations this host accepts. Hello only; an SDK leaves a
+	// declaration the host does not name out of the plan, so an older host still accepts it.
+	Features []string `json:"features,omitempty"`
 }
+
+// FeatureJobCores is the hello feature for a job's declared core request.
+const FeatureJobCores = "job_cores"
+
+// HostFeatures lists the optional plan declarations this host accepts.
+func HostFeatures() []string { return []string{FeatureJobCores} }
 
 // EngineIdentity permits actionable mismatch diagnostics without stamping every request.
 type EngineIdentity struct {
@@ -238,10 +247,10 @@ func ParseFrame(line []byte) (Frame, error) {
 // OperationFields names the request fields an operation must carry and may carry, by JSON name.
 type OperationFields struct{ Required, Allowed []string }
 
-var requestFieldNames = []string{"protocol", "engine", "runner", "binding", "pipeline", "args", "run", "job", "step", "attempt", "settled", "failure", "closure", "input", "target"}
+var requestFieldNames = []string{"protocol", "engine", "runner", "binding", "features", "pipeline", "args", "run", "job", "step", "attempt", "settled", "failure", "closure", "input", "target"}
 
 var requestFieldRules = map[Op]OperationFields{
-	OpHello:    {[]string{"protocol", "engine", "runner"}, []string{"protocol", "engine", "runner", "binding"}},
+	OpHello:    {[]string{"protocol", "engine", "runner"}, []string{"protocol", "engine", "runner", "binding", "features"}},
 	OpDescribe: {},
 	OpPlan:     {[]string{"pipeline", "args", "run"}, []string{"pipeline", "args", "run"}},
 	OpRunStep:  {[]string{"job", "step", "attempt", "settled"}, []string{"args", "job", "step", "attempt", "settled", "failure"}},
@@ -261,7 +270,7 @@ func RequestFields(op Op) OperationFields {
 
 func (r Request) fields() map[string]bool {
 	return map[string]bool{
-		"protocol": r.Protocol != 0, "engine": r.Engine != nil, "runner": r.Runner != nil, "binding": r.Binding != nil,
+		"protocol": r.Protocol != 0, "engine": r.Engine != nil, "runner": r.Runner != nil, "binding": r.Binding != nil, "features": r.Features != nil,
 		"pipeline": r.Pipeline != "", "args": r.Args != nil, "run": r.Run != nil, "job": r.Job != "", "step": r.Step != "",
 		"attempt": r.Attempt != 0, "settled": r.Settled != nil, "failure": r.Failure != nil, "closure": r.Closure != "",
 		"input": len(r.Input) != 0, "target": r.Target != "",
