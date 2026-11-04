@@ -226,4 +226,15 @@ func TestLocalDashboardReturnsWithAnOnDemandRestart(t *testing.T) {
 	if status := restart(); status.DashboardURL != "" || len(binds) != 2 {
 		t.Fatalf("a forgotten dashboard returned: %+v %v", status, binds)
 	}
+	remote := serving
+	remote.DashboardAddress = "0.0.0.0:4343"
+	if _, err := lifecycle.StartDashboard(t.Context(), remote); err != nil {
+		t.Fatal(err)
+	}
+	if status := restart(); status.DashboardURL == "" || len(binds) != 4 || binds[3] != serving.DashboardAddress {
+		t.Fatalf("a restored remote dashboard did not fall back to loopback: %+v %v", status, binds)
+	}
+	if _, err := lifecycle.StartDashboard(t.Context(), serving); err != nil {
+		t.Fatalf("the loopback restore lost its read-only policy: %v", err)
+	}
 }

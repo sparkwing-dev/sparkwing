@@ -52,7 +52,7 @@ type localRuntimeSession struct {
 }
 
 // NewLocalRuntime constructs the elected local process used by LocalLifecycle.
-// An empty DashboardAddress restores the last dashboard address the runtime served, unless
+// An empty DashboardAddress restores the remembered dashboard on loopback, unless
 // Standalone; with nothing remembered it serves api.sock only.
 // Another process's election is refused without opening its store.
 func NewLocalRuntime(cfg LocalRuntimeConfig) (LocalRuntime, error) {

@@ -148,6 +148,9 @@ unlock.
   The card showed only "No logs captured for this node"; it now shows the status detail the API reports, such as the failed dependency and the retry remedy.
 - **console:** Content-addressed build assets are served with `Cache-Control: public, max-age=31536000, immutable`
   Files under `/_next/static/` had no caching policy, so browsers revalidated them on every load.
+- **dashboard:** A dashboard restored after an idle exit binds loopback only
+  A dashboard started with `--allow-remote` on a non-loopback address came back on that address whenever a run or schedule restarted the controller, so the consent outlived the network it was given on. The restore now keeps the port and read-only policy but binds `127.0.0.1`; run `sparkwing dashboard start --allow-remote` again to serve remotely.
+
 - **runners:** A job waiting in `RunAndAwait` no longer holds its runner's slot
   A self-hosted runner defaults to `max_concurrent: 1`, and a child run goes back to the same runners, so the first `RunAndAwait` on a one-runner team hung until its timeout. A job blocked on its children now leaves its slot free, and so does the owner of a named-runner run while one of its jobs waits, until the last wait returns. A resumed job can briefly put the runner over `max_concurrent` until other jobs finish.
 - **cli:** `sparkwing runners add --help` says a job waiting in `RunAndAwait` does not count toward `--max-concurrent`
