@@ -1,6 +1,6 @@
 # Deploy pipeline credentials: proposed IAM role, cluster access and parameters
 
-Status: proposal for Korey (2026-11-02), with his runner-isolation and GitOps-scope decisions folded in. Nothing here is applied. The `deploy` pipeline in `.sparkwing/jobs/deploy.go` expects exactly these names; change both together. The Terraform and Argo manifests are on kikd-infra deploy-scope branch (local worktree `/var/tmp/sw-fix-deploy-infra`, not pushed).
+Status: applied 2026-11-04 on Korey's go-ahead (decision 96). The role, policy, access entry, RBAC and AppProject are on kikd-infra main, and the two Sparkwing Argo applications read `sparkwing-dev/sparkwing-gitops`. The `deploy` pipeline in `.sparkwing/jobs/deploy.go` expects exactly these names; change both together. What remains is under [What a person does](#what-a-person-does).
 
 The pipeline holds no key. Each deploy job asks the controller for an OIDC token (`sparkwing.OIDCToken(ctx, "sts.amazonaws.com")`), exchanges it with `sts:AssumeRoleWithWebIdentity` for a one-hour session, and runs `aws`, `kubectl` and `git` with only that session. The machine's AWS profile, config and git config are never read (decision 82: per-run credentials, both owned machines may deploy).
 
@@ -70,14 +70,13 @@ An EKS access entry maps the role to the Kubernetes group `sparkwing-deployer`, 
 
 | Name | Holds | Scope |
 | --- | --- | --- |
-| `/kikd-prod/sparkwing/deploy/gitops-deploy-key` | ed25519 private key of a write deploy key | `koreyGambill/kikd-gitops`, until the move below |
-| `/kikd-prod/sparkwing/deploy/sparkwing-gitops-deploy-key` | ed25519 private key of a write deploy key | `koreyGambill/sparkwing-gitops` only, after the move |
+| `/kikd-prod/sparkwing/deploy/sparkwing-gitops-deploy-key` | ed25519 private key of a write deploy key | `sparkwing-dev/sparkwing-gitops` only |
 | `/kikd-prod/sparkwing/deploy/ci-smoke-deploy-key` | ed25519 private key of a read-only deploy key | `sparkwing-dev/sparkwing-ci-smoke` only |
 | `/kikd-prod/sparkwing/deploy/staging-gate-token` | staging team token, `runs.read,logs.read,runs.write` | staging fixture team `stg-qa` |
 | `/kikd-prod/sparkwing/deploy/smoke-token-qa-team` | production team token, `runs.read,logs.read,runs.write` | `qa-team` |
 | `/kikd-prod/sparkwing/deploy/smoke-token-qa-team-b` | production team token, `runs.read,logs.read,runs.write` | `qa-team-b` |
 
-These five are long-lived secrets. They never sit on a runner's disk past the job (the job writes each to a 0600 file in its temporary directory and removes the directory) and are masked in logs, but whoever holds the role can read them. Each token should carry an expiry and a rotation date in the ink vault runbook.
+These are long-lived secrets. They never sit on a runner's disk past the job (the job writes each to a 0600 file in its temporary directory and removes the directory) and are masked in logs, but whoever holds the role can read them. Each token should carry an expiry and a rotation date in the ink vault runbook.
 
 ## Retries and old runs
 
@@ -108,8 +107,8 @@ Later deploys then trace the image and run unattended.
 
 ## What a person does
 
-1. Review and merge kikd-infra deploy-scope branch commit `2c90511` (role, policy, access entry, RBAC, AppProject), set `sparkwing_deploy_team`, and apply `terraform/sparkwing-product`.
-2. Create the two deploy keys in GitHub and store their private halves; mint the three team tokens and store them. Fill `<team>` in the trust policy.
+1. Done 2026-11-04: the role, policy, access entry, RBAC and AppProject are applied, with `sparkwing_deploy_team` defaulting to `spark-sharks`. Confirm the production team slug that covers `sparkwing-dev/sparkwing`; a different slug is a one-line Terraform change.
+2. Allow deploy keys in the `sparkwing-dev` organisation (it refuses them today), then create the write key on `sparkwing-gitops` and the read-only key on `sparkwing-ci-smoke` and store their private halves; mint the three team tokens and store them.
 3. Install the GitHub App so repository-scoped runs exist in production: the production team's installation must cover `sparkwing-dev/sparkwing` (the push that starts a deploy) and the WSL workstation and Mac must be enrolled as repository-scoped runners for it (decision 82). The staging `stg-qa` team and the production `qa-team` and `qa-team-b` installations must also cover `sparkwing-dev/sparkwing`, because the gate and the smoke trigger `example` and `deploy-smoke` at the candidate commit, and staging's must cover `sparkwing-ci-smoke`.
 4. Run `sparkwing run deploy -- --dry-run --stop-after staging` from a checkout and read the printed actions.
 5. Add `on: push` for `main` to the `deploy` entry in `.sparkwing/sparkwing.yaml` together with `args: {stop-after: staging}`. Watch one push deploy and gate staging, then remove the `args` line so the next push promotes to production.
@@ -139,7 +138,7 @@ The cheap mitigations the pipeline applies:
 
 A GitHub deploy key reaches its whole repository, so a write key on kikd-gitops can change every application there (bitwing, moonborn, okbot, stormwing and the rest). Korey chose to confine it.
 
-**Recommendation: a separate repository, `koreyGambill/sparkwing-gitops`,** holding the `sparkwing` and `sparkwing-staging` directories unchanged. The alternative is a branch of kikd-gitops tracked only by the two Sparkwing applications.
+**Chosen: a separate repository, `sparkwing-dev/sparkwing-gitops`,** holding the `sparkwing` and `sparkwing-staging` directories unchanged. The alternative is a branch of kikd-gitops tracked only by the two Sparkwing applications.
 
 | | Separate repository | Branch in kikd-gitops |
 | --- | --- | --- |
@@ -153,12 +152,6 @@ A GitHub deploy key reaches its whole repository, so a write key on kikd-gitops 
 
 **Argo refresh.** The role no longer patches applications, so the pipeline waits for Argo's own poll (3 minutes by default), about four extra minutes per deploy across the two phases. A GitHub webhook from sparkwing-gitops to `https://argocd.rangz.dev/api/webhook`, with its secret in `argocd-secret` as `webhook.github.secret`, brings that back to seconds; it is configured in the Argo Helm values in kikd-infra and is not on the branch.
 
-**Pipeline.** `--gitops-layout` selects `kikd-gitops` (today, the default) or `sparkwing-gitops` (the new repository and its key parameter, same directory names). After the move, set `gitops-layout: sparkwing-gitops` in the deploy entry's `args` or change the default in `deploy_env.go`.
+**Pipeline.** The pipeline writes only `sparkwing-dev/sparkwing-gitops`, with the `sparkwing-gitops-deploy-key` parameter, in the same directory names.
 
-**The move, in order.**
-
-1. Create `koreyGambill/sparkwing-gitops` and copy `sparkwing/` and `sparkwing-staging/` from kikd-gitops main byte for byte.
-2. Add a write deploy key on it only; store the private half in `/kikd-prod/sparkwing/deploy/sparkwing-gitops-deploy-key`.
-3. Merge kikd-infra `2c90511`, then `eaaf94c`. Argo should report both applications Synced with no diff.
-4. Switch the pipeline's layout, remove the kikd-gitops deploy key and delete `/kikd-prod/sparkwing/deploy/gitops-deploy-key`.
-5. Delete the two directories from kikd-gitops.
+**The move (done 2026-11-04).** `sparkwing-dev/sparkwing-gitops` main is kikd-gitops `456e104` filtered to `sparkwing/` and `sparkwing-staging/` with history kept, trees identical. Argo reads it through ExternalSecret `argocd/sparkwing-gitops-repo` (the same token as kikd-gitops), and both applications moved to it with no change to any live object. The two directories were then deleted from kikd-gitops. The organisation has deploy keys disabled, so the write deploy key and its parameter wait for Korey.

@@ -46,25 +46,6 @@ func (c deployConfig) toolDirInUse() bool {
 	return c.ToolDir != "" && err == nil && info.IsDir()
 }
 
-// safety: until the Sparkwing apps move (deploy-pipeline-iam.md, GitOps
-// scope), deploys write kikd-gitops; the move flips one name here or in the
-// deploy entry's args, and the deploy key parameter moves with it.
-var deployGitopsLayouts = map[string]struct{ url, keyParam string }{
-	"kikd-gitops":      {"git@github.com:koreyGambill/kikd-gitops.git", "/kikd-prod/sparkwing/deploy/gitops-deploy-key"},
-	"sparkwing-gitops": {"git@github.com:koreyGambill/sparkwing-gitops.git", "/kikd-prod/sparkwing/deploy/sparkwing-gitops-deploy-key"},
-}
-
-const deployDefaultGitopsLayout = "kikd-gitops"
-
-func (c *deployConfig) useGitopsLayout(name string) error {
-	layout, ok := deployGitopsLayouts[name]
-	if !ok {
-		return fmt.Errorf("unknown GitOps layout %q; use kikd-gitops or sparkwing-gitops", name)
-	}
-	c.GitopsURL, c.Params.GitopsKey = layout.url, layout.keyParam
-	return nil
-}
-
 // safety: each phase waits for Argo and then the rollout; rollback repeats
 // both phases, so the production budget holds a deploy, a smoke and a full
 // rollback, and a job timeout cannot cut a rollback short.
@@ -111,14 +92,14 @@ func defaultDeployConfig() deployConfig {
 		ControllerBase: ecr + "/sparkwing-controller@sha256:db2c67bb6189f8ea33e92df7f8ff4541e9da5b8fe00607bad265a8e5743dc4a3",
 		RunnerBase:     ecr + "/sparkwing-runner@sha256:055651afe046f9eb44a8d1eba12d560c189057dd04339cad298f6e9c926f1c8d",
 		RoleARN:        "arn:aws:iam::633280902600:role/sparkwing-deploy",
-		GitopsURL:      "git@github.com:koreyGambill/kikd-gitops.git",
+		GitopsURL:      "git@github.com:sparkwing-dev/sparkwing-gitops.git",
 		GitopsBranch:   "main",
 		ReferenceURL:   "git@github.com:sparkwing-dev/sparkwing-ci-smoke.git",
 		ReferenceName:  "hello",
 		CommitName:     "Sparkwing deploy",
 		CommitEmail:    "deploy@sparkwing.dev",
 		Params: deployParams{
-			GitopsKey:      "/kikd-prod/sparkwing/deploy/gitops-deploy-key",
+			GitopsKey:      "/kikd-prod/sparkwing/deploy/sparkwing-gitops-deploy-key",
 			ReferenceKey:   "/kikd-prod/sparkwing/deploy/ci-smoke-deploy-key",
 			StagingToken:   "/kikd-prod/sparkwing/deploy/staging-gate-token",
 			SmokeTokenBase: "/kikd-prod/sparkwing/deploy/smoke-token-",
