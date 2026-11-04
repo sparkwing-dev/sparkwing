@@ -156,7 +156,7 @@ func TestRunsTimingReadsFinishedRunsAndEmitsNDJSON(t *testing.T) {
 func TestRunsTimingTextNamesItsPhases(t *testing.T) {
 	run, steps, events := timingFixture()
 	var out bytes.Buffer
-	if err := writeRunsTiming(&out, "check", nil, []runTiming{measureRun(run, steps, events)}, "pretty"); err != nil {
+	if err := writeRunsTiming(&out, "check", nil, 20, []runTiming{measureRun(run, steps, events)}, "pretty"); err != nil {
 		t.Fatal(err)
 	}
 	for _, want := range []string{"check: 1 finished runs", "admit", "idle", "build", "Longest waits:", "#7", "Failed jobs", "sdk_error"} {
@@ -191,7 +191,7 @@ func TestRunTimingMovesRunnerClockStepsIntoTheJobWindow(t *testing.T) {
 func TestRunsTimingJobFilterBoundsTheSections(t *testing.T) {
 	run, steps, events := timingFixture()
 	var out bytes.Buffer
-	if err := writeRunsTiming(&out, "check", []string{"build"}, []runTiming{measureRun(run, steps, events)}, "pretty"); err != nil {
+	if err := writeRunsTiming(&out, "check", []string{"build"}, 20, []runTiming{measureRun(run, steps, events)}, "pretty"); err != nil {
 		t.Fatal(err)
 	}
 	if strings.Contains(out.String(), "sdk_error") || !strings.Contains(out.String(), "build") {
@@ -213,5 +213,24 @@ func TestRunTimingAlignsEachAttemptToItsOwnStart(t *testing.T) {
 	got := measureRun(run, steps, events)
 	if build := got.Jobs["build"]; build.Phases[phaseRunning] != 11*time.Second || got.StepShift != 8*time.Second {
 		t.Fatalf("build %+v shift %v", build, got.StepShift)
+	}
+}
+
+func TestRunsTimingTopRaisesTheBound(t *testing.T) {
+	run, steps, events := timingFixture()
+	timings := []runTiming{measureRun(run, steps, events)}
+	var out bytes.Buffer
+	if err := writeRunsTiming(&out, "check", nil, 1, timings, "pretty"); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out.String(), "1 more jobs: raise --top") {
+		t.Fatalf("bounded output:\n%s", out.String())
+	}
+	out.Reset()
+	if err := writeRunsTiming(&out, "check", nil, 2, timings, "json"); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out.String(), `"jobs":2,"jobs_returned":2`) || !strings.Contains(out.String(), `"truncated":false`) {
+		t.Fatalf("json page:\n%s", out.String())
 	}
 }

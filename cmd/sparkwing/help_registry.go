@@ -263,6 +263,7 @@ var commandFlagDescriptions = map[string]string{
 	"sparkwing runs stats --sizing":                            "Show the controller's learned resource sizing for each job instead of run statistics.",
 	"sparkwing runs timing --job":                              "Report only these jobs in the job, wait and failure sections; run-level phases still cover every job.",
 	"sparkwing runs timing --last":                             "Number of finished runs to read, newest first, 20 by default.",
+	"sparkwing runs timing --top":                              "Most jobs and most failure groups to show, 20 by default; the page record and text say how many were left out.",
 	"sparkwing runs status --exit-zero":                        "Exit 0 when the run ended failed or cancelled; invalid usage and incomplete observations still exit nonzero.",
 	"sparkwing runs status --poll":                             "Time between checks of the run with --follow, as a Go duration, 3s by default.",
 	"sparkwing runs status --steps":                            "Include every recorded step in summary and tree output, not only the failing steps summary shows by default.",

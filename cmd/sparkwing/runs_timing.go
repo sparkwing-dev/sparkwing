@@ -228,7 +228,13 @@ func observeRunsTiming(ctx context.Context, inv clisurface.Invocation, runs cont
 		}
 		timings = append(timings, measureRun(run, steps.Steps, events))
 	}
-	return writeRunsTiming(out, query.Pipeline, inv.Flags["job"], timings, inv.Output(color.IsInteractiveStdout()))
+	rows := 20
+	if inv.Has("top") {
+		if rows, err = strconv.Atoi(inv.Value("top")); err != nil {
+			return &clisurface.UsageError{Path: inv.Command.Path, Message: "--top must be a positive number"}
+		}
+	}
+	return writeRunsTiming(out, query.Pipeline, inv.Flags["job"], rows, timings, inv.Output(color.IsInteractiveStdout()))
 }
 
 func readRunEvents(ctx context.Context, logs controllerwire.LogReader, run string) ([]controllerwire.LogRecord, error) {
@@ -527,8 +533,6 @@ func spread(values []time.Duration) percentiles {
 	return percentiles{P50: rank(0.5), P90: rank(0.9), Max: sorted[len(sorted)-1]}
 }
 
-const timingTextRows = 20
-
 func selected(filter []string, job string) bool {
 	return len(filter) == 0 || contains(filter, job)
 }
@@ -633,7 +637,7 @@ func summarizeTiming(pipeline string, jobFilter []string, timings []runTiming) (
 	return summary, jobRecords, failureRecords
 }
 
-func writeRunsTiming(out io.Writer, pipeline string, jobFilter []string, timings []runTiming, format string) error {
+func writeRunsTiming(out io.Writer, pipeline string, jobFilter []string, rows int, timings []runTiming, format string) error {
 	summary, jobs, failures := summarizeTiming(pipeline, jobFilter, timings)
 	switch format {
 	case "json":
@@ -647,12 +651,12 @@ func writeRunsTiming(out io.Writer, pipeline string, jobFilter []string, timings
 				return err
 			}
 		}
-		for _, job := range jobs[:min(len(jobs), timingTextRows)] {
+		for _, job := range jobs[:min(len(jobs), rows)] {
 			if err := enc.Encode(job); err != nil {
 				return err
 			}
 		}
-		for _, failure := range failures[:min(len(failures), timingTextRows)] {
+		for _, failure := range failures[:min(len(failures), rows)] {
 			if err := enc.Encode(failure); err != nil {
 				return err
 			}
@@ -661,9 +665,9 @@ func writeRunsTiming(out io.Writer, pipeline string, jobFilter []string, timings
 			return err
 		}
 		return enc.Encode(timingPage{
-			Kind: "page", Jobs: len(jobs), JobsReturned: min(len(jobs), timingTextRows),
-			FailureGroups: len(failures), FailureGroupsReturned: min(len(failures), timingTextRows),
-			Truncated: len(jobs) > timingTextRows || len(failures) > timingTextRows,
+			Kind: "page", Jobs: len(jobs), JobsReturned: min(len(jobs), rows),
+			FailureGroups: len(failures), FailureGroupsReturned: min(len(failures), rows),
+			Truncated: len(jobs) > rows || len(failures) > rows,
 		})
 	case "plain":
 		for _, job := range jobs {
@@ -700,14 +704,14 @@ func writeRunsTiming(out io.Writer, pipeline string, jobFilter []string, timings
 	fmt.Fprintln(out, "\nEach run's wall splits into the most advanced phase any job was in; gap is a job between or after its steps, idle is no job active.")
 	fmt.Fprintln(out)
 	fmt.Fprintln(tw, "JOB\tRUNS\tFAIL\tRETRY\tWAIT\tSETUP\tRUNNING\tGAP\tTOTAL")
-	for _, job := range jobs[:min(len(jobs), timingTextRows)] {
+	for _, job := range jobs[:min(len(jobs), rows)] {
 		fmt.Fprintf(tw, "%s\t%d\t%d\t%d\t%s\t%s\t%s\t%s\t%s\n", job.Job, job.Runs, job.Failed, job.Retries, pair(job.Wait), pair(job.Setup), pair(job.Running), pair(job.Gap), pair(job.Total))
 	}
 	if err := tw.Flush(); err != nil {
 		return err
 	}
-	if len(jobs) > timingTextRows {
-		fmt.Fprintf(out, "%d more jobs: select them with --job.\n", len(jobs)-timingTextRows)
+	if len(jobs) > rows {
+		fmt.Fprintf(out, "%d more jobs: raise --top or select them with --job.\n", len(jobs)-rows)
 	}
 	fmt.Fprintln(out, "\nJob columns are P50 / P90. Wait is queue (ready to claimed), admit (claimed to started: admission and source checkout) and approval.")
 	type longWait struct {
@@ -741,7 +745,7 @@ func writeRunsTiming(out io.Writer, pipeline string, jobFilter []string, timings
 	}
 	fmt.Fprintln(out, "\nFailed jobs, grouped by job, failing step and reason:")
 	fmt.Fprintln(tw, "COUNT\tJOB\tSTEP\tOUTCOME\tREASON\tRUNS")
-	for _, f := range failures[:min(len(failures), timingTextRows)] {
+	for _, f := range failures[:min(len(failures), rows)] {
 		numbers := make([]string, 0, min(len(f.Runs), 5))
 		for _, n := range f.Runs[:min(len(f.Runs), 5)] {
 			numbers = append(numbers, "#"+strconv.FormatInt(n, 10))
@@ -751,8 +755,8 @@ func writeRunsTiming(out io.Writer, pipeline string, jobFilter []string, timings
 	if err := tw.Flush(); err != nil {
 		return err
 	}
-	if len(failures) > timingTextRows {
-		fmt.Fprintf(out, "%d more failure groups: select their jobs with --job.\n", len(failures)-timingTextRows)
+	if len(failures) > rows {
+		fmt.Fprintf(out, "%d more failure groups: raise --top or select their jobs with --job.\n", len(failures)-rows)
 	}
 	return nil
 }

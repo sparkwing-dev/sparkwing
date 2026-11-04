@@ -605,11 +605,12 @@ func Registry() []Command {
 			"Read the newest finished root runs of one pipeline, skipping dry runs, with their jobs, steps and lifecycle events, through the selected controller.",
 			"Each job's window, from its first ready event to its end, splits into queue (ready to claimed), admit (claimed to started: concurrency and machine admission, then source checkout), approval, setup (started to the attempt's first step: compile and cache restore), running (any step in progress) and gap (a started job with no step in progress). Each run's wall splits into the most advanced phase any job was in, plus idle when no job is active, so the phases always sum to the wall.",
 			"Step times carry the runner's clock and lifecycle events the store's; a job whose steps fall outside its window has them moved by one offset, reported as step_clock_shift_ns and in the text.",
-			"Text prints run-level and per-job P50 and P90, the five longest waits, and failed jobs grouped by job, failing step of the final attempt and reason; a job with several failing steps counts under each, and cancellations caused by an upstream failure or a cancel request are left out. Both formats show at most 20 jobs, slowest first, and 20 failure groups, most frequent first; --job selects the jobs the job, wait and failure sections cover. JSON emits one run record per run, the job and failure records, a summary record, and a final page record with the totals and whether any were left out.",
+			"Text prints run-level and per-job P50 and P90, the five longest waits, and failed jobs grouped by job, failing step of the final attempt and reason; a job with several failing steps counts under each, and cancellations caused by an upstream failure or a cancel request are left out. Both formats show at most --top jobs, slowest first, and --top failure groups, most frequent first (20 each by default); --job selects the jobs the job, wait and failure sections cover. JSON emits one run record per run, the job and failure records, a summary record, and a final page record with the totals and whether any were left out.",
 		}, Flags: []Flag{
 			{Name: "pipeline", Argument: "NAME", Required: true},
 			{Name: "last", Argument: "N", Minimum: 1, HasMinimum: true},
 			{Name: "job", Argument: "JOB", Repeatable: true, CommaList: true},
+			{Name: "top", Argument: "N", Minimum: 1, HasMinimum: true},
 			{Name: "profile", Argument: "NAME"},
 		}},
 		{Path: "sparkwing runs status", Rules: []string{
