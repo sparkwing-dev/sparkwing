@@ -396,7 +396,6 @@ var flagDescriptions = map[string]string{
 	"sw-detached":         "Submit work to the local controller and return before it finishes.",
 	"sw-idempotency-key":  "Deduplicate detached submissions using this key.",
 	"sw-request-id":       "Request identifier for a detached submission.",
-	"sw-output":           "Format for run output.",
 	"sw-verbose":          "Include detailed run output.",
 	"sw-start-at":         "Start execution at the selected step.",
 	"sw-stop-at":          "Stop execution after the selected step.",

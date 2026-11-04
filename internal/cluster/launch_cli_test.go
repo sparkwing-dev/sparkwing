@@ -21,7 +21,7 @@ func TestLauncherCommandPassesOnlyOperatorConfiguration(t *testing.T) {
 	boundary := errors.New("fixture boundary")
 	image := "example.com/image@sha256:" + strings.Repeat("a", 64)
 	args := []string{"--controller=https://controller.example", "--image=" + image, "--docker-image=" + image, "--cpu-ceiling=500m", "--memory-ceiling=1Gi", "--credentials-dir=" + dir, "--label=cluster", "--stop-team=team,another", "--node-class=cloud-hardened"}
-	if _, err := runnerflags.Parse("launch", args, io.Discard); err != nil {
+	if _, err := runnerflags.Parse("launch", args, io.Discard, io.Discard); err != nil {
 		t.Fatal(err)
 	}
 	err := RunLaunchCLI(t.Context(), args,

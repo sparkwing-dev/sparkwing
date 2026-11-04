@@ -19,9 +19,27 @@ unlock.
 ---
 
 ## [Unreleased]
+
 ### Changed
 
 - **sdk:** `NewConcurrencyGroup` in Go and `ConcurrencyGroup` in TypeScript no longer check `Scope` and `OnLimit` themselves. The host still refuses an unknown value as `plan_invalid` when it validates the plan, so both SDKs fail the same way.
+- **delivery:** Docs, UI and process landings run their own checks plus the review
+  Without `--full`, the `gate` and `land` pipelines run vet, build, lint, the critical tests and the TypeScript SDK suite only when the change reaches Go source or `sdk/typescript/`, and install frontend dependencies only when a frontend suite runs. The review still runs on every landing; `sparkwing run gate -- --full` keeps the broad verification.
+
+### Fixed
+
+- **controller:** `GET /api/v1/team/github-app/automation` accepts `limit` and its own `next_cursor`
+  An older query check refused both with 400, so a team with more than 50 automations could not read past the first page.
+- **CLI:** A source build without the dashboard bundle refuses `dashboard start` and `dashboard open`
+  The README promised this, but the local controller served the empty embed and every page answered 404. Start and open now fail with a hint naming `bin/build-web.sh` or a release binary, and the local controller serves its missing-bundle page instead of a 404. Runs never need the bundle.
+- **controller:** GitHub check summaries count a memoized job as `memoized`, not `other`
+  The summary kept its own list of outcomes, which had retired names and lacked `memoized`. It now counts the outcome the store records.
+- **runner:** `sparkwing-runner` help follows the output contract the CLI uses
+  Help now goes to stdout, as one `{"kind":"help","text":...}` record under `-o json` or a pipe, and an invalid `-o` value is refused before help prints. It went to stderr in every mode, and `--help -o bogus` succeeded.
+- **runners:** A native runner service keeps a custom `SPARKWING_HOME`
+  `sparkwing runners add` placed the log under the selected state home, but the systemd unit and LaunchAgent did not carry it, so the started runner used `~/.sparkwing`. Both now set `SPARKWING_HOME` to the home the installer resolved; reinstall an existing service to pick it up.
+- **runner:** `sparkwing-runner version -o json` writes one JSON record on one line
+  It printed an indented document, which a reader taking one JSON object per line could not parse.
 - **run:** A first run reuses the installed CLI as the pipeline engine when it is the pinned release
   The engine was downloaded again (73 MB) and verified twice; now the installed bytes are checked against the signed
   release files and verified once.
@@ -78,6 +96,20 @@ unlock.
 - **cli (Breaking):** Remove the hidden `sparkwing __host-trigger` command. It refused every invocation because standalone hosting is not available; the local controller hosts queued triggers.
 - **tooling (Breaking):** Delete `bin/pre-release-test.sh` and `bin/status.sh`, which tested removed packages and queried removed `/agents` and `/jobs` routes. Use `sparkwing run pre-release`, `sparkwing runners list` and `sparkwing runs` instead.
 
+### Removed
+
+- **cli:** (Breaking) `sparkwing run --sw-output` is removed; use `-o`/`--output`
+  The two flags selected the same thing, and a run's help and errors read only `-o`, so `--sw-output json` could run in JSON and still fail in prose. `-o` now drives a run's output, help and errors, ahead of `SPARKWING_LOG_FORMAT` and terminal detection. Replace `--sw-output FORMAT` with `-o FORMAT`.
+
+- **docs:** `SPARKWING_DEBUG` is no longer listed as a setting
+  Nothing read it, so setting it never changed SDK diagnostics. Its process-environment class goes with it.
+
+### Docs
+
+- **docs:** README, the local dashboard page and the auth reference describe shipped integrations as shipped
+  They still said native host, controller and managed-service integration was incomplete and that card, refund, fraud-warning and dispute settlement needed store work. Both shipped.
+- **docs:** Configuration guidance names each component's real input
+  Machine configuration no longer says installation uses submitted values (only planning and execution do), and the git-credentials page says the controller reads its secrets key from the `secrets-key` file in `--credentials-dir`, not `SPARKWING_SECRETS_KEY`.
 
 ## [v0.68.7] - 2026-11-04
 ### Added
