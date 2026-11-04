@@ -19,11 +19,23 @@ unlock.
 ---
 
 ## [Unreleased]
+### Changed
+
+- **store (Breaking):** The schema baseline advances to version 30, which replaces the `warm_pool_desired` view in place
+  A v0.68.7 store (schema 29) upgrades on its first open, and a schema 28 store takes both steps, in one transaction on SQLite and PostgreSQL. PostgreSQL replaces the view in place, so KEDA's SELECT grant survives. An older binary refuses a schema 30 store, so snapshot the store first; rollback means restoring that snapshot. See the [store upgrade migration](docs/migrations/_unreleased.md#upgrade-the-store-in-place-to-schema-baseline-30).
+
 ### Fixed
+
+- **warm capacity:** Auto no longer grows idle warm capacity to its maximum
+  The start-time trigger added one node above the current warm count whenever the last hour's median start exceeded the target, and each new warm node raised that count, so any slow start kept the pool at the Auto maximum for an hour with nobody waiting. The trigger now fires only while a job is waiting for a fresh node; with no waits the pool returns to its minimum.
 
 - **launcher:** Stop warning about Cloud reservations that belong to another job namespace
   Staging and production can share a cluster, so each launcher logged a warning for every node the other environment reserved. That is now a debug message.
 
+### Removed
+
+- **credits (Breaking):** Remove the retired `warm_cpu_class_cores` credit setting
+  Nothing scaled from it: per-class warm capacity is the only warm policy. The credit and credit-settings responses no longer report it, and the settings write refuses a body that names it. See the [migration guide](docs/migrations/_unreleased.md#the-warm_cpu_class_cores-credit-setting-is-removed).
 
 ## [v0.68.7] - 2026-11-04
 ### Added
