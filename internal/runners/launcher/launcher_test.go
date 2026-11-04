@@ -496,7 +496,7 @@ func TestLauncherWaitsOutAControllerRetryAfter(t *testing.T) {
 func TestForeignNamespaceReservationIsReported(t *testing.T) {
 	l, kube, _, _ := fixture()
 	var logs strings.Builder
-	l.Logger = slog.New(slog.NewTextHandler(&logs, nil))
+	l.Logger = slog.New(slog.NewTextHandler(&logs, &slog.HandlerOptions{Level: slog.LevelDebug}))
 	node := &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "legacy", Annotations: map[string]string{reservationNamespaceAnnotation: "sparkwing-jobs", reservationAnnotation: "{}"}}}
 	if _, err := kube.CoreV1().Nodes().Create(t.Context(), node, metav1.CreateOptions{}); err != nil {
 		t.Fatal(err)
@@ -504,8 +504,8 @@ func TestForeignNamespaceReservationIsReported(t *testing.T) {
 	if err := l.Sync(t.Context()); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(logs.String(), "another job namespace") || !strings.Contains(logs.String(), "sparkwing-jobs") {
-		t.Fatalf("legacy reservation went unreported: %s", logs.String())
+	if !strings.Contains(logs.String(), "level=DEBUG") || !strings.Contains(logs.String(), "another job namespace") || !strings.Contains(logs.String(), "sparkwing-jobs") {
+		t.Fatalf("foreign reservation not reported at debug: %s", logs.String())
 	}
 }
 

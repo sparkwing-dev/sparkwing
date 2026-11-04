@@ -19,6 +19,11 @@ unlock.
 ---
 
 ## [Unreleased]
+### Fixed
+
+- **launcher:** Stop warning about Cloud reservations that belong to another job namespace
+  Staging and production can share a cluster, so each launcher logged a warning for every node the other environment reserved. That is now a debug message.
+
 
 ## [v0.68.7] - 2026-11-04
 ### Added

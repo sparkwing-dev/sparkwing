@@ -160,7 +160,8 @@ func (l *Launcher) syncReservations(ctx context.Context, prior error) error {
 		node := &nodes.Items[i]
 		namespace := node.Annotations[reservationNamespaceAnnotation]
 		if namespace != "" && namespace != l.Config.Namespace && !ownsNodeReservation(node, l.Config.Namespace) {
-			l.logger().Warn("node holds a Cloud reservation from another job namespace; drain it with that namespace's launcher or clear it by hand", "node", node.Name, "namespace", namespace)
+			// safety: environments share clusters, so another namespace's reservation is normal; its own launcher owns it.
+			l.logger().Debug("node holds a Cloud reservation from another job namespace; that namespace's launcher owns it", "node", node.Name, "namespace", namespace)
 		}
 		if node.Labels[TeamNodeLabel] == "" || !reservationEvidence(node) {
 			continue
