@@ -80,8 +80,8 @@ unlock.
   Each process hashed its ~100 MB executable (about 280ms) before resolving a replacement-pin engine. The digest is now reused while the file's device, inode, size, modification and change times are unchanged.
 - **cache:** Pipeline key inputs reuse the digest of each unchanged file from `SPARKWING_HOME/cache/file-digests`
   Each SDK install re-read every file of the pipeline module and its `replace` targets, 37 MB in the Sparkwing repository and 300-700ms under load, twice per local run. Keys are unchanged.
-- **Cloud (Breaking):** A used Cloud node retires once the launcher has seen it unreserved and empty for 60 seconds, whatever state its run is in
-  The launcher kept a run's empty nodes until the run ended, so a run waiting on an approval, or a fan-out waiting on one long job, held idle nodes that other teams' jobs could not use until Karpenter consolidated them. A successor that reserves the node within the grace still reuses it; one that arrives later, such as a job after an approval, boots a fresh node. `sparkwing-runner launch --idle-grace` sets the grace, which must be at least `--poll` plus 30 seconds. The launcher no longer asks the controller whether a run has ended: the `retire_run` request and `run_terminal` response are gone from launcher sync, so deploy the controller and launcher from the same release. See the [migration guide](docs/migrations/_unreleased.md#cloud-nodes-retire-after-an-idle-grace).
+- **controller (Breaking):** A used Cloud node retires once the launcher has seen it unreserved and empty for 60 seconds, whatever state its run is in
+  The launcher kept a run's empty nodes until the run ended, so a run waiting on an approval, or a fan-out waiting on one long job, held idle nodes that other teams' jobs could not use until Karpenter consolidated them. A successor that reserves the node within the grace still reuses it; one that arrives later, such as a job after an approval, boots a fresh node. `sparkwing-runner launch --idle-grace` sets the grace, which must be at least `--poll` plus 30 seconds. The launcher no longer asks the controller whether a run has ended: the `retire_run` request (the `LauncherRun` body with its `run_id` and `team`) and `run_terminal` response are gone from launcher sync, so deploy the controller and launcher from the same release. See the [migration guide](docs/migrations/_unreleased.md#cloud-nodes-retire-after-an-idle-grace).
 - **delivery:** `sparkwing run land` merges `origin/main` when main moved instead of failing
   A clean merge (a merge commit, never a rebase) re-checks only the files the merge changed, with `go build` and the
   affected tests, then pushes; the review does not run again. It merges at most three times, and a conflict fails
@@ -176,19 +176,19 @@ unlock.
 
 - **cli (Breaking):** Remove the hidden `sparkwing __host-trigger` command. It refused every invocation because standalone hosting is not available; the local controller hosts queued triggers.
 - **tooling (Breaking):** Delete `bin/pre-release-test.sh` and `bin/status.sh`, which tested removed packages and queried removed `/agents` and `/jobs` routes. Use `sparkwing run pre-release`, `sparkwing runners list` and `sparkwing runs` instead.
-- **cli:** (Breaking) `sparkwing run --sw-output` is removed; use `-o`/`--output`
-  The two flags selected the same thing, and a run's help and errors read only `-o`, so `--sw-output json` could run in JSON and still fail in prose. `-o` now drives a run's output, help and errors, ahead of `SPARKWING_LOG_FORMAT` and terminal detection. Replace `--sw-output FORMAT` with `-o FORMAT`.
+- **cli (Breaking):** `sparkwing run --sw-output` is removed; use `-o`/`--output`
+  The two flags selected the same thing, and a run's help and errors read only `-o`, so `--sw-output json` could run in JSON and still fail in prose. `-o` now drives a run's output, help and errors, ahead of `SPARKWING_LOG_FORMAT` and terminal detection. Replace `--sw-output FORMAT` with `-o FORMAT`. See the [migration guide](docs/migrations/_unreleased.md#sparkwing-run---sw-output-is-removed).
 
 - **docs:** `SPARKWING_DEBUG` is no longer listed as a setting
   Nothing read it, so setting it never changed SDK diagnostics. Its process-environment class goes with it.
 - **CLI (Breaking):** Sparkwing no longer searches for other installed copies of itself
-  `sparkwing doctor` drops `install_conflict` and its `executable` and `competing_install` lines, `sparkwing info` drops `executable.other_installs` and its warning, and `sparkwing update` and `bin/install.sh` no longer print rename commands for other copies. Your shell decides which copy runs: check with `which -a sparkwing` and `sparkwing version`, then remove the unwanted install or call the one you want by its absolute path. See [If the wrong sparkwing runs](docs/getting-started.md#if-the-wrong-sparkwing-runs).
+  `sparkwing doctor` drops `install_conflict` and its `executable` and `competing_install` lines, `sparkwing info` drops `executable.other_installs` and its warning, and `sparkwing update` and `bin/install.sh` no longer print rename commands for other copies. Your shell decides which copy runs: check with `which -a sparkwing` and `sparkwing version`, then remove the unwanted install or call the one you want by its absolute path. See [If the wrong sparkwing runs](docs/getting-started.md#if-the-wrong-sparkwing-runs) and the [migration guide](docs/migrations/_unreleased.md#doctor-and-info-no-longer-report-other-installs).
 - **runners (Breaking):** `sparkwing runners add --trust verified` is gone
   `--repos`, which every shared runner needs, already limits a runner to repository-proven work, and a runner scoped by
   it is now a trusted host whose jobs can produce a counted pass. See the
   [migration guide](docs/migrations/_unreleased.md#runners-add---trust-verified-is-gone).
 - **wingwire (Breaking):** `AdmissionRequest` drops `ParentLeaseToken`, `ParentRunID` and `ParentNodeID`, and the admission daemon no longer attaches a child run to its parent's lease
-  No Sparkwing client sent these fields. The daemon journal no longer records `child_attach_request` or `child_attach`.
+  The `admission_request` message loses `parent_lease_token`, `parent_run_id` and `parent_node_id`. No Sparkwing client sent these fields. The daemon journal no longer records `child_attach_request` or `child_attach`. See the [migration guide](docs/migrations/_unreleased.md#admission-requests-no-longer-attach-to-a-parent-lease).
 - **credits (Breaking):** Remove the retired `warm_cpu_class_cores` credit setting
   Nothing scaled from it: per-class warm capacity is the only warm policy. The credit and credit-settings responses no longer report it, and the settings write refuses a body that names it. See the [migration guide](docs/migrations/_unreleased.md#the-warm_cpu_class_cores-credit-setting-is-removed).
 

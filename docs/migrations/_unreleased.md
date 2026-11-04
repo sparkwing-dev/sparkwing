@@ -13,9 +13,9 @@ pool reached its maximum, even with nobody waiting.
 
 The default Auto start-time target becomes 20 seconds. New stores seed every
 class at 20 seconds, and the upgrade moves each class still at the old
-10-second default to 20. A class set to another target keeps it; set it back
-with `sparkwing operator warm-capacity set --start-time-target 10s` if you
-want the old behavior.
+10-second default to 20. A class set to another target keeps it. To keep the
+old behavior, pass `--start-time-target 10s` to `sparkwing operator
+warm-capacity set` along with the class's other settings.
 
 A v0.68.7 store (schema 29 with the v0.68.7 baseline digest) upgrades in place
 the first time this release opens it, on SQLite and PostgreSQL. A v0.68.3 to
@@ -54,6 +54,10 @@ The Cloud launcher retires a used node once it has seen the node unreserved and
 empty for 60 seconds, instead of waiting for the node's run to end. It no longer
 sends the `retire_run` query on launcher sync, and the controller no longer
 accepts it or returns `run_terminal`.
+In the API document this removes
+`components.schemas.internal.controllerwire.LauncherRun`,
+`components.schemas.internal.controllerwire.LauncherSyncRequest.properties.retire_run`
+and `components.schemas.internal.controllerwire.LauncherSyncResponse.properties.run_terminal`.
 
 Deploy the controller and launcher from the same release. An older launcher
 against a newer controller has its retirement query refused, logs a retirement
@@ -68,7 +72,7 @@ at least `--poll` plus 30 seconds.
 
 ## runners add --trust verified is gone
 
-`sparkwing runners add --trust verified` was removed with no alias. A shared
+The `verified` value of the `--trust` flag on `sparkwing runners add` was removed with no alias. A shared
 runner enrolled with `--repos` already takes only work whose repository GitHub
 or the controller's own fetch proved, and is now a trusted host whose jobs can
 produce a pass that `sw.FromProvenRunAtCommit()` counts. A runner registered
@@ -84,3 +88,29 @@ so a cloud trust policy that requires `fresh` stops accepting them: allow
 `persistent` for those subjects, or run the jobs on Sparkwing Cloud. Their
 verified runs write the launcher's own cache scope, which other launchers and
 Cloud do not restore, unless the team turns on `high_trust`.
+
+## sparkwing run --sw-output is removed
+
+`sparkwing run` no longer accepts `--sw-output`. Use the global output flag:
+
+- Before: `sparkwing run build --sw-output json`
+- After: `sparkwing run build -o json`
+
+`-o` now drives a run's output, help and errors, ahead of
+`SPARKWING_LOG_FORMAT` and terminal detection.
+
+## doctor and info no longer report other installs
+
+`sparkwing doctor -o json` drops the `install_conflict` check and its
+`executable` and `competing_install` lines, and `sparkwing info -o json` drops
+`executable.other_installs`. A script that read those fields should check the
+shell instead: `which -a sparkwing` lists every copy on `PATH`, and
+`sparkwing version` names the one that runs.
+
+## Admission requests no longer attach to a parent lease
+
+The daemon's `admission_request` message no longer carries
+`parent_lease_token`, `parent_run_id` or `parent_node_id`, and the daemon no
+longer attaches a child run to its parent's lease. No Sparkwing client sent
+these fields, so nothing changes for the CLI or SDKs. A custom client that set
+them should drop them; a child run is admitted on its own.
