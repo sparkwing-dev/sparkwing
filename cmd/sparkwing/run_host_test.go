@@ -65,7 +65,7 @@ func localRuntimeFor(t *testing.T, award controllerwire.ClaimedUnit, detached bo
 	return localRunDependencies{version: "v1.2.3", resolve: func(context.Context, localRunOptions) (localRunRuntime, error) {
 		*observed = append(*observed, "resolve")
 		return localRunRuntime{
-			follow: func(context.Context, string, string, io.Writer) error { return nil },
+			follow: func(context.Context, string, string, io.Writer, <-chan struct{}) error { return nil },
 			prepare: func(_ context.Context, pipeline string, flags runFlags) (localRunPreparation, error) {
 				*observed = append(*observed, "prepare")
 				if pipeline != "ci" {
@@ -921,7 +921,7 @@ func TestLocalAttachedRunStreamsCommittedLogs(t *testing.T) {
 	followed := false
 	deps.resolve = func(ctx context.Context, options localRunOptions) (localRunRuntime, error) {
 		runtime, err := resolve(ctx, options)
-		runtime.follow = func(_ context.Context, run, format string, out io.Writer) error {
+		runtime.follow = func(_ context.Context, run, format string, out io.Writer, _ <-chan struct{}) error {
 			followed = true
 			if run != "local-run" || format != "json" {
 				return errors.New("log attachment lost run or output selection")
@@ -1018,7 +1018,7 @@ func TestLocalRunInterruptCancelsAndWaitsForTerminalRun(t *testing.T) {
 			close(cancelled)
 			return controllerwire.Applied{}, nil
 		}}
-		runtime.follow = func(ctx context.Context, _, _ string, _ io.Writer) error {
+		runtime.follow = func(ctx context.Context, _, _ string, _ io.Writer, _ <-chan struct{}) error {
 			select {
 			case <-cancelled:
 				return nil

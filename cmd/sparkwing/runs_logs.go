@@ -55,8 +55,20 @@ func followControllerRunLogs(ctx context.Context, options client.EngineOptions, 
 // the run's end promptly; remote followers keep the one-second poll.
 const localFollowPoll = 200 * time.Millisecond
 
-func waitLocalFollowPoll(ctx context.Context, _ time.Duration) error {
-	return waitStatusPoll(ctx, localFollowPoll)
+// perf: the first wait after hosting returns ends at once, so the final logs are read without a poll's delay.
+func localFollowWait(hosted <-chan struct{}) func(context.Context, time.Duration) error {
+	return func(ctx context.Context, _ time.Duration) error {
+		timer := time.NewTimer(localFollowPoll)
+		defer timer.Stop()
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-timer.C:
+		case <-hosted:
+			hosted = nil
+		}
+		return nil
+	}
 }
 
 func parseRunLogs(inv clisurface.Invocation) (controllerwire.LogQuery, error) {

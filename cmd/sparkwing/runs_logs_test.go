@@ -444,8 +444,9 @@ func TestRunLogSearchPreservesMatchesFromIncompleteLogs(t *testing.T) {
 
 func TestLocalFollowPollsFasterThanRemoteFollow(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
+		wait := localFollowWait(make(chan struct{}))
 		start := time.Now()
-		if err := waitLocalFollowPoll(t.Context(), time.Second); err != nil {
+		if err := wait(t.Context(), time.Second); err != nil {
 			t.Fatal(err)
 		}
 		if waited := time.Since(start); waited != localFollowPoll {
@@ -453,8 +454,30 @@ func TestLocalFollowPollsFasterThanRemoteFollow(t *testing.T) {
 		}
 		ctx, cancel := context.WithCancel(t.Context())
 		cancel()
-		if err := waitLocalFollowPoll(ctx, time.Second); err == nil {
+		if err := wait(ctx, time.Second); err == nil {
 			t.Fatal("a cancelled local follow kept waiting")
+		}
+	})
+}
+
+func TestLocalFollowReadsAtOnceWhenHostingEndsThenPollsAgain(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		hosted := make(chan struct{})
+		close(hosted)
+		wait := localFollowWait(hosted)
+		start := time.Now()
+		if err := wait(t.Context(), time.Second); err != nil {
+			t.Fatal(err)
+		}
+		if waited := time.Since(start); waited != 0 {
+			t.Fatalf("first wait after hosting = %s; want an immediate read", waited)
+		}
+		start = time.Now()
+		if err := wait(t.Context(), time.Second); err != nil {
+			t.Fatal(err)
+		}
+		if waited := time.Since(start); waited != localFollowPoll {
+			t.Fatalf("second wait = %s; want the normal poll, not a spin", waited)
 		}
 	})
 }
