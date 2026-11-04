@@ -40,8 +40,6 @@ type strictPaths struct {
 	Reviewer string   `yaml:"reviewer"`
 }
 
-// docsOnlyRoute moves the default review to a cheaper reviewer's model when
-// every changed file matches Paths; the review itself still runs.
 type docsOnlyRoute struct {
 	Paths    []string `yaml:"paths"`
 	Reviewer string   `yaml:"reviewer"`
@@ -140,8 +138,8 @@ func checkPatterns(patterns []string) error {
 	return nil
 }
 
-// defaultModel is the model the default reviewer runs on for this diff: the
-// docs_only reviewer's when every changed file is documentation.
+// safety: docs_only swaps only the default reviewer's model, so every change is
+// still reviewed; an empty diff keeps the default model.
 func (p reviewPolicy) defaultModel(files []string) string {
 	if len(p.DocsOnly.Paths) == 0 || len(files) == 0 {
 		return p.Reviewers[defaultReviewer].Model
