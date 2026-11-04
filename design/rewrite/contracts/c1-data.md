@@ -3238,7 +3238,6 @@ The existing `Store`, `Tenant`, `Operator`, `Open`, `ForTeam`, `AsOperator` and
 |---|---|
 | `OutputData` | Binds output bytes and records to reader authority and an exact uploader. |
 | `OutputData.Put` | Checks the output cap and uploader binding, obtains a verified receipt, then commits the output record. |
-| `OutputData.Read` | Looks up the authorized output record and consumes bounded bytes through verified EOF and successful close. |
 
 ### internal/store/claim_contract.go
 
