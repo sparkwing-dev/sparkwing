@@ -27,6 +27,7 @@ unlock.
 ### Removed
 
 - **cli (Breaking):** Remove the hidden `sparkwing __host-trigger` command. It refused every invocation because standalone hosting is not available; the local controller hosts queued triggers.
+- **tooling (Breaking):** Delete `bin/pre-release-test.sh` and `bin/status.sh`, which tested removed packages and queried removed `/agents` and `/jobs` routes. Use `sparkwing run pre-release`, `sparkwing runners list` and `sparkwing runs` instead.
 
 
 ## [v0.68.7] - 2026-11-04
