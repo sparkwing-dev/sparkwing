@@ -31,6 +31,11 @@ unlock.
 - **launcher:** Stop warning about Cloud reservations that belong to another job namespace
   Staging and production can share a cluster, so each launcher logged a warning for every node the other environment reserved. That is now a debug message.
 
+### Removed
+
+- **docs:** `SPARKWING_DEBUG` is no longer listed as a setting
+  Nothing read it, so setting it never changed SDK diagnostics. Its process-environment class goes with it.
+
 
 ## [v0.68.7] - 2026-11-04
 ### Added

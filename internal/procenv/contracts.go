@@ -12,7 +12,6 @@ const (
 	runtimeClass
 	Protocol
 	Credential
-	diagnostic
 	tool
 )
 

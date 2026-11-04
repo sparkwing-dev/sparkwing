@@ -154,7 +154,7 @@ func TestValidateAssignments(t *testing.T) {
 }
 
 func TestServiceAndInstallPolicies(t *testing.T) {
-	b := Base{Local: true, Captured: []string{"PATH=/bin", "CUSTOM=yes", "SPARKWING_DEBUG=1", "SPARKWING_HOME=/sw", "XDG_CACHE_HOME=/cache", "GOCACHE=/go", "AWS_REGION=west", "KUBECONFIG=/kube", "SPARKWING_TOOLCHAIN_ACTIVE=1", "SPARKWING_NODE_URL=old"}}
+	b := Base{Local: true, Captured: []string{"PATH=/bin", "CUSTOM=yes", "SPARKWING_HOME=/sw", "XDG_CACHE_HOME=/cache", "GOCACHE=/go", "AWS_REGION=west", "KUBECONFIG=/kube", "SPARKWING_TOOLCHAIN_ACTIVE=1", "SPARKWING_NODE_URL=old"}}
 	for _, kind := range []Kind{Install, HostChild, CLI} {
 		env, err := buildEntries(kind, b, Runtime{RunID: "run"})
 		if err != nil {
@@ -193,7 +193,7 @@ func TestLookupExactBeforePrefix(t *testing.T) {
 
 func TestInstallReceivesOnlyBase(t *testing.T) {
 	for _, local := range []bool{true, false} {
-		b := Base{Local: local, Captured: []string{"CUSTOM=", "PATH=/bin", "SPARKWING_DEBUG=1"}, Ambient: []string{"CUSTOM=", "PATH=/bin", "SPARKWING_DEBUG=1"}, SubmitEnvAllow: []string{"CUSTOM", "SPARKWING_DEBUG"}}
+		b := Base{Local: local, Captured: []string{"CUSTOM=", "PATH=/bin"}, Ambient: []string{"CUSTOM=", "PATH=/bin"}, SubmitEnvAllow: []string{"CUSTOM"}}
 		env, err := buildEntries(Install, b, Runtime{RunID: "run", Startup: []Assignment{{Name: "START", Value: "yes", Startup: true}}})
 		if err != nil {
 			t.Fatal(err)

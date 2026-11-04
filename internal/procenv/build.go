@@ -178,13 +178,10 @@ func inherited(k Kind, row Var, known bool, name string, b Base) bool {
 	}
 	switch k {
 	case CLI:
-		return row.Class == tool || (known && (row.Class == user || row.Class == diagnostic))
+		return row.Class == tool || (known && row.Class == user)
 	case HostChild:
-		return row.Class != diagnostic
+		return true
 	case Plan, Attempt, Eval, Install:
-		if k == Install && row.Class == diagnostic {
-			return false
-		}
 		if b.Local || ownerTool(b, row) {
 			return true
 		}

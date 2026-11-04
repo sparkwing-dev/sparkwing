@@ -151,7 +151,6 @@ does not change the build.
 
 | Variable | Class | Policy |
 |---|---|---|
-| `SPARKWING_DEBUG` | Diagnostic | SDK diagnostic output selection. |
 | `SPARKWING_RUNNER_NAME` | RuntimeClass | Composed from the sealed run and granted runner identity. |
 | `SPARKWING_RUNNER_TYPE` | RuntimeClass | Composed from the sealed run and granted runner identity. |
 | `SPARKWING_RUNNER_LABELS` | RuntimeClass | Composed from the sealed run and granted runner identity. |

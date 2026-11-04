@@ -141,6 +141,13 @@ func TestDocsNameEveryEnvironmentVariableTheCodeReads(t *testing.T) {
 			t.Errorf("constructedEnvReads lists %q, which the walk no longer finds; drop it", site)
 		}
 	}
+	// safety: a registry row classifies a name, it does not read it, so a
+	// setting a person sets must also appear in the source walk.
+	for _, variable := range procenv.Registry {
+		if variable.Owner == "user" && !variable.Prefix && !slices.Contains(names, variable.Name) {
+			t.Errorf("procenv.Registry offers %s as a user setting, but no product code reads it; delete the row", variable.Name)
+		}
+	}
 	for _, variable := range procenv.Registry {
 		names = append(names, variable.Name)
 	}
