@@ -23,6 +23,8 @@ unlock.
 
 - **launcher:** Stop warning about Cloud reservations that belong to another job namespace
   Staging and production can share a cluster, so each launcher logged a warning for every node the other environment reserved. That is now a debug message.
+- **cloud:** Expanding a generator whose job was memoized reads its recorded output
+  A separately awarded evaluator refused the memoized job's output as unreadable, because its source has attempt and generation zero, so the expansion failed. The evaluator's own lease still has to be live.
 
 
 ## [v0.68.7] - 2026-11-04
