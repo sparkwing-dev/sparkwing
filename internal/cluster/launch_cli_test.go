@@ -69,3 +69,14 @@ func TestLauncherCommandRejectsMemoryOverflowBeforeRuntime(t *testing.T) {
 		})
 	}
 }
+
+func TestLauncherCommandRefusesPollBelowIdleClaimFloor(t *testing.T) {
+	image := "example.com/image@sha256:" + strings.Repeat("a", 64)
+	err := RunLaunchCLI(t.Context(), []string{"--controller=https://controller.example", "--image=" + image, "--docker-image=" + image, "--cpu-ceiling=1", "--memory-ceiling=1Gi", "--credentials-dir=" + t.TempDir(), "--poll=1s"}, func(context.Context, launcher.CloudJobConfig, func(context.Context) (string, error)) (*launcher.Launcher, error) {
+		t.Error("a sub-floor poll reached the runtime factory")
+		return nil, nil
+	})
+	if err == nil || !strings.Contains(err.Error(), "--poll 1s") {
+		t.Fatalf("poll floor error: %v", err)
+	}
+}

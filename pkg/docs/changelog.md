@@ -30,6 +30,8 @@ unlock.
 
 ### Fixed
 
+- **launcher:** `sparkwing-runner launch` refuses `--poll` below 2s at startup
+  The controller never suggests an idle claim poll under 2s, and one enforcing idle polls answered a faster launcher with a rate-limit warning on every tick. The launcher now fails at startup and names the controller's `--idle-claim-poll`.
 - **launcher:** Stop warning about Cloud reservations that belong to another job namespace
   Staging and production can share a cluster, so each launcher logged a warning for every node the other environment reserved. That is now a debug message.
 - **cli:** Print blank command output lines as blank lines in plain run logs

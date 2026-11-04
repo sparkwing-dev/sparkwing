@@ -12,6 +12,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/credentials"
 	"github.com/sparkwing-dev/sparkwing/internal/deployment"
 	"github.com/sparkwing-dev/sparkwing/internal/runners/launcher"
+	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
 
 const (
@@ -68,6 +69,10 @@ func RunLaunchCLI(ctx context.Context, args []string, factory LauncherFactory) e
 		poll, err = time.ParseDuration(textFlag(fs, "poll"))
 		if err != nil || poll <= 0 {
 			return errors.New("--poll must be a positive duration")
+		}
+		// safety: a faster launcher is refused with 429 on every idle claim instead of failing once here.
+		if poll < store.MinIdleClaimPoll {
+			return fmt.Errorf("--poll %s is faster than the %s minimum idle claim poll, which a controller enforcing idle polls refuses; use at least the controller's --idle-claim-poll", poll, store.MinIdleClaimPoll)
 		}
 	}
 	cpuQuantity, err := resource.ParseQuantity(textFlag(fs, "cpu-ceiling"))
