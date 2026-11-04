@@ -27,8 +27,7 @@ import (
 )
 
 const (
-	// keyEnv carries the key as base64 of 32 bytes, as it does for
-	// sparkwing-controller. It overrides the key file.
+	// keyEnv carries the key as base64 of 32 bytes. It overrides the key file.
 	keyEnv = "SPARKWING_SECRETS_KEY"
 	// previousKeyEnv carries a retired key that values may still be sealed
 	// under, until `sparkwing secrets rotate` reseals them.

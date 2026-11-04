@@ -38,6 +38,11 @@ unlock.
 - **docs:** `SPARKWING_DEBUG` is no longer listed as a setting
   Nothing read it, so setting it never changed SDK diagnostics. Its process-environment class goes with it.
 
+### Docs
+
+- **docs:** Configuration guidance names each component's real input
+  Machine configuration no longer says installation uses submitted values (only planning and execution do), and the git-credentials page says the controller reads its secrets key from the `secrets-key` file in `--credentials-dir`, not `SPARKWING_SECRETS_KEY`.
+
 
 ## [v0.68.7] - 2026-11-04
 ### Added
