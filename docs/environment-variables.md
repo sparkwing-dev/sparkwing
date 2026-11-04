@@ -62,6 +62,7 @@ Sparkwing code. See [node protocol](node-protocol.md).
 | `SPARKWING_JOB_ID` | [node protocol](node-protocol.md) |
 | `SPARKWING_RUN_ID` | [architecture](architecture.md) |
 | `SPARKWING_GATE_INDEX` | [hooks](hooks.md) |
+| `SPARKWING_DEVELOPMENT_BUILD` | [versioning](versioning.md) |
 
 ## Test
 

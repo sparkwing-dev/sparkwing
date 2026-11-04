@@ -1,6 +1,6 @@
 # Deploy pipeline credentials: proposed IAM role, cluster access and parameters
 
-Status: proposal for Korey (2026-11-02), with his runner-isolation and GitOps-scope decisions folded in. Nothing here is applied. The `deploy` pipeline in `.sparkwing/jobs/deploy.go` expects exactly these names; change both together. The Terraform and Argo manifests are on kikd-infra branch `bw-3095-deploy-scope` (local worktree `/var/tmp/sw-fix-deploy-infra`, not pushed).
+Status: proposal for Korey (2026-11-02), with his runner-isolation and GitOps-scope decisions folded in. Nothing here is applied. The `deploy` pipeline in `.sparkwing/jobs/deploy.go` expects exactly these names; change both together. The Terraform and Argo manifests are on kikd-infra deploy-scope branch (local worktree `/var/tmp/sw-fix-deploy-infra`, not pushed).
 
 The pipeline holds no key. Each deploy job asks the controller for an OIDC token (`sparkwing.OIDCToken(ctx, "sts.amazonaws.com")`), exchanges it with `sts:AssumeRoleWithWebIdentity` for a one-hour session, and runs `aws`, `kubectl` and `git` with only that session. The machine's AWS profile, config and git config are never read (decision 82: per-run credentials, both owned machines may deploy).
 
@@ -94,7 +94,7 @@ Only a push to main can assume the role, and a push-started run carries no comma
 
 `--promote-proven` reads the `staging-gate` output of the newest successful default-branch `deploy` run (`RefToLastRun`). The lookup cannot skip runs: it returns the newest successful run or nothing. So a promotion re-emits the record it promoted on as its own `staging-gate` output, and the record keeps the time its gate ran, so chaining promotions never stretches `--proven-max-age`. A newest run that holds no usable record stops the promotion; deploy staging again.
 
-Today the lookup is scoped to the team and the pipeline name, not the repository. A `deploy` pipeline in another repository of the same team could publish a record the production job would read. The digest comparison still requires the record to name the exact images being promoted, but until the repository-scoped lookup lands, the production team must subscribe only `sparkwing-dev/sparkwing`. The tree-gate lane (branch `bw-3095-tree-gate`) is adding a repository-and-commit filter to the latest-run lookup (`sparkwing.FromTrustedRun`); `--promote-proven` must switch to it when it lands.
+Today the lookup is scoped to the team and the pipeline name, not the repository. A `deploy` pipeline in another repository of the same team could publish a record the production job would read. The digest comparison still requires the record to name the exact images being promoted, but until the repository-scoped lookup lands, the production team must subscribe only `sparkwing-dev/sparkwing`. The tree-gate lane (the tree-gate branch) is adding a repository-and-commit filter to the latest-run lookup (`sparkwing.FromTrustedRun`); `--promote-proven` must switch to it when it lands.
 
 ## First deploy over an untraced image
 
@@ -108,7 +108,7 @@ Later deploys then trace the image and run unattended.
 
 ## What a person does
 
-1. Review and merge kikd-infra `bw-3095-deploy-scope` commit `2c90511` (role, policy, access entry, RBAC, AppProject), set `sparkwing_deploy_team`, and apply `terraform/sparkwing-product`.
+1. Review and merge kikd-infra deploy-scope branch commit `2c90511` (role, policy, access entry, RBAC, AppProject), set `sparkwing_deploy_team`, and apply `terraform/sparkwing-product`.
 2. Create the two deploy keys in GitHub and store their private halves; mint the three team tokens and store them. Fill `<team>` in the trust policy.
 3. Install the GitHub App so repository-scoped runs exist in production: the production team's installation must cover `sparkwing-dev/sparkwing` (the push that starts a deploy) and the WSL workstation and Mac must be enrolled as repository-scoped runners for it (decision 82). The staging `stg-qa` team and the production `qa-team` and `qa-team-b` installations must also cover `sparkwing-dev/sparkwing`, because the gate and the smoke trigger `example` and `deploy-smoke` at the candidate commit, and staging's must cover `sparkwing-ci-smoke`.
 4. Run `sparkwing run deploy -- --dry-run --stop-after staging` from a checkout and read the printed actions.
