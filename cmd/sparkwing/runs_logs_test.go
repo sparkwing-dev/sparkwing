@@ -208,7 +208,7 @@ func TestRunLogsTriggerFollowPreservesTransportAndBearer(t *testing.T) {
 		}
 		return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(`{"records":[],"next_cursor":"","truncated":false,"complete":true}`)), Header: make(http.Header)}, nil
 	})}}
-	if err := followControllerRunLogs(t.Context(), options, "r1", "plain", &out); err != nil || out.Len() != 0 {
+	if err := followControllerRunLogs(t.Context(), options, "r1", "plain", &out, waitStatusPoll); err != nil || out.Len() != 0 {
 		t.Fatalf("follow=%q err=%v", out.String(), err)
 	}
 }
@@ -436,5 +436,20 @@ func TestRunLogSearchPreservesMatchesFromIncompleteLogs(t *testing.T) {
 	err := observeRunLogs(t.Context(), logInvocation(t, "grep", "--grep", "retained", "-o", "plain"), reader, nil, &output, &output, nil)
 	if err == nil || !strings.Contains(err.Error(), "writer_lost") || exitCodeFor(err) != 3 || !strings.Contains(output.String(), "retained match") {
 		t.Fatalf("output=%q error=%v", output.String(), err)
+	}
+}
+
+func TestLocalFollowPollsFasterThanRemoteFollow(t *testing.T) {
+	ctx, cancel := context.WithCancel(t.Context())
+	start := time.Now()
+	if err := waitLocalFollowPoll(ctx, time.Second); err != nil {
+		t.Fatal(err)
+	}
+	if elapsed := time.Since(start); elapsed >= time.Second {
+		t.Fatalf("local follow waited %s, the remote one-second poll", elapsed)
+	}
+	cancel()
+	if err := waitLocalFollowPoll(ctx, time.Second); err == nil {
+		t.Fatal("a cancelled local follow kept waiting")
 	}
 }
