@@ -828,7 +828,7 @@ func TestDeployStagingGateThenProduction(t *testing.T) {
 	}
 }
 
-func TestDeployToolchainAndGitopsLayout(t *testing.T) {
+func TestDeployToolchain(t *testing.T) {
 	f := newFakeDeploy(t)
 	d := f.deployer(false)
 	d.cfg.ToolDir = t.TempDir()
@@ -848,20 +848,6 @@ func TestDeployToolchainAndGitopsLayout(t *testing.T) {
 	}
 	if _, err := d.cmd(t.Context(), deployCommand{Name: "kubectl"}); err == nil || !strings.Contains(err.Error(), "deploy toolchain") {
 		t.Fatalf("a tool missing from the toolchain: %v", err)
-	}
-
-	cfg := defaultDeployConfig()
-	if cfg.GitopsURL != deployGitopsLayouts[deployDefaultGitopsLayout].url || cfg.Params.GitopsKey != deployGitopsLayouts[deployDefaultGitopsLayout].keyParam {
-		t.Fatalf("default config does not match the default layout: %+v", cfg)
-	}
-	if err := cfg.useGitopsLayout("sparkwing-gitops"); err != nil || !strings.Contains(cfg.GitopsURL, "sparkwing-gitops") || !strings.Contains(cfg.Params.GitopsKey, "sparkwing-gitops") {
-		t.Fatalf("sparkwing-gitops layout = %+v, %v", cfg, err)
-	}
-	if err := cfg.useGitopsLayout("elsewhere"); err == nil {
-		t.Fatal("an unknown layout was accepted")
-	}
-	if _, err := newTestHost(t, sparkwingtest.Options{}).Plan(t.Context(), "Deploy", map[string]string{"gitops-layout": "elsewhere"}); err == nil {
-		t.Fatal("an unknown --gitops-layout planned")
 	}
 }
 
@@ -1088,5 +1074,13 @@ func TestDeployDryRunPrintsEveryActionAndTakesNone(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(f.repo, "dist")); !os.IsNotExist(err) {
 		t.Fatalf("dry run built into dist: %v", err)
+	}
+}
+
+// Decision 87: the deploy credential reaches only the Sparkwing GitOps repository.
+func TestDeployWritesOnlySparkwingGitops(t *testing.T) {
+	cfg := defaultDeployConfig()
+	if cfg.GitopsURL != "git@github.com:sparkwing-dev/sparkwing-gitops.git" || cfg.Params.GitopsKey != "/kikd-prod/sparkwing/deploy/sparkwing-gitops-deploy-key" {
+		t.Fatalf("GitOps target = %q with key %q", cfg.GitopsURL, cfg.Params.GitopsKey)
 	}
 }

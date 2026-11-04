@@ -378,7 +378,7 @@ images with buildx under QEMU and joins both architectures under one index per t
 The `deploy` pipeline replaces the manual staging and production lanes. `build-images` builds the
 linux binaries with `bin/build-release-target.sh` and publishes them through `publish-images`
 logic, reusing the images when the commit's version tag already exists. `staging-deploy` pins the
-digests in kikd-gitops and renders with the candidate chart. It pushes the controller Deployment
+digests in `sparkwing-dev/sparkwing-gitops` and renders with the candidate chart. It pushes the controller Deployment
 alone and waits for Argo Synced/Healthy and the rollout, then does the same for the launcher with
 every other chart change. It refuses an
 environment whose store baseline differs from the candidate's, since a store change takes the full
@@ -386,9 +386,8 @@ gate. `staging-gate` runs `example` and the `sparkwing-ci-smoke` reference pipel
 Cloud. `production` requires a staging-gate record for the same digests, deploys the same way,
 runs `deploy-smoke` in `qa-team` and `qa-team-b` (one NodeClaim each, no controller or launcher
 WARN or ERROR), and reverts its GitOps commits on failure. Each environment's deployed and previous
-digests are its job output. `--gitops-layout` picks kikd-gitops today or the proposed
-Sparkwing-only repository after the move. Credentials come from the run's OIDC token through the role proposed in
-[deploy-pipeline-iam.md](design/rewrite/proposals/deploy-pipeline-iam.md), which is not applied yet.
+digests are its job output. Credentials come from the run's OIDC token through the `sparkwing-deploy`
+role in [deploy-pipeline-iam.md](design/rewrite/proposals/deploy-pipeline-iam.md).
 
 Only a run the GitHub App started for a push to main can assume that role, so a terminal can only
 preview. `--stop-after`, `--promote-proven` and `--version` reach a real deploy as `args:` on the

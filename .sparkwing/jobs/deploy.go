@@ -17,7 +17,6 @@ type DeployArgs struct {
 	PromoteProven   bool   `flag:"promote-proven" desc:"Skip staging and promote to production on the staging-gate record of the last successful default-branch deploy run, which must name the same image digests. A real deploy takes it only from sparkwing.yaml args."`
 	ControllerBase  string `flag:"controller-base" desc:"Controller runtime base by digest (build-images --runtime-base). Default: the qa.20 base."`
 	RunnerBase      string `flag:"runner-base" desc:"Runner runtime base by digest (build-images --runtime-base). Default: the qa.20 base."`
-	GitopsLayout    string `flag:"gitops-layout" desc:"Where Sparkwing's deploy values live: kikd-gitops (today) or sparkwing-gitops (after the move). Default: kikd-gitops."`
 	ProvenRecordAge string `flag:"proven-max-age" desc:"Oldest staging-gate record --promote-proven accepts, as a Go duration. Default: 168h."`
 }
 
@@ -31,7 +30,7 @@ func (Deploy) ShortHelp() string {
 
 func (Deploy) Help() string {
 	return "Turns the manual Sparkwing Cloud release lanes into one DAG. build-images builds linux/amd64 and linux/arm64 binaries with bin/build-release-target.sh and appends them to the runtime bases with publish-images, " +
-		"reusing images an earlier run already published for the same commit. staging-deploy and production pin the digests in kikd-gitops, render with the candidate chart and push the controller, then the launcher, " +
+		"reusing images an earlier run already published for the same commit. staging-deploy and production pin the digests in sparkwing-gitops, render with the candidate chart and push the controller, then the launcher, " +
 		"each after Argo reports Synced/Healthy and the deployment has rolled out. The controller's commit changes only the controller Deployment; every other chart change lands with the launcher. Each refuses when the " +
 		"environment's store baseline differs from the candidate's, because a store change takes the full gate. staging-gate runs the example pipeline and the sparkwing-ci-smoke reference pipeline on staging Cloud. " +
 		"production requires a staging-gate record for the same digests, from this run or, with --promote-proven, from the last successful default-branch deploy run, then runs the two-job deploy-smoke pipeline in each " +
@@ -75,13 +74,6 @@ func (p *Deploy) Plan(_ context.Context, plan *sparkwing.Plan, in DeployArgs, rc
 	}
 	if in.RunnerBase != "" {
 		cfg.RunnerBase = in.RunnerBase
-	}
-	layout := in.GitopsLayout
-	if layout == "" {
-		layout = deployDefaultGitopsLayout
-	}
-	if err := cfg.useGitopsLayout(layout); err != nil {
-		return fmt.Errorf("deploy: --gitops-layout: %w", err)
 	}
 	base := deployJob{Cfg: cfg, Dry: in.DryRun || rc.DryRun, RunID: rc.RunID}
 	if !base.Dry {
