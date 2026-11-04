@@ -47,6 +47,8 @@ unlock.
 
 ### Docs
 
+- **docs:** README, the local dashboard page and the auth reference describe shipped integrations as shipped
+  They still said native host, controller and managed-service integration was incomplete and that card, refund, fraud-warning and dispute settlement needed store work. Both shipped.
 - **docs:** Configuration guidance names each component's real input
   Machine configuration no longer says installation uses submitted values (only planning and execution do), and the git-credentials page says the controller reads its secrets key from the `secrets-key` file in `--credentials-dir`, not `SPARKWING_SECRETS_KEY`.
 

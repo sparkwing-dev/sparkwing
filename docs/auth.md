@@ -676,10 +676,9 @@ and checks its identity, payment and test/live mode. It keeps no card details. M
 credit, attempt or billing authority.
 
 Settlement derives the team and ledger effect from committed billing records
-and deduplicates provider events in its transaction. Checkout settlement is
-implemented. Settlement of card, refund, warning and dispute events still needs
-the store integration. A provider retry cannot safely be treated as a new
-credit grant.
+and deduplicates provider events in its transaction. Checkout, card, refund,
+early fraud warning and dispute events all settle there, so a provider retry is
+never treated as a new credit grant.
 
 Test and live Stripe keys select configuration for the same implementation.
 Checkout, payment history, card operations, payment holds and reversals retain
