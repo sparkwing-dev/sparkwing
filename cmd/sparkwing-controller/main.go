@@ -623,6 +623,7 @@ func run(args []string) error {
 	if err != nil {
 		return fmt.Errorf("persist deployment configuration: %w", err)
 	}
+	slog.Info("payment deployment; a checkout service's BILLING_DEPLOYMENT must equal it", "deployment", deploymentID)
 	srv.WithPaymentDeployment(deploymentID)
 	return controller.ServeWith(ctx, srv, listeners.Listeners)
 }

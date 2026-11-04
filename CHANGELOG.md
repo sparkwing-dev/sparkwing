@@ -33,6 +33,8 @@ unlock.
   Activating a virtualenv or Node version manager keeps the compiled pipeline; upgrading Go behind the same `PATH`
   rebuilds it.
 - **run:** Each engine notice, such as the missing version policy warning, prints once per command instead of three times
+- **controller:** The controller logs its payment deployment id at start, and a checkout pairing alert says which setting to fix
+  A 421 from the checkout service now tells the operator to set its `BILLING_DEPLOYMENT` to the `deployment` value on the alert, which the start-up `payment deployment` line also prints.
 
 ### Fixed
 

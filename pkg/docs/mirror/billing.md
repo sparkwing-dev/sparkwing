@@ -305,7 +305,10 @@ ledger effect because its charge total repeats those individual refunds.
 
 Each controller store holds a random payment deployment id, created once at
 first start and never changed by configuration, so renaming the controller's
-host leaves its in-flight payments its own. The checkout service stamps that id as
+host leaves its in-flight payments its own. The controller logs it at start as
+`payment deployment`, and the checkout service's `BILLING_DEPLOYMENT` must be
+set to that value; a reset or restored store with another id breaks the pairing
+until it is updated. The checkout service stamps that id as
 `metadata[sparkwing_deployment]` on every Checkout Session, setup intent,
 payment intent and customer it creates for the controller. Deployments that
 share one Stripe account each receive the other's events at `/webhooks/stripe`.

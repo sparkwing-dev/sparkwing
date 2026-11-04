@@ -62,7 +62,7 @@ var errCheckoutMisconfigured = errors.New("the checkout service and this control
 var checkoutMisconfigurations = map[int]string{
 	http.StatusUnauthorized:       "the checkout service refused the billing-token credential; it must equal the service's BILLING_CHECKOUT_TOKEN",
 	http.StatusNotFound:           "the checkout service has no such route; --billing-url must name the checkout service",
-	http.StatusMisdirectedRequest: "the checkout service serves another deployment; its BILLING_DEPLOYMENT must be this controller's deployment",
+	http.StatusMisdirectedRequest: "the checkout service serves another deployment; set its BILLING_DEPLOYMENT to this alert's deployment value, which the controller also logs at startup",
 }
 
 var errCheckoutRefused = errors.New("the checkout service refused the request")
