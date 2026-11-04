@@ -33,7 +33,14 @@ itself and a branch that does not contain a freshly fetched `origin/main`, and
 names the command that fixes each. The gate (the same jobs as
 `sparkwing run gate`) and the review (the same job as `sparkwing run review`,
 under `.review.yaml`) then run in parallel. Every change is reviewed, docs and
-comment changes included; the review job never skips by size or path. Pass
+comment changes included; the review job never skips by size or path. The
+gate selects its checks from the change scope (decision 96): vet, build, lint,
+the critical tests and the TypeScript SDK suite run only when the change
+reaches Go source, a non-Markdown file inside a Go package, module files,
+`.golangci.yml`, the store schema or, for the SDK suite, `sdk/typescript/`.
+A docs, UI or process change runs its own tests (affected packages, frontend
+suites when `web/` changed, the docs mirror and source-policy sweeps) plus the
+review. `sparkwing run gate -- --full` keeps the broad verification. Pass
 `-- --brief '...'` or `-- --skip 'F2=reason'` as for the review pipeline.
 
 The `land` job's `verify` step requires the review record's tree to be HEAD's

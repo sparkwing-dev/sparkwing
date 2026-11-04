@@ -19,6 +19,11 @@ unlock.
 ---
 
 ## [Unreleased]
+### Changed
+
+- **delivery:** Docs, UI and process landings run their own checks plus the review
+  Without `--full`, the `gate` and `land` pipelines run vet, build, lint, the critical tests and the TypeScript SDK suite only when the change reaches Go source or `sdk/typescript/`, and install frontend dependencies only when a frontend suite runs. The review still runs on every landing; `sparkwing run gate -- --full` keeps the broad verification.
+
 ### Fixed
 
 - **launcher:** Stop warning about Cloud reservations that belong to another job namespace

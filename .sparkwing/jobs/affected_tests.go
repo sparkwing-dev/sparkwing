@@ -54,15 +54,23 @@ func runAffectedTest(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	byDir := map[string]string{}
 	var plans []affectedTestPlan
 	for _, module := range modules {
 		packages, err := listModulePackages(ctx, module)
 		if err != nil {
 			return fmt.Errorf("%s: %w", module, err)
 		}
+		addRepoPackages(byDir, module, packages)
 		plans = append(plans, planAffectedTests(module, modules, files, packages, critical[module]))
 	}
 	sparkwing.Info(ctx, "affected tests: %s", scope)
+	if goChange(files, byDir) == "" {
+		sparkwing.Info(ctx, "affected tests: no Go source changed, so the critical set stays for hosted CI")
+		for i := range plans {
+			plans[i].critical = nil
+		}
+	}
 	return withProductTestHome(func(home string) error {
 		var failures []string
 		for _, p := range plans {
@@ -400,4 +408,90 @@ func fixtureChange(files, modules []string, byDir map[string]string, built map[s
 		}
 	}
 	return ""
+}
+
+func addRepoPackages(byDir map[string]string, module string, packages []modulePackage) {
+	for _, pkg := range packages {
+		dir := pkg.dir
+		if module != "." {
+			dir = path.Join(filepath.ToSlash(module), dir)
+		}
+		byDir[dir] = pkg.importPath
+	}
+}
+
+// perf: decision 96 lands docs, process and UI changes on their own tests, so
+// the module-wide Go steps answer only to a change that reaches compiled code,
+// embedded assets, module requirements or the lint configuration. Markdown
+// inside a package still runs that package's tests through the test step.
+func goChange(files []string, byDir map[string]string) string {
+	for _, f := range files {
+		switch {
+		case strings.HasSuffix(f, ".md"):
+			continue
+		case strings.HasSuffix(f, ".go"):
+			return f + " changed"
+		case path.Base(f) == "go.mod" || path.Base(f) == "go.sum" || path.Base(f) == ".golangci.yml":
+			return f + " changed"
+		}
+		if _, ok := wholeModuleTriggers[f]; ok {
+			return f + " changed"
+		}
+		if pkg := owningPackage(f, byDir); pkg != "" {
+			return fmt.Sprintf("%s changed, which %s owns", f, pkg)
+		}
+	}
+	return ""
+}
+
+func repoGoChange(ctx context.Context) (string, error) {
+	files, _, err := affectedChangeScope(ctx)
+	if err != nil {
+		return "", err
+	}
+	modules, err := committedModuleDirs(ctx)
+	if err != nil {
+		return "", err
+	}
+	byDir := map[string]string{}
+	for _, module := range modules {
+		packages, err := listModulePackages(ctx, module)
+		if err != nil {
+			return "", fmt.Errorf("%s: %w", module, err)
+		}
+		addRepoPackages(byDir, module, packages)
+	}
+	return goChange(files, byDir), nil
+}
+
+// safety: an unjudgeable change runs the step, so a broken scope can only widen it.
+func skipUnlessGoTouched(step string) sparkwing.SkipPredicate {
+	return func(ctx context.Context) bool {
+		why, err := repoGoChange(ctx)
+		switch {
+		case err != nil:
+			sparkwing.Info(ctx, "%s: running, because the change could not be judged: %v", step, err)
+			return false
+		case why != "":
+			sparkwing.Info(ctx, "%s: running, because %s", step, why)
+			return false
+		}
+		sparkwing.Info(ctx, "%s: skipping, because the change touches no Go source; hosted CI verifies main", step)
+		return true
+	}
+}
+
+// perf: the TypeScript SDK suite judges sdk/typescript and the Go protocol it
+// conforms to, so a change touching neither leaves it to hosted CI.
+func skipTypeScriptSDKUnlessTouched(ctx context.Context) bool {
+	files, _, err := affectedChangeScope(ctx)
+	if err == nil {
+		for _, f := range files {
+			if strings.HasPrefix(f, "sdk/typescript/") {
+				sparkwing.Info(ctx, "sdk-typescript: running, because %s changed", f)
+				return false
+			}
+		}
+	}
+	return skipUnlessGoTouched("sdk-typescript")(ctx)
 }

@@ -155,3 +155,38 @@ func TestBrowserFixtureIgnoresMarkdownAndTestsInPackagesItBuilds(t *testing.T) {
 		t.Fatal("a module requirement change skipped the browser smoke")
 	}
 }
+
+func TestGoStepsAnswerOnlyToChangesThatReachGo(t *testing.T) {
+	byDir := map[string]string{"pkg/docs": "m/pkg/docs", "internal/web": "m/web", ".sparkwing/jobs": "jobs"}
+	docsOnly := []string{"README.md", "docs/machine-config.md", "pkg/docs/mirror/machine-config.md", "CHANGELOG.md", "web/src/page.tsx", "design/notes.txt"}
+	if why := goChange(docsOnly, byDir); why != "" {
+		t.Fatalf("a docs and UI change ran the Go steps: %q", why)
+	}
+	for _, file := range []string{"internal/web/server.go", "internal/web/assets/logo.svg", ".sparkwing/go.sum", ".golangci.yml", "internal/store/schema.sql", "tools/new.go"} {
+		if why := goChange(append(docsOnly, file), byDir); why == "" {
+			t.Errorf("%s skipped the Go steps", file)
+		}
+	}
+}
+
+func TestDocsOnlyChangeSkipsTheGoStepsAndTheSDKSuite(t *testing.T) {
+	root := gateFixtureRepo(t)
+	gitCommitAll(t, root, "base")
+	runTestGit(t, root, "update-ref", "refs/remotes/origin/main", "HEAD")
+	ctx := context.Background()
+	writeGoFile(t, filepath.Join(root, "docs", "guide.md"), "# Guide\n")
+	gitCommitAll(t, root, "docs")
+	if !skipUnlessGoTouched("vet")(ctx) || !skipTypeScriptSDKUnlessTouched(ctx) {
+		t.Fatal("a docs-only change ran vet or the TypeScript SDK suite")
+	}
+	writeGoFile(t, filepath.Join(root, "sdk", "typescript", "src", "index.ts"), "export {}\n")
+	gitCommitAll(t, root, "sdk")
+	if skipTypeScriptSDKUnlessTouched(ctx) {
+		t.Fatal("a TypeScript SDK change skipped its suite")
+	}
+	writeGoFile(t, filepath.Join(root, "internal", "sound.go"), "package internal\n\nfunc Sound() int { return 2 }\n")
+	gitCommitAll(t, root, "go")
+	if skipUnlessGoTouched("vet")(ctx) {
+		t.Fatal("a Go change skipped vet")
+	}
+}
