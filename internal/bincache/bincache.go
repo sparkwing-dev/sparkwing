@@ -467,25 +467,23 @@ type fileState struct {
 
 // hashable lists the files a key part covers and how many gitignored paths it left out.
 func hashable(dir string, keep fileFilter, hashAllFiles bool) ([]string, int, error) {
-	var prune map[string]bool
+	var prune, ignored map[string]bool
 	if !hashAllFiles {
-		prune = ignoredDirsUnder(dir)
+		prune, ignored = ignoredUnder(dir)
 	}
 	files, pruned, err := walkHashable(dir, keep, prune)
-	if err != nil || hashAllFiles {
+	if err != nil || len(ignored) == 0 {
 		return files, pruned, err
-	}
-	ignored := ignoredUnder(dir, files)
-	if len(ignored) == 0 {
-		return files, pruned, nil
 	}
 	kept := files[:0]
 	for _, path := range files {
-		if !ignored[path] {
+		if ignored[path] {
+			pruned++
+		} else {
 			kept = append(kept, path)
 		}
 	}
-	return kept, pruned + len(ignored), nil
+	return kept, pruned, nil
 }
 
 func snapshotHashable(files []string) (map[string]fileState, error) {

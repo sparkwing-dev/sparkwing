@@ -142,3 +142,37 @@ func TestHashSkipsWhollyIgnoredDirectoriesButHashesTrackedFilesInThem(t *testing
 	}
 	t.Fatalf("tracked file under an ignored directory left the key: %v", files)
 }
+
+func TestHashableAgreesWithCheckIgnore(t *testing.T) {
+	dir := newGitPipelineDir(t)
+	writeFile(t, filepath.Join(dir, ".gitignore"), "logs/*\n!logs/keep.txt\n*.tmp\nbuild/\n")
+	writeFile(t, filepath.Join(dir, "sub/.gitignore"), "local.json\n")
+	for _, name := range []string{"logs/a.log", "logs/keep.txt", "x.tmp", "sub/x.tmp", "sub/local.json", "sub/ok.go", "build/out/bin", "tracked.tmp"} {
+		writeFile(t, filepath.Join(dir, name), name)
+	}
+	add := exec.Command("git", "add", "-f", "tracked.tmp")
+	add.Dir = dir
+	if out, err := add.CombinedOutput(); err != nil {
+		t.Fatalf("git add: %v: %s", err, out)
+	}
+	files, _, err := hashable(dir, allFiles, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	kept := map[string]bool{}
+	for _, path := range files {
+		kept[path] = true
+	}
+	all, _, err := walkHashable(dir, allFiles, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, path := range all {
+		check := exec.Command("git", "check-ignore", "-q", path)
+		check.Dir = dir
+		ignored := check.Run() == nil
+		if ignored == kept[path] {
+			t.Errorf("%s: check-ignore ignored=%t but hashable kept=%t", path, ignored, kept[path])
+		}
+	}
+}

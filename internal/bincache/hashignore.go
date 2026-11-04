@@ -1,56 +1,33 @@
 package bincache
 
 import (
-	"bytes"
-	"errors"
-	"os/exec"
 	"path/filepath"
 	"strings"
 
 	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 )
 
-func ignoredUnder(dir string, candidates []string) map[string]bool {
-	if len(candidates) == 0 {
-		return nil
-	}
-
-	cmd := procenv.HostCommand("git", "check-ignore", "-z", "--stdin")
-	cmd.Dir = dir
-	cmd.Stdin = strings.NewReader(strings.Join(candidates, "\x00") + "\x00")
-	var out bytes.Buffer
-	cmd.Stdout = &out
-	if err := cmd.Run(); err != nil {
-
-		var ee *exec.ExitError
-		if !errors.As(err, &ee) || ee.ExitCode() != 1 {
-			return nil
-		}
-	}
-
-	ignored := make(map[string]bool)
-	for _, p := range strings.Split(out.String(), "\x00") {
-		if p != "" {
-			ignored[p] = true
-		}
-	}
-	return ignored
-}
-
-// perf: pruning wholly ignored directories keeps a large build cache inside the
-// tree from being walked and handed to check-ignore path by path.
-func ignoredDirsUnder(dir string) map[string]bool {
+// ignoredUnder names the untracked files git ignores under dir, and the wholly ignored
+// directories it collapses, as paths joined to dir. Outside a repository nothing is ignored.
+// perf: one ls-files call replaces piping every walked path to check-ignore, which
+// took seconds per listing on a few thousand files.
+func ignoredUnder(dir string) (dirs, files map[string]bool) {
 	cmd := procenv.HostCommand("git", "ls-files", "-z", "--others", "--ignored", "--exclude-standard", "--directory")
 	cmd.Dir = dir
 	out, err := cmd.Output()
 	if err != nil {
-		return nil
+		return nil, nil
 	}
-	dirs := make(map[string]bool)
+	dirs, files = map[string]bool{}, map[string]bool{}
 	for _, p := range strings.Split(string(out), "\x00") {
-		if rel, ok := strings.CutSuffix(p, "/"); ok && rel != "" {
+		if p == "" {
+			continue
+		}
+		if rel, ok := strings.CutSuffix(p, "/"); ok {
 			dirs[filepath.Join(dir, filepath.FromSlash(rel))] = true
+		} else {
+			files[filepath.Join(dir, filepath.FromSlash(p))] = true
 		}
 	}
-	return dirs
+	return dirs, files
 }
