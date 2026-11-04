@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"io"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -131,6 +132,8 @@ func writeSelfDigestRecord(record, line string) {
 	}
 	_, writeErr := stage.WriteString(line + "\n")
 	if errors.Join(writeErr, stage.Close()) != nil || os.Rename(stage.Name(), record) != nil {
-		_ = os.Remove(stage.Name())
+		if err := os.Remove(stage.Name()); err != nil && !os.IsNotExist(err) {
+			slog.Default().Warn("engine: self-digest stage outlived its write", "path", stage.Name(), "error", err)
+		}
 	}
 }

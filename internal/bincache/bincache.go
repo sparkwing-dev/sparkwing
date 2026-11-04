@@ -557,7 +557,11 @@ func hashFilesInto(h io.Writer, dir string, files []string) (hashStats, error) {
 				if i >= len(files) {
 					return
 				}
-				rel, _ := filepath.Rel(dir, files[i])
+				rel, err := filepath.Rel(dir, files[i])
+				if err != nil {
+					errs[i] = err
+					continue
+				}
 				digests[i], sizes[i], errs[i] = hashFile(files[i], rel, memo)
 			}
 		}()
