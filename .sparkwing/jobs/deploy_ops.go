@@ -714,9 +714,6 @@ func (d *deployer) pinAndPush(ctx context.Context, env deployEnv, dir string, ph
 		if err != nil {
 			return err
 		}
-		if !strings.Contains(out, "@"+want.Digest) {
-			return fmt.Errorf("the render does not reference %s", want.Digest)
-		}
 		if phase.name == deployPhaseController {
 			previous, err := os.ReadFile(filepath.Join(dir, rendered))
 			if err != nil {
@@ -725,6 +722,16 @@ func (d *deployer) pinAndPush(ctx context.Context, env deployEnv, dir string, ph
 			if out, err = spliceControllerDeployment(string(previous), out, env.Namespace, env.ControllerDeployment); err != nil {
 				return err
 			}
+		}
+		out, dropped, err := dropClusterScoped(out)
+		if err != nil {
+			return err
+		}
+		if len(dropped) > 0 {
+			d.tools.say(ctx, "left out of "+rendered+", applied through kikd-infra k8s/sparkwing-cluster/: "+strings.Join(dropped, ", "))
+		}
+		if !strings.Contains(out, "@"+want.Digest) {
+			return fmt.Errorf("the render does not reference %s", want.Digest)
 		}
 		return os.WriteFile(filepath.Join(dir, rendered), []byte(out), 0o644)
 	}); err != nil {
