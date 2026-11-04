@@ -743,8 +743,16 @@ var productTestKept = map[string]string{
 // a CLI verb would otherwise read for the dashboard's address.
 const productTestHomeVar = "SPARKWING_HOME"
 
+// safety: go test never hashes a file outside the module it tests, and the
+// pipeline module's tests read .github/, bin/ and the root guides above it, so
+// a cached pass would survive a change to them. The checkout's state travels
+// as a variable those tests read, so only a rerun of the same tree replays.
+const productTestRepoStateVar = "SPARKWING_TEST_REPO_STATE"
+
+const productTestRepoState = `"$(git rev-parse -q --verify 'HEAD^{tree}')-$(git diff HEAD | git hash-object --stdin)-$(git ls-files -o --exclude-standard | git hash-object --stdin)"`
+
 func productTestPins(home string) []string {
-	return []string{productTestHomeVar + "=" + shellQuote(home)}
+	return []string{productTestHomeVar + "=" + shellQuote(home), productTestRepoStateVar + "=" + productTestRepoState}
 }
 
 func withoutInherited(cmd string, names []string) string {

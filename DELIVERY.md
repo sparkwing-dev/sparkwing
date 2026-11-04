@@ -715,7 +715,7 @@ file. Other syntax and workflow checks remain active.
   invalidates the cached `.sparkwing/` pipeline binary, so the first hook run
   after one pays about 2.5 s to recompile it outside the timed job span.
 - **Gate and land speed fixes, measured 2026-11-04** on this 16-core host at
-  load 13 to 35 (BW-3095; raw data in the sweep's `speed-data/ci/fixes/`).
+  load 13 to 35 (raw data in the sweep's `speed-data/ci/fixes/`).
   Hosted CI: a per-commit Go cache key saved from main pushes took the CLI
   build from 112 s cold (99 s median on the stale cache) to 6 s plus a 15 s
   restore on gate-core, 74 s to 15 s plus 26 s on race-touched, and vet from
@@ -744,7 +744,11 @@ file. Other syntax and workflow checks remain active.
   `test` step, the short suite and the `test` pipeline key that directory by
   checkout and step under `$TMPDIR` and empty it before and after each run, so
   `go test` can replay a passing package that reads the home; a fresh path per
-  run defeated its cache. A gate runs inside a sparkwing node, which hands its children the
+  run defeated its cache. Every product test step also pins
+  `SPARKWING_TEST_REPO_STATE` (HEAD's tree plus a hash of uncommitted and
+  untracked changes), which the pipeline module's `TestMain` reads: go test
+  never hashes files above the module, so without it a change to `.github/` or
+  `bin/` would replay that module's cached pass. A gate runs inside a sparkwing node, which hands its children the
   machine's admission socket, the dispatcher's service URLs and the run's own
   credentials, so a suite that read one would reach a live service and fail
   only under the gate. The node consumes its WorkStep window before the body

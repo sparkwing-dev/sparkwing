@@ -21,6 +21,10 @@ func TestMain(m *testing.M) {
 		fmt.Fprintln(os.Stderr, "jobs test: set sparkwing home:", err)
 		os.Exit(1)
 	}
+	// safety: reading the checkout state the gate pins makes it part of this
+	// package's test-cache key, because go test does not hash the files above
+	// the module that these tests read.
+	_ = os.Getenv(productTestRepoStateVar)
 	code := m.Run()
 	_ = os.RemoveAll(home)
 	os.Exit(code)
