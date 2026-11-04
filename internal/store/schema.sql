@@ -1832,7 +1832,7 @@ CREATE TABLE warm_pool_settings (
     auto_max BIGINT NOT NULL DEFAULT 0 CHECK(auto_max >= auto_min AND auto_max <= 2147483647),
     start_time_target_seconds DOUBLE PRECISION NOT NULL DEFAULT 10 CHECK(start_time_target_seconds > 0)
 );
-INSERT INTO warm_pool_settings(class) VALUES ('sparkwing-2cpu'),('sparkwing-4cpu'),('sparkwing-8cpu'),('sparkwing-16cpu'),('sparkwing-32cpu'),('sparkwing-64cpu');
+INSERT INTO warm_pool_settings(class,start_time_target_seconds) VALUES ('sparkwing-2cpu',20),('sparkwing-4cpu',20),('sparkwing-8cpu',20),('sparkwing-16cpu',20),('sparkwing-32cpu',20),('sparkwing-64cpu',20);
 
 CREATE TABLE warm_pool_observations (
     class TEXT PRIMARY KEY NOT NULL REFERENCES warm_pool_settings(class),

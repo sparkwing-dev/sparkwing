@@ -28,7 +28,10 @@ var schemaUpgrades = []schemaUpgrade{
 	},
 	{
 		from: 29, release: "v0.68.7", digest: "cbd0b9e4e393e9e215e8ce0db6912f882d6b732e034674f7ab9d596c8b6c4d39",
-		statements: []string{strings.TrimSpace(warmPoolDesiredV30)},
+		statements: []string{
+			strings.TrimSpace(warmPoolDesiredV30),
+			`UPDATE warm_pool_settings SET start_time_target_seconds=20 WHERE start_time_target_seconds=10`,
+		},
 	},
 }
 

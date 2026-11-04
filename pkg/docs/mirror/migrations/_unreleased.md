@@ -11,6 +11,12 @@ adds a node for slow starts only while a job is waiting for a fresh node. Before
 any slow start in the last hour kept adding a node every scaling cycle until the
 pool reached its maximum, even with nobody waiting.
 
+The default Auto start-time target becomes 20 seconds. New stores seed every
+class at 20 seconds, and the upgrade moves each class still at the old
+10-second default to 20. A class set to another target keeps it; set it back
+with `sparkwing operator warm-capacity set --start-time-target 10s` if you
+want the old behavior.
+
 A v0.68.7 store (schema 29 with the v0.68.7 baseline digest) upgrades in place
 the first time this release opens it, on SQLite and PostgreSQL. A v0.68.3 to
 v0.68.6 store (schema 28) takes both steps in the same transaction. The upgrade

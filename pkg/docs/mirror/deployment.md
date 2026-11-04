@@ -137,7 +137,7 @@ memory cgroup limits. A cold capacity request always asks for the requested clas
 Warm capacity defaults Off for every class. The operator **Warm capacity** page
 and CLI show warm/desired nodes, start-time percentiles, cold starts and upsizes,
 with signup and active-team counts. Operators select Off, Manual count or Auto
-minimum/maximum and a start-time target (default 10s). Auto uses cold-start waits
+minimum/maximum and a start-time target (default 20s). Auto uses cold-start waits
 in the last 30 minutes and, while a job is waiting for a fresh node, median start
 time in the last hour, clamped to the configured bounds; no waiting means the
 minimum.

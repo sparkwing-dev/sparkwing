@@ -337,7 +337,7 @@ Manage warm Cloud capacity per hardware class
 
 Set Off, Manual or Auto warm capacity for one class
 
-Replace one class policy. Off is the default. Counts default to zero and the start-time target to 10s.
+Replace one class policy. Off is the default. Counts default to zero and the start-time target to 20s.
 
 Auto uses the higher of cold-start waits / 2 rounded up and current warm + 1 when the hourly median exceeds the target, clamped to min/max.
 
@@ -354,7 +354,7 @@ Auto uses the higher of cold-start waits / 2 rounded up and current warm + 1 whe
 | `--count N` | Warm nodes to hold in manual mode, zero by default. |
 | `--min N` | Minimum warm nodes in auto mode, zero by default. |
 | `--max N` | Maximum warm nodes in auto mode, zero by default. |
-| `--start-time-target DURATION` | Positive job start-time target as a duration, 10s by default. |
+| `--start-time-target DURATION` | Positive job start-time target as a duration, 20s by default. |
 | `--profile NAME` | Controller connection profile from your config. Optional profiles use the saved default, then local; --profile= selects local. |
 
 ## `sparkwing operator warm-capacity show`

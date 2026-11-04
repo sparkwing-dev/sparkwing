@@ -146,7 +146,7 @@ var commandFlagDescriptions = map[string]string{
 	"sparkwing operator warm-capacity set --count":             "Warm nodes to hold in manual mode, zero by default.",
 	"sparkwing operator warm-capacity set --min":               "Minimum warm nodes in auto mode, zero by default.",
 	"sparkwing operator warm-capacity set --max":               "Maximum warm nodes in auto mode, zero by default.",
-	"sparkwing operator warm-capacity set --start-time-target": "Positive job start-time target as a duration, 10s by default.",
+	"sparkwing operator warm-capacity set --start-time-target": "Positive job start-time target as a duration, 20s by default.",
 	"sparkwing operator limits set --setting":                  "Name of the operational guard to change, as operator limits show lists it.",
 	"sparkwing operator limits set --value":                    "New value for the guard as a nonnegative integer; a value above the deployment's ceiling is refused, not clamped.",
 	"sparkwing operator secrets rotate --verify":               "Change nothing and count the rows that still open only under the previous key; retire that key once this reports zero and nothing unreadable.",

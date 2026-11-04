@@ -965,7 +965,8 @@ and evaluation through the existing state machine and derived verdict owner.
 ## Warm capacity
 
 `warm_pool_settings` stores one operator policy for each Cloud class. Every row
-starts Off, all counts start at zero, and the start-time target is 10 seconds.
+starts Off, all counts start at zero, and the start-time target is 20 seconds;
+the schema 30 upgrade moves a class still at the earlier 10-second default to 20.
 `warm_pool_observations` holds the deployment launcher's last ready, never-bound
 node count. The `warm_pool_desired` view expires observations after 120 seconds
 and computes Off/Manual/Auto for both SQLite and PostgreSQL. Auto takes the higher

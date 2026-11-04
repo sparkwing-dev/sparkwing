@@ -157,7 +157,7 @@ func Registry() []Command {
 		}},
 		{Path: "sparkwing operator warm-capacity", Authority: deploymentAdmin, Flags: []Flag{}},
 		{Path: "sparkwing operator warm-capacity show", Authority: deploymentAdmin, Flags: []Flag{{Name: "profile", Argument: "NAME"}}},
-		{Path: "sparkwing operator warm-capacity set", Authority: deploymentAdmin, Rules: []string{"Replace one class policy. Off is the default. Counts default to zero and the start-time target to 10s.", "Auto uses the higher of cold-start waits / 2 rounded up and current warm + 1 when the hourly median exceeds the target, clamped to min/max."}, Flags: []Flag{
+		{Path: "sparkwing operator warm-capacity set", Authority: deploymentAdmin, Rules: []string{"Replace one class policy. Off is the default. Counts default to zero and the start-time target to 20s.", "Auto uses the higher of cold-start waits / 2 rounded up and current warm + 1 when the hourly median exceeds the target, clamped to min/max."}, Flags: []Flag{
 			{Name: "class", Argument: "CLASS", Required: true},
 			{Name: "mode", Argument: "MODE", Required: true},
 			{Name: "count", Argument: "N"},

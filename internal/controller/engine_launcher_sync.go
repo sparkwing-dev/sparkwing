@@ -127,7 +127,7 @@ func (s storeLauncherSync) ReadLauncherSync(ctx context.Context, ref capability.
 
 func validateLauncherSync(body controllerwire.LauncherSyncRequest) ([]capability.LauncherObservation, error) {
 	for class, count := range body.WarmPools {
-		policy := store.WarmCapacitySettings{Class: class, Mode: "off", StartTimeTargetSeconds: 10}
+		policy := store.WarmCapacitySettings{Class: class, Mode: "off", StartTimeTargetSeconds: 20}
 		if count < 0 || policy.Validate() != nil {
 			return nil, invalidEngineBody("warm observations require known classes and nonnegative counts")
 		}
