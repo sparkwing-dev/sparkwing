@@ -55,7 +55,7 @@ func persistClaimContextTx(ctx context.Context, tx *storeTx, team Team, runID st
 	if err := json.Unmarshal(request, &sealed); err != nil {
 		return "", err
 	}
-	if !runspec.AppRepositoryTrust.Has(sealed.Provenance.Trust) {
+	if !runspec.AppRepositoryTrust().Has(sealed.Provenance.Trust) {
 		sealed.Provenance.Ref = ""
 	}
 	var accepted struct {

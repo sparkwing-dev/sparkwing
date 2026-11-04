@@ -98,16 +98,12 @@ func TestDaemonEventsReportsEmptyJournalLocation(t *testing.T) {
 	}
 }
 
-func TestDaemonExplainIncludesOwnedSlotsAndChildAttaches(t *testing.T) {
+func TestDaemonExplainIncludesOwnedSlots(t *testing.T) {
 	home := t.TempDir()
 	dir := filepath.Join(home, "wingd")
 	for _, record := range []journal.Record{
 		{Kind: "request", RunID: "node-slot", Data: map[string]any{"resources": map[string]any{"cores": 0.2}, "class": "batch", "priority": 0}},
 		{Kind: "grant", RunID: "node-slot", Data: map[string]any{"owner_run_id": "run-1", "wait_ms": 12400, "backfill": true}},
-		{Kind: "child_attach_request", RunID: "child-1", Data: map[string]any{"requested_parent": "run-1"}},
-		{Kind: "child_attach", RunID: "child-1", Data: map[string]any{"resolved_parent": "run-1"}},
-		{Kind: "child_attach_request", RunID: "child-2", Data: map[string]any{"requested_parent": "run-1"}},
-		{Kind: "rejected", RunID: "child-2", Data: map[string]any{"reason": "parent lease missing"}},
 		{Kind: "request", RunID: "refused-slot", Data: map[string]any{"requested_owner_run_id": "run-1", "resources": map[string]any{"cores": 0.5}, "class": "batch", "priority": 0}},
 		{Kind: "rejected", RunID: "refused-slot", Data: map[string]any{"reason": "draining"}},
 		{Kind: "release", RunID: "node-slot", Data: map[string]any{"lease_id": "lease-1"}},
@@ -119,7 +115,7 @@ func TestDaemonExplainIncludesOwnedSlotsAndChildAttaches(t *testing.T) {
 	}
 	t.Setenv("SPARKWING_HOME", home)
 	plain := captureDaemonOutput(t, func() error { return runDaemonEventsArgs([]string{"--explain", "--run", "run-1", "-o", "plain"}) })
-	for _, fragment := range []string{"node-slot: Requested 0.2 cores", "node-slot: Admitted after 12.4s (backfill)", "child-1: Attached child", "child-2: Request rejected: parent lease missing", "refused-slot: Request rejected: draining", "node-slot: Released lease-1"} {
+	for _, fragment := range []string{"node-slot: Requested 0.2 cores", "node-slot: Admitted after 12.4s (backfill)", "refused-slot: Request rejected: draining", "node-slot: Released lease-1"} {
 		if !strings.Contains(plain, fragment) {
 			t.Errorf("missing %q in %s", fragment, plain)
 		}
@@ -183,11 +179,11 @@ func TestDaemonJournalReportsSkippedRecords(t *testing.T) {
 }
 
 func TestExplainEventRendersKnownKindsWithoutRawJSON(t *testing.T) {
-	data := map[string]any{"reason": "capacity", "role": "holding admission", "lease_id": "lease-1", "wait_ms": float64(12400), "backfill": true, "blocking_reason": "waiting for 2.0 cores", "blocker": "run-X", "resources": map[string]any{"cores": 0.2}, "class": "batch", "priority": float64(0), "requested_parent": "run-X", "resolved_parent": "run-X", "requesting_pid": float64(123), "pid_known": true, "affected_runs": []any{"run-X"}, "by_run": "run-X", "version": "v1", "socket": "/tmp/socket", "successor_version": "v2", "target_cores": float64(2), "error": "timeout", "duration_ms": float64(100), "failed_probes": float64(3), "message_type": "bad", "count": float64(4)}
+	data := map[string]any{"reason": "capacity", "role": "holding admission", "lease_id": "lease-1", "wait_ms": float64(12400), "backfill": true, "blocking_reason": "waiting for 2.0 cores", "blocker": "run-X", "resources": map[string]any{"cores": 0.2}, "class": "batch", "priority": float64(0), "requesting_pid": float64(123), "pid_known": true, "affected_runs": []any{"run-X"}, "by_run": "run-X", "version": "v1", "socket": "/tmp/socket", "successor_version": "v2", "target_cores": float64(2), "error": "timeout", "duration_ms": float64(100), "failed_probes": float64(3), "message_type": "bad", "count": float64(4)}
 	cases := map[string]string{
 		"request": "Requested 0.2 cores", "queued": "Queued behind run run-X", "grant": "Admitted after 12.4s (backfill)",
 		"connection_opened": "Connection opened by pid 123", "connection_handshake": "Connection handshake completed", "connection_closed": "Connection closed",
-		"child_attach_request": "Requested child attachment", "child_attach": "Attached child", "reattach_request": "Requested lease reattachment", "reattach_accepted": "Reattached after daemon replacement (incarnation 3)", "reattach_refused": "Reattachment refused",
+		"reattach_request": "Requested lease reattachment", "reattach_accepted": "Reattached after daemon replacement (incarnation 3)", "reattach_refused": "Reattachment refused",
 		"cancel": "Cancelled by pid 123", "release": "Released lease-1", "superseded": "Superseded by run run-X", "denied": "Admission denied", "rejected": "Request rejected", "rejection": "Invalid request rejected", "eviction": "Evicted", "queue_timeout": "Queue wait expired", "cancellation": "Admission cancelled", "backfill": "Backfilled", "reprioritize": "Priority changed", "contended": "Ran under contention", "grace_expiry": "Reattachment grace expired",
 		"start": "Daemon started", "ready": "Daemon ready", "shutdown": "Daemon stopped", "drain_begin": "Daemon began draining", "drain_end": "Daemon finished draining", "headroom_sample": "Available capacity sampled", "handshake_refused": "Connection handshake refused", "message_refused": "Message refused", "dropped": "Journal dropped",
 	}

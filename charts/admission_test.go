@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	admissionv1 "k8s.io/api/admissionregistration/v1"
+	corev1 "k8s.io/api/core/v1"
 	"sigs.k8s.io/yaml"
 
 	"github.com/sparkwing-dev/sparkwing/internal/runners/launcher"
@@ -40,27 +41,30 @@ func launcherImages(prefix string) []string {
 
 func generatedAdmissionTemplate(t *testing.T) []byte {
 	t.Helper()
-	policies, bindings := launcher.AdmissionPolicies(launcher.AdmissionConfig{Namespace: "{{ $jobs }}", Launcher: "{{ $launcher }}", RunnerImage: "{{ $runner }}", DockerImage: "{{ $docker }}"})
-	out := bytes.NewBufferString(admissionHeader)
+	admission := launcher.AdmissionConfig{Namespace: "{{ $jobs }}", Launcher: "{{ $launcher }}", RunnerImage: "{{ $runner }}", DockerImage: "{{ $docker }}"}
+	policies, bindings := launcher.AdmissionPolicies(admission)
+	objects := []any{launcher.AdmissionParams(admission)}
 	for i := range policies {
-		for _, object := range []any{policies[i], bindings[i]} {
-			raw, err := json.Marshal(object)
-			if err != nil {
-				t.Fatal(err)
-			}
-			var document map[string]any
-			if err := json.Unmarshal(raw, &document); err != nil {
-				t.Fatal(err)
-			}
-			delete(document, "status")
-			delete(document["metadata"].(map[string]any), "creationTimestamp")
-			body, err := yaml.Marshal(document)
-			if err != nil {
-				t.Fatal(err)
-			}
-			out.WriteString("---\n")
-			out.Write(body)
+		objects = append(objects, policies[i], bindings[i])
+	}
+	out := bytes.NewBufferString(admissionHeader)
+	for _, object := range objects {
+		raw, err := json.Marshal(object)
+		if err != nil {
+			t.Fatal(err)
 		}
+		var document map[string]any
+		if err := json.Unmarshal(raw, &document); err != nil {
+			t.Fatal(err)
+		}
+		delete(document, "status")
+		delete(document["metadata"].(map[string]any), "creationTimestamp")
+		body, err := yaml.Marshal(document)
+		if err != nil {
+			t.Fatal(err)
+		}
+		out.WriteString("---\n")
+		out.Write(body)
 	}
 	out.WriteString("{{- end }}\n")
 	return out.Bytes()
@@ -90,7 +94,8 @@ func TestChartInstallsTheLaunchersAdmissionPolicies(t *testing.T) {
 			if slices.Contains(settings, prefix+"launcher.jobNamespace=customer-jobs") {
 				jobs = "customer-jobs"
 			}
-			policies, bindings := launcher.AdmissionPolicies(launcher.AdmissionConfig{Namespace: jobs, Launcher: "system:serviceaccount:cloud:cloud-launcher", RunnerImage: "registry.example/runner:test@" + testDigest, DockerImage: "registry.example/docker:dind@" + dockerDigest})
+			admission := launcher.AdmissionConfig{Namespace: jobs, Launcher: "system:serviceaccount:cloud:cloud-launcher", RunnerImage: "registry.example/runner:test@" + testDigest, DockerImage: "registry.example/docker:dind@" + dockerDigest}
+			policies, bindings := launcher.AdmissionPolicies(admission)
 			found := 0
 			for _, document := range strings.Split(helmRenderAll(t, chart, "sparkwing", "cloud", settings...), "\n---") {
 				var kind struct{ Kind, APIVersion string }
@@ -98,6 +103,15 @@ func TestChartInstallsTheLaunchersAdmissionPolicies(t *testing.T) {
 					t.Fatal(err)
 				}
 				switch kind.Kind {
+				case "ConfigMap":
+					var params corev1.ConfigMap
+					if err := yaml.Unmarshal([]byte(document), &params); err != nil {
+						t.Fatal(err)
+					}
+					if want := launcher.AdmissionParams(admission); params.Name != want.Name || params.Namespace != want.Namespace || !reflect.DeepEqual(params.Data, want.Data) {
+						t.Errorf("%s renders admission params %s/%s %v unlike the launcher's expectation %v", chart, params.Namespace, params.Name, params.Data, want.Data)
+					}
+					found++
 				case "ValidatingAdmissionPolicy":
 					var policy admissionv1.ValidatingAdmissionPolicy
 					if err := yaml.Unmarshal([]byte(document), &policy); err != nil {
@@ -120,8 +134,8 @@ func TestChartInstallsTheLaunchersAdmissionPolicies(t *testing.T) {
 					found++
 				}
 			}
-			if found != 4 {
-				t.Errorf("%s rendered %d of the 4 admission objects", chart, found)
+			if found != 5 {
+				t.Errorf("%s rendered %d of the 5 admission objects", chart, found)
 			}
 		}
 	}

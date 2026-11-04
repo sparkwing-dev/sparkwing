@@ -28,20 +28,11 @@ func TestJob_RejectsPathUnsafeIDs(t *testing.T) {
 	sparkwing.Job(plan, "build.amd64-v2", &buildJob{})
 }
 
-func TestNewConcurrencyGroup_RejectsUnknownEnumValues(t *testing.T) {
-	mustPanic := func(name string, limit sparkwing.ConcurrencyLimit) {
-		t.Helper()
-		defer func() {
-			if recover() == nil {
-				t.Errorf("NewConcurrencyGroup(%q, %+v) did not panic", name, limit)
-			}
-		}()
-		sparkwing.NewConcurrencyGroup(name, limit)
-	}
-	mustPanic("", sparkwing.ConcurrencyLimit{Capacity: 1})
-	mustPanic("g", sparkwing.ConcurrencyLimit{Capacity: 1, OnLimit: "qeue"})
-	mustPanic("g", sparkwing.ConcurrencyLimit{Capacity: 1, Scope: "globl"})
-	sparkwing.NewConcurrencyGroup("g", sparkwing.ConcurrencyLimit{
-		Capacity: 1, OnLimit: sparkwing.CancelOthers, Scope: sparkwing.ScopeBox,
-	})
+func TestNewConcurrencyGroup_RejectsAnEmptyName(t *testing.T) {
+	defer func() {
+		if recover() == nil {
+			t.Error("NewConcurrencyGroup with an empty name did not panic")
+		}
+	}()
+	sparkwing.NewConcurrencyGroup("", sparkwing.ConcurrencyLimit{Capacity: 1})
 }

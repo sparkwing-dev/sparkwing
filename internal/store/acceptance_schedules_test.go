@@ -53,7 +53,7 @@ func checkStoreScheduleBoundary(t *testing.T) (err error) {
 	if _, err := local.GetCronSchedule(ctx, "schedule-1"); !errors.Is(err, store.ErrNotFound) {
 		return fmt.Errorf("foreign schedule read: %v", err)
 	}
-	if err := local.SetCronSchedulePaused(ctx, "schedule-1", true); !errors.Is(err, store.ErrNotFound) {
+	if err := local.SetCronScheduleDeclared(ctx, "schedule-1", false); !errors.Is(err, store.ErrNotFound) {
 		return fmt.Errorf("foreign schedule write: %v", err)
 	}
 	if fires, err := local.ListCronFires(ctx, "schedule-1", 10); err != nil || len(fires) != 0 {
@@ -99,8 +99,8 @@ func checkStoreScheduleBoundary(t *testing.T) (err error) {
 	if got, err := s.AsOperator().GetCronTick(ctx); err != nil || !got.At.Equal(tick.At) || got.Host != tick.Host || got.Version != tick.Version || got.Error != tick.Error {
 		return fmt.Errorf("persisted tick: %+v, %v", got, err)
 	}
-	if n, err := local.DeleteCronSchedulesForRepo(ctx, repo); err != nil || n != 1 {
-		return fmt.Errorf("tenant schedule deletion: %d, %v", n, err)
+	if err := local.DeleteCronSchedule(ctx, before.ID); err != nil {
+		return fmt.Errorf("tenant schedule deletion: %w", err)
 	}
 	other, err := s.ForTeam(ctx, "other")
 	if err != nil {

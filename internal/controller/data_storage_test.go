@@ -35,6 +35,9 @@ func TestDataStorageCollectionFailureStillResetsZeroRateBilling(t *testing.T) {
 			t.Error(err)
 		}
 	})
+	// safety: the default team is never billed for storage, so a named team carries the reset.
+	const team store.Team = "billed-team"
+	teststore.SeedTeam(t, st, team)
 	now := time.Now()
 	server := NewDeployment(st, deploymenttest.Metered(t), nil).WithDataObjects(failedDataDeletion{})
 	if !server.deployment.Metering() {
@@ -43,18 +46,18 @@ func TestDataStorageCollectionFailureStillResetsZeroRateBilling(t *testing.T) {
 	rate := int64(0)
 	teststore.SetCreditSettings(t, st, store.CreditSettingsUpdate{StorageRateMicroPerGBDay: &rate})
 	digest := strings.Repeat("a", 64)
-	if _, err := teststore.SQL(t, st).ExecContext(t.Context(), "INSERT INTO blobs(team,digest,size,created_at) VALUES (?,?,1,?)", store.DefaultTeam, digest, now.UnixNano()); err != nil {
+	if _, err := teststore.SQL(t, st).ExecContext(t.Context(), "INSERT INTO blobs(team,digest,size,created_at) VALUES (?,?,1,?)", team, digest, now.UnixNano()); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := teststore.SQL(t, st).ExecContext(t.Context(), "INSERT INTO blob_tombstones(team,digest,marked_at) VALUES (?,?,?)", store.DefaultTeam, digest, now.Add(-2*limits.BlobGCGrace).UnixNano()); err != nil {
+	if _, err := teststore.SQL(t, st).ExecContext(t.Context(), "INSERT INTO blob_tombstones(team,digest,marked_at) VALUES (?,?,?)", team, digest, now.Add(-2*limits.BlobGCGrace).UnixNano()); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := teststore.SQL(t, st).ExecContext(t.Context(), "INSERT INTO team_storage(team,store,storage_charged_through,updated_at) VALUES (?,'cache',123,?)", store.DefaultTeam, now.UnixNano()); err != nil {
+	if _, err := teststore.SQL(t, st).ExecContext(t.Context(), "INSERT INTO team_storage(team,store,storage_charged_through,updated_at) VALUES (?,'cache',123,?)", team, now.UnixNano()); err != nil {
 		t.Fatal(err)
 	}
 	server.maintainRetainedData(t.Context())
 	var through int64
-	if err := teststore.SQL(t, st).QueryRowContext(t.Context(), "SELECT storage_charged_through FROM team_storage WHERE team=? AND store='cache'", store.DefaultTeam).Scan(&through); err != nil {
+	if err := teststore.SQL(t, st).QueryRowContext(t.Context(), "SELECT storage_charged_through FROM team_storage WHERE team=? AND store='cache'", team).Scan(&through); err != nil {
 		t.Fatal(err)
 	}
 	if through != 0 {

@@ -18,7 +18,7 @@ func TestWarmCapacityConsoleCommitsAndRevocation(t *testing.T) {
 		t.Fatalf("capacity=%s err=%v", read.Body, err)
 	}
 	for _, c := range before.Classes {
-		if c.Mode != "off" || c.Desired != 0 || c.StartTimeTargetSeconds != 10 {
+		if c.Mode != "off" || c.Desired != 0 || c.StartTimeTargetSeconds != 20 {
 			t.Fatalf("default=%+v", c)
 		}
 	}

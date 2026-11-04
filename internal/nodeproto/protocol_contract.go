@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"reflect"
+	"slices"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
@@ -243,6 +244,39 @@ func ParseFrame(line []byte) (Frame, error) {
 	return Frame{Log: &log}, nil
 }
 
+// OperationFields names the request fields an operation must carry and may carry, by JSON name.
+type OperationFields struct{ Required, Allowed []string }
+
+var requestFieldNames = []string{"protocol", "engine", "runner", "binding", "features", "pipeline", "args", "run", "job", "step", "attempt", "settled", "failure", "closure", "input", "target"}
+
+var requestFieldRules = map[Op]OperationFields{
+	OpHello:    {[]string{"protocol", "engine", "runner"}, []string{"protocol", "engine", "runner", "binding", "features"}},
+	OpDescribe: {},
+	OpPlan:     {[]string{"pipeline", "args", "run"}, []string{"pipeline", "args", "run"}},
+	OpRunStep:  {[]string{"job", "step", "attempt", "settled"}, []string{"args", "job", "step", "attempt", "settled", "failure"}},
+	OpEval:     {[]string{"closure"}, []string{"args", "closure", "attempt", "settled", "input"}},
+	OpCancel:   {nil, []string{"job", "step", "target"}},
+}
+
+// RequestFieldNames lists every operation-specific request field by JSON name.
+func RequestFieldNames() []string { return slices.Clone(requestFieldNames) }
+
+// RequestFields returns the field rule Validate enforces for op, which the published
+// request schema renders. Cancel's choice between target and job is checked separately.
+func RequestFields(op Op) OperationFields {
+	f := requestFieldRules[op]
+	return OperationFields{Required: slices.Clone(f.Required), Allowed: slices.Clone(f.Allowed)}
+}
+
+func (r Request) fields() map[string]bool {
+	return map[string]bool{
+		"protocol": r.Protocol != 0, "engine": r.Engine != nil, "runner": r.Runner != nil, "binding": r.Binding != nil, "features": r.Features != nil,
+		"pipeline": r.Pipeline != "", "args": r.Args != nil, "run": r.Run != nil, "job": r.Job != "", "step": r.Step != "",
+		"attempt": r.Attempt != 0, "settled": r.Settled != nil, "failure": r.Failure != nil, "closure": r.Closure != "",
+		"input": len(r.Input) != 0, "target": r.Target != "",
+	}
+}
+
 // Validate refuses fields that contradict the selected operation before invoking pipeline code.
 func (r Request) Validate() error {
 	bad := func(message string) error { return &apierr.Error{Code: apierr.BadRequest, Message: message} }
@@ -285,15 +319,11 @@ func (r Request) Validate() error {
 	default:
 		return &apierr.Error{Code: apierr.UnknownOp, Message: fmt.Sprintf("unknown node operation %q; rebuild .sparkwing if the SDK is older than the engine", r.Op)}
 	}
-	if r.Op != OpHello && (r.Protocol != 0 || r.Engine != nil || r.Runner != nil || r.Binding != nil || r.Features != nil) ||
-		r.Op != OpPlan && (r.Pipeline != "" || r.Run != nil) ||
-		r.Op != OpPlan && r.Op != OpRunStep && r.Op != OpEval && r.Args != nil ||
-		r.Op != OpRunStep && r.Failure != nil ||
-		r.Op != OpRunStep && r.Op != OpEval && (r.Attempt != 0 || r.Settled != nil) ||
-		r.Op != OpRunStep && r.Op != OpCancel && (r.Job != "" || r.Step != "") ||
-		r.Op != OpCancel && r.Target != "" ||
-		r.Op != OpEval && (r.Closure != "" || len(r.Input) != 0) {
-		return bad("request carries fields for another operation")
+	present := r.fields()
+	for _, field := range requestFieldNames {
+		if present[field] && !slices.Contains(requestFieldRules[r.Op].Allowed, field) {
+			return bad("request carries fields for another operation")
+		}
 	}
 	if f := r.Failure; f != nil && (f.Job == "" || f.Stage == "" || f.Error == nil) {
 		return bad("failure needs a job, stage and error")
@@ -424,26 +454,12 @@ func requiredString(obj map[string]json.RawMessage, key string) error {
 }
 
 func requestFields(obj map[string]json.RawMessage, op Op) error {
-	allowed := map[string]bool{"id": true, "op": true}
-	switch op {
-	case OpHello:
-		allowed["protocol"], allowed["engine"], allowed["runner"], allowed["binding"] = true, true, true, true
-	case OpDescribe:
-	case OpPlan:
-		allowed["pipeline"], allowed["args"], allowed["run"] = true, true, true
-	case OpRunStep:
-		allowed["args"] = true
-		allowed["job"], allowed["step"], allowed["attempt"], allowed["failure"], allowed["settled"] = true, true, true, true, true
-	case OpEval:
-		allowed["args"] = true
-		allowed["closure"], allowed["input"], allowed["attempt"], allowed["settled"] = true, true, true, true
-	case OpCancel:
-		allowed["job"], allowed["step"], allowed["target"] = true, true, true
-	default:
+	rule, known := requestFieldRules[op]
+	if !known {
 		return nil
 	}
-	for _, key := range []string{"protocol", "engine", "runner", "binding", "pipeline", "args", "run", "job", "step", "attempt", "settled", "failure", "closure", "input", "target"} {
-		if raw, found := obj[key]; found && (!allowed[key] || string(raw) == "null" && key != "input") {
+	for _, key := range requestFieldNames {
+		if raw, found := obj[key]; found && (!slices.Contains(rule.Allowed, key) || string(raw) == "null" && key != "input") {
 			return &apierr.Error{Code: apierr.BadRequest, Message: fmt.Sprintf("operation %s cannot carry %s", op, key)}
 		}
 	}

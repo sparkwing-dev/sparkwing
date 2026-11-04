@@ -18,9 +18,6 @@ func TestResolveHoldReportsUnsafeAndOversizedFiles(t *testing.T) {
 		if err == nil || hold.Source != path {
 			t.Fatalf("unsafe hold disappeared: %+v %v", hold, err)
 		}
-		if _, err := resolveHoldStrict(path); err == nil {
-			t.Fatal("strict resolver hid read failure")
-		}
 	}
 	missing := filepath.Join(root, "missing")
 	if hold, err := ResolveHold(missing); err != nil || hold.Value != "" {

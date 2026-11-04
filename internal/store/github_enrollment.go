@@ -4,7 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"errors"
-	"fmt"
 	"slices"
 	"strconv"
 	"strings"
@@ -24,15 +23,12 @@ func (t *Tenant) RegisterGitHubRunner(ctx context.Context, a capability.Authoriz
 		if row.Team != "" && row.Team != t.team || row.CreatedBy != "" && row.CreatedBy != actor {
 			return bindingRefusal()
 		}
-		var count, exists int
-		if err := tx.QueryRowContext(ctx, `SELECT COUNT(*),COALESCE(SUM(CASE WHEN repository_id=? THEN 1 ELSE 0 END),0) FROM github_runner_bindings WHERE team=?`, row.RepositoryID, t.team).Scan(&count, &exists); err != nil {
+		var exists int
+		if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM github_runner_bindings WHERE team=? AND repository_id=?`, t.team, row.RepositoryID).Scan(&exists); err != nil {
 			return err
 		}
 		if exists != 0 {
 			return ErrAlreadyBound
-		}
-		if t.s.holdsFreeAllowance(t.team) && count >= maxGitHubRunnerBindings {
-			return fmt.Errorf("%w: team GitHub runner repository binding limit is %d, current usage is %d bindings; remove unused bindings or contact support@sparkwing.dev to raise this limit", ErrBindingLimit, maxGitHubRunnerBindings, count)
 		}
 		out = GitHubRunnerBinding{Team: t.team, RepositoryID: row.RepositoryID, RepositoryOwnerID: row.RepositoryOwnerID, Repository: repo.Slug(), InstallationID: row.InstallationID, CreatedBy: actor, CreatedAt: tx.now(ctx)}
 		_, err := tx.execContext(ctx, `INSERT INTO github_runner_bindings(team,repository_id,repository_owner_id,repository,installation_id,created_by,created_at,repo_key) VALUES (?,?,?,?,NULLIF(?,0),?,?,?)`, t.team, out.RepositoryID, out.RepositoryOwnerID, out.Repository, out.InstallationID, actor, out.CreatedAt.UnixNano(), githubRepositoryKey(out.RepositoryID))
@@ -109,14 +105,6 @@ func checkActionsEnrollmentTx(ctx context.Context, tx *storeTx, spec capability.
 	}
 	if spec.ExpiresAt == nil {
 		return authorityError(apierr.Forbidden, "Actions credential requires its verified expiry ceiling")
-	}
-	var live int
-	now := tx.now(ctx)
-	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM capabilities WHERE team=? AND bind_kind='push' AND parent_id IS NULL AND `+liveCredentialSQL(""), spec.Team, now.UnixNano(), now.UnixNano()).Scan(&live); err != nil {
-		return err
-	}
-	if live >= maxGitHubRunnerCredentials {
-		return fmt.Errorf("%w: team live GitHub Actions credential limit is %d, current usage is %d credentials; let existing jobs finish or contact support@sparkwing.dev to raise this limit", ErrGitHubRunnerCredentialLimit, maxGitHubRunnerCredentials, live)
 	}
 	return nil
 }

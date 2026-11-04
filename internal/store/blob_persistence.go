@@ -273,7 +273,7 @@ func blobKindAllowed(a blobActor, kind blob.Kind) bool {
 		}
 		return source.Kind == blob.UploadOwnerUnit && source.Unit.Set && (source.Unit.Value.Kind == blob.UploadPlanUnit || source.Unit.Value.Kind == blob.UploadTriggerUnit)
 	}
-	for _, rule := range blob.UploadRules {
+	for _, rule := range blob.UploadRules() {
 		if rule.IdentityKind == source.Kind && rule.RequiresAttempt == source.Attempt.Set && rule.RequiresUnit == source.Unit.Set && slices.Contains(rule.RecordKinds, kind) {
 			return true
 		}

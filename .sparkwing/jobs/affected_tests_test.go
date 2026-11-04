@@ -2,6 +2,7 @@ package jobs
 
 import (
 	"context"
+	"path"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -153,5 +154,90 @@ func TestBrowserFixtureIgnoresMarkdownAndTestsInPackagesItBuilds(t *testing.T) {
 	}
 	if why := fixtureChange([]string{"go.mod"}, modules, byDir, built); why == "" {
 		t.Fatal("a module requirement change skipped the browser smoke")
+	}
+}
+
+// TestAffectedTestsRunTheReadersOfFilesOutsideEveryPackage plants changes the
+// import graph cannot see and requires the packages whose tests read them.
+func TestAffectedTestsRunTheReadersOfFilesOutsideEveryPackage(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: lists both modules' packages; the fast class runs under -short")
+	}
+	root := sourceTreeRoot()
+	if root == "" {
+		t.Fatal("could not locate the repository root from this file's compile-time path")
+	}
+	t.Chdir(root)
+	ctx := context.Background()
+	modules, err := committedModuleDirs(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	packages := map[string][]modulePackage{}
+	known := map[string]bool{}
+	for _, m := range modules {
+		pkgs, err := listModulePackages(ctx, m)
+		if err != nil {
+			t.Fatal(err)
+		}
+		packages[m] = pkgs
+		for _, pkg := range pkgs {
+			known[path.Join(m, pkg.dir)] = true
+		}
+	}
+	for _, r := range nonPackageReaders {
+		for _, dir := range r.dirs {
+			if !known[dir] {
+				t.Errorf("%s names %s, which is not a package in this repository", r.prefix, dir)
+			}
+		}
+	}
+	for file, want := range map[string]string{
+		".github/workflows/canonical-gates.yaml": "sparkwing-pipelines/jobs",
+		"docs/pipelines.md":                      "github.com/sparkwing-dev/sparkwing/internal/doccheck",
+		"bin/check-changelog.sh":                 "sparkwing-pipelines/jobs",
+	} {
+		var selected []string
+		for _, m := range modules {
+			selected = append(selected, planAffectedTests(m, modules, []string{file}, packages[m], nil).packages...)
+		}
+		if !slices.Contains(selected, want) {
+			t.Errorf("a change to %s selected %v, want %s among them", file, selected, want)
+		}
+	}
+}
+
+func TestGoStepsAnswerOnlyToChangesThatReachGo(t *testing.T) {
+	byDir := map[string]string{"pkg/docs": "m/pkg/docs", "internal/web": "m/web", ".sparkwing/jobs": "jobs"}
+	docsOnly := []string{"README.md", "docs/machine-config.md", "pkg/docs/mirror/machine-config.md", "CHANGELOG.md", "web/src/page.tsx", "design/notes.txt"}
+	if why := goChange(docsOnly, byDir); why != "" {
+		t.Fatalf("a docs and UI change ran the Go steps: %q", why)
+	}
+	for _, file := range []string{"internal/web/server.go", "internal/web/assets/logo.svg", ".sparkwing/go.sum", ".golangci.yml", "internal/store/schema.sql", "tools/new.go"} {
+		if why := goChange(append(docsOnly, file), byDir); why == "" {
+			t.Errorf("%s skipped the Go steps", file)
+		}
+	}
+}
+
+func TestDocsOnlyChangeSkipsTheGoStepsAndTheSDKSuite(t *testing.T) {
+	root := gateFixtureRepo(t)
+	gitCommitAll(t, root, "base")
+	runTestGit(t, root, "update-ref", "refs/remotes/origin/main", "HEAD")
+	ctx := context.Background()
+	writeGoFile(t, filepath.Join(root, "docs", "guide.md"), "# Guide\n")
+	gitCommitAll(t, root, "docs")
+	if !skipUnlessGoTouched("vet")(ctx) || !skipTypeScriptSDKUnlessTouched(ctx) {
+		t.Fatal("a docs-only change ran vet or the TypeScript SDK suite")
+	}
+	writeGoFile(t, filepath.Join(root, "sdk", "typescript", "src", "index.ts"), "export {}\n")
+	gitCommitAll(t, root, "sdk")
+	if skipTypeScriptSDKUnlessTouched(ctx) {
+		t.Fatal("a TypeScript SDK change skipped its suite")
+	}
+	writeGoFile(t, filepath.Join(root, "internal", "sound.go"), "package internal\n\nfunc Sound() int { return 2 }\n")
+	gitCommitAll(t, root, "go")
+	if skipUnlessGoTouched("vet")(ctx) {
+		t.Fatal("a Go change skipped vet")
 	}
 }

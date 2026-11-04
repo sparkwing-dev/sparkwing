@@ -72,9 +72,9 @@ func (s provenLatestServices) Latest(ctx context.Context, pipeline, job string, 
 }
 
 // TestProvenGatePassReachesALaterRunAtTheSameCommit runs a producer job
-// through claim, attempt start and report on a runner registered with trust
-// "verified", then reads its output from a second run at the same commit the
-// way the gate's skip predicate does. A refused lookup fails the test.
+// through claim, attempt start and report on a trusted host, then reads its
+// output from a second run at the same commit the way the gate's skip
+// predicate does. A refused lookup fails the test.
 func TestProvenGatePassReachesALaterRunAtTheSameCommit(t *testing.T) {
 	ctx := t.Context()
 	objects, err := blob.NewFilesystem(blob.FilesystemOptions{Directory: t.TempDir(), Endpoint: "http://local", SigningKey: bytes.Repeat([]byte{42}, 32)})
@@ -117,9 +117,6 @@ func TestProvenGatePassReachesALaterRunAtTheSameCommit(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-
-	// safety: trust is read at attempt start, so the registration change lands between claim and start.
-	setRootTrust(t, e.Store, "root", capability.TrustVerified)
 	producerBearer := string(claim.Bearer)
 	path := "/api/v1/runs/" + producer + "/jobs/record-tree/transition"
 	controller.EngineAdmitBearer(t, e.Store, producerBearer)
@@ -151,13 +148,9 @@ func TestProvenGatePassReachesALaterRunAtTheSameCommit(t *testing.T) {
 	}
 	controller.EngineClaimHTTP(t, handler, producerBearer, "POST", path, string(report), 200)
 	childOutputSQL(t, e.Store, `UPDATE runs SET status='success',finished_at=? WHERE team='a' AND id=?`, time.Now().UnixNano(), producer)
-	var trusted int
-	if err := teststore.SQL(t, e.Store).QueryRowContext(ctx, `SELECT trusted_host FROM nodes WHERE team='a' AND run_id=? AND node_id='record-tree'`, producer).Scan(&trusted); err != nil || trusted != 1 {
-		t.Fatalf("producer trusted_host = %d, %v; want the verified runner recorded as trusted", trusted, err)
-	}
-
-	// safety: both runs are sealed as App-proven pushes of one commit after their claims, since this runner's
-	// claim rules are covered elsewhere and the subject here is the read path.
+	// safety: both runs are sealed as App-proven pushes of one commit, and the producer's host marked trusted,
+	// after their claims, since trustedHostRecordedAtClaim covers the claim rules and the subject here is the read path.
+	childOutputSQL(t, e.Store, `UPDATE nodes SET trusted_host=1 WHERE team='a' AND run_id=?`, producer)
 	feature := sealAppProof(t, "refs/heads/feature")
 	reseal(t, e.Store, producer, feature, nil)
 	reseal(t, e.Store, "run", sealAppProof(t, "refs/heads/main"), nil)
@@ -235,6 +228,12 @@ func TestProvenGatePassReachesALaterRunAtTheSameCommit(t *testing.T) {
 			break_:  func() { reseal(t, e.Store, producer, feature, []string{"GOFLAGS"}) },
 			restore: func() { reseal(t, e.Store, producer, feature, nil) },
 		},
+		"a producer narrowed by --only": {
+			break_: func() {
+				reseal(t, e.Store, producer, feature, nil, func(o *runspec.Options) { o.Only.Value = "record-tree" })
+			},
+			restore: func() { reseal(t, e.Store, producer, feature, nil, func(o *runspec.Options) { o.Only.Value = "" }) },
+		},
 		"a producer at another commit": {
 			break_: func() {
 				childOutputSQL(t, e.Store, `UPDATE runs SET provenance_sha=? WHERE team='a' AND id=?`, "fedcba9876543210fedcba9876543210fedcba98", producer)
@@ -255,24 +254,6 @@ func TestProvenGatePassReachesALaterRunAtTheSameCommit(t *testing.T) {
 	}
 }
 
-func setRootTrust(t *testing.T, st *store.Store, prefix string, trust capability.Trust) {
-	t.Helper()
-	var envelope []byte
-	if err := teststore.SQL(t, st).QueryRowContext(t.Context(), `SELECT authority_json FROM capabilities WHERE prefix=?`, prefix).Scan(&envelope); err != nil {
-		t.Fatal(err)
-	}
-	var record store.CapabilityRecord
-	if err := json.Unmarshal(envelope, &record); err != nil {
-		t.Fatal(err)
-	}
-	record.Value.Trust = trust
-	updated, err := json.Marshal(record)
-	if err != nil {
-		t.Fatal(err)
-	}
-	childOutputSQL(t, st, `UPDATE capabilities SET authority_json=? WHERE prefix=?`, updated, prefix)
-}
-
 func sealAppProof(t *testing.T, ref string) runspec.Provenance {
 	t.Helper()
 	p, err := runspec.AppProvenance(runspec.AppFacts{Repository: "acme/repo", Event: "push", RepositoryID: 1, DeliveryKey: "delivery-" + ref, VerifiedAt: time.Unix(1700000000, 0), Ref: ref, SHA: provenGateSHA, DefaultBranch: "main", DefaultBranchPush: ref == "refs/heads/main"}, runspec.Optional[runspec.PullRequest]{}, "gate")
@@ -282,7 +263,7 @@ func sealAppProof(t *testing.T, ref string) runspec.Provenance {
 	return p
 }
 
-func reseal(t *testing.T, st *store.Store, run string, p runspec.Provenance, env []string) {
+func reseal(t *testing.T, st *store.Store, run string, p runspec.Provenance, env []string, options ...func(*runspec.Options)) {
 	t.Helper()
 	var body []byte
 	var pipeline string
@@ -294,5 +275,9 @@ func reseal(t *testing.T, st *store.Store, run string, p runspec.Provenance, env
 		t.Fatal(err)
 	}
 	sealed.Request.Pipeline, sealed.Request.Git.SHA, sealed.Request.Git.Repository.Key, sealed.Request.Env.Names = pipeline, provenGateSHA, "gh:1", env
+	for _, set := range options {
+		set(&sealed.Request.Options)
+	}
+	sealed.ProofEligible = sealed.Request.ProofEligible()
 	childOutputSQL(t, st, `UPDATE runs SET request_json=?,git_sha=?,repo_key='gh:1' WHERE team='a' AND id=?`, controller.SealWith(t, sealed, p), provenGateSHA, run)
 }

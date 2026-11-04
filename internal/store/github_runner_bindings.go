@@ -69,25 +69,8 @@ func (t *Tenant) GitHubRunnerBinding(ctx context.Context, repositoryID int64) (G
 	return b, nil
 }
 
-// maxGitHubRunnerBindings bounds the repositories one team binds to GitHub
-// runners, funded or not.
-const maxGitHubRunnerBindings = 20
-
-// ErrBindingLimit refuses a GitHub runner binding past
-// [maxGitHubRunnerBindings].
-var ErrBindingLimit = errors.New("store: this team binds as many repositories as it may")
-
 // ErrAlreadyBound is returned when a team binds a repository it already binds.
 var ErrAlreadyBound = errors.New("store: this repository is already bound to the team")
-
-// maxGitHubRunnerCredentials bounds the live credentials one team's GitHub
-// Actions jobs hold at once, since each exchange is unauthenticated until
-// the job's ID token verifies.
-const maxGitHubRunnerCredentials = 20
-
-// ErrGitHubRunnerCredentialLimit is returned when a team already holds
-// [maxGitHubRunnerCredentials] live GitHub Actions credentials.
-var ErrGitHubRunnerCredentialLimit = errors.New("store: this team already holds the maximum live GitHub Actions runner credentials")
 
 // GitHubRepo identifies a repository on github.com. App deliveries supply ID;
 // parsed slugs alone leave it zero.

@@ -166,3 +166,28 @@ func TestDefaultProfileRevokedTokenNamesItsReplacementCommand(t *testing.T) {
 		t.Fatalf("default-profile refusal: %s", &out)
 	}
 }
+
+func TestRunErrorsRenderInTheRunsResolvedOutput(t *testing.T) {
+	if _, err := clisurface.Parse("sparkwing", []string{"run", "ci", "--sw-output", "json"}); err == nil {
+		t.Fatal("run accepted the removed --sw-output")
+	}
+	t.Setenv("SPARKWING_LOG_FORMAT", "json")
+	inv, err := clisurface.Parse("sparkwing", []string{"run", "missing"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var out bytes.Buffer
+	if err := writeInvocationError(&out, &invocationError{inv: inv, cause: errors.New("no pipeline named missing")}, apierr.WriteJSON); err != nil {
+		t.Fatal(err)
+	}
+	if !json.Valid(out.Bytes()) {
+		t.Fatalf("run selected JSON through SPARKWING_LOG_FORMAT but its failure was prose: %q", out.String())
+	}
+	inv, err = clisurface.Parse("sparkwing", []string{"run", "missing", "-o", "plain"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := invocationOutput(inv); got != "plain" {
+		t.Fatalf("explicit -o plain resolved to %q, want plain over the environment", got)
+	}
+}

@@ -405,6 +405,13 @@
               {
                 "not": {
                   "required": [
+                    "settled"
+                  ]
+                }
+              },
+              {
+                "not": {
+                  "required": [
                     "failure"
                   ]
                 }
@@ -482,6 +489,13 @@
               {
                 "not": {
                   "required": [
+                    "features"
+                  ]
+                }
+              },
+              {
+                "not": {
+                  "required": [
                     "pipeline"
                   ]
                 }
@@ -518,6 +532,13 @@
                 "not": {
                   "required": [
                     "attempt"
+                  ]
+                }
+              },
+              {
+                "not": {
+                  "required": [
+                    "settled"
                   ]
                 }
               },
@@ -596,6 +617,13 @@
               {
                 "not": {
                   "required": [
+                    "features"
+                  ]
+                }
+              },
+              {
+                "not": {
+                  "required": [
                     "job"
                   ]
                 }
@@ -611,6 +639,13 @@
                 "not": {
                   "required": [
                     "attempt"
+                  ]
+                }
+              },
+              {
+                "not": {
+                  "required": [
+                    "settled"
                   ]
                 }
               },
@@ -694,6 +729,13 @@
               {
                 "not": {
                   "required": [
+                    "features"
+                  ]
+                }
+              },
+              {
+                "not": {
+                  "required": [
                     "pipeline"
                   ]
                 }
@@ -730,7 +772,8 @@
             "required": [
               "job",
               "step",
-              "attempt"
+              "attempt",
+              "settled"
             ]
           }
         },
@@ -778,6 +821,13 @@
               {
                 "not": {
                   "required": [
+                    "features"
+                  ]
+                }
+              },
+              {
+                "not": {
+                  "required": [
                     "pipeline"
                   ]
                 }
@@ -786,6 +836,27 @@
                 "not": {
                   "required": [
                     "run"
+                  ]
+                }
+              },
+              {
+                "not": {
+                  "required": [
+                    "job"
+                  ]
+                }
+              },
+              {
+                "not": {
+                  "required": [
+                    "step"
+                  ]
+                }
+              },
+              {
+                "not": {
+                  "required": [
+                    "failure"
                   ]
                 }
               },
@@ -846,6 +917,13 @@
               {
                 "not": {
                   "required": [
+                    "features"
+                  ]
+                }
+              },
+              {
+                "not": {
+                  "required": [
                     "pipeline"
                   ]
                 }
@@ -868,6 +946,13 @@
                 "not": {
                   "required": [
                     "attempt"
+                  ]
+                }
+              },
+              {
+                "not": {
+                  "required": [
+                    "settled"
                   ]
                 }
               },

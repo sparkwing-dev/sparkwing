@@ -22,6 +22,7 @@ if a[:2]==['buildx','build']:
  assert open('dist/'+binary+'-linux-'+arch,'rb').read()==('payload:'+binary+':'+arch).encode()
  expected='build/Dockerfile.runner' if binary=='sparkwing-runner' else 'build/Dockerfile.binary'
  assert option('--file')==expected
+ assert 'SPARKWING_VERSION='+os.environ['TAG'] in a
  assert 'push-by-digest=true' in option('--output')
  assert '--tag' not in a
  digest='sha256:'+hashlib.sha256((binary+arch).encode()).hexdigest()

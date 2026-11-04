@@ -163,17 +163,18 @@ func TestDisabledBreakerCountsWithoutRefusing(t *testing.T) {
 	}
 }
 
-func TestDefaultBudgetsTripAHotLoopInsideAMinute(t *testing.T) {
-	l := New(defaultConfig())
+func TestAMinuteBudgetTripsAHotLoopInsideAMinute(t *testing.T) {
+	const perMinute = 1200
+	l := New(testConfig(perMinute, 0))
 	sent := 0
-	for range defaultPutPerMinute * 2 {
+	for range perMinute * 2 {
 		if err := l.Allow(classPut); err != nil {
 			break
 		}
 		sent++
 	}
-	if sent != defaultPutPerMinute {
-		t.Fatalf("a loop with no sleep sent %d puts before the default breaker tripped, want %d", sent, defaultPutPerMinute)
+	if sent != perMinute {
+		t.Fatalf("a loop with no sleep sent %d puts before the breaker tripped, want %d", sent, perMinute)
 	}
 }
 

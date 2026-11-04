@@ -305,6 +305,29 @@ func TestAMisconfiguredCheckoutServiceIsRetriedAndAlertsOnce(t *testing.T) {
 	}
 }
 
+// The billing worker owns the misconfiguration alert: a payment page an owner opens concurrently answers without
+// touching it, and only the worker's own successful call clears it.
+func TestOnlyTheBillingWorkerClearsTheMisconfigurationAlert(t *testing.T) {
+	e, _ := refillFixture(t)
+	worker := NewDeployment(e.Store, deploymenttest.Team(t), nil).WithBillingCheckout("https://checkout.test", "credential")
+	worker.checkout.http.Transport = billingPageTransport(func(*http.Request) (*http.Response, error) {
+		return refillReply(http.StatusOK, `{}`), nil
+	})
+	worker.checkout.misconfigured = true
+	var out map[string]any
+	if err := worker.checkout.post(t.Context(), "/internal/portal", map[string]any{}, &out); err != nil || !worker.checkout.misconfigured {
+		t.Fatalf("an HTTP request changed the worker's alert state: %v", err)
+	}
+	worker.alertCheckoutMisconfigured(errCheckoutRefused)
+	if !worker.checkout.misconfigured {
+		t.Fatal("an unrelated refusal cleared the alert")
+	}
+	worker.alertCheckoutMisconfigured(nil)
+	if worker.checkout.misconfigured {
+		t.Fatal("the worker's successful call left the alert set")
+	}
+}
+
 // Each refill is authorized immediately before its own call, so a team that turns refills off, is held or tops up
 // above its threshold while another team's call is in flight is not charged.
 func TestARefillIsAuthorizedImmediatelyBeforeItsOwnCall(t *testing.T) {

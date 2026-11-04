@@ -12,6 +12,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/credentials"
 	"github.com/sparkwing-dev/sparkwing/internal/deployment"
 	"github.com/sparkwing-dev/sparkwing/internal/runners/launcher"
+	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
 
 const (
@@ -69,6 +70,17 @@ func RunLaunchCLI(ctx context.Context, args []string, factory LauncherFactory) e
 		if err != nil || poll <= 0 {
 			return errors.New("--poll must be a positive duration")
 		}
+		// safety: a faster launcher is refused with 429 on every idle claim instead of failing once here.
+		if poll < store.MinIdleClaimPoll {
+			return fmt.Errorf("--poll %s is faster than the %s minimum idle claim poll, which a controller enforcing idle polls refuses; use at least the controller's --idle-claim-poll", poll, store.MinIdleClaimPoll)
+		}
+	}
+	var idleGrace time.Duration
+	if fs.Changed("idle-grace") {
+		idleGrace, err = time.ParseDuration(textFlag(fs, "idle-grace"))
+		if err != nil || idleGrace <= 0 {
+			return errors.New("--idle-grace must be a positive duration")
+		}
 	}
 	cpuQuantity, err := resource.ParseQuantity(textFlag(fs, "cpu-ceiling"))
 	if err != nil {
@@ -123,6 +135,7 @@ func RunLaunchCLI(ctx context.Context, args []string, factory LauncherFactory) e
 	if fs.Changed("poll") {
 		runner.Poll = poll
 	}
+	runner.IdleGrace = idleGrace
 	runner.Breaker = budgetBreaker(creds)
 	return runner.Run(ctx)
 }

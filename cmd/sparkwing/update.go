@@ -19,7 +19,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/buildinfo"
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
 	"github.com/sparkwing-dev/sparkwing/internal/gotoolchain"
-	"github.com/sparkwing-dev/sparkwing/internal/installsite"
 	"github.com/sparkwing-dev/sparkwing/internal/releaseasset"
 )
 
@@ -132,34 +131,7 @@ func updateBinary(version string, force, overrideHold bool) (updateReceipt, erro
 	result.After = installedReleaseIdentity(installed, resolved, targetRevision)
 	result.ResolvedRelease = resolved
 	result.Digest = installed.digest
-	reportOtherInstalls(os.Stderr, currentBin)
 	return result, nil
-}
-
-func reportOtherInstalls(w io.Writer, installedBin string) {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		home = ""
-	}
-	writeOtherInstallsNote(w, installedBin,
-		installsite.Competing(installsite.Scan(installsite.SearchDirs(os.Getenv, home)), installedBin))
-}
-
-func writeOtherInstallsNote(w io.Writer, installedBin string, others []installsite.Copy) {
-	if len(others) == 0 {
-		return
-	}
-	noun := "binaries are"
-	if len(others) == 1 {
-		noun = "binary is"
-	}
-	fmt.Fprintf(w, "\nnote: %d other sparkwing %s installed on this machine:\n", len(others), noun)
-	for _, c := range others {
-		fmt.Fprintf(w, "  %s (modified %s) -- retire it with: %s\n",
-			c.Path, c.ModTime.Format("2006-01-02 15:04"), installsite.RetireRemedy(c.Path).Text())
-	}
-	fmt.Fprintf(w, "  a shell and a background job can resolve different copies of `sparkwing`, so the same command can be two builds.\n")
-	fmt.Fprintf(w, "  keep one, or point each job at %s by absolute path. `sparkwing doctor` shows the full picture.\n", installedBin)
 }
 
 func installedVersion() string {

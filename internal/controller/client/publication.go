@@ -221,7 +221,7 @@ func publishLocalLogs(ctx context.Context, publisher ProfileData, reader control
 			if record.Subject == nil || record.Subject.Attempt == nil {
 				continue
 			}
-			if err := sink.Append([]byte(record.Line+"\n"), "", 0, 0); err != nil {
+			if err := sink.Append([]byte(record.Line + "\n")); err != nil {
 				return err
 			}
 		}

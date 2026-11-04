@@ -21,7 +21,7 @@ func TestLauncherCommandPassesOnlyOperatorConfiguration(t *testing.T) {
 	boundary := errors.New("fixture boundary")
 	image := "example.com/image@sha256:" + strings.Repeat("a", 64)
 	args := []string{"--controller=https://controller.example", "--image=" + image, "--docker-image=" + image, "--cpu-ceiling=500m", "--memory-ceiling=1Gi", "--credentials-dir=" + dir, "--label=cluster", "--stop-team=team,another", "--node-class=cloud-hardened"}
-	if _, err := runnerflags.Parse("launch", args, io.Discard); err != nil {
+	if _, err := runnerflags.Parse("launch", args, io.Discard, io.Discard); err != nil {
 		t.Fatal(err)
 	}
 	err := RunLaunchCLI(t.Context(), args,
@@ -67,5 +67,16 @@ func TestLauncherCommandRejectsMemoryOverflowBeforeRuntime(t *testing.T) {
 				t.Fatalf("quantity error: %v", err)
 			}
 		})
+	}
+}
+
+func TestLauncherCommandRefusesPollBelowIdleClaimFloor(t *testing.T) {
+	image := "example.com/image@sha256:" + strings.Repeat("a", 64)
+	err := RunLaunchCLI(t.Context(), []string{"--controller=https://controller.example", "--image=" + image, "--docker-image=" + image, "--cpu-ceiling=1", "--memory-ceiling=1Gi", "--credentials-dir=" + t.TempDir(), "--poll=1s"}, func(context.Context, launcher.CloudJobConfig, func(context.Context) (string, error)) (*launcher.Launcher, error) {
+		t.Error("a sub-floor poll reached the runtime factory")
+		return nil, nil
+	})
+	if err == nil || !strings.Contains(err.Error(), "--poll 1s") {
+		t.Fatalf("poll floor error: %v", err)
 	}
 }

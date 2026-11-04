@@ -176,20 +176,24 @@ func TestGitHubRunnerCredentialReachesNothingOutsideItsRoutes(t *testing.T) {
 	}
 }
 
-func TestGitHubRunnerCredentialsPerTeamAreBounded(t *testing.T) {
+// Live credentials are not counted, so a team's workflow throughput is not
+// capped by credentials that outlive their jobs; each workflow run attempt
+// still exchanges once.
+func TestGitHubRunnerCredentialsPerTeamAreNotCounted(t *testing.T) {
 	f := newGHFixture(t)
 	owner := f.user("o", "olga@example.com")
 	f.bind(owner, widgetsJob)
-	for i := range 20 {
+	for i := range 25 {
 		job := widgetsJob
 		job.RunID = fmt.Sprint(1000 + i)
 		if _, code := f.exchange(f.gh.Token(job, ghAudience), owner.team); code != http.StatusCreated {
 			t.Fatalf("mint %d: HTTP %d", i, code)
 		}
 	}
-
-	if _, code := f.exchange(f.gh.Token(widgetsJob, ghAudience), owner.team); code != http.StatusTooManyRequests {
-		t.Fatalf("21st credential = %d, want 429", code)
+	replay := widgetsJob
+	replay.RunID = "1000"
+	if _, code := f.exchange(f.gh.Token(replay, ghAudience), owner.team); code == http.StatusCreated {
+		t.Fatal("a replayed workflow run attempt minted a second credential")
 	}
 }
 

@@ -216,11 +216,6 @@ func githubCheckSummary(run *store.Run, nodes []*store.Node, conclusion, link st
 		if outcome == "" {
 			outcome = n.Status
 		}
-		switch outcome {
-		case "success", "failed", "satisfied", "cached", "skipped", "cancelled", "skipped-concurrent", "superseded", "pending", "running":
-		default:
-			outcome = "other"
-		}
 		counts[outcome]++
 	}
 	if len(counts) > 0 {

@@ -168,24 +168,19 @@ type Issued struct {
 
 // Trust is the runs a machine root accepts work from, set by a team admin at registration.
 // The empty value takes the controller default: verified default-branch work only when the
-// root holds a pool that a secret is reserved to, and any run otherwise. TrustVerified takes
-// runs whose commit GitHub or the controller's own fetch proved, on any branch, and never
-// asserted work.
+// root holds a pool that a secret is reserved to, and any run otherwise. Repository scopes,
+// not trust, decide whether a root takes only repository-proven work.
 type Trust string
 
 const (
 	TrustVerifiedDefault Trust = "verified-default"
-	TrustVerified        Trust = "verified"
 	TrustAny             Trust = "any"
 )
 
 // Valid reports whether t is the controller default or a named class.
 func (t Trust) Valid() bool {
-	return t == "" || t == TrustVerifiedDefault || t == TrustVerified || t == TrustAny
+	return t == "" || t == TrustVerifiedDefault || t == TrustAny
 }
-
-// ExcludesAsserted reports whether a root with this trust never takes asserted work.
-func (t Trust) ExcludesAsserted() bool { return t == TrustVerifiedDefault || t == TrustVerified }
 
 // Launcher identifies roots that can deliver only per-claim bootstrap authority.
 func Launcher(c Capability) bool {

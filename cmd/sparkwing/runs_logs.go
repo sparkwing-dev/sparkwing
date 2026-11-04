@@ -42,13 +42,33 @@ func runRunsLogs(ctx context.Context, inv clisurface.Invocation) error {
 	return observeRunLogs(ctx, inv, reader, runs, os.Stdout, os.Stderr, waitStatusPoll)
 }
 
-func followControllerRunLogs(ctx context.Context, options client.EngineOptions, run, format string, out io.Writer) error {
+func followControllerRunLogs(ctx context.Context, options client.EngineOptions, run, format string, out io.Writer, wait func(context.Context, time.Duration) error) error {
 	inv := clisurface.Invocation{Command: clisurface.Command{Path: "sparkwing runs logs"}, Flags: map[string][]string{"run": {run}, "follow": {"true"}, "output": {format}}}
 	reader, err := client.NewLogReader(options)
 	if err != nil {
 		return err
 	}
-	return observeRunLogs(ctx, inv, reader, nil, out, io.Discard, waitStatusPoll)
+	return observeRunLogs(ctx, inv, reader, nil, out, io.Discard, wait)
+}
+
+// perf: a foreground local run reads its own machine's controller, so a short poll shows step output and
+// the run's end promptly; remote followers keep the one-second poll.
+const localFollowPoll = 200 * time.Millisecond
+
+// perf: the first wait after hosting returns ends at once, so the final logs are read without a poll's delay.
+func localFollowWait(hosted <-chan struct{}) func(context.Context, time.Duration) error {
+	return func(ctx context.Context, _ time.Duration) error {
+		timer := time.NewTimer(localFollowPoll)
+		defer timer.Stop()
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-timer.C:
+		case <-hosted:
+			hosted = nil
+		}
+		return nil
+	}
 }
 
 func parseRunLogs(inv clisurface.Invocation) (controllerwire.LogQuery, error) {

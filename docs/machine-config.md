@@ -64,7 +64,7 @@ run:
 start with a letter, so `_*` and `A_*` are refused as too broad. Credential-shaped and engine-owned names are
 excluded. The controller encrypts the captured values separately from the run
 spec and delivers them only to live execution awards. Retries keep the same
-values. Planning, installation and execution use them, and values of at least
+values. Planning and execution use them, and values of at least
 12 characters are masked before processes start. Public run views show only
 names and an environment digest.
 

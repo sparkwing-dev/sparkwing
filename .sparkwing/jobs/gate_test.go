@@ -1038,7 +1038,7 @@ func TestGoStepsIgnoreBrokenGoInNodeModules(t *testing.T) {
 	writeGoFile(t, filepath.Join(root, "web", "node_modules", "dependency", "broken.go"),
 		"package dependency\n\nfunc Broken( {\n")
 	for name, step := range map[string]func(context.Context) error{
-		"vet": runVet, "build": runBuild, "test": runTest,
+		"gofmt": runGofmt, "vet": runVet, "build": runBuild, "test": runTest,
 	} {
 		t.Run(name, func(t *testing.T) {
 			if err := step(context.Background()); err != nil {

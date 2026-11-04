@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import {
   DOCS_URL,
   limitHelp,
@@ -8,12 +8,46 @@ import {
   type SupportContact,
 } from "@/lib/support";
 
+const VIEWPORT_GUTTER = 8;
+
+// viewportShift is how far a panel must move sideways to sit inside the
+// viewport's gutters; a panel wider than the viewport keeps its left edge.
+export function viewportShift(
+  left: number,
+  right: number,
+  viewportWidth: number,
+): number {
+  const intoRight = Math.min(0, viewportWidth - VIEWPORT_GUTTER - right);
+  return Math.max(intoRight, VIEWPORT_GUTTER - left);
+}
+
 export function HelpPanel({ contact }: { contact: SupportContact | null }) {
+  const ref = useRef<HTMLDivElement>(null);
+  // The panel hangs from the Help button's right edge, which a narrow
+  // header can wrap anywhere, so it is nudged back on screen after layout.
+  useLayoutEffect(() => {
+    const panel = ref.current;
+    if (!panel) return;
+    const place = () => {
+      panel.style.transform = "";
+      const box = panel.getBoundingClientRect();
+      const dx = viewportShift(
+        box.left,
+        box.right,
+        document.documentElement.clientWidth,
+      );
+      if (dx !== 0) panel.style.transform = `translateX(${dx}px)`;
+    };
+    place();
+    window.addEventListener("resize", place);
+    return () => window.removeEventListener("resize", place);
+  }, []);
   return (
     <div
+      ref={ref}
       role="dialog"
       aria-label="Help"
-      className="absolute right-0 mt-1 w-80 p-3 space-y-2 text-sm bg-[var(--surface)] border border-[var(--border)] rounded-sm shadow-lg z-50"
+      className="absolute right-0 mt-1 w-80 max-w-[calc(100vw-1rem)] p-3 space-y-2 text-sm bg-[var(--surface)] border border-[var(--border)] rounded-sm shadow-lg z-50"
     >
       <p>
         Need higher limits, have feedback, or want to suggest an improvement?

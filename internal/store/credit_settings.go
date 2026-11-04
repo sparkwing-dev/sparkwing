@@ -35,8 +35,6 @@ func integerCreditSetting(key, raw string, fallback int64) (int64, error) {
 	switch key {
 	case metaKeyCreditRateMicro:
 		validate = validCreditRate
-	case metaKeyWarmCPUClass:
-		validate = validWarmCPUClass
 	case metaKeyStorageRateMicroPerGBDay:
 		validate = validStorageRate
 	case metaKeyStorageFreeAllowanceBytes:

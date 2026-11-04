@@ -52,8 +52,6 @@ type InfoSDKPin struct {
 
 type InfoExecutable struct {
 	Path string `json:"path"`
-
-	OtherInstalls []string `json:"other_installs,omitempty"`
 }
 
 type InfoTip struct {
@@ -318,10 +316,6 @@ func printAgentBlock(w io.Writer) {
 	if line := sdkPinLine(info.SDKPin); line != "" {
 		fmt.Fprintln(w, "- "+line)
 	}
-	if n := len(info.Executable.OtherInstalls); n > 0 {
-		fmt.Fprintf(w, "- %d other sparkwing install(s) on this machine: %s. A process with a different PATH may run one of those instead; use absolute paths in automation, and `sparkwing doctor` for the full picture.\n",
-			n, strings.Join(info.Executable.OtherInstalls, ", "))
-	}
 	fmt.Fprintln(w)
 	fmt.Fprint(w, agentBlockAuthoring)
 }
@@ -539,15 +533,7 @@ func gatherExecutable() InfoExecutable {
 	if err != nil {
 		return InfoExecutable{}
 	}
-	out := InfoExecutable{Path: self}
-	home, err := os.UserHomeDir()
-	if err != nil {
-		home = ""
-	}
-	for _, c := range installsite.Competing(installsite.Scan(installsite.SearchDirs(os.Getenv, home)), self) {
-		out.OtherInstalls = append(out.OtherInstalls, c.Path)
-	}
-	return out
+	return InfoExecutable{Path: self}
 }
 
 func gatherTips() []InfoTip {
@@ -737,17 +723,6 @@ func printInfoTable(info Info) {
 
 	if info.UpgradeNotice != "" {
 		fmt.Println(color.Yellow(info.UpgradeNotice))
-		fmt.Println()
-	}
-
-	if n := len(info.Executable.OtherInstalls); n > 0 {
-		noun := "installs"
-		if n == 1 {
-			noun = "install"
-		}
-		fmt.Println(color.Yellow(fmt.Sprintf(
-			"%d other sparkwing %s on this machine (%s); a process whose PATH orders one of them first runs that build instead of %s. `sparkwing doctor` explains.",
-			n, noun, strings.Join(info.Executable.OtherInstalls, ", "), info.Executable.Path)))
 		fmt.Println()
 	}
 

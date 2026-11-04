@@ -124,18 +124,12 @@ func TestOIDCMintHTTPIdentityAndExpiryProperty(t *testing.T) {
 		f.calls, f.minted = 0, 0
 		forged := hex.EncodeToString(input)
 		f.facts.NotAfter = b.snapshot.Now.Add(time.Duration(1+seconds%600) * time.Second)
-		expiry := b.snapshot.Now.Add(time.Duration(1+(seconds/2)%600) * time.Second)
-		deadline := b.snapshot.Now.Add(time.Duration(1+(seconds/3)%600) * time.Second)
-		revocation := b.snapshot.Now.Add(time.Duration(1+(seconds/4)%600) * time.Second)
-		b.snapshot.Authorities[0].Principal.Capability.RevokedAt = &revocation
-		b.snapshot.Authorities[0].Principal.Capability.ExpiresAt = &expiry
-		b.snapshot.Authorities[0].Principal.Capability.Binding.Deadline = &deadline
 		b.snapshot.Binding.Current = b.snapshot.Authorities[0].Principal.Capability.Binding
 		b.snapshot.Authorities[0].Principal.Authority.ID = "claim-" + forged
 		b.snapshot.Authorities[0].Principal.Capability.Prefix = "claim-" + forged
 		w := authorityHTTP(h, b, "POST", "/api/v1/runs/run/oidc-token?team="+forged+"&run_id="+forged+"&repository="+forged, `{"audience":"vault"}`)
 		result, c := oidcResponse(t, w, &key.PublicKey)
-		ceiling := min(f.facts.NotAfter.Unix(), expiry.Unix(), deadline.Unix(), revocation.Unix())
+		ceiling := f.facts.NotAfter.Unix()
 		return f.calls == 1 && f.minted == 1 && f.actor.Target.Team == "team" && f.actor.Target.RunID == "run" && f.actor.Access.Binding == capability.BindRun &&
 			f.actor.Principal.Authority == b.snapshot.Authorities[0].Principal.Authority && f.actor.Binding.Generation == 4 &&
 			c["iss"] == "https://issuer.example" && c["aud"] == "vault" && c["sub"] == "team:team:repository_id:42:pipeline:deploy:trigger:push:runner:runner:runner_environment:persistent:ref:refs/heads/main" &&
