@@ -251,7 +251,7 @@ func TestRefreshHeadroomSubtractsMeasuredHolderUsageNotLeaseCapacity(t *testing.
 			if err != nil || dec.Kind != admission.DecisionGranted {
 				t.Fatalf("submit holder = %s, %v", dec.Kind, err)
 			}
-			d.byRun["holder"] = &conn{runID: "holder", role: roleHolder, pid: 4242}
+			d.byRun["holder"] = &conn{runID: "holder", role: roleHolder, resources: wholeBox, pid: 4242}
 
 			d.refreshHeadroom()
 
@@ -282,7 +282,7 @@ func TestRefreshHeadroomKeepsOwnedCPUAcrossSamePIDHolderReplacement(t *testing.T
 		fraction: 3,
 	}
 	d.ownedSampler = owned
-	d.byRun["first"] = &conn{runID: "first", role: roleHolder, pid: 4242}
+	d.byRun["first"] = &conn{runID: "first", role: roleHolder, resources: wholeBox, pid: 4242}
 	done := make(chan struct{})
 	go func() {
 		d.refreshHeadroom()
@@ -303,7 +303,7 @@ func TestRefreshHeadroomKeepsOwnedCPUAcrossSamePIDHolderReplacement(t *testing.T
 	}
 	d.mu.Lock()
 	delete(d.byRun, "first")
-	d.byRun["second"] = &conn{runID: "second", role: roleHolder, pid: 4242}
+	d.byRun["second"] = &conn{runID: "second", role: roleHolder, resources: wholeBox, pid: 4242}
 	d.mu.Unlock()
 	release()
 	select {
@@ -336,7 +336,7 @@ func TestRefreshHeadroomUsesOnePairedHostAndOwnedReading(t *testing.T) {
 	owned := &fixedOwnedCPUSampler{fraction: 8, measured: true}
 	d.sampler = paired
 	d.ownedSampler = owned
-	d.byRun["holder"] = &conn{runID: "holder", role: roleHolder, pid: 4242}
+	d.byRun["holder"] = &conn{runID: "holder", role: roleHolder, resources: wholeBox, pid: 4242}
 
 	d.refreshHeadroom()
 
@@ -392,7 +392,7 @@ func TestRefreshHeadroom_OwnedCPUIsBoundedByTheContainerLimitNotTheMachine(t *te
 	owned := &fixedOwnedCPUSampler{fraction: 1, measured: true}
 	d.sampler = &countingHostSampler{stat: HostStat{TotalCores: 64, BusyCores: 4, CPUMeasured: true}}
 	d.ownedSampler = owned
-	d.byRun["holder"] = &conn{runID: "holder", role: roleHolder, pid: 4242}
+	d.byRun["holder"] = &conn{runID: "holder", role: roleHolder, resources: wholeBox, pid: 4242}
 
 	d.refreshHeadroom()
 
@@ -417,7 +417,7 @@ func TestRefreshHeadroom_PairedSamplerIsBoundedByTheContainerLimitToo(t *testing
 	}
 	d.sampler = paired
 	d.ownedSampler = nil
-	d.byRun["holder"] = &conn{runID: "holder", role: roleHolder, pid: 4242}
+	d.byRun["holder"] = &conn{runID: "holder", role: roleHolder, resources: wholeBox, pid: 4242}
 
 	d.refreshHeadroom()
 
