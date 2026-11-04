@@ -97,11 +97,13 @@ with a status detail naming the missing label.
 
 Labels are matching preferences the machine reports about itself. They never
 grant pools, reserved secrets, trust or repository scope; those come from the
-machine's credentials and the team's access rules. Validation refuses a label
-that names a granted fact (`name=`, `class=`, `location=`, `team=`, `pool=` or
-`local`), a blank label, and the `sparkwing-` prefix reserved for Sparkwing
-Cloud. `os=` and `arch=` labels are accepted but never override the platform
-the machine observes.
+machine's credentials and the team's access rules. A label that names a granted
+fact (`name=`, `class=`, `location=`, `team=`, `pool=` or `local`) has no
+effect: matching uses the granted value instead. The daemon logs a warning for
+each one when it starts, and `sparkwing doctor` reports it with its file and
+line. Validation refuses a blank label and the `sparkwing-` prefix reserved for
+Sparkwing Cloud. `os=` and `arch=` labels are accepted but never override the
+platform the machine observes.
 
 The local controller reads `runner.labels` when it starts. After changing them,
 run `sparkwing daemon restart --force` so local runs report the new labels. An

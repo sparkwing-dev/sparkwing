@@ -23,6 +23,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/opsview"
 	"github.com/sparkwing-dev/sparkwing/internal/wingd"
 
+	"github.com/sparkwing-dev/sparkwing/internal/userconfig"
 	wingdclient "github.com/sparkwing-dev/sparkwing/internal/wingd/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/color"
 )
@@ -53,11 +54,12 @@ type doctorDependencies struct {
 	local   func(context.Context) (dashboardServices, error)
 	machine func(context.Context) doctorReport
 	sweep   func(context.Context, dashboardServices, bool) ([]localhostwire.LocalDoctorFinding, error)
+	config  func() []doctorFinding
 }
 
 func runDoctor(inv clisurface.Invocation) error {
 	return runDoctorCommand(context.Background(), inv, os.Stdout, doctorDependencies{
-		version: installedVersion(), local: resolveLocalServices, machine: inspectDoctorMachine, sweep: sweepDoctorSessions,
+		version: installedVersion(), local: resolveLocalServices, machine: inspectDoctorMachine, sweep: sweepDoctorSessions, config: ignoredLabelFindings,
 	})
 }
 
@@ -87,6 +89,9 @@ func inspectDoctor(ctx context.Context, dryRun bool, deps doctorDependencies) (d
 	report := deps.machine(ctx)
 	report.DryRun = dryRun
 	report.Findings = []doctorFinding{}
+	if deps.config != nil {
+		report.Findings = append(report.Findings, deps.config()...)
+	}
 	if err := ctx.Err(); err != nil {
 		report.ControllerError = err.Error()
 		return report, err
@@ -251,4 +256,20 @@ func sweepDoctorSessions(ctx context.Context, services dashboardServices, dryRun
 	transport := wingdclient.NewAPIClient(socket)
 	defer transport.CloseIdleConnections()
 	return client.SweepLocalSessions(ctx, client.EngineOptions{URL: wingdclient.APIBaseURL, HTTP: transport}, dryRun)
+}
+
+func ignoredLabelFindings() []doctorFinding {
+	findings := []doctorFinding{}
+	path, err := userconfig.Path()
+	if err != nil {
+		return findings
+	}
+	ignored, err := userconfig.IgnoredRunnerLabels(path)
+	if err != nil {
+		return findings
+	}
+	for _, label := range ignored {
+		findings = append(findings, doctorFinding{Code: "runner_label_ignored", Unit: "config", Message: label.String(), Hint: "matching already uses the value Sparkwing grants; delete the label"})
+	}
+	return findings
 }
