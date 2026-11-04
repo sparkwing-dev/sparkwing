@@ -401,6 +401,52 @@ sparkwing run deploy -- --dry-run --stop-after staging    # preview a staging-on
 sparkwing run deploy -- --dry-run --promote-proven        # preview promoting the last staging-proven digests
 ```
 
+#### Deploy toolchain
+
+A real deploy runs `aws`, `kubectl`, `helm`, `git`, `ssh`, `go`, `bash`, `node` and `pnpm` only from
+`/opt/sparkwing-deploy/bin`, and gives every child process `PATH=/opt/sparkwing-deploy/bin:/usr/bin:/bin`.
+The directory must be owned by root and not writable by the runner's user, so another job on the same
+runner cannot plant a binary that a later deploy runs with production credentials. When the directory is
+missing, every deploy job refuses before it fetches a credential; there is no fallback to the runner's
+`PATH`. A `--dry-run` preview holds no credentials and still resolves tools from `PATH`. Install the tools
+as root, at the versions the deploy machines already use:
+
+```bash
+sudo install -d -o root -g root -m 0755 /opt/sparkwing-deploy /opt/sparkwing-deploy/bin
+cd "$(mktemp -d)"
+# Go, matching go.mod's toolchain line
+curl -fsSLO https://go.dev/dl/go1.26.10.linux-amd64.tar.gz
+curl -fsSL "https://go.dev/dl/?mode=json&include=all" | grep -A3 '"go1.26.10.linux-amd64.tar.gz"' | grep sha256  # compare
+sha256sum go1.26.10.linux-amd64.tar.gz
+sudo tar -C /opt/sparkwing-deploy -xzf go1.26.10.linux-amd64.tar.gz
+sudo ln -sf /opt/sparkwing-deploy/go/bin/go /opt/sparkwing-deploy/bin/go
+# kubectl
+curl -fsSLO https://dl.k8s.io/release/v1.37.0/bin/linux/amd64/kubectl
+echo "$(curl -fsSL https://dl.k8s.io/release/v1.37.0/bin/linux/amd64/kubectl.sha256)  kubectl" | sha256sum -c
+sudo install -o root -g root -m 0755 kubectl /opt/sparkwing-deploy/bin/kubectl
+# helm
+curl -fsSLO https://get.helm.sh/helm-v4.2.4-linux-amd64.tar.gz
+curl -fsSL https://get.helm.sh/helm-v4.2.4-linux-amd64.tar.gz.sha256sum | sha256sum -c
+tar -xzf helm-v4.2.4-linux-amd64.tar.gz
+sudo install -o root -g root -m 0755 linux-amd64/helm /opt/sparkwing-deploy/bin/helm
+# AWS CLI v2
+curl -fsSL https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip -o awscliv2.zip
+unzip -q awscliv2.zip
+sudo ./aws/install -i /opt/sparkwing-deploy/aws-cli -b /opt/sparkwing-deploy/bin
+# Node and pnpm for bin/build-web.sh
+curl -fsSLO https://nodejs.org/dist/v22.23.1/node-v22.23.1-linux-x64.tar.xz
+curl -fsSL https://nodejs.org/dist/v22.23.1/SHASUMS256.txt | grep ' node-v22.23.1-linux-x64.tar.xz$' | sha256sum -c
+sudo tar -C /opt/sparkwing-deploy -xJf node-v22.23.1-linux-x64.tar.xz
+sudo mv /opt/sparkwing-deploy/node-v22.23.1-linux-x64 /opt/sparkwing-deploy/node
+sudo env PATH=/opt/sparkwing-deploy/node/bin:/usr/bin:/bin npm install -g --prefix /opt/sparkwing-deploy/node pnpm@12.5.1
+sudo ln -sf /opt/sparkwing-deploy/node/bin/node /opt/sparkwing-deploy/bin/node
+sudo ln -sf /opt/sparkwing-deploy/node/bin/pnpm /opt/sparkwing-deploy/bin/pnpm
+# git, ssh and bash from the root-owned system packages
+for t in git ssh bash; do sudo ln -sf "/usr/bin/$t" "/opt/sparkwing-deploy/bin/$t"; done
+sudo chown -R root:root /opt/sparkwing-deploy && sudo chmod -R go-w /opt/sparkwing-deploy
+ls -l /opt/sparkwing-deploy/bin && /opt/sparkwing-deploy/bin/go version
+```
+
 ### Check tiers
 
 Canonical hosted jobs retain a `canonical-timings` JSON artifact for 30 days

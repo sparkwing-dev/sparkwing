@@ -153,7 +153,11 @@ func (d *deployer) cmd(ctx context.Context, c deployCommand) (string, error) {
 		}
 		c.Name = path
 	}
-	if d.cfg.toolDirInUse() {
+	inUse, err := d.cfg.toolDirInUse(d.dry)
+	if err != nil {
+		return "", err
+	}
+	if inUse {
 		env := make(map[string]string, len(c.Env)+1)
 		for k, v := range c.Env {
 			env[k] = v
@@ -171,9 +175,12 @@ func (d *deployer) tool(name string) (string, error) {
 	if path, ok := d.resolved[name]; ok {
 		return path, nil
 	}
+	inUse, err := d.cfg.toolDirInUse(d.dry)
+	if err != nil {
+		return "", err
+	}
 	var path string
-	var err error
-	if d.cfg.toolDirInUse() {
+	if inUse {
 		path = filepath.Join(d.cfg.ToolDir, name)
 		if _, err = os.Stat(path); err != nil {
 			return "", fmt.Errorf("%s is not in the deploy toolchain %s: %w", name, d.cfg.ToolDir, err)
