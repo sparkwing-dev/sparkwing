@@ -49,16 +49,10 @@ unlock.
   The `sw-capacity-*` placeholder ran `sleep` as PID 1, which ignores SIGTERM, so each delete before Job creation waited for the kubelet to kill it. It now runs a `/bin/sh` that sleeps for the same budget and exits on SIGTERM. Deletion stays graceful, so the placeholder's requests are still freed before the Job is placed.
 - **runner image:** Cloud jobs skip downloading and compiling the runner's own SDK
   A release runner image now ships a Go module cache and build cache primed for its own SDK version under `/usr/local/share/sparkwing/go-seed`, and a Cloud Job copies them into its empty `/tmp` caches while the Docker sidecar starts. A Cloud plan already pins that version, so its pipeline build drops from about 24s to a few seconds; dependencies beyond the SDK's own still download as before, with `go.sum` checks unchanged. The image grows by about 200 MB uncompressed (about 60 MB compressed).
-
-### Fixed
-
 - **launcher:** `sparkwing-runner launch` refuses `--poll` below 2s at startup
   The controller never suggests an idle claim poll under 2s, and one enforcing idle polls answered a faster launcher with a rate-limit warning on every tick. The launcher now fails at startup and names the controller's `--idle-claim-poll`.
 - **store (Breaking):** The schema baseline advances to version 30, which replaces the `warm_pool_desired` view in place
   A v0.68.7 store (schema 29) upgrades on its first open, and a schema 28 store takes both steps, in one transaction on SQLite and PostgreSQL. PostgreSQL replaces the view in place, so KEDA's SELECT grant survives. An older binary refuses a schema 30 store, so snapshot the store first; rollback means restoring that snapshot. See the [store upgrade migration](docs/migrations/_unreleased.md#upgrade-the-store-in-place-to-schema-baseline-30).
-
-### Fixed
-
 - **warm capacity:** Auto no longer grows idle warm capacity to its maximum
   The start-time trigger added one node above the current warm count whenever the last hour's median start exceeded the target, and each new warm node raised that count, so any slow start kept the pool at the Auto maximum for an hour with nobody waiting. The trigger now fires only while a job is waiting for a fresh node; with no waits the pool returns to its minimum.
 - **run:** A first run reuses the installed CLI as the pipeline engine when it is the pinned release
@@ -136,9 +130,6 @@ unlock.
   when a release moves the images. An installation that applies them apart from the namespaced chart updates them once
   for this release, after the ConfigMap exists. The launcher refuses to start unless that ConfigMap holds exactly its
   own images, and its job namespace Role gains `get` on it.
-
-### Fixed
-
 - **controller:** Run intake refuses an invalid setting, such as an unsupported Cloud size, as `400 bad_request`
   A request naming `sparkwing-3cpu` returned `500 internal` "request failed". The refusal now carries the setting error, which for a size lists the valid ones.
 - **console:** The Start a run dialog keeps keyboard focus inside it
@@ -175,21 +166,6 @@ unlock.
   `WithFreshBranch` alone runs that branch's tip in the parent's repository, and naming the parent's own repository with `WithFreshRepo` inherits the parent's source.
 - **docs:** Correct the secrets and versioning pages
   `--only-on` secrets reach unverified runs on a runner enrolled with `--trust=any`, and every launcher, self-hosted ones included, refuses a development build unless `SPARKWING_DEVELOPMENT_BUILD=1` is set.
-### Removed
-
-- **cli (Breaking):** Remove the hidden `sparkwing __host-trigger` command. It refused every invocation because standalone hosting is not available; the local controller hosts queued triggers.
-- **tooling (Breaking):** Delete `bin/pre-release-test.sh` and `bin/status.sh`, which tested removed packages and queried removed `/agents` and `/jobs` routes. Use `sparkwing run pre-release`, `sparkwing runners list` and `sparkwing runs` instead.
-
-### Removed
-
-- **cli:** (Breaking) `sparkwing run --sw-output` is removed; use `-o`/`--output`
-  The two flags selected the same thing, and a run's help and errors read only `-o`, so `--sw-output json` could run in JSON and still fail in prose. `-o` now drives a run's output, help and errors, ahead of `SPARKWING_LOG_FORMAT` and terminal detection. Replace `--sw-output FORMAT` with `-o FORMAT`.
-
-- **docs:** `SPARKWING_DEBUG` is no longer listed as a setting
-  Nothing read it, so setting it never changed SDK diagnostics. Its process-environment class goes with it.
-
-### Docs
-
 - **docs:** README, the local dashboard page and the auth reference describe shipped integrations as shipped
   They still said native host, controller and managed-service integration was incomplete and that card, refund, fraud-warning and dispute settlement needed store work. Both shipped.
 - **docs:** Configuration guidance names each component's real input
@@ -198,22 +174,21 @@ unlock.
 
 ### Removed
 
+- **cli (Breaking):** Remove the hidden `sparkwing __host-trigger` command. It refused every invocation because standalone hosting is not available; the local controller hosts queued triggers.
+- **tooling (Breaking):** Delete `bin/pre-release-test.sh` and `bin/status.sh`, which tested removed packages and queried removed `/agents` and `/jobs` routes. Use `sparkwing run pre-release`, `sparkwing runners list` and `sparkwing runs` instead.
+- **cli:** (Breaking) `sparkwing run --sw-output` is removed; use `-o`/`--output`
+  The two flags selected the same thing, and a run's help and errors read only `-o`, so `--sw-output json` could run in JSON and still fail in prose. `-o` now drives a run's output, help and errors, ahead of `SPARKWING_LOG_FORMAT` and terminal detection. Replace `--sw-output FORMAT` with `-o FORMAT`.
+
+- **docs:** `SPARKWING_DEBUG` is no longer listed as a setting
+  Nothing read it, so setting it never changed SDK diagnostics. Its process-environment class goes with it.
 - **CLI (Breaking):** Sparkwing no longer searches for other installed copies of itself
   `sparkwing doctor` drops `install_conflict` and its `executable` and `competing_install` lines, `sparkwing info` drops `executable.other_installs` and its warning, and `sparkwing update` and `bin/install.sh` no longer print rename commands for other copies. Your shell decides which copy runs: check with `which -a sparkwing` and `sparkwing version`, then remove the unwanted install or call the one you want by its absolute path. See [If the wrong sparkwing runs](docs/getting-started.md#if-the-wrong-sparkwing-runs).
-
-### Removed
-
 - **runners (Breaking):** `sparkwing runners add --trust verified` is gone
   `--repos`, which every shared runner needs, already limits a runner to repository-proven work, and a runner scoped by
   it is now a trusted host whose jobs can produce a counted pass. See the
   [migration guide](docs/migrations/_unreleased.md#runners-add---trust-verified-is-gone).
-### Removed
-
 - **wingwire (Breaking):** `AdmissionRequest` drops `ParentLeaseToken`, `ParentRunID` and `ParentNodeID`, and the admission daemon no longer attaches a child run to its parent's lease
   No Sparkwing client sent these fields. The daemon journal no longer records `child_attach_request` or `child_attach`.
-
-### Removed
-
 - **credits (Breaking):** Remove the retired `warm_cpu_class_cores` credit setting
   Nothing scaled from it: per-class warm capacity is the only warm policy. The credit and credit-settings responses no longer report it, and the settings write refuses a body that names it. See the [migration guide](docs/migrations/_unreleased.md#the-warm_cpu_class_cores-credit-setting-is-removed).
 
