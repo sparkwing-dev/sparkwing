@@ -34,6 +34,7 @@ func MaterializePipeline(ctx context.Context, dir string, options CompileOptions
 		}
 		return lease, false, nil
 	}
+	started := time.Now()
 	if err := preparePipelineDependencies(ctx, dir, options); err != nil {
 		return nil, false, fmt.Errorf("prepare pipeline dependencies: %w", err)
 	}
@@ -50,7 +51,11 @@ func MaterializePipeline(ctx context.Context, dir string, options CompileOptions
 		return nil, false, err
 	}
 	lease.markUsed()
-	if !published {
+	if published {
+		if _, err := fmt.Fprintf(options.Diagnostics, "Cache miss: pipeline binary compiled in %s\n", time.Since(started).Round(100*time.Millisecond)); err != nil {
+			return nil, false, errors.Join(err, lease.Release())
+		}
+	} else {
 		if _, err := fmt.Fprintln(options.Diagnostics, "Cache hit: pipeline binary"); err != nil {
 			return nil, false, errors.Join(err, lease.Release())
 		}

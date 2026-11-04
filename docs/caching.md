@@ -188,6 +188,8 @@ not transfer pipeline executables.
 checkout compiles its pipeline. A TypeScript checkout installs dependencies.
 When a Go pipeline reuses a compiled binary, the CLI prints
 `Cache hit: pipeline binary`, including on the run after a successful warmup.
+A run that compiles prints `Cache miss: pipeline binary compiled in <duration>`,
+so a cache that a CI provider failed to restore shows up in the run output.
 See [Warmup](sparks.md#warmup) for receipts and the process-policy integration.
 
 ### The key
