@@ -246,10 +246,13 @@ func TestGitHubEnrollmentRemovalRacesIssuance(t *testing.T) {
 	}
 }
 
-func TestGitHubEnrollmentAndIssuanceLimitsSerialize(t *testing.T) {
+// Neither repository consent nor live Actions credentials are counted, so a
+// funded team binds and exchanges past the 20 the old caps allowed, concurrently.
+func TestGitHubEnrollmentAndIssuanceHaveNoCountLimit(t *testing.T) {
 	for _, issuance := range []bool{false, true} {
 		t.Run(fmt.Sprint(issuance), func(t *testing.T) {
 			tenant, a, _ := actionsEnrollment(t)
+			rewriteSchemaExec(t, tenant.s.db, `INSERT INTO credit_grants(reference,id,team,kind,amount_micro,created_at) VALUES ('fund','fund',?,'paid',1000000,1)`, tenant.team)
 			var group sync.WaitGroup
 			results := make(chan error, 32)
 			for i := range 32 {
@@ -265,73 +268,12 @@ func TestGitHubEnrollmentAndIssuanceLimitsSerialize(t *testing.T) {
 			}
 			group.Wait()
 			close(results)
-			accepted := 0
 			for err := range results {
-				if err == nil {
-					accepted++
-				} else if !errors.Is(err, ErrBindingLimit) && !errors.Is(err, ErrGitHubRunnerCredentialLimit) {
+				if err != nil {
 					t.Fatal(err)
 				}
 			}
-			want := maxGitHubRunnerBindings - 1
-			if issuance {
-				want = maxGitHubRunnerCredentials
-			}
-			if accepted != want {
-				t.Fatalf("accepted %d, want %d", accepted, want)
-			}
 		})
-	}
-}
-
-func TestGitHubEnrollmentLimitsIgnoreFundingAndExemptDefaultTeam(t *testing.T) {
-	tenant, a := credentialMaintenanceFixture(t)
-	rewriteSchemaExec(t, tenant.s.db, `INSERT INTO credit_grants(reference,id,team,kind,amount_micro,created_at) VALUES ('fund','fund','a','paid',1000000,1)`)
-	rewriteSchemaExec(t, tenant.s.db, `INSERT INTO teams(name,created_at,updated_at) VALUES (?,1,1)`, DefaultTeam)
-	operator := &Tenant{s: tenant.s, team: DefaultTeam}
-	owner := authorityMember(t, tenant.s, "operator-owner", RoleOwner, DefaultTeam)
-	op := a
-	op.Principal.Authority, op.Target.Team = owner.Authority, string(DefaultTeam)
-	for i := range maxGitHubRunnerBindings + 1 {
-		row := GitHubRunnerBinding{RepositoryID: int64(i + 1), RepositoryOwnerID: 7, Repository: "acme/repo"}
-		_, err := tenant.RegisterGitHubRunner(t.Context(), a, row)
-		if i < maxGitHubRunnerBindings && err != nil || i == maxGitHubRunnerBindings && !errors.Is(err, ErrBindingLimit) {
-			t.Fatalf("funded registration %d: %v", i, err)
-		}
-		if i == maxGitHubRunnerBindings {
-			for _, want := range []string{"limit is 20", "current usage is 20", "support@sparkwing.dev"} {
-				if !strings.Contains(err.Error(), want) {
-					t.Fatalf("binding refusal %q omits %q", err, want)
-				}
-			}
-		}
-		if _, err := operator.RegisterGitHubRunner(t.Context(), op, row); err != nil {
-			t.Fatalf("default-team registration %d: %v", i, err)
-		}
-	}
-}
-
-func TestGitHubActionsExpiredAndRevokedRootsReleaseIssuanceCapacity(t *testing.T) {
-	tenant, a, row := actionsEnrollment(t)
-	now := tenant.s.now()
-	tenant.s.clock = func() time.Time { return now }
-	for i := range maxGitHubRunnerCredentials {
-		if _, err := tenant.s.AsOperator().ProvisionCapability(t.Context(), actionsSpec(t, tenant.s, tenant.team, fmt.Sprint(i))); err != nil {
-			t.Fatal(err)
-		}
-	}
-	now = now.Add(time.Hour)
-	if _, err := tenant.s.AsOperator().ProvisionCapability(t.Context(), actionsSpec(t, tenant.s, tenant.team, "expired-capacity")); err != nil {
-		t.Fatalf("expired roots still consume issuance capacity: %v", err)
-	}
-	if err := tenant.RevokeGitHubRunner(t.Context(), a, row.RepositoryID); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := tenant.RegisterGitHubRunner(t.Context(), a, row); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := tenant.s.AsOperator().ProvisionCapability(t.Context(), actionsSpec(t, tenant.s, tenant.team, "revoked-capacity")); err != nil {
-		t.Fatalf("revoked roots still consume issuance capacity: %v", err)
 	}
 }
 
@@ -371,29 +313,14 @@ func TestGitHubEnrollmentRollbackPreservesConsentAndAuthority(t *testing.T) {
 	}
 }
 
-func TestGitHubActionsExpiryFreesQuotaWithoutDeletingAudit(t *testing.T) {
+func TestGitHubActionsExpiryEndsAuthorityWithoutDeletingAudit(t *testing.T) {
 	tenant, _, _ := actionsEnrollment(t)
 	s := tenant.s
 	now := s.now()
 	s.clock = func() time.Time { return now }
-	var first capability.Issued
-	for i := range maxGitHubRunnerCredentials {
-		issued, err := s.AsOperator().ProvisionCapability(t.Context(), actionsSpec(t, s, tenant.team, fmt.Sprint(i)))
-		if err != nil {
-			t.Fatal(err)
-		}
-		if i == 0 {
-			first = issued
-		}
-	}
-	if issued, err := s.AsOperator().ProvisionCapability(t.Context(), actionsSpec(t, s, tenant.team, "full")); !errors.Is(err, ErrGitHubRunnerCredentialLimit) || issued.Raw != "" {
-		t.Fatalf("full quota: %+v, %v", issued.Capability, err)
-	} else {
-		for _, want := range []string{"limit is 20", "current usage is 20", "support@sparkwing.dev"} {
-			if !strings.Contains(err.Error(), want) {
-				t.Fatalf("Actions credential refusal %q omits %q", err, want)
-			}
-		}
+	first, err := s.AsOperator().ProvisionCapability(t.Context(), actionsSpec(t, s, tenant.team, "first"))
+	if err != nil {
+		t.Fatal(err)
 	}
 	now = *first.Capability.ExpiresAt
 	if _, err := s.AsOperator().LookupCapability(t.Context(), first.Capability.Digest); err == nil {
@@ -401,9 +328,9 @@ func TestGitHubActionsExpiryFreesQuotaWithoutDeletingAudit(t *testing.T) {
 	}
 	issued, err := s.AsOperator().ProvisionCapability(t.Context(), actionsSpec(t, s, tenant.team, "after-expiry"))
 	if err != nil || issued.Raw == "" {
-		t.Fatalf("quota after expiry: %+v, %v", issued.Capability, err)
+		t.Fatalf("issuance after expiry: %+v, %v", issued.Capability, err)
 	}
-	rewriteSchemaCount(t, s.db, "capabilities", maxGitHubRunnerCredentials+1)
+	rewriteSchemaCount(t, s.db, "capabilities", 2)
 }
 
 // Losing an installation ends everything the team held through it, and

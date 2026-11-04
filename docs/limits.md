@@ -208,6 +208,13 @@ operator configuration. Korey decided each on 2026-11-04.
   and `--max-runs-per-principal-hour` remains an operator setting. GitHub
   allows 500 workflow runs per ten seconds per repository, and CircleCI queues
   concurrency-limited work instead of refusing it.
+- GitHub Actions enrollment: no cap of 20 bound repositories per metered team
+  and none of 20 live Actions credentials per team. A credential lives about an
+  hour after its job ends, so the credential cap limited workflow throughput,
+  not concurrency. Verified OIDC identity, one exchange per workflow run
+  attempt, and the one-hour credential lifetime of decision 67 stay. GitHub
+  permits far higher workflow concurrency, and CircleCI bounds active
+  execution through plan and resource-class limits rather than credentials.
 
 ## Billing and overload protection
 

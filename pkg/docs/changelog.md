@@ -51,6 +51,10 @@ unlock.
   a push the cap refused became a failed delivery that a team admin had to process again. The per-team queue shed
   depth still answers `503` past its threshold, and `--max-runs-per-principal-hour` still sets a cap when the
   operator names one.
+- **controller:** GitHub Actions runners no longer cap bound repositories or live credentials at 20 per team
+  A credential lives about an hour after its job ends, so a team that ran 20 short workflows in an hour had its next
+  exchange refused with `429`, and a metered team could not bind a 21st repository. Both caps are removed. Each
+  workflow run attempt still exchanges once, against verified GitHub identity, for a one-hour credential.
 
 ### Fixed
 
