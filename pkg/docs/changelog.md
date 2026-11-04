@@ -19,6 +19,11 @@ unlock.
 ---
 
 ## [Unreleased]
+### Changed
+
+- **delivery:** Gate and land runs start faster and redo less work
+  The golangci-lint cache moved from `.sparkwing/cache/` to the worktree's git directory, so starting a run in a checkout that had linted no longer hashes its 80,000 files (`sparkwing pipeline list` 67 s to 2.5 s). Without `--full` the gate lints only the packages holding changed Go files, its test steps keep one `SPARKWING_HOME` per checkout so `go test` replays unchanged passes, a change outside every package (`.github/`, `docs/`, `bin/` and similar) runs the packages whose tests read it, and land pushes the tree it gated without re-running the pre-push hook. Hosted CI refreshes its Go build cache from every push to main.
+
 ### Fixed
 
 - **launcher:** Stop warning about Cloud reservations that belong to another job namespace
