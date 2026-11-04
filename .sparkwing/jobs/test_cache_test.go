@@ -31,6 +31,7 @@ import (
 )
 func TestTemporaryFiles(t *testing.T) {
  if os.Getenv("TMPDIR") != os.Getenv("SPARKWING_TEST_EXPECTED_TMPDIR") { t.Fatal("caller temporary directory changed") }
+ if os.Getenv("SPARKWING_HOME") == "" { t.Fatal("the step pinned no sparkwing home") }
  t.TempDir()
 }
 `)

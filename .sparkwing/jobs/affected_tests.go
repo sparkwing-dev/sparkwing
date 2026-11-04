@@ -114,7 +114,7 @@ func runAffectedTest(ctx context.Context) error {
 		plans = append(plans, planAffectedTests(module, modules, files, packages, critical[module]))
 	}
 	sparkwing.Info(ctx, "affected tests: %s", scope)
-	return withProductTestHome(func(home string) error {
+	return withStableProductTestHome("gate-test", func(home string) error {
 		var failures []string
 		for _, p := range plans {
 			for _, command := range p.commands(currentHost()) {

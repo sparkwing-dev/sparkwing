@@ -3,6 +3,7 @@ package jobs
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"errors"
 	"fmt"
 	"io"
@@ -779,6 +780,27 @@ func withProductTestHome(run func(home string) error) error {
 	return errors.Join(runErr, cleanupErr)
 }
 
+// perf: go test replays a pass only while the environment its tests read
+// repeats, so a fresh home per run reran every package reading SPARKWING_HOME.
+// Keyed by checkout and step and emptied around use; two runs of one step in
+// one checkout at once share it and fail loudly rather than pass wrongly.
+func withStableProductTestHome(step string, run func(home string) error) error {
+	sum := sha256.Sum256([]byte(regexCheckRoot()))
+	home := filepath.Join(os.TempDir(), fmt.Sprintf("sparkwing-gate-home-%s-%x", step, sum[:6]))
+	if err := os.RemoveAll(home); err != nil {
+		return fmt.Errorf("empty the suite's sparkwing home: %w", err)
+	}
+	if err := os.Mkdir(home, 0o700); err != nil {
+		return fmt.Errorf("create the suite's sparkwing home: %w", err)
+	}
+	runErr := run(home)
+	cleanupErr := os.RemoveAll(home)
+	if cleanupErr != nil {
+		cleanupErr = fmt.Errorf("remove the suite's sparkwing home: %w", cleanupErr)
+	}
+	return errors.Join(runErr, cleanupErr)
+}
+
 func runVet(ctx context.Context) error {
 	return forEachGoModule(ctx, "go vet", boundedGoCommand(currentHost(), "vet", "./..."), "")
 }
@@ -788,7 +810,7 @@ func runBuild(ctx context.Context) error {
 }
 
 func runTest(ctx context.Context) error {
-	return withProductTestHome(func(home string) error {
+	return withStableProductTestHome("gate-test", func(home string) error {
 		return forEachGoModule(ctx, "go test", testGoCommand(currentHost()), home)
 	})
 }
@@ -796,7 +818,7 @@ func runTest(ctx context.Context) error {
 // perf: short mode defers expensive test bodies while retaining real-store
 // fixture setup, whose aggregate cost still takes minutes.
 func runShortTest(ctx context.Context) error {
-	return withProductTestHome(func(home string) error {
+	return withStableProductTestHome("short-test", func(home string) error {
 		return forEachGoModule(ctx, "go test", boundedGoCommand(currentHost(), "test", "-short ./..."), home)
 	})
 }
