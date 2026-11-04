@@ -44,7 +44,7 @@ func (s *Server) runnerInventory(ctx context.Context, team string) (capability.R
 			return capability.RunnerSnapshot{}, routepolicy.MissingEndpointPolicy()
 		}
 	}
-	return snapshot, nil
+	return mergeLocalRunner(snapshot, team, s.localRunner), nil
 }
 
 func (s *Server) handleAgents(w http.ResponseWriter, r *http.Request, a capability.Authorized) error {

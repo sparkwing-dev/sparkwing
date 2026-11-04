@@ -50,8 +50,10 @@ func (StorePostgres) Help() string {
 		"that server; otherwise it starts an embedded Postgres on a free port, with its data " +
 		"directory under a temporary root and its binaries under the persistent tool cache, " +
 		"and stops the server and removes the data directory whether the suite passes, " +
-		"fails, or is interrupted. A run killed outright before its teardown finishes can leave " +
-		"a sparkwing-store-postgres-* directory under TMPDIR. A failing suite prints the tail of the server log, " +
+		"fails, or is interrupted. A run killed outright before its teardown finishes, as a " +
+		"cancelled run is one second after it is asked to stop, leaves a sparkwing-store-postgres-* " +
+		"directory under TMPDIR; the next store-postgres run removes every such directory whose " +
+		"owning process is gone. A failing suite prints the tail of the server log, " +
 		"which embedded-postgres only makes available once the server has stopped. A server " +
 		"that will not start is retried once on a fresh port and then fails the step with " +
 		"the cause; the suite is never skipped. Needs no Docker."
@@ -141,10 +143,16 @@ func (p *StorePostgres) run(ctx context.Context) error {
 		return runStoreSuiteAgainst(ctx, dsn)
 	}
 
+	sweepAbandonedStorePostgresRoots(ctx, os.TempDir())
 	root, err := os.MkdirTemp("", storePostgresRootPrefix)
 	if err != nil {
 		return fmt.Errorf("create the postgres temporary root: %w", err)
 	}
+	release, err := claimStorePostgresRoot(root)
+	if err != nil {
+		return errors.Join(err, os.RemoveAll(root))
+	}
+	defer release()
 
 	var serverLog bytes.Buffer
 	var server *embeddedpostgres.EmbeddedPostgres
@@ -175,13 +183,31 @@ func (p *StorePostgres) run(ctx context.Context) error {
 			}
 			return server.Stop()
 		},
-		remove: func() error { return os.RemoveAll(root) },
+		remove: func() error { return removeStorePostgresRoot(root) },
 		suite:  runStoreSuiteAgainst,
 		serverLog: func() string {
 			return lastLines(serverLog.String(), storePostgresLogLines)
 		},
 		report: func(tail string) { sparkwing.Info(ctx, "postgres server log:\n%s", tail) },
 	})
+}
+
+// safety: the owner lock goes last, so a run killed mid-delete still leaves a root the next
+// sweep recognizes as abandoned instead of a lockless one it must skip.
+func removeStorePostgresRoot(root string) error {
+	entries, err := os.ReadDir(root)
+	if err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	for _, entry := range entries {
+		if entry.Name() == storePostgresOwnerLock {
+			continue
+		}
+		if err := os.RemoveAll(filepath.Join(root, entry.Name())); err != nil {
+			return err
+		}
+	}
+	return os.RemoveAll(root)
 }
 
 type storePostgresRun struct {

@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"slices"
 	"strings"
 	"sync/atomic"
@@ -267,5 +268,72 @@ func TestStorePostgresShardTimeoutEndsInsideTheStep(t *testing.T) {
 	}
 	if timeout >= storePostgresPrePushTimeout {
 		t.Fatalf("shard timeout %s does not end before the step's %s, so a hung test would print no stack", timeout, storePostgresPrePushTimeout)
+	}
+}
+
+func TestStorePostgresSweepRemovesOnlyAbandonedRoots(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("no flock outside unix")
+	}
+	dir := t.TempDir()
+	mkRoot := func(name string) string {
+		root := filepath.Join(dir, storePostgresRootPrefix+name)
+		if err := os.MkdirAll(filepath.Join(root, "data"), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		return root
+	}
+	live := mkRoot("live")
+	release, err := claimStorePostgresRoot(live)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer release()
+	abandoned := mkRoot("abandoned")
+	releaseAbandoned, err := claimStorePostgresRoot(abandoned)
+	if err != nil {
+		t.Fatal(err)
+	}
+	releaseAbandoned()
+	unclaimed := mkRoot("unclaimed")
+
+	sweepAbandonedStorePostgresRoots(t.Context(), dir)
+
+	if _, err := os.Stat(abandoned); !os.IsNotExist(err) {
+		t.Errorf("the root whose owner is gone survived the sweep: %v", err)
+	}
+	for _, root := range []string{live, unclaimed} {
+		if _, err := os.Stat(root); err != nil {
+			t.Errorf("the sweep removed %s, which a live run may still own: %v", root, err)
+		}
+	}
+}
+
+func TestStorePostgresRootRemovalDeletesTheOwnerLockLast(t *testing.T) {
+	root := filepath.Join(t.TempDir(), storePostgresRootPrefix+"x")
+	if err := os.MkdirAll(filepath.Join(root, "data", "base"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, storePostgresOwnerLock), nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(root, 0o500); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(root, 0o700) })
+	if err := removeStorePostgresRoot(root); err == nil {
+		t.Skip("running as a user that ignores directory permissions")
+	}
+	if _, err := os.Stat(filepath.Join(root, storePostgresOwnerLock)); err != nil {
+		t.Errorf("a failed removal dropped the owner lock first: %v", err)
+	}
+	if err := os.Chmod(root, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := removeStorePostgresRoot(root); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(root); !os.IsNotExist(err) {
+		t.Errorf("root survived removal: %v", err)
 	}
 }
