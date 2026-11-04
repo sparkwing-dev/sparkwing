@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"strings"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
@@ -442,16 +443,18 @@ func TestRunLogSearchPreservesMatchesFromIncompleteLogs(t *testing.T) {
 }
 
 func TestLocalFollowPollsFasterThanRemoteFollow(t *testing.T) {
-	ctx, cancel := context.WithCancel(t.Context())
-	start := time.Now()
-	if err := waitLocalFollowPoll(ctx, time.Second); err != nil {
-		t.Fatal(err)
-	}
-	if elapsed := time.Since(start); elapsed >= time.Second {
-		t.Fatalf("local follow waited %s, the remote one-second poll", elapsed)
-	}
-	cancel()
-	if err := waitLocalFollowPoll(ctx, time.Second); err == nil {
-		t.Fatal("a cancelled local follow kept waiting")
-	}
+	synctest.Test(t, func(t *testing.T) {
+		start := time.Now()
+		if err := waitLocalFollowPoll(t.Context(), time.Second); err != nil {
+			t.Fatal(err)
+		}
+		if waited := time.Since(start); waited != localFollowPoll {
+			t.Fatalf("local follow waited %s, want %s", waited, localFollowPoll)
+		}
+		ctx, cancel := context.WithCancel(t.Context())
+		cancel()
+		if err := waitLocalFollowPoll(ctx, time.Second); err == nil {
+			t.Fatal("a cancelled local follow kept waiting")
+		}
+	})
 }
