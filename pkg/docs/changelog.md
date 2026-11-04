@@ -26,6 +26,8 @@ unlock.
 
 ### Fixed
 
+- **controller:** GitHub check summaries count a memoized job as `memoized`, not `other`
+  The summary kept its own list of outcomes, which had retired names and lacked `memoized`. It now counts the outcome the store records.
 - **runner:** `sparkwing-runner` help follows the output contract the CLI uses
   Help now goes to stdout, as one `{"kind":"help","text":...}` record under `-o json` or a pipe, and an invalid `-o` value is refused before help prints. It went to stderr in every mode, and `--help -o bogus` succeeded.
 - **runners:** A native runner service keeps a custom `SPARKWING_HOME`
