@@ -863,23 +863,26 @@ these rules in the transaction that issues the root.
 
 ### Device sign-in
 
-`sparkwing login` and `sparkwing runners add` without `--session-stdin` get
-their credential through a browser approval, so nothing is copied out of a
-browser:
+`sparkwing login` and a personal `runners add` without
+`--session-stdin` get their credential through a browser approval, so nothing
+is copied out of a browser. Both need stdin and stderr on a terminal, so a code
+never lands in a script's log:
 
-1. The CLI sends `POST /api/v1/auth/device` with the machine name and what it
-   asks for: a member token's grants, or a runner enrollment. The controller
+1. The CLI sends `POST /api/v1/auth/device` with the machine name, the team it
+   may join when `--team` is given, and what it asks for: a member token's
+   grants, or a personal runner enrollment. The body is capped at 16 KiB. The controller
    returns a device code once, an eight-letter user code, `/device`, a
    10-minute lifetime and a 5-second poll interval.
 2. The CLI prints its own controller URL plus `/device` and the user code. The
    page address never comes from the response.
 3. A signed-in member opens `/device`, types the code, and sees the machine or
-   runner name, the team, the exact grants, the runner's repositories, trust and
-   pools, and the time left. Approve and Deny post the code to
+   runner name, the team, the exact grants, the runner's repositories and the
+   time left. A request naming another team is refused. Approve and Deny post the code to
    `/api/v1/auth/device/approve` or `/deny`.
 4. The CLI polls `POST /api/v1/auth/device/token`. An approved request is
    redeemed once: the controller issues the credential then, under the approving
-   session, and the CLI saves it.
+   session. The CLI prints the team before it saves the token or writes the
+   runner configuration, and refuses a team other than `--team`.
 
 Lookup, approval and denial need a direct account session with its CSRF proof,
 as issuing a member root does; a session opened from a token cannot approve.
@@ -889,10 +892,12 @@ grants, or the approver's `runs.read`, `logs.read`, `runs.write`, `runs.control`
 and `approvals.write` where the role holds them; it never carries `team.admin`.
 It is the same token the console's Create CLI token issues: its parent is the
 approving session, it expires after 90 days, and logging that session out ends
-it. A runner request is issued as `POST /api/v1/runners` would issue it, so
-shared runners, pools and trust still need team administration. The store
-checks the session's liveness, membership and grants again when the code is
-redeemed, so an approval never yields more than the approver holds then.
+it. Browser approval enrolls personal runners only, because a code can be
+phished: shared runners, reserved pools, trust classes, platforms and launchers
+are refused when the request starts and keep `--session-stdin`. Approval runs
+the store's own issuance check for the request, and redemption runs it again
+with the session's liveness, membership and grants at that moment, so an
+approval never yields more than the approver holds then.
 
 Codes are single use and bound to the store that issued them: another
 deployment does not know them. A poll inside the interval returns `slow_down`

@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
 )
@@ -171,9 +172,6 @@ func TestDeviceLoginRefusals(t *testing.T) {
 
 func TestDeviceLoginEnrollsARunnerUnderTheApprover(t *testing.T) {
 	s, raw, csrf := reviewAccount(t, "editor")
-	shared := startDevice(t, s, `{"kind":"runner","runner":{"name":"build-box","repos":["github.com/acme/*"]}}`)
-	reviewSessionRequest(t, s, raw, csrf, "POST", "/api/v1/auth/device/approve", `{"user_code":"`+shared.UserCode+`"}`, 403)
-
 	personal := startDevice(t, s, `{"kind":"runner","runner":{"name":"korey-laptop","personal":true}}`)
 	var lookup controllerwire.DeviceLoginLookup
 	if err := json.Unmarshal(reviewSessionRequest(t, s, raw, csrf, "POST", "/api/v1/auth/device/lookup", `{"user_code":"`+personal.UserCode+`"}`, 200).Body.Bytes(), &lookup); err != nil {
@@ -203,5 +201,58 @@ func TestDeviceUserCodesAreTypedFromTheDisplayAlphabet(t *testing.T) {
 	code, err := newUserCode()
 	if _, ok := normalizeUserCode(code); err != nil || !ok {
 		t.Fatalf("generated code %q does not normalize: %v", code, err)
+	}
+}
+
+func TestDeviceLoginRefusesWhatABrowserApprovalShouldNotGrant(t *testing.T) {
+	s, raw, csrf := reviewAccount(t, "owner")
+	for _, body := range []string{
+		`{"kind":"runner","runner":{"name":"b","repos":["github.com/*/*"]}}`,
+		`{"kind":"runner","runner":{"name":"b","repos":["github.com/acme/*"],"trust":"any"}}`,
+		`{"kind":"runner","runner":{"name":"b","personal":true,"reserved_pools":["deploy"]}}`,
+		`{"kind":"runner","runner":{"name":"b","personal":true,"platform":"kubernetes"}}`,
+		`{"kind":"runner","runner":{"name":"b","personal":true,"grants":["nodes.claim","claims.launch"]}}`,
+		`{"kind":"runner","runner":{"name":"b","personal":true,"repos":["github.com/acme/` + strings.Repeat("x", 300) + `"]}}`,
+		`{"kind":"member","machine":"box","team":"Not A Slug"}`,
+		`{"kind":"member","machine":"box"` + strings.Repeat(" ", 20<<10) + `}`,
+	} {
+		devicePost(t, s.Handler(), "/api/v1/auth/device", body, 400)
+	}
+	var rows int
+	if err := teststore.SQL(t, s.store).QueryRow(`SELECT COUNT(*) FROM device_logins`).Scan(&rows); err != nil || rows != 0 {
+		t.Fatalf("refused starts stored %d rows %v", rows, err)
+	}
+
+	foreign := startDevice(t, s, `{"kind":"member","machine":"box","team":"other"}`)
+	reviewSessionRequest(t, s, raw, csrf, "POST", "/api/v1/auth/device/lookup", `{"user_code":"`+foreign.UserCode+`"}`, 403)
+	reviewSessionRequest(t, s, raw, csrf, "POST", "/api/v1/auth/device/approve", `{"user_code":"`+foreign.UserCode+`"}`, 403)
+	reviewSessionRequest(t, s, raw, csrf, "POST", "/api/v1/auth/device/deny", `{"user_code":"`+foreign.UserCode+`"}`, 204)
+	own := startDevice(t, s, `{"kind":"member","machine":"box","team":"a"}`)
+	reviewSessionRequest(t, s, raw, csrf, "POST", "/api/v1/auth/device/approve", `{"user_code":"`+own.UserCode+`"}`, 204)
+}
+
+func TestDeviceApprovalRunsTheStoreIssuanceCheck(t *testing.T) {
+	s, raw, csrf := reviewAccount(t, "editor")
+	engineSQL(t, s.store, `UPDATE teams SET members_can_add_machines=0 WHERE name='a'`)
+	started := startDevice(t, s, `{"kind":"runner","runner":{"name":"desk","personal":true}}`)
+	reviewSessionRequest(t, s, raw, csrf, "POST", "/api/v1/auth/device/approve", `{"user_code":"`+started.UserCode+`"}`, 403)
+	reviewSessionRequest(t, s, raw, csrf, "POST", "/api/v1/auth/device/lookup", `{"user_code":"`+started.UserCode+`"}`, 200)
+
+	member := startDevice(t, s, `{"kind":"member","machine":"box"}`)
+	reviewSessionRequest(t, s, raw, csrf, "POST", "/api/v1/auth/device/approve", `{"user_code":"`+member.UserCode+`"}`, 204)
+	engineSQL(t, s.store, `UPDATE memberships SET role='reader' WHERE account_id='member'`)
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPost, "/api/v1/auth/device/token", strings.NewReader(`{"device_code":"`+member.DeviceCode+`"}`))
+	r.Header.Set("Content-Type", "application/json")
+	s.Handler().ServeHTTP(w, r)
+	if w.Code == http.StatusOK || strings.Contains(w.Body.String(), `"capability"`) {
+		t.Fatalf("a downgraded approver still minted the editor grants: %d %s", w.Code, w.Body)
+	}
+}
+
+func TestRunnerTrustRefusalNamesOnlyCurrentClasses(t *testing.T) {
+	_, err := runnerEnrollmentSpec(runnerEnrollmentRequest{Name: "b", Repos: []string{"github.com/acme/*"}, Trust: "verified"}, capability.AuthorityRef{}, "a")
+	if err == nil || strings.Contains(err.Error(), "verified,") || !strings.Contains(err.Error(), "verified-default or any") {
+		t.Fatalf("trust refusal = %v", err)
 	}
 }

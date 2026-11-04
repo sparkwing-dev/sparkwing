@@ -21,6 +21,19 @@ import (
 
 var deviceLoginSleep = client.SleepContext
 
+var deviceTerminal = func() bool {
+	return term.IsTerminal(int(os.Stdin.Fd())) && term.IsTerminal(int(os.Stderr.Fd()))
+}
+
+// safety: the approver's session picks the team, so the CLI names it before anything is saved or started.
+func checkApprovedTeam(token controllerwire.CreatedToken, want string) error {
+	fmt.Fprintf(os.Stderr, "Approved for team %s as %s with %s.\n", token.Team, token.Principal, strings.Join(token.Grants, ", "))
+	if want != "" && token.Team != want {
+		return fmt.Errorf("the approval is for team %s, not --team %s; nothing was saved", token.Team, want)
+	}
+	return nil
+}
+
 func runLogin(inv clisurface.Invocation) error {
 	format := inv.Output(term.IsTerminal(int(os.Stdout.Fd())))
 	if inv.Help() {
@@ -54,9 +67,15 @@ func runLogin(inv clisurface.Invocation) error {
 	if machine == "" {
 		machine = deviceMachineName()
 	}
-	request := controllerwire.StartDeviceLoginRequest{Kind: controllerwire.DeviceLoginMember, Machine: machine, Grants: inv.Flags["scope"]}
+	request := controllerwire.StartDeviceLoginRequest{Kind: controllerwire.DeviceLoginMember, Machine: machine, Team: inv.Value("team"), Grants: inv.Flags["scope"]}
 	token, err := deviceSignIn(context.Background(), base, request)
 	if err != nil {
+		return err
+	}
+	if err := checkApprovedTeam(token, request.Team); err != nil {
+		if revokeProfileToken(&namedProfile{Profile: userconfig.Profile{Controller: userconfig.Connection{URL: base, Token: &token.Capability}}}) != nil {
+			fmt.Fprintf(os.Stderr, "warning: token %s is still live; revoke it from the console\n", token.Prefix)
+		}
 		return err
 	}
 	p := &namedProfile{Name: name, Profile: userconfig.Profile{Controller: userconfig.Connection{URL: base, Token: &token.Capability}}}
@@ -81,11 +100,14 @@ func runLogin(inv clisurface.Invocation) error {
 			fmt.Fprintf(os.Stderr, "warning: the profile's previous token was not revoked; revoke it from the console's Machines page or with sparkwing tokens revoke --profile %s\n", name)
 		}
 	}
-	fmt.Fprintf(os.Stderr, "Signed in to %s as %s with %s.\n", token.Team, token.Principal, strings.Join(token.Grants, ", "))
 	return writeProfile(p, format)
 }
 
 func deviceSignIn(parent context.Context, base string, request controllerwire.StartDeviceLoginRequest) (controllerwire.CreatedToken, error) {
+	// safety: a code printed into a log or shared screen lets anyone on the deployment approve it into their team.
+	if !deviceTerminal() {
+		return controllerwire.CreatedToken{}, &apierr.Error{Code: apierr.BadRequest, Message: "browser approval needs stdin and stderr on a terminal; in a script, use runners add --session-stdin or profiles add --token-stdin"}
+	}
 	// safety: an interrupt withdraws the request, so the code on screen stops working once the command exits.
 	ctx, stop := signal.NotifyContext(parent, os.Interrupt, syscall.SIGTERM)
 	defer stop()

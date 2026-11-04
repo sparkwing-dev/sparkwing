@@ -28,6 +28,9 @@ const (
 	// eight of them give about 2^34 codes against a per-account limit on browser guesses.
 	userCodeAlphabet = "BCDFGHJKLMNPQRSTVWXZ"
 	userCodeLength   = 8
+	// safety: every device route is unauthenticated or takes a short code, and start stores its body.
+	deviceBodyLimit = 16 << 10
+	maxDeviceRepo   = 256
 )
 
 // safety: these match the console's Create CLI token; team.admin never travels through a device login.
@@ -37,6 +40,7 @@ var cliMemberGrants = []capability.Grant{capability.RunsRead, capability.LogsRea
 type deviceLoginRequest struct {
 	Kind    string                   `json:"kind"`
 	Machine string                   `json:"machine"`
+	Team    string                   `json:"team,omitempty"`
 	Grants  []capability.Grant       `json:"grants,omitempty"`
 	Runner  *runnerEnrollmentRequest `json:"runner,omitempty"`
 }
@@ -59,6 +63,7 @@ func (s *Server) handleStartDeviceLogin(w http.ResponseWriter, r *http.Request, 
 	if err := s.deviceLoginAvailable(); err != nil {
 		return err
 	}
+	r.Body = http.MaxBytesReader(nil, r.Body, deviceBodyLimit)
 	var request deviceLoginRequest
 	if err := decodeEngineRequest(r, &request); err != nil {
 		return err
@@ -152,6 +157,9 @@ func (s *Server) handleLookupDeviceLogin(w http.ResponseWriter, r *http.Request,
 	if err != nil {
 		return err
 	}
+	if err := deviceTeamMatches(request, a); err != nil {
+		return err
+	}
 	grants, err := deviceLoginGrants(request, a.Principal)
 	if err != nil {
 		return err
@@ -180,15 +188,23 @@ func (s *Server) handleDecideDeviceLogin(approve bool) func(http.ResponseWriter,
 			return err
 		}
 		var grants []capability.Grant
+		var spec *capability.ProvisionSpec
 		if approve {
+			if err := deviceTeamMatches(request, a); err != nil {
+				return err
+			}
 			if grants, err = deviceLoginGrants(request, a.Principal); err != nil {
 				return err
 			}
-			if err := deviceApprovalAuthority(request, grants, a.Principal); err != nil {
+			issued, err := deviceLoginSpec(store.DeviceLogin{
+				Request: login.Request, Team: store.Team(a.Target.Team), AccountID: a.Principal.Capability.Subject.ID, Session: a.Principal.Authority, Grants: grants,
+			})
+			if err != nil {
 				return err
 			}
+			spec = &issued
 		}
-		decided, err := s.operator.DecideDeviceLogin(r.Context(), a.Principal, login.UserCode, grants, approve)
+		decided, err := s.operator.DecideDeviceLogin(r.Context(), a.Principal, login.UserCode, grants, spec)
 		if err != nil {
 			return deviceLookupError(err)
 		}
@@ -205,6 +221,7 @@ func (s *Server) pendingDeviceLogin(r *http.Request, a capability.Authorized) (s
 	if err := s.loginLimit.admitAccount(a.Principal.Capability.Subject.ID); err != nil {
 		return store.DeviceLogin{}, deviceLoginRequest{}, err
 	}
+	r.Body = http.MaxBytesReader(nil, r.Body, deviceBodyLimit)
 	var body controllerwire.UserCodeRequest
 	if err := decodeEngineRequest(r, &body); err != nil {
 		return store.DeviceLogin{}, deviceLoginRequest{}, err
@@ -251,6 +268,15 @@ func validateDeviceLoginRequest(request *deviceLoginRequest) error {
 		if request.Runner == nil || len(request.Grants) != 0 {
 			return invalidEngineBody("a runner device login carries its enrollment in runner and no member grants")
 		}
+		// safety: a browser approval is phishable, so it never grants a credential that runs other members' work.
+		if runner := request.Runner; !runner.Personal || len(runner.ReservedPools) != 0 || runner.Trust != "" || runner.Platform != "" || runner.Grants != nil {
+			return invalidEngineBody("browser approval enrolls personal runners only; enroll shared runners, reserved pools, trust classes, platforms and launchers with --session-stdin")
+		}
+		for _, repo := range request.Runner.Repos {
+			if len(repo) > maxDeviceRepo {
+				return invalidEngineBody("repos patterns must be at most 256 characters")
+			}
+		}
 		if _, err := runnerEnrollmentSpec(*request.Runner, capability.AuthorityRef{}, ""); err != nil {
 			return err
 		}
@@ -260,6 +286,9 @@ func validateDeviceLoginRequest(request *deviceLoginRequest) error {
 	}
 	if !store.ValidRunnerName(request.Machine) {
 		return invalidEngineBody("machine must be 1 to 63 letters, digits, '-', '_' or '.'")
+	}
+	if request.Team != "" && (len(request.Team) > 63 || store.NormalizeTeam(store.Team(request.Team)) != store.Team(request.Team)) {
+		return invalidEngineBody("team must be a team slug")
 	}
 	return nil
 }
@@ -278,25 +307,9 @@ func deviceLoginGrants(request deviceLoginRequest, approver capability.Principal
 	}), nil
 }
 
-// safety: the store refuses the same cases when the device redeems; refusing here keeps an approval the
-// approver cannot honor from reaching the device as a confusing late failure.
-func deviceApprovalAuthority(request deviceLoginRequest, grants []capability.Grant, approver capability.Principal) error {
-	if request.Kind == controllerwire.DeviceLoginRunner {
-		if !request.Runner.Personal && !slices.Contains(approver.Capability.Grants, capability.TeamAdmin) {
-			return apierr.Authorization(apierr.ReasonMissingGrant, "team runner enrollment requires team administration")
-		}
-		if request.Runner.Personal && !slices.Contains(approver.Capability.Grants, capability.RunsWrite) {
-			return apierr.Authorization(apierr.ReasonMissingGrant, "a personal runner runs your own work, which requires runs.write")
-		}
-		return nil
-	}
-	if len(grants) == 0 {
-		return apierr.Authorization(apierr.ReasonMissingGrant, "your membership grants none of the requested permissions")
-	}
-	for _, grant := range grants {
-		if !slices.Contains(approver.Capability.Grants, grant) {
-			return apierr.Authorization(apierr.ReasonMissingGrant, "your membership does not include "+string(grant)+", which the device requested")
-		}
+func deviceTeamMatches(request deviceLoginRequest, a capability.Authorized) error {
+	if request.Team != "" && request.Team != a.Target.Team {
+		return apierr.Authorization(apierr.ReasonBinding, "this device asked to join team "+request.Team+"; switch to that team to approve it, or deny it")
 	}
 	return nil
 }
@@ -316,6 +329,7 @@ func deviceLoginSpec(login store.DeviceLogin) (capability.ProvisionSpec, error) 
 }
 
 func decodeDeviceCode(r *http.Request) ([32]byte, error) {
+	r.Body = http.MaxBytesReader(nil, r.Body, deviceBodyLimit)
 	var body controllerwire.DeviceCodeRequest
 	if err := decodeEngineRequest(r, &body); err != nil {
 		return [32]byte{}, err

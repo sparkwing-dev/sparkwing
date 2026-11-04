@@ -4244,6 +4244,8 @@ components:
           anyOf:
             - $ref: '#/components/schemas/internal.controllerwire.EnrollRunnerRequest'
             - type: "null"
+        team:
+          type: string
       required:
         - kind
         - machine

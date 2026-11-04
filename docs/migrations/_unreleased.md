@@ -1,21 +1,8 @@
 # Migrating to the next release
 
-This release upgrades the store to schema baseline 31 in place, and removes the
+This release upgrades the store to schema baseline 30 in place, and removes the
 retired `warm_cpu_class_cores` credit setting. Take a store snapshot before the
 first start; the sections below cover the other changes.
-
-## Upgrade the store in place to schema baseline 31
-
-Schema baseline 31 adds the `device_logins` table behind `sparkwing login` and
-browser-approved runner enrollment. A row holds the SHA-256 digest of a device
-code, the code a person types in the browser and, once approved, the approving
-session. It never holds a credential. Rows are deleted once they expire.
-
-A schema 30 store upgrades in place the first time this release opens it. A
-schema 28 or 29 store takes every step in the same transaction, on SQLite and
-PostgreSQL, under the migration advisory lock on PostgreSQL. The steps below for
-schema baseline 30 apply unchanged: snapshot the store, start this release, and
-restore the snapshot to roll back.
 
 ## Upgrade the store in place to schema baseline 30
 
@@ -23,6 +10,12 @@ Schema baseline 30 replaces the `warm_pool_desired` view. Auto warm capacity now
 adds a node for slow starts only while a job is waiting for a fresh node. Before,
 any slow start in the last hour kept adding a node every scaling cycle until the
 pool reached its maximum, even with nobody waiting.
+
+Schema baseline 30 also adds the `device_logins` table behind `sparkwing login`
+and browser-approved runner enrollment. A row holds the SHA-256 digest of a
+device code, the code a person types in the browser and, once approved, the
+approving session. It never holds a credential, and rows are deleted once they
+expire.
 
 The default Auto start-time target becomes 20 seconds. New stores seed every
 class at 20 seconds, and the upgrade moves each class still at the old
@@ -85,25 +78,25 @@ at least `--poll` plus 30 seconds.
 
 ## runners add enrolls through a browser approval
 
-`sparkwing runners add` without `--session-stdin` no longer refuses personal
-enrollment and no longer sends the profile's token. It prints a code and the
-controller's `/device` page instead:
+A personal `runners add` without `--session-stdin` no longer refuses.
+On a terminal it prints a code and the controller's `/device` page instead:
 
 ```sh
 sparkwing runners add --profile work --runner korey-laptop --personal
 ```
 
 Open the page where you are signed in to the console, type the code, check the
-runner name, team, repositories and grants, and approve. The runner credential
-is issued under your account with the same checks as a session enrollment:
-shared runners, reserved pools and `--trust` still need team administration.
-The profile only needs a controller URL; it does not need a token.
+runner name, team and grants, and approve. The command prints the team before it
+writes anything; pass `--team` to refuse an approver from another team. The
+runner credential is issued under your account with the same checks as a
+session enrollment. The profile only needs a controller URL. Shared runners,
+reserved pools, `--trust`, `--platform` and `--launcher` still need
+`--session-stdin`.
 
 Scripts that pipe a session keep working unchanged:
 `sparkwing-controller admin session ... | sparkwing runners add --session-stdin ...`.
-A script that ran `runners add` without `--session-stdin` and expected an error
-now waits up to 10 minutes for an approval; add `--session-stdin` or stop
-calling it.
+Without a terminal on stdin and stderr, the browser path refuses at once, so
+scripts still fail fast.
 
 To sign the CLI itself in, run `sparkwing login --controller https://HOST` the
 same way instead of pasting a token into

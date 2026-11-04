@@ -24,10 +24,11 @@ const (
 
 // StartDeviceLoginRequest describes what a device asks for. Machine names the device on the approval page.
 // Grants narrow a member token; empty asks for the approver's run and log grants. Runner carries an
-// enrollment and makes Machine its runner name.
+// enrollment and makes Machine its runner name. Team, when set, refuses an approver from another team.
 type StartDeviceLoginRequest struct {
 	Kind    string               `json:"kind"`
 	Machine string               `json:"machine"`
+	Team    string               `json:"team,omitempty"`
 	Grants  []string             `json:"grants,omitempty"`
 	Runner  *EnrollRunnerRequest `json:"runner,omitempty"`
 }

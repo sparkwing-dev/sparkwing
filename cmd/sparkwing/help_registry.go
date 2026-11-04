@@ -173,6 +173,7 @@ var commandFlagDescriptions = map[string]string{
 	"sparkwing login --controller":                             "Controller URL to sign in to; defaults to the URL saved in --profile.",
 	"sparkwing login --profile":                                "Profile to save the token in; defaults to the controller host.",
 	"sparkwing login --machine":                                "Name the approval page shows for this machine; defaults to the host name.",
+	"sparkwing login --team":                                   "Team this machine may join; an approver from another team is refused.",
 	"sparkwing login --scope":                                  "Grants to ask for; defaults to every run and log grant your role holds.",
 	"sparkwing login --force":                                  "Point an existing profile at a different controller.",
 	"sparkwing profiles add --profile":                         "Name for this saved connection; defaults to the controller host.",

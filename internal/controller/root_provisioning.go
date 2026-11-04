@@ -57,15 +57,18 @@ func runnerEnrollmentSpec(request runnerEnrollmentRequest, authority capability.
 	if err != nil {
 		return capability.ProvisionSpec{}, invalidEngineBody("repos must contain valid host/path patterns")
 	}
+	if len(request.ReservedPools) > maxRunnerRepos || request.Platform != "" && request.Platform != "kubernetes" {
+		return capability.ProvisionSpec{}, invalidEngineBody("reserved_pools must name at most 32 pools and platform must be empty or kubernetes")
+	}
 	seen := make(map[string]bool, len(request.ReservedPools))
 	for _, pool := range request.ReservedPools {
-		if strings.TrimSpace(pool) == "" || seen[pool] {
-			return capability.ProvisionSpec{}, invalidEngineBody("reserved_pools must contain unique nonempty names")
+		if !store.ValidRunnerName(pool) || seen[pool] {
+			return capability.ProvisionSpec{}, invalidEngineBody("reserved_pools must contain unique names of 1 to 63 letters, digits, '-', '_' or '.'")
 		}
 		seen[pool] = true
 	}
 	if !request.Trust.Valid() || request.Personal && request.Trust != "" {
-		return capability.ProvisionSpec{}, invalidEngineBody("trust must be verified-default, verified or any, on a shared runner only")
+		return capability.ProvisionSpec{}, invalidEngineBody("trust must be verified-default or any, on a shared runner only")
 	}
 	expires, err := provisionExpiry(request.ExpiresAt)
 	if err != nil {

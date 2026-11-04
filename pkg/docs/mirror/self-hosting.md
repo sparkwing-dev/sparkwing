@@ -392,16 +392,17 @@ independent account session. A `team.admin` bearer, a token-derived browser
 session and the deployment bootstrap token cannot substitute for it. Shared
 runner and launcher enrollment also require current team administration.
 
-On a machine with a browser nearby, approve the enrollment there. The profile
-needs only the controller URL:
+To offer your own workstation for your runs, approve the enrollment in a
+browser. The profile needs only the controller URL:
 
 ```bash
-sparkwing runners add --profile prod --runner build-box --repos github.com/acme/repo
+sparkwing runners add --profile prod --runner korey-laptop --personal --team support-test
 ```
 
 The command prints a code and the controller's `/device` page. Sign in to the
-console, type the code, check the runner name, team, repositories and grants,
-and approve; the runner credential is issued under your account. See
+console, type the code, check the runner name, team and grants, and approve;
+the runner credential is issued under your account. Shared runners, reserved
+pools and launchers need the session pipe below. See
 [device sign-in](auth.md#device-sign-in). `sparkwing login` signs the CLI itself
 in the same way.
 

@@ -61,6 +61,9 @@ func newDeviceLoginFixture(t *testing.T, decision string) *deviceLoginFixture {
 		return w.Result(), nil
 	})
 	t.Cleanup(func() { http.DefaultTransport = original })
+	previousTerminal := deviceTerminal
+	deviceTerminal = func() bool { return true }
+	t.Cleanup(func() { deviceTerminal = previousTerminal })
 	previous := deviceLoginSleep
 	deviceLoginSleep = func(ctx context.Context, _ time.Duration) error {
 		db := teststore.SQL(t, state)
@@ -102,7 +105,7 @@ func TestLoginSavesTheTokenTheBrowserApproved(t *testing.T) {
 	f := newDeviceLoginFixture(t, "approve")
 	var err error
 	out := captureStdout(t, func() {
-		err = runSparkwing([]string{"login", "--profile", "work", "--machine", "desk", "--output", "json"})
+		err = runSparkwing([]string{"login", "--profile", "work", "--machine", "desk", "--team", "device-test", "--output", "json"})
 	})
 	if err != nil {
 		t.Fatalf("login: %v", err)
@@ -161,5 +164,23 @@ func TestRunnersAddEnrollsThroughTheBrowser(t *testing.T) {
 	var personal int
 	if err := teststore.SQL(t, device.state).QueryRowContext(t.Context(), `SELECT COUNT(*) FROM capabilities WHERE subject_kind='machine' AND subject_id='desk'`).Scan(&personal); err != nil || personal != 1 {
 		t.Fatalf("enrolled machine credentials %d %v", personal, err)
+	}
+}
+
+func TestBrowserApprovalRefusesScriptsAndSharedRunners(t *testing.T) {
+	f := newRunnersFixture(t)
+	device := newDeviceLoginFixture(t, "approve")
+	deviceTerminal = func() bool { return false }
+	if err := runSparkwing([]string{"login", "--controller", "https://controller.example", "--profile", "ci"}); err == nil || !strings.Contains(err.Error(), "terminal") {
+		t.Fatalf("non-terminal login: %v", err)
+	}
+	deviceTerminal = func() bool { return true }
+	err := runRunnersAddArgs([]string{"--profile", "prod", "--runner", "desk", "--repos", "github.com/acme/*", "--config", f.config, "--no-service"})
+	if err == nil || !strings.Contains(err.Error(), "--session-stdin") {
+		t.Fatalf("shared browser enrollment: %v", err)
+	}
+	var started int
+	if err := teststore.SQL(t, device.state).QueryRowContext(t.Context(), `SELECT COUNT(*) FROM device_logins`).Scan(&started); err != nil || started != 0 {
+		t.Fatalf("refused commands started %d device logins %v", started, err)
 	}
 }

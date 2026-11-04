@@ -84,7 +84,10 @@ func runRunnersAdd(inv clisurface.Invocation) error {
 		}
 		manager = sessionManager
 	} else {
-		manager = &deviceRunnerManager{base: prof.ControllerURL()}
+		if !enrollment.personal || len(enrollment.pools) != 0 || enrollment.trust != "" || enrollment.platform != "" || enrollment.launcher {
+			return &clisurface.UsageError{Path: inv.Command.Path, Message: "browser approval enrolls personal runners only; enroll shared runners, reserved pools, trust classes, platforms and launchers with --session-stdin"}
+		}
+		manager = &deviceRunnerManager{base: prof.ControllerURL(), team: inv.Value("team")}
 	}
 	if err != nil {
 		return err
@@ -99,12 +102,16 @@ func runnerTokenManager(prof *namedProfile) (client.RunnerTokenManager, error) {
 // safety: a machine credential cannot revoke itself, so a failed browser enrollment leaves the revocation hint.
 type deviceRunnerManager struct {
 	controllerwire.TokenManager
-	base string
+	base, team string
 }
 
 func (m *deviceRunnerManager) EnrollRunner(ctx context.Context, request controllerwire.EnrollRunnerRequest) (*controllerwire.CreatedToken, error) {
-	token, err := deviceSignIn(ctx, m.base, controllerwire.StartDeviceLoginRequest{Kind: controllerwire.DeviceLoginRunner, Machine: request.Name, Runner: &request})
+	token, err := deviceSignIn(ctx, m.base, controllerwire.StartDeviceLoginRequest{Kind: controllerwire.DeviceLoginRunner, Machine: request.Name, Team: m.team, Runner: &request})
 	if err != nil {
+		return nil, err
+	}
+	if err := checkApprovedTeam(token, m.team); err != nil {
+		fmt.Fprintf(os.Stderr, "the runner token %s is live; revoke it from the console's Machines page\n", token.Prefix)
 		return nil, err
 	}
 	return &token, nil

@@ -101,9 +101,11 @@ func (o *Operator) PendingDeviceLogin(ctx context.Context, userCode string) (Dev
 	return out, err
 }
 
-// DecideDeviceLogin approves or denies a pending login once, from a direct account session. An approval records
-// the session as the authority the device's credential will be minted under, and the grants the approver saw.
-func (o *Operator) DecideDeviceLogin(ctx context.Context, p capability.Principal, userCode string, grants []capability.Grant, approve bool) (DeviceLogin, error) {
+// DecideDeviceLogin approves (spec set) or denies (spec nil) a pending login once, from a direct account session.
+// An approval first runs the issuance checks for spec, which redemption repeats, and records the session as the
+// authority the device's credential will be minted under, with the grants the approver saw.
+func (o *Operator) DecideDeviceLogin(ctx context.Context, p capability.Principal, userCode string, grants []capability.Grant, spec *capability.ProvisionSpec) (DeviceLogin, error) {
+	approve := spec != nil
 	if !p.DirectAccountSession() || p.Capability.Team == "" {
 		return DeviceLogin{}, authorityError(apierr.Forbidden, "approving a device requires a direct account sign-in session")
 	}
@@ -117,6 +119,11 @@ func (o *Operator) DecideDeviceLogin(ctx context.Context, p capability.Principal
 	}
 	var out DeviceLogin
 	err = o.s.inTx(ctx, func(tx *storeTx) error {
+		if spec != nil {
+			if _, err := provisionCapabilityTx(ctx, tx, *spec); err != nil {
+				return err
+			}
+		}
 		now := tx.now(ctx)
 		result, err := tx.execContext(ctx, `UPDATE device_logins SET state=?,team=?,account_id=?,session_hash=?,grants=?,decided_at=? WHERE user_code=? AND state='pending' AND expires_at>?`,
 			state, p.Capability.Team, p.Capability.Subject.ID, p.Authority.ID, string(encoded), now.UnixNano(), userCode, now.UnixNano())
