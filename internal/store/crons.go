@@ -416,17 +416,6 @@ func (t *Tenant) GetCronSchedule(ctx context.Context, id string) (CronSchedule, 
 	return sched, err
 }
 
-// SetCronSchedulePaused pauses or resumes a schedule. A paused
-// schedule still advances its cursor, so resuming does not replay the
-// instants that passed while it was paused.
-func (t *Tenant) SetCronSchedulePaused(ctx context.Context, id string, paused bool) error {
-	return t.s.inTx(ctx, func(tx *storeTx) error {
-		return updateCronScheduleTx(ctx, tx, id,
-			`UPDATE cron_schedules SET paused = ?, updated_at = ? WHERE team = ? AND id = ?`,
-			boolToInt(paused), tx.now(ctx).UnixNano(), string(t.team), id)
-	})
-}
-
 // SetCronScheduleDeclared records whether the repository still
 // declares this schedule.
 func (t *Tenant) SetCronScheduleDeclared(ctx context.Context, id string, declared bool) error {
@@ -626,20 +615,6 @@ func (t *Tenant) setCronOverrideTx(ctx context.Context, tx *storeTx, id string, 
 	return credentialRowChanged(result, err)
 }
 
-// ClearCronOverride drops this host's edit, returning the schedule to
-// what the repository declares.
-func (t *Tenant) ClearCronOverride(ctx context.Context, id string) error {
-	return t.s.inTx(ctx, func(tx *storeTx) error {
-		return updateCronScheduleTx(ctx, tx, id,
-			`UPDATE cron_schedules
-            SET override_cron = NULL, override_tz = NULL, override_overlap = NULL,
-                override_catch_up_ns = NULL, override_args = NULL, override_base = NULL,
-                override_set_at = NULL, updated_at = ?
-          WHERE team = ? AND id = ?`,
-			tx.now(ctx).UnixNano(), string(t.team), id)
-	})
-}
-
 // DeleteCronSchedule disarms one schedule and drops its fire history,
 // leaving every sibling schedule of the same pipeline armed. An id
 // unknown in t's team is an error wrapping [ErrNotFound].
@@ -665,34 +640,6 @@ func (t *Tenant) DeleteCronSchedule(ctx context.Context, id string) (err error) 
 			return notFound("cron schedule", id)
 		}
 		return nil
-	})
-}
-
-// DeleteCronSchedulesForRepo disarms every schedule of one repository
-// checkout in t's team and returns how many rows went, so a caller can
-// report an uninstall that found nothing.
-func (t *Tenant) DeleteCronSchedulesForRepo(ctx context.Context, repoPath string) (int, error) {
-	return inTxResult(ctx, t.s, func(tx *storeTx) (int, error) {
-		if _, err := tx.execContext(ctx, `SELECT id FROM cron_schedules WHERE team = ? AND repo_path = ? ORDER BY id`+tx.forUpdate(), string(t.team), repoPath); err != nil {
-			return 0, err
-		}
-		if _, err := tx.execContext(ctx,
-			`DELETE FROM cron_fires
-          WHERE team = ?
-            AND schedule_id IN (SELECT id FROM cron_schedules WHERE team = ? AND repo_path = ?)`,
-			string(t.team), string(t.team), repoPath); err != nil {
-			return 0, err
-		}
-		res, err := tx.execContext(ctx,
-			`DELETE FROM cron_schedules WHERE team = ? AND repo_path = ?`, string(t.team), repoPath)
-		if err != nil {
-			return 0, err
-		}
-		affected, err := res.RowsAffected()
-		if err != nil {
-			return 0, err
-		}
-		return int(affected), nil
 	})
 }
 

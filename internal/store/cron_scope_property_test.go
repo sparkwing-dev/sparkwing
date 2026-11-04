@@ -45,10 +45,6 @@ func TestCronOperationsRemainInTheirTenantProperty(t *testing.T) {
 			mutations := []func() error{
 				func() error {
 					s.SetTestClock(t, func() time.Time { return now })
-					return tenant.SetCronSchedulePaused(t.Context(), foreign.ID, true)
-				},
-				func() error {
-					s.SetTestClock(t, func() time.Time { return now })
 					return tenant.SetCronScheduleDeclared(t.Context(), foreign.ID, false)
 				},
 				func() error {
@@ -62,10 +58,6 @@ func TestCronOperationsRemainInTheirTenantProperty(t *testing.T) {
 				func() error {
 					s.SetTestClock(t, func() time.Time { return now })
 					return tenant.SetCronOverride(t.Context(), foreign.ID, CronOverride{})
-				},
-				func() error {
-					s.SetTestClock(t, func() time.Time { return now })
-					return tenant.ClearCronOverride(t.Context(), foreign.ID)
 				},
 				func() error { return tenant.DeleteCronSchedule(t.Context(), foreign.ID) },
 				func() error {
@@ -105,8 +97,8 @@ func TestCronOperationsRemainInTheirTenantProperty(t *testing.T) {
 			if err != nil || len(fires) != 1 || fires[0].Outcome != CronOutcomeMissed {
 				t.Fatalf("own history: %+v, %v", fires, err)
 			}
-			if n, err := tenant.DeleteCronSchedulesForRepo(t.Context(), path); err != nil || n != 1 {
-				t.Fatalf("tenant deletion: %d, %v", n, err)
+			if err := tenant.DeleteCronSchedule(t.Context(), expected[j].ID); err != nil {
+				t.Fatalf("tenant deletion: %v", err)
 			}
 		}
 	}
