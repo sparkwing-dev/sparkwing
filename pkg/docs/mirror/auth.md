@@ -726,11 +726,12 @@ The route is `POST /api/v1/operator/teams` and requires `operator.tokens`, or an
 operator's direct browser session with its CSRF proof. It creates the team,
 owner account, membership and first credential in one audited transaction.
 The credential is returned once. Members sign the CLI in with `sparkwing login --controller https://HOST`, and
-enroll machines with
-`sparkwing runners add --profile work --runner build-box --repos 'github.com/acme/*'`;
+enroll their own workstation with
+`sparkwing runners add --profile work --runner korey-laptop --personal`;
 both are approved in the browser (see [device sign-in](#device-sign-in)).
-For headless enrollment, an existing team administrator pipes the in-pod
-`sparkwing-controller admin session` command to `runners add --session-stdin`. See
+Shared runners take an existing team administrator's session instead:
+`sparkwing runners add --session-stdin --profile work --runner build-box --repos 'github.com/acme/*'`,
+fed by the in-pod `sparkwing-controller admin session` command when headless. See
 [workstation capacity](self-hosting.md#add-workstation-capacity) for the full pipe.
 
 `profiles add` probes `/api/v1/health` and authenticates through

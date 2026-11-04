@@ -19,10 +19,13 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/userconfig"
 )
 
-var deviceLoginSleep = client.SleepContext
+type deviceConsole struct {
+	interactive bool
+	sleep       func(context.Context, time.Duration) error
+}
 
-var deviceTerminal = func() bool {
-	return term.IsTerminal(int(os.Stdin.Fd())) && term.IsTerminal(int(os.Stderr.Fd()))
+func terminalConsole() deviceConsole {
+	return deviceConsole{interactive: term.IsTerminal(int(os.Stdin.Fd())) && term.IsTerminal(int(os.Stderr.Fd())), sleep: client.SleepContext}
 }
 
 // safety: the approver's session picks the team, so the CLI names it before anything is saved or started.
@@ -34,7 +37,9 @@ func checkApprovedTeam(token controllerwire.CreatedToken, want string) error {
 	return nil
 }
 
-func runLogin(inv clisurface.Invocation) error {
+func runLogin(inv clisurface.Invocation) error { return login(inv, terminalConsole()) }
+
+func login(inv clisurface.Invocation, console deviceConsole) error {
 	format := inv.Output(term.IsTerminal(int(os.Stdout.Fd())))
 	if inv.Help() {
 		return writeCommandHelp(surfaceCommand(inv.Command.Path), os.Stdout, format)
@@ -68,7 +73,7 @@ func runLogin(inv clisurface.Invocation) error {
 		machine = deviceMachineName()
 	}
 	request := controllerwire.StartDeviceLoginRequest{Kind: controllerwire.DeviceLoginMember, Machine: machine, Team: inv.Value("team"), Grants: inv.Flags["scope"]}
-	token, err := deviceSignIn(context.Background(), base, request)
+	token, err := deviceSignIn(context.Background(), console, base, request)
 	if err != nil {
 		return err
 	}
@@ -103,9 +108,9 @@ func runLogin(inv clisurface.Invocation) error {
 	return writeProfile(p, format)
 }
 
-func deviceSignIn(parent context.Context, base string, request controllerwire.StartDeviceLoginRequest) (controllerwire.CreatedToken, error) {
+func deviceSignIn(parent context.Context, console deviceConsole, base string, request controllerwire.StartDeviceLoginRequest) (controllerwire.CreatedToken, error) {
 	// safety: a code printed into a log or shared screen lets anyone on the deployment approve it into their team.
-	if !deviceTerminal() {
+	if !console.interactive {
 		return controllerwire.CreatedToken{}, &apierr.Error{Code: apierr.BadRequest, Message: "browser approval needs stdin and stderr on a terminal; in a script, use runners add --session-stdin or profiles add --token-stdin"}
 	}
 	// safety: an interrupt withdraws the request, so the code on screen stops working once the command exits.
@@ -129,7 +134,7 @@ func deviceSignIn(parent context.Context, base string, request controllerwire.St
 		code = code[:4] + "-" + code[4:]
 	}
 	fmt.Fprintf(os.Stderr, "To approve this sign-in, open %s%s in a browser where you are signed in, and enter the code:\n\n    %s\n\nWaiting for approval; the code expires in %d minutes. Press Ctrl-C to cancel.\n", base, started.VerificationPath, code, max(started.ExpiresIn/60, 1))
-	token, err := login.Wait(ctx, started, deviceLoginSleep)
+	token, err := login.Wait(ctx, started, console.sleep)
 	if err != nil && ctx.Err() != nil {
 		cancelCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 		defer cancel()

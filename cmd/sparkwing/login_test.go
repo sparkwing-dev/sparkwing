@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
 	"github.com/sparkwing-dev/sparkwing/internal/controller"
 	"github.com/sparkwing-dev/sparkwing/internal/deployment/deploymenttest"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
@@ -23,6 +24,22 @@ type deviceLoginFixture struct {
 	state         *store.Store
 	handler       http.Handler
 	session, csrf string
+	console       deviceConsole
+}
+
+func (f *deviceLoginFixture) run(t *testing.T, args ...string) error {
+	t.Helper()
+	inv, err := clisurface.Parse("sparkwing", args)
+	if err != nil {
+		return err
+	}
+	if err := applyConfiguredProfile(&inv); err != nil {
+		return err
+	}
+	if inv.Command.Path == "sparkwing login" {
+		return login(inv, f.console)
+	}
+	return runnersAdd(inv, f.console)
 }
 
 func newDeviceLoginFixture(t *testing.T, decision string) *deviceLoginFixture {
@@ -61,11 +78,7 @@ func newDeviceLoginFixture(t *testing.T, decision string) *deviceLoginFixture {
 		return w.Result(), nil
 	})
 	t.Cleanup(func() { http.DefaultTransport = original })
-	previousTerminal := deviceTerminal
-	deviceTerminal = func() bool { return true }
-	t.Cleanup(func() { deviceTerminal = previousTerminal })
-	previous := deviceLoginSleep
-	deviceLoginSleep = func(ctx context.Context, _ time.Duration) error {
+	f.console = deviceConsole{interactive: true, sleep: func(ctx context.Context, _ time.Duration) error {
 		db := teststore.SQL(t, state)
 		if _, err := db.ExecContext(ctx, `UPDATE device_logins SET polled_at = polled_at - 120000000000 WHERE polled_at IS NOT NULL`); err != nil {
 			return err
@@ -82,8 +95,7 @@ func newDeviceLoginFixture(t *testing.T, decision string) *deviceLoginFixture {
 			t.Errorf("browser %s answered %d", decision, status)
 		}
 		return nil
-	}
-	t.Cleanup(func() { deviceLoginSleep = previous })
+	}}
 	return f
 }
 
@@ -105,7 +117,7 @@ func TestLoginSavesTheTokenTheBrowserApproved(t *testing.T) {
 	f := newDeviceLoginFixture(t, "approve")
 	var err error
 	out := captureStdout(t, func() {
-		err = runSparkwing([]string{"login", "--profile", "work", "--machine", "desk", "--team", "device-test", "--output", "json"})
+		err = f.run(t, "login", "--profile", "work", "--machine", "desk", "--team", "device-test", "--output", "json")
 	})
 	if err != nil {
 		t.Fatalf("login: %v", err)
@@ -136,8 +148,8 @@ func TestLoginSavesTheTokenTheBrowserApproved(t *testing.T) {
 
 func TestLoginReportsADeniedApproval(t *testing.T) {
 	writeProfilesFixture(t, "profiles: {}\n")
-	newDeviceLoginFixture(t, "deny")
-	err := runSparkwing([]string{"login", "--controller", "https://controller.example", "--output", "json"})
+	f := newDeviceLoginFixture(t, "deny")
+	err := f.run(t, "login", "--controller", "https://controller.example", "--output", "json")
 	if err == nil || !strings.Contains(err.Error(), "denied") {
 		t.Fatalf("denied login: %v", err)
 	}
@@ -152,7 +164,7 @@ func TestRunnersAddEnrollsThroughTheBrowser(t *testing.T) {
 	device := newDeviceLoginFixture(t, "approve")
 	var err error
 	captureStdout(t, func() {
-		err = runRunnersAddArgs([]string{"--profile", "prod", "--runner", "desk", "--personal", "--config", f.config, "--no-service", "--output", "json"})
+		err = device.run(t, "runners", "add", "--profile", "prod", "--runner", "desk", "--personal", "--config", f.config, "--no-service", "--output", "json")
 	})
 	if err != nil {
 		t.Fatalf("browser enrollment: %v", err)
@@ -170,17 +182,31 @@ func TestRunnersAddEnrollsThroughTheBrowser(t *testing.T) {
 func TestBrowserApprovalRefusesScriptsAndSharedRunners(t *testing.T) {
 	f := newRunnersFixture(t)
 	device := newDeviceLoginFixture(t, "approve")
-	deviceTerminal = func() bool { return false }
-	if err := runSparkwing([]string{"login", "--controller", "https://controller.example", "--profile", "ci"}); err == nil || !strings.Contains(err.Error(), "terminal") {
+	device.console.interactive = false
+	if err := device.run(t, "login", "--controller", "https://controller.example", "--profile", "ci"); err == nil || !strings.Contains(err.Error(), "terminal") {
 		t.Fatalf("non-terminal login: %v", err)
 	}
-	deviceTerminal = func() bool { return true }
-	err := runRunnersAddArgs([]string{"--profile", "prod", "--runner", "desk", "--repos", "github.com/acme/*", "--config", f.config, "--no-service"})
+	device.console.interactive = true
+	err := device.run(t, "runners", "add", "--profile", "prod", "--runner", "desk", "--repos", "github.com/acme/*", "--config", f.config, "--no-service")
 	if err == nil || !strings.Contains(err.Error(), "--session-stdin") {
 		t.Fatalf("shared browser enrollment: %v", err)
 	}
 	var started int
 	if err := teststore.SQL(t, device.state).QueryRowContext(t.Context(), `SELECT COUNT(*) FROM device_logins`).Scan(&started); err != nil || started != 0 {
 		t.Fatalf("refused commands started %d device logins %v", started, err)
+	}
+}
+
+func TestLoginWithControllerIgnoresTheSavedDefaultProfile(t *testing.T) {
+	writeProfilesFixture(t, "profiles:\n  work:\n    controller: { url: https://elsewhere.example }\n    default: true\n")
+	f := newDeviceLoginFixture(t, "approve")
+	var err error
+	captureStdout(t, func() { err = f.run(t, "login", "--controller", "https://controller.example", "--output", "json") })
+	if err != nil {
+		t.Fatalf("login beside a default profile: %v", err)
+	}
+	profiles, _, err := loadProfiles()
+	if err != nil || profiles["work"].Controller.URL != "https://elsewhere.example" || profiles["controller-example"].Controller.Token == nil {
+		t.Fatalf("profiles after login = %+v %v", profiles, err)
 	}
 }
