@@ -608,6 +608,15 @@ func Registry() []Command {
 			{Name: "yes", Requires: []string{"reset"}},
 			{Name: "profile", Argument: "NAME"},
 		}},
+		{Path: "sparkwing runs timing", Rules: []string{
+			"Read the newest finished root runs of one pipeline, skipping dry runs, with their jobs, steps and lifecycle events, through the selected controller.",
+			"Each job's window, from its first ready event to its end, splits into queue (ready to claimed), admit (claimed to started: concurrency and machine admission, then source checkout), approval, setup (started to the attempt's first step: compile and cache restore), running (any step in progress) and gap (a started job with no step in progress). Each run's wall splits into the most advanced phase any job was in, plus idle when no job is active, so the phases always sum to the wall.",
+			"Text prints run-level and per-job P50 and P90, the longest waits, and failed jobs grouped by job, failing step and reason; a job with several failing steps counts under each, and cancellations caused by an upstream failure or a cancel request are left out. JSON emits one run record per run, one job record per job, one failure record per group and a final summary record.",
+		}, Flags: []Flag{
+			{Name: "pipeline", Argument: "NAME", Required: true},
+			{Name: "last", Argument: "N", Minimum: 1, HasMinimum: true},
+			{Name: "profile", Argument: "NAME"},
+		}},
 		{Path: "sparkwing runs status", Rules: []string{
 			"Read the same public run detail through a controller profile or the local controller. Numeric run selectors are per-team numbers.",
 			"Views: summary, timeline, receipt, errors, tree. Summary includes recorded failing steps and errors for failed jobs. --steps includes all recorded steps. Receipts retain the controller's hashes and settled cost.",
