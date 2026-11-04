@@ -62,7 +62,8 @@ func reviewJobNode(plan *sparkwing.Plan, in ReviewArgs, branch string) *sparkwin
 	return sparkwing.Job(plan, "review", &reviewJob{args: in, branch: branch}).
 		Inline().
 		Timeout(45 * time.Minute).
-		NoProgressTimeout(30 * time.Minute)
+		NoProgressTimeout(30 * time.Minute).
+		Cores(lightJobCores)
 }
 
 func init() {

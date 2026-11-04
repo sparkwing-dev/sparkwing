@@ -34,7 +34,7 @@ func (WindowsVerify) Examples() []sparkwing.Example {
 }
 
 func (p *WindowsVerify) Plan(_ context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, rc sparkwing.RunContext) error {
-	sparkwing.Job(plan, rc.Pipeline, p).Requires("os=windows").Timeout(20 * time.Minute)
+	sparkwing.Job(plan, rc.Pipeline, p).Requires("os=windows").Timeout(20 * time.Minute).Cores(4)
 	return nil
 }
 

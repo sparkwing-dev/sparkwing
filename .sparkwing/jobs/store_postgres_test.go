@@ -221,7 +221,7 @@ func TestStorePostgresShardsFollowTheGoStepBound(t *testing.T) {
 		{hostShape{cpus: 4, singleTenant: true}, 4},
 		{hostShape{cpus: 4}, 1},
 		{hostShape{cpus: 8, singleTenant: true}, 4},
-		{hostShape{cpus: 16}, 7},
+		{hostShape{cpus: 16}, 6},
 		{hostShape{cpus: 2}, 1},
 	} {
 		if got := storePostgresShardCount(tc.host); got != tc.want {

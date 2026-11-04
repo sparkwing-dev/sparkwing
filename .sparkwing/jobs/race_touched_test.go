@@ -168,7 +168,7 @@ func TestGateRaceWorkersKeepTheHostsPackageBound(t *testing.T) {
 		{5, 2, false},
 		{8, 3, false},
 		{8, 4, true},
-		{16, 7, false},
+		{16, 6, false},
 		{16, 8, true},
 	} {
 		host := hostShape{cpus: tc.cpus, singleTenant: tc.singleTenant}
