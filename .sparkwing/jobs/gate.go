@@ -81,7 +81,7 @@ func gateJobs(plan *sparkwing.Plan, p *Gate, id string, full bool) []*sparkwing.
 	ref := provenGatePass(id)
 	p.Proven = ref
 	proven := skipWhenTreePassed(ref)
-	broad := sparkwing.Job(plan, id, p).Timeout(gateRunTimeout).Cache(lintCache()).SkipIf(proven)
+	broad := sparkwing.Job(plan, id, p).Timeout(gateRunTimeout).SkipIf(proven)
 	race := sparkwing.Job(plan, "race-touched", &raceTouchedJob{Proven: ref, mode: p.mode}).Timeout(raceTouchedStepTimeout).SkipIf(proven)
 	record := &recordTree{Proven: ref, Gate: sparkwing.RefTo[bool](broad), Race: sparkwing.RefTo[bool](race), mode: p.mode}
 	tree := sparkwing.Job(plan, recordTreeJob, record).Needs(broad, race).SkipIf(proven)

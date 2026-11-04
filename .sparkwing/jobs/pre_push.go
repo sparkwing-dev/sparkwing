@@ -47,7 +47,7 @@ func (PrePush) Examples() []sparkwing.Example {
 
 func (p *PrePush) Plan(_ context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, rc sparkwing.RunContext) error {
 	plan.Priority(hookTierPriority)
-	sparkwing.Job(plan, rc.Pipeline, p).Cache(lintCache())
+	sparkwing.Job(plan, rc.Pipeline, p)
 	return nil
 }
 

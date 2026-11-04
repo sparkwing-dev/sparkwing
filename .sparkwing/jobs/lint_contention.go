@@ -62,7 +62,7 @@ var prePushLinters = []string{
 // vet-touched measured over 77 s.
 func fastLintCommand(cores int, pkgs []string) string {
 	return fmt.Sprintf("GOMAXPROCS=%d GOLANGCI_LINT_CACHE=%s golangci-lint run --allow-parallel-runners -j %d --timeout 5m --enable-only %s %s",
-		cores, shellQuote(pipelineCacheDir("golangci-lint")), cores, strings.Join(prePushLinters, ","), strings.Join(pkgs, " "))
+		cores, shellQuote(lintCacheDir()), cores, strings.Join(prePushLinters, ","), strings.Join(pkgs, " "))
 }
 
 func runGolangciLintWithin(ctx context.Context, deadline time.Duration) error {
@@ -84,10 +84,7 @@ func lintModules(ctx context.Context, deadline time.Duration, command func(base 
 	}
 	sparkwing.Info(ctx, "golangci-lint: %s", describeLintScope(dirs, baseline))
 
-	// safety: each worktree keeps its own cache. A cache shared between trees
-	// replays findings under the path of the tree that filled it, and those sit
-	// outside this tree's diff, so the baseline filter drops every one.
-	cacheDir := pipelineCacheDir("golangci-lint")
+	cacheDir := lintCacheDir()
 	lintCtx, cancel := context.WithTimeout(ctx, deadline)
 	defer cancel()
 
