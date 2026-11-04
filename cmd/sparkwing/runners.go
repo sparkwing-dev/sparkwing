@@ -633,6 +633,7 @@ func defaultRunnerServiceHost(configPath string) (runnerservice.Host, error) {
 		Binary:     runnerBinaryPath(),
 		ConfigPath: configPath,
 		LogPath:    filepath.Join(root.Root, "runner.log"),
+		StateHome:  root.Root,
 		UID:        os.Getuid(),
 		Exec:       runnerservice.DefaultExec,
 	}, nil

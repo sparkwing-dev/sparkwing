@@ -79,7 +79,7 @@ func (r *Release) Plan(_ context.Context, plan *sparkwing.Plan, in ReleaseArgs, 
 	// before prepare-changelog writes, so no lint or suite reads a checkout
 	// that changes under it.
 	cutChecks := sparkwing.Job(plan, "release-cut-checks", &releaseCutChecksJob{}).
-		Cache(lintCache()).Timeout(releaseCutBudget + releaseLintLockAllowance)
+		Timeout(releaseCutBudget + releaseLintLockAllowance)
 
 	changelog := sparkwing.Job(plan, "prepare-changelog", &prepareChangelogJob{
 		RepoDir: repoDir,
@@ -794,8 +794,8 @@ var storeSchemaConstRe = regexp.MustCompile(`(?m)^const\s+expectedSchemaVersion\
 
 var storeSchemaSQLPaths = []string{"internal/store/schema.sql"}
 
-// safety: a store at an unchanged version is accepted as-is, so a baseline edit that keeps the
-// number would open old stores against a schema they do not have.
+// safety: a store refuses to open when its recorded baseline differs from the embedded one, so a
+// released baseline edit without a versioned upgrade leaves every existing store unopenable.
 func schemaSQLDrift(prevTag string, schema int, prev, cur map[string]string) error {
 	var changed []string
 	for _, path := range storeSchemaSQLPaths {

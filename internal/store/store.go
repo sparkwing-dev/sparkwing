@@ -144,7 +144,7 @@ func Open(path string, opts ...Option) (*Store, error) {
 	} else if err := tightenExistingSQLite(path); err != nil {
 		return nil, err
 	}
-	st, err := openSQL(context.Background(), "sqlite", sqliteDSN(path), DialectSQLite, path, opts)
+	st, err := openSQL(context.Background(), cachedSQLiteDriver, sqliteDSN(path), DialectSQLite, path, opts)
 	if err != nil {
 		return nil, err
 	}
@@ -1293,7 +1293,7 @@ func scanApproval(rs rowScanner) (*Approval, error) {
 var schemaNeutral string
 
 // safety: fresh stores get this baseline whole; an older store upgrades only through schemaUpgrades.
-const expectedSchemaVersion = 29
+const expectedSchemaVersion = 30
 
 // ExpectedSchemaVersion returns the schema version this binary
 // understands. Useful for diagnostics, version-mismatch reporting,

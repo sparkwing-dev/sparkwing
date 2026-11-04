@@ -76,9 +76,23 @@ jobs:
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version: "1.26.10"
-          cache-dependency-path: |
-            go.sum
-            .sparkwing/go.sum
+          cache: false
+
+      # perf: setup-go keys its cache on go.sum alone, so every run hit that key
+      # exactly and none saved; the build cache froze at its first save. A
+      # per-commit key saved from main pushes keeps it current, and every other
+      # run restores main's newest by prefix.
+      - name: Restore the Go caches
+        id: go-cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cache/go-build
+            ~/go/pkg/mod
+          key: go-${{ runner.os }}-${{ runner.arch }}-1.26.10-${{ hashFiles('go.sum', '.sparkwing/go.sum') }}-${{ github.sha }}
+          restore-keys: |
+            go-${{ runner.os }}-${{ runner.arch }}-1.26.10-${{ hashFiles('go.sum', '.sparkwing/go.sum') }}-
+            go-${{ runner.os }}-${{ runner.arch }}-1.26.10-
 
       - name: Capture the immutable source commit
         run: echo "SOURCE_SHA=$(git rev-parse HEAD)" >>"$GITHUB_ENV"
@@ -255,6 +269,16 @@ jobs:
           part="${part/-of-//}"
           "$RUNNER_TEMP/sparkwing" run pre-release --sw-start-at race-store --sw-stop-at race-store --sw-run-handle-file "$RUNNER_TEMP/canonical-run.json" -- --race-store-part "$part"
           bash bin/check-hosted-gate-clean.sh "$target_sha"
+
+      - name: Save the Go caches
+        if: ${{ !cancelled() && github.event_name == 'push' && github.ref == 'refs/heads/main' && matrix.gate == 'gate' && steps.go-cache.outputs.cache-hit != 'true' }}
+        continue-on-error: true
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cache/go-build
+            ~/go/pkg/mod
+          key: ${{ steps.go-cache.outputs.cache-primary-key }}
 
       - name: Export canonical run timings
         if: ${{ always() }}

@@ -63,13 +63,19 @@ func productionRuntime(version string) clusterRuntime {
 		}},
 		Bootstrap: BootstrapRuntime{
 			Host: func(ctx context.Context, options BootstrapOptions) (launcher.BootstrapHost, func() error, error) {
-				// safety: admission lets a Cloud job carry only the launcher's environment, so a job has no development
-				// override and a development job image always refuses customer work.
+				// safety: admission keeps the launcher's environment out of every launcher job, Cloud or team, so a job
+				// has no development override and a development job image always refuses work.
 				if err := engine.RequirePolicyBuild("Cloud job", version, "", false); err != nil {
 					return launcher.BootstrapHost{}, nil, err
 				}
+				// perf: the copy overlaps the Docker sidecar's startup.
+				seeded := make(chan error, 1)
+				go func() { seeded <- seedGoCaches(goSeedRoot, version, options.ModuleCache, os.Getenv("GOCACHE")) }()
 				if err := waitForDocker(ctx, os.Getenv("DOCKER_HOST"), dockerStartup); err != nil {
 					return launcher.BootstrapHost{}, nil, err
+				}
+				if err := <-seeded; err != nil {
+					slog.Warn("Go caches start cold", "err", err)
 				}
 				home, err := wingd.HomeDir("")
 				if err != nil {

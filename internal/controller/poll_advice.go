@@ -28,10 +28,6 @@ func LongestHonoredIdlePoll(d time.Duration) time.Duration {
 	return time.Duration(float64(min(d, MaxHonoredIdleClaimPoll)) * IdleClaimPollJitterFactor)
 }
 
-// safety: the advice is a floor a runner may only widen to, so it is withheld
-// until it would be worth a runner's while to widen at all.
-const minIdleClaimPoll = 2 * time.Second
-
 // perf: an empty queue answers claims for a quarter of the time it has been
 // empty, so the first idle minute walks a one-second poller out to the ceiling
 // rather than parking it there the moment one poll comes back empty.
@@ -65,7 +61,9 @@ func (s *Server) claimPollAdvice(now time.Time) time.Duration {
 	}
 	idle := now.Sub(time.Unix(0, last))
 	advice := idle / idleClaimPollFraction
-	if advice < minIdleClaimPoll {
+	// safety: the advice is a floor a runner may only widen to, so it is withheld
+	// until it would be worth a runner's while to widen at all.
+	if advice < store.MinIdleClaimPoll {
 		return 0
 	}
 	return min(advice.Truncate(time.Second), s.idleClaimPoll)

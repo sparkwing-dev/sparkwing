@@ -23,7 +23,7 @@ func TestRunnerChartsPreserveRepositoryAdmission(t *testing.T) {
 					settings = append(settings, prefix+"runner.repos["+strconv.Itoa(i)+"]="+repo)
 				}
 				rendered := helmRender(t, chart, template, "sparkwing", settings...)
-				flags, err := runnerflags.Parse("warm", runnerContainer(t, rendered).Args[1:], io.Discard)
+				flags, err := runnerflags.Parse("warm", runnerContainer(t, rendered).Args[1:], io.Discard, io.Discard)
 				if err != nil {
 					t.Fatal(err)
 				}

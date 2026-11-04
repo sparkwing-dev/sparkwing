@@ -38,6 +38,10 @@ rules:
   - apiGroups: [""]
     resources: ["secrets"]
     verbs: ["create", "delete"]
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    resourceNames: ["sparkwing-cloud-admission"]
+    verbs: ["get"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding

@@ -99,11 +99,11 @@ func TestCloudLogsSealFiftyMillionPayloadBytes(t *testing.T) {
 	}
 	line := []byte(strings.Repeat("x", 50_000) + "\n")
 	for range 1000 {
-		if err := sink.Append(line, "", 0, 0); err != nil {
+		if err := sink.Append(line); err != nil {
 			t.Fatal(err)
 		}
 	}
-	if err := sink.Append([]byte("EMIT_DONE\n"), "", 0, 0); err != nil {
+	if err := sink.Append([]byte("EMIT_DONE\n")); err != nil {
 		t.Fatal(err)
 	}
 	engineClaimHTTP(t, h, claim.Capability, "POST", "/api/v1/runs/run/jobs/job/transition", `{"to":"success","cause":"report","source_attempt":1,"result":{"outcome":"success"}}`, http.StatusOK)

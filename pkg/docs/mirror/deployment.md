@@ -74,12 +74,15 @@ its node. If a matching node is finishing the previous job's fenced teardown,
 the successor waits up to 30 seconds before requesting another node. A live job
 still permits fanout onto fresh capacity.
 
-After the run becomes terminal, the launcher retires its empty, unreserved nodes
-by deleting their UID-fenced NodeClaims. It checks the retained run identity,
-protected team/run labels and shared-pool provenance, and requires every
-non-DaemonSet Pod to have disappeared. Reconciliation finds these spent nodes
-after a launcher restart. Nodes of active runs stay available to that run.
-Older nodes without retained run identity fall back to Karpenter consolidation.
+Once a used node has sat unreserved and empty for 60 seconds, the launcher
+retires it by deleting its UID-fenced NodeClaim, whatever state its run is in. A
+later job of the same run that reserves the node within that grace reuses it; one
+that becomes ready later, such as after an approval, gets a fresh node.
+`sparkwing-runner launch --idle-grace` changes the grace. Retirement checks the
+retained run identity, protected team/run labels and shared-pool provenance, and
+requires every non-DaemonSet Pod to have disappeared. Reconciliation finds these
+spent nodes after a launcher restart. Older nodes without retained run identity
+fall back to Karpenter consolidation.
 
 When no vacant Ready node fits, the launcher checks shared-pool provenance with
 read-only NodePool access. A compatible pool that is scaling or exhausted keeps
@@ -134,9 +137,10 @@ memory cgroup limits. A cold capacity request always asks for the requested clas
 Warm capacity defaults Off for every class. The operator **Warm capacity** page
 and CLI show warm/desired nodes, start-time percentiles, cold starts and upsizes,
 with signup and active-team counts. Operators select Off, Manual count or Auto
-minimum/maximum and a start-time target (default 10s). Auto uses cold-start waits
-in the last 30 minutes and median start time in the last hour, clamped to the
-configured bounds; no waiting means the minimum.
+minimum/maximum and a start-time target (default 20s). Auto uses cold-start waits
+in the last 30 minutes and, while a job is waiting for a fresh node, median start
+time in the last hour, clamped to the configured bounds; no waiting means the
+minimum.
 
 The chart's optional `warmCapacity` infrastructure creates low-priority pause
 placeholders and KEDA PostgreSQL scalers. Each placeholder reserves one catalog
@@ -274,6 +278,9 @@ artifacts fail before execution. Prepared records follow run retention and never
 provide cross-run or cross-team access.
 
 Update the controller, launcher, runner image and generated admission policies
-together. Job Pods contain the Docker sidecar and `run-node`; remove custom
+together. The policies read the runner and Docker images from the ConfigMap
+`sparkwing-cloud-admission` in the job namespace, so an installation that
+applies the chart's cluster-scoped objects separately changes only that
+namespaced ConfigMap when the images move. Job Pods contain the Docker sidecar and `run-node`; remove custom
 `fetch-source` init containers and `--source-dir` flags. Existing data storage and
 credentials suffice; there is no prepared-cache setting.

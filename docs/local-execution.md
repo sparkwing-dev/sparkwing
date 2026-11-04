@@ -161,8 +161,9 @@ A client attempts one replacement when it finds an incompatible daemon, includin
 a v0.67 daemon at the socket path used before per-home socket tokens. Startup
 prints the old and new versions, drains the predecessor and waits for its
 election lock before starting the selected executable. If
-an incompatible daemon answers again, stop competing Sparkwing installations
-and run `sparkwing daemon restart`, or select a separate `SPARKWING_HOME`.
+an incompatible daemon answers again, remove the other Sparkwing installation
+(`which -a sparkwing` lists them) and run `sparkwing daemon restart`, or select
+a separate `SPARKWING_HOME`.
 The replacement still drains active runs before taking ownership.
 
 Active runs, queued triggers, held leases and open dashboard connections keep
@@ -192,7 +193,7 @@ approval wait and owner liveness have separate meanings. See [limits](limits.md)
 ## Detaching a run so it outlives the terminal
 
 ```bash
-sparkwing run nightly-report --sw-detached --sw-output json
+sparkwing run nightly-report --sw-detached -o json
 sparkwing runs status --run RUN_ID
 sparkwing runs logs --run RUN_ID --follow
 sparkwing runs cancel --run RUN_ID
@@ -243,7 +244,7 @@ sparkwing run build --sw-run-handle-file /tmp/build-run.json
 The run handle identifies the run for observations and cancellation. It carries
 no credential. The CLI writes it once at intake with `schema_version`, `run_id`
 and `pipeline`, and never updates it; read the run's current state with
-`sparkwing runs status --run RUN_ID`. `--sw-output` chooses pretty, JSON or plain output for foreground
+`sparkwing runs status --run RUN_ID`. `-o` chooses pretty, JSON or plain output for foreground
 and detached commands. List commands emit one JSON record per line.
 
 ## Which checkout runs

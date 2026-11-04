@@ -251,7 +251,7 @@ func TestMain(m *testing.M) {
 			}
 			main()
 			return
-		case "wingd", "pipeline", "run", "runs", "runners", "overflow", "__host-trigger", "__tick", "__complete":
+		case "wingd", "pipeline", "run", "runs", "runners", "overflow", "__tick", "__complete":
 			main()
 			return
 		case "__test-runner":
@@ -275,7 +275,7 @@ func TestMain(m *testing.M) {
 }
 
 func TestDetachedHostEntrypointDoesNotRunPipelineFixtures(t *testing.T) {
-	for _, args := range [][]string{{"wingd", "run"}, {"pipeline", "describe"}, {"run"}, {"runs"}, {"runners"}, {"overflow"}, {"__sdk-install"}, {"__host-trigger"}, {"__tick"}, {"__complete"}} {
+	for _, args := range [][]string{{"wingd", "run"}, {"pipeline", "describe"}, {"run"}, {"runs"}, {"runners"}, {"overflow"}, {"__sdk-install"}, {"__tick"}, {"__complete"}} {
 		t.Run(strings.Join(args, "_"), func(t *testing.T) {
 			cmd := exec.CommandContext(t.Context(), os.Args[0], append(args, "--help")...)
 			cmd.Env = append(os.Environ(), "SPARKWING_TEST_DAEMON_ENTRYPOINT=1")

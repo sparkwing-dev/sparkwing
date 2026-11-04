@@ -138,7 +138,7 @@ func TestGitHubInboxPersistsFailuresUntilManualProcessing(t *testing.T) {
 	projectConfig = "pipelines:\n  - name: build\n    entrypoint: Build\n    on:\n      push: {}\n  - name: automatic\n    entrypoint: Automatic\n    on:\n      push: {}\n"
 	secondBody := strings.Replace(body, "0123456789abcdef0123456789abcdef01234567", strings.Repeat("a", 40), 1)
 	previewUnavailable = true
-	if err := e.Store.AsOperator().EnqueueGitHubDelivery(t.Context(), "partial-discovery", "push", []byte(secondBody), now); err != nil {
+	if err := e.Store.AsOperator().EnqueueGitHubDelivery(t.Context(), "partial-discovery", "push", []byte(secondBody)); err != nil {
 		t.Fatal(err)
 	}
 	outcome, err = restarted.processNextGitHubDelivery(t.Context())
@@ -170,7 +170,7 @@ func TestGitHubInboxPersistsFailuresUntilManualProcessing(t *testing.T) {
 
 	thirdBody := strings.Replace(body, "0123456789abcdef0123456789abcdef01234567", strings.Repeat("b", 40), 1)
 	s.WithFloodPolicy(FloodPolicy{RunsPerPrincipalHour: 1})
-	if err := e.Store.AsOperator().EnqueueGitHubDelivery(t.Context(), "partial-admission", "push", []byte(thirdBody), now); err != nil {
+	if err := e.Store.AsOperator().EnqueueGitHubDelivery(t.Context(), "partial-admission", "push", []byte(thirdBody)); err != nil {
 		t.Fatal(err)
 	}
 	outcome, err = restarted.processNextGitHubDelivery(t.Context())
@@ -199,7 +199,7 @@ func TestGitHubInboxPersistsFailuresUntilManualProcessing(t *testing.T) {
 			projectConfig = test.config
 			featureBody := strings.Replace(body, configRef, test.sha, 1)
 			featureBody = strings.Replace(featureBody, "refs/heads/main", "refs/heads/feature", 1)
-			if err := e.Store.AsOperator().EnqueueGitHubDelivery(t.Context(), test.id, "push", []byte(featureBody), now); err != nil {
+			if err := e.Store.AsOperator().EnqueueGitHubDelivery(t.Context(), test.id, "push", []byte(featureBody)); err != nil {
 				t.Fatal(err)
 			}
 			outcome, err := s.processNextGitHubDelivery(t.Context())
@@ -230,10 +230,10 @@ func TestGitHubInboxLifecycleCrashBeforeCompletionKeepsNewerState(t *testing.T) 
 	e, _ := engineServerFixture(t, deploymenttest.Team(t), func(s *Server) {
 		s.WithGitHubApp(githubapp.Config{AppID: 1, PrivateKey: key, WebhookSecret: "hook"})
 	})
-	s, ctx, now := e.Server, t.Context(), time.Now()
+	s, ctx := e.Server, t.Context()
 	engineSQL(t, e.Store, `INSERT INTO github_app_installations(installation_id,team,account_id,account_login,account_type,created_at,updated_at) VALUES (7,'a',42,'acme','Organization',1,1)`)
 	op := e.Store.AsOperator()
-	if err := op.EnqueueGitHubDelivery(ctx, "suspend", "installation", []byte(`{"action":"suspend","installation":{"id":7,"app_id":1}}`), now); err != nil {
+	if err := op.EnqueueGitHubDelivery(ctx, "suspend", "installation", []byte(`{"action":"suspend","installation":{"id":7,"app_id":1}}`)); err != nil {
 		t.Fatal(err)
 	}
 	engineSQL(t, e.Store, `CREATE TRIGGER fail_delivery_completion BEFORE UPDATE ON github_app_deliveries WHEN NEW.state='done' BEGIN SELECT RAISE(ABORT,'crash before completion'); END`)
@@ -245,7 +245,7 @@ func TestGitHubInboxLifecycleCrashBeforeCompletionKeepsNewerState(t *testing.T) 
 		t.Fatalf("mutation did not commit before completion failure: %+v, %v", got, err)
 	}
 	engineSQL(t, e.Store, `DROP TRIGGER fail_delivery_completion`)
-	if err := op.EnqueueGitHubDelivery(ctx, "unsuspend", "installation", []byte(`{"action":"unsuspend","installation":{"id":7,"app_id":1}}`), now.Add(time.Second)); err != nil {
+	if err := op.EnqueueGitHubDelivery(ctx, "unsuspend", "installation", []byte(`{"action":"unsuspend","installation":{"id":7,"app_id":1}}`)); err != nil {
 		t.Fatal(err)
 	}
 	if outcome, err := s.processNextGitHubDelivery(ctx); err != nil || outcome == nil || outcome.failureReason() != "" {
@@ -273,8 +273,7 @@ func TestGitHubInboxPermanentFailureRetainsReasonWithoutRetry(t *testing.T) {
 	e, _ := engineServerFixture(t, deploymenttest.Team(t), func(s *Server) {
 		s.WithGitHubApp(githubapp.Config{AppID: 1, PrivateKey: key, WebhookSecret: "hook"})
 	})
-	now := time.Now()
-	if err := e.Store.AsOperator().EnqueueGitHubDelivery(t.Context(), "malformed", "push", []byte(`{`), now); err != nil {
+	if err := e.Store.AsOperator().EnqueueGitHubDelivery(t.Context(), "malformed", "push", []byte(`{`)); err != nil {
 		t.Fatal(err)
 	}
 	outcome, err := e.Server.processNextGitHubDelivery(t.Context())

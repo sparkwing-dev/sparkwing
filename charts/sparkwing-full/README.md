@@ -251,8 +251,9 @@ All classes default Off. The operator console's **Warm capacity** page and
 operator CLI set Off, Manual count, or Auto minimum/maximum and start target
 (default 10s). KEDA reads `warm_pool_desired`; Off requests zero. Auto uses the
 higher of half the last 30 minutes' cold-start waits (rounded up) and one more
-than current warm capacity when the last hour's median start exceeds target,
-clamped to the operator minimum/maximum. With no waits it returns the minimum.
+than current warm capacity when the last hour's median start exceeds target
+while a job is waiting for a fresh node, clamped to the operator
+minimum/maximum. With no waits it returns the minimum.
 See [the infrastructure proposal](../../design/rewrite/proposals/warm-capacity.md)
 for exact KEDA manifests, the reader role and Secret, and shared-pool labels.
 

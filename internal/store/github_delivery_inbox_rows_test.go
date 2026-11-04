@@ -12,9 +12,8 @@ func TestGitHubDeliveryCompletionReleasesPayload(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer s.Close()
-	now := time.Unix(1_000_000, 0)
 	op := s.AsOperator()
-	if err := op.EnqueueGitHubDelivery(t.Context(), "delivery", "push", []byte(`{"ref":"main"}`), now); err != nil {
+	if err := op.EnqueueGitHubDelivery(t.Context(), "delivery", "push", []byte(`{"ref":"main"}`)); err != nil {
 		t.Fatal(err)
 	}
 	claim, err := op.ClaimGitHubDelivery(t.Context())
@@ -39,10 +38,9 @@ func TestFailedGitHubDeliveryManualProcessingIsTeamScopedAndAudited(t *testing.T
 	actor := authorityMember(t, s, "owner", RoleOwner)
 	tenant := &Tenant{s: s, team: "a"}
 	a := teamAuthorization(t, s, actor, "a", "PATCH", "/api/v1/team")
-	now := time.Now()
 	op := s.AsOperator()
 	for _, id := range []string{"ours", "foreign"} {
-		if err := op.EnqueueGitHubDelivery(t.Context(), id, "push", []byte(id), now); err != nil {
+		if err := op.EnqueueGitHubDelivery(t.Context(), id, "push", []byte(id)); err != nil {
 			t.Fatal(err)
 		}
 		claim, err := op.ClaimGitHubDelivery(t.Context())
@@ -129,7 +127,7 @@ func TestFailedGitHubDeliveryCannotMutateReplacementConnection(t *testing.T) {
 						return "a"
 					}
 					bind("a")
-					if err := op.EnqueueGitHubDelivery(ctx, "old", "installation", []byte(`{"installation":{"id":7}}`), now); err != nil {
+					if err := op.EnqueueGitHubDelivery(ctx, "old", "installation", []byte(`{"installation":{"id":7}}`)); err != nil {
 						t.Fatal(err)
 					}
 					claim, err := op.ClaimGitHubDelivery(ctx)

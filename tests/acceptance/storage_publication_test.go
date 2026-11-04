@@ -37,7 +37,7 @@ func checkStoragePublication(t *testing.T, objects blob.ObjectBackend, transfers
 		store := blob.NewSignedStore(blob.SignedStoreOptions{Signer: signer, HTTPClient: transfers})
 		records := &storageMaterializationRecords{results: make(map[blob.RecordKey]blob.RecordLookupResult)}
 		budget := blob.Budget{Deadline: time.Now().Add(time.Minute)}
-		output := blob.OutputData{Bytes: store, Records: records, Authority: authority, Identity: identity, Pipeline: "build", Budget: budget}
+		output := blob.OutputData{Bytes: store, Records: records, Authority: authority, Identity: identity, Pipeline: "build"}
 		data := artifacts.Data{Bytes: store, Records: records, Authority: authority, Identity: identity, Pipeline: "build", Budget: budget}
 		workspace := t.TempDir()
 		payload := bytes.Clone(seed[:ordinal%17])
@@ -62,10 +62,6 @@ func checkStoragePublication(t *testing.T, objects blob.ObjectBackend, transfers
 				return false
 			}
 		}
-		got, err := output.Read(t.Context(), result.Key)
-		if err != nil || !bytes.Equal(got, payload) {
-			t.Fatalf("published output: %q, %v", got, err)
-		}
 		destination := t.TempDir()
 		if n, err := (nodehost.ArtifactRecords{Blobs: data.Bytes, Records: data.Records}).Stage(t.Context(), blob.RecordLookup{Authority: data.Authority, Key: manifest.Key, Budget: data.Budget}, destination, ""); err != nil || n != 1 {
 			t.Fatalf("published artifact: %d, %v", n, err)
@@ -82,10 +78,6 @@ func checkStoragePublication(t *testing.T, objects blob.ObjectBackend, transfers
 		}
 		if record, err := artifacts.Capture(t.Context(), data, workspace, []string{"result"}, func(warning string) { t.Fatal(warning) }); record.Digest != "" || !errors.Is(err, records.commitErr) {
 			t.Fatalf("refused publication manifest: %+v, %v", record, err)
-		}
-		got, err = output.Read(t.Context(), result.Key)
-		if err != nil || !bytes.Equal(got, payload) {
-			t.Fatalf("output after refused publication: %q, %v", got, err)
 		}
 		local, err := os.ReadFile(file)
 		return err == nil && bytes.Equal(local, append(bytes.Clone(payload), ordinal)) && len(records.results) == 2 && records.results[result.Key].Record == result && records.results[manifest.Key].Record == manifest

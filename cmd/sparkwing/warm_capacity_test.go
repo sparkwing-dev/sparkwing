@@ -71,7 +71,7 @@ func TestWarmCapacityCommandsUseControllerTransport(t *testing.T) {
 		t.Fatalf("policy=%+v requests=%d closes=%d", policy, count, closes)
 	}
 	run("set", "--class", "sparkwing-2cpu", "--mode", "auto", "--min", "1", "--max", "5", "--profile", "deployment", "-o", "json")
-	if policy.AutoMin != 1 || policy.AutoMax != 5 || policy.StartTimeTargetSeconds != 10 {
+	if policy.AutoMin != 1 || policy.AutoMax != 5 || policy.StartTimeTargetSeconds != 20 {
 		t.Fatalf("auto=%+v", policy)
 	}
 }

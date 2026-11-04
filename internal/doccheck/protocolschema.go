@@ -156,6 +156,9 @@ func constrainProtocolSchema(name string, def protocolSchema) {
 		enum("level", "debug", "info", "warn", "error")
 	case "pipeline", "arg", "envVar", "secret", "cache":
 		nonempty("name")
+		if name == "cache" {
+			enum("resolver", nodeproto.CacheResolvers...)
+		}
 	case "job":
 		nonempty("id", "result_step", "on_failure_of")
 		enum("failure_policy", "fail_fast", "collect_all")
@@ -191,37 +194,27 @@ func constrainProtocolSchema(name string, def protocolSchema) {
 }
 
 func requestSchemaRules() []any {
-	fields := []string{"protocol", "engine", "runner", "binding", "pipeline", "args", "run", "job", "step", "attempt", "failure", "closure", "input", "target"}
 	rules := []any{}
-	for _, operation := range []struct {
-		op                string
-		required, allowed []string
-	}{
-		{"hello", []string{"protocol", "engine", "runner"}, []string{"protocol", "engine", "runner", "binding"}},
-		{"describe", nil, nil},
-		{"plan", []string{"pipeline", "args", "run"}, []string{"pipeline", "args", "run"}},
-		{"run_step", []string{"job", "step", "attempt"}, []string{"args", "job", "step", "attempt", "failure"}},
-		{"eval", []string{"closure"}, []string{"args", "closure", "job", "step", "attempt", "input", "failure"}},
-		{"cancel", nil, []string{"job", "step", "target"}},
-	} {
+	for _, op := range []nodeproto.Op{nodeproto.OpHello, nodeproto.OpDescribe, nodeproto.OpPlan, nodeproto.OpRunStep, nodeproto.OpEval, nodeproto.OpCancel} {
+		operation := nodeproto.RequestFields(op)
 		then := protocolSchema{}
 		checks := []any{}
-		if len(operation.required) > 0 {
-			then["required"] = operation.required
+		if len(operation.Required) > 0 {
+			then["required"] = operation.Required
 		}
-		for _, field := range fields {
-			if !slices.Contains(operation.allowed, field) {
+		for _, field := range nodeproto.RequestFieldNames() {
+			if !slices.Contains(operation.Allowed, field) {
 				checks = append(checks, protocolSchema{"not": protocolSchema{"required": []string{field}}})
 			}
 		}
-		if operation.op == "cancel" {
+		if op == nodeproto.OpCancel {
 			checks = append(checks, protocolSchema{"oneOf": []any{
 				protocolSchema{"required": []string{"target"}, "not": protocolSchema{"anyOf": []any{protocolSchema{"required": []string{"job"}}, protocolSchema{"required": []string{"step"}}}}},
 				protocolSchema{"required": []string{"job"}, "not": protocolSchema{"required": []string{"target"}}},
 			}})
 		}
 		then["allOf"] = checks
-		rules = append(rules, protocolSchema{"if": protocolSchema{"properties": protocolSchema{"op": protocolSchema{"const": operation.op}}, "required": []string{"op"}}, "then": then})
+		rules = append(rules, protocolSchema{"if": protocolSchema{"properties": protocolSchema{"op": protocolSchema{"const": op}}, "required": []string{"op"}}, "then": then})
 	}
 	return rules
 }

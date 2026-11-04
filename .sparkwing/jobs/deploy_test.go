@@ -202,6 +202,35 @@ func TestSpliceControllerDeployment(t *testing.T) {
 	}
 }
 
+const testClusterScoped = `---
+# Source: sparkwing-full/charts/sparkwing-runner-bundle/templates/launcher-rbac.yaml
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: sparkwing-cloud-jobs
+---
+# Source: sparkwing-full/charts/sparkwing-runner-bundle/templates/launcher-rbac.yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: sparkwing-runner-boundary
+`
+
+func TestDropClusterScoped(t *testing.T) {
+	namespaced := testRendered("sparkwing", testPins("v1", testDigest("c1"), testDigest("r1")), "chart")
+	kept, dropped, err := dropClusterScoped(namespaced + testClusterScoped)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if kept != namespaced || fmt.Sprint(dropped) != "[Namespace/sparkwing-cloud-jobs ClusterRole/sparkwing-runner-boundary]" {
+		t.Fatalf("kept:\n%s\ndropped: %q", kept, dropped)
+	}
+	unknown := namespaced + "---\napiVersion: example.com/v1\nkind: Widget\nmetadata:\n  name: w\n"
+	if _, _, err := dropClusterScoped(unknown); err == nil || !strings.Contains(err.Error(), "Widget/w has no metadata.namespace") {
+		t.Fatalf("an unknown kind without a namespace = %v", err)
+	}
+}
+
 func TestDirtyLogLines(t *testing.T) {
 	logs := "[pod/c] time=1 level=INFO msg=ok\n[pod/c] {\"level\":\"WARN\",\"msg\":\"slow\"}\n[pod/l] 2026 ERROR boom\n[pod/l] level=error msg=x\n"
 	if got := dirtyLogLines(logs); len(got) != 3 {
@@ -616,7 +645,7 @@ func (f *fakeDeploy) run(ctx context.Context, c deployCommand) (string, error) {
 		if err != nil {
 			return "", err
 		}
-		return testRendered(c.Args[1], pins, "new-chart"), nil
+		return testRendered(c.Args[1], pins, "new-chart") + testClusterScoped, nil
 	case name == "bash":
 		if strings.Contains(joined, "build-release-target") {
 			dist := filepath.Join(c.Dir, "dist")
@@ -787,6 +816,11 @@ func TestDeployStagingGateThenProduction(t *testing.T) {
 	}
 	if final := deployGitIn(t, f.bare, "show", "main:sparkwing-staging/rendered.yaml"); !strings.Contains(final, "chart: new-chart") || strings.Contains(final, "@"+f.old.Runner.Digest) {
 		t.Fatalf("the launcher commit did not carry the rest of the chart:\n%s", final)
+	} else if strings.Contains(final, "kind: ClusterRole") || strings.Contains(final, "kind: Namespace") {
+		t.Fatalf("the render kept cluster-scoped objects:\n%s", final)
+	}
+	if !slices.Contains(f.said, "left out of sparkwing-staging/rendered.yaml, applied through kikd-infra k8s/sparkwing-cluster/: Namespace/sparkwing-cloud-jobs, ClusterRole/sparkwing-runner-boundary") {
+		t.Fatalf("the deploy did not name the cluster-scoped objects it left out: %q", f.said)
 	}
 
 	gate, err := f.deployer(false).stagingGate(t.Context(), images)
@@ -851,6 +885,26 @@ func TestDeployToolchain(t *testing.T) {
 	}
 }
 
+func TestDeployRefusesMissingToolchain(t *testing.T) {
+	missing := filepath.Join(t.TempDir(), "bin")
+	f := newFakeDeploy(t)
+	d := f.deployer(false)
+	d.cfg.ToolDir = missing
+	if _, err := d.cmd(t.Context(), deployCommand{Name: "aws"}); err == nil || !strings.Contains(err.Error(), missing+" is missing") || !strings.Contains(err.Error(), "Deploy toolchain") {
+		t.Fatalf("a real deploy without its toolchain: %v", err)
+	}
+	job := deployJob{Cfg: f.config(), Name: "production"}
+	job.Cfg.ToolDir = missing
+	if _, _, err := job.deployer(); err == nil || !strings.Contains(err.Error(), missing) {
+		t.Fatalf("a real deploy job without its toolchain: %v", err)
+	}
+	dry := f.deployer(true)
+	dry.cfg.ToolDir = missing
+	if path, err := dry.tool("git"); err != nil || path != "git" {
+		t.Fatalf("a dry run previews from PATH: %q %v", path, err)
+	}
+}
+
 func TestDeployRefusesSupersededCommit(t *testing.T) {
 	f := newFakeDeploy(t)
 	images := f.candidate()
@@ -891,7 +945,7 @@ func TestDeployFirstDeployOverUntracedImageNeedsAPerson(t *testing.T) {
 	f.registry.revisions = map[string]string{}
 	before := deployGitIn(t, f.bare, "rev-parse", "main")
 	_, err := f.deployer(false).promote(t.Context(), f.candidate())
-	if err == nil || !strings.Contains(err.Error(), "Deploy once by hand") || !strings.Contains(err.Error(), "helm template sparkwing charts/sparkwing-full --namespace sparkwing") {
+	if err == nil || !strings.Contains(err.Error(), "Deploy once by hand") || !strings.Contains(err.Error(), "helm template sparkwing charts/sparkwing-full --namespace sparkwing -f sparkwing/helm-values.yaml | yq 'select(.metadata.namespace != null)'") {
 		t.Fatalf("first deploy over an untraced image: %v", err)
 	}
 	if deployGitIn(t, f.bare, "rev-parse", "main") != before {

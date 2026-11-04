@@ -55,7 +55,10 @@ func newAdmissionEnv(t *testing.T) *admissionEnv {
 	if _, err := admin.CoreV1().Nodes().Create(ctx, node, metav1.CreateOptions{}); err != nil {
 		t.Fatal(err)
 	}
-	policies, bindings := AdmissionPolicies(AdmissionConfig{Namespace: "cloud", Launcher: testLauncher, RunnerImage: e.l.Config.RunnerImage, DockerImage: testDockerImage})
+	policies, bindings := AdmissionPolicies(e.admission())
+	if _, err := admin.CoreV1().ConfigMaps("cloud").Create(ctx, AdmissionParams(e.admission()), metav1.CreateOptions{}); err != nil {
+		t.Fatal(err)
+	}
 	for i := range policies {
 		if _, err := admin.AdmissionregistrationV1().ValidatingAdmissionPolicies().Create(ctx, policies[i], metav1.CreateOptions{}); err != nil {
 			t.Fatal(err)
@@ -232,6 +235,22 @@ func TestLauncherVerifiesLiveAdmissionPolicies(t *testing.T) {
 	if err := other.verifyAdmission(t.Context()); err == nil {
 		t.Fatal("policy for other images accepted")
 	}
+	configMaps := e.as(t, "admin").CoreV1().ConfigMaps("cloud")
+	params, err := configMaps.Get(t.Context(), AdmissionParamsName, metav1.GetOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	params.Data["extra"] = "x"
+	if params, err = configMaps.Update(t.Context(), params, metav1.UpdateOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	if err := l.verifyAdmission(t.Context()); err == nil {
+		t.Fatal("params with an extra key accepted")
+	}
+	delete(params.Data, "extra")
+	if _, err = configMaps.Update(t.Context(), params, metav1.UpdateOptions{}); err != nil {
+		t.Fatal(err)
+	}
 	impostor := &Launcher{Kube: e.as(t, testIntruder), Config: e.l.Config}
 	if err := impostor.verifyAdmission(t.Context()); err == nil {
 		t.Fatal("policy naming another launcher accepted")
@@ -253,6 +272,26 @@ func TestLauncherVerifiesLiveAdmissionPolicies(t *testing.T) {
 	}
 	if err := l.verifyAdmission(t.Context()); err == nil {
 		t.Fatal("missing binding accepted")
+	}
+}
+
+// safety: the policies read their images from the param ConfigMap, so losing it must refuse every write rather than skip the checks.
+func TestAdmissionPolicyDeniesWithoutParams(t *testing.T) {
+	e := newAdmissionEnv(t)
+	if err := e.as(t, "admin").CoreV1().ConfigMaps("cloud").Delete(t.Context(), AdmissionParamsName, metav1.DeleteOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	l := &Launcher{Kube: e.as(t, testLauncher), Config: e.l.Config}
+	if err := l.verifyAdmission(t.Context()); err == nil {
+		t.Fatal("missing params accepted")
+	}
+	job := e.resources.Job.DeepCopy()
+	err := wait.PollUntilContextTimeout(t.Context(), 50*time.Millisecond, 30*time.Second, true, func(ctx context.Context) (bool, error) {
+		_, err := e.as(t, testLauncher).BatchV1().Jobs("cloud").Create(ctx, job, metav1.CreateOptions{DryRun: []string{metav1.DryRunAll}})
+		return err != nil && strings.Contains(err.Error(), "denied request"), nil
+	})
+	if err != nil {
+		t.Fatalf("the launcher's own Job was admitted without params: %v", err)
 	}
 }
 

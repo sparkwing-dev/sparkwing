@@ -20,7 +20,7 @@ Publication is one-way run/results/logs with local provenance; a publication fai
 
 Cache-from reads only authorized verified-default-branch memo/artifacts/depcache; no shared writes or remote binary fetch.
 
---sw-output applies to foreground and detached runs; explicit --sw-output beats -o, then SPARKWING_LOG_FORMAT, then terminal detection.
+-o applies to foreground and detached runs, their help and their errors; it beats SPARKWING_LOG_FORMAT, then terminal detection.
 
 --sw-only keeps matching jobs and their dependencies. Other declared jobs are skipped. Recovery jobs and jobs added by generators retain their normal rules. --sw-start-at and --sw-stop-at select a window in each job containing the named steps. A job containing neither bound runs all its steps. Unknown step names fail before work starts. --sw-only cannot be combined with either step bound. All three selections are sealed at intake and survive resume and retry. Child pipelines resolve their own job and step selections because their jobs and steps have separate names.
 
@@ -50,7 +50,6 @@ Cache-from reads only authorized verified-default-branch memo/artifacts/depcache
 | `--sw-workers N` | Positive foreground worker count; refused for detached runs. Must be at least 1. |
 | `--sw-idempotency-key KEY` | Deduplicate detached submissions using this key. |
 | `--sw-request-id ID` | Request identifier for a detached submission. |
-| `--sw-output FORMAT` | Format for run output. Values: pretty, json, plain. |
 | `-v, --sw-verbose` | Include detailed run output. |
 | `--sw-start-at STEP` | Start execution at the selected step. |
 | `--sw-stop-at STEP` | Stop execution after the selected step. |

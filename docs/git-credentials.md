@@ -47,7 +47,8 @@ with `team.admin` stores, replaces,
 confirms or deletes one, and no route returns its value: the list shows the
 host, repository, kind, pinned host key and who stored it. The controller seals
 the value under its secrets key, bound to the team, host and repository grant, so a
-controller started without `SPARKWING_SECRETS_KEY` holds none.
+controller started without a `secrets-key` file in its `--credentials-dir`
+holds none.
 
 A write names `repository`, the canonical key such as `gh:12345` or
 `git:gitlab.com/team/repo`. An administrator can instead set `host_wide: true`

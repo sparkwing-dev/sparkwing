@@ -156,6 +156,7 @@ func (s *Server) refillPass(ctx context.Context) {
 			return
 		}
 		res, err := s.checkout.refill(ctx, s.paymentDeployment, r)
+		s.alertCheckoutMisconfigured(err)
 		if !errors.Is(err, errCheckoutUnavailable) {
 			s.checkout.settled(r.ID)
 		}
@@ -163,7 +164,6 @@ func (s *Server) refillPass(ctx context.Context) {
 		case errors.Is(err, errRefillNoCard):
 			s.recordRefillFailure(ctx, r, store.RefillNoCard)
 		case errors.Is(err, errCheckoutUnavailable):
-			s.alertCheckoutMisconfigured(err)
 			if !s.checkout.unavailable(r.ID) {
 				s.logger.Error("charging a refill failed; it is retried", "team", string(r.Team), "refill", r.ID, "err", err)
 				return
@@ -216,9 +216,7 @@ func (s *Server) refundQueuedPayments(ctx context.Context) {
 			continue
 		}
 		refund, status, err := s.checkout.refund(ctx, s.paymentDeployment, d.Team, d.PaymentIntent, d.Reason)
-		if errors.Is(err, errCheckoutUnavailable) {
-			s.alertCheckoutMisconfigured(err)
-		}
+		s.alertCheckoutMisconfigured(err)
 		if errors.Is(err, errCheckoutUnavailable) && !s.checkout.unavailable(d.PaymentIntent) {
 			s.logger.Error("refunding a queued card payment failed; it is retried", "team", string(d.Team),
 				"payment_intent", d.PaymentIntent, "err", err)

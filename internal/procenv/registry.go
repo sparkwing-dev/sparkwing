@@ -5,12 +5,11 @@ const goToolchainDoc = "Go toolchain; inherited on the requester's own machine w
 // Registry is the single classification table for environment generation and reference documentation.
 // Removed names remain deny-only rows so stale parent environments cannot restore a credential transport.
 var Registry = []Var{
-	{Name: "SPARKWING_HOME", Prefix: false, Class: user, Owner: "user", Doc: "CLI setting; service equivalents are flags."},
-	{Name: "SPARKWING_CONFIG", Prefix: false, Class: user, Owner: "user", Doc: "CLI setting; service equivalents are flags."},
+	{Name: "SPARKWING_HOME", Prefix: false, Class: user, Owner: "user", Doc: "State home for the CLI, controller and runner; a native runner service records it."},
+	{Name: "SPARKWING_CONFIG", Prefix: false, Class: user, Owner: "user", Doc: "Machine configuration path for the CLI and runner."},
 	{Name: "SPARKWING_LOG_FORMAT", Prefix: false, Class: user, Owner: "user", Doc: "CLI setting; service equivalents are flags."},
 	{Name: "SPARKWING_AGENT", Prefix: false, Class: user, Owner: "user", Doc: "CLI setting; names the coding agent that starts a run."},
 	{Name: "SPARKWING_TOOLCHAIN", Prefix: false, Class: user, Owner: "user", Doc: "CLI setting; service equivalents are flags."},
-	{Name: "SPARKWING_DEBUG", Prefix: false, Class: diagnostic, Owner: "user", Doc: "SDK diagnostic output selection."},
 	{Name: "SPARKWING_SECRETS_KEY_FILE", Prefix: false, Class: user, Owner: "engine", Doc: "CLI key-file selector; never inherited by pipeline code."},
 	{Name: "SPARKWING_SECRETS_KEY", Prefix: false, Class: Credential, Owner: "engine", Doc: "Owner input only; never emitted by Build."},
 	{Name: "SPARKWING_SECRETS_PREVIOUS_KEY", Prefix: false, Class: Credential, Owner: "engine", Doc: "Owner input only; never emitted by Build."},

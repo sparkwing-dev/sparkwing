@@ -121,7 +121,7 @@ func (preRelease *PreRelease) Plan(_ context.Context, plan *sparkwing.Plan, in P
 		return err
 	}
 	preRelease.raceStorePart = part
-	sparkwing.Job(plan, runContext.Pipeline, preRelease).Timeout(preReleaseRunTimeout).Cache(lintCache())
+	sparkwing.Job(plan, runContext.Pipeline, preRelease).Timeout(preReleaseRunTimeout)
 	return nil
 }
 

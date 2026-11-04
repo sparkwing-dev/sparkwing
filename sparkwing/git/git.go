@@ -275,21 +275,27 @@ func loadDockerignore(repoDir string) ([]string, error) {
 	return patterns, nil
 }
 
+// safety: as in Docker, the last matching pattern wins and a leading ! re-includes, so a
+// re-included build input changes the hash.
 func matchesIgnore(path string, patterns []string) bool {
+	ignored := false
 	for _, p := range patterns {
-		if strings.HasSuffix(p, "/") {
-			if strings.HasPrefix(path, p) || strings.HasPrefix(path+"/", p) {
-				return true
-			}
-		}
-		if matched, _ := filepath.Match(p, filepath.Base(path)); matched {
-			return true
-		}
-		if strings.HasPrefix(path, p+"/") || path == p {
-			return true
+		p, include := strings.CutPrefix(p, "!")
+		if matchesIgnorePattern(path, p) {
+			ignored = !include
 		}
 	}
-	return false
+	return ignored
+}
+
+func matchesIgnorePattern(path, p string) bool {
+	if strings.HasSuffix(p, "/") && (strings.HasPrefix(path, p) || strings.HasPrefix(path+"/", p)) {
+		return true
+	}
+	if matched, err := filepath.Match(p, filepath.Base(path)); err == nil && matched {
+		return true
+	}
+	return strings.HasPrefix(path, p+"/") || path == p
 }
 
 // ChangedFiles returns paths (repo-relative) modified between `since`

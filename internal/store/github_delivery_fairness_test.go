@@ -30,7 +30,9 @@ func TestGitHubDeliveryClaimsRotateTeamsAcrossRestart(t *testing.T) {
 		for n := range count {
 			id := fmt.Sprintf("%s-%02d", team, n)
 			body := fmt.Appendf(nil, `{"installation":{"id":%d},"delivery":%q}`, installation.InstallationID, id)
-			if err := st.AsOperator().EnqueueGitHubDelivery(ctx, id, "push", body, now.Add(time.Duration(i*100+n)*time.Second)); err != nil {
+			at := now.Add(time.Duration(i*100+n) * time.Second)
+			st.SetTestClock(t, func() time.Time { return at })
+			if err := st.AsOperator().EnqueueGitHubDelivery(ctx, id, "push", body); err != nil {
 				t.Fatal(err)
 			}
 		}
@@ -72,7 +74,9 @@ func TestGitHubDeliveryUnboundInstallationsShareOneTurn(t *testing.T) {
 		t.Fatal(err)
 	}
 	for i, body := range []string{`{}`, `{"installation":{"id":98}}`, `{"installation":{"id":99}}`, `{"installation":{"id":1}}`} {
-		if err := st.AsOperator().EnqueueGitHubDelivery(ctx, fmt.Sprint(i), "push", []byte(body), now.Add(time.Duration(i)*time.Second)); err != nil {
+		at := now.Add(time.Duration(i) * time.Second)
+		st.SetTestClock(t, func() time.Time { return at })
+		if err := st.AsOperator().EnqueueGitHubDelivery(ctx, fmt.Sprint(i), "push", []byte(body)); err != nil {
 			t.Fatal(err)
 		}
 	}

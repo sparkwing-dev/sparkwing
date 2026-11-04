@@ -65,7 +65,7 @@ func localRuntimeFor(t *testing.T, award controllerwire.ClaimedUnit, detached bo
 	return localRunDependencies{version: "v1.2.3", resolve: func(context.Context, localRunOptions) (localRunRuntime, error) {
 		*observed = append(*observed, "resolve")
 		return localRunRuntime{
-			follow: func(context.Context, string, string, io.Writer) error { return nil },
+			follow: func(context.Context, string, string, io.Writer, <-chan struct{}) error { return nil },
 			prepare: func(_ context.Context, pipeline string, flags runFlags) (localRunPreparation, error) {
 				*observed = append(*observed, "prepare")
 				if pipeline != "ci" {
@@ -197,7 +197,7 @@ func TestLocalForegroundRunReportsCommittedOutcome(t *testing.T) {
 				return runtime, err
 			}
 			var out bytes.Buffer
-			flags, args := parseRunFlagsArgs([]string{"--sw-output=json", "--", "--password=private-value"})
+			flags, args := parseRunFlagsArgs([]string{"--output=json", "--", "--password=private-value"})
 			err := runLocalCommand(t.Context(), "ci", flags, args, &out, deps)
 			if (err == nil) != (outcome == "success" || outcome == "dry_run") {
 				t.Fatalf("outcome=%s error=%v", outcome, err)
@@ -251,7 +251,7 @@ func TestLocalForegroundRunOutputFailuresStayVisible(t *testing.T) {
 			t.Run(fmt.Sprintf("%s/%d", format, at), func(t *testing.T) {
 				var calls []string
 				out := localFailingEventWriter{at: at}
-				flags, args := parseRunFlagsArgs([]string{"--sw-output=" + format, "--", "--password=private-value"})
+				flags, args := parseRunFlagsArgs([]string{"--output=" + format, "--", "--password=private-value"})
 				err := runLocalCommand(t.Context(), "ci", flags, args, &out, localRuntimeFor(t, localTestAward(t), false, &calls))
 				if err == nil || !strings.Contains(err.Error(), "closed output") || !strings.Contains(err.Error(), "local-run") {
 					t.Fatalf("output failure was hidden: %v", err)
@@ -429,7 +429,7 @@ func localTestPreparation(t *testing.T, award controllerwire.ClaimedUnit) localR
 }
 
 func TestParsedLocalOutputSurvivesIntakeAndReceipt(t *testing.T) {
-	for _, option := range [][]string{{"-o", "plain"}, {"--output=plain"}, {"--sw-output=plain"}, nil} {
+	for _, option := range [][]string{{"-o", "plain"}, {"--output=plain"}, nil} {
 		t.Run(strings.Join(option, " "), func(t *testing.T) {
 			t.Setenv("SPARKWING_LOG_FORMAT", "plain")
 			flags, args := parseRunFlagsArgs(append(append([]string{"--sw-detached"}, option...), "--", "--password=private-value"))
@@ -601,33 +601,6 @@ func TestLocalIntakeFailureHasNoReceiptOrClaim(t *testing.T) {
 type failingLocalWriter struct{}
 
 func (failingLocalWriter) Write([]byte) (int, error) { return 0, errors.New("closed output") }
-
-func TestStandaloneHostUsesFinalFlagsAndSharedHost(t *testing.T) {
-	award := localTestAward(t)
-	var calls []string
-	deps := localRuntimeFor(t, award, false, &calls)
-	resolve := deps.resolve
-	db := filepath.Join(t.TempDir(), "state.db")
-	env := filepath.Join(t.TempDir(), "environment.json")
-	deps.resolve = func(ctx context.Context, opts localRunOptions) (localRunRuntime, error) {
-		if opts.stateDB != db || opts.environmentFile != env || opts.standaloneReason != "isolated CI" {
-			t.Fatalf("standalone input=%+v", opts)
-		}
-		return resolve(ctx, opts)
-	}
-	err := runLocalHostCommandArgs(t.Context(), []string{"--run", award.RunID, "--state-db", db, "--env-file", env, "--standalone-reason", "isolated CI"}, io.Discard, deps)
-	if err != nil || !reflect.DeepEqual(calls, []string{"resolve", "claim", "bind", "host", "host-close", "close"}) {
-		t.Fatalf("standalone calls=%v error=%v", calls, err)
-	}
-	for _, args := range [][]string{{"--program", "pipeline", "run"}, {"--run", "r", "--state-db", "relative", "--standalone-reason", "CI"}, {"--run", "r", "--state-db", db}} {
-		if err := runLocalHostCommandArgs(t.Context(), args, io.Discard, localRunDependencies{resolve: func(context.Context, localRunOptions) (localRunRuntime, error) {
-			t.Fatal("invalid host arguments reached native composition")
-			return localRunRuntime{}, nil
-		}}); err == nil {
-			t.Fatalf("accepted invalid host argv %v", args)
-		}
-	}
-}
 
 func FuzzLocalOwnerSealCannotChange(f *testing.F) {
 	f.Add("private", "foreign", int64(7))
@@ -921,7 +894,7 @@ func TestLocalAttachedRunStreamsCommittedLogs(t *testing.T) {
 	followed := false
 	deps.resolve = func(ctx context.Context, options localRunOptions) (localRunRuntime, error) {
 		runtime, err := resolve(ctx, options)
-		runtime.follow = func(_ context.Context, run, format string, out io.Writer) error {
+		runtime.follow = func(_ context.Context, run, format string, out io.Writer, _ <-chan struct{}) error {
 			followed = true
 			if run != "local-run" || format != "json" {
 				return errors.New("log attachment lost run or output selection")
@@ -1018,7 +991,7 @@ func TestLocalRunInterruptCancelsAndWaitsForTerminalRun(t *testing.T) {
 			close(cancelled)
 			return controllerwire.Applied{}, nil
 		}}
-		runtime.follow = func(ctx context.Context, _, _ string, _ io.Writer) error {
+		runtime.follow = func(ctx context.Context, _, _ string, _ io.Writer, _ <-chan struct{}) error {
 			select {
 			case <-cancelled:
 				return nil

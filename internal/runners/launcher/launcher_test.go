@@ -150,7 +150,9 @@ func installAdmission(kube *fake.Clientset, cfg CloudJobConfig) {
 	kube.PrependReactor("create", "selfsubjectreviews", func(ktesting.Action) (bool, runtime.Object, error) {
 		return true, &authenticationv1.SelfSubjectReview{Status: authenticationv1.SelfSubjectReviewStatus{UserInfo: authenticationv1.UserInfo{Username: testLauncher}}}, nil
 	})
-	policies, bindings := AdmissionPolicies(AdmissionConfig{Namespace: cfg.Namespace, Launcher: testLauncher, RunnerImage: cfg.RunnerImage, DockerImage: cfg.DockerImage})
+	c := AdmissionConfig{Namespace: cfg.Namespace, Launcher: testLauncher, RunnerImage: cfg.RunnerImage, DockerImage: cfg.DockerImage}
+	policies, bindings := AdmissionPolicies(c)
+	_ = kube.Tracker().Add(AdmissionParams(c))
 	for i := range policies {
 		_ = kube.Tracker().Add(policies[i])
 		_ = kube.Tracker().Add(bindings[i])

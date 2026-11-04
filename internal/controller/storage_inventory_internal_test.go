@@ -24,7 +24,10 @@ func TestStorageMaintenanceUsesFinalInventoryAndLeavesReplicaUsage(t *testing.T)
 			t.Error(err)
 		}
 	})
-	tenant, err := s.ForTeam(t.Context(), store.DefaultTeam)
+	// safety: the default team is never billed for storage, so a named team carries the charge.
+	const team store.Team = "inventory-team"
+	teststore.SeedTeam(t, s, team)
+	tenant, err := s.ForTeam(t.Context(), team)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -34,11 +37,11 @@ func TestStorageMaintenanceUsesFinalInventoryAndLeavesReplicaUsage(t *testing.T)
 	now := time.Now()
 	old := now.Add(-24 * time.Hour).UnixNano()
 	const size = 2 * store.StorageBytesPerGB
-	if _, err := teststore.SQL(t, s).ExecContext(t.Context(), "INSERT INTO blobs(team,digest,size,created_at) VALUES (?,?,?,?)", store.DefaultTeam, strings.Repeat("a", 64), size, old); err != nil {
+	if _, err := teststore.SQL(t, s).ExecContext(t.Context(), "INSERT INTO blobs(team,digest,size,created_at) VALUES (?,?,?,?)", team, strings.Repeat("a", 64), size, old); err != nil {
 		t.Fatal(err)
 	}
 	for _, kind := range []store.StorageKind{store.StorageCache, store.StorageLogs} {
-		if _, err := teststore.SQL(t, s).ExecContext(t.Context(), "INSERT INTO team_storage(team,store,storage_charged_through,updated_at) VALUES (?,?,?,?)", store.DefaultTeam, kind, old, old); err != nil {
+		if _, err := teststore.SQL(t, s).ExecContext(t.Context(), "INSERT INTO team_storage(team,store,storage_charged_through,updated_at) VALUES (?,?,?,?)", team, kind, old, old); err != nil {
 			t.Fatal(err)
 		}
 	}

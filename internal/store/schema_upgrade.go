@@ -2,10 +2,15 @@ package store
 
 import (
 	"context"
+	_ "embed"
 	"fmt"
 	"slices"
+	"strings"
 	"time"
 )
+
+//go:embed upgrades/schema-30-warm-pool-desired.sql
+var warmPoolDesiredV30 string
 
 type schemaUpgrade struct {
 	from       int
@@ -20,6 +25,13 @@ var schemaUpgrades = []schemaUpgrade{
 	{
 		from: 28, release: "v0.68.3", digest: "75de685ed349678b0fa36694978890a2ddd491851d7a63c4c6740e81408b166a",
 		statements: []string{`ALTER TABLE nodes ADD COLUMN trusted_host BIGINT NOT NULL DEFAULT 0 CHECK(trusted_host IN (0,1))`},
+	},
+	{
+		from: 29, release: "v0.68.7", digest: "cbd0b9e4e393e9e215e8ce0db6912f882d6b732e034674f7ab9d596c8b6c4d39",
+		statements: []string{
+			strings.TrimSpace(warmPoolDesiredV30),
+			`UPDATE warm_pool_settings SET start_time_target_seconds=20 WHERE start_time_target_seconds=10`,
+		},
 	},
 }
 
@@ -45,12 +57,14 @@ func upgradeSchemaTx(ctx context.Context, tx *storeTx, version int, path string)
 			return schemaUpgradeDigestError(step, recorded, path)
 		}
 		for _, statement := range step.statements {
-			translated, err := translateSchema(statement, tx.dialect)
-			if err == nil {
-				_, err = tx.execContext(ctx, translated)
-			}
-			if err != nil {
-				return fmt.Errorf("upgrade store schema %d to %d: %w; the store is unchanged", version, version+1, err)
+			for _, part := range dialectStatements(statement, tx.dialect) {
+				translated, err := translateSchema(part, tx.dialect)
+				if err == nil {
+					_, err = tx.execContext(ctx, translated)
+				}
+				if err != nil {
+					return fmt.Errorf("upgrade store schema %d to %d: %w; the store is unchanged", version, version+1, err)
+				}
 			}
 		}
 		next := schemaBaselineDigest()
@@ -68,6 +82,16 @@ func upgradeSchemaTx(ctx context.Context, tx *storeTx, version int, path string)
 		version++
 	}
 	return nil
+}
+
+// safety: PostgreSQL replaces a view in place, which keeps grants such as KEDA's warm reader role; dropping it
+// would revoke them. SQLite has no CREATE OR REPLACE VIEW and no grants, so it drops and recreates the view.
+func dialectStatements(statement string, dialect Dialect) []string {
+	rest, ok := strings.CutPrefix(statement, "CREATE OR REPLACE VIEW ")
+	if !ok || dialect != DialectSQLite {
+		return []string{statement}
+	}
+	return []string{"DROP VIEW " + strings.Fields(rest)[0], "CREATE VIEW " + rest}
 }
 
 // safety: a store without the digest column predates every release this binary upgrades, so it reads as missing.

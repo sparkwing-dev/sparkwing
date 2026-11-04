@@ -48,7 +48,6 @@ func (t *Tenant) CreditState(ctx context.Context, window time.Duration) (CreditS
 		return out, err
 	}
 	out.RateMicroPerSecond, out.RateTable, out.RateTableSet = settings.RateMicroPerSecond, settings.RateTable, settings.RateTableSet
-	out.WarmCPUClassCores = settings.WarmCPUClassCores
 	out.StorageRateMicroPerGBDay, out.StorageFreeAllowanceBytes = settings.StorageRateMicroPerGBDay, settings.StorageFreeAllowanceBytes
 	return out, tx.Commit()
 }

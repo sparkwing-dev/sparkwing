@@ -50,7 +50,7 @@ Runs a pipeline from the nearest pipeline directory. Engine controls precede
 `--`. All pipeline and job arguments follow it:
 
 ```bash
-sparkwing run deploy --sw-output json -- --environment staging
+sparkwing run deploy -o json -- --environment staging
 ```
 
 Unknown engine flags fail before execution setup. Local `run` accepts no
@@ -124,7 +124,7 @@ indexed in [cli-reference.md](cli-reference.md):
 | `update` | Self-update the machine CLI and refresh managed units |
 | `upgrade` | Upgrade and verify a repository's pinned SDK with its matching engine |
 | `dashboard` | Local controller lifecycle and UI: start / stop / status / logs / install / uninstall |
-| `doctor` | Sweep stray local step sessions and inspect controller findings, project toolchains, hooks and competing installs |
+| `doctor` | Sweep stray local step sessions and inspect controller findings, project toolchains and hooks |
 | `profiles` | Private machine controller connections and credential files |
 | `operator` | Deployment operational limits, object storage and service credentials |
 | `tokens` | Team credential metadata, issuance, rotation and revocation |

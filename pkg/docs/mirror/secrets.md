@@ -41,16 +41,11 @@ run-now and burst `machines` work. Use a shared runner or Sparkwing Cloud for
 those runs. A host's classification is sealed at claim time and is also checked
 when secrets or OIDC tokens are released.
 
-`--shared` secrets. Fetching proves the repository
-for secrets and OIDC claims: a run-now or dashboard run's token claims the
-repository and the branch or tag head it ran, with `trigger:manual`. It keeps its
-manual trust class for reserved pools, and its cache records stay in its own
-fetched scope.
-
 `--shared` secrets are team-wide, like a GitHub organization secret with no
 repository allow-list: every pipeline of every repository in the team reads
 them. Protect deploy secrets with a [reserved pool](scheduling.md#reserved-pools)
-or `--only-on`, which only verified runs receive. Replacing a secret's value
+or `--only-on`, which only verified runs receive unless the pool's runner is
+enrolled with `--trust=any`. Replacing a secret's value
 without `--only-on` keeps its pool.
 
 `--repo` takes a GitHub `owner/name` or a repository key such as `gh:12345`

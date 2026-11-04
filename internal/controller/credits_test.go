@@ -164,7 +164,6 @@ type creditSettingsView struct {
 	RateMicroPerSecond int64            `json:"rate_micro_per_second"`
 	RateTable          []creditRateView `json:"rate_table"`
 	RateTableSet       bool             `json:"rate_table_set"`
-	WarmCPUClassCores  int64            `json:"warm_cpu_class_cores"`
 	MicroPerCredit     int64            `json:"micro_per_credit"`
 	CreditsPerDollar   int64            `json:"credits_per_dollar"`
 }
@@ -191,7 +190,7 @@ func TestCreditSettings_ReadNeedsRunsReadAndWriteNeedsAdmin(t *testing.T) {
 		t.Fatalf("read with runs.read = %d, want 200", status)
 	}
 	status, _ = f.request(t, http.MethodPut, "/api/v1/operator/credits/settings", f.readonly,
-		map[string]any{"warm_cpu_class_cores": 1})
+		map[string]any{"storage_free_allowance_bytes": 1})
 	if status != http.StatusForbidden {
 		t.Fatalf("write without admin = %d, want 403", status)
 	}
@@ -246,9 +245,6 @@ func TestCreditSettings_TakesTheRateTableAsAListOrAsAnObject(t *testing.T) {
 	}
 	if view.rateFor(2) != 11_000 || view.rateFor(4) != 22_000 || len(view.RateTable) != 2 {
 		t.Fatalf("rate table after the object write = %+v", view.RateTable)
-	}
-	if view.WarmCPUClassCores != store.DefaultWarmCPUClassCores {
-		t.Fatalf("writing the table moved the warm cpu class to %d", view.WarmCPUClassCores)
 	}
 }
 
