@@ -23,8 +23,9 @@ func (Land) Help() string {
 		"naming the command that fixes each. Then runs the gate (the same jobs as `sparkwing run gate`) and the review " +
 		"(the same job as `sparkwing run review`, which reads .review.yaml and takes --brief and --skip) in parallel. " +
 		"The review always runs, whatever the change's size or paths. When both pass and the review record's tree is HEAD's tree with result pass, " +
-		"the land job re-checks that HEAD did not move and origin/main is still its ancestor, then runs `git push origin <HEAD>:refs/heads/main` " +
-		"with no force. A rejected push means main moved: rebase and rerun. The push step carries the destructive and prod risks, " +
+		"the land job re-checks that HEAD did not move and origin/main is still its ancestor, then runs `git push --no-verify origin <HEAD>:refs/heads/main` " +
+		"with no force when that commit's tree is the tree the gate and review judged, since the gate covers every check the pre-push hook makes; " +
+		"any other tree pushes through the hook. A rejected push means main moved: rebase and rerun. The push step carries the destructive and prod risks, " +
 		"so a real landing needs --sw-allow-risk destructive,prod. The land job's output is the landing record: branch, commit, tree, base, " +
 		"the run that gated it, and the review record's path and result."
 }
@@ -210,9 +211,9 @@ func (j *landJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
 		return verifyLanding(ctx, gitIn(j.RepoDir), j.RepoDir, j.Head.Get(ctx), review)
 	}).SafeWithoutDryRun()
 	push := sparkwing.Step(w, "push", func(ctx context.Context) error {
-		return pushLanding(ctx, gitIn(j.RepoDir), j.RepoDir, j.Head.Get(ctx).Commit)
+		return pushLanding(ctx, gitIn(j.RepoDir), j.RepoDir, j.Head.Get(ctx))
 	}).DryRun(func(ctx context.Context) error {
-		sparkwing.Info(ctx, "dry run: would run git %s", strings.Join(landPushArgs(j.Head.Get(ctx).Commit), " "))
+		sparkwing.Info(ctx, "dry run: would run git %s", strings.Join(landPushArgs(j.Head.Get(ctx).Commit, true), " "))
 		return nil
 	}).Risk("destructive", "prod").Needs(verify)
 	return sparkwing.Step(w, "record", func(ctx context.Context) (landingRecord, error) {
@@ -298,14 +299,27 @@ func verifyLanding(ctx context.Context, git gitRunner, dir string, head landHead
 }
 
 // safety: no --force and an explicit commit, so the remote accepts the push
-// only as a fast-forward to exactly the gated commit. The pre-push hook still
-// runs, because the gate does not cover every check that tier makes.
-func landPushArgs(commit string) []string {
+// only as a fast-forward to exactly the gated commit.
+// perf: the gate runs every check the pre-push hook makes, the qatrust vet
+// included, so re-running the hook on the tree the gate just passed only queued
+// behind admission (8.4 minutes of a 632 s push in land #587).
+func landPushArgs(commit string, gated bool) []string {
+	if gated {
+		return []string{"push", "--no-verify", landBaseRemote, commit + ":refs/heads/" + landBaseBranch}
+	}
 	return []string{"push", landBaseRemote, commit + ":refs/heads/" + landBaseBranch}
 }
 
-func pushLanding(ctx context.Context, git gitRunner, dir, commit string) error {
-	out, err := git(ctx, landPushArgs(commit)...)
+// safety: the hook is skipped only when the pushed commit's tree is the one the
+// gate and review judged; anything else is judged by the hook as a human push is.
+func pushLanding(ctx context.Context, git gitRunner, dir string, head landHead) error {
+	commit := head.Commit
+	tree, err := git(ctx, "rev-parse", commit+"^{tree}")
+	gated := err == nil && tree == head.Tree
+	if !gated {
+		sparkwing.Info(ctx, "the pushed tree is not the gated tree %s, so the pre-push hook judges it", short(head.Tree))
+	}
+	out, err := git(ctx, landPushArgs(commit, gated)...)
 	if err != nil {
 		msg := err.Error()
 		if strings.Contains(msg, "non-fast-forward") || strings.Contains(msg, "fetch first") || strings.Contains(msg, "rejected") {

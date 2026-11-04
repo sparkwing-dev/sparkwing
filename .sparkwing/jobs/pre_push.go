@@ -135,6 +135,15 @@ func runVetTouched(ctx context.Context) error {
 		})
 }
 
+// safety: the gate vets the qatrust flavor of the packages a change touches, so
+// land can push the tree it gated without re-running the pre-push hook.
+func runQATrustVetTouched(ctx context.Context) error {
+	return overTouchedPackages(ctx, "vet-qatrust", "compile", "Go file(s)", existingGoFiles,
+		func(_ string, pkgs []string) string {
+			return goCommandAt(prePushTaskCores(runtime.NumCPU()), "vet", "-tags qatrust "+strings.Join(pkgs, " "))
+		})
+}
+
 // perf: the fast linter subset over the packages the push touches. The full
 // set measured ninety seconds over both modules, which is the release cut's
 // price to pay, not the push boundary's.

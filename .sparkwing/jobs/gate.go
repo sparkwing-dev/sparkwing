@@ -151,6 +151,7 @@ func (p *Gate) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
 	formattersStep := sparkwing.Step(w, "formatters", runFormatters).Needs(gofmtStep)
 	vetStep := sparkwing.Step(w, "vet", runVet).Needs(formattersStep)
 	buildStep := sparkwing.Step(w, "build", runBuild).Needs(vetStep)
+	sparkwing.Step(w, "vet-qatrust", runQATrustVetTouched).Needs(vetStep)
 	// safety: a Gate that Plan never configured runs every test, so a missing
 	// mode can only widen the gate.
 	test := runTest

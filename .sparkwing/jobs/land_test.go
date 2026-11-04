@@ -124,25 +124,37 @@ func TestLandVerifyRefusesUnlessTheReviewPassedThisTree(t *testing.T) {
 }
 
 func TestLandPushIsAFastForwardOfTheGatedCommit(t *testing.T) {
-	g := landableGit()
-	if err := pushLanding(t.Context(), g.run, "/repo", "c0ffee00"); err != nil {
-		t.Fatal(err)
-	}
-	push := g.calls[len(g.calls)-1]
-	if push != "push origin c0ffee00:refs/heads/main" {
-		t.Fatalf("push = %q", push)
-	}
-	for _, arg := range strings.Fields(push) {
-		if strings.HasPrefix(arg, "+") || strings.HasPrefix(arg, "--force") || arg == "-f" || arg == "--no-verify" {
-			t.Fatalf("push forces or skips the pre-push hook with %q", arg)
-		}
+	for name, tc := range map[string]struct {
+		tree string
+		want string
+	}{
+		"gated tree skips the hook":  {tree: "7ee00000", want: "push --no-verify origin c0ffee00:refs/heads/main"},
+		"another tree runs the hook": {tree: "0dd00000", want: "push origin c0ffee00:refs/heads/main"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			g := landableGit()
+			g.answers["rev-parse c0ffee00^{tree}"] = tc.tree
+			if err := pushLanding(t.Context(), g.run, "/repo", acceptedHead()); err != nil {
+				t.Fatal(err)
+			}
+			push := g.calls[len(g.calls)-1]
+			if push != tc.want {
+				t.Fatalf("push = %q, want %q", push, tc.want)
+			}
+			for _, arg := range strings.Fields(push) {
+				if strings.HasPrefix(arg, "+") || strings.HasPrefix(arg, "--force") || arg == "-f" {
+					t.Fatalf("push forces with %q", arg)
+				}
+			}
+		})
 	}
 }
 
 func TestLandPushRejectionSaysRebaseAndRerun(t *testing.T) {
 	g := landableGit()
-	g.fail["push origin c0ffee00:refs/heads/main"] = errors.New(" ! [rejected]        c0ffee00 -> main (fetch first)")
-	err := pushLanding(t.Context(), g.run, "/repo", "c0ffee00")
+	g.answers["rev-parse c0ffee00^{tree}"] = "7ee00000"
+	g.fail["push --no-verify origin c0ffee00:refs/heads/main"] = errors.New(" ! [rejected]        c0ffee00 -> main (fetch first)")
+	err := pushLanding(t.Context(), g.run, "/repo", acceptedHead())
 	if err == nil || !strings.Contains(err.Error(), "moved since the gate ran") || !strings.Contains(err.Error(), "rerun sparkwing run land") {
 		t.Fatalf("err = %v", err)
 	}
