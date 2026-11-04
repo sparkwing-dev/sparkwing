@@ -311,23 +311,27 @@ func TestStorePostgresSweepRemovesOnlyAbandonedRoots(t *testing.T) {
 
 func TestStorePostgresRootRemovalDeletesTheOwnerLockLast(t *testing.T) {
 	root := filepath.Join(t.TempDir(), storePostgresRootPrefix+"x")
-	if err := os.MkdirAll(filepath.Join(root, "data", "base"), 0o700); err != nil {
+	locked := filepath.Join(root, "data", "base")
+	if err := os.MkdirAll(locked, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(locked, "relation"), nil, 0o600); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(root, storePostgresOwnerLock), nil, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.Chmod(root, 0o500); err != nil {
+	if err := os.Chmod(locked, 0o500); err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { _ = os.Chmod(root, 0o700) })
+	t.Cleanup(func() { _ = os.Chmod(locked, 0o700) })
 	if err := removeStorePostgresRoot(root); err == nil {
 		t.Skip("running as a user that ignores directory permissions")
 	}
 	if _, err := os.Stat(filepath.Join(root, storePostgresOwnerLock)); err != nil {
-		t.Errorf("a failed removal dropped the owner lock first: %v", err)
+		t.Errorf("a failed data removal still dropped the owner lock: %v", err)
 	}
-	if err := os.Chmod(root, 0o700); err != nil {
+	if err := os.Chmod(locked, 0o700); err != nil {
 		t.Fatal(err)
 	}
 	if err := removeStorePostgresRoot(root); err != nil {
