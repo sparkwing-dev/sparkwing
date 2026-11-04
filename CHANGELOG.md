@@ -38,6 +38,24 @@ unlock.
   `sparkwing runners add` placed the log under the selected state home, but the systemd unit and LaunchAgent did not carry it, so the started runner used `~/.sparkwing`. Both now set `SPARKWING_HOME` to the home the installer resolved; reinstall an existing service to pick it up.
 - **runner:** `sparkwing-runner version -o json` writes one JSON record on one line
   It printed an indented document, which a reader taking one JSON object per line could not parse.
+- **run:** A first run reuses the installed CLI as the pipeline engine when it is the pinned release
+  The engine was downloaded again (73 MB) and verified twice; now the installed bytes are checked against the signed
+  release files and verified once.
+- **run:** A compile prints `Cache miss: pipeline binary compiled in <duration>`
+  A CI cache that never restores now shows in the run output instead of only as a slow run.
+- **sdk:** `sparkwing pipeline new` no longer downloads the controller's dependencies
+  `go mod tidy` in a new pipeline fetched 80 modules (611 MB) through SDK test imports; it now fetches 5.
+- **install:** `install.sh` downloads a release's files in one connection-reusing `curl` call
+- **cache:** The pipeline binary key records the compilers `PATH` resolves to instead of `PATH` itself
+  Activating a virtualenv or Node version manager keeps the compiled pipeline; upgrading Go behind the same `PATH`
+  rebuilds it.
+- **run:** Each engine notice, such as the missing version policy warning, prints once per command instead of three times
+
+### Fixed
+
+- **runners:** A job waiting in `RunAndAwait` no longer holds its runner's slot
+  A self-hosted runner defaults to `max_concurrent: 1`, and a child run goes back to the same runners, so the first `RunAndAwait` on a one-runner team hung until its timeout. A job blocked on its children now leaves its slot free, and so does the owner of a named-runner run while one of its jobs waits, until the last wait returns. A resumed job can briefly put the runner over `max_concurrent` until other jobs finish.
+
 - **launcher:** Stop warning about Cloud reservations that belong to another job namespace
   Staging and production can share a cluster, so each launcher logged a warning for every node the other environment reserved. That is now a debug message.
 - **cli:** Print blank command output lines as blank lines in plain run logs
