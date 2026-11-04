@@ -2,6 +2,7 @@ package store
 
 import (
 	"fmt"
+	"slices"
 	"testing"
 	"time"
 
@@ -88,8 +89,10 @@ func WarmCapacityModesAndDemand(t *testing.T, s *Store) {
 		}
 	}
 	insertCapacity("job", "node", true, 20000000000, true)
+	assertDesired(1)
+	insertCapacity("live", "node", false, 0, true)
 	assertDesired(4)
-	if _, err = s.exec(ctx, `UPDATE cloud_job_capacity SET claim_to_start_ns=1000000000`); err != nil {
+	if _, err = s.exec(ctx, `UPDATE cloud_job_capacity SET claim_to_start_ns=1000000000 WHERE reservation_id='job'`); err != nil {
 		t.Fatal(err)
 	}
 	assertDesired(1)
@@ -116,7 +119,7 @@ func WarmCapacityModesAndDemand(t *testing.T, s *Store) {
 		t.Fatal(e)
 	}
 	c := metrics.Classes[0]
-	if c.ColdStarts24h != 7 || c.ColdStarts7d != 7 || c.Upsizes24h != 1 || c.Upsizes7d != 1 || c.Start1h.P50Seconds == nil || *c.Start1h.P50Seconds != 1 || c.Start24h.P95Seconds == nil || *c.Start24h.P95Seconds != 1 {
+	if c.ColdStarts24h != 8 || c.ColdStarts7d != 8 || c.Upsizes24h != 1 || c.Upsizes7d != 1 || c.Start1h.P50Seconds == nil || *c.Start1h.P50Seconds != 1 || c.Start24h.P95Seconds == nil || *c.Start24h.P95Seconds != 1 {
 		t.Fatalf("metrics: %+v", c)
 	}
 	if metrics.Classes[1].ColdStarts24h != 0 || metrics.Classes[1].Upsizes24h != 0 {
@@ -160,6 +163,69 @@ func WarmCapacityModesAndDemand(t *testing.T, s *Store) {
 	if err = op.WriteWarmCapacity(ctx, a, w); err == nil {
 		t.Fatal("revoked grant accepted")
 	}
+}
+
+func TestWarmCapacityAutoReturnsToMinimumWithNobodyWaiting(t *testing.T) {
+	WarmCapacityAutoReturnsToMinimumWithNobodyWaiting(t, authorityStore(t))
+}
+
+// WarmCapacityAutoReturnsToMinimumWithNobodyWaiting feeds each desired count back as the next observed warm
+// count, as KEDA and Karpenter do every polling cycle, so a trigger fed by its own output shows up as a ratchet.
+func WarmCapacityAutoReturnsToMinimumWithNobodyWaiting(t *testing.T, s *Store) {
+	ctx := t.Context()
+	const class = "sparkwing-4cpu"
+	rewriteSchemaExec(t, s.db, `INSERT INTO teams(name,created_at,updated_at) VALUES ('a',1,1) ON CONFLICT(name) DO NOTHING`)
+	if _, err := s.exec(ctx, `UPDATE warm_pool_settings SET mode='auto',auto_min=1,auto_max=5,start_time_target_seconds=10 WHERE class=?`, class); err != nil {
+		t.Fatal(err)
+	}
+	now := s.now().UnixNano()
+	insert := func(id string, started bool, latency time.Duration, waited bool, ago time.Duration) {
+		t.Helper()
+		if _, err := s.exec(ctx, `INSERT INTO billing_awards(team,reservation_id,capability_prefix,run_id,node_id,generation,payer_team,metered,executor_class,billing_start,unit_kind,billing_unit,awarded_at) VALUES ('a',?,?,'run',?,1,'a',1,'cloud','at_start','node','job',?)`, id, id, id, now); err != nil {
+			t.Fatal(err)
+		}
+		at := now - int64(ago)
+		var startedAt, ns any
+		if started {
+			startedAt, ns = at, int64(latency)
+		}
+		if _, err := s.exec(ctx, `INSERT INTO cloud_job_capacity(team,reservation_id,requested_class,granted_class,waited_for_fresh_node,claimed_at,started_at,claim_to_start_ns) VALUES ('a',?,?,?,?,?,?,?)`, id, class, class, boolInt(waited), at-int64(latency), startedAt, ns); err != nil {
+			t.Fatal(err)
+		}
+	}
+	cycles := func() []int64 {
+		t.Helper()
+		var warm int64
+		var seen []int64
+		for range 7 {
+			if _, err := s.exec(ctx, `INSERT INTO warm_pool_observations(class,warm,observed_at) VALUES (?,?,?) ON CONFLICT(class) DO UPDATE SET warm=excluded.warm, observed_at=excluded.observed_at`, class, warm, s.now().UnixNano()); err != nil {
+				t.Fatal(err)
+			}
+			if err := s.queryRow(ctx, `SELECT desired_replicas FROM warm_pool_desired WHERE hardware_class=?`, class).Scan(&warm); err != nil {
+				t.Fatal(err)
+			}
+			seen = append(seen, warm)
+		}
+		return seen
+	}
+	steady := func(why string) {
+		t.Helper()
+		if got := cycles(); slices.Max(got) != 1 {
+			t.Fatalf("%s: desired over repeated observations = %v, want the minimum 1 throughout", why, got)
+		}
+	}
+	insert("slow", true, 20*time.Second, false, 40*time.Minute)
+	steady("a slow start 40 minutes ago with nobody waiting")
+	insert("cold-started", true, 40*time.Second, true, 5*time.Minute)
+	steady("a cold wait that already started")
+	insert("cold-waiting", false, 0, true, time.Minute)
+	if got := cycles(); got[len(got)-1] != 5 || !slices.IsSorted(got) {
+		t.Fatalf("desired while a job waits for a fresh node = %v, want growth to the maximum 5", got)
+	}
+	if _, err := s.exec(ctx, `UPDATE billing_awards SET settled_at=? WHERE reservation_id='cold-waiting'`, now); err != nil {
+		t.Fatal(err)
+	}
+	steady("the waiting job's award settled before it started")
 }
 
 func TestWarmCapacityPolicyValidation(t *testing.T) {

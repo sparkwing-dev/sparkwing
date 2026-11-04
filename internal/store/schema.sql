@@ -1842,7 +1842,7 @@ CREATE TABLE warm_pool_observations (
 
 CREATE VIEW warm_pool_desired AS
 WITH jobs AS (
-    SELECT c.* FROM cloud_job_capacity c
+    SELECT c.*, b.settled_at FROM cloud_job_capacity c
     JOIN billing_awards b ON b.team=c.team AND b.reservation_id=c.reservation_id
     WHERE b.unit_kind='node'
 ), starts AS (
@@ -1856,7 +1856,8 @@ WITH jobs AS (
     SELECT class, AVG(claim_to_start_ns / 1000000000.0) AS median_seconds
     FROM starts WHERE position IN ((total + 1) / 2, (total + 2) / 2) GROUP BY class
 ), waits AS (
-    SELECT requested_class AS class, (COUNT(*) + 1) / 2 AS desired
+    SELECT requested_class AS class, (COUNT(*) + 1) / 2 AS desired,
+           SUM(CASE WHEN started_at IS NULL AND settled_at IS NULL THEN 1 ELSE 0 END) AS waiting
     FROM jobs WHERE waited_for_fresh_node=1
       AND COALESCE(started_at,claimed_at) >= DATABASE_TIMESTAMP - 1800000000000
       AND COALESCE(started_at,claimed_at) <= DATABASE_TIMESTAMP
@@ -1864,12 +1865,12 @@ WITH jobs AS (
 ), demand AS (
     SELECT s.*, CASE WHEN o.observed_at >= DATABASE_TIMESTAMP - 120000000000
                     THEN COALESCE(o.warm, 0) ELSE 0 END AS warm,
-           COALESCE(w.desired, 0) AS wait_desired,
+           COALESCE(w.desired, 0) AS wait_desired, COALESCE(w.waiting, 0) AS waiting,
            COALESCE(m.median_seconds, 0) AS median_seconds
     FROM warm_pool_settings s LEFT JOIN warm_pool_observations o ON o.class=s.class
     LEFT JOIN waits w ON w.class=s.class LEFT JOIN medians m ON m.class=s.class
 ), targets AS (
-    SELECT *, CASE WHEN median_seconds > start_time_target_seconds
+    SELECT *, CASE WHEN waiting > 0 AND median_seconds > start_time_target_seconds
                    THEN warm + 1 ELSE 0 END AS latency_desired FROM demand
 ), clamped AS (
     SELECT *, CASE WHEN wait_desired > latency_desired THEN wait_desired ELSE latency_desired END AS auto_desired

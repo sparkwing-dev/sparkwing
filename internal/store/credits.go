@@ -83,12 +83,9 @@ func (e *InsufficientCreditsError) Error() string {
 // Unwrap reports [ErrInsufficientCredits], so a caller matches the condition with errors.Is without knowing this type.
 func (e *InsufficientCreditsError) Unwrap() error { return ErrInsufficientCredits }
 
-// safety: each of these is one price the operator sets for the whole controller, so they stay in the deployment's
+// safety: the rate is one price the operator sets for the whole controller, so it stays in the deployment's
 // bag; a per-team rate is a discount the product does not sell.
-const (
-	metaKeyCreditRateMicro = "credit_rate_micro_per_second"
-	metaKeyWarmCPUClass    = "warm_cpu_class_cores"
-)
+const metaKeyCreditRateMicro = "credit_rate_micro_per_second"
 
 // CreditHistoryMaxLimit is the most rows of each kind one history read returns.
 const CreditHistoryMaxLimit = 1000
@@ -148,8 +145,6 @@ type CreditState struct {
 	RateTable           CreditRateTable
 	// RateTableSet reports whether an operator wrote the table.
 	RateTableSet bool
-	// WarmCPUClassCores is the largest class a warm runner pool serves.
-	WarmCPUClassCores int64
 	// StorageRateMicroPerGBDay is what one gibibyte kept for one day costs, and zero is an installation that bills no storage.
 	StorageRateMicroPerGBDay int64
 	// StorageFreeAllowanceBytes is how many retained bytes a team keeps without being billed for them.
@@ -380,8 +375,6 @@ type CreditSettings struct {
 	// RateTable prices every cpu class.
 	RateTable    CreditRateTable
 	RateTableSet bool
-	// WarmCPUClassCores is the largest cpu class a warm runner pool serves.
-	WarmCPUClassCores int64
 	// StorageRateMicroPerGBDay is what one gibibyte kept for one day costs.
 	StorageRateMicroPerGBDay int64
 	// StorageFreeAllowanceBytes is how many retained bytes a team keeps without being billed for them.
@@ -392,7 +385,6 @@ type CreditSettings struct {
 type CreditSettingsUpdate struct {
 	RateMicroPerSecond        *int64
 	RateTable                 *CreditRateTable
-	WarmCPUClassCores         *int64
 	StorageRateMicroPerGBDay  *int64
 	StorageFreeAllowanceBytes *int64
 }
@@ -440,9 +432,6 @@ func (u CreditSettingsUpdate) byKey() map[string]int64 {
 	if u.RateMicroPerSecond != nil {
 		out[metaKeyCreditRateMicro] = *u.RateMicroPerSecond
 	}
-	if u.WarmCPUClassCores != nil {
-		out[metaKeyWarmCPUClass] = *u.WarmCPUClassCores
-	}
 	if u.StorageRateMicroPerGBDay != nil {
 		out[metaKeyStorageRateMicroPerGBDay] = *u.StorageRateMicroPerGBDay
 	}
@@ -455,10 +444,10 @@ func (u CreditSettingsUpdate) byKey() map[string]int64 {
 // safety: every value is judged before any of them is written, so a body that
 // names one good setting and one bad one moves neither.
 func (u CreditSettingsUpdate) validate() error {
-	if u.RateMicroPerSecond == nil && u.RateTable == nil && u.WarmCPUClassCores == nil &&
+	if u.RateMicroPerSecond == nil && u.RateTable == nil &&
 		u.StorageRateMicroPerGBDay == nil && u.StorageFreeAllowanceBytes == nil {
 		return fmt.Errorf(
-			"%w: name at least one of the rate, the warm cpu class, "+
+			"%w: name at least one of the rate, the rate table, "+
 				"the storage rate, or the free storage allowance",
 			ErrInvalidCreditSetting)
 	}
@@ -469,11 +458,6 @@ func (u CreditSettingsUpdate) validate() error {
 	}
 	if u.RateTable != nil {
 		if err := u.RateTable.Validate(); err != nil {
-			return err
-		}
-	}
-	if u.WarmCPUClassCores != nil {
-		if err := validWarmCPUClass(*u.WarmCPUClassCores); err != nil {
 			return err
 		}
 	}
@@ -503,23 +487,9 @@ func validCreditRate(micro int64) error {
 	return nil
 }
 
-// safety: the warm class is a whole number of cores the ladder can name, and
-// zero is the cluster that runs nothing warm, so only a negative one is refused.
-func validWarmCPUClass(cores int64) error {
-	if cores < 0 {
-		return fmt.Errorf("%w: the warm cpu class must not be negative, got %d",
-			ErrInvalidCreditSetting, cores)
-	}
-	return nil
-}
-
 func creditSettingsTx(ctx context.Context, tx *storeTx) (CreditSettings, error) {
 	var out CreditSettings
 	rate, err := creditSettingTx(ctx, tx, metaKeyCreditRateMicro, DefaultCreditRateMicro)
-	if err != nil {
-		return out, err
-	}
-	warm, err := creditSettingTx(ctx, tx, metaKeyWarmCPUClass, DefaultWarmCPUClassCores)
 	if err != nil {
 		return out, err
 	}
@@ -542,7 +512,6 @@ func creditSettingsTx(ctx context.Context, tx *storeTx) (CreditSettings, error) 
 	out.RateMicroPerSecond = rate
 	out.RateTable = table
 	out.RateTableSet = tableRaw != ""
-	out.WarmCPUClassCores = warm
 	out.StorageRateMicroPerGBDay = storageRate
 	out.StorageFreeAllowanceBytes = storageFree
 	return out, nil

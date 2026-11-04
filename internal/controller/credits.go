@@ -26,7 +26,6 @@ type creditStateJSON struct {
 	RateMicroPerSecond int64            `json:"rate_micro_per_second"`
 	RateTable          []creditRateJSON `json:"rate_table"`
 	RateTableSet       bool             `json:"rate_table_set"`
-	WarmCPUClassCores  int64            `json:"warm_cpu_class_cores"`
 
 	StorageChargedMicro       int64 `json:"storage_charged_micro"`
 	StorageRateMicroPerGBDay  int64 `json:"storage_rate_micro_per_gb_day"`
@@ -42,7 +41,6 @@ type creditSettingsJSON struct {
 	RateMicroPerSecond        int64            `json:"rate_micro_per_second"`
 	RateTable                 []creditRateJSON `json:"rate_table"`
 	RateTableSet              bool             `json:"rate_table_set"`
-	WarmCPUClassCores         int64            `json:"warm_cpu_class_cores"`
 	StorageRateMicroPerGBDay  int64            `json:"storage_rate_micro_per_gb_day"`
 	StorageFreeAllowanceBytes int64            `json:"storage_free_allowance_bytes"`
 	MicroPerCredit            int64            `json:"micro_per_credit"`
@@ -61,7 +59,6 @@ type creditRateJSON struct {
 type setCreditSettingsReq struct {
 	RateMicroPerSecond        *int64             `json:"rate_micro_per_second,omitempty"`
 	RateTable                 *creditRateTableIn `json:"rate_table,omitempty"`
-	WarmCPUClassCores         *int64             `json:"warm_cpu_class_cores,omitempty"`
 	StorageRateMicroPerGBDay  *int64             `json:"storage_rate_micro_per_gb_day,omitempty"`
 	StorageFreeAllowanceBytes *int64             `json:"storage_free_allowance_bytes,omitempty"`
 }
@@ -69,7 +66,6 @@ type setCreditSettingsReq struct {
 func (r setCreditSettingsReq) update() store.CreditSettingsUpdate {
 	out := store.CreditSettingsUpdate{
 		RateMicroPerSecond:        r.RateMicroPerSecond,
-		WarmCPUClassCores:         r.WarmCPUClassCores,
 		StorageRateMicroPerGBDay:  r.StorageRateMicroPerGBDay,
 		StorageFreeAllowanceBytes: r.StorageFreeAllowanceBytes,
 	}
@@ -83,7 +79,6 @@ func (r *setCreditSettingsReq) UnmarshalJSON(raw []byte) error {
 	var wire struct {
 		RateMicroPerSecond        optionalCreditInt64     `json:"rate_micro_per_second"`
 		RateTable                 optionalCreditRateTable `json:"rate_table"`
-		WarmCPUClassCores         optionalCreditInt64     `json:"warm_cpu_class_cores"`
 		StorageRateMicroPerGBDay  optionalCreditInt64     `json:"storage_rate_micro_per_gb_day"`
 		StorageFreeAllowanceBytes optionalCreditInt64     `json:"storage_free_allowance_bytes"`
 	}
@@ -95,7 +90,6 @@ func (r *setCreditSettingsReq) UnmarshalJSON(raw []byte) error {
 	*r = setCreditSettingsReq{
 		RateMicroPerSecond:        wire.RateMicroPerSecond.pointer(),
 		RateTable:                 wire.RateTable.pointer(),
-		WarmCPUClassCores:         wire.WarmCPUClassCores.pointer(),
 		StorageRateMicroPerGBDay:  wire.StorageRateMicroPerGBDay.pointer(),
 		StorageFreeAllowanceBytes: wire.StorageFreeAllowanceBytes.pointer(),
 	}
@@ -227,7 +221,6 @@ func (s *Server) handleCreditsShow(w http.ResponseWriter, r *http.Request, a cap
 		RateMicroPerSecond: state.RateMicroPerSecond,
 		RateTable:          creditRateTableToJSON(state.RateTable),
 		RateTableSet:       state.RateTableSet,
-		WarmCPUClassCores:  state.WarmCPUClassCores,
 
 		StorageChargedMicro:       state.StorageChargedMicro,
 		StorageRateMicroPerGBDay:  state.StorageRateMicroPerGBDay,
@@ -283,7 +276,6 @@ func creditSettingsToJSON(settings store.CreditSettings) creditSettingsJSON {
 		RateMicroPerSecond:        settings.RateMicroPerSecond,
 		RateTable:                 creditRateTableToJSON(settings.RateTable),
 		RateTableSet:              settings.RateTableSet,
-		WarmCPUClassCores:         settings.WarmCPUClassCores,
 		StorageRateMicroPerGBDay:  settings.StorageRateMicroPerGBDay,
 		StorageFreeAllowanceBytes: settings.StorageFreeAllowanceBytes,
 		MicroPerCredit:            store.MicroCreditsPerCredit,

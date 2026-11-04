@@ -53,6 +53,13 @@ unlock.
 
 - **launcher:** `sparkwing-runner launch` refuses `--poll` below 2s at startup
   The controller never suggests an idle claim poll under 2s, and one enforcing idle polls answered a faster launcher with a rate-limit warning on every tick. The launcher now fails at startup and names the controller's `--idle-claim-poll`.
+- **store (Breaking):** The schema baseline advances to version 30, which replaces the `warm_pool_desired` view in place
+  A v0.68.7 store (schema 29) upgrades on its first open, and a schema 28 store takes both steps, in one transaction on SQLite and PostgreSQL. PostgreSQL replaces the view in place, so KEDA's SELECT grant survives. An older binary refuses a schema 30 store, so snapshot the store first; rollback means restoring that snapshot. See the [store upgrade migration](docs/migrations/_unreleased.md#upgrade-the-store-in-place-to-schema-baseline-30).
+
+### Fixed
+
+- **warm capacity:** Auto no longer grows idle warm capacity to its maximum
+  The start-time trigger added one node above the current warm count whenever the last hour's median start exceeded the target, and each new warm node raised that count, so any slow start kept the pool at the Auto maximum for an hour with nobody waiting. The trigger now fires only while a job is waiting for a fresh node; with no waits the pool returns to its minimum.
 - **run:** A first run reuses the installed CLI as the pipeline engine when it is the pinned release
   The engine was downloaded again (73 MB) and verified twice; now the installed bytes are checked against the signed
   release files and verified once.
@@ -201,6 +208,10 @@ unlock.
 - **wingwire (Breaking):** `AdmissionRequest` drops `ParentLeaseToken`, `ParentRunID` and `ParentNodeID`, and the admission daemon no longer attaches a child run to its parent's lease
   No Sparkwing client sent these fields. The daemon journal no longer records `child_attach_request` or `child_attach`.
 
+### Removed
+
+- **credits (Breaking):** Remove the retired `warm_cpu_class_cores` credit setting
+  Nothing scaled from it: per-class warm capacity is the only warm policy. The credit and credit-settings responses no longer report it, and the settings write refuses a body that names it. See the [migration guide](docs/migrations/_unreleased.md#the-warm_cpu_class_cores-credit-setting-is-removed).
 
 ## [v0.68.7] - 2026-11-04
 ### Added

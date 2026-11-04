@@ -416,9 +416,9 @@ func TestOlderSchemaRequiresBackupBeforeDiscard(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// safety: schema 28 upgrades in place, so 27 is the newest version still refused as older.
+	// safety: schema 28 and later upgrade in place, so 27 is the newest version still refused as older.
 	if _, err := st.DB().Exec(storetest.Rebind(st,
-		`UPDATE sparkwing_schema_version SET version = ?`), store.ExpectedSchemaVersion()-2); err != nil {
+		`UPDATE sparkwing_schema_version SET version = ?`), 27); err != nil {
 		t.Fatal(err)
 	}
 	remedy := []string{"move ", "-wal", "-shm", "aside"}

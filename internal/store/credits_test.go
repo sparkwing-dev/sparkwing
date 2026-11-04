@@ -79,21 +79,21 @@ func TestSetCreditSettingsWritesEveryNamedValueOrNone(t *testing.T) {
 	s := storetest.Open(t)
 	ctx := context.Background()
 
-	rate, warm := int64(30_000), int64(8)
+	rate, free := int64(30_000), int64(8)
 	got, err := s.AsOperator().SetCreditSettings(ctx, store.CreditSettingsUpdate{
-		RateMicroPerSecond: &rate, WarmCPUClassCores: &warm,
+		RateMicroPerSecond: &rate, StorageFreeAllowanceBytes: &free,
 	})
 	if err != nil {
 		t.Fatalf("set both: %v", err)
 	}
-	if got.RateMicroPerSecond != rate || got.WarmCPUClassCores != warm {
+	if got.RateMicroPerSecond != rate || got.StorageFreeAllowanceBytes != free {
 		t.Fatalf("settings = %+v", got)
 	}
 
 	bad := int64(-5)
 	keep := int64(16)
 	if _, err := s.AsOperator().SetCreditSettings(ctx, store.CreditSettingsUpdate{
-		WarmCPUClassCores: &keep, RateMicroPerSecond: &bad,
+		StorageFreeAllowanceBytes: &keep, RateMicroPerSecond: &bad,
 	}); !errors.Is(err, store.ErrInvalidCreditSetting) {
 		t.Fatalf("a mixed update = %v, want a refusal", err)
 	}
@@ -101,8 +101,8 @@ func TestSetCreditSettingsWritesEveryNamedValueOrNone(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read settings: %v", err)
 	}
-	if got.WarmCPUClassCores != warm {
-		t.Fatalf("warm class = %d; the good half of a refused update was written", got.WarmCPUClassCores)
+	if got.StorageFreeAllowanceBytes != free {
+		t.Fatalf("free allowance = %d; the good half of a refused update was written", got.StorageFreeAllowanceBytes)
 	}
 
 	if _, err := s.AsOperator().SetCreditSettings(ctx, store.CreditSettingsUpdate{}); !errors.Is(
