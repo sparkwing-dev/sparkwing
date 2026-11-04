@@ -19,6 +19,17 @@ unlock.
 ---
 
 ## [Unreleased]
+### Changed
+
+- **run:** A first run reuses the installed CLI as the pipeline engine when it is the pinned release
+  The engine was downloaded again (73 MB) and verified twice; now the installed bytes are checked against the signed
+  release files and verified once.
+- **run:** A compile prints `Cache miss: pipeline binary compiled in <duration>`
+  A CI cache that never restores now shows in the run output instead of only as a slow run.
+- **sdk:** `sparkwing pipeline new` no longer downloads the controller's dependencies
+  `go mod tidy` in a new pipeline fetched 80 modules (611 MB) through SDK test imports; it now fetches 5.
+- **install:** `install.sh` downloads a release's files in one connection-reusing `curl` call
+
 ### Fixed
 
 - **launcher:** Stop warning about Cloud reservations that belong to another job namespace
