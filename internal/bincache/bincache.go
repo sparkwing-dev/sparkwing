@@ -737,10 +737,51 @@ func EffectiveOverlay(dir string, env []string) string {
 
 func buildEnvironmentKey(env []string) []byte {
 	var input bytes.Buffer
-	for _, name := range strings.Fields("PATH GOOS GOARCH GO386 GOAMD64 GOARM GOARM64 GOMIPS GOMIPS64 GOPPC64 GORISCV64 GOWASM GOEXPERIMENT GOFLAGS GOTOOLCHAIN GOROOT GOPATH GOENV GOSUMDB GONOSUMDB GOINSECURE GOPRIVATE GONOPROXY CGO_ENABLED CC CXX FC AR PKG_CONFIG CGO_CFLAGS CGO_CPPFLAGS CGO_CXXFLAGS CGO_FFLAGS CGO_LDFLAGS") {
+	for _, name := range strings.Fields("GOOS GOARCH GO386 GOAMD64 GOARM GOARM64 GOMIPS GOMIPS64 GOPPC64 GORISCV64 GOWASM GOEXPERIMENT GOFLAGS GOTOOLCHAIN GOROOT GOPATH GOENV GOSUMDB GONOSUMDB GOINSECURE GOPRIVATE GONOPROXY CGO_ENABLED CC CXX FC AR PKG_CONFIG CGO_CFLAGS CGO_CPPFLAGS CGO_CXXFLAGS CGO_FFLAGS CGO_LDFLAGS") {
 		value, _ := gotoolchain.LookupEnv(env, name)
 		fmt.Fprintf(&input, "%s=%s\x00", name, value)
 	}
+	// perf: the compilers PATH resolves to stand in for PATH itself, so activating a virtualenv or nvm no longer
+	// recompiles the pipeline, while upgrading Go behind the same PATH now does.
+	tools := []string{"go", "gcc", "clang", "pkg-config"}
+	for _, name := range []string{"CC", "CXX"} {
+		if value, _ := gotoolchain.LookupEnv(env, name); len(strings.Fields(value)) > 0 {
+			tools = append(tools, strings.Fields(value)[0])
+		}
+	}
+	for _, tool := range tools {
+		fmt.Fprintf(&input, "tool:%s=%s\x00", tool, toolIdentity(env, tool))
+	}
 	sum := sha256.Sum256(input.Bytes())
 	return sum[:]
+}
+
+func toolIdentity(env []string, tool string) string {
+	candidates := []string{tool}
+	if !filepath.IsAbs(tool) {
+		candidates = nil
+		path, _ := gotoolchain.LookupEnv(env, "PATH")
+		for _, dir := range filepath.SplitList(path) {
+			if dir == "" {
+				continue
+			}
+			name := filepath.Join(dir, tool)
+			if runtime.GOOS == "windows" && filepath.Ext(name) == "" {
+				name += ".exe"
+			}
+			candidates = append(candidates, name)
+		}
+	}
+	for _, candidate := range candidates {
+		resolved, err := filepath.EvalSymlinks(candidate)
+		if err != nil {
+			continue
+		}
+		info, err := os.Stat(resolved)
+		if err != nil || info.IsDir() || runtime.GOOS != "windows" && info.Mode()&0o111 == 0 {
+			continue
+		}
+		return fmt.Sprintf("%s|%d|%d", resolved, info.Size(), info.ModTime().UnixNano())
+	}
+	return "absent"
 }
