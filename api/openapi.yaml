@@ -2090,18 +2090,6 @@ components:
         - expires_at
       type: object
       x-sparkwing-go-type: controllerwire.LauncherPreparation
-    internal.controllerwire.LauncherRun:
-      additionalProperties: true
-      properties:
-        run_id:
-          type: string
-        team:
-          type: string
-      required:
-        - team
-        - run_id
-      type: object
-      x-sparkwing-go-type: controllerwire.LauncherRun
     internal.controllerwire.LauncherSyncRequest:
       additionalProperties: true
       properties:
@@ -2128,10 +2116,6 @@ components:
             - items:
                 $ref: '#/components/schemas/internal.capability.LeaseRef'
               type: array
-            - type: "null"
-        retire_run:
-          anyOf:
-            - $ref: '#/components/schemas/internal.controllerwire.LauncherRun'
             - type: "null"
         warm_pools:
           anyOf:
@@ -2170,8 +2154,6 @@ components:
                 $ref: '#/components/schemas/internal.capability.LeaseRef'
               type: array
             - type: "null"
-        run_terminal:
-          type: boolean
       required:
         - awards
         - retired
@@ -6052,6 +6034,8 @@ components:
           $ref: '#/components/schemas/internal.runspec.Ceilings'
         hash:
           type: string
+        proof_eligible:
+          type: boolean
         provenance:
           additionalProperties: false
           properties:

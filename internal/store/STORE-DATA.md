@@ -9,14 +9,17 @@ counter domains, boolean flags, and nonempty concurrency keys. Installations
 are referenced with their tenant. Job receipts reference the exact attempt and
 generation. Sessions, memberships and identities reference an existing account.
 The schema counterexample suites exercise these rules against either dialect.
-The baseline version is 29. Both dialects are translated from `schema.sql`.
+The baseline version is 30. Both dialects are translated from `schema.sql`.
 A fresh store gets the baseline whole. `schemaUpgrades` in `schema_upgrade.go`
 lists the forward steps, each keyed by the version and baseline digest a release
-recorded: a v0.68.3 schema-28 store gains `nodes.trusted_host` and records
-version 29 and its digest in the open transaction, under the migration advisory
-lock on PostgreSQL. A step adds a column at the end of its table so the upgraded
-schema matches a fresh one. Any other version or digest requires a backup and
-recreation, and there are no down migrations.
+recorded, and an older supported store takes every later step in the same open
+transaction, under the migration advisory lock on PostgreSQL: a v0.68.3
+schema-28 store gains `nodes.trusted_host` (version 29), and a v0.68.7 schema-29
+store gets the replaced `warm_pool_desired` view (version 30). A step adds a
+column at the end of its table so the upgraded schema matches a fresh one. A
+view is replaced with `CREATE OR REPLACE VIEW`, which keeps PostgreSQL grants;
+SQLite drops and recreates it. Any other version or digest requires a backup
+and recreation, and there are no down migrations.
 
 `sparkwing_schema_version.baseline_digest` records SHA-256 of the neutral SQL
 with LF line endings. Open refuses a differing digest at the same version with
@@ -253,8 +256,9 @@ Open intervals stop at `charged_through` in reports. Closed intervals use their
 persisted finish time. This keeps a late disruption from refunding time that a
 report counted only because the reaper had not run yet.
 Grant requests use `Tenant.RecordCreditGrant`. Its raw Store twin is removed.
-Deployment price and policy reads use `Operator.CreditSettings`,
-`Operator.CreditRateTable` and `Operator.WarmCPUClassCores`.
+Deployment price and policy reads use `Operator.CreditSettings` and
+`Operator.CreditRateTable`. Warm capacity policy lives only in
+`warm_pool_settings`; a leftover `warm_cpu_class_cores` settings row is inert.
 Billing-policy writes use `Operator.SetCreditSettings`. Once a table is stored,
 change prices through `CreditSettingsUpdate.RateTable`. A scalar update is
 refused before any sibling settings change. An absent table derives the default
@@ -961,12 +965,16 @@ and evaluation through the existing state machine and derived verdict owner.
 ## Warm capacity
 
 `warm_pool_settings` stores one operator policy for each Cloud class. Every row
-starts Off, all counts start at zero, and the start-time target is 10 seconds.
+starts Off, all counts start at zero, and the start-time target is 20 seconds;
+the schema 30 upgrade moves a class still at the earlier 10-second default to 20.
 `warm_pool_observations` holds the deployment launcher's last ready, never-bound
 node count. The `warm_pool_desired` view expires observations after 120 seconds
 and computes Off/Manual/Auto for both SQLite and PostgreSQL. Auto takes the higher
 of `ceil(cold waits in 30m / 2)` and warm plus one when the hourly median exceeds
-the target, then clamps to min/max.
+the target while a job is still waiting for a fresh node (an unstarted, unsettled
+cold wait), then clamps to min/max. Without that live wait, the latency trigger
+would feed on its own output: each new warm node raises `warm`, so the pool would
+climb to the maximum whenever any start in the last hour was slow.
 
 Job telemetry in `cloud_job_capacity` is scoped to billing reservations and
 grouped by `requested_class`. `granted_class` identifies upsizes,

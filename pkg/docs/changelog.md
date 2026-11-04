@@ -33,7 +33,41 @@ unlock.
   an agent without a reason. Fix it by saying why the retry should pass, such as
   `--reason "flake: DNS timeout in TestX"` or `--reason "fixed X in commit Y"`. People are never asked, and
   `--agent none` opts out. A controller older than the field gets the retry without the reason, with a notice.
+- **warm capacity:** The default Auto start-time target is 20 seconds instead of 10. New stores seed every class at 20 seconds, and the schema 30 upgrade moves classes still at 10 seconds to 20; a class set to any other target keeps it. `sparkwing operator warm-capacity set` without `--start-time-target` now sends 20s.
+- **sdk:** `NewConcurrencyGroup` in Go and `ConcurrencyGroup` in TypeScript no longer check `Scope` and `OnLimit` themselves. The host still refuses an unknown value as `plan_invalid` when it validates the plan, so both SDKs fail the same way.
+- **delivery:** Docs, UI and process landings run their own checks plus the review
+  Without `--full`, the `gate` and `land` pipelines run vet, build, lint, the critical tests and the TypeScript SDK suite only when the change reaches Go source or `sdk/typescript/`, and install frontend dependencies only when a frontend suite runs. The review still runs on every landing; `sparkwing run gate -- --full` keeps the broad verification.
 
+### Fixed
+
+- **billing:** A refund Stripe fails after reporting it succeeded logs `alert=refund_failed_after_success` at error level
+  No operator view listed it, so the customer was the only one who could notice. [Cloud billing](docs/billing.md) has the manual reconciliation.
+- **controller:** `GET /api/v1/team/github-app/automation` accepts `limit` and its own `next_cursor`
+  An older query check refused both with 400, so a team with more than 50 automations could not read past the first page.
+- **CLI:** A source build without the dashboard bundle refuses `dashboard start` and `dashboard open`
+  The README promised this, but the local controller served the empty embed and every page answered 404. Start and open now fail with a hint naming `bin/build-web.sh` or a release binary, and the local controller serves its missing-bundle page instead of a 404. Runs never need the bundle.
+- **controller:** GitHub check summaries count a memoized job as `memoized`, not `other`
+  The summary kept its own list of outcomes, which had retired names and lacked `memoized`. It now counts the outcome the store records.
+- **runner:** `sparkwing-runner` help follows the output contract the CLI uses
+  Help now goes to stdout, as one `{"kind":"help","text":...}` record under `-o json` or a pipe, and an invalid `-o` value is refused before help prints. It went to stderr in every mode, and `--help -o bogus` succeeded.
+- **runners:** A native runner service keeps a custom `SPARKWING_HOME`
+  `sparkwing runners add` placed the log under the selected state home, but the systemd unit and LaunchAgent did not carry it, so the started runner used `~/.sparkwing`. Both now set `SPARKWING_HOME` to the home the installer resolved; reinstall an existing service to pick it up.
+- **runner:** `sparkwing-runner version -o json` writes one JSON record on one line
+  It printed an indented document, which a reader taking one JSON object per line could not parse.
+- **delivery:** Gate and land runs start faster and redo less work
+  The golangci-lint cache moved from `.sparkwing/cache/` to the worktree's git directory, so starting a run in a checkout that had linted no longer hashes its 80,000 files (`sparkwing pipeline list` 67 s to 2.5 s). Without `--full` the gate lints only the packages holding changed Go files, its test steps keep one `SPARKWING_HOME` per checkout so `go test` replays unchanged passes, a change outside every package (`.github/`, `docs/`, `bin/` and similar) runs the packages whose tests read it, and land pushes the tree it gated without re-running the pre-push hook. Hosted CI refreshes its Go build cache from every push to main.
+- **launcher:** Cloud Job Pods retry DNS after 1s instead of 5s
+  Under strict VPC CNI network policy a new Pod's egress drops for about 2s, so the first controller lookup used to stall for the full 5s resolver timeout. Job Pods now set the resolver options `timeout:1` and `attempts:5`, and admission accepts exactly those options on Job Pods.
+- **launcher:** Cold-start capacity placeholders leave a reserved node about 2s sooner
+  The `sw-capacity-*` placeholder ran `sleep` as PID 1, which ignores SIGTERM, so each delete before Job creation waited for the kubelet to kill it. It now runs a `/bin/sh` that sleeps for the same budget and exits on SIGTERM. Deletion stays graceful, so the placeholder's requests are still freed before the Job is placed.
+- **runner image:** Cloud jobs skip downloading and compiling the runner's own SDK
+  A release runner image now ships a Go module cache and build cache primed for its own SDK version under `/usr/local/share/sparkwing/go-seed`, and a Cloud Job copies them into its empty `/tmp` caches while the Docker sidecar starts. A Cloud plan already pins that version, so its pipeline build drops from about 24s to a few seconds; dependencies beyond the SDK's own still download as before, with `go.sum` checks unchanged. The image grows by about 200 MB uncompressed (about 60 MB compressed).
+- **launcher:** `sparkwing-runner launch` refuses `--poll` below 2s at startup
+  The controller never suggests an idle claim poll under 2s, and one enforcing idle polls answered a faster launcher with a rate-limit warning on every tick. The launcher now fails at startup and names the controller's `--idle-claim-poll`.
+- **store (Breaking):** The schema baseline advances to version 30, which replaces the `warm_pool_desired` view in place
+  A v0.68.7 store (schema 29) upgrades on its first open, and a schema 28 store takes both steps, in one transaction on SQLite and PostgreSQL. PostgreSQL replaces the view in place, so KEDA's SELECT grant survives. An older binary refuses a schema 30 store, so snapshot the store first; rollback means restoring that snapshot. See the [store upgrade migration](docs/migrations/_unreleased.md#upgrade-the-store-in-place-to-schema-baseline-30).
+- **warm capacity:** Auto no longer grows idle warm capacity to its maximum
+  The start-time trigger added one node above the current warm count whenever the last hour's median start exceeded the target, and each new warm node raised that count, so any slow start kept the pool at the Auto maximum for an hour with nobody waiting. The trigger now fires only while a job is waiting for a fresh node; with no waits the pool returns to its minimum.
 - **run:** A first run reuses the installed CLI as the pipeline engine when it is the pinned release
   The engine was downloaded again (73 MB) and verified twice; now the installed bytes are checked against the signed
   release files and verified once.
@@ -46,19 +80,130 @@ unlock.
   Activating a virtualenv or Node version manager keeps the compiled pipeline; upgrading Go behind the same `PATH`
   rebuilds it.
 - **run:** Each engine notice, such as the missing version policy warning, prints once per command instead of three times
-
-### Fixed
+- **cli:** Local commands no longer read gitignored trees when keying the pipeline binary
+  `sparkwing run`, `pipeline list`, `info` and `cache explain` walked every file under the pipeline module and its local `replace` targets and passed each path to `git check-ignore`; an 80,000-file ignored lint cache made each take 60-90 seconds. One `git ls-files` call now names ignored files and wholly ignored directories, which are skipped, and the remaining files hash in parallel. Keys are unchanged.
+- **run:** A foreground `sparkwing run` shows step output and exits within 200ms of the run finishing
+  It followed its own machine's controller on the one-second remote poll. Remote follows keep one second.
+- **run:** Local runs start faster in repositories that replace the SDK
+  The running engine is hashed once per process instead of about eight times, and each job reads its run snapshot once while binding its process services.
+- **local:** The local controller reuses prepared SQLite statements
+  Every store call parsed and planned its SQL again, about 40% of the local controller's CPU during a run. Each connection now keeps up to 512 prepared statements, which cuts the controller's share of a local job's start from roughly 0.8 seconds to 0.2 seconds.
+- **run:** SDK installs check the SDK pin while the pipeline key is computed, and a foreground run reads its final logs as soon as hosting ends
+- **run:** The engine's own digest is kept in `SPARKWING_HOME/cache` across processes
+  Each process hashed its ~100 MB executable (about 280ms) before resolving a replacement-pin engine. The digest is now reused while the file's device, inode, size, modification and change times are unchanged.
+- **cache:** Pipeline key inputs reuse the digest of each unchanged file from `SPARKWING_HOME/cache/file-digests`
+  Each SDK install re-read every file of the pipeline module and its `replace` targets, 37 MB in the Sparkwing repository and 300-700ms under load, twice per local run. Keys are unchanged.
+- **controller (Breaking):** A used Cloud node retires once the launcher has seen it unreserved and empty for 60 seconds, whatever state its run is in
+  The launcher kept a run's empty nodes until the run ended, so a run waiting on an approval, or a fan-out waiting on one long job, held idle nodes that other teams' jobs could not use until Karpenter consolidated them. A successor that reserves the node within the grace still reuses it; one that arrives later, such as a job after an approval, boots a fresh node. `sparkwing-runner launch --idle-grace` sets the grace, which must be at least `--poll` plus 30 seconds. The launcher no longer asks the controller whether a run has ended: the `retire_run` request (the `LauncherRun` body with its `run_id` and `team`) and `run_terminal` response are gone from launcher sync, so deploy the controller and launcher from the same release. See the [migration guide](docs/migrations/_unreleased.md#cloud-nodes-retire-after-an-idle-grace).
+- **delivery:** `sparkwing run land` merges `origin/main` when main moved instead of failing
+  A clean merge (a merge commit, never a rebase) re-checks only the files the merge changed, with `go build` and the
+  affected tests, then pushes; the review does not run again. It merges at most three times, and a conflict fails
+  naming `git merge origin/main`. Preconditions accept a branch behind main that merges cleanly.
+- **controller:** The controller logs its payment deployment id at start, and a checkout pairing alert says which setting to fix
+  A 421 from the checkout service now tells the operator to set its `BILLING_DEPLOYMENT` to the `deployment` value on the alert, which the start-up `payment deployment` line also prints.
+- **billing:** Retained storage is charged in full, even when that takes the balance negative
+  Storage past the free allowance used to be charged only from the positive balance, and nothing was charged while
+  a hold was open, so the unpaid part was forgiven. It is now charged at the published rate like compute overage:
+  the balance can go negative, a hold no longer pauses the charge, and the next Add funds covers it. A team at zero
+  or below still cannot grow its storage or start new Cloud work.
+- **controller:** The shared object-store request budget no longer has a per-minute stop by default
+  The controller used to refuse every team's uploads, downloads and deletes for the rest of a minute once all teams
+  together sent 1,200 writes, 3,000 reads, or 600 listings or deletes. The budget now counts requests and refuses
+  nothing unless the operator sets one with `--object-store-budget`, such as `put:minute=1200`, which keeps working.
+- **controller:** The `cloud` and `cloud-free` limits profiles no longer cap a team's total request rate
+  All of a team's tokens shared one bucket of 3,600 requests a minute (600 on `cloud-free`), so a team that added
+  runners could see its heartbeats and state writes refused with `429`. Per-runner claim and heartbeat budgets and
+  the request-rate alarm still apply, and `--requests-per-token-minute` still sets a budget when the operator names one.
+- **controller:** The `cloud` and `cloud-free` limits profiles no longer cap runs per hour
+  A team's GitHub App pushes, API submissions and schedules shared a cap of 600 runs an hour (60 on `cloud-free`), and
+  a push the cap refused became a failed delivery that a team admin had to process again. The per-team queue shed
+  depth still answers `503` past its threshold, and `--max-runs-per-principal-hour` still sets a cap when the
+  operator names one.
+- **controller:** GitHub Actions runners no longer cap bound repositories or live credentials at 20 per team
+  A credential lives about an hour after its job ends, so a team that ran 20 short workflows in an hour had its next
+  exchange refused with `429`, and a metered team could not bind a 21st repository. Both caps are removed. Each
+  workflow run attempt still exchanges once, against verified GitHub identity, for a one-hour credential.
+- **runners (Breaking):** A team's own launcher pods are no longer fresh hosts
+  They take the trust of the launcher credential that started them: jobs on them mint OIDC tokens with
+  `runner_environment` `persistent` instead of `fresh` and write that launcher's own cache scope unless the team has
+  `high_trust` on. Only Sparkwing Cloud nodes and GitHub-hosted Actions runners, which their provider attests, are fresh.
+  See the [migration guide](docs/migrations/_unreleased.md#team-launcher-pods-are-not-fresh-hosts).
+- **cache (Breaking):** `high_trust` lets only trusted hosts write the shared verified cache
+  A trusted host is a fresh host or a machine scoped with `--repos`. Personal machines and self-hosted Actions runners
+  now write only their own host's cache whatever `high_trust` says, so a pass `sw.FromProvenRunAtCommit()` counts never
+  restores bytes such a host wrote.
+- **sdk:** `sw.FromProvenRunAtCommit()` counts a run only when intake sealed it proof eligible
+  Intake checks the run's options against an allow-list of options that only place, schedule or present a run; any other
+  option, such as `--cache-from`, a checkout policy, a risk acknowledgement or job default overrides, and any option added
+  later, keeps the run from counting. Runs from earlier releases are not eligible, so the first gate after upgrading runs
+  in full. A job's host is recorded as trusted when it is claimed rather than when it starts.
+- **helm + launcher:** The Cloud job admission policies read the runner and Docker images from a ConfigMap
+  The chart renders `sparkwing-cloud-admission` in the job namespace, and the two ValidatingAdmissionPolicies bind to
+  it through `paramRef` with `parameterNotFoundAction: Deny`, so the cluster-scoped policies and bindings stay the same
+  when a release moves the images. An installation that applies them apart from the namespaced chart updates them once
+  for this release, after the ConfigMap exists. The launcher refuses to start unless that ConfigMap holds exactly its
+  own images, and its job namespace Role gains `get` on it.
+- **controller:** Run intake refuses an invalid setting, such as an unsupported Cloud size, as `400 bad_request`
+  A request naming `sparkwing-3cpu` returned `500 internal` "request failed". The refusal now carries the setting error, which for a size lists the valid ones.
+- **console:** The Start a run dialog keeps keyboard focus inside it
+  Tab and Shift+Tab cycle through the dialog's controls instead of reaching the runs list behind it, and closing the dialog returns focus to the button that opened it.
+- **console:** The Help panel stays on screen at narrow widths
+  At 360px the panel, and its support link, started off the left edge of the viewport.
+- **console:** A job cancelled before it started shows why in its Logs card
+  The card showed only "No logs captured for this node"; it now shows the status detail the API reports, such as the failed dependency and the retry remedy.
+- **console:** Content-addressed build assets are served with `Cache-Control: public, max-age=31536000, immutable`
+  Files under `/_next/static/` had no caching policy, so browsers revalidated them on every load.
+- **dashboard:** A dashboard restored after an idle exit binds loopback only
+  A dashboard started with `--allow-remote` on a non-loopback address came back on that address whenever a run or schedule restarted the controller, so the consent outlived the network it was given on. The restore now keeps the port and read-only policy but binds `127.0.0.1`; run `sparkwing dashboard start --allow-remote` again to serve remotely.
 
 - **runners:** A job waiting in `RunAndAwait` no longer holds its runner's slot
   A self-hosted runner defaults to `max_concurrent: 1`, and a child run goes back to the same runners, so the first `RunAndAwait` on a one-runner team hung until its timeout. A job blocked on its children now leaves its slot free, and so does the owner of a named-runner run while one of its jobs waits, until the last wait returns. A resumed job can briefly put the runner over `max_concurrent` until other jobs finish.
+- **cli:** `sparkwing runners add --help` says a job waiting in `RunAndAwait` does not count toward `--max-concurrent`
 
 - **launcher:** Stop warning about Cloud reservations that belong to another job namespace
   Staging and production can share a cluster, so each launcher logged a warning for every node the other environment reserved. That is now a debug message.
+- **cloud:** Expanding a generator whose job was memoized reads its recorded output
+  A separately awarded evaluator refused the memoized job's output as unreadable, because its source has attempt and generation zero, so the expansion failed. The evaluator's own lease still has to be live.
 - **cli:** Print blank command output lines as blank lines in plain run logs
   `sparkwing runs logs -o plain` printed the word `exec_line` wherever a command wrote an empty line.
 - **cli:** List this machine in `sparkwing runners list` against the local controller
   The local runner appeared only while it held a job, without its `runner.labels`, and with a `last_seen` that stopped at the last claim before a daemon restart. It is now always listed, named after the host, with the labels the daemon read at start and a `last_seen` of the read time.
+- **sdk:** `FilesetHash` honors `!pattern` re-inclusions in `.dockerignore`, in Go and TypeScript
+  Both SDKs dropped a file as soon as any pattern matched, so `*.md` then `!README.md` still left `README.md` out of the hash, and a deployment tag from `docker.ComputeTagsIn` stayed the same when that build input changed. As in Docker, the last matching pattern now decides.
+- **protocol:** The published node protocol schemas reject the requests the host and SDKs already reject
+  `node-protocol.schema.json` accepted `run_step` without `settled`, and `job`, `step` or `failure` on `eval`, and `describe.schema.json` accepted any cache `resolver`. The host decoder, its validator and the schema generator now read one per-operation field rule, and the resolver lists `go-modules` and `npm`.
 
+### Docs
+
+- **sdk:** Describe how `WithFreshRepo` and `WithFreshBranch` select a child's source
+  `WithFreshBranch` alone runs that branch's tip in the parent's repository, and naming the parent's own repository with `WithFreshRepo` inherits the parent's source.
+- **docs:** Correct the secrets and versioning pages
+  `--only-on` secrets reach unverified runs on a runner enrolled with `--trust=any`, and every launcher, self-hosted ones included, refuses a development build unless `SPARKWING_DEVELOPMENT_BUILD=1` is set.
+- **docs:** README, the local dashboard page and the auth reference describe shipped integrations as shipped
+  They still said native host, controller and managed-service integration was incomplete and that card, refund, fraud-warning and dispute settlement needed store work. Both shipped.
+- **docs:** Configuration guidance names each component's real input
+  Machine configuration no longer says installation uses submitted values (only planning and execution do), and the git-credentials page says the controller reads its secrets key from the `secrets-key` file in `--credentials-dir`, not `SPARKWING_SECRETS_KEY`.
+- **docs:** The API guide shows a read-only bearer request, and the versioning guide links the latest stable release
+
+### Removed
+
+- **cli (Breaking):** Remove the hidden `sparkwing __host-trigger` command. It refused every invocation because standalone hosting is not available; the local controller hosts queued triggers.
+- **tooling (Breaking):** Delete `bin/pre-release-test.sh` and `bin/status.sh`, which tested removed packages and queried removed `/agents` and `/jobs` routes. Use `sparkwing run pre-release`, `sparkwing runners list` and `sparkwing runs` instead.
+- **cli (Breaking):** `sparkwing run --sw-output` is removed; use `-o`/`--output`
+  The two flags selected the same thing, and a run's help and errors read only `-o`, so `--sw-output json` could run in JSON and still fail in prose. `-o` now drives a run's output, help and errors, ahead of `SPARKWING_LOG_FORMAT` and terminal detection. Replace `--sw-output FORMAT` with `-o FORMAT`. See the [migration guide](docs/migrations/_unreleased.md#sparkwing-run---sw-output-is-removed).
+
+- **docs:** `SPARKWING_DEBUG` is no longer listed as a setting
+  Nothing read it, so setting it never changed SDK diagnostics. Its process-environment class goes with it.
+- **CLI (Breaking):** Sparkwing no longer searches for other installed copies of itself
+  `sparkwing doctor` drops `install_conflict` and its `executable` and `competing_install` lines, `sparkwing info` drops `executable.other_installs` and its warning, and `sparkwing update` and `bin/install.sh` no longer print rename commands for other copies. Your shell decides which copy runs: check with `which -a sparkwing` and `sparkwing version`, then remove the unwanted install or call the one you want by its absolute path. See [If the wrong sparkwing runs](docs/getting-started.md#if-the-wrong-sparkwing-runs) and the [migration guide](docs/migrations/_unreleased.md#doctor-and-info-no-longer-report-other-installs).
+- **runners (Breaking):** `sparkwing runners add --trust verified` is gone
+  `--repos`, which every shared runner needs, already limits a runner to repository-proven work, and a runner scoped by
+  it is now a trusted host whose jobs can produce a counted pass. See the
+  [migration guide](docs/migrations/_unreleased.md#runners-add---trust-verified-is-gone).
+- **wingwire (Breaking):** `AdmissionRequest` drops `ParentLeaseToken`, `ParentRunID` and `ParentNodeID`, and the admission daemon no longer attaches a child run to its parent's lease
+  The `admission_request` message loses `parent_lease_token`, `parent_run_id` and `parent_node_id`. No Sparkwing client sent these fields. The daemon journal no longer records `child_attach_request` or `child_attach`. See the [migration guide](docs/migrations/_unreleased.md#admission-requests-no-longer-attach-to-a-parent-lease).
+- **credits (Breaking):** Remove the retired `warm_cpu_class_cores` credit setting
+  Nothing scaled from it: per-class warm capacity is the only warm policy. The credit and credit-settings responses no longer report it, and the settings write refuses a body that names it. See the [migration guide](docs/migrations/_unreleased.md#the-warm_cpu_class_cores-credit-setting-is-removed).
 
 ## [v0.68.7] - 2026-11-04
 ### Added

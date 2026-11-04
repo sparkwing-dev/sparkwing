@@ -9,7 +9,6 @@ import (
 	"strings"
 	"testing"
 	"testing/quick"
-	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/limits"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
@@ -18,7 +17,6 @@ import (
 type outputRecords struct {
 	RecordStore
 	request     CommitRecordRequest
-	lookup      RecordLookup
 	result      RecordLookupResult
 	err         error
 	afterCommit func()
@@ -48,11 +46,6 @@ func TestOutputCommitPreservesCancellationCause(t *testing.T) {
 	}
 }
 
-func (r *outputRecords) LookupRecord(_ context.Context, q RecordLookup) (RecordLookupResult, error) {
-	r.lookup = q
-	return r.result, r.err
-}
-
 func newOutputData(t *testing.T) (OutputData, *outputRecords, *signer) {
 	t.Helper()
 	i := identity()
@@ -77,7 +70,7 @@ func newOutputData(t *testing.T) (OutputData, *outputRecords, *signer) {
 	})})
 	r := &outputRecords{}
 	return OutputData{
-		Bytes: store, Records: r, Identity: i, Pipeline: "build", Budget: Budget{Deadline: time.Now().Add(time.Minute)},
+		Bytes: store, Records: r, Identity: i, Pipeline: "build",
 		Authority: Authority{CapabilityRef: i.CapabilityRef, Principal: i.Principal, Attempt: i.Attempt, Repo: "gh:123", Ref: RefFacts{Scope: RefScope{Ref: "feature"}}},
 	}, r, s
 }
@@ -96,10 +89,6 @@ func TestOutputRecordRoundTrip(t *testing.T) {
 			}
 			if record.Digest != digest(body) || signer.commits != 1 || records.request.Source != data.Identity || records.request.Authority != data.Authority || records.request.ManifestDigest.Set || len(records.request.Members) != 0 {
 				t.Fatalf("output commit = %+v", records.request)
-			}
-			got, err := data.Read(t.Context(), key)
-			if err != nil || string(got) != body || records.lookup.Authority != data.Authority || records.lookup.Key != key || records.lookup.Budget != data.Budget {
-				t.Fatalf("output read = %q, %v", got, err)
 			}
 		})
 	}
@@ -151,86 +140,6 @@ func TestOutputImportedPublication(t *testing.T) {
 		t.Fatalf("imported output = %+v, %v", record, err)
 	}
 }
-
-func TestOutputReadRefusals(t *testing.T) {
-	for _, fault := range []string{"missing_record", "refused_edge", "wrong_key", "wrong_kind", "missing_bytes", "corrupt", "short", "long", "output_limit", "unverified", "close", "budget", "cancelled"} {
-		t.Run(fault, func(t *testing.T) {
-			data, records, _ := newOutputData(t)
-			record, err := data.Put(t.Context(), []byte("result"))
-			if err != nil {
-				t.Fatal(err)
-			}
-			ctx, cancel := context.WithCancel(t.Context())
-			defer cancel()
-			key := record.Key
-			body := &remoteBody{Reader: strings.NewReader("result")}
-			size := int64(6)
-			downloads := 0
-			switch fault {
-			case "missing_record":
-				records.result.Found = false
-			case "refused_edge":
-				records.err = ErrDigestNotReadable
-			case "wrong_key":
-				records.result.Record.Key.Name = "other-run"
-			case "wrong_kind":
-				key.Kind = KindDepcache
-			case "corrupt":
-				body.Reader = strings.NewReader("wrong!")
-			case "short":
-				body.Reader = strings.NewReader("resul")
-			case "long":
-				body.Reader = strings.NewReader("result!")
-			case "output_limit":
-				raw := strings.Repeat("x", int(limits.NodeOutputBytes)+1)
-				body.Reader, size = strings.NewReader(raw), int64(len(raw))
-				records.result.Record.Digest = digest(raw)
-			case "close":
-				body.err = errors.New("close failed")
-			case "budget":
-				data.Budget.Deadline = time.Time{}
-			case "cancelled":
-				cancel()
-			}
-			data.Bytes = NewSignedStore(SignedStoreOptions{
-				Signer: &signer{download: func(q GetRequest) (SignedTransfer, error) {
-					downloads++
-					if fault == "missing_bytes" {
-						return SignedTransfer{}, ErrNotFound
-					}
-					return SignedTransfer{Digest: q.Digest, Size: size}, nil
-				}},
-				HTTPClient: transfer(func(context.Context, SignedTransfer, io.Reader) (io.ReadCloser, error) { return body, nil }),
-			})
-			if fault == "unverified" {
-				data.Bytes = unverifiedOutputStore{Store: data.Bytes, body: body}
-			}
-			got, err := data.Read(ctx, key)
-			if err == nil || got != nil {
-				t.Fatalf("bad output returned bytes: %q, %v", got, err)
-			}
-			if fault == "cancelled" && !errors.Is(err, context.Canceled) {
-				t.Fatalf("cancellation = %v", err)
-			}
-			if downloads > 0 && fault != "missing_bytes" && !body.closed {
-				t.Fatal("failed output read leaked its stream")
-			}
-		})
-	}
-}
-
-type unverifiedOutputStore struct {
-	Store
-	body *remoteBody
-}
-
-func (s unverifiedOutputStore) Get(context.Context, GetRequest) (VerifiedReader, error) {
-	return unverifiedOutput{s.body}, nil
-}
-
-type unverifiedOutput struct{ *remoteBody }
-
-func (unverifiedOutput) Verified() bool { return false }
 
 type cancelledOutputUpload struct {
 	Store

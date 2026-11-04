@@ -37,7 +37,7 @@ func TestLintReportsAFindingIntroducedInALinkedWorktree(t *testing.T) {
 	runTestGit(t, origin, "worktree", "add", "-b", "finding", worktree, "HEAD")
 
 	t.Chdir(worktree)
-	t.Cleanup(func() { _ = os.RemoveAll(pipelineCacheDir("golangci-lint")) })
+	t.Cleanup(func() { _ = os.RemoveAll(lintCacheDir()) })
 
 	writeGoFile(t, filepath.Join(worktree, "internal", "negative_control.go"),
 		ineffassignViolation("internal"))
@@ -54,5 +54,29 @@ func TestLintReportsAFindingIntroducedInALinkedWorktree(t *testing.T) {
 	if !strings.Contains(err.Error(), "ineffectual assignment") {
 		t.Fatalf("lint failed in a linked worktree for some reason other than the "+
 			"planted finding: %v", err)
+	}
+}
+
+// TestLintCacheLivesInTheWorktreesGitDir keeps the 80,000-file cache out of
+// the tree the pipeline's source key walks, and apart from every other tree.
+func TestLintCacheLivesInTheWorktreesGitDir(t *testing.T) {
+	root := t.TempDir()
+	origin := filepath.Join(root, "origin")
+	writeGoFile(t, filepath.Join(origin, "go.mod"), "module fixture\n\ngo 1.25\n")
+	gitInit(t, origin)
+	gitCommitAll(t, origin, "base")
+	linked := filepath.Join(root, "linked")
+	runTestGit(t, origin, "worktree", "add", "-b", "linked", linked, "HEAD")
+	dirs := map[string]string{}
+	for _, tree := range []string{origin, linked} {
+		t.Chdir(tree)
+		dir := lintCacheDir()
+		if strings.HasPrefix(dir, tree+string(filepath.Separator)) && !strings.HasPrefix(dir, filepath.Join(tree, ".git")) {
+			t.Fatalf("%s: lint cache %s sits in the walked tree", tree, dir)
+		}
+		dirs[tree] = dir
+	}
+	if dirs[origin] == dirs[linked] {
+		t.Fatalf("two worktrees share the lint cache %s", dirs[origin])
 	}
 }

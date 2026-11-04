@@ -39,6 +39,12 @@ func validAttempt(a runspec.AttemptIdentity) bool {
 	return a.Team != "" && a.RunID != "" && a.NodeID != "" && a.Attempt > 0 && a.Generation > 0
 }
 
+// safety: an eval source names a persisted result, not an attempt, so a memoized
+// source has attempt and generation zero; the unit's own generation is the lease.
+func validEvalSource(a runspec.AttemptIdentity) bool {
+	return a.Team != "" && a.RunID != "" && a.NodeID != "" && a.Attempt >= 0 && a.Generation >= 0
+}
+
 func validUpload(i UploadIdentity) bool {
 	if i.Team == "" || i.RunID == "" || i.Principal == "" || i.CapabilityRef == "" {
 		return false
@@ -60,7 +66,7 @@ func validUpload(i UploadIdentity) bool {
 		case UploadTriggerUnit, UploadPlanUnit:
 			return !u.Source.Set
 		case UploadEvalUnit:
-			return u.Source.Set && validAttempt(u.Source.Value) && u.Source.Value.Team == i.Team && u.Source.Value.RunID == i.RunID
+			return u.Source.Set && validEvalSource(u.Source.Value) && u.Source.Value.Team == i.Team && u.Source.Value.RunID == i.RunID
 		}
 	}
 	return false
@@ -82,7 +88,7 @@ func AuthorizeUpload(a Authority, i UploadIdentity, kind Kind) error {
 	if (a.Upload.Set && a.Upload.Value != i) || (i.Kind != UploadJob && !a.Upload.Set) {
 		return ErrDigestNotReadable
 	}
-	for _, rule := range UploadRules {
+	for _, rule := range uploadRules {
 		if rule.IdentityKind == i.Kind && rule.RequiresAttempt == i.Attempt.Set && rule.RequiresUnit == i.Unit.Set && slices.Contains(rule.RecordKinds, kind) {
 			return nil
 		}

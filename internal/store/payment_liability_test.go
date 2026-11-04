@@ -8,7 +8,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 )
 
-func TestProtectedWarningFreezesStorageSpending(t *testing.T) {
+func TestProtectedWarningRefusesStorageGrowthButStillCharges(t *testing.T) {
 	s, event := paymentFixture(t, capability.PaymentTest)
 	event.LiabilityShift, event.ThreeDS = true, "authenticated"
 	if _, err := s.settlePaymentFacts(t.Context(), event); err != nil {
@@ -36,11 +36,11 @@ func TestProtectedWarningFreezesStorageSpending(t *testing.T) {
 		t.Fatalf("storage growth = %v; want held credit refused", err)
 	}
 	now = now.Add(24 * time.Hour)
-	if billed := retainedBill(t, s); len(billed.Charges) != 0 {
-		t.Fatalf("frozen credit funded retained storage: %+v", billed)
+	if billed := retainedBill(t, s); len(billed.Charges) != 1 || billed.ChargedMicro != rate {
+		t.Fatalf("held storage = %+v; want the full day charged", billed)
 	}
-	if balance, err := tenant.CreditBalanceMicro(t.Context()); err != nil || balance != before {
-		t.Fatalf("frozen balance = %d, want %d: %v", balance, before, err)
+	if balance, err := tenant.CreditBalanceMicro(t.Context()); err != nil || balance != before-rate {
+		t.Fatalf("held balance = %d, want %d: %v", balance, before-rate, err)
 	}
 	freeze, err := tenant.CreditFreeze(t.Context())
 	if err != nil || len(freeze.Disputes) != 1 {
@@ -51,7 +51,7 @@ func TestProtectedWarningFreezesStorageSpending(t *testing.T) {
 		t.Fatal(err)
 	}
 	now = now.Add(24 * time.Hour)
-	if billed := retainedBill(t, s); len(billed.Charges) != 1 || billed.ChargedMicro != min(before, rate) {
+	if billed := retainedBill(t, s); len(billed.Charges) != 1 || billed.ChargedMicro != rate {
 		t.Fatalf("released storage = %+v; want only the released day charged", billed)
 	}
 }

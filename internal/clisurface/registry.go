@@ -9,12 +9,6 @@ func Registry() []Command {
 			{Name: "kind", Argument: "KIND", Repeatable: true, CommaList: true},
 			{Name: "word", Argument: "VALUE", Meaning: "Command words to complete; empty selects the root."},
 		}},
-		{Path: "sparkwing __host-trigger", Hidden: true, Flags: []Flag{
-			{Name: "standalone-reason", Argument: "REASON"},
-			{Name: "run", Argument: "RUN"},
-			{Name: "state-db", Argument: "PATH"},
-			{Name: "env-file", Argument: "PATH"},
-		}},
 		{Path: "sparkwing __tick", Hidden: true, Rules: []string{"Stable managed-timer entrypoint; start the local controller on demand. No crons tick alias."}, Flags: []Flag{
 			{Name: "home", Argument: "PATH", Meaning: "Explicit state home captured by the managed timer."},
 			{Name: "dry-run"},
@@ -65,7 +59,7 @@ func Registry() []Command {
 			{Name: "force"},
 		}},
 		{Path: "sparkwing daemon status", Flags: []Flag{}},
-		{Path: "sparkwing daemon stop", Rules: []string{"Stops the local controller and its dashboard. The dashboard no longer returns when a run or schedule next starts the controller; until this stop, a controller that exits idle and restarts on demand serves it again at the same address and read-only policy."}, Flags: []Flag{}},
+		{Path: "sparkwing daemon stop", Rules: []string{"Stops the local controller and its dashboard. The dashboard no longer returns when a run or schedule next starts the controller; until this stop, a controller that exits idle and restarts on demand serves it again with the same port and read-only policy, on loopback only; a remote address needs `dashboard start --allow-remote` again."}, Flags: []Flag{}},
 		{Path: "sparkwing dashboard", Flags: []Flag{}},
 		{Path: "sparkwing dashboard install", Platforms: []string{"linux", "darwin"}, Rules: []string{"Install a login service with restart on failure using systemd user or launchd; no socket activation. Refuse Windows with --stay guidance."}, Flags: []Flag{
 			{Name: "force"},
@@ -82,7 +76,7 @@ func Registry() []Command {
 			{Name: "stay"},
 		}},
 		{Path: "sparkwing dashboard status", Flags: []Flag{}},
-		{Path: "sparkwing dashboard stop", Rules: []string{"Stops the local controller and its dashboard. The dashboard no longer returns when a run or schedule next starts the controller; until this stop, a controller that exits idle and restarts on demand serves it again at the same address and read-only policy."}, Flags: []Flag{}},
+		{Path: "sparkwing dashboard stop", Rules: []string{"Stops the local controller and its dashboard. The dashboard no longer returns when a run or schedule next starts the controller; until this stop, a controller that exits idle and restarts on demand serves it again with the same port and read-only policy, on loopback only; a remote address needs `dashboard start --allow-remote` again."}, Flags: []Flag{}},
 		{Path: "sparkwing dashboard uninstall", Platforms: []string{"linux", "darwin"}, Rules: []string{"Remove the managed login service; Windows uses --stay only."}, Flags: []Flag{}},
 		{Path: "sparkwing debug", Flags: []Flag{}},
 		{Path: "sparkwing debug attach", Flags: []Flag{
@@ -163,7 +157,7 @@ func Registry() []Command {
 		}},
 		{Path: "sparkwing operator warm-capacity", Authority: deploymentAdmin, Flags: []Flag{}},
 		{Path: "sparkwing operator warm-capacity show", Authority: deploymentAdmin, Flags: []Flag{{Name: "profile", Argument: "NAME"}}},
-		{Path: "sparkwing operator warm-capacity set", Authority: deploymentAdmin, Rules: []string{"Replace one class policy. Off is the default. Counts default to zero and the start-time target to 10s.", "Auto uses the higher of cold-start waits / 2 rounded up and current warm + 1 when the hourly median exceeds the target, clamped to min/max."}, Flags: []Flag{
+		{Path: "sparkwing operator warm-capacity set", Authority: deploymentAdmin, Rules: []string{"Replace one class policy. Off is the default. Counts default to zero and the start-time target to 20s.", "Auto uses the higher of cold-start waits / 2 rounded up and current warm + 1 when the hourly median exceeds the target, clamped to min/max."}, Flags: []Flag{
 			{Name: "class", Argument: "CLASS", Required: true},
 			{Name: "mode", Argument: "MODE", Required: true},
 			{Name: "count", Argument: "N"},
@@ -289,7 +283,7 @@ func Registry() []Command {
 		{Path: "sparkwing team settings show", Authority: teamCredential, Rules: []string{"Show the team's members_can_add_machines setting and claim ranking. members_can_add_machines defaults to true and allows members to enroll only their own personal machines. The claim ranking orders who takes a run that selects no runner: here, personal, github-actions, self-hosted, cloud by default; none means first come. The child-run ceiling defaults to 50 descendants per root, excluding retries. high_trust defaults to false; see team settings set. Plain prints the boolean, comma-separated ranking, child-run ceiling and high_trust."}, Flags: []Flag{
 			{Name: "profile", Argument: "NAME", Required: true},
 		}},
-		{Path: "sparkwing team settings set", Authority: teamCredential, Rules: []string{"Only team administrators change team settings. Changes are audited. Pass --members-can-add-machines, --claim-ranking, --max-children-per-root or --high-trust, separately or together. False requires administration for personal enrollment and ends personal machines that members without administration enrolled; setting it back to true does not revive them. Shared runner registration, token minting and revocation always require administration.", "--max-children-per-root takes an integer from 1 to 1000 (default 50) and limits descendants across every depth, excluding retries. --claim-ranking takes distinct tiers from here, personal, github-actions, self-hosted and cloud, best first. A tier left out cannot take runs that select no runner. none means first come among every tier and default restores the default ranking (here,personal,github-actions,self-hosted, then cloud on Sparkwing Cloud). Cloud takes part only while the team has credits or a saved card; a self-hosted controller refuses it.", "--high-trust true lets verified runs on plain-machine, persistent and self-hosted Actions runners write the verified cache that fresh pods, Sparkwing Cloud and remote readers restore. Off (the default), those runs write only their own host's cache, because an earlier job on the same host could have tampered with what they archive. Turn it on only when every job those runners take is trusted."}, Flags: []Flag{
+		{Path: "sparkwing team settings set", Authority: teamCredential, Rules: []string{"Only team administrators change team settings. Changes are audited. Pass --members-can-add-machines, --claim-ranking, --max-children-per-root or --high-trust, separately or together. False requires administration for personal enrollment and ends personal machines that members without administration enrolled; setting it back to true does not revive them. Shared runner registration, token minting and revocation always require administration.", "--max-children-per-root takes an integer from 1 to 1000 (default 50) and limits descendants across every depth, excluding retries. --claim-ranking takes distinct tiers from here, personal, github-actions, self-hosted and cloud, best first. A tier left out cannot take runs that select no runner. none means first come among every tier and default restores the default ranking (here,personal,github-actions,self-hosted, then cloud on Sparkwing Cloud). Cloud takes part only while the team has credits or a saved card; a self-hosted controller refuses it.", "--high-trust true lets verified runs on trusted hosts that outlive their jobs (runners and team launchers scoped to repositories) write the verified cache that fresh pods, Sparkwing Cloud and remote readers restore. Off (the default), those runs write only their own host's cache, because an earlier job on the same host could have tampered with what they archive. Hosts that take asserted work, such as personal machines and self-hosted Actions runners, never write it."}, Flags: []Flag{
 			{Name: "profile", Argument: "NAME", Required: true},
 			{Name: "members-can-add-machines", Argument: "BOOL", Values: []string{"true", "false"}},
 			{Name: "high-trust", Argument: "BOOL", Values: []string{"true", "false"}},
@@ -393,7 +387,7 @@ func Registry() []Command {
 			"Publication is one-way run/results/logs with local provenance; a publication failure never changes the local run verdict.",
 			"--agent NAME records the coding agent that starts the run on your behalf, such as claude-code:land-agent, and --agent none records none. Without the flag, SPARKWING_AGENT applies, then a detected coding-agent environment (Claude Code, Codex, Gemini CLI). The label is sealed with the request, kept by retries and publication, and shown in run views; it never grants or limits authority.",
 			"Cache-from reads only authorized verified-default-branch memo/artifacts/depcache; no shared writes or remote binary fetch.",
-			"--sw-output applies to foreground and detached runs; explicit --sw-output beats -o, then SPARKWING_LOG_FORMAT, then terminal detection.",
+			"-o applies to foreground and detached runs, their help and their errors; it beats SPARKWING_LOG_FORMAT, then terminal detection.",
 			"--sw-only keeps matching jobs and their dependencies. Other declared jobs are skipped. Recovery jobs and jobs added by generators retain their normal rules. --sw-start-at and --sw-stop-at select a window in each job containing the named steps. A job containing neither bound runs all its steps. Unknown step names fail before work starts. --sw-only cannot be combined with either step bound. All three selections are sealed at intake and survive resume and retry. Child pipelines resolve their own job and step selections because their jobs and steps have separate names.",
 			"--sw-allow-unadmitted selects standalone CI with an exclusive in-process local controller. Give it a private SPARKWING_HOME. Its admission queue and concurrency rules remain active; it does not join shared machine admission. The CLI joins controller shutdown before returning. Detached runs and Cloud routing cannot use this mode.",
 		}, Flags: []Flag{
@@ -409,7 +403,6 @@ func Registry() []Command {
 			{Name: "sw-workers", Argument: "N", Minimum: 1, HasMinimum: true, Conflicts: []string{"sw-detached"}, Meaning: "Positive foreground worker count; refused for detached runs."},
 			{Name: "sw-idempotency-key", Argument: "KEY", Requires: []string{"sw-detached"}},
 			{Name: "sw-request-id", Argument: "ID", Requires: []string{"sw-detached"}},
-			{Name: "sw-output", Argument: "FORMAT", Values: []string{"pretty", "json", "plain"}},
 			{Name: "sw-verbose", Short: "v"},
 			{Name: "sw-start-at", Argument: "STEP"},
 			{Name: "sw-stop-at", Argument: "STEP"},
@@ -426,7 +419,7 @@ func Registry() []Command {
 			{Name: "sw-run-handle-file", Argument: "PATH"},
 		}},
 		{Path: "sparkwing runners", Flags: []Flag{}},
-		{Path: "sparkwing runners add", Authority: teamCredential, Rules: []string{"All runner enrollment requires an independent account session through --session-stdin. For headless setup, run sparkwing-controller admin session in the controller pod as an existing team administrator. Shared runner registration requires team administration. --personal registers capacity for only your runs and requires --session-stdin with an existing independent account session. Members may enroll personal machines when the team's members_can_add_machines setting is true (the default). When false, enrollment requires team administration. Turning it off ends personal machines that members without administration enrolled, and turning it back on does not revive them. The session and its CSRF proof stay in memory. After fetching the session CSRF proof, the CLI attempts logout on enrollment success or failure. Use a dedicated session because logout ends it for every client. --reserved-for requires team-admin runner registration support. --trust sets which runs a shared runner takes (verified-default, verified or any); unset, a launcher holding a pool with a reserved secret takes only verified default-branch work, including unmodified admin-armed default-branch schedules. --launcher enrolls only claims.launch for a shared reserved pool and skips the persistent runner service. Verified-default pools and pools holding reserved secrets require launcher credentials, including with --trust=any. --repos accepts repeatable, comma-separated patterns and is required for shared runners. Omit it for personal runners: they claim only their owner's asserted work and never repository-proven runs. A runner serving several repositories lets a job from one act as the runner and claim another repository's jobs in the team, with their secrets; scope --repos to one repository, or to repositories that trust each other, to isolate them. JSON reports personal scope, credential metadata and service state without the bearer. Plain emits the runner name."}, Flags: []Flag{
+		{Path: "sparkwing runners add", Authority: teamCredential, Rules: []string{"All runner enrollment requires an independent account session through --session-stdin. For headless setup, run sparkwing-controller admin session in the controller pod as an existing team administrator. Shared runner registration requires team administration. --personal registers capacity for only your runs and requires --session-stdin with an existing independent account session. Members may enroll personal machines when the team's members_can_add_machines setting is true (the default). When false, enrollment requires team administration. Turning it off ends personal machines that members without administration enrolled, and turning it back on does not revive them. The session and its CSRF proof stay in memory. After fetching the session CSRF proof, the CLI attempts logout on enrollment success or failure. Use a dedicated session because logout ends it for every client. --reserved-for requires team-admin runner registration support. --trust sets which runs a shared runner takes (verified-default or any); unset, a launcher holding a pool with a reserved secret takes only verified default-branch work, including unmodified admin-armed default-branch schedules. --launcher enrolls only claims.launch for a shared reserved pool and skips the persistent runner service. Verified-default pools and pools holding reserved secrets require launcher credentials, including with --trust=any. --repos accepts repeatable, comma-separated patterns and is required for shared runners; a runner scoped by it takes only repository-proven work, so it is a trusted host whose jobs can produce a pass that sw.FromProvenRunAtCommit counts. Omit it for personal runners: they claim only their owner's asserted work and never repository-proven runs. A runner serving several repositories lets a job from one act as the runner and claim another repository's jobs in the team, with their secrets; scope --repos to one repository, or to repositories that trust each other, to isolate them. JSON reports personal scope, credential metadata and service state without the bearer. Plain emits the runner name."}, Flags: []Flag{
 			{Name: "runner", Argument: "RUNNER", Required: true},
 			{Name: "personal", Meaning: "Offer this machine only to your runs, including Cloud overflow."},
 			{Name: "session-stdin", Meaning: "Read an independent account session from stdin without saving it and attempt logout when enrollment finishes; required for shared, personal and launcher enrollment."},
@@ -438,7 +431,7 @@ func Registry() []Command {
 			{Name: "no-service"},
 			{Name: "profile", Argument: "NAME"},
 			{Name: "reserved-for", Argument: "POOL", Repeatable: true, CommaList: true},
-			{Name: "trust", Argument: "CLASS", Values: []string{"verified-default", "verified", "any"}},
+			{Name: "trust", Argument: "CLASS", Values: []string{"verified-default", "any"}},
 			{Name: "platform", Argument: "PLATFORM", Values: []string{"kubernetes"}, Meaning: "Record a shared Kubernetes runner at admin enrollment; a runner in a pod stops at its first poll without it."},
 			{Name: "launcher", Meaning: "Enroll only claims.launch for a shared reserved pool and skip the persistent runner service."},
 		}},
@@ -853,6 +846,7 @@ func Registry() []Command {
 			{Name: "memory-ceiling", Argument: "BYTES", Required: true},
 			{Name: "docker-image", Argument: "IMAGE", Required: true},
 			{Name: "poll", Argument: "DURATION"},
+			{Name: "idle-grace", Argument: "DURATION"},
 			{Name: "credentials-dir", Argument: "PATH", Required: true},
 		}},
 		{Path: "sparkwing-runner run-node", Hidden: true, Rules: []string{"Read the bootstrap file once, exchange it and keep the capability in memory; no bearer in argv or env."}, Flags: []Flag{

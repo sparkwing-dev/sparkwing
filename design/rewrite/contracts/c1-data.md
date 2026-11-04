@@ -2707,8 +2707,8 @@ fake. The SQLite billing-start boundary uses C2's production calculator through
 final settlement and replay after reopening. The retention proof
 also checks exact deployment totals across pruning and reopening, with storage
 seconds excluded. The unused `Store.RunFinished` pruning query is removed.
-`Operator.CreditSettings`, `Operator.CreditRateTable` and
-`Operator.WarmCPUClassCores` own deployment price and policy reads.
+`Operator.CreditSettings` and `Operator.CreditRateTable` own deployment price
+and policy reads.
 `Operator.SetCreditSettings` owns every billing-policy update. A stored rate
 table refuses a scalar price update before any setting changes. The separate
 `SetOperatorCreditSettings` writer and the reader override for older binaries
@@ -3229,7 +3229,7 @@ The existing `Store`, `Tenant`, `Operator`, `Open`, `ForTeam`, `AsOperator` and
 | `UploadUnit` | UploadUnit identifies the owner lease without inventing a job before AcceptPlan. Eval source identity binds the evaluation to its terminal generator source. |
 | `UploadIdentity` | UploadIdentity is resolved by C2 from live authority, never accepted as caller proof. Job requires Attempt and forbids Unit. Owner requires Unit and forbids Attempt. Publication forbids Unit and requires a publish-mode run without an executable claim. Imported publication outputs require Attempt matching that run's imported job result. Nested attempt Team/RunID must equal this identity's Team/RunID. |
 | `UploadRule` | UploadRule distinguishes non-job byte intake from job-owned output edges. |
-| `UploadRules` | UploadRules is the complete identity/record-kind policy, rechecked at commit. Publication with an imported attempt follows the final row rather than non-job publication. |
+| `UploadRules` | UploadRules returns the complete identity/record-kind policy, rechecked at commit, as a copy. Publication with an imported attempt follows the final row rather than non-job publication. |
 | `AuthorizeUpload` | AuthorizeUpload checks the C2-resolved identity and target kind in the write transaction. It requires a live owner fence or publication authority, verifies imported job identity, and rejects identity/principal/capability mismatches with the authenticated authority. |
 
 ### internal/blob/output.go
@@ -3238,7 +3238,6 @@ The existing `Store`, `Tenant`, `Operator`, `Open`, `ForTeam`, `AsOperator` and
 |---|---|
 | `OutputData` | Binds output bytes and records to reader authority and an exact uploader. |
 | `OutputData.Put` | Checks the output cap and uploader binding, obtains a verified receipt, then commits the output record. |
-| `OutputData.Read` | Looks up the authorized output record and consumes bounded bytes through verified EOF and successful close. |
 
 ### internal/store/claim_contract.go
 

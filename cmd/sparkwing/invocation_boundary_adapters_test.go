@@ -145,14 +145,6 @@ func runScheduleTickCommandArgs(ctx context.Context, args []string, out io.Write
 	return runScheduleTickCommand(ctx, inv, out, resolve)
 }
 
-func runLocalHostCommandArgs(ctx context.Context, args []string, out io.Writer, deps localRunDependencies) (resultErr error) {
-	inv, err := clisurface.Parse("sparkwing", append([]string{"__host-trigger"}, args...))
-	if err != nil {
-		return err
-	}
-	return runLocalHostCommand(ctx, inv, out, deps)
-}
-
 func runDaemonLifecycleCommandArgs(ctx context.Context, args []string, out io.Writer, resolve func(context.Context) (dashboardServices, error)) error {
 	inv, err := clisurface.Parse("sparkwing", append([]string{"daemon"}, args...))
 	if err != nil {

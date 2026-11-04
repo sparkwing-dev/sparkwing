@@ -34,9 +34,6 @@ func resolveLocalRunRuntime(ctx context.Context, options localRunOptions) (local
 	if err := context.Cause(ctx); err != nil {
 		return localRunRuntime{}, err
 	}
-	if options.stateDB != "" || options.standaloneReason != "" || options.environmentFile != "" {
-		return localRunRuntime{}, &apierr.Error{Code: apierr.CapabilityUnsupported, Message: "local run private host options require an elected standalone runtime"}
-	}
 	directory, err := findSparkwingDir()
 	if err != nil {
 		return localRunRuntime{}, err
@@ -77,8 +74,8 @@ func resolveLocalRunRuntime(ctx context.Context, options localRunOptions) (local
 		publish: func(ctx context.Context, profile, run string) error {
 			return publishLocalProfile(ctx, home, transport, profile, run)
 		},
-		follow: func(ctx context.Context, run, format string, out io.Writer) error {
-			return followControllerRunLogs(ctx, transport, run, format, out)
+		follow: func(ctx context.Context, run, format string, out io.Writer, hosted <-chan struct{}) error {
+			return followControllerRunLogs(ctx, transport, run, format, out, localFollowWait(hosted))
 		},
 		ensureController: func(ctx context.Context) error {
 			if options.standalone {

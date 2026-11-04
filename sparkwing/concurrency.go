@@ -99,29 +99,11 @@ type ConcurrencyGroup struct {
 // Plan and job groups have separate namespaces, so the same name at both
 // levels identifies independent budgets.
 //
-// An empty name or an unknown Scope / OnLimit value panics at
-// construction: a misspelled policy would otherwise fall through to
-// the backend's default and silently coordinate differently than the
-// author wrote.
+// An empty name panics at construction. The host refuses an unknown Scope or
+// OnLimit value when it validates the plan.
 func NewConcurrencyGroup(name string, limit ConcurrencyLimit) *ConcurrencyGroup {
 	if name == "" {
 		panic("sparkwing: NewConcurrencyGroup: name must not be empty (all unnamed groups would share one budget)")
-	}
-	switch limit.Scope {
-	case "", ScopeRun, ScopeBox, ScopeGlobal:
-	default:
-		panic(fmt.Sprintf(
-			"sparkwing: NewConcurrencyGroup(%q): Scope %q is not one of sparkwing.ScopeRun / ScopeBox / ScopeGlobal",
-			name, limit.Scope,
-		))
-	}
-	switch limit.OnLimit {
-	case "", Queue, Fail, Skip, CancelOthers:
-	default:
-		panic(fmt.Sprintf(
-			"sparkwing: NewConcurrencyGroup(%q): OnLimit %q is not one of sparkwing.Queue / Fail / Skip / CancelOthers",
-			name, limit.OnLimit,
-		))
 	}
 	return &ConcurrencyGroup{name: name, limit: limit}
 }

@@ -1357,8 +1357,8 @@ export type CronState = "armed" | "paused" | "undeclared";
 export type CronOutcome =
   "" | "fired" | "skipped_overlap" | "missed" | "failed";
 
-// Where a schedule is evaluated. This dashboard reads one host's store, so
-// every row it serves is local.
+// Where a schedule is evaluated: by the local scheduler or by the controller,
+// which owns App-declared schedules.
 export type CronWhere = "local" | "controller";
 
 export type CronLockState =

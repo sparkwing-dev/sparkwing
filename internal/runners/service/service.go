@@ -33,8 +33,11 @@ type Host struct {
 	Binary     string
 	ConfigPath string
 	LogPath    string
-	UID        int
-	Exec       func(context.Context, string, ...string) (string, error)
+	// StateHome is the resolved Sparkwing home; the service runs with it as
+	// SPARKWING_HOME so it uses the state the installer chose.
+	StateHome string
+	UID       int
+	Exec      func(context.Context, string, ...string) (string, error)
 }
 
 // State describes the service as it exists on the host.
@@ -268,7 +271,7 @@ func configArgument(words []string) string {
 	if len(words) < 2 || words[1] != "start" {
 		return ""
 	}
-	flags, err := runnerflags.Parse("start", words[2:], io.Discard)
+	flags, err := runnerflags.Parse("start", words[2:], io.Discard, io.Discard)
 	if err != nil {
 		return ""
 	}
@@ -286,6 +289,9 @@ func serviceUnit(h Host) string {
 	b.WriteString("[Service]\nType=simple\n")
 	fmt.Fprintf(&b, "ExecStart=%s\n", unitfile.Command([]string{h.Binary, "start", "--config", h.ConfigPath}))
 	// safety: a runner the operator stopped must stay stopped.
+	if h.StateHome != "" {
+		fmt.Fprintf(&b, "Environment=%s\n", unitfile.Assignment("SPARKWING_HOME", h.StateHome))
+	}
 	b.WriteString("Restart=on-failure\nRestartSec=10\n")
 	b.WriteString("StandardOutput=journal\nStandardError=journal\n")
 	b.WriteString("KillMode=mixed\nKillSignal=SIGTERM\nTimeoutStopSec=30\n\n")
@@ -306,6 +312,9 @@ func agentPlist(h Host) string {
 	b.WriteString("  </array>\n\n")
 	b.WriteString("  <key>EnvironmentVariables</key>\n  <dict>\n")
 	fmt.Fprintf(&b, "    <key>HOME</key>\n    <string>%s</string>\n", unitfile.XMLText(h.Home))
+	if h.StateHome != "" {
+		fmt.Fprintf(&b, "    <key>SPARKWING_HOME</key>\n    <string>%s</string>\n", unitfile.XMLText(h.StateHome))
+	}
 	// safety: a launchd job inherits almost nothing, so the jobs' docker and git come from here.
 	b.WriteString("    <key>PATH</key>\n    <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>\n")
 	b.WriteString("  </dict>\n\n")

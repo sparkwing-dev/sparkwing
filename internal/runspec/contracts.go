@@ -411,7 +411,9 @@ type SealedRequest struct {
 	AuthorityRef capability.AuthorityRef `json:"authority_ref"`
 	Ceilings     Ceilings                `json:"ceilings"`
 	Provenance   Provenance              `json:"provenance"`
-	Hash         Hash                    `json:"hash"`
+	// ProofEligible is Request.ProofEligible at intake.
+	ProofEligible bool `json:"proof_eligible,omitempty"`
+	Hash          Hash `json:"hash"`
 }
 
 // safety: DefaultBranchSource limits discovery to App facts or the acquired origin HEAD.
@@ -489,20 +491,6 @@ type SealInput struct {
 	Resolved     Resolved
 	Plan         json.RawMessage
 	Now          time.Time
-}
-
-// safety: projections supplies write-once indexed fields derived only from the sealed spec.
-type projections struct {
-	RepoKey       RepoKey
-	RepoDisplay   string
-	Pipeline      string
-	SHA           string
-	Ref           string
-	DefaultBranch string
-	Dispatch      Dispatch
-	RequestHash   Hash
-	SpecHash      Hash
-	PlanHash      Hash
 }
 
 // safety: RetryInput carries source code and inputs with the authenticated retrier.

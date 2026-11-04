@@ -110,7 +110,7 @@ controller:
 
   # Named set of abuse guards the controller runs with: "cloud" for a paid
   # hosted controller, "cloud-free" for a free-tier one. A profile supplies the
-  # per-runner and per-token request budgets, the request rate alarm, the
+  # per-runner request budgets, the request rate alarm, the
   # egress stream and download caps, and idle-poll enforcement, and it fills a
   # guard only where nothing above named one, so an explicit value always wins.
   # Empty, the default, supplies none and leaves a self-hosted controller

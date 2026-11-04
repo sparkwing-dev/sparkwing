@@ -8,8 +8,6 @@ import (
 	"strings"
 
 	"golang.org/x/mod/semver"
-
-	"github.com/sparkwing-dev/sparkwing/internal/buildinfo"
 )
 
 // Mode controls whether a required release may be fetched.
@@ -55,32 +53,6 @@ func ResolveHold(configPath string) (Hold, error) {
 		return Hold{}, nil
 	}
 	return Hold{Value: value, Source: configPath}, nil
-}
-
-// resolveHoldStrict distinguishes an invalid configured ceiling from the
-// absence of one so unattended updaters can fail closed.
-func resolveHoldStrict(configPath string) (Hold, error) {
-	hold, err := ResolveHold(configPath)
-	if err != nil {
-		return hold, err
-	}
-	if hold.Value == "" {
-		return hold, nil
-	}
-	if !validHold(hold.Value) {
-		return hold, fmt.Errorf("invalid version hold %q from %s: use vMAJOR.MINOR or vMAJOR.MINOR.PATCH", hold.Value, hold.Source)
-	}
-	return hold, nil
-}
-
-// validHold reports whether value is a stable minor-series or exact release ceiling.
-func validHold(value string) bool {
-	value = strings.TrimSpace(value)
-	if buildinfo.IsReleaseVersion(value) {
-		return true
-	}
-	return strings.Count(strings.TrimPrefix(value, "v"), ".") == 1 &&
-		buildinfo.IsReleaseVersion(value+".0")
 }
 
 // ExceedsHold reports whether target crosses an exact or minor-series ceiling.

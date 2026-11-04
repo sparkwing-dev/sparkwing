@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"strings"
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
@@ -83,7 +84,7 @@ func TestNativeChildOwnerBudgetFollowsAuthenticatedLocalPlacement(t *testing.T) 
 			id, err := process.StartChild(t.Context(), "deploy", nil, "", "")
 			if tc.zero {
 				var failure *apierr.Error
-				if !errors.As(err, &failure) || failure.Code != apierr.Internal {
+				if !errors.As(err, &failure) || failure.Code != apierr.BadRequest || !strings.Contains(failure.Message, "remote owner duration must be positive") {
 					t.Fatalf("remote zero owner budget was not refused: %v", err)
 				}
 				return

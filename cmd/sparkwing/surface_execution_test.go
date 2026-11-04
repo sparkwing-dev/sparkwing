@@ -29,7 +29,7 @@ func TestRegisteredFlagsReachExecutionParser(t *testing.T) {
 					value = "1"
 				case f.Argument == "DURATION" || f.Argument == "DUR":
 					value = "1s"
-				case f.Name == "output" || f.Name == "sw-output":
+				case f.Name == "output":
 					value = "json"
 				}
 				token := "--" + f.Name

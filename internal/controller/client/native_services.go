@@ -22,6 +22,12 @@ type NativeProcessClient struct {
 	transport *engineClient
 	run, job  string
 	request   runspec.Request
+	secrets   []string
+}
+
+// SecretNames returns the secret names the run's sealed spec resolved, read with the process binding.
+func (c *NativeProcessClient) SecretNames() []string {
+	return append([]string{}, c.secrets...)
 }
 
 // ProcessClient binds a process declaration to its independently authenticated parent.
@@ -37,7 +43,11 @@ func (c *LocalHostClient) ProcessClient(ctx context.Context, principal capabilit
 	if err != nil {
 		return nil, err
 	}
-	return &NativeProcessClient{transport: transport, run: c.run, job: job, request: snapshot.Run.Request.Request}, nil
+	client := &NativeProcessClient{transport: transport, run: c.run, job: job, request: snapshot.Run.Request.Request}
+	if snapshot.Run.Spec != nil {
+		client.secrets = snapshot.Run.Spec.Resolved.SecretNames
+	}
+	return client, nil
 }
 
 // Annotation commits a masked annotation through the common reporting transaction.

@@ -27,7 +27,10 @@ trust comes from a signed App delivery. See [GitHub App](github-app.md) and
 The exchange issues a controller capability with `nodes.claim` and
 `triggers.claim`, a one-hour lifetime, and the verified repository, ref, commit
 workflow run, run attempt and workflow reference binding. Each repository/run/attempt
-can exchange once, including after the first credential is revoked. Repository identity uses GitHub's numeric ID, so a
+can exchange once, including after the first credential is revoked. A team may
+bind any number of repositories and hold any number of live Actions credentials;
+a credential outlives its job, so counting them would cap workflow throughput.
+Repository identity uses GitHub's numeric ID, so a
 rename preserves that identity. An owner transfer requires a matching new
 binding.
 

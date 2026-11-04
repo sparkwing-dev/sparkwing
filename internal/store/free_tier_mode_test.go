@@ -43,13 +43,4 @@ func TestUnmeteredDeploymentAppliesNoFreeTierLimits(t *testing.T) {
 			}
 		}
 	})
-	t.Run("actions bindings", func(t *testing.T) {
-		tenant, a, _ := actionsEnrollment(t)
-		tenant.s.DisableCreditMetering()
-		for i := range maxGitHubRunnerBindings {
-			if _, err := tenant.RegisterGitHubRunner(t.Context(), a, GitHubRunnerBinding{RepositoryID: int64(i + 100), RepositoryOwnerID: 7, Repository: "acme/repo"}); err != nil {
-				t.Fatalf("binding %d: %v", i, err)
-			}
-		}
-	})
 }

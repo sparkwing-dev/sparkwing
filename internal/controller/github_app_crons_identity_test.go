@@ -24,8 +24,8 @@ func TestGitHubAppCronRenameKeepsIdentityAndPauseAtRepoCap(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := tn.SetCronSchedulePaused(t.Context(), before.ID, true); err != nil {
-		t.Fatal(err)
+	if code := f.call("POST", "/api/v1/schedules/"+before.ID+"/pause", olga.auth, nil, nil); code != http.StatusOK {
+		t.Fatalf("pause = %d", code)
 	}
 	for i := range 9 {
 		if _, _, err := tn.ArmCronSchedule(t.Context(), store.CronSchedule{

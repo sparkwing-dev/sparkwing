@@ -8,9 +8,10 @@ import (
 )
 
 // refuseBelowMinInterval reports the compute guard a schedule's cadence
-// breaks, or nil when it is at or above the guard. A ceiling of zero is
-// unlimited, and an expression that resolves fewer than two instants is
-// measured as no cadence at all.
+// breaks, or nil when ShortestInterval found no gap below it. Gaps across
+// midnight are sampled from upcoming days, so a rare shorter gap can pass. A
+// ceiling of zero is unlimited, and an expression that resolves fewer than two
+// instants is measured as no cadence at all.
 func refuseBelowMinInterval(expr, tz string, ceilingSeconds int64) error {
 	if expr == "" || ceilingSeconds <= 0 {
 		return nil

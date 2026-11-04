@@ -88,21 +88,6 @@
           ]
         },
         {
-          "name": "parent_lease_token",
-          "kind": "string",
-          "omitempty": true
-        },
-        {
-          "name": "parent_run_id",
-          "kind": "string",
-          "omitempty": true
-        },
-        {
-          "name": "parent_node_id",
-          "kind": "string",
-          "omitempty": true
-        },
-        {
           "name": "semaphores_only",
           "kind": "bool",
           "omitempty": true

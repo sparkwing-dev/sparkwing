@@ -41,9 +41,20 @@ type deployConfig struct {
 	ToolDir        string
 }
 
-func (c deployConfig) toolDirInUse() bool {
-	info, err := os.Stat(c.ToolDir)
-	return c.ToolDir != "" && err == nil && info.IsDir()
+// safety: a real deploy holds production credentials, so it refuses a missing
+// toolchain instead of trusting the runner's PATH (decision 86). A dry run holds
+// none and previews from PATH, as do tests, which leave ToolDir empty.
+func (c deployConfig) toolDirInUse(dry bool) (bool, error) {
+	if c.ToolDir == "" {
+		return false, nil
+	}
+	if info, err := os.Stat(c.ToolDir); err == nil && info.IsDir() {
+		return true, nil
+	}
+	if dry {
+		return false, nil
+	}
+	return false, fmt.Errorf("deploy toolchain %s is missing: install the pinned deploy tools there as DELIVERY.md's \"Deploy toolchain\" section describes; a real deploy never falls back to PATH", c.ToolDir)
 }
 
 // safety: each phase waits for Argo and then the rollout; rollback repeats
@@ -166,8 +177,8 @@ type gitopsChange struct {
 	Commit string `json:"commit"`
 }
 
-// safety: rollback and the post-deploy cron find what an environment runs
-// through RefToLastRun("deploy", "staging-deploy" or "production").
+// safety: a failed promote rolls back from this run's own record: it reverts
+// Changes newest first and names Previous as what production returns to.
 type envDeployment struct {
 	Environment string         `json:"environment"`
 	Images      deployImages   `json:"images"`
@@ -396,8 +407,11 @@ func deployVersion(newest, newestCommit, commit string, committed int64) (string
 }
 
 type renderedDoc struct {
-	text string
-	key  string
+	text      string
+	key       string
+	kind      string
+	namespace string
+	name      string
 }
 
 func splitRendered(rendered string) ([]renderedDoc, error) {
@@ -414,9 +428,41 @@ func splitRendered(rendered string) ([]renderedDoc, error) {
 		if meta.Kind != "" {
 			key = meta.Kind + "/" + meta.Metadata.Namespace + "/" + meta.Metadata.Name
 		}
-		docs = append(docs, renderedDoc{text: part, key: key})
+		docs = append(docs, renderedDoc{text: part, key: key, kind: meta.Kind, namespace: meta.Metadata.Namespace, name: meta.Metadata.Name})
 	}
 	return docs, nil
+}
+
+// safety: the sparkwing Argo project admits no cluster-scoped kinds, so a
+// GitOps commit cannot grant cluster-wide access; kikd-infra applies these.
+var clusterScopedKinds = map[string]bool{
+	"Namespace": true, "ClusterRole": true, "ClusterRoleBinding": true, "PriorityClass": true,
+	"ValidatingAdmissionPolicy": true, "ValidatingAdmissionPolicyBinding": true,
+	"MutatingAdmissionPolicy": true, "MutatingAdmissionPolicyBinding": true,
+	"ValidatingWebhookConfiguration": true, "MutatingWebhookConfiguration": true,
+	"CustomResourceDefinition": true, "StorageClass": true, "IngressClass": true, "PersistentVolume": true,
+}
+
+// safety: any other document without a namespace fails the render, so an
+// object the list does not know is never dropped or applied to the wrong
+// namespace.
+func dropClusterScoped(rendered string) (string, []string, error) {
+	docs, err := splitRendered(rendered)
+	if err != nil {
+		return "", nil, err
+	}
+	var kept, dropped []string
+	for _, doc := range docs {
+		switch {
+		case clusterScopedKinds[doc.kind]:
+			dropped = append(dropped, doc.kind+"/"+doc.name)
+		case doc.kind != "" && doc.namespace == "":
+			return "", nil, fmt.Errorf("%s/%s has no metadata.namespace and is not a known cluster-scoped kind", doc.kind, doc.name)
+		default:
+			kept = append(kept, doc.text)
+		}
+	}
+	return strings.Join(kept, "---"), dropped, nil
 }
 
 // safety: the controller ships alone, so its commit keeps every other object

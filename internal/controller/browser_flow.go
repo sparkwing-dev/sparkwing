@@ -44,7 +44,7 @@ func identityRefusal(op string, err error) error {
 		errors.Is(err, store.ErrInvitationOpen):
 		return refuse(http.StatusConflict, "", err.Error())
 	case errors.Is(err, store.ErrLastOwner), errors.Is(err, store.ErrRoleAboveOwn),
-		errors.Is(err, store.ErrWaitlisted), errors.Is(err, store.ErrBindingLimit):
+		errors.Is(err, store.ErrWaitlisted):
 		return refuse(http.StatusForbidden, "", err.Error())
 	}
 	return fmt.Errorf("%s: %w", op, err)

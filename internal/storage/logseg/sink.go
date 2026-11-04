@@ -29,8 +29,6 @@ const (
 // [maxNodeBytes]; the sink keeps nothing after it.
 const truncationMarker = "[sparkwing] truncated: the node log reached its 64 MiB cap\n"
 
-const maxTrackedGaps = 32
-
 // Uploader stores one attempt's segments and manifest. The controller
 // issues the URLs it writes through; the uploader owns that exchange.
 type Uploader interface {
@@ -56,11 +54,6 @@ type Options struct {
 	Interval     time.Duration
 	SegmentBytes int64
 	MaxBytes     int64
-	// Live, when set, receives stored appends in order with the byte
-	// offset in the log each begins at, for the controller's live view,
-	// while a viewer watches the node (see [Sink.setWatched]). It must
-	// not block.
-	Live func(offset int64, data []byte)
 	// AfterFunc schedules the interval cut; time.AfterFunc when nil.
 	AfterFunc func(d time.Duration, f func()) (stop func() bool)
 	// Retries is how many times a failed upload is tried before the
@@ -113,13 +106,6 @@ type cutSegment struct {
 	off int64
 }
 
-type writerStream struct {
-	next    int64
-	gapSum  int64
-	sealed  bool
-	dropped int64
-}
-
 // Sink spools one node attempt's log on local disk and uploads it as
 // numbered segments. It is safe for concurrent use.
 type Sink struct {
@@ -140,11 +126,7 @@ type Sink struct {
 	truncated         bool
 	persistenceFailed bool
 	dropped           int64
-	streams           map[string]*writerStream
-	gaps              []Gap
-	extraGap          int64
 	closed            bool
-	watched           bool
 
 	upMu     sync.Mutex
 	work     chan struct{}
@@ -169,40 +151,22 @@ func NewSink(ctx context.Context, up Uploader, opts Options) (*Sink, error) {
 	}
 	s := &Sink{
 		opts: opts, up: up, ctx: context.WithoutCancel(ctx), spool: spool, cutLine: 1, nextN: 1,
-		streams: map[string]*writerStream{},
-		work:    make(chan struct{}, 1), done: make(chan struct{}),
+		work: make(chan struct{}, 1), done: make(chan struct{}),
 	}
 	s.loopCtx, s.stopLoop = context.WithCancel(s.ctx)
 	go s.uploadLoop()
 	return s, nil
 }
 
-// Append stores data, one or more newline-terminated lines. A writer
-// that numbers its lines names its stream and the inclusive range first
-// to last; a range the sink already stored is a retry and is ignored,
-// and a range that skips ahead records a gap. An unnumbered writer
-// passes an empty stream.
-func (s *Sink) Append(data []byte, stream string, first, last int64) error {
+// Append stores data, one or more newline-terminated lines.
+func (s *Sink) Append(data []byte) error {
 	if len(data) == 0 {
 		return nil
-	}
-	if last < first {
-		last = first
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.closed {
 		return ErrClosed
-	}
-	var ws *writerStream
-	if stream != "" && first > 0 {
-		ws = s.stream(stream)
-		if last < ws.next {
-			return nil
-		}
-		if first > ws.next {
-			s.recordGap(ws, ws.next, first-1)
-		}
 	}
 	if data[len(data)-1] != '\n' {
 		data = append(bytes.Clone(data), '\n')
@@ -210,7 +174,6 @@ func (s *Sink) Append(data []byte, stream string, first, last int64) error {
 	n := int64(bytes.Count(data, []byte{'\n'}))
 	if s.truncated {
 		s.dropped += n
-		s.advance(ws, last)
 		return nil
 	}
 	if s.written+int64(len(data)) > s.opts.MaxBytes {
@@ -221,10 +184,6 @@ func (s *Sink) Append(data []byte, stream string, first, last int64) error {
 	if _, err := s.spool.Write(data); err != nil {
 		s.persistenceFailed = true
 		return fmt.Errorf("logseg: write spool: %w", err)
-	}
-	s.advance(ws, last)
-	if s.watched && s.opts.Live != nil {
-		s.opts.Live(s.written, data)
 	}
 	s.written += int64(len(data))
 	s.lines += n
@@ -241,72 +200,6 @@ func (s *Sink) MarkIncomplete() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.persistenceFailed = true
-}
-
-func (s *Sink) stream(name string) *writerStream {
-	ws := s.streams[name]
-	if ws == nil {
-		ws = &writerStream{next: 1}
-		s.streams[name] = ws
-	}
-	return ws
-}
-
-func (s *Sink) advance(ws *writerStream, last int64) {
-	if ws != nil {
-		ws.next = last + 1
-	}
-}
-
-func (s *Sink) recordGap(ws *writerStream, from, to int64) {
-	ws.gapSum += to - from + 1
-	if len(s.gaps) < maxTrackedGaps {
-		s.gaps = append(s.gaps, Gap{From: from, To: to})
-		return
-	}
-	s.extraGap += to - from + 1
-}
-
-// writerSealed records a numbering writer's own closing statement: the
-// last number it assigned and how many lines it gave up on.
-func (s *Sink) writerSealed(stream string, finalSeq, dropped int64) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	ws := s.stream(stream)
-	if finalSeq >= ws.next {
-		s.recordGap(ws, ws.next, finalSeq)
-		ws.next = finalSeq + 1
-	}
-	ws.sealed = true
-	ws.dropped = max(ws.dropped, dropped)
-}
-
-// setWatched turns the live view on or off. Turning it on first hands
-// Live every byte after the last uploaded segment, so the live view
-// joins the segments with no gap; while it is off, nothing goes live.
-func (s *Sink) setWatched(watched bool) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if watched == s.watched || s.closed {
-		return
-	}
-	s.watched = watched
-	if !watched || s.opts.Live == nil {
-		return
-	}
-	var from int64
-	for _, seg := range s.uploaded {
-		from += seg.Bytes
-	}
-	if from >= s.written {
-		return
-	}
-	pending := make([]byte, s.written-from)
-	if _, err := s.spool.ReadAt(pending, from); err != nil {
-		s.opts.Logger.Warn("read the log spool for the live view", "subject", s.opts.Subject, "err", err)
-		return
-	}
-	s.opts.Live(from, pending)
 }
 
 func (s *Sink) cutOnInterval() {
@@ -462,7 +355,7 @@ func (s *Sink) manifestLocked(allUploaded bool, end End) Manifest {
 	m := Manifest{
 		Version: manifestVersion, Subject: new(cloneSubject(s.opts.Subject)),
 		SealedBy: sealedByNode, SealedAt: time.Now().UTC(),
-		Gaps: s.gaps, Segments: s.uploaded,
+		Segments: s.uploaded,
 	}
 	for _, seg := range s.uploaded {
 		m.Lines += seg.Lines
@@ -472,15 +365,7 @@ func (s *Sink) manifestLocked(allUploaded bool, end End) Manifest {
 	if m.Lines > 0 {
 		m.FirstSeq = 1
 	}
-	m.DroppedLines = s.dropped + s.extraGap + (s.lines - m.Lines)
-	unsealed, writerDropped := false, false
-	for _, ws := range s.streams {
-		unsealed = unsealed || !ws.sealed
-		if extra := ws.dropped - ws.gapSum; extra > 0 {
-			m.DroppedLines += extra
-			writerDropped = true
-		}
-	}
+	m.DroppedLines = s.dropped + (s.lines - m.Lines)
 	switch {
 	case s.persistenceFailed:
 		m.Status, m.Reason = statusIncomplete, "log persistence failed"
@@ -492,12 +377,6 @@ func (s *Sink) manifestLocked(allUploaded bool, end End) Manifest {
 		m.Status, m.Reason = statusCutOff, reasonByteCap
 	case end.Stopped:
 		m.Status, m.Reason = statusCutOff, reasonStopped
-	case unsealed:
-		m.Status, m.Reason = statusCutOff, reasonUnsealed
-	case len(s.gaps) > 0:
-		m.Status, m.Reason = statusIncomplete, reasonSequenceGap
-	case writerDropped:
-		m.Status, m.Reason = statusIncomplete, reasonDropped
 	default:
 		m.Status = StatusComplete
 	}

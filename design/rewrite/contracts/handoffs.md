@@ -1418,6 +1418,7 @@ Sparkwing should support pipelines that coordinate agents and people: durable st
 
 - 88: a gate pass lets CI skip only when every job that produced it ran on a trusted host: a fresh host (Cloud, launcher, GitHub-hosted Actions) or a machine root an admin registered with trust `verified` (new; proven work on any branch, never asserted) or `verified-default`. Roots that accept asserted work never produce counted passes, because an earlier job can poison HOME, `GOFLAGS` or the Go cache. "Trusted" is the concept; freshness is one way to earn it, and later trusted hosts need not be fresh. Korey's desktop and laptop register as `verified`.
 - 89: shifting left, a plain local `sparkwing run gate` on a registered trusted machine, opted into explicitly, produces a pass CI trusts, signed with that machine's controller-issued credential. It requires a clean checkout (a file-hash proof of a dirty tree is deferred) and CI skips only when the tree it fetched equals the recorded tree. Local caches (Go build and test cache, binary cache) stay usable on trusted machines so the local gate is fast; the trust boundary is the machine, not the run.
+- Status of 89 (2026-11-04 sweep): designed, not built. Local runs are asserted, so `sw.FromProvenRunAtCommit` never counts a local gate pass.
 
 ## 2026-11-03 Korey decisions 90-91: first forward migration; over-limit jobs fail fast
 

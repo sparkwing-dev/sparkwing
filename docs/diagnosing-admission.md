@@ -43,19 +43,15 @@ its run ID and pipeline.
 `start`, `ready`, `drain_begin`, `drain_end`, and `shutdown` describe lifecycle.
 `request`, `queued`, `grant`, `denied`, `rejected`, `eviction`, `superseded`, `backfill`,
 `reprioritize`, `contended`, `queue_timeout`, `cancellation`, and `cancel`
-describe admission decisions. `child_attach_request`, `child_attach`,
-`reattach_request`, `reattach_accepted`, `reattach_refused`, `release`, and
-`grace_expiry` describe lease ownership. `headroom_sample` records capacity
+describe admission decisions. `reattach_request`, `reattach_accepted`,
+`reattach_refused`, `release`, and `grace_expiry` describe lease ownership. `headroom_sample` records capacity
 inputs. `connection_opened`, `connection_handshake`, `connection_closed`,
 `handshake_refused`, and `message_refused` describe transport. Individual health
 probe connections are omitted.
 `dropped` counts records lost when the bounded writer buffer filled.
 
-`child_attach` records carry the requested parent ID and the resolved live
-parent ID. A rejected child attach names the requested parent and, when an
-ancestor blocks it, the resolved parent and blocking ancestor. `cancel` records
-carry the requesting peer's identity, affected live runs, and blocked descendant
-IDs, including departed descendants that cannot attach again.
+`cancel` records carry the requesting peer's identity, affected live runs, and
+blocked descendant IDs.
 
 Journal writes do not hold admission. Policy endpoint URLs in records keep only
 the scheme, host and path. Userinfo, query parameters and fragments are omitted.
@@ -94,10 +90,10 @@ sparkwing doctor --timeout 15s -o pretty
 sparkwing doctor --dry-run -o plain
 ```
 
-Doctor inspects the project Go toolchain, repository hooks and competing CLI
-installs. Local controller findings come through its lifecycle interface.
-Both modes use the same diagnostic path. The CLI never opens `state.db`,
-repairs private-home permissions or reaps processes during this command.
+Doctor inspects the project Go toolchain and repository hooks. Local
+controller findings come through its lifecycle interface. Both modes use the
+same diagnostic path. The CLI never opens `state.db`, repairs private-home
+permissions or reaps processes during this command.
 
 JSON output is one report. `controller_checked` is true only after the lifecycle
 check completes. `findings` retains each finding's `code`, `message`, optional

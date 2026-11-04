@@ -122,56 +122,6 @@ if [ -n "$gopath_bin" ] && [ -d "$gopath_bin" ] && [ "$gopath_bin" != "$DEST" ];
   done
 fi
 
-report_competing_installs() {
-  local installed="$DEST/sparkwing$exe_suffix"
-  local -a scan_dirs=() reported=()
-  local -a suffixes=("$exe_suffix")
-  if (( windows )); then suffixes+=(""); fi
-  local d p r dup suffix found=0
-  IFS=':' read -r -a scan_dirs <<< "${PATH:-}"
-  if [ -n "${HOME:-}" ]; then
-    scan_dirs+=("$HOME/.local/bin" "$HOME/go/bin")
-  fi
-  if [ -n "$gopath_bin" ]; then
-    scan_dirs+=("$gopath_bin")
-  fi
-  scan_dirs+=(/usr/local/bin /opt/homebrew/bin)
-  if [ -n "${GOBIN:-}" ]; then
-    if (( windows )); then
-      scan_dirs+=("$(shell_path "$GOBIN")")
-    else
-      scan_dirs+=("$GOBIN")
-    fi
-  fi
-
-  for d in "${scan_dirs[@]}"; do
-    for suffix in "${suffixes[@]}"; do
-    p="$d/sparkwing$suffix"
-    if [ ! -f "$p" ] || [ ! -x "$p" ]; then continue; fi
-    if [ "$p" -ef "$installed" ]; then continue; fi
-    dup=0
-    for r in ${reported[@]+"${reported[@]}"}; do
-      if [ "$p" -ef "$r" ]; then
-        dup=1
-        break
-      fi
-    done
-    if [ "$dup" = 1 ]; then continue; fi
-    reported+=("$p")
-    found=1
-    echo "note: another sparkwing is installed at $p (left untouched)"
-    echo "      a shell or job whose PATH orders $d before $DEST runs it instead of $installed"
-    printf '      to retire it: test ! -e %q && test ! -L %q && mv -n -- %q %q && test ! -e %q && test ! -L %q   (undo: test ! -e %q && test ! -L %q && mv -n -- %q %q && test ! -e %q && test ! -L %q)\n' \
-      "$p.superseded" "$p.superseded" "$p" "$p.superseded" "$p" "$p" \
-      "$p" "$p" "$p.superseded" "$p" "$p.superseded" "$p.superseded"
-    done
-  done
-  if [ "$found" = 1 ]; then
-    echo "      \`sparkwing doctor\` reports the full picture."
-  fi
-}
-report_competing_installs
-
 echo
 echo "Installed to $DEST:"
 ls -1 "$DEST"/sparkwing*

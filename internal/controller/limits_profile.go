@@ -25,8 +25,6 @@ type LimitsProfileValues struct {
 	ClaimsPerRunnerMinute int
 	// HeartbeatsPerRunnerMinute is [RequestBudget.HeartbeatsPerMinute].
 	HeartbeatsPerRunnerMinute int
-	// RequestsPerTokenMinute is [TokenRequestBudget.PerTokenMinute].
-	RequestsPerTokenMinute int
 	// RequestsPerMinuteAlarm is [TokenRequestBudget.AlarmPerMinute].
 	RequestsPerMinuteAlarm int
 	// MaxLogStreamsPerPrincipal is the concurrent live log streams one
@@ -35,8 +33,6 @@ type LimitsProfileValues struct {
 	// MaxDownloadsPerPrincipal is the concurrent metered downloads one
 	// principal may hold open.
 	MaxDownloadsPerPrincipal int
-	// RunsPerPrincipalHour is [FloodPolicy.RunsPerPrincipalHour].
-	RunsPerPrincipalHour int
 	// ShedQueueDepth is [FloodPolicy.ShedQueueDepth].
 	ShedQueueDepth int
 	// EgressDailyAlarmBytes is the bytes the controller may send in a UTC day
@@ -70,29 +66,21 @@ const (
 	cloudFreeClaimHeadroom = 2
 )
 
-// safety: a runner spends more than claims. A two-slot runner honoring its
-// cadences spends roughly 300 requests a minute: 120 empty-queue claim polls,
-// 40 node heartbeats at one every three seconds, and its state writes. A
-// signed-up team's tokens share one budget, so the free tier carries one such
-// runner and the paid tier a pool of ten with a fifth to spare.
-const (
-	cloudRequestsPerTokenMinute     = 3600
-	cloudFreeRequestsPerTokenMinute = 600
-)
+// safety: neither profile sets a team's aggregate request budget: one shared bucket would starve the
+// heartbeats of a team that adds runners. Per-runner budgets bound each runner, and
+// --requests-per-token-minute stays an operator's explicit setting.
 
-// safety: the alarm is what one controller pod is sized to serve, so it sits
-// above any single tenant's budget and speaks when several tenants at once, or
-// a pod carrying more tenants than it was planned for, are driving it.
+// safety: the alarm is what one controller pod is sized to serve, so it
+// speaks when several tenants at once, or a pod carrying more tenants than it
+// was planned for, are driving it.
 const cloudRequestRateAlarm = 5000
 
-// safety: a principal's run cap is the guard a pending trigger nobody claims
-// is written against, and the shed depth is each team's backstop behind it,
-// sized so one team's queue scan stays a fraction of a second.
+// safety: the shed depth bounds each team's unclaimed triggers so one queue scan stays a fraction of a
+// second. No profile sets an hourly run cap: a refused GitHub App delivery needs an admin to process it
+// again (decision 41), so the cap stays an operator's explicit --max-runs-per-principal-hour.
 const (
-	cloudRunsPerPrincipalHour     = 600
-	cloudFreeRunsPerPrincipalHour = 60
-	cloudShedQueueDepth           = 5000
-	cloudFreeShedQueueDepth       = 1000
+	cloudShedQueueDepth     = 5000
+	cloudFreeShedQueueDepth = 1000
 )
 
 // safety: egress is the bill a free account can run up without any compute, at
@@ -112,11 +100,9 @@ var limitsProfiles = map[string]LimitsProfileValues{
 	LimitsProfileCloud: {
 		ClaimsPerRunnerMinute:     CompliantClaimPollsPerMinute() * cloudClaimHeadroom,
 		HeartbeatsPerRunnerMinute: RecommendedHeartbeatsPerMinute,
-		RequestsPerTokenMinute:    cloudRequestsPerTokenMinute,
 		RequestsPerMinuteAlarm:    cloudRequestRateAlarm,
 		MaxLogStreamsPerPrincipal: 50,
 		MaxDownloadsPerPrincipal:  20,
-		RunsPerPrincipalHour:      cloudRunsPerPrincipalHour,
 		ShedQueueDepth:            cloudShedQueueDepth,
 
 		EgressDailyAlarmBytes: cloudEgressDailyAlarmBytes,
@@ -125,11 +111,9 @@ var limitsProfiles = map[string]LimitsProfileValues{
 	LimitsProfileCloudFree: {
 		ClaimsPerRunnerMinute:     CompliantClaimPollsPerMinute() * cloudFreeClaimHeadroom,
 		HeartbeatsPerRunnerMinute: RecommendedHeartbeatsPerMinute / freeHeartbeatDivisor,
-		RequestsPerTokenMinute:    cloudFreeRequestsPerTokenMinute,
 		RequestsPerMinuteAlarm:    cloudRequestRateAlarm,
 		MaxLogStreamsPerPrincipal: 10,
 		MaxDownloadsPerPrincipal:  5,
-		RunsPerPrincipalHour:      cloudFreeRunsPerPrincipalHour,
 		ShedQueueDepth:            cloudFreeShedQueueDepth,
 
 		EgressDailyAlarmBytes: cloudFreeEgressDailyAlarmBytes,

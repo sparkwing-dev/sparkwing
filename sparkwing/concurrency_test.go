@@ -62,3 +62,19 @@ func TestGoConcurrencyKeepsOptionalPoliciesUnset(t *testing.T) {
 		t.Fatalf("Go declaration presence: %+v", spec)
 	}
 }
+
+func TestHostRefusesUnknownConcurrencyPolicy(t *testing.T) {
+	for _, limit := range []ConcurrencyLimit{{Capacity: 1, OnLimit: "qeue"}, {Capacity: 1, Scope: "globl"}} {
+		plan := NewPlan()
+		Job(plan, "deploy", func(context.Context) error { return nil }).Concurrency(NewConcurrencyGroup("g", limit))
+		raw, err := json.Marshal(planDocument(plan))
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, err = nodeproto.ValidatePlan(raw, nodeproto.ValidationContext{Placement: nodeproto.PlacementLocal, Secrets: secrets.NewMasker()})
+		var failure *apierr.Error
+		if !errors.As(err, &failure) || failure.Code != apierr.PlanInvalid {
+			t.Fatalf("%+v = %v, want plan_invalid", limit, err)
+		}
+	}
+}

@@ -48,6 +48,8 @@ func TestNormalizeHold(t *testing.T) {
 		{"", "", true},
 		{"garbage", "", true},
 		{"v0.15.x", "", true},
+		{"latest", "", true},
+		{"v01.15", "", true},
 	}
 	for _, c := range cases {
 		got, err := normalizeHold(c.in)

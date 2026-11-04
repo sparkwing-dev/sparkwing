@@ -141,16 +141,17 @@ func WithFreshArgs(args map[string]string) AwaitOption {
 // which silently builds the wrong code when the awaited pipeline is
 // registered in a different repo.
 //
-// When set, the child trigger lands at the branch tip of `repo`'s
-// `main` (no SHA pinning) so the child always builds the latest.
-// Pass WithFreshBranch to override.
+// When repo names a repository other than the parent's, the child
+// runs the tip of its `main` (no SHA pinning); pass WithFreshBranch
+// for another branch. Naming the parent's own repository inherits
+// the parent's source.
 func WithFreshRepo(repo string) AwaitOption {
 	return func(c *awaitConfig) { c.repo = repo }
 }
 
-// WithFreshBranch overrides the branch the spawned trigger runs
-// against. Default is "main" when WithFreshRepo is set; otherwise
-// the spawn inherits the parent's branch.
+// WithFreshBranch runs the spawned trigger at the tip of branch, in
+// the repository WithFreshRepo selects or else the parent's, and
+// drops the parent's commit pin.
 func WithFreshBranch(branch string) AwaitOption {
 	return func(c *awaitConfig) { c.branch = branch }
 }
@@ -163,12 +164,11 @@ type awaitRequest struct {
 	NodeID   string
 	Args     map[string]string
 	Timeout  time.Duration
-	// Repo, when non-empty, declares which repo the spawned pipeline
-	// lives in. Required for cross-repo awaits; empty falls back to
-	// parent-run inheritance.
+	// safety: only a Repo other than the parent's key selects another repository; empty or the parent's key
+	// inherits the parent's source.
 	Repo string
-	// Branch overrides the default branch for the spawned trigger
-	// (effective only when Repo is also set). Empty -> "main".
+	// safety: Branch runs its tip in the selected repository; empty keeps the parent's commit, or "main" when
+	// Repo selects another repository.
 	Branch string
 }
 

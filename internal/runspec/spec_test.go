@@ -265,14 +265,10 @@ func TestRetryPreservesPlanBytes(t *testing.T) {
 	}
 }
 
-func TestProjectionAndContext(t *testing.T) {
+func TestContextUsesSealedWinners(t *testing.T) {
 	s := fixture(t)
 	s.Resolved.Settings.Options.DryRun = Setting[bool]{Optional: Optional[bool]{Set: true, Value: true}}
 	s.Resolved.Entrypoint = "ci/main.go"
-	p := project(s)
-	if p.RepoKey != "gh:42" || p.SHA != strings.Repeat("a", 40) || p.DefaultBranch != "main" || p.RequestHash != s.Request.Hash || p.SpecHash != s.Hash || p.PlanHash != s.PlanHash {
-		t.Fatalf("projection lost inputs: %+v", p)
-	}
 	c := s.runContext()
 	if !c.DryRun || c.Source.Entrypoint != "ci/main.go" || !reflect.DeepEqual(c, s.GuardContext()) {
 		t.Fatal("context did not use sealed winners")
@@ -281,10 +277,6 @@ func TestProjectionAndContext(t *testing.T) {
 	s.Resolved.DefaultBranchSource = DefaultBranchOriginHEAD
 	if s.GuardContext().Git.App.Set {
 		t.Fatal("origin HEAD manufactured App trust")
-	}
-	s.Resolved.DefaultBranch = Optional[string]{}
-	if project(s).DefaultBranch != "main" {
-		t.Fatal("lost intake default branch")
 	}
 }
 

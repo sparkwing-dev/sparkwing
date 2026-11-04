@@ -106,10 +106,18 @@ func runFlagsFromInvocation(inv clisurface.Invocation) (runFlags, []string) {
 	}, inv.Args
 }
 
-func runOutput(inv clisurface.Invocation, environment string, terminal bool) (string, settings.Origin) {
-	if inv.Has("sw-output") {
-		return inv.Value("sw-output"), settings.Origin{Source: settings.Flag, Key: "sw-output"}
+// safety: run's execution, help and errors share this one resolution, so a
+// failure never renders in a different mode from the run it reports.
+func invocationOutput(inv clisurface.Invocation) string {
+	terminal := color.IsInteractiveStdout()
+	if inv.Command.Path != "sparkwing run" {
+		return inv.Output(terminal)
 	}
+	output, _ := runOutput(inv, os.Getenv("SPARKWING_LOG_FORMAT"), terminal)
+	return output
+}
+
+func runOutput(inv clisurface.Invocation, environment string, terminal bool) (string, settings.Origin) {
 	if inv.Has("output") {
 		return inv.Value("output"), settings.Origin{Source: settings.Flag, Key: "output"}
 	}

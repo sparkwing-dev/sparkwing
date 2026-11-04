@@ -143,12 +143,15 @@ webhook. EKS region values, VPC resource controller ENI data and load-balancer
 readiness gates pass. AWS credential injection, host access, extra capabilities,
 service account tokens, ephemeral containers and exec, attach or port-forward
 are refused. `nodes/proxy` reaches the kubelet without admission; grant it only
-to cluster administrators. The policy
-template is generated from `launcher.AdmissionPolicies`; regenerate it with
+to cluster administrators. The policies read the pinned images from the
+ConfigMap `sparkwing-cloud-admission` the chart renders in the job namespace, so
+the cluster-scoped policies and bindings do not change when only the images do;
+without that ConfigMap they deny every Pod and Job there. The template is
+generated from `launcher.AdmissionPolicies` and `launcher.AdmissionParams`; regenerate it with
 `GOWORK=off go test ./charts -run TestLauncherAdmissionTemplateIsGenerated -update`.
 
 The launcher refuses to start unless those policies and bindings match its
-identity, namespace and images. It checks each Job's award fields (team
+identity and namespace and the ConfigMap names its images. It checks each Job's award fields (team
 placement, node, images and resources) at activation, and each of the Job's
 Pods once, on the first pass that sees it. A
 mismatch deletes the Job, fails its exact award, cordons the node and deletes
