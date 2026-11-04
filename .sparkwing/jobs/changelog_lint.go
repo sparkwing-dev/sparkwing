@@ -487,11 +487,15 @@ func lintSectionHeadingsDedupe(s changelogSection) []ChangelogIssue {
 	for _, h := range s.subHeads {
 		key := normalizeHeadingName(h.name)
 		if prev, ok := firstSeen[key]; ok {
+			fix := "move its bullets under the first heading and delete the repeat"
+			if s.version == "Unreleased" {
+				fix = "run `bash bin/check-changelog.sh --fix` to merge every repeated heading in [Unreleased] and re-sync the mirror, then commit CHANGELOG.md and pkg/docs/changelog.md"
+			}
 			issues = append(issues, ChangelogIssue{
 				Line:     h.line,
 				Category: "duplicate-heading",
-				Message: fmt.Sprintf("### %s appears more than once in [%s] (first at line %d); merge the entries into one block",
-					h.name, s.version, prev),
+				Message: fmt.Sprintf("### %s appears more than once in [%s] (first at line %d); %s",
+					h.name, s.version, prev, fix),
 			})
 			continue
 		}
