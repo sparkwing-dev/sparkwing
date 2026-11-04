@@ -246,7 +246,7 @@ func prepareNativeLocalRun(ctx context.Context, home, directory, pipeline string
 	if selection.source.Ref == "" {
 		selection.source.Ref = entry.SHA
 	}
-	if err := writeEngineNotices(os.Stderr, entry.Engine.Notices); err != nil {
+	if err := writeEngineNoticesOnce(os.Stderr, entry.Engine.Notices); err != nil {
 		return localRunPreparation{}, err
 	}
 	processes := nodehost.ProtocolSessionConfig{Environments: nodehost.SDKEnvironment{Base: options.Base, Snapshots: snapshots}}
