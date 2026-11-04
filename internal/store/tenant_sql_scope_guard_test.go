@@ -157,6 +157,28 @@ var reviewedClaimSearchSQL = map[string]string{
 	"claimProofFactsTx": "joins requirement terms on each proof head's own team and requirements, both bound per head",
 }
 
+// safety: each entry names a function that splices a relation into its SQL at run time, which the guard
+// cannot read, with the reason every relation it can splice is scoped.
+var reviewedRuntimeRelations = map[string]string{
+	"(*Tenant).markForDeletionTx":    "deletes from a fixed list of tenant tables WHERE team = ?",
+	"deleteTenantRowsTx":             "deletes each tenant-owned schema table WHERE team = ?",
+	"(*Operator).relabelPrincipalTx": "relabels a deleted user's name in a fixed list of tables across every team",
+	"usageStatement":                 "inserts into a fixed usage table keyed by (team, period)",
+	"(*Tenant).WriteAnnotation":      "resultTarget names nodes, node_steps or runs with a team = ? predicate",
+	"(*Tenant).WriteSummary":         "resultTarget names nodes, node_steps or runs with a team = ? predicate",
+	"(*Tenant).admitWorkTx":          "reads and deletes concurrency_holders and concurrency_waiters WHERE team=?",
+	"clearAdmissionLevelTx":          "deletes from concurrency_holders and concurrency_waiters WHERE team=?",
+	"renewCapacityTx":                "reads and renews concurrency_holders and concurrency_waiters WHERE team=?",
+	"checkCapacityMutationTx":        "reads concurrency_holders and concurrency_waiters WHERE team=?",
+	"clampRunLeasesTx":               "updates a fixed list of leased tables WHERE team=?",
+	"readUnclaimedUnitTx":            "selects from its own literal union over triggers, nodes and eval_units, each WHERE team=?",
+	"firstEligibleRouteTx":           "selects from a claim-search subquery whose own statements the guard judges",
+	"(*claimSQL).headSQL":            "selects from claim source subqueries whose own statements the guard judges",
+	"(*claimSQL).alternatives":       "selects from json_each or unnest over one value",
+	"(*claimSQL).source":             "selects from its own literal FROM clauses over nodes, eval_units and triggers",
+	"(*claimSQL).query":              "selects from a union of literal cloud sizes",
+}
+
 // safety: queue_team routes an App delivery after verification and is filtered by hand; the guard's
 // predicate reader knows only team, so this table is reviewed here rather than silently skipped.
 var reviewedTeamColumnTables = map[string]string{
@@ -172,6 +194,10 @@ func TestTenantSQLScope_EveryTenantTableStatementCarriesTheKey(t *testing.T) {
 	seen := map[string]bool{}
 	for _, stmt := range tenantSQLStatements(t) {
 		for _, problem := range unjudgeableTableSyntax(stmt.text) {
+			if _, ok := reviewedRuntimeRelations[stmt.key]; ok && problem == runtimeRelationProblem {
+				seen["runtime "+stmt.key] = true
+				continue
+			}
 			t.Errorf("%s: statement in %s %s, which the scope guard cannot judge; write a plain table name and an explicit JOIN.\n\t%s", stmt.pos, stmt.key, problem, collapse(stmt.text))
 		}
 		tables := tenantTablesTouchedBy(stmt.text)
@@ -235,6 +261,11 @@ func TestTenantSQLScope_EveryTenantTableStatementCarriesTheKey(t *testing.T) {
 	for key, why := range reviewedOperatorTableSQL {
 		if strings.TrimSpace(why) == "" || !seen[key] {
 			t.Errorf("reviewedOperatorTableSQL entry %q is stale or has no reason; delete it", key)
+		}
+	}
+	for key, why := range reviewedRuntimeRelations {
+		if strings.TrimSpace(why) == "" || !seen["runtime "+key] {
+			t.Errorf("reviewedRuntimeRelations entry %q is stale or has no reason; delete it", key)
 		}
 	}
 	for key, why := range reviewedClaimSearchSQL {
@@ -394,8 +425,8 @@ func unjudgeableTableSyntax(sql string) []string {
 }
 
 // safety: discovery and refusal share this fail-closed reader: after FROM, JOIN, INTO, UPDATE or USING
-// (and ONLY) it accepts a plain table, a subquery, an INTO column list, information_schema, or the clause
-// word, comma or parenthesis left where the flattener dropped a fragment; every other form is refused.
+// (and ONLY) it accepts a plain table, a subquery, an INTO column list, information_schema, or a clause
+// word, comma or parenthesis; every other form, including a relation built at run time, is refused.
 func sqlRelations(tokens []string) (tables, problems []string) {
 	for i := 0; i+1 < len(tokens); i++ {
 		switch tokens[i] {
@@ -416,6 +447,8 @@ func sqlRelations(tokens []string) (tables, problems []string) {
 		}
 		switch {
 		case next == "(" && (slices.Contains([]string{"select", "with", "values", ")"}, after) || tokens[i] == "into" && scopeIdentRe.MatchString(after) && j+2 < len(tokens) && (tokens[j+2] == "," || tokens[j+2] == ")")):
+		case next == runtimeFragment || next == "(" && after == runtimeFragment:
+			problems = append(problems, runtimeRelationProblem)
 		case slices.Contains(sqlClauseWords, next) || next == ")" || next == ",":
 		case next == "information_schema" && after == ".":
 		case scopeIdentRe.MatchString(next) && after != "." && !slices.Contains(sqlRelationModifiers, next):
@@ -727,9 +760,8 @@ func exprString(e ast.Expr) string {
 	}
 }
 
-// safety: a fragment it cannot resolve becomes a space, because an
-// unresolvable call is not a team predicate and crediting it as one
-// would pass an unscoped statement.
+// safety: a fragment it cannot resolve becomes a space, because an unresolvable call is not a team
+// predicate; one that names a relation becomes runtimeFragment, which sqlRelations refuses.
 func flattenSQL(e ast.Expr, consts map[string]string) (string, bool) {
 	switch v := e.(type) {
 	case *ast.BasicLit:
@@ -756,14 +788,29 @@ func flattenSQL(e ast.Expr, consts map[string]string) (string, bool) {
 		if !lok && !rok {
 			return "", false
 		}
+		if !rok && relationSlotRe.MatchString(left) {
+			right = runtimeFragment
+		}
 		return left + " " + right, true
 	case *ast.ParenExpr:
 		return flattenSQL(v.X, consts)
+	case *ast.CallExpr:
+		// safety: these claimSQL helpers render a table function over one value, never a stored relation.
+		if sel, ok := v.Fun.(*ast.SelectorExpr); ok && slices.Contains([]string{"array", "indexed", "alternatives"}, sel.Sel.Name) {
+			return "json_each", true
+		}
 	}
 	return "", false
 }
 
 var sqlVerbRe = regexp.MustCompile(`(?is)\b(SELECT|INSERT\s+INTO|UPDATE|DELETE\s+FROM)\b`)
+
+const (
+	runtimeFragment        = "runtime_fragment"
+	runtimeRelationProblem = "names a relation built at run time"
+)
+
+var relationSlotRe = regexp.MustCompile(`(?is)\b(FROM|JOIN|INTO|UPDATE|USING)\s*\(?\s*$`)
 
 func looksLikeSQL(s string) bool { return sqlVerbRe.MatchString(s) }
 
@@ -796,6 +843,21 @@ func TestTenantSQLScope_RefusesUnjudgeableSyntax(t *testing.T) {
 	} {
 		if got := len(unjudgeableTableSyntax(c.sql)) > 0; got != c.refused {
 			t.Errorf("%q: refused=%v, want %v", c.sql, got, c.refused)
+		}
+	}
+	for src, refused := range map[string]bool{
+		"`SELECT id FROM ` + table + ` WHERE id=?`":           true,
+		"`SELECT id FROM (` + query + `) waiting`":            true,
+		"`SELECT 1 FROM ` + q.array(v, `x`)":                  false,
+		"`SELECT id FROM runs WHERE team=? AND ` + condition": false,
+	} {
+		expr, err := parser.ParseExpr(src)
+		if err != nil {
+			t.Fatal(err)
+		}
+		text, _ := flattenSQL(expr, nil)
+		if got := len(unjudgeableTableSyntax(text)) > 0; got != refused {
+			t.Errorf("%s: refused=%v, want %v", src, got, refused)
 		}
 	}
 	for _, sql := range []string{`SELECT SUM(amount_micro) FROM ((credit_grants)) WHERE team=?`, `UPDATE OR IGNORE credit_grants SET created_by=? WHERE team=?`} {
