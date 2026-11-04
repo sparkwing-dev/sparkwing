@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"slices"
 	"strings"
 	"sync/atomic"
@@ -267,5 +268,43 @@ func TestStorePostgresShardTimeoutEndsInsideTheStep(t *testing.T) {
 	}
 	if timeout >= storePostgresPrePushTimeout {
 		t.Fatalf("shard timeout %s does not end before the step's %s, so a hung test would print no stack", timeout, storePostgresPrePushTimeout)
+	}
+}
+
+func TestStorePostgresSweepRemovesOnlyAbandonedRoots(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("no flock outside unix")
+	}
+	dir := t.TempDir()
+	mkRoot := func(name string) string {
+		root := filepath.Join(dir, storePostgresRootPrefix+name)
+		if err := os.MkdirAll(filepath.Join(root, "data"), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		return root
+	}
+	live := mkRoot("live")
+	release, err := claimStorePostgresRoot(live)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer release()
+	abandoned := mkRoot("abandoned")
+	releaseAbandoned, err := claimStorePostgresRoot(abandoned)
+	if err != nil {
+		t.Fatal(err)
+	}
+	releaseAbandoned()
+	unclaimed := mkRoot("unclaimed")
+
+	sweepAbandonedStorePostgresRoots(t.Context(), dir)
+
+	if _, err := os.Stat(abandoned); !os.IsNotExist(err) {
+		t.Errorf("the root whose owner is gone survived the sweep: %v", err)
+	}
+	for _, root := range []string{live, unclaimed} {
+		if _, err := os.Stat(root); err != nil {
+			t.Errorf("the sweep removed %s, which a live run may still own: %v", root, err)
+		}
 	}
 }
