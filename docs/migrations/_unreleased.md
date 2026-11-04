@@ -82,8 +82,8 @@ and no `--trust`, or `--trust any`.
 
 ## Team launcher pods are not fresh hosts
 
-Pods a team's own launcher starts, enrolled with `sparkwing runners add
---launcher`, now take the trust of the launcher's credential instead of counting
+Pods a team's own launcher starts, a runner enrolled with `--launcher`, now
+take the trust of the launcher's credential instead of counting
 as fresh hosts. Jobs on them mint OIDC tokens whose `runner_environment` claim
 is `persistent`, and the subject's `runner_environment` segment changes with
 it. A push to `main` run on such a pod was
