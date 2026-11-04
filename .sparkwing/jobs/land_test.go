@@ -52,6 +52,17 @@ func TestLandPreconditionsAcceptARebasedCleanBranch(t *testing.T) {
 	}
 }
 
+func TestLandPreconditionsAcceptABranchBehindMainThatMergesCleanly(t *testing.T) {
+	g := landableGit()
+	g.fail["merge-base --is-ancestor origin/main HEAD"] = errors.New("exit 1")
+	if _, err := checkLandPreconditions(t.Context(), g.run, "/repo"); err != nil {
+		t.Fatalf("a branch whose merge with main is clean was refused: %v", err)
+	}
+	if !slices.Contains(g.calls, "merge-tree --write-tree --no-messages HEAD origin/main") {
+		t.Fatalf("preconditions accepted a branch behind main without trying the merge: %v", g.calls)
+	}
+}
+
 func TestLandPreconditionsRefuseWithTheFixingCommand(t *testing.T) {
 	cases := map[string]struct {
 		edit func(*landGit)
@@ -63,9 +74,10 @@ func TestLandPreconditionsRefuseWithTheFixingCommand(t *testing.T) {
 			g.answers["status --porcelain --untracked-files=normal"] = " M go.mod"
 		}, "git -C /repo add <paths> && git -C /repo commit"},
 		"fetch": {func(g *landGit) { g.fail["fetch --quiet origin main"] = errors.New("offline") }, "retry: git -C /repo fetch origin main"},
-		"not rebased": {func(g *landGit) {
+		"behind main with a conflict": {func(g *landGit) {
 			g.fail["merge-base --is-ancestor origin/main HEAD"] = errors.New("exit 1")
-		}, "git -C /repo fetch origin main && git -C /repo rebase origin/main, then rerun sparkwing run land"},
+			g.fail["merge-tree --write-tree --no-messages HEAD origin/main"] = errors.New("exit 1")
+		}, "git -C /repo fetch origin main && git -C /repo merge origin/main, then rerun sparkwing run land"},
 		"nothing to land": {func(g *landGit) { g.answers["rev-parse origin/main"] = "c0ffee00" }, "nothing to land"},
 	}
 	for name, tc := range cases {
@@ -98,9 +110,6 @@ func TestLandVerifyRefusesUnlessTheReviewPassedThisTree(t *testing.T) {
 		"review empty":   {review: func(r *reviewRecord) { r.Result = "" }, want: `result is ""`},
 		"other tree":     {review: func(r *reviewRecord) { r.Tree = "0dd00000" }, want: "review judged tree"},
 		"head moved":     {git: func(g *landGit) { g.answers["rev-parse HEAD"] = "beef0000" }, want: "HEAD moved"},
-		"main moved": {git: func(g *landGit) {
-			g.fail["merge-base --is-ancestor origin/main c0ffee00"] = errors.New("exit 1")
-		}, want: "rebase origin/main"},
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -139,7 +148,7 @@ func TestLandPushIsAFastForwardOfTheGatedCommit(t *testing.T) {
 	}
 }
 
-func TestLandPushRejectionSaysRebaseAndRerun(t *testing.T) {
+func TestLandPushRejectionSaysMergeAndRerun(t *testing.T) {
 	g := landableGit()
 	g.fail["push origin c0ffee00:refs/heads/main"] = errors.New(" ! [rejected]        c0ffee00 -> main (fetch first)")
 	err := pushLanding(t.Context(), g.run, "/repo", "c0ffee00")

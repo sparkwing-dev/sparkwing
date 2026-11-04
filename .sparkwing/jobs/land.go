@@ -10,23 +10,26 @@ import (
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
-// Land checks a rebased branch, runs the gate and the review side by side, and
-// fast-forwards origin/main to exactly the commit both passed.
+// Land checks a branch, runs the gate and the review side by side, and pushes
+// the commit both passed to main, merging origin/main into it first when main moved.
 type Land struct{ sparkwing.Base }
 
 func (Land) ShortHelp() string {
-	return "Land the current branch: gate and review in parallel, then fast-forward origin/main to HEAD"
+	return "Land the current branch: gate and review in parallel, then push HEAD to main, merging origin/main first when it moved"
 }
 
 func (Land) Help() string {
-	return "Refuses a dirty checkout, a detached HEAD, main itself, and a branch that does not contain origin/main (after fetching it), " +
+	return "Refuses a dirty checkout, a detached HEAD, main itself, and a branch whose merge with origin/main (after fetching it) conflicts, " +
 		"naming the command that fixes each. Then runs the gate (the same jobs as `sparkwing run gate`) and the review " +
 		"(the same job as `sparkwing run review`, which reads .review.yaml and takes --brief and --skip) in parallel. " +
 		"The review always runs, whatever the change's size or paths. When both pass and the review record's tree is HEAD's tree with result pass, " +
-		"the land job re-checks that HEAD did not move and origin/main is still its ancestor, then runs `git push origin <HEAD>:refs/heads/main` " +
-		"with no force. A rejected push means main moved: rebase and rerun. The push step carries the destructive and prod risks, " +
-		"so a real landing needs --sw-allow-risk destructive,prod. The land job's output is the landing record: branch, commit, tree, base, " +
-		"the run that gated it, and the review record's path and result."
+		"the land job re-checks that HEAD did not move, fetches origin/main and runs `git push origin <HEAD>:refs/heads/main` " +
+		"with no force. When origin/main is not an ancestor of HEAD, or the push is refused because main moved, the push step merges origin/main " +
+		"into the branch (a merge commit under the default git identity, never a rebase), builds every module and runs the affected tests over the files " +
+		"that differ between the gated tree and the merged tree, then pushes the merge; the review is not run again. It merges at most 3 times; a conflict fails " +
+		"and names the merge to run by hand. The push step carries the destructive and prod risks, " +
+		"so a real landing needs --sw-allow-risk destructive,prod. The land job's output is the landing record: branch, the commit and tree pushed, " +
+		"the tree the gate and review judged, base, merges, the run that gated it, and the review record's path and result."
 }
 
 func (Land) Examples() []sparkwing.Example {
@@ -145,7 +148,7 @@ func checkLandPreconditions(ctx context.Context, git gitRunner, dir string) (lan
 	if base == head {
 		return landHead{}, fmt.Errorf("land: %s is already at HEAD %s, so there is nothing to land", landBaseRef, short(head))
 	}
-	if err := requireContainsBase(ctx, git, dir); err != nil {
+	if err := requireCleanMerge(ctx, git, dir); err != nil {
 		return landHead{}, err
 	}
 	return landHead{Branch: branch, Commit: head, Tree: tree, Base: base}, nil
@@ -169,14 +172,21 @@ func fetchLandBase(ctx context.Context, git gitRunner, dir string) error {
 	return nil
 }
 
-func rebaseRemedy(dir string) string {
-	return fmt.Sprintf("git -C %s fetch %s %s && git -C %s rebase %s, then rerun sparkwing run land", dir, landBaseRemote, landBaseBranch, dir, landBaseRef)
+func mergeRemedy(dir string) string {
+	return fmt.Sprintf("git -C %s fetch %s %s && git -C %s merge %s, then rerun sparkwing run land", dir, landBaseRemote, landBaseBranch, dir, landBaseRef)
 }
 
-func requireContainsBase(ctx context.Context, git gitRunner, dir string) error {
-	if _, err := git(ctx, "merge-base", "--is-ancestor", landBaseRef, "HEAD"); err != nil {
-		return fmt.Errorf("land: HEAD does not contain %s, so main cannot fast-forward to it; rebase: %s", landBaseRef, rebaseRemedy(dir))
+// perf: a branch behind main that merges cleanly lands; the push step merges
+// it after the gate. A conflict fails here, before the gate and review spend
+// their time on a branch that cannot land unaided.
+func requireCleanMerge(ctx context.Context, git gitRunner, dir string) error {
+	if _, err := git(ctx, "merge-base", "--is-ancestor", landBaseRef, "HEAD"); err == nil {
+		return nil
 	}
+	if _, err := git(ctx, "merge-tree", "--write-tree", "--no-messages", "HEAD", landBaseRef); err != nil {
+		return fmt.Errorf("land: HEAD does not contain %s and merging it conflicts; merge it: %s", landBaseRef, mergeRemedy(dir))
+	}
+	sparkwing.Info(ctx, "%s moved past HEAD and merges cleanly; the push step merges it after the gate", landBaseRef)
 	return nil
 }
 
@@ -184,7 +194,9 @@ type landingRecord struct {
 	Branch       string `json:"branch"`
 	Commit       string `json:"commit"`
 	Tree         string `json:"tree"`
+	GatedTree    string `json:"gated_tree"`
 	Base         string `json:"base"`
+	Merges       int    `json:"merges"`
 	GateRun      string `json:"gate_run"`
 	ReviewRecord string `json:"review_record"`
 	ReviewResult string `json:"review_result"`
@@ -198,6 +210,9 @@ type landJob struct {
 	RunID   string
 	Head    sparkwing.Ref[landHead]
 	Review  sparkwing.Ref[reviewRecord]
+	// safety: the push step sets it to what it pushed, so the record names the
+	// pushed commit and tree rather than the gated ones.
+	landed *landTarget
 }
 
 func (j *landJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
@@ -210,9 +225,15 @@ func (j *landJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
 		return verifyLanding(ctx, gitIn(j.RepoDir), j.RepoDir, j.Head.Get(ctx), review)
 	}).SafeWithoutDryRun()
 	push := sparkwing.Step(w, "push", func(ctx context.Context) error {
-		return pushLanding(ctx, gitIn(j.RepoDir), j.RepoDir, j.Head.Get(ctx).Commit)
+		landed, err := landOnto(ctx, j.RepoDir, j.Head.Get(ctx), recheckMergeDelta)
+		if err != nil {
+			return err
+		}
+		j.landed = &landed
+		return nil
 	}).DryRun(func(ctx context.Context) error {
-		sparkwing.Info(ctx, "dry run: would run git %s", strings.Join(landPushArgs(j.Head.Get(ctx).Commit), " "))
+		sparkwing.Info(ctx, "dry run: would fetch %s, merge it into %s when it moved (at most %d times, re-checking the files each merge changed), then run git %s",
+			landBaseRef, j.Head.Get(ctx).Branch, landMaxMerges, strings.Join(landPushArgs("<HEAD or the merge>"), " "))
 		return nil
 	}).Risk("destructive", "prod").Needs(verify)
 	return sparkwing.Step(w, "record", func(ctx context.Context) (landingRecord, error) {
@@ -246,11 +267,17 @@ func (j *landJob) record(ctx context.Context) (landingRecord, error) {
 	if err != nil {
 		return landingRecord{}, fmt.Errorf("land: locate the git common dir: %w", err)
 	}
+	pushed := landTarget{Commit: head.Commit, Tree: head.Tree, Base: head.Base}
+	if j.landed != nil {
+		pushed = *j.landed
+	}
 	return landingRecord{
 		Branch:       head.Branch,
-		Commit:       head.Commit,
-		Tree:         head.Tree,
-		Base:         head.Base,
+		Commit:       pushed.Commit,
+		Tree:         pushed.Tree,
+		GatedTree:    head.Tree,
+		Base:         pushed.Base,
+		Merges:       pushed.Merges,
 		GateRun:      j.RunID,
 		ReviewRecord: reviewRecordPath(filepath.Join(common, "sparkwing-review"), review.Branch),
 		ReviewResult: review.Result,
@@ -263,13 +290,13 @@ func landingSummary(rec landingRecord) string {
 	if !rec.Pushed {
 		verb = "Dry run: would land"
 	}
-	return fmt.Sprintf("%s `%s` at `%s` on %s\n\n| | |\n| --- | --- |\n| tree | `%s` |\n| base | `%s` |\n| gate run | `%s` |\n| review | %s, `%s` |\n",
-		verb, rec.Branch, short(rec.Commit), landBaseRef, rec.Tree, short(rec.Base), rec.GateRun, rec.ReviewResult, rec.ReviewRecord)
+	return fmt.Sprintf("%s `%s` at `%s` on %s\n\n| | |\n| --- | --- |\n| tree | `%s` |\n| gated tree | `%s` |\n| merges of %s | %d |\n| base | `%s` |\n| gate run | `%s` |\n| review | %s, `%s` |\n",
+		verb, rec.Branch, short(rec.Commit), landBaseRef, rec.Tree, rec.GatedTree, landBaseRef, rec.Merges, short(rec.Base), rec.GateRun, rec.ReviewResult, rec.ReviewRecord)
 }
 
 // safety: the gate and review judged the commit the preconditions accepted, so
-// anything that moved HEAD, dirtied the checkout or let main move past it since
-// means the evidence no longer describes what would be pushed.
+// anything that moved HEAD or dirtied the checkout since means the evidence no
+// longer describes what would be pushed. Main moving is the push step's to handle.
 func verifyLanding(ctx context.Context, git gitRunner, dir string, head landHead, review reviewRecord) error {
 	if review.Result != resultPass {
 		return fmt.Errorf("land: the review record's result is %q with %d blocking finding(s) open; fix them and rerun sparkwing run land", review.Result, review.BlockingOpen)
@@ -287,14 +314,128 @@ func verifyLanding(ctx context.Context, git gitRunner, dir string, head landHead
 	if err := requireClean(ctx, git, dir); err != nil {
 		return err
 	}
-	if err := fetchLandBase(ctx, git, dir); err != nil {
+	sparkwing.Info(ctx, "review %s on tree %s, HEAD still %s", review.Result, short(head.Tree), short(head.Commit))
+	return nil
+}
+
+// safety: bounded, so a main that keeps moving fails the land instead of
+// merging and re-checking without end.
+const landMaxMerges = 3
+
+// safety: Tree is the tree pushed. Only a merge changes it from the gated
+// tree, and the merge's own delta is re-checked before the push.
+type landTarget struct {
+	Commit string
+	Tree   string
+	Base   string
+	Merges int
+}
+
+type mergeRecheck func(ctx context.Context, files []string) error
+
+// perf: main's own commits passed their land, and the gate and review judged
+// this branch, so a clean merge re-checks only the files the merge changed
+// The review covers the branch's diff and is not run again.
+func landOnto(ctx context.Context, dir string, head landHead, recheck mergeRecheck) (landTarget, error) {
+	git := gitIn(dir)
+	target := landTarget{Commit: head.Commit, Tree: head.Tree, Base: head.Base}
+	var refused error
+	for {
+		if err := fetchLandBase(ctx, git, dir); err != nil {
+			return target, err
+		}
+		base, err := git(ctx, "rev-parse", landBaseRef)
+		if err != nil {
+			return target, fmt.Errorf("land: resolve %s: %w", landBaseRef, err)
+		}
+		if refused != nil && base == target.Base {
+			return target, refused
+		}
+		if _, err := git(ctx, "merge-base", "--is-ancestor", base, target.Commit); err != nil {
+			if target.Merges == landMaxMerges {
+				return target, fmt.Errorf("land: %s moved again after %d merges; rerun sparkwing run land when main is quieter", landBaseRef, landMaxMerges)
+			}
+			target, err = mergeLandBase(ctx, git, dir, head.Branch, target, base)
+			if err != nil {
+				return target, err
+			}
+			files, err := changedBetween(ctx, dir, head.Tree, target.Tree)
+			if err != nil {
+				return target, err
+			}
+			sparkwing.Info(ctx, "merged %s %s into %s as %s; re-checking the %d file(s) the merge changed", landBaseRef, short(base), head.Branch, short(target.Commit), len(files))
+			if err := recheck(ctx, files); err != nil {
+				return target, fmt.Errorf("land: %s merged cleanly as %s, which the branch now holds, but re-checking the files it changed failed; fix it on the branch and rerun sparkwing run land: %w", landBaseRef, short(target.Commit), err)
+			}
+		}
+		target.Base = base
+		refused = pushLanding(ctx, git, dir, target.Commit)
+		if refused == nil {
+			return target, nil
+		}
+		if !errors.As(refused, new(errMainMoved)) {
+			return target, refused
+		}
+	}
+}
+
+// safety: the merge goes through git merge in the checkout, so it carries the
+// developer's identity and signing, and the branch holds what main receives.
+// A merge that stops is aborted, leaving the checkout as the gate judged it.
+func mergeLandBase(ctx context.Context, git gitRunner, dir, branch string, onto landTarget, base string) (landTarget, error) {
+	now, err := git(ctx, "rev-parse", "HEAD")
+	if err != nil {
+		return onto, fmt.Errorf("land: resolve HEAD: %w", err)
+	}
+	if now != onto.Commit {
+		return onto, fmt.Errorf("land: HEAD moved from %s to %s during the run; rerun sparkwing run land", short(onto.Commit), short(now))
+	}
+	if err := requireClean(ctx, git, dir); err != nil {
+		return onto, err
+	}
+	msg := fmt.Sprintf("Merge remote-tracking branch '%s' into %s", landBaseRef, branch)
+	if _, err := git(ctx, "merge", "--no-ff", "--no-edit", "-m", msg, base); err != nil {
+		if _, merging := git(ctx, "rev-parse", "-q", "--verify", "MERGE_HEAD"); merging == nil {
+			if _, abortErr := git(ctx, "merge", "--abort"); abortErr != nil {
+				err = errors.Join(err, abortErr)
+			}
+		}
+		return onto, fmt.Errorf("land: merging %s %s into %s conflicts, so it cannot land unaided; merge it: %s\n%w", landBaseRef, short(base), branch, mergeRemedy(dir), err)
+	}
+	commit, err := git(ctx, "rev-parse", "HEAD")
+	if err != nil {
+		return onto, fmt.Errorf("land: resolve the merge commit: %w", err)
+	}
+	tree, err := git(ctx, "rev-parse", "HEAD^{tree}")
+	if err != nil {
+		return onto, fmt.Errorf("land: resolve the merge commit's tree: %w", err)
+	}
+	return landTarget{Commit: commit, Tree: tree, Base: base, Merges: onto.Merges + 1}, nil
+}
+
+// safety: -z and no trimming, so a name holding a newline or leading space
+// still reaches the affected-test selection intact.
+func changedBetween(ctx context.Context, dir, from, to string) ([]string, error) {
+	out, err := runGitIn(ctx, dir, "diff", "-z", "--name-only", "--no-renames", "--diff-filter=ACMRD", from, to)
+	if err != nil {
+		return nil, fmt.Errorf("land: list the files the merge changed: %w", err)
+	}
+	var files []string
+	for _, f := range strings.Split(out, "\x00") {
+		if f != "" {
+			files = append(files, f)
+		}
+	}
+	return files, nil
+}
+
+// safety: build catches an importer the merge broke, which the affected
+// selection leaves to the build step; the tests cover the packages it changed.
+func recheckMergeDelta(ctx context.Context, files []string) error {
+	if err := runBuild(ctx); err != nil {
 		return err
 	}
-	if _, err := git(ctx, "merge-base", "--is-ancestor", landBaseRef, head.Commit); err != nil {
-		return fmt.Errorf("land: %s moved during the run and %s no longer contains it; rebase: %s", landBaseRef, short(head.Commit), rebaseRemedy(dir))
-	}
-	sparkwing.Info(ctx, "review %s on tree %s; %s is an ancestor of %s", review.Result, short(head.Tree), landBaseRef, short(head.Commit))
-	return nil
+	return runAffectedTestFiles(ctx, files, fmt.Sprintf("%d file(s) the merge of %s changed", len(files), landBaseRef))
 }
 
 // safety: no --force and an explicit commit, so the remote accepts the push
@@ -304,12 +445,16 @@ func landPushArgs(commit string) []string {
 	return []string{"push", landBaseRemote, commit + ":refs/heads/" + landBaseBranch}
 }
 
+// safety: a refusal because main moved sends land back to merge; any other
+// push failure ends the land.
+type errMainMoved struct{ error }
+
 func pushLanding(ctx context.Context, git gitRunner, dir, commit string) error {
 	out, err := git(ctx, landPushArgs(commit)...)
 	if err != nil {
 		msg := err.Error()
 		if strings.Contains(msg, "non-fast-forward") || strings.Contains(msg, "fetch first") || strings.Contains(msg, "rejected") {
-			return fmt.Errorf("land: %s moved since the gate ran, so the push was refused: rebase: %s\n%w", landBaseRef, rebaseRemedy(dir), err)
+			return errMainMoved{fmt.Errorf("land: %s moved since the gate ran, so the push was refused; merge it: %s\n%w", landBaseRef, mergeRemedy(dir), err)}
 		}
 		return fmt.Errorf("land: push %s to %s: %w", short(commit), landBaseRef, err)
 	}

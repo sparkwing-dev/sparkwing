@@ -15,7 +15,7 @@ launcher when testing isolated tool state.
 ## Landing a change
 
 Agents and the lead land every change with `sparkwing run land`, so each
-landing goes through Sparkwing itself. From a clean, rebased work branch:
+landing goes through Sparkwing itself. From a clean work branch:
 
 ```bash
 sparkwing run land --sw-dry-run                           # preview; nothing is pushed
@@ -29,22 +29,36 @@ skips. Without them the run fails as "pipeline discovery failed (details
 withheld)".
 
 The `preconditions` job refuses a dirty checkout, a detached HEAD, `main`
-itself and a branch that does not contain a freshly fetched `origin/main`, and
-names the command that fixes each. The gate (the same jobs as
+itself and a branch whose merge with a freshly fetched `origin/main`
+conflicts, and names the command that fixes each; a branch behind main that
+merges cleanly goes ahead. The gate (the same jobs as
 `sparkwing run gate`) and the review (the same job as `sparkwing run review`,
 under `.review.yaml`) then run in parallel. Every change is reviewed, docs and
 comment changes included; the review job never skips by size or path. Pass
 `-- --brief '...'` or `-- --skip 'F2=reason'` as for the review pipeline.
 
 The `land` job's `verify` step requires the review record's tree to be HEAD's
-tree with result `pass`, HEAD unchanged since the preconditions and
-`origin/main` still its ancestor. Its `push` step runs
+tree with result `pass` and HEAD unchanged since the preconditions. Its `push`
+step fetches `origin/main` and runs
 `git push origin <HEAD>:refs/heads/main` without force, so the pre-push hook
 still runs, and carries the
 `destructive` and `prod` risks, as release's `push-tag` does. A rejected push
-means main moved: rebase onto `origin/main` and rerun. The job's output is the
-landing record (branch, commit, tree, base, gate run, review record path and
-result). The gate's `test` step summary lists the slowest packages and tests.
+means main moved; the step then merges it, as below. The job's output is the
+landing record (branch, the commit and tree pushed, the gated tree, base,
+merges, gate run, review record path and result). The gate's `test` step summary lists the slowest packages and tests.
+
+When `origin/main` is not an ancestor of HEAD at push time, the `push` step
+merges it into the branch in the checkout (`git merge --no-ff`, the default
+git identity and signing; never a rebase), runs `go build` in every module
+and the affected-test selection over the files that differ between the gated
+tree and the merged tree, then pushes the merge. The review is not run again:
+it judged the branch's own diff, and the re-check covers what the merge
+brought in. It
+merges at most three times per land. A conflict aborts the merge, leaves the
+branch as the gate judged it and names `git merge origin/main` to run by hand.
+A re-check failure leaves the merge on the branch. The `record-tree` pass
+names only the gated tree; the merged tree records no gate pass, and the
+landing record names both.
 
 ## Checks
 

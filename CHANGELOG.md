@@ -33,6 +33,10 @@ unlock.
   Activating a virtualenv or Node version manager keeps the compiled pipeline; upgrading Go behind the same `PATH`
   rebuilds it.
 - **run:** Each engine notice, such as the missing version policy warning, prints once per command instead of three times
+- **delivery:** `sparkwing run land` merges `origin/main` when main moved instead of failing
+  A clean merge (a merge commit, never a rebase) re-checks only the files the merge changed, with `go build` and the
+  affected tests, then pushes; the review does not run again. It merges at most three times, and a conflict fails
+  naming `git merge origin/main`. Preconditions accept a branch behind main that merges cleanly.
 
 ### Fixed
 

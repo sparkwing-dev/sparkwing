@@ -46,6 +46,12 @@ func runAffectedTest(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	return runAffectedTestFiles(ctx, files, scope)
+}
+
+// perf: land passes the files a merge of origin/main changed, so a clean merge
+// re-runs only the packages main touched instead of the whole gate.
+func runAffectedTestFiles(ctx context.Context, files []string, scope string) error {
 	modules, err := committedModuleDirs(ctx)
 	if err != nil {
 		return err
