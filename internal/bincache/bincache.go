@@ -465,7 +465,6 @@ type fileState struct {
 	modTime int64
 }
 
-// hashable lists the files a key part covers and how many gitignored paths it left out.
 func hashable(dir string, keep fileFilter, hashAllFiles bool) ([]string, int, error) {
 	var prune, ignored map[string]bool
 	if !hashAllFiles {
@@ -591,7 +590,7 @@ func hashFile(path string) ([]byte, int64, error) {
 	return fileH.Sum(nil), n, nil
 }
 
-// walkHashable skips the directories named in prune, counting each as one path.
+// perf: wholly ignored directories in prune are never walked; each counts as one excluded path.
 func walkHashable(dir string, keep fileFilter, prune map[string]bool) ([]string, int, error) {
 	var files []string
 	pruned := 0

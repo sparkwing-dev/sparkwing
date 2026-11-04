@@ -62,10 +62,8 @@ var selfDigest struct {
 	digest string
 }
 
-// executableDigest hashes the running executable once per process while the file keeps its identity, size and
-// modification time.
-// perf: one local run resolves and verifies its replacement engine about eight times; each hash of a 100 MB
-// executable took 250 ms.
+// perf: a local run resolves and verifies its replacement engine about eight times, and each hash of the 100 MB
+// executable took 250 ms; the digest is kept while the file keeps its identity, size and modification time.
 func executableDigest(ctx context.Context, path string) (string, error) {
 	selfDigest.Lock()
 	defer selfDigest.Unlock()

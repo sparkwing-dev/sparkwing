@@ -7,10 +7,8 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 )
 
-// ignoredUnder names the untracked files git ignores under dir, and the wholly ignored
-// directories it collapses, as paths joined to dir. Outside a repository nothing is ignored.
-// perf: one ls-files call replaces piping every walked path to check-ignore, which
-// took seconds per listing on a few thousand files.
+// perf: one ls-files call names ignored files and wholly ignored directories; piping every walked path to
+// check-ignore took seconds per listing on a few thousand files. Outside a repository nothing is ignored.
 func ignoredUnder(dir string) (dirs, files map[string]bool) {
 	cmd := procenv.HostCommand("git", "ls-files", "-z", "--others", "--ignored", "--exclude-standard", "--directory")
 	cmd.Dir = dir
