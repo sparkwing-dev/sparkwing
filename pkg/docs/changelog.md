@@ -28,7 +28,6 @@ unlock.
 
 - **warm capacity:** Auto no longer grows idle warm capacity to its maximum
   The start-time trigger added one node above the current warm count whenever the last hour's median start exceeded the target, and each new warm node raised that count, so any slow start kept the pool at the Auto maximum for an hour with nobody waiting. The trigger now fires only while a job is waiting for a fresh node; with no waits the pool returns to its minimum.
-
 - **launcher:** Stop warning about Cloud reservations that belong to another job namespace
   Staging and production can share a cluster, so each launcher logged a warning for every node the other environment reserved. That is now a debug message.
 - **cli:** Print blank command output lines as blank lines in plain run logs
