@@ -678,7 +678,8 @@ func (d *deployer) firstDeployError(env deployEnv, deployed imagePin, why string
 	return fmt.Errorf("%s runs %s, and %s. Deploy once by hand: confirm the live store with "+
 		"`SELECT version, baseline_digest FROM sparkwing_schema_version` matches this candidate's baseline, pin controller.image.tag and "+
 		"sparkwing-runner-bundle.launcher.image.tag, jobImage.tag and jobImage.digest in %s/helm-values.yaml to images built by this "+
-		"pipeline (they carry the revision label), render with `helm template %s charts/sparkwing-full --namespace %s -f %s/helm-values.yaml > %s/rendered.yaml`, "+
+		"pipeline (they carry the revision label), render without the cluster-scoped documents kikd-infra applies with "+
+		"`helm template %s charts/sparkwing-full --namespace %s -f %s/helm-values.yaml | yq 'select(.metadata.namespace != null)' > %s/rendered.yaml`, "+
 		"and push; later deploys then run here", env.Name, deployed.ref(), why, env.GitopsDir, env.HelmRelease, env.Namespace, env.GitopsDir, env.GitopsDir)
 }
 

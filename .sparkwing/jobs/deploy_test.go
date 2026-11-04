@@ -925,7 +925,7 @@ func TestDeployFirstDeployOverUntracedImageNeedsAPerson(t *testing.T) {
 	f.registry.revisions = map[string]string{}
 	before := deployGitIn(t, f.bare, "rev-parse", "main")
 	_, err := f.deployer(false).promote(t.Context(), f.candidate())
-	if err == nil || !strings.Contains(err.Error(), "Deploy once by hand") || !strings.Contains(err.Error(), "helm template sparkwing charts/sparkwing-full --namespace sparkwing") {
+	if err == nil || !strings.Contains(err.Error(), "Deploy once by hand") || !strings.Contains(err.Error(), "helm template sparkwing charts/sparkwing-full --namespace sparkwing -f sparkwing/helm-values.yaml | yq 'select(.metadata.namespace != null)'") {
 		t.Fatalf("first deploy over an untraced image: %v", err)
 	}
 	if deployGitIn(t, f.bare, "rev-parse", "main") != before {

@@ -400,8 +400,11 @@ cluster-scoped kinds, so a GitOps commit cannot grant cluster-wide access. The r
 chart's namespaces, ClusterRole, ClusterRoleBinding, admission policies and similar, logs each one
 it left out, and fails on any other object without a namespace. kikd-infra keeps them in
 `k8s/sparkwing-cluster/staging.yaml` and `production.yaml`, applied by the Argo application
-`sparkwing-cluster` in project `kikd`. A release that changes them updates kikd-infra before its
-deploy, staging first, then production:
+`sparkwing-cluster` in project `kikd`. An image-only release leaves them alone: the Cloud job
+admission policies read the runner and Docker images from the ConfigMap `sparkwing-cloud-admission`
+in the job namespace, which the render keeps, so the policies are the same across releases and
+rollbacks. A release whose chart changes a rule, the RBAC or the namespaces updates kikd-infra
+before its deploy, staging first, then production:
 
 1. Render the chart at the new tag with `helm template <release> charts/sparkwing-full --namespace <ns> -f <env dir>/helm-values.yaml`.
 2. Copy its cluster-scoped documents into the environment's file in kikd-infra `k8s/sparkwing-cluster/`.

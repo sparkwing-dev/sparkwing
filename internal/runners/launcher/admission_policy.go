@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"strconv"
 	"strings"
 
@@ -16,10 +17,15 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/match"
 )
 
-// AdmissionConfig holds the per-install values the job namespace policies render into CEL.
+// AdmissionConfig holds the per-install values for the job namespace policies.
+// Namespace and Launcher are rendered into the cluster-scoped policies; the
+// images, which change every release, go into the namespaced param ConfigMap.
 type AdmissionConfig struct {
 	Namespace, Launcher, RunnerImage, DockerImage string
 }
+
+// AdmissionParamsName names the ConfigMap in the job namespace that holds the images the policies admit.
+const AdmissionParamsName = "sparkwing-cloud-admission"
 
 // admissionPolicyName names one of the cluster-scoped policies, and its binding, guarding a job namespace.
 func admissionPolicyName(kind, namespace string) string {
@@ -99,8 +105,8 @@ func policyVariables(c AdmissionConfig, pod string) []admissionv1.Variable {
 		{Name: "launcher", Expression: "'" + c.Launcher + "'"},
 		{Name: "jobNamespace", Expression: "'" + c.Namespace + "'"},
 		{Name: "cloudClasses", Expression: celList(classes)},
-		{Name: "runnerImage", Expression: "'" + c.RunnerImage + "'"},
-		{Name: "dockerImage", Expression: "'" + c.DockerImage + "'"},
+		{Name: "runnerImage", Expression: "params.data.runnerImage"},
+		{Name: "dockerImage", Expression: "params.data.dockerImage"},
 		{Name: "labels", Expression: pod + `.metadata.?labels.orValue({})`},
 		{Name: "team", Expression: `variables.labels[?'` + TeamLabel + `'].orValue('')`},
 		{Name: "spec", Expression: pod + `.spec`},
@@ -130,7 +136,17 @@ func celList(values []string) string {
 	return "[" + strings.Join(quoted, ", ") + "]"
 }
 
+// AdmissionParams returns the ConfigMap naming the images the job namespace policies admit.
+func AdmissionParams(c AdmissionConfig) *corev1.ConfigMap {
+	return &corev1.ConfigMap{
+		TypeMeta:   metav1.TypeMeta{APIVersion: "v1", Kind: "ConfigMap"},
+		ObjectMeta: metav1.ObjectMeta{Name: AdmissionParamsName, Namespace: c.Namespace},
+		Data:       map[string]string{"runnerImage": c.RunnerImage, "dockerImage": c.DockerImage},
+	}
+}
+
 // AdmissionPolicies returns the Pod and Job policies, with their Deny bindings, scoped to the job namespace.
+// They read the images from AdmissionParams, so they stay the same across releases and rollbacks.
 func AdmissionPolicies(c AdmissionConfig) ([]*admissionv1.ValidatingAdmissionPolicy, []*admissionv1.ValidatingAdmissionPolicyBinding) {
 	pods := policyVariables(c, "object")
 	pods = append(pods, admissionv1.Variable{Name: "owners", Expression: `object.metadata.?ownerReferences.orValue([])`}, admissionv1.Variable{Name: "shape", Expression: podShape}, admissionv1.Variable{Name: "nodeTopology", Expression: celList(nodeTopologyLabels)})
@@ -164,12 +180,13 @@ func AdmissionPolicies(c AdmissionConfig) ([]*admissionv1.ValidatingAdmissionPol
 		policies = append(policies, &admissionv1.ValidatingAdmissionPolicy{
 			TypeMeta:   metav1.TypeMeta{APIVersion: "admissionregistration.k8s.io/v1", Kind: "ValidatingAdmissionPolicy"},
 			ObjectMeta: metav1.ObjectMeta{Name: name},
-			Spec:       admissionv1.ValidatingAdmissionPolicySpec{FailurePolicy: ptr(admissionv1.Fail), MatchConstraints: admissionMatch(c.Namespace, p.rules...), Variables: p.variables, Validations: p.validation},
+			Spec:       admissionv1.ValidatingAdmissionPolicySpec{ParamKind: &admissionv1.ParamKind{APIVersion: "v1", Kind: "ConfigMap"}, FailurePolicy: ptr(admissionv1.Fail), MatchConstraints: admissionMatch(c.Namespace, p.rules...), Variables: p.variables, Validations: p.validation},
 		})
 		bindings = append(bindings, &admissionv1.ValidatingAdmissionPolicyBinding{
 			TypeMeta:   metav1.TypeMeta{APIVersion: "admissionregistration.k8s.io/v1", Kind: "ValidatingAdmissionPolicyBinding"},
 			ObjectMeta: metav1.ObjectMeta{Name: name},
-			Spec: admissionv1.ValidatingAdmissionPolicyBindingSpec{PolicyName: name, ValidationActions: []admissionv1.ValidationAction{admissionv1.Deny}, MatchResources: &admissionv1.MatchResources{
+			// safety: a missing param ConfigMap denies every request rather than skipping the policy.
+			Spec: admissionv1.ValidatingAdmissionPolicyBindingSpec{PolicyName: name, ParamRef: &admissionv1.ParamRef{Name: AdmissionParamsName, Namespace: c.Namespace, ParameterNotFoundAction: ptr(admissionv1.DenyAction)}, ValidationActions: []admissionv1.ValidationAction{admissionv1.Deny}, MatchResources: &admissionv1.MatchResources{
 				NamespaceSelector: &metav1.LabelSelector{MatchLabels: map[string]string{"kubernetes.io/metadata.name": c.Namespace}},
 				ObjectSelector:    &metav1.LabelSelector{},
 				MatchPolicy:       ptr(admissionv1.Equivalent),
@@ -204,7 +221,8 @@ func (l *Launcher) verifyAdmission(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	policies, bindings := AdmissionPolicies(AdmissionConfig{Namespace: l.Config.Namespace, Launcher: identity, RunnerImage: l.Config.RunnerImage, DockerImage: l.Config.DockerImage})
+	c := AdmissionConfig{Namespace: l.Config.Namespace, Launcher: identity, RunnerImage: l.Config.RunnerImage, DockerImage: l.Config.DockerImage}
+	policies, bindings := AdmissionPolicies(c)
 	api := l.Kube.AdmissionregistrationV1()
 	for i, want := range policies {
 		policy, err := api.ValidatingAdmissionPolicies().Get(ctx, want.Name, metav1.GetOptions{})
@@ -216,8 +234,15 @@ func (l *Launcher) verifyAdmission(ctx context.Context) error {
 			return fmt.Errorf("Cloud admission binding %s: %w", want.Name, err)
 		}
 		if !equality.Semantic.DeepEqual(policy.Spec, want.Spec) || !equality.Semantic.DeepEqual(binding.Spec, bindings[i].Spec) {
-			return fmt.Errorf("Cloud admission policy %s does not match this launcher's namespace, identity and images", want.Name)
+			return fmt.Errorf("the Cloud admission policy %s does not match this launcher's namespace and identity", want.Name)
 		}
+	}
+	params, err := l.Kube.CoreV1().ConfigMaps(c.Namespace).Get(ctx, AdmissionParamsName, metav1.GetOptions{})
+	if err != nil {
+		return fmt.Errorf("read the Cloud admission params %s/%s: %w", c.Namespace, AdmissionParamsName, err)
+	}
+	if want := AdmissionParams(c); !maps.Equal(params.Data, want.Data) || len(params.BinaryData) != 0 {
+		return fmt.Errorf("the Cloud admission params %s/%s admit %s and %s, not this launcher's images %s and %s", c.Namespace, AdmissionParamsName, params.Data["runnerImage"], params.Data["dockerImage"], c.RunnerImage, c.DockerImage)
 	}
 	return nil
 }
