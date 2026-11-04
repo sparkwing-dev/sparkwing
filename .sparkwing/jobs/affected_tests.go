@@ -28,11 +28,10 @@ var wholeModuleTriggers = map[string]string{
 	"internal/store/schema.sql": "the store schema changed, and a redeploy cannot undo a schema change",
 }
 
-// perf: these tests read repository files outside every package through
-// relative paths the import graph cannot see, so a change under a prefix runs
-// the packages listed beside it. CHANGELOG.md is left out: nearly every change
-// edits it, the docs-mirror, changelog and changelog-links steps judge it on
-// every run, and its other readers run under --full.
+// perf: tests read these files through paths the import graph cannot see, so a
+// change under a prefix runs the packages beside it. CHANGELOG.md is left out:
+// nearly every change edits it, the docs-mirror and changelog steps judge it
+// on every run, and its other readers run under --full.
 var nonPackageReaders = []struct {
 	prefix string
 	dirs   []string
