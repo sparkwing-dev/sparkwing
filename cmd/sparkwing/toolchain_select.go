@@ -112,7 +112,7 @@ func (c pipelineEngineSwitcher) run(ctx context.Context, dir string, sdk enginei
 		selected.Target != c.target || !filepath.IsAbs(selected.Executable) {
 		return &apierr.Error{Code: apierr.ProtocolMismatch, Message: "engine resolver returned a different pin or incomplete verified executable"}
 	}
-	if err := errors.Join(writeEngineNotices(c.diagnostics, selected.Notices), ctx.Err()); err != nil {
+	if err := errors.Join(writeEngineNoticesOnce(c.diagnostics, selected.Notices), ctx.Err()); err != nil {
 		return err
 	}
 	current, err := os.Stat(c.current)
