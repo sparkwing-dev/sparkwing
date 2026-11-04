@@ -20,7 +20,17 @@ unlock.
 
 ## [Unreleased]
 
+### Added
+
+- **CLI:** `sparkwing login` signs a machine in through the browser and saves a CLI token in the profile
+  The command prints a code and the controller's `/device` page. A signed-in member types the code there, checks the machine name, team and grants, and approves; nothing is copied out of the browser. The token is the member token the console's Create CLI token issues: by default the approver's run and log grants, never `team.admin` or more than the approver holds, expiring after 90 days. Codes last 10 minutes, work once, slow down a device that polls faster than every 5 seconds, and stop working when the command is interrupted or the browser denies them. See [Signing in](docs/auth.md#device-sign-in).
+- **controller:** Device sign-in routes under `/api/v1/auth/device`
+  `POST /api/v1/auth/device`, `/token` and `/cancel` take no bearer: a device starts, polls and withdraws a request with its own device code, and starting shares the sign-in limit of 30 per client per minute. `/lookup`, `/approve` and `/deny` need a direct account session with its CSRF proof and allow 10 code entries per account per minute. Approvals and denials write a `device_login.decided` audit row; the redeemed credential writes `token.minted` as other issuance does.
+
 ### Changed
+
+- **runners:** `sparkwing runners add` without `--session-stdin` enrolls through a browser approval (Breaking)
+  It used to refuse personal enrollment without `--session-stdin`, and a shared enrollment sent the profile's token, which the route refused. It now prints a code for the controller's `/device` page, where a signed-in account sees the runner name, repositories, trust and grants before approving; the runner credential is issued under that account's authority with the same checks as before. `--session-stdin` with `sparkwing-controller admin session` stays the headless path. See the [migration](docs/migrations/_unreleased.md#runners-add-enrolls-through-a-browser-approval).
 
 - **warm capacity:** The default Auto start-time target is 20 seconds instead of 10. New stores seed every class at 20 seconds, and the schema 30 upgrade moves classes still at 10 seconds to 20; a class set to any other target keeps it. `sparkwing operator warm-capacity set` without `--start-time-target` now sends 20s.
 - **sdk:** `NewConcurrencyGroup` in Go and `ConcurrencyGroup` in TypeScript no longer check `Scope` and `OnLimit` themselves. The host still refuses an unknown value as `plan_invalid` when it validates the plan, so both SDKs fail the same way.
@@ -53,6 +63,8 @@ unlock.
   A release runner image now ships a Go module cache and build cache primed for its own SDK version under `/usr/local/share/sparkwing/go-seed`, and a Cloud Job copies them into its empty `/tmp` caches while the Docker sidecar starts. A Cloud plan already pins that version, so its pipeline build drops from about 24s to a few seconds; dependencies beyond the SDK's own still download as before, with `go.sum` checks unchanged. The image grows by about 200 MB uncompressed (about 60 MB compressed).
 - **launcher:** `sparkwing-runner launch` refuses `--poll` below 2s at startup
   The controller never suggests an idle claim poll under 2s, and one enforcing idle polls answered a faster launcher with a rate-limit warning on every tick. The launcher now fails at startup and names the controller's `--idle-claim-poll`.
+- **store (Breaking):** The schema baseline advances to version 31, which adds the `device_logins` table
+  A schema 30 store upgrades on its first open, and older supported stores take every step in the same transaction. The table keeps a pending device sign-in's code digest, its typed user code and the approving session until the code is redeemed or expires; it never holds a bearer. See the [store upgrade migration](docs/migrations/_unreleased.md#upgrade-the-store-in-place-to-schema-baseline-31).
 - **store (Breaking):** The schema baseline advances to version 30, which replaces the `warm_pool_desired` view in place
   A v0.68.7 store (schema 29) upgrades on its first open, and a schema 28 store takes both steps, in one transaction on SQLite and PostgreSQL. PostgreSQL replaces the view in place, so KEDA's SELECT grant survives. An older binary refuses a schema 30 store, so snapshot the store first; rollback means restoring that snapshot. See the [store upgrade migration](docs/migrations/_unreleased.md#upgrade-the-store-in-place-to-schema-baseline-30).
 - **warm capacity:** Auto no longer grows idle warm capacity to its maximum

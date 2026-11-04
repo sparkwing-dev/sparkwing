@@ -1,8 +1,21 @@
 # Migrating to the next release
 
-This release upgrades the store to schema baseline 30 in place, and removes the
+This release upgrades the store to schema baseline 31 in place, and removes the
 retired `warm_cpu_class_cores` credit setting. Take a store snapshot before the
 first start; the sections below cover the other changes.
+
+## Upgrade the store in place to schema baseline 31
+
+Schema baseline 31 adds the `device_logins` table behind `sparkwing login` and
+browser-approved runner enrollment. A row holds the SHA-256 digest of a device
+code, the code a person types in the browser and, once approved, the approving
+session. It never holds a credential. Rows are deleted once they expire.
+
+A schema 30 store upgrades in place the first time this release opens it. A
+schema 28 or 29 store takes every step in the same transaction, on SQLite and
+PostgreSQL, under the migration advisory lock on PostgreSQL. The steps below for
+schema baseline 30 apply unchanged: snapshot the store, start this release, and
+restore the snapshot to roll back.
 
 ## Upgrade the store in place to schema baseline 30
 
@@ -69,6 +82,32 @@ Jobs that become ready more than about a minute after their run's last node
 emptied, such as a deploy after an approval, now boot a fresh node. To keep
 nodes longer, pass `sparkwing-runner launch --idle-grace <duration>`; it must be
 at least `--poll` plus 30 seconds.
+
+## runners add enrolls through a browser approval
+
+`sparkwing runners add` without `--session-stdin` no longer refuses personal
+enrollment and no longer sends the profile's token. It prints a code and the
+controller's `/device` page instead:
+
+```sh
+sparkwing runners add --profile work --runner korey-laptop --personal
+```
+
+Open the page where you are signed in to the console, type the code, check the
+runner name, team, repositories and grants, and approve. The runner credential
+is issued under your account with the same checks as a session enrollment:
+shared runners, reserved pools and `--trust` still need team administration.
+The profile only needs a controller URL; it does not need a token.
+
+Scripts that pipe a session keep working unchanged:
+`sparkwing-controller admin session ... | sparkwing runners add --session-stdin ...`.
+A script that ran `runners add` without `--session-stdin` and expected an error
+now waits up to 10 minutes for an approval; add `--session-stdin` or stop
+calling it.
+
+To sign the CLI itself in, run `sparkwing login --controller https://HOST` the
+same way instead of pasting a token into
+`sparkwing profiles add --controller https://HOST --token-stdin`.
 
 ## runners add --trust verified is gone
 
