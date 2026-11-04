@@ -535,28 +535,60 @@ func listedSnapshot(dir string, keep fileFilter, hashAllFiles bool) (map[string]
 	return snapshotHashable(files)
 }
 
+// perf: hashing a few thousand files one at a time took most of a replace target's key; files hash in
+// parallel and their lines are written in walk order.
 func hashFilesInto(h io.Writer, dir string, files []string) (hashStats, error) {
 	var stats hashStats
-	for _, path := range files {
+	digests := make([][]byte, len(files))
+	sizes := make([]int64, len(files))
+	errs := make([]error, len(files))
+	var next sync.Mutex
+	index := 0
+	var wg sync.WaitGroup
+	for range min(runtime.GOMAXPROCS(0), 8, len(files)) {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for {
+				next.Lock()
+				i := index
+				index++
+				next.Unlock()
+				if i >= len(files) {
+					return
+				}
+				digests[i], sizes[i], errs[i] = hashFile(files[i])
+			}
+		}()
+	}
+	wg.Wait()
+	for i, path := range files {
+		if errs[i] != nil {
+			return stats, errs[i]
+		}
 		rel, _ := filepath.Rel(dir, path)
-		f, err := os.Open(path)
-		if errors.Is(err, fs.ErrNotExist) {
-			return stats, ErrUnstableInputs
-		}
-		if err != nil {
-			return stats, err
-		}
-		fileH := sha256.New()
-		n, copyErr := io.Copy(fileH, f)
-		f.Close()
-		if copyErr != nil {
-			return stats, copyErr
-		}
 		stats.Files++
-		stats.Bytes += n
-		fmt.Fprintf(h, "%s\x00%x\n", rel, fileH.Sum(nil))
+		stats.Bytes += sizes[i]
+		fmt.Fprintf(h, "%s\x00%x\n", rel, digests[i])
 	}
 	return stats, nil
+}
+
+func hashFile(path string) ([]byte, int64, error) {
+	f, err := os.Open(path)
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil, 0, ErrUnstableInputs
+	}
+	if err != nil {
+		return nil, 0, err
+	}
+	defer f.Close()
+	fileH := sha256.New()
+	n, err := io.Copy(fileH, f)
+	if err != nil {
+		return nil, 0, err
+	}
+	return fileH.Sum(nil), n, nil
 }
 
 // walkHashable skips the directories named in prune, counting each as one path.
