@@ -367,7 +367,11 @@ func newCloudDispatchLauncher(t *testing.T, f cloudDispatch) *cloudDispatchLaunc
 	l.kube.PrependReactor("create", "selfsubjectreviews", func(ktesting.Action) (bool, k8sruntime.Object, error) {
 		return true, &authenticationv1.SelfSubjectReview{Status: authenticationv1.SelfSubjectReviewStatus{UserInfo: authenticationv1.UserInfo{Username: identity}}}, nil
 	})
-	policies, bindings := launcher.AdmissionPolicies(launcher.AdmissionConfig{Namespace: jobs.Namespace, Launcher: identity, RunnerImage: jobs.RunnerImage, DockerImage: jobs.DockerImage})
+	admission := launcher.AdmissionConfig{Namespace: jobs.Namespace, Launcher: identity, RunnerImage: jobs.RunnerImage, DockerImage: jobs.DockerImage}
+	policies, bindings := launcher.AdmissionPolicies(admission)
+	if err := l.kube.Tracker().Add(launcher.AdmissionParams(admission)); err != nil {
+		t.Fatal(err)
+	}
 	for i := range policies {
 		if err := l.kube.Tracker().Add(policies[i]); err != nil {
 			t.Fatal(err)
@@ -569,7 +573,7 @@ func TestCloudJobReportsThroughTheNodeHostRoute(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := sink.Append([]byte(`{"msg":"hello from the Cloud step"}`+"\n"), "", 0, 0); err != nil {
+	if err := sink.Append([]byte(`{"msg":"hello from the Cloud step"}` + "\n")); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := sink.Close(t.Context(), logseg.End{}); err != nil {

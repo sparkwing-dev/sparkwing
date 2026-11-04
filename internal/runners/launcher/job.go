@@ -231,11 +231,18 @@ func cloudPod(cfg CloudJobConfig, a CloudJobAward, r CloudNodeReservation, secre
 		HostUsers:                     ptr(jobHostUsers),
 		SecurityContext:               jobPodSecurity(),
 		TerminationGracePeriodSeconds: ptr(int64(0)),
+		DNSConfig:                     jobDNSConfig(),
 		// safety: the pod cgroup shares the awarded CPU and memory with DinD instead of doubling the billed allocation.
 		Resources:      &corev1.ResourceRequirements{Requests: budget, Limits: budget.DeepCopy()},
 		Volumes:        []corev1.Volume{{Name: "scratch", VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{SizeLimit: scratch}}}, {Name: "bootstrap", VolumeSource: corev1.VolumeSource{Secret: &corev1.SecretVolumeSource{SecretName: secret, DefaultMode: ptr(int32(0o400))}}}},
 		InitContainers: []corev1.Container{dockerContainer(cfg)}, Containers: []corev1.Container{main},
 	}
+}
+
+// perf: strict VPC CNI network policy drops a new Pod's egress for about 2s,
+// so run-node's first controller lookup retries after 1s instead of the 5s default.
+func jobDNSConfig() *corev1.PodDNSConfig {
+	return &corev1.PodDNSConfig{Options: []corev1.PodDNSConfigOption{{Name: "timeout", Value: ptr("1")}, {Name: "attempts", Value: ptr("5")}}}
 }
 
 func hostContainer(cfg CloudJobConfig, a CloudJobAward) corev1.Container {

@@ -336,7 +336,7 @@ linters:
       allow-unused: false
     forbidigo:
       exclude-godoc-examples: true
-      analyze-types: false
+      analyze-types: true
       forbid:
         - pattern: ^panic$
           msg: "panic() in library code is a hard crash; return an error and let the caller decide. Allowed in cmd/**/main.go and _test.go (see exclusions)."
@@ -344,6 +344,12 @@ linters:
           msg: "os.Exit short-circuits deferred cleanup; return an error from main or use orchestrator-managed shutdown. Allowed in cmd/**/main.go (see exclusions)."
         - pattern: ^fmt\.Println$
           msg: "fmt.Println bypasses the structured logger; use sparkwing.Info/Error or slog directly. Allowed in cmd/**/main.go and _test.go (see exclusions)."
+        - pattern: ^exec\.Command(Context)?$
+          pkg: ^os/exec$
+          msg: "a raw process constructor bypasses the environment policy; use internal/procenv: Command with Build's environment for repository-controlled children, ControlCommand with an explicit environment for trusted host tooling."
+        - pattern: ^procenv\.HostCommand(Context)?$
+          pkg: ^github\.com/sparkwing-dev/sparkwing/internal/procenv$
+          msg: "HostCommand hands the child the whole host environment, credentials included; use Command with Build's environment or ControlCommand with an explicit one. A trusted control process that needs the host environment takes a nolint naming why."
   exclusions:
     paths:
       - web/node_modules/
@@ -354,16 +360,26 @@ linters:
       - path: _test\.go
         linters:
           - forbidigo
+      # The process-constructor rules apply in these paths too, so each
+      # exclusion names only the panic, os.Exit and fmt.Println messages.
       - path: cmd/
+        text: &forbidigo-crash-and-print "(panic\\(\\) in library code|os\\.Exit short-circuits|fmt\\.Println bypasses)"
         linters:
           - forbidigo
       - path: (^|/)main\.go$
+        text: *forbidigo-crash-and-print
         linters:
           - forbidigo
       - path: ^sparkwing/[^/]+\.go$
+        text: *forbidigo-crash-and-print
         linters:
           - forbidigo
       - path: sparkwing/planguard/
+        text: *forbidigo-crash-and-print
+        linters:
+          - forbidigo
+      - path: internal/procenv/
+        text: "raw process constructor bypasses"
         linters:
           - forbidigo
       - path: \.pb\.go$

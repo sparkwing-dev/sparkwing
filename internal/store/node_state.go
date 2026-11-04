@@ -715,8 +715,13 @@ func applyNodeEdgeTx(ctx context.Context, tx *storeTx, team Team, row *runstate.
 			row.QueueStartedAt = &now
 		}
 	case runstate.NodeClaimed:
-		// safety: a holder can finish without starting, so a new claim must not inherit the last attempt's trusted host.
-		if _, err := tx.execContext(ctx, `UPDATE nodes SET trusted_host=0 WHERE team=? AND run_id=? AND node_id=?`, team, row.Ref.RunID, row.Ref.NodeID); err != nil {
+		// safety: the only writer of trusted_host. Each claim records its own holder's host, so a holder that
+		// finishes without starting never inherits the last attempt's.
+		trusted, err := claimHostTrustedTx(ctx, tx, change.Actor.Authority)
+		if err != nil {
+			return err
+		}
+		if _, err := tx.execContext(ctx, `UPDATE nodes SET trusted_host=? WHERE team=? AND run_id=? AND node_id=?`, boolInt(trusted), team, row.Ref.RunID, row.Ref.NodeID); err != nil {
 			return err
 		}
 		award := change.Extra.Claim
@@ -737,11 +742,8 @@ func applyNodeEdgeTx(ctx context.Context, tx *storeTx, team Team, row *runstate.
 				return errors.New("attempt identity does not match claim")
 			}
 		}
-		kind, name, location, trusted, err := attemptExecutorTx(ctx, tx, change.Actor, change.Extra.Attempt)
+		kind, name, location, err := attemptExecutorTx(ctx, tx, change.Actor, change.Extra.Attempt)
 		if err != nil {
-			return err
-		}
-		if _, err := tx.execContext(ctx, `UPDATE nodes SET trusted_host=? WHERE team=? AND run_id=? AND node_id=?`, boolInt(trusted), team, row.Ref.RunID, row.Ref.NodeID); err != nil {
 			return err
 		}
 		_, err = tx.execContext(ctx, `INSERT INTO node_attempts(team,run_id,node_id,attempt,generation,holder,capability_prefix,executor_kind,executor_name,executor_location,started_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)`, team, row.Ref.RunID, row.Ref.NodeID, row.Attempt, row.Generation, row.ClaimedBy, row.CapabilityPrefix, kind, name, location, now.UnixNano())

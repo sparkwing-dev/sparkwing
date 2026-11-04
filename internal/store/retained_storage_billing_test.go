@@ -54,8 +54,8 @@ func TestStoreDataRetainedStoragePricesUniqueBytesAndTenantAllowance(t *testing.
 	}
 	*now = now.Add(24 * time.Hour)
 	billed := retainedBill(t, s)
-	if len(billed.Charges) != 2 || billed.ChargedMicro != 2*CloudStorageRateMicroPerGBDay {
-		t.Fatalf("billing=%+v; want b's 3 GB-day charge cut to the one its balance funds", billed)
+	if len(billed.Charges) != 2 || billed.ChargedMicro != 4*CloudStorageRateMicroPerGBDay {
+		t.Fatalf("billing=%+v; want b's full 3 GB-day charge past the one its balance funds", billed)
 	}
 	for i, want := range []int64{gb, 3 * gb} {
 		charge := billed.Charges[i]
@@ -67,13 +67,13 @@ func TestStoreDataRetainedStoragePricesUniqueBytesAndTenantAllowance(t *testing.
 		t.Fatalf("replayed interval=%+v", replay)
 	}
 	*now = now.Add(24 * time.Hour)
-	if unfunded := retainedBill(t, s); len(unfunded.Charges) != 1 || unfunded.Charges[0].Team != "a" {
-		t.Fatalf("an empty balance kept accruing storage debt: %+v", unfunded)
+	if unfunded := retainedBill(t, s); len(unfunded.Charges) != 2 || unfunded.ChargedMicro != 4*CloudStorageRateMicroPerGBDay {
+		t.Fatalf("a negative balance stopped storage accruing: %+v", unfunded)
 	}
 	for _, tc := range []struct {
 		team Team
 		want int64
-	}{{"a", 0}, {"b", 0}} {
+	}{{"a", 0}, {"b", -5 * CloudStorageRateMicroPerGBDay}} {
 		balance, err := (&Tenant{s: s, team: tc.team}).CreditBalanceMicro(t.Context())
 		if err != nil || balance != tc.want {
 			t.Fatalf("team=%s balance=%d: %v", tc.team, balance, err)
@@ -81,7 +81,7 @@ func TestStoreDataRetainedStoragePricesUniqueBytesAndTenantAllowance(t *testing.
 	}
 }
 
-func TestStoreDataRetainedStorageForgivesUnfundedTimeBeforeTopUp(t *testing.T) {
+func TestStoreDataRetainedStorageCarriesUnfundedTimeIntoTheNextTopUp(t *testing.T) {
 	for _, balance := range []int64{0, -100} {
 		t.Run(fmt.Sprint(balance), func(t *testing.T) {
 			s, now := retainedBillingFixture(t)
@@ -94,16 +94,16 @@ func TestStoreDataRetainedStorageForgivesUnfundedTimeBeforeTopUp(t *testing.T) {
 			retainedBlob(t, s, "a", "a", StorageBytesPerGB, *now)
 			retainedBill(t, s)
 			*now = now.Add(24 * time.Hour)
-			if billed := retainedBill(t, s); len(billed.Charges) != 0 {
-				t.Fatalf("unfunded day created debt: %+v", billed)
+			if billed := retainedBill(t, s); len(billed.Charges) != 1 || billed.ChargedMicro != CloudStorageRateMicroPerGBDay {
+				t.Fatalf("unfunded day = %+v; want the full day charged", billed)
 			}
 			tenant := &Tenant{s: s, team: "a"}
-			if got, err := tenant.CreditBalanceMicro(t.Context()); err != nil || got != balance {
-				t.Fatalf("unfunded balance = %d, %v; want %d", got, err, balance)
+			if got, err := tenant.CreditBalanceMicro(t.Context()); err != nil || got != balance-CloudStorageRateMicroPerGBDay {
+				t.Fatalf("unfunded balance = %d, %v; want %d", got, err, balance-CloudStorageRateMicroPerGBDay)
 			}
-			rewriteSchemaExec(t, s.db, `INSERT INTO credit_grants(reference,team,id,kind,amount_micro,created_at) VALUES ('top-up','a','top-up','paid',?,1)`, CloudStorageRateMicroPerGBDay-balance)
+			rewriteSchemaExec(t, s.db, `INSERT INTO credit_grants(reference,team,id,kind,amount_micro,created_at) VALUES ('top-up','a','top-up','paid',?,1)`, 2*CloudStorageRateMicroPerGBDay-balance)
 			if replay := retainedBill(t, s); len(replay.Charges) != 0 {
-				t.Fatalf("top-up collected forgiven storage: %+v", replay)
+				t.Fatalf("top-up billed the day twice: %+v", replay)
 			}
 			*now = now.Add(24 * time.Hour)
 			if billed := retainedBill(t, s); len(billed.Charges) != 1 || billed.ChargedMicro != CloudStorageRateMicroPerGBDay {

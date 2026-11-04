@@ -19,7 +19,7 @@ func runWarmCapacityCommand(ctx context.Context, inv clisurface.Invocation, out 
 	if inv.Help() || inv.Command.Path == "sparkwing operator warm-capacity" {
 		return writeCommandHelp(surfaceHelp(inv.Command), out, format)
 	}
-	input := controllerwire.WarmCapacitySettings{Class: inv.Value("class"), Mode: inv.Value("mode"), StartTimeTargetSeconds: 10}
+	input := controllerwire.WarmCapacitySettings{Class: inv.Value("class"), Mode: inv.Value("mode"), StartTimeTargetSeconds: 20}
 	setting := inv.Command.Path == "sparkwing operator warm-capacity set"
 	if setting {
 		for _, field := range []struct {
@@ -37,7 +37,7 @@ func runWarmCapacityCommand(ctx context.Context, inv clisurface.Invocation, out 
 		if raw := inv.Value("start-time-target"); raw != "" {
 			target, err := time.ParseDuration(raw)
 			if err != nil || target <= 0 {
-				return &clisurface.UsageError{Path: inv.Command.Path, Message: "--start-time-target must be a positive duration, such as 10s"}
+				return &clisurface.UsageError{Path: inv.Command.Path, Message: "--start-time-target must be a positive duration, such as 20s"}
 			}
 			input.StartTimeTargetSeconds = target.Seconds()
 		}

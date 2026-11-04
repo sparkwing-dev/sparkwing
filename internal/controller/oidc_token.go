@@ -90,15 +90,6 @@ func (s *Server) handleOIDCToken(w http.ResponseWriter, r *http.Request, a capab
 		if facts.Team != a.Target.Team || facts.RunID != a.Target.RunID || facts.Now.IsZero() || !facts.NotAfter.After(facts.Now) {
 			return store.OIDCMint{}, errors.New("invalid persisted OIDC identity")
 		}
-		ceiling := facts.NotAfter
-		for _, end := range []*time.Time{a.Principal.Capability.ExpiresAt, a.Principal.Capability.RevokedAt} {
-			if end != nil && end.Before(ceiling) {
-				ceiling = *end
-			}
-		}
-		if end := a.Binding.Deadline; end != nil && end.Before(ceiling) {
-			ceiling = *end
-		}
 		claims := oidcissuer.Claims{
 			Audience: body.Audience, Team: facts.Team, RunID: facts.RunID, Pipeline: facts.Pipeline,
 			Trigger: facts.Trigger, RunnerKind: facts.RunnerKind, FreshHost: facts.FreshHost, Ref: facts.Ref, SHA: facts.SHA, Repository: facts.Repository, RepositoryID: facts.RepositoryID,
@@ -114,7 +105,7 @@ func (s *Server) handleOIDCToken(w http.ResponseWriter, r *http.Request, a capab
 		if err := r.Context().Err(); err != nil {
 			return store.OIDCMint{}, err
 		}
-		token, err := s.oidc.issuer.Mint(claims, facts.Now, ceiling)
+		token, err := s.oidc.issuer.Mint(claims, facts.Now, facts.NotAfter)
 		if err != nil {
 			return store.OIDCMint{}, errors.Join(&apierr.Error{Code: apierr.Unavailable, Message: "OIDC issuance unavailable"}, err)
 		}

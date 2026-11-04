@@ -153,7 +153,11 @@ func (d *deployer) cmd(ctx context.Context, c deployCommand) (string, error) {
 		}
 		c.Name = path
 	}
-	if d.cfg.toolDirInUse() {
+	inUse, err := d.cfg.toolDirInUse(d.dry)
+	if err != nil {
+		return "", err
+	}
+	if inUse {
 		env := make(map[string]string, len(c.Env)+1)
 		for k, v := range c.Env {
 			env[k] = v
@@ -171,9 +175,12 @@ func (d *deployer) tool(name string) (string, error) {
 	if path, ok := d.resolved[name]; ok {
 		return path, nil
 	}
+	inUse, err := d.cfg.toolDirInUse(d.dry)
+	if err != nil {
+		return "", err
+	}
 	var path string
-	var err error
-	if d.cfg.toolDirInUse() {
+	if inUse {
 		path = filepath.Join(d.cfg.ToolDir, name)
 		if _, err = os.Stat(path); err != nil {
 			return "", fmt.Errorf("%s is not in the deploy toolchain %s: %w", name, d.cfg.ToolDir, err)
@@ -678,7 +685,8 @@ func (d *deployer) firstDeployError(env deployEnv, deployed imagePin, why string
 	return fmt.Errorf("%s runs %s, and %s. Deploy once by hand: confirm the live store with "+
 		"`SELECT version, baseline_digest FROM sparkwing_schema_version` matches this candidate's baseline, pin controller.image.tag and "+
 		"sparkwing-runner-bundle.launcher.image.tag, jobImage.tag and jobImage.digest in %s/helm-values.yaml to images built by this "+
-		"pipeline (they carry the revision label), render with `helm template %s charts/sparkwing-full --namespace %s -f %s/helm-values.yaml > %s/rendered.yaml`, "+
+		"pipeline (they carry the revision label), render without the cluster-scoped documents kikd-infra applies with "+
+		"`helm template %s charts/sparkwing-full --namespace %s -f %s/helm-values.yaml | yq 'select(.metadata.namespace != null)' > %s/rendered.yaml`, "+
 		"and push; later deploys then run here", env.Name, deployed.ref(), why, env.GitopsDir, env.HelmRelease, env.Namespace, env.GitopsDir, env.GitopsDir)
 }
 
@@ -714,9 +722,6 @@ func (d *deployer) pinAndPush(ctx context.Context, env deployEnv, dir string, ph
 		if err != nil {
 			return err
 		}
-		if !strings.Contains(out, "@"+want.Digest) {
-			return fmt.Errorf("the render does not reference %s", want.Digest)
-		}
 		if phase.name == deployPhaseController {
 			previous, err := os.ReadFile(filepath.Join(dir, rendered))
 			if err != nil {
@@ -725,6 +730,16 @@ func (d *deployer) pinAndPush(ctx context.Context, env deployEnv, dir string, ph
 			if out, err = spliceControllerDeployment(string(previous), out, env.Namespace, env.ControllerDeployment); err != nil {
 				return err
 			}
+		}
+		out, dropped, err := dropClusterScoped(out)
+		if err != nil {
+			return err
+		}
+		if len(dropped) > 0 {
+			d.tools.say(ctx, "left out of "+rendered+", applied through kikd-infra k8s/sparkwing-cluster/: "+strings.Join(dropped, ", "))
+		}
+		if !strings.Contains(out, "@"+want.Digest) {
+			return fmt.Errorf("the render does not reference %s", want.Digest)
 		}
 		return os.WriteFile(filepath.Join(dir, rendered), []byte(out), 0o644)
 	}); err != nil {

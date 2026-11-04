@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"strings"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
@@ -208,7 +209,7 @@ func TestRunLogsTriggerFollowPreservesTransportAndBearer(t *testing.T) {
 		}
 		return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(`{"records":[],"next_cursor":"","truncated":false,"complete":true}`)), Header: make(http.Header)}, nil
 	})}}
-	if err := followControllerRunLogs(t.Context(), options, "r1", "plain", &out); err != nil || out.Len() != 0 {
+	if err := followControllerRunLogs(t.Context(), options, "r1", "plain", &out, waitStatusPoll); err != nil || out.Len() != 0 {
 		t.Fatalf("follow=%q err=%v", out.String(), err)
 	}
 }
@@ -439,4 +440,44 @@ func TestRunLogSearchPreservesMatchesFromIncompleteLogs(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "writer_lost") || exitCodeFor(err) != 3 || !strings.Contains(output.String(), "retained match") {
 		t.Fatalf("output=%q error=%v", output.String(), err)
 	}
+}
+
+func TestLocalFollowPollsFasterThanRemoteFollow(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		wait := localFollowWait(make(chan struct{}))
+		start := time.Now()
+		if err := wait(t.Context(), time.Second); err != nil {
+			t.Fatal(err)
+		}
+		if waited := time.Since(start); waited != localFollowPoll {
+			t.Fatalf("local follow waited %s, want %s", waited, localFollowPoll)
+		}
+		ctx, cancel := context.WithCancel(t.Context())
+		cancel()
+		if err := wait(ctx, time.Second); err == nil {
+			t.Fatal("a cancelled local follow kept waiting")
+		}
+	})
+}
+
+func TestLocalFollowReadsAtOnceWhenHostingEndsThenPollsAgain(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		hosted := make(chan struct{})
+		close(hosted)
+		wait := localFollowWait(hosted)
+		start := time.Now()
+		if err := wait(t.Context(), time.Second); err != nil {
+			t.Fatal(err)
+		}
+		if waited := time.Since(start); waited != 0 {
+			t.Fatalf("first wait after hosting = %s; want an immediate read", waited)
+		}
+		start = time.Now()
+		if err := wait(t.Context(), time.Second); err != nil {
+			t.Fatal(err)
+		}
+		if waited := time.Since(start); waited != localFollowPoll {
+			t.Fatalf("second wait = %s; want the normal poll, not a spin", waited)
+		}
+	})
 }

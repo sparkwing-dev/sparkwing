@@ -13,8 +13,8 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
 
-// safety: sparkwing-platform tests its real handler against a byte-identical copy of testdata/checkout_contract.json,
-// so the two copies change together.
+// safety: sparkwing-platform tests its real handler against its own copy of testdata/checkout_contract.json; nothing
+// compares the copies, so a contract change updates both.
 type checkoutContract struct {
 	RefundEvent json.RawMessage `json:"refund_event"`
 	Token       string          `json:"token"`

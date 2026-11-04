@@ -7,6 +7,7 @@ import { pathToFileURL } from "node:url";
 import { definePipeline, git, Git, gitFromTree, githubOwnerRepo, withCommandEnv } from "../src/index.ts";
 import { resetPipelines } from "../src/plan.ts";
 import { runScope } from "../src/scope.ts";
+import { dockerignoreMatcher } from "../src/helpers/git.ts";
 import { fakeContext, commandFailure } from "./helper-context.ts";
 import { Host, hello } from "./helpers.ts";
 
@@ -242,4 +243,13 @@ test("fileset hashes local bytes, permissions, filenames and Docker ignore rules
   const edited = await git.filesetHash(fake.ctx, root);
   await fs.chmod(root + "/a", 0o755);
   if (process.platform !== "win32") assert.notEqual(edited, await git.filesetHash(fake.ctx, root));
+});
+
+test("dockerignore matching agrees with the Go SDK's vectors", async () => {
+  const vectors: { patterns: string[]; path: string; ignored: boolean }[] = JSON.parse(
+    await fs.readFile(new URL("../../../sparkwing/git/testdata/dockerignore-vectors.json", import.meta.url), "utf8"),
+  );
+  for (const vector of vectors) {
+    assert.equal(dockerignoreMatcher(vector.patterns)(vector.path), vector.ignored, `${vector.path} under ${vector.patterns.join(", ")}`);
+  }
 });

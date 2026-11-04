@@ -30,7 +30,7 @@ func TestGitHubInstallationWithdrawalReplayKeepsOriginalTargets(t *testing.T) {
 			}
 			original := arm(701)
 			op, now := s.AsOperator(), in.Request.Git.App.Value.VerifiedAt
-			if err := op.EnqueueGitHubDelivery(ctx, "withdraw", "installation_repositories", []byte(`{"installation":{"id":7},"action":"removed"}`), now); err != nil {
+			if err := op.EnqueueGitHubDelivery(ctx, "withdraw", "installation_repositories", []byte(`{"installation":{"id":7},"action":"removed"}`)); err != nil {
 				t.Fatal(err)
 			}
 			delivery, err := op.ClaimGitHubDelivery(ctx)
@@ -129,10 +129,9 @@ func TestGitHubDeliveryPublicationReceiptSurvivesWithdrawal(t *testing.T) {
 	s, tenant, in := appAdmissionFixture(t, true, "fixture")
 	defer s.Close()
 	ctx := t.Context()
-	now := in.Request.Git.App.Value.VerifiedAt
 	body := []byte(`{"installation":{"id":7},"after":"publication"}`)
 	op := s.AsOperator()
-	if err := op.EnqueueGitHubDelivery(ctx, "publication", "push", body, now); err != nil {
+	if err := op.EnqueueGitHubDelivery(ctx, "publication", "push", body); err != nil {
 		t.Fatal(err)
 	}
 	delivery, err := op.ClaimGitHubDelivery(ctx)
@@ -179,10 +178,9 @@ func TestGitHubDeliveryTargetedAdmissionsReplayBeforeSource(t *testing.T) {
 	s, tenant, in := appAdmissionFixture(t, true, "fixture")
 	defer s.Close()
 	ctx := t.Context()
-	now := in.Request.Git.App.Value.VerifiedAt
 	body := []byte(`{"installation":{"id":7},"after":"admission"}`)
 	op := s.AsOperator()
-	if err := op.EnqueueGitHubDelivery(ctx, "admission", "push", body, now); err != nil {
+	if err := op.EnqueueGitHubDelivery(ctx, "admission", "push", body); err != nil {
 		t.Fatal(err)
 	}
 	delivery, err := op.ClaimGitHubDelivery(ctx)
@@ -241,11 +239,11 @@ func TestGitHubRepositoryWithdrawalFencesFirstPublication(t *testing.T) {
 }
 
 func TestGitHubDeliveryUnbindReturnsStoredTeam(t *testing.T) {
-	s, tenant, in := appAdmissionFixture(t, true, "fixture")
+	s, tenant, _ := appAdmissionFixture(t, true, "fixture")
 	defer s.Close()
 	ctx := t.Context()
-	op, now := s.AsOperator(), in.Request.Git.App.Value.VerifiedAt
-	if err := op.EnqueueGitHubDelivery(ctx, "unbind", "installation", []byte(`{"installation":{"id":7},"action":"deleted"}`), now); err != nil {
+	op := s.AsOperator()
+	if err := op.EnqueueGitHubDelivery(ctx, "unbind", "installation", []byte(`{"installation":{"id":7},"action":"deleted"}`)); err != nil {
 		t.Fatal(err)
 	}
 	delivery, err := op.ClaimGitHubDelivery(ctx)
@@ -265,7 +263,7 @@ func TestGitHubUnappliedPublicationCannotAcquireLaterConsent(t *testing.T) {
 	defer s.Close()
 	ctx := t.Context()
 	op, now := s.AsOperator(), in.Request.Git.App.Value.VerifiedAt
-	if err := op.EnqueueGitHubDelivery(ctx, "before-consent", "push", []byte(`{"installation":{"id":7},"after":"before-consent"}`), now); err != nil {
+	if err := op.EnqueueGitHubDelivery(ctx, "before-consent", "push", []byte(`{"installation":{"id":7},"after":"before-consent"}`)); err != nil {
 		t.Fatal(err)
 	}
 	delivery, err := op.ClaimGitHubDelivery(ctx)
@@ -285,9 +283,9 @@ func TestGitHubDeliveryLosingConnectionDuringPreparationIsRevoked(t *testing.T) 
 	s, tenant, in := appAdmissionFixture(t, true, "fixture")
 	defer s.Close()
 	ctx := t.Context()
-	op, now := s.AsOperator(), in.Request.Git.App.Value.VerifiedAt
+	op := s.AsOperator()
 	body := []byte(`{"installation":{"id":7},"after":"unbound-during-fetch"}`)
-	if err := op.EnqueueGitHubDelivery(ctx, "unbound-during-fetch", "push", body, now); err != nil {
+	if err := op.EnqueueGitHubDelivery(ctx, "unbound-during-fetch", "push", body); err != nil {
 		t.Fatal(err)
 	}
 	delivery, err := op.ClaimGitHubDelivery(ctx)

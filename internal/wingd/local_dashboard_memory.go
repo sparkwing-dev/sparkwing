@@ -4,10 +4,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
 	"os"
 	"path/filepath"
 
 	"github.com/sparkwing-dev/sparkwing/internal/fssecure"
+	"github.com/sparkwing-dev/sparkwing/internal/originguard"
 )
 
 const dashboardMemoryFile = "dashboard.json"
@@ -36,6 +38,14 @@ func (r *localRuntime) rememberedDashboard() (dashboardMemory, bool, error) {
 	var memory dashboardMemory
 	if err := json.Unmarshal(body, &memory); err != nil || memory.Address == "" {
 		return dashboardMemory{}, false, fmt.Errorf("wingd: remembered dashboard %s is unreadable", dashboardMemoryFile)
+	}
+	// safety: --allow-remote consents for one explicit start, so a restore never reopens a remote listener.
+	if !originguard.LoopbackHost(memory.Address) {
+		_, port, err := net.SplitHostPort(memory.Address)
+		if err != nil {
+			return dashboardMemory{}, false, fmt.Errorf("wingd: remembered dashboard %s is unreadable", dashboardMemoryFile)
+		}
+		memory.Address = net.JoinHostPort("127.0.0.1", port)
 	}
 	return memory, true, nil
 }

@@ -83,6 +83,10 @@
           "type": "string"
         },
         "resolver": {
+          "enum": [
+            "go-modules",
+            "npm"
+          ],
           "type": "string"
         }
       },

@@ -87,43 +87,6 @@ func leaseStateFor(t *testing.T, d *Daemon, requestID string) admission.LeaseSta
 	return admission.LeaseState{}
 }
 
-func TestNestedRunSubLeaseKeepsItsOwnerRun(t *testing.T) {
-	d := handlerDaemon(t, 4)
-
-	parent, parentPeer := handlerConn(t, d)
-	grant := mustGrantFrame(t, callAndRead(t, parentPeer, func() {
-		d.handleAdmission(parent, &wingwire.AdmissionRequest{
-			RunID: "parent-run", Resources: wingwire.HostResources{Cores: 1},
-		})
-	}))
-
-	child, childPeer := handlerConn(t, d)
-	callAndRead(t, childPeer, func() {
-		d.handleAdmission(child, &wingwire.AdmissionRequest{
-			RunID: "child-run", ParentLeaseToken: grant.LeaseToken,
-		})
-	})
-
-	sub, subPeer := handlerConn(t, d)
-	callAndRead(t, subPeer, func() {
-		d.handleAdmission(sub, &wingwire.AdmissionRequest{
-			RunID: "child-run/plan-sems", OwnerRunID: "child-run", OwnerLeaseToken: grant.LeaseToken,
-			DisplayRunID: "child-run", SemaphoresOnly: true, SubLease: true,
-			Semaphores: []wingwire.SemaphoreClaim{{Name: "grp", Capacity: 1, Cost: 1, Policy: wingwire.PolicyQueue}},
-		})
-	})
-
-	if got := leaseStateFor(t, d, "child-run/plan-sems").OwnerID; got != "child-run" {
-		t.Fatalf("sub-lease owner = %q, want child-run; the parent's token did not prove the child's ownership", got)
-	}
-	d.mu.Lock()
-	ownerRunID := sub.ownerRunID
-	d.mu.Unlock()
-	if ownerRunID != "child-run" {
-		t.Fatalf("sub-lease connection owner = %q, want child-run", ownerRunID)
-	}
-}
-
 func TestSubLeaseFromAnUnrelatedRunKeepsNoOwner(t *testing.T) {
 	d := handlerDaemon(t, 4)
 
@@ -152,32 +115,5 @@ func TestSubLeaseFromAnUnrelatedRunKeepsNoOwner(t *testing.T) {
 
 	if got := leaseStateFor(t, d, "other-run/plan-sems").OwnerID; got != "" {
 		t.Fatalf("sub-lease owner = %q, want none; a token from another run proved ownership", got)
-	}
-}
-
-func TestChildAttachValidatesOwnerProof(t *testing.T) {
-	for _, owner := range []string{"parent-run", "foreign-run", "../malformed"} {
-		t.Run(owner, func(t *testing.T) {
-			d := handlerDaemon(t, 4)
-			parent, peer := handlerConn(t, d)
-			grant := mustGrantFrame(t, callAndRead(t, peer, func() {
-				d.handleAdmission(parent, &wingwire.AdmissionRequest{RunID: "parent-run", Resources: wingwire.HostResources{Cores: 1}})
-			}))
-			foreign, foreignPeer := handlerConn(t, d)
-			callAndRead(t, foreignPeer, func() {
-				d.handleAdmission(foreign, &wingwire.AdmissionRequest{RunID: "foreign-run", Resources: wingwire.HostResources{Cores: 1}})
-			})
-			child, childPeer := handlerConn(t, d)
-			callAndRead(t, childPeer, func() {
-				d.handleAdmission(child, &wingwire.AdmissionRequest{RunID: "child-run", ParentLeaseToken: grant.LeaseToken, OwnerRunID: owner, OwnerLeaseToken: grant.LeaseToken})
-			})
-			want := ""
-			if owner == "parent-run" {
-				want = owner
-			}
-			if child.ownerRunID != want {
-				t.Fatalf("owner=%q, want%q", child.ownerRunID, want)
-			}
-		})
 	}
 }

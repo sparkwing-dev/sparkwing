@@ -21,22 +21,23 @@ func TestGitHubDeliveryReplayAndEventBinding(t *testing.T) {
 	op := st.AsOperator()
 	ctx := t.Context()
 	now := time.Unix(1_000_000, 0)
+	st.SetTestClock(t, func() time.Time { return now })
 	body := []byte(`{"action":"opened"}`)
-	if err := op.EnqueueGitHubDelivery(ctx, "first", "pull_request", body, now); err != nil {
+	if err := op.EnqueueGitHubDelivery(ctx, "first", "pull_request", body); err != nil {
 		t.Fatal(err)
 	}
 	for _, id := range []string{"first", "second"} {
-		if err := op.EnqueueGitHubDelivery(ctx, id, "pull_request", body, now); err != nil {
+		if err := op.EnqueueGitHubDelivery(ctx, id, "pull_request", body); err != nil {
 			t.Fatalf("identical replay %q: %v", id, err)
 		}
 	}
-	if err := op.EnqueueGitHubDelivery(ctx, "first", "pull_request", []byte("different"), now); !errors.Is(err, store.ErrGitHubDeliveryConflict) {
+	if err := op.EnqueueGitHubDelivery(ctx, "first", "pull_request", []byte("different")); !errors.Is(err, store.ErrGitHubDeliveryConflict) {
 		t.Fatalf("delivery ID rebound to a body: %v", err)
 	}
-	if err := op.EnqueueGitHubDelivery(ctx, "second", "pull_request", []byte("different"), now); !errors.Is(err, store.ErrGitHubDeliveryConflict) {
+	if err := op.EnqueueGitHubDelivery(ctx, "second", "pull_request", []byte("different")); !errors.Is(err, store.ErrGitHubDeliveryConflict) {
 		t.Fatalf("replayed delivery ID rebound to a body: %v", err)
 	}
-	if err := op.EnqueueGitHubDelivery(ctx, "third", "push", body, now); !errors.Is(err, store.ErrGitHubDeliveryConflict) {
+	if err := op.EnqueueGitHubDelivery(ctx, "third", "push", body); !errors.Is(err, store.ErrGitHubDeliveryConflict) {
 		t.Fatalf("digest rebound to an event: %v", err)
 	}
 	claimed, err := op.ClaimGitHubDelivery(ctx)
@@ -59,7 +60,7 @@ func TestGitHubDeliveryInterruptedProcessingNeverRetries(t *testing.T) {
 	}
 	now := teststore.Now(st)
 	ctx := t.Context()
-	if err := st.AsOperator().EnqueueGitHubDelivery(ctx, "delivery", "push", []byte("body"), now); err != nil {
+	if err := st.AsOperator().EnqueueGitHubDelivery(ctx, "delivery", "push", []byte("body")); err != nil {
 		t.Fatal(err)
 	}
 	first, err := st.AsOperator().ClaimGitHubDelivery(ctx)
@@ -92,9 +93,8 @@ func TestGitHubDeliveryFailuresNeverRetry(t *testing.T) {
 		t.Run(reason, func(t *testing.T) {
 			st := storetest.Open(t)
 			op := st.AsOperator()
-			now := time.Now()
 			ctx := t.Context()
-			if err := op.EnqueueGitHubDelivery(ctx, "delivery", "push", []byte("body"), now); err != nil {
+			if err := op.EnqueueGitHubDelivery(ctx, "delivery", "push", []byte("body")); err != nil {
 				t.Fatal(err)
 			}
 			claim, err := op.ClaimGitHubDelivery(ctx)
@@ -126,7 +126,7 @@ func TestGitHubDeliveryLifecycleCrashDoesNotReplayAppliedSuspend(t *testing.T) {
 		t.Fatal(err)
 	}
 	op := st.AsOperator()
-	if err := op.EnqueueGitHubDelivery(ctx, "suspend", "installation", []byte(`{"action":"suspend","installation":{"id":7}}`), now); err != nil {
+	if err := op.EnqueueGitHubDelivery(ctx, "suspend", "installation", []byte(`{"action":"suspend","installation":{"id":7}}`)); err != nil {
 		t.Fatal(err)
 	}
 	old, err := op.ClaimGitHubDelivery(ctx)
@@ -142,7 +142,7 @@ func TestGitHubDeliveryLifecycleCrashDoesNotReplayAppliedSuspend(t *testing.T) {
 	}
 	st = target.Open(t)
 	op = st.AsOperator()
-	if err := op.EnqueueGitHubDelivery(ctx, "unsuspend", "installation", []byte(`{"action":"unsuspend","installation":{"id":7}}`), now.Add(time.Second)); err != nil {
+	if err := op.EnqueueGitHubDelivery(ctx, "unsuspend", "installation", []byte(`{"action":"unsuspend","installation":{"id":7}}`)); err != nil {
 		t.Fatal(err)
 	}
 	newer, err := op.ClaimGitHubDelivery(ctx)
@@ -185,7 +185,7 @@ func TestGitHubDeliveryFailedLifecycleDoesNotKeepReceipt(t *testing.T) {
 		t.Fatal(err)
 	}
 	op := st.AsOperator()
-	if err := op.EnqueueGitHubDelivery(ctx, "suspend", "installation", []byte(`{"action":"suspend","installation":{"id":7}}`), now); err != nil {
+	if err := op.EnqueueGitHubDelivery(ctx, "suspend", "installation", []byte(`{"action":"suspend","installation":{"id":7}}`)); err != nil {
 		t.Fatal(err)
 	}
 	claim, err := op.ClaimGitHubDelivery(ctx)

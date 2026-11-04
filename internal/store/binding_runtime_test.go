@@ -266,15 +266,17 @@ func TestBindingTokenRequiresTheAccountOwner(t *testing.T) {
 	for _, prefix := range []string{"mine", "theirs"} {
 		authorityPersist(t, s, authorityRoot(prefix, "a"))
 	}
+	authorityPersist(t, s, authorityRoot("foreign", "b"))
 	rewriteSchemaExec(t, s.db, `UPDATE capabilities SET created_by='owner' WHERE prefix='mine'`)
 	rewriteSchemaExec(t, s.db, `UPDATE capabilities SET created_by='other' WHERE prefix='theirs'`)
 	p, err := s.AsOperator().ResolveAuthority(t.Context(), owner.Authority)
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, prefix := range []string{"mine", "theirs", "missing"} {
+	for _, prefix := range []string{"mine", "theirs", "foreign", "missing"} {
 		err := s.AsOperator().CheckBinding(t.Context(), p, capability.BindOwnToken, capability.Target{Team: "a", TokenPrefix: prefix})
-		if (err == nil) != (prefix == "mine") {
+		var failure *apierr.Error
+		if prefix == "mine" && err != nil || prefix != "mine" && (!errors.As(err, &failure) || failure.Code != apierr.Forbidden) {
 			t.Fatalf("%s: %v", prefix, err)
 		}
 	}

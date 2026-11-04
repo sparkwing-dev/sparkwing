@@ -119,9 +119,6 @@ func (s *Server) issueActionsCredential(w http.ResponseWriter, r *http.Request, 
 		return routepolicy.MissingEndpointPolicy()
 	}
 	issued, err := s.credentialIssuer.ProvisionCapability(r.Context(), proof.spec)
-	if errors.Is(err, store.ErrGitHubRunnerCredentialLimit) {
-		return &apierr.Error{Code: apierr.RateLimited, Message: err.Error()}
-	}
 	if err != nil {
 		return engineLookupError(err)
 	}

@@ -658,10 +658,11 @@ in-process counter, so they survive a controller restart.
 
 Every object-store client a Sparkwing process builds draws on one
 request budget. The budget counts `put`, `get`, `list` and `delete`
-separately, each against a per-minute rate and an optional per-day total. A class
-that spends either budget trips: further requests of that class are
-refused with an error naming the class and the limit, and nothing is
-queued. Classes are independent, so a tripped `put` budget leaves reads
+separately, each against an optional per-minute rate and an optional per-day
+total. Both are off by default, so the budget counts requests and refuses
+nothing until an operator sets one. A class that spends a budget it has
+trips: further requests of that class are refused with an error naming the
+class and the limit, and nothing is queued. Classes are independent, so a tripped `put` budget leaves reads
 serving until their own budget trips.
 
 The budget counts billed attempts, not API calls. It sits inside the AWS
@@ -669,23 +670,18 @@ SDK's retry loop, so a call the SDK re-sends four times spends four
 units, which is what the object store charges for.
 
 The guard exists because a retry loop against a failing bucket bills per
-request and the bill arrives hours later. Defaults sit far above normal
-load and far below a loop with no sleep. Shared daily stops are off by
-default: ordinary enforcement uses per-team budgets. Operators can enable
-a shared daily stop as an emergency cost brake:
+request and the bill arrives hours later. The budget is shared by every team
+on the process, so it cannot tell a runaway caller from healthy demand at
+scale, and a stop it enforces refuses every team's uploads at once. Per-team
+budgets do the ordinary enforcement. Operators can enable a shared minute or
+daily stop as an emergency cost brake.
 
-| Class | Per minute | Per day |
-|--------|------|-------------|
-| `put` | 1200 | unlimited |
-| `get` | 3000 | unlimited |
-| `list` | 600 | unlimited |
-| `delete` | 600 | unlimited |
-
-Override any of them on the controller with `--object-store-budget`, a
+Set them on the controller with `--object-store-budget`, a
 comma-separated list of `class:window=count` entries such as
-`put:minute=600,put:day=200000`, where the class is `put`, `get`, `list` or
-`delete` and the window is `minute` or `day`. A count of `0` removes that
-budget. Every other process runs on the built-in budgets.
+`put:minute=1200,put:day=200000`, where the class is `put`, `get`, `list` or
+`delete` and the window is `minute` or `day`. A count of `0`, or a class and
+window the list does not name, is unlimited. Every other process runs
+unlimited.
 A class tripped by its per-minute rate clears when that minute rolls, so
 one burst costs a minute of refusals rather than a day of them. An opt-in day
 budget bounds the total. A class tripped by its per-day budget
@@ -775,7 +771,7 @@ The ceiling is the controller's alone; no other process takes one.
 
 The controller measures on its ordinary timer. Measurement requests sit outside
 the object-store request budget, because totalling a million-object bucket would
-otherwise spend the per-minute list budget and refuse other readers. The walk
+otherwise spend an operator's per-minute list budget and refuse other readers. The walk
 is bounded at `--bucket-measure-pages` listings (1000 by default, a thousand
 objects each) and at half the reconciliation interval, whichever comes first.
 

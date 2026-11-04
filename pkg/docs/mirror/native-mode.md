@@ -3,13 +3,13 @@
 The public dashboard commands use the local controller lifecycle. See the
 [dashboard reference](cli-dashboard.md) for their grammar and output formats.
 
-This build still needs native runtime, managed-service and log-source bindings.
-Dashboard commands report `unavailable` when those bindings are absent. They do
-not fall back to a separate dashboard server or open another state store.
+Dashboard commands report `unavailable`, naming the missing piece, when this
+platform cannot supply the local controller lifecycle, managed units or log
+source. They do not fall back to a separate dashboard server or open another
+state store.
 
 Doctor reports an incomplete controller inspection when its lifecycle binding is
-absent. Its project toolchain, hook survey and competing-install checks still
-run. An incomplete inspection is an error, even when those machine checks pass.
+absent. Its project toolchain and hook survey checks still run. An incomplete inspection is an error, even when those machine checks pass.
 
 <!-- design:begin -->
 ## Controller lifecycle contract

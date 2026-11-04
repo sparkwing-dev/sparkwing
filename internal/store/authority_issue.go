@@ -323,10 +323,8 @@ func awardCapabilityTx(ctx context.Context, tx *storeTx, spec capability.AwardSp
 	if sealed.Provenance.ProvenRepository() != "" && !facts.HostKind.AllowsProvenRepository() {
 		return capability.Capability{}, authorityError(apierr.Forbidden, provenRepositoryHostReason)
 	}
-	for _, node := range chain {
-		if node.principal.Capability.Unit == "" && node.principal.Capability.Repositories != nil && sealed.Provenance.ProvenRepository() == "" {
-			return capability.Capability{}, authorityError(apierr.Forbidden, repositoryScopedRunnerReason)
-		}
+	if repositoryScoped(chain) && sealed.Provenance.ProvenRepository() == "" {
+		return capability.Capability{}, authorityError(apierr.Forbidden, repositoryScopedRunnerReason)
 	}
 	if reason, err := claimantTrustRefusalTx(ctx, tx, Team(row.team), row.run, chain[len(chain)-1].principal.Capability, facts.Launcher, facts.PersistentKubernetes); err != nil {
 		return capability.Capability{}, err
@@ -371,7 +369,7 @@ func awardCapabilityTx(ctx context.Context, tx *storeTx, spec capability.AwardSp
 	c.ExecutionHost = awardExecutionHost(chain, sealed, here)
 	c.Host = claimant.Capability.Host
 	if c.Host == nil {
-		cacheScope, err := awardCacheHostTx(ctx, tx, Team(row.team), facts)
+		cacheScope, err := awardCacheHostTx(ctx, tx, Team(row.team), facts, hostTrusted(chain, facts))
 		if err != nil {
 			return capability.Capability{}, err
 		}
@@ -462,16 +460,18 @@ func awardCapabilityTx(ctx context.Context, tx *storeTx, spec capability.AwardSp
 	return c, nil
 }
 
-// awardCacheHostTx names the cache scope of a claimant whose host serves many
-// jobs (plain-machine, persistent and self-hosted Actions runners), or "" for a
-// fresh pod, Cloud, a GitHub-hosted Actions runner or a high-trust team.
-func awardCacheHostTx(ctx context.Context, tx *storeTx, team Team, facts claimantFacts) (string, error) {
+// safety: awardCacheHostTx returns the host scope of a host that serves many jobs, or "" (the shared
+// scope) for a fresh host or a trusted host of a high-trust team. An untrusted host never writes the
+// shared scope, so a counted pass never restores bytes it wrote, whatever high_trust says.
+func awardCacheHostTx(ctx context.Context, tx *storeTx, team Team, facts claimantFacts, trusted bool) (string, error) {
 	if facts.FreshHost {
 		return "", nil
 	}
-	var highTrust bool
-	if err := tx.QueryRowContext(ctx, `SELECT high_trust FROM teams WHERE name=?`, team).Scan(&highTrust); err != nil || highTrust {
-		return "", err
+	if trusted {
+		var highTrust bool
+		if err := tx.QueryRowContext(ctx, `SELECT high_trust FROM teams WHERE name=?`, team).Scan(&highTrust); err != nil || highTrust {
+			return "", err
+		}
 	}
 	sum := sha256.Sum256([]byte(facts.Host))
 	return hostWriterPrefix + hex.EncodeToString(sum[:8]), nil

@@ -47,7 +47,7 @@ func (p *Test) Plan(_ context.Context, plan *sparkwing.Plan, in TestArgs, rc spa
 
 func (p *Test) run(cmd string) func(context.Context) error {
 	return func(ctx context.Context) error {
-		return withProductTestHome(func(home string) error {
+		return withStableProductTestHome("test", func(home string) error {
 			if _, err := sparkwing.Bash(ctx, productTestScript(cmd, home)).Run(); err != nil {
 				return err
 			}

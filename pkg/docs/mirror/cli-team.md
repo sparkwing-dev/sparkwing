@@ -47,7 +47,7 @@ Only team administrators change team settings. Changes are audited. Pass --membe
 
 --max-children-per-root takes an integer from 1 to 1000 (default 50) and limits descendants across every depth, excluding retries. --claim-ranking takes distinct tiers from here, personal, github-actions, self-hosted and cloud, best first. A tier left out cannot take runs that select no runner. none means first come among every tier and default restores the default ranking (here,personal,github-actions,self-hosted, then cloud on Sparkwing Cloud). Cloud takes part only while the team has credits or a saved card; a self-hosted controller refuses it.
 
---high-trust true lets verified runs on plain-machine, persistent and self-hosted Actions runners write the verified cache that fresh pods, Sparkwing Cloud and remote readers restore. Off (the default), those runs write only their own host's cache, because an earlier job on the same host could have tampered with what they archive. Turn it on only when every job those runners take is trusted.
+--high-trust true lets verified runs on trusted hosts that outlive their jobs (runners and team launchers scoped to repositories) write the verified cache that fresh pods, Sparkwing Cloud and remote readers restore. Off (the default), those runs write only their own host's cache, because an earlier job on the same host could have tampered with what they archive. Hosts that take asserted work, such as personal machines and self-hosted Actions runners, never write it.
 
 ### Flags
 
@@ -59,7 +59,7 @@ Only team administrators change team settings. Changes are audited. Pass --membe
 | `--help-all` | Include uncommon flags in command help. |
 | `--profile NAME` | Controller connection profile from your config. Must be supplied explicitly. (required) |
 | `--members-can-add-machines BOOL` | Whether members without administration may enroll their own personal machines; false also ends personal machines such members already enrolled, and true does not revive them. Values: true, false. |
-| `--high-trust BOOL` | Let verified runs on plain-machine, persistent and self-hosted Actions runners write the shared verified cache; leave it false unless every job those runners take is trusted, since an earlier job on the same host could tamper with what they archive. Values: true, false. |
+| `--high-trust BOOL` | Let verified runs on trusted hosts that outlive their jobs (runners and team launchers scoped to repositories) write the shared verified cache; hosts that take asserted work never do, since an earlier job on the same host could tamper with what they archive. Values: true, false. |
 | `--claim-ranking TIERS` | Comma-separated tiers, best first, that take runs selecting no runner; a tier left out takes none of them, none means first come among every tier, and default restores the standard ranking. |
 | `--max-children-per-root COUNT` | Maximum descendants per root run (1 to 1000, default 50; retries excluded) |
 

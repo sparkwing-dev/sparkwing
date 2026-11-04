@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"slices"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
@@ -467,9 +468,18 @@ type UploadRule struct {
 	RecordKinds        []Kind
 }
 
-// UploadRules is the complete identity/record-kind policy, rechecked at commit.
-// Publication with an imported attempt follows the final row rather than non-job publication.
-var UploadRules = []UploadRule{
+// UploadRules returns the complete identity/record-kind policy, rechecked at commit,
+// as a copy. Publication with an imported attempt follows the final row rather than
+// non-job publication.
+func UploadRules() []UploadRule {
+	out := slices.Clone(uploadRules)
+	for i := range out {
+		out[i].RecordKinds = slices.Clone(out[i].RecordKinds)
+	}
+	return out
+}
+
+var uploadRules = []UploadRule{
 	{UploadJob, true, false, false, []Kind{KindOutput, KindManifest, KindMemo, KindDepcache, KindBinary, KindSourceBundle}},
 	{UploadOwnerUnit, false, true, false, []Kind{KindBinary, KindSourceBundle, KindPrepared}},
 	{UploadPublication, false, false, true, []Kind{KindBinary, KindSourceBundle}},

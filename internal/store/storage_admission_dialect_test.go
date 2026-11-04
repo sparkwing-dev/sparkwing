@@ -205,6 +205,42 @@ func TestCloudBillingChargesThePublishedRatePastTheFreeAllowance(t *testing.T) {
 	})
 }
 
+// Storage is billed at the full rate even past the balance: the charge takes a funded team negative, the
+// out-of-credit block then refuses new growth, and an open hold does not pause the charge.
+func TestStorageChargesPastTheBalanceAndThroughAHold(t *testing.T) {
+	bothDialects(t, func(t *testing.T, target *storetest.Target) {
+		f := newGrowthFixture(t, target)
+		fundTeam(t, f.tenant, "pay-storage")
+		f.storeBytes(t, "a", 1440001*store.StorageBytesPerGB, f.now.Add(-time.Hour))
+		day := int64(1000 * store.CloudStorageRateMicroPerGBDay)
+		charge := func(want int64) {
+			t.Helper()
+			f.now = f.now.Add(time.Minute)
+			billed, err := f.s.AsOperator().ChargeRetainedStorage(t.Context())
+			if err != nil || billed.ChargedMicro != day {
+				t.Fatalf("billing = %+v, %v; want the full %d", billed, err, day)
+			}
+			if got, err := f.tenant.CreditBalanceMicro(t.Context()); err != nil || got != want {
+				t.Fatalf("balance = %d, %v; want %d", got, err, want)
+			}
+		}
+		if _, err := f.s.AsOperator().ChargeRetainedStorage(t.Context()); err != nil {
+			t.Fatal(err)
+		}
+		funded := int64(100 * store.MicroCreditsPerCent)
+		charge(funded - day)
+		for _, w := range f.writes() {
+			if err := w.write(t); !errors.Is(err, store.ErrInsufficientCredits) {
+				t.Fatalf("%s on a negative balance = %v; want an insufficient-credits refusal", w.name, err)
+			}
+		}
+		if _, err := f.tenant.HoldByOperator(t.Context(), "operator", "review"); err != nil {
+			t.Fatal(err)
+		}
+		charge(funded - 2*day)
+	})
+}
+
 func (f *growthFixture) logSubject() blob.LogSubject {
 	return blob.LogSubject{Kind: blob.LogJobAttempt, Team: f.attempt.Team, RunID: f.attempt.RunID, Attempt: &f.attempt}
 }

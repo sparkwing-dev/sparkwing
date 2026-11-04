@@ -20,7 +20,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	controllerclient "github.com/sparkwing-dev/sparkwing/internal/controller/client"
-	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/limits"
 	"github.com/sparkwing-dev/sparkwing/pkg/match"
 )
@@ -73,13 +72,15 @@ type Launcher struct {
 	Config   CloudJobConfig
 	Boundary CloudBoundary
 	Poll     time.Duration
-	Logger   *slog.Logger
+	// IdleGrace is how long a used node may sit unreserved before retirement; zero means DefaultIdleGrace.
+	IdleGrace time.Duration
+	Logger    *slog.Logger
 	// Breaker reports whether the Cloud budget breaker is closed. Nil means no
 	// breaker, as on self-hosted clusters.
 	Breaker func(context.Context) (bool, error)
 
 	retirementMu     sync.Mutex
-	nonTerminalRuns  map[controllerwire.LauncherRun]time.Time
+	idleSince        map[types.UID]time.Time
 	retirementLogged time.Time
 
 	mu       sync.Mutex
@@ -103,7 +104,14 @@ func (l *Launcher) validate() error {
 	if l.Kube == nil || l.Control == nil || l.Boundary == nil {
 		return errors.New("launcher requires Kubernetes, controller and boundary")
 	}
-	return nil
+	return l.validateIdleGrace()
+}
+
+func (l *Launcher) claimPoll() time.Duration {
+	if l.Poll <= 0 {
+		return 5 * time.Second
+	}
+	return l.Poll
 }
 
 // Run verifies the job namespace admission policies once, catching a chart and
@@ -116,10 +124,7 @@ func (l *Launcher) Run(ctx context.Context) error {
 	if err := l.verifyAdmission(ctx); err != nil {
 		return err
 	}
-	poll := l.Poll
-	if poll <= 0 {
-		poll = 5 * time.Second
-	}
+	poll := l.claimPoll()
 	logger := l.logger()
 	var retiring sync.WaitGroup
 	defer retiring.Wait()

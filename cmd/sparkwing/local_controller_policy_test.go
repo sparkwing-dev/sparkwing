@@ -13,7 +13,6 @@ import (
 	"strings"
 	"sync"
 	"testing"
-	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
@@ -24,6 +23,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/localhostwire"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 
+	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
@@ -302,12 +302,12 @@ func exerciseLocalRun(t *testing.T, options client.EngineOptions, admitted contr
 	if err != nil {
 		t.Fatal("storage:", err)
 	}
-	output := blob.OutputData{Bytes: storage.Bytes, Records: storage.Records, Authority: storage.Authority, Identity: storage.Authority.Upload.Value, Pipeline: "example", Budget: blob.Budget{Deadline: time.Now().Add(time.Minute)}}
+	output := blob.OutputData{Bytes: storage.Bytes, Records: storage.Records, Authority: storage.Authority, Identity: storage.Authority.Upload.Value, Pipeline: "example"}
 	record, err := output.Put(ctx, []byte(`{"value":"stored"}`))
 	if err != nil {
 		t.Fatal("output commit:", err)
 	}
-	data, err := output.Read(ctx, record.Key)
+	data, err := (nodehost.OutputRecords{Blobs: storage.Bytes, Records: storage.Records}).ReadResult(ctx, runstate.NodeRow{Status: runstate.StatusDone, OutputRecord: &record.Key}, storage.Authority)
 	if err != nil || string(data) != `{"value":"stored"}` {
 		t.Fatalf("output read: %s: %v", data, err)
 	}
@@ -320,7 +320,7 @@ func exerciseLocalRun(t *testing.T, options client.EngineOptions, admitted contr
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := sink.Append([]byte("production local log\n"), "", 0, 0); err != nil {
+	if err := sink.Append([]byte("production local log\n")); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := sink.Close(ctx, logseg.End{}); err != nil {

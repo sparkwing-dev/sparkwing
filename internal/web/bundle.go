@@ -61,6 +61,21 @@ bundle first, then reinstall:
   bash bin/build-web.sh
   go install ./cmd/sparkwing`
 
+// VerifiedBundle returns the embedded dashboard bundle when this build carries
+// one and nil otherwise, so pages report the missing bundle instead of 404.
+func VerifiedBundle() fs.FS { return verifiedBundle(nextBundle) }
+
+func verifiedBundle(embedded fs.FS) fs.FS {
+	if bundleMissingReason(embedded) != "" {
+		return nil
+	}
+	sub, err := fs.Sub(embedded, "next-out")
+	if err != nil {
+		return nil
+	}
+	return sub
+}
+
 // BundleFS returns the embedded dashboard bundle rooted at its index.html,
 // the shape [Pages] serves.
 func BundleFS() fs.FS {

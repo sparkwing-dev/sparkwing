@@ -36,7 +36,7 @@ func attachHereRun(ctx context.Context, options client.EngineOptions, run, outpu
 	return observeHereRun(ctx, run, hereObservation{
 		host: host,
 		follow: func(ctx context.Context) error {
-			return followControllerRunLogs(ctx, options, run, format, out)
+			return followControllerRunLogs(ctx, options, run, format, out, waitStatusPoll)
 		},
 		cancel: func(ctx context.Context) error {
 			_, writeErr := fmt.Fprintf(os.Stderr, "cancelling %s; interrupt again to stop hosting without waiting\n", run)

@@ -2,8 +2,11 @@ package controller
 
 import (
 	"crypto/sha256"
+	"errors"
+	"strings"
 	"testing"
 
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controller/client"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
@@ -61,5 +64,27 @@ func triggerReachesCloudLauncher(t *testing.T, flags runspec.Options) {
 	claim, err := s.store.AsOperator().ClaimUnit(t.Context(), store.UnitDemand{CapabilityPrefix: launcher.Capability.Prefix, Kinds: []capability.UnitKind{capability.UnitPlan, capability.UnitEval, capability.UnitNode}})
 	if err != nil || claim.RunID != created.RunID || claim.Kind != capability.UnitPlan {
 		t.Fatalf("Cloud launcher poll: %+v %v", claim, err)
+	}
+}
+
+// Grid R09C08: a size outside the Cloud catalog reached the server unvalidated
+// and failed as an unclassified 500.
+func TestCreateRunRefusesUnsupportedCloudSize(t *testing.T) {
+	_, options, input, _ := sourceUploadFixture(t)
+	flag := func(key string) runspec.SettingOrigin {
+		return runspec.SettingOrigin{Layer: runspec.LayerFlag, Key: key}
+	}
+	input.Options = runspec.Options{
+		Runner:   runspec.Setting[runspec.RunnerSelection]{Optional: runspec.Optional[runspec.RunnerSelection]{Set: true, Value: runspec.RunnerSelection{Kind: runspec.RunnerLabel, Value: "class=cloud"}}, Origin: flag("runner")},
+		Requires: runspec.Setting[[]string]{Optional: runspec.Optional[[]string]{Set: true, Value: []string{"sparkwing-3cpu"}}, Origin: flag("requires")},
+	}
+	c, err := client.NewEngineClient(options)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = c.CreateRun(t.Context(), controllerwire.CreateRunRequest{IdempotencyKey: "unsupported-size", Request: input})
+	var failure *apierr.Error
+	if !errors.As(err, &failure) || failure.Code != apierr.BadRequest || !strings.Contains(failure.Message, "valid sizes: sparkwing-2cpu") {
+		t.Fatalf("CreateRun with sparkwing-3cpu = %#v, want bad_request naming the valid sizes", err)
 	}
 }

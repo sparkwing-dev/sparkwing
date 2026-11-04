@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"slices"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
@@ -14,9 +15,9 @@ type claimantFacts struct {
 	HostKind                                                            capability.HostKind
 	Launcher, Personal, Shared, Cloud, Observable, PersistentKubernetes bool
 	OwnerAccount, Tier, OIDCKind, ExecutorClass                         string
-	// safety: FreshHost is a host no job of another run touched: a launcher or Cloud pod, whose warm node
-	// serves only its own run, or a GitHub-hosted Actions runner. A self-hosted Actions runner is a long-lived
-	// host like any other. Host names any other host.
+	// safety: FreshHost is a host its provider attests no job of another run touched: a Cloud pod, whose
+	// warm node serves only its own run, or a GitHub-hosted Actions runner. A team's own launcher pod and a
+	// self-hosted Actions runner are only as trusted as the credential behind them. Host names any other host.
 	FreshHost bool
 	Host      string
 }
@@ -124,6 +125,20 @@ func claimantFactsTx(ctx context.Context, tx *storeTx, chain []authorityNode, re
 	if facts.Cloud || githubHosted {
 		facts.HostKind = capability.HostCloud
 	}
-	facts.FreshHost = facts.Launcher || facts.Cloud || facts.Tier == tierActions && githubHosted
+	facts.FreshHost = facts.Cloud || facts.Tier == tierActions && githubHosted
 	return facts, nil
+}
+
+// safety: hostTrusted is the one rule for a host whose jobs may write the shared verified cache and
+// produce a pass sw.FromProvenRunAtCommit counts: a fresh host, or a machine an admin scoped to
+// repositories, which never takes asserted work that could leave HOME, GOFLAGS or a cache poisoned.
+func hostTrusted(chain []authorityNode, facts claimantFacts) bool {
+	return facts.FreshHost || chain[len(chain)-1].principal.Capability.Subject.Kind == capability.SubjectMachine && repositoryScoped(chain)
+}
+
+// safety: repositoryScoped is the one rule for a claimant that takes only repository-proven work.
+func repositoryScoped(chain []authorityNode) bool {
+	return slices.ContainsFunc(chain, func(node authorityNode) bool {
+		return node.principal.Capability.Unit == "" && node.principal.Capability.Repositories != nil
+	})
 }

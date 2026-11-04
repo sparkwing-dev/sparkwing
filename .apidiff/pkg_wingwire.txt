@@ -18,12 +18,6 @@ type AdmissionRequest struct {
 	Resources  HostResources
 	Semaphores []SemaphoreClaim
 
-	ParentLeaseToken string
-
-	ParentRunID string
-
-	ParentNodeID string
-
 	SemaphoresOnly bool
 
 	SubLease bool

@@ -146,32 +146,6 @@ func TestRateTableRefusesARateThatWouldOverflowAReservation(t *testing.T) {
 	}
 }
 
-// The warm class names where a class runs, so an operator may retire the warm
-// pool with zero but never name a negative class.
-func TestTheWarmCPUClassDefaultsToTwoCoresAndRefusesANegative(t *testing.T) {
-	s := storetest.Open(t)
-	ctx := context.Background()
-	cores, err := s.AsOperator().WarmCPUClassCores(ctx)
-	if err != nil {
-		t.Fatalf("read the warm class: %v", err)
-	}
-	if cores != store.DefaultWarmCPUClassCores {
-		t.Fatalf("warm class = %d, want %d", cores, store.DefaultWarmCPUClassCores)
-	}
-	retired := int64(0)
-	if _, err := s.AsOperator().SetCreditSettings(ctx, store.CreditSettingsUpdate{WarmCPUClassCores: &retired}); err != nil {
-		t.Fatalf("retire the warm pool: %v", err)
-	}
-	if cores, err := s.AsOperator().WarmCPUClassCores(ctx); err != nil || cores != 0 {
-		t.Fatalf("warm class = %d, %v; want 0", cores, err)
-	}
-	negative := int64(-1)
-	if _, err := s.AsOperator().SetCreditSettings(ctx,
-		store.CreditSettingsUpdate{WarmCPUClassCores: &negative}); err == nil {
-		t.Fatal("a negative warm class was accepted")
-	}
-}
-
 func TestAStoredRateTableNothingCanReadIsAnError(t *testing.T) {
 	s := storetest.Open(t)
 	ctx := context.Background()

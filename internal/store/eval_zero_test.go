@@ -3,6 +3,7 @@ package store
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
@@ -135,5 +136,34 @@ func TestZeroEvalIdentityRequiresExplicitTaggedSourceGeneration(t *testing.T) {
 	}
 	if _, err := decodeAwardUnit(capability.UnitEval, string(body)); err == nil {
 		t.Fatal("absent generation silently aliased materialized source zero")
+	}
+}
+
+func TestMemoizedSourceEvalReadsMaterializedOutput(t *testing.T) {
+	s, tenant, _, issued := zeroEvalFixture(t)
+	run, err := tenant.ReadRun(t.Context(), "run")
+	if err != nil {
+		t.Fatal(err)
+	}
+	row, err := tenant.ReadNode(t.Context(), runspec.NodeRef{RunID: "run", NodeID: "job"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	key := blob.MaterializedRecordKey("a", "run", "job", row.StateSeq, run.Request.Request.Git.Repository.Key, blob.ScopeFor(run.Request.Provenance), run.Request.Request.Pipeline, blob.KindOutput)
+	digest := blob.Digest(strings.Repeat("c", 64))
+	rewriteSchemaExec(t, s.db, `INSERT INTO blobs(team,digest,size,created_at) VALUES('a',?,3,1)`, digest)
+	namespace, err := blob.RecordNamespace(key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	destination := blob.UploadIdentity{Kind: blob.UploadOwnerUnit, Team: "a", RunID: "run"}
+	if err := s.inTx(t.Context(), func(tx *storeTx) error {
+		return persistBlobRecordTx(t.Context(), tx, blob.Record{Key: key, Digest: digest, Source: destination, Provenance: blob.ProvenanceLocal, RefFacts: blob.RefFacts{Scope: key.Scope.Ref}}, namespace, destination, &row)
+	}); err != nil {
+		t.Fatal(err)
+	}
+	got, err := tenant.LookupRecord(t.Context(), blob.RecordLookup{Key: key, Authority: blob.Authority{CapabilityRef: issued.Capability.Prefix}})
+	if err != nil || !got.Found || got.Record.Digest != digest {
+		t.Fatalf("memoized source evaluation lost its materialized output: %+v %v", got, err)
 	}
 }

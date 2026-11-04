@@ -2,6 +2,7 @@ package git
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -681,5 +682,26 @@ func TestGitHelpersDisableTerminalPrompts(t *testing.T) {
 	}
 	if got != "0" {
 		t.Fatalf("git prompt setting = %q, want 0", got)
+	}
+}
+
+// The TypeScript SDK runs the same vectors in test/git-helper.test.ts, so both fileset hashes read .dockerignore alike.
+func TestDockerignoreVectors(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join("testdata", "dockerignore-vectors.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var vectors []struct {
+		Patterns []string `json:"patterns"`
+		Path     string   `json:"path"`
+		Ignored  bool     `json:"ignored"`
+	}
+	if err := json.Unmarshal(data, &vectors); err != nil {
+		t.Fatal(err)
+	}
+	for _, v := range vectors {
+		if got := matchesIgnore(v.Path, v.Patterns); got != v.Ignored {
+			t.Errorf("%q under %q: ignored=%v, want %v", v.Path, v.Patterns, got, v.Ignored)
+		}
 	}
 }

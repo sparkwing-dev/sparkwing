@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"log/slog"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
@@ -28,8 +29,11 @@ func recordPaymentConsequenceTx(ctx context.Context, tx *storeTx, e capability.P
 		return err
 	case payment != e.PaymentID || recorded != amount:
 		return authorityError(apierr.Conflict, "payment consequence changed its payment or amount")
-	// Stripe can fail a refund it reported succeeded; the failure is recorded so the operator lists it.
+	// bug: Stripe can fail a refund it reported succeeded; no operator view lists it, so the error log is the only
+	// signal and docs/billing.md holds the manual reconciliation.
 	case kind == "refund" && status == cardRefundSucceeded && e.Status == "failed":
+		slog.ErrorContext(ctx, "billing alert: Stripe failed a refund it had reported succeeded; return the money by hand",
+			"alert", "refund_failed_after_success", "mode", e.Mode, "refund", e.ObjectID, "payment", e.PaymentID, "amount_micro", amount)
 	case status == cardRefundSucceeded || status == "failed" || status == "canceled":
 		if e.Status == cardRefundSucceeded || e.Status == "failed" || e.Status == "canceled" {
 			if status != e.Status {

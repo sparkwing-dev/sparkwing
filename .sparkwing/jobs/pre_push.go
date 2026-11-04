@@ -47,7 +47,7 @@ func (PrePush) Examples() []sparkwing.Example {
 
 func (p *PrePush) Plan(_ context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, rc sparkwing.RunContext) error {
 	plan.Priority(hookTierPriority)
-	sparkwing.Job(plan, rc.Pipeline, p).Cache(lintCache())
+	sparkwing.Job(plan, rc.Pipeline, p)
 	return nil
 }
 
@@ -132,6 +132,15 @@ func runVetTouched(ctx context.Context) error {
 				return goCommandAt(cores, "vet", strings.Join(def, " ")) + " && " + qa
 			}
 			return qa
+		})
+}
+
+// safety: the gate vets the qatrust flavor of the packages a change touches, so
+// land can push the tree it gated without re-running the pre-push hook.
+func runQATrustVetTouched(ctx context.Context) error {
+	return overTouchedPackages(ctx, "vet-qatrust", "compile", "Go file(s)", existingGoFiles,
+		func(_ string, pkgs []string) string {
+			return goCommandAt(prePushTaskCores(runtime.NumCPU()), "vet", "-tags qatrust "+strings.Join(pkgs, " "))
 		})
 }
 

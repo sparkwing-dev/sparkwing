@@ -39,14 +39,8 @@ func WithClient(cfg NativeConfig, c *client.LocalHostClient) NativeConfig {
 		if err != nil {
 			return ProcessServices{}, err
 		}
-		snapshot, err := cfg.Store.ReadSnapshot(ctx, p.Capability.Binding.RunID)
-		if err != nil {
-			return ProcessServices{}, err
-		}
-		service := ProcessServices{RunID: p.Capability.Binding.RunID, Job: job}
-		if snapshot.Run.Spec != nil {
-			service.Secrets = append([]string{}, snapshot.Run.Spec.Resolved.SecretNames...)
-		}
+		// perf: the process client already read this run's snapshot; a second read cost a controller round trip per job.
+		service := ProcessServices{RunID: p.Capability.Binding.RunID, Job: job, Secrets: remote.SecretNames()}
 		service.Annotation = func(ctx context.Context, _ capability.Authorized, body nodeproto.AnnotationRequest) error {
 			return remote.Annotation(ctx, body)
 		}

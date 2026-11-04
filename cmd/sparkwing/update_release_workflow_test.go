@@ -69,6 +69,7 @@ func TestReleaseWorkflowUsesTheRunnerImageContract(t *testing.T) {
 		"COPY bin/check-runner-image.sh /usr/local/bin/check-runner-image.sh",
 		"RUN /bin/sh /usr/local/bin/check-runner-image.sh",
 		"COPY --from=build /out/" + launcher.JobBinary + " /usr/local/bin/" + launcher.JobBinary,
+		"COPY --from=go-seed /usr/local/share/sparkwing/go-seed /usr/local/share/sparkwing/go-seed",
 		`ENTRYPOINT ["/usr/local/bin/` + launcher.JobBinary + `"]`,
 	} {
 		if !containsDockerInstruction(instructions, required) {

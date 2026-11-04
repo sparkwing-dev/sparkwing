@@ -60,7 +60,8 @@ var CloudSizeLabelSQL = cloudSizeLabelSQL
 // TestOnlySeedSealedRun inserts a successful executed run with a sealed
 // provenance, options and submitted environment names, bypassing intake.
 func (t *Tenant) TestOnlySeedSealedRun(ctx context.Context, id, pipeline string, repo runspec.RepoKey, sha string, provenance runspec.Provenance, options runspec.Options, finished time.Time, env ...string) error {
-	body, err := json.Marshal(runspec.SealedRequest{Version: 1, Request: runspec.Request{Pipeline: pipeline, Git: runspec.Git{SHA: sha, Repository: runspec.Repository{Key: repo}}, Options: options, Env: runspec.EnvSnapshot{Names: env}}, Provenance: provenance})
+	request := runspec.Request{Pipeline: pipeline, Git: runspec.Git{SHA: sha, Repository: runspec.Repository{Key: repo}}, Options: options, Env: runspec.EnvSnapshot{Names: env}}
+	body, err := json.Marshal(runspec.SealedRequest{Version: 1, Request: request, Provenance: provenance, ProofEligible: request.ProofEligible()})
 	if err != nil {
 		return err
 	}

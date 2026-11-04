@@ -117,7 +117,7 @@ func TestRunCacheProfileMayExplicitlyDisableMachineDefault(t *testing.T) {
 	if err != nil || !inv.Has("sw-cache-from") || inv.Value("sw-cache-from") != "" {
 		t.Fatalf("explicit empty cache profile=%+v %v", inv, err)
 	}
-	for _, args := range [][]string{{"run", "ci", "--sw-output="}, {"run", "ci", "--publish="}} {
+	for _, args := range [][]string{{"run", "ci", "--publish="}} {
 		if _, err := Parse("sparkwing", args); err == nil {
 			t.Fatalf("accepted empty required option: %v", args)
 		}

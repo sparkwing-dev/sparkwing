@@ -36,10 +36,13 @@ func controllerPlanFixture(t *testing.T, plan nodeproto.PlanDoc, prepare ...func
 	return tenant, request, now
 }
 
-func controllerJobAward(t *testing.T, tenant *Tenant, runID string) runstate.Actor {
+func controllerJobAward(t *testing.T, tenant *Tenant, runID string, shape ...func(*capability.Capability)) runstate.Actor {
 	t.Helper()
 	root := authorityRoot("runner", "a")
 	root.Grants = []capability.Grant{capability.NodesClaim}
+	for _, apply := range shape {
+		apply(&root)
+	}
 	authorityPersist(t, tenant.s, root)
 	demand := UnitDemand{CapabilityPrefix: root.Prefix, Target: &UnitRef{Kind: capability.UnitNode, RunID: runspec.RunID(runID), NodeID: "job"}}
 	fundUnitClaim(t, tenant.s)
@@ -51,9 +54,9 @@ func controllerJobAward(t *testing.T, tenant *Tenant, runID string) runstate.Act
 	return actor
 }
 
-func controllerJobActor(t *testing.T, tenant *Tenant, runID string) runstate.Actor {
+func controllerJobActor(t *testing.T, tenant *Tenant, runID string, shape ...func(*capability.Capability)) runstate.Actor {
 	t.Helper()
-	actor := controllerJobAward(t, tenant, runID)
+	actor := controllerJobAward(t, tenant, runID, shape...)
 	admitExecution(t, tenant, actor)
 	if _, err := tenant.TransitionNode(t.Context(), nodeTransition{Ref: runspec.NodeRef{RunID: runspec.RunID(runID), NodeID: "job"}, To: runstate.NodeRunning, Cause: runstate.CauseStart, Actor: actor, SourceAttempt: sourceAttempt(0)}); err != nil {
 		t.Fatal(err)
