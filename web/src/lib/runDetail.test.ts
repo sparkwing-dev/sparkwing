@@ -56,6 +56,14 @@ describe("runDetailView", () => {
     const plain = api.runDetailView(fixture("run-detail-plan-failure.json")).run;
     assert.equal("agent" in plain, false);
   });
+  it("shows a retry's recorded reason and none on a run without one", () => {
+    const wire = fixture("run-detail-jobs.json");
+    wire.inputs.lineage.retry_of = "run-source";
+    wire.inputs.lineage.retry_reason = "flake: DNS timeout in TestX";
+    assert.equal(api.runDetailView(wire).run.retry_reason, "flake: DNS timeout in TestX");
+    const plain = api.runDetailView(fixture("run-detail-plan-failure.json")).run;
+    assert.equal("retry_reason" in plain, false);
+  });
   it("does not invent durations for jobs and runs that never started", () => {
     const wire = fixture("run-detail-jobs.json");
     wire.started_at = "0001-01-01T00:00:00Z";

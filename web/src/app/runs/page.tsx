@@ -3231,6 +3231,11 @@ function RunDetailPane({
             reusedIDs={reusedNodeIDs ?? null}
             priorRunID={reusedPriorRunID ?? null}
           />
+          {run.retry_of && run.retry_reason && (
+            <div className="text-[10px] text-[var(--muted)] py-1" data-testid="retry-reason">
+              Retry reason: <span className="text-[var(--fg)]">{run.retry_reason}</span>
+            </div>
+          )}
           <DebugPausePanel runID={run.id} runStatus={run.status} />
         </div>
 

@@ -19,7 +19,20 @@ unlock.
 ---
 
 ## [Unreleased]
+### Added
+
+- **cli + controller:** `runs retry --reason TEXT` records why the retry should pass
+  The new run keeps the reason in its lineage (`retry_reason`), and `runs status`, `runs list`, the API and the
+  console run view show it. A reason is one line of at most 1024 bytes without control characters.
+
 ### Changed
+
+- **cli + controller:** An agent's retry must give `--reason`
+  When `runs retry` runs under a detected coding agent (Claude Code, Codex, Gemini CLI), `--agent` or
+  `SPARKWING_AGENT`, it refuses to retry without `--reason`, and the controller refuses a retry request that names
+  an agent without a reason. Fix it by saying why the retry should pass, such as
+  `--reason "flake: DNS timeout in TestX"` or `--reason "fixed X in commit Y"`. People are never asked, and
+  `--agent none` opts out. A controller older than the field gets the retry without the reason, with a notice.
 
 - **run:** A first run reuses the installed CLI as the pipeline engine when it is the pinned release
   The engine was downloaded again (73 MB) and verified twice; now the installed bytes are checked against the signed

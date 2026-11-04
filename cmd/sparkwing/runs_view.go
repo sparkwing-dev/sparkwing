@@ -196,6 +196,12 @@ func writeRunDetail(out io.Writer, detail controllerwire.RunDetail, opts runStat
 	if detail.Inputs.Agent != "" {
 		fmt.Fprintf(&text, "agent\t%s\n", detail.Inputs.Agent)
 	}
+	if lineage := detail.Inputs.Lineage; lineage.RetryOf != "" {
+		fmt.Fprintf(&text, "retry_of\t%s\n", lineage.RetryOf)
+		if lineage.RetryReason != "" {
+			fmt.Fprintf(&text, "retry_reason\t%s\n", lineage.RetryReason)
+		}
+	}
 	if err := writeEngineNotices(&text, detail.Notices); err != nil {
 		return err
 	}

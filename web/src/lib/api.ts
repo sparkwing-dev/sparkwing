@@ -172,6 +172,8 @@ export interface Run {
   reused_jobs?: string[];
   retried_as?: string;
   retry_source?: string;
+  // retry_reason is why the retry should pass, recorded by `runs retry --reason`.
+  retry_reason?: string;
   parent_run_id?: string;
   replay_of_run_id?: string;
   replay_of_node_id?: string;
@@ -333,7 +335,7 @@ export interface RunDetailWire {
       ref: string;
       sha: string;
     };
-    lineage: { parent_run_id: string; parent_job_id: string; retry_of: string };
+    lineage: { parent_run_id: string; parent_job_id: string; retry_of: string; retry_reason?: string };
   };
   jobs: JobDetailWire[];
   attempts: AttemptDetailWire[];
@@ -489,6 +491,7 @@ export function runDetailView(
     git_sha: inputs.git.sha || undefined,
     repo: inputs.git.repository.display || undefined,
     retry_of: inputs.lineage.retry_of || undefined,
+    retry_reason: inputs.lineage.retry_reason || undefined,
     parent_run_id: inputs.lineage.parent_run_id || undefined,
     args: inputs.args ?? inputs.requested_args ?? undefined,
     error: wire.failure || undefined,

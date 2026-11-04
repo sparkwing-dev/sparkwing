@@ -297,9 +297,16 @@ type FinishRequest struct {
 type CancelRequest struct {
 	Reason string `json:"reason"`
 }
+
+// RetryRequest asks for a new run of a sealed source run. Reason is recorded in the new run's lineage.
+// Agent is the requester's self-declared agent label (decision 94); the controller refuses a retry that
+// names an agent without a reason. Clients send both only when set, so controllers older than these
+// fields still accept a human's retry.
 type RetryRequest struct {
 	IdempotencyKey string    `json:"idempotency_key"`
 	Mode           RetryMode `json:"mode"`
+	Reason         string    `json:"reason,omitempty"`
+	Agent          string    `json:"agent,omitempty"`
 }
 
 // RetryMode selects reuse of successful jobs or execution of the complete sealed plan.

@@ -185,6 +185,7 @@ type Lineage struct {
 	ParentJobID   string          `json:"parent_job_id"`
 	RetryOf       string          `json:"retry_of"`
 	Retrier       Optional[Actor] `json:"retrier"`
+	RetryReason   string          `json:"retry_reason,omitempty"`
 }
 
 // safety: Layer names the source to report when an explicit setting is invalid.
@@ -511,6 +512,7 @@ type RetryInput struct {
 	Plan        json.RawMessage
 	Retrier     Actor
 	SourceRunID string
+	Reason      string
 }
 
 // safety: RetrySnapshot keeps the source's sealed identity whole, including the writer whose cache scope
