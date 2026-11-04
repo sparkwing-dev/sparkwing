@@ -48,7 +48,16 @@ type Request struct {
 	Input    json.RawMessage   `json:"input,omitempty"`
 	// Target identifies the active request cancelled by OpCancel, including eval without job/step.
 	Target string `json:"target,omitempty"`
+	// Features names the optional plan declarations this host accepts. Hello only; an SDK leaves a
+	// declaration the host does not name out of the plan, so an older host still accepts it.
+	Features []string `json:"features,omitempty"`
 }
+
+// FeatureJobCores is the hello feature for a job's declared core request.
+const FeatureJobCores = "job_cores"
+
+// HostFeatures lists the optional plan declarations this host accepts.
+func HostFeatures() []string { return []string{FeatureJobCores} }
 
 // EngineIdentity permits actionable mismatch diagnostics without stamping every request.
 type EngineIdentity struct {
@@ -276,7 +285,7 @@ func (r Request) Validate() error {
 	default:
 		return &apierr.Error{Code: apierr.UnknownOp, Message: fmt.Sprintf("unknown node operation %q; rebuild .sparkwing if the SDK is older than the engine", r.Op)}
 	}
-	if r.Op != OpHello && (r.Protocol != 0 || r.Engine != nil || r.Runner != nil || r.Binding != nil) ||
+	if r.Op != OpHello && (r.Protocol != 0 || r.Engine != nil || r.Runner != nil || r.Binding != nil || r.Features != nil) ||
 		r.Op != OpPlan && (r.Pipeline != "" || r.Run != nil) ||
 		r.Op != OpPlan && r.Op != OpRunStep && r.Op != OpEval && r.Args != nil ||
 		r.Op != OpRunStep && r.Failure != nil ||

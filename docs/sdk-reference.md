@@ -521,6 +521,7 @@ type JobGroup struct {
 - `func (g *JobGroup) Concurrency(cg *ConcurrencyGroup, cost ...int) *JobGroup` -- Concurrency enrolls every member of the group in concurrency group g with the given admission cost.
 - `func (g *JobGroup) Consumes(producer *JobNode, opts ...ConsumeOption) *JobGroup` -- Consumes stages the given producer's artifacts into every member's workspace before it runs, and implies Needs(producer) on each.
 - `func (g *JobGroup) ContinueOnError() *JobGroup` -- ContinueOnError marks every member so downstream dependents proceed even on failure.
+- `func (g *JobGroup) Cores(cores float64) *JobGroup` -- Cores sets the core request on every member.
 - `func (g *JobGroup) Env(key, value string, opts ...EnvOption) *JobGroup` -- Env applies the same startup/body distinction to all members.
 - `func (g *JobGroup) Inline() *JobGroup` -- Inline places every member on the dispatcher's host.
 - `func (g *JobGroup) Members() []*JobNode` -- Members returns the group's jobs in declaration order.
@@ -557,6 +558,7 @@ type JobNode struct {
 - `func (n *JobNode) Concurrency(g *ConcurrencyGroup, cost ...int) *JobNode` -- Concurrency enrolls the node in concurrency group g with the given admission cost (default 1).
 - `func (n *JobNode) Consumes(producer *JobNode, opts ...ConsumeOption) *JobNode` -- Consumes declares that this node stages the artifacts produced by producer into its workspace before it runs, and implies Needs(producer).
 - `func (n *JobNode) ContinueOnError() *JobNode` -- ContinueOnError tells the orchestrator that downstream dependents should proceed even when this node fails.
+- `func (n *JobNode) Cores(cores float64) *JobNode` -- Cores sets the CPU this job asks local admission to reserve while it runs.
 - `func (n *JobNode) Env(key, value string, opts ...EnvOption) *JobNode` -- Env defaults to body scope; startup declarations take effect before attempt process creation.
 - `func (n *JobNode) Generate(fn GenerateFn) *Generator` -- Generate declares an expansion after source success or memo reuse; the host owns acceptance.
 - `func (n *JobNode) ID() string`

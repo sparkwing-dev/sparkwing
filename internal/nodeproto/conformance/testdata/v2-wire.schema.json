@@ -307,6 +307,12 @@
         "failure": {
           "$ref": "#/$defs/JobFailure"
         },
+        "features": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
         "id": {
           "type": "string"
         },

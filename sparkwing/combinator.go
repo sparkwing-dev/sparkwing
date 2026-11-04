@@ -89,6 +89,14 @@ func (g *JobGroup) NoProgressTimeout(d time.Duration) *JobGroup {
 	return g
 }
 
+// Cores sets the core request on every member. See [JobNode.Cores].
+func (g *JobGroup) Cores(cores float64) *JobGroup {
+	for _, m := range g.Members() {
+		m.Cores(cores)
+	}
+	return g
+}
+
 // Verify registers a postcondition check on every member. See [JobNode.Verify].
 func (g *JobGroup) Verify(fn VerifyFn) *JobGroup {
 	for _, m := range g.Members() {

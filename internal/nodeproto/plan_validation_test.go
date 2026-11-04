@@ -137,6 +137,20 @@ func TestValidatePlanValuesAndCapabilities(t *testing.T) {
 	checkPlan(t, `{"jobs":[]}`, context, apierr.PlanInvalid)
 }
 
+func TestValidatePlanJobCores(t *testing.T) {
+	plan := checkPlan(t, `{"jobs":[{"id":"a","cores":0.25,"steps":[{"id":"s"}]},{"id":"b","cores":6,"steps":[{"id":"s"}]}]}`, planContext(), "")
+	if *plan.Jobs[0].Cores != 0.25 || *plan.Jobs[1].Cores != 6 {
+		t.Fatalf("cores = %v, %v, want 0.25 and 6", *plan.Jobs[0].Cores, *plan.Jobs[1].Cores)
+	}
+	for name, raw := range map[string]string{
+		"below the floor": `{"jobs":[{"id":"a","cores":0.1,"steps":[{"id":"s"}]}]}`,
+		"zero":            `{"jobs":[{"id":"a","cores":0,"steps":[{"id":"s"}]}]}`,
+		"on an approval":  `{"jobs":[{"id":"a","cores":1,"approval":{}}]}`,
+	} {
+		t.Run(name, func(t *testing.T) { checkPlan(t, raw, planContext(), apierr.PlanInvalid) })
+	}
+}
+
 func TestApprovalConcurrencyRefusedAtAcceptance(t *testing.T) {
 	for _, placement := range []Placement{PlacementLocal, PlacementLocalTriggered, PlacementRunnerHosted, PlacementLauncher, PlacementHere, PlacementGitHubActions} {
 		for _, expansion := range []bool{false, true} {
@@ -160,8 +174,8 @@ func TestApprovalConcurrencyRefusedAtAcceptance(t *testing.T) {
 
 func TestPlanCapabilityLaunchParity(t *testing.T) {
 	rows := capabilityTable()
-	if len(rows) != 35 {
-		t.Fatalf("capability rows = %d, want 35", len(rows))
+	if len(rows) != 36 {
+		t.Fatalf("capability rows = %d, want 36", len(rows))
 	}
 	seen := map[planCapability]bool{}
 	for _, row := range rows {

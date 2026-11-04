@@ -4829,6 +4829,10 @@ components:
             - type: "null"
         continue_on_error:
           type: boolean
+        cores:
+          anyOf:
+            - type: number
+            - type: "null"
         deps:
           anyOf:
             - items:
@@ -5484,6 +5488,8 @@ components:
                 $ref: '#/components/schemas/internal.runspec.Concurrency'
               type: array
             - type: "null"
+        cores:
+          type: number
         memo_ttl:
           $ref: '#/components/schemas/internal.runspec.Setting.time.Duration.'
         no_progress_timeout:

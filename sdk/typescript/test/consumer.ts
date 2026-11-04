@@ -51,6 +51,7 @@ job
   .retry(0, { backoffMs: 0 })
   .timeout(0)
   .noProgressTimeout(0)
+  .cores(0.5)
   .concurrency(group)
   .requires("os=linux")
   .prefers("fast")
