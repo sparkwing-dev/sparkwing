@@ -749,7 +749,10 @@ const productTestHomeVar = "SPARKWING_HOME"
 // as a variable those tests read, so only a rerun of the same tree replays.
 const productTestRepoStateVar = "SPARKWING_TEST_REPO_STATE"
 
-const productTestRepoState = `"$(git rev-parse -q --verify 'HEAD^{tree}')-$(git diff HEAD | git hash-object --stdin)-$(git ls-files -o --exclude-standard | git hash-object --stdin)"`
+// safety: a checkout without commits has no HEAD, so git's complaints are
+// dropped rather than mixed into the step's failure output. Untracked files
+// count by name and content, because an edit to one is a change too.
+const productTestRepoState = `"$(git rev-parse -q --verify 'HEAD^{tree}')-$(git diff HEAD 2>/dev/null | git hash-object --stdin)-$({ git ls-files -o --exclude-standard; git ls-files -o --exclude-standard -z | xargs -0 -r git hash-object --; } 2>/dev/null | git hash-object --stdin)"`
 
 func productTestPins(home string) []string {
 	return []string{productTestHomeVar + "=" + shellQuote(home), productTestRepoStateVar + "=" + productTestRepoState}

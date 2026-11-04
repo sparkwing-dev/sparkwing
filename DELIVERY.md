@@ -745,10 +745,11 @@ file. Other syntax and workflow checks remain active.
   checkout and step under `$TMPDIR` and empty it before and after each run, so
   `go test` can replay a passing package that reads the home; a fresh path per
   run defeated its cache. Every product test step also pins
-  `SPARKWING_TEST_REPO_STATE` (HEAD's tree plus a hash of uncommitted and
-  untracked changes), which the pipeline module's `TestMain` reads: go test
-  never hashes files above the module, so without it a change to `.github/` or
-  `bin/` would replay that module's cached pass. A gate runs inside a sparkwing node, which hands its children the
+  `SPARKWING_TEST_REPO_STATE` (HEAD's tree plus a hash of uncommitted changes
+  and of untracked files' names and contents), which the pipeline module's
+  `TestCheckoutStateKeysTheTestCache` reads: go test never hashes files above
+  the module and records a variable only while a test runs, so without it a
+  change to `.github/` or `bin/` would replay that module's cached pass. A gate runs inside a sparkwing node, which hands its children the
   machine's admission socket, the dispatcher's service URLs and the run's own
   credentials, so a suite that read one would reach a live service and fail
   only under the gate. The node consumes its WorkStep window before the body

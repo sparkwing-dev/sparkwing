@@ -96,4 +96,8 @@ func TestReadsCheckoutState(t *testing.T) { _ = os.Getenv("`+productTestRepoStat
 	if out := run(); strings.Contains(out, "(cached)") {
 		t.Fatalf("a changed checkout replayed a cached pass:\n%s", out)
 	}
+	writeGoFile(t, filepath.Join(root, "outside.yaml"), "changed: again\n")
+	if out := run(); strings.Contains(out, "(cached)") {
+		t.Fatalf("an edited untracked file replayed a cached pass:\n%s", out)
+	}
 }
