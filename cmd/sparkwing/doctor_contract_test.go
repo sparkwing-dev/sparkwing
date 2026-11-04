@@ -267,3 +267,15 @@ func sameDoctorFindings(got []doctorFinding, want []localhostwire.LocalDoctorFin
 	}
 	return true
 }
+
+func TestDoctorNamesIgnoredRunnerLabels(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	if err := os.WriteFile(path, []byte("runner:\n  labels: [host=moonborn, location=local]\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("SPARKWING_CONFIG", path)
+	findings := ignoredLabelFindings()
+	if len(findings) != 1 || findings[0].Code != "runner_label_ignored" || !strings.Contains(findings[0].Message, path+": runner.labels: line 2: \"location=local\"") || !strings.Contains(findings[0].Message, "has no effect") {
+		t.Fatalf("findings = %+v", findings)
+	}
+}

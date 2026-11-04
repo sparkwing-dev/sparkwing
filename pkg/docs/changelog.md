@@ -44,6 +44,8 @@ unlock.
 - **CLI (Breaking):** `--sw-run-handle-file` writes an identity-only handle without `status`
   The handle recorded `"status":"pending"` at intake and kept it after the run finished, so a reader polling it saw a run that never ended. The handle is a write-once identity: it now holds only `schema_version`, `run_id` and `pipeline`. Read `run_id` and query `sparkwing runs status --run RUN_ID` for the current state. See the [migration guide](docs/migrations/_unreleased.md#run-handle-files-carry-no-status).
 - **scaffold:** `const FallbackSDKVersion` pins v0.68.6, so a fresh scaffold compiles against that release.
+- **config:** `runner.labels` applies to the machine's own local `sparkwing run` work
+  Local runs reported only their account and platform, so a job requiring a custom label such as `host=moonborn` waited forever on the machine that listed it. The local controller now reads `runner.labels` when it starts and reports them for its background claims, the foreground run owner and the owner's own job execution; `sparkwing daemon restart --force` picks up an edit. Labels stay preferences and never grant pools, reserved secrets, trust or repository scope. Labels naming a granted fact (`local`, `name=`, `class=`, `location=`, `team=`, `pool=`) have no effect: the daemon logs a warning at start and `sparkwing doctor` reports each with its file and line. Blank labels are refused. `os=` and `arch=` never override the observed platform. A waiting local job's detail names the `runner.labels` remedy. See [Runner labels](docs/machine-config.md#runner-labels).
 
 ### Fixed
 
@@ -94,6 +96,13 @@ unlock.
   A local run whose job required runner labels the machine running it does not report, such as `Requires("host=build-box")` on a laptop, left the job `pending` with an empty detail for as long as the run lived, because only that machine ever executes a local run's jobs. `runs status` (pretty and JSON `status_detail`) and the dashboard now say the job waits on those labels, list the labels the machine reports, and say to cancel the run and start it where the labels apply or change the job's requirements.
 - **CLI:** `sparkwing update` caches the version policy local runs read, and doctor reports it
   Every local run warned that no verified version policy was cached, because local runs never fetch it and the commands that did kept it in `~/.cache/sparkwing/engines` while local runs read `<sparkwing home>/engines`. Engine releases and the policy now share `<sparkwing home>/engines`; previously cached engines download again once. `sparkwing update` refreshes the signed policy there and reports it as `version_policy`. `update --dry-run` and `doctor` report the cached policy's status, latest release, publication time and age without writing anything, and the local-run warning now says to run `sparkwing update`. Local runs stay offline.
+### Changed
+
+- **CLI (Breaking):** `--sw-run-handle-file` writes an identity-only handle without `status`
+  The handle recorded `"status":"pending"` at intake and kept it after the run finished, so a reader polling it saw a run that never ended. The handle is a write-once identity: it now holds only `schema_version`, `run_id` and `pipeline`. Read `run_id` and query `sparkwing runs status --run RUN_ID` for the current state. See the [migration guide](docs/migrations/_unreleased.md#run-handle-files-carry-no-status).
+- **scaffold:** `const FallbackSDKVersion` pins v0.68.6, so a fresh scaffold compiles against that release.
+- **config:** `runner.labels` applies to the machine's own local `sparkwing run` work
+  Local runs reported only their account and platform, so a job requiring a custom label such as `host=moonborn` waited forever on the machine that listed it. The local controller now reads `runner.labels` when it starts and reports them for its background claims, the foreground run owner and the owner's own job execution; `sparkwing daemon restart --force` picks up an edit. Labels stay preferences and never grant pools, reserved secrets, trust or repository scope. Labels naming a granted fact (`local`, `name=`, `class=`, `location=`, `team=`, `pool=`) have no effect: the daemon logs a warning at start and `sparkwing doctor` reports each with its file and line. Blank labels are refused. `os=` and `arch=` never override the observed platform. A waiting local job's detail names the `runner.labels` remedy. See [Runner labels](docs/machine-config.md#runner-labels).
 
 ## [v0.68.6] - 2026-11-03
 ### Fixed

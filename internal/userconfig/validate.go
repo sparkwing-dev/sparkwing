@@ -92,7 +92,11 @@ func validURL(raw string) bool {
 
 func validateRunner(r RunnerConfig) error {
 	for _, label := range r.Labels {
-		if strings.HasPrefix(strings.TrimSpace(label), "sparkwing-") {
+		label = strings.TrimSpace(label)
+		switch {
+		case label == "":
+			return Invalid("runner.labels", "labels must not be blank")
+		case strings.HasPrefix(label, "sparkwing-"):
 			return Invalid("runner.labels", "labels beginning with sparkwing- belong to Sparkwing Cloud; use another prefix for self-hosted, personal or pool runners")
 		}
 	}

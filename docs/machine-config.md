@@ -48,6 +48,7 @@ runner:
   repos: [github.com/acme/app]
   max_concurrent: 2
   holder_prefix: desk
+  labels: [host=desk, gpu]
   local_admission: true
 cache:
   max_bytes: 4GiB
@@ -84,6 +85,29 @@ controller supplies the runner identity and claim holder for each award.
 Controller-backed concurrency uses this persisted machine identity for box
 scope, independently of `machine.box_id` and `runner.local_admission`. A local
 controller uses its persisted local peer identity in its private store.
+
+## Runner labels
+
+`runner.labels` lists custom labels this machine reports for job placement,
+such as `host=desk` or `gpu`. They apply to everything the machine runs: work
+an enrolled runner claims from a controller, and the machine's own local
+`sparkwing run` work. A job with `Requires("host=desk")` runs locally on a
+machine whose configuration lists `host=desk`, and waits on any other machine
+with a status detail naming the missing label.
+
+Labels are matching preferences the machine reports about itself. They never
+grant pools, reserved secrets, trust or repository scope; those come from the
+machine's credentials and the team's access rules. A label that names a granted
+fact (`name=`, `class=`, `location=`, `team=`, `pool=` or `local`) has no
+effect: matching uses the granted value instead. The daemon logs a warning for
+each one when it starts, and `sparkwing doctor` reports it with its file and
+line. Validation refuses a blank label and the `sparkwing-` prefix reserved for
+Sparkwing Cloud. `os=` and `arch=` labels are accepted but never override the
+platform the machine observes.
+
+The local controller reads `runner.labels` when it starts. After changing them,
+run `sparkwing daemon restart --force` so local runs report the new labels. An
+enrolled runner reads them when its service starts.
 
 ## Permissions and writes
 

@@ -22,6 +22,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
 	"github.com/sparkwing-dev/sparkwing/internal/paths"
 	"github.com/sparkwing-dev/sparkwing/internal/runners"
+	"github.com/sparkwing-dev/sparkwing/internal/userconfig"
 	"github.com/sparkwing-dev/sparkwing/internal/web"
 	"github.com/sparkwing-dev/sparkwing/internal/wingd"
 	wingdclient "github.com/sparkwing-dev/sparkwing/internal/wingd/client"
@@ -140,7 +141,13 @@ func bindLocalController(ctx context.Context, b localcontroller.Binding) (_ loca
 			err = errors.Join(err, objects.Close())
 		}
 	}()
-	claimant, err := localcontroller.NewClaimant(b.Store)
+	var machineRunner userconfig.RunnerConfig
+	configPath, _, err := userconfig.ReadDefault(userconfig.Runner, &machineRunner)
+	if err != nil {
+		return localcontroller.Services{}, err
+	}
+	warnIgnoredRunnerLabels(configPath)
+	claimant, err := localcontroller.NewClaimant(ctx, b.Store, machineRunner.Labels)
 	if err != nil {
 		return localcontroller.Services{}, err
 	}
@@ -245,4 +252,14 @@ func composeLocalServices(ctx context.Context, config wingd.LocalRuntimeConfig, 
 		return wingdclient.MintDashboardLogin(ctx, home)
 	}
 	return result, nil
+}
+
+func warnIgnoredRunnerLabels(path string) {
+	ignored, err := userconfig.IgnoredRunnerLabels(path)
+	if err != nil {
+		slog.Warn("could not inspect runner.labels", "err", err)
+	}
+	for _, label := range ignored {
+		slog.Warn(label.String())
+	}
 }

@@ -153,6 +153,11 @@ sparkwing runners add --runner gpu-box --profile prod --label gpu-x --repos gith
 Provide an independent account session on stdin. Start an existing matching
 runner if one is already enrolled.
 
+A local `sparkwing run` executes its jobs only on the machine that started it.
+List a job's custom labels under `runner.labels` in that machine's
+[configuration](machine-config.md#runner-labels) and run
+`sparkwing daemon restart --force` so its local runs report them.
+
 New metered claims account for billable time that begins during issuance when
 computing the funded lease bound.
 

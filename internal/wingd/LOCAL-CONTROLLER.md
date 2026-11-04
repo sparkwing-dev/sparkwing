@@ -75,7 +75,8 @@ the API. Pipeline spawning and machine admission remain native-host checks.
 `NewClaimant` captures the process's kernel account. Its bearer provider uses
 shared peer authentication and credential delegation. Its enrollment resolver
 accepts only that authenticated local account in `DefaultTeam`, and supplies
-the machine's CPU count, OS and architecture. Ambient runner names and tokens
+the machine's CPU count, OS and architecture, plus the `runner.labels` the
+machine configuration listed when the controller started. Ambient runner names and tokens
 cannot select the account. Cleanup revokes the delegated queue credential.
 The store authenticates the verified peer for default-team reads. That peer has
 no persisted authority reference for delegation, so production queue startup

@@ -5,7 +5,9 @@ import (
 	"encoding/hex"
 	"errors"
 	"path/filepath"
+	"reflect"
 	"runtime"
+	"slices"
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
@@ -29,7 +31,7 @@ func FuzzClaimantIdentityIgnoresAmbientInput(f *testing.F) {
 				t.Error(err)
 			}
 		}()
-		claimant, err := NewClaimant(s)
+		claimant, err := NewClaimant(t.Context(), s, nil)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -86,4 +88,48 @@ func FuzzLocalClaimProfileRequiresCapturedAccount(f *testing.F) {
 			t.Fatalf("verified account lost its machine facts: %+v: %v", profile, err)
 		}
 	})
+}
+
+func TestLocalClaimProfileAddsConfiguredLabelsWithoutAuthority(t *testing.T) {
+	p := capability.Principal{
+		Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: "claimant"},
+		Capability: capability.Capability{
+			Prefix: "claimant", Team: string(store.DefaultTeam), Audience: capability.Controller,
+			Subject: capability.Subject{Kind: capability.SubjectLocal, ID: "local:verified"},
+		},
+	}
+	s, err := teststore.OpenExisting(t, filepath.Join(t.TempDir(), "state.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := s.Close(); err != nil {
+			t.Error(err)
+		}
+	})
+	withLabels, err := NewClaimant(t.Context(), s, []string{"host=moonborn", "pool=prod", "name=other", "location=cloud", "local", "gpu"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := withLabels.Close(); err != nil {
+			t.Error(err)
+		}
+	})
+	p.Capability.Subject.ID = withLabels.subject
+	bare, err := (&Claimant{subject: withLabels.subject}).ResolveClaimProfile(t.Context(), p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	profile, err := withLabels.ResolveClaimProfile(t.Context(), p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(profile.Labels, []string{"host=moonborn", "gpu"}) {
+		t.Fatalf("labels = %v", profile.Labels)
+	}
+	profile.Labels = nil
+	if !reflect.DeepEqual(profile, bare) {
+		t.Fatalf("labels changed granted facts: %+v != %+v", profile, bare)
+	}
 }

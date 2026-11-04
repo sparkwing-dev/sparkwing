@@ -167,11 +167,11 @@ func TestLocalControllerTwoJobProcessesUseIndependentAwards(t *testing.T) {
 	t.Setenv("SPARKWING_CONFIG", filepath.Join(t.TempDir(), "config.yaml"))
 	var b Binding
 	var claimant *Claimant
-	c := openFixture(t, func(_ context.Context, binding Binding) (Services, error) {
+	c := openFixture(t, func(ctx context.Context, binding Binding) (Services, error) {
 		b = binding
 		services := serviceFixture(binding)
 		var err error
-		claimant, err = NewClaimant(binding.Store)
+		claimant, err = NewClaimant(ctx, binding.Store, nil)
 		if err != nil {
 			t.Fatal(err)
 		}
