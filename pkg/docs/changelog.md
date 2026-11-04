@@ -29,6 +29,10 @@ unlock.
 - **sdk:** `sparkwing pipeline new` no longer downloads the controller's dependencies
   `go mod tidy` in a new pipeline fetched 80 modules (611 MB) through SDK test imports; it now fetches 5.
 - **install:** `install.sh` downloads a release's files in one connection-reusing `curl` call
+- **cache:** The pipeline binary key records the compilers `PATH` resolves to instead of `PATH` itself
+  Activating a virtualenv or Node version manager keeps the compiled pipeline; upgrading Go behind the same `PATH`
+  rebuilds it.
+- **run:** Each engine notice, such as the missing version policy warning, prints once per command instead of three times
 
 ### Fixed
 
