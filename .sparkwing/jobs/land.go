@@ -333,6 +333,10 @@ type landTarget struct {
 
 type mergeRecheck func(ctx context.Context, files []string) error
 
+// safety: a refusal because main moved sends land back to merge; any other
+// push failure ends the land.
+type errMainMoved struct{ error }
+
 // perf: main's own commits passed their land, and the gate and review judged
 // this branch, so a clean merge re-checks only the files the merge changed
 // The review covers the branch's diff and is not run again.
@@ -444,10 +448,6 @@ func recheckMergeDelta(ctx context.Context, files []string) error {
 func landPushArgs(commit string) []string {
 	return []string{"push", landBaseRemote, commit + ":refs/heads/" + landBaseBranch}
 }
-
-// safety: a refusal because main moved sends land back to merge; any other
-// push failure ends the land.
-type errMainMoved struct{ error }
 
 func pushLanding(ctx context.Context, git gitRunner, dir, commit string) error {
 	out, err := git(ctx, landPushArgs(commit)...)
