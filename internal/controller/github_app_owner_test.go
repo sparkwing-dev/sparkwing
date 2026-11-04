@@ -263,14 +263,14 @@ func TestGitHubAppAutomationListingReadsAContinuationPage(t *testing.T) {
 	}
 	var first struct {
 		Automation []controllerwire.GitHubAppAutomation `json:"automation"`
-		NextCursor string                                `json:"next_cursor"`
+		NextCursor string                               `json:"next_cursor"`
 	}
 	if code := f.call("GET", "/api/v1/team/github-app/automation?limit=1", olga.auth, nil, &first); code != http.StatusOK || len(first.Automation) != 1 || first.NextCursor == "" {
 		t.Fatalf("first page = %d %+v, want one row and a continuation", code, first)
 	}
 	var second struct {
 		Automation []controllerwire.GitHubAppAutomation `json:"automation"`
-		NextCursor string                                `json:"next_cursor"`
+		NextCursor string                               `json:"next_cursor"`
 	}
 	if code := f.call("GET", "/api/v1/team/github-app/automation?limit=1&cursor="+url.QueryEscape(first.NextCursor), olga.auth, nil, &second); code != http.StatusOK || len(second.Automation) != 1 || second.NextCursor != "" {
 		t.Fatalf("continuation page = %d %+v, want the last row", code, second)
