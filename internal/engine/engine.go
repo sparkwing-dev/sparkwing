@@ -44,6 +44,7 @@ type VerifiedRelease struct {
 	target  releaseasset.Target
 	asset   releaseasset.Verified
 	bundle  ReleaseBundle
+	keys    []ed25519.PublicKey
 }
 
 // Config supplies machine-owned storage and transport, never repository-selected trust roots or URLs.
@@ -66,6 +67,7 @@ type Resolver struct {
 	indexErr  error
 	notice    sync.Once
 	command   func(context.Context, string, string, ...string) error
+	installed func() (string, error)
 }
 
 // Restriction carries signed notice and enforcement dates; an empty Version means no restriction.

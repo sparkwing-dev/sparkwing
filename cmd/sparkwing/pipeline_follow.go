@@ -23,7 +23,7 @@ func triggeredRunOutcome(ctx context.Context, reader controllerwire.RunReader, r
 	if out == nil {
 		out = io.Discard
 	}
-	if err := writeEngineNotices(out, detail.Notices); err != nil {
+	if err := writeEngineNoticesOnce(out, detail.Notices); err != nil {
 		return "", err
 	}
 	if detail.Status != "success" {

@@ -60,3 +60,30 @@ func TestGoCommandsRequireExplicitInputs(t *testing.T) {
 		t.Fatalf("compiler ignored cancellation: %v", err)
 	}
 }
+
+func TestCacheKeyFollowsCompilersNotPath(t *testing.T) {
+	dir := newPipelineDir(t)
+	bin := t.TempDir()
+	tool := filepath.Join(bin, "go")
+	if err := os.WriteFile(tool, []byte("#!/bin/sh\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	key := func(path string) string {
+		t.Helper()
+		k, _, err := ExplainCacheKey(dir, []string{"PATH=" + path, "GOWORK=off"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return k
+	}
+	first := key(bin)
+	if other := key(t.TempDir() + string(filepath.ListSeparator) + bin); other != first {
+		t.Fatal("a PATH entry without a compiler changed the pipeline cache key")
+	}
+	if err := os.WriteFile(tool, []byte("#!/bin/sh\n# upgraded\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if other := key(bin); other == first {
+		t.Fatal("replacing go behind an unchanged PATH kept the pipeline cache key")
+	}
+}
