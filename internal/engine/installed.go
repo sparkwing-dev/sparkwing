@@ -9,6 +9,7 @@ import (
 	"io"
 	"os"
 	"runtime"
+	"sync"
 
 	"github.com/sparkwing-dev/sparkwing/internal/engineid"
 	"github.com/sparkwing-dev/sparkwing/internal/releaseasset"
@@ -45,18 +46,45 @@ func installedEngine(ctx context.Context, pin engineid.Pin, target releaseasset.
 	if err != nil {
 		return Resolved{}, err
 	}
-	file, err := os.Open(path)
+	digest, err := executableDigest(ctx, path)
 	if err != nil {
 		return Resolved{}, err
 	}
-	hash := sha256.New()
-	_, readErr := io.Copy(hash, file)
-	if err := errors.Join(readErr, file.Close(), ctx.Err()); err != nil {
-		return Resolved{}, err
-	}
-	digest := hex.EncodeToString(hash.Sum(nil))
 	return Resolved{
 		Identity: engineid.Identity{Pin: pin, Version: version, ManifestDigest: digest}, Target: target, AssetDigest: digest, Executable: path,
 		Notices: []engineid.Notice{{Kind: engineid.NoticePinDisabled, Version: version, Reason: "SDK replacement: engine pinning is off for this run; using the installed CLI's engine."}},
 	}, nil
+}
+
+var selfDigest struct {
+	sync.Mutex
+	info   os.FileInfo
+	digest string
+}
+
+// executableDigest hashes the running executable once per process while the file keeps its identity, size and
+// modification time.
+// perf: one local run resolves and verifies its replacement engine about eight times; each hash of a 100 MB
+// executable took 250 ms.
+func executableDigest(ctx context.Context, path string) (string, error) {
+	selfDigest.Lock()
+	defer selfDigest.Unlock()
+	info, err := os.Stat(path)
+	if err != nil {
+		return "", err
+	}
+	if previous := selfDigest.info; previous != nil && os.SameFile(previous, info) && previous.Size() == info.Size() && previous.ModTime().Equal(info.ModTime()) {
+		return selfDigest.digest, nil
+	}
+	file, err := os.Open(path)
+	if err != nil {
+		return "", err
+	}
+	hash := sha256.New()
+	_, readErr := io.Copy(hash, file)
+	if err := errors.Join(readErr, file.Close(), ctx.Err()); err != nil {
+		return "", err
+	}
+	selfDigest.info, selfDigest.digest = info, hex.EncodeToString(hash.Sum(nil))
+	return selfDigest.digest, nil
 }
