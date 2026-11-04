@@ -79,11 +79,8 @@ func gateJobs(plan *sparkwing.Plan, p *Gate, id string, full bool) []*sparkwing.
 	ref := provenGatePass(id)
 	p.Proven = ref
 	proven := skipWhenTreePassed(ref)
-	host := currentHost()
-	broad := sparkwing.Job(plan, id, p).Timeout(gateRunTimeout).Cache(lintCache()).SkipIf(proven).
-		Cores(float64(goStepParallelism(host)))
-	race := sparkwing.Job(plan, "race-touched", &raceTouchedJob{Proven: ref, mode: p.mode}).Timeout(raceTouchedStepTimeout).SkipIf(proven).
-		Cores(float64(max(gateRaceParallelism(host), 1)))
+	broad := sparkwing.Job(plan, id, p).Timeout(gateRunTimeout).Cache(lintCache()).SkipIf(proven)
+	race := sparkwing.Job(plan, "race-touched", &raceTouchedJob{Proven: ref, mode: p.mode}).Timeout(raceTouchedStepTimeout).SkipIf(proven)
 	record := &recordTree{Proven: ref, Gate: sparkwing.RefTo[bool](broad), Race: sparkwing.RefTo[bool](race), mode: p.mode}
 	tree := sparkwing.Job(plan, recordTreeJob, record).Needs(broad, race).SkipIf(proven).Cores(lightJobCores)
 	return []*sparkwing.JobNode{broad, race, tree}
@@ -119,12 +116,12 @@ func currentHost() hostShape {
 	return hostShape{cpus: runtime.NumCPU(), singleTenant: os.Getenv("CI") != ""}
 }
 
-// perf: two fifths of a shared machine, so the gate and race-touched jobs land
-// runs side by side each declare this as their core request and together fit in
-// the 80% local admission grants after its reserve; at 16 cores that is 6 each.
-// A single-tenant host holds nothing back for a neighbor it does not have.
+// perf: half the machine, so one gate cannot saturate a box another is
+// sharing. The shared form subtracts a CPU first and so collapses to one
+// thread at four, pinning a gate that reserved 2.5 cores to one of them. A
+// single-tenant host holds nothing back for a neighbor it does not have.
 func goStepParallelism(h hostShape) int {
-	parallelism := h.cpus * 2 / 5
+	parallelism := (h.cpus - 1) / 2
 	if h.singleTenant {
 		parallelism = h.cpus / 2
 	}

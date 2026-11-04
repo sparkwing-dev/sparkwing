@@ -43,20 +43,12 @@ func TestGateReservesAndBoundsItsCPU(t *testing.T) {
 	if got := time.Duration(nodes[0].TimeoutMS) * time.Millisecond; got != gateRunTimeout {
 		t.Fatalf("gate node timeout = %s, want declared workload deadline %s", got, gateRunTimeout)
 	}
-	if want := float64(goStepParallelism(currentHost())); nodes[0].Cores != want {
-		t.Fatalf("gate core request = %v, want its -p %v", nodes[0].Cores, want)
+	// perf: the gate and race-touched keep the one-core default; with their whole process tree counted as
+	// Sparkwing load they overcommit like fixed runner slots, which kept six lands no slower than before.
+	if nodes[0].Cores != 0 || nodes[1].Cores != 0 || nodes[2].Cores != lightJobCores {
+		t.Fatalf("core requests = %v %v %v, want default, default, %v", nodes[0].Cores, nodes[1].Cores, nodes[2].Cores, lightJobCores)
 	}
-	if want := float64(max(gateRaceParallelism(currentHost()), 1)); nodes[1].Cores != want {
-		t.Fatalf("race-touched core request = %v, want its -p %v", nodes[1].Cores, want)
-	}
-	if nodes[2].Cores != lightJobCores {
-		t.Fatalf("record-tree core request = %v, want %v", nodes[2].Cores, lightJobCores)
-	}
-	if shared := (hostShape{cpus: 16}); 2*goStepParallelism(shared) > 16*4/5 {
-		t.Fatalf("gate and race-touched ask for %d cores on 16, more than the 12.8 admission grants, so land would run them one at a time",
-			2*goStepParallelism(shared))
-	}
-	for _, tc := range []struct{ cpus, parallelism int }{{1, 1}, {2, 1}, {3, 1}, {4, 1}, {8, 3}, {14, 5}, {16, 6}} {
+	for _, tc := range []struct{ cpus, parallelism int }{{1, 1}, {2, 1}, {3, 1}, {4, 1}, {8, 3}, {14, 6}, {16, 7}} {
 		if got := goStepParallelism(hostShape{cpus: tc.cpus}); got != tc.parallelism {
 			t.Errorf("goStepParallelism(%d shared) = %d, want %d", tc.cpus, got, tc.parallelism)
 		}
@@ -66,7 +58,7 @@ func TestGateReservesAndBoundsItsCPU(t *testing.T) {
 			t.Errorf("goStepParallelism(%d single-tenant) = %d, want %d", tc.cpus, got, tc.parallelism)
 		}
 	}
-	if got := boundedGoCommand(hostShape{cpus: 14}, "test", "./..."); got != "GOMAXPROCS=5 go test -p 5 ./..." {
+	if got := boundedGoCommand(hostShape{cpus: 14}, "test", "./..."); got != "GOMAXPROCS=6 go test -p 6 ./..." {
 		t.Fatalf("shared bounded command = %q", got)
 	}
 	if got := boundedGoCommand(hostShape{cpus: 14, singleTenant: true}, "test", "./..."); got != "GOMAXPROCS=7 go test -p 7 ./..." {
