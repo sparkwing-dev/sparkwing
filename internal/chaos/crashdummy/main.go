@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"os/exec"
 	"os/signal"
 	"path/filepath"
 	"runtime"
@@ -127,8 +126,6 @@ type holdFlags struct {
 	burn        bool
 	dirty       bool
 	ignoreTerm  bool
-	parentToken string
-	children    int
 	daemonGrace int
 	daemonIdle  int
 	daemonCores float64
@@ -148,8 +145,6 @@ func runHold(args []string) {
 	fs.BoolVar(&hf.burn, "burn", false, "")
 	fs.BoolVar(&hf.dirty, "dirty", false, "")
 	fs.BoolVar(&hf.ignoreTerm, "ignore-term", false, "")
-	fs.StringVar(&hf.parentToken, "parent-token", "", "")
-	fs.IntVar(&hf.children, "children", 0, "")
 	fs.IntVar(&hf.daemonGrace, "daemon-grace-ms", 2000, "")
 	fs.IntVar(&hf.daemonIdle, "daemon-idle-ms", 4000, "")
 	fs.Float64Var(&hf.daemonCores, "daemon-total-cores", 8, "")
@@ -161,12 +156,11 @@ func runHold(args []string) {
 }
 
 type holder struct {
-	hf       holdFlags
-	mu       sync.Mutex
-	lease    *client.Lease
-	cl       *client.Client
-	children []*exec.Cmd
-	done     chan struct{}
+	hf    holdFlags
+	mu    sync.Mutex
+	lease *client.Lease
+	cl    *client.Client
+	done  chan struct{}
 }
 
 func (h *holder) run() {
@@ -200,7 +194,6 @@ func (h *holder) run() {
 	h.set(cl, lease)
 	announce(lease.Token)
 
-	h.spawnChildren(lease.Token)
 	if h.hf.burn {
 		go burnCPU(h.hf.cores)
 	}
@@ -219,9 +212,6 @@ func (h *holder) run() {
 }
 
 func (h *holder) request() wingwire.AdmissionRequest {
-	if h.hf.parentToken != "" {
-		return wingwire.AdmissionRequest{RunID: wingwire.HolderRef(h.hf.run), ParentLeaseToken: h.hf.parentToken}
-	}
 	req := wingwire.AdmissionRequest{
 		RunID:     wingwire.HolderRef(h.hf.run),
 		Resources: wingwire.HostResources{Cores: h.hf.cores, MemoryBytes: int64(h.hf.memMB) << 20},
@@ -292,7 +282,6 @@ func (h *holder) cleanExit() {
 	default:
 	}
 	close(h.done)
-	h.terminateChildren()
 	if h.hf.dirty {
 		os.Exit(1)
 	}
@@ -313,41 +302,6 @@ func (h *holder) installSignals() {
 			h.cleanExit()
 		}
 	}()
-}
-
-func (h *holder) spawnChildren(token string) {
-	childMS := h.hf.runMS
-	if childMS <= 0 {
-		childMS = 3000
-	}
-	for i := 0; i < h.hf.children; i++ {
-		self, err := os.Executable()
-		if err != nil {
-			return
-		}
-		cmd := procenv.HostCommand(self, "hold",
-			"--home", h.hf.home,
-			"--run", h.hf.run+"-c"+strconv.Itoa(i),
-			"--parent-token", token,
-			"--version", h.hf.version,
-			"--run-ms", strconv.Itoa(childMS),
-		)
-		if err := cmd.Start(); err == nil {
-			h.mu.Lock()
-			h.children = append(h.children, cmd)
-			h.mu.Unlock()
-			go func() { _ = cmd.Wait() }()
-		}
-	}
-}
-
-func (h *holder) terminateChildren() {
-	h.mu.Lock()
-	children := append([]*exec.Cmd(nil), h.children...)
-	h.mu.Unlock()
-	for _, child := range children {
-		_ = child.Process.Signal(syscall.SIGTERM)
-	}
 }
 
 func (h *holder) daemonSpawner() func(home, version string) error {

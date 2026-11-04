@@ -46,6 +46,11 @@ unlock.
 - **cli:** List this machine in `sparkwing runners list` against the local controller
   The local runner appeared only while it held a job, without its `runner.labels`, and with a `last_seen` that stopped at the last claim before a daemon restart. It is now always listed, named after the host, with the labels the daemon read at start and a `last_seen` of the read time.
 
+### Removed
+
+- **wingwire (Breaking):** `AdmissionRequest` drops `ParentLeaseToken`, `ParentRunID` and `ParentNodeID`, and the admission daemon no longer attaches a child run to its parent's lease
+  No Sparkwing client sent these fields. The daemon journal no longer records `child_attach_request` or `child_attach`.
+
 
 ## [v0.68.7] - 2026-11-04
 ### Added
