@@ -19,7 +19,21 @@ unlock.
 ---
 
 ## [Unreleased]
+### Added
+
+- **sdk:** `JobNode.Cores(n)`, `JobGroup.Cores(n)` and TypeScript `job.cores(n)` declare the CPU a job asks local admission to reserve
+  The default stays one core; requests go down to 0.25. The plan carries `cores` only to a host whose hello names the
+  new `job_cores` feature, so a pipeline using it still plans on an older host, which keeps the one-core charge.
+
 ### Changed
+
+- **daemon:** A job's own processes no longer count as external load
+  Node-host leases now carry the host process ID, so CPU used by a job's process tree counts as that job's, up to the
+  cores it was charged. Before, a gate running `go test -p 7` while charged one core showed all of its CPU as external
+  load and starved every other waiter.
+- **daemon:** A later local waiter starts before a blocked older one only when it cannot delay it
+  The `classic` mode allowed one backfill past a blocked head with no check; now every blocked waiter keeps the
+  capacity it needs at the headroom the machine offers now, and a smaller waiter goes first only within that.
 
 - **run:** A first run reuses the installed CLI as the pipeline engine when it is the pinned release
   The engine was downloaded again (73 MB) and verified twice; now the installed bytes are checked against the signed
