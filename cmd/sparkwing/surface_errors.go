@@ -13,7 +13,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/settings"
 	"github.com/sparkwing-dev/sparkwing/internal/userconfig"
-	"github.com/sparkwing-dev/sparkwing/pkg/color"
 	"github.com/sparkwing-dev/sparkwing/pkg/docs"
 )
 
@@ -76,7 +75,7 @@ func writeInvocationError(w io.Writer, err error, encode func(io.Writer, *apierr
 		guided.Hint = "Sign in again to the dashboard and create a replacement token, then run `sparkwing profiles set --profile " + quoted + " --token-stdin` and paste it on stdin"
 		failure = &guided
 	}
-	if inv.Output(color.IsInteractiveStdout()) == "json" {
+	if invocationOutput(inv) == "json" {
 		return encode(w, failure)
 	}
 	path := strings.TrimPrefix(inv.Command.Path, "sparkwing")

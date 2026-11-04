@@ -296,7 +296,7 @@ func (r exampleProbeRun) await(ctx context.Context, in ExampleInputs) (exampleRu
 func exampleStart(ctx context.Context, in ExampleInputs, token string, extra ...string) (exampleProbeRun, error) {
 	args := []string{"-C", sparkwing.WorkDir()}
 	if in.APIProfile == "" {
-		args = append(args, "run", "example-probe", "--sw-detached", "--sw-output", "plain")
+		args = append(args, "run", "example-probe", "--sw-detached", "-o", "plain")
 	} else {
 		args = append(args, "pipeline", "trigger", "example-probe", "--profile", in.APIProfile, "--detach", "-o", "plain")
 	}

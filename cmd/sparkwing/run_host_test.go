@@ -197,7 +197,7 @@ func TestLocalForegroundRunReportsCommittedOutcome(t *testing.T) {
 				return runtime, err
 			}
 			var out bytes.Buffer
-			flags, args := parseRunFlagsArgs([]string{"--sw-output=json", "--", "--password=private-value"})
+			flags, args := parseRunFlagsArgs([]string{"--output=json", "--", "--password=private-value"})
 			err := runLocalCommand(t.Context(), "ci", flags, args, &out, deps)
 			if (err == nil) != (outcome == "success" || outcome == "dry_run") {
 				t.Fatalf("outcome=%s error=%v", outcome, err)
@@ -251,7 +251,7 @@ func TestLocalForegroundRunOutputFailuresStayVisible(t *testing.T) {
 			t.Run(fmt.Sprintf("%s/%d", format, at), func(t *testing.T) {
 				var calls []string
 				out := localFailingEventWriter{at: at}
-				flags, args := parseRunFlagsArgs([]string{"--sw-output=" + format, "--", "--password=private-value"})
+				flags, args := parseRunFlagsArgs([]string{"--output=" + format, "--", "--password=private-value"})
 				err := runLocalCommand(t.Context(), "ci", flags, args, &out, localRuntimeFor(t, localTestAward(t), false, &calls))
 				if err == nil || !strings.Contains(err.Error(), "closed output") || !strings.Contains(err.Error(), "local-run") {
 					t.Fatalf("output failure was hidden: %v", err)
@@ -429,7 +429,7 @@ func localTestPreparation(t *testing.T, award controllerwire.ClaimedUnit) localR
 }
 
 func TestParsedLocalOutputSurvivesIntakeAndReceipt(t *testing.T) {
-	for _, option := range [][]string{{"-o", "plain"}, {"--output=plain"}, {"--sw-output=plain"}, nil} {
+	for _, option := range [][]string{{"-o", "plain"}, {"--output=plain"}, nil} {
 		t.Run(strings.Join(option, " "), func(t *testing.T) {
 			t.Setenv("SPARKWING_LOG_FORMAT", "plain")
 			flags, args := parseRunFlagsArgs(append(append([]string{"--sw-detached"}, option...), "--", "--password=private-value"))

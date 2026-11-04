@@ -59,7 +59,7 @@ interface ProbeRun { id: string; cleanup: CleanupRegistration }
 async function trigger(ctx: Context, token: string, ...args: string[]): Promise<ProbeRun> {
   const command = ctx.args["api-profile"]
     ? ["pipeline", "trigger", "example-probe", profile(ctx), "--detach", "-o", "plain"]
-    : ["run", "example-probe", "--sw-detached", "--sw-output", "plain"];
+    : ["run", "example-probe", "--sw-detached", "-o", "plain"];
   const id = (await cli(ctx, ...command, "--", "--token", token, "--cli", ctx.args["cli"] || "sparkwing", "--api-profile", ctx.args["api-profile"] || "", ...args)).trim();
   assert.match(id, /^[A-Za-z0-9_-]+$/, "trigger returned no plain run ID");
   return { id, cleanup: await trackRun(ctx, id) };

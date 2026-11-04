@@ -393,7 +393,7 @@ func Registry() []Command {
 			"Publication is one-way run/results/logs with local provenance; a publication failure never changes the local run verdict.",
 			"--agent NAME records the coding agent that starts the run on your behalf, such as claude-code:land-agent, and --agent none records none. Without the flag, SPARKWING_AGENT applies, then a detected coding-agent environment (Claude Code, Codex, Gemini CLI). The label is sealed with the request, kept by retries and publication, and shown in run views; it never grants or limits authority.",
 			"Cache-from reads only authorized verified-default-branch memo/artifacts/depcache; no shared writes or remote binary fetch.",
-			"--sw-output applies to foreground and detached runs; explicit --sw-output beats -o, then SPARKWING_LOG_FORMAT, then terminal detection.",
+			"-o applies to foreground and detached runs, their help and their errors; it beats SPARKWING_LOG_FORMAT, then terminal detection.",
 			"--sw-only keeps matching jobs and their dependencies. Other declared jobs are skipped. Recovery jobs and jobs added by generators retain their normal rules. --sw-start-at and --sw-stop-at select a window in each job containing the named steps. A job containing neither bound runs all its steps. Unknown step names fail before work starts. --sw-only cannot be combined with either step bound. All three selections are sealed at intake and survive resume and retry. Child pipelines resolve their own job and step selections because their jobs and steps have separate names.",
 			"--sw-allow-unadmitted selects standalone CI with an exclusive in-process local controller. Give it a private SPARKWING_HOME. Its admission queue and concurrency rules remain active; it does not join shared machine admission. The CLI joins controller shutdown before returning. Detached runs and Cloud routing cannot use this mode.",
 		}, Flags: []Flag{
@@ -409,7 +409,6 @@ func Registry() []Command {
 			{Name: "sw-workers", Argument: "N", Minimum: 1, HasMinimum: true, Conflicts: []string{"sw-detached"}, Meaning: "Positive foreground worker count; refused for detached runs."},
 			{Name: "sw-idempotency-key", Argument: "KEY", Requires: []string{"sw-detached"}},
 			{Name: "sw-request-id", Argument: "ID", Requires: []string{"sw-detached"}},
-			{Name: "sw-output", Argument: "FORMAT", Values: []string{"pretty", "json", "plain"}},
 			{Name: "sw-verbose", Short: "v"},
 			{Name: "sw-start-at", Argument: "STEP"},
 			{Name: "sw-stop-at", Argument: "STEP"},

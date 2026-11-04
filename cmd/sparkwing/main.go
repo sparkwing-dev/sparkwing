@@ -246,7 +246,7 @@ func runSparkwing(args []string) (result error) {
 	}
 	pipelineHelp := inv.Command.Path == "sparkwing run" && inv.Pipeline != ""
 	if inv.Help() && !pipelineHelp || inv.Command.Path != "sparkwing version" && len(childCommands(inv.Command.Path)) > 0 {
-		return writeCommandHelp(surfaceHelp(inv.Command), os.Stdout, inv.Output(color.IsInteractiveStdout()))
+		return writeCommandHelp(surfaceHelp(inv.Command), os.Stdout, invocationOutput(inv))
 	}
 	if err := applyConfiguredProfile(&inv); err != nil {
 		return err
@@ -277,7 +277,7 @@ func runSparkwing(args []string) (result error) {
 	// the notice inside its own document.
 	if verb := strings.Fields(inv.Command.Path)[1]; verb == "info" {
 		noteVersionTransition(os.Stderr, verb)
-	} else if inv.Output(color.IsInteractiveStdout()) != "json" {
+	} else if invocationOutput(inv) != "json" {
 		noticeVerb = verb
 	}
 	switch {

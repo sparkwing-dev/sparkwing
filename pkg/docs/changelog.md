@@ -35,6 +35,9 @@ unlock.
 
 ### Removed
 
+- **cli:** (Breaking) `sparkwing run --sw-output` is removed; use `-o`/`--output`
+  The two flags selected the same thing, and a run's help and errors read only `-o`, so `--sw-output json` could run in JSON and still fail in prose. `-o` now drives a run's output, help and errors, ahead of `SPARKWING_LOG_FORMAT` and terminal detection. Replace `--sw-output FORMAT` with `-o FORMAT`.
+
 - **docs:** `SPARKWING_DEBUG` is no longer listed as a setting
   Nothing read it, so setting it never changed SDK diagnostics. Its process-environment class goes with it.
 

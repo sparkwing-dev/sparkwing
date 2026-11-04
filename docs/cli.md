@@ -50,7 +50,7 @@ Runs a pipeline from the nearest pipeline directory. Engine controls precede
 `--`. All pipeline and job arguments follow it:
 
 ```bash
-sparkwing run deploy --sw-output json -- --environment staging
+sparkwing run deploy -o json -- --environment staging
 ```
 
 Unknown engine flags fail before execution setup. Local `run` accepts no
