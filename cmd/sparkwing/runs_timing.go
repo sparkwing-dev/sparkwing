@@ -50,15 +50,16 @@ type timingSpan struct {
 }
 
 type runTiming struct {
-	ID       string
-	Number   int64
-	Status   string
-	SHA      string
-	Rerun    bool
-	Wall     time.Duration
-	Phases   phaseDurations
-	Jobs     map[string]jobRunTiming
-	Failures []timingFailureKey
+	ID        string
+	Number    int64
+	Status    string
+	SHA       string
+	Rerun     bool
+	Wall      time.Duration
+	Phases    phaseDurations
+	Jobs      map[string]jobRunTiming
+	Failures  []timingFailureKey
+	StepShift time.Duration
 }
 
 type jobRunTiming struct {
@@ -92,6 +93,7 @@ type timingRunRecord struct {
 	RunningNS time.Duration `json:"running_ns"`
 	GapNS     time.Duration `json:"gap_ns"`
 	IdleNS    time.Duration `json:"idle_ns"`
+	ShiftNS   time.Duration `json:"step_clock_shift_ns"`
 }
 
 type timingSummaryRecord struct {
@@ -212,7 +214,7 @@ func observeRunsTiming(ctx context.Context, inv clisurface.Invocation, runs cont
 		}
 		timings = append(timings, measureRun(run, steps.Steps, events))
 	}
-	return writeRunsTiming(out, query.Pipeline, timings, inv.Output(color.IsInteractiveStdout()))
+	return writeRunsTiming(out, query.Pipeline, inv.Flags["job"], timings, inv.Output(color.IsInteractiveStdout()))
 }
 
 func readRunEvents(ctx context.Context, logs controllerwire.LogReader, run string) ([]controllerwire.LogRecord, error) {
@@ -258,10 +260,15 @@ func measureRun(run controllerwire.RunDetail, steps []controllerwire.StepDetail,
 	}
 	var spans []timingSpan
 	for _, job := range run.Jobs {
-		jobSpans := jobTimeline(byJob[job.ID], stepsByJob[job.ID], end)
+		jobSpans, shift := jobTimeline(byJob[job.ID], stepsByJob[job.ID], end)
 		spans = append(spans, jobSpans...)
-		if job.Outcome == "failed" || job.Outcome == "cancelled" && !contains([]string{"", "upstream_failed", "cancel_requested"}, job.Reason) {
-			for _, step := range failingSteps(stepsByJob[job.ID]) {
+		if shift < 0 {
+			shift = -shift
+		}
+		timing.StepShift = max(timing.StepShift, shift)
+		requested := run.CancelRequestedAt != nil || job.CancelRequestedAt != nil || cancelRequested(byJob[job.ID])
+		if job.Outcome == "failed" || job.Outcome == "cancelled" && !requested && job.Reason != "upstream_failed" {
+			for _, step := range failingSteps(stepsByJob[job.ID], job.Attempt) {
 				timing.Failures = append(timing.Failures, timingFailureKey{Job: job.ID, Step: step, Outcome: job.Outcome, Reason: job.Reason})
 			}
 		}
@@ -282,10 +289,63 @@ func measureRun(run controllerwire.RunDetail, steps []controllerwire.StepDetail,
 	return timing
 }
 
-func failingSteps(steps []controllerwire.StepDetail) []string {
+// safety: steps carry the runner's clock and events the store's, so a job's steps move by one offset into its window.
+func alignStepClock(steps []controllerwire.StepDetail, started, end time.Time) ([]controllerwire.StepDetail, time.Duration) {
+	var earliest, latest time.Time
+	for _, step := range steps {
+		if step.StartedAt == nil {
+			continue
+		}
+		if earliest.IsZero() || step.StartedAt.Before(earliest) {
+			earliest = *step.StartedAt
+		}
+		finish := *step.StartedAt
+		if step.FinishedAt != nil {
+			finish = *step.FinishedAt
+		}
+		if finish.After(latest) {
+			latest = finish
+		}
+	}
+	var shift time.Duration
+	switch {
+	case earliest.IsZero() || started.IsZero():
+	case earliest.Before(started):
+		shift = started.Sub(earliest)
+	case latest.After(end):
+		shift = max(end.Sub(latest), started.Sub(earliest))
+	}
+	if shift == 0 {
+		return steps, 0
+	}
+	moved := make([]controllerwire.StepDetail, len(steps))
+	for i, step := range steps {
+		moved[i] = step
+		if step.StartedAt != nil {
+			from := step.StartedAt.Add(shift)
+			moved[i].StartedAt = &from
+		}
+		if step.FinishedAt != nil {
+			to := step.FinishedAt.Add(shift)
+			moved[i].FinishedAt = &to
+		}
+	}
+	return moved, shift
+}
+
+func cancelRequested(events []controllerwire.LogRecord) bool {
+	for _, event := range events {
+		if event.Event == "job_cancel_requested" {
+			return true
+		}
+	}
+	return false
+}
+
+func failingSteps(steps []controllerwire.StepDetail, attempt int64) []string {
 	var failed []string
 	for _, step := range steps {
-		if step.Status == "failed" && !contains(failed, step.ID) {
+		if step.Status == "failed" && step.Attempt == attempt && !contains(failed, step.ID) {
 			failed = append(failed, step.ID)
 		}
 	}
@@ -295,7 +355,7 @@ func failingSteps(steps []controllerwire.StepDetail) []string {
 	return failed
 }
 
-func jobTimeline(events []controllerwire.LogRecord, steps []controllerwire.StepDetail, runEnd time.Time) []timingSpan {
+func jobTimeline(events []controllerwire.LogRecord, steps []controllerwire.StepDetail, runEnd time.Time) ([]timingSpan, time.Duration) {
 	sort.SliceStable(events, func(i, j int) bool { return events[i].LineNo < events[j].LineNo })
 	type change struct {
 		at    time.Time
@@ -324,11 +384,19 @@ func jobTimeline(events []controllerwire.LogRecord, steps []controllerwire.StepD
 		}
 	}
 	if len(changes) == 0 {
-		return nil
+		return nil, 0
 	}
 	if end.IsZero() || end.After(runEnd) {
 		end = runEnd
 	}
+	var started time.Time
+	for _, c := range changes {
+		if c.phase == phaseSetup {
+			started = c.at
+			break
+		}
+	}
+	steps, shift := alignStepClock(steps, started, end)
 	type interval struct{ from, to time.Time }
 	var ran []interval
 	cuts := []time.Time{end}
@@ -373,7 +441,7 @@ func jobTimeline(events []controllerwire.LogRecord, steps []controllerwire.StepD
 		}
 		spans = appendSpan(spans, timingSpan{from, to, phase})
 	}
-	return spans
+	return spans, shift
 }
 
 func overlay(spans []timingSpan, start, end time.Time) []timingSpan {
@@ -421,7 +489,13 @@ func spread(values []time.Duration) percentiles {
 	return percentiles{P50: rank(0.5), P90: rank(0.9), Max: sorted[len(sorted)-1]}
 }
 
-func summarizeTiming(pipeline string, timings []runTiming) (timingSummaryRecord, []timingJobRecord, []timingFailureRecord) {
+const timingTextRows = 20
+
+func selected(filter []string, job string) bool {
+	return len(filter) == 0 || contains(filter, job)
+}
+
+func summarizeTiming(pipeline string, jobFilter []string, timings []runTiming) (timingSummaryRecord, []timingJobRecord, []timingFailureRecord) {
 	summary := timingSummaryRecord{Kind: "summary", Pipeline: pipeline, Runs: len(timings)}
 	var walls []time.Duration
 	var phases [phaseCount][]time.Duration
@@ -454,6 +528,9 @@ func summarizeTiming(pipeline string, timings []runTiming) (timingSummaryRecord,
 			phases[phase] = append(phases[phase], d)
 		}
 		for id, job := range run.Jobs {
+			if !selected(jobFilter, id) {
+				continue
+			}
 			samples := jobs[id]
 			if samples == nil {
 				samples = &jobSamples{}
@@ -471,6 +548,9 @@ func summarizeTiming(pipeline string, timings []runTiming) (timingSummaryRecord,
 			}
 		}
 		for _, key := range run.Failures {
+			if !selected(jobFilter, key.Job) {
+				continue
+			}
 			record := failures[key]
 			if record == nil {
 				record = &timingFailureRecord{Kind: "failure", Job: key.Job, Step: key.Step, Outcome: key.Outcome, Reason: key.Reason}
@@ -515,8 +595,8 @@ func summarizeTiming(pipeline string, timings []runTiming) (timingSummaryRecord,
 	return summary, jobRecords, failureRecords
 }
 
-func writeRunsTiming(out io.Writer, pipeline string, timings []runTiming, format string) error {
-	summary, jobs, failures := summarizeTiming(pipeline, timings)
+func writeRunsTiming(out io.Writer, pipeline string, jobFilter []string, timings []runTiming, format string) error {
+	summary, jobs, failures := summarizeTiming(pipeline, jobFilter, timings)
 	switch format {
 	case "json":
 		enc := json.NewEncoder(out)
@@ -524,7 +604,7 @@ func writeRunsTiming(out io.Writer, pipeline string, timings []runTiming, format
 			p := run.Phases
 			if err := enc.Encode(timingRunRecord{
 				Kind: "run", Number: run.Number, ID: run.ID, Status: run.Status, Rerun: run.Rerun, WallNS: run.Wall,
-				QueueNS: p[phaseQueue], AdmitNS: p[phaseAdmit], Approval: p[phaseApproval], SetupNS: p[phaseSetup], RunningNS: p[phaseRunning], GapNS: p[phaseGap], IdleNS: p[phaseIdle],
+				QueueNS: p[phaseQueue], AdmitNS: p[phaseAdmit], Approval: p[phaseApproval], SetupNS: p[phaseSetup], RunningNS: p[phaseRunning], GapNS: p[phaseGap], IdleNS: p[phaseIdle], ShiftNS: run.StepShift,
 			}); err != nil {
 				return err
 			}
@@ -565,35 +645,48 @@ func writeRunsTiming(out io.Writer, pipeline string, timings []runTiming, format
 	if err := tw.Flush(); err != nil {
 		return err
 	}
+	var shifted time.Duration
+	for _, run := range timings {
+		shifted = max(shifted, run.StepShift)
+	}
+	if shifted > 0 {
+		fmt.Fprintf(out, "\nStep times use the runner's clock; some jobs' steps were moved up to %s to fit their job window.\n", fmtDur(shifted))
+	}
 	fmt.Fprintln(out, "\nEach run's wall splits into the most advanced phase any job was in; gap is a job between or after its steps, idle is no job active.")
 	fmt.Fprintln(out)
 	fmt.Fprintln(tw, "JOB\tRUNS\tFAIL\tRETRY\tWAIT\tSETUP\tRUNNING\tGAP\tTOTAL")
-	for _, job := range jobs {
+	for _, job := range jobs[:min(len(jobs), timingTextRows)] {
 		fmt.Fprintf(tw, "%s\t%d\t%d\t%d\t%s\t%s\t%s\t%s\t%s\n", job.Job, job.Runs, job.Failed, job.Retries, pair(job.Wait), pair(job.Setup), pair(job.Running), pair(job.Gap), pair(job.Total))
 	}
 	if err := tw.Flush(); err != nil {
 		return err
 	}
-	fmt.Fprintln(out, "\nJob columns are P50 / P90. Wait is ready to claimed (queue) plus claimed to started (admission and source checkout).")
+	if len(jobs) > timingTextRows {
+		fmt.Fprintf(out, "%d more jobs: select them with --job, or read every job with -o json.\n", len(jobs)-timingTextRows)
+	}
+	fmt.Fprintln(out, "\nJob columns are P50 / P90. Wait is queue (ready to claimed), admit (claimed to started: admission and source checkout) and approval.")
 	type longWait struct {
-		number       int64
-		job          string
-		queue, admit time.Duration
+		number                 int64
+		job                    string
+		queue, admit, approval time.Duration
 	}
 	var waits []longWait
 	for _, run := range timings {
 		for id, job := range run.Jobs {
-			waits = append(waits, longWait{run.Number, id, job.Phases[phaseQueue], job.Phases[phaseAdmit]})
+			if selected(jobFilter, id) {
+				waits = append(waits, longWait{run.Number, id, job.Phases[phaseQueue], job.Phases[phaseAdmit], job.Phases[phaseApproval]})
+			}
 		}
 	}
-	sort.Slice(waits, func(i, j int) bool { return waits[i].queue+waits[i].admit > waits[j].queue+waits[j].admit })
+	total := func(w longWait) time.Duration { return w.queue + w.admit + w.approval }
+	sort.Slice(waits, func(i, j int) bool { return total(waits[i]) > total(waits[j]) })
 	if len(waits) > 5 {
 		waits = waits[:5]
 	}
 	fmt.Fprintln(out, "\nLongest waits:")
-	fmt.Fprintln(tw, "RUN\tJOB\tQUEUE\tADMIT")
+	fmt.Fprintln(tw, "RUN\tJOB\tWAIT\tQUEUE\tADMIT\tAPPROVAL")
 	for _, w := range waits {
-		fmt.Fprintf(tw, "#%d\t%s\t%s\t%s\n", w.number, w.job, fmtDur(w.queue), fmtDur(w.admit))
+		fmt.Fprintf(tw, "#%d\t%s\t%s\t%s\t%s\t%s\n", w.number, w.job, fmtDur(total(w)), fmtDur(w.queue), fmtDur(w.admit), fmtDur(w.approval))
 	}
 	if err := tw.Flush(); err != nil {
 		return err
@@ -603,12 +696,18 @@ func writeRunsTiming(out io.Writer, pipeline string, timings []runTiming, format
 	}
 	fmt.Fprintln(out, "\nFailed jobs, grouped by job, failing step and reason:")
 	fmt.Fprintln(tw, "COUNT\tJOB\tSTEP\tOUTCOME\tREASON\tRUNS")
-	for _, f := range failures {
+	for _, f := range failures[:min(len(failures), timingTextRows)] {
 		numbers := make([]string, 0, min(len(f.Runs), 5))
 		for _, n := range f.Runs[:min(len(f.Runs), 5)] {
 			numbers = append(numbers, "#"+strconv.FormatInt(n, 10))
 		}
 		fmt.Fprintf(tw, "%d\t%s\t%s\t%s\t%s\t%s\n", f.Count, f.Job, dashIfEmpty(f.Step), f.Outcome, dashIfEmpty(f.Reason), strings.Join(numbers, " "))
 	}
-	return tw.Flush()
+	if err := tw.Flush(); err != nil {
+		return err
+	}
+	if len(failures) > timingTextRows {
+		fmt.Fprintf(out, "%d more failure groups: select jobs with --job, or read every group with -o json.\n", len(failures)-timingTextRows)
+	}
+	return nil
 }

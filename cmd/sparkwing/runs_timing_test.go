@@ -29,13 +29,15 @@ func timingFixture() (controllerwire.RunDetail, []controllerwire.StepDetail, []c
 	run.Inputs.Pipeline, run.Inputs.Git.SHA = "check", "abc"
 	run.Jobs = []controllerwire.JobDetail{
 		{ID: "build", Outcome: "success"},
-		{ID: "test", Outcome: "failed", Reason: "sdk_error"},
+		{ID: "test", Outcome: "failed", Reason: "sdk_error", Attempt: 2},
+		{ID: "notify", Outcome: "cancelled", Reason: "user_cancelled", CancelRequestedAt: at(79)},
 		{ID: "deploy", Outcome: "cancelled", Reason: "upstream_failed"},
 	}
 	run.Attempts = []controllerwire.AttemptDetail{{JobID: "build", Attempt: 1}, {JobID: "test", Attempt: 1}, {JobID: "test", Attempt: 2}}
 	steps := []controllerwire.StepDetail{
 		{JobID: "build", ID: "compile", Attempt: 1, Status: "passed", StartedAt: at(46), FinishedAt: at(50)},
 		{JobID: "build", ID: "package", Attempt: 1, Status: "passed", StartedAt: at(51), FinishedAt: at(60)},
+		{JobID: "test", ID: "lint", Attempt: 1, Status: "failed", StartedAt: at(63.5), FinishedAt: at(63.6)},
 		{JobID: "test", ID: "unit", Attempt: 2, Status: "failed", StartedAt: at(64), FinishedAt: at(78)},
 	}
 	events := []controllerwire.LogRecord{
@@ -66,7 +68,7 @@ func TestRunTimingPartitionsEveryJobAndTheWall(t *testing.T) {
 		t.Fatalf("build phases %v total %v", build.Phases, build.Total)
 	}
 	test := got.Jobs["test"]
-	if test.Phases.sum() != test.Total || test.Total != 17*time.Second || test.Attempts != 2 || test.Phases[phaseRunning] != 14*time.Second {
+	if test.Phases.sum() != test.Total || test.Total != 17*time.Second || test.Attempts != 2 || test.Phases[phaseRunning] != 14100*time.Millisecond {
 		t.Fatalf("test timing %+v", test)
 	}
 	if _, ok := got.Jobs["deploy"]; ok {
@@ -154,7 +156,7 @@ func TestRunsTimingReadsFinishedRunsAndEmitsNDJSON(t *testing.T) {
 func TestRunsTimingTextNamesItsPhases(t *testing.T) {
 	run, steps, events := timingFixture()
 	var out bytes.Buffer
-	if err := writeRunsTiming(&out, "check", []runTiming{measureRun(run, steps, events)}, "pretty"); err != nil {
+	if err := writeRunsTiming(&out, "check", nil, []runTiming{measureRun(run, steps, events)}, "pretty"); err != nil {
 		t.Fatal(err)
 	}
 	for _, want := range []string{"check: 1 finished runs", "admit", "idle", "build", "Longest waits:", "#7", "Failed jobs", "sdk_error"} {
@@ -167,5 +169,32 @@ func TestRunsTimingTextNamesItsPhases(t *testing.T) {
 func TestRunsTimingRequiresAPipeline(t *testing.T) {
 	if _, err := clisurface.Parse("sparkwing", []string{"runs", "timing"}); err == nil {
 		t.Fatal("timing without --pipeline parsed")
+	}
+}
+
+func TestRunTimingMovesRunnerClockStepsIntoTheJobWindow(t *testing.T) {
+	run, steps, events := timingFixture()
+	skewed := make([]controllerwire.StepDetail, len(steps))
+	for i, step := range steps {
+		skewed[i] = step
+		if step.JobID == "build" {
+			skewed[i].StartedAt, skewed[i].FinishedAt = at(step.StartedAt.Sub(timingBase).Seconds()-10), at(step.FinishedAt.Sub(timingBase).Seconds()-10)
+		}
+	}
+	got := measureRun(run, skewed, events)
+	build := got.Jobs["build"]
+	if got.StepShift != 7*time.Second || build.Phases[phaseRunning] != 13*time.Second || build.Phases.sum() != build.Total {
+		t.Fatalf("shift %v build %+v", got.StepShift, build)
+	}
+}
+
+func TestRunsTimingJobFilterBoundsTheSections(t *testing.T) {
+	run, steps, events := timingFixture()
+	var out bytes.Buffer
+	if err := writeRunsTiming(&out, "check", []string{"build"}, []runTiming{measureRun(run, steps, events)}, "pretty"); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(out.String(), "sdk_error") || !strings.Contains(out.String(), "build") {
+		t.Fatalf("filtered output:\n%s", out.String())
 	}
 }

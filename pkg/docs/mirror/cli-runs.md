@@ -401,7 +401,9 @@ Read the newest finished root runs of one pipeline, skipping dry runs, with thei
 
 Each job's window, from its first ready event to its end, splits into queue (ready to claimed), admit (claimed to started: concurrency and machine admission, then source checkout), approval, setup (started to the attempt's first step: compile and cache restore), running (any step in progress) and gap (a started job with no step in progress). Each run's wall splits into the most advanced phase any job was in, plus idle when no job is active, so the phases always sum to the wall.
 
-Text prints run-level and per-job P50 and P90, the longest waits, and failed jobs grouped by job, failing step and reason; a job with several failing steps counts under each, and cancellations caused by an upstream failure or a cancel request are left out. JSON emits one run record per run, one job record per job, one failure record per group and a final summary record.
+Step times carry the runner's clock and lifecycle events the store's; a job whose steps fall outside its window has them moved by one offset, reported as step_clock_shift_ns and in the text.
+
+Text prints run-level and per-job P50 and P90, the five longest waits, and failed jobs grouped by job, failing step of the final attempt and reason; a job with several failing steps counts under each, and cancellations caused by an upstream failure or a cancel request are left out. Text shows at most 20 jobs and 20 failure groups and names how many more exist. --job selects jobs for the job, wait and failure sections. JSON is the complete export: one run record per run, one job record per selected job, one failure record per group and a final summary record.
 
 ### Flags
 
@@ -413,4 +415,5 @@ Text prints run-level and per-job P50 and P90, the longest waits, and failed job
 | `--help-all` | Include uncommon flags in command help. |
 | `--pipeline NAME` | Pipeline name. (required) |
 | `--last N` | Number of finished runs to read, newest first, 20 by default. Must be at least 1. |
+| `--job JOB` | Report only these jobs in the job, wait and failure sections; run-level phases still cover every job. Repeatable; comma-separated values are accepted. |
 | `--profile NAME` | Controller connection profile from your config. Optional profiles use the saved default, then local; --profile= selects local. |

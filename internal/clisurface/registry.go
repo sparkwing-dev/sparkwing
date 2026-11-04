@@ -604,10 +604,12 @@ func Registry() []Command {
 		{Path: "sparkwing runs timing", Rules: []string{
 			"Read the newest finished root runs of one pipeline, skipping dry runs, with their jobs, steps and lifecycle events, through the selected controller.",
 			"Each job's window, from its first ready event to its end, splits into queue (ready to claimed), admit (claimed to started: concurrency and machine admission, then source checkout), approval, setup (started to the attempt's first step: compile and cache restore), running (any step in progress) and gap (a started job with no step in progress). Each run's wall splits into the most advanced phase any job was in, plus idle when no job is active, so the phases always sum to the wall.",
-			"Text prints run-level and per-job P50 and P90, the longest waits, and failed jobs grouped by job, failing step and reason; a job with several failing steps counts under each, and cancellations caused by an upstream failure or a cancel request are left out. JSON emits one run record per run, one job record per job, one failure record per group and a final summary record.",
+			"Step times carry the runner's clock and lifecycle events the store's; a job whose steps fall outside its window has them moved by one offset, reported as step_clock_shift_ns and in the text.",
+			"Text prints run-level and per-job P50 and P90, the five longest waits, and failed jobs grouped by job, failing step of the final attempt and reason; a job with several failing steps counts under each, and cancellations caused by an upstream failure or a cancel request are left out. Text shows at most 20 jobs and 20 failure groups and names how many more exist. --job selects jobs for the job, wait and failure sections. JSON is the complete export: one run record per run, one job record per selected job, one failure record per group and a final summary record.",
 		}, Flags: []Flag{
 			{Name: "pipeline", Argument: "NAME", Required: true},
 			{Name: "last", Argument: "N", Minimum: 1, HasMinimum: true},
+			{Name: "job", Argument: "JOB", Repeatable: true, CommaList: true},
 			{Name: "profile", Argument: "NAME"},
 		}},
 		{Path: "sparkwing runs status", Rules: []string{

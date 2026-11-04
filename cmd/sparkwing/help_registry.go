@@ -261,6 +261,7 @@ var commandFlagDescriptions = map[string]string{
 	"sparkwing runs stats --reset":                             "Clear learned sizing for --pipeline or --all-pipelines while keeping resource pins; the controller has no route for this yet, so it fails with policy_missing and changes nothing.",
 	"sparkwing runs stats --since":                             "Count only top-level runs that started within this lookback, such as 7d or 2w; by default every run counts.",
 	"sparkwing runs stats --sizing":                            "Show the controller's learned resource sizing for each job instead of run statistics.",
+	"sparkwing runs timing --job":                              "Report only these jobs in the job, wait and failure sections; run-level phases still cover every job.",
 	"sparkwing runs timing --last":                             "Number of finished runs to read, newest first, 20 by default.",
 	"sparkwing runs status --exit-zero":                        "Exit 0 when the run ended failed or cancelled; invalid usage and incomplete observations still exit nonzero.",
 	"sparkwing runs status --poll":                             "Time between checks of the run with --follow, as a Go duration, 3s by default.",
