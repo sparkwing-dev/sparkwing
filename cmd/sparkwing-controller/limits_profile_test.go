@@ -27,7 +27,6 @@ func TestApplyLimitsProfile_CloudTurnsEveryGuardOn(t *testing.T) {
 		RequestsPerMinuteAlarm:    5000,
 		MaxLogStreamsPerPrincipal: 50,
 		MaxDownloadsPerPrincipal:  20,
-		RunsPerPrincipalHour:      600,
 		ShedQueueDepth:            5000,
 		EgressDailyAlarmBytes:     200 << 30,
 		EnforceIdleClaimPoll:      true,
@@ -59,7 +58,6 @@ func TestApplyLimitsProfile_WhatTheOperatorNamedWins(t *testing.T) {
 		RequestsPerMinuteAlarm:    true,
 		MaxLogStreamsPerPrincipal: true,
 		MaxDownloadsPerPrincipal:  true,
-		RunsPerPrincipalHour:      true,
 		ShedQueueDepth:            true,
 		EgressDailyAlarmBytes:     true,
 	})

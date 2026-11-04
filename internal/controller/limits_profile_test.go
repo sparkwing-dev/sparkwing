@@ -30,7 +30,6 @@ func TestLimitsProfile_HostedProfilesCarryTheDocumentedValues(t *testing.T) {
 				RequestsPerMinuteAlarm:    5000,
 				MaxLogStreamsPerPrincipal: 50,
 				MaxDownloadsPerPrincipal:  20,
-				RunsPerPrincipalHour:      600,
 				ShedQueueDepth:            5000,
 
 				EgressDailyAlarmBytes: 200 << 30,
@@ -45,7 +44,6 @@ func TestLimitsProfile_HostedProfilesCarryTheDocumentedValues(t *testing.T) {
 				RequestsPerMinuteAlarm:    5000,
 				MaxLogStreamsPerPrincipal: 10,
 				MaxDownloadsPerPrincipal:  5,
-				RunsPerPrincipalHour:      60,
 				ShedQueueDepth:            1000,
 
 				EgressDailyAlarmBytes: 20 << 30,
@@ -106,7 +104,6 @@ func TestLimitsProfile_HostedControllersCarryEveryGuard(t *testing.T) {
 			{"requests per minute alarm", int64(profile.RequestsPerMinuteAlarm)},
 			{"max log streams per principal", int64(profile.MaxLogStreamsPerPrincipal)},
 			{"max downloads per principal", int64(profile.MaxDownloadsPerPrincipal)},
-			{"runs per principal hour", int64(profile.RunsPerPrincipalHour)},
 			{"shed queue depth", int64(profile.ShedQueueDepth)},
 			{"egress daily alarm bytes", profile.EgressDailyAlarmBytes},
 		} {
@@ -139,7 +136,6 @@ func TestLimitsProfile_TheFreeTierIsTighterThanThePaidOne(t *testing.T) {
 		{"heartbeats per runner minute", int64(paid.HeartbeatsPerRunnerMinute), int64(free.HeartbeatsPerRunnerMinute)},
 		{"max log streams per principal", int64(paid.MaxLogStreamsPerPrincipal), int64(free.MaxLogStreamsPerPrincipal)},
 		{"max downloads per principal", int64(paid.MaxDownloadsPerPrincipal), int64(free.MaxDownloadsPerPrincipal)},
-		{"runs per principal hour", int64(paid.RunsPerPrincipalHour), int64(free.RunsPerPrincipalHour)},
 		{"shed queue depth", int64(paid.ShedQueueDepth), int64(free.ShedQueueDepth)},
 		{"egress daily alarm bytes", paid.EgressDailyAlarmBytes, free.EgressDailyAlarmBytes},
 	} {

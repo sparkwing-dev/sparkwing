@@ -23,10 +23,6 @@ const (
 	bucketMeasurePages int = 1000
 	// cloudRequestRateAlarm supplies per-replica request-rate alarm.
 	cloudRequestRateAlarm int = 5000
-	// cloudRunsPerPrincipalHour supplies funded profile deployment-wide run-rate guard.
-	cloudRunsPerPrincipalHour int = 600
-	// cloudFreeRunsPerPrincipalHour supplies free profile deployment-wide run-rate guard.
-	cloudFreeRunsPerPrincipalHour int = 60
 	// cloudShedQueueDepth supplies funded profile team pending-queue guard.
 	cloudShedQueueDepth int = 5000
 	// cloudFreeShedQueueDepth supplies free profile team pending-queue guard.

@@ -33,8 +33,6 @@ type LimitsProfileValues struct {
 	// MaxDownloadsPerPrincipal is the concurrent metered downloads one
 	// principal may hold open.
 	MaxDownloadsPerPrincipal int
-	// RunsPerPrincipalHour is [FloodPolicy.RunsPerPrincipalHour].
-	RunsPerPrincipalHour int
 	// ShedQueueDepth is [FloodPolicy.ShedQueueDepth].
 	ShedQueueDepth int
 	// EgressDailyAlarmBytes is the bytes the controller may send in a UTC day
@@ -79,14 +77,15 @@ const (
 // was planned for, are driving it.
 const cloudRequestRateAlarm = 5000
 
-// safety: a principal's run cap is the guard a pending trigger nobody claims
-// is written against, and the shed depth is each team's backstop behind it,
-// sized so one team's queue scan stays a fraction of a second.
+// safety: the shed depth is each team's backstop against pending triggers
+// nobody claims, sized so one team's queue scan stays a fraction of a second.
+// Neither profile sets an hourly run cap: a GitHub App delivery the cap
+// refuses becomes a failed delivery an admin must process again (decision 41),
+// so ordinary push volume would turn into manual recovery. The cap stays an
+// operator's explicit --max-runs-per-principal-hour.
 const (
-	cloudRunsPerPrincipalHour     = 600
-	cloudFreeRunsPerPrincipalHour = 60
-	cloudShedQueueDepth           = 5000
-	cloudFreeShedQueueDepth       = 1000
+	cloudShedQueueDepth     = 5000
+	cloudFreeShedQueueDepth = 1000
 )
 
 // safety: egress is the bill a free account can run up without any compute, at
@@ -109,7 +108,6 @@ var limitsProfiles = map[string]LimitsProfileValues{
 		RequestsPerMinuteAlarm:    cloudRequestRateAlarm,
 		MaxLogStreamsPerPrincipal: 50,
 		MaxDownloadsPerPrincipal:  20,
-		RunsPerPrincipalHour:      cloudRunsPerPrincipalHour,
 		ShedQueueDepth:            cloudShedQueueDepth,
 
 		EgressDailyAlarmBytes: cloudEgressDailyAlarmBytes,
@@ -121,7 +119,6 @@ var limitsProfiles = map[string]LimitsProfileValues{
 		RequestsPerMinuteAlarm:    cloudRequestRateAlarm,
 		MaxLogStreamsPerPrincipal: 10,
 		MaxDownloadsPerPrincipal:  5,
-		RunsPerPrincipalHour:      cloudFreeRunsPerPrincipalHour,
 		ShedQueueDepth:            cloudFreeShedQueueDepth,
 
 		EgressDailyAlarmBytes: cloudFreeEgressDailyAlarmBytes,

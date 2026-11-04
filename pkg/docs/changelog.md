@@ -46,6 +46,11 @@ unlock.
   All of a team's tokens shared one bucket of 3,600 requests a minute (600 on `cloud-free`), so a team that added
   runners could see its heartbeats and state writes refused with `429`. Per-runner claim and heartbeat budgets and
   the request-rate alarm still apply, and `--requests-per-token-minute` still sets a budget when the operator names one.
+- **controller:** The `cloud` and `cloud-free` limits profiles no longer cap runs per hour
+  A team's GitHub App pushes, API submissions and schedules shared a cap of 600 runs an hour (60 on `cloud-free`), and
+  a push the cap refused became a failed delivery that a team admin had to process again. The per-team queue shed
+  depth still answers `503` past its threshold, and `--max-runs-per-principal-hour` still sets a cap when the
+  operator names one.
 
 ### Fixed
 

@@ -365,7 +365,6 @@ func run(args []string) error {
 		RequestsPerMinuteAlarm:    fs.Changed(flagRequestsPerMinuteAlarm),
 		MaxLogStreamsPerPrincipal: egressNamed.MaxLogStreams,
 		MaxDownloadsPerPrincipal:  egressNamed.MaxDownloads,
-		RunsPerPrincipalHour:      fs.Changed("max-runs-per-principal-hour"),
 		ShedQueueDepth:            fs.Changed("shed-queue-depth"),
 		EgressDailyAlarmBytes:     egressNamed.DailyAlarmBytes,
 	})
@@ -723,7 +722,6 @@ type guardsNamed struct {
 	RequestsPerMinuteAlarm    bool
 	MaxLogStreamsPerPrincipal bool
 	MaxDownloadsPerPrincipal  bool
-	RunsPerPrincipalHour      bool
 	ShedQueueDepth            bool
 	EgressDailyAlarmBytes     bool
 }
@@ -746,9 +744,6 @@ func applyLimitsProfile(profile controller.LimitsProfileValues, set guardValues,
 	}
 	if !named.MaxDownloadsPerPrincipal {
 		set.MaxDownloadsPerPrincipal = profile.MaxDownloadsPerPrincipal
-	}
-	if !named.RunsPerPrincipalHour {
-		set.RunsPerPrincipalHour = profile.RunsPerPrincipalHour
 	}
 	if !named.ShedQueueDepth {
 		set.ShedQueueDepth = profile.ShedQueueDepth

@@ -201,6 +201,13 @@ operator configuration. Korey decided each on 2026-11-04.
   `--requests-per-token-minute` remains an operator setting. GitHub publishes
   limits on runner scale rather than a shared request bucket, and CircleCI
   queues work at its concurrency limit instead of refusing it.
+- Hourly run cap: the limits profiles no longer cap runs per principal (600 an
+  hour, 60 on `cloud-free`). A GitHub App delivery the cap refused became a
+  failed delivery an admin had to process again (decision 41), so ordinary
+  push volume turned into manual recovery. The team queue shed depth stays,
+  and `--max-runs-per-principal-hour` remains an operator setting. GitHub
+  allows 500 workflow runs per ten seconds per repository, and CircleCI queues
+  concurrency-limited work instead of refusing it.
 
 ## Billing and overload protection
 
