@@ -6,7 +6,6 @@ import (
 	"iter"
 	"reflect"
 	"slices"
-	"strings"
 	"sync"
 	"time"
 
@@ -63,29 +62,9 @@ func (p *Plan) setInputs(in any) {
 	p.inputs = in
 }
 
-func validateNodeID(id string) error {
-	for _, seg := range strings.Split(id, "/") {
-		if seg == "" {
-			return fmt.Errorf("id must not contain empty path segments")
-		}
-		if seg == "." || seg == ".." {
-			return fmt.Errorf("id segment %q is a path reference", seg)
-		}
-		for _, r := range seg {
-			if r == '\\' || r < 0x20 || r == 0x7f {
-				return fmt.Errorf("id must not contain backslashes or control characters")
-			}
-		}
-	}
-	return nil
-}
-
 func newNode(caller, id string, job Workable) *JobNode {
 	if id == "" {
 		panic(fmt.Sprintf("sparkwing: %s: id must not be empty", caller))
-	}
-	if err := validateNodeID(id); err != nil {
-		panic(fmt.Sprintf("sparkwing: %s(%q): %v", caller, id, err))
 	}
 	if job == nil {
 		panic(fmt.Sprintf("sparkwing: %s(%q): job must be non-nil", caller, id))

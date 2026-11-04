@@ -33,6 +33,8 @@ unlock.
   Activating a virtualenv or Node version manager keeps the compiled pipeline; upgrading Go behind the same `PATH`
   rebuilds it.
 - **run:** Each engine notice, such as the missing version policy warning, prints once per command instead of three times
+- **sdk:** The engine refuses a plan whose job ID has an empty, `.` or `..` path segment, a backslash or a control character
+  Only the Go SDK refused these IDs; a TypeScript pipeline sent them through. Plan validation now refuses them for every SDK with `plan_invalid` naming the job ID and its position, and the Go SDK's own check is gone, so a Go pipeline gets the same error at planning instead of a panic at `sw.Job`.
 
 ### Fixed
 
