@@ -158,7 +158,11 @@ func (p *Gate) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
 		test = runAffectedTest
 	}
 	testStep := sparkwing.Step(w, "test", test).Needs(buildStep)
-	sparkwing.Step(w, "lint", runGolangciLint).Needs(testStep)
+	lint := runGolangciLint
+	if p.mode == gateAffected {
+		lint = runGolangciLintTouched
+	}
+	sparkwing.Step(w, "lint", lint).Needs(testStep)
 	sparkwing.Step(w, "store-postgres", func(ctx context.Context) error { return runStorePostgresIfTouched(ctx, p.mode) }).Needs(testStep)
 	sparkwing.Step(w, "em-dashes", checkEmDashes)
 	sparkwing.Step(w, "tracker-ids", checkTrackerIDs)
