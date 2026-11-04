@@ -15,7 +15,11 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 )
 
-const usedRunAnnotation = "sparkwing.dev/used-run"
+const (
+	usedRunAnnotation = "sparkwing.dev/used-run"
+	// safety: marks a cordon the launcher made for retirement; an operator's cordon lacks it and is never undone.
+	retirementCordonAnnotation = "sparkwing.dev/retirement-cordon"
+)
 
 type usedRun struct {
 	Team  string `json:"team"`
@@ -130,6 +134,9 @@ func (b *KubernetesBoundary) retireSpentNode(ctx context.Context, observed corev
 		return err
 	}
 	// safety: cordon before the vacancy check so new placements cannot refill a spent node.
+	if !node.Spec.Unschedulable {
+		node.Annotations[retirementCordonAnnotation] = "true"
+	}
 	node.Spec.Unschedulable = true
 	cordoned, err := b.Kube.CoreV1().Nodes().Update(ctx, node, metav1.UpdateOptions{})
 	if apierrors.IsConflict(err) || apierrors.IsNotFound(err) {
@@ -144,7 +151,11 @@ func (b *KubernetesBoundary) retireSpentNode(ctx context.Context, observed corev
 	}
 	for _, pod := range pods.Items {
 		if pod.Spec.NodeName == node.Name && !daemonPod(pod) {
+			if cordoned.Annotations[retirementCordonAnnotation] == "" {
+				return nil
+			}
 			// safety: a successor that bound before the cordon cannot reserve a cordoned node; a conflict retries next pass.
+			delete(cordoned.Annotations, retirementCordonAnnotation)
 			cordoned.Spec.Unschedulable = false
 			_, err = b.Kube.CoreV1().Nodes().Update(ctx, cordoned, metav1.UpdateOptions{})
 			if apierrors.IsConflict(err) || apierrors.IsNotFound(err) {

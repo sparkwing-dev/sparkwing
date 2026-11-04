@@ -21,7 +21,7 @@ import (
 )
 
 func TestRestartRetiresOnlyEmptySpentNodesAfterIdleGrace(t *testing.T) {
-	for _, scenario := range []string{"idle", "daemon pod", "work pod", "terminal pod", "warm pod", "successor binds after cordon", "foreign team", "foreign run", "unlabeled", "missing annotation", "foreign pool", "claim UID changed", "node replaced", "concurrent reservation", "cordon conflict"} {
+	for _, scenario := range []string{"idle", "daemon pod", "work pod", "terminal pod", "warm pod", "successor binds after cordon", "operator cordon", "foreign team", "foreign run", "unlabeled", "missing annotation", "foreign pool", "claim UID changed", "node replaced", "concurrent reservation", "cordon conflict"} {
 		t.Run(scenario, func(t *testing.T) {
 			synctest.Test(t, func(t *testing.T) {
 				boundary, kube := boundaryFixture()
@@ -54,6 +54,8 @@ func TestRestartRetiresOnlyEmptySpentNodesAfterIdleGrace(t *testing.T) {
 					delete(node.Annotations, usedRunAnnotation)
 				case "foreign pool":
 					node.Labels[PoolNamespaceLabel] = "foreign"
+				case "operator cordon":
+					node.Spec.Unschedulable = true
 				case "claim UID changed":
 					node.OwnerReferences[0].UID = "replacement"
 				}
@@ -106,7 +108,7 @@ func TestRestartRetiresOnlyEmptySpentNodesAfterIdleGrace(t *testing.T) {
 						return false, nil, nil
 					})
 				}
-				if scenario == "daemon pod" || scenario == "work pod" || scenario == "terminal pod" || scenario == "warm pod" {
+				if scenario == "daemon pod" || scenario == "operator cordon" || scenario == "work pod" || scenario == "terminal pod" || scenario == "warm pod" {
 					pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "occupant", Namespace: "foreign"}, Spec: corev1.PodSpec{NodeName: "node"}}
 					if scenario == "daemon pod" {
 						pod.OwnerReferences = []metav1.OwnerReference{{APIVersion: "apps/v1", Kind: "DaemonSet", Name: "daemon", UID: "daemon-uid", Controller: ptr(true)}}
@@ -142,7 +144,10 @@ func TestRestartRetiresOnlyEmptySpentNodesAfterIdleGrace(t *testing.T) {
 				if lookupErr != nil {
 					t.Fatal(lookupErr)
 				}
-				if !retired && current.Spec.Unschedulable {
+				if scenario == "operator cordon" && (!current.Spec.Unschedulable || current.Annotations[retirementCordonAnnotation] != "") {
+					t.Fatalf("retirement undid or claimed an operator's cordon: %+v", current)
+				}
+				if !retired && scenario != "operator cordon" && (current.Spec.Unschedulable || current.Annotations[retirementCordonAnnotation] != "") {
 					t.Fatal("retirement left a kept node cordoned, so no successor could reserve it")
 				}
 				if scenario == "cordon conflict" && (current.Spec.Unschedulable || current.Annotations[reservationAnnotation] != "new reservation") {

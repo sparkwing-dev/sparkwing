@@ -619,7 +619,9 @@ precondition. When a Pod remains, such as a successor's capacity Pod that bound
 between the cordon and the check, the launcher uncordons the node with the
 cordon's resource version, because the boundary refuses to reserve a cordoned
 node and the successor would otherwise wait with no new node coming. A conflict
-leaves the next pass to retry.
+leaves the next pass to retry. The launcher marks its own cordon with
+`sparkwing.dev/retirement-cordon` and uncordons only a node carrying that mark,
+so a node an operator cordoned stays cordoned.
 Concurrent reservation or node replacement cancels retirement. Repeated passes
 accept an already-deleted claim. Retirement failures retain the node and retry
 without blocking claims or preparation renewal. Retirement errors are logged at
