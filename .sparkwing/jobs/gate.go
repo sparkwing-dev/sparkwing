@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -433,7 +434,39 @@ func strippedGoComments(src string) string {
 }
 
 func runGofmt(ctx context.Context) error {
-	return sparkwing.Bash(ctx, `gofmt -l .`).MustBeEmpty("files need formatting")
+	return gofmtOverScope(ctx, treeGoFiles)
+}
+
+// bug: sdk-typescript runs npm ci beside this step, and a walk into the
+// node_modules it rewrites failed on entries vanishing mid-readdir. Vendored
+// JavaScript holds no Go of ours, so the walk never enters it.
+func treeGoFiles(_ context.Context, noun string, keep func([]string) []string) ([]string, string, error) {
+	root := regexCheckRoot()
+	var files []string
+	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			if errors.Is(err, fs.ErrNotExist) {
+				return nil
+			}
+			return err
+		}
+		if d.IsDir() && (d.Name() == "node_modules" || d.Name() == ".git") {
+			return filepath.SkipDir
+		}
+		if !d.IsDir() && strings.HasSuffix(d.Name(), ".go") {
+			rel, relErr := filepath.Rel(root, path)
+			if relErr != nil {
+				return relErr
+			}
+			files = append(files, rel)
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, "", fmt.Errorf("list the tree's Go files: %w", err)
+	}
+	files = keep(files)
+	return files, fmt.Sprintf("%d %s in the tree, node_modules excluded", len(files), noun), nil
 }
 
 func runFormatters(ctx context.Context) error {
