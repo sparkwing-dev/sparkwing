@@ -24,7 +24,6 @@ func TestApplyLimitsProfile_CloudTurnsEveryGuardOn(t *testing.T) {
 	want := guardValues{
 		ClaimsPerRunnerMinute:     480,
 		HeartbeatsPerRunnerMinute: 1200,
-		RequestsPerTokenMinute:    3600,
 		RequestsPerMinuteAlarm:    5000,
 		MaxLogStreamsPerPrincipal: 50,
 		MaxDownloadsPerPrincipal:  20,
@@ -57,7 +56,6 @@ func TestApplyLimitsProfile_WhatTheOperatorNamedWins(t *testing.T) {
 	got := applyLimitsProfile(cloud, set, guardsNamed{
 		ClaimsPerRunnerMinute:     true,
 		HeartbeatsPerRunnerMinute: true,
-		RequestsPerTokenMinute:    true,
 		RequestsPerMinuteAlarm:    true,
 		MaxLogStreamsPerPrincipal: true,
 		MaxDownloadsPerPrincipal:  true,

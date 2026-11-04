@@ -195,6 +195,12 @@ operator configuration. Korey decided each on 2026-11-04.
   `--object-store-budget` for an emergency brake. GitHub scopes cache request
   limits to a repository, and CircleCI limits concurrency per account and
   resource class; neither stops every customer on aggregate traffic.
+- Team request budget: the `cloud` and `cloud-free` limits profiles no longer
+  size one request bucket that all of a team's tokens share. Per-runner claim
+  and heartbeat budgets and the controller's request-rate alarm stay, and
+  `--requests-per-token-minute` remains an operator setting. GitHub publishes
+  limits on runner scale rather than a shared request bucket, and CircleCI
+  queues work at its concurrency limit instead of refusing it.
 
 ## Billing and overload protection
 

@@ -21,10 +21,6 @@ const (
 	requestsPerMinuteAlarm int = 0
 	// bucketMeasurePages supplies maximum pages per bucket measurement.
 	bucketMeasurePages int = 1000
-	// cloudRequestsPerTokenMinute supplies funded profile token request budget per replica.
-	cloudRequestsPerTokenMinute int = 3600
-	// cloudFreeRequestsPerTokenMinute supplies free profile token request budget per replica.
-	cloudFreeRequestsPerTokenMinute int = 600
 	// cloudRequestRateAlarm supplies per-replica request-rate alarm.
 	cloudRequestRateAlarm int = 5000
 	// cloudRunsPerPrincipalHour supplies funded profile deployment-wide run-rate guard.

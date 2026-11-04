@@ -42,6 +42,10 @@ unlock.
   The controller used to refuse every team's uploads, downloads and deletes for the rest of a minute once all teams
   together sent 1,200 writes, 3,000 reads, or 600 listings or deletes. The budget now counts requests and refuses
   nothing unless the operator sets one with `--object-store-budget`, such as `put:minute=1200`, which keeps working.
+- **controller:** The `cloud` and `cloud-free` limits profiles no longer cap a team's total request rate
+  All of a team's tokens shared one bucket of 3,600 requests a minute (600 on `cloud-free`), so a team that added
+  runners could see its heartbeats and state writes refused with `429`. Per-runner claim and heartbeat budgets and
+  the request-rate alarm still apply, and `--requests-per-token-minute` still sets a budget when the operator names one.
 
 ### Fixed
 

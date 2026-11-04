@@ -171,7 +171,7 @@ func run(args []string) error {
 			"sized for. Zero raises no alarm.")
 	limitsProfile := fs.String("limits-profile", "",
 		fmt.Sprintf("named set of abuse guards this controller runs with: %s. A profile "+
-			"supplies the per-runner and per-token request budgets, the request rate "+
+			"supplies the per-runner request budgets, the request rate "+
 			"alarm, the egress alarm, stream and download caps, and idle-poll enforcement, "+
 			"and it fills a guard only where the command line and the environment "+
 			"named none, so an explicit setting always wins, zero included. Empty, "+
@@ -362,7 +362,6 @@ func run(args []string) error {
 	}, guardsNamed{
 		ClaimsPerRunnerMinute:     fs.Changed(flagClaimsPerRunnerMinute),
 		HeartbeatsPerRunnerMinute: fs.Changed(flagHeartbeatsPerRunnerMinute),
-		RequestsPerTokenMinute:    fs.Changed(flagRequestsPerTokenMinute),
 		RequestsPerMinuteAlarm:    fs.Changed(flagRequestsPerMinuteAlarm),
 		MaxLogStreamsPerPrincipal: egressNamed.MaxLogStreams,
 		MaxDownloadsPerPrincipal:  egressNamed.MaxDownloads,
@@ -721,7 +720,6 @@ type guardValues struct {
 type guardsNamed struct {
 	ClaimsPerRunnerMinute     bool
 	HeartbeatsPerRunnerMinute bool
-	RequestsPerTokenMinute    bool
 	RequestsPerMinuteAlarm    bool
 	MaxLogStreamsPerPrincipal bool
 	MaxDownloadsPerPrincipal  bool
@@ -739,9 +737,6 @@ func applyLimitsProfile(profile controller.LimitsProfileValues, set guardValues,
 	}
 	if !named.HeartbeatsPerRunnerMinute {
 		set.HeartbeatsPerRunnerMinute = profile.HeartbeatsPerRunnerMinute
-	}
-	if !named.RequestsPerTokenMinute {
-		set.RequestsPerTokenMinute = profile.RequestsPerTokenMinute
 	}
 	if !named.RequestsPerMinuteAlarm {
 		set.RequestsPerMinuteAlarm = profile.RequestsPerMinuteAlarm

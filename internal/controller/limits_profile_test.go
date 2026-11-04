@@ -27,7 +27,6 @@ func TestLimitsProfile_HostedProfilesCarryTheDocumentedValues(t *testing.T) {
 			want: controller.LimitsProfileValues{
 				ClaimsPerRunnerMinute:     480,
 				HeartbeatsPerRunnerMinute: 1200,
-				RequestsPerTokenMinute:    3600,
 				RequestsPerMinuteAlarm:    5000,
 				MaxLogStreamsPerPrincipal: 50,
 				MaxDownloadsPerPrincipal:  20,
@@ -43,7 +42,6 @@ func TestLimitsProfile_HostedProfilesCarryTheDocumentedValues(t *testing.T) {
 			want: controller.LimitsProfileValues{
 				ClaimsPerRunnerMinute:     240,
 				HeartbeatsPerRunnerMinute: 600,
-				RequestsPerTokenMinute:    600,
 				RequestsPerMinuteAlarm:    5000,
 				MaxLogStreamsPerPrincipal: 10,
 				MaxDownloadsPerPrincipal:  5,
@@ -105,7 +103,6 @@ func TestLimitsProfile_HostedControllersCarryEveryGuard(t *testing.T) {
 		}{
 			{"claims per runner minute", int64(profile.ClaimsPerRunnerMinute)},
 			{"heartbeats per runner minute", int64(profile.HeartbeatsPerRunnerMinute)},
-			{"requests per token minute", int64(profile.RequestsPerTokenMinute)},
 			{"requests per minute alarm", int64(profile.RequestsPerMinuteAlarm)},
 			{"max log streams per principal", int64(profile.MaxLogStreamsPerPrincipal)},
 			{"max downloads per principal", int64(profile.MaxDownloadsPerPrincipal)},
@@ -140,7 +137,6 @@ func TestLimitsProfile_TheFreeTierIsTighterThanThePaidOne(t *testing.T) {
 	}{
 		{"claims per runner minute", int64(paid.ClaimsPerRunnerMinute), int64(free.ClaimsPerRunnerMinute)},
 		{"heartbeats per runner minute", int64(paid.HeartbeatsPerRunnerMinute), int64(free.HeartbeatsPerRunnerMinute)},
-		{"requests per token minute", int64(paid.RequestsPerTokenMinute), int64(free.RequestsPerTokenMinute)},
 		{"max log streams per principal", int64(paid.MaxLogStreamsPerPrincipal), int64(free.MaxLogStreamsPerPrincipal)},
 		{"max downloads per principal", int64(paid.MaxDownloadsPerPrincipal), int64(free.MaxDownloadsPerPrincipal)},
 		{"runs per principal hour", int64(paid.RunsPerPrincipalHour), int64(free.RunsPerPrincipalHour)},
@@ -165,19 +161,17 @@ func TestLimitsProfile_UnknownNameIsRefused(t *testing.T) {
 	}
 }
 
-// A signed-up team's tokens share one request budget, and a two-slot runner
-// honoring its cadences spends about 300 requests a minute, so the paid tier
-// carries a pool of ten such runners with room to spare.
-func TestLimitsProfile_CloudCarriesTenRunnersPerTeam(t *testing.T) {
-	paid, err := controller.LimitsProfile(controller.LimitsProfileCloud)
-	if err != nil {
-		t.Fatalf("LimitsProfile: %v", err)
-	}
-	const runners, perRunner = 10, 300
-	if got := paid.RequestsPerTokenMinute; got <= runners*perRunner {
-		t.Errorf("cloud allows a team %d requests a minute; ten two-slot runners spend %d", got, runners*perRunner)
-	}
-	if paid.RequestsPerMinuteAlarm <= paid.RequestsPerTokenMinute {
-		t.Errorf("the alarm %d must sit above one team's budget %d", paid.RequestsPerMinuteAlarm, paid.RequestsPerTokenMinute)
+// A team's tokens share one request bucket, so a fixed size would let a team
+// that adds runners starve its own heartbeats. Neither hosted profile sets it;
+// the per-runner budgets and the alarm still do.
+func TestLimitsProfile_NoProfileSetsATeamRequestBudget(t *testing.T) {
+	for _, name := range controller.LimitsProfileNames() {
+		profile, err := controller.LimitsProfile(name)
+		if err != nil {
+			t.Fatalf("LimitsProfile(%q): %v", name, err)
+		}
+		if profile.ClaimsPerRunnerMinute <= 0 || profile.HeartbeatsPerRunnerMinute <= 0 || profile.RequestsPerMinuteAlarm <= 0 {
+			t.Errorf("%s = %+v; want per-runner budgets and the aggregate alarm kept", name, profile)
+		}
 	}
 }
