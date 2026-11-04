@@ -138,6 +138,7 @@ type Server struct {
 	localHTTP                 localhostwire.LocalHTTP
 	localSessionMu            sync.Mutex
 	localSessions             *sessionledger.Ledger
+	localRunner               *LocalRunner
 	localSchedules            *crons.Service
 	localScheduleProver       LocalScheduleProver
 	localScheduleEnvironments LocalScheduleEnvironments

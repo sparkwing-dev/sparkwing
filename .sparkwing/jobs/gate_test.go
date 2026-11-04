@@ -336,6 +336,23 @@ func TestEachMandatoryStepWaitsOnTheOneBeforeIt(t *testing.T) {
 	}
 }
 
+func TestGatePolicyFailuresDoNotCancelTheTestSuite(t *testing.T) {
+	w := inspectWork(t, &Gate{})
+	if w.FailurePolicy != sparkwing.CollectAll {
+		t.Fatalf("gate failure policy = %q, want collect_all so a policy failure cannot hide test failures", w.FailurePolicy)
+	}
+	for _, id := range []string{"tracker-ids", "changelog-links", "em-dashes", "comments", "changelog"} {
+		step := findStep(w, id)
+		if step == nil {
+			t.Errorf("gate does not run %q", id)
+			continue
+		}
+		if len(step.Needs) != 0 {
+			t.Errorf("%q needs %v; policy sweeps stay independent of the Go chain", id, step.Needs)
+		}
+	}
+}
+
 func TestGateRunsFrontendUnitSuiteAsAnIndependentStep(t *testing.T) {
 	w := inspectWork(t, &Gate{})
 	step := findStep(w, "frontend-unit")
