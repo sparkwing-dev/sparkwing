@@ -56,3 +56,20 @@ func TestAnAwaitHoldsTheNoProgressTimeout(t *testing.T) {
 		}
 	})
 }
+
+func TestAwaitNotifiesOnceAcrossNestedWaits(t *testing.T) {
+	var got []bool
+	parent := WithAwaitNotify(t.Context(), func(awaiting bool) { got = append(got, awaiting) })
+	_, activity, stop := executorProgressContext(parent, time.Minute)
+	defer stop()
+	first, second := activity.Await(), activity.Await()
+	first()
+	first()
+	if len(got) != 1 || !got[0] {
+		t.Fatalf("one job awaiting twice reported %v", got)
+	}
+	second()
+	if len(got) != 2 || got[1] {
+		t.Fatalf("the last resume did not report the job working: %v", got)
+	}
+}

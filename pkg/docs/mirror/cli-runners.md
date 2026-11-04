@@ -42,7 +42,7 @@ All runner enrollment requires an independent account session through --session-
 | `--session-stdin` | Read an independent account session from stdin without saving it and attempt logout when enrollment finishes; required for shared, personal and launcher enrollment. |
 | `--repos PATTERN` | Repository patterns this runner takes jobs for; a job on a runner serving several repositories can claim the others' jobs and their secrets, so scope it to repositories that trust each other. Repeatable; comma-separated values are accepted. |
 | `--label LABEL` | Labels this runner advertises, matched against the labels jobs ask for or prefer. Repeatable; comma-separated values are accepted. |
-| `--max-concurrent N` | Most jobs this runner holds at once, written to its config. Must be at least 1. |
+| `--max-concurrent N` | Most jobs this runner works on at once, written to its config. Must be at least 1. A job waiting in `RunAndAwait` does not count until its child finishes, so a one-slot runner can run the child. |
 | `--config PATH` | Machine config file to write the runner section into, the standard Sparkwing config file by default. |
 | `--force` | Replace an existing object. |
 | `--no-service` | Write the runner config and credential without installing or starting the runner service. |

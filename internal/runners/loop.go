@@ -14,6 +14,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/limits"
+	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
 )
 
 // ClaimController claims through the shared queue and must honor context cancellation.
@@ -139,12 +140,19 @@ func (l *Loop) run(ctx context.Context) (policyErr, runErr error) {
 	defer timer.Stop()
 	results := make(chan unitResult, l.Config.MaxConcurrent)
 	active := make(map[capability.LeaseRef]struct{})
+	// safety: a job blocked in RunAndAwait holds no job slot, or its child could never run here.
+	var awaitMu sync.Mutex
+	awaiting := make(map[capability.LeaseRef]bool)
+	awaitChanged := make(chan struct{}, 1)
 	idleSince, pollAt, backoffUntil := time.Now(), time.Time{}, time.Time{}
 	claimed := 0
 	var hostErr error
 	finish := func(result unitResult) {
 		pollAt = time.Time{}
 		delete(active, result.key)
+		awaitMu.Lock()
+		delete(awaiting, result.key)
+		awaitMu.Unlock()
 		if len(active) == 0 {
 			idleSince = time.Now()
 		}
@@ -185,7 +193,19 @@ func (l *Loop) run(ctx context.Context) (policyErr, runErr error) {
 		}
 		active[key] = struct{}{}
 		claimed++
-		go func() { results <- unitResult{key: key, err: l.Host.Host(ctx, unit)} }()
+		hostCtx := ctx
+		if unit.Unit != capability.UnitTrigger {
+			hostCtx = nodehost.WithAwaitNotify(ctx, func(on bool) {
+				awaitMu.Lock()
+				awaiting[key] = on
+				awaitMu.Unlock()
+				select {
+				case awaitChanged <- struct{}{}:
+				default:
+				}
+			})
+		}
+		go func() { results <- unitResult{key: key, err: l.Host.Host(hostCtx, unit)} }()
 		return nil
 	}
 	var pending <-chan claimOutcome
@@ -214,19 +234,24 @@ func (l *Loop) run(ctx context.Context) (policyErr, runErr error) {
 			nextClaim = backoffUntil
 		}
 		request := l.request()
-		owners := 0
+		owners, working := 0, 0
+		awaitMu.Lock()
 		for key := range active {
-			if key.Kind == capability.UnitTrigger {
+			switch {
+			case key.Kind == capability.UnitTrigger:
 				owners++
+			case !awaiting[key]:
+				working++
 			}
 		}
+		awaitMu.Unlock()
 		freeSlots := l.Config.MaxConcurrent
-		// safety: Owners wait for jobs, so sharing their claim slots would deadlock.
+		// safety: Owners and awaiting jobs wait for jobs, so sharing their claim slots would deadlock.
 		request.Kinds = slices.DeleteFunc(request.Kinds, func(kind capability.UnitKind) bool {
-			if len(active)-owners >= l.Config.MaxConcurrent {
+			if working >= l.Config.MaxConcurrent {
 				return true
 			}
-			used := len(active) - owners
+			used := working
 			if kind == capability.UnitTrigger {
 				used = owners
 			}
@@ -284,6 +309,7 @@ func (l *Loop) run(ctx context.Context) (policyErr, runErr error) {
 				return err, nil
 			}
 		case <-timer.C:
+		case <-awaitChanged:
 		case <-claims.Done():
 			return nil, nil
 		}

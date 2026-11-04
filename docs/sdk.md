@@ -209,7 +209,10 @@ TypeScript uses `refToLastRun(pipeline, jobID, { fromAnyRun: true })`.
 waits for its output. Options include `sw.WithFreshInputs(in)`,
 `sw.WithFreshArgs(args)` and `sw.WithFreshTimeout(duration)`. The host owns child
 submission, authorization, cancellation and cycle checks. Call it inside an
-execution callback. Compose reusable job types into a plan when the work belongs
+execution callback. While it waits, the job does not count against its runner's
+`max_concurrent`, so the child can run on the same runner; once the child
+finishes, the resumed job can briefly put the runner over that limit. Compose
+reusable job types into a plan when the work belongs
 in the same run.
 Declare every pipeline a job may start with
 `sw.Job(plan, "release", &Release{}).StartsChildren("deploy-us", "deploy-eu")`

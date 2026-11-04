@@ -16,6 +16,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/limits"
+	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
 )
 
 type claimFunc func(context.Context, controllerwire.ClaimRequest) (controllerwire.ClaimResponse, error)
@@ -109,6 +110,51 @@ func TestLoopOwnerDoesNotOccupyItsJobsOnlySlot(t *testing.T) {
 		}
 		if err := loop.Run(ctx); err != nil || !jobRan || !ownerFinished {
 			t.Fatalf("single-slot run stalled: claims=%d greet ran=%v owner finished=%v error=%v", claims, jobRan, ownerFinished, err)
+		}
+	})
+}
+
+func TestLoopAwaitingJobDoesNotOccupyItsChildsOnlySlot(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		ctx, cancel := context.WithTimeout(t.Context(), time.Minute)
+		defer cancel()
+		childFinished := make(chan struct{})
+		claims := 0
+		var parentFinished, childRan bool
+		loop := &Loop{
+			Config:       LoopConfig{Version: "v1.0.0", MaxConcurrent: 1, MaxClaims: 2, Kinds: []capability.UnitKind{capability.UnitNode}},
+			CheckVersion: func(context.Context, string) error { return nil },
+			Controller: claimFunc(func(_ context.Context, request controllerwire.ClaimRequest) (controllerwire.ClaimResponse, error) {
+				claims++
+				if request.FreeSlots == nil || *request.FreeSlots != 1 {
+					t.Errorf("claim %d free slots = %v", claims, request.FreeSlots)
+				}
+				run := "parent"
+				if claims == 2 {
+					run = "child"
+				}
+				return controllerwire.ClaimResponse{Claim: &controllerwire.ClaimedUnit{Unit: capability.UnitNode, UnitID: run, RunID: run, JobID: "job", Capability: "private"}}, nil
+			}),
+			Host: hostFunc(func(ctx context.Context, unit controllerwire.ClaimedUnit) error {
+				if unit.RunID == "child" {
+					childRan = true
+					close(childFinished)
+					return nil
+				}
+				notify := nodehost.AwaitNotify(ctx)
+				notify(true)
+				defer notify(false)
+				select {
+				case <-childFinished:
+					parentFinished = true
+					return nil
+				case <-ctx.Done():
+					return ctx.Err()
+				}
+			}),
+		}
+		if err := loop.Run(ctx); err != nil || !childRan || !parentFinished {
+			t.Fatalf("single-slot RunAndAwait stalled: claims=%d child ran=%v parent finished=%v error=%v", claims, childRan, parentFinished, err)
 		}
 	})
 }
