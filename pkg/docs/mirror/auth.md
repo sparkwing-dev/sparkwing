@@ -1043,10 +1043,12 @@ pipeline declares `sw.FromAnyRun()`. A reference declared with
 `sw.FromProvenRunAtCommit()` reads only a run at the reader's own sealed commit
 whose repository was proven (an App delivery, an Actions push, a schedule, or
 code the controller fetched from GitHub) as the reader's proven repository, and
-whose sealed options selected every job and step: no `--sw-only`,
-`--sw-start-at` or `--sw-stop-at`, no dry run, no debug and no
-`--sw-pause-before`, `--sw-pause-after` or `--sw-pause-on-failure`, because a
-paused job can be attached to and edited. The run must also have
+that intake sealed as proof eligible: it set no run option outside an
+allow-list of options that only place, schedule or present a run, so no
+`--sw-only`, `--sw-start-at` or `--sw-stop-at`, no dry run, no debug and no
+`--sw-pause-before`, `--sw-pause-after` or `--sw-pause-on-failure` (a paused
+job can be attached to and edited), and any option added later also keeps it
+from counting (see [security](security.md)). The run must also have
 sealed no environment variables, because a submitted `GOFLAGS` or similar can
 change what its jobs judged, and every job that did not skip must have run on a
 trusted host (see [security](security.md)). The newest such run in which the referenced job

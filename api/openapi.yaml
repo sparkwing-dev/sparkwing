@@ -6028,6 +6028,8 @@ components:
           $ref: '#/components/schemas/internal.runspec.Ceilings'
         hash:
           type: string
+        proof_eligible:
+          type: boolean
         provenance:
           additionalProperties: false
           properties:

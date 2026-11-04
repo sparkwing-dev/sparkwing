@@ -379,9 +379,9 @@ func TestKubernetesRunnerNeedsAKubernetesEnrollment(t *testing.T) {
 	}
 }
 
-// Decision 70: a job on a launcher pod mints runner_environment fresh, from the
-// same host classification that decides its cache writes.
-func TestLauncherPodOIDCIsFresh(t *testing.T) {
+// safety: a team's own launcher pod is only as trusted as the credential that started it, so its job mints
+// runner_environment persistent; only a provider-attested host is fresh.
+func TestTeamLauncherPodOIDCIsNotFresh(t *testing.T) {
 	f := poolPinFixture(t)
 	worker, err := f.claim(t, capability.UnitNode, f.admitted.RunID)
 	if err != nil {
@@ -396,7 +396,7 @@ func TestLauncherPodOIDCIsFresh(t *testing.T) {
 		got = facts
 		return OIDCMint{Token: "token", ID: "id", Subject: "subject", ExpiresAt: facts.NotAfter}, nil
 	})
-	if err != nil || !got.FreshHost {
+	if err != nil || got.FreshHost {
 		t.Fatalf("launcher pod fresh host = %v, %v", got.FreshHost, err)
 	}
 }
