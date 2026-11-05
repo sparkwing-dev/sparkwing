@@ -194,7 +194,9 @@ reference, JSON null is absent. An in-run null output is present and decodes to
 the type's zero value. Typed job and step outputs are bounded to 16 MiB each.
 
 `sw.RefToLastRun[T](pipeline, jobID, sw.MaxAge(duration))` reads the latest
-successful verified default-branch run without starting another run. Store it in
+successful verified default-branch run without starting another run. A reference
+to the reading run's own pipeline reads only runs of the reader's repository,
+because repositories in one team can share a pipeline name. Store it in
 a job field so planning can declare the read edge. Add `sw.FromAnyRun()` to accept
 output from any successful run, including pull requests and uploads. The opt-out
 must be declared in that job field. Runtime requests cannot widen it.

@@ -56,7 +56,9 @@ type runnerEnrollment struct {
 	sessionStdin bool
 }
 
-func runRunnersAdd(inv clisurface.Invocation) error {
+func runRunnersAdd(inv clisurface.Invocation) error { return runnersAdd(inv, terminalConsole()) }
+
+func runnersAdd(inv clisurface.Invocation, console deviceConsole) error {
 	enrollment, prof, err := prepareRunnerEnrollment(inv)
 	if errors.Is(err, errHelpRequested) {
 		return nil
@@ -84,7 +86,10 @@ func runRunnersAdd(inv clisurface.Invocation) error {
 		}
 		manager = sessionManager
 	} else {
-		manager, err = runnerTokenManager(prof)
+		if !enrollment.personal || len(enrollment.pools) != 0 || enrollment.trust != "" || enrollment.platform != "" || enrollment.launcher {
+			return &clisurface.UsageError{Path: inv.Command.Path, Message: "browser approval enrolls personal runners only; enroll shared runners, reserved pools, trust classes, platforms and launchers with --session-stdin"}
+		}
+		manager = &deviceRunnerManager{base: prof.ControllerURL(), team: inv.Value("team"), console: console}
 	}
 	if err != nil {
 		return err
@@ -94,6 +99,29 @@ func runRunnersAdd(inv clisurface.Invocation) error {
 
 func runnerTokenManager(prof *namedProfile) (client.RunnerTokenManager, error) {
 	return client.NewRunnerTokenManager(client.EngineOptions{URL: prof.ControllerURL(), Bearer: func(context.Context) (string, error) { return prof.ControllerToken(), nil }})
+}
+
+// safety: a machine credential cannot revoke itself, so a failed browser enrollment leaves the revocation hint.
+type deviceRunnerManager struct {
+	controllerwire.TokenManager
+	base, team string
+	console    deviceConsole
+}
+
+func (m *deviceRunnerManager) EnrollRunner(ctx context.Context, request controllerwire.EnrollRunnerRequest) (*controllerwire.CreatedToken, error) {
+	token, err := deviceSignIn(ctx, m.console, m.base, controllerwire.StartDeviceLoginRequest{Kind: controllerwire.DeviceLoginRunner, Machine: request.Name, Team: m.team, Runner: &request})
+	if err != nil {
+		return nil, err
+	}
+	if err := checkApprovedTeam(token, m.team); err != nil {
+		fmt.Fprintf(os.Stderr, "the runner token %s is live; revoke it from the console's Machines page\n", token.Prefix)
+		return nil, err
+	}
+	return &token, nil
+}
+
+func (m *deviceRunnerManager) RevokeToken(context.Context, string) (controllerwire.TokenRevoked, error) {
+	return controllerwire.TokenRevoked{}, errors.New("a runner enrolled through the browser cannot revoke its own credential; revoke it from the console's Machines page")
 }
 
 func prepareRunnerEnrollment(inv clisurface.Invocation) (runnerEnrollment, *namedProfile, error) {
@@ -144,9 +172,6 @@ func parseRunnerEnrollment(inv clisurface.Invocation) (runnerEnrollment, *namedP
 		return enrollment, nil, &clisurface.UsageError{Path: inv.Command.Path, Message: "--launcher requires --reserved-for on a shared runner"}
 	}
 	enrollment.sessionStdin = inv.Bool("session-stdin")
-	if enrollment.personal && !enrollment.sessionStdin {
-		return enrollment, nil, &clisurface.UsageError{Path: inv.Command.Path, Message: "--personal requires --session-stdin with an existing independent account session"}
-	}
 	prof, err := resolveProfile(inv.Value("profile"))
 	if err != nil {
 		return enrollment, nil, err

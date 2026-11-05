@@ -1,4 +1,4 @@
-package sourceurl
+package githubapp
 
 import (
 	"context"
@@ -10,11 +10,12 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
+	"github.com/sparkwing-dev/sparkwing/internal/sourceurl"
 )
 
-// GitHubRepositoryID resolves a positive numeric identity without trusting a repository display name.
-func GitHubRepositoryID(ctx context.Context, remote, token string) (int64, error) {
-	identity, err := Identity(remote)
+// RepositoryID resolves a positive numeric identity without trusting a repository display name.
+func RepositoryID(ctx context.Context, remote, token string) (int64, error) {
+	identity, err := sourceurl.Identity(remote)
 	if err != nil {
 		return 0, &apierr.Error{Code: apierr.InvalidArgs, Message: "invalid GitHub repository URL"}
 	}

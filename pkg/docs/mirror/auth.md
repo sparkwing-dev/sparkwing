@@ -725,11 +725,13 @@ Create a team and its first team-admin credential with
 The route is `POST /api/v1/operator/teams` and requires `operator.tokens`, or an
 operator's direct browser session with its CSRF proof. It creates the team,
 owner account, membership and first credential in one audited transaction.
-The credential is returned once. Existing team administrators issue member
-credentials through the team namespace and enroll machines with
-`sparkwing runners add --session-stdin --profile work --runner build-box --repos 'github.com/acme/*'`.
-For headless enrollment, an existing team administrator uses the in-pod
-`sparkwing-controller admin session` command. See
+The credential is returned once. Members sign the CLI in with `sparkwing login --controller https://HOST`, and
+enroll their own workstation with
+`sparkwing runners add --profile work --runner korey-laptop --personal`;
+both are approved in the browser (see [device sign-in](#device-sign-in)).
+Shared runners take an existing team administrator's session instead:
+`sparkwing runners add --session-stdin --profile work --runner build-box --repos 'github.com/acme/*'`,
+fed by the in-pod `sparkwing-controller admin session` command when headless. See
 [workstation capacity](self-hosting.md#add-workstation-capacity) for the full pipe.
 
 `profiles add` probes `/api/v1/health` and authenticates through
@@ -860,6 +862,58 @@ Machine roots require a direct account sign-in session or deployment authority.
 Their grants are limited to `nodes.claim` and `triggers.claim`. The store checks
 these rules in the transaction that issues the root.
 
+### Device sign-in
+
+`sparkwing login` and a personal `runners add` without
+`--session-stdin` get their credential through a browser approval, so nothing
+is copied out of a browser. Both need stdin and stderr on a terminal, so a code
+never lands in a script's log:
+
+1. The CLI sends `POST /api/v1/auth/device` with the machine name, the team it
+   may join when `--team` is given, and what it asks for: a member token's
+   grants, or a personal runner enrollment. The body is capped at 16 KiB. The controller
+   returns a device code once, an eight-letter user code, `/device`, a
+   10-minute lifetime and a 5-second poll interval.
+2. The CLI prints its own controller URL plus `/device` and the user code. The
+   page address never comes from the response.
+3. A signed-in member opens `/device`, types the code, and sees the machine or
+   runner name, the team, the exact grants, the runner's repositories and the
+   time left. A request naming another team is refused. Approve and Deny post the code to
+   `/api/v1/auth/device/approve` or `/deny`.
+4. The CLI polls `POST /api/v1/auth/device/token`. An approved request is
+   redeemed once: the controller issues the credential then, under the approving
+   session. The CLI prints the team before it saves the token or writes the
+   runner configuration, and refuses a team other than `--team`.
+
+Lookup, approval and denial need a direct account session with its CSRF proof,
+as issuing a member root does; a session opened from a token cannot approve.
+They allow 10 code entries per account per minute, and an unknown, expired or
+decided code is refused the same way. A member token carries the requested
+grants, or the approver's `runs.read`, `logs.read`, `runs.write`, `runs.control`
+and `approvals.write` where the role holds them; it never carries `team.admin`.
+It is the same token the console's Create CLI token issues: its parent is the
+approving session, it expires after 90 days, and logging that session out ends
+it. Browser approval enrolls personal runners only, because a code can be
+phished: shared runners, reserved pools, trust classes, platforms and launchers
+are refused when the request starts and keep `--session-stdin`. Approval runs
+the store's own issuance check for the request, and redemption runs it again
+with the session's liveness, membership and grants at that moment, so an
+approval never yields more than the approver holds then.
+
+Codes are single use and bound to the store that issued them: another
+deployment does not know them. A poll inside the interval returns `slow_down`
+and adds five seconds, up to a minute. Refusals carry `details.reason`:
+`access_denied` after a denial or cancellation, `expired_token` after 10
+minutes, and `invalid_grant` for an unknown or already redeemed code.
+`POST /api/v1/auth/device/cancel` lets the device withdraw its own request; the
+CLI sends it when interrupted. Starting a request shares the sign-in limit of
+30 per client per minute. Each decision writes a `device_login.decided` audit
+row with the approver and an opaque request id, and the issued credential
+writes `token.minted`.
+
+Only approve a request you started yourself in the last few minutes. A code
+someone sends you asks you to sign their machine in as you.
+
 ### Linked sign-ins
 
 Google and GitHub identities can be linked from an authenticated account.
@@ -894,8 +948,8 @@ still apply after admission.
 
 ## Unauthenticated endpoints
 
-Public discovery, sign-in, provider callbacks, webhooks and signed data URLs use
-their declared proof requirements. A route being reachable without a bearer is
+Public discovery, sign-in, device sign-in start, poll and cancellation, provider
+callbacks, webhooks and signed data URLs use their declared proof requirements. A route being reachable without a bearer is
 not an authorization bypass. A signed URL, verified webhook or provider proof
 is valid only for its own operation. Every registered route declares its proof.
 
@@ -937,8 +991,9 @@ SHA. A subsequent branch-head lookup cannot replace that proof.
 
 ## Signing in
 
-Sign in on the controller's configured dashboard origin, select the team you
-belong to, and create the credential appropriate for the CLI or machine.
+Sign in on the controller's configured dashboard origin and select the team you
+belong to. Run `sparkwing login` or `sparkwing runners add` and approve its code
+on the dashboard's `/device` page, or create a credential in the console.
 Controller enrollment checks account and machine authority. Possessing a
 repository URL or typing a team name supplies neither.
 

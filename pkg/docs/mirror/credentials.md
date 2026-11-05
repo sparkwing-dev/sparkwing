@@ -4,6 +4,17 @@ The typed client separates team and deployment credential management. Final
 controller provisioning and native runner configuration remain integration
 requirements.
 
+Sign a machine in through the browser, which saves a member token in the
+profile without copying anything out of the browser:
+
+```sh
+sparkwing login --controller https://sparkwing.example.com --profile prod
+```
+
+The command prints a code; type it on the controller's `/device` page while
+signed in, check the machine name, team and grants, and approve. See
+[device sign-in](auth.md#device-sign-in).
+
 Save an existing controller credential without putting it in argv:
 
 ```sh

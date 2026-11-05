@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
-	"net/http/httptest"
 	"strings"
 	"testing"
 
@@ -48,19 +47,12 @@ func TestErrorUnmarshalUsesInnerCodec(t *testing.T) {
 
 func TestErrorWriters(t *testing.T) {
 	failure := &apierr.Error{Code: apierr.RateLimited, Message: "retry later", Details: map[string]any{"retry_after_ms": 1001}}
-	w := httptest.NewRecorder()
-	if err := apierr.WriteHTTP(w, failure); err != nil {
-		t.Fatal(err)
-	}
-	if w.Code != 429 || w.Header().Get("Retry-After") != "2" || w.Header().Get("Content-Type") != "application/json" {
-		t.Fatalf("HTTP error metadata: %d %v", w.Code, w.Header())
-	}
 	var stream bytes.Buffer
 	if err := apierr.WriteJSON(&stream, failure); err != nil {
 		t.Fatal(err)
 	}
-	if stream.String() != w.Body.String() || strings.Count(stream.String(), "\n") != 1 {
-		t.Fatal("HTTP and stream errors differ")
+	if strings.Count(stream.String(), "\n") != 1 || apierr.RetryAfter(failure) != "2" {
+		t.Fatalf("stream error %q, retry after %q", stream.String(), apierr.RetryAfter(failure))
 	}
 	var envelope apierr.Envelope
 	if err := json.Unmarshal(stream.Bytes(), &envelope); err != nil || envelope.Error.Code != apierr.RateLimited {
@@ -68,12 +60,6 @@ func TestErrorWriters(t *testing.T) {
 	}
 	if err := apierr.WriteJSON(failingWriter{}, failure); err == nil {
 		t.Fatal("writer failure hidden")
-	}
-	for _, bad := range []*apierr.Error{nil, {Code: "unknown", Message: "x"}, {Code: apierr.Internal, Details: map[string]any{"bad": make(chan int)}}} {
-		w = httptest.NewRecorder()
-		if err := apierr.WriteHTTP(w, bad); err == nil || w.Body.Len() != 0 || len(w.Header()) != 0 {
-			t.Fatal("invalid error committed a partial response")
-		}
 	}
 }
 

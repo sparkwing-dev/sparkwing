@@ -227,6 +227,13 @@ uncached rebuild. Pass `sparkwing run --sw-hash-all-files`
 when a build depends on ignored files, including generated assets embedded
 by Go.
 
+Builds run with `CGO_ENABLED=0` unless the environment sets `CGO_ENABLED`.
+Without cgo an uncached compile skips the C toolchain and the cgo variants
+of `runtime`, `net` and `os/user`, 1 to 3 seconds on a two-vCPU CI
+runner. A pipeline that imports a package written with cgo sets
+`CGO_ENABLED=1` in its environment; the key records the effective value,
+so an unset `CGO_ENABLED` and `CGO_ENABLED=0` share a binary.
+
 Builds pass `-trimpath`, which keeps the build directory out of the
 binary. That is what lets two checkouts produce byte-identical output;
 the cost is that panics report module-relative paths rather than paths

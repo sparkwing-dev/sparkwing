@@ -934,8 +934,12 @@ file. Other syntax and workflow checks remain active.
   set is left alone.
 - **Frontend dependencies:** the gate's `frontend-deps` step runs
   `pnpm --dir web install --frozen-lockfile --prefer-offline --ignore-scripts`
-  before the frontend steps, a no-op when `web/node_modules` matches the
-  lockfile. Without pnpm and without `web/node_modules` it fails naming that
+  before the frontend steps and the Go `test` step, whose `tests/acceptance`
+  drives the dashboard client through `web/node_modules`. It is a no-op when
+  `web/node_modules` matches the lockfile. The affected gate skips it when the
+  change touches no frontend input, unless `web/node_modules` is missing, and
+  the land re-check after merging `origin/main` installs a missing tree before
+  its tests. Without pnpm and without `web/node_modules` it fails naming that
   command.
 - **Go result caching:** ordinary `test` and `gate` checks preserve the
   caller's temporary-directory settings so Go can reuse passing results.

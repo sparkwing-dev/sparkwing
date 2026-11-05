@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"sort"
+	"strings"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 )
@@ -169,8 +170,27 @@ func (v *planValidator) identifiers(values []string, path string) error {
 	return nil
 }
 
+// safety: hosts and stores use job IDs as slash-separated path segments, and
+// every SDK's plan reaches this check, so the rule has one owner.
+func jobIdentifier(id, path string) error {
+	for _, seg := range strings.Split(id, "/") {
+		switch {
+		case seg == "":
+			return planInvalid(path, fmt.Sprintf("job ID %q has an empty path segment", id))
+		case seg == "." || seg == "..":
+			return planInvalid(path, fmt.Sprintf("job ID %q has the path reference %q as a segment", id, seg))
+		case strings.ContainsFunc(seg, func(r rune) bool { return r == '\\' || r < 0x20 || r == 0x7f }):
+			return planInvalid(path, fmt.Sprintf("job ID %q contains a backslash or control character", id))
+		}
+	}
+	return nil
+}
+
 func (v *planValidator) registerJob(job JobSpec, path string) error {
 	if err := v.identifier(job.ID, path+".id"); err != nil {
+		return err
+	}
+	if err := jobIdentifier(job.ID, path+".id"); err != nil {
 		return err
 	}
 	if _, exists := v.jobs[job.ID]; exists {

@@ -70,7 +70,7 @@ func (s *EngineController) retry(ctx context.Context, a capability.Authorized, b
 	}
 	request, err := IntakeForStore(a, controllerwire.CreateRunRequest{
 		IdempotencyKey: body.IdempotencyKey,
-		Request:        runspec.Request{Version: 1, Team: a.Target.Team, Lineage: runspec.Lineage{RetryOf: a.Target.RunID}},
+		Request:        runspec.Request{Version: 1, Team: a.Target.Team, Agent: body.Agent, Lineage: runspec.Lineage{RetryOf: a.Target.RunID, RetryReason: body.Reason}},
 	})
 	if err != nil {
 		return controllerwire.CreateRunResponse{}, err

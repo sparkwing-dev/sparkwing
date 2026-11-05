@@ -191,12 +191,7 @@ func executeBurstUploadedSDK(t *testing.T, engines *engine.Resolver, selected en
 		},
 	}
 	native.serviceURL = func(handler http.Handler) string {
-		url, paths := burstSDKPipeService(t, handler)
-		for i, name := range []string{".burst-requests", ".burst-responses"} {
-			if err := os.Symlink(paths[i], filepath.Join(native.entry.CheckoutDirectory(), name)); err != nil {
-				t.Fatal(err)
-			}
-		}
+		url, _ := burstSDKLoopbackService(t, handler)
 		return url
 	}
 	executeBurstSDKProcess(t, options, award, owner, native)

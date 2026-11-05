@@ -27,9 +27,34 @@ unlock.
 - **sdk:** `JobNode.Cores(n)`, `JobGroup.Cores(n)` and TypeScript `job.cores(n)` declare the CPU a job asks local admission to reserve
   The default stays one core; requests go down to 0.25. The plan carries `cores` only to a host whose hello names the
   new `job_cores` feature, so a pipeline using it still plans on an older host, which keeps the one-core charge.
+- **CLI:** `sparkwing login` signs a machine in through the browser and saves a CLI token in the profile
+  On a terminal the command prints a code and the controller's `/device` page. A signed-in member types the code there, checks the machine name, team and grants, and approves; nothing is copied out of the browser, and `--team` refuses an approver from another team. The token is the member token the console's Create CLI token issues: by default the approver's run and log grants, never `team.admin` or more than the approver holds, expiring after 90 days. Codes last 10 minutes, work once, slow down a device that polls faster than every 5 seconds, and stop working when the command is interrupted or the browser denies them. See [Signing in](docs/auth.md#device-sign-in).
+- **controller:** Device sign-in routes under `/api/v1/auth/device`
+  `POST /api/v1/auth/device`, `/token` and `/cancel` take no bearer: a device starts, polls and withdraws a request with its own device code. Bodies are capped at 16 KiB, starting shares the sign-in limit of 30 per client per minute, and only member tokens and personal runners can be requested. `/lookup`, `/approve` and `/deny` need a direct account session with its CSRF proof and allow 10 code entries per account per minute. Approvals and denials write a `device_login.decided` audit row; the redeemed credential writes `token.minted` as other issuance does.
 
 ### Changed
 
+- **runners:** `sparkwing runners add --personal` without `--session-stdin` enrolls through a browser approval
+  It used to refuse. On a terminal it now prints a code for the controller's `/device` page, where a signed-in account sees the runner name, team and grants before approving; the runner credential is issued under that account's authority with the same checks as before, and the command prints the team before writing configuration. `--team` refuses an approver from another team. Shared runners, reserved pools, trust classes, platforms and launchers keep `--session-stdin`, and a script without a terminal still fails at once. See the [migration](docs/migrations/_unreleased.md#runners-add-enrolls-through-a-browser-approval).
+
+- **cli + controller:** `runs retry --reason TEXT` records why the retry should pass
+  The new run keeps the reason in its lineage (`retry_reason`), and `runs status`, `runs list`, the API and the
+  console run view show it, and the console's Rerun menu takes one. A reason is one line of at most 1024 bytes without
+  control characters.
+- **cli:** `sparkwing runs timing --pipeline <name>` splits recent runs' time into waiting, setup and running per job
+  Each job's time divides into queue, admission, setup, running and an explicit gap, with P50 and P90 across the last
+  `--last` finished runs. Each run's wall divides the same way and the parts always add up to it, so a long admission
+  wait or a slow setup shows instead of hiding inside the total. Failed jobs are grouped by failing step and reason,
+  with retry and repeated-commit counts. `-o json` emits NDJSON.
+- **sdk:** `JobNode.Cores(n)`, `JobGroup.Cores(n)` and TypeScript `job.cores(n)` declare the CPU a job asks local admission to reserve
+  The default stays one core; requests go down to 0.25. The plan carries `cores` only to a host whose hello names the
+  new `job_cores` feature, so a pipeline using it still plans on an older host, which keeps the one-core charge.
+- **cli + controller (Breaking):** An agent's retry must give `--reason`
+  When `runs retry` runs under a detected coding agent (Claude Code, Codex, Gemini CLI), `--agent` or
+  `SPARKWING_AGENT`, it refuses to retry without `--reason`, and the controller refuses a retry request that names
+  an agent without a reason. Fix it by saying why the retry should pass, such as
+  `--reason "flake: DNS timeout in TestX"` or `--reason "fixed X in commit Y"`. People are never asked, and
+  `--agent none` opts out. A controller older than the field gets the retry without the reason, with a notice.
 - **daemon:** A job's own processes no longer count as external load
   Node-host leases now carry the host process ID, so all CPU used by a job's process tree counts as Sparkwing load, not
   external load. Before, a gate running `go test -p 7` while charged one core showed all of its CPU as external load
@@ -41,6 +66,12 @@ unlock.
 - **sdk:** `NewConcurrencyGroup` in Go and `ConcurrencyGroup` in TypeScript no longer check `Scope` and `OnLimit` themselves. The host still refuses an unknown value as `plan_invalid` when it validates the plan, so both SDKs fail the same way.
 - **delivery:** Docs, UI and process landings run their own checks plus the review
   Without `--full`, the `gate` and `land` pipelines run vet, build, lint, the critical tests and the TypeScript SDK suite only when the change reaches Go source or `sdk/typescript/`, and install frontend dependencies only when a frontend suite runs. The review still runs on every landing; `sparkwing run gate -- --full` keeps the broad verification.
+- **sdk:** The Go SDK no longer imports `net/http`
+  It reaches its node host over loopback with a small HTTP/1.1 client, so a pipeline that does not import `net/http`
+  itself skips `net/http`, `crypto/tls` and `crypto/x509` on an uncached compile.
+- **run:** (Breaking) Go pipelines compile with `CGO_ENABLED=0` unless the environment sets `CGO_ENABLED`
+  An uncached compile is 1-3s faster on a two-vCPU runner. A pipeline that imports a cgo package sets
+  `CGO_ENABLED=1`; see the [migration guide](docs/migrations/_unreleased.md#pipelines-compile-without-cgo).
 
 ### Fixed
 
@@ -68,8 +99,8 @@ unlock.
   A release runner image now ships a Go module cache and build cache primed for its own SDK version under `/usr/local/share/sparkwing/go-seed`, and a Cloud Job copies them into its empty `/tmp` caches while the Docker sidecar starts. A Cloud plan already pins that version, so its pipeline build drops from about 24s to a few seconds; dependencies beyond the SDK's own still download as before, with `go.sum` checks unchanged. The image grows by about 200 MB uncompressed (about 60 MB compressed).
 - **launcher:** `sparkwing-runner launch` refuses `--poll` below 2s at startup
   The controller never suggests an idle claim poll under 2s, and one enforcing idle polls answered a faster launcher with a rate-limit warning on every tick. The launcher now fails at startup and names the controller's `--idle-claim-poll`.
-- **store (Breaking):** The schema baseline advances to version 30, which replaces the `warm_pool_desired` view in place
-  A v0.68.7 store (schema 29) upgrades on its first open, and a schema 28 store takes both steps, in one transaction on SQLite and PostgreSQL. PostgreSQL replaces the view in place, so KEDA's SELECT grant survives. An older binary refuses a schema 30 store, so snapshot the store first; rollback means restoring that snapshot. See the [store upgrade migration](docs/migrations/_unreleased.md#upgrade-the-store-in-place-to-schema-baseline-30).
+- **store (Breaking):** The schema baseline advances to version 30, which replaces the `warm_pool_desired` view in place and adds the `device_logins` table
+  A v0.68.7 store (schema 29) upgrades on its first open, and a schema 28 store takes both steps, in one transaction on SQLite and PostgreSQL. PostgreSQL replaces the view in place, so KEDA's SELECT grant survives. `device_logins` keeps a pending device sign-in's code digest, typed user code and approving session until it is redeemed or expires; it never holds a bearer. An older binary refuses a schema 30 store, so snapshot the store first; rollback means restoring that snapshot. See the [store upgrade migration](docs/migrations/_unreleased.md#upgrade-the-store-in-place-to-schema-baseline-30).
 - **warm capacity:** Auto no longer grows idle warm capacity to its maximum
   The start-time trigger added one node above the current warm count whenever the last hour's median start exceeded the target, and each new warm node raised that count, so any slow start kept the pool at the Auto maximum for an hour with nobody waiting. The trigger now fires only while a job is waiting for a fresh node; with no waits the pool returns to its minimum.
 - **run:** A first run reuses the installed CLI as the pipeline engine when it is the pinned release
@@ -84,6 +115,8 @@ unlock.
   Activating a virtualenv or Node version manager keeps the compiled pipeline; upgrading Go behind the same `PATH`
   rebuilds it.
 - **run:** Each engine notice, such as the missing version policy warning, prints once per command instead of three times
+- **sdk:** The engine refuses a plan whose job ID has an empty, `.` or `..` path segment, a backslash or a control character
+  Only the Go SDK refused these IDs; a TypeScript pipeline sent them through. Plan validation now refuses them for every SDK with `plan_invalid` naming the job ID and its position, and the Go SDK's own check is gone, so a Go pipeline gets the same error at planning instead of a panic at `sw.Job`.
 - **cli:** Local commands no longer read gitignored trees when keying the pipeline binary
   `sparkwing run`, `pipeline list`, `info` and `cache explain` walked every file under the pipeline module and its local `replace` targets and passed each path to `git check-ignore`; an 80,000-file ignored lint cache made each take 60-90 seconds. One `git ls-files` call now names ignored files and wholly ignored directories, which are skipped, and the remaining files hash in parallel. Keys are unchanged.
 - **run:** A foreground `sparkwing run` shows step output and exits within 200ms of the run finishing
@@ -160,6 +193,10 @@ unlock.
 - **dashboard:** A dashboard restored after an idle exit binds loopback only
   A dashboard started with `--allow-remote` on a non-loopback address came back on that address whenever a run or schedule restarted the controller, so the consent outlived the network it was given on. The restore now keeps the port and read-only policy but binds `127.0.0.1`; run `sparkwing dashboard start --allow-remote` again to serve remotely.
 
+- **sdk:** A `RefToLastRun` reference to the reading run's own pipeline reads only runs of the reader's repository
+  Repositories in one team can share a pipeline name, so `sparkwing run deploy -- --promote-proven` could read a
+  staging-gate record another repository's `deploy` pipeline published. References to other pipelines still read
+  across the team's repositories.
 - **runners:** A job waiting in `RunAndAwait` no longer holds its runner's slot
   A self-hosted runner defaults to `max_concurrent: 1`, and a child run goes back to the same runners, so the first `RunAndAwait` on a one-runner team hung until its timeout. A job blocked on its children now leaves its slot free, and so does the owner of a named-runner run while one of its jobs waits, until the last wait returns. A resumed job can briefly put the runner over `max_concurrent` until other jobs finish.
 - **cli:** `sparkwing runners add --help` says a job waiting in `RunAndAwait` does not count toward `--max-concurrent`

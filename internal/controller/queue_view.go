@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
+	"github.com/sparkwing-dev/sparkwing/internal/apierrhttp"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
@@ -59,9 +60,9 @@ func (s *Server) handleQueueStateView(w http.ResponseWriter, r *http.Request, a 
 			// safety: the policy writer replaces a 5xx message with "request failed", so this fixed public message is
 			// written here and the cause goes only to the request log. Daemon status, stop and restart speak over the
 			// socket that went quiet, so stopping this process by hand is the one recovery that works.
-			apierr.NoteResponseError(w, err)
+			apierrhttp.NoteResponseError(w, err)
 			pid := strconv.Itoa(os.Getpid())
-			return apierr.WriteHTTP(w, &apierr.Error{
+			return apierrhttp.Write(w, &apierr.Error{
 				Code: apierr.Unavailable, Message: "The local admission daemon did not answer.",
 				Hint: "Stop the sparkwing process " + pid + " by hand (for example `kill " + pid + "`), then run `sparkwing dashboard start`.",
 			})

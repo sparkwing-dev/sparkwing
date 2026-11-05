@@ -24,6 +24,7 @@ type gitClient struct {
 	masker          *secrets.Masker
 	workspace       string
 	bundleTransport http.RoundTripper
+	lookup          sourceurl.Lookup
 }
 
 func gitEnvironment(base []string) []string {
@@ -43,11 +44,11 @@ func (g *gitClient) output(ctx context.Context, directory, remote, input string,
 		// a tenant clone connects to the address that passed the check.
 		var pin sourceurl.Pin
 		if g.owner {
-			err = sourceurl.CheckResolvedHost(ctx, remote, lookupHost)
+			err = sourceurl.CheckResolvedHost(ctx, remote, g.resolver())
 		} else {
 			remote, args, err = normalizedRemote(remote, args)
 			if err == nil {
-				pin, err = sourceurl.PinCloneHost(ctx, remote, lookupHost)
+				pin, err = sourceurl.PinCloneHost(ctx, remote, g.resolver())
 			}
 		}
 		if err != nil {
@@ -98,6 +99,13 @@ func tenantRemote(remote string, options Options) (string, error) {
 }
 
 var lookupHost sourceurl.Lookup = net.DefaultResolver.LookupIPAddr
+
+func (g *gitClient) resolver() sourceurl.Lookup {
+	if g.lookup != nil {
+		return g.lookup
+	}
+	return lookupHost
+}
 
 // safety: curl and ssh match the pin by the spelling git dials, so a trailing
 // dot or a capital letter would dial a fresh resolution.

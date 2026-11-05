@@ -87,3 +87,33 @@ func TestCacheKeyFollowsCompilersNotPath(t *testing.T) {
 		t.Fatal("replacing go behind an unchanged PATH kept the pipeline cache key")
 	}
 }
+
+func TestPipelineBuildsWithoutCgoUnlessTheEnvironmentAsks(t *testing.T) {
+	bin := t.TempDir()
+	if err := os.WriteFile(filepath.Join(bin, "go"), []byte("#!/bin/sh\nprintf 'CGO_ENABLED=%s\\n' \"$CGO_ENABLED\"\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	dir := newPipelineDir(t)
+	build := func(extra ...string) (string, string) {
+		t.Helper()
+		env := append([]string{"PATH=" + bin, "GOWORK=off"}, extra...)
+		var out bytes.Buffer
+		if err := CompilePipeline(t.Context(), dir, filepath.Join(t.TempDir(), "pipeline"), CompileOptions{Environment: env, Diagnostics: &out}); err != nil {
+			t.Fatal(err)
+		}
+		key, _, err := ExplainCacheKey(dir, env)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return strings.TrimSpace(out.String()), key
+	}
+	unset, unsetKey := build()
+	off, offKey := build("CGO_ENABLED=0")
+	on, onKey := build("CGO_ENABLED=1")
+	if unset != "CGO_ENABLED=0" || off != "CGO_ENABLED=0" || on != "CGO_ENABLED=1" {
+		t.Fatalf("compiler saw unset=%q off=%q on=%q", unset, off, on)
+	}
+	if unsetKey != offKey || onKey == offKey {
+		t.Fatal("pipeline cache key does not follow the effective CGO_ENABLED")
+	}
+}

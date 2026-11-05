@@ -185,6 +185,11 @@ func inherited(k Kind, row Var, known bool, name string, b Base) bool {
 		if b.Local || ownerTool(b, row) {
 			return true
 		}
+		// safety: pipeline compiles default to CGO_ENABLED=0, so a runner operator's own setting is the only
+		// way a cgo pipeline builds remotely; a requester can still never submit it.
+		if k == Install && envKey(name) == envKey("CGO_ENABLED") && !slices.ContainsFunc(b.Submitted, func(submitted string) bool { return envKey(submitted) == envKey(name) }) {
+			return true
+		}
 		if row.RemoteBase {
 			return true
 		}

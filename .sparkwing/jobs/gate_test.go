@@ -369,6 +369,13 @@ func TestGateRunsFrontendUnitSuiteAsAnIndependentStep(t *testing.T) {
 	}
 }
 
+func TestGateTestStepWaitsOnFrontendDependencies(t *testing.T) {
+	w := inspectWork(t, &Gate{})
+	if !stepWaitsOn(w, "test", "frontend-deps") {
+		t.Fatal("test does not wait on frontend-deps, so tests/acceptance can run before web/node_modules exists")
+	}
+}
+
 func TestGateRunsTheTypeScriptSDKSuiteAsAnIndependentStep(t *testing.T) {
 	w := inspectWork(t, &Gate{})
 	step := findStep(w, "sdk-typescript")

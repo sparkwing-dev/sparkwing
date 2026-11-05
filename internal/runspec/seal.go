@@ -219,6 +219,7 @@ func CarryRetry(input RetryInput) (RetrySnapshot, error) {
 	lineage := input.Request.Request.Lineage
 	lineage.RetryOf = input.SourceRunID
 	lineage.Retrier = Optional[Actor]{Set: true, Value: input.Retrier}
+	lineage.RetryReason = input.Reason
 	snapshot, err := clone(RetrySnapshot{Request: input.Request, Spec: input.Spec, Lineage: lineage})
 	if err != nil {
 		return RetrySnapshot{}, err

@@ -141,9 +141,14 @@ var reviewedUnscopedSQL = map[string]string{
 // safety: operator-owned tables that carry a team column are judged like tenant tables; an entry
 // names one statement's function and table with the reason it reads across teams.
 var reviewedOperatorTableSQL = map[string]string{
-	"(*Store).settlePaymentFacts|payment_events": "a provider event replays by its own id before any team is known",
-	"checkPaymentObjectTx|payment_events":        "a provider object's earlier events are found by the provider's id, whichever team they named",
-	"paymentEventReplayTx|payment_events":        "a provider event replays by its own id before any team is known",
+	"(*Store).settlePaymentFacts|payment_events":   "a provider event replays by its own id before any team is known",
+	"checkPaymentObjectTx|payment_events":          "a provider object's earlier events are found by the provider's id, whichever team they named",
+	"paymentEventReplayTx|payment_events":          "a provider event replays by its own id before any team is known",
+	"(*Operator).CreateDeviceLogin|device_logins":  "a device login has no team until a signed-in account approves it",
+	"(*Operator).PendingDeviceLogin|device_logins": "a typed user code names the login before the approver's team is attached",
+	"(*Operator).DecideDeviceLogin|device_logins":  "the approval writes the approver's team onto the login the typed user code names",
+	"(*Operator).PollDeviceLogin|device_logins":    "the device proves the login by its device code digest; the redeemed credential is minted under the recorded team",
+	"(*Operator).CancelDeviceLogin|device_logins":  "the device withdraws its own login by its device code digest",
 }
 
 // safety: each entry joins a tenant relation pinned by a key other than team, with the reason that key is safe.

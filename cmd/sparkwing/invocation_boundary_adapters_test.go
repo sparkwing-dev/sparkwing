@@ -118,7 +118,7 @@ func runRunsRetryCommandArgs(ctx context.Context, args []string, input io.Reader
 	if err != nil {
 		return err
 	}
-	return runRunsRetryCommand(ctx, inv, input, out, resolve)
+	return runRunsRetryCommand(ctx, inv, input, out, func(string) string { return "" }, resolve)
 }
 
 func runSDKInstallCommandArgs(ctx context.Context, args []string, version string, input io.Reader, out, diagnostics io.Writer, install func(context.Context, string, io.Reader, io.Writer, io.Writer) error) error {

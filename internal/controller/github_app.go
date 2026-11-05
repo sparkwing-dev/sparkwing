@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
+	"github.com/sparkwing-dev/sparkwing/internal/apierrhttp"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/githubapp"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
@@ -89,8 +90,8 @@ func (s *Server) githubAppUnavailable() error {
 }
 
 func (s *Server) writeGitHubAppUnavailable(w http.ResponseWriter) error {
-	apierr.NoteResponseError(w, s.githubAppUnavailable())
-	return apierr.WriteHTTP(w, &apierr.Error{Code: apierr.Unavailable, Message: errGitHubAppUnavailable.Error()})
+	apierrhttp.NoteResponseError(w, s.githubAppUnavailable())
+	return apierrhttp.Write(w, &apierr.Error{Code: apierr.Unavailable, Message: errGitHubAppUnavailable.Error()})
 }
 
 const previousWebhookSecretWarning = "GitHub App: remove the previous webhook secret after rotation"

@@ -1170,7 +1170,7 @@ All capability names below are in `internal/capability`.
 | `apierr.Envelope` | Encode the shared outer `error` object. |
 | `apierr.DecodeInner` | Decode one inner error object, rejecting malformed or nested envelopes while preserving unknown additive codes. |
 | `apierr.Status` | Select the registry's HTTP status. |
-| `apierr.WriteHTTP` | Write the error envelope and Retry-After without plain-text fallbacks. |
+| `apierrhttp.Write` | Write the error envelope and Retry-After without plain-text fallbacks. |
 | `apierr.WriteJSON` | Write one JSON error line for CLI stderr. |
 | `blob.NewFilesystem`, `blob.NewS3` | Physical backends own object validation, transfer signing and byte verification. |
 | `controller.ParseCloudFrontDataConfig` | Validate CloudFront download signing before opening object storage. |

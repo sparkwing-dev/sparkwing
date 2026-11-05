@@ -45,7 +45,7 @@ func PrepareCheckout(ctx context.Context, spec Spec, options Options) (entry *En
 		}
 	}()
 	checkout := spec.LocalCheckout
-	client := gitClient{owner: options.ownerGit(), env: gitEnvironment(environment), bundleTransport: options.BundleTransport, masker: options.Base.Masker}
+	client := gitClient{owner: options.ownerGit(), env: gitEnvironment(environment), bundleTransport: options.BundleTransport, masker: options.Base.Masker, lookup: options.LookupHost}
 	if checkout == "" {
 		if !filepath.IsAbs(options.Workspace) {
 			return entry, errors.New("remote source requires an absolute host workspace")

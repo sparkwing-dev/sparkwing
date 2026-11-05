@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
+	"github.com/sparkwing-dev/sparkwing/internal/apierrhttp"
 	"github.com/sparkwing-dev/sparkwing/internal/crons"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/routepolicy"
@@ -633,7 +634,7 @@ func (s *Server) handleGitHubAppRunEvent(w http.ResponseWriter, r *http.Request,
 	if event == "push" && intake.branch != "" && intake.branch == env.Repository.DefaultBranch {
 		cronStatus, cronSkip, cronErr = s.reconcileGitHubAppCrons(r, in, tenant, repo, intake)
 		if cronErr != nil {
-			apierr.NoteResponseError(w, cronErr)
+			apierrhttp.NoteResponseError(w, cronErr)
 			s.logger.Warn("github app schedule reconciliation failed", "team", string(in.Team), "repo", repo.Slug(), "err", cronErr)
 		}
 	}
@@ -656,9 +657,9 @@ func (s *Server) handleGitHubAppRunEvent(w http.ResponseWriter, r *http.Request,
 			preview, err := s.githubAppAutomationPreview(ctx, tenant, in, repo)
 			if err != nil || (preview.Status != "ready" && preview.Status != "missing") {
 				if err != nil {
-					apierr.NoteResponseError(w, err)
+					apierrhttp.NoteResponseError(w, err)
 				} else {
-					apierr.NoteResponseError(w, errors.New(preview.Error))
+					apierrhttp.NoteResponseError(w, errors.New(preview.Error))
 				}
 				s.logger.Warn("github app repository automation unavailable", "team", string(in.Team), "repo", repo.Slug(), "status", preview.Status, "error", preview.Error, "err", err)
 				if len(planned) == 0 {

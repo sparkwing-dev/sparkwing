@@ -1,13 +1,10 @@
 package sdkserve
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net"
-	"net/http"
 	"net/url"
 	"strconv"
 	"strings"
@@ -19,10 +16,10 @@ import (
 )
 
 type routeServices struct {
-	ctx       context.Context
-	binding   *nodeproto.ProcessBinding
-	emit      func(nodeproto.FrameLog)
-	transport http.RoundTripper
+	ctx     context.Context
+	binding *nodeproto.ProcessBinding
+	emit    func(nodeproto.FrameLog)
+	dial    dialFunc
 }
 
 func routeSegment(id string) string {
@@ -49,26 +46,20 @@ func (s *routeServices) call(ctx context.Context, method, path string, body, out
 	if err != nil {
 		return err
 	}
-	req, err := http.NewRequestWithContext(ctx, method, strings.TrimRight(u.String(), "/")+path, bytes.NewReader(raw))
+	port := u.Port()
+	if port == "" {
+		port = "80"
+	}
+	dial := s.dial
+	if dial == nil {
+		dial = dialLoopback
+	}
+	resp, err := roundTrip(ctx, dial, net.JoinHostPort(u.Hostname(), port), method, path, s.binding.Routes.Bearer, raw, limits.NodeOutputBytes+limits.ProtocolEnvelopeBytes)
 	if err != nil {
 		return err
 	}
-	req.Header.Set("Authorization", "Bearer "+s.binding.Routes.Bearer)
-	req.Header.Set("Content-Type", "application/json")
-	client := http.Client{Transport: s.transport, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
-	resp, err := client.Do(req)
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
-	data, err := io.ReadAll(io.LimitReader(resp.Body, limits.NodeOutputBytes+limits.ProtocolEnvelopeBytes+1))
-	if err != nil {
-		return err
-	}
-	if int64(len(data)) > limits.NodeOutputBytes+limits.ProtocolEnvelopeBytes {
-		return fmt.Errorf("host response exceeds output limit")
-	}
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+	data := resp.body
+	if resp.status < 200 || resp.status >= 300 {
 		var envelope struct {
 			Error json.RawMessage `json:"error"`
 		}

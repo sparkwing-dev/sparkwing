@@ -361,6 +361,8 @@ func runSparkwing(args []string) (result error) {
 		return runReposInfo(inv)
 	case "sparkwing repos update":
 		return runReposUpdate(inv)
+	case "sparkwing login":
+		return runLogin(inv)
 	case "sparkwing runners add":
 		return runRunnersAdd(inv)
 	case "sparkwing runners remove":
@@ -389,6 +391,8 @@ func runSparkwing(args []string) (result error) {
 		return runRunsStatus(context.Background(), inv)
 	case "sparkwing runs stats":
 		return runJobsStats(context.Background(), inv)
+	case "sparkwing runs timing":
+		return runRunsTiming(context.Background(), inv)
 	case "sparkwing runs cancel":
 		return runRunsCancel(context.Background(), inv)
 	case "sparkwing runs prune":

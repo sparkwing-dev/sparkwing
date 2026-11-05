@@ -784,24 +784,6 @@ func TestRunnersEnrollmentRequestsPersonalCapacityOnlyWhenSelected(t *testing.T)
 	}
 }
 
-func TestRunnersPersonalEnrollmentRequiresIndependentSessionBeforeSideEffects(t *testing.T) {
-	f := newRunnersFixture(t)
-	profileHTTPFixture(t, func(*http.Request) (int, string) {
-		t.Fatal("missing session sent a request")
-		return 500, ""
-	})
-	err := runRunnersAddArgs([]string{"--profile", "prod", "--runner", "desk", "--personal", "--config", f.config})
-	if err == nil || !strings.Contains(err.Error(), "--session-stdin") {
-		t.Fatalf("missing independent session: %v", err)
-	}
-	if len(*f.calls) != 0 {
-		t.Fatalf("missing session reached service manager: %v", *f.calls)
-	}
-	if _, err := os.Stat(f.config); !errors.Is(err, os.ErrNotExist) {
-		t.Fatalf("missing session wrote runner configuration: %v", err)
-	}
-}
-
 func TestRunnersPersonalEnrollmentUsesEphemeralSession(t *testing.T) {
 	f := newRunnersFixture(t)
 	withStdin(t, "private-independent-session\n")

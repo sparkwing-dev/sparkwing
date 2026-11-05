@@ -15,6 +15,7 @@ func runGo(ctx context.Context, dir string, args []string, options CompileOption
 	if options.Environment == nil || options.Diagnostics == nil {
 		return errors.New("Go execution requires a captured environment and diagnostic writer")
 	}
+	options.Environment = pipelineBuildEnvironment(options.Environment)
 	tool, err := gotoolchain.Executable(options.Environment)
 	if err != nil {
 		return err

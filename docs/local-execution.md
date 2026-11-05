@@ -518,13 +518,15 @@ fencing rules. The local controller supplies this machine's admission only.
 Other machines register as runners with Cloud. They need `sparkwing-runner`
 beside `sparkwing`, which `curl -fsSL https://sparkwing.dev/install.sh | sh -s -- --runner`
 installs from the signed release. `sparkwing runners add --runner NAME
---personal --session-stdin --profile work` reads an existing independent account
-session from stdin and reserves the machine for that user's asserted runs.
-Omit `--repos` for a personal runner. Repository scopes require proven code,
-which personal machines never claim. The session
-and its CSRF proof stay in memory. After fetching the proof, the command
-attempts logout on enrollment success or failure and saves only the new runner
-credential. Use a dedicated session because logout ends it for every client. A profile backed only by a member token cannot enroll a personal machine.
+--personal --profile work` prints a code to approve on the controller's
+`/device` page while signed in, and reserves the machine for that user's
+asserted runs. Omit `--repos` for a personal runner. Repository scopes require
+proven code, which personal machines never claim. With `--session-stdin` the
+command reads an existing independent account session from stdin instead; the
+session and its CSRF proof stay in memory, and after fetching the proof the
+command attempts logout on enrollment success or failure. Either way it saves
+only the new runner credential. A profile backed only by a member token cannot
+enroll a personal machine without one of the two.
 The team's `members_can_add_machines` setting defaults to true. Any member
 can enroll a personal machine while it is on. When it is off, personal
 enrollment requires team administration. Shared runners always require team
