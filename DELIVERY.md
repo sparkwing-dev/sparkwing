@@ -447,15 +447,16 @@ ERROR). Each environment's deployed and previous digests are its job output. Cre
 from the run's OIDC token through the `sparkwing-deploy` role in
 [deploy-pipeline-iam.md](design/rewrite/proposals/deploy-pipeline-iam.md).
 
-The deploy takes no deploy-time snapshot. Recovery is RDS point-in-time recovery, with
-7 days of retention in production and 1 day in staging. Take a manual snapshot before a risky
+The deploy takes no deploy-time snapshot. Recovery is RDS point-in-time recovery. Production
+(`kikd-prod-sparkwing-postgres`, RDS) keeps 7 days; staging (`kikd-prod-sparkwing-staging-postgres`,
+a separate Aurora Serverless cluster) keeps 1 day. Take a manual snapshot before a risky
 migration. Checking that automated backups are on belongs to external verification through
 stormwing, not the deploy. The deploy role has no RDS permission.
 
 A failed production deploy or smoke reverts this run's GitOps commits, launcher first, even
 after cancellation. Image rollback does not undo a forward migration. If recovery needs an
 older schema, recover the target database before reverting its images. Staging and production
-share an RDS instance, so a recovery must preserve the other database.
+have separate database servers, so recovering one never touches the other.
 
 Only a run the GitHub App started for a push to main can assume the deploy role. The `deploy`
 entry in `.sparkwing/sparkwing.yaml` declares `on: push` for `main` with
@@ -525,6 +526,12 @@ sparkwing run deploy -- --dry-run --promote-proven        # preview promoting th
 ```
 
 #### Deploy toolchain
+
+Deploys run only on runners labelled `deploy-kikd-prod`. After installing the root-owned toolchain
+below, enroll one with `sparkwing runners add --profile prod --runner korey-desktop --session-stdin
+--repos github.com/sparkwing-dev/sparkwing --trust verified-default --label deploy-kikd-prod`, using
+the account session described in the [runners add docs](docs/cli-runners.md#sparkwing-runners-add).
+Local `--dry-run` previews need no runner label.
 
 A real deploy runs `aws`, `kubectl`, `helm`, `git`, `ssh`, `go`, `bash`, `node` and `pnpm` only from
 `/opt/sparkwing-deploy/bin`, and gives every child process `PATH=/opt/sparkwing-deploy/bin:/usr/bin:/bin`.

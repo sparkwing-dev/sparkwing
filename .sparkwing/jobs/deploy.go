@@ -75,11 +75,14 @@ func (p *Deploy) Plan(_ context.Context, plan *sparkwing.Plan, in DeployArgs, rc
 		cfg.RunnerBase = in.RunnerBase
 	}
 	base := deployJob{Cfg: cfg, Dry: in.DryRun || rc.DryRun, RunID: rc.RunID}
+	var runnerLabels []string
 	if !base.Dry {
 		plan.Concurrency(deployRuns)
+		runnerLabels = []string{"deploy-kikd-prod"}
 	}
 
-	build := sparkwing.Job(plan, "build-images", &deployBuildJob{Job: base.named("build-images"), Version: in.Version}).Timeout(cfg.buildBudget())
+	build := sparkwing.Job(plan, "build-images", &deployBuildJob{Job: base.named("build-images"), Version: in.Version}).
+		Requires(runnerLabels...).Timeout(cfg.buildBudget())
 	images := sparkwing.RefTo[deployImages](build)
 	var gate *sparkwing.JobNode
 	if in.PromoteProven {
@@ -87,18 +90,18 @@ func (p *Deploy) Plan(_ context.Context, plan *sparkwing.Plan, in DeployArgs, rc
 			Proven: sparkwing.RefToLastRun[stagingGateRecord]("deploy", "staging-gate", sparkwing.MaxAge(maxAge)),
 			MaxAge: maxAge,
 			Dry:    base.Dry,
-		}).Inline()
+		}).Inline().Requires(runnerLabels...)
 	} else {
 		staging := sparkwing.Job(plan, "staging-deploy", &deployStagingJob{Job: base.named("staging-deploy"), Images: images}).
-			Needs(build).Timeout(cfg.stagingBudget())
+			Needs(build).Requires(runnerLabels...).Timeout(cfg.stagingBudget())
 		gate = sparkwing.Job(plan, "staging-gate", &deployGateJob{Job: base.named("staging-gate"), Images: images}).
-			Needs(staging).Timeout(cfg.gateBudget())
+			Needs(staging).Requires(runnerLabels...).Timeout(cfg.gateBudget())
 		if in.StopAfter == "staging" {
 			return nil
 		}
 	}
 	prod := &deployProductionJob{Job: base.named("production"), Images: images, Gate: sparkwing.RefTo[stagingGateRecord](gate)}
-	sparkwing.Job(plan, "production", prod).Needs(build, gate).Timeout(cfg.productionBudget())
+	sparkwing.Job(plan, "production", prod).Needs(build, gate).Requires(runnerLabels...).Timeout(cfg.productionBudget())
 	return nil
 }
 
