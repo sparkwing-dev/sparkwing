@@ -105,7 +105,7 @@ func (s *EngineController) claim(ctx context.Context, authorized capability.Auth
 	}
 	machine := c.Subject.Kind == capability.SubjectMachine && (c.Binding.Kind == capability.BindingNone || c.Binding.Kind == capability.BindingPush)
 	if c.Purpose == capability.PurposeHere || machine || c.Subject.Kind == capability.SubjectLocal || c.Subject.Kind == capability.SubjectService && slices.Contains(c.Grants, capability.ClaimsLaunch) {
-		if err := s.authority.RecordRunnerPoll(ctx, store.UnitDemand{FreeSlots: body.FreeSlots, CapabilityPrefix: c.Prefix, Kinds: slices.Clone(body.Kinds), Labels: body.Labels, OS: profile.OS, Arch: profile.Arch}); err != nil {
+		if err := s.authority.RecordRunnerPoll(ctx, store.UnitDemand{MaxConcurrent: body.MaxConcurrent, FreeSlots: body.FreeSlots, CapabilityPrefix: c.Prefix, Kinds: slices.Clone(body.Kinds), Labels: body.Labels, OS: profile.OS, Arch: profile.Arch}); err != nil {
 			return controllerwire.ClaimResponse{}, err
 		}
 	}

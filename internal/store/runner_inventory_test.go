@@ -213,3 +213,34 @@ func TestRunnerObservationFailureRollsBackAwardAndRenewal(t *testing.T) {
 		})
 	}
 }
+
+func TestRunnerInventoryExcludesWaitingPersonalTriggerOwners(t *testing.T) {
+	s, demand, _, _ := renewalFixture(t, capability.UnitTrigger)
+	demand.Target = &UnitRef{Kind: capability.UnitNode, RunID: "run", NodeID: "job"}
+	demand.Kinds = []capability.UnitKind{capability.UnitNode}
+	if _, err := s.AsOperator().ClaimUnit(t.Context(), demand); err != nil {
+		t.Fatal(err)
+	}
+	rows := readRunnerInventory(t, s, "a").Runners
+	if len(rows) != 1 || !reflect.DeepEqual(rows[0].ActiveJobs, []string{"run/job"}) {
+		t.Fatalf("waiting owner counted as a job: %+v", rows)
+	}
+}
+
+func TestRunnerInventoryRetainsConfiguredConcurrencyAcrossRenewal(t *testing.T) {
+	s, demand, claim, now := renewalFixture(t, capability.UnitNode)
+	demand.MaxConcurrent = 2
+	if err := s.AsOperator().RecordRunnerPoll(t.Context(), demand); err != nil {
+		t.Fatal(err)
+	}
+	for range 2 {
+		rows := readRunnerInventory(t, s, "a").Runners
+		if len(rows) != 1 || rows[0].MaxConcurrent != 2 {
+			t.Fatalf("configured concurrency missing: %+v", rows)
+		}
+		*now = now.Add(time.Second)
+		if _, err := s.AsOperator().RenewUnit(t.Context(), claim.Award.CapabilityPrefix, false); err != nil {
+			t.Fatal(err)
+		}
+	}
+}

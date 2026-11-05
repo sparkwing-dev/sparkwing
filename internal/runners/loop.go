@@ -381,7 +381,7 @@ func policyInterrupted(ctx context.Context, err error) bool {
 
 func (l *Loop) request() controllerwire.ClaimRequest {
 	return controllerwire.ClaimRequest{
-		RunnerVersion: l.Config.Version, OS: runtime.GOOS, Arch: runtime.GOARCH,
+		RunnerVersion: l.Config.Version, OS: runtime.GOOS, Arch: runtime.GOARCH, MaxConcurrent: l.Config.MaxConcurrent,
 		Kinds:  slices.Clone(l.Config.Kinds),
 		Labels: slices.Clone(l.Config.Labels), RunID: l.Config.RunID, Kubernetes: l.Config.Kubernetes,
 	}

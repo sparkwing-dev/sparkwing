@@ -76,6 +76,8 @@ type PlanAccepted struct {
 
 // ClaimRequest proposes selectors, labels and free capacity for a server-authorized award.
 type ClaimRequest struct {
+	// MaxConcurrent reports configured capacity for inventory; it grants no slots.
+	MaxConcurrent      int                   `json:"max_concurrent,omitempty"`
 	FreeSlots          *int                  `json:"free_slots,omitempty"`
 	OS                 string                `json:"os,omitempty"`
 	Arch               string                `json:"arch,omitempty"`

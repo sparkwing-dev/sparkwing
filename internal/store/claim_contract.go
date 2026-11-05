@@ -22,6 +22,8 @@ type UnitRef struct {
 // come from C2's capability; requirements come from persisted seals, and pool access is
 // decided at each use from the current pool rules.
 type UnitDemand struct {
+	// MaxConcurrent is the runner-reported inventory limit, independent of offered slots.
+	MaxConcurrent int
 	// FreeSlots is remaining poll capacity; nil offers one slot. Awards consume it.
 	FreeSlots          *int
 	CapabilityPrefix   string

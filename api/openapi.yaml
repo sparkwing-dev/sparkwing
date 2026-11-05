@@ -835,6 +835,8 @@ components:
                 type: string
               type: array
             - type: "null"
+        max_concurrent:
+          type: integer
         os:
           type: string
         run_id:

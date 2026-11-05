@@ -30,7 +30,13 @@ runs execute in-process through the native owner, as a Cloud plan pod does.
 bound of the same size, because their hosting waits for jobs to finish. Claims
 offer only kinds with available capacity and stop while job capacity is full.
 `TestLoopOwnerDoesNotOccupyItsJobsOnlySlot` covers a waiting owner and its job
-at concurrency one.
+at concurrency one. Claims report the configured limit as optional
+`max_concurrent` inventory data, independently of `free_slots`. Renewals retain
+that observation. Personal-runner `active_jobs` lists job awards and excludes
+trigger owners. Older runners that omit the limit report zero (unknown).
+`TestRunnerInventoryRecordsConcurrencyFromClaimHTTP`,
+`TestRunnerInventoryRetainsConfiguredConcurrencyAcrossRenewal` and
+`TestRunnerInventoryExcludesWaitingPersonalTriggerOwners` cover reporting.
 
 Empty HTTP claims retain `X-Sparkwing-Poll-After`. The loop waits at least
 that interval (up to eight seconds) or its configured poll, whichever is longer;
