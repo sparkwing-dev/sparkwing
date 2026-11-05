@@ -129,7 +129,7 @@ func appendRunnerAwardTx(ctx context.Context, tx *storeTx, team Team, prefix str
 	if seen.After(row.LastSeen) {
 		row.LastSeen = seen
 	}
-	// Trigger owners wait for jobs under a separate bound and consume no job slot.
+	// safety: trigger owners wait for jobs under a separate bound and consume no job slot.
 	if c.Billing.ExecutorClass == "runner" && c.Unit == capability.UnitTrigger {
 		return nil
 	}

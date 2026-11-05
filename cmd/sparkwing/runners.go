@@ -679,7 +679,7 @@ func runnerServicePath() string {
 	}
 	bin := filepath.Join(root, "bin")
 	if info, err := os.Stat(filepath.Join(bin, "go")); err == nil && !info.IsDir() && info.Mode()&0o111 != 0 {
-		// Version-manager shims can select another Go after the service changes directory.
+		// hack: version-manager shims can select another Go after the service changes directory.
 		return bin + string(os.PathListSeparator) + path
 	}
 	return path

@@ -372,7 +372,7 @@ func executorActor(input NodeInput) runstate.Actor {
 }
 
 func (h *nodeExecutor) report(ctx context.Context, input NodeInput, result runstate.NodeResult, runErr error) error {
-	// A sensitive startup request can observe cancellation before the next lease renewal.
+	// safety: a sensitive startup request can observe cancellation before the next lease renewal.
 	if runErr != nil && ctx.Err() == nil {
 		if snapshot, err := h.deps.Store.ReadSnapshot(ctx, input.Accepted.RunID); err == nil {
 			for _, row := range snapshot.Nodes {
