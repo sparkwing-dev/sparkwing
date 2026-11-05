@@ -56,12 +56,13 @@ export default function TeamSwitcher() {
     };
   }, [open]);
 
-  if (state.status !== "ready") return null;
+  if (state.status !== "ready" && state.status !== "no-team") return null;
   const { me } = state;
-  const active = me.active_team;
+  const active = state.status === "ready" ? state.me.active_team : null;
+  if (!active && me.memberships.length === 0) return null;
 
   async function choose(slug: string) {
-    if (slug === active.slug) {
+    if (slug === active?.slug) {
       setOpen(false);
       return;
     }
@@ -91,9 +92,9 @@ export default function TeamSwitcher() {
         className="flex items-center gap-2 px-2 py-1 rounded-[var(--radius-control)] hover:bg-[var(--surface-raised)] text-sm"
       >
         <span className="font-medium max-w-[14rem] truncate">
-          {active.display_name}
+          {active?.display_name ?? "Choose a team"}
         </span>
-        <RolePill role={active.role} />
+        {active ? <RolePill role={active.role} /> : null}
         {me.invitations.length > 0 ? (
           <span
             className="w-2 h-2 rounded-full bg-[var(--warning)]"
@@ -129,13 +130,13 @@ export default function TeamSwitcher() {
                 key={m.slug}
                 type="button"
                 role="menuitemradio"
-                aria-checked={m.slug === active.slug}
+                aria-checked={m.slug === active?.slug}
                 disabled={switching !== null}
                 onClick={() => choose(m.slug)}
                 className="w-full flex items-center gap-2 px-3 py-1.5 text-sm text-left hover:bg-[var(--surface-raised)] disabled:opacity-60"
               >
                 <span className="w-3 text-[var(--accent)]">
-                  {m.slug === active.slug ? "✓" : ""}
+                  {m.slug === active?.slug ? "✓" : ""}
                 </span>
                 <span className="flex-1 truncate">{m.display_name}</span>
                 {switching === m.slug ? (

@@ -167,6 +167,38 @@ describe("switchTeam", () => {
 });
 
 describe("getMe", () => {
+  it("reads an approved account without an active team as no-team", async () => {
+    const body = {
+      user: { id: "new", email: "new@example.com", name: "New" },
+      active_team: null,
+      waitlisted: false,
+      operator_console: false,
+    };
+    respond = () => Response.json(body);
+    assert.deepEqual(await teams.getMe(), {
+      kind: "no-team",
+      me: {
+        user: body.user,
+        memberships: [],
+        invitations: [],
+        waitlisted: false,
+        operator_console: false,
+      },
+    });
+  });
+
+  it("reads an approved account with an active team as a member", async () => {
+    const me = {
+      user: { id: "owner", email: "owner@example.com", name: "Owner" },
+      active_team: { slug: "acme", display_name: "Acme", role: "owner" },
+      memberships: [],
+      invitations: [],
+      waitlisted: false,
+    };
+    respond = () => Response.json(me);
+    assert.deepEqual(await teams.getMe(), { kind: "member", me });
+  });
+
   it("reads a password operator's refused /me as no team, never as a signed-out session", async () => {
     const assigned: string[] = [];
     runtime.window = {

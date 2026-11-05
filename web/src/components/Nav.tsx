@@ -24,6 +24,7 @@ export default function Nav() {
   const visibleTabs = navTabs(team.status);
 
   useEffect(() => {
+    if (!["ready", "single-team", "operator"].includes(team.status)) return;
     let cancelled = false;
     async function tick() {
       const rows = await getPendingApprovals();
@@ -35,7 +36,7 @@ export default function Nav() {
       cancelled = true;
       clearInterval(t);
     };
-  }, []);
+  }, [team.status]);
 
   return (
     <header className="flex flex-wrap sm:flex-nowrap items-center gap-1 px-4 border-b border-[var(--border)] bg-[var(--surface)]">
@@ -112,7 +113,7 @@ export default function Nav() {
         onToggle={() => setOpen((v) => !v)}
         onClose={() => setOpen(false)}
       />
-      {(team.status === "ready" || team.status === "waitlisted") && team.me.operator_console ? (
+      {(team.status === "ready" || team.status === "waitlisted" || team.status === "no-team") && team.me.operator_console ? (
         <Link href="/operator" className="px-3 py-2 text-sm">
           Operator
         </Link>

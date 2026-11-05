@@ -27,6 +27,8 @@ unlock.
 - **runners:** Enrollment records the shell's PATH in launchd and systemd services and prepends the installed Go toolchain, so fresh macOS runners can compile pipelines without depending on version-manager shims.
 - **runners:** Jobs cancelled during startup report cancellation and seal empty logs when storage or process setup is refused before the next heartbeat.
 - **runners:** Burst here handoff waits for rate-limited claims and continues. Empty claim polls honor the controller's suggested interval, and personal machines and here runs keep separate idle-poll budgets.
+- **console:** Approved accounts without an active team can create their first team or select an existing one
+  Home and team pages show the next step without sending team requests that return Permission denied.
 
 ## [v0.69.2] - 2026-11-05
 ### Changed

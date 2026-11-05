@@ -16,6 +16,10 @@ describe("navTabs", () => {
     assert.deepEqual(hrefs("waitlisted"), []);
   });
 
+  it("links no team views before an approved account selects a team", () => {
+    assert.deepEqual(hrefs("no-team"), []);
+  });
+
   it("keeps team secrets under the Team tab for a signed-in member", () => {
     assert.ok(hrefs("ready").includes("/team"));
     assert.equal(hrefs("single-team").includes("/team"), false);
