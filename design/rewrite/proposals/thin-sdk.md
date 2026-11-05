@@ -1,7 +1,8 @@
 # Thin SDK audit and plan
 
 Audit date: 2026-11-05. Source snapshot: `57ae1ac9b2693ed23faa28a2ffe7f19d1ed7475a`.
-This is a proposal. It changes no runtime contract.
+This plan records the decisions made on 2026-11-05.
+It changes no runtime behavior by itself.
 All source references are repository-relative and refer to that snapshot.
 
 The SDKs should declare work, invoke author callbacks, and relay bytes and results.
@@ -68,7 +69,7 @@ structured errors. They cannot make the two native language value sets identical
 | `sparkwing/protocol_describe.go:101` parses typed secret declarations. `:130` resolves fields lazily and skips missing optional fields. `sparkwing/secrets.go:32` exposes a typed struct. `sparkwing/secret.go:12` imports the host secret package for an error sentinel. | `sdk/typescript/src/describe.ts:33` describes declared names. `sdk/typescript/src/context.ts:34` maps an optional miss to `undefined`. There is no Go reflection equivalent in TypeScript. | **Stays** for declaration extraction, typed assignment and language mapping of an explicit absent result. **Moves to host** for required/optional decisions. Replace the `internal/secrets` import with a wire error code and SDK-local sentinel. No secret source, masker or trust rule belongs in either SDK. |
 | `sparkwing/sdk_contract.go:358` relays mask registration. `internal/sdkserve/routes.go:192` waits for acknowledgement. `sparkwing/oidc.go:28` relays token requests. `sparkwing/protocol_operations.go:77` maps unavailable OIDC to a Go sentinel. | `sdk/typescript/src/context.ts:60` and `sdk/typescript/src/routes.ts:115` relay mask and OIDC requests. Neither SDK signs tokens. | **Stays** as relay over existing `/node/v1/masks` and `/node/v1/oidc-token`, then equivalent service operations. The host already registers secrets before return at `internal/nodehost/process_service_reads.go:116` and issued OIDC at `:143`. Keep issuer, claims, expiry, rate limits and masking in the host. |
 | `sparkwing/ref.go:182` decodes current-job outputs. `:200` requests previous-run output with age and trust options. `sparkwing/protocol_operations.go:539` maps host reasons to an absent-reference sentinel. | `sdk/typescript/src/context.ts:50` and `:63` relay output/latest reads. `sdk/typescript/src/routes.ts:91` encodes selection options. Both delegate record selection. Go adds typed decoding and sentinel semantics. | **Stays** for typed decoding and relay through existing output/latest routes. **Moves to host** for every selection, trust, age and authorization decision. Return an explicit presence state in the new operation. Keep missing recorded blob bytes distinct from absent output. |
-| `internal/sdkserve/routes.go:124` submits a child, long-polls it and interprets terminal states. `sparkwing/protocol_operations.go:93` applies the caller's wait timeout locally. | `sdk/typescript/src/routes.ts:118` coerces child args, submits, polls at a fixed wait and applies a client timeout. Go accepts success or memoized and handles skipped as terminal. TypeScript `:147` accepts only success and `:155` treats those other statuses as unknown. | **Moves to host.** `child.run-await/1` carries target, args and requested wait deadline. Return terminal output or a structured failure. Keep author input serialization and cancellation relay. Waiting expiry must retain its existing child-lifetime semantics unless Korey approves a change. |
+| `internal/sdkserve/routes.go:124` submits a child, long-polls it and interprets terminal states. `sparkwing/protocol_operations.go:93` applies the caller's wait timeout locally. | `sdk/typescript/src/routes.ts:118` coerces child args, submits, polls at a fixed wait and applies a client timeout. Go accepts success or memoized and handles skipped as terminal. TypeScript `:147` accepts only success and `:155` treats those other statuses as unknown. | **Moves to host.** `child.run-await/1` carries target, args and requested wait deadline. Return terminal output or a structured failure. Keep author input serialization and cancellation relay. Waiting expiry must retain its existing child-lifetime semantics. Any change needs a separate product decision. |
 | `sparkwing/cleanup/cleanup.go:47` registers with the host or writes a local session-ledger record. `:80` releases through a fixed 10-second detached context. | `sdk/typescript/src/routes.ts:162` registers cleanup through the host. Its helper cleanup uses an uncancelled context at `sdk/typescript/src/command.ts:91`. It has no Go ledger fallback. | **Stays** for declaring cleanup and releasing its handle through existing `/node/v1/cleanups`. **Moves to host** for lifetime, release deadlines and replay. **Delete** SDK ledger fallback after an authenticated tool-to-host path exists. A subprocess must not inherit the callback's bearer to recover that feature. |
 
 ### Validation, retries, caching and logs
@@ -92,7 +93,7 @@ structured errors. They cannot make the two native language value sets identical
 | `sparkwing/git/git.go:42` through `:118` read repository state. `:305` reads changes. `:334` selects semantic tags. `:381` creates and pushes tags. `sparkwing/git/clone.go:21` clones through `gitcmd` and disables prompts. `sparkwing/git_runtime.go:45` wraps those reads and exposes a trigger snapshot. | `sdk/typescript/src/helpers/git.ts:8` duplicates Git commands and state helpers. TypeScript `:199` requests NUL-delimited changed paths. Go `sparkwing/git/git.go:305` splits line output, so newline-bearing filenames differ. Both parse semantic tags, but one uses a custom parser and the other `x/mod/semver`. | **Moves to host.** `git.read/1`, `git.clone/1`, `git.fetch/1` and `git.push-tag/1` share command environment, prompt handling, cleanup and parsing. Keep sealed trigger data and pure accessors in the SDK. User-requested clones remain distinct from host source acquisition and do not grant repository proof. |
 | `sparkwing/git/git.go:138` hashes tracked and untracked files with `.dockerignore`. `:223` walks the filesystem without Git, skips selected directories and ignores walk errors. `:173` follows file symlinks through stat/read. | `sdk/typescript/src/helpers/git.ts:73` and `sdk/typescript/src/helpers/files.ts:93` duplicate the hash. TypeScript's fallback includes regular directory entries and propagates read errors. Symlinks and unreadable walks can produce different inputs. | **Moves to host** with `git.read/1` fileset hashing. Keep this legacy hash distinct from memo identity until shared vectors prove equivalence. Do not silently change build tags or reuse keys while moving ownership. |
 | `sparkwing/services/services.go:118` allocates names and ports, starts Docker services and tears them down. `:242` owns fallback delay, readiness polling, per-probe timeout and total timeout. `:160` fixes cleanup timeout at 10 seconds. | `sdk/typescript/src/helpers/services.ts:95` registers label cleanup before create/start. `:130` asks Docker for an assigned port. Go `sparkwing/services/services.go:210` probes a free host port before Docker binds it and only defers local cleanup. TypeScript `:68` rejects host networking off Linux. Go forwards it to Docker. | **Moves to host.** `services.start/1` returns addresses and a lifetime handle. `services.release/1` releases it. The host owns readiness, retries, allocation and cleanup. The SDK invokes the author callback between those two relays. Preserve caller-specified readiness budgets and handle platform errors through the shared host implementation. |
-| `sparkwing/fs.go:18` joins paths. `:35` and `:47` wrap file IO. `:62` wraps `filepath.Glob`. `sparkwing/exec.go:29` obtains the work directory from process CWD. | `sdk/typescript/src/helpers/files.ts:6` uses scoped project root. `:17` wraps file IO with phase checks. `:27` implements glob syntax and `:67` walks directories to expand it. The root and guard behavior differ. | **Stays** for work-directory data and pure path joining. **Delete** redundant general file IO and glob wrappers in the one-time API cut. Callers can use language libraries for author-owned IO. This avoids adding a general filesystem RPC just to retain convenience wrappers. Host memo/file discovery remains a host service. This public API cut needs Korey's decision in section 5. |
+| `sparkwing/fs.go:18` joins paths. `:35` and `:47` wrap file IO. `:62` wraps `filepath.Glob`. `sparkwing/exec.go:29` obtains the work directory from process CWD. | `sdk/typescript/src/helpers/files.ts:6` uses scoped project root. `:17` wraps file IO with phase checks. `:27` implements glob syntax and `:67` walks directories to expand it. The root and guard behavior differ. | **Stays** for work-directory data and pure path joining. **Delete** redundant general file IO and glob wrappers in the one-time API cut. Callers can use language libraries for author-owned IO. This avoids adding a general filesystem RPC just to retain convenience wrappers. Host memo/file discovery remains a host service. This is a Breaking change in the thinning release. The changelog must list standard-library replacements. |
 | `sparkwing/sparkwingtest/host.go:93` accepts plans. `:182` dispatches steps. `:398` resolves test secrets. `:497` registers masks. `:532` validates plans. `:582` masks logs. | TypeScript uses injected host services and native-host conformance tests, including `sdk/typescript/test/nativehost/conformance_test.go:44`. It does not ship the same public fake host. | **Moves to a host-owned test harness.** Keep the public fixture API small, but have policy assertions exercise the real host implementation. **Delete** copied validation/masking/scheduling policy from the SDK fake. Do not make a fake host's agreement with itself the compatibility gate. |
 
 ### Internal import ledger
@@ -260,24 +261,21 @@ today's host supports that major.
 
 ### Engine selection decision
 
-The standing goal says an SDK pin selects its exact matching engine. It promises
-automatic runs for releases from the last 12 months, subject to security
-revocation. A fixed last-N matrix cannot replace that promise.
+From the thinning release on, a thinned SDK pin runs on the newest compatible
+host through a signed SDK-to-host compatibility map. Pins from before thinning
+keep exact matching-engine routing. This amends the matching-engine product goal.
 
-Recommend preserving exact-engine routing for legacy SDKs. For the thinned
-baseline, recommend a signed SDK-to-compatible-host mapping that can select an
-updated host without editing the repository's SDK pin. Record both identities
-in the accepted run. Keep the SDK identity check at hello. Replace engine/SDK
-equality with the signed compatibility contract, not a development replacement.
-This amends the matching-engine rule and needs Korey's approval.
-
-Without that amendment, thinning still reduces SDK release pressure. A host-only
-fix will apply only to runs using the updated host. It will not automatically
-reach every old pin. Do not promise otherwise.
+SDK releases from the last 12 months continue to run automatically.
+Existing security revocation rules stay in force.
+Record both SDK and host identities on each accepted run.
+Keep the SDK identity check at hello. The signed compatibility contract replaces
+engine/SDK equality for thinned pins. A development replacement cannot stand
+in for that contract. Host-only fixes reach thinned pins through the map.
+Legacy pins retain the behavior of their exact matching engine.
 
 ## 3. Compatibility matrix and gate
 
-Recommend **N = 3 released versions per language, including the latest release**.
+Use **N = 3 released versions per language, including the latest release**.
 Select Go module releases and published npm releases separately. They may not
 have the same available version set. Exclude QA and prereleases from this N.
 Retain one fixture for the first thinned release and the oldest supported
@@ -295,9 +293,9 @@ That is useful cross-language coverage, but it does not prove historical pins.
 | --- | --- | --- | --- |
 | Candidate host x Go SDK releases R, R-1, R-2 | Freeze a tiny pipeline source and exact go.mod/go.sum per release. Compile with the released SDK, no local replace. Run the resulting executable through candidate nodehost. | Real hello identity, describe, plan, args, step output, raw output and nonzero exit. | `gate` when host, SDK, protocol, environment, process, secret or pin code changes. Also `pre-release`. |
 | Candidate host x TypeScript SDK releases R, R-1, R-2 | Freeze source, package lock and npm integrity. Run each released package with its declared Node runtime. Use the published bridge on Windows. | The same semantic fixture and host-side outcomes as Go. | Same as Go. |
-| Candidate host x first thin and oldest capability baselines | Keep immutable fixtures when recent versions no longer cover those branches. | Missing hello features, old fields, explicit body dispatch, chunk limits and useful unsupported-capability errors. | Same focused `gate` and `pre-release`. |
-| Candidate host x lifecycle fixture for each supported SDK baseline | Two dependent jobs, concurrent steps, retry, timeout, cancellation with a grandchild, generator replay, memo miss/hit, cache restore and secret kind drift. Use local fake executables for Docker/Git behavior and a local OIDC issuer fixture. | Legacy cells assert compatible results and outer-process cleanup with documented SDK differences. Thin-baseline cells also assert host-owned subprocess policy, classification agreement and chunk-boundary masking. No real provider is contacted. | Focused `gate` for affected contracts. Full fixture set in `pre-release`. |
-| Current launcher/resolver x supported historical pin | Use the real signed selection path and its matching engine for legacy pins. Add revoked, missing and incompatible artifacts. | Exact-engine fallback, 12-month policy, revocation guidance and no silent repin. For thinned pins, verify the approved compatible-host mapping. | `pre-release`, nightly and dispatch. This is a separate routing check. |
+| Candidate host x first thin and oldest capability baselines | Keep immutable fixtures when recent versions no longer cover those branches. | Missing hello features, old fields, explicit body dispatch, chunk limits and useful unsupported-capability errors. | `pre-release`. |
+| Candidate host x lifecycle fixture for each supported SDK baseline | Two dependent jobs, concurrent steps, retry, timeout, cancellation with a grandchild, generator replay, memo miss/hit, cache restore and secret kind drift. Use local fake executables for Docker/Git behavior and a local OIDC issuer fixture. | Legacy cells assert compatible results and outer-process cleanup with documented SDK differences. Thin-baseline cells also assert host-owned subprocess policy, classification agreement and chunk-boundary masking. No real provider is contacted. | Affected `gate` for the last three releases per language. All anchors and the full fixture set in `pre-release`. |
+| Current launcher/resolver x supported historical pin | Use the real signed selection path and its matching engine for legacy pins. Add revoked, missing and incompatible artifacts. | Exact-engine fallback, 12-month policy, revocation guidance and no silent repin. For thinned pins, verify selection of the newest compatible host through the signed map. | `pre-release`, nightly and dispatch. This is a separate routing check. |
 | Candidate host x platform boundary | Linux, macOS, Windows x64 and Windows arm64 release jobs run their supported transport and process cases. | Pipe handles, process ownership, cancellation and platform result conventions. | `pre-release` and publication jobs. Linux focused cells run in `gate`. |
 
 Use a manifest with SDK version, artifact checksum, fixture revision, compiler or
@@ -334,25 +332,25 @@ should acquire or compile historical SDKs. The broad gate and pre-release have
 separate heavier execution classes at `:659`. Nightly and dispatch coverage is
 described at `:619`.
 
-Recommend the warm six-cell direct matrix in the focused **gate**, because a
+Run the warm six-cell direct matrix in the affected **gate**, because a
 host change can break pinned consumers before a release. Add explicit affected
 path selection. SDK compatibility must run for host-only changes too.
 Run all anchors, cold artifact preparation and platform cells in **pre-release**.
-This is proposed tier membership. It requires updating DELIVERY and pipeline
-selection when implemented.
+Update DELIVERY and pipeline selection to implement this tier membership.
 
-No timing was measured in this audit. Budget the initial warm Linux matrix at
-30-90 seconds wall time and cold preparation at 2-10 minutes on a four-core
-runner. These are planning estimates, not gate guarantees. Bound concurrency
-and measure each language/version before setting a deadline. The cost is one
+No timing was measured in this audit. Measure warm execution and cold
+preparation for each language/version before setting deadlines.
+Bound concurrency during measurement. The cost is one
 candidate host build plus six small fixture preparations and process runs,
 then any non-duplicate anchors. Reuse is material: `DELIVERY.md:1229` records
 shared SDK fixture preparation as an existing way to avoid repeated builds.
-Keep raw timing, fixture identities and per-cell outcomes as artifacts.
+Keep raw timings, fixture identities and per-cell results as artifacts.
 
 Three releases are a recent regression canary, not a 12-month support claim.
-The signed support policy and matching-engine routing remain responsible for
-the longer promise. If frequent releases expose a distinct older capability
+The signed support policy and routing checks cover the longer promise.
+They verify exact matching engines for legacy pins and the signed compatibility
+map for thinned pins. Run these separate 12-month checks nightly and in
+`pre-release`. If frequent releases expose a distinct older capability
 baseline, retain its fixture regardless of N.
 
 ## 4. One-time thinning release
@@ -361,15 +359,19 @@ S means one narrow contract or deletion. M means a cross-language contract with
 focused conformance work. L means process lifetime or public API migration.
 Sizes describe implementation risk, not measured elapsed time.
 
+Steps 1-2 start now. Steps 3-5 wait until local job hosting has moved into the
+runner process, as specified in `local-controller-restart.md` step 3.
+Host code then lands once in its final home.
+
 | Order | Host work | Go SDK change | TypeScript SDK change | Size |
 | --- | --- | --- | --- | --- |
 | 1 | Freeze historical fixtures and agree on capability, process and API boundaries. Record Go/TypeScript differences as shared vectors. | No release yet. Preserve pinned source artifacts. | No release yet. Preserve npm packages and bridge artifacts. | M |
 | 2 | Split nodeproto wire codecs from host policy. Extend hello and add the generic operation service. Keep existing v2 routes for legacy clients. | Prepare the thin transport and error codecs. | Prepare the same transport and typed relay. Keep the native handle bridge. | M |
 | 3 | Own command start, env, stdin, raw output, capture, measurement, cancellation and cleanup on the executing runner. Add explicit callback body selection and a one-time body-env preparation boundary after replay. | Replace exec implementation with relay. Remove platform process files, reporter, diagnostics, procenv and ledger calls after parity passes. | Replace spawn, env filtering, taskkill and stream collection with relay. Remove per-callback process.env rewriting. | L |
-| 4 | Add host Docker, Git, service and cache-key operations. Own secret classification and child wait behavior. Resolve semantic differences through shared vectors. | Keep helper signatures as relay where feasible. Remove local helper engines and cleanup fallback. Cut generic file IO/glob sugar only if approved. | Keep helper signatures as relay. Remove duplicate Docker/Git/service algorithms and policy checks. Apply the same approved file-helper cut. | L |
+| 4 | Add host Docker, Git, service and cache-key operations. Own secret classification and child wait behavior. The maintainer ratifies every Go/TypeScript semantic difference before porting. Record each decision in shared vectors. | Keep helper APIs as thin relays. Remove local helper engines and cleanup fallback. Cut generic file IO/glob helpers once in the thinning release. Mark the cut Breaking and list standard-library replacements in the changelog. | Keep helper signatures as relay. Remove duplicate Docker/Git/service algorithms and policy checks. Apply the same Breaking file-helper cut and document standard-library replacements. | L |
 | 5 | Validate all raw and generated declarations under current placement. Own policy defaults, bounds and known-tool vocabulary. Expose a real host test harness. | Remove full plan validation, CPU/tool catalogs, product limits and fake-host policy. Retain reflection and scalar codecs. | Remove declaration policy checks, secret checks and log/annotation policy. Retain API typing and callback registration. | M |
-| 6 | Release host support first. Verify direct old-SDK matrix and runner ownership after the local controller move. | Publish one thinning 0.x release after host support is available. Upgrade pinned repos once and verify their pipelines. | Publish its thinning 0.x release in the same window, with verified native bridges. Upgrade pins once. | L |
-| 7 | If approved, publish the signed compatible-host selection rule. Keep identity, support and revocation checks. Demonstrate a host-only policy change against the frozen thin artifacts. | Freeze the baseline. Later releases add optional author API or fix SDK transport/language defects. | Freeze the baseline on the same terms. | M |
+| 6 | Release host support and the signed compatibility map before accepting thinned pins. Verify the direct old-SDK matrix and runner ownership after the local controller move. | Publish one thinning 0.x release after host support is available. Upgrade pinned repos once and verify their pipelines. | Publish its thinning 0.x release in the same window, with verified native bridges. Upgrade pins once. | L |
+| 7 | Verify the signed compatible-host selection rule from the thinning release on. Keep identity, support and revocation checks. Demonstrate a host-only policy change against the frozen thin artifacts. | Freeze the baseline. Later releases add optional author API or fix SDK transport/language defects. | Freeze the baseline on the same terms. | M |
 
 Do not make thinning depend on aligning Go and npm release numbers.
 Publish the compatibility mapping explicitly. Do not run a new SDK against a
@@ -379,7 +381,9 @@ The failure must name the missing capability and supported host remedy.
 Keep existing caller choices while moving ownership. Volume support, readiness
 budgets, command captures, output formats and child timeout behavior need
 cross-language acceptance vectors. New limits and changed defaults need a
-separate product decision. Move the owner first. Change semantics separately.
+separate product decision. The maintainer ratifies every Go/TypeScript semantic
+difference before porting. The port never decides which behavior wins.
+Move the owner first. Change semantics separately.
 
 The release is complete when the runtime SDK closure contains only declarations,
 language bindings, callbacks and transport. Its checks must reject new imports
@@ -407,50 +411,32 @@ Pass operation dependencies through nodehost composition. The runner owns
 process handles, workspace paths, service lifetimes and measurement.
 Route cancellation through the same job lifetime on local and cloud runners.
 
-Let the controller lane finish transport and runner ownership contracts first.
-The SDK lane can independently prepare wire types, vectors and historical
-fixtures. Agree on the operation service and callback-environment boundary
-before either lane edits shared nodehost composition. Then implement the host
-operations against the resulting runner seam. Do not patch temporary daemon
-hosting just to get the thinning release out sooner.
+Prepare wire types, shared vectors and historical fixtures in steps 1-2.
+Set the operation service and callback-environment contracts before changing
+shared nodehost composition. After local job hosting moves into the runner
+process, implement steps 3-5 there. This avoids building temporary daemon hosting.
 
-`design/rewrite/W9-LOCAL-SDK-CONTINUATION.md:9` records local SDK selection work.
-Earlier W8 handoffs describe native files and open contracts that have since
-moved. Use current nodehost source for ownership, then confirm the in-flight
-runner seam with its lead before implementation.
+## 5. Decisions (2026-11-05)
 
-## 5. Open questions for Korey
+1. **Host selection.** From the thinning release on, a thinned SDK pin runs on
+   the newest compatible host through a signed SDK-to-host compatibility map.
+   Pins from before thinning keep exact matching-engine routing. The 12-month
+   automatic-run promise and revocation rules stay. Record both SDK and host
+   identities on each accepted run. This amends the matching-engine product goal.
+2. **Helper API.** Keep Exec, Docker, Git, services, refs and secret APIs as thin
+   relays to host operations. Keep pure path and value helpers. Cut generic file
+   IO/glob helpers once in the thinning release. Mark this Breaking and give
+   standard-library replacements in the changelog. The maintainer ratifies every
+   Go/TypeScript semantic difference before porting. The port never decides
+   which behavior wins.
+3. **Compatibility bar.** Run the candidate host x last 3 released SDKs per
+   language in the affected `gate`. Run all anchors, cold preparation and
+   platform cells in `pre-release`. Run separate 12-month routing checks nightly
+   and in `pre-release`. Measure costs before setting deadlines. Keep raw
+   timings and per-cell results as artifacts.
 
-1. **Should a thinned SDK pin select an updated compatible host?** Exact matching
-   engines preserve old semantics, but also preserve old policy. Recommend
-   keeping exact matching for legacy pins and approving signed compatible-host
-   selection for the thinned baseline. Keep the 12-month automatic-run promise,
-   revocation rules and both recorded identities. This is a change to the
-   standing matching-engine goal, not an implementation detail.
-2. **How much public API may the one-time cut remove?** Keeping helper APIs as
-   relays avoids pipeline rewrites, but a general filesystem service adds little
-   value. Recommend preserving Exec, Docker, Git, services, refs and secret APIs.
-   Remove generic file IO/glob sugar once and give callers language-library
-   replacements. Preserve pure path and value helpers. Ratify differing helper
-   semantics before porting them. Do not adopt narrower TypeScript behavior as
-   a new Go restriction by accident.
-3. **What compatibility bar should block a host change?** A release-only matrix
-   finds failures after ordinary host deployment. Recommend N=3 per language in
-   the affected gate, plus baseline anchors and cold/platform cells in
-   pre-release. Retain separate 12-month engine-routing checks. Measure costs
-   before setting execution deadlines. This adds verification work, not a new
-   customer timeout or support cutoff.
+## Audit evidence
 
-## Audit evidence and friction
-
-This lane used source inspection and static document checks only. It did not
-build, run Sparkwing, contact a cluster, or exercise a provider. Runtime claims
-above describe source behavior. Proposed timings and compatibility coverage
-are not measured results. The lead owns the full gate after this lane.
-
-The user-selected worktree was used directly. Sparkwing discovery was skipped
-because the lane forbids running Sparkwing. Xwing discovery succeeded.
-Overwing standards loaded, but its binary reported that it was behind source.
-The bootstrap's landing-card filesystem path was absent. Reading the named
-card through Overwing worked. Historical controller handoffs contain stale
-paths, so ownership recommendations use current nodehost source.
+The audit used source inspection and static document checks.
+Runtime claims describe the source snapshot named above.
+Compatibility coverage describes required work, not measured results.
