@@ -20,6 +20,11 @@ unlock.
 
 ## [Unreleased]
 
+### Changed
+
+- **scaffold:** `const FallbackSDKVersion` pins v0.69.1, so a fresh scaffold compiles against that release.
+
+
 ### Fixed
 
 - **scaffold:** Registry templates come from sparks-core v0.33.6, whose helpers read `SPARKWING_DRY_RUN` as a boolean, so a normal run executes instead of echoing its deploy and release commands
