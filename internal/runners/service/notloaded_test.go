@@ -1,18 +1,23 @@
 package service
 
-import "testing"
+import (
+	"os"
+	"testing"
+)
 
-func TestNotLoadedRecognisesLaunchctlMissingService(t *testing.T) {
-	for _, out := range []string{
-		"Bad request.\nCould not find service \"com.sparkwing.runner\" in domain for user gui: 502",
-		"Could not find specified service",
-		"Unit sparkwing-runner.service not loaded.",
-	} {
-		if !notLoaded(out) {
-			t.Errorf("notLoaded(%q) = false, want true", out)
-		}
+func TestInstallDarwinTreatsAMissingAgentAsNotInstalled(t *testing.T) {
+	exec := &fakeExec{fail: map[string]string{
+		"launchctl print gui/501/com.sparkwing.runner": "Bad request.\nCould not find service \"com.sparkwing.runner\" in domain for user gui: 501",
+	}}
+	h := darwinHost(t, exec)
+	state, err := Install(t.Context(), h)
+	if err != nil {
+		t.Fatalf("Install on a Mac without the agent: %v", err)
 	}
-	if notLoaded("Operation not permitted") {
-		t.Error("notLoaded treated a permission error as a missing service")
+	if !state.Installed {
+		t.Fatalf("state = %+v, want installed", state)
+	}
+	if _, err := os.Stat(plistPath(h)); err != nil {
+		t.Fatalf("plist was not written: %v", err)
 	}
 }
