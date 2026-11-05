@@ -392,6 +392,20 @@ independent account session. A `team.admin` bearer, a token-derived browser
 session and the deployment bootstrap token cannot substitute for it. Shared
 runner and launcher enrollment also require current team administration.
 
+To offer your own workstation for your runs, approve the enrollment in a
+browser. The profile needs only the controller URL:
+
+```bash
+sparkwing runners add --profile prod --runner korey-laptop --personal --team support-test
+```
+
+The command prints a code and the controller's `/device` page. Sign in to the
+console, type the code, check the runner name, team and grants, and approve;
+the runner credential is issued under your account. Shared runners, reserved
+pools and launchers need the session pipe below. See
+[device sign-in](auth.md#device-sign-in). `sparkwing login` signs the CLI itself
+in the same way.
+
 For headless setup on a licensed `team` or Cloud controller, use the existing
 administrator's account ID from `operator teams create`. Run this inside the
 serving controller's pod and pipe its output directly to the enrolling CLI:
@@ -424,9 +438,9 @@ sparkwing runners add --profile prod --runner deploy-launcher --session-stdin \
   --repos github.com/acme/repo --reserved-for deploy --launcher
 ```
 
-To offer a machine only to your own runs, add `--personal` to an enrollment
-with `--session-stdin`. Members may use their own independent sign-in session
-when `members_can_add_machines` is enabled. Personal capacity is bound to that
+To offer a machine only to your own runs, add `--personal` to an enrollment.
+Members may approve their own personal machines when `members_can_add_machines`
+is enabled. Personal capacity is bound to that
 account, and the controller checks ownership when matching runs. Cloud-routed
 runs can prefer your registered machines before using Cloud pools. Omitting
 `--personal` enrolls a team runner. Repository filters, capacity settings and

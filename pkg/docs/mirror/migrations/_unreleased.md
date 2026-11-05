@@ -11,6 +11,12 @@ adds a node for slow starts only while a job is waiting for a fresh node. Before
 any slow start in the last hour kept adding a node every scaling cycle until the
 pool reached its maximum, even with nobody waiting.
 
+Schema baseline 30 also adds the `device_logins` table behind `sparkwing login`
+and browser-approved runner enrollment. A row holds the SHA-256 digest of a
+device code, the code a person types in the browser and, once approved, the
+approving session. It never holds a credential, and rows are deleted once they
+expire.
+
 The default Auto start-time target becomes 20 seconds. New stores seed every
 class at 20 seconds, and the upgrade moves each class still at the old
 10-second default to 20. A class set to another target keeps it. To keep the
@@ -69,6 +75,32 @@ Jobs that become ready more than about a minute after their run's last node
 emptied, such as a deploy after an approval, now boot a fresh node. To keep
 nodes longer, pass `sparkwing-runner launch --idle-grace <duration>`; it must be
 at least `--poll` plus 30 seconds.
+
+## runners add enrolls through a browser approval
+
+A personal `runners add` without `--session-stdin` no longer refuses.
+On a terminal it prints a code and the controller's `/device` page instead:
+
+```sh
+sparkwing runners add --profile work --runner korey-laptop --personal
+```
+
+Open the page where you are signed in to the console, type the code, check the
+runner name, team and grants, and approve. The command prints the team before it
+writes anything; pass `--team` to refuse an approver from another team. The
+runner credential is issued under your account with the same checks as a
+session enrollment. The profile only needs a controller URL. Shared runners,
+reserved pools, `--trust`, `--platform` and `--launcher` still need
+`--session-stdin`.
+
+Scripts that pipe a session keep working unchanged:
+`sparkwing-controller admin session ... | sparkwing runners add --session-stdin ...`.
+Without a terminal on stdin and stderr, the browser path refuses at once, so
+scripts still fail fast.
+
+To sign the CLI itself in, run `sparkwing login --controller https://HOST` the
+same way instead of pasting a token into
+`sparkwing profiles add --controller https://HOST --token-stdin`.
 
 ## runners add --trust verified is gone
 

@@ -1528,6 +1528,123 @@ components:
         - upcoming
       type: object
       x-sparkwing-go-type: controllerwire.DetailView
+    internal.controllerwire.DeviceCodeRequest:
+      additionalProperties: true
+      properties:
+        device_code:
+          type: string
+      required:
+        - device_code
+      type: object
+      x-sparkwing-go-type: controllerwire.DeviceCodeRequest
+    internal.controllerwire.DeviceLoginLookup:
+      additionalProperties: true
+      properties:
+        created_at:
+          format: date-time
+          type: string
+        expires_at:
+          format: date-time
+          type: string
+        grants:
+          anyOf:
+            - items:
+                type: string
+              type: array
+            - type: "null"
+        kind:
+          type: string
+        machine:
+          type: string
+        runner:
+          anyOf:
+            - $ref: '#/components/schemas/internal.controllerwire.DeviceRunner'
+            - type: "null"
+        team:
+          type: string
+        user_code:
+          type: string
+      required:
+        - user_code
+        - kind
+        - machine
+        - team
+        - grants
+        - created_at
+        - expires_at
+      type: object
+      x-sparkwing-go-type: controllerwire.DeviceLoginLookup
+    internal.controllerwire.DeviceLoginPoll:
+      additionalProperties: true
+      properties:
+        credential:
+          anyOf:
+            - $ref: '#/components/schemas/internal.controllerwire.CreatedToken'
+            - type: "null"
+        interval:
+          type: integer
+        status:
+          type: string
+      required:
+        - status
+      type: object
+      x-sparkwing-go-type: controllerwire.DeviceLoginPoll
+    internal.controllerwire.DeviceLoginStarted:
+      additionalProperties: true
+      properties:
+        device_code:
+          type: string
+        expires_in:
+          type: integer
+        interval:
+          type: integer
+        user_code:
+          type: string
+        verification_path:
+          type: string
+      required:
+        - device_code
+        - user_code
+        - verification_path
+        - expires_in
+        - interval
+      type: object
+      x-sparkwing-go-type: controllerwire.DeviceLoginStarted
+    internal.controllerwire.DeviceRunner:
+      additionalProperties: true
+      properties:
+        launcher:
+          type: boolean
+        name:
+          type: string
+        personal:
+          type: boolean
+        platform:
+          type: string
+        repos:
+          anyOf:
+            - items:
+                type: string
+              type: array
+            - type: "null"
+        reserved_pools:
+          anyOf:
+            - items:
+                type: string
+              type: array
+            - type: "null"
+        trust:
+          type: string
+      required:
+        - name
+        - personal
+        - repos
+        - reserved_pools
+        - trust
+        - platform
+        - launcher
+      type: object
+      x-sparkwing-go-type: controllerwire.DeviceRunner
     internal.controllerwire.EffectiveView:
       additionalProperties: true
       properties:
@@ -4114,6 +4231,30 @@ components:
         - message
       type: object
       x-sparkwing-go-type: controllerwire.StandingRequestWrite
+    internal.controllerwire.StartDeviceLoginRequest:
+      additionalProperties: true
+      properties:
+        grants:
+          anyOf:
+            - items:
+                type: string
+              type: array
+            - type: "null"
+        kind:
+          type: string
+        machine:
+          type: string
+        runner:
+          anyOf:
+            - $ref: '#/components/schemas/internal.controllerwire.EnrollRunnerRequest'
+            - type: "null"
+        team:
+          type: string
+      required:
+        - kind
+        - machine
+      type: object
+      x-sparkwing-go-type: controllerwire.StartDeviceLoginRequest
     internal.controllerwire.StepDetail:
       additionalProperties: true
       properties:
@@ -4289,6 +4430,15 @@ components:
         - detail
       type: object
       x-sparkwing-go-type: controllerwire.TimerStateView
+    internal.controllerwire.UserCodeRequest:
+      additionalProperties: true
+      properties:
+        user_code:
+          type: string
+      required:
+        - user_code
+      type: object
+      x-sparkwing-go-type: controllerwire.UserCodeRequest
     internal.controllerwire.WarmCapacity:
       additionalProperties: true
       properties:
@@ -7477,6 +7627,189 @@ paths:
             binding: none
             liveness: credential
         retry: safe
+  /api/v1/auth/device:
+    post:
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/internal.controllerwire.StartDeviceLoginRequest'
+        required: true
+      responses:
+        2XX:
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/internal.controllerwire.DeviceLoginStarted'
+          description: Successful response.
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/internal.apierr.Envelope'
+          description: Canonical API failure.
+      summary: Start a device sign-in and return its codes once
+      x-sparkwing-policy:
+        method: POST
+        path: /api/v1/auth/device
+        audience: controller
+        owner: none
+        authentication: public
+        access: []
+        retry: never
+  /api/v1/auth/device/approve:
+    post:
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/internal.controllerwire.UserCodeRequest'
+        required: true
+      responses:
+        "204":
+          description: Completed without a response body.
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/internal.apierr.Envelope'
+          description: Canonical API failure.
+      summary: Approve a device sign-in under this session
+      x-sparkwing-policy:
+        method: POST
+        path: /api/v1/auth/device/approve
+        audience: controller
+        owner: team
+        authentication: capability
+        access:
+          - credential: account_session
+            grants:
+              - runs.read
+            binding: none
+            liveness: credential
+        retry: never
+  /api/v1/auth/device/cancel:
+    post:
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/internal.controllerwire.DeviceCodeRequest'
+        required: true
+      responses:
+        "204":
+          description: Completed without a response body.
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/internal.apierr.Envelope'
+          description: Canonical API failure.
+      summary: Withdraw a device sign-in
+      x-sparkwing-policy:
+        method: POST
+        path: /api/v1/auth/device/cancel
+        audience: controller
+        owner: none
+        authentication: public
+        access: []
+        retry: safe
+  /api/v1/auth/device/deny:
+    post:
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/internal.controllerwire.UserCodeRequest'
+        required: true
+      responses:
+        "204":
+          description: Completed without a response body.
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/internal.apierr.Envelope'
+          description: Canonical API failure.
+      summary: Deny a device sign-in
+      x-sparkwing-policy:
+        method: POST
+        path: /api/v1/auth/device/deny
+        audience: controller
+        owner: team
+        authentication: capability
+        access:
+          - credential: account_session
+            grants:
+              - runs.read
+            binding: none
+            liveness: credential
+        retry: safe
+  /api/v1/auth/device/lookup:
+    post:
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/internal.controllerwire.UserCodeRequest'
+        required: true
+      responses:
+        2XX:
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/internal.controllerwire.DeviceLoginLookup'
+          description: Successful response.
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/internal.apierr.Envelope'
+          description: Canonical API failure.
+      summary: Show what a pending device sign-in would grant
+      x-sparkwing-policy:
+        method: POST
+        path: /api/v1/auth/device/lookup
+        audience: controller
+        owner: team
+        authentication: capability
+        access:
+          - credential: account_session
+            grants:
+              - runs.read
+            binding: none
+            liveness: credential
+        retry: safe
+  /api/v1/auth/device/token:
+    post:
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/internal.controllerwire.DeviceCodeRequest'
+        required: true
+      responses:
+        2XX:
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/internal.controllerwire.DeviceLoginPoll'
+          description: Successful response.
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/internal.apierr.Envelope'
+          description: Canonical API failure.
+      summary: Poll a device sign-in; an approval returns its credential once
+      x-sparkwing-policy:
+        method: POST
+        path: /api/v1/auth/device/token
+        audience: controller
+        owner: none
+        authentication: public
+        access: []
+        retry: never
   /api/v1/auth/logout:
     post:
       description: Authorization is declared by the shared policy. A shared success-body contract is not documented for this operation.

@@ -24,6 +24,7 @@ type triggerFlags struct {
 	profile                          string
 	detach                           bool
 	workingTree                      bool
+	trusted                          bool
 	wantHelp                         bool
 	allowSecretFiles                 []string
 	runner                           string
@@ -36,13 +37,13 @@ type triggerFlags struct {
 func triggerFlagsFromInvocation(inv clisurface.Invocation) (triggerFlags, error) {
 	flags := triggerFlags{
 		pipeline: inv.Pipeline, profile: inv.Value("profile"), detach: inv.Bool("detach"),
-		workingTree: inv.Bool("working-tree"), wantHelp: inv.Help(),
+		workingTree: inv.Bool("working-tree"), trusted: inv.Bool("trusted"), wantHelp: inv.Help(),
 		allowSecretFiles: inv.Flags["allow-secret-file"], runner: inv.Value("runner"),
 		reason: inv.Value("reason"), passthrough: inv.Args, resume: inv.Value("resume"),
 		ref: inv.Value("ref"), pipelineRef: inv.Value("pipeline-ref"), output: inv.Output(color.IsInteractiveStdout()),
 	}
 	if !flags.wantHelp && flags.resume == "" {
-		if err := checkHereFlags(flags); err != nil {
+		if err := errors.Join(checkHereFlags(flags), checkTrustedFlags(flags)); err != nil {
 			return triggerFlags{}, &clisurface.UsageError{Path: inv.Command.Path, Message: err.Error()}
 		}
 		agent, err := resolveRunAgent(inv.Value("agent"), inv.Has("agent"), os.Getenv)
@@ -73,6 +74,11 @@ func runTriggerCommand(ctx context.Context, inv clisurface.Invocation, out io.Wr
 			func(ctx context.Context, options client.EngineOptions, run string) (nodehost.RunCompletion, error) {
 				return resumeAttachedHereRun(ctx, options, run, defaultHereDependencies(flags.output))
 			})
+	}
+	if flags.trusted {
+		if flags.runner, err = trustedRunnerForProfile(ctx, flags.profile); err != nil {
+			return err
+		}
 	}
 	request, err := prepare(ctx, flags)
 	if err != nil {
@@ -107,6 +113,25 @@ func runTriggerCommand(ctx context.Context, inv clisurface.Invocation, out io.Wr
 			return outcome, errors.Join(followErr, err)
 		},
 	})
+}
+
+func trustedRunnerForProfile(ctx context.Context, profileName string) (string, error) {
+	profile, err := resolveProfileFlag(profileName)
+	if err != nil {
+		return "", err
+	}
+	if profile == nil {
+		return "", errors.New("--trusted requires --profile")
+	}
+	path, err := agentConfigPath("")
+	if err != nil {
+		return "", err
+	}
+	checkout, err := os.Getwd()
+	if err != nil {
+		return "", err
+	}
+	return trustedRunner(ctx, profile.ControllerURL(), path, checkout)
 }
 
 func localRunnerCredential(controllerURL string) (string, error) {

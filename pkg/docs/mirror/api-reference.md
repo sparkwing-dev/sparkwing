@@ -246,6 +246,12 @@ The owner names the server lookup. Bindings and current authority constrain ever
 | `PUT` | `/api/v1/data/uploads/{upload}` | `controller` | `team` | `signed_object_url` | `exact_body` |  |
 | `GET` | `/api/v1/data/objects/{key...}` | `controller` | `team` | `signed_object_url` | `safe` |  |
 | `PUT` | `/api/v1/log-segments/{key...}` | `controller` | `run` | `signed_object_url` | `exact_body` |  |
+| `POST` | `/api/v1/auth/device` | `controller` | `none` | `public` | `never` |  |
+| `POST` | `/api/v1/auth/device/token` | `controller` | `none` | `public` | `never` |  |
+| `POST` | `/api/v1/auth/device/cancel` | `controller` | `none` | `public` | `safe` |  |
+| `POST` | `/api/v1/auth/device/lookup` | `controller` | `team` | `capability` | `safe` | `account_session` / `runs.read` / `none` / `credential` |
+| `POST` | `/api/v1/auth/device/approve` | `controller` | `team` | `capability` | `never` | `account_session` / `runs.read` / `none` / `credential` |
+| `POST` | `/api/v1/auth/device/deny` | `controller` | `team` | `capability` | `safe` | `account_session` / `runs.read` / `none` / `credential` |
 | `GET` | `/api/v1/auth/session` | `controller` | `account` | `browser_flow_csrf_nonce` | `never` |  |
 | `POST` | `/api/v1/auth/logout` | `controller` | `account` | `browser_flow_csrf_nonce` | `never` |  |
 | `GET` | `/login` | `controller` | `account` | `browser_flow_csrf_nonce` | `never` |  |
