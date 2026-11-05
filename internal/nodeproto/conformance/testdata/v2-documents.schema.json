@@ -300,6 +300,9 @@
         "continue_on_error": {
           "type": "boolean"
         },
+        "cores": {
+          "type": "number"
+        },
         "deps": {
           "items": {
             "type": "string"

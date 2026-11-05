@@ -39,6 +39,22 @@ func TestV2Declarations(t *testing.T) {
 	}
 }
 
+func TestJobCoresDeclaration(t *testing.T) {
+	p := NewPlan()
+	Job(p, "light", func(context.Context) error { return nil }).Cores(0.25)
+	Job(p, "plain", func(context.Context) error { return nil })
+	doc := planDocument(p)
+	if doc.Jobs[0].Cores == nil || *doc.Jobs[0].Cores != 0.25 || doc.Jobs[1].Cores != nil {
+		t.Fatalf("cores = %v / %v, want 0.25 on light and absent on plain", doc.Jobs[0].Cores, doc.Jobs[1].Cores)
+	}
+	defer func() {
+		if recover() == nil {
+			t.Fatal("Cores(0.1) did not panic below the 0.25 floor")
+		}
+	}()
+	Job(p, "tiny", func(context.Context) error { return nil }).Cores(0.1)
+}
+
 func TestMemoKeyBoundaries(t *testing.T) {
 	if reflect.DeepEqual(MemoKey("ab", "c"), MemoKey("a", "bc")) {
 		t.Fatal("ambiguous key")

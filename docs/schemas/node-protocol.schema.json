@@ -489,6 +489,13 @@
               {
                 "not": {
                   "required": [
+                    "features"
+                  ]
+                }
+              },
+              {
+                "not": {
+                  "required": [
                     "pipeline"
                   ]
                 }
@@ -610,6 +617,13 @@
               {
                 "not": {
                   "required": [
+                    "features"
+                  ]
+                }
+              },
+              {
+                "not": {
+                  "required": [
                     "job"
                   ]
                 }
@@ -715,6 +729,13 @@
               {
                 "not": {
                   "required": [
+                    "features"
+                  ]
+                }
+              },
+              {
+                "not": {
+                  "required": [
                     "pipeline"
                   ]
                 }
@@ -794,6 +815,13 @@
                 "not": {
                   "required": [
                     "binding"
+                  ]
+                }
+              },
+              {
+                "not": {
+                  "required": [
+                    "features"
                   ]
                 }
               },
@@ -883,6 +911,13 @@
                 "not": {
                   "required": [
                     "binding"
+                  ]
+                }
+              },
+              {
+                "not": {
+                  "required": [
+                    "features"
                   ]
                 }
               },
@@ -1002,6 +1037,12 @@
         },
         "failure": {
           "$ref": "#/$defs/failure"
+        },
+        "features": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
         },
         "id": {
           "minLength": 1,

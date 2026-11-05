@@ -84,9 +84,13 @@ func gateJobs(plan *sparkwing.Plan, p *Gate, id string, full bool) []*sparkwing.
 	broad := sparkwing.Job(plan, id, p).Timeout(gateRunTimeout).SkipIf(proven)
 	race := sparkwing.Job(plan, "race-touched", &raceTouchedJob{Proven: ref, mode: p.mode}).Timeout(raceTouchedStepTimeout).SkipIf(proven)
 	record := &recordTree{Proven: ref, Gate: sparkwing.RefTo[bool](broad), Race: sparkwing.RefTo[bool](race), mode: p.mode}
-	tree := sparkwing.Job(plan, recordTreeJob, record).Needs(broad, race).SkipIf(proven)
+	tree := sparkwing.Job(plan, recordTreeJob, record).Needs(broad, race).SkipIf(proven).Cores(lightJobCores)
 	return []*sparkwing.JobNode{broad, race, tree}
 }
+
+// perf: jobs that mostly wait on git, the network or a reviewer ask local
+// admission for a quarter core, so they start beside running gates.
+const lightJobCores = 0.25
 
 // perf: four-core runners need explicit per-process limits for heavy suites.
 const overlappedGoSuiteCPUs = 4

@@ -34,7 +34,11 @@ conflicts, and names the command that fixes each; a branch behind main that
 merges cleanly goes ahead. The gate (the same jobs as
 `sparkwing run gate`) and the review (the same job as `sparkwing run review`,
 under `.review.yaml`) then run in parallel. Every change is reviewed, docs and
-comment changes included; the review job never skips by size or path. The
+comment changes included; the review job never skips by size or path. A diff
+whose every file matches `.review.yaml`'s `docs_only` paths (`docs/`, any
+`*.md`, `CHANGELOG*`) runs the default review on the cheaper `docs` reviewer
+(Claude Haiku) instead of the default model; any other file keeps the default.
+The record's `reviewer.model` names the model that ran. The
 gate selects its checks from the change scope (decision 96): vet, build, lint,
 the critical tests and the TypeScript SDK suite run only when the change
 reaches Go source, a non-Markdown file inside a Go package, module files,
@@ -581,7 +585,15 @@ file. Other syntax and workflow checks remain active.
   its own 80-minute hosted job. Hosted CI selects them with `sparkwing run gate
   --sw-only gate -- --full` and `sparkwing run gate --sw-only race-touched`. Each job
   owns a separate four-core runner, so race tests share no cores with the full
-  Go or PostgreSQL suite. `sparkwing run gate` runs both jobs locally. Without
+  Go or PostgreSQL suite. `sparkwing run gate` runs both jobs locally. There
+  both keep the one-core admission charge while running half the machine's
+  cores, overcommitting like fixed runner slots; local admission counts their
+  CPU as Sparkwing load, not external. The `preconditions`, `review`,
+  `record-tree` and `land` jobs declare a quarter core (`Cores(0.25)`), so they
+  start beside running gates instead of queueing behind them. A simulation of
+  six concurrent lands found declaring 4 or 6 cores for the gate pair slower
+  than this under external load.
+  Without
   `--full` its test step runs the changed packages (importers still build and
   vet; their tests run after deploy) and the tests marked `//sparkwing:critical` on the line above them; a change to a
   `go.mod`, `go.sum` or `internal/store/schema.sql` runs its whole module. A

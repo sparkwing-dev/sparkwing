@@ -123,6 +123,7 @@ export interface JobGroup {
   retry(attempts: number, options?: RetryOptions): this;
   timeout(ms: number): this;
   noProgressTimeout(ms: number): this;
+  cores(n: number): this;
   skipIf(predicate: Predicate, options?: SkipOptions): this;
   beforeRun(hook: Hook): this;
   verify(hook: Hook): this;
@@ -242,6 +243,7 @@ export declare class Job<T = unknown> {
   retry(attempts: number, options?: RetryOptions): this;
   timeout(ms: number): this;
   noProgressTimeout(ms: number): this;
+  cores(n: number): this;
   skipIf(predicate: Predicate, options?: SkipOptions): this;
   beforeRun(hook: Hook): this;
   verify(hook: Hook): this;

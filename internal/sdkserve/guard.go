@@ -3,6 +3,7 @@ package sdkserve
 import (
 	"context"
 	"fmt"
+	"slices"
 )
 
 type planTimeKey struct{}
@@ -32,4 +33,18 @@ func RequireExecution(ctx context.Context, what string) {
 			what,
 		))
 	}
+}
+
+type hostFeaturesKey struct{}
+
+// WithHostFeatures records the plan declarations the calling host accepts.
+func WithHostFeatures(ctx context.Context, features []string) context.Context {
+	return context.WithValue(ctx, hostFeaturesKey{}, features)
+}
+
+// HostAccepts reports whether the host that said hello named feature, so an SDK
+// leaves out declarations an older host would refuse.
+func HostAccepts(ctx context.Context, feature string) bool {
+	features, _ := ctx.Value(hostFeaturesKey{}).([]string)
+	return slices.Contains(features, feature)
 }
