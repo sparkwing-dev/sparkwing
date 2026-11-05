@@ -41,6 +41,12 @@ CREATE TABLE claim_awards (
     ordinal BIGINT NOT NULL DEFAULT 0 CHECK(ordinal >= 0)
 );
 INSERT INTO claim_awards(singleton,ordinal) VALUES (1,0);
+
+CREATE TABLE local_machine_admission (
+    singleton BIGINT NOT NULL PRIMARY KEY CHECK(singleton=1),
+    state_json BLOB NOT NULL
+);
+
 CREATE TABLE team_first_success (
     team TEXT NOT NULL PRIMARY KEY REFERENCES teams(name),
     run_id TEXT NOT NULL CHECK(run_id <> '')

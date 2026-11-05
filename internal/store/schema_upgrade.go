@@ -51,6 +51,13 @@ var schemaUpgrades = []schemaUpgrade{
 			`CREATE INDEX idx_device_logins_expiry ON device_logins(expires_at)`,
 		},
 	},
+	{
+		from: 30, release: "v0.69.2", digest: "d0f42d8e52dd4ce999ace44a3767b6302d87e54c3b79dd544dfc5cd1ff8c0cf4",
+		statements: []string{`CREATE TABLE local_machine_admission (
+    singleton BIGINT NOT NULL PRIMARY KEY CHECK(singleton=1),
+    state_json BLOB NOT NULL
+)`},
+	},
 }
 
 func schemaUpgradeFrom(version int) (schemaUpgrade, bool) {

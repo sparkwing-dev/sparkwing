@@ -19,10 +19,7 @@ type Snapshot struct {
 	Leases              []LeaseState     `json:"leases,omitempty"`
 	Semaphores          []SemaphoreState `json:"semaphores,omitempty"`
 	Waiters             []WaiterState    `json:"waiters,omitempty"`
-	// PriorityOverrides is the rank an operator set on a run after it was
-	// submitted, keyed by run id. It outlives the run's waiters -- which
-	// are not persisted -- so a participant admitting after a daemon
-	// restart still lands at the rank the operator chose.
+	// PriorityOverrides retains operator ranking for participants submitted after restore.
 	PriorityOverrides map[string]int `json:"priority_overrides,omitempty"`
 }
 
