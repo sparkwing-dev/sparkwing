@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -11,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
 	"github.com/sparkwing-dev/sparkwing/internal/controller"
 	"github.com/sparkwing-dev/sparkwing/internal/deployment/deploymenttest"
@@ -208,5 +210,78 @@ func TestLoginWithControllerIgnoresTheSavedDefaultProfile(t *testing.T) {
 	profiles, _, err := loadProfiles()
 	if err != nil || profiles["work"].Controller.URL != "https://elsewhere.example" || profiles["controller-example"].Controller.Token == nil {
 		t.Fatalf("profiles after login = %+v %v", profiles, err)
+	}
+}
+
+func TestLoginWarnsOnlyWhenPreviousTokenRevocationIsUnconfirmed(t *testing.T) {
+	for _, tc := range []struct {
+		name, method  string
+		code          apierr.Code
+		warn, revoked bool
+	}{
+		{name: "already revoked", revoked: true},
+		{name: "live revoked"},
+		{name: "not live", method: http.MethodGet, code: apierr.Unauthenticated},
+		{name: "lookup absent", method: http.MethodGet, code: apierr.NotFound},
+		{name: "ended during revoke", method: http.MethodDelete, code: apierr.Unauthenticated},
+		{name: "absent during revoke", method: http.MethodDelete, code: apierr.NotFound},
+		{name: "live revoke failed", method: http.MethodDelete, code: apierr.Unavailable, warn: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			writeProfilesFixture(t, "profiles: {}\n")
+			f := newDeviceLoginFixture(t, "approve")
+			var err error
+			captureStdout(t, func() {
+				err = f.run(t, "login", "--profile", "work", "--controller", "https://controller.example", "-o", "json")
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			profiles, _, err := loadProfiles()
+			if err != nil {
+				t.Fatal(err)
+			}
+			previous := *profiles["work"].Controller.Token
+			if tc.revoked {
+				if err := revokeProfileToken(&namedProfile{Profile: profiles["work"]}); err != nil {
+					t.Fatal(err)
+				}
+			}
+			calls := 0
+			original := f.handler
+			f.handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if tc.method != "" && r.Method == tc.method && strings.HasPrefix(r.URL.Path, "/api/v1/tokens/") {
+					calls++
+					w.Header().Set("Content-Type", "application/json")
+					status := http.StatusServiceUnavailable
+					if tc.code == apierr.NotFound {
+						status = http.StatusNotFound
+					}
+					if tc.code == apierr.Unauthenticated {
+						status = http.StatusUnauthorized
+					}
+					w.WriteHeader(status)
+					_ = json.NewEncoder(w).Encode(apierr.Envelope{Error: &apierr.Error{Code: tc.code, Message: "token cleanup refused"}})
+					return
+				}
+				original.ServeHTTP(w, r)
+			})
+			stderr := captureStderr(t, func() {
+				captureStdout(t, func() { err = f.run(t, "login", "--profile", "work", "-o", "json") })
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if tc.method != "" && calls != 1 {
+				t.Fatalf("cleanup calls = %d", calls)
+			}
+			if warned := strings.Contains(stderr, "previous token was not revoked"); warned != tc.warn {
+				t.Fatalf("warning = %v, want %v: %s", warned, tc.warn, stderr)
+			}
+			profiles, _, err = loadProfiles()
+			if err != nil || profiles["work"].Controller.Token == nil || *profiles["work"].Controller.Token == previous {
+				t.Fatalf("replacement was not saved: %v", err)
+			}
+		})
 	}
 }

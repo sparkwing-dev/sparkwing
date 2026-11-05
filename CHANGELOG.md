@@ -22,6 +22,7 @@ unlock.
 
 ### Fixed
 
+- **cli:** Replacing a profile token through `sparkwing login` skips the revocation warning when the previous token is already ended or unknown
 - **controller:** Device sign-in links redirect from the API host to the configured console origin
 
 - **Cloud:** A same-run successor waits up to 30 seconds for a terminating or finished predecessor Pod before requesting another node, including when Kubernetes has not yet marked the predecessor Job for deletion.

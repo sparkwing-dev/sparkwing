@@ -887,6 +887,9 @@ never lands in a script's log:
    session. The CLI prints the team before it saves the token or writes the
    runner configuration, and refuses a team other than `--team`.
 
+When login replaces a saved token, already ended or unknown tokens need no
+cleanup. A failed attempt to revoke a live token still prints a warning.
+
 Lookup, approval and denial need a direct account session with its CSRF proof,
 as issuing a member root does; a session opened from a token cannot approve.
 They allow 10 code entries per account per minute, and an unknown, expired or
