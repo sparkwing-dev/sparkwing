@@ -15,7 +15,7 @@ func TestApprovedAccountWithoutTeamCreatesFirstTeam(t *testing.T) {
 	if code := f.call("POST", "/api/v1/teams", auth, map[string]string{"slug": "first-team"}, nil); code != http.StatusForbidden {
 		t.Fatalf("waitlisted create team = %d, want 403", code)
 	}
-	// Approval normally provisions a personal team. Retain an approved account
+	// safety: approval normally provisions a personal team. Retain an approved account
 	// without one to cover accounts admitted without that provisioning.
 	if _, err := teststore.Exec(t.Context(), f.store, `UPDATE accounts SET waitlisted_at=0 WHERE id=?`, newcomer.User.ID); err != nil {
 		t.Fatal(err)
