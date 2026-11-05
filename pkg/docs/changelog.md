@@ -22,6 +22,8 @@ unlock.
 
 ### Fixed
 
+- **scaffold:** Registry templates come from sparks-core v0.33.6, whose helpers read `SPARKWING_DRY_RUN` as a boolean, so a normal run executes instead of echoing its deploy and release commands
+
 - **cli:** Replacing a profile token through `sparkwing login` skips the revocation warning when the previous token is already ended or unknown
 - **controller:** Device sign-in links redirect from the API host to the configured console origin
 

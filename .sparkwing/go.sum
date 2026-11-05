@@ -28,8 +28,8 @@ github.com/rogpeppe/go-internal v1.15.0 h1:D0RCU5rMAp+SpgkiNdrjfJ+LX4J1M32V2NeCY
 github.com/rogpeppe/go-internal v1.15.0/go.mod h1:DrUVZyrJU+txYW5/1kwtXQSMFio52ZOxX7yM1VHvnxs=
 github.com/sirupsen/logrus v1.9.4 h1:TsZE7l11zFCLZnZ+teH4Umoq5BhEIfIzfRDZ1Uzql2w=
 github.com/sirupsen/logrus v1.9.4/go.mod h1:ftWc9WdOfJ0a92nsE2jF5u5ZwH8Bv2zdeOC42RjbV2g=
-github.com/sparkwing-dev/sparks-core/templates v0.33.5 h1:sV2clLzJkb7mNyszeGS3iVdIspyvD7vE1imSLY6lcIE=
-github.com/sparkwing-dev/sparks-core/templates v0.33.5/go.mod h1:lSkz5wUBkHu9RhcPtt3jgKQV2XmSoOBKo1cfwA526gA=
+github.com/sparkwing-dev/sparks-core/templates v0.33.6 h1:m1u14Bvwqyl9trLugcv6TFy/G050LPLvBPdXjzHMuX4=
+github.com/sparkwing-dev/sparks-core/templates v0.33.6/go.mod h1:lSkz5wUBkHu9RhcPtt3jgKQV2XmSoOBKo1cfwA526gA=
 github.com/stretchr/testify v1.11.1 h1:7s2iGBzp5EwR7/aIZr8ao5+dra3wiQyKjjFuvgVKu7U=
 github.com/stretchr/testify v1.11.1/go.mod h1:wZwfW3scLgRK+23gO65QZefKpKQRnfz6sD981Nm4B6U=
 github.com/xi2/xz v0.0.0-20171230120015-48954b6210f8 h1:nIPpBwaJSVYIxUFsDv3M8ofmx9yWTog9BfvIu0q41lo=

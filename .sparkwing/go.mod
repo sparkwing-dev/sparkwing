@@ -8,7 +8,7 @@ require (
 	github.com/fergusstrange/embedded-postgres v1.34.0
 	github.com/google/go-containerregistry v0.22.1
 	github.com/lib/pq v1.10.9
-	github.com/sparkwing-dev/sparks-core/templates v0.33.5
+	github.com/sparkwing-dev/sparks-core/templates v0.33.6
 	github.com/sparkwing-dev/sparkwing v0.69.0
 	go.yaml.in/yaml/v3 v3.0.4
 	golang.org/x/mod v0.41.0
