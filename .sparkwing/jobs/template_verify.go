@@ -421,7 +421,7 @@ func classifyTemplateDryRun(runID, raw string) (templateOutcome, error) {
 		return out, errors.New("missing completed dry-run job or step evidence")
 	}
 	allSucceeded := true
-	// The public step view omits skip reasons, so every skipped step is partial evidence.
+	// safety: the public step view omits skip reasons, so every skipped step is partial evidence.
 	for _, r := range append(detail.Jobs, detail.Steps...) {
 		if r.Status == "skipped" || r.Outcome == "skipped" || strings.Contains(r.Reason+r.StatusDetail, "no_dry_run_defined") {
 			out.Skipped, out.SkipReason = true, "dry-run jobs or steps skipped"
