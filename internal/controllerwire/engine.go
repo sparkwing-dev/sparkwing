@@ -117,7 +117,9 @@ type ClaimedUnit struct {
 }
 
 type ClaimResponse struct {
-	Claim *ClaimedUnit `json:"claim,omitempty"`
+	// PollAfter carries transport advice locally; it is not part of the JSON envelope.
+	PollAfter time.Duration `json:"-"`
+	Claim     *ClaimedUnit  `json:"claim,omitempty"`
 }
 
 // LauncherCapacityObservation reports demand without an execution placement.

@@ -12,6 +12,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/controller"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/limits"
 	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
@@ -319,6 +320,7 @@ func (l *Loop) run(ctx context.Context) (policyErr, runErr error) {
 			}
 			if outcome.response.Claim == nil {
 				pollAt = time.Now().Add(l.Config.PollInterval)
+				backoffUntil = time.Now().Add(min(outcome.response.PollAfter, controller.MaxHonoredIdleClaimPoll))
 			}
 		case result := <-results:
 			finish(result)

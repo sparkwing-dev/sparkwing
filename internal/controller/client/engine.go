@@ -18,6 +18,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
 
 // ErrResponseNotObject marks a reply with no usable controller envelope.
@@ -169,6 +170,9 @@ func (c *engineClient) readResponse(resp *http.Response, output any) (bool, erro
 	}
 	if err := json.Unmarshal(data, output); err != nil {
 		return false, fmt.Errorf("decode controller response: %w", err)
+	}
+	if claim, ok := output.(*controllerwire.ClaimResponse); ok {
+		claim.PollAfter, _ = parseDelaySeconds(resp.Header.Get(store.ClaimPollAfterHeader))
 	}
 	return false, nil
 }
