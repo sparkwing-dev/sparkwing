@@ -15,6 +15,7 @@ import {
   fmtDuration,
   fmtETA,
   fmtHolderCost,
+  fmtLiveUsage,
   groupHolders,
   hasDaemon,
   humanBytes,
@@ -550,5 +551,25 @@ describe("availabilityTerms", () => {
       available: 8,
     };
     assert.equal(availabilityResidual(r, true), null);
+  });
+});
+
+
+describe("fmtLiveUsage", () => {
+  it("shows current, peak, and average process measurements", () => {
+    const holder: QueueHolder = {
+      run_id: "job", elapsed_ms: 1, resources: { cores: 4 },
+      usage: {
+        cpu_measured: true, memory_measured: true,
+        current_cpu_cores: 1, peak_cpu_cores: 2, average_cpu_cores: 1.5,
+        current_memory_bytes: 1024, peak_memory_bytes: 2048, average_memory_bytes: 1536,
+      },
+    };
+    assert.equal(fmtLiveUsage(holder, "cores"), "1 / 2 / 1.50");
+    assert.equal(fmtLiveUsage(holder, "memory"), "1.0 KiB / 2.0 KiB / 1.5 KiB");
+    holder.usage!.cpu_measured = false;
+    assert.equal(fmtLiveUsage(holder, "cores"), "unmeasured");
+    delete holder.usage;
+    assert.equal(fmtLiveUsage(holder, "memory"), "unmeasured");
   });
 });

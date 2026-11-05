@@ -26,6 +26,7 @@ func (p *procSampler) sample(pid int) (ProcUsage, bool) {
 func (p *procSampler) sampleMany(pids []int) map[int]ProcUsage {
 	procs, ok := linuxProcesses()
 	if !ok {
+		p.unmeasuredMetrics(pids)
 		return nil
 	}
 	now := time.Now()
@@ -55,12 +56,16 @@ func (p *procSampler) sampleMany(pids []int) map[int]ProcUsage {
 	for pid, tree := range trees {
 		usage := ProcUsage{HasDescendant: len(tree) > 1}
 		var sampled bool
+		var memory uint64
+		memoryMeasured := true
 		p.pruneTreeLocked(pid, trackedPIDs(tree))
 		for _, treePID := range tree {
 			proc, ok := procs[treePID]
 			if !ok {
 				continue
 			}
+			memory += proc.memoryBytes
+			memoryMeasured = memoryMeasured && proc.memoryMeasured
 			current := cpuSample{
 				cpuSeconds: proc.cpuSeconds,
 				at:         now,
@@ -80,6 +85,7 @@ func (p *procSampler) sampleMany(pids []int) map[int]ProcUsage {
 			}
 			sampled = true
 		}
+		p.recordMetricsLocked(pid, procs[pid].startTicks, usage.Fraction, sampled, memory, memoryMeasured, now)
 		if sampled {
 			usages[pid] = usage
 		}
@@ -127,6 +133,8 @@ func linuxOwnedProcesses(procs map[int]linuxProc, now time.Time, uptimeSeconds f
 }
 
 type linuxProc struct {
+	memoryBytes    uint64
+	memoryMeasured bool
 	parentPID      int
 	startTicks     uint64
 	selfCPUSeconds float64
@@ -184,7 +192,16 @@ func parseLinuxProcessStat(line string) (linuxProc, bool) {
 	if err1 != nil || err2 != nil || err3 != nil || err4 != nil || err5 != nil {
 		return linuxProc{}, false
 	}
+	var memory uint64
+	memoryMeasured := false
+	if len(fields) >= 22 {
+		pages, err := strconv.ParseUint(fields[21], 10, 64)
+		if err == nil && pages <= ^uint64(0)/uint64(os.Getpagesize()) {
+			memory, memoryMeasured = pages*uint64(os.Getpagesize()), true
+		}
+	}
 	return linuxProc{
+		memoryBytes: memory, memoryMeasured: memoryMeasured,
 		parentPID:      parent,
 		startTicks:     startTicks,
 		selfCPUSeconds: (utime + stime) / linuxClockTicks,

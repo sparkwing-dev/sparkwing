@@ -12,6 +12,21 @@ import (
 
 const windowsFiletimeTicksPerSecond = 10_000_000
 
+var processMemoryInfo = windows.NewLazySystemDLL("psapi.dll").NewProc("GetProcessMemoryInfo")
+
+type windowsProcessMemoryCounters struct {
+	Size                       uint32
+	PageFaultCount             uint32
+	PeakWorkingSetSize         uintptr
+	WorkingSetSize             uintptr
+	QuotaPeakPagedPoolUsage    uintptr
+	QuotaPagedPoolUsage        uintptr
+	QuotaPeakNonPagedPoolUsage uintptr
+	QuotaNonPagedPoolUsage     uintptr
+	PagefileUsage              uintptr
+	PeakPagefileUsage          uintptr
+}
+
 var globalMemoryStatusEx = windows.NewLazySystemDLL("kernel32.dll").NewProc("GlobalMemoryStatusEx")
 
 type windowsMemoryStatusEx struct {
@@ -27,10 +42,12 @@ type windowsMemoryStatusEx struct {
 }
 
 type windowsProc struct {
-	parentPID  int
-	startTicks uint64
-	cpuSeconds float64
-	measured   bool
+	memoryBytes    uint64
+	memoryMeasured bool
+	parentPID      int
+	startTicks     uint64
+	cpuSeconds     float64
+	measured       bool
 }
 
 func sampleHost() (HostStat, error) {
@@ -55,6 +72,7 @@ func (p *procSampler) sample(pid int) (ProcUsage, bool) {
 func (p *procSampler) sampleMany(pids []int) map[int]ProcUsage {
 	procs, ok := windowsProcesses()
 	if !ok {
+		p.unmeasuredMetrics(pids)
 		return nil
 	}
 	now := time.Now()
@@ -79,6 +97,7 @@ func (p *procSampler) sampleMany(pids []int) map[int]ProcUsage {
 	for pid, tree := range trees {
 		p.pruneTreeLocked(pid, trackedPIDs(tree))
 		if !windowsTreeMeasured(tree, procs) {
+			p.recordMetricsLocked(pid, procs[pid].startTicks, 0, false, 0, false, now)
 			for _, treePID := range tree {
 				delete(p.last, treePID)
 			}
@@ -86,8 +105,12 @@ func (p *procSampler) sampleMany(pids []int) map[int]ProcUsage {
 		}
 		usage := ProcUsage{HasDescendant: len(tree) > 1}
 		var sampled bool
+		var memory uint64
+		memoryMeasured := true
 		for _, treePID := range tree {
 			proc := procs[treePID]
+			memory += proc.memoryBytes
+			memoryMeasured = memoryMeasured && proc.memoryMeasured
 			current := cpuSample{
 				cpuSeconds: proc.cpuSeconds,
 				at:         now,
@@ -105,6 +128,7 @@ func (p *procSampler) sampleMany(pids []int) map[int]ProcUsage {
 			usage.Fraction += fraction
 			sampled = true
 		}
+		p.recordMetricsLocked(pid, procs[pid].startTicks, usage.Fraction, sampled, memory, memoryMeasured, now)
 		if sampled {
 			usages[pid] = usage
 		}
@@ -182,6 +206,10 @@ func windowsProcess(processID, parentPID int) windowsProc {
 	proc.startTicks = windowsFiletimeTicks(creation)
 	proc.cpuSeconds = float64(windowsFiletimeTicks(kernel)+windowsFiletimeTicks(user)) / windowsFiletimeTicksPerSecond
 	proc.measured = true
+	memory := windowsProcessMemoryCounters{Size: uint32(unsafe.Sizeof(windowsProcessMemoryCounters{}))}
+	if ok, _, _ := processMemoryInfo.Call(uintptr(handle), uintptr(unsafe.Pointer(&memory)), uintptr(memory.Size)); ok != 0 {
+		proc.memoryBytes, proc.memoryMeasured = uint64(memory.WorkingSetSize), true
+	}
 	return proc
 }
 

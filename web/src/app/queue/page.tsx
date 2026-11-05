@@ -22,6 +22,7 @@ import {
   fmtDuration,
   fmtETA,
   fmtHolderCost,
+  fmtLiveUsage,
   groupHolders,
   hasDaemon,
   queueLifecycleConnections,
@@ -329,6 +330,8 @@ function HoldersSection({ groups }: { groups: HolderGroup[] }) {
               <Th hideSm>Repo</Th>
               <Th right>Elapsed</Th>
               <Th>Cost</Th>
+              <Th>CPU cores<br /><span className="normal-case">now / peak / avg</span></Th>
+              <Th>Memory<br /><span className="normal-case">now / peak / avg</span></Th>
               <Th hideSm>Semaphores</Th>
             </tr>
           </thead>
@@ -336,7 +339,7 @@ function HoldersSection({ groups }: { groups: HolderGroup[] }) {
             {groups.length === 0 ? (
               <tr>
                 <td
-                  colSpan={6}
+                  colSpan={8}
                   className="px-3 py-3 text-[var(--muted)] text-center bg-[var(--surface)]"
                 >
                   Nothing is holding admission.
@@ -478,6 +481,8 @@ function HolderRow({ h, attached }: { h: QueueHolder; attached?: boolean }) {
           source={h.parent ? "" : h.cost_source}
         />
       </Td>
+      <Td mono muted>{fmtLiveUsage(h, "cores")}</Td>
+      <Td mono muted>{fmtLiveUsage(h, "memory")}</Td>
       <Td hideSm mono muted>
         {h.semaphores && h.semaphores.length > 0
           ? h.semaphores.join(", ")

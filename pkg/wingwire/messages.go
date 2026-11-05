@@ -453,10 +453,25 @@ type ExternalAttribution struct {
 	Attributed int64 `json:"attributed"`
 }
 
+// ProcessUsage reports sampled process-tree CPU cores and resident memory.
+// Averages cover measured intervals since this controller began observing the holder.
+type ProcessUsage struct {
+	CPUMeasured        bool    `json:"cpu_measured"`
+	MemoryMeasured     bool    `json:"memory_measured"`
+	CurrentCPUCores    float64 `json:"current_cpu_cores"`
+	PeakCPUCores       float64 `json:"peak_cpu_cores"`
+	AverageCPUCores    float64 `json:"average_cpu_cores"`
+	CurrentMemoryBytes uint64  `json:"current_memory_bytes"`
+	PeakMemoryBytes    uint64  `json:"peak_memory_bytes"`
+	AverageMemoryBytes uint64  `json:"average_memory_bytes"`
+}
+
 // Holder is one run currently holding admission, or a connected run carrying
 // a zero-cost orchestration lease, as reported in a [QueueState].
 type Holder struct {
-	RunID string `json:"run_id"`
+	// Usage is live process-tree measurement, separate from reserved capacity.
+	Usage *ProcessUsage `json:"usage,omitempty"`
+	RunID string        `json:"run_id"`
 	// ParticipantID is the daemon lease key when it differs from RunID.
 	ParticipantID string `json:"participant_id,omitempty"`
 	// DisplayRunID is the label queue views print for this row. Empty

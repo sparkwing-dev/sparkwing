@@ -29,6 +29,7 @@ func (p *procSampler) sample(pid int) (ProcUsage, bool) {
 func (p *procSampler) sampleMany(pids []int) map[int]ProcUsage {
 	procs, ok := darwinProcesses()
 	if !ok {
+		p.unmeasuredMetrics(pids)
 		return nil
 	}
 	children := map[int][]int{}
@@ -56,16 +57,25 @@ func (p *procSampler) sampleMany(pids []int) map[int]ProcUsage {
 			allPIDs = append(allPIDs, treePID)
 		}
 	}
-	cpu, ok := darwinProcessCPUFractions(allPIDs)
+	cpu, memoryByPID, ok := darwinProcessResources(allPIDs)
 	if !ok {
+		p.unmeasuredMetrics(pids)
 		return nil
 	}
 
 	usages := make(map[int]ProcUsage, len(trees))
+	now := time.Now()
+	p.mu.Lock()
+	defer p.mu.Unlock()
 	for pid, tree := range trees {
 		usage := ProcUsage{HasDescendant: len(tree) > 1}
 		var sampled bool
+		var memory uint64
+		memoryMeasured := true
 		for _, treePID := range tree {
+			resident, measured := memoryByPID[treePID]
+			memory += resident
+			memoryMeasured = memoryMeasured && measured
 			fraction, ok := cpu[treePID]
 			if !ok {
 				continue
@@ -73,6 +83,8 @@ func (p *procSampler) sampleMany(pids []int) map[int]ProcUsage {
 			usage.Fraction += fraction
 			sampled = true
 		}
+		birth := byPID[pid].Proc.P_starttime
+		p.recordMetricsLocked(pid, uint64(birth.Sec)*1_000_000+uint64(birth.Usec), usage.Fraction, sampled, memory, memoryMeasured, now)
 		if sampled {
 			usages[pid] = usage
 		}
@@ -154,20 +166,26 @@ func darwinProcesses() ([]unix.KinfoProc, bool) {
 }
 
 func darwinProcessCPUFractions(pids []int) (map[int]float64, bool) {
+	cpu, _, ok := darwinProcessResources(pids)
+	return cpu, ok
+}
+
+func darwinProcessResources(pids []int) (map[int]float64, map[int]uint64, bool) {
 	if len(pids) == 0 {
-		return nil, false
+		return nil, nil, false
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
-	args := []string{"-o", "pid=", "-o", "pcpu=", "-p", darwinPIDList(pids)}
+	args := []string{"-o", "pid=", "-o", "pcpu=", "-o", "rss=", "-p", darwinPIDList(pids)}
 	out, err := procenv.HostCommandContext(ctx, "ps", args...).Output()
 	if err != nil {
-		return nil, false
+		return nil, nil, false
 	}
 	fractions := map[int]float64{}
+	memory := map[int]uint64{}
 	for _, line := range strings.Split(string(out), "\n") {
 		fields := strings.Fields(line)
-		if len(fields) != 2 {
+		if len(fields) != 3 {
 			continue
 		}
 		pid, err := strconv.Atoi(fields[0])
@@ -179,8 +197,11 @@ func darwinProcessCPUFractions(pids []int) (map[int]float64, bool) {
 			continue
 		}
 		fractions[pid] = percent / 100.0
+		if kib, err := strconv.ParseUint(fields[2], 10, 64); err == nil && kib <= ^uint64(0)/1024 {
+			memory[pid] = kib * 1024
+		}
 	}
-	return fractions, len(fractions) > 0
+	return fractions, memory, len(fractions) > 0
 }
 
 func darwinPIDList(pids []int) string {

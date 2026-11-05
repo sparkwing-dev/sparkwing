@@ -6,6 +6,7 @@ func (p *procSampler) forget(pid int) {
 	p.mu.Lock()
 	delete(p.last, pid)
 	delete(p.tree, pid)
+	delete(p.metrics, pid)
 	p.mu.Unlock()
 }
 

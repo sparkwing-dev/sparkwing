@@ -1108,7 +1108,19 @@ export interface QueueResource {
   available?: number;
 }
 
+export interface QueueProcessUsage {
+  cpu_measured: boolean;
+  memory_measured: boolean;
+  current_cpu_cores: number;
+  peak_cpu_cores: number;
+  average_cpu_cores: number;
+  current_memory_bytes: number;
+  peak_memory_bytes: number;
+  average_memory_bytes: number;
+}
+
 export interface QueueHolder {
+  usage?: QueueProcessUsage;
   run_id: string;
   participant_id?: string;
   display_run_id?: string;

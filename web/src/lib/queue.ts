@@ -46,6 +46,17 @@ export function fmtHolderCost(h: QueueHolder): string {
   return fmtCost(h.resources);
 }
 
+export function fmtLiveUsage(h: QueueHolder, resource: "cores" | "memory"): string {
+  const usage = h.usage;
+  if (!usage || !(resource === "cores" ? usage.cpu_measured : usage.memory_measured)) {
+    return "unmeasured";
+  }
+  const current = resource === "cores" ? usage.current_cpu_cores : usage.current_memory_bytes;
+  const peak = resource === "cores" ? usage.peak_cpu_cores : usage.peak_memory_bytes;
+  const average = resource === "cores" ? usage.average_cpu_cores : usage.average_memory_bytes;
+  return `${fmtAmount(resource, current)} / ${fmtAmount(resource, peak)} / ${fmtAmount(resource, average)}`;
+}
+
 export function queueRowID(row: {
   run_id: string;
   participant_id?: string;

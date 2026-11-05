@@ -130,6 +130,7 @@ func (d *Daemon) buildQueueStateLocked() (wingwire.QueueState, admission.Snapsho
 			ConnectionOnly: !leaseHoldsResources(snap, ls) && charge.Cores == 0 && charge.MemoryBytes == 0,
 		}
 		if c := d.byRun[ls.RequestID]; c != nil {
+			h.Usage = d.processUsage(c.pid)
 			h.Pipeline = c.pipeline
 			h.Repo = c.repo
 			if !c.startAt.IsZero() {
