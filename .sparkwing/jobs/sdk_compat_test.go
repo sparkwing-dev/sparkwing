@@ -71,7 +71,7 @@ func TestSDKCompatibilityRunsWarmAndColdWithoutCachedTestResults(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		for _, arg := range []string{"-v\n", "-count=1\n", "-timeout\n15m\n", "./internal/nodehost\n", "^TestHistoricalSDKCompatibility$\n", "-sdk-compat=" + mode + "\n"} {
+		for _, arg := range []string{"-v\n", "-count=1\n", "-timeout\n15m\n", "./internal/nodehost\n", "^TestHistoricalSDKCompatibility$\n", "-sdk-compat=" + mode + "\n", "-sdk-compat-cache=" + filepath.Join(root, ".sparkwing", "cache", "sdk-compat") + "\n"} {
 			if !strings.Contains(string(data), arg) {
 				t.Errorf("%s invocation %q lacks %q", mode, data, arg)
 			}

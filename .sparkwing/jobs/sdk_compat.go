@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"path"
+	"path/filepath"
 	"strings"
 
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
@@ -18,8 +19,12 @@ func runSDKCompatibilityCold(ctx context.Context) error {
 }
 
 func runSDKCompatibility(ctx context.Context, mode string) error {
+	cache, err := filepath.Abs(pipelineCacheDir("sdk-compat"))
+	if err != nil {
+		return fmt.Errorf("historical SDK fixture cache: %w", err)
+	}
 	return withProductTestHome(func(home string) error {
-		command := boundedGoCommand(currentHost(), "test", "-v -count=1 -timeout 15m ./internal/nodehost -run '^TestHistoricalSDKCompatibility$' -args -sdk-compat="+mode)
+		command := boundedGoCommand(currentHost(), "test", "-v -count=1 -timeout 15m ./internal/nodehost -run '^TestHistoricalSDKCompatibility$' -args -sdk-compat="+mode+" -sdk-compat-cache="+shellQuote(cache))
 		if _, err := sparkwing.Bash(ctx, productTestScript(command, home)).Env("GOWORK", "off").Run(); err != nil {
 			return fmt.Errorf("historical SDK compatibility (%s): %w", mode, err)
 		}

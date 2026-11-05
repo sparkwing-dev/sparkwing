@@ -596,9 +596,10 @@ SDK trees, fixture sources and the compatibility check itself. Documentation and
 unrelated UI or billing changes skip acquisition. Neither hook tier acquires
 historical SDK artifacts.
 
-Immutable fixture preparation is shared across cells and cached by fixture
-source, released artifact, toolchain and platform. TypeScript installs also key
-on lock integrity and Node runtime. Candidate host source is excluded from that
+Immutable fixture preparation is shared across cells in the worktree's
+`.sparkwing/cache/sdk-compat/` directory and cached by fixture source, released
+artifact, toolchain and platform. TypeScript installs also key on lock integrity
+and Node runtime. Candidate host source is excluded from that
 cache because every matrix invocation compiles and executes today's nodehost.
 Cold pre-release preparation rebuilds the fixtures to check artifact acquisition
 and compiler assumptions. The matrix uses isolated homes, local workspaces and
