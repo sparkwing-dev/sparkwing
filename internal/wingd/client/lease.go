@@ -11,7 +11,6 @@ import (
 	"os"
 	"strconv"
 	"sync"
-	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/procgroup"
 	"github.com/sparkwing-dev/sparkwing/internal/wingd"
@@ -57,9 +56,7 @@ func (cl *Client) Acquire(ctx context.Context, req wingwire.AdmissionRequest, on
 		if granted || ctx.Err() == nil {
 			return
 		}
-		cleanup, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
-		defer cancel()
-		resultErr = errors.Join(resultErr, cl.admissionCall(cleanup, http.MethodDelete, "/requests/by-key/"+request.RequestKey, nil, nil, readOnlyRetryLimit))
+		resultErr = errors.Join(resultErr, cl.admissionCall(context.WithoutCancel(ctx), http.MethodDelete, "/requests/by-key/"+request.RequestKey, nil, nil, 0))
 	}()
 	var state wingd.AdmissionHTTPState
 	if err := cl.admissionCall(ctx, http.MethodPost, "/requests", request, &state, 0); err != nil {
@@ -124,9 +121,7 @@ func (cl *Client) Reattach(ctx context.Context, token, runID string) (*Lease, er
 func (l *Lease) Release() error {
 	l.once.Do(func() {
 		l.cancel()
-		ctx, cancel := context.WithTimeout(context.Background(), RequestTimeout)
-		defer cancel()
-		l.releaseErr = l.cl.admissionCall(ctx, http.MethodDelete, "/requests/"+url.PathEscape(l.id), nil, nil, 0)
+		l.releaseErr = l.cl.admissionCall(context.Background(), http.MethodDelete, "/requests/"+url.PathEscape(l.id), nil, nil, 0)
 		l.releaseErr = errors.Join(l.releaseErr, l.cl.Close())
 	})
 	return l.releaseErr
