@@ -23,6 +23,10 @@ unlock.
 ### Fixed
 
 - **docs:** The `sparkwing login` reference page is listed in the docs sidebar, so the documentation site builds for this release.
+### Changed
+
+- **scaffold:** `const FallbackSDKVersion` pins v0.69.0, so a fresh scaffold compiles against that release.
+
 
 ## [v0.69.0] - 2026-11-05
 ### Added
