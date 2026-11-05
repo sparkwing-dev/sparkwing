@@ -11,10 +11,10 @@ storage, retries and cleanup. Put that code in `internal/nodehost` and its host
 dependencies. The local controller project can then move hosting into a runner
 without moving policy through either SDK.
 
-An SDK from before thinning keeps its compiled policy and its historical engine.
-Only the existing engine resolver serves those pins. The new host supports
-thinned SDKs only. Later host policy fixes reach thinned pins through the signed
-compatibility map.
+SDK releases before the thinning release keep their compiled policy and historical
+engines. Only the existing engine resolver serves those pins. The new host
+supports the thinning baseline and later SDK releases. Later host policy fixes
+reach those pins through the signed compatibility map.
 
 ## 1. Inventory
 
@@ -177,11 +177,12 @@ floors are also distinct from SDK capabilities.
 
 ### Proposed contract
 
-Use node protocol 2 with the thinning capabilities required at hello.
-The new host keeps no legacy node protocol routes or dual code paths for
-pre-thinning SDKs. Move retained helper calls to the generic operation service.
-Remove the superseded service routes. Capability negotiation applies only to
-thinned SDKs. The host must learn their supported transport before using it.
+Use node protocol 2 with the thinning capabilities required at hello. The new
+host keeps no legacy node protocol routes or dual code paths for SDK releases
+before the thinning release. Move retained helper calls to the generic
+operation service. Remove the superseded service routes. Capability negotiation
+applies only to SDK releases from the thinning baseline and later. The host
+must learn their supported transport before using it.
 
 | Direction | Proposed hello data | Use |
 | --- | --- | --- |
@@ -190,11 +191,12 @@ thinned SDKs. The host must learn their supported transport before using it.
 | Host session state | Selected capabilities, actual SDK identity and required API features from the plan. | Validate dispatch once. Persist enough to explain replay or refusal. Do not trust an SDK capability as authorization. |
 
 Give capabilities semantic names and independent versions. Examples are
-`host_operations/1`, `prepare_execution/1`, `selected_step_body/1` and `raw_chunks/1`.
-Optional declaration support uses the existing host feature direction.
-A required user API feature must fail with an actionable unsupported-capability
-error when absent. Do not silently drop a requested security or execution
-property. Thinned SDKs must declare every capability required by the baseline.
+`host_operations/1`, `prepare_execution/1`, `selected_step_body/1` and
+`raw_chunks/1`. Optional declaration support uses the existing host feature
+direction. A required user API feature must fail with an actionable
+unsupported-capability error when absent. Do not silently drop a requested
+security or execution property. SDK releases from the thinning baseline and
+later must declare every capability required by the baseline.
 
 Use one generic service envelope for SDK-to-host calls. Proposed endpoint:
 `POST /node/v1/operations`. Its body has a request ID, an operation name and an
@@ -215,9 +217,9 @@ the stream, preserving the caller's raw bytes.
 SDKs ship typed wrappers for existing APIs once. They also ship a generic relay
 for future operations. The host can add an operation or change its internal
 policy without changing that relay. A new typed author API may justify an
-optional SDK release. The host accepts earlier thinned envelopes with their
-documented defaults. Large results use chunks rather than changing a pinned
-decoder's allocation cap.
+optional SDK release. The host accepts envelopes from the thinning baseline and
+later SDK releases with their documented defaults. Large results use chunks
+rather than changing a pinned decoder's allocation cap.
 
 `command.exec/1` sends overrides, not an SDK-assembled effective environment.
 The host constructs the command environment from accepted job state and caller
@@ -226,13 +228,22 @@ To preserve inheritance after author code changes its environment, relay raw
 overrides and deletions as request data. The host still filters and composes the
 effective environment. Shared vectors must cover this case before the helper cut.
 
-Exec, Docker, Git and services require a Sparkwing host session in both languages.
+The host-session-only helper rule is pending maintainer ratification.
+Under this rule, Exec, Docker, Git and services require a Sparkwing host session
+in both languages.
 A standalone tool importing the SDK gets a clear error before any side effect.
 For example: "Exec requires a Sparkwing host session. Use os/exec in Go or
 child_process in TypeScript for standalone execution, or use the sparkwingtest
 host for tests." Each helper names itself in that error. Neither SDK has a local
 fallback implementation. Tests cover each helper outside a host session and
 confirm that it starts no process or service.
+
+[GitHub Actions toolkit](https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-commands)
+commands for runner services run only inside Actions runners and offer no
+standalone fallback for runner-provided commands.
+[CircleCI orbs](https://circleci.com/docs/orbs/use/orb-concepts/) run their
+commands inside CircleCI job runners and offer no standalone fallback for
+runner-provided commands.
 
 All operations run beside the job on its executing runner and share its workspace.
 They must never execute on the controller's machine by accident.
@@ -260,55 +271,64 @@ the outer process boundary too. An SDK guard is not an isolation boundary.
 
 Host validation consumes raw declarations before policy normalization.
 It validates generated amendments under actual placement too.
-A thinned SDK must not reject a new host policy before the host sees the declaration.
+SDK releases from the thinning baseline and later relay raw declarations.
+The host applies new policy before any SDK policy check could reject them.
 That is why removing validation and known-tool catalogs is part of the thinning
 release, rather than a capability flag alone.
 
-Pre-thinning SDKs never run on the new host. They run only through the existing
-engine resolver on their own historical engine. This needs no new host code.
-When that routing path is retired, fail with an actionable error:
+SDK releases before the thinning release never run on the new host. Only the
+existing engine resolver serves those pins on their historical engines. The new
+host keeps no legacy routes. Keep that resolver path until the 12-month
+automatic-run window for the last SDK release before the thinning release ends.
+Existing security revocation rules still apply to individual releases.
+After that window ends, retiring the path must return an actionable error:
 "This SDK pin requires a retired engine. Run `sparkwing pipeline upgrade`."
 A resolver-routing pass proves resolver behavior only. It is not evidence of
 compatibility with the new host.
 
 ### Engine selection decision
 
-From the thinning release on, a thinned SDK pin runs on the newest compatible
-host through a signed SDK-to-host compatibility map. Pins from before thinning
-keep exact matching-engine routing through the existing resolver only. This
-amends the matching-engine product goal.
+Pins for the thinning baseline and later SDK releases run on the newest
+compatible host through a signed SDK-to-host compatibility map. Pins for SDK
+releases before the thinning release keep exact matching-engine routing through
+the existing resolver only. This amends the matching-engine product goal.
 
 SDK releases from the last 12 months continue to run automatically.
 Existing security revocation rules stay in force.
 Record both SDK and host identities on each accepted run.
 Keep the SDK identity check at hello. The signed compatibility contract replaces
-engine/SDK equality for thinned pins. A development replacement cannot stand
-in for that contract. Host-only fixes reach thinned pins through the map.
-Pre-thinning pins retain the behavior of their own historical engine until
-that routing path is retired. Retirement requires the upgrade error above.
+engine/SDK equality for pins from the thinning baseline and later SDK releases.
+A development replacement cannot stand in for that contract. Host-only fixes
+reach those pins through the map.
+Pins for SDK releases before the thinning release retain their historical engine
+behavior. The resolver path must stay until the 12-month automatic-run window
+for the last such release ends. Retirement then requires the upgrade error above.
 
 ## 3. Compatibility matrix and gate
 
-Use **N = 3 released thinned versions per language, including the latest release**.
-Select Go module releases and published npm releases separately. They may not
-have the same available version set. Exclude QA, prereleases and pre-thinning
-versions from this N. Until three thinned releases exist, test every available
-thinned release. Retain one fixture for the first thinned release and the oldest
-supported thinned wire/capability baseline after they leave the last three.
-Deduplicate anchors that name the same artifact.
+Use **N = 3 released SDK versions per language, including the latest release**.
+Select only the thinning baseline and later SDK releases. Exclude QA and
+prereleases. Select Go module releases and published npm releases separately.
+They may not have the same available version set. Until three releases exist in
+that range, test every available release in it. Retain one fixture for the
+thinning baseline and the oldest supported wire/capability baseline in that
+range after they leave the last three. Deduplicate anchors that name the same
+artifact.
 
-The principal matrix runs the **candidate host from today's source against
-released thinned SDK artifacts**. It must not let the engine resolver substitute a
-historical host and then report compatibility. Existing Go conformance compiles
-current source at `internal/nodeproto/conformance/conformance_test.go:45`.
-That is useful cross-language coverage, but it does not prove released thinned pins.
+The principal matrix runs the **candidate host from today's source against SDK
+artifacts from the thinning baseline and later releases**. It must not let the
+engine resolver substitute a historical host and then report compatibility.
+Existing Go conformance compiles current source at
+`internal/nodeproto/conformance/conformance_test.go:45`. That is useful
+cross-language coverage, but it does not prove pins for the thinning baseline
+and later SDK releases.
 
 | Cell | Artifact and execution | Required assertions | Tier |
 | --- | --- | --- | --- |
-| Candidate host x up to three Go thinned SDK releases | Freeze a tiny pipeline source and exact go.mod/go.sum per release. Compile with the released SDK, no local replace. Run the resulting executable through candidate nodehost. | Real hello identity, describe, plan, args, step output, raw output and nonzero exit. | `gate` when host, SDK, protocol, environment, process, secret or pin code changes. Also `pre-release`. |
-| Candidate host x up to three TypeScript thinned SDK releases | Freeze source, package lock and npm integrity. Run each released package with its declared Node runtime. Use the published bridge on Windows. | The same semantic fixture and host-side outcomes as Go. | Same as Go. |
-| Candidate host x first thin and oldest thinned capability baselines | Keep immutable fixtures when recent versions no longer cover those branches. | Required baseline features, absent optional fields, explicit body dispatch, chunk limits and useful unsupported-capability errors. | `pre-release`. |
-| Candidate host x lifecycle fixture for each supported thinned SDK baseline | Two dependent jobs, concurrent steps, retry, timeout, cancellation with a grandchild, generator replay, memo miss/hit, cache restore and secret kind drift. Use local fake executables for Docker/Git behavior and a local OIDC issuer fixture. | Assert host-owned subprocess policy, outer-process cleanup, classification agreement and chunk-boundary masking. No real provider is contacted. | Affected `gate` for up to three thinned releases per language. All anchors and the full fixture set in `pre-release`. |
+| Candidate host x up to three Go SDK releases from the thinning baseline and later | Freeze a tiny pipeline source and exact go.mod/go.sum per release. Compile with the released SDK, no local replace. Run the resulting executable through candidate nodehost. | Real hello identity, describe, plan, args, step output, raw output and nonzero exit. | `gate` when host, SDK, protocol, environment, process, secret or pin code changes. Also `pre-release`. |
+| Candidate host x up to three TypeScript SDK releases from the thinning baseline and later | Freeze source, package lock and npm integrity. Run each released package with its declared Node runtime. Use the published bridge on Windows. | The same semantic fixture and host-side outcomes as Go. | Same as Go. |
+| Candidate host x thinning baseline and oldest supported later capability baseline | Keep immutable fixtures when recent versions no longer cover those branches. | Required baseline features, absent optional fields, explicit body dispatch, chunk limits and useful unsupported-capability errors. | `pre-release`. |
+| Candidate host x lifecycle fixture for the thinning baseline and each supported later SDK baseline | Two dependent jobs, concurrent steps, retry, timeout, cancellation with a grandchild, generator replay, memo miss/hit, cache restore and secret kind drift. Use local fake executables for Docker/Git behavior and a local OIDC issuer fixture. | Assert host-owned subprocess policy, outer-process cleanup, classification agreement and chunk-boundary masking. No real provider is contacted. | Affected `gate` for up to three SDK releases per language from the thinning baseline and later. All anchors and the full fixture set in `pre-release`. |
 | Candidate host x platform boundary | Linux, macOS, Windows x64 and Windows arm64 release jobs run their supported transport and process cases. | Pipe handles, process ownership, cancellation and platform result conventions. | `pre-release` and publication jobs. Linux focused cells run in `gate`. |
 
 Use a manifest with SDK version, artifact checksum, fixture revision, compiler or
@@ -318,12 +338,13 @@ the newest API. Test every available common operation. Test new API only in the
 fixtures that declare it.
 
 The direct matrix needs a test composition that installs candidate nodehost
-beside the frozen thinned pipeline. Pass the real released SDK pin as expected
-SDK identity and record the real candidate host build separately. Do not forge
-an SDK version, use a local module replacement, or disable hello validation.
-Inject the candidate host through a test-only engine resolver and process entry.
-This composition does not exercise production engine routing.
-Production engine selection is covered only by the separate resolver check below.
+beside the frozen pipeline from the thinning baseline or a later SDK release.
+Pass the real released SDK pin as expected SDK identity and record the real
+candidate host build separately. Do not forge an SDK version, use a local
+module replacement, or disable hello validation. Inject the candidate host
+through a test-only engine resolver and process entry. This composition does
+not exercise production engine routing. Production engine selection is covered
+only by the separate resolver check below.
 
 Use isolated homes and local workspaces. Store fake secrets only in fixture
 state. Use host processes and pipes, rather than transcript-only mocks, for
@@ -350,23 +371,29 @@ Run all anchors, cold artifact preparation and platform cells in **pre-release**
 Update DELIVERY and pipeline selection to implement this tier membership.
 
 No timing was measured in this audit. Measure warm execution and cold
-preparation for each language/version before setting deadlines.
-Bound concurrency during measurement. The cost is one
-candidate host build plus up to six small fixture preparations and process runs,
-then any non-duplicate thinned anchors. Reuse is material: `DELIVERY.md:1229` records
-shared SDK fixture preparation as an existing way to avoid repeated builds.
-Keep raw timings, fixture identities and per-cell results as artifacts.
+preparation for each language/version before setting deadlines. Bound
+concurrency during measurement. The cost is one candidate host build plus up to
+six small fixture preparations and process runs, then any non-duplicate anchors
+from the thinning baseline and later SDK releases. Reuse is material:
+`DELIVERY.md:1229` records shared SDK fixture preparation as an existing way to
+avoid repeated builds. Keep raw timings, fixture identities and per-cell
+results as artifacts.
 
-Three thinned releases are a recent regression canary, not a 12-month support claim.
-Keep a separate resolver check outside the candidate-host matrix. Use the real
-signed selection path. Pre-thinning pins must select their own historical engine.
-Thinned pins must select the newest compatible host through the signed map.
-Cover the oldest pin within the 12-month support window in each language.
-Also cover revoked, missing and incompatible artifacts, with no silent repin.
-A retired historical-engine path must name `sparkwing pipeline upgrade` in its
-error. Run this resolver check nightly, on dispatch and in `pre-release`.
-It proves routing only. It never runs a pre-thinning SDK against the new host.
-Retain distinct older thinned capability fixtures regardless of N.
+The three SDK releases from the thinning baseline and later catch recent
+regressions. They do not prove 12-month support. Keep a separate resolver check
+outside the candidate-host matrix. Use the real signed selection path. Pins for
+SDK releases before the thinning release must select their own historical
+engine. Pins for the thinning baseline and later SDK releases must select the
+newest compatible host through the signed map. Cover the oldest pin within the
+12-month support window in each language. Also cover revoked, missing and
+incompatible artifacts, with no silent repin. A retired historical-engine path
+must name `sparkwing pipeline upgrade` in its error. Verify that the resolver
+path stays until the 12-month automatic-run window for the last SDK release
+before the thinning release ends. Run this resolver check nightly, on dispatch
+and in `pre-release`. It proves routing only. It never runs an SDK release
+before the thinning release against the new host. Retain distinct older
+capability fixtures from the thinning baseline and later SDK releases
+regardless of N.
 
 ## 4. One-time thinning release
 
@@ -381,12 +408,12 @@ Host code then lands once in its final home.
 
 | Order | Host work | Go SDK change | TypeScript SDK change | Size |
 | --- | --- | --- | --- | --- |
-| 1 | Freeze thinned compatibility fixtures and separate resolver fixtures. Agree on capability, process and API boundaries. Record Go/TypeScript differences as shared vectors. | No release yet. Preserve pinned source artifacts. | No release yet. Preserve npm packages and bridge artifacts. | M |
+| 1 | Freeze compatibility fixtures for the thinning baseline and later SDK releases and separate resolver fixtures. Agree on capability, process and API boundaries. Record Go/TypeScript differences as shared vectors. | No release yet. Preserve pinned source artifacts. | No release yet. Preserve npm packages and bridge artifacts. | M |
 | 2 | Split nodeproto wire codecs from host policy. Extend hello and add the generic operation service. Require the thinning baseline and remove superseded routes. Benchmark Exec through the host operation service against direct execution in both languages. Record the stop-and-rethink threshold and results before step 3 starts. | Prepare the thin transport and error codecs. | Prepare the same transport and typed relay. Keep the native handle bridge. | M |
 | 3 | Own command start, env, stdin, raw output, capture, measurement, cancellation and cleanup on the executing runner. Add explicit callback body selection and a one-time body-env preparation boundary after replay. | Replace exec implementation with relay. Remove platform process files, reporter, diagnostics, procenv and ledger calls after parity passes. | Replace spawn, env filtering, taskkill and stream collection with relay. Remove per-callback process.env rewriting. | L |
 | 4 | Add host Docker, Git, service and cache-key operations. Own secret classification and child wait behavior. The maintainer ratifies every Go/TypeScript semantic difference before porting. Record each decision in shared vectors. | Keep helper APIs as thin relays. Remove local helper engines and cleanup fallback. Cut generic file IO/glob helpers once in the thinning release. Mark the cut Breaking and list standard-library replacements in the changelog. | Keep helper signatures as relay. Remove duplicate Docker/Git/service algorithms and policy checks. Apply the same Breaking file-helper cut and document standard-library replacements. | L |
 | 5 | Validate all raw and generated declarations under current placement. Own policy defaults, bounds and known-tool vocabulary. Expose a real host test harness. | Remove full plan validation, CPU/tool catalogs, product limits and fake-host policy. Retain reflection and scalar codecs. | Remove declaration policy checks, secret checks and log/annotation policy. Retain API typing and callback registration. | M |
-| 6 | Release host support and the signed compatibility map before accepting thinned pins. Verify the direct thinned-SDK matrix and runner ownership after the local controller move. Soak the candidate on Sparkwing's own pipelines before adding its signed map entry. | Publish one thinning 0.x release after host support is available. Upgrade pinned repos once and verify their pipelines. | Publish its thinning 0.x release in the same window, with verified native bridges. Upgrade pins once. | L |
+| 6 | Release host support and the signed compatibility map before accepting pins for the thinning baseline and later SDK releases. Verify the direct matrix for the thinning baseline and later SDK releases and runner ownership after the local controller move. Soak the candidate on Sparkwing's own pipelines before adding its signed map entry. | Publish one thinning 0.x release after host support is available. Upgrade pinned repos once and verify their pipelines. | Publish its thinning 0.x release in the same window, with verified native bridges. Upgrade pins once. | L |
 | 7 | Gate each new host version's signed compatibility map entry on the matrix and a soak on Sparkwing's own pipelines. Remove the version with a single revert of its map entry. Verify signed host selection, identity, support and revocation. Demonstrate a host-only policy change against frozen thin artifacts. | Freeze the baseline. Later releases add optional author API or fix SDK transport/language defects. | Freeze the baseline on the same terms. | M |
 
 ### Step 2 performance gate
@@ -394,14 +421,17 @@ Host code then lands once in its final home.
 Measure Exec through the host operation service against direct `os/exec` in Go
 and `child_process` in TypeScript. Use a minimal real `command.exec/1` service
 path with child execution and result streaming. Use the same executable, argv,
-environment, workspace and output handling on the same runner. Measure end-to-end latency per
-command and throughput for many small commands in both languages. Use warmed
-sessions, at least 10,000 commands per case and five paired runs. Include serial
-execution and concurrency eight. Record p50 and p95 latency and commands per second.
-Keep raw samples, runtime versions, runner details and benchmark scripts.
+environment, workspace and output handling on the same runner. Measure
+end-to-end latency per command and throughput for many small commands in both
+languages. Use warmed sessions, at least 10,000 commands per case and five
+paired runs. Include serial execution and concurrency eight. Record p50 and p95
+latency and commands per second. Keep raw samples, runtime versions, runner
+details and benchmark scripts.
 
-Proposed stop-and-rethink threshold: added latency must stay at or below 1 ms at
-p50 and 5 ms at p95. Throughput must stay at or above 80% of direct execution.
+The performance guardrail thresholds are pending maintainer ratification.
+Ratify them before using them to approve step 3.
+Proposed bounds: added latency must stay at or below 1 ms at p50 and 5 ms at p95.
+Throughput must stay at or above 80% of direct execution.
 Apply each bound to each language and concurrency case. Use the median paired
 latency differences and throughput ratios across the five runs. Record the
 threshold before measuring. Record results before step 3 starts. If any bound
@@ -417,10 +447,11 @@ identities, matrix results and soak runs. Include gate and pre-release pipelines
 and repeated runs that exercise command capture, cancellation and services.
 Steps 6-7 apply this rule to the first host and every later host version.
 
-Keep each host version's map entry in its own change. Removal is a single revert
-of that entry, followed by signed map publication. For later host versions,
-resolver checks must show that thinned pins select the previous compatible host
-without changing SDK pins. Keep that host available during the soak and rollout.
+Keep each host version's map entry in its own change. Removal is a single
+revert of that entry, followed by signed map publication. For later host
+versions, resolver checks must show that pins for the thinning baseline and
+later SDK releases select the previous compatible host without changing SDK
+pins. Keep that host available during the soak and rollout.
 
 Do not make thinning depend on aligning Go and npm release numbers.
 Publish the compatibility mapping explicitly. Do not run a new SDK against a
@@ -460,31 +491,29 @@ Pass operation dependencies through nodehost composition. The runner owns
 process handles, workspace paths, service lifetimes and measurement.
 Route cancellation through the same job lifetime on local and cloud runners.
 
-Prepare wire types, shared vectors, thinned fixtures and resolver fixtures
-in steps 1-2.
-Set the operation service and callback-environment contracts before changing
-shared nodehost composition. After the step 2 performance gate passes and local
-job hosting moves into the runner process, implement steps 3-5 there.
-This avoids building temporary daemon hosting.
+Prepare wire types, shared vectors, fixtures for the thinning baseline and
+later SDK releases and resolver fixtures in steps 1-2. Set the operation
+service and callback-environment contracts before changing shared nodehost
+composition. After the step 2 performance gate passes and local job hosting
+moves into the runner process, implement steps 3-5 there. This avoids building
+temporary daemon hosting.
 
 ## 5. Decisions (2026-11-05)
 
+This log is append-only. Later entries name the earlier entries they supersede.
+
 1. **Host selection.** From the thinning release on, a thinned SDK pin runs on
    the newest compatible host through a signed SDK-to-host compatibility map.
-   Pre-thinning pins run only through the existing resolver on their historical
-   engine. The new host has no legacy routes or dual paths for them. Retirement
-   returns an error naming `sparkwing pipeline upgrade`. The 12-month
+   Pins from before thinning keep exact matching-engine routing. The 12-month
    automatic-run promise and revocation rules stay. Record both SDK and host
    identities on each accepted run. This amends the matching-engine product goal.
 2. **Helper API.** Keep Exec, Docker, Git, services, refs and secret APIs as thin
-   relays to host operations. Exec, Docker, Git and services require a host
-   session. Outside one, fail with an error naming `os/exec`, `child_process`
-   or the `sparkwingtest` host. No in-SDK fallback exists. Keep pure path and
-   value helpers. Cut generic file IO/glob helpers once in the thinning release.
-   Mark this Breaking and give standard-library replacements in the changelog. The maintainer ratifies every
+   relays to host operations. Keep pure path and value helpers. Cut generic file
+   IO/glob helpers once in the thinning release. Mark this Breaking and give
+   standard-library replacements in the changelog. The maintainer ratifies every
    Go/TypeScript semantic difference before porting. The port never decides
    which behavior wins.
-3. **Compatibility bar.** Run the candidate host x up to 3 released thinned SDKs per
+3. **Compatibility bar.** Run the candidate host x last 3 released SDKs per
    language in the affected `gate`. Run all anchors, cold preparation and
    platform cells in `pre-release`. Run separate 12-month routing checks nightly
    and in `pre-release`. Measure costs before setting deadlines. Keep raw
@@ -496,6 +525,30 @@ This avoids building temporary daemon hosting.
 5. **Host promotion.** Add a host version to the signed compatibility map only
    after the matrix and a soak on Sparkwing's own pipelines pass. Remove it with
    a single revert of its map entry and publish the signed map.
+6. **Host route cut.** Supersedes entry 1 on host compatibility and retirement.
+   The new host supports the thinning baseline and later SDK releases only.
+   It keeps no legacy routes or dual paths. Only the existing resolver serves
+   pins for SDK releases before the thinning release on their historical engines.
+   That resolver path must stay until the 12-month automatic-run window for
+   the last such release ends. Existing security revocation rules still apply.
+   Retirement then returns an error naming `sparkwing pipeline upgrade`.
+   Entry 1's signed map and SDK and host identity recording still apply.
+7. **Host-session-only helpers.** Supersedes entry 2 on standalone helper use.
+   This rule is pending maintainer ratification. Exec, Docker, Git and services
+   require a Sparkwing host session. Outside one, they fail before side effects.
+   Errors name `os/exec`, `child_process` or the `sparkwingtest` host as remedies.
+   Neither SDK has an execution fallback. Entry 2's other API choices still apply.
+8. **Compatibility release range.** Supersedes entry 3's release selection.
+   Test up to three released SDKs per language from the thinning baseline and
+   later. Test all available releases in that range until three exist.
+   Keep the thinning baseline and oldest supported later capability anchors.
+   Pins for SDK releases before the thinning release use separate resolver checks.
+   Entry 3's tiers, cost measurement and evidence requirements still apply.
+9. **Performance guardrails.** Supersedes entry 4 on threshold approval.
+   The thresholds are pending maintainer ratification. The proposed bounds stay
+   at 1 ms added p50, 5 ms added p95 and at least 80% of direct throughput.
+   Apply each bound to each language and concurrency case. Entry 4's comparison
+   and stop-and-rethink rule still apply once the thresholds are ratified.
 
 ## Audit evidence
 
