@@ -1022,10 +1022,15 @@ func TestDeployRollbackOutlivesCancelTimeoutAndSession(t *testing.T) {
 
 func TestDeploySmokeLogCheckRenewsAnExpiredSession(t *testing.T) {
 	f := newFakeDeploy(t)
+	// safety: both smoke runs are followed concurrently, so expiring on each status read
+	// could expire the renewed session too, depending on which run reports first.
+	var once sync.Once
 	f.onSmoke = func(string) error {
-		f.mu.Lock()
-		f.expired = f.sessions
-		f.mu.Unlock()
+		once.Do(func() {
+			f.mu.Lock()
+			f.expired = f.sessions
+			f.mu.Unlock()
+		})
 		return nil
 	}
 	if _, err := f.deployer(false).promote(t.Context(), f.candidate()); err != nil {
