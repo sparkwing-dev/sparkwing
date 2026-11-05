@@ -2,12 +2,13 @@ package client
 
 import (
 	"context"
-	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
-	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"net/http"
 	"testing"
 	"time"
+
+	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
+	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
 
 func TestClaimRetainsIdlePollAdvice(t *testing.T) {

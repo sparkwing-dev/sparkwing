@@ -3,10 +3,11 @@ package runners
 import (
 	"context"
 	"errors"
-	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"testing"
 	"testing/synctest"
 	"time"
+
+	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 )
 
 func TestLoopHonorsIdlePollAdvice(t *testing.T) {
@@ -14,7 +15,8 @@ func TestLoopHonorsIdlePollAdvice(t *testing.T) {
 		ctx, cancel := context.WithCancel(t.Context())
 		defer cancel()
 		start, calls := time.Now(), 0
-		loop := &Loop{Config: LoopConfig{Version: "v1.0.0", MaxConcurrent: 1, PollInterval: time.Second}, CheckVersion: func(context.Context, string) error { return nil },
+		loop := &Loop{
+			Config: LoopConfig{Version: "v1.0.0", MaxConcurrent: 1, PollInterval: time.Second}, CheckVersion: func(context.Context, string) error { return nil },
 			Controller: claimFunc(func(context.Context, controllerwire.ClaimRequest) (controllerwire.ClaimResponse, error) {
 				calls++
 				if calls == 2 {
