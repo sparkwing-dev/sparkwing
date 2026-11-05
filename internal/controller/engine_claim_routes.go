@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"slices"
+	"strconv"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
@@ -61,6 +62,13 @@ func decodeClaimRequest(r *http.Request) (controllerwire.ClaimRequest, error) {
 	var body controllerwire.ClaimRequest
 	if err := decodeEngineRequest(r, &body); err != nil {
 		return body, err
+	}
+	if raw := r.Header.Get(controllerwire.RunnerMaxConcurrentHeader); raw != "" {
+		value, err := strconv.Atoi(raw)
+		if err != nil || value < 1 {
+			return body, invalidEngineBody("runner concurrency header must be positive")
+		}
+		body.MaxConcurrent = value
 	}
 	if run := r.PathValue("run"); run != "" {
 		kind, job := capability.UnitTrigger, r.PathValue("job")

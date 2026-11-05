@@ -33,3 +33,20 @@ func TestClaimRequestPreservesBusyAndUnspecifiedSlots(t *testing.T) {
 		})
 	}
 }
+
+func TestClaimConcurrencyObservationPreservesLegacyBody(t *testing.T) {
+	body, err := json.Marshal(ClaimRequest{MaxConcurrent: 2, RunnerVersion: "v1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var legacy struct {
+		RunnerVersion string   `json:"runner_version"`
+		Kinds         []string `json:"kinds"`
+		Labels        []string `json:"labels"`
+	}
+	decoder := json.NewDecoder(strings.NewReader(string(body)))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&legacy); err != nil {
+		t.Fatalf("inventory observation broke legacy claims: %s: %v", body, err)
+	}
+}

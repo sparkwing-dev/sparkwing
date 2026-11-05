@@ -10,6 +10,7 @@ import (
 	"maps"
 	"net/http"
 	"reflect"
+	"strconv"
 	"strings"
 	"time"
 
@@ -49,6 +50,9 @@ func (c *engineClient) request(ctx context.Context, method, pattern, path, key s
 		return fmt.Errorf("create controller request: %w", err)
 	}
 	req.Header.Set("Accept", "application/json")
+	if claim, ok := input.(controllerwire.ClaimRequest); ok && claim.MaxConcurrent > 0 {
+		req.Header.Set(controllerwire.RunnerMaxConcurrentHeader, strconv.Itoa(claim.MaxConcurrent))
+	}
 	if input != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}

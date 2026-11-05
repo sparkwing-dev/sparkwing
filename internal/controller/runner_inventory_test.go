@@ -368,7 +368,11 @@ func TestProfileIdentityProbeAcceptsDeploymentAndTeamCredentials(t *testing.T) {
 
 func TestRunnerInventoryRecordsConcurrencyFromClaimHTTP(t *testing.T) {
 	e, h, raw := engineClaimHTTPFixture(t, []capability.Grant{capability.NodesClaim})
-	engineClaimHTTP(t, h, raw, "POST", "/api/v1/runners/claim", `{"runner_version":"v1.2.3","kinds":["node"],"max_concurrent":2}`, 200)
+	withLimit := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		r.Header.Set(controllerwire.RunnerMaxConcurrentHeader, "2")
+		h.ServeHTTP(w, r)
+	})
+	engineClaimHTTP(t, withLimit, raw, "POST", "/api/v1/runners/claim", `{"runner_version":"v1.2.3","kinds":["node"]}`, 200)
 	tenant, err := e.Store.ForTeam(t.Context(), "a")
 	if err != nil {
 		t.Fatal(err)
