@@ -34,6 +34,8 @@ unlock.
 
 ### Changed
 
+- **runners:** A GitHub Actions job now fails when the Sparkwing work it ran fails
+  `sparkwing-runner warm --github-actions` used to exit 0 at `--idle-exit` even when a run or job it executed failed, so GitHub showed a green check for a failed deploy. It now exits non-zero and names each failed or cancelled run and job with `sparkwing runs status --run <id>`. An idle exit with no claimed work still succeeds, and `start` runners are unchanged.
 - **runners:** `sparkwing runners add --personal` without `--session-stdin` enrolls through a browser approval
   It used to refuse. On a terminal it now prints a code for the controller's `/device` page, where a signed-in account sees the runner name, team and grants before approving; the runner credential is issued under that account's authority with the same checks as before, and the command prints the team before writing configuration. `--team` refuses an approver from another team. Shared runners, reserved pools, trust classes, platforms and launchers keep `--session-stdin`, and a script without a terminal still fails at once. See the [migration](docs/migrations/_unreleased.md#runners-add-enrolls-through-a-browser-approval).
 

@@ -39,6 +39,25 @@ func AwaitNotify(ctx context.Context) func(awaiting bool) {
 	return func(bool) {}
 }
 
+type outcomeNotifyKey struct{}
+
+// WorkOutcome is the terminal state a host recorded for a run, or for one of its jobs when JobID is set.
+type WorkOutcome struct{ RunID, JobID, State string }
+
+// WithOutcomeNotify reports each terminal state a host under ctx records, so a
+// one-shot runner can fail when the work it executed failed. notify must not block.
+func WithOutcomeNotify(ctx context.Context, notify func(WorkOutcome)) context.Context {
+	return context.WithValue(ctx, outcomeNotifyKey{}, notify)
+}
+
+// OutcomeNotify returns the hook WithOutcomeNotify installed, or a no-op.
+func OutcomeNotify(ctx context.Context) func(WorkOutcome) {
+	if notify, ok := ctx.Value(outcomeNotifyKey{}).(func(WorkOutcome)); ok {
+		return notify
+	}
+	return func(WorkOutcome) {}
+}
+
 func executorProgressContext(parent context.Context, idle time.Duration) (context.Context, ExecutorActivity, func()) {
 	notify := AwaitNotify(parent)
 	ctx, cancel := context.WithCancelCause(parent)

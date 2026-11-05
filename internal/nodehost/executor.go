@@ -393,6 +393,9 @@ func (h *nodeExecutor) report(ctx context.Context, input NodeInput, result runst
 	reportCtx := lease.ExecutionContext(ctx)
 	result = recordNodeFailure(input.NodeID, result, h.deps.Masker.Mask)
 	_, err := h.transition(reportCtx, input, store.ReportNode{SourceAttempt: &input.Attempt, Outcome: result.Outcome, Result: &result})
+	if err == nil {
+		OutcomeNotify(ctx)(WorkOutcome{RunID: input.Accepted.RunID, JobID: input.NodeID, State: string(result.Outcome)})
+	}
 	return errors.Join(runErr, err)
 }
 

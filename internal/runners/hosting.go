@@ -81,7 +81,10 @@ func HostAward(ctx context.Context, unit controllerwire.ClaimedUnit, bind func(c
 	if captured.Unit == capability.UnitEval {
 		return owner.Evaluate(ctx, inputs.Run, captured.JobID, captured.SourceGeneration, *captured.Binding.Expansion)
 	}
-	_, err = owner.Run(ctx, inputs.Run)
+	completion, err := owner.Run(ctx, inputs.Run)
+	if err == nil {
+		nodehost.OutcomeNotify(ctx)(nodehost.WorkOutcome{RunID: captured.RunID, State: completion.Outcome})
+	}
 	return err
 }
 

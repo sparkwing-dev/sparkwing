@@ -291,7 +291,7 @@ func (cli RunnerCLI) authorizeActions(ctx context.Context, fs *flag.FlagSet, opt
 		return issued.Raw, nil
 	}
 	options.Loop.ClaimUntil = *expires
-	options.Loop.VersionPinned = true
+	options.Loop.VersionPinned, options.Loop.FailOnFailedWork = true, true
 	options.actions = &githubActionsSource{repository: push.RepositoryKey, token: os.Getenv("GITHUB_TOKEN")}
 	if options.Config.Repos == nil {
 		options.Config.Repos = []string{"github.com/" + push.Repository}

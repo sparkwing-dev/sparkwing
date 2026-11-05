@@ -15,6 +15,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/limits"
 	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 )
 
 // ClaimController claims through the shared queue and must honor context cancellation.
@@ -42,6 +43,9 @@ type LoopConfig struct {
 	// job gets its version from .sparkwing/go.mod, and a restarted process
 	// cannot exchange the run attempt's one-shot OIDC token again.
 	VersionPinned bool
+	// FailOnFailedWork makes the loop return an error naming each run or job it
+	// executed that failed or was cancelled, so a GitHub Actions job shows red.
+	FailOnFailedWork bool
 	// Kubernetes reports to the controller that this runner runs in a pod.
 	Kubernetes bool
 }
@@ -150,6 +154,7 @@ func (l *Loop) run(ctx context.Context) (policyErr, runErr error) {
 	awaitChanged := make(chan struct{}, 1)
 	idleSince, pollAt, backoffUntil := time.Now(), time.Time{}, time.Time{}
 	claimed := 0
+	var failed failedWork
 	var hostErr error
 	finish := func(result unitResult) {
 		pollAt = time.Time{}
@@ -197,7 +202,8 @@ func (l *Loop) run(ctx context.Context) (policyErr, runErr error) {
 		}
 		active[key] = struct{}{}
 		claimed++
-		hostCtx := nodehost.WithAwaitNotify(ctx, func(on bool) {
+		hostCtx := nodehost.WithOutcomeNotify(ctx, failed.record)
+		hostCtx = nodehost.WithAwaitNotify(hostCtx, func(on bool) {
 			awaitMu.Lock()
 			if on {
 				awaiting[key]++
@@ -223,6 +229,9 @@ func (l *Loop) run(ctx context.Context) (policyErr, runErr error) {
 			finish(<-results)
 		}
 		runErr = errors.Join(runErr, hostErr, context.Cause(ctx))
+		if l.Config.FailOnFailedWork {
+			runErr = errors.Join(runErr, failed.err())
+		}
 	}()
 	for {
 		drainResults()
@@ -386,3 +395,39 @@ func validateUnit(unit controllerwire.ClaimedUnit) error {
 // InKubernetesPod reports whether KUBERNETES_SERVICE_HOST, which the kubelet sets in
 // every container, is present in the process environment.
 func InKubernetesPod() bool { return os.Getenv("KUBERNETES_SERVICE_HOST") != "" }
+
+type failedWork struct {
+	mu       sync.Mutex
+	outcomes []nodehost.WorkOutcome
+}
+
+func (f *failedWork) record(outcome nodehost.WorkOutcome) {
+	switch outcome.State {
+	// safety: run outcomes arrive here too; RunFailed and RunCancelled share these values.
+	case string(runstate.NodeFailed), string(runstate.NodeCancelled):
+	default:
+		return
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.outcomes = append(f.outcomes, outcome)
+}
+
+func (f *failedWork) err() error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	var failures []error
+	seen := map[nodehost.WorkOutcome]bool{}
+	for _, o := range f.outcomes {
+		if seen[o] {
+			continue
+		}
+		seen[o] = true
+		subject := "run " + o.RunID
+		if o.JobID != "" {
+			subject = fmt.Sprintf("job %s in run %s", o.JobID, o.RunID)
+		}
+		failures = append(failures, fmt.Errorf("%s %s; inspect it with `sparkwing runs status --run %s`", subject, o.State, o.RunID))
+	}
+	return errors.Join(failures...)
+}

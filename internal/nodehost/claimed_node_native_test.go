@@ -168,7 +168,8 @@ func TestClaimedNodeHostAcquiresSourceAndJoinsNativeSDK(t *testing.T) {
 					return runstate.LeaseBeat{}, &apierr.Error{Code: apierr.Unavailable, Message: "controller unreachable"}
 				}
 			}
-			err = host.Execute(ctx, input)
+			var reported []WorkOutcome
+			err = host.Execute(WithOutcomeNotify(ctx, func(o WorkOutcome) { reported = append(reported, o) }), input)
 			var cancelled *lease.CancelError
 			switch outcome {
 			case "success":
@@ -196,6 +197,10 @@ func TestClaimedNodeHostAcquiresSourceAndJoinsNativeSDK(t *testing.T) {
 			}
 			if _, err := os.Stat(filepath.Join(root, ".git")); err != nil {
 				t.Fatal("host removed the user's checkout:", err)
+			}
+			wantReported := map[string]runstate.NodeState{"success": runstate.NodeSuccess, "funding_refused": runstate.NodeCancelled}[outcome]
+			if wantReported == "" && len(reported) != 0 || wantReported != "" && (len(reported) != 1 || reported[0] != WorkOutcome{RunID: input.Accepted.RunID, JobID: input.NodeID, State: string(wantReported)}) {
+				t.Fatalf("reported outcomes = %+v", reported)
 			}
 			if outcome == "funding_refused" {
 				if len(s.changes) != 2 || s.changes[1].Extra.Result.Outcome != runstate.NodeCancelled {

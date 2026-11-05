@@ -143,6 +143,14 @@ The runner requests a GitHub ID token with the controller URL as its audience,
 then exchanges it for a short-lived controller capability. The exchange returns
 the verified push binding; the runner uses that repository and expiry for its
 claims. The workflow needs `id-token: write` and `GITHUB_TOKEN` for source access.
+The exchange works once per run attempt, so the runner keeps the version
+`.sparkwing/go.mod` pins rather than updating itself; a pin that signed policy
+revokes or puts below the minimum fails the job and names the pin to raise.
+
+The Actions job fails when Sparkwing work it executed fails. `warm` exits
+non-zero and names each failed or cancelled run and job with the
+`sparkwing runs status --run <id>` command that shows why. An idle exit with no
+claimed work succeeds.
 
 `warm` uses controller-awarded leases and job settings. It rejects the removed
 `--heartbeat`, `--lease`, `--holder-prefix`, `--trigger-source`,
