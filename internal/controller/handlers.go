@@ -180,7 +180,7 @@ func (s *Server) handlePipelineLatest(w http.ResponseWriter, r *http.Request, au
 	if reference.FromProvenRun {
 		run, err = tenant.GetLatestProvenRunAtCommit(r.Context(), name, reference.JobID, authorized.Principal.Capability.Binding.RunID, statuses, maxAge)
 	} else {
-		run, err = tenant.GetLatestRun(r.Context(), name, statuses, maxAge, reference.FromAnyRun)
+		run, err = tenant.GetLatestRun(r.Context(), name, statuses, maxAge, reference.FromAnyRun, authorized.Principal.Capability.Binding.RunID)
 	}
 	if err != nil {
 		return engineLookupError(err)

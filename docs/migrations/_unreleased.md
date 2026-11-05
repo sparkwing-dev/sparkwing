@@ -82,12 +82,43 @@ and no `--trust`, or `--trust any`.
 
 ## Team launcher pods are not fresh hosts
 
-Pods a team's own launcher starts now take the trust of the launcher's
-credential. Their jobs mint OIDC tokens with `runner_environment: persistent`,
-so a cloud trust policy that requires `fresh` stops accepting them: allow
-`persistent` for those subjects, or run the jobs on Sparkwing Cloud. Their
-verified runs write the launcher's own cache scope, which other launchers and
-Cloud do not restore, unless the team turns on `high_trust`.
+Pods a team's own launcher starts, a runner enrolled with `--launcher`, now
+take the trust of the launcher's credential instead of counting
+as fresh hosts. Jobs on them mint OIDC tokens whose `runner_environment` claim
+is `persistent`, and the subject's `runner_environment` segment changes with
+it. A push to `main` run on such a pod was
+
+```text
+team:acme:repository_id:123456789:pipeline:deploy:trigger:push:runner:runner:runner_environment:fresh:ref:refs/heads/main
+```
+
+and is now
+
+```text
+team:acme:repository_id:123456789:pipeline:deploy:trigger:push:runner:runner:runner_environment:persistent:ref:refs/heads/main
+```
+
+Every other segment stays the same, `runner:runner` included. Jobs on Sparkwing
+Cloud nodes and GitHub-hosted Actions runners, which their provider attests no
+other run touched, keep `runner_environment:fresh`.
+
+This affects a cloud trust policy that requires `runner_environment:fresh` (an
+AWS `sub` condition, a GCP attribute condition on
+`assertion.runner_environment`, a Vault `bound_claims` entry, and similar) for
+jobs that run on a team's own launcher. After the upgrade those roles refuse
+the token. Pick one:
+
+- Admit the launcher's subjects: replace `runner_environment:fresh` with
+  `runner_environment:persistent` in the subject, or with
+  `runner_environment:*` to admit both, and in claim-based conditions accept
+  `persistent`. Keep the repository, trigger and ref pinned.
+- Move the deploying jobs to Sparkwing Cloud, whose tokens stay `fresh`, and
+  leave the policy unchanged.
+
+A policy that already uses `runner_environment:*` needs no change. Verified
+runs on a team launcher's pods also write that launcher's own cache scope,
+which other launchers and Cloud do not restore, unless the team turns on
+`high_trust`.
 
 ## sparkwing run --sw-output is removed
 
