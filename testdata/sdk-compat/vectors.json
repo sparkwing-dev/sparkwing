@@ -392,6 +392,38 @@
           "sdk/typescript/src/routes.ts:HostServices.secret"
         ]
       }
+    },
+    {
+      "id": "malformed-run-context-validation",
+      "area": "protocol",
+      "evidence": "source_inspection",
+      "input": {
+        "operation": "plan",
+        "run": {
+          "trigger": {
+            "source": ""
+          }
+        }
+      },
+      "go": {
+        "outcome": "accepts",
+        "trigger_source": ""
+      },
+      "typescript": {
+        "outcome": "refuses",
+        "code": "bad_request",
+        "error_contains": "run.trigger.source"
+      },
+      "decision": "maintainer_required",
+      "sources": {
+        "go": [
+          "sparkwing/protocol_operations.go:sdkOperations.Plan"
+        ],
+        "typescript": [
+          "sdk/typescript/src/protocol.ts:validateRequest",
+          "sdk/typescript/src/errors.ts:string"
+        ]
+      }
     }
   ]
 }

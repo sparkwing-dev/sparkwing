@@ -69,7 +69,13 @@ func (task task) Work(work *sparkwing.Work) (*sparkwing.WorkStep, error) {
 		return map[string]string{"trimmed": value}, err
 	})
 	sparkwing.Step(work, "raw", func(ctx context.Context) error {
-		if _, err := os.Stdout.WriteString("compat-raw-out\n"); err != nil {
+		if _, err := os.Stdout.WriteString("compat-raw-outer-first\ncompat-secret-"); err != nil {
+			return err
+		}
+		if _, err := sparkwing.Exec(ctx, os.Getenv("COMPAT_HELPER_EXE"), "raw-outer-barrier").Capture(); err != nil {
+			return err
+		}
+		if _, err := os.Stdout.WriteString("value\ncompat-raw-out\n"); err != nil {
 			return err
 		}
 		_, err := sparkwing.Exec(ctx, os.Getenv("COMPAT_HELPER_EXE"), "raw").Run()

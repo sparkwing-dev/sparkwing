@@ -22,7 +22,9 @@ definePipeline({
       trimmed: await ctx.exec([process.env.COMPAT_HELPER_EXE, "trim"]).string(),
     }));
     source.step("raw", async (ctx) => {
-      writeSync(1, "compat-raw-out\n");
+      writeSync(1, "compat-raw-outer-first\ncompat-secret-");
+      await ctx.exec([process.env.COMPAT_HELPER_EXE, "raw-outer-barrier"]).capture();
+      writeSync(1, "value\ncompat-raw-out\n");
       await ctx.exec([process.env.COMPAT_HELPER_EXE, "raw"]).run();
     });
     source.step("oidc", async (ctx) => ({ token: await ctx.oidcToken("compat-audience") }));
