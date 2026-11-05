@@ -52,7 +52,7 @@ export default function NewTeamPage() {
       await createTeam(effectiveSlug, name.trim());
       await refreshTeamState();
       toast(createdNotice(name.trim()), "success");
-      router.push("/team");
+      router.push(state.status === "ready" && state.caps?.github_app?.slug ? "/team/github" : "/team");
     } catch (err) {
       setCreating(false);
       toast(errorText(err), "error");
@@ -63,9 +63,8 @@ export default function NewTeamPage() {
     <div className="flex-1 overflow-y-auto p-6 max-w-xl mx-auto w-full">
       <h1 className="text-xl font-bold mb-1">Create a team</h1>
       <p className="text-sm text-[var(--muted)] mb-6">
-        You&apos;ll own the new team and switch to it. Your personal space and
-        other teams stay as they are - switch between them anytime from the team
-        menu. Each team has its own pipelines, runs, secrets and machines.
+        Give your team a name, then connect a repository. Each team has its own
+        pipelines, runs, secrets and machines. You can switch teams from the team menu.
       </p>
       <form
         onSubmit={submit}
@@ -87,7 +86,7 @@ export default function NewTeamPage() {
           <span className="block text-xs text-[var(--muted)] mb-1">
             Slug{" "}
             <span className="text-[10px]">
-              (permanent; used in URLs and hostnames)
+              (permanent; used by the CLI, GitHub variables and AWS policies)
             </span>
           </span>
           <input

@@ -193,29 +193,28 @@ function ConnectedGitHub({ me }: { me: Me }) {
 
   return (
     <>
+      <div className="mb-6 space-y-2">
+        <h2 className="text-2xl font-semibold">Set up a repository</h2>
+        <p className="max-w-xl text-sm text-[var(--muted)]">Connect GitHub, choose what runs, then finish in GitHub Actions. We&apos;ll show what&apos;s ready and what needs your attention.</p>
+      </div>
       {accessUpdated && (
         <div role="status" className="mb-4 rounded border border-green-500/40 bg-green-500/10 px-4 py-3 text-sm text-green-200">
           Repository access updated on GitHub
         </div>
       )}
-      <Panel
-        title="Connected accounts"
-        action={
-          canManage ? (
+      {installations.length === 0 ? <section className="mb-6 space-y-4 rounded-lg bg-[var(--surface)] p-5">
+        <h3 className="text-base font-semibold">1. Connect GitHub</h3>
+        <p className="text-sm text-[var(--muted)]">Choose your GitHub account and the repositories Sparkwing can read. GitHub will return you here to enable runs. Installing the app alone does not start pipelines.</p>
+        {canManage ? <ConnectGitHubForm csrfToken={csrfToken} connected={false} /> : <p className="text-sm text-amber-200">A team owner needs to connect GitHub.</p>}
+      </section> : <details className="mb-6">
+        <summary className="min-h-11 cursor-pointer py-3 text-sm text-[var(--muted)]">GitHub connected · {installations.map((inst) => inst.account_login).join(", ")} · manage accounts</summary>
+      <Panel title="Connected accounts">
+          {canManage ? (
             <ConnectGitHubForm
               csrfToken={csrfToken}
               connected={installations.length > 0}
             />
-          ) : null
-        }
-      >
-        {installations.length === 0 ? (
-          <div className="p-4 text-xs text-[var(--muted)]">
-            {canManage
-              ? "Connect GitHub to run pipelines on pushes and pull requests."
-              : "A team owner can connect GitHub to start runs from this team's repositories."}
-          </div>
-        ) : (
+          ) : null}
           <ul>
             {installations.map((inst) => (
               <InstallationRow
@@ -229,11 +228,12 @@ function ConnectedGitHub({ me }: { me: Me }) {
               />
             ))}
           </ul>
-        )}
       </Panel>
+      </details>}
       {installations.length > 0 && <GitHubOnboarding repositories={choices} canManage={canManage} teamSlug={me.active_team.slug} />}
-      <details className="mb-4">
+      <details className="mt-6 mb-4 border-t border-[var(--border)] pt-2">
       <summary className="cursor-pointer py-3 text-sm">Advanced: manual subscriptions</summary>
+      <p className="mb-4 text-sm text-[var(--muted)]">Most repositories use the guided setup above. Use a manual subscription only to override a pipeline&apos;s configuration or set triggers outside the repository.</p>
       <Panel
         title="Manual subscriptions"
         action={
@@ -284,10 +284,11 @@ function ConnectedGitHub({ me }: { me: Me }) {
         </Panel>
       ) : null}
       </details>
-      {installations.length > 0 ? (
+      {installations.length > 0 ? (<details className="mb-4">
+        <summary className="min-h-11 cursor-pointer py-3 text-sm">Advanced: access to other repositories</summary>
         <ExtraReposPanel repositories={choices} canManage={canManage} />
-      ) : null}
-      {canManage && <FailedGitHubDeliveries />}
+      </details>) : null}
+      {canManage && <details className="mb-4"><summary className="min-h-11 cursor-pointer py-3 text-sm">Troubleshoot missing runs</summary><FailedGitHubDeliveries /></details>}
       {!canManage ? (
         <div className="text-xs text-[var(--muted)]">
           Team owners connect accounts and change subscriptions.

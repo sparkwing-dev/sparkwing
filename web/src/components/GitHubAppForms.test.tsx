@@ -42,7 +42,8 @@ describe("ConnectGitHubForm", () => {
     const html = renderToStaticMarkup(
       <ConnectGitHubForm csrfToken="session-csrf" connected={false} />,
     );
-    assert.match(html, /Already installed the app\? Connect an existing installation/);
+    assert.match(html, /Already installed the app\?/);
+    assert.match(html, /Connect an existing installation/);
     assert.match(html, /action="\/github\/app\/connect\/existing"/);
   });
   it("posts the session CSRF token to the dashboard server", () => {

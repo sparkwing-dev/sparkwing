@@ -48,6 +48,14 @@ The browser suite checks run control geometry at 375px, cancellation before
 start, repository refusal remedies, and login accessibility with axe against
 the server-rendered page, including its expanded access-token form.
 
+**Team > GitHub** is the guided repository setup. It reads push triggers and saved
+permissions, combines the two owner approvals for GitHub Actions, and asks the
+customer to confirm workflow and team settings that the API cannot inspect.
+Existing workflows can be kept. **Team > Machines** starts with browser CLI
+sign-in using `sparkwing login`. Team headers show the slug used by external
+configuration with a copy button. The onboarding browser tests cover owner and
+member access, invalid configuration, permission failures, and mobile axe checks.
+
 `sparkwing run gate` runs the unit and full ESLint suites in parallel,
 then the production build and browser smoke suite. Install the locked dashboard
 dependencies before running the local gate; hosted CI runs `pnpm install

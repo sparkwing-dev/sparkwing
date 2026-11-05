@@ -9,6 +9,7 @@ import TeamShell, {
   inputClass,
 } from "@/components/TeamShell";
 import CopyField from "@/components/CopyField";
+import CLISignIn from "@/components/CLISignIn";
 import { toast } from "@/components/Toasts";
 import {
   type Me,
@@ -96,6 +97,10 @@ function Machines({ me }: { me: Me }) {
 
   return (
     <>
+      <section id="cli-access" className="mb-6">
+        <h2 className="text-lg font-semibold">CLI access</h2>
+        <CLISignIn teamSlug={me.active_team.slug} />
+      </section>
       {canConnectMachines(role, membersCanAddMachines) ? (
         <ConnectForm team={me.active_team.display_name} admin={owner} onMinted={load} />
       ) : (
@@ -223,8 +228,8 @@ function CLIAccess({
   return (
     <div className="mt-6">
       <Panel
-        title="CLI access"
-        hint={`A personal token lets the sparkwing CLI start and follow ${team}'s runs as you. It loses access when you leave the team.`}
+        title="Manual CLI tokens"
+        hint={`For scripts that cannot use browser sign-in. A token acts as you in ${team} and loses access when you leave.`}
       >
         <div className="flex items-center gap-2 p-4">
           <button

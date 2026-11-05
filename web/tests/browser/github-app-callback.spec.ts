@@ -23,7 +23,8 @@ test("an existing App callback requests available once", async ({ page }) => {
     const callback = page.waitForResponse((response) =>
       new URL(response.url()).pathname === "/github/app/callback",
     );
-    await page.getByRole("button", { name: /Already installed the app/ }).click();
+    await page.getByText("Already installed the app?", { exact: true }).click();
+    await page.getByRole("button", { name: "Connect an existing installation", exact: true }).click();
     expect((await callback).status()).toBe(303);
     await expect(
       page.getByRole("heading", { name: "No existing installations" }),

@@ -31,19 +31,23 @@ export function ConnectGitHubForm({
   connected: boolean;
 }) {
   return (
-    <div className="flex flex-col items-end gap-2">
+    <div className="flex flex-wrap items-center gap-3">
       <form method="POST" action={connectFormAction}>
         <input type="hidden" name="csrf_token" value={csrfToken} />
         <button type="submit" className={buttonClass} disabled={!csrfToken}>
           {connected ? "Connect another account" : "Connect GitHub"}
         </button>
       </form>
+      <details className="text-sm text-[var(--muted)]">
+      <summary className="min-h-11 cursor-pointer py-3">Already installed the app?</summary>
+      <p className="mb-2 max-w-sm">Link the installation to this team. Choosing repositories on GitHub gives access to code. You enable runs here next.</p>
       <form method="POST" action="/github/app/connect/existing">
         <input type="hidden" name="csrf_token" value={csrfToken} />
-        <button type="submit" className={quietButtonClass} disabled={!csrfToken}>
-          Already installed the app? Connect an existing installation
+        <button type="submit" className={`${quietButtonClass} min-h-11`} disabled={!csrfToken}>
+          Connect an existing installation
         </button>
       </form>
+      </details>
     </div>
   );
 }
@@ -65,7 +69,7 @@ export function InstallationRow({
 }) {
   return (
     <li className="px-4 py-3 border-b border-[var(--border)] last:border-0">
-      <div className="flex items-center gap-3">
+      <div className="flex flex-wrap items-center gap-3">
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 text-sm">
             <span className="font-medium truncate">{inst.account_login}</span>

@@ -53,9 +53,11 @@ func TestKeeperHonorsTheReturnedBoundAcrossSlowAndLostRenewals(t *testing.T) {
 					Observe: func(Beat) { observed++ },
 				}
 				ctx, stop := keeper.Run(t.Context())
-				defer stop()
 				<-ctx.Done()
-				if got := time.Since(start); got != max(20*time.Second, responseDelay) {
+				got := time.Since(start)
+				// safety: stop joins the renewal goroutine, which still writes calls and observed.
+				stop()
+				if got != max(20*time.Second, responseDelay) {
 					t.Fatalf("keeper stopped after %v, past its returned bound", got)
 				}
 				if responseDelay > 20*time.Second && observed != 0 {

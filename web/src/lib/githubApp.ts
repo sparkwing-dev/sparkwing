@@ -44,7 +44,7 @@ export interface AutomationSkipped {
 export type AppRunner = "anywhere" | "cloud" | "github-actions" | `pool=${string}`;
 
 export const appRunnerChoices: { value: AppRunner; label: string }[] = [
-  { value: "anywhere", label: "Anywhere (team claim ranking)" },
+  { value: "anywhere", label: "Any available team runner" },
   { value: "cloud", label: "Sparkwing Cloud" },
   { value: "github-actions", label: "GitHub Actions" },
 ];
