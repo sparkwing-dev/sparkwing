@@ -22,6 +22,11 @@ unlock.
 
 ### Added
 
+- **cli:** `sparkwing runs timing --pipeline <name>` splits recent runs' time into waiting, setup and running per job
+  Each job's time divides into queue, admission, setup, running and an explicit gap, with P50 and P90 across the last
+  `--last` finished runs. Each run's wall divides the same way and the parts always add up to it, so a long admission
+  wait or a slow setup shows instead of hiding inside the total. Failed jobs are grouped by failing step and reason,
+  with retry and repeated-commit counts. `-o json` emits NDJSON.
 - **sdk:** `JobNode.Cores(n)`, `JobGroup.Cores(n)` and TypeScript `job.cores(n)` declare the CPU a job asks local admission to reserve
   The default stays one core; requests go down to 0.25. The plan carries `cores` only to a host whose hello names the
   new `job_cores` feature, so a pipeline using it still plans on an older host, which keeps the one-core charge.

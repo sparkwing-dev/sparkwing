@@ -389,6 +389,8 @@ func runSparkwing(args []string) (result error) {
 		return runRunsStatus(context.Background(), inv)
 	case "sparkwing runs stats":
 		return runJobsStats(context.Background(), inv)
+	case "sparkwing runs timing":
+		return runRunsTiming(context.Background(), inv)
 	case "sparkwing runs cancel":
 		return runRunsCancel(context.Background(), inv)
 	case "sparkwing runs prune":
