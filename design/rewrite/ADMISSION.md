@@ -58,3 +58,35 @@ contention. Mutations reproduce the ws12j/k failures. Production `MayStart` test
 replace the shadow allocator on both dialects. Concurrent admission tests race
 execution, settlement and reaping. Architectural lint restricts ledger writers;
 behavioral tests prove permit enforcement and complete-set grants.
+
+## Durable machine admission
+
+Logical concurrency above and local machine capacity are separate admission
+layers. `internal/admission/ledger.go` owns the machine policy engine: priority
+and class FIFO, guarded backfill, skip/fail, supersession and atomic semaphore
+grants. The controller persists its complete snapshot, including waiters and
+arrival counters, with request receipts in `local_machine_admission` in
+`state.db`. `internal/store/machine_admission.go` commits the complete payload in
+one transaction. Startup restores it before admission decisions.
+
+Machine requests use HTTP on the controller API socket. Only the verified local
+socket peer can call these routes. Browser cookies supply no authority. A
+client request key identifies a retry and returns the same ticket or grant.
+Ticket reads can long poll for about 20 seconds. A lost poll retries the same
+ticket and retains its arrival. Release and cancel are idempotent. Lease watches
+return committed eviction, orphan cancellation and run cancellation immediately.
+In-memory wake channels only prompt another read of the committed ticket.
+
+Every ticket records its holder's root PID and `procgroup.ProcessBirth` start
+identity. The controller verifies process ownership against the socket peer.
+Each decision and a periodic process check release capacity for dead holders or
+reused PIDs. Inspection errors keep the reservation. Connections, renewals,
+expiry and timeout settings do not determine machine authority.
+
+The existing sampler attributes CPU and memory to each holder's process tree.
+The controller API exposes current, peak and average job usage for the dashboard.
+Existing host processes still own job execution and logical claim renewal.
+
+Store round trips and restart ordering are guarded by
+`internal/store/machine_admission_test.go`. The ledger's property and invariant
+tests continue to guard policy independently of transport and persistence.

@@ -1,7 +1,7 @@
 # Local controller transport
 
-`DialSocket` and `ListenSocket` own the local transport for admission and the
-controller API. `SocketPath` and `APISocketPath` select stable home-bound endpoint
+`DialSocket` and `ListenSocket` own the local transport for the controller API,
+including machine admission. `SocketPath` and `APISocketPath` select stable home-bound endpoint
 keys. Each key carries a random id recorded in the home's `wingd/socket-id`, so
 another account cannot predict and pre-create it. Unix uses those keys as socket
 paths and, on bind, removes this account's socket directories that hold only
@@ -16,10 +16,23 @@ Callers supply it as `EngineOptions.HTTP` and `APIBaseURL` as `EngineOptions.URL
 the shared clients' route policy owns any retry. Close idle connections when finished.
 
 `wingd/client.Probe` supplies daemon readiness, draining and API diagnostics.
-Admission clients retain the connected daemon version for connection diagnostics.
-The admission wire's stats-reset operation clears its persisted event window.
-`TestStatsReset_ClearsTheEventWindow` exercises that operation over in-memory
-connections and checks that the granted holder survives the reset.
+Admission clients retain the controller version for diagnostics. Incompatible
+clients receive an error naming their version, the controller version and
+`sparkwing pipeline upgrade`. The admission frame protocol has no compatibility
+relay.
+
+Machine admission uses `/api/v1/local/admission` on `api.sock`. A client request
+key creates one durable ticket or grant. Ticket GET and lease-watch requests
+can wait about 20 seconds and wake after the relevant state commits. Dropped
+polls retry the same ticket without losing its arrival. DELETE releases or
+cancels idempotently. Queue, priority and live process metrics use the same
+verified-peer HTTP transport.
+
+The ticket binds the holder root PID and process start time to the verified
+socket peer's account. The controller checks process liveness on decisions and
+periodically. A gone or reused holder releases capacity. Inspection errors keep
+it. A connection closing never releases admission, and there is no renewal or
+expiry. The complete ledger and ticket receipts share one store transaction.
 
 `ListenSocket` yields `authenticatedAPIConn` only after checking the kernel identity against
 the controller account. Unix supplies the socket peer UID. Windows reads one
@@ -58,8 +71,8 @@ contracts.
 Caller cancellation bounds connection and handshake work. The server uses
 `limits.LocalControllerHandshake`. Listener closure cancels and joins pending
 connects and authentication, while authenticated connections survive for drain.
-The runtime retains its existing home election until admission and API drains
-finish. A Windows replacement binds after those accepted connections close.
+The runtime retains its existing home election until admission workers and API
+requests join. A Windows replacement binds after accepted connections close.
 
 The Windows tests cover SID delivery, owner-only DACLs, exclusive binding,
 cancellation, incomplete authentication, immediate rebinding after shutdown and

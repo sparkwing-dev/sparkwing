@@ -117,11 +117,31 @@ The native local host binds W3's machine-admission port to the elected home
 with takeover and spawning disabled. W6 resolves the configured box identity
 and its hostname default. The same identity reaches local and store capacity
 admission. Every locally scheduled job uses machine admission before execution.
-Each held lease owns its admission connection, returns watch failures to the
-host, and closes that connection on release. The production CLI supplies its
-version to this binding. The adapter tests preserve the captured home and
-refuse malformed machine settings. In-memory client tests cover recovery and
-joined release. Native admission sockets still require the lead's platform run.
+Each admission request creates a durable HTTP ticket on the controller API
+socket. Retrying its client request key returns the same result. Queued tickets
+retain arrival order through dropped long polls and controller restarts. The
+host watches a granted ticket for committed eviction or cancellation and releases
+it with an idempotent request. The production CLI supplies its version to this
+binding. The adapter tests preserve the captured home and refuse malformed
+machine settings. Native socket identity still requires platform evidence.
+
+`internal/admission/ledger.go` retains machine policy ownership. Every mutation
+commits the complete ledger snapshot, waiters and request receipts to
+`local_machine_admission` in the elected controller's `state.db`. Startup restores
+that payload before serving admission. The former `wingd/state.json` sidecar
+supplies no authority. Commit failures restore the previous committed state.
+In-memory wake channels only prompt pollers to reread their durable tickets.
+
+Tickets and leases bind the holder root PID to its `procgroup.ProcessBirth`
+start identity. The controller verifies its OS account against the socket peer.
+Each admission decision and a periodic check release dead or reused holders.
+Process inspection errors retain capacity. There is no machine renewal, expiry
+or timeout setting, and a connection closing releases nothing. Hosts still own
+job execution and the existing logical claim renewals.
+
+The existing process-tree sampler supplies current, peak and average CPU and
+memory usage through the controller API for the dashboard. Its attribution and
+the ledger's guarded backfill retain their existing scheduling rules.
 
 The local schedule factory constructs the same home-bound lifecycle and native
 timer operations without opening the store. Registration, pinning and ticks
@@ -154,8 +174,8 @@ Cancellation calls `Tenant.TransitionRun` with the elected reaper fence. It
 records the request while live holders drain, and maintenance finishes the run
 after their leases end. Repeated requests preserve the first reason and leave
 terminal results intact. Missing and foreign runs fail. Stale fences cannot mutate state.
-Disconnect finalization logs failures and remains usable during runtime drain
-because admission finalizers join before store close. Readiness requires the
+Process-death finalization logs failures and remains usable during runtime drain
+because admission workers join before store close. Readiness requires the
 open, reconciled owner and the shared state binding's readiness check.
 
 Readiness waits for reconciliation, admission startup and the API serving loop.
@@ -199,7 +219,7 @@ one explicit start. A failed bind on that restore is logged and the controller
 starts without it. `sparkwing dashboard stop` and `sparkwing daemon stop` clear the
 record with `ForgetDashboard`; `daemon restart` keeps it.
 Admission holders and waiting runs also remain active. `setStay` pins the
-daemon. The client `Probe` API observes the handshake without requesting queue work.
+daemon. The client `Probe` API reads controller HTTP status without requesting queue work.
 Health probes, repeated unchanged counts and idle API connections do
 not extend its idle deadline. The timeout comes from
 `limits.LocalControllerIdleTimeout` unless the existing admission configuration
@@ -219,8 +239,8 @@ UID cannot change the account attached to the connection. The API listener
 checks `LocalSubject` before yielding a connection. Unix uses kernel UIDs.
 Windows uses owner-only named pipes and the client's identification-token SID.
 The [transport contract](LOCAL-TRANSPORT.md) lists the native tests still required.
-Admission state and election files use `fssecure`. Admission state accepts only
-the current schema.
+Election files use `fssecure`. Machine admission state uses the store's schema
+migration and baseline checks.
 
 `ResolveAdmissionPolicy` reads the complete machine configuration through
 `userconfig.ReadConfig`. The shared configuration package owns decoding and
@@ -278,34 +298,29 @@ The local CLI host and schedule operation transport still require those shared
 contracts. The store also needs a typed incompatible-store error.
 
 `client.QueryLocalController` discovers the owner through the authenticated
-admission socket. It reports readiness, PID, version, stay policy and the four
-activity counts. The query uses a health-probe connection and leaves the idle
+controller API socket. It reports readiness, PID, version, stay policy and the four
+activity counts. The HTTP query leaves the idle
 deadline unchanged. `client.setLocalStay` changes the owner's policy and checks
 its acknowledgement. Neither operation starts a process or replaces another
 version. Missing sockets, unreachable owners, unsupported operations and stalled
-replies remain distinct errors. The existing `client.Stop` uses admission drain
+replies remain distinct errors. The existing `client.Stop` requests controller drain
 and waits for the socket and election lock to close.
 
-The admission wire's `local_control` request carries an optional `stay` value.
-Only an elected `LocalRuntime` serves it. A health probe may read status but
-cannot change policy. `local_control_status` is the process snapshot, not an
-installed-service claim. Native service inspection supplies that separate fact.
+The controller HTTP routes under `/api/v1/local/controller/` expose probe,
+status, stay, dashboard and drain operations. Each requires the verified local
+socket peer. Only an elected `LocalRuntime` serves lifecycle mutations. Status
+describes the running process. Native service inspection supplies installed-unit
+facts separately.
 
 `client.startLocalDashboard` requests dashboard startup from an existing owner.
-Its `local_dashboard` request waits for `local_dashboard_ack` after the serving
-loop reaches readiness. An identical address reuses the listener. A bind failure
-returns the owner's error and leaves the controller available. Probe connections
-and admission-only daemons refuse the operation.
+Its HTTP request waits for the serving loop to reach readiness. An identical
+address reuses the listener. A bind failure returns the owner's error and leaves
+the controller available. Admission-only daemons refuse the operation.
 
-The dashboard request uses one connection. Peer disconnect cancels the readiness
-wait, and the handler joins its reader before returning. Shutdown closes the
-connection before joining handlers because a readiness waiter may be waiting
-for that same runtime to finish. Service failure therefore reaches a foreign
-caller as a transport error. The runtime retains the service error through
-shutdown. Client cancellation closes its connection and returns its context
-error, including cancellation during the switch from handshake to readiness.
-The handshake has the existing probe budget. Readiness follows the caller's
-context because dashboard startup can take longer than a health probe.
+The dashboard HTTP request follows the caller's context while waiting for
+readiness. Shutdown cancels requests and joins handlers before closing the
+store. A service failure remains observable after cleanup. Dashboard startup
+can take longer than a health probe, so readiness follows the caller's context.
 
 `client.NewLocalLifecycle` reuses a ready owner or starts the captured absolute
 executable through `wingd run --home HOME --version VERSION`. That process
@@ -330,11 +345,9 @@ host services through the CLI's `localcontroller.Config.Bind` adapter.
 `NewLocalRuntime` refuses a foreign election before opening its store. Windows
 transport still refuses API access when it cannot supply a client SID.
 
-Drain preserves cancellation and unreachable-owner errors and requires a
-`drain_ack` on the current admission protocol. A successful drain then waits for
-the socket and election lock to close. It never starts a replacement process.
-The runtime recognises draining before the API listener closes, so its expected
-closure cannot cancel the acknowledgement write on the admission connection.
+Drain preserves cancellation and unreachable-owner errors. Its HTTP response
+acknowledges drain before shutdown starts. A successful drain then waits for
+the socket and election lock to close. It starts no replacement process.
 
 `NewManagedUnitManager` implements `ManagedUnitManager` for one captured state
 home. Linux uses systemd user units. macOS uses LaunchAgents. Controller units
@@ -362,19 +375,14 @@ native login, crash, shutdown or Windows behavior.
 
 `TestLocalRuntime*` exercises election-before-open, readiness, failure cleanup,
 restart after failed startup, all four activity holds and idle probes. It uses
-in-memory listeners and fake shared-controller services. `TestLocalControl*`
-exercises the new wire exchange with `net.Pipe`, including probe restrictions,
-response validation, cancellation and stalled peers. `TestLocalDashboard*`
-covers starting the UI on an existing owner, failed binds, readiness and joined
-shutdown. Its wire tests also cover probe refusal, peer cancellation and service
-failure during a remote start. The wire shape and round-trip tests cover the
-status/stay and dashboard messages.
+in-memory listeners and fake shared-controller services. `TestLocalHTTP*`
+exercises verified-peer delivery, refusal paths, cancellation and joined
+shutdown. Machine-admission HTTP tests cover durable requests and poll wakeups.
+The sampler tests cover process-tree attribution and current, peak and average
+usage independently of admission charges.
 `TestLocalLifecycle*` in the client package exercises foreign-owner composition,
 election races, home binding, concurrent reuse and refusal paths through the
-lifecycle interface with process-boundary fakes. `TestLocalDrain*` uses
-`net.Pipe` to cover acknowledgement validation and cancelled handshakes.
-The runtime drain test blocks the acknowledgement reader while the API closes
-and verifies that the acknowledgement arrives before connection shutdown.
+lifecycle interface with process-boundary fakes.
 The process/store
 scenarios remain open: local controller
 idle lifecycle, health-probe process exit, dashboard install/update, Windows

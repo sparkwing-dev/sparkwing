@@ -20,6 +20,10 @@ unlock.
 
 ## [Unreleased]
 
+### Breaking
+
+- **local controller (Breaking):** Machine admission uses durable HTTP tickets on the controller API socket. Older pinned CLIs must run `sparkwing pipeline upgrade`. Incompatible-client errors name the client and controller versions. The schema baseline advances to version 31 in place, storing queued requests, leases and retry receipts together in `state.db`. See [the migration guide](docs/migrations/_unreleased.md#upgrade-the-store-in-place-to-schema-baseline-31).
+
 ### Fixed
 
 - **daemon:** CLI connections reuse compatible running daemons across version differences, including repo-pinned and source builds, so they leave active runs running. Protocol and wire-build mismatches fail without automatic draining or replacement and name the explicit restart command.
