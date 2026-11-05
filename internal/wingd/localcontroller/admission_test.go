@@ -68,8 +68,8 @@ func TestAdmissionUsesOwnedStoreDuringDrain(t *testing.T) {
 	if err := c.sweep(t.Context()); err != nil {
 		t.Fatal(err)
 	}
-	if terminal, err := owner.IsRunTerminal("run"); terminal || err != nil {
-		t.Fatalf("cancellation ended a live owner: terminal=%t error=%v", terminal, err)
+	if terminal, err := owner.IsRunTerminal("run"); !terminal || err != nil {
+		t.Fatalf("cancellation did not block admission: terminal=%t error=%v", terminal, err)
 	}
 	if _, err := stateSQL(t, binding).ExecContext(t.Context(), `UPDATE triggers SET lease_expires_at=1 WHERE id='run'`); err != nil {
 		t.Fatal(err)

@@ -59,6 +59,9 @@ func (s *EngineController) cancel(ctx context.Context, a capability.Authorized, 
 	applied, err := tenant.TransitionRun(ctx, runstate.RunTransition{
 		RunID: runspec.RunID(a.Target.RunID), To: runstate.RunCancelled, Cause: runstate.RunCancel, Actor: actor, Reason: body.Reason,
 	})
+	if err == nil && applied.CancelRequested && s.AfterRunCancellation != nil {
+		err = s.AfterRunCancellation(context.WithoutCancel(ctx), store.Team(a.Target.Team), a.Target.RunID)
+	}
 	return appliedResponse(applied), engineLookupError(err)
 }
 

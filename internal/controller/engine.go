@@ -14,18 +14,20 @@ import (
 
 // EngineController applies authorized operations through store transactions.
 type EngineController struct {
-	authority         engineAuthority
-	operator          AuthorityRevoker
-	authorization     routepolicy.Authorization
-	RunnerPolicy      RunnerAdmissionPolicy
-	LocalRunnerPolicy RunnerAdmissionPolicy
-	VersionPolicy     *SignedEngineVersionPolicy
-	Units             UnitRenewer
-	Launcher          LauncherSyncReader
-	ResolveTenant     func(context.Context, store.Team) (TenantHandle, error)
-	ResolveOperator   func(context.Context) (AuthorityRevoker, error)
-	ProjectScheduling func(store.RunSnapshot) (store.ScheduleSnapshot, error)
-	ReadRunStatus     func(context.Context, store.Team, string) (RunStatusFacts, error)
+	// AfterRunCancellation observes committed cancellation intent, including retries.
+	AfterRunCancellation func(context.Context, store.Team, string) error
+	authority            engineAuthority
+	operator             AuthorityRevoker
+	authorization        routepolicy.Authorization
+	RunnerPolicy         RunnerAdmissionPolicy
+	LocalRunnerPolicy    RunnerAdmissionPolicy
+	VersionPolicy        *SignedEngineVersionPolicy
+	Units                UnitRenewer
+	Launcher             LauncherSyncReader
+	ResolveTenant        func(context.Context, store.Team) (TenantHandle, error)
+	ResolveOperator      func(context.Context) (AuthorityRevoker, error)
+	ProjectScheduling    func(store.RunSnapshot) (store.ScheduleSnapshot, error)
+	ReadRunStatus        func(context.Context, store.Team, string) (RunStatusFacts, error)
 }
 
 // ReconcileJob uses C1 ReconcileRequest and returns its persisted node and claim.
