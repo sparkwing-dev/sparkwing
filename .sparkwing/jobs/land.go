@@ -440,6 +440,11 @@ func recheckMergeDelta(ctx context.Context, files []string) error {
 	if err := runBuild(ctx); err != nil {
 		return err
 	}
+	if frontendDepsMissing() {
+		if err := runFrontendDeps(ctx); err != nil {
+			return err
+		}
+	}
 	return runAffectedTestFiles(ctx, files, fmt.Sprintf("%d file(s) the merge of %s changed", len(files), landBaseRef))
 }
 

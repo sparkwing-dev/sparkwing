@@ -162,7 +162,9 @@ func (p *Gate) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
 	if p.mode == gateAffected {
 		test = runAffectedTest
 	}
-	testStep := sparkwing.Step(w, "test", test).Needs(buildStep)
+	// safety: tests/acceptance drives the dashboard client through web/node_modules.
+	frontendDeps := sparkwing.Step(w, "frontend-deps", runFrontendDeps)
+	testStep := sparkwing.Step(w, "test", test).Needs(buildStep, frontendDeps)
 	lint := runGolangciLint
 	if p.mode == gateAffected {
 		lint = runGolangciLintTouched
@@ -180,7 +182,6 @@ func (p *Gate) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
 	sparkwing.Step(w, "changelog", checkChangelogRequired)
 	sparkwing.Step(w, "api-spec", checkAPISpec)
 	sparkwing.Step(w, "api-snapshot", checkAPISnapshot)
-	frontendDeps := sparkwing.Step(w, "frontend-deps", runFrontendDeps)
 	frontendUnit := sparkwing.Step(w, "frontend-unit", runFrontendUnit).Needs(frontendDeps)
 	frontendLint := sparkwing.Step(w, "frontend-lint", runFrontendLint).Needs(frontendDeps)
 	frontendBuild := sparkwing.Step(w, "frontend-build", runFrontendBuild).Needs(frontendUnit, frontendLint)
@@ -196,7 +197,7 @@ func (p *Gate) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
 		vetStep.SkipIf(skipUnlessGoTouched("vet"))
 		buildStep.SkipIf(skipUnlessGoTouched("build"))
 		lintStep.SkipIf(skipUnlessGoTouched("lint"))
-		frontendDeps.SkipIf(skipFrontendUnlessTouched(true))
+		frontendDeps.SkipIf(skipFrontendDepsUnlessTouched)
 		sdkStep.SkipIf(skipTypeScriptSDKUnlessTouched)
 	}
 	// safety: the job succeeds only when every step does, so this output says the
@@ -221,7 +222,7 @@ const frontendInstall = "pnpm --dir web install --frozen-lockfile --prefer-offli
 // no-op when the dependencies already match the lockfile.
 func runFrontendDeps(ctx context.Context) error {
 	if _, err := exec.LookPath("pnpm"); err != nil {
-		if _, statErr := os.Stat(filepath.Join(sparkwing.WorkDir(), "web", "node_modules")); statErr == nil {
+		if !frontendDepsMissing() {
 			sparkwing.Warn(ctx, "pnpm is not on PATH, so web/node_modules was not checked against the lockfile")
 			return nil
 		}
@@ -231,6 +232,19 @@ func runFrontendDeps(ctx context.Context) error {
 		return fmt.Errorf("frontend dependencies: %w\nrun: %s", err, frontendInstall)
 	}
 	return nil
+}
+
+func frontendDepsMissing() bool {
+	_, err := os.Stat(filepath.Join(sparkwing.WorkDir(), "web", "node_modules"))
+	return err != nil
+}
+
+func skipFrontendDepsUnlessTouched(ctx context.Context) bool {
+	if frontendDepsMissing() {
+		sparkwing.Info(ctx, "frontend dependencies: installing, because web/node_modules is missing")
+		return false
+	}
+	return skipFrontendUnlessTouched(true)(ctx)
 }
 
 func runFrontendUnit(ctx context.Context) error {
