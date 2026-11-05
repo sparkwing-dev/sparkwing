@@ -93,7 +93,7 @@ Only a push to main can assume the role, and a push-started run carries no comma
 
 `--promote-proven` reads the `staging-gate` output of the newest successful default-branch `deploy` run (`RefToLastRun`). The lookup cannot skip runs: it returns the newest successful run or nothing. So a promotion re-emits the record it promoted on as its own `staging-gate` output, and the record keeps the time its gate ran, so chaining promotions never stretches `--proven-max-age`. A newest run that holds no usable record stops the promotion; deploy staging again.
 
-Today the lookup is scoped to the team and the pipeline name, not the repository. A `deploy` pipeline in another repository of the same team could publish a record the production job would read. The digest comparison still requires the record to name the exact images being promoted, but until the repository-scoped lookup lands, the production team must subscribe only `sparkwing-dev/sparkwing`. The tree-gate lane (the tree-gate branch) is adding a repository-and-commit filter to the latest-run lookup (`sparkwing.FromTrustedRun`); `--promote-proven` must switch to it when it lands.
+The lookup reads only `deploy` runs of the reading run's own repository, because a reference to a pipeline's own last run is scoped to the reader's repository. A `deploy` pipeline in another repository of the same team cannot publish a record the production job reads.
 
 ## First deploy over an untraced image
 

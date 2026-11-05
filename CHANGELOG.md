@@ -87,6 +87,8 @@ unlock.
   Activating a virtualenv or Node version manager keeps the compiled pipeline; upgrading Go behind the same `PATH`
   rebuilds it.
 - **run:** Each engine notice, such as the missing version policy warning, prints once per command instead of three times
+- **sdk:** The engine refuses a plan whose job ID has an empty, `.` or `..` path segment, a backslash or a control character
+  Only the Go SDK refused these IDs; a TypeScript pipeline sent them through. Plan validation now refuses them for every SDK with `plan_invalid` naming the job ID and its position, and the Go SDK's own check is gone, so a Go pipeline gets the same error at planning instead of a panic at `sw.Job`.
 - **cli:** Local commands no longer read gitignored trees when keying the pipeline binary
   `sparkwing run`, `pipeline list`, `info` and `cache explain` walked every file under the pipeline module and its local `replace` targets and passed each path to `git check-ignore`; an 80,000-file ignored lint cache made each take 60-90 seconds. One `git ls-files` call now names ignored files and wholly ignored directories, which are skipped, and the remaining files hash in parallel. Keys are unchanged.
 - **run:** A foreground `sparkwing run` shows step output and exits within 200ms of the run finishing
@@ -163,6 +165,10 @@ unlock.
 - **dashboard:** A dashboard restored after an idle exit binds loopback only
   A dashboard started with `--allow-remote` on a non-loopback address came back on that address whenever a run or schedule restarted the controller, so the consent outlived the network it was given on. The restore now keeps the port and read-only policy but binds `127.0.0.1`; run `sparkwing dashboard start --allow-remote` again to serve remotely.
 
+- **sdk:** A `RefToLastRun` reference to the reading run's own pipeline reads only runs of the reader's repository
+  Repositories in one team can share a pipeline name, so `sparkwing run deploy -- --promote-proven` could read a
+  staging-gate record another repository's `deploy` pipeline published. References to other pipelines still read
+  across the team's repositories.
 - **runners:** A job waiting in `RunAndAwait` no longer holds its runner's slot
   A self-hosted runner defaults to `max_concurrent: 1`, and a child run goes back to the same runners, so the first `RunAndAwait` on a one-runner team hung until its timeout. A job blocked on its children now leaves its slot free, and so does the owner of a named-runner run while one of its jobs waits, until the last wait returns. A resumed job can briefly put the runner over `max_concurrent` until other jobs finish.
 - **cli:** `sparkwing runners add --help` says a job waiting in `RunAndAwait` does not count toward `--max-concurrent`
