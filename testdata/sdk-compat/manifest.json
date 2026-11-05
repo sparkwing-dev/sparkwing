@@ -1,0 +1,126 @@
+{
+  "schema_version": 1,
+  "selection": {
+    "go": "Latest three non-retracted stable v0 Go module releases from proxy.golang.org; prereleases and QA excluded.",
+    "typescript": "Latest three stable @sparkwing/sdk versions from registry.npmjs.org; prereleases and QA excluded.",
+    "frozen_at": "2026-11-05",
+    "go_registry": "https://proxy.golang.org/github.com/sparkwing-dev/sparkwing/@v/list",
+    "npm_registry": "https://registry.npmjs.org/@sparkwing%2fsdk"
+  },
+  "fixtures": [
+    {
+      "id": "go-v0.69.2",
+      "language": "go",
+      "version": "v0.69.2",
+      "directory": "go/v0.69.2",
+      "entrypoint": ".",
+      "artifact": {
+        "source": "github.com/sparkwing-dev/sparkwing",
+        "checksum": "h1:hE5DawlPeEt9lpJozcLU4zLlV3tOBwYeL+zVdXJHHZc="
+      },
+      "fixture_revision": 1,
+      "toolchain": {
+        "name": "go",
+        "version": "go1.26.10"
+      },
+      "wire_major": 2,
+      "capabilities": [],
+      "expected_outcome": "compatible"
+    },
+    {
+      "id": "go-v0.69.1",
+      "language": "go",
+      "version": "v0.69.1",
+      "directory": "go/v0.69.1",
+      "entrypoint": ".",
+      "artifact": {
+        "source": "github.com/sparkwing-dev/sparkwing",
+        "checksum": "h1:NyR2dbojHgOUGXO8BZJ/dJGhhmkzkXAn8IvxyIZB4EM="
+      },
+      "fixture_revision": 1,
+      "toolchain": {
+        "name": "go",
+        "version": "go1.26.10"
+      },
+      "wire_major": 2,
+      "capabilities": [],
+      "expected_outcome": "compatible"
+    },
+    {
+      "id": "go-v0.69.0",
+      "language": "go",
+      "version": "v0.69.0",
+      "directory": "go/v0.69.0",
+      "entrypoint": ".",
+      "artifact": {
+        "source": "github.com/sparkwing-dev/sparkwing",
+        "checksum": "h1:yPe8ULBnAEonRInTzEE5Bw8D6YSBxAYk68mrK9LOJko="
+      },
+      "fixture_revision": 1,
+      "toolchain": {
+        "name": "go",
+        "version": "go1.26.10"
+      },
+      "wire_major": 2,
+      "capabilities": [],
+      "expected_outcome": "compatible"
+    },
+    {
+      "id": "typescript-0.69.2",
+      "language": "typescript",
+      "version": "0.69.2",
+      "directory": "typescript/0.69.2",
+      "entrypoint": "pipeline.mjs",
+      "artifact": {
+        "source": "https://registry.npmjs.org/@sparkwing/sdk/-/sdk-0.69.2.tgz",
+        "checksum": "sha512-aq76IE3mJABymYU5YYh08LlM1O4Eo7evrozkONpGpmk1CHr13FcnKa/gSlp3/libve7HWFrppniT7Vpu7X++og=="
+      },
+      "fixture_revision": 1,
+      "toolchain": {
+        "name": "node",
+        "version": ">=22.18"
+      },
+      "wire_major": 2,
+      "capabilities": [],
+      "expected_outcome": "compatible"
+    },
+    {
+      "id": "typescript-0.69.1",
+      "language": "typescript",
+      "version": "0.69.1",
+      "directory": "typescript/0.69.1",
+      "entrypoint": "pipeline.mjs",
+      "artifact": {
+        "source": "https://registry.npmjs.org/@sparkwing/sdk/-/sdk-0.69.1.tgz",
+        "checksum": "sha512-JJ3oMGiADbAO/aXBqPK6UQAZgopRK6wWRIqEzFJJOGDV1rMR1Ti2E/L8EFgEwY/Y+NfF1ExUpun06ZHyBtowUw=="
+      },
+      "fixture_revision": 1,
+      "toolchain": {
+        "name": "node",
+        "version": ">=22.18"
+      },
+      "wire_major": 2,
+      "capabilities": [],
+      "expected_outcome": "compatible"
+    },
+    {
+      "id": "typescript-0.69.0",
+      "language": "typescript",
+      "version": "0.69.0",
+      "directory": "typescript/0.69.0",
+      "entrypoint": "pipeline.mjs",
+      "artifact": {
+        "source": "https://registry.npmjs.org/@sparkwing/sdk/-/sdk-0.69.0.tgz",
+        "checksum": "sha512-pn0D9DbwWPEWMcs4db0THo4C00uc1PZMDJMFMjZtoTjyoNZMr9ubrSEOTF7b126Op0usmh6qFAUrgLps4HAEFg=="
+      },
+      "fixture_revision": 1,
+      "toolchain": {
+        "name": "node",
+        "version": ">=22.18"
+      },
+      "wire_major": 2,
+      "capabilities": [],
+      "expected_outcome": "compatible"
+    }
+  ]
+}
