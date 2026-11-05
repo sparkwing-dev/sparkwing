@@ -427,25 +427,90 @@ images with buildx under QEMU and joins both architectures under one index per t
 
 ### Deploying Sparkwing Cloud
 
-The `deploy` pipeline replaces the manual staging and production lanes. `build-images` builds the
-linux binaries with `bin/build-release-target.sh` and publishes them through `publish-images`
-logic, reusing the images when the commit's version tag already exists. `staging-deploy` pins the
-digests in `sparkwing-dev/sparkwing-gitops` and renders with the candidate chart. It pushes the controller Deployment
-alone and waits for Argo Synced/Healthy and the rollout, then does the same for the launcher with
-every other chart change. It refuses an
-environment whose store baseline differs from the candidate's, since a store change takes the full
-gate. `staging-gate` runs `example` and the `sparkwing-ci-smoke` reference pipeline on staging
-Cloud. `production` requires a staging-gate record for the same digests, deploys the same way,
-runs `deploy-smoke` in `qa-team` and `qa-team-b` (one NodeClaim each, no controller or launcher
-WARN or ERROR), and reverts its GitOps commits on failure. Each environment's deployed and previous
-digests are its job output. Credentials come from the run's OIDC token through the `sparkwing-deploy`
-role in [deploy-pipeline-iam.md](design/rewrite/proposals/deploy-pipeline-iam.md).
+Production deploys follow main. Releases are separate and occasional: the release tag, 38 CLI
+assets, npm packages, signed version index and site publication stay in the release workflow.
+The `deploy` pipeline builds its own service images and needs no tag at HEAD or GitHub release run.
+It fetches stable tags for the release base, then uses `git describe --tags --long` to stamp
+`vX.Y.Z-N-gSHA`, the format the hosted controller and launcher accept. Production orders those
+stamps after their base release, compares the commit counts numerically, and refuses older images.
 
-Only a run the GitHub App started for a push to main can assume that role, so a terminal can only
-preview. `--stop-after`, `--promote-proven` and `--version` reach a real deploy as `args:` on the
-`deploy` entry in `.sparkwing/sparkwing.yaml`. Each deploy job refuses a commit that is no longer
-main's tip, and production refuses a version below the one it runs, so a retried old run cannot
-roll production back.
+`build-images` builds linux/amd64 and linux/arm64 binaries with `bin/build-release-target.sh` and
+publishes them through `publish-images`, reusing the image pair when its immutable version tags
+already exist and both revision labels match the candidate commit. `staging-deploy` pins the
+digests in `sparkwing-dev/sparkwing-gitops` and renders with the candidate chart. It pushes the
+controller Deployment alone and waits for Argo Synced/Healthy and the rollout, then does the
+same for the launcher with every other chart change. `staging-gate` starts `example` and the
+`sparkwing-ci-smoke` reference pipeline before waiting for both on staging Cloud. `production`
+requires a staging-gate record for the same digests and deploys the same images. It runs
+`deploy-smoke` in `qa-team` and `qa-team-b` (one NodeClaim each, no controller or launcher WARN or
+ERROR). Each environment's deployed and previous digests are its job output. Credentials come
+from the run's OIDC token through the `sparkwing-deploy` role in
+[deploy-pipeline-iam.md](design/rewrite/proposals/deploy-pipeline-iam.md).
+
+Before either environment rolls out, a read-only `rds describe-db-instances` checks the configured
+target, `kikd-prod-sparkwing-postgres`. `BackupRetentionPeriod` must be greater than zero. Missing,
+malformed or denied responses fail the deploy with no GitOps push. This also runs on a deploy
+whose digests are unchanged. The deploy never enables backups itself.
+
+The schema check reads the controller Deployment's image by digest, traces its revision label
+(or older release tag) to `internal/store/store.go`, and compares that embedded schema version
+with the candidate's. Equal versions require equal baseline digests and log
+`no schema change; relying on RDS point-in-time recovery`. A higher candidate version creates
+an RDS snapshot and waits for `available` before any rollout. The snapshot ID is logged and
+included in the deployment output. A failed create or wait stops before GitOps changes.
+An older candidate schema or baseline change without a version bump fails before snapshotting.
+
+A failed production deploy or smoke with an unchanged schema reverts this run's GitOps commits,
+launcher first, even after cancellation. After a schema upgrade, it leaves the images in place
+and reports the snapshot for manual recovery, because an older controller refuses the upgraded
+store. Recover the target database from a restored snapshot before reverting its images. Staging
+and production name the same RDS instance, so a recovery must preserve the other database.
+
+Only a run the GitHub App started for a push to main can assume the deploy role. The `deploy`
+entry in `.sparkwing/sparkwing.yaml` declares `on: push` for `main` with
+`args: {stop-after: staging}`. The lead removes that argument after one watched staging deploy
+and gate, enabling the full staging-gate -> production flow on subsequent pushes. Before that
+watched deploy, apply the RDS role extension documented in the IAM proposal. A terminal can
+preview with `--dry-run`. `--stop-after`, `--promote-proven` and `--version` reach a real deploy
+through the entry's `args`. Each deploy job refuses a commit that is no longer main's tip, so a
+retried old run cannot roll production back.
+
+#### Deploy cost estimate
+
+These are estimates from the code path, not observed deploy timings. The ranges assume a warm
+builder, working registry and available Cloud capacity. Queueing and cold compiler caches can
+exceed them. The watched staging deploy should record phase durations before setting a speed target.
+
+| Phase | Estimated elapsed time | Bound or main cost in code |
+| --- | --- | --- |
+| Resolve version, role and existing images | 2-15 seconds | Git fetch/describe, STS, ECR lookups. A matching published pair skips all builds. |
+| Dashboard | 30 seconds-3 minutes when rebuilt, seconds on validated reuse | `bin/build-web.sh --reuse` validates its existing input/output receipt before reusing the bundle. |
+| Two Linux binary builds | 1-6 minutes warm, 5-20 minutes cold | amd64 then arm64, each compiling the CLI, controller and runner. Whole build job budget: 45 minutes. |
+| Publish and verify both multi-arch images | 30 seconds-3 minutes | One binary layer per platform over pinned runtime bases. Verification reads the published binaries back. |
+| Backup preflight and schema comparison, per environment | 1-5 seconds | One RDS describe, deployment image lookup, revision label and source reads. |
+| Snapshot, only on a schema upgrade | 2-15 minutes, storage-dependent | AWS waiter polls every 30 seconds, up to 60 attempts, within a 30-minute context budget. No wait for equal schema versions. |
+| GitOps and two rollouts, per environment | 1-8 minutes | Two serial GitOps pushes, each waiting for Argo (10-minute cap) and rollout (5-minute cap). Argo's default poll alone can cost up to 3 minutes per push. |
+| Staging gate | 1-10 minutes with available capacity | Candidate CLI build plus two overlapping pipeline runs. Each run has a 45-minute limit. |
+| Production smoke | 1-5 minutes with available capacity | CLI build plus two concurrent fixture runs, NodeClaim sampling and log scan. Each run has a 20-minute limit. |
+| Production rollback, on failure without a schema change | Similar to the two rollouts | Two reverse GitOps commits. Budget: 35 minutes. |
+
+The slowest expected work is cold Go compilation, Argo polling, the staging probe runs, and
+snapshots on schema upgrades. The no-schema-change path removes snapshot time entirely.
+Dashboard receipt reuse and overlapping staging probes are enabled. Reuse by published tag and
+revision, skipping unchanged rollout digests, and shared runtime base layers already avoid work.
+Different commits still stamp different binaries and revision labels, so a source-unrelated change
+does not automatically produce the same image digest.
+
+Parallel architecture builds are a follow-up: `build-release-target.sh` creates and deletes a
+shared temporary Git tag, so running its two invocations concurrently would race. Resolve tag
+ownership first, then measure CPU and memory contention. Parallel controller/runner publication
+can also overlap independent registry I/O. Persistent Go caches reduce cold builds, while ECR's
+existing content-addressed base layers already avoid uploading unchanged runtime layers. An Argo
+GitHub webhook can replace polling with prompt sync without widening the deploy role's access.
+
+Job budgets are failure ceilings, not expected duration: build 45 minutes, staging deploy 75,
+staging gate 105, and production 130 including a possible snapshot and rollback. They allow
+3h45 for a staging-only path or 5h55 for all four jobs if every ceiling is reached.
 
 The deploy writes no cluster-scoped object to GitOps: the AppProject `sparkwing` permits no
 cluster-scoped kinds, so a GitOps commit cannot grant cluster-wide access. The render drops the

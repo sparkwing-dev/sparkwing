@@ -12,7 +12,7 @@ import (
 
 type DeployArgs struct {
 	DryRun          bool   `flag:"dry-run" desc:"Print every action the deploy would take, in order, and take none of them."`
-	Version         string `flag:"version" desc:"Version to build and tag the images as. Default: the release tag at HEAD, else the next patch version plus -main.<commit time>.g<commit>. A real deploy takes it only from sparkwing.yaml args."`
+	Version         string `flag:"version" desc:"Version to build and tag the images as. Default: the main service build stamp vX.Y.Z-N-gSHA from git describe. A real deploy takes it only from sparkwing.yaml args."`
 	StopAfter       string `flag:"stop-after" desc:"Stop after this stage: staging deploys and gates staging only. Default: promote to production. A real deploy takes it only from sparkwing.yaml args."`
 	PromoteProven   bool   `flag:"promote-proven" desc:"Skip staging and promote to production on the staging-gate record of the last successful default-branch deploy run, which must name the same image digests. A real deploy takes it only from sparkwing.yaml args."`
 	ControllerBase  string `flag:"controller-base" desc:"Controller runtime base by digest (build-images --runtime-base). Default: the qa.20 base."`
@@ -29,13 +29,13 @@ func (Deploy) ShortHelp() string {
 }
 
 func (Deploy) Help() string {
-	return "Turns the manual Sparkwing Cloud release lanes into one DAG. build-images builds linux/amd64 and linux/arm64 binaries with bin/build-release-target.sh and appends them to the runtime bases with publish-images, " +
+	return "Turns the Sparkwing Cloud deploy lanes into one DAG. build-images builds linux/amd64 and linux/arm64 binaries with bin/build-release-target.sh and appends them to the runtime bases with publish-images, " +
 		"reusing images an earlier run already published for the same commit. staging-deploy and production pin the digests in sparkwing-gitops, render with the candidate chart and push the controller, then the launcher, " +
 		"each after Argo reports Synced/Healthy and the deployment has rolled out. The controller's commit changes only the controller Deployment; every other chart change lands with the launcher. Each refuses when the " +
-		"environment's store baseline differs from the candidate's, because a store change takes the full gate. staging-gate runs the example pipeline and the sparkwing-ci-smoke reference pipeline on staging Cloud. " +
+		"environment has RDS automated backups disabled. A changed schema version takes an RDS snapshot and waits for it before rollout; unchanged schemas rely on point-in-time recovery. staging-gate runs the example pipeline and the sparkwing-ci-smoke reference pipeline on staging Cloud. " +
 		"production requires a staging-gate record for the same digests, from this run or, with --promote-proven, from the last successful default-branch deploy run, then runs the two-job deploy-smoke pipeline in each " +
-		"QA fixture team and checks one NodeClaim per run and WARN- and ERROR-free controller and launcher logs. A failed production deploy or smoke reverts the run's GitOps commits, launcher first, even after the job " +
-		"is cancelled. Each environment's deployed and previous digests are that job's output. Credentials come from this run's OIDC token: the sparkwing-deploy role reads the GitOps deploy key and the fixture tokens " +
+		"QA fixture team and checks one NodeClaim per run and WARN- and ERROR-free controller and launcher logs. A failed production deploy or smoke with an unchanged schema reverts the run's GitOps commits, launcher first, even after cancellation. " +
+		"A schema upgrade failure requires manual database recovery from the recorded snapshot before reverting images. Each environment's deployed and previous digests are that job's output. Credentials come from this run's OIDC token: the sparkwing-deploy role reads the GitOps deploy key and the fixture tokens " +
 		"from SSM; no key is stored with the pipeline. Only a run the GitHub App started for a push to main can assume that role, so --stop-after, --promote-proven and --version reach a real deploy only through args " +
 		"in .sparkwing/sparkwing.yaml; on the command line they work with --dry-run, which prints every action without taking any. Every deploy job refuses a commit that is no longer the tip of origin/main, and " +
 		"production refuses a version below the one it runs, so retrying an old run cannot roll production back."
@@ -226,6 +226,9 @@ func summarizeDeployment(ctx context.Context, rec envDeployment) {
 	sparkwing.Summary(ctx, fmt.Sprintf("%s runs %s\n\n- controller `%s` (was `%s`)\n- runner `%s` (was `%s`)\n- GitOps changes: %d",
 		rec.Environment, rec.Images.Version, rec.Images.Controller.Digest, rec.Previous.Controller.Digest,
 		rec.Images.Runner.Digest, rec.Previous.Launcher.Digest, len(rec.Changes)))
+	if rec.Snapshot != "" {
+		sparkwing.Summary(ctx, "Pre-migration RDS snapshot: `"+rec.Snapshot+"`")
+	}
 }
 
 type deployGateJob struct {
@@ -342,6 +345,9 @@ func (d *deployer) promote(ctx context.Context, images deployImages) (envDeploym
 	}
 	if len(rec.Changes) == 0 {
 		return rec, err
+	}
+	if rec.Snapshot != "" {
+		return rec, fmt.Errorf("production schema upgrade failed; automatic image rollback is unsafe after a forward migration. Recover the database from RDS snapshot %s before reverting GitOps commits: %w", rec.Snapshot, err)
 	}
 	d.tools.say(ctx, "production failed, rolling back: "+err.Error())
 	if rbErr := d.rollbackDetached(ctx, env, rec, gitEnv); rbErr != nil {

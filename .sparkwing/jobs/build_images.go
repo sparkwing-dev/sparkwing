@@ -144,22 +144,29 @@ func (p *BuildImages) resolveTag(ctx context.Context) error {
 var serviceBuildStamp = regexp.MustCompile(`^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)-(0|[1-9][0-9]*)-g[0-9a-f]{7,40}$`)
 
 func describeServiceBuild(ctx context.Context) (string, error) {
-	shallow, err := sparkwing.Exec(ctx, "git", "rev-parse", "--is-shallow-repository").String()
+	return resolveServiceBuild(ctx, func(ctx context.Context, args ...string) (string, error) {
+		return sparkwing.Exec(ctx, "git", args...).String()
+	})
+}
+
+func resolveServiceBuild(ctx context.Context, git func(context.Context, ...string) (string, error)) (string, error) {
+	shallow, err := git(ctx, "rev-parse", "--is-shallow-repository")
 	if err != nil {
 		return "", fmt.Errorf("inspect checkout depth: %w", err)
 	}
 	fetch := []string{"fetch", "--quiet", "--tags", "origin"}
-	if shallow == "true" {
+	if strings.TrimSpace(shallow) == "true" {
 		fetch = append(fetch, "--unshallow")
 	}
-	if _, err := sparkwing.Exec(ctx, "git", fetch...).Run(); err != nil {
+	if _, err := git(ctx, fetch...); err != nil {
 		return "", fmt.Errorf("fetch release tags so the image version names its release base, or pass --tag: %w", err)
 	}
-	tag, err := sparkwing.Exec(ctx, "git", "describe", "--tags", "--long", "--abbrev=12",
-		"--match", "v[0-9]*.[0-9]*.[0-9]*", "--exclude", "*-*", "HEAD").String()
+	tag, err := git(ctx, "describe", "--tags", "--long", "--abbrev=12",
+		"--match", "v[0-9]*.[0-9]*.[0-9]*", "--exclude", "*-*", "HEAD")
 	if err != nil {
 		return "", fmt.Errorf("describe HEAD from its newest stable release tag: %w", err)
 	}
+	tag = strings.TrimSpace(tag)
 	if !serviceBuildStamp.MatchString(tag) {
 		return "", fmt.Errorf("git describe gave %q, not the service build stamp vX.Y.Z-N-gSHA; fetch the stable release tags or pass --tag", tag)
 	}

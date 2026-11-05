@@ -116,22 +116,22 @@ func TestValuesPinsReadAndPin(t *testing.T) {
 	}
 }
 
-func TestDeployVersion(t *testing.T) {
-	commit := strings.Repeat("ab", 20)
-	for _, tc := range []struct{ newest, newestCommit, want string }{
-		{"v0.68.3", commit, "v0.68.3"},
-		{"v0.68.3", "other", "v0.68.4-main.1762000000.gabababababab"},
-		{"", "", "v0.0.1-main.1762000000.gabababababab"},
-	} {
-		got, err := deployVersion(tc.newest, tc.newestCommit, commit, 1762000000)
-		if err != nil || got != tc.want {
-			t.Errorf("deployVersion(%q) = %q, %v; want %q", tc.newest, got, err, tc.want)
+func TestDeployVersionOrder(t *testing.T) {
+	versions := []string{
+		"v0.68.2", "v0.68.3", "v0.68.3-9-gabababababab", "v0.68.3-10-g0123456789ab", "v0.68.4",
+	}
+	for i := 1; i < len(versions); i++ {
+		previous, err := deployVersionOrder(versions[i-1])
+		if err != nil {
+			t.Fatal(err)
+		}
+		candidate, err := deployVersionOrder(versions[i])
+		if err != nil || semver.Compare(candidate, previous) <= 0 {
+			t.Fatalf("version order %s -> %s = %s -> %s, %v", versions[i-1], versions[i], previous, candidate, err)
 		}
 	}
-	earlier, _ := deployVersion("v0.68.3", "", commit, 1762000000)
-	later, _ := deployVersion("v0.68.3", "", strings.Repeat("01", 20), 1762000001)
-	if semver.Compare(earlier, later) >= 0 || semver.Compare(later, "v0.68.4") >= 0 || semver.Compare(later, "v0.68.3") <= 0 {
-		t.Fatalf("main versions do not order by commit time between releases: %s, %s", earlier, later)
+	if zero, err := deployVersionOrder("v0.68.3-0-gabababababab"); err != nil || zero != "v0.68.3" {
+		t.Fatalf("zero-distance stamp = %s, %v", zero, err)
 	}
 }
 
@@ -368,23 +368,28 @@ func (r *fakeDeployRegistry) publish(_ context.Context, _ string, in PublishImag
 // safety: the fake cluster runs whatever the bare GitOps repository's main
 // branch pins, so a test sees a rollout exactly when a push lands.
 type fakeDeploy struct {
-	t            *testing.T
-	bare         string
-	repo         string
-	head         string
-	old          deployImages
-	registry     *fakeDeployRegistry
-	mu           sync.Mutex
-	said         []string
-	calls        []string
-	failRuns     map[string]bool
-	claimsPerRun int
-	dirtyLogs    bool
-	clock        time.Time
-	sessions     int
-	expired      int
-	oidcDown     bool
-	onSmoke      func(run string) error
+	t                 *testing.T
+	bare              string
+	repo              string
+	head              string
+	old               deployImages
+	registry          *fakeDeployRegistry
+	mu                sync.Mutex
+	said              []string
+	calls             []string
+	failRuns          map[string]bool
+	claimsPerRun      int
+	dirtyLogs         bool
+	backupRetention   int
+	rdsDescribeError  error
+	rdsCreateError    error
+	rdsWaitError      error
+	runningController string
+	clock             time.Time
+	sessions          int
+	expired           int
+	oidcDown          bool
+	onSmoke           func(run string) error
 }
 
 func testPins(version, ctl, run string) valuesPins {
@@ -478,13 +483,16 @@ func newFakeDeploy(t *testing.T) *fakeDeploy {
 	root := t.TempDir()
 	f := &fakeDeploy{
 		t: t, bare: filepath.Join(root, "gitops.git"), repo: filepath.Join(root, "sparkwing"), claimsPerRun: 1,
-		failRuns: map[string]bool{}, clock: time.Date(2026, 11, 2, 12, 0, 0, 0, time.UTC),
+		failRuns: map[string]bool{}, backupRetention: 7, clock: time.Date(2026, 11, 2, 12, 0, 0, 0, time.UTC),
 	}
 	if err := os.MkdirAll(filepath.Join(f.repo, "internal", "store"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	schema := "CREATE TABLE runs (id TEXT PRIMARY KEY);\n"
 	if err := os.WriteFile(filepath.Join(f.repo, deployStoreSchema), []byte(schema), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(f.repo, storeSchemaSourcePath), []byte("package store\nconst expectedSchemaVersion = 30\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	deployGitIn(t, f.repo, "init", "--quiet", "-b", "main")
@@ -495,7 +503,7 @@ func newFakeDeploy(t *testing.T) *fakeDeploy {
 	deployGitIn(t, f.repo, "remote", "add", "origin", filepath.Join(root, "source.git"))
 
 	f.old = deployImages{
-		Commit: f.head, Version: "v0.68.3", SchemaDigest: schemaBaselineDigestOf(schema),
+		Commit: f.head, Version: "v0.68.3", SchemaVersion: 30, SchemaDigest: schemaBaselineDigestOf(schema),
 		Controller: imagePin{testRegistry + "/sparkwing-controller", "v0.68.3", testDigest("old-ctl")},
 		Runner:     imagePin{testRegistry + "/sparkwing-runner", "v0.68.3", testDigest("old-run")},
 	}
@@ -528,7 +536,7 @@ func newFakeDeploy(t *testing.T) *fakeDeploy {
 
 func (f *fakeDeploy) candidate() deployImages {
 	c := f.old
-	c.Version = "v0.68.4-main.1762000000.g" + f.head[:12]
+	c.Version = "v0.68.3-1-g" + f.head[:12]
 	c.Controller = imagePin{c.Controller.Repository, c.Version, testDigest("new-ctl")}
 	c.Runner = imagePin{c.Runner.Repository, c.Version, testDigest("new-run")}
 	return c
@@ -631,6 +639,15 @@ func (f *fakeDeploy) run(ctx context.Context, c deployCommand) (string, error) {
 				return "", err
 			}
 			return "value-of-" + arg("--name") + "\n", nil
+		case strings.HasPrefix(joined, "rds describe-db-instances"):
+			if err := f.session(c.Env); err != nil {
+				return "", err
+			}
+			return fmt.Sprintf(`{"DBInstances":[{"DBInstanceIdentifier":%q,"BackupRetentionPeriod":%d}]}`, arg("--db-instance-identifier"), f.backupRetention), f.rdsDescribeError
+		case strings.HasPrefix(joined, "rds create-db-snapshot"):
+			return `{}`, f.rdsCreateError
+		case strings.HasPrefix(joined, "rds wait db-snapshot-available"):
+			return "", f.rdsWaitError
 		case strings.HasPrefix(joined, "ecr get-login-password"):
 			return "ecr-password\n", nil
 		case strings.HasPrefix(joined, "eks update-kubeconfig"):
@@ -706,6 +723,9 @@ func (f *fakeDeploy) kubectl(c deployCommand) (string, error) {
 	case strings.Contains(joined, "get deployment"):
 		ns := c.Args[1]
 		pins := f.pinsOnMain(envDir[ns])
+		if f.runningController != "" && strings.Contains(c.Args[4], "controller") {
+			return f.runningController, nil
+		}
 		if strings.Contains(joined, "controller") && strings.Contains(c.Args[4], "controller") {
 			return pins.Controller.ref(), nil
 		}
@@ -751,11 +771,11 @@ func (f *fakeDeploy) triggered(pipeline string) []string {
 func TestDeployBuildPublishesThenReusesCandidate(t *testing.T) {
 	f := newFakeDeploy(t)
 	d := f.deployer(false)
-	images, err := d.buildCandidate(t.Context(), "v0.68.4-main.gtest")
+	images, err := d.buildCandidate(t.Context(), "v0.68.3-1-g0123456789ab")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if images.Commit != f.head || images.SchemaDigest != f.old.SchemaDigest || images.Controller.Digest != testDigest("v0.68.4-main.gtestsparkwing-controller") {
+	if images.Commit != f.head || images.SchemaDigest != f.old.SchemaDigest || images.Controller.Digest != testDigest("v0.68.3-1-g0123456789absparkwing-controller") {
 		t.Fatalf("images = %+v", images)
 	}
 	if len(f.registry.published) != 1 || f.registry.published[0].Revision != f.head || f.registry.published[0].ControllerBase != d.cfg.ControllerBase {
@@ -766,7 +786,7 @@ func TestDeployBuildPublishesThenReusesCandidate(t *testing.T) {
 		t.Fatalf("SHA256SUMS = %q, %v", sums, err)
 	}
 
-	again, err := f.deployer(false).buildCandidate(t.Context(), "v0.68.4-main.gtest")
+	again, err := f.deployer(false).buildCandidate(t.Context(), "v0.68.3-1-g0123456789ab")
 	if err != nil || !again.sameDigests(images) || len(f.registry.published) != 1 {
 		t.Fatalf("rebuild of a published commit = %+v, %v, published %d", again, err, len(f.registry.published))
 	}
@@ -776,7 +796,7 @@ func TestDeployBuildPublishesThenReusesCandidate(t *testing.T) {
 			f.registry.revisions[ref] = "someone-else"
 		}
 	}
-	if _, err := f.deployer(false).buildCandidate(t.Context(), "v0.68.4-main.gtest"); err == nil || !strings.Contains(err.Error(), "new --version") {
+	if _, err := f.deployer(false).buildCandidate(t.Context(), "v0.68.3-1-g0123456789ab"); err == nil || !strings.Contains(err.Error(), "new --version") {
 		t.Fatalf("a tag from another commit: %v", err)
 	}
 }
@@ -952,6 +972,7 @@ func TestDeployFirstDeployOverUntracedImageNeedsAPerson(t *testing.T) {
 		t.Fatal("a refused first deploy reached GitOps")
 	}
 
+	f.commitValues("sparkwing", testValues("v0.68.3", f.old.Controller.Digest, f.old.Runner.Digest))
 	f.registry.revisions = map[string]string{f.old.Controller.Repository + "@" + f.old.Controller.Digest: "--upload-pack=touch /tmp/pwned"}
 	if _, err := f.deployer(false).promote(t.Context(), f.candidate()); err == nil || !strings.Contains(err.Error(), "not a full commit id") {
 		t.Fatalf("an option-shaped revision label: %v", err)
@@ -1068,13 +1089,13 @@ func TestDeployRollsBackFailedProductionSmoke(t *testing.T) {
 	}
 }
 
-func TestDeployRefusesStoreBaselineChange(t *testing.T) {
+func TestDeployRefusesUnversionedStoreBaselineChange(t *testing.T) {
 	f := newFakeDeploy(t)
 	images := f.candidate()
 	images.SchemaDigest = schemaBaselineDigestOf("CREATE TABLE other (id TEXT);\n")
 	before := deployGitIn(t, f.bare, "rev-parse", "main")
 	_, err := f.deployer(false).promote(t.Context(), images)
-	if err == nil || !strings.Contains(err.Error(), "store change takes the full gate") {
+	if err == nil || !strings.Contains(err.Error(), "bump the schema version") {
 		t.Fatalf("promote across a store change = %v", err)
 	}
 	if after := deployGitIn(t, f.bare, "rev-parse", "main"); after != before {
@@ -1095,7 +1116,7 @@ func TestDeployDryRunPrintsEveryActionAndTakesNone(t *testing.T) {
 	}
 	d.tools.registry = nil
 	ctx := t.Context()
-	images, err := d.buildCandidate(ctx, "v0.68.4-main.gdry")
+	images, err := d.buildCandidate(ctx, "v0.68.3-1-g0123456789ab")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1110,7 +1131,7 @@ func TestDeployDryRunPrintsEveryActionAndTakesNone(t *testing.T) {
 	}
 	want := []string{
 		"resolve the candidate commit", "assume arn:aws:iam::633280902600:role/sparkwing-deploy", "build linux/amd64", "build linux/arm64", "publish both images",
-		"clone " + f.bare, "check that staging's store baseline", "pin the staging controller", "render sparkwing-staging/rendered.yaml",
+		"clone " + f.bare, "verify RDS automated backups", "compare staging's deployed schema version", "pin the staging controller", "render sparkwing-staging/rendered.yaml",
 		"commit \"deploy(staging): controller", "wait for Argo application sparkwing-staging", "wait for deployment sparkwing-staging/sparkwing-staging-sparkwing-full-controller",
 		"pin the staging launcher", "wait for deployment sparkwing-staging/sparkwing-staging-sparkwing-runner-bundle-launcher",
 		"build the candidate CLI", "add CLI profile staging", "trigger example", "trigger hello",

@@ -66,12 +66,14 @@ func (c deployConfig) rollbackBudget() time.Duration { return 2*c.phaseWait() + 
 
 func (c deployConfig) buildBudget() time.Duration { return 45 * time.Minute }
 
-func (c deployConfig) stagingBudget() time.Duration { return 2*c.phaseWait() + 15*time.Minute }
+func (c deployConfig) stagingBudget() time.Duration {
+	return deploySnapshotBudget + 2*c.phaseWait() + 15*time.Minute
+}
 
 func (c deployConfig) gateBudget() time.Duration { return 2*c.RunTimeout + 15*time.Minute }
 
 func (c deployConfig) productionBudget() time.Duration {
-	return 2*c.phaseWait() + c.SmokeTimeout + c.rollbackBudget() + 15*time.Minute
+	return deploySnapshotBudget + 2*c.phaseWait() + c.SmokeTimeout + c.rollbackBudget() + 15*time.Minute
 }
 
 type deployParams struct {
@@ -90,6 +92,7 @@ type deployEnv struct {
 	ControllerDeployment string
 	LauncherDeployment   string
 	ControllerURL        string
+	DBInstance           string
 }
 
 func defaultDeployConfig() deployConfig {
@@ -124,6 +127,7 @@ func defaultDeployConfig() deployConfig {
 			ControllerDeployment: "sparkwing-staging-sparkwing-full-controller",
 			LauncherDeployment:   "sparkwing-staging-sparkwing-runner-bundle-launcher",
 			ControllerURL:        "https://staging.sparkwing.dev",
+			DBInstance:           "kikd-prod-sparkwing-postgres",
 		},
 		Production: deployEnv{
 			Name:                 "production",
@@ -134,6 +138,7 @@ func defaultDeployConfig() deployConfig {
 			ControllerDeployment: "sparkwing-sparkwing-full-controller",
 			LauncherDeployment:   "sparkwing-sparkwing-runner-bundle-launcher",
 			ControllerURL:        "https://api.sparkwing.dev",
+			DBInstance:           "kikd-prod-sparkwing-postgres",
 		},
 		SmokeTeams:     []string{"qa-team", "qa-team-b"},
 		ArgoTimeout:    10 * time.Minute,
@@ -154,11 +159,12 @@ type imagePin struct {
 func (p imagePin) ref() string { return p.Repository + ":" + p.Tag + "@" + p.Digest }
 
 type deployImages struct {
-	Commit       string   `json:"commit"`
-	Version      string   `json:"version"`
-	SchemaDigest string   `json:"schema_digest"`
-	Controller   imagePin `json:"controller"`
-	Runner       imagePin `json:"runner"`
+	Commit        string   `json:"commit"`
+	Version       string   `json:"version"`
+	SchemaDigest  string   `json:"schema_digest"`
+	SchemaVersion int      `json:"schema_version"`
+	Controller    imagePin `json:"controller"`
+	Runner        imagePin `json:"runner"`
 }
 
 func (a deployImages) sameDigests(b deployImages) bool {
@@ -185,6 +191,7 @@ type envDeployment struct {
 	Previous    valuesPins     `json:"previous"`
 	Changes     []gitopsChange `json:"changes"`
 	WindowStart string         `json:"window_start"`
+	Snapshot    string         `json:"snapshot,omitempty"`
 }
 
 type stagingGateRecord struct {
@@ -196,9 +203,10 @@ type stagingGateRecord struct {
 }
 
 const (
-	deployStoreSchema = "internal/store/schema.sql"
-	deployChart       = "charts/sparkwing-full"
-	deployDirPrefix   = "sparkwing-deploy-"
+	deploySnapshotBudget = 30 * time.Minute
+	deployStoreSchema    = "internal/store/schema.sql"
+	deployChart          = "charts/sparkwing-full"
+	deployDirPrefix      = "sparkwing-deploy-"
 )
 
 func sweepStaleDeployDirs(root string, now time.Time, maxAge time.Duration) error {
@@ -386,24 +394,25 @@ func dirtyLogLines(logs string) []string {
 	return out
 }
 
-// safety: an untagged commit's version sorts below the next patch release and,
-// through its commit time, after every earlier commit's; the image tags it
-// names are immutable, so one commit maps to one version.
-func deployVersion(newest, newestCommit, commit string, committed int64) (string, error) {
-	if newest != "" && newestCommit == commit {
-		return newest, nil
+// safety: git describe counts sort numerically after their release base, while
+// semver alone sorts them before it and compares counts lexically.
+func deployVersionOrder(version string) (string, error) {
+	if !semver.IsValid(version) {
+		return "", fmt.Errorf("%q is not a version this pipeline can order", version)
 	}
-	if newest == "" {
-		newest = "v0.0.0"
+	if !serviceBuildStamp.MatchString(version) {
+		return version, nil
 	}
-	next, err := bumpVersion(newest, "patch")
+	base, rest, _ := strings.Cut(version, "-")
+	count, _, _ := strings.Cut(rest, "-")
+	if count == "0" {
+		return base, nil
+	}
+	next, err := bumpVersion(base, "patch")
 	if err != nil {
 		return "", err
 	}
-	if len(commit) < 12 {
-		return "", fmt.Errorf("commit %q is not a full hash", commit)
-	}
-	return fmt.Sprintf("%s-main.%d.g%s", next, committed, commit[:12]), nil
+	return next + "-main." + count, nil
 }
 
 type renderedDoc struct {
