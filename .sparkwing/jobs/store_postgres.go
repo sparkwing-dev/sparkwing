@@ -120,7 +120,10 @@ func (l storePostgresPaths) config(logger io.Writer) embeddedpostgres.Config {
 		DataPath(l.Data).
 		BinariesPath(l.Binaries).
 		Logger(logger).
-		StartTimeout(storePostgresStartLimit)
+		StartTimeout(storePostgresStartLimit).
+		// safety: each test drops its schema with CASCADE, which locks every table and
+		// index in it; parallel drops overflow the default 64-per-transaction lock table.
+		StartParameters(map[string]string{"max_locks_per_transaction": "1024"})
 }
 
 func freeLocalPort() (uint32, error) {
