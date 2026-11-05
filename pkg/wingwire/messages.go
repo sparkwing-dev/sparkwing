@@ -17,42 +17,12 @@ const (
 	OriginController Origin = "controller"
 )
 
-// Hello is the client's opening message on a fresh connection: the
-// protocol major it speaks and its binary version. The daemon answers
-// with [HelloAck] on the newest major the two share. A client whose
-// ProtocolMajor is ahead of everything the daemon speaks initiates a
-// takeover (drain the old daemon, spawn its own binary); one below the
-// daemon's floor fails with a version error.
-type Hello struct {
-	ProtocolMajor int    `json:"protocol_major"`
-	BinaryVersion string `json:"binary_version"`
-	BuildIdentity string `json:"build_identity,omitempty"`
-	// HealthProbe marks a connection that only observes the daemon: a
-	// supervisor health check or a socket sweep. The daemon serves it like
-	// any other connection but keeps it out of idle accounting, so a
-	// daemon whose only traffic is probes still idles out. Daemons that
-	// predate the field ignore it.
-	HealthProbe bool `json:"health_probe,omitempty"`
-	// HolderLiveness advertises that a working client can answer
-	// [LivenessProbe] frames while it holds admission. Older clients omit it
-	// and retain diagnostic-only stall handling.
-	HolderLiveness bool `json:"holder_liveness,omitempty"`
-}
-
-// HelloAck is the daemon's reply to [Hello], carrying the majors in play
-// and the daemon's binary version. Draining reports that the daemon has
-// stopped admitting new work (a takeover is in progress): existing
-// leases keep being served, but a client that needs admission should
-// wait for the successor daemon and reconnect.
+// HelloAck reports the controller version, contract, and readiness over HTTP.
+// Draining means existing leases remain readable while new work waits for the successor.
 type HelloAck struct {
-	// ProtocolMajor is the major this connection speaks: the client's own
-	// whenever the daemon still serves it, else the daemon's newest.
+	// ProtocolMajor is the controller's admission contract version.
 	ProtocolMajor int `json:"protocol_major"`
-	// NativeProtocolMajor is the newest major the daemon itself speaks. It
-	// exceeds ProtocolMajor on a connection served down to an older client,
-	// which is how that client knows it is the older side and must not take
-	// the daemon over. Zero from daemons that predate the field, where
-	// ProtocolMajor is the only major there is.
+	// NativeProtocolMajor also identifies the serving controller's contract.
 	NativeProtocolMajor int    `json:"native_protocol_major,omitempty"`
 	BinaryVersion       string `json:"binary_version"`
 	BuildIdentity       string `json:"build_identity,omitempty"`
@@ -142,9 +112,8 @@ type SemaphoreClaim struct {
 // AdmissionRequest asks the daemon for one admission lease. A request
 // may combine host resources and logical semaphores, draw only host
 // resources for a node, or draw only semaphores for a run-level claim.
-// The daemon answers with [Grant], a stream of [Queued] positions
-// followed by a [Grant], or an [Evicted] terminal event, per the
-// policies.
+// The HTTP response grants a lease or returns a durable queue ticket.
+// Repeated polls observe that ticket without changing its arrival order.
 type AdmissionRequest struct {
 	RunID HolderRef `json:"run_id"`
 	// OwnerRunID is the real run that owns an internal participant. Empty
@@ -167,10 +136,8 @@ type AdmissionRequest struct {
 	// shared daemon's queue can say whose work each row is. Empty when
 	// the run started outside any repository.
 	Repo string `json:"repo,omitempty"`
-	// PID is the run process's operating-system process id. The daemon
-	// samples this process's CPU at a slow cadence to flag a holder that
-	// is alive but idle while waiters queue behind it. Zero disables
-	// stall sampling for the holder.
+	// PID is the holder's root process. The controller verifies its owner and
+	// records its birth time before admission, then samples its process tree.
 	PID int `json:"pid,omitempty"`
 	// Resources is the host capacity the lease is expected to occupy. A
 	// zero value means the request declared no hints and the daemon
@@ -183,7 +150,7 @@ type AdmissionRequest struct {
 	// semaphore acquisitions made from inside an already-admitted run.
 	SemaphoresOnly bool `json:"semaphores_only,omitempty"`
 	// SubLease marks an internal lease whose parent run owns finalization.
-	// The daemon releases it on disconnect but never finalizes a run row for it.
+	// The controller never finalizes a run row for this participant.
 	SubLease bool `json:"sub_lease,omitempty"`
 	// NonBlocking refuses immediately when this request cannot be granted.
 	// Helper executors use it because they may offer only work they can
@@ -224,10 +191,8 @@ type AdmissionRequest struct {
 	Class string `json:"class,omitempty"`
 }
 
-// Grant is the daemon's admission of a request. The lease lives as
-// long as the client's connection; LeaseToken additionally lets the
-// holder [Reattach] within the grace window after a daemon restart or
-// takeover.
+// Grant admits a request until explicit release, cancellation, eviction, or
+// observed holder-process exit. LeaseToken proves parent admission for child claims.
 type Grant struct {
 	RunID      string `json:"run_id"`
 	LeaseToken string `json:"lease_token"`
@@ -281,46 +246,6 @@ type Evicted struct {
 	// client surfaces a cause rather than a bare policy key. Empty for
 	// ordinary cancel_others evictions and older daemons.
 	Reason string `json:"reason,omitempty"`
-}
-
-// Release returns a lease before the connection closes -- the explicit
-// counterpart of the implicit release the daemon performs when a
-// holder's socket closes.
-type Release struct {
-	LeaseToken string `json:"lease_token"`
-}
-
-// LivenessProbe asks an idle-looking holder to prove its control loop is
-// still running. Nonce prevents a delayed acknowledgement from satisfying a
-// later challenge.
-type LivenessProbe struct {
-	Nonce uint64 `json:"nonce"`
-}
-
-// LivenessAck answers the corresponding [LivenessProbe].
-type LivenessAck struct {
-	Nonce uint64 `json:"nonce"`
-}
-
-// Reattach presents a lease token on a fresh connection to resume a
-// lease that survived a daemon restart or version takeover. Accepted
-// only within the daemon's reconnect grace window; after that the
-// lease is gone and the run must submit a new [AdmissionRequest].
-type Reattach struct {
-	LeaseToken string `json:"lease_token"`
-	// RunID names the member of the lease this connection is resuming.
-	// Without it a restored multi-member lease hands its memberships out in
-	// order, so a child reconnecting before its parent is given the parent's
-	// identity. Empty from a client that predates the field.
-	RunID string `json:"run_id,omitempty"`
-}
-
-// DrainRequest tells a daemon to stop admitting new work while
-// continuing to serve existing leases. Sent by a newer client that is
-// about to spawn its own binary as the successor daemon.
-type DrainRequest struct {
-	// SuccessorVersion is the binary version that will take over.
-	SuccessorVersion string `json:"successor_version"`
 }
 
 // DrainAck confirms the daemon is draining. HoldersRemaining is the
@@ -466,7 +391,7 @@ type ProcessUsage struct {
 	AverageMemoryBytes uint64  `json:"average_memory_bytes"`
 }
 
-// Holder is one run currently holding admission, or a connected run carrying
+// Holder is one run holding admission, including a run carrying
 // a zero-cost orchestration lease, as reported in a [QueueState].
 type Holder struct {
 	// Usage is live process-tree measurement, separate from reserved capacity.
@@ -499,9 +424,8 @@ type Holder struct {
 	Burst bool `json:"burst,omitempty"`
 	// Semaphores names the semaphores the holder occupies.
 	Semaphores []string `json:"semaphores,omitempty"`
-	// ConnectionOnly marks a zero-cost orchestration lease. It keeps the run
-	// connected for lifecycle and finalization, but holds no host or semaphore
-	// resource. Older clients safely ignore this additive distinction.
+	// ConnectionOnly marks a zero-cost orchestration lease used for lifecycle
+	// and finalization. It holds no host or semaphore resource.
 	ConnectionOnly bool `json:"connection_only,omitempty"`
 	// CostSource names how Resources was resolved ("pin", "measured",
 	// "default"). Empty for leases whose source did not survive a daemon
@@ -518,10 +442,8 @@ type Holder struct {
 	// DriftWarning, when set, notes that the holder's pin has drifted from
 	// its measured profile.
 	DriftWarning string `json:"drift_warning,omitempty"`
-	// Stalled marks a holder that is alive but has consumed near-zero CPU for
-	// a sustained window while runs wait behind it -- a likely wedge. Capable
-	// clients are challenged before the daemon reclaims their admission; the
-	// flag remains diagnostic-only for older clients.
+	// Stalled marks a live holder with near-zero CPU while other work waits.
+	// It is diagnostic only. Process identity determines lease liveness.
 	Stalled bool `json:"stalled,omitempty"`
 	// Recovery is the exact command an operator runs to clear a stalled
 	// holder. Set only when Stalled is true; it never names a
@@ -845,12 +767,8 @@ type RejectionCount struct {
 	Count int    `json:"count"`
 }
 
-// CancelLease asks the daemon to cancel a local run it is arbitrating,
-// by run id, on a dedicated control connection. The daemon signals the
-// run's holding connection to wind down cleanly (the same path as an
-// operator interrupt) and answers with [CancelLeaseAck]. It is the
-// dashboard-free recovery path: the daemon, not a controller, knows the
-// run and holds its connection.
+// CancelLease asks the controller to cancel a run's machine admission.
+// Its holders observe the committed cancellation through lease-watch polls.
 type CancelLease struct {
 	RunID string `json:"run_id"`
 }
@@ -863,7 +781,7 @@ type CancelLeaseAck struct {
 }
 
 // SetPriority re-ranks a run the daemon is already arbitrating, by run
-// id, on a dedicated control connection. Mode is empty for an absolute
+// id. Mode is empty for an absolute
 // Priority; "front" or "back" resolves the rank against the waiters that
 // do not belong to this run, so the run lands ahead of or behind all of
 // them and Priority is ignored. Every participant of the run -- the run
@@ -883,7 +801,7 @@ type SetPriority struct {
 // and every other field is zero. Previous and Priority are the run's
 // rank before and after. Position is the run's best queue position
 // afterwards, 1-based, and zero when nothing of the run is waiting.
-// Participants counts the connections re-ranked. Holding is true when
+// Participants counts the admission requests re-ranked. Holding is true when
 // the run already holds a lease, which means the change reaches only the
 // node admissions it has yet to make.
 type SetPriorityAck struct {
@@ -896,48 +814,17 @@ type SetPriorityAck struct {
 	Holding      bool   `json:"holding,omitempty"`
 }
 
-// Cancel is the daemon's push to a run's holding connection telling it to
-// wind down cleanly, as if it had received an operator interrupt. Reason
-// is a short human phrase for the run's terminal record.
+// Cancel is a committed run cancellation returned by a lease watch.
+// Reason is a short human phrase for the run's terminal record.
 type Cancel struct {
 	RunID  string `json:"run_id"`
 	Reason string `json:"reason,omitempty"`
 }
 
 // StatsReset asks the daemon to clear its rolling admission-outcome window
-// (the data behind the queue view's recent-events summary), on a dedicated
-// control connection. The daemon answers with [StatsResetAck].
+// (the data behind the queue view's recent-events summary).
+// The controller answers with [StatsResetAck].
 type StatsReset struct{}
 
 // StatsResetAck confirms the daemon cleared its admission-outcome window.
 type StatsResetAck struct{}
-
-// Unsupported answers a message whose type the receiving daemon does not
-// serve, naming that type. The connection stays open, so a client that
-// reached for an operation this daemon predates learns so and continues on
-// the surface they share instead of waiting for a reply that never comes.
-type Unsupported struct {
-	Type string `json:"type"`
-}
-
-func (*StatsReset) wireType() MessageType       { return TypeStatsReset }
-func (*Unsupported) wireType() MessageType      { return TypeUnsupported }
-func (*StatsResetAck) wireType() MessageType    { return TypeStatsResetAck }
-func (*SetPriority) wireType() MessageType      { return TypeSetPriority }
-func (*SetPriorityAck) wireType() MessageType   { return TypeSetPriorityAck }
-func (*CancelLease) wireType() MessageType      { return TypeCancelLease }
-func (*CancelLeaseAck) wireType() MessageType   { return TypeCancelLeaseAck }
-func (*Cancel) wireType() MessageType           { return TypeCancel }
-func (*Hello) wireType() MessageType            { return TypeHello }
-func (*HelloAck) wireType() MessageType         { return TypeHelloAck }
-func (*AdmissionRequest) wireType() MessageType { return TypeAdmissionRequest }
-func (*Grant) wireType() MessageType            { return TypeGrant }
-func (*Queued) wireType() MessageType           { return TypeQueued }
-func (*Evicted) wireType() MessageType          { return TypeEvicted }
-func (*Release) wireType() MessageType          { return TypeRelease }
-func (*LivenessProbe) wireType() MessageType    { return TypeLivenessProbe }
-func (*LivenessAck) wireType() MessageType      { return TypeLivenessAck }
-func (*Reattach) wireType() MessageType         { return TypeReattach }
-func (*DrainRequest) wireType() MessageType     { return TypeDrainRequest }
-func (*DrainAck) wireType() MessageType         { return TypeDrainAck }
-func (*QueueState) wireType() MessageType       { return TypeQueueState }

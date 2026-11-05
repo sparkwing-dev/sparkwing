@@ -1,7 +1,7 @@
 {
   "types": [
     {
-      "type": "admission_request",
+      "type": "AdmissionRequest",
       "fields": [
         {
           "name": "run_id",
@@ -145,7 +145,7 @@
       ]
     },
     {
-      "type": "cancel",
+      "type": "Cancel",
       "fields": [
         {
           "name": "run_id",
@@ -160,7 +160,7 @@
       ]
     },
     {
-      "type": "cancel_lease",
+      "type": "CancelLease",
       "fields": [
         {
           "name": "run_id",
@@ -170,7 +170,7 @@
       ]
     },
     {
-      "type": "cancel_lease_ack",
+      "type": "CancelLeaseAck",
       "fields": [
         {
           "name": "found",
@@ -180,7 +180,7 @@
       ]
     },
     {
-      "type": "drain_ack",
+      "type": "DrainAck",
       "fields": [
         {
           "name": "holders_remaining",
@@ -190,17 +190,7 @@
       ]
     },
     {
-      "type": "drain_request",
-      "fields": [
-        {
-          "name": "successor_version",
-          "kind": "string",
-          "omitempty": false
-        }
-      ]
-    },
-    {
-      "type": "evicted",
+      "type": "Evicted",
       "fields": [
         {
           "name": "run_id",
@@ -230,7 +220,7 @@
       ]
     },
     {
-      "type": "grant",
+      "type": "Grant",
       "fields": [
         {
           "name": "run_id",
@@ -277,37 +267,7 @@
       ]
     },
     {
-      "type": "hello",
-      "fields": [
-        {
-          "name": "protocol_major",
-          "kind": "int",
-          "omitempty": false
-        },
-        {
-          "name": "binary_version",
-          "kind": "string",
-          "omitempty": false
-        },
-        {
-          "name": "build_identity",
-          "kind": "string",
-          "omitempty": true
-        },
-        {
-          "name": "health_probe",
-          "kind": "bool",
-          "omitempty": true
-        },
-        {
-          "name": "holder_liveness",
-          "kind": "bool",
-          "omitempty": true
-        }
-      ]
-    },
-    {
-      "type": "hello_ack",
+      "type": "HelloAck",
       "fields": [
         {
           "name": "protocol_major",
@@ -362,27 +322,7 @@
       ]
     },
     {
-      "type": "liveness_ack",
-      "fields": [
-        {
-          "name": "nonce",
-          "kind": "uint64",
-          "omitempty": false
-        }
-      ]
-    },
-    {
-      "type": "liveness_probe",
-      "fields": [
-        {
-          "name": "nonce",
-          "kind": "uint64",
-          "omitempty": false
-        }
-      ]
-    },
-    {
-      "type": "local_control",
+      "type": "LocalControl",
       "fields": [
         {
           "name": "stay",
@@ -392,7 +332,7 @@
       ]
     },
     {
-      "type": "local_control_status",
+      "type": "LocalControlStatus",
       "fields": [
         {
           "name": "running",
@@ -447,7 +387,7 @@
       ]
     },
     {
-      "type": "local_dashboard",
+      "type": "LocalDashboard",
       "fields": [
         {
           "name": "address",
@@ -462,7 +402,7 @@
       ]
     },
     {
-      "type": "local_dashboard_ack",
+      "type": "LocalDashboardAck",
       "fields": [
         {
           "name": "read_only",
@@ -477,7 +417,7 @@
       ]
     },
     {
-      "type": "queue_state",
+      "type": "QueueState",
       "fields": [
         {
           "name": "resources",
@@ -526,6 +466,53 @@
           "kind": "[]struct",
           "omitempty": true,
           "fields": [
+            {
+              "name": "usage",
+              "kind": "*struct",
+              "omitempty": true,
+              "fields": [
+                {
+                  "name": "cpu_measured",
+                  "kind": "bool",
+                  "omitempty": false
+                },
+                {
+                  "name": "memory_measured",
+                  "kind": "bool",
+                  "omitempty": false
+                },
+                {
+                  "name": "current_cpu_cores",
+                  "kind": "float64",
+                  "omitempty": false
+                },
+                {
+                  "name": "peak_cpu_cores",
+                  "kind": "float64",
+                  "omitempty": false
+                },
+                {
+                  "name": "average_cpu_cores",
+                  "kind": "float64",
+                  "omitempty": false
+                },
+                {
+                  "name": "current_memory_bytes",
+                  "kind": "uint64",
+                  "omitempty": false
+                },
+                {
+                  "name": "peak_memory_bytes",
+                  "kind": "uint64",
+                  "omitempty": false
+                },
+                {
+                  "name": "average_memory_bytes",
+                  "kind": "uint64",
+                  "omitempty": false
+                }
+              ]
+            },
             {
               "name": "run_id",
               "kind": "string",
@@ -1078,7 +1065,7 @@
       ]
     },
     {
-      "type": "queued",
+      "type": "Queued",
       "fields": [
         {
           "name": "run_id",
@@ -1108,32 +1095,7 @@
       ]
     },
     {
-      "type": "reattach",
-      "fields": [
-        {
-          "name": "lease_token",
-          "kind": "string",
-          "omitempty": false
-        },
-        {
-          "name": "run_id",
-          "kind": "string",
-          "omitempty": true
-        }
-      ]
-    },
-    {
-      "type": "release",
-      "fields": [
-        {
-          "name": "lease_token",
-          "kind": "string",
-          "omitempty": false
-        }
-      ]
-    },
-    {
-      "type": "set_priority",
+      "type": "SetPriority",
       "fields": [
         {
           "name": "run_id",
@@ -1153,7 +1115,7 @@
       ]
     },
     {
-      "type": "set_priority_ack",
+      "type": "SetPriorityAck",
       "fields": [
         {
           "name": "found",
@@ -1193,22 +1155,12 @@
       ]
     },
     {
-      "type": "stats_reset",
+      "type": "StatsReset",
       "fields": null
     },
     {
-      "type": "stats_reset_ack",
+      "type": "StatsResetAck",
       "fields": null
-    },
-    {
-      "type": "unsupported",
-      "fields": [
-        {
-          "name": "type",
-          "kind": "string",
-          "omitempty": false
-        }
-      ]
     }
   ]
 }

@@ -3,7 +3,7 @@ package wingwire
 import "time"
 
 // LocalControl observes the elected controller, or changes its stay policy when
-// Stay is present. Health-probe connections may only observe. Neither operation
+// Stay is present. Both operations require a verified local peer. Neither operation
 // starts a controller or opens its store.
 type LocalControl struct {
 	Stay *bool `json:"stay,omitempty"`
@@ -26,11 +26,8 @@ type LocalControlStatus struct {
 	DashboardURL string `json:"dashboard_url,omitempty"`
 }
 
-func (*LocalControl) wireType() MessageType       { return TypeLocalControl }
-func (*LocalControlStatus) wireType() MessageType { return TypeLocalControlStatus }
-
 // LocalDashboard starts the dashboard on the elected owner and waits for its
-// serving loop. This is a one-request connection; disconnect cancels the wait.
+// serving loop. Cancelling the HTTP request cancels the wait.
 // Health probes and admission-only daemons cannot serve this operation.
 type LocalDashboard struct {
 	Address  string `json:"address"`
@@ -44,6 +41,3 @@ type LocalDashboardAck struct {
 	ReadOnly bool   `json:"read_only,omitempty"`
 	Error    string `json:"error,omitempty"`
 }
-
-func (*LocalDashboard) wireType() MessageType    { return TypeLocalDashboard }
-func (*LocalDashboardAck) wireType() MessageType { return TypeLocalDashboardAck }

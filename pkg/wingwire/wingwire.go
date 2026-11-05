@@ -1,75 +1,24 @@
-// Package wingwire defines the JSON wire protocol spoken between the
-// local admission daemon and its clients (run processes, the CLI's
-// queue view, and explicit daemon lifecycle commands). It contains pure
-// data types and their (de)serialization;
-// transport -- sockets, connection lifecycle, dispatch -- lives with
-// the daemon and client implementations, not here.
-//
-// # Framing
-//
-// Messages are newline-delimited JSON: each message is one [Envelope]
-// serialized as a single JSON object followed by one '\n'. encoding/json
-// escapes newlines inside strings, so an encoded message never spans
-// lines and a reader can frame the stream with nothing more than
-// bufio.Scanner's default line splitter. [Encode] emits exactly this
-// framing and [Decode] accepts a line with or without its trailing
-// newline.
-//
-// # Versioning
-//
-// The first message in each direction on a fresh connection is the
-// version handshake ([Hello] from the client, [HelloAck] from the
-// daemon). The client states the protocol major it speaks and the
-// daemon answers on the newest major the two share, anywhere in
-// [MinProtocolMajor]..[ProtocolMajor]. Compiled pipeline binaries pin
-// SDK versions and keep running long after the daemon upgrades past
-// them, so the daemon meets such a client on its own major rather than
-// refusing it. The binary version travels alongside for observability only.
-// BuildIdentity distinguishes same-major implementations that may otherwise
-// ignore one another's fields.
+// Package wingwire defines JSON data shared by the local controller HTTP API,
+// admission clients, and queue views. HTTP transport and peer authentication live
+// in the controller and client implementations.
 package wingwire
 
 import (
 	"encoding/base64"
-	"encoding/json"
-	"fmt"
 	"slices"
 )
 
 // BuildIdentity changes whenever same-major wire behavior changes. It lets
 // source and installed builds compiled from the same protocol implementation
 // recognize each other even when their display versions differ.
-const BuildIdentity = "wingwire-v1-local-dashboard-control"
+const BuildIdentity = "wingwire-v4-durable-http"
 
-// ProtocolMajor is the newest wire protocol major this build speaks.
-// Clients send it in [Hello]; a daemon answers on it whenever the client
-// speaks it too.
-const ProtocolMajor = 3
+// ProtocolMajor identifies the durable HTTP controller contract.
+const ProtocolMajor = 4
 
-// MinProtocolMajor is the oldest wire protocol major a daemon of this
-// build still serves. Every major from here up to [ProtocolMajor] is
-// answered, so a repo whose pinned SDK predates the daemon keeps getting
-// admission grants instead of being locked out the moment the daemon
-// upgrades. Raising it is what turns a stale pin into a hard failure, so
-// raise it only for a change that genuinely cannot be served in the old
-// major's terms, and document the cut as a break. That cut is declared, not
-// discovered: the release gate refuses a raised floor without a `(Breaking)`
-// changelog entry and a migration section, the same way it refuses an
-// undeclared removal from the message set.
-const MinProtocolMajor = 1
-
-// ServedMajor reports the protocol major a daemon of this build answers a
-// client on, given the major that client sent in [Hello]. A client inside
-// the served range is met on its own major; anything else is answered
-// with this build's own, leaving the client to fail with a version error.
-// No map from release to protocol major is needed anywhere: every client
-// states its own major on every connection.
-func ServedMajor(client int) int {
-	if client >= MinProtocolMajor && client < ProtocolMajor {
-		return client
-	}
-	return ProtocolMajor
-}
+// MinProtocolMajor is the oldest controller contract this build serves.
+// Earlier connection-based admission clients must upgrade their pipeline pin.
+const MinProtocolMajor = 4
 
 // ProtocolFloor is one cliff in the wire protocol's history: the lowest
 // released SDK version whose clients speak Major.
@@ -103,7 +52,7 @@ var releasedProtocolFloors = ProtocolFloors{
 }
 
 // ReleasedProtocolFloors returns the release-to-major table this build
-// shipped with, whose newest row is [ProtocolMajor].
+// shipped with. An unreleased major has no release floor yet.
 func ReleasedProtocolFloors() ProtocolFloors {
 	return slices.Clone(releasedProtocolFloors)
 }
@@ -135,155 +84,6 @@ func (f ProtocolFloors) Newest() (floor ProtocolFloor, ok bool) {
 		return ProtocolFloor{}, false
 	}
 	return f[len(f)-1], true
-}
-
-// MessageType discriminates the concrete payload carried by an
-// [Envelope].
-type MessageType string
-
-const (
-	TypeHello              MessageType = "hello"
-	TypeHelloAck           MessageType = "hello_ack"
-	TypeAdmissionRequest   MessageType = "admission_request"
-	TypeGrant              MessageType = "grant"
-	TypeQueued             MessageType = "queued"
-	TypeEvicted            MessageType = "evicted"
-	TypeRelease            MessageType = "release"
-	TypeReattach           MessageType = "reattach"
-	TypeDrainRequest       MessageType = "drain_request"
-	TypeDrainAck           MessageType = "drain_ack"
-	TypeQueueState         MessageType = "queue_state"
-	TypeCancelLease        MessageType = "cancel_lease"
-	TypeCancelLeaseAck     MessageType = "cancel_lease_ack"
-	TypeSetPriority        MessageType = "set_priority"
-	TypeSetPriorityAck     MessageType = "set_priority_ack"
-	TypeCancel             MessageType = "cancel"
-	TypeStatsReset         MessageType = "stats_reset"
-	TypeStatsResetAck      MessageType = "stats_reset_ack"
-	TypeLivenessProbe      MessageType = "liveness_probe"
-	TypeLivenessAck        MessageType = "liveness_ack"
-	TypeUnsupported        MessageType = "unsupported"
-	TypeLocalControl       MessageType = "local_control"
-	TypeLocalControlStatus MessageType = "local_control_status"
-	TypeLocalDashboard     MessageType = "local_dashboard"
-	TypeLocalDashboardAck  MessageType = "local_dashboard_ack"
-)
-
-// Message is implemented by every concrete wire message. The
-// implementing set is closed: the unexported method keeps arbitrary
-// types out so [Decode] can guarantee an exhaustive mapping from
-// [MessageType] to concrete type.
-type Message interface {
-	wireType() MessageType
-}
-
-// TypeOf reports the wire type m serializes as, for a receiver that holds a
-// decoded message and needs to name its type back to the sender.
-func TypeOf(m Message) MessageType {
-	if m == nil {
-		return ""
-	}
-	return m.wireType()
-}
-
-// Envelope is the framing wrapper around every message: the type
-// discriminator plus the raw payload. Consumers normally use [Encode]
-// and [Decode] instead of touching Envelope directly.
-type Envelope struct {
-	Type    MessageType     `json:"type"`
-	Payload json.RawMessage `json:"payload,omitempty"`
-}
-
-// Encode serializes m as one framed line: an [Envelope] JSON object
-// terminated by '\n', ready to write to the connection as-is.
-func Encode(m Message) ([]byte, error) {
-	if m == nil {
-		return nil, fmt.Errorf("wingwire: Encode: nil message")
-	}
-	payload, err := json.Marshal(m)
-	if err != nil {
-		return nil, fmt.Errorf("wingwire: Encode %s: %w", m.wireType(), err)
-	}
-	line, err := json.Marshal(Envelope{Type: m.wireType(), Payload: payload})
-	if err != nil {
-		return nil, fmt.Errorf("wingwire: Encode %s: %w", m.wireType(), err)
-	}
-	return append(line, '\n'), nil
-}
-
-// Decode parses one framed line (with or without its trailing newline)
-// into the concrete message it carries. An unknown message type is an
-// [UnknownTypeError]: within one protocol major the type set only grows, so
-// the peer is newer or from a different major.
-func Decode(line []byte) (Message, error) {
-	var env Envelope
-	if err := json.Unmarshal(line, &env); err != nil {
-		return nil, fmt.Errorf("wingwire: Decode envelope: %w", err)
-	}
-	// safety: a frame with no type is malformed rather than a type from another
-	// generation, so it must not be answerable as an unknown type.
-	if env.Type == "" {
-		return nil, fmt.Errorf("wingwire: Decode envelope: no message type")
-	}
-	m, err := emptyMessage(env.Type)
-	if err != nil {
-		return nil, err
-	}
-	if len(env.Payload) > 0 {
-		if err := json.Unmarshal(env.Payload, m); err != nil {
-			return nil, fmt.Errorf("wingwire: Decode %s payload: %w", env.Type, err)
-		}
-	}
-	return m, nil
-}
-
-// UnknownTypeError reports a frame carrying a message type this build does
-// not know. A daemon distinguishes it from a malformed frame so it can answer
-// [Unsupported] and keep serving the connection.
-type UnknownTypeError struct {
-	Type MessageType
-}
-
-func (e *UnknownTypeError) Error() string {
-	return fmt.Sprintf("wingwire: unknown message type %q (peer speaks a different protocol major than %d)", e.Type, ProtocolMajor)
-}
-
-// safety: the wire shape snapshot is generated from this map, so a type reaches
-// the wire only by being registered here and cannot escape the snapshot.
-var messageRegistry = map[MessageType]func() Message{
-	TypeHello:              func() Message { return &Hello{} },
-	TypeHelloAck:           func() Message { return &HelloAck{} },
-	TypeAdmissionRequest:   func() Message { return &AdmissionRequest{} },
-	TypeGrant:              func() Message { return &Grant{} },
-	TypeQueued:             func() Message { return &Queued{} },
-	TypeEvicted:            func() Message { return &Evicted{} },
-	TypeRelease:            func() Message { return &Release{} },
-	TypeReattach:           func() Message { return &Reattach{} },
-	TypeDrainRequest:       func() Message { return &DrainRequest{} },
-	TypeDrainAck:           func() Message { return &DrainAck{} },
-	TypeQueueState:         func() Message { return &QueueState{} },
-	TypeCancelLease:        func() Message { return &CancelLease{} },
-	TypeCancelLeaseAck:     func() Message { return &CancelLeaseAck{} },
-	TypeSetPriority:        func() Message { return &SetPriority{} },
-	TypeSetPriorityAck:     func() Message { return &SetPriorityAck{} },
-	TypeCancel:             func() Message { return &Cancel{} },
-	TypeStatsReset:         func() Message { return &StatsReset{} },
-	TypeStatsResetAck:      func() Message { return &StatsResetAck{} },
-	TypeLivenessProbe:      func() Message { return &LivenessProbe{} },
-	TypeLivenessAck:        func() Message { return &LivenessAck{} },
-	TypeUnsupported:        func() Message { return &Unsupported{} },
-	TypeLocalControl:       func() Message { return &LocalControl{} },
-	TypeLocalControlStatus: func() Message { return &LocalControlStatus{} },
-	TypeLocalDashboard:     func() Message { return &LocalDashboard{} },
-	TypeLocalDashboardAck:  func() Message { return &LocalDashboardAck{} },
-}
-
-func emptyMessage(t MessageType) (Message, error) {
-	build, ok := messageRegistry[t]
-	if !ok {
-		return nil, &UnknownTypeError{Type: t}
-	}
-	return build(), nil
 }
 
 // NodeHostParticipant is the [AdmissionRequest].RunID of the lease a node of

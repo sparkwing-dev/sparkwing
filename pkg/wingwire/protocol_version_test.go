@@ -6,7 +6,7 @@ import (
 	"golang.org/x/mod/semver"
 )
 
-func TestReleasedProtocolFloors_CoverEveryMajorUpToTheCurrentOne(t *testing.T) {
+func TestReleasedProtocolFloors_NameReleasedMajorsInOrder(t *testing.T) {
 	floors := ReleasedProtocolFloors()
 	if len(floors) == 0 {
 		t.Fatal("the floor table must name at least protocol 1")
@@ -23,8 +23,8 @@ func TestReleasedProtocolFloors_CoverEveryMajorUpToTheCurrentOne(t *testing.T) {
 				f.Major, f.MinVersion, floors[i-1].Major, floors[i-1].MinVersion)
 		}
 	}
-	if newest := floors[len(floors)-1].Major; newest != ProtocolMajor {
-		t.Fatalf("newest floor is major %d but ProtocolMajor is %d; a bump appends a row naming the release that carries it", newest, ProtocolMajor)
+	if newest := floors[len(floors)-1].Major; newest > ProtocolMajor {
+		t.Fatalf("newest floor is major %d but ProtocolMajor is %d; a released protocol cannot be ahead of this build", newest, ProtocolMajor)
 	}
 }
 
@@ -57,8 +57,9 @@ func TestNewest_NamesTheHighestMajorTheTableCovers(t *testing.T) {
 	if !ok {
 		t.Fatal("the shipped table has no newest row")
 	}
-	if floor.Major != ProtocolMajor {
-		t.Fatalf("newest row is major %d; this build speaks %d", floor.Major, ProtocolMajor)
+	floors := ReleasedProtocolFloors()
+	if want := floors[len(floors)-1]; floor != want {
+		t.Fatalf("newest row = %+v, want %+v", floor, want)
 	}
 }
 

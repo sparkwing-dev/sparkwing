@@ -1,19 +1,16 @@
 package wingwire
 
 import (
-	"bytes"
 	"encoding/json"
-	"errors"
 	"reflect"
 	"strings"
 	"testing"
 	"time"
 )
 
-func roundTripMessages() []Message {
+func roundTripMessages() []any {
 	stay := true
-	return []Message{
-		&Hello{ProtocolMajor: ProtocolMajor, BinaryVersion: "v0.15.6"},
+	return []any{
 		&HelloAck{ProtocolMajor: ProtocolMajor, BinaryVersion: "v0.16.0", Draining: true},
 		&AdmissionRequest{
 			RunID:     "deploy-20260710-120000",
@@ -30,9 +27,6 @@ func roundTripMessages() []Message {
 		},
 		&Queued{RunID: "r1", Key: "cores", Position: 2, QueueLength: 3},
 		&Evicted{RunID: "r1", Key: "deploy-lock", SupersededBy: "r2", Policy: PolicyCancelOthers},
-		&Release{LeaseToken: "lease-def456"},
-		&Reattach{LeaseToken: "lease-def456", RunID: "deploy-20260710-120000"},
-		&DrainRequest{SuccessorVersion: "v0.16.0"},
 		&DrainAck{HoldersRemaining: 3},
 		&CancelLease{RunID: "deploy-20260710-120000"},
 		&CancelLeaseAck{Found: true},
@@ -40,15 +34,12 @@ func roundTripMessages() []Message {
 		&SetPriorityAck{Found: true, Previous: 0, Priority: 7, Position: 1, Participants: 3},
 		&StatsReset{},
 		&StatsResetAck{},
-		&LivenessProbe{Nonce: 7},
-		&LivenessAck{Nonce: 7},
 		&LocalControl{},
 		&LocalControl{Stay: &stay},
 		&LocalDashboard{Address: "127.0.0.1:0"},
 		&LocalDashboardAck{},
 		&LocalDashboardAck{Error: "dashboard address is occupied"},
 		&LocalControlStatus{Running: true, Stay: true, PID: 91, Version: "v1", Runs: 1, QueuedTriggers: 2, HeldLeases: 3, DashboardConnections: 4, IdleSince: time.Date(2026, 10, 14, 0, 0, 0, 0, time.UTC)},
-		&Unsupported{Type: "warp_core_breach"},
 		&Cancel{RunID: "deploy-20260710-120000", Reason: "cancelled via sparkwing runs cancel"},
 		&QueueState{
 			ExternalSampleAgeMS:      30000,
@@ -70,146 +61,28 @@ func roundTripMessages() []Message {
 	}
 }
 
-func TestQueueState_EmptyMeasurementAgeStaysWireCompatible(t *testing.T) {
-	line, err := Encode(&QueueState{ExternalSampleAgeMS: 30000})
+func TestQueueStateOmitsAbsentMeasurementAge(t *testing.T) {
+	body, err := json.Marshal(&QueueState{ExternalSampleAgeMS: 30000})
 	if err != nil {
-		t.Fatalf("Encode: %v", err)
+		t.Fatal(err)
 	}
-	if strings.Contains(string(line), "external_measurement_age_ms") {
-		t.Fatalf("zero measurement age was not omitted: %s", line)
+	if strings.Contains(string(body), "external_measurement_age_ms") {
+		t.Fatalf("zero measurement age was not omitted: %s", body)
 	}
 }
 
-func TestEncodeDecode_RoundTripsEveryMessageType(t *testing.T) {
-	for _, msg := range roundTripMessages() {
-		line, err := Encode(msg)
+func TestControllerJSONRoundTrips(t *testing.T) {
+	for _, value := range roundTripMessages() {
+		body, err := json.Marshal(value)
 		if err != nil {
-			t.Fatalf("Encode(%T): %v", msg, err)
+			t.Fatalf("marshal %T: %v", value, err)
 		}
-		got, err := Decode(line)
-		if err != nil {
-			t.Fatalf("Decode(%T): %v", msg, err)
+		got := reflect.New(reflect.TypeOf(value).Elem()).Interface()
+		if err := json.Unmarshal(body, got); err != nil {
+			t.Fatalf("unmarshal %T: %v", value, err)
 		}
-		if !reflect.DeepEqual(got, msg) {
-			t.Errorf("%T round-trip mismatch:\n got %#v\nwant %#v", msg, got, msg)
-		}
-	}
-}
-
-func TestEncode_CoversEveryDeclaredType(t *testing.T) {
-	seen := map[MessageType]bool{}
-	for _, msg := range roundTripMessages() {
-		line, err := Encode(msg)
-		if err != nil {
-			t.Fatalf("Encode(%T): %v", msg, err)
-		}
-		var env Envelope
-		if err := json.Unmarshal(line, &env); err != nil {
-			t.Fatalf("envelope(%T): %v", msg, err)
-		}
-		seen[env.Type] = true
-	}
-	for _, mt := range snapshotMessageTypes(t) {
-		if !seen[mt] {
-			t.Errorf("round-trip fixtures never exercise %q", mt)
-		}
-	}
-}
-
-func TestEncode_EmitsOneLine(t *testing.T) {
-	for _, msg := range roundTripMessages() {
-		line, err := Encode(msg)
-		if err != nil {
-			t.Fatalf("Encode(%T): %v", msg, err)
-		}
-		if !bytes.HasSuffix(line, []byte("\n")) {
-			t.Errorf("%T: encoded message missing trailing newline", msg)
-		}
-		if bytes.Count(line, []byte("\n")) != 1 {
-			t.Errorf("%T: encoded message spans multiple lines: %q", msg, line)
-		}
-	}
-}
-
-func TestEncode_EscapesNewlinesInsideStrings(t *testing.T) {
-	line, err := Encode(&Queued{RunID: "run\nwith\nnewlines", Key: "cores", Position: 1, QueueLength: 1})
-	if err != nil {
-		t.Fatalf("Encode: %v", err)
-	}
-	if bytes.Count(line, []byte("\n")) != 1 {
-		t.Fatalf("string newlines leaked into framing: %q", line)
-	}
-	got, err := Decode(line)
-	if err != nil {
-		t.Fatalf("Decode: %v", err)
-	}
-	if got.(*Queued).RunID != "run\nwith\nnewlines" {
-		t.Errorf("RunID = %q, lost embedded newlines", got.(*Queued).RunID)
-	}
-}
-
-func TestDecode_AcceptsLineWithoutTrailingNewline(t *testing.T) {
-	line, err := Encode(&Release{LeaseToken: "lease-1"})
-	if err != nil {
-		t.Fatalf("Encode: %v", err)
-	}
-	got, err := Decode(bytes.TrimSuffix(line, []byte("\n")))
-	if err != nil {
-		t.Fatalf("Decode without newline: %v", err)
-	}
-	if got.(*Release).LeaseToken != "lease-1" {
-		t.Errorf("LeaseToken = %q, want lease-1", got.(*Release).LeaseToken)
-	}
-}
-
-func TestDecode_RejectsUnknownType(t *testing.T) {
-	_, err := Decode([]byte(`{"type":"warp_core_breach","payload":{}}`))
-	if err == nil {
-		t.Fatal("Decode accepted an unknown message type")
-	}
-	if !strings.Contains(err.Error(), "warp_core_breach") {
-		t.Errorf("error does not name the unknown type: %v", err)
-	}
-}
-
-func TestDecode_RejectsMalformedJSON(t *testing.T) {
-	if _, err := Decode([]byte(`{"type":"hello","payload":`)); err == nil {
-		t.Fatal("Decode accepted truncated JSON")
-	}
-	if _, err := Decode([]byte(`{"type":"hello","payload":"not-an-object"}`)); err == nil {
-		t.Fatal("Decode accepted a payload of the wrong shape")
-	}
-}
-
-func TestDecode_EmptyPayloadYieldsZeroMessage(t *testing.T) {
-	got, err := Decode([]byte(`{"type":"drain_ack"}`))
-	if err != nil {
-		t.Fatalf("Decode: %v", err)
-	}
-	ack, ok := got.(*DrainAck)
-	if !ok {
-		t.Fatalf("got %T, want *DrainAck", got)
-	}
-	if ack.HoldersRemaining != 0 {
-		t.Errorf("HoldersRemaining = %d, want 0", ack.HoldersRemaining)
-	}
-}
-
-func TestEncode_RejectsNilMessage(t *testing.T) {
-	if _, err := Encode(nil); err == nil {
-		t.Fatal("Encode accepted a nil message")
-	}
-}
-
-func TestDecode_RejectsAFrameWithNoType(t *testing.T) {
-	for _, line := range []string{`{}`, `{"payload":{}}`, `{"type":"","payload":{}}`} {
-		_, err := Decode([]byte(line))
-		if err == nil {
-			t.Fatalf("Decode accepted %s", line)
-		}
-		var unknown *UnknownTypeError
-		if errors.As(err, &unknown) {
-			t.Errorf("Decode(%s) reported a missing type as an unknown one: %v", line, err)
+		if !reflect.DeepEqual(got, value) {
+			t.Errorf("%T round trip = %#v, want %#v", value, got, value)
 		}
 	}
 }

@@ -11,7 +11,7 @@ import (
 	"time"
 )
 
-var updateShapes = flag.Bool("update", false, "rewrite testdata/shapes.json from the registered message set")
+var updateShapes = flag.Bool("update", false, "rewrite testdata/shapes.json from the controller JSON fixtures")
 
 const shapesPath = "testdata/shapes.json"
 
@@ -58,33 +58,6 @@ func TestWireShapes(t *testing.T) {
 		formatShapeList(removed), formatShapeList(retyped), formatShapeList(added), regenerateShapes)
 }
 
-func TestRegistryAgreesWithEveryMessageType(t *testing.T) {
-	for _, mt := range registeredTypes() {
-		msg, err := emptyMessage(mt)
-		if err != nil {
-			t.Fatalf("emptyMessage(%q): %v", mt, err)
-		}
-		if got := msg.wireType(); got != mt {
-			t.Errorf("registry builds %T under %q but the message calls itself %q", msg, mt, got)
-		}
-	}
-}
-
-func TestSnapshotCoversTheWholeRegistry(t *testing.T) {
-	snapshot := map[MessageType]bool{}
-	for _, mt := range snapshotMessageTypes(t) {
-		snapshot[mt] = true
-	}
-	for _, mt := range registeredTypes() {
-		if !snapshot[mt] {
-			t.Errorf("message type %q is registered but absent from %s; regenerate with `%s`", mt, shapesPath, regenerateShapes)
-		}
-	}
-	if len(snapshot) != len(registeredTypes()) {
-		t.Errorf("%s carries %d types and the registry holds %d", shapesPath, len(snapshot), len(registeredTypes()))
-	}
-}
-
 func TestCompareShapesSeparatesBreaksFromGrowth(t *testing.T) {
 	old := map[string]string{
 		"grant":          "message",
@@ -127,35 +100,17 @@ func TestRenderKindNamesTheKindNotTheGoType(t *testing.T) {
 	}
 }
 
-func snapshotMessageTypes(t *testing.T) []MessageType {
-	t.Helper()
-	body, err := os.ReadFile(shapesPath)
-	if err != nil {
-		t.Fatalf("read %s: %v (regenerate with `%s`)", shapesPath, err, regenerateShapes)
-	}
-	var shapes wireShapes
-	if err := json.Unmarshal(body, &shapes); err != nil {
-		t.Fatalf("parse %s: %v", shapesPath, err)
-	}
-	out := make([]MessageType, 0, len(shapes.Types))
-	for _, ty := range shapes.Types {
-		out = append(out, MessageType(ty.Type))
-	}
-	return out
-}
-
 func currentShapes(t *testing.T) wireShapes {
 	t.Helper()
 	var shapes wireShapes
-	for _, mt := range registeredTypes() {
-		msg, err := emptyMessage(mt)
-		if err != nil {
-			t.Fatalf("emptyMessage(%q): %v", mt, err)
+	seen := map[string]bool{}
+	for _, value := range roundTripMessages() {
+		typ := reflect.TypeOf(value).Elem()
+		if seen[typ.Name()] {
+			continue
 		}
-		shapes.Types = append(shapes.Types, wireType{
-			Type:   string(mt),
-			Fields: renderFields(reflect.TypeOf(msg).Elem()),
-		})
+		seen[typ.Name()] = true
+		shapes.Types = append(shapes.Types, wireType{Type: typ.Name(), Fields: renderFields(typ)})
 	}
 	sort.Slice(shapes.Types, func(i, j int) bool { return shapes.Types[i].Type < shapes.Types[j].Type })
 	return shapes
@@ -297,13 +252,4 @@ func diffLines(want, got string) string {
 		b.WriteString("+" + line + "\n")
 	}
 	return b.String()
-}
-
-func registeredTypes() []MessageType {
-	out := make([]MessageType, 0, len(messageRegistry))
-	for t := range messageRegistry {
-		out = append(out, t)
-	}
-	sort.Slice(out, func(i, j int) bool { return out[i] < out[j] })
-	return out
 }

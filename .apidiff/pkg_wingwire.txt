@@ -65,7 +65,7 @@ type BudgetState struct {
 
 	Raw string
 }
-const BuildIdentity = "wingwire-v1-local-dashboard-control"
+const BuildIdentity = "wingwire-v4-durable-http"
 type Cancel struct {
 	RunID  string
 	Reason string
@@ -98,17 +98,8 @@ const CostSourceFloor CostSource = "floor"
 const CostSourceMeasured CostSource = "measured"
 const CostSourceMeasuring CostSource = "measuring"
 const CostSourcePin CostSource = "pin"
-func Decode(line []byte) (Message, error)
 type DrainAck struct {
 	HoldersRemaining int
-}
-type DrainRequest struct {
-	SuccessorVersion string
-}
-func Encode(m Message) ([]byte, error)
-type Envelope struct {
-	Type    MessageType
-	Payload json.RawMessage
 }
 type EventsWindow struct {
 	WindowMS int64
@@ -174,15 +165,6 @@ type Grant struct {
 
 	ExternalCores float64
 }
-type Hello struct {
-	ProtocolMajor int
-	BinaryVersion string
-	BuildIdentity string
-
-	HealthProbe bool
-
-	HolderLiveness bool
-}
 type HelloAck struct {
 	ProtocolMajor int
 
@@ -202,6 +184,7 @@ type HelloAck struct {
 	APIError string
 }
 type Holder struct {
+	Usage *ProcessUsage
 	RunID string
 
 	ParticipantID string
@@ -256,12 +239,6 @@ type HostResources struct {
 
 	MemoryBytes int64
 }
-type LivenessAck struct {
-	Nonce uint64
-}
-type LivenessProbe struct {
-	Nonce uint64
-}
 type LocalControl struct {
 	Stay *bool
 }
@@ -286,11 +263,7 @@ type LocalDashboardAck struct {
 	ReadOnly bool
 	Error    string
 }
-type Message interface {
-	wireType() MessageType
-}
-type MessageType string
-const MinProtocolMajor = 1
+const MinProtocolMajor = 4
 func NodeHostParticipant(runID, nodeID string) HolderRef
 func NodeSemaphoreParticipant(runID, nodeID string) HolderRef
 type Origin string
@@ -304,6 +277,16 @@ const PolicyQueue Policy = "queue"
 const PolicySkip Policy = "skip"
 const PriorityBack = "back"
 const PriorityFront = "front"
+type ProcessUsage struct {
+	CPUMeasured        bool
+	MemoryMeasured     bool
+	CurrentCPUCores    float64
+	PeakCPUCores       float64
+	AverageCPUCores    float64
+	CurrentMemoryBytes uint64
+	PeakMemoryBytes    uint64
+	AverageMemoryBytes uint64
+}
 type ProtocolFloor struct {
 	Major      int
 	MinVersion string
@@ -311,7 +294,7 @@ type ProtocolFloor struct {
 type ProtocolFloors []ProtocolFloor
 func (f ProtocolFloors) MinVersionSpeaking(major int) (version string, ok bool)
 func (f ProtocolFloors) Newest() (floor ProtocolFloor, ok bool)
-const ProtocolMajor = 3
+const ProtocolMajor = 4
 type QueueState struct {
 	Resources []ResourceState
 	Holders   []Holder
@@ -352,17 +335,9 @@ type Queued struct {
 
 	BlockingReason string
 }
-type Reattach struct {
-	LeaseToken string
-
-	RunID string
-}
 type RejectionCount struct {
 	Cause string
 	Count int
-}
-type Release struct {
-	LeaseToken string
 }
 func ReleasedProtocolFloors() ProtocolFloors
 func RemoteRunID(controller, run string) RunID
@@ -396,7 +371,6 @@ type SemaphoreClaim struct {
 
 	QueueTimeoutMS int64
 }
-func ServedMajor(client int) int
 type SetPriority struct {
 	RunID    string
 	Priority int
@@ -413,39 +387,6 @@ type SetPriorityAck struct {
 }
 type StatsReset struct{}
 type StatsResetAck struct{}
-const TypeAdmissionRequest MessageType = "admission_request"
-const TypeCancel MessageType = "cancel"
-const TypeCancelLease MessageType = "cancel_lease"
-const TypeCancelLeaseAck MessageType = "cancel_lease_ack"
-const TypeDrainAck MessageType = "drain_ack"
-const TypeDrainRequest MessageType = "drain_request"
-const TypeEvicted MessageType = "evicted"
-const TypeGrant MessageType = "grant"
-const TypeHello MessageType = "hello"
-const TypeHelloAck MessageType = "hello_ack"
-const TypeLivenessAck MessageType = "liveness_ack"
-const TypeLivenessProbe MessageType = "liveness_probe"
-const TypeLocalControl MessageType = "local_control"
-const TypeLocalControlStatus MessageType = "local_control_status"
-const TypeLocalDashboard MessageType = "local_dashboard"
-const TypeLocalDashboardAck MessageType = "local_dashboard_ack"
-func TypeOf(m Message) MessageType
-const TypeQueueState MessageType = "queue_state"
-const TypeQueued MessageType = "queued"
-const TypeReattach MessageType = "reattach"
-const TypeRelease MessageType = "release"
-const TypeSetPriority MessageType = "set_priority"
-const TypeSetPriorityAck MessageType = "set_priority_ack"
-const TypeStatsReset MessageType = "stats_reset"
-const TypeStatsResetAck MessageType = "stats_reset_ack"
-const TypeUnsupported MessageType = "unsupported"
-type UnknownTypeError struct {
-	Type MessageType
-}
-func (e *UnknownTypeError) Error() string
-type Unsupported struct {
-	Type string
-}
 type Waiter struct {
 	RunID string
 
