@@ -14,7 +14,7 @@ credential model in `docs/auth.md`, and the decision log
 
 ## Owners and guards
 
-SDKs declare and relay only. Policy and security behavior live in the host behind the versioned protocol. Changes avoid SDK releases (Korey 2026-11-05, BW-3118).
+SDKs declare and relay only. Policy and security behavior live in the host behind the versioned protocol. Changes avoid SDK releases (Korey 2026-11-05; see proposals/thin-sdk.md).
 
 ### Store baseline
 

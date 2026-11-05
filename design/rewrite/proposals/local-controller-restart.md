@@ -34,7 +34,7 @@ A controller restart must not.
 
 SDKs declare and relay only. Policy and security behavior live in the host
 behind the versioned protocol. This project makes no Go or TypeScript SDK
-change and requires no SDK release. BW-3118 tracks the thinning audit and
+change and requires no SDK release. The thin-SDK proposal tracks the thinning audit and
 compatibility matrix.
 
 ## What the code does today
@@ -489,5 +489,5 @@ allowlist, remote-bind cut and installed-CLI ownership remain agreed.
 | Q9: dashboard lifecycle | 2026-11-05 | Cut dashboard start/stop. Lifecycle belongs under `sparkwing daemon`. |
 | Ownership audit | 2026-11-05 | The runner reports observed exit time. Measure instant cancel via the lease watch. The controller cleans up orphaned job process groups. Port local-only host features with tests. |
 | Live job metrics | 2026-11-05 | Show per-job CPU and memory from the controller's sampler on the dashboard in step 1. |
-| SDK scope | 2026-11-05 | SDKs declare and relay only. Policy and security behavior live in the host behind the versioned protocol. This project changes neither Go nor TypeScript SDK. BW-3118 owns thinning and the compatibility matrix. |
+| SDK scope | 2026-11-05 | SDKs declare and relay only. Policy and security behavior live in the host behind the versioned protocol. This project changes neither Go nor TypeScript SDK. The thin-SDK proposal owns thinning and the compatibility matrix. |
 | Delivery order | 2026-11-05 | Follow the six implementation steps above. Release remains separate from engineering completion. |
