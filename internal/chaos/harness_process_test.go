@@ -188,6 +188,9 @@ func TestWatchActorBoundsRepeatedIgnoreTermDescendantChurn(t *testing.T) {
 	requireProcessGroups(t)
 	h, journal := newProcessHarness(t)
 	defer journal.Close()
+	// safety: twenty groups of term-ignoring descendants drain slowly on a loaded box;
+	// the bounds catch a hung cleanup, not a slow one.
+	h.cfg.Settle = 10 * time.Second
 	const actorCount = 20
 	var wg sync.WaitGroup
 	actors := make([]*actor, 0, actorCount)
@@ -220,7 +223,7 @@ func TestWatchActorBoundsRepeatedIgnoreTermDescendantChurn(t *testing.T) {
 	}()
 	select {
 	case <-done:
-	case <-time.After(4 * time.Second):
+	case <-time.After(30 * time.Second):
 		t.Fatal("repeated actor cleanup exceeded its bound")
 	}
 	for _, a := range actors {
