@@ -41,6 +41,7 @@ func (d *Daemon) refreshHeadroom() {
 
 func (d *Daemon) refreshHostSample(refreshCapacity bool) {
 	roots := d.holderSample()
+	d.sampleProcessUsage(roots)
 	stat, ownedByRoot, ownedMeasured, err := d.sampleHostAndOwned(roots)
 	if err != nil {
 		d.cfg.logf("host sample: %v", err)
@@ -197,6 +198,11 @@ func (d *Daemon) applyHeadroomSample(stat HostStat, ownedByRoot map[int]float64,
 	deliveries := d.routeLocked(events)
 	if len(events) == 0 {
 		deliveries = append(deliveries, d.waiterDeliveriesLocked()...)
+	}
+	if err := d.commitAdmissionLocked(); err != nil {
+		d.mu.Unlock()
+		d.cfg.logf("persist headroom: %v", err)
+		return
 	}
 	d.mu.Unlock()
 	d.cfg.logf("headroom: %.1f cores grantable (reserve %.1f, external %s)", targetCores, reservedCores,

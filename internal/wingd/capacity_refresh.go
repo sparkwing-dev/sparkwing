@@ -73,6 +73,11 @@ func (d *Daemon) applyCapacity(stat HostStat) {
 		d.cfg.logf("capacity resize: %v", err)
 		return
 	}
+	if err := d.commitAdmissionLocked(); err != nil {
+		d.mu.Unlock()
+		d.cfg.logf("persist capacity: %v", err)
+		return
+	}
 	oldCores := d.budgetCores
 	d.hostCores, d.hostMemory = cap.hostCores, cap.hostMemory
 	d.machineCores, d.machineMemory = cap.machineCores, cap.machineMemory
