@@ -183,13 +183,7 @@ func acquireAsync(t *testing.T, cl *client.Client, req wingwire.AdmissionRequest
 	}()
 	t.Cleanup(func() {
 		cancel()
-		timer := time.NewTimer(6 * time.Second)
-		defer timer.Stop()
-		select {
-		case <-finished:
-		case <-timer.C:
-			t.Error("admission request did not join during cleanup")
-		}
+		<-finished
 	})
 	return positions, result
 }

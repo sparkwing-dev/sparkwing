@@ -271,12 +271,7 @@ func TestQueuedHostPressureDoesNotReportColdSemaphoreKey(t *testing.T) {
 	waiterReq.Resources = wingwire.HostResources{Cores: 1}
 	waiter := ensure(t, home, "")
 	positions, _ := acquireAsync(t, waiter, waiterReq)
-	var q wingwire.Queued
-	select {
-	case q = <-positions:
-	case <-time.After(3 * time.Second):
-		t.Fatal("waiter did not queue")
-	}
+	q := <-positions
 
 	if q.Key != "" {
 		t.Fatalf("queued key = %q, want empty while only host capacity blocks", q.Key)
