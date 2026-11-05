@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
+	"github.com/sparkwing-dev/sparkwing/internal/apierrhttp"
 	"github.com/sparkwing-dev/sparkwing/internal/githubapp"
 	"github.com/sparkwing-dev/sparkwing/internal/routepolicy"
 )
@@ -314,7 +315,7 @@ func (s *Server) renderGitHubAppRefusal(w http.ResponseWriter, err error) {
 		s.logger.Info("github app connection canceled")
 		return
 	}
-	apierr.NoteResponseError(w, err)
+	apierrhttp.NoteResponseError(w, err)
 	page := flowPage{ActionHref: githubAppSettingsPath, ActionLabel: "Back to GitHub settings"}
 	refused, ok := refusalOf(err)
 	var failure *apierr.Error

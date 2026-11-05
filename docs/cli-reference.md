@@ -17,6 +17,7 @@ Every `sparkwing` command, flag, and argument, generated from the CLI's own comm
 - [`sparkwing doctor`](cli-doctor.md) -- Inspect local controller and machine diagnostics
 - [`sparkwing examples`](cli-examples.md) -- Read complete example pipelines
 - [`sparkwing info`](cli-info.md) -- Describe Sparkwing and the selected project
+- [`sparkwing login`](cli-login.md) -- Sign in through the browser and save a CLI token
 - [`sparkwing operator`](cli-operator.md) -- Manage deployment operations
 - [`sparkwing overflow`](cli-overflow.md) -- Manage your Cloud overflow allowance
 - [`sparkwing pipeline`](cli-pipeline.md) -- This repo's pipelines

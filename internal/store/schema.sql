@@ -1474,6 +1474,28 @@ CREATE TABLE flow_nonces (
     PRIMARY KEY(kind,nonce)
 );
 
+-- safety: a device login keeps the device code's digest, never a bearer; the
+-- credential is minted when the device redeems an approval, under the approving
+-- session's live authority.
+CREATE TABLE device_logins (
+    id TEXT NOT NULL PRIMARY KEY,
+    device_digest TEXT NOT NULL UNIQUE,
+    user_code TEXT NOT NULL UNIQUE,
+    request TEXT NOT NULL,
+    state TEXT NOT NULL CHECK(state IN ('pending','approved','denied','redeemed')),
+    created_at BIGINT NOT NULL,
+    expires_at BIGINT NOT NULL,
+    poll_interval BIGINT NOT NULL CHECK(poll_interval > 0),
+    polled_at BIGINT,
+    team TEXT REFERENCES teams(name) ON DELETE CASCADE,
+    account_id TEXT REFERENCES accounts(id) ON DELETE CASCADE,
+    session_hash TEXT REFERENCES sessions(hash) ON DELETE CASCADE,
+    grants TEXT NOT NULL DEFAULT '',
+    decided_at BIGINT,
+    CHECK(state NOT IN ('approved','redeemed') OR (team IS NOT NULL AND account_id IS NOT NULL AND session_hash IS NOT NULL AND decided_at IS NOT NULL))
+);
+CREATE INDEX idx_device_logins_expiry ON device_logins(expires_at);
+
 -- safety: one locked team/quota row serializes admission; summed usage rows never admit work.
 CREATE TABLE quota_admission (
     team TEXT NOT NULL REFERENCES teams(name),

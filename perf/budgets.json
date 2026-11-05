@@ -383,6 +383,48 @@
       "kind": "api",
       "exempt": "Requires a disposable recently signed-in provider session, CSRF and PKCE flow, and authority-bearing nonce and identity transactions. The dashboard corpus has no such fixture. Probing real accounts would change their sign-in methods. Authorized latency, cold start and response bytes are unmeasured.",
       "baselines": {}
+    },
+    {
+      "route": "/api/v1/auth/device",
+      "kind": "api",
+      "exempt": "Unauthenticated start of a device sign-in; each call writes a row that lives 10 minutes and shares the sign-in limit, so a scheduled probe would fill the store and spend that budget. In-process tests verify the body cap, validation and row contents. Latency and response bytes remain unmeasured.",
+      "baselines": {}
+    },
+    {
+      "route": "/api/v1/auth/device/token",
+      "kind": "api",
+      "exempt": "Needs a live device code, and a poll consumes an approval once, so the corpus has no reusable fixture. In-process tests verify pending, slow_down, redemption and refusals. Latency and response bytes remain unmeasured.",
+      "baselines": {}
+    },
+    {
+      "route": "/api/v1/auth/device/cancel",
+      "kind": "api",
+      "exempt": "Needs a live device code and withdraws it, so the corpus has no disposable fixture. In-process tests verify cancellation. Latency and response bytes remain unmeasured.",
+      "baselines": {}
+    },
+    {
+      "route": "/api/v1/auth/device/lookup",
+      "kind": "api",
+      "exempt": "Requires a live direct account session, its CSRF proof and a pending device code, absent from the dashboard corpus. In-process tests verify the view, team binding and refusals. Authorized latency and response bytes remain unmeasured.",
+      "baselines": {}
+    },
+    {
+      "route": "/api/v1/auth/device/approve",
+      "kind": "api",
+      "exempt": "Approval runs credential issuance checks under a person's live session; a scheduled probe must not approve sign-ins. In-process tests verify issuance checks, audit and refusals. Authorized latency and response bytes remain unmeasured.",
+      "baselines": {}
+    },
+    {
+      "route": "/api/v1/auth/device/deny",
+      "kind": "api",
+      "exempt": "Requires a live direct account session, its CSRF proof and a pending device code, absent from the dashboard corpus. In-process tests verify denial and audit. Authorized latency and response bytes remain unmeasured.",
+      "baselines": {}
+    },
+    {
+      "route": "/device",
+      "kind": "page",
+      "exempt": "Requires the remote dashboard, a signed-in account session and a pending device code, absent from the local dashboard corpus. The Playwright spec covers the page against a mocked controller. Page latency, the approve action, cold start and response bytes remain unmeasured.",
+      "baselines": {}
     }
   ]
 }

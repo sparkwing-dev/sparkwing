@@ -10,6 +10,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 	"github.com/sparkwing-dev/sparkwing/internal/releaseasset"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/sourceurl"
 )
 
 // Spec carries the sealed source identity, commit and checkout policy.
@@ -74,9 +75,11 @@ type Options struct {
 	// returns an empty commit and nil error; nil uses Git with Access.
 	ResolveRef func(context.Context, string) (string, error)
 	// ReadFile reads one committed file through host authority; nil fetches it with Access.
-	ReadFile  func(ctx context.Context, sha, name string) ([]byte, bool, error)
-	Base      procenv.Base
-	GitAccess GitAccess
+	ReadFile func(ctx context.Context, sha, name string) ([]byte, bool, error)
+	// LookupHost resolves clone hosts; nil uses the system resolver.
+	LookupHost sourceurl.Lookup
+	Base       procenv.Base
+	GitAccess  GitAccess
 }
 
 // GitAccess selects whose credentials fetch remote source; hosts derive it from authenticated placement.

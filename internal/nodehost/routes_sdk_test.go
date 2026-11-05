@@ -7,7 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
@@ -87,9 +87,8 @@ func TestSDKHTTPServicesUseTheRegisteredProductionRouter(t *testing.T) {
 		return nil
 	}
 	bearer := admitService(t, s, service)
-	originalTransport := http.DefaultTransport
-	http.DefaultTransport = routeTransport{handler: s.handler}
-	t.Cleanup(func() { http.DefaultTransport = originalTransport })
+	host := httptest.NewServer(s.handler)
+	t.Cleanup(host.Close)
 	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 	defer cancel()
 	complete := make(chan error, 1)
@@ -143,7 +142,7 @@ func TestSDKHTTPServicesUseTheRegisteredProductionRouter(t *testing.T) {
 	}()
 	defer input.Close()
 	defer writer.Close()
-	hello := map[string]any{"id": "hello", "op": "hello", "protocol": 2, "engine": map[string]string{"version": "v1"}, "runner": map[string]any{"name": "local", "type": "local", "labels": []string{}}, "binding": nodeproto.ProcessBinding{RunID: "run-1", JobID: "deploy", Routes: nodeproto.ProcessRoutes{URL: s.URL(), Bearer: bearer}}}
+	hello := map[string]any{"id": "hello", "op": "hello", "protocol": 2, "engine": map[string]string{"version": "v1"}, "runner": map[string]any{"name": "local", "type": "local", "labels": []string{}}, "binding": nodeproto.ProcessBinding{RunID: "run-1", JobID: "deploy", Routes: nodeproto.ProcessRoutes{URL: host.URL, Bearer: bearer}}}
 	go func() {
 		encoder := json.NewEncoder(writer)
 		if err := encoder.Encode(hello); err != nil {

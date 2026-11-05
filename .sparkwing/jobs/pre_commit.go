@@ -33,8 +33,8 @@ func (PreCommit) Help() string {
 		"The push boundary adds the contract gates and a compile of the touched packages in `pre-push`; " +
 		"go vet, go build, go test, golangci-lint, the race gate and the dashboard suites run in `gate`, " +
 		"on demand and in hosted CI. Set SPARKWING_REGEX_SWEEP_ALL=1 to sweep the whole tree for em dashes " +
-		"and tracker IDs. The tier is budgeted at three seconds and fails when its steps overrun it, " +
-		"naming the slowest."
+		"and tracker IDs. The tier is budgeted at three seconds of each step's own run time, not time spent waiting for a core; " +
+		"a step past it warns, naming the slowest, and the tier still passes when every check did."
 }
 
 func (PreCommit) Examples() []sparkwing.Example {

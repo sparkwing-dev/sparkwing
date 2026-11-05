@@ -4,7 +4,7 @@ import (
 	"context"
 	"strings"
 
-	"github.com/sparkwing-dev/sparkwing/internal/sourceurl"
+	"github.com/sparkwing-dev/sparkwing/internal/githubapp"
 )
 
 func lookupTriggerGitHubID(ctx context.Context, remote string, captured []string) (int64, error) {
@@ -17,5 +17,5 @@ func lookupTriggerGitHubID(ctx context.Context, remote string, captured []string
 	if token == "" {
 		token = env["GITHUB_TOKEN"]
 	}
-	return sourceurl.GitHubRepositoryID(ctx, remote, token)
+	return githubapp.RepositoryID(ctx, remote, token)
 }

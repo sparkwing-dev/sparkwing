@@ -41,8 +41,9 @@ pipelines:
   - name: review
     entrypoint: Review
 
-  # land is the pre-merge path for every change: gate and review in parallel,
-  # then a fast-forward of main to the commit both judged.
+  # land is the pre-merge path for every change: the gate's source-policy job
+  # first, then the rest of the gate and the review in parallel, then a
+  # fast-forward of main to the commit both judged.
   - name: land
     entrypoint: Land
 

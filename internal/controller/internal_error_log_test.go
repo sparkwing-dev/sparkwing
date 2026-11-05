@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
+	"github.com/sparkwing-dev/sparkwing/internal/apierrhttp"
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/routepolicy"
@@ -87,7 +88,7 @@ func TestRequestCancellationLogLevel(t *testing.T) {
 
 func TestUnexpectedMetricsUnavailableLogsError(t *testing.T) {
 	h, logs := auditHarness(t, "/api/v1/runs/{run}/jobs/{job}/metrics", func(w http.ResponseWriter, _ *http.Request) {
-		if err := apierr.WriteHTTP(w, &apierr.Error{Code: apierr.Unavailable, Message: errCloudMetricsUnavailable.Message}); err != nil {
+		if err := apierrhttp.Write(w, &apierr.Error{Code: apierr.Unavailable, Message: errCloudMetricsUnavailable.Message}); err != nil {
 			t.Fatal(err)
 		}
 	})

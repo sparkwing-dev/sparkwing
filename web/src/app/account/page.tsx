@@ -2,11 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
-import {
-  Notice,
-  Panel,
-  errorText,
-} from "@/components/TeamShell";
+import { Notice, Panel, errorText } from "@/components/TeamShell";
 import { toast } from "@/components/Toasts";
 import {
   type Me,
@@ -47,6 +43,17 @@ function Account({ me }: { me: Me }) {
           </p>
           <Link href="/account/sign-ins" className="underline">
             Manage
+          </Link>
+        </div>
+      </Panel>
+      <Panel title="Terminal sign-in">
+        <div className="p-4 text-sm flex items-center gap-3">
+          <p className="flex-1 text-[var(--muted)]">
+            Approve a <code>sparkwing login</code> request with the code your
+            terminal shows.
+          </p>
+          <Link href="/device" className="underline">
+            Enter a code
           </Link>
         </div>
       </Panel>

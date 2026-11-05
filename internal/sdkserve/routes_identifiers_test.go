@@ -50,7 +50,7 @@ func FuzzHostRouteIdentifiers(f *testing.F) {
 			calls := 0
 			s := &routeServices{
 				binding: &nodeproto.ProcessBinding{Routes: nodeproto.ProcessRoutes{URL: "http://127.0.0.1", Bearer: "delegated-fixture"}},
-				transport: routeTransport(func(r *http.Request) (*http.Response, error) {
+				dial: routeTransport(func(r *http.Request) (*http.Response, error) {
 					w := httptest.NewRecorder()
 					if r.Method == http.MethodPost && r.URL.Path == "/node/v1/children" {
 						_ = json.NewEncoder(w).Encode(map[string]string{"run_id": id})
@@ -59,21 +59,21 @@ func FuzzHostRouteIdentifiers(f *testing.F) {
 					calls++
 					escaped := r.URL.EscapedPath()
 					if r.Method != method || !strings.HasPrefix(escaped, prefix) || !strings.HasSuffix(escaped, suffix) || r.URL.Fragment != "" {
-						t.Fatalf("%s with %q reached %s %s", test.pattern, id, r.Method, r.URL)
+						t.Errorf("%s with %q reached %s %s", test.pattern, id, r.Method, r.URL)
 					}
 					segment := strings.TrimSuffix(strings.TrimPrefix(escaped, prefix), suffix)
 					if segment == "." || segment == ".." || strings.Contains(segment, "/") {
-						t.Fatalf("%s with %q is not an opaque segment: %q", test.pattern, id, segment)
+						t.Errorf("%s with %q is not an opaque segment: %q", test.pattern, id, segment)
 					}
 					if got, err := url.PathUnescape(segment); err != nil || got != id {
-						t.Fatalf("%s identifier = %q, %v, want %q", test.pattern, got, err, id)
+						t.Errorf("%s identifier = %q, %v, want %q", test.pattern, got, err, id)
 					}
 					if got := r.Header.Get("Authorization"); got != "Bearer delegated-fixture" {
 						t.Errorf("route authorization = %q", got)
 					}
 					_, _ = w.Write([]byte(test.reply))
 					return w.Result(), nil
-				}),
+				}).dial,
 			}
 			if err := test.call(s); err != nil || calls != 1 {
 				t.Fatalf("%s with %q: calls = %d, error = %v", test.pattern, id, calls, err)

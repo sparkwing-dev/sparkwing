@@ -25,9 +25,6 @@ func TestBurstSDKNativeChild(t *testing.T) {
 	if len(os.Args) < 5 || os.Args[len(os.Args)-2] != "burst-sdk-child" {
 		return
 	}
-	if len(os.Args) == 7 {
-		http.DefaultTransport = openBurstSDKPipeTransport(t, os.Args[3], os.Args[4])
-	}
 	requests, frames := os.NewFile(3, "requests"), os.NewFile(4, "frames")
 	syscall.CloseOnExec(3)
 	syscall.CloseOnExec(4)
@@ -42,7 +39,7 @@ func TestBurstNativeSDKExecutesHerePersonalAndCloudAwards(t *testing.T) {
 	if testing.Short() {
 		t.Skip("slow: 3.8s measured in the short class; the full suite runs it")
 	}
-	burstNativeSDKAcceptance(t, burstSDKPipeService)
+	burstNativeSDKAcceptance(t, burstSDKLoopbackService)
 }
 
 func FuzzRequesterSecretsMaskedThroughNativeExecution(f *testing.F) {
@@ -54,7 +51,7 @@ func FuzzRequesterSecretsMaskedThroughNativeExecution(f *testing.F) {
 			return
 		}
 		value := "requester-private-" + strings.ToValidUTF8(string(data), "�")
-		burstNativeSDKSecretAcceptance(t, burstSDKPipeService, value, []string{"personal"})
+		burstNativeSDKSecretAcceptance(t, burstSDKLoopbackService, value, []string{"personal"})
 	})
 }
 

@@ -144,6 +144,12 @@ func wireOperations() map[string]wireOperation {
 		}{}, wire.RotatedToken{})
 	}
 	result["POST /api/v1/runners"] = operation("Enroll a runner once", wire.EnrollRunnerRequest{}, wire.CreatedToken{})
+	result["POST /api/v1/auth/device"] = operation("Start a device sign-in and return its codes once", wire.StartDeviceLoginRequest{}, wire.DeviceLoginStarted{})
+	result["POST /api/v1/auth/device/token"] = operation("Poll a device sign-in; an approval returns its credential once", wire.DeviceCodeRequest{}, wire.DeviceLoginPoll{})
+	result["POST /api/v1/auth/device/cancel"] = operation("Withdraw a device sign-in", wire.DeviceCodeRequest{}, nil)
+	result["POST /api/v1/auth/device/lookup"] = operation("Show what a pending device sign-in would grant", wire.UserCodeRequest{}, wire.DeviceLoginLookup{})
+	result["POST /api/v1/auth/device/approve"] = operation("Approve a device sign-in under this session", wire.UserCodeRequest{}, nil)
+	result["POST /api/v1/auth/device/deny"] = operation("Deny a device sign-in", wire.UserCodeRequest{}, nil)
 	result["GET /api/v1/team/settings"] = operation("Read team enrollment, claim ranking and child-run settings", nil, wire.TeamSettings{})
 	result["PUT /api/v1/team/settings"] = operation("Change and audit team enrollment, claim ranking and child-run settings", wire.TeamSettingsUpdate{}, wire.TeamSettings{})
 	result["GET /api/v1/data/records"] = operation("Look up an authorized record", nil, wire.DataRecordLookupResult{}, query("kind", "string"), query("name", "string"), query("ref", "string"), query("pipeline", "string"), query("job", "string"), query("key", "string"), query("deadline", "string"), query("verified_default_only", "boolean"))

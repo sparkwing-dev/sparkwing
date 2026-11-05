@@ -11,17 +11,19 @@ import (
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
-// Land checks a branch, runs the gate and the review side by side, and pushes
-// the commit both passed to main, merging origin/main into it first when main moved.
+// Land checks a branch, runs the source-policy checks, then the rest of the
+// gate and the review side by side, and pushes the commit both passed to main,
+// merging origin/main into it first when main moved.
 type Land struct{ sparkwing.Base }
 
 func (Land) ShortHelp() string {
-	return "Land the current branch: gate and review in parallel, then push HEAD to main, merging origin/main first when it moved"
+	return "Land the current branch: source policy first, then gate and review in parallel, then push HEAD to main, merging origin/main first when it moved"
 }
 
 func (Land) Help() string {
 	return "Refuses a dirty checkout, a detached HEAD, main itself, a CHANGELOG.md that repeats a ### heading within a release, and a branch whose merge with origin/main (after fetching it) conflicts, " +
-		"naming the command that fixes each. Then runs the gate (the same jobs as `sparkwing run gate`) and the review " +
+		"naming the command that fixes each. Then runs the gate's policy job (the cheap source-policy checks), so a policy finding fails the land within seconds, " +
+		"and once it passes runs the rest of the gate (the same jobs as `sparkwing run gate`) and the review " +
 		"(the same job as `sparkwing run review`, which reads .review.yaml and takes --brief and --skip) in parallel. " +
 		"The review always runs, whatever the change's size or paths. When both pass and the review record's tree is HEAD's tree with result pass, " +
 		"the land job re-checks that HEAD did not move, fetches origin/main and runs `git push origin <HEAD>:refs/heads/main` " +
@@ -63,15 +65,15 @@ func (p *Land) Plan(_ context.Context, plan *sparkwing.Plan, in ReviewArgs, rc s
 	pre := sparkwing.Job(plan, "preconditions", &landPreconditionsJob{RepoDir: repoDir}).Inline().Cores(lightJobCores)
 
 	gate := gateJobs(plan, &Gate{}, "gate", false)
+	// perf: the policy job is the gate's first node and every heavy gate job
+	// already waits on it. The review waits on it too, so a one-second policy
+	// finding fails the land before the review spends minutes on the diff.
+	policy := gate[0].Needs(pre)
 	needs := make([]sparkwing.Dep, 0, len(gate)+1)
-	for i, n := range gate {
-		// safety: the last gate node records the tree and already waits for the others.
-		if i < len(gate)-1 {
-			n.Needs(pre)
-		}
+	for _, n := range gate {
 		needs = append(needs, n)
 	}
-	review := reviewJobNode(plan, in, branch).Needs(pre)
+	review := reviewJobNode(plan, in, branch).Needs(policy)
 	needs = append(needs, review)
 
 	sparkwing.Job(plan, "land", &landJob{
@@ -502,6 +504,9 @@ func changedBetween(ctx context.Context, dir, from, to string) ([]string, error)
 // selection leaves to the build step; the tests cover the packages it changed.
 func recheckMergeDelta(ctx context.Context, files []string) error {
 	if err := runBuild(ctx); err != nil {
+		return err
+	}
+	if err := ensureFrontendDeps(ctx); err != nil {
 		return err
 	}
 	return runAffectedTestFiles(ctx, files, fmt.Sprintf("%d file(s) the merge of %s changed", len(files), landBaseRef))

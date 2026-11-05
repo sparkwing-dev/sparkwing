@@ -224,3 +224,17 @@ func TestSubmittedValuesNeverRedirectTheRunnersOwnState(t *testing.T) {
 		}
 	}
 }
+
+func TestRemoteInstallsKeepTheRunnerOperatorsCgoSetting(t *testing.T) {
+	for _, base := range []Base{{Masker: secrets.NewMasker()}, {OwnerMachine: true, Masker: secrets.NewMasker()}} {
+		base.Ambient = []string{"CGO_ENABLED=1", "CGO_LDFLAGS=-L/tmp"}
+		install, err := buildEntries(Install, base, Runtime{})
+		if err != nil || !slices.Contains(install, "CGO_ENABLED=1") || slices.Contains(install, "CGO_LDFLAGS=-L/tmp") {
+			t.Fatalf("remote install environment %v: %v", install, err)
+		}
+		attempt, err := buildEntries(Attempt, base, Runtime{})
+		if err != nil || slices.Contains(attempt, "CGO_ENABLED=1") {
+			t.Fatalf("remote job environment %v: %v", attempt, err)
+		}
+	}
+}

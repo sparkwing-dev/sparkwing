@@ -205,7 +205,7 @@ func landPlan(t *testing.T) map[string]landPlanJob {
 	return jobs
 }
 
-func TestLandRunsTheGateAndReviewInParallelBeforeThePush(t *testing.T) {
+func TestLandRunsPolicyFirstThenTheGateAndReviewInParallelBeforeThePush(t *testing.T) {
 	jobs := landPlan(t)
 	gate := inspectPipeline(t, "Gate", nil)
 	var gateIDs []string
@@ -218,12 +218,18 @@ func TestLandRunsTheGateAndReviewInParallelBeforeThePush(t *testing.T) {
 		if !ok {
 			t.Fatalf("land has no %q job; jobs: %v", id, jobs)
 		}
-		// safety: record-tree follows the gate jobs it records; every other gate job and the review start together.
-		if id == recordTreeJob {
-			continue
-		}
-		if !slices.Equal(j.Needs, []string{"preconditions"}) {
-			t.Fatalf("%s needs %v; it should wait only for the preconditions, so the gate and review run side by side", id, j.Needs)
+		switch id {
+		case recordTreeJob:
+			// safety: record-tree follows the gate jobs it records.
+		case policyJobID:
+			if !slices.Equal(j.Needs, []string{"preconditions"}) {
+				t.Fatalf("policy needs %v; it should wait only for the preconditions", j.Needs)
+			}
+		default:
+			if !slices.Equal(j.Needs, []string{policyJobID}) {
+				t.Fatalf("%s needs %v; it should wait only for the policy job, so a policy finding fails the land "+
+					"before it starts and the heavy gate jobs and the review then run side by side", id, j.Needs)
+			}
 		}
 	}
 	land := jobs["land"]

@@ -30,6 +30,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/ratelimit"
 	"github.com/sparkwing-dev/sparkwing/internal/routepolicy"
 	"github.com/sparkwing-dev/sparkwing/internal/sessionledger"
+	"github.com/sparkwing-dev/sparkwing/internal/sourceurl"
 	"github.com/sparkwing-dev/sparkwing/internal/storage"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
@@ -61,6 +62,8 @@ type Server struct {
 	peerIdentity func(*http.Request) capability.Subject
 
 	loginLimit *loginLimiter
+
+	sourceLookup sourceurl.Lookup
 
 	flood                  *floodControl
 	operatorSettingsWrites OperatorSettingsWriter
@@ -285,6 +288,7 @@ func (s *Server) buildRegisteredRouters() *registeredMux {
 	endpoints = append(endpoints, s.actionsEndpoints()...)
 	endpoints = append(endpoints, s.githubRunnerEndpoints()...)
 	endpoints = append(endpoints, s.sessionEndpoints()...)
+	endpoints = append(endpoints, s.deviceLoginEndpoints()...)
 	endpoints = append(endpoints, s.accountEndpoints()...)
 	endpoints = append(endpoints, s.reportingEndpoints()...)
 	endpoints = append(endpoints, s.metricEndpoints()...)

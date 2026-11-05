@@ -89,7 +89,7 @@ func TestPreCommitAdmitsAheadOfTheBroadGate(t *testing.T) {
 }
 
 func TestGateStillRunsEveryStepTheHookTiersAlsoRun(t *testing.T) {
-	gate := stepIDs(t, &Gate{})
+	gate := append(stepIDs(t, &Gate{}), stepIDs(t, &policyJob{})...)
 	// safety: the gate's whole-module vet and build are what the push tier
 	// runs over the touched packages alone.
 	broader := map[string]string{

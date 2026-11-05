@@ -1,10 +1,13 @@
 package sdkserve
 
 import (
+	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"io"
+	"net"
 	"net/http"
 	"reflect"
 	"strings"
@@ -18,29 +21,59 @@ type routeTransport func(*http.Request) (*http.Response, error)
 
 func (f routeTransport) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
 
+// hack: fixtures stay written against net/http; dial serves one pipe connection with f through the SDK client.
+func (f routeTransport) dial(ctx context.Context, address string) (net.Conn, error) {
+	client, server := net.Pipe()
+	go func() {
+		defer server.Close()
+		request, err := http.ReadRequest(bufio.NewReader(server))
+		if err != nil {
+			return
+		}
+		body, err := io.ReadAll(request.Body)
+		if err != nil {
+			return
+		}
+		request.Body = io.NopCloser(bytes.NewReader(body))
+		request.URL.Scheme, request.URL.Host = "http", address
+		response, err := f(request.WithContext(ctx))
+		if err != nil || response == nil {
+			return
+		}
+		defer response.Body.Close()
+		response.ProtoMajor, response.ProtoMinor = 1, 1
+		_ = response.Write(server)
+	}()
+	return client, nil
+}
+
+var fakeBinding = &nodeproto.ProcessBinding{RunID: "run", JobID: "job", Routes: nodeproto.ProcessRoutes{
+	URL: "http://127.0.0.1:4321", Bearer: "delegated-fixture",
+}}
+
+func fakeTransport(t *testing.T, method, path, body, response string) routeTransport {
+	t.Helper()
+	return func(r *http.Request) (*http.Response, error) {
+		if r.Method != method || r.URL.RequestURI() != path || r.Header.Get("Authorization") != "Bearer delegated-fixture" {
+			t.Errorf("unexpected request: %s %s, authorization=%q", r.Method, r.URL.RequestURI(), r.Header.Get("Authorization"))
+		}
+		var got, want any
+		if err := json.NewDecoder(r.Body).Decode(&got); err != nil {
+			t.Error(err)
+		}
+		if err := json.Unmarshal([]byte(body), &want); err != nil {
+			t.Error(err)
+		}
+		if !reflect.DeepEqual(got, want) {
+			t.Errorf("request body = %#v, want %#v", got, want)
+		}
+		return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(response)), Header: http.Header{}}, nil
+	}
+}
+
 func fakeRoutes(t *testing.T, method, path, body, response string) *routeServices {
 	t.Helper()
-	return &routeServices{
-		binding: &nodeproto.ProcessBinding{RunID: "run", JobID: "job", Routes: nodeproto.ProcessRoutes{
-			URL: "http://127.0.0.1:4321", Bearer: "delegated-fixture",
-		}},
-		transport: routeTransport(func(r *http.Request) (*http.Response, error) {
-			if r.Method != method || r.URL.RequestURI() != path || r.Header.Get("Authorization") != "Bearer delegated-fixture" {
-				t.Errorf("unexpected request: %s %s, authorization=%q", r.Method, r.URL.RequestURI(), r.Header.Get("Authorization"))
-			}
-			var got, want any
-			if err := json.NewDecoder(r.Body).Decode(&got); err != nil {
-				t.Fatal(err)
-			}
-			if err := json.Unmarshal([]byte(body), &want); err != nil {
-				t.Fatal(err)
-			}
-			if !reflect.DeepEqual(got, want) {
-				t.Errorf("request body = %#v, want %#v", got, want)
-			}
-			return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(response)), Header: http.Header{}}, nil
-		}),
-	}
+	return &routeServices{binding: fakeBinding, dial: fakeTransport(t, method, path, body, response).dial}
 }
 
 func TestHostRoutesUseBoundServices(t *testing.T) {
@@ -89,21 +122,21 @@ func TestHostRoutesChildSubmissionAndAwait(t *testing.T) {
 	for _, outcome := range []string{"success", "memoized"} {
 		for _, output := range []string{"42", "null", ""} {
 			t.Run(outcome+"/output="+output, func(t *testing.T) {
-				submit := fakeRoutes(t, "POST", "/node/v1/children",
+				submit := fakeTransport(t, "POST", "/node/v1/children",
 					`{"pipeline":"build","job":"image","args":{"version":"next"},"repo":"org/repo","branch":"release"}`, `{"run_id":"child/1"}`)
 				response := `{"status":"` + outcome + `"`
 				if output != "" {
 					response += `,"output":` + output
 				}
-				await := fakeRoutes(t, "GET", "/node/v1/children/child%2F1/await?job=image&wait_ms=60000", `null`, response+`}`)
+				await := fakeTransport(t, "GET", "/node/v1/children/child%2F1/await?job=image&wait_ms=60000", `null`, response+`}`)
 				calls := 0
-				s := &routeServices{binding: submit.binding, transport: routeTransport(func(r *http.Request) (*http.Response, error) {
+				s := &routeServices{binding: fakeBinding, dial: routeTransport(func(r *http.Request) (*http.Response, error) {
 					calls++
 					if calls == 1 {
-						return submit.transport.RoundTrip(r)
+						return submit(r)
 					}
-					return await.transport.RoundTrip(r)
-				})}
+					return await(r)
+				}).dial}
 				got, err := s.RunPipeline(t.Context(), ChildRequest{Pipeline: "build", Job: "image", Args: map[string]string{"version": "next"}, Repo: "org/repo", Branch: "release"})
 				if (err == nil) != (output != "") || string(got) != output || calls != 2 {
 					t.Fatalf("child = %s, %v, calls = %d", got, err, calls)
@@ -118,10 +151,10 @@ func TestHostRoutesRefuseInvalidOriginsBeforeSendingBearer(t *testing.T) {
 		t.Run(origin, func(t *testing.T) {
 			s := &routeServices{
 				binding: &nodeproto.ProcessBinding{Routes: nodeproto.ProcessRoutes{URL: origin, Bearer: "secret"}},
-				transport: routeTransport(func(*http.Request) (*http.Response, error) {
-					t.Fatal("sent the delegated bearer to an invalid origin")
+				dial: routeTransport(func(*http.Request) (*http.Response, error) {
+					t.Error("sent the delegated bearer to an invalid origin")
 					return nil, nil
-				}),
+				}).dial,
 			}
 			if _, err := s.Output(t.Context(), "job"); err == nil {
 				t.Fatal("invalid origin accepted")
@@ -134,10 +167,11 @@ func TestHostRoutesCancellationReachesTransport(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
 	s := &routeServices{
 		binding: &nodeproto.ProcessBinding{Routes: nodeproto.ProcessRoutes{URL: "http://127.0.0.1"}},
-		transport: routeTransport(func(r *http.Request) (*http.Response, error) {
+		dial: routeTransport(func(r *http.Request) (*http.Response, error) {
 			cancel()
+			<-r.Context().Done()
 			return nil, r.Context().Err()
-		}),
+		}).dial,
 	}
 	if _, err := s.Output(ctx, "job"); !errors.Is(err, context.Canceled) {
 		t.Fatalf("transport cancellation = %v", err)
@@ -206,17 +240,16 @@ func TestHostRoutesPreserveExplicitEmptyValues(t *testing.T) {
 }
 
 func TestHostRoutesEncodeNilCollectionsAsEmpty(t *testing.T) {
-	submit := fakeRoutes(t, "POST", "/node/v1/children", `{"pipeline":"weather-report","job":"stamp","args":{}}`, `{"run_id":"child"}`)
-	await := fakeRoutes(t, "GET", "/node/v1/children/child/await?job=stamp&wait_ms=60000", `null`, `{"status":"success","output":{}}`)
-	transport := submit.transport
+	transport := fakeTransport(t, "POST", "/node/v1/children", `{"pipeline":"weather-report","job":"stamp","args":{}}`, `{"run_id":"child"}`)
+	await := fakeTransport(t, "GET", "/node/v1/children/child/await?job=stamp&wait_ms=60000", `null`, `{"status":"success","output":{}}`)
 	calls := 0
-	submit.transport = routeTransport(func(r *http.Request) (*http.Response, error) {
+	submit := &routeServices{binding: fakeBinding, dial: routeTransport(func(r *http.Request) (*http.Response, error) {
 		calls++
 		if calls == 1 {
-			return transport.RoundTrip(r)
+			return transport(r)
 		}
-		return await.transport.RoundTrip(r)
-	})
+		return await(r)
+	}).dial}
 	request := ChildRequest{Pipeline: "weather-report", Job: "stamp"}
 	if _, err := submit.RunPipeline(t.Context(), request); err != nil || calls != 2 || request.Args != nil {
 		t.Fatalf("child request = %+v, calls = %d, error = %v", request, calls, err)
@@ -232,9 +265,9 @@ func TestMaskUsesAcknowledgedBoundRoute(t *testing.T) {
 	if err := s.Mask(t.Context(), "sensitive"); err != nil {
 		t.Fatal(err)
 	}
-	s.transport = routeTransport(func(*http.Request) (*http.Response, error) {
+	s.dial = routeTransport(func(*http.Request) (*http.Response, error) {
 		return &http.Response{StatusCode: http.StatusConflict, Body: io.NopCloser(strings.NewReader(`{"error":{"code":"secret_in_identifier","message":"identifier collision","details":{"field":"jobs[0].id"}}}`)), Header: http.Header{}}, nil
-	})
+	}).dial
 	if err := s.Mask(t.Context(), "sensitive"); err == nil || strings.Contains(err.Error(), "sensitive") {
 		t.Fatalf("mask refusal = %v", err)
 	}
@@ -256,9 +289,9 @@ func TestRecordsUseAcknowledgedBoundRoutes(t *testing.T) {
 			s := fakeRoutes(t, "POST", test.path, test.body, `{}`)
 			s.ctx = t.Context()
 			s.Emit(test.frame)
-			s.transport = routeTransport(func(*http.Request) (*http.Response, error) {
+			s.dial = routeTransport(func(*http.Request) (*http.Response, error) {
 				return &http.Response{StatusCode: http.StatusInternalServerError, Body: io.NopCloser(strings.NewReader(`{"error":{"code":"unavailable","message":"write failed"}}`)), Header: http.Header{}}, nil
-			})
+			}).dial
 			defer func() {
 				if recover() == nil {
 					t.Fatal("record write failure was ignored")

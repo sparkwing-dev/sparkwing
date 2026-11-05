@@ -97,7 +97,7 @@ func contractSymbols(t *testing.T, directory string) map[string]string {
 func TestCurrentContractSymbolInventories(t *testing.T) {
 	const root = "../../"
 	packages := map[string]map[string]string{}
-	for _, name := range []string{"settings", "nodehost", "store", "capability", "controllerwire", "runspec", "runstate", "engineid", "localhostwire", "routepolicy", "blob", "lease", "source", "engine", "nodeproto", "apierr", "controller", "protofd"} {
+	for _, name := range []string{"settings", "nodehost", "store", "capability", "controllerwire", "runspec", "runstate", "engineid", "localhostwire", "routepolicy", "blob", "lease", "source", "engine", "nodeproto", "apierr", "apierrhttp", "controller", "protofd"} {
 		packages[name] = contractSymbols(t, root+"internal/"+name)
 	}
 	packages["client"] = contractSymbols(t, root+"internal/controller/client")

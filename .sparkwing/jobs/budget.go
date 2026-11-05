@@ -10,7 +10,7 @@ import (
 )
 
 // perf: the three check classes and the wall time each promises. A tier that
-// outgrows its class fails on the budget instead of growing quietly until
+// outgrows its class warns on the budget instead of growing quietly until
 // somebody measures the hooks again.
 const (
 	preCommitBudget  = 3 * time.Second
@@ -19,12 +19,6 @@ const (
 )
 
 const budgetStepID = "budget"
-
-// perf: what one core formats inside the commit tier's three seconds, at the
-// 0.11 s a Go file costs in golangci-lint fmt. A wider change is accepted as
-// long rather than failed: these steps cost per file, so a fileset several
-// times a normal one costs several times its time with no tier having grown.
-const budgetWaiverFiles = 25
 
 type stepTiming struct {
 	id   string
@@ -48,15 +42,15 @@ func newTierBudget(tier string, limit time.Duration) *tierBudget {
 	return &tierBudget{tier: tier, limit: limit}
 }
 
-// safety: the scope is the tier's own, so the waiver counts the files the tier
+// safety: the scope is the tier's own, so the verdict counts the files the tier
 // judged rather than a second reading of the change.
 func (b *tierBudget) over(scopeOf scopeFunc) *tierBudget {
 	b.scopeOf = scopeOf
 	return b
 }
 
-// safety: a scope that cannot be read enforces the budget. A tier that stops
-// knowing how wide its change is must not stop keeping its promise.
+// safety: -1 says the tier could not size its change, which the verdict line
+// leaves out rather than reporting a count it does not have.
 func (b *tierBudget) changedGoFiles(ctx context.Context) (int, string) {
 	if b.scopeOf == nil {
 		return -1, ""
@@ -105,14 +99,17 @@ func (b *tierBudget) record(id string, started, finished time.Time, err error) {
 
 func (b *tierBudget) report(ctx context.Context) error {
 	b.mu.Lock()
-	tier, limit, took := b.tier, b.limit, b.last.Sub(b.first)
+	tier, limit, span := b.tier, b.limit, b.last.Sub(b.first)
 	steps, stepFail := b.steps, b.stepFail
 	b.mu.Unlock()
 
 	changed, scope := b.changedGoFiles(ctx)
-	line, err := budgetVerdict(tier, limit, took, steps, stepFail, changed)
+	line, overrun := budgetVerdict(tier, limit, span, steps, stepFail, changed)
 	if line != "" {
 		sparkwing.Info(ctx, "%s", line)
+	}
+	if overrun != "" {
+		sparkwing.Warn(ctx, "%s", overrun)
 	}
 	// safety: a tier whose scope is empty runs every step and passes every one
 	// of them without judging a line of Go. That verdict reads exactly like a
@@ -120,7 +117,7 @@ func (b *tierBudget) report(ctx context.Context) error {
 	if changed == 0 {
 		sparkwing.Warn(ctx, "%s", emptyScopeNotice(tier, scope))
 	}
-	return err
+	return nil
 }
 
 func emptyScopeNotice(tier, scope string) string {
@@ -129,12 +126,12 @@ func emptyScopeNotice(tier, scope string) string {
 		tier, scope)
 }
 
-// safety: a red tier reports the failed check, not the budget. Its steps were
-// cancelled part-way, so their durations measure the cancellation rather than
-// the work, and a budget verdict on them would name the wrong cause.
-func budgetVerdict(tier string, limit, took time.Duration, steps []stepTiming, stepFail bool, changed int) (string, error) {
+// safety: judges the slowest check's own run time, not the span, which also counts waits for a core or a step
+// slot (a 3.8 s span whose slowest check took 473 ms, on a loaded host). An overrun only warns: failing a green
+// tier on time sent authors to --no-verify, which skips every check. A red tier names its failed check instead.
+func budgetVerdict(tier string, limit, span time.Duration, steps []stepTiming, stepFail bool, changed int) (line, overrun string) {
 	if len(steps) == 0 {
-		return "", nil
+		return "", ""
 	}
 	slowest := steps[0]
 	for _, s := range steps[1:] {
@@ -142,19 +139,16 @@ func budgetVerdict(tier string, limit, took time.Duration, steps []stepTiming, s
 			slowest = s
 		}
 	}
-	line := fmt.Sprintf("%s ran %s of its %s budget; slowest step %q at %s",
-		tier, took.Round(time.Millisecond), limit, slowest.id, slowest.took.Round(time.Millisecond))
+	took := slowest.took.Round(time.Millisecond)
+	line = fmt.Sprintf("%s's slowest check %q ran %s of its %s budget; its %d checks spanned %s",
+		tier, slowest.id, took, limit, len(steps), span.Round(time.Millisecond))
 	if changed >= 0 {
 		line += fmt.Sprintf(" over %d Go file(s)", changed)
 	}
-	if stepFail || took <= limit {
-		return line, nil
+	if stepFail || slowest.took <= limit {
+		return line, ""
 	}
-	if changed > budgetWaiverFiles {
-		return line + fmt.Sprintf("; the budget is waived past %d Go files, because these steps cost per file",
-			budgetWaiverFiles), nil
-	}
-	return line, fmt.Errorf("%s ran %s, over the %s this check class promises. The slowest step is %q at %s: "+
-		"make it cheaper or move it to a slower class",
-		tier, took.Round(time.Millisecond), limit, slowest.id, slowest.took.Round(time.Millisecond))
+	return line, fmt.Sprintf("%s's slowest check %q ran %s, over the %s this check class promises: "+
+		"make it cheaper or move it to a slower class. Every check passed, so the tier passes",
+		tier, slowest.id, took, limit)
 }
