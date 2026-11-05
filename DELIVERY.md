@@ -29,7 +29,8 @@ skips. Without them the run fails as "pipeline discovery failed (details
 withheld)".
 
 The `preconditions` job refuses a dirty checkout, a detached HEAD, `main`
-itself and a branch whose merge with a freshly fetched `origin/main`
+itself, a CHANGELOG.md that repeats a `###` heading within a release, and a
+branch whose merge with a freshly fetched `origin/main`
 conflicts, and names the command that fixes each; a branch behind main that
 merges cleanly goes ahead. The gate (the same jobs as
 `sparkwing run gate`) and the review (the same job as `sparkwing run review`,
@@ -62,7 +63,12 @@ merges, gate run, review record path and result). The gate's `test` step summary
 
 When `origin/main` is not an ancestor of HEAD at push time, the `push` step
 merges it into the branch in the checkout (`git merge --no-ff`, the default
-git identity and signing; never a rebase), runs `go build` in every module
+git identity and signing; never a rebase). CHANGELOG.md merges with the union
+driver, so two branches that each open the same `###` heading under
+`[Unreleased]` merge into a repeated heading the changelog lint refuses; when
+the merge leaves one, the step runs `bash bin/check-changelog.sh --fix` and
+commits CHANGELOG.md and its mirror as a follow-up commit (never an amend). It
+then runs `go build` in every module
 and the affected-test selection over the files that differ between the gated
 tree and the merged tree, then pushes the merge. The review is not run again:
 it judged the branch's own diff, and the re-check covers what the merge
