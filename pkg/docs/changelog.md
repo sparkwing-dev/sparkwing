@@ -20,6 +20,10 @@ unlock.
 
 ## [Unreleased]
 
+### Fixed
+
+- **docs:** The `sparkwing login` reference page is listed in the docs sidebar, so the documentation site builds for this release.
+
 ## [v0.69.0] - 2026-11-05
 ### Added
 

@@ -102,6 +102,7 @@
         "cli-doctor",
         "cli-examples",
         "cli-info",
+        "cli-login",
         "cli-operator",
         "cli-overflow",
         "cli-pipeline",
