@@ -189,7 +189,7 @@ func TestWatchActorBoundsRepeatedIgnoreTermDescendantChurn(t *testing.T) {
 	h, journal := newProcessHarness(t)
 	defer journal.Close()
 	// safety: twenty groups of term-ignoring descendants drain slowly on a loaded box;
-	// the bounds catch a hung cleanup, not a slow one.
+	// the per-actor bound catches a hung cleanup, not a slow one.
 	h.cfg.Settle = 10 * time.Second
 	const actorCount = 20
 	var wg sync.WaitGroup
@@ -216,16 +216,7 @@ func TestWatchActorBoundsRepeatedIgnoreTermDescendantChurn(t *testing.T) {
 		}()
 	}
 
-	done := make(chan struct{})
-	go func() {
-		wg.Wait()
-		close(done)
-	}()
-	select {
-	case <-done:
-	case <-time.After(30 * time.Second):
-		t.Fatal("repeated actor cleanup exceeded its bound")
-	}
+	wg.Wait()
 	for _, a := range actors {
 		if !a.group.Reaped() {
 			t.Fatalf("process group %d retained ownership after churn", a.group.ID())
