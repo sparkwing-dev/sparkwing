@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/store"
+	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 )
 
 func newAdviceServer(t *testing.T) *Server {
@@ -60,8 +60,8 @@ func TestHandleClaimNode_NamesAPollIntervalWhileIdle(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status=%d want 204", rec.Code)
 	}
-	if got := rec.Header().Get(store.ClaimPollAfterHeader); got != "5" {
-		t.Errorf("%s=%q want \"5\"", store.ClaimPollAfterHeader, got)
+	if got := rec.Header().Get(controllerwire.ClaimPollAfterHeader); got != "5" {
+		t.Errorf("%s=%q want \"5\"", controllerwire.ClaimPollAfterHeader, got)
 	}
 }
 
@@ -71,7 +71,7 @@ func TestClaimPollAdvice_WorkArrivingClearsTheAdvice(t *testing.T) {
 
 	idle := httptest.NewRecorder()
 	srv.Handler().ServeHTTP(idle, claimNodeRequest())
-	if got := idle.Header().Get(store.ClaimPollAfterHeader); got == "" {
+	if got := idle.Header().Get(controllerwire.ClaimPollAfterHeader); got == "" {
 		t.Fatal("an idle controller suggested nothing; the ramp never started")
 	}
 
@@ -79,9 +79,9 @@ func TestClaimPollAdvice_WorkArrivingClearsTheAdvice(t *testing.T) {
 
 	fresh := httptest.NewRecorder()
 	srv.Handler().ServeHTTP(fresh, claimNodeRequest())
-	if got := fresh.Header().Get(store.ClaimPollAfterHeader); got != "" {
+	if got := fresh.Header().Get(controllerwire.ClaimPollAfterHeader); got != "" {
 		t.Errorf("%s=%q after work arrived; a filled queue must return the fleet to its own cadence",
-			store.ClaimPollAfterHeader, got)
+			controllerwire.ClaimPollAfterHeader, got)
 	}
 }
 
@@ -98,7 +98,7 @@ func TestHandleClaimTrigger_WithholdsAdviceRightAfterAnAward(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status=%d want 204", rec.Code)
 	}
-	if got := rec.Header().Get(store.ClaimPollAfterHeader); got != "" {
-		t.Errorf("%s=%q want no header", store.ClaimPollAfterHeader, got)
+	if got := rec.Header().Get(controllerwire.ClaimPollAfterHeader); got != "" {
+		t.Errorf("%s=%q want no header", controllerwire.ClaimPollAfterHeader, got)
 	}
 }

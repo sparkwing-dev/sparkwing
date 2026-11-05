@@ -66,7 +66,9 @@ func (c deployConfig) rollbackBudget() time.Duration { return 2*c.phaseWait() + 
 
 func (c deployConfig) buildBudget() time.Duration { return 45 * time.Minute }
 
-func (c deployConfig) stagingBudget() time.Duration { return 2*c.phaseWait() + 15*time.Minute }
+func (c deployConfig) stagingBudget() time.Duration {
+	return 2*c.phaseWait() + 15*time.Minute
+}
 
 func (c deployConfig) gateBudget() time.Duration { return 2*c.RunTimeout + 15*time.Minute }
 
@@ -222,20 +224,13 @@ func sweepStaleDeployDirs(root string, now time.Time, maxAge time.Duration) erro
 
 var fullCommitRE = regexp.MustCompile(`^[0-9a-f]{40}([0-9a-f]{24})?$`)
 
-// safety: GitOps values and image labels are data someone else wrote; a value
-// reaches git only as a full commit id or a semver tag, never as an option.
+// safety: rollback records are data someone else wrote; git accepts a
+// recorded commit only as a full commit id, never as an option.
 func gitRevision(rev string) (string, error) {
 	if !fullCommitRE.MatchString(rev) {
 		return "", fmt.Errorf("%q is not a full commit id", rev)
 	}
 	return rev, nil
-}
-
-func gitTag(tag string) (string, error) {
-	if !semver.IsValid(tag) || strings.HasPrefix(tag, "-") {
-		return "", fmt.Errorf("%q is not a semver tag", tag)
-	}
-	return tag, nil
 }
 
 // safety: the store records sha256 of the embedded schema.sql with CRLF folded
@@ -386,24 +381,25 @@ func dirtyLogLines(logs string) []string {
 	return out
 }
 
-// safety: an untagged commit's version sorts below the next patch release and,
-// through its commit time, after every earlier commit's; the image tags it
-// names are immutable, so one commit maps to one version.
-func deployVersion(newest, newestCommit, commit string, committed int64) (string, error) {
-	if newest != "" && newestCommit == commit {
-		return newest, nil
+// safety: git describe counts sort numerically after their release base, while
+// semver alone sorts them before it and compares counts lexically.
+func deployVersionOrder(version string) (string, error) {
+	if !semver.IsValid(version) {
+		return "", fmt.Errorf("%q is not a version this pipeline can order", version)
 	}
-	if newest == "" {
-		newest = "v0.0.0"
+	if !serviceBuildStamp.MatchString(version) {
+		return version, nil
 	}
-	next, err := bumpVersion(newest, "patch")
+	base, rest, _ := strings.Cut(version, "-")
+	count, _, _ := strings.Cut(rest, "-")
+	if count == "0" {
+		return base, nil
+	}
+	next, err := bumpVersion(base, "patch")
 	if err != nil {
 		return "", err
 	}
-	if len(commit) < 12 {
-		return "", fmt.Errorf("commit %q is not a full hash", commit)
-	}
-	return fmt.Sprintf("%s-main.%d.g%s", next, committed, commit[:12]), nil
+	return next + "-main." + count, nil
 }
 
 type renderedDoc struct {

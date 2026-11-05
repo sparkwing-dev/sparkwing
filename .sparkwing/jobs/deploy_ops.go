@@ -13,7 +13,6 @@ import (
 	"path/filepath"
 	"slices"
 	"sort"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -388,28 +387,12 @@ func (d *deployer) buildCandidate(ctx context.Context, version string) (deployIm
 		}
 		out.Commit = strings.TrimSpace(head)
 		if version == "" {
-			newest, err := latestSemverTagIn(ctx, d.repoDir)
-			if err != nil {
+			if out.Version, err = resolveServiceBuild(ctx, d.sourceGit); err != nil {
 				return err
 			}
-			newestCommit := ""
-			if newest != "" {
-				c, err := d.sourceGit(ctx, "rev-list", "-n", "1", "--end-of-options", newest)
-				if err == nil {
-					newestCommit = strings.TrimSpace(c)
-				}
-			}
-			stamp, err := d.sourceGit(ctx, "show", "-s", "--format=%ct", "HEAD")
-			if err != nil {
-				return err
-			}
-			committed, err := strconv.ParseInt(strings.TrimSpace(stamp), 10, 64)
-			if err != nil {
-				return err
-			}
-			if out.Version, err = deployVersion(newest, newestCommit, out.Commit, committed); err != nil {
-				return err
-			}
+		}
+		if !serviceBuildStamp.MatchString(out.Version) && (!semver.IsValid(out.Version) || semver.Prerelease(out.Version) != "") {
+			return fmt.Errorf("deploy version %q must be a release or service build stamp vX.Y.Z-N-gSHA", out.Version)
 		}
 		out.Controller.Tag, out.Runner.Tag = out.Version, out.Version
 		schema, err := os.ReadFile(filepath.Join(d.repoDir, deployStoreSchema))
@@ -463,7 +446,7 @@ func (d *deployer) buildCandidate(ctx context.Context, version string) (deployIm
 		if err := os.RemoveAll(dist); err != nil {
 			return err
 		}
-		_, err := d.cmd(ctx, deployCommand{Dir: d.repoDir, Name: "bash", Args: []string{"bin/build-web.sh"}})
+		_, err := d.cmd(ctx, deployCommand{Dir: d.repoDir, Name: "bash", Args: []string{"bin/build-web.sh", "--reuse"}})
 		return err
 	}); err != nil {
 		return out, err
@@ -597,11 +580,6 @@ func (d *deployer) deployEnvironment(ctx context.Context, env deployEnv, images 
 		d.tools.say(ctx, env.Name+" already runs controller "+images.Controller.Digest+" and runner "+images.Runner.Digest)
 		return rec, nil
 	}
-	if err := d.act(ctx, "check that "+env.Name+"'s store baseline equals the candidate's "+images.SchemaDigest, func() error {
-		return d.checkStoreBaseline(ctx, env, rec.Previous.Controller, images.SchemaDigest)
-	}); err != nil {
-		return rec, err
-	}
 	if env.Name == d.cfg.Production.Name {
 		if err := d.act(ctx, "check that "+images.Version+" is not older than the production version", func() error {
 			return d.requireNotOlder(env, rec.Previous, images)
@@ -627,60 +605,25 @@ func (d *deployer) deployEnvironment(ctx context.Context, env deployEnv, images 
 	return rec, nil
 }
 
-func (d *deployer) checkStoreBaseline(ctx context.Context, env deployEnv, deployed imagePin, candidate string) error {
-	rev, err := d.tools.registry.revision(ctx, d.ecrPass, deployed.Repository+"@"+deployed.Digest)
-	if err != nil {
-		return err
-	}
-	if rev == "" {
-		tag, terr := gitTag(deployed.Tag)
-		if terr != nil {
-			return d.firstDeployError(env, deployed, "it carries no org.opencontainers.image.revision label and its tag is not a release tag")
-		}
-		out, err := d.sourceGit(ctx, "rev-list", "-n", "1", "--end-of-options", "refs/tags/"+tag)
-		if err != nil {
-			if _, ferr := d.sourceGit(ctx, "fetch", "--quiet", "--end-of-options", "origin", "refs/tags/"+tag+":refs/tags/"+tag); ferr != nil {
-				return d.firstDeployError(env, deployed, "it carries no revision label and tag "+tag+" is not in origin")
-			}
-			if out, err = d.sourceGit(ctx, "rev-list", "-n", "1", "--end-of-options", "refs/tags/"+tag); err != nil {
-				return err
-			}
-		}
-		rev = strings.TrimSpace(out)
-	}
-	if rev, err = gitRevision(rev); err != nil {
-		return fmt.Errorf("%s names its source as %w", deployed.ref(), err)
-	}
-	spec := rev + ":" + deployStoreSchema
-	schema, err := d.sourceGit(ctx, "show", "--end-of-options", spec)
-	if err != nil {
-		if _, ferr := d.sourceGit(ctx, "fetch", "--quiet", "--end-of-options", "origin", rev); ferr != nil {
-			return fmt.Errorf("read %s: %w", spec, err)
-		}
-		if schema, err = d.sourceGit(ctx, "show", "--end-of-options", spec); err != nil {
-			return err
-		}
-	}
-	if got := schemaBaselineDigestOf(schema); got != candidate {
-		return fmt.Errorf("%s runs store baseline %s (from %s) and the candidate needs %s; a store change takes the full gate and the store runbook, not this pipeline", env.Name, got, rev, candidate)
-	}
-	return nil
-}
-
 func (d *deployer) requireNotOlder(env deployEnv, previous valuesPins, images deployImages) error {
 	for _, pin := range []imagePin{previous.Controller, previous.Launcher} {
-		if !semver.IsValid(pin.Tag) {
-			return d.firstDeployError(env, pin, "its tag is not a version this pipeline can order")
+		previous, err := deployVersionOrder(pin.Tag)
+		if err != nil {
+			return d.firstDeployError(env, pin, err.Error())
 		}
-		if semver.Compare(images.Version, pin.Tag) < 0 {
+		candidate, err := deployVersionOrder(images.Version)
+		if err != nil {
+			return err
+		}
+		if semver.Compare(candidate, previous) < 0 {
 			return fmt.Errorf("%s runs %s, newer than the candidate %s; this pipeline never moves an environment back, so roll back by reverting the GitOps commit", env.Name, pin.Tag, images.Version)
 		}
 	}
 	return nil
 }
 
-// safety: an image this pipeline cannot trace to a commit hides the store
-// baseline it runs, so the first deploy over it is done by hand once.
+// safety: an image without an ordered version needs a manual first deploy
+// because the production downgrade guard cannot compare it with the candidate.
 func (d *deployer) firstDeployError(env deployEnv, deployed imagePin, why string) error {
 	return fmt.Errorf("%s runs %s, and %s. Deploy once by hand: confirm the live store with "+
 		"`SELECT version, baseline_digest FROM sparkwing_schema_version` matches this candidate's baseline, pin controller.image.tag and "+
@@ -980,9 +923,6 @@ func (d *deployer) stagingGate(ctx context.Context, images deployImages) (stagin
 	if err := d.triggerRun(ctx, profile, "example", d.repoDir, images.Commit, &rec.ExampleRun); err != nil {
 		return rec, err
 	}
-	if err := d.followRun(ctx, profile, &rec.ExampleRun); err != nil {
-		return rec, err
-	}
 	reference := filepath.Join(d.tmp, "reference")
 	if err := d.act(ctx, "clone the reference repository "+d.cfg.ReferenceURL, func() error {
 		env, err := d.gitEnv(ctx, d.cfg.Params.ReferenceKey, "reference-key")
@@ -997,7 +937,7 @@ func (d *deployer) stagingGate(ctx context.Context, images deployImages) (stagin
 	if err := d.triggerRun(ctx, profile, d.cfg.ReferenceName, reference, "", &rec.ReferenceRun); err != nil {
 		return rec, err
 	}
-	return rec, d.followRun(ctx, profile, &rec.ReferenceRun)
+	return rec, errors.Join(d.followRun(ctx, profile, &rec.ExampleRun), d.followRun(ctx, profile, &rec.ReferenceRun))
 }
 
 // safety: nodes outlive a run only briefly, so NodeClaims are sampled while

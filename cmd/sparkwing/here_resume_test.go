@@ -13,6 +13,7 @@ import (
 	"strings"
 	"testing"
 	"testing/quick"
+	"testing/synctest"
 	"time"
 	"unicode/utf8"
 
@@ -660,6 +661,40 @@ func FuzzHereHostRequiresExecutionAward(f *testing.F) {
 		award.Binding.RunID += "-foreign"
 		if _, err := hereRunInput(award.RunID, award); err == nil {
 			t.Fatal("foreign execution fence accepted")
+		}
+	})
+}
+
+func TestHereResumeWaitsForRateLimitedClaim(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		award := hereAward(t)
+		store := hereCredentials{dir: t.TempDir()}
+		if err := store.save("https://controller.example", award.RunID, "retained-private-bearer"); err != nil {
+			t.Fatal(err)
+		}
+		start, calls := time.Now(), 0
+		deps := hereDependencies{
+			credentials: func() (hereCredentials, error) { return store, nil }, version: "v1.2.3",
+			resolve: func(context.Context, client.EngineOptions) (hereRuntime, error) {
+				return hereRuntime{controller: hereTestController{claim: func(context.Context, controllerwire.ClaimRequest) (controllerwire.ClaimResponse, error) {
+					calls++
+					if calls <= 2 {
+						return controllerwire.ClaimResponse{}, &apierr.Error{Code: apierr.RateLimited, Details: map[string]any{"retry_after_ms": 2000}}
+					}
+					if elapsed := time.Since(start); elapsed != 4*time.Second {
+						t.Errorf("claim after %s, want 4s", elapsed)
+					}
+					return controllerwire.ClaimResponse{Claim: &award}, nil
+				}}, bind: func(context.Context, client.EngineOptions, controllerwire.ClaimedUnit) (hereHostSession, error) {
+					return hereHostSession{close: func() error { return nil }, host: hereTestHost(func(context.Context, nodehost.RunInput) (nodehost.RunCompletion, error) {
+						return nodehost.RunCompletion{Outcome: "success"}, nil
+					})}, nil
+				}}, nil
+			},
+		}
+		result, err := resumeHereRun(t.Context(), client.EngineOptions{URL: "https://controller.example"}, award.RunID, deps)
+		if err != nil || result.Outcome != "success" || calls != 3 {
+			t.Fatalf("result=%+v claims=%d error=%v", result, calls, err)
 		}
 	})
 }

@@ -52,6 +52,7 @@ var errBuildMismatch = errors.New("wingd/client: daemon build differs from this 
 func buildMismatch(selfVersion string, ack wingwire.HelloAck) error {
 	self := strings.TrimSpace(selfVersion)
 	daemon := strings.TrimSpace(ack.BinaryVersion)
+	// safety: older same-major daemons may ignore NonBlocking and queue helper work that must start immediately.
 	if ack.BuildIdentity == wingwire.BuildIdentity {
 		return nil
 	}
@@ -61,13 +62,8 @@ func buildMismatch(selfVersion string, ack wingwire.HelloAck) error {
 	if daemon == "" {
 		daemon = "(unknown)"
 	}
-	return fmt.Errorf("%w: this build is %s and the daemon is %s; the same protocol major does not prove same-build compatibility. Restart the daemon with this build or use a separate SPARKWING_HOME",
+	return fmt.Errorf("%w: this build is %s and the daemon is %s; the same protocol major does not prove same-build compatibility. When no runs are active, run `sparkwing daemon restart --force` with this build or use a separate SPARKWING_HOME",
 		errBuildMismatch, self, daemon)
-}
-
-func sameVersionBuildReplacement(selfVersion string, ack wingwire.HelloAck) bool {
-	return ack.BuildIdentity != wingwire.BuildIdentity &&
-		strings.TrimSpace(selfVersion) == strings.TrimSpace(ack.BinaryVersion)
 }
 
 const firstHostingRelease = "v0.27.0"
@@ -94,7 +90,7 @@ func daemonTooOld(selfVersion string, ack wingwire.HelloAck) error {
 	}
 	return fmt.Errorf(
 		"%w: daemon speaks protocol %d (sparkwing %s), this pipeline binary speaks protocol %d (sparkwing %s). "+
-			"Install sparkwing %s or newer on this host, then run `sparkwing daemon restart`",
+			"Install sparkwing %s or newer on this host with `sparkwing update`, then run `sparkwing daemon restart --force` when no runs are active",
 		errDaemonTooOld, ack.ProtocolMajor, daemon, wingd.ProtocolMajor, self, minHostingRelease())
 }
 
@@ -243,23 +239,7 @@ func daemonStartupBudget(opts Options) time.Duration {
 	return time.Duration(dialsPerSpawn) * opts.backoff()
 }
 
-var errTakeoverExhausted = errors.New("wingd/client: daemon replacement did not resolve the version conflict")
-
 var errDaemonDraining = errors.New("wingd/client: daemon is draining")
-
-func takeoverExhausted(selfVersion string, ack wingwire.HelloAck) error {
-	self := selfVersion
-	if self == "" {
-		self = "(unknown)"
-	}
-	daemon := ack.BinaryVersion
-	if daemon == "" {
-		daemon = "(unknown)"
-	}
-	return fmt.Errorf("%w: after one replacement attempt the daemon still reports %s (protocol %d) while this binary is %s (protocol %d). "+
-		"Stop competing Sparkwing installations and run `sparkwing daemon restart`, or set SPARKWING_HOME to use a separate daemon",
-		errTakeoverExhausted, daemon, ack.ProtocolMajor, self, wingd.ProtocolMajor)
-}
 
 func spawnFailed(home, sock string, serr, dialErr error) error {
 	if u := unreachable(sock, dialErr); u != nil {
@@ -327,7 +307,6 @@ func (cl *Client) connect(ctx context.Context) error {
 func (cl *Client) connectPaced(ctx context.Context, dialMax time.Duration) error {
 	opts := cl.opts
 	spawns := 0
-	replacementAttempted := false
 	drainWait := newRetry("wait for draining daemon", 0)
 	dialWait := newRetryCapped("wait for daemon socket", 0, dialMax)
 	electionWait := newRetryCapped("wait for predecessor daemon", 0, max(dialMax, electionPaceMax))
@@ -444,52 +423,11 @@ func (cl *Client) connectPaced(ctx context.Context, dialMax time.Duration) error
 			return errors.Join(err, cl.Close())
 		}
 
-		if replacementAttempted && ack.Draining && ack.ProtocolMajor <= wingd.ProtocolMajor {
-			if err := cl.Close(); err != nil {
-				return err
-			}
-			if err := drainWait.wait(ctx, errDaemonDraining); err != nil {
-				return err
-			}
-			continue
-		}
-
 		if ack.ProtocolMajor != wingd.ProtocolMajor {
 			if wingd.ProtocolMajor > ack.ProtocolMajor {
-				if opts.NoTakeover {
-					cl.Close()
-					return daemonTooOld(opts.Version, ack)
-				}
-				cl.ack = ack
-				if replacementAttempted {
-					cl.Close()
-					return takeoverExhausted(opts.Version, ack)
-				}
-				replacementAttempted = true
-				if terr := cl.takeover(ctx, opts); terr != nil {
-					return terr
-				}
-				spawns++
-				socketDeadline = time.Now().Add(daemonStartupBudget(opts))
-				continue
+				return errors.Join(daemonTooOld(opts.Version, ack), cl.Close())
 			}
-			cl.Close()
-			return protocolTooOld(opts.Version, ack)
-		}
-		if !opts.NoTakeover && !servedDownLevel(ack) &&
-			(supersedes(opts.Version, ack.BinaryVersion) || sameVersionBuildReplacement(opts.Version, ack)) {
-			cl.ack = ack
-			if replacementAttempted {
-				_ = cl.Close()
-				return takeoverExhausted(opts.Version, ack)
-			}
-			replacementAttempted = true
-			if terr := cl.takeover(ctx, opts); terr != nil {
-				return terr
-			}
-			spawns++
-			socketDeadline = time.Now().Add(daemonStartupBudget(opts))
-			continue
+			return errors.Join(protocolTooOld(opts.Version, ack), cl.Close())
 		}
 		if !servedDownLevel(ack) {
 			if err := buildMismatch(opts.Version, ack); err != nil {
@@ -568,26 +506,6 @@ func (cl *Client) recoverAdmissionConn(ctx context.Context) error {
 		return ctx.Err()
 	}
 	return cl.reconnect(ctx, defaultReattachTimeout)
-}
-
-func (cl *Client) takeover(ctx context.Context, opts Options) error {
-	opts.logf("taking over daemon %s with %s", cl.ack.BinaryVersion, opts.Version)
-	_ = cl.writeWithin(&wingwire.DrainRequest{SuccessorVersion: opts.Version}, opts.dialTimeout())
-	if nc := cl.conn(); nc != nil {
-		_ = nc.SetReadDeadline(time.Now().Add(opts.dialTimeout()))
-	}
-	_, _ = cl.dec.read()
-	if err := cl.Close(); err != nil && !errors.Is(err, net.ErrClosed) {
-		return err
-	}
-	if err := waitLockFree(ctx, opts.Home); err != nil {
-		return err
-	}
-	if err := opts.spawn(opts.Home, opts.Version); err != nil {
-		return fmt.Errorf("wingd/client: start replacement daemon: %w", err)
-	}
-	_ = sleep(ctx, opts.backoff())
-	return nil
 }
 
 func (cl *Client) handshake(version string) (wingwire.HelloAck, error) {

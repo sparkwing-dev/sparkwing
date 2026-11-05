@@ -52,7 +52,10 @@ Maximum session duration: 3600 seconds. The OIDC provider `arn:aws:iam::63328090
 }
 ```
 
-The role cannot delete images, change tags in place (the repositories keep immutable tags), read other parameters, or touch the database, Route 53 or IAM.
+The policy above cannot delete images, change tags in place (the repositories keep immutable
+tags), read other parameters, or touch the database, Route 53 or IAM.
+
+The deploy role gets no RDS permission. Recovery uses RDS point-in-time recovery.
 
 ## Cluster access
 
@@ -83,7 +86,7 @@ These are long-lived secrets. They never sit on a runner's disk past the job (th
 A retry of an old push run reuses that run's outputs and mints the same `trigger:push` subject, so the trust policy alone would let it promote older digests. The pipeline refuses this in two places:
 
 - Every deploy job (`staging-deploy`, `production`) runs `git ls-remote origin refs/heads/main` before changing anything and stops unless the candidate commit is main's tip.
-- `production` refuses a candidate version below the version production runs. Untagged commits build as `vX.Y.(Z+1)-main.<commit time>.g<commit>`, so versions between releases order by commit time.
+- `production` refuses a candidate version below the version production runs. Untagged commits build as `vX.Y.Z-N-gSHA` from `git describe --tags --long`. The version check orders a service stamp after its base release and compares commit counts numerically.
 
 ## Pipeline flags and the trust policy
 
@@ -95,15 +98,17 @@ Only a push to main can assume the role, and a push-started run carries no comma
 
 The lookup reads only `deploy` runs of the reading run's own repository, because a reference to a pipeline's own last run is scoped to the reader's repository. A `deploy` pipeline in another repository of the same team cannot publish a record the production job reads.
 
-## First deploy over an untraced image
+## First deploy over an unversioned image
 
-The store baseline check traces the running controller image to a commit: through its `org.opencontainers.image.revision` label, else through a release tag equal to its image tag. An image with neither, such as production's hand-built `commit-9fe8aca9f`, stops the pipeline with this remedy, done once by hand:
+The production downgrade guard requires image tags it can order as release versions or service
+build stamps. A hand-built tag such as `commit-9fe8aca9f` stops the pipeline with this remedy,
+done once by hand:
 
 1. Confirm the live store matches the candidate: `SELECT version, baseline_digest FROM sparkwing_schema_version` must show the baseline the `build-images` summary prints.
 2. Pin `controller.image.tag`, `sparkwing-runner-bundle.launcher.image.tag`, `jobImage.tag` and `jobImage.digest` in `<env dir>/helm-values.yaml` to images this pipeline built (they carry the label).
 3. Render without the cluster-scoped documents, which kikd-infra applies: `helm template <release> charts/sparkwing-full --namespace <namespace> -f <env dir>/helm-values.yaml | yq 'select(.metadata.namespace != null)' > <env dir>/rendered.yaml`, then commit and push. Committing the raw render would make Argo refuse the sync, because the `sparkwing` project permits no cluster-scoped kinds.
 
-Later deploys then trace the image and run unattended.
+Later deploys then compare image versions and run unattended.
 
 ## What a person does
 
@@ -111,7 +116,7 @@ Later deploys then trace the image and run unattended.
 2. Allow deploy keys in the `sparkwing-dev` organisation (it refuses them today), then create the write key on `sparkwing-gitops` and the read-only key on `sparkwing-ci-smoke` and store their private halves; mint the three team tokens and store them.
 3. Install the GitHub App so repository-scoped runs exist in production: the production team's installation must cover `sparkwing-dev/sparkwing` (the push that starts a deploy) and the WSL workstation and Mac must be enrolled as repository-scoped runners for it (decision 82). The staging `stg-qa` team and the production `qa-team` and `qa-team-b` installations must also cover `sparkwing-dev/sparkwing`, because the gate and the smoke trigger `example` and `deploy-smoke` at the candidate commit, and staging's must cover `sparkwing-ci-smoke`.
 4. Run `sparkwing run deploy -- --dry-run --stop-after staging` from a checkout and read the printed actions.
-5. Add `on: push` for `main` to the `deploy` entry in `.sparkwing/sparkwing.yaml` together with `args: {stop-after: staging}`. Watch one push deploy and gate staging, then remove the `args` line so the next push promotes to production.
+5. The `deploy` entry declares `on: push` for `main` with `args: {stop-after: staging}`. Watch the push deploy and gate staging. Remove the `args` line after that pass so the next push promotes to production.
 
 ## Decisions for Korey
 
@@ -119,7 +124,7 @@ Later deploys then trace the image and run unattended.
 2. **Run-now of main.** `trigger:push` refuses a console or CLI "run now" of `main` (`trigger:manual` with `ref:refs/heads/main`). Push-only does not keep members with `runs.write` away from the role: they can retry any push run, and a retry keeps `trigger:push`. What keeps a retry from deploying old code is the pipeline's main-tip and version checks above. A second subject for run-now would let a member deploy main's tip without a push, which those checks already allow through a retry. Recommendation: push only; a redeploy is an empty commit.
 3. **Long-lived tokens in SSM.** The staging and QA team tokens could instead come from the controllers trusting this OIDC issuer, which is new server-side work. Recommendation: SSM tokens with expiry until that exists.
 4. **Bot commit identity.** GitOps commits are authored as `Sparkwing deploy <deploy@sparkwing.dev>` with the host's git config ignored, so a deploy behaves the same on either machine or on Cloud and never needs a signing agent.
-5. **Candidate version.** A commit with no release tag builds as the next patch version plus `-main.<commit time>.g<12-char commit>`, for example `v0.68.4-main.1762095600.gbd3c2dd363c5`, so main builds order by commit time below the next release. Registry tags are immutable, so one commit maps to one image pair, and a rerun reuses it.
+5. **Candidate version.** Superseded by Korey's 2026-11-05 main-deploy decision: use the hosted service stamp `vX.Y.Z-N-gSHA`, for example `v0.68.6-12-gbd3c2dd363c5`. Stable release tags supply the base. HEAD needs no release tag, and the deploy does not invoke the GitHub release workflow. Registry tags are immutable, and a rerun reuses the same image pair after checking its revision labels.
 
 ## Runner isolation (accepted)
 

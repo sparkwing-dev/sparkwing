@@ -14,77 +14,12 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
 )
 
-func TestSupersedes(t *testing.T) {
-	tests := []struct {
-		client, daemon string
-		want           bool
-	}{
-		{"v2.0.0", "v1.0.0", true},
-		{"v1.2.0", "v1.1.9", true},
-		{"v1.0.0", "v1.0.0", false},
-		{"v1.0.0", "v2.0.0", false},
-		{"2.0.0", "1.0.0", true},
-		{"", "v1.0.0", false},
-		{"v1.0.0", "", false},
-		{"garbage", "v1.0.0", false},
-		{"(devel)", "v1.0.0", false},
-		{"(devel)", "(devel)", false},
-		{"(devel)", "", false},
-		{"(unknown)", "v1.0.0", false},
-		{"v1.0.0+dirty", "v1.0.0", false},
-		{"v1.0.0+dirty", "v1.0.0+dirty", false},
-		{"v0.9.0+dirty", "v1.0.0", false},
-		{"v1.0.0", "(devel)", false},
-		{"v1.0.0", "v1.0.0+dirty", false},
-		{"v1.1.0", "v1.0.0+dirty", false},
-		{"v0.22.2", "v0.22.2-dev+e99c1800", false},
-		{"v0.22.2-dev+e99c1800", "v0.22.2", true},
-		{"v0.22.2-dev+e99c1800", "v0.22.1", true},
-		{"v0.22.2-dev+e99c1800", "v0.22.3", false},
-		{"v0.22.3", "v0.22.2-dev+e99c1800", true},
-		{"v0.22.2-dev+e99c1800", "v0.22.2-0.20260801181107-3e089db19798", true},
-		{"v0.22.2-0.20260801181107-3e089db19798", "v0.22.2-dev+e99c1800", false},
-		{"v0.22.2-dev+nothex", "v0.22.2", false},
-		{"v0.22.3-dev+22222222", "v0.22.2-dev+11111111", true},
-		{"v0.23.0", "v0.22.1-0.20260724005950-041d1c11f150+dirty", false},
-		{"(devel)", "v1.0.0+dirty", false},
-		{"v1.0.0+dirty", "(devel)", false},
-		{"v0.23.0+dirty", "v0.22.0+dirty", true},
-		{"v0.22.0+dirty", "v0.23.0+dirty", false},
-		{"v0.22.1-0.20260724005950-041d1c11f150+dirty", "v0.22.1-0.20260723005950-041d1c11f150+dirty", true},
-	}
-	for _, tt := range tests {
-		if got := supersedes(tt.client, tt.daemon); got != tt.want {
-			t.Errorf("supersedes(%q,%q)=%v, want %v", tt.client, tt.daemon, got, tt.want)
-		}
-	}
-}
-
 func TestRecoveryBudgetsCoverFailureCeilingsAndRetryPacing(t *testing.T) {
 	if defaultReattachTimeout < 2*5*time.Minute+15*time.Second+30*time.Second+30*time.Second {
 		t.Fatalf("reattach timeout %s does not cover two stalled children and replacement backoff", defaultReattachTimeout)
 	}
 	if wingd.DefaultGraceWindow < 3*retryMaxDelay {
 		t.Fatalf("daemon grace %s does not cover reconnect pacing %s", wingd.DefaultGraceWindow, retryMaxDelay)
-	}
-}
-
-func TestSupersedes_NeverMutual(t *testing.T) {
-	versions := []string{
-		"", "(devel)", "(unknown)", "garbage",
-		"v1.0.0", "v1.1.0", "v2.0.0",
-		"v0.22.0", "v0.23.0",
-		"v1.0.0+dirty", "v0.22.0+dirty",
-		"v0.22.2-dev+e99c1800", "v0.22.3-dev+22222222",
-		"v0.22.1-0.20260724005950-041d1c11f150+dirty",
-		"v0.22.1-0.20260724005950-041d1c11f150",
-	}
-	for _, a := range versions {
-		for _, b := range versions {
-			if supersedes(a, b) && supersedes(b, a) {
-				t.Errorf("%q and %q supersede each other; a live pair of these builds would drain each other's daemon forever", a, b)
-			}
-		}
 	}
 }
 

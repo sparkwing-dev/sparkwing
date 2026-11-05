@@ -75,8 +75,7 @@ func (l *processLifecycle) ensure(ctx context.Context, opts wingd.LocalStartOpti
 		return l.LocalLifecycle.EnsureStarted(ctx, opts)
 	}
 	status, err := l.control.owner.Status(ctx)
-	if errors.Is(err, ErrNoDaemon) || errors.Is(err, errDaemonTooOld) || errors.Is(err, errDaemonLacksOperation) ||
-		(err == nil && (!status.Running || supersedes(opts.Version, status.Version))) {
+	if errors.Is(err, ErrNoDaemon) || (err == nil && !status.Running) {
 		status, err = l.start(ctx, opts)
 	}
 	if err != nil {

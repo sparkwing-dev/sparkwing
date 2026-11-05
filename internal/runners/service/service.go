@@ -36,6 +36,7 @@ type Host struct {
 	// StateHome is the resolved Sparkwing home; the service runs with it as
 	// SPARKWING_HOME so it uses the state the installer chose.
 	StateHome string
+	Path      string
 	UID       int
 	Exec      func(context.Context, string, ...string) (string, error)
 }
@@ -293,6 +294,9 @@ func serviceUnit(h Host) string {
 	if h.StateHome != "" {
 		fmt.Fprintf(&b, "Environment=%s\n", unitfile.Assignment("SPARKWING_HOME", h.StateHome))
 	}
+	if h.Path != "" {
+		fmt.Fprintf(&b, "Environment=%s\n", unitfile.Assignment("PATH", h.Path))
+	}
 	b.WriteString("Restart=on-failure\nRestartSec=10\n")
 	b.WriteString("StandardOutput=journal\nStandardError=journal\n")
 	b.WriteString("KillMode=mixed\nKillSignal=SIGTERM\nTimeoutStopSec=30\n\n")
@@ -316,8 +320,11 @@ func agentPlist(h Host) string {
 	if h.StateHome != "" {
 		fmt.Fprintf(&b, "    <key>SPARKWING_HOME</key>\n    <string>%s</string>\n", unitfile.XMLText(h.StateHome))
 	}
-	// safety: a launchd job inherits almost nothing, so the jobs' docker and git come from here.
-	b.WriteString("    <key>PATH</key>\n    <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>\n")
+	path := h.Path
+	if path == "" {
+		path = "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin"
+	}
+	fmt.Fprintf(&b, "    <key>PATH</key>\n    <string>%s</string>\n", unitfile.XMLText(path))
 	b.WriteString("  </dict>\n\n")
 	b.WriteString("  <key>RunAtLoad</key>\n  <true/>\n")
 	b.WriteString("  <key>KeepAlive</key>\n  <dict>\n")

@@ -190,3 +190,22 @@ func TestIdentityLinkBudgetRefusalNamesLimitUsageAndSupport(t *testing.T) {
 		}
 	}
 }
+
+func TestIdlePollBudgetSeparatesPersonalAndHereClaimants(t *testing.T) {
+	s := New(nil, nil).WithIdleClaimPollEnforced(true)
+	s.recordQueueActivity(time.Now().Add(-testIdleWindow))
+	for _, c := range []capability.Capability{
+		{Team: "team", Subject: capability.Subject{Kind: capability.SubjectMachine, ID: "moonborn"}},
+		{Team: "team", Subject: capability.Subject{Kind: capability.SubjectMachine, ID: "desktop"}},
+		{Team: "team", Purpose: capability.PurposeHere, Binding: capability.Binding{RunID: "here-run"}},
+	} {
+		a := capability.Authorized{Principal: capability.Principal{Capability: c}}
+		r := httptest.NewRequest(http.MethodPost, "/api/v1/runners/claim", nil)
+		if _, ok := s.admitRunnerRequest(httptest.NewRecorder(), r, a, budgetClassClaim); !ok {
+			t.Fatalf("another claimant spent the first poll for %+v", c.Subject)
+		}
+		if _, ok := s.admitRunnerRequest(httptest.NewRecorder(), r, a, budgetClassClaim); ok {
+			t.Fatal("early repeated poll admitted")
+		}
+	}
+}

@@ -107,6 +107,15 @@ func (s *Server) runnerBudgetKey(w http.ResponseWriter, r *http.Request, a capab
 		supplied = identity != ""
 	}
 	if identity == "" {
+		c := a.Principal.Capability
+		switch {
+		case c.Purpose == capability.PurposeHere:
+			identity = "here:" + c.Binding.RunID
+		case c.Subject.Kind == capability.SubjectMachine:
+			identity = "machine:" + c.Subject.ID
+		}
+	}
+	if identity == "" {
 		identity = "unnamed"
 	}
 	if supplied && !s.requestBudget.admitName(principal, identity, time.Now()) {

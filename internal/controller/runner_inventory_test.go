@@ -365,3 +365,20 @@ func TestProfileIdentityProbeAcceptsDeploymentAndTeamCredentials(t *testing.T) {
 	}
 	engineClaimHTTP(t, h, deployment, "GET", "/api/v1/runs", "", 403)
 }
+
+func TestRunnerInventoryRecordsConcurrencyFromClaimHTTP(t *testing.T) {
+	e, h, raw := engineClaimHTTPFixture(t, []capability.Grant{capability.NodesClaim})
+	withLimit := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		r.Header.Set(controllerwire.RunnerMaxConcurrentHeader, "2")
+		h.ServeHTTP(w, r)
+	})
+	engineClaimHTTP(t, withLimit, raw, "POST", "/api/v1/runners/claim", `{"runner_version":"v1.2.3","kinds":["node"]}`, 200)
+	tenant, err := e.Store.ForTeam(t.Context(), "a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	snapshot, err := tenant.ReadRunners(t.Context())
+	if err != nil || len(snapshot.Runners) != 2 || snapshot.Runners[0].Runner.Name != "root" || snapshot.Runners[0].MaxConcurrent != 2 {
+		t.Fatalf("claim lost configured concurrency: %+v %v", snapshot, err)
+	}
+}

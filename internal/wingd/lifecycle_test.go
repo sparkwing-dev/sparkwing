@@ -251,132 +251,44 @@ func TestReattach_RejectedAfterGrace(t *testing.T) {
 	}
 }
 
-func TestVersionTakeover_DrainsOldAndReattaches(t *testing.T) {
-	home := shortHome(t)
-	td1 := startDaemon(t, wingd.Config{Home: home, Version: "v1.0.0"})
+func TestVersionSkewPreservesDaemonAndActiveLease(t *testing.T) {
+	for _, versions := range []struct{ daemon, client string }{
+		{"v1.0.0", "v2.0.0"},
+		{"v2.0.0", "v1.0.0"},
+		{"v0.22.2", "v0.22.2-dev+1b9e5cd9"},
+		{"v1.0.0", "(devel)"},
+		{"v1.0.0+dirty", "v1.1.0"},
+		{"v0.22.2-dev+e99c1800", "v0.22.2"},
+	} {
+		t.Run(versions.daemon+"/"+versions.client, func(t *testing.T) {
+			home := shortHome(t)
+			clock := &stepClock{now: time.Unix(1_700_000_000, 0)}
+			td := startDaemon(t, wingd.Config{Home: home, Version: versions.daemon, Now: clock.Now})
+			holder := ensure(t, home, versions.daemon)
+			lease := mustAcquire(t, holder, coreReq("active", 1))
+			other := ensure(t, home, versions.client)
+			if other.DaemonVersion() != versions.daemon {
+				t.Fatalf("daemon version changed to %q", other.DaemonVersion())
+			}
+			clock.advance(time.Second)
+			state, err := other.QueueState(t.Context())
+			if err != nil || !holdsRun(state, lease.RunID) {
+				t.Fatalf("active lease changed: state=%+v error=%v", state, err)
+			}
+			state, err = holder.QueueState(t.Context())
+			if err != nil || !holdsRun(state, lease.RunID) {
+				t.Fatalf("original holder lost its lease: state=%+v error=%v", state, err)
+			}
+			if err := lease.Release(); err != nil {
+				t.Fatalf("original holder lost its connection: %v", err)
+			}
 
-	holder := ensure(t, home, "v1.0.0")
-	lease := mustAcquire(t, holder, coreReq("a", 1))
-	token := lease.Token
-
-	successor := newSuccessor(t, home, "v2.0.0")
-
-	newer, err := client.EnsureDaemon(context.Background(), client.Options{
-		Home:        home,
-		Version:     "v2.0.0",
-		Spawn:       successor.spawn,
-		DialTimeout: time.Second,
-		Backoff:     20 * time.Millisecond,
-	})
-	if err != nil {
-		t.Fatalf("takeover ensure: %v", err)
-	}
-	defer newer.Close()
-	if newer.DaemonVersion() != "v2.0.0" {
-		t.Fatalf("connected daemon version %q, want v2.0.0", newer.DaemonVersion())
-	}
-
-	if err := td1.waitExit(t, 3*time.Second); err != nil {
-		t.Fatalf("old daemon should have drained and exited: %v", err)
-	}
-
-	reconnect := ensure(t, home, "v2.0.0")
-	reclaimed, err := reconnect.Reattach(context.Background(), token, lease.RunID)
-	if err != nil {
-		t.Fatalf("reattach after takeover: %v", err)
-	}
-	if reclaimed.RunID != "a" {
-		t.Fatalf("reattached %q, want a", reclaimed.RunID)
-	}
-}
-
-func TestVersionTakeover_ExactSourceBuildDrainsSameReleaseAndReattaches(t *testing.T) {
-	home := shortHome(t)
-	old := startDaemon(t, wingd.Config{Home: home, Version: "v0.22.2"})
-
-	holder := ensure(t, home, "v0.22.2")
-	lease := mustAcquire(t, holder, coreReq("same-release-holder", 1))
-	newVersion := "v0.22.2-dev+1b9e5cd9"
-	successor := newSuccessor(t, home, newVersion)
-
-	newer, err := client.EnsureDaemon(context.Background(), client.Options{
-		Home: home, Version: newVersion, Spawn: successor.spawn,
-		DialTimeout: time.Second, Backoff: 20 * time.Millisecond,
-	})
-	if err != nil {
-		t.Fatalf("source takeover: %v", err)
-	}
-	defer newer.Close()
-	if newer.DaemonVersion() != newVersion {
-		t.Fatalf("connected daemon version %q, want %q", newer.DaemonVersion(), newVersion)
-	}
-	if err := old.waitExit(t, 3*time.Second); err != nil {
-		t.Fatalf("release daemon should have drained and exited: %v", err)
-	}
-	reconnect := ensure(t, home, newVersion)
-	reclaimed, err := reconnect.Reattach(context.Background(), lease.Token, lease.RunID)
-	if err != nil {
-		t.Fatalf("holder reattach: %v", err)
-	}
-	if reclaimed.RunID != "same-release-holder" {
-		t.Fatalf("reattached %q, want same-release-holder", reclaimed.RunID)
-	}
-}
-
-func TestVersionTakeover_DevBuildAcceptsSameSourceReleaseDaemon(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: 0.2s of real work; the fast class runs under -short")
-	}
-	home := shortHome(t)
-	td := startDaemon(t, wingd.Config{Home: home, Version: "v1.0.0"})
-
-	_, err := client.EnsureDaemon(context.Background(), client.Options{Home: home, Version: "(devel)", Spawn: errSpawn})
-	if err != nil {
-		t.Fatalf("ensure error = %v, want success", err)
-	}
-
-	select {
-	case err := <-td.done:
-		t.Fatalf("release daemon exited (%v); the dev build drained it", err)
-	case <-time.After(200 * time.Millisecond):
-	}
-}
-
-func TestVersionTakeover_ReleaseAcceptsSameSourceDirtyDevDaemon(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: 0.2s of real work; the fast class runs under -short")
-	}
-	home := shortHome(t)
-	td := startDaemon(t, wingd.Config{Home: home, Version: "v1.0.0+dirty"})
-
-	_, err := client.EnsureDaemon(context.Background(), client.Options{Home: home, Version: "v1.1.0", Spawn: errSpawn})
-	if err != nil {
-		t.Fatalf("ensure error = %v, want success", err)
-	}
-
-	select {
-	case err := <-td.done:
-		t.Fatalf("source-built daemon exited (%v); the release client drained it", err)
-	case <-time.After(200 * time.Millisecond):
-	}
-}
-
-func TestVersionTakeover_ReleaseLeavesCleanSourceDaemon(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: 0.2s of real work; the fast class runs under -short")
-	}
-	home := shortHome(t)
-	td := startDaemon(t, wingd.Config{Home: home, Version: "v0.22.2-dev+e99c1800"})
-
-	release := ensure(t, home, "v0.22.2")
-	if release.DaemonVersion() != "v0.22.2-dev+e99c1800" {
-		t.Fatalf("connected daemon version %q, want clean source build still resident", release.DaemonVersion())
-	}
-
-	select {
-	case err := <-td.done:
-		t.Fatalf("clean source daemon exited (%v); release build drained it", err)
-	case <-time.After(200 * time.Millisecond):
+			select {
+			case err := <-td.done:
+				t.Fatalf("daemon exited: %v", err)
+			default:
+			}
+		})
 	}
 }
 

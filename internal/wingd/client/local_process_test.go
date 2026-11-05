@@ -3,7 +3,6 @@ package client
 import (
 	"context"
 	"errors"
-	"os"
 	"path/filepath"
 	"sync"
 	"testing"
@@ -12,18 +11,18 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
 )
 
-func TestLocalProcessAttemptsItsOwnExecutableAfterIncompatibleDaemon(t *testing.T) {
+func TestLocalProcessRefusesIncompatibleDaemonWithoutStartingExecutable(t *testing.T) {
 	home := shortHome(t)
 	oneShotDaemon(t, home, wingwire.HelloAck{ProtocolMajor: wingd.ProtocolMajor - 1, BinaryVersion: "v0.67.0"})
 	_, err := ensureLocalProcess(t.Context(), wingd.LocalStartOptions{
 		Home: home, Version: "v0.68.3", Executable: filepath.Join(home, "missing-sparkwing"),
 	})
-	if !errors.Is(err, os.ErrNotExist) {
-		t.Fatalf("replacement did not attempt supplied executable: %v", err)
+	if !errors.Is(err, errDaemonTooOld) {
+		t.Fatalf("incompatible daemon was not refused: %v", err)
 	}
 }
 
-func TestLocalProcessLifecycleReplacesOlderOwner(t *testing.T) {
+func TestLocalProcessLifecycleReusesOlderOwner(t *testing.T) {
 	home := t.TempDir()
 	owner := &lifecycleOwner{status: wingd.LocalStatus{Running: true, PID: 72, Version: "v0.67.0"}}
 	starts := 0
@@ -33,8 +32,8 @@ func TestLocalProcessLifecycleReplacesOlderOwner(t *testing.T) {
 		return owner.status, nil
 	})
 	status, err := lifecycle.EnsureStarted(t.Context(), wingd.LocalStartOptions{Home: home, Version: "v0.68.3"})
-	if err != nil || starts != 1 || status.Version != "v0.68.3" || status.PID != 84 {
-		t.Fatalf("upgrade startup: %+v error=%v starts=%d", status, err, starts)
+	if err != nil || starts != 0 || status.Version != "v0.67.0" || status.PID != 72 {
+		t.Fatalf("reuse startup: %+v error=%v starts=%d", status, err, starts)
 	}
 }
 
@@ -146,7 +145,7 @@ func TestLocalProcessLifecycleKeepsStandaloneInProcess(t *testing.T) {
 }
 
 func TestLocalProcessLifecycleRefusesUnknownOwnerAndFailedStartup(t *testing.T) {
-	for _, failure := range []error{errDaemonUnreachable, errDaemonWedged, context.Canceled} {
+	for _, failure := range []error{errDaemonUnreachable, errDaemonWedged, errDaemonTooOld, errDaemonLacksOperation, context.Canceled} {
 		t.Run(failure.Error(), func(t *testing.T) {
 			local := &localRuntimeFixture{}
 			owner := &lifecycleOwner{err: failure}

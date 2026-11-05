@@ -216,11 +216,8 @@ func nativeServices(ctx context.Context, cfg NativeConfig, listen func(string, s
 			if err != nil {
 				return StorageBinding{}, err
 			}
-			binding, err := cfg.Storage(ctx, principal)
-			if err == nil {
-				logs.bind(principal, int64(input.Attempt))
-			}
-			return binding, err
+			logs.bind(principal, int64(input.Attempt))
+			return cfg.Storage(ctx, principal)
 		}, Bind: func(ctx context.Context, input NodeInput) (ProcessGrant, error) {
 			return delegate(ctx, input.NodeID, int64(input.Generation), int64(input.Attempt))
 		}},

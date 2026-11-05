@@ -157,14 +157,18 @@ for shutdown before starting the installed executable with the same home,
 dashboard address and stay policy. An incomplete drain or unready replacement
 returns an error without a success receipt.
 
-A client attempts one replacement when it finds an incompatible daemon, including
-a v0.67 daemon at the socket path used before per-home socket tokens. Startup
-prints the old and new versions, drains the predecessor and waits for its
-election lock before starting the selected executable. If
-an incompatible daemon answers again, remove the other Sparkwing installation
-(`which -a sparkwing` lists them) and run `sparkwing daemon restart`, or select
-a separate `SPARKWING_HOME`.
-The replacement still drains active runs before taking ownership.
+A client reuses a running compatible daemon regardless of release or source-build
+version. A repo-pinned CLI leaves the shared daemon and its active runs running.
+A protocol mismatch fails with both versions. If the daemon's protocol is too
+old, install a supported release with `sparkwing update`, then run
+`sparkwing daemon restart --force` when no runs are active. For an unreleased
+build, install that build before restarting.
+
+Same-major builds with different wire behavior are refused because an older
+daemon can ignore fields such as nonblocking admission and queue work that must
+start immediately. This refusal leaves the daemon running. When no runs are
+active, run `sparkwing daemon restart --force` with the required build, or use a
+separate `SPARKWING_HOME`.
 
 Active runs, queued triggers, held leases and open dashboard connections keep
 it alive. Health checks alone do not. `--stay` keeps it up until stopped.

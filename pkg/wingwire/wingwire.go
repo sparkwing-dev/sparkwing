@@ -1,7 +1,7 @@
 // Package wingwire defines the JSON wire protocol spoken between the
 // local admission daemon and its clients (run processes, the CLI's
-// queue view, and a successor daemon taking over during a version
-// upgrade). It contains pure data types and their (de)serialization;
+// queue view, and explicit daemon lifecycle commands). It contains pure
+// data types and their (de)serialization;
 // transport -- sockets, connection lifecycle, dispatch -- lives with
 // the daemon and client implementations, not here.
 //
@@ -24,9 +24,9 @@
 // [MinProtocolMajor]..[ProtocolMajor]. Compiled pipeline binaries pin
 // SDK versions and keep running long after the daemon upgrades past
 // them, so the daemon meets such a client on its own major rather than
-// refusing it. The binary version travels alongside for observability
-// and for the newer-client takeover decision. BuildIdentity distinguishes
-// same-major implementations that may otherwise ignore one another's fields.
+// refusing it. The binary version travels alongside for observability only.
+// BuildIdentity distinguishes same-major implementations that may otherwise
+// ignore one another's fields.
 package wingwire
 
 import (
@@ -61,8 +61,7 @@ const MinProtocolMajor = 1
 // ServedMajor reports the protocol major a daemon of this build answers a
 // client on, given the major that client sent in [Hello]. A client inside
 // the served range is met on its own major; anything else is answered
-// with this build's own, leaving the client to take the daemon over (it
-// is newer) or to fail with a version error (it is older than the floor).
+// with this build's own, leaving the client to fail with a version error.
 // No map from release to protocol major is needed anywhere: every client
 // states its own major on every connection.
 func ServedMajor(client int) int {
@@ -81,7 +80,7 @@ type ProtocolFloor struct {
 
 // ProtocolFloors is the release-to-major table, oldest major first. A
 // pipeline binary compiled against a release below a daemon's floor speaks
-// an older major, so the daemon refuses it and no takeover can resolve it --
+// an older major, so the daemon refuses it and restarting cannot resolve it --
 // the repo's own .sparkwing/go.mod pin has to move.
 //
 // It is a table rather than a single boundary because a diagnosis involves

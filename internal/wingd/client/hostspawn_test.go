@@ -76,44 +76,6 @@ func TestSpawn_HostThatExitsImmediatelyFailsFast(t *testing.T) {
 	}
 }
 
-func TestTakeover_BrokenSuccessorFailsFastNamingTheBinary(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("the fixture below is a unix shell script")
-	}
-	home := shortHome(t)
-	oneShotDaemon(t, home, wingwire.HelloAck{
-		ProtocolMajor:       wingd.ProtocolMajor,
-		NativeProtocolMajor: wingd.ProtocolMajor,
-		BinaryVersion:       "v0.1.0",
-	})
-	bin := filepath.Join(t.TempDir(), "sparkwing")
-	if err := os.WriteFile(bin, []byte("#!/bin/sh\necho 'wingd: cannot serve' >&2\nexit 1\n"), 0o755); err != nil {
-		t.Fatalf("write fixture host: %v", err)
-	}
-	spawn := func(home, version string) error { return spawnDetached(bin, home, version) }
-
-	start := time.Now()
-	_, err := EnsureDaemon(context.Background(), Options{
-		Home:        home,
-		Version:     "v9.9.9",
-		Spawn:       spawn,
-		DialTimeout: 200 * time.Millisecond,
-		Backoff:     5 * time.Millisecond,
-	})
-	if !errors.Is(err, errDaemonHostFailed) {
-		t.Fatalf("error %v does not match errDaemonHostFailed", err)
-	}
-	if errors.Is(err, errTakeoverExhausted) {
-		t.Fatal("a broken successor was reported as a version skew after burning the takeover budget")
-	}
-	if elapsed := time.Since(start); elapsed > 5*time.Second {
-		t.Fatalf("waited %s for a successor that died immediately", elapsed)
-	}
-	if !strings.Contains(err.Error(), bin) {
-		t.Errorf("message %q does not name the successor binary", err.Error())
-	}
-}
-
 func TestSpawn_FailedStartLeavesNoEmptyDaemonLog(t *testing.T) {
 	home := shortHome(t)
 	logPath, err := wingd.LogPath(home)
@@ -152,7 +114,7 @@ func TestEnsureDaemon_NoTakeoverAcceptsSameSourceDaemon(t *testing.T) {
 	}
 }
 
-func oneShotDaemon(t *testing.T, home string, ack wingwire.HelloAck) {
+func oneShotDaemon(t *testing.T, home string, ack wingwire.HelloAck) <-chan wingwire.Message {
 	t.Helper()
 	sock, err := wingd.EnsureSocketPath(home)
 	if err != nil {
@@ -166,6 +128,7 @@ func oneShotDaemon(t *testing.T, home string, ack wingwire.HelloAck) {
 		t.Fatalf("listen: %v", err)
 	}
 	t.Cleanup(func() { _ = ln.Close() })
+	requests := make(chan wingwire.Message, 8)
 	go func() {
 		for {
 			nc, err := ln.Accept()
@@ -182,10 +145,12 @@ func oneShotDaemon(t *testing.T, home string, ack wingwire.HelloAck) {
 				if _, err := nc.Write(line); err != nil {
 					return
 				}
-				_, _ = r.read()
+				message, _ := r.read()
+				requests <- message
 			}()
 		}
 	}()
+	return requests
 }
 
 func TestEnsureDaemon_NoTakeoverDaemonProtocolTooOldFails(t *testing.T) {
@@ -206,9 +171,6 @@ func TestEnsureDaemon_NoTakeoverDaemonProtocolTooOldFails(t *testing.T) {
 	})
 	if !errors.Is(err, errDaemonTooOld) {
 		t.Fatalf("error %v does not match errDaemonTooOld", err)
-	}
-	if errors.Is(err, errTakeoverExhausted) {
-		t.Fatal("a client that never takes over reported an exhausted takeover budget")
 	}
 	msg := err.Error()
 	for _, want := range []string{"v0.9.0", "v2.0.0", minHostingRelease(), "daemon restart"} {
@@ -294,29 +256,5 @@ func TestEnsureDaemon_NoTakeoverNeverSelfExecs(t *testing.T) {
 	})
 	if !errors.Is(err, errNoDaemonHost) {
 		t.Fatalf("error %v does not match errNoDaemonHost; an unwired no-takeover client fell back to self-exec", err)
-	}
-}
-
-func TestEnsureDaemon_HostingClientStillTakesOver(t *testing.T) {
-	home := shortHome(t)
-	oneShotDaemon(t, home, wingwire.HelloAck{
-		ProtocolMajor:       wingd.ProtocolMajor,
-		NativeProtocolMajor: wingd.ProtocolMajor,
-		BinaryVersion:       "v0.1.0",
-	})
-	spawns := &atomic.Int64{}
-	_, err := EnsureDaemon(context.Background(), Options{
-		Home:        home,
-		Version:     "v9.9.9",
-		Spawn:       func(string, string) error { spawns.Add(1); return nil },
-		DialTimeout: 200 * time.Millisecond,
-		Backoff:     5 * time.Millisecond,
-	})
-
-	if !errors.Is(err, errTakeoverExhausted) {
-		t.Fatalf("hosting client ended with %v, want the exhausted-takeover report", err)
-	}
-	if got := spawns.Load(); got != 1 {
-		t.Fatalf("successor spawns = %d, want %d -- the hosting client stopped taking over", got, 1)
 	}
 }

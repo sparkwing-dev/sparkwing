@@ -44,26 +44,6 @@ func TestServedDownLevelDetectsBeingTheOlderSide(t *testing.T) {
 	}
 }
 
-func TestDownLevelServiceOutranksASupersedingVersion(t *testing.T) {
-	ack := wingwire.HelloAck{ProtocolMajor: 1, NativeProtocolMajor: 2, BinaryVersion: "v1.0.0"}
-	if !supersedes("v2.0.0", ack.BinaryVersion) {
-		t.Fatal("test premise lost: a newer release no longer supersedes an older one")
-	}
-	if !servedDownLevel(ack) {
-		t.Error("a client served below the daemon's native major must not take it over")
-	}
-}
-
-func TestMatchingProtocolLeavesTheTakeoverToTheVersionComparison(t *testing.T) {
-	ack := wingwire.HelloAck{ProtocolMajor: 2, NativeProtocolMajor: 2, BinaryVersion: "v1.0.0"}
-	if servedDownLevel(ack) {
-		t.Fatal("test premise lost: a daemon on the client's own major is not down-level")
-	}
-	if supersedes("(devel)", ack.BinaryVersion) {
-		t.Error("a dev build must not take over a release daemon at matching protocol")
-	}
-}
-
 func TestMatchingProtocolRejectsAnUnorderedCrossBuildHandshake(t *testing.T) {
 	ack := wingwire.HelloAck{ProtocolMajor: wingd.ProtocolMajor, NativeProtocolMajor: wingd.ProtocolMajor, BinaryVersion: "v1.0.0"}
 	err := buildMismatch("(devel)", ack)
@@ -94,9 +74,6 @@ func TestMatchingProtocolRejectsOldOrMissingNonBlockingBuildIdentityAtSameDispla
 			}
 			if err := buildMismatch("v1.0.0", ack); !errors.Is(err, errBuildMismatch) {
 				t.Fatalf("old build identity error = %v, want errBuildMismatch", err)
-			}
-			if !sameVersionBuildReplacement("v1.0.0", ack) {
-				t.Fatal("same-version daemon without nonblocking admission was not replaceable")
 			}
 		})
 	}

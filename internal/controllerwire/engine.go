@@ -74,8 +74,13 @@ type PlanAccepted struct {
 	Notices  []engineid.Notice `json:"notices"`
 }
 
+// RunnerMaxConcurrentHeader reports configured runner capacity without changing the claim body.
+const RunnerMaxConcurrentHeader = "X-Sparkwing-Max-Concurrent"
+
 // ClaimRequest proposes selectors, labels and free capacity for a server-authorized award.
 type ClaimRequest struct {
+	// MaxConcurrent reports configured capacity for inventory; it grants no slots.
+	MaxConcurrent      int                   `json:"-"`
 	FreeSlots          *int                  `json:"free_slots,omitempty"`
 	OS                 string                `json:"os,omitempty"`
 	Arch               string                `json:"arch,omitempty"`
@@ -117,7 +122,9 @@ type ClaimedUnit struct {
 }
 
 type ClaimResponse struct {
-	Claim *ClaimedUnit `json:"claim,omitempty"`
+	// PollAfter carries transport advice locally; it is not part of the JSON envelope.
+	PollAfter time.Duration `json:"-"`
+	Claim     *ClaimedUnit  `json:"claim,omitempty"`
 }
 
 // LauncherCapacityObservation reports demand without an execution placement.

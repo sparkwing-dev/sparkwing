@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 
 	"github.com/sparkwing-dev/sparkwing/internal/egress"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
@@ -45,8 +46,8 @@ func TestClaimPollAdvice_EnforcementRefusesAnEarlyPoll(t *testing.T) {
 	if advised.Code != http.StatusOK {
 		t.Fatalf("first claim: status=%d want 204", advised.Code)
 	}
-	if got := advised.Header().Get(store.ClaimPollAfterHeader); got != "5" {
-		t.Fatalf("%s=%q want \"5\"", store.ClaimPollAfterHeader, got)
+	if got := advised.Header().Get(controllerwire.ClaimPollAfterHeader); got != "5" {
+		t.Fatalf("%s=%q want \"5\"", controllerwire.ClaimPollAfterHeader, got)
 	}
 
 	early := httptest.NewRecorder()
