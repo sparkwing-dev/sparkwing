@@ -1,1 +1,0 @@
-sync-docs --check: pkg/docs/mirror matches docs/, pkg/docs/changelog.md matches CHANGELOG.md
