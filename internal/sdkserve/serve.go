@@ -250,7 +250,7 @@ func (s *server) execute(ctx context.Context, req nodeproto.Request, rc nodeprot
 	if req.Op == nodeproto.OpPlan || req.Op == nodeproto.OpDescribe {
 		services.binding = nil
 	}
-	ctx = s.cfg.Operations.Context(ctx, rc, *s.hello.Runner, services)
+	ctx = s.cfg.Operations.Context(WithHostFeatures(ctx, s.hello.Features), rc, *s.hello.Runner, services)
 	switch req.Op {
 	case nodeproto.OpDescribe:
 		result, err = s.cfg.Operations.Describe(ctx)

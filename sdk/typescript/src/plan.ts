@@ -8,6 +8,7 @@ import type { ClosureSpec, ConcurrencySpec, JobSpec, PlanDoc, StepSpec } from ".
 function identifier(kind: string, value: string): void {
   if (typeof value !== "string" || value.length === 0) throw new Error(`${kind} identifier must not be empty`);
 }
+const MIN_JOB_CORES = 0.25;
 function integer(name: string, value: number, min = 0): number {
   if (!Number.isSafeInteger(value) || value < min) throw new Error(`${name} must be a ${min === 0 ? "nonnegative" : "positive"} integer`);
   return value;
@@ -415,6 +416,12 @@ export class Job<T = unknown> extends Declaration implements API.Job<T> {
     this.spec.no_progress_timeout_ms = integer("no-progress timeout", ms);
     return this;
   }
+  cores(n: number): this {
+    this.assertMutable();
+    if (!Number.isFinite(n) || n < MIN_JOB_CORES) throw new Error(`core request must be a finite number of at least ${MIN_JOB_CORES}`);
+    this.spec.cores = n;
+    return this;
+  }
   beforeRun(fn: API.Hook): this {
     this.assertMutable();
     this.callbacks.push({ id: this.closureID("before_run"), kind: "before_run", fn, job: this });
@@ -557,6 +564,9 @@ class JobGroup implements API.JobGroup {
   }
   noProgressTimeout(ms: number): this {
     return this.apply((job) => job.noProgressTimeout(ms));
+  }
+  cores(n: number): this {
+    return this.apply((job) => job.cores(n));
   }
   skipIf(fn: API.Predicate, options?: API.SkipOptions): this {
     return this.apply((job) => job.skipIf(fn, options));

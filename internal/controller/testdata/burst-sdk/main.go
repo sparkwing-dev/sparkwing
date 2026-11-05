@@ -1,15 +1,10 @@
 package main
 
 import (
-	"bufio"
-	"bytes"
 	"context"
 	"encoding/base64"
 	"errors"
-	"io"
-	"net/http"
 	"os"
-	"sync"
 
 	sw "github.com/sparkwing-dev/sparkwing/sparkwing"
 )
@@ -50,40 +45,7 @@ func (pipeline) Plan(_ context.Context, p *sw.Plan, _ sw.NoInputs, _ sw.RunConte
 	return nil
 }
 
-type pipeTransport struct {
-	mu       sync.Mutex
-	requests *os.File
-	reader   *bufio.Reader
-}
-
-func (p *pipeTransport) RoundTrip(request *http.Request) (*http.Response, error) {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	if err := errors.Join(request.Write(p.requests), request.Body.Close()); err != nil {
-		return nil, err
-	}
-	response, err := http.ReadResponse(p.reader, request)
-	if err != nil {
-		return nil, err
-	}
-	body, err := io.ReadAll(response.Body)
-	err = errors.Join(err, response.Body.Close())
-	response.Body = io.NopCloser(bytes.NewReader(body))
-	return response, err
-}
-
 func main() {
-	requests, err := os.OpenFile(".burst-requests", os.O_WRONLY, 0)
-	if err != nil {
-		panic(err)
-	}
-	defer requests.Close()
-	responses, err := os.Open(".burst-responses")
-	if err != nil {
-		panic(err)
-	}
-	defer responses.Close()
-	http.DefaultTransport = &pipeTransport{requests: requests, reader: bufio.NewReader(responses)}
 	sw.Register("burst-execution-proof", func() sw.Pipeline[sw.NoInputs] { return pipeline{} })
 	sw.Main()
 }

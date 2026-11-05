@@ -27,31 +27,22 @@ func TestWeighted_PromotionBackfillsPastNonFittingHeavyHead(t *testing.T) {
 	}
 }
 
-func TestWeighted_BackfillStopsWhenYoungerHolderBlocksHead(t *testing.T) {
+func TestWeighted_BackfillThatWouldDelayTheHeadQueues(t *testing.T) {
 	l := testLedger(t, 0, 0)
 	older := mustGrant(t, l, Request{ID: "older", Semaphores: []SemaphoreClaim{sem("k", 10, 5, PolicyQueue)}})
 	mustQueue(t, l, Request{ID: "heavy", Semaphores: []SemaphoreClaim{sem("k", 10, 8, PolicyQueue)}})
 
-	d, _ := submit(t, l, Request{ID: "light-1", Semaphores: []SemaphoreClaim{sem("k", 10, 5, PolicyQueue)}})
-	if d.Kind != DecisionGranted {
-		t.Fatalf("light-1 = %+v, want granted as backfill while only the older holder blocks heavy", d)
-	}
-	light1 := d.Lease
-
-	if pos := mustQueue(t, l, Request{ID: "light-2", Semaphores: []SemaphoreClaim{sem("k", 10, 5, PolicyQueue)}}); pos < 0 {
-		t.Fatalf("light-2 position = %d", pos)
+	if pos := mustQueue(t, l, Request{ID: "light", Semaphores: []SemaphoreClaim{sem("k", 10, 5, PolicyQueue)}}); pos != 1 {
+		t.Fatalf("light position = %d, want behind heavy: running it would hold heavy out once the older holder ends", pos)
 	}
 
 	events := mustRelease(t, l, older.ID, "older")
-	wantKinds(t, events, EventReleased)
-	if snap := l.Snapshot(); len(snap.Waiters) != 2 {
-		t.Fatalf("waiters = %+v, want heavy and light-2 both still queued; light-2 must not jump the protected heavy", snap.Waiters)
-	}
-
-	events = mustRelease(t, l, light1.ID, "light-1")
 	wantKinds(t, events, EventReleased, EventPromoted)
 	if events[1].RequestID != "heavy" {
-		t.Fatalf("promoted %q, want heavy once the younger holder releases", events[1].RequestID)
+		t.Fatalf("promoted %q, want heavy the moment the older holder ends", events[1].RequestID)
+	}
+	if snap := l.Snapshot(); len(snap.Waiters) != 1 || snap.Waiters[0].RequestID != "light" {
+		t.Fatalf("waiters = %+v, want light still queued", snap.Waiters)
 	}
 }
 
@@ -75,24 +66,20 @@ func TestWeighted_HostMemoryBackfillPastHeavyHead(t *testing.T) {
 	}
 }
 
-func TestWeighted_OneBackfillProtectsOlderWaiterFromAStream(t *testing.T) {
+func TestWeighted_SteadyPressureKeepsAStreamBehindTheHead(t *testing.T) {
 	l := testLedger(t, 0, 8<<30)
 	mustGrant(t, l, Request{ID: "guard", MemoryBytes: 1})
 	if _, err := l.SetHeadroom(0, 5<<30); err != nil {
 		t.Fatalf("set headroom: %v", err)
 	}
 	mustQueue(t, l, Request{ID: "heavy", MemoryBytes: 6 << 30})
-	first := mustGrant(t, l, Request{ID: "light-1", MemoryBytes: 4 << 30})
-
-	snap := l.Snapshot()
-	if len(snap.Waiters) != 1 || snap.Waiters[0].BackfillCount != 1 {
-		t.Fatalf("waiters = %+v, want heavy protected after one backfill", snap.Waiters)
+	for i := range 3 {
+		id := fmt.Sprintf("light-%d", i)
+		if pos := mustQueue(t, l, Request{ID: id, MemoryBytes: 4 << 30}); pos != i+1 {
+			t.Fatalf("%s position = %d, want behind heavy: under steady pressure it would hold heavy out", id, pos)
+		}
 	}
-	mustRelease(t, l, first.ID, "light-1")
 	l = restoreRoundTrip(t, l)
-	if pos := mustQueue(t, l, Request{ID: "light-2", MemoryBytes: 4 << 30}); pos != 1 {
-		t.Fatalf("light-2 position = %d, want behind protected heavy", pos)
-	}
 
 	events, err := l.SetHeadroom(0, 8<<30)
 	if err != nil {
@@ -100,7 +87,7 @@ func TestWeighted_OneBackfillProtectsOlderWaiterFromAStream(t *testing.T) {
 	}
 	wantKinds(t, events, EventPromoted)
 	if events[0].RequestID != "heavy" {
-		t.Fatalf("promoted %q, want protected heavy", events[0].RequestID)
+		t.Fatalf("promoted %q, want heavy first", events[0].RequestID)
 	}
 }
 
@@ -198,16 +185,17 @@ func TestWeighted_ProtectedWaiterAllowsBackfillInsideReservedCapacity(t *testing
 	_ = second
 }
 
-func TestWeighted_QueuedBackfillProtectsOlderWaiter(t *testing.T) {
+func TestWeighted_QueuedBackfillPromotesOnlyWithinTheHeadsReservation(t *testing.T) {
 	l := testLedger(t, 0, 8<<30)
-	mustGrant(t, l, Request{ID: "guard", MemoryBytes: 1})
+	guard := mustGrant(t, l, Request{ID: "guard", MemoryBytes: 3 << 30})
 	if _, err := l.SetHeadroom(0, 0); err != nil {
 		t.Fatalf("clear headroom: %v", err)
 	}
 	mustQueue(t, l, Request{ID: "heavy", MemoryBytes: 6 << 30})
-	mustQueue(t, l, Request{ID: "light", MemoryBytes: 4 << 30})
+	mustQueue(t, l, Request{ID: "light", MemoryBytes: 2 << 30})
+	mustQueue(t, l, Request{ID: "late", MemoryBytes: 1 << 30})
 
-	events, err := l.SetHeadroom(0, 5<<30)
+	events, err := l.SetHeadroom(0, 8<<30)
 	if err != nil {
 		t.Fatalf("raise headroom: %v", err)
 	}
@@ -216,10 +204,16 @@ func TestWeighted_QueuedBackfillProtectsOlderWaiter(t *testing.T) {
 		t.Fatalf("backfill event = %+v, want heavy bypassed once by light", events[0])
 	}
 	if events[1].RequestID != "light" {
-		t.Fatalf("promoted %q, want one light backfill", events[1].RequestID)
+		t.Fatalf("promoted %q, want light, which still leaves heavy room once the guard ends", events[1].RequestID)
 	}
-	if got := l.Snapshot().Waiters[0].BackfillCount; got != 1 {
-		t.Fatalf("heavy backfill count = %d, want 1", got)
+	if got := waiterOrder(l); len(got) != 2 || got[1] != "late" {
+		t.Fatalf("waiters = %v, want late held: it would overrun heavy's reservation", got)
+	}
+
+	events = mustRelease(t, l, guard.ID, "guard")
+	wantKinds(t, events, EventReleased, EventPromoted)
+	if events[1].RequestID != "heavy" {
+		t.Fatalf("promoted %q, want heavy once the guard ends", events[1].RequestID)
 	}
 }
 
@@ -363,29 +357,24 @@ func TestCancelWaiterPreservesProtectedHeadAdmission(t *testing.T) {
 	older := mustGrant(t, l, Request{ID: "older", Semaphores: []SemaphoreClaim{sem("k", 10, 5, PolicyQueue)}})
 	mustGrant(t, l, Request{ID: "other-holder", Semaphores: []SemaphoreClaim{sem("j", 1, 1, PolicyQueue)}})
 	mustQueue(t, l, Request{ID: "heavy", Semaphores: []SemaphoreClaim{sem("k", 10, 8, PolicyQueue)}})
-	light1 := mustGrant(t, l, Request{ID: "light-1", Semaphores: []SemaphoreClaim{sem("k", 10, 5, PolicyQueue)}})
 	mustQueue(t, l, Request{ID: "cancel-me", Semaphores: []SemaphoreClaim{sem("j", 1, 1, PolicyQueue)}})
-	mustQueue(t, l, Request{ID: "light-2", Semaphores: []SemaphoreClaim{sem("k", 10, 5, PolicyQueue)}})
+	mustQueue(t, l, Request{ID: "light", Semaphores: []SemaphoreClaim{sem("k", 10, 5, PolicyQueue)}})
 
 	events := l.CancelWaiter("cancel-me")
 	if len(events) != 0 {
 		t.Fatalf("cancel-me events = %+v, want no promotion", events)
 	}
 	events = mustRelease(t, l, older.ID, "older")
-	wantKinds(t, events, EventReleased)
-	snap := l.Snapshot()
-	if len(snap.Waiters) != 2 || snap.Waiters[0].RequestID != "heavy" || snap.Waiters[1].RequestID != "light-2" {
-		t.Fatalf("waiters after older release = %+v, want heavy still protecting light-2", snap.Waiters)
-	}
-
-	events = mustRelease(t, l, light1.ID, "light-1")
 	wantKinds(t, events, EventReleased, EventPromoted)
 	if events[1].RequestID != "heavy" {
 		t.Fatalf("promoted %q, want protected heavy head", events[1].RequestID)
 	}
+	if snap := l.Snapshot(); len(snap.Waiters) != 1 || snap.Waiters[0].RequestID != "light" {
+		t.Fatalf("waiters = %+v, want light still behind heavy", snap.Waiters)
+	}
 }
 
-func TestWeighted_HeadroomSqueezeKeepsReservationInsideTotalCapacity(t *testing.T) {
+func TestWeighted_HeadroomSqueezeJudgesReservationAtCurrentCapacity(t *testing.T) {
 	l := testLedger(t, 0, 8<<30)
 	holder := mustGrant(t, l, Request{ID: "holder", MemoryBytes: 5 << 30})
 	mustQueue(t, l, Request{ID: "heavy", MemoryBytes: 6 << 30})
@@ -408,9 +397,9 @@ func TestWeighted_HeadroomSqueezeKeepsReservationInsideTotalCapacity(t *testing.
 		t.Fatalf("leases = %+v, want the backfill still held so the host is not idle", snap.Leases)
 	}
 	small, _ := submit(t, l, Request{ID: "small", MemoryBytes: 64 << 20})
-	if small.Kind != DecisionGranted {
-		t.Fatalf("small = %+v, want granted: 1GiB of the 4GiB headroom is held, and heavy still fits "+
-			"beside both once the squeeze lifts, so reserving for heavy costs it nothing to admit", small)
+	if small.Kind != DecisionQueued {
+		t.Fatalf("small = %+v, want queued: under the 4GiB squeeze heavy no longer fits beside the backfill, "+
+			"and more work ahead of it would only keep it out longer", small)
 	}
 }
 

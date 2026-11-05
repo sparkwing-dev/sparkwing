@@ -151,6 +151,9 @@ func resolveJob(base Inputs, job nodeproto.JobSpec, run runspec.Options) (runspe
 	result := out.JobDefaults
 	result.Requires = out.Requires
 	result.Prefers = out.Prefers
+	if job.Cores != nil {
+		result.Cores = *job.Cores
+	}
 	result.Concurrency, err = resolveConcurrency(job.Concurrency)
 	return result, err
 }

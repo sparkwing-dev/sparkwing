@@ -194,7 +194,9 @@ reference, JSON null is absent. An in-run null output is present and decodes to
 the type's zero value. Typed job and step outputs are bounded to 16 MiB each.
 
 `sw.RefToLastRun[T](pipeline, jobID, sw.MaxAge(duration))` reads the latest
-successful verified default-branch run without starting another run. Store it in
+successful verified default-branch run without starting another run. A reference
+to the reading run's own pipeline reads only runs of the reader's repository,
+because repositories in one team can share a pipeline name. Store it in
 a job field so planning can declare the read edge. Add `sw.FromAnyRun()` to accept
 output from any successful run, including pull requests and uploads. The opt-out
 must be declared in that job field. Runtime requests cannot widen it.
@@ -290,6 +292,17 @@ job and returns that job, so chained modifiers configure the recovery.
 Recovery callbacks can accept `sw.Failure` to inspect `Stage` and `Err`.
 Local and runner hosts load this failure from the persisted source job.
 Calling `OnFailure` on the returned job declares the next recovery in the chain.
+
+## Core requests
+
+Local admission charges each job one core unless the job declares its CPU.
+`job.Cores(n)` declares `n` cores, fractions allowed down to `0.25`. Give a job
+that mostly waits on git or the network a small request such as `0.25`. A
+larger request reserves cores for a job that must not share them, at the cost
+of fewer jobs running at once. `JobGroup.Cores` sets every member. A request
+larger than the machine reserves the whole machine. Hosts without local
+admission, and hosts older than the setting, keep the one-core default. See
+[Local admission](admission.md#core-requests).
 
 ## Approvals
 

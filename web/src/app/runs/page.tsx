@@ -3234,6 +3234,11 @@ function RunDetailPane({
             reusedIDs={reusedNodeIDs ?? null}
             priorRunID={reusedPriorRunID ?? null}
           />
+          {run.retry_of && run.retry_reason && (
+            <div className="text-[10px] text-[var(--muted)] py-1" data-testid="retry-reason">
+              Retry reason: <span className="text-[var(--fg)]">{run.retry_reason}</span>
+            </div>
+          )}
           <DebugPausePanel runID={run.id} runStatus={run.status} />
         </div>
 
@@ -6626,16 +6631,20 @@ function RetryButton({ runId, onDone, runNow = false, disabled = false }: {
   disabled?: boolean;
 }) {
   const [loading, setLoading] = useState(false);
+  const [askingReason, setAskingReason] = useState(false);
+  const [reason, setReason] = useState("");
   const submission = useRef<{ input: string; key: string } | null>(null);
 
-  const submit = async (full: boolean) => {
+  const submit = async (full: boolean, withReason = "") => {
     if (loading || disabled) return;
     setLoading(true);
-    const input = JSON.stringify([runId, full]);
+    const input = JSON.stringify([runId, full, withReason]);
     if (submission.current?.input !== input) submission.current = { input, key: crypto.randomUUID() };
-    const fresh = await retryRun(runId, { full, idempotencyKey: submission.current.key }).catch(() => null);
+    const fresh = await retryRun(runId, { full, idempotencyKey: submission.current.key, reason: withReason }).catch(() => null);
     if (fresh?.run_id) {
       submission.current = null;
+      setAskingReason(false);
+      setReason("");
       toast(
         full
           ? `Rerun (all nodes) queued as ${fresh.run_id}`
@@ -6665,6 +6674,44 @@ function RetryButton({ runId, onDone, runNow = false, disabled = false }: {
     );
   }
 
+  if (askingReason) {
+    const trimmed = reason.trim();
+    return (
+      <span className="inline-flex items-center gap-1" onClick={(event) => event.stopPropagation()} data-testid="retry-reason-form">
+        <input
+          autoFocus
+          value={reason}
+          maxLength={1024}
+          onChange={(event) => setReason(event.target.value.replace(/[\u0000-\u001f\u007f]/g, " "))}
+          onKeyDown={(event) => {
+            if (event.key === "Escape") setAskingReason(false);
+            if (event.key === "Enter" && trimmed) void submit(false, trimmed);
+          }}
+          placeholder="Why should this rerun pass?"
+          aria-label="Rerun reason"
+          className="px-2 py-1 rounded text-xs border border-[var(--border)] bg-transparent w-56"
+        />
+        <button
+          disabled={loading || disabled || !trimmed}
+          onClick={() => void submit(false, trimmed)}
+          className="px-2 py-1 rounded text-xs font-medium border border-indigo-500/30 text-indigo-400 disabled:opacity-50"
+        >
+          From failed
+        </button>
+        <button
+          disabled={loading || disabled || !trimmed}
+          onClick={() => void submit(true, trimmed)}
+          className="px-2 py-1 rounded text-xs font-medium border border-indigo-500/30 text-indigo-400 disabled:opacity-50"
+        >
+          All
+        </button>
+        <button onClick={() => setAskingReason(false)} className="px-2 py-1 rounded text-xs text-[var(--muted)]">
+          Cancel
+        </button>
+      </span>
+    );
+  }
+
   return (
     <ActionMenu
       align="end"
@@ -6685,6 +6732,12 @@ function RetryButton({ runId, onDone, runNow = false, disabled = false }: {
           tone: "primary",
           disabled: loading || disabled,
           onSelect: () => submit(true),
+        },
+        {
+          label: "Rerun with a reason...",
+          description: "Record why the rerun should pass, such as a known flake or the commit that fixed it.",
+          disabled: loading || disabled,
+          onSelect: () => setAskingReason(true),
         },
       ]}
       trigger={(open, toggle) => (

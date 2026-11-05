@@ -185,6 +185,7 @@ type Lineage struct {
 	ParentJobID   string          `json:"parent_job_id"`
 	RetryOf       string          `json:"retry_of"`
 	Retrier       Optional[Actor] `json:"retrier"`
+	RetryReason   string          `json:"retry_reason,omitempty"`
 }
 
 // safety: Layer names the source to report when an explicit setting is invalid.
@@ -244,6 +245,8 @@ type JobExecutionSettings struct {
 	MemoTTL           Setting[time.Duration] `json:"memo_ttl"`
 	Requires          Setting[[]string]      `json:"requires"`
 	Prefers           Setting[[]string]      `json:"prefers"`
+	// Cores is the job's declared core request; zero leaves local admission's default.
+	Cores float64 `json:"cores,omitempty"`
 }
 
 // GuardDeclarations contains author predicates before evaluation adds a verdict.
@@ -499,6 +502,7 @@ type RetryInput struct {
 	Plan        json.RawMessage
 	Retrier     Actor
 	SourceRunID string
+	Reason      string
 }
 
 // safety: RetrySnapshot keeps the source's sealed identity whole, including the writer whose cache scope

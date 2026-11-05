@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"maps"
+	"net"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -398,7 +399,7 @@ func burstAcceptanceCheckout(t *testing.T, options client.EngineOptions, run str
 	if err != nil {
 		t.Fatal(err)
 	}
-	checkout, err := source.PrepareCheckout(t.Context(), spec, source.Options{Workspace: t.TempDir(), Access: access, BundleTransport: options.HTTP.Transport, BuildEnvironment: sourcetest.BuildEnvironment})
+	checkout, err := source.PrepareCheckout(t.Context(), spec, source.Options{Workspace: t.TempDir(), Access: access, BundleTransport: options.HTTP.Transport, BuildEnvironment: sourcetest.BuildEnvironment, LookupHost: fixtureCloneHostLookup})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -408,6 +409,11 @@ func burstAcceptanceCheckout(t *testing.T, options client.EngineOptions, run str
 	if err := checkout.Close(); err != nil {
 		t.Fatal(err)
 	}
+}
+
+// safety: the git shim serves fixture remotes locally, so only clone host validation would reach real DNS.
+func fixtureCloneHostLookup(context.Context, string) ([]net.IPAddr, error) {
+	return []net.IPAddr{{IP: net.ParseIP("140.82.112.3")}}, nil
 }
 
 func burstAcceptancePersonalMachine(t *testing.T, s *serverFixture) string {

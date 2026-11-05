@@ -1,0 +1,16 @@
+{
+  "valid": ["build", "build.amd64-v2", "deploy/staging-1", "a..b"],
+  "invalid": [
+    {"id": "..", "reason": "path reference"},
+    {"id": ".", "reason": "path reference"},
+    {"id": "../x", "reason": "path reference"},
+    {"id": "a/..", "reason": "path reference"},
+    {"id": "a//b", "reason": "empty path segment"},
+    {"id": "/a", "reason": "empty path segment"},
+    {"id": "a/", "reason": "empty path segment"},
+    {"id": "a\\b", "reason": "backslash or control character"},
+    {"id": "x\nb", "reason": "backslash or control character"},
+    {"id": "x\u0000y", "reason": "backslash or control character"},
+    {"id": "x\u007fy", "reason": "backslash or control character"}
+  ]
+}

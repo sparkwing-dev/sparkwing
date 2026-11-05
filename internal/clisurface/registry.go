@@ -582,10 +582,13 @@ func Registry() []Command {
 		{Path: "sparkwing runs retry", Rules: []string{
 			"Select --failed to reuse successful jobs or --all-jobs to execute the sealed plan again. Retry preserves the source request, plan, source trust and actor. The controller records the retrier separately.",
 			"Repeat --run or use --run - for newline-separated IDs on stdin. JSON emits one safe receipt or structured failure per source run. Plain emits new run IDs. Local and remote retries use the same controller API.",
+			"--reason records why the retry should pass on the new run, shown by runs list and runs status. It is required when an agent retries: the CLI detects Claude Code, Codex and Gemini CLI, or reads --agent or SPARKWING_AGENT, and the controller refuses an agent's retry without a reason. --agent none opts out.",
 		}, Flags: []Flag{
 			{Name: "run", Argument: "RUN_ID", Required: true, Repeatable: true, CommaList: true},
 			{Name: "failed", Conflicts: []string{"all-jobs"}},
 			{Name: "all-jobs", Conflicts: []string{"failed"}},
+			{Name: "reason", Argument: "TEXT"},
+			{Name: "agent", Argument: "NAME"},
 			{Name: "profile", Argument: "NAME"},
 		}},
 		{Path: "sparkwing runs stats", Rules: []string{
@@ -599,6 +602,18 @@ func Registry() []Command {
 			{Name: "reset"},
 			{Name: "all-pipelines", Requires: []string{"reset"}, Conflicts: []string{"pipeline"}},
 			{Name: "yes", Requires: []string{"reset"}},
+			{Name: "profile", Argument: "NAME"},
+		}},
+		{Path: "sparkwing runs timing", Rules: []string{
+			"Read the newest finished root runs of one pipeline, skipping dry runs, with their jobs, steps and lifecycle events, through the selected controller.",
+			"Each job's window, from its first ready event to its end, splits into queue (ready to claimed), admit (claimed to started: concurrency and machine admission, then source checkout), approval, setup (started to the attempt's first step: compile and cache restore), running (any step in progress) and gap (a started job with no step in progress). Each run's wall splits into the most advanced phase any job was in, plus idle when no job is active, so the phases always sum to the wall.",
+			"Step times carry the runner's clock and lifecycle events the store's; a job whose steps fall outside its window has them moved by one offset, reported as step_clock_shift_ns and in the text.",
+			"Text prints run-level and per-job P50 and P90, the five longest waits, and failed jobs grouped by job, failing step of the final attempt and reason; a job with several failing steps counts under each, and cancellations caused by an upstream failure or a cancel request are left out. Both formats show at most --top jobs, slowest first, and --top failure groups, most frequent first (20 each by default); --job selects the jobs the job, wait and failure sections cover. JSON emits one run record per run, the job and failure records, a summary record, and a final page record with the totals and whether any were left out.",
+		}, Flags: []Flag{
+			{Name: "pipeline", Argument: "NAME", Required: true},
+			{Name: "last", Argument: "N", Minimum: 1, HasMinimum: true},
+			{Name: "job", Argument: "JOB", Repeatable: true, CommaList: true},
+			{Name: "top", Argument: "N", Minimum: 1, HasMinimum: true},
 			{Name: "profile", Argument: "NAME"},
 		}},
 		{Path: "sparkwing runs status", Rules: []string{

@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"os"
 	"strings"
 	"testing"
 	"testing/synctest"
@@ -70,9 +71,22 @@ func TestAdmissionLeasesHostAroundEachNode(t *testing.T) {
 		t.Fatalf("leases=%d/%d/%d", live, granted, released)
 	}
 	for _, req := range d.requests() {
-		if !strings.HasPrefix(string(req.RunID), testRunID+"/node-host/") || req.OwnerRunID != "" || req.OwnerLeaseToken != "" || req.SubLease || req.SemaphoresOnly || len(req.Semaphores) != 0 || req.Priority != 5 || req.Class != "batch" || req.Pipeline != "p" || req.Resources != (wingwire.HostResources{}) {
+		if !strings.HasPrefix(string(req.RunID), testRunID+"/node-host/") || req.OwnerRunID != "" || req.OwnerLeaseToken != "" || req.SubLease || req.SemaphoresOnly || len(req.Semaphores) != 0 || req.Priority != 5 || req.Class != "batch" || req.Pipeline != "p" || req.Resources != (wingwire.HostResources{}) || req.PID != os.Getpid() {
 			t.Fatalf("request=%+v", req)
 		}
+	}
+}
+
+func TestAdmissionChargesTheJobsDeclaredCores(t *testing.T) {
+	d := newFakeDaemon()
+	admission := LocalAdmission{Daemon: d}
+	row := localAdmissionRow("light")
+	row.Execution.Cores = 0.25
+	if err := admission.node(localAdmissionContext(t), localAdmissionSeal(t, localAdmissionOptions()), row, func(context.Context) error { return nil }); err != nil {
+		t.Fatal(err)
+	}
+	if reqs := d.requests(); len(reqs) != 1 || reqs[0].Resources != (wingwire.HostResources{Cores: 0.25}) {
+		t.Fatalf("requests = %+v, want the declared quarter core", reqs)
 	}
 }
 

@@ -8,6 +8,7 @@ import (
 	"net/netip"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/deployment/deploymenttest"
 	"github.com/sparkwing-dev/sparkwing/internal/ratelimit"
@@ -54,6 +55,9 @@ func multiTeamLoginServer(t *testing.T) *Server {
 
 func TestLoginLimiter_IPv6RotationWithinOnePrefixCannotBlockOthers(t *testing.T) {
 	srv := multiTeamLoginServer(t)
+	// safety: 2400 requests outlast the two-second refill on a loaded machine, so a moving clock refunds attempts.
+	frozen := time.Now()
+	srv.loginLimit.now = func() time.Time { return frozen }
 	h := srv.Handler()
 	refused := 0
 	for i := range 2400 {

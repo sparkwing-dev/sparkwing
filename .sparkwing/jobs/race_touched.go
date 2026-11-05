@@ -38,6 +38,12 @@ func runRaceTouched(ctx context.Context, mode gateMode, suitesDone <-chan struct
 		sparkwing.Info(ctx, "race-touched: no package changed; nothing to race-test")
 		return nil
 	}
+	// safety: this job has no frontend-deps step of its own, and hosted CI installs web deps only for the gate lane.
+	if slices.Contains(targets["."], "./tests/acceptance") {
+		if err := ensureFrontendDeps(ctx); err != nil {
+			return err
+		}
+	}
 	return withGoTestScratch(func(testRoot string) error {
 		return withProductTestHome(func(home string) error {
 			return raceModules(ctx, targets, testRoot, home, suitesDone)

@@ -46,6 +46,7 @@ class Session {
   readonly #frames: LineSink;
   #done = false;
   #helloSeen = false;
+  #hostFeatures: readonly string[] = [];
   #runner: RunnerInfo | undefined;
   #binding: { run: string; job: string } | undefined;
   #services: HostServices | undefined;
@@ -138,8 +139,14 @@ class Session {
       this.#services = this.#options.services ? this.#options.services(routes) : new NodeRoutes(routes);
     }
     this.#runner = runner;
+    this.#hostFeatures = Array.isArray(req.features) ? [...(req.features as string[])] : [];
     const { version } = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")) as { version: string };
     return { protocol: 2, sdk: { language: "typescript", version: `v${version}` }, features: [] };
+  }
+  // safety: a host older than a declaration refuses the whole plan, so a core request it never named stays out.
+  #forHost(jobs: { cores?: number }[]): void {
+    if (this.#hostFeatures.includes("job_cores")) return;
+    for (const job of jobs) delete job.cores;
   }
   #root(): string {
     return this.#options.root ?? process.cwd();
@@ -194,6 +201,7 @@ class Session {
     if (this.#binding && run.id !== this.#binding.run) throw failure("bad_request", "plan run does not match hello binding");
     await runScope({ phase: "plan", root: this.#root() }, () => definition.plan(plan, run));
     const doc = plan.toDoc();
+    this.#forHost(doc.jobs);
     plan.seal();
     this.#planned = { plan, run, definition };
     return doc;
@@ -319,6 +327,7 @@ class Session {
       await closure.fn(generated, req.input ?? null, ctx);
       ctx.signal.throwIfAborted();
       const jobs = generated.toDoc().jobs;
+      this.#forHost(jobs);
       plan.insert(generated);
       this.#generatedArguments.set(closure.id, generated.jobs().flatMap((job) => job.argSpecs().map((spec) => argument(spec, job.id))));
       this.#generated.set(closure.id, jobs);

@@ -15,13 +15,13 @@ import (
 	"strings"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/apierrhttp"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 
 	"github.com/sparkwing-dev/sparkwing/internal/api"
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/health"
 	"github.com/sparkwing-dev/sparkwing/internal/storage"
@@ -33,7 +33,7 @@ import (
 // deployment to anyone who asks, so they are on the operator health route.
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	if err := s.healthDatabaseResult(r.Context(), pingHealthDatabase(r.Context(), s.operator.Ping)); err != nil {
-		apierr.NoteResponseError(w, err)
+		apierrhttp.NoteResponseError(w, err)
 		writeJSON(w, http.StatusServiceUnavailable, health.Response{Status: "degraded", Auth: "enabled", Problems: []string{"db: unavailable"}})
 		return
 	}
@@ -89,7 +89,7 @@ func pingHealthDatabase(ctx context.Context, ping func(context.Context) error) e
 func (s *Server) handleOperatorHealth(w http.ResponseWriter, r *http.Request, _ capability.Authorized) error {
 	out := controllerwire.OperatorHealth{Status: "ok", Database: s.storageHealth()}
 	if err := pingHealthDatabase(r.Context(), s.operator.Ping); err != nil {
-		apierr.NoteResponseError(w, fmt.Errorf("controller health database check: %w", err))
+		apierrhttp.NoteResponseError(w, fmt.Errorf("controller health database check: %w", err))
 		out.Problems = append(out.Problems, "db: unavailable")
 	}
 	var problems []string
@@ -180,7 +180,7 @@ func (s *Server) handlePipelineLatest(w http.ResponseWriter, r *http.Request, au
 	if reference.FromProvenRun {
 		run, err = tenant.GetLatestProvenRunAtCommit(r.Context(), name, reference.JobID, authorized.Principal.Capability.Binding.RunID, statuses, maxAge)
 	} else {
-		run, err = tenant.GetLatestRun(r.Context(), name, statuses, maxAge, reference.FromAnyRun)
+		run, err = tenant.GetLatestRun(r.Context(), name, statuses, maxAge, reference.FromAnyRun, authorized.Principal.Capability.Binding.RunID)
 	}
 	if err != nil {
 		return engineLookupError(err)
@@ -296,7 +296,7 @@ func writeError(w http.ResponseWriter, status int, err error) {
 	}
 	message := err.Error()
 	if status >= http.StatusInternalServerError {
-		apierr.NoteResponseError(w, err)
+		apierrhttp.NoteResponseError(w, err)
 		message = "internal server error"
 	}
 	writeJSON(w, status, map[string]string{"error": message})

@@ -61,7 +61,7 @@ func (p *Land) Plan(_ context.Context, plan *sparkwing.Plan, in ReviewArgs, rc s
 	if rc.Git != nil {
 		branch = rc.Git.Branch
 	}
-	pre := sparkwing.Job(plan, "preconditions", &landPreconditionsJob{RepoDir: repoDir}).Inline()
+	pre := sparkwing.Job(plan, "preconditions", &landPreconditionsJob{RepoDir: repoDir}).Inline().Cores(lightJobCores)
 
 	gate := gateJobs(plan, &Gate{}, "gate", false)
 	// perf: the policy job is the gate's first node and every heavy gate job
@@ -80,7 +80,7 @@ func (p *Land) Plan(_ context.Context, plan *sparkwing.Plan, in ReviewArgs, rc s
 		RunID:   rc.RunID,
 		Head:    sparkwing.RefTo[landHead](pre),
 		Review:  sparkwing.RefTo[reviewRecord](review),
-	}).Inline().Needs(needs...)
+	}).Inline().Cores(lightJobCores).Needs(needs...)
 	return nil
 }
 
@@ -440,6 +440,9 @@ func changedBetween(ctx context.Context, dir, from, to string) ([]string, error)
 // selection leaves to the build step; the tests cover the packages it changed.
 func recheckMergeDelta(ctx context.Context, files []string) error {
 	if err := runBuild(ctx); err != nil {
+		return err
+	}
+	if err := ensureFrontendDeps(ctx); err != nil {
 		return err
 	}
 	return runAffectedTestFiles(ctx, files, fmt.Sprintf("%d file(s) the merge of %s changed", len(files), landBaseRef))

@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
+	"github.com/sparkwing-dev/sparkwing/internal/apierrhttp"
 	"github.com/sparkwing-dev/sparkwing/internal/localhostwire"
 )
 
@@ -278,7 +279,7 @@ func (l *dashboardLogins) logout(w http.ResponseWriter, r *http.Request) {
 }
 
 func writeLoginFailure(w http.ResponseWriter, failure *apierr.Error) {
-	if err := apierr.WriteHTTP(w, failure); err != nil {
+	if err := apierrhttp.Write(w, failure); err != nil {
 		panic(http.ErrAbortHandler) //nolint:forbidigo // net/http aborts the incomplete response.
 	}
 }

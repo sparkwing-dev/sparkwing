@@ -43,6 +43,11 @@ func TestGateReservesAndBoundsItsCPU(t *testing.T) {
 	if got := time.Duration(nodes[1].TimeoutMS) * time.Millisecond; got != gateRunTimeout {
 		t.Fatalf("gate node timeout = %s, want declared workload deadline %s", got, gateRunTimeout)
 	}
+	// perf: the policy, gate and race-touched jobs keep the one-core default; with their whole process tree counted as
+	// Sparkwing load they overcommit like fixed runner slots, which kept six lands no slower than before.
+	if nodes[0].Cores != 0 || nodes[1].Cores != 0 || nodes[2].Cores != 0 || nodes[3].Cores != lightJobCores {
+		t.Fatalf("core requests = %v %v %v %v, want default, default, default, %v", nodes[0].Cores, nodes[1].Cores, nodes[2].Cores, nodes[3].Cores, lightJobCores)
+	}
 	for _, tc := range []struct{ cpus, parallelism int }{{1, 1}, {2, 1}, {3, 1}, {4, 1}, {8, 3}, {14, 6}, {16, 7}} {
 		if got := goStepParallelism(hostShape{cpus: tc.cpus}); got != tc.parallelism {
 			t.Errorf("goStepParallelism(%d shared) = %d, want %d", tc.cpus, got, tc.parallelism)
@@ -385,6 +390,13 @@ func TestGateRunsFrontendUnitSuiteAsAnIndependentStep(t *testing.T) {
 	}
 	if deps := step.Needs; !slices.Equal(deps, []string{"frontend-deps"}) {
 		t.Fatalf("frontend-unit dependencies = %v, want only the dependency install", deps)
+	}
+}
+
+func TestGateTestStepWaitsOnFrontendDependencies(t *testing.T) {
+	w := inspectWork(t, &Gate{})
+	if !stepWaitsOn(w, "test", "frontend-deps") {
+		t.Fatal("test does not wait on frontend-deps, so tests/acceptance can run before web/node_modules exists")
 	}
 }
 

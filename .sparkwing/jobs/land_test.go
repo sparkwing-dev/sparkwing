@@ -180,6 +180,7 @@ type landPlanJob struct {
 	ID     string
 	Needs  []string `json:"deps"`
 	Inline bool
+	Cores  float64
 	Steps  []landPlanStep
 }
 
@@ -241,6 +242,11 @@ func TestLandRunsPolicyFirstThenTheGateAndReviewInParallelBeforeThePush(t *testi
 	}
 	if !land.Inline || !jobs["preconditions"].Inline || !jobs["review"].Inline {
 		t.Fatal("preconditions, review and land must run in the developer's checkout")
+	}
+	for _, id := range []string{"preconditions", "review", recordTreeJob, "land"} {
+		if jobs[id].Cores != lightJobCores {
+			t.Fatalf("%s core request = %v, want %v so it starts beside running gates", id, jobs[id].Cores, lightJobCores)
+		}
 	}
 	for _, step := range land.Steps {
 		if step.ID == "push" {

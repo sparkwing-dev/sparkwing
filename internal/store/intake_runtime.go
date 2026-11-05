@@ -434,10 +434,13 @@ func intakeAuthorityTx(ctx context.Context, tx *storeTx, team Team, request Inta
 
 func retryIntakeTx(ctx context.Context, tx *storeTx, team Team, request IntakeRequest, p capability.Principal) (admittedSnapshot, error) {
 	if request.Request.Lineage.RetryOf == "" {
-		if request.RetryMode != "" {
-			return admittedSnapshot{}, authorityError(apierr.BadRequest, "retry mode requires a source run")
+		if request.RetryMode != "" || request.Request.Lineage.RetryReason != "" {
+			return admittedSnapshot{}, authorityError(apierr.BadRequest, "retry mode and reason require a source run")
 		}
 		return admittedSnapshot{}, nil
+	}
+	if err := runspec.ValidateRetryReason(request.Request.Lineage.RetryReason, request.Request.Agent); err != nil {
+		return admittedSnapshot{}, authorityError(apierr.BadRequest, err.Error())
 	}
 	mode := request.RetryMode
 	if mode == "" {
@@ -471,7 +474,7 @@ func retryIntakeTx(ctx context.Context, tx *storeTx, team Team, request IntakeRe
 			return admittedSnapshot{}, authorityError(apierr.Forbidden, fmt.Sprintf("only %s can retry a %s run; start a new run instead", writer, where))
 		}
 	}
-	in := runspec.RetryInput{Request: source.Request, Plan: source.Plan, Retrier: runspec.Actor{Kind: string(p.Capability.Subject.Kind), ID: p.Capability.Subject.ID}, SourceRunID: source.ID}
+	in := runspec.RetryInput{Request: source.Request, Plan: source.Plan, Retrier: runspec.Actor{Kind: string(p.Capability.Subject.Kind), ID: p.Capability.Subject.ID}, SourceRunID: source.ID, Reason: request.Request.Lineage.RetryReason}
 	if source.Spec != nil {
 		in.Spec = runspec.Optional[runspec.Spec]{Set: true, Value: *source.Spec}
 	}

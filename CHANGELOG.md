@@ -20,12 +20,46 @@ unlock.
 
 ## [Unreleased]
 
+### Added
+
+- **cli + controller:** `runs retry --reason TEXT` records why the retry should pass
+  The new run keeps the reason in its lineage (`retry_reason`), and `runs status`, `runs list`, the API and the
+  console run view show it, and the console's Rerun menu takes one. A reason is one line of at most 1024 bytes without
+  control characters.
+- **cli:** `sparkwing runs timing --pipeline <name>` splits recent runs' time into waiting, setup and running per job
+  Each job's time divides into queue, admission, setup, running and an explicit gap, with P50 and P90 across the last
+  `--last` finished runs. Each run's wall divides the same way and the parts always add up to it, so a long admission
+  wait or a slow setup shows instead of hiding inside the total. Failed jobs are grouped by failing step and reason,
+  with retry and repeated-commit counts. `-o json` emits NDJSON.
+- **sdk:** `JobNode.Cores(n)`, `JobGroup.Cores(n)` and TypeScript `job.cores(n)` declare the CPU a job asks local admission to reserve
+  The default stays one core; requests go down to 0.25. The plan carries `cores` only to a host whose hello names the
+  new `job_cores` feature, so a pipeline using it still plans on an older host, which keeps the one-core charge.
+
 ### Changed
 
+- **cli + controller (Breaking):** An agent's retry must give `--reason`
+  When `runs retry` runs under a detected coding agent (Claude Code, Codex, Gemini CLI), `--agent` or
+  `SPARKWING_AGENT`, it refuses to retry without `--reason`, and the controller refuses a retry request that names
+  an agent without a reason. Fix it by saying why the retry should pass, such as
+  `--reason "flake: DNS timeout in TestX"` or `--reason "fixed X in commit Y"`. People are never asked, and
+  `--agent none` opts out. A controller older than the field gets the retry without the reason, with a notice.
+- **daemon:** A job's own processes no longer count as external load
+  Node-host leases now carry the host process ID, so all CPU used by a job's process tree counts as Sparkwing load, not
+  external load. Before, a gate running `go test -p 7` while charged one core showed all of its CPU as external load
+  and starved every other waiter.
+- **daemon:** A later local waiter starts before a blocked older one only when it cannot delay it
+  The `classic` mode allowed one backfill past a blocked head with no check; now every blocked waiter keeps the
+  capacity it needs at the headroom the machine offers now, and a smaller waiter goes first only within that.
 - **warm capacity:** The default Auto start-time target is 20 seconds instead of 10. New stores seed every class at 20 seconds, and the schema 30 upgrade moves classes still at 10 seconds to 20; a class set to any other target keeps it. `sparkwing operator warm-capacity set` without `--start-time-target` now sends 20s.
 - **sdk:** `NewConcurrencyGroup` in Go and `ConcurrencyGroup` in TypeScript no longer check `Scope` and `OnLimit` themselves. The host still refuses an unknown value as `plan_invalid` when it validates the plan, so both SDKs fail the same way.
 - **delivery:** Docs, UI and process landings run their own checks plus the review
   Without `--full`, the `gate` and `land` pipelines run vet, build, lint, the critical tests and the TypeScript SDK suite only when the change reaches Go source or `sdk/typescript/`, and install frontend dependencies only when a frontend suite runs. The review still runs on every landing; `sparkwing run gate -- --full` keeps the broad verification.
+- **sdk:** The Go SDK no longer imports `net/http`
+  It reaches its node host over loopback with a small HTTP/1.1 client, so a pipeline that does not import `net/http`
+  itself skips `net/http`, `crypto/tls` and `crypto/x509` on an uncached compile.
+- **run:** (Breaking) Go pipelines compile with `CGO_ENABLED=0` unless the environment sets `CGO_ENABLED`
+  An uncached compile is 1-3s faster on a two-vCPU runner. A pipeline that imports a cgo package sets
+  `CGO_ENABLED=1`; see the [migration guide](docs/migrations/_unreleased.md#pipelines-compile-without-cgo).
 
 ### Fixed
 
@@ -69,6 +103,8 @@ unlock.
   Activating a virtualenv or Node version manager keeps the compiled pipeline; upgrading Go behind the same `PATH`
   rebuilds it.
 - **run:** Each engine notice, such as the missing version policy warning, prints once per command instead of three times
+- **sdk:** The engine refuses a plan whose job ID has an empty, `.` or `..` path segment, a backslash or a control character
+  Only the Go SDK refused these IDs; a TypeScript pipeline sent them through. Plan validation now refuses them for every SDK with `plan_invalid` naming the job ID and its position, and the Go SDK's own check is gone, so a Go pipeline gets the same error at planning instead of a panic at `sw.Job`.
 - **cli:** Local commands no longer read gitignored trees when keying the pipeline binary
   `sparkwing run`, `pipeline list`, `info` and `cache explain` walked every file under the pipeline module and its local `replace` targets and passed each path to `git check-ignore`; an 80,000-file ignored lint cache made each take 60-90 seconds. One `git ls-files` call now names ignored files and wholly ignored directories, which are skipped, and the remaining files hash in parallel. Keys are unchanged.
 - **run:** A foreground `sparkwing run` shows step output and exits within 200ms of the run finishing
@@ -145,6 +181,10 @@ unlock.
 - **dashboard:** A dashboard restored after an idle exit binds loopback only
   A dashboard started with `--allow-remote` on a non-loopback address came back on that address whenever a run or schedule restarted the controller, so the consent outlived the network it was given on. The restore now keeps the port and read-only policy but binds `127.0.0.1`; run `sparkwing dashboard start --allow-remote` again to serve remotely.
 
+- **sdk:** A `RefToLastRun` reference to the reading run's own pipeline reads only runs of the reader's repository
+  Repositories in one team can share a pipeline name, so `sparkwing run deploy -- --promote-proven` could read a
+  staging-gate record another repository's `deploy` pipeline published. References to other pipelines still read
+  across the team's repositories.
 - **runners:** A job waiting in `RunAndAwait` no longer holds its runner's slot
   A self-hosted runner defaults to `max_concurrent: 1`, and a child run goes back to the same runners, so the first `RunAndAwait` on a one-runner team hung until its timeout. A job blocked on its children now leaves its slot free, and so does the owner of a named-runner run while one of its jobs waits, until the last wait returns. A resumed job can briefly put the runner over `max_concurrent` until other jobs finish.
 - **cli:** `sparkwing runners add --help` says a job waiting in `RunAndAwait` does not count toward `--max-concurrent`

@@ -29,6 +29,7 @@ const (
 	capabilityRetry                 planCapability = "retry"
 	capabilityTimeout               planCapability = "timeout"
 	capabilityNoProgressTimeout     planCapability = "no_progress_timeout"
+	capabilityCores                 planCapability = "cores"
 	capabilityMemo                  planCapability = "memo"
 	capabilityCaches                planCapability = "caches"
 	capabilityArtifacts             planCapability = "artifacts"
@@ -80,6 +81,7 @@ func capabilityTable() []placementCapability {
 		{capabilityRetry, true, true, true, true, true, true},
 		{capabilityTimeout, true, true, true, true, true, true},
 		{capabilityNoProgressTimeout, true, true, true, true, true, true},
+		{capabilityCores, true, true, true, true, true, true},
 		{capabilityMemo, true, true, true, true, true, true},
 		{capabilityCaches, true, true, true, true, true, true},
 		{capabilityArtifacts, true, true, true, true, true, true},

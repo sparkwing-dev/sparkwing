@@ -82,12 +82,43 @@ and no `--trust`, or `--trust any`.
 
 ## Team launcher pods are not fresh hosts
 
-Pods a team's own launcher starts now take the trust of the launcher's
-credential. Their jobs mint OIDC tokens with `runner_environment: persistent`,
-so a cloud trust policy that requires `fresh` stops accepting them: allow
-`persistent` for those subjects, or run the jobs on Sparkwing Cloud. Their
-verified runs write the launcher's own cache scope, which other launchers and
-Cloud do not restore, unless the team turns on `high_trust`.
+Pods a team's own launcher starts, a runner enrolled with `--launcher`, now
+take the trust of the launcher's credential instead of counting
+as fresh hosts. Jobs on them mint OIDC tokens whose `runner_environment` claim
+is `persistent`, and the subject's `runner_environment` segment changes with
+it. A push to `main` run on such a pod was
+
+```text
+team:acme:repository_id:123456789:pipeline:deploy:trigger:push:runner:runner:runner_environment:fresh:ref:refs/heads/main
+```
+
+and is now
+
+```text
+team:acme:repository_id:123456789:pipeline:deploy:trigger:push:runner:runner:runner_environment:persistent:ref:refs/heads/main
+```
+
+Every other segment stays the same, `runner:runner` included. Jobs on Sparkwing
+Cloud nodes and GitHub-hosted Actions runners, which their provider attests no
+other run touched, keep `runner_environment:fresh`.
+
+This affects a cloud trust policy that requires `runner_environment:fresh` (an
+AWS `sub` condition, a GCP attribute condition on
+`assertion.runner_environment`, a Vault `bound_claims` entry, and similar) for
+jobs that run on a team's own launcher. After the upgrade those roles refuse
+the token. Pick one:
+
+- Admit the launcher's subjects: replace `runner_environment:fresh` with
+  `runner_environment:persistent` in the subject, or with
+  `runner_environment:*` to admit both, and in claim-based conditions accept
+  `persistent`. Keep the repository, trigger and ref pinned.
+- Move the deploying jobs to Sparkwing Cloud, whose tokens stay `fresh`, and
+  leave the policy unchanged.
+
+A policy that already uses `runner_environment:*` needs no change. Verified
+runs on a team launcher's pods also write that launcher's own cache scope,
+which other launchers and Cloud do not restore, unless the team turns on
+`high_trust`.
 
 ## sparkwing run --sw-output is removed
 
@@ -114,3 +145,30 @@ The daemon's `admission_request` message no longer carries
 longer attaches a child run to its parent's lease. No Sparkwing client sent
 these fields, so nothing changes for the CLI or SDKs. A custom client that set
 them should drop them; a child run is admitted on its own.
+
+## Pipelines compile without cgo
+
+Sparkwing compiles a Go pipeline with `CGO_ENABLED=0` when the environment does
+not set `CGO_ENABLED`. Earlier releases left the choice to Go, which enables cgo
+whenever a C compiler is on `PATH`. Without cgo, `net` uses Go's own DNS
+resolver and `os/user` reads `/etc/passwd` and `/etc/group` directly.
+
+A pipeline whose `.sparkwing/` module imports a package written with cgo (a SQLite
+driver built on the C library, for example) now fails to compile with
+`build constraints exclude all Go files` or undefined C symbols. Set
+`CGO_ENABLED=1` where the pipeline runs:
+
+```bash
+CGO_ENABLED=1 sparkwing run build
+```
+
+In GitHub Actions, set it on the step or job (`env: CGO_ENABLED: "1"`). A
+run cannot submit `CGO_*` names to a remote runner, so there the setting comes
+from the runner's own environment: set `CGO_ENABLED=1` in the environment the
+runner service starts with. Sparkwing Cloud runners carry no C compiler, so a
+cgo pipeline did not build there before this release either.
+`go env -w CGO_ENABLED=1` does not count: Sparkwing reads the process
+environment, and its `CGO_ENABLED=0` overrides Go's configuration file.
+
+Commands your pipeline runs, such as `go build` through `sparkwing.Exec`, are
+unaffected; they inherit the job's environment, not the pipeline compile's.

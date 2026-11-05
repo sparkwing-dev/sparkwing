@@ -135,7 +135,7 @@ Data properties on exported interfaces carry the values named in the export inve
 | `Job.withArgs` | Register job-specific args, exposed as resolved `Context.args`. |
 | `Job.step`, `groupSteps` | Declare typed steps and display groups. |
 | `Job.failurePolicy` | Select fail-fast or collect-all step execution. |
-| `Job.retry`, `timeout`, `noProgressTimeout` | Declare app attempts and execution limits. |
+| `Job.retry`, `timeout`, `noProgressTimeout`, `cores` | Declare app attempts, execution limits and the local core request. |
 | `Job.skipIf`, `beforeRun`, `verify`, `afterRun` | Register the execution and eval closures. |
 | `Job.memo`, `cache` | Declare result reuse or reusable file directories. |
 | `Job.artifacts`, `consumes` | Publish files or stage an authorized producer's files. |
@@ -153,7 +153,7 @@ Data properties on exported interfaces carry the values named in the export inve
 | `Plan.concurrency` | Declare run-level admission. |
 | `Plan.priority`, `claimWait`, `admissionClass`, `checkout` | Declare code defaults resolved at accept. |
 | `JobGroup.needs`, `needsIfPresent`, `needsGenerated` | Apply dependency and expansion ordering to every member. |
-| `JobGroup.retry`, `timeout`, `noProgressTimeout` | Apply retry and execution limits to every member. |
+| `JobGroup.retry`, `timeout`, `noProgressTimeout`, `cores` | Apply retry, execution limits and the core request to every member. |
 | `JobGroup.skipIf`, `beforeRun`, `verify`, `afterRun` | Apply eval and execution hooks to every member. |
 | `JobGroup.memo`, `cache`, `artifacts`, `consumes` | Apply reuse, directory caches and artifact flow to every member. |
 | `JobGroup.concurrency` | Apply admission cost to every member. |

@@ -49,15 +49,21 @@ func TestLintRefusesRawProcessConstructorsOutsideProcenv(t *testing.T) {
 	}
 	cmd := exec.Command(lint, "run", "--config", filepath.Join(dir, "lint.yml"), "--allow-parallel-runners", "./...")
 	cmd.Dir = dir
-	cmd.Env = append(os.Environ(), "GOWORK=off", "GOFLAGS=-buildvcs=false")
-	out, _ := cmd.CombinedOutput()
+	// safety: other fixtures share this module path and file names, so a shared
+	// cache can hand back their issues; warnings on stderr can also name paths.
+	scratch := t.TempDir()
+	cmd.Env = append(os.Environ(), "GOWORK=off", "GOFLAGS=-buildvcs=false",
+		"GOLANGCI_LINT_CACHE="+filepath.Join(scratch, "lint-cache"), "TMPDIR="+scratch)
+	var stderr strings.Builder
+	cmd.Stderr = &stderr
+	out, _ := cmd.Output()
 	report := string(out)
 	for _, want := range []string{"lib/lib.go", "cmd/tool/tool.go"} {
 		if !strings.Contains(report, want) || !strings.Contains(report, "raw process constructor") {
-			t.Errorf("lint did not refuse the aliased constructor in %s:\n%s", want, report)
+			t.Errorf("lint did not refuse the aliased constructor in %s:\n%s\nstderr:\n%s", want, report, stderr.String())
 		}
 	}
 	if strings.Contains(report, "internal/procenv/command.go") || strings.Contains(report, "panic(") {
-		t.Errorf("lint refused procenv's own constructor or a panic in cmd:\n%s", report)
+		t.Errorf("lint refused procenv's own constructor or a panic in cmd:\n%s\nstderr:\n%s", report, stderr.String())
 	}
 }
