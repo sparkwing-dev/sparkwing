@@ -52,7 +52,34 @@ Maximum session duration: 3600 seconds. The OIDC provider `arn:aws:iam::63328090
 }
 ```
 
-The role cannot delete images, change tags in place (the repositories keep immutable tags), read other parameters, or touch the database, Route 53 or IAM.
+The policy above cannot delete images, change tags in place (the repositories keep immutable
+tags), read other parameters, or touch the database, Route 53 or IAM.
+
+### Required RDS extension for schema-aware deploys
+
+The deploy pipeline now checks automated backups before every environment deploy and takes a
+snapshot only when the candidate changes the schema version. Add these statements to the role
+in kikd-infra before the watched staging push. This extension has not been applied by the code
+change in this repository. It allows describes and snapshot creation, with no restore, modify
+or delete permission.
+
+```json
+[
+  {"Sid": "DeployBackupRead", "Effect": "Allow",
+   "Action": ["rds:DescribeDBInstances", "rds:DescribeDBSnapshots"], "Resource": "*"},
+  {"Sid": "DeploySchemaSnapshot", "Effect": "Allow", "Action": "rds:CreateDBSnapshot",
+   "Resource": ["arn:aws:rds:us-west-2:633280902600:db:kikd-prod-sparkwing-postgres",
+                "arn:aws:rds:us-west-2:633280902600:snapshot:sparkwing-deploy-*"]}
+]
+```
+
+Both environments target `kikd-prod-sparkwing-postgres`. The preflight requires
+`BackupRetentionPeriod > 0` in [DescribeDBInstances](https://docs.aws.amazon.com/cli/latest/reference/rds/describe-db-instances.html).
+On a schema upgrade, [the snapshot waiter](https://docs.aws.amazon.com/cli/latest/reference/rds/wait/db-snapshot-available.html)
+requires the snapshot to be available before GitOps changes. Snapshot retention and manual
+recovery remain operator work. The deploy does not delete snapshots or restore databases.
+A failed schema-changing rollout reports its snapshot and requires database recovery before
+image rollback, because migrations are forward-only.
 
 ## Cluster access
 
@@ -83,7 +110,7 @@ These are long-lived secrets. They never sit on a runner's disk past the job (th
 A retry of an old push run reuses that run's outputs and mints the same `trigger:push` subject, so the trust policy alone would let it promote older digests. The pipeline refuses this in two places:
 
 - Every deploy job (`staging-deploy`, `production`) runs `git ls-remote origin refs/heads/main` before changing anything and stops unless the candidate commit is main's tip.
-- `production` refuses a candidate version below the version production runs. Untagged commits build as `vX.Y.(Z+1)-main.<commit time>.g<commit>`, so versions between releases order by commit time.
+- `production` refuses a candidate version below the version production runs. Untagged commits build as `vX.Y.Z-N-gSHA` from `git describe --tags --long`. The version check orders a service stamp after its base release and compares commit counts numerically.
 
 ## Pipeline flags and the trust policy
 
@@ -111,7 +138,7 @@ Later deploys then trace the image and run unattended.
 2. Allow deploy keys in the `sparkwing-dev` organisation (it refuses them today), then create the write key on `sparkwing-gitops` and the read-only key on `sparkwing-ci-smoke` and store their private halves; mint the three team tokens and store them.
 3. Install the GitHub App so repository-scoped runs exist in production: the production team's installation must cover `sparkwing-dev/sparkwing` (the push that starts a deploy) and the WSL workstation and Mac must be enrolled as repository-scoped runners for it (decision 82). The staging `stg-qa` team and the production `qa-team` and `qa-team-b` installations must also cover `sparkwing-dev/sparkwing`, because the gate and the smoke trigger `example` and `deploy-smoke` at the candidate commit, and staging's must cover `sparkwing-ci-smoke`.
 4. Run `sparkwing run deploy -- --dry-run --stop-after staging` from a checkout and read the printed actions.
-5. Add `on: push` for `main` to the `deploy` entry in `.sparkwing/sparkwing.yaml` together with `args: {stop-after: staging}`. Watch one push deploy and gate staging, then remove the `args` line so the next push promotes to production.
+5. The `deploy` entry declares `on: push` for `main` with `args: {stop-after: staging}`. Apply the RDS role extension above before the watched staging push, then watch it deploy and gate staging. Remove the `args` line after that pass so the next push promotes to production.
 
 ## Decisions for Korey
 
@@ -119,7 +146,7 @@ Later deploys then trace the image and run unattended.
 2. **Run-now of main.** `trigger:push` refuses a console or CLI "run now" of `main` (`trigger:manual` with `ref:refs/heads/main`). Push-only does not keep members with `runs.write` away from the role: they can retry any push run, and a retry keeps `trigger:push`. What keeps a retry from deploying old code is the pipeline's main-tip and version checks above. A second subject for run-now would let a member deploy main's tip without a push, which those checks already allow through a retry. Recommendation: push only; a redeploy is an empty commit.
 3. **Long-lived tokens in SSM.** The staging and QA team tokens could instead come from the controllers trusting this OIDC issuer, which is new server-side work. Recommendation: SSM tokens with expiry until that exists.
 4. **Bot commit identity.** GitOps commits are authored as `Sparkwing deploy <deploy@sparkwing.dev>` with the host's git config ignored, so a deploy behaves the same on either machine or on Cloud and never needs a signing agent.
-5. **Candidate version.** A commit with no release tag builds as the next patch version plus `-main.<commit time>.g<12-char commit>`, for example `v0.68.4-main.1762095600.gbd3c2dd363c5`, so main builds order by commit time below the next release. Registry tags are immutable, so one commit maps to one image pair, and a rerun reuses it.
+5. **Candidate version.** Superseded by Korey's 2026-11-05 main-deploy decision: use the hosted service stamp `vX.Y.Z-N-gSHA`, for example `v0.68.6-12-gbd3c2dd363c5`. Stable release tags supply the base. HEAD needs no release tag, and the deploy does not invoke the GitHub release workflow. Registry tags are immutable, and a rerun reuses the same image pair after checking its revision labels.
 
 ## Runner isolation (accepted)
 
