@@ -6,6 +6,8 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/docker"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/git"
 )
 
 type inputs struct {
@@ -17,6 +19,28 @@ type output struct {
 }
 
 type pipeline struct{ sparkwing.Base }
+
+type fixtureSecrets struct {
+	Value string `sw:"COMPAT_SECRET,optional"`
+}
+
+func (pipeline) Secrets() any { return &fixtureSecrets{} }
+
+type lifecycle struct{}
+
+func (lifecycle) Work(work *sparkwing.Work) (*sparkwing.WorkStep, error) {
+	concurrent := func(ctx context.Context) error {
+		_, err := sparkwing.Exec(ctx, os.Getenv("COMPAT_HELPER_EXE"), "concurrent").Run()
+		return err
+	}
+	a := sparkwing.Step(work, "concurrent-a", concurrent)
+	b := sparkwing.Step(work, "concurrent-b", concurrent)
+	sparkwing.Step(work, "retry", func(ctx context.Context) error {
+		_, err := sparkwing.Exec(ctx, os.Getenv("COMPAT_HELPER_EXE"), "retry").Run()
+		return err
+	}).Needs(a, b)
+	return nil, nil
+}
 
 type task struct {
 	sparkwing.Produces[output]
@@ -51,6 +75,20 @@ func (task task) Work(work *sparkwing.Work) (*sparkwing.WorkStep, error) {
 		_, err := sparkwing.Exec(ctx, os.Getenv("COMPAT_HELPER_EXE"), "raw").Run()
 		return err
 	})
+	sparkwing.Step(work, "oidc", func(ctx context.Context) (map[string]string, error) {
+		token, err := sparkwing.OIDCToken(ctx, "compat-audience")
+		return map[string]string{"token": token}, err
+	})
+	sparkwing.Step(work, "secret", func(ctx context.Context) (map[string]string, error) {
+		value, err := sparkwing.Secret(ctx, "COMPAT_SECRET")
+		return map[string]string{"secret": value}, err
+	})
+	sparkwing.Step(work, "git", func(ctx context.Context) ([]string, error) {
+		return git.ChangedFiles(ctx, sparkwing.WorkDir(), "")
+	})
+	sparkwing.Step(work, "docker", func(ctx context.Context) (docker.BuildResult, error) {
+		return docker.Build(ctx, docker.BuildConfig{Image: "compat-image", Tags: []string{"fixture"}})
+	})
 	return result, nil
 }
 
@@ -63,6 +101,8 @@ func (pipeline) Plan(_ context.Context, plan *sparkwing.Plan, in inputs, _ spark
 		sparkwing.Job(generated, "generated", func(context.Context) error { return nil })
 		return nil
 	})
+	sparkwing.Job(plan, "lifecycle", lifecycle{}).Retry(2).Timeout(time.Minute).
+		Cache(sparkwing.Dir("compat-cache", sparkwing.KeyFromFile("compat-cache-key.txt")))
 	sparkwing.Job(plan, "dependent", func(context.Context) error { return nil }).Needs(source)
 	return nil
 }

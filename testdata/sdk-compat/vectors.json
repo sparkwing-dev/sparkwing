@@ -58,7 +58,7 @@
           "sparkwing/protocol_operations.go:sdkOperations.Prepare"
         ],
         "typescript": [
-          "sdk/typescript/src/runner.ts:Runner.#context"
+          "sdk/typescript/src/runner.ts:Session.#context"
         ]
       },
       "decision": "maintainer_required"
@@ -225,10 +225,12 @@
     {
       "id": "git-newline-bearing-path",
       "area": "helper",
-      "evidence": "source_inspection",
+      "evidence": "historical_fixture",
       "input": {
         "changed_path": "line\nbreak.txt",
-        "git_config_core_quotepath": true
+        "git_config_core_quotepath": true,
+        "fixture_step": "git",
+        "fake_tool": "git"
       },
       "go": {
         "command_argv": [
@@ -237,6 +239,9 @@
           "HEAD"
         ],
         "paths": [
+          "\"line\\nbreak.txt\""
+        ],
+        "step_output": [
           "\"line\\nbreak.txt\""
         ]
       },
@@ -248,6 +253,9 @@
           "HEAD"
         ],
         "paths": [
+          "line\nbreak.txt"
+        ],
+        "step_output": [
           "line\nbreak.txt"
         ]
       },
@@ -313,6 +321,75 @@
         ],
         "typescript": [
           "sdk/typescript/src/command.ts:createCommand.string"
+        ]
+      }
+    },
+    {
+      "id": "docker-build-result-shape",
+      "area": "helper",
+      "evidence": "historical_fixture",
+      "input": {
+        "fixture_step": "docker",
+        "fake_tool": "docker",
+        "image": "compat-image",
+        "tags": [
+          "fixture"
+        ],
+        "fake_docker_exit_code": 0
+      },
+      "go": {
+        "step_output": {
+          "Image": "compat-image:fixture",
+          "Digests": {},
+          "Registries": null
+        }
+      },
+      "typescript": {
+        "step_output": {
+          "image": "compat-image:fixture",
+          "digests": {},
+          "registries": []
+        }
+      },
+      "decision": "maintainer_required",
+      "sources": {
+        "go": [
+          "sparkwing/docker/docker.go:BuildResult",
+          "sparkwing/docker/docker.go:build"
+        ],
+        "typescript": [
+          "sdk/typescript/src/helpers/docker.ts:build"
+        ]
+      }
+    },
+    {
+      "id": "secret-kind-drift",
+      "area": "helper",
+      "evidence": "historical_fixture",
+      "input": {
+        "fixture_step": "secret",
+        "declaration": "COMPAT_SECRET",
+        "stored_masked": false,
+        "stored_value": "compat-stored-value"
+      },
+      "go": {
+        "outcome": "failed",
+        "error_contains": "entry is stored with masked=false"
+      },
+      "typescript": {
+        "outcome": "success",
+        "step_output": {
+          "secret": "compat-stored-value"
+        }
+      },
+      "decision": "maintainer_required",
+      "sources": {
+        "go": [
+          "sparkwing/secret.go:Secret"
+        ],
+        "typescript": [
+          "sdk/typescript/src/context.ts:makeContext",
+          "sdk/typescript/src/routes.ts:HostServices.secret"
         ]
       }
     }
