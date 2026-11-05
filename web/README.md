@@ -17,6 +17,11 @@ with sibling routes for runs, queue, cluster, analytics and the docs guide.
 Shared UI is in `src/components/`. Edits hot-reload.
 Home shows a short setup guide while fewer than five runs are in its overview
 window. Its empty attention state links to Runs.
+Approved accounts without an active team see **Create your first team** before
+Home or team pages send team-scoped requests. Creating a team selects it and opens
+GitHub setup when the controller offers it. Accounts with existing memberships can
+select one from the team menu. Waitlisted accounts keep their waitlist notice,
+and operator sessions keep their existing access.
 On the runs Activity view, closing a detail pane keeps the run list compact
 until the pane finishes expanding, so row heights stay steady.
 Unstarted runs show `Not started` and their queued creation time, when available,

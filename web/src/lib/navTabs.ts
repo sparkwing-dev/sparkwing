@@ -36,7 +36,7 @@ const localAdmissionTabs = new Set(["/queue", "/capacity"]);
 // no account to hang team pages on, so Secrets sits in the top nav there.
 // A waitlisted account belongs to no team, so every team view would refuse it.
 export function navTabs(status: TeamState["status"]): NavTab[] {
-  if (status === "waitlisted") return [];
+  if (status === "waitlisted" || status === "no-team") return [];
   if (status === "single-team") {
     if (showsLocalAdmission(status)) return localTabs;
     return localTabs.filter((tab) => !localAdmissionTabs.has(tab.href));

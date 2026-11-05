@@ -20,6 +20,11 @@ unlock.
 
 ## [Unreleased]
 
+### Fixed
+
+- **console:** Approved accounts without an active team can create their first team or select an existing one
+  Home and team pages show the next step without sending team requests that return Permission denied.
+
 ## [v0.69.2] - 2026-11-05
 ### Changed
 
