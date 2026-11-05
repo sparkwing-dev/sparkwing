@@ -527,6 +527,12 @@ sparkwing run deploy -- --dry-run --promote-proven        # preview promoting th
 
 #### Deploy toolchain
 
+Deploys run only on runners labelled `deploy-kikd-prod`. After installing the root-owned toolchain
+below, enroll one with `sparkwing runners add --profile prod --runner korey-desktop --session-stdin
+--repos github.com/sparkwing-dev/sparkwing --trust verified-default --label deploy-kikd-prod`, using
+the account session described in the [runners add docs](docs/cli-runners.md#sparkwing-runners-add).
+Local `--dry-run` previews need no runner label.
+
 A real deploy runs `aws`, `kubectl`, `helm`, `git`, `ssh`, `go`, `bash`, `node` and `pnpm` only from
 `/opt/sparkwing-deploy/bin`, and gives every child process `PATH=/opt/sparkwing-deploy/bin:/usr/bin:/bin`.
 The directory must be owned by root and not writable by the runner's user, so another job on the same

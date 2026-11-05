@@ -270,6 +270,48 @@ func TestDeployPlanShape(t *testing.T) {
 	}
 }
 
+func TestDeployPlanRequiresDeployRunner(t *testing.T) {
+	for _, shape := range []struct {
+		name string
+		args map[string]string
+		jobs int
+	}{
+		{"full", nil, 4},
+		{"staging", map[string]string{"stop-after": "staging"}, 3},
+		{"promote-proven", map[string]string{"promote-proven": "true"}, 3},
+	} {
+		for _, mode := range []string{"real", "dry-run", "sw-dry-run"} {
+			t.Run(shape.name+"/"+mode, func(t *testing.T) {
+				var want []string
+				if mode == "real" {
+					want = []string{"deploy-kikd-prod"}
+				}
+				args := map[string]string{}
+				for key, value := range shape.args {
+					args[key] = value
+				}
+				if mode == "dry-run" {
+					args["dry-run"] = "true"
+				}
+				host := newTestHost(t, sparkwingtest.Options{Run: sparkwing.RunContext{DryRun: mode == "sw-dry-run"}})
+				plan, err := host.Plan(t.Context(), "Deploy", args)
+				if err != nil {
+					t.Fatal(err)
+				}
+				doc := decodePipeline(t, plan)
+				if len(doc.Jobs) != shape.jobs {
+					t.Fatalf("got %d jobs, want %d", len(doc.Jobs), shape.jobs)
+				}
+				for _, job := range doc.Jobs {
+					if !slices.Equal(job.Requires, want) {
+						t.Errorf("job %s requires %v, want %v", job.ID, job.Requires, want)
+					}
+				}
+			})
+		}
+	}
+}
+
 func TestRequireStagingPass(t *testing.T) {
 	images := deployImages{Controller: imagePin{Digest: testDigest("c")}, Runner: imagePin{Digest: testDigest("r")}}
 	gate := sparkwing.Ref[stagingGateRecord]{JobID: "staging-gate"}
