@@ -22,6 +22,7 @@ unlock.
 
 ### Fixed
 
+- **CLI:** `sparkwing runners add` installs the runner service on a Mac that has never had one; it no longer stops at launchctl's "Could not find service" answer.
 - **engine:** Export `SPARKWING_DRY_RUN=1` only for dry runs, so sparks-core helpers no longer skip their work on normal runs. Template verification selects dry-run mode with `--sw-dry-run`.
 
 - **cli:** Replacing a profile token through `sparkwing login` skips the revocation warning when the previous token is already ended or unknown

@@ -257,6 +257,7 @@ func notLoaded(out string) bool {
 		"no such file",
 		"no such process",
 		"could not find specified service",
+		"could not find service",
 		"does not exist",
 		"not found",
 	} {
