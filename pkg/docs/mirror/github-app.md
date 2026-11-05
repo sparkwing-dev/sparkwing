@@ -83,12 +83,32 @@ An installation stops being bound when GitHub reports it deleted, when a team ow
 
 ### Repository-managed triggers
 
-In **Team → GitHub**, select a connected repository, review its declared pipelines,
-and choose **Enable declarations**. Connecting an installation alone does not enable
-repository automation. The controller reads `.sparkwing/sparkwing.yaml` at the
+In **Team → GitHub**, follow **Set up a repository**. Connect GitHub, select a
+repository and review its pipeline names and push branches. An owner chooses
+**Enable runs on GitHub Actions** to allow Actions execution and turn on automatic
+runs together. This uses the repository's GitHub Actions minutes. Other run
+locations and separate permission controls are available under details.
+Connecting an installation alone does not enable repository automation.
+The controller reads `.sparkwing/sparkwing.yaml` at the
 verified default-branch head without compiling or executing repository Go code.
 Subsequent signed deliveries use those declarations; execution stays pinned to the
 event's commit. Feature-branch and PR-head configuration cannot authorize a run.
+
+The checklist reads trigger and permission status from the controller. Workflow
+and team settings are customer confirmations for that visit, because this API
+does not inspect GitHub workflows or variables. Keep an existing working workflow.
+For a new one, copy the starter into `.github/workflows/sparkwing.yaml`. Use the
+team **slug**, shown with a copy button beside the display name, for `--team`,
+workflow variables and AWS policies. A workflow that reads `vars.SPARKWING_TEAM`
+needs that repository variable set to the slug. The starter embeds `--team`
+directly. Confirm the workflow is enabled, then push a commit and follow it in
+**Runs**. Manual subscription overrides remain under **Advanced**.
+
+For terminal access, **Team → Machines** leads with `sparkwing login` and a command
+for this controller and team. Approve the code in the browser to sign in or
+replace an expired credential in the named profile. Use `--profile` with that
+name on later CLI commands, or replace it with an existing profile name when
+renewing credentials. Manual CLI tokens remain available for scripts.
 
 `GET /api/v1/team/github-app/automation?repository=owner/name` previews the
 configuration, source SHA, default branch, consent state and pipeline filters.
