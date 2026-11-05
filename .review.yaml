@@ -57,8 +57,18 @@ never_block:
   - rare non-catastrophic races that recover on their own
   - reconcilable edge cases that have a documented manual recovery
 
+# When every changed file matches these paths, the default review runs on the
+# docs reviewer's model. The review still runs; only the model changes.
+docs_only:
+  paths:
+    - docs/**
+    - "**/*.md"
+    - CHANGELOG*
+  reviewer: docs
+
 reviewers:
   default: { model: codex-sol }
+  docs: { model: claude-haiku }
   security: { model: claude-opus }
 
 rereview:

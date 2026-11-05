@@ -2,6 +2,7 @@ package nodeproto
 
 import (
 	"fmt"
+	"math"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -65,6 +66,14 @@ func (v *planValidator) validateJob(job JobSpec, path string) error {
 			if *duration.value < 0 {
 				return planInvalid(duration.path, "duration is negative")
 			}
+		}
+	}
+	if job.Cores != nil {
+		if err := v.feature(capabilityCores, path+".cores"); err != nil {
+			return err
+		}
+		if c := *job.Cores; math.IsNaN(c) || math.IsInf(c, 0) || c < MinJobCores {
+			return planInvalid(path+".cores", fmt.Sprintf("core request must be a finite number of at least %g", MinJobCores))
 		}
 	}
 	if job.Memo != nil {
@@ -182,7 +191,7 @@ func (v *planValidator) validateJob(job JobSpec, path string) error {
 		if err := v.feature(capabilityApproval, path+".approval"); err != nil {
 			return err
 		}
-		if len(job.Steps) != 0 || job.ResultStep != "" || job.OnFailureOf != "" || job.Retry != nil || job.Memo != nil || len(job.Caches)+len(job.Artifacts)+len(job.Consumes) > 0 || job.TimeoutMS != nil || job.NoProgressTimeoutMS != nil || job.Inline || job.FailurePolicy != "" || len(job.Closures.Generate) > 0 || len(job.Closures.BeforeRun)+len(job.Closures.AfterRun) > 0 || job.Closures.Verify != "" || job.Closures.MemoKey != "" {
+		if len(job.Steps) != 0 || job.ResultStep != "" || job.OnFailureOf != "" || job.Retry != nil || job.Memo != nil || len(job.Caches)+len(job.Artifacts)+len(job.Consumes) > 0 || job.TimeoutMS != nil || job.NoProgressTimeoutMS != nil || job.Cores != nil || job.Inline || job.FailurePolicy != "" || len(job.Closures.Generate) > 0 || len(job.Closures.BeforeRun)+len(job.Closures.AfterRun) > 0 || job.Closures.Verify != "" || job.Closures.MemoKey != "" {
 			return planInvalid(path+".approval", "approval conflicts with executable or recovery declarations")
 		}
 		if len(job.Closures.SkipIf) > 0 {

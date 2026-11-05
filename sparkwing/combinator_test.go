@@ -31,9 +31,9 @@ func TestGroupModifiersApplyToEveryMember(t *testing.T) {
 	upstream := Job(plan, "upstream", func(context.Context) error { return nil })
 	group := JobFanOut(plan, "builds", []string{"a", "b"}, func(item string) (string, any) {
 		return "build-" + item, func(context.Context) error { return nil }
-	}).Needs(upstream).Retry(3).Timeout(10 * time.Second).NoProgressTimeout(2 * time.Second)
+	}).Needs(upstream).Retry(3).Timeout(10 * time.Second).NoProgressTimeout(2 * time.Second).Cores(0.5)
 	for _, member := range group.Members() {
-		if !slices.Equal(member.needs, []string{"upstream"}) || member.retryAttempts != 3 || member.timeout != 10*time.Second || member.noProgressTimeout != 2*time.Second {
+		if !slices.Equal(member.needs, []string{"upstream"}) || member.retryAttempts != 3 || member.timeout != 10*time.Second || member.noProgressTimeout != 2*time.Second || member.cores != 0.5 {
 			t.Fatalf("group member %s settings = %+v", member.id, member)
 		}
 	}

@@ -62,7 +62,8 @@ func reviewJobNode(plan *sparkwing.Plan, in ReviewArgs, branch string) *sparkwin
 	return sparkwing.Job(plan, "review", &reviewJob{args: in, branch: branch}).
 		Inline().
 		Timeout(45 * time.Minute).
-		NoProgressTimeout(30 * time.Minute)
+		NoProgressTimeout(30 * time.Minute).
+		Cores(lightJobCores)
 }
 
 func init() {
@@ -248,6 +249,10 @@ func reviewPassForTree(ctx context.Context, d reviewDeps, p reviewPolicy, rec *r
 		order = append(order, profile)
 	}
 	sort.Strings(order)
+	docsModel := p.defaultModel(files)
+	if docsModel != p.Reviewers[defaultReviewer].Model {
+		rec.Notes = append(rec.Notes, "every changed file is documentation, so the default reviewer ran on "+docsModel)
+	}
 	for _, profile := range order {
 		scoped := diff
 		if profile != defaultReviewer {
@@ -255,7 +260,11 @@ func reviewPassForTree(ctx context.Context, d reviewDeps, p reviewPolicy, rec *r
 				return err
 			}
 		}
-		resumed, err := runProfile(ctx, d, p, rec, profile, reviewPrompt{
+		model := p.Reviewers[profile].Model
+		if profile == defaultReviewer {
+			model = docsModel
+		}
+		resumed, err := runProfile(ctx, d, p, rec, profile, model, reviewPrompt{
 			policy: p, profile: profile, objective: objective, standards: standards,
 			base: base, head: head, diff: scoped, files: profiles[profile],
 		})
@@ -281,8 +290,7 @@ func scopedDiff(ctx context.Context, d reviewDeps, base, head string, files []st
 	return out, nil
 }
 
-func runProfile(ctx context.Context, d reviewDeps, p reviewPolicy, rec *reviewRecord, profile string, prompt reviewPrompt) (bool, error) {
-	model := p.Reviewers[profile].Model
+func runProfile(ctx context.Context, d reviewDeps, p reviewPolicy, rec *reviewRecord, profile, model string, prompt reviewPrompt) (bool, error) {
 	rv, err := d.reviewer(model)
 	if err != nil {
 		return false, err

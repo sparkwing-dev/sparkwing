@@ -183,6 +183,7 @@ func (g *JobGroup) Cache(caches ...DirCache) *JobGroup
 func (g *JobGroup) Concurrency(cg *ConcurrencyGroup, cost ...int) *JobGroup
 func (g *JobGroup) Consumes(producer *JobNode, opts ...ConsumeOption) *JobGroup
 func (g *JobGroup) ContinueOnError() *JobGroup
+func (g *JobGroup) Cores(cores float64) *JobGroup
 func (g *JobGroup) Env(key, value string, opts ...EnvOption) *JobGroup
 func (g *JobGroup) Inline() *JobGroup
 func (g *JobGroup) Members() []*JobNode
@@ -209,6 +210,7 @@ func (n *JobNode) Cache(caches ...DirCache) *JobNode
 func (n *JobNode) Concurrency(g *ConcurrencyGroup, cost ...int) *JobNode
 func (n *JobNode) Consumes(producer *JobNode, opts ...ConsumeOption) *JobNode
 func (n *JobNode) ContinueOnError() *JobNode
+func (n *JobNode) Cores(cores float64) *JobNode
 func (n *JobNode) Env(key, value string, opts ...EnvOption) *JobNode
 func (n *JobNode) Generate(fn GenerateFn) *Generator
 func (n *JobNode) ID() string
