@@ -3,7 +3,7 @@ package wingd_test
 import (
 	"context"
 	"net"
-	"sync/atomic"
+	"sync"
 	"testing"
 	"time"
 
@@ -73,45 +73,49 @@ func TestIdleExit_HealthProbeTrafficDoesNotResetIdleClock(t *testing.T) {
 	}
 }
 
+type stepClock struct {
+	mu  sync.Mutex
+	now time.Time
+}
+
+func (c *stepClock) Now() time.Time {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.now
+}
+
+func (c *stepClock) advance(d time.Duration) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.now = c.now.Add(d)
+}
+
 func TestIdleExit_QueryTrafficDoesNotResetIdleClock(t *testing.T) {
 	t.Parallel()
-	if testing.Short() {
-		t.Skip("slow: 1.0s of real work; the fast class runs under -short")
-	}
 
-	// safety: the guard below needs several probes inside this window, and the window
-	// holds only as many as the interval divides into it. A contended machine stretches
-	// each query past the interval, so the window is sized for the slow case.
-	const idleTimeout = time.Second
+	const idleTimeout = 300 * time.Millisecond
+	const queries = 5
+	clock := &stepClock{now: time.Unix(1_700_000_000, 0)}
 	home := shortHome(t)
-	td := startDaemon(t, wingd.Config{Home: home, IdleTimeout: idleTimeout})
+	td := startDaemon(t, wingd.Config{Home: home, IdleTimeout: idleTimeout, Now: clock.Now})
 
-	firstCtx, firstDone := context.WithTimeout(context.Background(), 2*time.Second)
-	defer firstDone()
-	if _, err := client.Query(firstCtx, client.Options{Home: home, Version: "test"}); err != nil {
-		t.Fatalf("query against a serving daemon: %v", err)
-	}
-
-	var successfulQueries, firstSuccess, lastSuccess atomic.Int64
-	started := time.Now()
-	startProbeLoop(t, 50*time.Millisecond, func(ctx context.Context) error {
+	// safety: every query lands with the idle clock short of the timeout, and the final
+	// step stays shorter than the timeout, so the daemon can exit only if no query
+	// moved its last activity forward.
+	step := idleTimeout / (queries + 1)
+	for i := range queries {
+		clock.advance(step)
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		_, err := client.Query(ctx, client.Options{Home: home, Version: "test"})
-		if err == nil {
-			now := time.Since(started).Nanoseconds()
-			firstSuccess.CompareAndSwap(0, now)
-			lastSuccess.Store(now)
-			successfulQueries.Add(1)
+		cancel()
+		if err != nil {
+			t.Fatalf("query %d against a serving daemon: %v", i+1, err)
 		}
-		return err
-	})
-
-	if err := td.waitExit(t, idleTimeout+3*time.Second); err != nil {
-		t.Fatalf("daemon with only queue-state query traffic should idle out cleanly, got %v", err)
 	}
-	count := successfulQueries.Load()
-	span := time.Duration(lastSuccess.Load() - firstSuccess.Load())
-	if count < 3 || span < idleTimeout/2 {
-		t.Fatalf("query loop completed %d successful observations over %s; want repeated traffic spanning the idle window", count, span)
+	clock.advance(idleTimeout / 2)
+
+	if err := td.waitExit(t, 5*time.Second); err != nil {
+		t.Fatalf("daemon with only queue-state query traffic should idle out cleanly, got %v", err)
 	}
 }
 
