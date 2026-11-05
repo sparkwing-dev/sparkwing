@@ -248,9 +248,6 @@ type Approval struct {
 
 // Approval declares a manual gate whose owner enforces waiting and timeout policy.
 func (p *Plan) Approval(id string, cfg ApprovalConfig) *Approval {
-	if err := validateNodeID(id); err != nil {
-		panic(err)
-	}
 	n := &JobNode{id: id, approvalSpec: &cfg}
 	p.mu.Lock()
 	defer p.mu.Unlock()

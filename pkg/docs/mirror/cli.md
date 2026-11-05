@@ -104,6 +104,25 @@ authoritative. A controller older than the label refuses the field before writin
 anything; the CLI then resends once without it and prints a notice that the
 label was dropped.
 
+### Retry reasons
+
+`runs retry --reason TEXT` records why the retry should pass, such as
+`--reason "flake: DNS timeout in TestX"` or `--reason "fixed X in commit Y"`.
+The new run keeps it in its lineage as `retry_reason`; `runs status`,
+`runs list`, the API and the console run view show it. A reason is one line of
+at most 1024 bytes without control characters.
+
+An agent must give a reason. `runs retry` resolves the agent the same way as
+`sparkwing run` (`--agent`, then `SPARKWING_AGENT`, then the detected
+environment) and sends it with the retry; the controller refuses a retry that
+names an agent without a reason, and the CLI refuses it before connecting.
+People are never asked for one: a retry without an agent label needs no
+reason, even when the source run was started by an agent, because the
+controller cannot tell who is retrying from the source run's label. A CLI older
+than this field sends no agent, so the controller cannot require its reason.
+A controller older than the field refuses it before writing anything; the CLI
+then resends once without the reason and agent and prints a notice.
+
 ## Command groups
 
 Top-level groups, each with its own `--help` and a full per-group page

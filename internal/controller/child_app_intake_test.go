@@ -97,6 +97,7 @@ func TestAppParentChildrenPreserveOnlyExactRevisionTrust(t *testing.T) {
 				return http.DefaultTransport.RoundTrip(r)
 			})}
 			e.Server.WithGitHubApp(config)
+			e.Server.sourceLookup = fixtureCloneHostLookup
 			teststore.SeedGitHubInstallation(t, e.Store, "a", store.GitHubAppInstallation{InstallationID: 7, AccountID: 70, AccountLogin: "acme", AccountType: "Organization", ConnectedBy: "member", GitHubUserID: 71}, time.Now())
 			tenant := teststore.ForTeam(t, e.Store, "a")
 			parent, err := tenant.ReadRun(t.Context(), "run")

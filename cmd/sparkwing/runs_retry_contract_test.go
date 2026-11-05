@@ -129,7 +129,7 @@ func TestRetryReportsPartialFailureAndKeepsReplay(t *testing.T) {
 		return result, nil
 	}}
 	var out bytes.Buffer
-	err := retryRunIDs(t.Context(), retryConnection{Controller: c}, []string{"a", "b"}, controllerwire.RetryFailed, &out, "json")
+	err := retryRunIDs(t.Context(), retryConnection{Controller: c}, []string{"a", "b"}, controllerwire.RetryRequest{Mode: controllerwire.RetryFailed}, &out, "json")
 	if err == nil || !strings.Contains(err.Error(), "retry refused") {
 		t.Fatalf("failure lost: %v", err)
 	}
@@ -156,7 +156,7 @@ func TestRetryStopsAfterCancellationOrOutputFailure(t *testing.T) {
 		if cancelled {
 			out = io.Discard
 		}
-		err := retryRunIDs(ctx, retryConnection{Controller: c}, []string{"a", "b"}, controllerwire.RetryAll, out, "plain")
+		err := retryRunIDs(ctx, retryConnection{Controller: c}, []string{"a", "b"}, controllerwire.RetryRequest{Mode: controllerwire.RetryAll}, out, "plain")
 		if err == nil || calls != 1 {
 			t.Fatalf("cancelled=%v calls=%d err=%v", cancelled, calls, err)
 		}
@@ -175,7 +175,7 @@ func TestRetryRejectsMalformedReceipt(t *testing.T) {
 			return result, nil
 		}}
 		var out bytes.Buffer
-		err := retryRunIDs(t.Context(), retryConnection{Controller: c}, []string{"a"}, controllerwire.RetryAll, &out, "plain")
+		err := retryRunIDs(t.Context(), retryConnection{Controller: c}, []string{"a"}, controllerwire.RetryRequest{Mode: controllerwire.RetryAll}, &out, "plain")
 		if err == nil || out.Len() != 0 {
 			t.Fatalf("malformed receipt succeeded: %+v output=%q err=%v", result, out.String(), err)
 		}
@@ -215,7 +215,7 @@ func TestRetryHereHandoffReceivesPrivateReceiptOnce(t *testing.T) {
 		},
 	}
 	var out bytes.Buffer
-	if err := retryRunIDs(t.Context(), c, []string{"source"}, controllerwire.RetryFailed, &out, "json"); err != nil {
+	if err := retryRunIDs(t.Context(), c, []string{"source"}, controllerwire.RetryRequest{Mode: controllerwire.RetryFailed}, &out, "json"); err != nil {
 		t.Fatal(err)
 	}
 	if claimed != 1 || strings.Contains(out.String(), response.HereBearer) || strings.Contains(out.String(), "request") || !strings.Contains(out.String(), `"run_id":"here-retry"`) {
@@ -238,7 +238,7 @@ func FuzzRetryReceiptsExcludeExecutionInputs(f *testing.F) {
 				return response, nil
 			}}
 			var out bytes.Buffer
-			err := retryRunIDs(t.Context(), retryConnection{Controller: c}, []string{"source-run"}, controllerwire.RetryFailed, &out, "json")
+			err := retryRunIDs(t.Context(), retryConnection{Controller: c}, []string{"source-run"}, controllerwire.RetryRequest{Mode: controllerwire.RetryFailed}, &out, "json")
 			if here && exitCodeFor(err) != 3 || !here && err != nil {
 				t.Fatalf("here=%v error=%v", here, err)
 			}
