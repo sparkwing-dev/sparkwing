@@ -16,7 +16,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
 
-func historicalStorageLifecycle(t *testing.T, ctx context.Context, session *executorSession, task, lifecycle nodeproto.JobSpec) {
+func historicalStorageLifecycle(t *testing.T, ctx context.Context, session *executorSession, task, lifecycle nodeproto.JobSpec) json.RawMessage {
 	t.Helper()
 	host, input, spec, _, _, backend := executorMemoFixture(t, nil)
 	input.NodeID = task.ID
@@ -39,6 +39,7 @@ func historicalStorageLifecycle(t *testing.T, ctx context.Context, session *exec
 	if output.Outcome != "success" || len(output.Output) == 0 {
 		t.Fatalf("memo source output: %+v", output)
 	}
+	historicalAssertJSON(t, output.Output, marshalEventFixture(t, map[string]string{"name": session.jobArgs[task.ID]["name"]}))
 	hit.Output.Value = outputDigest(output.Output)
 	backend.values[hit.Output.Value] = output.Output
 	backend.hit = hit
@@ -58,15 +59,12 @@ func historicalStorageLifecycle(t *testing.T, ctx context.Context, session *exec
 		}
 	}
 	historicalDirectoryCache(t, ctx, lifecycle)
+	return output.Output
 }
 
-func historicalGeneratorReplay(t *testing.T, ctx context.Context, session *executorSession, plan nodeproto.PlanDoc) {
+func historicalGeneratorReplay(t *testing.T, ctx context.Context, session *executorSession, plan nodeproto.PlanDoc, output json.RawMessage) {
 	t.Helper()
 	source := plan.Jobs[0]
-	output := historicalRun(t, ctx, session, "output")
-	if output.Outcome != "success" || len(output.Output) == 0 {
-		t.Fatalf("generator source output: %+v", output)
-	}
 	spec := runspec.Spec{Request: runspec.SealedRequest{RunID: "compat", Request: runspec.Request{Pipeline: "compat"}}, Resolved: runspec.Resolved{SecretRegistration: runspec.SecretRegistration{Version: 1}}}
 	input := NodeInput{Accepted: AcceptedRun{RunID: "compat", Spec: marshalEventFixture(t, spec), Plan: plan}, NodeID: "generated"}
 	sourceHash, err := runspec.CanonicalHash(source)
@@ -79,12 +77,12 @@ func historicalGeneratorReplay(t *testing.T, ctx context.Context, session *execu
 		if ref != sourceRef || generation != 1 {
 			return nil, fmt.Errorf("historical replay read another source: %s generation=%d", ref, generation)
 		}
-		return output.Output, nil
+		return output, nil
 	}}
 	priorArgs := session.rawArgs
 	session.rawArgs = session.jobArgs[source.ID]
 	defer func() { session.rawArgs = priorArgs }()
-	body, err := code.generate(ctx, session, input, source, output.Output)
+	body, err := code.generate(ctx, session, input, source, output)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -112,7 +110,7 @@ func historicalGeneratorReplay(t *testing.T, ctx context.Context, session *execu
 		return readSource(ctx, ref)
 	}
 	input.Replay, err = code.recordedReplay(ctx, input, plan.Jobs)
-	if err != nil || len(input.Replay) != 1 || string(input.Replay[0].Output) != string(output.Output) {
+	if err != nil || len(input.Replay) != 1 || string(input.Replay[0].Output) != string(output) {
 		t.Fatalf("historical recorded replay: replay=%+v error=%v", input.Replay, err)
 	}
 	reconstructed, err := code.replay(ctx, session, input, plan.Jobs)
