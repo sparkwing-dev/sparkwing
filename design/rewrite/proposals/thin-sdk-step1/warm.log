@@ -1,0 +1,70 @@
+=== RUN   TestHistoricalSDKCompatibility
+=== RUN   TestHistoricalSDKCompatibility/go/v0.69.2
+    historical_sdk_test.go:88: accepted hello: {Protocol:2 SDK:{Language:go Version:v0.69.2} Features:[]}; candidate host: (devel)
+=== RUN   TestHistoricalSDKCompatibility/go/v0.69.2/executor-retry-concurrency
+=== RUN   TestHistoricalSDKCompatibility/go/v0.69.2/executor-dependent
+=== RUN   TestHistoricalSDKCompatibility/go/v0.69.2/executor-timeout
+=== NAME  TestHistoricalSDKCompatibility/go/v0.69.2
+    historical_sdk_test.go:76: {"cell_ms":1076,"host":"(devel)","host_executable_sha256":"1d0ceedd41e1e64e40eb04494b1fea5778ddb4b97bd3060e0b13759c5e13456b","host_go":"go1.26.10","mode":"warm","passed":true,"preparation":{"command":["/tmp/sw-codex-sdkfix/cache/4ad2c03dec47c8d790c0dfcc483a8b8220154f9ed57faf782ad9f7ea6226a7b4/pipeline"],"directory":"/tmp/sw-codex-sdkfix/cache/4ad2c03dec47c8d790c0dfcc483a8b8220154f9ed57faf782ad9f7ea6226a7b4","cache_hit":true,"duration_ms":45,"cache_key":"4ad2c03dec47c8d790c0dfcc483a8b8220154f9ed57faf782ad9f7ea6226a7b4","toolchain":{"go":"go version go1.26.10 linux/amd64"},"download_cache":"shared-go-module-cache"},"sdk":{"id":"go-v0.69.2","language":"go","version":"v0.69.2","directory":"go/v0.69.2","entrypoint":".","artifact":{"source":"github.com/sparkwing-dev/sparkwing","checksum":"h1:hE5DawlPeEt9lpJozcLU4zLlV3tOBwYeL+zVdXJHHZc="},"toolchain":{"name":"go","version":"go1.26.10"},"wire_major":2,"capabilities":[],"fixture_revision":3,"expected_outcome":"compatible"}}
+=== RUN   TestHistoricalSDKCompatibility/go/v0.69.1
+    historical_sdk_test.go:88: accepted hello: {Protocol:2 SDK:{Language:go Version:v0.69.1} Features:[]}; candidate host: (devel)
+=== RUN   TestHistoricalSDKCompatibility/go/v0.69.1/executor-retry-concurrency
+=== RUN   TestHistoricalSDKCompatibility/go/v0.69.1/executor-dependent
+=== RUN   TestHistoricalSDKCompatibility/go/v0.69.1/executor-timeout
+=== NAME  TestHistoricalSDKCompatibility/go/v0.69.1
+    historical_sdk_test.go:76: {"cell_ms":1050,"host":"(devel)","host_executable_sha256":"1d0ceedd41e1e64e40eb04494b1fea5778ddb4b97bd3060e0b13759c5e13456b","host_go":"go1.26.10","mode":"warm","passed":true,"preparation":{"command":["/tmp/sw-codex-sdkfix/cache/6da4d5113a8ce3136911c4d099561ce95608a90eee56e0ab0888ccfaeb56552e/pipeline"],"directory":"/tmp/sw-codex-sdkfix/cache/6da4d5113a8ce3136911c4d099561ce95608a90eee56e0ab0888ccfaeb56552e","cache_hit":true,"duration_ms":45,"cache_key":"6da4d5113a8ce3136911c4d099561ce95608a90eee56e0ab0888ccfaeb56552e","toolchain":{"go":"go version go1.26.10 linux/amd64"},"download_cache":"shared-go-module-cache"},"sdk":{"id":"go-v0.69.1","language":"go","version":"v0.69.1","directory":"go/v0.69.1","entrypoint":".","artifact":{"source":"github.com/sparkwing-dev/sparkwing","checksum":"h1:NyR2dbojHgOUGXO8BZJ/dJGhhmkzkXAn8IvxyIZB4EM="},"toolchain":{"name":"go","version":"go1.26.10"},"wire_major":2,"capabilities":[],"fixture_revision":3,"expected_outcome":"compatible"}}
+=== RUN   TestHistoricalSDKCompatibility/go/v0.69.0
+    historical_sdk_test.go:88: accepted hello: {Protocol:2 SDK:{Language:go Version:v0.69.0} Features:[]}; candidate host: (devel)
+=== RUN   TestHistoricalSDKCompatibility/go/v0.69.0/executor-retry-concurrency
+=== RUN   TestHistoricalSDKCompatibility/go/v0.69.0/executor-dependent
+=== RUN   TestHistoricalSDKCompatibility/go/v0.69.0/executor-timeout
+=== NAME  TestHistoricalSDKCompatibility/go/v0.69.0
+    historical_sdk_test.go:76: {"cell_ms":1085,"host":"(devel)","host_executable_sha256":"1d0ceedd41e1e64e40eb04494b1fea5778ddb4b97bd3060e0b13759c5e13456b","host_go":"go1.26.10","mode":"warm","passed":true,"preparation":{"command":["/tmp/sw-codex-sdkfix/cache/7f4f58bd88d04fb60073f8ef2552762cd02c3266112556460faf47f743a66557/pipeline"],"directory":"/tmp/sw-codex-sdkfix/cache/7f4f58bd88d04fb60073f8ef2552762cd02c3266112556460faf47f743a66557","cache_hit":true,"duration_ms":47,"cache_key":"7f4f58bd88d04fb60073f8ef2552762cd02c3266112556460faf47f743a66557","toolchain":{"go":"go version go1.26.10 linux/amd64"},"download_cache":"shared-go-module-cache"},"sdk":{"id":"go-v0.69.0","language":"go","version":"v0.69.0","directory":"go/v0.69.0","entrypoint":".","artifact":{"source":"github.com/sparkwing-dev/sparkwing","checksum":"h1:yPe8ULBnAEonRInTzEE5Bw8D6YSBxAYk68mrK9LOJko="},"toolchain":{"name":"go","version":"go1.26.10"},"wire_major":2,"capabilities":[],"fixture_revision":3,"expected_outcome":"compatible"}}
+=== RUN   TestHistoricalSDKCompatibility/typescript/0.69.2
+    historical_sdk_test.go:88: accepted hello: {Protocol:2 SDK:{Language:typescript Version:v0.69.2} Features:[]}; candidate host: (devel)
+=== RUN   TestHistoricalSDKCompatibility/typescript/0.69.2/executor-retry-concurrency
+=== RUN   TestHistoricalSDKCompatibility/typescript/0.69.2/executor-dependent
+=== RUN   TestHistoricalSDKCompatibility/typescript/0.69.2/executor-timeout
+=== NAME  TestHistoricalSDKCompatibility/typescript/0.69.2
+    historical_sdk_test.go:76: {"cell_ms":4498,"host":"(devel)","host_executable_sha256":"1d0ceedd41e1e64e40eb04494b1fea5778ddb4b97bd3060e0b13759c5e13456b","host_go":"go1.26.10","mode":"warm","passed":true,"preparation":{"command":["node","/tmp/sw-codex-sdkfix/cache/4a415e504ef81a66e7e9a28a0fa2f1c7958b99506b7343700ea0384a22f84c53/pipeline.mjs"],"directory":"/tmp/sw-codex-sdkfix/cache/4a415e504ef81a66e7e9a28a0fa2f1c7958b99506b7343700ea0384a22f84c53","cache_hit":true,"duration_ms":92,"cache_key":"4a415e504ef81a66e7e9a28a0fa2f1c7958b99506b7343700ea0384a22f84c53","toolchain":{"node":"v26.13.0","npm":"10.9.8"},"download_cache":"shared-npm-cache"},"sdk":{"id":"typescript-0.69.2","language":"typescript","version":"0.69.2","directory":"typescript/0.69.2","entrypoint":"pipeline.mjs","artifact":{"source":"https://registry.npmjs.org/@sparkwing/sdk/-/sdk-0.69.2.tgz","checksum":"sha512-aq76IE3mJABymYU5YYh08LlM1O4Eo7evrozkONpGpmk1CHr13FcnKa/gSlp3/libve7HWFrppniT7Vpu7X++og=="},"toolchain":{"name":"node","version":"\u003e=22.18"},"wire_major":2,"capabilities":[],"fixture_revision":3,"expected_outcome":"compatible"}}
+=== RUN   TestHistoricalSDKCompatibility/typescript/0.69.1
+    historical_sdk_test.go:88: accepted hello: {Protocol:2 SDK:{Language:typescript Version:v0.69.1} Features:[]}; candidate host: (devel)
+=== RUN   TestHistoricalSDKCompatibility/typescript/0.69.1/executor-retry-concurrency
+=== RUN   TestHistoricalSDKCompatibility/typescript/0.69.1/executor-dependent
+=== RUN   TestHistoricalSDKCompatibility/typescript/0.69.1/executor-timeout
+=== NAME  TestHistoricalSDKCompatibility/typescript/0.69.1
+    historical_sdk_test.go:76: {"cell_ms":3889,"host":"(devel)","host_executable_sha256":"1d0ceedd41e1e64e40eb04494b1fea5778ddb4b97bd3060e0b13759c5e13456b","host_go":"go1.26.10","mode":"warm","passed":true,"preparation":{"command":["node","/tmp/sw-codex-sdkfix/cache/8257a2bef63ec5c9b1beae65304fb915e5732a9d7e9bce05671de0918018502d/pipeline.mjs"],"directory":"/tmp/sw-codex-sdkfix/cache/8257a2bef63ec5c9b1beae65304fb915e5732a9d7e9bce05671de0918018502d","cache_hit":true,"duration_ms":94,"cache_key":"8257a2bef63ec5c9b1beae65304fb915e5732a9d7e9bce05671de0918018502d","toolchain":{"node":"v26.13.0","npm":"10.9.8"},"download_cache":"shared-npm-cache"},"sdk":{"id":"typescript-0.69.1","language":"typescript","version":"0.69.1","directory":"typescript/0.69.1","entrypoint":"pipeline.mjs","artifact":{"source":"https://registry.npmjs.org/@sparkwing/sdk/-/sdk-0.69.1.tgz","checksum":"sha512-JJ3oMGiADbAO/aXBqPK6UQAZgopRK6wWRIqEzFJJOGDV1rMR1Ti2E/L8EFgEwY/Y+NfF1ExUpun06ZHyBtowUw=="},"toolchain":{"name":"node","version":"\u003e=22.18"},"wire_major":2,"capabilities":[],"fixture_revision":3,"expected_outcome":"compatible"}}
+=== RUN   TestHistoricalSDKCompatibility/typescript/0.69.0
+    historical_sdk_test.go:88: accepted hello: {Protocol:2 SDK:{Language:typescript Version:v0.69.0} Features:[]}; candidate host: (devel)
+=== RUN   TestHistoricalSDKCompatibility/typescript/0.69.0/executor-retry-concurrency
+=== RUN   TestHistoricalSDKCompatibility/typescript/0.69.0/executor-dependent
+=== RUN   TestHistoricalSDKCompatibility/typescript/0.69.0/executor-timeout
+=== NAME  TestHistoricalSDKCompatibility/typescript/0.69.0
+    historical_sdk_test.go:76: {"cell_ms":4067,"host":"(devel)","host_executable_sha256":"1d0ceedd41e1e64e40eb04494b1fea5778ddb4b97bd3060e0b13759c5e13456b","host_go":"go1.26.10","mode":"warm","passed":true,"preparation":{"command":["node","/tmp/sw-codex-sdkfix/cache/c9b68c40377e4c41d93248f8a18e67ac70a69a62891104c3bcae9de75e74ed3a/pipeline.mjs"],"directory":"/tmp/sw-codex-sdkfix/cache/c9b68c40377e4c41d93248f8a18e67ac70a69a62891104c3bcae9de75e74ed3a","cache_hit":true,"duration_ms":90,"cache_key":"c9b68c40377e4c41d93248f8a18e67ac70a69a62891104c3bcae9de75e74ed3a","toolchain":{"node":"v26.13.0","npm":"10.9.8"},"download_cache":"shared-npm-cache"},"sdk":{"id":"typescript-0.69.0","language":"typescript","version":"0.69.0","directory":"typescript/0.69.0","entrypoint":"pipeline.mjs","artifact":{"source":"https://registry.npmjs.org/@sparkwing/sdk/-/sdk-0.69.0.tgz","checksum":"sha512-pn0D9DbwWPEWMcs4db0THo4C00uc1PZMDJMFMjZtoTjyoNZMr9ubrSEOTF7b126Op0usmh6qFAUrgLps4HAEFg=="},"toolchain":{"name":"node","version":"\u003e=22.18"},"wire_major":2,"capabilities":[],"fixture_revision":3,"expected_outcome":"compatible"}}
+--- PASS: TestHistoricalSDKCompatibility (15.77s)
+    --- PASS: TestHistoricalSDKCompatibility/go/v0.69.2 (1.08s)
+        --- PASS: TestHistoricalSDKCompatibility/go/v0.69.2/executor-retry-concurrency (0.22s)
+        --- PASS: TestHistoricalSDKCompatibility/go/v0.69.2/executor-dependent (0.01s)
+        --- PASS: TestHistoricalSDKCompatibility/go/v0.69.2/executor-timeout (0.06s)
+    --- PASS: TestHistoricalSDKCompatibility/go/v0.69.1 (1.05s)
+        --- PASS: TestHistoricalSDKCompatibility/go/v0.69.1/executor-retry-concurrency (0.21s)
+        --- PASS: TestHistoricalSDKCompatibility/go/v0.69.1/executor-dependent (0.01s)
+        --- PASS: TestHistoricalSDKCompatibility/go/v0.69.1/executor-timeout (0.06s)
+    --- PASS: TestHistoricalSDKCompatibility/go/v0.69.0 (1.09s)
+        --- PASS: TestHistoricalSDKCompatibility/go/v0.69.0/executor-retry-concurrency (0.21s)
+        --- PASS: TestHistoricalSDKCompatibility/go/v0.69.0/executor-dependent (0.01s)
+        --- PASS: TestHistoricalSDKCompatibility/go/v0.69.0/executor-timeout (0.06s)
+    --- PASS: TestHistoricalSDKCompatibility/typescript/0.69.2 (4.50s)
+        --- PASS: TestHistoricalSDKCompatibility/typescript/0.69.2/executor-retry-concurrency (0.36s)
+        --- PASS: TestHistoricalSDKCompatibility/typescript/0.69.2/executor-dependent (0.07s)
+        --- PASS: TestHistoricalSDKCompatibility/typescript/0.69.2/executor-timeout (0.13s)
+    --- PASS: TestHistoricalSDKCompatibility/typescript/0.69.1 (3.89s)
+        --- PASS: TestHistoricalSDKCompatibility/typescript/0.69.1/executor-retry-concurrency (0.34s)
+        --- PASS: TestHistoricalSDKCompatibility/typescript/0.69.1/executor-dependent (0.06s)
+        --- PASS: TestHistoricalSDKCompatibility/typescript/0.69.1/executor-timeout (0.12s)
+    --- PASS: TestHistoricalSDKCompatibility/typescript/0.69.0 (4.07s)
+        --- PASS: TestHistoricalSDKCompatibility/typescript/0.69.0/executor-retry-concurrency (0.34s)
+        --- PASS: TestHistoricalSDKCompatibility/typescript/0.69.0/executor-dependent (0.06s)
+        --- PASS: TestHistoricalSDKCompatibility/typescript/0.69.0/executor-timeout (0.12s)
+PASS
+ok  	github.com/sparkwing-dev/sparkwing/internal/nodehost	15.829s

@@ -602,7 +602,12 @@ artifact, toolchain and platform. TypeScript installs also key on lock integrity
 and Node runtime. Candidate host source is excluded from that
 cache because every matrix invocation compiles and executes today's nodehost.
 Cold pre-release preparation rebuilds the fixtures to check artifact acquisition
-and compiler assumptions. The matrix uses isolated homes, local workspaces and
+and compiler assumptions. npm uses a private empty download cache. Go retains
+its configured module and compiler caches. Linux measurements, raw per-cell
+records and the focused pipeline run are retained in
+`design/rewrite/proposals/thin-sdk-step1/REPORT.md`: 17.52 seconds warm and
+20.09 seconds with cold fixture preparation, including Go test setup.
+The matrix uses isolated homes, local workspaces and
 fake providers. This matrix does not replace production resolver routing or
 native platform checks.
 
