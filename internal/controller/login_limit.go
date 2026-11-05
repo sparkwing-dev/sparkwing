@@ -17,14 +17,17 @@ const (
 	loginClientWindow = time.Minute
 )
 
-type loginLimiter struct{ clients *ratelimit.Limiter }
+type loginLimiter struct {
+	clients *ratelimit.Limiter
+	now     func() time.Time
+}
 
 func newLoginLimiter() *loginLimiter {
-	return &loginLimiter{clients: ratelimit.New(loginClientBurst, loginClientWindow)}
+	return &loginLimiter{clients: ratelimit.New(loginClientBurst, loginClientWindow), now: time.Now}
 }
 
 func (l *loginLimiter) admit(r *http.Request) error {
-	if !l.clients.Allow(loginClientKey(ratelimit.ClientIP(r)), time.Now()) {
+	if !l.clients.Allow(loginClientKey(ratelimit.ClientIP(r)), l.now()) {
 		return &apierr.Error{Code: apierr.RateLimited, Message: fmt.Sprintf("login attempt limit is %d per client per minute; current budget usage is %d attempts; wait a minute or contact support@sparkwing.dev to raise this limit", loginClientBurst, loginClientBurst), Details: map[string]any{"retry_after_ms": loginClientWindow.Milliseconds()}}
 	}
 	return nil
