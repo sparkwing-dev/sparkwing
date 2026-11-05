@@ -38,6 +38,10 @@ type LoopConfig struct {
 	PollInterval  time.Duration
 	IdleExit      time.Duration
 	ClaimUntil    time.Time
+	// VersionPinned stops self-update toward a newer release: a GitHub Actions
+	// job gets its version from .sparkwing/go.mod, and a restarted process
+	// cannot exchange the run attempt's one-shot OIDC token again.
+	VersionPinned bool
 	// Kubernetes reports to the controller that this runner runs in a pod.
 	Kubernetes bool
 }

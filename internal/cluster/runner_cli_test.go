@@ -98,7 +98,7 @@ func TestActionsExchangeUsesCallerContextAndServerPushBinding(t *testing.T) {
 			if raw, err := options.Bearer(got); err != nil || raw != "private" {
 				t.Fatalf("runtime lost Actions credential: %v", err)
 			}
-			if !options.Loop.ClaimUntil.Equal(expires) || !reflect.DeepEqual(options.Config.Repos, []string{"github.com/" + push.Repository}) {
+			if !options.Loop.ClaimUntil.Equal(expires) || !options.Loop.VersionPinned || !reflect.DeepEqual(options.Config.Repos, []string{"github.com/" + push.Repository}) {
 				t.Errorf("Actions loop: %#v", options)
 			}
 			return runners.RuntimeConfig{}, boundary

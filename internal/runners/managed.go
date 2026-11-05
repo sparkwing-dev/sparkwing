@@ -64,9 +64,12 @@ func (r ManagedRunner) checkVersion(ctx context.Context, version string) error {
 		if !errors.As(policyErr, &denial) || (denial.Code != apierr.VersionRevoked && denial.Code != apierr.VersionUnsupported) {
 			return policyErr
 		}
+		if r.Loop.Config.VersionPinned {
+			return fmt.Errorf("%w; update github.com/sparkwing-dev/sparkwing in .sparkwing/go.mod to a supported release", policyErr)
+		}
 		return errors.Join(errRunnerUpdate, policyErr)
 	}
-	if semver.Compare(index.Index.Policy().Latest, version) > 0 {
+	if !r.Loop.Config.VersionPinned && semver.Compare(index.Index.Policy().Latest, version) > 0 {
 		return errRunnerUpdate
 	}
 	return nil

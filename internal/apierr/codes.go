@@ -134,6 +134,7 @@ const (
 	ReasonSecretsKeyRequired     Reason = "secrets_key_required"
 	ReasonNotReady               Reason = "not_ready"
 	ReasonNoOutput               Reason = "no_output"
+	ReasonExchangeUsed           Reason = "exchange_used"
 )
 
 // DetailUnknownField names, in Error.Details, a request field a controller refused because it does not know it.

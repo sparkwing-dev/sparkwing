@@ -120,7 +120,13 @@ func consumeActionsExchangeTx(ctx context.Context, tx *storeTx, spec capability.
 		return err
 	}
 	if n != 1 {
-		return bindingRefusal()
+		return actionsExchangeUsed()
 	}
 	return nil
+}
+
+func actionsExchangeUsed() error {
+	refusal := apierr.Authorization(apierr.ReasonExchangeUsed, "this GitHub Actions run attempt already exchanged its token; each run attempt gets one runner credential")
+	refusal.Hint = "Re-run the job for a new run attempt. If the runner restarted to update itself, set github.com/sparkwing-dev/sparkwing in .sparkwing/go.mod to the latest release."
+	return refusal
 }

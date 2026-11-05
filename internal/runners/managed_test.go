@@ -11,6 +11,7 @@ import (
 	"testing/synctest"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
@@ -252,4 +253,70 @@ func TestManagedRunnerPreservesInvalidPendingAwardFailure(t *testing.T) {
 			t.Fatalf("invalid award failure discarded after update: %v; installation=%v", err, installation.calls)
 		}
 	})
+}
+
+type fixedVersions struct{ index engine.VerifiedIndex }
+
+func (v fixedVersions) Index(context.Context, time.Time) (engine.IndexResult, error) {
+	return engine.IndexResult{Index: v.index}, nil
+}
+
+func (v fixedVersions) PrepareRunnerUpdate(context.Context, string, releaseasset.Target) (engine.SoftwareUpdate, error) {
+	panic("a pinned runner must not prepare an update")
+}
+
+func TestPinnedRunnerKeepsItsVersionWhenANewerReleaseExists(t *testing.T) {
+	_, replacement := runnerPolicyFixtures(t)
+	newer := signedRunnerPolicy(t, func(*engine.VersionIndex) {})
+	for name, tc := range map[string]struct {
+		index engine.VerifiedIndex
+		claim bool
+	}{"newer release": {newer, true}, "below minimum": {replacement, false}} {
+		t.Run(name, func(t *testing.T) {
+			installation := &installationFixture{}
+			claims := 0
+			runner := ManagedRunner{
+				Loop: &Loop{Config: LoopConfig{Version: "v0.10.0", MaxConcurrent: 1, MaxClaims: 1, VersionPinned: true}, Controller: claimFunc(func(context.Context, controllerwire.ClaimRequest) (controllerwire.ClaimResponse, error) {
+					claims++
+					return controllerwire.ClaimResponse{Claim: &controllerwire.ClaimedUnit{Unit: capability.UnitNode, UnitID: "unit", RunID: "run", Capability: "private"}}, nil
+				}), Host: hostFunc(func(context.Context, controllerwire.ClaimedUnit) error { return nil })},
+				Versions: fixedVersions{tc.index}, Installation: installation, Target: releaseasset.Target{Binary: releaseasset.SparkwingRunner, GOOS: "linux", GOARCH: "amd64"},
+			}
+			err := runner.Run(t.Context())
+			if len(installation.calls) != 0 {
+				t.Fatalf("pinned runner updated itself: %v", installation.calls)
+			}
+			if tc.claim {
+				if err != nil || claims != 1 {
+					t.Fatalf("Run = %v after %d claims", err, claims)
+				}
+				return
+			}
+			var refusal *apierr.Error
+			if !errors.As(err, &refusal) || refusal.Code != apierr.VersionUnsupported || !strings.Contains(err.Error(), ".sparkwing/go.mod") || claims != 0 {
+				t.Fatalf("Run = %v after %d claims", err, claims)
+			}
+		})
+	}
+}
+
+func signedRunnerPolicy(t *testing.T, edit func(*engine.VersionIndex)) engine.VerifiedIndex {
+	t.Helper()
+	public, key, err := ed25519.GenerateKey(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UTC()
+	published := now.AddDate(0, -1, 0)
+	policy := engine.VersionIndex{Format: engine.VersionIndexFormat, PublishedAt: now.Add(-time.Minute), Latest: "v0.20.0", Versions: []engineid.VersionInfo{{Version: "v0.10.0", PublishedAt: published, SupportUntil: published.AddDate(0, 12, 0)}, {Version: "v0.20.0", PublishedAt: published, SupportUntil: published.AddDate(0, 12, 0)}}}
+	edit(&policy)
+	body, err := json.Marshal(policy)
+	if err != nil {
+		t.Fatal(err)
+	}
+	verified, err := engine.VerifyIndex(engine.SignedIndex{Body: body, Signature: ed25519.Sign(key, body)}, now, []ed25519.PublicKey{public})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return verified
 }

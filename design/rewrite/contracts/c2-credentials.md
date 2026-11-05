@@ -624,7 +624,9 @@ No caller selects pools, metering, trust, grants or expiry. The response retains
 
 This is a local C2 declaration of the trusted registration selectors. The
 store checks the Actions binding and single-use attempt inside the issuance
-transaction. The real-store HTTP test proves the committed capability round
+transaction. A second exchange for the same run attempt is refused as
+`forbidden` with reason `exchange_used`, so the job log names the cause. The
+real-store HTTP test proves the committed capability round
 trip and refusal rollback.
 
 The old exchange mint handler is removed. The route has `RetryNever` because

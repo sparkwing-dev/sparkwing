@@ -75,6 +75,10 @@ unlock.
 
 ### Fixed
 
+- **runners:** `sparkwing-runner warm --github-actions` keeps the version `.sparkwing/go.mod` pins instead of updating itself when a newer release exists
+  The restarted runner traded the job's GitHub Actions token a second time, which the controller refuses, so after each release every workflow pinned to an older version failed with "resource is outside the authorized binding" until its pin was bumped. A pinned version that signed policy revokes or puts below the minimum still fails, and the error now says to update `github.com/sparkwing-dev/sparkwing` in `.sparkwing/go.mod`.
+- **controller:** A second token exchange for the same GitHub Actions run attempt is refused with reason `exchange_used`
+  It used to share the generic `binding` refusal, "resource is outside the authorized binding". The code is still `forbidden`, and the message and hint now name the repeated exchange and how to recover.
 - **billing:** A refund Stripe fails after reporting it succeeded logs `alert=refund_failed_after_success` at error level
   No operator view listed it, so the customer was the only one who could notice. [Cloud billing](docs/billing.md) has the manual reconciliation.
 - **controller:** `GET /api/v1/team/github-app/automation` accepts `limit` and its own `next_cursor`

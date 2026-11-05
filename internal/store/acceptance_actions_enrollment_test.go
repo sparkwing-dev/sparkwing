@@ -45,6 +45,10 @@ func checkStoreActionsEnrollment(t *testing.T) (err error) {
 	if err != nil {
 		return err
 	}
+	var used *apierr.Error
+	if again, err := s.AsOperator().ProvisionCapability(ctx, spec); again.Raw != "" || !errors.As(err, &used) || used.Code != apierr.Forbidden || used.Details["reason"] != apierr.ReasonExchangeUsed {
+		return errors.Join(errors.New("second exchange for one run attempt was not refused as exchange_used"), err)
+	}
 	child, err := s.AsOperator().DelegateCapability(ctx, capability.DelegateSpec{Parent: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: issued.Capability.Prefix}, Audience: capability.Controller, Grants: []capability.Grant{capability.NodesClaim}, Binding: spec.Binding, Repositories: spec.Repositories, ExpiresAt: spec.ExpiresAt})
 	if err != nil {
 		return err

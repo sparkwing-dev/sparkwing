@@ -48,6 +48,11 @@ CLI it prints `Installed runner services update themselves from their
 controller.`, and the JSON receipt carries the same sentence in
 `runner_services`. A current CLI omits it.
 
+A runner started with `warm --github-actions` never updates itself. The job
+runs the version `.sparkwing/go.mod` pins, and the run attempt's one token
+exchange would not survive a restart. When signed policy revokes that version
+or puts it below the minimum, the job fails and names the pin to raise.
+
 The invoking updater writes the receipt using its own version's format. An older
 updater can install a newer CLI without reporting fields added by that newer
 version. Run the installed CLI for subsequent updates to use its receipt format.
