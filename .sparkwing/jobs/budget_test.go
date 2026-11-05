@@ -218,7 +218,7 @@ func TestBudgetSaysWhenATierJudgedNoGoFile(t *testing.T) {
 }
 
 func TestReleaseCutRunsStateChecksAndTheFastBuildClass(t *testing.T) {
-	want := []string{"budget", "build", "changelog-links", "go-directives", "lint", "sdk-pins", "test", "version-freshness"}
+	want := []string{"budget", "build", "changelog-links", "docs-sidebar", "go-directives", "lint", "sdk-pins", "test", "version-freshness"}
 	if got := stepIDs(t, &releaseCutChecksJob{}); !slices.Equal(got, want) {
 		t.Fatalf("release cut steps = %v, want %v", got, want)
 	}
