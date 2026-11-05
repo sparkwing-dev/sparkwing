@@ -55,7 +55,7 @@ func TestSetPriority_WaiterIsReRankedAndAdmitted(t *testing.T) {
 		t.Skip("slow: 0.2s of real work; the fast class runs under -short")
 	}
 	home := shortHome(t)
-	startDaemon(t, wingd.Config{Home: home, Sampler: newFakeSampler(4, 8<<30), GraceWindow: -1})
+	startDaemon(t, wingd.Config{Home: home, Sampler: newFakeSampler(4, 8<<30)})
 
 	hog := ensure(t, home, "")
 	hogLease := mustAcquire(t, hog, coreReq("hog", 3))
@@ -96,7 +96,7 @@ func TestSetPriority_WaiterIsReRankedAndAdmitted(t *testing.T) {
 
 func TestSetPriority_HolderReportsThatOnlyItsLaterNodesMove(t *testing.T) {
 	home := shortHome(t)
-	startDaemon(t, wingd.Config{Home: home, Sampler: newFakeSampler(4, 8<<30), GraceWindow: -1})
+	startDaemon(t, wingd.Config{Home: home, Sampler: newFakeSampler(4, 8<<30)})
 
 	holder := ensure(t, home, "")
 	lease := mustAcquire(t, holder, coreReq("holder-run", 1))
@@ -116,7 +116,7 @@ func TestSetPriority_HolderReportsThatOnlyItsLaterNodesMove(t *testing.T) {
 
 func TestSetPriority_UnknownRunIsReportedNotFound(t *testing.T) {
 	home := shortHome(t)
-	startDaemon(t, wingd.Config{Home: home, GraceWindow: -1})
+	startDaemon(t, wingd.Config{Home: home})
 
 	ack := setPriority(t, home, "never-heard-of-it", 3, "")
 	if ack.Found {
@@ -129,7 +129,7 @@ func TestSetPriority_UnknownRunIsReportedNotFound(t *testing.T) {
 
 func TestSetPriority_RelativeModesExcludeTheRunsOwnParticipants(t *testing.T) {
 	home := shortHome(t)
-	startDaemon(t, wingd.Config{Home: home, Sampler: newFakeSampler(4, 8<<30), GraceWindow: -1})
+	startDaemon(t, wingd.Config{Home: home, Sampler: newFakeSampler(4, 8<<30)})
 
 	hog := ensure(t, home, "")
 	hogLease := mustAcquire(t, hog, coreReq("hog", 4))
@@ -170,7 +170,7 @@ func TestSetPriority_RelativeModesExcludeTheRunsOwnParticipants(t *testing.T) {
 
 func TestSetPriority_OverrideAppliesToASubsequentOwnerRequest(t *testing.T) {
 	home := shortHome(t)
-	startDaemon(t, wingd.Config{Home: home, Sampler: newFakeSampler(4, 8<<30), GraceWindow: -1})
+	startDaemon(t, wingd.Config{Home: home, Sampler: newFakeSampler(4, 8<<30)})
 
 	runCl := ensure(t, home, "")
 	runLease := mustAcquire(t, runCl, coreReq("parent-run", 1))
@@ -198,7 +198,7 @@ func TestSetPriority_OverrideAppliesToASubsequentOwnerRequest(t *testing.T) {
 
 func TestSetPriority_OverrideIsPersistedForTheNextDaemon(t *testing.T) {
 	home := shortHome(t)
-	td := startDaemon(t, wingd.Config{Home: home, Sampler: newFakeSampler(4, 8<<30), GraceWindow: -1})
+	td := startDaemon(t, wingd.Config{Home: home, Sampler: newFakeSampler(4, 8<<30)})
 
 	holder := ensure(t, home, "")
 	lease := mustAcquire(t, holder, coreReq("survivor", 1))

@@ -10,7 +10,7 @@ import (
 
 func TestSetPriority_NodeParticipantRecognizesOwningRun(t *testing.T) {
 	home := shortHome(t)
-	startDaemon(t, wingd.Config{Home: home, Sampler: newFakeSampler(4, 8<<30), GraceWindow: -1})
+	startDaemon(t, wingd.Config{Home: home, Sampler: newFakeSampler(4, 8<<30)})
 	hog := ensure(t, home, "")
 	lease := mustAcquire(t, hog, coreReq("hog", 4))
 	first := ensure(t, home, "")
@@ -42,7 +42,7 @@ func TestSetPriority_NodeParticipantRecognizesOwningRun(t *testing.T) {
 
 func TestSetPriority_NodeHolderReportsHolding(t *testing.T) {
 	home := shortHome(t)
-	startDaemon(t, wingd.Config{Home: home, Sampler: newFakeSampler(4, 8<<30), GraceWindow: -1})
+	startDaemon(t, wingd.Config{Home: home, Sampler: newFakeSampler(4, 8<<30)})
 	holder := ensure(t, home, "")
 	participant := string(wingwire.NodeHostParticipant("held-run", "job"))
 	lease := mustAcquire(t, holder, coreReq(participant, 1))

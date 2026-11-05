@@ -11,7 +11,7 @@ import (
 
 func TestQueueState_RepoAndEventsWindow(t *testing.T) {
 	home := shortHome(t)
-	startDaemon(t, wingd.Config{Home: home, Version: "v1", GraceWindow: -1})
+	startDaemon(t, wingd.Config{Home: home, Version: "v1"})
 
 	cl := ensure(t, home, "v1")
 	mustAcquire(t, cl, wingwire.AdmissionRequest{

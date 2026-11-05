@@ -196,7 +196,7 @@ func TestQueueState_BlockingReasonExplainsChargeSource(t *testing.T) {
 
 func TestQueueState_ReportsBackfillProtection(t *testing.T) {
 	home := shortHome(t)
-	startDaemon(t, wingd.Config{Home: home, Version: "v1", GraceWindow: -1})
+	startDaemon(t, wingd.Config{Home: home, Version: "v1"})
 
 	holderClient := ensure(t, home, "v1")
 	mustAcquire(t, holderClient, wingwire.AdmissionRequest{
@@ -244,7 +244,7 @@ func TestQueueState_ReportsBackfillProtection(t *testing.T) {
 
 func TestQueueState_CarriesOwnerAndParticipantIdentity(t *testing.T) {
 	home := shortHome(t)
-	startDaemon(t, wingd.Config{Home: home, Version: "v1", GraceWindow: -1})
+	startDaemon(t, wingd.Config{Home: home, Version: "v1"})
 
 	owner1 := mustAcquire(t, ensure(t, home, "v1"), wingwire.AdmissionRequest{RunID: "run-1", SemaphoresOnly: true})
 	owner2 := mustAcquire(t, ensure(t, home, "v1"), wingwire.AdmissionRequest{RunID: "run-2", SemaphoresOnly: true})
@@ -396,7 +396,7 @@ func TestQueueState_RecoveryCommandUsesOwnerRunID(t *testing.T) {
 
 func TestQueueState_DecodesNodeParticipantIdentity(t *testing.T) {
 	home := shortHome(t)
-	startDaemon(t, wingd.Config{Home: home, Version: "v1", GraceWindow: -1})
+	startDaemon(t, wingd.Config{Home: home, Version: "v1"})
 
 	holderClient := ensure(t, home, "v1")
 	mustAcquire(t, holderClient, wingwire.AdmissionRequest{
