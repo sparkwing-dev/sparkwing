@@ -6,7 +6,6 @@ import (
 	"regexp"
 	"runtime"
 	"slices"
-	"strconv"
 	"strings"
 
 	"github.com/sparkwing-dev/sparkwing/internal/envredact"
@@ -218,7 +217,9 @@ func composeRuntime(env map[string]string, k Kind, rt Runtime) {
 	if len(rt.Runner.Labels) > 0 {
 		put("SPARKWING_RUNNER_LABELS", strings.Join(rt.Runner.Labels, ","))
 	}
-	put("SPARKWING_DRY_RUN", strconv.FormatBool(rt.DryRun))
+	if rt.DryRun {
+		put("SPARKWING_DRY_RUN", "1")
+	}
 	put("CI", "true")
 	put("SPARKWING_BRANCH", rt.Branch)
 	put("SPARKWING_COMMIT", rt.Commit)

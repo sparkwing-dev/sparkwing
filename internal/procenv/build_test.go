@@ -1,6 +1,7 @@
 package procenv
 
 import (
+	"fmt"
 	"reflect"
 	"runtime"
 	"slices"
@@ -30,7 +31,7 @@ func TestCapturedEnvironmentAndClaimIdentity(t *testing.T) {
 			t.Fatal(err)
 		}
 		got := envMap(env)
-		for name, want := range map[string]string{"CUSTOM": "captured", "SPARKWING_CUSTOM": "yes", "SPARKWING_RUNNER_NAME": "granted", "CI": "true", "SPARKWING_RUN_ID": "run", "SPARKWING_BRANCH": "trunk", "SPARKWING_COMMIT": "abc", "SPARKWING_DRY_RUN": "true", "SPARKWING_GATE_INDEX": gate, "SPARKWING_ENGINE_VERSION": "v9.9.9"} {
+		for name, want := range map[string]string{"CUSTOM": "captured", "SPARKWING_CUSTOM": "yes", "SPARKWING_RUNNER_NAME": "granted", "CI": "true", "SPARKWING_RUN_ID": "run", "SPARKWING_BRANCH": "trunk", "SPARKWING_COMMIT": "abc", "SPARKWING_DRY_RUN": "1", "SPARKWING_GATE_INDEX": gate, "SPARKWING_ENGINE_VERSION": "v9.9.9"} {
 			if got[name] != want {
 				t.Errorf("kind %d %s=%q want %q", kind, name, got[name], want)
 			}
@@ -54,6 +55,26 @@ func TestCapturedEnvironmentAndClaimIdentity(t *testing.T) {
 	for _, name := range []string{"SPARKWING_BRANCH", "SPARKWING_COMMIT", "SPARKWING_REPO", "SPARKWING_TRIGGER_SOURCE", "SPARKWING_ENGINE_VERSION"} {
 		if _, ok := envMap(env)[name]; ok {
 			t.Errorf("invented %s", name)
+		}
+	}
+}
+
+func TestDryRunEnvironmentFollowsSealedRun(t *testing.T) {
+	for _, local := range []bool{false, true} {
+		for _, kind := range []Kind{Plan, Attempt, Eval} {
+			for _, dryRun := range []bool{false, true} {
+				t.Run(fmt.Sprintf("local=%t/kind=%d/dryRun=%t", local, kind, dryRun), func(t *testing.T) {
+					base := Base{Local: local, Captured: []string{"SPARKWING_DRY_RUN=1"}, Ambient: []string{"SPARKWING_DRY_RUN=false"}, SubmitEnvAllow: []string{"SPARKWING_DRY_RUN"}}
+					env, err := Build(kind, base, Runtime{DryRun: dryRun})
+					if err != nil {
+						t.Fatal(err)
+					}
+					value, present := envMap(slices.Collect(env.Values()))["SPARKWING_DRY_RUN"]
+					if present != dryRun || (dryRun && value != "1") {
+						t.Fatalf("SPARKWING_DRY_RUN=%q, present=%t, dry run=%t", value, present, dryRun)
+					}
+				})
+			}
 		}
 	}
 }

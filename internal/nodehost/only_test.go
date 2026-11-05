@@ -243,9 +243,19 @@ func TestDryRunEnvHandsTheSwitchToTheNode(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		want := "SPARKWING_DRY_RUN=" + strconv.FormatBool(dryRun)
-		if !slices.Contains(slices.Collect(planned.Values()), want) || !slices.Contains(slices.Collect(attempt.Values()), want) {
-			t.Fatalf("plan=%v attempt=%v, want %s", planned, attempt, want)
+		for _, env := range []procenv.Env{planned, attempt} {
+			found := false
+			for entry := range env.Values() {
+				if strings.HasPrefix(entry, "SPARKWING_DRY_RUN=") {
+					found = true
+					if !dryRun || entry != "SPARKWING_DRY_RUN=1" {
+						t.Fatalf("unexpected %s for dry run=%t", entry, dryRun)
+					}
+				}
+			}
+			if found != dryRun {
+				t.Fatalf("dry-run marker present=%t, dry run=%t", found, dryRun)
+			}
 		}
 	}
 }

@@ -219,3 +219,59 @@ func TestPythonFixture_PassesUnittest(t *testing.T) {
 		t.Fatalf("python3 -m unittest discover: %v\n%s", err, out)
 	}
 }
+
+func TestTemplateDryRunEvidenceControlsProofRecording(t *testing.T) {
+	for _, tc := range []struct {
+		name, jobs, steps string
+		partial           bool
+	}{
+		{
+			name:    "job without preview",
+			jobs:    `[{"id":"deploy","status":"done","outcome":"skipped","status_detail":"no_dry_run_defined"}]`,
+			steps:   `[]`,
+			partial: true,
+		},
+		{
+			name:    "successful job with skipped body",
+			jobs:    `[{"id":"deploy","status":"done","outcome":"success"}]`,
+			steps:   `[{"job_id":"deploy","id":"run","status":"skipped","outcome":"skipped"}]`,
+			partial: true,
+		},
+		{
+			name:  "fully executed preview",
+			jobs:  `[{"id":"deploy","status":"done","outcome":"success"}]`,
+			steps: `[{"job_id":"deploy","id":"run","status":"passed","outcome":"success"}]`,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			raw := `{"id":"verify-1","status":"dry_run","jobs":` + tc.jobs + `,"steps":` + tc.steps + `}`
+			out, err := classifyTemplateDryRun("verify-1", raw)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if out.Skipped != tc.partial || out.RanRunStep == tc.partial || tc.partial && out.SkipReason == "" {
+				t.Fatalf("outcome = %+v, want partial=%t and ran=%t", out, tc.partial, !tc.partial)
+			}
+			dir := t.TempDir()
+			recordVerification(t.Context(), dir, "dry-run-digest", "cloudrun-deploy-source", out)
+			if proofRecorded(dir, "dry-run-digest") == tc.partial {
+				t.Fatalf("proof recorded for partial=%t", tc.partial)
+			}
+		})
+	}
+}
+
+func TestTemplateDryRunMissingEvidenceFails(t *testing.T) {
+	for _, raw := range []string{
+		`not JSON`, `{}`, `{"id":"other","status":"dry_run","jobs":[{}],"steps":[{}]}`,
+		`{"id":"verify-1","status":"running","jobs":[{}],"steps":[{}]}`,
+		`{"id":"verify-1","status":"dry_run","jobs":[],"steps":[]}`,
+		`{"id":"verify-1","status":"dry_run","jobs":[{}]}`,
+		`{"id":"verify-1","status":"dry_run","jobs":[{}],"steps":[{}]}`,
+	} {
+		out, err := classifyTemplateDryRun("verify-1", raw)
+		if err == nil || out.RanRunStep {
+			t.Fatalf("evidence %s: outcome=%+v, error=%v; want unverified", raw, out, err)
+		}
+	}
+}

@@ -1311,8 +1311,12 @@ file. Other syntax and workflow checks remain active.
   that no digest covers. A partial verification is never recorded: when a
   runnable template's toolchain is missing the run step is skipped, the gate
   stays green, and no proof is written, so the template is verified again once
-  the toolchain appears. Reuse never changes the plan: every template keeps its
-  node, and the decision is made inside it, so a digest miss cannot be lost in
+  the toolchain appears. Dry runs read the admitted run's job and step status.
+  Any skipped execution is partial verification, including a body skipped as
+  `no_dry_run_defined`. It reports no completed run step and records no proof.
+  Missing or unreadable execution evidence fails verification.
+  Reuse never changes the plan: every template keeps its node, and the decision
+  is made inside it, so a digest miss cannot be lost in
   plan shaping. Third-party module resolution is outside the digest either way,
   which is the standing reason the boundary stays exhaustive: the release
   pipeline passes `--exhaustive`, and so should any manual run being used as a

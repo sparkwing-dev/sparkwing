@@ -160,7 +160,7 @@ compile, which otherwise runs with `CGO_ENABLED=0`; see
 | `SPARKWING_RUNNER_NAME` | RuntimeClass | Composed from the sealed run and granted runner identity. |
 | `SPARKWING_RUNNER_TYPE` | RuntimeClass | Composed from the sealed run and granted runner identity. |
 | `SPARKWING_RUNNER_LABELS` | RuntimeClass | Composed from the sealed run and granted runner identity. |
-| `SPARKWING_DRY_RUN` | RuntimeClass | Composed from the sealed run and granted runner identity. |
+| `SPARKWING_DRY_RUN` | RuntimeClass | Set to 1 only for a sealed dry run; absent on normal runs. Boolean readers accept only true values (1, t, T, TRUE, true, True); empty or invalid values mean false. |
 | `SPARKWING_BRANCH` | RuntimeClass | Composed from the sealed run and granted runner identity. |
 | `SPARKWING_COMMIT` | RuntimeClass | Composed from the sealed run and granted runner identity. |
 | `SPARKWING_REPO` | RuntimeClass | Composed from the sealed run and granted runner identity. |

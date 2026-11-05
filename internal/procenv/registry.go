@@ -19,7 +19,7 @@ var Registry = []Var{
 	{Name: "SPARKWING_RUNNER_NAME", Prefix: false, Class: runtimeClass, Owner: "engine", Doc: "Composed from the sealed run and granted runner identity."},
 	{Name: "SPARKWING_RUNNER_TYPE", Prefix: false, Class: runtimeClass, Owner: "engine", Doc: "Composed from the sealed run and granted runner identity."},
 	{Name: "SPARKWING_RUNNER_LABELS", Prefix: false, Class: runtimeClass, Owner: "engine", Doc: "Composed from the sealed run and granted runner identity."},
-	{Name: "SPARKWING_DRY_RUN", Prefix: false, Class: runtimeClass, Owner: "engine", Doc: "Composed from the sealed run and granted runner identity."},
+	{Name: "SPARKWING_DRY_RUN", Prefix: false, Class: runtimeClass, Owner: "engine", Doc: "Set to 1 only for a sealed dry run; absent on normal runs. Boolean readers accept only true values (1, t, T, TRUE, true, True); empty or invalid values mean false."},
 	{Name: "SPARKWING_GATE_INDEX", Prefix: false, Class: runtimeClass, Owner: "engine", Doc: "Hook index file path from the verified machine-local environment snapshot."},
 	{Name: "CI", Prefix: false, Class: runtimeClass, Owner: "engine", Doc: "Composed from the sealed run and granted runner identity."},
 	{Name: "SPARKWING_BRANCH", Prefix: false, Class: runtimeClass, Owner: "engine", Doc: "Composed from the sealed run and granted runner identity."},
