@@ -9,6 +9,8 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/wingd"
 )
 
+const maxAPIResponseBytes = 8 << 20
+
 // APIBaseURL addresses HTTP requests carried by the private controller socket.
 const APIBaseURL = "http://sparkwing-api"
 

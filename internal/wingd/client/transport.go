@@ -8,8 +8,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/wingd"
 )
 
-const maxFrame = 8 << 20
-
 func dial(ctx context.Context, sock string, timeout time.Duration) (net.Conn, error) {
 	return wingd.DialSocket(ctx, sock, timeout)
 }

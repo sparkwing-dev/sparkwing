@@ -79,16 +79,16 @@ func TestAdmissionRetriesTheSameRequestAndTicketAfterDroppedResponses(t *testing
 			if request.RequestKey == "" || request.RequestKey != requestKey {
 				t.Error("retry changed the client request key")
 			}
-			writeHTTPFixture(w, wingd.AdmissionHTTPState{ID: "ticket", State: "queued", Arrival: 7, Queued: &wingwire.Queued{RunID: "job"}})
+			writeHTTPFixture(w, wingd.AdmissionHTTPState{ID: "ticket", State: "queued", Arrival: 7, Revision: 7, Queued: &wingwire.Queued{RunID: "job"}})
 		case "GET " + admissionPath + "/requests/ticket":
-			if r.URL.Query().Get("wait") != "true" {
-				t.Error("queue poll did not wait")
+			if r.URL.Query().Get("wait") != "true" || r.URL.Query().Get("after") != "7" {
+				t.Error("queue poll lost its durable response revision")
 			}
 			if polls.Add(1) == 1 {
 				http.Error(w, "restart", http.StatusServiceUnavailable)
 				return
 			}
-			writeHTTPFixture(w, wingd.AdmissionHTTPState{ID: "ticket", State: "granted", Arrival: 7, Grant: &wingwire.Grant{RunID: "job", LeaseToken: "token"}})
+			writeHTTPFixture(w, wingd.AdmissionHTTPState{ID: "ticket", State: "granted", Arrival: 7, Revision: 8, Grant: &wingwire.Grant{RunID: "job", LeaseToken: "token"}})
 		case "DELETE " + admissionPath + "/requests/ticket":
 			writeHTTPFixture(w, wingd.AdmissionHTTPState{ID: "ticket", State: "released"})
 		default:
@@ -117,6 +117,9 @@ func TestLeaseWatchResumesAfterControllerRestartAndObservesCommittedCancel(t *te
 	serveHTTPFixture(t, home, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
 		case http.MethodGet:
+			if r.URL.Query().Get("after") != "10" {
+				t.Errorf("lease watch lost grant revision: %s", r.URL.RawQuery)
+			}
 			if polls.Add(1) == 1 {
 				http.Error(w, "restart", http.StatusServiceUnavailable)
 				return
@@ -133,7 +136,7 @@ func TestLeaseWatchResumesAfterControllerRestartAndObservesCommittedCancel(t *te
 			writeHTTPFixture(w, wingd.AdmissionHTTPState{ID: "ticket", State: "released"})
 		}
 	}))
-	held := fixtureClient(t, home).newLease(t.Context(), wingd.AdmissionHTTPState{ID: "ticket", Grant: &wingwire.Grant{RunID: "job", LeaseToken: "token"}})
+	held := fixtureClient(t, home).newLease(t.Context(), wingd.AdmissionHTTPState{ID: "ticket", Revision: 10, Grant: &wingwire.Grant{RunID: "job", LeaseToken: "token"}})
 	done := make(chan error, 1)
 	cancelled := make(chan wingwire.Cancel, 1)
 	go func() { done <- held.WatchControl(nil, func(value wingwire.Cancel) { cancelled <- value }) }()
@@ -284,5 +287,19 @@ func TestEnsureDaemonRefusesAControllerWithoutHTTPAdmission(t *testing.T) {
 	_, err := EnsureDaemon(t.Context(), Options{Home: home, Version: "test", Spawn: func(string, string) error { t.Error("spawned over an incompatible owner"); return nil }})
 	if !errors.Is(err, errDaemonTooOld) {
 		t.Fatalf("unsupported HTTP controller: %v", err)
+	}
+}
+
+func TestLeaseWatchReportsLostAuthorityWhenTheTicketIsGone(t *testing.T) {
+	home := shortHome(t)
+	serveHTTPFixture(t, home, http.NotFoundHandler())
+	cl := fixtureClient(t, home)
+	held := cl.newLease(t.Context(), wingd.AdmissionHTTPState{ID: "gone", Grant: &wingwire.Grant{RunID: "job", LeaseToken: "token"}})
+	defer cl.Close()
+	if err := held.WatchControl(nil, nil); !errors.Is(err, ErrReattachRejected) {
+		t.Fatalf("lost ticket: %v", err)
+	}
+	if _, err := cl.Reattach(t.Context(), "token", "job"); !errors.Is(err, ErrReattachRejected) {
+		t.Fatalf("lost lease: %v", err)
 	}
 }

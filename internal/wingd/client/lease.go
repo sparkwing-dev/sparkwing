@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"strconv"
 	"sync"
 	"time"
 
@@ -26,6 +27,7 @@ type Lease struct {
 	SoleRunUnderLoad bool
 	ExternalCores    float64
 	id               string
+	revision         uint64
 	ctx              context.Context
 	cancel           context.CancelFunc
 	once             sync.Once
@@ -87,8 +89,9 @@ func (cl *Client) Acquire(ctx context.Context, req wingwire.AdmissionRequest, on
 		if state.Queued != nil && onQueued != nil {
 			onQueued(*state.Queued)
 		}
+		revision := state.Revision
 		state = wingd.AdmissionHTTPState{}
-		if err := cl.admissionCall(ctx, http.MethodGet, "/requests/"+url.PathEscape(id)+"?wait=true", nil, &state, 0); err != nil {
+		if err := cl.admissionCall(ctx, http.MethodGet, "/requests/"+url.PathEscape(id)+"?wait=true&after="+strconv.FormatUint(revision, 10), nil, &state, 0); err != nil {
 			return nil, err
 		}
 	}
@@ -98,7 +101,7 @@ func (cl *Client) newLease(ctx context.Context, state wingd.AdmissionHTTPState) 
 	grant := state.Grant
 	ctx, cancel := context.WithCancel(cl.clientContext(ctx))
 	return &Lease{
-		cl: cl, id: state.ID, ctx: ctx, cancel: cancel, RunID: grant.RunID, Token: grant.LeaseToken,
+		cl: cl, id: state.ID, revision: state.Revision, ctx: ctx, cancel: cancel, RunID: grant.RunID, Token: grant.LeaseToken,
 		Resources: grant.Resources, Semaphores: grant.Semaphores, SoleRunUnderLoad: grant.SoleRunUnderLoad, ExternalCores: grant.ExternalCores,
 	}
 }
@@ -107,6 +110,9 @@ func (cl *Client) newLease(ctx context.Context, state wingd.AdmissionHTTPState) 
 func (cl *Client) Reattach(ctx context.Context, token, runID string) (*Lease, error) {
 	var state wingd.AdmissionHTTPState
 	if err := cl.admissionCall(ctx, http.MethodGet, "/leases/"+url.PathEscape(token), nil, &state, 0); err != nil {
+		if admissionNotFound(err) {
+			return nil, errors.Join(ErrReattachRejected, err)
+		}
 		return nil, err
 	}
 	if state.Grant == nil || (runID != "" && state.Grant.RunID != runID) {
@@ -135,15 +141,20 @@ func (l *Lease) Watch(onEvicted func(wingwire.Evicted)) {
 
 // WatchControl joins request-based lease watching and reports lost authority.
 func (l *Lease) WatchControl(onEvicted func(wingwire.Evicted), onCancel func(wingwire.Cancel)) error {
+	revision := l.revision
 	for l.ctx.Err() == nil {
 		var state wingd.AdmissionHTTPState
-		err := l.cl.admissionCall(l.ctx, http.MethodGet, "/requests/"+url.PathEscape(l.id)+"/watch?wait=true", nil, &state, 0)
+		err := l.cl.admissionCall(l.ctx, http.MethodGet, "/requests/"+url.PathEscape(l.id)+"/watch?wait=true&after="+strconv.FormatUint(revision, 10), nil, &state, 0)
 		if l.ctx.Err() != nil {
 			break
 		}
 		if err != nil {
+			if admissionNotFound(err) {
+				return errors.Join(ErrReattachRejected, err)
+			}
 			return err
 		}
+		revision = state.Revision
 		if state.Evicted != nil {
 			if onEvicted != nil {
 				onEvicted(*state.Evicted)

@@ -111,7 +111,6 @@ type Options struct {
 	PredecessorWaitTimeout time.Duration
 
 	Logf               func(format string, args ...any)
-	healthProbe        bool
 	observeDialFailure func()
 }
 

@@ -30,6 +30,11 @@ func (cl *Client) admissionCall(ctx context.Context, method, path string, input,
 	}
 }
 
+func admissionNotFound(err error) bool {
+	var status *httpStatusError
+	return errors.As(err, &status) && status.code == http.StatusNotFound
+}
+
 func transientAPIError(err error) bool {
 	var status *httpStatusError
 	if errors.As(err, &status) {
@@ -69,11 +74,11 @@ func (cl *Client) apiCall(ctx context.Context, method, path string, input, outpu
 		return err
 	}
 	defer response.Body.Close()
-	data, err := io.ReadAll(io.LimitReader(response.Body, maxFrame+1))
+	data, err := io.ReadAll(io.LimitReader(response.Body, maxAPIResponseBytes+1))
 	if err != nil {
 		return err
 	}
-	if len(data) > maxFrame {
+	if len(data) > maxAPIResponseBytes {
 		return errors.New("wingd/client: controller response exceeds limit")
 	}
 	if response.StatusCode < 200 || response.StatusCode >= 300 {

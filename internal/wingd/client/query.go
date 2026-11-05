@@ -18,7 +18,7 @@ var errDaemonUnreachable = errors.New("wingd/client: could not reach the admissi
 // errDaemonWedged is a daemon that took the connection and then answered
 // nothing before the caller's budget ran out. It is distinct from unreachable
 // because the socket is held: no successor can bind it, no admission is being
-// arbitrated behind it, and a drain that needs a handshake cannot replace it.
+// arbitrated behind it, and a drain request cannot reach it.
 var errDaemonWedged = errors.New("wingd/client: the daemon accepted the connection and did not answer")
 
 func dialMeansAbsent(err error) bool {
@@ -60,7 +60,6 @@ func Query(ctx context.Context, opts Options) (wingwire.QueueState, error) {
 func queryOptions(opts Options) Options {
 	opts.Spawn = func(string, string) error { return ErrNoDaemon }
 	opts.NoTakeover = true
-	opts.healthProbe = true
 	return opts
 }
 
