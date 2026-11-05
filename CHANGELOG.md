@@ -20,6 +20,7 @@ unlock.
 
 ## [Unreleased]
 
+## [v0.69.0] - 2026-11-05
 ### Added
 
 - **CLI:** `sparkwing pipeline trigger --trusted` runs HEAD on this machine's own runner so its gate pass counts for CI
@@ -43,7 +44,7 @@ unlock.
 - **scaffold:** `const FallbackSDKVersion` pins v0.68.7, so a fresh scaffold compiles against that release.
 
 - **runners:** `sparkwing runners add --personal` without `--session-stdin` enrolls through a browser approval
-  It used to refuse. On a terminal it now prints a code for the controller's `/device` page, where a signed-in account sees the runner name, team and grants before approving; the runner credential is issued under that account's authority with the same checks as before, and the command prints the team before writing configuration. `--team` refuses an approver from another team. Shared runners, reserved pools, trust classes, platforms and launchers keep `--session-stdin`, and a script without a terminal still fails at once. See the [migration](docs/migrations/_unreleased.md#runners-add-enrolls-through-a-browser-approval).
+  It used to refuse. On a terminal it now prints a code for the controller's `/device` page, where a signed-in account sees the runner name, team and grants before approving; the runner credential is issued under that account's authority with the same checks as before, and the command prints the team before writing configuration. `--team` refuses an approver from another team. Shared runners, reserved pools, trust classes, platforms and launchers keep `--session-stdin`, and a script without a terminal still fails at once. See the [migration](docs/migrations/v0.69.0.md#runners-add-enrolls-through-a-browser-approval).
 
 - **cli + controller:** `runs retry --reason TEXT` records why the retry should pass
   The new run keeps the reason in its lineage (`retry_reason`), and `runs status`, `runs list`, the API and the
@@ -79,7 +80,7 @@ unlock.
   itself skips `net/http`, `crypto/tls` and `crypto/x509` on an uncached compile.
 - **run:** (Breaking) Go pipelines compile with `CGO_ENABLED=0` unless the environment sets `CGO_ENABLED`
   An uncached compile is 1-3s faster on a two-vCPU runner. A pipeline that imports a cgo package sets
-  `CGO_ENABLED=1`; see the [migration guide](docs/migrations/_unreleased.md#pipelines-compile-without-cgo).
+  `CGO_ENABLED=1`; see the [migration guide](docs/migrations/v0.69.0.md#pipelines-compile-without-cgo).
 
 ### Fixed
 
@@ -112,7 +113,7 @@ unlock.
 - **launcher:** `sparkwing-runner launch` refuses `--poll` below 2s at startup
   The controller never suggests an idle claim poll under 2s, and one enforcing idle polls answered a faster launcher with a rate-limit warning on every tick. The launcher now fails at startup and names the controller's `--idle-claim-poll`.
 - **store (Breaking):** The schema baseline advances to version 30, which replaces the `warm_pool_desired` view in place and adds the `device_logins` table
-  A v0.68.7 store (schema 29) upgrades on its first open, and a schema 28 store takes both steps, in one transaction on SQLite and PostgreSQL. PostgreSQL replaces the view in place, so KEDA's SELECT grant survives. `device_logins` keeps a pending device sign-in's code digest, typed user code and approving session until it is redeemed or expires; it never holds a bearer. An older binary refuses a schema 30 store, so snapshot the store first; rollback means restoring that snapshot. See the [store upgrade migration](docs/migrations/_unreleased.md#upgrade-the-store-in-place-to-schema-baseline-30).
+  A v0.68.7 store (schema 29) upgrades on its first open, and a schema 28 store takes both steps, in one transaction on SQLite and PostgreSQL. PostgreSQL replaces the view in place, so KEDA's SELECT grant survives. `device_logins` keeps a pending device sign-in's code digest, typed user code and approving session until it is redeemed or expires; it never holds a bearer. An older binary refuses a schema 30 store, so snapshot the store first; rollback means restoring that snapshot. See the [store upgrade migration](docs/migrations/v0.69.0.md#upgrade-the-store-in-place-to-schema-baseline-30).
 - **warm capacity:** Auto no longer grows idle warm capacity to its maximum
   The start-time trigger added one node above the current warm count whenever the last hour's median start exceeded the target, and each new warm node raised that count, so any slow start kept the pool at the Auto maximum for an hour with nobody waiting. The trigger now fires only while a job is waiting for a fresh node; with no waits the pool returns to its minimum.
 - **run:** A first run reuses the installed CLI as the pipeline engine when it is the pinned release
@@ -143,7 +144,7 @@ unlock.
 - **cache:** Pipeline key inputs reuse the digest of each unchanged file from `SPARKWING_HOME/cache/file-digests`
   Each SDK install re-read every file of the pipeline module and its `replace` targets, 37 MB in the Sparkwing repository and 300-700ms under load, twice per local run. Keys are unchanged.
 - **controller (Breaking):** A used Cloud node retires once the launcher has seen it unreserved and empty for 60 seconds, whatever state its run is in
-  The launcher kept a run's empty nodes until the run ended, so a run waiting on an approval, or a fan-out waiting on one long job, held idle nodes that other teams' jobs could not use until Karpenter consolidated them. A successor that reserves the node within the grace still reuses it; one that arrives later, such as a job after an approval, boots a fresh node. `sparkwing-runner launch --idle-grace` sets the grace, which must be at least `--poll` plus 30 seconds. The launcher no longer asks the controller whether a run has ended: the `retire_run` request (the `LauncherRun` body with its `run_id` and `team`) and `run_terminal` response are gone from launcher sync, so deploy the controller and launcher from the same release. See the [migration guide](docs/migrations/_unreleased.md#cloud-nodes-retire-after-an-idle-grace).
+  The launcher kept a run's empty nodes until the run ended, so a run waiting on an approval, or a fan-out waiting on one long job, held idle nodes that other teams' jobs could not use until Karpenter consolidated them. A successor that reserves the node within the grace still reuses it; one that arrives later, such as a job after an approval, boots a fresh node. `sparkwing-runner launch --idle-grace` sets the grace, which must be at least `--poll` plus 30 seconds. The launcher no longer asks the controller whether a run has ended: the `retire_run` request (the `LauncherRun` body with its `run_id` and `team`) and `run_terminal` response are gone from launcher sync, so deploy the controller and launcher from the same release. See the [migration guide](docs/migrations/v0.69.0.md#cloud-nodes-retire-after-an-idle-grace).
 - **delivery:** `sparkwing run land` merges `origin/main` when main moved instead of failing
   A clean merge (a merge commit, never a rebase) re-checks only the files the merge changed, with `go build` and the
   affected tests, then pushes; the review does not run again. It merges at most three times, and a conflict fails
@@ -176,7 +177,7 @@ unlock.
   They take the trust of the launcher credential that started them: jobs on them mint OIDC tokens with
   `runner_environment` `persistent` instead of `fresh` and write that launcher's own cache scope unless the team has
   `high_trust` on. Only Sparkwing Cloud nodes and GitHub-hosted Actions runners, which their provider attests, are fresh.
-  See the [migration guide](docs/migrations/_unreleased.md#team-launcher-pods-are-not-fresh-hosts).
+  See the [migration guide](docs/migrations/v0.69.0.md#team-launcher-pods-are-not-fresh-hosts).
 - **cache (Breaking):** `high_trust` lets only trusted hosts write the shared verified cache
   A trusted host is a fresh host or a machine scoped with `--repos`. Personal machines and self-hosted Actions runners
   now write only their own host's cache whatever `high_trust` says, so a pass `sw.FromProvenRunAtCommit()` counts never
@@ -243,20 +244,20 @@ unlock.
 - **cli (Breaking):** Remove the hidden `sparkwing __host-trigger` command. It refused every invocation because standalone hosting is not available; the local controller hosts queued triggers.
 - **tooling (Breaking):** Delete `bin/pre-release-test.sh` and `bin/status.sh`, which tested removed packages and queried removed `/agents` and `/jobs` routes. Use `sparkwing run pre-release`, `sparkwing runners list` and `sparkwing runs` instead.
 - **cli (Breaking):** `sparkwing run --sw-output` is removed; use `-o`/`--output`
-  The two flags selected the same thing, and a run's help and errors read only `-o`, so `--sw-output json` could run in JSON and still fail in prose. `-o` now drives a run's output, help and errors, ahead of `SPARKWING_LOG_FORMAT` and terminal detection. Replace `--sw-output FORMAT` with `-o FORMAT`. See the [migration guide](docs/migrations/_unreleased.md#sparkwing-run---sw-output-is-removed).
+  The two flags selected the same thing, and a run's help and errors read only `-o`, so `--sw-output json` could run in JSON and still fail in prose. `-o` now drives a run's output, help and errors, ahead of `SPARKWING_LOG_FORMAT` and terminal detection. Replace `--sw-output FORMAT` with `-o FORMAT`. See the [migration guide](docs/migrations/v0.69.0.md#sparkwing-run---sw-output-is-removed).
 
 - **docs:** `SPARKWING_DEBUG` is no longer listed as a setting
   Nothing read it, so setting it never changed SDK diagnostics. Its process-environment class goes with it.
 - **CLI (Breaking):** Sparkwing no longer searches for other installed copies of itself
-  `sparkwing doctor` drops `install_conflict` and its `executable` and `competing_install` lines, `sparkwing info` drops `executable.other_installs` and its warning, and `sparkwing update` and `bin/install.sh` no longer print rename commands for other copies. Your shell decides which copy runs: check with `which -a sparkwing` and `sparkwing version`, then remove the unwanted install or call the one you want by its absolute path. See [If the wrong sparkwing runs](docs/getting-started.md#if-the-wrong-sparkwing-runs) and the [migration guide](docs/migrations/_unreleased.md#doctor-and-info-no-longer-report-other-installs).
+  `sparkwing doctor` drops `install_conflict` and its `executable` and `competing_install` lines, `sparkwing info` drops `executable.other_installs` and its warning, and `sparkwing update` and `bin/install.sh` no longer print rename commands for other copies. Your shell decides which copy runs: check with `which -a sparkwing` and `sparkwing version`, then remove the unwanted install or call the one you want by its absolute path. See [If the wrong sparkwing runs](docs/getting-started.md#if-the-wrong-sparkwing-runs) and the [migration guide](docs/migrations/v0.69.0.md#doctor-and-info-no-longer-report-other-installs).
 - **runners (Breaking):** `sparkwing runners add --trust verified` is gone
   `--repos`, which every shared runner needs, already limits a runner to repository-proven work, and a runner scoped by
   it is now a trusted host whose jobs can produce a counted pass. See the
-  [migration guide](docs/migrations/_unreleased.md#runners-add---trust-verified-is-gone).
+  [migration guide](docs/migrations/v0.69.0.md#runners-add---trust-verified-is-gone).
 - **wingwire (Breaking):** `AdmissionRequest` drops `ParentLeaseToken`, `ParentRunID` and `ParentNodeID`, and the admission daemon no longer attaches a child run to its parent's lease
-  The `admission_request` message loses `parent_lease_token`, `parent_run_id` and `parent_node_id`. No Sparkwing client sent these fields. The daemon journal no longer records `child_attach_request` or `child_attach`. See the [migration guide](docs/migrations/_unreleased.md#admission-requests-no-longer-attach-to-a-parent-lease).
+  The `admission_request` message loses `parent_lease_token`, `parent_run_id` and `parent_node_id`. No Sparkwing client sent these fields. The daemon journal no longer records `child_attach_request` or `child_attach`. See the [migration guide](docs/migrations/v0.69.0.md#admission-requests-no-longer-attach-to-a-parent-lease).
 - **credits (Breaking):** Remove the retired `warm_cpu_class_cores` credit setting
-  Nothing scaled from it: per-class warm capacity is the only warm policy. The credit and credit-settings responses no longer report it, and the settings write refuses a body that names it. See the [migration guide](docs/migrations/_unreleased.md#the-warm_cpu_class_cores-credit-setting-is-removed).
+  Nothing scaled from it: per-class warm capacity is the only warm policy. The credit and credit-settings responses no longer report it, and the settings write refuses a body that names it. See the [migration guide](docs/migrations/v0.69.0.md#the-warm_cpu_class_cores-credit-setting-is-removed).
 
 ## [v0.68.7] - 2026-11-04
 ### Added
