@@ -151,7 +151,9 @@ and similar. Submitted names reach a shared runner only when its operator also
 lists them, never replace a value the host sets itself, and never reach the
 pipeline compile. Remote builds on a host the
 run's owner does not own set `GOENV=off`, so a `go env -w` file on that host
-does not change the build.
+does not change the build. A runner's own `CGO_ENABLED` does reach the pipeline
+compile, which otherwise runs with `CGO_ENABLED=0`; see
+[the key](caching.md#the-key).
 
 | Variable | Class | Policy |
 |---|---|---|

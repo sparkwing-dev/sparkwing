@@ -20,22 +20,25 @@ const (
 // safety: matches the identity link limit of ten attempts per account per minute.
 const deviceAccountBurst = 10
 
-type loginLimiter struct{ clients, accounts *ratelimit.Limiter }
+type loginLimiter struct {
+	clients, accounts *ratelimit.Limiter
+	now               func() time.Time
+}
 
 func newLoginLimiter() *loginLimiter {
-	return &loginLimiter{clients: ratelimit.New(loginClientBurst, loginClientWindow), accounts: ratelimit.New(deviceAccountBurst, loginClientWindow)}
+	return &loginLimiter{clients: ratelimit.New(loginClientBurst, loginClientWindow), accounts: ratelimit.New(deviceAccountBurst, loginClientWindow), now: time.Now}
 }
 
 // safety: device user codes are short, so a signed-in account may try only a few per minute.
 func (l *loginLimiter) admitAccount(account string) error {
-	if !l.accounts.Allow(account, time.Now()) {
+	if !l.accounts.Allow(account, l.now()) {
 		return &apierr.Error{Code: apierr.RateLimited, Message: fmt.Sprintf("device code entry is limited to %d attempts per account per minute; wait a minute and enter the code again", deviceAccountBurst), Details: map[string]any{"retry_after_ms": loginClientWindow.Milliseconds()}}
 	}
 	return nil
 }
 
 func (l *loginLimiter) admit(r *http.Request) error {
-	if !l.clients.Allow(loginClientKey(ratelimit.ClientIP(r)), time.Now()) {
+	if !l.clients.Allow(loginClientKey(ratelimit.ClientIP(r)), l.now()) {
 		return &apierr.Error{Code: apierr.RateLimited, Message: fmt.Sprintf("login attempt limit is %d per client per minute; current budget usage is %d attempts; wait a minute or contact support@sparkwing.dev to raise this limit", loginClientBurst, loginClientBurst), Details: map[string]any{"retry_after_ms": loginClientWindow.Milliseconds()}}
 	}
 	return nil

@@ -47,3 +47,18 @@ func TestSharedRunnerDoesNotInheritAnUnconfiguredDockerHost(t *testing.T) {
 		t.Fatalf("inherited operator DOCKER_HOST=%q", got)
 	}
 }
+
+// Pipeline compiles default to CGO_ENABLED=0; the runner service's own
+// CGO_ENABLED=1 is how an operator builds pipelines that link C.
+func TestRunnerInstallsKeepTheOperatorsCgoSetting(t *testing.T) {
+	t.Setenv("CGO_ENABLED", "1")
+	for _, owner := range []bool{false, true} {
+		env, err := procenv.Build(procenv.Install, runnerInstallBase(owner, ""), procenv.Runtime{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := env.Lookup("CGO_ENABLED"); got != "1" {
+			t.Errorf("owner=%v install CGO_ENABLED = %q, want the runner's setting", owner, got)
+		}
+	}
+}

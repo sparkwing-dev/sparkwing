@@ -14,6 +14,7 @@ import (
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
+	"github.com/sparkwing-dev/sparkwing/internal/apierrhttp"
 	"github.com/sparkwing-dev/sparkwing/internal/controller"
 	"github.com/sparkwing-dev/sparkwing/internal/controller/client"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
@@ -53,7 +54,7 @@ func legacyController(t *testing.T, next http.Handler, posts *atomic.Int32) *htt
 			decoder := json.NewDecoder(bytes.NewReader(body))
 			decoder.DisallowUnknownFields()
 			if err := decoder.Decode(reflect.New(legacy).Interface()); err != nil {
-				_ = apierr.WriteHTTP(w, &apierr.Error{Code: apierr.BadRequest, Message: "invalid engine request: body has a field this endpoint does not accept"})
+				_ = apierrhttp.Write(w, &apierr.Error{Code: apierr.BadRequest, Message: "invalid engine request: body has a field this endpoint does not accept"})
 				return
 			}
 			r.Body = io.NopCloser(bytes.NewReader(body))

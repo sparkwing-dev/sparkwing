@@ -47,3 +47,28 @@ func TestSDKTidyClosureNeedsOnlySmallModules(t *testing.T) {
 			"Move the test that imports them to a package outside the closure (go mod why -m <module> from a pipeline names it).", extra)
 	}
 }
+
+// Every pipeline compiles the SDK's standard-library imports on a cold build
+// cache. net/http brings crypto/tls, crypto/x509 and mime, roughly 45% of an
+// uncached first compile on a two-vCPU CI runner, though the SDK only talks
+// to its node host over loopback. sparkwingtest compiles only into a
+// pipeline's tests, so it is left out.
+func TestSDKCompileClosureSkipsHeavyStandardPackages(t *testing.T) {
+	gobin, err := exec.LookPath("go")
+	if err != nil {
+		t.Skip("go toolchain not on PATH")
+	}
+	cmd := exec.Command(gobin, "list", "-deps", ".", "./cleanup", "./docker", "./git", "./inputs", "./services")
+	cmd.Env = append(os.Environ(), "GOWORK=off")
+	out, err := cmd.Output()
+	if err != nil {
+		t.Fatalf("go list -deps: %v", err)
+	}
+	for _, pkg := range strings.Fields(string(out)) {
+		switch pkg {
+		case "net/http", "crypto/tls", "crypto/x509", "mime/multipart":
+			t.Errorf("the SDK's import closure reaches %s; keep server and HTTP client code outside it "+
+				"(go list -deps -f '{{.ImportPath}}: {{.Imports}}' ./sparkwing names the importer)", pkg)
+		}
+	}
+}

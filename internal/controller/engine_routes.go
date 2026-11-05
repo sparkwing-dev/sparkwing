@@ -15,6 +15,7 @@ import (
 	"strings"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
+	"github.com/sparkwing-dev/sparkwing/internal/apierrhttp"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
@@ -228,7 +229,7 @@ func (s *Server) handleIntake(engine *EngineController) func(http.ResponseWriter
 		})
 		if err != nil {
 			if refusal := publicQueueDepthRefusal(err); refusal != nil {
-				return apierr.WriteHTTP(w, refusal)
+				return apierrhttp.Write(w, refusal)
 			}
 			return err
 		}

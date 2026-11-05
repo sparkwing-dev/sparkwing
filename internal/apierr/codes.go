@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"io"
 	"math"
-	"net/http"
 	"strconv"
 	"time"
 )
@@ -271,29 +270,7 @@ func Status(code Code) int {
 			return definition.HTTPStatus
 		}
 	}
-	return http.StatusInternalServerError
-}
-
-// WriteHTTP writes Envelope and derives status from Code, including retry_after_ms as Retry-After.
-// Encode failures are returned to the caller for logging; this writer never emits plain text.
-func WriteHTTP(w http.ResponseWriter, failure *Error) error {
-	encoded, err := encode(failure)
-	if err != nil {
-		return err
-	}
-	if Status(failure.Code) >= http.StatusInternalServerError {
-		NoteResponseError(w, failure)
-	}
-	w.Header().Set("Content-Type", "application/json")
-	if delay := retryAfter(failure.Details["retry_after_ms"]); delay != "" {
-		w.Header().Set("Retry-After", delay)
-	}
-	w.WriteHeader(Status(failure.Code))
-	n, err := w.Write(encoded)
-	if err == nil && n != len(encoded) {
-		return io.ErrShortWrite
-	}
-	return err
+	return 500
 }
 
 // WriteJSON emits one newline-terminated Envelope for CLI stderr and other JSON streams.
@@ -330,6 +307,14 @@ func encode(failure *Error) ([]byte, error) {
 	return append(encoded, '\n'), nil
 }
 
+// RetryAfter returns the Retry-After seconds for failure's details.retry_after_ms, or "" when it names none.
+func RetryAfter(failure *Error) string {
+	if failure == nil {
+		return ""
+	}
+	return retryAfter(failure.Details["retry_after_ms"])
+}
+
 func retryAfter(value any) string {
 	encoded, err := json.Marshal(value)
 	if err != nil {
@@ -353,19 +338,4 @@ func RetryDelay(err error) (time.Duration, bool) {
 		return 0, false
 	}
 	return time.Duration(min(seconds, int64(time.Hour/time.Second))) * time.Second, true
-}
-
-// NoteResponseError retains the first cause for the request's masked diagnostic.
-func NoteResponseError(w http.ResponseWriter, err error) {
-	for {
-		if recorder, ok := w.(interface{ ResponseError(error) }); ok {
-			recorder.ResponseError(err)
-			return
-		}
-		wrapper, ok := w.(interface{ Unwrap() http.ResponseWriter })
-		if !ok {
-			return
-		}
-		w = wrapper.Unwrap()
-	}
 }

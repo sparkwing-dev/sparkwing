@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
+	"github.com/sparkwing-dev/sparkwing/internal/apierrhttp"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
@@ -136,7 +137,7 @@ func (s *Server) handleGetJobMetrics(w http.ResponseWriter, r *http.Request, a c
 			for _, attempt := range view.Attempts {
 				if attempt.Identity.NodeID == a.Target.NodeID && attempt.Identity.Attempt == int64(node.Attempt) && attempt.ExecutorLocation == "cloud" {
 					// hack: bypass policy redaction because this fixed 5xx explanation contains no private data.
-					return apierr.WriteHTTP(w, errCloudMetricsUnavailable)
+					return apierrhttp.Write(w, errCloudMetricsUnavailable)
 				}
 			}
 		}

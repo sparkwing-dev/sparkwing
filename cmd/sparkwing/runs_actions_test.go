@@ -66,7 +66,7 @@ func TestRunActionNumericSelectorsReachSharedTransport(t *testing.T) {
 			case "cancel":
 				err = cancelRunIDs(t.Context(), controller, ids, &out, "json")
 			case "retry":
-				err = retryRunIDs(t.Context(), retryConnection{Controller: controller}, ids, controllerwire.RetryFailed, &out, "json")
+				err = retryRunIDs(t.Context(), retryConnection{Controller: controller}, ids, controllerwire.RetryRequest{Mode: controllerwire.RetryFailed}, &out, "json")
 			case "prune":
 				pruner, openErr := client.NewRunPruner(options)
 				if openErr != nil {

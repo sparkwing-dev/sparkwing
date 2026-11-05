@@ -13,6 +13,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
 	"github.com/sparkwing-dev/sparkwing/internal/controller/client"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/pkg/color"
 )
 
@@ -23,7 +24,7 @@ type retryConnection struct {
 }
 
 func runRunsRetry(ctx context.Context, inv clisurface.Invocation) error {
-	return runRunsRetryCommand(ctx, inv, os.Stdin, os.Stdout, resolveRetryConnection)
+	return runRunsRetryCommand(ctx, inv, os.Stdin, os.Stdout, os.Getenv, resolveRetryConnection)
 }
 
 func resolveRetryConnection(ctx context.Context, profile string) (retryConnection, error) {
@@ -41,13 +42,21 @@ func resolveRetryConnection(ctx context.Context, profile string) (retryConnectio
 	}}, nil
 }
 
-func runRunsRetryCommand(ctx context.Context, inv clisurface.Invocation, input io.Reader, out io.Writer, resolve func(context.Context, string) (retryConnection, error)) error {
+func runRunsRetryCommand(ctx context.Context, inv clisurface.Invocation, input io.Reader, out io.Writer, getenv func(string) string, resolve func(context.Context, string) (retryConnection, error)) error {
 	format := inv.Output(color.IsInteractiveStdout())
 	if inv.Help() {
 		return writeCommandHelp(surfaceHelp(inv.Command), out, format)
 	}
 	if inv.Bool("failed") == inv.Bool("all-jobs") {
 		return &clisurface.UsageError{Path: inv.Command.Path, Message: "select --failed or --all-jobs"}
+	}
+	agent, err := resolveRunAgent(inv.Value("agent"), inv.Has("agent"), getenv)
+	if err != nil {
+		return &clisurface.UsageError{Path: inv.Command.Path, Message: err.Error()}
+	}
+	reason := inv.Value("reason")
+	if err := runspec.ValidateRetryReason(reason, agent); err != nil {
+		return &clisurface.UsageError{Path: inv.Command.Path, Message: err.Error()}
 	}
 	if err := ctx.Err(); err != nil {
 		return err
@@ -71,7 +80,7 @@ func runRunsRetryCommand(ctx context.Context, inv clisurface.Invocation, input i
 	if inv.Bool("all-jobs") {
 		mode = controllerwire.RetryAll
 	}
-	return retryRunIDs(ctx, connection, ids, mode, out, format)
+	return retryRunIDs(ctx, connection, ids, controllerwire.RetryRequest{Mode: mode, Reason: reason, Agent: agent}, out, format)
 }
 
 type retryResult struct {
@@ -82,13 +91,14 @@ type retryResult struct {
 	Error       *apierr.Error `json:"error,omitempty"`
 }
 
-func retryRunIDs(ctx context.Context, connection retryConnection, ids []string, mode controllerwire.RetryMode, out io.Writer, format string) error {
+func retryRunIDs(ctx context.Context, connection retryConnection, ids []string, request controllerwire.RetryRequest, out io.Writer, format string) error {
 	var failures []error
 	for _, id := range ids {
 		if err := ctx.Err(); err != nil {
 			return errors.Join(append(failures, err)...)
 		}
-		response, err := connection.Retry(ctx, id, controllerwire.RetryRequest{Mode: mode, IdempotencyKey: rand.Text()})
+		request.IdempotencyKey = rand.Text()
+		response, err := client.Retry(ctx, connection, id, request, os.Stderr)
 		result := retryResult{SourceRunID: id}
 		if err == nil {
 			result, err = retryReceipt(id, response)

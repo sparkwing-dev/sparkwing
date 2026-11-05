@@ -16,7 +16,6 @@ func TestIdleProbeLoopsOwnTheirLifecycle(t *testing.T) {
 	}
 	callers := map[string]bool{
 		"TestIdleExit_HealthProbeTrafficDoesNotResetIdleClock": false,
-		"TestIdleExit_QueryTrafficDoesNotResetIdleClock":       false,
 		"TestIdleExit_SocketSweepProbeDoesNotResetIdleClock":   false,
 		"TestIdleExit_PreHelloConnectionsDoNotResetIdleClock":  false,
 		"TestIdleExit_GraceThenIdleUnderHealthProbes":          false,

@@ -55,7 +55,7 @@ func (Gate) ShortHelp() string {
 }
 
 func (Gate) Help() string {
-	return "Runs gofmt over the tree and go vet / go build / golangci-lint in every committed Go module (today the repo root and .sparkwing/), runs go test on the packages the change touches (staged, or changed since origin/main) and every test tagged //sparkwing:critical, or on every package with -- --full, which hosted CI passes, runs go test -race on the packages that hold the staged Go files (or the Go files changed since origin/main when nothing is staged, with all tracked files judged if that baseline is unavailable, or every package with -- --full) apart from internal/store, which cannot finish inside the step's budget and races in pre-release instead, runs the internal/store suite against an embedded Postgres when that change touches internal/store, or always with -- --full, runs the dashboard's TypeScript unit, full ESLint, production-build, and Playwright browser-smoke suites, plus the configured formatters (gofumpt + goimports), no em dashes, and no internal tracker IDs (IMP-/SDK-/LOCAL-/RUN-/ORG-/REG-/TOD- uppercase, BW- in either case) over the staged files, or over the files changed since origin/main when nothing is staged, and no disallowed comments (only GoDoc on exported APIs and // hack:/safety:/bug:/perf: tags) in the staged change, or in the change since origin/main plus every untracked Go file when nothing is staged, and no test that sleeps or waits on the wall clock over that same scope, and repo-wide, that the embedded pkg/docs/ copies match the docs/ and CHANGELOG.md sources (via `bin/sync-docs.sh --check`; run bin/sync-docs.sh without the flag if it drifted) and that no product file resolves the sparkwing home itself, by reading SPARKWING_HOME or by joining a home directory with .sparkwing, instead of through internal/paths.DefaultPaths. The formatters, comment, em-dash, and tracker-ID steps name the mode they ran in, and the lint step names the modules it covered and the baseline it judged against. It also requires a CHANGELOG.md entry for every covered surface the change touches (bin/check-changelog.sh), api/openapi.yaml agreeing with the controller's route table (bin/check-api-spec.sh), and the public API surface matching the .apidiff/ snapshot (bin/check-api-snapshot.sh). Set SPARKWING_REGEX_SWEEP_ALL=1 to sweep the whole tree for em dashes and tracker IDs. No git hook runs this pipeline: `sparkwing run gate` runs it on demand and hosted CI runs it on every pull request and every push to main. The two hook tiers are the far cheaper subsets pre-commit and pre-push. A clean run whose gate and race-touched jobs both ran and passed outputs HEAD's tree, the gate definition fingerprint, the engine version and the mode from its record-tree job; a run whose jobs skipped records nothing. A later run at the same commit skips every job when the controller finds such a pass from a full-mode run proven for this repository (from GitHub or fetched by the controller) that selected every job without dry run, sealed no environment variables and ran every job on a trusted host (a fresh host, or a runner scoped to repositories with --repos), and says which runner proved it. A plain local run proves no repository, so it never lets another run skip. Without --full, vet, build, lint, the critical tests and the TypeScript SDK suite run only when the change reaches Go (a .go file, a non-Markdown file inside a Go package, go.mod, go.sum, .golangci.yml or the store schema) or, for the SDK suite, sdk/typescript/, and the frontend dependency install runs only when a frontend suite will, so a docs, UI or process change lands on its own tests plus the review (decision 96)."
+	return "Runs gofmt over the tree and go vet / go build / golangci-lint in every committed Go module (today the repo root and .sparkwing/), runs go test on the packages the change touches (staged, or changed since origin/main) and every test tagged //sparkwing:critical, or on every package with -- --full, which hosted CI passes, runs go test -race on the packages that hold the staged Go files (or the Go files changed since origin/main when nothing is staged, with all tracked files judged if that baseline is unavailable, or every package with -- --full) apart from internal/store, which cannot finish inside the step's budget and races in pre-release instead, runs the internal/store suite against an embedded Postgres when that change touches internal/store, or always with -- --full, runs the dashboard's TypeScript unit, full ESLint, production-build, and Playwright browser-smoke suites, plus the configured formatters (gofumpt + goimports), no em dashes, and no internal tracker IDs (IMP-/SDK-/LOCAL-/RUN-/ORG-/REG-/TOD- uppercase, BW- in either case) over the staged files, or over the files changed since origin/main when nothing is staged, and no disallowed comments (only GoDoc on exported APIs and // hack:/safety:/bug:/perf: tags) in the staged change, or in the change since origin/main plus every untracked Go file when nothing is staged, and no test that sleeps or waits on the wall clock over that same scope, and repo-wide, that the embedded pkg/docs/ copies match the docs/ and CHANGELOG.md sources (via `bin/sync-docs.sh --check`; run bin/sync-docs.sh without the flag if it drifted) and that no product file resolves the sparkwing home itself, by reading SPARKWING_HOME or by joining a home directory with .sparkwing, instead of through internal/paths.DefaultPaths. The formatters, comment, em-dash, and tracker-ID steps name the mode they ran in, and the lint step names the modules it covered and the baseline it judged against. It also requires a CHANGELOG.md entry for every covered surface the change touches (bin/check-changelog.sh), api/openapi.yaml agreeing with the controller's route table (bin/check-api-spec.sh), and the public API surface matching the .apidiff/ snapshot (bin/check-api-snapshot.sh). Set SPARKWING_REGEX_SWEEP_ALL=1 to sweep the whole tree for em dashes and tracker IDs. No git hook runs this pipeline: `sparkwing run gate` runs it on demand and hosted CI runs it on every pull request and every push to main. The two hook tiers are the far cheaper subsets pre-commit and pre-push. A clean run whose gate and race-touched jobs both ran and passed outputs HEAD's tree, the gate definition fingerprint, the engine version and the mode from its record-tree job; a run whose jobs skipped records nothing. A later run at the same commit skips every job when the controller finds such a pass from a full-mode run proven for this repository (from GitHub or fetched by the controller) that selected every job without dry run, sealed no environment variables and ran every job on a trusted host (a fresh host, or a runner scoped to repositories with --repos), and says which runner proved it. A plain local run proves no repository, so it never lets another run skip. Without --full, vet, build, lint, the critical tests and the TypeScript SDK suite run only when the change reaches Go (a .go file, a non-Markdown file inside a Go package, go.mod, go.sum, .golangci.yml or the store schema) or, for the SDK suite, sdk/typescript/, and the frontend dependency install runs only when a frontend suite will or web/node_modules is missing, so a docs, UI or process change lands on its own tests plus the review (decision 96)."
 }
 
 func (Gate) Examples() []sparkwing.Example {
@@ -162,7 +162,9 @@ func (p *Gate) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
 	if p.mode == gateAffected {
 		test = runAffectedTest
 	}
-	testStep := sparkwing.Step(w, "test", test).Needs(buildStep)
+	// safety: tests/acceptance drives the dashboard client through web/node_modules.
+	frontendDeps := sparkwing.Step(w, "frontend-deps", runFrontendDeps)
+	testStep := sparkwing.Step(w, "test", test).Needs(buildStep, frontendDeps)
 	lint := runGolangciLint
 	if p.mode == gateAffected {
 		lint = runGolangciLintTouched
@@ -180,7 +182,6 @@ func (p *Gate) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
 	sparkwing.Step(w, "changelog", checkChangelogRequired)
 	sparkwing.Step(w, "api-spec", checkAPISpec)
 	sparkwing.Step(w, "api-snapshot", checkAPISnapshot)
-	frontendDeps := sparkwing.Step(w, "frontend-deps", runFrontendDeps)
 	frontendUnit := sparkwing.Step(w, "frontend-unit", runFrontendUnit).Needs(frontendDeps)
 	frontendLint := sparkwing.Step(w, "frontend-lint", runFrontendLint).Needs(frontendDeps)
 	frontendBuild := sparkwing.Step(w, "frontend-build", runFrontendBuild).Needs(frontendUnit, frontendLint)
@@ -196,7 +197,7 @@ func (p *Gate) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
 		vetStep.SkipIf(skipUnlessGoTouched("vet"))
 		buildStep.SkipIf(skipUnlessGoTouched("build"))
 		lintStep.SkipIf(skipUnlessGoTouched("lint"))
-		frontendDeps.SkipIf(skipFrontendUnlessTouched(true))
+		frontendDeps.SkipIf(skipFrontendDepsUnlessTouched)
 		sdkStep.SkipIf(skipTypeScriptSDKUnlessTouched)
 	}
 	// safety: the job succeeds only when every step does, so this output says the
@@ -221,7 +222,7 @@ const frontendInstall = "pnpm --dir web install --frozen-lockfile --prefer-offli
 // no-op when the dependencies already match the lockfile.
 func runFrontendDeps(ctx context.Context) error {
 	if _, err := exec.LookPath("pnpm"); err != nil {
-		if _, statErr := os.Stat(filepath.Join(sparkwing.WorkDir(), "web", "node_modules")); statErr == nil {
+		if !frontendDepsMissing() {
 			sparkwing.Warn(ctx, "pnpm is not on PATH, so web/node_modules was not checked against the lockfile")
 			return nil
 		}
@@ -231,6 +232,26 @@ func runFrontendDeps(ctx context.Context) error {
 		return fmt.Errorf("frontend dependencies: %w\nrun: %s", err, frontendInstall)
 	}
 	return nil
+}
+
+func frontendDepsMissing() bool {
+	_, err := os.Stat(filepath.Join(sparkwing.WorkDir(), "web", "node_modules"))
+	return err != nil
+}
+
+func ensureFrontendDeps(ctx context.Context) error {
+	if !frontendDepsMissing() {
+		return nil
+	}
+	return runFrontendDeps(ctx)
+}
+
+func skipFrontendDepsUnlessTouched(ctx context.Context) bool {
+	if frontendDepsMissing() {
+		sparkwing.Info(ctx, "frontend dependencies: installing, because web/node_modules is missing")
+		return false
+	}
+	return skipFrontendUnlessTouched(true)(ctx)
 }
 
 func runFrontendUnit(ctx context.Context) error {
