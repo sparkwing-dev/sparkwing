@@ -12,6 +12,13 @@ Both execute `sparkwing-runner start --config PATH` in the foreground. They
 start at login and restart on failure. Windows installation returns
 `ErrUnsupported` so the caller can use its existing service manager.
 
+Enrollment captures PATH for both service managers and prepends the installed
+Go toolchain's `GOROOT/bin` when `GOTOOLCHAIN=local go env GOROOT` resolves it.
+This avoids version-manager shim selection after the service changes directory.
+The probe cannot download a toolchain. Native assignment and XML escaping keep
+paths literal. `TestRunnerServiceRetainsEnrolledGoToolchain` covers enrollment
+through registration on both platforms with a Go shim and a fake service manager.
+
 The registration names the existing config path. It does not read or copy
 credentials. Files without the managed marker remain untouched. `Uninstall`
 also preserves a registration naming another config.
