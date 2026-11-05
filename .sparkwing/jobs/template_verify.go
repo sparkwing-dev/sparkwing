@@ -3,6 +3,7 @@ package jobs
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net"
@@ -64,7 +65,7 @@ func (TemplateVerify) ShortHelp() string {
 }
 
 func (TemplateVerify) Help() string {
-	return "Builds the sparkwing CLI from the working tree, then fans out one job per sparks-core registry template. Each job scaffolds the template into a throwaway repo using the manifest's verify_params, then runs `go build ./...`, `sparkwing pipeline lint`, and `sparkwing pipeline plan --static`. Templates that import sparks-core blocks are built against the local sparks-core checkout (discovered via SPARKWING_SPARKS_CORE_DIR, the repo go.work, or a sibling ../sparks-core) so a template can be verified against unreleased library APIs it co-develops with, and every scaffold's sparkwing SDK is replaced with the working tree so the release being cut is what gets verified (and so a runs-store schema bump cannot strand a released-SDK scaffold on the tree-migrated verify state home). Templates tagged verify: runnable also run end-to-end against a synthesized fixture (a go module, a Dockerfile, a Node package, a Python package, or an ephemeral Postgres whose DSN is injected as a masked secret for the run); verify: dry-runnable templates run the same way with --sw-dry-run so the engine seals dry-run mode and cloud mutations echo instead of executing. When a fixture's toolchain or any command in the manifest's verify_tools is missing on the host (Docker daemon, node/npm, python3, migrate, pg_dump, ...) the run step is skipped, not failed, so the gate stays green. Run this check explicitly with `sparkwing run template-verify`. A template whose proof inputs are unchanged since a recorded pass is reused instead of re-verified: the digest covers the template's registry files, its verification manifest fields, the exact working state of the sparkwing and sparks-core checkouts (which is what pins the SDK, the CLI, and this verifier), the Go toolchain, and the identity of every host tool the template needs. Reuse is refused whenever any of those cannot be established, including when no local sparks-core checkout pins the module versions a scaffold resolves. Pass --exhaustive to verify every template regardless of recorded proofs."
+	return "Builds the sparkwing CLI from the working tree, then fans out one job per sparks-core registry template. Each job scaffolds the template into a throwaway repo using the manifest's verify_params, then runs `go build ./...`, `sparkwing pipeline lint`, and `sparkwing pipeline plan --static`. Templates that import sparks-core blocks are built against the local sparks-core checkout (discovered via SPARKWING_SPARKS_CORE_DIR, the repo go.work, or a sibling ../sparks-core) so a template can be verified against unreleased library APIs it co-develops with, and every scaffold's sparkwing SDK is replaced with the working tree so the release being cut is what gets verified (and so a runs-store schema bump cannot strand a released-SDK scaffold on the tree-migrated verify state home). Templates tagged verify: runnable also run end-to-end against a synthesized fixture (a go module, a Dockerfile, a Node package, a Python package, or an ephemeral Postgres whose DSN is injected as a masked secret for the run); verify: dry-runnable templates run the same way with --sw-dry-run so the engine seals dry-run mode and cloud mutations echo instead of executing. Skipped dry-run jobs or steps are reported as partial verification and never record a reusable proof. When a fixture's toolchain or any command in the manifest's verify_tools is missing on the host (Docker daemon, node/npm, python3, migrate, pg_dump, ...) the run step is skipped, not failed, so the gate stays green. Run this check explicitly with `sparkwing run template-verify`. A template whose proof inputs are unchanged since a recorded pass is reused instead of re-verified: the digest covers the template's registry files, its verification manifest fields, the exact working state of the sparkwing and sparks-core checkouts (which is what pins the SDK, the CLI, and this verifier), the Go toolchain, and the identity of every host tool the template needs. Reuse is refused whenever any of those cannot be established, including when no local sparks-core checkout pins the module versions a scaffold resolves. Pass --exhaustive to verify every template regardless of recorded proofs."
 }
 
 func (TemplateVerify) Examples() []sparkwing.Example {
@@ -250,15 +251,13 @@ func verifyTemplateFn(m templates.Manifest, envRef sparkwing.Ref[verifyEnv]) fun
 	}
 }
 
-// safety: a skipped run step is a partial verification, so it is never
-// recorded. Reusing one would let the next run treat a template that has
-// never executed as proven once its toolchain appeared.
+// safety: skipped execution is partial verification and cannot prove a later run.
 func recordVerification(ctx context.Context, dir, digest, name string, outcome templateOutcome) {
 	if digest == "" {
 		return
 	}
 	if outcome.Skipped {
-		sparkwing.Info(ctx, "%s: proof not recorded because %s was unavailable and the run step did not execute; the next run verifies it again",
+		sparkwing.Info(ctx, "%s: proof not recorded because verification was partial (%s); the next run verifies it again",
 			name, outcome.SkipReason)
 		return
 	}
@@ -267,9 +266,7 @@ func recordVerification(ctx context.Context, dir, digest, name string, outcome t
 	}
 }
 
-// safety: Skipped marks a tier whose run step could not execute. That is a
-// partial proof, and recording it would let the next run reuse it once the
-// missing toolchain appeared.
+// safety: Skipped includes partial execution so it cannot become a reusable proof.
 type templateOutcome struct {
 	Tier       string
 	RanRunStep bool
@@ -347,8 +344,9 @@ func verifyTemplate(ctx context.Context, m templates.Manifest, env verifyEnv) (t
 		defer cleanup()
 		args := []string{"run", m.Name}
 		mode := "ran green"
+		handlePath := filepath.Join(scratch, "verify-run.json")
 		if m.Tier() == templates.VerifyDryRunnable {
-			args = append(args, "--sw-dry-run")
+			args = append(args, "--sw-dry-run", "--sw-run-handle-file", handlePath)
 			mode = "ran green (dry-run)"
 		}
 		runCmd := sparkwing.Exec(ctx, bin, args...).Dir(scratch)
@@ -361,12 +359,81 @@ func verifyTemplate(ctx context.Context, m templates.Manifest, env verifyEnv) (t
 		if _, err := runCmd.Run(); err != nil {
 			return out, fmt.Errorf("%s: run: %w", m.Name, err)
 		}
+		if m.Tier() == templates.VerifyDryRunnable {
+			out, err = readTemplateDryRunOutcome(ctx, bin, scratch, env.StateHome, handlePath)
+			if err != nil {
+				return out, fmt.Errorf("%s: dry-run evidence: %w", m.Name, err)
+			}
+			if out.Skipped {
+				mode = "partial verification (" + out.SkipReason + ")"
+			}
+		} else {
+			out.RanRunStep = true
+		}
 		sparkwing.Annotate(ctx, sparkwing.Annotation{Message: fmt.Sprintf("%s: compiled + linted + explained + %s", m.Name, mode)})
-		out.RanRunStep = true
 		return out, nil
 	default:
 		return out, fmt.Errorf("%s: unknown verify tier %q", m.Name, m.Tier())
 	}
+}
+
+func readTemplateDryRunOutcome(ctx context.Context, bin, scratch, stateHome, handlePath string) (templateOutcome, error) {
+	out := templateOutcome{Tier: templates.VerifyDryRunnable}
+	raw, err := os.ReadFile(handlePath)
+	if err != nil {
+		return out, err
+	}
+	var handle struct {
+		RunID string `json:"run_id"`
+	}
+	if err := json.Unmarshal(raw, &handle); err != nil {
+		return out, err
+	}
+	if handle.RunID == "" {
+		return out, errors.New("run handle has no run ID")
+	}
+	result, err := sparkwing.Exec(ctx, bin, "runs", "status", "--run", handle.RunID, "--profile=", "--steps", "-o", "json").
+		Dir(scratch).Env("SPARKWING_HOME", stateHome).Capture()
+	if err != nil {
+		return out, err
+	}
+	return classifyTemplateDryRun(handle.RunID, result.Stdout)
+}
+
+func classifyTemplateDryRun(runID, raw string) (templateOutcome, error) {
+	out := templateOutcome{Tier: templates.VerifyDryRunnable}
+	type result struct {
+		Status       string `json:"status"`
+		Outcome      string `json:"outcome"`
+		Reason       string `json:"reason"`
+		StatusDetail string `json:"status_detail"`
+	}
+	var detail struct {
+		ID     string   `json:"id"`
+		Status string   `json:"status"`
+		Jobs   []result `json:"jobs"`
+		Steps  []result `json:"steps"`
+	}
+	if err := json.Unmarshal([]byte(raw), &detail); err != nil {
+		return out, err
+	}
+	if runID == "" || detail.ID != runID || detail.Status != "dry_run" {
+		return out, errors.New("missing completed dry-run job or step evidence")
+	}
+	allSucceeded := true
+	// The public step view omits skip reasons, so every skipped step is partial evidence.
+	for _, r := range append(detail.Jobs, detail.Steps...) {
+		if r.Status == "skipped" || r.Outcome == "skipped" || strings.Contains(r.Reason+r.StatusDetail, "no_dry_run_defined") {
+			out.Skipped, out.SkipReason = true, "dry-run jobs or steps skipped"
+			return out, nil
+		}
+		allSucceeded = allSucceeded && r.Outcome == "success"
+	}
+	if !allSucceeded || len(detail.Jobs) == 0 || len(detail.Steps) == 0 {
+		return out, errors.New("missing successful dry-run job or step evidence")
+	}
+	out.RanRunStep = true
+	return out, nil
 }
 
 func templateRunAdmissionEnv(stateHome string) map[string]string {
