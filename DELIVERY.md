@@ -447,15 +447,16 @@ ERROR). Each environment's deployed and previous digests are its job output. Cre
 from the run's OIDC token through the `sparkwing-deploy` role in
 [deploy-pipeline-iam.md](design/rewrite/proposals/deploy-pipeline-iam.md).
 
-The deploy takes no deploy-time snapshot. Recovery is RDS point-in-time recovery, with
-7 days of retention in production and 1 day in staging. Take a manual snapshot before a risky
+The deploy takes no deploy-time snapshot. Recovery is RDS point-in-time recovery. Production
+(`kikd-prod-sparkwing-postgres`, RDS) keeps 7 days; staging (`kikd-prod-sparkwing-staging-postgres`,
+a separate Aurora Serverless cluster) keeps 1 day. Take a manual snapshot before a risky
 migration. Checking that automated backups are on belongs to external verification through
 stormwing, not the deploy. The deploy role has no RDS permission.
 
 A failed production deploy or smoke reverts this run's GitOps commits, launcher first, even
 after cancellation. Image rollback does not undo a forward migration. If recovery needs an
 older schema, recover the target database before reverting its images. Staging and production
-share an RDS instance, so a recovery must preserve the other database.
+have separate database servers, so recovering one never touches the other.
 
 Only a run the GitHub App started for a push to main can assume the deploy role. The `deploy`
 entry in `.sparkwing/sparkwing.yaml` declares `on: push` for `main` with
