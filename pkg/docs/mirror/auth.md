@@ -875,7 +875,9 @@ never lands in a script's log:
    returns a device code once, an eight-letter user code, `/device`, a
    10-minute lifetime and a 5-second poll interval.
 2. The CLI prints its own controller URL plus `/device` and the user code. The
-   page address never comes from the response.
+   page address never comes from the response. When `--dashboard-url` configures a
+   separate console origin, the controller redirects `GET /device` there. The
+   redirect uses only that configured origin and drops request query parameters.
 3. A signed-in member opens `/device`, types the code, and sees the machine or
    runner name, the team, the exact grants, the runner's repositories and the
    time left. A request naming another team is refused. Approve and Deny post the code to

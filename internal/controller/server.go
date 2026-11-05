@@ -178,7 +178,8 @@ func (s *Server) WithBucketUsage(a storage.UsageReporter) *Server {
 // WithDashboardURL announces the externally-reachable dashboard URL via
 // GET /api/v1/services, so a client that has just been given a token can
 // tell its operator where to watch the runs it dispatches. Empty disables
-// the announcement.
+// the announcement. Device sign-in links on other hosts redirect to this
+// URL's origin.
 func (s *Server) WithDashboardURL(url string) *Server {
 	s.dashboardURL = url
 	return s
@@ -228,7 +229,7 @@ func (s *Server) Handler() http.Handler {
 	if s.dashboard != nil {
 		handler = s.browserHandler(handler)
 	}
-	return ratelimit.TrustedProxies(handler, s.trustedProxyCIDRs)
+	return ratelimit.TrustedProxies(s.devicePageRedirect(handler), s.trustedProxyCIDRs)
 }
 
 func (s *Server) handler() http.Handler {

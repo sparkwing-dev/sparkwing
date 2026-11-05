@@ -81,6 +81,23 @@ func (s *Server) browserHandler(api http.Handler) http.Handler {
 	return web.SecurityHeaders(d.HSTS, top)
 }
 
+func (s *Server) devicePageRedirect(next http.Handler) http.Handler {
+	console, err := url.Parse(s.dashboardURL)
+	if err != nil || console.Host == "" || console.User != nil || console.Scheme != "https" && console.Scheme != "http" {
+		return next
+	}
+	target := (&url.URL{Scheme: console.Scheme, Host: console.Host, Path: deviceVerification}).String()
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// safety: only configuration supplies the target. The console itself must keep serving the page.
+		if (r.Method == http.MethodGet || r.Method == http.MethodHead) && r.URL.Path == deviceVerification && !strings.EqualFold(r.Host, console.Host) {
+			w.Header().Set("Cache-Control", "no-store")
+			http.Redirect(w, r, target, http.StatusSeeOther)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
 func (s *Server) localShell() http.Handler {
 	d := s.dashboard
 	shell := http.NewServeMux()
