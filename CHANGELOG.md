@@ -22,7 +22,7 @@ unlock.
 
 ### Fixed
 
-- **engine:** Export `SPARKWING_DRY_RUN=1` only for dry runs, so sparks-core helpers no longer skip their work on normal runs.
+- **engine:** Export `SPARKWING_DRY_RUN=1` only for dry runs, so sparks-core helpers no longer skip their work on normal runs. Template verification selects dry-run mode with `--sw-dry-run`.
 
 - **cli:** Replacing a profile token through `sparkwing login` skips the revocation warning when the previous token is already ended or unknown
 - **controller:** Device sign-in links redirect from the API host to the configured console origin

@@ -239,6 +239,6 @@ launches a runner):
 | `AWS_PROFILE` | `aws` | AWS profile name |
 | `AWS_WEB_IDENTITY_TOKEN_FILE` | `aws` | IRSA detection |
 | `KUBERNETES_SERVICE_HOST` | `kube` | In-cluster detection |
-| `SPARKWING_DRY_RUN` | `cloudrun`, `ecs`, `lambda`, `terraform`, `gcp`, `docker`, `kube`, `release`, `dbbackup`, `contentkey` | Non-empty makes mutating commands echo their argv instead of executing |
+| `SPARKWING_DRY_RUN` | `cloudrun`, `ecs`, `lambda`, `terraform`, `gcp`, `docker`, `kube`, `release`, `dbbackup`, `s3` | A boolean true value (such as `1` or `true`) makes mutating commands echo their argv instead of executing. False, empty and invalid values allow execution. |
 | `SPARKWING_ARGOCD_SERVER` / `SPARKWING_ARGOCD_TOKEN` | `gitops` | ArgoCD API endpoint and bearer token for `SyncArgoCD` |
 | `SPARKWING_API_TOKEN` | `gitops` | Bearer sent to the controller authorization endpoint |
