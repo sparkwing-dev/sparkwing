@@ -93,7 +93,7 @@ func TestDeployBackupPreflightChecksNoOpDeploy(t *testing.T) {
 func TestDeployComparesTheRunningControllerImage(t *testing.T) {
 	f := newFakeDeploy(t)
 	f.runningController = testRegistry + "/sparkwing-controller:v0.68.3@" + testDigest("running")
-	// An untraced running image must not inherit the schema of the GitOps pin.
+	// safety: an untraced running image must not inherit the schema of the GitOps pin.
 	_, _, err := f.deployer(false).deployTo(t.Context(), f.config().Staging, f.candidate())
 	if err == nil || !strings.Contains(err.Error(), "Deploy once by hand") {
 		t.Fatalf("untraced running controller = %v", err)

@@ -50,7 +50,7 @@ func (d *deployer) snapshotSchemaChange(ctx context.Context, env deployEnv, imag
 		return "", fmt.Errorf("%s controller image must be pinned by digest: %w", env.Name, err)
 	}
 	deployed := imagePin{Repository: pin.Context().Name(), Digest: pin.DigestStr()}
-	// The revision label is authoritative. A tag is only a fallback for older images.
+	// safety: the revision label is authoritative. A tag is only a fallback for older images.
 	ref, _, _ := strings.Cut(strings.TrimSpace(image), "@")
 	if colon := strings.LastIndex(ref, ":"); colon > strings.LastIndex(ref, "/") {
 		deployed.Tag = ref[colon+1:]
@@ -88,7 +88,7 @@ func (d *deployer) snapshotSchemaChange(ctx context.Context, env deployEnv, imag
 	if err != nil {
 		return snapshot, fmt.Errorf("RDS snapshot %s is not ready; no rollout started (requires rds:DescribeDBSnapshots): %w", snapshot, err)
 	}
-	// A snapshot wait can consume half the role's one-hour session.
+	// safety: a snapshot wait can consume half the role's one-hour session.
 	if err := d.refreshRole(ctx); err != nil {
 		return snapshot, err
 	}
