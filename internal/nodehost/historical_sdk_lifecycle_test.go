@@ -4,6 +4,8 @@ package nodehost
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -11,6 +13,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
+	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
 
 func historicalStorageLifecycle(t *testing.T, ctx context.Context, session *executorSession, task, lifecycle nodeproto.JobSpec) {
@@ -55,6 +58,67 @@ func historicalStorageLifecycle(t *testing.T, ctx context.Context, session *exec
 		}
 	}
 	historicalDirectoryCache(t, ctx, lifecycle)
+}
+
+func historicalGeneratorReplay(t *testing.T, ctx context.Context, session *executorSession, plan nodeproto.PlanDoc) {
+	t.Helper()
+	source := plan.Jobs[0]
+	output := historicalRun(t, ctx, session, "output")
+	if output.Outcome != "success" || len(output.Output) == 0 {
+		t.Fatalf("generator source output: %+v", output)
+	}
+	spec := runspec.Spec{Request: runspec.SealedRequest{RunID: "compat", Request: runspec.Request{Pipeline: "compat"}}, Resolved: runspec.Resolved{SecretRegistration: runspec.SecretRegistration{Version: 1}}}
+	input := NodeInput{Accepted: AcceptedRun{RunID: "compat", Spec: marshalEventFixture(t, spec), Plan: plan}, NodeID: "generated"}
+	sourceHash, err := runspec.CanonicalHash(source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sourceRef := runspec.NodeRef{RunID: "compat", NodeID: runspec.NodeID(source.ID)}
+	persisted := newExpansionHostStore(store.RunRow{Execution: runstate.Execution{ID: "compat"}}, runstate.NodeRow{Ref: sourceRef, Spec: marshalEventFixture(t, source), SpecHash: string(sourceHash), Generation: 1, Status: runstate.StatusDone, Outcome: runstate.NodeSuccess, Expansion: runstate.ExpansionAccepted})
+	code := sdkCode{Store: persisted, Validation: nodeproto.ValidationContext{Placement: nodeproto.PlacementLocal, Secrets: ownerSealSecrets{}}, ReadOutput: func(_ context.Context, ref runspec.NodeRef, generation int64) (json.RawMessage, error) {
+		if ref != sourceRef || generation != 1 {
+			return nil, fmt.Errorf("historical replay read another source: %s generation=%d", ref, generation)
+		}
+		return output.Output, nil
+	}}
+	priorArgs := session.rawArgs
+	session.rawArgs = session.jobArgs[source.ID]
+	defer func() { session.rawArgs = priorArgs }()
+	body, err := code.generate(ctx, session, input, source, output.Output)
+	if err != nil {
+		t.Fatal(err)
+	}
+	expansion, err := nodeproto.ValidatePlan(body, nodeproto.ValidationContext{Placement: nodeproto.PlacementLocal, Secrets: ownerSealSecrets{}, Expansion: true, SourceJob: source.ID, ExistingJobs: plan.Jobs})
+	if err != nil || len(expansion.Jobs) != 1 || expansion.Jobs[0].ID != "generated" {
+		t.Fatalf("historical generated declarations: body=%s error=%v", body, err)
+	}
+	expansionHash, err := runspec.CanonicalHash(expansion)
+	if err != nil {
+		t.Fatal(err)
+	}
+	persisted.expansions = []runstate.AcceptedExpansionRow{{Source: sourceRef, SourceGeneration: 1, Body: marshalEventFixture(t, expansion), BodyHash: string(expansionHash)}}
+	generated := expansion.Jobs[0]
+	generatedHash, err := runspec.CanonicalHash(generated)
+	if err != nil {
+		t.Fatal(err)
+	}
+	generatedRow := runstate.NodeRow{Ref: runspec.NodeRef{RunID: "compat", NodeID: "generated"}, Spec: marshalEventFixture(t, generated), SpecHash: string(generatedHash), Status: runstate.StatusPending}
+	persisted.nodes = []runstate.NodeRow{generatedRow}
+	readSource := persisted.readNode
+	persisted.readNode = func(ctx context.Context, ref runspec.NodeRef) (runstate.NodeRow, error) {
+		if ref == generatedRow.Ref {
+			return generatedRow, nil
+		}
+		return readSource(ctx, ref)
+	}
+	input.Replay, err = code.recordedReplay(ctx, input, plan.Jobs)
+	if err != nil || len(input.Replay) != 1 || string(input.Replay[0].Output) != string(output.Output) {
+		t.Fatalf("historical recorded replay: replay=%+v error=%v", input.Replay, err)
+	}
+	reconstructed, err := code.replay(ctx, session, input, plan.Jobs)
+	if err != nil || len(reconstructed) != len(plan.Jobs)+1 || reconstructed[len(reconstructed)-1].ID != generated.ID {
+		t.Fatalf("historical generator replay: jobs=%+v error=%v", reconstructed, err)
+	}
 }
 
 func historicalDirectoryCache(t *testing.T, ctx context.Context, job nodeproto.JobSpec) {
