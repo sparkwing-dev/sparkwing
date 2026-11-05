@@ -124,3 +124,24 @@ func TestEvalUnitApprovalPredicateHasNoJobCapacityOrCompute(t *testing.T) {
 		})
 	}
 }
+
+func TestEvalUnitReportsCommittedGeneratorFailure(t *testing.T) {
+	state, host, input := newOwnerFixture(t, true)
+	row := runstate.NodeRow{Ref: runspec.NodeRef{RunID: runspec.RunID(input.RunID), NodeID: "source"}, Spec: json.RawMessage(`{"id":"source"}`), SpecHash: "source-hash", Status: runstate.StatusDone, Outcome: runstate.NodeSuccess, Expansion: runstate.ExpansionExpected}
+	state.snapshot.Nodes = []runstate.NodeRow{row}
+	host.Store = &evalUnitStore{ownerFixture: state}
+	input.Owner = runstate.Actor{Kind: runstate.ActorRunHost, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: "eval"}, CapabilityPrefix: "eval", NodeFence: runspec.NodeFence{RunID: "run", NodeID: "job", Holder: "source-holder", Generation: 0}}
+	host.Acquire = func(context.Context, RunInput) (*source.Entry, error) { return nil, nil }
+	host.Expand = func(context.Context, EvaluationInput, runstate.NodeRow, StorageBinding) (json.RawMessage, runspec.SecretRegistration, *store.ExpansionFailure, error) {
+		t.Fatal("generator ran without source")
+		return nil, runspec.SecretRegistration{}, nil, nil
+	}
+	var reported []WorkOutcome
+	ctx := WithOutcomeNotify(t.Context(), func(o WorkOutcome) { reported = append(reported, o) })
+	if err := host.Evaluate(ctx, input, "source", 0, capability.LeaseRef{Kind: capability.UnitEval, ID: "evaluation", Holder: "eval-holder", Generation: 7}); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(reported, []WorkOutcome{{RunID: input.RunID, JobID: "source", State: string(runstate.NodeFailed)}}) {
+		t.Fatalf("reported = %+v", reported)
+	}
+}

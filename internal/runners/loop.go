@@ -202,7 +202,10 @@ func (l *Loop) run(ctx context.Context) (policyErr, runErr error) {
 		}
 		active[key] = struct{}{}
 		claimed++
-		hostCtx := nodehost.WithOutcomeNotify(ctx, failed.record)
+		hostCtx := ctx
+		if l.Config.FailOnFailedWork {
+			hostCtx = nodehost.WithOutcomeNotify(ctx, failed.record)
+		}
 		hostCtx = nodehost.WithAwaitNotify(hostCtx, func(on bool) {
 			awaitMu.Lock()
 			if on {

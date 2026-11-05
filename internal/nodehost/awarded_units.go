@@ -141,6 +141,9 @@ func (h *OwnerHost) commitExpansion(ctx context.Context, row runstate.NodeRow, a
 	}
 	commit := func() error {
 		_, err := h.Store.AcceptExpansion(ctx, store.ExpansionSubmission{Source: row.Ref, SourceGeneration: row.Generation, Actor: actor, Body: body, Registration: registration, Failure: failure})
+		if err == nil && failure != nil {
+			OutcomeNotify(ctx)(WorkOutcome{RunID: string(row.Ref.RunID), JobID: string(row.Ref.NodeID), State: string(runstate.NodeFailed)})
+		}
 		return err
 	}
 	if h.Masks != nil && failure == nil {
@@ -178,5 +181,8 @@ func (h *OwnerHost) evaluateApproval(ctx context.Context, input RunInput, accept
 		command = store.BindNodeCommand(result.Transition, row.Ref, input.Owner)
 	}
 	_, err = h.Store.TransitionNode(ctx, command)
+	if policy, ok := result.Transition.(store.OwnerPolicyNode); ok && err == nil && policy.Outcome != "" {
+		OutcomeNotify(ctx)(WorkOutcome{RunID: string(row.Ref.RunID), JobID: string(row.Ref.NodeID), State: string(policy.Outcome)})
+	}
 	return err
 }
