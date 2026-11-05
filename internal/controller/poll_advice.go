@@ -5,6 +5,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/ratelimit"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
@@ -17,15 +18,12 @@ const DefaultMaxIdleClaimPoll = 5 * time.Second
 // window multiplies by this to get the longest a runner may actually wait.
 const IdleClaimPollJitterFactor = 1.25
 
-// MaxHonoredIdleClaimPoll caps the interval accepted by a runner.
-const MaxHonoredIdleClaimPoll = 8 * time.Second
-
 // LongestHonoredIdlePoll includes runner jitter in the capped poll interval.
 func LongestHonoredIdlePoll(d time.Duration) time.Duration {
 	if d <= 0 {
 		return 0
 	}
-	return time.Duration(float64(min(d, MaxHonoredIdleClaimPoll)) * IdleClaimPollJitterFactor)
+	return time.Duration(float64(min(d, controllerwire.MaxHonoredIdleClaimPoll)) * IdleClaimPollJitterFactor)
 }
 
 // perf: an empty queue answers claims for a quarter of the time it has been
@@ -96,7 +94,7 @@ func (s *Server) writeClaimPollAdvice(w http.ResponseWriter) {
 	if advice <= 0 {
 		return
 	}
-	w.Header().Set(store.ClaimPollAfterHeader, strconv.Itoa(int(advice.Seconds())))
+	w.Header().Set(controllerwire.ClaimPollAfterHeader, strconv.Itoa(int(advice.Seconds())))
 }
 
 // safety: a refusal is written here, so a caller that gets false must return

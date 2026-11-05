@@ -8,7 +8,6 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
-	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
 
 func TestClaimRetainsIdlePollAdvice(t *testing.T) {
@@ -17,7 +16,7 @@ func TestClaimRetainsIdlePollAdvice(t *testing.T) {
 			t.Errorf("configured capacity header = %q", got)
 		}
 		response := engineResponse(http.StatusOK, `{}`)
-		response.Header.Set(store.ClaimPollAfterHeader, "5")
+		response.Header.Set(controllerwire.ClaimPollAfterHeader, "5")
 		return response, nil
 	})
 	result, err := c.Claim(context.Background(), controllerwire.ClaimRequest{MaxConcurrent: 2, Kinds: []capability.UnitKind{capability.UnitNode}})
