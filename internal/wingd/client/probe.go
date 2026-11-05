@@ -4,8 +4,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
 	"os"
 	"time"
+
+	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
 )
 
 const probeTimeout = time.Second
@@ -61,43 +64,30 @@ func probeDeadline(ctx context.Context) (deadline time.Time, ownCeiling bool) {
 // only against the probe's own ceiling, because a caller who allowed less
 // than that has learned nothing about the daemon.
 func probeFault(sock, verb string, ownCeiling bool, err error) error {
-	if ownCeiling && errors.Is(err, os.ErrDeadlineExceeded) {
+	if ownCeiling && (errors.Is(err, os.ErrDeadlineExceeded) || errors.Is(err, context.DeadlineExceeded)) {
 		return fmt.Errorf("%w at %s: %w", errDaemonWedged, sock, err)
 	}
 	return fmt.Errorf("wingd/client: %s %s: %w", verb, sock, err)
 }
 
 func Probe(ctx context.Context, sock string) (DaemonInfo, error) {
-	nc, err := dial(ctx, sock, probeTimeout)
-	if err != nil {
-		if u := unreachable(sock, err); u != nil {
-			return DaemonInfo{}, u
-		}
-		return DaemonInfo{}, ErrNoDaemon
-	}
-	defer func() { _ = nc.Close() }()
-	// safety: bound reads because a probe has no lease or reconnect path if the
-	// daemon accepts but never responds.
 	deadline, ownCeiling := probeDeadline(ctx)
-	_ = nc.SetDeadline(deadline)
-	cl := &Client{nc: nc, dec: newFrameReader(nc), sock: sock, probe: true, connDeadline: deadline}
-	ack, err := cl.handshake("")
-	if err != nil {
+	ctx, cancel := context.WithDeadline(ctx, deadline)
+	defer cancel()
+	cl := &Client{sock: sock}
+	var ack wingwire.HelloAck
+	if err := cl.apiCall(ctx, http.MethodGet, controllerPath+"probe", nil, &ack); err != nil {
+		if dialMeansAbsent(err) {
+			return DaemonInfo{}, ErrNoDaemon
+		}
+		if !errors.Is(err, context.DeadlineExceeded) && !errors.Is(err, context.Canceled) {
+			return DaemonInfo{}, unreachable(sock, err)
+		}
 		return DaemonInfo{}, probeFault(sock, "probe", ownCeiling, err)
 	}
-	native := ack.NativeProtocolMajor
-	if native == 0 {
-		native = ack.ProtocolMajor
-	}
 	return DaemonInfo{
-		Socket:             sock,
-		ProtocolMajor:      native,
-		BinaryVersion:      ack.BinaryVersion,
-		StoreSchemaVersion: ack.StoreSchemaVersion,
-		StoreReady:         ack.StoreReady,
-		StoreError:         ack.StoreError,
-		APIReady:           ack.APIReady,
-		APIError:           ack.APIError,
-		Draining:           ack.Draining,
+		Socket: sock, ProtocolMajor: ack.ProtocolMajor, BinaryVersion: ack.BinaryVersion,
+		StoreSchemaVersion: ack.StoreSchemaVersion, StoreReady: ack.StoreReady, StoreError: ack.StoreError,
+		APIReady: ack.APIReady, APIError: ack.APIError, Draining: ack.Draining,
 	}, nil
 }

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"net/http"
 	"syscall"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
@@ -35,39 +36,9 @@ func unreachable(sock string, dialErr error) error {
 }
 
 func (cl *Client) QueueState(ctx context.Context) (wingwire.QueueState, error) {
-	stop := cl.cancelOnDone(ctx)
-	defer stop()
-	retry := newRetry("queue state", readOnlyRetryLimit)
-	for {
-		qs, terminal, transient := cl.readQueueState()
-		if transient == nil {
-			return qs, terminal
-		}
-		if err := retry.wait(ctx, transient); err != nil {
-			return wingwire.QueueState{}, err
-		}
-		if rerr := cl.recoverConn(ctx); rerr != nil {
-			return wingwire.QueueState{}, rerr
-		}
-	}
-}
-
-func (cl *Client) readQueueState() (qs wingwire.QueueState, terminal, transient error) {
-	if err := cl.write(&wingwire.QueueState{}); err != nil {
-		return wingwire.QueueState{}, nil, err
-	}
-	msg, err := cl.dec.read()
-	if err != nil {
-		return wingwire.QueueState{}, nil, err
-	}
-	if refusal := cl.lacksOperation(msg); refusal != nil {
-		return wingwire.QueueState{}, refusal, nil
-	}
-	got, ok := msg.(*wingwire.QueueState)
-	if !ok {
-		return wingwire.QueueState{}, fmt.Errorf("wingd/client: expected queue_state, got %T", msg), nil
-	}
-	return *got, nil, nil
+	var state wingwire.QueueState
+	err := cl.admissionCall(ctx, http.MethodGet, "/queue", nil, &state, readOnlyRetryLimit)
+	return state, err
 }
 
 func Query(ctx context.Context, opts Options) (wingwire.QueueState, error) {

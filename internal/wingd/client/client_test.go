@@ -14,15 +14,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
 )
 
-func TestRecoveryBudgetsCoverFailureCeilingsAndRetryPacing(t *testing.T) {
-	if defaultReattachTimeout < 2*5*time.Minute+15*time.Second+30*time.Second+30*time.Second {
-		t.Fatalf("reattach timeout %s does not cover two stalled children and replacement backoff", defaultReattachTimeout)
-	}
-	if wingd.DefaultGraceWindow < 3*retryMaxDelay {
-		t.Fatalf("daemon grace %s does not cover reconnect pacing %s", wingd.DefaultGraceWindow, retryMaxDelay)
-	}
-}
-
 func TestAdmissionError_FillsVersionSkewOnOpaqueInvalid(t *testing.T) {
 	cl := &Client{opts: Options{Version: "(devel)"}, ack: wingwire.HelloAck{BinaryVersion: "v0.18.0"}}
 	e := cl.admissionError(&wingwire.Evicted{Key: "invalid", Policy: wingwire.PolicyFail})
@@ -52,7 +43,7 @@ func TestAdmissionError_NoSkewHintWhenVersionsMatch(t *testing.T) {
 
 func shortHome(t *testing.T) string {
 	t.Helper()
-	dir, err := os.MkdirTemp("/tmp", "wdcl")
+	dir, err := os.MkdirTemp(os.TempDir(), "wdcl")
 	if err != nil {
 		return t.TempDir()
 	}
@@ -125,7 +116,7 @@ func TestEnsureDaemon_BoundsAnUnreachablePredecessorElection(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := os.Remove(sock); err != nil {
+	if err := os.Remove(wingd.APISocketBeside(sock)); err != nil {
 		t.Fatalf("hide predecessor listener: %v", err)
 	}
 

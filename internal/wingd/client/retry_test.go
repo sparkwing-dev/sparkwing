@@ -3,8 +3,7 @@ package client
 import (
 	"context"
 	"errors"
-	"os"
-	"path/filepath"
+	"net/http"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -66,46 +65,15 @@ func TestRetryReturnsOnceTheCallerGivesUp(t *testing.T) {
 
 func failingDaemon(t *testing.T, home string) *atomic.Int64 {
 	t.Helper()
-	sock, err := wingd.EnsureSocketPath(home)
-	if err != nil {
-		t.Fatalf("socket path: %v", err)
-	}
-	if err := os.MkdirAll(filepath.Dir(sock), 0o700); err != nil {
-		t.Fatalf("mkdir socket dir: %v", err)
-	}
-	ln, err := wingd.ListenSocket(sock)
-	if err != nil {
-		t.Fatalf("listen: %v", err)
-	}
-	t.Cleanup(func() { _ = ln.Close() })
-
 	accepted := &atomic.Int64{}
-	go func() {
-		for {
-			nc, err := ln.Accept()
-			if err != nil {
-				return
-			}
-			accepted.Add(1)
-			go func() {
-				defer nc.Close()
-				r := newFrameReader(nc)
-				if _, err := r.read(); err != nil {
-					return
-				}
-				line, _ := wingwire.Encode(&wingwire.HelloAck{
-					ProtocolMajor:       wingd.ProtocolMajor,
-					NativeProtocolMajor: wingd.ProtocolMajor,
-					BinaryVersion:       "v9.9.9",
-					BuildIdentity:       wingwire.BuildIdentity,
-				})
-				if _, err := nc.Write(line); err != nil {
-					return
-				}
-				_, _ = r.read()
-			}()
+	serveHTTPFixture(t, home, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		accepted.Add(1)
+		if r.URL.Path == controllerPath+"probe" {
+			writeHTTPFixture(w, wingwire.HelloAck{ProtocolMajor: wingd.ProtocolMajor, NativeProtocolMajor: wingd.ProtocolMajor, BinaryVersion: "v9.9.9", BuildIdentity: wingwire.BuildIdentity})
+			return
 		}
-	}()
+		http.Error(w, "unavailable", http.StatusServiceUnavailable)
+	}))
 	return accepted
 }
 

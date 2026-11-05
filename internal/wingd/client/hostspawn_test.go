@@ -3,6 +3,7 @@ package client
 import (
 	"context"
 	"errors"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -114,42 +115,18 @@ func TestEnsureDaemon_NoTakeoverAcceptsSameSourceDaemon(t *testing.T) {
 	}
 }
 
-func oneShotDaemon(t *testing.T, home string, ack wingwire.HelloAck) <-chan wingwire.Message {
+func oneShotDaemon(t *testing.T, home string, ack wingwire.HelloAck) <-chan string {
 	t.Helper()
-	sock, err := wingd.EnsureSocketPath(home)
-	if err != nil {
-		t.Fatalf("socket path: %v", err)
-	}
-	if err := os.MkdirAll(filepath.Dir(sock), 0o700); err != nil {
-		t.Fatalf("mkdir socket dir: %v", err)
-	}
-	ln, err := wingd.ListenSocket(sock)
-	if err != nil {
-		t.Fatalf("listen: %v", err)
-	}
-	t.Cleanup(func() { _ = ln.Close() })
-	requests := make(chan wingwire.Message, 8)
-	go func() {
-		for {
-			nc, err := ln.Accept()
-			if err != nil {
-				return
-			}
-			go func() {
-				defer nc.Close()
-				r := newFrameReader(nc)
-				if _, err := r.read(); err != nil {
-					return
-				}
-				line, _ := wingwire.Encode(&ack)
-				if _, err := nc.Write(line); err != nil {
-					return
-				}
-				message, _ := r.read()
-				requests <- message
-			}()
+	requests := make(chan string, 8)
+	serveHTTPFixture(t, home, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == controllerPath+"probe" {
+			writeHTTPFixture(w, ack)
+			requests <- ""
+			return
 		}
-	}()
+		requests <- r.URL.Path
+		http.NotFound(w, r)
+	}))
 	return requests
 }
 

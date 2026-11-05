@@ -2,291 +2,169 @@ package client
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
+	"errors"
 	"fmt"
+	"net/http"
+	"net/url"
+	"os"
 	"sync"
+	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/procgroup"
+	"github.com/sparkwing-dev/sparkwing/internal/wingd"
 	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
 )
 
 type Lease struct {
-	cl        *Client
-	RunID     string
-	Token     string
-	Resources wingwire.HostResources
-
-	Semaphores []string
-
+	cl               *Client
+	RunID            string
+	Token            string
+	Resources        wingwire.HostResources
+	Semaphores       []string
 	SoleRunUnderLoad bool
 	ExternalCores    float64
-
-	// safety: Release writes on the same connection recoverWatch replaces, so
-	// both take connMu.
-	connMu         sync.Mutex
-	recoveryMu     sync.Mutex
-	recoveryCancel context.CancelFunc
+	id               string
+	ctx              context.Context
+	cancel           context.CancelFunc
+	once             sync.Once
+	releaseErr       error
 }
 
-func (cl *Client) Acquire(ctx context.Context, req wingwire.AdmissionRequest, onQueued func(wingwire.Queued)) (*Lease, error) {
-	stop := cl.cancelOnDone(ctx)
+func (cl *Client) Acquire(ctx context.Context, req wingwire.AdmissionRequest, onQueued func(wingwire.Queued)) (held *Lease, resultErr error) {
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	stop := context.AfterFunc(cl.clientContext(ctx), cancel)
 	defer stop()
-	retry := newRetry("acquire", 0)
-	// safety: a queue update proves the exchange is healthy; reset retry pacing
-	// so a long wait does not inherit backoff from an earlier disconnect.
-	progressed := func(q wingwire.Queued) {
-		retry.reset()
-		if onQueued != nil {
-			onQueued(q)
-		}
+	pid := req.PID
+	if pid == 0 {
+		pid = os.Getpid()
 	}
-	for {
-		if err := cl.write(&req); err != nil {
-			if werr := retry.wait(ctx, err); werr != nil {
-				return nil, werr
-			}
-			if rerr := cl.recoverAdmissionConn(ctx); rerr != nil {
-				return nil, rerr
-			}
-			continue
-		}
-		lease, terminal, transient := cl.readGrant(progressed)
-		if transient == nil {
-			return lease, terminal
-		}
-		if err := retry.wait(ctx, transient); err != nil {
-			return nil, err
-		}
-		if rerr := cl.recoverAdmissionConn(ctx); rerr != nil {
-			return nil, rerr
-		}
-	}
-}
-
-func (cl *Client) readGrant(onQueued func(wingwire.Queued)) (lease *Lease, terminal, transient error) {
-	for {
-		msg, err := cl.dec.read()
-		if err != nil {
-			return nil, nil, err
-		}
-		switch m := msg.(type) {
-		case *wingwire.Grant:
-			return &Lease{cl: cl, RunID: m.RunID, Token: m.LeaseToken, Resources: m.Resources, Semaphores: m.Semaphores, SoleRunUnderLoad: m.SoleRunUnderLoad, ExternalCores: m.ExternalCores}, nil, nil
-		case *wingwire.Queued:
-			if onQueued != nil {
-				onQueued(*m)
-			}
-		case *wingwire.Evicted:
-			return nil, cl.admissionError(m), nil
-		case *wingwire.Cancel:
-			return nil, &cancelledError{Reason: m.Reason}, nil
-		case *wingwire.Unsupported:
-			return nil, daemonLacksOperation(m.Type, cl.ack.BinaryVersion), nil
-		default:
-			return nil, fmt.Errorf("wingd/client: unexpected %T while acquiring", msg), nil
-		}
-	}
-}
-
-// Reattach resumes the lease token on a fresh connection. runID names which
-// member of a multi-member lease is resuming; a restored lease hands its
-// memberships out in order when the frame names no run.
-func (cl *Client) Reattach(ctx context.Context, token, runID string) (*Lease, error) {
-	stop := cl.cancelOnDone(ctx)
-	defer stop()
-	retry := newRetry("re-attach", 0)
-	for {
-		lease, terminal, transient := cl.readReattach(token, runID)
-		if transient == nil {
-			return lease, terminal
-		}
-		if err := retry.wait(ctx, transient); err != nil {
-			return nil, err
-		}
-		if rerr := cl.recoverAdmissionConn(ctx); rerr != nil {
-			return nil, rerr
-		}
-	}
-}
-
-func (cl *Client) readReattach(token, runID string) (lease *Lease, terminal, transient error) {
-	if err := cl.write(&wingwire.Reattach{LeaseToken: token, RunID: runID}); err != nil {
-		return nil, nil, err
-	}
-	msg, err := cl.dec.read()
+	birth, err := procgroup.ProcessBirth(pid)
 	if err != nil {
-		return nil, nil, err
+		return nil, fmt.Errorf("wingd/client: holder process: %w", err)
 	}
-	switch m := msg.(type) {
-	case *wingwire.Grant:
-		return &Lease{cl: cl, RunID: m.RunID, Token: m.LeaseToken, Resources: m.Resources}, nil, nil
-	case *wingwire.Evicted:
-		return nil, ErrReattachRejected, nil
-	case *wingwire.Unsupported:
-		return nil, daemonLacksOperation(m.Type, cl.ack.BinaryVersion), nil
-	default:
-		return nil, fmt.Errorf("wingd/client: unexpected %T while re-attaching", msg), nil
+	var key [16]byte
+	if _, err := rand.Read(key[:]); err != nil {
+		return nil, err
+	}
+	request := wingd.AdmissionHTTPRequest{RequestKey: hex.EncodeToString(key[:]), Request: req, RootPID: pid, ProcessBirth: birth}
+	granted := false
+	defer func() {
+		if granted || ctx.Err() == nil {
+			return
+		}
+		cleanup, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+		defer cancel()
+		resultErr = errors.Join(resultErr, cl.admissionCall(cleanup, http.MethodDelete, "/requests/by-key/"+request.RequestKey, nil, nil, readOnlyRetryLimit))
+	}()
+	var state wingd.AdmissionHTTPState
+	if err := cl.admissionCall(ctx, http.MethodPost, "/requests", request, &state, 0); err != nil {
+		return nil, err
+	}
+	id := state.ID
+	for {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		if state.Grant != nil {
+			granted = true
+			return cl.newLease(ctx, state), nil
+		}
+		if state.Evicted != nil {
+			return nil, cl.admissionError(state.Evicted)
+		}
+		if state.Cancel != nil {
+			return nil, &cancelledError{Reason: state.Cancel.Reason}
+		}
+		if state.State == "released" {
+			return nil, ErrReattachRejected
+		}
+		if id == "" {
+			return nil, errors.New("wingd/client: admission returned no request ticket")
+		}
+		if state.Queued != nil && onQueued != nil {
+			onQueued(*state.Queued)
+		}
+		state = wingd.AdmissionHTTPState{}
+		if err := cl.admissionCall(ctx, http.MethodGet, "/requests/"+url.PathEscape(id)+"?wait=true", nil, &state, 0); err != nil {
+			return nil, err
+		}
 	}
 }
 
-// safety: keep recoveryMu until connMu is owned, or a recovery could start
-// after the cancel check and hold the connection lock for its full retry budget.
+func (cl *Client) newLease(ctx context.Context, state wingd.AdmissionHTTPState) *Lease {
+	grant := state.Grant
+	ctx, cancel := context.WithCancel(cl.clientContext(ctx))
+	return &Lease{
+		cl: cl, id: state.ID, ctx: ctx, cancel: cancel, RunID: grant.RunID, Token: grant.LeaseToken,
+		Resources: grant.Resources, Semaphores: grant.Semaphores, SoleRunUnderLoad: grant.SoleRunUnderLoad, ExternalCores: grant.ExternalCores,
+	}
+}
+
+// Reattach observes a durable lease after a controller restart.
+func (cl *Client) Reattach(ctx context.Context, token, runID string) (*Lease, error) {
+	var state wingd.AdmissionHTTPState
+	if err := cl.admissionCall(ctx, http.MethodGet, "/leases/"+url.PathEscape(token), nil, &state, 0); err != nil {
+		return nil, err
+	}
+	if state.Grant == nil || (runID != "" && state.Grant.RunID != runID) {
+		return nil, ErrReattachRejected
+	}
+	return cl.newLease(ctx, state), nil
+}
+
 func (l *Lease) Release() error {
-	l.recoveryMu.Lock()
-	if l.recoveryCancel != nil {
-		l.recoveryCancel()
-	}
-	l.connMu.Lock()
-	l.recoveryMu.Unlock()
-	defer l.connMu.Unlock()
-	_ = l.cl.write(&wingwire.Release{LeaseToken: l.Token})
-	return l.cl.Close()
+	l.once.Do(func() {
+		l.cancel()
+		ctx, cancel := context.WithTimeout(context.Background(), RequestTimeout)
+		defer cancel()
+		l.releaseErr = l.cl.admissionCall(ctx, http.MethodDelete, "/requests/"+url.PathEscape(l.id), nil, nil, 0)
+		l.releaseErr = errors.Join(l.releaseErr, l.cl.Close())
+	})
+	return l.releaseErr
 }
 
-// Watch reads the held connection until it closes, invoking onEvicted
-// when the daemon pushes an eviction (a cancel_others requester
-// superseded this lease). It returns when the connection ends --
-// [Lease.Release] and Close both terminate it -- so run it on its own
-// goroutine for the lease's lifetime.
-//
-// safety: the connection has exactly one reader; after Acquire returns,
-// Watch is that reader, so nothing else may read until it exits.
+// Watch observes durable lease cancellation until Release.
 func (l *Lease) Watch(onEvicted func(wingwire.Evicted)) {
 	if err := l.WatchControl(onEvicted, nil); err != nil {
-		l.cl.opts.logf("lease %s: eviction watch ended: %v", l.RunID, err)
+		l.cl.opts.logf("lease %s: watch ended: %v", l.RunID, err)
 	}
 }
 
-// WatchControl joins lease recovery and reports lost authority to the host.
+// WatchControl joins request-based lease watching and reports lost authority.
 func (l *Lease) WatchControl(onEvicted func(wingwire.Evicted), onCancel func(wingwire.Cancel)) error {
-	return l.watchLease(onEvicted, onCancel)
-}
-
-func (l *Lease) watchLease(onEvicted func(wingwire.Evicted), onCancel func(wingwire.Cancel)) error {
-	retry := newRetry("lease watch", 0)
-	for {
-		msg, err := l.cl.dec.read()
+	for l.ctx.Err() == nil {
+		var state wingd.AdmissionHTTPState
+		err := l.cl.admissionCall(l.ctx, http.MethodGet, "/requests/"+url.PathEscape(l.id)+"/watch?wait=true", nil, &state, 0)
+		if l.ctx.Err() != nil {
+			break
+		}
 		if err != nil {
-			if !l.cl.closed.Load() {
-				if werr := retry.wait(context.Background(), err); werr != nil {
-					return werr
-				}
-			}
-			recovered, recoverErr := l.recoverWatch()
-			if !recovered {
-				return recoverErr
-			}
-			continue
+			return err
 		}
-		retry.reset()
-		switch m := msg.(type) {
-		case *wingwire.Evicted:
+		if state.Evicted != nil {
 			if onEvicted != nil {
-				onEvicted(*m)
+				onEvicted(*state.Evicted)
 			}
-		case *wingwire.Cancel:
+			return nil
+		}
+		if state.Cancel != nil {
 			if onCancel != nil {
-				onCancel(*m)
+				onCancel(*state.Cancel)
 			}
-		case *wingwire.Unsupported:
-			return daemonLacksOperation(m.Type, l.cl.ack.BinaryVersion)
-		case *wingwire.LivenessProbe:
-			if err := l.cl.write(&wingwire.LivenessAck{Nonce: m.Nonce}); err != nil {
-				continue
-			}
+			return nil
+		}
+		if state.State == "released" {
+			return ErrReattachRejected
 		}
 	}
-}
-
-func (l *Lease) recoverWatch() (recovered bool, recoverErr error) {
-	ctx, cancel := context.WithTimeout(context.Background(), defaultReattachTimeout)
-	l.recoveryMu.Lock()
-	l.recoveryCancel = cancel
-	l.recoveryMu.Unlock()
-	defer func() {
-		l.recoveryMu.Lock()
-		l.recoveryCancel = nil
-		l.recoveryMu.Unlock()
-		cancel()
-	}()
-	l.connMu.Lock()
-	defer l.connMu.Unlock()
-	if l.cl.closed.Load() {
-		return false, nil
-	}
-	stop := l.cl.cancelOnDone(ctx)
-	defer stop()
-	if err := l.cl.reconnect(ctx, defaultReattachTimeout); err != nil {
-		l.cl.opts.logf("lease %s: daemon connection lost and not recovered (%v)", l.RunID, err)
-		return false, err
-	}
-	retry := newRetry("lease re-attach", 0)
-	for {
-		if _, terminal, transient := l.cl.readReattach(l.Token, l.RunID); terminal != nil {
-			l.cl.opts.logf("lease %s: reattach after daemon restart failed (%v)", l.RunID, terminal)
-			return false, terminal
-		} else if transient == nil {
-			return true, nil
-		} else if err := retry.wait(ctx, transient); err != nil {
-			return false, err
-		}
-		if err := l.cl.reconnect(ctx, defaultReattachTimeout); err != nil {
-			return false, err
-		}
-	}
+	return nil //nolint:nilerr // safety: Release cancels observation after relinquishing authority.
 }
 
 func (cl *Client) CancelLease(ctx context.Context, runID string) (bool, error) {
-	stop := cl.cancelOnDone(ctx)
-	defer stop()
-	retry := newRetry("cancel lease", 0)
-	for {
-		found, terminal, transient := cl.readCancelLease(runID)
-		if transient == nil {
-			return found, terminal
-		}
-		if err := retry.wait(ctx, transient); err != nil {
-			return false, err
-		}
-		if rerr := cl.recoverConn(ctx); rerr != nil {
-			return false, rerr
-		}
-	}
-}
-
-func (cl *Client) readCancelLease(runID string) (found bool, terminal, transient error) {
-	if err := cl.write(&wingwire.CancelLease{RunID: runID}); err != nil {
-		return false, nil, err
-	}
-	msg, err := cl.dec.read()
-	if err != nil {
-		return false, nil, err
-	}
-	if refusal := cl.lacksOperation(msg); refusal != nil {
-		return false, refusal, nil
-	}
-	ack, ok := msg.(*wingwire.CancelLeaseAck)
-	if !ok {
-		return false, fmt.Errorf("wingd/client: expected cancel_lease_ack, got %T", msg), nil
-	}
-	return ack.Found, nil, nil
-}
-
-func (cl *Client) cancelOnDone(ctx context.Context) (stop func()) {
-	done := make(chan struct{})
-	exited := make(chan struct{})
-	go func() {
-		defer close(exited)
-		select {
-		case <-ctx.Done():
-			cl.wakeWaiter()
-		case <-done:
-		}
-	}()
-	// safety: both channels are ready once a cancelled wait ends, so the wake
-	// can still be chosen here; clearing the deadlines before it lands would
-	// leave the connection permanently past its deadline.
-	return func() {
-		close(done)
-		<-exited
-		cl.resumeWaiter()
-	}
+	var result wingwire.CancelLeaseAck
+	err := cl.admissionCall(ctx, http.MethodPost, "/cancel", wingwire.CancelLease{RunID: runID}, &result, readOnlyRetryLimit)
+	return result.Found, err
 }

@@ -145,7 +145,7 @@ func TestLocalProcessLifecycleKeepsStandaloneInProcess(t *testing.T) {
 }
 
 func TestLocalProcessLifecycleRefusesUnknownOwnerAndFailedStartup(t *testing.T) {
-	for _, failure := range []error{errDaemonUnreachable, errDaemonWedged, errDaemonTooOld, errDaemonLacksOperation, context.Canceled} {
+	for _, failure := range []error{errDaemonUnreachable, errDaemonWedged, errDaemonTooOld, errors.New("controller operation unavailable"), context.Canceled} {
 		t.Run(failure.Error(), func(t *testing.T) {
 			local := &localRuntimeFixture{}
 			owner := &lifecycleOwner{err: failure}

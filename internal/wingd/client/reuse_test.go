@@ -36,7 +36,7 @@ func TestCompatibleDaemonIsReusedAcrossVersions(t *testing.T) {
 			if err := cl.Close(); err != nil {
 				t.Fatal(err)
 			}
-			if request := <-requests; request != nil {
+			if request := <-requests; request != "" {
 				t.Fatalf("connection sent %T instead of reusing daemon", request)
 			}
 			if spawns != 0 || cl.DaemonVersion() != versions.daemon {
@@ -73,7 +73,7 @@ func TestIncompatibleDaemonIsRefusedWithoutDrainOrSpawn(t *testing.T) {
 				if !errors.Is(err, test.want) || spawns != 0 {
 					t.Fatalf("mismatch: error=%v spawns=%d, want %v without spawn", err, spawns, test.want)
 				}
-				if request := <-requests; request != nil {
+				if request := <-requests; request != "" {
 					t.Fatalf("refused client sent %T", request)
 				}
 				for _, want := range []string{test.version, "v0.69.2"} {

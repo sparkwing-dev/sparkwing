@@ -1,36 +1,14 @@
 package client
 
 import (
-	"bufio"
 	"context"
 	"net"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/wingd"
-	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
 )
 
 const maxFrame = 8 << 20
-
-type frameReader struct {
-	sc *bufio.Scanner
-}
-
-func newFrameReader(nc net.Conn) *frameReader {
-	sc := bufio.NewScanner(nc)
-	sc.Buffer(make([]byte, 0, 64<<10), maxFrame)
-	return &frameReader{sc: sc}
-}
-
-func (r *frameReader) read() (wingwire.Message, error) {
-	if !r.sc.Scan() {
-		if err := r.sc.Err(); err != nil {
-			return nil, err
-		}
-		return nil, net.ErrClosed
-	}
-	return wingwire.Decode(r.sc.Bytes())
-}
 
 func dial(ctx context.Context, sock string, timeout time.Duration) (net.Conn, error) {
 	return wingd.DialSocket(ctx, sock, timeout)

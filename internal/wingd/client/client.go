@@ -4,8 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"net"
-	"os"
+	"net/http"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -41,7 +40,7 @@ func protocolTooOld(selfVersion string, ack wingwire.HelloAck) error {
 	return fmt.Errorf(
 		"%w: daemon speaks protocol %d (sparkwing %s), this pipeline binary speaks protocol %d (sparkwing %s). "+
 			"%s and re-run, or set SPARKWING_HOME to run against a daemon of your own; "+
-			"upgrading the sparkwing CLI does not affect this handshake",
+			"run `sparkwing pipeline upgrade` to update this pipeline pin",
 		errProtocolTooOld, ack.ProtocolMajor, daemon, wingd.ProtocolMajor, self, pinAdvice)
 }
 
@@ -52,7 +51,7 @@ var errBuildMismatch = errors.New("wingd/client: daemon build differs from this 
 func buildMismatch(selfVersion string, ack wingwire.HelloAck) error {
 	self := strings.TrimSpace(selfVersion)
 	daemon := strings.TrimSpace(ack.BinaryVersion)
-	// safety: older same-major daemons may ignore NonBlocking and queue helper work that must start immediately.
+	// safety: the HTTP payload contract requires the same admission build identity.
 	if ack.BuildIdentity == wingwire.BuildIdentity {
 		return nil
 	}
@@ -92,10 +91,6 @@ func daemonTooOld(selfVersion string, ack wingwire.HelloAck) error {
 		"%w: daemon speaks protocol %d (sparkwing %s), this pipeline binary speaks protocol %d (sparkwing %s). "+
 			"Install sparkwing %s or newer on this host with `sparkwing update`, then run `sparkwing daemon restart --force` when no runs are active",
 		errDaemonTooOld, ack.ProtocolMajor, daemon, wingd.ProtocolMajor, self, minHostingRelease())
-}
-
-func servedDownLevel(ack wingwire.HelloAck) bool {
-	return ack.NativeProtocolMajor > ack.ProtocolMajor
 }
 
 var ErrReattachRejected = errors.New("wingd/client: re-attach rejected; lease is gone")
@@ -159,27 +154,13 @@ func (o Options) spawn(home, version string) error {
 }
 
 type Client struct {
-	connMu        sync.Mutex
-	nc            net.Conn
-	dec           *frameReader
-	waitCancelled bool
-
-	writeMu      sync.Mutex
-	writeTimeout time.Duration
-
-	// safety: a caller that already bounded the whole socket owns the
-	// budget; a per-frame deadline may only tighten it, and must be put
-	// back afterwards rather than cleared.
-	connDeadline time.Time
-
-	ack  wingwire.HelloAck
-	opts Options
-	sock string
-
-	closed           atomic.Bool
-	reconnectAttempt func(context.Context) error
-
-	probe bool
+	ack        wingwire.HelloAck
+	opts       Options
+	sock       string
+	closed     atomic.Bool
+	lifetimeMu sync.Mutex
+	lifetime   context.Context
+	cancel     context.CancelFunc
 }
 
 type AdmissionError struct {
@@ -293,7 +274,7 @@ func EnsureDaemon(ctx context.Context, opts Options) (*Client, error) {
 	if err := wingd.ValidateSocketPath(sock); err != nil {
 		return nil, err
 	}
-	cl := &Client{opts: opts, sock: sock, probe: opts.healthProbe}
+	cl := &Client{opts: opts, sock: sock}
 	if err := cl.connect(ctx); err != nil {
 		return nil, err
 	}
@@ -319,16 +300,7 @@ func (cl *Client) connectPaced(ctx context.Context, dialMax time.Duration) error
 		if err := ctx.Err(); err != nil {
 			return daemonUnreachable(opts.Home, cl.sock, spawns, err, lastDial)
 		}
-		nc, derr := dial(ctx, cl.sock, opts.dialTimeout())
-		if derr != nil && !opts.NoTakeover {
-			legacy, err := wingd.LegacySocketPath(opts.Home)
-			if err != nil {
-				return err
-			}
-			if old, err := dial(ctx, legacy, opts.dialTimeout()); err == nil {
-				nc, derr = old, nil
-			}
-		}
+		nc, derr := dial(ctx, wingd.APISocketBeside(cl.sock), opts.dialTimeout())
 		if derr != nil {
 			if opts.observeDialFailure != nil {
 				opts.observeDialFailure()
@@ -403,24 +375,21 @@ func (cl *Client) connectPaced(ctx context.Context, dialMax time.Duration) error
 		}
 		releaseStart()
 		releaseStart = func() {}
-		cl.setConn(nc)
-		deadline := time.Now().Add(connectHandshakeTimeout)
-		if end, ok := ctx.Deadline(); ok && end.Before(deadline) {
-			deadline = end
+		if err := nc.Close(); err != nil {
+			return err
 		}
-		if err := cl.setReadDeadline(nc, deadline); err != nil {
-			return errors.Join(err, cl.Close())
-		}
-		ack, herr := cl.handshake(opts.Version)
+		var ack wingwire.HelloAck
+		pctx, cancel := context.WithTimeout(ctx, connectHandshakeTimeout)
+		herr := cl.apiCall(pctx, http.MethodGet, controllerPath+"probe", nil, &ack)
+		cancel()
 		if herr != nil {
-			cl.Close()
+			if !transientAPIError(herr) {
+				return fmt.Errorf("%w: this sparkwing is %s; the controller does not serve the HTTP admission contract. Run `sparkwing daemon restart --force` with this build when no runs are active: %w", errDaemonTooOld, opts.Version, herr)
+			}
 			if err := sleep(ctx, opts.backoff()); err != nil {
 				return daemonUnreachable(opts.Home, cl.sock, spawns, err, lastDial)
 			}
 			continue
-		}
-		if err := cl.setReadDeadline(nc, time.Time{}); err != nil {
-			return errors.Join(err, cl.Close())
 		}
 
 		if ack.ProtocolMajor != wingd.ProtocolMajor {
@@ -429,14 +398,10 @@ func (cl *Client) connectPaced(ctx context.Context, dialMax time.Duration) error
 			}
 			return errors.Join(protocolTooOld(opts.Version, ack), cl.Close())
 		}
-		if !servedDownLevel(ack) {
-			if err := buildMismatch(opts.Version, ack); err != nil {
-				cl.Close()
-				return err
-			}
+		if err := buildMismatch(opts.Version, ack); err != nil {
+			return err
 		}
 		if ack.Draining {
-			cl.Close()
 			// safety: draining can last for a full run; wait without a time cap but
 			// retain backoff to avoid a reconnect spin.
 			if err := drainWait.wait(ctx, errDaemonDraining); err != nil {
@@ -452,183 +417,28 @@ func (cl *Client) connectPaced(ctx context.Context, dialMax time.Duration) error
 	}
 }
 
-const (
-	connectHandshakeTimeout = time.Minute
-	defaultReconnectTimeout = 8 * time.Second
-	defaultReattachTimeout  = 12 * time.Minute
-)
-
-func (cl *Client) reconnect(ctx context.Context, within time.Duration) error {
-	rctx, cancel := context.WithTimeout(ctx, within)
-	defer cancel()
-	retry := newRetry("reconnect to admission daemon", 0)
-	hostFailures := 0
-	attempt := func(ctx context.Context) error { return cl.connectPaced(ctx, retryMaxDelay) }
-	if cl.reconnectAttempt != nil {
-		attempt = cl.reconnectAttempt
-	}
-	for {
-		err := attempt(rctx)
-		if err == nil {
-			return nil
-		}
-		switch {
-		case errors.Is(err, errDaemonHostFailed):
-			hostFailures++
-			if hostFailures >= 3 {
-				return fmt.Errorf("wingd/client: admission daemon host failed after %d attempts: %w", hostFailures, err)
-			}
-		case errors.Is(err, errDaemonUnreachable), errors.Is(err, ErrNoDaemon):
-		default:
-			return fmt.Errorf("wingd/client: admission daemon restart failed: %w", err)
-		}
-		if werr := retry.wait(rctx, err); werr != nil {
-			return fmt.Errorf("wingd/client: admission daemon restarted and did not come back: %w", werr)
-		}
-	}
-}
-
-func (cl *Client) recoverConn(ctx context.Context) error {
-	if cl.closed.Load() {
-		return net.ErrClosed
-	}
-	if ctx.Err() != nil {
-		return ctx.Err()
-	}
-	return cl.reconnect(ctx, defaultReconnectTimeout)
-}
-
-func (cl *Client) recoverAdmissionConn(ctx context.Context) error {
-	if cl.closed.Load() {
-		return net.ErrClosed
-	}
-	if ctx.Err() != nil {
-		return ctx.Err()
-	}
-	return cl.reconnect(ctx, defaultReattachTimeout)
-}
-
-func (cl *Client) handshake(version string) (wingwire.HelloAck, error) {
-	if err := cl.write(&wingwire.Hello{ProtocolMajor: wingd.ProtocolMajor, BinaryVersion: version, BuildIdentity: wingwire.BuildIdentity, HealthProbe: cl.probe, HolderLiveness: !cl.probe}); err != nil {
-		return wingwire.HelloAck{}, err
-	}
-	msg, err := cl.dec.read()
-	if err != nil {
-		return wingwire.HelloAck{}, err
-	}
-	ack, ok := msg.(*wingwire.HelloAck)
-	if !ok {
-		return wingwire.HelloAck{}, fmt.Errorf("wingd/client: expected hello_ack, got %T", msg)
-	}
-	return *ack, nil
-}
+const connectHandshakeTimeout = time.Minute
 
 func (cl *Client) DaemonVersion() string { return cl.ack.BinaryVersion }
 
-// safety: the daemon drops a peer that stops reading after its own
-// connWriteTimeout; a client without the mirror image of that bound blocks a
-// run forever on a daemon that accepts and then stalls.
-const clientWriteTimeout = 10 * time.Second
-
-func (cl *Client) write(msg wingwire.Message) error {
-	return cl.writeWithin(msg, cl.writeBudget())
-}
-
-func (cl *Client) writeBudget() time.Duration {
-	if cl.writeTimeout > 0 {
-		return cl.writeTimeout
-	}
-	return clientWriteTimeout
-}
-
-func (cl *Client) writeWithin(msg wingwire.Message, timeout time.Duration) error {
-	line, err := wingwire.Encode(msg)
-	if err != nil {
-		return err
-	}
-	nc := cl.conn()
-	if nc == nil {
-		return net.ErrClosed
-	}
-	cl.writeMu.Lock()
-	defer cl.writeMu.Unlock()
-	deadline := time.Now().Add(timeout)
-	if !cl.connDeadline.IsZero() && cl.connDeadline.Before(deadline) {
-		deadline = cl.connDeadline
-	}
-	if err := nc.SetWriteDeadline(deadline); err != nil {
-		return err
-	}
-	if _, err := nc.Write(line); err != nil {
-		if errors.Is(err, os.ErrDeadlineExceeded) {
-			// safety: the frame stopped part-written, so everything after it
-			// on this socket is misframed; the retry loops recover by
-			// reconnecting, which they cannot do while it still reads clean.
-			_ = nc.Close()
+func (cl *Client) clientContext(ctx context.Context) context.Context {
+	cl.lifetimeMu.Lock()
+	defer cl.lifetimeMu.Unlock()
+	if cl.lifetime == nil {
+		cl.lifetime, cl.cancel = context.WithCancel(context.WithoutCancel(ctx))
+		if cl.closed.Load() {
+			cl.cancel()
 		}
-		return err
 	}
-	_ = nc.SetWriteDeadline(cl.connDeadline)
-	return nil
-}
-
-// safety: a reconnect replaces the socket a waiting caller is blocked on, so
-// an already-armed cancellation is re-armed against the new one; otherwise the
-// wake reaches a socket nobody is reading and the live read never returns.
-func (cl *Client) setConn(nc net.Conn) {
-	cl.connMu.Lock()
-	defer cl.connMu.Unlock()
-	cl.nc = nc
-	cl.dec = newFrameReader(nc)
-	if cl.waitCancelled {
-		_ = nc.SetReadDeadline(time.Now())
-		_ = nc.SetWriteDeadline(time.Now())
-	}
-}
-
-func (cl *Client) setReadDeadline(nc net.Conn, deadline time.Time) error {
-	cl.connMu.Lock()
-	defer cl.connMu.Unlock()
-	if cl.waitCancelled {
-		deadline = time.Now()
-	}
-	return nc.SetReadDeadline(deadline)
-}
-
-func (cl *Client) conn() net.Conn {
-	cl.connMu.Lock()
-	defer cl.connMu.Unlock()
-	return cl.nc
-}
-
-func (cl *Client) wakeWaiter() {
-	cl.connMu.Lock()
-	defer cl.connMu.Unlock()
-	cl.waitCancelled = true
-	if cl.nc != nil {
-		_ = cl.nc.SetReadDeadline(time.Now())
-		_ = cl.nc.SetWriteDeadline(time.Now())
-	}
-}
-
-func (cl *Client) resumeWaiter() {
-	cl.connMu.Lock()
-	defer cl.connMu.Unlock()
-	cl.waitCancelled = false
-	if cl.nc != nil {
-		_ = cl.nc.SetReadDeadline(time.Time{})
-		_ = cl.nc.SetWriteDeadline(time.Time{})
-	}
+	return cl.lifetime
 }
 
 func (cl *Client) Close() error {
-	nc := cl.conn()
-	if nc == nil {
-		return nil
-	}
-	// safety: mark closed before closing the socket so a Watch or Acquire
-	// reader that wakes on the close sees the intent and exits instead of
-	// reconnecting to a daemon the caller is done with.
+	cl.lifetimeMu.Lock()
+	defer cl.lifetimeMu.Unlock()
 	cl.closed.Store(true)
-	return nc.Close()
+	if cl.cancel != nil {
+		cl.cancel()
+	}
+	return nil
 }

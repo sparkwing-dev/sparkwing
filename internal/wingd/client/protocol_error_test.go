@@ -32,7 +32,7 @@ func TestProtocolTooOld_DoesNotTellTheOperatorToUpgradeTheCLI(t *testing.T) {
 	if strings.Contains(msg, "upgrade sparkwing;") || strings.Contains(msg, "; upgrade sparkwing") {
 		t.Errorf("message still instructs a bare CLI upgrade: %s", msg)
 	}
-	if !strings.Contains(msg, "upgrading the sparkwing CLI does not affect this handshake") {
+	if !strings.Contains(msg, "sparkwing pipeline upgrade") {
 		t.Errorf("message should rule the CLI out explicitly; got: %s", msg)
 	}
 }
