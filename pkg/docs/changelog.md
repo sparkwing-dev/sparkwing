@@ -22,6 +22,7 @@ unlock.
 
 ### Fixed
 
+- **runners:** Jobs cancelled during startup report cancellation and seal empty logs when storage or process setup is refused before the next heartbeat.
 - **runners:** Burst here handoff waits for rate-limited claims and continues. Empty claim polls honor the controller's suggested interval, and personal machines and here runs keep separate idle-poll budgets.
 
 ## [v0.69.2] - 2026-11-05
