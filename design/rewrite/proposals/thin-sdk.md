@@ -238,9 +238,10 @@ host for tests." Each helper names itself in that error. Neither SDK has a local
 fallback implementation. Tests cover each helper outside a host session and
 confirm that it starts no process or service.
 
-[GitHub Actions toolkit](https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-commands)
-commands for runner services run only inside Actions runners and offer no
-standalone fallback for runner-provided commands.
+In the GitHub Actions toolkit, `@actions/exec` is a plain `child_process`
+wrapper that runs anywhere, while runner services such as cache, artifacts
+and job outputs need an Actions runner. Dagger SDKs send every command to the
+Dagger engine and run nothing without it.
 [CircleCI orbs](https://circleci.com/docs/orbs/use/orb-concepts/) run their
 commands inside CircleCI job runners and offer no standalone fallback for
 runner-provided commands.
