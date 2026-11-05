@@ -22,6 +22,8 @@ unlock.
 
 ### Fixed
 
+- **daemon:** CLI connections reuse compatible running daemons across version differences, including repo-pinned and source builds, so they leave active runs running. Protocol and wire-build mismatches fail without automatic draining or replacement and name the explicit restart command.
+
 - **runners:** Run-level label selectors and `--sw-requires` reach matching personal runners while unrelated machines poll. Each machine keeps its own idle-poll budget.
 - **runners:** Inventory reports the configured concurrency limit from runner polls and counts personal-runner jobs without duplicating their waiting trigger owners. The optional `X-Sparkwing-Max-Concurrent` observation header leaves older controllers able to award work; runners that omit it retain the zero (unknown) value.
 - **runners:** Enrollment records the shell's PATH in launchd and systemd services and prepends the installed Go toolchain, so fresh macOS runners can compile pipelines without depending on version-manager shims.

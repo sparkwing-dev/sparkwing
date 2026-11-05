@@ -24,6 +24,10 @@ var bannedGuideRecipes = []bannedPattern{
 
 var banned = []bannedPattern{
 	{
+		regexp.MustCompile(`(?i)a client attempts one replacement|startup prints the old and new versions, drains the predecessor`),
+		"clients reuse compatible running daemons; incompatible protocols and wire builds require an explicit restart when no runs are active",
+	},
+	{
 		regexp.MustCompile(`(?i)a child always uses (?:its|the) parent's repository`),
 		"explicit child repositories are authorized separately and sealed asserted; only the same repository and revision inherit identity",
 	},
