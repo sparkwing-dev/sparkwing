@@ -55,31 +55,7 @@ Maximum session duration: 3600 seconds. The OIDC provider `arn:aws:iam::63328090
 The policy above cannot delete images, change tags in place (the repositories keep immutable
 tags), read other parameters, or touch the database, Route 53 or IAM.
 
-### Required RDS extension for schema-aware deploys
-
-The deploy pipeline now checks automated backups before every environment deploy and takes a
-snapshot only when the candidate changes the schema version. Add these statements to the role
-in kikd-infra before the watched staging push. This extension has not been applied by the code
-change in this repository. It allows describes and snapshot creation, with no restore, modify
-or delete permission.
-
-```json
-[
-  {"Sid": "DeployBackupRead", "Effect": "Allow",
-   "Action": ["rds:DescribeDBInstances", "rds:DescribeDBSnapshots"], "Resource": "*"},
-  {"Sid": "DeploySchemaSnapshot", "Effect": "Allow", "Action": "rds:CreateDBSnapshot",
-   "Resource": ["arn:aws:rds:us-west-2:633280902600:db:kikd-prod-sparkwing-postgres",
-                "arn:aws:rds:us-west-2:633280902600:snapshot:sparkwing-deploy-*"]}
-]
-```
-
-Both environments target `kikd-prod-sparkwing-postgres`. The preflight requires
-`BackupRetentionPeriod > 0` in [DescribeDBInstances](https://docs.aws.amazon.com/cli/latest/reference/rds/describe-db-instances.html).
-On a schema upgrade, [the snapshot waiter](https://docs.aws.amazon.com/cli/latest/reference/rds/wait/db-snapshot-available.html)
-requires the snapshot to be available before GitOps changes. Snapshot retention and manual
-recovery remain operator work. The deploy does not delete snapshots or restore databases.
-A failed schema-changing rollout reports its snapshot and requires database recovery before
-image rollback, because migrations are forward-only.
+The deploy role gets no RDS permission. Recovery uses RDS point-in-time recovery.
 
 ## Cluster access
 
@@ -122,15 +98,17 @@ Only a push to main can assume the role, and a push-started run carries no comma
 
 The lookup reads only `deploy` runs of the reading run's own repository, because a reference to a pipeline's own last run is scoped to the reader's repository. A `deploy` pipeline in another repository of the same team cannot publish a record the production job reads.
 
-## First deploy over an untraced image
+## First deploy over an unversioned image
 
-The store baseline check traces the running controller image to a commit: through its `org.opencontainers.image.revision` label, else through a release tag equal to its image tag. An image with neither, such as production's hand-built `commit-9fe8aca9f`, stops the pipeline with this remedy, done once by hand:
+The production downgrade guard requires image tags it can order as release versions or service
+build stamps. A hand-built tag such as `commit-9fe8aca9f` stops the pipeline with this remedy,
+done once by hand:
 
 1. Confirm the live store matches the candidate: `SELECT version, baseline_digest FROM sparkwing_schema_version` must show the baseline the `build-images` summary prints.
 2. Pin `controller.image.tag`, `sparkwing-runner-bundle.launcher.image.tag`, `jobImage.tag` and `jobImage.digest` in `<env dir>/helm-values.yaml` to images this pipeline built (they carry the label).
 3. Render without the cluster-scoped documents, which kikd-infra applies: `helm template <release> charts/sparkwing-full --namespace <namespace> -f <env dir>/helm-values.yaml | yq 'select(.metadata.namespace != null)' > <env dir>/rendered.yaml`, then commit and push. Committing the raw render would make Argo refuse the sync, because the `sparkwing` project permits no cluster-scoped kinds.
 
-Later deploys then trace the image and run unattended.
+Later deploys then compare image versions and run unattended.
 
 ## What a person does
 
@@ -138,7 +116,7 @@ Later deploys then trace the image and run unattended.
 2. Allow deploy keys in the `sparkwing-dev` organisation (it refuses them today), then create the write key on `sparkwing-gitops` and the read-only key on `sparkwing-ci-smoke` and store their private halves; mint the three team tokens and store them.
 3. Install the GitHub App so repository-scoped runs exist in production: the production team's installation must cover `sparkwing-dev/sparkwing` (the push that starts a deploy) and the WSL workstation and Mac must be enrolled as repository-scoped runners for it (decision 82). The staging `stg-qa` team and the production `qa-team` and `qa-team-b` installations must also cover `sparkwing-dev/sparkwing`, because the gate and the smoke trigger `example` and `deploy-smoke` at the candidate commit, and staging's must cover `sparkwing-ci-smoke`.
 4. Run `sparkwing run deploy -- --dry-run --stop-after staging` from a checkout and read the printed actions.
-5. The `deploy` entry declares `on: push` for `main` with `args: {stop-after: staging}`. Apply the RDS role extension above before the watched staging push, then watch it deploy and gate staging. Remove the `args` line after that pass so the next push promotes to production.
+5. The `deploy` entry declares `on: push` for `main` with `args: {stop-after: staging}`. Watch the push deploy and gate staging. Remove the `args` line after that pass so the next push promotes to production.
 
 ## Decisions for Korey
 

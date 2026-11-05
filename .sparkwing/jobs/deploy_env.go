@@ -67,13 +67,13 @@ func (c deployConfig) rollbackBudget() time.Duration { return 2*c.phaseWait() + 
 func (c deployConfig) buildBudget() time.Duration { return 45 * time.Minute }
 
 func (c deployConfig) stagingBudget() time.Duration {
-	return deploySnapshotBudget + 2*c.phaseWait() + 15*time.Minute
+	return 2*c.phaseWait() + 15*time.Minute
 }
 
 func (c deployConfig) gateBudget() time.Duration { return 2*c.RunTimeout + 15*time.Minute }
 
 func (c deployConfig) productionBudget() time.Duration {
-	return deploySnapshotBudget + 2*c.phaseWait() + c.SmokeTimeout + c.rollbackBudget() + 15*time.Minute
+	return 2*c.phaseWait() + c.SmokeTimeout + c.rollbackBudget() + 15*time.Minute
 }
 
 type deployParams struct {
@@ -92,7 +92,6 @@ type deployEnv struct {
 	ControllerDeployment string
 	LauncherDeployment   string
 	ControllerURL        string
-	DBInstance           string
 }
 
 func defaultDeployConfig() deployConfig {
@@ -127,7 +126,6 @@ func defaultDeployConfig() deployConfig {
 			ControllerDeployment: "sparkwing-staging-sparkwing-full-controller",
 			LauncherDeployment:   "sparkwing-staging-sparkwing-runner-bundle-launcher",
 			ControllerURL:        "https://staging.sparkwing.dev",
-			DBInstance:           "kikd-prod-sparkwing-postgres",
 		},
 		Production: deployEnv{
 			Name:                 "production",
@@ -138,7 +136,6 @@ func defaultDeployConfig() deployConfig {
 			ControllerDeployment: "sparkwing-sparkwing-full-controller",
 			LauncherDeployment:   "sparkwing-sparkwing-runner-bundle-launcher",
 			ControllerURL:        "https://api.sparkwing.dev",
-			DBInstance:           "kikd-prod-sparkwing-postgres",
 		},
 		SmokeTeams:     []string{"qa-team", "qa-team-b"},
 		ArgoTimeout:    10 * time.Minute,
@@ -159,12 +156,11 @@ type imagePin struct {
 func (p imagePin) ref() string { return p.Repository + ":" + p.Tag + "@" + p.Digest }
 
 type deployImages struct {
-	Commit        string   `json:"commit"`
-	Version       string   `json:"version"`
-	SchemaDigest  string   `json:"schema_digest"`
-	SchemaVersion int      `json:"schema_version"`
-	Controller    imagePin `json:"controller"`
-	Runner        imagePin `json:"runner"`
+	Commit       string   `json:"commit"`
+	Version      string   `json:"version"`
+	SchemaDigest string   `json:"schema_digest"`
+	Controller   imagePin `json:"controller"`
+	Runner       imagePin `json:"runner"`
 }
 
 func (a deployImages) sameDigests(b deployImages) bool {
@@ -191,7 +187,6 @@ type envDeployment struct {
 	Previous    valuesPins     `json:"previous"`
 	Changes     []gitopsChange `json:"changes"`
 	WindowStart string         `json:"window_start"`
-	Snapshot    string         `json:"snapshot,omitempty"`
 }
 
 type stagingGateRecord struct {
@@ -203,10 +198,9 @@ type stagingGateRecord struct {
 }
 
 const (
-	deploySnapshotBudget = 30 * time.Minute
-	deployStoreSchema    = "internal/store/schema.sql"
-	deployChart          = "charts/sparkwing-full"
-	deployDirPrefix      = "sparkwing-deploy-"
+	deployStoreSchema = "internal/store/schema.sql"
+	deployChart       = "charts/sparkwing-full"
+	deployDirPrefix   = "sparkwing-deploy-"
 )
 
 func sweepStaleDeployDirs(root string, now time.Time, maxAge time.Duration) error {
@@ -230,20 +224,13 @@ func sweepStaleDeployDirs(root string, now time.Time, maxAge time.Duration) erro
 
 var fullCommitRE = regexp.MustCompile(`^[0-9a-f]{40}([0-9a-f]{24})?$`)
 
-// safety: GitOps values and image labels are data someone else wrote; a value
-// reaches git only as a full commit id or a semver tag, never as an option.
+// safety: rollback records are data someone else wrote; git accepts a
+// recorded commit only as a full commit id, never as an option.
 func gitRevision(rev string) (string, error) {
 	if !fullCommitRE.MatchString(rev) {
 		return "", fmt.Errorf("%q is not a full commit id", rev)
 	}
 	return rev, nil
-}
-
-func gitTag(tag string) (string, error) {
-	if !semver.IsValid(tag) || strings.HasPrefix(tag, "-") {
-		return "", fmt.Errorf("%q is not a semver tag", tag)
-	}
-	return tag, nil
 }
 
 // safety: the store records sha256 of the embedded schema.sql with CRLF folded

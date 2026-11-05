@@ -400,12 +400,7 @@ func (d *deployer) buildCandidate(ctx context.Context, version string) (deployIm
 			return err
 		}
 		out.SchemaDigest = schemaBaselineDigestOf(string(schema))
-		src, err := os.ReadFile(filepath.Join(d.repoDir, storeSchemaSourcePath))
-		if err != nil {
-			return err
-		}
-		out.SchemaVersion, err = parseStoreSchemaVersion(string(src))
-		return err
+		return nil
 	})
 	if err != nil {
 		return out, err
@@ -581,12 +576,8 @@ func (d *deployer) deployEnvironment(ctx context.Context, env deployEnv, images 
 		return rec, err
 	}
 	rec.WindowStart = d.tools.now().UTC().Format(time.RFC3339)
-	if err := d.checkAutomatedBackups(ctx, env); err != nil {
-		return rec, err
-	}
 	if !d.dry && rec.Previous.Controller.Digest == images.Controller.Digest && rec.Previous.Launcher.Digest == images.Runner.Digest {
 		d.tools.say(ctx, env.Name+" already runs controller "+images.Controller.Digest+" and runner "+images.Runner.Digest)
-		d.tools.say(ctx, "no schema change; relying on RDS point-in-time recovery")
 		return rec, nil
 	}
 	if env.Name == d.cfg.Production.Name {
@@ -595,13 +586,6 @@ func (d *deployer) deployEnvironment(ctx context.Context, env deployEnv, images 
 		}); err != nil {
 			return rec, err
 		}
-	}
-	if err := d.act(ctx, "compare "+env.Name+"'s deployed schema version with the candidate and snapshot RDS and wait for availability before rollout only on a change", func() error {
-		var err error
-		rec.Snapshot, err = d.snapshotSchemaChange(ctx, env, images)
-		return err
-	}); err != nil {
-		return rec, err
 	}
 	for _, phase := range deployPhases {
 		want := phase.want(images)
@@ -621,48 +605,6 @@ func (d *deployer) deployEnvironment(ctx context.Context, env deployEnv, images 
 	return rec, nil
 }
 
-func (d *deployer) deployedStoreSchema(ctx context.Context, env deployEnv, deployed imagePin) (int, string, error) {
-	rev, err := d.tools.registry.revision(ctx, d.ecrPass, deployed.Repository+"@"+deployed.Digest)
-	if err != nil {
-		return 0, "", err
-	}
-	if rev == "" {
-		tag, terr := gitTag(deployed.Tag)
-		if terr != nil {
-			return 0, "", d.firstDeployError(env, deployed, "it carries no org.opencontainers.image.revision label and its tag is not a release tag")
-		}
-		out, err := d.sourceGit(ctx, "rev-list", "-n", "1", "--end-of-options", "refs/tags/"+tag)
-		if err != nil {
-			if _, ferr := d.sourceGit(ctx, "fetch", "--quiet", "--end-of-options", "origin", "refs/tags/"+tag+":refs/tags/"+tag); ferr != nil {
-				return 0, "", d.firstDeployError(env, deployed, "it carries no revision label and tag "+tag+" is not in origin")
-			}
-			if out, err = d.sourceGit(ctx, "rev-list", "-n", "1", "--end-of-options", "refs/tags/"+tag); err != nil {
-				return 0, "", err
-			}
-		}
-		rev = strings.TrimSpace(out)
-	}
-	if rev, err = gitRevision(rev); err != nil {
-		return 0, "", fmt.Errorf("%s names its source as %w", deployed.ref(), err)
-	}
-	spec := rev + ":" + deployStoreSchema
-	schema, err := d.sourceGit(ctx, "show", "--end-of-options", spec)
-	if err != nil {
-		if _, ferr := d.sourceGit(ctx, "fetch", "--quiet", "--end-of-options", "origin", rev); ferr != nil {
-			return 0, "", fmt.Errorf("read %s: %w", spec, err)
-		}
-		if schema, err = d.sourceGit(ctx, "show", "--end-of-options", spec); err != nil {
-			return 0, "", err
-		}
-	}
-	src, err := d.sourceGit(ctx, "show", "--end-of-options", rev+":"+storeSchemaSourcePath)
-	if err != nil {
-		return 0, "", err
-	}
-	version, err := parseStoreSchemaVersion(src)
-	return version, schemaBaselineDigestOf(schema), err
-}
-
 func (d *deployer) requireNotOlder(env deployEnv, previous valuesPins, images deployImages) error {
 	for _, pin := range []imagePin{previous.Controller, previous.Launcher} {
 		previous, err := deployVersionOrder(pin.Tag)
@@ -680,8 +622,8 @@ func (d *deployer) requireNotOlder(env deployEnv, previous valuesPins, images de
 	return nil
 }
 
-// safety: an image this pipeline cannot trace to a commit hides the store
-// baseline it runs, so the first deploy over it is done by hand once.
+// safety: an image without an ordered version needs a manual first deploy
+// because the production downgrade guard cannot compare it with the candidate.
 func (d *deployer) firstDeployError(env deployEnv, deployed imagePin, why string) error {
 	return fmt.Errorf("%s runs %s, and %s. Deploy once by hand: confirm the live store with "+
 		"`SELECT version, baseline_digest FROM sparkwing_schema_version` matches this candidate's baseline, pin controller.image.tag and "+
