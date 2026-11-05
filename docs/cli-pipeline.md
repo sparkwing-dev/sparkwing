@@ -17,6 +17,7 @@ This repo's pipelines
 - `new` -- Scaffold a new Go or TypeScript pipeline
 - `plan` -- Render the runtime-resolved DAG without dispatching any jobs
 - `sparks` -- Manage sparks libraries declared in .sparkwing/sparkwing.yaml
+- `upgrade` -- Upgrade repository SDK pins
 - `trigger` -- Submit a pipeline run to a controller
 
 ### Flags
@@ -328,3 +329,20 @@ Against Sparkwing Cloud, a run without --runner executes on Cloud unless a repos
 | `--resume RUN` | Host an interrupted --runner here run again in this CLI, using the credential this machine saved and the run's original pipeline and arguments. |
 | `--ref REF` | Git revision of this checkout to run, resolved locally, HEAD by default. |
 | `--pipeline-ref REF` | Git revision to load the pipeline definitions from when it differs from the revision being run; it must match any source pin in the repository's configuration. |
+
+## `sparkwing pipeline upgrade`
+
+Upgrade repository SDK pins
+
+Bump the current repository's Go or TypeScript SDK pin to the signed latest permitted release, or --version. Resolve native lockfiles and verify compilation/type checking plus describe/plan with the exact verified engine. A pipeline that fails that check against the new pin still gets the pin: the command reports the failure, names the migration guides and exits non-zero. Refuse revoked targets with their signed reason. --dry-run reports pin edits without changing files or installed services.
+
+### Flags
+
+| Flag | Description |
+|---|---|
+| `-o, --output FORMAT` | Pretty on a terminal; JSON when piped; explicit format wins. Values: pretty, json, plain. |
+| `-C, --checkout PATH` | Resolve the project from this local checkout path. |
+| `-h, --help` | Show command help without executing. |
+| `--help-all` | Include uncommon flags in command help. |
+| `--version TAG` | SDK release tag to pin the repository to instead of the latest permitted release. |
+| `--dry-run` | Show what would change without changing anything. |

@@ -263,11 +263,11 @@ func TestEngineW8Components(t *testing.T) {
 		}
 		_, err = engine.Evaluate(verified, "v0.10.0", now)
 		var api *apierr.Error
-		if !errors.As(err, &api) || api.Code != apierr.VersionRevoked || api.Hint != "sparkwing upgrade" {
+		if !errors.As(err, &api) || api.Code != apierr.VersionRevoked || api.Hint != "sparkwing pipeline upgrade" {
 			t.Fatalf("revocation error: %v", err)
 		}
 		_, err = engine.EvaluateRunner(verified, "v0.10.0", now)
-		if !errors.As(err, &api) || api.Hint == "sparkwing upgrade" {
+		if !errors.As(err, &api) || api.Hint == "sparkwing pipeline upgrade" {
 			t.Fatalf("runner repair hint: %v", err)
 		}
 	})

@@ -11,7 +11,6 @@ Inspect and manage the local controller
 ### Subcommands
 
 - `events` -- Read retained local controller events
-- `recover-state` -- Preserve unreadable daemon state after its holders stop
 - `restart` -- Restart an answering local controller
 - `status` -- Report local controller status
 - `stop` -- Stop the local controller
@@ -47,20 +46,6 @@ JSON emits event records followed by a page record with truncated. Plain and pre
 | `--incarnation N` | Show only events from this numbered controller start, the N in the #N.seq column; zero shows every start. Must be at least 0. |
 | `--limit N` | Maximum number of records to print, at least one. Raise it to include older records. |
 | `--explain` | Print the complete admission timeline for the --run run and all its descendant runs, without pagination. |
-
-## `sparkwing daemon recover-state`
-
-Preserve unreadable daemon state after its holders stop
-
-### Flags
-
-| Flag | Description |
-|---|---|
-| `-o, --output FORMAT` | Pretty on a terminal; JSON when piped; explicit format wins. Values: pretty, json, plain. |
-| `-C, --checkout PATH` | Resolve the project from this local checkout path. |
-| `-h, --help` | Show command help without executing. |
-| `--help-all` | Include uncommon flags in command help. |
-| `--yes` | Confirm a destructive change without prompting. (required) |
 
 ## `sparkwing daemon restart`
 

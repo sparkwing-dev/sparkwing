@@ -115,7 +115,7 @@ func TestUpgradeReportPreservesOutputFailure(t *testing.T) {
 
 func TestUpgradePreservesPolicyAndVerificationFailures(t *testing.T) {
 	root := upgradeFixture(t, engineid.GoSDK)
-	for _, failure := range []error{&apierr.Error{Code: apierr.VersionRevoked, Message: "signed security reason", Hint: "sparkwing upgrade"}, errors.New("type checking failed")} {
+	for _, failure := range []error{&apierr.Error{Code: apierr.VersionRevoked, Message: "signed security reason", Hint: "sparkwing pipeline upgrade"}, errors.New("type checking failed")} {
 		fake := &fakeUpgradeResolver{err: failure}
 		var out bytes.Buffer
 		command := upgradeCommand{newResolver: func() (upgradeResolver, error) { return fake, nil }, out: &out}
@@ -419,7 +419,7 @@ func FuzzUpgradeVerifierMasksStageFailures(f *testing.F) {
 				t.Fatalf("stage %d: credential leaked or cause lost", failAt)
 			}
 			for _, format := range []string{"json", "pretty", "plain"} {
-				inv, parseErr := clisurface.Parse("sparkwing", []string{"upgrade", "-o", format})
+				inv, parseErr := clisurface.Parse("sparkwing", []string{"pipeline", "upgrade", "-o", format})
 				if parseErr != nil {
 					t.Fatal(parseErr)
 				}

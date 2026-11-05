@@ -33,7 +33,6 @@ Every `sparkwing` command, flag, and argument, generated from the CLI's own comm
 - [`sparkwing team`](cli-team.md) -- Manage your team
 - [`sparkwing tokens`](cli-tokens.md) -- Manage team credentials
 - [`sparkwing update`](cli-update.md) -- Update the CLI binary
-- [`sparkwing upgrade`](cli-upgrade.md) -- Upgrade repository SDK pins
 - [`sparkwing version`](cli-version.md) -- Inspect versions (CLI, SDK, sparks)
 
 ## `sparkwing`

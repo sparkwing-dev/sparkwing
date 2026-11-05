@@ -86,18 +86,10 @@ func TestUtilityMutationsUseSelectedOutput(t *testing.T) {
 		"go.mod":         "module example.com/library\n\ngo 1.26.0\n",
 		"build/build.go": "package build\n",
 	})
-	state := filepath.Join(home, "wingd", "state.json")
-	if err := os.MkdirAll(filepath.Dir(state), 0o700); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(state, []byte("{incomplete"), 0o600); err != nil {
-		t.Fatal(err)
-	}
 	for _, args := range [][]string{
 		{"version", "hold", "--set", "v0.15"},
 		{"version", "hold"},
 		{"version", "hold", "--clear"},
-		{"daemon", "recover-state", "--yes"},
 		{"pipeline", "sparks", "lint", "--path", library},
 	} {
 		var commandErr error
@@ -121,7 +113,7 @@ func TestUpgradeAppliesRelativeCheckoutOnce(t *testing.T) {
 	}
 	t.Chdir(directory)
 	t.Setenv("SPARKWING_TOOLCHAIN", "invalid-mode")
-	err := runSparkwing([]string{"upgrade", "--checkout", "checkout", "--dry-run"})
+	err := runSparkwing([]string{"pipeline", "upgrade", "--checkout", "checkout", "--dry-run"})
 	if err == nil || !strings.Contains(err.Error(), "unknown toolchain mode") {
 		t.Fatalf("selected checkout did not reach engine configuration: %v", err)
 	}

@@ -140,15 +140,15 @@ and the local CLI keep the development-build behavior above.
 
 Warnings appear in run output and the dashboard before enforcement, with signed
 reason and fix guidance. A revoked or unsupported release fails loudly and names
-`sparkwing upgrade`. The CLI renders the same notice data as run status.
+`sparkwing pipeline upgrade`. The CLI renders the same notice data as run status.
 Before launch, a hard cut changes code, wire, data, tests and docs together.
 
 ## Upgrading a repository
 
 ```bash
-sparkwing upgrade --dry-run
-sparkwing upgrade
-sparkwing upgrade --version v1.2.3
+sparkwing pipeline upgrade --dry-run
+sparkwing pipeline upgrade
+sparkwing pipeline upgrade --version v1.2.3
 ```
 
 `upgrade` stages concrete SDK pin and lockfile edits in a private checkout.

@@ -62,12 +62,12 @@ func TestTriggeredOutcomeReadAndWriteFailuresStayLoud(t *testing.T) {
 }
 
 func TestTriggeredOutcomeRetainsVersionPolicyNotices(t *testing.T) {
-	reader := &statusReader{details: []controllerwire.RunDetail{{ID: "run-outcome", Status: "success", Notices: []engineid.Notice{{Reason: "release will be revoked", Hint: "sparkwing upgrade"}}}}}
+	reader := &statusReader{details: []controllerwire.RunDetail{{ID: "run-outcome", Status: "success", Notices: []engineid.Notice{{Reason: "release will be revoked", Hint: "sparkwing pipeline upgrade"}}}}}
 	var out bytes.Buffer
 	if _, err := triggeredRunOutcome(t.Context(), reader, "run-outcome", &out); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(out.String(), "release will be revoked") || !strings.Contains(out.String(), "sparkwing upgrade") {
+	if !strings.Contains(out.String(), "release will be revoked") || !strings.Contains(out.String(), "sparkwing pipeline upgrade") {
 		t.Fatalf("notices lost: %q", &out)
 	}
 }

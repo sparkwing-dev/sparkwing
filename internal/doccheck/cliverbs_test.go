@@ -25,14 +25,14 @@ func TestMigrationUpgradeUsesPublishedReleaseSelection(t *testing.T) {
 	found := false
 	for _, line := range strings.Split(string(guide), "\n") {
 		args := strings.Fields(line)
-		if len(args) < 2 || args[0] != "sparkwing" || args[1] != "upgrade" {
+		if len(args) < 3 || args[0] != "sparkwing" || args[1] != "pipeline" || args[2] != "upgrade" {
 			continue
 		}
 		found = true
 		if _, err := clisurface.Parse("sparkwing", args[1:]); err != nil {
 			t.Errorf("migration upgrade command: %v", err)
 		}
-		if len(args) != 2 {
+		if len(args) != 3 {
 			t.Errorf("migration upgrade must select the latest stable release without a frozen version: %q", line)
 		}
 	}

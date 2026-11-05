@@ -110,7 +110,7 @@ var Codes = []Definition{
 	{SDKError, 422, "An SDK or user function reported an unclassified failure."},
 	{Cancelled, 409, "The operation was cancelled."},
 	{DeadlineExceeded, 408, "The applicable execution, queue or approval deadline passed."},
-	{VersionRevoked, 422, "Signed policy revoked the pinned engine; details give version and reason, hint names sparkwing upgrade."},
+	{VersionRevoked, 422, "Signed policy revoked the pinned engine; details give version and reason, hint names sparkwing pipeline upgrade."},
 	{VersionUnsupported, 422, "An effective signed minimum refuses the engine or runner; details give the minimum, reason and update action."},
 }
 

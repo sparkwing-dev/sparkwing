@@ -1,7 +1,7 @@
 # Diagnosing admission
 
 The daemon keeps a bounded JSON Lines journal in `<SPARKWING_HOME>/wingd/`, beside
-`d.log` and `state.json`. The default home is the one Sparkwing reports in
+`d.log`. Admission state lives in `<SPARKWING_HOME>/state.db`. The default home is the one Sparkwing reports in
 `sparkwing daemon status`. The journal survives daemon exit and needs no runs
 store. `events.jsonl` and its two numbered rotations retain at most 48 MiB.
 On Unix, SIGUSR1 captures diagnostic stacks in `d.log.stacks`, capped at 2 MiB.

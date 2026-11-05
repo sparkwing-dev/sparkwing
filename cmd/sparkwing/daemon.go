@@ -2,19 +2,13 @@ package main
 
 import (
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
-	"os"
 	"sort"
 	"strconv"
 	"strings"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
-	"github.com/sparkwing-dev/sparkwing/pkg/color"
-
-	"github.com/sparkwing-dev/sparkwing/internal/wingd"
 	"github.com/sparkwing-dev/sparkwing/internal/wingd/journal"
 )
 
@@ -244,25 +238,4 @@ func compactValue(value any) string {
 	default:
 		return fmt.Sprint(v)
 	}
-}
-
-func runDaemonRecoverState(inv clisurface.Invocation) error {
-	if inv.Help() {
-		return writeCommandHelp(surfaceHelp(inv.Command), os.Stdout, inv.Output(color.IsInteractiveStdout()))
-	}
-	yes := inv.Bool("yes")
-	if !yes {
-		return errors.New("daemon recover-state: refusing without --yes; unreadable state may describe live admission holders")
-	}
-	quarantined, err := wingd.RecoverUnreadableState("", time.Now())
-	if err != nil {
-		return fmt.Errorf("daemon recover-state: %w", err)
-	}
-	if inv.Output(color.IsInteractiveStdout()) == "json" {
-		return json.NewEncoder(os.Stdout).Encode(struct {
-			Preserved string `json:"preserved"`
-		}{quarantined})
-	}
-	_, err = fmt.Fprintln(os.Stdout, quarantined)
-	return err
 }

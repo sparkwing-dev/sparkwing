@@ -27,6 +27,10 @@ repository's pinned pipeline CLI together:
 sparkwing pipeline upgrade
 ```
 
+The former top-level `upgrade` command is now `pipeline upgrade`. The obsolete
+admission-sidecar recovery subcommand is removed because admission now lives
+in the store.
+
 An incompatible pinned CLI receives an error naming its version, the controller
 version and this upgrade command. There is no compatibility relay.
 

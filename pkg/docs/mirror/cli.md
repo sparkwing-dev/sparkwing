@@ -20,7 +20,7 @@ line, with an empty stream for no results. Errors go to stderr.
 
 Repository registration uses `repos add --checkout PATH` and
 `repos remove --checkout PATH`. Their JSON receipts include the action,
-absolute path and affected count. `version hold`, `daemon recover-state` and
+absolute path and affected count. `version hold` and
 `pipeline sparks lint|update` also honor the selected output format.
 
 Help, documentation, onboarding cards and completion scripts emit records
@@ -138,7 +138,7 @@ indexed in [cli-reference.md](cli-reference.md):
 | `repos` | The machine's fleet of sparkwing repos and their SDK pins: list / info / update / add / remove / prune |
 | `queue` | `list` reads admission or a selected concurrency group. `priority` changes a queued run's rank. See [Queue views](diagnosing-admission.md#queue-views). |
 | `cache` | The compiled pipeline binary cache and the docs cache: info / prune / explain / warm |
-| `daemon` | The local controller: status / events / restart / stop / recover-state |
+| `daemon` | The local controller: status / events / restart / stop |
 | `version` | Composite CLI + SDK + sparks version card; `upgrade` changes the pinned SDK |
 | `update` | Self-update the machine CLI and refresh managed units |
 | `upgrade` | Upgrade and verify a repository's pinned SDK with its matching engine |

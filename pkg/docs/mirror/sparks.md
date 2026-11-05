@@ -236,7 +236,7 @@ When a pipeline build resolves its sparks:
 
 SDK installation refreshes the overlay's Sparkwing SDK requirement from
 `go.mod` before compiling. An overlay left by an earlier run, or a Sparkwing
-entry in `sparks:`, cannot undo `sparkwing upgrade`. Other resolved library
+entry in `sparks:`, cannot undo `sparkwing pipeline upgrade`. Other resolved library
 versions remain in the overlay. SDK replacement mismatches and dependencies
 that select a different SDK version still fail verification.
 

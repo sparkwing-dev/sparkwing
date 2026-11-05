@@ -74,5 +74,5 @@ Verified engine releases come from GitHub Releases. A signed version index carri
 minimum and revocation policy. A cached verified index remains usable when a
 refresh fails, with a notice. Twelve months of controller API compatibility allow
 a fetched engine to keep using its matching node protocol. Age alone does not
-revoke a release. See [repository upgrades](cli-upgrade.md).
+revoke a release. See [repository upgrades](cli-pipeline.md#sparkwing-pipeline-upgrade).
 <!-- design:end -->

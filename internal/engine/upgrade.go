@@ -138,7 +138,7 @@ func (r *Resolver) Upgrade(ctx context.Context, request UpgradeRequest, verifier
 	}
 	for path, expected := range plan.inputDigests {
 		if currentInputs[path] != expected {
-			return result, &apierr.Error{Code: apierr.Conflict, Message: "Repository pin changed during upgrade verification: " + path, Hint: "Review the concurrent edit, then retry sparkwing upgrade."}
+			return result, &apierr.Error{Code: apierr.Conflict, Message: "Repository pin changed during upgrade verification: " + path, Hint: "Review the concurrent edit, then retry sparkwing pipeline upgrade."}
 		}
 	}
 	if err := applyPinEdits(ctx, request.Checkout, plan.Edits); err != nil {
@@ -164,7 +164,7 @@ func (r *Resolver) prepareUpgrade(ctx context.Context, request UpgradeRequest, p
 	if version == "" {
 		version = policy.Index.index.Latest
 		if policy.Index.Development() {
-			return "", plan, resolved, invalid("development builds require an explicit upgrade version", "Use sparkwing upgrade --version vMAJOR.MINOR.PATCH.")
+			return "", plan, resolved, invalid("development builds require an explicit upgrade version", "Use sparkwing pipeline upgrade --version vMAJOR.MINOR.PATCH.")
 		}
 	}
 	if !strings.HasPrefix(version, "v") {
@@ -541,7 +541,7 @@ func applyPinEdits(ctx context.Context, checkout string, edits []PinEdit) error 
 			mode = info.Mode().Perm()
 		}
 		if hash != edit.BeforeDigest {
-			return &apierr.Error{Code: apierr.Conflict, Message: "Repository pin changed during upgrade verification: " + edit.Path, Hint: "Review the concurrent edit, then retry sparkwing upgrade."}
+			return &apierr.Error{Code: apierr.Conflict, Message: "Repository pin changed during upgrade verification: " + edit.Path, Hint: "Review the concurrent edit, then retry sparkwing pipeline upgrade."}
 		}
 		originals[i] = original{body: body, mode: mode, missing: missing}
 	}

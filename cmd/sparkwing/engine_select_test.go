@@ -233,11 +233,11 @@ func TestPipelineEngineSwitchNeverFallsBackAfterResolverDenial(t *testing.T) {
 
 func TestPipelineEngineSwitchDisplaysSupportNoticesAndContinues(t *testing.T) {
 	command, selected, output, calls := engineSwitchFixture(t, engineid.GoSDK)
-	selected.Notices = []engineid.Notice{{Kind: engineid.NoticeSupportEnded, Reason: "support window ended", Hint: "consider sparkwing upgrade"}, {Kind: engineid.NoticeIndexFallback, Reason: "last verified policy retained"}}
+	selected.Notices = []engineid.Notice{{Kind: engineid.NoticeSupportEnded, Reason: "support window ended", Hint: "consider sparkwing pipeline upgrade"}, {Kind: engineid.NoticeIndexFallback, Reason: "last verified policy retained"}}
 	command.resolve = func(context.Context, engineid.Pin, releaseasset.Target, toolchain.Mode) (engine.Resolved, error) {
 		return selected, nil
 	}
-	if err := command.run(t.Context(), "/checkout/.sparkwing", engineid.GoSDK, "auto", nil, nil); err != nil || *calls != 1 || output.String() != "warning: support window ended\nhint: consider sparkwing upgrade\nwarning: last verified policy retained\n" {
+	if err := command.run(t.Context(), "/checkout/.sparkwing", engineid.GoSDK, "auto", nil, nil); err != nil || *calls != 1 || output.String() != "warning: support window ended\nhint: consider sparkwing pipeline upgrade\nwarning: last verified policy retained\n" {
 		t.Fatalf("notices changed execution: %v exec=%d output=%q", err, *calls, output.String())
 	}
 }

@@ -119,7 +119,6 @@
         "cli-secrets",
         "cli-tokens",
         "cli-update",
-        "cli-upgrade",
         "cli-version"
       ]
     }

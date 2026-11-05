@@ -52,9 +52,6 @@ func Registry() []Command {
 			{Name: "limit", Argument: "N", Minimum: 1, HasMinimum: true},
 			{Name: "explain", Requires: []string{"run"}, Conflicts: []string{"since", "kind", "incarnation", "limit"}},
 		}},
-		{Path: "sparkwing daemon recover-state", Flags: []Flag{
-			{Name: "yes", Required: true},
-		}},
 		{Path: "sparkwing daemon restart", Flags: []Flag{
 			{Name: "force"},
 		}},
@@ -264,6 +261,10 @@ func Registry() []Command {
 			{Name: "spark", Argument: "NAME", Required: true},
 		}},
 		{Path: "sparkwing pipeline sparks update", Flags: []Flag{}},
+		{Path: "sparkwing pipeline upgrade", Rules: []string{"Bump the current repository's Go or TypeScript SDK pin to the signed latest permitted release, or --version. Resolve native lockfiles and verify compilation/type checking plus describe/plan with the exact verified engine. A pipeline that fails that check against the new pin still gets the pin: the command reports the failure, names the migration guides and exits non-zero. Refuse revoked targets with their signed reason. --dry-run reports pin edits without changing files or installed services."}, Flags: []Flag{
+			{Name: "version", Argument: "TAG"},
+			{Name: "dry-run"},
+		}},
 		{Path: "sparkwing pipeline trigger", PipelineArgument: true, PipelineArgsAfterSeparator: true, PipelineOptionalOnResume: true, Rules: []string{"Flags including --profile may precede the verb; unknown engine flags before -- are usage errors.", "--resume reattaches only a here run; --runner must be absent or here. The existing sealed spec is authoritative; reject new args, reason, agent, source flags and detach on resume.", "Without --resume, one pipeline positional is required. Runner accepts here, cloud, a runner name, or label=<label>.", "--agent NAME records the coding agent that starts the run on your behalf, such as claude-code:land-agent, and --agent none records none. Without the flag, SPARKWING_AGENT applies, then a detected coding-agent environment (Claude Code, Codex, Gemini CLI). The label is sealed with the request, kept by retries and publication, and shown in run views; it never grants or limits authority.", "Against Sparkwing Cloud, a run without --runner executes on Cloud unless a repository pool route rule requires a pool, which keeps it on that pool's self-hosted runners. cloud keeps it on Cloud, a runner name or label=<label> keeps it on matching self-hosted runners, and here hosts it in this CLI."}, Flags: []Flag{
 			{Name: "profile", Argument: "NAME", Required: true},
 			{Name: "detach"},
@@ -750,11 +751,7 @@ func Registry() []Command {
 			{Name: "ttl", Argument: "DURATION"},
 			{Name: "profile", Argument: "NAME"},
 		}},
-		{Path: "sparkwing upgrade", Rules: []string{"Bump the current repository's Go or TypeScript SDK pin to the signed latest permitted release, or --version. Resolve native lockfiles and verify compilation/type checking plus describe/plan with the exact verified engine. A pipeline that fails that check against the new pin still gets the pin: the command reports the failure, names the migration guides and exits non-zero. Refuse revoked targets with their signed reason. --dry-run reports pin edits without changing files or installed services."}, Flags: []Flag{
-			{Name: "version", Argument: "TAG"},
-			{Name: "dry-run"},
-		}},
-		{Path: "sparkwing update", Rules: []string{"Update installed machine software using verified release assets. Re-render managed timers and restart an installed local-controller service through one upgrade hook, preserving schedules and configuration. A CLI update reports that installed runner services update themselves from their controller; it does not restart them. Install sparkwing-runner beside the CLI with install.sh --runner; it then updates itself from verified release assets. Repository SDK pins use sparkwing upgrade. --dry-run performs neither action."}, Flags: []Flag{
+		{Path: "sparkwing update", Rules: []string{"Update installed machine software using verified release assets. Re-render managed timers and restart an installed local-controller service through one upgrade hook, preserving schedules and configuration. A CLI update reports that installed runner services update themselves from their controller; it does not restart them. Install sparkwing-runner beside the CLI with install.sh --runner; it then updates itself from verified release assets. Repository SDK pins use sparkwing pipeline upgrade. --dry-run performs neither action."}, Flags: []Flag{
 			{Name: "dry-run"},
 			{Name: "force"},
 			{Name: "override-hold"},

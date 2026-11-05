@@ -203,10 +203,10 @@ func (r *Resolver) fetch(ctx context.Context, address string, release bool) ([]b
 var errNotPublished = errors.New("the origin does not publish it")
 
 func unpublishedRelease(version string, err error) error {
-	hint := "Pin the pipeline to a published release: `sparkwing upgrade --version <release>` in the repository, or `go -C .sparkwing get " + GoModule + "@<release>`."
+	hint := "Pin the pipeline to a published release: `sparkwing pipeline upgrade --version <release>` in the repository, or `go -C .sparkwing get " + GoModule + "@<release>`."
 	if QATrust {
 		hint = "This is a QA build, which installs engines only from " + indexHost + ", and that origin holds only -qa.N versions. " +
-			"Pin the pipeline to one, for example `sparkwing upgrade --version vX.Y.Z-qa.N`, or run a production sparkwing build for released pins."
+			"Pin the pipeline to one, for example `sparkwing pipeline upgrade --version vX.Y.Z-qa.N`, or run a production sparkwing build for released pins."
 	}
 	return &apierr.Error{Code: apierr.NotFound, Message: fmt.Sprintf("engine %s is not published at %s (%v)", version, ReleaseBase, err), Hint: hint}
 }

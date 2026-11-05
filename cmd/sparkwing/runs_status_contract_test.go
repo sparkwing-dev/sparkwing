@@ -73,7 +73,7 @@ func TestRunStatusUsesAuthoritativeDetailForEveryConnection(t *testing.T) {
 		Inputs:   runspec.Display{Pipeline: "check", Args: map[string]string{"password": "***"}},
 		Jobs:     []controllerwire.JobDetail{{ID: "build", Status: "finished", Outcome: "memoized", Generation: 3, Attempt: 2}},
 		Attempts: []controllerwire.AttemptDetail{{JobID: "build", Attempt: 2, Generation: 3, Outcome: "memoized", Executor: "runner-1"}},
-		Notices:  []engineid.Notice{{Kind: engineid.NoticeSupportEnding, Reason: "support ends soon", Hint: "sparkwing upgrade"}},
+		Notices:  []engineid.Notice{{Kind: engineid.NoticeSupportEnding, Reason: "support ends soon", Hint: "sparkwing pipeline upgrade"}},
 	}
 	for _, profile := range []string{"", "prod"} {
 		args := []string{}

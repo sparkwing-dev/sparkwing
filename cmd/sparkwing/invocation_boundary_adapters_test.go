@@ -202,7 +202,7 @@ func runInternalCompleteArgs(args []string) error {
 }
 
 func (c upgradeCommand) runArgs(ctx context.Context, args []string) (result error) {
-	inv, err := clisurface.Parse("sparkwing", append([]string{"upgrade"}, args...))
+	inv, err := clisurface.Parse("sparkwing", append([]string{"pipeline", "upgrade"}, args...))
 	if err != nil {
 		return err
 	}

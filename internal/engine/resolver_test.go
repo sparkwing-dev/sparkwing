@@ -436,7 +436,7 @@ func TestUnpublishedEngineNamesThePinAsTheFix(t *testing.T) {
 	if QATrust {
 		want = "only -qa.N versions"
 	}
-	if !strings.Contains(failure.Hint, want) || !strings.Contains(failure.Hint, "sparkwing upgrade --version") {
+	if !strings.Contains(failure.Hint, want) || !strings.Contains(failure.Hint, "sparkwing pipeline upgrade --version") {
 		t.Fatalf("hint %q does not name the pin fix %q", failure.Hint, want)
 	}
 }
@@ -471,7 +471,7 @@ func TestPreEnginePinNamesTheUpgradeButTamperingStaysAnIntegrityFailure(t *testi
 			if !errors.As(err, &failure) || failure.Code != tc.want || resolved.Executable != "" {
 				t.Fatalf("resolve = %+v, %v; want %s", resolved, err, tc.want)
 			}
-			if upgrade := strings.Contains(failure.Hint, "`sparkwing upgrade`"); upgrade != (tc.want == apierr.VersionUnsupported) {
+			if upgrade := strings.Contains(failure.Hint, "`sparkwing pipeline upgrade`"); upgrade != (tc.want == apierr.VersionUnsupported) {
 				t.Fatalf("hint %q", failure.Hint)
 			}
 			name, _ := target.NameForVersion(version)

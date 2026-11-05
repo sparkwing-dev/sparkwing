@@ -69,7 +69,7 @@ func runStatusFacts(b *credentialBoundary) controller.RunStatusFacts {
 			{Kind: blob.LogJobAttempt, Team: "team", RunID: "run", Attempt: &identity},
 			{Kind: blob.LogOwnerUnit, Team: "team", RunID: "run", Unit: &blob.LogUnit{Kind: blob.LogEval, Generation: 7, Source: &blob.LogSource{NodeID: "job", Generation: 3}}},
 		},
-		Notices: []engineid.Notice{{Kind: engineid.NoticeSupportEnding, Reason: "support ends soon", Hint: "sparkwing upgrade"}},
+		Notices: []engineid.Notice{{Kind: engineid.NoticeSupportEnding, Reason: "support ends soon", Hint: "sparkwing pipeline upgrade"}},
 	}
 }
 

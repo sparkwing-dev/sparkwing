@@ -347,8 +347,6 @@ func runSparkwing(args []string) (result error) {
 		return runCacheExplain(inv)
 	case "sparkwing cache prune":
 		return runCachePrune(inv)
-	case "sparkwing daemon recover-state":
-		return runDaemonRecoverState(inv)
 	case "sparkwing repos list":
 		return runReposList(inv)
 	case "sparkwing repos add":
@@ -377,7 +375,7 @@ func runSparkwing(args []string) (result error) {
 		return runInternalComplete(inv)
 	case "sparkwing update":
 		return runUpdate(inv)
-	case "sparkwing upgrade":
+	case "sparkwing pipeline upgrade":
 		return runUpgrade(inv)
 	case "sparkwing examples":
 		return runExamples(inv)

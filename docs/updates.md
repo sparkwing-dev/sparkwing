@@ -1,7 +1,7 @@
 # Updating Sparkwing
 
 The machine update command selects the installed CLI. Repository SDK pins are
-separate. See the [upgrade grammar](cli-upgrade.md) for that selection.
+separate. See the [upgrade grammar](cli-pipeline.md#sparkwing-pipeline-upgrade) for that selection.
 
 ## Preview a machine update
 
