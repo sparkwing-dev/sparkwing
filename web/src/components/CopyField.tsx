@@ -33,8 +33,9 @@ export default function CopyField({
       </code>
       <button
         type="button"
+        aria-label={copied ? `Copied ${label}` : `Copy ${label}`}
         onClick={copy}
-        className="px-3 text-xs rounded-[var(--radius-control)] border border-[var(--border)] text-[var(--muted)] hover:text-[var(--foreground)] hover:bg-[var(--surface-raised)] shrink-0"
+        className="min-h-11 px-3 text-xs rounded-[var(--radius-control)] border border-[var(--border)] text-[var(--muted)] hover:text-[var(--foreground)] hover:bg-[var(--surface-raised)] focus-visible:outline-2 focus-visible:outline-indigo-300 shrink-0"
       >
         {copied ? "Copied" : "Copy"}
       </button>

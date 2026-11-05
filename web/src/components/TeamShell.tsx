@@ -17,6 +17,7 @@ import { refreshTeamState, useTeamState } from "@/lib/useTeam";
 import { RolePill } from "@/components/TeamSwitcher";
 import { toast } from "@/components/Toasts";
 import { joinedNotice, rememberTeamNotice } from "@/lib/teamNotice";
+import CopyField from "./CopyField";
 
 const baseTabs = [
   { href: "/team", label: "Members" },
@@ -50,7 +51,7 @@ export function Panel({
 }) {
   return (
     <section className="mb-6">
-      <div className="flex items-end justify-between mb-2 gap-4">
+      <div className="flex flex-wrap items-end justify-between mb-2 gap-4">
         <div>
           <h2 className="text-xs font-bold uppercase tracking-wider text-[var(--muted)]">
             {title}
@@ -79,7 +80,7 @@ export function Notice({ children }: { children: ReactNode }) {
 }
 
 export const buttonClass =
-  "px-3 py-1.5 text-sm rounded-[var(--radius-control)] bg-[var(--accent)] text-white hover:brightness-110 disabled:opacity-50 disabled:cursor-not-allowed";
+  "min-h-11 px-4 py-2 text-sm font-medium rounded-[var(--radius-control)] bg-[var(--button)] text-white hover:bg-[var(--button-hover)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--accent)] disabled:opacity-50 disabled:cursor-not-allowed";
 export const quietButtonClass =
   "px-2 py-1 text-xs rounded-[var(--radius-control)] border border-[var(--border)] text-[var(--muted)] hover:text-[var(--foreground)] hover:bg-[var(--surface-raised)] disabled:opacity-50 disabled:cursor-not-allowed";
 export const dangerButtonClass =
@@ -209,10 +210,10 @@ export default function TeamShell({
   }
   const { me, caps } = state;
   return (
-    <div className="flex-1 overflow-y-auto p-6 max-w-4xl mx-auto w-full">
+    <div className="flex-1 overflow-y-auto p-4 sm:p-6 max-w-4xl mx-auto w-full">
       <InvitationsForMe me={me} />
       <TeamHeader me={me} />
-      <div className="flex gap-1 border-b border-[var(--border)] mb-6">
+      <div className="flex gap-1 overflow-x-auto border-b border-[var(--border)] mb-6">
         {teamTabs(caps).map((t) => {
           const active =
             t.href === "/team"
@@ -222,7 +223,7 @@ export default function TeamShell({
             <Link
               key={t.href}
               href={t.href}
-              className={`px-3 py-2 text-sm border-b-2 -mb-px ${
+              className={`shrink-0 px-3 py-3 text-sm border-b-2 -mb-px ${
                 active
                   ? "border-[var(--accent)] text-[var(--foreground)]"
                   : "border-transparent text-[var(--muted)] hover:text-[var(--foreground)]"
@@ -264,11 +265,11 @@ function TeamHeader({ me }: { me: Me }) {
   }
 
   return (
-    <div className="flex items-start justify-between gap-4 mb-4">
+    <div className="flex flex-wrap items-start justify-between gap-4 mb-4">
       <div className="min-w-0">
         {editing ? (
           <form
-            className="flex items-center gap-2"
+            className="flex flex-wrap items-center gap-2"
             onSubmit={(e) => {
               e.preventDefault();
               save();
@@ -277,7 +278,7 @@ function TeamHeader({ me }: { me: Me }) {
             <input
               autoFocus
               aria-label="Team name"
-              className={`${inputClass} text-lg w-72`}
+              className={`${inputClass} text-lg w-full sm:w-72`}
               value={name}
               maxLength={80}
               onChange={(e) => setName(e.target.value)}
@@ -297,8 +298,8 @@ function TeamHeader({ me }: { me: Me }) {
             </button>
           </form>
         ) : (
-          <div className="flex items-center gap-3">
-            <h1 className="text-xl font-bold truncate">{team.display_name}</h1>
+          <div className="flex flex-wrap items-center gap-3">
+            <h1 className="text-xl font-bold break-words">{team.display_name}</h1>
             <RolePill role={team.role} />
             {team.role === "owner" ? (
               <button
@@ -314,15 +315,11 @@ function TeamHeader({ me }: { me: Me }) {
             ) : null}
           </div>
         )}
-        <div className="text-xs font-mono text-[var(--muted)] mt-1">
-          {team.slug}
+        <div className="mt-3 max-w-md space-y-1">
+          <p className="text-xs text-[var(--muted)]">Team slug · use this in CLI, GitHub and AWS settings</p>
+          <CopyField value={team.slug} label="Team slug" />
         </div>
       </div>
-      {me.waitlisted ? null : (
-        <Link href="/team/new" className={quietButtonClass}>
-          New team
-        </Link>
-      )}
     </div>
   );
 }
