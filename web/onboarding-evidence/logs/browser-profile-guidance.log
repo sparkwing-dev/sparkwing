@@ -1,0 +1,26 @@
+
+Running 14 tests using 2 workers
+
+(node:4031996) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+
+(node:4031997) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+
+[1/14] tests/browser/github-onboarding.spec.ts:22:7 › owner enables Actions with one explicit action and confirms an existing workflow at 1440px
+[2/14] tests/browser/github-onboarding.spec.ts:22:7 › owner enables Actions with one explicit action and confirms an existing workflow at 390px
+[3/14] tests/browser/github-onboarding.spec.ts:68:5 › new team goes directly from local provider sign-in to guided repository setup
+[4/14] tests/browser/github-onboarding.spec.ts:96:5 › members can inspect setup but cannot grant either permission
+[5/14] tests/browser/github-onboarding.spec.ts:107:5 › saved permissions need only workflow confirmation and never grant again on reload
+[6/14] tests/browser/github-onboarding.spec.ts:122:5 › a failed permission grant stays incomplete and does not enable automatic runs
+[7/14] tests/browser/github-onboarding.spec.ts:134:7 › missing repository configuration cannot enable Actions
+[8/14] tests/browser/github-onboarding.spec.ts:134:7 › invalid repository configuration cannot enable Actions
+[9/14] tests/browser/github-onboarding.spec.ts:134:7 › unsupported repository configuration cannot enable Actions
+[10/14] tests/browser/github-onboarding.spec.ts:134:7 › unavailable repository configuration cannot enable Actions
+[11/14] tests/browser/github-onboarding.spec.ts:144:5 › manual overrides prevent a ready claim
+[12/14] tests/browser/github-onboarding.spec.ts:153:5 › retry finishes a partial save without granting Actions access twice
+[13/14] tests/browser/github-onboarding.spec.ts:172:5 › pull-request-only configuration points to another run location
+[14/14] tests/browser/github-onboarding.spec.ts:181:5 › CLI access leads with browser sign-in and the exact team slug
+  14 passed (27.1s)

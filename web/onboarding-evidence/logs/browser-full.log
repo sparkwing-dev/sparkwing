@@ -1,0 +1,205 @@
+
+Running 145 tests using 2 workers
+
+(node:3267538) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+
+(node:3267463) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+
+[1/145] tests/browser/authenticated-dashboard.spec.ts:331:5 › a refused sign-in returns to the sign-in page saying what happened
+[2/145] tests/browser/authenticated-dashboard.spec.ts:15:5 › the controller signs a browser in and authenticates the dashboard's calls by cookie
+[3/145] tests/browser/authenticated-dashboard.spec.ts:356:5 › bounds a failed fixture build and removes its temporary output
+[4/145] tests/browser/cloud-admission.spec.ts:32:5 › Cloud routes explain local admission without polling unsupported APIs
+[5/145] tests/browser/cloud-admission.spec.ts:54:5 › Cloud navigation fits a mobile viewport
+[6/145] tests/browser/dashboard.spec.ts:47:5 › keeps activity rows exactly two lines with long metadata and errors
+[7/145] tests/browser/dashboard.spec.ts:77:5 › Home shows the latest default-branch failure and optional feature failures
+[8/145] tests/browser/dashboard.spec.ts:127:5 › keeps a long node name visible beside its location icon
+[9/145] tests/browser/dashboard.spec.ts:181:5 › shows the run's notices, job summaries and earlier attempts' steps
+[10/145] tests/browser/dashboard.spec.ts:204:5 › says when a run's steps could not be read
+[11/145] tests/browser/dashboard.spec.ts:880:5 › renders the empty production dashboard and passes accessibility smoke
+[12/145] tests/browser/dashboard.spec.ts:906:5 › the console has one main landmark and a skip link into it
+[13/145] tests/browser/dashboard.spec.ts:921:5 › surfaces controller authentication failures
+[14/145] tests/browser/dashboard.spec.ts:930:5 › opens a completed run and renders stored node logs
+[15/145] tests/browser/dashboard.spec.ts:961:5 › keeps run panes the same size while switching selected runs
+  1) tests/browser/dashboard.spec.ts:880:5 › renders the empty production dashboard and passes accessibility smoke 
+
+    Error: expect(locator).toHaveAttribute(expected) failed
+
+    Locator: getByRole('link', { name: 'Connect a runner' })
+    Expected: "/team/machines"
+    Timeout: 5000ms
+    Error: element(s) not found
+
+    Call log:
+      - Expect "toHaveAttribute" with timeout 5000ms
+      - waiting for getByRole('link', { name: 'Connect a runner' })
+
+
+      886 |   await expect(page.getByRole("heading", { name: "Overview" })).toBeVisible();
+      887 |   await expect(page.getByRole("heading", { name: "Get started" })).toBeVisible();
+    > 888 |   await expect(page.getByRole("link", { name: "Connect a runner" })).toHaveAttribute("href", "/team/machines");
+          |                                                                      ^
+      889 |   await expect(page.getByRole("link", { name: "Setup docs" })).toHaveAttribute("href", "https://sparkwing.dev/docs/");
+      890 |   await expect(page.getByText("No completed deploys yet.")).toBeVisible();
+      891 |   await expect(
+        at /var/tmp/sw-lead-tmp/onboarding-wt/web/tests/browser/dashboard.spec.ts:888:70
+
+    attachment #1: screenshot (image/png) ──────────────────────────────────────────────────────────
+    test-results/dashboard-renders-the-empt-cabc5--passes-accessibility-smoke/test-failed-1.png
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+    attachment #2: video (video/webm) ──────────────────────────────────────────────────────────────
+    test-results/dashboard-renders-the-empt-cabc5--passes-accessibility-smoke/video.webm
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+    Error Context: test-results/dashboard-renders-the-empt-cabc5--passes-accessibility-smoke/error-context.md
+
+    attachment #4: trace (application/zip) ─────────────────────────────────────────────────────────
+    test-results/dashboard-renders-the-empt-cabc5--passes-accessibility-smoke/trace.zip
+    Usage:
+
+        pnpm exec playwright show-trace test-results/dashboard-renders-the-empt-cabc5--passes-accessibility-smoke/trace.zip
+
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+
+(node:3344819) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+
+[16/145] tests/browser/dashboard.spec.ts:1046:5 › keeps interval and command resource evidence distinct
+[17/145] tests/browser/dashboard.spec.ts:1089:5 › names a cache hit without requesting execution metrics
+[18/145] tests/browser/dashboard.spec.ts:1115:5 › says resource metrics are unavailable when the metrics endpoint refuses
+[19/145] tests/browser/dashboard.spec.ts:1138:5 › ignores an older node metrics response after switching runs
+[20/145] tests/browser/dashboard.spec.ts:1210:5 › shows an empty DAG canvas with the error for a run that never planned
+[21/145] tests/browser/dashboard.spec.ts:1239:5 › explains a historical trigger that ended before dispatch
+[22/145] tests/browser/dashboard.spec.ts:1258:5 › keeps the selected run when an older detail request finishes late
+[23/145] tests/browser/dashboard.spec.ts:1278:5 › does not restore an older run after the new detail request fails
+[24/145] tests/browser/dashboard.spec.ts:1291:5 › a deep link to a missing run says so and leads back to the runs
+[25/145] tests/browser/dashboard.spec.ts:1305:5 › navigating from a run to a missing run replaces the old detail
+[26/145] tests/browser/dashboard.spec.ts:1323:5 › a run that disappears while open says it is not found
+[27/145] tests/browser/dashboard.spec.ts:1341:5 › Analytics keeps its trend range in the URL
+[28/145] tests/browser/dashboard.spec.ts:1365:5 › run cards expose names, status, selection and keyboard activation
+[29/145] tests/browser/dashboard.spec.ts:1396:5 › opens a selected DAG step when logs mount
+[30/145] tests/browser/dashboard.spec.ts:1417:5 › DAG job nodes show one progress segment per step without moving
+[31/145] tests/browser/dashboard.spec.ts:1514:5 › focuses an exact line after expanding its selected step
+[32/145] tests/browser/dashboard.spec.ts:1521:5 › focuses an exact line without a selected step
+[33/145] tests/browser/dashboard.spec.ts:1526:5 › memoized run pills follow URL filter state and toggle from it
+[34/145] tests/browser/dashboard.spec.ts:1561:5 › auto-expands the pipeline that owns a selected run
+[35/145] tests/browser/dashboard.spec.ts:1574:5 › run rows keep their height while the detail pane closes
+[36/145] tests/browser/dashboard.spec.ts:1641:5 › runs and nodes collapse into selectable rails and remember the viewer's choice
+[37/145] tests/browser/dashboard.spec.ts:1708:5 › runs columns follow the viewport until the viewer chooses a width
+[38/145] tests/browser/dashboard.spec.ts:1729:5 › starting a run from the middle pane state keeps Nodes expanded
+[39/145] tests/browser/dashboard.spec.ts:1751:5 › Tab leaves focused Runs and Nodes panes without changing detail tabs
+[40/145] tests/browser/dashboard.spec.ts:1768:5 › Runs and Nodes show slim scroll thumbs during keyboard scrolling
+[41/145] tests/browser/dashboard.spec.ts:1810:5 › renders live structured node logs
+[42/145] tests/browser/dashboard.spec.ts:1896:5 › resumes the run event stream after a disconnect
+[43/145] tests/browser/dashboard.spec.ts:2055:5 › lists a connection-only lease apart from the holders
+[44/145] tests/browser/dashboard.spec.ts:2098:5 › the local Queue and Capacity panels show the machine's admission daemon
+[45/145] tests/browser/dashboard.spec.ts:2116:5 › says plainly when the local admission daemon is not running
+[46/145] tests/browser/dashboard.spec.ts:2132:5 › says how to fix an admission daemon that does not answer
+[47/145] tests/browser/dashboard.spec.ts:2147:5 › a signed-in controller without teams hides the machine-local panels
+[48/145] tests/browser/dashboard.spec.ts:2171:5 › surfaces a general controller connection failure
+[49/145] tests/browser/dashboard.spec.ts:2183:5 › shows every execution attempt of a job
+[50/145] tests/browser/dashboard.spec.ts:2233:5 › keeps run tabs fixed when selecting a node with execution history
+[51/145] tests/browser/dashboard.spec.ts:2267:5 › separates fleet executors, observations, and current activity
+[52/145] tests/browser/dashboard.spec.ts:2331:5 › keeps every public dashboard navigation target routable
+[53/145] tests/browser/dashboard.spec.ts:2360:5 › manages local secrets without an account
+[54/145] tests/browser/dashboard.spec.ts:2438:5 › Overview and Fleet do not request or show service probes
+[55/145] tests/browser/dashboard.spec.ts:2454:5 › navigation waits for a chosen tab before fetching other routes
+[56/145] tests/browser/dashboard.spec.ts:2484:5 › promises no analytics section the product does not have
+[57/145] tests/browser/dashboard.spec.ts:2498:5 › allocates collision-free ports for parallel static servers
+[58/145] tests/browser/dashboard.spec.ts:2512:5 › closes promptly with an active SSE response
+[59/145] tests/browser/dashboard.spec.ts:2556:5 › sends cancel and retry actions for an active run
+[60/145] tests/browser/dashboard.spec.ts:2595:7 › cancels a pending run before it starts
+[61/145] tests/browser/dashboard.spec.ts:2595:7 › cancels a queued run before it starts
+[62/145] tests/browser/dashboard.spec.ts:2617:5 › keeps every run header control inside the phone viewport
+[63/145] tests/browser/dashboard.spec.ts:2659:5 › shows queued time instead of a year-one start in every run view
+[64/145] tests/browser/dashboard.spec.ts:2682:5 › renders the crons overview with its health banner
+[65/145] tests/browser/dashboard.spec.ts:2708:5 › warns when the cron tick has gone stale
+[66/145] tests/browser/dashboard.spec.ts:2722:5 › names what a locked schedule runs and warns when the checkout has moved past it
+[67/145] tests/browser/dashboard.spec.ts:2753:5 › marks an overridden schedule and shows the declaration beside it
+[68/145] tests/browser/dashboard.spec.ts:2813:5 › pauses a schedule and flips the row it acted on
+[69/145] tests/browser/dashboard.spec.ts:2839:5 › deep-links a schedule and links its fires back to runs
+[70/145] tests/browser/dashboard.spec.ts:2858:5 › explains how to declare a schedule when the host has none
+[71/145] tests/browser/dashboard.spec.ts:2878:5 › cron history shows run results, hover details and run links
+[72/145] tests/browser/dashboard.spec.ts:2903:5 › cron history distinguishes empty and unavailable history
+[73/145] tests/browser/dashboard.spec.ts:2913:5 › cron detail deep links survive hidden and missing schedules
+[74/145] tests/browser/dashboard.spec.ts:2923:5 › a page link keeps its own filters over the session's saved ones
+[75/145] tests/browser/dashboard.spec.ts:2944:5 › runs trigger filters persist and offer badge include and exclude
+[76/145] tests/browser/dashboard.spec.ts:2982:7 › overview marks capped history at 999 runs
+[77/145] tests/browser/dashboard.spec.ts:2982:7 › overview marks capped history at 1000 runs
+[78/145] tests/browser/dashboard.spec.ts:3004:5 › Search finds an older run through server-side filters
+[79/145] tests/browser/dashboard.spec.ts:3057:5 › a failed search for older runs keeps the matches found and can be retried
+[80/145] tests/browser/dashboard.spec.ts:3105:5 › Search keeps visible filters aligned with same-view navigation
+[81/145] tests/browser/dashboard.spec.ts:3138:5 › runs list rows lead with status and stay put while the columns collapse
+[82/145] tests/browser/dashboard.spec.ts:3182:5 › Start a run keeps keyboard focus inside the dialog and returns it on close
+[83/145] tests/browser/dashboard.spec.ts:3206:5 › Help stays inside a narrow viewport
+[84/145] tests/browser/dashboard.spec.ts:3220:5 › a dependent cancelled before it started explains why in its logs
+[85/145] tests/browser/device-login.spec.ts:106:5 › a typed code is approved and the terminal is told to finish
+[86/145] tests/browser/device-login.spec.ts:170:5 › a denied request says the terminal reports it
+[87/145] tests/browser/device-login.spec.ts:189:5 › an unknown or expired code asks for a new one
+[88/145] tests/browser/device-login.spec.ts:208:5 › a refused approval shows the server's reason
+[89/145] tests/browser/device-login.spec.ts:233:5 › a runner request shows what the runner may do
+[90/145] tests/browser/github-app-callback.spec.ts:4:5 › an existing App callback requests available once
+[91/145] tests/browser/github-app-update.spec.ts:4:5 › GitHub repository access update returns to the signed-in GitHub tab
+[92/145] tests/browser/github-onboarding.spec.ts:23:7 › owner enables Actions with one explicit action and confirms an existing workflow at 1440px
+[93/145] tests/browser/github-onboarding.spec.ts:23:7 › owner enables Actions with one explicit action and confirms an existing workflow at 390px
+[94/145] tests/browser/github-onboarding.spec.ts:61:5 › new team goes directly from local provider sign-in to guided repository setup
+[95/145] tests/browser/github-onboarding.spec.ts:89:5 › members can inspect setup but cannot grant either permission
+[96/145] tests/browser/github-onboarding.spec.ts:100:5 › a failed permission grant stays incomplete and does not enable automatic runs
+[97/145] tests/browser/github-onboarding.spec.ts:112:7 › missing repository configuration cannot enable Actions
+[98/145] tests/browser/github-onboarding.spec.ts:112:7 › invalid repository configuration cannot enable Actions
+[99/145] tests/browser/github-onboarding.spec.ts:112:7 › unavailable repository configuration cannot enable Actions
+[100/145] tests/browser/github-onboarding.spec.ts:122:5 › manual overrides prevent a ready claim
+[101/145] tests/browser/github-onboarding.spec.ts:131:5 › retry finishes a partial save without granting Actions access twice
+[102/145] tests/browser/github-onboarding.spec.ts:150:5 › pull-request-only configuration points to another run location
+[103/145] tests/browser/github-onboarding.spec.ts:159:5 › CLI access leads with browser sign-in and the exact team slug
+[104/145] tests/browser/linked-sign-ins.spec.ts:58:5 › the page lists each provider and explains how accounts work
+[105/145] tests/browser/linked-sign-ins.spec.ts:95:5 › unlinking needs another method and asks first
+[106/145] tests/browser/linked-sign-ins.spec.ts:118:5 › an unlink from a stale sign-in asks for a fresh one
+[107/145] tests/browser/linked-sign-ins.spec.ts:148:5 › a refused link says what happened and what to do
+[108/145] tests/browser/linked-sign-ins.spec.ts:167:5 › a refused invitation says what happened and what to do
+[109/145] tests/browser/login-accessibility.spec.ts:5:5 › the server-rendered login has accessible contrast and landmarks
+[110/145] tests/browser/operator.spec.ts:65:5 › the operator finds a team and reads its standing
+[111/145] tests/browser/operator.spec.ts:79:5 › the operator sees refunds Stripe did not make
+[112/145] tests/browser/operator.spec.ts:91:5 › audit history continues through the browser client and preserves mutation targets
+[113/145] tests/browser/operator.spec.ts:114:5 › an action is sent only after its confirmation names the team and effect
+[114/145] tests/browser/operator.spec.ts:154:5 › the operator releases a dispute hold
+[115/145] tests/browser/operator.spec.ts:186:5 › the operator releases its own hold as no fault found
+[116/145] tests/browser/operator.spec.ts:245:5 › the operator approves waitlisted people one at a time or selected
+[117/145] tests/browser/operator.spec.ts:277:5 › a long waitlist pages fifty at a time
+[118/145] tests/browser/operator.spec.ts:290:5 › the operator grants or declines standing requests with a reason
+[119/145] tests/browser/run-admission.spec.ts:27:5 › submission stays visibly pending past ten seconds and accepts a late success once
+[120/145] tests/browser/run-admission.spec.ts:49:5 › a lost admission response retries the same key and a new form starts a new request
+[121/145] tests/browser/run-admission.spec.ts:77:5 › editing an unconfirmed submission starts a new request
+[122/145] tests/browser/run-admission.spec.ts:94:5 › Run now keeps waiting for late admission and retries a lost response with the same key
+[123/145] tests/browser/run-admission.spec.ts:119:7 › the toolbar Rerun all action retains its key and shows pending admission
+[124/145] tests/browser/run-admission.spec.ts:119:7 › the toolbar Rerun from failed action retains its key and shows pending admission
+[125/145] tests/browser/run-admission.spec.ts:146:5 › schedule Run now retries the same key and each pending row stays busy
+[126/145] tests/browser/runs-paging.spec.ts:47:5 › the runs page pages past 200 runs by cursor and polls only the newest page
+[127/145] tests/browser/team-billing.spec.ts:125:5 › an owner sees prices from the controller and starts a checkout
+[128/145] tests/browser/team-billing.spec.ts:180:5 › a reader cannot buy and a returning payment reloads the balance
+[129/145] tests/browser/team-billing.spec.ts:207:5 › checkout stays hidden when the controller has no checkout service
+[130/145] tests/browser/team-billing.spec.ts:221:5 › a held team sees the hold and no pay-now or budget controls
+[131/145] tests/browser/team-billing.spec.ts:243:5 › an owner turns on automatic refill within the limits
+[132/145] tests/browser/team-billing.spec.ts:272:5 › refill needs a saved card and explains a stopped refill
+[133/145] tests/browser/team-billing.spec.ts:293:5 › a failed refill tells the owner to update the card
+[134/145] tests/browser/team-billing.spec.ts:305:5 › an owner contacts the operators for higher limits or larger payments
+[135/145] tests/browser/team-billing.spec.ts:321:5 › a declined request shows the operator's reason
+[136/145] tests/browser/team-billing.spec.ts:337:5 › a High-standing owner requests larger payments
+[137/145] tests/browser/team-github-info.spec.ts:5:5 › GitHub explanations open by keyboard and touch
+[138/145] tests/browser/trigger-refusal.spec.ts:3:5 › a repository access refusal explains the fix and links to Team GitHub
+[139/145] tests/browser/trigger-refusal.spec.ts:43:5 › server errors give a friendly remedy, support contact and request id
+[140/145] tests/browser/trigger-refusal.spec.ts:60:5 › the run toolbar fits a 375px viewport without scrolling
+[141/145] tests/browser/trigger-refusal.spec.ts:74:5 › run rows never guess a trust class from main
+[142/145] tests/browser/trigger-refusal.spec.ts:89:5 › a run detail server failure shows support and its request id
+[143/145] tests/browser/waitlist.spec.ts:3:5 › a waitlisted operator can navigate the console while customer pages stay gated
+[144/145] tests/browser/waitlist.spec.ts:33:5 › a waitlisted account sees a centered notice and no team navigation
+[145/145] tests/browser/warm-capacity.spec.ts:3:5 › operator saves warm settings, sees metrics and recovers from a refused save
+  1 failed
+    tests/browser/dashboard.spec.ts:880:5 › renders the empty production dashboard and passes accessibility smoke 
+  144 passed (2.9m)

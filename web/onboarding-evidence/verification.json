@@ -1,0 +1,32 @@
+{
+  "revision": "6c99ae1b4",
+  "before_revision": "28b950c89",
+  "axe_reports": 20,
+  "axe_violations": 0,
+  "before_pngs": 18,
+  "after_pngs": 20,
+  "unit_tests_passed": 525,
+  "full_browser_tests_passed": 147,
+  "final_onboarding_tests_passed": 14,
+  "existing_workflow_console_clicks": {
+    "before": 9,
+    "after": 6
+  },
+  "new_workflow_console_clicks": {
+    "before": 10,
+    "after": 8
+  },
+  "click_count_exclusions": [
+    "GitHub-owned screens",
+    "typing and scrolling",
+    "committing a workflow",
+    "pushing a commit"
+  ],
+  "not_verified": [
+    "hosted GitHub Actions execution",
+    "GitHub variables and workflow enabled state",
+    "AWS access",
+    "performance latency budgets"
+  ],
+  "runtime_temporary_directory": "/tmp/sw-codex-onboarding (removed after checks)"
+}

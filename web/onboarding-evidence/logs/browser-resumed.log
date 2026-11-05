@@ -1,0 +1,20 @@
+Error: go exited 126: No version is set for command go
+Consider adding one of the following versions in your config file at /var/tmp/sw-lead-tmp/onboarding-wt/.tool-versions
+golang 1.23.3
+golang 1.26.6
+golang 1.26.9
+golang 1.27.0
+
+
+   at authenticated-server.ts:86
+
+  84 |     }
+  85 |     if (outcome.code !== 0) {
+> 86 |       throw new Error(
+     |             ^
+  87 |         `${command} exited ${outcome.code ?? outcome.signal}: ${stderr}`,
+  88 |       );
+  89 |     }
+    at run (/var/tmp/sw-lead-tmp/onboarding-wt/web/tests/browser/authenticated-server.ts:86:13)
+    at prepareAuthenticatedDashboardFixture (/var/tmp/sw-lead-tmp/onboarding-wt/web/tests/browser/authenticated-server.ts:108:5)
+
