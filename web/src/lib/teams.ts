@@ -35,8 +35,8 @@ export interface Me {
   operator_console?: boolean;
 }
 
-// A waitlisted account with no team yet; it has no active team to show.
-export type WaitlistedMe = Omit<Me, "active_team">;
+export type NoTeamMe = Omit<Me, "active_team">;
+export type WaitlistedMe = NoTeamMe;
 
 export function teamsEnabled(caps: Capabilities | null): boolean {
   return caps?.teams?.enabled === true;
@@ -170,6 +170,7 @@ export async function getCapabilities(): Promise<Capabilities | null> {
 
 export type MeResult =
   | { kind: "member"; me: Me }
+  | { kind: "no-team"; me: NoTeamMe }
   | { kind: "waitlisted"; me: WaitlistedMe }
   | { kind: "operator" }
   | { kind: "unavailable" };
@@ -182,20 +183,18 @@ export async function getMe(): Promise<MeResult> {
     if ([401, 403, 404].includes(res.status)) return { kind: "operator" };
     if (!res.ok) return { kind: "unavailable" };
     const body = (await res.json()) as Partial<Me>;
-    if (body.user && body.waitlisted && !body.active_team) {
+    if (!body.user) return { kind: "operator" };
+    if (!body.active_team) {
       return {
-        kind: "waitlisted",
+        kind: body.waitlisted ? "waitlisted" : "no-team",
         me: {
           user: body.user,
           memberships: body.memberships ?? [],
           invitations: body.invitations ?? [],
-          waitlisted: true,
+          waitlisted: body.waitlisted ?? false,
           operator_console: body.operator_console,
         },
       };
-    }
-    if (!body.user || !body.active_team) {
-      return { kind: "operator" };
     }
     return {
       kind: "member",

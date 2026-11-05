@@ -372,6 +372,21 @@ func executorActor(input NodeInput) runstate.Actor {
 }
 
 func (h *nodeExecutor) report(ctx context.Context, input NodeInput, result runstate.NodeResult, runErr error) error {
+	// safety: a sensitive startup request can observe cancellation before the next lease renewal.
+	if runErr != nil && ctx.Err() == nil {
+		if snapshot, err := h.deps.Store.ReadSnapshot(ctx, input.Accepted.RunID); err == nil {
+			for _, row := range snapshot.Nodes {
+				if row.Ref.NodeID == runspec.NodeID(input.NodeID) && row.Generation == input.Generation && row.Attempt == input.Attempt &&
+					row.ClaimedBy == input.Authority.Holder && row.CapabilityPrefix == input.Authority.CapabilityPrefix &&
+					(snapshot.Run.CancelRequestedAt != nil || row.CancelRequestedAt != nil) {
+					cancelled := &lease.CancelError{Reason: string(apierr.ReasonCancelled)}
+					result = runstate.NodeResult{Outcome: runstate.NodeCancelled, Reason: string(apierr.ReasonCancelled)}
+					runErr = cancelled
+					break
+				}
+			}
+		}
+	}
 	var refused *executorTransitionError
 	if errors.As(runErr, &refused) {
 		return runErr

@@ -492,6 +492,14 @@ foreground. Linux uses a systemd user service. macOS uses a launchd agent.
 The service file names an existing machine configuration and contains no
 credential. The duplicate shell enrollment installer has been removed.
 
+Enrollment records the shell's PATH in the service file. When Go is available,
+it prepends the installed toolchain's `GOROOT/bin`, resolved with
+`GOTOOLCHAIN=local go env GOROOT`, so version-manager shims do not depend on the
+service's working directory. Enrollment does not download Go. Install Go before
+enrolling a runner that builds Go pipelines. To refresh an existing service's
+PATH, repeat `runners add --force` with the same enrollment options from a shell
+that can run Go.
+
 Windows enrollment prints manual supervision steps rather than
 installing a login service. See [runner reference](cli-runners.md) and
 [machine settings](machine-config.md).

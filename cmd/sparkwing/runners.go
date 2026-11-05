@@ -25,6 +25,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/fssecure"
 	"github.com/sparkwing-dev/sparkwing/internal/installsite"
 	"github.com/sparkwing-dev/sparkwing/internal/paths"
+	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 	runnerservice "github.com/sparkwing-dev/sparkwing/internal/runners/service"
 	"github.com/sparkwing-dev/sparkwing/internal/settings"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
@@ -659,9 +660,29 @@ func defaultRunnerServiceHost(configPath string) (runnerservice.Host, error) {
 		ConfigPath: configPath,
 		LogPath:    filepath.Join(root.Root, "runner.log"),
 		StateHome:  root.Root,
+		Path:       runnerServicePath(),
 		UID:        os.Getuid(),
 		Exec:       runnerservice.DefaultExec,
 	}, nil
+}
+
+func runnerServicePath() string {
+	path := os.Getenv("PATH")
+	cmd := procenv.ControlCommand(append(os.Environ(), "GOTOOLCHAIN=local"), "go", "env", "GOROOT")
+	output, err := cmd.Output()
+	if err != nil {
+		return path
+	}
+	root := strings.TrimSpace(string(output))
+	if !filepath.IsAbs(root) {
+		return path
+	}
+	bin := filepath.Join(root, "bin")
+	if info, err := os.Stat(filepath.Join(bin, "go")); err == nil && !info.IsDir() && info.Mode()&0o111 != 0 {
+		// hack: version-manager shims can select another Go after the service changes directory.
+		return bin + string(os.PathListSeparator) + path
+	}
+	return path
 }
 
 // safety: a systemd or launchd job inherits no PATH, so the absolute path is baked in.

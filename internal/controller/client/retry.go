@@ -28,7 +28,10 @@ const maxRetryAfter = time.Hour
 // header near the int64 limit wraps a Duration negative or small, which a
 // caller would read as an invitation to come straight back.
 func parseRetryAfter(resp *http.Response) (time.Duration, bool) {
-	raw := resp.Header.Get("Retry-After")
+	return parseDelaySeconds(resp.Header.Get("Retry-After"))
+}
+
+func parseDelaySeconds(raw string) (time.Duration, bool) {
 	if raw == "" {
 		return 0, false
 	}

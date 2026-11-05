@@ -510,7 +510,10 @@ func TestLoopHonorsConfiguredPollInterval(t *testing.T) {
 		calls := 0
 		loop := &Loop{
 			Config: LoopConfig{Version: "v1.0.0", MaxConcurrent: 1, PollInterval: 17 * time.Second}, CheckVersion: func(context.Context, string) error { return nil },
-			Controller: claimFunc(func(context.Context, controllerwire.ClaimRequest) (controllerwire.ClaimResponse, error) {
+			Controller: claimFunc(func(_ context.Context, request controllerwire.ClaimRequest) (controllerwire.ClaimResponse, error) {
+				if request.MaxConcurrent != 1 {
+					t.Errorf("configured concurrency = %d, want 1", request.MaxConcurrent)
+				}
 				calls++
 				if calls == 2 {
 					if time.Since(start) != 17*time.Second {

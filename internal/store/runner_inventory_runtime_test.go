@@ -26,7 +26,7 @@ func TestRunnerInventoryWithSealedAdmissionAndEnrollment(t *testing.T) {
 		rows[row.Runner.Name] = i
 	}
 	host, runner := before.Runners[rows["host"]], before.Runners[rows["runner"]]
-	if !reflect.DeepEqual(host.ActiveJobs, []string{string(f.ref.RunID)}) || !reflect.DeepEqual(runner.ActiveJobs, []string{string(f.ref.RunID) + "/" + string(f.ref.NodeID)}) || !reflect.DeepEqual(runner.Runner.Labels, []string{"gpu"}) || runner.Headroom != nil || host.Headroom != nil {
+	if len(host.ActiveJobs) != 0 || !reflect.DeepEqual(runner.ActiveJobs, []string{string(f.ref.RunID) + "/" + string(f.ref.NodeID)}) || !reflect.DeepEqual(runner.Runner.Labels, []string{"gpu"}) || runner.Headroom != nil || host.Headroom != nil {
 		t.Fatalf("authority-bound observations: %+v", before)
 	}
 	if _, err := f.tenant.RenewNodeClaim(ctx, f.ref, f.holder); err != nil {

@@ -6,6 +6,7 @@ import { type ReactNode, useEffect, useRef, useState } from "react";
 import {
   type Capabilities,
   type Me,
+  type NoTeamMe,
   type PendingInvitation,
   type WaitlistedMe,
   acceptInvitation,
@@ -172,6 +173,26 @@ export function WaitlistNotice({ me }: { me: WaitlistedMe }) {
   );
 }
 
+export function FirstTeamNotice({ me }: { me: NoTeamMe }) {
+  const hasTeams = me.memberships.length > 0;
+  return (
+    <Notice>
+      <InvitationsForMe me={me} />
+      <h1 className="text-xl font-bold mb-3 text-[var(--foreground)]">
+        {hasTeams ? "Choose a team" : "Create your first team"}
+      </h1>
+      <p className="mb-4">
+        {hasTeams
+          ? "Choose a team from the team menu to continue, or create another team."
+          : "Your account is ready. Create a team to start running pipelines and connect your repositories and machines."}
+      </p>
+      <Link href="/team/new" className={`${buttonClass} inline-flex items-center`}>
+        {hasTeams ? "Create a team" : "Create your first team"}
+      </Link>
+    </Notice>
+  );
+}
+
 export default function TeamShell({
   children,
 }: {
@@ -198,6 +219,7 @@ export default function TeamShell({
   if (state.status === "waitlisted") {
     return <WaitlistNotice me={state.me} />;
   }
+  if (state.status === "no-team") return <FirstTeamNotice me={state.me} />;
   if (state.status === "operator") {
     return (
       <Notice>

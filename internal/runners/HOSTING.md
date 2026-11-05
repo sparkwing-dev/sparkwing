@@ -30,7 +30,24 @@ runs execute in-process through the native owner, as a Cloud plan pod does.
 bound of the same size, because their hosting waits for jobs to finish. Claims
 offer only kinds with available capacity and stop while job capacity is full.
 `TestLoopOwnerDoesNotOccupyItsJobsOnlySlot` covers a waiting owner and its job
-at concurrency one.
+at concurrency one. Claims report the configured limit in the optional
+`X-Sparkwing-Max-Concurrent` header, independently of `free_slots`. Older
+controllers ignore this header and continue awarding work. Renewals retain
+that observation. Personal-runner `active_jobs` lists job awards and excludes
+trigger owners. Older runners that omit the limit report zero (unknown).
+`TestRunnerInventoryRecordsConcurrencyFromClaimHTTP`,
+`TestRunnerInventoryRetainsConfiguredConcurrencyAcrossRenewal` and
+`TestRunnerInventoryExcludesWaitingPersonalTriggerOwners` cover reporting.
+
+Empty HTTP claims retain `X-Sparkwing-Poll-After`. The loop waits at least
+that interval (up to eight seconds) or its configured poll, whichever is longer;
+host completion preserves the controller's floor. Claim throttling retains
+`retry_after_ms`. Here attachment waits and repeats an explicitly rate-limited
+claim; a lost transport reply is never replayed because it may contain an award.
+`TestClaimRetainsIdlePollAdvice`, `TestLoopHonorsIdlePollAdvice` and
+`TestHereResumeWaitsForRateLimitedClaim` guard those paths. Idle-poll budgets
+separate authenticated personal machine identities and here runs when no runner
+header is supplied.
 
 The loop has one event wait for pending claims, host completions, poll timing,
 policy refresh and shutdown. A policy refresh leaves a pending claim in place.

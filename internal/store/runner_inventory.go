@@ -27,6 +27,9 @@ func (t *Tenant) ReadRunners(ctx context.Context) (capability.RunnerSnapshot, er
 	}
 	for _, agent := range agents {
 		row := capability.RunnerObservation{ID: "machine:" + agent.CapabilityPrefix, Team: string(t.team), Runner: nodeproto.RunnerIdentity{Name: agent.Name, Type: "runner", Labels: slices.Clone(agent.Profile.Labels)}, Location: agent.Profile.Location, LastSeen: agent.LastSeen, ActiveJobs: []string{}}
+		if agent.poll != nil {
+			row.MaxConcurrent = agent.poll.MaxConcurrent
+		}
 		if row.LastSeen.After(out.Now) {
 			return capability.RunnerSnapshot{}, authorityError(apierr.IntegrityFailure, "runner observation is in the future")
 		}
@@ -125,6 +128,10 @@ func appendRunnerAwardTx(ctx context.Context, tx *storeTx, team Team, prefix str
 	row := &out.Runners[i]
 	if seen.After(row.LastSeen) {
 		row.LastSeen = seen
+	}
+	// safety: trigger owners wait for jobs under a separate bound and consume no job slot.
+	if c.Billing.ExecutorClass == "runner" && c.Unit == capability.UnitTrigger {
+		return nil
 	}
 	job := c.Binding.RunID
 	if c.Binding.NodeID != "" {

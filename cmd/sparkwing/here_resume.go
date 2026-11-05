@@ -138,7 +138,18 @@ func resumeHereRun(ctx context.Context, options client.EngineOptions, run string
 		return completion, incompleteHereHandoff(run, err)
 	}
 	claim := controllerwire.ClaimRequest{RunID: run, Kinds: []capability.UnitKind{capability.UnitTrigger}, RunnerVersion: deps.version, OS: goruntime.GOOS, Arch: goruntime.GOARCH}
-	response, err := runtime.controller.Claim(ctx, claim)
+	var response controllerwire.ClaimResponse
+	for {
+		response, err = runtime.controller.Claim(ctx, claim)
+		delay, retry := apierr.RetryDelay(err)
+		var failure *apierr.Error
+		if !retry || !errors.As(err, &failure) || failure.Code != apierr.RateLimited {
+			break
+		}
+		if err = waitStatusPoll(ctx, delay); err != nil {
+			break
+		}
+	}
 	if err != nil {
 		return completion, incompleteHereHandoff(run, err)
 	}

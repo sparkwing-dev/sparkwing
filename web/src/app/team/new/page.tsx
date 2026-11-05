@@ -24,7 +24,7 @@ export default function NewTeamPage() {
   const [creating, setCreating] = useState(false);
 
   if (state.status === "loading") return <Notice>Loading…</Notice>;
-  if (state.status !== "ready") {
+  if (state.status !== "ready" && state.status !== "no-team") {
     return (
       <Notice>
         Teams are not enabled on this controller, so it runs one built-in team.
@@ -52,7 +52,7 @@ export default function NewTeamPage() {
       await createTeam(effectiveSlug, name.trim());
       await refreshTeamState();
       toast(createdNotice(name.trim()), "success");
-      router.push(state.status === "ready" && state.caps?.github_app?.slug ? "/team/github" : "/team");
+      router.push((state.status === "ready" || state.status === "no-team") && state.caps?.github_app?.slug ? "/team/github" : "/team");
     } catch (err) {
       setCreating(false);
       toast(errorText(err), "error");
