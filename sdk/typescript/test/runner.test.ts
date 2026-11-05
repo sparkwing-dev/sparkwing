@@ -163,19 +163,27 @@ test("duration arguments preserve signed zero in defaults and explicit inputs", 
   }
 });
 
-test("hello facts remain sealed, plans stay flat, body env starts only after planning", async () => {
+test("hello facts remain sealed, plans stay flat, body env starts only after planning", async (t) => {
+  const previousDryRun = process.env["SPARKWING_DRY_RUN"];
+  process.env["SPARKWING_DRY_RUN"] = "false";
+  t.after(() => {
+    if (previousDryRun === undefined) delete process.env["SPARKWING_DRY_RUN"];
+    else process.env["SPARKWING_DRY_RUN"] = previousDryRun;
+  });
   resetPipelines();
   let duringPlan: string | undefined;
   definePipeline({
     name: "fixture",
     plan(plan, run) {
       duringPlan = process.env["W5_BODY"];
+      assert.equal(run.dryRun, false);
       plan
         .job("build", (ctx) => {
           assert.equal(ctx.run.pipeline, "yaml-alias");
           assert.equal(ctx.runner.name, "granted");
           assert.equal(ctx.run.git.commit, "sealed-sha");
           assert.equal(ctx.run.noMemo, true);
+          assert.equal(ctx.dryRun, false);
           assert.equal("bearer" in ctx, false);
           assert.equal("attempt" in ctx, false);
           return { env: process.env["W5_BODY"], args: ctx.args, identity: run.runner.name };

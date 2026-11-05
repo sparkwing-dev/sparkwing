@@ -42,6 +42,22 @@ func TestRunStepDryRun(t *testing.T) {
 	}
 }
 
+func TestRunStepWithFalseDryRunEnvironmentExecutesBody(t *testing.T) {
+	t.Setenv("SPARKWING_DRY_RUN", "false")
+	work := NewWork()
+	applied := false
+	step := Step(work, "write", func(ctx context.Context) error {
+		if IsDryRun(ctx) {
+			t.Fatal("normal run reported dry-run mode")
+		}
+		applied = true
+		return nil
+	}).DryRun(func(context.Context) error { t.Fatal("normal run previewed work"); return nil })
+	if _, err := runStep(t.Context(), work, step); err != nil || !applied {
+		t.Fatalf("error=%v applied=%v", err, applied)
+	}
+}
+
 func TestRunStepReturnsBodyError(t *testing.T) {
 	work := NewWork()
 	want := errors.New("failed")

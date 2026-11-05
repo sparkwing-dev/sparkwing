@@ -100,6 +100,9 @@ func TestDocsCoverAuthoritativeEnvironmentPolicy(t *testing.T) {
 		if !docsMentionEnvVar(reference, variable.Name) {
 			t.Errorf("environment reference omits policy variable %s", variable.Name)
 		}
+		if variable.Name == "SPARKWING_DRY_RUN" && !strings.Contains(reference, variable.Doc) {
+			t.Error("environment reference differs from the dry-run export contract")
+		}
 	}
 }
 
