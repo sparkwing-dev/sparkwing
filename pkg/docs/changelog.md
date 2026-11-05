@@ -19,15 +19,13 @@ unlock.
 ---
 
 ## [Unreleased]
+
 ### Added
 
 - **cli + controller:** `runs retry --reason TEXT` records why the retry should pass
   The new run keeps the reason in its lineage (`retry_reason`), and `runs status`, `runs list`, the API and the
   console run view show it, and the console's Rerun menu takes one. A reason is one line of at most 1024 bytes without
   control characters.
-
-### Added
-
 - **sdk:** `JobNode.Cores(n)`, `JobGroup.Cores(n)` and TypeScript `job.cores(n)` declare the CPU a job asks local admission to reserve
   The default stays one core; requests go down to 0.25. The plan carries `cores` only to a host whose hello names the
   new `job_cores` feature, so a pipeline using it still plans on an older host, which keeps the one-core charge.
