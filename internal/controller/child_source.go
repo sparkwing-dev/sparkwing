@@ -68,7 +68,7 @@ func (s *Server) resolveChildRevisions(ctx context.Context, engine *EngineContro
 func (s *Server) selectIntakeSource(ctx context.Context, team store.Team, request runspec.Request, read func(context.Context, string, string) ([]byte, bool, error)) (runspec.Git, runspec.Source, error) {
 	spec := source.Spec{RepoKey: string(request.Git.Repository.Key), RemoteURL: request.Source.Location.RemoteURL, LocalCheckout: request.Source.Location.LocalCheckout}
 	access := &intakeRevisionAccess{server: s, team: team}
-	options := source.Options{Access: access, Base: procenv.Base{Ambient: os.Environ(), Masker: requestMasker(ctx)}, ReadFile: read}
+	options := source.Options{Access: access, Base: procenv.Base{Ambient: os.Environ(), Masker: requestMasker(ctx)}, ReadFile: read, LookupHost: s.sourceLookup}
 	if spec.LocalCheckout != "" || s.dashboard != nil && s.dashboard.Local {
 		options.Base.Local, options.Base.Captured, options.GitAccess = true, os.Environ(), source.GitAccessOwner
 	}

@@ -110,7 +110,7 @@ func readCommitFile(ctx context.Context, spec Spec, sha, name string, options Op
 		return nil, false, err
 	}
 	defer func() { err = errors.Join(err, os.RemoveAll(workspace)) }()
-	client := &gitClient{owner: options.ownerGit(), env: gitEnvironment(environment), workspace: workspace, masker: options.Base.Masker}
+	client := &gitClient{owner: options.ownerGit(), env: gitEnvironment(environment), workspace: workspace, masker: options.Base.Masker, lookup: options.LookupHost}
 	repository := filepath.Join(workspace, "objects.git")
 	remote, err := client.authorizeRemote(ctx, spec, spec.RemoteURL, options.Access)
 	if err != nil {
