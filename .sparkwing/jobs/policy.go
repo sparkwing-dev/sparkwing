@@ -47,6 +47,7 @@ var policySteps = []policyStep{
 	{"tracker-ids", checkTrackerIDs},
 	{"tracked-binaries", checkTrackedBinaries},
 	{"docs-mirror", checkDocsMirror},
+	{"docs-sidebar", checkDocsSidebar},
 	{"changelog-links", checkChangelogLinks},
 	{"comments", checkComments},
 	{"test-sleeps", checkTestSleeps},
@@ -60,6 +61,13 @@ var policySteps = []policyStep{
 func checkCLIDocs(ctx context.Context) error {
 	if _, err := sparkwing.Bash(ctx, "bash bin/gen-cli-docs.sh --check").Env("GOWORK", "off").Run(); err != nil {
 		return fmt.Errorf("the generated CLI reference in docs/ differs from the command registry; run `bash bin/gen-cli-docs.sh` and commit docs/ and pkg/docs: %w", err)
+	}
+	return nil
+}
+
+func checkDocsSidebar(ctx context.Context) error {
+	if result, err := sparkwing.Bash(ctx, "go run ./internal/doccheck --sidebar docs").Env("GOWORK", "off").Run(); err != nil {
+		return fmt.Errorf("docs sidebar differs from the docs tree; add each page to docs/_sidebar.json or its excluded list:\n%s%w", result.Stdout, err)
 	}
 	return nil
 }

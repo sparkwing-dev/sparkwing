@@ -35,7 +35,7 @@ conflicts, and names the command that fixes each; a branch behind main that
 merges cleanly goes ahead. The gate's `policy` job runs next, alone: gofmt,
 the formatters, em dashes, tracker IDs, comments, test sleeps, tracked
 binaries, home resolution, the docs mirror, changelog lint and links, the
-required changelog entry, the OpenAPI and API-snapshot checks and the
+required changelog entry, the docs sidebar, the OpenAPI and API-snapshot checks and the
 generated CLI reference (`bin/gen-cli-docs.sh --check`). Each answers in
 seconds with a warm build cache, so a policy finding fails the land in under
 a minute instead of after a twenty-minute gate. Once it passes, the rest of
@@ -113,7 +113,7 @@ The version defaults to a minor bump of the newest tag on origin; pass
 (pipeline flags follow `--`). The
 pipeline refuses `v1.0.0` and above. The dry run resolves the version, runs the
 read-only cut checks (version freshness, Go directives, SDK pins, changelog
-links) and previews the changelog and guide roll; build, lint and the short
+links, docs sidebar) and previews the changelog and guide roll; build, lint and the short
 tests run only in the real cut.
 
 The schema changelog gate compares the neutral `internal/store/schema.sql`
@@ -577,7 +577,7 @@ file. Other syntax and workflow checks remain active.
   and the release cut, the `release-cut-checks` job the `release` pipeline runs
   before it tags, 40 minutes including 30 minutes of lint-lock allowance
   and ten minutes for build, full lint, the short test suite,
-  published-version, Go-directive and SDK-pin checks, and changelog-link checks
+  published-version, Go-directive and SDK-pin checks, and changelog-link and docs-sidebar checks
   in parallel.
   Each of those jobs times its own steps and warns when its slowest step's
   own run time overruns the class, naming the step and its cost, so a class

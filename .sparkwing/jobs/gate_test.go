@@ -358,7 +358,7 @@ func TestThePolicyJobRunsEveryCheapCheckAndNothingHeavy(t *testing.T) {
 	}
 	for _, id := range []string{
 		"gofmt", "formatters", "tracker-ids", "em-dashes", "comments", "test-sleeps", "tracked-binaries",
-		"docs-mirror", "changelog-links", "home-resolution", "changelog", "api-spec", "api-snapshot", "cli-docs",
+		"docs-mirror", "changelog-links", "docs-sidebar", "home-resolution", "changelog", "api-spec", "api-snapshot", "cli-docs",
 	} {
 		step := findStep(w, id)
 		if step == nil {

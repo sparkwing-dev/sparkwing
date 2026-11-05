@@ -25,6 +25,12 @@ var (
 )
 
 func main() {
+	if len(os.Args) == 3 && os.Args[1] == "--sidebar" {
+		if !checkSidebar(os.Args[2]) {
+			os.Exit(1)
+		}
+		return
+	}
 	if len(os.Args) == 3 && os.Args[1] == "--write-protocol-schemas" {
 		if err := writeProtocolSchemas(os.Args[2]); err != nil {
 			fmt.Fprintln(os.Stderr, err)
@@ -33,7 +39,7 @@ func main() {
 		return
 	}
 	if len(os.Args) != 3 {
-		fmt.Fprintln(os.Stderr, "usage: doccheck <docs-content-dir> <repo-root>")
+		fmt.Fprintln(os.Stderr, "usage: doccheck <docs-content-dir> <repo-root> | doccheck --sidebar <docs-content-dir>")
 		os.Exit(2)
 	}
 	contentDir, repoRoot := os.Args[1], os.Args[2]

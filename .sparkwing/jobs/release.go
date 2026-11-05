@@ -130,7 +130,7 @@ func (j *releaseCutChecksJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, erro
 		return runGolangciLintWithin(ctx, releaseCutBudget+releaseLintLockAllowance)
 	})
 	budget.step(w, "test", runShortTest)
-	// safety: these four only read, so a dry run reports what the cut would refuse.
+	// safety: these checks only read, so a dry run reports what the cut would refuse.
 	budget.step(w, "version-freshness", func(ctx context.Context) error {
 		return checkPublishedVersionsFreshness(ctx, sparkwing.WorkDir())
 	}).SafeWithoutDryRun()
@@ -139,6 +139,7 @@ func (j *releaseCutChecksJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, erro
 		return checkReleasePins(sparkwing.WorkDir())
 	}).SafeWithoutDryRun()
 	budget.step(w, "changelog-links", checkChangelogLinks).SafeWithoutDryRun()
+	budget.step(w, "docs-sidebar", checkDocsSidebar).SafeWithoutDryRun()
 	budget.verdict(w)
 	return nil, nil
 }

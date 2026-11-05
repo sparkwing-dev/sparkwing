@@ -20,6 +20,10 @@ unlock.
 
 ## [Unreleased]
 
+### Fixed
+
+- **delivery:** Land and gate policy checks and release cuts reject documentation pages missing from the docs sidebar. Release dry runs check the sidebar too.
+
 ## [v0.69.1] - 2026-11-05
 ### Fixed
 
