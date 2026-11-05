@@ -34,11 +34,10 @@ func roundTrip(ctx context.Context, dial dialFunc, host, method, target, bearer 
 	if err != nil {
 		return hostResponse{}, err
 	}
-	stop := context.AfterFunc(ctx, func() { _ = conn.Close() })
+	stop := context.AfterFunc(ctx, func() { _ = conn.Close() }) //nolint:errcheck // closing only unblocks the exchange; the context error is reported
 	response, err := exchange(conn, host, method, target, bearer, body, limit)
 	stop()
-	// safety: the reply is complete once read; a close failure cannot change it.
-	_ = conn.Close()
+	_ = conn.Close() //nolint:errcheck // the reply is complete once read; a close failure cannot change it
 	if ctxErr := ctx.Err(); err != nil && ctxErr != nil {
 		return hostResponse{}, ctxErr
 	}
