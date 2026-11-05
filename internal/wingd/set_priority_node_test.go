@@ -15,11 +15,11 @@ func TestSetPriority_NodeParticipantRecognizesOwningRun(t *testing.T) {
 	lease := mustAcquire(t, hog, coreReq("hog", 4))
 	first := ensure(t, home, "")
 	firstID := string(wingwire.NodeHostParticipant("first-run", "first"))
-	positions, _ := acquireAsync(first, coreReq(firstID, 1))
+	positions, _ := acquireAsync(t, first, coreReq(firstID, 1))
 	waitForQueue(t, positions)
 	second := ensure(t, home, "")
 	secondID := string(wingwire.NodeHostParticipant("second-run", "second"))
-	positions, result := acquireAsync(second, coreReq(secondID, 1))
+	positions, result := acquireAsync(t, second, coreReq(secondID, 1))
 	waitForQueue(t, positions)
 	for i := 0; i < 2; i++ {
 		ack := setPriority(t, home, "second-run", 0, "front")

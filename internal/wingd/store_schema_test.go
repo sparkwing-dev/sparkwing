@@ -5,6 +5,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/wingd"
 	"github.com/sparkwing-dev/sparkwing/internal/wingd/client"
@@ -21,7 +22,9 @@ func TestTerminalCheckEvictionCarriesTheStoreFailureVerbatim(t *testing.T) {
 	})
 	cl := ensure(t, home, "v0.38.2")
 
-	_, err := cl.Acquire(context.Background(), coreReq("schema-skew", 1), nil)
+	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Second)
+	defer cancel()
+	_, err := cl.Acquire(ctx, coreReq("schema-skew", 1), nil)
 	var admErr *client.AdmissionError
 	if !errors.As(err, &admErr) {
 		t.Fatalf("acquire error = %v, want an admission error", err)

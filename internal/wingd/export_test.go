@@ -2,12 +2,6 @@ package wingd
 
 import "github.com/sparkwing-dev/sparkwing/pkg/wingwire"
 
-// MaxUnsupportedReplies is maxUnsupportedReplies for external tests.
-const MaxUnsupportedReplies = maxUnsupportedReplies
-
-// MaxRefusedTypeName is maxRefusedTypeName for external tests.
-const MaxRefusedTypeName = maxRefusedTypeName
-
 // FuncRunStore supplies scripted run state to admission tests.
 type FuncRunStore struct {
 	IsTerminal        func(runID string) (bool, error)

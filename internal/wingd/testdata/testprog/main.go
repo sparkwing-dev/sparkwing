@@ -70,14 +70,12 @@ func runDaemon(args []string) {
 	fs := flag.NewFlagSet("daemon", flag.ExitOnError)
 	home := fs.String("home", "", "")
 	version := fs.String("version", "v1.0.0", "")
-	graceMS := fs.Int("grace-ms", 3000, "")
 	idleMS := fs.Int("idle-ms", 30000, "")
 	_ = fs.Parse(args)
 
 	d, err := wingd.New(wingd.Config{
 		Home:        *home,
 		Version:     *version,
-		GraceWindow: time.Duration(*graceMS) * time.Millisecond,
 		IdleTimeout: time.Duration(*idleMS) * time.Millisecond,
 	})
 	if err != nil {
@@ -115,7 +113,6 @@ func runHold(args []string) {
 	sem := fs.String("sem", "", "")
 	policy := fs.String("sem-policy", "queue", "")
 	cores := fs.Float64("cores", 0, "")
-	graceMS := fs.Int("daemon-grace-ms", 3000, "")
 	idleMS := fs.Int("daemon-idle-ms", 30000, "")
 	semaphoresOnly := fs.Bool("semaphores-only", false, "")
 	realSpawn := fs.Bool("real-spawn", false, "")
@@ -128,7 +125,7 @@ func runHold(args []string) {
 	opts := client.Options{
 		Home:    *home,
 		Version: *version,
-		Spawn:   daemonSpawner(*graceMS, *idleMS),
+		Spawn:   daemonSpawner(*idleMS),
 		Backoff: 30 * time.Millisecond,
 	}
 	if *realSpawn {
@@ -195,13 +192,12 @@ func runReattach(args []string) {
 	home := fs.String("home", "", "")
 	token := fs.String("token", "", "")
 	run := fs.String("run", "", "")
-	graceMS := fs.Int("daemon-grace-ms", 3000, "")
 	idleMS := fs.Int("daemon-idle-ms", 30000, "")
 	_ = fs.Parse(args)
 
 	opts := client.Options{
 		Home:    *home,
-		Spawn:   daemonSpawner(*graceMS, *idleMS),
+		Spawn:   daemonSpawner(*idleMS),
 		Backoff: 30 * time.Millisecond,
 	}
 	cl, err := client.EnsureDaemon(context.Background(), opts)
@@ -216,7 +212,7 @@ func runReattach(args []string) {
 	block()
 }
 
-func daemonSpawner(graceMS, idleMS int) func(home, version string) error {
+func daemonSpawner(idleMS int) func(home, version string) error {
 	return func(home, version string) error {
 		self, err := os.Executable()
 		if err != nil {
@@ -224,7 +220,6 @@ func daemonSpawner(graceMS, idleMS int) func(home, version string) error {
 		}
 		cmd := exec.Command(self, "daemon",
 			"--home", home,
-			"--grace-ms", strconv.Itoa(graceMS),
 			"--idle-ms", strconv.Itoa(idleMS),
 		)
 		cmd.SysProcAttr = daemonDetachSysProcAttr()

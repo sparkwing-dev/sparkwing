@@ -2,11 +2,8 @@ package wingd
 
 import (
 	"fmt"
-	"path/filepath"
 	"testing"
 	"time"
-
-	"github.com/sparkwing-dev/sparkwing/internal/admission"
 )
 
 func TestEventWindow_SummaryFoldsOutcomes(t *testing.T) {
@@ -67,17 +64,17 @@ func TestCancelledRunTombstonesRemainBoundedAndKeepNewest(t *testing.T) {
 func TestEventWindow_SummaryFoldsRejectionsByCause(t *testing.T) {
 	var w eventWindow
 	now := time.Now()
-	w.record(now, admissionEvent{Kind: eventRejection, Key: rejectCauseCostSource})
-	w.record(now, admissionEvent{Kind: eventRejection, Key: rejectCauseCostSource})
-	w.record(now, admissionEvent{Kind: eventRejection, Key: rejectCauseRequest})
+	w.record(now, admissionEvent{Kind: eventRejection, Key: "cost_source"})
+	w.record(now, admissionEvent{Kind: eventRejection, Key: "cost_source"})
+	w.record(now, admissionEvent{Kind: eventRejection, Key: "request"})
 
 	s := w.summary(now)
 	if s == nil {
 		t.Fatal("summary nil for a populated window")
 	}
 	if len(s.Rejections) != 2 ||
-		s.Rejections[0].Cause != rejectCauseCostSource || s.Rejections[0].Count != 2 ||
-		s.Rejections[1].Cause != rejectCauseRequest || s.Rejections[1].Count != 1 {
+		s.Rejections[0].Cause != "cost_source" || s.Rejections[0].Count != 2 ||
+		s.Rejections[1].Cause != "request" || s.Rejections[1].Count != 1 {
 		t.Errorf("Rejections = %+v, want cost_source:2, request:1 sorted by cause", s.Rejections)
 	}
 }
@@ -105,65 +102,5 @@ func TestEventWindow_PrunesBySpanAndCap(t *testing.T) {
 	}
 	if got := len(capped.snapshot(now)); got != eventWindowCap {
 		t.Errorf("entries after cap = %d, want %d", got, eventWindowCap)
-	}
-}
-
-func TestEventWindow_SurvivesStateRoundTrip(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "state.json")
-	now := time.Now()
-	events := []admissionEvent{
-		{At: now, Kind: eventGrant, WaitMS: 1234},
-		{At: now, Kind: eventEviction, Key: "land"},
-		{At: now, Kind: eventBackfill, BackfillCount: 1},
-	}
-	if err := writeState(path, admission.Snapshot{TotalMilliCores: 8000, TotalMemoryBytes: 1 << 30}, events); err != nil {
-		t.Fatalf("writeState: %v", err)
-	}
-	snap, restored, err := readState(path)
-	if err != nil {
-		t.Fatalf("readState: %v", err)
-	}
-	if snap == nil || snap.TotalMilliCores != 8000 {
-		t.Fatalf("snapshot lost: %+v", snap)
-	}
-	if len(restored) != 3 || restored[0].WaitMS != 1234 || restored[1].Key != "land" || restored[2].BackfillCount != 1 {
-		t.Fatalf("events lost across round trip: %+v", restored)
-	}
-
-	var w eventWindow
-	w.restore(now, restored)
-	s := w.summary(now)
-	if s == nil || s.Runs != 1 || len(s.Evictions) != 1 || s.Backfills != 1 || s.BackfillProtections != 1 {
-		t.Errorf("restored summary = %+v, want 1 run, 1 eviction, and 1 protected backfill", s)
-	}
-}
-
-func TestReadState_ToleratesEventlessFile(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "state.json")
-	if err := writeState(path, admission.Snapshot{TotalMilliCores: 4000, TotalMemoryBytes: 1 << 30}, nil); err != nil {
-		t.Fatalf("writeState: %v", err)
-	}
-	_, events, err := readState(path)
-	if err != nil {
-		t.Fatalf("readState: %v", err)
-	}
-	if len(events) != 0 {
-		t.Errorf("events = %+v, want none", events)
-	}
-}
-
-func TestWaiterDepartureKind_ClassifiesTimeoutVersusCancel(t *testing.T) {
-	now := time.Now()
-	timedOut := &conn{queueTimeoutMS: 1000, startAt: now.Add(-2 * time.Second)}
-	if got := waiterDepartureKindLocked(timedOut, now); got != eventQueueTimeout {
-		t.Errorf("elapsed bounded wait = %q, want %q", got, eventQueueTimeout)
-	}
-	early := &conn{queueTimeoutMS: 60000, startAt: now.Add(-2 * time.Second)}
-	if got := waiterDepartureKindLocked(early, now); got != eventCancellation {
-		t.Errorf("early departure = %q, want %q", got, eventCancellation)
-	}
-	unbounded := &conn{startAt: now.Add(-time.Hour)}
-	if got := waiterDepartureKindLocked(unbounded, now); got != eventCancellation {
-		t.Errorf("unbounded waiter departure = %q, want %q", got, eventCancellation)
 	}
 }

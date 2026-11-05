@@ -30,7 +30,6 @@ func TestHeadroomSamplerLoopAdmitsAfterExternalCPUDrops(t *testing.T) {
 	startDaemon(t, wingd.Config{
 		Home:             home,
 		Sampler:          sampler,
-		GraceWindow:      -1,
 		HeadroomFraction: -1,
 		SampleInterval:   10 * time.Millisecond,
 		HeadroomMaxAge:   120 * time.Millisecond,
@@ -42,7 +41,7 @@ func TestHeadroomSamplerLoopAdmitsAfterExternalCPUDrops(t *testing.T) {
 	holderClient := ensure(t, home, "")
 	mustAcquire(t, holderClient, coreReq("cpu-holder", 0.1))
 	cl := ensure(t, home, "")
-	positions, result := acquireAsync(cl, wingwire.AdmissionRequest{
+	positions, result := acquireAsync(t, cl, wingwire.AdmissionRequest{
 		RunID:    "cpu-recovery",
 		SubLease: true,
 		Resources: wingwire.HostResources{
@@ -74,7 +73,6 @@ func TestHeadroomRefreshPushesUpdatedReasonToQueuedRun(t *testing.T) {
 	startDaemon(t, wingd.Config{
 		Home:             home,
 		Sampler:          sampler,
-		GraceWindow:      -1,
 		HeadroomFraction: -1,
 		SampleInterval:   10 * time.Millisecond,
 		HeadroomMaxAge:   120 * time.Millisecond,
@@ -86,7 +84,7 @@ func TestHeadroomRefreshPushesUpdatedReasonToQueuedRun(t *testing.T) {
 	holderClient := ensure(t, home, "")
 	mustAcquire(t, holderClient, coreReq("reason-holder", 0.1))
 	cl := ensure(t, home, "")
-	positions, result := acquireAsync(cl, wingwire.AdmissionRequest{
+	positions, result := acquireAsync(t, cl, wingwire.AdmissionRequest{
 		RunID:    "reason-refresh",
 		SubLease: true,
 		Resources: wingwire.HostResources{

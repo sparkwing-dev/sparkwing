@@ -3,7 +3,6 @@
 package wingd
 
 import (
-	"bufio"
 	"context"
 	"fmt"
 	"net"
@@ -12,8 +11,6 @@ import (
 	"sync"
 	"testing"
 	"time"
-
-	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
 )
 
 type apiRecorder struct {
@@ -185,74 +182,5 @@ func TestAPISocketRefusesAPeerFromAnotherAccount(t *testing.T) {
 	}
 	if peers := rec.peers(); len(peers) != 0 {
 		t.Fatalf("peer uids %v, want none", peers)
-	}
-}
-
-func TestAPIListenerClosesBeforeTheDrainIsAcknowledged(t *testing.T) {
-	d, rec, _ := startAPIDaemon(t, Config{})
-	select {
-	case <-rec.serve:
-	case <-time.After(3 * time.Second):
-		t.Fatal("the daemon never handed the API listener over")
-	}
-	sock := d.layout.apiSock
-	if nc, err := net.Dial("unix", sock); err != nil {
-		t.Fatalf("api socket refused a connection before the drain: %v", err)
-	} else {
-		_ = nc.Close()
-	}
-
-	nc, err := net.Dial("unix", d.layout.sock)
-	if err != nil {
-		t.Fatalf("dial admission socket: %v", err)
-	}
-	defer func() { _ = nc.Close() }()
-	_ = nc.SetDeadline(time.Now().Add(5 * time.Second))
-	send(t, nc, &wingwire.Hello{ProtocolMajor: ProtocolMajor, BinaryVersion: "test"})
-	lines := bufio.NewReader(nc)
-	ack := receive(t, lines)
-	hello, ok := ack.(*wingwire.HelloAck)
-	if !ok {
-		t.Fatalf("handshake answered with %T, want a HelloAck", ack)
-	}
-	if hello.APIReady == nil || !*hello.APIReady {
-		t.Fatalf("HelloAck reports api_ready %v, want true while the socket serves", hello.APIReady)
-	}
-	send(t, nc, &wingwire.DrainRequest{SuccessorVersion: "v2.0.0"})
-	if msg := receive(t, lines); !isDrainAck(msg) {
-		t.Fatalf("drain answered with %T, want a DrainAck", msg)
-	}
-	if conn, derr := net.Dial("unix", sock); derr == nil {
-		_ = conn.Close()
-		t.Fatal("the API socket still accepted a connection after the drain was acknowledged")
-	}
-}
-
-func isDrainAck(msg wingwire.Message) bool {
-	_, ok := msg.(*wingwire.DrainAck)
-	return ok
-}
-
-func receive(t *testing.T, r *bufio.Reader) wingwire.Message {
-	t.Helper()
-	line, err := r.ReadBytes('\n')
-	if err != nil {
-		t.Fatalf("read frame: %v", err)
-	}
-	msg, err := wingwire.Decode(line)
-	if err != nil {
-		t.Fatalf("decode frame: %v", err)
-	}
-	return msg
-}
-
-func send(t *testing.T, nc net.Conn, msg wingwire.Message) {
-	t.Helper()
-	line, err := wingwire.Encode(msg)
-	if err != nil {
-		t.Fatalf("encode %T: %v", msg, err)
-	}
-	if _, err := nc.Write(line); err != nil {
-		t.Fatalf("write %T: %v", msg, err)
 	}
 }

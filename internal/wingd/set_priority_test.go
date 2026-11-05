@@ -3,12 +3,12 @@ package wingd_test
 import (
 	"context"
 	"encoding/json"
-	"os"
 	"path/filepath"
 	"testing"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/admission"
+	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/wingd"
 	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
 )
@@ -61,10 +61,10 @@ func TestSetPriority_WaiterIsReRankedAndAdmitted(t *testing.T) {
 	hogLease := mustAcquire(t, hog, coreReq("hog", 3))
 
 	first := ensure(t, home, "")
-	firstPositions, firstResult := acquireAsync(first, coreReq("first", 3))
+	firstPositions, firstResult := acquireAsync(t, first, coreReq("first", 3))
 	waitForQueue(t, firstPositions)
 	second := ensure(t, home, "")
-	secondPositions, secondResult := acquireAsync(second, coreReq("second", 1))
+	secondPositions, secondResult := acquireAsync(t, second, coreReq("second", 1))
 	waitForQueue(t, secondPositions)
 
 	ack := setPriority(t, home, "second", 5, "")
@@ -138,17 +138,17 @@ func TestSetPriority_RelativeModesExcludeTheRunsOwnParticipants(t *testing.T) {
 	high := ensure(t, home, "")
 	highReq := coreReq("high", 1)
 	highReq.Priority = 4
-	highPositions, _ := acquireAsync(high, highReq)
+	highPositions, _ := acquireAsync(t, high, highReq)
 	waitForQueue(t, highPositions)
 
 	low := ensure(t, home, "")
 	lowReq := coreReq("low", 1)
 	lowReq.Priority = -2
-	lowPositions, _ := acquireAsync(low, lowReq)
+	lowPositions, _ := acquireAsync(t, low, lowReq)
 	waitForQueue(t, lowPositions)
 
 	mover := ensure(t, home, "")
-	moverPositions, _ := acquireAsync(mover, coreReq("mover", 1))
+	moverPositions, _ := acquireAsync(t, mover, coreReq("mover", 1))
 	waitForQueue(t, moverPositions)
 
 	if ack := setPriority(t, home, "mover", 0, "front"); ack.Priority != 5 || ack.Position != 1 {
@@ -187,7 +187,7 @@ func TestSetPriority_OverrideAppliesToASubsequentOwnerRequest(t *testing.T) {
 	nodeReq := coreReq("node-1", 2)
 	nodeReq.OwnerRunID = "parent-run"
 	nodeReq.OwnerLeaseToken = runLease.Token
-	nodePositions, _ := acquireAsync(nodeCl, nodeReq)
+	nodePositions, _ := acquireAsync(t, nodeCl, nodeReq)
 	waitForQueue(t, nodePositions)
 
 	qs := waitForParticipant(t, home, "node-1")
@@ -215,10 +215,16 @@ func TestSetPriority_OverrideIsPersistedForTheNextDaemon(t *testing.T) {
 	var persisted struct {
 		Snapshot admission.Snapshot `json:"snapshot"`
 	}
-	blob, err := os.ReadFile(filepath.Join(home, "wingd", "state.json"))
+	db, err := store.Open(filepath.Join(home, "state.db"))
 	if err != nil {
-		t.Fatalf("read state: %v", err)
+		t.Fatal(err)
 	}
+	defer db.Close()
+	blob, err := db.LoadMachineAdmission(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+
 	if err := json.Unmarshal(blob, &persisted); err != nil {
 		t.Fatalf("parse state: %v", err)
 	}
@@ -227,30 +233,5 @@ func TestSetPriority_OverrideIsPersistedForTheNextDaemon(t *testing.T) {
 	}
 	if len(persisted.Snapshot.Waiters) != 0 {
 		t.Fatalf("persisted waiters = %+v, want none: the override is what carries the rank across a restart", persisted.Snapshot.Waiters)
-	}
-}
-
-func TestSetPriority_RestoredOverrideRanksTheRunsNextRequest(t *testing.T) {
-	home := shortHome(t)
-	writeLedgerState(t, home, marshalState(t, admission.Snapshot{
-		TotalMilliCores:     4000,
-		TotalMemoryBytes:    8 << 30,
-		HeadroomMilliCores:  4000,
-		HeadroomMemoryBytes: 8 << 30,
-		PriorityOverrides:   map[string]int{"restored-run": 8},
-	}))
-	startDaemon(t, wingd.Config{Home: home, Sampler: newFakeSampler(4, 8<<30), GraceWindow: -1})
-
-	hog := ensure(t, home, "")
-	hogLease := mustAcquire(t, hog, coreReq("hog", 3))
-	defer func() { _ = hogLease.Release() }()
-
-	waiter := ensure(t, home, "")
-	positions, _ := acquireAsync(waiter, coreReq("restored-run", 2))
-	waitForQueue(t, positions)
-
-	qs := waitForWaiter(t, home, "restored-run")
-	if p, ok := waiterPriority(qs, "restored-run"); !ok || p != 8 {
-		t.Fatalf("restored priority = %d (present %v), want the persisted 8 rather than the carried 0", p, ok)
 	}
 }

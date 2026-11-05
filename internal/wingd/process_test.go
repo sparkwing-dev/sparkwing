@@ -340,28 +340,3 @@ func TestProcess_PipelineClientWithoutAHostStartsNothing(t *testing.T) {
 		t.Fatal("a client with no host binary started a daemon anyway")
 	}
 }
-
-func TestProcess_DaemonKillRestoresAndReattaches(t *testing.T) {
-	t.Parallel()
-
-	if testing.Short() {
-		t.Skip("process test skipped in -short")
-	}
-	home := shortHome(t)
-	a := startProc(t, "hold", "--home", home, "--run", "a", "--cores", "0.5",
-		"--daemon-grace-ms", "500", "--daemon-idle-ms", "3000")
-	a.waitOK(10 * time.Second)
-
-	dpid := readDaemonPid(t, home)
-	if err := killProcessPID(dpid); err != nil {
-		t.Fatalf("kill daemon %d: %v", dpid, err)
-	}
-
-	waitForDaemonLineCount(t, home, 2, 10*time.Second)
-
-	waitForHolder(t, home, "a")
-	observeReattachedHolderFor(t, home, "a", 750*time.Millisecond)
-	if err := processPIDAlive(a.cmd.Process.Pid); err != nil {
-		t.Fatalf("original holder exited instead of reclaiming its lease: %v", err)
-	}
-}

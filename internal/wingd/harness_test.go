@@ -4,10 +4,12 @@ import (
 	"context"
 	"errors"
 	"os"
+	"path/filepath"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/wingd"
 	"github.com/sparkwing-dev/sparkwing/internal/wingd/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
@@ -42,7 +44,7 @@ func (f *fakeSampler) set(stat wingd.HostStat) {
 
 func shortHome(t *testing.T) string {
 	t.Helper()
-	dir, err := os.MkdirTemp("/tmp", "wd")
+	dir, err := os.MkdirTemp("", "wd")
 	if err != nil {
 		dir = t.TempDir()
 	} else {
@@ -60,6 +62,21 @@ type testDaemon struct {
 
 func startDaemon(t *testing.T, cfg wingd.Config) *testDaemon {
 	t.Helper()
+	if cfg.Home == "" {
+		cfg.Home = shortHome(t)
+	}
+	if cfg.AdmissionStore == nil {
+		state, err := store.Open(filepath.Join(cfg.Home, "state.db"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() {
+			if err := state.Close(); err != nil {
+				t.Error(err)
+			}
+		})
+		cfg.AdmissionStore = state
+	}
 	if cfg.Version == "" {
 		cfg.Version = "v1.0.0"
 	}
@@ -148,11 +165,15 @@ type acquireResult struct {
 	err   error
 }
 
-func acquireAsync(cl *client.Client, req wingwire.AdmissionRequest) (<-chan wingwire.Queued, <-chan acquireResult) {
+func acquireAsync(t *testing.T, cl *client.Client, req wingwire.AdmissionRequest) (<-chan wingwire.Queued, <-chan acquireResult) {
+	t.Helper()
+	ctx, cancel := context.WithCancel(t.Context())
+	finished := make(chan struct{})
 	positions := make(chan wingwire.Queued, 8)
 	result := make(chan acquireResult, 1)
 	go func() {
-		lease, err := cl.Acquire(context.Background(), req, func(q wingwire.Queued) {
+		defer close(finished)
+		lease, err := cl.Acquire(ctx, req, func(q wingwire.Queued) {
 			select {
 			case positions <- q:
 			default:
@@ -160,6 +181,16 @@ func acquireAsync(cl *client.Client, req wingwire.AdmissionRequest) (<-chan wing
 		})
 		result <- acquireResult{lease: lease, err: err}
 	}()
+	t.Cleanup(func() {
+		cancel()
+		timer := time.NewTimer(6 * time.Second)
+		defer timer.Stop()
+		select {
+		case <-finished:
+		case <-timer.C:
+			t.Error("admission request did not join during cleanup")
+		}
+	})
 	return positions, result
 }
 

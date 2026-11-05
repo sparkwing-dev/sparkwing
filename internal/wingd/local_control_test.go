@@ -1,53 +1,11 @@
 package wingd
 
 import (
-	"bufio"
 	"context"
-	"net"
+	"encoding/json"
 	"net/http"
-	"sync/atomic"
 	"testing"
-	"testing/synctest"
-	"time"
-
-	"github.com/sparkwing-dev/sparkwing/internal/localhostwire"
-	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
 )
-
-func localControlPipe(t *testing.T, d *Daemon, probe bool) func(wingwire.Message) wingwire.Message {
-	_, exchange := localControlConnection(t, d, probe)
-	return exchange
-}
-
-func localControlConnection(t *testing.T, d *Daemon, probe bool) (net.Conn, func(wingwire.Message) wingwire.Message) {
-	t.Helper()
-	peer, server := net.Pipe()
-	d.startConn(newConn(d, server))
-	t.Cleanup(func() { peer.Close() })
-	scanner := bufio.NewScanner(peer)
-	exchange := func(request wingwire.Message) wingwire.Message {
-		t.Helper()
-		body, err := wingwire.Encode(request)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if _, err := peer.Write(body); err != nil {
-			t.Fatal(err)
-		}
-		if !scanner.Scan() {
-			t.Fatalf("missing reply: %v", scanner.Err())
-		}
-		reply, err := wingwire.Decode(scanner.Bytes())
-		if err != nil {
-			t.Fatal(err)
-		}
-		return reply
-	}
-	if _, ok := exchange(&wingwire.Hello{ProtocolMajor: ProtocolMajor, HealthProbe: probe}).(*wingwire.HelloAck); !ok {
-		t.Fatal("handshake refused")
-	}
-	return peer, exchange
-}
 
 func TestLocalControlReportsOwnerAndStay(t *testing.T) {
 	f := &runtimeControllerFixture{reconcile: func(context.Context) (LocalActivity, error) {
@@ -63,143 +21,42 @@ func TestLocalControlReportsOwnerAndStay(t *testing.T) {
 			t.Error(err)
 		}
 	})
-	exchange := localControlPipe(t, r.run.daemon, false)
 	for _, stay := range []bool{true, false} {
-		reply, ok := exchange(&wingwire.LocalControl{Stay: &stay}).(*wingwire.LocalControlStatus)
-		if !ok {
-			t.Fatal("missing local status")
+		w := policyHTTP(t, r.run.daemon, http.MethodPost, controllerHTTPPath+"stay", struct {
+			Stay bool `json:"stay"`
+		}{stay})
+		var status LocalStatus
+		if w.Code != http.StatusOK {
+			t.Fatalf("stay: HTTP %d: %s", w.Code, w.Body.String())
 		}
-		if !reply.Running || reply.Stay != stay || reply.PID == 0 || reply.Version != "v1" {
-			t.Fatalf("owner: %+v", reply)
-		}
-		if reply.Runs != 1 || reply.QueuedTriggers != 2 || reply.HeldLeases != 3 || reply.DashboardConnections != 4 || !reply.IdleSince.IsZero() {
-			t.Fatalf("activity: %+v", reply)
-		}
-		status, err := r.Status(t.Context())
-		if err != nil || status.Stay != stay {
-			t.Fatalf("runtime disagrees: %+v %v", status, err)
-		}
-	}
-}
-
-func TestLocalControlProbeCannotMutateOrResetIdle(t *testing.T) {
-	synctest.Test(t, func(t *testing.T) {
-		f := &runtimeControllerFixture{}
-		r := newRuntimeFixture(t, f)
-		var clock atomic.Pointer[time.Time]
-		now := time.Now()
-		clock.Store(&now)
-		r.cfg.Admission.Now = func() time.Time { return *clock.Load() }
-		lifecycle := NewLocalLifecycle(r, nil)
-		if _, err := lifecycle.EnsureStarted(t.Context(), LocalStartOptions{Home: f.home, Version: "v1"}); err != nil {
+		if err := json.Unmarshal(w.Body.Bytes(), &status); err != nil {
 			t.Fatal(err)
 		}
-		t.Cleanup(func() {
-			if err := lifecycle.Stop(context.Background()); err != nil {
-				t.Error(err)
-			}
-		})
-		exchange := localControlPipe(t, r.run.daemon, true)
-		before := exchange(&wingwire.LocalControl{}).(*wingwire.LocalControlStatus)
-		if before.IdleSince.IsZero() {
-			t.Fatal("missing idle boundary")
+		if !status.Running || status.Stay != stay || status.PID == 0 || status.Version != "v1" {
+			t.Fatalf("owner: %+v", status)
 		}
-		stay := true
-		if _, ok := exchange(&wingwire.LocalControl{Stay: &stay}).(*wingwire.Unsupported); !ok {
-			t.Fatal("health probe changed stay mode")
+		if status.Activity.Runs != 1 || status.Activity.QueuedTriggers != 2 || status.Activity.HeldLeases != 3 || status.Activity.DashboardConnections != 4 || !status.Activity.IdleSince.IsZero() {
+			t.Fatalf("activity: %+v", status.Activity)
 		}
-		// safety: a deterministic admission clock exposes any probe that touches idle accounting.
-		later := before.IdleSince.Add(time.Second)
-		clock.Store(&later)
-		after := exchange(&wingwire.LocalControl{}).(*wingwire.LocalControlStatus)
-		if after.Stay || after.IdleSince != before.IdleSince {
-			t.Fatalf("probe changed lifecycle: %+v", after)
-		}
-	})
+	}
 }
 
 func TestLocalControlAdmissionOnlyRefuses(t *testing.T) {
-	d, err := New(Config{Home: t.TempDir()})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := d.initLedger(); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { d.finalShutdown() })
-	if _, ok := localControlPipe(t, d, true)(&wingwire.LocalControl{}).(*wingwire.Unsupported); !ok {
-		t.Fatal("admission-only daemon impersonated local controller")
+	d := handlerDaemon(t, 2)
+	w := policyHTTP(t, d, http.MethodGet, controllerHTTPPath+"status", nil)
+	if w.Code != http.StatusServiceUnavailable {
+		t.Fatalf("admission-only status: HTTP %d: %s", w.Code, w.Body.String())
 	}
 }
 
-func TestLocalControlCannotPromoteBeforeReadiness(t *testing.T) {
-	entered, release := make(chan struct{}), make(chan struct{})
-	f := &runtimeControllerFixture{http: func() localhostwire.LocalHTTP {
-		close(entered)
-		<-release
-		return localhostwire.LocalHTTP{API: http.NotFoundHandler(), Dashboard: http.NotFoundHandler()}
-	}}
-	r := newRuntimeFixture(t, f)
-	lifecycle := NewLocalLifecycle(r, nil)
-	started := make(chan error, 1)
-	go func() {
-		_, err := lifecycle.EnsureStarted(t.Context(), LocalStartOptions{Home: f.home, Version: "v1"})
-		started <- err
-	}()
-	<-entered
-	exchange := localControlPipe(t, r.run.daemon, false)
-	stay := true
-	status := exchange(&wingwire.LocalControl{Stay: &stay}).(*wingwire.LocalControlStatus)
-	if status.Running || status.Stay {
-		t.Fatalf("promoted unready controller: %+v", status)
-	}
-	close(release)
-	if err := <-started; err != nil {
-		t.Fatal(err)
-	}
-	status = exchange(&wingwire.LocalControl{}).(*wingwire.LocalControlStatus)
-	if !status.Running || status.Stay {
-		t.Fatalf("lost readiness or saved refused promotion: %+v", status)
-	}
-	if err := lifecycle.Stop(t.Context()); err != nil {
-		t.Fatal(err)
-	}
-}
-
-func TestLocalControlRefusesStayAfterIdleShutdownCommits(t *testing.T) {
-	idleDecision, continueIdle := make(chan struct{}), make(chan struct{})
-	released := false
-	defer func() {
-		if !released {
-			close(continueIdle)
-		}
-	}()
-	f := &runtimeControllerFixture{}
-	r := newRuntimeFixture(t, f)
-	r.cfg.Admission.IdleTimeout = time.Millisecond
-	r.cfg.Admission.Logf = func(format string, _ ...any) {
-		if format == "idle for %s, exiting" {
-			close(idleDecision)
-			<-continueIdle
-		}
-	}
-	lifecycle := NewLocalLifecycle(r, nil)
-	if _, err := lifecycle.EnsureStarted(t.Context(), LocalStartOptions{Home: f.home, Version: "v1"}); err != nil {
-		t.Fatal(err)
-	}
-	<-idleDecision
-	exchange := localControlPipe(t, r.run.daemon, false)
-	stay := true
-	status := exchange(&wingwire.LocalControl{Stay: &stay}).(*wingwire.LocalControlStatus)
-	if status.Running || status.Stay {
-		t.Errorf("acknowledged stay after committing idle shutdown: %+v", status)
-	}
-	if err := r.SetStay(t.Context(), true); err == nil {
-		t.Error("in-process caller promoted stopping controller")
-	}
-	close(continueIdle)
-	released = true
-	if err := lifecycle.Stop(t.Context()); err != nil {
-		t.Fatal(err)
+func TestLocalControlGetCannotChangeStay(t *testing.T) {
+	d := handlerDaemon(t, 2)
+	called := false
+	d.localControl = func(*bool) LocalStatus { called = true; return LocalStatus{} }
+	w := policyHTTP(t, d, http.MethodGet, controllerHTTPPath+"stay", struct {
+		Stay bool `json:"stay"`
+	}{true})
+	if w.Code != http.StatusMethodNotAllowed || called {
+		t.Fatalf("GET stay changed lifecycle: HTTP %d, called=%v", w.Code, called)
 	}
 }

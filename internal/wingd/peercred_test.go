@@ -15,8 +15,6 @@ import (
 	"syscall"
 	"testing"
 	"time"
-
-	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
 )
 
 func TestPeerUID_ReadsTheConnectingUser(t *testing.T) {
@@ -105,11 +103,7 @@ func TestDaemon_AcceptLoopClosesAForeignConnection(t *testing.T) {
 		t.Fatalf("dial daemon: %v", err)
 	}
 	defer func() { _ = c.Close() }()
-	hello, err := wingwire.Encode(&wingwire.Hello{ProtocolMajor: ProtocolMajor, BinaryVersion: "test"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	_, _ = c.Write(hello)
+	_, _ = c.Write([]byte("GET /api/v1/local/controller/probe HTTP/1.1\r\nHost: local\r\n\r\n"))
 	_ = c.SetReadDeadline(time.Now().Add(3 * time.Second))
 	buf := make([]byte, 1)
 	if n, rerr := c.Read(buf); n > 0 || rerr == nil {
@@ -143,11 +137,7 @@ func TestPeerCredHelperProcess(t *testing.T) {
 		t.Fatalf("helper uid %d could not reach the socket: %v", os.Getuid(), err)
 	}
 	defer func() { _ = c.Close() }()
-	hello, err := wingwire.Encode(&wingwire.Hello{ProtocolMajor: ProtocolMajor, BinaryVersion: "helper"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	_, _ = c.Write(hello)
+	_, _ = c.Write([]byte("GET /api/v1/local/controller/probe HTTP/1.1\r\nHost: local\r\n\r\n"))
 	_ = c.SetReadDeadline(time.Now().Add(3 * time.Second))
 	buf := make([]byte, 1)
 	if n, _ := c.Read(buf); n > 0 {
@@ -220,5 +210,5 @@ func startLoggingDaemon(t *testing.T, logf func(format string, args ...any)) str
 			t.Error("daemon did not stop after cancel")
 		}
 	})
-	return d.layout.sock
+	return d.layout.apiSock
 }

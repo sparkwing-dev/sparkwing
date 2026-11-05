@@ -22,7 +22,7 @@ func TestQueueState_HostPressureExplainsWait(t *testing.T) {
 	home := shortHome(t)
 	sampler := newFakeSampler(10, 64<<30)
 	sampler.set(wingd.HostStat{TotalCores: 10, TotalMemoryBytes: 64 << 30, FreeMemoryBytes: 64 << 30, LoadAverage: 3.2, BusyCores: 3.2, LoadMeasured: true, CPUMeasured: true, MemoryMeasured: true})
-	startDaemon(t, wingd.Config{Home: home, Version: "v1", GraceWindow: -1, Sampler: sampler})
+	startDaemon(t, wingd.Config{Home: home, Version: "v1", Sampler: sampler})
 
 	holderClient := ensure(t, home, "v1")
 	mustAcquire(t, holderClient, wingwire.AdmissionRequest{
@@ -31,7 +31,7 @@ func TestQueueState_HostPressureExplainsWait(t *testing.T) {
 	})
 
 	cl := ensure(t, home, "v1")
-	_, result := acquireAsync(cl, wingwire.AdmissionRequest{
+	_, result := acquireAsync(t, cl, wingwire.AdmissionRequest{
 		RunID:     "heavy",
 		Resources: wingwire.HostResources{Cores: 5},
 	})
@@ -82,7 +82,7 @@ func TestQueueState_PositiveGrantRestoresExternalPressureAccounting(t *testing.T
 		CPUMeasured:      true,
 		MemoryMeasured:   true,
 	})
-	startDaemon(t, wingd.Config{Home: home, Version: "v1", GraceWindow: -1, Sampler: sampler})
+	startDaemon(t, wingd.Config{Home: home, Version: "v1", Sampler: sampler})
 	blocker := ensure(t, home, "v1")
 	mustAcquire(t, blocker, wingwire.AdmissionRequest{RunID: "resource-holder", Resources: wingwire.HostResources{Cores: 0.1}})
 
@@ -90,7 +90,7 @@ func TestQueueState_PositiveGrantRestoresExternalPressureAccounting(t *testing.T
 	mustAcquire(t, registration, wingwire.AdmissionRequest{RunID: "pipeline", SemaphoresOnly: true})
 
 	participant := ensure(t, home, "v1")
-	positions, result := acquireAsync(participant, wingwire.AdmissionRequest{
+	positions, result := acquireAsync(t, participant, wingwire.AdmissionRequest{
 		RunID:        "pipeline/node-host/cHJlLXB1c2g",
 		OwnerRunID:   "pipeline",
 		DisplayRunID: "pipeline/pre-push",
@@ -144,7 +144,7 @@ func TestQueueState_BlockingReasonExplainsChargeSource(t *testing.T) {
 	home := shortHome(t)
 	sampler := newFakeSampler(10, 64<<30)
 	sampler.set(wingd.HostStat{TotalCores: 10, TotalMemoryBytes: 64 << 30, FreeMemoryBytes: 64 << 30, LoadAverage: 3.2, BusyCores: 3.2, LoadMeasured: true, CPUMeasured: true, MemoryMeasured: true})
-	startDaemon(t, wingd.Config{Home: home, Version: "v1", GraceWindow: -1, Sampler: sampler})
+	startDaemon(t, wingd.Config{Home: home, Version: "v1", Sampler: sampler})
 
 	holderClient := ensure(t, home, "v1")
 	mustAcquire(t, holderClient, wingwire.AdmissionRequest{
@@ -154,7 +154,7 @@ func TestQueueState_BlockingReasonExplainsChargeSource(t *testing.T) {
 	})
 
 	cl := ensure(t, home, "v1")
-	_, result := acquireAsync(cl, wingwire.AdmissionRequest{
+	_, result := acquireAsync(t, cl, wingwire.AdmissionRequest{
 		RunID:       "heavy",
 		Resources:   wingwire.HostResources{MemoryBytes: 8 << 30},
 		CostSource:  wingwire.CostSourceMeasured,
@@ -207,7 +207,7 @@ func TestQueueState_ReportsBackfillProtection(t *testing.T) {
 	})
 
 	heavyClient := ensure(t, home, "v1")
-	positions, _ := acquireAsync(heavyClient, wingwire.AdmissionRequest{
+	positions, _ := acquireAsync(t, heavyClient, wingwire.AdmissionRequest{
 		RunID: "heavy",
 		Semaphores: []wingwire.SemaphoreClaim{
 			{Name: "weighted", Capacity: 8, Cost: 6, Policy: wingwire.PolicyQueue},
@@ -258,7 +258,7 @@ func TestQueueState_CarriesOwnerAndParticipantIdentity(t *testing.T) {
 	})
 
 	waiterClient := ensure(t, home, "v1")
-	positions, _ := acquireAsync(waiterClient, wingwire.AdmissionRequest{
+	positions, _ := acquireAsync(t, waiterClient, wingwire.AdmissionRequest{
 		RunID:           "internal-waiter",
 		OwnerRunID:      "run-2",
 		OwnerLeaseToken: owner2.Token,
@@ -345,11 +345,10 @@ func observeQueueStateFor(t *testing.T, q *client.Client, duration time.Duration
 
 func TestQueueState_RecoveryCommandUsesOwnerRunID(t *testing.T) {
 	home := shortHome(t)
-	proc := &fakeProcSampler{usage: map[int]wingd.ProcUsage{9003: {}}}
+	proc := &fakeProcSampler{usage: map[int]wingd.ProcUsage{os.Getpid(): {}}}
 	startDaemon(t, wingd.Config{
 		Home:             home,
 		Version:          "v1",
-		GraceWindow:      -1,
 		Sampler:          newFakeSampler(4, 8<<30),
 		HeadroomFraction: -1,
 		ProcSampler:      proc,
@@ -364,7 +363,7 @@ func TestQueueState_RecoveryCommandUsesOwnerRunID(t *testing.T) {
 		OwnerRunID:      "run-1",
 		OwnerLeaseToken: owner.Token,
 		DisplayRunID:    "run-1/build",
-		PID:             9003,
+		PID:             os.Getpid(),
 		Resources:       wingwire.HostResources{Cores: 1},
 		Semaphores: []wingwire.SemaphoreClaim{
 			{Name: "deploy", Capacity: 1, Cost: 1, Policy: wingwire.PolicyQueue},
@@ -372,7 +371,7 @@ func TestQueueState_RecoveryCommandUsesOwnerRunID(t *testing.T) {
 	})
 
 	waiterClient := ensure(t, home, "v1")
-	positions, _ := acquireAsync(waiterClient, wingwire.AdmissionRequest{
+	positions, _ := acquireAsync(t, waiterClient, wingwire.AdmissionRequest{
 		RunID:     "waiter",
 		Resources: wingwire.HostResources{Cores: 1},
 		Semaphores: []wingwire.SemaphoreClaim{
@@ -406,7 +405,7 @@ func TestQueueState_DecodesNodeParticipantIdentity(t *testing.T) {
 	})
 
 	waiterClient := ensure(t, home, "v1")
-	positions, _ := acquireAsync(waiterClient, wingwire.AdmissionRequest{
+	positions, _ := acquireAsync(t, waiterClient, wingwire.AdmissionRequest{
 		RunID:     "run-2/node-semaphore/dGVzdC9zaGFyZC0y",
 		Resources: wingwire.HostResources{MemoryBytes: 8 << 30},
 	})
@@ -442,7 +441,7 @@ func TestQueueState_ResourceRowsReconcile(t *testing.T) {
 	home := shortHome(t)
 	sampler := newFakeSampler(10, 64<<30)
 	sampler.set(wingd.HostStat{TotalCores: 10, TotalMemoryBytes: 64 << 30, FreeMemoryBytes: 64 << 30, LoadAverage: 3.2, BusyCores: 3.2, LoadMeasured: true, CPUMeasured: true, MemoryMeasured: true})
-	startDaemon(t, wingd.Config{Home: home, Version: "v1", GraceWindow: -1, Sampler: sampler})
+	startDaemon(t, wingd.Config{Home: home, Version: "v1", Sampler: sampler})
 
 	holderClient := ensure(t, home, "v1")
 	mustAcquire(t, holderClient, wingwire.AdmissionRequest{
@@ -625,10 +624,10 @@ func TestQueueState_ReportsHoldersWaitersPositionsAndPipelines(t *testing.T) {
 	})
 
 	holder := ensure(t, home, "")
-	mustAcquire(t, holder, semHostReq("holder", "deployer", 4242, "deploy"))
+	mustAcquire(t, holder, semHostReq("holder", "deployer", os.Getpid(), "deploy"))
 
 	waiter := ensure(t, home, "")
-	positions, _ := acquireAsync(waiter, semHostReq("waiter", "builder", 4343, "deploy"))
+	positions, _ := acquireAsync(t, waiter, semHostReq("waiter", "builder", os.Getppid(), "deploy"))
 	waitForQueue(t, positions)
 
 	q := ensure(t, home, "")
@@ -675,7 +674,7 @@ func TestQueueState_ReportsHoldersWaitersPositionsAndPipelines(t *testing.T) {
 
 func TestQueueState_FlagsStalledHolderWithRecoveryCommand(t *testing.T) {
 	home := shortHome(t)
-	proc := &fakeProcSampler{usage: map[int]wingd.ProcUsage{9001: {}}}
+	proc := &fakeProcSampler{usage: map[int]wingd.ProcUsage{os.Getpid(): {}}}
 	startDaemon(t, wingd.Config{
 		Home:             home,
 		Sampler:          newFakeSampler(4, 8<<30),
@@ -686,10 +685,10 @@ func TestQueueState_FlagsStalledHolderWithRecoveryCommand(t *testing.T) {
 	})
 
 	holder := ensure(t, home, "")
-	mustAcquire(t, holder, semHostReq("wedged", "stuck", 9001, "deploy"))
+	mustAcquire(t, holder, semHostReq("wedged", "stuck", os.Getpid(), "deploy"))
 
 	waiter := ensure(t, home, "")
-	positions, _ := acquireAsync(waiter, semHostReq("waiting", "builder", 9002, "deploy"))
+	positions, _ := acquireAsync(t, waiter, semHostReq("waiting", "builder", os.Getppid(), "deploy"))
 	waitForQueue(t, positions)
 
 	q := ensure(t, home, "")
@@ -707,8 +706,8 @@ func TestQueueState_FlagsStalledHolderWithRecoveryCommand(t *testing.T) {
 func TestQueueState_AdmissionWaitingParentIsNotStalled(t *testing.T) {
 	home := shortHome(t)
 	proc := &fakeProcSampler{usage: map[int]wingd.ProcUsage{
-		9001: {Fraction: 0.9},
-		9002: {},
+		os.Getpid():  {Fraction: 0.9},
+		os.Getppid(): {},
 	}}
 	startDaemon(t, wingd.Config{
 		Home:             home,
@@ -722,14 +721,14 @@ func TestQueueState_AdmissionWaitingParentIsNotStalled(t *testing.T) {
 	hostClient := ensure(t, home, "")
 	mustAcquire(t, hostClient, wingwire.AdmissionRequest{
 		RunID:     "host-holder",
-		PID:       9001,
+		PID:       os.Getpid(),
 		Resources: wingwire.HostResources{Cores: 1},
 	})
 
 	parentClient := ensure(t, home, "")
 	mustAcquire(t, parentClient, wingwire.AdmissionRequest{
 		RunID:          "pipeline-run",
-		PID:            9002,
+		PID:            os.Getppid(),
 		SemaphoresOnly: true,
 		Semaphores: []wingwire.SemaphoreClaim{
 			{Name: "gate", Capacity: 1, Cost: 1, Policy: wingwire.PolicyQueue},
@@ -737,11 +736,11 @@ func TestQueueState_AdmissionWaitingParentIsNotStalled(t *testing.T) {
 	})
 
 	nodeClient := ensure(t, home, "")
-	positions, _ := acquireAsync(nodeClient, wingwire.AdmissionRequest{
+	positions, _ := acquireAsync(t, nodeClient, wingwire.AdmissionRequest{
 		RunID:        "pipeline-run/node-host/YnVpbGQ",
 		OwnerRunID:   "pipeline-run",
 		DisplayRunID: "pipeline-run/build",
-		PID:          9002,
+		PID:          os.Getppid(),
 		Resources:    wingwire.HostResources{Cores: 1},
 		SubLease:     true,
 	})
@@ -783,7 +782,7 @@ func TestQueueState_BusyHolderIsNotStalled(t *testing.T) {
 		t.Skip("slow: 0.5s of real work; the fast class runs under -short")
 	}
 	home := shortHome(t)
-	proc := &fakeProcSampler{usage: map[int]wingd.ProcUsage{7001: {Fraction: 0.9}}}
+	proc := &fakeProcSampler{usage: map[int]wingd.ProcUsage{os.Getpid(): {Fraction: 0.9}}}
 	startDaemon(t, wingd.Config{
 		Home:             home,
 		Sampler:          newFakeSampler(4, 8<<30),
@@ -794,10 +793,10 @@ func TestQueueState_BusyHolderIsNotStalled(t *testing.T) {
 	})
 
 	holder := ensure(t, home, "")
-	mustAcquire(t, holder, semHostReq("busy", "worker", 7001, "deploy"))
+	mustAcquire(t, holder, semHostReq("busy", "worker", os.Getpid(), "deploy"))
 
 	waiter := ensure(t, home, "")
-	positions, _ := acquireAsync(waiter, semHostReq("waiting", "builder", 7002, "deploy"))
+	positions, _ := acquireAsync(t, waiter, semHostReq("waiting", "builder", os.Getppid(), "deploy"))
 	waitForQueue(t, positions)
 
 	q := ensure(t, home, "")
@@ -816,7 +815,7 @@ func TestQueueState_IdleDescendantTreeStillStalls(t *testing.T) {
 		t.Skip("slow: 0.3s of real work; the fast class runs under -short")
 	}
 	home := shortHome(t)
-	proc := &fakeProcSampler{usage: map[int]wingd.ProcUsage{8001: {HasDescendant: true}}}
+	proc := &fakeProcSampler{usage: map[int]wingd.ProcUsage{os.Getpid(): {HasDescendant: true}}}
 	startDaemon(t, wingd.Config{
 		Home:             home,
 		Sampler:          newFakeSampler(4, 8<<30),
@@ -827,10 +826,10 @@ func TestQueueState_IdleDescendantTreeStillStalls(t *testing.T) {
 	})
 
 	holder := ensure(t, home, "")
-	mustAcquire(t, holder, semHostReq("idle-tree", "worker", 8001, "deploy"))
+	mustAcquire(t, holder, semHostReq("idle-tree", "worker", os.Getpid(), "deploy"))
 
 	waiter := ensure(t, home, "")
-	positions, _ := acquireAsync(waiter, semHostReq("waiting", "builder", 8002, "deploy"))
+	positions, _ := acquireAsync(t, waiter, semHostReq("waiting", "builder", os.Getppid(), "deploy"))
 	waitForQueue(t, positions)
 
 	q := ensure(t, home, "")

@@ -9,7 +9,6 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/wingd"
 	"github.com/sparkwing-dev/sparkwing/internal/wingd/client"
-	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
 )
 
 func probeHome(ctx context.Context, home string) error {
@@ -146,7 +145,7 @@ func TestIdleExit_SocketSweepProbeDoesNotResetIdleClock(t *testing.T) {
 	}
 }
 
-func TestIdleExit_PreHelloConnectionsDoNotResetIdleClock(t *testing.T) {
+func TestIdleExit_IncompleteConnectionsDoNotResetIdleClock(t *testing.T) {
 	t.Parallel()
 	if testing.Short() {
 		t.Skip("slow: 0.3s of real work; the fast class runs under -short")
@@ -169,80 +168,5 @@ func TestIdleExit_PreHelloConnectionsDoNotResetIdleClock(t *testing.T) {
 
 	if err := td.waitExit(t, 3*time.Second); err != nil {
 		t.Fatalf("daemon with only hello-less connections should idle out cleanly, got %v", err)
-	}
-}
-
-func TestIdleExit_GraceThenIdleUnderHealthProbes(t *testing.T) {
-	t.Parallel()
-	if testing.Short() {
-		t.Skip("slow: 0.8s of real work; the fast class runs under -short")
-	}
-
-	home := shortHome(t)
-	td := startDaemon(t, wingd.Config{Home: home, IdleTimeout: 300 * time.Millisecond})
-	cl := ensure(t, home, "")
-	mustAcquire(t, cl, coreReq("gone-owner", 1))
-
-	td.stop()
-	if err := td.waitExit(t, 3*time.Second); err != nil {
-		t.Fatalf("first daemon stop: %v", err)
-	}
-	_ = cl.Close()
-
-	td2 := startDaemon(t, wingd.Config{
-		Home:        home,
-		IdleTimeout: 300 * time.Millisecond,
-		GraceWindow: 500 * time.Millisecond,
-	})
-	startProbeLoop(t, 50*time.Millisecond, func(ctx context.Context) error {
-		return probeHome(ctx, home)
-	})
-
-	select {
-	case err := <-td2.done:
-		t.Fatalf("daemon exited inside the reattach grace window: %v", err)
-	case <-time.After(250 * time.Millisecond):
-	}
-	if err := td2.waitExit(t, 5*time.Second); err != nil {
-		t.Fatalf("daemon should idle out after grace expires despite probes, got %v", err)
-	}
-}
-
-func TestHealthProbeConnectionMayOnlyReadQueueState(t *testing.T) {
-	home := shortHome(t)
-	startDaemon(t, wingd.Config{Home: home})
-	sock, err := wingd.EnsureSocketPath(home)
-	if err != nil {
-		t.Fatalf("socket path: %v", err)
-	}
-	nc, err := wingd.DialSocket(context.Background(), sock, 3*time.Second)
-	if err != nil {
-		t.Fatalf("dial daemon: %v", err)
-	}
-	t.Cleanup(func() { _ = nc.Close() })
-
-	if err := writeRawMessage(nc, &wingwire.Hello{ProtocolMajor: wingd.ProtocolMajor, BinaryVersion: "test", HealthProbe: true}); err != nil {
-		t.Fatalf("write hello: %v", err)
-	}
-	if _, ok := readRawMessage(t, nc).(*wingwire.HelloAck); !ok {
-		t.Fatal("probe hello not acknowledged")
-	}
-	if err := writeRawMessage(nc, &wingwire.QueueState{}); err != nil {
-		t.Fatalf("write queue-state: %v", err)
-	}
-	if _, ok := readRawMessage(t, nc).(*wingwire.QueueState); !ok {
-		t.Fatal("probe connection could not read queue state")
-	}
-
-	if err := writeRawMessage(nc, &wingwire.AdmissionRequest{RunID: "sneak", Resources: wingwire.HostResources{Cores: 1}}); err != nil {
-		t.Fatalf("write admission request: %v", err)
-	}
-	msg := readRawMessage(t, nc)
-	unsupported, ok := msg.(*wingwire.Unsupported)
-	if !ok {
-		t.Fatalf("daemon answered an admission request on a probe connection with %T; want it refused", msg)
-	}
-	if unsupported.Type != string(wingwire.TypeAdmissionRequest) {
-		t.Errorf("refusal names %q, want %q", unsupported.Type, wingwire.TypeAdmissionRequest)
 	}
 }

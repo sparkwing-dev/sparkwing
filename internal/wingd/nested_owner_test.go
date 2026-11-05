@@ -1,11 +1,18 @@
 package wingd
 
 import (
-	"net"
+	"bytes"
+	"context"
+	"crypto/rand"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"os"
 	"testing"
-	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/admission"
+	"github.com/sparkwing-dev/sparkwing/internal/localhostwire"
+	"github.com/sparkwing-dev/sparkwing/internal/procgroup"
 	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
 )
 
@@ -19,59 +26,62 @@ func configuredHandlerDaemon(t *testing.T, cfg Config, cores float64) *Daemon {
 	cfg.Home = t.TempDir()
 	d, err := New(cfg)
 	if err != nil {
-		t.Fatalf("New: %v", err)
+		t.Fatal(err)
 	}
-	ledger, err := admission.New(admission.Config{TotalCores: cores})
+	d.ledger, err = admission.New(admission.Config{TotalCores: cores})
 	if err != nil {
-		t.Fatalf("new ledger: %v", err)
-	}
-	d.ledger = ledger
-	d.persistWrite = func(string, admission.Snapshot, []admissionEvent, []string) error {
-		return nil
+		t.Fatal(err)
 	}
 	return d
 }
 
-func handlerConn(t *testing.T, d *Daemon) (server, peer *conn) {
+func policyHTTP(t *testing.T, d *Daemon, method, path string, input any) *httptest.ResponseRecorder {
 	t.Helper()
-	sc, pc := net.Pipe()
-	t.Cleanup(func() { _ = sc.Close(); _ = pc.Close() })
-	server = newConn(d, sc)
-	server.protocolMajor = ProtocolMajor
-	d.mu.Lock()
-	d.conns[server] = struct{}{}
-	d.mu.Unlock()
-	return server, newConn(d, pc)
-}
-
-// safety: a pipe carries no buffer, so the handler cannot return until the
-// peer reads the frame it writes.
-func callAndRead(t *testing.T, peer *conn, call func()) wingwire.Message {
-	t.Helper()
-	done := make(chan struct{})
-	go func() {
-		defer close(done)
-		call()
-	}()
-	msg, err := peer.readMessage()
+	var body []byte
+	if input != nil {
+		var err error
+		body, err = json.Marshal(input)
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	r := httptest.NewRequest(method, path, bytes.NewReader(body))
+	r.Header.Set("Content-Type", "application/json")
+	peer, err := controllerPeerIdentity()
 	if err != nil {
-		t.Fatalf("read reply: %v", err)
+		t.Fatal(err)
 	}
-	select {
-	case <-done:
-	case <-time.After(5 * time.Second):
-		t.Fatal("handler did not return after replying")
-	}
-	return msg
+	ctx := context.WithValue(localhostwire.WithLocalPeer(t.Context(), peer), socketPeerContextKey{}, true)
+	r = r.WithContext(ctx)
+	w := httptest.NewRecorder()
+	d.admissionHTTP(d.controllerHTTP(http.NotFoundHandler())).ServeHTTP(w, r)
+	return w
 }
 
-func mustGrantFrame(t *testing.T, msg wingwire.Message) *wingwire.Grant {
+func policyRequest(t *testing.T, d *Daemon, req wingwire.AdmissionRequest) AdmissionHTTPState {
 	t.Helper()
-	grant, ok := msg.(*wingwire.Grant)
-	if !ok {
-		t.Fatalf("reply = %#v, want a grant", msg)
+	birth, err := procgroup.ProcessBirth(os.Getpid())
+	if err != nil {
+		t.Fatal(err)
 	}
-	return grant
+	input := AdmissionHTTPRequest{RequestKey: rand.Text(), Request: req, RootPID: os.Getpid(), ProcessBirth: birth}
+	w := policyHTTP(t, d, http.MethodPost, admissionHTTPPath+"/requests", input)
+	if w.Code != http.StatusOK {
+		t.Fatalf("admit %s: HTTP %d: %s", req.RunID, w.Code, w.Body.String())
+	}
+	var state AdmissionHTTPState
+	if err := json.Unmarshal(w.Body.Bytes(), &state); err != nil {
+		t.Fatal(err)
+	}
+	return state
+}
+
+func policyRelease(t *testing.T, d *Daemon, id string) {
+	t.Helper()
+	w := policyHTTP(t, d, http.MethodDelete, admissionHTTPPath+"/requests/"+id, nil)
+	if w.Code != http.StatusOK {
+		t.Fatalf("release: HTTP %d: %s", w.Code, w.Body.String())
+	}
 }
 
 func leaseStateFor(t *testing.T, d *Daemon, requestID string) admission.LeaseState {
@@ -89,31 +99,19 @@ func leaseStateFor(t *testing.T, d *Daemon, requestID string) admission.LeaseSta
 
 func TestSubLeaseFromAnUnrelatedRunKeepsNoOwner(t *testing.T) {
 	d := handlerDaemon(t, 4)
-
-	holder, holderPeer := handlerConn(t, d)
-	grant := mustGrantFrame(t, callAndRead(t, holderPeer, func() {
-		d.handleAdmission(holder, &wingwire.AdmissionRequest{
-			RunID: "holder-run", Resources: wingwire.HostResources{Cores: 1},
-		})
-	}))
-
-	other, otherPeer := handlerConn(t, d)
-	callAndRead(t, otherPeer, func() {
-		d.handleAdmission(other, &wingwire.AdmissionRequest{
-			RunID: "other-run", Resources: wingwire.HostResources{Cores: 1},
-		})
-	})
-
-	sub, subPeer := handlerConn(t, d)
-	callAndRead(t, subPeer, func() {
-		d.handleAdmission(sub, &wingwire.AdmissionRequest{
-			RunID: "other-run/plan-sems", OwnerRunID: "other-run", OwnerLeaseToken: grant.LeaseToken,
-			SemaphoresOnly: true, SubLease: true,
-			Semaphores: []wingwire.SemaphoreClaim{{Name: "grp", Capacity: 1, Cost: 1, Policy: wingwire.PolicyQueue}},
-		})
-	})
-
+	holder := policyRequest(t, d, wingwire.AdmissionRequest{RunID: "holder-run", Resources: wingwire.HostResources{Cores: 1}})
+	if holder.Grant == nil {
+		t.Fatalf("holder = %+v", holder)
+	}
+	other := policyRequest(t, d, wingwire.AdmissionRequest{RunID: "other-run", Resources: wingwire.HostResources{Cores: 1}})
+	if other.Grant == nil {
+		t.Fatalf("other = %+v", other)
+	}
+	sub := policyRequest(t, d, wingwire.AdmissionRequest{RunID: "other-run/plan-sems", OwnerRunID: "other-run", OwnerLeaseToken: holder.Grant.LeaseToken, SemaphoresOnly: true, SubLease: true, Semaphores: []wingwire.SemaphoreClaim{{Name: "grp", Capacity: 1, Cost: 1, Policy: wingwire.PolicyQueue}}})
+	if sub.Grant == nil {
+		t.Fatalf("sub = %+v", sub)
+	}
 	if got := leaseStateFor(t, d, "other-run/plan-sems").OwnerID; got != "" {
-		t.Fatalf("sub-lease owner = %q, want none; a token from another run proved ownership", got)
+		t.Fatalf("sub-lease owner = %q, want none", got)
 	}
 }

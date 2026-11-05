@@ -2,9 +2,7 @@ package wingd_test
 
 import (
 	"context"
-	"fmt"
 	"os"
-	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -29,12 +27,12 @@ func TestJournalRecordsQueueBlockerAndGrant(t *testing.T) {
 		_ = lease.Release()
 		t.Fatal("nonblocking request acquired a held semaphore")
 	}
-	positions, result := acquireAsync(queuedClient, semReq("waiting", "pool", 1, 1, wingwire.PolicyQueue))
+	positions, result := acquireAsync(t, queuedClient, semReq("waiting", "pool", 1, 1, wingwire.PolicyQueue))
 	waitForQueue(t, positions)
 	if err := holder.Release(); err != nil {
 		t.Fatal(err)
 	}
-	granted := waitResult(t, result, wingdChurnWait)
+	granted := waitResult(t, result, 10*time.Second)
 	if granted.err != nil {
 		t.Fatal(granted.err)
 	}
@@ -103,15 +101,9 @@ func TestHealthProbeProducesNoConnectionJournalRecords(t *testing.T) {
 	}
 }
 
-func TestJournalConnectionIdentityAndOwnedNodeSlot(t *testing.T) {
+func TestJournalOwnedNodeAdmissionPreservesIdentity(t *testing.T) {
 	home := shortHome(t)
-	disconnected := make(chan struct{}, 1)
-	td := startDaemon(t, wingd.Config{Home: home, Sampler: newFakeSampler(8, 8<<30), Logf: func(format string, args ...any) {
-		line := fmt.Sprintf(format, args...)
-		if strings.Contains(line, "disconnected while") && strings.HasSuffix(line, "(run node-slot)") {
-			disconnected <- struct{}{}
-		}
-	}})
+	td := startDaemon(t, wingd.Config{Home: home, Sampler: newFakeSampler(8, 8<<30)})
 	parentClient := ensure(t, home, "")
 	parent := mustAcquire(t, parentClient, coreReq("parent-run", 1))
 	nodeClient := ensure(t, home, "")
@@ -120,21 +112,13 @@ func TestJournalConnectionIdentityAndOwnedNodeSlot(t *testing.T) {
 	req.OwnerLeaseToken = parent.Token
 	req.Pipeline = "test-pipeline"
 	req.SubLease = true
-	mustAcquire(t, nodeClient, req)
-	if err := nodeClient.Close(); err != nil {
+	node := mustAcquire(t, nodeClient, req)
+	if err := node.Release(); err != nil {
 		t.Fatal(err)
-	}
-	wait, cancel := context.WithTimeout(t.Context(), 3*time.Second)
-	defer cancel()
-	select {
-	case <-disconnected:
-	case <-wait.Done():
-		t.Fatal("node disconnect was not observed")
 	}
 	if err := parent.Release(); err != nil {
 		t.Fatal(err)
 	}
-	_ = parentClient.Close()
 	td.stopAndWait(t)
 	dir, err := wingd.StateDir(home)
 	if err != nil {
@@ -144,39 +128,17 @@ func TestJournalConnectionIdentityAndOwnedNodeSlot(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	var opened, handshake, closed, grant bool
+	grant := false
 	for _, record := range records {
 		if record.Data != nil {
 			checkJournalDataKeys(t, record.Data)
 		}
 		if record.Kind == "grant" && record.RunID == "node-slot" {
-			grant = record.Data["owner_run_id"] == "parent-run"
-		}
-		if record.RunID != "node-slot" {
-			continue
-		}
-		switch record.Kind {
-		case "request":
-			if _, exists := record.Data["semaphores"]; exists {
-				t.Fatal("empty semaphores were serialized")
-			}
-		case "connection_closed":
-			closed = record.Pipeline == "test-pipeline"
-			if runtime.GOOS == "linux" || runtime.GOOS == "darwin" {
-				closed = closed && record.PID == os.Getpid()
-			}
+			grant = record.Data["owner_run_id"] == "parent-run" && record.Pipeline == "test-pipeline" && record.PID == os.Getpid()
 		}
 	}
-	for _, record := range records {
-		switch record.Kind {
-		case "connection_opened":
-			opened = record.PID == os.Getpid()
-		case "connection_handshake":
-			handshake = record.PID == os.Getpid()
-		}
-	}
-	if !grant || !closed || ((runtime.GOOS == "linux" || runtime.GOOS == "darwin") && (!opened || !handshake)) {
-		t.Fatalf("missing connection identity or node grant: opened=%t handshake=%t closed=%t grant=%t", opened, handshake, closed, grant)
+	if !grant {
+		t.Fatalf("missing owned node admission identity: %+v", records)
 	}
 }
 

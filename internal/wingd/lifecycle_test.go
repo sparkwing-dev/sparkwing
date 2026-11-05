@@ -2,9 +2,6 @@ package wingd_test
 
 import (
 	"context"
-	"errors"
-	"os"
-	"sync"
 	"testing"
 	"time"
 
@@ -69,185 +66,6 @@ func observeHolderFor(t *testing.T, q *client.Client, daemonDone <-chan error, r
 			}
 			return
 		}
-	}
-}
-
-func waitForRecoveredHolderRelease(t *testing.T, q *client.Client, runID string) {
-	t.Helper()
-	qs, err := q.QueueState(context.Background())
-	if err != nil {
-		t.Fatalf("queue state: %v", err)
-	}
-	if !holdsRun(qs, runID) {
-		t.Fatalf("recovered holder %q was not visible during its grace window", runID)
-	}
-
-	deadline := time.Now().Add(3 * time.Second)
-	poll := time.NewTicker(10 * time.Millisecond)
-	defer poll.Stop()
-	for holdsRun(qs, runID) && time.Now().Before(deadline) {
-		<-poll.C
-		qs, err = q.QueueState(context.Background())
-		if err != nil {
-			t.Fatalf("queue state: %v", err)
-		}
-	}
-	if holdsRun(qs, runID) {
-		t.Fatalf("recovered holder %q was not released after its grace window", runID)
-	}
-}
-
-func TestDaemon_StalledHolderMustAnswerLivenessChallenge(t *testing.T) {
-	home := shortHome(t)
-	startDaemon(t, wingd.Config{
-		Home: home, Version: "v1", GraceWindow: -1, HeadroomFraction: -1,
-		ProcSampler: lifecycleIdleProcSampler{}, StallInterval: 5 * time.Millisecond,
-		StallWindow: 10 * time.Millisecond, StallProbeTimeout: 25 * time.Millisecond,
-	})
-
-	wedgedClient := ensure(t, home, "v1")
-	wedgedReq := wingwire.AdmissionRequest{RunID: "wedged", SemaphoresOnly: true, Semaphores: []wingwire.SemaphoreClaim{{Name: "wedged-lock", Capacity: 1, Cost: 1, Policy: wingwire.PolicyQueue}}}
-	wedgedReq.PID = os.Getpid()
-	if _, err := wedgedClient.Acquire(context.Background(), wedgedReq, nil); err != nil {
-		t.Fatalf("wedged acquire: %v", err)
-	}
-	healthyClient := ensure(t, home, "v1")
-	healthyReq := wingwire.AdmissionRequest{RunID: "healthy", SemaphoresOnly: true, Semaphores: []wingwire.SemaphoreClaim{{Name: "healthy-lock", Capacity: 1, Cost: 1, Policy: wingwire.PolicyQueue}}}
-	healthyReq.PID = os.Getpid()
-	healthy := mustAcquire(t, healthyClient, healthyReq)
-	go healthy.Watch(nil)
-
-	waiterClient := ensure(t, home, "v1")
-	waiter := make(chan error, 1)
-	go func() {
-		lease, err := waiterClient.Acquire(context.Background(), wingwire.AdmissionRequest{
-			RunID: "waiter", SemaphoresOnly: true,
-			Semaphores: []wingwire.SemaphoreClaim{
-				{Name: "wedged-lock", Capacity: 1, Cost: 1, Policy: wingwire.PolicyQueue},
-				{Name: "healthy-lock", Capacity: 1, Cost: 1, Policy: wingwire.PolicyQueue},
-			},
-		}, nil)
-		if err == nil {
-			err = lease.Release()
-		}
-		waiter <- err
-	}()
-
-	deadline := time.Now().Add(time.Second)
-	poll := time.NewTicker(5 * time.Millisecond)
-	defer poll.Stop()
-	for time.Now().Before(deadline) {
-		qs, err := client.Query(context.Background(), client.Options{Home: home, Version: "v1"})
-		if err != nil {
-			t.Fatalf("query: %v", err)
-		}
-		if !holdsRun(qs, "wedged") {
-			if !holdsRun(qs, "healthy") {
-				t.Fatal("healthy zero-CPU holder was reclaimed")
-			}
-			_ = healthy.Release()
-			select {
-			case err := <-waiter:
-				if err != nil {
-					t.Fatalf("waiter acquire: %v", err)
-				}
-			case <-time.After(time.Second):
-				t.Fatal("waiter was not promoted")
-			}
-			return
-		}
-		<-poll.C
-	}
-	t.Fatal("live but unresponsive holder was not reclaimed")
-}
-
-func TestReattach_ReclaimsLeaseAfterRestart(t *testing.T) {
-	home := shortHome(t)
-	td1 := startDaemon(t, wingd.Config{Home: home, GraceWindow: 2 * time.Second})
-
-	a := ensure(t, home, "")
-	lease := mustAcquire(t, a, coreReq("a", 1))
-	token := lease.Token
-
-	td1.stop()
-	if err := td1.waitExit(t, 3*time.Second); err != nil {
-		t.Fatalf("daemon1 exit: %v", err)
-	}
-
-	startDaemon(t, wingd.Config{Home: home, GraceWindow: 2 * time.Second})
-
-	b, err := client.EnsureDaemon(context.Background(), client.Options{
-		Home: home, Version: "v1.0.0", Spawn: errSpawn, DialTimeout: time.Second, Backoff: 10 * time.Millisecond,
-	})
-	if err != nil {
-		t.Fatalf("reconnect: %v", err)
-	}
-	defer b.Close()
-
-	reclaimed, err := b.Reattach(context.Background(), token, lease.RunID)
-	if err != nil {
-		t.Fatalf("reattach: %v", err)
-	}
-	if reclaimed.RunID != "a" {
-		t.Fatalf("reattached run id %q, want a", reclaimed.RunID)
-	}
-	if reclaimed.Token != token {
-		t.Fatalf("reattach returned token %q, want %q", reclaimed.Token, token)
-	}
-	defer reclaimed.Release()
-}
-
-func TestGraceExpiry_ReleasesUnclaimedLease(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: 0.3s of real work; the fast class runs under -short")
-	}
-	home := shortHome(t)
-	td1 := startDaemon(t, wingd.Config{Home: home})
-
-	a := ensure(t, home, "")
-	mustAcquire(t, a, coreReq("a", 1))
-
-	td1.stop()
-	if err := td1.waitExit(t, 3*time.Second); err != nil {
-		t.Fatalf("daemon1 exit: %v", err)
-	}
-
-	startDaemon(t, wingd.Config{Home: home, GraceWindow: 300 * time.Millisecond})
-	started := time.Now()
-	q := ensure(t, home, "")
-	waitForRecoveredHolderRelease(t, q, "a")
-	if elapsed := time.Since(started); elapsed >= 500*time.Millisecond {
-		t.Errorf("grace expiry observation took %v, want less than 500ms", elapsed)
-	}
-}
-
-func TestReattach_RejectedAfterGrace(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: 0.3s of real work; the fast class runs under -short")
-	}
-	home := shortHome(t)
-	td1 := startDaemon(t, wingd.Config{Home: home})
-
-	a := ensure(t, home, "")
-	lease := mustAcquire(t, a, coreReq("a", 1))
-	token := lease.Token
-
-	td1.stop()
-	if err := td1.waitExit(t, 3*time.Second); err != nil {
-		t.Fatalf("daemon1 exit: %v", err)
-	}
-
-	startDaemon(t, wingd.Config{Home: home, GraceWindow: 300 * time.Millisecond})
-	started := time.Now()
-	b := ensure(t, home, "")
-	waitForRecoveredHolderRelease(t, b, "a")
-
-	_, err := b.Reattach(context.Background(), token, lease.RunID)
-	if !errors.Is(err, client.ErrReattachRejected) {
-		t.Fatalf("reattach after grace: got %v, want ErrReattachRejected", err)
-	}
-	if elapsed := time.Since(started); elapsed >= 500*time.Millisecond {
-		t.Errorf("reattach rejection observation took %v, want less than 500ms", elapsed)
 	}
 }
 
@@ -344,7 +162,7 @@ func TestQueueState_ReportsHoldersAndWaiters(t *testing.T) {
 	mustAcquire(t, h, coreReq("h", 3))
 
 	w := ensure(t, home, "")
-	pos, _ := acquireAsync(w, coreReq("w", 2))
+	pos, _ := acquireAsync(t, w, coreReq("w", 2))
 	waitForQueue(t, pos)
 
 	q := ensure(t, home, "")
@@ -360,54 +178,5 @@ func TestQueueState_ReportsHoldersAndWaiters(t *testing.T) {
 	}
 	if held := resourceHeld(qs, "cores"); held != 3 {
 		t.Fatalf("cores held %v, want 3", held)
-	}
-}
-
-type successor struct {
-	t     *testing.T
-	home  string
-	ver   string
-	once  sync.Once
-	ready chan struct{}
-}
-
-func newSuccessor(t *testing.T, home, ver string) *successor {
-	if ver == "" {
-		ver = "v1.0.0"
-	}
-	return &successor{t: t, home: home, ver: ver, ready: make(chan struct{})}
-}
-
-func (s *successor) spawn(home, version string) error {
-	s.once.Do(func() { go s.bringUp() })
-	return nil
-}
-
-func (s *successor) bringUp() {
-	deadline := time.Now().Add(5 * time.Second)
-	retry := time.NewTicker(20 * time.Millisecond)
-	defer retry.Stop()
-	for time.Now().Before(deadline) {
-		d, err := wingd.New(wingd.Config{
-			Home:        s.home,
-			Version:     s.ver,
-			GraceWindow: 2 * time.Second,
-			Sampler:     newFakeSampler(64, 64<<30),
-		})
-		if err != nil {
-			return
-		}
-		ctx, cancel := context.WithCancel(context.Background())
-		done := make(chan error, 1)
-		go func() { done <- d.Run(ctx) }()
-		select {
-		case <-d.Ready():
-			s.t.Cleanup(cancel)
-			close(s.ready)
-			return
-		case <-done:
-			cancel()
-			<-retry.C
-		}
 	}
 }

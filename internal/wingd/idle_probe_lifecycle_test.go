@@ -15,23 +15,22 @@ func TestIdleProbeLoopsOwnTheirLifecycle(t *testing.T) {
 		t.Fatalf("parse idle_probe_test.go: %v", err)
 	}
 	callers := map[string]bool{
-		"TestIdleExit_HealthProbeTrafficDoesNotResetIdleClock": false,
-		"TestIdleExit_SocketSweepProbeDoesNotResetIdleClock":   false,
-		"TestIdleExit_PreHelloConnectionsDoNotResetIdleClock":  false,
-		"TestIdleExit_GraceThenIdleUnderHealthProbes":          false,
+		"TestIdleExit_HealthProbeTrafficDoesNotResetIdleClock":  false,
+		"TestIdleExit_SocketSweepProbeDoesNotResetIdleClock":    false,
+		"TestIdleExit_IncompleteConnectionsDoNotResetIdleClock": false,
 	}
 	var (
-		foundHelper       bool
-		foundOldHelper    bool
-		helperWithCancel  bool
-		helperCleanup     bool
-		helperCancels     bool
-		helperClosesDone  bool
-		helperWaitsDone   bool
-		helperBoundedJoin bool
-		helperOwnsTimer   bool
-		helperStopsTimer  bool
-		preHelloDialBound bool
+		foundHelper         bool
+		foundOldHelper      bool
+		helperWithCancel    bool
+		helperCleanup       bool
+		helperCancels       bool
+		helperClosesDone    bool
+		helperWaitsDone     bool
+		helperBoundedJoin   bool
+		helperOwnsTimer     bool
+		helperStopsTimer    bool
+		incompleteDialBound bool
 	)
 	for _, decl := range file.Decls {
 		fn, ok := decl.(*ast.FuncDecl)
@@ -144,8 +143,8 @@ func TestIdleProbeLoopsOwnTheirLifecycle(t *testing.T) {
 					}
 				}
 			}
-			if fn.Name.Name == "TestIdleExit_PreHelloConnectionsDoNotResetIdleClock" && sel.Sel.Name == "DialContext" {
-				preHelloDialBound = true
+			if fn.Name.Name == "TestIdleExit_IncompleteConnectionsDoNotResetIdleClock" && sel.Sel.Name == "DialContext" {
+				incompleteDialBound = true
 			}
 			return true
 		})
@@ -161,7 +160,7 @@ func TestIdleProbeLoopsOwnTheirLifecycle(t *testing.T) {
 			t.Errorf("%s must delegate probe lifecycle to startProbeLoop", name)
 		}
 	}
-	if !preHelloDialBound {
-		t.Error("pre-hello probes must use context-bounded dialing")
+	if !incompleteDialBound {
+		t.Error("incomplete connections must use context-bounded dialing")
 	}
 }

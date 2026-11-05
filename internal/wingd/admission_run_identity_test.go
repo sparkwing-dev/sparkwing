@@ -36,49 +36,29 @@ VALUES ('default','real-run',1,'example','running',?,'request',1,'gh:1','host','
 		row, err := tenant.ReadRun(context.Background(), id)
 		return row.State == runstate.RunSuccess || row.State == runstate.RunFailed || row.State == runstate.RunCancelled, err
 	}}}, 4)
-	parent, peer := handlerConn(t, d)
-	grant := mustGrantFrame(t, callAndRead(t, peer, func() {
-		d.handleAdmission(parent, &wingwire.AdmissionRequest{RunID: "real-run", SemaphoresOnly: true})
-	}))
+	parent := policyRequest(t, d, wingwire.AdmissionRequest{RunID: "real-run", SemaphoresOnly: true})
+	if parent.Grant == nil {
+		t.Fatalf("parent = %+v", parent)
+	}
 	ordinal := 0
 	if err := quick.Check(func(node string) bool {
 		node = fmt.Sprintf("%d/%s", ordinal, node)
 		ordinal++
-		host, peer := handlerConn(t, d)
-		message := callAndRead(t, peer, func() {
-			d.handleAdmission(host, &wingwire.AdmissionRequest{
-				RunID: wingwire.NodeHostParticipant("real-run", node), OwnerRunID: "real-run", OwnerLeaseToken: grant.LeaseToken,
-				SubLease: true, Resources: wingwire.HostResources{Cores: 1},
-			})
-		})
-		held, admitted := message.(*wingwire.Grant)
-		if !admitted {
-			t.Logf("admission for node %q: %#v", node, message)
+		state := policyRequest(t, d, wingwire.AdmissionRequest{RunID: wingwire.NodeHostParticipant("real-run", node), OwnerRunID: "real-run", OwnerLeaseToken: parent.Grant.LeaseToken, SubLease: true, Resources: wingwire.HostResources{Cores: 1}})
+		if state.Grant == nil {
+			t.Logf("admission for node %q: %+v", node, state)
 			return false
 		}
-		d.reattachWait[host.leaseID] = struct{}{}
-		d.reattachMembers[host.leaseID] = []string{host.runID}
-		reconnected, peer := handlerConn(t, d)
-		message = callAndRead(t, peer, func() {
-			d.handleReattach(reconnected, &wingwire.Reattach{LeaseToken: held.LeaseToken, RunID: host.runID})
-		})
-		_, admitted = message.(*wingwire.Grant)
-		if !admitted {
-			t.Logf("reattach for node %q: %#v", node, message)
-		}
-		d.handleRelease(reconnected, &wingwire.Release{LeaseToken: held.LeaseToken})
-		return admitted
+		policyRelease(t, d, state.ID)
+		return true
 	}, &quick.Config{MaxCount: 24}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := teststore.SQL(t, db).ExecContext(t.Context(), `UPDATE runs SET status='failed',finished_at=1 WHERE id='real-run'`); err != nil {
 		t.Fatal(err)
 	}
-	host, peer := handlerConn(t, d)
-	message := callAndRead(t, peer, func() {
-		d.handleAdmission(host, &wingwire.AdmissionRequest{RunID: wingwire.NodeHostParticipant("real-run", "after-finish"), SubLease: true})
-	})
-	if refusal, ok := message.(*wingwire.Evicted); !ok || refusal.Key != "cancelled" {
-		t.Fatalf("terminal run admitted a node host: %#v", message)
+	state := policyRequest(t, d, wingwire.AdmissionRequest{RunID: wingwire.NodeHostParticipant("real-run", "after-finish"), SubLease: true})
+	if state.Evicted == nil || state.Evicted.Key != "cancelled" {
+		t.Fatalf("terminal run admitted a node host: %+v", state)
 	}
 }

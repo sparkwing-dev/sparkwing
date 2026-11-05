@@ -13,9 +13,8 @@ import (
 func TestQueueState_OriginTagsHoldersAndWaiters(t *testing.T) {
 	home := shortHome(t)
 	startDaemon(t, wingd.Config{
-		Home: home, Version: "v1", GraceWindow: -1,
-		HeadroomFraction: -1,
-		Sampler:          newFakeSampler(8, 16<<30),
+		Home: home, Version: "v1", HeadroomFraction: -1,
+		Sampler: newFakeSampler(8, 16<<30),
 	})
 
 	local := ensure(t, home, "v1")
@@ -35,14 +34,7 @@ func TestQueueState_OriginTagsHoldersAndWaiters(t *testing.T) {
 	})
 
 	waiterConn := ensure(t, home, "v1")
-	go func() {
-		_, _ = waiterConn.Acquire(context.Background(), wingwire.AdmissionRequest{
-			RunID:     "ctrl-waiter",
-			Pipeline:  "test",
-			Origin:    wingwire.OriginController,
-			Resources: wingwire.HostResources{Cores: 6},
-		}, nil)
-	}()
+	acquireAsync(t, waiterConn, wingwire.AdmissionRequest{RunID: "ctrl-waiter", Pipeline: "test", Origin: wingwire.OriginController, Resources: wingwire.HostResources{Cores: 6}})
 
 	qs := waitForWaiter(t, home, "ctrl-waiter")
 

@@ -3,6 +3,7 @@ package wingd_test
 import (
 	"context"
 	"errors"
+	"sync"
 	"testing"
 	"time"
 
@@ -14,6 +15,9 @@ func TestSlowRunStoreDoesNotBlockOtherConnections(t *testing.T) {
 	home := shortHome(t)
 	entered := make(chan struct{}, 1)
 	release := make(chan struct{})
+	var releaseOnce sync.Once
+	unblock := func() { releaseOnce.Do(func() { close(release) }) }
+	defer unblock()
 	startDaemon(t, wingd.Config{
 		Home: home,
 		Runs: &wingd.FuncRunStore{IsTerminal: func(string) (bool, error) {
@@ -27,34 +31,36 @@ func TestSlowRunStoreDoesNotBlockOtherConnections(t *testing.T) {
 	})
 
 	blocked := ensure(t, home, "")
-	admitted := make(chan error, 1)
-	go func() {
-		lease, err := blocked.Acquire(context.Background(), coreReq("slow-store", 1), nil)
-		if lease != nil {
-			_ = lease.Release()
-		}
-		admitted <- err
-	}()
+	_, admitted := acquireAsync(t, blocked, coreReq("slow-store", 1))
 	select {
 	case <-entered:
 	case <-time.After(2 * time.Second):
 		t.Fatal("admission never reached the store")
 	}
 
-	other := ensure(t, home, "")
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Second)
 	defer cancel()
+	other, err := client.EnsureDaemon(ctx, client.Options{Home: home, Version: "v1.0.0", Spawn: errSpawn, DialTimeout: time.Second, Backoff: 10 * time.Millisecond})
+	if err != nil {
+		unblock()
+		t.Fatalf("probe while the store is slow: %v", err)
+	}
+	defer other.Close()
 	if _, err := other.QueueState(ctx); err != nil {
 		t.Fatalf("queue state while the store is slow: %v", err)
 	}
 
-	close(release)
-	if err := <-admitted; err != nil {
-		t.Fatalf("acquire: %v", err)
+	unblock()
+	result := waitResult(t, admitted, 2*time.Second)
+	if result.err != nil {
+		t.Fatalf("acquire: %v", result.err)
+	}
+	if err := result.lease.Release(); err != nil {
+		t.Fatal(err)
 	}
 }
 
-func TestHandshakeReportsTheDaemonStoreIsReady(t *testing.T) {
+func TestProbeReportsTheDaemonStoreIsReady(t *testing.T) {
 	home := shortHome(t)
 	startDaemon(t, wingd.Config{Home: home, Runs: &wingd.FuncRunStore{}})
 
@@ -74,7 +80,7 @@ func TestHandshakeReportsTheDaemonStoreIsReady(t *testing.T) {
 	}
 }
 
-func TestHandshakeReportsWhyTheStoreIsUnusable(t *testing.T) {
+func TestProbeReportsWhyTheStoreIsUnusable(t *testing.T) {
 	home := shortHome(t)
 	startDaemon(t, wingd.Config{
 		Home: home,
@@ -97,41 +103,5 @@ func TestHandshakeReportsWhyTheStoreIsUnusable(t *testing.T) {
 	}
 	if info.StoreError != "database is at schema version 26; this binary expects 17" {
 		t.Fatalf("store error = %q, want the store failure verbatim", info.StoreError)
-	}
-}
-
-func TestShutdownWaitsForAnInFlightFinalize(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: 0.3s of real work; the fast class runs under -short")
-	}
-	home := shortHome(t)
-	entered := make(chan struct{})
-	finalized := make(chan string, 1)
-	td := startDaemon(t, wingd.Config{
-		Home: home,
-		Runs: &wingd.FuncRunStore{Finalize: func(runID string) {
-			close(entered)
-			time.Sleep(300 * time.Millisecond)
-			finalized <- runID
-		}},
-	})
-
-	cl := ensure(t, home, "")
-	mustAcquire(t, cl, coreReq("drain-finalize", 1))
-	cl.Close()
-	select {
-	case <-entered:
-	case <-time.After(2 * time.Second):
-		t.Fatal("the orphaned run was never finalized")
-	}
-
-	td.stopAndWait(t)
-	select {
-	case got := <-finalized:
-		if got != "drain-finalize" {
-			t.Fatalf("finalized %q, want drain-finalize", got)
-		}
-	default:
-		t.Fatal("shutdown returned before an in-flight finalize finished; the host closes the store next")
 	}
 }

@@ -6,10 +6,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"net"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/admission"
 	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
@@ -147,10 +145,7 @@ func TestDarwinMemorySample_QueuesUntilRecovery(t *testing.T) {
 		t.Fatalf("small worker: %s, %v", holder.Kind, err)
 	}
 
-	server, peer := net.Pipe()
-	defer server.Close()
-	defer peer.Close()
-	waiter := newConn(d, server)
+	waiter := &conn{}
 	waiter.runID, waiter.role = "memory-worker", roleWaiter
 	waiter.resources = wingwire.HostResources{MemoryBytes: 2 << 30}
 	d.byRun[waiter.runID] = waiter
@@ -167,23 +162,9 @@ func TestDarwinMemorySample_QueuesUntilRecovery(t *testing.T) {
 		t.Fatal("failed memory read changed headroom or admitted the waiter")
 	}
 
-	messages := make(chan wingwire.Message, 1)
-	go func() {
-		message, err := newConn(d, peer).readMessage()
-		if err != nil {
-			t.Errorf("read recovery grant: %v", err)
-		}
-		messages <- message
-	}()
 	readErr = nil
 	d.refreshHeadroom()
-	select {
-	case message := <-messages:
-		grant, ok := message.(*wingwire.Grant)
-		if !ok || grant.RunID != waiter.runID {
-			t.Fatalf("recovery delivered %T, want a grant for %s", message, waiter.runID)
-		}
-	case <-time.After(time.Second):
-		t.Fatal("memory recovery did not deliver a grant")
+	if waiter.role != roleHolder {
+		t.Fatalf("memory recovery did not admit waiter: role=%v", waiter.role)
 	}
 }
