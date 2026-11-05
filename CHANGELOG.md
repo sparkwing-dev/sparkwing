@@ -20,6 +20,10 @@ unlock.
 
 ## [Unreleased]
 
+### Added
+
+- **SDK:** Host compatibility checks run frozen released Go and TypeScript pipelines through candidate nodehost. The affected gate reuses fixture preparation, and pre-release rebuilds every historical fixture.
+
 ### Fixed
 
 - **daemon:** CLI connections reuse compatible running daemons across version differences, including repo-pinned and source builds, so they leave active runs running. Protocol and wire-build mismatches fail without automatic draining or replacement and name the explicit restart command.
