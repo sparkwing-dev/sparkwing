@@ -1,14 +1,11 @@
 # Local controller restart without handover
 
-Agreed design, Korey, 2026-11-05. Design only.
+Design proposal.
 
-The decision record is
-`/home/bombuntu/code/ink-labs/wing/sweeps/sparkwing-2026-11-05-local-controller.md`.
-It overrides earlier proposals where they differ.
-
-Korey chose one local controller and durable state. The controller is today's
-wingd without job execution. It alone writes `state.db`. It serves the existing
-controller API and machine admission through HTTP on the local API socket.
+This design uses one local controller and durable state so jobs can outlive a
+controller process. It supersedes earlier proposals where they differ.
+The controller is today's wingd without job execution. It alone writes
+`state.db`. It serves the existing controller API and machine admission through HTTP on the local API socket.
 CLI and runner clients use that address. Long polls wake queued tickets and
 watch leases. A poll waits about 20 seconds before the client asks again.
 The browser uses a loopback HTTP dashboard on the same controller. A socket
@@ -21,7 +18,9 @@ controller or proxy chain. Runner processes keep executing while the controller 
 
 D15 remains fixed: preserve FIFO under the configured admission policy, count
 job process trees as Sparkwing load, and honor SDK `Cores()`. The owners and
-guards are at [design/rewrite/ORIENTATION.md:124](../../../design/rewrite/ORIENTATION.md#L124) through line 127.
+guards are the [queue ordering row](../ORIENTATION.md#L132) and the
+[declared cores and process-tree load row](../ORIENTATION.md#L133) in
+`design/rewrite/ORIENTATION.md`, read at commit `effbeb87d05b`.
 The reported November incident motivates the change. This note does not claim
 to reproduce it.
 
@@ -34,8 +33,8 @@ A controller restart must not.
 
 SDKs declare and relay only. Policy and security behavior live in the host
 behind the versioned protocol. This project makes no Go or TypeScript SDK
-change and requires no SDK release. The thin-SDK proposal tracks the thinning audit and
-compatibility matrix.
+change and requires no SDK release. SDK thinning and compatibility audits are
+separate work.
 
 ## What the code does today
 
@@ -77,7 +76,7 @@ repositories. It cannot rule out an external consumer of public `pkg/wingwire`.
 | Local status/control clients | [internal/wingd/client/local_control.go:39](../../../internal/wingd/client/local_control.go#L39) | Move status/control onto the API socket. Installed CLI owns restart. Browser requests cannot replace the executable. |
 
 Bitwing's gate slots are separate. The source at
-`/home/bombuntu/code/bitwing/.sparkwing/jobs/pre_push.go:331` uses
+Bitwing `.sparkwing/jobs/pre_push.go:331` uses
 `BITWING_GATE_SLOTS` and `syscall.Flock`, with per-step lock files. It is not a
 wingd client. The ordinary pipeline job is at the same file's line 46.
 Recommendation: replace the private CPU gate with truthful SDK `Cores()`
@@ -89,11 +88,11 @@ No direct admission client was found in sparks-core or the other searched
 tools, including subprocess calls to admission/queue commands. Sparks-core
 needs no transport migration on that evidence. Xwing does launch `wingd run`
 for private candidates at
-`/home/bombuntu/code/xwing/internal/toolruntime/runtime.go:651` and
-`/home/bombuntu/code/xwing/internal/toolruntime/dashboard.go:423`. Update that
+Xwing `internal/toolruntime/runtime.go:651` and
+`internal/toolruntime/dashboard.go:423`. Update that
 private lifecycle contract for a controller plus runner. Overwing invokes the
 normal pipeline CLI at
-`/home/bombuntu/code/overwing/internal/textlint/runner.go:60`.
+Overwing `internal/textlint/runner.go:60`.
 
 ### Stored ledger, requests and leases
 
@@ -158,7 +157,7 @@ rules. They are separate from PID-based machine admission.
 | Headroom samples, process CPU baselines, smoothing, attribution, measured PID set and host/container totals | [internal/wingd/server.go:82](../../../internal/wingd/server.go#L82), [internal/wingd/sampler.go:98](../../../internal/wingd/sampler.go#L98) | Rebuild from OS measurements plus stored holder roots and effective policy. Cache samples only. Keep grants conservative during warmup. |
 | Recent admission events and journal buffers | [internal/wingd/events.go:35](../../../internal/wingd/events.go#L35), [internal/wingd/journal/journal.go:38](../../../internal/wingd/journal/journal.go#L38) | Store user-visible admission history with transitions. Diagnostic journal buffers remain best effort. They grant no authority. |
 | Election lock, listeners, accepted sockets, timers, channels, shutdown flags, cgroup handles and readiness/activity counts | [internal/wingd/server.go:33](../../../internal/wingd/server.go#L33), [internal/wingd/local_runtime.go:34](../../../internal/wingd/local_runtime.go#L34) | Recreate handles. Derive activity from store. Reapply effective policy and limits. Delete idle shutdown and stay bookkeeping. |
-| Requester local secret values in `sync.Map` | [internal/store/local_secrets.go:37](../../../internal/store/local_secrets.go#L37), [internal/store/local_secrets.go:70](../../../internal/store/local_secrets.go#L70), [internal/store/store.go:305](../../../internal/store/store.go#L305) | Encrypt run-scoped values in store before intake acknowledgement. Delete at run end. Existing keyring supplies encryption. Korey approved this on 2026-11-05. |
+| Requester local secret values in `sync.Map` | [internal/store/local_secrets.go:37](../../../internal/store/local_secrets.go#L37), [internal/store/local_secrets.go:70](../../../internal/store/local_secrets.go#L70), [internal/store/store.go:305](../../../internal/store/store.go#L305) | Encrypt run-scoped values in store before intake acknowledgement. Delete at run end. The existing keyring supplies encryption so secrets survive restart without plaintext storage. |
 | Embedded claimant's cached bearer and close-time revocation | [internal/wingd/localcontroller/claimant.go:47](../../../internal/wingd/localcontroller/claimant.go#L47), [internal/wingd/localcontroller/claimant.go:82](../../../internal/wingd/localcontroller/claimant.go#L82) | Delete the credential cache and embedded claimant. Local runner uses peer auth. Keep persistent award credentials and credential epoch across controller restart. Extract its labels policy. |
 | Filesystem object URL signing key | [cmd/sparkwing/local_services.go:132](../../../cmd/sparkwing/local_services.go#L132) | Persist encrypted signing material in store metadata. Preserve outstanding upload/download URLs. Existing blob bytes stay in managed `data/` storage. |
 | Pending sign-in codes, sessions, last seen, expiry and revocation channel | [internal/wingd/local_login.go:35](../../../internal/wingd/local_login.go#L35), [internal/wingd/local_login.go:50](../../../internal/wingd/local_login.go#L50) | Store code/session digests, subject, exact origin, expiry and revocation. Replace revocation channels with request-time reads. |
@@ -248,11 +247,41 @@ store. Activate the new instance and disable old claims in one transaction.
 Already committed old claims must finish or release. Keep a stable machine
 identity for placement and labels. Use distinct process instances for claims.
 New instances must be able to run dependencies of old waiting hosts. Do not create a second resource budget.
-Do not impose a new drain timeout that kills healthy jobs. Service registration
-must let the old process finish, including on Windows. Today the Linux runner
+Do not impose a new drain timeout that kills healthy jobs. A roll sends the
+application drain request. It stops old claims and waits for hosts, uploads and
+terminal acknowledgements before the old runner exits. Keep its service
+registration active until then, including on Windows. Today the Linux runner
 unit uses SIGTERM and a 30-second stop timeout at
 [internal/runners/service/service.go:298](../../../internal/runners/service/service.go#L298).
 A normal service restart cannot implement this roll unchanged.
+
+Detached startup must also escape the controller's service lifetime:
+
+- **Linux:** a detached child stays in the controller unit's cgroup. The default
+  [`KillMode=control-group`](https://www.freedesktop.org/software/systemd/man/latest/systemd.kill.html)
+  kills it on stop. Start each runner instance as its own transient user service
+  with [`systemd-run --user`](https://www.freedesktop.org/software/systemd/man/latest/systemd-run.html).
+  This keeps service cleanup without sharing the controller's cgroup. Do not
+  add stop dependencies from runner units to the controller. Detect systemd
+  boot with [`sd_booted`](https://www.freedesktop.org/software/systemd/man/latest/sd_booted.html) and probe the user manager. A missing user manager on a
+  systemd host is a setup error. Only a confirmed no-systemd host uses `setsid`,
+  independent stdio and no parent-death signal. Its supervisor must stop only
+  the controller, leaving the runner's session alive.
+- **macOS:** launch each runner instance as a separate
+  [launchd agent](https://github.com/apple-oss-distributions/launchd/blob/main/man/launchd.plist.5).
+  It has its own process group because launchd cleans up a stopped agent's
+  group. Stopping the controller agent must not unload runner agents.
+- **Windows:** start each runner instance through SCM as a separate service,
+  outside any controller-owned Job Object. Controller stop must not stop runner
+  services or close their handles. The runner owns its job-tree handles because
+  [`KILL_ON_JOB_CLOSE`](https://learn.microsoft.com/en-us/windows/win32/procthread/job-objects)
+  can kill every process in the object. A roll drains through the application
+  API before stopping the old service. An explicit runner service stop drains
+  on a worker thread, reports `STOP_PENDING` with
+  [checkpoints and wait hints](https://learn.microsoft.com/en-us/windows/win32/api/winsvc/ns-winsvc-service_status),
+  then reports `STOPPED` after acknowledgements. Its
+  [control handler](https://learn.microsoft.com/en-us/windows/win32/services/service-control-handler-function)
+  returns within 30 seconds. Controller restart never sends that stop request.
 
 ## Dashboard, CLI ownership and landing
 
@@ -279,7 +308,8 @@ watches recheck session expiry and revocation. A navigation may serve the
 signed-out shell. Keep only one redemption path. Remove browser fragment
 bearers and in-memory session authority.
 
-Korey chose plain `127.0.0.1`. Cookies are shared by host, not isolated by port.
+Use plain `127.0.0.1` because it keeps a stable local address without local TLS
+setup. Cookies are shared by host, not isolated by port.
 Another service on that host can receive the cookie when visited. HttpOnly,
 SameSite and Origin checks do not fix that limitation. The existing rationale
 is at [internal/wingd/local_login.go:219](../../../internal/wingd/local_login.go#L219). Document the accepted port-sharing
@@ -294,18 +324,17 @@ authentication. Tailscale documents both its identity headers and the risk
 from services on the same backend machine in its
 [Serve guide](https://tailscale.com/docs/features/tailscale-serve#identity-headers).
 Cut automatic tailnet identity login from this proposal. Cut `--allow-remote`
-and direct non-loopback binds, as Korey chose.
+and direct non-loopback binds because Serve supplies the HTTPS entry point.
 
 Only the installed CLI starts or restarts the controller using the installed
 binary. Compatible pinned CLIs use the running controller. Old incompatible pins
 are a hard cut. Bump all pins and mark the change Breaking. There is no adapter
-for engines that still embed the old admission host. The separate
-**installed-CLI daemon ownership lane**, already in progress, owns that change.
+for engines that still embed the old admission host. A separate installed-CLI
+ownership change must remove pinned-engine takeover.
 Its source boundaries are [internal/wingd/client/client.go:457](../../../internal/wingd/client/client.go#L457),
 [internal/wingd/client/client.go:573](../../../internal/wingd/client/client.go#L573) and [internal/wingd/client/spawn.go:20](../../../internal/wingd/client/spawn.go#L20).
-This proposal depends on that lane. It does not invent a second version election
-or claim the lane is already in this checkout. Keep the matching engine for a
-repo's SDK pin. Missing API capabilities get an actionable error, never a
+This proposal depends on that change. It adds no second version election.
+Keep the matching engine for a repo's SDK pin. Missing API capabilities get an actionable error, never a
 fallback to an old controller or direct store access.
 
 After landing, refresh the global CLI and runner from the exact pushed commit,
@@ -419,7 +448,7 @@ controller API and the existing runner loop.
 
 S means half a day. M means one to two days. L means three to five days.
 Sizes include focused tests, not release coordination. The six steps total
-roughly 10-18 working days. Installed-CLI ownership remains a separate lane.
+roughly 10-18 working days. Installed-CLI ownership remains a separate change.
 
 1. **Durable machine admission over HTTP, L.** Persist the existing ledger's
    full state on every change, including waiters. Add ticket long poll and PID
@@ -458,36 +487,40 @@ local secrets, a schedule, release with a lost reply, immediate cancellation,
 runner exit-time reporting, orphan cleanup and migration failure. Measure
 cancel-to-stop latency through the lease watch. Test polling through transport
 errors without adding claim or intake replay. Restart the controller twice
-while old jobs run. Roll a runner while its owner awaits a child. Land from the
-old runner and prove refresh returns before it exits. Assert one store writer,
+while old jobs run. Stop and restart the controller through systemd, launchd
+and SCM with a logging child job alive. Verify distinct cgroups, process groups
+or Job Objects and unchanged runner/job identities. Cover the no-systemd
+session path. On Windows, test application drain and explicit service stop
+through terminal acknowledgement. Roll a runner while its owner awaits a child.
+Land from the old runner and prove refresh returns before it exits. Assert one store writer,
 unchanged live attempts, preserved order, no duplicate machine grants, correct
 log offsets and no controller-caused job termination. Test cookie persistence,
 expiry, logout, hostile Host/Origin and real Serve routing. Retain native
 Windows pipe/process/service tests. Use repository delivery gates for the
 implementation.
 
-This proposal was checked by source reading and citation/path checks only.
-No Sparkwing binary was built or run. No store, service or pipeline was opened.
-The lead runs the full gate after this session.
+Validation here covers source references and design consistency. Runtime
+acceptance checks belong to the implementing changes.
 
 ## Decisions
 
-All decisions below are Korey's, dated 2026-11-05. They close the earlier open
-questions. The dashboard's 30-day cookie, plain loopback hostname, Serve
-allowlist, remote-bind cut and installed-CLI ownership remain agreed.
+These decisions close the earlier open questions. The dashboard uses a 30-day
+cookie to preserve sign-in across restarts. Its stable loopback address and
+exact Serve allowlist keep routing explicit. The installed CLI owns controller
+replacement so repository pins cannot replace the shared service.
 
 | Decision | Date | Agreed behavior |
 | --- | --- | --- |
-| Q1: admission owners | 2026-11-05 | Keep two admission layers. Machine admission lives in the local store. |
-| Q2: waiting | 2026-11-05 | Keep the roughly 20-second long poll. Wake queued tickets when they can proceed. |
-| Q3: durability | 2026-11-05 | Keep the existing ledger engine. Persist its full state, including waiters, in the store on every change. Do not normalize it into rows. |
-| Q4: reconnect scope | 2026-11-05 | The runner loop keeps polling across transport errors. Drop claim receipts, intake replay and one-time-bearer rework. |
-| Q5: local secrets | 2026-11-05 | Encrypt run-scoped secrets in the store with the existing keyring. Delete them at run end. Document encrypted backup retention. |
-| Q6: machine lease liveness | 2026-11-05 | Use holder PID plus start time. No renewal, expiry or ticket liveness window. Eviction and cancel use the lease watch long poll. |
-| Q7: local runner | 2026-11-05 | The controller starts and rolls the detached local runner. Record its identity and lifecycle state in the store. |
-| Q8: compatibility | 2026-11-05 | Hard-cut old incompatible pins. Bump all pins. Mark Breaking. |
-| Q9: dashboard lifecycle | 2026-11-05 | Cut dashboard start/stop. Lifecycle belongs under `sparkwing daemon`. |
-| Ownership audit | 2026-11-05 | The runner reports observed exit time. Measure instant cancel via the lease watch. The controller cleans up orphaned job process groups. Port local-only host features with tests. |
-| Live job metrics | 2026-11-05 | Show per-job CPU and memory from the controller's sampler on the dashboard in step 1. |
-| SDK scope | 2026-11-05 | SDKs declare and relay only. Policy and security behavior live in the host behind the versioned protocol. This project changes neither Go nor TypeScript SDK. The thin-SDK proposal owns thinning and the compatibility matrix. |
-| Delivery order | 2026-11-05 | Follow the six implementation steps above. Release remains separate from engineering completion. |
+| Q1: admission owners | 2026-11-05 | Keep two admission layers because logical placement and machine capacity have different owners. Machine admission lives in the local store. |
+| Q2: waiting | 2026-11-05 | Keep the roughly 20-second long poll because it bounds transport waits. Wake queued tickets when they can proceed. |
+| Q3: durability | 2026-11-05 | Keep the existing ledger engine. Persist its full state, including waiters, in the store on every change. Keep it whole because the ledger already owns policy and ordering. |
+| Q4: reconnect scope | 2026-11-05 | The runner loop keeps polling across transport errors. Keep existing claim and result semantics because restart needs transport recovery, not a new replay protocol. |
+| Q5: local secrets | 2026-11-05 | Encrypt run-scoped secrets in the store with the existing keyring. Delete them at run end. Document encrypted backup retention. Encryption preserves restart recovery without plaintext storage. |
+| Q6: machine lease liveness | 2026-11-05 | Use holder PID plus start time. No renewal, expiry or ticket liveness window. Eviction and cancel use the lease watch long poll. Process identity survives transport loss without freeing live capacity. |
+| Q7: local runner | 2026-11-05 | The controller starts and rolls the detached local runner. Record its identity and lifecycle state in the store so a successor controller can reuse it. |
+| Q8: compatibility | 2026-11-05 | Hard-cut old incompatible pins because they still embed the old admission host. Bump all pins. Mark Breaking. |
+| Q9: dashboard lifecycle | 2026-11-05 | Cut dashboard start/stop because the dashboard shares the always-on controller. Lifecycle belongs under `sparkwing daemon`. |
+| Ownership audit | 2026-11-05 | The runner reports observed exit time. Measure instant cancel via the lease watch. The controller cleans up orphaned job process groups. Port local-only host features with tests so moving execution preserves their behavior. |
+| Live job metrics | 2026-11-05 | Show per-job CPU and memory from the controller's sampler on the dashboard in step 1 so users can see the load admission measures. |
+| SDK scope | 2026-11-05 | SDKs declare and relay only. Policy and security behavior live in the host behind the versioned protocol. This project changes neither Go nor TypeScript SDK. Host ownership avoids SDK releases for policy changes. SDK thinning and compatibility audits are separate work. |
+| Delivery order | 2026-11-05 | Follow the six implementation steps above. Release remains separate from engineering completion because it has its own checks and approval gate. |
