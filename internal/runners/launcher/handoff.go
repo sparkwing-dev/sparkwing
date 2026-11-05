@@ -32,9 +32,10 @@ func (b *KubernetesBoundary) predecessorTeardown(ctx context.Context, node corev
 	matches := err == nil && reservation == held && sameBinding(recorded, binding)
 	// perf: work can be awarded before Kubernetes observes the planning Job's exit.
 	planHandoff := binding.Kind == CloudPlan && successor.Kind != CloudPlan
-	if !matches || job.DeletionTimestamp == nil && !planHandoff || job.Annotations[rejectedAnnotation] != "" || !slices.Contains(job.Finalizers, cleanupFinalizer) {
+	if !matches || job.Annotations[rejectedAnnotation] != "" || !slices.Contains(job.Finalizers, cleanupFinalizer) {
 		return false, nil
 	}
+	finishing := job.DeletionTimestamp != nil || jobFinished(*job) || planHandoff
 	pods, err := b.Kube.CoreV1().Pods("").List(ctx, metav1.ListOptions{FieldSelector: "spec.nodeName=" + node.Name})
 	if err != nil {
 		return false, err
@@ -48,8 +49,12 @@ func (b *KubernetesBoundary) predecessorTeardown(ctx context.Context, node corev
 		}) {
 			return false, nil
 		}
+		// perf: Pod exit can precede Job deletion while the controller seals the logs.
+		finishing = finishing || pod.DeletionTimestamp != nil || pod.Status.Phase == corev1.PodSucceeded || pod.Status.Phase == corev1.PodFailed || slices.ContainsFunc(pod.Status.ContainerStatuses, func(status corev1.ContainerStatus) bool {
+			return status.Name == "run-node" && status.State.Terminated != nil
+		})
 	}
-	return true, nil
+	return finishing, nil
 }
 
 func (l *Launcher) retireEndedPredecessors(ctx context.Context, successor CloudJobBinding) (bool, error) {

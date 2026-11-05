@@ -576,10 +576,12 @@ change host state outside its Pod. A node is reused only by later jobs of the
 run that first used it, so even within a team no run reaches another's node.
 
 Placement prefers a run's own nodes within each eligible class. If its matching
-node still holds an exact predecessor reservation whose UID-fenced Job is deleting
-with the cleanup finalizer, the successor waits up to 30 seconds before requesting
-fresh capacity. A work or eval award also waits for its planning Job before Kubernetes
-marks that Job for deletion: the controller can award work as planning exits.
+node still holds an exact predecessor reservation whose UID-fenced Job has the
+cleanup finalizer and is deleting or finished, the successor waits up to 30 seconds
+before requesting fresh capacity. An owned Pod that is deleting or terminal, or
+whose `run-node` container has exited, earns the same wait before Job deletion.
+A work or eval award also waits for its planning Job before Kubernetes marks
+that Job for deletion: the controller can award work as planning exits.
 Only that predecessor's Pods and DaemonSets may occupy the node.
 Normal reconciliation retries teardown before placement. The controller can also
 end a work predecessor and award its dependent between reconciliation and claim.
@@ -587,16 +589,19 @@ So before a fresh award's first capacity request, the launcher asks the controll
 about the run's other live Jobs, tears down those whose awards ended and places
 again, and the successor waits for that teardown instead of creating demand that
 cannot fit on the reserved node and would make Karpenter add one. Live work
-reservations still permit fanout. Known residual: while an ended predecessor's
-log stream is still unsealed, the controller defers its retirement for up to the
-log seal grace, so this check leaves it alone and the successor still requests
-fresh capacity. That can add one node that the run never uses. Foreign runs, damaged bindings and quarantined nodes never earn
-this wait. The deadline belongs to the held award and does not renew on retries.
+reservations still permit fanout. The 60-second idle-retire grace starts only
+after release; it cannot cover this occupied-node gap. Log sealing can defer the
+controller's retirement decision, so Pod exit evidence also earns the bounded
+wait. If every container still runs and neither Job nor Pod is deleting or
+terminal, there is no exit evidence and placement still permits fanout. Foreign
+runs, damaged bindings and quarantined nodes never earn this wait. The deadline belongs to the held award and does not renew on retries.
 A held award has no Job or capacity Pod to renew it, so every pass retries its
 placement and renews its fence even while a claim backoff delays new claims.
 `TestSuccessorWaitsForPredecessorNode`, `TestTeardownWaitIsBoundedAndRunScoped`
 and `TestTeardownWaitRenewsThroughClaimBackoff` guard reuse, the fallback and renewal.
-`TestSuccessorAwardedBeforePredecessorRetirementReusesNode` guards the work-to-work gap.
+`TestSuccessorAwardedBeforePredecessorRetirementReusesNode` guards the work-to-work
+gap with a fake clock, including Pod exit before Job deletion, one NodeClaim
+through the handoff and fresh-capacity fallback at 30 seconds.
 `TestRunAndRetryPlanHandoffCreateOnlyOneNodeClaim` guards the plan-to-work gap for
 normal runs and retries, including launcher restarts.
 

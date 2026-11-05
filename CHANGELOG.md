@@ -22,6 +22,7 @@ unlock.
 
 ### Fixed
 
+- **Cloud:** A same-run successor waits up to 30 seconds for a terminating or finished predecessor Pod before requesting another node, including when Kubernetes has not yet marked the predecessor Job for deletion.
 - **delivery:** Land and gate policy checks and release cuts reject documentation pages missing from the docs sidebar. Release dry runs check the sidebar too.
 
 ## [v0.69.1] - 2026-11-05
