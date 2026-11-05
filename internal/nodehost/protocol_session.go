@@ -254,6 +254,9 @@ func startProtocolSession(ctx context.Context, cfg ProtocolSessionConfig) (sessi
 		case <-s.joined:
 		}
 	}()
+	if err := observeAdmissionProcess(ctx, cmd.Process.Pid); err != nil {
+		return s, fmt.Errorf("register admitted job process: %w", err)
+	}
 	if err := context.Cause(ctx); err != nil {
 		return s, err
 	}

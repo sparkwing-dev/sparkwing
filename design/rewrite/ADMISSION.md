@@ -83,8 +83,15 @@ Each decision and a periodic process check release capacity for dead holders or
 reused PIDs. Inspection errors keep the reservation. Connections, renewals,
 expiry and timeout settings do not determine machine authority.
 
-The existing sampler attributes CPU and memory to each holder's process tree.
-The controller API exposes current, peak and average job usage for the dashboard.
+The host registers each spawned job's PID and start identity with
+`POST /api/v1/local/admission/requests/{id}/process` before its SDK handshake.
+This measurement root is separate from the holder root that determines lease
+liveness. The controller verifies its owner against the socket peer and persists
+it with the ticket. The existing sampler exposes current, peak and average
+process-tree CPU and resident memory through the queue API. A dead or reused
+measurement PID withholds readings without ending the holder's reservation.
+Jobs sharing a runner PID have no individual reading until their job processes
+are registered. Host-root CPU attribution for admission remains unchanged.
 Existing host processes still own job execution and logical claim renewal.
 
 Store round trips and restart ordering are guarded by

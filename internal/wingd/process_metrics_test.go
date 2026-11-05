@@ -1,10 +1,12 @@
 package wingd
 
 import (
+	"os"
 	"testing"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/admission"
+	"github.com/sparkwing-dev/sparkwing/internal/procgroup"
 )
 
 func TestProcessMetrics_TimeWeightedAverageAndPIDReuse(t *testing.T) {
@@ -24,6 +26,50 @@ func TestProcessMetrics_TimeWeightedAverageAndPIDReuse(t *testing.T) {
 	usage = p.ProcessUsage(42)
 	if usage.PeakCPUCores != 0.5 || usage.AverageCPUCores != 0.5 || usage.PeakMemoryBytes != 50 {
 		t.Fatalf("reused PID retained prior process measurements: %+v", usage)
+	}
+}
+
+func TestProcessMetricsSeparateJobsSharingOneHolderProcess(t *testing.T) {
+	d := newHeadroomDaemon(t, 10, 0)
+	p := newProcSampler()
+	d.procSampler = p
+	for i, pid := range []int{os.Getpid(), os.Getppid()} {
+		id := []string{"first", "second"}[i]
+		if _, _, err := d.ledger.Submit(admission.Request{ID: id, Cores: 1}); err != nil {
+			t.Fatal(err)
+		}
+		birth, err := procgroup.ProcessBirth(pid)
+		if err != nil {
+			t.Fatal(err)
+		}
+		d.byRun[id] = &conn{runID: id, role: roleHolder, pid: 9999, measurementPID: pid, measurementBirth: birth}
+		p.recordMetricsLocked(pid, 7, float64(i+1), true, uint64((i+1)*100), true, time.Unix(100, 0))
+	}
+	qs := d.readQueueState()
+	if len(qs.Holders) != 2 || qs.Holders[0].Usage == nil || qs.Holders[1].Usage == nil || qs.Holders[0].Usage.CurrentMemoryBytes == qs.Holders[1].Usage.CurrentMemoryBytes {
+		t.Fatalf("job readings were not distinct: %+v", qs.Holders)
+	}
+	if roots := d.measurementSample(); len(roots) != 2 {
+		t.Fatalf("job sampling roots = %+v", roots)
+	}
+	if roots := d.holderSample(); len(roots) != 1 || roots[0].PID != 9999 {
+		t.Fatalf("per-job measurement changed owned host attribution: %+v", roots)
+	}
+	d.byRun["second"].measurementBirth = "reused"
+	qs = d.readQueueState()
+	for _, holder := range qs.Holders {
+		if holder.RunID == "second" && holder.Usage != nil {
+			t.Fatalf("reused measurement PID still had readings: %+v", holder.Usage)
+		}
+	}
+	for _, c := range d.byRun {
+		c.measurementPID = 0
+	}
+	p.recordMetricsLocked(9999, 7, 3, true, 300, true, time.Unix(100, 0))
+	for _, holder := range d.readQueueState().Holders {
+		if holder.Usage != nil {
+			t.Fatalf("shared runner total was reported as job usage: %+v", holder.Usage)
+		}
 	}
 }
 

@@ -1,6 +1,7 @@
 package wingd
 
 import (
+	"sort"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
@@ -99,6 +100,46 @@ func (d *Daemon) processUsage(pid int) *wingwire.ProcessUsage {
 		return sampler.ProcessUsage(pid)
 	}
 	return nil
+}
+
+func (d *Daemon) measurementPIDsLocked() map[*conn]int {
+	byHolder := map[int]int{}
+	bySample := map[int]int{}
+	pids := make(map[*conn]int, len(d.byRun))
+	for _, c := range d.byRun {
+		if c.role != roleHolder {
+			continue
+		}
+		pid := c.samplePID()
+		pids[c] = pid
+		bySample[pid]++
+		byHolder[c.pid]++
+	}
+	for c, pid := range pids {
+		if pid <= 0 || bySample[pid] > 1 || c.measurementPID == 0 && byHolder[c.pid] > 1 {
+			delete(pids, c)
+		}
+	}
+	return pids
+}
+
+func (d *Daemon) holderProcessUsagesLocked() map[*conn]*wingwire.ProcessUsage {
+	usages := make(map[*conn]*wingwire.ProcessUsage, len(d.byRun))
+	for c, pid := range d.measurementPIDsLocked() {
+		usages[c] = d.processUsage(pid)
+	}
+	return usages
+}
+
+func (d *Daemon) measurementSample() []OwnedRoot {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	roots := make([]OwnedRoot, 0, len(d.byRun))
+	for c, pid := range d.measurementPIDsLocked() {
+		roots = append(roots, OwnedRoot{PID: pid, HeldSince: c.startAt})
+	}
+	sort.Slice(roots, func(i, j int) bool { return roots[i].PID < roots[j].PID })
+	return roots
 }
 
 func (d *Daemon) sampleProcessUsage(roots []OwnedRoot) {

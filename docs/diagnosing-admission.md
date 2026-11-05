@@ -119,3 +119,17 @@ Its report carries a `record_error` warning beside that session. Plain reports
 count these as `unrecorded_step_outcomes`. A failed sweep still returns an error.
 This does not connect process cleanup to the lifecycle CLI.
 <!-- design:end -->
+
+
+## Live job measurements
+
+The local dashboard queue shows current, peak and average CPU cores and resident
+memory separately from each job's reserved capacity. Averages cover measured
+intervals since the controller began observing the job process. A controller
+restart starts a fresh measurement history while admission tickets retain their
+queue order and leases.
+
+The host registers each job's process tree for measurement. Jobs sharing a runner
+process remain unmeasured until their individual processes are registered. A
+missing or reused job PID also remains unmeasured. Ending the job process does
+not end admission until the host releases its lease or its holder process exits.

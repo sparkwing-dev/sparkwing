@@ -114,6 +114,7 @@ func (d *Daemon) buildQueueStateLocked() (wingwire.QueueState, admission.Snapsho
 	}
 
 	now := d.now()
+	usages := d.holderProcessUsagesLocked()
 	for _, ls := range snap.Leases {
 		rowID := queueRowIdentity(ls.RequestID, d.byRun[ls.RequestID])
 		charge, recorded := d.leaseCharge[ls.ID]
@@ -130,7 +131,7 @@ func (d *Daemon) buildQueueStateLocked() (wingwire.QueueState, admission.Snapsho
 			ConnectionOnly: !leaseHoldsResources(snap, ls) && charge.Cores == 0 && charge.MemoryBytes == 0,
 		}
 		if c := d.byRun[ls.RequestID]; c != nil {
-			h.Usage = d.processUsage(c.pid)
+			h.Usage = usages[c]
 			h.Pipeline = c.pipeline
 			h.Repo = c.repo
 			if !c.startAt.IsZero() {

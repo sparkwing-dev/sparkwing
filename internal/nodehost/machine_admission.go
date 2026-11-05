@@ -34,6 +34,10 @@ type machineLease struct{ lease *wingdclient.Lease }
 
 func (l machineLease) Token() string  { return l.lease.Token }
 func (l machineLease) Release() error { return l.lease.Release() }
+func (l machineLease) TrackProcess(ctx context.Context, pid int) error {
+	return l.lease.TrackProcess(ctx, pid)
+}
+
 func (l machineLease) Watch(evicted func(wingwire.Evicted), stopped func(wingwire.Cancel)) error {
 	return l.lease.WatchControl(evicted, stopped)
 }

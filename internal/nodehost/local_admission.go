@@ -127,9 +127,23 @@ func (a *LocalAdmission) hold(parent context.Context, ref runspec.NodeRef, reque
 		err = errors.Join(err, localAdmissionFailure(context.Cause(ctx)), releaseErr, watchErr)
 	}()
 	if err == nil && context.Cause(ctx) == nil {
+		if tracker, ok := held.(interface {
+			TrackProcess(context.Context, int) error
+		}); ok {
+			ctx = context.WithValue(ctx, admissionProcessObserverKey{}, tracker.TrackProcess)
+		}
 		err = body(ctx, held)
 	}
 	return err
+}
+
+type admissionProcessObserverKey struct{}
+
+func observeAdmissionProcess(ctx context.Context, pid int) error {
+	if observe, ok := ctx.Value(admissionProcessObserverKey{}).(func(context.Context, int) error); ok {
+		return observe(ctx, pid)
+	}
+	return nil
 }
 
 func localAdmissionFailure(err error) error {
