@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { type ReactNode, useState } from "react";
+import { type ReactNode, useEffect, useRef, useState } from "react";
 import {
   type Capabilities,
   type Me,
@@ -179,6 +179,11 @@ export default function TeamShell({
 }) {
   const state = useTeamState();
   const pathname = usePathname();
+  const tabs = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const active = tabs.current?.querySelector<HTMLElement>('[aria-current="page"]');
+    if (tabs.current && active) tabs.current.scrollLeft = active.offsetLeft - tabs.current.offsetLeft;
+  }, [pathname, state.status]);
   if (state.status === "loading") {
     return <Notice>Loading team…</Notice>;
   }
@@ -213,7 +218,7 @@ export default function TeamShell({
     <div className="flex-1 overflow-y-auto p-4 sm:p-6 max-w-4xl mx-auto w-full">
       <InvitationsForMe me={me} />
       <TeamHeader me={me} />
-      <div className="flex gap-1 overflow-x-auto border-b border-[var(--border)] mb-6">
+      <div ref={tabs} className="flex gap-1 overflow-x-auto border-b border-[var(--border)] mb-6">
         {teamTabs(caps).map((t) => {
           const active =
             t.href === "/team"
@@ -223,6 +228,7 @@ export default function TeamShell({
             <Link
               key={t.href}
               href={t.href}
+              aria-current={active ? "page" : undefined}
               className={`shrink-0 px-3 py-3 text-sm border-b-2 -mb-px ${
                 active
                   ? "border-[var(--accent)] text-[var(--foreground)]"

@@ -74,6 +74,7 @@ test("GitHub explanations open by keyboard and touch", async ({ page }) => {
   const target = await info.boundingBox();
   expect(target?.width).toBeGreaterThanOrEqual(44);
   expect(target?.height).toBeGreaterThanOrEqual(44);
+  await page.getByText("Advanced: access to other repositories", { exact: true }).click();
   await expect(
     page.getByRole("button", { name: /About extra repositories/ }),
   ).toBeVisible();

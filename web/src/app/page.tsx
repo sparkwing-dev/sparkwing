@@ -373,10 +373,9 @@ function GettingStarted() {
     <section className="mb-5 rounded-lg border border-[var(--border)] bg-[var(--surface)] p-4">
       <h2 className="text-sm font-semibold">Get started</h2>
       <ol className="mt-2 list-decimal list-inside space-y-1 text-sm text-[var(--muted)]">
-        <li>Add a pipeline to your repository.</li>
-        <li><Link href="/team/machines" className="text-indigo-300 underline">Connect a runner</Link> on your machine or in GitHub Actions.</li>
-        <li>Trigger a run.</li>
-        <li>Follow its result in Runs.</li>
+        <li><Link href="/team/github" className="text-indigo-300 underline">Set up a repository</Link> to run pipelines on pushes with GitHub Actions.</li>
+        <li>Push a commit and follow its result in Runs.</li>
+        <li><Link href="/team/machines" className="text-indigo-300 underline">Sign in your CLI or connect a machine</Link> when you need local access.</li>
       </ol>
       <div className="mt-3 flex flex-wrap gap-x-4 gap-y-1 text-sm text-indigo-300">
         <a href="https://sparkwing.dev/docs/" target="_blank" rel="noopener noreferrer" className="hover:underline">
