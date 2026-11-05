@@ -324,6 +324,8 @@ Select --failed to reuse successful jobs or --all-jobs to execute the sealed pla
 
 Repeat --run or use --run - for newline-separated IDs on stdin. JSON emits one safe receipt or structured failure per source run. Plain emits new run IDs. Local and remote retries use the same controller API.
 
+--reason records why the retry should pass on the new run, shown by runs list and runs status. It is required when an agent retries: the CLI detects Claude Code, Codex and Gemini CLI, or reads --agent or SPARKWING_AGENT, and the controller refuses an agent's retry without a reason. --agent none opts out.
+
 ### Flags
 
 | Flag | Description |
@@ -335,6 +337,8 @@ Repeat --run or use --run - for newline-separated IDs on stdin. JSON emits one s
 | `--run RUN_ID` | Run ID or per-team run number. Repeatable; comma-separated values are accepted. (required) |
 | `--failed` | Start a new run that reuses the source run's successful jobs and runs the rest again. |
 | `--all-jobs` | Start a new run that runs every job of the source run's plan again. |
+| `--reason TEXT` | Why the retry should pass, such as "flake: DNS timeout in TestX" or "fixed X in commit Y"; recorded on the new run and required when an agent retries. |
+| `--agent NAME` | Coding agent requesting the retry, such as claude-code:land-agent; an agent must give --reason, and none records no agent. |
 | `--profile NAME` | Controller connection profile from your config. Optional profiles use the saved default, then local; --profile= selects local. |
 
 ## `sparkwing runs stats`

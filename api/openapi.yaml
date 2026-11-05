@@ -3111,9 +3111,13 @@ components:
     internal.controllerwire.RetryRequest:
       additionalProperties: true
       properties:
+        agent:
+          type: string
         idempotency_key:
           type: string
         mode:
+          type: string
+        reason:
           type: string
       required:
         - idempotency_key
@@ -5510,6 +5514,8 @@ components:
         retrier:
           $ref: '#/components/schemas/internal.runspec.Optional.github.com.sparkwing-dev.sparkwing.internal.runspec.Actor.'
         retry_of:
+          type: string
+        retry_reason:
           type: string
         root_run_id:
           type: string

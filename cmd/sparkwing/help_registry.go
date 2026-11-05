@@ -257,6 +257,8 @@ var commandFlagDescriptions = map[string]string{
 	"sparkwing runs prune --older-than":                        "Delete every finished run that started longer ago than this, such as 72h, 30d or 4w; cannot be combined with --run.",
 	"sparkwing runs retry --all-jobs":                          "Start a new run that runs every job of the source run's plan again.",
 	"sparkwing runs retry --failed":                            "Start a new run that reuses the source run's successful jobs and runs the rest again.",
+	"sparkwing runs retry --reason":                            "Why the retry should pass, such as \"flake: DNS timeout in TestX\" or \"fixed X in commit Y\"; recorded on the new run and required when an agent retries.",
+	"sparkwing runs retry --agent":                             "Coding agent requesting the retry, such as claude-code:land-agent; an agent must give --reason, and none records no agent.",
 	"sparkwing runs stats --all-pipelines":                     "Apply --reset to every pipeline; requires --reset and --yes.",
 	"sparkwing runs stats --reset":                             "Clear learned sizing for --pipeline or --all-pipelines while keeping resource pins; the controller has no route for this yet, so it fails with policy_missing and changes nothing.",
 	"sparkwing runs stats --since":                             "Count only top-level runs that started within this lookback, such as 7d or 2w; by default every run counts.",

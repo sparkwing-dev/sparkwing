@@ -43,20 +43,25 @@ func writeListedRun(out io.Writer, run controllerwire.RunDetail, format string, 
 	}
 	if format == "json" {
 		return json.NewEncoder(out).Encode(struct {
-			ID         string     `json:"id"`
-			Number     int64      `json:"number"`
-			Pipeline   string     `json:"pipeline"`
-			Status     string     `json:"status"`
-			Ref        string     `json:"ref,omitempty"`
-			SHA        string     `json:"sha,omitempty"`
-			Agent      string     `json:"agent,omitempty"`
-			StartedAt  *time.Time `json:"started_at,omitempty"`
-			FinishedAt *time.Time `json:"finished_at,omitempty"`
-		}{run.ID, run.Number, run.Inputs.Pipeline, run.Status, run.Inputs.Git.Ref, run.Inputs.Git.SHA, run.Inputs.Agent, run.StartedAt, run.FinishedAt})
+			ID          string     `json:"id"`
+			Number      int64      `json:"number"`
+			Pipeline    string     `json:"pipeline"`
+			Status      string     `json:"status"`
+			Ref         string     `json:"ref,omitempty"`
+			SHA         string     `json:"sha,omitempty"`
+			Agent       string     `json:"agent,omitempty"`
+			RetryOf     string     `json:"retry_of,omitempty"`
+			RetryReason string     `json:"retry_reason,omitempty"`
+			StartedAt   *time.Time `json:"started_at,omitempty"`
+			FinishedAt  *time.Time `json:"finished_at,omitempty"`
+		}{run.ID, run.Number, run.Inputs.Pipeline, run.Status, run.Inputs.Git.Ref, run.Inputs.Git.SHA, run.Inputs.Agent, run.Inputs.Lineage.RetryOf, run.Inputs.Lineage.RetryReason, run.StartedAt, run.FinishedAt})
 	}
 	agent := ""
 	if run.Inputs.Agent != "" {
 		agent = "  via agent " + run.Inputs.Agent
+	}
+	if reason := run.Inputs.Lineage.RetryReason; reason != "" {
+		agent += fmt.Sprintf("  retry of %s: %s", run.Inputs.Lineage.RetryOf, reason)
 	}
 	_, err := fmt.Fprintf(out, "%s (#%d)  %s  %s  %s  %s%s\n", run.ID, run.Number, run.Inputs.Pipeline, run.Status, run.Inputs.Git.Ref, shortSHAOrDash(run.Inputs.Git.SHA), agent)
 	return err
