@@ -44,9 +44,6 @@ unlock.
 - **sdk:** `JobNode.Cores(n)`, `JobGroup.Cores(n)` and TypeScript `job.cores(n)` declare the CPU a job asks local admission to reserve
   The default stays one core; requests go down to 0.25. The plan carries `cores` only to a host whose hello names the
   new `job_cores` feature, so a pipeline using it still plans on an older host, which keeps the one-core charge.
-
-### Changed
-
 - **cli + controller (Breaking):** An agent's retry must give `--reason`
   When `runs retry` runs under a detected coding agent (Claude Code, Codex, Gemini CLI), `--agent` or
   `SPARKWING_AGENT`, it refuses to retry without `--reason`, and the controller refuses a retry request that names
