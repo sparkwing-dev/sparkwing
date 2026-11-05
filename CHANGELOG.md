@@ -22,6 +22,7 @@ unlock.
 
 ### Fixed
 
+- **runners:** Run-level label selectors and `--sw-requires` reach matching personal runners while unrelated machines poll. Each machine keeps its own idle-poll budget.
 - **runners:** Inventory reports the configured concurrency limit from runner polls and counts personal-runner jobs without duplicating their waiting trigger owners. The optional `X-Sparkwing-Max-Concurrent` observation header leaves older controllers able to award work; runners that omit it retain the zero (unknown) value.
 - **runners:** Enrollment records the shell's PATH in launchd and systemd services and prepends the installed Go toolchain, so fresh macOS runners can compile pipelines without depending on version-manager shims.
 - **runners:** Jobs cancelled during startup report cancellation and seal empty logs when storage or process setup is refused before the next heartbeat.
