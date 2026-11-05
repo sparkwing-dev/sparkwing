@@ -181,7 +181,10 @@ The step bumps `pkg/scaffold/version.go`, `.apidiff/pkg_scaffold.txt`,
 tidies both modules, adds a changelog entry, syncs the docs mirror, and commits
 the result. Review that commit and deliver it to main before the next cut.
 Run the follow-up even if hosted artifact publication failed, because the
-module proxy can already serve the immutable tag.
+module proxy can already serve the immutable tag. A skipped follow-up surfaces
+only at the next cut, whose `version-freshness` step refuses with "scaffold
+fallback pin ... is behind latest release"; the fix then is this same command
+and a land before the cut, which is how v0.69.0 found v0.68.7's missing pin.
 
 The local release pipeline ends at the tag push because the new module must
 exist before the pins can resolve it. Pre-release leaves the tag's own commit
