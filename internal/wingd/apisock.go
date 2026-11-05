@@ -3,6 +3,7 @@ package wingd
 import (
 	"context"
 	"net"
+	"net/http"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/localhostwire"
@@ -21,7 +22,11 @@ type authenticatedAPIConn interface {
 
 func (d *Daemon) startAPI(ctx context.Context) error {
 	if d.cfg.ServeAPI == nil {
-		return nil
+		d.cfg.ServeAPI = func(ctx context.Context, ln net.Listener) {
+			if err := ServeAPI(ctx, ln, localhostwire.LocalHTTP{API: d.admissionHTTP(d.controllerHTTP(http.NotFoundHandler()))}); err != nil {
+				d.cfg.logf("admission HTTP server: %v", err)
+			}
+		}
 	}
 	ln, err := d.bind(d.layout.apiSock)
 	if err != nil {

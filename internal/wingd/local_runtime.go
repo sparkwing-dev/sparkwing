@@ -133,6 +133,11 @@ func (r *localRuntime) Run(ctx context.Context, opts LocalStartOptions) (err err
 		return err
 	}
 	d.cfg.Runs = controller
+	if admission, ok := controller.(interface {
+		SetAdmissionCancellation(func(context.Context, string) error)
+	}); ok {
+		admission.SetAdmissionCancellation(d.cancelCommittedRunAdmission)
+	}
 	d.localControl = func(stay *bool) LocalStatus { return r.control(session, stay) }
 	d.localDashboard = r.EnsureDashboard
 	d.dashboardSeen = session.logins.lastSignedInRequest
@@ -204,7 +209,7 @@ func (r *localRuntime) serve(ctx context.Context, session *localRuntimeSession, 
 	d.cfg.ServeAPI = func(_ context.Context, ln net.Listener) {
 		serve("controller API", func() error {
 			local := controller.HTTP()
-			local.API = logins.socketRoutes(local.API)
+			local.API = d.admissionHTTP(d.controllerHTTP(logins.socketRoutes(local.API)))
 			return ServeAPI(ctx, &readyListener{Listener: ln, ready: apiReady}, local)
 		})
 	}

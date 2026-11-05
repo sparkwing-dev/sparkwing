@@ -1,11 +1,6 @@
 package wingd
 
 import (
-	"bufio"
-	"errors"
-	"net"
-	"os"
-	"sync"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/admission"
@@ -33,25 +28,10 @@ func (r connRole) String() string {
 
 const maxFrame = 8 << 20
 
-const connWriteTimeout = 10 * time.Second
-
 type conn struct {
-	d  *Daemon
-	nc net.Conn
-	sc *bufio.Scanner
-
-	id uint64
-
-	writeMu        sync.Mutex
-	closeOnce      sync.Once
-	disconnectOnce sync.Once
-
-	protocolMajor int
-
-	healthProbe    bool
-	holderLiveness bool
-
-	handshaked bool
+	measurementPID   int
+	measurementBirth string
+	ticketID         string
 
 	runID        string
 	journalRunID string
@@ -61,7 +41,6 @@ type conn struct {
 	priority     int
 	class        string
 	pid          int
-	peerPID      int
 	role         connRole
 	leaseID      admission.LeaseID
 	members      []string
@@ -69,22 +48,14 @@ type conn struct {
 	sems         []string
 	startAt      time.Time
 
-	queueTimeoutMS int64
-
 	costSource         string
 	repo               string
 	expectedDurationMS int64
 	driftWarning       string
 	origin             wingwire.Origin
-	requestResources   wingwire.HostResources
-	requestSemaphores  []wingwire.SemaphoreClaim
-	semaphoresOnly     bool
 
 	stalled  bool
 	lowSince time.Time
-
-	livenessNonce uint64
-	livenessSeq   uint64
 
 	expectedP99MS int64
 	sampleCount   int
@@ -95,93 +66,15 @@ type conn struct {
 	contentionReason string
 
 	finalizable bool
-
-	unsupported int
 }
 
-const maxUnsupportedReplies = 8
-
-const maxRefusedTypeName = 64
-
-// safety: a refusal echoes a type name the peer chose, and a connection that
-// only sends unknown frames both amplifies and holds the daemon past its idle
-// window, so the reply is truncated and the exchange is capped.
-func (c *conn) refuse(t wingwire.MessageType) (closeConn bool) {
-	name := string(t)
-	if len(name) > maxRefusedTypeName {
-		name = name[:maxRefusedTypeName]
+func (c *conn) samplePID() int {
+	if c.measurementPID == 0 {
+		return c.pid
 	}
-	c.unsupported++
-	kind := "message_refused"
-	if !c.handshaked {
-		kind = "handshake_refused"
+	actual, err := admissionProcessBirth(c.measurementPID)
+	if err != nil || actual != c.measurementBirth {
+		return 0
 	}
-	data := map[string]any{"message_type": name, "health_probe": c.healthProbe}
-	if !c.handshaked {
-		data["reason"] = "unsupported message " + name
-	}
-	c.d.recordJournal(kind, c, data)
-	where := ""
-	if c.healthProbe {
-		where = " on a health probe"
-	}
-	c.logf("conn %d: message type %q is not served%s (%d/%d)", c.id, name, where, c.unsupported, maxUnsupportedReplies)
-	if err := c.send(&wingwire.Unsupported{Type: name}); err != nil {
-		return true
-	}
-	return c.unsupported >= maxUnsupportedReplies
-}
-
-func newConn(d *Daemon, nc net.Conn) *conn {
-	sc := bufio.NewScanner(nc)
-	sc.Buffer(make([]byte, 0, 64<<10), maxFrame)
-	var id uint64
-	if d != nil {
-		id = d.connSeq.Add(1)
-	}
-	return &conn{d: d, nc: nc, sc: sc, id: id}
-}
-
-func (c *conn) readMessage() (wingwire.Message, error) {
-	if !c.sc.Scan() {
-		if err := c.sc.Err(); err != nil {
-			return nil, err
-		}
-		return nil, errPeerClosed
-	}
-	return wingwire.Decode(c.sc.Bytes())
-}
-
-func (c *conn) send(msg wingwire.Message) error {
-	line, err := wingwire.Encode(msg)
-	if err != nil {
-		return err
-	}
-	c.writeMu.Lock()
-	defer c.writeMu.Unlock()
-	if err := c.nc.SetWriteDeadline(time.Now().Add(connWriteTimeout)); err != nil {
-		return err
-	}
-	if _, err := c.nc.Write(line); err != nil {
-		if errors.Is(err, os.ErrDeadlineExceeded) {
-			// safety: a partial timed-out frame corrupts framing; close the socket
-			// and let disconnect handling release admission.
-			c.logf("conn %d stopped reading; dropping connection after %s", c.id, connWriteTimeout)
-			c.close()
-		}
-		return err
-	}
-	_ = c.nc.SetWriteDeadline(time.Time{})
-	return nil
-}
-
-func (c *conn) logf(format string, args ...any) {
-	if c.d == nil {
-		return
-	}
-	c.d.cfg.logf(format, args...)
-}
-
-func (c *conn) close() {
-	c.closeOnce.Do(func() { _ = c.nc.Close() })
+	return c.measurementPID
 }

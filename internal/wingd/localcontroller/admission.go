@@ -27,7 +27,7 @@ func (c *localController) IsRunTerminal(runID wingwire.RunID) (bool, error) {
 		return false, nil
 	}
 	row, err := c.tenant.ReadRun(context.Background(), string(runID))
-	return terminal(row.State), err
+	return terminal(row.State) || row.CancelRequestedAt != nil, err
 }
 
 func (c *localController) FinalizeRun(runID string) {
@@ -76,4 +76,12 @@ func (c *localController) cancelRun(runID, reason string, actor runstate.Actor) 
 
 func terminal(state runstate.RunState) bool {
 	return state == runstate.RunSuccess || state == runstate.RunDryRun || state == runstate.RunFailed || state == runstate.RunCancelled
+}
+
+func (c *localController) LoadMachineAdmission(ctx context.Context) ([]byte, error) {
+	return c.store.LoadMachineAdmission(ctx)
+}
+
+func (c *localController) SaveMachineAdmission(ctx context.Context, data []byte) error {
+	return c.store.SaveMachineAdmission(ctx, data)
 }

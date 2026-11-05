@@ -49,6 +49,11 @@ func (d *Daemon) applyCapacity(stat HostStat) {
 	cap := d.deriveCapacity(stat)
 
 	d.mu.Lock()
+	if err := d.reapAdmissionLocked(); err != nil {
+		d.mu.Unlock()
+		d.cfg.logf("reconcile admission process: %v", err)
+		return
+	}
 	coreBand := math.Max(capacityCoreBand, capacityBandFraction*d.budgetCores)
 	memBand := uint64(capacityBandFraction * float64(d.budgetMemory))
 	coresMoved := math.Abs(cap.budgetCores-d.budgetCores) >= coreBand
@@ -91,5 +96,4 @@ func (d *Daemon) applyCapacity(stat HostStat) {
 	d.mu.Unlock()
 
 	d.cfg.logf("capacity changed: %.1f -> %.1f cores", oldCores, applyCores)
-	d.flush(nil)
 }

@@ -8,10 +8,8 @@ import (
 	"net"
 	"os"
 	"path/filepath"
-	"slices"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"golang.org/x/sync/singleflight"
@@ -24,11 +22,12 @@ import (
 const maxCancelledRunTombstones = 4096
 
 type Daemon struct {
-	cfg          Config
-	layout       layout
-	sampler      HostSampler
-	procSampler  ProcSampler
-	ownedSampler OwnedCPUSampler
+	admissionRevision uint64
+	cfg               Config
+	layout            layout
+	sampler           HostSampler
+	procSampler       ProcSampler
+	ownedSampler      OwnedCPUSampler
 
 	lockFile *os.File
 	ln       net.Listener
@@ -38,12 +37,9 @@ type Daemon struct {
 	apiDone chan struct{}
 	apiErr  string
 
-	connSeq atomic.Uint64
-
 	ready       chan struct{}
 	quit        chan struct{}
 	shutdownOne sync.Once
-	graceTimer  *time.Timer
 	finalizers  sync.WaitGroup
 	connections sync.WaitGroup
 
@@ -53,31 +49,32 @@ type Daemon struct {
 
 	queueStateReads singleflight.Group
 
-	mu                  sync.Mutex
-	persistMu           sync.Mutex
-	persistWrite        func(string, admission.Snapshot, []admissionEvent, []string) error
-	ledger              *admission.Ledger
-	conns               map[*conn]struct{}
-	byRun               map[string]*conn
-	leaseRun            map[admission.LeaseID]string
-	leaseCharge         map[admission.LeaseID]wingwire.HostResources
-	leaseMembers        map[admission.LeaseID][]string
-	reattachWait        map[admission.LeaseID]struct{}
-	reattachMembers     map[admission.LeaseID][]string
-	cancelPending       map[string]struct{}
-	cancelledRuns       map[string]struct{}
-	cancelledRunOrder   []string
-	disconnectedPending map[string]struct{}
-	draining            bool
-	shuttingDown        bool
-	localActivity       LocalActivity
-	dashboardConns      int
-	stay                bool
-	localControl        func(*bool) LocalStatus
-	localDashboard      func(context.Context, string, bool) error
-	dashboardSeen       func() time.Time
-	lastActivity        time.Time
-	startedAt           time.Time
+	mu                 sync.Mutex
+	admissionContext   context.Context
+	admissionStore     MachineAdmissionStore
+	admissionTickets   map[string]*admissionTicket
+	admissionKeys      map[string]string
+	admissionCommitted []byte
+	admissionChanged   chan struct{}
+	processBirth       func(int) (string, error)
+	ledger             *admission.Ledger
+	conns              map[*conn]struct{}
+	byRun              map[string]*conn
+	leaseRun           map[admission.LeaseID]string
+	leaseCharge        map[admission.LeaseID]wingwire.HostResources
+	leaseMembers       map[admission.LeaseID][]string
+	cancelledRuns      map[string]struct{}
+	cancelledRunOrder  []string
+	draining           bool
+	shuttingDown       bool
+	localActivity      LocalActivity
+	dashboardConns     int
+	stay               bool
+	localControl       func(*bool) LocalStatus
+	localDashboard     func(context.Context, string, bool) error
+	dashboardSeen      func() time.Time
+	lastActivity       time.Time
+	startedAt          time.Time
 
 	loadInit             bool
 	externalInit         bool
@@ -122,7 +119,7 @@ type Daemon struct {
 
 type delivery struct {
 	c   *conn
-	msg wingwire.Message
+	msg any
 }
 
 func New(cfg Config) (*Daemon, error) {
@@ -151,26 +148,26 @@ func New(cfg Config) (*Daemon, error) {
 		ownedSampler = newOwnedCPUSampler()
 	}
 	return &Daemon{
-		cfg:                 cfg,
-		stay:                cfg.Stay,
-		layout:              lay,
-		sampler:             sampler,
-		procSampler:         procSampler,
-		ownedSampler:        ownedSampler,
-		container:           containerSensorFor(cfg),
-		ready:               make(chan struct{}),
-		quit:                make(chan struct{}),
-		conns:               map[*conn]struct{}{},
-		byRun:               map[string]*conn{},
-		measuredPIDs:        map[int]struct{}{},
-		leaseRun:            map[admission.LeaseID]string{},
-		leaseCharge:         map[admission.LeaseID]wingwire.HostResources{},
-		leaseMembers:        map[admission.LeaseID][]string{},
-		reattachWait:        map[admission.LeaseID]struct{}{},
-		reattachMembers:     map[admission.LeaseID][]string{},
-		cancelPending:       map[string]struct{}{},
-		cancelledRuns:       map[string]struct{}{},
-		disconnectedPending: map[string]struct{}{},
+		cfg:              cfg,
+		admissionContext: context.Background(),
+		admissionTickets: map[string]*admissionTicket{},
+		admissionKeys:    map[string]string{},
+		admissionChanged: make(chan struct{}),
+		stay:             cfg.Stay,
+		layout:           lay,
+		sampler:          sampler,
+		procSampler:      procSampler,
+		ownedSampler:     ownedSampler,
+		container:        containerSensorFor(cfg),
+		ready:            make(chan struct{}),
+		quit:             make(chan struct{}),
+		conns:            map[*conn]struct{}{},
+		byRun:            map[string]*conn{},
+		measuredPIDs:     map[int]struct{}{},
+		leaseRun:         map[admission.LeaseID]string{},
+		leaseCharge:      map[admission.LeaseID]wingwire.HostResources{},
+		leaseMembers:     map[admission.LeaseID][]string{},
+		cancelledRuns:    map[string]struct{}{},
 	}, nil
 }
 
@@ -189,6 +186,7 @@ func (d *Daemon) Run(ctx context.Context) error {
 }
 
 func (d *Daemon) runElected(ctx context.Context) error {
+	d.admissionContext = context.WithoutCancel(ctx)
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	if err := ctx.Err(); err != nil {
@@ -225,7 +223,7 @@ func (d *Daemon) runElected(ctx context.Context) error {
 		d.finalShutdown()
 		return err
 	}
-	d.startGrace()
+
 	close(d.ready)
 	d.recordJournal("ready", nil, map[string]any{"socket": d.layout.sock})
 	d.cfg.logf("elected; serving %s (version %q)", d.layout.sock, d.cfg.Version)
@@ -233,7 +231,7 @@ func (d *Daemon) runElected(ctx context.Context) error {
 	diagnosticsDone := d.startDiagnostics(ctx.Done())
 
 	var workers sync.WaitGroup
-	for _, run := range []func(context.Context){d.watchContext, d.sampleLoop, d.stallLoop, d.idleLoop} {
+	for _, run := range []func(context.Context){d.watchContext, d.sampleLoop, d.stallLoop, d.idleLoop, d.admissionLivenessLoop} {
 		workers.Go(func() { run(ctx) })
 	}
 	defer func() {
@@ -256,30 +254,23 @@ func (d *Daemon) runElected(ctx context.Context) error {
 				return nil
 			}
 		}
-		c := newConn(d, nc)
-		peer, peerKnown := peerPID(nc)
-		if peerKnown {
-			c.pid, c.peerPID = peer, peer
-		}
 		if perr := checkPeerCredentials(nc); perr != nil {
-			d.recordJournal("handshake_refused", c, map[string]any{"reason": perr.Error()})
-			d.cfg.logf("%v", perr)
 			_ = nc.Close()
 			continue
 		}
-		d.startConn(c) //nolint:contextcheck // Socket closure and the shutdown join govern connection lifetime.
-	}
-}
+		d.connections.Add(1)
+		go func() {
+			defer d.connections.Done()
+			stop := context.AfterFunc(ctx, func() {
+				if err := nc.Close(); err != nil {
+					d.cfg.logf("close legacy peer: %v", err)
+				}
+			})
+			defer stop()
+			d.refuseLegacyAdmission(nc)
+		}()
 
-func (d *Daemon) startConn(c *conn) {
-	d.mu.Lock()
-	d.conns[c] = struct{}{}
-	d.mu.Unlock()
-	d.connections.Add(1)
-	go func() {
-		defer d.connections.Done()
-		d.serveConn(c)
-	}()
+	}
 }
 
 func (d *Daemon) watchContext(ctx context.Context) {
@@ -311,18 +302,6 @@ func (d *Daemon) finalShutdown() {
 	if draining {
 		d.recordJournal("drain_end", nil, nil)
 	}
-	if d.graceTimer != nil {
-		d.graceTimer.Stop()
-	}
-	d.mu.Lock()
-	var toClose []*conn
-	for c := range d.conns {
-		toClose = append(toClose, c)
-	}
-	d.mu.Unlock()
-	for _, c := range toClose {
-		c.close()
-	}
 	d.connections.Wait()
 	if err := d.persistState(); err != nil {
 		d.cfg.logf("final persist: %v", err)
@@ -349,33 +328,19 @@ func (d *Daemon) awaitFinalizers(within time.Duration) {
 	}
 }
 
-func (d *Daemon) finalizeAsync(runID string) {
-	if d.cfg.Runs == nil {
-		return
-	}
-	d.finalizers.Add(1)
-	go func() {
-		defer d.finalizers.Done()
-		d.cfg.Runs.FinalizeRun(runID)
-	}()
-}
-
 func (d *Daemon) initLedger() error {
-	snap, events, cancelledRuns, err := readStateWithCancellations(d.layout.state)
-	if err != nil {
-		home := filepath.Dir(d.layout.dir)
-		return fmt.Errorf("wingd: durable state %s is unreadable; run sparkwing daemon recover-state --yes --home %q: %w", d.layout.state, home, err)
+	d.admissionStore = d.cfg.AdmissionStore
+	if d.admissionStore == nil {
+		d.admissionStore, _ = d.cfg.Runs.(MachineAdmissionStore)
 	}
-	if len(cancelledRuns) > maxCancelledRunTombstones {
-		cancelledRuns = cancelledRuns[len(cancelledRuns)-maxCancelledRunTombstones:]
-	}
-	for _, runID := range cancelledRuns {
-		if _, exists := d.cancelledRuns[runID]; exists {
-			continue
+	var payload []byte
+	if d.admissionStore != nil {
+		var err error
+		payload, err = d.admissionStore.LoadMachineAdmission(d.admissionContext)
+		if err != nil {
+			return fmt.Errorf("wingd: load machine admission from state.db: %w", err)
 		}
-		d.recordCancelledRunLocked(runID)
 	}
-	d.events.restore(d.now(), events)
 	stat, serr := d.sampler.Sample()
 	if serr != nil {
 		d.cfg.logf("initial host sample: %v", serr)
@@ -402,36 +367,55 @@ func (d *Daemon) initLedger() error {
 	if d.cfg.Budget.IgnoreExternal {
 		d.cfg.logf("budget: ignoring external load in admission headroom (operator setting)")
 	}
-	var restored []admission.LeaseState
-	if snap != nil {
-		lg, kept, rerr := d.restoreLedger(*snap)
-		if rerr != nil {
-			d.discardState(rerr)
-		} else {
-			d.ledger = lg
-			restored = kept
+	if len(payload) > 0 {
+		if err := d.restoreAdmissionPayloadLocked(payload); err != nil {
+			return err
 		}
-	}
-	if d.ledger == nil {
-		lg, err := admission.New(admission.Config{
-			TotalCores:       d.budgetCores,
-			TotalMemoryBytes: d.budgetMemory,
-			Scheduling:       d.cfg.admissionPolicy().Scheduling,
-		})
+		d.admissionCommitted = payload
+		d.ledger.SetSchedulingPolicy(d.cfg.admissionPolicy().Scheduling)
+		usedCores, usedMemory := d.ledger.Used()
+		totalCores, totalMemory := max(d.budgetCores, usedCores), max(d.budgetMemory, usedMemory)
+		for _, waiter := range d.ledger.Snapshot().Waiters {
+			totalCores = max(totalCores, float64(waiter.MilliCores)/1000)
+			totalMemory = max(totalMemory, waiter.MemoryBytes)
+		}
+		if err := d.ledger.ResizeTotals(totalCores, totalMemory); err != nil {
+			return err
+		}
+	} else {
+		lg, err := admission.New(admission.Config{TotalCores: d.budgetCores, TotalMemoryBytes: d.budgetMemory, Scheduling: d.cfg.admissionPolicy().Scheduling})
 		if err != nil {
 			return fmt.Errorf("wingd: new ledger: %w", err)
 		}
 		d.ledger = lg
 	}
-	for _, ls := range restored {
-		d.leaseRun[ls.ID] = ls.RequestID
-		d.leaseCharge[ls.ID] = wingwire.HostResources{
-			Cores:       float64(ls.MilliCores) / 1000.0,
-			MemoryBytes: int64(ls.MemoryBytes),
+	if d.cfg.Runs != nil {
+		checked := map[wingwire.RunID]bool{}
+		for _, ticket := range d.admissionTickets {
+			if !ticket.Active {
+				continue
+			}
+			runID := ticket.Input.Request.RunID.RunID()
+			if checked[runID] {
+				continue
+			}
+			checked[runID] = true
+			terminal, err := d.cfg.Runs.IsRunTerminal(runID)
+			if err != nil {
+				return fmt.Errorf("reconcile machine admission run %s: %w", runID, err)
+			}
+			if terminal {
+				if err := d.cancelAdmissionRunLocked(string(runID), "run was cancelled or completed while controller was stopped"); err != nil {
+					return err
+				}
+			}
 		}
-		d.leaseMembers[ls.ID] = append([]string(nil), ls.Members...)
-		d.reattachWait[ls.ID] = struct{}{}
-		d.reattachMembers[ls.ID] = append([]string(nil), ls.Members...)
+	}
+	if err := d.reapAdmissionLocked(); err != nil {
+		return err
+	}
+	if err := d.commitAdmissionLocked(); err != nil {
+		return err
 	}
 	d.mu.Lock()
 	d.lastActivity = d.now()
@@ -439,219 +423,11 @@ func (d *Daemon) initLedger() error {
 	return nil
 }
 
-func (d *Daemon) restoreLedger(snap admission.Snapshot) (*admission.Ledger, []admission.LeaseState, error) {
-	lg, err := admission.Restore(snap, nil)
-	if err != nil {
-		return nil, nil, fmt.Errorf("restore ledger: %w", err)
-	}
-	lg.SetSchedulingPolicy(d.cfg.admissionPolicy().Scheduling)
-	neededMilliCores := int64(0)
-	neededMemory := uint64(0)
-	for _, lease := range snap.Leases {
-		neededMilliCores += lease.MilliCores
-		neededMemory += lease.MemoryBytes
-	}
-	for _, waiter := range snap.Waiters {
-		neededMilliCores = max(neededMilliCores, waiter.MilliCores)
-		neededMemory = max(neededMemory, waiter.MemoryBytes)
-	}
-	applyCores := max(d.budgetCores, float64(neededMilliCores)/1000.0)
-	applyMemory := max(d.budgetMemory, neededMemory)
-	if err := lg.ResizeTotals(applyCores, applyMemory); err != nil {
-		return nil, nil, fmt.Errorf("resize restored ledger: %w", err)
-	}
-	if _, err := lg.SetHeadroom(d.budgetCores, d.budgetMemory); err != nil {
-		return nil, nil, fmt.Errorf("cap restored ledger headroom: %w", err)
-	}
-	return lg, snap.Leases, nil
-}
-
-func (d *Daemon) discardState(reason error) {
-	dst, err := quarantineState(d.layout.state, d.now())
-	if err != nil {
-		d.cfg.logf("state file unusable (%v); quarantine failed: %v; serving with a fresh ledger", reason, err)
-		return
-	}
-	d.cfg.logf("state file unusable: %v; quarantined to %s, serving with a fresh ledger", reason, dst)
-}
-
-func (d *Daemon) startGrace() {
-	d.mu.Lock()
-	pending := len(d.reattachWait)
-	d.mu.Unlock()
-	if pending == 0 {
-		return
-	}
-	d.graceTimer = time.AfterFunc(d.cfg.graceWindow(), d.expireGrace)
-}
-
-func (d *Daemon) expireGrace() {
-	d.mu.Lock()
-	if d.shuttingDown {
-		d.mu.Unlock()
-		return
-	}
-	var events []admission.Event
-	released := 0
-	for id := range d.reattachWait {
-		for _, m := range d.reattachMembers[id] {
-			d.recordJournal("grace_expiry", &conn{runID: m}, map[string]any{"lease_id": id})
-			evs, err := d.ledger.Release(id, m)
-			if err == nil {
-				events = append(events, evs...)
-			}
-		}
-		delete(d.reattachMembers, id)
-		delete(d.reattachWait, id)
-		released++
-	}
-	deliveries := d.routeLocked(events)
-	d.touchLocked()
-	d.mu.Unlock()
-	if released > 0 {
-		d.cfg.logf("grace expired: released %d unreclaimed lease(s)", released)
-	}
-	d.flush(deliveries)
-}
-
 func (d *Daemon) now() time.Time { return d.cfg.now() }
 
 func (d *Daemon) touchLocked() { d.lastActivity = d.now() }
 
-func (d *Daemon) touchConnLocked(c *conn) {
-	if c.handshaked && !c.healthProbe {
-		d.touchLocked()
-	}
-}
-
 func (d *Daemon) isDrainingLocked() bool { return d.draining }
-
-func (d *Daemon) serveConn(c *conn) {
-	defer d.handleDisconnect(c)
-
-	msg, err := c.readMessage()
-	if err != nil {
-		var unknown *wingwire.UnknownTypeError
-		if errors.As(err, &unknown) {
-			c.refuse(unknown.Type)
-		}
-		return
-	}
-	hello, ok := msg.(*wingwire.Hello)
-	if !ok {
-		c.refuse(wingwire.TypeOf(msg))
-		return
-	}
-	d.mu.Lock()
-	draining := d.isDrainingLocked()
-	c.protocolMajor = wingwire.ServedMajor(hello.ProtocolMajor)
-	served := c.protocolMajor
-	c.healthProbe = hello.HealthProbe
-	c.holderLiveness = hello.HolderLiveness
-	c.handshaked = true
-
-	if !c.healthProbe {
-		d.touchLocked()
-	}
-	d.mu.Unlock()
-	if !c.healthProbe {
-		d.recordJournal("connection_opened", c, map[string]any{"role": "pending"})
-	}
-	d.recordJournal("connection_handshake", c, map[string]any{"health_probe": c.healthProbe, "holder_liveness": c.holderLiveness, "protocol_major": served})
-	ack := &wingwire.HelloAck{
-		ProtocolMajor:       served,
-		NativeProtocolMajor: ProtocolMajor,
-		BinaryVersion:       d.cfg.Version,
-		BuildIdentity:       wingwire.BuildIdentity,
-		Draining:            draining,
-		StoreSchemaVersion:  d.cfg.StoreSchemaVersion,
-	}
-	if d.cfg.ServeAPI != nil {
-		apiReady, apiErr := d.apiState()
-		ack.APIReady = &apiReady
-		ack.APIError = apiErr
-	}
-	if d.cfg.Runs != nil {
-		storeErr := d.cfg.Runs.Ready()
-		storeReady := storeErr == nil
-		ack.StoreReady = &storeReady
-		if storeErr != nil {
-			ack.StoreError = storeErr.Error()
-		}
-	}
-	if err := c.send(ack); err != nil {
-		return
-	}
-
-	for {
-		msg, err := c.readMessage()
-		if err != nil {
-			var unknown *wingwire.UnknownTypeError
-			if !errors.As(err, &unknown) || c.refuse(unknown.Type) {
-				return
-			}
-			continue
-		}
-		if d.dispatch(c, msg) {
-			return
-		}
-	}
-}
-
-func (d *Daemon) dispatch(c *conn, msg wingwire.Message) bool {
-	if c.healthProbe {
-		switch m := msg.(type) {
-		case *wingwire.QueueState:
-			d.handleQueueState(c)
-		case *wingwire.LocalControl:
-			if m.Stay != nil {
-				return c.refuse(wingwire.TypeOf(msg))
-			}
-			return d.handleLocalControl(c, m)
-		default:
-			return c.refuse(wingwire.TypeOf(msg))
-		}
-		return false
-	}
-	switch m := msg.(type) {
-	case *wingwire.AdmissionRequest:
-		d.handleAdmission(c, m)
-	case *wingwire.Reattach:
-		d.handleReattach(c, m)
-	case *wingwire.Release:
-		d.handleRelease(c, m)
-	case *wingwire.LivenessAck:
-		d.handleLivenessAck(c, m)
-	case *wingwire.QueueState:
-		d.handleQueueState(c)
-	case *wingwire.CancelLease:
-		d.handleCancelLease(c, m)
-	case *wingwire.SetPriority:
-		d.handleSetPriority(c, m)
-	case *wingwire.StatsReset:
-		d.handleStatsReset(c)
-	case *wingwire.LocalControl:
-		return d.handleLocalControl(c, m)
-	case *wingwire.LocalDashboard:
-		return d.handleLocalDashboard(c, m)
-	case *wingwire.DrainRequest:
-		d.handleDrain(c, m)
-		return true
-	default:
-		return c.refuse(wingwire.TypeOf(msg))
-	}
-	return false
-}
-
-func (d *Daemon) handleLivenessAck(c *conn, ack *wingwire.LivenessAck) {
-	d.mu.Lock()
-	defer d.mu.Unlock()
-	if c.role == roleHolder && c.livenessNonce == ack.Nonce {
-		c.livenessNonce = 0
-		c.stalled = false
-		c.lowSince = d.now()
-	}
-}
 
 func chargedResources(r wingwire.HostResources) wingwire.HostResources {
 	if r.Cores == 0 && r.MemoryBytes == 0 {
@@ -755,269 +531,6 @@ func (d *Daemon) idleGrantableMemoryLocked() uint64 {
 	return grantable
 }
 
-const subLeaseMajor = 2
-
-func finalizesRun(protocolMajor int, req *wingwire.AdmissionRequest) bool {
-	if protocolMajor < subLeaseMajor {
-		return !req.SemaphoresOnly
-	}
-	return !req.SubLease
-}
-
-func (d *Daemon) terminalCheckReason(err error) string {
-	version := d.cfg.Version
-	if version == "" {
-		version = "(unknown)"
-	}
-	return fmt.Sprintf("daemon %s could not read the runs store: %v", version, err)
-}
-
-func (d *Daemon) handleAdmission(c *conn, req *wingwire.AdmissionRequest) {
-	data := map[string]any{"resources": req.Resources, "class": req.Class, "priority": req.Priority}
-	if len(req.Semaphores) > 0 {
-		data["semaphores"] = req.Semaphores
-	}
-	if req.OwnerRunID != "" {
-		data["requested_owner_run_id"] = req.OwnerRunID
-	}
-	d.recordJournal("request", &conn{runID: string(req.RunID), displayRunID: req.DisplayRunID, pipeline: req.Pipeline, repo: req.Repo, pid: req.PID}, data)
-	if !validCostSource(req.CostSource) {
-		d.rejectInvalid(c, req, rejectCauseCostSource, fmt.Sprintf(
-			"admission request invalid: unrecognized cost source %q; pin resources explicitly with plan.Resources(sparkwing.Cores(n), sparkwing.MemoryGB(n)), or upgrade this box's sparkwing so its daemon knows the source",
-			req.CostSource))
-		return
-	}
-	d.mu.Lock()
-	cancelled := d.runCancelledLocked(string(req.RunID))
-	d.mu.Unlock()
-	if !cancelled && d.cfg.Runs != nil {
-		var err error
-		cancelled, err = d.cfg.Runs.IsRunTerminal(req.RunID.RunID())
-		if err != nil {
-			d.cfg.logf("admission: terminal check for %s: %v", string(req.RunID), err)
-			d.recordJournal("rejected", &conn{runID: string(req.RunID)}, map[string]any{"reason": "terminal check failed", "error": err.Error()})
-			_ = c.send(&wingwire.Evicted{RunID: string(req.RunID), Key: "terminal-check", Policy: wingwire.PolicyFail, Reason: d.terminalCheckReason(err)})
-			return
-		}
-	}
-	if cancelled {
-		d.recordJournal("rejected", &conn{runID: string(req.RunID)}, map[string]any{"reason": "run terminal or cancelled"})
-		_ = c.send(&wingwire.Evicted{RunID: string(req.RunID), Key: "cancelled", Policy: wingwire.PolicyFail})
-		return
-	}
-	requested := chargedResources(req.Resources)
-	charged := requested
-
-	d.mu.Lock()
-	if d.runCancelledLocked(string(req.RunID)) {
-		d.mu.Unlock()
-		d.recordJournal("rejected", &conn{runID: string(req.RunID)}, map[string]any{"reason": "run cancelled"})
-		_ = c.send(&wingwire.Evicted{RunID: string(req.RunID), Key: "cancelled", Policy: wingwire.PolicyFail})
-		return
-	}
-	if d.draining {
-		d.mu.Unlock()
-		d.recordJournal("rejected", c, map[string]any{"reason": "draining"})
-		_ = c.send(&wingwire.Evicted{RunID: string(req.RunID), Key: "draining", Policy: wingwire.Policy("draining")})
-		return
-	}
-	if req.SemaphoresOnly {
-		charged = wingwire.HostResources{}
-	} else {
-		charged = d.clampHostChargeLocked(charged, req.CostSource)
-	}
-	req.OwnerRunID = d.validatedOwnerRunIDLocked(req.OwnerRunID, req.OwnerLeaseToken)
-	// safety: an operator re-rank outranks the priority the plan carried, and
-	// requestIdentityMatches compares the connection's, so both sides of a
-	// reconnect have to see the same resolved rank.
-	req.Priority = d.ledger.EffectivePriority(string(req.RunID), req.OwnerRunID, req.Priority)
-	ledgerCharge := charged
-	if d.cfg.admissionPolicy().Mode == admission.ModeOff {
-		ledgerCharge = wingwire.HostResources{}
-	}
-	ar := requestFromWireWithMetadata(string(req.RunID), req.OwnerRunID, ledgerCharge, req.Semaphores, req.CostSource, req.Priority, req.Class, req.ExpectedP99MS)
-	ar.BurstCores = d.cfg.admissionPolicy().interactiveBurstEligible(req, ledgerCharge)
-	c.runID = string(req.RunID)
-	c.journalRunID = string(req.RunID)
-	c.ownerRunID = req.OwnerRunID
-	c.displayRunID = req.DisplayRunID
-	c.pipeline = req.Pipeline
-	c.priority = req.Priority
-	c.class = string(admission.NormalizeWorkloadClass(admission.WorkloadClass(req.Class)))
-	c.repo = req.Repo
-	c.pid = req.PID
-	c.resources = charged
-	c.sems = semNames(req.Semaphores)
-	c.finalizable = finalizesRun(c.protocolMajor, req)
-	c.startAt = d.now()
-	c.costSource = string(req.CostSource)
-	c.expectedDurationMS = req.ExpectedDurationMS
-	c.expectedP99MS = req.ExpectedP99MS
-	c.sampleCount = req.SampleCount
-	c.driftWarning = req.DriftWarning
-	c.origin = req.Origin
-	c.queueTimeoutMS = tightestQueueTimeoutMS(req.Semaphores)
-	c.requestResources = requested
-	c.requestSemaphores = cloneSemaphoreClaims(req.Semaphores)
-	c.semaphoresOnly = req.SemaphoresOnly
-	if existing := d.byRun[string(req.RunID)]; existing != nil && existing != c {
-		switch existing.role {
-		case roleWaiter:
-			if !requestIdentityMatches(existing, req, c.finalizable) ||
-				existing.queueTimeoutMS != tightestQueueTimeoutMS(req.Semaphores) ||
-				!queuedRequestPresent(d.ledger.Snapshot(), string(req.RunID)) {
-				d.mu.Unlock()
-				_ = c.send(&wingwire.Evicted{RunID: string(req.RunID), Key: "duplicate", Policy: wingwire.PolicyFail})
-				return
-			}
-			c.role = roleWaiter
-			if !existing.startAt.IsZero() {
-				c.startAt = existing.startAt
-			}
-			existing.role = roleNone
-			existing.runID = ""
-			existing.members = nil
-			existing.finalizable = false
-			d.byRun[string(req.RunID)] = c
-			events, err := d.ledger.ReplaceWaiter(ar)
-			if err != nil {
-				existing.role = roleWaiter
-				existing.runID = string(req.RunID)
-				existing.finalizable = c.finalizable
-				d.byRun[string(req.RunID)] = existing
-				c.role = roleNone
-				c.runID = ""
-				c.finalizable = false
-				d.mu.Unlock()
-				_ = c.send(&wingwire.Evicted{RunID: string(req.RunID), Key: submitErrorKey(err), Policy: wingwire.PolicyFail})
-				return
-			}
-			deliveries := d.routeLocked(events)
-			snap := d.ledger.Snapshot()
-			if c.role == roleWaiter {
-				if queued := d.queuedDeliveryLockedFromSnapshot(c, snap, string(req.RunID)); queued != nil {
-					deliveries = append(deliveries, *queued)
-				}
-			}
-			d.touchLocked()
-			d.mu.Unlock()
-			existing.close()
-			d.flush(deliveries)
-			return
-		case roleHolder:
-			if len(existing.members) != 1 {
-				d.mu.Unlock()
-				_ = c.send(&wingwire.Evicted{RunID: string(req.RunID), Key: "duplicate", Policy: wingwire.PolicyFail})
-				return
-			}
-			snap := d.ledger.Snapshot()
-			if !requestMetadataMatches(existing, req, c.finalizable) ||
-				!grantedRequestPresent(snap, existing.leaseID, string(req.RunID)) {
-				d.mu.Unlock()
-				_ = c.send(&wingwire.Evicted{RunID: string(req.RunID), Key: "duplicate", Policy: wingwire.PolicyFail})
-				return
-			}
-			leaseID := existing.leaseID
-			lease, ok := d.ledger.LeaseByID(leaseID)
-			if !ok {
-				d.mu.Unlock()
-				_ = c.send(&wingwire.Evicted{RunID: string(req.RunID), Key: "duplicate", Policy: wingwire.PolicyFail})
-				return
-			}
-			c.role = roleHolder
-			c.leaseID = leaseID
-			c.members = cloneStrings(existing.members)
-			c.resources = existing.resources
-			c.priority = existing.priority
-			c.ownerRunID = existing.ownerRunID
-			c.displayRunID = existing.displayRunID
-			if !existing.startAt.IsZero() {
-				c.startAt = existing.startAt
-			}
-			c.holdSampledMS = existing.holdSampledMS
-			c.holdSaturatedMS = existing.holdSaturatedMS
-			c.contended = existing.contended
-			c.contentionReason = existing.contentionReason
-			c.stalled = existing.stalled
-			c.lowSince = existing.lowSince
-			existing.role = roleNone
-			existing.runID = ""
-			existing.members = nil
-			existing.finalizable = false
-			for _, member := range c.members {
-				d.byRun[member] = c
-			}
-			soleUnderLoad := d.soleRunUnderLoadLocked(c)
-			externalCores := d.externalCores
-			d.touchLocked()
-			d.mu.Unlock()
-			existing.close()
-			grant := &wingwire.Grant{
-				RunID:      string(req.RunID),
-				LeaseToken: lease.Token,
-				Resources:  c.resources,
-				Semaphores: leaseSemaphores(snap, leaseID),
-			}
-			if soleUnderLoad {
-				grant.SoleRunUnderLoad = true
-				grant.ExternalCores = externalCores
-			}
-			_ = c.send(grant)
-			return
-		default:
-			d.mu.Unlock()
-			_ = c.send(&wingwire.Evicted{RunID: string(req.RunID), Key: "duplicate", Policy: wingwire.PolicyFail})
-			return
-		}
-	}
-	d.byRun[string(req.RunID)] = c
-	dec, events, err := d.ledger.Submit(ar)
-	if err != nil {
-		delete(d.byRun, string(req.RunID))
-		d.mu.Unlock()
-		key := submitErrorKey(err)
-		d.recordJournal("rejected", c, map[string]any{"reason": key, "error": err.Error()})
-		if key == "invalid" {
-			d.rejectInvalid(c, req, rejectCauseRequest, "admission request invalid: "+err.Error())
-			return
-		}
-		_ = c.send(&wingwire.Evicted{RunID: string(req.RunID), Key: key, Policy: wingwire.PolicyFail, Reason: refusalReason(err)})
-		return
-	}
-	switch dec.Kind {
-	case admission.DecisionQueued:
-		if req.NonBlocking {
-			events = append(events, d.ledger.CancelWaiter(string(req.RunID))...)
-			delete(d.byRun, string(req.RunID))
-			deliveries := d.routeLocked(events)
-			d.touchLocked()
-			d.mu.Unlock()
-			d.recordJournal("denied", c, map[string]any{"reason": "capacity", "nonblocking": true})
-			d.flush(deliveries)
-			_ = c.send(&wingwire.Evicted{RunID: string(req.RunID), Key: "capacity", Policy: wingwire.PolicyFail, Reason: "capacity is not immediately available"})
-			return
-		}
-		c.role = roleWaiter
-	case admission.DecisionFailed, admission.DecisionSkipped:
-		delete(d.byRun, string(req.RunID))
-		policy := wingwire.PolicyFail
-		if dec.Kind == admission.DecisionSkipped {
-			policy = wingwire.PolicySkip
-		}
-		d.mu.Unlock()
-		d.recordJournal("denied", c, map[string]any{"reason": dec.Key, "decision": dec.Kind})
-		_ = c.send(&wingwire.Evicted{RunID: string(req.RunID), Key: dec.Key, Policy: policy})
-		return
-	}
-	deliveries := d.routeLocked(events)
-	d.touchLocked()
-	d.mu.Unlock()
-	d.flush(deliveries)
-	if len(dec.Evicted) > 0 {
-		d.cfg.logf("cancel_others: run %s superseded %d holder(s)", string(req.RunID), len(dec.Evicted))
-	}
-}
-
 func (d *Daemon) validatedOwnerRunIDLocked(ownerRunID, ownerLeaseToken string) string {
 	if ownerRunID == "" || ownerLeaseToken == "" {
 		return ""
@@ -1042,65 +555,6 @@ func validCostSource(source wingwire.CostSource) bool {
 	}
 }
 
-func tightestQueueTimeoutMS(sems []wingwire.SemaphoreClaim) int64 {
-	var t int64
-	for _, s := range sems {
-		if s.QueueTimeoutMS <= 0 || (s.Policy != "" && s.Policy != wingwire.PolicyQueue) {
-			continue
-		}
-		if t == 0 || s.QueueTimeoutMS < t {
-			t = s.QueueTimeoutMS
-		}
-	}
-	return t
-}
-
-func requestMetadataMatches(existing *conn, req *wingwire.AdmissionRequest, newFinalizable bool) bool {
-	requested := chargedResources(req.Resources)
-	return requestIdentityMatches(existing, req, newFinalizable) &&
-		existing.costSource == string(req.CostSource) &&
-		existing.expectedDurationMS == req.ExpectedDurationMS &&
-		existing.expectedP99MS == req.ExpectedP99MS &&
-		existing.sampleCount == req.SampleCount &&
-		existing.driftWarning == req.DriftWarning &&
-		existing.requestResources == requested &&
-		existing.queueTimeoutMS == tightestQueueTimeoutMS(req.Semaphores)
-}
-
-func requestIdentityMatches(existing *conn, req *wingwire.AdmissionRequest, newFinalizable bool) bool {
-	return existing.finalizable == newFinalizable &&
-		existing.pipeline == req.Pipeline &&
-		existing.repo == req.Repo &&
-		existing.pid == req.PID &&
-		existing.origin == req.Origin &&
-		existing.priority == req.Priority &&
-		existing.class == string(admission.NormalizeWorkloadClass(admission.WorkloadClass(req.Class))) &&
-		existing.ownerRunID == req.OwnerRunID &&
-		existing.displayRunID == req.DisplayRunID &&
-		claimRequestsMatch(existing.requestSemaphores, req.Semaphores) &&
-		existing.semaphoresOnly == req.SemaphoresOnly
-}
-
-func grantedRequestPresent(snap admission.Snapshot, leaseID admission.LeaseID, runID string) bool {
-	for _, lease := range snap.Leases {
-		if lease.ID != leaseID || lease.RequestID != runID {
-			continue
-		}
-		return true
-	}
-	return false
-}
-
-func queuedRequestPresent(snap admission.Snapshot, runID string) bool {
-	for _, w := range snap.Waiters {
-		if w.RequestID != runID {
-			continue
-		}
-		return true
-	}
-	return false
-}
-
 func cloneSemaphoreClaims(in []wingwire.SemaphoreClaim) []wingwire.SemaphoreClaim {
 	if len(in) == 0 {
 		return nil
@@ -1108,33 +562,6 @@ func cloneSemaphoreClaims(in []wingwire.SemaphoreClaim) []wingwire.SemaphoreClai
 	return append([]wingwire.SemaphoreClaim(nil), in...)
 }
 
-func cloneStrings(in []string) []string {
-	if len(in) == 0 {
-		return nil
-	}
-	return append([]string(nil), in...)
-}
-
-func claimRequestsMatch(got, want []wingwire.SemaphoreClaim) bool {
-	if len(got) != len(want) {
-		return false
-	}
-	for i, claim := range got {
-		expected := want[i]
-		if claim.Policy == "" {
-			claim.Policy = wingwire.PolicyQueue
-		}
-		if expected.Policy == "" {
-			expected.Policy = wingwire.PolicyQueue
-		}
-		if claim != expected {
-			return false
-		}
-	}
-	return true
-}
-
-// safety: an orphaned run's mark lives on its own lease, not among the tombstones, so every guard checks both.
 func (d *Daemon) runCancelledLocked(runID string) bool {
 	if _, cancelled := d.cancelledRuns[runID]; cancelled {
 		return true
@@ -1152,164 +579,6 @@ func leaseSemaphores(snap admission.Snapshot, id admission.LeaseID) []string {
 	return nil
 }
 
-func (d *Daemon) handleReattach(c *conn, req *wingwire.Reattach) {
-	d.recordJournal("reattach_request", &conn{runID: req.RunID}, nil)
-	d.mu.Lock()
-	leaseID, err := d.ledger.Reattach(req.LeaseToken)
-	if err != nil {
-		d.mu.Unlock()
-		d.recordJournal("reattach_refused", &conn{runID: req.RunID}, map[string]any{"reason": "unknown lease"})
-		_ = c.send(&wingwire.Evicted{RunID: c.runID, Key: "reattach", Policy: wingwire.PolicyFail})
-		return
-	}
-	_, pending := d.reattachWait[leaseID]
-	if !pending {
-		d.mu.Unlock()
-		d.recordJournal("reattach_refused", &conn{runID: req.RunID}, map[string]any{"reason": "grace expired or already reclaimed", "lease_id": leaseID})
-		_ = c.send(&wingwire.Evicted{RunID: c.runID, Key: "reattach", Policy: wingwire.PolicyFail})
-		return
-	}
-	members := append([]string(nil), d.leaseMembers[leaseID]...)
-	if len(members) == 0 {
-		for _, lease := range d.ledger.Snapshot().Leases {
-			if lease.ID == leaseID {
-				members = append(members, lease.Members...)
-				break
-			}
-		}
-	}
-	d.mu.Unlock()
-	for _, member := range members {
-		if d.cfg.Runs == nil {
-			continue
-		}
-		terminal, checkErr := d.cfg.Runs.IsRunTerminal(wingwire.HolderRef(member).RunID())
-		if checkErr != nil {
-			d.cfg.logf("reattach: terminal check for %s: %v", member, checkErr)
-			d.recordJournal("reattach_refused", &conn{runID: member}, map[string]any{"reason": "terminal check failed", "error": checkErr.Error()})
-			_ = c.send(&wingwire.Evicted{RunID: member, Key: "terminal-check", Policy: wingwire.PolicyFail, Reason: d.terminalCheckReason(checkErr)})
-			return
-		}
-		if terminal {
-			d.mu.Lock()
-			d.recordCancelledRunLocked(member)
-			d.mu.Unlock()
-			d.recordJournal("reattach_refused", &conn{runID: member}, map[string]any{"reason": "run terminal"})
-			_ = c.send(&wingwire.Evicted{RunID: member, Key: "cancelled", Policy: wingwire.PolicyFail})
-			return
-		}
-	}
-	d.mu.Lock()
-	currentLeaseID, err := d.ledger.Reattach(req.LeaseToken)
-	_, pending = d.reattachWait[leaseID]
-	if err != nil || currentLeaseID != leaseID || !pending {
-		d.mu.Unlock()
-		d.recordJournal("reattach_refused", &conn{runID: req.RunID}, map[string]any{"reason": "lease changed during terminal check"})
-		_ = c.send(&wingwire.Evicted{RunID: c.runID, Key: "reattach", Policy: wingwire.PolicyFail})
-		return
-	}
-	requestID := d.leaseRun[leaseID]
-	reclaimed, claimed := d.claimUnreclaimedMemberLocked(leaseID, requestID, req.RunID)
-	if !claimed {
-		d.mu.Unlock()
-		d.recordJournal("reattach_refused", &conn{runID: req.RunID}, map[string]any{"reason": "member already reclaimed or absent", "lease_id": leaseID})
-		d.cfg.logf("reattach: lease %s holds no unreclaimed member named %s", leaseID, req.RunID)
-		if err := c.send(&wingwire.Evicted{RunID: req.RunID, Key: "reattach", Policy: wingwire.PolicyFail}); err != nil {
-			d.cfg.logf("reattach: refuse %s: %v", req.RunID, err)
-		}
-		return
-	}
-	c.role = roleHolder
-	c.leaseID = leaseID
-	c.startAt = d.now()
-	c.finalizable = true
-	c.resources = d.leaseCharge[leaseID]
-	c.members = []string{reclaimed}
-	c.runID = reclaimed
-	c.journalRunID = reclaimed
-	for _, m := range c.members {
-		d.byRun[m] = c
-	}
-	lease, _ := d.ledger.LeaseByID(leaseID)
-	orphaned := d.ledger.Orphaned(reclaimed)
-	d.touchLocked()
-	d.recordJournal("reattach_accepted", c, map[string]any{"lease_id": leaseID, "member": reclaimed})
-	d.mu.Unlock()
-	if err := d.persistState(); err != nil {
-		d.cfg.logf("persist: %v", err)
-	}
-	d.cfg.logf("reattach: run %s reclaimed lease %s", reclaimed, leaseID)
-	_ = c.send(&wingwire.Grant{RunID: reclaimed, LeaseToken: lease.Token, Resources: c.resources})
-	// safety: a run cancelled while it was away, as an attached run is when an ancestor's lease ends during a
-	// daemon restart, is told so the moment it is back, rather than run on under groups nobody holds.
-	if orphaned {
-		if err := c.send(&wingwire.Cancel{RunID: reclaimed, Reason: orphanedReason}); err != nil {
-			go d.handleDisconnect(c)
-		}
-	}
-}
-
-// safety: a nested run's parent and child present the same lease token, so each
-// reattach claims one member; one connection owning them all releases the whole
-// lease when any one run ends. A client naming runID claims that member and
-// nothing else; a frame that names no run leaves members going out in order
-// after the lease's request, which is what gave a child the parent's identity.
-func (d *Daemon) claimUnreclaimedMemberLocked(id admission.LeaseID, requestID, runID string) (member string, claimed bool) {
-	remaining := d.reattachMembers[id]
-	if len(remaining) == 0 {
-		if runID != "" && runID != requestID {
-			return "", false
-		}
-		delete(d.reattachMembers, id)
-		delete(d.reattachWait, id)
-		return requestID, true
-	}
-	want := runID
-	if want == "" {
-		want = requestID
-	}
-	at := slices.Index(remaining, want)
-	if at < 0 {
-		if runID != "" {
-			return "", false
-		}
-		at = 0
-	}
-	member = remaining[at]
-	remaining = append(remaining[:at], remaining[at+1:]...)
-	if len(remaining) == 0 {
-		delete(d.reattachMembers, id)
-		delete(d.reattachWait, id)
-	} else {
-		d.reattachMembers[id] = remaining
-	}
-	return member, true
-}
-
-func (d *Daemon) handleRelease(c *conn, _ *wingwire.Release) {
-	d.mu.Lock()
-	if c.role != roleHolder {
-		d.mu.Unlock()
-		return
-	}
-	events := d.releaseConnLocked(c)
-	deliveries := d.routeLocked(events)
-	d.touchLocked()
-	d.mu.Unlock()
-	d.flush(deliveries)
-}
-
-func (d *Daemon) handleDrain(c *conn, req *wingwire.DrainRequest) {
-	d.recordJournal("drain_begin", nil, map[string]any{"successor_version": req.SuccessorVersion})
-	remaining, err := d.beginDrain()
-	if err != nil {
-		d.cfg.logf("persist: %v", err)
-	}
-	d.cfg.logf("draining for successor %s", req.SuccessorVersion)
-	_ = c.send(&wingwire.DrainAck{HoldersRemaining: remaining})
-	d.shutdownWithReason("drain")
-}
-
 func (d *Daemon) beginDrain() (int, error) {
 	remaining := d.markDraining()
 	err := d.persistState()
@@ -1322,291 +591,6 @@ func (d *Daemon) markDraining() int {
 	defer d.mu.Unlock()
 	d.draining = true
 	return len(d.leaseRun)
-}
-
-func (d *Daemon) handleCancelLease(c *conn, req *wingwire.CancelLease) {
-	d.mu.Lock()
-	target := d.byRun[req.RunID]
-	if _, pending := d.cancelPending[req.RunID]; pending {
-		d.mu.Unlock()
-		c.close()
-		return
-	}
-	if target == nil || !target.finalizable ||
-		(target.role != roleHolder && target.role != roleWaiter) {
-		d.mu.Unlock()
-		_ = c.send(&wingwire.CancelLeaseAck{Found: false})
-		return
-	}
-	waiter := target.role == roleWaiter
-	affected := []string{req.RunID}
-	var parents map[string]string
-	if !waiter {
-		snap := d.ledger.Snapshot()
-		parents = leaseParents(snap)
-		affected = nil
-		for _, lease := range snap.Leases {
-			for _, member := range lease.Members {
-				for ancestor, hops := member, 0; ancestor != "" && hops <= len(parents); ancestor, hops = parents[ancestor], hops+1 {
-					if ancestor == req.RunID {
-						affected = append(affected, member)
-						break
-					}
-				}
-			}
-		}
-	}
-	affectedSet := make(map[string]struct{}, len(affected))
-	for _, runID := range affected {
-		affectedSet[runID] = struct{}{}
-	}
-	var blockedIDs []string
-	for descendant := range parents {
-		if _, live := affectedSet[descendant]; live {
-			continue
-		}
-		for ancestor, hops := descendant, 0; ancestor != "" && hops <= len(parents); ancestor, hops = parents[ancestor], hops+1 {
-			if ancestor == req.RunID {
-				blockedIDs = append(blockedIDs, descendant)
-				break
-			}
-		}
-	}
-	blockedIDs = append(blockedIDs, affected...)
-	const reason = "cancelled via sparkwing runs cancel"
-	identity := &conn{runID: target.runID, displayRunID: target.displayRunID, pipeline: target.pipeline, repo: target.repo, pid: target.pid}
-	for _, runID := range blockedIDs {
-		d.cancelPending[runID] = struct{}{}
-	}
-	d.mu.Unlock()
-	pid, known := peerPID(c.nc)
-	uid, uidKnown, uidErr := peerUID(c.nc)
-	if uidErr != nil {
-		d.cfg.logf("cancel: peer uid: %v", uidErr)
-	}
-	d.cfg.logf("cancel: run=%s peer_pid=%d peer_pid_known=%t affected=%s",
-		req.RunID, pid, known, strings.Join(affected, ","))
-
-	if d.cfg.Runs != nil {
-		if err := d.cfg.Runs.FinalizeCancelledRuns(append([]string(nil), affected...), reason); err != nil {
-			d.cfg.logf("cancel: finalize runs %s: %v", strings.Join(affected, ","), err)
-			var orphaned []string
-			d.mu.Lock()
-			for _, runID := range blockedIDs {
-				delete(d.cancelPending, runID)
-			}
-			for _, runID := range affected {
-				if _, disconnected := d.disconnectedPending[runID]; disconnected {
-					delete(d.disconnectedPending, runID)
-					orphaned = append(orphaned, runID)
-				}
-			}
-			d.mu.Unlock()
-			for _, runID := range orphaned {
-				d.finalizeAsync(runID)
-			}
-			c.close()
-			return
-		}
-	}
-	d.recordJournal("cancel", identity, map[string]any{"requesting_pid": pid, "pid_known": known, "requesting_uid": uid, "uid_known": uidKnown, "affected_runs": affected, "blocked_runs": blockedIDs})
-
-	d.mu.Lock()
-	current := make(map[*conn]string)
-	for _, runID := range blockedIDs {
-		delete(d.cancelPending, runID)
-		d.recordCancelledRunLocked(runID)
-	}
-	for _, runID := range affected {
-		delete(d.disconnectedPending, runID)
-		if owner := d.byRun[runID]; owner != nil {
-			if _, seen := current[owner]; !seen {
-				current[owner] = runID
-			}
-		}
-	}
-	var events []admission.Event
-	for owner := range current {
-		switch owner.role {
-		case roleWaiter:
-			d.recordWindow(d.now(), admissionEvent{Kind: eventCancellation}, owner, map[string]any{"reason": reason})
-			events = append(events, d.cancelWaiterLocked(owner.runID)...)
-			delete(d.byRun, owner.runID)
-			owner.role = roleNone
-			owner.finalizable = false
-		case roleHolder:
-			events = append(events, d.releaseConnLocked(owner)...)
-		}
-	}
-	deliveries := d.routeLocked(events)
-	d.touchLocked()
-	d.mu.Unlock()
-	persistErr := d.persistState()
-	if persistErr != nil {
-		d.cfg.logf("cancel: persist tombstone: %v", persistErr)
-	}
-	for owner, runID := range current {
-		d.cfg.logf("cancel: signalling run %s to wind down", runID)
-		if err := owner.send(&wingwire.Cancel{RunID: runID, Reason: reason}); err != nil {
-			// safety: the promotions below are already committed to the ledger, so a
-			// dead cancel target must not cost the promoted waiters their grants.
-			go d.handleDisconnect(owner)
-		}
-	}
-	for _, dl := range deliveries {
-		if err := dl.c.send(dl.msg); err != nil {
-			go d.handleDisconnect(dl.c)
-		}
-	}
-	if persistErr != nil {
-		// safety: the missing acknowledgement is how the caller learns the
-		// cancellation is not durable; the promotions above are already committed
-		// in memory, so they go out either way.
-		c.close()
-		return
-	}
-	_ = c.send(&wingwire.CancelLeaseAck{Found: true})
-}
-
-func leaseParents(snap admission.Snapshot) map[string]string {
-	parents := make(map[string]string)
-	for _, lease := range snap.Leases {
-		for child, parent := range lease.Parents {
-			parents[child] = parent
-		}
-	}
-	return parents
-}
-
-func (d *Daemon) handleQueueState(c *conn) {
-	qs := d.readQueueState()
-	_ = c.send(&qs)
-}
-
-func (d *Daemon) handleStatsReset(c *conn) {
-	d.events.reset()
-	if err := d.persistState(); err != nil {
-		d.cfg.logf("persist: %v", err)
-	}
-	d.cfg.logf("stats reset: admission-outcome window cleared")
-	_ = c.send(&wingwire.StatsResetAck{})
-}
-
-func (d *Daemon) handleDisconnect(c *conn) {
-	c.disconnectOnce.Do(func() {
-		c.close()
-		d.mu.Lock()
-
-		role, runID := c.role, c.runID
-		if runID == "" && len(c.members) > 0 {
-			runID = c.members[0]
-		}
-		delete(d.conns, c)
-		for _, m := range c.members {
-			if d.byRun[m] == c {
-				delete(d.byRun, m)
-			}
-		}
-		if c.runID != "" && d.byRun[c.runID] == c {
-			delete(d.byRun, c.runID)
-		}
-		if d.shuttingDown {
-			if c.handshaked {
-				d.recordJournal("connection_closed", c, map[string]any{"role": role.String(), "holder_liveness": c.holderLiveness, "reason": "shutdown"})
-			}
-			d.mu.Unlock()
-			return
-		}
-		var orphaned []string
-		if c.finalizable && d.cfg.Runs != nil {
-			switch c.role {
-			case roleHolder:
-				for _, runID := range c.members {
-					if _, pending := d.cancelPending[runID]; pending {
-						d.disconnectedPending[runID] = struct{}{}
-					} else {
-						orphaned = append(orphaned, runID)
-					}
-				}
-			case roleWaiter:
-				if _, pending := d.cancelPending[c.runID]; pending {
-					d.disconnectedPending[c.runID] = struct{}{}
-				} else {
-					orphaned = append(orphaned, c.runID)
-				}
-			}
-		}
-		var events []admission.Event
-		switch c.role {
-		case roleHolder:
-			events = d.releaseConnLocked(c)
-		case roleWaiter:
-			if c.finalizable {
-				kind := waiterDepartureKindLocked(c, d.now())
-				data := map[string]any{"reason": "connection closed"}
-				if kind == eventQueueTimeout {
-					data = map[string]any{"reason": "queue timeout", "timeout_ms": c.queueTimeoutMS}
-				}
-				d.recordWindow(d.now(), admissionEvent{Kind: kind}, c, data)
-			}
-			events = d.cancelWaiterLocked(c.runID)
-		}
-		deliveries := d.routeLocked(events)
-		d.touchConnLocked(c)
-		if c.handshaked {
-			d.recordJournal("connection_closed", c, map[string]any{"role": role.String(), "holder_liveness": c.holderLiveness})
-		}
-		d.mu.Unlock()
-		d.logDisconnect(c, role, runID)
-		for _, orphan := range orphaned {
-			d.cfg.logf("orphan: conn %d lost run %s without release; finalizing", c.id, orphan)
-			d.finalizeAsync(orphan)
-		}
-		d.flush(deliveries)
-	})
-}
-
-func (d *Daemon) logDisconnect(c *conn, role connRole, runID string) {
-	if role == roleNone {
-		return
-	}
-	if runID == "" {
-		runID = "-"
-	}
-	d.cfg.logf("conn %d disconnected while %s (run %s)", c.id, role, runID)
-}
-
-func waiterDepartureKindLocked(c *conn, now time.Time) string {
-	if c.queueTimeoutMS > 0 && !c.startAt.IsZero() &&
-		now.Sub(c.startAt).Milliseconds() >= c.queueTimeoutMS {
-		return eventQueueTimeout
-	}
-	return eventCancellation
-}
-
-func (d *Daemon) releaseConnLocked(c *conn) []admission.Event {
-	var events []admission.Event
-	for _, m := range c.members {
-		evs, err := d.ledger.Release(c.leaseID, m)
-		if err == nil {
-			events = append(events, evs...)
-		}
-	}
-	c.role = roleNone
-	c.members = nil
-	return events
-}
-
-func (d *Daemon) flush(deliveries []delivery) {
-	persistErr := d.persistState()
-	if persistErr != nil {
-		d.cfg.logf("persist: %v", persistErr)
-	}
-	for _, dl := range deliveries {
-		if err := dl.c.send(dl.msg); err != nil {
-			go d.handleDisconnect(dl.c)
-		}
-	}
 }
 
 func (d *Daemon) recordCancelledRunLocked(runID string) {
@@ -1624,36 +608,9 @@ func (d *Daemon) recordCancelledRunLocked(runID string) {
 }
 
 func (d *Daemon) persistState() error {
-	d.persistMu.Lock()
-	defer d.persistMu.Unlock()
 	d.mu.Lock()
-	snap := d.ledger.Snapshot()
-	cancelledRuns := append([]string(nil), d.cancelledRunOrder...)
-	d.mu.Unlock()
-	write := d.persistWrite
-	if write != nil {
-		if err := write(d.layout.state, snap, d.events.snapshot(d.now()), cancelledRuns); err != nil {
-			return err
-		}
-	} else if err := writeStateWithCancellations(d.layout.state, snap, d.events.snapshot(d.now()), cancelledRuns); err != nil {
-		return err
-	}
-	return nil
-}
-
-const (
-	rejectCauseCostSource = "cost_source"
-	rejectCauseRequest    = "request"
-)
-
-func (d *Daemon) rejectInvalid(c *conn, req *wingwire.AdmissionRequest, cause, reason string) {
-	// safety: the window is recorded before the refusal is sent, because a
-	// caller that has its answer can query the window immediately and a
-	// rejection it already saw must not be missing from it.
-	d.recordWindow(d.now(), admissionEvent{Kind: eventRejection, Key: cause}, &conn{runID: string(req.RunID), displayRunID: req.DisplayRunID, pipeline: req.Pipeline, repo: req.Repo, pid: req.PID}, map[string]any{"reason": reason})
-	_ = c.send(&wingwire.Evicted{RunID: string(req.RunID), Key: "invalid", Policy: wingwire.PolicyFail, Reason: reason})
-	d.cfg.logf("conn %d rejected run %s: %s [cost_source=%q cores=%.2f memory_bytes=%d semaphores=%d]",
-		c.id, string(req.RunID), reason, req.CostSource, req.Resources.Cores, req.Resources.MemoryBytes, len(req.Semaphores))
+	defer d.mu.Unlock()
+	return d.commitAdmissionLocked()
 }
 
 func refusalReason(err error) string {
@@ -1674,61 +631,6 @@ func submitErrorKey(err error) string {
 		return "duplicate"
 	default:
 		return "invalid"
-	}
-}
-
-func (d *Daemon) handleSetPriority(c *conn, req *wingwire.SetPriority) {
-	d.mu.Lock()
-	targets := d.runConnsLocked(req.RunID)
-	if len(targets) == 0 {
-		d.mu.Unlock()
-		d.sendPriorityAck(c, req.RunID, &wingwire.SetPriorityAck{Found: false, Reason: "not in local admission"})
-		return
-	}
-	priority := req.Priority
-	if req.Mode != "" {
-		resolved, ok := resolveRelativePriority(d.ledger.Snapshot(), req.RunID, req.Mode)
-		if !ok {
-			d.mu.Unlock()
-			d.sendPriorityAck(c, req.RunID, &wingwire.SetPriorityAck{Found: false, Reason: "unknown priority mode " + req.Mode})
-			return
-		}
-		priority = resolved
-	}
-	previous := targets[0].priority
-	holding := false
-	for _, t := range targets {
-		if t.runID == req.RunID {
-			previous = t.priority
-		}
-		holding = holding || t.role == roleHolder
-		t.priority = priority
-	}
-	_, events := d.ledger.SetPriority(req.RunID, priority)
-	deliveries := d.routeLocked(events)
-	snap := d.ledger.Snapshot()
-	position := runQueuePosition(snap, req.RunID)
-	d.recordWindow(d.now(), admissionEvent{Kind: eventReprioritize}, &conn{runID: req.RunID}, map[string]any{"priority": req.Priority})
-	d.touchLocked()
-	d.mu.Unlock()
-
-	d.flush(deliveries)
-	d.cfg.logf("priority: run %s re-ranked %d -> %d across %d participant(s)", req.RunID, previous, priority, len(targets))
-	d.sendPriorityAck(c, req.RunID, &wingwire.SetPriorityAck{
-		Found:        true,
-		Previous:     previous,
-		Priority:     priority,
-		Position:     position,
-		Participants: len(targets),
-		Holding:      holding,
-	})
-}
-
-// sendPriorityAck logs a lost ack instead of failing the re-rank: the ledger
-// has already moved the run, and the operator's next queue view shows it.
-func (d *Daemon) sendPriorityAck(c *conn, runID string, ack *wingwire.SetPriorityAck) {
-	if err := c.send(ack); err != nil {
-		d.cfg.logf("priority: ack for run %s lost: %v", runID, err)
 	}
 }
 

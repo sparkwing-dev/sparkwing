@@ -72,7 +72,8 @@ func (d *Daemon) routeLocked(events []admission.Event) []delivery {
 			grant := &wingwire.Grant{
 				RunID:      ev.RequestID,
 				LeaseToken: lease.Token,
-				Resources:  c.resources,
+    Resources:c.resources,
+    Semaphores:leaseSemaphores(d.ledger.Snapshot(),ev.Lease),
 			}
 			if soleUnderLoad {
 				grant.SoleRunUnderLoad = true
@@ -134,6 +135,7 @@ func (d *Daemon) routeLocked(events []admission.Event) []delivery {
 	if queueChanged {
 		out = append(out, d.waiterDeliveriesLocked()...)
 	}
+	d.captureAdmissionDeliveriesLocked(out)
 	return out
 }
 

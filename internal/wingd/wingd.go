@@ -31,8 +31,6 @@ const FinalizeDrainWindow = 10 * time.Second
 const (
 	defaultIdleTimeout = limits.LocalControllerIdleTimeout
 
-	DefaultGraceWindow = 2 * time.Minute
-
 	defaultSampleInterval = 5 * time.Second
 
 	defaultHeadroomMaxAge = 30 * time.Second
@@ -46,8 +44,6 @@ const (
 	defaultStallWindow = 60 * time.Second
 
 	defaultStallCPUFraction = 0.02
-
-	defaultStallProbeTimeout = 10 * time.Second
 )
 
 type Config struct {
@@ -78,8 +74,6 @@ type Config struct {
 
 	IdleTimeout time.Duration
 
-	GraceWindow time.Duration
-
 	SampleInterval time.Duration
 
 	HeadroomMaxAge time.Duration
@@ -92,11 +86,11 @@ type Config struct {
 
 	StallCPUFraction float64
 
-	StallProbeTimeout time.Duration
-
 	// Runs is the daemon's handle on the runs store. Nil leaves every
 	// store-backed behavior off: no terminal check, no finalize.
 	Runs RunStore
+
+	AdmissionStore MachineAdmissionStore
 
 	// ServeAPI serves the elected controller over connections with verified UID or SID identity.
 	ServeAPI func(ctx context.Context, ln net.Listener)
@@ -115,16 +109,6 @@ func (c Config) idleTimeout() time.Duration {
 		return c.IdleTimeout
 	}
 	return defaultIdleTimeout
-}
-
-func (c Config) graceWindow() time.Duration {
-	if c.GraceWindow < 0 {
-		return 0
-	}
-	if c.GraceWindow > 0 {
-		return c.GraceWindow
-	}
-	return DefaultGraceWindow
 }
 
 func (c Config) sampleInterval() time.Duration {
@@ -160,13 +144,6 @@ func (c Config) stallWindow() time.Duration {
 		return c.StallWindow
 	}
 	return defaultStallWindow
-}
-
-func (c Config) stallProbeTimeout() time.Duration {
-	if c.StallProbeTimeout > 0 {
-		return c.StallProbeTimeout
-	}
-	return defaultStallProbeTimeout
 }
 
 func (c Config) stallCPUFraction() float64 {
@@ -209,7 +186,6 @@ type layout struct {
 	start   string
 	sock    string
 	apiSock string
-	state   string
 	log     string
 }
 
@@ -243,7 +219,6 @@ func layoutFor(home string, create bool) (layout, error) {
 		start:   filepath.Join(dir, "d.start.lock"),
 		sock:    sock,
 		apiSock: APISocketBeside(sock),
-		state:   filepath.Join(dir, "state.json"),
 		log:     filepath.Join(dir, "d.log"),
 	}, nil
 }

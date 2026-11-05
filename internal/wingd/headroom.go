@@ -41,7 +41,7 @@ func (d *Daemon) refreshHeadroom() {
 
 func (d *Daemon) refreshHostSample(refreshCapacity bool) {
 	roots := d.holderSample()
-	d.sampleProcessUsage(roots)
+	d.sampleProcessUsage(d.measurementSample())
 	stat, ownedByRoot, ownedMeasured, err := d.sampleHostAndOwned(roots)
 	if err != nil {
 		d.cfg.logf("host sample: %v", err)
@@ -76,6 +76,11 @@ func (d *Daemon) sampleHostAndOwned(roots []OwnedRoot) (HostStat, map[int]float6
 
 func (d *Daemon) applyHeadroomSample(stat HostStat, ownedByRoot map[int]float64, ownedMeasured bool) {
 	d.mu.Lock()
+	if err := d.reapAdmissionLocked(); err != nil {
+		d.mu.Unlock()
+		d.cfg.logf("reconcile admission process: %v", err)
+		return
+	}
 	now := d.now()
 	ownedBusy, withoutProcess, awaitingMeasure, processGone := d.ownedBusyLocked(ownedByRoot)
 	impossible := false
@@ -195,9 +200,9 @@ func (d *Daemon) applyHeadroomSample(stat HostStat, ownedByRoot map[int]float64,
 		d.cfg.logf("set headroom: %v", err)
 		return
 	}
-	deliveries := d.routeLocked(events)
+	d.routeLocked(events)
 	if len(events) == 0 {
-		deliveries = append(deliveries, d.waiterDeliveriesLocked()...)
+		d.captureAdmissionDeliveriesLocked(d.waiterDeliveriesLocked())
 	}
 	if err := d.commitAdmissionLocked(); err != nil {
 		d.mu.Unlock()
@@ -210,7 +215,6 @@ func (d *Daemon) applyHeadroomSample(stat HostStat, ownedByRoot map[int]float64,
 	if !stat.MemoryMeasured {
 		d.cfg.logf("headroom: memory external unmeasured (host sensor unavailable); none subtracted")
 	}
-	d.flush(deliveries)
 }
 
 func headroomFromReserveExternal(total, reserved, external uint64) uint64 {

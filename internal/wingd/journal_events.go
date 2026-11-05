@@ -8,7 +8,7 @@ import (
 )
 
 func (d *Daemon) recordJournal(kind string, c *conn, data map[string]any) {
-	if d.journal == nil || (c != nil && c.healthProbe) {
+	if d.journal == nil {
 		return
 	}
 	r := journal.Record{Kind: kind, Data: data}
@@ -17,18 +17,11 @@ func (d *Daemon) recordJournal(kind string, c *conn, data map[string]any) {
 		if r.RunID == "" {
 			r.RunID = c.journalRunID
 		}
-		connection := kind == "connection_opened" || kind == "connection_handshake" || kind == "connection_closed" || kind == "handshake_refused" || kind == "message_refused"
-		if c.ownerRunID != "" || connection {
+		if c.ownerRunID != "" {
 			if r.Data == nil {
 				r.Data = make(map[string]any)
 			}
-		}
-		if c.ownerRunID != "" {
 			r.Data["owner_run_id"] = c.ownerRunID
-		}
-		if connection {
-			r.PID = c.peerPID
-			r.Data["connection_id"] = c.id
 		}
 	}
 	d.journal.Enqueue(r)

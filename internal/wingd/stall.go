@@ -3,8 +3,6 @@ package wingd
 import (
 	"context"
 	"time"
-
-	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
 )
 
 const descendantStallWindowMultiplier = 4
@@ -78,10 +76,6 @@ func (d *Daemon) stallTick() {
 	}
 
 	d.mu.Lock()
-	var challenges []struct {
-		c     *conn
-		nonce uint64
-	}
 	for _, c := range holders {
 		if c.role != roleHolder || !sampled[c] {
 			continue
@@ -102,15 +96,6 @@ func (d *Daemon) stallTick() {
 			}
 			if now.Sub(c.lowSince) >= stallWindow {
 				c.stalled = true
-
-				if c.holderLiveness && c.livenessNonce == 0 {
-					c.livenessSeq++
-					c.livenessNonce = c.livenessSeq
-					challenges = append(challenges, struct {
-						c     *conn
-						nonce uint64
-					}{c: c, nonce: c.livenessNonce})
-				}
 			}
 		} else {
 			c.lowSince = time.Time{}
@@ -118,29 +103,6 @@ func (d *Daemon) stallTick() {
 		}
 	}
 	d.mu.Unlock()
-	for _, challenge := range challenges {
-		if err := challenge.c.send(&wingwire.LivenessProbe{Nonce: challenge.nonce}); err != nil {
-			d.mu.Lock()
-			if challenge.c.livenessNonce == challenge.nonce {
-				challenge.c.livenessNonce = 0
-			}
-			d.mu.Unlock()
-			continue
-		}
-		time.AfterFunc(d.cfg.stallProbeTimeout(), func() {
-			d.mu.Lock()
-			unanswered := challenge.c.role == roleHolder && challenge.c.livenessNonce == challenge.nonce
-			runID := challenge.c.runID
-			if unanswered {
-				challenge.c.livenessNonce = 0
-			}
-			d.mu.Unlock()
-			if unanswered {
-				d.cfg.logf("holder %s did not answer liveness challenge within %s; reclaiming lease", runID, d.cfg.stallProbeTimeout())
-				challenge.c.close()
-			}
-		})
-	}
 }
 
 func (d *Daemon) orchestrationHolderWaitingLocked(holder *conn) bool {

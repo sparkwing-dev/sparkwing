@@ -47,9 +47,6 @@ func (d *Daemon) idleElapsedLocked() time.Duration {
 	if d.stay || hasLocalActivity(d.localActivity) || d.dashboardConns > 0 || len(d.byRun) > 0 {
 		return 0
 	}
-	if len(d.reattachWait) > 0 {
-		return 0
-	}
 	if d.dashboardSeen != nil {
 		if seen := d.dashboardSeen(); !seen.IsZero() && d.now().Sub(seen) < limits.LocalDashboardSessionHold {
 			return 0

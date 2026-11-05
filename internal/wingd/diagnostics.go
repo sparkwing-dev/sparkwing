@@ -15,7 +15,6 @@ func (d *Daemon) diagnosticSummary() string {
 	}
 	conns := len(d.conns)
 	leases := len(d.leaseRun)
-	reattach := len(d.reattachWait)
 	holders, waiters := 0, 0
 	for c := range d.conns {
 		switch c.role {
@@ -26,8 +25,8 @@ func (d *Daemon) diagnosticSummary() string {
 		}
 	}
 	d.mu.Unlock()
-	return fmt.Sprintf("goroutines=%d conns=%d holders=%d waiters=%d leases=%d awaiting-reattach=%d version=%s",
-		runtime.NumGoroutine(), conns, holders, waiters, leases, reattach, d.cfg.Version)
+	return fmt.Sprintf("goroutines=%d conns=%d holders=%d waiters=%d leases=%d version=%s",
+		runtime.NumGoroutine(), conns, holders, waiters, leases, d.cfg.Version)
 }
 
 func (d *Daemon) writeDiagnosticDump() {
