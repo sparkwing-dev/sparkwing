@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/signal"
@@ -52,31 +53,40 @@ func runDaemon(args []string) {
 	fs := flag.NewFlagSet("daemon", flag.ExitOnError)
 	home := fs.String("home", "", "")
 	version := fs.String("version", "v1.0.0", "")
-	graceMS := fs.Int("grace-ms", 2000, "")
+	_ = fs.Int("grace-ms", 2000, "oracle settle interval only")
 	idleMS := fs.Int("idle-ms", 4000, "")
 	totalCores := fs.Float64("total-cores", 8, "")
 	totalMemMB := fs.Int("total-mem-mb", 8192, "")
 	_ = fs.Parse(args)
+	boundHome, err := wingd.HomeDir(*home)
+	if err != nil {
+		fail("home: %v", err)
+	}
+	state := &admissionStore{path: filepath.Join(boundHome, "state.db")}
 
 	d, err := wingd.New(wingd.Config{
-		Home:             *home,
+		Home:             boundHome,
 		Version:          *version,
-		GraceWindow:      time.Duration(*graceMS) * time.Millisecond,
 		IdleTimeout:      time.Duration(*idleMS) * time.Millisecond,
 		HeadroomFraction: -1,
 		Sampler:          fixedSampler{cores: *totalCores, mem: uint64(*totalMemMB) << 20},
-		Runs:             finalizeStore(finalizeLogger(*home)),
+		Runs:             finalizeStore(finalizeLogger(boundHome)),
+		AdmissionStore:   state,
 	})
 	if err != nil {
 		fail("new daemon: %v", err)
 	}
 	go func() {
 		<-d.Ready()
-		recordPid(*home)
+		recordPid(boundHome)
 	}()
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	if err := d.Run(ctx); err != nil && err != wingd.ErrNotElected {
+	runErr := d.Run(ctx)
+	if errors.Is(runErr, wingd.ErrNotElected) {
+		runErr = nil
+	}
+	if err := errors.Join(runErr, state.close()); err != nil {
 		fail("run: %v", err)
 	}
 }
@@ -126,7 +136,6 @@ type holdFlags struct {
 	burn        bool
 	dirty       bool
 	ignoreTerm  bool
-	daemonGrace int
 	daemonIdle  int
 	daemonCores float64
 	daemonMemMB int
@@ -145,7 +154,7 @@ func runHold(args []string) {
 	fs.BoolVar(&hf.burn, "burn", false, "")
 	fs.BoolVar(&hf.dirty, "dirty", false, "")
 	fs.BoolVar(&hf.ignoreTerm, "ignore-term", false, "")
-	fs.IntVar(&hf.daemonGrace, "daemon-grace-ms", 2000, "")
+	_ = fs.Int("daemon-grace-ms", 2000, "oracle settle interval only")
 	fs.IntVar(&hf.daemonIdle, "daemon-idle-ms", 4000, "")
 	fs.Float64Var(&hf.daemonCores, "daemon-total-cores", 8, "")
 	fs.IntVar(&hf.daemonMemMB, "daemon-total-mem-mb", 8192, "")
@@ -225,54 +234,20 @@ func (h *holder) request() wingwire.AdmissionRequest {
 }
 
 func (h *holder) holdLoop() {
-	for {
-		evicted := false
-		h.current().Watch(func(wingwire.Evicted) { evicted = true })
-		select {
-		case <-h.done:
-			return
-		default:
-		}
-		if evicted {
-			os.Exit(3)
-		}
-		if !h.reattach() {
-			os.Exit(4)
-		}
+	cancelled := false
+	err := h.current().WatchControl(func(wingwire.Evicted) { cancelled = true }, func(wingwire.Cancel) { cancelled = true })
+	select {
+	case <-h.done:
+		return
+	default:
 	}
-}
-
-func (h *holder) reattach() bool {
-	deadline := time.Now().Add(time.Duration(h.hf.daemonGrace)*time.Millisecond + 2*time.Second)
-	token := h.current().Token
-	for time.Now().Before(deadline) {
-		select {
-		case <-h.done:
-			return true
-		default:
-		}
-		cl, err := client.EnsureDaemon(context.Background(), client.Options{
-			Home:    h.hf.home,
-			Version: h.hf.version,
-			Spawn:   h.daemonSpawner(),
-			Backoff: 25 * time.Millisecond,
-		})
-		if err != nil {
-			time.Sleep(25 * time.Millisecond)
-			continue
-		}
-		lease, rerr := cl.Reattach(context.Background(), token, h.hf.run)
-		if rerr == nil {
-			h.set(cl, lease)
-			return true
-		}
-		_ = cl.Close()
-		if rerr == client.ErrReattachRejected {
-			return false
-		}
-		time.Sleep(25 * time.Millisecond)
+	if cancelled {
+		os.Exit(3)
 	}
-	return false
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "lease watch: %v\n", err)
+		os.Exit(4)
+	}
 }
 
 func (h *holder) cleanExit() {
@@ -314,10 +289,9 @@ func (h *holder) daemonSpawner() func(home, version string) error {
 		if v == "" {
 			v = h.hf.version
 		}
-		cmd := procenv.HostCommand(self, "daemon",
+		cmd := procenv.ControlCommand(os.Environ(), self, "daemon",
 			"--home", home,
 			"--version", v,
-			"--grace-ms", strconv.Itoa(h.hf.daemonGrace),
 			"--idle-ms", strconv.Itoa(h.hf.daemonIdle),
 			"--total-cores", strconv.FormatFloat(h.hf.daemonCores, 'f', -1, 64),
 			"--total-mem-mb", strconv.Itoa(h.hf.daemonMemMB),

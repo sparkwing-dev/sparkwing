@@ -35,8 +35,7 @@ func TestCLIObservationsPreserveSyntheticAdmission(t *testing.T) {
 			t.Error(err)
 		}
 	}()
-	// Exercise the restart gap too: observation must not create a controller
-	// whose production grace and idle periods outlive this harness.
+	// safety: observing an absent fixture must not create a production controller.
 	for seed := range int64(9) {
 		h.rng = rand.New(rand.NewSource(seed)) // #nosec G404 -- deterministic test input
 		h.hammerCLI()
@@ -70,8 +69,8 @@ func TestCLIObservationsPreserveSyntheticAdmission(t *testing.T) {
 		if state.DaemonVersion != "v1.0.0" || len(state.Holders) != 1 {
 			t.Fatalf("CLI replaced the admission daemon or lost its holder: %+v", state)
 		}
-		if _, err := os.Stat(filepath.Join(h.home, "state.db")); !errors.Is(err, os.ErrNotExist) {
-			t.Fatalf("CLI opened a controller runs store in the synthetic admission home: %v", err)
+		if _, err := os.Stat(filepath.Join(h.home, "state.db")); err != nil {
+			t.Fatalf("durable admission store missing after CLI observation: %v", err)
 		}
 	}
 	recorded, err := os.Open(journal.filename())

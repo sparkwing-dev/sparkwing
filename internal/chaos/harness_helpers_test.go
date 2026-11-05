@@ -144,7 +144,7 @@ func run(t testing.TB, cfg config) {
 	if cfg.Seed == 0 {
 		cfg.Seed = time.Now().UnixNano()
 	}
-	home, err := os.MkdirTemp("/tmp", "chaos")
+	home, err := os.MkdirTemp("", "chaos")
 	if err != nil {
 		t.Fatalf("temp home: %v", err)
 	}
@@ -541,10 +541,7 @@ func (h *harness) hammerCLI() {
 	if h.sparkBin == "" {
 		return
 	}
-	// runs list starts a detached controller when it hits a daemon-restart gap.
-	// That controller cannot reattach synthetic runs without store rows, and its
-	// production grace/idle periods exceed this harness's convergence window.
-	// Observe admission directly so the harness retains ownership of its daemons.
+	// safety: observations must leave the fixture in charge of restarting its controller.
 	verbs := [][]string{{"daemon", "events", "--limit", "5"}, {"info"}}
 	verb := verbs[h.rng.Intn(len(verbs))]
 	cmd := procenv.ControlCommand(
@@ -565,10 +562,7 @@ func (h *harness) checkLedger() {
 	if v := checkLedgerTruth(qs); len(v) > 0 {
 		h.fail("ledger-truth", v, qs)
 	}
-	// safety: gate the liveness check on daemon stability -- right after a
-	// kill the successor is still restoring holders and re-admitting
-	// reconnecting waiters, a transient in which zero holders alongside a
-	// waiter is legitimate rather than a stranded run.
+	// safety: recovery checks wait for the replacement controller and its process census to settle.
 	if h.leakStable() && h.daemonGraceStable(qs) {
 		if v := checkLivenessTruth(qs); len(v) > 0 {
 			h.fail("liveness", v, qs)
