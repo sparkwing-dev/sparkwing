@@ -36,22 +36,18 @@ cannot be combined with list filters, or limits.
 
 A retained record carries a timestamp, source,
 incarnation, sequence, kind, run identity where known, and decision inputs in
-snake_case `data` fields. Connection records carry the peer PID when the operating
-system supplies it. After a connection identifies its run, later records carry
-its run ID and pipeline.
+snake_case `data` fields. Admission records carry the holder root PID, run ID
+and pipeline where known.
 
-`start`, `ready`, `drain_begin`, `drain_end`, and `shutdown` describe lifecycle.
-`request`, `queued`, `grant`, `denied`, `rejected`, `eviction`, `superseded`, `backfill`,
-`reprioritize`, `contended`, `queue_timeout`, `cancellation`, and `cancel`
-describe admission decisions. `reattach_request`, `reattach_accepted`,
-`reattach_refused`, `release`, and `grace_expiry` describe lease ownership. `headroom_sample` records capacity
-inputs. `connection_opened`, `connection_handshake`, `connection_closed`,
-`handshake_refused`, and `message_refused` describe transport. Individual health
-probe connections are omitted.
-`dropped` counts records lost when the bounded writer buffer filled.
+`start`, `ready`, `drain_begin`, `drain_end` and `shutdown` describe lifecycle.
+`request`, `queued`, `grant`, `denied`, `rejected`, `eviction`, `superseded`,
+`backfill`, `reprioritize`, `contended`, `queue_timeout` and `cancellation`
+describe admission decisions. `release` records capacity returning to the queue.
+`headroom_sample` records capacity inputs. `dropped` counts records lost when
+the bounded writer buffer filled.
 
-`cancel` records carry the requesting peer's identity, affected live runs, and
-blocked descendant IDs.
+Ticket state in `state.db` records committed cancellation and eviction. HTTP
+connections and dropped polls hold no admission authority.
 
 Journal writes do not hold admission. Policy endpoint URLs in records keep only
 the scheme, host and path. Userinfo, query parameters and fragments are omitted.
@@ -69,7 +65,7 @@ controller. Without a profile, the CLI starts the local controller on demand.
 Bare `queue` shows help. Failed reads return nonzero with no success record on
 stdout, so an unreachable controller cannot look like an empty queue.
 
-The admission snapshot retains capacity, holders, connected runs, ordered
+The admission snapshot retains capacity, holders, run participants, ordered
 waiters, pressure measurements and runner headroom. `--group` reads one
 concurrency group, including its effective capacity, used cost, separate run
 and job IDs, holder leases, supersession and waiter positions. JSON returns one
