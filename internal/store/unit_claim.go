@@ -142,8 +142,10 @@ func (op *Operator) claimUnitTx(ctx context.Context, tx *storeTx, demand UnitDem
 	if err != nil {
 		return UnitClaim{}, err
 	}
-	if err := activeLocalRunnerTx(ctx, tx, demand.CapabilityPrefix); err != nil {
-		return UnitClaim{}, err
+	if p.Capability.Subject.Kind == capability.SubjectLocal {
+		if err := activeLocalRunnerTx(ctx, tx, demand.CapabilityPrefix); err != nil {
+			return UnitClaim{}, err
+		}
 	}
 	team, err := tx.operator.claimTargetTeamTx(ctx, tx, p.Capability, unit)
 	if err != nil {
