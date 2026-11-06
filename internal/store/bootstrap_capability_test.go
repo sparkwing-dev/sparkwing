@@ -206,7 +206,7 @@ func TestDeploymentAdministratorRequiresLiveAncestryProperty(t *testing.T) {
 			case "expired":
 				admin.ExpiresAt = &now
 			case "future":
-				admin.IssuedAt = now.Add(time.Second)
+				admin.IssuedAt = now.Add(time.Minute)
 			case "deadline":
 				admin.Binding.Deadline = &now
 			case "revoked":
