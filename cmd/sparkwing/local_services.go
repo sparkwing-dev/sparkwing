@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"crypto/rand"
 	"errors"
 	"log/slog"
 	"os"
@@ -129,8 +128,8 @@ func bindLocalController(ctx context.Context, b localcontroller.Binding) (_ loca
 	}
 	b.Controller.VersionPolicy = &controller.SignedEngineVersionPolicy{Resolver: engines}
 	b.Controller.LocalRunnerPolicy = b.Controller.VersionPolicy
-	key := make([]byte, 32)
-	if _, err := rand.Read(key); err != nil {
+	key, err := b.Store.AsOperator().LocalObjectSigningKey(ctx, cipher)
+	if err != nil {
 		return localcontroller.Services{}, err
 	}
 	objects, err := blob.NewFilesystem(blob.FilesystemOptions{Directory: filepath.Join(b.Home, "data"), Endpoint: wingdclient.APIBaseURL, SigningKey: key})
@@ -195,6 +194,7 @@ func bindLocalController(ctx context.Context, b localcontroller.Binding) (_ loca
 	transport := wingdclient.NewAPIClient(socket)
 	policies := server.StorePolicies()
 	policies.ClaimProfiles = claimant
+	policies.LocalSecrets = cipher
 	return localcontroller.Services{
 		Policies: policies,
 		State:    state, HTTP: server.HTTP(), Close: func() error {
