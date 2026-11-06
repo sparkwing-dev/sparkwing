@@ -22,7 +22,7 @@ unlock.
 
 ### Breaking
 
-- **local controller (Breaking):** Schema 33 adds durable runner process identities and lifecycle state. Recognized schema 32 stores upgrade in place. Older binaries refuse the upgraded store. See [the migration guide](docs/migrations/_unreleased.md#upgrade-the-store-in-place-to-schema-baseline-33).
+- **local controller (Breaking):** The schema baseline advances to version 33, adding durable runner process identities and lifecycle state. Recognized schema 32 stores upgrade in place. Older binaries refuse the upgraded store. See [the migration guide](docs/migrations/_unreleased.md#upgrade-the-store-in-place-to-schema-baseline-33).
 
 - **CLI (Breaking):** Repository pin upgrades move from `sparkwing upgrade` to `sparkwing pipeline upgrade`. The obsolete `sparkwing daemon recover-state` command is removed because machine admission now lives in `state.db`. See [the migration guide](docs/migrations/_unreleased.md#upgrade-the-store-in-place-to-schema-baseline-31).
 
