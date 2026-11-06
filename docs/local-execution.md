@@ -19,8 +19,11 @@ checksums and builds the executable.
 Preparation uses the build's selected toolchain, workspace and sparks overlay.
 
 The commands bind sealed intake to the shared controller, source, private
-environment, storage and host services. The CLI sends state operations over the
-authenticated private API. Owner evaluation delegates a fresh SDK process from
+environment, storage and host services. Foreground local and here hosts use the
+runner's HTTP host composition. Each host presents its execution award for state,
+logs and storage, including over the private API socket. Source bundle downloads
+keep the selected controller's transport. Captured local environments come from
+the run's sealed snapshot. Owner evaluation delegates a fresh SDK process from
 the live owner lease. It keeps the evaluated job separate from that lease and
 creates no work attempt. Each service call rechecks that job's persisted source
 fence and declared output edges. A separately awarded eval process uses its own
