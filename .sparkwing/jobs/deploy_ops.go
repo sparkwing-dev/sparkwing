@@ -207,10 +207,14 @@ func (d *deployer) assumeRole(ctx context.Context) error {
 		if err != nil {
 			return err
 		}
+		// safety: the AWS CLI reads AWS_PROFILE="" as a profile named "", and an
+		// inherited profile would point at the empty config, so it is unset instead.
+		if err := os.Unsetenv("AWS_PROFILE"); err != nil {
+			return err
+		}
 		base := map[string]string{
 			"AWS_CONFIG_FILE":             empty,
 			"AWS_SHARED_CREDENTIALS_FILE": empty,
-			"AWS_PROFILE":                 "",
 			"AWS_REGION":                  d.cfg.Region,
 			"AWS_DEFAULT_REGION":          d.cfg.Region,
 			"AWS_EC2_METADATA_DISABLED":   "true",
