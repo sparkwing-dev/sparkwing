@@ -107,7 +107,11 @@ func openLocalController(ctx context.Context, home string) (wingd.LocalControlle
 	return (localcontroller.Config{Bind: bindLocalController}).Open(ctx, home)
 }
 
-func bindLocalController(ctx context.Context, b localcontroller.Binding) (_ localcontroller.Services, err error) {
+func bindLocalController(ctx context.Context, b localcontroller.Binding) (localcontroller.Services, error) {
+	return bindLocalControllerWithClock(ctx, b, nil)
+}
+
+func bindLocalControllerWithClock(ctx context.Context, b localcontroller.Binding, now func() time.Time) (_ localcontroller.Services, err error) {
 	keyring, err := localsecrets.LoadKeyring(localsecrets.KeyringOptions{Create: true})
 	if err != nil {
 		return localcontroller.Services{}, err
@@ -132,7 +136,7 @@ func bindLocalController(ctx context.Context, b localcontroller.Binding) (_ loca
 	if err != nil {
 		return localcontroller.Services{}, err
 	}
-	objects, err := blob.NewFilesystem(blob.FilesystemOptions{Directory: filepath.Join(b.Home, "data"), Endpoint: wingdclient.APIBaseURL, SigningKey: key})
+	objects, err := blob.NewFilesystem(blob.FilesystemOptions{Directory: filepath.Join(b.Home, "data"), Endpoint: wingdclient.APIBaseURL, SigningKey: key, LogNow: now})
 	if err != nil {
 		return localcontroller.Services{}, err
 	}

@@ -315,17 +315,20 @@ func burstIntakeDeploymentController(t *testing.T, endpoint string, cfg deployme
 	if err != nil {
 		t.Fatal(err)
 	}
-	objects, err := blob.NewFilesystem(blob.FilesystemOptions{Directory: t.TempDir(), Endpoint: endpoint, SigningKey: []byte(strings.Repeat("k", 32))})
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() {
-		if err := objects.Close(); err != nil {
-			t.Error(err)
-		}
-	})
 	var server *controller.Server
 	options = append(options, store.WithPolicies(func(state *store.Store) (store.Policies, error) {
+		objects, err := blob.NewFilesystem(blob.FilesystemOptions{
+			Directory: t.TempDir(), Endpoint: endpoint, SigningKey: []byte(strings.Repeat("k", 32)),
+			LogNow: func() time.Time { return teststore.Now(state) },
+		})
+		if err != nil {
+			return store.Policies{}, err
+		}
+		t.Cleanup(func() {
+			if err := objects.Close(); err != nil {
+				t.Error(err)
+			}
+		})
 		server = controller.NewDeployment(state, cfg, nil).WithSecretsCipher(cipher).WithDashboard(controller.Dashboard{}).WithDataObjects(objects)
 		return server.StorePolicies(), nil
 	}))

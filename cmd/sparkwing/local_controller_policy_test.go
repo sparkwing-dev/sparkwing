@@ -70,7 +70,10 @@ func productionLocalPolicyClientAt(t *testing.T, home string, opts ...store.Opti
 	t.Helper()
 	t.Setenv("SPARKWING_CONFIG", filepath.Join(t.TempDir(), "config.yaml"))
 	t.Setenv("SPARKWING_SECRETS_KEY_FILE", filepath.Join(t.TempDir(), "secrets.key"))
-	owner, err := (localcontroller.Config{Bind: bindLocalController, StoreOptions: opts}).Open(t.Context(), home)
+	bind := func(ctx context.Context, b localcontroller.Binding) (localcontroller.Services, error) {
+		return bindLocalControllerWithClock(ctx, b, func() time.Time { return teststore.Now(b.Store) })
+	}
+	owner, err := (localcontroller.Config{Bind: bind, StoreOptions: opts}).Open(t.Context(), home)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -140,8 +143,8 @@ func testProductionLocalControllerAdmitsRun(t *testing.T, format string) {
 		return &http.Response{StatusCode: http.StatusForbidden, Body: io.NopCloser(strings.NewReader("")), Header: make(http.Header)}, nil
 	})}
 	t.Cleanup(func() { http.DefaultClient = previous })
-	// bug: host clock corrections must not invalidate authority during this admission fixture.
-	now := time.Now().UTC()
+	// bug: a store ahead of wall time catches a signer that ignores the fixture clock.
+	now := time.Now().UTC().Add(5 * time.Second)
 	options := productionLocalPolicyClient(t, teststore.WithClock(func() time.Time { return now }))
 	engine, err := client.NewEngineClient(options)
 	if err != nil {

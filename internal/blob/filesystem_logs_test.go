@@ -14,8 +14,37 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/limits"
 )
+
+func TestFilesystemLogSigningUsesTheLogSlotClock(t *testing.T) {
+	now := time.Date(2026, 10, 14, 12, 0, 0, 0, time.UTC)
+	logNow := now.Add(5 * time.Second)
+	backend, err := NewFilesystem(FilesystemOptions{
+		Directory: t.TempDir(), Endpoint: "https://controller.invalid", SigningKey: []byte(strings.Repeat("x", 32)),
+		Now: func() time.Time { return now }, LogNow: func() time.Time { return logNow },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = backend.Close() })
+	key := "logs/r90/teams/acme/runs/run-1/units/plan/g1/manifest.json"
+	expires := logNow.Add(limits.LogUploadURLTTL)
+	if _, _, err := backend.SignLogPut(t.Context(), key, 1, digest("x"), expires); err != nil {
+		t.Fatalf("sign log with its slot clock: %v", err)
+	}
+	if _, _, err := backend.SignLogPut(t.Context(), key, 1, digest("x"), expires.Add(time.Nanosecond)); err == nil {
+		t.Fatal("signed beyond the log upload lifetime")
+	}
+	object := capability.ObjectToSign{
+		Method: http.MethodGet, Key: "teams/acme/cas/" + string(digest("x")), Size: 1, SHA256: string(digest("x")),
+		ExpiresAt: now.Add(time.Second),
+	}
+	if _, err := backend.Sign(t.Context(), object); err != nil {
+		t.Fatalf("data transfer used the log clock: %v", err)
+	}
+}
 
 func TestFilesystemLogUploadsAreImmutableAndPutOnly(t *testing.T) {
 	now := time.Date(2026, 10, 14, 12, 0, 0, 0, time.UTC)
