@@ -13,6 +13,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
@@ -31,7 +32,9 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/source"
 	"github.com/sparkwing-dev/sparkwing/internal/storage/logseg"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
+	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
 	"github.com/sparkwing-dev/sparkwing/internal/wingd"
+	"github.com/sparkwing-dev/sparkwing/internal/wingd/localcontroller"
 )
 
 type policyListener struct {
@@ -58,16 +61,16 @@ type policyConnection struct {
 
 func (c policyConnection) PeerIdentity() localhostwire.LocalPeerIdentity { return c.peer }
 
-func productionLocalPolicyClient(t *testing.T) client.EngineOptions {
+func productionLocalPolicyClient(t *testing.T, opts ...store.Option) client.EngineOptions {
 	t.Helper()
-	return productionLocalPolicyClientAt(t, t.TempDir())
+	return productionLocalPolicyClientAt(t, t.TempDir(), opts...)
 }
 
-func productionLocalPolicyClientAt(t *testing.T, home string) client.EngineOptions {
+func productionLocalPolicyClientAt(t *testing.T, home string, opts ...store.Option) client.EngineOptions {
 	t.Helper()
 	t.Setenv("SPARKWING_CONFIG", filepath.Join(t.TempDir(), "config.yaml"))
 	t.Setenv("SPARKWING_SECRETS_KEY_FILE", filepath.Join(t.TempDir(), "secrets.key"))
-	owner, err := openLocalController(t.Context(), home)
+	owner, err := (localcontroller.Config{Bind: bindLocalController, StoreOptions: opts}).Open(t.Context(), home)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -137,7 +140,9 @@ func testProductionLocalControllerAdmitsRun(t *testing.T, format string) {
 		return &http.Response{StatusCode: http.StatusForbidden, Body: io.NopCloser(strings.NewReader("")), Header: make(http.Header)}, nil
 	})}
 	t.Cleanup(func() { http.DefaultClient = previous })
-	options := productionLocalPolicyClient(t)
+	// bug: host clock corrections must not invalidate authority during this admission fixture.
+	now := time.Now().UTC()
+	options := productionLocalPolicyClient(t, teststore.WithClock(func() time.Time { return now }))
 	engine, err := client.NewEngineClient(options)
 	if err != nil {
 		t.Fatal(err)
@@ -206,6 +211,9 @@ func testProductionLocalControllerAdmitsRun(t *testing.T, format string) {
 	page, err := reader.ListRuns(t.Context(), controllerwire.RunQuery{Limit: 20})
 	if err != nil || len(page.Runs) != 1 || page.Runs[0].Status != string(runstate.RunSuccess) {
 		t.Fatalf("development run page: %+v: %v", page, err)
+	}
+	if finished := page.Runs[0].FinishedAt; finished == nil || !finished.Equal(now) {
+		t.Fatalf("run completion did not use the fixture clock: %v, want %v", finished, now)
 	}
 	if Version == "v1.2.3" && (len(page.Runs[0].Notices) != 1 || page.Runs[0].Notices[0].Kind != engineid.NoticePolicyUnavailable) {
 		t.Fatalf("offline policy warning missing from local status: %+v", page.Runs[0].Notices)
