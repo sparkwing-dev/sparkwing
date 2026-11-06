@@ -653,7 +653,7 @@ func (f *fakeDeploy) run(ctx context.Context, c deployCommand) (string, error) {
 	case name == "aws":
 		switch {
 		case strings.HasPrefix(joined, "sts assume-role-with-web-identity"):
-			if c.Env["AWS_PROFILE"] != "" || c.Env["AWS_CONFIG_FILE"] == "" {
+			if _, set := c.Env["AWS_PROFILE"]; set || c.Env["AWS_CONFIG_FILE"] == "" {
 				return "", fmt.Errorf("sts call can read the machine's AWS config: %v", c.Env)
 			}
 			f.mu.Lock()
