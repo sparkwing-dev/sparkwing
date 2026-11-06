@@ -55,7 +55,9 @@ func runLocalQueue(ctx context.Context, options client.EngineOptions, loop *runn
 	go func() { watchDone <- watchLocalRunner(watchCtx, lifecycle, instance.ID, loop) }()
 	defer func() {
 		stopWatch()
-		err = errors.Join(err, <-watchDone)
+		if watchErr := <-watchDone; !errors.Is(watchErr, context.Canceled) {
+			err = errors.Join(err, watchErr)
+		}
 	}()
 	return loop.Run(ctx)
 }

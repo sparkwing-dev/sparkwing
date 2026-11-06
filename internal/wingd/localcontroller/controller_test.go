@@ -293,7 +293,7 @@ func TestCompositionJoinsQueueAndActivityBeforeStoreClose(t *testing.T) {
 				<-ctx.Done()
 				<-release
 				defer close(joined)
-				return errors.Join(ctx.Err(), b.Store.AsOperator().Ping(t.Context()))
+				return errors.Join(ctx.Err(), b.Store.AsOperator().Ping(context.WithoutCancel(ctx)))
 			}
 			services.State.(*stateFixture).watch = func(ctx context.Context, report func(wingd.LocalActivity) error) error {
 				<-started

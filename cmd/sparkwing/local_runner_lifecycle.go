@@ -49,7 +49,7 @@ func watchLocalRunner(ctx context.Context, lifecycle localRunnerLifecycle, id st
 	for {
 		instance, err := lifecycle.Watch(ctx, id, "active")
 		if ctx.Err() != nil {
-			return nil
+			return ctx.Err()
 		}
 		if err != nil {
 			loop.Drain()
