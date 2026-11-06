@@ -61,12 +61,30 @@ func TestTypeScriptPublicationRequiresAnExactImmutablePackage(t *testing.T) {
 	}
 }
 
-func checkPublication(t *testing.T, payload []byte, test publicationCase) {
-	t.Helper()
-	node, err := exec.LookPath("node")
+func TestTypeScriptPublicationIgnoresNodeShimPathChanges(t *testing.T) {
+	node, err := exec.Command("node", "-p", "process.execPath").Output()
 	if err != nil {
 		t.Fatal(err)
 	}
+	dir := t.TempDir()
+	shim := "#!/bin/sh\nexport PATH='" + dir + "':\"$PATH\"\nexec '" + strings.TrimSpace(string(node)) + "' \"$@\"\n"
+	if err := os.WriteFile(filepath.Join(dir, "node"), []byte(shim), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "npm"), []byte("#!/bin/sh\necho 'npm escaped the test fixture' >&2\nexit 91\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	checkPublication(t, []byte("verified package bytes"), publicationCase{success: true, publish: true})
+}
+
+func checkPublication(t *testing.T, payload []byte, test publicationCase) {
+	t.Helper()
+	resolved, err := exec.Command("node", "-p", "process.execPath").Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	node := strings.TrimSpace(string(resolved))
 	script, err := filepath.Abs("publish-typescript.mjs")
 	if err != nil {
 		t.Fatal(err)
@@ -153,7 +171,7 @@ process.exit(Number(process.env[dryRun ? "DRY_RUN_STATUS" : "PUBLISH_STATUS"] ||
 	calls := filepath.Join(dir, "calls")
 	command := exec.Command(node, script, filepath.Join("typescript-dist", "sdk.tgz"), test.version, test.tag)
 	command.Dir = dir
-	command.Env = append(os.Environ(), "PATH="+dir+string(os.PathListSeparator)+os.Getenv("PATH"), "METADATA="+test.metadata, "LOOKUP_STATUS="+test.status, "VERSIONS="+test.versions, "VERSIONS_STATUS="+test.versionsStatus, "DRY_RUN_STATUS="+test.dryRunStatus, "PUBLISH_STATUS="+test.publishStatus, "CALLS="+calls)
+	command.Env = append(os.Environ(), "PATH="+strings.Join([]string{dir, "/usr/bin", "/bin"}, string(os.PathListSeparator)), "METADATA="+test.metadata, "LOOKUP_STATUS="+test.status, "VERSIONS="+test.versions, "VERSIONS_STATUS="+test.versionsStatus, "DRY_RUN_STATUS="+test.dryRunStatus, "PUBLISH_STATUS="+test.publishStatus, "CALLS="+calls)
 	output, err := command.CombinedOutput()
 	if (err == nil) != test.success || !strings.Contains(string(output), test.failure) {
 		t.Fatalf("success=%v, want success=%v and failure=%q: %s", err == nil, test.success, test.failure, output)
