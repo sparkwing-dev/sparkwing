@@ -11,17 +11,17 @@ import (
 
 func TestAdmissionCancellationBindingKeepsTheLocalTenant(t *testing.T) {
 	var binding Binding
-	c := openFixture(t, func(_ context.Context, b Binding) (Services, error) {
+	c := openFixture(t, func(ctx context.Context, b Binding) (Services, error) {
 		binding = b
-		seedOwner(t, b, "same-run-id", false)
-		if _, err := stateSQL(t, b).ExecContext(t.Context(), `INSERT INTO teams(name,created_at,updated_at) VALUES ('foreign',1,1)`); err != nil {
+		seedOwnerContext(t, ctx, b, "same-run-id", false)
+		if _, err := stateSQL(t, b).ExecContext(ctx, `INSERT INTO teams(name,created_at,updated_at) VALUES ('foreign',1,1)`); err != nil {
 			return Services{}, err
 		}
-		foreign, err := b.Store.ForTeam(t.Context(), "foreign")
+		foreign, err := b.Store.ForTeam(ctx, "foreign")
 		if err != nil {
 			return Services{}, err
 		}
-		seedOwner(t, Binding{Home: b.Home, Store: b.Store, Tenant: foreign}, "foreign-run-id", false)
+		seedOwnerContext(t, ctx, Binding{Home: b.Home, Store: b.Store, Tenant: foreign}, "foreign-run-id", false)
 		return serviceFixture(b), nil
 	})
 	calls := 0

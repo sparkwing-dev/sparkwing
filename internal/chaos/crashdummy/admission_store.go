@@ -16,7 +16,7 @@ type admissionStore struct {
 }
 
 func (s *admissionStore) LoadMachineAdmission(ctx context.Context) ([]byte, error) {
-	s.once.Do(func() { s.db, s.err = store.Open(s.path) })
+	s.once.Do(func() { s.db, s.err = store.Open(s.path) }) //nolint:contextcheck // safety: election owns initialization; Open has no context parameter.
 	if s.err != nil {
 		return nil, s.err
 	}

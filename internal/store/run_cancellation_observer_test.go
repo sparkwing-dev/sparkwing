@@ -33,7 +33,7 @@ func TestRunCancellationObserverRunsAfterCommitAndRetriesOnReplay(t *testing.T) 
 		t.Fatalf("committed cancellation was retried or hid notification error: calls=%d error=%v", calls, err)
 	}
 	busyCalls, waits := 0, 0
-	if got := retryOnBusyWithSleep(func() error { busyCalls++; return err }, func(time.Duration) { waits++ }); got != err || busyCalls != 1 || waits != 0 {
+	if got := retryOnBusyWithSleep(func() error { busyCalls++; return err }, func(time.Duration) { waits++ }); !errors.Is(got, err) || busyCalls != 1 || waits != 0 {
 		t.Fatalf("post-commit notification triggered outer SQL retry: calls=%d waits=%d error=%v", busyCalls, waits, got)
 	}
 	applied, err := tenant.TransitionRun(t.Context(), change)
