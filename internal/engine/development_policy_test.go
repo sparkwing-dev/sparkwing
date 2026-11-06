@@ -8,6 +8,8 @@ import (
 	"testing"
 	"time"
 
+	"golang.org/x/mod/semver"
+
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/engineid"
 	"github.com/sparkwing-dev/sparkwing/internal/releaseasset"
@@ -53,28 +55,56 @@ func TestMainBuildStampIsNarrow(t *testing.T) {
 }
 
 func TestMainBuildEnforcesSignedEnginePolicy(t *testing.T) {
-	fixture, transport, key, policy, now := fixtureResolver(t)
-	policy.Revoked = []Restriction{{Version: "v0.10.2", Reason: "revocation fixture", Security: true, AnnouncedAt: now, EffectiveAt: now}}
-	transport.policy(t, key, policy)
-	config := fixture.config
-	config.BuildVersion = "v0.20.0-3-gabc1234"
-	r, err := NewResolver(config)
-	if err != nil {
-		t.Fatal(err)
+	for _, version := range []string{"v0.20.0-3-gabc1234", "v0.20.1-0.20261106041046-718a7591f23a"} {
+		t.Run(version, func(t *testing.T) {
+			if err := RequirePolicyBuild("Cloud job", version, "", false); err != nil {
+				t.Fatal(err)
+			}
+			fixture, transport, key, policy, now := fixtureResolver(t)
+			policy.Revoked = []Restriction{{Version: "v0.10.2", Reason: "revocation fixture", Security: true, AnnouncedAt: now, EffectiveAt: now}}
+			transport.policy(t, key, policy)
+			config := fixture.config
+			config.BuildVersion = version
+			r, err := NewResolver(config)
+			if err != nil {
+				t.Fatal(err)
+			}
+			index, err := r.Index(t.Context(), now)
+			if err != nil || index.Index.Development() || len(transport.requests) == 0 {
+				t.Fatalf("main build skipped signed policy: %+v: %v", index, err)
+			}
+			if _, err := Evaluate(index.Index, "v0.20.0", now); err != nil {
+				t.Fatalf("listed engine refused: %v", err)
+			}
+			_, err = Evaluate(index.Index, "v0.10.2", now)
+			requireCode(t, err, apierr.VersionRevoked)
+			_, err = Evaluate(index.Index, "v0.30.0", now)
+			requireCode(t, err, apierr.VersionUnsupported)
+			if _, err := Evaluate(index.Index, config.BuildVersion, now); err == nil {
+				t.Fatal("unlisted service build accepted as a pinned engine")
+			}
+			config.CacheDirectory = t.TempDir()
+			delete(transport.responses, VersionIndexSignatureURL)
+			unsigned, err := NewResolver(config)
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, err = unsigned.Index(t.Context(), now)
+			requireCode(t, err, apierr.Unavailable)
+		})
 	}
-	index, err := r.Index(t.Context(), now)
-	if err != nil || index.Index.Development() || len(transport.requests) == 0 {
-		t.Fatalf("main build skipped signed policy: %+v: %v", index, err)
+}
+
+func TestRequirePolicyBuildAcceptsCanonicalPseudoVersion(t *testing.T) {
+	const version = "v0.68.7-0.20261106041046-718a7591f23a"
+	for _, component := range []string{"controller", "launcher", "Cloud job"} {
+		if err := RequirePolicyBuild(component, version, "", false); err != nil {
+			t.Fatalf("%s refused main build: %v", component, err)
+		}
 	}
-	if _, err := Evaluate(index.Index, "v0.20.0", now); err != nil {
-		t.Fatalf("listed engine refused: %v", err)
+	if semver.Compare("v0.68.6", version) >= 0 || semver.Compare(version, "v0.68.7") >= 0 {
+		t.Fatal("main build must sort after its stable base and before the next release")
 	}
-	_, err = Evaluate(index.Index, "v0.10.2", now)
-	requireCode(t, err, apierr.VersionRevoked)
-	_, err = Evaluate(index.Index, "v0.30.0", now)
-	requireCode(t, err, apierr.VersionUnsupported)
-	_, err = Evaluate(index.Index, config.BuildVersion, now)
-	requireCode(t, err, apierr.VersionUnsupported)
 }
 
 func TestRequirePolicyBuildRefusesDevelopmentUnlessAllowed(t *testing.T) {
@@ -85,7 +115,7 @@ func TestRequirePolicyBuildRefusesDevelopmentUnlessAllowed(t *testing.T) {
 	}
 	for _, version := range []string{"commit-0123456", "v0.68.6-dev+abc1234", "(devel)"} {
 		err := RequirePolicyBuild("launcher", version, "X=1", false)
-		if err == nil || !strings.Contains(err.Error(), version) || !strings.Contains(err.Error(), "vX.Y.Z-N-gSHA") || !strings.Contains(err.Error(), "set X=1") {
+		if err == nil || !strings.Contains(err.Error(), version) || !strings.Contains(err.Error(), "sparkwing run build-images") || !strings.Contains(err.Error(), "set X=1") {
 			t.Fatalf("development build %q: %v", version, err)
 		}
 		if err := RequirePolicyBuild("launcher", version, "X=1", true); err != nil {

@@ -112,22 +112,31 @@ needs an explicit `--version` when upgrading a repository because it does not
 fetch the latest-version index. Released controller runners retain signed policy checks, regardless of the
 version reported by a runner or selected by a pipeline.
 
-A service build deployed from a main commit is stamped `vX.Y.Z-N-gSHA`, the
-output of `git describe --tags --long`, and enforces signed policy like a
-release. Its own version never enters the index: the signed index governs the
-engine each run selects, which every job checks before it executes pipeline
+A service build deployed from a main commit after a stable release is stamped
+with Go's canonical pseudo-version `vX.Y.(Z+1)-0.YYYYMMDDhhmmss-SHA12`.
+For example, a commit after `v0.69.2` builds as
+`v0.69.3-0.20261106041046-718a7591f23a`, which sorts after `v0.69.2` and
+before `v0.69.3`. The timestamp is the commit's UTC committer time and SHA12
+is its first 12 lowercase hexadecimal SHA characters. This stamp enforces
+signed policy like a release. Git-describe stamps `vX.Y.Z-N-gSHA` retain the
+same enforcement because released image builders still produce them.
+
+A service build's own version never enters the index: the signed index governs
+the engine each run selects, which every job checks before it executes pipeline
 code, and revoked or below-minimum engines still refuse. The deployment's Cloud
 launcher, which holds an operator-issued service token, claims work without its
 own version being looked up, because it is the signed service image the deploy
 workflow built. Self-hosted runners still claim only as a listed release that is
-neither revoked nor below the minimum. Any other unreleased stamp, such as
-`commit-<sha>` or `-dev`, is a development build.
+neither revoked nor below the minimum. Other unreleased stamps, such as
+`commit-<sha>` or `-dev`, and malformed pseudo-versions are development builds.
 
-`sparkwing run build-images` stamps images with that form by default. It
-fetches tags from `origin` (unshallowing a shallow clone), runs
-`git describe --tags --long --abbrev=12` against the newest stable `vX.Y.Z`
-tag, and fails the build when the result is not `vX.Y.Z-N-gSHA`. `--tag`
-still overrides the stamp.
+`sparkwing run build-images` fetches tags from `origin` (unshallowing a shallow
+clone), selects the highest reachable release tag and derives Go's canonical
+pseudo-version from that base and the commit metadata. A release-tag build
+keeps its exact release version. A prerelease base uses Go's corresponding
+prerelease pseudo-version form; production policy classification requires a
+stable release base. The build fails when no release base is reachable. `--tag`
+overrides the stamp.
 
 Cloud controllers and every launcher refuse to run work from a development
 build. A controller with `--deployment=cloud` refuses to start unless it is

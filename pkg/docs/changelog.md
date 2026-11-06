@@ -31,7 +31,7 @@ unlock.
 
 ### Fixed
 
-- **deploy:** Untagged main builds use Go's canonical pseudo-version for images and version checks, so trimmed builds match their module stamp and sort after the previous release. Release-tag builds keep their existing version and tag handling.
+- **deploy:** Untagged main builds use Go's canonical pseudo-version for images and version checks, so trimmed builds match their module stamp and sort after the previous release. Release-tag builds keep their existing version and tag handling. Canonical pseudo-version service images pass controller, launcher and Cloud job startup checks while retaining signed engine policy enforcement.
 
 - **local controller:** Shutdown keeps admission reachable until embedded hosts finish cleanup and completes even when drain persistence fails. Release cleanup gives up after one second when the controller cannot answer. Terminal retry receipts stay bounded, and per-job CPU readings keep their own measurement intervals.
 

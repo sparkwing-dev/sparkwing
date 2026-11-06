@@ -12,6 +12,7 @@ import (
 	"regexp"
 	"time"
 
+	"golang.org/x/mod/module"
 	"golang.org/x/mod/semver"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
@@ -95,7 +96,7 @@ func RequirePolicyBuild(component, version, override string, allowed bool) error
 	if version == "" || releaseBuild(version) || allowed {
 		return nil
 	}
-	fix := "deploy a release vX.Y.Z or a main build stamped vX.Y.Z-N-gSHA (sparkwing run build-images stamps it)"
+	fix := "deploy a release vX.Y.Z or a main build stamped vX.Y.(Z+1)-0.YYYYMMDDhhmmss-SHA12 (sparkwing run build-images stamps it)"
 	if override != "" {
 		fix += ", or on a development cluster set " + override
 	}
@@ -103,17 +104,30 @@ func RequirePolicyBuild(component, version, override string, allowed bool) error
 		component, version, fix)
 }
 
-var describeSuffix = regexp.MustCompile(`^-(0|[1-9][0-9]*)-g[0-9a-f]{7,40}$`)
+var (
+	describeSuffix = regexp.MustCompile(`^-(0|[1-9][0-9]*)-g[0-9a-f]{7,40}$`)
+	pseudoSuffix   = regexp.MustCompile(`^-0\.[0-9]{14}-[0-9a-f]{12}$`)
+)
 
-// safety: a service build from a main commit, stamped `vX.Y.Z-N-gSHA` by `git describe --tags --long`,
-// enforces the signed engine policy like a release; its own version is absent from the index and must not
-// switch policy off.
+// safety: main service versions are absent from the index but must still enforce signed engine policy.
+// Released image builders also produce git-describe stamps, which must keep enforcing policy.
 func mainBuild(version string) bool {
 	if !semver.IsValid(version) || semver.Build(version) != "" {
 		return false
 	}
 	suffix := semver.Prerelease(version)
-	return describeSuffix.MatchString(suffix) && buildinfo.IsReleaseVersion(version[:len(version)-len(suffix)])
+	if describeSuffix.MatchString(suffix) {
+		return buildinfo.IsReleaseVersion(version[:len(version)-len(suffix)])
+	}
+	if !pseudoSuffix.MatchString(suffix) {
+		return false
+	}
+	base, err := module.PseudoVersionBase(version)
+	if err != nil || !buildinfo.IsReleaseVersion(base) {
+		return false
+	}
+	_, err = module.PseudoVersionTime(version)
+	return err == nil
 }
 
 func (r *Resolver) localIndex(now time.Time) IndexResult {
