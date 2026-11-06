@@ -612,3 +612,54 @@ func TestMachineAdmissionCancelledRemoteRunRejectsNewParticipant(t *testing.T) {
 		t.Fatalf("cancelled run reacquired: %+v", got)
 	}
 }
+
+func TestMachineAdmissionBoundsTerminalReceiptsAcrossRestarts(t *testing.T) {
+	persistence := &admissionMemoryStore{}
+	d := newHTTPAdmissionTest(t, persistence)
+	now := time.Now()
+	d.cfg.Now = func() time.Time { return now }
+	held := admissionResponse(t, admissionHTTPCall(t, d, http.MethodPost, "/requests", admissionTestInput(t, "held", 2)))
+	queued := admissionResponse(t, admissionHTTPCall(t, d, http.MethodPost, "/requests", admissionTestInput(t, "queued", 2)))
+	var latest AdmissionHTTPRequest
+	var refused AdmissionHTTPState
+	for i := range 512 {
+		now = now.Add(time.Millisecond)
+		latest = admissionTestInput(t, "burst-"+strconv.Itoa(i), 1)
+		latest.Request.NonBlocking = true
+		refused = admissionResponse(t, admissionHTTPCall(t, d, http.MethodPost, "/requests", latest))
+		if refused.Evicted == nil || refused.Evicted.Key != "capacity" {
+			t.Fatalf("burst refusal: %+v", refused)
+		}
+		if len(d.admissionTickets) > 258 || len(d.admissionKeys) > 258 {
+			t.Fatalf("terminal history grew unbounded: tickets=%d keys=%d", len(d.admissionTickets), len(d.admissionKeys))
+		}
+	}
+	restarted := newHTTPAdmissionTest(t, persistence)
+	replay := admissionResponse(t, admissionHTTPCall(t, restarted, http.MethodPost, "/requests", latest))
+	if replay.ID != refused.ID || replay.Evicted == nil {
+		t.Fatalf("restart lost recent retry receipt: %+v", replay)
+	}
+	now = now.Add(2 * time.Minute)
+	restarted.cfg.Now = func() time.Time { return now }
+	admissionResponse(t, admissionHTTPCall(t, restarted, http.MethodDelete, "/requests/by-key/cancelled-before-post", nil))
+	if len(restarted.admissionTickets) != 3 || len(restarted.admissionKeys) != 3 {
+		t.Fatalf("expired receipts retained: tickets=%d keys=%d", len(restarted.admissionTickets), len(restarted.admissionKeys))
+	}
+	if got := admissionResponse(t, admissionHTTPCall(t, restarted, http.MethodGet, "/requests/"+queued.ID, nil)); got.Queued == nil || got.Arrival != queued.Arrival {
+		t.Fatalf("pruning changed active waiter: %+v", got)
+	}
+	admissionResponse(t, admissionHTTPCall(t, restarted, http.MethodDelete, "/requests/"+held.ID, nil))
+	if got := admissionResponse(t, admissionHTTPCall(t, restarted, http.MethodGet, "/requests/"+queued.ID, nil)); got.Grant == nil {
+		t.Fatalf("pruning lost live authority: %+v", got)
+	}
+}
+
+func TestMachineAdmissionBoundsCancellationTombstones(t *testing.T) {
+	d := newHTTPAdmissionTest(t, &admissionMemoryStore{})
+	for i := range 512 {
+		admissionResponse(t, admissionHTTPCall(t, d, http.MethodDelete, "/requests/by-key/"+strconv.Itoa(i), nil))
+		if len(d.admissionTickets) > 256 || len(d.admissionKeys) > 256 {
+			t.Fatalf("cancelled request history grew unbounded: tickets=%d keys=%d", len(d.admissionTickets), len(d.admissionKeys))
+		}
+	}
+}

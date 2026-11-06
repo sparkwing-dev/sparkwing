@@ -18,7 +18,14 @@ type MachineAdmissionStore interface {
 	SaveMachineAdmission(context.Context, []byte) error
 }
 
+const (
+	maxTerminalAdmissionTickets = 256
+	terminalAdmissionRetention  = time.Minute
+)
+
 type admissionTicket struct {
+	TerminalAt       time.Time              `json:"terminal_at,omitempty"`
+	TerminalRevision uint64                 `json:"terminal_revision,omitempty"`
 	MeasurementPID   int                    `json:"measurement_pid,omitempty"`
 	MeasurementBirth string                 `json:"measurement_birth,omitempty"`
 	Fingerprint      string                 `json:"fingerprint"`
@@ -157,8 +164,44 @@ func (d *Daemon) captureAdmissionDeliveriesLocked(deliveries []delivery) {
 	}
 }
 
+func (d *Daemon) pruneAdmissionTicketsLocked() {
+	now := d.now()
+	var terminal []*admissionTicket
+	remove := func(ticket *admissionTicket) {
+		delete(d.admissionTickets, ticket.Result.ID)
+		delete(d.admissionKeys, admissionRequestKey(ticket.Subject, ticket.Input.RequestKey))
+	}
+	for _, ticket := range d.admissionTickets {
+		if ticket.Active {
+			continue
+		}
+		if ticket.TerminalAt.IsZero() {
+			ticket.TerminalAt = now
+			ticket.TerminalRevision = d.admissionRevision + 1
+		}
+		if now.Sub(ticket.TerminalAt) >= terminalAdmissionRetention {
+			remove(ticket)
+			continue
+		}
+		terminal = append(terminal, ticket)
+	}
+	if len(terminal) <= maxTerminalAdmissionTickets {
+		return
+	}
+	sort.Slice(terminal, func(i, j int) bool {
+		if terminal[i].TerminalRevision != terminal[j].TerminalRevision {
+			return terminal[i].TerminalRevision < terminal[j].TerminalRevision
+		}
+		return terminal[i].Result.ID < terminal[j].Result.ID
+	})
+	for _, ticket := range terminal[:len(terminal)-maxTerminalAdmissionTickets] {
+		remove(ticket)
+	}
+}
+
 func (d *Daemon) commitAdmissionLocked() error {
 	d.captureAdmissionDeliveriesLocked(d.waiterDeliveriesLocked())
+	d.pruneAdmissionTicketsLocked()
 	d.admissionRevision++
 	for _, ticket := range d.admissionTickets {
 		ticket.Result.Revision = d.admissionRevision
