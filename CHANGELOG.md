@@ -34,6 +34,7 @@ unlock.
 
 ### Fixed
 
+- **controller:** Capability issuance tolerates up to 30 seconds of backward clock skew, so time-sync corrections and VM resumes keep local owners, awards and here handoffs usable. Hosted controllers share the allowance. Expiry, revocation and binding deadlines retain their existing checks.
 - **CLI:** Pipeline triggers accept exact commits fetched from origin in shallow runner checkouts, so jobs can trigger another pipeline at the pushed commit without origin-tracking branches. Both execution and pipeline-code commits still require origin fetch evidence.
 - **logs:** Public runner environment values such as HOME and PATH remain readable. Operator-supplied values and embedded proxy credentials remain masked.
 - **deploy:** Untagged main builds use Go's canonical pseudo-version for images and version checks, so trimmed builds match their module stamp and sort after the previous release. Release-tag builds keep their existing version and tag handling. Canonical pseudo-version service images pass controller, launcher and Cloud job startup checks while retaining signed engine policy enforcement.

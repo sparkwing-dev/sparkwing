@@ -152,9 +152,13 @@ func validIdentity(p Principal) bool {
 	return false
 }
 
-// CredentialAlive includes expiry, rotation grace and the binding deadline.
+// bug: time sync and VM resume can step the wall clock backwards after issuance.
+const issuedAtClockSkew = 30 * time.Second
+
+// CredentialAlive allows 30 seconds of issuance skew and enforces expiry,
+// rotation grace and the binding deadline without additional leeway.
 func CredentialAlive(c Capability, now time.Time) bool {
-	return !c.IssuedAt.After(now) &&
+	return !c.IssuedAt.After(now.Add(issuedAtClockSkew)) &&
 		(c.ExpiresAt == nil || now.Before(*c.ExpiresAt)) &&
 		(c.RevokedAt == nil || now.Before(*c.RevokedAt)) &&
 		(c.Binding.Deadline == nil || now.Before(*c.Binding.Deadline))

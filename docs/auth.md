@@ -69,6 +69,17 @@ is outside the launch offering.
 
 ## Controller authorization
 
+Capability liveness accepts `issued_at` up to 30 seconds ahead of the store's
+wall clock. This covers small backward corrections during time sync or VM
+resume, including WSL's roughly 3.3-second steps. Local and hosted controllers
+share this check for owners, awards, here handoffs and their ancestry. Issuance
+farther ahead is refused. Expiry, revocation and binding deadlines stay strict
+against the observed wall clock, with no extra grace. A backward step within
+the allowance can delay expiry by up to 30 seconds; a forward step can expire
+credentials early. Thirty seconds leaves room for corrections while keeping
+the window small. For comparison, [Auth0's Java MVC library](https://github.com/auth0/auth0-java-mvc-common/blob/master/EXAMPLES.md#allow-a-clock-skew-for-token-validation)
+allows 60 seconds of JWT clock skew by default.
+
 Embedded controllers supply `WithMetricWriter` for job metric and usage writes,
 and `WithOperatorSettingsWriter` for deployment setting changes. Each writer
 receives the verified authority and resource target and rechecks them in its

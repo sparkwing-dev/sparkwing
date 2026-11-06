@@ -196,6 +196,7 @@ SDKs declare and relay only. Policy and security behavior live in the host behin
 | Break-glass session mints commit an audit row with no secret or reason | `identity.go`: `Operator.CreateBreakGlassSession` | `cmd/sparkwing-controller/admin_session_test.go`: `TestAdminSessionEnrollsSharedRunnerAndReservedLauncher` |
 | Sessions | `auth.go`: `Operator.LookupSession`, `CreateCapabilitySession`; `identity.go`: `createAccountSession` | `session_runtime_test.go`; `internal/controller/session_store_runtime_test.go`: `TestMemberTokenHTTPSessionTimeoutAndLogout` |
 | Tokens and capability issuance | `authority_issue.go`: `Store.issueTx`, `awardCapabilityTx` | `security_audit_test.go`: `TestDelegatedTokenRequiresAudit` |
+| Capability issuance tolerates up to 30 seconds of backward wall-clock skew on local and hosted controllers; expiry, revocation and binding deadlines stay strict | `internal/capability/authentication.go`: `CredentialAlive` | `internal/capability/authentication_clock_test.go`: `TestAuthenticationToleratesBackwardClockStep`, `TestCredentialClockSkewKeepsDeadlinesStrict`; `internal/store/authority_clock_test.go`: `TestAuthorityToleratesBackwardClockStep` |
 
 ### GitHub App
 
