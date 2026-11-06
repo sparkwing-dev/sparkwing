@@ -235,6 +235,7 @@ var schemaTables = []schemaTable{
 	{Name: "log_slots", Owner: schemaTenant},
 	{Name: "log_streams", Owner: schemaTenant},
 	{Name: "local_machine_admission", Owner: schemaOperator},
+	{Name: "local_runner_instances", Owner: schemaOperator},
 	{Name: "local_run_secrets", Owner: schemaTenant},
 	{Name: "node_metrics", Owner: schemaTenant},
 	{Name: "node_steps", Owner: schemaTenant},

@@ -7,11 +7,13 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"testing/synctest"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controller/client"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
+	"github.com/sparkwing-dev/sparkwing/internal/localhostwire"
 	"github.com/sparkwing-dev/sparkwing/internal/runners"
 )
 
@@ -54,16 +56,58 @@ func (f queueHostFunc) Host(ctx context.Context, unit controllerwire.ClaimedUnit
 	return f(ctx, unit)
 }
 
+type queueLifecycleFixture struct {
+	instance localhostwire.LocalRunnerInstance
+	activate func() error
+	watch    func(context.Context) (localhostwire.LocalRunnerInstance, error)
+	stop     func()
+}
+
+func (f *queueLifecycleFixture) Register(_ context.Context, instance localhostwire.LocalRunnerInstance) (localhostwire.LocalRunnerInstance, error) {
+	f.instance = instance
+	f.instance.Machine, f.instance.State = "machine", "registered"
+	return f.instance, nil
+}
+
+func (f *queueLifecycleFixture) Activate(context.Context, string) error {
+	if f.activate != nil {
+		return f.activate()
+	}
+	f.instance.State = "active"
+	return nil
+}
+
+func (f *queueLifecycleFixture) Watch(ctx context.Context, _, _ string) (localhostwire.LocalRunnerInstance, error) {
+	if f.watch != nil {
+		return f.watch(ctx)
+	}
+	<-ctx.Done()
+	return localhostwire.LocalRunnerInstance{}, ctx.Err()
+}
+
+func (f *queueLifecycleFixture) Stop(context.Context, string) error {
+	if f.stop != nil {
+		f.stop()
+	}
+	return nil
+}
+
 func TestLocalQueueRevokesAfterHostsJoinWithCancelledContext(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
-	joined, revoked := false, false
+	joined, stopped, revoked := false, false, false
 	options := localQueueTestClient(t, func(ctx context.Context) {
-		if !joined || ctx.Err() != nil {
-			t.Fatalf("revocation before host cleanup or with cancelled context: joined=%t err=%v", joined, ctx.Err())
+		if !joined || !stopped || ctx.Err() != nil {
+			t.Fatalf("revocation before host cleanup or with cancelled context: joined=%t stopped=%t err=%v", joined, stopped, ctx.Err())
 		}
 		revoked = true
 	})
+	lifecycle := &queueLifecycleFixture{stop: func() {
+		if !joined {
+			t.Fatal("runner stopped before its host joined")
+		}
+		stopped = true
+	}}
 	loop := &runners.Loop{
 		Config:       runners.LoopConfig{Version: "development", MaxConcurrent: 1, MaxClaims: 1},
 		CheckVersion: func(context.Context, string) error { return nil },
@@ -73,11 +117,78 @@ func TestLocalQueueRevokesAfterHostsJoinWithCancelledContext(t *testing.T) {
 			return ctx.Err()
 		}),
 	}
-	if err := runLocalQueue(ctx, options, loop); !errors.Is(err, context.Canceled) {
+	if err := runLocalQueue(ctx, options, loop, lifecycle); !errors.Is(err, context.Canceled) {
 		t.Fatalf("queue shutdown = %v", err)
 	}
 	if !revoked {
 		t.Fatal("queue returned without revoking its credential")
+	}
+}
+
+func TestLocalQueueDrainWatchJoinsSaturatedHosts(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		started, finish, drain := make(chan struct{}), make(chan struct{}), make(chan struct{})
+		joined, stopped := false, false
+		options := localQueueTestClient(t, func(context.Context) {
+			if !joined || !stopped {
+				t.Error("revoked before the draining host and lifecycle joined")
+			}
+		})
+		lifecycle := &queueLifecycleFixture{
+			watch: func(ctx context.Context) (localhostwire.LocalRunnerInstance, error) {
+				select {
+				case <-drain:
+					return localhostwire.LocalRunnerInstance{State: "draining"}, nil
+				case <-ctx.Done():
+					return localhostwire.LocalRunnerInstance{}, ctx.Err()
+				}
+			},
+			stop: func() { stopped = true },
+		}
+		loop := &runners.Loop{
+			Config:       runners.LoopConfig{Version: "development", MaxConcurrent: 1, Kinds: []capability.UnitKind{capability.UnitTrigger}},
+			CheckVersion: func(context.Context, string) error { return nil },
+			Host: queueHostFunc(func(ctx context.Context, _ controllerwire.ClaimedUnit) error {
+				close(started)
+				<-finish
+				if ctx.Err() != nil {
+					t.Errorf("drain cancelled a held host: %v", ctx.Err())
+				}
+				joined = true
+				return nil
+			}),
+		}
+		done := make(chan error, 1)
+		go func() { done <- runLocalQueue(t.Context(), options, loop, lifecycle) }()
+		<-started
+		close(drain)
+		synctest.Wait()
+		select {
+		case err := <-done:
+			t.Fatalf("runner returned before held host: %v", err)
+		default:
+		}
+		close(finish)
+		if err := <-done; err != nil {
+			t.Fatal(err)
+		}
+		if !stopped {
+			t.Fatal("runner did not acknowledge its joined host")
+		}
+	})
+}
+
+func TestLocalQueueActivationFailureStopsAndRevokesWithoutClaim(t *testing.T) {
+	failure := errors.New("activation failed")
+	stopped, revoked := false, false
+	options := localQueueTestClient(t, func(context.Context) { revoked = true })
+	lifecycle := &queueLifecycleFixture{activate: func() error { return failure }, stop: func() { stopped = true }}
+	loop := &runners.Loop{Config: runners.LoopConfig{Version: "development"}, CheckVersion: func(context.Context, string) error { return nil }}
+	if err := runLocalQueue(t.Context(), options, loop, lifecycle); !errors.Is(err, failure) {
+		t.Fatalf("activation: %v", err)
+	}
+	if !stopped || !revoked {
+		t.Fatalf("failed activation leaked identity or authority: stopped=%t revoked=%t", stopped, revoked)
 	}
 }
 

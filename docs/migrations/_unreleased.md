@@ -1,5 +1,33 @@
 # Migrating to the next release
 
+## Upgrade the store in place to schema baseline 33
+
+Schema 33 adds `local_runner_instances` to the recognized schema 32 baseline in
+one transaction. It records each runner's claim credential prefix, PID, process
+birth, version, executable SHA-256 and registered, active, draining or stopped
+state. Earlier recognized baselines run their existing upgrades first. Older
+binaries refuse the upgraded store. Retain a backup before upgrading if you
+need to return to an older binary.
+
+Verified socket peers use `POST /api/v1/local/runners` to register, and
+`GET /api/v1/local/runners/{id}` to read an instance. The optional
+`wait_state=active` query waits up to 20 seconds for a change. `POST` actions at
+`/api/v1/local/runners/{id}/activate`, `/api/v1/local/runners/{id}/drain` and
+`/api/v1/local/runners/{id}/stop` control its lifecycle. These are private socket
+routes. Browser cookies and remote credentials cannot call them.
+
+A registered successor cannot claim until activation. Activation drains the
+previous instance and enables the successor under the same store lock as claim
+arbitration. Draining preserves the old instance's held awards through uploads
+and terminal acknowledgement. The machine placement identity remains stable
+across process instances. A separate watch drains a runner even when all host
+slots are occupied. Stopped records retire with their ended credentials.
+
+No existing HTTP route, wire field or SDK symbol is removed. Local queue
+execution still shares the controller process lifetime. Detached supervision,
+foreground execution transfer and process-survival guarantees remain separate
+work.
+
 ## Local queue claims use HTTP
 
 The local queue obtains its credential through the authenticated API socket and

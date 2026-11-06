@@ -22,6 +22,8 @@ unlock.
 
 ### Breaking
 
+- **local controller (Breaking):** Schema 33 adds durable runner process identities and lifecycle state. Recognized schema 32 stores upgrade in place. Older binaries refuse the upgraded store. See [the migration guide](docs/migrations/_unreleased.md#upgrade-the-store-in-place-to-schema-baseline-33).
+
 - **CLI (Breaking):** Repository pin upgrades move from `sparkwing upgrade` to `sparkwing pipeline upgrade`. The obsolete `sparkwing daemon recover-state` command is removed because machine admission now lives in `state.db`. See [the migration guide](docs/migrations/_unreleased.md#upgrade-the-store-in-place-to-schema-baseline-31).
 
 - **local controller (Breaking):** Machine admission uses durable HTTP tickets on the controller API socket. Older pinned CLIs must run `sparkwing pipeline upgrade`. Incompatible-client errors name the client and controller versions. The schema baseline advances to version 32 in place, storing queued requests, leases, retry receipts and encrypted requester secrets together in `state.db`. See [the migration guide](docs/migrations/_unreleased.md#upgrade-the-store-in-place-to-schema-baseline-31).
@@ -29,6 +31,8 @@ unlock.
 - **local controller (Breaking):** The local controller remains running while idle, so a new client cannot race its idle shutdown. Removed `POST /api/v1/local/controller/stay`, `LocalControl.stay`, `LocalControlStatus.stay`, `LocalControlStatus.idle_since`, daemon status `stay`, and `--stay` from `sparkwing dashboard start` and `sparkwing wingd run`. Explicit `sparkwing daemon stop` still stops it. See [the migration guide](docs/migrations/_unreleased.md#local-controllers-remain-running-while-idle).
 
 ### Added
+
+- **local controller:** Verified socket peers register, activate, drain and observe runner instances under `/api/v1/local/runners`. Activation atomically enables a successor and stops the prior instance's new claims. An independent lifecycle watch drains saturated loops while held awards finish. This does not yet detach the local runner from the controller process. See [the migration guide](docs/migrations/_unreleased.md#upgrade-the-store-in-place-to-schema-baseline-33).
 
 - **local controller:** The local queue obtains a claim-only delegate and claims work through authenticated socket HTTP. Its credential is revoked after hosts finish cleanup. The verified peer may delegate exactly `triggers.claim` and `nodes.claim` through `POST /api/v1/tokens`. See [the migration guide](docs/migrations/_unreleased.md#local-queue-claims-use-http).
 

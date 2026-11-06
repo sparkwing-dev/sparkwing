@@ -212,7 +212,7 @@ func (r *localRuntime) serve(ctx context.Context, session *localRuntimeSession, 
 	d.cfg.ServeAPI = func(_ context.Context, ln net.Listener) {
 		serve("controller API", func() error {
 			local := controller.HTTP()
-			local.API = d.admissionHTTP(d.controllerHTTP(logins.socketRoutes(local.API)))
+			local.API = d.admissionHTTP(d.localRunnerHTTP(d.controllerHTTP(logins.socketRoutes(local.API))))
 			return ServeAPI(apiCtx, &readyListener{Listener: ln, ready: apiReady}, local)
 		})
 	}

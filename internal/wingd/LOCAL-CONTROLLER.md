@@ -30,15 +30,14 @@ starts. A losing election opens no store and returns `ErrNotElected`.
 `localcontroller.Config.Open` supplies that factory's store ownership and
 maintenance. It opens `<home>/state.db`, selects `DefaultTeam`, and gives the
 shared service binder that store, tenant and `EngineController`. The binder
-returns the shared policy handlers, state projection and `StoreRunnerConfig`.
-`Config.Open` constructs the shared queue over its owned store before returning.
-`localcontroller.NewStoreRunner` constructs that queue from the shared controller and
-`localcontroller.StoreRunnerConfig`. `Config.Open` rejects another controller store.
-The runner supplies `StoreHosting` over the owned handle. The controller needs its signed runner
-admission policy and the store needs its enrollment resolver. The bearer provider
-supplies a provisioned claimant credential.
-The embedded queue authenticates that credential before its startup and refresh
-version checks. Those checks and claim admission share
+returns the shared policy handlers, state projection and `Services.Runner`.
+After the API starts listening, that function obtains a claim-only credential
+through verified socket HTTP and constructs `runners.Loop` with the shared HTTP
+client and native host composition. It records its process instance and activates
+it before claiming. The production store claimant and hosting adapters are removed.
+The controller needs its signed runner admission policy and the store needs its
+enrollment resolver. Queue startup and refresh use the local signed policy.
+Claim admission authenticates the persisted credential through
 `EngineController.CheckRunner`, which selects local policy only for a persisted
 local subject. Local checks use cached policy without network refresh, including
 when a new home has no cached policy. Machine and service claimants retain strict
@@ -71,23 +70,22 @@ output upload/readback, durable log upload/readback, and atomic run completion.
 The test supplies signed release metadata and reports execution results through
 the API. Pipeline spawning and machine admission remain native-host checks.
 
-`NewClaimant` captures the process's kernel account. Its bearer provider uses
-shared peer authentication and credential delegation. Its enrollment resolver
+`NewClaimProfile` captures the process's kernel account. Its enrollment resolver
 accepts only that authenticated local account in `DefaultTeam`, and supplies
 the machine's CPU count, OS and architecture, plus the `runner.labels` the
 machine configuration listed when the controller started. Ambient runner names and tokens
-cannot select the account. Cleanup revokes the delegated queue credential.
-The store authenticates the verified peer for default-team reads. That peer has
-no persisted authority reference for delegation, so production queue startup
-cannot sustain a running controller. The socket-free `rewrite_integration`
-claimant probe reproduces the missing authority. Constructor success does not
-establish queue readiness.
+cannot select the account. It holds no store handle or credential. The local
+queue delegates exactly `triggers.claim` and `nodes.claim` through
+`POST /api/v1/tokens`. The store retains the peer root across controller starts,
+so process-specific delegates keep the same machine placement identity.
+After the loop joins its hosts, the queue records its stopped instance and
+revokes its delegate while the API remains available.
 
 `NativeServices` takes `NativeConfig` with W3's `NativeHostStore`, C2's
 `AuthenticationReader` and `BindingChecker`, the authenticated principal, refresh
-and renewal callbacks, and source options. The embedded queue passes its tenant
-and elected store. An adapter can supply those interfaces without another store
-opener. Refreshed authority, persisted run identity and both tenant projections
+and renewal callbacks, and source options. The local queue supplies authenticated
+HTTP adapters. Those interfaces require no execution-host store opener.
+Refreshed authority, persisted run identity and both tenant projections
 must agree before process transport opens. The constructor binds W3's host
 configuration, source, captured environments, lease keeper, state following and
 process router. Owner
@@ -137,6 +135,29 @@ Each admission decision and a periodic check release dead or reused holders.
 Process inspection errors retain capacity. There is no machine renewal, expiry
 or timeout setting, and a connection closing releases nothing. Hosts still own
 job execution and the existing logical claim renewals.
+
+Runner instances persist in `local_runner_instances` with a claim credential
+prefix, PID, process birth, version, executable SHA-256 and lifecycle state.
+Registration verifies the socket account and live process identity. An instance
+starts registered and cannot claim. Activation holds the same store arbitration
+lock as `claimUnitTx`, changes the previous active instance to draining and
+enables the successor in one transaction. The peer-root machine identity remains
+separate from process instance IDs. Draining leaves held award ancestry valid
+through cleanup, upload and terminal acknowledgement.
+
+The socket-only routes are `POST /api/v1/local/runners`,
+`GET /api/v1/local/runners/{id}`, and `POST` actions at that instance's
+`/activate`, `/drain` and `/stop` paths. A read with `wait_state=active` waits up
+to 20 seconds for a state change. Mutations wake these watchers after commit.
+Browser sessions and remote credentials cannot use these lifecycle routes.
+The runner watches independently of claim capacity and calls `Loop.Drain` when
+its instance leaves active state. Watch reads reconnect through transport errors.
+After joining its hosts, the queue records stopped state before revoking its
+credential. Ordinary ended-credential retention removes its instance record.
+
+The queue still shares the controller process lifetime. These records and
+transitions do not yet provide detached supervision or job survival through
+controller process replacement.
 
 The existing process-tree sampler supplies current, peak and average CPU and
 memory usage through the controller API for the dashboard. Its attribution and
@@ -273,7 +294,7 @@ execution joins.
 reconciliation, the shared queue, native host, persisted completion and joined
 shutdown. It substitutes state/HTTP, enrollment, version policy and source
 services. The local node-adoption properties use C2 snapshot and relation fakes
-with the shared authenticator. The persisted node-start and host-refresh tests
+with the shared authenticator. The persisted node-start tests
 verify that an attempt-zero award survives the transition to its current attempt.
 The delegation test uses the shared `NativeProcesses` and `ProcessAuthorities`.
 These tests do not establish persisted peer authentication, remote native state,

@@ -11,7 +11,10 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/runners"
 )
 
-func runLocalQueue(ctx context.Context, options client.EngineOptions, loop *runners.Loop) (err error) {
+func runLocalQueue(ctx context.Context, options client.EngineOptions, loop *runners.Loop, lifecycle localRunnerLifecycle) (err error) {
+	if loop == nil || loop.CheckVersion == nil || lifecycle == nil {
+		return errors.New("local queue requires a loop, version policy and process lifecycle")
+	}
 	tokens, err := client.NewTokenManager(options, false)
 	if err != nil {
 		return err
@@ -25,6 +28,20 @@ func runLocalQueue(ctx context.Context, options client.EngineOptions, loop *runn
 		_, revokeErr := tokens.RevokeToken(context.WithoutCancel(ctx), credential.Metadata.Prefix)
 		err = errors.Join(err, revokeErr)
 	}()
+	instance, err := localRunnerInstance(credential.Metadata.Prefix, loop.Config.Version)
+	if err != nil {
+		return err
+	}
+	if _, err := lifecycle.Register(ctx, instance); err != nil {
+		return err
+	}
+	defer func() { err = errors.Join(err, lifecycle.Stop(context.WithoutCancel(ctx), instance.ID)) }()
+	if err := loop.CheckVersion(ctx, loop.Config.Version); err != nil {
+		return err
+	}
+	if err := lifecycle.Activate(ctx, instance.ID); err != nil {
+		return err
+	}
 	options.Bearer = func(ctx context.Context) (string, error) { return credential.Token, context.Cause(ctx) }
 	loop.Controller, err = client.NewEngineClient(options)
 	if err != nil {
@@ -33,5 +50,12 @@ func runLocalQueue(ctx context.Context, options client.EngineOptions, loop *runn
 	if loop.OnError == nil {
 		loop.OnError = func(err error) { slog.Error("local run host failed", "err", err) }
 	}
+	watchCtx, stopWatch := context.WithCancel(ctx)
+	watchDone := make(chan error, 1)
+	go func() { watchDone <- watchLocalRunner(watchCtx, lifecycle, instance.ID, loop) }()
+	defer func() {
+		stopWatch()
+		err = errors.Join(err, <-watchDone)
+	}()
 	return loop.Run(ctx)
 }

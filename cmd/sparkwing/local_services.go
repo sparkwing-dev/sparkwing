@@ -192,6 +192,10 @@ func bindLocalControllerWithClock(ctx context.Context, b localcontroller.Binding
 		return localcontroller.Services{}, err
 	}
 	transport := wingdclient.NewAPIClient(socket)
+	lifecycle, err := wingdclient.NewLocalRunnerClient(b.Home, installedVersion())
+	if err != nil {
+		return localcontroller.Services{}, err
+	}
 	policies := server.StorePolicies()
 	policies.ClaimProfiles = profile
 	policies.LocalSecrets = cipher
@@ -210,7 +214,7 @@ func bindLocalControllerWithClock(ctx context.Context, b localcontroller.Binding
 					return b.Controller.LocalRunnerPolicy.CheckRunner(ctx, version)
 				},
 				Host: localRunnerHosting(b.Home, client.EngineOptions{URL: wingdclient.APIBaseURL, HTTP: transport}),
-			})
+			}, lifecycle)
 		},
 	}, nil
 }

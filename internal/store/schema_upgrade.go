@@ -68,6 +68,19 @@ var schemaUpgrades = []schemaUpgrade{
     FOREIGN KEY(team,run_id) REFERENCES runs(team,id) ON DELETE CASCADE
 )`},
 	},
+	{
+		from: 32, release: "schema 32", digest: "8229dac48bd08544fb5b2cddfe2f9c9d0f0f3c41968eda4db1591aff9f247f61",
+		statements: []string{`CREATE TABLE local_runner_instances (
+    id TEXT NOT NULL PRIMARY KEY CHECK(id <> ''),
+    capability_prefix TEXT NOT NULL UNIQUE REFERENCES capabilities(prefix) ON DELETE CASCADE,
+    machine TEXT NOT NULL CHECK(machine <> ''),
+    pid BIGINT NOT NULL CHECK(pid > 0),
+    process_birth TEXT NOT NULL CHECK(process_birth <> ''),
+    version TEXT NOT NULL CHECK(version <> ''),
+    build_identity TEXT NOT NULL CHECK(build_identity <> ''),
+    state TEXT NOT NULL CHECK(state IN ('registered','active','draining','stopped'))
+)`, `CREATE UNIQUE INDEX idx_local_runner_active ON local_runner_instances(machine) WHERE state='active'`},
+	},
 }
 
 func schemaUpgradeFrom(version int) (schemaUpgrade, bool) {

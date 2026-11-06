@@ -3,6 +3,7 @@ package store_test
 import (
 	_ "embed"
 	"encoding/hex"
+	"fmt"
 	"strings"
 	"sync"
 	"testing"
@@ -87,9 +88,31 @@ func TestSchemaUpgradesAReleasedV0683StoreInPlace(t *testing.T) {
 	target.Open(t)
 }
 
+func TestSchemaUpgradeAddsLocalRunnersToVersion32(t *testing.T) {
+	target := storetest.New(t)
+	st := target.Open(t)
+	if _, err := st.DB().Exec(`DROP TABLE local_runner_instances`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.DB().Exec(`UPDATE sparkwing_schema_version SET version=32, baseline_digest='8229dac48bd08544fb5b2cddfe2f9c9d0f0f3c41968eda4db1591aff9f247f61'`); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.Close(); err != nil {
+		t.Fatal(err)
+	}
+	upgraded := target.Open(t)
+	fresh := storetest.New(t).Open(t)
+	if a, b := schemaShape(t, upgraded), schemaShape(t, fresh); a != b {
+		t.Fatalf("schema upgrade differs: %s", shapeDiff(a, b))
+	}
+}
+
 func TestSchemaUpgradeAddsLocalSecretsToVersion31(t *testing.T) {
 	target := storetest.New(t)
 	st := target.Open(t)
+	if _, err := st.DB().Exec(`DROP TABLE local_runner_instances`); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := st.DB().Exec(`DROP TABLE local_run_secrets`); err != nil {
 		t.Fatal(err)
 	}
@@ -109,6 +132,9 @@ func TestSchemaUpgradeAddsLocalSecretsToVersion31(t *testing.T) {
 func TestSchemaUpgradeAddsMachineAdmissionToVersion30(t *testing.T) {
 	target := storetest.New(t)
 	st := target.Open(t)
+	if _, err := st.DB().Exec(`DROP TABLE local_runner_instances`); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := st.DB().Exec(`DROP TABLE local_run_secrets`); err != nil {
 		t.Fatal(err)
 	}
@@ -142,7 +168,7 @@ func TestSchemaUpgradeRefusesEveryOtherStore(t *testing.T) {
 		"unknown 28 digest": {`UPDATE sparkwing_schema_version SET baseline_digest='other'`, []string{`"other" is not the v0.68.3 baseline`, "left the store unchanged", "open it once with Sparkwing v0.68.3"}},
 		"missing 28 digest": {`UPDATE sparkwing_schema_version SET baseline_digest=''`, []string{`"<missing>" is not the v0.68.3 baseline`, "left the store unchanged"}},
 		"older than 28":     {`UPDATE sparkwing_schema_version SET version=27`, []string{"version 27 is older", "this build cannot upgrade it", "back up the store"}},
-		"newer than binary": {`UPDATE sparkwing_schema_version SET version=33`, []string{"version 33 is newer", "start a binary matching the store"}},
+		"newer than binary": {fmt.Sprintf(`UPDATE sparkwing_schema_version SET version=%d`, store.ExpectedSchemaVersion()+1), []string{fmt.Sprintf("version %d is newer", store.ExpectedSchemaVersion()+1), "start a binary matching the store"}},
 	} {
 		t.Run(name, func(t *testing.T) {
 			target := storetest.New(t)

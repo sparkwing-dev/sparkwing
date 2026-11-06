@@ -9,14 +9,22 @@ counter domains, boolean flags, and nonempty concurrency keys. Installations
 are referenced with their tenant. Job receipts reference the exact attempt and
 generation. Sessions, memberships and identities reference an existing account.
 The schema counterexample suites exercise these rules against either dialect.
-The baseline version is 30. Both dialects are translated from `schema.sql`.
+The baseline version is 33. Both dialects are translated from `schema.sql`.
 A fresh store gets the baseline whole. `schemaUpgrades` in `schema_upgrade.go`
 lists the forward steps, each keyed by the version and baseline digest a release
 recorded, and an older supported store takes every later step in the same open
 transaction, under the migration advisory lock on PostgreSQL: a v0.68.3
 schema-28 store gains `nodes.trusted_host` (version 29), and a v0.68.7 schema-29
 store gets the replaced `warm_pool_desired` view and the `device_logins` table
-(version 30). A step adds a
+(version 30). Schema 31 adds `local_machine_admission`, schema 32 adds
+`local_run_secrets`, and schema 33 adds `local_runner_instances` with a unique
+active instance per verified local peer root. Runner registration persists its
+claim capability, process ID and birth identity, version and build identity.
+Activation shares queue arbitration with claim awards, atomically draining the
+previous instance before admitting the successor. Registered, draining and
+stopped instances receive no new awards. Held award authority remains live
+while an instance drains. Existing credential retention removes an instance
+record when its ended claim capability is retired. A step adds a
 column at the end of its table so the upgraded schema matches a fresh one. A
 view is replaced with `CREATE OR REPLACE VIEW`, which keeps PostgreSQL grants;
 SQLite drops and recreates it. Any other version or digest requires a backup
