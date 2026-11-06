@@ -417,3 +417,9 @@ refuses an owner that cannot confirm it. Browser origins must match the bound
 host and port; wildcard binds need a loopback origin or a concrete bind address.
 `--allow-origin` is removed because the controller's browser API requires same-origin
 requests. Remote access through an alternate hostname should use a controller deployment.
+
+Runner discovery uses `GET /api/v1/local/runners?state=active` through the verified
+socket. The store resolves the account's active instance and validates its claim
+credential ancestry in the same snapshot. Registered, draining, stopped and
+foreign-account instances are absent. The returned PID, birth and build are
+persisted identity; the caller must check the actual process before reuse.

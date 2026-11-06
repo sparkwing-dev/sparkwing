@@ -28,6 +28,11 @@ execution still shares the controller process lifetime. Detached supervision,
 foreground execution transfer and process-survival guarantees remain separate
 work.
 
+`GET /api/v1/local/runners?state=active` returns the verified socket account's
+current active instance, or `not_found` when none is active. A successor must
+verify that the recorded process birth and build still match before reuse.
+No existing route or wire symbol is removed by this discovery addition.
+
 ## Local queue claims use HTTP
 
 The local queue obtains its credential through the authenticated API socket and

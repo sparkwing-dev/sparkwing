@@ -72,3 +72,30 @@ func TestLocalRunnerWatchRefusesChangedIdentityAndStopsOnCancellation(t *testing
 		})
 	}
 }
+
+func TestActiveLocalRunnerDiscoveryChecksLifecycleAndIdentity(t *testing.T) {
+	for _, state := range []string{"active", "draining", "incomplete"} {
+		t.Run(state, func(t *testing.T) {
+			home := shortHome(t)
+			serveHTTPFixture(t, home, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.Method != http.MethodGet || r.URL.Path != localRunnerPath || r.URL.Query().Get("state") != "active" || r.Header.Get("Authorization") != "" {
+					t.Errorf("changed runner discovery: %s %s", r.Method, r.URL)
+				}
+				instance := runnerClientInstance()
+				instance.State = state
+				if state == "incomplete" {
+					instance.ID = ""
+				}
+				writeHTTPFixture(w, instance)
+			}))
+			client, err := NewLocalRunnerClient(home, "v1")
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, err = client.Active(t.Context())
+			if (err == nil) != (state == "active") {
+				t.Fatalf("discovery state %s: %v", state, err)
+			}
+		})
+	}
+}

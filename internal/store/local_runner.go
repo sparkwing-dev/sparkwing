@@ -122,6 +122,44 @@ func (o *Operator) ReadLocalRunner(ctx context.Context, subject, id string) (_ L
 	return instance, nil
 }
 
+// ActiveLocalRunner finds the current instance for the verified local subject.
+// Absence is ErrNotFound; a stored identity is not proof that its process is alive.
+func (o *Operator) ActiveLocalRunner(ctx context.Context, subject string) (_ LocalRunnerInstance, err error) {
+	tx, err := o.s.beginSnapshotReadTx(ctx)
+	if err != nil {
+		return LocalRunnerInstance{}, err
+	}
+	defer rollbackUnlessDone(tx, &err)
+	rows, err := tx.queryContext(ctx, `SELECT prefix FROM capabilities WHERE team=? AND subject_kind='local' AND subject_id=? AND parent_id IS NULL ORDER BY created_at,prefix`, DefaultTeam, subject)
+	if err != nil {
+		return LocalRunnerInstance{}, err
+	}
+	prefixes, err := scanPrefixes(rows)
+	if err != nil {
+		return LocalRunnerInstance{}, err
+	}
+	var machine string
+	for _, prefix := range prefixes {
+		record, err := tx.operator.loadCapabilityRecordTx(ctx, tx, prefix)
+		if err != nil {
+			return LocalRunnerInstance{}, err
+		}
+		if record.Value.CredentialEpoch == o.s.credentialEpoch {
+			machine = prefix
+			break
+		}
+	}
+	var id string
+	err = tx.QueryRowContext(ctx, `SELECT id FROM local_runner_instances WHERE machine=? AND state='active'`, machine).Scan(&id)
+	if errors.Is(err, sql.ErrNoRows) {
+		return LocalRunnerInstance{}, notFound("active local runner", "")
+	}
+	if err != nil {
+		return LocalRunnerInstance{}, err
+	}
+	return authorizedLocalRunnerTx(ctx, tx, subject, id)
+}
+
 func authorizedLocalRunnerTx(ctx context.Context, tx *storeTx, subject, id string) (LocalRunnerInstance, error) {
 	instance, err := readLocalRunnerTx(ctx, tx, id)
 	if err != nil {

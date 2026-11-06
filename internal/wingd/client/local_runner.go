@@ -90,3 +90,16 @@ func (c *LocalRunnerClient) Drain(ctx context.Context, id string) error {
 func (c *LocalRunnerClient) Stop(ctx context.Context, id string) error {
 	return c.client.apiCall(ctx, http.MethodPost, localRunnerPath+"/"+url.PathEscape(id)+"/stop", nil, nil)
 }
+
+// Active discovers the persisted current instance without claiming that its process is alive.
+func (c *LocalRunnerClient) Active(ctx context.Context) (localhostwire.LocalRunnerInstance, error) {
+	var result localhostwire.LocalRunnerInstance
+	err := c.client.apiCall(ctx, http.MethodGet, localRunnerPath+"?state=active", nil, &result)
+	if err == nil {
+		err = validateLocalRunnerInstance(result, result.ID)
+		if err == nil && (result.ID == "" || result.State != "active") {
+			err = &apierr.Error{Code: apierr.ProtocolError, Message: "controller returned an inactive local runner"}
+		}
+	}
+	return result, err
+}

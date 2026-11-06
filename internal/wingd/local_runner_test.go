@@ -134,3 +134,27 @@ func TestLocalRunnerHTTPDrainWakesIndependentWatch(t *testing.T) {
 		}
 	})
 }
+
+func (f *runnerHTTPFixture) ActiveLocalRunner(context.Context, string) (localhostwire.LocalRunnerInstance, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.instance, nil
+}
+
+func TestLocalRunnerActiveDiscoveryRequiresVerifiedSocket(t *testing.T) {
+	d := newHTTPAdmissionTest(t, &admissionMemoryStore{})
+	fixture := &runnerHTTPFixture{instance: localhostwire.LocalRunnerInstance{ID: "successor", State: "active"}}
+	d.cfg.Runs = fixture
+	handler := d.localRunnerHTTP(http.NotFoundHandler())
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, httptest.NewRequestWithContext(t.Context(), http.MethodGet, localRunnerPath+"?state=active", nil))
+	if w.Code != http.StatusUnauthorized {
+		t.Fatalf("unverified discovery: %d", w.Code)
+	}
+	w = httptest.NewRecorder()
+	handler.ServeHTTP(w, runnerHTTPRequest(t, t.Context(), http.MethodGet, "?state=active", nil))
+	var instance localhostwire.LocalRunnerInstance
+	if err := json.Unmarshal(w.Body.Bytes(), &instance); err != nil || w.Code != http.StatusOK || instance != fixture.instance {
+		t.Fatalf("active discovery: %d %+v %v", w.Code, instance, err)
+	}
+}

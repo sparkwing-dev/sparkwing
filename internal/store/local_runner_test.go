@@ -81,7 +81,7 @@ func TestLocalRunnerIdentityAndStateSurviveRestart(t *testing.T) {
 			t.Error(err)
 		}
 	}()
-	got, err := s.AsOperator().ReadLocalRunner(t.Context(), localRunnerSubject, first.ID)
+	got, err := s.AsOperator().ActiveLocalRunner(t.Context(), localRunnerSubject)
 	first.State = "active"
 	if err != nil || got != first {
 		t.Fatalf("reopened: %+v, %v; want %+v", got, err, first)
@@ -319,5 +319,58 @@ func TestLocalRunnerStoppedIdentityRetiresWithItsEndedCredential(t *testing.T) {
 	}
 	if _, err := s.AsOperator().ReadLocalRunner(t.Context(), localRunnerSubject, instance.ID); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("retired instance: %v", err)
+	}
+}
+
+func TestActiveLocalRunnerFollowsRollAndHidesForeignSubjects(t *testing.T) {
+	s := localRunnerStore(t)
+	first := registerLocalRunner(t, s, "first")
+	second := registerLocalRunner(t, s, "second")
+	if _, err := s.AsOperator().ActiveLocalRunner(t.Context(), localRunnerSubject); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("registered discovery: %v", err)
+	}
+	for _, instance := range []LocalRunnerInstance{first, second} {
+		if err := s.AsOperator().ActivateLocalRunner(t.Context(), localRunnerSubject, instance.ID); err != nil {
+			t.Fatal(err)
+		}
+		got, err := s.AsOperator().ActiveLocalRunner(t.Context(), localRunnerSubject)
+		instance.State = "active"
+		if err != nil || got != instance {
+			t.Fatalf("active: %+v %v; want %+v", got, err, instance)
+		}
+		if _, err := s.AsOperator().ActiveLocalRunner(t.Context(), "uid:2000"); !errors.Is(err, ErrNotFound) {
+			t.Fatalf("foreign discovery: %v", err)
+		}
+	}
+	if err := s.AsOperator().DrainLocalRunner(t.Context(), localRunnerSubject, second.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.AsOperator().ActiveLocalRunner(t.Context(), localRunnerSubject); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("draining discovery: %v", err)
+	}
+}
+
+func TestActiveLocalRunnerIgnoresRetiredPeerRoot(t *testing.T) {
+	s := localRunnerStore(t)
+	old := registerLocalRunner(t, s, "old")
+	if err := s.AsOperator().ActivateLocalRunner(t.Context(), localRunnerSubject, old.ID); err != nil {
+		t.Fatal(err)
+	}
+	s.credentialEpoch += "-rotated"
+	current := registerLocalRunner(t, s, "current")
+	if current.Machine == old.Machine {
+		t.Fatal("credential epoch retained the old peer root")
+	}
+	if err := s.AsOperator().ActivateLocalRunner(t.Context(), localRunnerSubject, current.ID); err != nil {
+		t.Fatal(err)
+	}
+	current.State = "active"
+	got, err := s.AsOperator().ActiveLocalRunner(t.Context(), localRunnerSubject)
+	if err != nil || got != current {
+		t.Fatalf("current epoch discovery: %+v %v; want %+v", got, err, current)
+	}
+	var state string
+	if err := s.db.QueryRowContext(t.Context(), `SELECT state FROM local_runner_instances WHERE id=?`, old.ID).Scan(&state); err != nil || state != "active" {
+		t.Fatalf("old root fixture no longer active: %s %v", state, err)
 	}
 }

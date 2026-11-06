@@ -18,6 +18,7 @@ const localRunnerPath = "/api/v1/local/runners"
 
 // LocalRunnerStore persists process instances and arbitrates activation with claims.
 type LocalRunnerStore interface {
+	ActiveLocalRunner(context.Context, string) (localhostwire.LocalRunnerInstance, error)
 	RegisterLocalRunner(context.Context, string, localhostwire.LocalRunnerInstance) (localhostwire.LocalRunnerInstance, error)
 	ReadLocalRunner(context.Context, string, string) (localhostwire.LocalRunnerInstance, error)
 	ActivateLocalRunner(context.Context, string, string) error
@@ -58,6 +59,15 @@ func (d *Daemon) localRunnerHTTP(next http.Handler) http.Handler {
 		registry, ok := d.cfg.Runs.(LocalRunnerStore)
 		if !ok {
 			writeLoginFailure(w, &apierr.Error{Code: apierr.Unavailable, Message: "local runner persistence is unavailable"})
+			return
+		}
+		if r.URL.Path == localRunnerPath && r.Method == http.MethodGet && r.URL.Query().Get("state") == "active" {
+			instance, err := registry.ActiveLocalRunner(r.Context(), subject)
+			if err != nil {
+				writeLocalRunnerFailure(w, err)
+				return
+			}
+			writeAdmissionJSON(w, instance)
 			return
 		}
 		if r.URL.Path == localRunnerPath && r.Method == http.MethodPost {

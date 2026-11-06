@@ -48,3 +48,8 @@ func localRunnerError(err error) error {
 	}
 	return err
 }
+
+func (c *localController) ActiveLocalRunner(ctx context.Context, subject string) (localhostwire.LocalRunnerInstance, error) {
+	result, err := c.operator.ActiveLocalRunner(ctx, subject)
+	return runnerInstance(result), localRunnerError(err)
+}
