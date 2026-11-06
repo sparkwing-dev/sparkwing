@@ -26,6 +26,7 @@ func TestDashboardServesAControllerARunStarted(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", testhome.TempDir(t))
 	home := testhome.TempDir(t)
 	t.Setenv("SPARKWING_HOME", home)
+	t.Setenv("SPARKWING_SECRETS_KEY_FILE", filepath.Join(home, "secrets.key"))
 	t.Setenv("SPARKWING_CONFIG", filepath.Join(home, "missing.yaml"))
 	offlineStopDaemon(t, home)
 	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Minute)

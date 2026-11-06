@@ -20,6 +20,7 @@ func TestFreshScaffoldPlansAndExplainsInitialCommitBeforeRun(t *testing.T) {
 	}
 	home, repo := t.TempDir(), t.TempDir()
 	t.Setenv("HOME", home)
+	t.Setenv("SPARKWING_SECRETS_KEY_FILE", filepath.Join(home, "secrets.key"))
 	t.Setenv("SPARKWING_HOME", filepath.Join(home, "state"))
 	t.Setenv("SPARKWING_CONFIG", filepath.Join(home, "config.yaml"))
 	t.Setenv("XDG_CACHE_HOME", filepath.Join(home, "cache"))

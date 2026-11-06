@@ -49,7 +49,10 @@ refuses the read and asks the requester to submit a new run.
 The filesystem object URL signing key is also encrypted in store settings.
 Outstanding upload and download URLs keep working after a controller restart,
 subject to their original expiry. Preserve the local secrets key with the
-store; losing it prevents the controller from opening its signing key.
+store; losing it prevents the controller from opening its signing key. If
+`SPARKWING_HOME` selects an isolated home and no key exists, set
+`SPARKWING_SECRETS_KEY_FILE` to a private file inside that home before starting
+the controller. This keeps key creation inside the selected home.
 
 SQLite backups contain encrypted requester secrets and signing material.
 Deleting a run's live secrets does not erase earlier backups or SQLite's freed

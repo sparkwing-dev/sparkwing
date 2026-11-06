@@ -52,7 +52,7 @@ cancellation remain idempotent.
 Job execution remains with the existing hosts. This change does not transfer
 running jobs to a separate local runner or change their logical claim renewals.
 
-## Preserve local run secrets across restart with schema 32
+## Upgrade the store in place to schema baseline 32
 
 Schema 32 adds `local_run_secrets` to the recognized schema 31 baseline in one
 transaction. Older recognized baselines run the earlier upgrades first. The

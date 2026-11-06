@@ -28,6 +28,9 @@ func (o *Operator) LocalObjectSigningKey(ctx context.Context, cipher SessionKeyC
 			return nil, err
 		}
 		envelope, err = cipher.SealBound(secrets.PurposeSetting, "", metaKeyLocalObjects, "settings", false, true, hex.EncodeToString(minted))
+		if errors.Is(err, secrets.ErrKeyRefused) {
+			return nil, errors.New("local object signing key encryption failed; restore the existing local secrets key or set SPARKWING_SECRETS_KEY_FILE to a private key file inside SPARKWING_HOME before starting the controller")
+		}
 		if err != nil || !secrets.IsBound(envelope) {
 			return nil, errors.New("local object signing key encryption failed")
 		}

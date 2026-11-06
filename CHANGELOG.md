@@ -31,7 +31,7 @@ unlock.
 
 ### Fixed
 
-- **local controller:** Requester secrets persist encrypted across controller restarts and are deleted at terminal run state. Filesystem object URL signing keys also persist encrypted, preserving issued URLs until expiry. Schema 32 upgrades recognized stores in place; preserve the existing local secrets key with backups. See [the migration guide](docs/migrations/_unreleased.md#preserve-local-run-secrets-across-restart-with-schema-32).
+- **local controller:** Requester secrets persist encrypted across controller restarts and are deleted at terminal run state. Filesystem object URL signing keys also persist encrypted, preserving issued URLs until expiry. Schema 32 upgrades recognized stores in place; preserve the existing local secrets key with backups. See [the migration guide](docs/migrations/_unreleased.md#upgrade-the-store-in-place-to-schema-baseline-32).
 
 - **local controller:** Shutdown keeps admission reachable until embedded hosts finish cleanup and completes even when drain persistence fails. Release cleanup gives up after one second when the controller cannot answer. Terminal retry receipts stay bounded, and per-job CPU readings keep their own measurement intervals.
 

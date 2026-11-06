@@ -1910,7 +1910,7 @@ SELECT class AS hardware_class, warm, CASE mode WHEN 'off' THEN 0 WHEN 'manual' 
 FROM clamped;
 
 CREATE TABLE local_run_secrets (
-    team TEXT NOT NULL,
+    team TEXT NOT NULL REFERENCES teams(name),
     run_id TEXT NOT NULL,
     envelope TEXT NOT NULL,
     PRIMARY KEY(team,run_id),
