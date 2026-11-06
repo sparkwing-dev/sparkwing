@@ -7323,6 +7323,10 @@ components:
             - type: "null"
         stalled:
           type: boolean
+        usage:
+          anyOf:
+            - $ref: '#/components/schemas/pkg.wingwire.ProcessUsage'
+            - type: "null"
       required:
         - run_id
         - elapsed_ms
@@ -7338,6 +7342,36 @@ components:
           type: integer
       type: object
       x-sparkwing-go-type: wingwire.HostResources
+    pkg.wingwire.ProcessUsage:
+      additionalProperties: true
+      properties:
+        average_cpu_cores:
+          type: number
+        average_memory_bytes:
+          type: integer
+        cpu_measured:
+          type: boolean
+        current_cpu_cores:
+          type: number
+        current_memory_bytes:
+          type: integer
+        memory_measured:
+          type: boolean
+        peak_cpu_cores:
+          type: number
+        peak_memory_bytes:
+          type: integer
+      required:
+        - cpu_measured
+        - memory_measured
+        - current_cpu_cores
+        - peak_cpu_cores
+        - average_cpu_cores
+        - current_memory_bytes
+        - peak_memory_bytes
+        - average_memory_bytes
+      type: object
+      x-sparkwing-go-type: wingwire.ProcessUsage
     pkg.wingwire.QueueState:
       additionalProperties: true
       properties:
@@ -18240,7 +18274,7 @@ x-sparkwing-error-codes:
     purpose: The applicable execution, queue or approval deadline passed.
   - code: version_revoked
     http_status: 422
-    purpose: Signed policy revoked the pinned engine; details give version and reason, hint names sparkwing upgrade.
+    purpose: Signed policy revoked the pinned engine; details give version and reason, hint names sparkwing pipeline upgrade.
   - code: version_unsupported
     http_status: 422
     purpose: An effective signed minimum refuses the engine or runner; details give the minimum, reason and update action.
