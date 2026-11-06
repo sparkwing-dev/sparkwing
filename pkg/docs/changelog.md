@@ -43,6 +43,10 @@ unlock.
 - **console:** Approved accounts without an active team can create their first team or select an existing one
   Home and team pages show the next step without sending team requests that return Permission denied.
 
+### Docs
+
+- **auth:** Explain that browser sign-out ends `sparkwing login` tokens and enrollment cookies should come from a separate private browser window
+
 ## [v0.69.2] - 2026-11-05
 ### Changed
 
