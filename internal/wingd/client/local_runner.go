@@ -83,7 +83,16 @@ func (c *LocalRunnerClient) Activate(ctx context.Context, id string) error {
 
 // Drain stops new claims while existing awards retain their reporting authority.
 func (c *LocalRunnerClient) Drain(ctx context.Context, id string) error {
-	return c.client.apiCall(ctx, http.MethodPost, localRunnerPath+"/"+url.PathEscape(id)+"/drain", nil, nil)
+	wait := newRetry("drain local runner", 0)
+	for {
+		err := c.client.apiCall(ctx, http.MethodPost, localRunnerPath+"/"+url.PathEscape(id)+"/drain", nil, nil)
+		if err == nil || !transientAPIError(err) {
+			return err
+		}
+		if err := wait.wait(ctx, err); err != nil {
+			return err
+		}
+	}
 }
 
 // Stop records that the runner has joined its hosts and terminal acknowledgements.

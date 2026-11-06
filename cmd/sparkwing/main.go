@@ -401,6 +401,8 @@ func runSparkwing(args []string) (result error) {
 		return runRunnersList(context.Background(), inv)
 	case "sparkwing __tick":
 		return runScheduleTick(inv)
+	case "sparkwing wingd runner":
+		return runLocalRunnerCommand(inv)
 	case "sparkwing wingd run":
 		return runWingdRun(inv)
 	case "sparkwing daemon status":

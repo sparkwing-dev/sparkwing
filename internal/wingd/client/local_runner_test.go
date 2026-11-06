@@ -99,3 +99,30 @@ func TestActiveLocalRunnerDiscoveryChecksLifecycleAndIdentity(t *testing.T) {
 		})
 	}
 }
+
+func TestLocalRunnerDrainRetriesUntilFencedOrCancelled(t *testing.T) {
+	home := shortHome(t)
+	var calls atomic.Int32
+	serveHTTPFixture(t, home, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != localRunnerPath+"/instance/drain" {
+			t.Errorf("changed drain: %s %s", r.Method, r.URL)
+		}
+		if calls.Add(1) == 1 {
+			http.Error(w, "unavailable", http.StatusServiceUnavailable)
+			return
+		}
+		writeHTTPFixture(w, struct{}{})
+	}))
+	client, err := NewLocalRunnerClient(home, "v1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := client.Drain(t.Context(), "instance"); err != nil || calls.Load() != 2 {
+		t.Fatalf("drain recovery: calls=%d err=%v", calls.Load(), err)
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	if err := client.Drain(ctx, "instance"); !errors.Is(err, context.Canceled) {
+		t.Fatalf("cancelled drain: %v", err)
+	}
+}

@@ -23,10 +23,16 @@ and terminal acknowledgement. The machine placement identity remains stable
 across process instances. A separate watch drains a runner even when all host
 slots are occupied. Stopped records retire with their ended credentials.
 
-No existing HTTP route, wire field or SDK symbol is removed. Local queue
-execution still shares the controller process lifetime. Detached supervision,
-foreground execution transfer and process-survival guarantees remain separate
-work.
+No existing HTTP route, wire field or SDK symbol is removed. Linux and macOS
+queues run in an independent runner. The controller reuses matching live process
+birth, version and executable digest, or starts a successor and atomically drains
+the previous instance. Each runner uses a digest-pinned executable and independent
+stdio. Systemd hosts require a working user manager; a missing manager is an
+error. Confirmed no-systemd Linux hosts use a separate session. macOS uses a
+per-instance launchd agent. No drain deadline kills held work. Dependencies
+keep the exact accepted development executable from retained builds, with native
+platform, embedded version and complete digest checked again before use. Windows queued
+hosting and foreground/here hosting retain their existing process lifetimes.
 
 `GET /api/v1/local/runners?state=active` returns the verified socket account's
 current active instance, or `not_found` when none is active. A successor must
@@ -38,13 +44,13 @@ No existing route or wire symbol is removed by this discovery addition.
 The local queue obtains its credential through the authenticated API socket and
 uses the shared HTTP claim client. Verified socket peers may request exactly
 `triggers.claim` and `nodes.claim` from `POST /api/v1/tokens`. Other member-token
-requests remain refused. The queue revokes its delegate after hosts join and
-before the API shuts down. Captured account and label policy holds no store
-handle or credential.
+requests remain refused. The queue revokes its delegate after hosts join.
+Detached runner cleanup uses the API independently of the controller's shutdown
+lifetime. Captured account and label policy holds no store handle or credential.
 
-No HTTP route, wire field or SDK symbol is removed. Queue execution still runs
-inside the controller process, so this change alone does not preserve jobs
-across controller process replacement.
+No HTTP route, wire field or SDK symbol is removed. Detached queue supervision
+is described in the schema 33 section above. Foreground/here execution transfer
+remains separate work.
 
 ## Upgrade the store in place to schema baseline 31
 

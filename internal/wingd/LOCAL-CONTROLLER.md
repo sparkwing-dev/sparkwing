@@ -31,10 +31,15 @@ starts. A losing election opens no store and returns `ErrNotElected`.
 maintenance. It opens `<home>/state.db`, selects `DefaultTeam`, and gives the
 shared service binder that store, tenant and `EngineController`. The binder
 returns the shared policy handlers, state projection and `Services.Runner`.
-After the API starts listening, that function obtains a claim-only credential
-through verified socket HTTP and constructs `runners.Loop` with the shared HTTP
-client and native host composition. It records its process instance and activates
-it before claiming. The production store claimant and hosting adapters are removed.
+After the API starts listening, that function supervises the local runner on
+Linux and macOS. It discovers the persisted active instance, checks process birth,
+version and executable digest, and reuses a matching live process. A different
+build or dead process starts a successor from a digest-pinned executable under
+`<home>/runners/builds`. The successor obtains a claim-only credential through
+verified socket HTTP and constructs `runners.Loop` with native HTTP hosting.
+It records its process instance and activates it before claiming. Windows still
+uses an embedded loop until same-account SCM supervision is available. The
+production store claimant and hosting adapters are removed.
 The controller needs its signed runner admission policy and the store needs its
 enrollment resolver. Queue startup and refresh use the local signed policy.
 Claim admission authenticates the persisted credential through
@@ -79,7 +84,8 @@ queue delegates exactly `triggers.claim` and `nodes.claim` through
 `POST /api/v1/tokens`. The store retains the peer root across controller starts,
 so process-specific delegates keep the same machine placement identity.
 After the loop joins its hosts, the queue records its stopped instance and
-revokes its delegate while the API remains available.
+revokes its delegate after terminal acknowledgements. The runner has an
+independent lifetime; controller replacement does not join or cancel its hosts.
 
 `NativeServices` takes `NativeConfig` with W3's `NativeHostStore`, C2's
 `AuthenticationReader` and `BindingChecker`, the authenticated principal, refresh
@@ -155,9 +161,31 @@ its instance leaves active state. Watch reads reconnect through transport errors
 After joining its hosts, the queue records stopped state before revoking its
 credential. Ordinary ended-credential retention removes its instance record.
 
-The queue still shares the controller process lifetime. These records and
-transitions do not yet provide detached supervision or job survival through
-controller process replacement.
+On Linux, systemd-booted machines require a working user manager. Each instance
+runs in a separate `systemd-run --user` service with `KillMode=mixed` and
+`TimeoutStopSec=infinity`; controller service shutdown cannot reach its cgroup.
+A confirmed no-systemd host uses a separate session, separate stdio and no
+parent-death signal. macOS uses a separate per-instance launchd agent with no
+forced drain timeout. Captured environment overrides the manager environment,
+and each instance has its own log under `<home>/runners`. Services do not
+restart a retired instance after a crash; the controller starts a new identity.
+Accepted Go replacement identities retain their exact executable in
+`runners/builds/<sha256>`. New resolutions select the installed CLI. A successor
+can ensure a previously accepted identity only from that digest's retained file,
+checking native target, embedded build version and the complete SHA-256 before
+execution or SDK installation. Missing or changed bytes fail the job.
+
+No healthy drain has a kill deadline. Runner stop signals call `Loop.Drain`.
+Whenever the claim loop exits, an independent mutation records draining while
+held hosts continue. It reconnects through API outages and is joined after the
+hosts finish. A controller returning after the claim recovery window can start
+a successor instead of reusing a process that stopped polling. Startup waits use
+the existing private-request timeout and never kill a launched runner. Private
+launcher environment files are removed after the manager loads them.
+
+Foreground and here execution still live in the CLI. Windows still shares the
+controller queue lifetime. Native launchd and Windows service survival remain
+unverified.
 
 The existing process-tree sampler supplies current, peak and average CPU and
 memory usage through the controller API for the dashboard. Its attribution and

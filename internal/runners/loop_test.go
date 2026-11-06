@@ -1280,3 +1280,43 @@ func TestRunnerReportsAKubernetesPodToTheController(t *testing.T) {
 		}
 	}
 }
+
+func TestLoopReportsStoppedClaimsBeforeHeldHostJoins(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		started, stopped, release := make(chan struct{}), make(chan struct{}), make(chan struct{})
+		calls := 0
+		loop := &Loop{
+			Config:          LoopConfig{Version: "v1.0.0", MaxConcurrent: 2, PollInterval: time.Second},
+			CheckVersion:    func(context.Context, string) error { return nil },
+			OnClaimsStopped: func() { close(stopped) },
+			Controller: claimFunc(func(context.Context, controllerwire.ClaimRequest) (controllerwire.ClaimResponse, error) {
+				calls++
+				if calls == 1 {
+					return controllerwire.ClaimResponse{Claim: &controllerwire.ClaimedUnit{Unit: capability.UnitNode, UnitID: "unit", RunID: "run", Capability: "secret"}}, nil
+				}
+				return controllerwire.ClaimResponse{}, io.ErrUnexpectedEOF
+			}),
+			Host: hostFunc(func(ctx context.Context, _ controllerwire.ClaimedUnit) error {
+				close(started)
+				<-release
+				if ctx.Err() != nil {
+					t.Errorf("claim transport exit cancelled held work: %v", ctx.Err())
+				}
+				return nil
+			}),
+		}
+		joined := make(chan error, 1)
+		go func() { joined <- loop.Run(t.Context()) }()
+		<-started
+		<-stopped
+		select {
+		case err := <-joined:
+			t.Fatalf("returned before held host: %v", err)
+		default:
+		}
+		close(release)
+		if err := <-joined; !errors.Is(err, io.ErrUnexpectedEOF) {
+			t.Fatalf("claim transport outcome: %v", err)
+		}
+	})
+}

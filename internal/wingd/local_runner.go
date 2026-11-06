@@ -12,9 +12,20 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/localhostwire"
+	"github.com/sparkwing-dev/sparkwing/internal/procgroup"
 )
 
 const localRunnerPath = "/api/v1/local/runners"
+
+// LocalRunnerProcessAlive checks the recorded process incarnation, excluding exited processes.
+// Inspection errors leave the identity unknown rather than declaring its process dead.
+func LocalRunnerProcessAlive(instance localhostwire.LocalRunnerInstance) (bool, error) {
+	birth, err := admissionProcessBirth(instance.PID)
+	if errors.Is(err, procgroup.ErrProcessAbsent) {
+		return false, nil
+	}
+	return err == nil && birth == instance.ProcessBirth, err
+}
 
 // LocalRunnerStore persists process instances and arbitrates activation with claims.
 type LocalRunnerStore interface {

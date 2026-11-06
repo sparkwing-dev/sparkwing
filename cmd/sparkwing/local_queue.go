@@ -11,7 +11,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/runners"
 )
 
-func runLocalQueue(ctx context.Context, options client.EngineOptions, loop *runners.Loop, lifecycle localRunnerLifecycle) (err error) {
+func runLocalQueue(ctx context.Context, id string, options client.EngineOptions, loop *runners.Loop, lifecycle localRunnerLifecycle) (err error) {
 	if loop == nil || loop.CheckVersion == nil || lifecycle == nil {
 		return errors.New("local queue requires a loop, version policy and process lifecycle")
 	}
@@ -28,7 +28,7 @@ func runLocalQueue(ctx context.Context, options client.EngineOptions, loop *runn
 		_, revokeErr := tokens.RevokeToken(context.WithoutCancel(ctx), credential.Metadata.Prefix)
 		err = errors.Join(err, revokeErr)
 	}()
-	instance, err := localRunnerInstance(credential.Metadata.Prefix, loop.Config.Version)
+	instance, err := localRunnerInstance(id, credential.Metadata.Prefix, loop.Config.Version)
 	if err != nil {
 		return err
 	}
@@ -57,6 +57,21 @@ func runLocalQueue(ctx context.Context, options client.EngineOptions, loop *runn
 		stopWatch()
 		if watchErr := <-watchDone; !errors.Is(watchErr, context.Canceled) {
 			err = errors.Join(err, watchErr)
+		}
+	}()
+	drainCtx, stopDrain := context.WithCancel(context.WithoutCancel(ctx))
+	drainResult := make(chan error, 1)
+	draining := false
+	loop.OnClaimsStopped = func() {
+		draining = true
+		go func() { drainResult <- lifecycle.Drain(drainCtx, instance.ID) }()
+	}
+	defer func() {
+		stopDrain()
+		if draining {
+			if drainErr := <-drainResult; !errors.Is(drainErr, context.Canceled) {
+				err = errors.Join(err, drainErr)
+			}
 		}
 	}()
 	return loop.Run(ctx)

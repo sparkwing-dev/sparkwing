@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"crypto/rand"
 	"errors"
 	"log/slog"
 	"os"
@@ -208,7 +209,10 @@ func bindLocalControllerWithClock(ctx context.Context, b localcontroller.Binding
 		Maintain: server.MaintainStorage,
 		Complete: server.ReconcileRunEffects,
 		Runner: func(ctx context.Context) error {
-			return runLocalQueue(ctx, client.EngineOptions{URL: wingdclient.APIBaseURL, HTTP: transport}, &runners.Loop{
+			if runtime.GOOS != "windows" {
+				return superviseLocalRunnerProcess(ctx, timerHost)
+			}
+			return runLocalQueue(ctx, rand.Text(), client.EngineOptions{URL: wingdclient.APIBaseURL, HTTP: transport}, &runners.Loop{
 				Config: runners.LoopConfig{Version: installedVersion(), MaxConcurrent: runtime.NumCPU()},
 				CheckVersion: func(ctx context.Context, version string) error {
 					return b.Controller.LocalRunnerPolicy.CheckRunner(ctx, version)

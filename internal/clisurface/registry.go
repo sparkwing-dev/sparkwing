@@ -765,6 +765,10 @@ func Registry() []Command {
 			{Name: "clear", Conflicts: []string{"set"}},
 		}},
 		{Path: "sparkwing wingd", Hidden: true, Flags: []Flag{}},
+		{Path: "sparkwing wingd runner", Hidden: true, Flags: []Flag{
+			{Name: "home", Argument: "PATH", Required: true, Meaning: "State home of the controller supervising this process."},
+			{Name: "instance", Argument: "ID", Required: true, Meaning: "Process identity selected by the supervising controller."},
+		}},
 		{Path: "sparkwing wingd run", Hidden: true, Flags: []Flag{
 			{Name: "home", Argument: "PATH", Meaning: "Explicit state home for foreground controller ownership."},
 			{Name: "version", Argument: "VERSION"},

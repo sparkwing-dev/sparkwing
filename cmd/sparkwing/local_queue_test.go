@@ -61,6 +61,14 @@ type queueLifecycleFixture struct {
 	activate func() error
 	watch    func(context.Context) (localhostwire.LocalRunnerInstance, error)
 	stop     func()
+	drain    func(context.Context) error
+}
+
+func (f *queueLifecycleFixture) Drain(ctx context.Context, _ string) error {
+	if f.drain != nil {
+		return f.drain(ctx)
+	}
+	return nil
 }
 
 func (f *queueLifecycleFixture) Register(_ context.Context, instance localhostwire.LocalRunnerInstance) (localhostwire.LocalRunnerInstance, error) {
@@ -117,7 +125,7 @@ func TestLocalQueueRevokesAfterHostsJoinWithCancelledContext(t *testing.T) {
 			return ctx.Err()
 		}),
 	}
-	if err := runLocalQueue(ctx, options, loop, lifecycle); !errors.Is(err, context.Canceled) {
+	if err := runLocalQueue(ctx, "test-instance", options, loop, lifecycle); !errors.Is(err, context.Canceled) {
 		t.Fatalf("queue shutdown = %v", err)
 	}
 	if !revoked {
@@ -127,7 +135,7 @@ func TestLocalQueueRevokesAfterHostsJoinWithCancelledContext(t *testing.T) {
 
 func TestLocalQueueDrainWatchJoinsSaturatedHosts(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		started, finish, drain := make(chan struct{}), make(chan struct{}), make(chan struct{})
+		started, finish, drain, draining := make(chan struct{}), make(chan struct{}), make(chan struct{}), make(chan struct{})
 		joined, stopped := false, false
 		options := localQueueTestClient(t, func(context.Context) {
 			if !joined || !stopped {
@@ -143,7 +151,8 @@ func TestLocalQueueDrainWatchJoinsSaturatedHosts(t *testing.T) {
 					return localhostwire.LocalRunnerInstance{}, ctx.Err()
 				}
 			},
-			stop: func() { stopped = true },
+			stop:  func() { stopped = true },
+			drain: func(context.Context) error { close(draining); return nil },
 		}
 		loop := &runners.Loop{
 			Config:       runners.LoopConfig{Version: "development", MaxConcurrent: 1, Kinds: []capability.UnitKind{capability.UnitTrigger}},
@@ -159,9 +168,10 @@ func TestLocalQueueDrainWatchJoinsSaturatedHosts(t *testing.T) {
 			}),
 		}
 		done := make(chan error, 1)
-		go func() { done <- runLocalQueue(t.Context(), options, loop, lifecycle) }()
+		go func() { done <- runLocalQueue(t.Context(), "test-instance", options, loop, lifecycle) }()
 		<-started
 		close(drain)
+		<-draining
 		synctest.Wait()
 		select {
 		case err := <-done:
@@ -184,7 +194,7 @@ func TestLocalQueueActivationFailureStopsAndRevokesWithoutClaim(t *testing.T) {
 	options := localQueueTestClient(t, func(context.Context) { revoked = true })
 	lifecycle := &queueLifecycleFixture{activate: func() error { return failure }, stop: func() { stopped = true }}
 	loop := &runners.Loop{Config: runners.LoopConfig{Version: "development"}, CheckVersion: func(context.Context, string) error { return nil }}
-	if err := runLocalQueue(t.Context(), options, loop, lifecycle); !errors.Is(err, failure) {
+	if err := runLocalQueue(t.Context(), "test-instance", options, loop, lifecycle); !errors.Is(err, failure) {
 		t.Fatalf("activation: %v", err)
 	}
 	if !stopped || !revoked {

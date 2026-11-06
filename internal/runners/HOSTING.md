@@ -203,3 +203,9 @@ locations instead of rebuilding them from legacy trigger fields. The source
 contract describes a Git-bundle seed but has no separate marker for an uploaded
 working-tree snapshot. Final `accept_working_tree` transport and consent remain
 an integration obligation. A committed-source test does not close that obligation.
+
+`Loop.OnClaimsStopped` notifies the host owner before pending awards and held
+hosts join. The local runner uses it to persist draining independently of host
+cleanup, including when a controller outage exhausts claim recovery. Cancellation
+of that persistence worker follows host joining, so a permanently absent API
+does not hold an idle runner open.

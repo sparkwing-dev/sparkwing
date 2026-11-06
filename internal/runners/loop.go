@@ -58,10 +58,12 @@ type Loop struct {
 	Host         UnitHost
 	CheckVersion func(context.Context, string) error
 	OnError      func(error)
-	mu           sync.Mutex
-	drain        chan struct{}
-	running      bool
-	draining     bool
+	// OnClaimsStopped runs once before joining hosts when the claim loop exits.
+	OnClaimsStopped func()
+	mu              sync.Mutex
+	drain           chan struct{}
+	running         bool
+	draining        bool
 }
 
 // Drain stops new claims and makes Run join held hosts without cancelling their
@@ -228,6 +230,9 @@ func (l *Loop) run(ctx context.Context) (policyErr, runErr error) {
 	var pending <-chan claimOutcome
 	defer func() {
 		cancelClaims()
+		if l.OnClaimsStopped != nil {
+			l.OnClaimsStopped()
+		}
 		if pending != nil {
 			runErr = errors.Join(runErr, accept(<-pending))
 		}

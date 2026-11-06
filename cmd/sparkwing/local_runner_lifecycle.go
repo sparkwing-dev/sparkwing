@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
@@ -17,12 +16,13 @@ import (
 type localRunnerLifecycle interface {
 	Register(context.Context, localhostwire.LocalRunnerInstance) (localhostwire.LocalRunnerInstance, error)
 	Activate(context.Context, string) error
+	Drain(context.Context, string) error
 	Watch(context.Context, string, string) (localhostwire.LocalRunnerInstance, error)
 	Stop(context.Context, string) error
 }
 
-func localRunnerInstance(prefix, version string) (localhostwire.LocalRunnerInstance, error) {
-	instance := localhostwire.LocalRunnerInstance{ID: rand.Text(), CapabilityPrefix: prefix, PID: os.Getpid(), Version: version}
+func localRunnerInstance(id, prefix, version string) (localhostwire.LocalRunnerInstance, error) {
+	instance := localhostwire.LocalRunnerInstance{ID: id, CapabilityPrefix: prefix, PID: os.Getpid(), Version: version}
 	birth, err := procgroup.ProcessBirth(instance.PID)
 	if err != nil {
 		return instance, err

@@ -166,7 +166,7 @@ func hostSourceOptions(home string, captured []string, masker *secrets.Masker, l
 	if err != nil {
 		return source.Options{}, err
 	}
-	engines, err := engine.NewResolver(engine.Config{BuildVersion: installedVersion(), Mode: mode, CacheDirectory: filepath.Join(home, "engines"), LocalOnly: local})
+	engines, err := engine.NewResolver(engine.Config{BuildVersion: installedVersion(), Mode: mode, CacheDirectory: filepath.Join(home, "engines"), LocalOnly: local, LocalBuildDirectory: filepath.Join(home, "runners", "builds")})
 	if err != nil {
 		return source.Options{}, err
 	}

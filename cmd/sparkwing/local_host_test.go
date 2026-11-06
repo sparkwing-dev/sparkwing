@@ -40,7 +40,7 @@ func TestLocalQueueReportsHostFailureWhileDraining(t *testing.T) {
 	previous := slog.Default()
 	slog.SetDefault(slog.New(slog.NewTextHandler(&output, nil)))
 	t.Cleanup(func() { slog.SetDefault(previous) })
-	if err := runLocalQueue(t.Context(), options, loop, &queueLifecycleFixture{}); !errors.Is(err, failure) {
+	if err := runLocalQueue(t.Context(), "test-instance", options, loop, &queueLifecycleFixture{}); !errors.Is(err, failure) {
 		t.Fatal(err)
 	}
 	if !strings.Contains(output.String(), "local run host failed") || !strings.Contains(output.String(), failure.Error()) {

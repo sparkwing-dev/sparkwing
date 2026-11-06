@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -81,7 +82,7 @@ func TestRun_PinnedPipelineRunsWithTheNetworkDenied(t *testing.T) {
 
 	// safety: a sparkwing on the developer's PATH would host the admission
 	// daemon for this home, and the operator's binary is not this test's to
-	// start; the fixture PATH carries the two tools a run actually needs.
+	// start; the fixture PATH carries build tools and native supervision only.
 	toolPath := offlineToolPath(t, goBin, gitBin)
 	repoDir, sparkwingDir := offlineWriteFixture(t, gitBin, toolPath, fixtureHome)
 	marker := filepath.Join(t.TempDir(), "ran.txt")
@@ -236,6 +237,17 @@ func offlineUnlockModuleCache(t *testing.T, modCache string) {
 func offlineToolPath(t *testing.T, tools ...string) string {
 	t.Helper()
 	dir := t.TempDir()
+	var managers []string
+	if runtime.GOOS == "linux" {
+		managers = []string{"systemctl", "systemd-run"}
+	} else if runtime.GOOS == "darwin" {
+		managers = []string{"launchctl"}
+	}
+	for _, name := range managers {
+		if path, err := exec.LookPath(name); err == nil {
+			tools = append(tools, path)
+		}
+	}
 	for _, tool := range tools {
 		name := filepath.Base(tool)
 		if name == "go" {
@@ -279,7 +291,7 @@ func offlineGoEnv(t *testing.T, name string) string {
 
 func offlineBaseEnv(t *testing.T, fixtureHome, toolPath, sparkwingHome, marker string) []string {
 	t.Helper()
-	return []string{
+	environment := []string{
 		"HOME=" + fixtureHome,
 		"PATH=" + toolPath,
 		"GOMODCACHE=" + filepath.Join(fixtureHome, "go", "pkg", "mod"),
@@ -291,6 +303,12 @@ func offlineBaseEnv(t *testing.T, fixtureHome, toolPath, sparkwingHome, marker s
 		"SPARKWING_LOG_FORMAT=plain",
 		offlineMarkerEnv + "=" + marker,
 	}
+	for _, name := range []string{"XDG_RUNTIME_DIR", "DBUS_SESSION_BUS_ADDRESS"} {
+		if value, ok := os.LookupEnv(name); ok {
+			environment = append(environment, name+"="+value)
+		}
+	}
+	return environment
 }
 
 func offlineConnectedEnv(t *testing.T, fixtureHome, toolPath, sparkwingHome, marker string) []string {
