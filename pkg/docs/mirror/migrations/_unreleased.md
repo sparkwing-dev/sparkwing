@@ -20,6 +20,13 @@ The former wingwire `Hello`, `HelloAck`, `AdmissionRequest`, `Grant`, `Queued`,
 `LivenessProbe`, `LivenessAck`, `QueueState`, `SetPriority`, `SetPriorityAck`,
 `DrainRequest`, `DrainAck`, `LocalControl`, `LocalControlStatus`, `LocalDashboard`,
 `LocalDashboardAck`, `StatsReset` and `StatsResetAck` frames are removed.
+On the wire these are the `admission_request`, `grant`, `evicted`, `cancel`,
+`cancel_lease`, `cancel_lease_ack`, `reattach`, `liveness_probe`, `liveness_ack`,
+`queue_state`, `set_priority`, `set_priority_ack`, `drain_request`, `drain_ack`,
+`hello`, `hello_ack`, `local_control`, `local_control_status`, `local_dashboard`,
+`local_dashboard_ack`, `stats_reset`, `stats_reset_ack` and `unsupported` messages.
+The daemon protocol floor raised 1 -> 4 (newest major 4), so a CLI that speaks
+only an older major is refused with upgrade guidance.
 Upgrade the installed CLI and each
 repository's pinned pipeline CLI together:
 
