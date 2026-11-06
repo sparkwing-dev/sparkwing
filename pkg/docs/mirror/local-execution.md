@@ -528,9 +528,12 @@ asserted runs. Omit `--repos` for a personal runner. Repository scopes require
 proven code, which personal machines never claim. With `--session-stdin` the
 command reads an existing independent account session from stdin instead; the
 session and its CSRF proof stay in memory, and after fetching the proof the
-command attempts logout on enrollment success or failure. Either way it saves
-only the new runner credential. A profile backed only by a member token cannot
-enroll a personal machine without one of the two.
+command attempts logout on enrollment success or failure. A token minted by
+`sparkwing login` ends when its approving browser session signs out. If you
+supply that same session for enrollment, a successful logout invalidates the
+CLI token too. Copy the enrollment cookie from a separate private browser
+window. Either way it saves only the new runner credential. A profile backed
+only by a member token cannot enroll a personal machine without one of the two.
 The team's `members_can_add_machines` setting defaults to true. Any member
 can enroll a personal machine while it is on. When it is off, personal
 enrollment requires team administration. Shared runners always require team

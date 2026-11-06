@@ -62,6 +62,24 @@ func TestAffectedTestsLeaveANestedModulesFilesToThatModule(t *testing.T) {
 	}
 }
 
+func TestAffectedWireChangesRunTheReleaseWireCutCheck(t *testing.T) {
+	modules := []string{".", ".sparkwing"}
+	packages := []modulePackage{{importPath: "sparkwing-pipelines/jobs", dir: "jobs"}}
+	files := []string{"pkg/wingwire/messages.go", "internal/controllerwire/run.go", "internal/apispec/spec.go"}
+	for _, surface := range wireSurfaces {
+		files = append(files, surface.path)
+	}
+	for _, file := range files {
+		t.Run(file, func(t *testing.T) {
+			plan := planAffectedTests(".sparkwing", modules, []string{file}, packages, nil)
+			commands := plan.commands(hostShape{cpus: 2})
+			if len(commands) != 1 || !strings.HasSuffix(commands[0], " 'sparkwing-pipelines/jobs'") || strings.Contains(commands[0], "-run") {
+				t.Fatalf("%s selected %q, want the jobs suite including TestRepositoryUnreleasedSectionDeclaresEveryWireCut", file, commands)
+			}
+		})
+	}
+}
+
 func TestCriticalMarkersMustSitAboveATest(t *testing.T) {
 	tests, misplaced := scanCriticalTests("package x\n\n//sparkwing:critical\nfunc TestGuard(t *testing.T) {}\n\n//sparkwing:critical\nfunc helper() {}\n")
 	if !slices.Equal(tests, []string{"TestGuard"}) || !slices.Equal(misplaced, []int{6}) {

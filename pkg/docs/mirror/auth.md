@@ -353,8 +353,13 @@ rotation and revocation. Members enroll their own personal machines through
 `sparkwing runners add --personal --session-stdin` with an independent account
 session. After fetching the session CSRF proof, the CLI attempts logout on
 enrollment success or failure. Use a dedicated session because logout ends it
-for every client. The team setting `members_can_add_machines` defaults to true. When it
-is false, personal enrollment requires administration too. A personal runner
+for every client. A token minted by `sparkwing login` ends when its approving
+browser session signs out. Supplying that same session to `--session-stdin`
+therefore invalidates the CLI token when logout succeeds. Copy the enrollment
+cookie from a separate private browser window instead.
+
+The team setting `members_can_add_machines` defaults to true. When it is false,
+personal enrollment requires administration too. A personal runner
 records the membership epoch, grant and setting that authorized enrollment.
 Every use checks them again, and turning the setting off ends members' personal
 runners for good: turning it back on does not revive them. Removing and re-adding the member cannot revive
