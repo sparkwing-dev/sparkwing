@@ -534,11 +534,19 @@ func pushLanding(ctx context.Context, git gitRunner, dir, commit, gatedTree stri
 	}
 	out, err := git(ctx, landPushArgs(commit, gated)...)
 	if err != nil {
-		msg := err.Error()
-		if strings.Contains(msg, "non-fast-forward") || strings.Contains(msg, "fetch first") || strings.Contains(msg, "rejected") {
+		refused := fmt.Errorf("land: push %s to %s was refused; the push can be retried: %w", short(commit), landBaseRef, err)
+		if fetchErr := fetchLandBase(ctx, git, dir); fetchErr != nil {
+			return fmt.Errorf("%w\ncould not check whether main moved: %w", refused, fetchErr)
+		}
+		base, baseErr := git(ctx, "rev-parse", landBaseRef)
+		ancestor, ancestryErr := git(ctx, "merge-base", landBaseRef, commit)
+		if baseErr != nil || ancestryErr != nil {
+			return fmt.Errorf("%w\ncould not check main's ancestry: %w", refused, errors.Join(baseErr, ancestryErr))
+		}
+		if ancestor != base {
 			return errMainMoved{fmt.Errorf("land: %s moved since the gate ran, so the push was refused; merge it: %s\n%w", landBaseRef, mergeRemedy(dir), err)}
 		}
-		return fmt.Errorf("land: push %s to %s: %w", short(commit), landBaseRef, err)
+		return refused
 	}
 	if out != "" {
 		sparkwing.Info(ctx, "%s", out)

@@ -64,8 +64,10 @@ step fetches `origin/main` and runs
 pushed commit's tree is the tree the gate and review judged (the gate runs
 every check the pre-push hook makes, the qatrust vet included); a merged tree
 pushes through the hook. It carries the
-`destructive` and `prod` risks, as release's `push-tag` does. A rejected push
-means main moved; the step then merges it, as below. The job's output is the
+`destructive` and `prod` risks, as release's `push-tag` does. After a refused
+push, the step fetches main and checks its ancestry. It merges main only when
+main is not an ancestor of the pushed commit. Otherwise it preserves the
+remote's reason and says the push can be retried. The job's output is the
 landing record (branch, the commit and tree pushed, the gated tree, base,
 merges, gate run, review record path and result). The gate's `test` step summary lists the slowest packages and tests.
 
@@ -715,7 +717,11 @@ file. Other syntax and workflow checks remain active.
   `nonPackageReaders` table in `.sparkwing/jobs/affected_tests.go` (`.github/`
   and `bin/` run `.sparkwing/jobs`, `docs/` runs `internal/doccheck` and
   `cmd/sparkwing`, and so on); `CHANGELOG.md` is left to the docs-mirror and
-  changelog steps. Its lint step lints only the packages holding changed Go
+  changelog steps. Changes under `pkg/wingwire/`, `internal/controllerwire/`,
+  `internal/apispec/` or `api/` also run `.sparkwing/jobs`, including
+  `TestRepositoryUnreleasedSectionDeclaresEveryWireCut`, because the release
+  wire-cut check reads the protocol and API surfaces outside its package.
+  Its lint step lints only the packages holding changed Go
   files (every package when `go.mod`, `go.sum` or `.golangci.yml` changed),
   since `--new-from-rev` drops findings outside the change anyway. With
   `--full`, race tests cover every package but `internal/store` and the
