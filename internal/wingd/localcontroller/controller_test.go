@@ -57,9 +57,9 @@ func serviceFixture(b Binding) Services {
 		Runner: StoreRunnerConfig{
 			Loop:   runners.LoopConfig{Version: "v0.71.0", MaxConcurrent: 1},
 			Bearer: func(ctx context.Context) (string, error) { <-ctx.Done(); return "", ctx.Err() },
-			Bind: func(context.Context, StoreBinding) (nodehost.NativeServices, error) {
+			Host: StoreHosting{Controller: b.Controller, Bind: func(context.Context, StoreBinding) (nodehost.NativeServices, error) {
 				return nodehost.NativeServices{}, errors.New("unexpected host")
-			},
+			}},
 		},
 	}
 }
@@ -271,7 +271,7 @@ func TestCompositionCleansPartialBindings(t *testing.T) {
 				case "incomplete":
 					services.HTTP.API = nil
 				case "runner":
-					services.Runner.Bind = nil
+					services.Runner.Host = nil
 				case "policy":
 					b.Controller.RunnerPolicy = nil
 				case "tenant":

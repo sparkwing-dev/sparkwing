@@ -4,113 +4,70 @@ import (
 	"context"
 	"errors"
 	"log/slog"
-	"os"
 	"path/filepath"
-
-	"github.com/sparkwing-dev/sparkwing/internal/wingd/localcontroller"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controller/client"
+	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
+	"github.com/sparkwing-dev/sparkwing/internal/procenv"
+	"github.com/sparkwing-dev/sparkwing/internal/runners"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
-	"github.com/sparkwing-dev/sparkwing/internal/runstate"
-	"github.com/sparkwing-dev/sparkwing/internal/secrets"
-	"github.com/sparkwing-dev/sparkwing/internal/store"
+	"github.com/sparkwing-dev/sparkwing/internal/source"
 )
 
-type localOwnerState struct {
-	*store.Tenant
-	owner capability.AuthorityRef
-}
-
-func (s localOwnerState) ReadSnapshot(ctx context.Context, run string) (store.RunSnapshot, error) {
-	return s.Tenant.ReadOwnerSnapshot(ctx, s.owner, run)
-}
-
-func newLocalNativeServices(ctx context.Context, home string, owned *store.Store, binding localcontroller.StoreBinding, options client.EngineOptions) (nodehost.NativeServices, error) {
-	return localNativeServices(ctx, home, owned, binding, options, nodehost.NewNativeServices)
-}
-
-func localNativeServices(ctx context.Context, home string, owned *store.Store, binding localcontroller.StoreBinding, options client.EngineOptions, build func(context.Context, nodehost.NativeConfig) (nodehost.NativeServices, error)) (_ nodehost.NativeServices, err error) {
-	options.Bearer = binding.Bearer
-	var private *client.LocalHostClient
-	fence := binding.Principal.Capability.Binding
-	if binding.Principal.Capability.Unit == capability.UnitNode {
-		private, err = client.NewNodeHostClient(options, fence.RunID, fence.NodeID)
-	} else {
-		private, err = client.NewLocalHostClient(options, fence.RunID)
-	}
-	if err != nil {
-		return nodehost.NativeServices{}, err
-	}
-	defer func() {
+func localRunnerHosting(home string, options client.EngineOptions) runners.Hosting {
+	hosting := runners.NativeHosting(runners.NativeHostingConfig{
+		Home: home, Controller: options, Admission: nodehost.MachineAdmission(home, installedVersion()), SubmitAccept: procenv.SubmitAcceptAll(),
+		Source: func(_ context.Context, unit controllerwire.ClaimedUnit, connection client.EngineOptions) (source.Options, error) {
+			return localAwardSourceOptions(home, unit, connection)
+		},
+	})
+	bind := hosting.Bind
+	hosting.Bind = func(ctx context.Context, unit controllerwire.ClaimedUnit, controller controllerwire.Controller) (nodehost.NativeServices, capability.Principal, error) {
+		services, principal, err := bind(ctx, unit, controller)
 		if err != nil {
-			err = errors.Join(err, private.Close())
+			return services, principal, err
 		}
-	}()
-	source, err := hostSourceOptions(home, os.Environ(), secrets.NewMasker(), true)
-	if err != nil {
-		return nodehost.NativeServices{}, err
+		err = bindLocalProfiles(ctx, home, options, unit, &services)
+		return services, principal, err
 	}
-	var state nodehost.NativeHostStore = binding.Tenant
-	if binding.Principal.Capability.Unit == capability.UnitTrigger {
-		state = localOwnerState{Tenant: binding.Tenant, owner: binding.Principal.Authority}
+	return hosting
+}
+
+func bindLocalProfiles(ctx context.Context, home string, options client.EngineOptions, unit controllerwire.ClaimedUnit, services *nodehost.NativeServices) error {
+	request := unit.Request.Request
+	if request.Origin != runspec.OriginLocal {
+		return nil
 	}
-	admission := nodehost.MachineAdmission(home, installedVersion())
-	services, err := build(ctx, nodehost.WithClient(nodehost.NativeConfig{
-		Admission: nodehost.ComposeStartGate(binding.Tenant, admission, true),
-		Home:      home, Store: state, Parent: owned.AsOperator(), Bindings: owned.AsOperator(),
-		Principal: binding.Principal, Refresh: binding.Refresh, Renew: owned.AsOperator().RenewUnit, Source: source, Local: store.OwnerCanExecute(binding.Principal),
-	}, private))
-	if err != nil {
-		return nodehost.NativeServices{}, err
-	}
-	services.Config.Owner.Delegator = owned.AsOperator()
-	closeServices := services.Close
-	services.Close = func() error { return errors.Join(closeServices(), private.Close()) }
-	run, err := binding.Tenant.ReadRun(ctx, fence.RunID)
-	if err != nil {
-		return nodehost.NativeServices{}, errors.Join(err, services.Close())
-	}
-	if profile := run.Request.Request.Options.CacheFrom.Value; profile != "" && run.Request.Request.Origin == runspec.OriginLocal {
+	if profile := request.Options.CacheFrom.Value; profile != "" {
 		snapshots, err := nodehost.NewFileEnvironmentSnapshots(filepath.Join(home, "environments"))
 		if err != nil {
-			return nodehost.NativeServices{}, errors.Join(err, services.Close())
+			return err
 		}
-		environment, err := snapshots.Load(ctx, run.Request.Request.Env)
+		environment, err := snapshots.Load(ctx, request.Env)
 		if err != nil {
-			return nodehost.NativeServices{}, errors.Join(err, services.Close())
+			return err
 		}
-		cache, closeCache, err := openProfileCache(ctx, environment, profile, run.Request.Request.Git, run.Request.Request.Source.Location.LocalCheckout)
+		cache, closeCache, err := openProfileCache(ctx, environment, profile, request.Git, request.Source.Location.LocalCheckout)
 		if err != nil {
-			return nodehost.NativeServices{}, errors.Join(err, services.Close())
+			return err
 		}
 		services.Storage.RemoteCache = cache
 		closeHost := services.Close
 		services.Close = func() error { return errors.Join(closeHost(), closeCache()) }
 	}
-	if binding.Principal.Capability.Unit == capability.UnitTrigger {
+	if unit.Unit == capability.UnitTrigger && request.Options.Publish.Value != "" {
 		closeHost := services.Close
 		services.Close = func() error {
 			err := closeHost()
 			finished := context.WithoutCancel(ctx)
-			run, readErr := binding.Tenant.ReadRun(finished, fence.RunID)
-			if readErr == nil && run.FinishedAt != nil && run.Request.Request.Options.Publish.Value != "" {
-				local := options
-				local.Bearer = nil
-				if publishErr := publishLocalProfile(finished, home, local, run.Request.Request.Options.Publish.Value, run.ID); publishErr != nil {
-					slog.Warn("local run completed but publication failed", "run_id", run.ID, "err", publishErr)
-				}
+			options.Bearer = nil
+			if publishErr := publishLocalProfile(finished, home, options, request.Options.Publish.Value, unit.RunID); publishErr != nil {
+				slog.Warn("local run completed but publication failed", "run_id", unit.RunID, "err", publishErr)
 			}
 			return err
 		}
 	}
-	adopt := services.Config.Owner.AdoptClaim
-	services.Config.Owner.AdoptClaim = func(ctx context.Context, claim runstate.ReconciledNode) error {
-		if err := private.AdoptClaim(ctx, claim); err != nil {
-			return err
-		}
-		return adopt(ctx, claim)
-	}
-	return services, nil
+	return nil
 }

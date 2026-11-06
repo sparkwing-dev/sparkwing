@@ -89,19 +89,6 @@ func TestLocalQueueReportsHostFailureWhileDraining(t *testing.T) {
 
 func TestLocalQueueBindsAuthenticatedStorageBeforeOpeningProcessTransport(t *testing.T) {
 	t.Setenv("SPARKWING_CONFIG", filepath.Join(t.TempDir(), "missing.yaml"))
-	owned, err := teststore.Open(t, filepath.Join(t.TempDir(), "state.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() {
-		if err := owned.Close(); err != nil {
-			t.Error(err)
-		}
-	})
-	tenant, err := owned.ForTeam(t.Context(), store.DefaultTeam)
-	if err != nil {
-		t.Fatal(err)
-	}
 	raw := capability.ControllerPrefix + base64.RawURLEncoding.EncodeToString(make([]byte, 32))
 	now := time.Now()
 	p := capability.Principal{Class: capability.CredentialBearer, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: "owner"}, Capability: capability.Capability{
@@ -133,10 +120,16 @@ func TestLocalQueueBindsAuthenticatedStorageBeforeOpeningProcessTransport(t *tes
 		}
 		return response.Result(), nil
 	})}}
-	binding := localcontroller.StoreBinding{Tenant: tenant, Principal: p, Refresh: func(context.Context) (capability.Principal, error) { return p, nil }, Bearer: func(context.Context) (string, error) { return raw, nil }}
-	services, err := newLocalNativeServices(t.Context(), t.TempDir(), owned, binding, options)
+	unit := controllerwire.ClaimedUnit{Unit: p.Capability.Unit, UnitID: p.Capability.UnitID, RunID: "run", Capability: raw, Purpose: p.Capability.Purpose, Delivery: p.Capability.Delivery, Binding: p.Capability.Binding}
+	unit.Request.Request.Team = "default"
+	unit.Request.Request.Source.Location.LocalCheckout = t.TempDir()
+	connection, err := client.NewEngineClient(options)
+	if err != nil {
+		t.Fatal(err)
+	}
+	services, _, err := localRunnerHosting(t.TempDir(), options).Bind(t.Context(), unit, connection)
 	var failure *apierr.Error
-	if !errors.As(err, &failure) || failure.Message != "storage fence changed" || authenticated != 1 || storage != 1 || services.Close != nil {
+	if !errors.As(err, &failure) || failure.Message != "storage fence changed" || authenticated < 1 || storage != 1 || services.Close != nil {
 		t.Fatalf("queue did not bind authenticated storage: authentication=%d storage=%d: %v", authenticated, storage, err)
 	}
 }

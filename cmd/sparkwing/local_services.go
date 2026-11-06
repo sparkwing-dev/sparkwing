@@ -211,9 +211,7 @@ func bindLocalControllerWithClock(ctx context.Context, b localcontroller.Binding
 			Bearer:  claimant.Bearer,
 			Loop:    runners.LoopConfig{Version: installedVersion(), MaxConcurrent: runtime.NumCPU()},
 			OnError: func(err error) { slog.Error("local run host failed", "err", err) },
-			Bind: func(ctx context.Context, binding localcontroller.StoreBinding) (nodehost.NativeServices, error) {
-				return newLocalNativeServices(ctx, b.Home, b.Store, binding, client.EngineOptions{URL: wingdclient.APIBaseURL, HTTP: transport})
-			},
+			Host:    localRunnerHosting(b.Home, client.EngineOptions{URL: wingdclient.APIBaseURL, HTTP: transport}),
 		},
 	}, nil
 }

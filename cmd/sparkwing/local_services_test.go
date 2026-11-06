@@ -26,6 +26,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
 	"github.com/sparkwing-dev/sparkwing/internal/runners"
 	"github.com/sparkwing-dev/sparkwing/internal/wingd"
+	wingdclient "github.com/sparkwing-dev/sparkwing/internal/wingd/client"
 	"github.com/sparkwing-dev/sparkwing/internal/wingd/localcontroller"
 	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
 )
@@ -236,7 +237,8 @@ func TestProductionLocalQueueBindsRunnerPolicy(t *testing.T) {
 			t.Error(err)
 		}
 	}()
-	if runner.Bearer == nil || runner.Bind == nil || runner.Loop.MaxConcurrent <= 0 {
+	host, ok := runner.Host.(runners.Hosting)
+	if runner.Bearer == nil || !ok || host.Bind == nil || host.HTTP == nil || host.ControllerURL != wingdclient.APIBaseURL || runner.Loop.MaxConcurrent <= 0 {
 		t.Fatal("local queue has no authenticated runner binding")
 	}
 }

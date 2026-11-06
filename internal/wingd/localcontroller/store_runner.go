@@ -8,22 +8,21 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controller"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
-	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
 	"github.com/sparkwing-dev/sparkwing/internal/routepolicy"
 	"github.com/sparkwing-dev/sparkwing/internal/runners"
 )
 
-// StoreRunnerConfig binds an embedded claimant and native hosts to the controller's store.
+// StoreRunnerConfig binds the embedded claimant to an award-bound host.
 type StoreRunnerConfig struct {
 	Bearer  func(context.Context) (string, error)
 	Loop    runners.LoopConfig
-	Bind    func(context.Context, StoreBinding) (nodehost.NativeServices, error)
+	Host    runners.UnitHost
 	OnError func(error)
 }
 
-// NewStoreRunner constructs the shared queue without a transport or another store opener.
+// NewStoreRunner constructs the embedded claimant loop using the owned controller.
 func NewStoreRunner(engine *controller.EngineController, cfg StoreRunnerConfig) (*runners.Loop, error) {
-	if engine == nil || cfg.Bearer == nil || cfg.Bind == nil || engine.ResolveTenant == nil || engine.RunnerPolicy == nil {
+	if engine == nil || cfg.Bearer == nil || cfg.Host == nil || engine.ResolveTenant == nil || engine.RunnerPolicy == nil {
 		return nil, errors.New("embedded runner requires the owned controller, claimant, signed policy and native services")
 	}
 	if cfg.Loop.Version == "" || cfg.Loop.MaxConcurrent < 1 {
@@ -38,7 +37,7 @@ func NewStoreRunner(engine *controller.EngineController, cfg StoreRunnerConfig) 
 	client := storeController{Engine: engine, Bearer: cfg.Bearer, Router: router}
 	loop := &runners.Loop{
 		Config: cfg.Loop, Controller: client,
-		Host:    StoreHosting{Controller: engine, Bind: cfg.Bind},
+		Host:    cfg.Host,
 		OnError: cfg.OnError,
 	}
 	loop.CheckVersion = func(ctx context.Context, version string) error {

@@ -250,7 +250,7 @@ func checkNativeStoreOwnerW8(t *testing.T, mode string) {
 		runner, err := localcontroller.NewStoreRunner(server.EngineController, localcontroller.StoreRunnerConfig{
 			Bearer: func(context.Context) (string, error) { return root.Raw, nil },
 			Loop:   runners.LoopConfig{Version: "v0.71.0", Kinds: []capability.UnitKind{capability.UnitTrigger}, MaxConcurrent: 1, MaxClaims: 1},
-			Bind:   bind,
+			Host:   localcontroller.StoreHosting{Controller: server.EngineController, Bind: bind},
 		})
 		if err != nil {
 			t.Fatal(err)
@@ -270,7 +270,7 @@ func checkNativeStoreOwnerW8(t *testing.T, mode string) {
 				Runner: localcontroller.StoreRunnerConfig{
 					Bearer: func(context.Context) (string, error) { return root.Raw, nil },
 					Loop:   runners.LoopConfig{Version: "v0.71.0", Kinds: []capability.UnitKind{capability.UnitTrigger}, MaxConcurrent: 1},
-					Bind:   bind,
+					Host:   localcontroller.StoreHosting{Controller: binding.Controller, Bind: bind},
 				},
 			}, nil
 		}}

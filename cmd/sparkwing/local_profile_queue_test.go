@@ -1,8 +1,6 @@
 package main
 
 import (
-	"context"
-	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -10,54 +8,33 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/sparkwing-dev/sparkwing/internal/runstate"
-
-	"github.com/sparkwing-dev/sparkwing/internal/wingd/localcontroller"
+	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controller/client"
 	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
-	"github.com/sparkwing-dev/sparkwing/internal/store"
-	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
 )
 
 func TestLocalQueueCacheDoesNotDependOnOwnerWinningJobClaim(t *testing.T) {
 	for _, unit := range []capability.UnitKind{capability.UnitTrigger, capability.UnitNode} {
 		t.Run(string(unit), func(t *testing.T) {
 			home := t.TempDir()
-			owned, err := teststore.Open(t, filepath.Join(home, "state.db"))
-			if err != nil {
-				t.Fatal(err)
-			}
-			t.Cleanup(func() { _ = owned.Close() })
-			tenant := teststore.ForTeam(t, owned, store.DefaultTeam)
-			if err := teststore.SeedRun(owned, t.Context(), store.DefaultTeam, store.Run{RunSummary: runstate.RunSummary{ID: "run", Pipeline: "ci", Status: "running"}}); err != nil {
-				t.Fatal(err)
-			}
-			run, err := tenant.ReadRun(t.Context(), "run")
-			if err != nil {
-				t.Fatal(err)
-			}
+			unit := controllerwire.ClaimedUnit{Unit: unit, RunID: "run"}
+			run := &unit.Request
 			repo := initSnapshotRepo(t)
 			runSnapshotGit(t, repo, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main")
-			run.Request.Request.Origin = runspec.OriginLocal
-			run.Request.Request.Source.Location.LocalCheckout = repo
-			run.Request.Request.Options.CacheFrom.Value = "cloud"
-			run.Request.Request.EnvironmentSource = runspec.EnvironmentCaptured
+			run.Request.Origin = runspec.OriginLocal
+			run.Request.Git.Repository.Key = "git:example.test/acme/repo"
+			run.Request.Source.Location.LocalCheckout = repo
+			run.Request.Options.CacheFrom.Value = "cloud"
+			run.Request.EnvironmentSource = runspec.EnvironmentCaptured
 			snapshots, err := nodehost.NewFileEnvironmentSnapshots(filepath.Join(home, "environments"))
 			if err != nil {
 				t.Fatal(err)
 			}
-			run.Request.Request.Env, err = snapshots.Capture(t.Context(), []string{"PATH=" + os.Getenv("PATH"), "HOME=" + home})
+			run.Request.Env, err = snapshots.Capture(t.Context(), []string{"PATH=" + os.Getenv("PATH"), "HOME=" + home})
 			if err != nil {
-				t.Fatal(err)
-			}
-			raw, err := json.Marshal(run.Request)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if _, err := teststore.SQL(t, owned).ExecContext(t.Context(), `UPDATE runs SET request_json=? WHERE id='run'`, raw); err != nil {
 				t.Fatal(err)
 			}
 			config := filepath.Join(home, "config.yaml")
@@ -83,11 +60,8 @@ func TestLocalQueueCacheDoesNotDependOnOwnerWinningJobClaim(t *testing.T) {
 				return w.Result(), nil
 			})
 			t.Cleanup(func() { http.DefaultTransport = previous })
-			principal := capability.Principal{Capability: capability.Capability{Team: "default", Unit: unit, Binding: capability.Binding{RunID: "run", NodeID: "job"}}}
-			binding := localcontroller.StoreBinding{Tenant: tenant, Principal: principal, Bearer: func(context.Context) (string, error) { return "award", nil }}
-			services, err := localNativeServices(t.Context(), home, owned, binding, client.EngineOptions{URL: "http://local"}, func(context.Context, nodehost.NativeConfig) (nodehost.NativeServices, error) {
-				return nodehost.NativeServices{Close: func() error { closed++; return nil }}, nil
-			})
+			services := nodehost.NativeServices{Close: func() error { closed++; return nil }}
+			err = bindLocalProfiles(t.Context(), home, client.EngineOptions{URL: "http://local"}, unit, &services)
 			if err != nil {
 				t.Fatal(err)
 			}

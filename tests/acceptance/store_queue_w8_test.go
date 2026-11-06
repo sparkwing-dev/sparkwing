@@ -62,10 +62,10 @@ func FuzzStoreQueueClaimAuthorityW8(f *testing.F) {
 		runner, err := localcontroller.NewStoreRunner(server.EngineController, localcontroller.StoreRunnerConfig{
 			Bearer: func(context.Context) (string, error) { return raw, nil },
 			Loop:   runners.LoopConfig{Version: "v0.71.0", MaxConcurrent: 1},
-			Bind: func(context.Context, localcontroller.StoreBinding) (nodehost.NativeServices, error) {
+			Host: localcontroller.StoreHosting{Controller: server.EngineController, Bind: func(context.Context, localcontroller.StoreBinding) (nodehost.NativeServices, error) {
 				t.Fatal("claim executed pipeline code")
 				return nodehost.NativeServices{}, nil
-			},
+			}},
 		})
 		if err != nil {
 			t.Fatal(err)
