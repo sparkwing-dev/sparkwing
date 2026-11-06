@@ -44,7 +44,7 @@ func (t *Tenant) ReadSecret(ctx context.Context, a capability.Authorized) (*Secr
 		}
 		if claim && slices.Contains(selected.Request.Request.LocalSecretNames, a.Target.SecretName) {
 			var value string
-			value, err = tx.store.localSecret(t.team, run, a.Target.SecretName)
+			value, err = localSecretTx(ctx, tx, t.team, run, a.Target.SecretName)
 			out = &Secret{Name: a.Target.SecretName, Value: value, Masked: true, Ephemeral: true, Pipeline: selection.pipeline, Principal: selected.Request.Request.Actor.ID}
 		} else {
 			out, _, err = selectedSecretTx(ctx, tx, t.team, a.Target.SecretName, selection)

@@ -69,26 +69,27 @@ type Store struct {
 	credentialEpoch    string
 	controllerFailStop func(error)
 
-	runEnvCipher     SessionKeyCipher
-	localSecrets     sync.Map
-	resultRecords    nodeResultRecords
-	materializations materializationRecords
-	claimProfiles    ClaimProfileResolver
-	intakePolicy     IntakePolicy
-	planSecretOpener PlanSecretOpener
-	delegation       delegationContracts
-	consolePolicy    consolePolicy
-	clock            func() time.Time
-	pinnedClock      func() time.Time // safety: PostgreSQL time stays authoritative outside clock-pinned fixtures.
-	db               *sql.DB
-	conn             *sql.Conn // Break-glass verification and writes share this session.
-	githubLocks      *sql.DB
-	dialect          Dialect
-	cleanup          func() error
-	csrfKeyMu        sync.Mutex
-	csrfKey          []byte
-	csrfCipher       SessionKeyCipher
-	githubCheckMu    sync.Mutex
+	runEnvCipher       SessionKeyCipher
+	localSecrets       sync.Map
+	localSecretsCipher SessionKeyCipher
+	resultRecords      nodeResultRecords
+	materializations   materializationRecords
+	claimProfiles      ClaimProfileResolver
+	intakePolicy       IntakePolicy
+	planSecretOpener   PlanSecretOpener
+	delegation         delegationContracts
+	consolePolicy      consolePolicy
+	clock              func() time.Time
+	pinnedClock        func() time.Time // safety: PostgreSQL time stays authoritative outside clock-pinned fixtures.
+	db                 *sql.DB
+	conn               *sql.Conn // safety: break-glass writes must use the verified session.
+	githubLocks        *sql.DB
+	dialect            Dialect
+	cleanup            func() error
+	csrfKeyMu          sync.Mutex
+	csrfKey            []byte
+	csrfCipher         SessionKeyCipher
+	githubCheckMu      sync.Mutex
 }
 
 // Dialect reports the SQL dialect this Store was opened against.
@@ -1297,7 +1298,7 @@ func scanApproval(rs rowScanner) (*Approval, error) {
 var schemaNeutral string
 
 // safety: fresh stores get this baseline whole; an older store upgrades only through schemaUpgrades.
-const expectedSchemaVersion = 31
+const expectedSchemaVersion = 32
 
 // ExpectedSchemaVersion returns the schema version this binary
 // understands. Useful for diagnostics, version-mismatch reporting,

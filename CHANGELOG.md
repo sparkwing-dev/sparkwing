@@ -24,12 +24,14 @@ unlock.
 
 - **CLI (Breaking):** Repository pin upgrades move from `sparkwing upgrade` to `sparkwing pipeline upgrade`. The obsolete `sparkwing daemon recover-state` command is removed because machine admission now lives in `state.db`. See [the migration guide](docs/migrations/_unreleased.md#upgrade-the-store-in-place-to-schema-baseline-31).
 
-- **local controller (Breaking):** Machine admission uses durable HTTP tickets on the controller API socket. Older pinned CLIs must run `sparkwing pipeline upgrade`. Incompatible-client errors name the client and controller versions. The schema baseline advances to version 31 in place, storing queued requests, leases and retry receipts together in `state.db`. See [the migration guide](docs/migrations/_unreleased.md#upgrade-the-store-in-place-to-schema-baseline-31).
+- **local controller (Breaking):** Machine admission uses durable HTTP tickets on the controller API socket. Older pinned CLIs must run `sparkwing pipeline upgrade`. Incompatible-client errors name the client and controller versions. The schema baseline advances to version 32 in place, storing queued requests, leases, retry receipts and encrypted requester secrets together in `state.db`. See [the migration guide](docs/migrations/_unreleased.md#upgrade-the-store-in-place-to-schema-baseline-31).
 ### Added
 
 - **SDK:** Host compatibility checks run frozen released Go and TypeScript pipelines through candidate nodehost. The affected gate reuses fixture preparation, and pre-release rebuilds every historical fixture.
 
 ### Fixed
+
+- **local controller:** Requester secrets persist encrypted across controller restarts and are deleted at terminal run state. Filesystem object URL signing keys also persist encrypted, preserving issued URLs until expiry. Schema 32 upgrades recognized stores in place; preserve the existing local secrets key with backups. See [the migration guide](docs/migrations/_unreleased.md#preserve-local-run-secrets-across-restart-with-schema-32).
 
 - **local controller:** Shutdown keeps admission reachable until embedded hosts finish cleanup and completes even when drain persistence fails. Release cleanup gives up after one second when the controller cannot answer. Terminal retry receipts stay bounded, and per-job CPU readings keep their own measurement intervals.
 

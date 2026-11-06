@@ -1908,3 +1908,11 @@ SELECT class AS hardware_class, warm, CASE mode WHEN 'off' THEN 0 WHEN 'manual' 
     ELSE CASE WHEN auto_desired < auto_min THEN auto_min
               WHEN auto_desired > auto_max THEN auto_max ELSE auto_desired END END AS desired_replicas
 FROM clamped;
+
+CREATE TABLE local_run_secrets (
+    team TEXT NOT NULL,
+    run_id TEXT NOT NULL,
+    envelope TEXT NOT NULL,
+    PRIMARY KEY(team,run_id),
+    FOREIGN KEY(team,run_id) REFERENCES runs(team,id) ON DELETE CASCADE
+);

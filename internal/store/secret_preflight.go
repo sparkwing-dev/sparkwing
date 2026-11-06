@@ -119,7 +119,7 @@ func secretPreflightTx(ctx context.Context, tx *storeTx, team Team, run RunRow, 
 	runID := run.ID
 	readable := map[string]bool{}
 	for _, name := range run.Request.Request.LocalSecretNames {
-		if _, err := tx.store.localSecret(team, runID, name); err != nil {
+		if _, err := localSecretTx(ctx, tx, team, runID, name); err != nil {
 			return err
 		}
 		readable[name] = true

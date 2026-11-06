@@ -88,7 +88,7 @@ func bindingSecretTx(ctx context.Context, tx *storeTx, c capability.Capability, 
 		return err
 	}
 	if slices.Contains(run.Request.Request.LocalSecretNames, target.SecretName) {
-		_, err := tx.store.localSecret(Team(c.Team), run.ID, target.SecretName)
+		_, err := localSecretTx(ctx, tx, Team(c.Team), run.ID, target.SecretName)
 		return err
 	}
 	_, pool, err := selectedSecretTx(ctx, tx, Team(c.Team), target.SecretName, selection)

@@ -58,6 +58,16 @@ var schemaUpgrades = []schemaUpgrade{
     state_json BLOB NOT NULL
 )`},
 	},
+	{
+		from: 31, release: "schema 31", digest: "c09c6196b47e8c6561edd4f6274c105e5c8d00a8cbe9ec8925c5e0f23a68d236",
+		statements: []string{`CREATE TABLE local_run_secrets (
+    team TEXT NOT NULL,
+    run_id TEXT NOT NULL,
+    envelope TEXT NOT NULL,
+    PRIMARY KEY(team,run_id),
+    FOREIGN KEY(team,run_id) REFERENCES runs(team,id) ON DELETE CASCADE
+)`},
+	},
 }
 
 func schemaUpgradeFrom(version int) (schemaUpgrade, bool) {

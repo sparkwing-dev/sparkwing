@@ -2,12 +2,16 @@ package store
 
 import (
 	"context"
+	"database/sql"
+	"encoding/json"
+	"errors"
 	"maps"
 	"slices"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/pkg/secretname"
 )
 
@@ -34,7 +38,7 @@ func validateLocalSecrets(names []string, values map[string]string) error {
 	return nil
 }
 
-func (s *Store) installLocalSecrets(team Team, admitted AdmissionResult, values map[string]string) (*localRunSecrets, error) {
+func (s *Store) installLocalSecrets(ctx context.Context, tx *storeTx, team Team, admitted AdmissionResult, values map[string]string) (*localRunSecrets, error) {
 	names := admitted.Request.Request.LocalSecretNames
 	if len(names) == 0 {
 		return nil, nil
@@ -44,6 +48,9 @@ func (s *Store) installLocalSecrets(team Team, admitted AdmissionResult, values 
 	}
 	if err := validateLocalSecrets(names, values); err != nil {
 		return nil, err
+	}
+	if s.localSecretsCipher != nil {
+		return nil, installDurableLocalSecretsTx(ctx, tx, team, admitted, values)
 	}
 	key := localSecretKey{team, admitted.RunID}
 	if admitted.Replayed {
@@ -86,7 +93,7 @@ func localSecretDeclared(specNames, localNames []string) bool {
 	return true
 }
 
-// ResupplyHereSecrets restores volatile inputs only from their live requester host.
+// ResupplyHereSecrets restores requester inputs only from their live requester host.
 func (o *Operator) ResupplyHereSecrets(ctx context.Context, authority capability.AuthorityRef, values map[string]string) error {
 	var installed *localRunSecrets
 	var key localSecretKey
@@ -131,7 +138,7 @@ func (o *Operator) ResupplyHereSecrets(ctx context.Context, authority capability
 			return err
 		}
 		key = localSecretKey{tenant.team, run.ID}
-		installed, err = o.s.installLocalSecrets(tenant.team, AdmissionResult{RunID: run.ID, Request: run.Request}, values)
+		installed, err = o.s.installLocalSecrets(ctx, tx, tenant.team, AdmissionResult{RunID: run.ID, Request: run.Request}, values)
 		return err
 	})
 	if err != nil {
@@ -145,4 +152,82 @@ func (s *Store) uninstallLocalSecrets(key localSecretKey, installed **localRunSe
 		s.localSecrets.CompareAndDelete(key, *installed)
 		*installed = nil
 	}
+}
+
+func localSecretsUnavailable() error {
+	return authorityError(apierr.Unavailable, "requester local secrets are unavailable; submit a new run")
+}
+
+func durableLocalSecretsTx(ctx context.Context, tx *storeTx, team Team, run string) (map[string]string, error) {
+	var envelope string
+	err := tx.QueryRowContext(ctx, `SELECT envelope FROM local_run_secrets WHERE team=? AND run_id=?`, team, run).Scan(&envelope)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, localSecretsUnavailable()
+	}
+	if err != nil {
+		return nil, err
+	}
+	plain, err := tx.store.localSecretsCipher.OpenBound(secrets.PurposeRunEnvironment, string(team), run, "local-secrets", false, true, envelope)
+	var encoded map[string][]byte
+	if err != nil || json.Unmarshal([]byte(plain), &encoded) != nil {
+		return nil, localSecretsUnavailable()
+	}
+	values := make(map[string]string, len(encoded))
+	for name, value := range encoded {
+		values[name] = string(value)
+	}
+	return values, nil
+}
+
+func installDurableLocalSecretsTx(ctx context.Context, tx *storeTx, team Team, admitted AdmissionResult, values map[string]string) error {
+	var present int
+	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM local_run_secrets WHERE team=? AND run_id=?`, team, admitted.RunID).Scan(&present); err != nil {
+		return err
+	}
+	if admitted.Replayed || present != 0 {
+		previous, err := durableLocalSecretsTx(ctx, tx, team, admitted.RunID)
+		if err != nil {
+			return err
+		}
+		if !maps.Equal(previous, values) {
+			return authorityError(apierr.SpecDrift, "local secret values differ from the original intake")
+		}
+		return nil
+	}
+	var finished sql.NullInt64
+	if err := tx.QueryRowContext(ctx, `SELECT finished_at FROM runs WHERE team=? AND id=?`, team, admitted.RunID).Scan(&finished); err != nil {
+		return err
+	}
+	if finished.Valid {
+		return nil
+	}
+	raw := make(map[string][]byte, len(values))
+	for name, value := range values {
+		raw[name] = []byte(value)
+	}
+	encoded, err := json.Marshal(raw)
+	if err != nil {
+		return localSecretsUnavailable()
+	}
+	envelope, err := tx.store.localSecretsCipher.SealBound(secrets.PurposeRunEnvironment, string(team), admitted.RunID, "local-secrets", false, true, string(encoded))
+	if err != nil || !secrets.IsBound(envelope) {
+		return localSecretsUnavailable()
+	}
+	_, err = tx.execContext(ctx, `INSERT INTO local_run_secrets(team,run_id,envelope) VALUES (?,?,?)`, team, admitted.RunID, envelope)
+	return err
+}
+
+func localSecretTx(ctx context.Context, tx *storeTx, team Team, run, name string) (string, error) {
+	if tx.store.localSecretsCipher == nil {
+		return tx.store.localSecret(team, run, name)
+	}
+	values, err := durableLocalSecretsTx(ctx, tx, team, run)
+	if err != nil {
+		return "", err
+	}
+	value, ok := values[name]
+	if !ok {
+		return "", localSecretsUnavailable()
+	}
+	return value, nil
 }

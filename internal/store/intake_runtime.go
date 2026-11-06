@@ -60,7 +60,7 @@ func (t *Tenant) validateAdmissionInputsTx(ctx context.Context, tx *storeTx, res
 	if err := validateLocalSecrets(request.Request.LocalSecretNames, request.LocalSecrets); err != nil {
 		return nil, err
 	}
-	installed, err := t.s.installLocalSecrets(t.team, result, request.LocalSecrets)
+	installed, err := t.s.installLocalSecrets(ctx, tx, t.team, result, request.LocalSecrets)
 	if err == nil {
 		err = t.installSubmittedEnvironmentTx(ctx, tx, result, request)
 	}
