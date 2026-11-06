@@ -92,9 +92,9 @@ existing behavior.
 
 Award-bound node transitions accept the optional `X-Sparkwing-Exited-At`
 header, formatted as RFC3339Nano, on `report` and `retry` commands. Runners record
-it after joining the execution process and before log acknowledgement, cleanup
-and artifact/cache publication. The controller stores it as the job and attempt
-finish time even when reporting resumes after a restart.
+it after joining the execution process and before final log acknowledgement,
+cleanup and artifact/cache publication. The controller stores it as the job and
+attempt finish time even when reporting resumes after a restart.
 
 It clamps observations to report receipt and, when clocks permit, the attempt
 start to handle clock skew. Reports that omit the header retain receipt-time

@@ -30,11 +30,13 @@ unlock.
 
 ### Added
 
-- **runners:** Award-bound job reports accept optional `X-Sparkwing-Exited-At` observation headers. Job and attempt finish times preserve the runner's observed process exit before log acknowledgement, cleanup and publication, including delayed reports after controller restart. Event timestamps still use the controller clock. See [the migration guide](docs/migrations/_unreleased.md#observed-job-exit-time).
+- **runners:** Award-bound job reports accept optional `X-Sparkwing-Exited-At` observation headers. Job and attempt finish times preserve the runner's observed process exit before final log acknowledgement, cleanup and artifact/cache publication, including delayed reports after controller restart. Event timestamps still use the controller clock. See [the migration guide](docs/migrations/_unreleased.md#observed-job-exit-time).
 
 - **SDK:** Host compatibility checks run frozen released Go and TypeScript pipelines through candidate nodehost. The affected gate reuses fixture preparation, and pre-release rebuilds every historical fixture.
 
 ### Fixed
+
+- **runners:** Claim polling recovers from controller transport failures and missing local sockets for up to five seconds without cancelling held jobs or replaying claims. Graceful drain stops new claims and joins active hosts.
 
 - **controller:** Capability issuance tolerates up to 30 seconds of backward clock skew, so time-sync corrections and VM resumes keep local owners, awards and here handoffs usable. Hosted controllers share the allowance. Expiry, revocation and binding deadlines retain their existing checks.
 - **CLI:** Pipeline triggers accept exact commits fetched from origin in shallow runner checkouts, so jobs can trigger another pipeline at the pushed commit without origin-tracking branches. Both execution and pipeline-code commits still require origin fetch evidence.

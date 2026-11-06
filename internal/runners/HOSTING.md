@@ -55,6 +55,35 @@ Stopping cancels and joins that request, takes responsibility for a late award,
 and joins every held host. Drain and policy denial preserve held host contexts.
 Caller cancellation reaches those hosts and remains in the returned error.
 
+Controller transport failures, including a missing local socket, allow fresh
+claim polls for up to five seconds of consecutive failures. A successful response
+resets that window. Each poll is a new request because a lost claim reply may
+already contain an award. Authentication, permission and protocol refusals
+remain fatal. Signed version policy keeps its existing denial behavior.
+`Loop.Drain` stops new claims and returns immediately. `Run` joins held hosts,
+including uploads and terminal acknowledgements, before it returns.
+`TestLoopPollsThroughControllerRestarts`,
+`TestLoopControllerRestartKeepsHeldHostAliveThroughDrain`,
+`TestLoopBoundsControllerTransportRecovery`,
+`TestLoopTransportRecoveryKeepsRefusalsFatal` and
+`TestMissingSocketDoesNotReplayClaim` guard recovery and request replay.
+
+Job reports and application retries carry optional `X-Sparkwing-Exited-At`,
+captured after the execution process tree joins and before final log
+acknowledgement, cleanup and artifact/cache publication. Older controllers ignore
+this header. The store uses it for the job and attempt finish time, bounded by
+report receipt and, when clocks permit, attempt start. Reports without it use
+receipt time. The observation does not change the persisted result replay digest.
+Event, lease and billing clocks still belong to the controller.
+`TestNodeExecutorReportsExitBeforePublication`,
+`TestReportedExitTimePreservesDelayedObservation`,
+`TestRetriedAttemptPreservesObservedExitAndOwnStart` and
+`TestLocalHostReportsObservedExitToRestartedController` guard that boundary.
+`TestProtocolSessionObservesExitBeforeOutputAcknowledgement` holds log
+acknowledgement after a real child exits and checks the observation stays fixed.
+`TestNodeExitObservationPreservesLegacyCommandBody` checks that older
+controllers can still decode a new runner's reports.
+
 `RuntimeConfig.Repositories` carries the machine owner's parsed `runner.repos`.
 `NewManagedRunner` checks the captured intake and accepted source locations before
 calling its host. Both must project valid sealed remote source admitted by that
