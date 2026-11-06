@@ -172,7 +172,7 @@ func (d *Daemon) pruneAdmissionTicketsLocked() {
 		delete(d.admissionKeys, admissionRequestKey(ticket.Subject, ticket.Input.RequestKey))
 	}
 	for _, ticket := range d.admissionTickets {
-		if ticket.Active {
+		if ticket.Active || ticket.MeasurementPID != 0 {
 			continue
 		}
 		if ticket.TerminalAt.IsZero() {

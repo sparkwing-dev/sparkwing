@@ -79,7 +79,8 @@ In-memory wake channels only prompt another read of the committed ticket.
 Active tickets remain until released or reaped. Mutations prune terminal retry
 receipts older than one minute and retain at most 256. Pruning removes receipts
 and their request keys together, including refusal and cancellation tombstones.
-Startup applies the same bounds before serving requests.
+Startup applies the same bounds before serving requests. Receipts with recorded
+execution roots remain until the controller observes those sessions empty.
 `Store.SetRunCancellationObserver` forwards cancellation after the SQL transaction
 commits, including cancellation from recovery, deletion and credit enforcement.
 Rolled-back transactions do not notify. Replayed cancellation retries failed
@@ -88,7 +89,8 @@ notification without treating a committed transaction as a SQL conflict.
 Every ticket records its holder's root PID and `procgroup.ProcessBirth` start
 identity. The controller verifies process ownership against the socket peer.
 Each decision and a periodic process check release capacity for dead holders or
-reused PIDs. Inspection errors keep the reservation. Connections, renewals,
+reused PIDs. A holder with a recorded job root keeps its reservation until orphan
+cleanup observes the execution session empty. Inspection errors keep the reservation. Connections, renewals,
 expiry and timeout settings do not determine machine authority.
 Release and cancelled-acquisition cleanup retry for at most one second. When the
 controller cannot answer, cleanup reports the error and PID liveness recovers
@@ -109,6 +111,23 @@ shared runner roots cannot shorten a job's measurement interval or alter its ave
 Jobs sharing a runner PID have no individual reading until their job processes
 are registered. Host-root CPU attribution for admission remains unchanged.
 Existing host processes still own job execution and logical claim renewal.
+
+The liveness worker checks recorded execution roots outside the admission lock.
+On Unix, confirmed holder death or reuse triggers cleanup of the job's dedicated
+session using its root PID and start identity. The session check refuses live
+members behind a reused root identity. Empty-session acknowledgement is persisted,
+so a controller restart or failed acknowledgement repeats cleanup safely. Live
+holders keep running. Cancelled jobs with registered roots retain their machine
+charge until the host releases after joining them. On Windows, runner-owned
+kill-on-close Job Objects terminate jobs when their runner dies. The controller
+retains the charge until it observes the root gone.
+
+`TestAdmissionOrphanCleanupSurvivesControllerRestart` covers a real Linux holder
+process, an orphaned child and a reopened SQLite store. Additional process tests
+cover failed cleanup persistence, live holders, root reuse and receipt retention.
+`TestMachineLeaseWatchMeasuresCancelToJobProcessExit` measures cancellation over
+the verified API socket through nodehost to an executing protocol child, without
+an award-renewal loop.
 
 Store round trips and restart ordering are guarded by
 `internal/store/machine_admission_test.go`. The ledger's property and invariant

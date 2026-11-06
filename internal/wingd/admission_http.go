@@ -572,10 +572,17 @@ func (d *Daemon) reapAdmissionLocked() error {
 		if err == nil && actual == ticket.Input.ProcessBirth {
 			continue
 		}
+		if ticket.Result.Cancel == nil {
+			changed = true
+		}
 		ticket.Result.State = "cancelled"
 		ticket.Result.Cancel = &wingwire.Cancel{RunID: string(ticket.Input.Request.RunID), Reason: "holder process exited or PID was reused"}
 		ticket.Result.Grant = nil
 		ticket.Result.Queued = nil
+		// safety: an orphaned job keeps its capacity until its recorded execution session is empty.
+		if ticket.MeasurementPID != 0 {
+			continue
+		}
 		released, err := d.releaseAdmissionTicketLocked(ticket)
 		if err != nil {
 			return err
@@ -600,6 +607,9 @@ func (d *Daemon) admissionLivenessLoop(ctx context.Context) {
 		case <-d.quit:
 			return
 		case <-tick.C:
+			if err := d.cleanupAdmissionProcesses(); err != nil {
+				d.cfg.logf("orphan process cleanup: %v", err)
+			}
 			if err := d.reapAdmission(); err != nil {
 				d.cfg.logf("process liveness: %v", err)
 			}
@@ -632,6 +642,9 @@ func (d *Daemon) cancelAdmissionRunLocked(runID, reason string) error {
 		ticket.Result.Cancel = &wingwire.Cancel{RunID: target.runID, Reason: reason}
 		ticket.Result.Grant = nil
 		ticket.Result.Queued = nil
+		if ticket.MeasurementPID != 0 {
+			continue
+		}
 		released, err := d.releaseAdmissionTicketLocked(ticket)
 		if err != nil {
 			return err

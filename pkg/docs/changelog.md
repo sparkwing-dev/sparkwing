@@ -36,6 +36,8 @@ unlock.
 
 ### Fixed
 
+- **local controller:** Recorded Unix job sessions are cleaned up after their holder process dies, including after controller restart. Job roots survive receipt pruning and failed cleanup acknowledgements. Cancelled jobs keep their machine capacity until the host joins and releases them.
+
 - **runners:** Claim polling recovers from controller transport failures and missing local sockets for up to five seconds without cancelling held jobs or replaying claims. Graceful drain stops new claims and joins active hosts.
 
 - **controller:** Capability issuance tolerates up to 30 seconds of backward clock skew, so time-sync corrections and VM resumes keep local owners, awards and here handoffs usable. Hosted controllers share the allowance. Expiry, revocation and binding deadlines retain their existing checks.
