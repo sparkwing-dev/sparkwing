@@ -1,0 +1,871 @@
+{
+  "schema_version": 1,
+  "date": "2026-11-05",
+  "source_commit": "c24023e0ec0a82c3238daf6ca37250870770a31f",
+  "platform": "linux/amd64",
+  "candidate_host": "Go test executable containing candidate nodehost, sdkHello and executor",
+  "concurrency": "sequential cells; real concurrent steps inside lifecycle cells",
+  "runs": [
+    {
+      "label": "warm-fill",
+      "clock_seconds": {
+        "real": 22.66,
+        "user": 24.51,
+        "sys": 7.44
+      },
+      "raw_log": "warm-fill.log",
+      "cells": [
+        {
+          "cell_ms": 1440,
+          "host": "(devel)",
+          "host_executable_sha256": "1d0ceedd41e1e64e40eb04494b1fea5778ddb4b97bd3060e0b13759c5e13456b",
+          "host_go": "go1.26.10",
+          "mode": "warm",
+          "passed": true,
+          "preparation": {
+            "command": [
+              "/tmp/sw-codex-sdkfix/cache/4ad2c03dec47c8d790c0dfcc483a8b8220154f9ed57faf782ad9f7ea6226a7b4/pipeline"
+            ],
+            "directory": "/tmp/sw-codex-sdkfix/cache/4ad2c03dec47c8d790c0dfcc483a8b8220154f9ed57faf782ad9f7ea6226a7b4",
+            "cache_hit": false,
+            "duration_ms": 392,
+            "cache_key": "4ad2c03dec47c8d790c0dfcc483a8b8220154f9ed57faf782ad9f7ea6226a7b4",
+            "toolchain": {
+              "go": "go version go1.26.10 linux/amd64"
+            },
+            "download_cache": "shared-go-module-cache"
+          },
+          "sdk": {
+            "id": "go-v0.69.2",
+            "language": "go",
+            "version": "v0.69.2",
+            "directory": "go/v0.69.2",
+            "entrypoint": ".",
+            "artifact": {
+              "source": "github.com/sparkwing-dev/sparkwing",
+              "checksum": "h1:hE5DawlPeEt9lpJozcLU4zLlV3tOBwYeL+zVdXJHHZc="
+            },
+            "toolchain": {
+              "name": "go",
+              "version": "go1.26.10"
+            },
+            "wire_major": 2,
+            "capabilities": [],
+            "fixture_revision": 3,
+            "expected_outcome": "compatible"
+          }
+        },
+        {
+          "cell_ms": 1341,
+          "host": "(devel)",
+          "host_executable_sha256": "1d0ceedd41e1e64e40eb04494b1fea5778ddb4b97bd3060e0b13759c5e13456b",
+          "host_go": "go1.26.10",
+          "mode": "warm",
+          "passed": true,
+          "preparation": {
+            "command": [
+              "/tmp/sw-codex-sdkfix/cache/6da4d5113a8ce3136911c4d099561ce95608a90eee56e0ab0888ccfaeb56552e/pipeline"
+            ],
+            "directory": "/tmp/sw-codex-sdkfix/cache/6da4d5113a8ce3136911c4d099561ce95608a90eee56e0ab0888ccfaeb56552e",
+            "cache_hit": false,
+            "duration_ms": 352,
+            "cache_key": "6da4d5113a8ce3136911c4d099561ce95608a90eee56e0ab0888ccfaeb56552e",
+            "toolchain": {
+              "go": "go version go1.26.10 linux/amd64"
+            },
+            "download_cache": "shared-go-module-cache"
+          },
+          "sdk": {
+            "id": "go-v0.69.1",
+            "language": "go",
+            "version": "v0.69.1",
+            "directory": "go/v0.69.1",
+            "entrypoint": ".",
+            "artifact": {
+              "source": "github.com/sparkwing-dev/sparkwing",
+              "checksum": "h1:NyR2dbojHgOUGXO8BZJ/dJGhhmkzkXAn8IvxyIZB4EM="
+            },
+            "toolchain": {
+              "name": "go",
+              "version": "go1.26.10"
+            },
+            "wire_major": 2,
+            "capabilities": [],
+            "fixture_revision": 3,
+            "expected_outcome": "compatible"
+          }
+        },
+        {
+          "cell_ms": 1456,
+          "host": "(devel)",
+          "host_executable_sha256": "1d0ceedd41e1e64e40eb04494b1fea5778ddb4b97bd3060e0b13759c5e13456b",
+          "host_go": "go1.26.10",
+          "mode": "warm",
+          "passed": true,
+          "preparation": {
+            "command": [
+              "/tmp/sw-codex-sdkfix/cache/7f4f58bd88d04fb60073f8ef2552762cd02c3266112556460faf47f743a66557/pipeline"
+            ],
+            "directory": "/tmp/sw-codex-sdkfix/cache/7f4f58bd88d04fb60073f8ef2552762cd02c3266112556460faf47f743a66557",
+            "cache_hit": false,
+            "duration_ms": 401,
+            "cache_key": "7f4f58bd88d04fb60073f8ef2552762cd02c3266112556460faf47f743a66557",
+            "toolchain": {
+              "go": "go version go1.26.10 linux/amd64"
+            },
+            "download_cache": "shared-go-module-cache"
+          },
+          "sdk": {
+            "id": "go-v0.69.0",
+            "language": "go",
+            "version": "v0.69.0",
+            "directory": "go/v0.69.0",
+            "entrypoint": ".",
+            "artifact": {
+              "source": "github.com/sparkwing-dev/sparkwing",
+              "checksum": "h1:yPe8ULBnAEonRInTzEE5Bw8D6YSBxAYk68mrK9LOJko="
+            },
+            "toolchain": {
+              "name": "go",
+              "version": "go1.26.10"
+            },
+            "wire_major": 2,
+            "capabilities": [],
+            "fixture_revision": 3,
+            "expected_outcome": "compatible"
+          }
+        },
+        {
+          "cell_ms": 4538,
+          "host": "(devel)",
+          "host_executable_sha256": "1d0ceedd41e1e64e40eb04494b1fea5778ddb4b97bd3060e0b13759c5e13456b",
+          "host_go": "go1.26.10",
+          "mode": "warm",
+          "passed": true,
+          "preparation": {
+            "command": [
+              "node",
+              "/tmp/sw-codex-sdkfix/cache/4a415e504ef81a66e7e9a28a0fa2f1c7958b99506b7343700ea0384a22f84c53/pipeline.mjs"
+            ],
+            "directory": "/tmp/sw-codex-sdkfix/cache/4a415e504ef81a66e7e9a28a0fa2f1c7958b99506b7343700ea0384a22f84c53",
+            "cache_hit": false,
+            "duration_ms": 707,
+            "cache_key": "4a415e504ef81a66e7e9a28a0fa2f1c7958b99506b7343700ea0384a22f84c53",
+            "toolchain": {
+              "node": "v26.13.0",
+              "npm": "10.9.8"
+            },
+            "download_cache": "shared-npm-cache"
+          },
+          "sdk": {
+            "id": "typescript-0.69.2",
+            "language": "typescript",
+            "version": "0.69.2",
+            "directory": "typescript/0.69.2",
+            "entrypoint": "pipeline.mjs",
+            "artifact": {
+              "source": "https://registry.npmjs.org/@sparkwing/sdk/-/sdk-0.69.2.tgz",
+              "checksum": "sha512-aq76IE3mJABymYU5YYh08LlM1O4Eo7evrozkONpGpmk1CHr13FcnKa/gSlp3/libve7HWFrppniT7Vpu7X++og=="
+            },
+            "toolchain": {
+              "name": "node",
+              "version": ">=22.18"
+            },
+            "wire_major": 2,
+            "capabilities": [],
+            "fixture_revision": 3,
+            "expected_outcome": "compatible"
+          }
+        },
+        {
+          "cell_ms": 4405,
+          "host": "(devel)",
+          "host_executable_sha256": "1d0ceedd41e1e64e40eb04494b1fea5778ddb4b97bd3060e0b13759c5e13456b",
+          "host_go": "go1.26.10",
+          "mode": "warm",
+          "passed": true,
+          "preparation": {
+            "command": [
+              "node",
+              "/tmp/sw-codex-sdkfix/cache/8257a2bef63ec5c9b1beae65304fb915e5732a9d7e9bce05671de0918018502d/pipeline.mjs"
+            ],
+            "directory": "/tmp/sw-codex-sdkfix/cache/8257a2bef63ec5c9b1beae65304fb915e5732a9d7e9bce05671de0918018502d",
+            "cache_hit": false,
+            "duration_ms": 576,
+            "cache_key": "8257a2bef63ec5c9b1beae65304fb915e5732a9d7e9bce05671de0918018502d",
+            "toolchain": {
+              "node": "v26.13.0",
+              "npm": "10.9.8"
+            },
+            "download_cache": "shared-npm-cache"
+          },
+          "sdk": {
+            "id": "typescript-0.69.1",
+            "language": "typescript",
+            "version": "0.69.1",
+            "directory": "typescript/0.69.1",
+            "entrypoint": "pipeline.mjs",
+            "artifact": {
+              "source": "https://registry.npmjs.org/@sparkwing/sdk/-/sdk-0.69.1.tgz",
+              "checksum": "sha512-JJ3oMGiADbAO/aXBqPK6UQAZgopRK6wWRIqEzFJJOGDV1rMR1Ti2E/L8EFgEwY/Y+NfF1ExUpun06ZHyBtowUw=="
+            },
+            "toolchain": {
+              "name": "node",
+              "version": ">=22.18"
+            },
+            "wire_major": 2,
+            "capabilities": [],
+            "fixture_revision": 3,
+            "expected_outcome": "compatible"
+          }
+        },
+        {
+          "cell_ms": 4461,
+          "host": "(devel)",
+          "host_executable_sha256": "1d0ceedd41e1e64e40eb04494b1fea5778ddb4b97bd3060e0b13759c5e13456b",
+          "host_go": "go1.26.10",
+          "mode": "warm",
+          "passed": true,
+          "preparation": {
+            "command": [
+              "node",
+              "/tmp/sw-codex-sdkfix/cache/c9b68c40377e4c41d93248f8a18e67ac70a69a62891104c3bcae9de75e74ed3a/pipeline.mjs"
+            ],
+            "directory": "/tmp/sw-codex-sdkfix/cache/c9b68c40377e4c41d93248f8a18e67ac70a69a62891104c3bcae9de75e74ed3a",
+            "cache_hit": false,
+            "duration_ms": 583,
+            "cache_key": "c9b68c40377e4c41d93248f8a18e67ac70a69a62891104c3bcae9de75e74ed3a",
+            "toolchain": {
+              "node": "v26.13.0",
+              "npm": "10.9.8"
+            },
+            "download_cache": "shared-npm-cache"
+          },
+          "sdk": {
+            "id": "typescript-0.69.0",
+            "language": "typescript",
+            "version": "0.69.0",
+            "directory": "typescript/0.69.0",
+            "entrypoint": "pipeline.mjs",
+            "artifact": {
+              "source": "https://registry.npmjs.org/@sparkwing/sdk/-/sdk-0.69.0.tgz",
+              "checksum": "sha512-pn0D9DbwWPEWMcs4db0THo4C00uc1PZMDJMFMjZtoTjyoNZMr9ubrSEOTF7b126Op0usmh6qFAUrgLps4HAEFg=="
+            },
+            "toolchain": {
+              "name": "node",
+              "version": ">=22.18"
+            },
+            "wire_major": 2,
+            "capabilities": [],
+            "fixture_revision": 3,
+            "expected_outcome": "compatible"
+          }
+        }
+      ],
+      "command_argv": [
+        "go",
+        "-C",
+        "/var/tmp/sw-lead-tmp/sdkfix-wt",
+        "test",
+        "-v",
+        "-count=1",
+        "-timeout",
+        "15m",
+        "./internal/nodehost",
+        "-run",
+        "^TestHistoricalSDKCompatibility$",
+        "-args",
+        "-sdk-compat=warm",
+        "-sdk-compat-cache=/tmp/sw-codex-sdkfix/cache"
+      ]
+    },
+    {
+      "label": "warm",
+      "clock_seconds": {
+        "real": 17.52,
+        "user": 8.44,
+        "sys": 5.72
+      },
+      "raw_log": "warm.log",
+      "cells": [
+        {
+          "cell_ms": 1076,
+          "host": "(devel)",
+          "host_executable_sha256": "1d0ceedd41e1e64e40eb04494b1fea5778ddb4b97bd3060e0b13759c5e13456b",
+          "host_go": "go1.26.10",
+          "mode": "warm",
+          "passed": true,
+          "preparation": {
+            "command": [
+              "/tmp/sw-codex-sdkfix/cache/4ad2c03dec47c8d790c0dfcc483a8b8220154f9ed57faf782ad9f7ea6226a7b4/pipeline"
+            ],
+            "directory": "/tmp/sw-codex-sdkfix/cache/4ad2c03dec47c8d790c0dfcc483a8b8220154f9ed57faf782ad9f7ea6226a7b4",
+            "cache_hit": true,
+            "duration_ms": 45,
+            "cache_key": "4ad2c03dec47c8d790c0dfcc483a8b8220154f9ed57faf782ad9f7ea6226a7b4",
+            "toolchain": {
+              "go": "go version go1.26.10 linux/amd64"
+            },
+            "download_cache": "shared-go-module-cache"
+          },
+          "sdk": {
+            "id": "go-v0.69.2",
+            "language": "go",
+            "version": "v0.69.2",
+            "directory": "go/v0.69.2",
+            "entrypoint": ".",
+            "artifact": {
+              "source": "github.com/sparkwing-dev/sparkwing",
+              "checksum": "h1:hE5DawlPeEt9lpJozcLU4zLlV3tOBwYeL+zVdXJHHZc="
+            },
+            "toolchain": {
+              "name": "go",
+              "version": "go1.26.10"
+            },
+            "wire_major": 2,
+            "capabilities": [],
+            "fixture_revision": 3,
+            "expected_outcome": "compatible"
+          }
+        },
+        {
+          "cell_ms": 1050,
+          "host": "(devel)",
+          "host_executable_sha256": "1d0ceedd41e1e64e40eb04494b1fea5778ddb4b97bd3060e0b13759c5e13456b",
+          "host_go": "go1.26.10",
+          "mode": "warm",
+          "passed": true,
+          "preparation": {
+            "command": [
+              "/tmp/sw-codex-sdkfix/cache/6da4d5113a8ce3136911c4d099561ce95608a90eee56e0ab0888ccfaeb56552e/pipeline"
+            ],
+            "directory": "/tmp/sw-codex-sdkfix/cache/6da4d5113a8ce3136911c4d099561ce95608a90eee56e0ab0888ccfaeb56552e",
+            "cache_hit": true,
+            "duration_ms": 45,
+            "cache_key": "6da4d5113a8ce3136911c4d099561ce95608a90eee56e0ab0888ccfaeb56552e",
+            "toolchain": {
+              "go": "go version go1.26.10 linux/amd64"
+            },
+            "download_cache": "shared-go-module-cache"
+          },
+          "sdk": {
+            "id": "go-v0.69.1",
+            "language": "go",
+            "version": "v0.69.1",
+            "directory": "go/v0.69.1",
+            "entrypoint": ".",
+            "artifact": {
+              "source": "github.com/sparkwing-dev/sparkwing",
+              "checksum": "h1:NyR2dbojHgOUGXO8BZJ/dJGhhmkzkXAn8IvxyIZB4EM="
+            },
+            "toolchain": {
+              "name": "go",
+              "version": "go1.26.10"
+            },
+            "wire_major": 2,
+            "capabilities": [],
+            "fixture_revision": 3,
+            "expected_outcome": "compatible"
+          }
+        },
+        {
+          "cell_ms": 1085,
+          "host": "(devel)",
+          "host_executable_sha256": "1d0ceedd41e1e64e40eb04494b1fea5778ddb4b97bd3060e0b13759c5e13456b",
+          "host_go": "go1.26.10",
+          "mode": "warm",
+          "passed": true,
+          "preparation": {
+            "command": [
+              "/tmp/sw-codex-sdkfix/cache/7f4f58bd88d04fb60073f8ef2552762cd02c3266112556460faf47f743a66557/pipeline"
+            ],
+            "directory": "/tmp/sw-codex-sdkfix/cache/7f4f58bd88d04fb60073f8ef2552762cd02c3266112556460faf47f743a66557",
+            "cache_hit": true,
+            "duration_ms": 47,
+            "cache_key": "7f4f58bd88d04fb60073f8ef2552762cd02c3266112556460faf47f743a66557",
+            "toolchain": {
+              "go": "go version go1.26.10 linux/amd64"
+            },
+            "download_cache": "shared-go-module-cache"
+          },
+          "sdk": {
+            "id": "go-v0.69.0",
+            "language": "go",
+            "version": "v0.69.0",
+            "directory": "go/v0.69.0",
+            "entrypoint": ".",
+            "artifact": {
+              "source": "github.com/sparkwing-dev/sparkwing",
+              "checksum": "h1:yPe8ULBnAEonRInTzEE5Bw8D6YSBxAYk68mrK9LOJko="
+            },
+            "toolchain": {
+              "name": "go",
+              "version": "go1.26.10"
+            },
+            "wire_major": 2,
+            "capabilities": [],
+            "fixture_revision": 3,
+            "expected_outcome": "compatible"
+          }
+        },
+        {
+          "cell_ms": 4498,
+          "host": "(devel)",
+          "host_executable_sha256": "1d0ceedd41e1e64e40eb04494b1fea5778ddb4b97bd3060e0b13759c5e13456b",
+          "host_go": "go1.26.10",
+          "mode": "warm",
+          "passed": true,
+          "preparation": {
+            "command": [
+              "node",
+              "/tmp/sw-codex-sdkfix/cache/4a415e504ef81a66e7e9a28a0fa2f1c7958b99506b7343700ea0384a22f84c53/pipeline.mjs"
+            ],
+            "directory": "/tmp/sw-codex-sdkfix/cache/4a415e504ef81a66e7e9a28a0fa2f1c7958b99506b7343700ea0384a22f84c53",
+            "cache_hit": true,
+            "duration_ms": 92,
+            "cache_key": "4a415e504ef81a66e7e9a28a0fa2f1c7958b99506b7343700ea0384a22f84c53",
+            "toolchain": {
+              "node": "v26.13.0",
+              "npm": "10.9.8"
+            },
+            "download_cache": "shared-npm-cache"
+          },
+          "sdk": {
+            "id": "typescript-0.69.2",
+            "language": "typescript",
+            "version": "0.69.2",
+            "directory": "typescript/0.69.2",
+            "entrypoint": "pipeline.mjs",
+            "artifact": {
+              "source": "https://registry.npmjs.org/@sparkwing/sdk/-/sdk-0.69.2.tgz",
+              "checksum": "sha512-aq76IE3mJABymYU5YYh08LlM1O4Eo7evrozkONpGpmk1CHr13FcnKa/gSlp3/libve7HWFrppniT7Vpu7X++og=="
+            },
+            "toolchain": {
+              "name": "node",
+              "version": ">=22.18"
+            },
+            "wire_major": 2,
+            "capabilities": [],
+            "fixture_revision": 3,
+            "expected_outcome": "compatible"
+          }
+        },
+        {
+          "cell_ms": 3889,
+          "host": "(devel)",
+          "host_executable_sha256": "1d0ceedd41e1e64e40eb04494b1fea5778ddb4b97bd3060e0b13759c5e13456b",
+          "host_go": "go1.26.10",
+          "mode": "warm",
+          "passed": true,
+          "preparation": {
+            "command": [
+              "node",
+              "/tmp/sw-codex-sdkfix/cache/8257a2bef63ec5c9b1beae65304fb915e5732a9d7e9bce05671de0918018502d/pipeline.mjs"
+            ],
+            "directory": "/tmp/sw-codex-sdkfix/cache/8257a2bef63ec5c9b1beae65304fb915e5732a9d7e9bce05671de0918018502d",
+            "cache_hit": true,
+            "duration_ms": 94,
+            "cache_key": "8257a2bef63ec5c9b1beae65304fb915e5732a9d7e9bce05671de0918018502d",
+            "toolchain": {
+              "node": "v26.13.0",
+              "npm": "10.9.8"
+            },
+            "download_cache": "shared-npm-cache"
+          },
+          "sdk": {
+            "id": "typescript-0.69.1",
+            "language": "typescript",
+            "version": "0.69.1",
+            "directory": "typescript/0.69.1",
+            "entrypoint": "pipeline.mjs",
+            "artifact": {
+              "source": "https://registry.npmjs.org/@sparkwing/sdk/-/sdk-0.69.1.tgz",
+              "checksum": "sha512-JJ3oMGiADbAO/aXBqPK6UQAZgopRK6wWRIqEzFJJOGDV1rMR1Ti2E/L8EFgEwY/Y+NfF1ExUpun06ZHyBtowUw=="
+            },
+            "toolchain": {
+              "name": "node",
+              "version": ">=22.18"
+            },
+            "wire_major": 2,
+            "capabilities": [],
+            "fixture_revision": 3,
+            "expected_outcome": "compatible"
+          }
+        },
+        {
+          "cell_ms": 4067,
+          "host": "(devel)",
+          "host_executable_sha256": "1d0ceedd41e1e64e40eb04494b1fea5778ddb4b97bd3060e0b13759c5e13456b",
+          "host_go": "go1.26.10",
+          "mode": "warm",
+          "passed": true,
+          "preparation": {
+            "command": [
+              "node",
+              "/tmp/sw-codex-sdkfix/cache/c9b68c40377e4c41d93248f8a18e67ac70a69a62891104c3bcae9de75e74ed3a/pipeline.mjs"
+            ],
+            "directory": "/tmp/sw-codex-sdkfix/cache/c9b68c40377e4c41d93248f8a18e67ac70a69a62891104c3bcae9de75e74ed3a",
+            "cache_hit": true,
+            "duration_ms": 90,
+            "cache_key": "c9b68c40377e4c41d93248f8a18e67ac70a69a62891104c3bcae9de75e74ed3a",
+            "toolchain": {
+              "node": "v26.13.0",
+              "npm": "10.9.8"
+            },
+            "download_cache": "shared-npm-cache"
+          },
+          "sdk": {
+            "id": "typescript-0.69.0",
+            "language": "typescript",
+            "version": "0.69.0",
+            "directory": "typescript/0.69.0",
+            "entrypoint": "pipeline.mjs",
+            "artifact": {
+              "source": "https://registry.npmjs.org/@sparkwing/sdk/-/sdk-0.69.0.tgz",
+              "checksum": "sha512-pn0D9DbwWPEWMcs4db0THo4C00uc1PZMDJMFMjZtoTjyoNZMr9ubrSEOTF7b126Op0usmh6qFAUrgLps4HAEFg=="
+            },
+            "toolchain": {
+              "name": "node",
+              "version": ">=22.18"
+            },
+            "wire_major": 2,
+            "capabilities": [],
+            "fixture_revision": 3,
+            "expected_outcome": "compatible"
+          }
+        }
+      ],
+      "command_argv": [
+        "go",
+        "-C",
+        "/var/tmp/sw-lead-tmp/sdkfix-wt",
+        "test",
+        "-v",
+        "-count=1",
+        "-timeout",
+        "15m",
+        "./internal/nodehost",
+        "-run",
+        "^TestHistoricalSDKCompatibility$",
+        "-args",
+        "-sdk-compat=warm",
+        "-sdk-compat-cache=/tmp/sw-codex-sdkfix/cache"
+      ]
+    },
+    {
+      "label": "cold",
+      "clock_seconds": {
+        "real": 20.09,
+        "user": 10.92,
+        "sys": 6.95
+      },
+      "raw_log": "cold.log",
+      "cells": [
+        {
+          "cell_ms": 1545,
+          "host": "(devel)",
+          "host_executable_sha256": "1d0ceedd41e1e64e40eb04494b1fea5778ddb4b97bd3060e0b13759c5e13456b",
+          "host_go": "go1.26.10",
+          "mode": "cold",
+          "passed": true,
+          "preparation": {
+            "command": [
+              "/tmp/sw-codex-sdkfix/cache/.prepare-927811661-cold/pipeline"
+            ],
+            "directory": "/tmp/sw-codex-sdkfix/cache/.prepare-927811661-cold",
+            "cache_hit": false,
+            "duration_ms": 416,
+            "cache_key": "4ad2c03dec47c8d790c0dfcc483a8b8220154f9ed57faf782ad9f7ea6226a7b4",
+            "toolchain": {
+              "go": "go version go1.26.10 linux/amd64"
+            },
+            "download_cache": "shared-go-module-cache"
+          },
+          "sdk": {
+            "id": "go-v0.69.2",
+            "language": "go",
+            "version": "v0.69.2",
+            "directory": "go/v0.69.2",
+            "entrypoint": ".",
+            "artifact": {
+              "source": "github.com/sparkwing-dev/sparkwing",
+              "checksum": "h1:hE5DawlPeEt9lpJozcLU4zLlV3tOBwYeL+zVdXJHHZc="
+            },
+            "toolchain": {
+              "name": "go",
+              "version": "go1.26.10"
+            },
+            "wire_major": 2,
+            "capabilities": [],
+            "fixture_revision": 3,
+            "expected_outcome": "compatible"
+          }
+        },
+        {
+          "cell_ms": 1590,
+          "host": "(devel)",
+          "host_executable_sha256": "1d0ceedd41e1e64e40eb04494b1fea5778ddb4b97bd3060e0b13759c5e13456b",
+          "host_go": "go1.26.10",
+          "mode": "cold",
+          "passed": true,
+          "preparation": {
+            "command": [
+              "/tmp/sw-codex-sdkfix/cache/.prepare-2110137735-cold/pipeline"
+            ],
+            "directory": "/tmp/sw-codex-sdkfix/cache/.prepare-2110137735-cold",
+            "cache_hit": false,
+            "duration_ms": 446,
+            "cache_key": "6da4d5113a8ce3136911c4d099561ce95608a90eee56e0ab0888ccfaeb56552e",
+            "toolchain": {
+              "go": "go version go1.26.10 linux/amd64"
+            },
+            "download_cache": "shared-go-module-cache"
+          },
+          "sdk": {
+            "id": "go-v0.69.1",
+            "language": "go",
+            "version": "v0.69.1",
+            "directory": "go/v0.69.1",
+            "entrypoint": ".",
+            "artifact": {
+              "source": "github.com/sparkwing-dev/sparkwing",
+              "checksum": "h1:NyR2dbojHgOUGXO8BZJ/dJGhhmkzkXAn8IvxyIZB4EM="
+            },
+            "toolchain": {
+              "name": "go",
+              "version": "go1.26.10"
+            },
+            "wire_major": 2,
+            "capabilities": [],
+            "fixture_revision": 3,
+            "expected_outcome": "compatible"
+          }
+        },
+        {
+          "cell_ms": 1485,
+          "host": "(devel)",
+          "host_executable_sha256": "1d0ceedd41e1e64e40eb04494b1fea5778ddb4b97bd3060e0b13759c5e13456b",
+          "host_go": "go1.26.10",
+          "mode": "cold",
+          "passed": true,
+          "preparation": {
+            "command": [
+              "/tmp/sw-codex-sdkfix/cache/.prepare-3471581348-cold/pipeline"
+            ],
+            "directory": "/tmp/sw-codex-sdkfix/cache/.prepare-3471581348-cold",
+            "cache_hit": false,
+            "duration_ms": 414,
+            "cache_key": "7f4f58bd88d04fb60073f8ef2552762cd02c3266112556460faf47f743a66557",
+            "toolchain": {
+              "go": "go version go1.26.10 linux/amd64"
+            },
+            "download_cache": "shared-go-module-cache"
+          },
+          "sdk": {
+            "id": "go-v0.69.0",
+            "language": "go",
+            "version": "v0.69.0",
+            "directory": "go/v0.69.0",
+            "entrypoint": ".",
+            "artifact": {
+              "source": "github.com/sparkwing-dev/sparkwing",
+              "checksum": "h1:yPe8ULBnAEonRInTzEE5Bw8D6YSBxAYk68mrK9LOJko="
+            },
+            "toolchain": {
+              "name": "go",
+              "version": "go1.26.10"
+            },
+            "wire_major": 2,
+            "capabilities": [],
+            "fixture_revision": 3,
+            "expected_outcome": "compatible"
+          }
+        },
+        {
+          "cell_ms": 4520,
+          "host": "(devel)",
+          "host_executable_sha256": "1d0ceedd41e1e64e40eb04494b1fea5778ddb4b97bd3060e0b13759c5e13456b",
+          "host_go": "go1.26.10",
+          "mode": "cold",
+          "passed": true,
+          "preparation": {
+            "command": [
+              "node",
+              "/tmp/sw-codex-sdkfix/cache/.prepare-3162652494-cold/pipeline.mjs"
+            ],
+            "directory": "/tmp/sw-codex-sdkfix/cache/.prepare-3162652494-cold",
+            "cache_hit": false,
+            "duration_ms": 688,
+            "cache_key": "4a415e504ef81a66e7e9a28a0fa2f1c7958b99506b7343700ea0384a22f84c53",
+            "toolchain": {
+              "node": "v26.13.0",
+              "npm": "10.9.8"
+            },
+            "download_cache": "private-npm-cache"
+          },
+          "sdk": {
+            "id": "typescript-0.69.2",
+            "language": "typescript",
+            "version": "0.69.2",
+            "directory": "typescript/0.69.2",
+            "entrypoint": "pipeline.mjs",
+            "artifact": {
+              "source": "https://registry.npmjs.org/@sparkwing/sdk/-/sdk-0.69.2.tgz",
+              "checksum": "sha512-aq76IE3mJABymYU5YYh08LlM1O4Eo7evrozkONpGpmk1CHr13FcnKa/gSlp3/libve7HWFrppniT7Vpu7X++og=="
+            },
+            "toolchain": {
+              "name": "node",
+              "version": ">=22.18"
+            },
+            "wire_major": 2,
+            "capabilities": [],
+            "fixture_revision": 3,
+            "expected_outcome": "compatible"
+          }
+        },
+        {
+          "cell_ms": 4314,
+          "host": "(devel)",
+          "host_executable_sha256": "1d0ceedd41e1e64e40eb04494b1fea5778ddb4b97bd3060e0b13759c5e13456b",
+          "host_go": "go1.26.10",
+          "mode": "cold",
+          "passed": true,
+          "preparation": {
+            "command": [
+              "node",
+              "/tmp/sw-codex-sdkfix/cache/.prepare-3487408423-cold/pipeline.mjs"
+            ],
+            "directory": "/tmp/sw-codex-sdkfix/cache/.prepare-3487408423-cold",
+            "cache_hit": false,
+            "duration_ms": 560,
+            "cache_key": "8257a2bef63ec5c9b1beae65304fb915e5732a9d7e9bce05671de0918018502d",
+            "toolchain": {
+              "node": "v26.13.0",
+              "npm": "10.9.8"
+            },
+            "download_cache": "private-npm-cache"
+          },
+          "sdk": {
+            "id": "typescript-0.69.1",
+            "language": "typescript",
+            "version": "0.69.1",
+            "directory": "typescript/0.69.1",
+            "entrypoint": "pipeline.mjs",
+            "artifact": {
+              "source": "https://registry.npmjs.org/@sparkwing/sdk/-/sdk-0.69.1.tgz",
+              "checksum": "sha512-JJ3oMGiADbAO/aXBqPK6UQAZgopRK6wWRIqEzFJJOGDV1rMR1Ti2E/L8EFgEwY/Y+NfF1ExUpun06ZHyBtowUw=="
+            },
+            "toolchain": {
+              "name": "node",
+              "version": ">=22.18"
+            },
+            "wire_major": 2,
+            "capabilities": [],
+            "fixture_revision": 3,
+            "expected_outcome": "compatible"
+          }
+        },
+        {
+          "cell_ms": 4603,
+          "host": "(devel)",
+          "host_executable_sha256": "1d0ceedd41e1e64e40eb04494b1fea5778ddb4b97bd3060e0b13759c5e13456b",
+          "host_go": "go1.26.10",
+          "mode": "cold",
+          "passed": true,
+          "preparation": {
+            "command": [
+              "node",
+              "/tmp/sw-codex-sdkfix/cache/.prepare-883812916-cold/pipeline.mjs"
+            ],
+            "directory": "/tmp/sw-codex-sdkfix/cache/.prepare-883812916-cold",
+            "cache_hit": false,
+            "duration_ms": 561,
+            "cache_key": "c9b68c40377e4c41d93248f8a18e67ac70a69a62891104c3bcae9de75e74ed3a",
+            "toolchain": {
+              "node": "v26.13.0",
+              "npm": "10.9.8"
+            },
+            "download_cache": "private-npm-cache"
+          },
+          "sdk": {
+            "id": "typescript-0.69.0",
+            "language": "typescript",
+            "version": "0.69.0",
+            "directory": "typescript/0.69.0",
+            "entrypoint": "pipeline.mjs",
+            "artifact": {
+              "source": "https://registry.npmjs.org/@sparkwing/sdk/-/sdk-0.69.0.tgz",
+              "checksum": "sha512-pn0D9DbwWPEWMcs4db0THo4C00uc1PZMDJMFMjZtoTjyoNZMr9ubrSEOTF7b126Op0usmh6qFAUrgLps4HAEFg=="
+            },
+            "toolchain": {
+              "name": "node",
+              "version": ">=22.18"
+            },
+            "wire_major": 2,
+            "capabilities": [],
+            "fixture_revision": 3,
+            "expected_outcome": "compatible"
+          }
+        }
+      ],
+      "command_argv": [
+        "go",
+        "-C",
+        "/var/tmp/sw-lead-tmp/sdkfix-wt",
+        "test",
+        "-v",
+        "-count=1",
+        "-timeout",
+        "15m",
+        "./internal/nodehost",
+        "-run",
+        "^TestHistoricalSDKCompatibility$",
+        "-args",
+        "-sdk-compat=cold",
+        "-sdk-compat-cache=/tmp/sw-codex-sdkfix/cache"
+      ]
+    }
+  ],
+  "pipeline": {
+    "id": "run-3888b0cfb383a64b817b1a16",
+    "status": "success",
+    "command": "sparkwing run pre-release --sw-start-at sdk-compat --sw-stop-at sdk-compat",
+    "launcher": "installed Sparkwing v0.69.2",
+    "raw_log": "pipeline.ndjson"
+  },
+  "authoring_timings_seconds": {
+    "go_readonly_build_parallel_first": [
+      0.584398089,
+      0.568670047,
+      0.631796802
+    ],
+    "npm_lock_only": [
+      0.793461516,
+      0.772407368,
+      0.755501105
+    ],
+    "npm_ci_cached_latest": 0.712056588,
+    "go_readonly_build_revision2": [
+      0.589341543,
+      0.583138559,
+      0.598628374
+    ],
+    "go_readonly_build_revision3": [
+      0.512408668,
+      0.509127606,
+      0.529488747
+    ]
+  },
+  "invocation_environment": {
+    "HOME": "/tmp/sw-codex-sdkfix/home",
+    "SPARKWING_HOME": "/tmp/sw-codex-sdkfix/state",
+    "GOPATH": "/home/bombuntu/.go",
+    "GOMODCACHE": "/home/bombuntu/.go/pkg/mod",
+    "ASDF_DATA_DIR": "/home/bombuntu/.asdf",
+    "ASDF_GOLANG_VERSION": "1.26.9",
+    "GOWORK": "off",
+    "GOFLAGS": "-buildvcs=false",
+    "GOCACHE": "/tmp/sw-gocache",
+    "TMPDIR": "/tmp/sw-codex-sdkfix/tmp"
+  }
+}

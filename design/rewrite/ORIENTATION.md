@@ -14,6 +14,8 @@ credential model in `docs/auth.md`, and the decision log
 
 ## Owners and guards
 
+SDKs declare and relay only. Policy and security behavior live in the host behind the versioned protocol so policy changes do not require SDK releases.
+
 ### Store baseline
 
 | Rule | Owner | Guard test |

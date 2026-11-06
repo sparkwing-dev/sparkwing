@@ -98,6 +98,7 @@ func (PreRelease) ShortHelp() string {
 func (PreRelease) Help() string {
 	return "Run lint, race tests, Postgres tests, admission fault tests, vulnerability scans, " +
 		"dependency checks, public interface checks, Terraform checks, and workflow checks. " +
+		"The sdk-compat step runs every historical SDK fixture against the candidate nodehost with cold artifact preparation. " +
 		"Committed Go modules must use released dependencies; the pipeline module may replace " +
 		"the Sparkwing module with its parent checkout. Keep Go workspace files untracked. " +
 		"Published modules and generated init or template modules must use a minor-only or zero-patch Go floor. " +
@@ -161,6 +162,7 @@ func preReleaseChecks(part raceStorePart) []preReleaseCheck {
 		}},
 		{id: "gofmt", run: checkPreReleaseGofmt},
 		{id: "lint", run: runGolangciLint},
+		{id: "sdk-compat", run: runSDKCompatibilityCold},
 		{id: "race", run: preReleaseShell("go -C .sparkwing test -race ./...")},
 		// safety: the gate defers this race suite to the release boundary.
 		{id: "race-store", run: func(ctx context.Context) error {

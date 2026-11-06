@@ -1,0 +1,429 @@
+{
+  "schema_version": 1,
+  "source_revision": "40dfd013b66bb1618e58a08ac6be1920e2a059ea",
+  "policy": "These vectors record existing language behavior. A maintainer must choose semantics before either SDK changes. Source-inspection vectors do not claim executed coverage.",
+  "vectors": [
+    {
+      "id": "command-environment-protocol-token",
+      "area": "environment",
+      "evidence": "source_inspection",
+      "input": {
+        "command_overrides": {
+          "SPARKWING_NODE_TOKEN": "fake-token"
+        },
+        "platform": "linux"
+      },
+      "go": {
+        "child_environment": {
+          "SPARKWING_NODE_TOKEN": "fake-token"
+        }
+      },
+      "typescript": {
+        "child_environment_absent": [
+          "SPARKWING_NODE_TOKEN"
+        ]
+      },
+      "sources": {
+        "go": [
+          "sparkwing/exec.go:commandEnvFromContext",
+          "sparkwing/exec.go:Cmd.execute",
+          "internal/procenv/command.go:ControlCommandContext"
+        ],
+        "typescript": [
+          "sdk/typescript/src/command.ts:commandEnv",
+          "sdk/typescript/src/command.ts:protocolEnv"
+        ]
+      },
+      "decision": "maintainer_required"
+    },
+    {
+      "id": "body-environment-runtime-options",
+      "area": "environment",
+      "evidence": "source_inspection",
+      "input": {
+        "body_environment": {
+          "GOMAXPROCS": "2"
+        }
+      },
+      "go": {
+        "callback_environment": {
+          "GOMAXPROCS": "2"
+        }
+      },
+      "typescript": {
+        "callback_environment": "Preserves the launch value; skips the body declaration."
+      },
+      "sources": {
+        "go": [
+          "sparkwing/protocol_operations.go:sdkOperations.Prepare"
+        ],
+        "typescript": [
+          "sdk/typescript/src/runner.ts:Session.#context"
+        ]
+      },
+      "decision": "maintainer_required"
+    },
+    {
+      "id": "callback-mutated-environment-inheritance",
+      "area": "environment",
+      "evidence": "historical_fixture",
+      "input": {
+        "callback_sets": {
+          "COMPAT_MUTATED_ENV": "callback"
+        },
+        "fixture_step": "environment",
+        "helper_mode": "env"
+      },
+      "go": {
+        "stdout": "compat-env:callback"
+      },
+      "typescript": {
+        "stdout": "compat-env:callback"
+      },
+      "decision": "preserve_agreement",
+      "sources": {
+        "go": [
+          "sparkwing/exec.go:processCommandContext"
+        ],
+        "typescript": [
+          "sdk/typescript/src/command.ts:commandEnv"
+        ]
+      }
+    },
+    {
+      "id": "unix-process-diagnostic-escalation",
+      "area": "process",
+      "evidence": "source_inspection",
+      "input": {
+        "platform": "linux",
+        "cancellation": "Deadline with execdiag diagnostic escalation configured."
+      },
+      "go": {
+        "termination": "Diagnostic session signal, followed by bounded escalation and session kill."
+      },
+      "typescript": {
+        "termination": "Immediate SIGKILL to detached child process group."
+      },
+      "sources": {
+        "go": [
+          "sparkwing/exec_unix.go:configureProcessGroup"
+        ],
+        "typescript": [
+          "sdk/typescript/src/command.ts:terminate"
+        ]
+      },
+      "decision": "maintainer_required"
+    },
+    {
+      "id": "unix-process-owner-death-ledger",
+      "area": "process",
+      "evidence": "source_inspection",
+      "input": {
+        "platform": "linux",
+        "run_and_job_identity": "present",
+        "callback_process": "dies before its command"
+      },
+      "go": {
+        "ownership": "Records command session identity in the session ledger for external cleanup."
+      },
+      "typescript": {
+        "ownership": "No command session ledger registration."
+      },
+      "sources": {
+        "go": [
+          "sparkwing/exec_ledger_unix.go:recordStepSession"
+        ],
+        "typescript": [
+          "sdk/typescript/src/command.ts:runCommand"
+        ]
+      },
+      "decision": "maintainer_required"
+    },
+    {
+      "id": "windows-process-tree-kill",
+      "area": "process",
+      "evidence": "source_inspection",
+      "input": {
+        "platform": "win32",
+        "cancellation": true
+      },
+      "go": {
+        "termination": "Suspended launch assigned to Windows Job; closing job kills tree."
+      },
+      "typescript": {
+        "termination": "Runs taskkill /pid PID /T /F; falls back to child.kill on failure."
+      },
+      "sources": {
+        "go": [
+          "sparkwing/exec_windows.go:startStepCommand"
+        ],
+        "typescript": [
+          "sdk/typescript/src/command.ts:terminate"
+        ]
+      },
+      "decision": "maintainer_required"
+    },
+    {
+      "id": "docker-missing-buildx-metadata",
+      "area": "helper",
+      "evidence": "source_inspection",
+      "input": {
+        "platforms": [
+          "linux/amd64",
+          "linux/arm64"
+        ],
+        "push": true,
+        "registries": [
+          "example.invalid"
+        ],
+        "fake_docker_exit_code": 0,
+        "metadata_file": "missing"
+      },
+      "go": {
+        "outcome": "success",
+        "digests": {}
+      },
+      "typescript": {
+        "outcome": "error",
+        "reason": "Metadata read rejects."
+      },
+      "sources": {
+        "go": [
+          "sparkwing/docker/docker.go:build"
+        ],
+        "typescript": [
+          "sdk/typescript/src/helpers/docker.ts:build"
+        ]
+      },
+      "decision": "maintainer_required"
+    },
+    {
+      "id": "docker-bind-mount-volume",
+      "area": "helper",
+      "evidence": "source_inspection",
+      "input": {
+        "volumes": {
+          "/tmp/compat-input": "/work"
+        }
+      },
+      "go": {
+        "outcome": "Forwards the volume string to Docker."
+      },
+      "typescript": {
+        "outcome": "Throws before Docker create because the key is not a named volume."
+      },
+      "sources": {
+        "go": [
+          "sparkwing/docker/run.go:Run"
+        ],
+        "typescript": [
+          "sdk/typescript/src/helpers/docker.ts:run"
+        ]
+      },
+      "decision": "maintainer_required"
+    },
+    {
+      "id": "git-newline-bearing-path",
+      "area": "helper",
+      "evidence": "historical_fixture",
+      "input": {
+        "changed_path": "line\nbreak.txt",
+        "git_config_core_quotepath": true,
+        "fixture_step": "git",
+        "fake_tool": "git"
+      },
+      "go": {
+        "command_argv": [
+          "diff",
+          "--name-only",
+          "HEAD"
+        ],
+        "paths": [
+          "\"line\\nbreak.txt\""
+        ],
+        "step_output": [
+          "\"line\\nbreak.txt\""
+        ]
+      },
+      "typescript": {
+        "command_argv": [
+          "diff",
+          "--name-only",
+          "-z",
+          "HEAD"
+        ],
+        "paths": [
+          "line\nbreak.txt"
+        ],
+        "step_output": [
+          "line\nbreak.txt"
+        ]
+      },
+      "sources": {
+        "go": [
+          "sparkwing/git/git.go:ChangedFiles"
+        ],
+        "typescript": [
+          "sdk/typescript/src/helpers/git.ts:git.changedFiles"
+        ]
+      },
+      "decision": "maintainer_required"
+    },
+    {
+      "id": "file-helper-planning-phase",
+      "area": "helper",
+      "evidence": "source_inspection",
+      "input": {
+        "phase": "plan",
+        "operation": "readFile",
+        "file": "fixture.txt"
+      },
+      "go": {
+        "outcome": "Reads relative to process working directory without a phase check."
+      },
+      "typescript": {
+        "outcome": "Execution-phase assertion rejects."
+      },
+      "sources": {
+        "go": [
+          "sparkwing/fs.go:ReadFile"
+        ],
+        "typescript": [
+          "sdk/typescript/src/helpers/files.ts:readFile",
+          "sdk/typescript/src/scope.ts:assertExecution"
+        ]
+      },
+      "decision": "maintainer_required"
+    },
+    {
+      "id": "command-string-byte-order-mark",
+      "area": "helper",
+      "evidence": "historical_fixture",
+      "input": {
+        "stdout": "\ufeffcompat\ufeff",
+        "fixture_step": "helper",
+        "helper_mode": "trim"
+      },
+      "go": {
+        "step_output": {
+          "trimmed": "\ufeffcompat\ufeff"
+        }
+      },
+      "typescript": {
+        "step_output": {
+          "trimmed": "compat"
+        }
+      },
+      "decision": "maintainer_required",
+      "sources": {
+        "go": [
+          "sparkwing/exec.go:Cmd.String"
+        ],
+        "typescript": [
+          "sdk/typescript/src/command.ts:createCommand.string"
+        ]
+      }
+    },
+    {
+      "id": "docker-build-result-shape",
+      "area": "helper",
+      "evidence": "historical_fixture",
+      "input": {
+        "fixture_step": "docker",
+        "fake_tool": "docker",
+        "image": "compat-image",
+        "tags": [
+          "fixture"
+        ],
+        "fake_docker_exit_code": 0
+      },
+      "go": {
+        "step_output": {
+          "Image": "compat-image:fixture",
+          "Digests": {},
+          "Registries": null
+        }
+      },
+      "typescript": {
+        "step_output": {
+          "image": "compat-image:fixture",
+          "digests": {},
+          "registries": []
+        }
+      },
+      "decision": "maintainer_required",
+      "sources": {
+        "go": [
+          "sparkwing/docker/docker.go:BuildResult",
+          "sparkwing/docker/docker.go:build"
+        ],
+        "typescript": [
+          "sdk/typescript/src/helpers/docker.ts:build"
+        ]
+      }
+    },
+    {
+      "id": "secret-kind-drift",
+      "area": "helper",
+      "evidence": "historical_fixture",
+      "input": {
+        "fixture_step": "secret",
+        "declaration": "COMPAT_SECRET",
+        "stored_masked": false,
+        "stored_value": "compat-stored-value"
+      },
+      "go": {
+        "outcome": "failed",
+        "error_contains": "entry is stored with masked=false"
+      },
+      "typescript": {
+        "outcome": "success",
+        "step_output": {
+          "secret": "compat-stored-value"
+        }
+      },
+      "decision": "maintainer_required",
+      "sources": {
+        "go": [
+          "sparkwing/secret.go:Secret"
+        ],
+        "typescript": [
+          "sdk/typescript/src/context.ts:makeContext",
+          "sdk/typescript/src/routes.ts:HostServices.secret"
+        ]
+      }
+    },
+    {
+      "id": "malformed-run-context-validation",
+      "area": "protocol",
+      "evidence": "source_inspection",
+      "input": {
+        "operation": "plan",
+        "run": {
+          "trigger": {
+            "source": ""
+          }
+        }
+      },
+      "go": {
+        "outcome": "accepts",
+        "trigger_source": ""
+      },
+      "typescript": {
+        "outcome": "refuses",
+        "code": "bad_request",
+        "error_contains": "run.trigger.source"
+      },
+      "decision": "maintainer_required",
+      "sources": {
+        "go": [
+          "sparkwing/protocol_operations.go:sdkOperations.Plan"
+        ],
+        "typescript": [
+          "sdk/typescript/src/protocol.ts:validateRequest",
+          "sdk/typescript/src/errors.ts:string"
+        ]
+      }
+    }
+  ]
+}
