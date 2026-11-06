@@ -170,12 +170,12 @@ func resolveServiceBuild(ctx context.Context, git func(context.Context, ...strin
 	}
 	base := ""
 	for tag := range strings.FieldsSeq(tags) {
-		if semver.Canonical(tag) == tag && semver.Prerelease(tag) == "" && semver.Compare(tag, base) > 0 {
+		if semver.Canonical(tag) == tag && !module.IsPseudoVersion(tag) && semver.Compare(tag, base) > 0 {
 			base = tag
 		}
 	}
 	if base == "" {
-		return "", fmt.Errorf("HEAD has no stable release base; fetch the stable release tags or pass --tag")
+		return "", fmt.Errorf("HEAD has no release base; fetch the release tags or pass --tag")
 	}
 	commit, err := git(ctx, "show", "-s", "--format=%H%n%cI", "HEAD")
 	if err != nil {

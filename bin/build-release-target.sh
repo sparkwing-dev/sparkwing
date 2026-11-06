@@ -22,7 +22,7 @@ trap cleanup EXIT
 # safety: -trimpath drops -X from build info, so the version check reads Go's
 # module stamp. Pseudo-versions come from commit metadata without a tag. Release
 # builds still use an exact tag, removing any tag created here on exit.
-if [[ ! "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+-0\.[0-9]{14}-[0-9a-f]{12}$ ]]; then
+if [[ ! "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+-(0\.|[0-9A-Za-z.-]+\.0\.)[0-9]{14}-[0-9a-f]{12}$ ]]; then
   if tagged="$(git rev-parse -q --verify "refs/tags/$TAG^{commit}")"; then
     if [ "$tagged" != "$(git rev-parse HEAD)" ]; then
       echo "tag $TAG does not name the checked-out commit" >&2

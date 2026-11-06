@@ -1,7 +1,6 @@
 package main
 
 import (
-	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -187,8 +186,15 @@ func TestReleaseTargetUsesGoVersionWithoutTaggingMain(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, release := range []bool{false, true} {
-		t.Run(fmt.Sprint("release=", release), func(t *testing.T) {
+	for _, tc := range []struct {
+		name, base, prefix string
+		release            bool
+	}{
+		{name: "main after stable", base: "v0.69.2", prefix: "v0.69.3-0."},
+		{name: "main after prerelease", base: "v0.69.3-qa.1", prefix: "v0.69.3-qa.1.0."},
+		{name: "release", base: "v0.69.2", release: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
 			dir := t.TempDir()
 			if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module example.com/service\n\ngo 1.26.0\n"), 0o600); err != nil {
 				t.Fatal(err)
@@ -205,9 +211,9 @@ func TestReleaseTargetUsesGoVersionWithoutTaggingMain(t *testing.T) {
 			gitIn(t, dir, "init", "-q")
 			gitIn(t, dir, "add", "go.mod", "cmd")
 			gitIn(t, dir, "-c", "user.name=t", "-c", "user.email=t@example.com", "commit", "-q", "-m", "release")
-			gitIn(t, dir, "tag", "v0.69.2")
-			version := "v0.69.2"
-			if !release {
+			gitIn(t, dir, "tag", tc.base)
+			version := tc.base
+			if !tc.release {
 				gitIn(t, dir, "-c", "user.name=t", "-c", "user.email=t@example.com", "commit", "-q", "--allow-empty", "-m", "main")
 				info, err := exec.Command("git", "-C", dir, "show", "-s", "--format=%H%n%cI", "HEAD").Output()
 				if err != nil {
@@ -218,20 +224,20 @@ func TestReleaseTargetUsesGoVersionWithoutTaggingMain(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				version = "v0.69.3-0." + committed.UTC().Format("20060102150405") + "-" + fields[0][:12]
+				version = tc.prefix + committed.UTC().Format("20060102150405") + "-" + fields[0][:12]
 			}
 			goPath, err := exec.LookPath("go")
 			if err != nil {
 				t.Fatal(err)
 			}
 			toolDir := t.TempDir()
-			wrapper := "#!/bin/sh\nset -eu\nif [ \"$1\" = build ]; then\n  test \"$(git tag --list)\" = v0.69.2\n  shift\n  exec \"$REAL_GO\" build -buildvcs=true \"$@\"\nfi\nexec \"$REAL_GO\" \"$@\"\n"
+			wrapper := "#!/bin/sh\nset -eu\nif [ \"$1\" = build ]; then\n  test \"$(git tag --list)\" = \"$BASE_TAG\"\n  shift\n  exec \"$REAL_GO\" build -buildvcs=true \"$@\"\nfi\nexec \"$REAL_GO\" \"$@\"\n"
 			if err := os.WriteFile(filepath.Join(toolDir, "go"), []byte(wrapper), 0o700); err != nil {
 				t.Fatal(err)
 			}
 			cmd := exec.Command("bash", script)
 			cmd.Dir = dir
-			cmd.Env = append(os.Environ(), "PATH="+toolDir+":"+os.Getenv("PATH"), "REAL_GO="+goPath, "GOOS=linux", "GOARCH=amd64", "TAG="+version)
+			cmd.Env = append(os.Environ(), "PATH="+toolDir+":"+os.Getenv("PATH"), "REAL_GO="+goPath, "BASE_TAG="+tc.base, "GOOS=linux", "GOARCH=amd64", "TAG="+version)
 			if out, err := cmd.CombinedOutput(); err != nil {
 				t.Fatalf("%v: %s", err, out)
 			}

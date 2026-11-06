@@ -430,13 +430,14 @@ images with buildx under QEMU and joins both architectures under one index per t
 Production deploys follow main. Releases are separate and occasional: the release tag, 38 CLI
 assets, npm packages, signed version index and site publication stay in the release workflow.
 The `deploy` pipeline builds its own service images and needs no tag at HEAD or GitHub release run.
-It fetches stable tags for the release base, then computes Go's canonical pseudo-version
-`vX.Y.(Z+1)-0.YYYYMMDDhhmmss-SHA12` from the highest reachable stable tag, the commit's UTC
+It fetches release tags for the base, then computes Go's canonical pseudo-version. After a
+stable release, this is `vX.Y.(Z+1)-0.YYYYMMDDhhmmss-SHA12` from the highest reachable tag, the commit's UTC
 committer time and its first 12 SHA characters. For example, a commit after `v0.69.2` builds as
 `v0.69.3-0.20261106041046-718a7591f23a`. This version matches Go's module stamp without creating
 a temporary tag. The same version names image tags, labels, version checks and summaries.
 Production compares it with semantic version ordering, after the base release and before the
-next release, and refuses older images. Release-tag builds keep their exact release version.
+next release, and refuses older images. A prerelease base uses Go's corresponding prerelease
+pseudo-version form. Release-tag builds keep their exact release version.
 
 `build-images` builds linux/amd64 and linux/arm64 binaries with `bin/build-release-target.sh` and
 publishes them through `publish-images`, reusing the image pair when its immutable version tags
