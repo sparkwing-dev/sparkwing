@@ -44,13 +44,13 @@ func (d *Daemon) refuseLegacyAdmission(connection net.Conn) {
 	}
 	reason := fmt.Sprintf("sparkwing %s uses connection-based machine admission; controller %s requires durable HTTP admission. Run `sparkwing pipeline upgrade` to update this pipeline pin", old, current)
 	encoder := json.NewEncoder(connection)
-	if encoder.Encode(map[string]any{"type": "hello_ack", "payload": map[string]any{"protocol_major": hello.Payload.ProtocolMajor, "native_protocol_major": ProtocolMajor, "binary_version": current, "build_identity": hello.Payload.BuildIdentity}}) != nil {
+	if encoder.Encode(map[string]any{"type": "hello_ack", "payload": map[string]any{"protocol_major": hello.Payload.ProtocolMajor, "native_protocol_major": ProtocolMajor, "binary_version": current, "build_identity": hello.Payload.BuildIdentity, "api_ready": false, "api_error": reason, "store_ready": false, "store_error": reason}}) != nil {
 		return
 	}
 	if !scanner.Scan() {
 		return
 	}
-	if err := encoder.Encode(map[string]any{"type": "evicted", "payload": map[string]any{"key": "admission_protocol_removed", "policy": "fail", "reason": reason}}); err != nil {
+	if err := encoder.Encode(map[string]any{"type": "unsupported", "payload": map[string]any{"type": reason}}); err != nil {
 		d.cfg.logf("write obsolete admission refusal: %v", err)
 	}
 }

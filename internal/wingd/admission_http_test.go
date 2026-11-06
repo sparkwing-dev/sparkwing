@@ -428,39 +428,47 @@ func TestMachineAdmissionCancelByKeyBeforeRequest(t *testing.T) {
 }
 
 func TestMachineAdmissionOldPinNamesBothVersionsAndUpgrade(t *testing.T) {
-	d := newHTTPAdmissionTest(t, &admissionMemoryStore{})
-	d.cfg.Version = "v0.70.0"
-	server, client := net.Pipe()
-	done := make(chan struct{})
-	go func() { defer close(done); d.refuseLegacyAdmission(server) }()
-	defer client.Close()
-	encoder, decoder := json.NewEncoder(client), json.NewDecoder(client)
-	if err := encoder.Encode(map[string]any{"type": "hello", "payload": map[string]any{"protocol_major": 3, "binary_version": "v0.69.1"}}); err != nil {
-		t.Fatal(err)
-	}
-	var ack map[string]any
-	if err := decoder.Decode(&ack); err != nil {
-		t.Fatal(err)
-	}
-	if err := encoder.Encode(map[string]any{"type": "admission_request", "payload": map[string]any{"run_id": "old-pin"}}); err != nil {
-		t.Fatal(err)
-	}
-	var refusal struct {
-		Payload struct {
-			Reason string `json:"reason"`
-		} `json:"payload"`
-	}
-	if err := decoder.Decode(&refusal); err != nil {
-		t.Fatal(err)
-	}
-	for _, want := range []string{"v0.69.1", "v0.70.0", "sparkwing pipeline upgrade"} {
-		if !strings.Contains(refusal.Payload.Reason, want) {
-			t.Fatalf("refusal missing %q: %s", want, refusal.Payload.Reason)
-		}
-	}
-	<-done
-	if len(d.ledger.Snapshot().Leases) != 0 {
-		t.Fatal("legacy peer acquired authority")
+	for _, operation := range []string{"admission_request", "queue_state", "set_priority", "cancel_lease", "drain_request"} {
+		t.Run(operation, func(t *testing.T) {
+			d := newHTTPAdmissionTest(t, &admissionMemoryStore{})
+			d.cfg.Version = "v0.70.0"
+			server, client := net.Pipe()
+			done := make(chan struct{})
+			go func() { defer close(done); d.refuseLegacyAdmission(server) }()
+			defer client.Close()
+			encoder, decoder := json.NewEncoder(client), json.NewDecoder(client)
+			if err := encoder.Encode(map[string]any{"type": "hello", "payload": map[string]any{"protocol_major": 3, "binary_version": "v0.69.1"}}); err != nil {
+				t.Fatal(err)
+			}
+			var ack map[string]any
+			if err := decoder.Decode(&ack); err != nil {
+				t.Fatal(err)
+			}
+			if err := encoder.Encode(map[string]any{"type": operation, "payload": map[string]any{"run_id": "old-pin"}}); err != nil {
+				t.Fatal(err)
+			}
+			var refusal struct {
+				Type    string `json:"type"`
+				Payload struct {
+					Reason string `json:"type"`
+				} `json:"payload"`
+			}
+			if err := decoder.Decode(&refusal); err != nil {
+				t.Fatal(err)
+			}
+			if refusal.Type != "unsupported" {
+				t.Fatalf("legacy operation returned %q", refusal.Type)
+			}
+			for _, want := range []string{"v0.69.1", "v0.70.0", "sparkwing pipeline upgrade"} {
+				if !strings.Contains(refusal.Payload.Reason, want) {
+					t.Fatalf("refusal missing %q: %s", want, refusal.Payload.Reason)
+				}
+			}
+			<-done
+			if len(d.ledger.Snapshot().Leases) != 0 {
+				t.Fatal("legacy peer acquired authority")
+			}
+		})
 	}
 }
 

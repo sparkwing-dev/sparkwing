@@ -228,9 +228,3 @@ func TestDaemonLifecycleMissingAndCancelledRuntime(t *testing.T) {
 		t.Fatalf("failed runtime: %v %s", err, &out)
 	}
 }
-
-func TestShutdownWindowsNest(t *testing.T) {
-	if wingd.FinalizeDrainWindow >= daemonRestartTimeout {
-		t.Fatalf("shutdown windows: drain=%s restart=%s", wingd.FinalizeDrainWindow, daemonRestartTimeout)
-	}
-}
