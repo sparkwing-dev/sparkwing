@@ -37,28 +37,65 @@ func installedEngineVersion() (string, error) {
 }
 
 func installedEngine(ctx context.Context, pin engineid.Pin, target releaseasset.Target) (Resolved, error) {
+	path, err := os.Executable()
+	if err != nil {
+		return Resolved{}, err
+	}
+	return replacementEngineAt(ctx, pin, target, path, false)
+}
+
+func replacementEngineAt(ctx context.Context, pin engineid.Pin, target releaseasset.Target, path string, retained bool) (Resolved, error) {
 	if err := ctx.Err(); err != nil {
 		return Resolved{}, err
 	}
 	if pin.SDK != engineid.GoSDK || pin.Replacement == "" || target != (releaseasset.Target{Binary: releaseasset.Sparkwing, GOOS: runtime.GOOS, GOARCH: runtime.GOARCH}) {
 		return Resolved{}, invalid("SDK replacement requires this machine's installed Sparkwing engine", "Run the pipeline on the installed CLI's platform.")
 	}
-	version, err := installedEngineVersion()
+	info, err := buildinfo.ReadFile(path)
 	if err != nil {
 		return Resolved{}, err
 	}
-	path, err := os.Executable()
+	if retained {
+		settings := make(map[string]string, len(info.Settings))
+		for _, setting := range info.Settings {
+			settings[setting.Key] = setting.Value
+		}
+		if settings["GOOS"] != target.GOOS || settings["GOARCH"] != target.GOARCH || info.Path != GoModule+"/cmd/"+string(target.Binary) {
+			return Resolved{}, integrity(errors.New("retained executable does not match the native Sparkwing target"))
+		}
+		stat, err := os.Stat(path)
+		if err != nil {
+			return Resolved{}, err
+		}
+		if !stat.Mode().IsRegular() || (runtime.GOOS != "windows" && stat.Mode().Perm()&0o100 == 0) {
+			return Resolved{}, integrity(errors.New("retained engine is not executable"))
+		}
+	}
+	version, err := executableVersion(info)
 	if err != nil {
 		return Resolved{}, err
 	}
-	digest, err := executableDigest(ctx, path)
+	if version == "" {
+		version = "(devel)"
+	}
+	digestEngine := executableDigest
+	if retained {
+		digestEngine = fullExecutableDigest
+	}
+	digest, err := digestEngine(ctx, path)
 	if err != nil {
 		return Resolved{}, err
 	}
-	return Resolved{
+	resolved := Resolved{
 		Identity: engineid.Identity{Pin: pin, Version: version, ManifestDigest: digest}, Target: target, AssetDigest: digest, Executable: path,
 		Notices: []engineid.Notice{{Kind: engineid.NoticePinDisabled, Version: version, Reason: "SDK replacement: engine pinning is off for this run; using the installed CLI's engine."}},
-	}, nil
+	}
+	if retained {
+		resolved.retainedExecutable = path
+		resolved.retainedIdentity = resolved.Identity
+		resolved.Notices[0].Reason = "SDK replacement: engine pinning is off for this run; using the accepted local engine."
+	}
+	return resolved, nil
 }
 
 var selfDigest struct {
@@ -93,6 +130,20 @@ func executableDigest(ctx context.Context, path string) (string, error) {
 			}
 		}
 	}
+	value, err := fullExecutableDigest(ctx, path)
+	if err != nil {
+		return "", err
+	}
+	selfDigest.info, selfDigest.digest = info, value
+	if after, err := os.Stat(path); stable && record != "" && err == nil {
+		if again, ok := fileIdentity(after, time.Now()); ok && again == identity {
+			writeSelfDigestRecord(record, path+"|"+identity+" "+selfDigest.digest)
+		}
+	}
+	return selfDigest.digest, nil
+}
+
+func fullExecutableDigest(ctx context.Context, path string) (string, error) {
 	file, err := os.Open(path)
 	if err != nil {
 		return "", err
@@ -102,13 +153,7 @@ func executableDigest(ctx context.Context, path string) (string, error) {
 	if err := errors.Join(readErr, file.Close(), ctx.Err()); err != nil {
 		return "", err
 	}
-	selfDigest.info, selfDigest.digest = info, hex.EncodeToString(hash.Sum(nil))
-	if after, err := os.Stat(path); stable && record != "" && err == nil {
-		if again, ok := fileIdentity(after, time.Now()); ok && again == identity {
-			writeSelfDigestRecord(record, path+"|"+identity+" "+selfDigest.digest)
-		}
-	}
-	return selfDigest.digest, nil
+	return hex.EncodeToString(hash.Sum(nil)), nil
 }
 
 // perf: each sparkwing process hashed its own 100 MB executable (250 ms) before running a replacement-pin

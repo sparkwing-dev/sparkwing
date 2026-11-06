@@ -209,9 +209,18 @@ func (request SDKInstallRequest) PipelineDirectory() (string, error) {
 
 func (r Resolved) verifyInstalledEngine() error {
 	if r.Identity.Pin.SDK == engineid.GoSDK && r.Identity.Pin.Replacement != "" {
-		current, err := installedEngine(context.Background(), r.Identity.Pin, r.Target)
+		var current Resolved
+		var err error
+		if r.retainedExecutable != "" {
+			if r.Identity != r.retainedIdentity {
+				return integrity(errors.New("SDK installation requires the accepted local engine identity"))
+			}
+			current, err = replacementEngineAt(context.Background(), r.Identity.Pin, r.Target, r.retainedExecutable, true)
+		} else {
+			current, err = installedEngine(context.Background(), r.Identity.Pin, r.Target)
+		}
 		if err == nil && (current.Identity != r.Identity || current.AssetDigest != r.AssetDigest || current.Executable != r.Executable) {
-			err = integrity(errors.New("SDK installation requires the installed replacement-pin engine"))
+			err = integrity(errors.New("SDK installation requires the exact selected replacement-pin engine"))
 		}
 		return err
 	}

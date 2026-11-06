@@ -63,6 +63,12 @@ func NewResolver(config Config) (*Resolver, error) {
 	if err := os.MkdirAll(config.CacheDirectory, 0o700); err != nil {
 		return nil, err
 	}
+	if config.LocalBuildDirectory != "" {
+		if !filepath.IsAbs(config.LocalBuildDirectory) {
+			return nil, errors.New("retained local engine directory must be absolute")
+		}
+		config.LocalBuildDirectory = filepath.Clean(config.LocalBuildDirectory)
+	}
 	if config.HTTPClient == nil {
 		config.HTTPClient = http.DefaultClient
 	}
@@ -82,13 +88,29 @@ func (r *Resolver) Resolve(ctx context.Context, pin engineid.Pin, target release
 }
 
 // Ensure binds another machine's executable to the accepted portable identity.
+// A configured local build directory can retain the exact accepted Go replacement
+// engine after the installed CLI changes; new resolutions still use the installed CLI.
 func (r *Resolver) Ensure(ctx context.Context, identity engineid.Identity, target releaseasset.Target) (Resolved, error) {
 	if identity.Pin.SDK == engineid.GoSDK && identity.Pin.Replacement != "" {
 		resolved, err := installedEngine(ctx, identity.Pin, target)
-		if err == nil && resolved.Identity != identity {
-			err = integrity(fmt.Errorf("installed engine differs from the accepted replacement-pin engine"))
+		if err != nil || resolved.Identity == identity {
+			return resolved, err
 		}
-		return resolved, err
+		if r.config.LocalBuildDirectory == "" {
+			return Resolved{}, integrity(errors.New("installed engine differs from the accepted replacement-pin engine"))
+		}
+		if !validDigest(identity.ManifestDigest) {
+			return Resolved{}, integrity(errors.New("accepted local engine digest is invalid"))
+		}
+		path := filepath.Join(r.config.LocalBuildDirectory, identity.ManifestDigest)
+		resolved, err = replacementEngineAt(ctx, identity.Pin, target, path, true)
+		if err != nil {
+			return Resolved{}, integrity(fmt.Errorf("read accepted retained local engine: %w", err))
+		}
+		if resolved.Identity != identity {
+			return Resolved{}, integrity(errors.New("retained local engine differs from the accepted replacement-pin engine"))
+		}
+		return resolved, nil
 	}
 	version, err := VersionForPin(identity.Pin)
 	if err != nil {

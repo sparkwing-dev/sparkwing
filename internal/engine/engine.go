@@ -22,12 +22,14 @@ const (
 
 // Resolved includes the selected executable for this machine's platform.
 type Resolved struct {
-	Identity    engineid.Identity
-	Target      releaseasset.Target
-	AssetDigest string
-	Executable  string
-	Notices     []engineid.Notice
-	trustedKeys []ed25519.PublicKey
+	Identity           engineid.Identity
+	Target             releaseasset.Target
+	AssetDigest        string
+	Executable         string
+	Notices            []engineid.Notice
+	trustedKeys        []ed25519.PublicKey
+	retainedExecutable string
+	retainedIdentity   engineid.Identity
 }
 
 // ReleaseBundle is untrusted until VerifyRelease checks it against the keys its caller supplies; the resolver supplies the production roots.
@@ -50,10 +52,12 @@ type VerifiedRelease struct {
 // Config supplies machine-owned storage and transport, never repository-selected trust roots or URLs.
 type Config struct {
 	CacheDirectory string
-	Mode           toolchain.Mode
-	HTTPClient     *http.Client
-	BuildVersion   string
-	LocalOnly      bool
+	// LocalBuildDirectory names the host's retained replacement engines, keyed by executable SHA-256.
+	LocalBuildDirectory string
+	Mode                toolchain.Mode
+	HTTPClient          *http.Client
+	BuildVersion        string
+	LocalOnly           bool
 	// TrustedKeys defaults to releaseauth.PublicKeys when nil. NewResolver copies every key.
 	TrustedKeys []ed25519.PublicKey
 }
