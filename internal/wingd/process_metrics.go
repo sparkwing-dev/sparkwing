@@ -83,14 +83,23 @@ func (p *procSampler) retainMetrics(roots []OwnedRoot) {
 	if p.metrics == nil {
 		p.metrics = map[int]*processMetrics{}
 	}
+	forget := func(root int) {
+		delete(p.last, root)
+		for pid := range p.tree[root] {
+			delete(p.last, pid)
+		}
+		delete(p.tree, root)
+	}
 	for _, root := range roots {
 		live[root.PID] = true
 		if prior := p.metrics[root.PID]; prior == nil || !prior.heldSince.Equal(root.HeldSince) {
+			forget(root.PID)
 			p.metrics[root.PID] = &processMetrics{heldSince: root.HeldSince}
 		}
 	}
 	for pid := range p.metrics {
 		if !live[pid] {
+			forget(pid)
 			delete(p.metrics, pid)
 		}
 	}

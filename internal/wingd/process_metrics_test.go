@@ -150,4 +150,18 @@ func TestProcessMetrics_StallSamplingDoesNotAdvanceMeasurement(t *testing.T) {
 	if usage := p.ProcessUsage(pid); !usage.CPUMeasured {
 		t.Fatalf("second measurement lost its CPU baseline: %+v", usage)
 	}
+	for _, gap := range []bool{false, true} {
+		if gap {
+			d.sampleProcessUsage(nil)
+		}
+		roots[0].HeldSince = roots[0].HeldSince.Add(time.Second)
+		d.sampleProcessUsage(roots)
+		if usage := p.ProcessUsage(pid); usage.CPUMeasured {
+			t.Fatalf("new hold inherited an earlier CPU interval (gap=%t): %+v", gap, usage)
+		}
+		d.sampleProcessUsage(roots)
+		if usage := p.ProcessUsage(pid); !usage.CPUMeasured {
+			t.Fatalf("new hold lost its own CPU baseline (gap=%t): %+v", gap, usage)
+		}
+	}
 }
