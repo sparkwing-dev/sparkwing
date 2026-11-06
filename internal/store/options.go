@@ -22,6 +22,7 @@ type Policies struct {
 	PlanSecrets    PlanSecretOpener
 	SessionKeys    SessionKeyCipher
 	RunEnvironment SessionKeyCipher
+	LocalSecrets   SessionKeyCipher
 	ResultBlobs    BlobManifestReader
 }
 
@@ -49,6 +50,9 @@ func (s *Store) configurePolicies(policies Policies) {
 	}
 	if policies.RunEnvironment != nil {
 		s.runEnvCipher = policies.RunEnvironment
+	}
+	if policies.LocalSecrets != nil && s.dialect == DialectSQLite {
+		s.localSecretsCipher = policies.LocalSecrets
 	}
 	if policies.ResultBlobs != nil {
 		records := &blobRecords{manifests: policies.ResultBlobs}

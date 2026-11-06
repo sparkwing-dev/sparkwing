@@ -260,6 +260,9 @@ func transitionRunTx(ctx context.Context, tx *storeTx, team Team, change runstat
 		return runstate.Applied{}, err
 	}
 	if row.FinishedAt != nil {
+		if _, err := tx.execContext(ctx, `DELETE FROM local_run_secrets WHERE team=? AND run_id=?`, team, row.ID); err != nil {
+			return runstate.Applied{}, err
+		}
 		tx.finishedLocalSecrets = append(tx.finishedLocalSecrets, localSecretKey{team, row.ID})
 		if err := releaseCapacityTx(ctx, tx, team, row.ID, ""); err != nil {
 			return runstate.Applied{}, err

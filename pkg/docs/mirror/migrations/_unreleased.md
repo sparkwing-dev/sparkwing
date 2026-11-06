@@ -50,3 +50,21 @@ cancellation remain idempotent.
 
 Job execution remains with the existing hosts. This change does not transfer
 running jobs to a separate local runner or change their logical claim renewals.
+
+## Upgrade the store in place to schema baseline 32
+
+Schema 32 adds `local_run_secrets` to the recognized schema 31 baseline in one
+transaction. Older recognized baselines run the earlier upgrades first. The
+local controller encrypts requester values under the existing local secrets
+key before acknowledging intake and deletes them at terminal run state.
+Hosted controller secret handling is unchanged.
+
+The local filesystem object URL signing key now persists encrypted in store
+settings, so outstanding upload and download URLs survive controller restarts
+until their original expiry. Preserve the existing local secrets key alongside
+your database backup. Run-scoped secrets in older backups remain encrypted
+after live cleanup; see [backup retention](../backup-restore.md#local-restart-secrets-and-backups).
+
+No CLI, HTTP route, award credential or SDK surface is removed by this step.
+This step alone does not make embedded job execution survive a controller
+restart; the runner separation is a later change.

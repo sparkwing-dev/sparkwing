@@ -259,7 +259,7 @@ func (t *Tenant) markForDeletionTx(ctx context.Context, tx *storeTx, requestedBy
 	if err := t.cancelActiveRunsTx(ctx, tx, now); err != nil {
 		return nil, err
 	}
-	for _, table := range []string{"cron_schedules", "run_effects"} {
+	for _, table := range []string{"cron_schedules", "run_effects", "local_run_secrets"} {
 		if _, err := tx.execContext(ctx, `DELETE FROM `+table+` WHERE team = ?`, t.team); err != nil {
 			return nil, err
 		}

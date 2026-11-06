@@ -12,12 +12,12 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 )
 
-func localSecretFixture(t *testing.T, value string) (*Tenant, capability.Authorized) {
+func localSecretFixture(t *testing.T, value string, stores ...*Store) (*Tenant, capability.Authorized) {
 	t.Helper()
 	tenant, plan, _ := planFixtureWithInput(t, runspec.DispatchHost, func(in *IntakeRequest) {
 		in.Request.LocalSecretNames = []string{"KEY"}
 		in.LocalSecrets = map[string]string{"KEY": value}
-	})
+	}, stores...)
 	plan.Seal.Resolved.SecretNames = []string{"KEY"}
 	if _, err := tenant.AcceptPlan(t.Context(), plan); err != nil {
 		t.Fatal(err)

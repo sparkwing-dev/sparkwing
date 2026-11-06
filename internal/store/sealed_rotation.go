@@ -71,8 +71,8 @@ func scopeName(purpose secrets.Purpose, scope string) string {
 	return ""
 }
 
-// RotateSealedValues reseals every tenant's secrets, git credentials and submitted run environments, and the
-// session signing key, under the cipher's current key. Each step commits on its own and repeats safely.
+// RotateSealedValues reseals every tenant's secrets, git credentials and submitted run environments, and local requester inputs, plus
+// signing keys, under the cipher's current key. Each step commits on its own and repeats safely.
 // Verify only counts, reporting how many rows still open under the previous key alone.
 func (o *Operator) RotateSealedValues(ctx context.Context, a capability.Authorized, cipher SealedRotationCipher, verify bool) (SealedRotation, error) {
 	if cipher == nil {
@@ -123,17 +123,21 @@ func (o *Operator) RotateSealedValues(ctx context.Context, a capability.Authoriz
 		if err := step(func(r *sealedRotationTx) error { return r.tenantCredentials(ctx, &Tenant{s: o.s, team: team}) }, team); err != nil {
 			return SealedRotation{}, err
 		}
-		for after, more := "", true; more; {
-			if err := step(func(r *sealedRotationTx) (err error) {
-				after, more, err = r.runEnvironments(ctx, team, after)
-				return err
-			}); err != nil {
-				return SealedRotation{}, err
+		for _, local := range []bool{false, true} {
+			for after, more := "", true; more; {
+				if err := step(func(r *sealedRotationTx) (err error) {
+					after, more, err = r.runEnvironments(ctx, team, after, local)
+					return err
+				}); err != nil {
+					return SealedRotation{}, err
+				}
 			}
 		}
 	}
-	if err := step(func(r *sealedRotationTx) error { return r.sessionKey(ctx) }); err != nil {
-		return SealedRotation{}, err
+	for _, key := range []string{metaKeySessionCSRFKey, metaKeyLocalObjects} {
+		if err := step(func(r *sealedRotationTx) error { return r.settingKey(ctx, key) }); err != nil {
+			return SealedRotation{}, err
+		}
 	}
 	return total, nil
 }
@@ -227,8 +231,16 @@ func (r *sealedRotationTx) tenantCredentials(ctx context.Context, t *Tenant) err
 	return nil
 }
 
-func (r *sealedRotationTx) runEnvironments(ctx context.Context, team Team, after string) (string, bool, error) {
-	rows, err := r.tx.queryContext(ctx, `SELECT id,submitted_env FROM runs WHERE team=? AND submitted_env<>'' AND id>? ORDER BY id LIMIT ?`+r.tx.forUpdate(), team, after, sealedRotationRunPage)
+func (r *sealedRotationTx) runEnvironments(ctx context.Context, team Team, after string, local bool) (string, bool, error) {
+	query := `SELECT id,submitted_env FROM runs WHERE team=? AND submitted_env<>'' AND id>? ORDER BY id LIMIT ?`
+	update := `UPDATE runs SET submitted_env=? WHERE team=? AND id=?`
+	scope := "run-environment"
+	if local {
+		query = `SELECT run_id,envelope FROM local_run_secrets WHERE team=? AND run_id>? ORDER BY run_id LIMIT ?`
+		update = `UPDATE local_run_secrets SET envelope=? WHERE team=? AND run_id=?`
+		scope = "local-secrets"
+	}
+	rows, err := r.tx.queryContext(ctx, query+r.tx.forUpdate(), team, after, sealedRotationRunPage)
 	if err != nil {
 		return after, false, err
 	}
@@ -245,18 +257,22 @@ func (r *sealedRotationTx) runEnvironments(ctx context.Context, team Team, after
 		return after, false, err
 	}
 	for _, e := range page {
-		value, err := r.reseal(secrets.PurposeRunEnvironment, team, e.run, "run-environment", false, true, e.value)
+		value, err := r.reseal(secrets.PurposeRunEnvironment, team, e.run, scope, false, true, e.value)
 		if errors.Is(err, errSealedUnreadable) {
 			continue
 		}
 		if err != nil {
 			return after, false, err
 		}
-		r.out.RunEnvironments++
+		if local {
+			r.out.Secrets++
+		} else {
+			r.out.RunEnvironments++
+		}
 		if r.verify {
 			continue
 		}
-		if _, err := r.tx.execContext(ctx, `UPDATE runs SET submitted_env=? WHERE team=? AND id=?`, value, team, e.run); err != nil {
+		if _, err := r.tx.execContext(ctx, update, value, team, e.run); err != nil {
 			return after, false, err
 		}
 	}
@@ -266,16 +282,16 @@ func (r *sealedRotationTx) runEnvironments(ctx context.Context, team Team, after
 	return page[len(page)-1].run, len(page) == sealedRotationRunPage, nil
 }
 
-func (r *sealedRotationTx) sessionKey(ctx context.Context) error {
+func (r *sealedRotationTx) settingKey(ctx context.Context, key string) error {
 	var envelope []byte
-	err := r.tx.QueryRowContext(ctx, `SELECT value FROM settings WHERE key=? AND sealed=1`+r.tx.forUpdate(), metaKeySessionCSRFKey).Scan(&envelope)
+	err := r.tx.QueryRowContext(ctx, `SELECT value FROM settings WHERE key=? AND sealed=1`+r.tx.forUpdate(), key).Scan(&envelope)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil
 	}
 	if err != nil {
 		return err
 	}
-	value, err := r.reseal(secrets.PurposeSetting, "", metaKeySessionCSRFKey, "settings", false, true, string(envelope))
+	value, err := r.reseal(secrets.PurposeSetting, "", key, "settings", false, true, string(envelope))
 	if errors.Is(err, errSealedUnreadable) {
 		return nil
 	}
@@ -286,6 +302,6 @@ func (r *sealedRotationTx) sessionKey(ctx context.Context) error {
 	if r.verify {
 		return nil
 	}
-	_, err = r.tx.execContext(ctx, `UPDATE settings SET value=? WHERE key=? AND sealed=1`, []byte(value), metaKeySessionCSRFKey)
+	_, err = r.tx.execContext(ctx, `UPDATE settings SET value=? WHERE key=? AND sealed=1`, []byte(value), key)
 	return err
 }

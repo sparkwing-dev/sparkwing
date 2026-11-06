@@ -87,9 +87,31 @@ func TestSchemaUpgradesAReleasedV0683StoreInPlace(t *testing.T) {
 	target.Open(t)
 }
 
+func TestSchemaUpgradeAddsLocalSecretsToVersion31(t *testing.T) {
+	target := storetest.New(t)
+	st := target.Open(t)
+	if _, err := st.DB().Exec(`DROP TABLE local_run_secrets`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.DB().Exec(`UPDATE sparkwing_schema_version SET version=31, baseline_digest='c09c6196b47e8c6561edd4f6274c105e5c8d00a8cbe9ec8925c5e0f23a68d236'`); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.Close(); err != nil {
+		t.Fatal(err)
+	}
+	upgraded := target.Open(t)
+	fresh := storetest.New(t).Open(t)
+	if a, b := schemaShape(t, upgraded), schemaShape(t, fresh); a != b {
+		t.Fatalf("schema upgrade differs: %s", shapeDiff(a, b))
+	}
+}
+
 func TestSchemaUpgradeAddsMachineAdmissionToVersion30(t *testing.T) {
 	target := storetest.New(t)
 	st := target.Open(t)
+	if _, err := st.DB().Exec(`DROP TABLE local_run_secrets`); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := st.DB().Exec(`DROP TABLE local_machine_admission`); err != nil {
 		t.Fatal(err)
 	}
@@ -120,7 +142,7 @@ func TestSchemaUpgradeRefusesEveryOtherStore(t *testing.T) {
 		"unknown 28 digest": {`UPDATE sparkwing_schema_version SET baseline_digest='other'`, []string{`"other" is not the v0.68.3 baseline`, "left the store unchanged", "open it once with Sparkwing v0.68.3"}},
 		"missing 28 digest": {`UPDATE sparkwing_schema_version SET baseline_digest=''`, []string{`"<missing>" is not the v0.68.3 baseline`, "left the store unchanged"}},
 		"older than 28":     {`UPDATE sparkwing_schema_version SET version=27`, []string{"version 27 is older", "this build cannot upgrade it", "back up the store"}},
-		"newer than binary": {`UPDATE sparkwing_schema_version SET version=32`, []string{"version 32 is newer", "start a binary matching the store"}},
+		"newer than binary": {`UPDATE sparkwing_schema_version SET version=33`, []string{"version 33 is newer", "start a binary matching the store"}},
 	} {
 		t.Run(name, func(t *testing.T) {
 			target := storetest.New(t)

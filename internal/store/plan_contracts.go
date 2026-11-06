@@ -46,7 +46,7 @@ func planSecretsTx(ctx context.Context, tx *storeTx, team Team, spec runspec.Spe
 		}
 	}
 	for _, name := range spec.Request.Request.LocalSecretNames {
-		value, err := tx.store.localSecret(team, spec.Request.RunID, name)
+		value, err := localSecretTx(ctx, tx, team, spec.Request.RunID, name)
 		if err != nil {
 			return nil, err
 		}
