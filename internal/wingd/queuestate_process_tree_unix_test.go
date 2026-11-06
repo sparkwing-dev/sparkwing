@@ -4,6 +4,7 @@ package wingd_test
 
 import (
 	"io"
+	"os"
 	"os/exec"
 	"syscall"
 	"testing"
@@ -48,7 +49,7 @@ func TestQueueState_ActiveChildProcessPreventsStalledHolder(t *testing.T) {
 	mustAcquire(t, holder, semHostReq("active-child", "worker", holderProcess.Process.Pid, "deploy"))
 
 	waiter := ensure(t, home, "")
-	positions, _ := acquireAsync(t, waiter, semHostReq("waiting", "builder", holderProcess.Process.Pid+1, "deploy"))
+	positions, _ := acquireAsync(t, waiter, semHostReq("waiting", "builder", os.Getpid(), "deploy"))
 	waitForQueue(t, positions)
 
 	poll := time.NewTicker(10 * time.Millisecond)
