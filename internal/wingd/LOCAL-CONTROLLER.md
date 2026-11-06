@@ -8,15 +8,14 @@ ready. Standalone mode follows its caller's context because that process owns
 the controller lifetime.
 A failed startup cancels and joins both the runtime and its readiness waiter
 before returning. The runtime port must honor cancellation after cleanup.
-`StartDashboard` can promote an existing controller to stay mode and start its
-dashboard serving loop. `Stop` waits for the runtime's admission drain and
-shutdown.
+`StartDashboard` starts the dashboard serving loop on an existing controller.
+`Stop` waits for the runtime's admission drain and shutdown.
 `InstallController` holds the same lifecycle gate through drain, managed-unit
 activation and successor readiness. It joins the previous owner before starting
 the service. The client holds the existing home startup claim through this
 transition, so another CLI cannot start an on-demand owner during the handoff.
 Installation requires an installed unit and a new running PID with the
-requested version and stay mode. Activation or readiness failure reports where
+requested version. Activation or readiness failure reports where
 the handoff stopped. It starts no fallback controller because the managed unit
 may already be active. These checks establish activation and successor identity,
 not the service manager's process ancestry.
@@ -54,7 +53,7 @@ controller's store also fails startup.
 The CLI factory now binds `NewState`, the shared `Server.HTTP()` handlers,
 signed engine and runner policies, and the native service constructor.
 `NewState` reads activity in one tenant-scoped snapshot and reports changed
-counts. Published history and terminal nodes do not hold the controller open.
+counts. Published history and terminal nodes do not contribute to activity.
 The production factory test reconciles a fresh home, checks
 both HTTP handlers and verifies closure without a socket.
 
@@ -162,7 +161,7 @@ projection to reconcile local activity. It renews the same fence after that
 projection returns. Expiry or replacement during reconciliation refuses startup.
 The elected home process uses the stable `wingd` maintenance holder because its
 workers join before the election is released. Periodic maintenance renews the
-fence and uses the same store operations. It is not an activity hold.
+fence and uses the same store operations. It does not contribute to activity.
 
 Queue execution, activity observation and maintenance share cancellation.
 Failure of one stops and joins all three. Store close refuses while those
@@ -194,41 +193,26 @@ closing the store, including when the dashboard started after the controller.
 Any serving or worker failure cancels the runtime. Drain uses admission's
 draining state, stops listeners and joins workers, API requests and admission
 finalizers before closing the store. Election ownership lasts through store
-close. The daemon also joins its sampling, idle and diagnostic workers.
+close. The daemon also joins its sampling and diagnostic workers.
 Transient startup failures can be retried. An incompatible store remains a
 doctor finding. A dashboard startup failure reaches its caller after that
 cleanup, with the original service error preserved.
 
-The daemon accepts live controller counts through `setLocalActivity`. Runs,
-queued triggers, held leases and dashboard connections prevent idle exit.
+The daemon accepts live controller counts through `setLocalActivity` for status.
 The runtime counts its dashboard HTTP connections until they close, including
-idle keep-alive sockets and hijacked connections. Closing the last connection
-starts a fresh idle interval. Controller activity updates cannot erase that hold.
-A signed-in dashboard request (a session request or a redeemed sign-in link)
-also holds idle exit for `limits.LocalDashboardSessionHold`, 30 minutes, so a
-tab whose browser drops idle sockets keeps its server, and an abandoned tab
-stops holding the controller once that window passes.
+idle keep-alive sockets and hijacked connections. Controller activity updates
+cannot erase that count. The controller remains running while idle until an
+explicit stop, context cancellation or runtime failure.
 
 The runtime records the address and read-only policy of the dashboard it last
 served in `wingd/dashboard.json` under its home. A controller started without a
 dashboard address, other than a standalone one, serves that dashboard again, so
-an idle exit followed by an on-demand start from a run or schedule keeps the
-dashboard. The restore binds loopback only: a remembered non-loopback address
-comes back as `127.0.0.1` on the same port, because `--allow-remote` consents to
+an on-demand start from a run or schedule restores the dashboard. The restore
+binds loopback only: a remembered non-loopback address comes back as `127.0.0.1` on the same port, because `--allow-remote` consents to
 one explicit start. A failed bind on that restore is logged and the controller
 starts without it. `sparkwing dashboard stop` and `sparkwing daemon stop` clear the
 record with `ForgetDashboard`; `daemon restart` keeps it.
-Admission holders and waiting runs also remain active. `setStay` pins the
-daemon. The client `Probe` API reads controller HTTP status without requesting queue work.
-Health probes, repeated unchanged counts and idle API connections do
-not extend its idle deadline. The timeout comes from
-`limits.LocalControllerIdleTimeout` unless the existing admission configuration
-overrides it.
-
-Idle expiry and the stopping transition share the stay-policy lock. Once idle
-shutdown is committed, the controller refuses stay promotion and new admission.
-It cannot acknowledge a running owner and then exit from an earlier idle
-decision.
+The client `Probe` API reads controller HTTP status without requesting queue work.
 
 `LocalSubject` accepts matching kernel UIDs on Linux and macOS, or matching
 client SIDs on Windows. Missing identity refuses access. The socket transport
@@ -298,16 +282,13 @@ The local CLI host and schedule operation transport still require those shared
 contracts. The store also needs a typed incompatible-store error.
 
 `client.QueryLocalController` discovers the owner through the authenticated
-controller API socket. It reports readiness, PID, version, stay policy and the four
-activity counts. The HTTP query leaves the idle
-deadline unchanged. `client.setLocalStay` changes the owner's policy and checks
-its acknowledgement. Neither operation starts a process or replaces another
-version. Missing sockets, unreachable owners, unsupported operations and stalled
-replies remain distinct errors. The existing `client.Stop` requests controller drain
+controller API socket. It reports readiness, PID, version and the four
+activity counts. The query starts no process and replaces no other version.
+Missing sockets, unreachable owners, unsupported operations and stalled replies remain distinct errors. The existing `client.Stop` requests controller drain
 and waits for the socket and election lock to close.
 
 The controller HTTP routes under `/api/v1/local/controller/` expose probe,
-status, stay, dashboard and drain operations. Each requires the verified local
+status, dashboard and drain operations. Each requires the verified local
 socket peer. Only an elected `LocalRuntime` serves lifecycle mutations. Status
 describes the running process. Native service inspection supplies installed-unit
 facts separately.
@@ -330,9 +311,8 @@ local controller status to report running within the existing startup budget.
 The request can finish while that detached process continues hosting other runs.
 
 The adapter binds one home before any owner query. An empty start Home selects
-that bound home. Another home is refused before mutation. It promotes stay,
-attaches the dashboard and drains the elected process through the authenticated
-socket. Status retains installed-unit information. Unreachable, stalled or
+that bound home. Another home is refused before mutation. It attaches the
+dashboard and drains the elected process through the authenticated socket. Status retains installed-unit information. Unreachable, stalled or
 unsupported owners remain errors. Version skew does not replace a ready owner.
 
 Standalone uses the supplied in-process runtime and refuses an existing owner.
@@ -351,9 +331,10 @@ the socket and election lock to close. It starts no replacement process.
 
 `NewManagedUnitManager` implements `ManagedUnitManager` for one captured state
 home. Linux uses systemd user units. macOS uses LaunchAgents. Controller units
-run foreground `wingd run --stay --home <absolute-home>`. Timers run
-`__tick --home <absolute-home>`. Windows refuses native installation with
-`--stay` guidance. Inspect reads the installed argv and release without opening
+run foreground `wingd run --home <absolute-home>`. Timers run
+`__tick --home <absolute-home>`. Windows refuses native installation and names
+the foreground `wingd run` command. Inspect reads the installed argv and release
+without opening
 the store or contacting the service manager.
 
 Refresh updates both installed unit kinds. It keeps their captured settings and
@@ -374,7 +355,8 @@ File and service-manager fixtures exercise these ports. They do not establish
 native login, crash, shutdown or Windows behavior.
 
 `TestLocalRuntime*` exercises election-before-open, readiness, failure cleanup,
-restart after failed startup, all four activity holds and idle probes. It uses
+restart after failed startup, activity counts and remaining ready while idle
+until explicitly stopped. It uses
 in-memory listeners and fake shared-controller services. `TestLocalHTTP*`
 exercises verified-peer delivery, refusal paths, cancellation and joined
 shutdown. Machine-admission HTTP tests cover durable requests and poll wakeups.
@@ -384,8 +366,7 @@ usage independently of admission charges.
 election races, home binding, concurrent reuse and refusal paths through the
 lifecycle interface with process-boundary fakes.
 The process/store
-scenarios remain open: local controller
-idle lifecycle, health-probe process exit, dashboard install/update, Windows
+scenarios remain open: dashboard install/update, Windows
 transport identity and local orphan recovery. These require the real controller
 and platform fixtures.
 

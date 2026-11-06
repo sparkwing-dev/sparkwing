@@ -32,8 +32,8 @@ func TestControllerHTTPRefusesBrowserIdentityAndCookies(t *testing.T) {
 		t.Fatal(err)
 	}
 	called := false
-	d.localControl = func(*bool) LocalStatus { called = true; return LocalStatus{} }
-	request := controllerHTTPRequest(t, http.MethodPost, "stay", `{"stay":true}`, false)
+	d.localControl = func() LocalStatus { called = true; return LocalStatus{} }
+	request := controllerHTTPRequest(t, http.MethodGet, "status", "", false)
 	request.Header.Set("Cookie", "sw_session=browser-cookie")
 	recorder := httptest.NewRecorder()
 	d.controllerHTTP(http.NotFoundHandler()).ServeHTTP(recorder, request)
@@ -42,50 +42,22 @@ func TestControllerHTTPRefusesBrowserIdentityAndCookies(t *testing.T) {
 	}
 }
 
-func TestControllerHTTPReportsAndChangesOwnerState(t *testing.T) {
+func TestControllerHTTPReportsOwnerState(t *testing.T) {
 	d, err := New(Config{Home: t.TempDir(), Version: "test"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	stay := false
-	d.localControl = func(next *bool) LocalStatus {
-		if next != nil {
-			stay = *next
-		}
-		return LocalStatus{Running: true, Stay: stay, PID: 123, Version: "test", Activity: LocalActivity{Runs: 2}}
+	d.localControl = func() LocalStatus {
+		return LocalStatus{Running: true, PID: 123, Version: "test", Activity: LocalActivity{Runs: 2}}
 	}
-	for _, test := range []struct {
-		method, path, body string
-		wantStay           bool
-	}{
-		{http.MethodGet, "status", "", false},
-		{http.MethodPost, "stay", `{"stay":true}`, true},
-		{http.MethodGet, "status", "", true},
-	} {
-		recorder := httptest.NewRecorder()
-		d.controllerHTTP(http.NotFoundHandler()).ServeHTTP(recorder, controllerHTTPRequest(t, test.method, test.path, test.body, true))
-		var status LocalStatus
-		if err := json.Unmarshal(recorder.Body.Bytes(), &status); err != nil {
-			t.Fatal(err)
-		}
-		if recorder.Code != http.StatusOK || !status.Running || status.Stay != test.wantStay || status.Activity.Runs != 2 {
-			t.Fatalf("owner state: status=%d body=%s", recorder.Code, recorder.Body.String())
-		}
-	}
-}
-
-func TestControllerHTTPRejectsInvalidStayWithoutMutation(t *testing.T) {
-	d, err := New(Config{Home: t.TempDir(), Version: "test"})
-	if err != nil {
+	recorder := httptest.NewRecorder()
+	d.controllerHTTP(http.NotFoundHandler()).ServeHTTP(recorder, controllerHTTPRequest(t, http.MethodGet, "status", "", true))
+	var status LocalStatus
+	if err := json.Unmarshal(recorder.Body.Bytes(), &status); err != nil {
 		t.Fatal(err)
 	}
-	d.localControl = func(*bool) LocalStatus { t.Error("invalid request mutated owner"); return LocalStatus{} }
-	for _, body := range []string{`{}`, `{"stay":"yes"}`, `invalid`} {
-		recorder := httptest.NewRecorder()
-		d.controllerHTTP(http.NotFoundHandler()).ServeHTTP(recorder, controllerHTTPRequest(t, http.MethodPost, "stay", body, true))
-		if recorder.Code != http.StatusBadRequest {
-			t.Fatalf("invalid stay: %d %s", recorder.Code, recorder.Body.String())
-		}
+	if recorder.Code != http.StatusOK || !status.Running || status.Activity.Runs != 2 {
+		t.Fatalf("owner state: status=%d body=%s", recorder.Code, recorder.Body.String())
 	}
 }
 

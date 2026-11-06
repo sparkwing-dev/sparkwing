@@ -127,25 +127,25 @@ and any unfinished subject, so later runs cannot displace older candidates.
 
 ### Who hosts the daemon
 
-The local controller is wingd. These commands inspect or hold its lifecycle:
+The local controller is wingd. These commands inspect or manage its lifecycle:
 
 ```bash
 sparkwing daemon status -o json
-sparkwing dashboard start --stay
+sparkwing dashboard start
 sparkwing dashboard open
 sparkwing dashboard status
 sparkwing doctor -o json
 ```
 
 Daemon status, stop and restart use the shared local lifecycle. JSON reports
-`state`, `version`, `pid`, `stay`, `installed` and the four activity counts.
+`state`, `version`, `pid`, `installed` and the four activity counts.
 They report the dashboard apart from the controller: `dashboard` is `serving`
 or `not_serving`, and while it serves, `url` is its address. Pretty output
 prints a `dashboard:` line either way. A controller that `sparkwing run` or a
 schedule started serves no dashboard; `sparkwing dashboard open` starts one at
 127.0.0.1:4343 when none serves, then mints the sign-in link. Once a dashboard
-has served, a controller that exits idle and restarts on demand serves it again
-at the same address, until `dashboard stop` or `daemon stop`.
+has served, a controller restarted on demand serves it again at the same
+address, until `dashboard stop` or `daemon stop`.
 Stop and restart also report `stopped`, `restarted` and `previous_version`.
 Plain output is the resulting state. Store and API diagnostics come from doctor.
 Doctor also sweeps stray step sessions through the controller. A successful
@@ -154,7 +154,7 @@ cleanup whose run was pruned reports an unrecorded-outcome warning and succeeds.
 Restart preserves a stopped controller. An answering controller on the exact
 installed version stays running unless `--force` is selected. Replacement waits
 for shutdown before starting the installed executable with the same home,
-dashboard address and stay policy. An incomplete drain or unready replacement
+dashboard address. An incomplete drain or unready replacement
 returns an error without a success receipt.
 
 A client reuses a running compatible daemon regardless of release or source-build
@@ -170,11 +170,10 @@ start immediately. This refusal leaves the daemon running. When no runs are
 active, run `sparkwing daemon restart --force` with the required build, or use a
 separate `SPARKWING_HOME`.
 
-Active runs, queued triggers, held leases and open dashboard connections keep
-it alive. Health checks alone do not. `--stay` keeps it up until stopped.
+The controller remains running while idle. `sparkwing daemon stop` stops it.
 Linux and macOS support an installed login service through `dashboard install`.
-Windows supports stay mode. Machine updates refresh managed controller and
-schedule units together. See [local dashboard](native-mode.md).
+Windows supports the foreground controller. Machine updates refresh managed
+controller and schedule units together. See [local dashboard](native-mode.md).
 
 Installation drains and joins the existing owner before activating the managed
 service, then waits for the successor to acquire the same home and become ready.

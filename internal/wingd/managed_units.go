@@ -85,8 +85,8 @@ func (m *nativeUnits) controller() (ManagedUnit, string, bool, error) {
 	if len(args) > 0 {
 		unit.Executable, unit.Arguments = args[0], slices.Clone(args[1:])
 	}
-	if len(args) == 6 && slices.Equal(args[1:5], []string{"wingd", "run", "--stay", "--home"}) {
-		unit.Home = args[5]
+	if len(args) == 5 && slices.Equal(args[1:4], []string{"wingd", "run", "--home"}) {
+		unit.Home = args[4]
 	}
 	return unit, body, exists, nil
 }
@@ -132,7 +132,7 @@ func (m *nativeUnits) validate(ctx context.Context, executable, version string) 
 		return err
 	}
 	if m.host.GOOS == "windows" {
-		return errors.New("wingd: Windows supports dashboard start --stay and daemon schedules; native service installation is unavailable")
+		return errors.New("wingd: Windows supports dashboard start and daemon schedules; native service installation is unavailable")
 	}
 	if !filepath.IsAbs(executable) || strings.ContainsAny(executable, "\r\n\x00") || version == "" || strings.ContainsAny(version, "\r\n<>\x00") {
 		return errors.New("wingd: an absolute executable and a one-line release version are required")
@@ -245,7 +245,7 @@ func (m *nativeUnits) UninstallController(ctx context.Context) error {
 	}
 	defer func() { <-m.gate }()
 	if m.host.GOOS == "windows" {
-		return errors.New("wingd: Windows supports --stay; there is no installed controller service")
+		return errors.New("wingd: Windows supports dashboard start; there is no installed controller service")
 	}
 	unit, _, exists, err := m.controller()
 	if err != nil || !exists {
@@ -318,7 +318,7 @@ func (m *nativeUnits) reloadAgent(ctx context.Context, loaded bool) error {
 }
 
 func (m *nativeUnits) render(executable, version string) string {
-	args := []string{executable, "wingd", "run", "--stay", "--home", m.host.SparkwingHome}
+	args := []string{executable, "wingd", "run", "--home", m.host.SparkwingHome}
 	if m.host.GOOS == "linux" {
 		return fmt.Sprintf("# %s\n%s\n[Unit]\nDescription=Sparkwing local controller\n[Service]\nType=simple\nExecStart=%s\nEnvironment=%s\nRestart=on-failure\n[Install]\nWantedBy=default.target\n", crontimer.Marker, unitfile.VersionRecord("linux", version), unitfile.Command(args), unitfile.Assignment("PATH", m.host.PathEnv))
 	}

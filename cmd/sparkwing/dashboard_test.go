@@ -70,14 +70,14 @@ func TestDashboardUsesLocalControllerLifecycle(t *testing.T) {
 		args         []string
 		calls, units []string
 	}{
-		{[]string{"start", "--stay", "--addr", "[::1]:9000"}, []string{"start"}, nil},
+		{[]string{"start", "--addr", "[::1]:9000"}, []string{"start"}, nil},
 		{[]string{"status"}, []string{"status"}, nil},
 		{[]string{"stop"}, []string{"stop", "status"}, nil},
 		{[]string{"install"}, []string{"install"}, nil},
 		{[]string{"uninstall"}, []string{"status"}, []string{"uninstall"}},
 	} {
 		t.Run(tc.args[0], func(t *testing.T) {
-			lifecycle := &dashboardLifecycleFake{status: wingd.LocalStatus{Running: true, Stay: true, Installed: true, PID: 123, Version: "v1.2.3", Activity: wingd.LocalActivity{Runs: 2, QueuedTriggers: 3, HeldLeases: 4, DashboardConnections: 5}}}
+			lifecycle := &dashboardLifecycleFake{status: wingd.LocalStatus{Running: true, Installed: true, PID: 123, Version: "v1.2.3", Activity: wingd.LocalActivity{Runs: 2, QueuedTriggers: 3, HeldLeases: 4, DashboardConnections: 5}}}
 			units := &dashboardUnitsFake{}
 			services := dashboardServices{lifecycle: lifecycle, units: units, options: wingd.LocalStartOptions{Home: "/private/home", Executable: "/bin/sparkwing", Version: "v2.0.0"}}
 			var output bytes.Buffer
@@ -96,17 +96,17 @@ func TestDashboardUsesLocalControllerLifecycle(t *testing.T) {
 			if tc.args[0] == "stop" {
 				state = "stopped"
 			}
-			if got.State != state || got.Version != "v1.2.3" || got.PID != 123 || !got.Stay || !got.Installed || got.Activity != (dashboardActivity{Runs: 2, QueuedTriggers: 3, HeldLeases: 4, DashboardConnections: 5}) {
+			if got.State != state || got.Version != "v1.2.3" || got.PID != 123 || !got.Installed || got.Activity != (dashboardActivity{Runs: 2, QueuedTriggers: 3, HeldLeases: 4, DashboardConnections: 5}) {
 				t.Fatalf("lost controller status: %+v", got)
 			}
 			if tc.args[0] == "start" {
 				want := services.options
-				want.Stay, want.DashboardAddress = true, "[::1]:9000"
+				want.DashboardAddress = "[::1]:9000"
 				if lifecycle.options != want {
 					t.Fatalf("start options: %+v", lifecycle.options)
 				}
 			}
-			if tc.args[0] == "install" && (!lifecycle.options.Stay || lifecycle.options.Home != services.options.Home || lifecycle.options.Executable != services.options.Executable || lifecycle.options.Version != services.options.Version) {
+			if tc.args[0] == "install" && (lifecycle.options.Home != services.options.Home || lifecycle.options.Executable != services.options.Executable || lifecycle.options.Version != services.options.Version) {
 				t.Fatalf("login options: %+v", lifecycle.options)
 			}
 		})
@@ -126,7 +126,7 @@ func TestDashboardStatusPrintsTheServingURL(t *testing.T) {
 		}
 		want := `"dashboard":"serving","url":"http://127.0.0.1:4343"`
 		if mode == "pretty" {
-			want = "Local controller: running\npid: 123\nversion: v1.2.3\nstay: false\ninstalled: false\ndashboard: serving at http://127.0.0.1:4343 (sign in with sparkwing dashboard open)\n"
+			want = "Local controller: running\npid: 123\nversion: v1.2.3\ninstalled: false\ndashboard: serving at http://127.0.0.1:4343 (sign in with sparkwing dashboard open)\n"
 		}
 		if !strings.Contains(output.String(), want) {
 			t.Fatalf("%s status lacks the dashboard URL: %s", mode, &output)
@@ -136,7 +136,7 @@ func TestDashboardStatusPrintsTheServingURL(t *testing.T) {
 	var output bytes.Buffer
 	if err := runDashboardCommandArgs(t.Context(), []string{"status", "-o", "json"}, &output, "linux", func(context.Context) (dashboardServices, error) {
 		return dashboardServices{lifecycle: lifecycle}, nil
-	}); err != nil || strings.Contains(output.String(), `"url"`) || !strings.Contains(output.String(), `"state":"running","pid":123,"version":"v1.2.3","stay":false,"installed":false,"dashboard":"not_serving"`) {
+	}); err != nil || strings.Contains(output.String(), `"url"`) || !strings.Contains(output.String(), `"state":"running","pid":123,"version":"v1.2.3","installed":false,"dashboard":"not_serving"`) {
 		t.Fatalf("status without a serving dashboard named a URL: %s %v", &output, err)
 	}
 	output.Reset()
@@ -147,11 +147,11 @@ func TestDashboardStatusPrintsTheServingURL(t *testing.T) {
 	}
 }
 
-func TestDashboardDefaultStartDoesNotPinController(t *testing.T) {
+func TestDashboardDefaultStartUsesLocalController(t *testing.T) {
 	f := &dashboardLifecycleFake{}
 	var output bytes.Buffer
-	err := runDashboardCommandArgs(t.Context(), []string{"start", "--stay=false", "--read-only=false", "-o", "plain"}, &output, "windows", func(context.Context) (dashboardServices, error) { return dashboardServices{lifecycle: f}, nil })
-	if err != nil || f.options.Stay || f.options.Standalone || f.options.DashboardAddress != "127.0.0.1:4343" {
+	err := runDashboardCommandArgs(t.Context(), []string{"start", "--read-only=false", "-o", "plain"}, &output, "windows", func(context.Context) (dashboardServices, error) { return dashboardServices{lifecycle: f}, nil })
+	if err != nil || f.options.Standalone || f.options.DashboardAddress != "127.0.0.1:4343" {
 		t.Fatalf("options=%+v err=%v", f.options, err)
 	}
 	if output.String() != "stopped\n" {
@@ -165,6 +165,8 @@ func TestDashboardRejectsBeforeResolvingServices(t *testing.T) {
 		args []string
 	}{
 		{"linux", []string{"restart"}},
+		{"linux", []string{"start", "--stay"}},
+		{"linux", []string{"start", "--stay=false"}},
 		{"linux", []string{"status", "--output", "bogus"}},
 		{"linux", []string{"logs", "--limit", "1"}},
 		{"linux", []string{"logs", "--tail", "-1"}},
@@ -187,8 +189,8 @@ func TestDashboardRejectsBeforeResolvingServices(t *testing.T) {
 			}
 			if tc.goos == "windows" {
 				var failure *apierr.Error
-				if !errors.As(err, &failure) || !strings.Contains(failure.Hint, "--stay") {
-					t.Fatalf("missing stay guidance: %v", err)
+				if !errors.As(err, &failure) || !strings.Contains(failure.Hint, "sparkwing dashboard start") {
+					t.Fatalf("missing dashboard start guidance: %v", err)
 				}
 			}
 		})

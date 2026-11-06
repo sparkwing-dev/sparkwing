@@ -49,7 +49,7 @@ func TestLocalInstallJoinsOwnerBeforeActivationAndGatesStartup(t *testing.T) {
 		home := t.TempDir()
 		local := &localRuntimeFixture{}
 		draining, release, activated := make(chan struct{}), make(chan struct{}), make(chan struct{})
-		owner := &drainingInstallOwner{lifecycleOwner: lifecycleOwner{status: wingd.LocalStatus{Running: true, Stay: true, PID: 72, Version: "v1"}}}
+		owner := &drainingInstallOwner{lifecycleOwner: lifecycleOwner{status: wingd.LocalStatus{Running: true, PID: 72, Version: "v1"}}}
 		owner.drain = func(context.Context) error {
 			close(draining)
 			<-release
@@ -57,10 +57,10 @@ func TestLocalInstallJoinsOwnerBeforeActivationAndGatesStartup(t *testing.T) {
 			return nil
 		}
 		units := &installingUnits{}
-		units.install = func(_ context.Context, opts wingd.LocalStartOptions) error {
+		units.install = func(_ context.Context, _ wingd.LocalStartOptions) error {
 			status, err := owner.Status(t.Context())
-			if err != nil || status.Running || !opts.Stay {
-				t.Error("service activated before the old owner joined or without stay")
+			if err != nil || status.Running {
+				t.Error("service activated before the old owner joined")
 			}
 			units.units = []wingd.ManagedUnit{{Kind: wingd.ManagedController}}
 			close(activated)
@@ -74,7 +74,7 @@ func TestLocalInstallJoinsOwnerBeforeActivationAndGatesStartup(t *testing.T) {
 		installed, started := make(chan error, 1), make(chan error, 1)
 		go func() {
 			status, err := lifecycle.InstallController(t.Context(), opts)
-			if err == nil && (!status.Running || !status.Installed || !status.Stay || status.PID != 84) {
+			if err == nil && (!status.Running || !status.Installed || status.PID != 84) {
 				err = errors.New("installation did not return the managed successor")
 			}
 			installed <- err
@@ -107,7 +107,7 @@ func TestLocalInstallJoinsOwnerBeforeActivationAndGatesStartup(t *testing.T) {
 			t.Fatal("start bypassed successor readiness")
 		default:
 		}
-		owner.setStatus(wingd.LocalStatus{Running: true, Stay: true, PID: 84, Version: opts.Version})
+		owner.setStatus(wingd.LocalStatus{Running: true, PID: 84, Version: opts.Version})
 		if err := <-installed; err != nil {
 			t.Fatal(err)
 		}
@@ -126,11 +126,11 @@ func TestLocalInstallJoinsOwnerBeforeActivationAndGatesStartup(t *testing.T) {
 }
 
 func TestLocalInstallRefusesUnverifiedSuccessorAndPreservesFailures(t *testing.T) {
-	for _, mode := range []string{"drain", "activate", "same_pid", "zero_pid", "not_staying", "wrong_version", "missing_unit", "cancel_ready", "foreign_home"} {
+	for _, mode := range []string{"drain", "activate", "same_pid", "zero_pid", "wrong_version", "missing_unit", "cancel_ready", "foreign_home"} {
 		t.Run(mode, func(t *testing.T) {
 			home := t.TempDir()
 			local := &localRuntimeFixture{}
-			owner := &drainingInstallOwner{lifecycleOwner: lifecycleOwner{status: wingd.LocalStatus{Running: true, Stay: true, PID: 72, Version: "v1"}}}
+			owner := &drainingInstallOwner{lifecycleOwner: lifecycleOwner{status: wingd.LocalStatus{Running: true, PID: 72, Version: "v1"}}}
 			failure := errors.New("native boundary failed")
 			drains, installs := 0, 0
 			owner.drain = func(context.Context) error {
@@ -150,14 +150,12 @@ func TestLocalInstallRefusesUnverifiedSuccessorAndPreservesFailures(t *testing.T
 					return failure
 				}
 				units.units = []wingd.ManagedUnit{{Kind: wingd.ManagedController}}
-				owner.status = wingd.LocalStatus{Running: true, Stay: true, PID: 84, Version: opts.Version}
+				owner.status = wingd.LocalStatus{Running: true, PID: 84, Version: opts.Version}
 				switch mode {
 				case "same_pid":
 					owner.status.PID = 72
 				case "zero_pid":
 					owner.status.PID = 0
-				case "not_staying":
-					owner.status.Stay = false
 				case "wrong_version":
 					owner.status.Version = "v1"
 				case "missing_unit":

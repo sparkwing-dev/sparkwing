@@ -4,15 +4,14 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"os/exec"
 	"os/signal"
 	"path/filepath"
-	"strconv"
 	"syscall"
 	"time"
 
 	flag "github.com/spf13/pflag"
 
+	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 	"github.com/sparkwing-dev/sparkwing/internal/wingd"
 	"github.com/sparkwing-dev/sparkwing/internal/wingd/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
@@ -44,13 +43,11 @@ func runWingdMode(args []string) {
 	home := fs.String("home", "", "")
 	version := fs.String("version", "v1.0.0", "")
 
-	idleMS := fs.Int("idle-ms", 3000, "")
 	_ = fs.Parse(args[1:])
 
 	d, err := wingd.New(wingd.Config{
-		Home:        *home,
-		Version:     *version,
-		IdleTimeout: time.Duration(*idleMS) * time.Millisecond,
+		Home:    *home,
+		Version: *version,
 		Logf: func(format string, a ...any) {
 			fmt.Fprintf(os.Stderr, "%s wingd: %s\n",
 				time.Now().Format(time.RFC3339), fmt.Sprintf(format, a...))
@@ -70,13 +67,11 @@ func runDaemon(args []string) {
 	fs := flag.NewFlagSet("daemon", flag.ExitOnError)
 	home := fs.String("home", "", "")
 	version := fs.String("version", "v1.0.0", "")
-	idleMS := fs.Int("idle-ms", 30000, "")
 	_ = fs.Parse(args)
 
 	d, err := wingd.New(wingd.Config{
-		Home:        *home,
-		Version:     *version,
-		IdleTimeout: time.Duration(*idleMS) * time.Millisecond,
+		Home:    *home,
+		Version: *version,
 	})
 	if err != nil {
 		fail("new daemon: %v", err)
@@ -113,7 +108,6 @@ func runHold(args []string) {
 	sem := fs.String("sem", "", "")
 	policy := fs.String("sem-policy", "queue", "")
 	cores := fs.Float64("cores", 0, "")
-	idleMS := fs.Int("daemon-idle-ms", 30000, "")
 	semaphoresOnly := fs.Bool("semaphores-only", false, "")
 	realSpawn := fs.Bool("real-spawn", false, "")
 
@@ -125,7 +119,7 @@ func runHold(args []string) {
 	opts := client.Options{
 		Home:    *home,
 		Version: *version,
-		Spawn:   daemonSpawner(*idleMS),
+		Spawn:   daemonSpawner,
 		Backoff: 30 * time.Millisecond,
 	}
 	if *realSpawn {
@@ -136,7 +130,7 @@ func runHold(args []string) {
 		opts.Spawn = nil
 		if *hostBin != "" {
 			opts.Spawn = func(home, version string) error {
-				cmd := exec.Command(*hostBin, "wingd", "run", "--home", home, "--version", version)
+				cmd := procenv.ControlCommand(os.Environ(), *hostBin, "wingd", "run", "--home", home, "--version", version)
 				if err := cmd.Start(); err != nil {
 					return err
 				}
@@ -192,12 +186,11 @@ func runReattach(args []string) {
 	home := fs.String("home", "", "")
 	token := fs.String("token", "", "")
 	run := fs.String("run", "", "")
-	idleMS := fs.Int("daemon-idle-ms", 30000, "")
 	_ = fs.Parse(args)
 
 	opts := client.Options{
 		Home:    *home,
-		Spawn:   daemonSpawner(*idleMS),
+		Spawn:   daemonSpawner,
 		Backoff: 30 * time.Millisecond,
 	}
 	cl, err := client.EnsureDaemon(context.Background(), opts)
@@ -212,22 +205,19 @@ func runReattach(args []string) {
 	block()
 }
 
-func daemonSpawner(idleMS int) func(home, version string) error {
-	return func(home, version string) error {
-		self, err := os.Executable()
-		if err != nil {
-			return err
-		}
-		cmd := exec.Command(self, "daemon",
-			"--home", home,
-			"--idle-ms", strconv.Itoa(idleMS),
-		)
-		cmd.SysProcAttr = daemonDetachSysProcAttr()
-		if err := cmd.Start(); err != nil {
-			return err
-		}
-		return cmd.Process.Release()
+func daemonSpawner(home, version string) error {
+	self, err := os.Executable()
+	if err != nil {
+		return err
 	}
+	cmd := procenv.ControlCommand(os.Environ(), self, "daemon",
+		"--home", home,
+	)
+	cmd.SysProcAttr = daemonDetachSysProcAttr()
+	if err := cmd.Start(); err != nil {
+		return err
+	}
+	return cmd.Process.Release()
 }
 
 func announce(token string) {

@@ -27,7 +27,7 @@ func TestLocalDashboardStartsOnExistingController(t *testing.T) {
 		return listener, nil
 	}
 	lifecycle := NewLocalLifecycle(r, nil)
-	opts := LocalStartOptions{Home: f.home, Version: "v1", Stay: true}
+	opts := LocalStartOptions{Home: f.home, Version: "v1"}
 	first, err := lifecycle.EnsureStarted(t.Context(), opts)
 	if err != nil {
 		t.Fatal(err)
@@ -75,7 +75,7 @@ func TestLocalDashboardBindFailureLeavesControllerAvailable(t *testing.T) {
 		return &runtimeListener{closed: make(chan struct{})}, nil
 	}
 	lifecycle := NewLocalLifecycle(r, nil)
-	opts := LocalStartOptions{Home: f.home, Version: "v1", Stay: true}
+	opts := LocalStartOptions{Home: f.home, Version: "v1"}
 	if _, err := lifecycle.EnsureStarted(t.Context(), opts); err != nil {
 		t.Fatal(err)
 	}
@@ -98,7 +98,7 @@ func TestLocalDashboardStartupFailureReachesCaller(t *testing.T) {
 	f := &runtimeControllerFixture{http: func() localhostwire.LocalHTTP { return localhostwire.LocalHTTP{API: http.NotFoundHandler()} }}
 	r := newRuntimeFixture(t, f)
 	lifecycle := NewLocalLifecycle(r, nil)
-	opts := LocalStartOptions{Home: f.home, Version: "v1", Stay: true}
+	opts := LocalStartOptions{Home: f.home, Version: "v1"}
 	if _, err := lifecycle.EnsureStarted(t.Context(), opts); err != nil {
 		t.Fatal(err)
 	}
@@ -135,7 +135,7 @@ func TestLocalDashboardReadinessAndJoinedShutdown(t *testing.T) {
 			return listener, nil
 		}
 		lifecycle := NewLocalLifecycle(r, nil)
-		opts := LocalStartOptions{Home: f.home, Version: "v1", Stay: true}
+		opts := LocalStartOptions{Home: f.home, Version: "v1"}
 		if _, err := lifecycle.EnsureStarted(t.Context(), opts); err != nil {
 			t.Fatal(err)
 		}

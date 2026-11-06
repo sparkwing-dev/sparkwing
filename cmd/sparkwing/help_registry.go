@@ -400,7 +400,6 @@ var flagDescriptions = map[string]string{
 	"sw-cache-from":       "Read authorized cache entries from the named controller profile; empty disables the machine default.",
 	"sw-no-memo":          "Execute jobs without reusing memoized results.",
 	"sw-allow-risk":       "Authorize the listed pipeline risks. A run narrowed with --sw-only, --sw-start-at or --sw-stop-at needs only the risks of the steps it selects.",
-	"stay":                "Keep the local controller running until stopped.",
 	"sw-ref":              "Build the pipeline and run against this Git ref.",
 	"sw-pipeline-ref":     "Load the pipeline from this Git ref.",
 	"sw-pause-before":     "Pause before the selected job.",

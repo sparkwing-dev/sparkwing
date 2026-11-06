@@ -56,13 +56,13 @@ func (f *daemonLifecycleFake) EnsureStarted(_ context.Context, options wingd.Loc
 	if f.started != nil {
 		return *f.started, nil
 	}
-	f.status.Running, f.status.Version, f.status.Stay = true, options.Version, options.Stay
+	f.status.Running, f.status.Version = true, options.Version
 	f.status.PID = 17
 	return f.status, nil
 }
 
 func TestDaemonLifecycleReportsSharedStatus(t *testing.T) {
-	fake := &daemonLifecycleFake{status: wingd.LocalStatus{Running: true, Stay: true, Installed: true, PID: 42, Version: "v1.2.3-dev+abcdef01", Activity: wingd.LocalActivity{Runs: 2, QueuedTriggers: 3, HeldLeases: 4, DashboardConnections: 5}}}
+	fake := &daemonLifecycleFake{status: wingd.LocalStatus{Running: true, Installed: true, PID: 42, Version: "v1.2.3-dev+abcdef01", Activity: wingd.LocalActivity{Runs: 2, QueuedTriggers: 3, HeldLeases: 4, DashboardConnections: 5}}}
 	var out bytes.Buffer
 	err := runDaemonLifecycleCommandArgs(t.Context(), []string{"status", "-o", "json"}, &out, func(context.Context) (dashboardServices, error) {
 		return dashboardServices{lifecycle: fake}, nil
@@ -73,13 +73,23 @@ func TestDaemonLifecycleReportsSharedStatus(t *testing.T) {
 	var report struct {
 		Kind, Service, Action, State, Version string
 		PID                                   int
-		Stay, Installed                       bool
+		Installed                             bool
 		Activity                              map[string]any
 	}
 	if err := json.Unmarshal(out.Bytes(), &report); err != nil {
 		t.Fatal(err)
 	}
-	if report.Kind != "service" || report.Service != "controller" || report.Action != "status" || report.State != "running" || report.Version != fake.status.Version || report.PID != 42 || !report.Stay || !report.Installed || report.Activity["runs"] != float64(2) || report.Activity["queued_triggers"] != float64(3) || report.Activity["held_leases"] != float64(4) || report.Activity["dashboard_connections"] != float64(5) || !reflect.DeepEqual(fake.calls, []string{"status"}) {
+	var fields map[string]any
+	if err := json.Unmarshal(out.Bytes(), &fields); err != nil {
+		t.Fatal(err)
+	}
+	if _, exists := fields["stay"]; exists {
+		t.Fatalf("status retained stay: %s", &out)
+	}
+	if _, exists := report.Activity["idle_since"]; exists {
+		t.Fatalf("status retained idle_since: %s", &out)
+	}
+	if report.Kind != "service" || report.Service != "controller" || report.Action != "status" || report.State != "running" || report.Version != fake.status.Version || report.PID != 42 || !report.Installed || report.Activity["runs"] != float64(2) || report.Activity["queued_triggers"] != float64(3) || report.Activity["held_leases"] != float64(4) || report.Activity["dashboard_connections"] != float64(5) || !reflect.DeepEqual(fake.calls, []string{"status"}) {
 		t.Fatalf("status: %+v calls=%v", report, fake.calls)
 	}
 }
@@ -110,7 +120,7 @@ func TestDaemonLifecycleRestartDrainsAndKeepsRuntimeOptions(t *testing.T) {
 		force bool
 		old   string
 	}{{false, "v1"}, {true, "v2"}} {
-		fake := &daemonLifecycleFake{status: wingd.LocalStatus{Running: true, Stay: true, Installed: true, Version: test.old}}
+		fake := &daemonLifecycleFake{status: wingd.LocalStatus{Running: true, Installed: true, Version: test.old}}
 		options := wingd.LocalStartOptions{Home: "/private/home", Executable: "/bin/sparkwing", Version: "v2", DashboardAddress: "127.0.0.1:9000"}
 		var out bytes.Buffer
 		args := []string{"restart", "-o", "json"}
@@ -120,7 +130,6 @@ func TestDaemonLifecycleRestartDrainsAndKeepsRuntimeOptions(t *testing.T) {
 		err := runDaemonLifecycleCommandArgs(t.Context(), args, &out, func(context.Context) (dashboardServices, error) {
 			return dashboardServices{lifecycle: fake, options: options}, nil
 		})
-		options.Stay = true
 		var result struct {
 			Restarted       bool   `json:"restarted"`
 			PreviousVersion string `json:"previous_version"`

@@ -323,24 +323,13 @@
     },
     {
       "type": "LocalControl",
-      "fields": [
-        {
-          "name": "stay",
-          "kind": "*bool",
-          "omitempty": true
-        }
-      ]
+      "fields": null
     },
     {
       "type": "LocalControlStatus",
       "fields": [
         {
           "name": "running",
-          "kind": "bool",
-          "omitempty": false
-        },
-        {
-          "name": "stay",
           "kind": "bool",
           "omitempty": false
         },
@@ -372,11 +361,6 @@
         {
           "name": "dashboard_connections",
           "kind": "int",
-          "omitempty": false
-        },
-        {
-          "name": "idle_since",
-          "kind": "struct",
           "omitempty": false
         },
         {

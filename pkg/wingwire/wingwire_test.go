@@ -5,11 +5,9 @@ import (
 	"reflect"
 	"strings"
 	"testing"
-	"time"
 )
 
 func roundTripMessages() []any {
-	stay := true
 	return []any{
 		&HelloAck{ProtocolMajor: ProtocolMajor, BinaryVersion: "v0.16.0", Draining: true},
 		&AdmissionRequest{
@@ -35,11 +33,10 @@ func roundTripMessages() []any {
 		&StatsReset{},
 		&StatsResetAck{},
 		&LocalControl{},
-		&LocalControl{Stay: &stay},
 		&LocalDashboard{Address: "127.0.0.1:0"},
 		&LocalDashboardAck{},
 		&LocalDashboardAck{Error: "dashboard address is occupied"},
-		&LocalControlStatus{Running: true, Stay: true, PID: 91, Version: "v1", Runs: 1, QueuedTriggers: 2, HeldLeases: 3, DashboardConnections: 4, IdleSince: time.Date(2026, 10, 14, 0, 0, 0, 0, time.UTC)},
+		&LocalControlStatus{Running: true, PID: 91, Version: "v1", Runs: 1, QueuedTriggers: 2, HeldLeases: 3, DashboardConnections: 4},
 		&Cancel{RunID: "deploy-20260710-120000", Reason: "cancelled via sparkwing runs cancel"},
 		&QueueState{
 			ExternalSampleAgeMS:      30000,

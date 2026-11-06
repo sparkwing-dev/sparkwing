@@ -18,17 +18,15 @@ The local controller owns the state store, admission, queue and dashboard in one
 home. Local pipeline execution stays in the CLI process. Standalone CI uses the
 same runtime in process and must not open a home already owned by a controller.
 
-Runs, queued work, held leases and open dashboard connections keep the controller
-alive. With none of those holds, it may exit after the shared idle interval.
-Dashboard start with `--stay` keeps it up until stopped. Health probes alone do
-not keep it alive.
+The local controller remains running while idle. Use `sparkwing daemon stop` to
+stop it.
 
 Login services on Linux and macOS use a foreground controller process with an
-absolute home. The CLI adapter forwards home, version, stay and standalone mode
+absolute home. The CLI adapter forwards home, version and standalone mode
 to that runtime and waits for it to return. Signal cancellation reaches the same
 runtime context. Startup reconciliation and shutdown draining belong to the
-runtime. Windows supports stay mode and daemon schedules, without a login-service
-installer.
+runtime. Windows supports the foreground controller and daemon schedules, without a
+login-service installer.
 
 Managed schedule timers use one stable hidden entrypoint with the captured home.
 Machine updates refresh both timer and controller units. The controller runtime,

@@ -12,7 +12,7 @@ import (
 func TestEnsureLocalControllerUsesCapturedLifecycle(t *testing.T) {
 	home := t.TempDir()
 	lifecycle := &daemonLifecycleFake{status: wingd.LocalStatus{PID: 17}}
-	options := wingd.LocalStartOptions{Home: home, Executable: "/captured/sparkwing", Version: "v0.71.0", Stay: true}
+	options := wingd.LocalStartOptions{Home: home, Executable: "/captured/sparkwing", Version: "v0.71.0"}
 	_, err := ensureLocalController(t.Context(), filepath.Join(home, "."), func(context.Context) (dashboardServices, error) {
 		return dashboardServices{lifecycle: lifecycle, options: options}, nil
 	})

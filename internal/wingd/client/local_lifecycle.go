@@ -21,7 +21,6 @@ func NewLocalLifecycle(home string, runtime wingd.LocalRuntime, units wingd.Mana
 
 type controllerOwner interface {
 	Status(context.Context) (wingd.LocalStatus, error)
-	SetStay(context.Context, bool) error
 	EnsureDashboard(context.Context, string, bool) error
 	Drain(context.Context) error
 }
@@ -30,11 +29,6 @@ type localOwnerClient struct{ home string }
 
 func (o localOwnerClient) Status(ctx context.Context) (wingd.LocalStatus, error) {
 	return QueryLocalController(ctx, o.home)
-}
-
-func (o localOwnerClient) SetStay(ctx context.Context, stay bool) error {
-	_, err := setLocalStay(ctx, o.home, stay)
-	return err
 }
 
 func (o localOwnerClient) EnsureDashboard(ctx context.Context, address string, readOnly bool) error {
@@ -96,14 +90,6 @@ func (r *ownerRuntime) target(ctx context.Context) (controllerOwner, error) {
 		return r.LocalRuntime, nil
 	}
 	return r.owner, nil
-}
-
-func (r *ownerRuntime) SetStay(ctx context.Context, stay bool) error {
-	owner, err := r.target(ctx)
-	if err != nil {
-		return err
-	}
-	return owner.SetStay(ctx, stay)
 }
 
 func (r *ownerRuntime) EnsureDashboard(ctx context.Context, address string, readOnly bool) error {

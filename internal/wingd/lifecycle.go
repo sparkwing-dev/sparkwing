@@ -3,7 +3,6 @@ package wingd
 import (
 	"context"
 	"fmt"
-	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/localhostwire"
 )
@@ -11,7 +10,6 @@ import (
 // LocalActivity counts live state, not historical runs or configured schedules.
 type LocalActivity struct {
 	Runs, QueuedTriggers, HeldLeases, DashboardConnections int
-	IdleSince                                              time.Time
 }
 
 // CurrentLocalSubject identifies the controller process from its OS account.
@@ -47,7 +45,7 @@ func LocalSubject(peer, owner localhostwire.LocalPeerIdentity) (string, error) {
 // LocalStartOptions carries spawn plumbing in arguments rather than environment variables.
 type LocalStartOptions struct {
 	Home, Executable, Version string
-	Stay, Standalone          bool
+	Standalone                bool
 	DashboardAddress          string
 	DashboardReadOnly         bool
 }
@@ -59,7 +57,6 @@ type LocalRuntime interface {
 	// A completed previous Run cannot satisfy a new readiness request.
 	AwaitReady(context.Context) (LocalStatus, error)
 	Status(context.Context) (LocalStatus, error)
-	SetStay(context.Context, bool) error
 	// EnsureDashboard starts the UI on an already-ready owner, reusing an identical address and read-only policy.
 	// A different address or policy is refused until the controller is stopped and restarted.
 	EnsureDashboard(context.Context, string, bool) error
@@ -69,10 +66,10 @@ type LocalRuntime interface {
 
 // LocalStatus exposes version skew and activity without opening a second writing store handle.
 type LocalStatus struct {
-	Running, Stay, Installed bool
-	PID                      int
-	Version                  string
-	Activity                 LocalActivity
+	Running, Installed bool
+	PID                int
+	Version            string
+	Activity           LocalActivity
 	// DashboardURL is the serving dashboard's origin, empty while it is not serving.
 	DashboardURL string
 }

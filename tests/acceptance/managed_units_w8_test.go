@@ -47,7 +47,7 @@ func TestManagedUnitsW8Components(t *testing.T) {
 			for _, unit := range units {
 				want := []string{"__tick", "--home", host.SparkwingHome}
 				if unit.Kind == wingd.ManagedController {
-					want = []string{"wingd", "run", "--stay", "--home", host.SparkwingHome}
+					want = []string{"wingd", "run", "--home", host.SparkwingHome}
 				}
 				if unit.Home != host.SparkwingHome || unit.Executable != host.Binary || unit.Version != "v1.2.4" || !slices.Equal(unit.Arguments, want) {
 					t.Fatalf("unit = %+v", unit)

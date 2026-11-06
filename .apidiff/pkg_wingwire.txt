@@ -239,19 +239,15 @@ type HostResources struct {
 
 	MemoryBytes int64
 }
-type LocalControl struct {
-	Stay *bool
-}
+type LocalControl struct{}
 type LocalControlStatus struct {
 	Running              bool
-	Stay                 bool
 	PID                  int
 	Version              string
 	Runs                 int
 	QueuedTriggers       int
 	HeldLeases           int
 	DashboardConnections int
-	IdleSince            time.Time
 
 	DashboardURL string
 }

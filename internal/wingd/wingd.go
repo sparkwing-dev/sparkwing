@@ -17,7 +17,6 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/fssecure"
-	"github.com/sparkwing-dev/sparkwing/internal/limits"
 	"github.com/sparkwing-dev/sparkwing/internal/paths"
 	"github.com/sparkwing-dev/sparkwing/internal/userconfig"
 	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
@@ -26,8 +25,6 @@ import (
 var ErrNotElected = errors.New("wingd: another daemon is already elected")
 
 const (
-	defaultIdleTimeout = limits.LocalControllerIdleTimeout
-
 	defaultSampleInterval = 5 * time.Second
 
 	defaultHeadroomMaxAge = 30 * time.Second
@@ -67,10 +64,6 @@ type Config struct {
 
 	Now func() time.Time
 
-	Stay bool
-
-	IdleTimeout time.Duration
-
 	SampleInterval time.Duration
 
 	HeadroomMaxAge time.Duration
@@ -99,13 +92,6 @@ type Config struct {
 	StoreSchemaVersion int
 
 	Logf func(format string, args ...any)
-}
-
-func (c Config) idleTimeout() time.Duration {
-	if c.IdleTimeout > 0 {
-		return c.IdleTimeout
-	}
-	return defaultIdleTimeout
 }
 
 func (c Config) sampleInterval() time.Duration {

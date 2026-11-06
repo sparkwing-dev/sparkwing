@@ -57,23 +57,12 @@ func (d *Daemon) controllerHTTP(next http.Handler) http.Handler {
 				}
 			}
 			writeControllerHTTP(w, ack)
-		case "status", "stay":
+		case "status":
 			if d.localControl == nil {
 				writeLoginFailure(w, &apierr.Error{Code: apierr.Unavailable, Message: "controller runtime is unavailable"})
 				return
 			}
-			var stay *bool
-			if path == "stay" {
-				var request struct {
-					Stay *bool `json:"stay"`
-				}
-				if json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096)).Decode(&request) != nil || request.Stay == nil {
-					writeLoginFailure(w, &apierr.Error{Code: apierr.BadRequest, Message: "stay is required"})
-					return
-				}
-				stay = request.Stay
-			}
-			writeControllerHTTP(w, d.localControl(stay))
+			writeControllerHTTP(w, d.localControl())
 		case "dashboard":
 			if d.localDashboard == nil {
 				writeLoginFailure(w, &apierr.Error{Code: apierr.Unavailable, Message: "controller dashboard is unavailable"})

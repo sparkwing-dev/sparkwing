@@ -68,11 +68,8 @@ type Daemon struct {
 	shuttingDown       bool
 	localActivity      LocalActivity
 	dashboardConns     int
-	stay               bool
-	localControl       func(*bool) LocalStatus
+	localControl       func() LocalStatus
 	localDashboard     func(context.Context, string, bool) error
-	dashboardSeen      func() time.Time
-	lastActivity       time.Time
 	startedAt          time.Time
 
 	loadInit             bool
@@ -152,7 +149,6 @@ func New(cfg Config) (*Daemon, error) {
 		admissionTickets: map[string]*admissionTicket{},
 		admissionKeys:    map[string]string{},
 		admissionChanged: make(chan struct{}),
-		stay:             cfg.Stay,
 		layout:           lay,
 		sampler:          sampler,
 		procSampler:      procSampler,
@@ -230,7 +226,7 @@ func (d *Daemon) runElected(ctx context.Context) error {
 	diagnosticsDone := d.startDiagnostics(ctx.Done())
 
 	var workers sync.WaitGroup
-	for _, run := range []func(context.Context){d.watchContext, d.sampleLoop, d.stallLoop, d.idleLoop, d.admissionLivenessLoop} {
+	for _, run := range []func(context.Context){d.watchContext, d.sampleLoop, d.stallLoop, d.admissionLivenessLoop} {
 		workers.Go(func() { run(ctx) })
 	}
 	defer func() {
@@ -401,15 +397,10 @@ func (d *Daemon) initLedger() error {
 	if err := d.commitAdmissionLocked(); err != nil {
 		return err
 	}
-	d.mu.Lock()
-	d.lastActivity = d.now()
-	d.mu.Unlock()
 	return nil
 }
 
 func (d *Daemon) now() time.Time { return d.cfg.now() }
-
-func (d *Daemon) touchLocked() { d.lastActivity = d.now() }
 
 func (d *Daemon) isDrainingLocked() bool { return d.draining }
 

@@ -51,7 +51,7 @@ func (r *localRuntime) rememberedDashboard() (dashboardMemory, bool, error) {
 }
 
 // ForgetDashboard clears the dashboard a controller restarted on demand would serve again.
-// An explicit stop calls it, so only an idle exit or a crash brings the dashboard back.
+// An explicit stop calls it, so a crash brings the dashboard back.
 func ForgetDashboard(home string) error {
 	home, err := HomeDir(home)
 	if err != nil {

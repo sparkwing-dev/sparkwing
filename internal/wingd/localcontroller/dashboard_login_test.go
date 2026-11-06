@@ -26,7 +26,7 @@ func TestDashboardLoginAuthorizesControllerAPIAsMintingPeer(t *testing.T) {
 		t.Fatal(err)
 	}
 	lifecycle := wingd.NewLocalLifecycle(runtime, nil)
-	if _, err := lifecycle.StartDashboard(t.Context(), wingd.LocalStartOptions{Home: home, Version: "v0.71.0", Stay: true, DashboardAddress: "127.0.0.1:0"}); err != nil {
+	if _, err := lifecycle.StartDashboard(t.Context(), wingd.LocalStartOptions{Home: home, Version: "v0.71.0", DashboardAddress: "127.0.0.1:0"}); err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() {

@@ -25,6 +25,9 @@ unlock.
 - **CLI (Breaking):** Repository pin upgrades move from `sparkwing upgrade` to `sparkwing pipeline upgrade`. The obsolete `sparkwing daemon recover-state` command is removed because machine admission now lives in `state.db`. See [the migration guide](docs/migrations/_unreleased.md#upgrade-the-store-in-place-to-schema-baseline-31).
 
 - **local controller (Breaking):** Machine admission uses durable HTTP tickets on the controller API socket. Older pinned CLIs must run `sparkwing pipeline upgrade`. Incompatible-client errors name the client and controller versions. The schema baseline advances to version 32 in place, storing queued requests, leases, retry receipts and encrypted requester secrets together in `state.db`. See [the migration guide](docs/migrations/_unreleased.md#upgrade-the-store-in-place-to-schema-baseline-31).
+
+- **local controller (Breaking):** The local controller remains running while idle, so a new client cannot race its idle shutdown. Removed `POST /api/v1/local/controller/stay`, `LocalControl.stay`, `LocalControlStatus.stay`, `LocalControlStatus.idle_since`, daemon status `stay`, and `--stay` from `sparkwing dashboard start` and `sparkwing wingd run`. Explicit `sparkwing daemon stop` still stops it. See [the migration guide](docs/migrations/_unreleased.md#local-controllers-remain-running-while-idle).
+
 ### Added
 
 - **SDK:** Host compatibility checks run frozen released Go and TypeScript pipelines through candidate nodehost. The affected gate reuses fixture preparation, and pre-release rebuilds every historical fixture.

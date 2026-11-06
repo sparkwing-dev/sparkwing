@@ -22,7 +22,7 @@ func TestLocalControllerW8Components(t *testing.T) {
 			}
 		}
 	})
-	t.Run("startup_stay_standalone_and_drain", func(t *testing.T) {
+	t.Run("startup_dashboard_standalone_and_drain", func(t *testing.T) {
 		runtime := &localRuntimeW8{ready: make(chan struct{}), stop: make(chan struct{})}
 		lifecycle := wingd.NewLocalLifecycle(runtime, nil)
 		opts := wingd.LocalStartOptions{Home: t.TempDir(), Version: "v1"}
@@ -30,10 +30,9 @@ func TestLocalControllerW8Components(t *testing.T) {
 		if err != nil || !status.Running {
 			t.Fatalf("startup: %+v, %v", status, err)
 		}
-		opts.Stay = true
 		status, err = lifecycle.StartDashboard(t.Context(), opts)
-		if err != nil || !status.Stay {
-			t.Fatalf("stay: %+v, %v", status, err)
+		if err != nil || !status.Running {
+			t.Fatalf("dashboard: %+v, %v", status, err)
 		}
 		opts.Standalone = true
 		if _, err := lifecycle.EnsureStarted(t.Context(), opts); err == nil {
@@ -58,7 +57,7 @@ type localRuntimeW8 struct {
 func (r *localRuntimeW8) Run(ctx context.Context, opts wingd.LocalStartOptions) error {
 	r.mu.Lock()
 	r.starts++
-	r.status = wingd.LocalStatus{Running: true, Stay: opts.Stay, Version: opts.Version}
+	r.status = wingd.LocalStatus{Running: true, Version: opts.Version}
 	r.mu.Unlock()
 	close(r.ready)
 	select {
@@ -84,13 +83,6 @@ func (r *localRuntimeW8) Status(context.Context) (wingd.LocalStatus, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	return r.status, nil
-}
-
-func (r *localRuntimeW8) SetStay(_ context.Context, stay bool) error {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	r.status.Stay = stay
-	return nil
 }
 
 func (r *localRuntimeW8) EnsureDashboard(context.Context, string, bool) error { return nil }

@@ -27,9 +27,8 @@ waiter keeps its arrival order through owner handoff.
 
 For a run that waited, was refused, or lost its daemon, see [Diagnosing admission](diagnosing-admission.md).
 
-The local controller starts on demand. It stays up for runs, queued triggers,
-held leases and open dashboard connections. `sparkwing dashboard start --stay`
-keeps it running until stopped. An installed systemd service or launchd agent
+The local controller starts on demand and remains running while idle.
+`sparkwing daemon stop` stops it. An installed systemd service or launchd agent
 restarts it after failure. See [Local execution](local-execution.md).
 
 Lease holders and queued runs retry with capped backoff for up to twelve minutes

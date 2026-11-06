@@ -31,7 +31,7 @@ Manage the local dashboard
 
 Install a dashboard service that starts at login
 
-Install a login service with restart on failure using systemd user or launchd; no socket activation. Refuse Windows with --stay guidance.
+Install a login service with restart on failure using systemd user or launchd; no socket activation. Refuse Windows with `sparkwing dashboard start` guidance.
 
 ### Flags
 
@@ -77,7 +77,7 @@ Print a one-time sign-in link for the local dashboard. When no dashboard serves,
 
 Start the local dashboard and controller on demand
 
-Starts the local controller on demand; --stay pins it until stopped. Runs, queued work, held leases, dashboard connections and a signed-in dashboard request in the last 30 minutes prevent idle exit.
+Starts the local controller on demand. The controller keeps running while idle until explicitly stopped.
 
 ### Flags
 
@@ -90,7 +90,6 @@ Starts the local controller on demand; --stay pins it until stopped. Runs, queue
 | `--addr HOST:PORT` | Address the dashboard listens on as HOST:PORT, 127.0.0.1:4343 by default; a non-loopback host also needs --allow-remote. |
 | `--allow-remote` | Permit a non-loopback --addr over cleartext HTTP. The one-time login token and 24-hour session bearer cross the network unencrypted, and a session can read decrypted secrets. Use only on a trusted network or through an SSH tunnel: ssh -N -L 4343:127.0.0.1:4343 user@host (keep the remote dashboard on loopback). |
 | `--read-only` | Block browser writes while still allowing authenticated reads of decrypted secrets and sign-out. This is not safe to share. |
-| `--stay` | Keep the local controller running until stopped. |
 
 ## `sparkwing dashboard status`
 
@@ -109,7 +108,7 @@ Report whether the controller runs and where the dashboard serves
 
 Stop a running dashboard server
 
-Stops the local controller and its dashboard. The dashboard no longer returns when a run or schedule next starts the controller; until this stop, a controller that exits idle and restarts on demand serves it again with the same port and read-only policy, on loopback only; a remote address needs `dashboard start --allow-remote` again.
+Stops the local controller and its dashboard. The dashboard no longer returns when a run or schedule next starts the controller.
 
 ### Flags
 
@@ -124,7 +123,7 @@ Stops the local controller and its dashboard. The dashboard no longer returns wh
 
 Remove the dashboard login service
 
-Remove the managed login service; Windows uses --stay only.
+Remove the managed login service; Windows uses `sparkwing dashboard start` directly.
 
 ### Flags
 

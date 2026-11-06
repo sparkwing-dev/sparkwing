@@ -2,6 +2,8 @@ package wingd_test
 
 import (
 	"bufio"
+	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -13,6 +15,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/testleak"
+	"github.com/sparkwing-dev/sparkwing/internal/wingd/client"
 )
 
 var (
@@ -221,6 +224,17 @@ func waitForDaemonLineCount(t *testing.T, home string, want int, timeout time.Du
 	}
 }
 
+func stopProcessDaemonOnCleanup(t *testing.T, home string) {
+	t.Helper()
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		if err := client.Stop(ctx, client.Options{Home: home}); err != nil && !errors.Is(err, client.ErrNoDaemon) {
+			t.Errorf("stop fixture daemon: %v", err)
+		}
+	})
+}
+
 func TestProcess_ElectionRaceSingleDaemon(t *testing.T) {
 	t.Parallel()
 
@@ -228,6 +242,7 @@ func TestProcess_ElectionRaceSingleDaemon(t *testing.T) {
 		t.Skip("process test skipped in -short")
 	}
 	home := shortHome(t)
+	stopProcessDaemonOnCleanup(t, home)
 	const n = 6
 	holders := make([]*procHandle, n)
 	for i := range holders {
@@ -236,7 +251,6 @@ func TestProcess_ElectionRaceSingleDaemon(t *testing.T) {
 			"--run", "r"+strconv.Itoa(i),
 			"--sem", "election-"+strconv.Itoa(i),
 			"--semaphores-only",
-			"--daemon-idle-ms", "1500",
 		)
 	}
 	for i, h := range holders {
@@ -256,10 +270,11 @@ func TestProcess_ClientKillReleasesAndPromotes(t *testing.T) {
 		t.Skip("process test skipped in -short")
 	}
 	home := shortHome(t)
-	a := startProc(t, "hold", "--home", home, "--run", "a", "--sem", "lock", "--daemon-idle-ms", "3000")
+	stopProcessDaemonOnCleanup(t, home)
+	a := startProc(t, "hold", "--home", home, "--run", "a", "--sem", "lock")
 	a.waitOK(10 * time.Second)
 
-	b := startProc(t, "hold", "--home", home, "--run", "b", "--sem", "lock", "--daemon-idle-ms", "3000")
+	b := startProc(t, "hold", "--home", home, "--run", "b", "--sem", "lock")
 	b.mustStayQueued(500 * time.Millisecond)
 
 	a.kill()
@@ -271,14 +286,13 @@ func TestProcess_CancelOthersEvictsHolderAcrossProcesses(t *testing.T) {
 		t.Skip("process test skipped in -short")
 	}
 	home := shortHome(t)
+	stopProcessDaemonOnCleanup(t, home)
 	victim := startProc(t, "hold", "--home", home, "--run", "victim",
-		"--sem", "lock", "--sem-policy", "cancel_others", "--semaphores-only",
-		"--daemon-idle-ms", "3000")
+		"--sem", "lock", "--sem-policy", "cancel_others", "--semaphores-only")
 	victim.waitOK(10 * time.Second)
 
 	aggressor := startProc(t, "hold", "--home", home, "--run", "aggressor",
-		"--sem", "lock", "--sem-policy", "cancel_others", "--semaphores-only",
-		"--daemon-idle-ms", "3000")
+		"--sem", "lock", "--sem-policy", "cancel_others", "--semaphores-only")
 	aggressor.waitOK(10 * time.Second)
 
 	got := victim.waitLine("EVICTED ", 10*time.Second)
@@ -292,6 +306,7 @@ func TestProcess_SelfSpawnedDaemonWritesLogFile(t *testing.T) {
 		t.Skip("process test skipped in -short")
 	}
 	home := shortHome(t)
+	stopProcessDaemonOnCleanup(t, home)
 	h := startProc(t, "hold", "--home", home, "--run", "r", "--cores", "0.1", "--real-spawn")
 	h.waitOK(10 * time.Second)
 
@@ -307,6 +322,7 @@ func TestProcess_PipelineClientStartsDaemonViaHostBinary(t *testing.T) {
 		t.Skip("process test skipped in -short")
 	}
 	home := shortHome(t)
+	stopProcessDaemonOnCleanup(t, home)
 	hostBin := buildFixture(t)
 	env := []string{"PATH=" + t.TempDir()}
 	h := startProcEnv(t, env, "hold",
@@ -329,6 +345,7 @@ func TestProcess_PipelineClientWithoutAHostStartsNothing(t *testing.T) {
 		t.Skip("process test skipped in -short")
 	}
 	home := shortHome(t)
+	stopProcessDaemonOnCleanup(t, home)
 	env := []string{"PATH=" + t.TempDir()}
 	h := startProcEnv(t, env, "hold",
 		"--home", home, "--run", "hostless", "--cores", "0.1", "--external-host")

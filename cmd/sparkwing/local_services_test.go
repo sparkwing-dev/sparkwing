@@ -335,7 +335,7 @@ func TestProductionLocalQueueReportsTheMachineAdmissionDaemon(t *testing.T) {
 		t.Fatalf("queue without a daemon reported host state: %+v", absent)
 	}
 
-	daemon, err := wingd.New(wingd.Config{Home: home, Version: "v1.2.3", Stay: true})
+	daemon, err := wingd.New(wingd.Config{Home: home, Version: "v1.2.3"})
 	if err != nil {
 		t.Fatal(err)
 	}

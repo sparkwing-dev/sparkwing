@@ -94,7 +94,7 @@ func TestDashboardServesAControllerARunStarted(t *testing.T) {
 		t.Fatalf("status should report the same controller running and the dashboard serving at %s: %+v", origin, after)
 	}
 
-	// safety: a drain outside the CLI's stop command exits the way an idle controller does.
+	// safety: a direct drain preserves the saved dashboard for an on-demand restart.
 	if err := wingdclient.Stop(ctx, wingdclient.Options{Home: home}); err != nil {
 		t.Fatalf("drain the controller: %v", err)
 	}

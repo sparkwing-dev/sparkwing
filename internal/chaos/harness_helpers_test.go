@@ -40,7 +40,6 @@ type config struct {
 
 	FaultBudget float64
 
-	DaemonIdleMS  int
 	DaemonGraceMS int
 
 	DaemonCores float64
@@ -60,7 +59,6 @@ func ciConfig(seed int64) config {
 		Settle:            6 * time.Second,
 		EnableCLI:         true,
 		FaultBudget:       0.6,
-		DaemonIdleMS:      3000,
 		DaemonGraceMS:     2500,
 		DaemonCores:       8,
 		MaxOwnedProcesses: 96,
@@ -76,7 +74,6 @@ func soakConfig(seed int64, d time.Duration) config {
 		Settle:            8 * time.Second,
 		EnableCLI:         true,
 		FaultBudget:       1.0,
-		DaemonIdleMS:      10000,
 		DaemonGraceMS:     3000,
 		DaemonCores:       16,
 		MaxOwnedProcesses: 192,
@@ -286,7 +283,6 @@ func (h *harness) spawn(wedged bool) {
 
 	args := []string{
 		"hold", "--home", h.home, "--run", runID, "--version", "v1.0.0",
-		"--daemon-idle-ms", strconv.Itoa(h.cfg.DaemonIdleMS),
 		"--daemon-grace-ms", strconv.Itoa(h.cfg.DaemonGraceMS),
 		"--daemon-total-cores", strconv.FormatFloat(h.cfg.DaemonCores, 'f', -1, 64),
 	}
@@ -485,7 +481,6 @@ func (h *harness) takeover() {
 	args := []string{
 		"hold", "--home", h.home, "--run", runID, "--version", ver,
 		"--cores", "0.2", "--run-ms", strconv.Itoa(600 + h.rng.Intn(800)),
-		"--daemon-idle-ms", strconv.Itoa(h.cfg.DaemonIdleMS),
 		"--daemon-grace-ms", strconv.Itoa(h.cfg.DaemonGraceMS),
 		"--daemon-total-cores", strconv.FormatFloat(h.cfg.DaemonCores, 'f', -1, 64),
 	}
@@ -853,6 +848,13 @@ func (h *harness) cleanup() {
 			h.t.Error(err)
 		}
 	}
+	if h.home != "" {
+		ctx, cancel := context.WithTimeout(context.Background(), h.processWait())
+		if err := client.Stop(ctx, client.Options{Home: h.home}); err != nil && !errors.Is(err, client.ErrNoDaemon) {
+			h.t.Errorf("stop chaos controller: %v", err)
+		}
+		cancel()
+	}
 	for _, daemon := range daemons {
 		if err := h.cleanupDaemon(daemon); err != nil {
 			h.t.Error(err)
@@ -971,19 +973,6 @@ func (h *harness) converge() {
 		h.ctl = nil
 	}
 	h.mu.Unlock()
-
-	idleWait := time.Duration(h.cfg.DaemonIdleMS)*time.Millisecond + time.Second
-	for attempt := 0; attempt < 4; attempt++ {
-		time.Sleep(idleWait)
-		ctx, cancel := context.WithTimeout(context.Background(), h.oracleTimeout())
-		_, err := client.Query(ctx, h.readOpts())
-		cancel()
-		if errors.Is(err, client.ErrNoDaemon) {
-			h.jr.log("daemon_idle", "", "daemon exited after quiescence")
-			return
-		}
-	}
-	h.t.Errorf("daemon did not idle-exit after convergence (seed=%d journal=%s)", h.cfg.Seed, h.jr.filename())
 }
 
 func (h *harness) readState() (wingwire.QueueState, error) {
@@ -1043,7 +1032,6 @@ func (h *harness) daemonSpawn() func(home, version string) error {
 			"--home", home,
 			"--version", v,
 			"--grace-ms", strconv.Itoa(h.cfg.DaemonGraceMS),
-			"--idle-ms", strconv.Itoa(h.cfg.DaemonIdleMS),
 			"--total-cores", strconv.FormatFloat(h.cfg.DaemonCores, 'f', -1, 64),
 		)
 		return h.startDaemonCommand(cmd)

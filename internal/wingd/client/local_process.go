@@ -84,14 +84,9 @@ func (l *processLifecycle) ensure(ctx context.Context, opts wingd.LocalStartOpti
 	if !status.Running {
 		return wingd.LocalStatus{}, errors.New("wingd/client: controller stopped during startup")
 	}
-	if opts.Stay && !status.Stay {
-		if err := l.control.owner.SetStay(ctx, true); err != nil {
-			return wingd.LocalStatus{}, err
-		}
-	}
 	status, err = l.Status(ctx)
-	if err == nil && (!status.Running || (opts.Stay && !status.Stay)) {
-		err = errors.New("wingd/client: controller stopped during startup or stay promotion")
+	if err == nil && !status.Running {
+		err = errors.New("wingd/client: controller stopped during startup")
 	}
 	return status, err
 }

@@ -83,9 +83,6 @@ func foregroundOptions(inv clisurface.Invocation, options wingd.LocalStartOption
 	if inv.Has("version") {
 		options.Version = inv.Value("version")
 	}
-	if inv.Has("stay") {
-		options.Stay = inv.Bool("stay")
-	}
 	options.Standalone = options.Standalone || inv.Has("standalone-reason")
 	return options, nil
 }

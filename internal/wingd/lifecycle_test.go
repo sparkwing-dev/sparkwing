@@ -6,15 +6,8 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/wingd"
-	"github.com/sparkwing-dev/sparkwing/internal/wingd/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
 )
-
-type lifecycleIdleProcSampler struct{}
-
-func (lifecycleIdleProcSampler) CPUUsage(int) (wingd.ProcUsage, bool) {
-	return wingd.ProcUsage{}, true
-}
 
 func holdsRun(qs wingwire.QueueState, runID string) bool {
 	for _, h := range qs.Holders {
@@ -23,50 +16,6 @@ func holdsRun(qs wingwire.QueueState, runID string) bool {
 		}
 	}
 	return false
-}
-
-func observeHolderFor(t *testing.T, q *client.Client, daemonDone <-chan error, runID string, duration time.Duration) {
-	t.Helper()
-	deadlineAt := time.Now().Add(duration)
-	observe := func() {
-		queryCtx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
-		defer cancel()
-		qs, err := q.QueueState(queryCtx)
-		if err != nil {
-			t.Fatalf("queue state while observing holder %q: %v", runID, err)
-		}
-		if !holdsRun(qs, runID) {
-			t.Fatalf("holder %q disappeared during idle observation", runID)
-		}
-	}
-	poll := time.NewTicker(20 * time.Millisecond)
-	defer poll.Stop()
-	observation := time.NewTimer(duration)
-	defer observation.Stop()
-	for {
-		observe()
-		if !time.Now().Before(deadlineAt) {
-			select {
-			case err := <-daemonDone:
-				t.Fatalf("daemon exited while holder %q was active: %v", runID, err)
-			default:
-			}
-			return
-		}
-		select {
-		case err := <-daemonDone:
-			t.Fatalf("daemon exited while holder %q was active: %v", runID, err)
-		case <-poll.C:
-		case <-observation.C:
-			observe()
-			select {
-			case err := <-daemonDone:
-				t.Fatalf("daemon exited while holder %q was active: %v", runID, err)
-			default:
-			}
-			return
-		}
-	}
 }
 
 func TestVersionSkewPreservesDaemonAndActiveLease(t *testing.T) {
@@ -107,50 +56,6 @@ func TestVersionSkewPreservesDaemonAndActiveLease(t *testing.T) {
 			default:
 			}
 		})
-	}
-}
-
-func TestIdleExit_NoWork(t *testing.T) {
-	t.Parallel()
-	if testing.Short() {
-		t.Skip("slow: 0.3s of real work; the fast class runs under -short")
-	}
-
-	home := shortHome(t)
-	td := startDaemon(t, wingd.Config{Home: home, IdleTimeout: 250 * time.Millisecond})
-	if err := td.waitExit(t, 3*time.Second); err != nil {
-		t.Fatalf("idle daemon should exit cleanly, got %v", err)
-	}
-}
-
-func TestIdleExit_WaitsForHolders(t *testing.T) {
-	t.Parallel()
-	if testing.Short() {
-		t.Skip("slow: 0.8s of real work; the fast class runs under -short")
-	}
-
-	home := shortHome(t)
-	const idleTimeout = 300 * time.Millisecond
-	td := startDaemon(t, wingd.Config{Home: home, IdleTimeout: idleTimeout})
-
-	a := ensure(t, home, "")
-	lease := mustAcquire(t, a, coreReq("a", 1))
-
-	started := time.Now()
-	observeHolderFor(t, a, td.done, "a", idleTimeout+100*time.Millisecond)
-	elapsed := time.Since(started)
-	if elapsed < idleTimeout {
-		t.Fatalf("held-lease observation took %s, want at least idle timeout %s", elapsed, idleTimeout)
-	}
-	if elapsed >= 550*time.Millisecond {
-		t.Fatalf("held-lease observation took %s, want under 550ms", elapsed)
-	}
-
-	if err := lease.Release(); err != nil {
-		t.Fatalf("release: %v", err)
-	}
-	if err := td.waitExit(t, 3*time.Second); err != nil {
-		t.Fatalf("daemon should idle out after release, got %v", err)
 	}
 }
 

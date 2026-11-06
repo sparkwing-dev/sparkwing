@@ -7,7 +7,7 @@ import (
 	"testing"
 )
 
-func TestLocalControlReportsOwnerAndStay(t *testing.T) {
+func TestLocalControlReportsOwner(t *testing.T) {
 	f := &runtimeControllerFixture{reconcile: func(context.Context) (LocalActivity, error) {
 		return LocalActivity{Runs: 1, QueuedTriggers: 2, HeldLeases: 3, DashboardConnections: 4}, nil
 	}}
@@ -21,23 +21,19 @@ func TestLocalControlReportsOwnerAndStay(t *testing.T) {
 			t.Error(err)
 		}
 	})
-	for _, stay := range []bool{true, false} {
-		w := policyHTTP(t, r.run.daemon, http.MethodPost, controllerHTTPPath+"stay", struct {
-			Stay bool `json:"stay"`
-		}{stay})
-		var status LocalStatus
-		if w.Code != http.StatusOK {
-			t.Fatalf("stay: HTTP %d: %s", w.Code, w.Body.String())
-		}
-		if err := json.Unmarshal(w.Body.Bytes(), &status); err != nil {
-			t.Fatal(err)
-		}
-		if !status.Running || status.Stay != stay || status.PID == 0 || status.Version != "v1" {
-			t.Fatalf("owner: %+v", status)
-		}
-		if status.Activity.Runs != 1 || status.Activity.QueuedTriggers != 2 || status.Activity.HeldLeases != 3 || status.Activity.DashboardConnections != 4 || !status.Activity.IdleSince.IsZero() {
-			t.Fatalf("activity: %+v", status.Activity)
-		}
+	w := policyHTTP(t, r.run.daemon, http.MethodGet, controllerHTTPPath+"status", nil)
+	var status LocalStatus
+	if w.Code != http.StatusOK {
+		t.Fatalf("status: HTTP %d: %s", w.Code, w.Body.String())
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &status); err != nil {
+		t.Fatal(err)
+	}
+	if !status.Running || status.PID == 0 || status.Version != "v1" {
+		t.Fatalf("owner: %+v", status)
+	}
+	if status.Activity != (LocalActivity{Runs: 1, QueuedTriggers: 2, HeldLeases: 3, DashboardConnections: 4}) {
+		t.Fatalf("activity: %+v", status.Activity)
 	}
 }
 
@@ -49,14 +45,12 @@ func TestLocalControlAdmissionOnlyRefuses(t *testing.T) {
 	}
 }
 
-func TestLocalControlGetCannotChangeStay(t *testing.T) {
+func TestLocalControlStayRouteRemoved(t *testing.T) {
 	d := handlerDaemon(t, 2)
-	called := false
-	d.localControl = func(*bool) LocalStatus { called = true; return LocalStatus{} }
-	w := policyHTTP(t, d, http.MethodGet, controllerHTTPPath+"stay", struct {
-		Stay bool `json:"stay"`
-	}{true})
-	if w.Code != http.StatusMethodNotAllowed || called {
-		t.Fatalf("GET stay changed lifecycle: HTTP %d, called=%v", w.Code, called)
+	for _, method := range []string{http.MethodGet, http.MethodPost} {
+		w := policyHTTP(t, d, method, controllerHTTPPath+"stay", nil)
+		if w.Code == http.StatusOK {
+			t.Fatalf("removed stay route accepted %s", method)
+		}
 	}
 }

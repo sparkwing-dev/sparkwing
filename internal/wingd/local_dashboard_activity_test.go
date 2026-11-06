@@ -10,13 +10,11 @@ import (
 	"os/signal"
 	"testing"
 	"testing/synctest"
-	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/limits"
 	"github.com/sparkwing-dev/sparkwing/internal/localhostwire"
 )
 
-func TestLocalRuntimeDashboardConnectionsHoldIdle(t *testing.T) {
+func TestLocalRuntimeDashboardConnectionActivity(t *testing.T) {
 	// safety: Go's process-wide signal goroutine must start outside a synctest bubble.
 	interrupt := make(chan os.Signal, 1)
 	signal.Notify(interrupt, os.Interrupt)
@@ -77,7 +75,7 @@ func TestLocalRuntimeDashboardConnectionsHoldIdle(t *testing.T) {
 				}
 				synctest.Wait()
 				status, err := r.Status(t.Context())
-				if err != nil || !status.Running || status.Activity.DashboardConnections != 1 || !status.Activity.IdleSince.IsZero() {
+				if err != nil || !status.Running || status.Activity.DashboardConnections != 1 {
 					t.Fatalf("dashboard connection missing from activity: %+v, %v", status, err)
 				}
 				for _, activity := range []LocalActivity{{Runs: 1}, {}} {
@@ -89,84 +87,15 @@ func TestLocalRuntimeDashboardConnectionsHoldIdle(t *testing.T) {
 						t.Fatalf("controller report replaced dashboard activity: %+v, %v", status, err)
 					}
 				}
-				<-time.NewTimer(2 * limits.LocalControllerIdleTimeout).C
-				status, err = r.Status(t.Context())
-				if err != nil || !status.Running {
-					t.Fatalf("controller exited with an open dashboard connection: %+v, %v", status, err)
-				}
 				if err := client.Close(); err != nil {
 					t.Fatal(err)
 				}
 				synctest.Wait()
 				status, err = r.Status(t.Context())
-				if err != nil || status.Activity.DashboardConnections != 0 || status.Activity.IdleSince.IsZero() {
+				if err != nil || status.Activity.DashboardConnections != 0 {
 					t.Fatalf("closed dashboard connection retained activity: %+v, %v", status, err)
-				}
-				<-time.NewTimer(limits.LocalDashboardSessionHold + 2*limits.LocalControllerIdleTimeout).C
-				synctest.Wait()
-				status, err = r.Status(t.Context())
-				if err != nil || status.Running || !f.closed.Load() {
-					t.Fatalf("idle controller did not join its shutdown: %+v, %v", status, err)
 				}
 			})
 		})
 	}
-}
-
-func TestLocalRuntimeRecentSignedInDashboardHoldsIdle(t *testing.T) {
-	// safety: Go's process-wide signal goroutine must start outside a synctest bubble.
-	interrupt := make(chan os.Signal, 1)
-	signal.Notify(interrupt, os.Interrupt)
-	signal.Stop(interrupt)
-	synctest.Test(t, func(t *testing.T) {
-		f := &runtimeControllerFixture{}
-		f.http = func() localhostwire.LocalHTTP {
-			return localhostwire.LocalHTTP{API: http.NotFoundHandler(), Dashboard: http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-				w.WriteHeader(http.StatusNoContent)
-			})}
-		}
-		r := newRuntimeFixture(t, f)
-		listener := &localHTTPListener{connections: make(chan net.Conn, 1), closed: make(chan struct{})}
-		r.listen = func(network, _ string) (net.Listener, error) {
-			if network == "tcp" {
-				return listener, nil
-			}
-			return &runtimeListener{closed: make(chan struct{})}, nil
-		}
-		lifecycle := NewLocalLifecycle(r, nil)
-		if _, err := lifecycle.StartDashboard(t.Context(), LocalStartOptions{Home: f.home, Version: "v1", DashboardAddress: "127.0.0.1:0"}); err != nil {
-			t.Fatal(err)
-		}
-		defer func() {
-			if err := lifecycle.Stop(context.Background()); err != nil {
-				t.Error(err)
-			}
-		}()
-		client, server := net.Pipe()
-		listener.connections <- server
-		if _, err := io.WriteString(client, "GET / HTTP/1.1\r\nHost: dashboard\r\nAuthorization: "+signedInBearer(t, r)+"\r\n\r\n"); err != nil {
-			t.Fatal(err)
-		}
-		response, err := http.ReadResponse(bufio.NewReader(client), nil)
-		if err != nil {
-			t.Fatal(err)
-		}
-		response.Body.Close()
-		if err := client.Close(); err != nil {
-			t.Fatal(err)
-		}
-		synctest.Wait()
-		<-time.NewTimer(limits.LocalDashboardSessionHold - time.Minute).C
-		synctest.Wait()
-		status, err := r.Status(t.Context())
-		if err != nil || !status.Running {
-			t.Fatalf("controller exited while a signed-in dashboard was recently active: %+v, %v", status, err)
-		}
-		<-time.NewTimer(time.Minute + 2*limits.LocalControllerIdleTimeout).C
-		synctest.Wait()
-		status, err = r.Status(t.Context())
-		if err != nil || status.Running || !f.closed.Load() {
-			t.Fatalf("an abandoned dashboard pinned the controller past the hold: %+v, %v", status, err)
-		}
-	})
 }

@@ -31,9 +31,9 @@ func TestWingdRunForwardsForegroundOwnership(t *testing.T) {
 	failure := errors.New("runtime stopped")
 	key := struct{}{}
 	ctx := context.WithValue(t.Context(), key, "caller")
-	err := runWingdRunCommandArgs(ctx, []string{"--home", home, "--stay", "--version", "2.1.0", "-o", "json"}, &bytes.Buffer{}, defaults,
+	err := runWingdRunCommandArgs(ctx, []string{"--home", home, "--version", "2.1.0", "-o", "json"}, &bytes.Buffer{}, defaults,
 		func(_ context.Context, resolved wingd.LocalStartOptions) (wingd.LocalRuntime, error) {
-			if resolved.Home != home || resolved.Version != "2.1.0" || !resolved.Stay {
+			if resolved.Home != home || resolved.Version != "2.1.0" {
 				t.Fatalf("resolver received stale start options: %+v", resolved)
 			}
 			return foregroundRuntimeFake{run: func(runCtx context.Context, options wingd.LocalStartOptions) error {
@@ -45,7 +45,7 @@ func TestWingdRunForwardsForegroundOwnership(t *testing.T) {
 			}}, nil
 		})
 	want := defaults
-	want.Home, want.Stay, want.Version = home, true, "2.1.0"
+	want.Home, want.Version = home, "2.1.0"
 	if !errors.Is(err, failure) || !reflect.DeepEqual(got, want) {
 		t.Fatalf("options = %+v, err = %v", got, err)
 	}
@@ -57,7 +57,7 @@ func TestWingdRunWaitsForCancellation(t *testing.T) {
 	entered, done := make(chan struct{}), make(chan error, 1)
 	options := wingd.LocalStartOptions{Home: t.TempDir()}
 	go func() {
-		done <- runWingdRunCommandArgs(ctx, []string{"--stay"}, &bytes.Buffer{}, options,
+		done <- runWingdRunCommandArgs(ctx, nil, &bytes.Buffer{}, options,
 			func(context.Context, wingd.LocalStartOptions) (wingd.LocalRuntime, error) {
 				return foregroundRuntimeFake{run: func(runCtx context.Context, _ wingd.LocalStartOptions) error {
 					close(entered)
@@ -80,7 +80,7 @@ func TestWingdRunWaitsForCancellation(t *testing.T) {
 
 func TestWingdRunValidatesBeforeRuntime(t *testing.T) {
 	for _, args := range [][]string{
-		{"--unknown"}, {"extra"}, {"--home="}, {"--standalone-reason="}, {"--version="}, {"--output", "yaml"},
+		{"--unknown"}, {"--stay"}, {"--stay=false"}, {"extra"}, {"--home="}, {"--standalone-reason="}, {"--version="}, {"--output", "yaml"},
 	} {
 		t.Run(strings.Join(args, " "), func(t *testing.T) {
 			called := false
@@ -134,7 +134,7 @@ func TestWingdRunRejectsMissingRuntimeAndKeepsDefaults(t *testing.T) {
 	defaults := wingd.LocalStartOptions{Home: t.TempDir(), Version: "2.0.0", Executable: filepath.Join(t.TempDir(), "sparkwing")}
 	for _, absent := range []bool{false, true} {
 		var got wingd.LocalStartOptions
-		err := runWingdRunCommandArgs(t.Context(), []string{"--stay=false", "--standalone-reason", "CI"}, &bytes.Buffer{}, defaults, func(context.Context, wingd.LocalStartOptions) (wingd.LocalRuntime, error) {
+		err := runWingdRunCommandArgs(t.Context(), []string{"--standalone-reason", "CI"}, &bytes.Buffer{}, defaults, func(context.Context, wingd.LocalStartOptions) (wingd.LocalRuntime, error) {
 			if absent {
 				return nil, nil
 			}

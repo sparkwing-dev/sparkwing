@@ -79,7 +79,7 @@ func (r *localRuntime) Run(ctx context.Context, opts LocalStartOptions) (err err
 		return errors.New("wingd: local controller version is required")
 	}
 	cfg := r.cfg.Admission
-	cfg.Version, cfg.Stay = opts.Version, opts.Stay
+	cfg.Version = opts.Version
 	d, err := New(cfg)
 	if err != nil {
 		return err
@@ -138,9 +138,8 @@ func (r *localRuntime) Run(ctx context.Context, opts LocalStartOptions) (err err
 	}); ok {
 		admission.SetAdmissionCancellation(d.cancelCommittedRunAdmission)
 	}
-	d.localControl = func(stay *bool) LocalStatus { return r.control(session, stay) }
+	d.localControl = func() LocalStatus { return r.control(session) }
 	d.localDashboard = r.EnsureDashboard
-	d.dashboardSeen = session.logins.lastSignedInRequest
 	dashboard, restore := dashboardMemory{Address: opts.DashboardAddress, ReadOnly: opts.DashboardReadOnly}, false
 	if dashboard.Address == "" && !opts.Standalone {
 		remembered, ok, err := r.rememberedDashboard()
@@ -245,7 +244,7 @@ func (r *localRuntime) serve(ctx context.Context, session *localRuntimeSession, 
 		}
 		dashboardListener, dashboardAddress, dashboardReadOnly = ln, address, requestedReadOnly
 		if err := r.rememberDashboard(dashboardMemory{Address: address, ReadOnly: requestedReadOnly}); err != nil {
-			d.cfg.logf("the dashboard will not return after an idle exit: %v", err)
+			d.cfg.logf("the dashboard will not return after a controller restart: %v", err)
 		}
 		dashboardReady = make(chan struct{})
 		logins.serving("http://" + ln.Addr().String())
@@ -436,43 +435,13 @@ func (r *localRuntime) statusLocked(session *localRuntimeSession) LocalStatus {
 	defer d.mu.Unlock()
 	activity := d.localActivity
 	activity.DashboardConnections += d.dashboardConns
-	if !hasLocalActivity(activity) {
-		activity.IdleSince = d.lastActivity
-	}
-	return LocalStatus{Running: session.ready && !d.shuttingDown && !d.draining, PID: os.Getpid(), Version: d.cfg.Version, Stay: d.stay, Activity: activity, DashboardURL: session.logins.servingOrigin()}
+	return LocalStatus{Running: session.ready && !d.shuttingDown && !d.draining, PID: os.Getpid(), Version: d.cfg.Version, Activity: activity, DashboardURL: session.logins.servingOrigin()}
 }
 
-func (r *localRuntime) control(session *localRuntimeSession, stay *bool) LocalStatus {
+func (r *localRuntime) control(session *localRuntimeSession) LocalStatus {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	status := r.statusLocked(session)
-	if stay != nil && status.Running {
-		if err := session.daemon.setStay(*stay); err != nil {
-			return r.statusLocked(session)
-		}
-		status = r.statusLocked(session)
-	}
-	return status
-}
-
-func (r *localRuntime) SetStay(ctx context.Context, stay bool) error {
-	if err := ctx.Err(); err != nil {
-		return err
-	}
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	if r.run == nil {
-		return errors.New("wingd: local controller is not running")
-	}
-	select {
-	case <-r.run.done:
-		return errors.New("wingd: local controller is not running")
-	default:
-	}
-	if !r.run.ready {
-		return errors.New("wingd: local controller is not ready")
-	}
-	return r.run.daemon.setStay(stay)
+	return r.statusLocked(session)
 }
 
 func (r *localRuntime) Drain(ctx context.Context) error {

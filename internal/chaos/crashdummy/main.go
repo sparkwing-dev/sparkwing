@@ -54,7 +54,6 @@ func runDaemon(args []string) {
 	home := fs.String("home", "", "")
 	version := fs.String("version", "v1.0.0", "")
 	_ = fs.Int("grace-ms", 2000, "oracle settle interval only")
-	idleMS := fs.Int("idle-ms", 4000, "")
 	totalCores := fs.Float64("total-cores", 8, "")
 	totalMemMB := fs.Int("total-mem-mb", 8192, "")
 	_ = fs.Parse(args)
@@ -67,7 +66,6 @@ func runDaemon(args []string) {
 	d, err := wingd.New(wingd.Config{
 		Home:             boundHome,
 		Version:          *version,
-		IdleTimeout:      time.Duration(*idleMS) * time.Millisecond,
 		HeadroomFraction: -1,
 		Sampler:          fixedSampler{cores: *totalCores, mem: uint64(*totalMemMB) << 20},
 		Runs:             finalizeStore(finalizeLogger(boundHome)),
@@ -136,7 +134,6 @@ type holdFlags struct {
 	burn        bool
 	dirty       bool
 	ignoreTerm  bool
-	daemonIdle  int
 	daemonCores float64
 	daemonMemMB int
 }
@@ -155,7 +152,6 @@ func runHold(args []string) {
 	fs.BoolVar(&hf.dirty, "dirty", false, "")
 	fs.BoolVar(&hf.ignoreTerm, "ignore-term", false, "")
 	_ = fs.Int("daemon-grace-ms", 2000, "oracle settle interval only")
-	fs.IntVar(&hf.daemonIdle, "daemon-idle-ms", 4000, "")
 	fs.Float64Var(&hf.daemonCores, "daemon-total-cores", 8, "")
 	fs.IntVar(&hf.daemonMemMB, "daemon-total-mem-mb", 8192, "")
 	_ = fs.Parse(args)
@@ -292,7 +288,6 @@ func (h *holder) daemonSpawner() func(home, version string) error {
 		cmd := procenv.ControlCommand(os.Environ(), self, "daemon",
 			"--home", home,
 			"--version", v,
-			"--idle-ms", strconv.Itoa(h.hf.daemonIdle),
 			"--total-cores", strconv.FormatFloat(h.hf.daemonCores, 'f', -1, 64),
 			"--total-mem-mb", strconv.Itoa(h.hf.daemonMemMB),
 		)

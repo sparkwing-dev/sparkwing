@@ -41,7 +41,7 @@ func TestProductionRunnerDoesNotAdvertiseSaturatedNativeJobCapacity(t *testing.T
 			if err != nil {
 				t.Fatal(err)
 			}
-			daemon, err := wingd.New(wingd.Config{Home: home, Version: "v1.2.3", Budget: budget, Stay: true})
+			daemon, err := wingd.New(wingd.Config{Home: home, Version: "v1.2.3", Budget: budget})
 			if err != nil {
 				t.Fatal(err)
 			}

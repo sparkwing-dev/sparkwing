@@ -52,9 +52,9 @@ func TestLocalProcessLifecycleStartsDetachedAndReusesOwner(t *testing.T) {
 		return owner.status, nil
 	})
 	ctx, cancel := context.WithCancel(t.Context())
-	opts := wingd.LocalStartOptions{Home: home, Executable: "/sparkwing", Version: "v2", Stay: true, DashboardAddress: "127.0.0.1:4343"}
+	opts := wingd.LocalStartOptions{Home: home, Executable: "/sparkwing", Version: "v2", DashboardAddress: "127.0.0.1:4343"}
 	status, err := lifecycle.StartDashboard(ctx, opts)
-	if err != nil || status.PID != 72 || !status.Stay || local.starts != 0 || starts != 1 || owner.dashboards != 1 {
+	if err != nil || status.PID != 72 || local.starts != 0 || starts != 1 || owner.dashboards != 1 {
 		t.Fatalf("startup: %+v, %v, local=%d detached=%d dashboard=%d", status, err, local.starts, starts, owner.dashboards)
 	}
 	cancel()
@@ -62,13 +62,13 @@ func TestLocalProcessLifecycleStartsDetachedAndReusesOwner(t *testing.T) {
 	for range 20 {
 		callers.Go(func() {
 			status, err := lifecycle.EnsureStarted(t.Context(), opts)
-			if err != nil || status.PID != 72 || !status.Stay || status.Version != "v2" {
+			if err != nil || status.PID != 72 || status.Version != "v2" {
 				t.Errorf("reuse: %+v, %v", status, err)
 			}
 		})
 	}
 	callers.Wait()
-	if starts != 1 || owner.stays != 1 || local.starts != 0 || owner.drains != 0 {
+	if starts != 1 || local.starts != 0 || owner.drains != 0 {
 		t.Fatalf("request cancellation or reuse changed ownership: starts=%d owner=%+v", starts, owner)
 	}
 	if err := lifecycle.Stop(t.Context()); err != nil || owner.drains != 1 {
@@ -77,10 +77,10 @@ func TestLocalProcessLifecycleStartsDetachedAndReusesOwner(t *testing.T) {
 }
 
 func FuzzLocalProcessLifecycleKeepsOwnership(f *testing.F) {
-	f.Add(false, true, false, uint8(0))
-	f.Add(true, false, true, uint8(1))
-	f.Add(false, true, true, uint8(2))
-	f.Fuzz(func(t *testing.T, present, stay, dashboard bool, failure uint8) {
+	f.Add(false, false, uint8(0))
+	f.Add(true, true, uint8(1))
+	f.Add(false, true, uint8(2))
+	f.Fuzz(func(t *testing.T, present, dashboard bool, failure uint8) {
 		home := t.TempDir()
 		local := &localRuntimeFixture{failure: errors.New("CLI opened the store")}
 		owner := &lifecycleOwner{err: ErrNoDaemon}
@@ -104,7 +104,7 @@ func FuzzLocalProcessLifecycleKeepsOwnership(f *testing.F) {
 		})
 		ctx, cancel := context.WithCancel(t.Context())
 		defer cancel()
-		opts := wingd.LocalStartOptions{Home: home, Version: "v2", Stay: stay}
+		opts := wingd.LocalStartOptions{Home: home, Version: "v2"}
 		if dashboard {
 			opts.DashboardAddress = "127.0.0.1:4343"
 		}
@@ -115,13 +115,13 @@ func FuzzLocalProcessLifecycleKeepsOwnership(f *testing.F) {
 		}
 		status, err := lifecycle.StartDashboard(ctx, opts)
 		refused := failure%4 >= 2 || (!present && failure%4 == 1)
-		if (err != nil) != refused || (!refused && (!status.Running || (stay && !status.Stay))) {
+		if (err != nil) != refused || (!refused && !status.Running) {
 			t.Fatalf("unexpected startup: status=%+v error=%v refused=%t", status, err, refused)
 		}
 		if local.starts != 0 || starts > 1 || owner.drains != 0 {
 			t.Fatal("request changed process ownership")
 		}
-		if refused && (owner.stays != 0 || owner.dashboards != 0) {
+		if refused && owner.dashboards != 0 {
 			t.Fatal("refused request mutated a controller")
 		}
 		if present && starts != 0 {

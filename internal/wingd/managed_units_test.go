@@ -173,7 +173,7 @@ func TestManagedUnitsRefuseWindowsAndOtherHomes(t *testing.T) {
 				t.Fatalf("cancelled refresh = %v", err)
 			}
 			if goos == "windows" {
-				if err := manager.InstallController(t.Context(), LocalStartOptions{Home: host.SparkwingHome, Executable: filepath.Join(root, "sparkwing"), Version: "v1"}); err == nil || !strings.Contains(err.Error(), "--stay") {
+				if err := manager.InstallController(t.Context(), LocalStartOptions{Home: host.SparkwingHome, Executable: filepath.Join(root, "sparkwing"), Version: "v1"}); err == nil || !strings.Contains(err.Error(), "dashboard start") {
 					t.Fatalf("Windows install = %v", err)
 				}
 				if units, err := manager.Inspect(t.Context()); err != nil || len(units) != 0 {

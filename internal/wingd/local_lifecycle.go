@@ -106,11 +106,6 @@ func (l *localLifecycle) reuse(ctx context.Context, opts LocalStartOptions, stat
 	if opts.Standalone {
 		return LocalStatus{}, errors.New("wingd: standalone cannot open a store owned by a running controller")
 	}
-	if opts.Stay && !status.Stay {
-		if err := l.runtime.SetStay(ctx, true); err != nil {
-			return LocalStatus{}, err
-		}
-	}
 	status, err := l.Status(ctx)
 	if err == nil && !status.Running {
 		err = errors.New("wingd: controller stopped during startup")
@@ -207,7 +202,7 @@ func (l *localLifecycle) InstallController(ctx context.Context, opts LocalStartO
 	if l.home != "" && home != l.home || !filepath.IsAbs(opts.Executable) || opts.Version == "" || opts.Standalone || opts.DashboardAddress != "" {
 		return LocalStatus{}, errors.New("wingd: service installation requires the bound home, executable and version")
 	}
-	l.home, opts.Home, opts.Stay = home, home, true
+	l.home, opts.Home = home, home
 	previous, err := l.runtime.Status(ctx)
 	if err != nil {
 		return LocalStatus{}, err
@@ -226,8 +221,8 @@ func (l *localLifecycle) InstallController(ctx context.Context, opts LocalStartO
 	if err != nil {
 		return LocalStatus{}, fmt.Errorf("wingd: verify installed controller: %w", err)
 	}
-	if !status.Running || !status.Stay || !status.Installed || status.Version != opts.Version || status.PID <= 0 || status.PID != ready.PID || status.PID == previous.PID {
-		return LocalStatus{}, errors.New("wingd: service installed but a new ready controller with the installed version and stay mode was not verified")
+	if !status.Running || !status.Installed || status.Version != opts.Version || status.PID <= 0 || status.PID != ready.PID || status.PID == previous.PID {
+		return LocalStatus{}, errors.New("wingd: service installed but a new ready controller with the installed version was not verified")
 	}
 	return status, nil
 }
@@ -288,7 +283,7 @@ func validUnitArguments(unit ManagedUnit) bool {
 	}
 	switch unit.Kind {
 	case ManagedController:
-		return slices.Equal(unit.Arguments, []string{"wingd", "run", "--stay", "--home", unit.Home})
+		return slices.Equal(unit.Arguments, []string{"wingd", "run", "--home", unit.Home})
 	case ManagedSchedule:
 		return slices.Equal(unit.Arguments, []string{"__tick", "--home", unit.Home})
 	default:

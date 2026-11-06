@@ -7,10 +7,7 @@ import (
 	"sync"
 	"testing"
 	"testing/synctest"
-	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/admission"
-	"github.com/sparkwing-dev/sparkwing/internal/limits"
 	"github.com/sparkwing-dev/sparkwing/internal/localhostwire"
 )
 
@@ -35,54 +32,6 @@ func TestLocalSubject(t *testing.T) {
 		if _, err := LocalSubject(peer, owner); err == nil {
 			t.Fatalf("accepted unverified peer %+v", peer)
 		}
-	}
-}
-
-func TestLocalDaemonActivityAndProbeIdle(t *testing.T) {
-	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
-	ledger, err := admission.New(admission.Config{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	d := &Daemon{cfg: Config{Now: func() time.Time { return now }}, ledger: ledger, lastActivity: now, conns: map[*conn]struct{}{{}: {}}}
-	for _, hold := range []LocalActivity{{Runs: 1}, {QueuedTriggers: 1}, {HeldLeases: 1}, {DashboardConnections: 1}} {
-		if err := d.setLocalActivity(hold); err != nil {
-			t.Fatal(err)
-		}
-		now = now.Add(2 * limits.LocalControllerIdleTimeout)
-		if d.idleElapsed() != 0 {
-			t.Fatalf("daemon idled with %+v", hold)
-		}
-		if err := d.setLocalActivity(LocalActivity{}); err != nil {
-			t.Fatal(err)
-		}
-	}
-	d.setStay(true)
-	now = now.Add(limits.LocalControllerIdleTimeout)
-	if d.idleElapsed() != 0 {
-		t.Fatal("stay did not pin controller")
-	}
-	d.setStay(false)
-	now = now.Add(limits.LocalControllerIdleTimeout)
-	for range 10 {
-		// safety: status reads and repeated zero-activity samples must not extend idle time.
-		if err := d.setLocalActivity(LocalActivity{}); err != nil {
-			t.Fatal(err)
-		}
-		if d.idleElapsed() != limits.LocalControllerIdleTimeout {
-			t.Fatal("health observation extended idle deadline")
-		}
-	}
-	if err := d.setLocalActivity(LocalActivity{Runs: -1}); err == nil {
-		t.Fatal("negative count was accepted")
-	}
-	now = now.Add(-time.Nanosecond)
-	if d.beginIdleShutdown(limits.LocalControllerIdleTimeout) {
-		t.Fatal("controller exited before its idle boundary")
-	}
-	now = now.Add(time.Nanosecond)
-	if !d.beginIdleShutdown(limits.LocalControllerIdleTimeout) {
-		t.Fatal("controller did not exit at its idle boundary")
 	}
 }
 
@@ -118,7 +67,7 @@ func (r *lifecycleRuntime) Run(ctx context.Context, opts LocalStartOptions) erro
 		return ctx.Err()
 	}
 	r.mu.Lock()
-	r.status = LocalStatus{Running: true, Stay: opts.Stay, Version: opts.Version, PID: 17}
+	r.status = LocalStatus{Running: true, Version: opts.Version, PID: 17}
 	r.mu.Unlock()
 	close(r.ready)
 	select {
@@ -144,13 +93,6 @@ func (r *lifecycleRuntime) Status(context.Context) (LocalStatus, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	return r.status, nil
-}
-
-func (r *lifecycleRuntime) SetStay(_ context.Context, stay bool) error {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	r.status.Stay = stay
-	return nil
 }
 
 func (r *lifecycleRuntime) EnsureDashboard(context.Context, string, bool) error { return nil }
@@ -190,10 +132,9 @@ func TestLocalLifecycleConcurrentStartAndDrain(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	opts.Stay = true
 	status, err := lifecycle.StartDashboard(ctx, opts)
-	if err != nil || !status.Stay {
-		t.Fatalf("stay promotion: %+v, %v", status, err)
+	if err != nil || !status.Running {
+		t.Fatalf("dashboard startup: %+v, %v", status, err)
 	}
 	opts.Standalone = true
 	if _, err := lifecycle.EnsureStarted(ctx, opts); err == nil {
@@ -351,10 +292,4 @@ func TestLocalLifecycleJoinsFailedStartup(t *testing.T) {
 			}
 		}
 	})
-}
-
-func (d *Daemon) idleElapsed() time.Duration {
-	d.mu.Lock()
-	defer d.mu.Unlock()
-	return d.idleElapsedLocked()
 }

@@ -22,7 +22,7 @@ func TestBurstHereOwnerLeavesSaturatedJobsUnclaimed(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	daemon, err := wingd.New(wingd.Config{Home: home, Version: "v1.0.0", Budget: budget, Stay: true})
+	daemon, err := wingd.New(wingd.Config{Home: home, Version: "v1.0.0", Budget: budget})
 	if err != nil {
 		t.Fatal(err)
 	}

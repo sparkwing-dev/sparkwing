@@ -89,7 +89,7 @@ func validateDashboardInvocation(inv clisurface.Invocation, goos string) error {
 		return err
 	case "sparkwing dashboard install", "sparkwing dashboard uninstall":
 		if goos != "linux" && goos != "darwin" {
-			return &apierr.Error{Code: apierr.BadRequest, Message: "dashboard login services are supported on Linux and macOS", Hint: "use sparkwing dashboard start --stay"}
+			return &apierr.Error{Code: apierr.BadRequest, Message: "dashboard login services are supported on Linux and macOS", Hint: "use sparkwing dashboard start"}
 		}
 		if inv.Bool("force") {
 			return dashboardUnavailable("managed-unit replacement policy for --force")
@@ -131,7 +131,7 @@ func executeDashboard(ctx context.Context, inv clisurface.Invocation, services d
 	switch action {
 	case "start":
 		options := services.options
-		options.Stay, options.DashboardAddress = inv.Bool("stay"), dashboardAddress(inv)
+		options.DashboardAddress = dashboardAddress(inv)
 		options.DashboardReadOnly = inv.Bool("read-only")
 		status, err = services.lifecycle.StartDashboard(ctx, options)
 	case "stop":
@@ -147,7 +147,6 @@ func executeDashboard(ctx context.Context, inv clisurface.Invocation, services d
 		}
 		if action == "install" {
 			options := services.options
-			options.Stay = true
 			status, err = services.lifecycle.InstallController(ctx, options)
 		} else {
 			err = services.units.UninstallController(ctx)

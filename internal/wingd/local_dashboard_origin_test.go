@@ -28,7 +28,7 @@ func TestLocalDashboardRefusesForeignHostsAndOrigins(t *testing.T) {
 		return ln, err
 	}
 	lifecycle := NewLocalLifecycle(r, nil)
-	opts := LocalStartOptions{Home: f.home, Version: "v1", Stay: true}
+	opts := LocalStartOptions{Home: f.home, Version: "v1"}
 	if _, err := lifecycle.EnsureStarted(t.Context(), opts); err != nil {
 		t.Fatal(err)
 	}
@@ -42,6 +42,9 @@ func TestLocalDashboardRefusesForeignHostsAndOrigins(t *testing.T) {
 		t.Fatal(err)
 	}
 	addr := <-bound
+	// safety: pooled connections can race the controller's bounded shutdown.
+	browser := &http.Client{Transport: &http.Transport{DisableKeepAlives: true}}
+	t.Cleanup(browser.CloseIdleConnections)
 	for _, tc := range []struct {
 		host, origin string
 		want         int
@@ -60,7 +63,7 @@ func TestLocalDashboardRefusesForeignHostsAndOrigins(t *testing.T) {
 		if tc.origin != "" {
 			req.Header.Set("Origin", tc.origin)
 		}
-		resp, err := http.DefaultClient.Do(req)
+		resp, err := browser.Do(req)
 		if err != nil {
 			t.Fatal(err)
 		}

@@ -18,11 +18,10 @@ import (
 )
 
 type dashboardActivity struct {
-	IdleSince            time.Time `json:"idle_since"`
-	Runs                 int       `json:"runs"`
-	QueuedTriggers       int       `json:"queued_triggers"`
-	HeldLeases           int       `json:"held_leases"`
-	DashboardConnections int       `json:"dashboard_connections"`
+	Runs                 int `json:"runs"`
+	QueuedTriggers       int `json:"queued_triggers"`
+	HeldLeases           int `json:"held_leases"`
+	DashboardConnections int `json:"dashboard_connections"`
 }
 
 type dashboardResult struct {
@@ -33,7 +32,6 @@ type dashboardResult struct {
 	State     string            `json:"state"`
 	PID       int               `json:"pid,omitempty"`
 	Version   string            `json:"version,omitempty"`
-	Stay      bool              `json:"stay"`
 	Installed bool              `json:"installed"`
 	Dashboard string            `json:"dashboard"`
 	URL       string            `json:"url,omitempty"`
@@ -51,8 +49,8 @@ func localStatusResult(service, action string, status wingd.LocalStatus) dashboa
 	}
 	return dashboardResult{
 		Kind: "service", Tool: "sparkwing", Service: service, Action: action, State: state, Dashboard: dashboard,
-		PID: status.PID, Version: status.Version, Stay: status.Stay, Installed: status.Installed, URL: status.DashboardURL,
-		Activity: dashboardActivity{IdleSince: status.Activity.IdleSince, Runs: status.Activity.Runs, QueuedTriggers: status.Activity.QueuedTriggers, HeldLeases: status.Activity.HeldLeases, DashboardConnections: status.Activity.DashboardConnections},
+		PID: status.PID, Version: status.Version, Installed: status.Installed, URL: status.DashboardURL,
+		Activity: dashboardActivity{Runs: status.Activity.Runs, QueuedTriggers: status.Activity.QueuedTriggers, HeldLeases: status.Activity.HeldLeases, DashboardConnections: status.Activity.DashboardConnections},
 	}
 }
 
@@ -119,7 +117,7 @@ func renderDashboard(out io.Writer, result dashboardResult, mode string) error {
 		_, err := fmt.Fprintln(out, result.State)
 		return err
 	default:
-		_, err := fmt.Fprintf(out, "Local controller: %s\npid: %d\nversion: %s\nstay: %t\ninstalled: %t\n", result.State, result.PID, result.Version, result.Stay, result.Installed)
+		_, err := fmt.Fprintf(out, "Local controller: %s\npid: %d\nversion: %s\ninstalled: %t\n", result.State, result.PID, result.Version, result.Installed)
 		if err == nil {
 			if result.Dashboard == "serving" {
 				_, err = fmt.Fprintf(out, "dashboard: serving at %s (sign in with sparkwing dashboard open)\n", result.URL)

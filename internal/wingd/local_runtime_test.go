@@ -14,7 +14,6 @@ import (
 	"testing/synctest"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/limits"
 	"github.com/sparkwing-dev/sparkwing/internal/localhostwire"
 )
 
@@ -144,8 +143,8 @@ func TestLocalRuntimeOwnsStoreUntilAllServicesJoin(t *testing.T) {
 	}
 	r := newRuntimeFixture(t, f)
 	lifecycle := NewLocalLifecycle(r, nil)
-	status, err := lifecycle.EnsureStarted(t.Context(), LocalStartOptions{Home: f.home, Version: "v1", Stay: true, DashboardAddress: "127.0.0.1:0"})
-	if err != nil || !status.Running || !status.Stay || status.PID == 0 {
+	status, err := lifecycle.EnsureStarted(t.Context(), LocalStartOptions{Home: f.home, Version: "v1", DashboardAddress: "127.0.0.1:0"})
+	if err != nil || !status.Running || status.PID == 0 {
 		t.Fatalf("start: %+v, %v", status, err)
 	}
 	if err := lifecycle.Stop(t.Context()); err != nil {
@@ -170,7 +169,7 @@ func TestLocalRuntimeFixtureCleanupJoinsConsumers(t *testing.T) {
 	}
 	t.Run("controller", func(t *testing.T) {
 		r := newRuntimeFixture(t, f)
-		if _, err := NewLocalLifecycle(r, nil).EnsureStarted(t.Context(), LocalStartOptions{Home: f.home, Version: "v1", Stay: true}); err != nil {
+		if _, err := NewLocalLifecycle(r, nil).EnsureStarted(t.Context(), LocalStartOptions{Home: f.home, Version: "v1"}); err != nil {
 			t.Fatal(err)
 		}
 	})
@@ -285,7 +284,7 @@ func TestLocalRuntimeStartupFailuresReleaseOwnership(t *testing.T) {
 			case "consumer":
 				f.background = func(context.Context, func(LocalActivity) error) error { return failure }
 			}
-			err := r.Run(t.Context(), LocalStartOptions{Home: f.home, Version: "v1", Stay: true, DashboardAddress: "127.0.0.1:0"})
+			err := r.Run(t.Context(), LocalStartOptions{Home: f.home, Version: "v1", DashboardAddress: "127.0.0.1:0"})
 			if !errors.Is(err, failure) {
 				t.Fatalf("failure: %v", err)
 			}
@@ -310,82 +309,42 @@ func TestLocalRuntimeWrongHomeNeverOpensIt(t *testing.T) {
 	}
 }
 
-func TestLocalRuntimeIdleHoldsAndProbes(t *testing.T) {
-	for _, initial := range []LocalActivity{{Runs: 1}, {QueuedTriggers: 1}, {HeldLeases: 1}, {DashboardConnections: 1}} {
-		t.Run(fmt.Sprint(initial), func(t *testing.T) {
-			synctest.Test(t, func(t *testing.T) {
-				update := make(chan LocalActivity)
-				updated := make(chan struct{})
-				f := &runtimeControllerFixture{
-					reconcile: func(context.Context) (LocalActivity, error) { return initial, nil },
-					background: func(ctx context.Context, report func(LocalActivity) error) error {
-						for {
-							select {
-							case value := <-update:
-								if err := report(value); err != nil {
-									return err
-								}
-								updated <- struct{}{}
-							case <-ctx.Done():
-								return nil
-							}
-						}
-					},
-				}
-				r := newRuntimeFixture(t, f)
-				ctx, cancel := context.WithCancel(t.Context())
-				defer cancel()
-				done := make(chan error, 1)
-				go func() { done <- r.Run(ctx, LocalStartOptions{Home: f.home, Version: "v1"}) }()
-				if _, err := r.AwaitReady(ctx); err != nil {
-					t.Fatal(err)
-				}
-				if r.run.daemon.idleElapsed() != 0 {
-					t.Fatal("activity did not hold controller")
-				}
-				update <- LocalActivity{}
-				<-updated
-				status, err := r.Status(ctx)
-				if err != nil {
-					t.Fatal(err)
-				}
-				idleSince := status.Activity.IdleSince
-				probed := make(chan struct{})
-				stopProbe := make(chan struct{})
-				defer func() { close(stopProbe); <-probed }()
-				go func() {
-					defer close(probed)
-					ticker := time.NewTicker(limits.LocalControllerIdleTimeout / 8)
-					defer ticker.Stop()
-					for {
-						select {
-						case <-ticker.C:
-							status, err := r.Status(ctx)
-							if err != nil {
-								t.Error(err)
-								return
-							}
-							if status.Running && status.Activity.IdleSince != idleSince {
-								t.Error("probe reset idle deadline")
-								return
-							}
-						case <-stopProbe:
-							return
-						}
-					}
-				}()
-				if err := <-done; err != nil {
-					t.Fatal(err)
-				}
-				if !f.closed.Load() {
-					t.Fatal("idle exit leaked store")
-				}
-				if time.Since(idleSince) != limits.LocalControllerIdleTimeout {
-					t.Fatalf("idle exit after %s", time.Since(idleSince))
-				}
-			})
-		})
-	}
+func TestLocalRuntimeRemainsIdleUntilStopped(t *testing.T) {
+	// safety: Go's process-wide signal goroutine must start outside a synctest bubble.
+	interrupt := make(chan os.Signal, 1)
+	signal.Notify(interrupt, os.Interrupt)
+	signal.Stop(interrupt)
+	synctest.Test(t, func(t *testing.T) {
+		f := &runtimeControllerFixture{}
+		r := newRuntimeFixture(t, f)
+		lifecycle := NewLocalLifecycle(r, nil)
+		if _, err := lifecycle.EnsureStarted(t.Context(), LocalStartOptions{Home: f.home, Version: "v1"}); err != nil {
+			t.Fatal(err)
+		}
+		defer func() {
+			if err := lifecycle.Stop(context.Background()); err != nil {
+				t.Error(err)
+			}
+		}()
+		// bug: an idle controller must remain available when the next client arrives.
+		time.Sleep(time.Hour)
+		synctest.Wait()
+		status, err := lifecycle.Status(t.Context())
+		if err != nil || !status.Running || status.Activity != (LocalActivity{}) || f.closed.Load() {
+			t.Fatalf("idle controller stopped: %+v, %v, closed=%t", status, err, f.closed.Load())
+		}
+		again, err := lifecycle.EnsureStarted(t.Context(), LocalStartOptions{Home: f.home, Version: "v1"})
+		if err != nil || !again.Running || again.PID != status.PID {
+			t.Fatalf("next client: %+v, %v", again, err)
+		}
+		if err := lifecycle.Stop(t.Context()); err != nil {
+			t.Fatal(err)
+		}
+		status, err = lifecycle.Status(t.Context())
+		if err != nil || status.Running || !f.closed.Load() {
+			t.Fatalf("explicit stop: %+v, %v, closed=%t", status, err, f.closed.Load())
+		}
+	})
 }
 
 func TestLocalRuntimeJoinsAPIAndPreservesShutdownFailure(t *testing.T) {
@@ -403,7 +362,7 @@ func TestLocalRuntimeJoinsAPIAndPreservesShutdownFailure(t *testing.T) {
 			return listener, nil
 		}
 		lifecycle := NewLocalLifecycle(r, nil)
-		if _, err := lifecycle.EnsureStarted(t.Context(), LocalStartOptions{Home: f.home, Version: "v1", Stay: true}); err != nil {
+		if _, err := lifecycle.EnsureStarted(t.Context(), LocalStartOptions{Home: f.home, Version: "v1"}); err != nil {
 			t.Fatal(err)
 		}
 		done := make(chan error, 1)
@@ -432,7 +391,7 @@ func TestLocalRuntimeFailedStartupCanRetry(t *testing.T) {
 		return LocalActivity{}, nil
 	}
 	lifecycle := NewLocalLifecycle(r, nil)
-	opts := LocalStartOptions{Home: f.home, Version: "v1", Stay: true}
+	opts := LocalStartOptions{Home: f.home, Version: "v1"}
 	if _, err := lifecycle.EnsureStarted(t.Context(), opts); err == nil {
 		t.Fatal("startup failure hidden")
 	}
@@ -554,7 +513,7 @@ func TestLocalRuntimeDefersConsumersUntilPrivateAPIReady(t *testing.T) {
 		}
 		r := newRuntimeFixture(t, f)
 		done := make(chan error, 1)
-		go func() { done <- r.Run(ctx, LocalStartOptions{Home: f.home, Version: "v1", Stay: true}) }()
+		go func() { done <- r.Run(ctx, LocalStartOptions{Home: f.home, Version: "v1"}) }()
 		t.Cleanup(func() {
 			cancel()
 			if err := <-done; err != nil {
@@ -616,7 +575,7 @@ func TestLocalRuntimeKeepsAPIUntilWorkersJoin(t *testing.T) {
 	defer cancel()
 	done := make(chan error, 1)
 	go func() {
-		done <- r.Run(ctx, LocalStartOptions{Home: f.home, Version: "test", Stay: true, Standalone: true})
+		done <- r.Run(ctx, LocalStartOptions{Home: f.home, Version: "test", Standalone: true})
 	}()
 	if _, err := r.AwaitReady(t.Context()); err != nil {
 		t.Fatal(err)

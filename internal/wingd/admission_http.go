@@ -310,7 +310,6 @@ func (d *Daemon) requestAdmissionHTTP(w http.ResponseWriter, r *http.Request, su
 			d.routeLocked(events)
 		}
 	}
-	d.touchLocked()
 	if err := d.commitAdmissionLocked(); err != nil {
 		admissionHTTPFailure(w, err)
 		return
