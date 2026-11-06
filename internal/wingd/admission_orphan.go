@@ -1,13 +1,14 @@
 package wingd
 
 import (
+	"context"
 	"errors"
 	"fmt"
 
 	"github.com/sparkwing-dev/sparkwing/internal/procgroup"
 )
 
-func (d *Daemon) cleanupAdmissionProcesses() error {
+func (d *Daemon) cleanupAdmissionProcesses(ctx context.Context) error {
 	d.mu.Lock()
 	var roots []admissionTicket
 	for _, ticket := range d.admissionTickets {
@@ -18,6 +19,9 @@ func (d *Daemon) cleanupAdmissionProcesses() error {
 	d.mu.Unlock()
 	var result error
 	for _, root := range roots {
+		if err := context.Cause(ctx); err != nil {
+			return errors.Join(result, err)
+		}
 		birth, err := admissionProcessBirth(root.Input.RootPID)
 		if err != nil && !errors.Is(err, procgroup.ErrProcessAbsent) {
 			result = errors.Join(result, err)
@@ -36,7 +40,8 @@ func (d *Daemon) cleanupAdmissionProcesses() error {
 			if holderAlive {
 				continue
 			}
-			// safety: process identity is checked again by session cleanup before signalling.
+			// safety: session cleanup rechecks process identity before signaling and bounds its own wait.
+			//nolint:contextcheck // safety: KillSession has no caller-context variant.
 			if err := killAdmissionExecution(root.MeasurementPID, root.MeasurementBirth); err != nil {
 				result = errors.Join(result, fmt.Errorf("kill orphan job root %d: %w", root.MeasurementPID, err))
 				continue

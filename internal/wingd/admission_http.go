@@ -607,7 +607,7 @@ func (d *Daemon) admissionLivenessLoop(ctx context.Context) {
 		case <-d.quit:
 			return
 		case <-tick.C:
-			if err := d.cleanupAdmissionProcesses(); err != nil {
+			if err := d.cleanupAdmissionProcesses(ctx); err != nil {
 				d.cfg.logf("orphan process cleanup: %v", err)
 			}
 			if err := d.reapAdmission(); err != nil {

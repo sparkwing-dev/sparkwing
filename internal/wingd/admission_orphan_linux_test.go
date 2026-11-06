@@ -2,6 +2,7 @@ package wingd
 
 import (
 	"bufio"
+	"context"
 	"errors"
 	"fmt"
 	"net/http"
@@ -140,7 +141,7 @@ func TestAdmissionOrphanCleanupSurvivesControllerRestart(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = persistence.Close() })
 	restarted := newHTTPAdmissionTest(t, persistence)
-	if err := restarted.cleanupAdmissionProcesses(); err != nil {
+	if err := restarted.cleanupAdmissionProcesses(t.Context()); err != nil {
 		t.Fatal(err)
 	}
 	if err := admissionProcessRunning(job.child); !errors.Is(err, procgroup.ErrProcessAbsent) {
@@ -162,12 +163,12 @@ func TestAdmissionOrphanCleanupRetriesAfterFailedAcknowledgement(t *testing.T) {
 	held := registerAdmissionOrphan(t, d, job)
 	job.stop()
 	persistence.fail = true
-	if err := d.cleanupAdmissionProcesses(); err == nil {
+	if err := d.cleanupAdmissionProcesses(t.Context()); err == nil {
 		t.Fatal("cleanup did not report failed persistence")
 	}
 	persistence.fail = false
 	restarted := newHTTPAdmissionTest(t, persistence)
-	if err := restarted.cleanupAdmissionProcesses(); err != nil {
+	if err := restarted.cleanupAdmissionProcesses(t.Context()); err != nil {
 		t.Fatal(err)
 	}
 	if err := restarted.reapAdmission(); err != nil {
@@ -196,7 +197,7 @@ func TestAdmissionKeepsLiveCancelledRootsPastReceiptRetention(t *testing.T) {
 	}
 	job.stop()
 	restarted := newHTTPAdmissionTest(t, persistence)
-	if err := restarted.cleanupAdmissionProcesses(); err != nil {
+	if err := restarted.cleanupAdmissionProcesses(t.Context()); err != nil {
 		t.Fatal(err)
 	}
 	if err := admissionProcessRunning(job.child); !errors.Is(err, procgroup.ErrProcessAbsent) {
@@ -208,7 +209,7 @@ func TestAdmissionCleanupLeavesLiveHolderAndReusedRootAlone(t *testing.T) {
 	job := startAdmissionOrphan(t)
 	d := newHTTPAdmissionTest(t, &admissionMemoryStore{})
 	held := registerAdmissionOrphan(t, d, job)
-	if err := d.cleanupAdmissionProcesses(); err != nil {
+	if err := d.cleanupAdmissionProcesses(t.Context()); err != nil {
 		t.Fatal(err)
 	}
 	if err := admissionProcessRunning(job.child); err != nil {
@@ -222,11 +223,11 @@ func TestAdmissionCleanupLeavesLiveHolderAndReusedRootAlone(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := d.cleanupAdmissionProcesses(); err == nil {
+	if err := d.cleanupAdmissionProcesses(t.Context()); err == nil {
 		t.Fatal("PID reuse with live session members was not refused")
 	}
 	if err := admissionProcessRunning(job.child); err != nil {
-		t.Fatalf("cleanup signalled a reused root: %v", err)
+		t.Fatalf("cleanup signaled a reused root: %v", err)
 	}
 }
 
@@ -253,5 +254,23 @@ func TestAdmissionKeepsCancelledTreeChargedUntilHostRelease(t *testing.T) {
 	state = admissionResponse(t, admissionHTTPCall(t, d, http.MethodGet, "/requests/"+waiting.ID, nil))
 	if state.Grant == nil {
 		t.Fatalf("host release did not promote waiter: %+v", state)
+	}
+}
+
+func TestAdmissionCleanupStopsWithControllerContext(t *testing.T) {
+	job := startAdmissionOrphan(t)
+	d := newHTTPAdmissionTest(t, &admissionMemoryStore{})
+	held := registerAdmissionOrphan(t, d, job)
+	job.stop()
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	if err := d.cleanupAdmissionProcesses(ctx); !errors.Is(err, context.Canceled) {
+		t.Fatalf("cancelled cleanup: %v", err)
+	}
+	if err := admissionProcessRunning(job.child); err != nil {
+		t.Fatalf("cancelled cleanup killed the job: %v", err)
+	}
+	if !d.admissionTickets[held.ID].Active || d.admissionTickets[held.ID].MeasurementPID != job.root {
+		t.Fatal("cancelled cleanup forgot the job or its reservation")
 	}
 }
