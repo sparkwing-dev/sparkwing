@@ -109,6 +109,34 @@ func TestRemoteAllowListMasksBeforeExecution(t *testing.T) {
 	}
 }
 
+func TestRemoteBasePathsRemainReadable(t *testing.T) {
+	for name, kind := range map[string]Kind{"git": Git, "plan": Plan, "attempt": Attempt, "eval": Eval, "install": Install} {
+		t.Run(name, func(t *testing.T) {
+			masker := secrets.NewMasker()
+			base := Base{Ambient: []string{
+				"HOME=/home/bombuntu",
+				"PATH=/opt/toolchain/bin:/usr/bin",
+				"HTTPS_PROXY=https://alice:proxy-password@proxy.example",
+				"CUSTOM=operator-private-value",
+			}, SubmitEnvAllow: []string{"CUSTOM"}, Masker: masker}
+			if _, err := Build(kind, base, Runtime{}); err != nil {
+				t.Fatal(err)
+			}
+			for _, path := range []string{"/home/bombuntu", "/opt/toolchain/bin:/usr/bin"} {
+				if got := masker.Mask(path); got != path {
+					t.Fatalf("public path %q masked to %q", path, got)
+				}
+			}
+			if got := masker.Mask("proxy-password"); got != "***" {
+				t.Fatalf("proxy password = %q", got)
+			}
+			if kind != Git && masker.Mask("operator-private-value") != "***" {
+				t.Fatal("operator value was not masked")
+			}
+		})
+	}
+}
+
 func TestJobEnvironmentPhases(t *testing.T) {
 	input := []Assignment{{Name: "BODY", Value: "body"}, {Name: "MARKED", Value: "startup", Startup: true}, {Name: "NODE_OPTIONS", Value: "--trace-warnings"}, {Name: "GODEBUG", Value: "gctrace=1"}, {Name: "GOMAXPROCS", Value: "2"}}
 	split, err := SplitJobEnv(input)

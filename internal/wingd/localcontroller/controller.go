@@ -46,6 +46,8 @@ type Services struct {
 // Config supplies shared service constructors without opening another store.
 type Config struct {
 	Bind func(context.Context, Binding) (Services, error)
+	// StoreOptions configures the owned store before service binding.
+	StoreOptions []store.Option
 }
 
 // Open constructs LocalRuntimeConfig.Open's store owner under the runtime's election.
@@ -69,7 +71,8 @@ func (cfg Config) Open(ctx context.Context, home string) (_ wingd.LocalControlle
 	}
 	var services Services
 	var binding Binding
-	s, err := store.Open(filepath.Join(home, "state.db"), store.WithCredentialEpoch(epoch), store.WithPolicies(func(s *store.Store) (store.Policies, error) {
+	options := append([]store.Option(nil), cfg.StoreOptions...)
+	options = append(options, store.WithCredentialEpoch(epoch), store.WithPolicies(func(s *store.Store) (store.Policies, error) {
 		tenant, err := s.ForTeam(ctx, store.DefaultTeam)
 		if err != nil {
 			return store.Policies{}, err
@@ -78,6 +81,7 @@ func (cfg Config) Open(ctx context.Context, home string) (_ wingd.LocalControlle
 		services, err = cfg.Bind(ctx, binding)
 		return services.Policies, err
 	}))
+	s, err := store.Open(filepath.Join(home, "state.db"), options...) //nolint:contextcheck // safety: Store.Open has no context parameter; election owns initialization.
 	if err != nil {
 		return nil, errors.Join(err, closeServices(services))
 	}

@@ -13,6 +13,11 @@ including each normalized list item, before author code can release it. Host
 issued values are registered before a service returns them. Derived proxy parts
 shorter than four code points are skipped as well.
 
+Remote process setup masks operator-supplied environment values of at least
+twelve bytes. Public base values such as HOME and PATH remain readable.
+Embedded proxy credentials are registered even in public base variables.
+Explicit secret and mask registrations still apply to every matching value.
+
 Each registered value is matched literally and through its JSON/Go quoted, URL
 query/path/component, standard and URL-safe base64, and embedded base64
 spellings. Percent escape hex digits match regardless of case. Encoded forms
