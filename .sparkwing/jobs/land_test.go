@@ -159,13 +159,38 @@ func TestLandPushIsAFastForwardOfTheGatedCommit(t *testing.T) {
 	}
 }
 
-func TestLandPushRejectionSaysMergeAndRerun(t *testing.T) {
-	g := landableGit()
-	g.answers["rev-parse c0ffee00^{tree}"] = "7ee00000"
-	g.fail["push --no-verify origin c0ffee00:refs/heads/main"] = errors.New(" ! [rejected]        c0ffee00 -> main (fetch first)")
-	err := pushLanding(t.Context(), g.run, "/repo", acceptedHead().Commit, acceptedHead().Tree)
-	if err == nil || !strings.Contains(err.Error(), "moved since the gate ran") || !strings.Contains(err.Error(), "rerun sparkwing run land") {
-		t.Fatalf("err = %v", err)
+func TestLandPushRefusalChecksFreshAncestry(t *testing.T) {
+	for _, test := range []struct {
+		name, reason, ancestor string
+		moved                  bool
+	}{
+		{"main moved", " ! [rejected] c0ffee00 -> main (fetch first)", "older000", true},
+		{"remote failure", " ! [remote rejected] c0ffee00 -> main (fatal error in commit_refs_rules)", "ba5e0000", false},
+		{"main moved without rejection text", "remote update failed", "older000", true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			g := landableGit()
+			g.answers["rev-parse c0ffee00^{tree}"] = "7ee00000"
+			g.answers["merge-base origin/main c0ffee00"] = test.ancestor
+			g.fail["push --no-verify origin c0ffee00:refs/heads/main"] = errors.New(test.reason)
+			err := pushLanding(t.Context(), g.run, "/repo", acceptedHead().Commit, acceptedHead().Tree)
+			if err == nil || !strings.Contains(err.Error(), test.reason) {
+				t.Fatalf("err = %v, want the remote's reason %q", err, test.reason)
+			}
+			if moved := errors.As(err, new(errMainMoved)); moved != test.moved {
+				t.Fatalf("err = %v, main moved = %v, want %v", err, moved, test.moved)
+			}
+			if test.moved {
+				if !strings.Contains(err.Error(), "moved since the gate ran") || !strings.Contains(err.Error(), "rerun sparkwing run land") {
+					t.Fatalf("err = %v, want the merge and rerun remedy", err)
+				}
+			} else if !strings.Contains(err.Error(), "push can be retried") || strings.Contains(err.Error(), "moved since the gate ran") {
+				t.Fatalf("err = %v, want a retry without claiming main moved", err)
+			}
+			if !slices.Contains(g.calls, "fetch --quiet origin main") || !slices.Contains(g.calls, "merge-base origin/main c0ffee00") {
+				t.Fatalf("calls = %v, want freshly fetched main's ancestry checked", g.calls)
+			}
+		})
 	}
 }
 

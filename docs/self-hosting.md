@@ -427,7 +427,11 @@ team, excluding the session and free-text reason. The initial expiry is 15 minut
 the normal account-session lifecycle. After fetching the session CSRF proof,
 enrollment attempts logout on success or failure. If fetching the proof or logout
 fails, the session remains live until expiry or revocation.
-Use a dedicated session because logout ends it for every client. See
+Use a dedicated session because logout ends it for every client. A token minted
+by `sparkwing login` ends when its approving browser session signs out. If you
+copy a browser session cookie for enrollment, use a separate private browser
+window. Reusing the session that approved CLI login invalidates its token when
+enrollment logs out. See
 [session lifecycle](auth.md#browser-session-lifecycle) for expiry and logout. Keep session output private. A `local` deployment uses
 the local controller connection and does not support account sessions.
 
