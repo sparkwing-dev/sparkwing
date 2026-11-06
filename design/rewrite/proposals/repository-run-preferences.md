@@ -10,13 +10,13 @@ Cloud-hosted controllers.
 
 The first use is the pre-release macOS and Windows cells. Each cell prefers
 team runners with `os=darwin` or `os=windows`. GitHub-hosted runners provide the
-last tier. When a team runner takes the cell, no fallback workflow starts and
-that cell spends no GitHub Actions minutes.
+last tier. A team runner that claims the cell before dispatch avoids a fallback
+workflow and its GitHub Actions minutes.
 
-Implementation starts after step 3, **Local jobs through the runner path**, in
-[local controller restart](local-controller-restart.md#implementation-order).
-That step puts local execution behind the common runner contract. This design
-extends that contract instead of adding another execution path.
+Implementation depends on moving local job hosting into the runner process,
+as described in [local controller restart](local-controller-restart.md).
+That move puts local execution behind the common runner contract. This design
+extends that contract.
 
 ## Existing contracts
 
@@ -106,7 +106,10 @@ It does not grant authority or let repository input supply arbitrary `runs-on`.
 
 A job block replaces the pipeline's whole preference list. It never appends an
 unexpected paid fallback. Omitted job placement inherits the pipeline list.
-An explicit empty list clears inheritance and restores existing placement.
+An explicit empty list clears inheritance and restores existing routing and
+ranking under team policy and hard selectors. That routing can reach paid Cloud
+or an existing Actions runner when those rules allow it. An empty list does not
+request an on-demand Actions workflow or disable existing paid routing.
 Omitted pipeline placement preserves existing routing and ranking. This change
 adds no repository-wide placement default.
 
@@ -225,65 +228,78 @@ Keep it in the controller. The existing App requests Contents, Checks, Metadata
 and Pull requests permissions. Adding Actions write needs installation approval.
 Source tokens remain restricted to Contents read. See
 [GitHub App](../../../docs/github-app.md) and
-[GitHub dispatch authorization](https://docs.github.com/en/rest/actions/workflows#create-a-workflow-dispatch-event).
+[GitHub dispatch authorization](https://docs.github.com/en/rest/actions/workflows?apiVersion=2022-11-28#create-a-workflow-dispatch-event).
 
 Recheck installation ownership, repository coverage, automation consent and
 workflow approval before dispatch. Uninstall, suspension, repository transfer
 and withdrawn consent fence pending dispatches and later exchanges. The workflow
 gets `id-token: write` and `contents: read`. It receives no App token or reusable
 team credential. Workflow inputs contain a dispatch receipt ID and approved
-image selection. Inputs contain no secrets or bearer credentials.
+image selection. The receipt is a non-bearer correlation value. Knowing it
+grants no authority. Inputs contain no secrets or bearer credentials.
 
 The existing exchange accepts branch refs and binds repository, ref and SHA to
 the workflow's identity. That is insufficient for release tags, PR refs and a
 trusted workflow running separately from the workload revision. Add a receipt
 binding at the host boundary. Verify GitHub OIDC issuer, audience, numeric
 repository and owner IDs, workflow identity, workflow run ID and attempt.
-Match the workflow revision to the intent. Associate the provider run with the
-recorded App dispatch through the API response or verified provider metadata.
-Then resolve the receipt in the controller. An input naming a run is not proof.
-Keep the existing once-per-workflow-attempt exchange rule.
+Match the workflow revision to the recorded dispatch. The proof is the run's
+verified GitHub OIDC claims matched by the controller to that dispatch and its
+award. Bind the provider run ID and attempt through authenticated workflow
+registration and verified provider metadata. The input receipt only locates
+the dispatch record. Keep the existing once-per-workflow-attempt exchange rule.
 
-The receipt authorizes only its original run, job and placement generation.
+The controller can grant an award only for the recorded run, job and placement
+generation. GitHub grants `id-token: write` to the job, not an individual step.
+Code in the fallback job, including PR code, can mint that job's OIDC id-token.
+The award it can obtain is limited to that job's own trust class, never broader.
 The execution award retains the original repository, event, ref, SHA and trust.
 A default-branch dispatcher does not upgrade PR code to default-branch trust.
 Use the existing source and secret checks for the awarded job. The new receipt
 path does not broaden ordinary Actions push credentials to arbitrary refs.
-Keep the existing fork PR refusal.
+Keep the existing fork PR refusal. See
+[GitHub OIDC permissions](https://docs.github.com/en/actions/reference/security/oidc#required-permission).
 
 ### One dispatch decision
 
 Commit a durable dispatch intent under the same job lock as claim selection.
 Key it by team, numeric repository ID, run, job, source generation and placement
 generation. Store the workflow, image, policy digest, receipt ID and provider
-status. A second replica or wake reads that intent instead of sending a second
-request. An execution award that wins first prevents intent creation.
+status. Record one dispatch per job placement generation. A second replica or
+wake reads that record instead of sending another request. An execution award
+that wins first prevents intent creation.
 
-The intent reserves delivery to Actions, not compute or logical concurrency.
-Once committed for sending, it fences competing job claims until delivery is
-resolved or explicitly abandoned. Send outside the database transaction under
-one leased sender. Recheck cancellation and the generation before sending.
-Record the provider run ID when returned, and adopt it through authenticated
-workflow registration when needed. Provider events and registration wake the
-same controller state machine. The workflow cannot create another Sparkwing
-trigger. This also prevents a dispatch webhook loop.
+A pending dispatch does not reserve the job, compute or logical concurrency.
+Team runners and every earlier eligible tier can still claim while it is
+outstanding. Send outside the database transaction under one leased sender.
+Recheck cancellation, the generation and any existing award before sending.
+An award can still win while the HTTP request is in flight. A fallback worker
+that starts later and finds the job already claimed takes its normal idle exit.
+That race costs at most its GitHub startup minutes.
 
-Do not claim exactly-once HTTP delivery. Persist a sending state before the HTTP
-request. A lost response or sender crash can mean GitHub accepted the request.
-An expired sender lease makes that state uncertain. Reconcile by receipt and
-provider run identity before any resend. A controller restart cannot blindly
-resend it.
-Duplicate workflow invocations must compete for one receipt binding. Only one
-can obtain the job award. Workflow concurrency may reduce wasted starts, but
-the controller fence owns execution deduplication. An upstream duplicate may
-still incur GitHub startup minutes.
+Persist a sending state before the HTTP request. The `204` response from
+`workflow_dispatch` returns no run ID. A lost `204` is indistinguishable from
+an accepted workflow that has not started. A sender crash or expired sender
+lease can leave the same uncertainty. Correctness never depends on telling
+those cases apart. Record the uncertainty and keep other eligible claimants
+unblocked. A controller restart or poll must not resend that generation.
+Authenticated workflow registration can later bind the provider run ID.
+Provider events and registration update the same dispatch record. The workflow
+cannot create another Sparkwing trigger.
+
+Duplicate workflow invocations compete for one receipt binding. Only one can
+obtain the job award. The existing atomic claim and live award checks prevent
+duplicate execution across all tiers. Workflow concurrency may reduce wasted
+starts. An upstream duplicate may still incur GitHub startup minutes.
 
 Cancellation invalidates the receipt and cancels a known provider run. Late
-registration cannot obtain work. Before releasing a failed dispatch back to
-other tiers, invalidate its generation so a delayed workflow cannot also
-execute. Retry delivery after a definite refusal or an operator decision uses
-a new dispatch generation. A lost claim or exchange response keeps the existing
-one-time-response rules. Receipt reconciliation must not replay bearer issuance.
+registration cannot obtain work. Redispatch requires a new job placement
+generation, whether after a definite refusal or an audited operator retry.
+Invalidate the old receipt before opening that generation. This cannot preempt
+a live execution award. Warn that a delayed old workflow may still cost startup
+minutes. A lost claim or exchange response keeps the existing one-time-response
+rules. Receipt reconciliation must not replay bearer issuance. No automatic
+dispatch deadline or retry cap is added. Either needs maintainer approval.
 
 ## Console and costs
 
@@ -295,9 +311,11 @@ a funding refusal and a provider queue. Example messages are:
 - `Waiting for team runners with os=darwin. GitHub Actions opens in 3s.`
 - `No live matching team offer. Requesting GitHub Actions macos-latest.`
 - `GitHub Actions accepted the workflow. Waiting for its runner.`
-- `Dispatch outcome unknown. Reconciling before another request.`
+- `Dispatch outcome unknown. Team runners can still claim. No redispatch for this generation.`
 
-Link a dispatched provider run and show the awarded runner after claim. Show
+Show acceptance, refusal or uncertainty even when no provider run ID is known.
+Link a provider run when its identity is known. Show the awarded runner after
+claim and any fallback worker that exits idle after losing the race. Show
 failed tiers with a repair action. Keep these explanations in the controller's
 run detail projection so the CLI and console agree. The browser does not
 compute eligibility from its own clock.
@@ -323,12 +341,13 @@ An eligible Actions tail remains available.
 
 | Failure | Controller behavior and remedy |
 | --- | --- |
-| Dispatch API rejects the request | Persist the masked reason. Release the delivery reservation after fencing it. Keep authorized team or Cloud work claimable. Retry a transient refusal only when it is known not to have been accepted. |
+| Dispatch API rejects the request | Persist the masked reason. Keep authorized team or Cloud work claimable. Redispatch only on a new job placement generation. |
 | Workflow file or dispatch trigger is missing | Mark that tier unavailable. Name the expected path and `workflow_dispatch`. Ask the repository owner to commit it. Do not silently create or edit a workflow. |
 | Actions or the workflow is disabled | Show the provider refusal and repository Actions settings. Keep other eligible tiers usable. Do not silently enable Actions. |
 | App lacks Actions write or consent was revoked | Refuse dispatch and explain the approval or reconnection needed. Already admitted work on other authorized runners can continue under existing authority rules. |
-| GitHub accepts but no runner starts | Show provider queue state and a link. Reconcile workflow completion and cancellation. Use the existing job queue deadline. Do not start duplicate workflows on each poll. |
-| Dispatch outcome is uncertain | Preserve the intent across restart. Reconcile before retry. Offer an audited operator retry that first fences the old receipt and warns about possible extra GitHub minutes. |
+| GitHub accepts but no runner starts | Show acceptance and any known provider queue state. Link the run when identified. Keep earlier tiers claimable under the existing job queue policy. Do not dispatch again for that placement generation. |
+| Dispatch outcome is uncertain | Preserve the record across restart and show the uncertainty. Keep earlier tiers claimable. Offer an audited operator retry on a new placement generation that invalidates the old receipt and warns about extra GitHub startup minutes. |
+| Another claimant wins before the fallback worker starts | Keep the live award. The fallback worker finds no eligible work and takes its normal idle exit. Show that outcome and its possible GitHub startup cost. |
 | Hosted image cannot satisfy required labels | Keep the requirement. Show the image and missing labels. A workflow cannot relabel itself to bypass the match. |
 | Every tier is unavailable | Keep the job visibly queued under its existing queue policy, with reasons for each tier. A provable configuration error fails validation. No hidden new queue timeout applies. |
 | Runner disconnects after award | Use existing lease expiry, cleanup, retry and generation fencing. Expiring a preference hold does not move an executing job. |
@@ -370,13 +389,17 @@ same placement engine. Cover these contracts:
 
 - Parse pipeline and job lists. Check replacement, clearing, names, label
   alternatives, invalid durations, duration overflow and the Actions tail.
+  Verify that an empty list restores team policy routing, including permitted
+  Cloud or existing Actions runners, without requesting an Actions workflow.
   Keep old configuration and SDK pins working. Test exact generated job IDs.
 - Seal default-branch policy independently of event SHA. Test pushes, same-repo
   PRs, releases and schedules. A PR policy edit cannot authorize dispatch.
   Proof failure, personal machines and fork PRs retain their existing boundaries.
 - Race eligible team claims, Cloud launch requests and Actions dispatch intent
-  on two controller replicas. Assert one winner and no dispatch when an earlier
-  tier wins. Test named claims and owner execution through the same predicate.
+  on two controller replicas. Assert one execution award. A claim before intent
+  creation prevents dispatch. A claim during an outstanding dispatch still
+  wins, and the late fallback worker exits idle. Test named claims and owner
+  execution through the same predicate.
 - Advance through live, absent, stale, full and revoked claimant observations.
   Assert immediate fallback without an eligible earlier offer, fixed deadlines,
   unchanged fair share and no hold reset on restart or relinquishment.
@@ -385,10 +408,15 @@ same placement engine. Cover these contracts:
   Inline jobs and approvals must not acquire independent placement awards.
 - Fake the GitHub API at the HTTP boundary. Cover acceptance, definite refusal,
   missing workflow, disabled Actions, permission loss, rate limiting, lost
-  responses, cancellation and controller restart. Count outbound dispatches.
+  responses, cancellation and controller restart. Count one outbound dispatch
+  per job placement generation, including after a lost `204`. Earlier tiers
+  stay claimable in every pending or uncertain dispatch state. Redispatch
+  requires a new generation and invalidates the old receipt.
 - Verify OIDC against the receipt and original award. Test PR and tag source
   revisions, wrong repository or workflow, spoofed receipt input, replayed
   exchange, duplicate workflow attempts, revoked consent and late registration.
+  Prove that PR code can mint the fallback job's id-token but can obtain only
+  its own job's trust class. Receipt knowledge alone grants no award.
   Share fixtures between controller exchange and runner startup.
 - Assert zero Cloud compute charges during placement holds. Test Cloud award
   settlement once, actual planning charges, no-credit unmetered execution and
@@ -400,14 +428,17 @@ Before enabling the first use, run a real pre-release cell on native macOS and
 Windows team runners. Then remove matching offers and prove the controller
 dispatches the correct GitHub-hosted image. Repeat on a Cloud-hosted controller.
 Cancel during dispatch and restart a controller between intent and response.
-Retain provider run IDs and dispatch counts. Confirm that the team-runner case
-starts no fallback workflow. Live provider tests belong to implementation
+Retain provider run IDs and dispatch counts. Confirm that a team claim before
+dispatch starts no fallback workflow. Bring a team runner online during an
+outstanding dispatch. Confirm that it can claim and the late fallback worker
+exits idle. Live provider tests belong to implementation
 acceptance and require an authorized test repository and account.
 
 ## Implementation order
 
 S means half a day. M means 1-2 days. L means 3-5 days. Sizes include focused
-tests. Begin after local-controller restart step 3 is complete.
+tests. Begin once local job hosting has moved into the runner process, as
+described in [local controller restart](local-controller-restart.md).
 
 1. **Configuration and sealed policy, M.** Add pipeline and job declarations,
    located validation, inheritance and policy revision capture. Keep routing
@@ -441,7 +472,7 @@ tests. Begin after local-controller restart step 3 is complete.
 | Should Actions receipt scope cover one job or a batch? | Start with one job and placement generation. It makes cost and cancellation traceable. Reuse an existing eligible runner through normal claims. Add batching only with measured need and explicit job bindings. |
 | Which revision supplies policy and workflow authority? | Use verified default-branch policy and an owner-approved workflow ref. Preserve the event SHA as execution source. Show both revisions. |
 | Should SDK `Prefers` override repository tier order? | Keep repository tiers outermost. Use SDK selectors within an open tier because they cannot authorize a new provider. |
-| How should uncertain dispatch recover? | Reconcile the same receipt before resending. Offer an audited retry after fencing the old generation. Do not impose a new automatic deadline or retry cap without approval. |
+| How should uncertain dispatch recover? | Keep earlier tiers claimable and show the uncertainty. Record one dispatch per job placement generation. An audited retry opens a new generation and invalidates the old receipt. Any automatic deadline or retry cap needs maintainer approval. |
 | Should a failed Actions tail fail the whole run immediately? | Keep other listed tiers usable under the existing queue policy. Show the unavailable tail and repair action. Fail a provably invalid declaration during validation. |
 | Does Cloud hosting change prices for team or Actions jobs? | Keep existing award-based charging. Show any Cloud planning charges separately. Any new controller fee or fallback surcharge needs a separate pricing decision. |
 
