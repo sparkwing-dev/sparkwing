@@ -81,7 +81,7 @@ func (cfg Config) Open(ctx context.Context, home string) (_ wingd.LocalControlle
 		services, err = cfg.Bind(ctx, binding)
 		return services.Policies, err
 	}))
-	s, err := store.Open(filepath.Join(home, "state.db"), options...)
+	s, err := store.Open(filepath.Join(home, "state.db"), options...) //nolint:contextcheck // safety: Store.Open has no context parameter; election owns initialization.
 	if err != nil {
 		return nil, errors.Join(err, closeServices(services))
 	}
