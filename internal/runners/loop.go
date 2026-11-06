@@ -12,6 +12,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	controllerclient "github.com/sparkwing-dev/sparkwing/internal/controller/client"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/limits"
 	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
@@ -63,8 +64,9 @@ type Loop struct {
 	draining     bool
 }
 
-// safety: callable before or during Run; the mutex makes repeats close drain once.
-func (l *Loop) startDrain() {
+// Drain stops new claims and makes Run join held hosts without cancelling their
+// contexts. It may be called before or during Run and returns immediately.
+func (l *Loop) Drain() {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	l.initDrain()
@@ -153,6 +155,7 @@ func (l *Loop) run(ctx context.Context) (policyErr, runErr error) {
 	awaiting := make(map[capability.LeaseRef]int)
 	awaitChanged := make(chan struct{}, 1)
 	idleSince, pollAt, backoffUntil := time.Now(), time.Time{}, time.Time{}
+	var transportSince time.Time
 	claimed := 0
 	var failed failedWork
 	var hostErr error
@@ -309,6 +312,18 @@ func (l *Loop) run(ctx context.Context) (policyErr, runErr error) {
 			case <-drain:
 				return nil, nil
 			default:
+			}
+			if controllerclient.RetryableTransportError(outcome.err) {
+				if transportSince.IsZero() {
+					transportSince = time.Now()
+				}
+				if time.Since(transportSince) < 5*time.Second {
+					// safety: a fresh poll never replays a claim whose award reply was lost.
+					backoffUntil = time.Now().Add(min(l.Config.PollInterval, time.Second))
+					continue
+				}
+			} else {
+				transportSince = time.Time{}
 			}
 			if delay, ok := apierr.RetryDelay(outcome.err); ok {
 				backoffUntil = time.Now().Add(max(delay, l.Config.PollInterval))

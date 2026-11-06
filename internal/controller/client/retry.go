@@ -6,18 +6,26 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"os"
 	"strconv"
+	"strings"
 	"syscall"
 	"time"
 )
 
 const unavailableRetries = 3
 
-func retryableTransportError(err error) bool {
+// RetryableTransportError identifies interrupted controller transports, including
+// a local socket temporarily absent while its controller restarts.
+func RetryableTransportError(err error) bool {
 	var netErr net.Error
+	var operation *net.OpError
+	var path *os.PathError
 	return errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) ||
 		errors.Is(err, syscall.ECONNREFUSED) || errors.Is(err, syscall.ECONNRESET) || errors.Is(err, syscall.EPIPE) ||
-		errors.As(err, &netErr) && netErr.Timeout()
+		errors.As(err, &netErr) && netErr.Timeout() ||
+		errors.As(err, &operation) && operation.Op == "dial" && strings.HasPrefix(operation.Net, "unix") && errors.Is(err, os.ErrNotExist) ||
+		errors.As(err, &path) && path.Op == "connect" && errors.Is(err, os.ErrNotExist)
 }
 
 // safety: bounds a parsed Retry-After above every cap a caller applies, so a

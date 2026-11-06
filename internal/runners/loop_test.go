@@ -4,6 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
+	"net"
+	"os"
 	"reflect"
 	"slices"
 	"sync"
@@ -49,7 +52,7 @@ func TestLoopUsesOneQueueForEveryUnitKind(t *testing.T) {
 		Host: hostFunc(func(_ context.Context, unit controllerwire.ClaimedUnit) error {
 			hosted = append(hosted, unit.Unit)
 			if len(hosted) == len(want) {
-				loop.startDrain()
+				loop.Drain()
 			}
 			hostedUnit <- struct{}{}
 			return nil
@@ -182,7 +185,7 @@ func TestLoopDrainKeepsHeldUnitsAliveAndJoins(t *testing.T) {
 	}
 	go func() { joined <- loop.Run(t.Context()) }()
 	<-started
-	loop.startDrain()
+	loop.Drain()
 	select {
 	case err := <-joined:
 		t.Fatalf("drain did not join: %v", err)
@@ -242,7 +245,7 @@ func TestLoopCannotRunTwice(t *testing.T) {
 	loop := &Loop{Config: LoopConfig{Version: "v1.2.3", MaxConcurrent: 1}, Controller: claimFunc(func(context.Context, controllerwire.ClaimRequest) (controllerwire.ClaimResponse, error) {
 		return controllerwire.ClaimResponse{}, nil
 	}), Host: hostFunc(func(context.Context, controllerwire.ClaimedUnit) error { return nil }), CheckVersion: func(context.Context, string) error { return nil }}
-	loop.startDrain()
+	loop.Drain()
 	var wg sync.WaitGroup
 	results := make(chan error, 2)
 	for range 2 {
@@ -273,7 +276,7 @@ func TestLoopDrainCancelsInflightClaim(t *testing.T) {
 		Host:         hostFunc(func(context.Context, controllerwire.ClaimedUnit) error { t.Error("unexpected execution"); return nil }),
 		CheckVersion: func(context.Context, string) error { return nil },
 	}
-	go func() { <-started; loop.startDrain() }()
+	go func() { <-started; loop.Drain() }()
 	if err := loop.Run(t.Context()); err != nil {
 		t.Fatal(err)
 	}
@@ -285,7 +288,7 @@ func TestLoopOwnsAnAwardThatRacesDrain(t *testing.T) {
 	loop = &Loop{
 		Config: LoopConfig{Version: "v1.2.3", MaxConcurrent: 1},
 		Controller: claimFunc(func(context.Context, controllerwire.ClaimRequest) (controllerwire.ClaimResponse, error) {
-			loop.startDrain()
+			loop.Drain()
 			return controllerwire.ClaimResponse{Claim: &controllerwire.ClaimedUnit{Unit: capability.UnitNode, UnitID: "unit", RunID: "run", Capability: "secret"}}, nil
 		}),
 		Host: hostFunc(func(ctx context.Context, _ controllerwire.ClaimedUnit) error {
@@ -398,7 +401,7 @@ func TestLoopReclaimedGenerationDoesNotLoseItsAward(t *testing.T) {
 			claims++
 			if claims == 2 {
 				<-firstFinished
-				loop.startDrain()
+				loop.Drain()
 			}
 			return controllerwire.ClaimResponse{Claim: &controllerwire.ClaimedUnit{Unit: capability.UnitNode, UnitID: "same-unit", RunID: "run", Capability: "secret", Binding: capability.Binding{Generation: claims}}}, nil
 		}),
@@ -556,6 +559,120 @@ func TestLoopWaitsOutAControllerRetryAfter(t *testing.T) {
 			t.Fatalf("calls=%d err=%v", calls, err)
 		}
 	})
+}
+
+func TestLoopPollsThroughControllerRestarts(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		calls, hosted := 0, 0
+		start := time.Now()
+		loop := &Loop{
+			Config:       LoopConfig{Version: "v1.0.0", MaxConcurrent: 1, MaxClaims: 1, PollInterval: time.Second},
+			CheckVersion: func(context.Context, string) error { return nil },
+			Controller: claimFunc(func(context.Context, controllerwire.ClaimRequest) (controllerwire.ClaimResponse, error) {
+				calls++
+				switch calls {
+				case 1, 2, 3, 5, 6, 7:
+					return controllerwire.ClaimResponse{}, fmt.Errorf("controller socket: %w", &net.OpError{Op: "dial", Net: "unix", Err: os.ErrNotExist})
+				case 4:
+					return controllerwire.ClaimResponse{}, nil
+				default:
+					return controllerwire.ClaimResponse{Claim: &controllerwire.ClaimedUnit{Unit: capability.UnitNode, UnitID: "unit", RunID: "run", Capability: "secret"}}, nil
+				}
+			}),
+			Host: hostFunc(func(context.Context, controllerwire.ClaimedUnit) error { hosted++; return nil }),
+		}
+		if err := loop.Run(t.Context()); err != nil || calls != 8 || hosted != 1 || time.Since(start) != 7*time.Second {
+			t.Fatalf("claims = %d, hosted = %d, elapsed = %s, error = %v", calls, hosted, time.Since(start), err)
+		}
+	})
+}
+
+func TestLoopBoundsControllerTransportRecovery(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		calls := 0
+		start := time.Now()
+		loop := &Loop{
+			Config:       LoopConfig{Version: "v1.0.0", MaxConcurrent: 1, PollInterval: time.Second},
+			CheckVersion: func(context.Context, string) error { return nil },
+			Controller: claimFunc(func(context.Context, controllerwire.ClaimRequest) (controllerwire.ClaimResponse, error) {
+				calls++
+				return controllerwire.ClaimResponse{}, io.ErrUnexpectedEOF
+			}),
+			Host: hostFunc(func(context.Context, controllerwire.ClaimedUnit) error { t.Error("unexpected work"); return nil }),
+		}
+		if err := loop.Run(t.Context()); !errors.Is(err, io.ErrUnexpectedEOF) || calls != 6 || time.Since(start) != 5*time.Second {
+			t.Fatalf("claims = %d, elapsed = %s, error = %v", calls, time.Since(start), err)
+		}
+	})
+}
+
+func TestLoopControllerRestartKeepsHeldHostAliveThroughDrain(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		started, recovered, release := make(chan struct{}), make(chan struct{}), make(chan struct{})
+		joined := make(chan error, 1)
+		calls := 0
+		start := time.Now()
+		loop := &Loop{
+			Config:       LoopConfig{Version: "v1.0.0", MaxConcurrent: 2, PollInterval: time.Second},
+			CheckVersion: func(context.Context, string) error { return nil },
+			Host: hostFunc(func(ctx context.Context, _ controllerwire.ClaimedUnit) error {
+				close(started)
+				<-release
+				return ctx.Err()
+			}),
+		}
+		loop.Controller = claimFunc(func(context.Context, controllerwire.ClaimRequest) (controllerwire.ClaimResponse, error) {
+			calls++
+			if calls == 1 {
+				return controllerwire.ClaimResponse{Claim: &controllerwire.ClaimedUnit{Unit: capability.UnitNode, UnitID: "unit", RunID: "run", Capability: "secret"}}, nil
+			}
+			<-started
+			if calls < 5 {
+				return controllerwire.ClaimResponse{}, &net.OpError{Op: "dial", Net: "unix", Err: os.ErrNotExist}
+			}
+			loop.Drain()
+			close(recovered)
+			return controllerwire.ClaimResponse{}, nil
+		})
+		go func() { joined <- loop.Run(t.Context()) }()
+		<-recovered
+		synctest.Wait()
+		select {
+		case err := <-joined:
+			t.Fatalf("drain returned before its held host: %v", err)
+		default:
+		}
+		close(release)
+		if err := <-joined; err != nil || calls != 5 || time.Since(start) != 3*time.Second {
+			t.Fatalf("claims = %d, elapsed = %s, error = %v", calls, time.Since(start), err)
+		}
+	})
+}
+
+func TestLoopTransportRecoveryKeepsRefusalsFatal(t *testing.T) {
+	for _, code := range []apierr.Code{apierr.Unauthenticated, apierr.Forbidden, apierr.ProtocolError} {
+		t.Run(string(code), func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				calls := 0
+				failure := &apierr.Error{Code: code, Message: "refused"}
+				loop := &Loop{
+					Config:       LoopConfig{Version: "v1.0.0", MaxConcurrent: 1, PollInterval: time.Second},
+					CheckVersion: func(context.Context, string) error { return nil },
+					Controller: claimFunc(func(context.Context, controllerwire.ClaimRequest) (controllerwire.ClaimResponse, error) {
+						calls++
+						if calls == 1 {
+							return controllerwire.ClaimResponse{}, io.EOF
+						}
+						return controllerwire.ClaimResponse{}, failure
+					}),
+					Host: hostFunc(func(context.Context, controllerwire.ClaimedUnit) error { t.Error("unexpected work"); return nil }),
+				}
+				if err := loop.Run(t.Context()); !errors.Is(err, failure) || calls != 2 {
+					t.Fatalf("claims = %d, error = %v", calls, err)
+				}
+			})
+		})
+	}
 }
 
 func TestLoopHostCompletionKeepsServerBackoff(t *testing.T) {
@@ -764,7 +881,7 @@ func testPendingClaimStop(t *testing.T, run string, reason, order uint8, awarded
 			if reason == 1 {
 				cancel(cancelledErr)
 			} else {
-				loop.startDrain()
+				loop.Drain()
 			}
 			if order == 1 {
 				release()
@@ -1042,7 +1159,7 @@ func TestLoopDrainDuringPendingClaimPolicyRefresh(t *testing.T) {
 					finished := make(chan error, 1)
 					go func() { finished <- loop.Run(t.Context()) }()
 					<-refreshing
-					loop.startDrain()
+					loop.Drain()
 					err := <-finished
 					wantHosted := 0
 					if awarded {
