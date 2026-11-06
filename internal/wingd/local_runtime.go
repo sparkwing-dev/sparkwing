@@ -322,11 +322,10 @@ running:
 	}
 	session.cancel()
 	workers.Wait()
-	// safety: the admission timeout can report a slow drain, but cannot close its backing store.
+	// safety: API handlers must finish before their backing store closes.
 	if d.apiDone != nil {
 		<-d.apiDone
 	}
-	d.finalizers.Wait()
 	if errors.Is(err, context.Canceled) && ctx.Err() != nil {
 		err = nil
 	}

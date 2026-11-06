@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -427,6 +428,9 @@ func (d *Daemon) releaseAdmissionTicketLocked(ticket *admissionTicket) ([]admiss
 	if c != nil {
 		switch c.role {
 		case roleWaiter:
+			if c.finalizable {
+				d.recordWindow(d.now(), admissionEvent{Kind: eventCancellation}, c, map[string]any{"reason": "queued admission cancelled"})
+			}
 			events = d.ledger.CancelWaiter(c.runID)
 		case roleHolder:
 			var err error
@@ -506,14 +510,20 @@ func (d *Daemon) cancelAdmissionHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	const reason = "cancelled via sparkwing runs cancel"
-	ids := []string{request.RunID}
+	idsSet := map[string]bool{string(wingwire.HolderRef(request.RunID).RunID()): true}
 	for _, target := range targets {
-		if target.runID != request.RunID {
-			ids = append(ids, target.runID)
-		}
+		idsSet[string(wingwire.HolderRef(target.runID).RunID())] = true
 	}
+	ids := make([]string, 0, len(idsSet))
+	for id := range idsSet {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
 	if d.cfg.Runs != nil {
-		if err := d.cfg.Runs.FinalizeCancelledRuns(ids, reason); err != nil {
+		d.mu.Unlock()
+		err := d.cfg.Runs.FinalizeCancelledRuns(ids, reason)
+		d.mu.Lock()
+		if err != nil {
 			admissionHTTPFailure(w, err)
 			return
 		}

@@ -40,7 +40,6 @@ type Daemon struct {
 	ready       chan struct{}
 	quit        chan struct{}
 	shutdownOne sync.Once
-	finalizers  sync.WaitGroup
 	connections sync.WaitGroup
 
 	events      eventWindow
@@ -307,25 +306,6 @@ func (d *Daemon) finalShutdown() {
 		d.cfg.logf("final persist: %v", err)
 	}
 	d.awaitAPI(apiDrainWindow)
-	d.awaitFinalizers(FinalizeDrainWindow)
-}
-
-// safety: a finalize is the only record that an orphaned run ended, and the
-// host closes the store as soon as Run returns, so an in-flight one is drained
-// rather than left to fail against a closed handle.
-func (d *Daemon) awaitFinalizers(within time.Duration) {
-	done := make(chan struct{})
-	go func() {
-		d.finalizers.Wait()
-		close(done)
-	}()
-	timer := time.NewTimer(within)
-	defer timer.Stop()
-	select {
-	case <-done:
-	case <-timer.C:
-		d.cfg.logf("shutdown: a run finalize did not finish within %s", within)
-	}
 }
 
 func (d *Daemon) initLedger() error {
@@ -555,15 +535,11 @@ func validCostSource(source wingwire.CostSource) bool {
 	}
 }
 
-func cloneSemaphoreClaims(in []wingwire.SemaphoreClaim) []wingwire.SemaphoreClaim {
-	if len(in) == 0 {
-		return nil
-	}
-	return append([]wingwire.SemaphoreClaim(nil), in...)
-}
-
 func (d *Daemon) runCancelledLocked(runID string) bool {
 	if _, cancelled := d.cancelledRuns[runID]; cancelled {
+		return true
+	}
+	if _, cancelled := d.cancelledRuns[string(wingwire.HolderRef(runID).RunID())]; cancelled {
 		return true
 	}
 	return d.ledger.Orphaned(runID)

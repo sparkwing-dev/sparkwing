@@ -25,9 +25,6 @@ import (
 
 var ErrNotElected = errors.New("wingd: another daemon is already elected")
 
-// FinalizeDrainWindow bounds admission's warning before the local runtime joins finalizers.
-const FinalizeDrainWindow = 10 * time.Second
-
 const (
 	defaultIdleTimeout = limits.LocalControllerIdleTimeout
 

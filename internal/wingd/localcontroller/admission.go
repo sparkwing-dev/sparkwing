@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log/slog"
 
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
@@ -28,12 +27,6 @@ func (c *localController) IsRunTerminal(runID wingwire.RunID) (bool, error) {
 	}
 	row, err := c.tenant.ReadRun(context.Background(), string(runID))
 	return terminal(row.State) || row.CancelRequestedAt != nil, err
-}
-
-func (c *localController) FinalizeRun(runID string) {
-	if err := c.FinalizeCancelledRuns([]string{runID}, "admission connection lost"); err != nil {
-		slog.Error("wingd: cancel disconnected run", "run", runID, "error", err)
-	}
 }
 
 func (c *localController) FinalizeCancelledRuns(runIDs []string, reason string) error {
