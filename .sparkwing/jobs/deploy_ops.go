@@ -21,6 +21,7 @@ import (
 	"github.com/google/go-containerregistry/pkg/name"
 	"github.com/google/go-containerregistry/pkg/v1/remote"
 	"github.com/google/go-containerregistry/pkg/v1/remote/transport"
+	"golang.org/x/mod/module"
 	"golang.org/x/mod/semver"
 
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
@@ -395,8 +396,8 @@ func (d *deployer) buildCandidate(ctx context.Context, version string) (deployIm
 				return err
 			}
 		}
-		if !serviceBuildStamp.MatchString(out.Version) && (!semver.IsValid(out.Version) || semver.Prerelease(out.Version) != "") {
-			return fmt.Errorf("deploy version %q must be a release or service build stamp vX.Y.Z-N-gSHA", out.Version)
+		if !serviceBuildStamp.MatchString(out.Version) && !module.IsPseudoVersion(out.Version) && (!semver.IsValid(out.Version) || semver.Prerelease(out.Version) != "") {
+			return fmt.Errorf("deploy version %q must be a release or Go pseudo-version", out.Version)
 		}
 		out.Controller.Tag, out.Runner.Tag = out.Version, out.Version
 		schema, err := os.ReadFile(filepath.Join(d.repoDir, deployStoreSchema))

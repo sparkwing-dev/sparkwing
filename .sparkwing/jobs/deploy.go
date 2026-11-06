@@ -12,7 +12,7 @@ import (
 
 type DeployArgs struct {
 	DryRun          bool   `flag:"dry-run" desc:"Print every action the deploy would take, in order, and take none of them."`
-	Version         string `flag:"version" desc:"Version to build and tag the images as. Default: the main service build stamp vX.Y.Z-N-gSHA from git describe. A real deploy takes it only from sparkwing.yaml args."`
+	Version         string `flag:"version" desc:"Version to build and tag the images as. Default: Go's canonical pseudo-version for main. A real deploy takes it only from sparkwing.yaml args."`
 	StopAfter       string `flag:"stop-after" desc:"Stop after this stage: staging deploys and gates staging only. Default: promote to production. A real deploy takes it only from sparkwing.yaml args."`
 	PromoteProven   bool   `flag:"promote-proven" desc:"Skip staging and promote to production on the staging-gate record of the last successful default-branch deploy run, which must name the same image digests. A real deploy takes it only from sparkwing.yaml args."`
 	ControllerBase  string `flag:"controller-base" desc:"Controller runtime base by digest (build-images --runtime-base). Default: the qa.20 base."`

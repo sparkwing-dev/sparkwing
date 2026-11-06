@@ -119,7 +119,8 @@ func TestValuesPinsReadAndPin(t *testing.T) {
 
 func TestDeployVersionOrder(t *testing.T) {
 	versions := []string{
-		"v0.68.2", "v0.68.3", "v0.68.3-9-gabababababab", "v0.68.3-10-g0123456789ab", "v0.68.4",
+		"v0.68.2", "v0.68.3", "v0.68.3-9-gabababababab", "v0.68.3-10-g0123456789ab",
+		"v0.68.4-0.20261106041046-718a7591f23a", "v0.68.4-0.20261106041047-0123456789ab", "v0.68.4",
 	}
 	for i := 1; i < len(versions); i++ {
 		previous, err := deployVersionOrder(versions[i-1])
@@ -133,6 +134,14 @@ func TestDeployVersionOrder(t *testing.T) {
 	}
 	if zero, err := deployVersionOrder("v0.68.3-0-gabababababab"); err != nil || zero != "v0.68.3" {
 		t.Fatalf("zero-distance stamp = %s, %v", zero, err)
+	}
+}
+
+func TestDeployPseudoVersionUsesSemverOrder(t *testing.T) {
+	version := "v0.69.3-0.20261106041046-718a7591f23a"
+	ordered, err := deployVersionOrder(version)
+	if err != nil || ordered != version || semver.Compare(version, "v0.69.2") <= 0 || semver.Compare(version, "v0.69.3") >= 0 {
+		t.Fatalf("pseudo-version %q must sort between current and next release unchanged: %q, %v", version, ordered, err)
 	}
 }
 
@@ -1191,9 +1200,16 @@ func TestDeployBuildsUntaggedMainWithoutARelease(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := "v0.68.3-1-g" + f.head[:12]
+	committed, err := time.Parse(time.RFC3339, deployGitIn(t, f.repo, "show", "-s", "--format=%cI", "HEAD"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "v0.68.4-0." + committed.UTC().Format("20060102150405") + "-" + f.head[:12]
 	if images.Version != want || len(f.registry.published) != 1 {
 		t.Fatalf("untagged main build = %+v, publications=%v", images, f.registry.published)
+	}
+	if images.Controller.Tag != want || images.Runner.Tag != want || f.registry.published[0].Version != want {
+		t.Fatalf("candidate version differs across images: %+v, publication=%+v", images, f.registry.published[0])
 	}
 	if tags := deployGitIn(t, f.repo, "tag", "--points-at", "HEAD"); tags != "" {
 		t.Fatalf("deploy requires a release tag at HEAD: %s", tags)
@@ -1232,5 +1248,17 @@ func TestDeployStagingGateStartsBothRunsBeforeWaiting(t *testing.T) {
 	reference := slices.IndexFunc(f.calls, func(call string) bool { return strings.Contains(call, "pipeline trigger hello") })
 	if reference < 0 || firstWait <= reference {
 		t.Fatalf("staging probes must overlap: %v", f.calls)
+	}
+}
+
+func TestDeployBuildsReleaseTagUnchanged(t *testing.T) {
+	f := newFakeDeploy(t)
+	deployGitIn(t, f.repo, "tag", "-a", "v0.69.2", "-m", "release")
+	images, err := f.deployer(false).buildCandidate(t.Context(), "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if images.Version != "v0.69.2" || images.Controller.Tag != "v0.69.2" || images.Runner.Tag != "v0.69.2" || f.registry.published[0].Version != "v0.69.2" {
+		t.Fatalf("release version changed: %+v, publications=%+v", images, f.registry.published)
 	}
 }

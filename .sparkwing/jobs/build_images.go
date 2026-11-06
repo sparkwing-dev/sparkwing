@@ -6,6 +6,10 @@ import (
 	"os"
 	"regexp"
 	"strings"
+	"time"
+
+	"golang.org/x/mod/module"
+	"golang.org/x/mod/semver"
 
 	sparkwing "github.com/sparkwing-dev/sparkwing/sparkwing"
 )
@@ -23,7 +27,7 @@ type BuildImages struct {
 type BuildImagesArgs struct {
 	Registry    string `flag:"registry" desc:"Optional registry prefix (e.g. an ECR host). When set, images are tagged <registry>/<component>:<tag>."`
 	Push        bool   `flag:"push" desc:"Build multi-arch (linux/amd64,linux/arm64) and push to the registry. Requires --registry."`
-	Tag         string `flag:"tag" desc:"Override the image tag. Default: the service build stamp vX.Y.Z-N-gSHA from git describe, after fetching tags from origin."`
+	Tag         string `flag:"tag" desc:"Override the image tag. Default: Go's canonical pseudo-version for main, after fetching release tags from origin."`
 	SkipWeb     bool   `flag:"skip-web-bundle" desc:"Skip the Next.js SPA build. Use when internal/web/next-out/ is already current (faster iteration)."`
 	RuntimeBase bool   `flag:"runtime-base" desc:"Build each Dockerfile's runtime stage, without a binary, as <component>-base for publish-images to append signed binaries to. Requires --push; the builder must run linux/arm64 natively or under emulation."`
 	QATrust     bool   `flag:"qatrust" desc:"Build with the qatrust tag: trust the QA release key and read policy and engines from https://qa-releases.sparkwing.dev. Pair with --tag set to the QA pre-release version (e.g. v0.68.0-qa.1). Never for production images."`
@@ -50,7 +54,7 @@ func (BuildImages) Help() string {
 
 func (BuildImages) Examples() []sparkwing.Example {
 	return []sparkwing.Example{
-		{Comment: "Local single-arch build, tagged vX.Y.Z-N-gSHA", Command: "sparkwing run build-images"},
+		{Comment: "Local single-arch build with Go's canonical pseudo-version", Command: "sparkwing run build-images"},
 		{Comment: "Push multi-arch to a registry", Command: "sparkwing run build-images -- --registry=123456789012.dkr.ecr.us-west-2.amazonaws.com --push"},
 		{Comment: "Reuse a current SPA bundle to skip the slow npm step", Command: "sparkwing run build-images -- --skip-web-bundle"},
 		{Comment: "QA-flavored images for a QA pre-release", Command: "sparkwing run build-images -- --qatrust --tag v0.68.0-qa.1 --registry=123456789012.dkr.ecr.us-west-2.amazonaws.com --push"},
@@ -139,8 +143,7 @@ func (p *BuildImages) resolveTag(ctx context.Context) error {
 	return nil
 }
 
-// safety: the controller and runner enforce signed version policy only for a release or this exact stamp; any
-// other version is a development build, which a hosted controller and Cloud launcher refuse to run.
+// safety: production may still run an older git-describe stamp whose ordering needs its release base.
 var serviceBuildStamp = regexp.MustCompile(`^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)-(0|[1-9][0-9]*)-g[0-9a-f]{7,40}$`)
 
 func describeServiceBuild(ctx context.Context) (string, error) {
@@ -161,16 +164,40 @@ func resolveServiceBuild(ctx context.Context, git func(context.Context, ...strin
 	if _, err := git(ctx, fetch...); err != nil {
 		return "", fmt.Errorf("fetch release tags so the image version names its release base, or pass --tag: %w", err)
 	}
-	tag, err := git(ctx, "describe", "--tags", "--long", "--abbrev=12",
-		"--match", "v[0-9]*.[0-9]*.[0-9]*", "--exclude", "*-*", "HEAD")
+	tags, err := git(ctx, "tag", "--merged", "HEAD", "--list", "v*")
 	if err != nil {
-		return "", fmt.Errorf("describe HEAD from its newest stable release tag: %w", err)
+		return "", fmt.Errorf("list reachable release tags: %w", err)
 	}
-	tag = strings.TrimSpace(tag)
-	if !serviceBuildStamp.MatchString(tag) {
-		return "", fmt.Errorf("git describe gave %q, not the service build stamp vX.Y.Z-N-gSHA; fetch the stable release tags or pass --tag", tag)
+	base := ""
+	for tag := range strings.FieldsSeq(tags) {
+		if semver.Canonical(tag) == tag && semver.Prerelease(tag) == "" && semver.Compare(tag, base) > 0 {
+			base = tag
+		}
 	}
-	return tag, nil
+	if base == "" {
+		return "", fmt.Errorf("HEAD has no stable release base; fetch the stable release tags or pass --tag")
+	}
+	commit, err := git(ctx, "show", "-s", "--format=%H%n%cI", "HEAD")
+	if err != nil {
+		return "", fmt.Errorf("read candidate commit and time: %w", err)
+	}
+	fields := strings.Fields(commit)
+	if len(fields) != 2 || len(fields[0]) != 40 {
+		return "", fmt.Errorf("invalid candidate commit and time %q", commit)
+	}
+	committed, err := time.Parse(time.RFC3339, fields[1])
+	if err != nil {
+		return "", fmt.Errorf("parse candidate commit time: %w", err)
+	}
+	tagged, err := git(ctx, "rev-parse", "refs/tags/"+base+"^{commit}")
+	if err != nil {
+		return "", fmt.Errorf("resolve release base commit: %w", err)
+	}
+	if strings.TrimSpace(tagged) == fields[0] {
+		return base, nil
+	}
+	// bug: Go ignores pseudo-version tags and derives its stamp from the release base and commit metadata.
+	return module.PseudoVersion(semver.Major(base), base, committed, fields[0][:12]), nil
 }
 
 func (p *BuildImages) buildWebBundle(ctx context.Context) error {

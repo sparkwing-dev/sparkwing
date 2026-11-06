@@ -31,6 +31,8 @@ unlock.
 
 ### Fixed
 
+- **deploy:** Untagged main builds use Go's canonical pseudo-version for images and version checks, so trimmed builds match their module stamp and sort after the previous release. Release-tag builds keep their existing version and tag handling.
+
 - **local controller:** Shutdown keeps admission reachable until embedded hosts finish cleanup and completes even when drain persistence fails. Release cleanup gives up after one second when the controller cannot answer. Terminal retry receipts stay bounded, and per-job CPU readings keep their own measurement intervals.
 
 - **daemon:** CLI connections reuse compatible running daemons across version differences, including repo-pinned and source builds, so they leave active runs running. Protocol and wire-build mismatches fail without automatic draining or replacement and name the explicit restart command.

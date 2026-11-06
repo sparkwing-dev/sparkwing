@@ -381,8 +381,7 @@ func dirtyLogLines(logs string) []string {
 	return out
 }
 
-// safety: git describe counts sort numerically after their release base, while
-// semver alone sorts them before it and compares counts lexically.
+// safety: legacy git-describe stamps sort after their release base and before Go pseudo-versions.
 func deployVersionOrder(version string) (string, error) {
 	if !semver.IsValid(version) {
 		return "", fmt.Errorf("%q is not a version this pipeline can order", version)
@@ -399,7 +398,7 @@ func deployVersionOrder(version string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return next + "-main." + count, nil
+	return next + "-0.0." + count, nil
 }
 
 type renderedDoc struct {

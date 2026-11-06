@@ -430,9 +430,13 @@ images with buildx under QEMU and joins both architectures under one index per t
 Production deploys follow main. Releases are separate and occasional: the release tag, 38 CLI
 assets, npm packages, signed version index and site publication stay in the release workflow.
 The `deploy` pipeline builds its own service images and needs no tag at HEAD or GitHub release run.
-It fetches stable tags for the release base, then uses `git describe --tags --long` to stamp
-`vX.Y.Z-N-gSHA`, the format the hosted controller and launcher accept. Production orders those
-stamps after their base release, compares the commit counts numerically, and refuses older images.
+It fetches stable tags for the release base, then computes Go's canonical pseudo-version
+`vX.Y.(Z+1)-0.YYYYMMDDhhmmss-SHA12` from the highest reachable stable tag, the commit's UTC
+committer time and its first 12 SHA characters. For example, a commit after `v0.69.2` builds as
+`v0.69.3-0.20261106041046-718a7591f23a`. This version matches Go's module stamp without creating
+a temporary tag. The same version names image tags, labels, version checks and summaries.
+Production compares it with semantic version ordering, after the base release and before the
+next release, and refuses older images. Release-tag builds keep their exact release version.
 
 `build-images` builds linux/amd64 and linux/arm64 binaries with `bin/build-release-target.sh` and
 publishes them through `publish-images`, reusing the image pair when its immutable version tags
@@ -474,7 +478,7 @@ exceed them. The watched staging deploy should record phase durations before set
 
 | Phase | Estimated elapsed time | Bound or main cost in code |
 | --- | --- | --- |
-| Resolve version, role and existing images | 2-15 seconds | Git fetch/describe, STS, ECR lookups. A matching published pair skips all builds. |
+| Resolve version, role and existing images | 2-15 seconds | Git fetch and commit metadata, STS, ECR lookups. A matching published pair skips all builds. |
 | Dashboard | 30 seconds-3 minutes when rebuilt, seconds on validated reuse | `bin/build-web.sh --reuse` validates its existing input/output receipt before reusing the bundle. |
 | Two Linux binary builds | 1-6 minutes warm, 5-20 minutes cold | amd64 then arm64, each compiling the CLI, controller and runner. Whole build job budget: 45 minutes. |
 | Publish and verify both multi-arch images | 30 seconds-3 minutes | One binary layer per platform over pinned runtime bases. Verification reads the published binaries back. |
@@ -489,9 +493,9 @@ revision, skipping unchanged rollout digests, and shared runtime base layers alr
 Different commits still stamp different binaries and revision labels, so a source-unrelated change
 does not automatically produce the same image digest.
 
-Parallel architecture builds are a follow-up: `build-release-target.sh` creates and deletes a
-shared temporary Git tag, so running its two invocations concurrently would race. Resolve tag
-ownership first, then measure CPU and memory contention. Parallel controller/runner publication
+Parallel architecture builds are a follow-up. Untagged main builds no longer create a shared
+Git tag, so measure CPU and memory contention before running them concurrently. Release builds
+that create a temporary tag still need coordinated tag ownership. Parallel controller/runner publication
 can also overlap independent registry I/O. Persistent Go caches reduce cold builds, while ECR's
 existing content-addressed base layers already avoid uploading unchanged runtime layers. An Argo
 GitHub webhook can replace polling with prompt sync without widening the deploy role's access.

@@ -19,17 +19,19 @@ cleanup() {
   if [ -n "$created_tag" ]; then git tag -d "$TAG" >/dev/null; fi
 }
 trap cleanup EXIT
-# safety: -trimpath drops -X from build info, so the engine's version check reads
-# the module version Go stamps from an exact tag on a clean checkout. A tag this
-# script creates is removed on exit so it never reaches a push.
-if tagged="$(git rev-parse -q --verify "refs/tags/$TAG^{commit}")"; then
-  if [ "$tagged" != "$(git rev-parse HEAD)" ]; then
-    echo "tag $TAG does not name the checked-out commit" >&2
-    exit 2
+# safety: -trimpath drops -X from build info, so the version check reads Go's
+# module stamp. Pseudo-versions come from commit metadata without a tag. Release
+# builds still use an exact tag, removing any tag created here on exit.
+if [[ ! "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+-0\.[0-9]{14}-[0-9a-f]{12}$ ]]; then
+  if tagged="$(git rev-parse -q --verify "refs/tags/$TAG^{commit}")"; then
+    if [ "$tagged" != "$(git rev-parse HEAD)" ]; then
+      echo "tag $TAG does not name the checked-out commit" >&2
+      exit 2
+    fi
+  else
+    git tag "$TAG"
+    created_tag=1
   fi
-else
-  git tag "$TAG"
-  created_tag=1
 fi
 # safety: only a QA pre-release may trust the QA key and origin.
 want_qatrust=
