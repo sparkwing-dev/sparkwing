@@ -86,10 +86,51 @@ func (s preparedTriggerSource) checkReachable(ctx context.Context) error {
 			return err
 		}
 		if refs == "" {
-			return &apierr.Error{Code: apierr.InvalidArgs, Message: "selected source commit is not on origin", Hint: "push both selected commits or trigger with --working-tree"}
+			fetched, err := s.checkout.fetchedFromOrigin(ctx, sha)
+			if err != nil {
+				return err
+			}
+			if !fetched {
+				return &apierr.Error{Code: apierr.InvalidArgs, Message: "selected source commit is not on origin", Hint: "push both selected commits or trigger with --working-tree"}
+			}
 		}
 	}
 	return nil
+}
+
+func (c triggerCheckout) fetchedFromOrigin(ctx context.Context, sha string) (bool, error) {
+	origin, err := c.read(ctx, "remote", "get-url", "origin")
+	if err != nil {
+		return false, err
+	}
+	file, err := c.read(ctx, "rev-parse", "--git-path", "FETCH_HEAD")
+	if err != nil {
+		return false, err
+	}
+	if !filepath.IsAbs(file) {
+		file = filepath.Join(c.directory, file)
+	}
+	data, err := os.ReadFile(file)
+	if errors.Is(err, os.ErrNotExist) {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("inspect trigger fetch evidence: %w", err)
+	}
+	// bug: fetching an exact commit leaves FETCH_HEAD but no origin-tracking branch.
+	if parsed, err := url.Parse(origin); err == nil && parsed.Host != "" {
+		parsed.User = nil
+		origin = parsed.String()
+	} else if _, remote, ok := strings.Cut(origin, "@"); ok {
+		origin = remote
+	}
+	want := sha + "\t\t'" + sha + "' of " + strings.TrimSuffix(strings.TrimRight(origin, "/"), ".git")
+	for line := range strings.SplitSeq(string(data), "\n") {
+		if line == want {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 func prepareTriggerSource(ctx context.Context, input triggerSourceInput) (preparedTriggerSource, error) {

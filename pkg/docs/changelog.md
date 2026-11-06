@@ -31,6 +31,8 @@ unlock.
 
 ### Fixed
 
+- **CLI:** Pipeline triggers accept exact commits fetched from origin in shallow runner checkouts, so jobs can trigger another pipeline at the pushed commit without origin-tracking branches. Both execution and pipeline-code commits still require origin fetch evidence.
+- **logs:** Public runner environment values such as HOME and PATH remain readable. Operator-supplied values and embedded proxy credentials remain masked.
 - **deploy:** Untagged main builds use Go's canonical pseudo-version for images and version checks, so trimmed builds match their module stamp and sort after the previous release. Release-tag builds keep their existing version and tag handling. Canonical pseudo-version service images pass controller, launcher and Cloud job startup checks while retaining signed engine policy enforcement.
 - **local controller:** Requester secrets persist encrypted across controller restarts and are deleted at terminal run state. Filesystem object URL signing keys also persist encrypted, preserving issued URLs until expiry. Schema 32 upgrades recognized stores in place; preserve the existing local secrets key with backups. See [the migration guide](docs/migrations/_unreleased.md#upgrade-the-store-in-place-to-schema-baseline-32).
 

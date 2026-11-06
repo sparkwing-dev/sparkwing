@@ -22,7 +22,7 @@ Every profile with a controller follows the same dispatch flow:
 ```
 sparkwing pipeline trigger <pipeline> --profile <profile>
   → CLI reads the origin URL + branch/SHA from your checkout and POSTs the trigger
-  → CLI requires the commit on an origin-tracking branch
+  → CLI checks both selected commits against local origin fetch records
   → controller enqueues the run
   → a runner in the pool claims it on its next poll
   → runner clones the ref and executes the pipeline
@@ -40,8 +40,14 @@ limit, exclude unneeded files with `.gitignore`. Tracked files must first be
 untracked with `git rm --cached PATH`. Alternatively, commit and run `git push`,
 then trigger without `--working-tree` to fetch the commit.
 
-The default requires an `origin` URL and a pushed commit. `--working-tree`
-needs a local Git checkout with a HEAD commit and an origin URL. It scans the
+The default requires an `origin` URL and a pushed commit. Both the execution
+commit and any separate pipeline-code commit must appear on an origin-tracking
+branch or in an exact-SHA `FETCH_HEAD` record from that origin. Sparkwing's
+runner checkouts fetch by SHA, so a job can trigger another pipeline at its
+fetched commit without fetching branch tips first. These local records check
+availability, not repository trust. The controller still decides source authority.
+
+`--working-tree` needs a local Git checkout with a HEAD commit and an origin URL. It scans the
 final bundle and source metadata for configured local secret values and uploads the scanned copy
 through the controller's signed storage binding before admitting the run.
 Source acquisition ignores Git replacement objects, so a selected commit ID
