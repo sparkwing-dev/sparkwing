@@ -103,11 +103,10 @@ func (cfg Config) Open(ctx context.Context, home string) (_ wingd.LocalControlle
 	if err != nil {
 		return nil, err
 	}
-	return &localController{engine: binding.Controller, State: services.State, services: services, store: s, operator: s.AsOperator(), tenant: binding.Tenant, queue: queue}, nil
+	return &localController{State: services.State, services: services, store: s, operator: s.AsOperator(), tenant: binding.Tenant, queue: queue}, nil
 }
 
 type localController struct {
-	engine *controller.EngineController
 	State
 	services Services
 	store    *store.Store

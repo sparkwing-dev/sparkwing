@@ -51,7 +51,9 @@ func TestAdmissionUsesOwnedStoreDuringDrain(t *testing.T) {
 		t.Fatal(err)
 	}
 	cancel()
-	owner.FinalizeRun("run")
+	if err := owner.FinalizeCancelledRuns([]string{"run"}, "holder process exited"); err != nil {
+		t.Fatal(err)
+	}
 	row, err := binding.Tenant.ReadRun(t.Context(), "run")
 	if err != nil || row.CancelRequestedAt == nil || row.CancelReason == "" {
 		t.Fatalf("disconnect during drain: cancelled=%v reason=%q: %v", row.CancelRequestedAt, row.CancelReason, err)

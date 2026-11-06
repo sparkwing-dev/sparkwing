@@ -168,6 +168,9 @@ func transitionRunTx(ctx context.Context, tx *storeTx, team Team, change runstat
 		}
 	}
 	if row.StateDigest == digest && reflect.DeepEqual(row.StateActor, change.Actor) {
+		if change.Cause == runstate.RunCancel && row.CancelRequestedAt != nil {
+			tx.recordRunCancellation(team, row.ID)
+		}
 		return runstate.Applied{Replayed: true, StateSeq: row.StateSeq, Outcome: row.State, Reason: change.Reason, CancelRequested: row.CancelRequestedAt != nil && row.FinishedAt == nil}, nil
 	}
 	refusal := func() (runstate.Applied, error) {
@@ -282,6 +285,9 @@ func transitionRunTx(ctx context.Context, tx *storeTx, team Team, change runstat
 				}
 			}
 		}
+	}
+	if change.Cause == runstate.RunCancel {
+		tx.recordRunCancellation(team, row.ID)
 	}
 	return runstate.Applied{StateSeq: row.StateSeq, Outcome: row.State, Reason: change.Reason, CancelRequested: change.Cause == runstate.RunCancel}, nil
 }

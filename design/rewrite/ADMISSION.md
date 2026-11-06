@@ -76,6 +76,10 @@ Ticket reads can long poll for about 20 seconds. A lost poll retries the same
 ticket and retains its arrival. Release and cancel are idempotent. Lease watches
 return committed eviction, orphan cancellation and run cancellation immediately.
 In-memory wake channels only prompt another read of the committed ticket.
+`Store.SetRunCancellationObserver` forwards cancellation after the SQL transaction
+commits, including cancellation from recovery, deletion and credit enforcement.
+Rolled-back transactions do not notify. Replayed cancellation retries failed
+notification without treating a committed transaction as a SQL conflict.
 
 Every ticket records its holder's root PID and `procgroup.ProcessBirth` start
 identity. The controller verifies process ownership against the socket peer.

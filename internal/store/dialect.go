@@ -127,6 +127,7 @@ type storeTx struct {
 	ledgerLocked         bool
 	insertedAuthorities  []capability.AuthorityRef
 	finishedLocalSecrets []localSecretKey
+	cancelledRuns        []runCancellationKey
 	appAdmission         *GitHubAppAdmission
 	scheduleAdmission    *scheduleAdmission
 	unpricedDemand       *UnitDemand
@@ -273,7 +274,7 @@ func (t *storeTx) Commit() error {
 	for _, key := range t.finishedLocalSecrets {
 		t.store.localSecrets.Delete(key)
 	}
-	return nil
+	return t.notifyRunCancellations()
 }
 func (t *storeTx) Rollback() error { return rollbackTx(t.tx) }
 

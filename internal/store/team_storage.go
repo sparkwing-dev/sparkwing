@@ -41,7 +41,7 @@ func retryConflict(ctx context.Context, attempt func() error, sleep func(context
 	const attempts, base, ceiling = 5, 10 * time.Millisecond, 250 * time.Millisecond
 	var err error
 	for i := range attempts {
-		if err = attempt(); err == nil || (!isPGConflict(err) && !errors.Is(err, errAuthorityChanged)) || i == attempts-1 {
+		if err = attempt(); err == nil || isRunCancellationNotificationError(err) || (!isPGConflict(err) && !errors.Is(err, errAuthorityChanged)) || i == attempts-1 {
 			return err
 		}
 		if sleep(ctx, rand.N(min(base<<i, ceiling))) != nil {

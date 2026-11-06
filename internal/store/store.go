@@ -62,6 +62,7 @@ const retrySourceManual = "manual"
 // underlying database is SQLite or Postgres depending on which
 // constructor opened it; dialect-aware methods branch on s.dialect.
 type Store struct {
+	runCancellations   atomic.Pointer[runCancellationObserver]
 	creditMeteringOff  atomic.Bool
 	cloudStorage       atomic.Bool
 	controllerEpoch    int64
@@ -340,7 +341,7 @@ func retryOnBusyWithSleep(fn func() error, sleep func(time.Duration)) error {
 }
 
 func isBusyErr(err error) bool {
-	if err == nil {
+	if err == nil || isRunCancellationNotificationError(err) {
 		return false
 	}
 	if isPGConflict(err) {
@@ -353,6 +354,9 @@ func isBusyErr(err error) bool {
 }
 
 func isPGConflict(err error) bool {
+	if isRunCancellationNotificationError(err) {
+		return false
+	}
 	var pgErr *pgconn.PgError
 	return errors.As(err, &pgErr) && (pgErr.Code == "40P01" || pgErr.Code == "40001")
 }
