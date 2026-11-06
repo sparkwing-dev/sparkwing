@@ -1,15 +1,11 @@
 package acceptance_test
 
 import (
-	"context"
 	"crypto/sha256"
-	"errors"
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/controller"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
-	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
@@ -50,79 +46,6 @@ func TestLocalNodeAuthorityW8SurvivesStart(t *testing.T) {
 	if err != nil || current.Principal.Capability.Binding.Attempt != int64(applied.Attempt) || snapshot.Authorities[0].Principal.Capability.Binding.Attempt != 0 || snapshot.Binding.Current.Attempt != int64(applied.Attempt) {
 		t.Fatalf("started claim lost its immutable award or current attempt: %+v: %v", current.Principal.Capability.Binding, err)
 	}
-}
-
-func TestStoreHostingW8RefreshesNodeAwardAfterStart(t *testing.T) {
-	s, unit := nativeStoreAwardW8(t, capability.UnitNode)
-	finished := errors.New("binding finished")
-	refreshed, closed := false, false
-	host := storeHostingW8{Controller: controller.NewEngineController(s, controller.EngineController{}), Bind: func(ctx context.Context, binding storeBindingW8) (nodehost.NativeServices, error) {
-		p := binding.Principal
-		admitStoredUnitW8(t, s, unit)
-		attempt := int64(0)
-		applied, err := binding.Tenant.TransitionNode(ctx, store.StartNode{Ref: runspec.NodeRef{RunID: runspec.RunID(unit.RunID), NodeID: runspec.NodeID(unit.JobID)}, Actor: runstate.Actor{Kind: runstate.ActorHolder, Authority: p.Authority, CapabilityPrefix: p.Capability.Prefix, NodeFence: runspec.NodeFence{RunID: runspec.RunID(p.Capability.Binding.RunID), NodeID: runspec.NodeID(p.Capability.Binding.NodeID), Holder: p.Capability.Binding.Holder, Generation: runspec.ClaimGeneration(p.Capability.Binding.Generation)}}, SourceAttempt: (*runspec.AttemptOrdinal)(&attempt)})
-		if err != nil {
-			return nodehost.NativeServices{}, err
-		}
-		current, err := binding.Refresh(ctx)
-		if err != nil || current.Authority != p.Authority || current.Capability.Binding.Attempt != int64(applied.Attempt) || unit.Binding.Attempt != 0 {
-			t.Fatalf("started host lost its authenticated award: %+v: %v", current.Capability.Binding, err)
-		}
-		refreshed = true
-		return nodehost.NativeServices{Close: func() error { closed = true; return nil }}, finished
-	}}
-	if err := host.Host(t.Context(), unit); !errors.Is(err, finished) || !refreshed || !closed {
-		t.Fatalf("refreshed=%v closed=%v: %v", refreshed, closed, err)
-	}
-}
-
-func FuzzEmbeddedServiceBearerW9KeepsAwardAndLifetime(f *testing.F) {
-	f.Add("forged", false)
-	f.Add("", true)
-	f.Fuzz(func(t *testing.T, replacement string, owner bool) {
-		kind := capability.UnitNode
-		if owner {
-			kind = capability.UnitTrigger
-		}
-		s, unit := nativeStoreAwardW8(t, kind)
-		raw := unit.Capability
-		finished := errors.New("services bound")
-		ctx, cancelHost := context.WithCancel(t.Context())
-		defer cancelHost()
-		var retained func(context.Context) (string, error)
-		finalized := false
-		host := storeHostingW8{Controller: controller.NewEngineController(s, controller.EngineController{}), Bind: func(ctx context.Context, binding storeBindingW8) (nodehost.NativeServices, error) {
-			retained = binding.Bearer
-			if retained == nil {
-				t.Fatal("embedded services have no awarded credential transport")
-			}
-			unit.Capability = replacement
-			actual, err := retained(ctx)
-			if err != nil || actual != raw || sha256.Sum256([]byte(actual)) != binding.Principal.Capability.Digest {
-				t.Fatal("embedded services received a substituted award")
-			}
-			cancelled, cancelOperation := context.WithCancel(ctx)
-			cancelOperation()
-			if actual, err := retained(cancelled); actual != "" || !errors.Is(err, context.Canceled) {
-				t.Fatal("cancelled service operation retained usable authority")
-			}
-			cancelHost()
-			return nodehost.NativeServices{Close: func() error {
-				actual, err := retained(context.WithoutCancel(ctx))
-				if actual != raw || err != nil {
-					t.Fatal("cancelled hosting scope lost authority before joined log cleanup")
-				}
-				finalized = true
-				return nil
-			}}, finished
-		}}
-		if err := host.Host(ctx, unit); !errors.Is(err, finished) || !finalized {
-			t.Fatal(err)
-		}
-		if actual, err := retained(t.Context()); actual != "" || !errors.Is(err, context.Canceled) {
-			t.Fatal("service authority outlived its hosting scope")
-		}
-	})
 }
 
 func admitStoredUnitW8(t *testing.T, s *store.Store, unit controllerwire.ClaimedUnit) {

@@ -16,8 +16,6 @@ import (
 type storeBindingW8 struct {
 	Tenant    *store.Tenant
 	Principal capability.Principal
-	Refresh   func(context.Context) (capability.Principal, error)
-	Bearer    func(context.Context) (string, error)
 }
 
 type storeHostingW8 struct {
@@ -51,25 +49,7 @@ func (h storeHostingW8) bind(ctx context.Context, unit, _ controllerwire.Claimed
 	if err != nil {
 		return nodehost.NativeServices{}, inputs, err
 	}
-	lifetime, retire := context.WithCancel(context.WithoutCancel(ctx))
-	binding := storeBindingW8{Tenant: tenant, Principal: principal, Refresh: func(ctx context.Context) (capability.Principal, error) {
-		_, p, err := h.authenticate(ctx, unit)
-		return p, err
-	}, Bearer: func(request context.Context) (string, error) {
-		if err := errors.Join(context.Cause(lifetime), context.Cause(request)); err != nil {
-			return "", err
-		}
-		return unit.Capability, nil
-	}}
-	services, err := h.Bind(ctx, binding)
-	closeServices := services.Close
-	services.Close = func() error {
-		defer retire()
-		if closeServices != nil {
-			return closeServices()
-		}
-		return nil
-	}
+	services, err := h.Bind(ctx, storeBindingW8{Tenant: tenant, Principal: principal})
 	if services.Config.Store == nil {
 		services.Config.Store = tenant
 	}

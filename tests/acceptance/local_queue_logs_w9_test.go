@@ -12,14 +12,16 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controller"
 	"github.com/sparkwing-dev/sparkwing/internal/controller/client"
+	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
+	"github.com/sparkwing-dev/sparkwing/internal/runners"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/storage/logseg"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
 
-func TestEmbeddedOwnerSealsLogsDuringCancelledHostCleanup(t *testing.T) {
+func TestHTTPOwnerSealsLogsDuringCancelledHostCleanup(t *testing.T) {
 	s, unit := nativeStoreAwardW8(t, capability.UnitTrigger)
 	objects, err := blob.NewFilesystem(blob.FilesystemOptions{Directory: t.TempDir(), Endpoint: "http://local", SigningKey: bytes.Repeat([]byte{42}, 32)})
 	if err != nil {
@@ -41,34 +43,38 @@ func TestEmbeddedOwnerSealsLogsDuringCancelledHostCleanup(t *testing.T) {
 	finished := errors.New("host cancelled after log append")
 	var principal capability.Principal
 	var subject blob.LogSubject
-	var retired func(context.Context) (string, error)
+	var private *client.LocalHostClient
 	var cleanupErr error
-	host := storeHostingW8{Controller: controller.NewEngineController(s, controller.EngineController{}), Bind: func(ctx context.Context, binding storeBindingW8) (nodehost.NativeServices, error) {
-		retired, principal = binding.Bearer, binding.Principal
-		private, err := client.NewLocalHostClient(client.EngineOptions{URL: "http://local", HTTP: transport, Bearer: binding.Bearer}, unit.RunID)
+	host := runners.Hosting{ControllerURL: "http://local", HTTP: transport, Bind: func(ctx context.Context, unit controllerwire.ClaimedUnit, _ controllerwire.Controller) (nodehost.NativeServices, capability.Principal, error) {
+		var err error
+		private, err = client.NewLocalHostClient(client.EngineOptions{URL: "http://local", HTTP: transport, Bearer: func(ctx context.Context) (string, error) { return unit.Capability, context.Cause(ctx) }}, unit.RunID)
 		if err != nil {
-			return nodehost.NativeServices{}, err
+			return nodehost.NativeServices{}, principal, err
 		}
 		t.Cleanup(func() { _ = private.Close() })
+		principal, err = private.Principal(ctx)
+		if err != nil {
+			return nodehost.NativeServices{}, principal, err
+		}
 		subject = blob.LogSubject{Kind: blob.LogOwnerUnit, Team: principal.Capability.Team, RunID: unit.RunID, Unit: &blob.LogUnit{Kind: blob.LogTrigger, Generation: principal.Capability.Binding.Generation}}
 		uploader, err := private.LogUploader(ctx, principal, subject)
 		if err != nil {
-			return nodehost.NativeServices{}, err
+			return nodehost.NativeServices{}, principal, err
 		}
 		sink, err := logseg.NewSink(ctx, uploader, logseg.Options{Subject: subject})
 		if err != nil {
-			return nodehost.NativeServices{}, err
+			return nodehost.NativeServices{}, principal, err
 		}
 		t.Cleanup(func() { _, _ = sink.Close(context.WithoutCancel(ctx), logseg.End{}) })
 		if err := sink.Append([]byte("last owner line\n")); err != nil {
-			return nodehost.NativeServices{}, err
+			return nodehost.NativeServices{}, principal, err
 		}
 		cancel()
 		return nodehost.NativeServices{Close: func() error {
 			_, err := sink.Close(context.WithoutCancel(ctx), logseg.End{})
 			cleanupErr = errors.Join(err, private.Close())
 			return cleanupErr
-		}}, finished
+		}}, principal, finished
 	}}
 	if err := host.Host(ctx, unit); !errors.Is(err, finished) || !errors.Is(err, context.Canceled) {
 		t.Fatal(err)
@@ -86,7 +92,7 @@ func TestEmbeddedOwnerSealsLogsDuringCancelledHostCleanup(t *testing.T) {
 	if err != nil || !result.Complete || output.String() != "last owner line\n" {
 		t.Fatalf("cancelled owner lost persisted final logs: complete=%t output=%q: %v", result.Complete, output.String(), err)
 	}
-	if raw, err := retired(t.Context()); raw != "" || !errors.Is(err, context.Canceled) {
-		t.Fatal("closed log services retained their bearer")
+	if _, err := private.Principal(t.Context()); err == nil {
+		t.Fatal("closed log services retained usable private authority")
 	}
 }
