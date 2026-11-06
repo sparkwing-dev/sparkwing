@@ -76,11 +76,13 @@ func (l *failedRuntimeListener) Accept() (net.Conn, error) { return nil, l.failu
 type drainingRuntimeListener struct {
 	net.Listener
 	once              sync.Once
+	closes            atomic.Int32
 	stopping, release chan struct{}
 	failure           error
 }
 
 func (l *drainingRuntimeListener) Close() error {
+	l.closes.Add(1)
 	l.once.Do(func() { close(l.stopping) })
 	<-l.release
 	return errors.Join(l.Listener.Close(), l.failure)
@@ -354,10 +356,12 @@ func TestLocalRuntimeJoinsAPIAndPreservesShutdownFailure(t *testing.T) {
 		closeFailure := errors.New("store close failed")
 		f := &runtimeControllerFixture{closeErr: closeFailure}
 		r := newRuntimeFixture(t, f)
+		var apiListener *drainingRuntimeListener
 		r.listen = func(network, address string) (net.Listener, error) {
 			listener := &runtimeListener{closed: make(chan struct{})}
 			if network == "unix" && address == r.layout.apiSock {
-				return &drainingRuntimeListener{Listener: listener, stopping: apiStopping, release: release, failure: failure}, nil
+				apiListener = &drainingRuntimeListener{Listener: listener, stopping: apiStopping, release: release, failure: failure}
+				return apiListener, nil
 			}
 			return listener, nil
 		}
@@ -375,6 +379,9 @@ func TestLocalRuntimeJoinsAPIAndPreservesShutdownFailure(t *testing.T) {
 		close(release)
 		if err := <-done; !errors.Is(err, failure) || !errors.Is(err, closeFailure) {
 			t.Fatalf("shutdown failures: %v", err)
+		}
+		if got := apiListener.closes.Load(); got != 1 {
+			t.Fatalf("API listener closed %d times, want one owner", got)
 		}
 	})
 }

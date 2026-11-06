@@ -325,12 +325,14 @@ running:
 	}
 	session.cancel()
 	workers.Wait()
-	d.closeAPIListener()
 	stopAPI()
 	// safety: API handlers must finish before their backing store closes.
 	if d.apiDone != nil {
 		<-d.apiDone
 	}
+	d.mu.Lock()
+	d.apiLn = nil
+	d.mu.Unlock()
 	d.removeSockets()
 	if errors.Is(err, context.Canceled) && ctx.Err() != nil {
 		err = nil
