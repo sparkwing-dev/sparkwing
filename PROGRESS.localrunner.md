@@ -1,52 +1,63 @@
 # Local runner migration progress
 
-Uncommitted continuation note. Step 3 remains incomplete. Do not land or push.
+Step 3 remains incomplete. Do not land or push. Keep this note uncommitted.
 
-Commits: `3252fbd5e` retries fresh claim polls across five seconds of consecutive
-controller transport failures (missing sockets/pipes included) and exposes
-`Loop.Drain`. Successful responses reset recovery. Claims are never replayed.
-Held hosts survive outages and drain joins them without cancelling their contexts.
+Prior session: `3252fbd5e` adds five-second claim transport recovery and graceful
+`Loop.Drain`. `652aedc23` reports runner-observed exits using optional
+`X-Sparkwing-Exited-At`, preserving existing command JSON and replay identity.
+`ce2f36095` documents those contracts. The lead gate passed that session.
 
-`652aedc23` captures observed job process exit before final log acknowledgement,
-cleanup and artifact/cache publication. Optional `X-Sparkwing-Exited-At` carries
-it to the controller. Older controllers ignore the header. Command JSON and
-persisted result replay identity stay unchanged. First committed observations
-survive replay. `ce2f36095` updates source docs, owners/guards and changelog.
-No SDK or store-schema changes. No detached runner is launched yet.
+This session: `558d50b1f`, `2cf25dd97`, `5fa90b2d9` add orphan session cleanup
+using the existing durable admission holder and measurement PID/start identities.
+The existing liveness worker inspects and kills sessions outside the admission
+mutex. Dead holders retain capacity until cleanup acknowledges emptiness.
+Receipts with roots survive pruning. Cancelled measured leases retain capacity
+until host release after joining the job. Cleanup observes controller cancellation
+between roots. Existing procgroup session kill has its own bounded wait and no
+context variant; the call has a safety nolint matching existing package precedent.
+No SDK, schema or wire-field change. Detached runner startup is still absent.
 
-Final passing checks: full runners/client/controllerwire/runstate suites;
-focused store/controller/nodehost reporting regressions; golangci fmt; lint of
-all seven changed packages (0 issues, depguard included); commentcheck;
-sleepcheck; doccheck package tests and actual source-doc drift check; docs sync;
-changelog check; full .sparkwing/jobs (128.199s). One test binary at a time, -p 4,
-GOMAXPROCS=4. Broad store suite timed out at 300s in unrelated membership
-property coverage. Full gate remains the lead's work. Jobs initially failed on
-this note's Markdown list spacing, then passed after correction.
+Linux tests use a real holder spawning a shell and child in a separate session.
+They cover holder death, SQLite close/reopen, failed cleanup acknowledgement,
+receipt retention, live holders, PID/start mismatch, capacity during cancellation
+and a cancelled cleanup scan. Nodehost measures cancel-to-exit through the real
+verified API socket and an executing protocol child, without award renewal.
+Latest raw measurement: 1.237601ms. Speed is logged, not asserted, because sleepcheck
+rejects wall-clock gates. Actual process exit and lease.CancelError are required.
 
-Independent reviews resolved legacy replay hash compatibility, retry-backoff
-cancellation reusing the prior timestamp, and capture delayed by output drain.
-Final frozen code commits have no remaining review findings. The HTTP reporting
-test rebuilds a handler over the same store, not a real controller process.
-The protocol observation test uses a real child with blocked output acknowledgement.
+Checks passed: full wingd (31.781s), full nodehost (55.935s), final focused
+nodehost cancellation rerun, full .sparkwing/jobs (89.371s), doccheck package,
+commentcheck and sleepcheck. Final golangci fmt/lint (depguard included, zero
+issues), actual source-doc drift, docs sync and changelog checks also passed.
+The wingd test package cross-compiled for windows/amd64 and darwin/arm64.
+Independent static review passed all three frozen commits with no findings.
+Native macOS/Windows behavior and service survival remain unverified. Windows
+cleanup waits for the runner-owned kill-on-close Job Object to close; it does
+not introduce a controller-owned job handle. No full gate run in this lane.
 
-Remaining: durable runner PID/start/version records and atomic roll; supervisor
-and OS launcher survival (systemd user service, confirmed-no-systemd session,
-launchd, Windows SCM); HTTP execution-host migration; orphan process-group cleanup;
-measured cancel-to-process-exit; local feature tests before embedded-path deletion.
+Remaining: durable runner instance PID/start/version and accepting/draining state;
+atomic activation plus claim gating; process supervision and OS launchers;
+HTTP execution-host migration; feature parity tests; removal of embedded paths;
+real controller restart/roll and native service acceptance.
 
-Lead decision: remote here still loads one-time authority in CLI, claims a named
-trigger on the selected remote controller, then hosts it. Local peer queue cannot
-discover this work. Define a verified-peer local handoff retaining that remote
-controller and narrow authority, or explicitly defer remote here. The proposal
-requires porting here but leaves that transfer unspecified. No broker was added.
+Recommended next slice: extract the award-bound host composition in
+internal/cluster/production_runtime.go for reuse by embedded and detached local
+hosts. Preserve local source Base.Local/Captured, LocalOnly engine resolver,
+workspace/source and sealed environment snapshots, cache/publication, BundleTransport
+and engine pins. Delete direct host store bindings after feature parity tests.
+Keep cluster's Cloud Docker and Actions behavior in its existing owner.
 
-Migration facts: preserve source Base.Local, LocalOnly engine resolver, captured
-home/environments and socket BundleTransport. Generation-zero local_foreground
-triggers reserve initial claim for the named CLI claimant (store/claim_query.go).
-Foreground output already follows committed segmented logs. Cache/publication
-helpers remain in cmd/sparkwing/local_run.go and local_publish.go. Extract machine
-labels from claimant without widening award authority.
+Foreground contract: generation-zero local_foreground triggers require named
+claims by their creating principal (store/claim_query.go). An ordinary unnamed
+loop cannot claim these. A verified-peer runner handoff must retain this named
+claim and the shared loop's host accounting. Remote here separately retains a
+run-bound bearer, selects a remote controller and makes a named trigger claim.
+Transfer that narrow authority and selected transport to the runner; local peer
+authority cannot replace it. Burst local secrets must come from submitted sealed
+snapshots/transfer, not the detached runner's ambient environment.
 
-All product execution used isolated HOME/SPARKWING_HOME. Private HOME needed the
-real Go installation on PATH. Go 1.26.10 auto-selected from the 1.26.9 installation.
-Task scratch was removed at session end. No landing, push or service-manager tests.
+Friction resolved: protocol fixture needed complete hello and settled-step fields;
+its raw cat predecessor exited before registration. Lint required controller
+context propagation and American spellings. No design contradiction found.
+All product execution used isolated HOME/SPARKWING_HOME. No live task processes
+remain. Scratch was removed at session end. Only this note remains uncommitted.
