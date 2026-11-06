@@ -102,3 +102,16 @@ closure. Older controllers ignore the header and still accept the unchanged
 command body. Exit observations do not change result replay identity. Event
 times, lease checks and other authority decisions still use the controller
 clock. No route, credential, SDK surface or existing payload field is removed.
+
+## Local job process cleanup
+
+The local controller retains recorded job roots until their execution sessions
+are empty, including roots on released or cancelled admission tickets. On Unix,
+confirmed holder death triggers identity-checked session cleanup. A controller
+restart retries cleanup from the stored root PID and process start time.
+Inspection failures retain the root and its reservation for another check.
+
+Cancelling a machine lease with a registered job root wakes its watch immediately
+and retains its capacity while the host stops and joins the job. The host's
+explicit release frees that capacity. Foreground cancellation keeps waiting for
+the run's terminal result.
