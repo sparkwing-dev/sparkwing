@@ -62,6 +62,9 @@ func (p *procSampler) recordMetricsLocked(pid int, birth uint64, cpu float64, cp
 func (p *procSampler) ProcessUsage(pid int) *wingwire.ProcessUsage {
 	p.mu.Lock()
 	defer p.mu.Unlock()
+	if p.measurement != nil {
+		return p.measurement.ProcessUsage(pid)
+	}
 	m := p.metrics[pid]
 	if m == nil {
 		return nil
@@ -148,7 +151,15 @@ func (d *Daemon) sampleProcessUsage(roots []OwnedRoot) {
 		pids = append(pids, root.PID)
 	}
 	if sampler, ok := d.procSampler.(*procSampler); ok {
-		sampler.retainMetrics(roots)
+		sampler.mu.Lock()
+		if sampler.measurement == nil {
+			sampler.measurement = newProcSampler()
+		}
+		measurement := sampler.measurement
+		sampler.mu.Unlock()
+		measurement.retainMetrics(roots)
+		measurement.CPUUsages(pids)
+		return
 	}
 	if sampler, ok := d.procSampler.(procBatchSampler); ok {
 		sampler.CPUUsages(pids)

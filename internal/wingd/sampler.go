@@ -376,10 +376,11 @@ type ProcUsage struct {
 
 type procSampler struct {
 	//lint:ignore U1000 used by platform implementations
-	mu      sync.Mutex
-	last    map[int]cpuSample
-	tree    map[int]map[int]struct{}
-	metrics map[int]*processMetrics
+	mu          sync.Mutex
+	last        map[int]cpuSample
+	tree        map[int]map[int]struct{}
+	metrics     map[int]*processMetrics
+	measurement *procSampler
 }
 
 type cpuSample struct {

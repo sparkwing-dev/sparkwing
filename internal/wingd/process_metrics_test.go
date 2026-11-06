@@ -2,6 +2,7 @@ package wingd
 
 import (
 	"os"
+	"runtime"
 	"testing"
 	"time"
 
@@ -122,5 +123,31 @@ func TestProcessMetrics_UnreadableIntervalsDoNotChangeAverage(t *testing.T) {
 	p.retainMetrics(nil)
 	if usage := p.ProcessUsage(42); usage != nil {
 		t.Fatalf("released process retained measurements: %+v", usage)
+	}
+}
+
+func TestProcessMetrics_StallSamplingDoesNotAdvanceMeasurement(t *testing.T) {
+	if runtime.GOOS != "linux" && runtime.GOOS != "windows" {
+		t.Skip("platform does not use CPU delta baselines")
+	}
+	p := newProcSampler()
+	d := &Daemon{procSampler: p}
+	pid := os.Getpid()
+	roots := []OwnedRoot{{PID: pid, HeldSince: time.Now()}}
+	d.sampleProcessUsage(roots)
+	before := p.ProcessUsage(pid)
+	if before == nil || !before.MemoryMeasured || before.CPUMeasured {
+		t.Fatalf("first measurement = %+v", before)
+	}
+	if readings := p.CPUUsages([]int{pid}); len(readings) != 0 {
+		t.Fatalf("stall sampler inherited measurement CPU baseline: %+v", readings)
+	}
+	after := p.ProcessUsage(pid)
+	if *after != *before {
+		t.Fatalf("stall sampling changed job measurement: before %+v, after %+v", before, after)
+	}
+	d.sampleProcessUsage(roots)
+	if usage := p.ProcessUsage(pid); !usage.CPUMeasured {
+		t.Fatalf("second measurement lost its CPU baseline: %+v", usage)
 	}
 }
