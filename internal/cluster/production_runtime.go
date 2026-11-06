@@ -11,7 +11,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controller/client"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
@@ -22,11 +21,9 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/releaseasset"
 	"github.com/sparkwing-dev/sparkwing/internal/runners"
 	"github.com/sparkwing-dev/sparkwing/internal/runners/launcher"
-	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
 	"github.com/sparkwing-dev/sparkwing/internal/sourceurl"
-	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/wingd"
 )
 
@@ -93,125 +90,58 @@ func fixedBearer(raw string) func(context.Context) (string, error) {
 
 // safety: a Cloud Job serves one claim and is then discarded, and a requester's own machine is its operator, so both accept every submittable name.
 func productionHostingAt(home, version string, connection client.EngineOptions, modules string, admission bool, accept procenv.SubmitAccept, actions *githubActionsSource) runners.Hosting {
-	return runners.Hosting{ControllerURL: connection.URL, HTTP: connection.HTTP, Bind: func(ctx context.Context, unit controllerwire.ClaimedUnit, controller controllerwire.Controller) (services nodehost.NativeServices, principal capability.Principal, err error) {
-		options := connection
-		options.Bearer, options.Launcher = fixedBearer(unit.Capability), false
-		var private *client.LocalHostClient
-		if unit.Unit == capability.UnitNode {
-			private, err = client.NewNodeHostClient(options, unit.RunID, unit.JobID)
-		} else {
-			private, err = client.NewLocalHostClient(options, unit.RunID)
-		}
-		if err != nil {
-			return services, principal, err
-		}
-		closeResources := private.Close
-		defer func() {
+	var machineAdmission *nodehost.LocalAdmission
+	if admission {
+		machineAdmission = nodehost.MachineAdmission(home, version)
+		machineAdmission.Controller = connection.URL
+	}
+	hosting := runners.NativeHosting(runners.NativeHostingConfig{
+		Home: home, Controller: connection, Admission: machineAdmission, SubmitAccept: accept, PrepareSource: modules != "",
+		Source: func(ctx context.Context, unit controllerwire.ClaimedUnit, options client.EngineOptions) (source.Options, error) {
+			engines, err := engine.NewResolver(engine.Config{BuildVersion: version, CacheDirectory: filepath.Join(home, "engines")})
 			if err != nil {
-				err = errors.Join(err, closeResources())
+				return source.Options{}, err
 			}
-		}()
-		refresh := func(ctx context.Context) (capability.Principal, error) {
-			p, e := private.Principal(ctx)
-			if e == nil {
-				e = runners.ValidateAwardPrincipal(unit, p)
+			spec, err := source.ForRequest(unit.Request)
+			if unit.Accepted != nil {
+				spec, err = source.ForExecution(unit.Accepted.Spec)
 			}
-			return p, e
-		}
-		principal, err = refresh(ctx)
-		if err != nil {
-			return services, principal, err
-		}
-		var processes *nodehost.NativeProcesses
-		state, err := nodehost.NewRemoteHostStore(controller, private, unit.UnitID, func() bool { return processes != nil && processes.Computing(unit.RunID) })
-		if err != nil {
-			return services, principal, err
-		}
-		state.Finish = private.FinishRunAndUnit
-		engines, err := engine.NewResolver(engine.Config{BuildVersion: version, CacheDirectory: filepath.Join(home, "engines")})
-		if err != nil {
-			return services, principal, err
-		}
-		input, err := nodehost.NewRunInput(unit)
-		if err != nil {
-			return services, principal, err
-		}
-		spec, err := source.ForRequest(unit.Request)
-		if input.Accepted != nil {
-			spec, err = source.ForExecution(unit.Accepted.Spec)
-		}
-		if err != nil {
-			return services, principal, err
-		}
-		access, err := client.NewSourceAccess(options, unit.RunID, spec)
-		if err != nil {
-			return services, principal, err
-		}
-		if actions != nil {
-			access = actions.bind(access)
-		}
-		submitted := accept
-		if unit.OwnerMachine {
-			submitted = procenv.SubmitAcceptAll()
-		}
-		var machineAdmission *nodehost.LocalAdmission
-		if admission {
-			machineAdmission = nodehost.MachineAdmission(home, version)
-			machineAdmission.Controller = connection.URL
-		}
-		services, err = nodehost.NewNativeServices(ctx, nodehost.WithClient(nodehost.NativeConfig{
-			Admission:    nodehost.ComposeStartGate(state, machineAdmission, false),
-			SubmittedEnv: unit.SubmittedEnv, SubmitAccept: submitted,
-			Home: home, Store: state, Parent: private, Bindings: private, Principal: principal, Refresh: refresh, Local: store.OwnerCanExecute(principal),
-			Source: source.Options{Engines: engines, Access: access, SDK: engineid.GoSDK, Workspace: filepath.Join(home, "workspaces"), Target: releaseasset.Target{Binary: releaseasset.Sparkwing, GOOS: runtime.GOOS, GOARCH: runtime.GOARCH}, GitAccess: ownerGitAccess(unit.OwnerMachine), Base: runnerInstallBase(unit.OwnerMachine, modules)},
-			Renew: func(ctx context.Context, _ string, computing bool) (runstate.LeaseBeat, error) {
-				return state.RenewOwner(ctx, runstate.Actor{}, computing)
-			},
-		}, private))
-		if err != nil {
-			return services, principal, err
-		}
-
-		processes = services.Config.Processes
-		closeResources = func() error { return errors.Join(services.Close(), private.Close()) }
-		if modules != "" && (unit.Unit == capability.UnitPlan || unit.Unit == capability.UnitTrigger || unit.Unit == capability.UnitNode) {
-			storage, bindErr := private.BindStorage(ctx, principal)
-			if bindErr != nil {
-				return services, principal, bindErr
+			if err != nil {
+				return source.Options{}, err
 			}
-			services.Config.Source.Prepared = &source.Prepared{
-				Bytes: storage.Bytes, Records: storage.Records, Authority: storage.Authority,
-				Key:         blob.PreparedRecordKey(unit.Request.Request.Team, unit.RunID, storage.Authority.Repo, unit.Request.Request.Pipeline),
-				RequestHash: string(unit.Request.Hash), Publish: unit.Unit != capability.UnitNode,
+			access, err := client.NewSourceAccess(options, unit.RunID, spec)
+			if err != nil {
+				return source.Options{}, err
 			}
+			if actions != nil {
+				access = actions.bind(access)
+			}
+			return source.Options{Engines: engines, Access: access, SDK: engineid.GoSDK, Workspace: filepath.Join(home, "workspaces"), Target: releaseasset.Target{Binary: releaseasset.Sparkwing, GOOS: runtime.GOOS, GOARCH: runtime.GOARCH}, GitAccess: ownerGitAccess(unit.OwnerMachine), Base: runnerInstallBase(unit.OwnerMachine, modules)}, nil
+		},
+	})
+	if modules == "" {
+		return hosting
+	}
+	bind := hosting.Bind
+	hosting.Bind = func(ctx context.Context, unit controllerwire.ClaimedUnit, controller controllerwire.Controller) (nodehost.NativeServices, capability.Principal, error) {
+		services, principal, err := bind(ctx, unit, controller)
+		if err != nil {
+			return services, principal, err
 		}
-		originalClose := services.Close
-		services.Close = func() error { return errors.Join(originalClose(), private.Close()) }
-		if modules != "" {
-			docker, e := dockerClient(os.Getenv("DOCKER_HOST"))
-			if e != nil {
-				return services, principal, e
-			}
-			services.Config.Lease.ExecutionEnded = func() {
-				kill, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-				defer cancel()
-				err := stopDocker(kill, docker)
-				if err != nil {
-					slog.Error("stop Cloud Docker execution", "err", err)
-				}
-			}
+		docker, err := dockerClient(os.Getenv("DOCKER_HOST"))
+		if err != nil {
+			return services, principal, err
 		}
-		if unit.Unit == capability.UnitTrigger {
-			adopt := services.Config.Owner.AdoptClaim
-			services.Config.Owner.AdoptClaim = func(ctx context.Context, claim runstate.ReconciledNode) error {
-				if err := private.AdoptClaim(ctx, claim); err != nil {
-					return err
-				}
-				return adopt(ctx, claim)
+		services.Config.Lease.ExecutionEnded = func() {
+			kill, cancel := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Second)
+			defer cancel()
+			if err := stopDocker(kill, docker); err != nil {
+				slog.Error("stop Cloud Docker execution", "err", err)
 			}
 		}
 		return services, principal, nil
-	}}
+	}
+	return hosting
 }
 
 func ownerGitAccess(owner bool) source.GitAccess {

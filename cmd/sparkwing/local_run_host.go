@@ -15,7 +15,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
-	"github.com/sparkwing-dev/sparkwing/internal/store"
 
 	wingdclient "github.com/sparkwing-dev/sparkwing/internal/wingd/client"
 )
@@ -24,107 +23,72 @@ func bindLocalRunHost(ctx context.Context, home string, options client.EngineOpt
 	if award.Unit != capability.UnitTrigger || award.Capability == "" {
 		return hereHostSession{}, localRunProtocolError("local host requires its trigger award")
 	}
-	options.Bearer = func(context.Context) (string, error) { return award.Capability, nil }
+	var requesterSecrets map[string]string
+	if award.Request.Request.Burst != nil && len(award.Request.Request.LocalSecretNames) > 0 {
+		requesterSecrets = map[string]string{}
+		for _, name := range award.Request.Request.LocalSecretNames {
+			value, present := os.LookupEnv(name)
+			if !present {
+				return hereHostSession{}, errors.New("requester local secret is unavailable on resume")
+			}
+			requesterSecrets[name] = value
+		}
+	}
+	options.Bearer = func(ctx context.Context) (string, error) { return award.Capability, context.Cause(ctx) }
 	controller, err := client.NewEngineClient(options)
 	if err != nil {
 		return hereHostSession{}, err
-	}
-	private, err := client.NewLocalHostClient(options, award.RunID)
-	if err != nil {
-		return hereHostSession{}, err
-	}
-	closeResources := private.Close
-	defer func() {
-		if err != nil {
-			err = errors.Join(err, closeResources())
-		}
-	}()
-	refresh := func(ctx context.Context) (capability.Principal, error) {
-		principal, err := private.Principal(ctx)
-		if err == nil {
-			err = runners.ValidateAwardPrincipal(award, principal)
-		}
-		return principal, err
-	}
-	principal, err := refresh(ctx)
-	if err != nil {
-		return hereHostSession{}, err
-	}
-	var host *nodehost.OwnerHost
-	state, err := nodehost.NewRemoteHostStore(controller, private, award.UnitID, func() bool {
-		return host != nil && host.Computing != nil && host.Computing(award.RunID)
-	})
-	if err != nil {
-		return hereHostSession{}, err
-	}
-	state.Finish = private.FinishRunAndUnit
-	if award.Request.Request.Burst != nil {
-		if len(award.Request.Request.LocalSecretNames) > 0 {
-			state.LocalSecrets = map[string]string{}
-			for _, name := range award.Request.Request.LocalSecretNames {
-				value, present := os.LookupEnv(name)
-				if !present {
-					return hereHostSession{}, errors.New("requester local secret is unavailable on resume")
-				}
-				state.LocalSecrets[name] = value
-			}
-			if _, err := state.RenewOwner(ctx, runstate.Actor{}, false); err != nil {
-				return hereHostSession{}, err
-			}
-		}
-	}
-	sourceOptions, err := hostSourceOptions(home, os.Environ(), secrets.NewMasker(), award.Request.Request.Source.Location.LocalCheckout != "")
-	if err != nil {
-		return hereHostSession{}, err
-	}
-	if award.Request.Request.Source.Location.LocalCheckout == "" {
-		sourceOptions.Base.OwnerMachine, sourceOptions.GitAccess = award.OwnerMachine, gitAccess(award.OwnerMachine)
-		spec, err := source.ForRequest(award.Request)
-		if err != nil {
-			return hereHostSession{}, err
-		}
-		sourceOptions.Access, err = client.NewSourceAccess(options, award.RunID, spec)
-		if err != nil {
-			return hereHostSession{}, err
-		}
-		if options.HTTP != nil {
-			sourceOptions.BundleTransport = options.HTTP.Transport
-		}
-	}
-	engines, ok := sourceOptions.Engines.(*engine.Resolver)
-	if !ok {
-		return hereHostSession{}, errors.New("local source has no native engine resolver")
 	}
 	admission := nodehost.MachineAdmission(home, installedVersion())
 	if options.URL != wingdclient.APIBaseURL {
 		admission.Controller = options.URL
 	}
-	services, err := nodehost.NewNativeServices(ctx, nodehost.WithClient(nodehost.NativeConfig{
-		Admission:    nodehost.ComposeStartGate(state, admission, true),
-		SubmittedEnv: award.SubmittedEnv, SubmitAccept: procenv.SubmitAcceptAll(),
-		Home: home, Store: state, Parent: private, Bindings: private,
-		Principal: principal, Refresh: refresh, Source: sourceOptions, Local: store.OwnerCanExecute(principal),
-		Renew: func(ctx context.Context, _ string, computing bool) (runstate.LeaseBeat, error) {
-			return state.RenewOwner(ctx, runstate.Actor{}, computing)
+	hosting := runners.NativeHosting(runners.NativeHostingConfig{
+		Home: home, Controller: options, Admission: admission, SubmitAccept: procenv.SubmitAcceptAll(), RequesterSecrets: requesterSecrets,
+		Source: func(_ context.Context, unit controllerwire.ClaimedUnit, connection client.EngineOptions) (source.Options, error) {
+			return localAwardSourceOptions(home, unit, connection)
 		},
-	}, private))
+	})
+	services, principal, err := hosting.Bind(ctx, award, controller)
+	defer func() {
+		if err != nil && services.Close != nil {
+			err = errors.Join(err, services.Close())
+		}
+	}()
 	if err != nil {
 		return hereHostSession{}, err
 	}
-	closeResources = func() error { return errors.Join(services.Close(), private.Close()) }
-	adopt := services.Config.Owner.AdoptClaim
-	services.Config.Owner.AdoptClaim = func(ctx context.Context, claim runstate.ReconciledNode) error {
-		if err := private.AdoptClaim(ctx, claim); err != nil {
-			return err
-		}
-		return adopt(ctx, claim)
+	engines, ok := services.Config.Source.Engines.(*engine.Resolver)
+	if !ok {
+		return hereHostSession{}, errors.New("local source has no native engine resolver")
 	}
+	var host *nodehost.OwnerHost
 	host, _, _, err = nodehost.NewNativeHost(services.Config)
 	if err != nil {
 		return hereHostSession{}, err
 	}
-	return hereHostSession{host: host, close: closeResources, input: nodehost.RunInput{
+	return hereHostSession{host: host, close: services.Close, input: nodehost.RunInput{
 		Storage: services.Storage, Engines: engines,
 		Owner: runstate.Actor{Authority: principal.Authority, CapabilityPrefix: principal.Capability.Prefix},
 	}}, nil
+}
+
+func localAwardSourceOptions(home string, award controllerwire.ClaimedUnit, options client.EngineOptions) (source.Options, error) {
+	local := award.Request.Request.Source.Location.LocalCheckout != ""
+	sourceOptions, err := hostSourceOptions(home, os.Environ(), secrets.NewMasker(), local)
+	if err != nil {
+		return source.Options{}, err
+	}
+	if !local {
+		sourceOptions.Base.OwnerMachine, sourceOptions.GitAccess = award.OwnerMachine, gitAccess(award.OwnerMachine)
+		spec, err := source.ForRequest(award.Request)
+		if err != nil {
+			return source.Options{}, err
+		}
+		sourceOptions.Access, err = client.NewSourceAccess(options, award.RunID, spec)
+		if err != nil {
+			return source.Options{}, err
+		}
+	}
+	return sourceOptions, nil
 }
