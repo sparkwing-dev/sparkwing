@@ -7,7 +7,6 @@ import (
 	"math/rand/v2"
 	"net"
 	"os"
-	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -33,9 +32,10 @@ type Daemon struct {
 	ln       net.Listener
 	listen   func(string) (net.Listener, error)
 
-	apiLn   net.Listener
-	apiDone chan struct{}
-	apiErr  string
+	apiLn      net.Listener
+	apiDone    chan struct{}
+	apiErr     string
+	managedAPI bool
 
 	ready       chan struct{}
 	quit        chan struct{}
@@ -196,9 +196,9 @@ func (d *Daemon) runElected(ctx context.Context) error {
 	d.journal = journal.NewWriter(d.layout.dir, incarnation, d.cfg.Logf)
 	defer d.journal.Close()
 	defer func() {
-		_ = os.Remove(d.layout.sock)
-		_ = os.Remove(d.layout.apiSock)
-		_ = os.Remove(filepath.Dir(d.layout.sock))
+		if !d.managedAPI {
+			d.removeSockets()
+		}
 	}()
 
 	d.startedAt = d.now()
@@ -287,7 +287,9 @@ func (d *Daemon) shutdownWithReason(reason string) {
 		d.shuttingDown = true
 		d.mu.Unlock()
 		close(d.quit)
-		d.closeAPIListener()
+		if !d.managedAPI {
+			d.closeAPIListener()
+		}
 		if d.ln != nil {
 			_ = d.ln.Close()
 		}
@@ -305,7 +307,9 @@ func (d *Daemon) finalShutdown() {
 	if err := d.persistState(); err != nil {
 		d.cfg.logf("final persist: %v", err)
 	}
-	d.awaitAPI(apiDrainWindow)
+	if !d.managedAPI {
+		d.awaitAPI(apiDrainWindow)
+	}
 }
 
 func (d *Daemon) initLedger() error {
@@ -558,7 +562,6 @@ func leaseSemaphores(snap admission.Snapshot, id admission.LeaseID) []string {
 func (d *Daemon) beginDrain() (int, error) {
 	remaining := d.markDraining()
 	err := d.persistState()
-	d.closeAPIListener()
 	return remaining, err
 }
 

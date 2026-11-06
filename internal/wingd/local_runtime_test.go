@@ -575,3 +575,64 @@ func TestLocalRuntimeDefersConsumersUntilPrivateAPIReady(t *testing.T) {
 		<-consumed
 	})
 }
+
+func TestLocalRuntimeKeepsAPIUntilWorkersJoin(t *testing.T) {
+	result := make(chan error, 1)
+	entered := make(chan struct{})
+	f := &runtimeControllerFixture{}
+	r := newRuntimeFixture(t, f)
+	r.listen = nil
+	f.http = func() localhostwire.LocalHTTP {
+		return localhostwire.LocalHTTP{API: http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusNoContent) })}
+	}
+	f.background = func(ctx context.Context, _ func(LocalActivity) error) error {
+		close(entered)
+		<-ctx.Done()
+		held, err := LockHeld(f.home)
+		if err != nil {
+			result <- err
+			return nil
+		}
+		if !held || f.closed.Load() {
+			result <- fmt.Errorf("cleanup lost controller ownership: held=%t closed=%t", held, f.closed.Load())
+			return nil
+		}
+		transport := &http.Transport{DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
+			return (&net.Dialer{}).DialContext(ctx, "unix", r.layout.apiSock)
+		}}
+		defer transport.CloseIdleConnections()
+		client := &http.Client{Transport: transport, Timeout: time.Second}
+		response, err := client.Get("http://localhost/cleanup")
+		if err == nil {
+			response.Body.Close()
+			if response.StatusCode != http.StatusNoContent {
+				err = fmt.Errorf("cleanup status %d", response.StatusCode)
+			}
+		}
+		result <- err
+		return nil
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	done := make(chan error, 1)
+	go func() {
+		done <- r.Run(ctx, LocalStartOptions{Home: f.home, Version: "test", Stay: true, Standalone: true})
+	}()
+	if _, err := r.AwaitReady(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	<-entered
+	cancel()
+	if err := <-result; err != nil {
+		t.Errorf("worker cleanup API: %v", err)
+	}
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+	if held, err := LockHeld(f.home); err != nil || held {
+		t.Errorf("shutdown retained election ownership: held=%t err=%v", held, err)
+	}
+	if _, err := os.Stat(r.layout.apiSock); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("API socket remains: %v", err)
+	}
+}

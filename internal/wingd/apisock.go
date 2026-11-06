@@ -2,8 +2,11 @@ package wingd
 
 import (
 	"context"
+	"errors"
 	"net"
 	"net/http"
+	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/localhostwire"
@@ -60,9 +63,6 @@ func (d *Daemon) apiState() (bool, string) {
 	return false, "the daemon is draining, so it no longer serves the controller API"
 }
 
-// safety: a successor binds api.sock as soon as it is elected, so the
-// predecessor stops serving before it acknowledges a drain rather than when
-// it finally exits.
 func (d *Daemon) closeAPIListener() {
 	d.mu.Lock()
 	ln := d.apiLn
@@ -70,6 +70,14 @@ func (d *Daemon) closeAPIListener() {
 	d.mu.Unlock()
 	if ln != nil {
 		_ = ln.Close()
+	}
+}
+
+func (d *Daemon) removeSockets() {
+	for _, path := range []string{d.layout.sock, d.layout.apiSock, filepath.Dir(d.layout.sock)} {
+		if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
+			d.cfg.logf("remove socket path %s: %v", path, err)
+		}
 	}
 }
 

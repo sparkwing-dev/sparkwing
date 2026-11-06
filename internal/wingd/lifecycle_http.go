@@ -92,16 +92,18 @@ func (d *Daemon) controllerHTTP(next http.Handler) http.Handler {
 		case "drain":
 			d.recordJournal("drain_begin", nil, nil)
 			remaining, err := d.beginDrain()
+			defer func() {
+				// safety: deliver even a failed drain acknowledgement before cancelling HTTP handlers.
+				if flush, ok := w.(http.Flusher); ok {
+					flush.Flush()
+				}
+				d.shutdownWithReason("drain")
+			}()
 			if err != nil {
 				writeLoginFailure(w, &apierr.Error{Code: apierr.Internal, Message: err.Error()})
 				return
 			}
 			writeControllerHTTP(w, wingwire.DrainAck{HoldersRemaining: remaining})
-			// safety: deliver the acknowledgement before shutdown cancels the request context.
-			if flush, ok := w.(http.Flusher); ok {
-				flush.Flush()
-			}
-			d.shutdownWithReason("drain")
 		default:
 			http.NotFound(w, r)
 		}

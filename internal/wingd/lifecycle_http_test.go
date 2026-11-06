@@ -110,3 +110,19 @@ func TestControllerHTTPDashboardReturnsReadinessFailureAndPolicy(t *testing.T) {
 		t.Fatalf("dashboard result: %+v", result)
 	}
 }
+
+func TestControllerHTTPDrainPersistenceFailureStopsDaemon(t *testing.T) {
+	persistence := &admissionMemoryStore{}
+	d := newHTTPAdmissionTest(t, persistence)
+	persistence.fail = true
+	recorder := httptest.NewRecorder()
+	d.controllerHTTP(http.NotFoundHandler()).ServeHTTP(recorder, controllerHTTPRequest(t, http.MethodPost, "drain", "", true))
+	if recorder.Code != http.StatusInternalServerError {
+		t.Fatalf("drain persistence failure: status=%d body=%s", recorder.Code, recorder.Body.String())
+	}
+	select {
+	case <-d.quit:
+	default:
+		t.Fatal("failed drain retained the elected daemon")
+	}
+}

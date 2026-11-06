@@ -76,6 +76,10 @@ Ticket reads can long poll for about 20 seconds. A lost poll retries the same
 ticket and retains its arrival. Release and cancel are idempotent. Lease watches
 return committed eviction, orphan cancellation and run cancellation immediately.
 In-memory wake channels only prompt another read of the committed ticket.
+Active tickets remain until released or reaped. Mutations prune terminal retry
+receipts older than one minute and retain at most 256. Pruning removes receipts
+and their request keys together, including refusal and cancellation tombstones.
+Startup applies the same bounds before serving requests.
 `Store.SetRunCancellationObserver` forwards cancellation after the SQL transaction
 commits, including cancellation from recovery, deletion and credit enforcement.
 Rolled-back transactions do not notify. Replayed cancellation retries failed
@@ -86,6 +90,12 @@ identity. The controller verifies process ownership against the socket peer.
 Each decision and a periodic process check release capacity for dead holders or
 reused PIDs. Inspection errors keep the reservation. Connections, renewals,
 expiry and timeout settings do not determine machine authority.
+Release and cancelled-acquisition cleanup retry for at most one second. When the
+controller cannot answer, cleanup reports the error and PID liveness recovers
+capacity after the holder exits. During shutdown the controller refuses new
+admission, joins embedded hosts while the API remains reachable, then closes and
+joins the API before closing the store and releasing election ownership. Drain
+completes shutdown even if its final admission save fails.
 
 The host registers each spawned job's PID and start identity with
 `POST /api/v1/local/admission/requests/{id}/process` before its SDK handshake.
@@ -94,6 +104,8 @@ liveness. The controller verifies its owner against the socket peer and persists
 it with the ticket. The existing sampler exposes current, peak and average
 process-tree CPU and resident memory through the queue API. A dead or reused
 measurement PID withholds readings without ending the holder's reservation.
+Job measurements keep CPU baselines separate from stall detection, so a scan of
+shared runner roots cannot shorten a job's measurement interval or alter its average.
 Jobs sharing a runner PID have no individual reading until their job processes
 are registered. Host-root CPU attribution for admission remains unchanged.
 Existing host processes still own job execution and logical claim renewal.

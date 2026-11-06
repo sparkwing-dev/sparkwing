@@ -235,7 +235,7 @@ func (d *Daemon) requestAdmissionHTTP(w http.ResponseWriter, r *http.Request, su
 		writeLoginFailure(w, &apierr.Error{Code: apierr.BadRequest, Message: fmt.Sprintf("unknown admission cost source %q", req.CostSource)})
 		return
 	}
-	if d.draining {
+	if d.draining || d.shuttingDown {
 		writeLoginFailure(w, &apierr.Error{Code: apierr.Unavailable, Message: "local controller is draining"})
 		return
 	}

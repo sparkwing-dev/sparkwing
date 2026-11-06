@@ -11,11 +11,14 @@ import (
 	"os"
 	"strconv"
 	"sync"
+	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/procgroup"
 	"github.com/sparkwing-dev/sparkwing/internal/wingd"
 	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
 )
+
+const admissionCleanupTimeout = time.Second
 
 type Lease struct {
 	cl               *Client
@@ -56,7 +59,7 @@ func (cl *Client) Acquire(ctx context.Context, req wingwire.AdmissionRequest, on
 		if granted || ctx.Err() == nil {
 			return
 		}
-		resultErr = errors.Join(resultErr, cl.admissionCall(context.WithoutCancel(ctx), http.MethodDelete, "/requests/by-key/"+request.RequestKey, nil, nil, 0))
+		resultErr = errors.Join(resultErr, cl.cleanupAdmission(ctx, "/requests/by-key/"+request.RequestKey))
 	}()
 	var state wingd.AdmissionHTTPState
 	if err := cl.admissionCall(ctx, http.MethodPost, "/requests", request, &state, 0); err != nil {
@@ -118,10 +121,21 @@ func (cl *Client) Reattach(ctx context.Context, token, runID string) (*Lease, er
 	return cl.newLease(ctx, state), nil
 }
 
+func (cl *Client) cleanupAdmission(ctx context.Context, path string) error {
+	// safety: PID liveness recovers capacity if shutdown prevents an explicit release.
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), admissionCleanupTimeout)
+	defer cancel()
+	err := cl.admissionCall(ctx, http.MethodDelete, path, nil, nil, 0)
+	if admissionNotFound(err) {
+		return nil
+	}
+	return err
+}
+
 func (l *Lease) Release() error {
 	l.once.Do(func() {
 		l.cancel()
-		l.releaseErr = l.cl.admissionCall(context.Background(), http.MethodDelete, "/requests/"+url.PathEscape(l.id), nil, nil, 0)
+		l.releaseErr = l.cl.cleanupAdmission(l.ctx, "/requests/"+url.PathEscape(l.id))
 		l.releaseErr = errors.Join(l.releaseErr, l.cl.Close())
 	})
 	return l.releaseErr

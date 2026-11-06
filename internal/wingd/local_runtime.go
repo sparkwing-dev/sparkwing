@@ -174,6 +174,10 @@ func (r *localRuntime) changed() {
 
 func (r *localRuntime) serve(ctx context.Context, session *localRuntimeSession, controller LocalController, dashboard dashboardMemory, restore bool) error {
 	d := session.daemon
+	// safety: hosts release admission through api.sock while their workers join.
+	d.managedAPI = true
+	apiCtx, stopAPI := context.WithCancel(context.WithoutCancel(ctx))
+	defer stopAPI()
 	var workers sync.WaitGroup
 	var failuresMu sync.Mutex
 	var failures error
@@ -210,7 +214,7 @@ func (r *localRuntime) serve(ctx context.Context, session *localRuntimeSession, 
 		serve("controller API", func() error {
 			local := controller.HTTP()
 			local.API = d.admissionHTTP(d.controllerHTTP(logins.socketRoutes(local.API)))
-			return ServeAPI(ctx, &readyListener{Listener: ln, ready: apiReady}, local)
+			return ServeAPI(apiCtx, &readyListener{Listener: ln, ready: apiReady}, local)
 		})
 	}
 	var dashboardListener net.Listener
@@ -322,10 +326,13 @@ running:
 	}
 	session.cancel()
 	workers.Wait()
+	d.closeAPIListener()
+	stopAPI()
 	// safety: API handlers must finish before their backing store closes.
 	if d.apiDone != nil {
 		<-d.apiDone
 	}
+	d.removeSockets()
 	if errors.Is(err, context.Canceled) && ctx.Err() != nil {
 		err = nil
 	}
