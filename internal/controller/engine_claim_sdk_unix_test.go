@@ -106,11 +106,11 @@ func TestClaimedRunDescribesRepositoryExampleOverSDKPipes(t *testing.T) {
 
 func acceptLocalExample(t *testing.T, root string, raw []byte, selected engine.Resolved) {
 	t.Helper()
-	var claimant *localcontroller.Claimant
+	var claimant *localcontroller.ClaimProfile
 	var server *controller.Server
 	st, err := teststore.Open(t, filepath.Join(t.TempDir(), "state.db"), store.WithPolicies(func(st *store.Store) (store.Policies, error) {
 		var err error
-		claimant, err = localcontroller.NewClaimant(t.Context(), st, nil)
+		claimant, err = localcontroller.NewClaimProfile(nil)
 		if err != nil {
 			return store.Policies{}, err
 		}
@@ -127,11 +127,7 @@ func acceptLocalExample(t *testing.T, root string, raw []byte, selected engine.R
 			t.Error(err)
 		}
 	})
-	t.Cleanup(func() {
-		if err := claimant.Close(); err != nil {
-			t.Error(err)
-		}
-	})
+
 	resolver, err := engine.NewResolver(engine.Config{BuildVersion: "development", CacheDirectory: t.TempDir()})
 	if err != nil {
 		t.Fatal(err)

@@ -1,10 +1,9 @@
 # Runner hosting
 
 `NewManagedRunner` takes a `UnitHost`. `RuntimeConfig.NewController` opens the
-claimant transport. The host owns each award's execution lifetime. An embedded
-controller uses `NewStoreRunner` with its existing `EngineController` and store.
-The local controller constructs that queue in `Config.Open` from its service
-binder's `StoreRunnerConfig`.
+claimant transport. The host owns each award's execution lifetime. The local
+controller's service binder supplies `Services.Runner`, which constructs a
+`Loop` over the authenticated controller API socket after it is listening.
 An HTTP placement supplies `Hosting` with its award-specific controller factory
 and native service binder. The binder returns `NativeServices` with an authenticated
 `NativeHostStore` and the current C2 principal. It must derive that principal from
@@ -114,31 +113,22 @@ empty or error without changing its returned award or error. Metrics failure
 cancels and joins the loop. Runner exit stops and joins the listener, including
 the HTTP shutdown worker. An empty address starts no listener.
 
-`StoreRunnerConfig` supplies the claimant bearer provider, loop settings and
-native service binder. The queue authenticates each claim through C2 and checks
-every requested kind before calling the shared controller. Named trigger claims
-use their run's ownership and named route. Other claims use the ordered runner
-route. The controller still owns enrollment, signed version admission, matching
-and issuance.
-`StoreController` supplies the embedded local queue's policy adapter. Launchers
-use the shared HTTP client and controller handlers for claim and synchronization.
-Each request rechecks its service credential and `claims.launch` authority.
+The local queue obtains a claim-only delegate through `POST /api/v1/tokens`
+using verified socket peer authority. It asks for exactly `triggers.claim` and
+`nodes.claim`. The queue uses the shared HTTP claim client and revokes its
+delegate after `Loop.Run` joins all hosts, while the API still serves cleanup.
+`ClaimProfile` owns captured account and configured-label policy without holding
+a store or issuing credentials. Each HTTP claim rechecks authority, signed local
+version policy and placement in the controller. The production store claimant
+and hosting adapters are removed.
 
-`StoreHosting` authenticates and authorizes the presented award through C2's
-heartbeat policy before binding native services. It selects the authenticated
-tenant, checks both persisted seals, and builds owner authority from the persisted
-owner lease. Only original awards and exchanged capabilities enter hosting.
-Narrowed reporting delegations cannot construct hosts. Jobs use
-`nodehost.NewNodeInput` with the persisted row. The granted
-runner and request bytes are captured before any service callback runs.
-An attempt-zero node award keeps the same claim identity when authentication
-projects its current execution attempt. Fixed attempts and every other claim
-field must still match. The persisted start/refresh acceptance test exercises
-this through `StoreHosting` and C2's real authenticator.
+Launchers use the shared HTTP client and controller handlers for claim and
+synchronization. Each request rechecks its service credential and
+`claims.launch` authority. Only original awards and exchanged capabilities enter
+hosting. Narrowed reporting delegations cannot construct hosts.
 
 The service binder returns `NativeServices`. It supplies source, engine, process,
-policy, logging and storage adapters for `nodehost.NewNativeHost`. Embedded hosting
-overrides the constructor's store with the authenticated tenant. Remote hosting
+policy, logging and storage adapters for `nodehost.NewNativeHost`. HTTP hosting
 uses the bound `NativeHostStore` adapter. The shared
 owner and claimed host own acquisition, lease renewal and joining. Services close
 after those hosts return, including partial construction failures. Configured
@@ -157,7 +147,7 @@ with its own label slice. It reaches both planning and self-claimed work. A node
 selected executable is acquired by the shared host from the accepted engine
 identity before SDK execution.
 
-`TestNativeStoreOwnerW8` constructs the embedded queue through the local binding
+`TestNativeStoreOwnerW8` supplies an HTTP claimant through the local binding
 and through `Config.Open`. It runs real C2 claim authentication, shared controller
 issuance, the native owner and C1 completion before joining local workers. The remote-award and managed-runner variants use the same native owner, with an
 in-process controller transport and tenant standing in for the remote store adapter.

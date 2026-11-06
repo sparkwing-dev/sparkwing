@@ -1,5 +1,18 @@
 # Migrating to the next release
 
+## Local queue claims use HTTP
+
+The local queue obtains its credential through the authenticated API socket and
+uses the shared HTTP claim client. Verified socket peers may request exactly
+`triggers.claim` and `nodes.claim` from `POST /api/v1/tokens`. Other member-token
+requests remain refused. The queue revokes its delegate after hosts join and
+before the API shuts down. Captured account and label policy holds no store
+handle or credential.
+
+No HTTP route, wire field or SDK symbol is removed. Queue execution still runs
+inside the controller process, so this change alone does not preserve jobs
+across controller process replacement.
+
 ## Upgrade the store in place to schema baseline 31
 
 The local controller stores machine-admission requests, queue arrivals, leases

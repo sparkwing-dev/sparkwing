@@ -12,7 +12,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/credentials"
 	"github.com/sparkwing-dev/sparkwing/internal/fssecure"
 	"github.com/sparkwing-dev/sparkwing/internal/localhostwire"
-	"github.com/sparkwing-dev/sparkwing/internal/runners"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/wingd"
 )
@@ -37,7 +36,7 @@ type Services struct {
 	Policies store.Policies
 	State    State
 	HTTP     localhostwire.LocalHTTP
-	Runner   StoreRunnerConfig
+	Runner   func(context.Context) error
 	Close    func() error
 	Maintain func(context.Context)
 	Complete func(context.Context) error
@@ -100,14 +99,10 @@ func (cfg Config) Open(ctx context.Context, home string) (_ wingd.LocalControlle
 	if err := context.Cause(ctx); err != nil {
 		return nil, err
 	}
-	if services.State == nil || services.HTTP.API == nil || services.HTTP.Dashboard == nil {
-		return nil, errors.New("wingd: local services require state and shared HTTP handlers")
+	if services.State == nil || services.HTTP.API == nil || services.HTTP.Dashboard == nil || services.Runner == nil || binding.Controller.RunnerPolicy == nil || binding.Controller.ResolveTenant == nil {
+		return nil, errors.New("wingd: local services require state, runner, signed policy and shared HTTP handlers")
 	}
-	queue, err := NewStoreRunner(binding.Controller, services.Runner)
-	if err != nil {
-		return nil, err
-	}
-	return &localController{State: services.State, services: services, store: s, operator: s.AsOperator(), tenant: binding.Tenant, queue: queue}, nil
+	return &localController{State: services.State, services: services, store: s, operator: s.AsOperator(), tenant: binding.Tenant}, nil
 }
 
 type localController struct {
@@ -116,7 +111,6 @@ type localController struct {
 	store    *store.Store
 	operator *store.Operator
 	tenant   *store.Tenant
-	queue    *runners.Loop
 	mu       sync.Mutex
 	// reconciled is set once startup recovery has run; workers and admission cancellation need it.
 	reconciled bool
@@ -185,7 +179,7 @@ func (c *localController) Run(ctx context.Context, report func(wingd.LocalActivi
 			results <- err
 		}()
 	}
-	start("queue", c.queue.Run)
+	start("queue", c.services.Runner)
 	start("activity", func(ctx context.Context) error { return c.State.Watch(ctx, report) })
 	start("maintenance", func(ctx context.Context) error { return c.maintain(ctx) })
 	var result error

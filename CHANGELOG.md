@@ -30,6 +30,8 @@ unlock.
 
 ### Added
 
+- **local controller:** The local queue obtains a claim-only delegate and claims work through authenticated socket HTTP. Its credential is revoked after hosts finish cleanup. The verified peer may delegate exactly `triggers.claim` and `nodes.claim` through `POST /api/v1/tokens`. See [the migration guide](docs/migrations/_unreleased.md#local-queue-claims-use-http).
+
 - **runners:** Award-bound job reports accept optional `X-Sparkwing-Exited-At` observation headers. Job and attempt finish times preserve the runner's observed process exit before final log acknowledgement, cleanup and artifact/cache publication, including delayed reports after controller restart. Event timestamps still use the controller clock. See [the migration guide](docs/migrations/_unreleased.md#observed-job-exit-time).
 
 - **SDK:** Host compatibility checks run frozen released Go and TypeScript pipelines through candidate nodehost. The affected gate reuses fixture preparation, and pre-release rebuilds every historical fixture.

@@ -1,4 +1,4 @@
-package localcontroller
+package acceptance_test
 
 import (
 	"context"
@@ -13,23 +13,20 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
 
-// StoreBinding supplies authenticated, tenant-scoped facts to native service construction.
-type StoreBinding struct {
+type storeBindingW8 struct {
 	Tenant    *store.Tenant
 	Principal capability.Principal
 	Refresh   func(context.Context) (capability.Principal, error)
 	Bearer    func(context.Context) (string, error)
 }
 
-// StoreHosting constructs the shared hosts over the controller's existing store handle.
-type StoreHosting struct {
+type storeHostingW8 struct {
 	Controller *controller.EngineController
 	router     *routepolicy.Router
-	Bind       func(context.Context, StoreBinding) (nodehost.NativeServices, error)
+	Bind       func(context.Context, storeBindingW8) (nodehost.NativeServices, error)
 }
 
-// Host authenticates before binding services; shared hosts own acquisition, renewal and joining.
-func (h StoreHosting) Host(ctx context.Context, unit controllerwire.ClaimedUnit) error {
+func (h storeHostingW8) Host(ctx context.Context, unit controllerwire.ClaimedUnit) error {
 	if h.Controller == nil || h.Bind == nil {
 		return errors.New("store hosting requires the owned store and native services")
 	}
@@ -41,7 +38,7 @@ func (h StoreHosting) Host(ctx context.Context, unit controllerwire.ClaimedUnit)
 	return runners.HostAward(ctx, unit, h.bind)
 }
 
-func (h StoreHosting) bind(ctx context.Context, unit, _ controllerwire.ClaimedUnit, input nodehost.RunInput) (nodehost.NativeServices, runners.HostInputs, error) {
+func (h storeHostingW8) bind(ctx context.Context, unit, _ controllerwire.ClaimedUnit, input nodehost.RunInput) (nodehost.NativeServices, runners.HostInputs, error) {
 	ctx, principal, err := h.authenticate(ctx, unit)
 	if err != nil {
 		return nodehost.NativeServices{}, runners.HostInputs{}, err
@@ -55,7 +52,7 @@ func (h StoreHosting) bind(ctx context.Context, unit, _ controllerwire.ClaimedUn
 		return nodehost.NativeServices{}, inputs, err
 	}
 	lifetime, retire := context.WithCancel(context.WithoutCancel(ctx))
-	binding := StoreBinding{Tenant: tenant, Principal: principal, Refresh: func(ctx context.Context) (capability.Principal, error) {
+	binding := storeBindingW8{Tenant: tenant, Principal: principal, Refresh: func(ctx context.Context) (capability.Principal, error) {
 		_, p, err := h.authenticate(ctx, unit)
 		return p, err
 	}, Bearer: func(request context.Context) (string, error) {
@@ -79,7 +76,7 @@ func (h StoreHosting) bind(ctx context.Context, unit, _ controllerwire.ClaimedUn
 	return services, inputs, err
 }
 
-func (h StoreHosting) authenticate(ctx context.Context, unit controllerwire.ClaimedUnit) (context.Context, capability.Principal, error) {
+func (h storeHostingW8) authenticate(ctx context.Context, unit controllerwire.ClaimedUnit) (context.Context, capability.Principal, error) {
 	if err := context.Cause(ctx); err != nil {
 		return ctx, capability.Principal{}, err
 	}

@@ -166,16 +166,15 @@ func TestLocalControllerTwoJobProcessesUseIndependentAwards(t *testing.T) {
 	ctx := t.Context()
 	t.Setenv("SPARKWING_CONFIG", filepath.Join(t.TempDir(), "config.yaml"))
 	var b Binding
-	var claimant *Claimant
+	var claimant *ClaimProfile
 	c := openFixture(t, func(ctx context.Context, binding Binding) (Services, error) {
 		b = binding
 		services := serviceFixture(binding)
 		var err error
-		claimant, err = NewClaimant(ctx, binding.Store, nil)
+		claimant, err = NewClaimProfile(nil)
 		if err != nil {
 			t.Fatal(err)
 		}
-		services.Close = claimant.Close
 		objects, err := blob.NewFilesystem(blob.FilesystemOptions{Directory: t.TempDir(), Endpoint: "http://controller", SigningKey: make([]byte, 32)})
 		if err != nil {
 			t.Fatal(err)
@@ -214,14 +213,7 @@ func TestLocalControllerTwoJobProcessesUseIndependentAwards(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	raw, err := claimant.Bearer(ctx)
-	if err != nil {
-		t.Fatal(err)
-	}
-	root, err := b.Store.AsOperator().LookupCapability(ctx, sha256.Sum256([]byte(raw)))
-	if err != nil {
-		t.Fatal(err)
-	}
+	root := peer.Authorities[0].Principal
 	award, err := b.Store.AsOperator().ClaimUnit(ctx, store.UnitDemand{CapabilityPrefix: root.Capability.Prefix, Target: &store.UnitRef{Kind: capability.UnitTrigger, RunID: runspec.RunID(admitted.RunID)}})
 	if err != nil {
 		t.Fatal(err)

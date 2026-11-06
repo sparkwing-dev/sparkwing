@@ -14,8 +14,6 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/controller"
 	"github.com/sparkwing-dev/sparkwing/internal/localhostwire"
-	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
-	"github.com/sparkwing-dev/sparkwing/internal/runners"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
@@ -52,15 +50,9 @@ func (p runnerPolicy) CheckRunner(ctx context.Context, version string) error { r
 func serviceFixture(b Binding) Services {
 	b.Controller.RunnerPolicy = runnerPolicy(func(context.Context, string) error { return nil })
 	return Services{
-		State: &stateFixture{},
-		HTTP:  localhostwire.LocalHTTP{API: http.NotFoundHandler(), Dashboard: http.NotFoundHandler()},
-		Runner: StoreRunnerConfig{
-			Loop:   runners.LoopConfig{Version: "v0.71.0", MaxConcurrent: 1},
-			Bearer: func(ctx context.Context) (string, error) { <-ctx.Done(); return "", ctx.Err() },
-			Host: StoreHosting{Controller: b.Controller, Bind: func(context.Context, StoreBinding) (nodehost.NativeServices, error) {
-				return nodehost.NativeServices{}, errors.New("unexpected host")
-			}},
-		},
+		State:  &stateFixture{},
+		HTTP:   localhostwire.LocalHTTP{API: http.NotFoundHandler(), Dashboard: http.NotFoundHandler()},
+		Runner: func(ctx context.Context) error { <-ctx.Done(); return ctx.Err() },
 	}
 }
 
@@ -271,7 +263,7 @@ func TestCompositionCleansPartialBindings(t *testing.T) {
 				case "incomplete":
 					services.HTTP.API = nil
 				case "runner":
-					services.Runner.Host = nil
+					services.Runner = nil
 				case "policy":
 					b.Controller.RunnerPolicy = nil
 				case "tenant":
@@ -296,12 +288,12 @@ func TestCompositionJoinsQueueAndActivityBeforeStoreClose(t *testing.T) {
 		var closeCount atomic.Int32
 		c := openFixture(t, func(_ context.Context, b Binding) (Services, error) {
 			services := serviceFixture(b)
-			services.Runner.Bearer = func(ctx context.Context) (string, error) {
+			services.Runner = func(ctx context.Context) error {
 				close(started)
 				<-ctx.Done()
 				<-release
 				defer close(joined)
-				return "", errors.Join(ctx.Err(), b.Store.AsOperator().Ping(t.Context()))
+				return errors.Join(ctx.Err(), b.Store.AsOperator().Ping(t.Context()))
 			}
 			services.State.(*stateFixture).watch = func(ctx context.Context, report func(wingd.LocalActivity) error) error {
 				<-started

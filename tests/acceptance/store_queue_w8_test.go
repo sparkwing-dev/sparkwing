@@ -5,14 +5,11 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/sparkwing-dev/sparkwing/internal/wingd/localcontroller"
-
-	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
+	"github.com/sparkwing-dev/sparkwing/internal/controller/client"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
-	"github.com/sparkwing-dev/sparkwing/internal/runners"
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
 )
 
@@ -59,14 +56,7 @@ func FuzzStoreQueueClaimAuthorityW8(f *testing.F) {
 			revokeStoredRunnerW8(t, server.Store, ref)
 			want = apierr.Unauthenticated
 		}
-		runner, err := localcontroller.NewStoreRunner(server.EngineController, localcontroller.StoreRunnerConfig{
-			Bearer: func(context.Context) (string, error) { return raw, nil },
-			Loop:   runners.LoopConfig{Version: "v0.71.0", MaxConcurrent: 1},
-			Host: localcontroller.StoreHosting{Controller: server.EngineController, Bind: func(context.Context, localcontroller.StoreBinding) (nodehost.NativeServices, error) {
-				t.Fatal("claim executed pipeline code")
-				return nodehost.NativeServices{}, nil
-			}},
-		})
+		queue, err := cloudStoreClientW8(t, server)(client.EngineOptions{URL: "https://controller.example", Bearer: func(context.Context) (string, error) { return raw, nil }})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -74,7 +64,7 @@ func FuzzStoreQueueClaimAuthorityW8(f *testing.F) {
 		if named {
 			body.RunID = "run"
 		}
-		response, err := runner.Controller.Claim(t.Context(), body)
+		response, err := queue.Claim(t.Context(), body)
 		if want == "" {
 			if err != nil || response.Claim == nil || response.Claim.RunID != "run" || response.Claim.Unit != capability.UnitTrigger || response.Claim.Capability == raw {
 				t.Fatalf("authorized queue claim: %+v: %v", response, err)
@@ -82,7 +72,8 @@ func FuzzStoreQueueClaimAuthorityW8(f *testing.F) {
 			return
 		}
 		var refusal *apierr.Error
-		if !errors.As(err, &refusal) || refusal.Code != want || response.Claim != nil {
+		clientRefusal := mode%8 == 2 && named || mode%8 >= 3 && mode%8 <= 5
+		if err == nil || response.Claim != nil || !clientRefusal && (!errors.As(err, &refusal) || refusal.Code != want) {
 			t.Fatalf("queue claim: %+v: %v; want %s", response, err, want)
 		}
 		var claims int

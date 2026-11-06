@@ -17,13 +17,11 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/controller"
 	"github.com/sparkwing-dev/sparkwing/internal/controller/client"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/localhostwire"
+	"github.com/sparkwing-dev/sparkwing/internal/runners"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
-	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
-	"github.com/sparkwing-dev/sparkwing/internal/wingd/localcontroller"
 )
 
 type queueHostTransport func(*http.Request) (*http.Response, error)
@@ -34,52 +32,15 @@ type failedQueueHost struct{ err error }
 
 func (h failedQueueHost) Host(context.Context, controllerwire.ClaimedUnit) error { return h.err }
 
-type queueClaim struct{ unit controllerwire.ClaimedUnit }
-
-func (q queueClaim) Claim(context.Context, controllerwire.ClaimRequest) (controllerwire.ClaimResponse, error) {
-	return controllerwire.ClaimResponse{Claim: &q.unit}, nil
-}
-
 func TestLocalQueueReportsHostFailureWhileDraining(t *testing.T) {
-	t.Setenv("SPARKWING_CONFIG", filepath.Join(t.TempDir(), "config.yaml"))
-	t.Setenv("SPARKWING_SECRETS_KEY_FILE", filepath.Join(t.TempDir(), "secrets.key"))
-	home := t.TempDir()
-	owned, err := teststore.Open(t, filepath.Join(home, "state.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() {
-		if err := owned.Close(); err != nil {
-			t.Error(err)
-		}
-	})
-	tenant, err := owned.ForTeam(t.Context(), store.DefaultTeam)
-	if err != nil {
-		t.Fatal(err)
-	}
-	engine := controller.NewEngineController(owned, controller.EngineController{})
-	services, err := bindLocalController(t.Context(), localcontroller.Binding{Home: home, Store: owned, Tenant: tenant, Controller: engine})
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() {
-		if err := services.Close(); err != nil {
-			t.Error(err)
-		}
-	})
-	services.Runner.Loop.MaxClaims = 1
-	loop, err := localcontroller.NewStoreRunner(engine, services.Runner)
-	if err != nil {
-		t.Fatal(err)
-	}
 	failure := errors.New("profile cache construction failed")
-	loop.Controller, loop.Host = queueClaim{localTestAward(t)}, failedQueueHost{failure}
-	loop.CheckVersion = func(context.Context, string) error { return nil }
+	loop := &runners.Loop{Config: runners.LoopConfig{Version: "development", MaxConcurrent: 1, MaxClaims: 1}, Host: failedQueueHost{failure}, CheckVersion: func(context.Context, string) error { return nil }}
+	options := localQueueTestClient(t, nil)
 	var output bytes.Buffer
 	previous := slog.Default()
 	slog.SetDefault(slog.New(slog.NewTextHandler(&output, nil)))
 	t.Cleanup(func() { slog.SetDefault(previous) })
-	if err := loop.Run(t.Context()); !errors.Is(err, failure) {
+	if err := runLocalQueue(t.Context(), options, loop); !errors.Is(err, failure) {
 		t.Fatal(err)
 	}
 	if !strings.Contains(output.String(), "local run host failed") || !strings.Contains(output.String(), failure.Error()) {

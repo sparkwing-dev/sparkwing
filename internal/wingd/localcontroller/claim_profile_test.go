@@ -1,10 +1,7 @@
 package localcontroller
 
 import (
-	"context"
 	"encoding/hex"
-	"errors"
-	"path/filepath"
 	"reflect"
 	"runtime"
 	"slices"
@@ -12,43 +9,22 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
-	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
 	"github.com/sparkwing-dev/sparkwing/internal/wingd"
 )
 
-func FuzzClaimantIdentityIgnoresAmbientInput(f *testing.F) {
+func FuzzClaimProfileIdentityIgnoresAmbientInput(f *testing.F) {
 	f.Add("local:0", "forged-token")
 	f.Add("S-1-5-18", "")
 	f.Fuzz(func(t *testing.T, subject, bearer string) {
 		t.Setenv("SPARKWING_RUNNER_NAME", hex.EncodeToString([]byte(subject)))
 		t.Setenv("SPARKWING_TOKEN", hex.EncodeToString([]byte(bearer)))
-		s, err := teststore.OpenExisting(t, filepath.Join(t.TempDir(), "state.db"))
-		if err != nil {
-			t.Fatal(err)
-		}
-		defer func() {
-			if err := s.Close(); err != nil {
-				t.Error(err)
-			}
-		}()
-		claimant, err := NewClaimant(t.Context(), s, nil)
+		claimant, err := NewClaimProfile(nil)
 		if err != nil {
 			t.Fatal(err)
 		}
 		want, err := wingd.CurrentLocalSubject()
 		if err != nil || claimant.subject != want {
 			t.Fatalf("ambient input selected local identity: %q != %q: %v", claimant.subject, want, err)
-		}
-		ctx, cancel := context.WithCancel(t.Context())
-		cancel()
-		if raw, err := claimant.Bearer(ctx); raw != "" || !errors.Is(err, context.Canceled) {
-			t.Fatalf("cancelled peer lookup issued a credential: %t: %v", raw != "", err)
-		}
-		if err := claimant.Close(); err != nil {
-			t.Fatal(err)
-		}
-		if raw, err := claimant.Bearer(t.Context()); raw != "" || err == nil {
-			t.Fatal("closed claimant returned authority")
 		}
 	})
 }
@@ -57,7 +33,7 @@ func FuzzLocalClaimProfileRequiresCapturedAccount(f *testing.F) {
 	f.Add("other", uint8(0))
 	f.Add("local:0", uint8(1))
 	f.Fuzz(func(t *testing.T, forged string, mutation uint8) {
-		c := Claimant{subject: "local:verified"}
+		c := ClaimProfile{subject: "local:verified"}
 		p := capability.Principal{
 			Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: "claimant"},
 			Capability: capability.Capability{
@@ -98,26 +74,13 @@ func TestLocalClaimProfileAddsConfiguredLabelsWithoutAuthority(t *testing.T) {
 			Subject: capability.Subject{Kind: capability.SubjectLocal, ID: "local:verified"},
 		},
 	}
-	s, err := teststore.OpenExisting(t, filepath.Join(t.TempDir(), "state.db"))
+	withLabels, err := NewClaimProfile([]string{"host=moonborn", "pool=prod", "name=other", "location=cloud", "local", "gpu"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() {
-		if err := s.Close(); err != nil {
-			t.Error(err)
-		}
-	})
-	withLabels, err := NewClaimant(t.Context(), s, []string{"host=moonborn", "pool=prod", "name=other", "location=cloud", "local", "gpu"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() {
-		if err := withLabels.Close(); err != nil {
-			t.Error(err)
-		}
-	})
+
 	p.Capability.Subject.ID = withLabels.subject
-	bare, err := (&Claimant{subject: withLabels.subject}).ResolveClaimProfile(t.Context(), p)
+	bare, err := (&ClaimProfile{subject: withLabels.subject}).ResolveClaimProfile(t.Context(), p)
 	if err != nil {
 		t.Fatal(err)
 	}

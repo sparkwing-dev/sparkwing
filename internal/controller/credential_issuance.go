@@ -53,7 +53,7 @@ func (s *Server) handleIssueCredential(w http.ResponseWriter, r *http.Request, a
 	}
 	p := a.Principal
 	// safety: a token minted under the local peer keeps its local subject, which no member route accepts from a bearer.
-	if p.Class == capability.CredentialPeer && request.Data == nil {
+	if p.Class == capability.CredentialPeer && request.Data == nil && (request.AllowTeamAdmin || len(request.Grants) != 2 || !slices.Contains(request.Grants, capability.NodesClaim) || !slices.Contains(request.Grants, capability.TriggersClaim)) {
 		return &apierr.Error{Code: apierr.CapabilityUnsupported, Message: "a local controller issues no member tokens; the CLI reaches it over its socket, and `sparkwing dashboard open` signs a browser in"}
 	}
 	var issued capability.Issued

@@ -151,15 +151,11 @@ func bindLocalControllerWithClock(ctx context.Context, b localcontroller.Binding
 		return localcontroller.Services{}, err
 	}
 	warnIgnoredRunnerLabels(configPath)
-	claimant, err := localcontroller.NewClaimant(ctx, b.Store, machineRunner.Labels)
+	profile, err := localcontroller.NewClaimProfile(machineRunner.Labels)
 	if err != nil {
 		return localcontroller.Services{}, err
 	}
-	defer func() {
-		if err != nil {
-			err = errors.Join(err, claimant.Close())
-		}
-	}()
+
 	server := controller.New(b.Store, nil).WithEngineController(b.Controller).WithSecretsCipher(cipher).WithDataObjects(objects).
 		WithDashboard(controller.Dashboard{Local: true, Version: installedVersion(), Paths: paths.PathsAt(b.Home), Bundle: web.VerifiedBundle()})
 	snapshots, err := nodehost.NewFileEnvironmentSnapshots(filepath.Join(b.Home, "environments"))
@@ -197,21 +193,24 @@ func bindLocalControllerWithClock(ctx context.Context, b localcontroller.Binding
 	}
 	transport := wingdclient.NewAPIClient(socket)
 	policies := server.StorePolicies()
-	policies.ClaimProfiles = claimant
+	policies.ClaimProfiles = profile
 	policies.LocalSecrets = cipher
 	return localcontroller.Services{
 		Policies: policies,
 		State:    state, HTTP: server.HTTP(), Close: func() error {
 			transport.CloseIdleConnections()
-			return errors.Join(claimant.Close(), objects.Close())
+			return objects.Close()
 		},
 		Maintain: server.MaintainStorage,
 		Complete: server.ReconcileRunEffects,
-		Runner: localcontroller.StoreRunnerConfig{
-			Bearer:  claimant.Bearer,
-			Loop:    runners.LoopConfig{Version: installedVersion(), MaxConcurrent: runtime.NumCPU()},
-			OnError: func(err error) { slog.Error("local run host failed", "err", err) },
-			Host:    localRunnerHosting(b.Home, client.EngineOptions{URL: wingdclient.APIBaseURL, HTTP: transport}),
+		Runner: func(ctx context.Context) error {
+			return runLocalQueue(ctx, client.EngineOptions{URL: wingdclient.APIBaseURL, HTTP: transport}, &runners.Loop{
+				Config: runners.LoopConfig{Version: installedVersion(), MaxConcurrent: runtime.NumCPU()},
+				CheckVersion: func(ctx context.Context, version string) error {
+					return b.Controller.LocalRunnerPolicy.CheckRunner(ctx, version)
+				},
+				Host: localRunnerHosting(b.Home, client.EngineOptions{URL: wingdclient.APIBaseURL, HTTP: transport}),
+			})
 		},
 	}, nil
 }

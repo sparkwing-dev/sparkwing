@@ -21,19 +21,20 @@ func TestLocalClaimantW8UsesPersistedPeerAuthority(t *testing.T) {
 			t.Error(err)
 		}
 	})
-	claimant, err := NewClaimant(t.Context(), s, nil)
+	claimant, err := NewClaimProfile(nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() {
-		if err := claimant.Close(); err != nil {
-			t.Error(err)
-		}
-	})
-	raw, err := claimant.Bearer(t.Context())
+	peer, err := s.AsOperator().ReadAuthentication(t.Context(), capability.CredentialLookup{Class: capability.CredentialPeer, Peer: capability.Subject{Kind: capability.SubjectLocal, ID: claimant.subject}}, capability.RequestEvidence{})
 	if err != nil {
-		t.Fatal("verified peer cannot obtain local queue authority:", err)
+		t.Fatal(err)
 	}
+	parent := peer.Authorities[0].Principal
+	issued, err := s.AsOperator().DelegateCapability(t.Context(), capability.DelegateSpec{Parent: parent.Authority, Audience: capability.Controller, Grants: []capability.Grant{capability.TriggersClaim, capability.NodesClaim}, Binding: parent.Capability.Binding})
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw := issued.Raw
 	route, ok := capability.LookupRoute("POST", "/api/v1/runners/claim")
 	if !ok {
 		t.Fatal("missing shared claim route")

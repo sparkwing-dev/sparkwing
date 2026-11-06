@@ -24,9 +24,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/crontimer"
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
-	"github.com/sparkwing-dev/sparkwing/internal/runners"
 	"github.com/sparkwing-dev/sparkwing/internal/wingd"
-	wingdclient "github.com/sparkwing-dev/sparkwing/internal/wingd/client"
 	"github.com/sparkwing-dev/sparkwing/internal/wingd/localcontroller"
 	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
 )
@@ -217,7 +215,7 @@ func TestProductionLocalSchedulesShareCapturedControllerHome(t *testing.T) {
 func TestProductionLocalQueueBindsRunnerPolicy(t *testing.T) {
 	t.Setenv("SPARKWING_CONFIG", filepath.Join(t.TempDir(), "config.yaml"))
 	t.Setenv("SPARKWING_SECRETS_KEY_FILE", filepath.Join(t.TempDir(), "secrets.key"))
-	var runner localcontroller.StoreRunnerConfig
+	var runner func(context.Context) error
 	owner, err := (localcontroller.Config{Bind: func(ctx context.Context, binding localcontroller.Binding) (localcontroller.Services, error) {
 		services, err := bindLocalController(ctx, binding)
 		if err == nil {
@@ -237,9 +235,8 @@ func TestProductionLocalQueueBindsRunnerPolicy(t *testing.T) {
 			t.Error(err)
 		}
 	}()
-	host, ok := runner.Host.(runners.Hosting)
-	if runner.Bearer == nil || !ok || host.Bind == nil || host.HTTP == nil || host.ControllerURL != wingdclient.APIBaseURL || runner.Loop.MaxConcurrent <= 0 {
-		t.Fatal("local queue has no authenticated runner binding")
+	if runner == nil {
+		t.Fatal("local queue has no runner binding")
 	}
 }
 
@@ -252,7 +249,8 @@ func TestProductionLocalQueueChecksVersionWithoutNetwork(t *testing.T) {
 		requests++
 		return nil, errors.New("network denied")
 	})}
-	var queue *runners.Loop
+	var policy controller.RunnerAdmissionPolicy
+	var handler http.Handler
 	owner, err := (localcontroller.Config{Bind: func(ctx context.Context, binding localcontroller.Binding) (localcontroller.Services, error) {
 		services, err := bindLocalController(ctx, binding)
 		if err != nil {
@@ -268,9 +266,15 @@ func TestProductionLocalQueueChecksVersionWithoutNetwork(t *testing.T) {
 		}
 		binding.Controller.RunnerPolicy = &controller.SignedRunnerAdmission{Resolver: strict}
 		binding.Controller.LocalRunnerPolicy = &controller.SignedEngineVersionPolicy{Resolver: local}
-		services.Runner.Loop.Kinds = []capability.UnitKind{capability.UnitTrigger, capability.UnitNode}
-		queue, err = localcontroller.NewStoreRunner(binding.Controller, services.Runner)
-		return services, err
+		policy = binding.Controller.LocalRunnerPolicy
+		subject, err := wingd.CurrentLocalSubject()
+		if err != nil {
+			return services, err
+		}
+		handler = controller.New(binding.Store, nil).WithEngineController(binding.Controller).WithPeerIdentity(func(*http.Request) capability.Subject {
+			return capability.Subject{Kind: capability.SubjectLocal, ID: subject}
+		}).Handler()
+		return services, nil
 	}}).Open(t.Context(), home)
 	if err != nil {
 		t.Fatal(err)
@@ -280,12 +284,33 @@ func TestProductionLocalQueueChecksVersionWithoutNetwork(t *testing.T) {
 			t.Error(err)
 		}
 	})
-	if err := queue.CheckVersion(t.Context(), "v1.2.3"); err != nil {
-		t.Fatalf("local queue version check: %v", err)
+	if err := policy.CheckRunner(t.Context(), "v1.2.3"); err != nil {
+		t.Fatal(err)
 	}
-	response, err := queue.Controller.Claim(t.Context(), controllerwire.ClaimRequest{RunnerVersion: "v1.2.3", Kinds: []capability.UnitKind{capability.UnitTrigger, capability.UnitNode}})
+	options := client.EngineOptions{URL: "http://controller", HTTP: &http.Client{Transport: queueHostTransport(func(r *http.Request) (*http.Response, error) {
+		w := httptest.NewRecorder()
+		handler.ServeHTTP(w, r)
+		return w.Result(), nil
+	})}}
+	tokens, err := client.NewTokenManager(options, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	credential, err := tokens.CreateToken(t.Context(), controllerwire.TokenCreate{Scopes: []capability.Grant{capability.TriggersClaim, capability.NodesClaim}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	options.Bearer = func(context.Context) (string, error) { return credential.Token, nil }
+	queue, err := client.NewEngineClient(options)
+	if err != nil {
+		t.Fatal(err)
+	}
+	response, err := queue.Claim(t.Context(), controllerwire.ClaimRequest{RunnerVersion: "v1.2.3", Kinds: []capability.UnitKind{capability.UnitTrigger, capability.UnitNode}})
 	if err != nil || response.Claim != nil {
 		t.Fatalf("empty local queue: %+v: %v", response, err)
+	}
+	if _, err := tokens.RevokeToken(t.Context(), credential.Metadata.Prefix); err != nil {
+		t.Fatal(err)
 	}
 	if requests != 0 {
 		t.Fatalf("local queue made %d network requests", requests)
