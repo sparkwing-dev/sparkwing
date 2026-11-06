@@ -2,43 +2,43 @@
 
 Step 3 remains incomplete. Do not land or push. Keep this note uncommitted.
 
-New commits: 67aa0f011 extracts runners.NativeHosting and reuses it in cluster and
-foreground local/here hosts; 5e01be2de updates ownership docs. Private awards,
-sealed environment snapshots, injected bundle transport, prepared-source roles,
-requester-secret copying and HTTP state reads have parity tests. Cloud Docker and
-Actions policy stay in cluster. No SDK, schema or wire changes.
+Latest commits: 09bb338c1 moves the production local queue's execution hosts to
+runners.NativeHosting over the authenticated API socket. b9d8401d0 updates docs
+and ownership guards. cmd/sparkwing/local_host.go has no store bindings. The
+embedded claimant/loop still run in the controller. Legacy StoreHosting remains
+only for test fixtures and must go with the embedded runner.
 
-Full runners, cluster, CLI (282.379s) and .sparkwing/jobs (177.162s) suites passed.
-Final focused checks on repository Go 1.26.10 passed: common-host tests, tagged
-owner/node/plan/eval and private-source binding, real foreground generators,
-doccheck, vet, lint/depguard, formatting, comment/sleep checks, actual source-doc
-checks and docs sync. Code and docs received independent review. The first full
-suites used Go 1.27; its mismatch with the Go 1.26-built linter caused a panic,
-resolved by selecting the cached repository toolchain. No source workaround.
+Local cache profiles now bind from sealed inputs for trigger and independent
+node awards. Publication reads terminal history with verified peer authority,
+after native host cleanup/log flush, and keeps profile data credentials narrow.
+Tests cover cache credential cleanup, publication order/success/refusal, checkout
+redaction, opt-in, no node publication, and unchanged local verdict on failure.
+No SDK, wire or schema changes. A preterminal host failure can now warn that
+publication was unavailable instead of silently skipping publication.
 
-Existing opt-in integration failures were reproduced through Go overlays of the
-original composition at 643e98ea7: cluster TestProductionRunnerCommandsClaimAndHost
-(claim/host probe, missing mask registration), Cloud exchange/installed
-run-node (missing Docker setup), eligible scheduling (missing mask registration),
-and CLI TestRunAnywhereRunnerHostsPlanEvaluationAndJobs (sealed here machine []).
-They remain deferred. Foreground generator execution passes with a temporary
-private secrets key supplied through the existing key-file setting. Raw logs
-are retained in ignored .sparkwing/cache/localrunner-http-hosts/. Scratch removed.
+Validation: full CLI (252.047s), localcontroller (6.647s), pipeline jobs (88.919s),
+focused profile tests, real queued native schedule integration (3.554s), doccheck
+suite, vet, lint/depguard, fmt, commentcheck, sleepcheck and source-doc checks pass.
+Full acceptance passes (142.085s) after installing the missing locked web tsx
+and SDK TypeScript compiler dependencies without changing source or locks.
+Original setup failures, focused recovery and final full run logs are retained
+in .sparkwing/cache/localrunner-profile-hosts/. Scratch removed. Xwing context
+was unavailable for this fixed checkout; used repository Go checks.
 
-Next: port local cache/publication into the common host with tests, then remove
-embedded direct-store host adapters and claimant. Add durable runner instance
-PID/start/version and atomic activation/drain claim gating; supervise detached
-OS services; move foreground/here hosting and terminal observation to the runner;
-prove controller restart/roll and native service survival. The embedded queue and
-local_host.go direct bindings remain. Source uses localAwardSourceOptions and
-hostSourceOptions to preserve Base.Local, captured snapshots and LocalOnly engines.
+Next: durable PID/start/version/build records and atomic activation/drain using
+the same store claim-queue lock as claimUnit; a registered successor must not
+claim until activation. Start after API listening. A runner-side lifecycle watch
+calls Loop.Drain even at full host capacity; awards remain valid through uploads
+and terminal acknowledgement. Use Loop, not ManagedRunner's separate updater.
+Extract labels/profile policy from Claimant, then remove its token issuance and
+revocation. Keep stable machine placement separate from process-instance IDs.
 
-Foreground generation-zero local_foreground triggers need a named claim by their
-creator. Remote here retains its run-bound bearer and selected transport. Transfer
-captured requester secrets, never the detached runner's ambient values. Retain
-common-loop host accounting, and let new instances execute dependencies of
-waiting owners in a draining instance.
-
-Prior verified work: 3252fbd5e claim retry/Loop.Drain; 652aedc23 exit timestamps;
-ce2f36095 docs; 558d50b1f and 2cf25dd97 orphan cleanup/capacity/cancel tests;
-5fa90b2d9 migration guidance. The lead gate passed those earlier commits.
+Add detached systemd user services (setsid only on confirmed no-systemd), separate
+launchd agents and Windows SCM services. Existing controller unit/spawn helpers
+do not provide those lifetimes. Then move foreground/here hosting and terminal
+observation into the runner, delete remaining embedded adapters, and prove real
+restart/roll/service survival, including an old owner awaiting a child. Native
+Windows service/process/pipe parity remains untested. Prior restart polling,
+observed exits, orphan cleanup and measured cancel tests already passed the lead
+gate. Previous broad tagged-integration baseline failures and logs remain in
+.sparkwing/cache/localrunner-http-hosts/; do not redo them without a scope reason.
