@@ -175,7 +175,7 @@ func bindLocalController(ctx context.Context, b localcontroller.Binding) (_ loca
 	server.WithLocalSessions(paths.PathsAt(b.Home).SessionLedgerDir())
 	server.WithLocalRunner(controller.LocalRunner{Name: localRunnerName(), Labels: match.SelfAsserted(machineRunner.Labels)})
 	server.WithLocalAdmission(func(ctx context.Context) (wingwire.QueueState, error) {
-		// safety: a daemon can hold its socket and go quiet before or after its hello; the bound answers the
+		// safety: a daemon can hold its socket and stop answering HTTP; the bound answers the
 		// console's poll with the public refusal well before the browser abandons the request at ten seconds.
 		ctx, cancel := context.WithTimeout(ctx, localAdmissionTimeout)
 		defer cancel()

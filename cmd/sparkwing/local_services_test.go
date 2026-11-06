@@ -1,10 +1,10 @@
 package main
 
 import (
-	"bufio"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"io"
 	"net"
@@ -14,7 +14,6 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
-	"sync/atomic"
 	"testing"
 	"time"
 
@@ -371,31 +370,14 @@ func TestProductionLocalQueueReportsTheMachineAdmissionDaemon(t *testing.T) {
 	}
 }
 
-// A daemon that holds its socket and goes quiet, before or after its hello, still gets the public refusal back
-// well inside the browser's ten-second abort.
+// safety: incomplete HTTP responses must return before the browser's ten-second abort.
 func TestProductionLocalQueueRefusesASilentDaemonPromptly(t *testing.T) {
-	for _, silence := range []string{"before hello", "after hello"} {
+	for _, silence := range []string{"before headers", "after headers", "after probe"} {
 		t.Run(silence, func(t *testing.T) {
 			home := t.TempDir()
 			queue, err := client.NewQueueManager(productionLocalPolicyClientAt(t, home))
 			if err != nil {
 				t.Fatal(err)
-			}
-			var real string
-			if silence == "after hello" {
-				real = t.TempDir()
-				daemon, err := wingd.New(wingd.Config{Home: real, Version: installedVersion(), Stay: true})
-				if err != nil {
-					t.Fatal(err)
-				}
-				ctx, stop := context.WithCancel(t.Context())
-				done := make(chan error, 1)
-				go func() { done <- daemon.Run(ctx) }()
-				<-daemon.Ready()
-				t.Cleanup(func() { stop(); <-done })
-				if real, err = wingd.EnsureSocketPath(real); err != nil {
-					t.Fatal(err)
-				}
 			}
 			sock, err := wingd.EnsureSocketPath(home)
 			if err != nil {
@@ -404,13 +386,39 @@ func TestProductionLocalQueueRefusesASilentDaemonPromptly(t *testing.T) {
 			if err := os.MkdirAll(filepath.Dir(sock), 0o700); err != nil {
 				t.Fatal(err)
 			}
-			listener, err := net.Listen("unix", sock)
+			listener, err := net.Listen("unix", wingd.APISocketBeside(sock))
 			if err != nil {
 				t.Fatal(err)
 			}
-			t.Cleanup(func() { _ = listener.Close() })
-			var hellos atomic.Int32
-			go silentDaemon(listener, real, &hellos)
+			release := make(chan struct{})
+			answered := make(chan struct{}, 1)
+			server := &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if silence == "after probe" && r.URL.Path == "/api/v1/local/controller/probe" {
+					if err := json.NewEncoder(w).Encode(wingwire.HelloAck{ProtocolMajor: wingd.ProtocolMajor, BinaryVersion: installedVersion(), BuildIdentity: wingwire.BuildIdentity}); err != nil {
+						t.Error(err)
+					}
+					return
+				}
+				if silence == "after headers" {
+					w.Header().Set("Content-Length", "2")
+					w.WriteHeader(http.StatusOK)
+					w.(http.Flusher).Flush()
+				}
+				select {
+				case answered <- struct{}{}:
+				default:
+				}
+				<-release
+			})}
+			done := make(chan error, 1)
+			go func() { done <- server.Serve(listener) }()
+			t.Cleanup(func() {
+				_ = server.Close()
+				close(release)
+				if err := <-done; !errors.Is(err, http.ErrServerClosed) {
+					t.Error(err)
+				}
+			})
 
 			started := time.Now()
 			_, err = queue.ReadQueue(t.Context())
@@ -421,34 +429,11 @@ func TestProductionLocalQueueRefusesASilentDaemonPromptly(t *testing.T) {
 			if elapsed := time.Since(started); elapsed > 5*time.Second {
 				t.Fatalf("queue with a silent daemon took %s, want well under the browser's 10s abort", elapsed)
 			}
-			if silence == "after hello" && hellos.Load() == 0 {
-				t.Fatal("the daemon never answered a hello, so the case after one went untested")
+			select {
+			case <-answered:
+			default:
+				t.Fatal("the controller never received an HTTP request")
 			}
 		})
-	}
-}
-
-func silentDaemon(listener net.Listener, real string, hellos *atomic.Int32) {
-	for {
-		conn, err := listener.Accept()
-		if err != nil {
-			return
-		}
-		if real == "" {
-			continue
-		}
-		upstream, err := net.Dial("unix", real)
-		if err != nil {
-			_ = conn.Close()
-			continue
-		}
-		go func() { _, _ = io.Copy(upstream, conn) }()
-		go func() {
-			line, err := bufio.NewReader(upstream).ReadBytes('\n')
-			if err == nil && strings.Contains(string(line), "hello_ack") {
-				hellos.Add(1)
-				_, _ = conn.Write(line)
-			}
-		}()
 	}
 }
