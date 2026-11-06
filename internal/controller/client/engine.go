@@ -19,6 +19,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 )
 
 // ErrResponseNotObject marks a reply with no usable controller envelope.
@@ -51,6 +52,9 @@ func (c *engineClient) request(ctx context.Context, method, pattern, path, key s
 	req.Header.Set("Accept", "application/json")
 	if claim, ok := input.(controllerwire.ClaimRequest); ok && claim.MaxConcurrent > 0 {
 		req.Header.Set(controllerwire.RunnerMaxConcurrentHeader, strconv.Itoa(claim.MaxConcurrent))
+	}
+	if command, ok := input.(runstate.NodeCommandPayload); ok && command.Extra.ExitedAt != nil {
+		req.Header.Set(controllerwire.NodeExitedAtHeader, command.Extra.ExitedAt.UTC().Format(time.RFC3339Nano))
 	}
 	if input != nil {
 		req.Header.Set("Content-Type", "application/json")

@@ -50,6 +50,7 @@ func (c StartNode) nodeChange() nodeTransition {
 
 // RetryNode requests the retry edge.
 type RetryNode struct {
+	ExitedAt      *time.Time
 	Ref           runspec.NodeRef
 	Actor         runstate.Actor
 	SourceAttempt *runspec.AttemptOrdinal
@@ -58,11 +59,12 @@ type RetryNode struct {
 }
 
 func (c RetryNode) nodeChange() nodeTransition {
-	return nodeTransition{Ref: c.Ref, Actor: c.Actor, SourceAttempt: c.SourceAttempt, To: runstate.NodeRunning, Cause: runstate.CauseRetry, Extra: transitionExtra{Result: c.Result, RetryAt: c.RetryAt}}
+	return nodeTransition{Ref: c.Ref, Actor: c.Actor, SourceAttempt: c.SourceAttempt, To: runstate.NodeRunning, Cause: runstate.CauseRetry, Extra: transitionExtra{Result: c.Result, RetryAt: c.RetryAt, ExitedAt: c.ExitedAt}}
 }
 
 // ReportNode requests the report edge.
 type ReportNode struct {
+	ExitedAt      *time.Time
 	Ref           runspec.NodeRef
 	Actor         runstate.Actor
 	SourceAttempt *runspec.AttemptOrdinal
@@ -71,7 +73,7 @@ type ReportNode struct {
 }
 
 func (c ReportNode) nodeChange() nodeTransition {
-	return nodeTransition{Ref: c.Ref, Actor: c.Actor, SourceAttempt: c.SourceAttempt, To: c.Outcome, Cause: runstate.CauseReport, Extra: transitionExtra{Result: c.Result}}
+	return nodeTransition{Ref: c.Ref, Actor: c.Actor, SourceAttempt: c.SourceAttempt, To: c.Outcome, Cause: runstate.CauseReport, Extra: transitionExtra{Result: c.Result, ExitedAt: c.ExitedAt}}
 }
 
 // ReadyNode requests the release edge.
@@ -222,9 +224,9 @@ func NodeCommandFromPayload(body runstate.NodeCommandPayload, ref runspec.NodeRe
 	case runstate.CauseStart:
 		command = StartNode{Ref: ref, Actor: actor, SourceAttempt: body.SourceAttempt}
 	case runstate.CauseRetry:
-		command = RetryNode{Ref: ref, Actor: actor, SourceAttempt: body.SourceAttempt, Result: body.Extra.Result, RetryAt: body.Extra.RetryAt}
+		command = RetryNode{Ref: ref, Actor: actor, SourceAttempt: body.SourceAttempt, Result: body.Extra.Result, RetryAt: body.Extra.RetryAt, ExitedAt: body.Extra.ExitedAt}
 	case runstate.CauseReport:
-		command = ReportNode{Ref: ref, Actor: actor, SourceAttempt: body.SourceAttempt, Outcome: body.To, Result: body.Extra.Result}
+		command = ReportNode{Ref: ref, Actor: actor, SourceAttempt: body.SourceAttempt, Outcome: body.To, Result: body.Extra.Result, ExitedAt: body.Extra.ExitedAt}
 	case runstate.CauseRelease:
 		if body.To == runstate.NodeReady {
 			command = ReadyNode{Ref: ref, Actor: actor}
@@ -271,6 +273,6 @@ func NodeCommandPayloadFor(command NodeCommand) (runstate.NodeCommandPayload, er
 	}
 	c := command.nodeChange()
 	return runstate.NodeCommandPayload{To: c.To, Cause: c.Cause, SourceAttempt: c.SourceAttempt, Extra: runstate.NodeCommandExtra{
-		OwnerPolicy: c.Extra.OwnerPolicy, Result: c.Extra.Result, Materialize: c.Extra.Materialize, Approval: c.Extra.Approval, RetryAt: c.Extra.RetryAt, Publication: c.Extra.Publication,
+		OwnerPolicy: c.Extra.OwnerPolicy, Result: c.Extra.Result, Materialize: c.Extra.Materialize, Approval: c.Extra.Approval, RetryAt: c.Extra.RetryAt, Publication: c.Extra.Publication, ExitedAt: c.Extra.ExitedAt,
 	}}, nil
 }

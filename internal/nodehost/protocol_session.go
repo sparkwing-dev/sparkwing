@@ -32,6 +32,7 @@ import (
 // Revoke removes route authority before Close joins the process.
 type ProtocolSessionConfig struct {
 	output          *planningLogs
+	exitedAt        *time.Time
 	Masks           *MaskRegistry
 	Command         []string
 	Directory       string
@@ -51,6 +52,7 @@ type ProtocolSessionConfig struct {
 
 // startNode launches an attempt with its validated grant and shared environment.
 func (cfg ProtocolSessionConfig) startNode(ctx context.Context, input NodeInput, activity ExecutorActivity) (ExecutorProcess, error) {
+	cfg.exitedAt = input.exitedAt
 	if input.processRevoke != nil {
 		cfg.Revoke = input.processRevoke
 	}
@@ -581,6 +583,9 @@ func (s *protocolSession) watchProtocolProcess() {
 		s.reapErr = s.process.Finish(ctx, s.cfg.grace)
 	} else {
 		s.reapErr = s.process.Terminate(ctx, s.cfg.grace)
+	}
+	if s.cfg.exitedAt != nil {
+		*s.cfg.exitedAt = time.Now().UTC()
 	}
 }
 

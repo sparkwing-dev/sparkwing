@@ -16,8 +16,8 @@ func TestNodeCommandPayloadRejectsConflictingPayload(t *testing.T) {
 	actor := runstate.Actor{Kind: runstate.ActorHolder}
 	commands := []NodeCommand{
 		StartNode{Ref: ref, Actor: actor, SourceAttempt: new(runspec.AttemptOrdinal(0))},
-		RetryNode{Ref: ref, Actor: actor, SourceAttempt: new(runspec.AttemptOrdinal(1)), Result: &runstate.NodeResult{Outcome: runstate.NodeFailed}},
-		ReportNode{Ref: ref, Actor: actor, SourceAttempt: new(runspec.AttemptOrdinal(1)), Outcome: runstate.NodeSuccess},
+		RetryNode{Ref: ref, Actor: actor, SourceAttempt: new(runspec.AttemptOrdinal(1)), Result: &runstate.NodeResult{Outcome: runstate.NodeFailed}, ExitedAt: new(time.Unix(1000, 0).UTC())},
+		ReportNode{Ref: ref, Actor: actor, SourceAttempt: new(runspec.AttemptOrdinal(1)), Outcome: runstate.NodeSuccess, ExitedAt: new(time.Unix(1000, 0).UTC())},
 		ReadyNode{Ref: ref, Actor: actor},
 		ReleaseNode{Ref: ref, Actor: actor},
 		DependencyNode{Ref: ref, Actor: actor, Outcome: runstate.NodeSkipped},
@@ -56,6 +56,11 @@ func TestNodeCommandPayloadRejectsConflictingPayload(t *testing.T) {
 	body.To = runstate.NodeSuccess
 	if _, err := NodeCommandFromPayload(body, ref, actor); err == nil {
 		t.Fatal("start accepted a terminal destination")
+	}
+	body.To = runstate.NodeRunning
+	body.Extra.ExitedAt = new(time.Now())
+	if _, err := NodeCommandFromPayload(body, ref, actor); err == nil {
+		t.Fatal("start accepted an observed exit")
 	}
 	body, _ = NodeCommandPayloadFor(CancelNode{})
 	body.Extra.RetryAt = new(time.Time)

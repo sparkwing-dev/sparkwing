@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/lease"
@@ -59,6 +60,9 @@ func (h *nodeExecutor) attempt(ctx context.Context, input NodeInput, spec runspe
 		}
 		if process != nil {
 			closeErr := process.Close()
+			if input.exitedAt != nil && input.exitedAt.IsZero() {
+				*input.exitedAt = time.Now().UTC()
+			}
 			cleanupErr := process.Cleanup(lease.ExecutionContext(parent))
 			if cleanupFailure := errors.Join(closeErr, cleanupErr); cleanupFailure != nil {
 				err = errors.Join(err, cleanupFailure)

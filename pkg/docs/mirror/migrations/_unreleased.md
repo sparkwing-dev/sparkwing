@@ -87,3 +87,18 @@ The hard cut removes `POST /api/v1/local/controller/stay`, `LocalControl.stay`,
 fields. The four activity counts remain status
 observations. Dashboard activation and its remembered address retain their
 existing behavior.
+
+## Observed job exit time
+
+Award-bound node transitions accept the optional `X-Sparkwing-Exited-At`
+header, formatted as RFC3339Nano, on `report` and `retry` commands. Runners record
+it after joining the execution process and before log acknowledgement, cleanup
+and artifact/cache publication. The controller stores it as the job and attempt
+finish time even when reporting resumes after a restart.
+
+It clamps observations to report receipt and, when clocks permit, the attempt
+start to handle clock skew. Reports that omit the header retain receipt-time
+closure. Older controllers ignore the header and still accept the unchanged
+command body. Exit observations do not change result replay identity. Event
+times, lease checks and other authority decisions still use the controller
+clock. No route, credential, SDK surface or existing payload field is removed.

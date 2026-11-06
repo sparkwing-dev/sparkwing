@@ -30,6 +30,8 @@ unlock.
 
 ### Added
 
+- **runners:** Award-bound job reports accept optional `X-Sparkwing-Exited-At` observation headers. Job and attempt finish times preserve the runner's observed process exit before log acknowledgement, cleanup and publication, including delayed reports after controller restart. Event timestamps still use the controller clock. See [the migration guide](docs/migrations/_unreleased.md#observed-job-exit-time).
+
 - **SDK:** Host compatibility checks run frozen released Go and TypeScript pipelines through candidate nodehost. The affected gate reuses fixture preparation, and pre-release rebuilds every historical fixture.
 
 ### Fixed

@@ -49,6 +49,8 @@ func TestRetryLeavesTheRowRunningThroughItsBackoff(t *testing.T) {
 		if len(state.changes) != 2 || state.changes[0].Cause != runstate.CauseStart || state.changes[1].Cause != runstate.CauseRetry || state.changes[1].To != runstate.NodeRunning || state.changes[1].Actor.Generation != input.Generation || len(*processes) != 1 {
 			t.Fatalf("backoff changed lifecycle: transitions=%+v processes=%d", state.changes, len(*processes))
 		}
+		time.Sleep(2 * time.Second)
+		cancelledAt := time.Now().UTC()
 		cancel()
 		synctest.Wait()
 		if err := <-done; !errors.Is(err, context.Canceled) {
@@ -56,6 +58,10 @@ func TestRetryLeavesTheRowRunningThroughItsBackoff(t *testing.T) {
 		}
 		if len(state.changes) != 3 || state.changes[2].To != runstate.NodeCancelled || len(*processes) != 1 {
 			t.Fatalf("backoff cancellation started work or lost its terminal write: %+v", state.changes)
+		}
+		report := state.changes[2]
+		if report.Extra.ExitedAt == nil || !report.Extra.ExitedAt.Equal(cancelledAt) || !report.Extra.ExitedAt.After(*state.changes[1].Extra.ExitedAt) {
+			t.Fatalf("backoff cancellation reused prior attempt exit: report=%v retry=%v cancelled=%v", report.Extra.ExitedAt, state.changes[1].Extra.ExitedAt, cancelledAt)
 		}
 	})
 }

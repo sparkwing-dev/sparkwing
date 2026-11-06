@@ -3,6 +3,7 @@ package nodehost
 import (
 	"context"
 	"encoding/json"
+	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
@@ -76,6 +77,7 @@ type ClaimAuthority struct {
 // SDK processes receive them in hello, never through process environment.
 type NodeInput struct {
 	processRevoke func() error
+	exitedAt      *time.Time
 	Storage       StorageBinding
 	Engine        engine.Resolved
 	Accepted      AcceptedRun

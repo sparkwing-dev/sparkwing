@@ -309,7 +309,11 @@ func (h *nodeExecutor) startExecution(ctx context.Context, input NodeInput, spec
 func (h *nodeExecutor) attempts(ctx context.Context, input *NodeInput, spec runspec.Spec, row runstate.NodeRow, job nodeproto.JobSpec) (runstate.NodeResult, error) {
 	remaining := max(0, input.Execution.Retry.Value-row.ApplicationRetries)
 	for retry := 0; ; retry++ {
+		input.exitedAt = new(time.Time)
 		result, err := h.attempt(ctx, *input, spec, job, retry < remaining)
+		if input.exitedAt.IsZero() {
+			*input.exitedAt = time.Now().UTC()
+		}
 		if ctx.Err() != nil {
 			return h.failure(context.Cause(ctx)), context.Cause(ctx)
 		}
@@ -326,7 +330,7 @@ func (h *nodeExecutor) attempts(ctx context.Context, input *NodeInput, spec runs
 		retryAt := time.Now().Add(wait)
 		result = recordNodeFailure(input.NodeID, result, h.deps.Masker.Mask)
 		sourceAttempt := input.Attempt
-		applied, err := h.transition(ctx, *input, store.RetryNode{SourceAttempt: &sourceAttempt, Result: &result, RetryAt: &retryAt})
+		applied, err := h.transition(ctx, *input, store.RetryNode{SourceAttempt: &sourceAttempt, Result: &result, RetryAt: &retryAt, ExitedAt: input.exitedAt})
 		if err != nil {
 			return result, err
 		}
@@ -334,6 +338,7 @@ func (h *nodeExecutor) attempts(ctx context.Context, input *NodeInput, spec runs
 			return result, errors.New("retry transition returned an inconsistent claim or attempt")
 		}
 		input.Attempt = applied.Attempt
+		input.exitedAt = nil
 		bound, bindErr := h.bindStorage(ctx, *input)
 		if bindErr != nil {
 			input.Storage = StorageBinding{}
@@ -372,6 +377,10 @@ func executorActor(input NodeInput) runstate.Actor {
 }
 
 func (h *nodeExecutor) report(ctx context.Context, input NodeInput, result runstate.NodeResult, runErr error) error {
+	if input.exitedAt == nil {
+		exited := time.Now().UTC()
+		input.exitedAt = &exited
+	}
 	// safety: a sensitive startup request can observe cancellation before the next lease renewal.
 	if runErr != nil && ctx.Err() == nil {
 		if snapshot, err := h.deps.Store.ReadSnapshot(ctx, input.Accepted.RunID); err == nil {
@@ -407,7 +416,7 @@ func (h *nodeExecutor) report(ctx context.Context, input NodeInput, result runst
 	// safety: a cancelled context cannot send the final fenced report; the store still verifies current authority.
 	reportCtx := lease.ExecutionContext(ctx)
 	result = recordNodeFailure(input.NodeID, result, h.deps.Masker.Mask)
-	_, err := h.transition(reportCtx, input, store.ReportNode{SourceAttempt: &input.Attempt, Outcome: result.Outcome, Result: &result})
+	_, err := h.transition(reportCtx, input, store.ReportNode{SourceAttempt: &input.Attempt, Outcome: result.Outcome, Result: &result, ExitedAt: input.exitedAt})
 	if err == nil {
 		OutcomeNotify(ctx)(WorkOutcome{RunID: input.Accepted.RunID, JobID: input.NodeID, State: string(result.Outcome)})
 	}

@@ -7,6 +7,7 @@ import (
 	"math"
 	"net/http"
 	"slices"
+	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
@@ -182,9 +183,28 @@ func (s *Server) localHostRunEdge(w http.ResponseWriter, r *http.Request, a capa
 	return nil
 }
 
+func observeNodeExit(r *http.Request, body *runstate.NodeCommandPayload) error {
+	values := r.Header.Values(controllerwire.NodeExitedAtHeader)
+	if len(values) == 0 {
+		return nil
+	}
+	if len(values) != 1 || body.Cause != runstate.CauseReport && body.Cause != runstate.CauseRetry {
+		return invalidEngineBody("observed exit requires one timestamp on a report or retry")
+	}
+	exited, err := time.Parse(time.RFC3339Nano, values[0])
+	if err != nil {
+		return invalidEngineBody("observed exit must be an RFC3339Nano timestamp")
+	}
+	body.Extra.ExitedAt = &exited
+	return nil
+}
+
 func (s *Server) localHostNodeTransition(w http.ResponseWriter, r *http.Request, a capability.Authorized) error {
 	var body runstate.NodeCommandPayload
 	if err := decodeEngineRequest(r, &body); err != nil {
+		return err
+	}
+	if err := observeNodeExit(r, &body); err != nil {
 		return err
 	}
 	tenant, err := s.tenantForTeam(r.Context(), store.Team(a.Target.Team))

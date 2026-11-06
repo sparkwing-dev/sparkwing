@@ -124,9 +124,10 @@ type transitionExtra struct {
 	Claim       *runstate.ClaimAward
 	Attempt     *runstate.NodeAttempt
 	RetryAt     *time.Time
+	ExitedAt    *time.Time `json:"-"`
 }
 
-// nodeTransition has no caller-selected event kind or clock; the edge determines both.
+// safety: event time comes from the store clock; ExitedAt only observes execution completion.
 type nodeTransition struct {
 	Ref           runspec.NodeRef
 	To            runstate.NodeState
@@ -667,6 +668,7 @@ func applyNodeEdgeTx(ctx context.Context, tx *storeTx, team Team, row *runstate.
 		}
 		return nil
 	}
+	finished := nodeFinishedAt(*row, change, now)
 	if row.Status == runstate.StatusRunning && (change.To != runstate.NodeRunning || change.Cause == runstate.CauseRetry) {
 		outcome, reason := change.To, ""
 		if change.Extra.Result != nil {
@@ -678,7 +680,7 @@ func applyNodeEdgeTx(ctx context.Context, tx *storeTx, team Team, row *runstate.
 				outcome, reason = runstate.NodeCancelled, "cancelled"
 			}
 		}
-		result, err := tx.execContext(ctx, `UPDATE node_attempts SET finished_at=?,outcome=?,failure_reason=? WHERE team=? AND run_id=? AND node_id=? AND attempt=? AND generation=? AND finished_at IS NULL`, now.UnixNano(), outcome, reason, team, row.Ref.RunID, row.Ref.NodeID, row.Attempt, row.Generation)
+		result, err := tx.execContext(ctx, `UPDATE node_attempts SET finished_at=?,outcome=?,failure_reason=? WHERE team=? AND run_id=? AND node_id=? AND attempt=? AND generation=? AND finished_at IS NULL`, finished.UnixNano(), outcome, reason, team, row.Ref.RunID, row.Ref.NodeID, row.Attempt, row.Generation)
 		if err != nil {
 			return err
 		}
@@ -788,7 +790,7 @@ func applyNodeEdgeTx(ctx context.Context, tx *storeTx, team Team, row *runstate.
 		}
 		row.Status = runstate.StatusDone
 		row.Outcome = change.To
-		row.FinishedAt = &now
+		row.FinishedAt = &finished
 		row.QueueStartedAt = nil
 		clearNodeClaim(row)
 		if row.Expansion == runstate.ExpansionExpected && change.To != runstate.NodeSuccess && change.To != runstate.NodeMemoized {
@@ -799,6 +801,21 @@ func applyNodeEdgeTx(ctx context.Context, tx *storeTx, team Team, row *runstate.
 		}
 	}
 	return nil
+}
+
+func nodeFinishedAt(row runstate.NodeRow, change nodeTransition, now time.Time) time.Time {
+	if change.Cause != runstate.CauseReport && change.Cause != runstate.CauseRetry || change.Extra.ExitedAt == nil || change.Extra.ExitedAt.IsZero() {
+		return now
+	}
+	finished := change.Extra.ExitedAt.UTC()
+	// safety: observations clamp to receipt and, when clocks permit, the attempt start.
+	if row.StartedAt != nil && finished.Before(*row.StartedAt) {
+		finished = *row.StartedAt
+	}
+	if finished.After(now) {
+		finished = now
+	}
+	return finished
 }
 
 func clearNodeClaim(row *runstate.NodeRow) {

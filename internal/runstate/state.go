@@ -37,6 +37,7 @@ type NodeCommandExtra struct {
 	Materialize *MaterializeSource        `json:"materialize,omitempty"`
 	Approval    *ApprovalResolution       `json:"approval,omitempty"`
 	RetryAt     *time.Time                `json:"retry_at,omitempty"`
+	ExitedAt    *time.Time                `json:"-"`
 	Publication *runspec.PublishedAttempt `json:"publication,omitempty"`
 }
 

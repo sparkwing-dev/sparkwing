@@ -889,3 +889,48 @@ func TestProtocolSessionIdleSinkFailureStopsAuthor(t *testing.T) {
 		})
 	}
 }
+
+func TestProtocolSessionObservesExitBeforeOutputAcknowledgement(t *testing.T) {
+	var exited time.Time
+	finishing, acknowledge := make(chan struct{}), make(chan struct{})
+	defer func() {
+		select {
+		case <-acknowledge:
+		default:
+			close(acknowledge)
+		}
+	}()
+	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+	defer cancel()
+	session := protocolTestSession(t, "normal", func(cfg *ProtocolSessionConfig) {
+		cfg.exitedAt = &exited
+		cfg.output = &planningLogs{masker: secrets.NewMasker(), buffer: []planningOutput{{text: "pending output"}}, sink: func(context.Context, nodeproto.FrameLog) error {
+			close(finishing)
+			<-acknowledge
+			return nil
+		}}
+	})
+	protocolTestHello(t, session)
+	closed := make(chan error, 1)
+	go func() { closed <- session.Close() }()
+	select {
+	case <-finishing:
+	case <-ctx.Done():
+		t.Fatal("output finalization did not start")
+	}
+	blockedAt := time.Now().UTC()
+	select {
+	case err := <-closed:
+		close(acknowledge)
+		t.Fatalf("Close returned before output acknowledgement: %v", err)
+	default:
+	}
+	observed := exited
+	close(acknowledge)
+	if err := <-closed; err != nil {
+		t.Fatal(err)
+	}
+	if observed.IsZero() || observed.After(blockedAt) || !exited.Equal(observed) {
+		t.Fatalf("exit observation = %v, after acknowledgement = %v, output blocked at %v", observed, exited, blockedAt)
+	}
+}
