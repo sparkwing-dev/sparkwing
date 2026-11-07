@@ -283,12 +283,6 @@ func queueLifecycleConnections(qs wingwire.QueueState) []wingwire.Holder {
 }
 
 func queueLifecycleRows(qs wingwire.QueueState, connectionOnly bool) []wingwire.Holder {
-	waitingOwners := make(map[string]bool)
-	for _, w := range qs.Waiters {
-		if w.ParticipantID != "" {
-			waitingOwners[w.RunID] = true
-		}
-	}
 	holders := make([]wingwire.Holder, 0, len(qs.Holders))
 	for _, h := range qs.Holders {
 		if h.ConnectionOnly != connectionOnly {
@@ -298,20 +292,15 @@ func queueLifecycleRows(qs wingwire.QueueState, connectionOnly bool) []wingwire.
 			holders = append(holders, h)
 			continue
 		}
-		orchestrationWait := h.AdmissionWaiting ||
-			(h.ParticipantID == "" && h.Parent == "" && h.Resources.Cores <= 0 && h.Resources.MemoryBytes <= 0 && waitingOwners[h.RunID])
-		if !orchestrationWait {
+		if !h.AdmissionWaiting {
 			holders = append(holders, h)
 		}
 	}
 	return holders
 }
 
-// resourceAvailable returns the grantable amount the machine view displays for
-// one resource row, including compatibility with daemons that predate explicit
-// headroom fields.
 func resourceAvailable(r wingwire.ResourceState) float64 {
-	if isHostResource(r.Key) && (r.Available > 0 || r.Reserved > 0 || r.External > 0 || r.ExternalSource != "") {
+	if isHostResource(r.Key) {
 		return r.Available
 	}
 	free := r.Capacity - r.Held
@@ -375,8 +364,6 @@ func fmtHeadroomCell(key string, v float64) string {
 	return fmtAmount(key, v)
 }
 
-// externalAmount formats the queue view's external-load cell without turning a
-// legacy unknown or an unreadable measurement into a measured zero.
 func externalAmount(r wingwire.ResourceState) string {
 	if !isHostResource(r.Key) {
 		return "-"

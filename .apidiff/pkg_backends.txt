@@ -1,3 +1,0 @@
-# pkg/backends
-
-const MigrationGuideURL = "https://sparkwing.dev/docs/migration-guide/"

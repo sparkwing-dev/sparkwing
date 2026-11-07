@@ -45,7 +45,7 @@ func TestExternalAmountDistinguishesUnknownAndUnattributed(t *testing.T) {
 		name, source, want string
 		external           float64
 	}{
-		{name: "legacy unknown", want: "unknown"},
+		{name: "missing measurement", want: "unknown"},
 		{name: "unmeasured", source: wingwire.ExternalUnmeasured, want: "unmeasured"},
 		{name: "measured", source: wingwire.ExternalMeasured, external: 1.25, want: "1.25"},
 		{name: "unattributed", source: wingwire.ExternalUnattributed, external: 1.25, want: "1.25 (unattributed)"},

@@ -205,8 +205,7 @@ attempt finish time even when reporting resumes after a restart.
 
 It clamps observations to report receipt and, when clocks permit, the attempt
 start to handle clock skew. Reports that omit the header retain receipt-time
-closure. Older controllers ignore the header and still accept the unchanged
-command body. Exit observations do not change result replay identity. Event
+closure. Exit observations do not change result replay identity. Event
 times, lease checks and other authority decisions still use the controller
 clock. No route, credential, SDK surface or existing payload field is removed.
 
@@ -258,10 +257,30 @@ configured source credentials. App credentials remain on the controller.
 For GitHub identity lookup without an explicit local GitHub token, upgrade the
 controller before the CLI. This applies to pipeline triggers, Cloud-routed runs
 and profile cache identity. Explicit `GH_TOKEN` or `GITHUB_TOKEN` still supports identity
-lookup when the controller cannot resolve it, including older controllers and
-repository-scoped HTTPS source credentials. Without an explicit token, the CLI
+lookup when the controller cannot resolve it through its repository-scoped
+HTTPS source credentials or is rate limited. Without an explicit token, the CLI
 returns the controller's error and makes no anonymous GitHub request.
 No route, wire field or SDK surface is removed.
+
+## Current contracts only
+
+Run submission and retries send agent labels and retry reasons once. A controller
+that refuses those fields returns its error. Upgrade clients and controllers
+together when their contracts change.
+
+Admission restores the current snapshot format. Historical rankless snapshots
+are refused. Queue views use explicit admission and resource fields. Managed hooks
+that no pipeline declares cause a conflict, including historical global-hook
+forwarders. Delete the stale hook named in the error.
+
+Unknown machine/profile keys and guard forms receive the normal schema errors.
+The unused `pkg/backends` migration-URL package is removed.
+
+Schema 30 is the oldest baseline this binary upgrades. The 28-to-29 and 29-to-30
+steps and their historical fixtures are removed. Schemas 30 through 33 retain
+their in-place path to schema 34. Resetting a database requires preserving
+secrets and keys, teams and memberships, tokens, runner registrations, GitHub App
+installations, schedules and subscriptions. Billing records need separate review.
 
 ## The dashboard serves whenever the controller runs
 
