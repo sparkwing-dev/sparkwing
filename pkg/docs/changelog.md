@@ -22,6 +22,7 @@ unlock.
 
 ### Breaking
 
+- **CLI (Breaking):** `sparkwing dashboard start` and `sparkwing dashboard stop` are removed, with their `--addr`, `--allow-remote` and `--read-only` flags. Every shared local controller now serves the dashboard from the moment it starts, at `dashboard.address` in config.yaml (`127.0.0.1:4343` by default, loopback only). `dashboard.read_only` replaces `--read-only`. `sparkwing dashboard open` starts the controller when none runs, and `sparkwing daemon stop` stops it. A taken port leaves runs admitted and status reports `dashboard_error`. The `wingd/dashboard.json` record and `POST /api/v1/local/controller/dashboard` are removed. See [the migration guide](docs/migrations/_unreleased.md#the-dashboard-serves-whenever-the-controller-runs).
 - **controller (Breaking):** The schema baseline advances to version 34, adding a partial index on live child runs for the parent-cancellation sweep. Recognized schema 33 stores upgrade in place. Older binaries refuse the upgraded store. See [the migration guide](docs/migrations/_unreleased.md#upgrade-the-store-in-place-to-schema-baseline-34).
 
 - **local controller (Breaking):** The schema baseline advances to version 33, adding durable runner process identities and lifecycle state. Recognized schema 32 stores upgrade in place. Older binaries refuse the upgraded store. See [the migration guide](docs/migrations/_unreleased.md#upgrade-the-store-in-place-to-schema-baseline-33).
@@ -48,14 +49,17 @@ unlock.
 
 ### Changed
 
+- **examples:** The `example` pipeline's memoized-step, cancellation and logs-history probes now run on Sparkwing Cloud instead of skipping. A new `lifecycle-cli` job builds the CLI from the checkout and signs in to `--api-controller` with the optional `EXAMPLE_PROBE_TOKEN` secret, and the deploy pipeline's staging gate passes the staging controller. Without a CLI on the host, a controller or that secret, the probes still skip with the reason.
+
 - **storage:** The first 256 MiB of the prepared pipeline Sparkwing Cloud builds for a run no longer counts toward the team's per-run, monthly or object storage quotas, so free-tier teams can run Go pipelines whose binaries are 20 to 40 MB. Bytes past 256 MiB and further uploads from the run's planning credentials count as before. The prepared pipeline stays deduplicated by digest and retained-storage billing still counts it. The free tier's per-run limit rises from 10 MiB to 100 MiB; the paid tier and explicit operator quotas are unchanged. See [limits](docs/limits.md#uploads-and-storage-accounting).
 
 ### Fixed
 
 - **deploy:** Restore the controller runtime base index after registry retention expired it. Keep both runtime bases under the existing retention tags so a pinned digest survives the rolling release-image window.
 
+- **local controller:** `sparkwing daemon stop` retires the local runner before the controller exits, so an idle runner records its stop and revokes its claim credential instead of failing against a missing socket, and a runner holding jobs stops claiming and finishes them. `sparkwing daemon restart` keeps the runner and its jobs running.
 - **controller:** A request the controller abandons while stopping is answered as `unavailable` instead of `internal`, so held reads retry against its successor. Jobs waiting on child runs survived controller kills but failed with `request failed` when `sparkwing daemon restart` drained the controller.
-- **runners:** A `sparkwing-runner` with `runner.local_admission: true` explains a local controller it cannot use. With no controller running, a claimed job fails naming `sparkwing dashboard start`, `sparkwing dashboard install` and `local_admission: false` instead of a failed daemon spawn followed by an earlier daemon's log. A controller on an incompatible build names both builds and the same remedies. The runner logs one warning per cause while either lasts, and a controller refusing a pre-HTTP runner names the runner remedy and records `handshake_refused` in `sparkwing daemon events`.
+- **runners:** A `sparkwing-runner` with `runner.local_admission: true` explains a local controller it cannot use. With no controller running, a claimed job fails naming `sparkwing dashboard open`, `sparkwing dashboard install` and `local_admission: false` instead of a failed daemon spawn followed by an earlier daemon's log. A controller on an incompatible build names both builds and the same remedies. The runner logs one warning per cause while either lasts, and a controller refusing a pre-HTTP runner names the runner remedy and records `handshake_refused` in `sparkwing daemon events`.
 
 - **controller:** A claim from a development-build runner is refused with a message naming the build and a hint to install a released `sparkwing-runner`, instead of "invalid release version". Development runners are still refused by release controllers.
 - **controller and CLI:** A generator job whose expansion failed now shows why. Run status gives it the `expansion_failed` reason and its masked error, the errors view and `runs failures` list it, and jobs that waited on its generated group name it as blocking. Previously the run failed naming a job that read as successful, and the error was only in controller logs. See [observability](docs/observability.md#failure-reasons).

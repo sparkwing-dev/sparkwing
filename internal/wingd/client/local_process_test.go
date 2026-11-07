@@ -52,10 +52,10 @@ func TestLocalProcessLifecycleStartsDetachedAndReusesOwner(t *testing.T) {
 		return owner.status, nil
 	})
 	ctx, cancel := context.WithCancel(t.Context())
-	opts := wingd.LocalStartOptions{Home: home, Executable: "/sparkwing", Version: "v2", DashboardAddress: "127.0.0.1:4343"}
-	status, err := lifecycle.StartDashboard(ctx, opts)
-	if err != nil || status.PID != 72 || local.starts != 0 || starts != 1 || owner.dashboards != 1 {
-		t.Fatalf("startup: %+v, %v, local=%d detached=%d dashboard=%d", status, err, local.starts, starts, owner.dashboards)
+	opts := wingd.LocalStartOptions{Home: home, Executable: "/sparkwing", Version: "v2"}
+	status, err := lifecycle.EnsureStarted(ctx, opts)
+	if err != nil || status.PID != 72 || local.starts != 0 || starts != 1 {
+		t.Fatalf("startup: %+v, %v, local=%d detached=%d", status, err, local.starts, starts)
 	}
 	cancel()
 	var callers sync.WaitGroup
@@ -77,10 +77,10 @@ func TestLocalProcessLifecycleStartsDetachedAndReusesOwner(t *testing.T) {
 }
 
 func FuzzLocalProcessLifecycleKeepsOwnership(f *testing.F) {
-	f.Add(false, false, uint8(0))
-	f.Add(true, true, uint8(1))
-	f.Add(false, true, uint8(2))
-	f.Fuzz(func(t *testing.T, present, dashboard bool, failure uint8) {
+	f.Add(false, uint8(0))
+	f.Add(true, uint8(1))
+	f.Add(false, uint8(2))
+	f.Fuzz(func(t *testing.T, present bool, failure uint8) {
 		home := t.TempDir()
 		local := &localRuntimeFixture{failure: errors.New("CLI opened the store")}
 		owner := &lifecycleOwner{err: ErrNoDaemon}
@@ -105,24 +105,18 @@ func FuzzLocalProcessLifecycleKeepsOwnership(f *testing.F) {
 		ctx, cancel := context.WithCancel(t.Context())
 		defer cancel()
 		opts := wingd.LocalStartOptions{Home: home, Version: "v2"}
-		if dashboard {
-			opts.DashboardAddress = "127.0.0.1:4343"
-		}
 		if failure%4 == 2 {
 			cancel()
 		} else if failure%4 == 3 {
 			opts.Home = t.TempDir()
 		}
-		status, err := lifecycle.StartDashboard(ctx, opts)
+		status, err := lifecycle.EnsureStarted(ctx, opts)
 		refused := failure%4 >= 2 || (!present && failure%4 == 1)
 		if (err != nil) != refused || (!refused && !status.Running) {
 			t.Fatalf("unexpected startup: status=%+v error=%v refused=%t", status, err, refused)
 		}
 		if local.starts != 0 || starts > 1 || owner.drains != 0 {
 			t.Fatal("request changed process ownership")
-		}
-		if refused && owner.dashboards != 0 {
-			t.Fatal("refused request mutated a controller")
 		}
 		if present && starts != 0 {
 			t.Fatal("ready owner was replaced")

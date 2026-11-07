@@ -7,6 +7,7 @@ type Config struct {
 	Profiles  map[string]Profile `yaml:"profiles,omitempty" json:"profiles,omitempty"`
 	Repos     *ReposConfig       `yaml:"repos,omitempty" json:"repos,omitempty"`
 	Admission *AdmissionConfig   `yaml:"admission,omitempty" json:"admission,omitempty"`
+	Dashboard *DashboardConfig   `yaml:"dashboard,omitempty" json:"dashboard,omitempty"`
 	Runner    *RunnerConfig      `yaml:"runner,omitempty" json:"runner,omitempty"`
 	Cache     *CacheConfig       `yaml:"cache,omitempty" json:"cache,omitempty"`
 	Machine   *MachineConfig     `yaml:"machine,omitempty" json:"machine,omitempty"`
@@ -60,6 +61,12 @@ type AdmissionBurst struct {
 	Cores      *float64 `yaml:"cores,omitempty" json:"cores,omitempty"`
 	MaxP99     *string  `yaml:"max_p99,omitempty" json:"max_p99,omitempty"`
 	MinSamples *int     `yaml:"min_samples,omitempty" json:"min_samples,omitempty"`
+}
+
+// DashboardConfig is read when the local controller starts, so a change takes effect on restart.
+type DashboardConfig struct {
+	Address  *string `yaml:"address,omitempty" json:"address,omitempty"`
+	ReadOnly *bool   `yaml:"read_only,omitempty" json:"read_only,omitempty"`
 }
 
 // RunnerConfig supplies machine claim preferences; pools and billing facts come

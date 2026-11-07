@@ -56,7 +56,7 @@ var key = []byte("sparkwing signing domain v1")
 var message = "sparkwing will build with " + "go1.26."
 var version string
 var fragment = "sparkwing will build with " + version
-var current = "sparkwing dashboard " + "start"
+var current = "sparkwing dashboard " + "open"
 func data() { run("commit", "-m", "sparkwing sample commit"); strings.NewReader("sparkwing snapshot\n") }
 `)
 	writeSource(t, root, "cmd/tool/hint_test.go", "package main\n\nvar old = \"sparkwing update --cli\"\n")
@@ -82,7 +82,7 @@ func FuzzConcatenatedRecoveryCommandsUseCurrentGrammar(f *testing.F) {
 	f.Add(uint8(10))
 	f.Add(uint8(20))
 	f.Fuzz(func(t *testing.T, split uint8) {
-		for _, command := range []string{"sparkwing serve start\n", "sparkwing dashboard start\n", "sparkwing serve start", "sparkwing dashboard start"} {
+		for _, command := range []string{"sparkwing serve start\n", "sparkwing dashboard open\n", "sparkwing serve start", "sparkwing dashboard open"} {
 			root := t.TempDir()
 			point := int(split) % len(command)
 			expression := "(" + strconv.Quote(command[:point]) + " + " + strconv.Quote(command[point:]) + ")"
@@ -104,7 +104,7 @@ func FuzzNamedConstantRecoveryCommandsUseCurrentGrammar(f *testing.F) {
 		f.Add(uint8(10), form)
 	}
 	f.Fuzz(func(t *testing.T, split, form uint8) {
-		for _, command := range []string{"sparkwing serve start", "sparkwing dashboard start"} {
+		for _, command := range []string{"sparkwing serve start", "sparkwing dashboard open"} {
 			root := t.TempDir()
 			point := int(split) % len(command)
 			declarations := "const head = " + strconv.Quote(command[:point]) + "\nconst tail = " + strconv.Quote(command[point:]) + "\n"
