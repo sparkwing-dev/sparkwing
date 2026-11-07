@@ -40,4 +40,11 @@ describe("local session", () => {
     await logOutLocal();
     assert.deepEqual(calls, [{ url: "/logout", method: "POST", auth: null }]);
   });
+
+  it("rejects when the controller could not revoke the session", async () => {
+    runtime.fetch = async () => new Response(null, { status: 503 });
+    await assert.rejects(logOutLocal(), /still active/);
+    runtime.fetch = async () => new Response(null, { status: 401 });
+    await logOutLocal();
+  });
 });

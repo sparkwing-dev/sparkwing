@@ -147,20 +147,31 @@ function LogoutControl() {
 
 function LocalLogoutControl() {
   const [held, setHeld] = useState(false);
+  const [failure, setFailure] = useState("");
   useEffect(() => {
     queueMicrotask(() => setHeld(localSignedIn()));
   }, []);
   if (!held) return null;
   return (
-    <button
-      type="button"
-      onClick={() => {
-        void logOutLocal().then(() => window.location.reload());
-      }}
-      className="ml-2 px-2 py-1 text-xs rounded-sm border border-[var(--border)] text-[var(--muted)] hover:text-[var(--foreground)] hover:bg-[var(--surface-raised)]"
-    >
-      Log out
-    </button>
+    <>
+      <button
+        type="button"
+        onClick={() => {
+          setFailure("");
+          logOutLocal()
+            .then(() => window.location.reload())
+            .catch((err: unknown) => setFailure(err instanceof Error ? err.message : "sign-out failed"));
+        }}
+        className="ml-2 px-2 py-1 text-xs rounded-sm border border-[var(--border)] text-[var(--muted)] hover:text-[var(--foreground)] hover:bg-[var(--surface-raised)]"
+      >
+        Log out
+      </button>
+      {failure && (
+        <span role="alert" className="ml-2 text-xs text-[var(--danger)]">
+          {failure}
+        </span>
+      )}
+    </>
   );
 }
 

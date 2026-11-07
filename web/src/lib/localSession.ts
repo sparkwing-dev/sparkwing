@@ -29,6 +29,10 @@ export function localSignedIn(): boolean {
 
 // The local session is an HttpOnly cookie, so the browser sends it and the
 // Origin header the controller requires on this write.
+// A 401 means the session had already ended; any other failure leaves it live,
+// so it rejects for the caller to say so.
 export async function logOutLocal(): Promise<void> {
-  await fetch(LOCAL_LOGOUT_PATH, { method: "POST" }).catch(() => undefined);
+  const res = await fetch(LOCAL_LOGOUT_PATH, { method: "POST" });
+  if (res.ok || res.status === 401) return;
+  throw new Error(`sign-out failed (HTTP ${res.status}); the session is still active`);
 }
