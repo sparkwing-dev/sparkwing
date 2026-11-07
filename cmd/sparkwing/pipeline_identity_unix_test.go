@@ -174,7 +174,7 @@ func main() {
 	if err := runInternalCompletePipelines(&output, nil); err != nil {
 		t.Fatal(err)
 	}
-	if got := strings.TrimSuffix(output.String(), "\n"); got != "deploy-prod\t\tpipeline\tentrypoint metadata\ndeploy-stage\t\tpipeline\tentrypoint metadata" {
+	if got := strings.TrimSuffix(output.String(), "\n"); got != "deploy-prod\tentrypoint metadata\ndeploy-stage\tentrypoint metadata" {
 		t.Fatalf("completion=%q", got)
 	}
 }
