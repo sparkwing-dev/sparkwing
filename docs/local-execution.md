@@ -10,7 +10,8 @@ GitHub Actions use the same capability table for initial plans and expansions.
 
 If the pipeline's `go.mod` replaces the Go SDK, Sparkwing uses the installed CLI's
 engine and warns that engine pinning is off for that run. The shared installer
-builds the replacement locally.
+builds the replacement locally. Local preparation retains that engine's exact
+executable so an older compatible runner can execute the accepted build.
 
 Local Go runs reuse their executable while source and captured build inputs match.
 Reusing the binary skips dependency preparation and compilation. On a miss,
@@ -35,7 +36,7 @@ credential permits verified cache reads. A selected publication profile receives
 history after the owner host closes its jobs and log uploads. Publication errors
 warn without changing the local execution result.
 
-The controller claims each executable local job through the shared claim matcher.
+Each executable local job receives an award through the shared claim matcher.
 Each job process receives a fresh credential from its own store-issued node award.
 The private API preserves the owner and node claim identities so the host can
 check their relation before starting the process.
@@ -60,8 +61,10 @@ selects the controller for `pipeline trigger`, run observations and management.
 
 | Invocation | Execution and records |
 | --- | --- |
-| `sparkwing run build` | The CLI hosts the run. The local controller owns its records. |
-| `sparkwing run build --sw-detached` | The local controller queues and hosts work independently of the submitting terminal. |
+| `sparkwing run build` | The local runner hosts the run. The CLI follows its logs and outcome. The local controller owns its records. |
+| `sparkwing run build --sw-detached` | The local runner hosts the queued work. The CLI returns after intake. |
+| `sparkwing run build --publish work` | The CLI hosts the run and waits for publication to finish or report a warning. |
+| `sparkwing run build --sw-allow-unadmitted` | The CLI hosts the run with its own exclusive in-process controller. |
 | `sparkwing pipeline trigger build --profile prod` | The selected controller queues the run for an eligible runner or launcher. |
 | `sparkwing pipeline trigger build --profile prod --runner here --reason repair` | This CLI hosts the controller's named here run. |
 
@@ -75,34 +78,44 @@ for a worker remain available to the scheduler without consuming a local claim.
 `--sw-start-at` and `--sw-stop-at` bound steps inside jobs. Use `--sw-only` to
 select jobs and their dependencies.
 
-Ctrl-C requests cancellation and keeps the foreground host alive until the run
-finishes and logs drain. A second interrupt stops waiting and joins local work.
+For an ordinary foreground local run, Ctrl-C requests cancellation and keeps
+observing until the run finishes and its logs drain. A second interrupt detaches
+the CLI. Execution and cleanup remain with the runner. Standalone and
+foreground publication retain their CLI host. Their first interrupt requests
+cancellation while that host drains, and a second stops hosting and observation.
 
 An explicit empty `--sw-cache-from=` disables `run.cache_from` from the machine
-file. The selected cache profile supplies a temporary repository reader for
-verified default-branch records to a member with the editor role or above. The credential follows the profile's live
-membership and revocation and is revoked when the host closes.
+file. Profile access is checked before intake. Each executing host uses a
+temporary repository reader for verified default-branch records, authorized
+by a member with the editor role or above. The credential follows the profile's
+live membership and revocation and is revoked when the host closes.
 
 `--publish P` uploads completed local job results, artifacts and retained logs
 to profile P. Publication creates history with local provenance and no execution
 claim. A publication error prints a warning and preserves the local verdict.
-Background local runs publish when their host closes. Published history excludes
-the private shell environment snapshot, including its variable names and digest.
+Foreground publication stays in the CLI so its cleanup, upload and warning finish
+before the command returns. Background local runs publish when their runner host
+closes. Published history excludes the private shell environment snapshot,
+including its variable names and digest.
 
 Local schedule registration, pins, timer installation and `__tick` use the
 controller and lifecycle services. Timers carry their absolute state home into
-resolution. Scheduled execution still needs the scheduler's sealed-intake binding.
+resolution. Scheduled runs enter the same local runner queue.
 
 ## Local execution
 
 The local controller owns one home, its SQLite store, admission, queue and
-browser dashboard. It starts on demand. The CLI hosts a foreground run and
-sends state operations through the controller API. Its first trigger claim is
-reserved for that foreground command, so the background queue cannot take it
-between submission and hosting. Local intake resolves an omitted dispatch to
-host execution before checking that reservation. Detached submissions enter the background queue.
-SDK processes declare and
-execute work through protocol v2. They do not open the controller's database.
+browser dashboard. It starts on demand. Ordinary foreground runs without
+publication and detached submissions enter its queue. The local runner owns
+their SDK processes and output pipes. The CLI submits and observes through the
+controller API.
+
+Standalone runs and foreground publication keep their CLI host, whose first
+trigger claim is reserved so the queue cannot take it between submission and
+hosting. Only standalone owns an in-process controller. Foreground publication
+uses the shared controller. Remote `--runner here` also keeps its CLI host.
+SDK processes declare and execute work through protocol v2. They do not open the
+controller's database.
 
 Startup reconciles orphaned work and starts the private API before consumers.
 Readiness does not wait for pipeline compilation or source preparation.
@@ -127,6 +140,10 @@ names its persisted attempt or owner unit. Resume cursors retain the selection
 and progress for each subject. An idle follow poll returns no repeated output.
 Completion requires terminal state and final persisted segments. A cursor never
 replaces the store's authorization check for those segments.
+Ordinary foreground status observation and followed logs reconnect through interrupted
+or temporarily unavailable controller reads. Logs keep their last cursor, so
+reconnecting does not repeat output. Permission, protocol and integrity refusals
+remain errors. Observation reconnects do not resubmit the run or claim its work.
 
 Cross-run log search uses the same persisted subjects and authorization. Run
 filters apply before the run limit. A page can contain no matches and still
@@ -184,6 +201,20 @@ Linux and macOS support an installed login service through `dashboard install`.
 Windows supports the foreground controller. Machine updates refresh managed
 controller and schedule units together. See [local dashboard](native-mode.md).
 
+On Linux and macOS, the controller starts a separate local runner after its API
+is ready. A successor controller reuses a live runner with the same executable
+build. A runner roll starts a successor and stops new claims on the old instance.
+The old runner keeps its held jobs, uploads and terminal acknowledgements until
+they finish. A healthy drain has no kill deadline. Controller replacement does
+not cancel these runner processes. Existing execution leases still apply during
+an outage.
+
+A systemd-booted Linux host requires a working user manager. Each runner has its
+own systemd user service and cgroup, separate from the controller. A Linux host
+without systemd uses a separate process session and stdio. macOS uses a separate
+launchd agent for each instance. Windows uses an embedded runner loop and does
+not have this process separation.
+
 Installation drains and joins the existing owner before activating the managed
 service, then waits for the successor to acquire the same home and become ready.
 
@@ -211,10 +242,11 @@ sparkwing runs logs --run RUN_ID --follow
 sparkwing runs cancel --run RUN_ID
 ```
 
-Detachment queues the sealed request with the local controller. The controller
-owns consumption and process cleanup. A separate user-managed consumer is not
-part of the model. A successful submission receipt identifies the allocated run.
-It does not prove that execution has started.
+Detachment queues the sealed request with the local controller and returns
+without following its execution. The local runner consumes the work and owns
+its execution cleanup. The controller owns admission and orphan recovery. A
+separate user-managed consumer is not required. A successful submission receipt
+identifies the allocated run. It does not prove that execution has started.
 
 `--sw-idempotency-key` gives repeated detached submissions one durable identity.
 `--sw-request-id` is a tracing field retained through intake and retry. The
@@ -296,9 +328,9 @@ For an uploaded Go pipeline, the runner installs the SDK from the acquired
 snapshot before planning. An upload with a local SDK replacement must include
 that replacement's source.
 
-Before a local run is accepted, foreground and queued hosts select Go or
-TypeScript from the sealed checkout's pipeline directory. A malformed manifest
-fails setup. Accepted runs retain the SDK identity in their sealed engine.
+Local preparation selects Go or TypeScript from the selected checkout's pipeline
+directory before intake. A malformed manifest fails preparation. Accepted runs
+retain the SDK identity in their sealed engine.
 
 SDK describe, plan, eval and attempt processes run from the acquired checkout
 root. If describe fails before secret declarations are known, the diagnostic
@@ -314,18 +346,13 @@ sparkwing runs logs --run RUN_ID --profile prod --follow
 
 The command prepares one sealed request and submits it to `POST /api/v1/runs`.
 Detached output includes the stable run ID, team number and replay flag. Preparation
-failures submit nothing. The old trigger request and separate here-host loop are
-removed.
+failures submit nothing.
 
 `--ref` selects the execution commit. `--pipeline-ref` selects the pipeline
 commit, subject to any configured source pin. That pipeline commit's
 `package.json` determines Go versus TypeScript before source acquisition and
 engine selection. A different SDK in the working tree or execution commit
 cannot change the selection. A malformed selected manifest fails preparation.
-
-GitHub numeric-ID lookup, private source access and captured environment delivery
-still need their native bindings. Initial here intake refuses before submission
-until its reason can survive the sealed request and replay.
 
 The selected controller owns the run's records. Its intake derives the caller's
 authority. A runner claims trigger and job units through one ordered queue. The
@@ -357,8 +384,8 @@ Hosting closes returned session resources before exiting, including when a
 binding fails after allocating them. A cleanup failure remains an incomplete
 handoff and preserves the binding or execution error.
 
-Local and here hosting use the earliest of the caller's deadline, the award's
-binding deadline, the owner deadline and the parent capability's expiry.
+CLI-hosted local and here execution use the earliest of the caller's deadline,
+the award's binding deadline, the owner deadline and the parent capability's expiry.
 Expired authority stops before host binding. Binding and hosting share that
 context. The host receives a copy of the awarded runner identity, so binding
 cannot change its labels.
@@ -472,8 +499,10 @@ shell utilities, while pipelines still need native tools for the commands they
 execute. Use `node.exe` to invoke JavaScript command entrypoints.
 
 Windows process cleanup uses kill-on-close Job Objects. Unix uses owned process
-sessions. Native Windows handle inheritance, cleanup and SDK execution require
-Windows acceptance runs. Linux fixtures and cross-compilation do not establish
+sessions. The Windows local queue still shares the controller process lifetime,
+so controller replacement can stop its hosted work even after the submitting
+terminal exits. Native Windows handle inheritance, cleanup and SDK execution
+require Windows acceptance runs. Linux fixtures and cross-compilation do not establish
 those behaviors. See [node protocol](node-protocol.md).
 
 
@@ -651,8 +680,11 @@ Retry also requires a fresh submission so values can be resolved again.
 
 Local routing and offline fallback resolve the same configured names at intake.
 Those environment entries are excluded from the saved local environment
-snapshot. The local controller releases their values through the same masked,
-volatile secret path.
+snapshot. The local controller encrypts the resolved values in its store before
+acknowledging intake, releases them only to authorized live hosts with masking,
+and deletes them when the run becomes terminal. The values survive controller
+restart. Retained backups can still contain their ciphertext. See
+[local secret backups](backup-restore.md#local-restart-secrets-and-backups).
 
 There is no per-user overflow cap by default. `overflow_minutes` narrows the
 user's monthly Cloud allowance for this run. The account's saved limit can only
