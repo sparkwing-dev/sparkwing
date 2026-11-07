@@ -38,7 +38,7 @@ sparkwing() {
 	}
 }
 
-func TestPipelineCompletionCarriesKindAndDescription(t *testing.T) {
+func TestPipelineCompletionCarriesNameAndDescription(t *testing.T) {
 	projectAt(t, "pipelines:\n  - name: demo\n    entrypoint: Demo\n")
 	out := captureStdout(t, func() {
 		if err := runInternalCompletePipelines(os.Stdout, nil); err != nil {
@@ -46,31 +46,28 @@ func TestPipelineCompletionCarriesKindAndDescription(t *testing.T) {
 		}
 	})
 	columns := strings.Split(strings.TrimSuffix(out, "\n"), "\t")
-	if len(columns) != 4 || columns[2] != "pipeline" || columns[3] != "manual" {
+	if len(columns) != 2 || columns[0] != "demo" || columns[1] != "manual" {
 		t.Fatalf("completion columns=%q", columns)
 	}
 }
 
-func TestFishPipelineProjectionKeepsDescription(t *testing.T) {
-	shell, err := exec.LookPath("sh")
+func TestZshPipelineCompletionUsesCurrentRows(t *testing.T) {
+	zsh, err := exec.LookPath("zsh")
 	if err != nil {
-		t.Skip("shell unavailable")
+		t.Skip("zsh unavailable")
 	}
-	for _, line := range strings.Split(renderFish(), "\n") {
-		if !strings.Contains(line, "__complete --kind pipelines") || !strings.Contains(line, "awk") {
-			continue
-		}
-		_, projection, ok := strings.Cut(line, "| ")
-		if !ok {
-			t.Fatal("missing projection")
-		}
-		cmd := exec.Command(shell, "-c", projection)
-		cmd.Stdin = strings.NewReader("demo\t\tpipeline\tmanual\n")
-		out, err := cmd.CombinedOutput()
-		if err != nil || string(out) != "demo\tmanual\n" {
-			t.Fatalf("projection=%q err=%v", out, err)
-		}
-		return
+	script := "compdef() { :; }\n" + renderZsh() + `
+sparkwing() { printf 'demo\tmanual\nlong-pipeline-name\tbuild checks\n'; }
+compadd() { printf '%s\n' "${names[@]}" "${displays[@]}"; }
+_sparkwing_complete_pipelines
+`
+	out, err := exec.Command(zsh, "-f", "-c", script).CombinedOutput()
+	if err != nil {
+		t.Fatalf("zsh completion: %s: %v", out, err)
 	}
-	t.Fatal("missing fish pipeline projection")
+	rows := strings.Split(strings.TrimSpace(string(out)), "\n")
+	if len(rows) != 4 || rows[0] != "demo" || rows[1] != "long-pipeline-name" ||
+		!strings.Contains(rows[2], "[pipeline]  manual") || !strings.Contains(rows[3], "[pipeline]  build checks") {
+		t.Fatalf("completion rows = %q", rows)
+	}
 }

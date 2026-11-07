@@ -1,8 +1,6 @@
 package store_test
 
 import (
-	_ "embed"
-	"encoding/hex"
 	"fmt"
 	"strings"
 	"sync"
@@ -12,80 +10,25 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/store/internal/storetest"
 )
 
-//go:embed testdata/schema-28-v0.68.3.sql
-var schemaV0683 string
-
-func releasedRows(dialect store.Dialect) []string {
-	blob := func(text string) string {
-		if dialect == store.DialectPostgres {
-			return `'\x` + hex.EncodeToString([]byte(text)) + `'::bytea`
-		}
-		return `X'` + hex.EncodeToString([]byte(text)) + `'`
-	}
-	return []string{
-		`INSERT INTO teams(name,created_at,updated_at) VALUES ('up',1,1)`,
-		`INSERT INTO runs(team,id,number,pipeline,status,request_json,request_hash,request_sealed_at,git_sha,provenance_sha,repo_key,dispatch,intake_mode,created_subject_kind,created_principal,created_at,started_at,finished_at,log_retention_class,log_retention_days)
-			VALUES ('up','r1',1,'gate','success',` + blob(`{}`) + `,'r1',1,'abc','abc','gh:1','host','execute','account','fixture',1,1,1,'r30',30)`,
-		`INSERT INTO nodes(team,run_id,node_id,status,outcome,finished_at,spec_json,execution_json) VALUES ('up','r1','a','done','success',1,` + blob(`{"id":"a"}`) + `,` + blob(`{}`) + `)`,
-		`INSERT INTO nodes(team,run_id,node_id,status,spec_json,execution_json) VALUES ('up','r1','b','pending',` + blob(`{"id":"b"}`) + `,` + blob(`{}`) + `)`,
-	}
-}
-
-func releasedStore(t *testing.T, target *storetest.Target) {
+func schema30Store(t *testing.T, target *storetest.Target) {
 	t.Helper()
-	location := target.Path()
-	dialect := store.DialectSQLite
-	if location == "" {
-		location, dialect = target.DSN(), store.DialectPostgres
-	}
-	if err := store.CreateReleasedStore(t.Context(), dialect, location, schemaV0683, 28, releasedRows(dialect)...); err != nil {
-		t.Fatal(err)
-	}
-}
-
-func TestSchemaUpgradesAReleasedV0683StoreInPlace(t *testing.T) {
-	target := storetest.New(t)
-	releasedStore(t, target)
 	st := target.Open(t)
-	var version int
-	var digest string
-	if err := st.DB().QueryRow(`SELECT version, baseline_digest FROM sparkwing_schema_version`).Scan(&version, &digest); err != nil {
-		t.Fatal(err)
-	}
-	fresh := storetest.New(t).Open(t)
-	if version != store.ExpectedSchemaVersion() || digest != readSchemaBaselineDigest(t, fresh) {
-		t.Fatalf("upgraded version %d digest %q, want %d %q", version, digest, store.ExpectedSchemaVersion(), readSchemaBaselineDigest(t, fresh))
-	}
-	rows, err := st.DB().Query(`SELECT node_id, status, trusted_host FROM nodes WHERE team='up' AND run_id='r1' ORDER BY node_id`)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var got []string
-	for rows.Next() {
-		var node, status string
-		var trusted int
-		if err := rows.Scan(&node, &status, &trusted); err != nil {
+	for _, statement := range []string{
+		`INSERT INTO teams(name,created_at,updated_at) VALUES ('kept',1,1)`,
+		`INSERT INTO secrets(team,name,value,principal,created_at,updated_at) VALUES ('kept','TOKEN','sealed-configuration','fixture',1,1)`,
+		`DROP INDEX idx_runs_live_children`,
+		`DROP TABLE local_runner_instances`,
+		`DROP TABLE local_run_secrets`,
+		`DROP TABLE local_machine_admission`,
+		`UPDATE sparkwing_schema_version SET version=30, baseline_digest='d0f42d8e52dd4ce999ace44a3767b6302d87e54c3b79dd544dfc5cd1ff8c0cf4'`,
+	} {
+		if _, err := st.DB().Exec(statement); err != nil {
 			t.Fatal(err)
 		}
-		got = append(got, node+" "+status+" "+string(rune('0'+trusted)))
-	}
-	if err := rows.Close(); err != nil {
-		t.Fatal(err)
-	}
-	if strings.Join(got, ",") != "a done 0,b pending 0" {
-		t.Fatalf("upgraded node rows = %v, want both kept and untrusted", got)
-	}
-	if _, err := st.DB().Exec(`UPDATE nodes SET trusted_host=2 WHERE node_id='a'`); err == nil {
-		t.Fatal("the upgraded column accepts a value outside 0 and 1")
-	}
-	if a, b := schemaShape(t, st), schemaShape(t, fresh); a != b {
-		t.Fatalf("upgraded schema differs from a fresh one:\n%s", shapeDiff(a, b))
 	}
 	if err := st.Close(); err != nil {
 		t.Fatal(err)
 	}
-	// safety: a second open of the upgraded store must not run the step again.
-	target.Open(t)
 }
 
 func TestSchemaUpgradeAddsLiveChildIndexToVersion33(t *testing.T) {
@@ -156,26 +99,12 @@ func TestSchemaUpgradeAddsLocalSecretsToVersion31(t *testing.T) {
 
 func TestSchemaUpgradeAddsMachineAdmissionToVersion30(t *testing.T) {
 	target := storetest.New(t)
+	schema30Store(t, target)
 	st := target.Open(t)
-	if _, err := st.DB().Exec(`DROP INDEX idx_runs_live_children`); err != nil {
-		t.Fatal(err)
+	var secret string
+	if err := st.DB().QueryRow(`SELECT value FROM secrets WHERE team='kept' AND name='TOKEN'`).Scan(&secret); err != nil || secret != "sealed-configuration" {
+		t.Fatalf("configured secret after upgrade = %q, %v", secret, err)
 	}
-	if _, err := st.DB().Exec(`DROP TABLE local_runner_instances`); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := st.DB().Exec(`DROP TABLE local_run_secrets`); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := st.DB().Exec(`DROP TABLE local_machine_admission`); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := st.DB().Exec(`UPDATE sparkwing_schema_version SET version=30, baseline_digest='d0f42d8e52dd4ce999ace44a3767b6302d87e54c3b79dd544dfc5cd1ff8c0cf4'`); err != nil {
-		t.Fatal(err)
-	}
-	if err := st.Close(); err != nil {
-		t.Fatal(err)
-	}
-	st = target.Open(t)
 	if state, err := st.LoadMachineAdmission(t.Context()); err != nil || state != nil {
 		t.Fatalf("upgraded machine state = %s, %v; want absent", state, err)
 	}
@@ -193,14 +122,14 @@ func TestSchemaUpgradeRefusesEveryOtherStore(t *testing.T) {
 		statement string
 		want      []string
 	}{
-		"unknown 28 digest": {`UPDATE sparkwing_schema_version SET baseline_digest='other'`, []string{`"other" is not the v0.68.3 baseline`, "left the store unchanged", "open it once with Sparkwing v0.68.3"}},
-		"missing 28 digest": {`UPDATE sparkwing_schema_version SET baseline_digest=''`, []string{`"<missing>" is not the v0.68.3 baseline`, "left the store unchanged"}},
-		"older than 28":     {`UPDATE sparkwing_schema_version SET version=27`, []string{"version 27 is older", "this build cannot upgrade it", "back up the store"}},
+		"unknown 30 digest": {`UPDATE sparkwing_schema_version SET baseline_digest='other'`, []string{`"other" is not the v0.69.2 baseline`, "left the store unchanged", "open it once with Sparkwing v0.69.2"}},
+		"missing 30 digest": {`UPDATE sparkwing_schema_version SET baseline_digest=''`, []string{`"<missing>" is not the v0.69.2 baseline`, "left the store unchanged"}},
+		"older than 30":     {`UPDATE sparkwing_schema_version SET version=29`, []string{"version 29 is older", "this build cannot upgrade it", "back up the store"}},
 		"newer than binary": {fmt.Sprintf(`UPDATE sparkwing_schema_version SET version=%d`, store.ExpectedSchemaVersion()+1), []string{fmt.Sprintf("version %d is newer", store.ExpectedSchemaVersion()+1), "start a binary matching the store"}},
 	} {
 		t.Run(name, func(t *testing.T) {
 			target := storetest.New(t)
-			releasedStore(t, target)
+			schema30Store(t, target)
 			location := target.Path()
 			dialect := store.DialectSQLite
 			if location == "" {
@@ -217,7 +146,7 @@ func TestSchemaUpgradeRefusesEveryOtherStore(t *testing.T) {
 					t.Errorf("refusal %q omits %q", err, want)
 				}
 			}
-			if store.ExecRawForTest(t.Context(), dialect, location, `SELECT trusted_host FROM nodes`) == nil {
+			if store.ExecRawForTest(t.Context(), dialect, location, `SELECT singleton FROM local_machine_admission`) == nil {
 				t.Fatal("a refused store was upgraded")
 			}
 		})
@@ -226,7 +155,7 @@ func TestSchemaUpgradeRefusesEveryOtherStore(t *testing.T) {
 
 func TestPostgresSchemaUpgradeRunsOnceUnderConcurrentOpens(t *testing.T) {
 	target := storetest.NewPostgres(t)
-	releasedStore(t, target)
+	schema30Store(t, target)
 	const openers = 8
 	errs := make([]error, openers)
 	var wg sync.WaitGroup
@@ -253,21 +182,6 @@ func TestPostgresSchemaUpgradeRunsOnceUnderConcurrentOpens(t *testing.T) {
 	}
 	if rows != 1 || version != store.ExpectedSchemaVersion() {
 		t.Fatalf("schema version rows %d at %d, want one at %d", rows, version, store.ExpectedSchemaVersion())
-	}
-}
-
-// safety: KEDA reads warm_pool_desired through a manually granted role, so replacing the view must keep its grants.
-func TestPostgresSchemaUpgradeKeepsWarmViewGrants(t *testing.T) {
-	target := storetest.NewPostgres(t)
-	releasedStore(t, target)
-	mutate(t, store.DialectPostgres, target.DSN(), `GRANT SELECT ON warm_pool_desired TO PUBLIC`)
-	st := target.Open(t)
-	var granted int
-	if err := st.DB().QueryRow(`SELECT COUNT(*) FROM information_schema.role_table_grants WHERE table_schema = current_schema() AND table_name = 'warm_pool_desired' AND grantee = 'PUBLIC' AND privilege_type = 'SELECT'`).Scan(&granted); err != nil {
-		t.Fatal(err)
-	}
-	if granted != 1 {
-		t.Fatal("upgrading the store revoked the warm_pool_desired grant")
 	}
 }
 
