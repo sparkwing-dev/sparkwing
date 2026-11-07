@@ -104,3 +104,10 @@ Requester secrets keep the existing volatile controller-memory lifetime, but
 there is no here host to resupply them after a controller restart. Submit a new
 run if those inputs are lost. Machine-configured burst routing keeps its
 foreground owner, preference holds and pre-intake local fallback.
+
+This repository's land pipeline accepts `-- --cloud-profile NAME` to wait for a
+full Cloud gate, including race tests. Each job fetches the preconditions
+comparison commit through this repository's `gate --base SHA` input, so policy
+and lint judge the branch diff despite the parentless uploaded snapshot. Review and push remain local. Its
+`gate_run` output names the Cloud gate's run rather than the local parent when
+that option is used.
