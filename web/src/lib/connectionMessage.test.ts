@@ -10,6 +10,13 @@ describe("connectionMessage", () => {
     assert.equal(message.signIn, undefined);
   });
 
+  it("says why a local sign-in link was refused", () => {
+    const message = connectionMessage("unauthorized", true, "this sign-in link is invalid, expired or already used");
+    assert.equal(message.text, "The sign-in link did not work");
+    assert.match(message.hint, /^this sign-in link is invalid, expired or already used\. Run `sparkwing dashboard open`/);
+    assert.equal(connectionMessage("unauthorized", false, "ignored").text, "You are not signed in");
+  });
+
   it("asks a hosted user to sign in again", () => {
     const message = connectionMessage("unauthorized", false);
     assert.doesNotMatch(message.hint, /dashboard open/);

@@ -31,6 +31,20 @@ export function codeFromFragment(hash: string | undefined): string | null {
 }
 
 let exchange: Promise<void> | null = null;
+let signInFailure: string | null = null;
+
+// Why the last sign-in link was refused, for the signed-out page to say.
+export function localSignInFailure(): string | null {
+  return signInFailure;
+}
+
+async function refusal(res: Response): Promise<string> {
+  try {
+    const body = (await res.json()) as { error?: { message?: unknown } };
+    if (typeof body.error?.message === "string") return body.error.message;
+  } catch {}
+  return `the controller refused it (HTTP ${res.status})`;
+}
 
 // The sign-in code arrives in the fragment, which the browser never sends to a
 // server. It leaves history before the exchange, so neither a reload nor the
@@ -53,13 +67,29 @@ export function ensureLocalSignIn(): Promise<void> | null {
     body: JSON.stringify({ code }),
   })
     .then(async (res) => {
-      if (!res.ok) return;
+      if (!res.ok) {
+        signInFailure = await refusal(res);
+        return;
+      }
       const grant = (await res.json()) as { token?: unknown };
-      if (typeof grant.token === "string" && grant.token !== "") {
-        w.localStorage?.setItem(STORAGE_KEY, grant.token);
+      if (typeof grant.token !== "string" || grant.token === "") {
+        signInFailure = "the controller returned no session";
+        return;
+      }
+      const previous = localSession();
+      w.localStorage?.setItem(STORAGE_KEY, grant.token);
+      signInFailure = null;
+      // A replaced session is revoked best-effort; it would otherwise stay valid until it expires.
+      if (previous && previous !== grant.token) {
+        await fetch(LOCAL_LOGOUT_PATH, {
+          method: "POST",
+          headers: { Authorization: `Bearer ${previous}` },
+        }).catch(() => undefined);
       }
     })
-    .catch(() => undefined)
+    .catch(() => {
+      signInFailure = "the controller did not answer";
+    })
     .finally(() => {
       exchange = null;
     });

@@ -2,7 +2,14 @@ import assert from "node:assert/strict";
 import { afterEach, describe, it } from "node:test";
 
 import { cancelRun } from "./api";
-import { codeFromFragment, ensureLocalSignIn, localSession, localSignedIn, logOutLocal } from "./localSession";
+import {
+  codeFromFragment,
+  ensureLocalSignIn,
+  localSession,
+  localSignedIn,
+  localSignInFailure,
+  logOutLocal,
+} from "./localSession";
 
 type FakeWindow = {
   __SPARKWING_REQUIRE_LOGIN__?: string;
@@ -82,12 +89,37 @@ describe("local sign-in", () => {
     assert.equal(localSignedIn(), true);
   });
 
-  it("keeps no token when the exchange is refused", async () => {
+  it("keeps no token and says why when the exchange is refused", async () => {
     const { w } = page("#code=spent");
-    runtime.fetch = async () => new Response(null, { status: 401 });
+    runtime.fetch = async () =>
+      Response.json({ error: { code: "unauthenticated", message: "this sign-in link is invalid, expired or already used" } }, { status: 401 });
     await (ensureLocalSignIn() ?? Promise.resolve());
     assert.equal(w.localStorage.getItem("sparkwing.localSession"), null);
     assert.equal(localSession(), null);
+    assert.equal(localSignInFailure(), "this sign-in link is invalid, expired or already used");
+    page("#code=unanswered");
+    runtime.fetch = async () => {
+      throw new TypeError("network down");
+    };
+    await (ensureLocalSignIn() ?? Promise.resolve());
+    assert.equal(localSignInFailure(), "the controller did not answer");
+  });
+
+  it("revokes the session a new sign-in replaces", async () => {
+    const { w } = page("#code=fresh");
+    w.localStorage.setItem("sparkwing.localSession", "session-old");
+    const calls: { url: string; auth: string | null }[] = [];
+    runtime.fetch = async (input, init) => {
+      calls.push({ url: String(input), auth: new Headers(init?.headers).get("Authorization") });
+      return String(input) === "/login" ? Response.json({ token: "session-new" }) : new Response(null, { status: 503 });
+    };
+    await (ensureLocalSignIn() ?? Promise.resolve());
+    assert.deepEqual(calls, [
+      { url: "/login", auth: null },
+      { url: "/logout", auth: "Bearer session-old" },
+    ]);
+    assert.equal(w.localStorage.getItem("sparkwing.localSession"), "session-new");
+    assert.equal(localSignInFailure(), null);
   });
 
   it("ignores a fragment outside the local dashboard", async () => {

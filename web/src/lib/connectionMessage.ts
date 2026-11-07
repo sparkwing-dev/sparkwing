@@ -9,6 +9,7 @@ export interface ConnectionMessage {
 export function connectionMessage(
   status: Exclude<ConnectionStatus, "ok">,
   local: boolean,
+  signInFailure: string | null = null,
 ): ConnectionMessage {
   switch (status) {
     case "unreachable":
@@ -17,6 +18,12 @@ export function connectionMessage(
         hint: "The API may be down or your network connection was interrupted. Data shown may be stale.",
       };
     case "unauthorized":
+      if (local && signInFailure) {
+        return {
+          text: "The sign-in link did not work",
+          hint: `${signInFailure}. Run \`sparkwing dashboard open\` for a new link.`,
+        };
+      }
       return local
         ? {
             text: "This browser is not signed in",
