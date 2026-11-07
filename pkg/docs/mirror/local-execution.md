@@ -287,8 +287,9 @@ becomes controller-owned during intake. It schedules the preserved plan without
 starting another planning owner. The controller materializes reused jobs as
 successful with zero attempts and copies their outputs and artifacts into the
 new run for dependents. Reused jobs receive no execution claim. If a source
-result has expired, was deleted or cannot be copied within the retry's data scope, the job
-executes again.
+result has expired, was deleted, cannot be copied within the retry's data scope or no
+longer matches the job, the job executes again. Reuse is decided when a job's dependencies finish, so a job never
+reuses its earlier result while a job it needs runs again.
 
 ### Publishing a foreground run handle
 
