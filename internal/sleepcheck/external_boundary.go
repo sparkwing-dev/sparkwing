@@ -27,6 +27,11 @@ type sourcePosition struct {
 
 var approvedExternalBoundaries = []externalBoundary{
 	{
+		file: "internal/nodehost/host_exec_stdin_unix_test.go", function: "TestHostCommandKeepsBufferedOutputPastASlowSink",
+		duration: "2 * commandDrainGrace",
+		marker:   "// sleepcheck:external-boundary real OS pipe deadline; synctest cannot model the sink mutex",
+	},
+	{
 		file: "internal/controller/direct_source_e2e_test.go", function: "startRunner",
 		duration: "10 * time.Second",
 		marker:   "// sleepcheck:external-boundary external runner gets ten seconds to exit before kill",

@@ -4,6 +4,7 @@ package nodehost
 
 import (
 	"bytes"
+	"context"
 	"os"
 	"strconv"
 	"strings"
@@ -21,7 +22,10 @@ func TestHostCommandKeepsBufferedOutputPastASlowSink(t *testing.T) {
 	sink := func(_ string, chunk []byte, _ bool) error {
 		if len(chunk) > 0 {
 			got += len(chunk)
-			time.Sleep(2 * commandDrainGrace)
+			select {
+			// sleepcheck:external-boundary real OS pipe deadline; synctest cannot model the sink mutex
+			case <-time.After(2 * commandDrainGrace):
+			}
 		}
 		return nil
 	}
@@ -54,12 +58,14 @@ func TestHostCommandReturnsWhenABackgroundChildHoldsStdin(t *testing.T) {
 			}
 		}
 	})
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
 	select {
 	case session := <-finished:
 		if err := endCommandSessions([]*commandSession{session}); err != nil {
 			t.Fatal(err)
 		}
-	case <-time.After(5 * time.Second):
+	case <-ctx.Done():
 		t.Fatal("the command never finished while a background child held its stdin")
 	}
 }
