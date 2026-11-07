@@ -151,12 +151,11 @@ allowance at the published rate.
 | Paid | 1 GiB | 100 GiB | 100,000 |
 
 The prepared pipeline that Sparkwing Cloud builds for a run (the checkout and
-the compiled pipeline binary, which is often 20 to 40 MB for Go) counts toward
-none of these limits. Sparkwing stores it once per digest and reuses it across
-runs. It has its own limit instead: an archive larger than 256 MiB is refused
-with `413 payload_too_large` naming that limit. Shrink the pipeline module, for
-example by trimming its dependencies, or keep large files out of the checkout.
-Retained-storage billing still counts its bytes. Korey decided these limits on
+the compiled pipeline binary, which is often 20 to 40 MB for Go) is stored once
+per digest. The first 256 MiB of a run's first prepared pipeline upload, and its
+object, count toward none of these limits. Bytes past 256 MiB, and any further
+upload from the run's planning credentials, count as usual. Retained-storage
+billing still counts every byte. Korey decided these limits on
 2026-11-07.
 
 For comparison, GitHub Actions caches 10 GB per repository by default, and GitLab

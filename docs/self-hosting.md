@@ -658,8 +658,9 @@ adds no bytes or objects, and a new empty blob counts as one object. Aborting or
 expiring a ticket releases its pending capacity. A month's boundary resets the
 monthly budget while the run's byte and object totals continue across months.
 Deployment default-tier changes apply to the next ticket for teams without an
-explicit quota. A Cloud planning owner's prepared pipeline upload reserves and
-counts nothing against these limits; it is refused above 256 MiB instead.
+explicit quota. The first 256 MiB of a run's first prepared pipeline upload from the
+Cloud planning owner, and its object, reserve and count nothing against these
+limits; later uploads and bytes past 256 MiB count as usual.
 
 The free tier configures a hundred mebibytes per run, a gigabyte per month and a
 thousand objects per run. The paid tier configures a gigabyte per run, a hundred
