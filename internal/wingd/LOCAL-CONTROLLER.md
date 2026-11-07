@@ -265,7 +265,7 @@ return instead of waiting forever.
 
 A dashboard bind failure leaves the controller admitting runs and is reported
 as `LocalStatus.DashboardError`; the runtime never falls back to another port,
-because bookmarks and HTTPS proxies name the configured address. Shutdown joins
+because bookmarks and port forwards name the configured address. Shutdown joins
 the dashboard serving loop before closing the store.
 
 Any serving or worker failure cancels the runtime. Drain uses admission's

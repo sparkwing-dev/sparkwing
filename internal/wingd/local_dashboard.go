@@ -2,7 +2,7 @@ package wingd
 
 import "github.com/sparkwing-dev/sparkwing/internal/userconfig"
 
-// DefaultDashboardAddress is the stable loopback address bookmarks and HTTPS proxies name.
+// DefaultDashboardAddress is the stable loopback address bookmarks and port forwards name.
 const DefaultDashboardAddress = "127.0.0.1:4343"
 
 // DashboardSettings is the dashboard a shared local controller binds when it starts.
