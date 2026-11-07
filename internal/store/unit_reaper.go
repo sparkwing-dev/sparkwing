@@ -47,6 +47,63 @@ func (o *Operator) ReapUnits(ctx context.Context, limit int) ([]ReapedUnit, erro
 			out = append(out, *result)
 		}
 	}
+	if remaining := limit - len(targets); remaining > 0 {
+		cancelled, err := o.cancelUnawaitedChildren(ctx, remaining)
+		out = append(out, cancelled...)
+		failures = errors.Join(failures, err)
+	}
+	return out, failures
+}
+
+// perf: repeats idx_runs_live_children's predicate so both dialects read the partial index, not run history.
+const unawaitedChildrenQuery = `SELECT c.team,c.id,c.parent_run_id,c.parent_node_id FROM runs c
+	 JOIN runs p ON p.team=c.team AND p.id=c.parent_run_id
+	 WHERE c.parent_run_id<>'' AND c.status IN ('pending','running') AND c.retry_of='' AND c.cancel_requested_at IS NULL AND (
+	 p.cancel_requested_at IS NOT NULL OR p.finished_at IS NOT NULL OR EXISTS (
+	 SELECT 1 FROM nodes n WHERE n.team=c.team AND n.run_id=c.parent_run_id AND n.node_id=c.parent_node_id AND n.status='done'))
+	 ORDER BY c.team,c.id LIMIT ?`
+
+// safety: only the creating job attempt can await a child (fresh invocation key per attempt), so an ended job or
+// parent leaves it unconsumable; retries are user-requested and kept. A sweep, not the parent's transition,
+// keeps the run lock order and reaches grandchildren on later passes.
+func (o *Operator) cancelUnawaitedChildren(ctx context.Context, limit int) ([]ReapedUnit, error) {
+	rows, err := o.s.query(ctx, unawaitedChildrenQuery, limit)
+	if err != nil {
+		return nil, err
+	}
+	type orphan struct {
+		team             Team
+		id, parent, node string
+	}
+	var orphans []orphan
+	for rows.Next() {
+		var row orphan
+		if err := rows.Scan(&row.team, &row.id, &row.parent, &row.node); err != nil {
+			return nil, errors.Join(err, rows.Close())
+		}
+		orphans = append(orphans, row)
+	}
+	if err := errors.Join(rows.Err(), rows.Close()); err != nil {
+		return nil, err
+	}
+	actor := runstate.Actor{Kind: runstate.ActorReaper, Owner: runstate.OwnerLeaseRef{Kind: runstate.OwnerController}}
+	var out []ReapedUnit
+	var failures error
+	for _, row := range orphans {
+		err := o.s.inTx(ctx, func(tx *storeTx) error {
+			_, err := transitionRunTx(ctx, tx, row.team, runstate.RunTransition{RunID: runspec.RunID(row.id), To: runstate.RunCancelled, Cause: runstate.RunCancel, Actor: actor, Reason: fmt.Sprintf("parent job %s/%s no longer awaits this run", row.parent, row.node)})
+			return err
+		})
+		var illegal *ErrIllegalTransition
+		if errors.As(err, &illegal) && illegal.Reason == ReasonTerminal {
+			continue
+		}
+		if err != nil {
+			failures = errors.Join(failures, fmt.Errorf("cancel child %s/%s: %w", row.team, row.id, err))
+			continue
+		}
+		out = append(out, ReapedUnit{Team: row.team, RunID: row.id, Kind: "child", Cancelled: true})
+	}
 	return out, failures
 }
 

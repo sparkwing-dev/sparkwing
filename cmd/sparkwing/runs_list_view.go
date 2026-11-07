@@ -101,7 +101,7 @@ func runFailures(ctx context.Context, reader controllerwire.RunReader, run contr
 		}
 	} else {
 		for _, job := range run.Jobs {
-			if job.Outcome != "failed" {
+			if job.Outcome != "failed" && job.Expansion != "failed" {
 				continue
 			}
 			row := base

@@ -38,7 +38,8 @@ type JobResult struct {
 	Annotations []nodeproto.Annotation
 }
 
-// RunFailure is a persisted masked error of the run (JobID empty) or one of its jobs.
+// RunFailure is a persisted masked error of the run (JobID empty) or one of its jobs,
+// including a generator job's failed expansion.
 type RunFailure struct {
 	JobID string
 	Error string
@@ -120,6 +121,31 @@ func readRunFailuresTx(ctx context.Context, tx *storeTx, team Team, runID string
 			return nil, err
 		}
 		failures = append(failures, failure)
+	}
+	if err := errors.Join(rows.Err(), rows.Close()); err != nil {
+		return nil, err
+	}
+	return readExpansionFailuresTx(ctx, tx, team, runID, failures)
+}
+
+// safety: reads the expansion row, not the job's result, so a retry reusing the successful generator
+// does not inherit a stale error.
+func readExpansionFailuresTx(ctx context.Context, tx *storeTx, team Team, runID string, failures []RunFailure) ([]RunFailure, error) {
+	rows, err := tx.queryContext(ctx, `SELECT node_id,expansion_failure FROM nodes WHERE team=? AND run_id=? AND expansion='failed' AND error='' AND expansion_failure IS NOT NULL`, team, runID)
+	if err != nil {
+		return nil, err
+	}
+	for rows.Next() {
+		var id string
+		var body []byte
+		if err := rows.Scan(&id, &body); err != nil {
+			return nil, errors.Join(err, rows.Close())
+		}
+		var failure ExpansionFailure
+		if err := json.Unmarshal(body, &failure); err != nil {
+			return nil, errors.Join(fmt.Errorf("decode job %s expansion failure: %w", id, err), rows.Close())
+		}
+		failures = append(failures, RunFailure{JobID: id, Error: "expansion failed: " + failure.MaskedError})
 	}
 	return failures, errors.Join(rows.Err(), rows.Close())
 }

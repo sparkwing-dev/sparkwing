@@ -127,10 +127,18 @@ func Evaluate(index VerifiedIndex, version string, now time.Time) ([]engineid.No
 
 // EvaluateRunner uses runner repair guidance while leaving claim renewals to their owner.
 func EvaluateRunner(index VerifiedIndex, version string, now time.Time) ([]engineid.Notice, error) {
-	return evaluate(index, version, now, runnerHint)
+	notices, err := evaluate(index, version, now, runnerHint)
+	var api *apierr.Error
+	if errors.As(err, &api) && api.Code == apierr.InvalidArgs && !releaseVersion(version) {
+		return nil, invalid(fmt.Sprintf("sparkwing-runner %s is a development build; this controller accepts claims only from signed releases", version), developmentRunnerHint)
+	}
+	return notices, err
 }
 
-const runnerHint = "Allow the runner to update automatically, then restart its existing service; check connectivity if the update fails."
+const (
+	runnerHint            = "Allow the runner to update automatically, then restart its existing service; check connectivity if the update fails."
+	developmentRunnerHint = "Install a released sparkwing-runner with `install.sh --runner` and restart its service. Development runners claim only from a local controller or a development controller."
+)
 
 func evaluate(index VerifiedIndex, version string, now time.Time, hint string) ([]engineid.Notice, error) {
 	if index.development {

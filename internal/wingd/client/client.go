@@ -48,6 +48,11 @@ var errDaemonTooOld = errors.New("wingd/client: daemon protocol is older than th
 
 var errBuildMismatch = errors.New("wingd/client: daemon build differs from this client")
 
+// IncompatibleDaemon reports a running daemon whose protocol or build this client cannot use.
+func IncompatibleDaemon(err error) bool {
+	return errors.Is(err, errDaemonTooOld) || errors.Is(err, errProtocolTooOld) || errors.Is(err, errBuildMismatch)
+}
+
 func buildMismatch(selfVersion string, ack wingwire.HelloAck) error {
 	self := strings.TrimSpace(selfVersion)
 	daemon := strings.TrimSpace(ack.BinaryVersion)
