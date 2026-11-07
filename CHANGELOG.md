@@ -48,7 +48,7 @@ unlock.
 
 ### Fixed
 
-- **controller:** Cancelling a run, or a run or job ending while a child it started through `RunAndAwait` is still pending or running, now cancels that child. Children had kept running until an operator cancelled each one by hand. Local and hosted controllers request the cancellation from their recovery sweep, so a grandchild follows one sweep later.
+- **controller:** Cancelling a run, or a run or job ending while a child it started through `RunAndAwait` is still pending or running, now cancels that child. Children had kept running until an operator cancelled each one by hand. Local and hosted controllers request the cancellation from their recovery sweep, so a grandchild follows one sweep later. A retry of a child run is left running, because someone asked for it.
 
 - **local controller:** Store time no longer moves backward when time sync or a VM resume steps the wall clock back, which had failed job and step completion with a `finished_at >= started_at` constraint error and refused plan settlement with "billing checkpoint is outside its awarded time range".
 

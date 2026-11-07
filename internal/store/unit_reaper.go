@@ -57,12 +57,13 @@ func (o *Operator) ReapUnits(ctx context.Context, limit int) ([]ReapedUnit, erro
 
 // cancelUnawaitedChildren requests cancellation of live child runs whose creating job or parent run has ended or
 // been cancelled. Children are only reachable through RunAndAwait in that job attempt, and each attempt submits a
-// fresh invocation key, so nothing can consume such a child. A sweep instead of the parent's transition keeps the
-// run lock order and reaches grandchildren on later passes.
+// fresh invocation key, so nothing can consume such a child. A retry keeps its source's parent lineage but is work a
+// person or agent asked for, so it is left alone. A sweep instead of the parent's transition keeps the run lock
+// order and reaches grandchildren on later passes.
 func (o *Operator) cancelUnawaitedChildren(ctx context.Context, limit int) ([]ReapedUnit, error) {
 	rows, err := o.s.query(ctx, `SELECT c.team,c.id,c.parent_run_id,c.parent_node_id FROM runs c
 	 JOIN runs p ON p.team=c.team AND p.id=c.parent_run_id
-	 WHERE c.status IN ('pending','running') AND c.cancel_requested_at IS NULL AND (
+	 WHERE c.status IN ('pending','running') AND c.retry_of='' AND c.cancel_requested_at IS NULL AND (
 	 p.cancel_requested_at IS NOT NULL OR p.finished_at IS NOT NULL OR EXISTS (
 	 SELECT 1 FROM nodes n WHERE n.team=c.team AND n.run_id=c.parent_run_id AND n.node_id=c.parent_node_id AND n.status='done'))
 	 ORDER BY c.team,c.id LIMIT ?`, limit)

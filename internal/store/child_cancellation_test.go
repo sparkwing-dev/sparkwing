@@ -8,7 +8,7 @@ import (
 
 func TestReaperCancelsChildrenTheirParentNoLongerAwaits(t *testing.T) {
 	reaper := runstate.Actor{Kind: runstate.ActorReaper, Owner: runstate.OwnerLeaseRef{Kind: runstate.OwnerController}}
-	for _, parent := range []string{"live", "run_cancelled", "run_finished", "job_finished"} {
+	for _, parent := range []string{"live", "manual_retry", "run_cancelled", "run_finished", "job_finished"} {
 		t.Run(parent, func(t *testing.T) {
 			tenant, request := childIntakeFixture(t)
 			ctx := t.Context()
@@ -17,6 +17,10 @@ func TestReaperCancelsChildrenTheirParentNoLongerAwaits(t *testing.T) {
 				t.Fatal(err)
 			}
 			switch parent {
+			case "manual_retry":
+				// A retry carries its source's parent lineage while its parent is long gone.
+				rewriteSchemaExec(t, tenant.s.db, `UPDATE runs SET retry_of='earlier-child' WHERE id=?`, child.RunID)
+				rewriteSchemaExec(t, tenant.s.db, `UPDATE runs SET status='failed',finished_at=1,cancel_requested_at=1 WHERE id='run'`)
 			case "run_cancelled":
 				if _, err := tenant.TransitionRun(ctx, runstate.RunTransition{RunID: "run", To: runstate.RunCancelled, Cause: runstate.RunCancel, Actor: reaper, Reason: "operator"}); err != nil {
 					t.Fatal(err)
@@ -33,9 +37,9 @@ func TestReaperCancelsChildrenTheirParentNoLongerAwaits(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if parent == "live" {
+			if parent == "live" || parent == "manual_retry" {
 				if row.CancelRequestedAt != nil {
-					t.Fatalf("reaper cancelled a child its live parent awaits: %q", row.CancelReason)
+					t.Fatalf("reaper cancelled a %s child: %q", parent, row.CancelReason)
 				}
 				return
 			}
