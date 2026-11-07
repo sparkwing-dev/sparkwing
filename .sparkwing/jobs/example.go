@@ -69,7 +69,7 @@ func (p *Example) Plan(_ context.Context, plan *sparkwing.Plan, in ExampleInputs
 	invWarm := sparkwing.Job(plan, "inventory-warm", offshootFn("inventory-warm", 4)).Needs(invCache)
 	sparkwing.Job(plan, "inventory-report", offshootFn("inventory-report", 2)).Needs(invWarm).Inline()
 
-	sparkwing.Job(plan, "weather-check", weatherCheckFn).Needs(configure).Inline().StartsChildren("weather-report").Timeout(90 * time.Second)
+	sparkwing.Job(plan, "weather-check", weatherCheckFn).Needs(configure).Inline().StartsChildren("weather-report").Timeout(5 * time.Minute)
 
 	sparkwing.Job(plan, "error-canary", &ExampleErrorCanary{}).Needs(configure).Optional()
 

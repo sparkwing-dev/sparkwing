@@ -181,7 +181,7 @@ func TestTwoTeamsOnAnEmptyPoolEachGetTheirOwnNode(t *testing.T) {
 	for name, serial := range map[string]bool{"concurrent": false, "one after the other": true} {
 		t.Run(name, func(t *testing.T) {
 			p := emptyPool(t)
-			l := &Launcher{Kube: p.kube, Config: CloudJobConfig{Namespace: "cloud", RunnerImage: "registry/runner@sha256:" + strings.Repeat("a", 64), CPUCeiling: 2, MemoryCeiling: 8 << 30}}
+			l := &Launcher{Kube: p.kube, Boundary: p.b, Config: CloudJobConfig{Namespace: "cloud", RunnerImage: "registry/runner@sha256:" + strings.Repeat("a", 64), CPUCeiling: 2, MemoryCeiling: 8 << 30}}
 			teams := []string{"stg-qa", "korey-gam"}
 			var mu sync.Mutex
 			reserved := map[string]CloudNodeReservation{}
