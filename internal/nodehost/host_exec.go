@@ -300,8 +300,9 @@ func closeFiles(files ...io.Closer) {
 }
 
 // ExecuteCommand runs a command for an in-process SDK host and joins its process tree.
+//
+//nolint:contextcheck // Cancellation travels through joined command channels; session cleanup bounds its own process-table read.
 func ExecuteCommand(ctx context.Context, req nodeproto.ExecRequest, sink func(string, []byte, bool) error) nodeproto.ExecDone {
-	//nolint:contextcheck // The host command observes cancellation through its joined kill and closed channels.
 	done, session := runHostCommand(req, secrets.NewMasker(), ctx.Done(), ctx.Done(), sink)
 	if session != nil {
 		if err := endCommandSessions([]*commandSession{session}); err != nil {
