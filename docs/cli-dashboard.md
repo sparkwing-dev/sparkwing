@@ -42,7 +42,7 @@ Read a bounded dashboard log tail
 
 Print a one-time sign-in link for the local dashboard
 
-Print a one-time sign-in link for the local dashboard, starting the local controller when none runs. Every shared local controller serves the dashboard at dashboard.address from config.yaml, 127.0.0.1:4343 by default, from the moment it starts until `sparkwing daemon stop`. The link is minted over the local socket, works once, expires after 60 seconds and works only at the dashboard address it names. Visiting it stores a 30-day session and sets an HttpOnly, SameSite=Strict cookie that survives controller restarts; Log out ends it. Every TCP API request needs that cookie, and every write also its own Origin; the local socket needs neither.
+Print a one-time sign-in link for the local dashboard, starting the local controller when none runs. Every shared local controller serves the dashboard at dashboard.address from config.yaml, 127.0.0.1:4343 by default, from the moment it starts until `sparkwing daemon stop`. The link is minted over the local socket and carries a one-time code in its fragment that works once, expires after 60 seconds and only at the dashboard address it names. The page exchanges it for a 30-day session token kept in localStorage and sent as an Authorization bearer header; it survives controller restarts and Log out revokes it. No cookie is set or accepted; every write also needs the dashboard's own Origin. The local socket needs no session.
 
 ### Flags
 

@@ -290,10 +290,7 @@ browser sessions as SHA-256 digests, with the minting peer, the exact origin and
 the expiry. Older binaries refuse the upgraded store. Retain a backup before
 upgrading if you need to return to an older binary.
 
-The dashboard no longer accepts `Authorization: Bearer` from a browser and no
-longer redirects to `/#s=<session>`. Signing in sets an `sw_dashboard` cookie
-that lasts 30 days and survives controller restarts. Browsers signed in before
-the upgrade, and any script that sent the old bearer to the TCP dashboard, need
-a new `sparkwing dashboard open` link; scripts should use the local socket or a
-controller token instead. A cookie-authenticated write, including
-`POST /logout`, must send `Origin` set to the dashboard's own origin.
+Sign-in links now carry their code in the fragment (`/#code=...`); open a new
+link with `sparkwing dashboard open` after upgrading. The page stores a 30-day
+token and sends it as `Authorization: Bearer`; every write needs the dashboard's
+own `Origin`.

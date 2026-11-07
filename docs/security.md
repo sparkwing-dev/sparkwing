@@ -509,41 +509,39 @@ The local dashboard's TCP listener answers only loopback Host names and its own
 loopback origin, so a rebound DNS name or another site's page is refused.
 
 TCP carries no peer identity, so the listener also needs a browser session.
-`sparkwing dashboard open` mints a sign-in link over the private socket. The
-link carries a random 32-byte token, works once and expires after 60 seconds.
-The controller stores only its SHA-256 digest, with the minting peer and the
-exact dashboard origin, and refuses the link at any other origin. Redeeming it
-stores a session digest in `state.db` and sets a host-only `sw_dashboard` cookie
-with `HttpOnly`, `SameSite=Strict`, `Path=/`, no `Domain` and a 30-day absolute
-expiry. A second,
-script-readable `sw_dashboard_signed_in` cookie only tells the page to show Log
-out; it authorizes nothing. A session is valid only at the origin it was
-redeemed at, survives controller restarts and ends at 30 days, at Log out, or
-when the store is replaced.
+`sparkwing dashboard open` mints a sign-in link over the private socket. Its
+random 32-byte code sits in the URL fragment, which the browser never sends to
+a server. The code works once, expires after 60 seconds, and is bound to the
+exact dashboard origin; the controller stores only its SHA-256 digest with the
+minting peer. The dashboard page removes the code from history, then exchanges
+it with `POST /login` from its own origin for a session token. The controller
+stores the token's digest in `state.db` for 30 days, so a session survives
+controller restarts.
 
-Known limitation, under review: browsers send a cookie to every port on the
-same host. Any other service on `127.0.0.1` that this browser visits receives
-the session cookie, including one run by another OS account, by Windows when
-the controller runs in WSL, or by a container on the host network. That
-service can then act as this account through the dashboard until the session
-ends, and because sessions survive restarts, a cookie captured by a process
-that held port 4343 earlier stays usable. HttpOnly, SameSite and the Origin
-checks below do not prevent this. Until it is resolved, sign out when you
-finish and avoid visiting other local web services in the same browser
-profile while signed in.
+The page keeps the token in `localStorage` and sends it as
+`Authorization: Bearer` on every API request and event stream. Nothing on the
+TCP dashboard accepts a cookie for authority, and no cookie is set.
+`localStorage` belongs to one origin, port included, so another service on
+`127.0.0.1`, including one run by another account, by Windows beside WSL, or by
+a host-network container, cannot read the token the way it would receive a
+cookie. A token is valid only at the origin where it was issued.
 
-A TCP request without a live session gets 401, except that the static dashboard
-pages, which carry no run data, load signed out. Every cookie-authenticated
-write, including `POST /logout`, must carry an `Origin` header naming the
-dashboard's own origin; a missing, `null` or foreign origin gets 403. Reads
-still pass the loopback Host and Origin checks above. After verifying the
-session, the gate consumes the session cookie, any `Authorization` header and
-any controller session cookies, then forwards the verified peer to the shared
-controller API. The dashboard session is not a controller capability. Log out
-deletes the stored session and ends its open event streams; if the store
-cannot revoke it, Log out fails visibly and leaves the session cookie in place
-so it can be retried. The socket itself
-needs no session.
+A TCP request without a live token gets 401, except that the static dashboard
+pages, which carry no run data, load signed out. Every request must name a
+loopback Host, and a request with any other `Origin`, including a bearer
+request from another site's page, gets 403 before authentication. Every write,
+including the code exchange and `POST /logout`, must also carry an `Origin`
+naming the dashboard's own origin. After verifying the token, the gate consumes
+its `Authorization` header and any controller session cookies, then forwards the
+verified peer to the shared controller API. The dashboard token is not a
+controller capability.
+
+Residual risks: script running in the dashboard's origin, such as an XSS bug,
+can read the token, and anyone who can read the browser profile can copy it.
+Log out revokes the session in the store first, ends its open event streams and
+only then forgets the token; if revocation fails, the page reports it and keeps
+the token so Log out can be retried. Sign out when you finish, especially on a
+shared machine. The socket itself needs no session.
 See [local execution](local-execution.md#the-laptop-boundary).
 
 ## Container hardening
