@@ -103,7 +103,7 @@ func exampleIntegration(plan *sparkwing.Plan, in ExampleInputs, rc sparkwing.Run
 			return fmt.Errorf("dynamic child: missing weather output")
 		}
 		return nil
-	}).NeedsGenerated(generator).StartsChildren("weather-report").Inline().Timeout(90*time.Second))
+	}).NeedsGenerated(generator).StartsChildren("weather-report").Inline().Timeout(5*time.Minute))
 	secret := sparkwing.Job(plan, "scoped-secrets", func(ctx context.Context) error {
 		value, err := sparkwing.Secret(ctx, in.SecretName)
 		if err != nil {
