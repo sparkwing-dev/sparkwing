@@ -22,6 +22,8 @@ unlock.
 
 ### Breaking
 
+- **compatibility (Breaking):** Remove old-controller field-stripping retries, historical hook forwarder exemptions, admission snapshot upgrades, retired configuration diagnostics, and redundant completion columns. Stores older than schema 30 are refused; schemas in use retain their upgrade path. Remove the unused `pkg/backends` package. See [the contract cut](docs/migrations/_unreleased.md#current-contracts-only).
+
 - **CLI (Breaking):** `sparkwing dashboard start` and `sparkwing dashboard stop` are removed, with their `--addr`, `--allow-remote` and `--read-only` flags. Every shared local controller now serves the dashboard from the moment it starts, at `dashboard.address` in config.yaml (`127.0.0.1:4343` by default, loopback only). `dashboard.read_only` replaces `--read-only`. `sparkwing dashboard open` starts the controller when none runs, and `sparkwing daemon stop` stops it. A taken port leaves runs admitted and status reports `dashboard_error`. The `wingd/dashboard.json` record and `POST /api/v1/local/controller/dashboard` are removed. See [the migration guide](docs/migrations/_unreleased.md#the-dashboard-serves-whenever-the-controller-runs).
 - **controller (Breaking):** The schema baseline advances to version 34, adding a partial index on live child runs for the parent-cancellation sweep. Recognized schema 33 stores upgrade in place. Older binaries refuse the upgraded store. See [the migration guide](docs/migrations/_unreleased.md#upgrade-the-store-in-place-to-schema-baseline-34).
 

@@ -165,7 +165,7 @@ func TestTypedMachineValidationMatchesDecode(t *testing.T) {
 	}
 }
 
-func FuzzRetiredProfileFieldsKeepValuesPrivate(f *testing.F) {
+func FuzzUnknownProfileFieldsKeepValuesPrivate(f *testing.F) {
 	f.Add([]byte("private-profile-value"))
 	f.Fuzz(func(t *testing.T, input []byte) {
 		if len(input) == 0 || len(input) > 256 {
@@ -175,8 +175,8 @@ func FuzzRetiredProfileFieldsKeepValuesPrivate(f *testing.F) {
 		for _, key := range []string{"state", "secrets", "logs", "cache", "mirror_local"} {
 			_, err := Decode("machine.yaml", []byte("profiles: {company.prod: {"+key+": {token: "+value+"}}}"))
 			var field *FieldError
-			if !errors.As(err, &field) || field.Key != "profiles.company.prod."+key || field.Line != 1 || !strings.Contains(field.Problem, "is removed") || !strings.Contains(field.Problem, "https://sparkwing.dev/docs/migration-guide/") || strings.Contains(err.Error(), value) {
-				t.Fatalf("removal diagnostic lost its location, guidance or privacy: %v", err)
+			if !errors.As(err, &field) || field.Key != "profiles.company.prod."+key || field.Line != 1 || field.Problem != "unknown key" || strings.Contains(err.Error(), value) {
+				t.Fatalf("unknown-field diagnostic lost its location or privacy: %v", err)
 			}
 		}
 	})
@@ -186,18 +186,6 @@ func TestRejectRemovedAdmissionAdvisor(t *testing.T) {
 	for _, raw := range []string{"admission: {mode: jev}", "admission: {jev: {}}"} {
 		if _, err := Decode("machine.yaml", []byte(raw)); err == nil {
 			t.Fatalf("accepted removed admission policy: %s", raw)
-		}
-	}
-}
-
-func TestRemovedMachineSectionsSayToDeleteThem(t *testing.T) {
-	for _, key := range []string{"agent", "logs", "fleet", "allow_repos", "dispatch_wait"} {
-		_, err := Decode("machine.yaml", []byte(key+": {}\n"))
-		var field *FieldError
-		if !errors.As(err, &field) || field.Key != key || field.Line != 1 ||
-			!strings.Contains(field.Problem, "is removed; delete it") ||
-			!strings.Contains(field.Problem, "https://sparkwing.dev/docs/migration-guide/") {
-			t.Errorf("%s: diagnostic does not say how to fix it: %v", key, err)
 		}
 	}
 }
