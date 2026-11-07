@@ -54,8 +54,14 @@ func (o *Operator) RedeemLocalDashboardCode(ctx context.Context, code, session, 
 		if err != nil {
 			return redemption{}, err
 		}
-		if _, err := tx.execContext(ctx, `DELETE FROM local_dashboard_sessions WHERE digest=?`, code); err != nil {
+		deleted, err := tx.execContext(ctx, `DELETE FROM local_dashboard_sessions WHERE digest=? AND kind='code'`, code)
+		if err != nil {
 			return redemption{}, err
+		}
+		// safety: only the redemption that deletes the row wins, so a concurrent one cannot reuse the code even
+		// where the transaction does not lock before the read.
+		if spent, err := deleted.RowsAffected(); err != nil || spent != 1 {
+			return redemption{refused: err == nil}, err
 		}
 		if stored != origin || expiresAt <= now.UnixNano() {
 			return redemption{refused: true}, nil
