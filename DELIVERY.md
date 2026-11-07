@@ -476,7 +476,10 @@ pseudo-version form. Release-tag builds keep their exact release version.
 
 `build-images` builds linux/amd64 and linux/arm64 binaries with `bin/build-release-target.sh` and
 publishes them through `publish-images`, reusing the image pair when its immutable version tags
-already exist and both revision labels match the candidate commit. `staging-deploy` pins the
+already exist and both revision labels match the candidate commit. A new build checks that both
+pinned runtime-base manifests exist before compiling the dashboard or binaries. A missing base
+fails with its reference and a repair hint. Reusing published candidate images needs no base lookup.
+`staging-deploy` pins the
 digests in `sparkwing-dev/sparkwing-gitops` and renders with the candidate chart. It pushes the
 controller Deployment alone and waits for Argo Synced/Healthy and the rollout, then does the
 same for the launcher with every other chart change. `staging-gate` starts `example` and the
