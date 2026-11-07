@@ -95,25 +95,29 @@ func TestDashboardLoginAuthorizesControllerAPIAsMintingPeer(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	exchange, err := http.NewRequestWithContext(t.Context(), http.MethodPost, origin+"/login", strings.NewReader(`{"code":"`+code+`"}`))
-	if err != nil {
-		t.Fatal(err)
+	signIn := func(code string) string {
+		t.Helper()
+		exchange, err := http.NewRequestWithContext(t.Context(), http.MethodPost, origin+"/login", strings.NewReader(`{"code":"`+code+`"}`))
+		if err != nil {
+			t.Fatal(err)
+		}
+		exchange.Header.Set("Origin", origin)
+		exchange.Header.Set("Content-Type", "application/json")
+		resp, err := browser.Do(exchange)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var grant struct {
+			Token string `json:"token"`
+		}
+		err = json.NewDecoder(resp.Body).Decode(&grant)
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusOK || err != nil || grant.Token == "" || len(resp.Header.Values("Set-Cookie")) != 0 {
+			t.Fatalf("dashboard sign-in exchange: HTTP %d, Set-Cookie %q (%v)", resp.StatusCode, resp.Header.Values("Set-Cookie"), err)
+		}
+		return grant.Token
 	}
-	exchange.Header.Set("Origin", origin)
-	exchange.Header.Set("Content-Type", "application/json")
-	resp, err := browser.Do(exchange)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var grant struct {
-		Token string `json:"token"`
-	}
-	err = json.NewDecoder(resp.Body).Decode(&grant)
-	resp.Body.Close()
-	session := grant.Token
-	if resp.StatusCode != http.StatusOK || err != nil || session == "" || len(resp.Header.Values("Set-Cookie")) != 0 {
-		t.Fatalf("dashboard sign-in exchange: HTTP %d, Set-Cookie %q (%v)", resp.StatusCode, resp.Header.Values("Set-Cookie"), err)
-	}
+	session := signIn(code)
 	base := link.Scheme + "://" + link.Host
 	request(http.MethodGet, base+"/api/v1/runs", "", http.StatusUnauthorized, &http.Cookie{Name: "sw_dashboard", Value: session})
 	request(http.MethodGet, base+"/api/v1/runs", "", http.StatusUnauthorized)
@@ -131,13 +135,21 @@ func TestDashboardLoginAuthorizesControllerAPIAsMintingPeer(t *testing.T) {
 	for _, name := range []string{"sw_session", "__Host-sw_session"} {
 		request(http.MethodGet, base+"/api/v1/runs", session, http.StatusOK, &http.Cookie{Name: name, Value: "swses_stale_other_port"})
 	}
+	request(http.MethodPost, base+"/logout", session, http.StatusNoContent)
+	request(http.MethodGet, base+"/api/v1/runs", session, http.StatusUnauthorized)
+
+	again, err := wingclient.MintDashboardLogin(t.Context(), home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, code, _ = strings.Cut(again.URL, "/#code=")
+	session = signIn(code)
+	request(http.MethodGet, base+"/api/v1/runs", session, http.StatusOK)
 	if err := lifecycle.Stop(t.Context()); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := lifecycle.EnsureStarted(t.Context(), start); err != nil {
 		t.Fatal(err)
 	}
-	request(http.MethodGet, base+"/api/v1/runs", session, http.StatusOK)
-	request(http.MethodPost, base+"/logout", session, http.StatusNoContent)
 	request(http.MethodGet, base+"/api/v1/runs", session, http.StatusUnauthorized)
 }

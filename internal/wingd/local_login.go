@@ -31,22 +31,24 @@ type DashboardLogin struct {
 	ExpiresAt time.Time `json:"expires_at"`
 }
 
-// DashboardSessionStore persists sign-in codes and browser sessions by SHA-256 digest.
-// RedeemDashboardCode spends the code even when it refuses it.
-type DashboardSessionStore interface {
-	MintDashboardCode(ctx context.Context, digest, origin string, peer localhostwire.LocalPeerIdentity, now, expires time.Time) error
-	RedeemDashboardCode(ctx context.Context, code, session, origin string, now, expires time.Time) (localhostwire.LocalPeerIdentity, error)
-	// DashboardSession reports false for an unknown, expired or revoked digest.
-	DashboardSession(ctx context.Context, digest string, now time.Time) (localhostwire.LocalPeerIdentity, string, time.Time, bool, error)
-	RevokeDashboardSession(ctx context.Context, digest string, now time.Time) (bool, error)
+// safety: codes and sessions live only in this controller run, so every restart revokes every sign-in; a process
+// that held the dashboard port while the controller was down cannot replay a token it collected.
+type dashboardLogins struct {
+	now     func() time.Time
+	mu      sync.Mutex
+	origin  string
+	entries map[string]dashboardEntry
+	watch   map[string]*sessionWatch
+	// hack: tests interpose a revocation between a request's session lookup and serving it.
+	afterLookup func(digest string)
 }
 
-type dashboardLogins struct {
-	now    func() time.Time
-	mu     sync.Mutex
-	origin string
-	store  DashboardSessionStore
-	watch  map[string]*sessionWatch
+// safety: entries are keyed by the SHA-256 digest of their token, so the map never holds a usable credential.
+type dashboardEntry struct {
+	code    bool
+	origin  string
+	peer    localhostwire.LocalPeerIdentity
+	expires time.Time
 }
 
 // safety: Log out closes ended to stop every request the session is still serving, including open streams.
@@ -59,7 +61,7 @@ func newDashboardLogins(now func() time.Time) *dashboardLogins {
 	if now == nil {
 		now = time.Now
 	}
-	return &dashboardLogins{now: now, watch: map[string]*sessionWatch{}}
+	return &dashboardLogins{now: now, entries: map[string]dashboardEntry{}, watch: map[string]*sessionWatch{}}
 }
 
 func (l *dashboardLogins) serving(origin string) {
@@ -72,21 +74,6 @@ func (l *dashboardLogins) servingOrigin() string {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	return l.origin
-}
-
-func (l *dashboardLogins) persist(store DashboardSessionStore) {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	l.store = store
-}
-
-func (l *dashboardLogins) sessions() (DashboardSessionStore, *apierr.Error) {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	if l.store == nil {
-		return nil, &apierr.Error{Code: apierr.Unavailable, Message: "dashboard sessions are unavailable in this controller"}
-	}
-	return l.store, nil
 }
 
 func (l *dashboardLogins) socketRoutes(api http.Handler) http.Handler {
@@ -108,7 +95,7 @@ func (l *dashboardLogins) socketRoutes(api http.Handler) http.Handler {
 			writeLoginFailure(w, &apierr.Error{Code: apierr.Unauthenticated, Message: "dashboard sign-in links need a verified local peer"})
 			return
 		}
-		login, failure := l.mint(r.Context(), peer)
+		login, failure := l.mint(peer)
 		if failure != nil {
 			writeLoginFailure(w, failure)
 			return
@@ -121,27 +108,53 @@ func (l *dashboardLogins) socketRoutes(api http.Handler) http.Handler {
 	})
 }
 
-func (l *dashboardLogins) mint(ctx context.Context, peer localhostwire.LocalPeerIdentity) (DashboardLogin, *apierr.Error) {
-	origin := l.servingOrigin()
-	if origin == "" {
-		return DashboardLogin{}, &apierr.Error{Code: apierr.Unavailable, Message: "the dashboard is not serving", Hint: "run sparkwing dashboard status to see why"}
-	}
-	store, failure := l.sessions()
-	if failure != nil {
-		return DashboardLogin{}, failure
-	}
+func (l *dashboardLogins) mint(peer localhostwire.LocalPeerIdentity) (DashboardLogin, *apierr.Error) {
 	token, err := randomToken()
 	if err != nil {
 		return DashboardLogin{}, &apierr.Error{Code: apierr.Internal, Message: "dashboard sign-in token: " + err.Error()}
 	}
-	now := l.now()
-	expires := now.Add(dashboardLoginLifetime)
-	if err := store.MintDashboardCode(ctx, tokenDigest(token), origin, peer.Clone(), now, expires); err != nil {
-		return DashboardLogin{}, &apierr.Error{Code: apierr.Internal, Message: "store dashboard sign-in code: " + err.Error()}
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if l.origin == "" {
+		return DashboardLogin{}, &apierr.Error{Code: apierr.Unavailable, Message: "the dashboard is not serving", Hint: "run sparkwing dashboard status to see why"}
 	}
+	now := l.now()
+	for digest, entry := range l.entries {
+		if !now.Before(entry.expires) {
+			delete(l.entries, digest)
+		}
+	}
+	expires := now.Add(dashboardLoginLifetime)
+	l.entries[tokenDigest(token)] = dashboardEntry{code: true, origin: l.origin, peer: peer.Clone(), expires: expires}
 	// safety: the code rides in the fragment, which the browser never sends; the page exchanges it
 	// and drops it from history.
-	return DashboardLogin{URL: origin + "/#code=" + token, ExpiresAt: expires}, nil
+	return DashboardLogin{URL: l.origin + "/#code=" + token, ExpiresAt: expires}, nil
+}
+
+// safety: the code is spent even when it is refused, so a guess at another origin uses it up.
+func (l *dashboardLogins) redeem(code, session, origin string) (time.Time, bool) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	entry, ok := l.entries[code]
+	delete(l.entries, code)
+	now := l.now()
+	if !ok || !entry.code || entry.origin != origin || !now.Before(entry.expires) {
+		return time.Time{}, false
+	}
+	expires := now.Add(dashboardSessionLifetime)
+	l.entries[session] = dashboardEntry{origin: origin, peer: entry.peer, expires: expires}
+	return expires, true
+}
+
+func (l *dashboardLogins) revoke(digest string) bool {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	entry, ok := l.entries[digest]
+	if !ok || entry.code {
+		return false
+	}
+	delete(l.entries, digest)
+	return l.now().Before(entry.expires)
 }
 
 func tokenDigest(token string) string {
@@ -167,22 +180,21 @@ type dashboardSession struct {
 	expires time.Time
 }
 
-// safety: the caller watches the digest before this lookup, and Log out revokes in the store before it ends
-// watches, so a request validated just before a revocation is still ended by it.
-func (l *dashboardLogins) lookup(r *http.Request, digest string) (dashboardSession, *apierr.Error) {
-	store, failure := l.sessions()
-	if failure != nil {
-		return dashboardSession{}, failure
-	}
-	peer, stored, expires, live, err := store.DashboardSession(r.Context(), digest, l.now())
-	if err != nil {
-		return dashboardSession{}, &apierr.Error{Code: apierr.Unavailable, Message: "read dashboard session: " + err.Error()}
+// safety: the caller watches the digest before this lookup, and Log out revokes before it ends watches, so a
+// request validated just before a revocation is still ended by it.
+func (l *dashboardLogins) lookup(r *http.Request, digest string) (dashboardSession, bool) {
+	l.mu.Lock()
+	entry, ok := l.entries[digest]
+	hook := l.afterLookup
+	l.mu.Unlock()
+	if hook != nil {
+		hook(digest)
 	}
 	// safety: a session redeemed at one origin does not authorize another origin on the same host.
-	if !live || stored != requestOrigin(r) {
-		return dashboardSession{}, nil
+	if !ok || entry.code || !l.now().Before(entry.expires) || entry.origin != requestOrigin(r) {
+		return dashboardSession{}, false
 	}
-	return dashboardSession{digest: digest, peer: peer, expires: expires}, nil
+	return dashboardSession{digest: digest, peer: entry.peer.Clone(), expires: entry.expires}, true
 }
 
 func (l *dashboardLogins) watchSession(digest string) (<-chan struct{}, func()) {
@@ -268,14 +280,7 @@ func (l *dashboardLogins) gate(next, shell http.Handler) http.Handler {
 		if token, ok := sessionToken(r); ok {
 			digest := tokenDigest(token)
 			ended, release := l.watchSession(digest)
-			current, failure := l.lookup(r, digest)
-			if failure != nil {
-				release()
-				w.Header().Set("Cache-Control", "no-store")
-				writeLoginFailure(w, failure)
-				return
-			}
-			if current.digest != "" {
+			if current, ok := l.lookup(r, digest); ok {
 				defer release()
 				if unsafeDashboardMethod(r.Method) && !sameDashboardOrigin(r) {
 					http.Error(w, "forbidden: a dashboard write must come from the dashboard's own origin", http.StatusForbidden)
@@ -316,11 +321,6 @@ func (l *dashboardLogins) login(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "forbidden: exchange a sign-in code from the dashboard's own origin", http.StatusForbidden)
 		return
 	}
-	store, failure := l.sessions()
-	if failure != nil {
-		writeLoginFailure(w, failure)
-		return
-	}
 	var exchange dashboardExchange
 	refused := &apierr.Error{Code: apierr.Unauthenticated, Message: "this sign-in link is invalid, expired, already used or for another address", Hint: "run sparkwing dashboard open for a new link"}
 	if json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096)).Decode(&exchange) != nil || exchange.Code == "" {
@@ -332,9 +332,8 @@ func (l *dashboardLogins) login(w http.ResponseWriter, r *http.Request) {
 		writeLoginFailure(w, &apierr.Error{Code: apierr.Internal, Message: "dashboard session token: " + err.Error()})
 		return
 	}
-	now := l.now()
-	expires := now.Add(dashboardSessionLifetime)
-	if _, err := store.RedeemDashboardCode(r.Context(), tokenDigest(exchange.Code), tokenDigest(session), requestOrigin(r), now, expires); err != nil {
+	expires, ok := l.redeem(tokenDigest(exchange.Code), tokenDigest(session), requestOrigin(r))
+	if !ok {
 		writeLoginFailure(w, refused)
 		return
 	}
@@ -355,21 +354,11 @@ func (l *dashboardLogins) logout(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "forbidden: sign out from the dashboard's own origin", http.StatusForbidden)
 		return
 	}
-	store, failure := l.sessions()
-	if failure != nil {
-		writeLoginFailure(w, failure)
-		return
-	}
 	token, ok := sessionToken(r)
 	live := false
 	if ok {
 		digest := tokenDigest(token)
-		var err error
-		// safety: the page forgets its token only after this succeeds, so a failed revocation can be retried.
-		if live, err = store.RevokeDashboardSession(r.Context(), digest, l.now()); err != nil {
-			writeLoginFailure(w, &apierr.Error{Code: apierr.Unavailable, Message: "revoke dashboard session: " + err.Error(), Hint: "try Log out again; the session stays valid until it is revoked"})
-			return
-		}
+		live = l.revoke(digest)
 		l.end(digest)
 	}
 	if !live {

@@ -3,7 +3,6 @@ package wingd
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -18,65 +17,6 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/localhostwire"
 )
-
-type memoryDashboardSessions struct {
-	mu   sync.Mutex
-	rows map[string]memoryDashboardRow
-}
-
-type memoryDashboardRow struct {
-	code    bool
-	origin  string
-	peer    localhostwire.LocalPeerIdentity
-	expires time.Time
-}
-
-func (m *memoryDashboardSessions) put(digest string, row memoryDashboardRow) {
-	if m.rows == nil {
-		m.rows = map[string]memoryDashboardRow{}
-	}
-	m.rows[digest] = row
-}
-
-func (m *memoryDashboardSessions) MintDashboardCode(_ context.Context, digest, origin string, peer localhostwire.LocalPeerIdentity, _, expires time.Time) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	m.put(digest, memoryDashboardRow{code: true, origin: origin, peer: peer, expires: expires})
-	return nil
-}
-
-func (m *memoryDashboardSessions) RedeemDashboardCode(_ context.Context, code, session, origin string, now, expires time.Time) (localhostwire.LocalPeerIdentity, error) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	row, ok := m.rows[code]
-	delete(m.rows, code)
-	if !ok || !row.code || row.origin != origin || !now.Before(row.expires) {
-		return localhostwire.LocalPeerIdentity{}, errors.New("refused")
-	}
-	m.put(session, memoryDashboardRow{origin: origin, peer: row.peer, expires: expires})
-	return row.peer, nil
-}
-
-func (m *memoryDashboardSessions) DashboardSession(_ context.Context, digest string, now time.Time) (localhostwire.LocalPeerIdentity, string, time.Time, bool, error) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	row, ok := m.rows[digest]
-	if !ok || row.code || !now.Before(row.expires) {
-		return localhostwire.LocalPeerIdentity{}, "", time.Time{}, false, nil
-	}
-	return row.peer, row.origin, row.expires, true, nil
-}
-
-func (m *memoryDashboardSessions) RevokeDashboardSession(_ context.Context, digest string, now time.Time) (bool, error) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	row, ok := m.rows[digest]
-	if !ok || row.code {
-		return false, nil
-	}
-	delete(m.rows, digest)
-	return now.Before(row.expires), nil
-}
 
 type loginClock struct {
 	mu  sync.Mutex
@@ -169,7 +109,7 @@ func withSessionFrom(session, origin string) func(*http.Request) {
 func signInThrough(t testing.TB, logins *dashboardLogins) string {
 	t.Helper()
 	uid := uint32(1000)
-	login, failure := logins.mint(t.Context(), localhostwire.LocalPeerIdentity{GOOS: "linux", UID: &uid})
+	login, failure := logins.mint(localhostwire.LocalPeerIdentity{GOOS: "linux", UID: &uid})
 	if failure != nil {
 		t.Fatal(failure)
 	}
@@ -194,9 +134,8 @@ func exchangeRequest(handler http.Handler, link, origin string) *httptest.Respon
 	return response
 }
 
-func storedLogins(clock func() time.Time, origin string) *dashboardLogins {
+func servingLogins(clock func() time.Time, origin string) *dashboardLogins {
 	logins := newDashboardLogins(clock)
-	logins.persist(&memoryDashboardSessions{})
 	logins.serving(origin)
 	return logins
 }
@@ -390,7 +329,19 @@ func TestLocalDashboardSignsInOnceThroughSocketMintedLink(t *testing.T) {
 		}
 	}
 
-	// safety: the session is stored, so a controller restart keeps it and only its 30-day expiry ends it.
+	clock.advance(dashboardSessionLifetime - time.Second)
+	if resp := loginRequest(t, browser, http.MethodGet, runs, withSession(session)); resp.StatusCode != http.StatusOK {
+		t.Fatalf("session inside 30 days: HTTP %d", resp.StatusCode)
+	}
+	clock.advance(time.Second)
+	if resp := loginRequest(t, browser, http.MethodGet, runs, withSession(session)); resp.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("session at 30 days: HTTP %d", resp.StatusCode)
+	}
+
+	// safety: a restart revokes every sign-in, so a token a port squatter collected while the controller was down
+	// is worthless once the controller binds again at the same address.
+	session = signIn(mint())
+	pending := mint()
 	if err := lifecycle.Stop(t.Context()); err != nil {
 		t.Fatal(err)
 	}
@@ -405,13 +356,11 @@ func TestLocalDashboardSignsInOnceThroughSocketMintedLink(t *testing.T) {
 	if status.DashboardURL != base {
 		t.Fatalf("the restarted dashboard moved from %s to %s: %s", base, status.DashboardURL, status.DashboardError)
 	}
-	clock.advance(dashboardSessionLifetime - time.Second)
-	if resp := loginRequest(t, browser, http.MethodGet, runs, withSession(session)); resp.StatusCode != http.StatusOK {
-		t.Fatalf("session after a restart, inside 30 days: HTTP %d", resp.StatusCode)
-	}
-	clock.advance(time.Second)
 	if resp := loginRequest(t, browser, http.MethodGet, runs, withSession(session)); resp.StatusCode != http.StatusUnauthorized {
-		t.Fatalf("session at 30 days: HTTP %d", resp.StatusCode)
+		t.Fatalf("a session minted before the restart: HTTP %d", resp.StatusCode)
+	}
+	if resp := exchange(pending, ""); resp.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("a link minted before the restart: HTTP %d", resp.StatusCode)
 	}
 
 	session = signIn(mint())
@@ -448,9 +397,9 @@ func TestLocalDashboardSignsInOnceThroughSocketMintedLink(t *testing.T) {
 }
 
 func TestLocalDashboardLinkRedeemsOnlyAtItsOrigin(t *testing.T) {
-	logins := storedLogins(nil, "http://127.0.0.1:4343")
+	logins := servingLogins(nil, "http://127.0.0.1:4343")
 	uid := uint32(7)
-	login, failure := logins.mint(t.Context(), localhostwire.LocalPeerIdentity{GOOS: "linux", UID: &uid})
+	login, failure := logins.mint(localhostwire.LocalPeerIdentity{GOOS: "linux", UID: &uid})
 	if failure != nil {
 		t.Fatal(failure)
 	}
@@ -474,12 +423,8 @@ func TestLocalDashboardLinkRedeemsOnlyAtItsOrigin(t *testing.T) {
 func TestLocalDashboardMintRefusesWithoutServingDashboard(t *testing.T) {
 	logins := newDashboardLogins(nil)
 	uid := uint32(7)
-	if _, failure := logins.mint(t.Context(), localhostwire.LocalPeerIdentity{GOOS: "linux", UID: &uid}); failure == nil || failure.Hint == "" {
+	if _, failure := logins.mint(localhostwire.LocalPeerIdentity{GOOS: "linux", UID: &uid}); failure == nil || failure.Hint == "" {
 		t.Fatalf("mint without a dashboard = %v", failure)
-	}
-	logins.serving("http://127.0.0.1:4343")
-	if _, failure := logins.mint(t.Context(), localhostwire.LocalPeerIdentity{GOOS: "linux", UID: &uid}); failure == nil {
-		t.Fatal("minted without a session store")
 	}
 	response := httptest.NewRecorder()
 	logins.socketRoutes(http.NotFoundHandler()).ServeHTTP(response, httptest.NewRequest(http.MethodPost, DashboardLoginPath, nil))
@@ -491,7 +436,7 @@ func TestLocalDashboardMintRefusesWithoutServingDashboard(t *testing.T) {
 func FuzzLocalDashboardRequiresSessionBearer(f *testing.F) {
 	server := httptest.NewServer(nil)
 	f.Cleanup(server.Close)
-	logins := storedLogins(nil, server.URL)
+	logins := servingLogins(nil, server.URL)
 	var reached sync.Map
 	dashboard := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		reached.Store(r.Header.Get("X-Probe"), true)
@@ -570,7 +515,7 @@ func TestLocalDashboardStreamsEndWithTheirSession(t *testing.T) {
 				<-r.Context().Done()
 			})
 			server := httptest.NewUnstartedServer(nil)
-			logins := storedLogins(clock.Now, "http://"+server.Listener.Addr().String())
+			logins := servingLogins(clock.Now, "http://"+server.Listener.Addr().String())
 			server.Config.Handler = logins.gate(stream, nil)
 			server.Start()
 			t.Cleanup(server.Close)
@@ -616,7 +561,7 @@ func TestLocalDashboardReadOnlyRequiresAuthAndRefusesChanges(t *testing.T) {
 	const origin = "http://192.0.2.1:4343"
 	for _, readOnly := range []bool{false, true} {
 		t.Run(fmt.Sprint(readOnly), func(t *testing.T) {
-			logins := storedLogins(nil, origin)
+			logins := servingLogins(nil, origin)
 			session := signInThrough(t, logins)
 			handler := guardDashboard(localhostwire.LocalHTTP{Dashboard: http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusNoContent) })}, "192.0.2.1:4343", logins, readOnly)
 			write := map[bool]int{false: http.StatusNoContent, true: http.StatusForbidden}[readOnly]
@@ -657,35 +602,16 @@ func TestLocalDashboardReadOnlyRequiresAuthAndRefusesChanges(t *testing.T) {
 	}
 }
 
-type revokingLookup struct {
-	*memoryDashboardSessions
-	after func(string)
-}
-
-func (r revokingLookup) DashboardSession(ctx context.Context, digest string, now time.Time) (localhostwire.LocalPeerIdentity, string, time.Time, bool, error) {
-	peer, origin, expires, live, err := r.memoryDashboardSessions.DashboardSession(ctx, digest, now)
-	if r.after != nil {
-		r.after(digest)
-	}
-	return peer, origin, expires, live, err
-}
-
 func TestLocalDashboardLogoutAfterLookupStillEndsTheStream(t *testing.T) {
 	server := httptest.NewUnstartedServer(nil)
 	origin := "http://" + server.Listener.Addr().String()
-	sessions := &memoryDashboardSessions{}
-	lookup := revokingLookup{memoryDashboardSessions: sessions}
-	logins := newDashboardLogins(nil)
-	logins.persist(lookup)
-	logins.serving(origin)
+	logins := servingLogins(nil, origin)
 	session := signInThrough(t, logins)
 	// safety: Log out lands after this request's lookup succeeded and before it serves, the window the watch must cover.
-	logins.persist(revokingLookup{memoryDashboardSessions: sessions, after: func(digest string) {
-		if _, err := sessions.RevokeDashboardSession(t.Context(), digest, time.Now()); err != nil {
-			t.Error(err)
-		}
+	logins.afterLookup = func(digest string) {
+		logins.revoke(digest)
 		logins.end(digest)
-	}})
+	}
 	server.Config.Handler = logins.gate(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		<-r.Context().Done()
@@ -721,7 +647,7 @@ func TestLocalDashboardLogoutAfterLookupStillEndsTheStream(t *testing.T) {
 }
 
 func TestLocalDashboardForgedBearersLeaveNoWatches(t *testing.T) {
-	logins := storedLogins(nil, "http://127.0.0.1:4343")
+	logins := servingLogins(nil, "http://127.0.0.1:4343")
 	for i := range 50 {
 		request := httptest.NewRequest(http.MethodGet, "http://127.0.0.1:4343/api/v1/runs", nil)
 		withSession(fmt.Sprintf("forged-%d", i))(request)
@@ -729,31 +655,5 @@ func TestLocalDashboardForgedBearersLeaveNoWatches(t *testing.T) {
 	}
 	if len(logins.watch) != 0 {
 		t.Fatalf("forged bearers left %d watches", len(logins.watch))
-	}
-}
-
-type failingRevoke struct{ *memoryDashboardSessions }
-
-func (failingRevoke) RevokeDashboardSession(context.Context, string, time.Time) (bool, error) {
-	return false, errors.New("store is busy")
-}
-
-func TestLocalDashboardLogoutKeepsTheSessionWhenRevocationFails(t *testing.T) {
-	const origin = "http://127.0.0.1:4343"
-	sessions := &memoryDashboardSessions{}
-	logins := newDashboardLogins(nil)
-	logins.persist(sessions)
-	logins.serving(origin)
-	session := signInThrough(t, logins)
-	logins.persist(failingRevoke{sessions})
-	request := httptest.NewRequest(http.MethodPost, origin+"/logout", nil)
-	withSessionFrom(session, origin)(request)
-	response := httptest.NewRecorder()
-	logins.gate(http.NotFoundHandler(), nil).ServeHTTP(response, request)
-	if response.Code != http.StatusServiceUnavailable {
-		t.Fatalf("failed revocation: HTTP %d", response.Code)
-	}
-	if _, _, _, live, err := sessions.DashboardSession(t.Context(), tokenDigest(session), time.Now()); err != nil || !live {
-		t.Fatalf("session after a failed revocation: live=%t %v", live, err)
 	}
 }
