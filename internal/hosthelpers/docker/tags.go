@@ -17,10 +17,10 @@ import (
 // Branch is a separate readable label; it isn't part of DeployTag /
 // ProdTag (those stay content-addressed).
 type ImageTag struct {
-	Commit  string
+	Commit  string `json:"commit"`
 	Content string `json:"content"`
-	Branch  string
-	Dirty   bool
+	Branch  string `json:"branch"`
+	Dirty   bool   `json:"dirty"`
 }
 
 // DeployTag is the canonical content-addressed tag applied to every
