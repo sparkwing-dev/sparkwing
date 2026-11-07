@@ -31,3 +31,17 @@ func TestPlacementTierWaitsMirrorTheClaimHold(t *testing.T) {
 		t.Fatalf("ranking exclusion: %+v", waits[1])
 	}
 }
+
+func TestPlacementTierWaitsCountAClaimantInItsEarliestTierOnly(t *testing.T) {
+	ready := time.Unix(100, 0)
+	tiers := []runspec.RepositoryTier{
+		{Target: runspec.PlacementTeam, Labels: []string{"os=darwin"}, Hold: 5 * time.Second},
+		{Target: runspec.PlacementTeam, Hold: 5 * time.Second},
+		{Target: runspec.PlacementCloud},
+	}
+	mac := placementCandidate{name: "mac", facts: claimFacts{Tier: tierSelfHosted, Labels: []string{"os=darwin"}, FreeSlots: 1}}
+	got := placementTierWaits(tiers, []placementCandidate{mac}, nil, ready, ready)
+	if len(got[0].Live) != 1 || len(got[1].Live) != 0 || got[2].OpensIn != 5*time.Second {
+		t.Fatalf("the mac holds through its earliest tier only, so cloud opens in 5s: %+v", got)
+	}
+}

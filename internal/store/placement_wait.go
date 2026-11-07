@@ -48,7 +48,7 @@ func readPlacementWaitsTx(ctx context.Context, tx *storeTx, team Team, run RunRo
 	if policy == nil || run.FinishedAt != nil || run.CancelRequestedAt != nil || run.Dispatch != string(runspec.DispatchController) {
 		return nil, nil
 	}
-	rows, err := tx.queryContext(ctx, `SELECT node_id,ready_at FROM nodes WHERE team=? AND run_id=? AND ready_at IS NOT NULL AND claimed_by IS NULL AND status='pending' AND cancel_requested_at IS NULL ORDER BY ready_at,node_id`, team, run.ID)
+	rows, err := tx.queryContext(ctx, `SELECT node_id,COALESCE(queue_started_at,ready_at) FROM nodes WHERE team=? AND run_id=? AND ready_at IS NOT NULL AND claimed_by IS NULL AND status='pending' AND cancel_requested_at IS NULL ORDER BY ready_at,node_id`, team, run.ID)
 	if err != nil {
 		return nil, err
 	}
@@ -121,8 +121,9 @@ func readPlacementWaitsTx(ctx context.Context, tx *storeTx, team Team, run RunRo
 	return waits, nil
 }
 
-// safety: mirrors the claim query's hold; a tier opens once every earlier tier with an admissible claimant
-// has passed its cumulative deadline. An on-demand launcher never holds, as in the query.
+// safety: mirrors the claim query's hold; a claimant counts in its earliest matching tier only, a tier opens
+// once every earlier tier with an admissible claimant has passed its cumulative deadline, and an on-demand
+// launcher never holds.
 func placementTierWaits(tiers []runspec.RepositoryTier, candidates []placementCandidate, ranking []string, ready, now time.Time) []PlacementTierWait {
 	out := make([]PlacementTierWait, len(tiers))
 	var deadline, blocked time.Time
@@ -137,7 +138,7 @@ func placementTierWaits(tiers []runspec.RepositoryTier, candidates []placementCa
 		}
 		var funding, matched bool
 		for _, c := range candidates {
-			if !repositoryTierMatches(tier, c.facts) {
+			if slices.IndexFunc(tiers, func(t runspec.RepositoryTier) bool { return repositoryTierMatches(t, c.facts) }) != i {
 				continue
 			}
 			matched = true

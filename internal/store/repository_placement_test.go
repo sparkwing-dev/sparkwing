@@ -9,6 +9,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
+	"github.com/sparkwing-dev/sparkwing/internal/store/internal/storetest"
 )
 
 func tiers(steps ...runspec.RepositoryTier) []runspec.RepositoryTier { return steps }
@@ -218,4 +219,42 @@ func TestPlacementNamedClaimFollowsTheSameHold(t *testing.T) {
 	if claim, err := f.Store.AsOperator().ClaimUnit(t.Context(), store.UnitDemand{CapabilityPrefix: f.Launcher, Target: target, Labels: []string{"team-4cpu"}}); err != nil || claim.NodeID != "job" {
 		t.Fatalf("named Cloud claim after the hold: %+v %v", claim, err)
 	}
+}
+
+func TestPlacementRankingStillFiltersAPinnedListedJob(t *testing.T) {
+	f := rankingFixture(t, true)
+	finishRankingTrigger(t, f)
+	if err := f.Rank(t, f.Admin, "self-hosted"); err != nil {
+		t.Fatal(err)
+	}
+	f.Place(t, runspec.RepositoryPlacement{Prefer: tiers(cloud(0))})
+	f.RequireOnJobs(t, "class=cloud")
+	f.At(2 * time.Minute)
+	wantNoJob(t, f, f.Launcher)
+}
+
+func TestPlacementPinnedUnlistedJobStillSkipsTheRanking(t *testing.T) {
+	f := rankingFixture(t, true)
+	finishRankingTrigger(t, f)
+	if err := f.Rank(t, f.Admin, "self-hosted"); err != nil {
+		t.Fatal(err)
+	}
+	f.Request(t, func(r *runspec.Request) { r.Origin = runspec.OriginApp })
+	f.RequireOnJobs(t, "class=cloud")
+	f.At(2 * time.Minute)
+	wantJob(t, f, f.Launcher)
+}
+
+func TestPlacementHoldRunsFromTheQueueStartNotARenewedReadyTime(t *testing.T) {
+	f := rankingFixture(t, true)
+	finishRankingTrigger(t, f)
+	f.Place(t, runspec.RepositoryPlacement{Prefer: tiers(team(5*time.Second), cloud(0))})
+	if _, err := f.Store.DB().ExecContext(t.Context(), storetest.Rebind(f.Store, `UPDATE nodes SET queue_started_at=?,ready_at=?`), f.ReadyAt.UnixNano(), f.ReadyAt.Add(4*time.Second).UnixNano()); err != nil {
+		t.Fatal(err)
+	}
+	livePolls(t, f, f.Self, f.Launcher)
+	f.At(4 * time.Second)
+	wantNoJob(t, f, f.Launcher)
+	f.At(5 * time.Second)
+	wantJob(t, f, f.Launcher)
 }
