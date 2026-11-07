@@ -31,6 +31,10 @@ const (
 	ProjectConfigBytes int64 = 1 << 20
 	// LogSearchBytes bounds run-scoped log search bytes.
 	LogSearchBytes int64 = 256 << 20
+	// PreparedPipelineBytes bounds how much of a run's first prepared pipeline
+	// archive Sparkwing Cloud keeps out of the team's storage quota; bytes past
+	// it count as usual.
+	PreparedPipelineBytes int64 = 256 << 20
 	// ProtocolEnvelopeBytes bounds envelope allowance beyond a typed output payload.
 	ProtocolEnvelopeBytes int64 = 1 << 20
 )

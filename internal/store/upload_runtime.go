@@ -70,7 +70,13 @@ func (t *Tenant) ReserveBlobUpload(ctx context.Context, request UploadReservatio
 		if err != nil {
 			return UploadReservation{}, err
 		}
-		if err := admitStorageGrowthTx(ctx, tx, t.team, storageGrowth{reservation: blobUploadQuotaID(request.ID), expires: request.ExpiresAt, run: a.source.RunID, bytes: reserved, objects: objects}); err != nil {
+		growth := storageGrowth{reservation: blobUploadQuotaID(request.ID), expires: request.ExpiresAt, run: a.source.RunID, bytes: reserved, objects: objects}
+		if a.preparesPipeline() && reserved > 0 {
+			if growth.exempt, err = claimPreparedExemptionTx(ctx, tx, t.team, a.source.RunID, growth.reservation, reserved); err != nil {
+				return UploadReservation{}, err
+			}
+		}
+		if err := admitStorageGrowthTx(ctx, tx, t.team, growth); err != nil {
 			return UploadReservation{}, err
 		}
 		u := UploadReservation{ID: request.ID, Blob: blob.Blob{Team: string(t.team), Digest: request.Intent.Digest, Size: request.Intent.Size}, Identity: a.source, Provenance: blobActorProvenance(a), RefFacts: a.authority.Ref, ExpiresAt: request.ExpiresAt.UTC()}

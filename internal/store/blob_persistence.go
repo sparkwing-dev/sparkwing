@@ -42,7 +42,11 @@ func commitVerifiedBlobTx(ctx context.Context, tx *storeTx, team Team, auth blob
 		}
 		return receipt.Value, nil
 	}
-	objects, err := commitBlobBytesTx(ctx, tx, team, blob.Blob{Digest: intent.Digest, Size: intent.Size}, quotas[0].amount)
+	exempt, err := preparedExemptionTx(ctx, tx, team, auth.source.RunID, accounting.ReservationID)
+	if err != nil {
+		return blob.Receipt{}, err
+	}
+	objects, err := commitBlobBytesTx(ctx, tx, team, blob.Blob{Digest: intent.Digest, Size: intent.Size}, quotas[0].amount+exempt)
 	if err != nil {
 		return blob.Receipt{}, err
 	}
@@ -53,7 +57,11 @@ func commitVerifiedBlobTx(ctx context.Context, tx *storeTx, team Team, auth blob
 	if err := clearBlobTombstoneTx(ctx, tx, team, intent.Digest); err != nil {
 		return blob.Receipt{}, err
 	}
-	if err := settleBlobQuotaTx(ctx, tx, team, auth.source.RunID, accounting, quotas, intent.Size*objects, objects); err != nil {
+	charged, chargedObjects := max(intent.Size*objects-exempt, 0), objects
+	if exempt > 0 {
+		chargedObjects = 0
+	}
+	if err := settleBlobQuotaTx(ctx, tx, team, auth.source.RunID, accounting, quotas, charged, chargedObjects); err != nil {
 		return blob.Receipt{}, err
 	}
 	return receipt, nil
@@ -263,6 +271,10 @@ func readOwnBlobReceiptTx(ctx context.Context, tx *storeTx, source blob.UploadId
 	}
 	return runspec.Optional[blob.Receipt]{Set: true, Value: blob.Receipt{Identity: source, Digest: digest, CreatedAt: *stateTime(sql.NullInt64{Int64: at, Valid: true})}}, nil
 }
+
+// safety: only the Cloud planning owner publishes the prepared pipeline Sparkwing built; its first upload per run
+// keeps up to limits.PreparedPipelineBytes out of the storage quota, and every other upload is charged.
+func (a blobActor) preparesPipeline() bool { return blobKindAllowed(a, blob.KindPrepared) }
 
 func blobKindAllowed(a blobActor, kind blob.Kind) bool {
 	source := a.source

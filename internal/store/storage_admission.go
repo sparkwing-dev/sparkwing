@@ -18,6 +18,9 @@ type storageGrowth struct {
 	bytes, objects int64
 	// lifecycle marks a run's own state record, which is counted but never refused so a run can always finish.
 	lifecycle bool
+	// safety: exempt is the part of a run's first prepared pipeline the tier quota neither refuses nor counts,
+	// along with its object; retained-storage billing still counts every byte.
+	exempt int64
 }
 
 // admitStorageGrowthTx is the one storage rule. Every write that grows a team's stored data calls it in the
@@ -37,7 +40,11 @@ func admitStorageGrowthTx(ctx context.Context, tx *storeTx, team Team, g storage
 	if err != nil {
 		return err
 	}
-	dimensions := uploadQuotaDimensions(g.reservation, g.run, StorageMonth(tx.now(ctx)), g.bytes, g.objects)
+	counted, countedObjects := g.bytes-min(g.exempt, g.bytes), g.objects
+	if g.exempt > 0 {
+		countedObjects = 0
+	}
+	dimensions := uploadQuotaDimensions(g.reservation, g.run, StorageMonth(tx.now(ctx)), counted, countedObjects)
 	if !g.lifecycle {
 		dimensions[0].ceiling, dimensions[1].ceiling, dimensions[2].ceiling = policy.MaxBytesPerMonth, policy.MaxBytesPerRun, policy.MaxObjectsPerRun
 	}

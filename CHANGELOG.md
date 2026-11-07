@@ -42,6 +42,10 @@ unlock.
 - **delivery:** `sparkwing run land -- --cloud-profile NAME` runs the full gate and race tests on Cloud while review and push keep the local checkout. The landing record names the Cloud gate run.
 - **SDK:** Host compatibility checks run frozen released Go and TypeScript pipelines through candidate nodehost. The affected gate reuses fixture preparation, and pre-release rebuilds every historical fixture.
 
+### Changed
+
+- **storage:** The first 256 MiB of the prepared pipeline Sparkwing Cloud builds for a run no longer counts toward the team's per-run, monthly or object storage quotas, so free-tier teams can run Go pipelines whose binaries are 20 to 40 MB. Bytes past 256 MiB and further uploads from the run's planning credentials count as before. The prepared pipeline stays deduplicated by digest and retained-storage billing still counts it. The free tier's per-run limit rises from 10 MiB to 100 MiB; the paid tier and explicit operator quotas are unchanged. See [limits](docs/limits.md#uploads-and-storage-accounting).
+
 ### Fixed
 
 - **local controller:** Store time no longer moves backward when time sync or a VM resume steps the wall clock back, which had failed job and step completion with a `finished_at >= started_at` constraint error and refused plan settlement with "billing checkpoint is outside its awarded time range".
