@@ -510,10 +510,8 @@ older schema, recover the target database before reverting its images. Staging a
 have separate database servers, so recovering one never touches the other.
 
 Only a run the GitHub App started for a push to main can assume the deploy role. The `deploy`
-entry in `.sparkwing/sparkwing.yaml` declares `on: push` for `main` with
-`args: {stop-after: staging}`. The lead removes that argument after one watched staging deploy
-and gate, enabling the full staging-gate -> production flow on subsequent pushes. A terminal can
-preview with `--dry-run`. `--stop-after`, `--promote-proven` and `--version` reach a real deploy
+entry in `.sparkwing/sparkwing.yaml` declares `on: push` for `main`. Each push runs
+through production after its staging gate passes. A terminal can preview with `--dry-run`. `--stop-after`, `--promote-proven` and `--version` reach a real deploy
 through the entry's `args`. Each deploy job refuses a commit that is no longer main's tip, so a
 retried old run cannot roll production back.
 
