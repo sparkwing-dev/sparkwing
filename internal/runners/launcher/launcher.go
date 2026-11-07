@@ -83,7 +83,7 @@ type Launcher struct {
 	idleSince        map[types.UID]time.Time
 	retirementLogged time.Time
 
-	// foreignClassLogged is touched only by Run's loop, which takes the warm sample.
+	// safety: unlocked because only Run's loop takes the warm sample.
 	foreignClassLogged time.Time
 
 	mu       sync.Mutex
