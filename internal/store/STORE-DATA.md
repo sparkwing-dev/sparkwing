@@ -13,10 +13,8 @@ The baseline version is 34. Both dialects are translated from `schema.sql`.
 A fresh store gets the baseline whole. `schemaUpgrades` in `schema_upgrade.go`
 lists the forward steps, each keyed by the version and baseline digest a release
 recorded, and an older supported store takes every later step in the same open
-transaction, under the migration advisory lock on PostgreSQL: a v0.68.3
-schema-28 store gains `nodes.trusted_host` (version 29), and a v0.68.7 schema-29
-store gets the replaced `warm_pool_desired` view and the `device_logins` table
-(version 30). Schema 31 adds `local_machine_admission`, schema 32 adds
+transaction, under the migration advisory lock on PostgreSQL. Schema 30 is the
+oldest accepted baseline. Schema 31 adds `local_machine_admission`, schema 32 adds
 `local_run_secrets`, and schema 33 adds `local_runner_instances` with a unique
 active instance per verified local peer root. Runner registration persists its
 claim capability, process ID and birth identity, version and build identity.
@@ -27,10 +25,11 @@ while an instance drains. Existing credential retention removes an instance
 record when its ended claim capability is retired. Schema 34 adds
 `idx_runs_live_children`, a partial index on pending and running child runs that
 the parent-cancellation sweep reads instead of the whole run history. A step adds a
-column at the end of its table so the upgraded schema matches a fresh one. A
-view is replaced with `CREATE OR REPLACE VIEW`, which keeps PostgreSQL grants;
-SQLite drops and recreates it. Any other version or digest requires a backup
-and recreation, and there are no down migrations.
+column at the end of its table so the upgraded schema matches a fresh one.
+Other versions and digests are refused unchanged. Any reset must preserve secrets,
+teams and memberships, tokens, runner registrations, GitHub App installations,
+schedules and subscriptions. Billing records require separate review. There are
+no down migrations.
 
 `sparkwing_schema_version.baseline_digest` records SHA-256 of the neutral SQL
 with LF line endings. Open refuses a differing digest at the same version with
