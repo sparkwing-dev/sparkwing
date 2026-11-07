@@ -743,8 +743,7 @@ namespace, so Karpenter adds one node per team's demand.
 - A request, running or stopped, is replaced, UID-fenced, only when its node holds another
   team's Pod or is bound to another team or run. Otherwise the launcher waits,
   because recreating requests on an incompatible pool would keep provisioning
-  unusable nodes. The node-class affinity keeps requests off pools of another
-  EC2NodeClass that share the class labels and taint. A request on a Ready node
+  unusable nodes. A request on a Ready node
   the boundary still refuses logs a WARN on every pass naming the node and the
   refusal, so the misconfigured pool is visible before the award's deadline.
   Adoption waits for a terminating old request to leave before
@@ -834,6 +833,14 @@ UID must match the actual ReplicaSet, whose Deployment controller must be named
 `sparkwing-cloud-warm-<vCPU>`. It reserves the node before deleting placeholders.
 A forbidden delete releases the reservation and its taint while retaining the
 permanent team/run binding. Unrelated Pods make the node unavailable.
+Placeholders select the same class and launcher-namespace labels as capacity
+requests, plus the warm namespace, and likewise cannot name the restricted
+EC2NodeClass label, so a NodePool of another EC2NodeClass with the same label
+set receives them. The warm sample counts only nodes whose
+`karpenter.k8s.aws/ec2nodeclass` matches `--node-class`, so the controller never
+sees refused nodes as warm, and logs a WARN at most once a minute naming each
+other-class node and its NodePool.
+`TestWarmSampleExcludesAndReportsNodesOfAnotherNodeClass` guards this.
 
 Operator setting `cloud_upsize_enabled` defaults to true. With no free warm node
 of the requested class, a job may take an idle, never-used warm node exactly one

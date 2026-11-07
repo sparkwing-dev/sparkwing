@@ -83,6 +83,9 @@ type Launcher struct {
 	idleSince        map[types.UID]time.Time
 	retirementLogged time.Time
 
+	// safety: unlocked because only Run's loop takes the warm sample.
+	foreignClassLogged time.Time
+
 	mu       sync.Mutex
 	waiting  map[string]*CloudJobAward
 	identity string
