@@ -22,7 +22,7 @@ unlock.
 
 ### Breaking
 
-- **local controller (Breaking):** The local dashboard keeps its sign-in in a stored 30-day session. `sparkwing dashboard open` prints a link whose one-time code sits in the URL fragment; the page exchanges it with `POST /login` for a token it keeps in `localStorage` and sends as `Authorization: Bearer`. Sessions survive controller restarts, work only at their origin and end at Log out. The schema baseline advances to version 35, adding `local_dashboard_sessions`; recognized schema 34 stores upgrade in place. See [the migration guide](docs/migrations/_unreleased.md#upgrade-the-store-in-place-to-schema-baseline-35).
+- **local controller (Breaking):** `sparkwing dashboard open` prints a link whose one-time code sits in the URL fragment; the page exchanges it with `POST /login` for a session token it keeps in `localStorage` and sends as `Authorization: Bearer`. No cookie is set or accepted. Sessions live only in controller memory, so Log out or any controller restart revokes them; they last at most 30 days. See [the migration guide](docs/migrations/_unreleased.md#sign-in-again-after-each-controller-restart).
 
 - **CLI (Breaking):** `sparkwing dashboard install` and `dashboard uninstall` move to `sparkwing daemon install` and `daemon uninstall`, because the login service runs the controller, not only the dashboard. The always-refused `--force` flag is removed. See [the migration guide](docs/migrations/_unreleased.md#the-controller-login-service-moves-under-daemon).
 

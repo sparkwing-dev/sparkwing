@@ -282,15 +282,9 @@ The login service command moves from `dashboard` to `daemon`:
 Installed units keep running unchanged; their argv was already
 `wingd run --home <home>`. The `--force` flag, which always refused, is removed.
 
-## Upgrade the store in place to schema baseline 35
+## Sign in again after each controller restart
 
-Schema 35 adds `local_dashboard_sessions` to the recognized schema 34 baseline
-in one transaction. It stores the local dashboard's one-time sign-in codes and
-browser sessions as SHA-256 digests, with the minting peer, the exact origin and
-the expiry. Older binaries refuse the upgraded store. Retain a backup before
-upgrading if you need to return to an older binary.
-
-Sign-in links now carry their code in the fragment (`/#code=...`); open a new
-link with `sparkwing dashboard open` after upgrading. The page stores a 30-day
-token and sends it as `Authorization: Bearer`; every write needs the dashboard's
-own `Origin`.
+Sign-in links now carry their code in the fragment (`/#code=...`). The page
+stores the session token and sends it as `Authorization: Bearer`; every write
+needs the dashboard's own `Origin`. Sessions live only in controller memory, so
+run `sparkwing dashboard open` again after any controller restart.

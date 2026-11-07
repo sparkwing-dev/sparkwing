@@ -515,8 +515,9 @@ a server. The code works once, expires after 60 seconds, and is bound to the
 exact dashboard origin; the controller stores only its SHA-256 digest with the
 minting peer. The dashboard page removes the code from history, then exchanges
 it with `POST /login` from its own origin for a session token. The controller
-stores the token's digest in `state.db` for 30 days, so a session survives
-controller restarts.
+keeps only the token's digest, in its own memory, for at most 30 days. Codes and
+sessions are never written to disk, so every controller restart revokes every
+sign-in; run `sparkwing dashboard open` again afterwards.
 
 The page keeps the token in `localStorage` and sends it as
 `Authorization: Bearer` on every API request and event stream. Nothing on the
@@ -524,7 +525,11 @@ TCP dashboard accepts a cookie for authority, and no cookie is set.
 `localStorage` belongs to one origin, port included, so another service on
 `127.0.0.1`, including one run by another account, by Windows beside WSL, or by
 a host-network container, cannot read the token the way it would receive a
-cookie. A token is valid only at the origin where it was issued.
+cookie. That isolation holds only while this controller holds the dashboard
+port. Whatever process listens on that port while the controller is down
+receives the token from a reconnecting page or a restored tab. Because a
+restart revokes every sign-in, such a token is already dead when the controller
+binds the port again. A token is valid only at the origin where it was issued.
 
 A TCP request without a live token gets 401, except that the static dashboard
 pages, which carry no run data, load signed out. Every request must name a
