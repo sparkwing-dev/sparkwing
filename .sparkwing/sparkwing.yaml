@@ -19,22 +19,6 @@ pipelines:
 
   - name: pre-release
     entrypoint: PreRelease
-    # --platform-cells adds the macos and windows jobs. On repository-proven runs
-    # each waits for a team runner of its OS; the 5s hold leaves room for the
-    # GitHub Actions fallback tier once on-demand dispatch exists.
-    jobs:
-      macos:
-        placement:
-          prefer:
-            - target: team
-              labels: [os=darwin]
-              hold: 5s
-      windows:
-        placement:
-          prefer:
-            - target: team
-              labels: [os=windows]
-              hold: 5s
 
   - name: lint
     entrypoint: Lint
