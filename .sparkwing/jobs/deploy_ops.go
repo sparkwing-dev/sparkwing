@@ -448,7 +448,7 @@ func (d *deployer) buildCandidate(ctx context.Context, version string) (deployIm
 	}
 	dist := filepath.Join(d.repoDir, "dist")
 	if err := d.act(ctx, "build the dashboard with bin/build-web.sh", func() error {
-		if err := os.RemoveAll(dist); err != nil {
+		if err := removeDeployDir(dist); err != nil {
 			return err
 		}
 		_, err := d.cmd(ctx, deployCommand{Dir: d.repoDir, Name: "bash", Args: []string{"bin/build-web.sh", "--reuse"}})
@@ -834,7 +834,7 @@ func (d *deployer) buildCLI(ctx context.Context) error {
 		if err := os.MkdirAll(home, 0o700); err != nil {
 			return err
 		}
-		_, err := d.cmd(ctx, deployCommand{Dir: d.repoDir, Env: map[string]string{"GOWORK": "off"}, Name: "go", Args: []string{"build", "-o", d.cliBin(), "./cmd/sparkwing"}})
+		_, err := d.cmd(ctx, deployCommand{Dir: d.repoDir, Env: map[string]string{"GOWORK": "off", "GOFLAGS": "-modcacherw"}, Name: "go", Args: []string{"build", "-o", d.cliBin(), "./cmd/sparkwing"}})
 		return err
 	})
 }
@@ -845,6 +845,7 @@ func (d *deployer) sw(ctx context.Context, stdin string, args ...string) (string
 	home := filepath.Join(d.tmp, "cli-home")
 	return d.cmd(ctx, deployCommand{Stdin: stdin, Quiet: true, Name: d.cliBin(), Args: args, Env: map[string]string{
 		"HOME": home, "SPARKWING_HOME": filepath.Join(home, ".sparkwing"), "XDG_CONFIG_HOME": filepath.Join(home, ".config"),
+		"GOFLAGS": "-modcacherw",
 	}})
 }
 

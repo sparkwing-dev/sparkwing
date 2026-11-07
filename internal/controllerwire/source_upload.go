@@ -12,3 +12,8 @@ type SourceUploadRequest struct {
 	Digest blob.Digest    `json:"digest"`
 	Size   int64          `json:"size"`
 }
+
+// RepositoryResolveRequest asks the controller to resolve a clone URL through team source access.
+type RepositoryResolveRequest struct {
+	RemoteURL string `json:"remote_url"`
+}

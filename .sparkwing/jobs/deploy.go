@@ -138,7 +138,7 @@ func (j *deployJob) deployer() (*deployer, func(), error) {
 	}
 	d := &deployer{tools: tools, cfg: j.Cfg, dry: j.Dry, runID: j.RunID, repoDir: sparkwing.WorkDir(), tmp: tmp}
 	return d, func() {
-		if err := os.RemoveAll(tmp); err != nil {
+		if err := removeDeployDir(tmp); err != nil {
 			fmt.Fprintln(os.Stderr, "deploy: remove", tmp+":", err)
 		}
 	}, nil

@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -217,9 +218,34 @@ func sweepStaleDeployDirs(root string, now time.Time, maxAge time.Duration) erro
 		if err != nil || now.Sub(info.ModTime()) <= maxAge {
 			continue
 		}
-		errs = append(errs, os.RemoveAll(filepath.Join(root, e.Name())))
+		errs = append(errs, removeDeployDir(filepath.Join(root, e.Name())))
 	}
 	return errors.Join(errs...)
+}
+
+// bug: Go module cache directories are read-only. Unlinking their files needs
+// writable parent directories; WalkDir leaves symlink targets untouched.
+func removeDeployDir(root string) error {
+	err := filepath.WalkDir(root, func(path string, entry fs.DirEntry, err error) error {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		if !entry.IsDir() {
+			return nil
+		}
+		info, err := entry.Info()
+		if err != nil {
+			return err
+		}
+		return os.Chmod(path, info.Mode()|0o200)
+	})
+	if err != nil {
+		return err
+	}
+	return os.RemoveAll(root)
 }
 
 var fullCommitRE = regexp.MustCompile(`^[0-9a-f]{40}([0-9a-f]{24})?$`)

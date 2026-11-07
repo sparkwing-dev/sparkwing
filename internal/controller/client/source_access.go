@@ -8,6 +8,8 @@ import (
 	"reflect"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
 )
 
@@ -77,4 +79,18 @@ func (s *sourceAccess) BundleURL(ctx context.Context, digest string) (string, er
 		return "", dataProtocolError("source bundle requires a live matching signed URL without headers")
 	}
 	return result.URL, nil
+}
+
+// ResolveRepository resolves a clone URL with the selected controller's team source access.
+func ResolveRepository(ctx context.Context, options EngineOptions, remote string) (runspec.Repository, error) {
+	c, err := newEngineClient(options)
+	if err != nil {
+		return runspec.Repository{}, err
+	}
+	var result runspec.Repository
+	err = c.request(ctx, "POST", "/api/v1/repositories/resolve", "/api/v1/repositories/resolve", "", controllerwire.RepositoryResolveRequest{RemoteURL: remote}, &result)
+	if err == nil && (runspec.ValidateRepoUse(result.Key, runspec.RepoAccessRule) != nil || result.Display == "") {
+		err = dataProtocolError("controller returned an invalid repository identity")
+	}
+	return result, err
 }

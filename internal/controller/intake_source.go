@@ -3,11 +3,14 @@ package controller
 import (
 	"context"
 	"errors"
+	"net/http"
 	"net/url"
 	"strconv"
 	"strings"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
+	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/envredact"
 	"github.com/sparkwing-dev/sparkwing/internal/githubapp"
 	"github.com/sparkwing-dev/sparkwing/internal/routepolicy"
@@ -305,4 +308,24 @@ func (s *Server) ResolveScheduleRepository(ctx context.Context, team store.Team,
 	request := runspec.Request{Source: runspec.Source{Location: runspec.SourceLocation{RemoteURL: remote}}}
 	err := s.resolveIntakeSource(ctx, string(team), &request)
 	return request.Git.Repository, err
+}
+
+func (s *Server) handleResolveRepository(w http.ResponseWriter, r *http.Request, a capability.Authorized) error {
+	var body controllerwire.RepositoryResolveRequest
+	if err := decodeEngineRequest(r, &body); err != nil {
+		return err
+	}
+	if body.RemoteURL == "" {
+		return invalidEngineBody("remote_url is required")
+	}
+	request := runspec.Request{Source: runspec.Source{Location: runspec.SourceLocation{RemoteURL: body.RemoteURL}}}
+	if err := s.resolveIntakeSource(r.Context(), a.Target.Team, &request); err != nil {
+		return err
+	}
+	repository := request.Git.Repository
+	if !capability.RepositoryAllowed(a.Principal.Capability.Repositories, capability.RepositoryIdentity{Key: string(repository.Key), Display: repository.Display}) {
+		return apierr.Authorization(apierr.ReasonRepositoryUnauthorized, "repository is outside the credential scope")
+	}
+	writeJSON(w, http.StatusOK, repository)
+	return nil
 }

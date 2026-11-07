@@ -28,6 +28,7 @@ func credentialRouteExpectations() []credentialRouteExpectation {
 		{"POST", "/api/v1/runs/{run}/local-host/binding", "controller", "run", "capability", []string{"awarded_or_delegated_claim|trigger.host|runOfTrigger|reporting", "awarded_or_delegated_claim|data.read|planOwner|reporting", "eval_unit|expansion.submit|run|expansion"}},
 		{"GET", "/api/v1/runs/{run}/snapshot", "controller", "run", "capability", []string{"awarded_or_delegated_claim|trigger.host|runOfTrigger|sensitive"}},
 		{"POST", "/api/v1/runs/{run}/jobs/{job}/reconcile", "controller", "run", "capability", []string{"awarded_or_delegated_claim|nodes.claim|runOfTrigger|sensitive"}},
+		{"POST", "/api/v1/repositories/resolve", "controller", "team", "capability", []string{"unbound_member_or_local|runs.read|none|credential", "unbound_member_or_local|runs.write|none|credential"}},
 		{"POST", "/api/v1/runs", "controller", "team", "capability", []string{"unbound_member_or_local|runs.write|bodyNamesRun|credential", "awarded_or_delegated_claim|children.start|bodyNamesRun|sensitive"}},
 		{"GET", "/api/v1/runs", "controller", "team", "capability", []string{"unbound_member_or_local|runs.read|none|credential"}},
 		{"GET", "/api/v1/runs/grep", "controller", "team", "capability", []string{"unbound_member_or_local|logs.read|none|credential"}},

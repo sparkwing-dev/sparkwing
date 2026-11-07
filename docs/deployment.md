@@ -17,6 +17,14 @@ to a cluster via a profile's controller:
 | Dirty working tree | Remote runner | `sparkwing pipeline trigger build --profile dev --working-tree` |
 
 The `--profile` flag resolves a **profile** - a named cluster endpoint.
+GitHub repository identity is resolved by the selected controller through the
+team's GitHub App installation or configured source credentials. An App-covered
+private repository needs no local GitHub token for identity lookup, including
+SSH clones and triggers without `--ref`. The CLI can use an explicit `GH_TOKEN`
+or `GITHUB_TOKEN` if the controller cannot resolve identity. It never performs
+an anonymous GitHub lookup. Clone access and the controller's source authority
+remain separate from identity lookup.
+
 Every profile with a controller follows the same dispatch flow:
 
 ```
