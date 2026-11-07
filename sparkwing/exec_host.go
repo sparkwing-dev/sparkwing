@@ -13,16 +13,14 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/sdkserve"
 )
 
-// hostExecCmd hands the command to the host, which owns its process tree, output
-// masking and cleanup. A logged command's ExecResult keeps at most the last
-// nodeproto.ExecTailBytes of each stream; the whole output is in the job log.
+// safety: a logged command's result keeps only the last nodeproto.ExecTailBytes of each stream; the log has it all.
 func hostExecCmd(ctx context.Context, run sdkserve.HostExecFunc, display, name string, args []string, dir string, extraEnv map[string]string) (ExecResult, error) {
 	env := os.Environ()
 	for key, value := range extraEnv {
 		env = append(env, key+"="+value)
 	}
 	argv := append([]string{name}, args...)
-	// Resolve as exec.Command did here, against this process's PATH, so lookups keep their meaning.
+	// safety: resolve against this process's PATH, as exec.Command did here, so lookups keep their meaning.
 	path := name
 	if filepath.Base(name) == name {
 		resolved, err := exec.LookPath(name)

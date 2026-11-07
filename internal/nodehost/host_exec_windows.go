@@ -5,7 +5,7 @@ import (
 	"os/exec"
 )
 
-// Windows hosts do not offer host exec, so these only serve a misbehaving SDK.
+// safety: Windows hosts do not offer host exec, so these only serve a misbehaving SDK.
 type commandSession struct{ cmd *exec.Cmd }
 
 func configureHostCommand(*exec.Cmd) {}

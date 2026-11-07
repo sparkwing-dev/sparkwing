@@ -141,7 +141,6 @@ func (hostExecJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
 	return last, nil
 }
 
-// waitGone reports whether the pid recorded in path is still alive after a short wait.
 func waitGone(path string) bool {
 	raw, err := os.ReadFile(path)
 	if err != nil {
@@ -193,7 +192,6 @@ type hostExecHarness struct {
 	logs    []nodeproto.FrameLog
 }
 
-// hostExecCommand starts the Go or TypeScript SDK child.
 func hostExecCommand(t testing.TB, lang string) []string {
 	t.Helper()
 	if lang == "typescript" {
@@ -219,7 +217,6 @@ func startHostExecHarness(t testing.TB, lang string, features []string, dir stri
 	return startHostExecHarnessWithSink(t, lang, "job", features, dir, nil, extraEnv...)
 }
 
-// startHostExecHarnessWithSink sends every masked log record to sink when it is set.
 func startHostExecHarnessWithSink(t testing.TB, lang, job string, features []string, dir string, sink func(context.Context, nodeproto.FrameLog) error, extraEnv ...string) *hostExecHarness {
 	t.Helper()
 	var err error
@@ -282,7 +279,6 @@ func (h *hostExecHarness) step(t testing.TB, step string) hostExecObservation {
 	return o
 }
 
-// hosted counts the commands the host has started for this session.
 func (h *hostExecHarness) hosted() uint64 {
 	h.session.mu.Lock()
 	defer h.session.mu.Unlock()
@@ -350,7 +346,7 @@ func checkHostExecScenarios(t *testing.T, lang, mode string, features []string) 
 			if failing := h.step(t, "failing"); failing.Exit != 3 || !strings.Contains(failing.Error, "command failed (exit 3)") || !strings.Contains(failing.Error, "boom") || failing.Terminated != "" {
 				t.Fatalf("failing = %#v", failing)
 			}
-			// Go SDKs running commands themselves pass engine credentials a pipeline sets; TypeScript and the host drop them.
+			// safety: SDK-run Go commands pass engine credentials a pipeline sets; TypeScript and the host drop them.
 			wantToken := "unset"
 			if lang == "go" && mode == "sdk" {
 				wantToken = "leak"
@@ -361,7 +357,7 @@ func checkHostExecScenarios(t *testing.T, lang, mode string, features []string) 
 			if dirResult := h.step(t, "dir"); dirResult.Stdout != filepath.Join(dir, "sub")+"\n" {
 				t.Fatalf("dir = %#v", dirResult)
 			}
-			// Go searched its own PATH and TypeScript the command's, relative entries against the command's directory.
+			// safety: Go searches its own PATH, TypeScript the command's, with relative entries against its directory.
 			if lookup := h.step(t, "lookup"); lang == "go" && !lookup.NotFound || lang == "typescript" && lookup.Stdout != "rel-found\n" {
 				t.Errorf("lookup = %#v", lookup)
 			}
@@ -374,13 +370,13 @@ func checkHostExecScenarios(t *testing.T, lang, mode string, features []string) 
 					t.Errorf("cancellation left a child that moved to its own process group: %#v", group)
 				}
 			} else if mode == "host" {
-				// Node's own spawn waits for the background child or fails with EPIPE here, by timing.
+				// hack: Node's own spawn waits for the background child or fails with EPIPE here, by timing.
 				began := time.Now()
 				if stdin := h.step(t, "stdin"); stdin.Error != "" || time.Since(began) > 5*time.Second {
 					t.Errorf("stdin held by a background child = %#v after %s", stdin, time.Since(began))
 				}
 			}
-			// TypeScript has no deadline of its own; an aborted signal reports cancellation.
+			// hack: TypeScript has no deadline of its own; an aborted signal reports cancellation.
 			wantTerminated, wantMessage := "timeout", "command timed out"
 			if lang == "typescript" {
 				wantTerminated, wantMessage = "cancellation", "command terminated by cancellation"

@@ -104,9 +104,8 @@ func ParseHostLine(line []byte) (HostLine, bool, error) {
 
 var execFramePrefix = []byte(`{"exec":"`)
 
-// parseExecFast decodes a well-formed exec frame once. An exec frame carries the
-// command's whole environment, so the general path's three passes would dominate
-// the host's per-command cost; anything unusual falls back to that path.
+// perf: an exec frame carries the whole environment, so one decode replaces the general path's three
+// passes; anything unusual falls back to that path.
 func parseExecFast(line []byte) (Frame, bool) {
 	if !bytes.HasPrefix(line, execFramePrefix) {
 		return Frame{}, false

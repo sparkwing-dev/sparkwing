@@ -15,9 +15,8 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/sessionledger"
 )
 
-// commandSession is a host command's own Unix session. Cancellation kills it whole,
-// including children that moved to another process group. A normal exit leaves its
-// background children running, as SDK-run commands did, until the SDK session ends.
+// safety: cancellation kills the whole session, including children in other process groups; a normal
+// exit leaves background children running, as SDK-run commands did, until the SDK session ends.
 type commandSession struct {
 	pid      int
 	identity procgroup.SessionIdentity
@@ -29,8 +28,7 @@ func configureHostCommand(cmd *exec.Cmd) {
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
 }
 
-// trackHostCommand captures the session before the leader can be reaped and records it
-// for crash cleanup until the SDK session ends.
+// safety: capture before the leader can be reaped; the ledger keeps it for crash cleanup until the session ends.
 func trackHostCommand(cmd *exec.Cmd, env []string) *commandSession {
 	c := &commandSession{pid: cmd.Process.Pid, release: func() {}}
 	identity, err := procgroup.CaptureSession(c.pid)
@@ -55,9 +53,8 @@ func (c *commandSession) kill() {
 	}
 }
 
-// endCommandSessions kills what the SDK session's commands left running. One process
-// table read finds the live sessions, so a session that ran thousands of commands pays
-// for a kill only where something remains. A record whose kill fails stays in the ledger.
+// perf: one process table read finds live sessions, so thousands of commands cost a kill only where one remains.
+// safety: a record whose kill fails stays in the ledger for the crash sweep.
 func endCommandSessions(sessions []*commandSession) error {
 	if len(sessions) == 0 {
 		return nil
@@ -85,8 +82,7 @@ func endCommandSessions(sessions []*commandSession) error {
 	return errors.Join(errs...)
 }
 
-// recordCommandSession writes the ledger record a sweep needs to end the session if
-// this host dies first, matching what the SDK records for commands it runs itself.
+// safety: matches the record the SDK writes for its own commands, so a sweep ends the session if this host dies.
 func recordCommandSession(leader procgroup.SessionIdentity, env []string) func() {
 	var run, node string
 	for _, entry := range env {

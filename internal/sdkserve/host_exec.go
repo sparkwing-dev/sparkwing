@@ -82,8 +82,7 @@ func (s *server) hostExec(ctx context.Context, req nodeproto.ExecRequest) (HostE
 	}
 }
 
-// deliverExec routes one host line to its waiting command. The reader is the only
-// writer of a call's buffers, so a captured command sees its bytes in order.
+// safety: the reader is the only writer of a call's buffers, so a captured command sees its bytes in order.
 func (s *server) deliverExec(line nodeproto.HostLine) error {
 	s.execs.mu.Lock()
 	defer s.execs.mu.Unlock()

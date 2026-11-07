@@ -18,7 +18,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 )
 
-// hostCommand is one SDK command the host runs for its session.
 type hostCommand struct {
 	kill     chan struct{}
 	killOnce sync.Once
@@ -26,12 +25,10 @@ type hostCommand struct {
 
 func (c *hostCommand) stop() { c.killOnce.Do(func() { close(c.kill) }) }
 
-// commandDrainGrace bounds how long output may trail the command's exit, so a
-// background child holding the pipes cannot hold the command open.
+// safety: a background child holding the pipes cannot keep the command open past this.
 const commandDrainGrace = 500 * time.Millisecond
 
-// startExec runs an SDK command without blocking the frame reader, which must keep
-// draining the SDK's log frames while the command writes.
+// safety: the frame reader must keep draining log frames while the command runs, so this never blocks it.
 func (s *protocolSession) startExec(req nodeproto.ExecRequest) {
 	step := s.attributeProtocolLog(nodeproto.FrameLog{Step: req.Step}).Step
 	command := &hostCommand{kill: make(chan struct{})}
@@ -95,8 +92,7 @@ func (s *protocolSession) cancelExec(id string) {
 	}
 }
 
-// writeHostLine shares the request pipe with host requests; the SDK routes these
-// lines by their leading key.
+// safety: these lines share the request pipe with host requests; the SDK routes them by their leading key.
 func (s *protocolSession) writeHostLine(value any) error {
 	data, err := json.Marshal(value)
 	if err != nil {
@@ -115,10 +111,7 @@ func (s *protocolSession) writeHostLine(value any) error {
 
 var commandBuffers = sync.Pool{New: func() any { return new([64 << 10]byte) }}
 
-// runHostCommand starts req in its own session and feeds each output stream to
-// sink, ending each with eof. A logged command keeps only bounded tails for the
-// SDK's error messages. Either kill or closed ends the command's session; the
-// returned session outlives a normal exit until the SDK session ends.
+// safety: a normal exit returns the session alive; the end of the SDK session kills what it left running.
 func runHostCommand(req nodeproto.ExecRequest, kill, closed <-chan struct{}, sink func(stream string, chunk []byte, eof bool) error) (nodeproto.ExecDone, *commandSession) {
 	done := nodeproto.ExecDone{ID: req.ID, ExitCode: -1}
 	if info, err := os.Stat(req.Dir); err != nil {
@@ -266,9 +259,7 @@ func (t *commandTail) bytes() []byte {
 	return t.data
 }
 
-// lookCommand searches as Node's spawn does, since a Go SDK sends the path it resolved
-// itself: the command's own PATH, relative and empty entries against its directory, and
-// the C library's default when PATH is unset.
+// hack: Go SDKs send the path they resolved, so this follows Node's spawn: env PATH, relative entries against dir.
 func lookCommand(name string, env []string, dir string) (string, error) {
 	if strings.Contains(name, string(filepath.Separator)) {
 		return name, nil
@@ -297,7 +288,7 @@ func lookCommand(name string, env []string, dir string) (string, error) {
 	return "", &exec.Error{Name: name, Err: exec.ErrNotFound}
 }
 
-// defaultSearchPath is glibc's _CS_PATH, which execvp uses when PATH is unset.
+// hack: glibc's _CS_PATH, which execvp searches when PATH is unset.
 const defaultSearchPath = "/bin:/usr/bin"
 
 func closeFiles(files ...io.Closer) {

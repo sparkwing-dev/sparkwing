@@ -151,7 +151,7 @@ func Serve(ctx context.Context, in io.Reader, out io.Writer, cfg Config) error {
 	return readErr
 }
 
-// shutdown releases commands waiting on the host before joining the requests running them.
+// safety: commands waiting on the host are released before joining the requests that run them.
 func (s *server) shutdown(cancel context.CancelFunc) {
 	cancel()
 	s.endExecs()

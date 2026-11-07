@@ -21,8 +21,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
-// hostExecBenchLine is one 80-byte log line, so bulk output exercises the masked
-// line presenter the way build logs do.
+// perf: 80-byte lines make bulk output exercise the masked line presenter the way build logs do.
 const hostExecBenchLine = "sparkwing host exec benchmark output line 0123456789 abcdefghijklmnopqrstuvwxy"
 
 type hostExecBenchResult struct {
@@ -55,9 +54,6 @@ func processCPU() int64 {
 	return usage.Utime.Nano() + usage.Stime.Nano()
 }
 
-// runHostExecBench is the measured body: HOSTEXEC_BENCH_VARIANT selects direct
-// os/exec with discarded output, sparkwing Run (logged) or Capture (captured).
-//
 //nolint:contextcheck // sparkwing.Cmd carries the step context it was built with.
 func runHostExecBench(ctx context.Context) (hostExecBenchResult, error) {
 	variant := os.Getenv("HOSTEXEC_BENCH_VARIANT")
@@ -205,7 +201,7 @@ func TestHostExecBenchmark(t *testing.T) {
 	if err := json.Unmarshal(run.Output, &result); err != nil {
 		t.Fatal(err)
 	}
-	// The repository is public, so results keep no local paths.
+	// safety: the repository is public, so results keep no local paths.
 	recorded := spec
 	recorded.Out, recorded.Dir = "", ""
 	result["spec"], result["step_ns"], result["host_cpu_ns"] = recorded, stepNS, hostCPUNS
