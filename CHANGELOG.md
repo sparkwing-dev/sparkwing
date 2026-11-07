@@ -32,6 +32,10 @@ unlock.
 
 - **SDK:** Host compatibility checks run frozen released Go and TypeScript pipelines through candidate nodehost. The affected gate reuses fixture preparation, and pre-release rebuilds every historical fixture.
 
+### Changed
+
+- **storage:** The prepared pipeline Sparkwing Cloud builds for a run no longer counts toward the team's per-run, monthly or object storage quotas, so free-tier teams can run Go pipelines whose binaries are 20 to 40 MB. It stays deduplicated by digest and retained-storage billing still counts it. A prepared pipeline archive over 256 MiB is refused with `413 payload_too_large` naming the limit and suggesting a smaller pipeline module. The free tier's per-run limit rises from 10 MiB to 100 MiB; the paid tier and explicit operator quotas are unchanged. See [limits](docs/limits.md#uploads-and-storage-accounting).
+
 ### Fixed
 
 - **CLI and controller:** GitHub pipeline triggers resolve repository identity through `POST /api/v1/repositories/resolve` on the selected controller. Private repositories covered by the team's GitHub App work from HTTPS and SSH clones without a local GitHub token, with or without `--ref`. The CLI never falls back to anonymous GitHub lookup. Explicit `GH_TOKEN` or `GITHUB_TOKEN` remains available when the controller cannot resolve identity. See [the migration guide](docs/migrations/_unreleased.md#github-trigger-repository-identity).

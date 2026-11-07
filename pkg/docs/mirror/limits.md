@@ -147,11 +147,21 @@ allowance at the published rate.
 
 | Tier | Per run | Per month | Objects per run |
 | --- | --- | --- | --- |
-| Free | 10 MiB | 1 GiB | 1,000 |
+| Free | 100 MiB | 1 GiB | 1,000 |
 | Paid | 1 GiB | 100 GiB | 100,000 |
 
+The prepared pipeline that Sparkwing Cloud builds for a run (the checkout and
+the compiled pipeline binary, which is often 20 to 40 MB for Go) counts toward
+none of these limits. Sparkwing stores it once per digest and reuses it across
+runs. It has its own limit instead: an archive larger than 256 MiB is refused
+with `413 payload_too_large` naming that limit. Shrink the pipeline module, for
+example by trimming its dependencies, or keep large files out of the checkout.
+Retained-storage billing still counts its bytes. Korey decided these limits on
+2026-11-07.
+
 For comparison, GitHub Actions caches 10 GB per repository by default, and GitLab
-gives free namespaces 10 GiB of storage. A write past a limit is refused with the
+gives free namespaces 10 GiB of storage. GitHub's free plan includes 500 MB of
+artifact storage and does not count the runner's own tooling against it. A write past a limit is refused with the
 limit it hit and "contact support to raise this limit". Self-hosted deployments
 apply no tier unless the operator sets a default tier or a team quota.
 
