@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -39,9 +40,9 @@ func TestAdmissionOrphanHelper(t *testing.T) {
 	if _, err := fmt.Fprintf(os.Stdout, "%d %d\n", group.ID(), child); err != nil {
 		t.Fatal(err)
 	}
-	if err := group.Finish(t.Context(), 0); err != nil {
-		t.Fatal(err)
-	}
+	// safety: a runner outlives its jobs, so the holder stays until the test closes its stdin or kills it.
+	_ = group.Finish(t.Context(), 0)
+	_, _ = io.Copy(io.Discard, os.Stdin)
 }
 
 type orphanFixture struct {
