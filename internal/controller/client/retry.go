@@ -11,9 +11,39 @@ import (
 	"strings"
 	"syscall"
 	"time"
+
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 )
 
 const unavailableRetries = 3
+
+// safety: a controller outage cannot end held work; only read operations wait for reconnection.
+func retryHeldRead(ctx context.Context, read func() error) error {
+	for {
+		err := read()
+		if err == nil {
+			return nil
+		}
+		if cause := context.Cause(ctx); cause != nil {
+			return cause
+		}
+		retry := RetryableTransportError(err)
+		var failure *apierr.Error
+		if errors.As(err, &failure) {
+			retry = failure.Code == apierr.Unavailable
+		}
+		if !retry {
+			return err
+		}
+		delay := time.Second
+		if advised, ok := apierr.RetryDelay(err); ok {
+			delay = max(advised, 100*time.Millisecond)
+		}
+		if err := waitFor(ctx, delay); err != nil {
+			return context.Cause(ctx)
+		}
+	}
+}
 
 // RetryableTransportError identifies interrupted controller transports, including
 // a local socket temporarily absent while its controller restarts.

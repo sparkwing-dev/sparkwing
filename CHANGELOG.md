@@ -44,7 +44,7 @@ unlock.
 
 - **local controller:** Recorded Unix job sessions are cleaned up after their holder process dies, including after controller restart. Job roots survive receipt pruning and failed cleanup acknowledgements. Cancelled jobs keep their machine capacity until the host joins and releases them.
 
-- **runners:** Claim polling recovers from controller transport failures and missing local sockets for up to five seconds without cancelling held jobs or replaying claims. Graceful drain stops new claims and joins active hosts.
+- **runners:** Claim polling recovers from controller transport failures and missing local sockets for up to five seconds without cancelling held jobs or replaying claims. Graceful drain stops new claims and joins active hosts. Held jobs and owners keep reading their state, child runs and authentication through the same outage instead of failing.
 
 - **controller:** Capability issuance tolerates up to 30 seconds of backward clock skew, so time-sync corrections and VM resumes keep local owners, awards and here handoffs usable. Hosted controllers share the allowance. Expiry, revocation and binding deadlines retain their existing checks.
 - **CLI:** Pipeline triggers accept exact commits fetched from origin in shallow runner checkouts, so jobs can trigger another pipeline at the pushed commit without origin-tracking branches. Both execution and pipeline-code commits still require origin fetch evidence.

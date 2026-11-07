@@ -113,13 +113,17 @@ func (c *LocalHostClient) live() error {
 	return nil
 }
 
+func (c *LocalHostClient) readState(ctx context.Context, suffix, node string, result any) error {
+	return retryHeldRead(ctx, func() error { return c.request(ctx, "GET", suffix, node, nil, result) })
+}
+
 // ReadSnapshot reads the private execution snapshot under the current owner fence.
 func (c *LocalHostClient) ReadSnapshot(ctx context.Context, run string) (runstate.RunSnapshot, error) {
 	var result runstate.RunSnapshot
 	if run != c.run {
 		return result, localHostClientRefusal()
 	}
-	if err := c.request(ctx, "GET", "/snapshot", "", nil, &result); err != nil {
+	if err := c.readState(ctx, "/snapshot", "", &result); err != nil {
 		return runstate.RunSnapshot{}, err
 	}
 	if result.Run.ID != c.run {
@@ -136,7 +140,7 @@ func (c *LocalHostClient) ReadNode(ctx context.Context, ref runspec.NodeRef) (ru
 	}
 	if c.node != "" && ref.NodeID != runspec.NodeID(c.node) {
 		var snapshot localhostwire.LocalNodeSnapshot
-		if err := c.request(ctx, "GET", "/snapshot", "", nil, &snapshot); err != nil {
+		if err := c.readState(ctx, "/snapshot", "", &snapshot); err != nil {
 			return result, err
 		}
 		if snapshot.Run.ID != c.run {
@@ -153,7 +157,7 @@ func (c *LocalHostClient) ReadNode(ctx context.Context, ref runspec.NodeRef) (ru
 		}
 		return result, localHostClientRefusal()
 	}
-	if err := c.request(ctx, "GET", "", string(ref.NodeID), nil, &result); err != nil {
+	if err := c.readState(ctx, "", string(ref.NodeID), &result); err != nil {
 		return runstate.NodeRow{}, err
 	}
 	if result.Ref != ref {
@@ -220,7 +224,9 @@ func (c *LocalHostClient) TransitionNode(ctx context.Context, ref runspec.NodeRe
 // ReadAuthentication refreshes only authority within the host's awarded run.
 func (c *LocalHostClient) ReadAuthentication(ctx context.Context, lookup capability.CredentialLookup, evidence capability.RequestEvidence) (capability.AuthenticationSnapshot, error) {
 	var response localhostwire.LocalAuthentication
-	err := c.request(ctx, "POST", "/authentication", "", localhostwire.LocalAuthenticationRequest{Lookup: lookup, Evidence: evidence}, &response)
+	err := retryHeldRead(ctx, func() error {
+		return c.request(ctx, "POST", "/authentication", "", localhostwire.LocalAuthenticationRequest{Lookup: lookup, Evidence: evidence}, &response)
+	})
 	if err != nil {
 		return capability.AuthenticationSnapshot{}, err
 	}
@@ -236,7 +242,10 @@ func (c *LocalHostClient) ReadAuthentication(ctx context.Context, lookup capabil
 // CheckBinding asks the controller to resolve authority before checking persisted relations.
 func (c *LocalHostClient) CheckBinding(ctx context.Context, principal capability.Principal, rule capability.BindingRule, target capability.Target) error {
 	var result localhostwire.LocalBindingChecked
-	if err := c.request(ctx, "POST", "/binding", "", localhostwire.LocalBindingRequest{Authority: principal.Authority, Rule: rule, Target: target}, &result); err != nil {
+	err := retryHeldRead(ctx, func() error {
+		return c.request(ctx, "POST", "/binding", "", localhostwire.LocalBindingRequest{Authority: principal.Authority, Rule: rule, Target: target}, &result)
+	})
+	if err != nil {
 		return err
 	}
 	if !result.Checked {

@@ -100,7 +100,9 @@ func (c *NativeProcessClient) Output(ctx context.Context, run, job string) (json
 // ChildOutput reads a committed result through its creating job's child relation.
 func (c *NativeProcessClient) ChildOutput(ctx context.Context, run, job string) (json.RawMessage, error) {
 	var result controllerwire.JobOutput
-	err := c.transport.request(ctx, "GET", "/api/v1/runs/{run}/children/{child}/jobs/{job}/output", "/api/v1/runs/"+url.PathEscape(c.run)+"/children/"+url.PathEscape(run)+"/jobs/"+url.PathEscape(job)+"/output", "", nil, &result)
+	err := retryHeldRead(ctx, func() error {
+		return c.transport.request(ctx, "GET", "/api/v1/runs/{run}/children/{child}/jobs/{job}/output", "/api/v1/runs/"+url.PathEscape(c.run)+"/children/"+url.PathEscape(run)+"/jobs/"+url.PathEscape(job)+"/output", "", nil, &result)
+	})
 	return result.Output, err
 }
 
@@ -172,6 +174,8 @@ func (c *NativeProcessClient) StartChild(ctx context.Context, pipeline string, a
 func (c *NativeProcessClient) Child(ctx context.Context, run string, wait time.Duration) (controllerwire.RunDetail, error) {
 	var result controllerwire.RunDetail
 	query := url.Values{"wait": {wait.String()}}
-	err := c.transport.request(ctx, "GET", "/api/v1/runs/{run}/children/{child}", "/api/v1/runs/"+url.PathEscape(c.run)+"/children/"+url.PathEscape(run)+"?"+query.Encode(), "", nil, &result)
+	err := retryHeldRead(ctx, func() error {
+		return c.transport.request(ctx, "GET", "/api/v1/runs/{run}/children/{child}", "/api/v1/runs/"+url.PathEscape(c.run)+"/children/"+url.PathEscape(run)+"?"+query.Encode(), "", nil, &result)
+	})
 	return result, err
 }
