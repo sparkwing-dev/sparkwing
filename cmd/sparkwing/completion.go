@@ -96,7 +96,6 @@ func runInternalCompletePipelines(w io.Writer, _ []string) error {
 	}
 	type completionRow struct {
 		name string
-		kind string
 		desc string
 	}
 	var rows []completionRow
@@ -104,17 +103,14 @@ func runInternalCompletePipelines(w io.Writer, _ []string) error {
 		for _, p := range cfg.Registry().Pipelines {
 			rows = append(rows, completionRow{
 				name: p.Name,
-				kind: "pipeline",
 				desc: shortPipelineHint(shortByName[p.Entrypoint], helpByName[p.Entrypoint], p),
 			})
 		}
 	}
 	sort.Slice(rows, func(i, j int) bool { return rows[i].name < rows[j].name })
 	for _, r := range rows {
-		fmt.Fprintf(w, "%s\t%s\t%s\t%s\n",
+		fmt.Fprintf(w, "%s\t%s\n",
 			strings.ReplaceAll(r.name, "\t", " "),
-			"",
-			r.kind,
 			strings.ReplaceAll(r.desc, "\t", " "))
 	}
 	return nil
@@ -619,106 +615,41 @@ _sparkwing_complete_flags() {
     compadd -l -J "flags" -d descs -a names
 }
 
-# _sparkwing_complete_pipelines handles 'sparkwing run <TAB>'.
-# Entries come back tab-separated as four columns -- name, group,
-# kind, desc -- where kind is the
-# pipeline-trigger model (currently always "pipeline"; the
-# column persists for backward compat with the helper output).
-# Bucket by group in first-seen order and render each row as:
-# name-padded desc.
 _sparkwing_complete_pipelines() {
-    local -A _sw_p_names _sw_p_raw _sw_p_displays
-    local -a _sw_p_order
-    local line name group kind desc
-    # First pass: collect rows and find the widest name across all
-    # entries. One global width keeps every section aligned to the
-    # same column (no staggering between groups). Capped at 24 so a
-    # single pathologically-long name doesn't starve the desc column.
-    local _sw_name_width=0
-    local _sw_name_cap=30
+    local -a names descriptions displays
+    local line name desc label padded_name
+    local width=0
     while IFS= read -r line; do
         name="${line%%$'\t'*}"
-        line="${line#*$'\t'}"
-        group="${line%%$'\t'*}"
-        line="${line#*$'\t'}"
-        kind="${line%%$'\t'*}"
         desc="${line#*$'\t'}"
-        [[ -z "$group" ]] && group="Pipelines"
-        if [[ -z "${_sw_p_names[$group]-}" ]]; then
-            _sw_p_order+=("$group")
-            _sw_p_names[$group]=""
-            _sw_p_raw[$group]=""
-            _sw_p_displays[$group]=""
-        fi
-        _sw_p_names[$group]+="$name"$'\n'
-        # Stash raw row for the render pass using unit-separator
-        # bytes -- never appear in names/descs in practice.
-        _sw_p_raw[$group]+="$name"$'\x1f'"$kind"$'\x1f'"$desc"$'\n'
-        local _sw_len=${#name}
-        (( _sw_len > _sw_name_cap )) && _sw_len=$_sw_name_cap
-        (( _sw_len > _sw_name_width )) && _sw_name_width=$_sw_len
+        names+=("$name")
+        descriptions+=("$desc")
+        local length=${#name}
+        (( length > 30 )) && length=30
+        (( length > width )) && width=$length
     done < <(sparkwing __complete --kind pipelines -o plain 2>/dev/null)
 
-    # Second pass: render every row at the single global width.
-    local g nm k d col padded padded_name label
-    for g in "${_sw_p_order[@]}"; do
-        local raw="${_sw_p_raw[$g]}"
-        local -a rows=( "${(@f)raw}" )
-        (( ${#rows[@]} > 0 )) && [[ -z "${rows[-1]}" ]] && rows=( "${rows[@]:0:-1}" )
-        for row in "${rows[@]}"; do
-            nm="${row%%$'\x1f'*}"
-            row="${row#*$'\x1f'}"
-            k="${row%%$'\x1f'*}"
-            d="${row#*$'\x1f'}"
-
-            # Pad the bracketed kind to a fixed visible width for
-            # column alignment. ANSI escapes would color these nicely
-            # but zsh's completion engine miscounts their width when
-            # the menu has to redraw (small terminals + tab cycling),
-            # which leaves duplicated rows in the scrollback. Plain
-            # text is reliable; color can come back later via
-            # zstyle list-colors once the patterns are worked out.
-            col="${(r:10:: :)${:-[$k]}}"
-
-            if (( ${#nm} >= _sw_name_width )); then
-                padded_name="$nm"
-            else
-                padded_name="${(r:$_sw_name_width:: :)nm}"
+    local i
+    for (( i=1; i<=${#names[@]}; i++ )); do
+        name="${names[$i]}"
+        desc="${descriptions[$i]}"
+        if (( ${#name} >= width )); then
+            padded_name="$name"
+        else
+            padded_name="${(r:$width:: :)name}"
+        fi
+        label="$padded_name  [pipeline]"
+        if [[ -n "$desc" && "$desc" != "$name" ]]; then
+            local available=$(( ${COLUMNS:-80} - width - 15 ))
+            if (( available > 10 && ${#desc} > available )); then
+                desc="${desc[1,available-1]}…"
             fi
-            if [[ -z "$d" || "$d" == "$nm" ]]; then
-                label="$padded_name  $col"
-            else
-                # Indent = name_width + 2 + 10 + 2
-                local _sw_indent=$(( _sw_name_width + 14 ))
-                local _sw_max=$(( ${COLUMNS:-80} - _sw_indent - 1 ))
-                if (( _sw_max > 10 )) && (( ${#d} > _sw_max )); then
-                    d="${d[1,_sw_max-1]}…"
-                fi
-                label="$padded_name  $col  $d"
-            fi
-            _sw_p_displays[$g]+="$label"$'\n'
-        done
+            label="$label  $desc"
+        fi
+        displays+=("$label")
     done
-
-    # Third pass: feed each group to compadd. Do not redeclare g
-    # here -- it was already declared above, and typeset g (which
-    # local g expands to) with no value and an existing local
-    # prints g=<current value> to stdout, which corrupts completion.
-    # Re-use the existing local.
-    local -a gnames gdisps
-    for g in "${_sw_p_order[@]}"; do
-        gnames=( "${(@f)_sw_p_names[$g]}" )
-        gdisps=( "${(@f)_sw_p_displays[$g]}" )
-        (( ${#gnames[@]} > 0 )) && [[ -z "${gnames[-1]}" ]] && gnames=( "${gnames[@]:0:-1}" )
-        (( ${#gdisps[@]} > 0 )) && [[ -z "${gdisps[-1]}" ]] && gdisps=( "${gdisps[@]:0:-1}" )
-        (( ${#gnames[@]} == 0 )) && continue
-        local tag="${(L)g// /-}"
-        # Both Pipelines and Scripts render in magenta; cyan is
-        # reserved for the "Pipeline Args" / "Script Args" flag
-        # groups so operators visually distinguish "what can I run"
-        # from "what flags apply".
-        compadd -l -X "%F{magenta}%B▸ ${g}%b%f" -J "$tag" -d gdisps -a gnames
-    done
+    (( ${#names[@]} == 0 )) && return
+    compadd -l -X "%F{magenta}%B▸ Pipelines%b%f" -J pipelines -d displays -a names
 }
 
 compdef _sparkwing sparkwing
@@ -738,7 +669,7 @@ end
 
 function __sparkwing_pipelines
     # Columns: name, group, kind, desc. Fish wants name\tdesc.
-    sparkwing __complete --kind pipelines -o plain 2>/dev/null | awk -F '\t' '{print $1"\t"$4}'
+    sparkwing __complete --kind pipelines -o plain 2>/dev/null
 end
 
 function __sparkwing_has_path

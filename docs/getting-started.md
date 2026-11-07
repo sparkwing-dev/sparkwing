@@ -94,14 +94,14 @@ go install github.com/sparkwing-dev/sparkwing/cmd/sparkwing@latest
 ```
 
 This installs the `sparkwing` binary, which is the single CLI for
-both admin / inspection (`sparkwing dashboard start`,
+both admin / inspection (`sparkwing dashboard open`,
 `sparkwing pipeline list`) and pipeline invocation
 (`sparkwing run <pipeline>`).
 
 > **Note:** `go install` does not include the Next.js dashboard
 > bundle, which is a generated artifact and not checked into the
-> repository. A source-built binary will refuse to start
-> `sparkwing dashboard` with a clear message pointing back to the
+> repository. A source-built binary will refuse
+> `sparkwing dashboard open` with a clear message pointing back to the
 > release binary. CLI-only commands (`run`, `pipeline`, `runs`, etc.)
 > work fine. If you want the dashboard from a source checkout, run
 > `bash bin/build-web.sh` first to generate the bundle, then
@@ -111,7 +111,7 @@ both admin / inspection (`sparkwing dashboard start`,
 
 Prebuilt Windows binaries are published to GitHub Releases:
 `sparkwing-windows-amd64.exe` and `sparkwing-windows-arm64.exe`. They
-embed the dashboard bundle, so `sparkwing dashboard start` runs locally
+embed the dashboard bundle, so `sparkwing dashboard open` works locally
 just as it does on macOS/Linux. Download the one for your architecture,
 rename it to `sparkwing.exe`, and put it on PATH. Install
 [Git for Windows](https://git-scm.com/download/win) as well -- pipelines
@@ -126,7 +126,7 @@ go install github.com/sparkwing-dev/sparkwing/cmd/sparkwing@latest
 
 A source build does not include the Next.js dashboard bundle (it is a
 generated artifact, not checked into the repository), so
-`sparkwing dashboard start` on a source-built CLI refuses to start unless
+`sparkwing dashboard open` on a source-built CLI refuses unless
 you run `bash bin/build-web.sh` from a repo checkout first. The prebuilt
 release binary has no such limitation.
 
@@ -159,8 +159,7 @@ sparkwing pipeline new --pipeline release   # single-node minimal template by de
 sparkwing run release
 
 # 3. (Optional) Watch runs in the browser
-sparkwing dashboard start    # detached local dashboard + API on :4343
-sparkwing dashboard open     # one-time sign-in link for the browser
+sparkwing dashboard open     # one-time sign-in link for the dashboard on :4343
 ```
 
 In a new Git repository, preview the scaffold before your first commit with

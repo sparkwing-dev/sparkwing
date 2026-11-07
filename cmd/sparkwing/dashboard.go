@@ -4,15 +4,11 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"net"
 	"os"
 	"os/signal"
 	"runtime"
-	"strconv"
 	"strings"
 	"syscall"
-
-	"github.com/sparkwing-dev/sparkwing/internal/originguard"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
@@ -28,6 +24,8 @@ type dashboardServices struct {
 	options   wingd.LocalStartOptions
 	openLog   func(context.Context) (*os.File, error)
 	mintLogin func(context.Context) (wingd.DashboardLogin, error)
+	// safety: only daemon stop retires the runner; a restart must leave it and its jobs running.
+	retireRunner func(context.Context) error
 }
 
 func runDashboard(inv clisurface.Invocation) error {
@@ -40,7 +38,7 @@ func runDashboard(inv clisurface.Invocation) error {
 }
 
 func requireDashboardBundle(inv clisurface.Invocation, verify func() error) error {
-	if inv.Help() || inv.Command.Path != "sparkwing dashboard start" && inv.Command.Path != "sparkwing dashboard open" {
+	if inv.Help() || inv.Command.Path != "sparkwing dashboard open" {
 		return nil
 	}
 	if err := verify(); err != nil {
@@ -89,35 +87,13 @@ func validateDashboardInvocation(inv clisurface.Invocation, goos string) error {
 		return err
 	case "sparkwing dashboard install", "sparkwing dashboard uninstall":
 		if goos != "linux" && goos != "darwin" {
-			return &apierr.Error{Code: apierr.BadRequest, Message: "dashboard login services are supported on Linux and macOS", Hint: "use sparkwing dashboard start"}
+			return &apierr.Error{Code: apierr.BadRequest, Message: "dashboard login services are supported on Linux and macOS", Hint: "sparkwing dashboard open starts the controller on demand"}
 		}
 		if inv.Bool("force") {
 			return dashboardUnavailable("managed-unit replacement policy for --force")
 		}
-	case "sparkwing dashboard start":
-		addr := dashboardAddress(inv)
-		_, port, err := net.SplitHostPort(addr)
-		if err != nil {
-			return &clisurface.UsageError{Path: inv.Command.Path, Message: "--addr must be HOST:PORT"}
-		}
-		number, err := strconv.Atoi(port)
-		if err != nil || number < 0 || number > 65535 {
-			return &clisurface.UsageError{Path: inv.Command.Path, Message: "--addr requires a port between 0 and 65535"}
-		}
-		if !originguard.LoopbackHost(addr) && !inv.Bool("allow-remote") {
-			return &clisurface.UsageError{Path: inv.Command.Path, Message: "non-loopback --addr requires --allow-remote"}
-		}
 	}
 	return nil
-}
-
-const defaultDashboardAddress = "127.0.0.1:4343"
-
-func dashboardAddress(inv clisurface.Invocation) string {
-	if inv.Has("addr") {
-		return inv.Value("addr")
-	}
-	return defaultDashboardAddress
 }
 
 func executeDashboard(ctx context.Context, inv clisurface.Invocation, services dashboardServices) (dashboardResult, error) {
@@ -129,16 +105,6 @@ func executeDashboard(ctx context.Context, inv clisurface.Invocation, services d
 	var status wingd.LocalStatus
 	var err error
 	switch action {
-	case "start":
-		options := services.options
-		options.DashboardAddress = dashboardAddress(inv)
-		options.DashboardReadOnly = inv.Bool("read-only")
-		status, err = services.lifecycle.StartDashboard(ctx, options)
-	case "stop":
-		status, err = stopLocalController(ctx, services.lifecycle)
-		if err == nil {
-			err = forgetDashboard(services.options.Home)
-		}
 	case "status":
 		status, err = services.lifecycle.Status(ctx)
 	case "install", "uninstall":
@@ -161,7 +127,7 @@ func executeDashboard(ctx context.Context, inv clisurface.Invocation, services d
 		return result, err
 	}
 	result = localStatusResult("dashboard", action, status)
-	if action == "stop" || action == "status" {
+	if action == "status" {
 		result.Warning = olderDashboardWarning(services.options.Home)
 	}
 	return result, nil

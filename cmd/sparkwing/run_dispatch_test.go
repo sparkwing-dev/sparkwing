@@ -74,7 +74,7 @@ func TestLogFormatRefusalNamesTheValueAndTheFix(t *testing.T) {
 	if flags.parseErr == nil {
 		t.Fatal("SPARKWING_LOG_FORMAT=quiet was accepted")
 	}
-	for _, want := range []string{`SPARKWING_LOG_FORMAT="quiet"`, "sparkwing pipeline hooks install"} {
+	for _, want := range []string{`SPARKWING_LOG_FORMAT="quiet"`, "must be pretty, json or plain"} {
 		if !strings.Contains(flags.parseErr.Error(), want) {
 			t.Errorf("refusal %q does not contain %q", flags.parseErr, want)
 		}

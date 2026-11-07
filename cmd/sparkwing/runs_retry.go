@@ -98,7 +98,7 @@ func retryRunIDs(ctx context.Context, connection retryConnection, ids []string, 
 			return errors.Join(append(failures, err)...)
 		}
 		request.IdempotencyKey = rand.Text()
-		response, err := client.Retry(ctx, connection, id, request, os.Stderr)
+		response, err := connection.Retry(ctx, id, request)
 		result := retryResult{SourceRunID: id}
 		if err == nil {
 			result, err = retryReceipt(id, response)

@@ -94,10 +94,6 @@ func parseProfileGuard(raw, rest string) (GuardToken, error) {
 		tok.Kind = KindProfileController
 		return tok, nil
 	}
-	if strings.HasPrefix(rest, "name=") {
-		return tok, fmt.Errorf("guard %q: where:name= is removed because a run no longer takes a profile; "+
-			"guard on where:local or where:controller instead", raw)
-	}
 	return tok, fmt.Errorf("guard %q: where: expects 'local' or 'controller'", raw)
 }
 

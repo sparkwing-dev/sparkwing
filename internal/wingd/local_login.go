@@ -114,7 +114,7 @@ func (l *dashboardLogins) mint(peer localhostwire.LocalPeerIdentity) (DashboardL
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	if l.origin == "" {
-		return DashboardLogin{}, &apierr.Error{Code: apierr.Unavailable, Message: "the dashboard is not serving", Hint: "run sparkwing dashboard start"}
+		return DashboardLogin{}, &apierr.Error{Code: apierr.Unavailable, Message: "the dashboard is not serving", Hint: "run sparkwing dashboard status to see why"}
 	}
 	now := l.now()
 	for key, login := range l.pending {
