@@ -264,10 +264,8 @@ func (r *localRuntime) serve(ctx context.Context, session *localRuntimeSession, 
 	return errors.Join(err, failures)
 }
 
-// bindDashboard leaves admission serving when the port is taken, because a busy
-// dashboard port must not stop runs; status reports the bind error instead.
-// A taken port is never swapped for another, since bookmarks and HTTPS proxies
-// name this address.
+// safety: a taken port must not stop runs, so admission keeps serving and status reports the bind error. A taken
+// port is never swapped for another, since bookmarks and HTTPS proxies name this address.
 func (r *localRuntime) bindDashboard(ctx context.Context, session *localRuntimeSession, controller LocalController, workers *sync.WaitGroup, ready chan struct{}, serve func(string, func() error)) {
 	d, settings := session.daemon, r.cfg.Dashboard
 	listen := r.listen
@@ -289,7 +287,11 @@ func (r *localRuntime) bindDashboard(ctx context.Context, session *localRuntimeS
 	session.logins.serving("http://" + ln.Addr().String())
 	handler := guardDashboard(controller.HTTP(), ln.Addr().String(), session.logins, settings.ReadOnly)
 	workers.Go(func() {
-		defer ln.Close()
+		defer func() {
+			if err := ln.Close(); err != nil && !errors.Is(err, net.ErrClosed) {
+				d.cfg.logf("wingd: close dashboard listener: %v", err)
+			}
+		}()
 		serve("dashboard", func() error {
 			return ServeLocalHTTP(ctx, &readyListener{Listener: ln, ready: ready}, handler, nil, d.dashboardConnection)
 		})

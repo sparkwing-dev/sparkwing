@@ -8,8 +8,11 @@ ready. Standalone mode follows its caller's context because that process owns
 the controller lifetime.
 A failed startup cancels and joins both the runtime and its readiness waiter
 before returning. The runtime port must honor cancellation after cleanup.
-`StartDashboard` starts the dashboard serving loop on an existing controller.
-`Stop` waits for the runtime's admission drain and shutdown.
+`Stop` waits for the runtime's admission drain and shutdown. A drain request
+with `runner=retire`, which only `sparkwing daemon stop` sends, first refuses
+runner registration and active-runner discovery, drains the active runner while
+the API still answers and waits up to five seconds for an idle runner to exit.
+A restart drain leaves the runner running.
 `InstallController` holds the same lifecycle gate through drain, managed-unit
 activation and successor readiness. It joins the previous owner before starting
 the service. The client holds the existing home startup claim through this

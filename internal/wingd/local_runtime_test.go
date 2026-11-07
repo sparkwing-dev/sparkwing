@@ -253,7 +253,7 @@ func TestLocalRuntimeReadinessWaitsForReconciliation(t *testing.T) {
 }
 
 func TestLocalRuntimeStartupFailuresReleaseOwnership(t *testing.T) {
-	for _, stage := range []string{"reconcile", "api_bind", "api_serve", "dashboard_bind", "consumer"} {
+	for _, stage := range []string{"reconcile", "api_bind", "api_serve", "consumer"} {
 		t.Run(stage, func(t *testing.T) {
 			failure := errors.New(stage + " failed")
 			f := &runtimeControllerFixture{}
@@ -275,13 +275,6 @@ func TestLocalRuntimeStartupFailuresReleaseOwnership(t *testing.T) {
 						return &failedRuntimeListener{Listener: listener, failure: failure}, nil
 					}
 					return listener, nil
-				}
-			case "dashboard_bind":
-				r.listen = func(network, _ string) (net.Listener, error) {
-					if network == "tcp" {
-						return nil, failure
-					}
-					return &runtimeListener{closed: make(chan struct{})}, nil
 				}
 			case "consumer":
 				f.background = func(context.Context, func(LocalActivity) error) error { return failure }
@@ -520,7 +513,8 @@ func TestLocalRuntimeDefersConsumersUntilPrivateAPIReady(t *testing.T) {
 		}
 		r := newRuntimeFixture(t, f)
 		done := make(chan error, 1)
-		go func() { done <- r.Run(ctx, LocalStartOptions{Home: f.home, Version: "v1"}) }()
+		// safety: standalone binds no dashboard, so the API is the only HTTP() caller this hook gates.
+		go func() { done <- r.Run(ctx, LocalStartOptions{Home: f.home, Version: "v1", Standalone: true}) }()
 		t.Cleanup(func() {
 			cancel()
 			if err := <-done; err != nil {

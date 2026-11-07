@@ -17,11 +17,9 @@ import (
 
 const localRunnerPath = "/api/v1/local/runners"
 
-// localRunnerRetireWait bounds how long an explicit stop waits for an idle runner to exit.
-// A runner holding jobs keeps running and finishes them against the next controller.
+// safety: a runner holding jobs keeps running past this bound and finishes them against the next controller.
 const localRunnerRetireWait = 5 * time.Second
 
-// runnerWake wakes lifecycle watches when an instance changes state.
 type runnerWake struct {
 	mu      sync.Mutex
 	changed chan struct{}
@@ -149,9 +147,9 @@ func (d *Daemon) localRunnerHTTP(next http.Handler) http.Handler {
 	})
 }
 
-// retireLocalRunner drains the active runner while the API still answers, so
-// the runner sees the change, records its own drain and exits once idle.
-// Restart skips this because a runner and its jobs outlive controller restarts.
+// safety: the drain lands while the API still answers, so the runner sees it, records its stop and revokes its
+// token before exiting; a runner that outlives its controller cannot. Restart skips this because runners and
+// their jobs outlive controller restarts.
 func (d *Daemon) retireLocalRunner(ctx context.Context) error {
 	registry, ok := d.cfg.Runs.(LocalRunnerStore)
 	if !ok {

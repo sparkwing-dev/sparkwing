@@ -24,17 +24,16 @@ type dashboardActivity struct {
 }
 
 type dashboardResult struct {
-	Kind      string `json:"kind"`
-	Tool      string `json:"tool"`
-	Service   string `json:"service"`
-	Action    string `json:"action"`
-	State     string `json:"state"`
-	PID       int    `json:"pid,omitempty"`
-	Version   string `json:"version,omitempty"`
-	Installed bool   `json:"installed"`
-	Dashboard string `json:"dashboard"`
-	URL       string `json:"url,omitempty"`
-	// DashboardError says why a running controller serves no dashboard.
+	Kind           string            `json:"kind"`
+	Tool           string            `json:"tool"`
+	Service        string            `json:"service"`
+	Action         string            `json:"action"`
+	State          string            `json:"state"`
+	PID            int               `json:"pid,omitempty"`
+	Version        string            `json:"version,omitempty"`
+	Installed      bool              `json:"installed"`
+	Dashboard      string            `json:"dashboard"`
+	URL            string            `json:"url,omitempty"`
 	DashboardError string            `json:"dashboard_error,omitempty"`
 	Activity       dashboardActivity `json:"activity"`
 	Warning        string            `json:"warning,omitempty"`
@@ -153,8 +152,10 @@ func openDashboard(ctx context.Context, services dashboardServices, out io.Write
 		return err
 	}
 	if status.DashboardError != "" {
-		return &apierr.Error{Code: apierr.Unavailable, Message: "the local controller serves no dashboard: " + status.DashboardError,
-			Hint: "free the port or set dashboard.address in config.yaml, then run sparkwing daemon restart --force"}
+		return &apierr.Error{
+			Code: apierr.Unavailable, Message: "the local controller serves no dashboard: " + status.DashboardError,
+			Hint: "free the port or set dashboard.address in config.yaml, then run sparkwing daemon restart --force",
+		}
 	}
 	login, err := services.mintLogin(ctx)
 	if err != nil {

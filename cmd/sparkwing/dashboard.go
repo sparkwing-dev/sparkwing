@@ -24,7 +24,7 @@ type dashboardServices struct {
 	options   wingd.LocalStartOptions
 	openLog   func(context.Context) (*os.File, error)
 	mintLogin func(context.Context) (wingd.DashboardLogin, error)
-	// retireRunner stops the controller and drains its supervised runner; nil skips the runner.
+	// safety: only daemon stop retires the runner; a restart must leave it and its jobs running.
 	retireRunner func(context.Context) error
 }
 
