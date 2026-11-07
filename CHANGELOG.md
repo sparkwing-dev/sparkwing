@@ -48,6 +48,8 @@ unlock.
 
 ### Fixed
 
+- **controller and CLI:** A generator job whose expansion failed now shows why. Run status gives it the `expansion_failed` reason and its masked error, the errors view and `runs failures` list it, and jobs that waited on its generated group name it as blocking. Previously the run failed naming a job that read as successful, and the error was only in controller logs. See [observability](docs/observability.md#failure-reasons).
+
 - **local controller:** Store time no longer moves backward when time sync or a VM resume steps the wall clock back, which had failed job and step completion with a `finished_at >= started_at` constraint error and refused plan settlement with "billing checkpoint is outside its awarded time range".
 
 - **runners:** A job whose started attempt lapsed can be awarded again. Its next award was refused as "reconciliation returned an inconsistent execution award" by here and local owners and as "runner award differs from its authenticated claim" by queued runners, which ended here handoffs as `agent_lost` and requeued the job every lease.

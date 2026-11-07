@@ -26,9 +26,10 @@ import (
 // RunStatusFacts combines one committed run/job snapshot with complete attempt
 // history and validated log subjects from that read. Failures carry the masked
 // run and job errors, including a job's reported before any attempt started and
-// the run's when its pipeline failed to plan. JobResults carry each job's masked
-// summary and annotations. Notices carry engine version policy and unclaimed-work
-// observations. Private fields stay here until the public display projection.
+// the run's when its pipeline failed to plan, and a generator's whose expansion
+// failed. JobResults carry each job's masked summary and annotations. Notices
+// carry engine version policy and unclaimed-work observations. Private fields
+// stay here until the public display projection.
 type RunStatusFacts struct {
 	Reason     string
 	Snapshot   store.RunSnapshot
@@ -120,6 +121,10 @@ func runDetailResponse(target capability.Target, facts RunStatusFacts) (controll
 		nodes[string(row.Ref.NodeID)] = row
 		job := snapshotJob(row)
 		job.Error = errorsByJob[job.ID]
+		// The generator itself succeeded, so without this its run fails naming a job that reads as green.
+		if row.Expansion == runstate.ExpansionFailed && job.Reason == "" {
+			job.Reason, job.StatusDetail = store.FailureExpansionFailed, "expansion_failed: the generated jobs were not added"
+		}
 		job.Summary, job.Annotations = results[job.ID].Summary, results[job.ID].Annotations
 		if reason := facts.HostIneligible[job.ID]; reason != "" && job.StatusDetail == "" {
 			job.StatusDetail = reason
@@ -210,9 +215,11 @@ func fillJobDeclarations(jobs []controllerwire.JobDetail, nodes map[string]runst
 			if need == jobs[i].OnFailureOf || continueOnError[need] {
 				continue
 			}
-			switch upstream.Outcome {
-			case runstate.NodeFailed, runstate.NodeCancelled, runstate.NodeSuperseded:
+			switch {
+			case upstream.Outcome == runstate.NodeFailed, upstream.Outcome == runstate.NodeCancelled, upstream.Outcome == runstate.NodeSuperseded:
 				blocked = append(blocked, fmt.Sprintf("%q (%s)", need, upstream.Outcome))
+			case upstream.Expansion == runstate.ExpansionFailed:
+				blocked = append(blocked, fmt.Sprintf("%q (expansion failed)", need))
 			}
 		}
 		if len(blocked) > 0 {
