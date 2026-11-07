@@ -257,7 +257,7 @@ func (l *localLifecycle) Doctor(ctx context.Context, version string) ([]localhos
 	}
 	var findings []localhostwire.LocalDoctorFinding
 	if status.Running && status.Version != version {
-		findings = append(findings, localhostwire.LocalDoctorFinding{Code: "version_skew", Message: fmt.Sprintf("controller version %q differs from CLI %q", status.Version, version), Hint: "Restart the local controller with sparkwing dashboard stop and sparkwing dashboard start."})
+		findings = append(findings, localhostwire.LocalDoctorFinding{Code: "version_skew", Message: fmt.Sprintf("controller version %q differs from CLI %q", status.Version, version), Hint: "Run sparkwing daemon restart with this CLI when no runs are active."})
 	}
 	if l.units == nil {
 		return findings, nil

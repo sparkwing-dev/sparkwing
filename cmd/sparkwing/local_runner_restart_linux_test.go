@@ -62,7 +62,7 @@ func testDetachedLocalRunnerRestart(t *testing.T, childOwner bool) {
 	defer log.Close()
 	var controller *exec.Cmd
 	var controllerUnit string
-	var controllerPID, sequence int
+	var controllerPID, sequence, restartedPID int
 	manager := func(args ...string) error {
 		managerCtx, stop := context.WithTimeout(context.Background(), 10*time.Second)
 		defer stop()
@@ -76,6 +76,12 @@ func testDetachedLocalRunnerRestart(t *testing.T, childOwner bool) {
 	var instances []localhostwire.LocalRunnerInstance
 	var run, marker string
 	stopController := func() {
+		if restartedPID != 0 {
+			if process, err := os.FindProcess(restartedPID); err == nil {
+				_ = process.Kill()
+			}
+			restartedPID = 0
+		}
 		if controllerUnit != "" {
 			if err := manager("kill", "--signal=KILL", controllerUnit); err != nil {
 				t.Logf("controller service cleanup: %v", err)
@@ -272,8 +278,46 @@ func testDetachedLocalRunnerRestart(t *testing.T, childOwner bool) {
 	if err := errors.Join(copyErr, markerErr, output.Close(), source.Close()); err != nil {
 		t.Fatal(err)
 	}
-	stopController()
-	rolled := start(next)
+	restartOnto := func(binary string) {
+		var stdout, stderr bytes.Buffer
+		command := procenv.ControlCommandContext(ctx, os.Environ(), binary, "daemon", "restart", "--force", "-o", "json")
+		command.Stdout, command.Stderr = &stdout, &stderr
+		if err := command.Run(); err != nil {
+			t.Fatalf("daemon restart: %v: %s", err, stderr.String())
+		}
+		var result struct {
+			Restarted       bool   `json:"restarted"`
+			State           string `json:"state"`
+			PID             int    `json:"pid"`
+			PreviousVersion string `json:"previous_version"`
+		}
+		if err := json.Unmarshal(stdout.Bytes(), &result); err != nil {
+			t.Fatalf("daemon restart output %q: %v", stdout.String(), err)
+		}
+		if result.PID > 0 {
+			restartedPID = result.PID
+		}
+		if !result.Restarted || result.State != "running" || result.PID <= 0 || result.PID == controllerPID || result.PreviousVersion == "" {
+			t.Fatalf("daemon restart did not replace the controller: %+v (previous pid %d)", result, controllerPID)
+		}
+		if controller != nil {
+			if err := <-waited; err != nil {
+				t.Fatalf("drained controller exited with %v", err)
+			}
+			controller = nil
+		}
+		if controllerUnit != "" {
+			if manager("is-active", "--quiet", controllerUnit) == nil {
+				t.Fatalf("drained controller unit %s is still active", controllerUnit)
+			}
+			controllerUnit = ""
+		}
+		controllerPID = result.PID
+	}
+	// safety: the build roll goes through the graceful drain users run, so held
+	// jobs and waiting owners must survive it as well as the kills above.
+	restartOnto(next)
+	rolled := first
 	awaitLocalRunnerCondition(t, ctx, func() bool {
 		var err error
 		rolled, err = registry.Active(ctx)

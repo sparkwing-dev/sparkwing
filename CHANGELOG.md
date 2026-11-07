@@ -50,6 +50,8 @@ unlock.
 
 ### Fixed
 
+- **controller:** A request the controller abandons while stopping is answered as `unavailable` instead of `internal`, so held reads retry against its successor. Jobs waiting on child runs survived controller kills but failed with `request failed` when `sparkwing daemon restart` drained the controller.
+
 - **local controller:** Store time no longer moves backward when time sync or a VM resume steps the wall clock back, which had failed job and step completion with a `finished_at >= started_at` constraint error and refused plan settlement with "billing checkpoint is outside its awarded time range".
 
 - **runners:** A job whose started attempt lapsed can be awarded again. Its next award was refused as "reconciliation returned an inconsistent execution award" by here and local owners and as "runner award differs from its authenticated claim" by queued runners, which ended here handoffs as `agent_lost` and requeued the job every lease.
