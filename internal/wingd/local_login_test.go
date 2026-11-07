@@ -194,7 +194,7 @@ func storedLogins(clock func() time.Time, origin string) *dashboardLogins {
 func TestDashboardSessionForwardsUnrelatedCookies(t *testing.T) {
 	request := httptest.NewRequest(http.MethodGet, "/api/v1/runs", nil)
 	request.Header.Set("Authorization", "Bearer stale")
-	for _, name := range []string{"sw_session", "__Host-sw_session", dashboardCookie, "__Host-" + dashboardCookie, dashboardSignedInMarker} {
+	for _, name := range []string{"sw_session", "__Host-sw_session", dashboardCookie, dashboardSignedInMarker} {
 		request.AddCookie(&http.Cookie{Name: name, Value: "stale"})
 	}
 	request.AddCookie(&http.Cookie{Name: "theme", Value: "dark"})
@@ -207,11 +207,11 @@ func TestDashboardSessionForwardsUnrelatedCookies(t *testing.T) {
 		}
 	})
 	logins := newDashboardLogins(nil)
-	logins.serveSession(httptest.NewRecorder(), request, handler, dashboardSession{digest: "d", expires: time.Now().Add(time.Hour)})
+	logins.serveSession(httptest.NewRecorder(), request, handler, dashboardSession{digest: "d", expires: time.Now().Add(time.Hour)}, make(chan struct{}))
 	if !forwarded {
 		t.Fatal("authenticated request did not reach the handler")
 	}
-	if len(request.Cookies()) != 6 {
+	if len(request.Cookies()) != 5 {
 		t.Fatal("forwarding changed the original request cookies")
 	}
 }
@@ -634,5 +634,111 @@ func TestLocalDashboardReadOnlyRequiresAuthAndRefusesChanges(t *testing.T) {
 				t.Fatalf("logout: %d %s", response.Code, response.Body)
 			}
 		})
+	}
+}
+
+type revokingLookup struct {
+	*memoryDashboardSessions
+	after func(string)
+}
+
+func (r revokingLookup) DashboardSession(ctx context.Context, digest string, now time.Time) (localhostwire.LocalPeerIdentity, string, time.Time, bool, error) {
+	peer, origin, expires, live, err := r.memoryDashboardSessions.DashboardSession(ctx, digest, now)
+	if r.after != nil {
+		r.after(digest)
+	}
+	return peer, origin, expires, live, err
+}
+
+func TestLocalDashboardLogoutAfterLookupStillEndsTheStream(t *testing.T) {
+	server := httptest.NewUnstartedServer(nil)
+	origin := "http://" + server.Listener.Addr().String()
+	sessions := &memoryDashboardSessions{}
+	lookup := revokingLookup{memoryDashboardSessions: sessions}
+	logins := newDashboardLogins(nil)
+	logins.persist(lookup)
+	logins.serving(origin)
+	session := signInThrough(t, logins)
+	// safety: Log out lands after this request's lookup succeeded and before it serves, the window the watch must cover.
+	logins.persist(revokingLookup{memoryDashboardSessions: sessions, after: func(digest string) {
+		if _, err := sessions.RevokeDashboardSession(t.Context(), digest, time.Now()); err != nil {
+			t.Error(err)
+		}
+		logins.end(digest)
+	}})
+	ended := make(chan struct{})
+	server.Config.Handler = logins.gate(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		<-r.Context().Done()
+		close(ended)
+	}), nil)
+	server.Start()
+	t.Cleanup(server.Close)
+	ctx, cancel := context.WithCancel(t.Context())
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, server.URL+"/api/v1/runs/r/events/stream", nil)
+		if err != nil {
+			return
+		}
+		withSession(session)(req)
+		if resp, err := http.DefaultClient.Do(req); err == nil {
+			_, _ = io.Copy(io.Discard, resp.Body)
+			_ = resp.Body.Close()
+		}
+	}()
+	select {
+	case <-ended:
+	case <-time.After(5 * time.Second):
+		cancel()
+		<-done
+		t.Fatal("a stream validated just before Log out outlived it")
+	}
+	cancel()
+	<-done
+	logins.mu.Lock()
+	watches := len(logins.watch)
+	logins.mu.Unlock()
+	if watches != 0 {
+		t.Fatalf("ended sessions left %d watches", watches)
+	}
+}
+
+func TestLocalDashboardForgedCookiesLeaveNoWatches(t *testing.T) {
+	logins := storedLogins(nil, "http://127.0.0.1:4343")
+	for i := range 50 {
+		request := httptest.NewRequest(http.MethodGet, "http://127.0.0.1:4343/api/v1/runs", nil)
+		withSession(fmt.Sprintf("forged-%d", i))(request)
+		logins.gate(http.NotFoundHandler(), nil).ServeHTTP(httptest.NewRecorder(), request)
+	}
+	if len(logins.watch) != 0 {
+		t.Fatalf("forged cookies left %d watches", len(logins.watch))
+	}
+}
+
+type failingRevoke struct{ *memoryDashboardSessions }
+
+func (failingRevoke) RevokeDashboardSession(context.Context, string, time.Time) (bool, error) {
+	return false, errors.New("store is busy")
+}
+
+func TestLocalDashboardLogoutKeepsCookiesWhenRevocationFails(t *testing.T) {
+	const origin = "http://127.0.0.1:4343"
+	sessions := &memoryDashboardSessions{}
+	logins := newDashboardLogins(nil)
+	logins.persist(sessions)
+	logins.serving(origin)
+	session := signInThrough(t, logins)
+	logins.persist(failingRevoke{sessions})
+	request := httptest.NewRequest(http.MethodPost, origin+"/logout", nil)
+	withSessionFrom(session, origin)(request)
+	response := httptest.NewRecorder()
+	logins.gate(http.NotFoundHandler(), nil).ServeHTTP(response, request)
+	if response.Code != http.StatusServiceUnavailable || len(response.Result().Cookies()) != 0 {
+		t.Fatalf("failed revocation: HTTP %d Set-Cookie %q", response.Code, response.Header().Values("Set-Cookie"))
+	}
+	if _, _, _, live, err := sessions.DashboardSession(t.Context(), tokenDigest(session), time.Now()); err != nil || !live {
+		t.Fatalf("session after a failed revocation: live=%t %v", live, err)
 	}
 }

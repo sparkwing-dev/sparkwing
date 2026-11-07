@@ -50,14 +50,20 @@ type dashboardLogins struct {
 	mu     sync.Mutex
 	origin string
 	store  DashboardSessionStore
-	ended  map[string]chan struct{}
+	watch  map[string]*sessionWatch
+}
+
+// safety: Log out closes ended to stop every request the session is still serving, including open streams.
+type sessionWatch struct {
+	ended chan struct{}
+	refs  int
 }
 
 func newDashboardLogins(now func() time.Time) *dashboardLogins {
 	if now == nil {
 		now = time.Now
 	}
-	return &dashboardLogins{now: now, ended: map[string]chan struct{}{}}
+	return &dashboardLogins{now: now, watch: map[string]*sessionWatch{}}
 }
 
 func (l *dashboardLogins) serving(origin string) {
@@ -150,13 +156,6 @@ func requestOrigin(r *http.Request) string {
 	return "http://" + r.Host
 }
 
-func sessionCookieName(origin string) string {
-	if strings.HasPrefix(origin, "https://") {
-		return "__Host-" + dashboardCookie
-	}
-	return dashboardCookie
-}
-
 // safety: one cookie of our name is required; a duplicate planted by another service on this host is refused.
 func sessionToken(r *http.Request, name string) (string, bool) {
 	var value string
@@ -178,52 +177,56 @@ type dashboardSession struct {
 	expires time.Time
 }
 
-func (l *dashboardLogins) session(r *http.Request) (dashboardSession, *apierr.Error) {
-	origin := requestOrigin(r)
-	token, ok := sessionToken(r, sessionCookieName(origin))
-	if !ok {
-		return dashboardSession{}, nil
-	}
+// safety: the caller watches the digest before this lookup, and Log out revokes in the store before it ends
+// watches, so a request validated just before a revocation is still ended by it.
+func (l *dashboardLogins) lookup(r *http.Request, digest string) (dashboardSession, *apierr.Error) {
 	store, failure := l.sessions()
 	if failure != nil {
 		return dashboardSession{}, failure
 	}
-	digest := tokenDigest(token)
 	peer, stored, expires, live, err := store.DashboardSession(r.Context(), digest, l.now())
 	if err != nil {
 		return dashboardSession{}, &apierr.Error{Code: apierr.Unavailable, Message: "read dashboard session: " + err.Error()}
 	}
 	// safety: a session redeemed at one origin does not authorize another origin on the same host.
-	if !live || stored != origin {
+	if !live || stored != requestOrigin(r) {
 		return dashboardSession{}, nil
 	}
 	return dashboardSession{digest: digest, peer: peer, expires: expires}, nil
 }
 
-func (l *dashboardLogins) endedChannel(digest string) chan struct{} {
+func (l *dashboardLogins) watchSession(digest string) (<-chan struct{}, func()) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	ended, ok := l.ended[digest]
+	current, ok := l.watch[digest]
 	if !ok {
-		ended = make(chan struct{})
-		l.ended[digest] = ended
+		current = &sessionWatch{ended: make(chan struct{})}
+		l.watch[digest] = current
 	}
-	return ended
+	current.refs++
+	return current.ended, func() {
+		l.mu.Lock()
+		defer l.mu.Unlock()
+		current.refs--
+		// safety: an unknown or finished digest leaves no entry behind, so forged cookies cannot grow the map.
+		if current.refs == 0 && l.watch[digest] == current {
+			delete(l.watch, digest)
+		}
+	}
 }
 
 func (l *dashboardLogins) end(digest string) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	if ended, ok := l.ended[digest]; ok {
-		close(ended)
-		delete(l.ended, digest)
+	if current, ok := l.watch[digest]; ok {
+		close(current.ended)
+		delete(l.watch, digest)
 	}
 }
 
-func (l *dashboardLogins) serveSession(w http.ResponseWriter, r *http.Request, next http.Handler, current dashboardSession) {
+func (l *dashboardLogins) serveSession(w http.ResponseWriter, r *http.Request, next http.Handler, current dashboardSession, ended <-chan struct{}) {
 	ctx, cancel := context.WithTimeout(localhostwire.WithLocalPeer(r.Context(), current.peer), current.expires.Sub(l.now()))
 	defer cancel()
-	ended := l.endedChannel(current.digest)
 	go func() {
 		select {
 		case <-ended:
@@ -238,7 +241,7 @@ func (l *dashboardLogins) serveSession(w http.ResponseWriter, r *http.Request, n
 	request.Header.Del("Cookie")
 	for _, cookie := range cookies {
 		switch cookie.Name {
-		case dashboardCookie, "__Host-" + dashboardCookie, dashboardSignedInMarker, "sw_session", "__Host-sw_session":
+		case dashboardCookie, dashboardSignedInMarker, "sw_session", "__Host-sw_session":
 		default:
 			request.AddCookie(cookie)
 		}
@@ -272,19 +275,26 @@ func (l *dashboardLogins) gate(next, shell http.Handler) http.Handler {
 			l.logout(w, r)
 			return
 		}
-		current, failure := l.session(r)
-		if failure != nil {
-			w.Header().Set("Cache-Control", "no-store")
-			writeLoginFailure(w, failure)
-			return
-		}
-		if current.digest != "" {
-			if unsafeDashboardMethod(r.Method) && !sameDashboardOrigin(r) {
-				http.Error(w, "forbidden: a dashboard write must come from the dashboard's own origin", http.StatusForbidden)
+		if token, ok := sessionToken(r, dashboardCookie); ok {
+			digest := tokenDigest(token)
+			ended, release := l.watchSession(digest)
+			current, failure := l.lookup(r, digest)
+			if failure != nil {
+				release()
+				w.Header().Set("Cache-Control", "no-store")
+				writeLoginFailure(w, failure)
 				return
 			}
-			l.serveSession(w, r, next, current)
-			return
+			if current.digest != "" {
+				defer release()
+				if unsafeDashboardMethod(r.Method) && !sameDashboardOrigin(r) {
+					http.Error(w, "forbidden: a dashboard write must come from the dashboard's own origin", http.StatusForbidden)
+					return
+				}
+				l.serveSession(w, r, next, current, ended)
+				return
+			}
+			release()
 		}
 		if shell != nil && (r.Method == http.MethodGet || r.Method == http.MethodHead) && !strings.HasPrefix(r.URL.Path, "/api/") {
 			shell.ServeHTTP(w, r)
@@ -320,14 +330,13 @@ func (l *dashboardLogins) login(w http.ResponseWriter, r *http.Request) {
 		writeLoginFailure(w, &apierr.Error{Code: apierr.Unauthenticated, Message: "this sign-in link is invalid, expired, already used or for another address", Hint: "run sparkwing dashboard open for a new link"})
 		return
 	}
-	secure := strings.HasPrefix(origin, "https://")
 	http.SetCookie(w, &http.Cookie{
-		Name: sessionCookieName(origin), Value: session, Path: "/", Expires: expires, MaxAge: int(dashboardSessionLifetime / time.Second),
-		HttpOnly: true, SameSite: http.SameSiteStrictMode, Secure: secure,
+		Name: dashboardCookie, Value: session, Path: "/", Expires: expires, MaxAge: int(dashboardSessionLifetime / time.Second),
+		HttpOnly: true, SameSite: http.SameSiteStrictMode,
 	})
 	http.SetCookie(w, &http.Cookie{
 		Name: dashboardSignedInMarker, Value: "1", Path: "/", Expires: expires, MaxAge: int(dashboardSessionLifetime / time.Second),
-		SameSite: http.SameSiteStrictMode, Secure: secure,
+		SameSite: http.SameSiteStrictMode,
 	})
 	http.Redirect(w, r, "/", http.StatusSeeOther)
 }
@@ -343,26 +352,25 @@ func (l *dashboardLogins) logout(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "forbidden: sign out from the dashboard's own origin", http.StatusForbidden)
 		return
 	}
-	origin := requestOrigin(r)
-	name, secure := sessionCookieName(origin), strings.HasPrefix(origin, "https://")
-	http.SetCookie(w, &http.Cookie{Name: name, Value: "", Path: "/", MaxAge: -1, HttpOnly: true, SameSite: http.SameSiteStrictMode, Secure: secure})
-	http.SetCookie(w, &http.Cookie{Name: dashboardSignedInMarker, Value: "", Path: "/", MaxAge: -1, SameSite: http.SameSiteStrictMode, Secure: secure})
-	token, ok := sessionToken(r, name)
 	store, failure := l.sessions()
 	if failure != nil {
 		writeLoginFailure(w, failure)
 		return
 	}
+	token, ok := sessionToken(r, dashboardCookie)
 	live := false
 	if ok {
 		digest := tokenDigest(token)
 		var err error
+		// safety: revoke before clearing cookies, so a failed revocation leaves the browser able to retry.
 		if live, err = store.RevokeDashboardSession(r.Context(), digest, l.now()); err != nil {
-			writeLoginFailure(w, &apierr.Error{Code: apierr.Unavailable, Message: "revoke dashboard session: " + err.Error()})
+			writeLoginFailure(w, &apierr.Error{Code: apierr.Unavailable, Message: "revoke dashboard session: " + err.Error(), Hint: "try Log out again; the session stays valid until it is revoked"})
 			return
 		}
 		l.end(digest)
 	}
+	http.SetCookie(w, &http.Cookie{Name: dashboardCookie, Value: "", Path: "/", MaxAge: -1, HttpOnly: true, SameSite: http.SameSiteStrictMode})
+	http.SetCookie(w, &http.Cookie{Name: dashboardSignedInMarker, Value: "", Path: "/", MaxAge: -1, SameSite: http.SameSiteStrictMode})
 	if !live {
 		writeLoginFailure(w, &apierr.Error{Code: apierr.Unauthenticated, Message: "this browser is not signed in"})
 		return
