@@ -287,3 +287,24 @@ func FuzzNativePrincipalKeepsClaimAcrossAttempts(f *testing.F) {
 		}
 	})
 }
+
+func TestNativeInputsAcceptReawardAfterLapsedAttempt(t *testing.T) {
+	unit, p, state := hostingStateFor(t, capability.UnitNode)
+	state.node.Attempt, state.node.Disruptions = 1, 1
+	input, err := nodehost.NewRunInput(unit)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := NativeInputs(t.Context(), state, unit, p, input)
+	if err != nil {
+		t.Fatal("requeued job refused its next award:", err)
+	}
+	if got.Node.Attempt != 1 {
+		t.Fatalf("next start lost the lapsed ordinal: %d", got.Node.Attempt)
+	}
+	unit.Binding.Attempt = 1
+	p.Capability.Binding = unit.Binding
+	if _, err := NativeInputs(t.Context(), state, unit, p, input); err == nil {
+		t.Fatal("unstarted award named the lapsed attempt")
+	}
+}

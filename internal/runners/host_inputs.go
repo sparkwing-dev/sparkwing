@@ -49,7 +49,7 @@ func NativeInputs(ctx context.Context, state nodehost.NativeHostStore, unit cont
 		if err != nil {
 			return HostInputs{}, err
 		}
-		if row.Ref != (runspec.NodeRef{RunID: runspec.RunID(unit.RunID), NodeID: runspec.NodeID(unit.JobID)}) || row.CapabilityPrefix != principal.Capability.Prefix || row.ClaimedBy != unit.Binding.Holder || row.Generation != runspec.ClaimGeneration(unit.Binding.Generation) || row.Attempt != runspec.AttemptOrdinal(unit.Binding.Attempt) || !reflect.DeepEqual(row.Execution, *unit.Execution) {
+		if row.Ref != (runspec.NodeRef{RunID: runspec.RunID(unit.RunID), NodeID: runspec.NodeID(unit.JobID)}) || row.CapabilityPrefix != principal.Capability.Prefix || row.ClaimedBy != unit.Binding.Holder || row.Generation != runspec.ClaimGeneration(unit.Binding.Generation) || row.AwardedAttempt() != runspec.AttemptOrdinal(unit.Binding.Attempt) || !reflect.DeepEqual(row.Execution, *unit.Execution) {
 			return HostInputs{}, awardMismatch()
 		}
 	} else if unit.Unit == capability.UnitEval {

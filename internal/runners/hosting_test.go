@@ -20,7 +20,7 @@ func hostingAward(kind capability.UnitKind) controllerwire.ClaimedUnit {
 	binding := capability.Binding{RunID: "run", Holder: "holder", Generation: 2, Kind: capability.BindingTrigger}
 	purpose := capability.PurposeTrigger
 	if kind == capability.UnitNode {
-		binding.Kind, binding.NodeID, binding.Attempt = capability.BindingNode, "job", 3
+		binding.Kind, binding.NodeID = capability.BindingNode, "job"
 		purpose = capability.PurposeWork
 	}
 	unit := controllerwire.ClaimedUnit{Unit: kind, Purpose: purpose, Delivery: capability.DeliveryDirect, UnitID: "unit", RunID: "run", JobID: binding.NodeID, Binding: binding, Capability: "award-secret", LeaseExpiresAt: time.Now().Add(time.Minute)}

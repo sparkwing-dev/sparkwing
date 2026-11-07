@@ -51,7 +51,7 @@ func (s *RemoteOwnerStore) ReconcileNode(ctx context.Context, request store.Reco
 	}
 	if result.Kind == runstate.Execute {
 		claim := wire.Claim
-		if request.MaterializeOnly || claim == nil || claim.Unit != capability.UnitNode || runspec.RunID(claim.RunID) != request.Ref.RunID || runspec.NodeID(claim.JobID) != request.Ref.NodeID || claim.Capability == "" || claim.Binding.Kind != capability.BindingNode || runspec.RunID(claim.Binding.RunID) != request.Ref.RunID || runspec.NodeID(claim.Binding.NodeID) != request.Ref.NodeID || claim.Binding.Holder != row.ClaimedBy || runspec.ClaimGeneration(claim.Binding.Generation) != row.Generation || runspec.AttemptOrdinal(claim.Binding.Attempt) != row.Attempt {
+		if request.MaterializeOnly || claim == nil || claim.Unit != capability.UnitNode || runspec.RunID(claim.RunID) != request.Ref.RunID || runspec.NodeID(claim.JobID) != request.Ref.NodeID || claim.Capability == "" || claim.Binding.Kind != capability.BindingNode || runspec.RunID(claim.Binding.RunID) != request.Ref.RunID || runspec.NodeID(claim.Binding.NodeID) != request.Ref.NodeID || claim.Binding.Holder != row.ClaimedBy || runspec.ClaimGeneration(claim.Binding.Generation) != row.Generation || runspec.AttemptOrdinal(claim.Binding.Attempt) != row.AwardedAttempt() {
 			return runstate.ReconciledNode{}, errors.New("reconciliation returned an inconsistent execution award")
 		}
 		result.Claim = &runstate.ClaimAward{Holder: claim.Binding.Holder, Generation: runspec.ClaimGeneration(claim.Binding.Generation), CapabilityPrefix: row.CapabilityPrefix, LeaseExpiresAt: claim.LeaseExpiresAt}

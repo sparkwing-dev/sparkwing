@@ -192,11 +192,32 @@ func (t *storeTx) readClock(ctx context.Context) (time.Time, error) {
 	if s.dialect == DialectSQLite && s.clock != nil {
 		return s.now(), nil
 	}
+	if s.dialect == DialectSQLite && s.wallClock != nil {
+		return s.monotonic(s.wallClock().UTC()), nil
+	}
 	var ns int64
 	if err := t.QueryRowContext(ctx, databaseTimeSQL(s.dialect)).Scan(&ns); err != nil {
 		return time.Time{}, err
 	}
+	if s.dialect == DialectSQLite {
+		return s.monotonic(time.Unix(0, ns).UTC()), nil
+	}
 	return time.Unix(0, ns).UTC(), nil
+}
+
+// bug: time sync and VM resume step the wall clock backward, which would
+// order a finish before its start; the local controller is the only writer of
+// its SQLite store, so its clock never moves backward within a process.
+func (s *Store) monotonic(now time.Time) time.Time {
+	for {
+		floor := s.clockFloor.Load()
+		if now.UnixNano() <= floor {
+			return time.Unix(0, floor).UTC()
+		}
+		if s.clockFloor.CompareAndSwap(floor, now.UnixNano()) {
+			return now
+		}
+	}
 }
 
 func databaseTimeSQL(d Dialect) string {

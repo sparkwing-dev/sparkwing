@@ -153,6 +153,15 @@ type NodeRow struct {
 	OwnerExecution        *OwnerExecution `json:",omitempty"`
 }
 
+// AwardedAttempt is the ordinal an execution award binds. A requeued node keeps
+// its lapsed attempt's ordinal, but no award names an attempt before it starts.
+func (r NodeRow) AwardedAttempt() runspec.AttemptOrdinal {
+	if r.Status == StatusPending && r.StartedAt == nil {
+		return 0
+	}
+	return r.Attempt
+}
+
 // NodeAttempt preserves the node-wide ordinal across claims; generation is an attribute of that ordinal.
 // A node starts at attempt zero. CauseStart allocates one on first execution and
 // the next ordinal after a started disruption. CauseRetry allocates the next ordinal

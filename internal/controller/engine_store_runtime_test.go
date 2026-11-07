@@ -207,7 +207,8 @@ func (engineProfileFake) ResolveClaimProfile(context.Context, capability.Princip
 	return match.Profile{}, nil
 }
 
-func TestEngineOwnerReconcilesExecutesAndFinishes(t *testing.T) {
+func engineOwnerWithPendingJob(t *testing.T) (*engineFixture, *store.Tenant, capability.Authorized) {
+	t.Helper()
 	server, tenant := engineRuntimeStore(t)
 	owner := engineRuntimeClaim(t, server, capability.UnitTrigger)
 	server.claimProfiles = engineProfileFake{}
@@ -228,6 +229,47 @@ func TestEngineOwnerReconcilesExecutesAndFinishes(t *testing.T) {
 	if _, err := server.Renew(t.Context(), owner, controllerwire.RenewalRequest{Executing: true}); err != nil {
 		t.Fatal(err)
 	}
+	return server, tenant, owner
+}
+
+func TestEngineOwnerReawardsLapsedStartedJob(t *testing.T) {
+	server, tenant, owner := engineOwnerWithPendingJob(t)
+	first, err := server.ReconcileJob(t.Context(), owner, controllerwire.ReconcileRequest{Policy: "none"})
+	if err != nil || first.Kind != "execute" || first.Claim == nil {
+		t.Fatalf("self claim: %+v, %v", first, err)
+	}
+	principal, err := server.Store.AsOperator().LookupCapability(t.Context(), sha256.Sum256([]byte(first.Claim.Capability)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	engineAdmitExecution(t, server.Store, principal)
+	executor := capability.Authorized{Principal: principal, Binding: first.Claim.Binding, Target: owner.Target}
+	if _, err := server.TransitionJob(t.Context(), executor, controllerwire.JobTransitionRequest{To: "running", Cause: "start", SourceAttempt: new(int64(0))}); err != nil {
+		t.Fatal(err)
+	}
+	engineSQL(t, server.Store, `UPDATE nodes SET lease_expires_at=started_at WHERE team='a' AND run_id='run' AND node_id='job'`)
+	if _, err := server.Store.AsOperator().ReapUnits(t.Context(), 10); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := server.Renew(t.Context(), owner, controllerwire.RenewalRequest{Executing: true}); err != nil {
+		t.Fatal(err)
+	}
+	again, err := server.ReconcileJob(t.Context(), owner, controllerwire.ReconcileRequest{Policy: "none"})
+	if err != nil || again.Kind != "execute" || again.Claim == nil || again.Job.Generation <= first.Job.Generation {
+		t.Fatalf("re-award after lapse: %+v, %v", again, err)
+	}
+	row := runstate.NodeRow{Status: runstate.NodeStatus(again.Job.Status), Attempt: runspec.AttemptOrdinal(again.Job.Attempt), StartedAt: again.Job.StartedAt}
+	if row.Attempt != 1 || runspec.AttemptOrdinal(again.Claim.Binding.Attempt) != row.AwardedAttempt() {
+		t.Fatalf("re-award binding attempt %d does not match persisted job %+v", again.Claim.Binding.Attempt, row)
+	}
+	persisted, err := tenant.ReadNode(t.Context(), runspec.NodeRef{RunID: "run", NodeID: "job"})
+	if err != nil || persisted.AwardedAttempt() != runspec.AttemptOrdinal(again.Claim.Binding.Attempt) {
+		t.Fatalf("persisted job %+v disagrees with award: %v", persisted, err)
+	}
+}
+
+func TestEngineOwnerReconcilesExecutesAndFinishes(t *testing.T) {
+	server, tenant, owner := engineOwnerWithPendingJob(t)
 	response, err := server.ReconcileJob(t.Context(), owner, controllerwire.ReconcileRequest{Policy: "none"})
 	if err != nil || response.Kind != "execute" || response.Claim == nil || response.Claim.Capability == "" || response.Claim.Accepted == nil || response.Claim.Binding.RunID != "run" || response.Claim.Binding.NodeID != "job" {
 		t.Fatalf("self claim: %+v, %v", response, err)
@@ -256,7 +298,7 @@ func TestEngineOwnerReconcilesExecutesAndFinishes(t *testing.T) {
 	if _, err := server.Finish(t.Context(), owner, controllerwire.FinishRequest{}); err == nil {
 		t.Fatal("finish ignored the owner write failure")
 	}
-	run, err = tenant.ReadRun(t.Context(), "run")
+	run, err := tenant.ReadRun(t.Context(), "run")
 	if err != nil || run.State != runstate.RunRunning || run.FinishedAt != nil {
 		t.Fatalf("partial finish: state=%s finished=%v, %v", run.State, run.FinishedAt, err)
 	}

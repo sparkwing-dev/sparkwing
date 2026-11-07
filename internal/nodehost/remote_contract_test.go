@@ -101,6 +101,30 @@ func TestRemoteReconciliationRetainsPrivateAwardAndExecutionState(t *testing.T) 
 	}
 }
 
+func TestRemoteReconciliationAcceptsReawardAfterLapsedAttempt(t *testing.T) {
+	job := executionWireFixture()
+	job.Attempt, job.StartedAt = 1, nil
+	claim := controllerwire.ClaimedUnit{
+		Unit: capability.UnitNode, RunID: "run", JobID: "job", Capability: "private-award", LeaseExpiresAt: *job.LeaseExpiresAt,
+		Binding: capability.Binding{Kind: capability.BindingNode, RunID: "run", NodeID: "job", Holder: "holder", Generation: 4},
+	}
+	f := &ownerOperationWire{reconcile: controllerwire.ReconcileResponse{Kind: string(runstate.Execute), Job: job, Claim: &claim}}
+	request := store.ReconcileRequest{Ref: runspec.NodeRef{RunID: "run", NodeID: "job"}, Policy: runstate.SourceNone}
+	got, err := (&RemoteOwnerStore{Controller: f}).ReconcileNode(t.Context(), request)
+	if err != nil {
+		t.Fatal("requeued job refused its next award:", err)
+	}
+	if got.Node.Attempt != 1 || got.Claim == nil {
+		t.Fatalf("next start lost the lapsed ordinal: %+v", got)
+	}
+	named := claim
+	named.Binding.Attempt = 1
+	f.reconcile.Claim = &named
+	if _, err := (&RemoteOwnerStore{Controller: f}).ReconcileNode(t.Context(), request); err == nil {
+		t.Fatal("unstarted award named the lapsed attempt")
+	}
+}
+
 func FuzzRemoteReconciliationKeepsOwnerAndNodeAwardsSeparate(f *testing.F) {
 	f.Add("owner", "node", "holder")
 	f.Add("", "\x00/\"", "other")

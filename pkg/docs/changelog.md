@@ -42,6 +42,10 @@ unlock.
 
 ### Fixed
 
+- **local controller:** Store time no longer moves backward when time sync or a VM resume steps the wall clock back, which had failed job and step completion with a `finished_at >= started_at` constraint error and refused plan settlement with "billing checkpoint is outside its awarded time range".
+
+- **runners:** A job whose started attempt lapsed can be awarded again. Its next award was refused as "reconciliation returned an inconsistent execution award" by here and local owners and as "runner award differs from its authenticated claim" by queued runners, which ended here handoffs as `agent_lost` and requeued the job every lease.
+
 - **local controller:** Recorded Unix job sessions are cleaned up after their holder process dies, including after controller restart. Job roots survive receipt pruning and failed cleanup acknowledgements. Cancelled jobs keep their machine capacity until the host joins and releases them.
 
 - **runners:** Claim polling recovers from controller transport failures and missing local sockets for up to five seconds without cancelling held jobs or replaying claims. Graceful drain stops new claims and joins active hosts. Held jobs and owners keep reading their state, child runs and authentication through the same outage instead of failing.

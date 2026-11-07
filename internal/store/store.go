@@ -81,6 +81,8 @@ type Store struct {
 	consolePolicy      consolePolicy
 	clock              func() time.Time
 	pinnedClock        func() time.Time // safety: PostgreSQL time stays authoritative outside clock-pinned fixtures.
+	clockFloor         atomic.Int64
+	wallClock          func() time.Time // safety: replaces only SQLite's wall-clock read, so fixtures still pass through the floor.
 	db                 *sql.DB
 	conn               *sql.Conn // safety: break-glass writes must use the verified session.
 	githubLocks        *sql.DB
