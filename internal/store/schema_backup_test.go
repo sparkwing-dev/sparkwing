@@ -18,6 +18,7 @@ func TestSQLiteUpgradeKeepsABackupTheOlderBinaryCanOpen(t *testing.T) {
 	}
 	for _, statement := range []string{
 		`DROP TABLE local_runner_instances`,
+		`DROP INDEX idx_runs_live_children`,
 		`UPDATE sparkwing_schema_version SET version=32, baseline_digest='8229dac48bd08544fb5b2cddfe2f9c9d0f0f3c41968eda4db1591aff9f247f61'`,
 		`INSERT INTO teams(name,created_at,updated_at) VALUES ('kept',1,1)`,
 	} {

@@ -22,6 +22,8 @@ unlock.
 
 ### Breaking
 
+- **controller (Breaking):** The schema baseline advances to version 34, adding a partial index on live child runs for the parent-cancellation sweep. Recognized schema 33 stores upgrade in place. Older binaries refuse the upgraded store. See [the migration guide](docs/migrations/_unreleased.md#upgrade-the-store-in-place-to-schema-baseline-34).
+
 - **local controller (Breaking):** The schema baseline advances to version 33, adding durable runner process identities and lifecycle state. Recognized schema 32 stores upgrade in place. Older binaries refuse the upgraded store. See [the migration guide](docs/migrations/_unreleased.md#upgrade-the-store-in-place-to-schema-baseline-33).
 
 - **CLI (Breaking):** Repository pin upgrades move from `sparkwing upgrade` to `sparkwing pipeline upgrade`. The obsolete `sparkwing daemon recover-state` command is removed because machine admission now lives in `state.db`. See [the migration guide](docs/migrations/_unreleased.md#upgrade-the-store-in-place-to-schema-baseline-31).
@@ -51,6 +53,8 @@ unlock.
 ### Fixed
 
 - **controller:** A request the controller abandons while stopping is answered as `unavailable` instead of `internal`, so held reads retry against its successor. Jobs waiting on child runs survived controller kills but failed with `request failed` when `sparkwing daemon restart` drained the controller.
+- **controller:** `sparkwing runs retry --failed` starts when a reused job has to run again. A job whose earlier result could not be reused, such as one written by another runner, used to stay ready while every runner claim failed with "financial lock order: work must precede the ledger". Reuse is now checked when a job's dependencies finish, as local runs already did, so a later job no longer reuses its earlier result or starts while a job it needs runs again. A job whose earlier result the controller refuses to reuse, such as one that no longer matches the job, now runs again; before, the refusal stopped the controller from scheduling that run and every run after it.
+- **controller:** Cancelling a run, or a run or job ending while a child it started through `RunAndAwait` is still pending or running, now cancels that child. Children had kept running until an operator cancelled each one by hand. Local and hosted controllers request the cancellation from their recovery sweep, so a grandchild follows one sweep later. A retry of a child run is left running, because someone asked for it.
 
 - **local controller:** Store time no longer moves backward when time sync or a VM resume steps the wall clock back, which had failed job and step completion with a `finished_at >= started_at` constraint error and refused plan settlement with "billing checkpoint is outside its awarded time range".
 

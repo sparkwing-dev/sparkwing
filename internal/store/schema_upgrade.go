@@ -81,6 +81,10 @@ var schemaUpgrades = []schemaUpgrade{
     state TEXT NOT NULL CHECK(state IN ('registered','active','draining','stopped'))
 )`, `CREATE UNIQUE INDEX idx_local_runner_active ON local_runner_instances(machine) WHERE state='active'`},
 	},
+	{
+		from: 33, release: "schema 33", digest: "b4ac52448bafd4ea378d1ed2e1d9aec0c610d3a5e27df4a7a780c178f425a47b",
+		statements: []string{`CREATE INDEX idx_runs_live_children ON runs(team,id) WHERE parent_run_id <> '' AND status IN ('pending','running')`},
+	},
 }
 
 func schemaUpgradeFrom(version int) (schemaUpgrade, bool) {
