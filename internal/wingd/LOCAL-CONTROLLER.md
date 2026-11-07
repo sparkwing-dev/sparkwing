@@ -183,9 +183,20 @@ a successor instead of reusing a process that stopped polling. Startup waits use
 the existing private-request timeout and never kill a launched runner. Private
 launcher environment files are removed after the manager loads them.
 
-Foreground and here execution still live in the CLI. Windows still shares the
-controller queue lifetime. Native launchd and Windows service survival remain
-unverified.
+Foreground local runs without publication submit to the queue and observe
+persisted logs and terminal status through HTTP. Their SDK processes and pipes
+belong to the runner, with the submitter's captured environment. Preparation
+retains its selected replacement-engine bytes once, so an older compatible
+runner can execute the accepted build. Read observation reconnects through
+controller outages without resetting its log cursor. Permission, protocol and
+integrity refusals remain errors. First interrupt requests durable cancellation;
+a second stops observation, including when the first arrived during intake.
+
+Standalone runs and foreground publication keep their CLI host. Standalone owns
+its in-process controller; publication keeps its existing cleanup ordering,
+warning and deadline before return. Remote here execution also remains in the
+CLI. Windows still shares the controller queue lifetime. Native launchd and
+Windows service survival remain unverified.
 
 The existing process-tree sampler supplies current, peak and average CPU and
 memory usage through the controller API for the dashboard. Its attribution and

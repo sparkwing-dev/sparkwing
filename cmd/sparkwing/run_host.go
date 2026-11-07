@@ -75,12 +75,15 @@ func runLocalCommand(ctx context.Context, pipeline string, flags runFlags, args 
 		defer signal.Stop(caught)
 		signals = caught
 	}
+	parent := ctx
 	preparing, cancelPreparation := context.WithCancel(ctx)
 	preparationDone, preparationStopped := make(chan struct{}), make(chan struct{})
+	interrupted := false
 	go func() {
 		defer close(preparationStopped)
 		select {
 		case <-signals:
+			interrupted = true
 			cancelPreparation()
 		case <-preparationDone:
 		case <-preparing.Done():
@@ -95,7 +98,7 @@ func runLocalCommand(ctx context.Context, pipeline string, flags runFlags, args 
 	if runtime.close != nil {
 		defer func() { resultErr = errors.Join(resultErr, runtime.close()) }()
 	}
-	if runtime.controller == nil || runtime.prepare == nil || runtime.close == nil || (!flags.detached && (runtime.bind == nil || runtime.follow == nil)) {
+	if runtime.controller == nil || runtime.prepare == nil || runtime.close == nil || (!flags.detached && (runtime.follow == nil || flags.allowUnadmitted && runtime.bind == nil)) {
 		return &apierr.Error{Code: apierr.Unavailable, Message: "local run integration has incomplete intake or host bindings"}
 	}
 	prepared, err := runtime.prepare(ctx, pipeline, flags)
@@ -108,6 +111,10 @@ func runLocalCommand(ctx context.Context, pipeline string, flags runFlags, args 
 	request, err := prepareLocalRunRequest(ctx, prepared, flags, args)
 	if err != nil {
 		return err
+	}
+	hostedInCLI := localRunNeedsCLIHost(flags, request.Request.Options.Publish.Value)
+	if hostedInCLI && runtime.bind == nil {
+		return &apierr.Error{Code: apierr.Unavailable, Message: "local run integration has no CLI host binding"}
 	}
 	if request.Request.Pipeline != pipeline || request.Request.Origin != runspec.OriginLocal || request.Request.Mode != runspec.IntakeExecute || request.Request.Dispatch != runspec.DispatchHost {
 		return localRunProtocolError("local preparation returned an invalid intake request")
@@ -144,7 +151,11 @@ func runLocalCommand(ctx context.Context, pipeline string, flags runFlags, args 
 		if err != nil {
 			return err
 		}
-		defer func() { resultErr = errors.Join(resultErr, closeCache()) }()
+		if hostedInCLI {
+			defer func() { resultErr = errors.Join(resultErr, closeCache()) }()
+		} else if err := closeCache(); err != nil {
+			return err
+		}
 	}
 	if runtime.ensureController != nil {
 		if err := runtime.ensureController(ctx); err != nil {
@@ -170,6 +181,9 @@ func runLocalCommand(ctx context.Context, pipeline string, flags runFlags, args 
 	// safety: Canceling preparation would stop the standalone controller before hosting.
 	close(preparationDone)
 	<-preparationStopped
+	if !hostedInCLI && !flags.detached {
+		ctx = parent
+	}
 	if err := validateLocalIntake(response, pipeline); err != nil {
 		return err
 	}
@@ -188,19 +202,26 @@ func runLocalCommand(ctx context.Context, pipeline string, flags runFlags, args 
 	hosted := make(chan struct{})
 	host := func(ctx context.Context) (nodehost.RunCompletion, error) {
 		defer close(hosted)
+		if !hostedInCLI {
+			return waitLocalRun(ctx, runtime.controller, response.RunID)
+		}
 		return hostLocalRun(ctx, runtime, response.RunID, "", deps.version)
 	}
-	completion, err := observeHereRun(ctx, response.RunID, hereObservation{host: host, follow: func(ctx context.Context) error {
+	completion, err := observeHereRun(ctx, response.RunID, hereObservation{interrupted: interrupted, host: host, follow: func(ctx context.Context) error {
 		return runtime.follow(ctx, response.RunID, request.Request.Options.Output.Value, out, hosted)
 	}, cancel: func(ctx context.Context) error {
-		_, writeErr := fmt.Fprintf(os.Stderr, "cancelling %s; interrupt again to stop hosting without waiting\n", response.RunID)
+		action := "observing"
+		if hostedInCLI {
+			action = "hosting"
+		}
+		_, writeErr := fmt.Fprintf(os.Stderr, "cancelling %s; interrupt again to stop %s without waiting\n", response.RunID, action)
 		_, cancelErr := runtime.controller.Cancel(ctx, response.RunID, controllerwire.CancelRequest{Reason: "interrupted by local host"})
 		return errors.Join(writeErr, cancelErr)
 	}}, signals)
 	if err != nil {
 		return fmt.Errorf("run %s is admitted: %w", response.RunID, err)
 	}
-	if profile := request.Request.Options.Publish.Value; profile != "" {
+	if profile := request.Request.Options.Publish.Value; hostedInCLI && profile != "" {
 		if runtime.publish == nil {
 			_, _ = fmt.Fprintln(os.Stderr, "warning: local run completed but publication is unavailable")
 		} else if err := publishLocalCompletion(ctx, deps.interrupts, runtime.publish, profile, response.RunID); err != nil {
@@ -216,6 +237,31 @@ func runLocalCommand(ctx context.Context, pipeline string, flags runFlags, args 
 		outputErr = fmt.Errorf("run %s is %s but its completion record could not be written: %w", response.RunID, completion.Outcome, outputErr)
 	}
 	return errors.Join(statusExitCode(completion.Outcome), outputErr)
+}
+
+func localRunNeedsCLIHost(flags runFlags, publish string) bool {
+	return flags.allowUnadmitted || !flags.detached && publish != ""
+}
+
+func waitLocalRun(ctx context.Context, controller controllerwire.Controller, run string) (nodehost.RunCompletion, error) {
+	for {
+		if err := ctx.Err(); err != nil {
+			return nodehost.RunCompletion{}, err
+		}
+		detail, err := controller.ReadRun(ctx, run)
+		if err != nil && !retryableRunRead(err) {
+			return nodehost.RunCompletion{}, err
+		}
+		if err == nil && (detail.ID != run || detail.Status == "") {
+			return nodehost.RunCompletion{}, localRunProtocolError("controller returned an invalid local run outcome")
+		}
+		if err == nil && isTerminalRunStatus(detail.Status) {
+			return nodehost.RunCompletion{Outcome: detail.Status}, nil
+		}
+		if err := waitStatusPoll(ctx, localFollowPoll); err != nil {
+			return nodehost.RunCompletion{}, err
+		}
+	}
 }
 
 func publishLocalCompletion(parent context.Context, interrupts <-chan os.Signal, publish func(context.Context, string, string) error, profile, run string) error {

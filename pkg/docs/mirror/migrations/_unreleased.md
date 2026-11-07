@@ -32,12 +32,28 @@ error. Confirmed no-systemd Linux hosts use a separate session. macOS uses a
 per-instance launchd agent. No drain deadline kills held work. Dependencies
 keep the exact accepted development executable from retained builds, with native
 platform, embedded version and complete digest checked again before use. Windows queued
-hosting and foreground/here hosting retain their existing process lifetimes.
+hosting retains its existing process lifetime.
 
 `GET /api/v1/local/runners?state=active` returns the verified socket account's
 current active instance, or `not_found` when none is active. A successor must
 verify that the recorded process birth and build still match before reuse.
 No existing route or wire symbol is removed by this discovery addition.
+
+### Foreground local execution
+
+Foreground local runs without publication execute in the local runner. The CLI
+submits and observes persisted logs and the terminal outcome over HTTP. Its
+captured environment and exact selected development engine remain the execution
+inputs. Status and followed logs reconnect through controller read outages,
+retaining the log cursor. Permission, protocol and integrity refusals remain
+errors. First interrupt requests durable cancellation; a second stops observation.
+An interrupt during successful intake keeps that same cancellation sequence.
+
+Foreground publication retains CLI hosting so its existing publication deadline
+and visible failure warning complete before return. `--sw-allow-unadmitted`
+retains its owned in-process controller and CLI host. Remote `--runner here`
+also stays CLI-hosted. No flag, route or wire symbol is removed by this piece;
+`LocalForeground` and `local_foreground` still reserve these CLI-hosted runs.
 
 ## Local queue claims use HTTP
 

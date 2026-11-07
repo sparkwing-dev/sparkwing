@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"maps"
@@ -12,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
 	"github.com/sparkwing-dev/sparkwing/internal/controller/client"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
@@ -49,6 +51,14 @@ func followControllerRunLogs(ctx context.Context, options client.EngineOptions, 
 		return err
 	}
 	return observeRunLogs(ctx, inv, reader, nil, out, io.Discard, wait)
+}
+
+func retryableRunRead(err error) bool {
+	var failure *apierr.Error
+	if errors.As(err, &failure) {
+		return failure.Code == apierr.Unavailable
+	}
+	return client.RetryableTransportError(err)
 }
 
 // perf: a foreground local run reads its own machine's controller, so a short poll shows step output and
@@ -122,6 +132,12 @@ func observeRunLogs(ctx context.Context, inv clisurface.Invocation, reader contr
 	for {
 		page, err := reader.ReadLogs(ctx, inv.Value("run"), query)
 		if err != nil {
+			if inv.Bool("follow") && retryableRunRead(err) {
+				if err := wait(ctx, time.Second); err != nil {
+					return fmt.Errorf("log observation incomplete: %w", err)
+				}
+				continue
+			}
 			return err
 		}
 		if err := page.Validate(query.Cursor); err != nil {

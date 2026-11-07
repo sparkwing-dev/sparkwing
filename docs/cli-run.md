@@ -8,7 +8,7 @@ Every `sparkwing run` command, flag, and argument, generated from the CLI's own 
 
 Invoke a pipeline
 
-Runs locally by default, including detached work on the local controller. Explicit user, repository or pipeline routing can select Cloud overflow. --profile is refused.
+Runs locally by default through the local runner. Foreground commands observe persisted output; standalone and foreground publication keep their CLI host. Explicit user, repository or pipeline routing can select Cloud overflow. --profile is refused.
 
 ### Burst and overflow
 

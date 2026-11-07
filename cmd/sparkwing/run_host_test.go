@@ -33,6 +33,7 @@ type localTestController struct {
 	controllerwire.Controller
 	create func(context.Context, controllerwire.CreateRunRequest) (controllerwire.CreateRunResponse, error)
 	claim  func(context.Context, controllerwire.ClaimRequest) (controllerwire.ClaimResponse, error)
+	read   func(context.Context, string) (controllerwire.RunDetail, error)
 }
 
 func (c localTestController) CreateRun(ctx context.Context, request controllerwire.CreateRunRequest) (controllerwire.CreateRunResponse, error) {
@@ -41,6 +42,13 @@ func (c localTestController) CreateRun(ctx context.Context, request controllerwi
 
 func (c localTestController) Claim(ctx context.Context, request controllerwire.ClaimRequest) (controllerwire.ClaimResponse, error) {
 	return c.claim(ctx, request)
+}
+
+func (c localTestController) ReadRun(ctx context.Context, run string) (controllerwire.RunDetail, error) {
+	if c.read != nil {
+		return c.read(ctx, run)
+	}
+	return controllerwire.RunDetail{ID: run, Status: "success"}, nil
 }
 
 func localTestAward(t *testing.T) controllerwire.ClaimedUnit {
@@ -121,7 +129,7 @@ func localRuntimeFor(t *testing.T, award controllerwire.ClaimedUnit, detached bo
 	}}
 }
 
-func TestLocalRunUsesSealedIntakeAndNamedOwnerClaim(t *testing.T) {
+func TestLocalRunSubmitsWithoutClaimingTheRunnerAward(t *testing.T) {
 	for _, detached := range []bool{false, true} {
 		t.Run(fmt.Sprint(detached), func(t *testing.T) {
 			var calls []string
@@ -129,7 +137,7 @@ func TestLocalRunUsesSealedIntakeAndNamedOwnerClaim(t *testing.T) {
 			deps := localRuntimeFor(t, localTestAward(t), detached, &calls)
 			flags, args := parseRunFlagsArgs([]string{fmt.Sprintf("--sw-detached=%t", detached), "-o=json", "--", "--password", "private-value"})
 			err := runLocalCommand(t.Context(), "ci", flags, args, &out, deps)
-			want := []string{"resolve", "prepare", "create", "claim", "bind", "host", "host-close", "close"}
+			want := []string{"resolve", "prepare", "create", "close"}
 			if detached {
 				want = []string{"resolve", "prepare", "create", "close"}
 				if out.String() != "{\"run_id\":\"local-run\",\"replayed\":false}\n" {
@@ -140,6 +148,75 @@ func TestLocalRunUsesSealedIntakeAndNamedOwnerClaim(t *testing.T) {
 				t.Fatalf("calls=%v error=%v", calls, err)
 			}
 		})
+	}
+}
+
+func TestStandaloneLocalRunKeepsItsNamedOwnerHost(t *testing.T) {
+	var calls []string
+	deps := localRuntimeFor(t, localTestAward(t), false, &calls)
+	if err := runLocalCommand(t.Context(), "ci", runFlags{allowUnadmitted: true}, []string{"--password", "private-value"}, io.Discard, deps); err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"resolve", "prepare", "create", "claim", "bind", "host", "host-close", "close"}
+	if !reflect.DeepEqual(calls, want) {
+		t.Fatalf("standalone calls=%v, want %v", calls, want)
+	}
+}
+
+func TestLocalQueueRunClosesCachePreflightBeforeIntake(t *testing.T) {
+	var calls []string
+	deps := localRuntimeFor(t, localTestAward(t), false, &calls)
+	resolve := deps.resolve
+	deps.resolve = func(ctx context.Context, options localRunOptions) (localRunRuntime, error) {
+		runtime, err := resolve(ctx, options)
+		runtime.bind = nil
+		runtime.publish = func(context.Context, string, string) error {
+			t.Error("observer published runner-owned completion")
+			return nil
+		}
+		runtime.openCache = func(_ context.Context, profile string, request *runspec.Request) (blob.RemoteCache, func() error, error) {
+			if profile != "cache" {
+				t.Fatalf("preflight profile=%q", profile)
+			}
+			calls = append(calls, "cache-preflight")
+			request.Git.Ref = "validated-cache-ref"
+			return &localReadOnlyCache{}, func() error { calls = append(calls, "cache-close"); return nil }, nil
+		}
+		controller := runtime.controller.(localTestController)
+		create := controller.create
+		controller.create = func(ctx context.Context, request controllerwire.CreateRunRequest) (controllerwire.CreateRunResponse, error) {
+			if request.Request.Git.Ref != "validated-cache-ref" || request.Request.LocalForeground {
+				t.Fatal("intake lost cache preflight or reserved the CLI host")
+			}
+			return create(ctx, request)
+		}
+		runtime.controller = controller
+		return runtime, err
+	}
+	if err := runLocalCommand(t.Context(), "ci", runFlags{cacheFrom: "cache"}, []string{"--password", "private-value"}, io.Discard, deps); err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"resolve", "prepare", "cache-preflight", "cache-close", "create", "close"}
+	if !reflect.DeepEqual(calls, want) {
+		t.Fatalf("observer calls=%v, want %v", calls, want)
+	}
+}
+
+func TestLocalQueueCachePreflightFailurePrecedesIntake(t *testing.T) {
+	var calls []string
+	deps := localRuntimeFor(t, localTestAward(t), false, &calls)
+	resolve := deps.resolve
+	failure := errors.New("profile unavailable")
+	deps.resolve = func(ctx context.Context, options localRunOptions) (localRunRuntime, error) {
+		runtime, err := resolve(ctx, options)
+		runtime.openCache = func(context.Context, string, *runspec.Request) (blob.RemoteCache, func() error, error) {
+			return nil, nil, failure
+		}
+		return runtime, err
+	}
+	err := runLocalCommand(t.Context(), "ci", runFlags{cacheFrom: "cache"}, []string{"--password", "private-value"}, io.Discard, deps)
+	if !errors.Is(err, failure) || !reflect.DeepEqual(calls, []string{"resolve", "prepare", "close"}) {
+		t.Fatalf("preflight failure: calls=%v err=%v", calls, err)
 	}
 }
 
@@ -186,14 +263,11 @@ func TestLocalForegroundRunReportsCommittedOutcome(t *testing.T) {
 			resolve := deps.resolve
 			deps.resolve = func(ctx context.Context, options localRunOptions) (localRunRuntime, error) {
 				runtime, err := resolve(ctx, options)
-				bind := runtime.bind
-				runtime.bind = func(ctx context.Context, award controllerwire.ClaimedUnit) (hereHostSession, error) {
-					session, err := bind(ctx, award)
-					session.host = hereTestHost(func(context.Context, nodehost.RunInput) (nodehost.RunCompletion, error) {
-						return nodehost.RunCompletion{Outcome: outcome}, nil
-					})
-					return session, err
+				controller := runtime.controller.(localTestController)
+				controller.read = func(context.Context, string) (controllerwire.RunDetail, error) {
+					return controllerwire.RunDetail{ID: "local-run", Status: outcome}, nil
 				}
+				runtime.controller = controller
 				return runtime, err
 			}
 			var out bytes.Buffer
@@ -362,6 +436,79 @@ func TestLocalRunInterruptDuringIntakeDoesNotClaim(t *testing.T) {
 	}
 	if !reflect.DeepEqual(calls, []string{"resolve", "prepare", "create", "close"}) {
 		t.Fatalf("interrupted intake reached hosting: %v", calls)
+	}
+}
+
+func TestLocalRunCarriesIntakeInterruptsIntoQueuedObservation(t *testing.T) {
+	for _, second := range []bool{false, true} {
+		t.Run(fmt.Sprint(second), func(t *testing.T) {
+			var calls []string
+			deps := localRuntimeFor(t, localTestAward(t), false, &calls)
+			signals := make(chan os.Signal, 1)
+			deps.interrupts = signals
+			resolve := deps.resolve
+			cancelled := make(chan struct{})
+			cancelRequests := 0
+			deps.resolve = func(ctx context.Context, options localRunOptions) (localRunRuntime, error) {
+				runtime, err := resolve(ctx, options)
+				controller := runtime.controller.(localTestController)
+				create := controller.create
+				controller.create = func(ctx context.Context, request controllerwire.CreateRunRequest) (controllerwire.CreateRunResponse, error) {
+					response, err := create(ctx, request)
+					signals <- os.Interrupt
+					<-ctx.Done()
+					if second {
+						signals <- os.Interrupt
+					}
+					return response, err
+				}
+				controller.read = func(ctx context.Context, _ string) (controllerwire.RunDetail, error) {
+					if second {
+						<-ctx.Done()
+						return controllerwire.RunDetail{}, ctx.Err()
+					}
+					select {
+					case <-cancelled:
+						return controllerwire.RunDetail{ID: "local-run", Status: "cancelled"}, nil
+					case <-ctx.Done():
+						return controllerwire.RunDetail{}, ctx.Err()
+					}
+				}
+				runtime.controller = localInterruptController{Controller: controller, cancel: func(ctx context.Context, run string, _ controllerwire.CancelRequest) (controllerwire.Applied, error) {
+					if run != "local-run" || !second && ctx.Err() != nil {
+						t.Errorf("intake interrupt lost cancellation: %s %v", run, ctx.Err())
+					}
+					cancelRequests++
+					close(cancelled)
+					return controllerwire.Applied{}, nil
+				}}
+				runtime.follow = func(ctx context.Context, _, _ string, _ io.Writer, _ <-chan struct{}) error {
+					if second {
+						<-ctx.Done()
+						return ctx.Err()
+					}
+					select {
+					case <-cancelled:
+						return nil
+					case <-ctx.Done():
+						return ctx.Err()
+					}
+				}
+				return runtime, err
+			}
+			var out bytes.Buffer
+			err := runLocalCommand(t.Context(), "ci", runFlags{outputFormat: "json"}, []string{"--password", "private-value"}, &out, deps)
+			if cancelRequests != 1 || !reflect.DeepEqual(calls, []string{"resolve", "prepare", "create", "close"}) {
+				t.Fatalf("intake interrupts: cancel_requests=%d calls=%v err=%v", cancelRequests, calls, err)
+			}
+			if second {
+				if !errors.Is(err, context.Canceled) || strings.Contains(out.String(), `"event":"run_finish"`) {
+					t.Fatalf("second intake interrupt did not detach: %s %v", &out, err)
+				}
+			} else if err == nil || strings.Contains(err.Error(), "incomplete") || !strings.Contains(out.String(), `"status":"cancelled"`) {
+				t.Fatalf("first intake interrupt did not observe cancellation: %s %v", &out, err)
+			}
+		})
 	}
 }
 
@@ -807,12 +954,12 @@ func TestLocalRemoteCacheRequiresTheSealedOptIn(t *testing.T) {
 				}
 				return runtime, err
 			}
-			if err := runLocalCommand(t.Context(), "ci", runFlags{cacheFrom: profile}, []string{"--password", "private-value"}, io.Discard, deps); err != nil {
+			if err := runLocalCommand(t.Context(), "ci", runFlags{cacheFrom: profile, allowUnadmitted: true}, []string{"--password", "private-value"}, io.Discard, deps); err != nil {
 				t.Fatal(err)
 			}
 		})
 	}
-	for _, flags := range []runFlags{{cacheFrom: "cache"}} {
+	for _, flags := range []runFlags{{cacheFrom: "cache", allowUnadmitted: true}} {
 		var calls []string
 		deps := localRuntimeFor(t, localTestAward(t), false, &calls)
 		err := runLocalCommand(t.Context(), "ci", flags, []string{"--password", "private-value"}, io.Discard, deps)
@@ -825,27 +972,55 @@ func TestLocalRemoteCacheRequiresTheSealedOptIn(t *testing.T) {
 
 func TestLocalPublicationFailurePreservesExecutionVerdict(t *testing.T) {
 	for _, fail := range []bool{false, true} {
-		var calls []string
-		deps := localRuntimeFor(t, localTestAward(t), false, &calls)
-		resolve := deps.resolve
-		published := false
-		deps.resolve = func(ctx context.Context, opts localRunOptions) (localRunRuntime, error) {
-			runtime, err := resolve(ctx, opts)
-			runtime.publish = func(_ context.Context, profile, run string) error {
-				published = true
-				if profile != "history" || run != "local-run" {
-					t.Fatal("publication lost its profile or local run")
-				}
-				if fail {
-					return errors.New("profile unavailable")
-				}
-				return nil
+		t.Run(fmt.Sprint(fail), func(t *testing.T) {
+			var calls []string
+			deps := localRuntimeFor(t, localTestAward(t), false, &calls)
+			resolve := deps.resolve
+			stderr, err := os.CreateTemp(t.TempDir(), "publication-stderr")
+			if err != nil {
+				t.Fatal(err)
 			}
-			return runtime, err
-		}
-		if err := runLocalCommand(t.Context(), "ci", runFlags{publish: "history"}, []string{"--password", "private-value"}, io.Discard, deps); err != nil || !published {
-			t.Fatalf("publication changed local verdict: published=%v err=%v", published, err)
-		}
+			previous := os.Stderr
+			os.Stderr = stderr
+			t.Cleanup(func() { os.Stderr = previous; _ = stderr.Close() })
+			deps.resolve = func(ctx context.Context, opts localRunOptions) (localRunRuntime, error) {
+				if opts.standalone {
+					t.Fatal("foreground publication took ownership of the shared controller")
+				}
+				runtime, err := resolve(ctx, opts)
+				controller := runtime.controller.(localTestController)
+				create := controller.create
+				controller.create = func(ctx context.Context, request controllerwire.CreateRunRequest) (controllerwire.CreateRunResponse, error) {
+					if !request.Request.LocalForeground {
+						t.Fatal("background runner could duplicate foreground publication")
+					}
+					return create(ctx, request)
+				}
+				runtime.controller = controller
+				runtime.publish = func(ctx context.Context, profile, run string) error {
+					calls = append(calls, "publish")
+					if _, bounded := ctx.Deadline(); !bounded || profile != "history" || run != "local-run" {
+						t.Fatal("publication lost its deadline, profile or local run")
+					}
+					if fail {
+						return errors.New("profile unavailable")
+					}
+					return nil
+				}
+				return runtime, err
+			}
+			if err := runLocalCommand(t.Context(), "ci", runFlags{publish: "history"}, []string{"--password", "private-value"}, io.Discard, deps); err != nil {
+				t.Fatalf("publication changed local verdict: %v", err)
+			}
+			want := []string{"resolve", "prepare", "create", "claim", "bind", "host", "host-close", "publish", "close"}
+			if !reflect.DeepEqual(calls, want) {
+				t.Fatalf("publication order=%v, want %v", calls, want)
+			}
+			body, err := os.ReadFile(stderr.Name())
+			if err != nil || strings.Contains(string(body), "publication failed") != fail {
+				t.Fatalf("publication warning=%q, failure=%t: %v", body, fail, err)
+			}
+		})
 	}
 }
 
@@ -962,15 +1137,16 @@ func TestLocalPreparationGatesDeclarationErrors(t *testing.T) {
 	}
 }
 
-func TestLocalRunRequestReservesOnlyForegroundIntake(t *testing.T) {
-	for _, detached := range []bool{false, true} {
+func TestLocalRunRequestReservesOnlyCLIHosting(t *testing.T) {
+	for _, flags := range []runFlags{{}, {detached: true}, {allowUnadmitted: true}, {publish: "history"}, {publish: "history", detached: true}} {
 		input := localTestPreparation(t, localTestAward(t))
-		request, err := prepareLocalRunRequest(t.Context(), input, runFlags{detached: detached}, nil)
+		request, err := prepareLocalRunRequest(t.Context(), input, flags, nil)
 		if err != nil {
 			t.Fatal(err)
 		}
-		if request.Request.LocalForeground == detached {
-			t.Fatalf("detached=%t foreground=%t", detached, request.Request.LocalForeground)
+		want := flags.allowUnadmitted || !flags.detached && flags.publish != ""
+		if request.Request.LocalForeground != want || request.Request.Dispatch != runspec.DispatchHost {
+			t.Fatalf("standalone=%t detached=%t request=%+v", flags.allowUnadmitted, flags.detached, request.Request)
 		}
 	}
 }
@@ -999,23 +1175,22 @@ func TestLocalRunInterruptCancelsAndWaitsForTerminalRun(t *testing.T) {
 				return ctx.Err()
 			}
 		}
-		bind := runtime.bind
-		runtime.bind = func(ctx context.Context, award controllerwire.ClaimedUnit) (hereHostSession, error) {
-			session, err := bind(ctx, award)
-			session.host = hereTestHost(func(ctx context.Context, _ nodehost.RunInput) (nodehost.RunCompletion, error) {
-				signals <- os.Interrupt
-				select {
-				case <-cancelled:
-					if ctx.Err() != nil {
-						t.Error("first interrupt abandoned owner finalization")
-					}
-					return nodehost.RunCompletion{Outcome: "cancelled"}, nil
-				case <-ctx.Done():
-					return nodehost.RunCompletion{}, ctx.Err()
+		controller := runtime.controller.(localInterruptController)
+		base := controller.Controller.(localTestController)
+		base.read = func(ctx context.Context, _ string) (controllerwire.RunDetail, error) {
+			signals <- os.Interrupt
+			select {
+			case <-cancelled:
+				if ctx.Err() != nil {
+					t.Error("first interrupt abandoned terminal observation")
 				}
-			})
-			return session, err
+				return controllerwire.RunDetail{ID: "local-run", Status: "cancelled"}, nil
+			case <-ctx.Done():
+				return controllerwire.RunDetail{}, ctx.Err()
+			}
 		}
+		controller.Controller = base
+		runtime.controller = controller
 		return runtime, err
 	}
 	ctx, stop := context.WithTimeout(t.Context(), time.Second)
@@ -1034,4 +1209,39 @@ type localInterruptController struct {
 
 func (c localInterruptController) Cancel(ctx context.Context, run string, request controllerwire.CancelRequest) (controllerwire.Applied, error) {
 	return c.cancel(ctx, run, request)
+}
+
+func TestLocalRunSecondInterruptStopsObservationAfterDurableCancel(t *testing.T) {
+	var calls []string
+	deps := localRuntimeFor(t, localTestAward(t), false, &calls)
+	signals := make(chan os.Signal, 1)
+	deps.interrupts = signals
+	resolve := deps.resolve
+	cancelled := false
+	deps.resolve = func(ctx context.Context, options localRunOptions) (localRunRuntime, error) {
+		runtime, err := resolve(ctx, options)
+		controller := runtime.controller.(localTestController)
+		controller.read = func(ctx context.Context, _ string) (controllerwire.RunDetail, error) {
+			signals <- os.Interrupt
+			<-ctx.Done()
+			return controllerwire.RunDetail{}, ctx.Err()
+		}
+		runtime.controller = localInterruptController{Controller: controller, cancel: func(ctx context.Context, run string, request controllerwire.CancelRequest) (controllerwire.Applied, error) {
+			if ctx.Err() != nil || run != "local-run" || request.Reason == "" {
+				t.Errorf("invalid durable cancellation: %s %+v %v", run, request, ctx.Err())
+			}
+			cancelled = true
+			signals <- os.Interrupt
+			return controllerwire.Applied{}, nil
+		}}
+		runtime.follow = func(ctx context.Context, _, _ string, _ io.Writer, _ <-chan struct{}) error {
+			<-ctx.Done()
+			return ctx.Err()
+		}
+		return runtime, err
+	}
+	err := runLocalCommand(t.Context(), "ci", runFlags{}, []string{"--password", "private-value"}, io.Discard, deps)
+	if !errors.Is(err, context.Canceled) || !cancelled || !reflect.DeepEqual(calls, []string{"resolve", "prepare", "create", "close"}) {
+		t.Fatalf("second interrupt: cancelled=%t calls=%v err=%v", cancelled, calls, err)
+	}
 }

@@ -16,9 +16,10 @@ import (
 )
 
 type hereObservation struct {
-	host   func(context.Context) (nodehost.RunCompletion, error)
-	follow func(context.Context) error
-	cancel func(context.Context) error
+	host        func(context.Context) (nodehost.RunCompletion, error)
+	follow      func(context.Context) error
+	cancel      func(context.Context) error
+	interrupted bool
 }
 
 func attachHereRun(ctx context.Context, options client.EngineOptions, run, output string, out io.Writer, host func(context.Context) (nodehost.RunCompletion, error)) (nodehost.RunCompletion, error) {
@@ -72,6 +73,19 @@ func observeHereRun(ctx context.Context, run string, observe hereObservation, si
 	var cancelling chan error
 	done := ctx.Done()
 	requested := false
+	requestCancellation := func() {
+		requested = true
+		if observe.cancel == nil {
+			failures = append(failures, &apierr.Error{Code: apierr.Unavailable, Message: "here attachment has no cancellation client"})
+			stop()
+			return
+		}
+		cancelling = make(chan error, 1)
+		go func(result chan<- error) { result <- observe.cancel(ctx) }(cancelling)
+	}
+	if observe.interrupted {
+		requestCancellation()
+	}
 	for hosted != nil || followed != nil || cancelling != nil {
 		select {
 		case result = <-hosted:
@@ -100,14 +114,7 @@ func observeHereRun(ctx context.Context, run string, observe hereObservation, si
 				stop()
 				continue
 			}
-			requested = true
-			if observe.cancel == nil {
-				failures = append(failures, &apierr.Error{Code: apierr.Unavailable, Message: "here attachment has no cancellation client"})
-				stop()
-				continue
-			}
-			cancelling = make(chan error, 1)
-			go func(result chan<- error) { result <- observe.cancel(ctx) }(cancelling)
+			requestCancellation()
 		case <-done:
 			failures = append(failures, ctx.Err())
 			done = nil
