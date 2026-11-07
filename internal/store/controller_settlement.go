@@ -60,6 +60,7 @@ func settleControllerTx(ctx context.Context, tx *storeTx, team Team, runID strin
 	if err != nil || actor == nil {
 		return err
 	}
+	missed := map[string]bool{}
 	for {
 		snapshot, err := readSnapshotTx(ctx, tx, team, runID)
 		if err != nil {
@@ -77,37 +78,23 @@ func settleControllerTx(ctx context.Context, tx *storeTx, team Team, runID strin
 				return settleAdmissionTx(ctx, tx, team, runstate.CapacityBinding{RunID: runID}, *actor, result)
 			}
 		}
-		if snapshot.Run.Retry != nil && snapshot.Run.CancelRequestedAt == nil {
-			changed := false
-			var pending error
-			for _, node := range snapshot.Nodes {
-				selected, ok := snapshot.Run.Retry.Results[string(node.Ref.NodeID)]
-				if !ok || node.Status != runstate.StatusPending || node.ReadyAt != nil || node.ClaimedBy != "" {
-					continue
-				}
-				source := runstate.MaterializeSource{Kind: runstate.SourceManualRetry, Result: &selected}
-				reused, err := tryMaterializationTx(ctx, tx, team, ReconcileRequest{Ref: node.Ref, Actor: *actor, Policy: source.Kind, Source: &source})
-				if errors.Is(err, errBlobIOPending) {
-					pending = err
-				} else if err != nil {
-					return err
-				}
-				changed = changed || reused
-			}
-			if pending != nil {
-				return pending
-			}
-			if changed {
-				continue
-			}
-		}
 		graph, err := snapshot.Scheduling()
 		if err != nil {
 			return err
 		}
 		decision := Decide(graph)
+		reused, deferred, err := reuseReleasedRetryJobsTx(ctx, tx, team, snapshot.Run, decision, *actor, missed)
+		if err != nil {
+			return err
+		}
+		if reused {
+			continue
+		}
 		changed := false
 		for _, node := range decision.Nodes {
+			if deferred[node.NodeID] {
+				continue
+			}
 			change := nodeTransition{Ref: runspec.NodeRef{RunID: runspec.RunID(runID), NodeID: runspec.NodeID(node.NodeID)}, Actor: *actor}
 			switch node.Kind {
 			case DecisionExpand:
@@ -157,4 +144,40 @@ func settleControllerTx(ctx context.Context, tx *storeTx, team Team, runID strin
 			return nil
 		}
 	}
+}
+
+// A retry probes reuse when a selected job is released, as the run host does,
+// so no job reuses a result while a job it needs runs again. The probe reads
+// result bytes and locks the source run, which a claim or completion cannot do
+// once it holds the ledger; such jobs stay pending for the controller sweep.
+func reuseReleasedRetryJobsTx(ctx context.Context, tx *storeTx, team Team, run RunRow, decision ScheduleDecision, actor runstate.Actor, missed map[string]bool) (bool, map[string]bool, error) {
+	if run.Retry == nil || run.CancelRequestedAt != nil {
+		return false, nil, nil
+	}
+	probe := tx.blobIO != nil && !tx.ledgerLocked
+	deferred := map[string]bool{}
+	reused := false
+	var pending error
+	for _, node := range decision.Nodes {
+		selected, ok := run.Retry.Results[node.NodeID]
+		if !ok || missed[node.NodeID] || node.Kind != DecisionReady && node.Kind != DecisionApproval {
+			continue
+		}
+		if !probe {
+			deferred[node.NodeID] = true
+			continue
+		}
+		source := runstate.MaterializeSource{Kind: runstate.SourceManualRetry, Result: &selected}
+		ok, err := tryMaterializationTx(ctx, tx, team, ReconcileRequest{Ref: runspec.NodeRef{RunID: runspec.RunID(run.ID), NodeID: runspec.NodeID(node.NodeID)}, Actor: actor, Policy: source.Kind, Source: &source})
+		if errors.Is(err, errBlobIOPending) {
+			pending = err
+			continue
+		}
+		if err != nil {
+			return false, nil, err
+		}
+		missed[node.NodeID] = !ok
+		reused = reused || ok
+	}
+	return reused, deferred, pending
 }
