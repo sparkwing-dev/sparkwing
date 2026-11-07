@@ -115,6 +115,9 @@ func preparePlanSealTx(ctx context.Context, tx *storeTx, team Team, request Plan
 	if plan.Jobs == nil {
 		return runspec.Spec{}, nil, authorityError(apierr.PlanInvalid, "plan requires an explicit jobs array")
 	}
+	if err := checkPlacementJobs(run.Request.Request.Placement, run.Request.Request.Pipeline, plan.Jobs); err != nil {
+		return runspec.Spec{}, nil, err
+	}
 	if err := nodeproto.ValidateInitialJobArguments(input.Resolved.ArgumentDeclarations, plan.Jobs); err != nil {
 		return runspec.Spec{}, nil, err
 	}

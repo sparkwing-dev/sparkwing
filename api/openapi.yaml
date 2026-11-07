@@ -6006,6 +6006,66 @@ components:
         - display
       type: object
       x-sparkwing-go-type: runspec.Repository
+    internal.runspec.RepositoryJobPlacement:
+      additionalProperties: true
+      properties:
+        job:
+          type: string
+        prefer:
+          anyOf:
+            - items:
+                $ref: '#/components/schemas/internal.runspec.RepositoryTier'
+              type: array
+            - type: "null"
+      required:
+        - job
+        - prefer
+      type: object
+      x-sparkwing-go-type: runspec.RepositoryJobPlacement
+    internal.runspec.RepositoryPlacement:
+      additionalProperties: true
+      properties:
+        jobs:
+          anyOf:
+            - items:
+                $ref: '#/components/schemas/internal.runspec.RepositoryJobPlacement'
+              type: array
+            - type: "null"
+        prefer:
+          anyOf:
+            - items:
+                $ref: '#/components/schemas/internal.runspec.RepositoryTier'
+              type: array
+            - type: "null"
+        revision:
+          type: string
+      required:
+        - revision
+        - prefer
+      type: object
+      x-sparkwing-go-type: runspec.RepositoryPlacement
+    internal.runspec.RepositoryTier:
+      additionalProperties: true
+      properties:
+        hold:
+          type: integer
+        labels:
+          anyOf:
+            - items:
+                type: string
+              type: array
+            - type: "null"
+        runner:
+          type: string
+        target:
+          type: string
+        workflow:
+          type: string
+      required:
+        - target
+        - hold
+      type: object
+      x-sparkwing-go-type: runspec.RepositoryTier
     internal.runspec.Request:
       additionalProperties: true
       properties:
@@ -6047,6 +6107,10 @@ components:
           type: string
         pipeline:
           type: string
+        placement:
+          anyOf:
+            - $ref: '#/components/schemas/internal.runspec.RepositoryPlacement'
+            - type: "null"
         pull_request:
           $ref: '#/components/schemas/internal.runspec.Optional.github.com.sparkwing-dev.sparkwing.internal.runspec.PullRequest.'
         reason:

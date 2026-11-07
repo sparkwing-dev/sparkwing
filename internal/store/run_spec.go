@@ -45,9 +45,13 @@ type IntakeRequest struct {
 	// FetchedRepository is the GitHub repository the controller fetches this
 	// run's code from through the team's App installation; only the controller
 	// sets it, never a request body.
-	FetchedRepository        FetchedRepository `json:"-"`
-	SourceCredentialVerified bool              `json:"-"`
-	UnverifiedReason         string            `json:"-"`
+	FetchedRepository FetchedRepository `json:"-"`
+	// RepositoryPlacement is the policy the controller read from the proven
+	// repository's verified default branch; intake seals it only when it also
+	// seals repository proof.
+	RepositoryPlacement      *runspec.RepositoryPlacement `json:"-"`
+	SourceCredentialVerified bool                         `json:"-"`
+	UnverifiedReason         string                       `json:"-"`
 	RetryMode                string
 	// OriginMachine is a short-lived proof of the submitting machine's runner credential; intake verifies it and seals
 	// only the machine's name.
@@ -414,7 +418,7 @@ func insertAdmissionTx(ctx context.Context, tx *storeTx, team Team, result Admis
 	if err != nil {
 		return err
 	}
-	claimContext, err := persistClaimContextTx(ctx, tx, team, result.RunID, kind, requirements, nil)
+	claimContext, err := persistClaimContextTx(ctx, tx, team, result.RunID, "", kind, requirements, nil)
 	if err != nil {
 		return err
 	}
@@ -453,7 +457,7 @@ func writeAcceptedPlanTx(ctx context.Context, tx *storeTx, team Team, id string,
 		return err
 	}
 	if err == nil {
-		claimContext, err := persistClaimContextTx(ctx, tx, team, id, kind, requirements, nil)
+		claimContext, err := persistClaimContextTx(ctx, tx, team, id, "", kind, requirements, nil)
 		if err != nil {
 			return err
 		}

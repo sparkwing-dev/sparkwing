@@ -4,12 +4,14 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
 	"github.com/sparkwing-dev/sparkwing/internal/ndjson"
 	"github.com/sparkwing-dev/sparkwing/pkg/color"
 
 	"github.com/sparkwing-dev/sparkwing/internal/pipelinelint"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/pkg/projectconfig"
 )
 
@@ -62,6 +64,11 @@ func runPipelineLint(inv clisurface.Invocation) error {
 
 	if err := renderLintFindings(findings, format); err != nil {
 		return err
+	}
+	if format != "json" {
+		if err := printPlacementPreview(cfg, parsed.pipeline); err != nil {
+			return err
+		}
 	}
 	if len(findings) > 0 {
 		return fmt.Errorf("lint: %d violation%s", len(findings), pluralS(len(findings)))
@@ -139,4 +146,45 @@ func printLintRules(format string) error {
 		fmt.Printf("%s\n  forbids: %s\n  why:     %s\n", r.Name, r.Forbids, r.Why)
 	}
 	return nil
+}
+
+// safety: the preview reads the local file, but only the default branch's copy applies to proven runs.
+func printPlacementPreview(cfg *projectconfig.Config, only string) error {
+	if cfg == nil {
+		return nil
+	}
+	header := false
+	for _, p := range cfg.Pipelines {
+		if only != "" && p.Name != only {
+			continue
+		}
+		policy, err := cfg.RepositoryPlacement(p.Name, "")
+		if err != nil {
+			return err
+		}
+		if policy == nil {
+			continue
+		}
+		if !header {
+			fmt.Println("\nplacement for repository runs (the default branch's copy applies):")
+			header = true
+		}
+		fmt.Printf("  %s\n", p.Name)
+		fmt.Printf("    %-12s %s\n", "other jobs", placementLine(policy.Prefer))
+		for _, job := range policy.Jobs {
+			fmt.Printf("    %-12s %s\n", job.Job, placementLine(job.Prefer))
+		}
+	}
+	return nil
+}
+
+func placementLine(tiers []runspec.RepositoryTier) string {
+	if len(tiers) == 0 {
+		return "existing routing (no repository list)"
+	}
+	parts := make([]string, len(tiers))
+	for i, tier := range tiers {
+		parts[i] = tier.String()
+	}
+	return strings.Join(parts, " -> ")
 }

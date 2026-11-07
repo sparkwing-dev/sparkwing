@@ -35,7 +35,7 @@ func TestClaimRoutesSeekBoundedHeadsInALargeQueue(t *testing.T) {
 		if err := tx.QueryRowContext(t.Context(), `SELECT execution_json FROM nodes WHERE team='a' AND run_id='run' AND node_id='job'`).Scan(&execution); err != nil {
 			return err
 		}
-		claimContext, err := persistClaimContextTx(t.Context(), tx, "a", "run", capability.UnitNode, requirements, execution)
+		claimContext, err := persistClaimContextTx(t.Context(), tx, "a", "run", "job", capability.UnitNode, requirements, execution)
 		if err != nil {
 			return err
 		}

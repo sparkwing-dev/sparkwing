@@ -943,6 +943,7 @@ func (s *Server) startGitHubAppRuns(w http.ResponseWriter, r *http.Request, in s
 	}
 	resp := githubAppWebhookResp{Status: "dispatched"}
 	failed := 0
+	placement := s.defaultBranchPlacement(in.InstallationID, repo)
 	for _, plan := range planned {
 		// safety: a run this delivery already started answers without spending,
 		// so manually processing a partial delivery again spends only for missing runs.
@@ -950,7 +951,15 @@ func (s *Server) startGitHubAppRuns(w http.ResponseWriter, r *http.Request, in s
 			resp.Runs = append(resp.Runs, githubAppRun{Pipeline: plan.pipeline, RunID: existing.ID, Status: "duplicate"})
 			continue
 		}
-		run, err := s.startGitHubAppRun(r, tenant, in, plan, repo, body)
+		policy, err := placement(ctx, plan.pipeline)
+		if refusal := (*apierr.Error)(nil); errors.As(err, &refusal) {
+			resp.Runs = append(resp.Runs, githubAppRun{Pipeline: plan.pipeline, Status: "refused", Reason: err.Error()})
+			continue
+		} else if err != nil {
+			writeError(w, http.StatusBadGateway, err)
+			return
+		}
+		run, err := s.startGitHubAppRun(r, tenant, in, plan, repo, body, policy)
 		if err != nil {
 			var refusal *apierr.Error
 			if errors.As(err, &refusal) && refusal.Details["retry_after_ms"] != nil {
@@ -988,7 +997,7 @@ func githubAppStartedAny(runs []githubAppRun) bool {
 }
 
 func (s *Server) startGitHubAppRun(
-	r *http.Request, tenant *store.Tenant, installation store.GitHubAppInstallation, plan githubAppPlannedRun, repo store.GitHubRepo, body []byte,
+	r *http.Request, tenant *store.Tenant, installation store.GitHubAppInstallation, plan githubAppPlannedRun, repo store.GitHubRepo, body []byte, placement *runspec.RepositoryPlacement,
 ) (githubAppRun, error) {
 	in := plan.intake
 	now := time.Now()
@@ -1031,7 +1040,7 @@ func (s *Server) startGitHubAppRun(
 		unverifiedReason = "Run is unverified because " + unavailable.Error()
 	}
 	result, err := admitWithFlood(r.Context(), s, func(ctx context.Context) (store.AdmissionResult, error) {
-		return tenant.AdmitGitHubAppRun(ctx, store.GitHubAppAdmission{Request: request, Installation: installation, Subscription: plan.subscription, Automation: plan.automation, Event: r.Header.Get("X-GitHub-Event"), SourceCredentialVerified: credentialVerified, UnverifiedReason: unverifiedReason})
+		return tenant.AdmitGitHubAppRun(ctx, store.GitHubAppAdmission{Request: request, Installation: installation, Subscription: plan.subscription, Automation: plan.automation, Event: r.Header.Get("X-GitHub-Event"), SourceCredentialVerified: credentialVerified, UnverifiedReason: unverifiedReason, RepositoryPlacement: placement})
 	})
 	if errors.Is(err, store.ErrGitHubAppAutomationRevoked) {
 		return githubAppRun{Pipeline: plan.pipeline, Status: "ignored"}, nil

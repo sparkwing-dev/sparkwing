@@ -51,6 +51,8 @@ func TestIntakeSourceNumericIdentityProperty(t *testing.T) {
 				payload = `{"token":"private","expires_at":"2100-01-01T00:00:00Z","permissions":{"metadata":"read"}}`
 			case "/installation/repositories":
 				payload = `{"total_count":1,"repositories":[{"id":42,"full_name":"acme/app","owner":{"id":70,"login":"acme"}}]}`
+			case "/repos/acme/app":
+				payload = `{"id":42,"default_branch":"main"}`
 			case "/repos/acme/app/git/ref/heads/main":
 				payload = `{"ref":"refs/heads/main","object":{"type":"commit","sha":"` + strings.Repeat("a", 40) + `"}}`
 			case "/repos/acme/app/compare/" + strings.Repeat("a", 40) + "...refs/heads/main":

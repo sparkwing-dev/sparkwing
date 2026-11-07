@@ -451,7 +451,7 @@ func insertNodeTx(ctx context.Context, tx *storeTx, team Team, row runstate.Node
 	if err != nil {
 		return err
 	}
-	claimContext, err := persistClaimContextTx(ctx, tx, team, string(row.Ref.RunID), capability.UnitNode, requirements, execution)
+	claimContext, err := persistClaimContextTx(ctx, tx, team, string(row.Ref.RunID), string(row.Ref.NodeID), capability.UnitNode, requirements, execution)
 	if err != nil {
 		return err
 	}

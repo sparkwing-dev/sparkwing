@@ -223,6 +223,9 @@ func (s *Server) handleIntake(engine *EngineController) func(http.ResponseWriter
 		}
 		request.Intent = &intent.Request
 		request.FetchedRepository = fetched
+		if request.RepositoryPlacement, err = s.fetchedPlacement(ctx, store.Team(a.Target.Team), body.Request, fetched); err != nil {
+			return err
+		}
 		request.SourceCredentialVerified = credentialVerified
 		request.UnverifiedReason = unverifiedReason
 		response, err := admitWithFlood(ctx, s, func(ctx context.Context) (controllerwire.CreateRunResponse, error) {

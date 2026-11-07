@@ -150,7 +150,7 @@ func benchmarkClaimQuery(b *testing.B, dialect Dialect, scenario string) {
 			}
 			keys[team.Team+"/"+label] = key
 			body, _ := json.Marshal(map[string]any{"requires": map[string]any{"value": []string{labelTerm(label)}}})
-			context, err := persistClaimContextTx(ctx, wrapped, Team(team.Team), "run-"+team.Team, capability.UnitNode, key, body)
+			context, err := persistClaimContextTx(ctx, wrapped, Team(team.Team), "run-"+team.Team, "job", capability.UnitNode, key, body)
 			if err != nil {
 				b.Fatal(err)
 			}
