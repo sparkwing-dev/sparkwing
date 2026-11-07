@@ -19,6 +19,18 @@ const res = await ctx.exec(["go", "list", "./..."]).capture();
 `String`, `Lines`, `JSON` and `MustBeEmpty` (`string()`, `lines()`, `json()` and
 `mustBeEmpty()`) already capture and need no change.
 
+## Upgrade the store in place to schema baseline 34
+
+Schema 34 adds the partial index `idx_runs_live_children` on pending and
+running child runs to the recognized schema 33 baseline in one transaction. The
+controller's recovery sweep reads it to cancel children whose parent run or
+creating job has ended, without scanning retained run history. Earlier
+recognized baselines run their existing upgrades first. Older binaries refuse
+the upgraded store. Retain a backup before upgrading if you need to return to
+an older binary.
+
+No CLI, HTTP route, wire field or SDK symbol changes.
+
 ## Upgrade the store in place to schema baseline 33
 
 Schema 33 adds `local_runner_instances` to the recognized schema 32 baseline in
@@ -136,6 +148,14 @@ in the store.
 
 An incompatible pinned CLI receives an error naming its version, the controller
 version and this upgrade command. There is no compatibility relay.
+
+An enrolled `sparkwing-runner` with `runner.local_admission: true` uses the same
+machine admission, so it must match the controller's build too. An older runner
+fails each claimed job with an error naming both versions; restart its service
+after updating so it moves to the latest release. When the CLI runs an
+unreleased build that no runner release matches, set `local_admission: false`
+under `runner:` in the runner's config and restart the runner until a matching
+release ships.
 
 A ticket's holder PID and process start time determine liveness. Closing a
 request or losing a long poll leaves its queue arrival or lease intact. The

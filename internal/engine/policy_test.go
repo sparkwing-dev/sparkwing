@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -160,5 +161,25 @@ func TestVerifyIndexUsesOnlySuppliedTrust(t *testing.T) {
 	}
 	if _, err := VerifyIndex(signed, now, signingKeys(key)); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestRunnerPolicyNamesADevelopmentBuildAndItsRemedy(t *testing.T) {
+	key := testSigningKey(t)
+	policy, now := policyFixture()
+	index, err := VerifyIndex(signPolicy(t, key, policy), now, signingKeys(key))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, version := range []string{"v0.69.2-dev+a757d2c30", "v0.69.3-0.20261106120000-a757d2c30abc"} {
+		_, err := EvaluateRunner(index, version, now)
+		requireCode(t, err, apierr.InvalidArgs)
+		var api *apierr.Error
+		if !errors.As(err, &api) || !strings.Contains(api.Message, version) || !strings.Contains(api.Message, "development build") || !strings.Contains(api.Hint, "install.sh --runner") {
+			t.Fatalf("development runner refusal = %v", err)
+		}
+	}
+	if _, err := Evaluate(index, "v0.69.2-dev+a757d2c30", now); err == nil || strings.Contains(err.Error(), "sparkwing-runner") {
+		t.Fatalf("engine refusal took runner guidance: %v", err)
 	}
 }

@@ -26,9 +26,10 @@ import (
 // RunStatusFacts combines one committed run/job snapshot with complete attempt
 // history and validated log subjects from that read. Failures carry the masked
 // run and job errors, including a job's reported before any attempt started and
-// the run's when its pipeline failed to plan. JobResults carry each job's masked
-// summary and annotations. Notices carry engine version policy and unclaimed-work
-// observations. Private fields stay here until the public display projection.
+// the run's when its pipeline failed to plan, and a generator's whose expansion
+// failed. JobResults carry each job's masked summary and annotations. Notices
+// carry engine version policy and unclaimed-work observations. Private fields
+// stay here until the public display projection.
 type RunStatusFacts struct {
 	Reason     string
 	Snapshot   store.RunSnapshot
@@ -120,6 +121,10 @@ func runDetailResponse(target capability.Target, facts RunStatusFacts) (controll
 		nodes[string(row.Ref.NodeID)] = row
 		job := snapshotJob(row)
 		job.Error = errorsByJob[job.ID]
+		// hack: the generator itself succeeded, so without this the run fails naming a job that reads as green.
+		if row.Expansion == runstate.ExpansionFailed && job.Reason == "" {
+			job.Reason, job.StatusDetail = store.FailureExpansionFailed, "expansion_failed: the generated jobs were not added"
+		}
 		job.Summary, job.Annotations = results[job.ID].Summary, results[job.ID].Annotations
 		if reason := facts.HostIneligible[job.ID]; reason != "" && job.StatusDetail == "" {
 			job.StatusDetail = reason
@@ -164,10 +169,20 @@ func runDetailResponse(target capability.Target, facts RunStatusFacts) (controll
 // safety: a need on a job this run never planned would draw an edge to nothing, so only planned jobs pass.
 func fillJobDeclarations(jobs []controllerwire.JobDetail, nodes map[string]runstate.NodeRow, snapshot store.RunSnapshot) error {
 	continueOnError := make(map[string]bool, len(jobs))
+	generatedNeeds := make(map[string][]string)
+	generators := make(map[string]string)
 	for i := range jobs {
 		spec := nodes[jobs[i].ID].Spec
 		if len(spec) == 0 {
 			continue
+		}
+		// safety: decoded apart from the display facts, so a closure shape this projection does not expect drops only the
+		// expansion diagnosis.
+		var generator jobGeneratorDeclaration
+		if json.Unmarshal(spec, &generator) == nil {
+			for _, group := range generator.Closures.Generate {
+				generators[group] = jobs[i].ID
+			}
 		}
 		// safety: only the display facts are decoded, so a declaration this projection does not read (env values,
 		// closures) can neither fail the run page nor reach it; an undecodable one shows the job without them.
@@ -176,6 +191,7 @@ func fillJobDeclarations(jobs []controllerwire.JobDetail, nodes map[string]runst
 			continue
 		}
 		continueOnError[jobs[i].ID] = declaration.ContinueOnError
+		generatedNeeds[jobs[i].ID] = declaration.NeedsGenerated
 		for _, need := range append(declaration.Needs, declaration.NeedsIfPresent...) {
 			if _, exists := nodes[need]; exists && !slices.Contains(jobs[i].Needs, need) {
 				jobs[i].Needs = append(jobs[i].Needs, need)
@@ -201,6 +217,15 @@ func fillJobDeclarations(jobs []controllerwire.JobDetail, nodes map[string]runst
 			resolved = true
 		}
 		var blocked []string
+		// safety: mirrors the scheduler, which cancels on a failed generated-group barrier before ordinary
+		// dependencies, and continue_on_error on the generator does not lift that barrier.
+		for _, group := range generatedNeeds[jobs[i].ID] {
+			source, exists := generators[group]
+			entry := fmt.Sprintf("%q (expansion failed)", source)
+			if exists && nodes[source].Expansion == runstate.ExpansionFailed && !slices.Contains(blocked, entry) {
+				blocked = append(blocked, entry)
+			}
+		}
 		needs := jobs[i].Needs
 		if resolved, ok := dependencies[jobs[i].ID]; ok {
 			needs = resolved
@@ -226,9 +251,16 @@ type jobDisplayDeclaration struct {
 	ContinueOnError bool            `json:"continue_on_error"`
 	Needs           []string        `json:"deps"`
 	NeedsIfPresent  []string        `json:"deps_if_present"`
+	NeedsGenerated  []string        `json:"needs_generated"`
 	Groups          []string        `json:"groups"`
 	OnFailureOf     string          `json:"on_failure_of"`
 	Approval        json.RawMessage `json:"approval"`
+}
+
+type jobGeneratorDeclaration struct {
+	Closures struct {
+		Generate []string `json:"generate"`
+	} `json:"closures"`
 }
 
 func statusAttempts(target capability.Target, nodes map[string]runstate.NodeRow, rows []runstate.NodeAttempt) ([]controllerwire.AttemptDetail, error) {

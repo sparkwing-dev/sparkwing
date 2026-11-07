@@ -43,6 +43,7 @@ var reviewedUnscopedSQL = map[string]string{
 	"(*Operator).MarkBlobTombstones":        "garbage collection compares every tenant blob with the complete live reference graph",
 	"(*Operator).SealAbandonedLogStreams":   "log maintenance discovers abandoned streams across every tenant",
 	"(*Operator).dueRunEffects":             "the completion worker discovers due effects across tenants before dispatching each tenant run",
+	"(*Operator).cancelUnawaitedChildren":   "the reaper discovers live child runs across tenants whose parent no longer awaits them, then cancels each by its own team key",
 	"(*Operator).expiredUnits":              "the reaper discovers expired execution units across tenants before expiring each exact unit",
 	"(*Operator).launcherKeysTx":            "launcher observations name global unit identities whose stored fence and capability ancestry prove ownership before any award is returned",
 	"(*Operator).launcherPrefixesTx":        "launcher reconciliation discovers every tenant award before validating each exact award",

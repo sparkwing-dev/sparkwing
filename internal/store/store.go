@@ -55,6 +55,9 @@ const (
 	// FailureJobDurationLimit: a Cloud job reached its team's standing job
 	// duration limit, counted from its first award, before an award could start it.
 	FailureJobDurationLimit = "job_duration_limit"
+	// FailureExpansionFailed: a generator job succeeded but its generated jobs
+	// were never added; status reads the reason from the expansion row.
+	FailureExpansionFailed = "expansion_failed"
 )
 
 // retrySourceManual identifies an explicitly retried run.
@@ -1303,7 +1306,7 @@ func scanApproval(rs rowScanner) (*Approval, error) {
 var schemaNeutral string
 
 // safety: fresh stores get this baseline whole; an older store upgrades only through schemaUpgrades.
-const expectedSchemaVersion = 33
+const expectedSchemaVersion = 34
 
 // ExpectedSchemaVersion returns the schema version this binary
 // understands. Useful for diagnostics, version-mismatch reporting,

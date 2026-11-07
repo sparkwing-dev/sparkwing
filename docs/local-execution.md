@@ -282,8 +282,9 @@ becomes controller-owned during intake. It schedules the preserved plan without
 starting another planning owner. The controller materializes reused jobs as
 successful with zero attempts and copies their outputs and artifacts into the
 new run for dependents. Reused jobs receive no execution claim. If a source
-result has expired, was deleted or cannot be copied within the retry's data scope, the job
-executes again.
+result has expired, was deleted, cannot be copied within the retry's data scope or no
+longer matches the job, the job executes again. Reuse is decided when a job's dependencies finish, so a job never
+reuses its earlier result while a job it needs runs again.
 
 ### Publishing a foreground run handle
 
@@ -645,6 +646,13 @@ placement still belong to the controller. With `local_admission` enabled, a
 registered machine with no available local CPU or memory budget withdraws its
 job capacity until budget becomes available. Planning continues while the
 machine budget is full.
+
+With `local_admission` enabled, the runner never starts the local controller and
+must match its build. If no controller runs, or it runs a build the runner
+cannot speak to, each claimed job fails with the fix: `sparkwing dashboard
+start` or `sparkwing dashboard install` for a missing controller, matching
+builds for a mismatch, or `local_admission: false` to stop sharing. The runner
+logs one warning per cause while it lasts.
 
 Each claimed job holds its machine lease through source preparation, execution
 and cleanup. Busy local work does not prevent jobs from becoming ready for overflow.

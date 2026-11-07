@@ -22,6 +22,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/procgroup"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
+	"github.com/sparkwing-dev/sparkwing/internal/wingd/journal"
 	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
 )
 
@@ -432,6 +433,7 @@ func TestMachineAdmissionOldPinNamesBothVersionsAndUpgrade(t *testing.T) {
 		t.Run(operation, func(t *testing.T) {
 			d := newHTTPAdmissionTest(t, &admissionMemoryStore{})
 			d.cfg.Version = "v0.70.0"
+			d.journal = journal.NewWriter(d.layout.dir, 1, nil)
 			server, client := net.Pipe()
 			done := make(chan struct{})
 			go func() { defer close(done); d.refuseLegacyAdmission(server) }()
@@ -459,12 +461,20 @@ func TestMachineAdmissionOldPinNamesBothVersionsAndUpgrade(t *testing.T) {
 			if refusal.Type != "unsupported" {
 				t.Fatalf("legacy operation returned %q", refusal.Type)
 			}
-			for _, want := range []string{"v0.69.1", "v0.70.0", "sparkwing pipeline upgrade"} {
+			for _, want := range []string{"v0.69.1", "v0.70.0", "sparkwing pipeline upgrade", "sparkwing-runner", "runner.local_admission: false"} {
 				if !strings.Contains(refusal.Payload.Reason, want) {
 					t.Fatalf("refusal missing %q: %s", want, refusal.Payload.Reason)
 				}
 			}
 			<-done
+			d.journal.Close()
+			records, _, err := journal.ReadWithStats(d.layout.dir)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(records) != 1 || records[0].Kind != "handshake_refused" || records[0].Data["peer_version"] != "v0.69.1" {
+				t.Fatalf("refusal left no journal record for daemon events: %+v", records)
+			}
 			if len(d.ledger.Snapshot().Leases) != 0 {
 				t.Fatal("legacy peer acquired authority")
 			}
