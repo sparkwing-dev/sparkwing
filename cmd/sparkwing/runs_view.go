@@ -163,7 +163,7 @@ func writeRunErrors(out io.Writer, detail controllerwire.RunDetail, format strin
 		}
 	}
 	for _, job := range detail.Jobs {
-		if job.Outcome != "failed" && job.Status != "failed" {
+		if job.Outcome != "failed" && job.Status != "failed" && job.Expansion != "failed" {
 			continue
 		}
 		failure := runFailure{RunID: detail.ID, JobID: job.ID, Attempt: job.Attempt, Outcome: job.Outcome, Reason: jobFailureText(job)}

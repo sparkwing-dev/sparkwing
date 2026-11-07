@@ -653,6 +653,13 @@ registered machine with no available local CPU or memory budget withdraws its
 job capacity until budget becomes available. Planning continues while the
 machine budget is full.
 
+With `local_admission` enabled, the runner never starts the local controller and
+must match its build. If no controller runs, or it runs a build the runner
+cannot speak to, each claimed job fails with the fix: `sparkwing dashboard
+start` or `sparkwing dashboard install` for a missing controller, matching
+builds for a mismatch, or `local_admission: false` to stop sharing. The runner
+logs one warning per cause while it lasts.
+
 Each claimed job holds its machine lease through source preparation, execution
 and cleanup. Busy local work does not prevent jobs from becoming ready for overflow.
 The store commits plan capacity with permission to release work. Each executing
