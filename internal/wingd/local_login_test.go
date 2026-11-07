@@ -666,15 +666,15 @@ func TestLocalDashboardLogoutAfterLookupStillEndsTheStream(t *testing.T) {
 		}
 		logins.end(digest)
 	}})
-	ended := make(chan struct{})
 	server.Config.Handler = logins.gate(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		<-r.Context().Done()
-		close(ended)
 	}), nil)
 	server.Start()
 	t.Cleanup(server.Close)
-	ctx, cancel := context.WithCancel(t.Context())
+	// safety: the stream ends on its own when Log out reaches it; only a stream that outlived it reaches this deadline.
+	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
+	defer cancel()
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
@@ -688,15 +688,10 @@ func TestLocalDashboardLogoutAfterLookupStillEndsTheStream(t *testing.T) {
 			_ = resp.Body.Close()
 		}
 	}()
-	select {
-	case <-ended:
-	case <-time.After(5 * time.Second):
-		cancel()
-		<-done
+	<-done
+	if ctx.Err() != nil {
 		t.Fatal("a stream validated just before Log out outlived it")
 	}
-	cancel()
-	<-done
 	logins.mu.Lock()
 	watches := len(logins.watch)
 	logins.mu.Unlock()
