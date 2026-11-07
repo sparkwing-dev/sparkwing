@@ -51,6 +51,8 @@ JSON emits event records followed by a page record with truncated. Plain and pre
 
 Restart an answering local controller
 
+The local runner and the jobs it holds keep running through the restart; the replacement controller starts a new runner only when the version changes.
+
 ### Flags
 
 | Flag | Description |
@@ -78,7 +80,7 @@ Report local controller status
 
 Stop the local controller
 
-Stops the local controller and its dashboard. The dashboard no longer returns when a run or schedule next starts the controller.
+Stops the local controller, its dashboard and its local runner. The runner stops claiming work first: an idle runner exits within seconds, and a runner holding jobs finishes them and exits once a controller accepts their results. The next run, schedule or `sparkwing dashboard open` starts the controller, dashboard and a new runner again.
 
 ### Flags
 

@@ -13,54 +13,48 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/localhostwire"
 )
 
-func TestLocalDashboardStartsOnExistingController(t *testing.T) {
+func TestLocalDashboardBindsOnEveryStart(t *testing.T) {
 	f := &runtimeControllerFixture{}
 	r := newRuntimeFixture(t, f)
-	var binds atomic.Int32
-	var dashboard *runtimeListener
-	r.listen = func(network, _ string) (net.Listener, error) {
+	r.cfg.Dashboard = DashboardSettings{Address: "127.0.0.1:4343", ReadOnly: true}
+	var binds []string
+	var listeners []*runtimeListener
+	r.listen = func(network, address string) (net.Listener, error) {
 		listener := &runtimeListener{closed: make(chan struct{})}
 		if network == "tcp" {
-			binds.Add(1)
-			dashboard = listener
+			binds = append(binds, address)
+			listeners = append(listeners, listener)
 		}
 		return listener, nil
 	}
 	lifecycle := NewLocalLifecycle(r, nil)
 	opts := LocalStartOptions{Home: f.home, Version: "v1"}
-	first, err := lifecycle.EnsureStarted(t.Context(), opts)
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() {
-		if err := lifecycle.Stop(context.Background()); err != nil {
-			t.Error(err)
-		}
-	})
-	if binds.Load() != 0 {
-		t.Fatal("dashboard started without a request")
-	}
-	opts.DashboardAddress = "127.0.0.1:0"
 	for range 2 {
-		status, err := lifecycle.StartDashboard(t.Context(), opts)
-		if err != nil || !status.Running || status.PID != first.PID {
-			t.Fatalf("dashboard start: %+v %v", status, err)
+		status, err := lifecycle.EnsureStarted(t.Context(), opts)
+		if err != nil || !status.Running || status.DashboardURL == "" || status.DashboardError != "" {
+			t.Fatalf("start: %+v %v", status, err)
+		}
+		if err := lifecycle.Stop(t.Context()); err != nil {
+			t.Fatal(err)
 		}
 	}
-	opts.DashboardReadOnly = true
-	if _, err := lifecycle.StartDashboard(t.Context(), opts); err == nil {
-		t.Fatal("changed the read-only policy of an existing listener")
+	if len(binds) != 2 || binds[0] != "127.0.0.1:4343" || binds[1] != "127.0.0.1:4343" {
+		t.Fatalf("dashboard binds=%v, want the configured address on each start", binds)
 	}
-	if binds.Load() != 1 {
-		t.Fatalf("dashboard binds=%d, want one", binds.Load())
+	for _, listener := range listeners {
+		select {
+		case <-listener.closed:
+		default:
+			t.Fatal("dashboard listener survived controller shutdown")
+		}
+	}
+	opts.Standalone = true
+	status, err := lifecycle.EnsureStarted(t.Context(), opts)
+	if err != nil || status.DashboardURL != "" || len(binds) != 2 {
+		t.Fatalf("standalone controller served a dashboard: %+v %v %v", status, binds, err)
 	}
 	if err := lifecycle.Stop(t.Context()); err != nil {
 		t.Fatal(err)
-	}
-	select {
-	case <-dashboard.closed:
-	default:
-		t.Fatal("dashboard listener survived controller shutdown")
 	}
 }
 
@@ -84,13 +78,12 @@ func TestLocalDashboardBindFailureLeavesControllerAvailable(t *testing.T) {
 			t.Error(err)
 		}
 	})
-	opts.DashboardAddress = "127.0.0.1:0"
-	if _, err := lifecycle.StartDashboard(t.Context(), opts); !errors.Is(err, failure) {
-		t.Fatalf("bind error: %v", err)
-	}
 	status, err := lifecycle.Status(t.Context())
 	if err != nil || !status.Running || f.closed.Load() {
 		t.Fatalf("controller lost after bind failure: %+v %v", status, err)
+	}
+	if status.DashboardURL != "" || !strings.Contains(status.DashboardError, failure.Error()) || !strings.Contains(status.DashboardError, r.cfg.Dashboard.Address) {
+		t.Fatalf("bind failure not reported: %+v", status)
 	}
 }
 
@@ -99,11 +92,7 @@ func TestLocalDashboardStartupFailureReachesCaller(t *testing.T) {
 	r := newRuntimeFixture(t, f)
 	lifecycle := NewLocalLifecycle(r, nil)
 	opts := LocalStartOptions{Home: f.home, Version: "v1"}
-	if _, err := lifecycle.EnsureStarted(t.Context(), opts); err != nil {
-		t.Fatal(err)
-	}
-	opts.DashboardAddress = "127.0.0.1:0"
-	if _, err := lifecycle.StartDashboard(t.Context(), opts); err == nil || !strings.Contains(err.Error(), "shared handler") {
+	if _, err := lifecycle.EnsureStarted(t.Context(), opts); err == nil || !strings.Contains(err.Error(), "shared handler") {
 		t.Fatalf("startup error: %v", err)
 	}
 	if !f.closed.Load() {
@@ -120,7 +109,8 @@ func TestLocalDashboardReadinessAndJoinedShutdown(t *testing.T) {
 		f := &runtimeControllerFixture{}
 		var calls atomic.Int32
 		f.http = func() localhostwire.LocalHTTP {
-			if calls.Add(1) == 2 {
+			// safety: the dashboard builds its handler before the API serves, so it is the first call.
+			if calls.Add(1) == 1 {
 				close(entered)
 				<-accept
 			}
@@ -136,12 +126,8 @@ func TestLocalDashboardReadinessAndJoinedShutdown(t *testing.T) {
 		}
 		lifecycle := NewLocalLifecycle(r, nil)
 		opts := LocalStartOptions{Home: f.home, Version: "v1"}
-		if _, err := lifecycle.EnsureStarted(t.Context(), opts); err != nil {
-			t.Fatal(err)
-		}
-		opts.DashboardAddress = "127.0.0.1:0"
 		started := make(chan error, 1)
-		go func() { _, err := lifecycle.StartDashboard(t.Context(), opts); started <- err }()
+		go func() { _, err := lifecycle.EnsureStarted(t.Context(), opts); started <- err }()
 		<-entered
 		synctest.Wait()
 		select {
@@ -167,74 +153,4 @@ func TestLocalDashboardReadinessAndJoinedShutdown(t *testing.T) {
 			t.Fatal(err)
 		}
 	})
-}
-
-func TestLocalDashboardReturnsWithAnOnDemandRestart(t *testing.T) {
-	f := &runtimeControllerFixture{}
-	r := newRuntimeFixture(t, f)
-	var binds []string
-	var refuse atomic.Bool
-	r.listen = func(network, address string) (net.Listener, error) {
-		if network == "tcp" {
-			if refuse.Load() {
-				return nil, errors.New("dashboard address is occupied")
-			}
-			binds = append(binds, address)
-		}
-		return &runtimeListener{closed: make(chan struct{})}, nil
-	}
-	lifecycle := NewLocalLifecycle(r, nil)
-	onDemand := LocalStartOptions{Home: f.home, Version: "v1"}
-	restart := func() LocalStatus {
-		t.Helper()
-		if err := lifecycle.Stop(t.Context()); err != nil {
-			t.Fatal(err)
-		}
-		status, err := lifecycle.EnsureStarted(t.Context(), onDemand)
-		if err != nil || !status.Running {
-			t.Fatalf("on-demand restart: %+v %v", status, err)
-		}
-		return status
-	}
-	t.Cleanup(func() {
-		if err := lifecycle.Stop(context.Background()); err != nil {
-			t.Error(err)
-		}
-	})
-	if status := restart(); status.DashboardURL != "" || len(binds) != 0 {
-		t.Fatalf("a controller that never served a dashboard started one: %+v %v", status, binds)
-	}
-	serving := onDemand
-	serving.DashboardAddress, serving.DashboardReadOnly = "127.0.0.1:4343", true
-	if _, err := lifecycle.StartDashboard(t.Context(), serving); err != nil {
-		t.Fatal(err)
-	}
-	if status := restart(); status.DashboardURL == "" || len(binds) != 2 || binds[1] != serving.DashboardAddress {
-		t.Fatalf("the dashboard did not return at its address: %+v %v", status, binds)
-	}
-	if _, err := lifecycle.StartDashboard(t.Context(), serving); err != nil {
-		t.Fatalf("the restored dashboard lost its read-only policy: %v", err)
-	}
-	refuse.Store(true)
-	if status := restart(); status.DashboardURL != "" {
-		t.Fatalf("an occupied address served a dashboard: %+v", status)
-	}
-	refuse.Store(false)
-	if err := ForgetDashboard(f.home); err != nil {
-		t.Fatal(err)
-	}
-	if status := restart(); status.DashboardURL != "" || len(binds) != 2 {
-		t.Fatalf("a forgotten dashboard returned: %+v %v", status, binds)
-	}
-	remote := serving
-	remote.DashboardAddress = "0.0.0.0:4343"
-	if _, err := lifecycle.StartDashboard(t.Context(), remote); err != nil {
-		t.Fatal(err)
-	}
-	if status := restart(); status.DashboardURL == "" || len(binds) != 4 || binds[3] != serving.DashboardAddress {
-		t.Fatalf("a restored remote dashboard did not fall back to loopback: %+v %v", status, binds)
-	}
-	if _, err := lifecycle.StartDashboard(t.Context(), serving); err != nil {
-		t.Fatalf("the loopback restore lost its read-only policy: %v", err)
-	}
 }

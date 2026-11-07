@@ -15,6 +15,7 @@ See [Config reference](config-reference.md).
 | `profiles` | Named controller connections containing `controller.url`, an optional `controller.token`, and `default: true` to select an optional-profile CLI connection. |
 | `repos` | Registered checkout paths, `fallback_paths`, `auto_register` and `include_worktrees`. |
 | `admission` | Machine admission `mode`, `budget` and `custom` policy. |
+| `dashboard` | The local dashboard's loopback `address` and `read_only` switch. |
 | `runner` | Controller URL, `credentials_dir`, permitted `repos`, labels and local capacity preferences. |
 | `cache` | Local binary-cache `max_bytes` and `max_entries`. Explicit zero disables a bound. |
 | `machine` | An optional `box_id` for standalone machine admission. |
@@ -52,6 +53,8 @@ runner:
   local_admission: true
 cache:
   max_bytes: 4GiB
+dashboard:
+  address: 127.0.0.1:4343
 machine:
   box_id: rack-3-host-7
 run:
@@ -96,6 +99,20 @@ programs are using. Adding `ignore-external` stops subtracting other
 programs' load, which suits a machine that runs only Sparkwing work. CPU used
 by a job's own processes is never external; see [Local admission](admission.md#external-load). The
 daemon reads the budget at start, so restart it after a change.
+
+## Dashboard
+
+The shared local controller serves the dashboard whenever it runs.
+`dashboard.address` is the loopback IP and port it binds, `127.0.0.1:4343` by
+default. A non-loopback or host-name address is refused. The dashboard answers
+only its own loopback origin, so a browser on another machine reaches it through
+an SSH port forward, for example `ssh -N -L 4343:127.0.0.1:4343 user@host`; a
+reverse proxy that presents another host name is refused. Port `0` picks a free port, which suits an isolated
+`SPARKWING_HOME` that would otherwise contend for the default; `sparkwing
+dashboard status` prints the bound address. `dashboard.read_only: true` refuses
+browser writes while still allowing signed-in reads, including decrypted
+secrets, and sign-out. The controller reads this section when it starts, so run
+`sparkwing daemon restart --force` after a change.
 
 ## Runner labels
 

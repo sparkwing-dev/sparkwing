@@ -10,11 +10,9 @@ import (
 )
 
 type lifecycleOwner struct {
-	status             wingd.LocalStatus
-	err                error
-	dashboards, drains int
-	address            string
-	readOnly           bool
+	status wingd.LocalStatus
+	err    error
+	drains int
 }
 
 func (o *lifecycleOwner) Status(ctx context.Context) (wingd.LocalStatus, error) {
@@ -22,12 +20,6 @@ func (o *lifecycleOwner) Status(ctx context.Context) (wingd.LocalStatus, error) 
 		return wingd.LocalStatus{}, err
 	}
 	return o.status, o.err
-}
-
-func (o *lifecycleOwner) EnsureDashboard(_ context.Context, address string, readOnly bool) error {
-	o.dashboards++
-	o.address, o.readOnly = address, readOnly
-	return o.err
 }
 
 func (o *lifecycleOwner) Drain(context.Context) error {
@@ -76,13 +68,13 @@ func TestLocalLifecycleReusesForeignOwner(t *testing.T) {
 	local := &localRuntimeFixture{}
 	owner := &lifecycleOwner{status: wingd.LocalStatus{Running: true, PID: 72, Version: "v1"}}
 	lifecycle := localLifecycleFixture(t, home, local, owner)
-	opts := wingd.LocalStartOptions{Home: home, Version: "v1", DashboardAddress: "127.0.0.1:9173", DashboardReadOnly: true}
-	status, err := lifecycle.StartDashboard(t.Context(), opts)
+	opts := wingd.LocalStartOptions{Home: home, Version: "v1"}
+	status, err := lifecycle.EnsureStarted(t.Context(), opts)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if status.PID != 72 || status.Version != "v1" || local.starts != 0 || owner.dashboards != 1 || owner.address != opts.DashboardAddress || !owner.readOnly {
-		t.Fatalf("owner=%+v local starts=%d dashboards=%d", status, local.starts, owner.dashboards)
+	if status.PID != 72 || status.Version != "v1" || local.starts != 0 {
+		t.Fatalf("owner=%+v local starts=%d", status, local.starts)
 	}
 	if err := lifecycle.Stop(t.Context()); err != nil {
 		t.Fatal(err)
@@ -119,13 +111,13 @@ func TestLocalLifecycleRefusesStandaloneAndForeignHome(t *testing.T) {
 	lifecycle := localLifecycleFixture(t, home, local, owner)
 	for _, opts := range []wingd.LocalStartOptions{
 		{Home: home, Standalone: true},
-		{Home: t.TempDir(), DashboardAddress: "127.0.0.1:9173"},
+		{Home: t.TempDir()},
 	} {
-		if _, err := lifecycle.StartDashboard(t.Context(), opts); err == nil {
+		if _, err := lifecycle.EnsureStarted(t.Context(), opts); err == nil {
 			t.Fatalf("accepted %+v", opts)
 		}
 	}
-	if local.starts != 0 || owner.dashboards != 0 || owner.drains != 0 {
+	if local.starts != 0 || owner.drains != 0 {
 		t.Fatalf("refused operation changed an owner: local=%+v owner=%+v", local, owner)
 	}
 }
@@ -174,14 +166,14 @@ func TestLocalLifecycleRetainsLocalOwnerAndStartupFailure(t *testing.T) {
 	local := &localRuntimeFixture{lifecycleOwner: lifecycleOwner{status: wingd.LocalStatus{Running: true, PID: 17, Version: "v1"}}}
 	owner := &lifecycleOwner{err: errors.New("foreign transport must remain unused")}
 	lifecycle := localLifecycleFixture(t, home, local, owner)
-	status, err := lifecycle.StartDashboard(t.Context(), wingd.LocalStartOptions{DashboardAddress: "127.0.0.1:9173"})
+	status, err := lifecycle.EnsureStarted(t.Context(), wingd.LocalStartOptions{})
 	if err != nil || status.PID != 17 {
 		t.Fatalf("local owner=%+v err=%v", status, err)
 	}
 	if err := lifecycle.Stop(t.Context()); err != nil {
 		t.Fatal(err)
 	}
-	if local.dashboards != 1 || local.drains != 1 || owner.dashboards != 0 || owner.drains != 0 {
+	if local.drains != 1 || owner.drains != 0 {
 		t.Fatalf("wrong owner changed: local=%+v foreign=%+v", local, owner)
 	}
 	startup := errors.New("controller factory failed")

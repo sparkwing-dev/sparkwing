@@ -10,7 +10,6 @@ Run a pipeline on the machine where you invoke Sparkwing:
 
 ```bash
 sparkwing run build
-sparkwing dashboard start
 sparkwing dashboard open
 ```
 

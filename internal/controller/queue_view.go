@@ -64,7 +64,7 @@ func (s *Server) handleQueueStateView(w http.ResponseWriter, r *http.Request, a 
 			pid := strconv.Itoa(os.Getpid())
 			return apierrhttp.Write(w, &apierr.Error{
 				Code: apierr.Unavailable, Message: "The local admission daemon did not answer.",
-				Hint: "Stop the sparkwing process " + pid + " by hand (for example `kill " + pid + "`), then run `sparkwing dashboard start`.",
+				Hint: "Stop the sparkwing process " + pid + " by hand (for example `kill " + pid + "`), then run `sparkwing dashboard open`.",
 			})
 		}
 	}

@@ -17,19 +17,3 @@ type LocalControlStatus struct {
 	// DashboardURL is the dashboard origin while it serves, never a sign-in link.
 	DashboardURL string `json:"dashboard_url,omitempty"`
 }
-
-// LocalDashboard starts the dashboard on the elected owner and waits for its
-// serving loop. Cancelling the HTTP request cancels the wait.
-// Health probes and admission-only daemons cannot serve this operation.
-type LocalDashboard struct {
-	Address  string `json:"address"`
-	ReadOnly bool   `json:"read_only,omitempty"`
-}
-
-// LocalDashboardAck acknowledges readiness, or names a failed start. A
-// failed transport is an error even if no result arrived. Retrying an identical
-// address and read-only policy reuse the owner's listener; it never spawns another controller.
-type LocalDashboardAck struct {
-	ReadOnly bool   `json:"read_only,omitempty"`
-	Error    string `json:"error,omitempty"`
-}

@@ -46,8 +46,6 @@ func LocalSubject(peer, owner localhostwire.LocalPeerIdentity) (string, error) {
 type LocalStartOptions struct {
 	Home, Executable, Version string
 	Standalone                bool
-	DashboardAddress          string
-	DashboardReadOnly         bool
 }
 
 // LocalRuntime uses the same internal/controller implementation, route policy and state owner.
@@ -57,9 +55,6 @@ type LocalRuntime interface {
 	// A completed previous Run cannot satisfy a new readiness request.
 	AwaitReady(context.Context) (LocalStatus, error)
 	Status(context.Context) (LocalStatus, error)
-	// EnsureDashboard starts the UI on an already-ready owner, reusing an identical address and read-only policy.
-	// A different address or policy is refused until the controller is stopped and restarted.
-	EnsureDashboard(context.Context, string, bool) error
 	// Drain returns after the admission drain and controller shutdown complete.
 	Drain(context.Context) error
 }
@@ -72,6 +67,8 @@ type LocalStatus struct {
 	Activity           LocalActivity
 	// DashboardURL is the serving dashboard's origin, empty while it is not serving.
 	DashboardURL string
+	// DashboardError says why a running controller serves no dashboard.
+	DashboardError string
 }
 
 // ManagedUnitKind gives schedules and the controller one upgrade path.
@@ -100,10 +97,9 @@ type ManagedUnitManager interface {
 	Inspect(context.Context) ([]ManagedUnit, error)
 }
 
-// LocalLifecycle starts on demand and shares the runtime used by explicit dashboard commands.
+// LocalLifecycle starts on demand and shares the runtime used by the daemon and dashboard commands.
 type LocalLifecycle interface {
 	EnsureStarted(context.Context, LocalStartOptions) (LocalStatus, error)
-	StartDashboard(context.Context, LocalStartOptions) (LocalStatus, error)
 	InstallController(context.Context, LocalStartOptions) (LocalStatus, error)
 	Stop(context.Context) error
 	Status(context.Context) (LocalStatus, error)

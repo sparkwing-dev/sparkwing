@@ -17,6 +17,32 @@ import (
 
 const localRunnerPath = "/api/v1/local/runners"
 
+// safety: a runner holding jobs keeps running past this bound and finishes them against the next controller.
+const localRunnerRetireWait = 5 * time.Second
+
+type runnerWake struct {
+	mu      sync.Mutex
+	changed chan struct{}
+}
+
+func (w *runnerWake) subscribe() <-chan struct{} {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if w.changed == nil {
+		w.changed = make(chan struct{})
+	}
+	return w.changed
+}
+
+func (w *runnerWake) notify() {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if w.changed != nil {
+		close(w.changed)
+	}
+	w.changed = make(chan struct{})
+}
+
 // LocalRunnerProcessAlive checks the recorded process incarnation, excluding exited processes.
 // Inspection errors leave the identity unknown rather than declaring its process dead.
 func LocalRunnerProcessAlive(instance localhostwire.LocalRunnerInstance) (bool, error) {
@@ -38,19 +64,7 @@ type LocalRunnerStore interface {
 }
 
 func (d *Daemon) localRunnerHTTP(next http.Handler) http.Handler {
-	var mu sync.Mutex
-	changed := make(chan struct{})
-	subscribe := func() <-chan struct{} {
-		mu.Lock()
-		defer mu.Unlock()
-		return changed
-	}
-	notify := func() {
-		mu.Lock()
-		defer mu.Unlock()
-		close(changed)
-		changed = make(chan struct{})
-	}
+	subscribe, notify := d.runnerWake.subscribe, d.runnerWake.notify
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != localRunnerPath && !strings.HasPrefix(r.URL.Path, localRunnerPath+"/") {
 			next.ServeHTTP(w, r)
@@ -73,6 +87,11 @@ func (d *Daemon) localRunnerHTTP(next http.Handler) http.Handler {
 			return
 		}
 		if r.URL.Path == localRunnerPath && r.Method == http.MethodGet && r.URL.Query().Get("state") == "active" {
+			// safety: a stopping controller must not hand its supervisor a reason to start a runner it then abandons.
+			if d.isDraining() {
+				writeLocalRunnerFailure(w, errControllerStopping)
+				return
+			}
 			instance, err := registry.ActiveLocalRunner(r.Context(), subject)
 			if err != nil {
 				writeLocalRunnerFailure(w, err)
@@ -82,7 +101,13 @@ func (d *Daemon) localRunnerHTTP(next http.Handler) http.Handler {
 			return
 		}
 		if r.URL.Path == localRunnerPath && r.Method == http.MethodPost {
+			release, ok := d.admitRunnerChange()
+			if !ok {
+				writeLocalRunnerFailure(w, errControllerStopping)
+				return
+			}
 			instance, err := registerLocalRunnerHTTP(w, r, registry, subject, peer)
+			release()
 			if err != nil {
 				writeLocalRunnerFailure(w, err)
 				return
@@ -107,7 +132,13 @@ func (d *Daemon) localRunnerHTTP(next http.Handler) http.Handler {
 		}
 		switch parts[1] {
 		case "activate":
+			release, ok := d.admitRunnerChange()
+			if !ok {
+				writeLocalRunnerFailure(w, errControllerStopping)
+				return
+			}
 			err = registry.ActivateLocalRunner(r.Context(), subject, parts[0])
+			release()
 		case "drain":
 			err = registry.DrainLocalRunner(r.Context(), subject, parts[0])
 		case "stop":
@@ -124,6 +155,80 @@ func (d *Daemon) localRunnerHTTP(next http.Handler) http.Handler {
 		writeAdmissionJSON(w, struct{}{})
 	})
 }
+
+// safety: the drain lands while the API still answers, so the runner sees it, records its stop and revokes its
+// token before exiting; a runner that outlives its controller cannot. Restart skips this because runners and
+// their jobs outlive controller restarts.
+func (d *Daemon) retireLocalRunner(ctx context.Context) error {
+	registry, ok := d.cfg.Runs.(LocalRunnerStore)
+	if !ok {
+		return nil
+	}
+	subject, err := CurrentLocalSubject()
+	if err != nil {
+		return err
+	}
+	d.runnerChanges.lock()
+	instance, err := registry.ActiveLocalRunner(ctx, subject)
+	var failure *apierr.Error
+	if err == nil {
+		err = registry.DrainLocalRunner(ctx, subject, instance.ID)
+	}
+	d.runnerChanges.unlock()
+	if errors.As(err, &failure) && failure.Code == apierr.NotFound {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	d.runnerWake.notify()
+	ctx, cancel := context.WithTimeout(ctx, localRunnerRetireWait)
+	defer cancel()
+	for {
+		alive, err := LocalRunnerProcessAlive(instance)
+		if err != nil || !alive {
+			return err
+		}
+		select {
+		case <-ctx.Done():
+			// safety: a runner still holding jobs finishes them; stop must not wait on or kill them.
+			return nil
+		case <-time.After(50 * time.Millisecond):
+		}
+	}
+}
+
+var errControllerStopping = &apierr.Error{Code: apierr.Unavailable, Message: "the local controller is stopping"}
+
+func (d *Daemon) isDraining() bool {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return d.draining
+}
+
+// safety: registration and activation hold runnerChanges through persistence and check draining under it, so a
+// retirement, which drains while holding it after draining is set, sees every change that passed and refuses the rest.
+func (d *Daemon) admitRunnerChange() (func(), bool) {
+	d.runnerChanges.lock()
+	if d.isDraining() {
+		d.runnerChanges.unlock()
+		return nil, false
+	}
+	return d.runnerChanges.unlock, true
+}
+
+// safety: a one-slot channel rather than a mutex, so testing/synctest can see a waiter as durably blocked.
+type runnerGate struct {
+	once sync.Once
+	slot chan struct{}
+}
+
+func (g *runnerGate) lock() {
+	g.once.Do(func() { g.slot = make(chan struct{}, 1) })
+	g.slot <- struct{}{}
+}
+
+func (g *runnerGate) unlock() { <-g.slot }
 
 func validLocalRunnerID(id string) bool {
 	return id != "" && id != "." && id != ".." && !strings.ContainsAny(id, "/\\?#\x00\r\n")

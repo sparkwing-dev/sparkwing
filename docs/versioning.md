@@ -71,10 +71,9 @@ are compiled and cached locally rather than downloaded from a controller.
 
 ## Support and security policy
 
-From launch freeze, the controller accepts requests emitted by every engine for
-twelve calendar months after its release. Older releases keep working until an
-explicit security revocation or minimum-version policy takes effect. Age alone
-never refuses execution. The selected engine supplies its matching node protocol.
+Clients, runners and controllers use the current contract. Upgrade them together
+when that contract changes. There is no old-peer compatibility promise until
+live-mode Stripe is enabled. The selected engine supplies its matching node protocol.
 
 The signed index at `https://sparkwing.dev/versions.json` records the latest
 release, minimum version, individual revocations and per-release support windows.
@@ -193,16 +192,16 @@ claims retain renewal and drain paths.
 
 The local controller owns one store, admission, queue and dashboard. Its HTTP API
 socket uses the same messages and route policy as a remote controller. The
-admission socket remains a separate protocol. Unknown additive API fields and
-future canonical error codes remain readable. Required types still validate.
+admission socket remains a separate protocol. Required types validate at the transport boundary.
 
 Store incompatibility is an actionable refusal. It never silently opens another
-store. v0.68.0 starts a new store and refuses one from v0.67 or earlier.
-Before 1.0, schema changes may require moving the local store aside or
-recreating a server database. The binary refuses a mismatched store with a
-move-aside remedy for an older local store. v0.68.3 ships baseline 28 as a store
-reset. Schema 29 is the first forward migration: a v0.68.3 baseline store upgrades
-in place on its first open, and an older binary then refuses it. See
+store.
+Before 1.0, schema changes may require a reset after configured data has been
+preserved. The binary refuses a mismatched store with a
+move-aside remedy for an older local store. Schemas 30 through 33 upgrade in
+place to schema 34. Earlier baselines are refused unchanged. A reset must preserve
+configured data, especially secrets and their keys. Billing records require
+separate review. See
 [Schema compatibility](backup-restore.md#schema-compatibility). Explicit standalone CI mode uses the same controller code in process.
 See [Local execution](local-execution.md) and [Controller HTTP API](api.md).
 

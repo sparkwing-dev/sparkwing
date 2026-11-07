@@ -251,14 +251,6 @@ type LocalControlStatus struct {
 
 	DashboardURL string
 }
-type LocalDashboard struct {
-	Address  string
-	ReadOnly bool
-}
-type LocalDashboardAck struct {
-	ReadOnly bool
-	Error    string
-}
 const MinProtocolMajor = 4
 func NodeHostParticipant(runID, nodeID string) HolderRef
 func NodeSemaphoreParticipant(runID, nodeID string) HolderRef

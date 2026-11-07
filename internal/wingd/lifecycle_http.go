@@ -64,23 +64,18 @@ func (d *Daemon) controllerHTTP(next http.Handler) http.Handler {
 			}
 			writeControllerHTTP(w, d.localControl())
 		case "dashboard":
-			if d.localDashboard == nil {
-				writeLoginFailure(w, &apierr.Error{Code: apierr.Unavailable, Message: "controller dashboard is unavailable"})
-				return
-			}
-			var request wingwire.LocalDashboard
-			if json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096)).Decode(&request) != nil || request.Address == "" {
-				writeLoginFailure(w, &apierr.Error{Code: apierr.BadRequest, Message: "dashboard address is required"})
-				return
-			}
-			reply := wingwire.LocalDashboardAck{ReadOnly: request.ReadOnly}
-			if err := d.localDashboard(r.Context(), request.Address, request.ReadOnly); err != nil {
-				reply.Error = err.Error()
-			}
-			writeControllerHTTP(w, reply)
+			// safety: a pre-step-5 CLI posts here to start the dashboard; name the cut instead of a bare 404.
+			writeLoginFailure(w, &apierr.Error{
+				Code:    apierr.UnsupportedRoute,
+				Message: "this local controller removed POST /api/v1/local/controller/dashboard; it serves the dashboard whenever it runs",
+				Hint:    "run sparkwing dashboard open from a current CLI: sparkwing update for the installed one, sparkwing pipeline upgrade for a repository pin",
+			})
 		case "drain":
 			d.recordJournal("drain_begin", nil, nil)
 			remaining, err := d.beginDrain()
+			if err == nil && r.URL.Query().Get("runner") == "retire" {
+				err = d.retireLocalRunner(r.Context())
+			}
 			defer func() {
 				// safety: deliver even a failed drain acknowledgement before cancelling HTTP handlers.
 				if flush, ok := w.(http.Flusher); ok {

@@ -15,6 +15,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/procenv"
+	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 )
 
 type hostCommand struct {
@@ -68,7 +69,7 @@ func (s *protocolSession) startExec(req nodeproto.ExecRequest) {
 				return s.cfg.output.stream(s.logCtx, key+stream, base, chunk, eof)
 			}
 		}
-		done, session := runHostCommand(req, command.kill, s.done, sink)
+		done, session := runHostCommand(req, s.cfg.output.masker, command.kill, s.done, sink)
 		s.mu.Lock()
 		delete(s.execs, req.ID)
 		if session != nil {
@@ -111,7 +112,7 @@ func (s *protocolSession) writeHostLine(value any) error {
 var commandBuffers = sync.Pool{New: func() any { return new([64 << 10]byte) }}
 
 // safety: a normal exit returns the session alive; the end of the SDK session kills what it left running.
-func runHostCommand(req nodeproto.ExecRequest, kill, closed <-chan struct{}, sink func(stream string, chunk []byte, eof bool) error) (nodeproto.ExecDone, *commandSession) {
+func runHostCommand(req nodeproto.ExecRequest, masker *secrets.Masker, kill, closed <-chan struct{}, sink func(stream string, chunk []byte, eof bool) error) (nodeproto.ExecDone, *commandSession) {
 	done := nodeproto.ExecDone{ID: req.ID, ExitCode: -1}
 	if info, err := os.Stat(req.Dir); err != nil {
 		done.StartError = fmt.Sprintf("dir %q: %v", req.Dir, err)
@@ -161,7 +162,7 @@ func runHostCommand(req nodeproto.ExecRequest, kill, closed <-chan struct{}, sin
 	}
 	err = cmd.Start()
 	if err != nil && execFormatError(err) {
-		// hack: Node's spawn runs a file without #! through /bin/sh, as execvp does; Go SDKs send path and keep the error.
+		// hack: execvp runs executable text without #! through /bin/sh for both SDKs.
 		cmd = command("/bin/sh", "/bin/sh", append([]string{path}, req.Argv[1:]...))
 		err = cmd.Start()
 	}
@@ -183,7 +184,7 @@ func runHostCommand(req nodeproto.ExecRequest, kill, closed <-chan struct{}, sin
 		case <-exited:
 		}
 	}()
-	tails := [2]*commandTail{{keep: !req.Capture}, {keep: !req.Capture}}
+	tails := [2]*commandTail{{keep: !req.Capture, mask: masker.Stream()}, {keep: !req.Capture, mask: masker.Stream()}}
 	var sinkMu sync.Mutex
 	var sinkErr error
 	var drains sync.WaitGroup
@@ -262,12 +263,17 @@ func runHostCommand(req nodeproto.ExecRequest, kill, closed <-chan struct{}, sin
 
 type commandTail struct {
 	keep bool
+	mask *secrets.Stream
 	data []byte
 }
 
 func (t *commandTail) add(chunk []byte) {
 	if !t.keep {
 		return
+	}
+	// safety: truncation must only discard bytes that have cleared whole-secret masking.
+	if t.mask != nil {
+		chunk = []byte(t.mask.Mask(string(chunk)))
 	}
 	t.data = append(t.data, chunk...)
 	if len(t.data) > 2*nodeproto.ExecTailBytes {
@@ -276,6 +282,11 @@ func (t *commandTail) add(chunk []byte) {
 }
 
 func (t *commandTail) bytes() []byte {
+	if t.mask != nil {
+		final := t.mask.Flush()
+		t.mask = nil
+		t.add([]byte(final))
+	}
 	if len(t.data) > nodeproto.ExecTailBytes {
 		return t.data[len(t.data)-nodeproto.ExecTailBytes:]
 	}

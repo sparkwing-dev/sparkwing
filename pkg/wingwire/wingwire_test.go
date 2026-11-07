@@ -33,9 +33,6 @@ func roundTripMessages() []any {
 		&StatsReset{},
 		&StatsResetAck{},
 		&LocalControl{},
-		&LocalDashboard{Address: "127.0.0.1:0"},
-		&LocalDashboardAck{},
-		&LocalDashboardAck{Error: "dashboard address is occupied"},
 		&LocalControlStatus{Running: true, PID: 91, Version: "v1", Runs: 1, QueuedTriggers: 2, HeldLeases: 3, DashboardConnections: 4},
 		&Cancel{RunID: "deploy-20260710-120000", Reason: "cancelled via sparkwing runs cancel"},
 		&QueueState{

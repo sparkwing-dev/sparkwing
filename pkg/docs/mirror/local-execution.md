@@ -158,7 +158,6 @@ The local controller is wingd. These commands inspect or manage its lifecycle:
 
 ```bash
 sparkwing daemon status -o json
-sparkwing dashboard start
 sparkwing dashboard open
 sparkwing dashboard status
 sparkwing doctor -o json
@@ -168,11 +167,17 @@ Daemon status, stop and restart use the shared local lifecycle. JSON reports
 `state`, `version`, `pid`, `installed` and the four activity counts.
 They report the dashboard apart from the controller: `dashboard` is `serving`
 or `not_serving`, and while it serves, `url` is its address. Pretty output
-prints a `dashboard:` line either way. A controller that `sparkwing run` or a
-schedule started serves no dashboard; `sparkwing dashboard open` starts one at
-127.0.0.1:4343 when none serves, then mints the sign-in link. Once a dashboard
-has served, a controller restarted on demand serves it again at the same
-address, until `dashboard stop` or `daemon stop`.
+prints a `dashboard:` line either way. Every shared controller serves the
+dashboard from the moment it starts, however it started, at `dashboard.address`
+from [config.yaml](machine-config.md#dashboard), `127.0.0.1:4343` by default.
+`sparkwing dashboard open` starts the controller when none runs, then mints the
+sign-in link. When the address is taken, the controller keeps admitting runs
+without a dashboard, and status reports the bind error as `dashboard_error`; it
+never moves to another port. `sparkwing daemon stop` stops the controller and
+its dashboard together and retires the local runner: the runner stops claiming
+work, an idle runner exits within seconds, and a runner holding jobs
+finishes them and exits once a controller accepts their results. `sparkwing
+daemon restart` leaves the runner and its jobs running.
 Stop and restart also report `stopped`, `restarted` and `previous_version`.
 Plain output is the resulting state. Store and API diagnostics come from doctor.
 Doctor also sweeps stray step sessions through the controller. A successful
@@ -656,7 +661,7 @@ machine budget is full.
 With `local_admission` enabled, the runner never starts the local controller and
 must match its build. If no controller runs, or it runs a build the runner
 cannot speak to, each claimed job fails with the fix: `sparkwing dashboard
-start` or `sparkwing dashboard install` for a missing controller, matching
+open` or `sparkwing dashboard install` for a missing controller, matching
 builds for a mismatch, or `local_admission: false` to stop sharing. The runner
 logs one warning per cause while it lasts.
 

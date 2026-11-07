@@ -18,7 +18,7 @@ func surfaceHelp(surface clisurface.Command) Command {
 	switch surface.Path {
 	case "sparkwing":
 		command.Description = "Run pipelines locally with run, or submit them to a controller with pipeline trigger. Use commands --search to find commands and --help for their flags."
-		command.Examples = []Example{{"Run a pipeline locally", "sparkwing run build"}, {"Inspect a pipeline", "sparkwing pipeline describe --pipeline build"}, {"Start the local dashboard", "sparkwing dashboard start"}}
+		command.Examples = []Example{{"Run a pipeline locally", "sparkwing run build"}, {"Inspect a pipeline", "sparkwing pipeline describe --pipeline build"}, {"Sign in to the local dashboard", "sparkwing dashboard open"}}
 	case "sparkwing commands":
 		command.Description = "Search command paths and summaries. Lists return bounded pages and a next_cursor when more matches exist. Markdown export includes the full selected command tree."
 		command.Examples = []Example{{"Find status commands", "sparkwing commands --search status"}, {"Export the reference", "sparkwing commands --format markdown --output plain"}}
@@ -116,9 +116,6 @@ var commandFlagDescriptions = map[string]string{
 	"sparkwing daemon events --kind":                           "Show only events of this kind.",
 	"sparkwing daemon events --since":                          "Show only events recorded within this lookback, such as 30m, 12h, 7d or 2w.",
 	"sparkwing dashboard logs --tail":                          "Number of most recent log lines to print, 40 by default; with --follow, lines before streaming starts.",
-	"sparkwing dashboard start --addr":                         "Address the dashboard listens on as HOST:PORT, 127.0.0.1:4343 by default; a non-loopback host also needs --allow-remote.",
-	"sparkwing dashboard start --allow-remote":                 "Permit a non-loopback --addr over cleartext HTTP. The one-time login token and 24-hour session bearer cross the network unencrypted, and a session can read decrypted secrets. Use only on a trusted network or through an SSH tunnel: ssh -N -L 4343:127.0.0.1:4343 user@host (keep the remote dashboard on loopback).",
-	"sparkwing dashboard start --read-only":                    "Block browser writes while still allowing authenticated reads of decrypted secrets and sign-out. This is not safe to share.",
 	"sparkwing debug attach --namespace":                       "Kubernetes namespace to pass to kubectl exec, overriding the namespace recorded for the job's pod.",
 	"sparkwing docs list --guides":                             "List the embedded reading guides and the topics each covers instead of topic pages.",
 	"sparkwing docs list --no-cache":                           "Fetch from sparkwing.dev without using the local docs web cache; has no effect without --web.",
@@ -450,9 +447,7 @@ var commandSynopses = map[string]string{
 	"sparkwing dashboard install":                   "Install a dashboard service that starts at login",
 	"sparkwing dashboard logs":                      "Read a bounded dashboard log tail",
 	"sparkwing dashboard open":                      "Print a one-time sign-in link for the local dashboard",
-	"sparkwing dashboard start":                     "Start the local dashboard and controller on demand",
 	"sparkwing dashboard status":                    "Report whether the controller runs and where the dashboard serves",
-	"sparkwing dashboard stop":                      "Stop a running dashboard server",
 	"sparkwing dashboard uninstall":                 "Remove the dashboard login service",
 	"sparkwing debug":                               "Interactive debugging for pipeline runs",
 	"sparkwing debug attach":                        "Attach to a running Kubernetes target (Cloud jobs unsupported)",

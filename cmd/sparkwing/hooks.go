@@ -204,7 +204,6 @@ type managedHookStatus struct {
 	Name      string   `json:"name"`
 	Pipelines []string `json:"pipelines"`
 	Current   bool     `json:"current"`
-	Forwarder bool     `json:"forwarder,omitempty"`
 }
 
 type hooksStatusSummary struct {
@@ -228,14 +227,10 @@ func statusHooks(git githooks.Git, repoRoot, mode string) error {
 		if pipes == nil {
 			pipes = []string{}
 		}
-		if h.Forwarder {
-			fmt.Fprintf(os.Stderr, "note: %s only forwards to your global core.hooksPath hook, as Sparkwing before v0.68 wrote it; it runs no pipeline, so install leaves it. Delete %s to stop forwarding.\n",
-				h.Name, filepath.Join(survey.HooksDir, h.Name))
-		}
-		hooks = append(hooks, managedHookStatus{Kind: "hook", Name: h.Name, Pipelines: pipes, Current: h.Current(), Forwarder: h.Forwarder})
+		hooks = append(hooks, managedHookStatus{Kind: "hook", Name: h.Name, Pipelines: pipes, Current: h.Current()})
 	}
 	for _, hook := range hooks {
-		if !hook.Current && !hook.Forwarder {
+		if !hook.Current {
 			fmt.Fprintf(os.Stderr, "warning: %s differs from the expected hook content or format version; run sparkwing pipeline hooks install\n", hook.Name)
 		}
 		if mode == "json" {

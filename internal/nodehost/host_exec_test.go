@@ -320,7 +320,11 @@ func checkHostExecScenarios(t *testing.T, lang, mode string) {
 			h := startHostExecHarness(t, lang, dir)
 
 			logged := h.step(t, "logged")
-			if logged.Error != "" || logged.Stdout != "line one\n"+hostExecSecret+" two\n" || logged.Stderr != "err text" {
+			wantLogged := "line one\n" + hostExecSecret + " two\n"
+			if mode == "host" {
+				wantLogged = "line one\n*** two\n"
+			}
+			if logged.Error != "" || logged.Stdout != wantLogged || logged.Stderr != "err text" {
 				t.Fatalf("logged result = %#v", logged)
 			}
 			if got := h.messages("logged"); !strings.Contains(got, "line one") || !strings.Contains(got, "err text") || strings.Contains(got, hostExecSecret) || !strings.Contains(got, "*** two") {
