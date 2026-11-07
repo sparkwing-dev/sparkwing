@@ -720,15 +720,16 @@ the controller is upgraded, without a capacity failure or refund.
 
 With a compatible pool, the launcher keeps the award and creates
 `sw-capacity-<award hash>`: an unbound Pod with the requested shared class and
-launcher namespace selectors, required node affinity on the launcher's
-`--node-class` through Karpenter's `karpenter.k8s.aws/ec2nodeclass` node label,
-the generic dedicated toleration, the award's CPU,
+launcher namespace selectors, the generic dedicated toleration, the award's CPU,
 memory and scratch requests, the runner image's `/bin/sh` sleeping for the
 remaining award budget and exiting on SIGTERM, and no volumes, environment or
 service account token. A bare `sleep` as PID 1 ignores SIGTERM, so every delete
 on the cold-start path waited for the kubelet's kill.
 The Pod records its unit fence and size in `sparkwing.dev/capacity-demand`,
 never the bootstrap credential.
+Karpenter refuses to provision for Pods that select on its restricted
+`karpenter.k8s.aws/ec2nodeclass` label, so the request cannot name the
+launcher's `--node-class`; keep one NodePool per class label set.
 Required pod anti-affinity on `kubernetes.io/hostname` keeps it off any node
 running a Pod with another team's `sparkwing.dev/team` label in the job
 namespace, so Karpenter adds one node per team's demand.

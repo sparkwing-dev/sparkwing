@@ -9,29 +9,28 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
-// Two NodePools of different EC2NodeClasses can carry the same class, namespace
-// and taint, as staging's boot and jobs pools did. A capacity request must select
-// exactly the nodes the boundary accepts for the launcher's node class.
-func TestCapacityRequestSelectsOnlyNodesTheBoundaryAccepts(t *testing.T) {
-	for _, launcherClass := range []string{"sparkwing-jobs", "sparkwing-staging-boot"} {
-		t.Run(launcherClass, func(t *testing.T) {
-			b, kube := boundaryFixture()
-			b.NodeClassName = launcherClass
-			node, err := kube.CoreV1().Nodes().Get(t.Context(), "node", metav1.GetOptions{})
-			if err != nil {
-				t.Fatal(err)
+// Karpenter refuses to provision for a Pod whose affinity names one of its
+// restricted label domains, which left every staging capacity request pending.
+func TestCapacityRequestAvoidsKarpenterRestrictedLabels(t *testing.T) {
+	pod, err := capacityPod(CloudJobConfig{Namespace: "cloud", NodeClassName: "sparkwing-jobs", RunnerImage: "runner", CPUCeiling: 4, MemoryCeiling: 8 << 30}, demandFor(teamAward("team")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	keys := []string{}
+	for key := range pod.Spec.NodeSelector {
+		keys = append(keys, key)
+	}
+	if affinity := pod.Spec.Affinity; affinity != nil && affinity.NodeAffinity != nil && affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution != nil {
+		for _, term := range affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution.NodeSelectorTerms {
+			for _, expression := range term.MatchExpressions {
+				keys = append(keys, expression.Key)
 			}
-			award := teamAward("team")
-			pod, err := capacityPod(CloudJobConfig{Namespace: "cloud", NodeClassName: launcherClass, RunnerImage: "runner", CPUCeiling: 4, MemoryCeiling: 8 << 30}, demandFor(award))
-			if err != nil {
-				t.Fatal(err)
-			}
-			selected := (&pool{t: t}).fits(*pod, *node, nil)
-			accepted := b.verifyNodeTeam(t.Context(), node.DeepCopy(), award.Binding.Team) == nil
-			if selected != accepted || accepted != (launcherClass == node.Labels[NodeClassLabel]) {
-				t.Fatalf("node of class %s: capacity request selects=%t, boundary accepts=%t", node.Labels[NodeClassLabel], selected, accepted)
-			}
-		})
+		}
+	}
+	for _, key := range keys {
+		if strings.HasPrefix(key, "karpenter.k8s.aws/") || strings.HasPrefix(key, "karpenter.sh/") {
+			t.Fatalf("capacity request selects Karpenter-restricted label %s", key)
+		}
 	}
 }
 
