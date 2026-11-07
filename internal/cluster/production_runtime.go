@@ -92,7 +92,7 @@ func fixedBearer(raw string) func(context.Context) (string, error) {
 func productionHostingAt(home, version string, connection client.EngineOptions, modules string, admission bool, accept procenv.SubmitAccept, actions *githubActionsSource) runners.Hosting {
 	var machineAdmission *nodehost.LocalAdmission
 	if admission {
-		machineAdmission = nodehost.MachineAdmission(home, version)
+		machineAdmission = nodehost.RunnerMachineAdmission(home, version)
 		machineAdmission.Controller = connection.URL
 	}
 	hosting := runners.NativeHosting(runners.NativeHostingConfig{

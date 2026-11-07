@@ -1,13 +1,35 @@
 # Migrating to the next release
 
+## Local stores are copied before schema upgrades
+
+A binary that upgrades a local SQLite store first copies it beside the store as
+`state.db.schema-<N>-<YYYYMMDDTHHMMSSZ>.bak`, where N is the schema version it
+upgrades from. Delete old copies yourself when you no longer need to return to
+an older binary; they hold the same encrypted secrets as the store. A failed
+copy refuses the upgrade and leaves the store unchanged. PostgreSQL stores still
+need an operator snapshot before upgrading. See
+[Schema compatibility](../backup-restore.md#schema-compatibility).
+
+## Upgrade the store in place to schema baseline 34
+
+Schema 34 adds the partial index `idx_runs_live_children` on pending and
+running child runs to the recognized schema 33 baseline in one transaction. The
+controller's recovery sweep reads it to cancel children whose parent run or
+creating job has ended, without scanning retained run history. Earlier
+recognized baselines run their existing upgrades first. Older binaries refuse
+the upgraded store. Retain a backup before upgrading if you need to return to
+an older binary.
+
+No CLI, HTTP route, wire field or SDK symbol changes.
+
 ## Upgrade the store in place to schema baseline 33
 
 Schema 33 adds `local_runner_instances` to the recognized schema 32 baseline in
 one transaction. It records each runner's claim credential prefix, PID, process
 birth, version, executable SHA-256 and registered, active, draining or stopped
 state. Earlier recognized baselines run their existing upgrades first. Older
-binaries refuse the upgraded store. Retain a backup before upgrading if you
-need to return to an older binary.
+binaries refuse the upgraded store. The upgrade copies a SQLite store first;
+see [Local stores are copied before schema upgrades](#local-stores-are-copied-before-schema-upgrades).
 
 Verified socket peers use `POST /api/v1/local/runners` to register, and
 `GET /api/v1/local/runners/{id}` to read an instance. The optional
@@ -117,6 +139,14 @@ in the store.
 
 An incompatible pinned CLI receives an error naming its version, the controller
 version and this upgrade command. There is no compatibility relay.
+
+An enrolled `sparkwing-runner` with `runner.local_admission: true` uses the same
+machine admission, so it must match the controller's build too. An older runner
+fails each claimed job with an error naming both versions; restart its service
+after updating so it moves to the latest release. When the CLI runs an
+unreleased build that no runner release matches, set `local_admission: false`
+under `runner:` in the runner's config and restart the runner until a matching
+release ships.
 
 A ticket's holder PID and process start time determine liveness. Closing a
 request or losing a long poll leaves its queue arrival or lease intact. The

@@ -67,7 +67,20 @@ require moving the local store aside or recreating a server database. The binary
 refuses a mismatched store and leaves it unchanged. For an older local store it
 names the move-aside remedy. A newer database needs its matching binary, and
 rollback needs a matching backup in a separate database: an older binary refuses
-an upgraded store, so take a snapshot before starting a release that upgrades it.
+an upgraded store.
+
+Before a binary upgrades a local SQLite store, it copies the store beside it as
+`<store>.schema-<N>-<YYYYMMDDTHHMMSSZ>.bak`, where N is the schema version
+before the upgrade. The copy is taken under the upgrade's write lock, so it
+matches the state the upgrade started from. It has mode 0600 on Linux and macOS
+and the store directory's ACL on Windows, holds the same encrypted secrets as
+the store, and is never pruned. When the copy fails,
+the binary refuses the upgrade and leaves the store unchanged; free disk space
+and start again. To return to the older binary, stop the controller, move the
+store and its `-wal` and `-shm` files aside, and copy the newest backup for that
+binary's schema to the store path. Runs recorded after the backup are lost.
+PostgreSQL stores are not copied: take a snapshot before starting a release that
+upgrades one.
 
 The recorded baseline digest must also match the binary at the same schema
 version. A differing digest refuses startup with both digests and the backup and
@@ -106,21 +119,23 @@ unchanged. See
 
 <!-- BEGIN GENERATED SCHEMA ERRORS -->
 ```text
-sparkwing: store schema version 27 is older than this binary (expects 33); back up the store and use a binary matching it; this build cannot upgrade it; to start fresh, move <path> and any <path>-wal and <path>-shm files aside and start again
+sparkwing: store schema version 27 is older than this binary (expects 34); back up the store and use a binary matching it; this build cannot upgrade it; to start fresh, move <path> and any <path>-wal and <path>-shm files aside and start again
 
-sparkwing: store schema version 27 is older than this binary (expects 33); back up the store and use a binary matching it; this build cannot upgrade it; to start fresh, point the server at an empty database and start again
+sparkwing: store schema version 27 is older than this binary (expects 34); back up the store and use a binary matching it; this build cannot upgrade it; to start fresh, point the server at an empty database and start again
 
-sparkwing: store schema version 28 is older than this binary (expects 33); start the controller with this binary once to upgrade the v0.68.3 store in place, then run this again
+sparkwing: store schema version 28 is older than this binary (expects 34); start the controller with this binary once to upgrade the v0.68.3 store in place, then run this again
 
 sparkwing: store schema version 28 baseline digest "<recorded-digest>" is not the v0.68.3 baseline "75de685ed349678b0fa36694978890a2ddd491851d7a63c4c6740e81408b166a" this binary upgrades, so it left the store unchanged; open it once with Sparkwing v0.68.3 to record its digest, then start this binary; or back up the store and use a binary matching it; this build cannot upgrade it; to start fresh, move <path> and any <path>-wal and <path>-shm files aside and start again
 
 sparkwing: store schema version 28 baseline digest "<missing>" is not the v0.68.3 baseline "75de685ed349678b0fa36694978890a2ddd491851d7a63c4c6740e81408b166a" this binary upgrades, so it left the store unchanged; open it once with Sparkwing v0.68.3 to record its digest, then start this binary; or back up the store and use a binary matching it; this build cannot upgrade it; to start fresh, point the server at an empty database and start again
 
-sparkwing: store schema version 34 is newer than this binary (expects 33); start a binary matching the store, or restore a backup matching this binary into a separate database
+sparkwing: store schema version 35 is newer than this binary (expects 34); start a binary matching the store, or restore a backup matching this binary: stop the controller, move <path> and any <path>-wal and <path>-shm files aside, and copy the newest <path>.schema-34-*.bak to <path>; runs recorded since that backup are lost
 
-sparkwing: store schema version 33 baseline digest "<recorded-digest>" differs from this binary's "<binary-digest>"; back up the store and use a binary matching it; this build cannot upgrade it; to start fresh, move <path> and any <path>-wal and <path>-shm files aside and start again
+sparkwing: store schema version 35 is newer than this binary (expects 34); start a binary matching the store, or restore a backup matching this binary into a separate database
 
-sparkwing: store schema version 33 baseline digest "<missing>" differs from this binary's "<binary-digest>"; back up the store and use a binary matching it; this build cannot upgrade it; to start fresh, point the server at an empty database and start again
+sparkwing: store schema version 34 baseline digest "<recorded-digest>" differs from this binary's "<binary-digest>"; back up the store and use a binary matching it; this build cannot upgrade it; to start fresh, move <path> and any <path>-wal and <path>-shm files aside and start again
+
+sparkwing: store schema version 34 baseline digest "<missing>" differs from this binary's "<binary-digest>"; back up the store and use a binary matching it; this build cannot upgrade it; to start fresh, point the server at an empty database and start again
 
 sparkwing: ~/.sparkwing/state.db is a store from Sparkwing v0.67 or earlier (schema version 94); this release starts a new store and cannot read or import it, and left the old one unchanged; stop every older Sparkwing process still using it, such as a v0.67 dashboard or daemon, then move it aside and run again: mv ~/.sparkwing/state.db ~/.sparkwing/state.db.v067 (move ~/.sparkwing/state.db-wal and ~/.sparkwing/state.db-shm with it if they exist)
 

@@ -110,10 +110,71 @@ func TestExampleLifecycleProbesSkipOnlyWithoutARunnableCLI(t *testing.T) {
 	if err := os.WriteFile(cli, []byte("#!/bin/sh\n"), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	if exampleNeedsCLI(ExampleInputs{CLI: cli})(ctx) {
+	rc := sparkwing.RunContext{RunID: "run-lifecycle-" + filepath.Base(t.TempDir())}
+	if exampleNeedsCLI(ExampleInputs{CLI: cli}, rc)(ctx) {
 		t.Fatal("skipped probes although the CLI is runnable")
 	}
-	if !exampleNeedsCLI(ExampleInputs{CLI: filepath.Join(t.TempDir(), "absent")})(ctx) {
+	absent := ExampleInputs{CLI: filepath.Join(t.TempDir(), "absent")}
+	if !exampleNeedsCLI(absent, rc)(ctx) {
 		t.Fatal("ran probes without a runnable CLI")
+	}
+	dir := exampleCLIDir(rc)
+	t.Cleanup(func() { _ = os.RemoveAll(dir) })
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	wrapper := filepath.Join(dir, "sparkwing")
+	if err := os.WriteFile(wrapper, []byte("#!/bin/sh\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if exampleNeedsCLI(absent, rc)(ctx) {
+		t.Fatal("skipped probes although lifecycle-cli built a CLI")
+	}
+	if got, ok := exampleLifecycle(absent, rc); !ok || got.CLI != wrapper || got.APIProfile != exampleProbeProfile {
+		t.Fatalf("lifecycle CLI = %+v, %t", got, ok)
+	}
+	if got, _ := exampleLifecycle(ExampleInputs{CLI: cli}, rc); got.CLI != cli || got.APIProfile != "" {
+		t.Fatalf("a CLI on the host was replaced: %+v", got)
+	}
+}
+
+func TestExampleBuildCLISignsInBeforePublishingTheWrapper(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("fixture toolchain is a POSIX executable")
+	}
+	t.Chdir(t.TempDir())
+	tools := t.TempDir()
+	record := filepath.Join(tools, "record")
+	fakeCLI := fmt.Sprintf("#!/bin/sh\\n{ echo \"home=$SPARKWING_HOME\"; echo \"args=$*\"; echo \"token=$(cat)\"; } > \"%s\"\\n", record)
+	fakeGo := fmt.Sprintf("#!/bin/sh\nwhile [ \"$1\" != -o ]; do shift; done\nprintf '%s' > \"$2\"\nchmod 0700 \"$2\"\n", fakeCLI)
+	if err := os.WriteFile(filepath.Join(tools, "go"), []byte(fakeGo), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", tools+string(os.PathListSeparator)+os.Getenv("PATH"))
+	host := sparkwingtest.New(sparkwingtest.Options{Secrets: map[string]sparkwingtest.Secret{exampleProbeToken: {Value: "probe-token", Masked: true}}})
+	defer func() {
+		if err := host.Close(); err != nil {
+			t.Error(err)
+		}
+	}()
+	rc := sparkwing.RunContext{RunID: "run-build-cli"}
+	in := ExampleInputs{CLI: filepath.Join(tools, "absent"), APIController: "https://staging.example"}
+	if err := exampleBuildCLI(in, rc)(host.Context(t.Context())); err != nil {
+		t.Fatal(err)
+	}
+	got, err := os.ReadFile(record)
+	if err != nil {
+		t.Fatal(err)
+	}
+	home := filepath.Join(exampleCLIDir(rc), "home")
+	want := "home=" + home + "\nargs=profiles add --profile " + exampleProbeProfile + " --controller https://staging.example --token-stdin\ntoken=probe-token\n"
+	if string(got) != want {
+		t.Fatalf("profile add saw\n%s\nwant\n%s", got, want)
+	}
+	if _, err := os.Stat(filepath.Join(home, "token")); !os.IsNotExist(err) {
+		t.Fatalf("token file left behind: %v", err)
+	}
+	if resolved, ok := exampleLifecycle(in, rc); !ok || resolved.APIProfile != exampleProbeProfile {
+		t.Fatalf("probes cannot resolve the built CLI: %+v", resolved)
 	}
 }

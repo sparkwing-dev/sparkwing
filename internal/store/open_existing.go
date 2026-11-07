@@ -87,6 +87,9 @@ func (s *Store) requireCurrentSchema(ctx context.Context, label, path string) (e
 			return fmt.Errorf("open existing store %s: %w", label, err)
 		}
 	}
+	if version > expectedSchemaVersion {
+		return schemaMismatchError(version, path)
+	}
 	if version > 0 && version != expectedSchemaVersion {
 		return schemaMismatchError(version, "recreate only a disposable store")
 	}

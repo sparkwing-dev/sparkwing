@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/sparkwing-dev/sparkwing/internal/wingd"
 	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
 )
 
@@ -64,5 +65,19 @@ func TestProtocolTooOld_AsksForAReleaseByProtocolWhenTheDaemonVersionIsAPrerelea
 	want := fmt.Sprintf("a release speaking protocol %d", wingwire.ProtocolMajor+1)
 	if !strings.Contains(err.Error(), want) {
 		t.Errorf("message names an unusable prerelease instead of asking for %q; got: %s", want, err.Error())
+	}
+}
+
+func TestIncompatibleDaemonClassifiesEveryVersionRefusal(t *testing.T) {
+	ack := wingwire.HelloAck{ProtocolMajor: wingd.ProtocolMajor + 1, BinaryVersion: "v9.0.0", BuildIdentity: "other"}
+	for _, err := range []error{daemonTooOld("v1.0.0", ack), protocolTooOld("v1.0.0", ack), buildMismatch("v1.0.0", ack), fmt.Errorf("wrapped: %w", buildMismatch("v1.0.0", ack))} {
+		if !IncompatibleDaemon(err) {
+			t.Errorf("version refusal not classified: %v", err)
+		}
+	}
+	for _, err := range []error{nil, ErrNoDaemon, errDaemonUnreachable, errors.New("other")} {
+		if IncompatibleDaemon(err) {
+			t.Errorf("unrelated error classified as a version refusal: %v", err)
+		}
 	}
 }

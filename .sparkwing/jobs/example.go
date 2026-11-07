@@ -17,7 +17,7 @@ func (Example) ShortHelp() string {
 }
 
 func (Example) Help() string {
-	return "Runs the SDK tour alongside named integration assertions for matrix, job and step outputs, generated jobs, dynamic child pipelines, scoped secrets, OIDC, dependency cache restore, memo reuse, artifacts, cancellation and API logs/history. The optional error canary remains a dashboard demonstration. Secrets, OIDC and the CLI lifecycle probes skip with a reason when unavailable; the probes need --cli runnable on the job host. Docker runs on capable runners. Pass --fail-once to exercise failed-only retry and predecessor outputs. Pass --smoke-profile plus --smoke-checkout to trigger and await sparkwing-ci-smoke as a separate run. Memoization belongs to jobs, so the memoized job contains one step. The default local run needs no Cloud or Docker."
+	return "Runs the SDK tour alongside named integration assertions for matrix, job and step outputs, generated jobs, dynamic child pipelines, scoped secrets, OIDC, dependency cache restore, memo reuse, artifacts, cancellation and API logs/history. The optional error canary remains a dashboard demonstration. Secrets, OIDC and the CLI lifecycle probes skip with a reason when unavailable; the probes use --cli when it is runnable on the job host, otherwise lifecycle-cli builds one from the checkout for --api-controller with the EXAMPLE_PROBE_TOKEN secret. Docker runs on capable runners. Pass --fail-once to exercise failed-only retry and predecessor outputs. Pass --smoke-profile plus --smoke-checkout to trigger and await sparkwing-ci-smoke as a separate run. Memoization belongs to jobs, so the memoized job contains one step. The default local run needs no Cloud or Docker."
 }
 
 func (Example) Examples() []sparkwing.Example {
