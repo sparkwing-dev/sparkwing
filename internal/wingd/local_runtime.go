@@ -203,6 +203,9 @@ func (r *localRuntime) serve(ctx context.Context, session *localRuntimeSession, 
 		}
 	}
 	logins := session.logins
+	if sessions, ok := controller.(DashboardSessionStore); ok {
+		logins.persist(sessions)
+	}
 	apiReady := make(chan struct{})
 	d.cfg.ServeAPI = func(_ context.Context, ln net.Listener) {
 		serve("controller API", func() error {

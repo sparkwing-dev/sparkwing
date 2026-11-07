@@ -106,21 +106,21 @@ unchanged. See
 
 <!-- BEGIN GENERATED SCHEMA ERRORS -->
 ```text
-sparkwing: store schema version 27 is older than this binary (expects 34); back up the store and use a binary matching it; this build cannot upgrade it; to start fresh, move <path> and any <path>-wal and <path>-shm files aside and start again
+sparkwing: store schema version 27 is older than this binary (expects 35); back up the store and use a binary matching it; this build cannot upgrade it; to start fresh, move <path> and any <path>-wal and <path>-shm files aside and start again
 
-sparkwing: store schema version 27 is older than this binary (expects 34); back up the store and use a binary matching it; this build cannot upgrade it; to start fresh, point the server at an empty database and start again
+sparkwing: store schema version 27 is older than this binary (expects 35); back up the store and use a binary matching it; this build cannot upgrade it; to start fresh, point the server at an empty database and start again
 
-sparkwing: store schema version 28 is older than this binary (expects 34); start the controller with this binary once to upgrade the v0.68.3 store in place, then run this again
+sparkwing: store schema version 28 is older than this binary (expects 35); start the controller with this binary once to upgrade the v0.68.3 store in place, then run this again
 
 sparkwing: store schema version 28 baseline digest "<recorded-digest>" is not the v0.68.3 baseline "75de685ed349678b0fa36694978890a2ddd491851d7a63c4c6740e81408b166a" this binary upgrades, so it left the store unchanged; open it once with Sparkwing v0.68.3 to record its digest, then start this binary; or back up the store and use a binary matching it; this build cannot upgrade it; to start fresh, move <path> and any <path>-wal and <path>-shm files aside and start again
 
 sparkwing: store schema version 28 baseline digest "<missing>" is not the v0.68.3 baseline "75de685ed349678b0fa36694978890a2ddd491851d7a63c4c6740e81408b166a" this binary upgrades, so it left the store unchanged; open it once with Sparkwing v0.68.3 to record its digest, then start this binary; or back up the store and use a binary matching it; this build cannot upgrade it; to start fresh, point the server at an empty database and start again
 
-sparkwing: store schema version 35 is newer than this binary (expects 34); start a binary matching the store, or restore a backup matching this binary into a separate database
+sparkwing: store schema version 36 is newer than this binary (expects 35); start a binary matching the store, or restore a backup matching this binary into a separate database
 
-sparkwing: store schema version 34 baseline digest "<recorded-digest>" differs from this binary's "<binary-digest>"; back up the store and use a binary matching it; this build cannot upgrade it; to start fresh, move <path> and any <path>-wal and <path>-shm files aside and start again
+sparkwing: store schema version 35 baseline digest "<recorded-digest>" differs from this binary's "<binary-digest>"; back up the store and use a binary matching it; this build cannot upgrade it; to start fresh, move <path> and any <path>-wal and <path>-shm files aside and start again
 
-sparkwing: store schema version 34 baseline digest "<missing>" differs from this binary's "<binary-digest>"; back up the store and use a binary matching it; this build cannot upgrade it; to start fresh, point the server at an empty database and start again
+sparkwing: store schema version 35 baseline digest "<missing>" differs from this binary's "<binary-digest>"; back up the store and use a binary matching it; this build cannot upgrade it; to start fresh, point the server at an empty database and start again
 
 sparkwing: ~/.sparkwing/state.db is a store from Sparkwing v0.67 or earlier (schema version 94); this release starts a new store and cannot read or import it, and left the old one unchanged; stop every older Sparkwing process still using it, such as a v0.67 dashboard or daemon, then move it aside and run again: mv ~/.sparkwing/state.db ~/.sparkwing/state.db.v067 (move ~/.sparkwing/state.db-wal and ~/.sparkwing/state.db-shm with it if they exist)
 

@@ -19,6 +19,7 @@ import (
 
 type runtimeControllerFixture struct {
 	FuncRunStore
+	memoryDashboardSessions
 	home       string
 	reconcile  func(context.Context) (LocalActivity, error)
 	background func(context.Context, func(LocalActivity) error) error

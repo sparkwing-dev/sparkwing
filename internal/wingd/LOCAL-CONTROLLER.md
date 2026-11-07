@@ -438,7 +438,7 @@ and platform fixtures.
 <!-- design:end -->
 
 The local dashboard binds loopback only; `dashboard.address` refuses any other
-host. Every data request requires the bearer session minted through `api.sock`.
+host. Every data request requires the stored cookie session redeemed from a link minted through `api.sock`.
 `dashboard.read_only` rejects authenticated browser requests other than GET,
 HEAD and OPTIONS before controller dispatch; sign-in and sign-out remain
 available. It blocks writes but still allows reading decrypted secrets, so a

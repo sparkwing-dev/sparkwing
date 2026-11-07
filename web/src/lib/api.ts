@@ -1,7 +1,6 @@
 import { readSupportContact } from "./support";
 import { listPages } from "./listPages";
 import { readCSRFCookie } from "./csrfCookie";
-import { localAuthHeaders } from "./localSession";
 import type { LogCompleteness } from "./logCompleteness";
 import type { TriggerGit } from "./triggerSource";
 import { hasTimestamp, runElapsedMs } from "./runTime";
@@ -112,7 +111,6 @@ export function authFetch(
     headers: {
       ...opts.headers,
       ...getSessionCSRFHeaders(opts.method),
-      ...localAuthHeaders(),
     },
     signal: controller.signal,
   })

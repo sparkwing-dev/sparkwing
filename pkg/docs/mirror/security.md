@@ -511,24 +511,33 @@ loopback origin, so a rebound DNS name or another site's page is refused.
 TCP carries no peer identity, so the listener also needs a browser session.
 `sparkwing dashboard open` mints a sign-in link over the private socket. The
 link carries a random 32-byte token, works once and expires after 60 seconds.
-Visiting it redirects to `/#s=<session>`. The page moves the session from the
-fragment into the tab's `sessionStorage`, clears the fragment, and sends it as
-`Authorization: Bearer` on every API request and event stream. The local dashboard
-never sets or authenticates with a cookie: browsers send one to every port on the
-same loopback host, so
-another account's server on `127.0.0.1` could replay it, while a header goes
-only to the origin the page names. A TCP request without a live bearer gets
-401, except that the static dashboard pages, which carry no run data, load
-signed out. The browser then acts as the socket peer that minted its link.
-After verifying the dashboard bearer, the gate consumes its Authorization header
-and any controller session cookies, then forwards the verified peer to the shared
-controller API. A stale cookie from another port cannot replace that peer.
-The dashboard bearer is not a controller capability.
-A session ends after 12 hours without a request or 24 hours after sign-in,
-whichever comes first, and the dashboard's Log out button ends it at once with
-a bearer-authenticated `POST /logout`. The controller holds tokens and sessions
-in memory, so a restart also signs every browser out; run
-`sparkwing dashboard open` again. The socket itself needs no session.
+The controller stores only its SHA-256 digest, with the minting peer and the
+exact dashboard origin, and refuses the link at any other origin. Redeeming it
+stores a session digest in `state.db` and sets a host-only `sw_dashboard` cookie
+with `HttpOnly`, `SameSite=Strict`, `Path=/`, no `Domain` and a 30-day absolute
+expiry; on an HTTPS origin it is `__Host-sw_dashboard` with `Secure`. A second,
+script-readable `sw_dashboard_signed_in` cookie only tells the page to show Log
+out; it authorizes nothing. A session is valid only at the origin it was
+redeemed at, survives controller restarts and ends at 30 days, at Log out, or
+when the store is replaced.
+
+Browsers send a cookie to every port on the same loopback host, so another
+service on `127.0.0.1` that this browser visits can receive the session cookie.
+HttpOnly, SameSite and the Origin checks below do not prevent that; run
+untrusted local services under another account or keep the dashboard on a
+machine without them. A `.localhost` name or local certificate would avoid it
+and is not provided.
+
+A TCP request without a live session gets 401, except that the static dashboard
+pages, which carry no run data, load signed out. Every cookie-authenticated
+write, including `POST /logout`, must carry an `Origin` header naming the
+dashboard's own origin; a missing, `null` or foreign origin gets 403. Reads
+still pass the loopback Host and Origin checks above. After verifying the
+session, the gate consumes the session cookie, any `Authorization` header and
+any controller session cookies, then forwards the verified peer to the shared
+controller API. The dashboard session is not a controller capability. Log out
+deletes the stored session and ends its open event streams. The socket itself
+needs no session.
 See [local execution](local-execution.md#the-laptop-boundary).
 
 ## Container hardening

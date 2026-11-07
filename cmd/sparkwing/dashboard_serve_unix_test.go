@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -85,8 +86,9 @@ func TestDashboardServesAControllerARunStarted(t *testing.T) {
 	if err := response.Body.Close(); err != nil {
 		t.Fatal(err)
 	}
-	if response.StatusCode != http.StatusSeeOther || !strings.HasPrefix(response.Header.Get("Location"), "/#s=") {
-		t.Fatalf("sign-in link did not start a session: HTTP %d", response.StatusCode)
+	signedIn := slices.ContainsFunc(response.Cookies(), func(c *http.Cookie) bool { return c.Name == "sw_dashboard" && c.Value != "" && c.HttpOnly })
+	if response.StatusCode != http.StatusSeeOther || response.Header.Get("Location") != "/" || !signedIn {
+		t.Fatalf("sign-in link did not start a session: HTTP %d, Set-Cookie %q", response.StatusCode, response.Header.Values("Set-Cookie"))
 	}
 
 	after := status()

@@ -5,7 +5,7 @@ import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState, useSyncExternalStore } from "react";
 import { type Approval, getPendingApprovals } from "@/lib/api";
 import { readCSRFCookie } from "@/lib/csrfCookie";
-import { localSession, logOutLocal } from "@/lib/localSession";
+import { localSignedIn, logOutLocal } from "@/lib/localSession";
 import { fmtDateTime, fmtFullDate } from "@/lib/timeFormat";
 import TeamSwitcher from "@/components/TeamSwitcher";
 import HelpMenu from "@/components/HelpMenu";
@@ -148,7 +148,7 @@ function LogoutControl() {
 function LocalLogoutControl() {
   const [held, setHeld] = useState(false);
   useEffect(() => {
-    queueMicrotask(() => setHeld(localSession() !== null));
+    queueMicrotask(() => setHeld(localSignedIn()));
   }, []);
   if (!held) return null;
   return (

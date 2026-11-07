@@ -61,7 +61,8 @@ func TestLocalRuntimeDashboardConnectionActivity(t *testing.T) {
 				client, server := net.Pipe()
 				defer client.Close()
 				listener.connections <- server
-				if _, err := io.WriteString(client, "GET / HTTP/1.1\r\nHost: dashboard\r\nAuthorization: "+signedInBearer(t, r)+"\r\n\r\n"); err != nil {
+				cookie, host := signedInCookie(t, r)
+				if _, err := io.WriteString(client, "GET / HTTP/1.1\r\nHost: "+host+"\r\nCookie: "+cookie+"\r\n\r\n"); err != nil {
 					t.Fatal(err)
 				}
 				if hijack {
