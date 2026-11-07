@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
@@ -16,12 +17,19 @@ import (
 // merging origin/main into it first when main moved.
 type Land struct{ sparkwing.Base }
 
+// LandArgs selects the gate's controller and supplies the local review inputs.
+type LandArgs struct {
+	ReviewArgs
+	CloudProfile string `flag:"cloud-profile" desc:"Run the full gate, including race tests, on this Cloud profile; keep review and push local."`
+}
+
 func (Land) ShortHelp() string {
 	return "Land the current branch: source policy first, then gate and review in parallel, then push HEAD to main, merging origin/main first when it moved"
 }
 
 func (Land) Help() string {
-	return "Refuses a dirty checkout, a detached HEAD, main itself, a CHANGELOG.md that repeats a ### heading within a release, and a branch whose merge with origin/main (after fetching it) conflicts, " +
+	return "Pass --cloud-profile NAME to run the full gate, including race tests, on Cloud while policy, review and push stay local. " +
+		"Refuses a dirty checkout, a detached HEAD, main itself, a CHANGELOG.md that repeats a ### heading within a release, and a branch whose merge with origin/main (after fetching it) conflicts, " +
 		"naming the command that fixes each. Then runs the gate's policy job (the cheap source-policy checks), so a policy finding fails the land within seconds, " +
 		"and once it passes runs the rest of the gate (the same jobs as `sparkwing run gate`) and the review " +
 		"(the same job as `sparkwing run review`, which reads .review.yaml and takes --brief and --skip) in parallel. " +
@@ -38,6 +46,7 @@ func (Land) Help() string {
 
 func (Land) Examples() []sparkwing.Example {
 	return []sparkwing.Example{
+		{Comment: "Run heavy checks on Cloud and stop before pushing", Command: "sparkwing run land --sw-route local --sw-stop-at verify --sw-allow-risk destructive,prod -- --cloud-profile cloud"},
 		{Comment: "Preview the landing without pushing", Command: "sparkwing run land --sw-dry-run"},
 		{Comment: "Gate and review without pushing (the risk check still covers the skipped push)", Command: "sparkwing run land --sw-stop-at verify --sw-allow-risk destructive,prod"},
 		{Comment: "Land the branch on main", Command: "sparkwing run land --sw-allow-risk destructive,prod"},
@@ -50,7 +59,7 @@ const (
 	landBaseRef    = landBaseRemote + "/" + landBaseBranch
 )
 
-func (p *Land) Plan(_ context.Context, plan *sparkwing.Plan, in ReviewArgs, rc sparkwing.RunContext) error {
+func (p *Land) Plan(_ context.Context, plan *sparkwing.Plan, in LandArgs, rc sparkwing.RunContext) error {
 	// safety: Plan reads WorkDir rather than running git, because planning does
 	// no I/O. The inline jobs run git in this checkout, not a job snapshot, so
 	// the commit they push is the one the developer is on.
@@ -64,7 +73,17 @@ func (p *Land) Plan(_ context.Context, plan *sparkwing.Plan, in ReviewArgs, rc s
 	}
 	pre := sparkwing.Job(plan, "preconditions", &landPreconditionsJob{RepoDir: repoDir}).Inline().Cores(lightJobCores)
 
-	gate := gateJobs(plan, &Gate{}, "gate", false)
+	var gate []*sparkwing.JobNode
+	var cloudGate sparkwing.Ref[string]
+	if in.CloudProfile == "" {
+		gate = gateJobs(plan, &Gate{}, "gate", false)
+	} else {
+		policy := sparkwing.Job(plan, policyJobID, &policyJob{}).Timeout(policyJobTimeout)
+		remote := sparkwing.Job(plan, "cloud-gate", &landCloudGate{RepoDir: repoDir, Profile: in.CloudProfile, Head: sparkwing.RefTo[landHead](pre)}).
+			Inline().Cores(lightJobCores).Timeout(90 * time.Minute).Needs(policy)
+		cloudGate = sparkwing.RefTo[string](remote)
+		gate = []*sparkwing.JobNode{policy, remote}
+	}
 	// perf: the policy job is the gate's first node and every heavy gate job
 	// already waits on it. The review waits on it too, so a one-second policy
 	// finding fails the land before the review spends minutes on the diff.
@@ -73,20 +92,21 @@ func (p *Land) Plan(_ context.Context, plan *sparkwing.Plan, in ReviewArgs, rc s
 	for _, n := range gate {
 		needs = append(needs, n)
 	}
-	review := reviewJobNode(plan, in, branch).Needs(policy)
+	review := reviewJobNode(plan, in.ReviewArgs, branch).Needs(policy)
 	needs = append(needs, review)
 
 	sparkwing.Job(plan, "land", &landJob{
-		RepoDir: repoDir,
-		RunID:   rc.RunID,
-		Head:    sparkwing.RefTo[landHead](pre),
-		Review:  sparkwing.RefTo[reviewRecord](review),
+		RepoDir:   repoDir,
+		RunID:     rc.RunID,
+		Head:      sparkwing.RefTo[landHead](pre),
+		Review:    sparkwing.RefTo[reviewRecord](review),
+		CloudGate: cloudGate,
 	}).Inline().Cores(lightJobCores).Needs(needs...)
 	return nil
 }
 
 func init() {
-	sparkwing.Register[ReviewArgs]("Land", func() sparkwing.Pipeline[ReviewArgs] { return &Land{} })
+	sparkwing.Register[LandArgs]("Land", func() sparkwing.Pipeline[LandArgs] { return &Land{} })
 }
 
 type gitRunner func(ctx context.Context, args ...string) (string, error)
@@ -215,10 +235,11 @@ type landingRecord struct {
 type landJob struct {
 	sparkwing.Base
 	sparkwing.Produces[landingRecord]
-	RepoDir string
-	RunID   string
-	Head    sparkwing.Ref[landHead]
-	Review  sparkwing.Ref[reviewRecord]
+	RepoDir   string
+	RunID     string
+	Head      sparkwing.Ref[landHead]
+	Review    sparkwing.Ref[reviewRecord]
+	CloudGate sparkwing.Ref[string]
 	// safety: the push step sets it to what it pushed, so the record names the
 	// pushed commit and tree rather than the gated ones.
 	landed *landTarget
@@ -280,6 +301,10 @@ func (j *landJob) record(ctx context.Context) (landingRecord, error) {
 	if j.landed != nil {
 		pushed = *j.landed
 	}
+	gateRun := j.RunID
+	if j.CloudGate.Job() != "" && !sparkwing.IsDryRun(ctx) {
+		gateRun = j.CloudGate.Get(ctx)
+	}
 	return landingRecord{
 		Branch:       head.Branch,
 		Commit:       pushed.Commit,
@@ -287,7 +312,7 @@ func (j *landJob) record(ctx context.Context) (landingRecord, error) {
 		GatedTree:    head.Tree,
 		Base:         pushed.Base,
 		Merges:       pushed.Merges,
-		GateRun:      j.RunID,
+		GateRun:      gateRun,
 		ReviewRecord: reviewRecordPath(filepath.Join(common, "sparkwing-review"), review.Branch),
 		ReviewResult: review.Result,
 		Pushed:       !sparkwing.IsDryRun(ctx),

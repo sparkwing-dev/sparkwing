@@ -79,6 +79,9 @@ func displayConfigPath(path string) string {
 }
 
 func applyConfiguredProfile(inv *clisurface.Invocation) error {
+	if inv.Command.Path == "sparkwing run" {
+		return nil
+	}
 	// safety: login --controller names its own profile from the host; a saved default must not capture it.
 	if inv.Has("profile") || inv.Bool("all-repos") || strings.HasPrefix(inv.Command.Path, "sparkwing profiles ") || inv.Command.Path == "sparkwing login" && inv.Has("controller") {
 		return nil

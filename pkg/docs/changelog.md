@@ -30,6 +30,8 @@ unlock.
 
 ### Added
 
+- **CLI:** `sparkwing run --sw-route cloud --profile NAME` sends planning and jobs directly to Cloud without a terminal or local fallback. `--sw-detached` returns a Cloud receipt. `--allow-secret-file PATH` uploads a named secret-shaped file, as with `pipeline trigger --working-tree`. Source uploads and requester secrets use the burst rules, and repository local restrictions still apply. Direct Cloud uses team credits rather than the burst overflow allowance.
+- **delivery:** `sparkwing run land -- --cloud-profile NAME` runs the full gate and race tests on Cloud while review and push keep the local checkout. The landing record names the Cloud gate run.
 - **SDK:** Host compatibility checks run frozen released Go and TypeScript pipelines through candidate nodehost. The affected gate reuses fixture preparation, and pre-release rebuilds every historical fixture.
 
 ### Changed

@@ -89,7 +89,7 @@ profiles:
 	}
 }
 
-func TestDispatchRun_RefusesAControllerProfileAndNamesTrigger(t *testing.T) {
+func TestDispatchRunRequiresExplicitCloudRoutingForAProfile(t *testing.T) {
 	writeProfilesFixture(t, `
 profiles:
   prod: { controller: { url: https://api.example.dev } }
@@ -97,8 +97,8 @@ profiles:
 `)
 	for _, name := range []string{"prod", "lite"} {
 		err := dispatchRunArgs([]string{"deploy", "--profile", name})
-		if err == nil || !strings.Contains(err.Error(), "sparkwing pipeline trigger <pipeline> --profile NAME") {
-			t.Errorf("run deploy --profile %s = %v, want a refusal naming pipeline trigger", name, err)
+		if err == nil || !strings.Contains(err.Error(), "--sw-route cloud") {
+			t.Errorf("run deploy --profile %s = %v, want a refusal naming --sw-route cloud", name, err)
 		}
 	}
 }

@@ -1,6 +1,6 @@
 # Local execution
 
-`sparkwing run` runs locally by default. Explicit routing can select a Cloud-owned run hosted on this machine. `pipeline trigger`
+`sparkwing run` runs locally by default. Explicit routing can select Cloud execution or a Cloud-owned overflow run hosted on this machine. `pipeline trigger`
 submits it to a controller. Both placements use the shared run and job hosts,
 sealed inputs and matching SDK engine.
 
@@ -46,13 +46,14 @@ sparkwing pipeline trigger build-deploy --profile prod
 ```
 
 Engine flags precede `--`. Pipeline and job arguments follow it. Local `run`
-uses this machine's controller unless Cloud routing is configured. It accepts no connection profile flag. A profile
+uses this machine's controller unless Cloud routing is configured. `--profile NAME` requires `--sw-route cloud`. A profile
 selects the controller for `pipeline trigger`, run observations and management.
 
 | Invocation | Execution and records |
 | --- | --- |
 | `sparkwing run build` | The CLI hosts the run. The local controller owns its records. |
 | `sparkwing run build --sw-detached` | The local controller queues and hosts work independently of the submitting terminal. |
+| `sparkwing run build --sw-route cloud --profile prod --sw-detached` | Cloud plans and runs jobs independently of the submitting terminal. |
 | `sparkwing pipeline trigger build --profile prod` | The selected controller queues the run for an eligible runner or launcher. |
 | `sparkwing pipeline trigger build --profile prod --runner here --reason repair` | This CLI hosts the controller's named here run. |
 
@@ -470,9 +471,50 @@ those behaviors. See [node protocol](node-protocol.md).
 
 ## Burst and overflow
 
+### Direct Cloud routing
+
+Route one invocation directly to Cloud without changing machine defaults:
+
+```bash
+sparkwing run test --sw-route cloud --profile work
+sparkwing run test --sw-route cloud --profile work --sw-detached -o json
+sparkwing runs logs --profile work --run RUN_ID --follow
+sparkwing runs status --profile work --run RUN_ID
+```
+
+`--sw-route cloud` sends planning and jobs to Cloud through the existing
+controller dispatch path. It works without a terminal and starts no local
+execution controller. The CLI still captures and inspects the source locally.
+Without `--sw-detached`, it follows logs and returns the run's exit status.
+Detached submission returns a receipt with `run_id` and `number` after intake.
+`--sw-run-handle-file PATH` also writes the run identity at intake.
+Interrupting observation leaves the Cloud run active, as with `pipeline trigger`.
+Use `sparkwing runs cancel --profile work --run RUN_ID` to cancel it.
+
+Explicit Cloud routing never falls back to local compute, including on a
+connection or upload failure. It selects Cloud immediately, without the machine
+`prefer` holds or personal runners. Cloud credits and team admission limits apply.
+The machine's burst `overflow_minutes` allowance applies to overflow, rather than
+these directly selected Cloud jobs. `--profile` requires `--sw-route cloud`.
+Omit it to use machine `run.routing.profile`. `--sw-route local` selects local
+execution for one invocation. Repository `run.route: local` still forbids Cloud.
+
+Source-file approval, secret scanning, requester secret selection and masking
+use the burst rules below. The upload refuses tracked files whose names or
+contents look like credentials. `--allow-secret-file PATH` uploads a named
+repository-relative file anyway, as `pipeline trigger --working-tree` does; the
+secret-value scan still applies and an unmatched path fails the run. Requester values stay in controller memory. Direct
+Cloud runs have no attached here host to resupply them after a controller restart.
+If those values are lost, submit a new run. A working-tree run still reads only
+team shared secrets, never repository pipeline secrets. `Inline()` does not return a job to the invoking machine.
+Split work needing local credentials into
+a local pipeline that invokes the remote checks and waits for their result.
+
+### Machine overflow
+
 Configure a Cloud connection and opt in through machine `run.routing`.
-The machine file alone selects the route, profile, preferences, local secret
-sources, overflow limit and untracked source files. Repository configuration
+The machine file selects overflow preferences, local secret sources, overflow
+limit and untracked source files. Repository configuration
 can restrict execution to this machine and declare required secret names.
 
 ```yaml
@@ -549,8 +591,8 @@ A personal machine takes your own runs that select no runner, ranked under the
 team's claim ranking. A run you trigger from this machine ranks it `here`. Runs
 started by a push, pull request, release or schedule never reach it.
 
-Cloud routing requires an attached terminal session. The default local route
-continues to support `--sw-detached`.
+Machine-configured burst routing needs a foreground here host and refuses
+`--sw-detached`. Use `--sw-route cloud` for a detached Cloud run.
 
 Registered machines advertise labels and a configured concurrent-job count.
 Required labels select eligible machines. CPU and memory observations are not

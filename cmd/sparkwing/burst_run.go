@@ -76,9 +76,9 @@ func runRoutedCommand(ctx context.Context, pipeline string, flags runFlags, args
 		return errors.New("run: Cloud overflow captures the working tree; use pipeline trigger to select committed revisions")
 	}
 	if route.Profile == nil {
-		return errors.New("run: cloud routing requires a profile in machine run.routing")
+		return errors.New("run: cloud routing requires --profile NAME or a profile in machine run.routing")
 	}
-	if flags.detached {
+	if flags.detached && flags.route != "cloud" {
 		return errors.New("run: a cloud-routed run hosts here and must remain attached")
 	}
 	options, closeConnection, err := deps.connect(ctx, *route.Profile)
@@ -95,6 +95,9 @@ func runRoutedCommand(ctx context.Context, pipeline string, flags runFlags, args
 	}
 	if ctx.Err() != nil {
 		return ctx.Err()
+	}
+	if flags.route == "cloud" {
+		return withProfile(*route.Profile, err)
 	}
 	if !burstControllerUnreachable(err) {
 		return withProfile(*route.Profile, err)
@@ -113,7 +116,7 @@ func runConfiguredInvocation(pipeline string, flags runFlags, args []string) err
 	if flags.sourceSelection != nil {
 		directory = flags.sourceSelection.execution.Directory
 	}
-	route, err := loadRunRouting(directory, pipeline)
+	route, err := loadRunRouting(directory, pipeline, flags)
 	if err != nil {
 		return err
 	}
@@ -127,7 +130,7 @@ func runConfiguredInvocation(pipeline string, flags runFlags, args []string) err
 	})
 }
 
-func loadRunRouting(directory, pipeline string) (userconfig.RunRouting, error) {
+func loadRunRouting(directory, pipeline string, flags runFlags) (userconfig.RunRouting, error) {
 	path, err := userconfig.Path()
 	if err != nil {
 		return userconfig.RunRouting{}, err
@@ -140,5 +143,21 @@ func loadRunRouting(directory, pipeline string) (userconfig.RunRouting, error) {
 	if err != nil {
 		return userconfig.RunRouting{}, err
 	}
-	return resolveRunRouting(machine, project, pipeline), nil
+	return resolveInvocationRouting(machine, project, pipeline, flags)
+}
+
+func resolveInvocationRouting(machine userconfig.Config, project *projectconfig.Config, pipeline string, flags runFlags) (userconfig.RunRouting, error) {
+	route := resolveRunRouting(machine, project, pipeline)
+	if flags.route == "cloud" {
+		if restricted := resolveRunRouting(userconfig.Config{}, project, pipeline); restricted.Route != nil {
+			return route, errors.New("run: repository run.route: local forbids --sw-route cloud")
+		}
+	}
+	if flags.route != "" {
+		route.Route = new(flags.route)
+	}
+	if flags.profile != "" {
+		route.Profile = new(flags.profile)
+	}
+	return route, nil
 }

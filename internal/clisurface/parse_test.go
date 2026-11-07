@@ -218,3 +218,27 @@ func TestLintRejectsRemovedStaticFlag(t *testing.T) {
 		t.Fatal("accepted inert --static")
 	}
 }
+
+func TestRunInvocationCloudRouting(t *testing.T) {
+	for _, args := range [][]string{
+		{"run", "gate", "--sw-route", "cloud", "--profile", "work", "--sw-detached", "--", "--full"},
+		{"--profile", "work", "run", "gate", "--sw-route", "cloud"},
+		{"run", "gate", "--sw-route", "local"},
+		{"run", "gate", "--sw-route", "cloud", "--allow-secret-file", "a.key,b.key", "--allow-secret-file", "c.key"},
+	} {
+		if _, err := Parse("sparkwing", args); err != nil {
+			t.Fatalf("%v: %v", args, err)
+		}
+	}
+	for _, args := range [][]string{
+		{"run", "gate", "--profile", "work"},
+		{"run", "gate", "--profile", "work", "--sw-route", "local"},
+		{"run", "gate", "--sw-route", "other"},
+		{"run", "gate", "--allow-secret-file", "a.key"},
+		{"run", "gate", "--sw-route", "local", "--allow-secret-file", "a.key"},
+	} {
+		if _, err := Parse("sparkwing", args); err == nil {
+			t.Fatalf("accepted %v", args)
+		}
+	}
+}

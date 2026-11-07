@@ -231,6 +231,12 @@ func flagToken(arg string, shorts map[string]string) (name, value string, explic
 }
 
 func (i *Invocation) validate() error {
+	if !i.Help() && i.Command.Path == "sparkwing run" && i.Has("profile") && i.Value("sw-route") != "cloud" {
+		return i.invalid("--profile requires --sw-route cloud")
+	}
+	if !i.Help() && i.Command.Path == "sparkwing run" && i.Has("allow-secret-file") && i.Value("sw-route") != "cloud" {
+		return i.invalid("--allow-secret-file requires --sw-route cloud")
+	}
 	definitions := append(GlobalFlags(), i.Command.Flags...)
 	allowed := make(map[string]Flag, len(definitions))
 	for _, f := range definitions {
@@ -245,9 +251,6 @@ func (i *Invocation) validate() error {
 	for _, name := range names {
 		f, ok := allowed[name]
 		if !ok {
-			if i.Command.Path == "sparkwing run" && name == "profile" {
-				return i.invalid("--profile is not accepted by local run; use sparkwing pipeline trigger <pipeline> --profile NAME")
-			}
 			return i.invalid("flag --%s is not accepted%s", name, i.flagHint())
 		}
 		if !f.Repeatable && len(i.Flags[name]) > 1 {

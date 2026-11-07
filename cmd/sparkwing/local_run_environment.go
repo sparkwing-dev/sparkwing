@@ -20,7 +20,7 @@ func prepareRunEnvironment(directory, pipeline string, captured []string, flags 
 	if flags.environment != nil {
 		return flags.environment, nil
 	}
-	route, err := loadRunRouting(directory, pipeline)
+	route, err := loadRunRouting(directory, pipeline, flags)
 	if err != nil {
 		return nil, err
 	}

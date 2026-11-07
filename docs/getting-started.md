@@ -436,6 +436,11 @@ Use `--profile NAME` to select a connection, or save one with
 use that default when the flag is omitted. With no saved default they use the
 local controller. `--profile=` selects local for one command.
 
+`sparkwing run` keeps its separate machine routing preference. A saved default
+profile does not change local execution. Use `--sw-route cloud --profile NAME`
+to send one run directly to Cloud. Without `--profile`, that explicit route
+uses machine `run.routing.profile`.
+
 ```bash
 sparkwing profiles show --profile prod        # saved connection, with token redacted
 sparkwing profiles remove --profile prod      # revoke and remove

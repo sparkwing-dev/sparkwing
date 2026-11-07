@@ -254,7 +254,7 @@ func FuzzPreparationGitNeverRestoresSigningMaterial(f *testing.F) {
 		prepared := prepareLocalEnvironment(os.Environ(), []string{"SIGNING_MATERIAL"})
 		t.Setenv("SIGNING_MATERIAL", secret+"-ambient")
 		t.Setenv("GIT_INDEX_FILE", filepath.Join(t.TempDir(), "foreign-index"))
-		snapshot, err := burstSourceSnapshot(t.Context(), prepared.captured, repo, nil, nil)
+		snapshot, err := burstSourceSnapshot(t.Context(), prepared.captured, repo, nil, nil, nil)
 		if err != nil {
 			t.Fatal(err)
 		}
