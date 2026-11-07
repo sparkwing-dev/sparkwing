@@ -13,6 +13,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/limits"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 )
@@ -42,7 +43,11 @@ func commitVerifiedBlobTx(ctx context.Context, tx *storeTx, team Team, auth blob
 		}
 		return receipt.Value, nil
 	}
-	objects, err := commitBlobBytesTx(ctx, tx, team, blob.Blob{Digest: intent.Digest, Size: intent.Size}, quotas[0].amount)
+	reserved := quotas[0].amount
+	if auth.preparesPipeline() {
+		reserved = limits.PreparedPipelineBytes
+	}
+	objects, err := commitBlobBytesTx(ctx, tx, team, blob.Blob{Digest: intent.Digest, Size: intent.Size}, reserved)
 	if err != nil {
 		return blob.Receipt{}, err
 	}
@@ -53,7 +58,11 @@ func commitVerifiedBlobTx(ctx context.Context, tx *storeTx, team Team, auth blob
 	if err := clearBlobTombstoneTx(ctx, tx, team, intent.Digest); err != nil {
 		return blob.Receipt{}, err
 	}
-	if err := settleBlobQuotaTx(ctx, tx, team, auth.source.RunID, accounting, quotas, intent.Size*objects, objects); err != nil {
+	charged, chargedObjects := intent.Size*objects, objects
+	if auth.preparesPipeline() {
+		charged, chargedObjects = 0, 0
+	}
+	if err := settleBlobQuotaTx(ctx, tx, team, auth.source.RunID, accounting, quotas, charged, chargedObjects); err != nil {
 		return blob.Receipt{}, err
 	}
 	return receipt, nil
@@ -263,6 +272,10 @@ func readOwnBlobReceiptTx(ctx context.Context, tx *storeTx, source blob.UploadId
 	}
 	return runspec.Optional[blob.Receipt]{Set: true, Value: blob.Receipt{Identity: source, Digest: digest, CreatedAt: *stateTime(sql.NullInt64{Int64: at, Valid: true})}}, nil
 }
+
+// safety: only the Cloud planning owner publishes the prepared pipeline Sparkwing built, so its upload is capped by
+// limits.PreparedPipelineBytes instead of the team's storage quota; retained-storage billing still counts it.
+func (a blobActor) preparesPipeline() bool { return blobKindAllowed(a, blob.KindPrepared) }
 
 func blobKindAllowed(a blobActor, kind blob.Kind) bool {
 	source := a.source

@@ -20,6 +20,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/engineid"
 	"github.com/sparkwing-dev/sparkwing/internal/fssecure"
+	"github.com/sparkwing-dev/sparkwing/internal/limits"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 	"github.com/sparkwing-dev/sparkwing/internal/releaseasset"
@@ -278,6 +279,9 @@ func (p *Prepared) publish(ctx context.Context, spec Spec, options Options, entr
 	size, err := archive.Seek(0, io.SeekCurrent)
 	if err != nil {
 		return err
+	}
+	if size > limits.PreparedPipelineBytes {
+		return errors.New(limits.PreparedPipelineTooLarge(size))
 	}
 	if _, err := archive.Seek(0, io.SeekStart); err != nil {
 		return err

@@ -20,12 +20,11 @@ const (
 	storageLimitObjectsPerRun = "objects_per_run"
 )
 
-// freeTierQuota is the free tier's storage allowance: ten megabytes per run,
-// which keeps an active five-person team under a gigabyte without a lifetime
-// cap.
+// safety: a hundred mebibytes of user data per run under a gigabyte a month, without a lifetime cap; the
+// prepared pipeline Sparkwing builds counts toward neither.
 var freeTierQuota = StorageQuota{
 	Tier:             storageTierFree,
-	MaxBytesPerRun:   10 << 20,
+	MaxBytesPerRun:   100 << 20,
 	MaxBytesPerMonth: 1 << 30,
 	MaxObjectsPerRun: 1000,
 }

@@ -1,6 +1,9 @@
 package limits
 
-import "time"
+import (
+	"fmt"
+	"time"
+)
 
 const (
 	// CacheArchiveBytes bounds dependency-cache archive.
@@ -31,6 +34,18 @@ const (
 	ProjectConfigBytes int64 = 1 << 20
 	// LogSearchBytes bounds run-scoped log search bytes.
 	LogSearchBytes int64 = 256 << 20
+	// PreparedPipelineBytes bounds the prepared pipeline archive Sparkwing Cloud
+	// builds and publishes for a run. The archive does not count toward the
+	// team's storage quota, so this cap is what bounds it.
+	PreparedPipelineBytes int64 = 256 << 20
 	// ProtocolEnvelopeBytes bounds envelope allowance beyond a typed output payload.
 	ProtocolEnvelopeBytes int64 = 1 << 20
 )
+
+// PreparedPipelineTooLarge names the prepared pipeline limit an archive of
+// size bytes exceeds and how to get under it.
+func PreparedPipelineTooLarge(size int64) string {
+	return fmt.Sprintf("prepared pipeline is %d bytes, over the %d-byte (256 MiB) limit for prepared pipelines; "+
+		"shrink the pipeline module, for example by trimming its dependencies, and keep large generated or vendored files out of the repository checkout",
+		size, PreparedPipelineBytes)
+}

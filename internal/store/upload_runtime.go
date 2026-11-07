@@ -11,6 +11,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/limits"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 )
 
@@ -70,7 +71,14 @@ func (t *Tenant) ReserveBlobUpload(ctx context.Context, request UploadReservatio
 		if err != nil {
 			return UploadReservation{}, err
 		}
-		if err := admitStorageGrowthTx(ctx, tx, t.team, storageGrowth{reservation: blobUploadQuotaID(request.ID), expires: request.ExpiresAt, run: a.source.RunID, bytes: reserved, objects: objects}); err != nil {
+		growth := storageGrowth{reservation: blobUploadQuotaID(request.ID), expires: request.ExpiresAt, run: a.source.RunID, bytes: reserved, objects: objects}
+		if a.preparesPipeline() {
+			if request.Intent.Size > limits.PreparedPipelineBytes {
+				return UploadReservation{}, authorityError(apierr.PayloadTooLarge, limits.PreparedPipelineTooLarge(request.Intent.Size))
+			}
+			growth.prepared = true
+		}
+		if err := admitStorageGrowthTx(ctx, tx, t.team, growth); err != nil {
 			return UploadReservation{}, err
 		}
 		u := UploadReservation{ID: request.ID, Blob: blob.Blob{Team: string(t.team), Digest: request.Intent.Digest, Size: request.Intent.Size}, Identity: a.source, Provenance: blobActorProvenance(a), RefFacts: a.authority.Ref, ExpiresAt: request.ExpiresAt.UTC()}
