@@ -22,7 +22,7 @@ const admissionCleanupTimeout = time.Second
 
 // safety: a long-lived runner can hold leases, so holder liveness does not recover
 // a release lost to a brief controller stall.
-var leaseReleaseTimeout = 5 * time.Second
+const leaseReleaseTimeout = 5 * time.Second
 
 type Lease struct {
 	cl               *Client
@@ -38,6 +38,7 @@ type Lease struct {
 	cancel           context.CancelFunc
 	once             sync.Once
 	releaseErr       error
+	releaseTimeout   time.Duration
 }
 
 func (cl *Client) Acquire(ctx context.Context, req wingwire.AdmissionRequest, onQueued func(wingwire.Queued)) (held *Lease, resultErr error) {
@@ -107,6 +108,7 @@ func (cl *Client) newLease(ctx context.Context, state wingd.AdmissionHTTPState) 
 	return &Lease{
 		cl: cl, id: state.ID, revision: state.Revision, ctx: ctx, cancel: cancel, RunID: grant.RunID, Token: grant.LeaseToken,
 		Resources: grant.Resources, Semaphores: grant.Semaphores, SoleRunUnderLoad: grant.SoleRunUnderLoad, ExternalCores: grant.ExternalCores,
+		releaseTimeout: leaseReleaseTimeout,
 	}
 }
 
@@ -143,7 +145,7 @@ func (cl *Client) cleanupAdmissionWithin(ctx context.Context, path string, timeo
 func (l *Lease) Release() error {
 	l.once.Do(func() {
 		l.cancel()
-		l.releaseErr = l.cl.cleanupAdmissionWithin(l.ctx, "/requests/"+url.PathEscape(l.id), leaseReleaseTimeout)
+		l.releaseErr = l.cl.cleanupAdmissionWithin(l.ctx, "/requests/"+url.PathEscape(l.id), l.releaseTimeout)
 		l.releaseErr = errors.Join(l.releaseErr, l.cl.Close())
 	})
 	return l.releaseErr

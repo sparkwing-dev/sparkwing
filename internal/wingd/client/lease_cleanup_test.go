@@ -92,9 +92,6 @@ func TestCancelledAdmissionRetriesLostResponseCleanupDuringControllerRecovery(t 
 }
 
 func TestAdmissionCleanupGivesUpWhenControllerCannotAnswer(t *testing.T) {
-	previous := leaseReleaseTimeout
-	leaseReleaseTimeout = admissionCleanupTimeout
-	t.Cleanup(func() { leaseReleaseTimeout = previous })
 	for _, operation := range []string{"release", "cancelled acquisition"} {
 		for _, silent := range []bool{false, true} {
 			t.Run(fmt.Sprintf("%s/silent=%t", operation, silent), func(t *testing.T) {
@@ -133,6 +130,7 @@ func TestAdmissionCleanupGivesUpWhenControllerCannotAnswer(t *testing.T) {
 				done := make(chan error, 1)
 				if operation == "release" {
 					held := cl.newLease(t.Context(), wingd.AdmissionHTTPState{ID: "ticket", Grant: &wingwire.Grant{RunID: "job", LeaseToken: "token"}})
+					held.releaseTimeout = admissionCleanupTimeout
 					go func() { done <- held.Release() }()
 				} else {
 					ctx, cancel := context.WithCancel(t.Context())
