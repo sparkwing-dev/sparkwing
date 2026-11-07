@@ -5,8 +5,10 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"log/slog"
 	"net/http"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -46,8 +48,8 @@ func TestWarmCapacityObservationThroughLauncherHTTP(t *testing.T) {
 	handler := controller.New(st, nil).WithEngineController(engine).Handler()
 	base, _, boundary, _ := fixture()
 	kube := fake.NewClientset()
-	node := corev1.Node{ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{CloudClassLabel: "2", PoolNamespaceLabel: base.Config.Namespace}}, Status: corev1.NodeStatus{Conditions: []corev1.NodeCondition{{Type: corev1.NodeReady, Status: corev1.ConditionTrue}}}}
-	for _, kind := range []string{"ready", "used", "bound", "unready", "other-deployment", "reserved", "reserved-taint", "unknown-class", "used-team", "quarantined"} {
+	node := corev1.Node{ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{CloudClassLabel: "2", PoolNamespaceLabel: base.Config.Namespace, NodeClassLabel: base.Config.NodeClassName}}, Status: corev1.NodeStatus{Conditions: []corev1.NodeCondition{{Type: corev1.NodeReady, Status: corev1.ConditionTrue}}}}
+	for _, kind := range []string{"ready", "used", "bound", "unready", "other-deployment", "reserved", "reserved-taint", "unknown-class", "used-team", "quarantined", "other-node-class"} {
 		n := node.DeepCopy()
 		n.Name = kind
 		switch kind {
@@ -69,6 +71,8 @@ func TestWarmCapacityObservationThroughLauncherHTTP(t *testing.T) {
 			n.Annotations = map[string]string{reservationAnnotation: "held"}
 		case "quarantined":
 			n.Annotations = map[string]string{quarantineAnnotation: "unsafe"}
+		case "other-node-class":
+			n.Labels[NodeClassLabel] = "sparkwing-staging-boot"
 		}
 		if _, err := kube.CoreV1().Nodes().Create(t.Context(), n, metav1.CreateOptions{}); err != nil {
 			t.Fatal(err)
@@ -94,5 +98,51 @@ func TestWarmCapacityObservationThroughLauncherHTTP(t *testing.T) {
 	state, err = st.AsOperator().WarmCapacity(t.Context())
 	if err != nil || state.Classes[0].Warm != 0 {
 		t.Fatalf("stale sample=%+v %v", state, err)
+	}
+}
+
+type warmSampleControl struct {
+	*controlFake
+	warm map[string]int64
+}
+
+func (c *warmSampleControl) ReportWarmPools(_ context.Context, warm map[string]int64) error {
+	c.warm = warm
+	return nil
+}
+
+// Staging's boot and jobs NodePools shared the class labels and taint, so
+// placeholders held boot-class nodes the launcher refuses. Those nodes must not
+// count as warm, and the misconfiguration is reported without flooding the log.
+func TestWarmSampleExcludesAndReportsNodesOfAnotherNodeClass(t *testing.T) {
+	l, kube, _, base := fixture()
+	control := &warmSampleControl{controlFake: base}
+	var logs strings.Builder
+	l.Control, l.Logger = control, slog.New(slog.NewTextHandler(&logs, nil))
+	for name, class := range map[string]string{"jobs": l.Config.NodeClassName, "boot": "sparkwing-staging-boot"} {
+		node := &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: name, Labels: map[string]string{CloudClassLabel: "2", PoolNamespaceLabel: l.Config.Namespace, NodeClassLabel: class, "karpenter.sh/nodepool": "pool-" + name}}, Status: corev1.NodeStatus{Conditions: []corev1.NodeCondition{{Type: corev1.NodeReady, Status: corev1.ConditionTrue}}}}
+		if _, err := kube.CoreV1().Nodes().Create(t.Context(), node, metav1.CreateOptions{}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for range 2 {
+		if err := l.reportWarmPools(t.Context()); err != nil {
+			t.Fatal(err)
+		}
+		if control.warm["sparkwing-2cpu"] != 1 {
+			t.Fatalf("warm sample counted another node class: %v", control.warm)
+		}
+	}
+	warning := logs.String()
+	if strings.Count(warning, "level=WARN") != 1 {
+		t.Fatalf("want one rate-limited WARN, got %q", warning)
+	}
+	for _, want := range []string{"boot (NodePool pool-boot, EC2NodeClass sparkwing-staging-boot)", "node_class=" + l.Config.NodeClassName} {
+		if !strings.Contains(warning, want) {
+			t.Fatalf("warning %q omits %q", warning, want)
+		}
+	}
+	if strings.Contains(warning, "pool-jobs") {
+		t.Fatalf("warning names an accepted node: %q", warning)
 	}
 }
