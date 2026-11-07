@@ -29,6 +29,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/storage/logseg"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
+	"github.com/sparkwing-dev/sparkwing/internal/userconfig"
 
 	authenticationv1 "k8s.io/api/authentication/v1"
 
@@ -139,10 +140,31 @@ func main() { sw.Register("Deploy", func() sw.Pipeline[sw.NoInputs] { return pip
 }
 
 func TestCloudWorkingTreeTriggerRunsPlanEvalAndJobsOnTheLauncher(t *testing.T) {
+	testCloudWorkingTreeDispatch(t, false)
+}
+
+func TestExplicitCloudRunPlansAndExecutesThroughTheLauncher(t *testing.T) {
+	testCloudWorkingTreeDispatch(t, true)
+}
+
+func testCloudWorkingTreeDispatch(t *testing.T, direct bool) {
+	t.Helper()
 	if testing.Short() {
 		t.Skip("slow: 3.7s measured in the short class; the full suite runs it")
 	}
 	f := cloudDispatchTrigger(t)
+	if direct {
+		flags, args := parseRunFlagsArgs([]string{"--sw-route=cloud", "--profile=cloud", "--sw-detached"})
+		connection, closeConnection, err := controllerOptions(t.Context(), "cloud")
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer closeConnection()
+		f.request, err = prepareNativeBurst(t.Context(), "deploy-prod", flags, args, userconfig.RunRouting{Profile: new("cloud")}, connection)
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
 	created, err := f.member.CreateRun(t.Context(), f.request)
 	if err != nil {
 		t.Fatal(err)

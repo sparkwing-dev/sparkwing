@@ -87,3 +87,20 @@ The hard cut removes `POST /api/v1/local/controller/stay`, `LocalControl.stay`,
 fields. The four activity counts remain status
 observations. Dashboard activation and its remembered address retain their
 existing behavior.
+
+## Route an invocation directly to Cloud
+
+`--sw-route cloud --profile NAME` on `sparkwing run` is additive. It uses the
+existing controller-dispatched run and source-upload contracts. No wire field,
+API endpoint or SDK symbol is removed or renamed. `--profile` remains refused
+without `--sw-route cloud`. `--sw-route local` overrides machine routing for one
+run. `--allow-secret-file PATH` also requires `--sw-route cloud`. Repository
+local restrictions remain binding.
+
+Explicit Cloud runs can use `--sw-detached` and need no attached here host.
+They never fall back locally. Interrupting log observation leaves them running.
+They use team Cloud credits rather than machine burst overflow allowances.
+Requester secrets keep the existing volatile controller-memory lifetime, but
+there is no here host to resupply them after a controller restart. Submit a new
+run if those inputs are lost. Machine-configured burst routing keeps its
+foreground owner, preference holds and pre-intake local fallback.

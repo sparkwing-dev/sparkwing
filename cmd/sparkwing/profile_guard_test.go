@@ -31,12 +31,12 @@ func TestEveryControllerVerbAcceptsProfile(t *testing.T) {
 	if marked == 0 {
 		t.Fatal("no command is marked ReachesController, so this check proves nothing")
 	}
-	if cmdRun.ReachesController || cmdRun.declaredFlags()["profile"] {
-		t.Error("sparkwing run executes on this machine; it neither reaches a controller nor declares --profile")
+	if !cmdRun.ReachesController || !cmdRun.declaredFlags()["profile"] {
+		t.Error("sparkwing run must expose its explicit Cloud connection")
 	}
 }
 
-// A run selects no profile. Non-test code in cmd/sparkwing and
+// A local run selects no profile. Non-test code in cmd/sparkwing and
 // internal/orchestrator may name the handoff variables only where they are
 // dropped before a pipeline process starts, and may build a controller secret
 // source only where a controller dispatched the run.
