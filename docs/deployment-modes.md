@@ -18,7 +18,6 @@ mode needs no account, profile or network listener.
 
 ```bash
 sparkwing run build
-sparkwing dashboard start
 sparkwing dashboard open
 ```
 

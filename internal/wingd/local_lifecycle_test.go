@@ -95,8 +95,6 @@ func (r *lifecycleRuntime) Status(context.Context) (LocalStatus, error) {
 	return r.status, nil
 }
 
-func (r *lifecycleRuntime) EnsureDashboard(context.Context, string, bool) error { return nil }
-
 func (r *lifecycleRuntime) Drain(context.Context) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -131,10 +129,6 @@ func TestLocalLifecycleConcurrentStartAndDrain(t *testing.T) {
 		if err := <-results; err != nil {
 			t.Fatal(err)
 		}
-	}
-	status, err := lifecycle.StartDashboard(ctx, opts)
-	if err != nil || !status.Running {
-		t.Fatalf("dashboard startup: %+v, %v", status, err)
 	}
 	opts.Standalone = true
 	if _, err := lifecycle.EnsureStarted(ctx, opts); err == nil {

@@ -371,36 +371,6 @@
       ]
     },
     {
-      "type": "LocalDashboard",
-      "fields": [
-        {
-          "name": "address",
-          "kind": "string",
-          "omitempty": false
-        },
-        {
-          "name": "read_only",
-          "kind": "bool",
-          "omitempty": true
-        }
-      ]
-    },
-    {
-      "type": "LocalDashboardAck",
-      "fields": [
-        {
-          "name": "read_only",
-          "kind": "bool",
-          "omitempty": true
-        },
-        {
-          "name": "error",
-          "kind": "string",
-          "omitempty": true
-        }
-      ]
-    },
-    {
       "type": "QueueState",
       "fields": [
         {

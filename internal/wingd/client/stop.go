@@ -22,7 +22,11 @@ func Stop(ctx context.Context, opts Options) error {
 	}
 	cl := &Client{sock: sock, opts: opts}
 	var ack wingwire.DrainAck
-	if err := cl.apiCall(ctx, http.MethodPost, controllerPath+"drain", nil, &ack); err != nil {
+	path := controllerPath + "drain"
+	if opts.RetireRunner {
+		path += "?runner=retire"
+	}
+	if err := cl.apiCall(ctx, http.MethodPost, path, nil, &ack); err != nil {
 		if dialMeansAbsent(err) {
 			return ErrNoDaemon
 		}

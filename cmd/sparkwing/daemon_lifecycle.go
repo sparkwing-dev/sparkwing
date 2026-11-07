@@ -89,10 +89,12 @@ func executeDaemonLifecycle(ctx context.Context, inv clisurface.Invocation, serv
 	if action == "restart" && services.options.Version == "" {
 		return result, &apierr.Error{Code: apierr.Unavailable, Message: "daemon restart requires the installed controller version"}
 	}
-	stopped, err := stopLocalController(ctx, services.lifecycle)
-	if err == nil && action == "stop" {
-		err = forgetDashboard(services.options.Home)
+	if action == "stop" && services.retireRunner != nil {
+		if err := services.retireRunner(ctx); err != nil {
+			return result, err
+		}
 	}
+	stopped, err := stopLocalController(ctx, services.lifecycle)
 	if err != nil {
 		return result, err
 	}
