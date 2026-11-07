@@ -3,7 +3,9 @@
 package main
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -28,6 +30,14 @@ import (
 )
 
 func TestDetachedLocalRunnerSurvivesControllerRestartAndRollsBuild(t *testing.T) {
+	testDetachedLocalRunnerRestart(t, false)
+}
+
+func TestDrainingLocalOwnerAwaitsChildWhileSuccessorRunsDependencies(t *testing.T) {
+	testDetachedLocalRunnerRestart(t, true)
+}
+
+func testDetachedLocalRunnerRestart(t *testing.T, childOwner bool) {
 	_, bootErr := os.Stat("/run/systemd/system")
 	if bootErr != nil && !errors.Is(bootErr, os.ErrNotExist) {
 		t.Fatal(bootErr)
@@ -64,6 +74,7 @@ func TestDetachedLocalRunnerSurvivesControllerRestartAndRollsBuild(t *testing.T)
 	}
 	var waited chan error
 	var instances []localhostwire.LocalRunnerInstance
+	var run, marker string
 	stopController := func() {
 		if controllerUnit != "" {
 			if err := manager("kill", "--signal=KILL", controllerUnit); err != nil {
@@ -78,7 +89,9 @@ func TestDetachedLocalRunnerSurvivesControllerRestartAndRollsBuild(t *testing.T)
 		}
 	}
 	defer func() {
-		stopController()
+		if marker != "" {
+			_ = os.WriteFile(marker+".release", nil, 0o600)
+		}
 		for _, instance := range instances {
 			alive, err := wingd.LocalRunnerProcessAlive(instance)
 			if err == nil && alive {
@@ -90,7 +103,7 @@ func TestDetachedLocalRunnerSurvivesControllerRestartAndRollsBuild(t *testing.T)
 		}
 		cleanup, stop := context.WithTimeout(context.Background(), 15*time.Second)
 		defer stop()
-		awaitLocalRunnerCondition(t, cleanup, func() bool {
+		stopped := func() bool {
 			for _, instance := range instances {
 				alive, err := wingd.LocalRunnerProcessAlive(instance)
 				if err != nil || alive {
@@ -98,10 +111,39 @@ func TestDetachedLocalRunnerSurvivesControllerRestartAndRollsBuild(t *testing.T)
 				}
 			}
 			return true
-		})
+		}
+		for !stopped() && cleanup.Err() == nil {
+			time.Sleep(20 * time.Millisecond)
+		}
+		if !stopped() {
+			t.Error("test-owned runners did not finish graceful cleanup")
+			for _, instance := range instances {
+				alive, err := wingd.LocalRunnerProcessAlive(instance)
+				if err != nil || !alive {
+					continue
+				}
+				if systemd {
+					unit := wingd.LocalRunnerServiceName(home, instance.ID)
+					cgroup, err := os.ReadFile(fmt.Sprintf("/proc/%d/cgroup", instance.PID))
+					if err == nil && strings.Contains(string(cgroup), "/"+unit+".service") {
+						if err := manager("kill", "--signal=KILL", unit); err != nil {
+							t.Logf("test runner service cleanup: %v", err)
+						}
+					}
+				} else if process, err := os.FindProcess(instance.PID); err == nil {
+					_ = process.Kill()
+				}
+			}
+		}
+		stopController()
 		if t.Failed() {
 			data, _ := os.ReadFile(logPath)
 			t.Logf("controller output:\n%s", data)
+			logs, _ := filepath.Glob(filepath.Join(home, "runners", "*", "runner.log"))
+			for _, path := range logs {
+				data, _ := os.ReadFile(path)
+				t.Logf("runner %s output:\n%s", filepath.Base(filepath.Dir(path)), data)
+			}
 		}
 	}()
 	start := func(binary string) localhostwire.LocalRunnerInstance {
@@ -166,7 +208,12 @@ func TestDetachedLocalRunnerSurvivesControllerRestartAndRollsBuild(t *testing.T)
 	if first.PID == controllerPID {
 		t.Fatal("runner still shares the controller process")
 	}
-	run, marker, connection := startHeldRunnerSchedule(t, ctx, home)
+	var connection client.EngineOptions
+	if childOwner {
+		run, marker, connection = startAwaitingLocalOwner(t, ctx, home, cli)
+	} else {
+		run, marker, connection = startHeldRunnerSchedule(t, ctx, home)
+	}
 	var jobPID int
 	awaitLocalRunnerCondition(t, ctx, func() bool {
 		data, err := os.ReadFile(marker + ".pid")
@@ -264,6 +311,12 @@ func TestDetachedLocalRunnerSurvivesControllerRestartAndRollsBuild(t *testing.T)
 		}
 		return err == nil && status.Status == "success"
 	})
+	if childOwner {
+		data, err := os.ReadFile(marker + ".await")
+		if err != nil || string(data) != "from-child" {
+			t.Fatalf("old owner did not receive child output: %s %v", data, err)
+		}
+	}
 	if systemd {
 		data, err := os.ReadFile(marker + ".after")
 		if err != nil || !strings.Contains(string(data), wingd.LocalRunnerServiceName(home, rolled.ID)) {
@@ -277,7 +330,7 @@ func TestDetachedLocalRunnerSurvivesControllerRestartAndRollsBuild(t *testing.T)
 	var lines strings.Builder
 	cursor := ""
 	awaitLocalRunnerCondition(t, ctx, func() bool {
-		logs, err := reader.ReadLogs(ctx, run, controllerwire.LogQuery{Cursor: cursor})
+		logs, err := reader.ReadLogs(ctx, run, controllerwire.LogQuery{Cursor: cursor, Tree: true})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -368,4 +421,64 @@ func main(){sw.Register("CI",func()sw.Pipeline[sw.NoInputs]{return pipeline{}});
 		t.Fatal(err)
 	}
 	return launched.RunID, marker, options
+}
+
+func startAwaitingLocalOwner(t *testing.T, ctx context.Context, home, binary string) (string, string, client.EngineOptions) {
+	t.Helper()
+	repo := initSnapshotRepo(t)
+	directory := filepath.Join(repo, ".sparkwing")
+	if err := os.Mkdir(directory, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	writeSDKFixture(t, directory, `package main
+import("context";"os";"time";sw "github.com/sparkwing-dev/sparkwing/sparkwing")
+type out struct { Value string }
+type hold struct { sw.Base; sw.Produces[out] }
+func (*hold) Work(w *sw.Work)(*sw.WorkStep,error){
+ return sw.Step(w,"hold",func(ctx context.Context)(out,error){
+  _,err:=sw.Bash(ctx,"echo $$ > \"$HOLD_MARKER.pid\"; echo held-begin; while [ ! -f \"$HOLD_MARKER.release\" ]; do sleep 0.02; done; echo held-end").Run();return out{Value:"from-child"},err
+ }),nil
+}
+type child struct{sw.Base}
+func(child) Plan(_ context.Context,p *sw.Plan,_ sw.NoInputs,_ sw.RunContext)error{sw.Job(p,"held",&hold{}).Cores(0.25);return nil}
+type parent struct{sw.Base}
+func(parent) Plan(_ context.Context,p *sw.Plan,_ sw.NoInputs,_ sw.RunContext)error{
+ awaited:=sw.Job(p,"await",func(ctx context.Context)error{
+  got,err:=sw.RunAndAwait[out,sw.NoInputs](ctx,"child","held",sw.WithFreshTimeout(90*time.Second));if err!=nil{return err};return os.WriteFile(os.Getenv("HOLD_MARKER")+".await",[]byte(got.Value),0600)
+ }).StartsChildren("child").Cores(0.25)
+ sw.Job(p,"after",func(ctx context.Context)error{
+  data,err:=os.ReadFile("/proc/self/cgroup");if err!=nil{return err};if _,err=sw.Bash(ctx,"echo successor-after").Run();err!=nil{return err};return os.WriteFile(os.Getenv("HOLD_MARKER")+".after",data,0600)
+ }).Needs(awaited).Cores(0.25)
+ return nil
+}
+func main(){sw.Register("CI",func()sw.Pipeline[sw.NoInputs]{return parent{}});sw.Register("Child",func()sw.Pipeline[sw.NoInputs]{return child{}});sw.Main()}
+`)
+	writeSnapshotFile(t, repo, ".sparkwing/sparkwing.yaml", "pipelines:\n  - name: ci\n    entrypoint: CI\n  - name: child\n    entrypoint: Child\n", 0o600)
+	runSnapshotGit(t, repo, "add", ".")
+	runSnapshotGit(t, repo, "commit", "-qm", "parent awaits child")
+	marker := filepath.Join(home, "held")
+	command := procenv.ControlCommandContext(ctx, append(os.Environ(), "HOLD_MARKER="+marker), binary, "run", "ci", "--sw-detached", "--sw-no-update", "-o", "json")
+	command.Dir = repo
+	var stderr bytes.Buffer
+	command.Stderr = &stderr
+	output, err := command.Output()
+	if err != nil {
+		t.Fatalf("submit awaiting owner: %v: %s %s", err, output, stderr.String())
+	}
+	var receipt struct {
+		RunID string `json:"run_id"`
+	}
+	if err := json.Unmarshal(output, &receipt); err != nil || receipt.RunID == "" {
+		t.Fatalf("awaiting owner receipt: %s %v", output, err)
+	}
+	socket, err := wingd.APISocketPath(home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	options, closeTransport, err := controllerSocketOptions(socket)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(closeTransport)
+	return receipt.RunID, marker, options
 }
