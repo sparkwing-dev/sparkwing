@@ -666,8 +666,8 @@ logs and step states retain every individual failure. `--platform-cells` adds
 the `macos` and `windows` cells as dispatched jobs requiring `os=darwin` and
 `os=windows`; they run the `macos-verify` and `windows-verify` checks. A local
 run cannot place them and hosted CI does not pass the flag. Trigger the run on
-the team controller, where `.sparkwing/sparkwing.yaml` places each cell on a
-team runner with a `5s` hold, and a cell whose machine is off waits visibly:
+the team controller; each cell waits visibly for a team runner reporting its
+operating system:
 
 ```bash
 sparkwing pipeline trigger pre-release --profile prod -- --platform-cells

@@ -233,7 +233,10 @@ Sizes: S half a day, M one to two days, L three to five days, tests included.
 5. **On-demand GitHub Actions (L).** App `actions: write` and approval flow,
    owner-approved workflow and images, dispatch intents and sender lease,
    receipt-bound OIDC exchange for tag and PR refs, cancellation, fallback
-   workflow with no event triggers.
+   workflow with no event triggers. Until then a `github-actions` tier is
+   matched by tier class only: its `workflow` and `runner` are validated and
+   sealed but bind nothing, so any live Actions runner of the team can claim.
+   Slice 5 must bind the claim to the dispatched workflow and image.
 6. **Docs and live acceptance (S).** Config reference, scheduling and Actions
    docs with their drift checks, then the live scenario below.
 
@@ -275,10 +278,28 @@ Sizes: S half a day, M one to two days, L three to five days, tests included.
   the run with both settings named, rather than letting the setting win.
 - Funding needs no new check: an unfunded Cloud claimant is ineligible in the
   claim predicate, so it never holds a later tier and never wins.
-- App-armed schedules do not seal placement yet; they need the default-branch
-  read at firing time. App deliveries and fetched Run now do.
-- Overrides naming no plan job fail plan acceptance unless a job generates
-  others; generated IDs are not checked when expansion closes yet.
+- The list only narrows, so intake seals it whatever the run's provenance,
+  including App runs whose compare was unavailable. Any runner pin (App runner
+  setting, `--runner`, burst routing) conflicts and refuses the run.
+- A child run is bound to the list of the job that started it; its own
+  pipeline's default-branch list narrows that by intersecting tiers, and an
+  empty intersection refuses the child.
+- App-armed schedules read the default-branch list each time they fire, in
+  the controller's schedule source resolution.
+- An override for a job a plan lacks is inert: the list binds job IDs, and a
+  pipeline flag can leave a declared job out. Plan and expansion acceptance
+  share one per-job check that refuses an override on an inline job and a job
+  whose operating-system requirement no listed tier can meet.
+- Holds run from `queue_started_at`, the time a job first became ready since
+  its last started attempt, so an award returned before it starts cannot renew
+  them. Ranking still orders by the latest ready time.
+- A listed job keeps the team ranking's claimant filter even when its
+  requirements pin a class, pool or name; unlisted pinned jobs still skip it.
+- A configuration reader older than these keys refuses a file that uses them.
+  Pre-launch, readers get no tolerance for unknown keys (Korey, 2026-11-07):
+  upgrade the controller and CLIs before adding the keys. The repository's own
+  pre-release YAML waits on `bw-3095-placement-repo-yaml` until the installed
+  CLI is rebuilt.
 - A `github-actions` tier takes only an Actions runner already polling until
   slice 5 adds dispatch. The projection says so.
 - `pipeline lint` prints the preview in table and plain output; JSON output

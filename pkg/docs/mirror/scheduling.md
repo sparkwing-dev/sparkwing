@@ -107,9 +107,10 @@ own project or machine preferences to change them.
 
 ### Repository placement
 
-A pipeline entry can order where its jobs run when a repository proves the
-run: GitHub App push, pull request and release deliveries, and Run now on a
-commit the controller fetched. Each tier names a target and an optional hold:
+A pipeline entry can order where its jobs run for GitHub App push, pull
+request and release deliveries, App-armed schedules (read when each fires) and
+Run now on a commit the controller fetched, including runs whose verification
+was unavailable. Each tier names a target and an optional hold:
 
 ```yaml
 pipelines:
@@ -133,12 +134,18 @@ Targets are `team` (shared team runners, optionally narrowed by `labels`),
 `workflow` and hosted `runner` image). A hold defaults to `0s`. Tier N opens
 when every earlier tier with a live runner that has a free slot has passed
 its deadline, which is the job's ready time plus the holds through that tier.
-An offline, busy, stale or mismatched runner never holds a later tier. A
-returned award that never started keeps the original ready time; a retry after
-a started attempt starts a fresh one.
+An offline, busy, stale or mismatched runner never holds a later tier. Holds
+run from the time the job first became ready since its last started attempt:
+a returned award that never started keeps that time, and a retry after a
+started attempt starts a fresh one.
 
 The list is the whole allowed set: a target that is not listed never runs the
-job, so a list without `cloud` never spends Cloud credits on it. Requirements
+job, so a list without `cloud` never spends Cloud credits on it. The list binds
+job IDs, not code: a job renamed to `macos` takes the `macos` override, and in a
+pipeline with only `jobs` overrides every other job keeps today's routing. A
+child run stays inside the list of the job that started it; the child
+pipeline's own default-branch list can only narrow it, and a child whose list
+shares no tier with its parent's is refused. Requirements
 from the SDK and the pipeline's `requires` still apply in every tier, and tier
 labels narrow only their own tier. A job block replaces the pipeline list; an
 empty `prefer: []` gives that job the routing it would have without a list.
@@ -148,12 +155,15 @@ classes may take the job. SDK `Prefers` adds no hold inside a tier.
 
 Only the copy of `.sparkwing/sparkwing.yaml` on the default branch's head
 applies, sealed with that commit next to the run's own revision, so a branch
-or pull request cannot add a paid tier. A job override that names no job in
-the plan fails plan acceptance, and an inline job cannot carry one. Listing
+or pull request cannot add a paid tier. An override for a job a plan does
+not contain is ignored. Plan and expansion acceptance refuse a job whose
+override names it while it is inline, and a job whose operating-system
+requirement no tier can meet, such as `os=darwin` with only `cloud` listed. Listing
 `cloud` or `github-actions` under a `run.route: local` pipeline is an error,
-and a GitHub App runner setting other than `anywhere` refuses the run with
-both settings named. A Run now with an explicit `--runner` keeps that
-selection instead of the list. `sparkwing pipeline lint` prints the resolved list for
+and a GitHub App runner setting other than `anywhere`, an explicit `--runner`
+or burst routing refuses the run with both settings named. When the
+default-branch file cannot be read or parsed, that pipeline's run is refused
+with the reason, and the rest of the delivery proceeds. `sparkwing pipeline lint` prints the resolved list for
 every declared job. `sparkwing runs status` and the run page show each held
 job's tiers, the runners live in each, and when the next tier opens. A job
 with no available tier waits under the existing queue policy. On-demand
