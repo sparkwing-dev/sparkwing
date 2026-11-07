@@ -57,8 +57,13 @@ func installedEngine(ctx context.Context, pin engineid.Pin, target releaseasset.
 	}
 	return Resolved{
 		Identity: engineid.Identity{Pin: pin, Version: version, ManifestDigest: digest}, Target: target, AssetDigest: digest, Executable: path,
-		Notices: []engineid.Notice{{Kind: engineid.NoticePinDisabled, Version: version, Reason: "SDK replacement: engine pinning is off for this run; using the installed CLI's engine."}},
+		Notices: []engineid.Notice{PinDisabledNotice(version)},
 	}, nil
+}
+
+// PinDisabledNotice reports that an SDK replacement runs the installed engine without release pinning or version policy.
+func PinDisabledNotice(version string) engineid.Notice {
+	return engineid.Notice{Kind: engineid.NoticePinDisabled, Version: version, Reason: "SDK replacement: engine pinning is off for this run; using the installed CLI's engine."}
 }
 
 var selfDigest struct {

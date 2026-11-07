@@ -137,6 +137,38 @@ func TestProductionCloudPlanAndEvalReachNativeHost(t *testing.T) {
 	}
 }
 
+// An exchanged eval award has no source.read, so a Cloud evaluation that
+// fetched would be refused and fail every generator; it restores the plan's
+// prepared source like a node, and only the planning owner publishes it.
+func TestProductionCloudUnitsRestorePreparedSource(t *testing.T) {
+	for _, kind := range []capability.UnitKind{capability.UnitPlan, capability.UnitEval, capability.UnitNode} {
+		t.Run(string(kind), func(t *testing.T) {
+			native, unit := productionNativeAward(t, kind)
+			t.Setenv("DOCKER_HOST", "unix://"+filepath.Join(t.TempDir(), "docker.sock"))
+			hosting := productionHostingAt(os.Getenv("SPARKWING_HOME"), "v1.2.3", client.EngineOptions{URL: native.ControllerURL, HTTP: native.HTTP}, t.TempDir(), false, procenv.SubmitAccept{}, nil)
+			controller, err := client.NewEngineClient(client.EngineOptions{URL: hosting.ControllerURL, HTTP: hosting.HTTP, Bearer: fixedBearer(unit.Capability)})
+			if err != nil {
+				t.Fatal(err)
+			}
+			services, _, err := hosting.Bind(t.Context(), unit, controller)
+			if services.Close != nil {
+				t.Cleanup(func() { _ = services.Close() })
+			}
+			var socket *net.OpError
+			if err != nil && errors.As(err, &socket) && socket.Op == "listen" && errors.Is(err, syscall.EPERM) {
+				t.Skipf("native host reached the sandbox socket boundary: %v", err)
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			prepared := services.Config.Source.Prepared
+			if prepared == nil || prepared.Key != blob.PreparedRecordKey("team", "run", "gh:42", unit.Request.Request.Pipeline) || prepared.Publish != (kind == capability.UnitPlan) {
+				t.Fatalf("%s prepared source = %+v", kind, prepared)
+			}
+		})
+	}
+}
+
 func testProductionNativeBinding(t *testing.T, kind capability.UnitKind) {
 	t.Helper()
 	hosting, unit := productionNativeAward(t, kind)
