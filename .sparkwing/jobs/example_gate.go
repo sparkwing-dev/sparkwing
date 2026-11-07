@@ -25,6 +25,7 @@ type ExampleInputs struct {
 	FailOnce      bool   `flag:"fail-once" help:"Exercise failed-only retry with a deterministic first-attempt failure"`
 	CLI           string `flag:"cli" default:"sparkwing" help:"CLI built from the same source as the running engine"`
 	APIProfile    string `flag:"api-profile" help:"Controller profile for lifecycle probes, empty for the local controller"`
+	APIController string `flag:"api-controller" help:"Controller URL for lifecycle probes on a host without --cli; builds the CLI from this checkout and signs in with EXAMPLE_PROBE_TOKEN"`
 	SmokeProfile  string `flag:"smoke-profile" help:"Target environment profile for the separate reference run"`
 	SmokeCheckout string `flag:"smoke-checkout" help:"Checkout of sparkwing-ci-smoke used by the trigger CLI"`
 	SmokePipeline string `flag:"smoke-pipeline" default:"reference" help:"Reference pipeline containing hello and docker-test"`
@@ -33,7 +34,13 @@ type ExampleInputs struct {
 
 type exampleSecrets struct {
 	Value string `sw:"EXAMPLE_GATE_SECRET,optional"`
+	Probe string `sw:"EXAMPLE_PROBE_TOKEN,optional"`
 }
+
+const (
+	exampleProbeToken   = "EXAMPLE_PROBE_TOKEN"
+	exampleProbeProfile = "example-probe"
+)
 
 func (Example) Secrets() any { return &exampleSecrets{} }
 
@@ -44,13 +51,78 @@ func exampleSkip(reason string) sparkwing.SkipPredicate {
 	}
 }
 
-func exampleNeedsCLI(in ExampleInputs) sparkwing.SkipPredicate {
+func exampleNeedsCLI(in ExampleInputs, rc sparkwing.RunContext) sparkwing.SkipPredicate {
 	return func(ctx context.Context) bool {
-		if _, err := exec.LookPath(in.CLI); err != nil {
-			return exampleSkip(fmt.Sprintf("CLI %q is not runnable on this host; pass --cli with a sparkwing binary to run lifecycle probes", in.CLI))(ctx)
+		if _, ok := exampleLifecycle(in, rc); !ok {
+			return exampleSkip(fmt.Sprintf("CLI %q is not runnable on this host and lifecycle-cli built none; pass --cli, or --api-controller with %s stored", in.CLI, exampleProbeToken))(ctx)
 		}
 		return false
 	}
+}
+
+func exampleCLIDir(rc sparkwing.RunContext) string {
+	return sparkwing.Path(filepath.Join(".sparkwing/cache/example-cli", rc.RunID))
+}
+
+// safety: resolved at job time because lifecycle-cli writes its wrapper after planning.
+func exampleLifecycle(in ExampleInputs, rc sparkwing.RunContext) (ExampleInputs, bool) {
+	if _, err := exec.LookPath(in.CLI); err == nil {
+		return in, true
+	}
+	wrapper := filepath.Join(exampleCLIDir(rc), "sparkwing")
+	if _, err := os.Stat(wrapper); err != nil {
+		return in, false
+	}
+	in.CLI, in.APIProfile = wrapper, exampleProbeProfile
+	return in, true
+}
+
+// hack: the Cloud job image ships only sparkwing-runner, so the probes build the CLI from the
+// candidate source and keep its profile in a private home, reaching the controller like a user.
+func exampleBuildCLI(in ExampleInputs, rc sparkwing.RunContext) func(context.Context) error {
+	return func(ctx context.Context) error {
+		token, err := sparkwing.Secret(ctx, exampleProbeToken)
+		if err != nil {
+			return err
+		}
+		dir := exampleCLIDir(rc)
+		home := filepath.Join(dir, "home")
+		if err := os.MkdirAll(home, 0o700); err != nil {
+			return err
+		}
+		bin := filepath.Join(dir, "sparkwing-cli")
+		if _, err := sparkwing.Exec(ctx, "go", "build", "-trimpath", "-buildvcs=false", "-o", bin, "./cmd/sparkwing").Env("CGO_ENABLED", "0").Env("GOWORK", "off").Run(); err != nil {
+			return err
+		}
+		for _, path := range []string{home, bin} {
+			if strings.ContainsRune(path, '\'') {
+				return fmt.Errorf("lifecycle CLI path %q cannot be quoted", path)
+			}
+		}
+		staged := filepath.Join(dir, "sparkwing.staged")
+		script := fmt.Sprintf("#!/bin/sh\nexport SPARKWING_HOME='%s' SPARKWING_CONFIG='%s/config.yaml'\nexec '%s' \"$@\"\n", home, home, bin)
+		if err := os.WriteFile(staged, []byte(script), 0o700); err != nil {
+			return err
+		}
+		tokenFile := filepath.Join(home, "token")
+		if err := os.WriteFile(tokenFile, []byte(token), 0o600); err != nil {
+			return err
+		}
+		_, err = sparkwing.Exec(ctx, "sh", "-c", `exec "$0" profiles add --profile "$1" --controller "$2" --token-stdin < "$3"`, staged, exampleProbeProfile, in.APIController, tokenFile).Run()
+		if err = errors.Join(err, os.Remove(tokenFile)); err != nil {
+			return fmt.Errorf("add probe profile: %w", err)
+		}
+		// safety: probes treat the wrapper's presence as a signed-in CLI, so it appears only after the profile.
+		return os.Rename(staged, filepath.Join(dir, "sparkwing"))
+	}
+}
+
+func exampleProbe(plan *sparkwing.Plan, id string, in ExampleInputs, rc sparkwing.RunContext, cli *sparkwing.JobNode, check func(ExampleInputs, sparkwing.RunContext) func(context.Context) error) *sparkwing.JobNode {
+	// perf: a Cloud probe run schedules its own pods, so the local 90s budget is too tight there.
+	return sparkwing.Job(plan, id, func(ctx context.Context) error {
+		resolved, _ := exampleLifecycle(in, rc)
+		return check(resolved, rc)(ctx)
+	}).Needs(cli).Inline().Timeout(5 * time.Minute)
 }
 
 func exampleIntegration(plan *sparkwing.Plan, in ExampleInputs, rc sparkwing.RunContext) *sparkwing.JobGroup {
@@ -153,16 +225,35 @@ func exampleIntegration(plan *sparkwing.Plan, in ExampleInputs, rc sparkwing.Run
 	all = append(all, sparkwing.Job(plan, "artifacts-assert", func(context.Context) error {
 		return exampleFileEquals(filepath.Join(".sparkwing/cache/example-consumed", artifactPath), rc.RunID)
 	}).Consumes(producer, sparkwing.Into(".sparkwing/cache/example-consumed")))
-	all = append(all, sparkwing.Job(plan, "memoized-step", exampleMemoCheck(in, rc)).Inline().Timeout(90*time.Second).SkipIf(exampleNeedsCLI(in)))
-	retry := sparkwing.Job(plan, "failed-only-retry", exampleRetryCheck(in, rc)).Inline().Timeout(90 * time.Second)
+	cli := sparkwing.Job(plan, "lifecycle-cli", exampleBuildCLI(in, rc)).Inline().Timeout(10 * time.Minute).SkipIf(func(ctx context.Context) bool {
+		if _, err := exec.LookPath(in.CLI); err == nil {
+			return exampleSkip(fmt.Sprintf("probes use CLI %q from this host", in.CLI))(ctx)
+		}
+		if in.APIController == "" {
+			return exampleSkip("no --api-controller configured for an in-job CLI")(ctx)
+		}
+		if _, err := sparkwing.Secret(ctx, exampleProbeToken); errors.Is(err, sparkwing.ErrSecretMissing) {
+			return exampleSkip(exampleProbeToken + " is not stored")(ctx)
+		}
+		return false
+	})
+	all = append(all, exampleProbe(plan, "memoized-step", in, rc, cli, exampleMemoCheck).SkipIf(exampleNeedsCLI(in, rc)))
+	retry := exampleProbe(plan, "failed-only-retry", in, rc, cli, exampleRetryCheck)
 	if !in.FailOnce {
 		retry.SkipIf(exampleSkip("pass --fail-once to exercise the expected first-attempt failure"))
 	} else {
-		retry.SkipIf(exampleNeedsCLI(in))
+		// safety: a retry carries its source run's request, so the probe learns its attempt only
+		// through the CLI on its own host.
+		retry.SkipIf(func(ctx context.Context) bool {
+			if _, err := exec.LookPath(in.CLI); err != nil {
+				return exampleSkip(fmt.Sprintf("--fail-once needs CLI %q on the probe run's host to observe its own attempt", in.CLI))(ctx)
+			}
+			return false
+		})
 	}
 	all = append(all, retry)
-	all = append(all, sparkwing.Job(plan, "cancellation", exampleCancelCheck(in, rc)).Inline().Timeout(90*time.Second).SkipIf(exampleNeedsCLI(in)))
-	all = append(all, sparkwing.Job(plan, "logs-history", exampleLogsHistory(in, rc)).Inline().Timeout(90*time.Second).SkipIf(exampleNeedsCLI(in)))
+	all = append(all, exampleProbe(plan, "cancellation", in, rc, cli, exampleCancelCheck).SkipIf(exampleNeedsCLI(in, rc)))
+	all = append(all, exampleProbe(plan, "logs-history", in, rc, cli, exampleLogsHistory).SkipIf(exampleNeedsCLI(in, rc)))
 	all = append(all, sparkwing.Job(plan, "docker-assert", func(ctx context.Context) error {
 		var out bytes.Buffer
 		if err := docker.Run(ctx, docker.RunOptions{Image: "alpine:3.22", Cmd: []string{"printf", "example-docker-ok"}, Stdout: &out}); err != nil {
