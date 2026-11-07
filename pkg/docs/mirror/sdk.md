@@ -211,8 +211,9 @@ TypeScript uses `refToLastRun(pipeline, jobID, { fromAnyRun: true })`.
 `sw.RunAndAwait[Out, In](ctx, pipeline, jobID, options...)` starts a child run and
 waits for its output. Options include `sw.WithFreshInputs(in)`,
 `sw.WithFreshArgs(args)` and `sw.WithFreshTimeout(duration)`. The host owns child
-submission, authorization, cancellation and cycle checks. Call it inside an
-execution callback. While it waits, the job does not count against its runner's
+submission, authorization, cancellation and cycle checks. A child that is still
+pending or running when its parent run is cancelled or ends, or when the job that
+started it ends, is cancelled. Call it inside an execution callback. While it waits, the job does not count against its runner's
 `max_concurrent`, so the child can run on the same runner; once the child
 finishes, the resumed job can briefly put the runner over that limit. Compose
 reusable job types into a plan when the work belongs

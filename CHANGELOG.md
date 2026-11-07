@@ -25,6 +25,7 @@ unlock.
 - **CLI (Breaking):** `sparkwing dashboard install` and `dashboard uninstall` move to `sparkwing daemon install` and `daemon uninstall`, because the login service runs the controller, not only the dashboard. The always-refused `--force` flag is removed. See [the migration guide](docs/migrations/_unreleased.md#the-controller-login-service-moves-under-daemon).
 
 - **CLI (Breaking):** `sparkwing dashboard start` and `sparkwing dashboard stop` are removed, with their `--addr`, `--allow-remote` and `--read-only` flags. Every shared local controller now serves the dashboard from the moment it starts, at `dashboard.address` in config.yaml (`127.0.0.1:4343` by default, loopback only). `dashboard.read_only` replaces `--read-only`. `sparkwing dashboard open` starts the controller when none runs, and `sparkwing daemon stop` stops it. A taken port leaves runs admitted and status reports `dashboard_error`. The `wingd/dashboard.json` record and `POST /api/v1/local/controller/dashboard` are removed. See [the migration guide](docs/migrations/_unreleased.md#the-dashboard-serves-whenever-the-controller-runs).
+- **controller (Breaking):** The schema baseline advances to version 34, adding a partial index on live child runs for the parent-cancellation sweep. Recognized schema 33 stores upgrade in place. Older binaries refuse the upgraded store. See [the migration guide](docs/migrations/_unreleased.md#upgrade-the-store-in-place-to-schema-baseline-34).
 
 - **local controller (Breaking):** The schema baseline advances to version 33, adding durable runner process identities and lifecycle state. Recognized schema 32 stores upgrade in place. Older binaries refuse the upgraded store. See [the migration guide](docs/migrations/_unreleased.md#upgrade-the-store-in-place-to-schema-baseline-33).
 
@@ -53,6 +54,7 @@ unlock.
 ### Fixed
 
 - **local controller:** `sparkwing daemon stop` retires the local runner before the controller exits, so an idle runner records its stop and revokes its claim credential instead of failing against a missing socket, and a runner holding jobs stops claiming and finishes them. `sparkwing daemon restart` keeps the runner and its jobs running.
+- **controller:** Cancelling a run, or a run or job ending while a child it started through `RunAndAwait` is still pending or running, now cancels that child. Children had kept running until an operator cancelled each one by hand. Local and hosted controllers request the cancellation from their recovery sweep, so a grandchild follows one sweep later. A retry of a child run is left running, because someone asked for it.
 
 - **local controller:** Store time no longer moves backward when time sync or a VM resume steps the wall clock back, which had failed job and step completion with a `finished_at >= started_at` constraint error and refused plan settlement with "billing checkpoint is outside its awarded time range".
 

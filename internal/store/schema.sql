@@ -1929,3 +1929,6 @@ CREATE TABLE local_runner_instances (
 );
 
 CREATE UNIQUE INDEX idx_local_runner_active ON local_runner_instances(machine) WHERE state='active';
+
+-- The parent-cancellation sweep reads only live child runs, not retained history.
+CREATE INDEX idx_runs_live_children ON runs(team,id) WHERE parent_run_id <> '' AND status IN ('pending','running');
