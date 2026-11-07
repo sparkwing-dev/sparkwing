@@ -515,18 +515,22 @@ The controller stores only its SHA-256 digest, with the minting peer and the
 exact dashboard origin, and refuses the link at any other origin. Redeeming it
 stores a session digest in `state.db` and sets a host-only `sw_dashboard` cookie
 with `HttpOnly`, `SameSite=Strict`, `Path=/`, no `Domain` and a 30-day absolute
-expiry; on an HTTPS origin it is `__Host-sw_dashboard` with `Secure`. A second,
+expiry. A second,
 script-readable `sw_dashboard_signed_in` cookie only tells the page to show Log
 out; it authorizes nothing. A session is valid only at the origin it was
 redeemed at, survives controller restarts and ends at 30 days, at Log out, or
 when the store is replaced.
 
-Browsers send a cookie to every port on the same loopback host, so another
-service on `127.0.0.1` that this browser visits can receive the session cookie.
-HttpOnly, SameSite and the Origin checks below do not prevent that; run
-untrusted local services under another account or keep the dashboard on a
-machine without them. A `.localhost` name or local certificate would avoid it
-and is not provided.
+Known limitation, under review: browsers send a cookie to every port on the
+same host. Any other service on `127.0.0.1` that this browser visits receives
+the session cookie, including one run by another OS account, by Windows when
+the controller runs in WSL, or by a container on the host network. That
+service can then act as this account through the dashboard until the session
+ends, and because sessions survive restarts, a cookie captured by a process
+that held port 4343 earlier stays usable. HttpOnly, SameSite and the Origin
+checks below do not prevent this. Until it is resolved, sign out when you
+finish and avoid visiting other local web services in the same browser
+profile while signed in.
 
 A TCP request without a live session gets 401, except that the static dashboard
 pages, which carry no run data, load signed out. Every cookie-authenticated
@@ -536,7 +540,9 @@ still pass the loopback Host and Origin checks above. After verifying the
 session, the gate consumes the session cookie, any `Authorization` header and
 any controller session cookies, then forwards the verified peer to the shared
 controller API. The dashboard session is not a controller capability. Log out
-deletes the stored session and ends its open event streams. The socket itself
+deletes the stored session and ends its open event streams; if the store
+cannot revoke it, Log out fails visibly and leaves the session cookie in place
+so it can be retried. The socket itself
 needs no session.
 See [local execution](local-execution.md#the-laptop-boundary).
 
