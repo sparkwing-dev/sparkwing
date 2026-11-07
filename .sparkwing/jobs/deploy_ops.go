@@ -878,10 +878,13 @@ func (d *deployer) addProfile(ctx context.Context, profile, url, tokenParam stri
 	})
 }
 
-func (d *deployer) triggerRun(ctx context.Context, profile, pipeline, checkout, ref string, runID *string) error {
+func (d *deployer) triggerRun(ctx context.Context, profile, pipeline, checkout, ref string, runID *string, pipelineArgs ...string) error {
 	args := []string{"pipeline", "trigger", pipeline, "-C", checkout, "--profile", profile, "--runner", "cloud", "--detach", "-o", "json"}
 	if ref != "" {
 		args = append(args, "--ref", ref)
+	}
+	if len(pipelineArgs) > 0 {
+		args = append(append(args, "--"), pipelineArgs...)
 	}
 	return d.act(ctx, "trigger "+pipeline+" from "+checkout+" on "+profile+" Cloud", func() error {
 		out, err := d.sw(ctx, "", args...)
@@ -940,7 +943,7 @@ func (d *deployer) stagingGate(ctx context.Context, images deployImages) (stagin
 	if err := d.addProfile(ctx, profile, d.cfg.Staging.ControllerURL, d.cfg.Params.StagingToken); err != nil {
 		return rec, err
 	}
-	if err := d.triggerRun(ctx, profile, "example", d.repoDir, images.Commit, &rec.ExampleRun); err != nil {
+	if err := d.triggerRun(ctx, profile, "example", d.repoDir, images.Commit, &rec.ExampleRun, "--api-controller", d.cfg.Staging.ControllerURL); err != nil {
 		return rec, err
 	}
 	reference := filepath.Join(d.tmp, "reference")

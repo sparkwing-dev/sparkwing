@@ -902,9 +902,9 @@ func TestDeployStagingGateThenProduction(t *testing.T) {
 		t.Fatalf("gate record = %+v", gate)
 	}
 	if !slices.ContainsFunc(f.calls, func(c string) bool {
-		return strings.Contains(c, "pipeline trigger example -C "+f.repo) && strings.Contains(c, "--ref "+f.head)
+		return strings.Contains(c, "pipeline trigger example -C "+f.repo) && strings.Contains(c, "--ref "+f.head) && strings.HasSuffix(c, "-- --api-controller "+defaultDeployConfig().Staging.ControllerURL)
 	}) {
-		t.Fatalf("example was not triggered at the candidate commit: %q", f.calls)
+		t.Fatalf("example was not triggered at the candidate commit with the staging controller for its probes: %q", f.calls)
 	}
 
 	prod, err := f.deployer(false).promote(t.Context(), images)
