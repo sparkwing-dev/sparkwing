@@ -197,7 +197,7 @@ func TestRunnerWarnsOncePerUnusableLocalControllerCause(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if got := strings.Count(logged.String(), "level=WARN"); got != 1 || !strings.Contains(logged.String(), "sparkwing dashboard start") {
+	if got := strings.Count(logged.String(), "level=WARN"); got != 1 || !strings.Contains(logged.String(), "sparkwing dashboard open") {
 		t.Fatalf("runner logged %d warnings for one missing controller:\n%s", got, logged.String())
 	}
 }

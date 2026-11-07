@@ -29,8 +29,8 @@ type dashboardLifecycleFake struct {
 	keepUp  bool
 }
 
-func (f *dashboardLifecycleFake) StartDashboard(_ context.Context, options wingd.LocalStartOptions) (wingd.LocalStatus, error) {
-	f.calls = append(f.calls, "start")
+func (f *dashboardLifecycleFake) EnsureStarted(_ context.Context, options wingd.LocalStartOptions) (wingd.LocalStatus, error) {
+	f.calls = append(f.calls, "ensure")
 	f.options = options
 	return f.status, f.err
 }
@@ -70,9 +70,7 @@ func TestDashboardUsesLocalControllerLifecycle(t *testing.T) {
 		args         []string
 		calls, units []string
 	}{
-		{[]string{"start", "--addr", "[::1]:9000"}, []string{"start"}, nil},
 		{[]string{"status"}, []string{"status"}, nil},
-		{[]string{"stop"}, []string{"stop", "status"}, nil},
 		{[]string{"install"}, []string{"install"}, nil},
 		{[]string{"uninstall"}, []string{"status"}, []string{"uninstall"}},
 	} {
@@ -92,19 +90,8 @@ func TestDashboardUsesLocalControllerLifecycle(t *testing.T) {
 			if err := json.Unmarshal(output.Bytes(), &got); err != nil {
 				t.Fatal(err)
 			}
-			state := "running"
-			if tc.args[0] == "stop" {
-				state = "stopped"
-			}
-			if got.State != state || got.Version != "v1.2.3" || got.PID != 123 || !got.Installed || got.Activity != (dashboardActivity{Runs: 2, QueuedTriggers: 3, HeldLeases: 4, DashboardConnections: 5}) {
+			if got.State != "running" || got.Version != "v1.2.3" || got.PID != 123 || !got.Installed || got.Activity != (dashboardActivity{Runs: 2, QueuedTriggers: 3, HeldLeases: 4, DashboardConnections: 5}) {
 				t.Fatalf("lost controller status: %+v", got)
-			}
-			if tc.args[0] == "start" {
-				want := services.options
-				want.DashboardAddress = "[::1]:9000"
-				if lifecycle.options != want {
-					t.Fatalf("start options: %+v", lifecycle.options)
-				}
 			}
 			if tc.args[0] == "install" && (lifecycle.options.Home != services.options.Home || lifecycle.options.Executable != services.options.Executable || lifecycle.options.Version != services.options.Version) {
 				t.Fatalf("login options: %+v", lifecycle.options)
@@ -142,20 +129,17 @@ func TestDashboardStatusPrintsTheServingURL(t *testing.T) {
 	output.Reset()
 	if err := runDashboardCommandArgs(t.Context(), []string{"status", "-o", "pretty"}, &output, "linux", func(context.Context) (dashboardServices, error) {
 		return dashboardServices{lifecycle: lifecycle}, nil
-	}); err != nil || !strings.Contains(output.String(), "Local controller: running\n") || !strings.Contains(output.String(), "dashboard: not serving (sparkwing dashboard open starts it") {
+	}); err != nil || !strings.Contains(output.String(), "Local controller: running\n") || !strings.Contains(output.String(), "dashboard: not serving (sparkwing dashboard open starts the controller") {
 		t.Fatalf("pretty status does not separate the controller from a dashboard that is not serving: %s %v", &output, err)
 	}
-}
-
-func TestDashboardDefaultStartUsesLocalController(t *testing.T) {
-	f := &dashboardLifecycleFake{}
-	var output bytes.Buffer
-	err := runDashboardCommandArgs(t.Context(), []string{"start", "--read-only=false", "-o", "plain"}, &output, "windows", func(context.Context) (dashboardServices, error) { return dashboardServices{lifecycle: f}, nil })
-	if err != nil || f.options.Standalone || f.options.DashboardAddress != "127.0.0.1:4343" {
-		t.Fatalf("options=%+v err=%v", f.options, err)
-	}
-	if output.String() != "stopped\n" {
-		t.Fatalf("plain output: %q", &output)
+	lifecycle.status.DashboardError = "dashboard listen on 127.0.0.1:4343: address already in use"
+	for mode, want := range map[string]string{"json": `"dashboard_error":"dashboard listen on 127.0.0.1:4343: address already in use"`, "pretty": "dashboard: not serving: dashboard listen on 127.0.0.1:4343: address already in use\n"} {
+		output.Reset()
+		if err := runDashboardCommandArgs(t.Context(), []string{"status", "-o", mode}, &output, "linux", func(context.Context) (dashboardServices, error) {
+			return dashboardServices{lifecycle: lifecycle}, nil
+		}); err != nil || !strings.Contains(output.String(), want) {
+			t.Fatalf("%s status hides the bind failure: %s %v", mode, &output, err)
+		}
 	}
 }
 
@@ -165,15 +149,13 @@ func TestDashboardRejectsBeforeResolvingServices(t *testing.T) {
 		args []string
 	}{
 		{"linux", []string{"restart"}},
-		{"linux", []string{"start", "--stay"}},
-		{"linux", []string{"start", "--stay=false"}},
+		{"linux", []string{"start"}},
+		{"linux", []string{"stop"}},
 		{"linux", []string{"status", "--output", "bogus"}},
 		{"linux", []string{"logs", "--limit", "1"}},
 		{"linux", []string{"logs", "--tail", "-1"}},
-		{"linux", []string{"start", "--addr", "127.0.0.1:notaport"}},
-		{"linux", []string{"start", "--addr", "127.0.0.1:65536"}},
-		{"linux", []string{"start", "--addr", "0.0.0.0:4343"}},
-		{"linux", []string{"start", "--allow-origin", "http://example.com"}},
+		{"linux", []string{"open", "--addr", "0.0.0.0:4343"}},
+		{"linux", []string{"open", "--allow-remote"}},
 		{"linux", []string{"install", "--force"}},
 		{"windows", []string{"install"}},
 		{"windows", []string{"uninstall"}},
@@ -189,8 +171,8 @@ func TestDashboardRejectsBeforeResolvingServices(t *testing.T) {
 			}
 			if tc.goos == "windows" {
 				var failure *apierr.Error
-				if !errors.As(err, &failure) || !strings.Contains(failure.Hint, "sparkwing dashboard start") {
-					t.Fatalf("missing dashboard start guidance: %v", err)
+				if !errors.As(err, &failure) || !strings.Contains(failure.Hint, "sparkwing dashboard open") {
+					t.Fatalf("missing dashboard open guidance: %v", err)
 				}
 			}
 		})
@@ -198,7 +180,7 @@ func TestDashboardRejectsBeforeResolvingServices(t *testing.T) {
 }
 
 func TestDashboardHelpDoesNotResolveRuntime(t *testing.T) {
-	for _, args := range [][]string{nil, {"start", "--help"}, {"install", "--help"}, {"open", "--help"}} {
+	for _, args := range [][]string{nil, {"status", "--help"}, {"install", "--help"}, {"open", "--help"}} {
 		var output bytes.Buffer
 		err := runDashboardCommandArgs(t.Context(), args, &output, "windows", func(context.Context) (dashboardServices, error) {
 			t.Fatal("help resolved services")
@@ -212,7 +194,7 @@ func TestDashboardHelpDoesNotResolveRuntime(t *testing.T) {
 
 func TestDashboardPreservesFailuresWithoutSuccessReceipt(t *testing.T) {
 	failure := &apierr.Error{Code: apierr.Unavailable, Message: "admission drain failed"}
-	for _, action := range []string{"start", "status", "stop", "install", "uninstall"} {
+	for _, action := range []string{"status", "install", "uninstall"} {
 		t.Run(action, func(t *testing.T) {
 			lifecycle := &dashboardLifecycleFake{err: failure}
 			units := &dashboardUnitsFake{err: failure}
@@ -223,32 +205,18 @@ func TestDashboardPreservesFailuresWithoutSuccessReceipt(t *testing.T) {
 			if !errors.Is(err, failure) || output.Len() != 0 {
 				t.Fatalf("error=%v output=%s", err, &output)
 			}
-			if action == "stop" && !reflect.DeepEqual(lifecycle.calls, []string{"stop"}) {
-				t.Fatalf("status after failed stop: %v", lifecycle.calls)
-			}
 		})
 	}
 }
 
 func TestDashboardMissingLifecycleFailsWithoutLegacyServiceFallback(t *testing.T) {
 	var output bytes.Buffer
-	err := runDashboardCommandArgs(t.Context(), []string{"start"}, &output, "linux", func(context.Context) (dashboardServices, error) {
+	err := runDashboardCommandArgs(t.Context(), []string{"status"}, &output, "linux", func(context.Context) (dashboardServices, error) {
 		return dashboardServices{}, nil
 	})
 	var failure *apierr.Error
 	if !errors.As(err, &failure) || failure.Code != apierr.Unavailable || output.Len() != 0 {
 		t.Fatalf("error=%v output=%s", err, &output)
-	}
-}
-
-func TestDashboardRefusesAnUndrainedStop(t *testing.T) {
-	fake := &dashboardLifecycleFake{status: wingd.LocalStatus{Running: true, Version: "v1"}, keepUp: true}
-	var out bytes.Buffer
-	err := runDashboardCommandArgs(t.Context(), []string{"stop", "-o", "json"}, &out, "linux", func(context.Context) (dashboardServices, error) {
-		return dashboardServices{lifecycle: fake}, nil
-	})
-	if err == nil || out.Len() != 0 {
-		t.Fatalf("undrained stop: %v %s", err, &out)
 	}
 }
 
@@ -276,14 +244,11 @@ func TestDashboardOpenPrintsSocketMintedLink(t *testing.T) {
 			}
 		})
 	}
-	failure := &apierr.Error{Code: apierr.Unavailable, Message: "the dashboard is not serving", Hint: "run sparkwing dashboard start"}
-	t.Run("starts a dashboard that is not serving", func(t *testing.T) {
+	t.Run("starts the controller before minting", func(t *testing.T) {
 		lifecycle := &dashboardLifecycleFake{status: wingd.LocalStatus{Running: true, PID: 123, Version: "v1.2.3"}}
-		minted := 0
 		services := dashboardServices{lifecycle: lifecycle, options: wingd.LocalStartOptions{Home: "/private/home", Version: "v1.2.3"}, mintLogin: func(context.Context) (wingd.DashboardLogin, error) {
-			minted++
 			if len(lifecycle.calls) == 0 {
-				return wingd.DashboardLogin{}, failure
+				t.Error("minted before the controller was ensured")
 			}
 			return login, nil
 		}}
@@ -291,46 +256,36 @@ func TestDashboardOpenPrintsSocketMintedLink(t *testing.T) {
 		if err := runDashboardCommandArgs(t.Context(), []string{"open", "-o", "plain"}, &output, "linux", func(context.Context) (dashboardServices, error) { return services, nil }); err != nil {
 			t.Fatal(err)
 		}
-		want := services.options
-		want.DashboardAddress = defaultDashboardAddress
-		if minted != 2 || !reflect.DeepEqual(lifecycle.calls, []string{"start"}) || lifecycle.options != want || output.String() != login.URL+"\n" {
-			t.Fatalf("minted=%d calls=%v options=%+v output=%q", minted, lifecycle.calls, lifecycle.options, &output)
+		if !reflect.DeepEqual(lifecycle.calls, []string{"ensure"}) || lifecycle.options != services.options || output.String() != login.URL+"\n" {
+			t.Fatalf("calls=%v options=%+v output=%q", lifecycle.calls, lifecycle.options, &output)
+		}
+	})
+	t.Run("names a dashboard that could not bind", func(t *testing.T) {
+		lifecycle := &dashboardLifecycleFake{status: wingd.LocalStatus{Running: true, DashboardError: "dashboard listen on 127.0.0.1:4343: address already in use"}}
+		services := dashboardServices{lifecycle: lifecycle, mintLogin: func(context.Context) (wingd.DashboardLogin, error) {
+			t.Error("minted a link for a dashboard that is not serving")
+			return login, nil
+		}}
+		var output bytes.Buffer
+		err := runDashboardCommandArgs(t.Context(), []string{"open"}, &output, "linux", func(context.Context) (dashboardServices, error) { return services, nil })
+		var failure *apierr.Error
+		if !errors.As(err, &failure) || !strings.Contains(failure.Message, "address already in use") || !strings.Contains(failure.Hint, "dashboard.address") || output.Len() != 0 {
+			t.Fatalf("error=%v output=%q", err, &output)
 		}
 	})
 	t.Run("keeps a refused start", func(t *testing.T) {
-		refused := errors.New("dashboard listen: address already in use")
+		refused := errors.New("controller startup failed")
 		lifecycle := &dashboardLifecycleFake{err: refused}
-		services := dashboardServices{lifecycle: lifecycle, mintLogin: func(context.Context) (wingd.DashboardLogin, error) { return wingd.DashboardLogin{}, failure }}
+		services := dashboardServices{lifecycle: lifecycle, mintLogin: func(context.Context) (wingd.DashboardLogin, error) { return login, nil }}
 		var output bytes.Buffer
 		err := runDashboardCommandArgs(t.Context(), []string{"open"}, &output, "linux", func(context.Context) (dashboardServices, error) { return services, nil })
 		if !errors.Is(err, refused) || output.Len() != 0 {
 			t.Fatalf("error=%v output=%q", err, &output)
 		}
 	})
-	var output bytes.Buffer
-	err := runDashboardCommandArgs(t.Context(), []string{"open"}, &output, "linux", func(context.Context) (dashboardServices, error) {
-		return dashboardServices{mintLogin: func(context.Context) (wingd.DashboardLogin, error) { return wingd.DashboardLogin{}, failure }}, nil
-	})
-	if !errors.Is(err, failure) || output.Len() != 0 {
-		t.Fatalf("error=%v output=%q", err, &output)
-	}
 }
 
-func TestDashboardRemoteStartUsesAuthenticatedController(t *testing.T) {
-	lifecycle := &dashboardLifecycleFake{}
-	var output bytes.Buffer
-	err := runDashboardCommandArgs(t.Context(), []string{"start", "--addr", "192.0.2.1:4343", "--allow-remote", "--read-only"}, &output, "linux", func(context.Context) (dashboardServices, error) {
-		return dashboardServices{lifecycle: lifecycle}, nil
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !reflect.DeepEqual(lifecycle.calls, []string{"start"}) || lifecycle.options.DashboardAddress != "192.0.2.1:4343" || !lifecycle.options.DashboardReadOnly {
-		t.Fatalf("start options: %+v calls: %v", lifecycle.options, lifecycle.calls)
-	}
-}
-
-func TestDashboardStopReportsAnOlderDashboardStillRunning(t *testing.T) {
+func TestDashboardStatusReportsAnOlderDashboardStillRunning(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("older dashboards ran only where signal 0 probes a pid")
 	}
@@ -358,14 +313,14 @@ func TestDashboardStopReportsAnOlderDashboardStillRunning(t *testing.T) {
 		lifecycle := &dashboardLifecycleFake{status: wingd.LocalStatus{Running: true}}
 		services := dashboardServices{lifecycle: lifecycle, options: wingd.LocalStartOptions{Home: home}}
 		var output bytes.Buffer
-		if err := runDashboardCommandArgs(t.Context(), []string{"stop", "-o", "json"}, &output, "linux", func(context.Context) (dashboardServices, error) { return services, nil }); err != nil {
+		if err := runDashboardCommandArgs(t.Context(), []string{"status", "-o", "json"}, &output, "linux", func(context.Context) (dashboardServices, error) { return services, nil }); err != nil {
 			t.Fatal(err)
 		}
 		var got dashboardResult
 		if err := json.Unmarshal(output.Bytes(), &got); err != nil {
 			t.Fatal(err)
 		}
-		if got.State != "stopped" || tc.alive != strings.Contains(got.Warning, fmt.Sprintf("kill %d", tc.pid)) {
+		if got.State != "running" || tc.alive != strings.Contains(got.Warning, fmt.Sprintf("kill %d", tc.pid)) {
 			t.Fatalf("pid %d alive=%v: %+v", tc.pid, tc.alive, got)
 		}
 	}

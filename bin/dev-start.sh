@@ -25,8 +25,8 @@ if ! command -v sparkwing >/dev/null 2>&1; then
   exit 1
 fi
 
-echo "==> starting sparkwing serve on :4343"
-sparkwing serve start
+echo "==> starting the local controller and its dashboard on :4343"
+sparkwing dashboard open
 
 echo "==> starting next dev on :3100 (log: $log_web)"
 (cd "$REPO/web" && pnpm run dev) >"$log_web" 2>&1 &

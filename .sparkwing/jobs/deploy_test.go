@@ -546,6 +546,9 @@ func newFakeDeploy(t *testing.T) *fakeDeploy {
 	f.registry = &fakeDeployRegistry{digests: map[string]string{}, revisions: map[string]string{
 		f.old.Controller.Repository + "@" + f.old.Controller.Digest: f.head,
 	}}
+	for _, ref := range []string{f.config().ControllerBase, f.config().RunnerBase} {
+		f.registry.digests[ref] = testDigest(ref)
+	}
 
 	work := filepath.Join(root, "gitops-seed")
 	if err := os.MkdirAll(work, 0o755); err != nil {
@@ -810,6 +813,8 @@ func TestDeployBuildPublishesThenReusesCandidate(t *testing.T) {
 		t.Fatalf("SHA256SUMS = %q, %v", sums, err)
 	}
 
+	delete(f.registry.digests, f.config().ControllerBase)
+	delete(f.registry.digests, f.config().RunnerBase)
 	again, err := f.deployer(false).buildCandidate(t.Context(), "v0.68.3-1-g0123456789ab")
 	if err != nil || !again.sameDigests(images) || len(f.registry.published) != 1 {
 		t.Fatalf("rebuild of a published commit = %+v, %v, published %d", again, err, len(f.registry.published))
@@ -822,6 +827,28 @@ func TestDeployBuildPublishesThenReusesCandidate(t *testing.T) {
 	}
 	if _, err := f.deployer(false).buildCandidate(t.Context(), "v0.68.3-1-g0123456789ab"); err == nil || !strings.Contains(err.Error(), "new --version") {
 		t.Fatalf("a tag from another commit: %v", err)
+	}
+}
+
+func TestDeployMissingRuntimeBaseStopsBeforeBuild(t *testing.T) {
+	for _, base := range []string{"controller", "runner"} {
+		t.Run(base, func(t *testing.T) {
+			f := newFakeDeploy(t)
+			ref := f.config().ControllerBase
+			if base == "runner" {
+				ref = f.config().RunnerBase
+			}
+			delete(f.registry.digests, ref)
+			_, err := f.deployer(false).buildCandidate(t.Context(), "v0.68.4")
+			if err == nil || !strings.Contains(err.Error(), "runtime base "+ref+" is missing") {
+				t.Fatalf("missing runtime base: %v", err)
+			}
+			if len(f.registry.published) != 0 || slices.ContainsFunc(f.calls, func(call string) bool {
+				return strings.Contains(call, "bin/build-")
+			}) {
+				t.Fatalf("missing runtime base reached a build: %v", f.calls)
+			}
+		})
 	}
 }
 

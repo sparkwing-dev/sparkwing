@@ -121,7 +121,7 @@ func TestDaemonLifecycleRestartDrainsAndKeepsRuntimeOptions(t *testing.T) {
 		old   string
 	}{{false, "v1"}, {true, "v2"}} {
 		fake := &daemonLifecycleFake{status: wingd.LocalStatus{Running: true, Installed: true, Version: test.old}}
-		options := wingd.LocalStartOptions{Home: "/private/home", Executable: "/bin/sparkwing", Version: "v2", DashboardAddress: "127.0.0.1:9000"}
+		options := wingd.LocalStartOptions{Home: "/private/home", Executable: "/bin/sparkwing", Version: "v2"}
 		var out bytes.Buffer
 		args := []string{"restart", "-o", "json"}
 		if test.force {
@@ -235,5 +235,34 @@ func TestDaemonLifecycleMissingAndCancelledRuntime(t *testing.T) {
 	failed := func(context.Context) (dashboardServices, error) { return dashboardServices{}, want }
 	if err := runDaemonLifecycleCommandArgs(t.Context(), []string{"status", "-o", "json"}, &out, failed); !errors.Is(err, want) || out.Len() != 0 {
 		t.Fatalf("failed runtime: %v %s", err, &out)
+	}
+}
+
+func TestDaemonStopRetiresTheRunnerAndRestartKeepsIt(t *testing.T) {
+	for _, test := range []struct {
+		args  []string
+		calls []string
+	}{
+		{[]string{"stop"}, []string{"status", "retire", "stop", "status"}},
+		{[]string{"restart", "--force"}, []string{"status", "stop", "status", "start"}},
+	} {
+		fake := &daemonLifecycleFake{status: wingd.LocalStatus{Running: true, Version: "v2"}}
+		services := dashboardServices{lifecycle: fake, options: wingd.LocalStartOptions{Home: "/private/home", Executable: "/bin/sparkwing", Version: "v2"}, retireRunner: func(context.Context) error {
+			fake.calls = append(fake.calls, "retire")
+			return nil
+		}}
+		var out bytes.Buffer
+		err := runDaemonLifecycleCommandArgs(t.Context(), append(test.args, "-o", "json"), &out, func(context.Context) (dashboardServices, error) { return services, nil })
+		if err != nil || !reflect.DeepEqual(fake.calls, test.calls) {
+			t.Fatalf("%v: calls=%v err=%v", test.args, fake.calls, err)
+		}
+	}
+	failure := errors.New("runner drain refused")
+	fake := &daemonLifecycleFake{status: wingd.LocalStatus{Running: true, Version: "v2"}}
+	services := dashboardServices{lifecycle: fake, retireRunner: func(context.Context) error { return failure }}
+	var out bytes.Buffer
+	err := runDaemonLifecycleCommandArgs(t.Context(), []string{"stop", "-o", "json"}, &out, func(context.Context) (dashboardServices, error) { return services, nil })
+	if !errors.Is(err, failure) || out.Len() != 0 || !reflect.DeepEqual(fake.calls, []string{"status"}) {
+		t.Fatalf("failed retirement: calls=%v err=%v", fake.calls, err)
 	}
 }
