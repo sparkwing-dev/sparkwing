@@ -133,7 +133,8 @@ func blobCandidateEdgeTx(ctx context.Context, tx *storeTx, a blobActor, c blobRe
 		edge.Kind = blob.EdgePrepared
 		owner := a.source.Kind == blob.UploadOwnerUnit && a.source.Unit.Set && (a.source.Unit.Value.Kind == blob.UploadPlanUnit || a.source.Unit.Value.Kind == blob.UploadTriggerUnit)
 		node := a.capability.Unit == capability.UnitNode && a.capability.Binding.Kind == capability.BindingNode && scope.Use == capability.DataClaim && a.capability.Audience == capability.Controller
-		return edge, a.capability.Issuance != capability.Delegate && scope.Use != capability.DataRemoteCache && a.capability.Delivery != capability.DeliveryBootstrap && (owner || node) && c.run == a.source.RunID && c.source.RunID == c.run && c.name == "pipeline" && c.pipeline == a.pipeline && c.facts == a.preparedFacts, nil
+		eval := a.capability.Unit == capability.UnitEval && a.capability.Binding.Kind == capability.BindingNode && a.capability.Binding.Expansion != nil && scope.Use == capability.DataExpansion && a.capability.Audience == capability.Controller
+		return edge, a.capability.Issuance != capability.Delegate && scope.Use != capability.DataRemoteCache && a.capability.Delivery != capability.DeliveryBootstrap && (owner || node || eval) && c.run == a.source.RunID && c.source.RunID == c.run && c.name == "pipeline" && c.pipeline == a.pipeline && c.facts == a.preparedFacts, nil
 	}
 	if scope.Use == capability.DataRemoteCache {
 		allowed := c.facts.DefaultBranchVerified && slices.Contains(scope.ReadRefs, c.ref) && c.kind != blob.KindBinary && c.kind != blob.KindSourceBundle

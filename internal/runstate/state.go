@@ -185,6 +185,7 @@ type TransitionCause string
 const (
 	CauseRelease        TransitionCause = "release"
 	CauseUnpriced       TransitionCause = "unpriced"
+	CauseDurationLimit  TransitionCause = "duration_limit"
 	CauseApprovalOpen   TransitionCause = "approval_open"
 	CauseRevoke         TransitionCause = "revoke"
 	CauseAward          TransitionCause = "award"

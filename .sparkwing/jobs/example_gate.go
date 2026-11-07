@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
@@ -40,6 +41,15 @@ func exampleSkip(reason string) sparkwing.SkipPredicate {
 	return func(ctx context.Context) bool {
 		sparkwing.Annotate(ctx, sparkwing.Annotation{Message: "SKIP: " + reason})
 		return true
+	}
+}
+
+func exampleNeedsCLI(in ExampleInputs) sparkwing.SkipPredicate {
+	return func(ctx context.Context) bool {
+		if _, err := exec.LookPath(in.CLI); err != nil {
+			return exampleSkip(fmt.Sprintf("CLI %q is not runnable on this host; pass --cli with a sparkwing binary to run lifecycle probes", in.CLI))(ctx)
+		}
+		return false
 	}
 }
 
@@ -143,14 +153,16 @@ func exampleIntegration(plan *sparkwing.Plan, in ExampleInputs, rc sparkwing.Run
 	all = append(all, sparkwing.Job(plan, "artifacts-assert", func(context.Context) error {
 		return exampleFileEquals(filepath.Join(".sparkwing/cache/example-consumed", artifactPath), rc.RunID)
 	}).Consumes(producer, sparkwing.Into(".sparkwing/cache/example-consumed")))
-	all = append(all, sparkwing.Job(plan, "memoized-step", exampleMemoCheck(in, rc)).Inline().Timeout(90*time.Second))
+	all = append(all, sparkwing.Job(plan, "memoized-step", exampleMemoCheck(in, rc)).Inline().Timeout(90*time.Second).SkipIf(exampleNeedsCLI(in)))
 	retry := sparkwing.Job(plan, "failed-only-retry", exampleRetryCheck(in, rc)).Inline().Timeout(90 * time.Second)
 	if !in.FailOnce {
 		retry.SkipIf(exampleSkip("pass --fail-once to exercise the expected first-attempt failure"))
+	} else {
+		retry.SkipIf(exampleNeedsCLI(in))
 	}
 	all = append(all, retry)
-	all = append(all, sparkwing.Job(plan, "cancellation", exampleCancelCheck(in, rc)).Inline().Timeout(90*time.Second))
-	all = append(all, sparkwing.Job(plan, "logs-history", exampleLogsHistory(in, rc)).Inline().Timeout(90*time.Second))
+	all = append(all, sparkwing.Job(plan, "cancellation", exampleCancelCheck(in, rc)).Inline().Timeout(90*time.Second).SkipIf(exampleNeedsCLI(in)))
+	all = append(all, sparkwing.Job(plan, "logs-history", exampleLogsHistory(in, rc)).Inline().Timeout(90*time.Second).SkipIf(exampleNeedsCLI(in)))
 	all = append(all, sparkwing.Job(plan, "docker-assert", func(ctx context.Context) error {
 		var out bytes.Buffer
 		if err := docker.Run(ctx, docker.RunOptions{Image: "alpine:3.22", Cmd: []string{"printf", "example-docker-ok"}, Stdout: &out}); err != nil {

@@ -94,3 +94,26 @@ func TestExampleOIDCClaimsBindAudienceRunPipelineAndTime(t *testing.T) {
 		}
 	}
 }
+
+func TestExampleLifecycleProbesSkipOnlyWithoutARunnableCLI(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("fixture CLI is a POSIX executable")
+	}
+	host := sparkwingtest.New(sparkwingtest.Options{})
+	defer func() {
+		if err := host.Close(); err != nil {
+			t.Error(err)
+		}
+	}()
+	ctx := host.Context(t.Context())
+	cli := filepath.Join(t.TempDir(), "sparkwing")
+	if err := os.WriteFile(cli, []byte("#!/bin/sh\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if exampleNeedsCLI(ExampleInputs{CLI: cli})(ctx) {
+		t.Fatal("skipped probes although the CLI is runnable")
+	}
+	if !exampleNeedsCLI(ExampleInputs{CLI: filepath.Join(t.TempDir(), "absent")})(ctx) {
+		t.Fatal("ran probes without a runnable CLI")
+	}
+}

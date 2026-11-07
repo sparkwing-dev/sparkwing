@@ -98,6 +98,8 @@ type CloudBoundary interface {
 	CapacityConfigured(context.Context, corev1.ResourceList) (bool, error)
 	Release(context.Context, CloudNodeReservation) error
 	Retire(context.Context, CloudNodeReservation) error
+	// CapacityNodeRefusal names why the named node can never be reserved for the team, or "".
+	CapacityNodeRefusal(ctx context.Context, node, team string) (string, error)
 }
 
 // CloudJobResources couples Secret cleanup and node ownership with the Job it authorizes.

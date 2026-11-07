@@ -54,7 +54,7 @@ func (p *pool) provision() *corev1.Node {
 	if _, err := p.b.Karpenter.Resource(nodeClaims).Create(p.t.Context(), claim, metav1.CreateOptions{}); err != nil {
 		p.t.Fatal(err)
 	}
-	node := &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: name, UID: k8stypes.UID("uid-" + name), ResourceVersion: "1", OwnerReferences: []metav1.OwnerReference{{APIVersion: "karpenter.sh/v1", Kind: "NodeClaim", Name: "claim-" + name, UID: k8stypes.UID("claim-uid-" + name)}}, Labels: map[string]string{CloudClassLabel: "2", PoolNamespaceLabel: "cloud", WarmNamespaceLabel: "warm", corev1.LabelHostname: name}}, Spec: corev1.NodeSpec{ProviderID: provider, Taints: []corev1.Taint{{Key: DedicatedTaint, Value: "true", Effect: corev1.TaintEffectNoSchedule}}}, Status: corev1.NodeStatus{Conditions: []corev1.NodeCondition{{Type: corev1.NodeReady, Status: corev1.ConditionTrue}}}}
+	node := &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: name, UID: k8stypes.UID("uid-" + name), ResourceVersion: "1", OwnerReferences: []metav1.OwnerReference{{APIVersion: "karpenter.sh/v1", Kind: "NodeClaim", Name: "claim-" + name, UID: k8stypes.UID("claim-uid-" + name)}}, Labels: map[string]string{CloudClassLabel: "2", PoolNamespaceLabel: "cloud", WarmNamespaceLabel: "warm", NodeClassLabel: "sparkwing-jobs", corev1.LabelHostname: name}}, Spec: corev1.NodeSpec{ProviderID: provider, Taints: []corev1.Taint{{Key: DedicatedTaint, Value: "true", Effect: corev1.TaintEffectNoSchedule}}}, Status: corev1.NodeStatus{Conditions: []corev1.NodeCondition{{Type: corev1.NodeReady, Status: corev1.ConditionTrue}}}}
 	created, err := p.kube.CoreV1().Nodes().Create(p.t.Context(), node, metav1.CreateOptions{})
 	if err != nil {
 		p.t.Fatal(err)

@@ -101,7 +101,8 @@ func NativeHosting(cfg NativeHostingConfig) Hosting {
 
 		processes = services.Config.Processes
 		closeResources = func() error { return errors.Join(services.Close(), private.Close()) }
-		if cfg.PrepareSource && (unit.Unit == capability.UnitPlan || unit.Unit == capability.UnitTrigger || unit.Unit == capability.UnitNode) {
+		// safety: an exchanged eval award holds no source.read, so it restores the plan's prepared source instead of fetching.
+		if cfg.PrepareSource {
 			storage, bindErr := private.BindStorage(ctx, principal)
 			if bindErr != nil {
 				return services, principal, bindErr
@@ -109,7 +110,7 @@ func NativeHosting(cfg NativeHostingConfig) Hosting {
 			services.Config.Source.Prepared = &source.Prepared{
 				Bytes: storage.Bytes, Records: storage.Records, Authority: storage.Authority,
 				Key:         blob.PreparedRecordKey(unit.Request.Request.Team, unit.RunID, storage.Authority.Repo, unit.Request.Request.Pipeline),
-				RequestHash: string(unit.Request.Hash), Publish: unit.Unit != capability.UnitNode,
+				RequestHash: string(unit.Request.Hash), Publish: unit.Unit == capability.UnitPlan || unit.Unit == capability.UnitTrigger,
 			}
 		}
 		originalClose := services.Close

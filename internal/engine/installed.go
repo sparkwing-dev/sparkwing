@@ -88,7 +88,7 @@ func replacementEngineAt(ctx context.Context, pin engineid.Pin, target releaseas
 	}
 	resolved := Resolved{
 		Identity: engineid.Identity{Pin: pin, Version: version, ManifestDigest: digest}, Target: target, AssetDigest: digest, Executable: path,
-		Notices: []engineid.Notice{{Kind: engineid.NoticePinDisabled, Version: version, Reason: "SDK replacement: engine pinning is off for this run; using the installed CLI's engine."}},
+		Notices: []engineid.Notice{PinDisabledNotice(version)},
 	}
 	if retained {
 		resolved.retainedExecutable = path
@@ -96,6 +96,11 @@ func replacementEngineAt(ctx context.Context, pin engineid.Pin, target releaseas
 		resolved.Notices[0].Reason = "SDK replacement: engine pinning is off for this run; using the accepted local engine."
 	}
 	return resolved, nil
+}
+
+// PinDisabledNotice reports that an SDK replacement runs the installed engine without release pinning or version policy.
+func PinDisabledNotice(version string) engineid.Notice {
+	return engineid.Notice{Kind: engineid.NoticePinDisabled, Version: version, Reason: "SDK replacement: engine pinning is off for this run; using the installed CLI's engine."}
 }
 
 var selfDigest struct {

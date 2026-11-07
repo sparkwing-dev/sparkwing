@@ -52,6 +52,9 @@ const (
 	// FailureUnpricedCPUClass: the node's cpu request is above the largest
 	// class the credit rate table prices, so no claim could be billed.
 	FailureUnpricedCPUClass = "unpriced_cpu_class"
+	// FailureJobDurationLimit: a Cloud job reached its team's standing job
+	// duration limit, counted from its first award, before an award could start it.
+	FailureJobDurationLimit = "job_duration_limit"
 )
 
 // retrySourceManual identifies an explicitly retried run.

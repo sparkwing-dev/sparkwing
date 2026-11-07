@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"testing"
 
@@ -114,4 +115,24 @@ func testPreparedDataHTTPPublish(t *testing.T, cloud bool) {
 	if got.Code != 200 || got.Body.String() != body {
 		t.Fatalf("GET=%d %q", got.Code, got.Body.String())
 	}
+	engineSQL(t, e.Store, `INSERT INTO nodes(team,run_id,node_id,status,outcome,finished_at,generation,expansion,spec_json,execution_json) VALUES ('a','run','gen','done','success',1,1,'expected',?,?)`, []byte(`{"id":"gen"}`), []byte(`{}`))
+	engineSQL(t, e.Store, `INSERT INTO eval_units(team,run_id,source_node_id,source_generation,status) VALUES ('a','run','gen',1,'pending')`)
+	claim, err = e.Store.AsOperator().ClaimUnit(t.Context(), store.UnitDemand{CapabilityPrefix: "runner", Target: &store.UnitRef{Kind: capability.UnitEval, RunID: "run", NodeID: "gen", SourceGeneration: 1}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	principal, err = e.Store.AsOperator().LookupCapability(t.Context(), sha256.Sum256(claim.Bearer))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if slices.Contains(principal.Capability.Grants, capability.SourceRead) {
+		t.Fatal("eval award gained source.read; it should restore the prepared source")
+	}
+	evalRaw := nativeClaimPresentation(t, e, capability.Authorized{Principal: principal, Binding: principal.Capability.Binding, Target: capability.Target{Team: "a", RunID: "run", NodeID: "gen"}})
+	w = engineClaimHTTP(t, h, evalRaw, "GET", "/api/v1/data/records?kind=prepared&pipeline=ci&name=pipeline&key=run", "", 200)
+	hit = controllerwire.DataRecordLookupResult{}
+	if err = json.Unmarshal(w.Body.Bytes(), &hit); err != nil || !hit.Found || hit.Record == nil || string(hit.Record.Digest) != digest {
+		t.Fatalf("eval lookup=%s: %v", w.Body.String(), err)
+	}
+	engineClaimHTTP(t, h, evalRaw, "POST", "/api/v1/data/download", fmt.Sprintf(`{"digest":%q}`, digest), 200)
 }

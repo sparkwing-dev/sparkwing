@@ -49,6 +49,7 @@ const (
 	guardOwner           edgeGuard = "live_owner"
 	guardOwnerPolicy     edgeGuard = "typed_owner_policy"
 	guardUnpriced        edgeGuard = "authorized_unpriced_claim"
+	guardDurationLimit   edgeGuard = "authorized_expired_cloud_claim"
 	guardUnclaimed       edgeGuard = "unclaimed"
 	guardDependency      edgeGuard = "store_dependency_verdict"
 	guardHolder          edgeGuard = "live_exact_holder"
@@ -85,6 +86,7 @@ func nodeTransitions() []nodeEdge {
 	return []nodeEdge{
 		{[]runstate.NodeState{runstate.NodeClaimed, runstate.NodeRunning}, []runstate.NodeState{runstate.NodeFailed}, []runstate.ActorKind{runstate.ActorLauncher}, runstate.CauseLaunchRejected, []edgeGuard{guardLauncherAward}, false},
 		{[]runstate.NodeState{nodePending, runstate.NodeReady}, []runstate.NodeState{runstate.NodeFailed}, []runstate.ActorKind{runstate.ActorClaimant}, runstate.CauseUnpriced, []edgeGuard{guardUnclaimed, guardUnpriced}, false},
+		{[]runstate.NodeState{nodePending, runstate.NodeReady}, []runstate.NodeState{runstate.NodeFailed}, []runstate.ActorKind{runstate.ActorClaimant}, runstate.CauseDurationLimit, []edgeGuard{guardUnclaimed, guardDurationLimit}, false},
 		{[]runstate.NodeState{nodePending}, terminal, []runstate.ActorKind{runstate.ActorOperator}, runstate.CausePublish, []edgeGuard{guardPublication}, false},
 		{[]runstate.NodeState{nodePending}, []runstate.NodeState{nodePending}, []runstate.ActorKind{runstate.ActorOperator}, runstate.CausePublishAttempt, []edgeGuard{guardPublication}, false},
 		{[]runstate.NodeState{nodePending}, []runstate.NodeState{runstate.NodeReady}, owners, runstate.CauseRelease, []edgeGuard{guardOwner, guardUnclaimed}, false},
@@ -560,6 +562,10 @@ func guardNodeEdgeTx(ctx context.Context, tx *storeTx, team Team, row runstate.N
 			}
 		case guardUnpriced:
 			if err := checkUnpricedClaimTx(ctx, tx, row, change); err != nil {
+				return err
+			}
+		case guardDurationLimit:
+			if err := checkExpiredClaimTx(ctx, tx, team, row, change, now); err != nil {
 				return err
 			}
 		case guardOwnerPolicy:
