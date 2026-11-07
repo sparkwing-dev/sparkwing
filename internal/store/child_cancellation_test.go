@@ -1,6 +1,7 @@
 package store
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
@@ -57,5 +58,33 @@ func TestReaperCancelsChildrenTheirParentNoLongerAwaits(t *testing.T) {
 				t.Fatalf("sweep after the child ended: %v", err)
 			}
 		})
+	}
+}
+
+func TestUnawaitedChildSweepReadsOnlyLiveChildren(t *testing.T) {
+	tenant, _ := childIntakeFixture(t)
+	if tenant.s.dialect != DialectSQLite {
+		t.Skip("plan text is SQLite's")
+	}
+	rows, err := tenant.s.query(t.Context(), "EXPLAIN QUERY PLAN "+unawaitedChildrenQuery, 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = rows.Close() }()
+	var plan []string
+	for rows.Next() {
+		var id, parent, unused int
+		var detail string
+		if err := rows.Scan(&id, &parent, &unused, &detail); err != nil {
+			t.Fatal(err)
+		}
+		plan = append(plan, detail)
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatal(err)
+	}
+	// Expected: SCAN c USING INDEX idx_runs_live_children; SEARCH p USING INDEX sqlite_autoindex_runs_2 (team=? AND id=?).
+	if len(plan) == 0 || plan[0] != "SCAN c USING INDEX idx_runs_live_children" {
+		t.Fatalf("sweep plan does not start from the live child index:\n%s", strings.Join(plan, "\n"))
 	}
 }
