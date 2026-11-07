@@ -374,3 +374,34 @@ func TestActiveLocalRunnerIgnoresRetiredPeerRoot(t *testing.T) {
 		t.Fatalf("old root fixture no longer active: %s %v", state, err)
 	}
 }
+
+func TestActiveLocalRunnerReplacesInstanceWithRevokedCredential(t *testing.T) {
+	s := localRunnerStore(t)
+	old := registerLocalRunner(t, s, "old")
+	if err := s.AsOperator().ActivateLocalRunner(t.Context(), localRunnerSubject, old.ID); err != nil {
+		t.Fatal(err)
+	}
+	ref := capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: old.CapabilityPrefix}
+	principal, err := s.AsOperator().ResolveAuthority(t.Context(), ref)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := (&Tenant{s: s, team: DefaultTeam}).RevokeAuthority(t.Context(), runstate.Actor{Authority: *principal.Capability.Parent}, ref); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.AsOperator().ActiveLocalRunner(t.Context(), localRunnerSubject); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("revoked active runner discovery: %v", err)
+	}
+	replacement := registerLocalRunner(t, s, "replacement")
+	if err := s.AsOperator().ActivateLocalRunner(t.Context(), localRunnerSubject, replacement.ID); err != nil {
+		t.Fatal(err)
+	}
+	replacement.State = "active"
+	if got, err := s.AsOperator().ActiveLocalRunner(t.Context(), localRunnerSubject); err != nil || got != replacement {
+		t.Fatalf("replacement discovery: %+v %v; want %+v", got, err, replacement)
+	}
+	var state string
+	if err := s.db.QueryRowContext(t.Context(), `SELECT state FROM local_runner_instances WHERE id=?`, old.ID).Scan(&state); err != nil || state != "draining" {
+		t.Fatalf("revoked runner row was not retired: %s %v", state, err)
+	}
+}

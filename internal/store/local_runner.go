@@ -123,7 +123,8 @@ func (o *Operator) ReadLocalRunner(ctx context.Context, subject, id string) (_ L
 }
 
 // ActiveLocalRunner finds the current instance for the verified local subject.
-// Absence is ErrNotFound; a stored identity is not proof that its process is alive.
+// Absence, including an active instance whose claim credential has ended, is
+// ErrNotFound; a stored identity is not proof that its process is alive.
 func (o *Operator) ActiveLocalRunner(ctx context.Context, subject string) (_ LocalRunnerInstance, err error) {
 	tx, err := o.s.beginSnapshotReadTx(ctx)
 	if err != nil {
@@ -157,7 +158,13 @@ func (o *Operator) ActiveLocalRunner(ctx context.Context, subject string) (_ Loc
 	if err != nil {
 		return LocalRunnerInstance{}, err
 	}
-	return authorizedLocalRunnerTx(ctx, tx, subject, id)
+	instance, err := authorizedLocalRunnerTx(ctx, tx, subject, id)
+	// safety: a runner whose claim credential ended can never claim again; reporting none lets the
+	// supervisor start a replacement, whose activation drains this row.
+	if unavailableRunner(err) {
+		return LocalRunnerInstance{}, notFound("active local runner", "")
+	}
+	return instance, err
 }
 
 func authorizedLocalRunnerTx(ctx context.Context, tx *storeTx, subject, id string) (LocalRunnerInstance, error) {
