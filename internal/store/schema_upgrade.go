@@ -85,16 +85,6 @@ var schemaUpgrades = []schemaUpgrade{
 		from: 33, release: "schema 33", digest: "b4ac52448bafd4ea378d1ed2e1d9aec0c610d3a5e27df4a7a780c178f425a47b",
 		statements: []string{`CREATE INDEX idx_runs_live_children ON runs(team,id) WHERE parent_run_id <> '' AND status IN ('pending','running')`},
 	},
-	{
-		from: 34, release: "schema 34", digest: "187573d27274e9bf1796a84d502b39ac9e8c0cb7730e41143a1e4f586d5a6012",
-		statements: []string{`CREATE TABLE local_dashboard_sessions (
-    digest TEXT NOT NULL PRIMARY KEY CHECK(digest <> ''),
-    kind TEXT NOT NULL CHECK(kind IN ('code','session')),
-    origin TEXT NOT NULL CHECK(origin <> ''),
-    peer TEXT NOT NULL CHECK(peer <> ''),
-    expires_at BIGINT NOT NULL
-)`, `CREATE INDEX idx_local_dashboard_sessions_expiry ON local_dashboard_sessions(expires_at)`},
-	},
 }
 
 func schemaUpgradeFrom(version int) (schemaUpgrade, bool) {

@@ -88,31 +88,9 @@ func TestSchemaUpgradesAReleasedV0683StoreInPlace(t *testing.T) {
 	target.Open(t)
 }
 
-func TestSchemaUpgradeAddsDashboardSessionsToVersion34(t *testing.T) {
-	target := storetest.New(t)
-	st := target.Open(t)
-	if _, err := st.DB().Exec(`DROP TABLE local_dashboard_sessions`); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := st.DB().Exec(`UPDATE sparkwing_schema_version SET version=34, baseline_digest='187573d27274e9bf1796a84d502b39ac9e8c0cb7730e41143a1e4f586d5a6012'`); err != nil {
-		t.Fatal(err)
-	}
-	if err := st.Close(); err != nil {
-		t.Fatal(err)
-	}
-	upgraded := target.Open(t)
-	fresh := storetest.New(t).Open(t)
-	if a, b := schemaShape(t, upgraded), schemaShape(t, fresh); a != b {
-		t.Fatalf("schema upgrade differs: %s", shapeDiff(a, b))
-	}
-}
-
 func TestSchemaUpgradeAddsLiveChildIndexToVersion33(t *testing.T) {
 	target := storetest.New(t)
 	st := target.Open(t)
-	if _, err := st.DB().Exec(`DROP TABLE local_dashboard_sessions`); err != nil {
-		t.Fatal(err)
-	}
 	if _, err := st.DB().Exec(`DROP INDEX idx_runs_live_children`); err != nil {
 		t.Fatal(err)
 	}
@@ -132,9 +110,6 @@ func TestSchemaUpgradeAddsLiveChildIndexToVersion33(t *testing.T) {
 func TestSchemaUpgradeAddsLocalRunnersToVersion32(t *testing.T) {
 	target := storetest.New(t)
 	st := target.Open(t)
-	if _, err := st.DB().Exec(`DROP TABLE local_dashboard_sessions`); err != nil {
-		t.Fatal(err)
-	}
 	if _, err := st.DB().Exec(`DROP INDEX idx_runs_live_children`); err != nil {
 		t.Fatal(err)
 	}
@@ -157,9 +132,6 @@ func TestSchemaUpgradeAddsLocalRunnersToVersion32(t *testing.T) {
 func TestSchemaUpgradeAddsLocalSecretsToVersion31(t *testing.T) {
 	target := storetest.New(t)
 	st := target.Open(t)
-	if _, err := st.DB().Exec(`DROP TABLE local_dashboard_sessions`); err != nil {
-		t.Fatal(err)
-	}
 	if _, err := st.DB().Exec(`DROP INDEX idx_runs_live_children`); err != nil {
 		t.Fatal(err)
 	}
@@ -185,9 +157,6 @@ func TestSchemaUpgradeAddsLocalSecretsToVersion31(t *testing.T) {
 func TestSchemaUpgradeAddsMachineAdmissionToVersion30(t *testing.T) {
 	target := storetest.New(t)
 	st := target.Open(t)
-	if _, err := st.DB().Exec(`DROP TABLE local_dashboard_sessions`); err != nil {
-		t.Fatal(err)
-	}
 	if _, err := st.DB().Exec(`DROP INDEX idx_runs_live_children`); err != nil {
 		t.Fatal(err)
 	}

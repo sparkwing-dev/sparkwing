@@ -1932,14 +1932,3 @@ CREATE UNIQUE INDEX idx_local_runner_active ON local_runner_instances(machine) W
 
 -- The parent-cancellation sweep reads only live child runs, not retained history.
 CREATE INDEX idx_runs_live_children ON runs(team,id) WHERE parent_run_id <> '' AND status IN ('pending','running');
-
--- Local dashboard sign-in codes and browser sessions, stored as SHA-256 digests.
-CREATE TABLE local_dashboard_sessions (
-    digest TEXT NOT NULL PRIMARY KEY CHECK(digest <> ''),
-    kind TEXT NOT NULL CHECK(kind IN ('code','session')),
-    origin TEXT NOT NULL CHECK(origin <> ''),
-    peer TEXT NOT NULL CHECK(peer <> ''),
-    expires_at BIGINT NOT NULL
-);
-
-CREATE INDEX idx_local_dashboard_sessions_expiry ON local_dashboard_sessions(expires_at);
