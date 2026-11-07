@@ -22,6 +22,11 @@ arbitration. Draining preserves the old instance's held awards through uploads
 and terminal acknowledgement. The machine placement identity remains stable
 across process instances. A separate watch drains a runner even when all host
 slots are occupied. Stopped records retire with their ended credentials.
+New local awards retain the nearest registered runner in their credential
+ancestry. Draining fences owner self-claims as well as queue polls; held owners
+keep awaiting children while a successor claims newly ready dependencies.
+Held renewals, reports, logs and child intake remain available. Earlier
+root-parented awards retain their existing ancestry.
 
 No existing HTTP route, wire field or SDK symbol is removed. Linux and macOS
 queues run in an independent runner. The controller reuses matching live process

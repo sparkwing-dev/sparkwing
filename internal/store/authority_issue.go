@@ -365,6 +365,19 @@ func awardCapabilityTx(ctx context.Context, tx *storeTx, spec capability.AwardSp
 	if here {
 		parent = claimant
 	}
+	if !here && parent.Capability.Purpose != capability.PurposeHere && claimant.Capability.Subject.Kind == capability.SubjectLocal {
+		for _, node := range chain {
+			_, err := localRunnerStateTx(ctx, tx, node.principal.Capability.Prefix)
+			if errors.Is(err, sql.ErrNoRows) {
+				continue
+			}
+			if err != nil {
+				return capability.Capability{}, err
+			}
+			parent = node.principal
+			break
+		}
+	}
 	c := capability.Capability{Team: row.team, Subject: claimant.Capability.Subject, Audience: capability.Controller, Grants: slices.Clone(policy.Grants), Issuance: capability.Award, Unit: spec.Unit, UnitID: spec.UnitID, Purpose: spec.Purpose, Delivery: spec.Delivery, Parent: &parent.Authority, ReservedPools: slices.Clone(parent.Capability.ReservedPools), Repositories: []string{row.repo}}
 	c.ExecutionHost = awardExecutionHost(chain, sealed, here)
 	c.Host = claimant.Capability.Host

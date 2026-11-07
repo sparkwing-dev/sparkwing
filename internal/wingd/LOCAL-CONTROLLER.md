@@ -149,7 +149,12 @@ starts registered and cannot claim. Activation holds the same store arbitration
 lock as `claimUnitTx`, changes the previous active instance to draining and
 enables the successor in one transaction. The peer-root machine identity remains
 separate from process instance IDs. Draining leaves held award ancestry valid
-through cleanup, upload and terminal acknowledgement.
+through cleanup, upload and terminal acknowledgement. New awards from registered
+local runners retain the nearest registered runner credential in their ancestry.
+Fresh queue claims and owner self-claims check that instance under the same
+claim-arbitration lock. A draining owner leaves new dependencies ready for its
+successor while continuing held renewals, reports, logs and child intake.
+Placement still follows the peer root; here-award parenting is unchanged.
 
 The socket-only routes are `POST /api/v1/local/runners`,
 `GET /api/v1/local/runners/{id}`, and `POST` actions at that instance's

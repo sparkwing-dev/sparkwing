@@ -72,6 +72,14 @@ func ownerExecutionEligibleTx(ctx context.Context, tx *storeTx, owner capability
 
 // safety: ok=false means the owner has no current host observation, which is not an error.
 func ownerExecutionDemandTx(ctx context.Context, tx *storeTx, owner capability.Principal) (UnitDemand, bool, error) {
+	if owner.Capability.Subject.Kind == capability.SubjectLocal {
+		if err := activeLocalRunnerTx(ctx, tx, owner.Capability.Prefix); err != nil {
+			if errors.Is(err, ErrNotFound) {
+				return UnitDemand{}, false, nil
+			}
+			return UnitDemand{}, false, err
+		}
+	}
 	demand, err := ownerClaimDemandTx(ctx, tx, owner)
 	if err != nil {
 		var denied *apierr.Error

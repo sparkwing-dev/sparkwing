@@ -197,16 +197,37 @@ func localRunnerMachineTx(ctx context.Context, tx *storeTx, subject, prefix stri
 }
 
 func activeLocalRunnerTx(ctx context.Context, tx *storeTx, prefix string) error {
-	var state string
-	err := tx.QueryRowContext(ctx, `SELECT state FROM local_runner_instances WHERE capability_prefix=?`, prefix).Scan(&state)
-	if errors.Is(err, sql.ErrNoRows) {
-		return nil
+	check := func(candidate string) (bool, error) {
+		state, err := localRunnerStateTx(ctx, tx, candidate)
+		if errors.Is(err, sql.ErrNoRows) {
+			return false, nil
+		}
+		if err != nil {
+			return false, err
+		}
+		if state != "active" {
+			return true, notFound("eligible work", "")
+		}
+		return true, nil
 	}
+	// perf: registered runner polls need only the exact lookup; held owner awards require ancestry.
+	if found, err := check(prefix); found || err != nil {
+		return err
+	}
+	chain, err := authorityChainTx(ctx, tx, capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: prefix}, false)
 	if err != nil {
 		return err
 	}
-	if state != "active" {
-		return notFound("eligible work", "")
+	for _, ancestor := range chain[1:] {
+		if found, err := check(ancestor.principal.Capability.Prefix); found || err != nil {
+			return err
+		}
 	}
 	return nil
+}
+
+func localRunnerStateTx(ctx context.Context, tx *storeTx, prefix string) (string, error) {
+	var state string
+	err := tx.QueryRowContext(ctx, `SELECT state FROM local_runner_instances WHERE capability_prefix=?`, prefix).Scan(&state)
+	return state, err
 }
