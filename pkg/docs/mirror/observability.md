@@ -180,6 +180,7 @@ the logs.
 | `verify` | The node's action completed, but its `Verify` postcondition returned an error -- the failure is at the verify stage, not the action. | Inspect the `Verify` assertion and the action's actual output. |
 | `source_unavailable` | A launcher Job's init container was refused the run's source credential. The refusal answers the same on every attempt, so the node is not retried. | Check the source credential the controller holds for the repository, then re-run. |
 | `source_fetch` | A launcher Job's init container could not check out the run's source for a reason a later attempt may not meet. The node is retried within its budget, a planning node included. | If every attempt fails, check that the repository and commit are reachable from the cluster. |
+| `expansion_failed` | A generator job finished but its generated jobs were never added, for example because evaluation could not fetch the source. The generator keeps its `success` outcome; status shows this reason on it and its error as `expansion failed: <masked error>`, and jobs waiting on the generated group name it as `(expansion failed)`. | Read the error in `sparkwing runs status --run <id>`, fix its cause, then re-run. |
 
 A plain pipeline-level failure (a failed test or command) carries no
 structured `failure_reason` -- read the logs.

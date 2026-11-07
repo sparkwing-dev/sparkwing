@@ -2,6 +2,7 @@ package store
 
 import (
 	"encoding/json"
+	"slices"
 	"testing"
 	"time"
 
@@ -50,6 +51,13 @@ func TestExpansionFailureIsAtomicAndReplayable(t *testing.T) {
 	}
 	if row.Expansion != runstate.ExpansionFailed || row.Outcome != runstate.NodeSuccess || row.ExpansionDigest != accepted.BodyHash {
 		t.Fatalf("persisted failure = %+v", row)
+	}
+	view, err := tenant.ReadRunView(t.Context(), "run")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Contains(view.Failures, RunFailure{JobID: "job", Error: "expansion failed: generator failed"}) {
+		t.Fatalf("status failures omit the expansion failure: %+v", view.Failures)
 	}
 	replay, err := tenant.AcceptExpansion(t.Context(), request)
 	if err != nil || !replay.Replayed || replay.BodyHash != accepted.BodyHash {

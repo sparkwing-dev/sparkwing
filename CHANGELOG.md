@@ -22,6 +22,8 @@ unlock.
 
 ### Breaking
 
+- **controller (Breaking):** The schema baseline advances to version 34, adding a partial index on live child runs for the parent-cancellation sweep. Recognized schema 33 stores upgrade in place. Older binaries refuse the upgraded store. See [the migration guide](docs/migrations/_unreleased.md#upgrade-the-store-in-place-to-schema-baseline-34).
+
 - **local controller (Breaking):** The schema baseline advances to version 33, adding durable runner process identities and lifecycle state. Recognized schema 32 stores upgrade in place. Older binaries refuse the upgraded store. See [the migration guide](docs/migrations/_unreleased.md#upgrade-the-store-in-place-to-schema-baseline-33).
 
 - **CLI (Breaking):** Repository pin upgrades move from `sparkwing upgrade` to `sparkwing pipeline upgrade`. The obsolete `sparkwing daemon recover-state` command is removed because machine admission now lives in `state.db`. See [the migration guide](docs/migrations/_unreleased.md#upgrade-the-store-in-place-to-schema-baseline-31).
@@ -51,6 +53,9 @@ unlock.
 - **runners:** A `sparkwing-runner` with `runner.local_admission: true` explains a local controller it cannot use. With no controller running, a claimed job fails naming `sparkwing dashboard start`, `sparkwing dashboard install` and `local_admission: false` instead of a failed daemon spawn followed by an earlier daemon's log. A controller on an incompatible build names both builds and the same remedies. The runner logs one warning per cause while either lasts, and a controller refusing a pre-HTTP runner names the runner remedy and records `handshake_refused` in `sparkwing daemon events`.
 
 - **controller:** A claim from a development-build runner is refused with a message naming the build and a hint to install a released `sparkwing-runner`, instead of "invalid release version". Development runners are still refused by release controllers.
+- **controller and CLI:** A generator job whose expansion failed now shows why. Run status gives it the `expansion_failed` reason and its masked error, the errors view and `runs failures` list it, and jobs that waited on its generated group name it as blocking. Previously the run failed naming a job that read as successful, and the error was only in controller logs. See [observability](docs/observability.md#failure-reasons).
+- **controller:** `sparkwing runs retry --failed` starts when a reused job has to run again. A job whose earlier result could not be reused, such as one written by another runner, used to stay ready while every runner claim failed with "financial lock order: work must precede the ledger". Reuse is now checked when a job's dependencies finish, as local runs already did, so a later job no longer reuses its earlier result or starts while a job it needs runs again. A job whose earlier result the controller refuses to reuse, such as one that no longer matches the job, now runs again; before, the refusal stopped the controller from scheduling that run and every run after it.
+- **controller:** Cancelling a run, or a run or job ending while a child it started through `RunAndAwait` is still pending or running, now cancels that child. Children had kept running until an operator cancelled each one by hand. Local and hosted controllers request the cancellation from their recovery sweep, so a grandchild follows one sweep later. A retry of a child run is left running, because someone asked for it.
 
 - **local controller:** Store time no longer moves backward when time sync or a VM resume steps the wall clock back, which had failed job and step completion with a `finished_at >= started_at` constraint error and refused plan settlement with "billing checkpoint is outside its awarded time range".
 
