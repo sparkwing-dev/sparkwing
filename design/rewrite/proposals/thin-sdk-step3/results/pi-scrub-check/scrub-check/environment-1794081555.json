@@ -1,0 +1,28 @@
+{
+ "uname": [
+  "Linux",
+  "6.8.0-1065-raspi",
+  "#69-Ubuntu SMP PREEMPT_DYNAMIC Tue Sep  8 18:10:10 UTC 2026",
+  "aarch64"
+ ],
+ "cpu_count": 4,
+ "initial_load": [
+  0.35888671875,
+  0.09130859375,
+  0.5869140625
+ ],
+ "binary_sha256": "b87df0c363cca543b55f362f4c8c3a2a23bd5027bf375acd7a385892b55fe75d",
+ "versions": {
+  "node": "v22.18.0",
+  "kernel": "6.8.0-1065-raspi"
+ },
+ "small_count": 10,
+ "bulk_bytes": 1048576,
+ "rounds": 1,
+ "quiet_threshold": 3.0,
+ "quiet_idle": 0.0,
+ "languages": "go,typescript",
+ "conditions": "quiet",
+ "concurrency": "1",
+ "meminfo": "MemTotal:        3874892 kB\nMemFree:         1651000 kB\nMemAvailable:    3292672 kB\nBuffers:          110352 kB\nCached:          1671036 kB\nSwapCached:            0 kB\nActive:           499956 kB\nInactive:        1407000 kB\nActive(anon):     128884 kB\nInactive(anon):        0 kB\nActive(file):     371072 kB\nInactive(file):  1407000 kB\nUnevictable:           0 kB\nMlocked:               0 kB\nSwapTotal:             0 kB\nSwapFree:              0 kB\nZswap:                 0 kB\nZswapped:              0 kB\nDirty:               756 kB\nWriteback:             0 kB\nAnonPages:        125624 kB\nMapped:           183784 kB\nShmem:              3316 kB\nKReclaimable:      88760 kB\nSlab:             172992 kB\nSReclaimable:      88760 kB\nSUnreclaim:        84232 kB\nKernelStack:        3536 kB\nPageTables:         3864 kB\nSecPageTables:         0 kB\nNFS_Unstable:          0 kB\nBounce:                0 kB\nWritebackTmp:          0 kB\nCommitLimit:     1937444 kB\nCommitted_AS:     993556 kB\nVmallocTotal:   133141626880 kB\nVmallocUsed:       20236 kB\nVmallocChunk:          0 kB\nPercpu:             8224 kB\nAnonHugePages:         0 kB\nShmemHugePages:        0 kB\nShmemPmdMapped:        0 kB\nFileHugePages:         0 kB\nFilePmdMapped:         0 kB\nCmaTotal:         524288 kB\nCmaFree:          513164 kB\nHugePages_Total:       0\nHugePages_Free:        0\nHugePages_Rsvd:        0\nHugePages_Surp:        0\nHugepagesize:       2048 kB\nHugetlb:               0 kB\n"
+}

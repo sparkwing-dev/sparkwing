@@ -103,6 +103,12 @@ at concurrency 1 add 0.30 ms p50 (70% of T's rate); at concurrency 8 P1 matches 
 bulk capture reaches 11-53% of TC. Full tables: `results/pi/summary.md`,
 `results/desktop/summary.md`.
 
+After the review fixes (`bf230236e`), `results/pi-head-check/` repeats Go concurrency-1
+cells on the Pi for three rounds: P1 small commands run at 76.7% of direct spawn and add
+0.97 ms per call, against 77.7% and 0.91 ms before, so capturing each command's session
+costs nothing measurable. `results/pi-scrub-check/` is the one-round run that verified the
+scrubbed recorder.
+
 ## Reading against the guardrail
 
 The guardrail asks for small per-call overhead against process spawn and large-output

@@ -1,0 +1,42 @@
+quiet-r0-go-small-c1-D ok 0.2 s load 0.35888671875
+quiet-r0-go-small-c1-T ok 0.25 s load 0.35888671875
+quiet-r0-go-small-c1-TC ok 0.21 s load 0.35888671875
+quiet-r0-go-small-c1-P1 ok 0.25 s load 0.35888671875
+quiet-r0-go-small-c1-P2 ok 0.26 s load 0.41064453125
+quiet-r0-go-bulk-c1-D ok 0.16 s load 0.41064453125
+quiet-r0-go-bulk-c1-T ok 0.84 s load 0.41064453125
+quiet-r0-go-bulk-c1-TC ok 2.28 s load 0.41064453125
+quiet-r0-go-bulk-c1-P1 ok 0.53 s load 0.41064453125
+quiet-r0-go-bulk-c1-P2 ok 2.99 s load 0.41064453125
+quiet-r0-typescript-small-c1-D ok 1.49 s load 0.5380859375
+quiet-r0-typescript-small-c1-T ok 1.54 s load 0.5380859375
+quiet-r0-typescript-small-c1-TC ok 1.53 s load 0.5751953125
+quiet-r0-typescript-small-c1-P1 ok 2.25 s load 0.5751953125
+quiet-r0-typescript-small-c1-P2 ok 1.35 s load 0.5751953125
+quiet-r0-typescript-bulk-c1-D ok 2.05 s load 0.689453125
+quiet-r0-typescript-bulk-c1-T ok 1.79 s load 0.689453125
+quiet-r0-typescript-bulk-c1-TC ok 2.14 s load 0.689453125
+quiet-r0-typescript-bulk-c1-P1 ok 1.54 s load 0.79443359375
+quiet-r0-typescript-bulk-c1-P2 ok 1.35 s load 0.79443359375
+| Condition | Lang | Size | C | Variant | Rounds | p50 ms | p95 ms | cmds/s | MiB/s | Added p50 vs base | Ratio vs base | Ratio vs D | Host CPU s | SDK CPU s |
+| --- | --- | --- | ---: | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| quiet | go | bulk | 1 | D | 1 | 14.692 | 14.692 | 67.8 | 67.8 |  |  |  | 0.001 | 0.008 |
+| quiet | go | bulk | 1 | T (vs D) | 1 | 268.393 | 268.393 | 3.7 | 3.7 | 253.700 | 5.5% | 5.5% | 0.702 | 0.101 |
+| quiet | go | bulk | 1 | TC (vs D) | 1 | 20.199 | 20.199 | 49.4 | 49.4 | 5.506 | 72.9% | 72.9% | 0.011 | 0.026 |
+| quiet | go | bulk | 1 | P1 (vs T) | 1 | 174.268 | 174.268 | 5.7 | 5.7 | -94.125 | 154.0% | 8.5% | 0.513 | 0.005 |
+| quiet | go | bulk | 1 | P2 (vs TC) | 1 | 1829.951 | 1829.951 | 0.5 | 0.5 | 1809.752 | 1.1% | 0.8% | 0.067 | 3.588 |
+| quiet | go | small | 1 | D | 1 | 4.584 | 4.890 | 228.1 |  |  |  |  | 0.010 | 0.019 |
+| quiet | go | small | 1 | T (vs D) | 1 | 4.870 | 5.217 | 213.3 |  | 0.286 | 93.5% | 93.5% | 0.038 | 0.025 |
+| quiet | go | small | 1 | TC (vs D) | 1 | 4.217 | 4.970 | 230.4 |  | -0.367 | 101.0% | 101.0% | 0.028 | 0.022 |
+| quiet | go | small | 1 | P1 (vs T) | 1 | 5.245 | 6.100 | 184.8 |  | 0.375 | 86.6% | 81.0% | 0.075 | 0.008 |
+| quiet | go | small | 1 | P2 (vs TC) | 1 | 5.807 | 6.412 | 168.8 |  | 1.590 | 73.3% | 74.0% | 0.077 | 0.009 |
+| quiet | typescript | bulk | 1 | D | 1 | 49.509 | 49.509 | 20.0 | 20.0 |  |  |  | 0.014 | 0.030 |
+| quiet | typescript | bulk | 1 | T (vs D) | 1 | 280.657 | 280.657 | 3.6 | 3.6 | 231.148 | 17.8% | 17.8% | 0.698 | 0.061 |
+| quiet | typescript | bulk | 1 | TC (vs D) | 1 | 76.864 | 76.864 | 12.9 | 12.9 | 27.355 | 64.5% | 64.5% | 0.025 | 0.063 |
+| quiet | typescript | bulk | 1 | P1 (vs T) | 1 | 157.540 | 157.540 | 6.3 | 6.3 | -123.117 | 178.0% | 31.7% | 0.367 | 0.007 |
+| quiet | typescript | bulk | 1 | P2 (vs TC) | 1 | 66.238 | 66.238 | 15.0 | 15.0 | -10.625 | 116.3% | 75.1% | 0.055 | 0.066 |
+| quiet | typescript | small | 1 | D | 1 | 14.743 | 15.780 | 67.3 |  |  |  |  | 0.001 | 0.078 |
+| quiet | typescript | small | 1 | T (vs D) | 1 | 16.264 | 16.544 | 62.5 |  | 1.522 | 92.7% | 92.7% | 0.064 | 0.093 |
+| quiet | typescript | small | 1 | TC (vs D) | 1 | 15.442 | 15.981 | 64.3 |  | 0.699 | 95.4% | 95.4% | 0.028 | 0.089 |
+| quiet | typescript | small | 1 | P1 (vs T) | 1 | 6.712 | 8.073 | 143.7 |  | -9.552 | 230.1% | 213.4% | 0.369 | 0.024 |
+| quiet | typescript | small | 1 | P2 (vs TC) | 1 | 6.541 | 6.981 | 151.8 |  | -8.900 | 236.3% | 225.5% | 0.093 | 0.024 |
