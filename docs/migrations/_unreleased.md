@@ -257,3 +257,15 @@ the state home is no longer read and can be deleted.
 `POST /api/v1/local/controller/dashboard` and the `wingwire.LocalDashboard` and
 `LocalDashboardAck` types are removed. `sparkwing daemon stop` now also retires
 the local runner; `sparkwing daemon restart` leaves it and its jobs running.
+
+## The controller login service moves under daemon
+
+The login service command moves from `dashboard` to `daemon`:
+
+| Before | Now |
+| --- | --- |
+| `sparkwing dashboard install` | `sparkwing daemon install` |
+| `sparkwing dashboard uninstall` | `sparkwing daemon uninstall` |
+
+Installed units keep running unchanged; their argv was already
+`wingd run --home <home>`. The `--force` flag, which always refused, is removed.

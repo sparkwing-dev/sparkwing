@@ -431,7 +431,7 @@ usage independently of admission charges.
 election races, home binding, concurrent reuse and refusal paths through the
 lifecycle interface with process-boundary fakes.
 The process/store
-scenarios remain open: dashboard install/update, Windows
+scenarios remain open: daemon install/update, Windows
 transport identity and local orphan recovery. These require the real controller
 and platform fixtures.
 

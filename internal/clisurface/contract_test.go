@@ -62,7 +62,7 @@ func TestRegistryRejectsGrammarDrift(t *testing.T) {
 }
 
 func TestFinalSurfaceHasNoRemovedCommands(t *testing.T) {
-	cuts := []string{"sparkwing cluster", "sparkwing cloud", "sparkwing configure", "sparkwing serve", "sparkwing crons", "sparkwing runs consumer", "sparkwing runs bounce", "sparkwing runs reattach", "sparkwing debug rerun", "sparkwing debug run", "sparkwing debug release", "sparkwing dashboard restart", "sparkwing dashboard start", "sparkwing dashboard stop", "sparkwing pipeline sparks resolve", "sparkwing pipeline sparks warmup", "sparkwing-runner agent", "sparkwing-runner runner", "sparkwing-runner wingd", "sparkwing wingd supervise"}
+	cuts := []string{"sparkwing cluster", "sparkwing cloud", "sparkwing configure", "sparkwing serve", "sparkwing crons", "sparkwing runs consumer", "sparkwing runs bounce", "sparkwing runs reattach", "sparkwing debug rerun", "sparkwing debug run", "sparkwing debug release", "sparkwing dashboard restart", "sparkwing dashboard start", "sparkwing dashboard stop", "sparkwing dashboard install", "sparkwing dashboard uninstall", "sparkwing pipeline sparks resolve", "sparkwing pipeline sparks warmup", "sparkwing-runner agent", "sparkwing-runner runner", "sparkwing-runner wingd", "sparkwing wingd supervise"}
 	for _, c := range Registry() {
 		for _, cut := range cuts {
 			if c.Path == cut || strings.HasPrefix(c.Path, cut+" ") {
@@ -81,7 +81,7 @@ func TestLaunchCriticalSurfaces(t *testing.T) {
 		"sparkwing run":               {"publish", "sw-cache-from", "sw-pause-before", "sw-no-memo", "sw-allow-risk"},
 		"sparkwing pipeline trigger":  {"resume", "runner", "profile"},
 		"sparkwing dashboard open":    {},
-		"sparkwing dashboard install": {}, "sparkwing dashboard uninstall": {}, "sparkwing __tick": {},
+		"sparkwing daemon install": {}, "sparkwing daemon uninstall": {}, "sparkwing __tick": {},
 		"sparkwing schedules pause": {"schedule"}, "sparkwing schedules resume": {"schedule"},
 		"sparkwing runners add": {"repos", "reserved-for"}, "sparkwing pools allow": {"pool", "repo", "branch", "source", "route"},
 		"sparkwing-runner start": {"config", "repos"}, "sparkwing-runner warm": {"github-actions", "poll"},
@@ -108,7 +108,7 @@ func TestLaunchCriticalSurfaces(t *testing.T) {
 	if !slices.ContainsFunc(commands["sparkwing run"].Flags, func(f Flag) bool { return f.Name == "sw-route" }) {
 		t.Error("run must offer invocation routing")
 	}
-	if slices.Contains(commands["sparkwing dashboard install"].Platforms, "windows") {
+	if slices.Contains(commands["sparkwing daemon install"].Platforms, "windows") {
 		t.Error("Windows install must be refused")
 	}
 	for _, c := range Registry() {

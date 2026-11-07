@@ -6,12 +6,14 @@ import (
 	"io"
 	"os"
 	"os/signal"
+	"runtime"
 	"strings"
 	"syscall"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
+	"github.com/sparkwing-dev/sparkwing/internal/wingd"
 	"github.com/sparkwing-dev/sparkwing/pkg/color"
 )
 
@@ -34,6 +36,10 @@ func runDaemonLifecycle(inv clisurface.Invocation) error {
 }
 
 func runDaemonLifecycleCommand(ctx context.Context, inv clisurface.Invocation, out io.Writer, resolve func(context.Context) (dashboardServices, error)) error {
+	return runDaemonLifecycleCommandOn(ctx, inv, out, runtime.GOOS, resolve)
+}
+
+func runDaemonLifecycleCommandOn(ctx context.Context, inv clisurface.Invocation, out io.Writer, goos string, resolve func(context.Context) (dashboardServices, error)) error {
 	format := inv.Output(color.IsInteractiveStdout())
 	if inv.Help() {
 		return writeCommandHelp(surfaceHelp(inv.Command), out, format)
@@ -45,11 +51,20 @@ func runDaemonLifecycleCommand(ctx context.Context, inv clisurface.Invocation, o
 		timeout = daemonRestartTimeout
 	case "sparkwing daemon stop":
 		timeout = daemonStopTimeout
+	case "sparkwing daemon install", "sparkwing daemon uninstall":
+		if goos != "linux" && goos != "darwin" {
+			return &apierr.Error{Code: apierr.BadRequest, Message: "controller login services are supported on Linux and macOS", Hint: "sparkwing dashboard open starts the controller on demand"}
+		}
+		// safety: installation waits for its successor under the client's own startup budget.
+		timeout = 0
 	default:
-		return &clisurface.UsageError{Path: inv.Command.Path, Message: "expected status, restart or stop"}
+		return &clisurface.UsageError{Path: inv.Command.Path, Message: "expected status, restart, stop, install or uninstall"}
 	}
-	ctx, cancel := context.WithTimeout(ctx, timeout)
-	defer cancel()
+	if timeout > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, timeout)
+		defer cancel()
+	}
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -63,6 +78,16 @@ func runDaemonLifecycleCommand(ctx context.Context, inv clisurface.Invocation, o
 	if services.lifecycle == nil {
 		return &apierr.Error{Code: apierr.Unavailable, Message: "daemon requires local controller lifecycle"}
 	}
+	if inv.Command.Path == "sparkwing daemon install" || inv.Command.Path == "sparkwing daemon uninstall" {
+		result, err := installDaemonService(ctx, inv, services)
+		if err != nil {
+			return err
+		}
+		if format == "json" {
+			return json.NewEncoder(out).Encode(result)
+		}
+		return renderDashboard(out, result, format)
+	}
 	result, err := executeDaemonLifecycle(ctx, inv, services)
 	if err != nil {
 		return err
@@ -71,6 +96,24 @@ func runDaemonLifecycleCommand(ctx context.Context, inv clisurface.Invocation, o
 		return json.NewEncoder(out).Encode(result)
 	}
 	return renderDashboard(out, result.dashboardResult, format)
+}
+
+func installDaemonService(ctx context.Context, inv clisurface.Invocation, services dashboardServices) (dashboardResult, error) {
+	action := strings.TrimPrefix(inv.Command.Path, "sparkwing daemon ")
+	if services.units == nil {
+		return dashboardResult{}, &apierr.Error{Code: apierr.Unavailable, Message: "daemon requires local controller managed units"}
+	}
+	var status wingd.LocalStatus
+	var err error
+	if action == "install" {
+		status, err = services.lifecycle.InstallController(ctx, services.options)
+	} else if err = services.units.UninstallController(ctx); err == nil {
+		status, err = services.lifecycle.Status(ctx)
+	}
+	if err != nil {
+		return dashboardResult{}, err
+	}
+	return localStatusResult("controller", action, status), nil
 }
 
 func executeDaemonLifecycle(ctx context.Context, inv clisurface.Invocation, services dashboardServices) (daemonLifecycleResult, error) {

@@ -203,7 +203,7 @@ active, run `sparkwing daemon restart --force` with the required build, or use a
 separate `SPARKWING_HOME`.
 
 The controller remains running while idle. `sparkwing daemon stop` stops it.
-Linux and macOS support an installed login service through `dashboard install`.
+Linux and macOS support an installed login service through `daemon install`.
 Windows supports the foreground controller. Machine updates refresh managed
 controller and schedule units together. See [local dashboard](native-mode.md).
 

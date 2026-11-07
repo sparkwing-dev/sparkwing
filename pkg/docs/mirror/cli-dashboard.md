@@ -10,11 +10,9 @@ Manage the local dashboard
 
 ### Subcommands
 
-- `install` -- Install a dashboard service that starts at login
 - `logs` -- Read a bounded dashboard log tail
 - `open` -- Print a one-time sign-in link for the local dashboard
 - `status` -- Report whether the controller runs and where the dashboard serves
-- `uninstall` -- Remove the dashboard login service
 
 ### Flags
 
@@ -24,22 +22,6 @@ Manage the local dashboard
 | `-C, --checkout PATH` | Resolve the project from this local checkout path. |
 | `-h, --help` | Show command help without executing. |
 | `--help-all` | Include uncommon flags in command help. |
-
-## `sparkwing dashboard install`
-
-Install a dashboard service that starts at login
-
-Install a login service with restart on failure using systemd user or launchd; no socket activation. Refuse Windows, where `sparkwing dashboard open` starts the controller on demand.
-
-### Flags
-
-| Flag | Description |
-|---|---|
-| `-o, --output FORMAT` | Pretty on a terminal; JSON when piped; explicit format wins. Values: pretty, json, plain. |
-| `-C, --checkout PATH` | Resolve the project from this local checkout path. |
-| `-h, --help` | Show command help without executing. |
-| `--help-all` | Include uncommon flags in command help. |
-| `--force` | Replace an existing object. |
 
 ## `sparkwing dashboard logs`
 
@@ -74,21 +56,6 @@ Print a one-time sign-in link for the local dashboard, starting the local contro
 ## `sparkwing dashboard status`
 
 Report whether the controller runs and where the dashboard serves
-
-### Flags
-
-| Flag | Description |
-|---|---|
-| `-o, --output FORMAT` | Pretty on a terminal; JSON when piped; explicit format wins. Values: pretty, json, plain. |
-| `-C, --checkout PATH` | Resolve the project from this local checkout path. |
-| `-h, --help` | Show command help without executing. |
-| `--help-all` | Include uncommon flags in command help. |
-
-## `sparkwing dashboard uninstall`
-
-Remove the dashboard login service
-
-Remove the managed login service; Windows starts the controller on demand.
 
 ### Flags
 

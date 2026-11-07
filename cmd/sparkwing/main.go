@@ -409,7 +409,7 @@ func runSparkwing(args []string) (result error) {
 		return runDaemonLifecycle(inv)
 	case "sparkwing daemon restart":
 		return runDaemonLifecycle(inv)
-	case "sparkwing daemon stop":
+	case "sparkwing daemon stop", "sparkwing daemon install", "sparkwing daemon uninstall":
 		return runDaemonLifecycle(inv)
 	case "sparkwing daemon events":
 		return runDaemonEvents(inv)
