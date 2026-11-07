@@ -8,8 +8,11 @@ ready. Standalone mode follows its caller's context because that process owns
 the controller lifetime.
 A failed startup cancels and joins both the runtime and its readiness waiter
 before returning. The runtime port must honor cancellation after cleanup.
-`StartDashboard` starts the dashboard serving loop on an existing controller.
-`Stop` waits for the runtime's admission drain and shutdown.
+`Stop` waits for the runtime's admission drain and shutdown. A drain request
+with `runner=retire`, which only `sparkwing daemon stop` sends, first refuses
+runner registration and active-runner discovery, drains the active runner while
+the API still answers and waits up to five seconds for an idle runner to exit.
+A restart drain leaves the runner running.
 `InstallController` holds the same lifecycle gate through drain, managed-unit
 activation and successor readiness. It joins the previous owner before starting
 the service. The client holds the existing home startup claim through this
@@ -253,25 +256,25 @@ because admission workers join before store close. Readiness requires the
 open, reconciled owner and the shared state binding's readiness check.
 
 Readiness waits for reconciliation, admission startup and the API serving loop.
-When `DashboardAddress` is set, it also waits for the dashboard serving loop.
-An empty address serves only `api.sock`. `AwaitReady` waits for an active start
+Unless the start is standalone, it also waits for the dashboard serving loop at
+`DashboardSettings.Address`, which `ResolveDashboardSettings` reads from the
+`dashboard` section of config.yaml when the controller process starts. `AwaitReady` waits for an active start
 and cannot reuse a completed start's readiness or failure. `LocalLifecycle`
 observes the matching `Run` result, so startup failures and lost elections
 return instead of waiting forever.
 
-`EnsureDashboard` starts the dashboard on an existing ready controller. Requests
-for the same address and read-only policy share its listener and readiness. A bind failure leaves
-the controller running. A different address or read-only policy requires a stop and restart because
-the runtime owns one dashboard listener. Shutdown joins that serving loop before
-closing the store, including when the dashboard started after the controller.
+A dashboard bind failure leaves the controller admitting runs and is reported
+as `LocalStatus.DashboardError`; the runtime never falls back to another port,
+because bookmarks and port forwards name the configured address. Shutdown joins
+the dashboard serving loop before closing the store.
 
 Any serving or worker failure cancels the runtime. Drain uses admission's
 draining state, stops listeners and joins workers, API requests and admission
 finalizers before closing the store. Election ownership lasts through store
 close. The daemon also joins its sampling and diagnostic workers.
 Transient startup failures can be retried. An incompatible store remains a
-doctor finding. A dashboard startup failure reaches its caller after that
-cleanup, with the original service error preserved.
+doctor finding. A dashboard serving failure other than the bind reaches the
+caller after that cleanup, with the original service error preserved.
 
 The daemon accepts live controller counts through `setLocalActivity` for status.
 The runtime counts its dashboard HTTP connections until they close, including
@@ -279,14 +282,6 @@ idle keep-alive sockets and hijacked connections. Controller activity updates
 cannot erase that count. The controller remains running while idle until an
 explicit stop, context cancellation or runtime failure.
 
-The runtime records the address and read-only policy of the dashboard it last
-served in `wingd/dashboard.json` under its home. A controller started without a
-dashboard address, other than a standalone one, serves that dashboard again, so
-an on-demand start from a run or schedule restores the dashboard. The restore
-binds loopback only: a remembered non-loopback address comes back as `127.0.0.1` on the same port, because `--allow-remote` consents to
-one explicit start. A failed bind on that restore is logged and the controller
-starts without it. `sparkwing dashboard stop` and `sparkwing daemon stop` clear the
-record with `ForgetDashboard`; `daemon restart` keeps it.
 The client `Probe` API reads controller HTTP status without requesting queue work.
 
 `LocalSubject` accepts matching kernel UIDs on Linux and macOS, or matching
@@ -363,15 +358,10 @@ Missing sockets, unreachable owners, unsupported operations and stalled replies 
 and waits for the socket and election lock to close.
 
 The controller HTTP routes under `/api/v1/local/controller/` expose probe,
-status, dashboard and drain operations. Each requires the verified local
+status and drain operations. Each requires the verified local
 socket peer. Only an elected `LocalRuntime` serves lifecycle mutations. Status
 describes the running process. Native service inspection supplies installed-unit
 facts separately.
-
-`client.startLocalDashboard` requests dashboard startup from an existing owner.
-Its HTTP request waits for the serving loop to reach readiness. An identical
-address reuses the listener. A bind failure returns the owner's error and leaves
-the controller available. Admission-only daemons refuse the operation.
 
 The dashboard HTTP request follows the caller's context while waiting for
 readiness. Shutdown cancels requests and joins handlers before closing the
@@ -447,18 +437,14 @@ and platform fixtures.
 
 <!-- design:end -->
 
-The local dashboard accepts non-loopback addresses through `dashboard start
---allow-remote`. Every data request requires the bearer session minted through
-`api.sock`, including remote requests. `--read-only` rejects authenticated browser
-requests other than GET, HEAD and OPTIONS before controller dispatch; sign-in and
-sign-out remain available. It blocks writes but still allows reading decrypted
-secrets, so a read-only session is not safe to share. The local socket retains
-its normal authority.
-
-`--allow-remote` serves cleartext HTTP. The one-time login token and 24-hour
-session bearer cross the network unencrypted, and a session can read decrypted
-secrets. Use it only on a trusted network or through an SSH tunnel. For a tunnel,
-keep the remote dashboard bound to `127.0.0.1:4343` and run this on your machine:
+The local dashboard binds loopback only; `dashboard.address` refuses any other
+host. Every data request requires the bearer session minted through `api.sock`.
+`dashboard.read_only` rejects authenticated browser requests other than GET,
+HEAD and OPTIONS before controller dispatch; sign-in and sign-out remain
+available. It blocks writes but still allows reading decrypted secrets, so a
+read-only session is not safe to share. The local socket retains its normal
+authority. To reach the dashboard from another machine, keep it on loopback and
+forward the port, for example:
 
 ```sh
 ssh -N -L 4343:127.0.0.1:4343 user@host

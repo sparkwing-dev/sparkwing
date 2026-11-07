@@ -59,6 +59,6 @@ sparkwing run build
 # Inspect a pipeline
 sparkwing pipeline describe --pipeline build
 
-# Start the local dashboard
-sparkwing dashboard start
+# Sign in to the local dashboard
+sparkwing dashboard open
 ```

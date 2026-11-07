@@ -6,10 +6,10 @@ RUN_DIR="/tmp/sparkwing-dev"
 pid_web="$RUN_DIR/web.pid"
 
 if command -v sparkwing >/dev/null 2>&1; then
-  echo "==> sparkwing serve: stopping"
-  sparkwing serve stop || true
+  echo "==> sparkwing daemon: stopping"
+  sparkwing daemon stop || true
 else
-  echo "==> sparkwing not on PATH; skipping serve stop"
+  echo "==> sparkwing not on PATH; skipping daemon stop"
 fi
 
 stop_next_dev() {

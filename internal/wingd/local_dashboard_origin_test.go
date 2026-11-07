@@ -37,10 +37,6 @@ func TestLocalDashboardRefusesForeignHostsAndOrigins(t *testing.T) {
 			t.Error(err)
 		}
 	})
-	opts.DashboardAddress = "127.0.0.1:0"
-	if _, err := lifecycle.StartDashboard(t.Context(), opts); err != nil {
-		t.Fatal(err)
-	}
 	addr := <-bound
 	// safety: pooled connections can race the controller's bounded shutdown.
 	browser := &http.Client{Transport: &http.Transport{DisableKeepAlives: true}}

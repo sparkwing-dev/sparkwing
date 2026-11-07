@@ -31,6 +31,7 @@ const (
 	Admission = "admission"
 	Runner    = "runner"
 	Cache     = "cache"
+	Dashboard = "dashboard"
 	Debug     = "debug"
 	machine   = "machine"
 	Profiles  = "profiles"
@@ -38,7 +39,7 @@ const (
 	run       = "run"
 )
 
-var sections = []string{Admission, Runner, Cache, Debug, machine, Profiles, Repos, run}
+var sections = []string{Admission, Runner, Cache, Dashboard, Debug, machine, Profiles, Repos, run}
 
 // Path reports the settings file: $SPARKWING_CONFIG when set, else config.yaml
 // in [fssecure.ConfigDir]. SPARKWING_HOME does not move it, because a profile

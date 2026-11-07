@@ -13,9 +13,7 @@ Manage the local dashboard
 - `install` -- Install a dashboard service that starts at login
 - `logs` -- Read a bounded dashboard log tail
 - `open` -- Print a one-time sign-in link for the local dashboard
-- `start` -- Start the local dashboard and controller on demand
 - `status` -- Report whether the controller runs and where the dashboard serves
-- `stop` -- Stop a running dashboard server
 - `uninstall` -- Remove the dashboard login service
 
 ### Flags
@@ -31,7 +29,7 @@ Manage the local dashboard
 
 Install a dashboard service that starts at login
 
-Install a login service with restart on failure using systemd user or launchd; no socket activation. Refuse Windows with `sparkwing dashboard start` guidance.
+Install a login service with restart on failure using systemd user or launchd; no socket activation. Refuse Windows, where `sparkwing dashboard open` starts the controller on demand.
 
 ### Flags
 
@@ -62,7 +60,7 @@ Read a bounded dashboard log tail
 
 Print a one-time sign-in link for the local dashboard
 
-Print a one-time sign-in link for the local dashboard. When no dashboard serves, it first starts one at 127.0.0.1:4343, and the local controller too when none runs, whoever started the controller. The link is minted over the local socket, works once and expires after 60 seconds; visiting it gives that browser tab a session it sends as an Authorization bearer header, never a cookie. Every TCP API request needs that header; the local socket needs none.
+Print a one-time sign-in link for the local dashboard, starting the local controller when none runs. Every shared local controller serves the dashboard at dashboard.address from config.yaml, 127.0.0.1:4343 by default, from the moment it starts until `sparkwing daemon stop`. The link is minted over the local socket, works once and expires after 60 seconds; visiting it gives that browser tab a session it sends as an Authorization bearer header, never a cookie. Every TCP API request needs that header; the local socket needs none.
 
 ### Flags
 
@@ -72,24 +70,6 @@ Print a one-time sign-in link for the local dashboard. When no dashboard serves,
 | `-C, --checkout PATH` | Resolve the project from this local checkout path. |
 | `-h, --help` | Show command help without executing. |
 | `--help-all` | Include uncommon flags in command help. |
-
-## `sparkwing dashboard start`
-
-Start the local dashboard and controller on demand
-
-Starts the local controller on demand. The controller keeps running while idle until explicitly stopped.
-
-### Flags
-
-| Flag | Description |
-|---|---|
-| `-o, --output FORMAT` | Pretty on a terminal; JSON when piped; explicit format wins. Values: pretty, json, plain. |
-| `-C, --checkout PATH` | Resolve the project from this local checkout path. |
-| `-h, --help` | Show command help without executing. |
-| `--help-all` | Include uncommon flags in command help. |
-| `--addr HOST:PORT` | Address the dashboard listens on as HOST:PORT, 127.0.0.1:4343 by default; a non-loopback host also needs --allow-remote. |
-| `--allow-remote` | Permit a non-loopback --addr over cleartext HTTP. The one-time login token and 24-hour session bearer cross the network unencrypted, and a session can read decrypted secrets. Use only on a trusted network or through an SSH tunnel: ssh -N -L 4343:127.0.0.1:4343 user@host (keep the remote dashboard on loopback). |
-| `--read-only` | Block browser writes while still allowing authenticated reads of decrypted secrets and sign-out. This is not safe to share. |
 
 ## `sparkwing dashboard status`
 
@@ -104,26 +84,11 @@ Report whether the controller runs and where the dashboard serves
 | `-h, --help` | Show command help without executing. |
 | `--help-all` | Include uncommon flags in command help. |
 
-## `sparkwing dashboard stop`
-
-Stop a running dashboard server
-
-Stops the local controller and its dashboard. The dashboard no longer returns when a run or schedule next starts the controller.
-
-### Flags
-
-| Flag | Description |
-|---|---|
-| `-o, --output FORMAT` | Pretty on a terminal; JSON when piped; explicit format wins. Values: pretty, json, plain. |
-| `-C, --checkout PATH` | Resolve the project from this local checkout path. |
-| `-h, --help` | Show command help without executing. |
-| `--help-all` | Include uncommon flags in command help. |
-
 ## `sparkwing dashboard uninstall`
 
 Remove the dashboard login service
 
-Remove the managed login service; Windows uses `sparkwing dashboard start` directly.
+Remove the managed login service; Windows starts the controller on demand.
 
 ### Flags
 

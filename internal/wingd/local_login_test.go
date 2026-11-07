@@ -131,8 +131,8 @@ func TestLocalDashboardSignsInOnceThroughSocketMintedLink(t *testing.T) {
 	r := newRuntimeFixture(t, f)
 	r.listen, r.now = nil, clock.Now
 	lifecycle := NewLocalLifecycle(r, nil)
-	opts := LocalStartOptions{Home: f.home, Version: "v1", DashboardAddress: "127.0.0.1:0"}
-	if _, err := lifecycle.StartDashboard(t.Context(), opts); err != nil {
+	opts := LocalStartOptions{Home: f.home, Version: "v1"}
+	if _, err := lifecycle.EnsureStarted(t.Context(), opts); err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() {
