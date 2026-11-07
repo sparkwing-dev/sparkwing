@@ -250,7 +250,7 @@ func reuseRetryJobTx(ctx context.Context, tx *storeTx, team Team, ref runspec.No
 // safety: only a verdict on the source is permanent; if any cause is transient, such as an unavailable
 // reader, a deadline or a database error, the sweep must retry rather than run a successful job again.
 func reuseRefused(err error) bool {
-	switch cause := err.(type) {
+	switch cause := err.(type) { //nolint:errorlint // Each joined cause is judged; As would hide a transient one.
 	case interface{ Unwrap() []error }:
 		causes := cause.Unwrap()
 		return len(causes) > 0 && !slices.ContainsFunc(causes, func(err error) bool { return !reuseRefused(err) })
@@ -261,6 +261,6 @@ func reuseRefused(err error) bool {
 	case interface{ Unwrap() error }:
 		return reuseRefused(cause.Unwrap())
 	default:
-		return err == blob.ErrDigestNotReadable
+		return err == blob.ErrDigestNotReadable //nolint:errorlint // Wrapped causes are unwrapped above.
 	}
 }
