@@ -2,8 +2,9 @@ package docker
 
 import (
 	"encoding/json"
-	sdkdocker "github.com/sparkwing-dev/sparkwing/sparkwing/docker"
 	"testing"
+
+	sdkdocker "github.com/sparkwing-dev/sparkwing/sparkwing/docker"
 )
 
 func TestImageTagWireFieldsReachBothSDKs(t *testing.T) {
