@@ -5,10 +5,12 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"reflect"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -424,5 +426,121 @@ func TestConsoleFailedRetryReusesSuccessfulJobWithoutAnAttempt(t *testing.T) {
 	after, err := control.ReadRun(t.Context(), created.RunID)
 	if err != nil || after.Status != "success" || len(after.Attempts) != 0 || len(after.Jobs) != 1 {
 		t.Fatalf("retry reran reused work: %+v, %v", after, err)
+	}
+}
+
+// Retry run 60 of the deploy pipeline stalled this way: its reused jobs carried
+// results another host wrote, so they had to run again, and every claim of the
+// first one failed while the controller probed reuse for the job queued behind it.
+func TestFailedRetryReusesOnlyReleasedJobsAndStaysClaimable(t *testing.T) {
+	s, options, _, source := retryActionDispatchFixture(t, "private-value", false, runspec.DispatchController, store.WithPolicies(func(*store.Store) (store.Policies, error) {
+		return store.Policies{ResultBlobs: storage.BlobManifests{}}, nil
+	}))
+	// safety: build reruns, check reuses its result, test failed and package reruns behind build.
+	jobs := []nodeproto.JobSpec{{ID: "build"}, {ID: "check", Needs: []string{"build"}}, {ID: "test", Needs: []string{"check"}}, {ID: "package", Needs: []string{"build"}}}
+	plan, err := json.Marshal(nodeproto.PlanDoc{Jobs: jobs})
+	if err != nil {
+		t.Fatal(err)
+	}
+	hour := runspec.Setting[time.Duration]{Optional: runspec.Optional[time.Duration]{Set: true, Value: time.Hour}}
+	settings := map[string]runspec.JobExecutionSettings{}
+	for _, job := range jobs {
+		settings[job.ID] = runspec.JobExecutionSettings{Timeout: hour}
+	}
+	spec, err := runspec.SealSpec(runspec.SealInput{Request: source.Request, Plan: plan, Now: time.Unix(2, 0), Resolved: runspec.Resolved{
+		Engine: engineid.Identity{Version: "v1.2.3"}, Args: source.Request.Request.RequestedArgs, SecretArgs: []string{"secret"}, Settings: runspec.ExecutionSettings{Jobs: settings},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sealed, err := json.Marshal(spec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	engineSQL(t, s.store, `UPDATE runs SET spec_json=?,spec_hash=?,sealed_at=2,plan_json=?,plan_hash=? WHERE team='a' AND id='run'`, sealed, spec.Hash, plan, spec.PlanHash)
+	for _, job := range jobs {
+		body, err := json.Marshal(job)
+		if err != nil {
+			t.Fatal(err)
+		}
+		hash, err := runspec.CanonicalHash(job)
+		if err != nil {
+			t.Fatal(err)
+		}
+		outcome, output := "success", []byte(nil)
+		switch job.ID {
+		case "test":
+			outcome = "failed"
+		case "build", "package":
+			output = fmt.Appendf(nil, `{"Team":"a","Kind":"output","Scope":{"Repo":"gh:1","Ref":{"Ref":"another-host"},"Pipeline":"ci","Job":%q},"Name":"result"}`, job.ID)
+		}
+		engineSQL(t, s.store, `INSERT INTO nodes(team,run_id,node_id,status,outcome,state_seq,spec_json,spec_hash,execution_json,finished_at,output_record) VALUES ('a','run',?,'done',?,2,?,?,?,2,?)`, job.ID, outcome, body, string(hash), []byte(`{}`), output)
+	}
+	control, err := client.NewEngineClient(options)
+	if err != nil {
+		t.Fatal(err)
+	}
+	created, err := control.Retry(t.Context(), "run", controllerwire.RetryRequest{Mode: controllerwire.RetryFailed, IdempotencyKey: "failed-retry"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	reconcile := func() {
+		t.Helper()
+		if _, err := s.store.AsOperator().ReconcileControllerRuns(t.Context(), "", 10); err != nil {
+			t.Fatal(err)
+		}
+	}
+	ready := func() []string {
+		t.Helper()
+		rows, err := teststore.SQL(t, s.store).Query(`SELECT node_id FROM nodes WHERE team='a' AND run_id=? AND status='pending' AND ready_at IS NOT NULL ORDER BY node_id`, created.RunID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer rows.Close()
+		var ids []string
+		for rows.Next() {
+			var id string
+			if err := rows.Scan(&id); err != nil {
+				t.Fatal(err)
+			}
+			ids = append(ids, id)
+		}
+		return ids
+	}
+	engineHTTPRoot(t, s.engine, "a", "retry-worker", []capability.Grant{capability.NodesClaim})
+	var ran []string
+	runNext := func() {
+		t.Helper()
+		claim, err := s.store.AsOperator().ClaimUnit(t.Context(), store.UnitDemand{CapabilityPrefix: "retry-worker", Kinds: []capability.UnitKind{capability.UnitNode}})
+		if err != nil {
+			t.Fatalf("runner could not claim released work %v: %v", ready(), err)
+		}
+		bearer := string(claim.Bearer)
+		engineAdmitBearer(t, s.store, bearer)
+		path := "/api/v1/runs/" + created.RunID + "/jobs/" + claim.NodeID + "/transition"
+		engineClaimHTTP(t, s.Handler(), bearer, "POST", path, `{"to":"running","cause":"start","source_attempt":0}`, http.StatusOK)
+		engineClaimHTTP(t, s.Handler(), bearer, "POST", path, `{"to":"success","cause":"report","source_attempt":1}`, http.StatusOK)
+		ran = append(ran, claim.NodeID)
+		reconcile()
+	}
+	reconcile()
+	if got := ready(); !reflect.DeepEqual(got, []string{"build"}) {
+		t.Fatalf("released before build reran: %v", got)
+	}
+	runNext()
+	if got := ready(); !reflect.DeepEqual(got, []string{"package", "test"}) {
+		t.Fatalf("released after build: %v", got)
+	}
+	runNext()
+	runNext()
+	slices.Sort(ran)
+	after, err := control.ReadRun(t.Context(), created.RunID)
+	if err != nil || after.Status != "success" || !reflect.DeepEqual(ran, []string{"build", "package", "test"}) {
+		t.Fatalf("retry: status=%s ran=%v err=%v", after.Status, ran, err)
+	}
+	for _, attempt := range after.Attempts {
+		if attempt.JobID == "check" {
+			t.Fatalf("reused job ran again: %+v", attempt)
+		}
 	}
 }

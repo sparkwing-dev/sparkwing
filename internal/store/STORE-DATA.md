@@ -9,7 +9,7 @@ counter domains, boolean flags, and nonempty concurrency keys. Installations
 are referenced with their tenant. Job receipts reference the exact attempt and
 generation. Sessions, memberships and identities reference an existing account.
 The schema counterexample suites exercise these rules against either dialect.
-The baseline version is 33. Both dialects are translated from `schema.sql`.
+The baseline version is 34. Both dialects are translated from `schema.sql`.
 A fresh store gets the baseline whole. `schemaUpgrades` in `schema_upgrade.go`
 lists the forward steps, each keyed by the version and baseline digest a release
 recorded, and an older supported store takes every later step in the same open
@@ -24,7 +24,9 @@ Activation shares queue arbitration with claim awards, atomically draining the
 previous instance before admitting the successor. Registered, draining and
 stopped instances receive no new awards. Held award authority remains live
 while an instance drains. Existing credential retention removes an instance
-record when its ended claim capability is retired. A step adds a
+record when its ended claim capability is retired. Schema 34 adds
+`idx_runs_live_children`, a partial index on pending and running child runs that
+the parent-cancellation sweep reads instead of the whole run history. A step adds a
 column at the end of its table so the upgraded schema matches a fresh one. A
 view is replaced with `CREATE OR REPLACE VIEW`, which keeps PostgreSQL grants;
 SQLite drops and recreates it. Any other version or digest requires a backup

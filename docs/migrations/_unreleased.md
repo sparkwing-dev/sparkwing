@@ -1,5 +1,17 @@
 # Migrating to the next release
 
+## Upgrade the store in place to schema baseline 34
+
+Schema 34 adds the partial index `idx_runs_live_children` on pending and
+running child runs to the recognized schema 33 baseline in one transaction. The
+controller's recovery sweep reads it to cancel children whose parent run or
+creating job has ended, without scanning retained run history. Earlier
+recognized baselines run their existing upgrades first. Older binaries refuse
+the upgraded store. Retain a backup before upgrading if you need to return to
+an older binary.
+
+No CLI, HTTP route, wire field or SDK symbol changes.
+
 ## Upgrade the store in place to schema baseline 33
 
 Schema 33 adds `local_runner_instances` to the recognized schema 32 baseline in

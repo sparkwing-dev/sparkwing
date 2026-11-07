@@ -557,3 +557,26 @@ func (t *storeTx) forNoKeyUpdate() string {
 // promoted controller's epoch, so a promotion's epoch bump waits for in-flight writes and a superseded
 // controller's next transaction sees the new epoch and stops.
 const controllerEpochLockSQL = `SELECT convert_from(value,'UTF8')::bigint FROM settings WHERE key='controller_epoch' FOR SHARE`
+
+type savepoint struct {
+	name            string
+	work, authority int
+}
+
+func savepointTx(ctx context.Context, tx *storeTx, name string) (savepoint, error) {
+	_, err := tx.execContext(ctx, "SAVEPOINT "+name)
+	return savepoint{name: name, work: len(tx.workLocks), authority: len(tx.authorityLocks)}, err
+}
+
+// safety: PostgreSQL releases row locks taken after a savepoint when it rolls back to it, so the lock
+// caches forget them and a later lock call takes them again.
+func (p savepoint) rollback(ctx context.Context, tx *storeTx) error {
+	_, err := tx.execContext(ctx, "ROLLBACK TO SAVEPOINT "+p.name)
+	tx.workLocks, tx.authorityLocks = tx.workLocks[:p.work], tx.authorityLocks[:p.authority]
+	return err
+}
+
+func (p savepoint) release(ctx context.Context, tx *storeTx) error {
+	_, err := tx.execContext(ctx, "RELEASE SAVEPOINT "+p.name)
+	return err
+}

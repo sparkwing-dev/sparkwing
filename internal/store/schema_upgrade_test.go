@@ -88,9 +88,31 @@ func TestSchemaUpgradesAReleasedV0683StoreInPlace(t *testing.T) {
 	target.Open(t)
 }
 
+func TestSchemaUpgradeAddsLiveChildIndexToVersion33(t *testing.T) {
+	target := storetest.New(t)
+	st := target.Open(t)
+	if _, err := st.DB().Exec(`DROP INDEX idx_runs_live_children`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.DB().Exec(`UPDATE sparkwing_schema_version SET version=33, baseline_digest='b4ac52448bafd4ea378d1ed2e1d9aec0c610d3a5e27df4a7a780c178f425a47b'`); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.Close(); err != nil {
+		t.Fatal(err)
+	}
+	upgraded := target.Open(t)
+	fresh := storetest.New(t).Open(t)
+	if a, b := schemaShape(t, upgraded), schemaShape(t, fresh); a != b {
+		t.Fatalf("schema upgrade differs: %s", shapeDiff(a, b))
+	}
+}
+
 func TestSchemaUpgradeAddsLocalRunnersToVersion32(t *testing.T) {
 	target := storetest.New(t)
 	st := target.Open(t)
+	if _, err := st.DB().Exec(`DROP INDEX idx_runs_live_children`); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := st.DB().Exec(`DROP TABLE local_runner_instances`); err != nil {
 		t.Fatal(err)
 	}
@@ -110,6 +132,9 @@ func TestSchemaUpgradeAddsLocalRunnersToVersion32(t *testing.T) {
 func TestSchemaUpgradeAddsLocalSecretsToVersion31(t *testing.T) {
 	target := storetest.New(t)
 	st := target.Open(t)
+	if _, err := st.DB().Exec(`DROP INDEX idx_runs_live_children`); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := st.DB().Exec(`DROP TABLE local_runner_instances`); err != nil {
 		t.Fatal(err)
 	}
@@ -132,6 +157,9 @@ func TestSchemaUpgradeAddsLocalSecretsToVersion31(t *testing.T) {
 func TestSchemaUpgradeAddsMachineAdmissionToVersion30(t *testing.T) {
 	target := storetest.New(t)
 	st := target.Open(t)
+	if _, err := st.DB().Exec(`DROP INDEX idx_runs_live_children`); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := st.DB().Exec(`DROP TABLE local_runner_instances`); err != nil {
 		t.Fatal(err)
 	}
