@@ -259,15 +259,17 @@ func TestDeployPlanShape(t *testing.T) {
 	}
 	full := deps(nil)
 	want := map[string][]string{
-		"build-images":   nil,
-		"staging-deploy": {"build-images"},
-		"staging-gate":   {"build-images", "staging-deploy"},
-		"production":     {"build-images", "staging-gate"},
+		"build-images":    nil,
+		"staging-deploy":  {"build-images"},
+		"staging-gate":    {"build-images", "staging-deploy"},
+		"production":      {"build-images", "staging-gate"},
+		"staging-scan":    {"staging-deploy"},
+		"production-scan": {"production"},
 	}
 	if fmt.Sprint(full) != fmt.Sprint(want) {
 		t.Fatalf("full plan = %v, want %v", full, want)
 	}
-	if got := deps(map[string]string{"stop-after": "staging"}); len(got) != 3 || got["production"] != nil {
+	if got := deps(map[string]string{"stop-after": "staging"}); len(got) != 4 || got["production"] != nil {
 		t.Fatalf("stop-after staging plan = %v", got)
 	}
 	proven := deps(map[string]string{"promote-proven": "true"})
@@ -285,9 +287,9 @@ func TestDeployPlanRequiresDeployRunner(t *testing.T) {
 		args map[string]string
 		jobs int
 	}{
-		{"full", nil, 4},
-		{"staging", map[string]string{"stop-after": "staging"}, 3},
-		{"promote-proven", map[string]string{"promote-proven": "true"}, 3},
+		{"full", nil, 6},
+		{"staging", map[string]string{"stop-after": "staging"}, 4},
+		{"promote-proven", map[string]string{"promote-proven": "true"}, 4},
 	} {
 		for _, mode := range []string{"real", "dry-run", "sw-dry-run"} {
 			t.Run(shape.name+"/"+mode, func(t *testing.T) {
@@ -738,6 +740,8 @@ func (f *fakeDeploy) kubectl(c deployCommand) (string, error) {
 	joined := strings.Join(c.Args, " ")
 	envDir := map[string]string{"sparkwing-staging": "sparkwing-staging", "sparkwing": "sparkwing"}
 	switch {
+	case strings.Contains(joined, "annotate application"):
+		return "", nil
 	case strings.Contains(joined, "rollout status"):
 		return "", nil
 	case strings.Contains(joined, "get application"):
@@ -850,8 +854,8 @@ func TestDeployStagingGateThenProduction(t *testing.T) {
 	if author := deployGitIn(t, f.bare, "log", "-1", "--format=%an <%ae>", "main"); author != "Sparkwing deploy <deploy@sparkwing.dev>" {
 		t.Fatalf("deploy commit author = %q", author)
 	}
-	if slices.ContainsFunc(f.calls, func(c string) bool { return strings.Contains(c, "annotate") || strings.Contains(c, "patch") }) {
-		t.Fatalf("the deploy wrote to an Argo application: %q", f.calls)
+	if got := slices.DeleteFunc(slices.Clone(f.calls), func(c string) bool { return !strings.Contains(c, "annotate application sparkwing-staging") }); len(got) != 2 {
+		t.Fatalf("expected refresh after each staging push: %q", f.calls)
 	}
 	controllerRender := deployGitIn(t, f.bare, "show", "main~1:sparkwing-staging/rendered.yaml")
 	if !strings.Contains(controllerRender, "@"+images.Controller.Digest) || !strings.Contains(controllerRender, "@"+f.old.Runner.Digest) ||
@@ -871,13 +875,13 @@ func TestDeployStagingGateThenProduction(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if gate.ExampleRun != "run-example-staging" || gate.ReferenceRun != "run-hello-staging" || !gate.Images.sameDigests(images) {
+	if gate.SmokeRun != "run-deploy-smoke-staging" || gate.ReferenceRun != "run-hello-staging" || !gate.Images.sameDigests(images) {
 		t.Fatalf("gate record = %+v", gate)
 	}
 	if !slices.ContainsFunc(f.calls, func(c string) bool {
-		return strings.Contains(c, "pipeline trigger example -C "+f.repo) && strings.Contains(c, "--ref "+f.head) && strings.HasSuffix(c, "-- --api-controller "+defaultDeployConfig().Staging.ControllerURL)
+		return strings.Contains(c, "pipeline trigger deploy-smoke -C "+f.repo) && strings.Contains(c, "--ref "+f.head) && strings.HasSuffix(c, "-- --child")
 	}) {
-		t.Fatalf("example was not triggered at the candidate commit with the staging controller for its probes: %q", f.calls)
+		t.Fatalf("smoke was not triggered at the candidate commit with its child check: %q", f.calls)
 	}
 
 	prod, err := f.deployer(false).promote(t.Context(), images)
@@ -890,7 +894,7 @@ func TestDeployStagingGateThenProduction(t *testing.T) {
 	if prod.Environment != "production" || prod.Previous.Launcher != f.old.Runner || prod.WindowStart == "" {
 		t.Fatalf("production record = %+v", prod)
 	}
-	if runs := f.triggered("deploy-smoke"); fmt.Sprint(runs) != "[run-deploy-smoke-qa-team run-deploy-smoke-qa-team-b]" {
+	if runs := f.triggered("deploy-smoke"); fmt.Sprint(runs) != "[run-deploy-smoke-staging run-deploy-smoke-qa-team run-deploy-smoke-qa-team-b]" {
 		t.Fatalf("smoke runs = %v", runs)
 	}
 
@@ -1159,7 +1163,7 @@ func TestDeployDryRunPrintsEveryActionAndTakesNone(t *testing.T) {
 		"clone " + f.bare, "pin the staging controller", "render sparkwing-staging/rendered.yaml",
 		"commit \"deploy(staging): controller", "wait for Argo application sparkwing-staging", "wait for deployment sparkwing-staging/sparkwing-staging-sparkwing-full-controller",
 		"pin the staging launcher", "wait for deployment sparkwing-staging/sparkwing-staging-sparkwing-runner-bundle-launcher",
-		"build the candidate CLI", "add CLI profile staging", "trigger example", "trigger hello",
+		"build the candidate CLI", "add CLI profile staging", "trigger deploy-smoke", "trigger hello",
 		"is still the tip of origin/main", "is not older than the production version",
 		"pin the production controller", "wait for Argo application sparkwing to be", "pin the production launcher",
 		"add CLI profile qa-team ", "trigger deploy-smoke", "add CLI profile qa-team-b", "follow both smoke runs", "check each smoke run used one NodeClaim",

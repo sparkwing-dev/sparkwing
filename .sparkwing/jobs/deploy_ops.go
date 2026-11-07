@@ -139,6 +139,8 @@ func (d *deployer) act(ctx context.Context, desc string, fn func() error) error 
 		return nil
 	}
 	d.tools.say(ctx, desc)
+	started := d.tools.now()
+	defer func() { d.tools.say(ctx, fmt.Sprintf("elapsed %s: %s", desc, d.tools.now().Sub(started))) }()
 	if err := fn(); err != nil {
 		return fmt.Errorf("%s: %w", desc, err)
 	}
@@ -723,6 +725,16 @@ func shortCommit(c string) string {
 }
 
 func (d *deployer) waitRollout(ctx context.Context, env deployEnv, commit string, phase deployPhase, digest string) error {
+	if err := d.act(ctx, "refresh Argo application "+env.ArgoApp+" after GitOps push "+commit, func() error {
+		_, err := d.kubectl(ctx, "-n", "argocd", "annotate", "application", env.ArgoApp, "argocd.argoproj.io/refresh=hard", "--overwrite")
+		if err != nil {
+			return fmt.Errorf("Argo refresh needs patch permission on application %s: %w", env.ArgoApp, err)
+		}
+		return nil
+	}); err != nil {
+		return err
+	}
+
 	if err := d.act(ctx, "wait for Argo application "+env.ArgoApp+" to be Synced and Healthy at "+commit, func() error {
 		deadline := d.tools.now().Add(d.cfg.ArgoTimeout)
 		last := ""
@@ -929,7 +941,7 @@ func (d *deployer) stagingGate(ctx context.Context, images deployImages) (stagin
 	if err := d.addProfile(ctx, profile, d.cfg.Staging.ControllerURL, d.cfg.Params.StagingToken); err != nil {
 		return rec, err
 	}
-	if err := d.triggerRun(ctx, profile, "example", d.repoDir, images.Commit, &rec.ExampleRun, "--api-controller", d.cfg.Staging.ControllerURL); err != nil {
+	if err := d.triggerRun(ctx, profile, "deploy-smoke", d.repoDir, images.Commit, &rec.SmokeRun, "--child"); err != nil {
 		return rec, err
 	}
 	reference := filepath.Join(d.tmp, "reference")
@@ -946,7 +958,7 @@ func (d *deployer) stagingGate(ctx context.Context, images deployImages) (stagin
 	if err := d.triggerRun(ctx, profile, d.cfg.ReferenceName, reference, "", &rec.ReferenceRun); err != nil {
 		return rec, err
 	}
-	return rec, errors.Join(d.followRun(ctx, profile, &rec.ExampleRun), d.followRun(ctx, profile, &rec.ReferenceRun))
+	return rec, errors.Join(d.followRun(ctx, profile, &rec.SmokeRun), d.followRun(ctx, profile, &rec.ReferenceRun))
 }
 
 // safety: nodes outlive a run only briefly, so NodeClaims are sampled while

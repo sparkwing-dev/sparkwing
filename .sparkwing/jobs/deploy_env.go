@@ -194,7 +194,7 @@ type stagingGateRecord struct {
 	Images       deployImages `json:"images"`
 	RunID        string       `json:"run_id"`
 	GatedAt      string       `json:"gated_at"`
-	ExampleRun   string       `json:"example_run"`
+	SmokeRun     string       `json:"smoke_run"`
 	ReferenceRun string       `json:"reference_run"`
 }
 
