@@ -47,7 +47,7 @@ func TestReaperCancelsChildrenTheirParentNoLongerAwaits(t *testing.T) {
 			if row.CancelRequestedAt == nil {
 				t.Fatalf("child %s outlived its %s parent", child.RunID, parent)
 			}
-						if _, err := tenant.s.AsOperator().ReapUnits(ctx, 100); err != nil {
+			if _, err := tenant.s.AsOperator().ReapUnits(ctx, 100); err != nil {
 				t.Fatal(err)
 			}
 			if row, err = tenant.ReadRun(ctx, child.RunID); err != nil || row.State != runstate.RunCancelled {
