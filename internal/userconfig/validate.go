@@ -92,7 +92,7 @@ func ValidateConfig(cfg Config) error {
 	return nil
 }
 
-// safety: the dashboard binds loopback only; remote browsers reach it through an HTTPS proxy such as Tailscale Serve.
+// safety: the dashboard binds loopback only; a remote browser reaches it through an SSH port forward.
 // Port 0 lets an isolated home pick a free port instead of contending for the shared default.
 func validateDashboardAddress(addr string) error {
 	host, port, err := net.SplitHostPort(addr)

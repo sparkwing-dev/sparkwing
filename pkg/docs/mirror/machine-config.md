@@ -104,9 +104,10 @@ daemon reads the budget at start, so restart it after a change.
 
 The shared local controller serves the dashboard whenever it runs.
 `dashboard.address` is the loopback IP and port it binds, `127.0.0.1:4343` by
-default. A non-loopback or host-name address is refused, because a remote
-browser reaches the dashboard through an HTTPS proxy such as Tailscale Serve
-rather than a direct bind. Port `0` picks a free port, which suits an isolated
+default. A non-loopback or host-name address is refused. The dashboard answers
+only its own loopback origin, so a browser on another machine reaches it through
+an SSH port forward, for example `ssh -N -L 4343:127.0.0.1:4343 user@host`; a
+reverse proxy that presents another host name is refused. Port `0` picks a free port, which suits an isolated
 `SPARKWING_HOME` that would otherwise contend for the default; `sparkwing
 dashboard status` prints the bound address. `dashboard.read_only: true` refuses
 browser writes while still allowing signed-in reads, including decrypted

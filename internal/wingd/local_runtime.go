@@ -265,7 +265,7 @@ func (r *localRuntime) serve(ctx context.Context, session *localRuntimeSession, 
 }
 
 // safety: a taken port must not stop runs, so admission keeps serving and status reports the bind error. A taken
-// port is never swapped for another, since bookmarks and HTTPS proxies name this address.
+// port is never swapped for another, since bookmarks and port forwards name this address.
 func (r *localRuntime) bindDashboard(ctx context.Context, session *localRuntimeSession, controller LocalController, workers *sync.WaitGroup, ready chan struct{}, serve func(string, func() error)) {
 	d, settings := session.daemon, r.cfg.Dashboard
 	listen := r.listen
