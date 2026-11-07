@@ -319,7 +319,8 @@ still apply; the host drops engine-minted credentials such as
 `SPARKWING_NODE_TOKEN`. `dir` must be absolute. A Go SDK resolves the executable
 against its own `PATH`, as `exec.Command` did, and sends it as `path`. Without
 `path` the host searches as Node's spawn does: `PATH` from `env`, relative and empty
-entries against `dir`, and `/bin:/usr/bin` when `env` has no `PATH`. Children a
+entries (and an empty `PATH`) against `dir`, and `/bin:/usr/bin` when `env` has no
+`PATH`; a file without `#!` then runs through `/bin/sh`, as `execvp` does. Children a
 command leaves running in the background survive its exit, as they did under the
 SDK, and the host kills them when the SDK session ends.
 

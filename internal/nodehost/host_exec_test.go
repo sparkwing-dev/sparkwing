@@ -94,6 +94,9 @@ func (hostExecJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
 			o.Survivor = waitGone(filepath.Join(dir, "group.pid"))
 			return o, nil
 		},
+		"noshebang": func(ctx context.Context) (hostExecObservation, error) {
+			return observe(sparkwing.Exec(ctx, filepath.Join(dir, "bin", "plain")).Capture()), nil
+		},
 		"lookup": func(ctx context.Context) (hostExecObservation, error) {
 			return observe(sparkwing.Exec(ctx, "swlookup").Env("PATH", filepath.Join(dir, "bin")).Capture()), nil
 		},
@@ -323,6 +326,9 @@ func checkHostExecScenarios(t *testing.T, lang, mode string, features []string) 
 			if err := os.WriteFile(filepath.Join(dir, "bin", "swlookup"), []byte("#!/bin/sh\necho rel-found\n"), 0o755); err != nil {
 				t.Fatal(err)
 			}
+			if err := os.WriteFile(filepath.Join(dir, "bin", "plain"), []byte("echo plain-ran\n"), 0o755); err != nil {
+				t.Fatal(err)
+			}
 			h := startHostExecHarness(t, lang, features, dir)
 
 			logged := h.step(t, "logged")
@@ -360,6 +366,10 @@ func checkHostExecScenarios(t *testing.T, lang, mode string, features []string) 
 			// safety: Go searches its own PATH, TypeScript the command's, with relative entries against its directory.
 			if lookup := h.step(t, "lookup"); lang == "go" && !lookup.NotFound || lang == "typescript" && lookup.Stdout != "rel-found\n" {
 				t.Errorf("lookup = %#v", lookup)
+			}
+			// hack: Node's spawn runs a file without #! through /bin/sh, as execvp does; Go's os/exec refuses it.
+			if plain := h.step(t, "noshebang"); lang == "go" && !strings.Contains(plain.Error, "exec format error") || lang == "typescript" && plain.Stdout != "plain-ran\n" {
+				t.Errorf("noshebang = %#v", plain)
 			}
 			if lang == "go" {
 				before := h.hosted()

@@ -129,14 +129,6 @@ func runHostCommand(req nodeproto.ExecRequest, kill, closed <-chan struct{}, sin
 			return done, nil
 		}
 	}
-	cmd := procenv.SDKCommand(req.Env, path, req.Argv[1:]...)
-	cmd.Args[0], cmd.Dir = req.Argv[0], req.Dir
-	if req.Stdin != nil {
-		cmd.Stdin = bytes.NewReader(req.Stdin)
-	}
-	// safety: a background child holding stdin would otherwise keep Wait's copier, and the session, alive.
-	cmd.WaitDelay = commandDrainGrace
-	configureHostCommand(cmd)
 	outR, outW, err := os.Pipe()
 	if err != nil {
 		done.StartError = err.Error()
@@ -148,7 +140,18 @@ func runHostCommand(req nodeproto.ExecRequest, kill, closed <-chan struct{}, sin
 		done.StartError = err.Error()
 		return done, nil
 	}
-	cmd.Stdout, cmd.Stderr = outW, errW
+	command := func(path, arg0 string, args []string) *exec.Cmd {
+		cmd := procenv.SDKCommand(req.Env, path, args...)
+		cmd.Args[0], cmd.Dir, cmd.Stdout, cmd.Stderr = arg0, req.Dir, outW, errW
+		if req.Stdin != nil {
+			cmd.Stdin = bytes.NewReader(req.Stdin)
+		}
+		// safety: a background child holding stdin would otherwise keep Wait's copier, and the session, alive.
+		cmd.WaitDelay = commandDrainGrace
+		configureHostCommand(cmd)
+		return cmd
+	}
+	cmd := command(path, req.Argv[0], req.Argv[1:])
 	select {
 	case <-kill:
 		closeFiles(outR, outW, errR, errW)
@@ -160,7 +163,13 @@ func runHostCommand(req nodeproto.ExecRequest, kill, closed <-chan struct{}, sin
 		return done, nil
 	default:
 	}
-	if err := cmd.Start(); err != nil {
+	err = cmd.Start()
+	if err != nil && req.Path == "" && execFormatError(err) {
+		// hack: Node's spawn runs a file without #! through /bin/sh, as execvp does; Go SDKs send path and keep the error.
+		cmd = command("/bin/sh", "/bin/sh", append([]string{path}, req.Argv[1:]...))
+		err = cmd.Start()
+	}
+	if err != nil {
 		closeFiles(outR, outW, errR, errW)
 		done.StartError = err.Error()
 		return done, nil
@@ -190,8 +199,16 @@ func runHostCommand(req nodeproto.ExecRequest, kill, closed <-chan struct{}, sin
 			pooled := commandBuffers.Get().(*[64 << 10]byte)
 			defer commandBuffers.Put(pooled)
 			buffer := pooled[:]
+			owed := -1
 			for {
-				n, err := r.Read(buffer)
+				limit := len(buffer)
+				if owed > 0 {
+					limit = min(limit, owed)
+				}
+				n, err := r.Read(buffer[:limit])
+				if owed > 0 {
+					owed -= n
+				}
 				if n > 0 {
 					tails[i].add(buffer[:n])
 					sinkMu.Lock()
@@ -204,6 +221,16 @@ func runHostCommand(req nodeproto.ExecRequest, kill, closed <-chan struct{}, sin
 						// safety: a dead sink must not leave the command blocked on a full pipe.
 						session.kill()
 					}
+				}
+				if owed == 0 {
+					break
+				}
+				// safety: the deadline ends the wait for a lingering child, never bytes the exited command already wrote.
+				if errors.Is(err, os.ErrDeadlineExceeded) && owed < 0 {
+					if owed = bufferedBytes(r); owed > 0 && r.SetReadDeadline(time.Time{}) == nil {
+						continue
+					}
+					break
 				}
 				if err != nil {
 					break
@@ -273,7 +300,11 @@ func lookCommand(name string, env []string, dir string) (string, error) {
 	if !set {
 		path = defaultSearchPath
 	}
-	for _, entry := range filepath.SplitList(path) {
+	entries := filepath.SplitList(path)
+	if path == "" {
+		entries = []string{""}
+	}
+	for _, entry := range entries {
 		if entry == "" {
 			entry = "."
 		}

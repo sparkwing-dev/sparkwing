@@ -111,6 +111,7 @@ definePipeline({
     });
     job.step("dir", (ctx) => run(ctx.exec(["pwd"]).dir(join(dir, "sub")).capture()));
     job.step("stdin", (ctx) => run(runInput(ctx, ["sh", "-c", "exec 3<&0; sleep 30 <&3 & exit 0"], "x".repeat(200000))));
+    job.step("noshebang", (ctx) => run(ctx.exec([join(dir, "bin", "plain")]).capture()));
     job.step("lookup", (ctx) => run(ctx.exec(["swlookup"]).env("PATH", "bin:/usr/bin:/bin").dir(dir).capture()));
     job.step("timeout", async (ctx) => {
       const pidFile = join(dir, "grandchild.pid");

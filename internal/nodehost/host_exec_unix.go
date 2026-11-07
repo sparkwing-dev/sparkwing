@@ -10,6 +10,8 @@ import (
 	"strings"
 	"syscall"
 
+	"golang.org/x/sys/unix"
+
 	"github.com/sparkwing-dev/sparkwing/internal/paths"
 	"github.com/sparkwing-dev/sparkwing/internal/procgroup"
 	"github.com/sparkwing-dev/sparkwing/internal/sessionledger"
@@ -22,6 +24,23 @@ type commandSession struct {
 	identity procgroup.SessionIdentity
 	captured bool
 	release  func()
+}
+
+func execFormatError(err error) bool { return errors.Is(err, syscall.ENOEXEC) }
+
+func bufferedBytes(f *os.File) int {
+	conn, err := f.SyscallConn()
+	if err != nil {
+		return 0
+	}
+	if fionread == 0 {
+		return 0
+	}
+	n, ioctlErr := 0, error(nil)
+	if err := conn.Control(func(fd uintptr) { n, ioctlErr = unix.IoctlGetInt(int(fd), fionread) }); err != nil || ioctlErr != nil {
+		return 0
+	}
+	return n
 }
 
 func configureHostCommand(cmd *exec.Cmd) {

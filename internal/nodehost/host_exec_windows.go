@@ -2,6 +2,7 @@ package nodehost
 
 import (
 	"log/slog"
+	"os"
 	"os/exec"
 )
 
@@ -9,6 +10,10 @@ import (
 type commandSession struct{ cmd *exec.Cmd }
 
 func configureHostCommand(*exec.Cmd) {}
+
+func execFormatError(error) bool { return false }
+
+func bufferedBytes(*os.File) int { return 0 }
 
 func trackHostCommand(cmd *exec.Cmd, _ []string) *commandSession { return &commandSession{cmd: cmd} }
 

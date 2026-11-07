@@ -29,6 +29,7 @@ func TestLookCommandMatchesNodeSpawn(t *testing.T) {
 		"empty entry":       {[]string{"PATH=:/usr/bin"}, filepath.Join(dir, "bin"), tool},
 		"later PATH wins":   {[]string{"PATH=/nowhere", "PATH=" + filepath.Join(dir, "bin")}, "/", tool},
 		"no PATH, defaults": {[]string{}, "/", "/bin/sh"},
+		"empty PATH":        {[]string{"PATH="}, filepath.Join(dir, "bin"), tool},
 	} {
 		name := "swlookup"
 		if test.want == "/bin/sh" {
