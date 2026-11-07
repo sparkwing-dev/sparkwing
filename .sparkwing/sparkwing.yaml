@@ -96,8 +96,6 @@ pipelines:
     on:
       push:
         branches: [main]
-    args:
-      stop-after: staging
 
   - name: deploy-smoke
     entrypoint: DeploySmoke
