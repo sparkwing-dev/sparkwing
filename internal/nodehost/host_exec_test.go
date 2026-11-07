@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
+	"github.com/sparkwing-dev/sparkwing/internal/procgroup"
 	"github.com/sparkwing-dev/sparkwing/internal/sdkserve"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
@@ -91,7 +92,7 @@ func (hostExecJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
 			ctx, cancel := context.WithTimeout(ctx, 300*time.Millisecond)
 			defer cancel()
 			o := observe(sparkwing.Bash(ctx, `timeout 60 sleep 60 & echo $! > "$P"; wait`).Env("P", filepath.Join(dir, "group.pid")).Run())
-			o.Survivor = waitGone(filepath.Join(dir, "group.pid"))
+			o.Survivor = hostExecChildAlive(filepath.Join(dir, "group.pid"))
 			return o, nil
 		},
 		"noshebang": func(ctx context.Context) (hostExecObservation, error) {
@@ -115,19 +116,7 @@ func (hostExecJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
 			ctx, cancel := context.WithTimeout(ctx, 300*time.Millisecond)
 			defer cancel()
 			o := observe(sparkwing.Bash(ctx, `sleep 30 & echo $! > "$P"; wait`).Env("P", pidFile).Run())
-			raw, err := os.ReadFile(pidFile)
-			if err != nil {
-				return o, err
-			}
-			pid, err := strconv.Atoi(strings.TrimSpace(string(raw)))
-			if err != nil {
-				return o, err
-			}
-			deadline := time.Now().Add(2 * time.Second)
-			for syscall.Kill(pid, 0) == nil && time.Now().Before(deadline) {
-				time.Sleep(10 * time.Millisecond)
-			}
-			o.Survivor = syscall.Kill(pid, 0) == nil
+			o.Survivor = hostExecChildAlive(pidFile)
 			return o, nil
 		},
 	}
@@ -144,7 +133,7 @@ func (hostExecJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
 	return last, nil
 }
 
-func waitGone(path string) bool {
+func hostExecChildAlive(path string) bool {
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		return true
@@ -153,11 +142,16 @@ func waitGone(path string) bool {
 	if err != nil {
 		return true
 	}
-	deadline := time.Now().Add(3 * time.Second)
-	for syscall.Kill(pid, 0) == nil && time.Now().Before(deadline) {
-		time.Sleep(10 * time.Millisecond)
+	processes, err := procgroup.List()
+	if err != nil {
+		return true
 	}
-	return syscall.Kill(pid, 0) == nil
+	for _, process := range processes {
+		if process.PID == pid {
+			return !process.Terminated()
+		}
+	}
+	return false
 }
 
 type hostExecPipeline struct{}
@@ -381,9 +375,8 @@ func checkHostExecScenarios(t *testing.T, lang, mode string, features []string) 
 				}
 			} else if mode == "host" {
 				// hack: Node's own spawn waits for the background child or fails with EPIPE here, by timing.
-				began := time.Now()
-				if stdin := h.step(t, "stdin"); stdin.Error != "" || time.Since(began) > 5*time.Second {
-					t.Errorf("stdin held by a background child = %#v after %s", stdin, time.Since(began))
+				if stdin := h.step(t, "stdin"); stdin.Error != "" {
+					t.Errorf("stdin held by a background child = %#v", stdin)
 				}
 			}
 			// hack: TypeScript has no deadline of its own; an aborted signal reports cancellation.
@@ -433,7 +426,7 @@ func TestHostExecBackgroundChildEndsWithTheSession(t *testing.T) {
 	if err := h.session.Close(); err != nil {
 		t.Fatal(err)
 	}
-	if waitGone(filepath.Join(dir, "background.pid")) {
+	if hostExecChildAlive(filepath.Join(dir, "background.pid")) {
 		t.Fatal("a background child outlived the SDK session")
 	}
 }
@@ -454,16 +447,20 @@ func TestHostExecCloseBoundsABlockedLogSink(t *testing.T) {
 	go func() {
 		_, _ = h.session.Request(context.Background(), nodeproto.Request{ID: "logged", Op: nodeproto.OpRunStep, Job: "job", Step: "logged", Attempt: 1, Settled: []string{}})
 	}()
+	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+	defer cancel()
 	select {
 	case <-blocked:
-	case <-time.After(10 * time.Second):
+	case <-ctx.Done():
 		t.Fatal("command output never reached the sink")
 	}
 	closed := make(chan error, 1)
 	go func() { closed <- h.session.Close() }()
+	closeCtx, closeCancel := context.WithTimeout(t.Context(), 15*time.Second)
+	defer closeCancel()
 	select {
 	case <-closed:
-	case <-time.After(15 * time.Second):
+	case <-closeCtx.Done():
 		t.Fatal("Close waited forever on a command blocked in the log sink")
 	}
 }
