@@ -20,6 +20,10 @@ import (
 
 const admissionCleanupTimeout = time.Second
 
+// safety: a long-lived runner can hold leases, so holder liveness does not recover
+// a release lost to a brief controller stall.
+var leaseReleaseTimeout = 5 * time.Second
+
 type Lease struct {
 	cl               *Client
 	RunID            string
@@ -122,8 +126,12 @@ func (cl *Client) Reattach(ctx context.Context, token, runID string) (*Lease, er
 }
 
 func (cl *Client) cleanupAdmission(ctx context.Context, path string) error {
+	return cl.cleanupAdmissionWithin(ctx, path, admissionCleanupTimeout)
+}
+
+func (cl *Client) cleanupAdmissionWithin(ctx context.Context, path string, timeout time.Duration) error {
 	// safety: PID liveness recovers capacity if shutdown prevents an explicit release.
-	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), admissionCleanupTimeout)
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), timeout)
 	defer cancel()
 	err := cl.admissionCall(ctx, http.MethodDelete, path, nil, nil, 0)
 	if admissionNotFound(err) {
@@ -135,7 +143,7 @@ func (cl *Client) cleanupAdmission(ctx context.Context, path string) error {
 func (l *Lease) Release() error {
 	l.once.Do(func() {
 		l.cancel()
-		l.releaseErr = l.cl.cleanupAdmission(l.ctx, "/requests/"+url.PathEscape(l.id))
+		l.releaseErr = l.cl.cleanupAdmissionWithin(l.ctx, "/requests/"+url.PathEscape(l.id), leaseReleaseTimeout)
 		l.releaseErr = errors.Join(l.releaseErr, l.cl.Close())
 	})
 	return l.releaseErr

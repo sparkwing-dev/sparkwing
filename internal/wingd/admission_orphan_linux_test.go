@@ -274,3 +274,35 @@ func TestAdmissionCleanupStopsWithControllerContext(t *testing.T) {
 		t.Fatal("cancelled cleanup forgot the job or its reservation")
 	}
 }
+
+func TestAdmissionReleasesCancelledTreeWhenHostReleaseIsLost(t *testing.T) {
+	job := startAdmissionOrphan(t)
+	d := newHTTPAdmissionTest(t, &admissionMemoryStore{})
+	held := registerAdmissionOrphan(t, d, job)
+	waiting := admissionResponse(t, admissionHTTPCall(t, d, http.MethodPost, "/requests", admissionTestInput(t, "waiting", 2)))
+	if err := d.cancelCommittedRunAdmission(t.Context(), "orphan"); err != nil {
+		t.Fatal(err)
+	}
+	if err := d.cleanupAdmissionProcesses(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if !d.admissionTickets[held.ID].Active {
+		t.Fatal("cancellation released capacity while the job still ran")
+	}
+	if err := procgroup.KillSession(procgroup.SessionIdentity{LeaderPID: job.root, SessionID: job.root, BirthToken: job.birth}); err != nil {
+		t.Fatal(err)
+	}
+	if err := d.cleanupAdmissionProcesses(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if ticket := d.admissionTickets[held.ID]; ticket.Active || ticket.MeasurementPID != 0 {
+		t.Fatalf("live holder kept a cancelled, exited job's capacity: %+v", ticket)
+	}
+	if err := admissionProcessRunning(job.holder); err != nil {
+		t.Fatalf("holder should outlive its job: %v", err)
+	}
+	state := admissionResponse(t, admissionHTTPCall(t, d, http.MethodGet, "/requests/"+waiting.ID, nil))
+	if state.Grant == nil {
+		t.Fatalf("released capacity did not promote waiter: %+v", state)
+	}
+}

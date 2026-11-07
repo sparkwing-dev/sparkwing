@@ -138,7 +138,9 @@ In-memory wake channels only prompt pollers to reread their durable tickets.
 Tickets and leases bind the holder root PID to its `procgroup.ProcessBirth`
 start identity. The controller verifies its OS account against the socket peer.
 Each admission decision and a periodic check release dead or reused holders.
-Process inspection errors retain capacity. There is no machine renewal, expiry
+A cancelled job's ticket is also released once its recorded execution session is
+empty, even while its holder lives, so a long-lived runner whose release request
+was lost does not keep that capacity. Process inspection errors retain capacity. There is no machine renewal, expiry
 or timeout setting, and a connection closing releases nothing. Hosts still own
 job execution and the existing logical claim renewals.
 

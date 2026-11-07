@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/sparkwing-dev/sparkwing/internal/admission"
 	"github.com/sparkwing-dev/sparkwing/internal/procgroup"
 )
 
@@ -28,7 +29,9 @@ func (d *Daemon) cleanupAdmissionProcesses(ctx context.Context) error {
 			continue
 		}
 		holderAlive := err == nil && birth == root.Input.ProcessBirth
-		if root.Active && holderAlive {
+		// safety: a cancelled job's capacity returns once its session is empty,
+		// so a lost host release cannot hold it for the runner's lifetime.
+		if root.Active && holderAlive && root.Result.Cancel == nil {
 			continue
 		}
 		empty, err := admissionExecutionEmpty(root.MeasurementPID, root.MeasurementBirth)
@@ -50,11 +53,21 @@ func (d *Daemon) cleanupAdmissionProcesses(ctx context.Context) error {
 		d.mu.Lock()
 		ticket := d.admissionTickets[root.Result.ID]
 		if ticket != nil && ticket.MeasurementPID == root.MeasurementPID && ticket.MeasurementBirth == root.MeasurementBirth {
-			ticket.MeasurementPID, ticket.MeasurementBirth = 0, ""
-			if ticket.participant != nil {
-				ticket.participant.measurementPID, ticket.participant.measurementBirth = 0, ""
+			var err error
+			if ticket.Active && ticket.Result.Cancel != nil {
+				var events []admission.Event
+				if events, err = d.releaseAdmissionTicketLocked(ticket); err == nil {
+					d.routeLocked(events)
+				}
 			}
-			result = errors.Join(result, d.commitAdmissionLocked())
+			if err == nil {
+				ticket.MeasurementPID, ticket.MeasurementBirth = 0, ""
+				if ticket.participant != nil {
+					ticket.participant.measurementPID, ticket.participant.measurementBirth = 0, ""
+				}
+				err = d.commitAdmissionLocked()
+			}
+			result = errors.Join(result, err)
 		}
 		d.mu.Unlock()
 	}

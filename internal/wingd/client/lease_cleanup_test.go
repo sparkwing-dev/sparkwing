@@ -92,6 +92,9 @@ func TestCancelledAdmissionRetriesLostResponseCleanupDuringControllerRecovery(t 
 }
 
 func TestAdmissionCleanupGivesUpWhenControllerCannotAnswer(t *testing.T) {
+	previous := leaseReleaseTimeout
+	leaseReleaseTimeout = admissionCleanupTimeout
+	t.Cleanup(func() { leaseReleaseTimeout = previous })
 	for _, operation := range []string{"release", "cancelled acquisition"} {
 		for _, silent := range []bool{false, true} {
 			t.Run(fmt.Sprintf("%s/silent=%t", operation, silent), func(t *testing.T) {
