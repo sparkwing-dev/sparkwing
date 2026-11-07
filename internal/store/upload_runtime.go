@@ -11,7 +11,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/limits"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 )
 
@@ -72,11 +71,10 @@ func (t *Tenant) ReserveBlobUpload(ctx context.Context, request UploadReservatio
 			return UploadReservation{}, err
 		}
 		growth := storageGrowth{reservation: blobUploadQuotaID(request.ID), expires: request.ExpiresAt, run: a.source.RunID, bytes: reserved, objects: objects}
-		if a.preparesPipeline() {
-			if request.Intent.Size > limits.PreparedPipelineBytes {
-				return UploadReservation{}, authorityError(apierr.PayloadTooLarge, limits.PreparedPipelineTooLarge(request.Intent.Size))
+		if a.preparesPipeline() && reserved > 0 {
+			if growth.exempt, err = claimPreparedExemptionTx(ctx, tx, t.team, a.source.RunID, growth.reservation, reserved); err != nil {
+				return UploadReservation{}, err
 			}
-			growth.prepared = true
 		}
 		if err := admitStorageGrowthTx(ctx, tx, t.team, growth); err != nil {
 			return UploadReservation{}, err

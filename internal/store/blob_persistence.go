@@ -13,7 +13,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/limits"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 )
@@ -43,11 +42,11 @@ func commitVerifiedBlobTx(ctx context.Context, tx *storeTx, team Team, auth blob
 		}
 		return receipt.Value, nil
 	}
-	reserved := quotas[0].amount
-	if auth.preparesPipeline() {
-		reserved = limits.PreparedPipelineBytes
+	exempt, err := preparedExemptionTx(ctx, tx, team, auth.source.RunID, accounting.ReservationID)
+	if err != nil {
+		return blob.Receipt{}, err
 	}
-	objects, err := commitBlobBytesTx(ctx, tx, team, blob.Blob{Digest: intent.Digest, Size: intent.Size}, reserved)
+	objects, err := commitBlobBytesTx(ctx, tx, team, blob.Blob{Digest: intent.Digest, Size: intent.Size}, quotas[0].amount+exempt)
 	if err != nil {
 		return blob.Receipt{}, err
 	}
@@ -58,9 +57,9 @@ func commitVerifiedBlobTx(ctx context.Context, tx *storeTx, team Team, auth blob
 	if err := clearBlobTombstoneTx(ctx, tx, team, intent.Digest); err != nil {
 		return blob.Receipt{}, err
 	}
-	charged, chargedObjects := intent.Size*objects, objects
-	if auth.preparesPipeline() {
-		charged, chargedObjects = 0, 0
+	charged, chargedObjects := max(intent.Size*objects-exempt, 0), objects
+	if exempt > 0 {
+		chargedObjects = 0
 	}
 	if err := settleBlobQuotaTx(ctx, tx, team, auth.source.RunID, accounting, quotas, charged, chargedObjects); err != nil {
 		return blob.Receipt{}, err
@@ -273,8 +272,8 @@ func readOwnBlobReceiptTx(ctx context.Context, tx *storeTx, source blob.UploadId
 	return runspec.Optional[blob.Receipt]{Set: true, Value: blob.Receipt{Identity: source, Digest: digest, CreatedAt: *stateTime(sql.NullInt64{Int64: at, Valid: true})}}, nil
 }
 
-// safety: only the Cloud planning owner publishes the prepared pipeline Sparkwing built, so its upload is capped by
-// limits.PreparedPipelineBytes instead of the team's storage quota; retained-storage billing still counts it.
+// safety: only the Cloud planning owner publishes the prepared pipeline Sparkwing built; its first upload per run
+// keeps up to limits.PreparedPipelineBytes out of the storage quota, and every other upload is charged.
 func (a blobActor) preparesPipeline() bool { return blobKindAllowed(a, blob.KindPrepared) }
 
 func blobKindAllowed(a blobActor, kind blob.Kind) bool {

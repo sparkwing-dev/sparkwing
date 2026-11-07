@@ -2,10 +2,13 @@ package store
 
 import (
 	"context"
+	"database/sql"
+	"errors"
 	"math"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
+	"github.com/sparkwing-dev/sparkwing/internal/limits"
 )
 
 type uploadQuotaDimension struct {
@@ -74,4 +77,26 @@ func applyStorageQuotaDimensionTx(ctx context.Context, tx *storeTx, team Team, d
 	}
 	_, err := tx.execContext(ctx, "UPDATE quota_admission SET period=?,used=?,reserved=?,updated_at=? WHERE team=? AND quota=?", d.period, used, reserved, tx.now(ctx).UnixNano(), team, d.quota)
 	return d.period, err
+}
+
+func preparedExemptionQuota(run string) string { return "storage.prepared:" + run }
+
+// safety: the first prepared upload of a run claims the run's one exemption by naming its reservation in the row's
+// period, so later uploads from the same planning token are charged in full even after an abort.
+func claimPreparedExemptionTx(ctx context.Context, tx *storeTx, team Team, run, reservation string, bytes int64) (int64, error) {
+	if _, err := tx.execContext(ctx, `INSERT INTO quota_admission(team,quota,period,used,updated_at) VALUES (?,?,?,?,?) ON CONFLICT(team,quota) DO NOTHING`,
+		team, preparedExemptionQuota(run), reservation, min(bytes, limits.PreparedPipelineBytes), tx.now(ctx).UnixNano()); err != nil {
+		return 0, err
+	}
+	return preparedExemptionTx(ctx, tx, team, run, reservation)
+}
+
+// safety: commit reads the exemption back by reservation, so only the upload that claimed it settles quota-free.
+func preparedExemptionTx(ctx context.Context, tx *storeTx, team Team, run, reservation string) (int64, error) {
+	var exempt int64
+	err := tx.QueryRowContext(ctx, "SELECT used FROM quota_admission WHERE team=? AND quota=? AND period=?", team, preparedExemptionQuota(run), reservation).Scan(&exempt)
+	if errors.Is(err, sql.ErrNoRows) {
+		return 0, nil
+	}
+	return exempt, err
 }
