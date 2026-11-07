@@ -309,7 +309,9 @@ func TestLocalDashboardSignsInOnceThroughSocketMintedLink(t *testing.T) {
 		func(req *http.Request) { req.Header.Set("Authorization", "Bearer "+session) },
 		func(req *http.Request) { req.Header.Set("Cookie", "sw_session="+session) },
 		func(req *http.Request) { req.Header.Set("Cookie", "__Host-"+dashboardCookie+"="+session) },
-		func(req *http.Request) { req.Header.Set("Cookie", dashboardCookie+"="+session+"; "+dashboardCookie+"=planted") },
+		func(req *http.Request) {
+			req.Header.Set("Cookie", dashboardCookie+"="+session+"; "+dashboardCookie+"=planted")
+		},
 		withSession(session[:len(session)-1] + map[bool]string{true: "B", false: "A"}[strings.HasSuffix(session, "A")]),
 	} {
 		if resp := loginRequest(t, browser, http.MethodGet, runs, edit); resp.StatusCode != http.StatusUnauthorized {
