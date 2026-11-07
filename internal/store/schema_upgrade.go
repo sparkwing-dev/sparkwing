@@ -92,6 +92,7 @@ func schemaUpgradeFrom(version int) (schemaUpgrade, bool) {
 }
 
 func upgradeSchemaTx(ctx context.Context, tx *storeTx, version int, path string) error {
+	start := version
 	for version < expectedSchemaVersion {
 		step, ok := schemaUpgradeFrom(version)
 		if !ok {
@@ -103,6 +104,11 @@ func upgradeSchemaTx(ctx context.Context, tx *storeTx, version int, path string)
 		}
 		if recorded != step.digest {
 			return schemaUpgradeDigestError(step, recorded, path)
+		}
+		if version == start && tx.dialect == DialectSQLite && path != "" {
+			if err := backupSQLiteBeforeUpgrade(ctx, path, version); err != nil {
+				return err
+			}
 		}
 		for _, statement := range step.statements {
 			for _, part := range dialectStatements(statement, tx.dialect) {

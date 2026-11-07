@@ -5,6 +5,10 @@ import "fmt"
 // path is the SQLite file, or empty for PostgreSQL.
 func schemaMismatchError(version int, path string) error {
 	if version > expectedSchemaVersion {
+		if path != "" {
+			return fmt.Errorf("sparkwing: store schema version %d is newer than this binary (expects %d); start a binary matching the store; to return to this binary, stop the controller, move %s and any %s-wal and %s-shm files aside, and copy the newest %s.schema-%d-*.bak backup to %s, which drops runs recorded since that backup",
+				version, expectedSchemaVersion, path, path, path, path, expectedSchemaVersion, path)
+		}
 		return fmt.Errorf("sparkwing: store schema version %d is newer than this binary (expects %d); start a binary matching the store, or restore a backup matching this binary into a separate database", version, expectedSchemaVersion)
 	}
 	if step, ok := schemaUpgradeFrom(version); ok {
