@@ -96,3 +96,44 @@ func TestRunDetailNamesFailedGeneratedDependency(t *testing.T) {
 		}
 	}
 }
+
+func TestRunDetailExplainsFailedExpansion(t *testing.T) {
+	for _, tc := range []struct{ name, generator, consumer, detail string }{
+		{
+			name:      "ordinary dependency on the generator",
+			generator: `{"id":"job","closures":{"generate":["children"]}}`,
+			consumer:  `{"id":"consumer","deps":["job","build"]}`,
+			detail:    `upstream_failed: blocked by "build" (failed); fix the dependency and retry the run`,
+		},
+		{
+			name:      "generated group of a continue_on_error generator",
+			generator: `{"id":"job","continue_on_error":true,"closures":{"generate":["children"]}}`,
+			consumer:  `{"id":"consumer","needs_generated":["children"]}`,
+			detail:    `upstream_failed: blocked by "job" (expansion failed); fix the dependency and retry the run`,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			server, _ := engineRuntimeStore(t)
+			owner := engineRuntimeClaim(t, server, capability.UnitNode)
+			failure, _ := json.Marshal(store.ExpansionFailure{Code: "plan_failed", MaskedError: "evaluation source acquisition failed"})
+			engineSQL(t, server.Store, `UPDATE nodes SET claimed_by=NULL,lease_expires_at=NULL,capability_prefix='',status='done',outcome='success',finished_at=1,expansion='failed',expansion_failure=?,spec_json=? WHERE team='a' AND run_id='run' AND node_id='job'`, failure, []byte(tc.generator))
+			engineSQL(t, server.Store, `INSERT INTO nodes(team,run_id,node_id,status,outcome,failure_reason,finished_at,spec_json,execution_json) VALUES ('a','run','consumer','done','cancelled','upstream_failed',1,?,?),('a','run','build','done','failed','',1,?,?)`, []byte(tc.consumer), []byte(`{}`), []byte(`{"id":"build"}`), []byte(`{}`))
+			detail, err := server.RunDetail(t.Context(), owner)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, job := range detail.Jobs {
+				switch job.ID {
+				case "job":
+					if job.Reason != store.FailureExpansionFailed || !strings.Contains(job.StatusDetail, "expansion_failed") || job.Error != "expansion failed: evaluation source acquisition failed" {
+						t.Fatalf("generator hides its expansion failure: %+v", job)
+					}
+				case "consumer":
+					if job.StatusDetail != tc.detail {
+						t.Fatalf("consumer detail = %s", job.StatusDetail)
+					}
+				}
+			}
+		})
+	}
+}

@@ -25,13 +25,14 @@ func TestSchemaErrorDocumentation(t *testing.T) {
 		t.Fatal("missing generated schema error markers")
 	}
 	oldest := schemaUpgrades[0]
-	want := fmt.Sprintf("%s\n```text\n%s\n\n%s\n\n%s\n\n%s\n\n%s\n\n%s\n\n%s\n\n%s\n\n%s\n\n%s\n```\n", begin,
+	want := fmt.Sprintf("%s\n```text\n%s\n\n%s\n\n%s\n\n%s\n\n%s\n\n%s\n\n%s\n\n%s\n\n%s\n\n%s\n\n%s\n```\n", begin,
 		schemaMismatchError(oldest.from-1, "<path>"),
 		schemaMismatchError(oldest.from-1, ""),
 		schemaMismatchError(oldest.from, ""),
 		schemaUpgradeDigestError(oldest, "<recorded-digest>", "<path>"),
 		schemaUpgradeDigestError(oldest, "", ""),
 		schemaMismatchError(expectedSchemaVersion+1, "<path>"),
+		schemaMismatchError(expectedSchemaVersion+1, ""),
 		schemaBaselineMismatchError("<recorded-digest>", "<binary-digest>", "<path>"),
 		schemaBaselineMismatchError("<missing>", "<binary-digest>", ""),
 		preRewriteStoreError(94, "~/.sparkwing/state.db"),

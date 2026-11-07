@@ -46,6 +46,12 @@ func (router *Router) Register(endpoint controllerwire.Endpoint) (err error) {
 			return
 		}
 		if err := router.serveEndpoint(w, r, endpoint); err != nil {
+			// safety: a stopping controller cancels in-flight handlers, and their
+			// clients must retry against its successor; a client that cancelled
+			// reads nothing.
+			if r.Context().Err() != nil {
+				err = errors.Join(&apierr.Error{Code: apierr.Unavailable, Message: "the controller stopped before answering"}, err)
+			}
 			WritePolicyError(w, err)
 		}
 	})
