@@ -188,3 +188,43 @@ Cancelling a machine lease with a registered job root wakes its watch immediatel
 and retains its capacity while the host stops and joins the job. The host's
 explicit release frees that capacity. Foreground cancellation keeps waiting for
 the run's terminal result.
+
+## Route an invocation directly to Cloud
+
+`--sw-route cloud --profile NAME` on `sparkwing run` is additive. It uses the
+existing controller-dispatched run and source-upload contracts. No wire field,
+API endpoint or SDK symbol is removed or renamed. `--profile` remains refused
+without `--sw-route cloud`. `--sw-route local` overrides machine routing for one
+run. `--allow-secret-file PATH` also requires `--sw-route cloud`. Repository
+local restrictions remain binding.
+
+Explicit Cloud runs can use `--sw-detached` and need no attached here host.
+They never fall back locally. Interrupting log observation leaves them running.
+They use team Cloud credits rather than machine burst overflow allowances.
+Requester secrets keep the existing volatile controller-memory lifetime, but
+there is no here host to resupply them after a controller restart. Submit a new
+run if those inputs are lost. Machine-configured burst routing keeps its
+foreground owner, preference holds and pre-intake local fallback.
+
+This repository's land pipeline accepts `-- --cloud-profile NAME` to wait for a
+full Cloud gate, including race tests. Each job fetches the preconditions
+comparison commit through this repository's `gate --base SHA` input, so policy
+and lint judge the branch diff despite the parentless uploaded snapshot. Review and push remain local. Its
+`gate_run` output names the Cloud gate's run rather than the local parent when
+that option is used.
+
+## GitHub trigger repository identity
+
+`POST /api/v1/repositories/resolve` accepts `{"remote_url":"git@github.com:owner/repo.git"}`
+and returns the canonical repository `key` and `display`. It requires `runs.read`
+or `runs.write` and respects the credential's repository scope. The controller
+resolves GitHub identities through the authenticated team's App installation or
+configured source credentials. App credentials remain on the controller.
+
+For GitHub identity lookup without an explicit local GitHub token, upgrade the
+controller before the CLI. This applies to pipeline triggers, Cloud-routed runs
+and profile cache identity. Explicit `GH_TOKEN` or `GITHUB_TOKEN` still supports identity
+lookup when the controller cannot resolve it, including older controllers and
+repository-scoped HTTPS source credentials. Without an explicit token, the CLI
+returns the controller's error and makes no anonymous GitHub request.
+No route, wire field or SDK surface is removed.

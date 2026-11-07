@@ -48,8 +48,10 @@ func runNativeBurst(ctx context.Context, pipeline string, flags runFlags, args [
 	if err != nil {
 		return err
 	}
-	if _, err := ensureLocalController(preparing, home, func(ctx context.Context) (dashboardServices, error) { return resolveLocalServicesAt(ctx, home) }); err != nil {
-		return err
+	if flags.route != "cloud" {
+		if _, err := ensureLocalController(preparing, home, func(ctx context.Context) (dashboardServices, error) { return resolveLocalServicesAt(ctx, home) }); err != nil {
+			return err
+		}
 	}
 	request, err := prepareNativeBurst(preparing, pipeline, flags, args, route, connection)
 	if err != nil {
@@ -58,6 +60,20 @@ func runNativeBurst(ctx context.Context, pipeline string, flags runFlags, args [
 	controller, err := client.NewEngineClient(connection)
 	if err != nil {
 		return err
+	}
+	if flags.route == "cloud" {
+		return submitTriggeredRun(preparing, request, flags.detached, flags.outputFormat, os.Stdout, triggerSubmission{
+			Controller: controller,
+			admitted: func(response controllerwire.CreateRunResponse) error {
+				if handlePath == "" {
+					return nil
+				}
+				return orchestrator.PublishRunHandle(handlePath, orchestrator.NewRunHandle(response.RunID, pipeline))
+			},
+			follow: func(ctx context.Context, run string) (string, error) {
+				return followTriggeredControllerRun(ctx, connection, run, flags.outputFormat, os.Stdout)
+			},
+		})
 	}
 	return submitTriggeredRun(preparing, request, false, flags.outputFormat, os.Stdout, triggerSubmission{
 		Controller: controller,
@@ -123,13 +139,13 @@ func prepareNativeBurst(ctx context.Context, pipeline string, flags runFlags, ar
 			}
 		}
 	}
-	snapshot, err := burstSourceSnapshot(ctx, captured, filepath.Dir(directory), files, route.SourceFiles)
+	snapshot, err := burstSourceSnapshot(ctx, captured, filepath.Dir(directory), files, route.SourceFiles, flags.allowSecretFiles)
 	if err != nil {
 		return controllerwire.CreateRunRequest{}, err
 	}
 	defer func() { resultErr = errors.Join(resultErr, snapshot.close()) }()
 	selected, err := prepareTriggerSource(ctx, triggerSourceInput{checkout: snapshot.RepoRoot, snapshot: snapshot, pipeline: pipeline, environment: captured, githubID: func(ctx context.Context, remote string) (int64, error) {
-		return lookupTriggerGitHubID(ctx, remote, captured)
+		return lookupTriggerGitHubID(ctx, remote, *route.Profile, captured)
 	}})
 	if err != nil {
 		return controllerwire.CreateRunRequest{}, err
@@ -167,6 +183,9 @@ func prepareNativeBurst(ctx context.Context, pipeline string, flags runFlags, ar
 	values := localRunSettingFlags(flags)
 	values.Profile.Set, values.Profile.Value = true, *route.Profile
 	values.Runner.Set, values.Runner.Value = true, runspec.RunnerSelection{Kind: runspec.RunnerHere}
+	if flags.route == "cloud" {
+		values.Runner.Value = runnerFlagSelection("cloud")
+	}
 	inputs := settings.Inputs{Context: settings.Context{Origin: runspec.OriginTrigger, Submitter: true, NumCPU: runtime.NumCPU()}, Flags: values}
 	inputs.Machine.SubmitEnvAllow.Set, inputs.Machine.SubmitEnvAllow.Value = allow != nil, allow
 	inputs.Machine.SubmitEnvAllow.Origin = runspec.SettingOrigin{Layer: runspec.LayerMachine, File: configPath, Key: "run.submit_env_allow"}
@@ -174,6 +193,7 @@ func prepareNativeBurst(ctx context.Context, pipeline string, flags runFlags, ar
 	if err != nil {
 		return request, err
 	}
+	request.Request.RequestID = flags.requestID
 	schema, err := boundPipelineSchema(described.Declarations().Pipelines, clisurface.PipelineIdentity{Name: pipeline, Entrypoint: selected.source.Entrypoint})
 	if err != nil {
 		return request, err
@@ -189,14 +209,19 @@ func prepareNativeBurst(ctx context.Context, pipeline string, flags runFlags, ar
 		held[name] = value
 	}
 	request.Request.LocalSecretNames = slices.Sorted(maps.Keys(request.LocalSecrets))
-	request.Request.Burst = &runspec.BurstPlacement{OverflowMinutes: route.OverflowMinutes}
-	prefer := route.Prefer
-	if prefer == nil {
-		prefer = []userconfig.RoutePreference{{Target: "here", Hold: "5s"}, {Target: "machines", Hold: "5s"}, {Target: "cloud"}}
-	}
-	for _, p := range prefer {
-		hold, _ := time.ParseDuration(p.Hold)
-		request.Request.Burst.Preferences = append(request.Request.Burst.Preferences, runspec.PlacementStep{Target: p.Target, Hold: hold})
+	if flags.route != "cloud" {
+		request.Request.Burst = &runspec.BurstPlacement{OverflowMinutes: route.OverflowMinutes}
+		prefer := route.Prefer
+		if prefer == nil {
+			prefer = []userconfig.RoutePreference{{Target: "here", Hold: "5s"}, {Target: "machines", Hold: "5s"}, {Target: "cloud"}}
+		}
+		for _, p := range prefer {
+			hold, err := time.ParseDuration(p.Hold)
+			if err != nil && p.Hold != "" {
+				return request, fmt.Errorf("run: invalid burst preference hold: %w", err)
+			}
+			request.Request.Burst.Preferences = append(request.Request.Burst.Preferences, runspec.PlacementStep{Target: p.Target, Hold: hold})
+		}
 	}
 	digest, err := client.UploadSourceSnapshot(ctx, connection, source.Publication{Git: request.Request.Git, Source: request.Request.Source, Path: snapshot.BundlePath, Base: procenv.Base{Local: true, Captured: captured, Masker: masker}, Secrets: held})
 	if err != nil {

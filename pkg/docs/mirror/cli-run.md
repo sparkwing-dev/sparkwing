@@ -8,7 +8,7 @@ Every `sparkwing run` command, flag, and argument, generated from the CLI's own 
 
 Invoke a pipeline
 
-Runs locally by default through the local runner. Foreground commands observe persisted output; standalone and foreground publication keep their CLI host. Explicit user, repository or pipeline routing can select Cloud overflow. --profile is refused.
+Runs locally by default through the local runner. Foreground commands observe persisted output; standalone and foreground publication keep their CLI host. --sw-route cloud --profile NAME sends planning and jobs directly to Cloud, including without a terminal. --sw-detached returns after intake; otherwise the CLI follows logs. Explicit Cloud routing never falls back locally. --profile requires --sw-route cloud. Repository local restrictions still apply.
 
 ### Burst and overflow
 
@@ -39,6 +39,9 @@ Cache-from reads only authorized verified-default-branch memo/artifacts/depcache
 | `-h, --help` | Show command help without executing. |
 | `--help-all` | Include uncommon flags in command help. |
 | `--publish PROFILE` | Copy this local run's results to the named controller profile. |
+| `--sw-route ROUTE` | Select local execution or direct Cloud execution for this invocation. Values: local, cloud. |
+| `--profile NAME` | Cloud connection profile; requires --sw-route cloud. |
+| `--allow-secret-file PATH` | Upload this repository-relative file even though its name or content looks like a secret; the secret-value scan still applies. Requires --sw-route cloud. Repeatable; comma-separated values are accepted. |
 | `--agent NAME` | Coding agent starting this run, such as claude-code:land-agent; none records no agent. Display-only. |
 | `--sw-cache-from PROFILE` | Read the authorized remote cache; an empty value disables the machine default. |
 | `--sw-pause-before JOB` | Pause before the selected job. Repeatable; comma-separated values are accepted. |
@@ -46,7 +49,7 @@ Cache-from reads only authorized verified-default-branch memo/artifacts/depcache
 | `--sw-pause-on-failure` | Keep failed jobs paused for inspection. |
 | `--sw-ref REF` | Build the pipeline and run against this Git ref. |
 | `--sw-pipeline-ref REF` | Load the pipeline from this Git ref. |
-| `--sw-detached` | Submit work to the local controller and return before it finishes. |
+| `--sw-detached` | Submit work to the selected controller and return before it finishes. |
 | `--sw-workers N` | Positive foreground worker count; refused for detached runs. Must be at least 1. |
 | `--sw-idempotency-key KEY` | Deduplicate detached submissions using this key. |
 | `--sw-request-id ID` | Request identifier for a detached submission. |

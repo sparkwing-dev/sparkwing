@@ -43,7 +43,8 @@ func (j *raceTouchedJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
 }
 
 type GateArgs struct {
-	Full bool `flag:"full" desc:"Run every Go test instead of the changed packages and the critical set."`
+	Full bool   `flag:"full" desc:"Run every Go test instead of the changed packages and the critical set."`
+	Base string `flag:"base" desc:"Fetch this public repository commit as origin/main before each job, for an uploaded snapshot."`
 }
 
 // safety: the hosted full-test chain can take 36 minutes before the 30-minute
@@ -68,7 +69,20 @@ func (Gate) Examples() []sparkwing.Example {
 }
 
 func (p *Gate) Plan(_ context.Context, plan *sparkwing.Plan, in GateArgs, rc sparkwing.RunContext) error {
-	gateJobs(plan, p, rc.Pipeline, in.Full)
+	jobs := gateJobs(plan, p, rc.Pipeline, in.Full)
+	if in.Base != "" {
+		if err := validateGateBase(in.Base); err != nil {
+			return err
+		}
+		for _, job := range jobs {
+			if job.ID() == rc.Pipeline || job.ID() == "race-touched" {
+				job.Cores(overlappedGoSuiteCPUs)
+			}
+			job.BeforeRun(func(ctx context.Context) error {
+				return fetchGateBase(ctx, "https://github.com/sparkwing-dev/sparkwing.git", in.Base)
+			})
+		}
+	}
 	return nil
 }
 
@@ -597,6 +611,11 @@ func resolveGateBase(ctx context.Context) (base, scope string, err error) {
 	sha = strings.TrimSpace(sha)
 	if err == nil && sha != "" {
 		return sha, fmt.Sprintf("change since %s (%s)", gateBaselineRef, sha[:12]), nil
+	}
+	// safety: an uploaded snapshot has no ancestry, but an explicitly fetched baseline still bounds its diff.
+	sha, err = sparkwing.Exec(ctx, "git", "rev-parse", "--verify", gateBaselineRef+"^{commit}").String()
+	if err == nil && sha != "" {
+		return sha, fmt.Sprintf("snapshot change against %s (%s)", gateBaselineRef, sha[:12]), nil
 	}
 	// safety: uploaded snapshots may have no remote refs or parent history.
 	// An empty tree charges every tracked file to the gate without fetching.

@@ -208,3 +208,57 @@ func TestRoutedRunDeadTokenHintNamesTheRoutingProfile(t *testing.T) {
 		t.Fatalf("hint does not name the routing profile %q: %s", want, hint)
 	}
 }
+
+func TestInvocationRoutingRequiresExplicitCloudAndPreservesMachineApprovals(t *testing.T) {
+	machine := userconfig.Config{Run: &userconfig.RunConfig{Routing: &userconfig.RunRouting{Route: new("local"), Profile: new("default"), LocalSecrets: []string{"TOKEN"}, SourceFiles: []string{"fixture.json"}}}}
+	for _, tc := range []struct{ route, profile, wantRoute, wantProfile string }{
+		{"cloud", "work", "cloud", "work"},
+		{"cloud", "", "cloud", "default"},
+		{"local", "", "local", "default"},
+	} {
+		got, err := resolveInvocationRouting(machine, nil, "gate", runFlags{route: tc.route, profile: tc.profile})
+		if err != nil || *got.Route != tc.wantRoute || *got.Profile != tc.wantProfile || !slices.Equal(got.LocalSecrets, []string{"TOKEN"}) || !slices.Equal(got.SourceFiles, []string{"fixture.json"}) {
+			t.Fatalf("route=%+v err=%v", got, err)
+		}
+	}
+	if *machine.Run.Routing.Route != "local" || *machine.Run.Routing.Profile != "default" {
+		t.Fatal("invocation changed machine defaults")
+	}
+	for _, project := range []*projectconfig.Config{
+		{Defaults: &projectconfig.Defaults{Run: &projectconfig.RunRestrictions{Route: new("local")}}},
+		{Pipelines: []projectconfig.Pipeline{{Name: "gate", Run: &projectconfig.RunRestrictions{Route: new("local")}}}},
+	} {
+		if _, err := resolveInvocationRouting(machine, project, "gate", runFlags{route: "cloud", profile: "work"}); err == nil {
+			t.Fatal("invocation bypassed repository local restriction")
+		}
+	}
+}
+
+func TestExplicitCloudRouteDetachesAndNeverFallsBack(t *testing.T) {
+	for _, detached := range []bool{false, true} {
+		for _, failure := range []error{nil, &net.OpError{Op: "dial", Net: "tcp", Err: errors.New("offline")}, &burstBeforeIntakeError{&apierr.Error{Code: apierr.Unavailable, Message: "offline"}}} {
+			flags, _ := parseRunFlagsArgs([]string{"--sw-route=cloud", "--profile=work", fmt.Sprintf("--sw-detached=%t", detached)})
+			called := false
+			err := runRoutedCommand(t.Context(), "gate", flags, nil, userconfig.RunRouting{Route: new("cloud"), Profile: new("work")}, io.Discard, burstRunDependencies{
+				connect: func(context.Context, string) (client.EngineOptions, func(), error) {
+					return client.EngineOptions{}, func() {}, nil
+				},
+				probe: func(context.Context, client.EngineOptions) error { return nil },
+				cloud: func(_ context.Context, _ string, got runFlags, _ []string, _ userconfig.RunRouting, _ client.EngineOptions) error {
+					called = true
+					if got.detached != detached {
+						t.Fatal("detachment lost")
+					}
+					return failure
+				},
+				local: func(context.Context, string, runFlags, []string) error {
+					t.Fatal("explicit Cloud fell back locally")
+					return nil
+				},
+			})
+			if !called || (err == nil) != (failure == nil) {
+				t.Fatalf("called=%v err=%v", called, err)
+			}
+		}
+	}
+}

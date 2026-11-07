@@ -23,6 +23,39 @@ sparkwing run land --sw-stop-at verify --sw-allow-risk destructive,prod   # gate
 sparkwing run land --sw-allow-risk destructive,prod                         # land on main
 ```
 
+To keep the heavy checks off the developer's machine, use the `cloud` profile
+for team `korey-gam`:
+
+```bash
+sparkwing run land --sw-route local --sw-stop-at verify --sw-allow-risk destructive,prod -- --cloud-profile cloud
+sparkwing run land --sw-route local --sw-allow-risk destructive,prod -- --cloud-profile cloud
+```
+
+`--sw-route local` keeps land on the developer's machine. With `--cloud-profile`, its
+local policy job runs first, then a light `cloud-gate` job invokes
+`sparkwing run gate --sw-route cloud --profile cloud -o json -- --full --base SHA` while
+the local review runs beside it. Cloud runs the policy, broad `gate`,
+`race-touched` and `record-tree` jobs. Each Cloud job fetches the exact public
+`origin/main` commit captured by preconditions over HTTPS, without developer
+credentials. That commit bounds policy and lint findings even though the uploaded
+snapshot has no ancestry. Full mode runs every package. The two heavy jobs each
+request four Cloud cores, matching their GitHub Actions lanes. The local wrapper
+requires a successful Cloud receipt and an unchanged clean HEAD before and
+after the remote gate. The landing record's `gate_run` names the Cloud run.
+The wrapper passes this repository's tracked secret-shaped fixtures, listed in
+`cloudGateSecretShapedFixtures`, with `--allow-secret-file`; a new fixture of
+that kind fails the Cloud upload until it is added there.
+Preconditions, review, verification and push retain the original checkout and
+its git credentials. A merge after the gate still runs its existing build and
+affected-test recheck locally.
+
+This option needs a CLI with invocation routing on PATH and a configured Cloud
+profile. It makes no machine-wide routing change. Cloud observation can be
+interrupted without cancelling the remote run. Follow or cancel that run using
+`sparkwing runs logs` or `sparkwing runs cancel` with `--profile cloud --run ID`.
+Do not route the whole land pipeline to Cloud because the push and review use
+local credentials and records.
+
 The risk check covers the whole plan even when `--sw-stop-at verify` leaves
 the push out, so the stop-at form needs the risks too; the push step still
 skips. Without them the run fails as "pipeline discovery failed (details

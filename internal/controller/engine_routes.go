@@ -35,6 +35,7 @@ func (s *Server) WithEngineController(engine *EngineController) *Server {
 func (s *Server) engineEndpoints() []controllerwire.Endpoint {
 	engine := s.engineController
 	return []controllerwire.Endpoint{
+		{Method: "POST", Pattern: "/api/v1/repositories/resolve", Authentication: capability.AuthCapability, Decode: authorityTarget, Handle: s.handleResolveRepository},
 		{
 			Method: "POST", Pattern: "/api/v1/runs", Authentication: capability.AuthCapability,
 			Decode: engine.intakeTarget, Handle: s.handleIntake(engine),

@@ -436,6 +436,11 @@ Use `--profile NAME` to select a connection, or save one with
 use that default when the flag is omitted. With no saved default they use the
 local controller. `--profile=` selects local for one command.
 
+`sparkwing run` keeps its separate machine routing preference. A saved default
+profile does not change local execution. Use `--sw-route cloud --profile NAME`
+to send one run directly to Cloud. Without `--profile`, that explicit route
+uses machine `run.routing.profile`.
+
 ```bash
 sparkwing profiles show --profile prod        # saved connection, with token redacted
 sparkwing profiles remove --profile prod      # revoke and remove
@@ -488,8 +493,11 @@ sparkwing pipeline trigger <pipeline> --profile acme
 The first prompts for the token without echoing it and saves a profile named
 after the team. Run the second inside a checkout whose commit is pushed: the
 run records the checkout's `origin` repository and commit, and a team runner
-fetches that commit. Private GitHub identity lookup accepts `GH_TOKEN` or
-`GITHUB_TOKEN` with repository read access. The controller credential needs
+fetches that commit. GitHub identity lookup first uses the selected controller's
+team App or source credentials. App-covered private repositories need no local
+GitHub token. An explicit `GH_TOKEN` or `GITHUB_TOKEN` with repository read access
+can supply identity when controller discovery is unavailable. The CLI never
+queries GitHub anonymously. The controller credential needs
 `runs.write`. Add `--working-tree` to capture tracked and unignored untracked
 files into an immutable Git snapshot, upload it through shared storage, and seal
 its digest into the run. The original checkout and index stay untouched.

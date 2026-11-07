@@ -15,7 +15,7 @@ func TestRunMarkdownProvidesBurstOverflowSection(t *testing.T) {
 			t.Fatal(err)
 		}
 		page := pages["cli-run.md"]
-		for _, policy := range []string{"machine run.routing", "may only restrict routing to local", "Other team runners cannot claim burst jobs"} {
+		for _, policy := range []string{"machine run.routing", "may only restrict routing to local", "Other team runners cannot claim burst jobs", "--sw-route cloud --profile NAME", "Explicit Cloud routing never falls back locally"} {
 			if !strings.Contains(page, policy) {
 				t.Fatalf("run reference omits authorization rule %q", policy)
 			}

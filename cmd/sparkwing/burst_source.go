@@ -20,7 +20,7 @@ type burstSourceSelection struct {
 	exclude []string
 }
 
-func burstSourceSnapshot(ctx context.Context, env []string, root string, declared, approved []string) (*worktreeSnapshot, error) {
+func burstSourceSnapshot(ctx context.Context, env []string, root string, declared, approved, allowedSecretFiles []string) (*worktreeSnapshot, error) {
 	gitEnv, err := procenv.Build(procenv.Git, procenv.Base{Local: true, Captured: env, Masker: secrets.NewMasker()}, procenv.Runtime{})
 	if err != nil {
 		return nil, err
@@ -40,7 +40,7 @@ func burstSourceSnapshot(ctx context.Context, env []string, root string, declare
 		}
 		include = append(include, name)
 	}
-	return captureBurstSnapshot(ctx, env, root, include, nil)
+	return captureSnapshot(ctx, env, root, defaultWorktreeSnapshotLimits, allowedSecretFiles, &burstSourceSelection{include: include})
 }
 
 func captureBurstSnapshot(ctx context.Context, env []string, start string, includedUntracked, excludedSecretFiles []string) (*worktreeSnapshot, error) {

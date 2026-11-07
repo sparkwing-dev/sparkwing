@@ -163,7 +163,7 @@ func dispatchRunWithEngine(inv clisurface.Invocation, selectEngine func(string, 
 	if err != nil {
 		return err
 	}
-	route, err := loadRunRouting(dir, pipelineName)
+	route, err := loadRunRouting(dir, pipelineName, flags)
 	if err != nil {
 		return err
 	}
@@ -186,7 +186,7 @@ func dispatchRunWithEngine(inv clisurface.Invocation, selectEngine func(string, 
 	}
 	var closeErr error
 	beforeExec := func() { closeErr = errors.Join(closeErr, code.Close(), selection.execution.Close()) }
-	route, err = loadRunRouting(selection.execution.Directory, pipelineName)
+	route, err = loadRunRouting(selection.execution.Directory, pipelineName, flags)
 	if err != nil {
 		return err
 	}

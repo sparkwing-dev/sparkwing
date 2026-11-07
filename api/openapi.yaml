@@ -3209,6 +3209,15 @@ components:
         - watched_jobs
       type: object
       x-sparkwing-go-type: controllerwire.RenewalResponse
+    internal.controllerwire.RepositoryResolveRequest:
+      additionalProperties: true
+      properties:
+        remote_url:
+          type: string
+      required:
+        - remote_url
+      type: object
+      x-sparkwing-go-type: controllerwire.RepositoryResolveRequest
     internal.controllerwire.RetryDetail:
       additionalProperties: true
       properties:
@@ -10832,6 +10841,46 @@ paths:
               - runs.state
             binding: slotOfBoundNode
             liveness: reporting
+        retry: safe
+  /api/v1/repositories/resolve:
+    post:
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/internal.controllerwire.RepositoryResolveRequest'
+        required: true
+      responses:
+        2XX:
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/internal.runspec.Repository'
+          description: Successful response.
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/internal.apierr.Envelope'
+          description: Canonical API failure.
+      summary: Resolve repository identity through team source access
+      x-sparkwing-policy:
+        method: POST
+        path: /api/v1/repositories/resolve
+        audience: controller
+        owner: team
+        authentication: capability
+        access:
+          - credential: unbound_member_or_local
+            grants:
+              - runs.read
+            binding: none
+            liveness: credential
+          - credential: unbound_member_or_local
+            grants:
+              - runs.write
+            binding: none
+            liveness: credential
         retry: safe
   /api/v1/runners:
     get:

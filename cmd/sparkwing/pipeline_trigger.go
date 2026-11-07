@@ -104,15 +104,19 @@ func runTriggerCommand(ctx context.Context, inv clisurface.Invocation, out io.Wr
 			return handoffHereRun(ctx, options, response, defaultHereDependencies(flags.output))
 		},
 		follow: func(ctx context.Context, run string) (string, error) {
-			followErr := followControllerRunLogs(ctx, options, run, flags.output, out, waitStatusPoll)
-			reader, err := client.NewRunReader(options)
-			if err != nil {
-				return "", errors.Join(followErr, err)
-			}
-			outcome, err := triggeredRunOutcome(ctx, reader, run, os.Stderr)
-			return outcome, errors.Join(followErr, err)
+			return followTriggeredControllerRun(ctx, options, run, flags.output, out)
 		},
 	})
+}
+
+func followTriggeredControllerRun(ctx context.Context, options client.EngineOptions, run, format string, out io.Writer) (string, error) {
+	followErr := followControllerRunLogs(ctx, options, run, format, out, waitStatusPoll)
+	reader, err := client.NewRunReader(options)
+	if err != nil {
+		return "", errors.Join(followErr, err)
+	}
+	outcome, err := triggeredRunOutcome(ctx, reader, run, os.Stderr)
+	return outcome, errors.Join(followErr, err)
 }
 
 func trustedRunnerForProfile(ctx context.Context, profileName string) (string, error) {

@@ -78,7 +78,7 @@ func burstLocalFallbackSecrets(t *testing.T, value string) {
 		t.Fatal(err)
 	}
 	captured := os.Environ()
-	route, err := loadRunRouting(filepath.Join(repo, ".sparkwing"), "burst")
+	route, err := loadRunRouting(filepath.Join(repo, ".sparkwing"), "burst", runFlags{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -178,6 +178,15 @@ func FuzzBurstHostSourceEnvironmentExcludesRequesterValues(f *testing.F) {
 }
 
 func TestBurstNativePreparationBuildsUploadedEditedSDK(t *testing.T) {
+	testBurstNativePreparation(t, false)
+}
+
+func TestExplicitCloudRunDetachesWithUploadedSourceAndPrivateSecrets(t *testing.T) {
+	testBurstNativePreparation(t, true)
+}
+
+func testBurstNativePreparation(t *testing.T, direct bool) {
+	t.Helper()
 	if testing.Short() {
 		t.Skip("slow: 6.9s measured in the short class; the full suite runs it")
 	}
@@ -201,7 +210,11 @@ func TestBurstNativePreparationBuildsUploadedEditedSDK(t *testing.T) {
 	})
 	options := client.EngineOptions{URL: "http://controller.test", Bearer: func(context.Context) (string, error) { return bearer, nil }, HTTP: &http.Client{Transport: transport}}
 	route := userconfig.RunRouting{Profile: new("cloud"), LocalSecrets: []string{"TOKEN"}, SourceFiles: []string{"declared.txt"}}
-	prepared, err := prepareNativeBurst(t.Context(), "burst", runFlags{}, []string{"--block"}, route, options)
+	flags := runFlags{outputFormat: "json"}
+	if direct {
+		flags.route, flags.profile, flags.detached, flags.requestID = "cloud", "cloud", true, "agent-check"
+	}
+	prepared, err := prepareNativeBurst(t.Context(), "burst", flags, []string{"--block"}, route, options)
 	if err != nil {
 		t.Fatalf("native burst preparation: %v", err)
 	}
@@ -216,7 +229,7 @@ func TestBurstNativePreparationBuildsUploadedEditedSDK(t *testing.T) {
 		t.Fatal(err)
 	}
 	created, err := member.CreateRun(t.Context(), prepared)
-	if err != nil || created.HereBearer == "" {
+	if err != nil || created.Here != !direct || (created.HereBearer != "") != !direct {
 		t.Fatalf("real burst intake: %v", err)
 	}
 	tenant, err := state.ForTeam(t.Context(), store.DefaultTeam)
@@ -233,6 +246,33 @@ func TestBurstNativePreparationBuildsUploadedEditedSDK(t *testing.T) {
 	persisted, err := json.Marshal(snapshot)
 	if err != nil || bytes.Contains(persisted, []byte(burstIntakeSecret)) || bytes.Contains(persisted, []byte("STRAY_REQUESTER_SHELL_NAME")) {
 		t.Fatal("requester shell data entered the Cloud run record")
+	}
+	if direct {
+		request := snapshot.Run.Request.Request
+		if request.Dispatch != runspec.DispatchController || request.Burst != nil || request.Options.Runner.Value != runnerFlagSelection("cloud") || request.RequestID != "agent-check" {
+			t.Fatalf("detached Cloud run retained a local owner or lost its selection: %+v", request)
+		}
+		var out bytes.Buffer
+		admitted := false
+		if err := submitTriggeredRun(t.Context(), prepared, true, "json", &out, triggerSubmission{
+			Controller: member,
+			admitted: func(response controllerwire.CreateRunResponse) error {
+				admitted = response.RunID == created.RunID
+				return nil
+			},
+			here: func(context.Context, controllerwire.CreateRunResponse) error {
+				t.Fatal("Cloud run hosted locally")
+				return nil
+			},
+			follow: func(context.Context, string) (string, error) { t.Fatal("detached run followed logs"); return "", nil },
+		}); err != nil || !admitted {
+			t.Fatalf("detached receipt: %s %v", &out, err)
+		}
+		var receipt triggerReceipt
+		if err := json.Unmarshal(out.Bytes(), &receipt); err != nil || receipt.RunID != created.RunID || !receipt.Replayed {
+			t.Fatalf("detached receipt lost run identity: %s %v", &out, err)
+		}
+		return
 	}
 	options.Bearer = func(context.Context) (string, error) { return created.HereBearer, nil }
 	here, err := client.NewEngineClient(options)

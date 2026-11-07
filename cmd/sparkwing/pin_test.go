@@ -109,7 +109,7 @@ func TestRun_SwRefReadsThePinAtTheExecutedRevision(t *testing.T) {
 func TestPinRefusal_SuggestsACommandTriggerParses(t *testing.T) {
 	writeProfilesFixture(t, "profiles:\n  prod: { controller: { url: http://127.0.0.1:1 } }\n")
 	projectAt(t, pinnedProject)
-	for _, args := range [][]string{{"release"}, {"build", "--profile", "prod"}} {
+	for _, args := range [][]string{{"release"}} {
 		err := dispatchRunArgs(args)
 		if err == nil {
 			t.Fatalf("dispatchRunArgs(%q) succeeded", args)

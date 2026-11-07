@@ -391,7 +391,7 @@ func Registry() []Command {
 			{Name: "yes"},
 		}},
 		{Path: "sparkwing run", PipelineArgument: true, PipelineArgsAfterSeparator: true, Rules: []string{
-			"Runs locally by default through the local runner. Foreground commands observe persisted output; standalone and foreground publication keep their CLI host. Explicit user, repository or pipeline routing can select Cloud overflow. --profile is refused.",
+			"Runs locally by default through the local runner. Foreground commands observe persisted output; standalone and foreground publication keep their CLI host. --sw-route cloud --profile NAME sends planning and jobs directly to Cloud, including without a terminal. --sw-detached returns after intake; otherwise the CLI follows logs. Explicit Cloud routing never falls back locally. --profile requires --sw-route cloud. Repository local restrictions still apply.",
 			"### Burst and overflow\n\nSet route: cloud and profile: NAME in machine run.routing to opt in. Repository defaults.run and pipelines[].run may only restrict routing to local and declare secret names. Machine configuration authorizes untracked source_files. The CLI hosts the Cloud-owned run and streams its logs. Ctrl-C requests cancellation. The default preference is here for 5s, then your registered personal machines for 5s, then Cloud. Other team runners cannot claim burst jobs. Prefer entries accept target and a non-negative hold duration. A controller that is unreachable before intake falls back to a local run and reports it. Authorization failures and a lost intake response remain failures because an accepted run keeps one owner. See [local execution](local-execution.md#burst-and-overflow) for configuration and secret handling.",
 			"Publication is one-way run/results/logs with local provenance; a publication failure never changes the local run verdict.",
 			"--agent NAME records the coding agent that starts the run on your behalf, such as claude-code:land-agent, and --agent none records none. Without the flag, SPARKWING_AGENT applies, then a detected coding-agent environment (Claude Code, Codex, Gemini CLI). The label is sealed with the request, kept by retries and publication, and shown in run views; it never grants or limits authority.",
@@ -401,6 +401,9 @@ func Registry() []Command {
 			"--sw-allow-unadmitted selects standalone CI with an exclusive in-process local controller. Give it a private SPARKWING_HOME. Its admission queue and concurrency rules remain active; it does not join shared machine admission. The CLI joins controller shutdown before returning. Detached runs and Cloud routing cannot use this mode.",
 		}, Flags: []Flag{
 			{Name: "publish", Argument: "PROFILE"},
+			{Name: "sw-route", Argument: "ROUTE", Values: []string{"local", "cloud"}, Meaning: "Select local execution or direct Cloud execution for this invocation."},
+			{Name: "profile", Argument: "NAME", Requires: []string{"sw-route"}, Meaning: "Cloud connection profile; requires --sw-route cloud."},
+			{Name: "allow-secret-file", Argument: "PATH", Repeatable: true, CommaList: true, Requires: []string{"sw-route"}, Meaning: "Upload this repository-relative file even though its name or content looks like a secret; the secret-value scan still applies. Requires --sw-route cloud."},
 			{Name: "agent", Argument: "NAME"},
 			{Name: "sw-cache-from", Argument: "PROFILE", AllowEmpty: true, Meaning: "Read the authorized remote cache; an empty value disables the machine default."},
 			{Name: "sw-pause-before", Argument: "JOB", Repeatable: true, CommaList: true},
@@ -408,7 +411,7 @@ func Registry() []Command {
 			{Name: "sw-pause-on-failure"},
 			{Name: "sw-ref", Argument: "REF", Conflicts: []string{"sw-pipeline-ref"}},
 			{Name: "sw-pipeline-ref", Argument: "REF", Conflicts: []string{"sw-ref"}},
-			{Name: "sw-detached", Conflicts: []string{"sw-workers"}},
+			{Name: "sw-detached", Conflicts: []string{"sw-workers"}, Meaning: "Submit work to the selected controller and return before it finishes."},
 			{Name: "sw-workers", Argument: "N", Minimum: 1, HasMinimum: true, Conflicts: []string{"sw-detached"}, Meaning: "Positive foreground worker count; refused for detached runs."},
 			{Name: "sw-idempotency-key", Argument: "KEY", Requires: []string{"sw-detached"}},
 			{Name: "sw-request-id", Argument: "ID", Requires: []string{"sw-detached"}},

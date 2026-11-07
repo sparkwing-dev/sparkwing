@@ -105,8 +105,8 @@ func TestLaunchCriticalSurfaces(t *testing.T) {
 	if !commands["sparkwing pipeline trigger"].PipelineOptionalOnResume {
 		t.Error("resume must not need a new pipeline")
 	}
-	if slices.ContainsFunc(commands["sparkwing run"].Flags, func(f Flag) bool { return f.Name == "profile" }) {
-		t.Error("local run accepts remote execution profile")
+	if !slices.ContainsFunc(commands["sparkwing run"].Flags, func(f Flag) bool { return f.Name == "sw-route" }) {
+		t.Error("run must offer invocation routing")
 	}
 	if slices.Contains(commands["sparkwing dashboard install"].Platforms, "windows") {
 		t.Error("Windows install must be refused")

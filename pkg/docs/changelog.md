@@ -38,6 +38,8 @@ unlock.
 
 - **runners:** Award-bound job reports accept optional `X-Sparkwing-Exited-At` observation headers. Job and attempt finish times preserve the runner's observed process exit before final log acknowledgement, cleanup and artifact/cache publication, including delayed reports after controller restart. Event timestamps still use the controller clock. See [the migration guide](docs/migrations/_unreleased.md#observed-job-exit-time).
 
+- **CLI:** `sparkwing run --sw-route cloud --profile NAME` sends planning and jobs directly to Cloud without a terminal or local fallback. `--sw-detached` returns a Cloud receipt. `--allow-secret-file PATH` uploads a named secret-shaped file, as with `pipeline trigger --working-tree`. Source uploads and requester secrets use the burst rules, and repository local restrictions still apply. Direct Cloud uses team credits rather than the burst overflow allowance.
+- **delivery:** `sparkwing run land -- --cloud-profile NAME` runs the full gate and race tests on Cloud while review and push keep the local checkout. The landing record names the Cloud gate run.
 - **SDK:** Host compatibility checks run frozen released Go and TypeScript pipelines through candidate nodehost. The affected gate reuses fixture preparation, and pre-release rebuilds every historical fixture.
 
 ### Fixed
@@ -49,6 +51,7 @@ unlock.
 - **local controller:** Recorded Unix job sessions are cleaned up after their holder process dies, including after controller restart. Job roots survive receipt pruning and failed cleanup acknowledgements. Cancelled jobs keep their machine capacity until the host joins and releases them.
 
 - **runners:** Claim polling recovers from controller transport failures and missing local sockets for up to five seconds without cancelling held jobs or replaying claims. Graceful drain stops new claims and joins active hosts. Held jobs and owners keep reading their state, child runs and authentication through the same outage instead of failing.
+- **CLI and controller:** GitHub pipeline triggers resolve repository identity through `POST /api/v1/repositories/resolve` on the selected controller. Private repositories covered by the team's GitHub App work from HTTPS and SSH clones without a local GitHub token, with or without `--ref`. The CLI never falls back to anonymous GitHub lookup. Explicit `GH_TOKEN` or `GITHUB_TOKEN` remains available when the controller cannot resolve identity. See [the migration guide](docs/migrations/_unreleased.md#github-trigger-repository-identity).
 
 - **controller:** Capability issuance tolerates up to 30 seconds of backward clock skew, so time-sync corrections and VM resumes keep local owners, awards and here handoffs usable. Hosted controllers share the allowance. Expiry, revocation and binding deadlines retain their existing checks.
 - **CLI:** Pipeline triggers accept exact commits fetched from origin in shallow runner checkouts, so jobs can trigger another pipeline at the pushed commit without origin-tracking branches. Both execution and pipeline-code commits still require origin fetch evidence.

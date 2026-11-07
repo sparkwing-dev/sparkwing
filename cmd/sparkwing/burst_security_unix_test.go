@@ -70,7 +70,7 @@ func hostileProjectCannotAuthorizeBurst(t *testing.T, body string) {
 		handler.ServeHTTP(w, r)
 		return w.Result(), nil
 	})}}
-	route, err := loadRunRouting(filepath.Join(repo, ".sparkwing"), "burst")
+	route, err := loadRunRouting(filepath.Join(repo, ".sparkwing"), "burst", runFlags{})
 	local := errors.New("local execution selected")
 	if err == nil {
 		err = runRoutedCommand(t.Context(), "burst", runFlags{}, nil, route, io.Discard, burstRunDependencies{

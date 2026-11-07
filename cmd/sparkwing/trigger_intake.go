@@ -19,8 +19,9 @@ import (
 
 type triggerSubmission struct {
 	controllerwire.Controller
-	here   func(context.Context, controllerwire.CreateRunResponse) error
-	follow func(context.Context, string) (string, error)
+	admitted func(controllerwire.CreateRunResponse) error
+	here     func(context.Context, controllerwire.CreateRunResponse) error
+	follow   func(context.Context, string) (string, error)
 }
 
 type triggerReceipt struct {
@@ -71,6 +72,11 @@ func submitTriggeredRun(ctx context.Context, input controllerwire.CreateRunReque
 	receipt, err := initialTriggerReceipt(input.Request.Pipeline, here, response)
 	if err != nil {
 		return err
+	}
+	if connection.admitted != nil {
+		if err := connection.admitted(response); err != nil {
+			return err
+		}
 	}
 	if here {
 		if connection.here == nil {
