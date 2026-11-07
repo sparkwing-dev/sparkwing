@@ -4224,6 +4224,13 @@ with unpriced_cpu_class. Claim issuance rolls back before that guarded edge,
 so no award, attempt or charge survives. Named and queued claims check the exact selected size price before award. Pricing refusal does not limit unmetered self-hosted work.
 The guard is exercised by generated foreign, missing, revoked and repriced cases.
 
+A Cloud job award past the team's standing job duration limit, counted from the
+job's first Cloud award, uses the same shape. Claim issuance rolls back and the
+claimant's own transaction fails the still-unclaimed job with job_duration_limit
+through the claimant duration_limit edge, so later claims do not meet the
+refusal again. Its guard requires that transaction's private proof and rechecks
+Cloud launcher ancestry, unit scope and the elapsed limit.
+
 IntakeQueueDepth reads the tenant queue from the same admission transaction.
 The controller's existing flood policy runs after C1 replay lookup. This removes
 nested store reads while holding the intake transaction and preserves replay

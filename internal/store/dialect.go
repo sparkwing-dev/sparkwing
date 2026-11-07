@@ -131,6 +131,7 @@ type storeTx struct {
 	appAdmission         *GitHubAppAdmission
 	scheduleAdmission    *scheduleAdmission
 	unpricedDemand       *UnitDemand
+	expiredClaimant      string
 	clock                func(context.Context) (time.Time, error)
 	err                  error
 	cancelingTeam        Team

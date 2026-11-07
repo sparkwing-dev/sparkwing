@@ -69,6 +69,10 @@ An operator hold that the operator who placed it releases as "no fault found"
 counts as if it never happened. Dispute, fraud-warning and other automatic holds
 always restart the count.
 
+A job's maximum duration counts from its first Cloud award, including any time
+it waited for capacity. A job that reaches the limit before an award could start
+it fails with `job_duration_limit` and the error starts `job never started`.
+
 Adding funds raises standing in the settlement transaction. Spending the
 balance can lower its balance-backed tier; payment history stays.
 

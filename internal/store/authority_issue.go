@@ -415,17 +415,17 @@ func awardCapabilityTx(ctx context.Context, tx *storeTx, spec capability.AwardSp
 		if standing.MaxJobDuration > 0 {
 			began := tx.now(ctx)
 			if c.Unit == capability.UnitNode {
-				var awarded sql.NullInt64
-				if err := tx.QueryRowContext(ctx, `SELECT MIN(awarded_at) FROM billing_awards WHERE team=? AND run_id=? AND node_id=? AND unit_kind=? AND executor_class='cloud'`, row.team, row.run, row.node, c.Unit).Scan(&awarded); err != nil {
+				if began, err = cloudJobBeganTx(ctx, tx, row.team, row.run, row.node, began); err != nil {
 					return capability.Capability{}, err
-				}
-				if awarded.Valid {
-					began = time.Unix(0, awarded.Int64)
 				}
 			}
 			deadline := began.Add(standing.MaxJobDuration)
 			if !deadline.After(tx.now(ctx)) {
-				return capability.Capability{}, authorityError(apierr.BadRequest, fmt.Sprintf("%s standing job duration limit is %s, current elapsed time is %s; split the work into shorter jobs or contact support@sparkwing.dev for higher standing or a duration override", standing.Tier, standing.MaxJobDuration, tx.now(ctx).Sub(began)))
+				var attempt int64
+				if err := tx.QueryRowContext(ctx, `SELECT attempt FROM nodes WHERE team=? AND run_id=? AND node_id=?`, row.team, row.run, row.node).Scan(&attempt); err != nil {
+					return capability.Capability{}, err
+				}
+				return capability.Capability{}, &JobDurationLimitError{RunID: row.run, NodeID: row.node, Tier: standing.Tier, Limit: standing.MaxJobDuration, Elapsed: tx.now(ctx).Sub(began), Started: attempt > 0}
 			}
 
 			if c.ExpiresAt == nil || deadline.Before(*c.ExpiresAt) {
@@ -458,6 +458,38 @@ func awardCapabilityTx(ctx context.Context, tx *storeTx, spec capability.AwardSp
 	c.RootMetered = meteredPlacement(claimant.Capability, parent.Capability)
 	c.Billing = &capability.BillingProvenance{PayerTeam: row.team, Metered: c.RootMetered, ExecutorClass: executor, ReservationID: reservation, Start: start, Unit: billingUnitKind(spec.Unit)}
 	return c, nil
+}
+
+// JobDurationLimitError refuses a Cloud job award once the job's standing duration
+// limit has passed since its first Cloud award. Claiming fails the job with it.
+type JobDurationLimitError struct {
+	RunID, NodeID  string
+	Tier           string
+	Limit, Elapsed time.Duration
+	Started        bool
+}
+
+func (e *JobDurationLimitError) Error() string {
+	if !e.Started {
+		return fmt.Sprintf("job never started within the %s standing job duration limit of %s, first awarded %s ago: no usable Sparkwing Cloud capacity started it; run it again, or contact support@sparkwing.dev if Cloud jobs keep waiting", e.Tier, e.Limit, e.Elapsed)
+	}
+	return fmt.Sprintf("%s standing job duration limit is %s, current elapsed time is %s; split the work into shorter jobs or contact support@sparkwing.dev for higher standing or a duration override", e.Tier, e.Limit, e.Elapsed)
+}
+
+// Unwrap keeps the refusal a bad request for callers that only map API errors.
+func (e *JobDurationLimitError) Unwrap() error {
+	return authorityError(apierr.BadRequest, e.Error())
+}
+
+func cloudJobBeganTx(ctx context.Context, tx *storeTx, team, run, node string, now time.Time) (time.Time, error) {
+	var awarded sql.NullInt64
+	if err := tx.QueryRowContext(ctx, `SELECT MIN(awarded_at) FROM billing_awards WHERE team=? AND run_id=? AND node_id=? AND unit_kind=? AND executor_class='cloud'`, team, run, node, capability.UnitNode).Scan(&awarded); err != nil {
+		return time.Time{}, err
+	}
+	if awarded.Valid {
+		return time.Unix(0, awarded.Int64), nil
+	}
+	return now, nil
 }
 
 // safety: awardCacheHostTx returns the host scope of a host that serves many jobs, or "" (the shared

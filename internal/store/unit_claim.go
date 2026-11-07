@@ -50,6 +50,14 @@ func (o *Operator) claimUnit(ctx context.Context, demand UnitDemand) (UnitClaim,
 		if errors.As(err, &unpriced) && unpriced.RunID != "" && unpriced.NodeID != "" {
 			err = errors.Join(err, o.failUnpricedClaim(ctx, demand, unpriced))
 		}
+		var expired *JobDurationLimitError
+		if errors.As(err, &expired) {
+			if failed := o.failExpiredClaim(ctx, demand, expired); failed != nil {
+				err = errors.Join(err, failed)
+			} else {
+				err = notFound("eligible work", "")
+			}
+		}
 		return UnitClaim{}, err
 	}
 	return out, nil

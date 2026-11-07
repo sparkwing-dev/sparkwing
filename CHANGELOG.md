@@ -40,6 +40,7 @@ unlock.
 
 ### Fixed
 
+- **controller:** A Sparkwing Cloud job that reaches its standing job duration limit before an award can start it fails with the new `job_duration_limit` reason, so its run finishes. Previously each later claim was refused with HTTP 400, the launcher logged a claim failure every few seconds and the run stayed running. See [observability](docs/observability.md).
 - **launcher:** Cloud capacity requests require the launcher's `--node-class` through Karpenter's `karpenter.k8s.aws/ec2nodeclass` node label, so a NodePool of another EC2NodeClass that shares the class labels and dedicated taint no longer receives demand the launcher can never reserve. A request bound to a node the launcher still refuses logs a WARN naming the node and the refusal on every pass. Requests created by an older launcher are replaced once on upgrade.
 - **CLI and controller:** GitHub pipeline triggers resolve repository identity through `POST /api/v1/repositories/resolve` on the selected controller. Private repositories covered by the team's GitHub App work from HTTPS and SSH clones without a local GitHub token, with or without `--ref`. The CLI never falls back to anonymous GitHub lookup. Explicit `GH_TOKEN` or `GITHUB_TOKEN` remains available when the controller cannot resolve identity. See [the migration guide](docs/migrations/_unreleased.md#github-trigger-repository-identity).
 
