@@ -1,8 +1,7 @@
 # Placement preferences for repository runs
 
-Status: design, not implemented. Date: 2026-11-07. Implement after local
-controller step 3 (local jobs through the runner path, see
-[local controller restart](proposals/local-controller-restart.md)).
+Status: slices 1-4 implemented; slices 5 (on-demand GitHub Actions) and 6
+(docs and live acceptance) remain. Date: 2026-11-07.
 
 This note is the short version Korey reviews. The longer
 [repository run preferences proposal](proposals/repository-run-preferences.md)
@@ -107,7 +106,7 @@ How it composes with what exists:
 | --- | --- |
 | SDK `Requires`, pipeline `requires` | Hard filter in every tier. A `darwin` job can never fall to a Linux image. |
 | Tier `labels` | Narrow that tier only, never later tiers. |
-| SDK `Prefers` | Orders claimants inside an open tier (open question 2). |
+| SDK `Prefers` | Orders claimants inside an open tier (decided question 2). |
 | Controller `--placement-hold`, `--default-prefer-labels` | Not applied to that job. |
 | Team claim ranking | Still filters which claimant classes are allowed; adds no hold. A listed tier the ranking excludes is a lint error. |
 | Automation `runner: github-actions` or `runner: pool=` | Conflict. Lint names both settings; neither silently wins. |
@@ -118,7 +117,7 @@ Which runs read it: runs whose intake seals repository proof. That is App
 push, pull request and release deliveries, App-armed schedules, and Run now on
 a commit Sparkwing fetched. The policy comes from the verified default-branch
 config, sealed with its revision next to the event's execution revision, so a
-pull request cannot add a paid tier or pick a workflow (open question 3).
+pull request cannot add a paid tier or pick a workflow (decided question 3).
 Unknown job IDs fail at plan acceptance with a located error; generated jobs
 are checked when expansion closes. `sparkwing pipeline lint` prints the
 resolved list for every known job.
@@ -155,7 +154,7 @@ are shown and never resent automatically; earlier tiers stay claimable.
 **Retries and returned awards.** An award returned before start (busy machine,
 failed Cloud capacity) keeps the original ready time, so holds cannot renew
 forever. A new attempt after a started attempt failed gets a fresh ready time
-(open question 5).
+(decided question 5).
 
 **Cancellation.** Cancelling the run or job removes it from ready work,
 invalidates its dispatch intent and cancels the known GitHub run through the
@@ -163,7 +162,7 @@ same API permission. A late workflow runner finds nothing to claim and exits
 idle. A placement hold never preempts an awarded job.
 
 **No tier available.** The job stays queued under today's queue policy with a
-reason per tier. No new timeout or cap is added (open question 4). A tier that
+reason per tier. No new timeout or cap is added (decided question 4). A tier that
 definitely cannot serve (missing workflow, Actions disabled, App permission not
 approved, no Cloud credits) is marked unavailable with its repair, and the
 remaining tiers keep working. A config that can never place, such as
@@ -171,7 +170,7 @@ remaining tiers keep working. A config that can never place, such as
 
 **Cloud-hosted controllers.** Today Cloud intake sends every unpinned App run
 to the launcher. With an explicit list, job units follow the list instead.
-Planning and evaluation keep today's placement (open question 1).
+Planning and evaluation keep today's placement (decided question 1).
 
 ## What the dashboard and CLI show while a job is held
 
@@ -230,7 +229,7 @@ Sizes: S half a day, M one to two days, L three to five days, tests included.
 4. **Pre-release cells on team runners (M).** Split the macOS and Windows checks
    into dispatched jobs with `Requires`, enroll Korey's machines as team
    runners, add the YAML. No fallback yet: if a machine is off, the cell waits
-   visibly (open question 6).
+   visibly (decided question 6).
 5. **On-demand GitHub Actions (L).** App `actions: write` and approval flow,
    owner-approved workflow and images, dispatch intents and sender lease,
    receipt-bound OIDC exchange for tag and PR refs, cancellation, fallback
@@ -268,60 +267,51 @@ Sizes: S half a day, M one to two days, L three to five days, tests included.
   controller between intent and response. Repeat on a Cloud-hosted controller.
   Keep provider run IDs, dispatch counts and timings.
 
-## Open questions
+## Implementation notes (slices 1-4)
 
-1. **Where do planning and evaluation run when jobs have repository tiers?**
-   Options: (a) unchanged, Cloud launcher on Cloud-hosted controllers and the
-   controller owner when self-hosted; (b) follow the pipeline list minus
-   `github-actions`; (c) a separate `planning` list. Recommendation: (a) for
-   now. Planning is short, the first use needs only the cells, and (b) makes a
-   Mac's absence delay every job's plan. Revisit with measured Cloud planning
-   cost. GitHub Actions, CircleCI and Buildkite have no planning unit to place:
-   a dynamic Buildkite pipeline upload is itself an ordinary job on an agent.
-2. **Does SDK `Prefers` hold inside an open repository tier?** Options: (a) it
-   only breaks ties, no hold; (b) it keeps the controller's 20s
-   `--placement-hold` inside each tier. Recommendation: (a). The repository
-   list already states how long to wait; a hidden 20s inside a 5s tier defeats
-   it. None of the three competitors has preferences, only hard selectors.
-3. **Which revision supplies the policy?** Options: (a) verified default-branch
-   config, sealed alongside the event revision; (b) the event's own revision.
-   Recommendation: (a), so a branch or PR cannot add a paid tier or choose a
-   privileged workflow; the run page shows both revisions. GitHub Actions takes
-   `runs-on` from the event's own workflow file, so a PR can target any runner
-   label the repository can reach; CircleCI and Buildkite also take runner
-   selection from the build's own config.
-4. **What happens when no tier is available for a long time?** Options: (a) the
-   job waits under the existing queue policy with per-tier reasons; (b) add a
-   placement deadline that fails the job. Recommendation: (a). A deadline is a
-   new customer-visible limit, so it would need your call. GitHub Actions fails
-   a job queued for 24 hours with no matching runner; CircleCI and Buildkite
-   also queue until a matching runner or agent appears; neither falls back to
-   other capacity.
-5. **Does a retry after a started attempt restart the holds?** Options: (a)
-   fresh ready time for the new attempt; (b) keep the first ready time, so a
-   retry goes straight to later tiers. Recommendation: (a). The crashed runner
-   is offline, so it does not hold anyway, and a healthy preferred runner should
-   get the retry. Unstarted returned awards keep the first ready time either
-   way.
-6. **Ship team-only cells before GitHub fallback?** Options: (a) slices 1-4
-   first, so pre-release runs macOS and Windows on your machines and waits if
-   one is off, then slice 5; (b) hold the cells until slice 5 lands.
-   Recommendation: (a). Pre-release is operator-run, a visible wait is
-   acceptable, and it proves the store engine on real machines before the
-   largest slice.
-7. **How does the App get `actions: write`?** Options: (a) add it to the
-   existing App, so each installation must approve the updated permissions and
-   the tier stays unavailable with an approval link until then; (b) a second
-   App only for dispatch. Recommendation: (a). One App is simpler, existing
-   installations keep working without approval, and only teams that list the
-   tier are prompted. Source tokens stay Contents read.
-8. **Automatic redispatch after an uncertain dispatch?** Options: (a) never
-   automatic; show it and offer an audited operator retry on a new generation;
-   (b) redispatch after a fixed wait. Recommendation: (a). A lost `204` is rare
-   and earlier tiers stay claimable, so a manual retry fits; (b) adds a timeout
-   that needs your approval and can double-bill minutes. GitHub Actions,
-   CircleCI and Buildkite have no equivalent, because none of them dispatches
-   fallback compute on another provider.
+- The only Cloud-only job path on Cloud-hosted controllers is the GitHub App
+  runner setting `cloud`, a hard `class=cloud` requirement. Any runner setting
+  other than `anywhere` therefore conflicts with an explicit list and refuses
+  the run with both settings named, rather than letting the setting win.
+- Funding needs no new check: an unfunded Cloud claimant is ineligible in the
+  claim predicate, so it never holds a later tier and never wins.
+- App-armed schedules do not seal placement yet; they need the default-branch
+  read at firing time. App deliveries and fetched Run now do.
+- Overrides naming no plan job fail plan acceptance unless a job generates
+  others; generated IDs are not checked when expansion closes yet.
+- A `github-actions` tier takes only an Actions runner already polling until
+  slice 5 adds dispatch. The projection says so.
+- `pipeline lint` prints the preview in table and plain output; JSON output
+  keeps findings only.
+
+## Decided questions
+
+Korey decided all eight on 2026-11-07 as recommended; the options and
+competitor comparisons are kept in the
+[proposal](proposals/repository-run-preferences.md).
+
+1. **Planning and evaluation placement is unchanged.** Cloud launcher on
+   Cloud-hosted controllers, the controller owner when self-hosted. Revisit
+   with measured Cloud planning cost.
+2. **SDK `Prefers` only breaks ties inside an open repository tier.** It adds
+   no hold; the controller's 20s `--placement-hold` does not apply to a job
+   with a repository list.
+3. **Policy comes from the verified default-branch config**, sealed with its
+   revision next to the event's execution revision.
+4. **No placement deadline.** A job with no available tier waits under the
+   existing queue policy and shows a reason per tier.
+5. **A retry after a started attempt gets a fresh ready time.** A returned
+   award that never started keeps the original one.
+6. **Team-runner cells ship first.** Slices 1-4 land before slice 5; a cell
+   whose machine is off waits visibly.
+7. **The existing App gains `actions: write`** (slice 5); each installation
+   approves it, and the tier shows an approval link until then.
+8. **Uncertain dispatches are never redispatched automatically** (slice 5); an
+   audited operator retry opens a new generation.
+
+The design agent's calls are ratified too: OS requirements stay in SDK and
+pipeline `requires`; `here`, `machines` and `pool=` stay burst-only; Cloud
+funding is checked when the Cloud tier opens; this note wins over the proposal.
 
 Competitor summary: GitHub Actions routes by `runs-on` labels and runner
 groups and waits for a match; ordered self-hosted-then-hosted fallback needs a
