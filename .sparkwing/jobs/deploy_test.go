@@ -1250,7 +1250,7 @@ func TestDeployBuildsUntaggedMainWithoutARelease(t *testing.T) {
 	}
 }
 
-func TestDeployRepositoryPushStopsAfterStaging(t *testing.T) {
+func TestDeployRepositoryPushRunsThroughProduction(t *testing.T) {
 	file, err := os.Open(filepath.Join("..", "sparkwing.yaml"))
 	if err != nil {
 		t.Fatal(err)
@@ -1261,7 +1261,7 @@ func TestDeployRepositoryPushStopsAfterStaging(t *testing.T) {
 		t.Fatal(err)
 	}
 	entry := cfg.Find("deploy")
-	if entry == nil || entry.Args["stop-after"] != "staging" || entry.On.Push == nil || !slices.Equal(entry.On.Push.Branches, []string{"main"}) {
+	if entry == nil || entry.Args["stop-after"] != "" || entry.On.Push == nil || !slices.Equal(entry.On.Push.Branches, []string{"main"}) {
 		t.Fatalf("push deploy configuration = %+v", entry)
 	}
 }
