@@ -1357,14 +1357,6 @@ func (s *Store) createBaseline(ctx context.Context, path string) error {
 				"(it holds tables but no sparkwing_schema_version); point sparkwing at an empty database")
 		}
 	default:
-		// safety: only pre-rewrite stores have sparkwing_meta (schema 4, v0.10.0, onward); the rewrite never creates it.
-		preRewrite, err := tableExists(ctx, tx, "sparkwing_meta")
-		if err != nil {
-			return fmt.Errorf("inspect the store's schema: %w", err)
-		}
-		if preRewrite {
-			return preRewriteStoreError(version, path)
-		}
 		if version > expectedSchemaVersion {
 			return schemaMismatchError(version, path)
 		}
