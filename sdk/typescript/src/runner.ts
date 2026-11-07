@@ -9,7 +9,8 @@ import { noMemo } from "./helpers/memo.ts";
 import { makeContext } from "./context.ts";
 import { decodeError, errorFields, failure, messageOf, object, string } from "./errors.ts";
 import type { LineSink } from "./log.ts";
-import { jsonOutput, jsonValue, readRequests, stringMap, validateRequest, writeReply, type Request } from "./protocol.ts";
+import { isHostLine, jsonOutput, jsonValue, readRequests, stringMap, validateRequest, writeFrame, writeReply, type HostLine, type Request } from "./protocol.ts";
+import type { HostExec, HostExecRequest, HostExecResult } from "./command.ts";
 import { NodeRoutes, type HostServices, type ProcessRoutes } from "./routes.ts";
 import { runScope } from "./scope.ts";
 import { StepState } from "./step-state.ts";
@@ -25,6 +26,14 @@ interface Planned {
   run: RunContext;
   definition: PipelineDef;
 }
+interface PendingExec {
+  stdout: Buffer[];
+  stderr: Buffer[];
+  capture: boolean;
+  resolve: (result: HostExecResult) => void;
+  reject: (error: unknown) => void;
+  release: () => void;
+}
 interface Active {
   job: string;
   step?: string;
@@ -36,7 +45,10 @@ interface Active {
 export async function serve(options: ServeOptions): Promise<void> {
   const session = new Session(options);
   try {
-    for await (const request of readRequests(options.input)) session.answer(request);
+    for await (const value of readRequests(options.input)) {
+      if (isHostLine(value)) session.hostLine(value);
+      else session.answer(value);
+    }
   } finally {
     await session.close();
   }
@@ -59,6 +71,8 @@ class Session {
   readonly #generatedArguments = new Map<string, DescribeArg[]>();
   #evalReady: Promise<void> = Promise.resolve();
   readonly #originalEnv = new Map<string, string | undefined>();
+  readonly #execs = new Map<string, PendingExec>();
+  #execSeq = 0;
   constructor(options: ServeOptions) {
     this.#options = options;
     this.#frames = {
@@ -69,12 +83,61 @@ class Session {
   }
   async close(): Promise<void> {
     this.#done = true;
+    for (const pending of this.#execs.values()) {
+      pending.release();
+      pending.reject(new Error("host closed the protocol session before the command finished"));
+    }
+    this.#execs.clear();
     for (const { controller } of this.#active.values()) controller.abort(new Error("host closed request pipe"));
     await Promise.all([...this.#active.values()].map((active) => active.done));
     for (const [key, value] of this.#originalEnv) {
       if (value === undefined) delete process.env[key];
       else process.env[key] = value;
     }
+  }
+  // hostExec hands one command to the host, which owns its process tree, masking and cleanup.
+  readonly #hostExec: HostExec = (request: HostExecRequest, signal: AbortSignal) =>
+    new Promise<HostExecResult>((resolve, reject) => {
+      if (this.#done) {
+        reject(new Error("host closed the protocol session before the command started"));
+        return;
+      }
+      const id = String(++this.#execSeq);
+      // safety: keep waiting after a cancel so the result reports how the killed command ended.
+      const cancel = () => writeFrame(this.#frames, { exec_cancel: id });
+      const release = () => signal.removeEventListener("abort", cancel);
+      this.#execs.set(id, { stdout: [], stderr: [], capture: request.capture, resolve, reject, release });
+      writeFrame(this.#frames, {
+        exec: id,
+        ...(request.step === undefined ? {} : { step: request.step }),
+        argv: request.argv,
+        dir: request.dir,
+        env: request.env,
+        ...(request.capture ? { capture: true } : {}),
+        ...(request.stdin === undefined ? {} : { stdin: Buffer.from(request.stdin).toString("base64") }),
+      });
+      signal.addEventListener("abort", cancel, { once: true });
+      if (signal.aborted) cancel();
+    });
+  hostLine(line: HostLine): void {
+    const id = String(line.exec_output ?? line.exec_done);
+    const pending = this.#execs.get(id);
+    if (!pending) throw failure("protocol_error", "host sent output for an unknown command");
+    const bytes = (value: unknown) => Buffer.from(typeof value === "string" ? value : "", "base64");
+    if (line.exec_output !== undefined) {
+      (line.stream === "stderr" ? pending.stderr : pending.stdout).push(bytes(line.data));
+      return;
+    }
+    this.#execs.delete(id);
+    pending.release();
+    pending.resolve({
+      exitCode: Number(line.exit_code),
+      signaled: line.signaled === true,
+      ...(typeof line.start_error === "string" ? { startError: line.start_error } : {}),
+      notFound: line.not_found === true,
+      stdout: pending.capture ? Buffer.concat(pending.stdout) : bytes(line.stdout),
+      stderr: pending.capture ? Buffer.concat(pending.stderr) : bytes(line.stderr),
+    });
   }
   answer(req: Request): void {
     if (this.#ids.has(req.id)) throw failure("protocol_error", "duplicate request id");
@@ -244,6 +307,7 @@ class Session {
       definition,
       outputs,
       bodyEnv: env,
+      ...(this.#hostFeatures.includes("host_exec") ? { hostExec: this.#hostExec } : {}),
       ...(failureInfo === undefined ? {} : { failure: failureInfo }),
       ...(this.#services === undefined ? {} : { services: this.#services }),
     });

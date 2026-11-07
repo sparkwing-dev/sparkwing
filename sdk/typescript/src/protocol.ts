@@ -14,8 +14,17 @@ export interface Request {
 }
 export type Reply = { reply: string; ok: true; result: unknown } | { reply: string; ok: false; error: ErrorFields };
 export class UnanswerableRequest extends Error {}
+// HostLine carries a host-run command's captured output or its result; it answers an exec frame.
+export interface HostLine {
+  exec_output?: string;
+  exec_done?: string;
+  [field: string]: unknown;
+}
+export function isHostLine(value: Request | HostLine): value is HostLine {
+  return typeof value.exec_output === "string" || typeof value.exec_done === "string";
+}
 
-export async function* readRequests(input: Readable): AsyncGenerator<Request> {
+export async function* readRequests(input: Readable): AsyncGenerator<Request | HostLine> {
   const decoder = new StringDecoder("utf8");
   let pending = "";
   for await (const chunk of input) {
@@ -32,13 +41,14 @@ export async function* readRequests(input: Readable): AsyncGenerator<Request> {
   pending += decoder.end();
   if (pending.trim()) yield parseRequest(pending);
 }
-function parseRequest(line: string): Request {
+function parseRequest(line: string): Request | HostLine {
   let value: unknown;
   try {
     value = parseJSON(line);
   } catch {
     throw new UnanswerableRequest("request is not JSON");
   }
+  if (value !== null && typeof value === "object" && !Array.isArray(value) && isHostLine(value as HostLine)) return value as HostLine;
   if (
     value === null ||
     typeof value !== "object" ||

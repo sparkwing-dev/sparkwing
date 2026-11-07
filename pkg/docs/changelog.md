@@ -22,6 +22,8 @@ unlock.
 
 ### Breaking
 
+- **SDK (Breaking):** When the host runs a command, `Run` (Go `Cmd.Run`, TypeScript `run()`) returns only the last 64 KiB of each of stdout and stderr; the whole output stays in the job log. Pipelines that parse `Run` output should use `Capture`. See [the migration guide](docs/migrations/_unreleased.md#parse-command-output-with-capture).
+
 - **local controller (Breaking):** The schema baseline advances to version 33, adding durable runner process identities and lifecycle state. Recognized schema 32 stores upgrade in place. Older binaries refuse the upgraded store. See [the migration guide](docs/migrations/_unreleased.md#upgrade-the-store-in-place-to-schema-baseline-33).
 
 - **CLI (Breaking):** Repository pin upgrades move from `sparkwing upgrade` to `sparkwing pipeline upgrade`. The obsolete `sparkwing daemon recover-state` command is removed because machine admission now lives in `state.db`. See [the migration guide](docs/migrations/_unreleased.md#upgrade-the-store-in-place-to-schema-baseline-31).
@@ -31,6 +33,8 @@ unlock.
 - **local controller (Breaking):** The local controller remains running while idle, so a new client cannot race its idle shutdown. Removed `POST /api/v1/local/controller/stay`, `LocalControl.stay`, `LocalControlStatus.stay`, `LocalControlStatus.idle_since`, daemon status `stay`, and `--stay` from `sparkwing dashboard start` and `sparkwing wingd run`. Explicit `sparkwing daemon stop` still stops it. See [the migration guide](docs/migrations/_unreleased.md#local-controllers-remain-running-while-idle).
 
 ### Added
+
+- **SDK protocol:** Hosts on Linux and macOS offer `host_exec` in hello. Go and TypeScript SDKs that see it hand `Exec`/`Bash` (`ctx.exec`/`ctx.bash`) commands to the host, which owns the process tree, writes output straight to the masked job log, relays captured output and kills commands on cancellation. Older SDKs and older hosts keep SDK-side execution. Host-run commands never receive engine-minted credentials such as `SPARKWING_NODE_TOKEN`, which Go SDKs previously passed through when a pipeline set them.
 
 - **local controller:** Verified socket peers register, activate, drain and observe runner instances under `/api/v1/local/runners`. `GET /api/v1/local/runners?state=active` discovers the persisted active instance for the socket account. Activation atomically enables a successor and stops the prior instance's new queue claims and owner self-claims. Held owners can await children while the successor executes newly ready dependencies. An independent lifecycle watch drains saturated loops while held awards finish. On Linux and macOS, queued work runs in a separate process or service that survives controller replacement. Matching live runners are reused; a new executable starts a successor while the old runner drains. Dependencies keep their accepted development engine from retained executable bytes. Windows queued hosting remains embedded. Foreground local runs without publication execute in the runner while the CLI observes persisted output, reconnects reads through controller outages, and preserves first-interrupt cancellation and second-interrupt detachment. Standalone, foreground publication and remote here execution retain CLI hosting. See [the migration guide](docs/migrations/_unreleased.md#upgrade-the-store-in-place-to-schema-baseline-33).
 

@@ -11,7 +11,26 @@ type Emitter = (event: string, attrs: Record<string, unknown>) => void;
 interface CommandBinding {
   emit: Emitter;
   env: Readonly<Record<string, string>>;
+  hostExec?: HostExec;
 }
+export interface HostExecRequest {
+  step?: string;
+  argv: readonly string[];
+  dir: string;
+  env: string[];
+  capture: boolean;
+  stdin?: string;
+}
+// Logged commands return at most the last 64 KiB of each stream; the job log keeps the rest.
+export interface HostExecResult {
+  exitCode: number;
+  signaled: boolean;
+  startError?: string;
+  notFound: boolean;
+  stdout: Buffer;
+  stderr: Buffer;
+}
+export type HostExec = (request: HostExecRequest, signal: AbortSignal) => Promise<HostExecResult>;
 const bindings = new WeakMap<Context, CommandBinding>();
 
 export class ExecError extends Error implements ExecResult {
@@ -52,8 +71,8 @@ function boundedCommand(command: string): string {
   return `${bytes.subarray(0, cut).toString()}... [${bytes.length - cut} more bytes]`;
 }
 
-export function registerCommandContext(ctx: Context, emit: Emitter, env: Readonly<Record<string, string>> = {}): void {
-  bindings.set(ctx, { emit, env: { ...env } });
+export function registerCommandContext(ctx: Context, emit: Emitter, env: Readonly<Record<string, string>> = {}, hostExec?: HostExec): void {
+  bindings.set(ctx, { emit, env: { ...env }, ...(hostExec === undefined ? {} : { hostExec }) });
 }
 
 function binding(ctx: Context): CommandBinding {
@@ -76,7 +95,7 @@ function deriveContext(ctx: Context, signal: AbortSignal, env: Readonly<Record<s
           : ctx.bash.call(derived, script, { ...options, env: { ...env, ...options?.env } }),
     },
   });
-  if (registered) registerCommandContext(derived, binding(ctx).emit, env);
+  if (registered) registerCommandContext(derived, binding(ctx).emit, env, binding(ctx).hostExec);
   return derived;
 }
 
@@ -193,6 +212,23 @@ export async function runCommand(ctx: Context, argv: readonly [string, ...string
   try {
     if (ctx.signal.aborted) throw new ExecError(result, "cancellation", ctx.signal.reason);
     const cwd = options.cwd !== undefined && isAbsolute(options.cwd) ? options.cwd : resolve(projectRoot(), options.cwd ?? "");
+    const hostExec = binding(ctx).hostExec;
+    // Output callbacks need the bytes as they arrive, so those commands stay in the SDK.
+    if (hostExec && !options.stdout && !options.stderr) {
+      const reply = await hostCommand(ctx, hostExec, argv, cwd, options);
+      result = { command, stdout: reply.stdout.toString("utf8"), stderr: reply.stderr.toString("utf8"), exitCode: reply.exitCode };
+      if (reply.startError !== undefined) {
+        result = { command, stdout: "", stderr: "", exitCode: exitNotStarted };
+        throw new ExecError(result, "", Object.assign(new Error(reply.startError), reply.notFound ? { code: "ENOENT" } : {}));
+      }
+      if (ctx.signal.aborted && (reply.signaled || reply.exitCode !== 0)) {
+        result = { ...result, exitCode: exitNotStarted };
+        throw new ExecError(result, "cancellation", ctx.signal.reason);
+      }
+      if (reply.signaled) throw new ExecError(result, "signal", new Error("process received a signal"));
+      if (result.exitCode !== 0) throw new ExecError(result);
+      return result;
+    }
     const child = spawn(argv[0], argv.slice(1), {
       cwd,
       env: commandEnv(ctx, options),
@@ -213,6 +249,22 @@ export async function runCommand(ctx: Context, argv: readonly [string, ...string
   } finally {
     emit("exec_end", { command, exit_code: result.exitCode, duration_ms: performance.now() - started, terminated });
   }
+}
+
+function hostCommand(ctx: Context, hostExec: HostExec, argv: readonly string[], dir: string, options: CommandOptions): Promise<HostExecResult> {
+  const env: string[] = [];
+  for (const [name, value] of Object.entries(commandEnv(ctx, options))) if (value !== undefined) env.push(`${name}=${value}`);
+  return hostExec(
+    {
+      ...(ctx.stepId === undefined ? {} : { step: ctx.stepId }),
+      argv,
+      dir,
+      env,
+      capture: options.capture === true,
+      ...(options.input === undefined ? {} : { stdin: options.input }),
+    },
+    ctx.signal,
+  );
 }
 
 interface Completion {

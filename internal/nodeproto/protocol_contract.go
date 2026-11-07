@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"reflect"
+	"runtime"
 	"slices"
 	"time"
 
@@ -49,16 +50,24 @@ type Request struct {
 	Input    json.RawMessage   `json:"input,omitempty"`
 	// Target identifies the active request cancelled by OpCancel, including eval without job/step.
 	Target string `json:"target,omitempty"`
-	// Features names the optional plan declarations this host accepts. Hello only; an SDK leaves a
-	// declaration the host does not name out of the plan, so an older host still accepts it.
+	// Features names the optional plan declarations and services this host accepts. Hello only; an
+	// SDK leaves a declaration the host does not name out of the plan, so an older host still
+	// accepts it, and uses a service only when the host names it.
 	Features []string `json:"features,omitempty"`
 }
 
 // FeatureJobCores is the hello feature for a job's declared core request.
 const FeatureJobCores = "job_cores"
 
-// HostFeatures lists the optional plan declarations this host accepts.
-func HostFeatures() []string { return []string{FeatureJobCores} }
+// HostFeatures lists the optional plan declarations and services this host accepts.
+// Host exec needs Unix sessions to kill a command's whole tree, so Windows hosts leave
+// commands to the SDK.
+func HostFeatures() []string {
+	if runtime.GOOS == "windows" {
+		return []string{FeatureJobCores}
+	}
+	return []string{FeatureJobCores, FeatureHostExec}
+}
 
 // EngineIdentity permits actionable mismatch diagnostics without stamping every request.
 type EngineIdentity struct {
@@ -152,10 +161,12 @@ type FrameLog struct {
 	Attrs      json.RawMessage `json:"attrs,omitempty"`
 }
 
-// Frame represents either a reply or log record on the isolated frame pipe, never stdout.
+// Frame represents one reply, log record or host exec request on the isolated frame pipe, never stdout.
 type Frame struct {
-	Reply *Reply
-	Log   *FrameLog
+	Reply      *Reply
+	Log        *FrameLog
+	Exec       *ExecRequest
+	ExecCancel *ExecCancel
 }
 
 // ParseRequest ignores additive fields, checks operation fields and decodes failure.error with apierr.DecodeInner.
@@ -188,9 +199,16 @@ func ParseRequest(line []byte) (Request, error) {
 
 // ParseFrame rejects ambiguous frames and uses apierr.DecodeInner for reply errors; unknown log events remain readable.
 func ParseFrame(line []byte) (Frame, error) {
+	if frame, ok := parseExecFast(line); ok {
+		return frame, nil
+	}
 	obj, err := protocolObject(line)
 	if err != nil {
 		return Frame{}, err
+	}
+	_, exec := obj["exec"]
+	if _, cancel := obj["exec_cancel"]; exec || cancel {
+		return parseExecFrame(obj, line)
 	}
 	if _, reply := obj["reply"]; reply {
 		if _, log := obj["ts"]; log {

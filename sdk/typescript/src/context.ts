@@ -1,5 +1,5 @@
 import type { Annotation, Args, Context, Failure, PipelineDef, RunContext } from "../index.d.ts";
-import { createCommand, registerCommandContext } from "./command.ts";
+import { createCommand, registerCommandContext, type HostExec } from "./command.ts";
 import { SDKError, failure } from "./errors.ts";
 import { LogWriter, type LineSink } from "./log.ts";
 import type { HostServices } from "./routes.ts";
@@ -16,6 +16,7 @@ export interface ContextOptions {
   services?: HostServices;
   outputs: ReadonlyMap<string, unknown>;
   bodyEnv?: Record<string, string>;
+  hostExec?: HostExec;
 }
 export function makeContext(options: ContextOptions): Context {
   const { run, signal, jobId } = options;
@@ -65,7 +66,7 @@ export function makeContext(options: ContextOptions): Context {
     exec: (argv, opts) => createCommand(ctx, argv, opts),
     bash: (script, opts) => createCommand(ctx, ["bash", "-c", script], opts),
   };
-  registerCommandContext(ctx, (event, attrs) => log.event(event, attrs), options.bodyEnv);
+  registerCommandContext(ctx, (event, attrs) => log.event(event, attrs), options.bodyEnv, options.hostExec);
   return ctx;
 }
 function checkAnnotation(annotation: Annotation): void {

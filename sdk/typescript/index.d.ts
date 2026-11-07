@@ -297,6 +297,7 @@ export interface Cmd {
   dir(path: string): this;
   env(name: string, value: string): this;
   envMap(values: Readonly<Record<string, string>>): this;
+  /** Logs output; when the host runs the command, the result keeps the last 64 KiB of each stream. */
   run(): Promise<ExecResult>;
   capture(): Promise<ExecResult>;
   string(): Promise<string>;

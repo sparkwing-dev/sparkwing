@@ -240,7 +240,9 @@ func (c *Cmd) EnvMap(env map[string]string) *Cmd {
 
 // Run executes the command, forwarding stdout/stderr bytes to
 // the logger installed in ctx. The host masks and splits them into lines. Returns an ExecResult on success, or
-// an *ExecError on non-zero exit / failure to start.
+// an *ExecError on non-zero exit / failure to start. When the host runs the
+// command itself, the result keeps only the last 64 KiB of each stream; use
+// Capture for the whole output.
 func (c *Cmd) Run() (ExecResult, error) {
 	return c.execute(false)
 }
@@ -410,6 +412,9 @@ func execCmd(ctx context.Context, name string, args []string, dir string, extraE
 	Debug(ctx, "exec: %s (dir=%s)", display, dir)
 	if len(extraEnv) > 0 {
 		Debug(ctx, "exec env: %s", formatEnvDiff(extraEnv))
+	}
+	if run, ok := sdkserve.HostExec(ctx); ok {
+		return hostExecCmd(ctx, run, display, name, args, dir, extraEnv)
 	}
 
 	// safety: own the pipes so Cmd.Wait cannot close them before reader

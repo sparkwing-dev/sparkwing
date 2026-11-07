@@ -18,6 +18,9 @@ type planningOutput struct {
 	level, text string
 	timestamp   string
 	eof         bool
+	// key and base carry a host-read byte stream, which needs no base64 round trip.
+	key  string
+	base nodeproto.FrameLog
 }
 
 type planningLogs struct {
@@ -45,6 +48,11 @@ func (l *planningLogs) write(ctx context.Context, record nodeproto.FrameLog) err
 
 func (l *planningLogs) text(ctx context.Context, level, text string, eof bool) error {
 	return l.output(ctx, planningOutput{level: level, text: text, timestamp: time.Now().UTC().Format(time.RFC3339Nano), eof: eof}, len(text)+64)
+}
+
+// stream writes raw command output the host read itself under base's attribution.
+func (l *planningLogs) stream(ctx context.Context, key string, base nodeproto.FrameLog, chunk []byte, eof bool) error {
+	return l.output(ctx, planningOutput{key: key, base: base, text: string(chunk), eof: eof}, len(chunk)+len(base.Step)+128)
 }
 
 func (l *planningLogs) output(ctx context.Context, output planningOutput, size int) error {
@@ -136,6 +144,8 @@ func (l *planningLogs) emit(ctx context.Context, output planningOutput) error {
 			l.err = err
 			return err
 		}
+	} else if output.key != "" {
+		frames = l.presenter.Text(output.key, output.base, output.text, output.eof)
 	} else {
 		frames = l.presenter.Text("raw:"+output.level, nodeproto.FrameLog{Level: output.level, TS: output.timestamp}, output.text, output.eof)
 	}

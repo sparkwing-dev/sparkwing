@@ -1,5 +1,24 @@
 # Migrating to the next release
 
+## Parse command output with Capture
+
+Hosts on Linux and macOS now run SDK commands themselves. A command run with `Run`
+writes its output straight to the masked job log, and its result keeps only the last
+64 KiB of stdout and of stderr, enough for error messages. Code that reads
+`Run`'s `Stdout` or `stdout` must switch to `Capture`, which returns every byte and
+writes nothing to the log:
+
+```go
+res, err := sparkwing.Exec(ctx, "go", "list", "./...").Capture()
+```
+
+```ts
+const res = await ctx.exec(["go", "list", "./..."]).capture();
+```
+
+`String`, `Lines`, `JSON` and `MustBeEmpty` (`string()`, `lines()`, `json()` and
+`mustBeEmpty()`) already capture and need no change.
+
 ## Upgrade the store in place to schema baseline 33
 
 Schema 33 adds `local_runner_instances` to the recognized schema 32 baseline in

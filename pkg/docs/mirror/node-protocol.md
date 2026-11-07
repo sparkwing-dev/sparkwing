@@ -58,7 +58,9 @@ The SDK's optional operations are advertised in hello's `features` array.
 The host's hello request may carry its own `features` array naming optional
 plan declarations it accepts. An SDK leaves a declaration out of the plan when
 the host does not name it, so a newer pipeline still plans on an older host.
-Today the only host feature is `job_cores`, which admits a job's `cores`.
+Host features are `job_cores`, which admits a job's `cores`, and `host_exec`,
+which offers to run the SDK's commands (Unix hosts only; see
+[Host-run commands](#host-run-commands)).
 
 ## Framing
 
@@ -305,6 +307,38 @@ has stopped. That operation also receives its own reply.
 <- {"reply":"7","ok":false,"error":{"code":"cancelled","message":"evaluation cancelled"}}
 <- {"reply":"8","ok":true,"result":{}}
 ```
+
+### Host-run commands
+
+When hello names `host_exec`, an SDK sends each command as a frame instead of
+spawning it, and the host owns the process: it starts the command in its own
+session, masks and logs its output, kills the session on cancellation or when the
+SDK session ends, and records it for crash cleanup. `env` is the complete
+environment the SDK would have used, so pipeline changes to its own environment
+still apply; the host drops engine-minted credentials such as
+`SPARKWING_NODE_TOKEN`. `dir` must be absolute. A Go SDK resolves the executable
+against its own `PATH`, as `exec.Command` did, and sends it as `path`. Without
+`path` the host searches as Node's spawn does: `PATH` from `env`, relative and empty
+entries against `dir`, and `/bin:/usr/bin` when `env` has no `PATH`. Children a
+command leaves running in the background survive its exit, as they did under the
+SDK, and the host kills them when the SDK session ends.
+
+```text
+<- {"exec":"4","step":"compile","argv":["go","build","./..."],"dir":"/repo","env":["PATH=/usr/bin:/bin","LANG=C.UTF-8"]}
+-> {"exec_done":"4","exit_code":0,"stderr":"Z286IGRvd25sb2FkaW5nCg=="}
+```
+
+Without `capture` the host writes output to the job log as `exec_line` records
+and the result carries at most the last 64 KiB of each stream, base64 encoded,
+for error messages. With `"capture":true` nothing is logged and every byte returns
+in order as `{"exec_output":"<id>","stream":"stdout"|"stderr","data":"<base64>"}`
+lines before the result. An optional base64 `stdin` is written to the command.
+`{"exec_cancel":"<id>"}` kills a running command; its `exec_done` still follows,
+with `signaled: true`. A command that never started has `exit_code: -1`, a
+`start_error` and `not_found: true` when the executable is missing. Host lines
+share the request pipe and are identified by their first key. Commands that need
+their output as it arrives, such as TypeScript output callbacks, still run in the
+SDK, as do all commands under an older host.
 
 ## Host service routes
 
