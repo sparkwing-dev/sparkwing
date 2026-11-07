@@ -1,8 +1,14 @@
+const STORAGE_KEY = "sparkwing.localSession";
+export const LOCAL_LOGIN_PATH = "/login";
 export const LOCAL_LOGOUT_PATH = "/logout";
 
 type BrowserWindow = {
   __SPARKWING_REQUIRE_LOGIN__?: string;
-  document?: { cookie?: string };
+  localStorage?: Storage;
+  location?: { hash?: string; pathname?: string; search?: string };
+  history?: {
+    replaceState?: (data: unknown, unused: string, url?: string) => void;
+  };
 };
 
 function browser(): BrowserWindow | null {
@@ -19,20 +25,78 @@ export function signInRequired(): boolean {
   return browser()?.__SPARKWING_REQUIRE_LOGIN__ === "true";
 }
 
-// The session cookie is HttpOnly; this marker cookie carries no authority and
-// only tells the page that a sign-out has something to end.
-export function localSignedIn(): boolean {
-  if (!localDashboard()) return false;
-  const cookie = browser()?.document?.cookie ?? "";
-  return cookie.split(";").some((part) => part.trim() === "sw_dashboard_signed_in=1");
+export function codeFromFragment(hash: string | undefined): string | null {
+  const match = /(?:^#|&)code=([^&]+)/.exec(hash ?? "");
+  return match ? decodeURIComponent(match[1]) : null;
 }
 
-// The local session is an HttpOnly cookie, so the browser sends it and the
-// Origin header the controller requires on this write.
-// A 401 means the session had already ended; any other failure leaves it live,
-// so it rejects for the caller to say so.
+let exchange: Promise<void> | null = null;
+
+// The sign-in code arrives in the fragment, which the browser never sends to a
+// server. It leaves history before the exchange, so neither a reload nor the
+// back button can present it again. It returns null when nothing is pending,
+// so ordinary requests start without waiting a tick.
+export function ensureLocalSignIn(): Promise<void> | null {
+  const w = browser();
+  if (!w || !localDashboard()) return null;
+  if (exchange) return exchange;
+  const code = codeFromFragment(w.location?.hash);
+  if (!code) return null;
+  w.history?.replaceState?.(
+    null,
+    "",
+    `${w.location?.pathname ?? "/"}${w.location?.search ?? ""}`,
+  );
+  exchange = fetch(LOCAL_LOGIN_PATH, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ code }),
+  })
+    .then(async (res) => {
+      if (!res.ok) return;
+      const grant = (await res.json()) as { token?: unknown };
+      if (typeof grant.token === "string" && grant.token !== "") {
+        w.localStorage?.setItem(STORAGE_KEY, grant.token);
+      }
+    })
+    .catch(() => undefined)
+    .finally(() => {
+      exchange = null;
+    });
+  return exchange;
+}
+
+// localStorage belongs to this exact origin, port included, so another service
+// on the same host cannot read the token the way it would receive a cookie.
+export function localSession(): string | null {
+  const w = browser();
+  if (!w || !localDashboard()) return null;
+  try {
+    return w.localStorage?.getItem(STORAGE_KEY) ?? null;
+  } catch {
+    return null;
+  }
+}
+
+export function localSignedIn(): boolean {
+  return localSession() !== null;
+}
+
+export function localAuthHeaders(): Record<string, string> {
+  const session = localSession();
+  return session ? { Authorization: `Bearer ${session}` } : {};
+}
+
+// The token is forgotten only once the controller has revoked it; a 401 means
+// it had already ended. Any other failure leaves it live, so this rejects.
 export async function logOutLocal(): Promise<void> {
-  const res = await fetch(LOCAL_LOGOUT_PATH, { method: "POST" });
-  if (res.ok || res.status === 401) return;
-  throw new Error(`sign-out failed (HTTP ${res.status}); the session is still active`);
+  const headers = localAuthHeaders();
+  if (!headers.Authorization) return;
+  const res = await fetch(LOCAL_LOGOUT_PATH, { method: "POST", headers });
+  if (!res.ok && res.status !== 401) {
+    throw new Error(`sign-out failed (HTTP ${res.status}); the session is still active`);
+  }
+  try {
+    browser()?.localStorage?.removeItem(STORAGE_KEY);
+  } catch {}
 }

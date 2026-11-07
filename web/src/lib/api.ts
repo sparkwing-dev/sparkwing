@@ -1,4 +1,5 @@
 import { readSupportContact } from "./support";
+import { ensureLocalSignIn, localAuthHeaders } from "./localSession";
 import { listPages } from "./listPages";
 import { readCSRFCookie } from "./csrfCookie";
 import type { LogCompleteness } from "./logCompleteness";
@@ -106,14 +107,18 @@ export function authFetch(
   }
   const controller = new AbortController();
   const timeout = timeoutMs === null ? undefined : setTimeout(() => controller.abort(), timeoutMs);
-  return fetch(url, {
-    ...opts,
-    headers: {
-      ...opts.headers,
-      ...getSessionCSRFHeaders(opts.method),
-    },
-    signal: controller.signal,
-  })
+  const send = () =>
+    fetch(url, {
+      ...opts,
+      headers: {
+        ...opts.headers,
+        ...getSessionCSRFHeaders(opts.method),
+        ...localAuthHeaders(),
+      },
+      signal: controller.signal,
+    });
+  const signIn = ensureLocalSignIn();
+  return (signIn ? signIn.then(send) : send())
     .then((res) => {
       if (res.status === 429) {
         _backoffUntil = Date.now() + 10_000;
