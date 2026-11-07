@@ -867,13 +867,17 @@ func (d *deployer) addProfile(ctx context.Context, profile, url, tokenParam stri
 		if err != nil {
 			return err
 		}
-		file, err := d.secretFile("token-"+profile, token)
-		if err != nil {
-			return err
-		}
-		_, err = d.sw(ctx, file, "profiles", "add", "--profile", profile, "--controller", url, "--token-stdin")
-		return errors.Join(err, os.Remove(file))
+		return d.profileToken(ctx, profile, url, token)
 	})
+}
+
+func (d *deployer) profileToken(ctx context.Context, profile, url, token string) error {
+	file, err := d.secretFile("token-"+profile, token)
+	if err != nil {
+		return err
+	}
+	_, err = d.sw(ctx, file, "profiles", "add", "--profile", profile, "--controller", url, "--token-stdin")
+	return errors.Join(err, os.Remove(file))
 }
 
 func (d *deployer) triggerRun(ctx context.Context, profile, pipeline, checkout, ref string, runID *string, pipelineArgs ...string) error {
@@ -958,7 +962,12 @@ func (d *deployer) stagingGate(ctx context.Context, images deployImages) (stagin
 	if err := d.triggerRun(ctx, profile, d.cfg.ReferenceName, reference, "", &rec.ReferenceRun); err != nil {
 		return rec, err
 	}
-	return rec, errors.Join(d.followRun(ctx, profile, &rec.SmokeRun), d.followRun(ctx, profile, &rec.ReferenceRun))
+	if err := errors.Join(d.followRun(ctx, profile, &rec.SmokeRun), d.followRun(ctx, profile, &rec.ReferenceRun)); err != nil {
+		return rec, err
+	}
+	var err error
+	rec.ScanRun, err = d.submitScan(ctx, d.cfg.Staging, images)
+	return rec, err
 }
 
 // safety: nodes outlive a run only briefly, so NodeClaims are sampled while

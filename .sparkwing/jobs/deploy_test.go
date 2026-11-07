@@ -259,17 +259,15 @@ func TestDeployPlanShape(t *testing.T) {
 	}
 	full := deps(nil)
 	want := map[string][]string{
-		"build-images":    nil,
-		"staging-deploy":  {"build-images"},
-		"staging-gate":    {"build-images", "staging-deploy"},
-		"production":      {"build-images", "staging-gate"},
-		"staging-scan":    {"staging-deploy"},
-		"production-scan": {"production"},
+		"build-images":   nil,
+		"staging-deploy": {"build-images"},
+		"staging-gate":   {"build-images", "staging-deploy"},
+		"production":     {"build-images", "staging-gate"},
 	}
 	if fmt.Sprint(full) != fmt.Sprint(want) {
 		t.Fatalf("full plan = %v, want %v", full, want)
 	}
-	if got := deps(map[string]string{"stop-after": "staging"}); len(got) != 4 || got["production"] != nil {
+	if got := deps(map[string]string{"stop-after": "staging"}); len(got) != 3 || got["production"] != nil {
 		t.Fatalf("stop-after staging plan = %v", got)
 	}
 	proven := deps(map[string]string{"promote-proven": "true"})
@@ -287,9 +285,9 @@ func TestDeployPlanRequiresDeployRunner(t *testing.T) {
 		args map[string]string
 		jobs int
 	}{
-		{"full", nil, 6},
-		{"staging", map[string]string{"stop-after": "staging"}, 4},
-		{"promote-proven", map[string]string{"promote-proven": "true"}, 4},
+		{"full", nil, 4},
+		{"staging", map[string]string{"stop-after": "staging"}, 3},
+		{"promote-proven", map[string]string{"promote-proven": "true"}, 3},
 	} {
 		for _, mode := range []string{"real", "dry-run", "sw-dry-run"} {
 			t.Run(shape.name+"/"+mode, func(t *testing.T) {
@@ -586,6 +584,7 @@ func (f *fakeDeploy) config() deployConfig {
 	cfg.GitopsURL = f.bare
 	cfg.ReferenceURL = f.repo
 	cfg.ToolDir = ""
+	cfg.BitwingHome = ""
 	return cfg
 }
 

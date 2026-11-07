@@ -37,7 +37,7 @@ func (Deploy) Help() string {
 		"Take a manual snapshot before a risky migration. Each environment's deployed and previous digests are that job's output. Credentials come from this run's OIDC token: the sparkwing-deploy role reads the GitOps deploy key and the fixture tokens " +
 		"from SSM; no key is stored with the pipeline. Only a run the GitHub App started for a push to main can assume that role, so --stop-after, --promote-proven and --version reach a real deploy only through args " +
 		"in .sparkwing/sparkwing.yaml; on the command line they work with --dry-run, which prints every action without taking any. Every deploy job refuses a commit that is no longer the tip of origin/main, and " +
-		"production refuses a version below the one it runs, so retrying an old run cannot roll production back. After each rollout, a post-deploy scan runs the full example at the deployed revision alongside promotion. Scan failures upsert a stable per-environment Bitwing finding and fail the scan job on this deploy run; a clean scan resolves the finding. An unavailable check reports could-not-run and preserves earlier findings. Argo refresh requires patch permission on the two named applications; the deploy toolchain must include bitwing with access to the shared ledger. The deploy concurrency slot stays held until scans finish."
+		"production refuses a version below the one it runs, so retrying an old run cannot roll production back. After each successful environment smoke, deploy submits a revision-bound deploy-scan pipeline and links it in the job summary without awaiting it. Scans use their own concurrency group, leaving the deploy slot free when promotion finishes. Scan failures upsert a stable per-environment Bitwing finding; a clean scan resolves it. An unavailable check reports could-not-run and preserves earlier findings. Argo refresh requires patch permission on the two named applications. The deploy toolchain must include bitwing with shared-ledger access; deploy-scan uses scoped fixture secrets rather than the deploy AWS role."
 }
 
 func (Deploy) Examples() []sparkwing.Example {
@@ -94,8 +94,6 @@ func (p *Deploy) Plan(_ context.Context, plan *sparkwing.Plan, in DeployArgs, rc
 	} else {
 		staging := sparkwing.Job(plan, "staging-deploy", &deployStagingJob{Job: base.named("staging-deploy"), Images: images}).
 			Needs(build).Requires(runnerLabels...).Timeout(cfg.stagingBudget())
-		sparkwing.Job(plan, "staging-scan", &deployScanJob{Job: base.named("staging-scan"), Environment: cfg.Staging, Deployment: sparkwing.RefTo[envDeployment](staging)}).
-			Needs(staging).Requires(runnerLabels...).Timeout(cfg.RunTimeout + 15*time.Minute)
 		gate = sparkwing.Job(plan, "staging-gate", &deployGateJob{Job: base.named("staging-gate"), Images: images}).
 			Needs(staging).Requires(runnerLabels...).Timeout(cfg.gateBudget())
 		if in.StopAfter == "staging" {
@@ -103,9 +101,7 @@ func (p *Deploy) Plan(_ context.Context, plan *sparkwing.Plan, in DeployArgs, rc
 		}
 	}
 	prod := &deployProductionJob{Job: base.named("production"), Images: images, Gate: sparkwing.RefTo[stagingGateRecord](gate)}
-	production := sparkwing.Job(plan, "production", prod).Needs(build, gate).Requires(runnerLabels...).Timeout(cfg.productionBudget())
-	sparkwing.Job(plan, "production-scan", &deployScanJob{Job: base.named("production-scan"), Environment: cfg.Production, Deployment: sparkwing.RefTo[envDeployment](production)}).
-		Needs(production).Requires(runnerLabels...).Timeout(cfg.RunTimeout + 15*time.Minute)
+	sparkwing.Job(plan, "production", prod).Needs(build, gate).Requires(runnerLabels...).Timeout(cfg.productionBudget())
 	return nil
 }
 
@@ -315,6 +311,7 @@ func (j *deployProductionJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, erro
 		rec, err := d.promote(ctx, images)
 		if err == nil {
 			summarizeDeployment(ctx, rec)
+			rec.ScanRun, err = d.submitScan(ctx, d.cfg.Production, images)
 		}
 		return rec, err
 	}), nil

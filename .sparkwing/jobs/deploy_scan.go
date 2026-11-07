@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
 	"time"
@@ -12,16 +13,88 @@ import (
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
+type DeployScanArgs struct {
+	Environment string `flag:"environment" default:"staging" enum:"staging,production" desc:"Deployed environment to scan."`
+	Record      string `flag:"record" required:"true" desc:"Deployment identity JSON: environment, deploy_run and images."`
+	DryRun      bool   `flag:"dry-run" desc:"Print scan actions without executing them."`
+}
+
+type DeployScan struct{ sparkwing.Base }
+
+func (DeployScan) ShortHelp() string {
+	return "Run a detached revision-bound full example scan and report Bitwing findings"
+}
+
+func (DeployScan) Help() string {
+	return "Submitted by deploy after each environment smoke. Uses an independent per-environment concurrency group and the deploy-kikd-prod runner toolchain. The source commit must match the supplied image identity. Reads DEPLOY_SCAN_STAGING_TOKEN or DEPLOY_SCAN_PRODUCTION_TOKEN from scoped Sparkwing secrets; it never assumes the deploy AWS role. Failures upsert a Bitwing finding, clean observations resolve it, and unavailable observations preserve earlier findings."
+}
+
+type deployScanSecrets struct {
+	Staging    string `sw:"DEPLOY_SCAN_STAGING_TOKEN,optional"`
+	Production string `sw:"DEPLOY_SCAN_PRODUCTION_TOKEN,optional"`
+}
+
+func (DeployScan) Secrets() any { return &deployScanSecrets{} }
+
+func (DeployScan) Plan(_ context.Context, plan *sparkwing.Plan, in DeployScanArgs, rc sparkwing.RunContext) error {
+	cfg := defaultDeployConfig()
+	env := cfg.Staging
+	switch in.Environment {
+	case "", cfg.Staging.Name:
+	case cfg.Production.Name:
+		env = cfg.Production
+	default:
+		return fmt.Errorf("deploy-scan: unknown environment %q", in.Environment)
+	}
+	dry := in.DryRun || rc.DryRun
+	var labels []string
+	if !dry {
+		plan.Concurrency(sparkwing.NewConcurrencyGroup("sparkwing-post-deploy-"+env.Name, sparkwing.ConcurrencyLimit{Capacity: 1}))
+		labels = []string{"deploy-kikd-prod"}
+	}
+	sourceCommit := ""
+	if rc.Git != nil {
+		sourceCommit = rc.Git.SHA
+	}
+	sparkwing.Job(plan, "scan", &deployScanJob{
+		Job:         deployJob{Cfg: cfg, Dry: dry, RunID: rc.RunID, Name: "scan"},
+		Environment: env, Record: in.Record, SourceCommit: sourceCommit,
+	}).Requires(labels...).Timeout(cfg.RunTimeout + 15*time.Minute)
+	return nil
+}
+
+func decodeScanRecord(raw, environment, sourceCommit string, dry bool) (deployScanRecord, error) {
+	var rec deployScanRecord
+	if err := json.Unmarshal([]byte(raw), &rec); err != nil {
+		return rec, fmt.Errorf("deploy-scan: decode deployment record: %w", err)
+	}
+	if rec.Environment != environment {
+		return rec, errors.New("deploy-scan: deployment record must match the selected environment")
+	}
+	if _, err := gitRevision(rec.Images.Commit); err != nil {
+		return rec, err
+	}
+	if rec.DeployRun == "" || !rec.Images.sameDigests(rec.Images) {
+		return rec, errors.New("deploy-scan: deployment run and both image digests are required")
+	}
+	if !dry && sourceCommit != rec.Images.Commit {
+		return rec, errors.New("deploy-scan: pipeline source must match the deployed commit")
+	}
+	return rec, nil
+}
+
 type deployScanJob struct {
 	sparkwing.Base
-	Job         deployJob
-	Environment deployEnv
-	Deployment  sparkwing.Ref[envDeployment]
+	Job          deployJob
+	Environment  deployEnv
+	Record       string
+	SourceCommit string
 	sparkwing.Produces[deployScanRecord]
 }
 
 type deployScanRecord struct {
 	Environment string       `json:"environment"`
+	ScanRun     string       `json:"scan_run,omitempty"`
 	DeployRun   string       `json:"deploy_run"`
 	Images      deployImages `json:"images"`
 	ExampleRun  string       `json:"example_run"`
@@ -29,38 +102,45 @@ type deployScanRecord struct {
 
 func (j *deployScanJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
 	return deployStep(w, j.Job.Dry, "scan", func(ctx context.Context) (deployScanRecord, error) {
+		rec, err := decodeScanRecord(j.Record, j.Environment.Name, j.SourceCommit, j.Job.Dry)
+		if err != nil {
+			return rec, err
+		}
 		d, done, err := j.Job.deployer()
 		if err != nil {
 			return deployScanRecord{}, err
 		}
 		defer done()
-		return d.postDeployScan(ctx, j.Environment, j.Deployment.Get(ctx).Images)
+		return d.postDeployScan(ctx, j.Environment, rec.Images, rec.DeployRun)
 	}), nil
 }
 
-func (d *deployer) postDeployScan(ctx context.Context, env deployEnv, images deployImages) (rec deployScanRecord, err error) {
-	rec = deployScanRecord{Environment: env.Name, DeployRun: d.runID, Images: images}
+func (d *deployer) postDeployScan(ctx context.Context, env deployEnv, images deployImages, deployRun string) (rec deployScanRecord, err error) {
+	rec = deployScanRecord{Environment: env.Name, DeployRun: deployRun, ScanRun: d.runID, Images: images}
 	started := d.tools.now()
 	completed := false
 	defer func() {
 		err = errors.Join(err, d.recordScanFinding(ctx, rec, completed, err))
 		if !d.dry {
 			sparkwing.Summary(ctx, fmt.Sprintf("%s post-deploy scan\n\nDeploy `%s`, commit `%s`, example `%s`\n\nController `%s`, runner `%s`\n\nElapsed: %s. Result: %v",
-				env.Name, d.runID, images.Commit, rec.ExampleRun, images.Controller.Digest, images.Runner.Digest, d.tools.now().Sub(started), err))
+				env.Name, rec.DeployRun, images.Commit, rec.ExampleRun, images.Controller.Digest, images.Runner.Digest, d.tools.now().Sub(started), err))
 		}
 	}()
-	if err = d.assumeRole(ctx); err != nil {
-		return rec, err
-	}
 	if err = d.buildCLI(ctx); err != nil {
 		return rec, err
 	}
 	profile := env.Name + "-scan"
-	tokenParam := d.cfg.Params.StagingToken
+	secretName := "DEPLOY_SCAN_STAGING_TOKEN"
 	if env.Name == d.cfg.Production.Name {
-		tokenParam = d.cfg.Params.SmokeTokenBase + d.cfg.SmokeTeams[0]
+		secretName = "DEPLOY_SCAN_PRODUCTION_TOKEN"
 	}
-	if err = d.addProfile(ctx, profile, env.ControllerURL, tokenParam); err != nil {
+	if err = d.act(ctx, "configure fixture profile from "+secretName, func() error {
+		token, err := sparkwing.Secret(ctx, secretName)
+		if err != nil {
+			return err
+		}
+		return d.profileToken(ctx, profile, env.ControllerURL, token)
+	}); err != nil {
 		return rec, err
 	}
 	if err = d.triggerRun(ctx, profile, "example", d.repoDir, images.Commit, &rec.ExampleRun, "--api-controller", env.ControllerURL); err != nil {
@@ -68,7 +148,7 @@ func (d *deployer) postDeployScan(ctx context.Context, env deployEnv, images dep
 	}
 	if !d.dry {
 		sparkwing.Summary(ctx, fmt.Sprintf("%s full example scan `%s` for deploy `%s`, commit `%s`, controller `%s`, runner `%s`. Promotion does not wait for this scan.",
-			env.Name, rec.ExampleRun, d.runID, images.Commit, images.Controller.Digest, images.Runner.Digest))
+			env.Name, rec.ExampleRun, rec.DeployRun, images.Commit, images.Controller.Digest, images.Runner.Digest))
 	}
 	err = d.act(ctx, "await full example scan on "+profile, func() error {
 		out, followErr := d.sw(ctx, "", "runs", "status", "--run", rec.ExampleRun, "--profile", profile, "--follow", "--exit-zero", "--timeout", d.cfg.RunTimeout.String(), "-o", "json")
@@ -128,10 +208,51 @@ func (d *deployer) recordScanFinding(ctx context.Context, rec deployScanRecord, 
 		// safety: cancellation must not discard the scan's failure feedback.
 		feedback, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
 		defer cancel()
-		_, err = d.cmd(feedback, deployCommand{Name: "bitwing", Args: args})
+		var env map[string]string
+		if home := d.cfg.BitwingHome; home != "" {
+			if _, err := os.Stat(filepath.Join(home, ".bitwing", "config.yaml")); err != nil {
+				return fmt.Errorf("configure the existing Bitwing ledger under %s before running scans: %w", home, err)
+			}
+			env = map[string]string{"HOME": home, "XDG_CONFIG_HOME": filepath.Join(home, ".config"), "BITWING_DB": "", "BITWING_REMOTE": ""}
+		}
+		_, err = d.cmd(feedback, deployCommand{Name: "bitwing", Args: args, Env: env})
 		if err != nil {
 			return fmt.Errorf("scan feedback failed; install bitwing in the deploy toolchain and check its ledger access: %w", err)
 		}
 		return nil
 	})
+}
+
+func (d *deployer) submitScan(ctx context.Context, env deployEnv, images deployImages) (string, error) {
+	rec := deployScanRecord{Environment: env.Name, DeployRun: d.runID, Images: images}
+	body, err := json.Marshal(rec)
+	if err != nil {
+		return "", err
+	}
+	const profile = "deploy-scans"
+	if err := d.addProfile(ctx, profile, d.cfg.Production.ControllerURL, d.cfg.Params.ScanToken); err != nil {
+		return "", err
+	}
+	var runID string
+	err = d.act(ctx, "submit detached "+env.Name+" deploy-scan at "+images.Commit, func() error {
+		out, err := d.sw(ctx, "", "pipeline", "trigger", "deploy-scan", "-C", d.repoDir,
+			"--profile", profile, "--runner", "label=deploy-kikd-prod", "--detach", "--ref", images.Commit, "-o", "json", "--", "--environment", env.Name, "--record", string(body))
+		if err != nil {
+			return err
+		}
+		runID = acceptedRunID(out)
+		if runID == "" {
+			return fmt.Errorf("deploy-scan submission returned no run_id: %q", out)
+		}
+		link := "https://console.sparkwing.dev/runs?run=" + url.QueryEscape(runID)
+		sparkwing.Summary(ctx, fmt.Sprintf("%s post-deploy scan: [%s](%s)\n\nDeploy `%s`, commit `%s`, controller `%s`, runner `%s`. Submitted without waiting; failures appear on the linked scan run and in Bitwing.",
+			env.Name, runID, link, d.runID, images.Commit, images.Controller.Digest, images.Runner.Digest))
+		d.tools.say(ctx, "detached deploy-scan: "+link)
+		return nil
+	})
+	return runID, err
+}
+
+func init() {
+	sparkwing.Register("DeployScan", func() sparkwing.Pipeline[DeployScanArgs] { return &DeployScan{} })
 }

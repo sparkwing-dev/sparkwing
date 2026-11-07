@@ -99,6 +99,9 @@ pipelines:
     args:
       stop-after: staging
 
+  - name: deploy-scan
+    entrypoint: DeployScan
+
   - name: deploy-smoke
     entrypoint: DeploySmoke
 

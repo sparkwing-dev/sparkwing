@@ -40,6 +40,7 @@ type deployConfig struct {
 	SmokeTimeout   time.Duration
 	PollInterval   time.Duration
 	ToolDir        string
+	BitwingHome    string
 }
 
 // safety: a real deploy holds production credentials, so it refuses a missing
@@ -80,6 +81,7 @@ func (c deployConfig) productionBudget() time.Duration {
 type deployParams struct {
 	GitopsKey      string
 	ReferenceKey   string
+	ScanToken      string
 	StagingToken   string
 	SmokeTokenBase string
 }
@@ -116,6 +118,7 @@ func defaultDeployConfig() deployConfig {
 			GitopsKey:      "/kikd-prod/sparkwing/deploy/sparkwing-gitops-deploy-key",
 			ReferenceKey:   "/kikd-prod/sparkwing/deploy/ci-smoke-deploy-key",
 			StagingToken:   "/kikd-prod/sparkwing/deploy/staging-gate-token",
+			ScanToken:      "/kikd-prod/sparkwing/deploy/scan-submit-token",
 			SmokeTokenBase: "/kikd-prod/sparkwing/deploy/smoke-token-",
 		},
 		Staging: deployEnv{
@@ -145,6 +148,7 @@ func defaultDeployConfig() deployConfig {
 		SmokeTimeout:   20 * time.Minute,
 		PollInterval:   5 * time.Second,
 		ToolDir:        "/opt/sparkwing-deploy/bin",
+		BitwingHome:    "/var/lib/sparkwing-deploy/bitwing",
 	}
 }
 
@@ -183,6 +187,7 @@ type gitopsChange struct {
 // safety: a failed promote rolls back from this run's own record: it reverts
 // Changes newest first and names Previous as what production returns to.
 type envDeployment struct {
+	ScanRun     string         `json:"scan_run,omitempty"`
 	Environment string         `json:"environment"`
 	Images      deployImages   `json:"images"`
 	Previous    valuesPins     `json:"previous"`
@@ -191,6 +196,7 @@ type envDeployment struct {
 }
 
 type stagingGateRecord struct {
+	ScanRun      string       `json:"scan_run"`
 	Images       deployImages `json:"images"`
 	RunID        string       `json:"run_id"`
 	GatedAt      string       `json:"gated_at"`
