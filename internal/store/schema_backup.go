@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"path/filepath"
 	"time"
 )
 
@@ -22,15 +23,21 @@ func backupSQLiteBeforeUpgrade(ctx context.Context, path string, version int) er
 	return nil
 }
 
-// safety: the copy is written under a temporary name so an interrupted
-// backup never looks complete, and Link refuses to replace an earlier backup.
+// safety: the copy is built in a temporary directory beside the store, so an
+// interrupted backup never looks complete, SQLite's sidecar files go with the
+// directory, and the copy inherits the same directory ACL that protects
+// state.db on Windows. Link refuses to replace an earlier backup.
 func copySQLiteSnapshot(ctx context.Context, path, final string) (err error) {
-	partial := final + ".partial"
+	dir, err := os.MkdirTemp(filepath.Dir(path), ".sparkwing-backup-*")
+	if err != nil {
+		return err
+	}
+	defer func() { err = errors.Join(err, os.RemoveAll(dir)) }()
+	partial := filepath.Join(dir, "state.db")
 	f, err := os.OpenFile(partial, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
 	if err != nil {
 		return err
 	}
-	defer func() { err = errors.Join(err, os.Remove(partial)) }()
 	if err := f.Close(); err != nil {
 		return err
 	}

@@ -39,7 +39,7 @@ func TestSQLiteUpgradeKeepsABackupTheOlderBinaryCanOpen(t *testing.T) {
 	if err != nil || len(backups) != 1 {
 		t.Fatalf("backups = %v, %v; want one schema 32 copy", backups, err)
 	}
-	if leftovers, _ := filepath.Glob(path + ".*.partial"); len(leftovers) != 0 {
+	if leftovers, _ := filepath.Glob(filepath.Join(filepath.Dir(path), ".sparkwing-backup-*")); len(leftovers) != 0 {
 		t.Fatalf("partial backups left behind: %v", leftovers)
 	}
 	info, err := os.Stat(backups[0])

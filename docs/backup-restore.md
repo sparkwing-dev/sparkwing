@@ -72,8 +72,9 @@ an upgraded store.
 Before a binary upgrades a local SQLite store, it copies the store beside it as
 `<store>.schema-<N>-<YYYYMMDDTHHMMSSZ>.bak`, where N is the schema version
 before the upgrade. The copy is taken under the upgrade's write lock, so it
-matches the state the upgrade started from. It has mode 0600 and holds the same
-encrypted secrets as the store; Sparkwing never prunes it. When the copy fails,
+matches the state the upgrade started from. It has mode 0600 on Linux and macOS
+and the store directory's ACL on Windows, holds the same encrypted secrets as
+the store, and is never pruned. When the copy fails,
 the binary refuses the upgrade and leaves the store unchanged; free disk space
 and start again. To return to the older binary, stop the controller, move the
 store and its `-wal` and `-shm` files aside, and copy the newest backup for that
