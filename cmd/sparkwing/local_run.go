@@ -114,7 +114,7 @@ func resolveLocalRunRuntime(ctx context.Context, options localRunOptions) (local
 
 func openLocalProfileCache(ctx context.Context, environment []string, profile string, request *runspec.Request) (blob.RemoteCache, func() error, error) {
 	selected, err := prepareTriggerSource(ctx, triggerSourceInput{checkout: request.Source.Location.LocalCheckout, pipeline: request.Pipeline, environment: environment, githubID: func(ctx context.Context, remote string) (int64, error) {
-		return lookupTriggerGitHubID(ctx, remote, environment)
+		return lookupTriggerGitHubID(ctx, remote, profile, environment)
 	}})
 	if err != nil {
 		return nil, nil, err

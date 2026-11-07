@@ -34,6 +34,8 @@ unlock.
 
 ### Fixed
 
+- **CLI and controller:** GitHub pipeline triggers resolve repository identity through `POST /api/v1/repositories/resolve` on the selected controller. Private repositories covered by the team's GitHub App work from HTTPS and SSH clones without a local GitHub token, with or without `--ref`. The CLI never falls back to anonymous GitHub lookup. Explicit `GH_TOKEN` or `GITHUB_TOKEN` remains available when the controller cannot resolve identity. See [the migration guide](docs/migrations/_unreleased.md#github-trigger-repository-identity).
+
 - **controller:** Capability issuance tolerates up to 30 seconds of backward clock skew, so time-sync corrections and VM resumes keep local owners, awards and here handoffs usable. Hosted controllers share the allowance. Expiry, revocation and binding deadlines retain their existing checks.
 - **CLI:** Pipeline triggers accept exact commits fetched from origin in shallow runner checkouts, so jobs can trigger another pipeline at the pushed commit without origin-tracking branches. Both execution and pipeline-code commits still require origin fetch evidence.
 - **logs:** Public runner environment values such as HOME and PATH remain readable. Operator-supplied values and embedded proxy credentials remain masked.

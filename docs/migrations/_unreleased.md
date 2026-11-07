@@ -87,3 +87,19 @@ The hard cut removes `POST /api/v1/local/controller/stay`, `LocalControl.stay`,
 fields. The four activity counts remain status
 observations. Dashboard activation and its remembered address retain their
 existing behavior.
+
+## GitHub trigger repository identity
+
+`POST /api/v1/repositories/resolve` accepts `{"remote_url":"git@github.com:owner/repo.git"}`
+and returns the canonical repository `key` and `display`. It requires `runs.read`
+or `runs.write` and respects the credential's repository scope. The controller
+resolves GitHub identities through the authenticated team's App installation or
+configured source credentials. App credentials remain on the controller.
+
+For GitHub identity lookup without an explicit local GitHub token, upgrade the
+controller before the CLI. This applies to pipeline triggers, Cloud-routed runs
+and profile cache identity. Explicit `GH_TOKEN` or `GITHUB_TOKEN` still supports identity
+lookup when the controller cannot resolve it, including older controllers and
+repository-scoped HTTPS source credentials. Without an explicit token, the CLI
+returns the controller's error and makes no anonymous GitHub request.
+No route, wire field or SDK surface is removed.

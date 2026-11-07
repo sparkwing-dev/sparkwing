@@ -129,7 +129,7 @@ func prepareNativeBurst(ctx context.Context, pipeline string, flags runFlags, ar
 	}
 	defer func() { resultErr = errors.Join(resultErr, snapshot.close()) }()
 	selected, err := prepareTriggerSource(ctx, triggerSourceInput{checkout: snapshot.RepoRoot, snapshot: snapshot, pipeline: pipeline, environment: captured, githubID: func(ctx context.Context, remote string) (int64, error) {
-		return lookupTriggerGitHubID(ctx, remote, captured)
+		return lookupTriggerGitHubID(ctx, remote, *route.Profile, captured)
 	}})
 	if err != nil {
 		return controllerwire.CreateRunRequest{}, err

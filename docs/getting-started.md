@@ -488,8 +488,11 @@ sparkwing pipeline trigger <pipeline> --profile acme
 The first prompts for the token without echoing it and saves a profile named
 after the team. Run the second inside a checkout whose commit is pushed: the
 run records the checkout's `origin` repository and commit, and a team runner
-fetches that commit. Private GitHub identity lookup accepts `GH_TOKEN` or
-`GITHUB_TOKEN` with repository read access. The controller credential needs
+fetches that commit. GitHub identity lookup first uses the selected controller's
+team App or source credentials. App-covered private repositories need no local
+GitHub token. An explicit `GH_TOKEN` or `GITHUB_TOKEN` with repository read access
+can supply identity when controller discovery is unavailable. The CLI never
+queries GitHub anonymously. The controller credential needs
 `runs.write`. Add `--working-tree` to capture tracked and unignored untracked
 files into an immutable Git snapshot, upload it through shared storage, and seal
 its digest into the run. The original checkout and index stay untouched.

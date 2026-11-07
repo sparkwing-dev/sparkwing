@@ -6,6 +6,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/cronspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 
 	wire "github.com/sparkwing-dev/sparkwing/internal/controllerwire"
@@ -97,6 +98,7 @@ func wireOperations() map[string]wireOperation {
 		"DELETE /api/v1/schedules/repos":                       operation("Remove repository schedules", nil, wire.ScheduleRepoDeletion{}, query("repo_url", "string")),
 		"GET /api/v1/queue":                                    operation("Read admission state", nil, wingwire.QueueState{}),
 		"GET /api/v1/queue/groups/{group}":                     operation("Read a concurrency group", nil, wire.QueueGroup{}),
+		"POST /api/v1/repositories/resolve":                    operation("Resolve repository identity through team source access", wire.RepositoryResolveRequest{}, runspec.Repository{}),
 		"POST /api/v1/data/source":                             operation("Reserve a source snapshot upload", wire.SourceUploadRequest{}, wire.DataUploadTicket{}),
 		"POST /api/v1/data/source/{upload}/commit":             operation("Commit a verified source snapshot", struct{}{}, wire.DataReceipt{}),
 		"POST /api/v1/data/upload":                             operation("Reserve an object upload", wire.DataUploadRequest{}, wire.DataUploadTicket{}),
