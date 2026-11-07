@@ -118,6 +118,14 @@ in the store.
 An incompatible pinned CLI receives an error naming its version, the controller
 version and this upgrade command. There is no compatibility relay.
 
+An enrolled `sparkwing-runner` with `runner.local_admission: true` uses the same
+machine admission, so it must match the controller's build too. An older runner
+fails each claimed job with an error naming both versions; restart its service
+after updating so it moves to the latest release. When the CLI runs an
+unreleased build that no runner release matches, set `local_admission: false`
+under `runner:` in the runner's config and restart the runner until a matching
+release ships.
+
 A ticket's holder PID and process start time determine liveness. Closing a
 request or losing a long poll leaves its queue arrival or lease intact. The
 controller releases capacity when it observes the holder process gone, including

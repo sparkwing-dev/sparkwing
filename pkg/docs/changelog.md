@@ -48,6 +48,10 @@ unlock.
 
 ### Fixed
 
+- **runners:** A `sparkwing-runner` with `runner.local_admission: true` explains a local controller it cannot use. With no controller running, a claimed job fails naming `sparkwing dashboard start`, `sparkwing dashboard install` and `local_admission: false` instead of a failed daemon spawn followed by an earlier daemon's log. A controller on an incompatible build names both builds and the same remedies. The runner logs one warning per cause while either lasts, and a controller refusing a pre-HTTP runner names the runner remedy and records `handshake_refused` in `sparkwing daemon events`.
+
+- **controller:** A claim from a development-build runner is refused with a message naming the build and a hint to install a released `sparkwing-runner`, instead of "invalid release version". Development runners are still refused by release controllers.
+
 - **local controller:** Store time no longer moves backward when time sync or a VM resume steps the wall clock back, which had failed job and step completion with a `finished_at >= started_at` constraint error and refused plan settlement with "billing checkpoint is outside its awarded time range".
 
 - **runners:** A job whose started attempt lapsed can be awarded again. Its next award was refused as "reconciliation returned an inconsistent execution award" by here and local owners and as "runner award differs from its authenticated claim" by queued runners, which ended here handoffs as `agent_lost` and requeued the job every lease.

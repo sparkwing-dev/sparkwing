@@ -42,7 +42,11 @@ func (d *Daemon) refuseLegacyAdmission(connection net.Conn) {
 	if current == "" {
 		current = "(unknown)"
 	}
-	reason := fmt.Sprintf("sparkwing %s uses connection-based machine admission; controller %s requires durable HTTP admission. Run `sparkwing pipeline upgrade` to update this pipeline pin", old, current)
+	// safety: pipeline binaries and sparkwing-runner with runner.local_admission share this hello, and an old
+	// peer prints only this text, so it names both remedies.
+	reason := fmt.Sprintf("sparkwing %s uses connection-based machine admission; controller %s requires durable HTTP admission. Run `sparkwing pipeline upgrade` to update this pipeline pin; for sparkwing-runner, install the same build as this controller and restart its service, or set runner.local_admission: false and restart the runner", old, current)
+	d.cfg.logf("refused machine admission from sparkwing %s: %s", old, reason)
+	d.recordJournal("handshake_refused", nil, map[string]any{"peer_version": old, "reason": reason})
 	encoder := json.NewEncoder(connection)
 	if encoder.Encode(map[string]any{"type": "hello_ack", "payload": map[string]any{"protocol_major": hello.Payload.ProtocolMajor, "native_protocol_major": ProtocolMajor, "binary_version": current, "build_identity": hello.Payload.BuildIdentity, "api_ready": false, "api_error": reason, "store_ready": false, "store_error": reason}}) != nil {
 		return
