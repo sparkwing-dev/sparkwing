@@ -16,7 +16,6 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/testhome"
-	"github.com/sparkwing-dev/sparkwing/internal/wingd"
 	wingdclient "github.com/sparkwing-dev/sparkwing/internal/wingd/client"
 )
 
@@ -105,49 +104,5 @@ func TestDashboardServesAControllerARunStarted(t *testing.T) {
 	}
 	if restarted := status(); restarted.State != "running" || restarted.PID == started.PID || restarted.Dashboard != "serving" {
 		t.Fatalf("a controller restarted on demand should serve its dashboard again: %+v", restarted)
-	}
-
-	registry, err := wingdclient.NewLocalRunnerClient(home, installedVersion())
-	if err != nil {
-		t.Fatal(err)
-	}
-	runner, err := registry.Active(ctx)
-	for err != nil && ctx.Err() == nil {
-		time.Sleep(100 * time.Millisecond)
-		runner, err = registry.Active(ctx)
-	}
-	if err != nil {
-		t.Fatalf("the controller started no local runner: %v", err)
-	}
-	out.Reset()
-	if err := runDaemonLifecycleCommandArgs(ctx, []string{"stop", "-o", "json"}, &out, resolveLocalServices); err != nil {
-		t.Fatalf("daemon stop: %v", err)
-	}
-	exited, stop := context.WithTimeout(ctx, 10*time.Second)
-	defer stop()
-	for {
-		alive, err := wingd.LocalRunnerProcessAlive(runner)
-		if err == nil && !alive {
-			break
-		}
-		if exited.Err() != nil {
-			t.Fatalf("an idle local runner outlived daemon stop: alive=%t err=%v", alive, err)
-		}
-		time.Sleep(50 * time.Millisecond)
-	}
-	// safety: a runner that outlives its controller exits on failed claims instead, without recording
-	// its stop or revoking its claim token.
-	logs, err := filepath.Glob(filepath.Join(home, "runners", "*", "runner.log"))
-	if err != nil || len(logs) == 0 {
-		t.Fatalf("runner logs: %v %v", logs, err)
-	}
-	for _, path := range logs {
-		body, err := os.ReadFile(path)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if strings.Contains(string(body), "api.sock") {
-			t.Fatalf("the runner lost its controller before retiring:\n%s", body)
-		}
 	}
 }

@@ -168,13 +168,13 @@ func (d *Daemon) retireLocalRunner(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	d.runnerChanges.Lock()
+	d.runnerChanges.lock()
 	instance, err := registry.ActiveLocalRunner(ctx, subject)
 	var failure *apierr.Error
 	if err == nil {
 		err = registry.DrainLocalRunner(ctx, subject, instance.ID)
 	}
-	d.runnerChanges.Unlock()
+	d.runnerChanges.unlock()
 	if errors.As(err, &failure) && failure.Code == apierr.NotFound {
 		return nil
 	}
@@ -209,13 +209,26 @@ func (d *Daemon) isDraining() bool {
 // safety: registration and activation hold runnerChanges through persistence and check draining under it, so a
 // retirement, which drains while holding it after draining is set, sees every change that passed and refuses the rest.
 func (d *Daemon) admitRunnerChange() (func(), bool) {
-	d.runnerChanges.Lock()
+	d.runnerChanges.lock()
 	if d.isDraining() {
-		d.runnerChanges.Unlock()
+		d.runnerChanges.unlock()
 		return nil, false
 	}
-	return d.runnerChanges.Unlock, true
+	return d.runnerChanges.unlock, true
 }
+
+// safety: a one-slot channel rather than a mutex, so testing/synctest can see a waiter as durably blocked.
+type runnerGate struct {
+	once sync.Once
+	slot chan struct{}
+}
+
+func (g *runnerGate) lock() {
+	g.once.Do(func() { g.slot = make(chan struct{}, 1) })
+	g.slot <- struct{}{}
+}
+
+func (g *runnerGate) unlock() { <-g.slot }
 
 func validLocalRunnerID(id string) bool {
 	return id != "" && id != "." && id != ".." && !strings.ContainsAny(id, "/\\?#\x00\r\n")
