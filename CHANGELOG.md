@@ -48,6 +48,8 @@ unlock.
 
 ### Fixed
 
+- **controller:** Cancelling a run, or a run or job ending while a child it started through `RunAndAwait` is still pending or running, now cancels that child. Children had kept running until an operator cancelled each one by hand. Local and hosted controllers request the cancellation from their recovery sweep, so a grandchild follows one sweep later.
+
 - **local controller:** Store time no longer moves backward when time sync or a VM resume steps the wall clock back, which had failed job and step completion with a `finished_at >= started_at` constraint error and refused plan settlement with "billing checkpoint is outside its awarded time range".
 
 - **runners:** A job whose started attempt lapsed can be awarded again. Its next award was refused as "reconciliation returned an inconsistent execution award" by here and local owners and as "runner award differs from its authenticated claim" by queued runners, which ended here handoffs as `agent_lost` and requeued the job every lease.
