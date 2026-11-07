@@ -26,7 +26,7 @@ func (DeployScan) ShortHelp() string {
 }
 
 func (DeployScan) Help() string {
-	return "Submitted by deploy after each environment smoke. Uses an independent per-environment concurrency group and the deploy-kikd-prod runner toolchain. The source commit must match the supplied image identity. Reads DEPLOY_SCAN_STAGING_TOKEN or DEPLOY_SCAN_PRODUCTION_TOKEN from scoped Sparkwing secrets; it never assumes the deploy AWS role. Failures upsert a Bitwing finding, clean observations resolve it, and unavailable observations preserve earlier findings."
+	return "Submitted by deploy after each environment smoke. Uses an independent per-environment concurrency group and the deploy-kikd-prod runner toolchain. Bitwing uses the runner user's PATH and existing ledger configuration. The source commit must match the supplied image identity. Reads DEPLOY_SCAN_STAGING_TOKEN or DEPLOY_SCAN_PRODUCTION_TOKEN from scoped Sparkwing secrets; it never assumes the deploy AWS role. Failures upsert a Bitwing finding, clean observations resolve it, and unavailable observations preserve earlier findings."
 }
 
 type deployScanSecrets struct {
@@ -208,16 +208,13 @@ func (d *deployer) recordScanFinding(ctx context.Context, rec deployScanRecord, 
 		// safety: cancellation must not discard the scan's failure feedback.
 		feedback, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
 		defer cancel()
-		var env map[string]string
-		if home := d.cfg.BitwingHome; home != "" {
-			if _, err := os.Stat(filepath.Join(home, ".bitwing", "config.yaml")); err != nil {
-				return fmt.Errorf("configure the existing Bitwing ledger under %s before running scans: %w", home, err)
-			}
-			env = map[string]string{"HOME": home, "XDG_CONFIG_HOME": filepath.Join(home, ".config"), "BITWING_DB": "", "BITWING_REMOTE": ""}
-		}
-		_, err = d.cmd(feedback, deployCommand{Name: "bitwing", Args: args, Env: env})
+		path, err := d.tools.lookPath("bitwing")
 		if err != nil {
-			return fmt.Errorf("scan feedback failed; install bitwing in the deploy toolchain and check its ledger access: %w", err)
+			return fmt.Errorf("scan feedback failed; bitwing must be on the runner user's PATH: %w", err)
+		}
+		_, err = d.tools.run(feedback, deployCommand{Name: path, Args: args})
+		if err != nil {
+			return fmt.Errorf("scan feedback failed; check the runner user's Bitwing ledger access: %w", err)
 		}
 		return nil
 	})

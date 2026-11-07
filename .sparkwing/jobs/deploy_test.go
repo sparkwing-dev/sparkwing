@@ -587,7 +587,6 @@ func (f *fakeDeploy) config() deployConfig {
 	cfg.GitopsURL = f.bare
 	cfg.ReferenceURL = f.repo
 	cfg.ToolDir = ""
-	cfg.BitwingHome = ""
 	return cfg
 }
 

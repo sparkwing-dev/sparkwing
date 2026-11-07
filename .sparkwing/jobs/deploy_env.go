@@ -40,7 +40,6 @@ type deployConfig struct {
 	SmokeTimeout   time.Duration
 	PollInterval   time.Duration
 	ToolDir        string
-	BitwingHome    string
 }
 
 // safety: a real deploy holds production credentials, so it refuses a missing
@@ -148,7 +147,6 @@ func defaultDeployConfig() deployConfig {
 		SmokeTimeout:   20 * time.Minute,
 		PollInterval:   5 * time.Second,
 		ToolDir:        "/opt/sparkwing-deploy/bin",
-		BitwingHome:    "/var/lib/sparkwing-deploy/bitwing",
 	}
 }
 

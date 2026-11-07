@@ -350,35 +350,41 @@ func TestDeployScanRejectsIncompleteIdentity(t *testing.T) {
 	}
 }
 
-func TestDeployScanFeedbackUsesTheConfiguredLedgerHome(t *testing.T) {
+func TestDeployScanFeedbackUsesTheRunnerUsersInstallAndLedger(t *testing.T) {
 	f := newFakeDeploy(t)
 	d := f.deployer(false)
-	d.cfg.BitwingHome = t.TempDir()
+	d.cfg.ToolDir = filepath.Join(t.TempDir(), "absent-deploy-toolchain")
+	userBinary := filepath.Join(t.TempDir(), "user-bin", "bitwing")
+	lookedUp := false
+	d.tools.lookPath = func(name string) (string, error) {
+		if name != "bitwing" {
+			t.Fatalf("looked up %q instead of bitwing", name)
+		}
+		lookedUp = true
+		return userBinary, nil
+	}
 	called := false
 	d.tools.run = func(_ context.Context, c deployCommand) (string, error) {
 		called = true
-		if c.Env["HOME"] != d.cfg.BitwingHome || c.Env["XDG_CONFIG_HOME"] != filepath.Join(d.cfg.BitwingHome, ".config") {
-			t.Fatalf("feedback used an isolated or ambient home: %v", c.Env)
-		}
-		for _, name := range []string{"BITWING_DB", "BITWING_REMOTE"} {
-			if value, present := c.Env[name]; !present || value != "" {
-				t.Fatalf("feedback must use the ledger config, not inherited %s", name)
-			}
+		if c.Name != userBinary || len(c.Env) != 0 {
+			t.Fatalf("feedback must use the user installation and inherit its environment: %+v", c)
 		}
 		return "{}", nil
 	}
-	rec := deployScanRecord{Environment: "staging"}
-	if err := d.recordScanFinding(t.Context(), rec, true, nil); err == nil || called {
-		t.Fatalf("missing ledger config must refuse before creating a ledger: called %t, error %v", called, err)
+	if err := d.recordScanFinding(t.Context(), deployScanRecord{Environment: "staging"}, true, errors.New("scan failed")); err != nil || !called || !lookedUp {
+		t.Fatalf("user feedback failed: called %t, looked up %t, error %v", called, lookedUp, err)
 	}
-	dir := filepath.Join(d.cfg.BitwingHome, ".bitwing")
-	if err := os.MkdirAll(dir, 0o700); err != nil {
-		t.Fatal(err)
+}
+
+func TestDeployScanFeedbackReportsMissingUserInstall(t *testing.T) {
+	f := newFakeDeploy(t)
+	d := f.deployer(false)
+	d.tools.lookPath = func(string) (string, error) { return "", errors.New("not found") }
+	d.tools.run = func(_ context.Context, c deployCommand) (string, error) {
+		t.Fatalf("executed a missing installation: %s", c)
+		return "", nil
 	}
-	if err := os.WriteFile(filepath.Join(dir, "config.yaml"), []byte("profile: shared\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	if err := d.recordScanFinding(t.Context(), rec, true, nil); err != nil || !called {
-		t.Fatalf("configured feedback failed: called %t, error %v", called, err)
+	if err := d.recordScanFinding(t.Context(), deployScanRecord{Environment: "staging"}, true, errors.New("scan failed")); err == nil || !strings.Contains(err.Error(), "runner user's PATH") {
+		t.Fatalf("missing installation was hidden: %v", err)
 	}
 }
