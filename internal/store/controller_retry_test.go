@@ -1,9 +1,12 @@
 package store
 
 import (
+	"context"
+	"errors"
 	"strings"
 	"testing"
 
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
@@ -254,5 +257,71 @@ func TestControllerRetryRunsARefusedReuseAgainAndKeepsSweeping(t *testing.T) {
 		if err != nil || run.State != runstate.RunRunning || row.Status != runstate.StatusPending || row.ReadyAt == nil || row.OutputRecord != nil {
 			t.Fatalf("run %s did not advance to execution: %s %+v %v", runID, run.State, row, err)
 		}
+	}
+}
+
+type failingResultBytes struct {
+	fakeBlobManifests
+	err error
+}
+
+func (f failingResultBytes) VerifyBlob(context.Context, blob.Blob) error { return f.err }
+
+// A temporary failure is not a verdict on the source: running the job again would
+// repeat a successful job's work and side effects, so the sweep retries instead.
+func TestControllerRetryWaitsOutATransientReuseFailure(t *testing.T) {
+	for name, cause := range map[string]error{
+		"unavailable reader":        authorityError(apierr.Unavailable, "result reader is restarting"),
+		"refusal past its deadline": errors.Join(authorityError(apierr.IllegalTransition, "refused"), context.DeadlineExceeded),
+	} {
+		t.Run(name, func(t *testing.T) {
+			source := retrySourceFixture(t, []nodeproto.JobSpec{{ID: "a"}, {ID: "failed", Needs: []string{"a"}}}, false)
+			runID := source.retry(t, "failed")
+			s := source.tenant.s
+			healthy := s.materializations
+			failing := &blobRecords{manifests: failingResultBytes{source.reads, cause}}
+			s.resultRecords, s.materializations = failing, failing
+			if _, err := s.AsOperator().ReconcileControllerRuns(t.Context(), "", 10); err == nil {
+				t.Fatal("a transient reuse failure was treated as a verdict")
+			}
+			ref := runspec.NodeRef{RunID: runspec.RunID(runID), NodeID: "a"}
+			if row, err := source.tenant.ReadNode(t.Context(), ref); err != nil || row.Status != runstate.StatusPending || row.ReadyAt != nil {
+				t.Fatalf("job was released to run again during a transient failure: %+v %v", row, err)
+			}
+			s.materializations = healthy
+			if _, err := s.AsOperator().ReconcileControllerRuns(t.Context(), "", 10); err != nil {
+				t.Fatal(err)
+			}
+			if row, err := source.tenant.ReadNode(t.Context(), ref); err != nil || row.Status != runstate.StatusDone || row.Attempt != 0 {
+				t.Fatalf("job was not reused once the failure passed: %+v %v", row, err)
+			}
+		})
+	}
+}
+
+func TestSavepointRollbackForgetsLocksTakenAfterIt(t *testing.T) {
+	source := retrySourceFixture(t, []nodeproto.JobSpec{{ID: "a"}, {ID: "failed", Needs: []string{"a"}}}, false)
+	s := source.tenant.s
+	if err := s.inTx(t.Context(), func(tx *storeTx) error {
+		before := len(tx.workLocks)
+		trial, err := savepointTx(t.Context(), tx, "trial")
+		if err != nil {
+			return err
+		}
+		if err := lockStateRunTx(t.Context(), tx, "a", source.runID); err != nil {
+			return err
+		}
+		if len(tx.workLocks) != before+1 {
+			t.Fatalf("lock was not recorded: %v", tx.workLocks)
+		}
+		if err := trial.rollback(t.Context(), tx); err != nil {
+			return err
+		}
+		if len(tx.workLocks) != before {
+			t.Fatalf("rolled-back lock is still cached: %v", tx.workLocks)
+		}
+		return trial.release(t.Context(), tx)
+	}); err != nil {
+		t.Fatal(err)
 	}
 }

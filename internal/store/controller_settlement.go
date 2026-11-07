@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"log/slog"
+	"slices"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
@@ -205,18 +206,19 @@ func prefetchRetryReadsTx(ctx context.Context, tx *storeTx, team Team, snapshot 
 		if !ok || node.Status != runstate.StatusPending || node.ReadyAt != nil || node.ClaimedBy != "" {
 			continue
 		}
-		if _, err := tx.execContext(ctx, "SAVEPOINT retry_reuse_reads"); err != nil {
+		trial, err := savepointTx(ctx, tx, "retry_reuse_reads")
+		if err != nil {
 			return err
 		}
 		source := runstate.MaterializeSource{Kind: runstate.SourceManualRetry, Result: &selected}
-		_, err := tryMaterializationTx(ctx, tx, team, ReconcileRequest{Ref: node.Ref, Actor: actor, Policy: source.Kind, Source: &source})
+		_, err = tryMaterializationTx(ctx, tx, team, ReconcileRequest{Ref: node.Ref, Actor: actor, Policy: source.Kind, Source: &source})
 		if errors.Is(err, errBlobIOPending) {
 			pending = err
 		}
-		if _, err := tx.execContext(ctx, "ROLLBACK TO SAVEPOINT retry_reuse_reads"); err != nil {
+		if err := trial.rollback(ctx, tx); err != nil {
 			return err
 		}
-		if _, err := tx.execContext(ctx, "RELEASE SAVEPOINT retry_reuse_reads"); err != nil {
+		if err := trial.release(ctx, tx); err != nil {
 			return err
 		}
 	}
@@ -226,7 +228,8 @@ func prefetchRetryReadsTx(ctx context.Context, tx *storeTx, team Team, snapshot 
 // safety: a refused source runs the job again; it never takes the refused result, and failing the job
 // would leave the user to retry the whole plan.
 func reuseRetryJobTx(ctx context.Context, tx *storeTx, team Team, ref runspec.NodeRef, actor runstate.Actor, selected runstate.MaterializedResultSource) (bool, error) {
-	if _, err := tx.execContext(ctx, "SAVEPOINT retry_reuse"); err != nil {
+	attempt, err := savepointTx(ctx, tx, "retry_reuse")
+	if err != nil {
 		return false, err
 	}
 	source := runstate.MaterializeSource{Kind: runstate.SourceManualRetry, Result: &selected}
@@ -236,19 +239,28 @@ func reuseRetryJobTx(ctx context.Context, tx *storeTx, team Team, ref runspec.No
 			return false, err
 		}
 		slog.Warn("retry cannot reuse the source result; the job runs again", "team", team, "run", ref.RunID, "job", ref.NodeID, "source_run", selected.Ref.RunID, "err", err)
-		if _, rollback := tx.execContext(ctx, "ROLLBACK TO SAVEPOINT retry_reuse"); rollback != nil {
+		if rollback := attempt.rollback(ctx, tx); rollback != nil {
 			return false, errors.Join(err, rollback)
 		}
 		reused = false
 	}
-	_, err = tx.execContext(ctx, "RELEASE SAVEPOINT retry_reuse")
-	return reused, err
+	return reused, attempt.release(ctx, tx)
 }
 
-// safety: refusals are store verdicts on the source; database and read failures stay errors so the sweep
-// tries the run again.
+// safety: only a verdict on the source is permanent; if any cause is transient, such as an unavailable
+// reader, a deadline or a database error, the sweep must retry rather than run a successful job again.
 func reuseRefused(err error) bool {
-	var refused *apierr.Error
-	var illegal *ErrIllegalTransition
-	return !errors.Is(err, errBlobIOPending) && (errors.As(err, &refused) || errors.As(err, &illegal) || errors.Is(err, blob.ErrDigestNotReadable))
+	switch cause := err.(type) {
+	case interface{ Unwrap() []error }:
+		causes := cause.Unwrap()
+		return len(causes) > 0 && !slices.ContainsFunc(causes, func(err error) bool { return !reuseRefused(err) })
+	case *ErrIllegalTransition:
+		return true
+	case *apierr.Error:
+		return slices.Contains([]apierr.Code{apierr.IllegalTransition, apierr.BadRequest, apierr.Forbidden, apierr.IntegrityFailure, apierr.SpecDrift}, cause.Code)
+	case interface{ Unwrap() error }:
+		return reuseRefused(cause.Unwrap())
+	default:
+		return err == blob.ErrDigestNotReadable
+	}
 }
