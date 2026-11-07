@@ -303,3 +303,45 @@ func TestLocalQueueRollsBeforeItsCredentialExpires(t *testing.T) {
 		}
 	})
 }
+
+func TestRollingLocalQueueStartsSuccessorBeforeDrainedInstanceJoins(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		ctx, cancel := context.WithCancel(t.Context())
+		defer cancel()
+		var instances atomic.Int32
+		successorRunning := make(chan struct{})
+		done := make(chan error, 1)
+		go func() {
+			done <- runRollingLocalQueue(ctx, func(ctx context.Context, claimsStopped func()) error {
+				switch instances.Add(1) {
+				case 1:
+					claimsStopped()
+					<-successorRunning
+					return nil
+				case 2:
+					close(successorRunning)
+					<-ctx.Done()
+					return ctx.Err()
+				}
+				t.Error("rolled past the successor")
+				return nil
+			})
+		}()
+		synctest.Wait()
+		if instances.Load() != 2 {
+			t.Fatalf("instances = %d; a draining owner waits on its successor", instances.Load())
+		}
+		cancel()
+		if err := <-done; !errors.Is(err, context.Canceled) {
+			t.Fatalf("rolling queue shutdown: %v", err)
+		}
+	})
+}
+
+func TestRollingLocalQueueStopsOnInstanceFailure(t *testing.T) {
+	failure := errors.New("activation failed")
+	err := runRollingLocalQueue(t.Context(), func(context.Context, func()) error { return failure })
+	if !errors.Is(err, failure) {
+		t.Fatalf("rolling queue failure: %v", err)
+	}
+}

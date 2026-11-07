@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"sync"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
@@ -69,9 +70,13 @@ func runLocalQueue(ctx context.Context, id string, options client.EngineOptions,
 	drainCtx, stopDrain := context.WithCancel(context.WithoutCancel(ctx))
 	drainResult := make(chan error, 1)
 	draining := false
+	claimsStopped := loop.OnClaimsStopped
 	loop.OnClaimsStopped = func() {
 		draining = true
 		go func() { drainResult <- lifecycle.Drain(drainCtx, instance.ID) }()
+		if claimsStopped != nil {
+			claimsStopped()
+		}
 	}
 	defer func() {
 		stopDrain()
@@ -82,4 +87,47 @@ func runLocalQueue(ctx context.Context, id string, options client.EngineOptions,
 		}
 	}()
 	return loop.Run(ctx)
+}
+
+// safety: each successor starts when its predecessor stops claiming, not after it joins,
+// because a draining owner may await a child only the successor can claim.
+func runRollingLocalQueue(ctx context.Context, start func(context.Context, func()) error) error {
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	launch := make(chan struct{}, 1)
+	results := make(chan error)
+	launch <- struct{}{}
+	running := 0
+	var result error
+	for {
+		select {
+		case <-launch:
+			if ctx.Err() == nil {
+				running++
+				var once sync.Once
+				successor := func() {
+					once.Do(func() {
+						select {
+						case launch <- struct{}{}:
+						default:
+						}
+					})
+				}
+				go func() {
+					err := start(ctx, successor)
+					successor()
+					results <- err
+				}()
+			}
+		case err := <-results:
+			running--
+			if err != nil {
+				result = errors.Join(result, err)
+				cancel()
+			}
+		}
+		if running == 0 && ctx.Err() != nil {
+			return result
+		}
+	}
 }

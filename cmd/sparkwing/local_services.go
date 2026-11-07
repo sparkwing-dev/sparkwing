@@ -212,19 +212,16 @@ func bindLocalControllerWithClock(ctx context.Context, b localcontroller.Binding
 			if runtime.GOOS != "windows" {
 				return superviseLocalRunnerProcess(ctx, timerHost)
 			}
-			// safety: an in-process queue that rolls its claim token must start the next instance itself.
-			for {
-				err := runLocalQueue(ctx, rand.Text(), client.EngineOptions{URL: wingdclient.APIBaseURL, HTTP: transport}, &runners.Loop{
+			return runRollingLocalQueue(ctx, func(ctx context.Context, claimsStopped func()) error {
+				return runLocalQueue(ctx, rand.Text(), client.EngineOptions{URL: wingdclient.APIBaseURL, HTTP: transport}, &runners.Loop{
 					Config: runners.LoopConfig{Version: installedVersion(), MaxConcurrent: runtime.NumCPU()},
 					CheckVersion: func(ctx context.Context, version string) error {
 						return b.Controller.LocalRunnerPolicy.CheckRunner(ctx, version)
 					},
-					Host: localRunnerHosting(b.Home, client.EngineOptions{URL: wingdclient.APIBaseURL, HTTP: transport}),
+					Host:            localRunnerHosting(b.Home, client.EngineOptions{URL: wingdclient.APIBaseURL, HTTP: transport}),
+					OnClaimsStopped: claimsStopped,
 				}, lifecycle)
-				if err != nil || ctx.Err() != nil {
-					return err
-				}
-			}
+			})
 		},
 	}, nil
 }
