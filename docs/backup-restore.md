@@ -128,7 +128,7 @@ sparkwing: store schema version 28 baseline digest "<recorded-digest>" is not th
 
 sparkwing: store schema version 28 baseline digest "<missing>" is not the v0.68.3 baseline "75de685ed349678b0fa36694978890a2ddd491851d7a63c4c6740e81408b166a" this binary upgrades, so it left the store unchanged; open it once with Sparkwing v0.68.3 to record its digest, then start this binary; or back up the store and use a binary matching it; this build cannot upgrade it; to start fresh, point the server at an empty database and start again
 
-sparkwing: store schema version 34 is newer than this binary (expects 33); start a binary matching the store; to return to this binary, stop the controller, move <path> and any <path>-wal and <path>-shm files aside, and copy the newest <path>.schema-33-*.bak backup to <path>, which drops runs recorded since that backup
+sparkwing: store schema version 34 is newer than this binary (expects 33); start a binary matching the store, or restore a backup matching this binary: stop the controller, move <path> and any <path>-wal and <path>-shm files aside, and copy the newest <path>.schema-33-*.bak to <path>; runs recorded since that backup are lost
 
 sparkwing: store schema version 34 is newer than this binary (expects 33); start a binary matching the store, or restore a backup matching this binary into a separate database
 
