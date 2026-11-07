@@ -112,10 +112,7 @@ func testDetachedLocalRunnerRestart(t *testing.T, childOwner bool) {
 			}
 			return true
 		}
-		for !stopped() && cleanup.Err() == nil {
-			time.Sleep(20 * time.Millisecond)
-		}
-		if !stopped() {
+		if pollLocalRunner(cleanup, stopped) != nil {
 			t.Error("test-owned runners did not finish graceful cleanup")
 			for _, instance := range instances {
 				alive, err := wingd.LocalRunnerProcessAlive(instance)
@@ -246,13 +243,8 @@ func testDetachedLocalRunnerRestart(t *testing.T, childOwner bool) {
 		t.Fatalf("same-build successor did not reuse identity: first=%+v successor=%+v", first, reused)
 	}
 	stopController()
-	// bug: the real outage crosses the claim loop's five-second recovery boundary.
-	outage := time.NewTimer(6 * time.Second)
-	select {
-	case <-ctx.Done():
-		outage.Stop()
-		t.Fatal(ctx.Err())
-	case <-outage.C:
+	if err := outlastClaimRecovery(ctx); err != nil {
+		t.Fatal(err)
 	}
 	recovered := start(cli)
 	awaitLocalRunnerCondition(t, ctx, func() bool {
@@ -353,14 +345,30 @@ func testDetachedLocalRunnerRestart(t *testing.T, childOwner bool) {
 
 func awaitLocalRunnerCondition(t *testing.T, ctx context.Context, condition func() bool) {
 	t.Helper()
-	ticker := time.NewTicker(20 * time.Millisecond)
-	defer ticker.Stop()
+	if err := pollLocalRunner(ctx, condition); err != nil {
+		t.Fatalf("local runner condition: %v", err)
+	}
+}
+
+func pollLocalRunner(ctx context.Context, condition func() bool) error {
 	for !condition() {
 		select {
 		case <-ctx.Done():
-			t.Fatalf("local runner condition: %v", ctx.Err())
-		case <-ticker.C:
+			return ctx.Err()
+		// sleepcheck:external-boundary real runner processes, services and socket state need a paced poll
+		case <-time.After(20 * time.Millisecond):
 		}
+	}
+	return nil
+}
+
+func outlastClaimRecovery(ctx context.Context) error {
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	// sleepcheck:external-boundary a real controller outage must outlast the five-second claim recovery window
+	case <-time.After(6 * time.Second):
+		return nil
 	}
 }
 

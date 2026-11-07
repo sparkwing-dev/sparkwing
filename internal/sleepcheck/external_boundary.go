@@ -36,6 +36,16 @@ var approvedExternalBoundaries = []externalBoundary{
 		duration: "500 * time.Millisecond",
 		marker:   "// sleepcheck:external-boundary external runner status needs a paced HTTP poll",
 	},
+	{
+		file: "cmd/sparkwing/local_runner_restart_linux_test.go", function: "pollLocalRunner",
+		duration: "20 * time.Millisecond",
+		marker:   "// sleepcheck:external-boundary real runner processes, services and socket state need a paced poll",
+	},
+	{
+		file: "cmd/sparkwing/local_runner_restart_linux_test.go", function: "outlastClaimRecovery",
+		duration: "6 * time.Second",
+		marker:   "// sleepcheck:external-boundary a real controller outage must outlast the five-second claim recovery window",
+	},
 }
 
 func approvedWaits(root string, rules []externalBoundary) (map[string]map[sourcePosition]bool, []externalBoundary) {
