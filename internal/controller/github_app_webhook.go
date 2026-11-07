@@ -727,7 +727,7 @@ func (s *Server) reconcileGitHubAppCrons(r *http.Request, in store.GitHubAppInst
 	if intake.at.Add(githubAppClockSkew).Before(grant.EnabledAt) {
 		return 0, "the push predates repository automation consent", nil
 	}
-	snapshot, err := s.githubApp.client.FileAtDefaultHead(r.Context(), in.InstallationID, repo.Owner, repo.Name,
+	snapshot, err := s.githubApp.client.FileAtDefaultHead(r.Context(), in.InstallationID, repo.ID, repo.Owner, repo.Name,
 		".sparkwing/"+projectconfig.Filename)
 	if err != nil {
 		return http.StatusBadGateway, "", fmt.Errorf("read GitHub schedule config: %w", err)
@@ -951,13 +951,13 @@ func (s *Server) startGitHubAppRuns(w http.ResponseWriter, r *http.Request, in s
 			resp.Runs = append(resp.Runs, githubAppRun{Pipeline: plan.pipeline, RunID: existing.ID, Status: "duplicate"})
 			continue
 		}
+		// safety: GitHub never redelivers, so a placement that cannot be read refuses only this run, visibly,
+		// and an operator can process the delivery again once the default branch reads.
 		policy, err := placement(ctx, plan.pipeline)
-		if refusal := (*apierr.Error)(nil); errors.As(err, &refusal) {
+		if err != nil {
 			resp.Runs = append(resp.Runs, githubAppRun{Pipeline: plan.pipeline, Status: "refused", Reason: err.Error()})
+			s.logger.Warn("github app run refused: placement unavailable", "team", string(in.Team), "repo", repo.Slug(), "pipeline", plan.pipeline, "err", err)
 			continue
-		} else if err != nil {
-			writeError(w, http.StatusBadGateway, err)
-			return
 		}
 		run, err := s.startGitHubAppRun(r, tenant, in, plan, repo, body, policy)
 		if err != nil {

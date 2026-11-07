@@ -447,6 +447,9 @@ func insertNodeTx(ctx context.Context, tx *storeTx, team Team, row runstate.Node
 	if err != nil {
 		return err
 	}
+	if err := checkJobPlacementTx(ctx, tx, team, row); err != nil {
+		return err
+	}
 	requirements, err := persistClaimRequirementsTx(ctx, tx, team, row.Execution.Requires.Value)
 	if err != nil {
 		return err

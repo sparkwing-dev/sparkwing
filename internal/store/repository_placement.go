@@ -1,26 +1,42 @@
 package store
 
 import (
+	"context"
+	"encoding/json"
 	"fmt"
 	"slices"
+	"strings"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 )
 
-// safety: only an executable run whose intake sealed repository proof takes repository placement; an App runner
-// pin and a placement list conflict rather than one silently winning, and a per-run --runner choice replaces the list.
-func sealRepositoryPlacement(input *runspec.Request, policy *runspec.RepositoryPlacement, owner GitHubAppRunner, provenance runspec.Provenance) error {
-	if policy == nil || provenance.ProvenRepository() == "" || input.Mode != runspec.IntakeExecute || input.Burst != nil {
+// safety: the list only narrows where jobs run, so it is sealed whatever the provenance, a child stays inside
+// the list of the parent job that started it, and any runner pin conflicts with a list rather than one winning.
+func sealRepositoryPlacement(input *runspec.Request, own, parent *runspec.RepositoryPlacement, parentJob string, owner GitHubAppRunner) error {
+	if input.Mode != runspec.IntakeExecute {
 		return nil
 	}
-	if owner != "" && owner != GitHubAppRunnerAnywhere {
-		return authorityError(apierr.BadRequest, fmt.Sprintf("the GitHub App runner setting %s conflicts with the placement of pipeline %s in .sparkwing/sparkwing.yaml; set the runner to anywhere or remove the placement", owner, input.Pipeline))
+	policy, err := runspec.BindToParent(own, parent, parentJob)
+	if err != nil {
+		return authorityError(apierr.BadRequest, fmt.Sprintf("the placement of child pipeline %s %v; narrow it to tiers its parent allows", input.Pipeline, err))
 	}
-	if runner := input.Options.Runner; runner.Set && runner.Value.Kind != runspec.RunnerAny {
+	if !policy.Active() {
 		return nil
+	}
+	conflict := func(setting string) error {
+		return authorityError(apierr.BadRequest, fmt.Sprintf("%s conflicts with the placement of pipeline %s from .sparkwing/sparkwing.yaml on the default branch; remove one of them", setting, input.Pipeline))
+	}
+	switch runner := input.Options.Runner; {
+	case input.Burst != nil:
+		return conflict("burst routing")
+	case owner != "" && owner != GitHubAppRunnerAnywhere:
+		return conflict("the GitHub App runner setting " + string(owner))
+	case runner.Set && runner.Value.Kind != runspec.RunnerAny:
+		return conflict(strings.TrimSpace("the runner selection " + string(runner.Value.Kind) + " " + runner.Value.Value))
 	}
 	if err := policy.Validate(); err != nil {
 		return authorityError(apierr.BadRequest, "repository placement: "+err.Error())
@@ -34,21 +50,44 @@ func repositoryPlacementApplies(request runspec.Request, unit UnitRef) bool {
 	return unit.Kind == capability.UnitNode && len(request.Placement.ForJob(string(unit.NodeID))) > 0
 }
 
-// safety: an override naming no plan job fails acceptance unless a generator may still add it; inline jobs
-// stay on their run host, so a placement cannot move them.
-func checkPlacementJobs(policy *runspec.RepositoryPlacement, pipeline string, jobs []nodeproto.JobSpec) error {
-	if policy == nil {
+// safety: runs at plan and expansion acceptance alike. An override for a job a plan lacks is inert, because
+// the list binds job IDs; an inline job stays on its run host, and a list no tier of which can meet the job's
+// operating-system requirements would leave the job waiting forever, so both refuse the job.
+func checkJobPlacementTx(ctx context.Context, tx *storeTx, team Team, row runstate.NodeRow) error {
+	var raw []byte
+	if err := tx.QueryRowContext(ctx, `SELECT request_json FROM runs WHERE team=? AND id=?`, team, row.Ref.RunID).Scan(&raw); err != nil {
+		return err
+	}
+	var sealed struct {
+		Request struct {
+			Placement *runspec.RepositoryPlacement `json:"placement"`
+		} `json:"request"`
+	}
+	if err := json.Unmarshal(raw, &sealed); err != nil {
+		return err
+	}
+	return checkJobPlacement(sealed.Request.Placement, row)
+}
+
+func checkJobPlacement(policy *runspec.RepositoryPlacement, row runstate.NodeRow) error {
+	tiers := policy.ForJob(string(row.Ref.NodeID))
+	if len(tiers) == 0 {
 		return nil
 	}
-	generates := slices.ContainsFunc(jobs, func(job nodeproto.JobSpec) bool { return len(job.Closures.Generate) > 0 })
-	for _, override := range policy.Jobs {
-		i := slices.IndexFunc(jobs, func(job nodeproto.JobSpec) bool { return job.ID == override.Job })
-		switch {
-		case i < 0 && !generates:
-			return authorityError(apierr.PlanInvalid, fmt.Sprintf("the placement for job %s of pipeline %s in .sparkwing/sparkwing.yaml at default-branch commit %s names no job in this plan", override.Job, pipeline, policy.Revision))
-		case i >= 0 && jobs[i].Inline && len(override.Prefer) > 0:
-			return authorityError(apierr.PlanInvalid, fmt.Sprintf("job %s is inline and stays on its run host; remove its placement from .sparkwing/sparkwing.yaml", override.Job))
+	var job nodeproto.JobSpec
+	if err := json.Unmarshal(row.Spec, &job); err != nil {
+		return err
+	}
+	if job.Inline {
+		return authorityError(apierr.PlanInvalid, fmt.Sprintf("job %s is inline and stays on its run host; remove its placement from .sparkwing/sparkwing.yaml", row.Ref.NodeID))
+	}
+	requires := row.Execution.Requires.Value
+	if !slices.ContainsFunc(tiers, func(tier runspec.RepositoryTier) bool { return tier.MaySatisfy(requires) }) {
+		names := make([]string, len(tiers))
+		for i, tier := range tiers {
+			names[i] = tier.String()
 		}
+		return authorityError(apierr.PlanInvalid, fmt.Sprintf("job %s requires %s, which no tier of its placement (%s) can satisfy", row.Ref.NodeID, strings.Join(requires, " "), strings.Join(names, "; ")))
 	}
 	return nil
 }

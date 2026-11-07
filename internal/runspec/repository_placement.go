@@ -164,3 +164,140 @@ func (t RepositoryTier) String() string {
 	}
 	return out
 }
+
+// BindToParent narrows a child run's own placement to the tier list of the
+// parent job that started it, so a child can never place work where its
+// parent could not. With no parent list the child keeps its own policy; with
+// no own policy every child job follows the parent job's list. Each child
+// tier is intersected with every parent tier it overlaps. An empty result is
+// an error, because an empty list would mean unconstrained routing.
+func BindToParent(own, parent *RepositoryPlacement, parentJob string) (*RepositoryPlacement, error) {
+	bound := parent.ForJob(parentJob)
+	if len(bound) == 0 {
+		return own, nil
+	}
+	if own == nil {
+		return &RepositoryPlacement{Revision: parent.Revision, Prefer: slices.Clone(bound)}, nil
+	}
+	narrow := func(tiers []RepositoryTier) ([]RepositoryTier, error) {
+		if len(tiers) == 0 {
+			return slices.Clone(bound), nil
+		}
+		out := intersectTiers(tiers, bound)
+		if len(out) == 0 {
+			return nil, fmt.Errorf("shares no tier with parent job %s's placement", parentJob)
+		}
+		return out, nil
+	}
+	out := &RepositoryPlacement{Revision: own.Revision}
+	var err error
+	if out.Prefer, err = narrow(own.Prefer); err != nil {
+		return nil, err
+	}
+	for _, job := range own.Jobs {
+		tiers, err := narrow(job.Prefer)
+		if err != nil {
+			return nil, fmt.Errorf("job %s %w", job.Job, err)
+		}
+		out.Jobs = append(out.Jobs, RepositoryJobPlacement{Job: job.Job, Prefer: tiers})
+	}
+	return out, nil
+}
+
+// safety: each child tier keeps its own hold on the last tier derived from it, so a
+// child's cumulative deadlines never grow past what its own list states.
+func intersectTiers(child, parent []RepositoryTier) []RepositoryTier {
+	var out []RepositoryTier
+	for _, c := range child {
+		start := len(out)
+		for _, p := range parent {
+			tier, ok := intersectTier(c, p)
+			if ok && !slices.ContainsFunc(out, func(t RepositoryTier) bool { return t.Target == tier.Target && slices.Equal(t.Labels, tier.Labels) }) {
+				out = append(out, tier)
+			}
+		}
+		if len(out) > start {
+			out[len(out)-1].Hold = c.Hold
+		}
+	}
+	return out
+}
+
+func intersectTier(c, p RepositoryTier) (RepositoryTier, bool) {
+	if TeamRunnerTarget(c.Target) && TeamRunnerTarget(p.Target) {
+		target := c.Target
+		if p.Target != PlacementTeam {
+			if c.Target != PlacementTeam && c.Target != p.Target {
+				return RepositoryTier{}, false
+			}
+			target = p.Target
+		}
+		labels := slices.Clone(c.Labels)
+		for _, term := range p.Labels {
+			if !slices.Contains(labels, term) {
+				labels = append(labels, term)
+			}
+		}
+		return RepositoryTier{Target: target, Labels: labels}, true
+	}
+	if c.Target == p.Target && c.Workflow == p.Workflow && c.Runner == p.Runner {
+		return RepositoryTier{Target: c.Target, Workflow: c.Workflow, Runner: c.Runner}, true
+	}
+	return RepositoryTier{}, false
+}
+
+// Active reports whether any job follows a tier list; a policy whose lists are
+// all empty leaves every job on the routing it has without one.
+func (p *RepositoryPlacement) Active() bool {
+	if p == nil {
+		return false
+	}
+	return len(p.Prefer) > 0 || slices.ContainsFunc(p.Jobs, func(job RepositoryJobPlacement) bool { return len(job.Prefer) > 0 })
+}
+
+// MaySatisfy reports whether some claimant of this tier could meet the job's
+// operating-system requirements. Cloud executors run Linux, a GitHub-hosted
+// image names its system, and a team tier is limited only by its own os=
+// labels. It answers true whenever the system is unknown.
+func (t RepositoryTier) MaySatisfy(requires []string) bool {
+	var systems []string
+	switch {
+	case t.Target == PlacementCloud:
+		systems = []string{"linux"}
+	case t.Target == PlacementGitHubActions:
+		for prefix, system := range map[string]string{"ubuntu-": "linux", "macos-": "darwin", "windows-": "windows"} {
+			if strings.HasPrefix(t.Runner, prefix) {
+				systems = []string{system}
+			}
+		}
+	default:
+		for _, term := range t.Labels {
+			if allowed, ok := osTerm(term); ok {
+				systems = allowed
+			}
+		}
+	}
+	if systems == nil {
+		return true
+	}
+	for _, term := range requires {
+		if allowed, ok := osTerm(term); ok && !slices.ContainsFunc(systems, func(system string) bool { return slices.Contains(allowed, system) }) {
+			return false
+		}
+	}
+	return true
+}
+
+// safety: only a term whose every alternative names an operating system constrains one; a mixed term may be met
+// by another label.
+func osTerm(term string) ([]string, bool) {
+	var systems []string
+	for _, alternative := range strings.Split(term, ",") {
+		system, ok := strings.CutPrefix(strings.TrimSpace(alternative), "os=")
+		if !ok || system == "" {
+			return nil, false
+		}
+		systems = append(systems, system)
+	}
+	return systems, len(systems) > 0
+}

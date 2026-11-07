@@ -58,6 +58,10 @@ func (s *Server) ResolveScheduleSource(ctx context.Context, row store.CronSchedu
 		read = func(ctx context.Context, sha, name string) ([]byte, bool, error) {
 			return s.githubApp.client.FileAtCommit(ctx, row.GitHubInstallationID, row.GitHubRepositoryID, repo.Owner, repo.Name, sha, name)
 		}
+		repo.ID = row.GitHubRepositoryID
+		if request.Placement, err = s.defaultBranchPlacement(row.GitHubInstallationID, repo)(ctx, row.Pipeline); err != nil {
+			return request, err
+		}
 	}
 	git, code, err := s.selectIntakeSource(ctx, row.Team, request, read)
 	if err != nil {

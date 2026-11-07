@@ -178,7 +178,15 @@ func admitRun(ctx context.Context, tx *storeTx, team Team, request IntakeRequest
 		if err := routeIntakeTx(ctx, tx, team, &input, provenance); err != nil {
 			return AdmissionResult{}, err
 		}
-		if err := sealRepositoryPlacement(&input, request.RepositoryPlacement, owner, provenance); err != nil {
+		var parentPlacement *runspec.RepositoryPlacement
+		if input.Lineage.ParentRunID != "" {
+			parent, err := readRunTx(ctx, tx, team, input.Lineage.ParentRunID)
+			if err != nil {
+				return AdmissionResult{}, err
+			}
+			parentPlacement = parent.Request.Request.Placement
+		}
+		if err := sealRepositoryPlacement(&input, request.RepositoryPlacement, parentPlacement, input.Lineage.ParentJobID, owner); err != nil {
 			return AdmissionResult{}, err
 		}
 		if request.Request.Dispatch == "" {

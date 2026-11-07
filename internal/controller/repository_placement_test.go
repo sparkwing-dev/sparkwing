@@ -2,6 +2,7 @@ package controller_test
 
 import (
 	"context"
+	"io"
 	"net/http"
 	"strings"
 	"testing"
@@ -79,5 +80,58 @@ func TestGitHubAppRunnerPinConflictsWithPlacement(t *testing.T) {
 	code, out := f.deliver("push", pushPayload(7, 701, "acme/widgets", headSHA), "")
 	if code == http.StatusAccepted || len(f.triggers(olga.team)) != 0 {
 		t.Fatalf("a runner pin silently won over placement: %d %v", code, out)
+	}
+}
+
+func TestGitHubAppUnverifiedRunStillSealsItsPlacement(t *testing.T) {
+	f := newAppFixture(t)
+	olga := f.ghUser(501, "olga")
+	f.connect(olga, 501, 7, acmeAdmin)
+	f.app.SetCommit("acme/widgets", "main", headSHA)
+	f.app.SetFile("acme/widgets", headSHA, ".sparkwing/sparkwing.yaml", []byte(defaultPlacementConfig))
+	if code := f.subscribe(olga, "acme/widgets", "deploy", nil); code != http.StatusOK {
+		t.Fatalf("subscribe=%d", code)
+	}
+	cfg := f.app.Config()
+	cfg.HTTP = &http.Client{Transport: automationTransport(func(r *http.Request) (*http.Response, error) {
+		if strings.Contains(r.URL.Path, "/compare/") {
+			return &http.Response{StatusCode: http.StatusServiceUnavailable, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(`{}`)), Request: r}, nil
+		}
+		return http.DefaultTransport.RoundTrip(r)
+	})}
+	f.srv.WithGitHubApp(cfg)
+	if code, out := f.deliver("push", pushPayload(7, 701, "acme/widgets", headSHA), ""); code != http.StatusAccepted || out["status"] != "dispatched" {
+		t.Fatalf("push=%d %v", code, out)
+	}
+	tenant, err := f.store.ForTeam(context.Background(), store.Team(olga.team))
+	if err != nil {
+		t.Fatal(err)
+	}
+	run, err := tenant.ReadRun(context.Background(), f.triggers(olga.team)[0].ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if run.Request.Provenance.ProvenRepository() != "" || run.Request.Request.Placement == nil {
+		t.Fatalf("an unverified App run dropped its list: proof=%+v placement=%+v", run.Request.Provenance, run.Request.Request.Placement)
+	}
+}
+
+func TestGitHubAppUnreadablePlacementRefusesOnlyThatRun(t *testing.T) {
+	f := newAppFixture(t)
+	olga := f.ghUser(501, "olga")
+	f.connect(olga, 501, 7, acmeAdmin)
+	if code := f.subscribe(olga, "acme/widgets", "deploy", map[string]any{"branches": []string{}}); code != http.StatusOK {
+		t.Fatalf("subscribe=%d", code)
+	}
+	f.app.SetCommit("acme/widgets", "main", headSHA)
+	f.app.SetFile("acme/widgets", headSHA, ".sparkwing/sparkwing.yaml", []byte(defaultPlacementConfig))
+	f.app.FailContents(1)
+	code, out := f.deliver("push", pushPayload(7, 701, "acme/widgets", headSHA), "")
+	runs, _ := out["runs"].([]any)
+	if code != http.StatusAccepted || len(runs) != 1 || runs[0].(map[string]any)["status"] != "refused" || !strings.Contains(runs[0].(map[string]any)["reason"].(string), "default-branch placement") {
+		t.Fatalf("a placement read failure must refuse the run visibly, not fail the delivery: %d %v", code, out)
+	}
+	if len(f.triggers(olga.team)) != 0 {
+		t.Fatal("a run started without its placement")
 	}
 }
