@@ -19,15 +19,6 @@ func TestSecret_NoResolverInstalled(t *testing.T) {
 	}
 }
 
-func TestSecret_BlankName(t *testing.T) {
-	ctx := withSecretResolver(context.Background(), secretResolverFunc(
-		func(ctx context.Context, name string) (string, bool, error) { return "x", true, nil },
-	))
-	if _, err := Secret(ctx, ""); err == nil {
-		t.Fatal("Secret(ctx, \"\") must error")
-	}
-}
-
 func TestSecret_DelegatesToResolver(t *testing.T) {
 	called := 0
 	ctx := withSecretResolver(context.Background(), secretResolverFunc(

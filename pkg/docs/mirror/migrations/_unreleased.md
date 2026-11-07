@@ -302,6 +302,14 @@ TypeScript `path`, `readFile`, `writeFile` and `glob` exports with `node:path` a
 Both command clients resolve the command environment's `PATH` in its requested
 working directory. This makes Go respect command-level `PATH` overrides.
 Executable text without a shebang runs through `/bin/sh` on Unix for both SDKs.
-Docker container output callbacks receive their bytes after the helper finishes.
+Docker container output is logged by the host after the helper finishes. Custom
+output callbacks receive their captured bytes after completion.
 Local TypeScript `file:` packages select the installed candidate engine, as a Go
 module replacement does. Both paths report that release pinning is disabled.
+
+Plan setters relay numeric bounds, cache requirements, environment names and enum
+values to host validation. Invalid declarations fail at the host with field paths.
+`NeedsTools` relays tool selectors without a client-maintained tool list, so a new
+host-detected tool does not require an SDK update. Unmatched selectors wait for
+an eligible runner under the run's claim-wait policy. Cleanup registration also
+requires the bound host. Standalone SDK cleanup replay files are removed.

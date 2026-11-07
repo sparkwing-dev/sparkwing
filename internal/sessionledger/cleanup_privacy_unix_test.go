@@ -1,6 +1,6 @@
 //go:build unix
 
-package cleanup
+package sessionledger_test
 
 import (
 	"context"
@@ -36,21 +36,12 @@ func TestOrphanCleanupDiagnosticsNeverUseExecutableText(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			release, err := Register(t.Context(), Spec{Argv: []string{program, secret}, Description: tc.description})
+			ledger := sessionledger.Open(paths.PathsAt(home).SessionLedgerDir())
+			release, err := ledger.Record(sessionledger.Record{Run: "run-1", Node: "build", OwnerPID: os.Getpid(), OwnerBirth: "gone", Handle: sessionledger.Handle{Kind: "command", ID: "owned", Argv: []string{program, secret}}, Description: tc.description})
 			if err != nil {
 				t.Fatal(err)
 			}
 			defer release()
-			ledger := sessionledger.Open(paths.PathsAt(home).SessionLedgerDir())
-			records, err := ledger.List()
-			if err != nil || len(records) != 1 {
-				t.Fatalf("records = %+v, err = %v", records, err)
-			}
-			// A mismatched birth token represents an owner that has exited.
-			records[0].OwnerBirth = "gone"
-			if _, err := ledger.Record(records[0]); err != nil {
-				t.Fatal(err)
-			}
 			outcomes, err := ledger.Sweep(t.Context(), sessionledger.SweepOptions{})
 			if err != nil || len(outcomes) != 1 {
 				t.Fatalf("outcomes = %+v, err = %v", outcomes, err)

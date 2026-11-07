@@ -171,6 +171,13 @@ export interface CommandOptions extends ExecOptions {
 
 function commandEnv(ctx:Context,options:ExecOptions):NodeJS.ProcessEnv{return {...process.env,...binding(ctx).env,...options.env};}
 
+const windowsPrivateEnv=new Set(["SPARKWING_NODE_TOKEN","SPARKWING_AGENT_TOKEN","SPARKWING_CACHE_GRANT","SPARKWING_SOURCE_TOKEN","SPARKWING_API_TOKEN","SPARKWING_LEASE_TOKEN","SPARKWING_SECRETS_KEY","SPARKWING_SECRETS_PREVIOUS_KEY","SPARKWING_RELEASE_SIGNING_KEY","SPARKWING_NODE_URL","SPARKWING_PROTOCOL_HANDLES","SPARKWING_CONTROLLER_URL"]);
+function windowsCommandEnv(ctx:Context,options:ExecOptions):NodeJS.ProcessEnv{
+ const env=commandEnv(ctx,options);
+ for(const name of Object.keys(env)){const key=name.toUpperCase();if(windowsPrivateEnv.has(key)||key.startsWith("SPARKWING_NODE_CLAIM_"))delete env[name]}
+ return env;
+}
+
 export function runInput(
   ctx: Context,
   argv: readonly [string, ...string[]],
@@ -211,7 +218,7 @@ export async function runCommand(ctx: Context, argv: readonly [string, ...string
     }
     const child = spawn(argv[0], argv.slice(1), {
       cwd,
-      env: commandEnv(ctx, options),
+      env: windowsCommandEnv(ctx, options),
       detached: process.platform !== "win32",
       // safety: Only these three handles are inherited; protocol handles never enter a tool.
       stdio: [options.input === undefined ? "ignore" : "pipe", "pipe", "pipe"],
@@ -262,7 +269,7 @@ function collectCommand(ctx: Context, child: ChildProcess, options: CommandOptio
     let cancelled = false;
     const kill = () => {
       try {
-        terminate(child, commandEnv(ctx, {}));
+        terminate(child, windowsCommandEnv(ctx, {}));
       } catch (error) {
         cause ??= error;
       }

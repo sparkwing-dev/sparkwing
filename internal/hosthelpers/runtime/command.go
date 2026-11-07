@@ -52,11 +52,11 @@ func LookPath(ctx context.Context, name string) (string, error) {
 type cleanupKey struct{}
 type cleanups struct {
 	register func([]string, string) (string, error)
-	release  func(string) error
+	release  func(context.Context, string) error
 }
 
 // WithCleanups binds resources to the host's process cleanup ledger.
-func WithCleanups(ctx context.Context, register func([]string, string) (string, error), release func(string) error) context.Context {
+func WithCleanups(ctx context.Context, register func([]string, string) (string, error), release func(context.Context, string) error) context.Context {
 	return context.WithValue(ctx, cleanupKey{}, cleanups{register, release})
 }
 
@@ -75,7 +75,7 @@ func Release(ctx context.Context, id string) error {
 	if !ok {
 		return fmt.Errorf("host cleanup service unavailable")
 	}
-	return c.release(id)
+	return c.release(ctx, id)
 }
 
 // Path resolves a helper filesystem input in the pipeline process's working directory.

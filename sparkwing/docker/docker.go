@@ -179,7 +179,10 @@ type RunOptions struct {
 // the caller; all I/O moves through the docker API.
 func Run(ctx context.Context, opts RunOptions) error {
 	var out struct{ Stdout, Stderr string }
-	err := sdkserve.Helper(ctx, "docker.Run", []any{opts}, &out)
+	err := sdkserve.Helper(ctx, "docker.Run", []any{struct {
+		RunOptions
+		CaptureOutput bool `json:"captureOutput"`
+	}{opts, opts.Stdout != nil || opts.Stderr != nil}}, &out)
 	stdout, stderr := opts.Stdout, opts.Stderr
 	if stdout == nil {
 		stdout = os.Stdout

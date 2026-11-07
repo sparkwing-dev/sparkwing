@@ -91,12 +91,6 @@ func Backoff(d time.Duration) RetryOption {
 // Cache declares files restored through the host-authorized depcache scope.
 func (n *JobNode) Cache(caches ...DirCache) *JobNode {
 	for _, c := range caches {
-		if c.spec.Path == "" && c.spec.Resolver == "" {
-			panic("sparkwing: Cache: path or resolver required")
-		}
-		if len(c.spec.KeyFiles) == 0 {
-			panic("sparkwing: Cache: key files required")
-		}
 		n.dirCaches = append(n.dirCaches, c)
 	}
 	return n
@@ -304,12 +298,7 @@ func (a *Approval) OnFailure(id string, body any) *JobNode {
 
 // FailurePolicy chooses fail_fast or collect_all without changing dependency requirements.
 func (w *Work) FailurePolicy(policy ParallelFailurePolicy) *Work {
-	switch policy {
-	case FailFast, CollectAll:
-		w.failures = policy
-	default:
-		panic("sparkwing: unknown failure policy")
-	}
+	w.failures = policy
 	return w
 }
 

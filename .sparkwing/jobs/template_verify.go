@@ -3,6 +3,7 @@ package jobs
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -18,6 +19,7 @@ import (
 	"time"
 
 	templates "github.com/sparkwing-dev/sparks-core/templates"
+	"github.com/sparkwing-dev/sparkwing/pkg/scaffold"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
@@ -144,10 +146,21 @@ func (j *buildVerifyCLIJob) run(ctx context.Context) (verifyEnv, error) {
 	} else {
 		sparkwing.Info(ctx, "verifying every template: %s", proof.Reason)
 	}
+	stateHome := filepath.Join(dir, "state")
+	if err := os.MkdirAll(stateHome, 0o700); err != nil {
+		return verifyEnv{}, err
+	}
+	key := make([]byte, 32)
+	if _, err := rand.Read(key); err != nil {
+		return verifyEnv{}, err
+	}
+	if err := os.WriteFile(filepath.Join(stateHome, "secrets.key"), key, 0o600); err != nil {
+		return verifyEnv{}, err
+	}
 	return verifyEnv{
 		CLI:        bin,
 		Root:       root,
-		StateHome:  filepath.Join(dir, "state"),
+		StateHome:  stateHome,
 		SparksCore: core,
 		GoEnv:      readGoEnv(ctx),
 		Proof:      proof,
@@ -302,7 +315,7 @@ func verifyTemplate(ctx context.Context, m templates.Manifest, env verifyEnv) (t
 	}
 	defer func() { _ = os.RemoveAll(scratch) }()
 
-	if err := scaffoldExample(ctx, bin, scratch, m); err != nil {
+	if err := scaffoldExample(ctx, bin, scratch, m, env.Root); err != nil {
 		return out, fmt.Errorf("%s: scaffold: %w", m.Name, err)
 	}
 
@@ -313,16 +326,16 @@ func verifyTemplate(ctx context.Context, m templates.Manifest, env verifyEnv) (t
 	if err := pinLocalSparksCore(ctx, dotSparkwing, env.SparksCore); err != nil {
 		return out, fmt.Errorf("%s: pin sparks-core: %w", m.Name, err)
 	}
-	if err := pinLocalSparkwingSDK(ctx, dotSparkwing, env.Root); err != nil {
-		return out, fmt.Errorf("%s: pin sparkwing SDK: %w", m.Name, err)
-	}
 	if _, err := sparkwing.Exec(ctx, "go", "build", "./...").Dir(dotSparkwing).Env("GOWORK", "off").Run(); err != nil {
 		return out, fmt.Errorf("%s: go build: %w", m.Name, err)
 	}
-	if _, err := sparkwing.Exec(ctx, bin, "-C", scratch, "pipeline", "lint", "--all").Run(); err != nil {
+	if err := gitInitFixture(ctx, scratch); err != nil {
+		return out, fmt.Errorf("%s: source fixture: %w", m.Name, err)
+	}
+	if _, err := sparkwing.Exec(ctx, bin, "-C", scratch, "pipeline", "lint").Run(); err != nil {
 		return out, fmt.Errorf("%s: lint: %w", m.Name, err)
 	}
-	if _, err := sparkwing.Exec(ctx, bin, "pipeline", "plan", "--static", "--name", m.Name).Dir(scratch).Run(); err != nil {
+	if _, err := sparkwing.Exec(ctx, bin, "pipeline", "plan", "--pipeline", m.Name).Dir(scratch).Run(); err != nil {
 		return out, fmt.Errorf("%s: explain: %w", m.Name, err)
 	}
 
@@ -438,7 +451,8 @@ func classifyTemplateDryRun(runID, raw string) (templateOutcome, error) {
 
 func templateRunAdmissionEnv(stateHome string) map[string]string {
 	return map[string]string{
-		"SPARKWING_HOME": stateHome,
+		"SPARKWING_HOME":             stateHome,
+		"SPARKWING_SECRETS_KEY_FILE": filepath.Join(stateHome, "secrets.key"),
 	}
 }
 
@@ -487,8 +501,17 @@ func normalizeVerifyModulePath(dotSparkwing, templateName string) error {
 
 // safety: `pipeline new` builds the repository the example has to compile in;
 // the example rendered with its verify parameters then replaces the job file.
-func scaffoldExample(ctx context.Context, bin, scratch string, m templates.Manifest) error {
-	if _, err := sparkwing.Exec(ctx, bin, "-C", scratch, "pipeline", "new", "--name", m.Name, "--template", "minimal").Run(); err != nil {
+func scaffoldExample(ctx context.Context, bin, scratch string, m templates.Manifest, sdkRoot string) error {
+	directory := filepath.Join(scratch, ".sparkwing")
+	if err := os.MkdirAll(directory, 0o755); err != nil {
+		return err
+	}
+	module := fmt.Sprintf("module sparkwing-pipelines\n\ngo 1.26.0\n\nrequire github.com/sparkwing-dev/sparkwing %s\n\nreplace github.com/sparkwing-dev/sparkwing => %q\n", scaffold.FallbackSDKVersion, sdkRoot)
+	if err := os.WriteFile(filepath.Join(directory, "go.mod"), []byte(module), 0o644); err != nil {
+		return err
+	}
+
+	if _, err := sparkwing.Exec(ctx, bin, "-C", scratch, "pipeline", "new", "--pipeline", m.Name, "--template", "minimal").Run(); err != nil {
 		return err
 	}
 	params := make(map[string]string, len(m.VerifyParams)+1)
@@ -511,7 +534,11 @@ func scaffoldExample(ctx context.Context, bin, scratch string, m templates.Manif
 	if len(jobs) != 1 {
 		return fmt.Errorf("pipeline new wrote %d job files, want 1", len(jobs))
 	}
-	return os.WriteFile(jobs[0], []byte(body), 0o644)
+	if err := os.WriteFile(jobs[0], []byte(body), 0o644); err != nil {
+		return err
+	}
+	config := fmt.Sprintf("pipelines:\n  - name: %q\n    entrypoint: %q\n", m.Name, m.Name)
+	return os.WriteFile(filepath.Join(directory, "sparkwing.yaml"), []byte(config), 0o644)
 }
 
 func pinLocalSparksCore(ctx context.Context, dotSparkwing string, core map[string]string) error {
@@ -531,30 +558,6 @@ func pinLocalSparksCore(ctx context.Context, dotSparkwing string, core map[strin
 	for _, mp := range sortedKeys(core) {
 		fmt.Fprintf(&b, "\nreplace %s => %s\n", mp, core[mp])
 	}
-	if err := os.WriteFile(path, []byte(b.String()), 0o644); err != nil {
-		return err
-	}
-	if _, err := sparkwing.Exec(ctx, "go", "mod", "tidy").Dir(dotSparkwing).Env("GOWORK", "off").Run(); err != nil {
-		return fmt.Errorf("go mod tidy: %w", err)
-	}
-	return nil
-}
-
-func pinLocalSparkwingSDK(ctx context.Context, dotSparkwing, root string) error {
-	if root == "" {
-		return nil
-	}
-	path := filepath.Join(dotSparkwing, "go.mod")
-	body, err := os.ReadFile(path)
-	if err != nil {
-		return err
-	}
-	var b strings.Builder
-	b.Write(body)
-	if len(body) > 0 && body[len(body)-1] != '\n' {
-		b.WriteByte('\n')
-	}
-	fmt.Fprintf(&b, "\nreplace github.com/sparkwing-dev/sparkwing => %s\n", root)
 	if err := os.WriteFile(path, []byte(b.String()), 0o644); err != nil {
 		return err
 	}

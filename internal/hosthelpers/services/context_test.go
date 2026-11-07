@@ -22,14 +22,14 @@ func helperContext(t *testing.T) context.Context {
 		id := strconv.Itoa(next)
 		commands[id] = argv
 		return id, nil
-	}, func(id string) error {
+	}, func(callCtx context.Context, id string) error {
 		mu.Lock()
 		argv, ok := commands[id]
 		mu.Unlock()
 		if !ok {
 			return fmt.Errorf("missing cleanup")
 		}
-		if err := helperruntime.Command(context.WithoutCancel(ctx), argv[0], argv[1:]...).Run(); err != nil {
+		if err := helperruntime.Command(callCtx, argv[0], argv[1:]...).Run(); err != nil {
 			return err
 		}
 		mu.Lock()

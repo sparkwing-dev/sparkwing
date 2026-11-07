@@ -3,7 +3,6 @@ package sparkwing
 import (
 	"context"
 	"slices"
-	"strings"
 	"testing"
 	"time"
 )
@@ -25,15 +24,11 @@ func TestClaimWaitPreservesExplicitValue(t *testing.T) {
 	}
 }
 
-func TestGroupNeedsToolsRejectsUnknownTool(t *testing.T) {
+func TestGroupNeedsToolsRelaysNewToolNames(t *testing.T) {
 	plan := NewPlan()
 	job := Job(plan, "build", func(context.Context) error { return nil })
-	group := GroupJobs(plan, "builds", job)
-	defer func() {
-		value := recover()
-		if value == nil || !strings.Contains(value.(string), "terraformm") {
-			t.Fatalf("unknown tool panic = %v", value)
-		}
-	}()
-	group.NeedsTools("terraformm")
+	GroupJobs(plan, "builds", job).NeedsTools("host-added-tool")
+	if got := planDocument(plan).Jobs[0].Requires; !slices.Contains(got, "tool:host-added-tool") {
+		t.Fatalf("selectors=%v", got)
+	}
 }

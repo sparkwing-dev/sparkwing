@@ -1,6 +1,7 @@
 package nodehost
 
 import (
+	"context"
 	"encoding/json"
 	"os"
 	"os/exec"
@@ -76,7 +77,7 @@ esac
 		}
 		return response
 	}
-	response := invoke("docker.Run", `[{"image":"fixture"}]`)
+	response := invoke("docker.Run", `[{"image":"fixture","captureOutput":true}]`)
 	if response.Error != "" || !strings.Contains(string(response.Result), "container output") {
 		t.Fatalf("container result=%+v", response)
 	}
@@ -104,5 +105,43 @@ esac
 	}
 	if strings.Contains(string(commands), secret) {
 		t.Fatal("password entered command arguments")
+	}
+}
+
+func TestHostHelperMasksCompleteOutputBeforeLogLimits(t *testing.T) {
+	routes, service, auth := serviceFixture(t)
+	const secret = "helper-boundary-private-suffix"
+	if err := service.Masks.registerValue(secret); err != nil {
+		t.Fatal(err)
+	}
+	var records []nodeproto.FrameLog
+	logs := &planningLogs{known: true, masker: service.Masks.masker, sink: func(_ context.Context, record nodeproto.FrameLog) error {
+		records = append(records, record)
+		return nil
+	}}
+	service.HelperStream = logs.stream
+	dir := t.TempDir()
+	testshell.Install(t, filepath.Join(dir, "docker"), "#!/bin/sh\ncase \"$1\" in start) printf '%s' \"$HELPER_BYTES\";; esac\n")
+	service.Cleanups = &ProcessCleanups{}
+	output := strings.Repeat("x", (64<<10)-3) + secret + "\n"
+	env := append(os.Environ(), "PATH="+dir+string(os.PathListSeparator)+os.Getenv("PATH"), "HELPER_BYTES="+output)
+	body, _ := json.Marshal(nodeproto.HelperRequest{Operation: "docker.Run", Dir: dir, Env: env, Args: json.RawMessage(`[{"image":"fixture"}]`)})
+	response, err := callService(t, routes, auth, "/node/v1/helpers", string(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(response.Body.String(), secret) {
+		t.Fatal("logged helper returned raw output")
+	}
+	if err := logs.finish(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if len(records) == 0 {
+		t.Fatal("helper output was not logged")
+	}
+	for _, record := range records {
+		if strings.Contains(record.Message, "private-suffix") || strings.Contains(record.Message, "helper-boundary") {
+			t.Fatalf("partial secret in bounded log: %q", record.Message)
+		}
 	}
 }

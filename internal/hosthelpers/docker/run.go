@@ -22,6 +22,7 @@ import (
 // under DinD. Inputs and outputs travel over the docker API via
 // `docker cp`.
 type RunOptions struct {
+	CaptureOutput bool `json:"captureOutput"`
 	// Image is the container image (e.g. "node:22-alpine"). Required.
 	Image string `json:"image"`
 	// Cmd is the command + args to run inside the container. When

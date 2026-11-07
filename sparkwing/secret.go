@@ -51,9 +51,6 @@ func Secret(ctx context.Context, name string) (string, error) {
 }
 
 func resolveValue(ctx context.Context, caller, name string) (string, bool, error) {
-	if name == "" {
-		return "", false, fmt.Errorf("sparkwing: %s: name is required", caller)
-	}
 	r := secretResolverFromContext(ctx)
 	if r == nil {
 		return "", false, fmt.Errorf("sparkwing: %s: no resolver installed -- %s can only be called from step bodies or memo key functions, not from Plan() (resolver is attached at dispatch time)", caller, caller)

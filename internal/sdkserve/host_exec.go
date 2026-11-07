@@ -22,7 +22,7 @@ type HostExecFunc func(context.Context, nodeproto.ExecRequest) (HostExecResult, 
 
 type hostExecKey struct{}
 
-// HostExec returns the host's command runner when the host offered one in hello.
+// HostExec returns the command runner bound to the current host session.
 func HostExec(ctx context.Context) (HostExecFunc, bool) {
 	run, ok := ctx.Value(hostExecKey{}).(HostExecFunc)
 	return run, ok

@@ -24,7 +24,7 @@ export const docker={DockerUnavailableError,BuildxRequiredError,PlatformUnsuppor
  const {stdout,stderr,...opts}=options;
  let error:unknown;
  let out:{stdout:string;stderr:string};
- try{out=await call(ctx,"Run",[opts])}catch(cause){error=cause;out=(cause as {result?:{stdout:string;stderr:string}}).result??{stdout:"",stderr:""}}
+ try{out=await call(ctx,"Run",[{...opts,captureOutput:!!stdout||!!stderr}])}catch(cause){error=cause;out=(cause as {result?:{stdout:string;stderr:string}}).result??{stdout:"",stderr:""}}
 
  if(stdout)stdout(Buffer.from(out.stdout));else if(out.stdout)ctx.log.info(out.stdout);
  if(stderr)stderr(Buffer.from(out.stderr));else if(out.stderr)ctx.log.info(out.stderr);

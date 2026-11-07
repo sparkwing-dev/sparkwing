@@ -178,8 +178,9 @@ func nativeEvals(t *testing.T, h *host, job nodeproto.JobSpec, output json.RawMe
 	}
 	var generated nodeproto.EvalResult
 	h.call(nodeproto.Request{ID: "generate", Op: nodeproto.OpEval, Closure: job.Closures.Generate[0], Input: output}, &generated)
-	var jobs []nodeproto.JobSpec
-	decode(t, generated.Value, &jobs)
+	var document nodeproto.PlanDoc
+	decode(t, generated.Value, &document)
+	jobs := document.Jobs
 	if generated.Error != nil || len(jobs) != 1 || jobs[0].ID != "generated" || len(jobs[0].Groups) != 1 || jobs[0].Groups[0] != job.Closures.Generate[0] {
 		t.Fatalf("generated: %+v, error: %v", jobs, generated.Error)
 	}
@@ -282,8 +283,6 @@ func (h *host) frame() wireFrame {
 		h.t.Fatalf("frame EOF: %v\n%s", h.frames.Err(), h.stderr.String())
 	}
 	line := h.frames.Bytes()
-	h.transcript.Write(line)
-	h.transcript.WriteByte('\n')
 	parsed, err := nodeproto.ParseFrame(line)
 	if err != nil {
 		h.t.Fatalf("frame: %v\n%s", err, line)
@@ -309,6 +308,8 @@ func (h *host) frame() wireFrame {
 		}
 		return wireFrame{}
 	}
+	h.transcript.Write(line)
+	h.transcript.WriteByte('\n')
 	var frame wireFrame
 	if parsed.Reply != nil {
 		frame.Reply = *parsed.Reply

@@ -7,9 +7,11 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"slices"
+	"sync/atomic"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
@@ -41,6 +43,8 @@ type ProcessServices struct {
 	StartChild     func(context.Context, capability.Authorized, ChildRequest) (string, error)
 	AwaitChild     func(context.Context, capability.Authorized, string, string, time.Duration) (ProcessChildResult, error)
 	Cleanups       *ProcessCleanups
+	HelperStream   func(context.Context, string, nodeproto.FrameLog, []byte, bool) error
+	helperSequence atomic.Uint64
 }
 
 // ProcessEndpointRegistrar is implemented by the common policy router.
@@ -192,8 +196,7 @@ func (s *ProcessServices) serve(request *http.Request, auth capability.Authorize
 		}
 		ctx := request.Context()
 		if s.Cleanups != nil {
-			cleanupCtx := helperruntime.WithEnvironment(ctx, body.Dir, body.Env)
-			ctx = helperruntime.WithCleanups(ctx, s.Cleanups.register, func(id string) error { return s.Cleanups.finish(cleanupCtx, id) })
+			ctx = helperruntime.WithCleanups(ctx, s.Cleanups.register, s.Cleanups.finish)
 		}
 		if body.Operation == "docker.Login" {
 			var args []json.RawMessage
@@ -207,6 +210,28 @@ func (s *ProcessServices) serve(request *http.Request, auth capability.Authorize
 			}
 		}
 		response := hosthelpers.Run(ctx, body)
+		if body.Operation == "docker.Run" {
+			var args []struct {
+				CaptureOutput bool `json:"captureOutput"`
+			}
+			if json.Unmarshal(body.Args, &args) == nil && len(args) == 1 && !args[0].CaptureOutput {
+				if s.HelperStream == nil {
+					return nil, 0, serviceUnavailable()
+				}
+				var output struct{ Stdout, Stderr string }
+				if err := json.Unmarshal(response.Result, &output); err != nil {
+					return nil, 0, err
+				}
+				key := fmt.Sprintf("helper:%d:", s.helperSequence.Add(1))
+				for stream, data := range map[string]string{"stdout": output.Stdout, "stderr": output.Stderr} {
+					base := nodeproto.FrameLog{TS: time.Now().UTC().Format(time.RFC3339Nano), Level: "info", Event: "exec_line"}
+					if err := s.HelperStream(ctx, key+stream, base, []byte(data), true); err != nil {
+						return nil, 0, err
+					}
+				}
+				response.Result = json.RawMessage(`{"stdout":"","stderr":""}`)
+			}
+		}
 		response.Error = s.Masks.mask(response.Error)
 		return response, http.StatusOK, nil
 	case "/node/v1/masks", "/node/v1/annotations", "/node/v1/summary":
