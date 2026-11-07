@@ -140,7 +140,12 @@ namespace is separate from the release and customer Job namespaces. Pool warm
 labels must match it. The launcher checks the ReplicaSet UID and its owning
 Deployment name, `sparkwing-cloud-warm-<vCPU>`. `launcher.nodeClassName` pins the
 hardened EC2NodeClass (`sparkwing-jobs` by default). Shared pools must reference
-that exact name with group `karpenter.k8s.aws` and kind `EC2NodeClass`.
+that exact name with group `karpenter.k8s.aws` and kind `EC2NodeClass`. Give a
+NodePool of any other EC2NodeClass a different class, launcher-namespace or
+warm-namespace label. Karpenter forbids Pods from selecting the EC2NodeClass
+label, so placeholders and capacity requests can land on a pool sharing those
+labels, and the launcher refuses its nodes. The launcher leaves such nodes out
+of the warm count and logs a WARN naming them and their NodePool.
 
 Operator setting
 `cloud_upsize_enabled` defaults to true. Only to avoid a cold start, the launcher
