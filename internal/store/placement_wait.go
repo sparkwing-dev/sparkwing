@@ -67,7 +67,7 @@ func readPlacementWaitsTx(ctx context.Context, tx *storeTx, team Team, run RunRo
 	if err := errors.Join(rows.Err(), rows.Close()); err != nil || len(waits) == 0 {
 		return nil, err
 	}
-	polls, err := placementRunnersTx(ctx, tx, team, time.Minute, true)
+	polls, err := placementRunnersTx(ctx, tx, team, claimLiveness(ctx, run.Request.Request), true)
 	if err != nil {
 		return nil, err
 	}
