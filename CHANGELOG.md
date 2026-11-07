@@ -22,6 +22,8 @@ unlock.
 
 ### Breaking
 
+- **controller (Breaking):** The schema baseline advances to version 34, adding a partial index on live child runs for the parent-cancellation sweep. Recognized schema 33 stores upgrade in place. Older binaries refuse the upgraded store. See [the migration guide](docs/migrations/_unreleased.md#upgrade-the-store-in-place-to-schema-baseline-34).
+
 - **local controller (Breaking):** The schema baseline advances to version 33, adding durable runner process identities and lifecycle state. Recognized schema 32 stores upgrade in place. Older binaries refuse the upgraded store. See [the migration guide](docs/migrations/_unreleased.md#upgrade-the-store-in-place-to-schema-baseline-33).
 
 - **CLI (Breaking):** Repository pin upgrades move from `sparkwing upgrade` to `sparkwing pipeline upgrade`. The obsolete `sparkwing daemon recover-state` command is removed because machine admission now lives in `state.db`. See [the migration guide](docs/migrations/_unreleased.md#upgrade-the-store-in-place-to-schema-baseline-31).
@@ -49,6 +51,7 @@ unlock.
 ### Fixed
 
 - **controller:** `sparkwing runs retry --failed` starts when a reused job has to run again. A job whose earlier result could not be reused, such as one written by another runner, used to stay ready while every runner claim failed with "financial lock order: work must precede the ledger". Reuse is now checked when a job's dependencies finish, as local runs already did, so a later job no longer reuses its earlier result or starts while a job it needs runs again. A job whose earlier result the controller refuses to reuse, such as one that no longer matches the job, now runs again; before, the refusal stopped the controller from scheduling that run and every run after it.
+- **controller:** Cancelling a run, or a run or job ending while a child it started through `RunAndAwait` is still pending or running, now cancels that child. Children had kept running until an operator cancelled each one by hand. Local and hosted controllers request the cancellation from their recovery sweep, so a grandchild follows one sweep later. A retry of a child run is left running, because someone asked for it.
 
 - **local controller:** Store time no longer moves backward when time sync or a VM resume steps the wall clock back, which had failed job and step completion with a `finished_at >= started_at` constraint error and refused plan settlement with "billing checkpoint is outside its awarded time range".
 
@@ -59,6 +62,7 @@ unlock.
 - **runners:** Claim polling recovers from controller transport failures and missing local sockets for up to five seconds without cancelling held jobs or replaying claims. Graceful drain stops new claims and joins active hosts. Held jobs and owners keep reading their state, child runs and authentication through the same outage instead of failing.
 - **controller:** A Sparkwing Cloud job that reaches its standing job duration limit before an award can start it fails with the new `job_duration_limit` reason, so its run finishes. Previously each later claim was refused with HTTP 400, the launcher logged a claim failure every few seconds and the run stayed running. See [observability](docs/observability.md).
 - **launcher:** A Cloud capacity request bound to a node the launcher refuses, such as one from a NodePool of another EC2NodeClass that shares the class labels and dedicated taint, logs a WARN naming the node and the refusal on every pass instead of waiting silently.
+- **launcher:** The warm capacity sample counts only nodes of the launcher's `--node-class`. Warm placeholders on a NodePool of another EC2NodeClass that shares the class and namespace labels were reported as warm capacity the launcher then refused. The launcher logs a WARN at most once a minute naming those nodes and their NodePool; give that pool a distinct label set.
 - **CLI and controller:** GitHub pipeline triggers resolve repository identity through `POST /api/v1/repositories/resolve` on the selected controller. Private repositories covered by the team's GitHub App work from HTTPS and SSH clones without a local GitHub token, with or without `--ref`. The CLI never falls back to anonymous GitHub lookup. Explicit `GH_TOKEN` or `GITHUB_TOKEN` remains available when the controller cannot resolve identity. See [the migration guide](docs/migrations/_unreleased.md#github-trigger-repository-identity).
 
 - **controller:** Capability issuance tolerates up to 30 seconds of backward clock skew, so time-sync corrections and VM resumes keep local owners, awards and here handoffs usable. Hosted controllers share the allowance. Expiry, revocation and binding deadlines retain their existing checks.
