@@ -685,7 +685,7 @@ func TestGitHelpersDisableTerminalPrompts(t *testing.T) {
 	}
 }
 
-// The TypeScript SDK runs the same vectors in test/git-helper.test.ts, so both fileset hashes read .dockerignore alike.
+// safety: both SDKs use this matcher, so these vectors guard shared cache identity.
 func TestDockerignoreVectors(t *testing.T) {
 	data, err := os.ReadFile(filepath.Join("testdata", "dockerignore-vectors.json"))
 	if err != nil {
