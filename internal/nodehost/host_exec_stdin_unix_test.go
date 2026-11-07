@@ -22,8 +22,11 @@ func TestHostCommandKeepsBufferedOutputPastASlowSink(t *testing.T) {
 	sink := func(_ string, chunk []byte, _ bool) error {
 		if len(chunk) > 0 {
 			got += len(chunk)
+			//nolint:staticcheck // Keep this wait matched to sleepcheck's approved real-pipe boundary.
+			select {
 			// sleepcheck:external-boundary real OS pipe deadline; synctest cannot model the sink mutex
-			<-time.After(2 * commandDrainGrace)
+			case <-time.After(2 * commandDrainGrace):
+			}
 		}
 		return nil
 	}
