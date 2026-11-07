@@ -19,7 +19,7 @@ func TestReaperCancelsChildrenTheirParentNoLongerAwaits(t *testing.T) {
 			}
 			switch parent {
 			case "manual_retry":
-				// A retry carries its source's parent lineage while its parent is long gone.
+				// safety: a retry keeps its source's parent lineage after that parent is gone.
 				rewriteSchemaExec(t, tenant.s.db, `UPDATE runs SET retry_of='earlier-child' WHERE id=?`, child.RunID)
 				rewriteSchemaExec(t, tenant.s.db, `UPDATE runs SET status='failed',finished_at=1,cancel_requested_at=1 WHERE id='run'`)
 			case "run_cancelled":
@@ -47,8 +47,7 @@ func TestReaperCancelsChildrenTheirParentNoLongerAwaits(t *testing.T) {
 			if row.CancelRequestedAt == nil {
 				t.Fatalf("child %s outlived its %s parent", child.RunID, parent)
 			}
-			// The next sweep finishes the unstarted child through its owner unit.
-			if _, err := tenant.s.AsOperator().ReapUnits(ctx, 100); err != nil {
+						if _, err := tenant.s.AsOperator().ReapUnits(ctx, 100); err != nil {
 				t.Fatal(err)
 			}
 			if row, err = tenant.ReadRun(ctx, child.RunID); err != nil || row.State != runstate.RunCancelled {
@@ -83,7 +82,7 @@ func TestUnawaitedChildSweepReadsOnlyLiveChildren(t *testing.T) {
 	if err := rows.Err(); err != nil {
 		t.Fatal(err)
 	}
-	// Expected: SCAN c USING INDEX idx_runs_live_children; SEARCH p USING INDEX sqlite_autoindex_runs_2 (team=? AND id=?).
+	// perf: the sweep must start from idx_runs_live_children, not a scan of run history.
 	if len(plan) == 0 || plan[0] != "SCAN c USING INDEX idx_runs_live_children" {
 		t.Fatalf("sweep plan does not start from the live child index:\n%s", strings.Join(plan, "\n"))
 	}

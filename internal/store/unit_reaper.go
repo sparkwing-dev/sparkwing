@@ -55,8 +55,7 @@ func (o *Operator) ReapUnits(ctx context.Context, limit int) ([]ReapedUnit, erro
 	return out, failures
 }
 
-// unawaitedChildrenQuery repeats idx_runs_live_children's predicate so both dialects read that partial index
-// rather than the whole run history.
+// perf: repeats idx_runs_live_children's predicate so both dialects read the partial index, not run history.
 const unawaitedChildrenQuery = `SELECT c.team,c.id,c.parent_run_id,c.parent_node_id FROM runs c
 	 JOIN runs p ON p.team=c.team AND p.id=c.parent_run_id
 	 WHERE c.parent_run_id<>'' AND c.status IN ('pending','running') AND c.retry_of='' AND c.cancel_requested_at IS NULL AND (
@@ -64,11 +63,9 @@ const unawaitedChildrenQuery = `SELECT c.team,c.id,c.parent_run_id,c.parent_node
 	 SELECT 1 FROM nodes n WHERE n.team=c.team AND n.run_id=c.parent_run_id AND n.node_id=c.parent_node_id AND n.status='done'))
 	 ORDER BY c.team,c.id LIMIT ?`
 
-// cancelUnawaitedChildren requests cancellation of live child runs whose creating job or parent run has ended or
-// been cancelled. Children are only reachable through RunAndAwait in that job attempt, and each attempt submits a
-// fresh invocation key, so nothing can consume such a child. A retry keeps its source's parent lineage but is work a
-// person or agent asked for, so it is left alone. A sweep instead of the parent's transition keeps the run lock
-// order and reaches grandchildren on later passes.
+// safety: only the creating job attempt can await a child (fresh invocation key per attempt), so an ended job or
+// parent leaves it unconsumable; retries are user-requested and kept. A sweep, not the parent's transition,
+// keeps the run lock order and reaches grandchildren on later passes.
 func (o *Operator) cancelUnawaitedChildren(ctx context.Context, limit int) ([]ReapedUnit, error) {
 	rows, err := o.s.query(ctx, unawaitedChildrenQuery, limit)
 	if err != nil {
