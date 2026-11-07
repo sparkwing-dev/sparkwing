@@ -63,24 +63,12 @@ func (d *Daemon) controllerHTTP(next http.Handler) http.Handler {
 				return
 			}
 			writeControllerHTTP(w, d.localControl())
-		case "dashboard":
-			if d.localDashboard == nil {
-				writeLoginFailure(w, &apierr.Error{Code: apierr.Unavailable, Message: "controller dashboard is unavailable"})
-				return
-			}
-			var request wingwire.LocalDashboard
-			if json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096)).Decode(&request) != nil || request.Address == "" {
-				writeLoginFailure(w, &apierr.Error{Code: apierr.BadRequest, Message: "dashboard address is required"})
-				return
-			}
-			reply := wingwire.LocalDashboardAck{ReadOnly: request.ReadOnly}
-			if err := d.localDashboard(r.Context(), request.Address, request.ReadOnly); err != nil {
-				reply.Error = err.Error()
-			}
-			writeControllerHTTP(w, reply)
 		case "drain":
 			d.recordJournal("drain_begin", nil, nil)
 			remaining, err := d.beginDrain()
+			if err == nil && r.URL.Query().Get("runner") == "retire" {
+				err = d.retireLocalRunner(r.Context())
+			}
 			defer func() {
 				// safety: deliver even a failed drain acknowledgement before cancelling HTTP handlers.
 				if flush, ok := w.(http.Flusher); ok {

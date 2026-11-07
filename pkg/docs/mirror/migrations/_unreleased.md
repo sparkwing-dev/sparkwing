@@ -232,3 +232,28 @@ lookup when the controller cannot resolve it, including older controllers and
 repository-scoped HTTPS source credentials. Without an explicit token, the CLI
 returns the controller's error and makes no anonymous GitHub request.
 No route, wire field or SDK surface is removed.
+
+## The dashboard serves whenever the controller runs
+
+`sparkwing dashboard start` and `sparkwing dashboard stop` are removed. Every
+shared local controller binds the dashboard when it starts, whether a run, a
+schedule, a login service or `sparkwing dashboard open` started it.
+
+| Before | Now |
+| --- | --- |
+| `sparkwing dashboard start` | `sparkwing dashboard open`, which starts the controller and prints a sign-in link |
+| `sparkwing dashboard stop` | `sparkwing daemon stop` |
+| `dashboard start --addr 127.0.0.1:PORT` | `dashboard: {address: 127.0.0.1:PORT}` in config.yaml, then `sparkwing daemon restart --force` |
+| `dashboard start --read-only` | `dashboard: {read_only: true}` in config.yaml |
+| `dashboard start --allow-remote` | Keep the dashboard on loopback and forward the port, for example `ssh -N -L 4343:127.0.0.1:4343 user@host` |
+
+`dashboard.address` accepts only a loopback IP and port. Port `0` picks a free
+port, which suits an isolated `SPARKWING_HOME`. When the address is taken the
+controller keeps admitting runs, `sparkwing dashboard status` reports the bind
+error as `dashboard_error`, and `sparkwing dashboard open` names it. The
+controller never moves to another port. A leftover `wingd/dashboard.json` under
+the state home is no longer read and can be deleted.
+
+`POST /api/v1/local/controller/dashboard` and the `wingwire.LocalDashboard` and
+`LocalDashboardAck` types are removed. `sparkwing daemon stop` now also retires
+the local runner; `sparkwing daemon restart` leaves it and its jobs running.

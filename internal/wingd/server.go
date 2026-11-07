@@ -65,11 +65,11 @@ type Daemon struct {
 	cancelledRuns      map[string]struct{}
 	cancelledRunOrder  []string
 	draining           bool
+	runnerWake         runnerWake
 	shuttingDown       bool
 	localActivity      LocalActivity
 	dashboardConns     int
 	localControl       func() LocalStatus
-	localDashboard     func(context.Context, string, bool) error
 	startedAt          time.Time
 
 	loadInit             bool

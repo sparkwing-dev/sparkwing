@@ -10,35 +10,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/wingd"
-	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
 )
-
-// startLocalDashboard waits for the elected owner's dashboard serving loop.
-func startLocalDashboard(ctx context.Context, home, address string, readOnly bool) error {
-	if address == "" {
-		return errors.New("wingd/client: dashboard address is required")
-	}
-	socket, err := wingd.SocketPath(home)
-	if err != nil {
-		return err
-	}
-	cl := &Client{sock: socket}
-	var reply wingwire.LocalDashboardAck
-	err = cl.apiCall(ctx, http.MethodPost, controllerPath+"dashboard", wingwire.LocalDashboard{Address: address, ReadOnly: readOnly}, &reply)
-	if dialMeansAbsent(err) {
-		return ErrNoDaemon
-	}
-	if err != nil {
-		return err
-	}
-	if reply.Error != "" {
-		return errors.New(reply.Error)
-	}
-	if reply.ReadOnly != readOnly {
-		return errors.New("wingd/client: dashboard owner did not confirm the requested read-only policy; restart the controller with this version")
-	}
-	return nil
-}
 
 // MintDashboardLogin asks the running controller over api.sock for a one-time dashboard sign-in link.
 func MintDashboardLogin(ctx context.Context, home string) (wingd.DashboardLogin, error) {
@@ -54,7 +26,7 @@ func MintDashboardLogin(ctx context.Context, home string) (wingd.DashboardLogin,
 	}
 	response, err := client.Do(request)
 	if err != nil {
-		return wingd.DashboardLogin{}, &apierr.Error{Code: apierr.Unavailable, Message: "the local controller did not answer on api.sock: " + err.Error(), Hint: "run sparkwing dashboard start"}
+		return wingd.DashboardLogin{}, &apierr.Error{Code: apierr.Unavailable, Message: "the local controller did not answer on api.sock: " + err.Error(), Hint: "run sparkwing dashboard open, which starts the controller"}
 	}
 	defer response.Body.Close()
 	body, err := io.ReadAll(io.LimitReader(response.Body, 64<<10))

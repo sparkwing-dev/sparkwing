@@ -1,52 +1,28 @@
 package wingd
 
-import (
-	"context"
-	"errors"
-)
+import "github.com/sparkwing-dev/sparkwing/internal/userconfig"
 
-type localDashboardRequest struct {
-	ctx      context.Context
-	address  string
-	readOnly bool
-	result   chan error
+// DefaultDashboardAddress is the stable loopback address bookmarks and HTTPS proxies name.
+const DefaultDashboardAddress = "127.0.0.1:4343"
+
+// DashboardSettings is the dashboard a shared local controller binds when it starts.
+type DashboardSettings struct {
+	Address  string
+	ReadOnly bool
 }
 
-func (r *localRuntime) EnsureDashboard(ctx context.Context, address string, readOnly bool) error {
-	if err := ctx.Err(); err != nil {
-		return err
+// ResolveDashboardSettings reads the dashboard section of the machine configuration.
+func ResolveDashboardSettings() (DashboardSettings, error) {
+	var raw userconfig.DashboardConfig
+	if _, _, err := userconfig.ReadDefault(userconfig.Dashboard, &raw); err != nil {
+		return DashboardSettings{}, err
 	}
-	if address == "" {
-		return errors.New("wingd: dashboard address is required")
+	settings := DashboardSettings{Address: DefaultDashboardAddress}
+	if raw.Address != nil {
+		settings.Address = *raw.Address
 	}
-	r.mu.Lock()
-	session := r.run
-	ready := session != nil && r.statusLocked(session).Running
-	r.mu.Unlock()
-	if !ready {
-		return errors.New("wingd: local controller is not ready")
+	if raw.ReadOnly != nil {
+		settings.ReadOnly = *raw.ReadOnly
 	}
-	request := localDashboardRequest{ctx: ctx, address: address, readOnly: readOnly, result: make(chan error, 1)}
-	select {
-	case session.dashboard <- request:
-	case <-session.done:
-		return session.stoppedError()
-	case <-ctx.Done():
-		return ctx.Err()
-	}
-	select {
-	case err := <-request.result:
-		return err
-	case <-session.done:
-		return session.stoppedError()
-	case <-ctx.Done():
-		return ctx.Err()
-	}
-}
-
-func (session *localRuntimeSession) stoppedError() error {
-	if session.err != nil {
-		return session.err
-	}
-	return errors.New("wingd: local controller stopped")
+	return settings, nil
 }

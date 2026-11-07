@@ -208,7 +208,7 @@ func offlineStopDaemon(t *testing.T, home string) {
 	t.Cleanup(func() {
 		ctx, cancel := context.WithTimeout(context.Background(), offlineStopTimeout)
 		defer cancel()
-		err := wingdclient.Stop(ctx, wingdclient.Options{Home: home})
+		err := wingdclient.Stop(ctx, wingdclient.Options{Home: home, RetireRunner: true})
 		if err == nil || errors.Is(err, wingdclient.ErrNoDaemon) {
 			return
 		}

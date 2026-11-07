@@ -33,7 +33,7 @@ func TestSurfaceDispatchRejectsBeforeState(t *testing.T) {
 func TestSurfaceDispatchHelp(t *testing.T) {
 	for _, command := range []string{
 		"--profile prod pipeline trigger --help", "pipeline trigger --profile prod --help",
-		"dashboard start --help", "schedules pause --help", "profiles add --help",
+		"dashboard open --help", "schedules pause --help", "profiles add --help",
 		"runners list --help", "pools allow --help", "operator tokens create --help",
 	} {
 		if err := runSparkwing(strings.Fields(command)); err != nil {

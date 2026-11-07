@@ -21,12 +21,12 @@ func TestDashboardLoginAuthorizesControllerAPIAsMintingPeer(t *testing.T) {
 		services.HTTP = controller.New(b.Store, nil).WithEngineController(b.Controller).HTTP()
 		return services, nil
 	}}
-	runtime, err := wingd.NewLocalRuntime(wingd.LocalRuntimeConfig{Admission: wingd.Config{Home: home}, Open: factory.Open})
+	runtime, err := wingd.NewLocalRuntime(wingd.LocalRuntimeConfig{Admission: wingd.Config{Home: home}, Dashboard: wingd.DashboardSettings{Address: "127.0.0.1:0"}, Open: factory.Open})
 	if err != nil {
 		t.Fatal(err)
 	}
 	lifecycle := wingd.NewLocalLifecycle(runtime, nil)
-	if _, err := lifecycle.StartDashboard(t.Context(), wingd.LocalStartOptions{Home: home, Version: "v0.71.0", DashboardAddress: "127.0.0.1:0"}); err != nil {
+	if _, err := lifecycle.EnsureStarted(t.Context(), wingd.LocalStartOptions{Home: home, Version: "v0.71.0"}); err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() {

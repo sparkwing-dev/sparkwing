@@ -161,7 +161,7 @@ claim's binding. Members may read only unmasked values in their own team.
 local peer needs `runs.read` for its active team. Queue groups and advertised
 runner headroom belong to that team. Machine roots and work claims cannot read
 the team queue. The former `/api/v1/queue/state` path is removed. The local
-controller that `sparkwing dashboard start` runs also reports its machine's
+controller behind `sparkwing dashboard open` also reports its machine's
 admission daemon: `daemon_version`, `daemon_uptime_ms`, the `cores` and
 `memory` rows and the daemon's holders and waiters. Without a running daemon
 those fields are absent, and a daemon that does not answer returns

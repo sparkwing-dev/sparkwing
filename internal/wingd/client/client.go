@@ -104,6 +104,9 @@ type Options struct {
 
 	NoTakeover bool
 
+	// RetireRunner makes Stop drain the supervised local runner too; a restart leaves it running.
+	RetireRunner bool
+
 	DialTimeout time.Duration
 
 	Backoff time.Duration

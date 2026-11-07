@@ -95,7 +95,7 @@ func (l *runtimeListener) Addr() net.Addr            { return &net.UnixAddr{Name
 func newRuntimeFixture(t *testing.T, controller *runtimeControllerFixture) *localRuntime {
 	t.Helper()
 	controller.home = t.TempDir()
-	runtime, err := NewLocalRuntime(LocalRuntimeConfig{Admission: Config{Home: controller.home, Sampler: runtimeSampler{}}, Open: func(_ context.Context, home string) (LocalController, error) {
+	runtime, err := NewLocalRuntime(LocalRuntimeConfig{Admission: Config{Home: controller.home, Sampler: runtimeSampler{}}, Dashboard: DashboardSettings{Address: "127.0.0.1:0"}, Open: func(_ context.Context, home string) (LocalController, error) {
 		held, err := LockHeld(home)
 		if err != nil || !held {
 			return nil, errors.New("store opened before ownership")
@@ -145,7 +145,7 @@ func TestLocalRuntimeOwnsStoreUntilAllServicesJoin(t *testing.T) {
 	}
 	r := newRuntimeFixture(t, f)
 	lifecycle := NewLocalLifecycle(r, nil)
-	status, err := lifecycle.EnsureStarted(t.Context(), LocalStartOptions{Home: f.home, Version: "v1", DashboardAddress: "127.0.0.1:0"})
+	status, err := lifecycle.EnsureStarted(t.Context(), LocalStartOptions{Home: f.home, Version: "v1"})
 	if err != nil || !status.Running || status.PID == 0 {
 		t.Fatalf("start: %+v, %v", status, err)
 	}
@@ -286,7 +286,7 @@ func TestLocalRuntimeStartupFailuresReleaseOwnership(t *testing.T) {
 			case "consumer":
 				f.background = func(context.Context, func(LocalActivity) error) error { return failure }
 			}
-			err := r.Run(t.Context(), LocalStartOptions{Home: f.home, Version: "v1", DashboardAddress: "127.0.0.1:0"})
+			err := r.Run(t.Context(), LocalStartOptions{Home: f.home, Version: "v1"})
 			if !errors.Is(err, failure) {
 				t.Fatalf("failure: %v", err)
 			}

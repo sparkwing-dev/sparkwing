@@ -118,7 +118,7 @@ func TestLocalRuntimeListenerFailureJoinsRequestsBeforeStoreClose(t *testing.T) 
 		return &runtimeListener{closed: make(chan struct{})}, nil
 	}
 	lifecycle := NewLocalLifecycle(r, nil)
-	if _, err := lifecycle.StartDashboard(t.Context(), LocalStartOptions{Home: f.home, Version: "v1", DashboardAddress: "127.0.0.1:0"}); err != nil {
+	if _, err := lifecycle.EnsureStarted(t.Context(), LocalStartOptions{Home: f.home, Version: "v1"}); err != nil {
 		t.Fatal(err)
 	}
 	r.mu.Lock()

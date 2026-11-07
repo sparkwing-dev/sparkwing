@@ -22,6 +22,8 @@ unlock.
 
 ### Breaking
 
+- **CLI (Breaking):** `sparkwing dashboard start` and `sparkwing dashboard stop` are removed, with their `--addr`, `--allow-remote` and `--read-only` flags. Every shared local controller now serves the dashboard from the moment it starts, at `dashboard.address` in config.yaml (`127.0.0.1:4343` by default, loopback only). `dashboard.read_only` replaces `--read-only`. `sparkwing dashboard open` starts the controller when none runs, and `sparkwing daemon stop` stops it. A taken port leaves runs admitted and status reports `dashboard_error`. The `wingd/dashboard.json` record and `POST /api/v1/local/controller/dashboard` are removed. See [the migration guide](docs/migrations/_unreleased.md#the-dashboard-serves-whenever-the-controller-runs).
+
 - **local controller (Breaking):** The schema baseline advances to version 33, adding durable runner process identities and lifecycle state. Recognized schema 32 stores upgrade in place. Older binaries refuse the upgraded store. See [the migration guide](docs/migrations/_unreleased.md#upgrade-the-store-in-place-to-schema-baseline-33).
 
 - **CLI (Breaking):** Repository pin upgrades move from `sparkwing upgrade` to `sparkwing pipeline upgrade`. The obsolete `sparkwing daemon recover-state` command is removed because machine admission now lives in `state.db`. See [the migration guide](docs/migrations/_unreleased.md#upgrade-the-store-in-place-to-schema-baseline-31).
@@ -47,6 +49,8 @@ unlock.
 - **storage:** The first 256 MiB of the prepared pipeline Sparkwing Cloud builds for a run no longer counts toward the team's per-run, monthly or object storage quotas, so free-tier teams can run Go pipelines whose binaries are 20 to 40 MB. Bytes past 256 MiB and further uploads from the run's planning credentials count as before. The prepared pipeline stays deduplicated by digest and retained-storage billing still counts it. The free tier's per-run limit rises from 10 MiB to 100 MiB; the paid tier and explicit operator quotas are unchanged. See [limits](docs/limits.md#uploads-and-storage-accounting).
 
 ### Fixed
+
+- **local controller:** `sparkwing daemon stop` retires the local runner before the controller exits, so an idle runner records its stop and revokes its claim credential instead of failing against a missing socket, and a runner holding jobs stops claiming and finishes them. `sparkwing daemon restart` keeps the runner and its jobs running.
 
 - **local controller:** Store time no longer moves backward when time sync or a VM resume steps the wall clock back, which had failed job and step completion with a `finished_at >= started_at` constraint error and refused plan settlement with "billing checkpoint is outside its awarded time range".
 

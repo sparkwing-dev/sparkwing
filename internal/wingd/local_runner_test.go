@@ -3,9 +3,11 @@ package wingd
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"os/exec"
 	"sync"
 	"testing"
 	"testing/synctest"
@@ -156,5 +158,52 @@ func TestLocalRunnerActiveDiscoveryRequiresVerifiedSocket(t *testing.T) {
 	var instance localhostwire.LocalRunnerInstance
 	if err := json.Unmarshal(w.Body.Bytes(), &instance); err != nil || w.Code != http.StatusOK || instance != fixture.instance {
 		t.Fatalf("active discovery: %d %+v %v", w.Code, instance, err)
+	}
+}
+
+func TestControllerDrainRetiresTheRunnerOnlyForStop(t *testing.T) {
+	exited := exec.Command("true")
+	if err := exited.Run(); err != nil {
+		t.Skip("no exited process to stand in for a runner: ", err)
+	}
+	birth := "exited"
+	for _, retire := range []bool{false, true} {
+		t.Run(fmt.Sprint(retire), func(t *testing.T) {
+			d := newHTTPAdmissionTest(t, &admissionMemoryStore{})
+			fixture := &runnerHTTPFixture{instance: localhostwire.LocalRunnerInstance{ID: "runner", PID: exited.Process.Pid, ProcessBirth: birth, State: "active"}}
+			d.cfg.Runs = fixture
+			woken := d.runnerWake.subscribe()
+			path := "drain"
+			if retire {
+				path += "?runner=retire"
+			}
+			w := httptest.NewRecorder()
+			d.controllerHTTP(http.NotFoundHandler()).ServeHTTP(w, controllerHTTPRequest(t, http.MethodPost, path, "", true))
+			if w.Code != http.StatusOK {
+				t.Fatalf("drain: %d %s", w.Code, w.Body.String())
+			}
+			fixture.mu.Lock()
+			state := fixture.instance.State
+			fixture.mu.Unlock()
+			select {
+			case <-woken:
+				if !retire {
+					t.Fatal("a restart drain woke runner watches")
+				}
+			default:
+				if retire {
+					t.Fatal("a stop drained the runner without waking its watch")
+				}
+			}
+			if want := map[bool]string{false: "active", true: "draining"}[retire]; state != want {
+				t.Fatalf("runner state=%s, want %s", state, want)
+			}
+			// safety: once draining, the supervisor must not find a reason to start a replacement.
+			w = httptest.NewRecorder()
+			d.localRunnerHTTP(http.NotFoundHandler()).ServeHTTP(w, runnerHTTPRequest(t, t.Context(), http.MethodGet, "?state=active", nil))
+			if w.Code != http.StatusServiceUnavailable {
+				t.Fatalf("active discovery while stopping: %d", w.Code)
+			}
+		})
 	}
 }

@@ -142,21 +142,6 @@ func (l *localLifecycle) awaitReady(ctx context.Context, run *localRun) error {
 	}
 }
 
-func (l *localLifecycle) StartDashboard(ctx context.Context, opts LocalStartOptions) (LocalStatus, error) {
-	status, err := l.EnsureStarted(ctx, opts)
-	if err != nil || opts.DashboardAddress == "" {
-		return status, err
-	}
-	if err := l.runtime.EnsureDashboard(ctx, opts.DashboardAddress, opts.DashboardReadOnly); err != nil {
-		return LocalStatus{}, err
-	}
-	status, err = l.Status(ctx)
-	if err == nil && !status.Running {
-		err = errors.New("wingd: controller stopped during dashboard startup")
-	}
-	return status, err
-}
-
 func (l *localLifecycle) Stop(ctx context.Context) error {
 	if err := l.lock(ctx); err != nil {
 		return err
@@ -199,7 +184,7 @@ func (l *localLifecycle) InstallController(ctx context.Context, opts LocalStartO
 	if err != nil {
 		return LocalStatus{}, err
 	}
-	if l.home != "" && home != l.home || !filepath.IsAbs(opts.Executable) || opts.Version == "" || opts.Standalone || opts.DashboardAddress != "" {
+	if l.home != "" && home != l.home || !filepath.IsAbs(opts.Executable) || opts.Version == "" || opts.Standalone {
 		return LocalStatus{}, errors.New("wingd: service installation requires the bound home, executable and version")
 	}
 	l.home, opts.Home = home, home
@@ -257,7 +242,7 @@ func (l *localLifecycle) Doctor(ctx context.Context, version string) ([]localhos
 	}
 	var findings []localhostwire.LocalDoctorFinding
 	if status.Running && status.Version != version {
-		findings = append(findings, localhostwire.LocalDoctorFinding{Code: "version_skew", Message: fmt.Sprintf("controller version %q differs from CLI %q", status.Version, version), Hint: "Restart the local controller with sparkwing dashboard stop and sparkwing dashboard start."})
+		findings = append(findings, localhostwire.LocalDoctorFinding{Code: "version_skew", Message: fmt.Sprintf("controller version %q differs from CLI %q", status.Version, version), Hint: "Run sparkwing daemon restart with this CLI when no runs are active."})
 	}
 	if l.units == nil {
 		return findings, nil

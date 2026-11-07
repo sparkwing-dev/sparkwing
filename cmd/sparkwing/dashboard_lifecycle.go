@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -25,18 +24,20 @@ type dashboardActivity struct {
 }
 
 type dashboardResult struct {
-	Kind      string            `json:"kind"`
-	Tool      string            `json:"tool"`
-	Service   string            `json:"service"`
-	Action    string            `json:"action"`
-	State     string            `json:"state"`
-	PID       int               `json:"pid,omitempty"`
-	Version   string            `json:"version,omitempty"`
-	Installed bool              `json:"installed"`
-	Dashboard string            `json:"dashboard"`
-	URL       string            `json:"url,omitempty"`
-	Activity  dashboardActivity `json:"activity"`
-	Warning   string            `json:"warning,omitempty"`
+	Kind      string `json:"kind"`
+	Tool      string `json:"tool"`
+	Service   string `json:"service"`
+	Action    string `json:"action"`
+	State     string `json:"state"`
+	PID       int    `json:"pid,omitempty"`
+	Version   string `json:"version,omitempty"`
+	Installed bool   `json:"installed"`
+	Dashboard string `json:"dashboard"`
+	URL       string `json:"url,omitempty"`
+	// DashboardError says why a running controller serves no dashboard.
+	DashboardError string            `json:"dashboard_error,omitempty"`
+	Activity       dashboardActivity `json:"activity"`
+	Warning        string            `json:"warning,omitempty"`
 }
 
 func localStatusResult(service, action string, status wingd.LocalStatus) dashboardResult {
@@ -49,7 +50,7 @@ func localStatusResult(service, action string, status wingd.LocalStatus) dashboa
 	}
 	return dashboardResult{
 		Kind: "service", Tool: "sparkwing", Service: service, Action: action, State: state, Dashboard: dashboard,
-		PID: status.PID, Version: status.Version, Installed: status.Installed, URL: status.DashboardURL,
+		PID: status.PID, Version: status.Version, Installed: status.Installed, URL: status.DashboardURL, DashboardError: status.DashboardError,
 		Activity: dashboardActivity{Runs: status.Activity.Runs, QueuedTriggers: status.Activity.QueuedTriggers, HeldLeases: status.Activity.HeldLeases, DashboardConnections: status.Activity.DashboardConnections},
 	}
 }
@@ -99,13 +100,6 @@ func stopLocalController(ctx context.Context, lifecycle wingd.LocalLifecycle) (w
 	return status, nil
 }
 
-func forgetDashboard(home string) error {
-	if home == "" {
-		return nil
-	}
-	return wingd.ForgetDashboard(home)
-}
-
 func renderDashboard(out io.Writer, result dashboardResult, mode string) error {
 	switch mode {
 	case "json":
@@ -119,10 +113,13 @@ func renderDashboard(out io.Writer, result dashboardResult, mode string) error {
 	default:
 		_, err := fmt.Fprintf(out, "Local controller: %s\npid: %d\nversion: %s\ninstalled: %t\n", result.State, result.PID, result.Version, result.Installed)
 		if err == nil {
-			if result.Dashboard == "serving" {
+			switch {
+			case result.Dashboard == "serving":
 				_, err = fmt.Fprintf(out, "dashboard: serving at %s (sign in with sparkwing dashboard open)\n", result.URL)
-			} else {
-				_, err = fmt.Fprintln(out, "dashboard: not serving (sparkwing dashboard open starts it and prints a sign-in link)")
+			case result.DashboardError != "":
+				_, err = fmt.Fprintf(out, "dashboard: not serving: %s\n", result.DashboardError)
+			default:
+				_, err = fmt.Fprintln(out, "dashboard: not serving (sparkwing dashboard open starts the controller and prints a sign-in link)")
 			}
 		}
 		if err == nil {
@@ -148,18 +145,18 @@ func openDashboard(ctx context.Context, services dashboardServices, out io.Write
 	if services.mintLogin == nil {
 		return dashboardUnavailable("local controller sign-in links")
 	}
-	login, err := services.mintLogin(ctx)
-	var failure *apierr.Error
-	if err != nil && services.lifecycle != nil && errors.As(err, &failure) && failure.Code == apierr.Unavailable {
-		options := services.options
-		if options.DashboardAddress == "" {
-			options.DashboardAddress = defaultDashboardAddress
-		}
-		if _, err := services.lifecycle.StartDashboard(ctx, options); err != nil {
-			return err
-		}
-		login, err = services.mintLogin(ctx)
+	if services.lifecycle == nil {
+		return dashboardUnavailable("local controller lifecycle")
 	}
+	status, err := services.lifecycle.EnsureStarted(ctx, services.options)
+	if err != nil {
+		return err
+	}
+	if status.DashboardError != "" {
+		return &apierr.Error{Code: apierr.Unavailable, Message: "the local controller serves no dashboard: " + status.DashboardError,
+			Hint: "free the port or set dashboard.address in config.yaml, then run sparkwing daemon restart --force"}
+	}
+	login, err := services.mintLogin(ctx)
 	if err != nil {
 		return err
 	}

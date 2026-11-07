@@ -91,25 +91,6 @@ func (l *processLifecycle) ensure(ctx context.Context, opts wingd.LocalStartOpti
 	return status, err
 }
 
-func (l *processLifecycle) StartDashboard(ctx context.Context, opts wingd.LocalStartOptions) (wingd.LocalStatus, error) {
-	if err := l.lock(ctx); err != nil {
-		return wingd.LocalStatus{}, err
-	}
-	defer func() { <-l.gate }()
-	status, err := l.ensure(ctx, opts)
-	if err != nil || opts.DashboardAddress == "" {
-		return status, err
-	}
-	if err := l.control.EnsureDashboard(ctx, opts.DashboardAddress, opts.DashboardReadOnly); err != nil {
-		return wingd.LocalStatus{}, err
-	}
-	status, err = l.Status(ctx)
-	if err == nil && !status.Running {
-		err = errors.New("wingd/client: controller stopped during dashboard startup")
-	}
-	return status, err
-}
-
 func (l *processLifecycle) Stop(ctx context.Context) error {
 	if err := l.lock(ctx); err != nil {
 		return err

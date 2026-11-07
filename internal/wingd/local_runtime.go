@@ -28,6 +28,7 @@ type LocalController interface {
 // Admission.Runs and Admission.ServeAPI are supplied by Open and must be unset.
 type LocalRuntimeConfig struct {
 	Admission Config
+	Dashboard DashboardSettings
 	Open      func(context.Context, string) (LocalController, error)
 }
 
@@ -42,18 +43,18 @@ type localRuntime struct {
 }
 
 type localRuntimeSession struct {
-	daemon    *Daemon
-	cancel    context.CancelFunc
-	done      chan struct{}
-	ready     bool
-	err       error
-	dashboard chan localDashboardRequest
-	logins    *dashboardLogins
+	daemon       *Daemon
+	cancel       context.CancelFunc
+	done         chan struct{}
+	ready        bool
+	err          error
+	logins       *dashboardLogins
+	dashboardErr error
 }
 
 // NewLocalRuntime constructs the elected local process used by LocalLifecycle.
-// An empty DashboardAddress restores the remembered dashboard on loopback, unless
-// Standalone; with nothing remembered it serves api.sock only.
+// Unless Standalone, every Run binds the dashboard at cfg.Dashboard.Address,
+// DefaultDashboardAddress when empty.
 // Another process's election is refused without opening its store.
 func NewLocalRuntime(cfg LocalRuntimeConfig) (LocalRuntime, error) {
 	if cfg.Open == nil || cfg.Admission.Runs != nil || cfg.Admission.ServeAPI != nil {
@@ -64,6 +65,9 @@ func NewLocalRuntime(cfg LocalRuntimeConfig) (LocalRuntime, error) {
 		return nil, err
 	}
 	cfg.Admission.Home = lay.home
+	if cfg.Dashboard.Address == "" {
+		cfg.Dashboard.Address = DefaultDashboardAddress
+	}
 	return &localRuntime{cfg: cfg, layout: lay, change: make(chan struct{})}, nil
 }
 
@@ -139,16 +143,7 @@ func (r *localRuntime) Run(ctx context.Context, opts LocalStartOptions) (err err
 		admission.SetAdmissionCancellation(d.cancelCommittedRunAdmission)
 	}
 	d.localControl = func() LocalStatus { return r.control(session) }
-	d.localDashboard = r.EnsureDashboard
-	dashboard, restore := dashboardMemory{Address: opts.DashboardAddress, ReadOnly: opts.DashboardReadOnly}, false
-	if dashboard.Address == "" && !opts.Standalone {
-		remembered, ok, err := r.rememberedDashboard()
-		if err != nil {
-			d.cfg.logf("not restoring the dashboard: %v", err)
-		}
-		dashboard, restore = remembered, ok
-	}
-	return r.serve(ctx, session, controller, dashboard, restore)
+	return r.serve(ctx, session, controller, !opts.Standalone)
 }
 
 func (r *localRuntime) begin(d *Daemon, cancel context.CancelFunc) (*localRuntimeSession, error) {
@@ -161,7 +156,7 @@ func (r *localRuntime) begin(d *Daemon, cancel context.CancelFunc) (*localRuntim
 			return nil, errors.New("wingd: local runtime is already starting or running")
 		}
 	}
-	r.run = &localRuntimeSession{daemon: d, cancel: cancel, done: make(chan struct{}), dashboard: make(chan localDashboardRequest), logins: newDashboardLogins(r.now)}
+	r.run = &localRuntimeSession{daemon: d, cancel: cancel, done: make(chan struct{}), logins: newDashboardLogins(r.now)}
 	r.changed()
 	return r.run, nil
 }
@@ -171,7 +166,7 @@ func (r *localRuntime) changed() {
 	r.change = make(chan struct{})
 }
 
-func (r *localRuntime) serve(ctx context.Context, session *localRuntimeSession, controller LocalController, dashboard dashboardMemory, restore bool) error {
+func (r *localRuntime) serve(ctx context.Context, session *localRuntimeSession, controller LocalController, bindDashboard bool) error {
 	d := session.daemon
 	// safety: hosts release admission through api.sock while their workers join.
 	d.managedAPI = true
@@ -216,58 +211,10 @@ func (r *localRuntime) serve(ctx context.Context, session *localRuntimeSession, 
 			return ServeAPI(apiCtx, &readyListener{Listener: ln, ready: apiReady}, local)
 		})
 	}
-	var dashboardListener net.Listener
-	var dashboardAddress string
-	var dashboardReadOnly bool
-	var dashboardReady chan struct{}
-	defer func() {
-		if dashboardListener != nil {
-			dashboardListener.Close()
-		}
-	}()
-	startDashboard := func(bindCtx context.Context, address string, requestedReadOnly bool) error {
-		if dashboardListener != nil {
-			if dashboardAddress != address || dashboardReadOnly != requestedReadOnly {
-				return fmt.Errorf("wingd: dashboard already serves %s; stop the controller before changing its address or read-only policy", dashboardAddress)
-			}
-			return nil
-		}
-		listen := r.listen
-		if listen == nil {
-			listen = func(network, address string) (net.Listener, error) {
-				return (&net.ListenConfig{}).Listen(bindCtx, network, address)
-			}
-		}
-		ln, err := listen("tcp", address)
-		if err != nil {
-			return fmt.Errorf("wingd: dashboard listen: %w", err)
-		}
-		dashboardListener, dashboardAddress, dashboardReadOnly = ln, address, requestedReadOnly
-		if err := r.rememberDashboard(dashboardMemory{Address: address, ReadOnly: requestedReadOnly}); err != nil {
-			d.cfg.logf("the dashboard will not return after a controller restart: %v", err)
-		}
-		dashboardReady = make(chan struct{})
-		logins.serving("http://" + ln.Addr().String())
-		workers.Go(func() {
-			defer ln.Close()
-			serve("dashboard", func() error {
-				return ServeLocalHTTP(ctx, &readyListener{Listener: ln, ready: dashboardReady}, guardDashboard(controller.HTTP(), ln.Addr().String(), logins, requestedReadOnly), nil, d.dashboardConnection)
-			})
-		})
-		return nil
-	}
-	var dashboardErr error
-	if dashboard.Address != "" {
-		dashboardErr = startDashboard(ctx, dashboard.Address, dashboard.ReadOnly)
-	}
-	if dashboardErr != nil && !restore {
-		return dashboardErr
-	}
-	if dashboardErr != nil {
-		d.cfg.logf("not restoring the dashboard at %s: %v", dashboard.Address, dashboardErr)
-	}
-	if dashboardListener == nil {
-		dashboardReady = make(chan struct{})
+	dashboardReady := make(chan struct{})
+	if bindDashboard {
+		r.bindDashboard(ctx, session, controller, &workers, dashboardReady, serve)
+	} else {
 		close(dashboardReady)
 	}
 	workers.Go(func() {
@@ -297,32 +244,7 @@ func (r *localRuntime) serve(ctx context.Context, session *localRuntimeSession, 
 		r.changed()
 	}
 	r.mu.Unlock()
-	var err error
-running:
-	for {
-		select {
-		case err = <-daemonDone:
-			break running
-		case request := <-session.dashboard:
-			dashboardErr := request.ctx.Err()
-			if dashboardErr == nil {
-				dashboardErr = startDashboard(request.ctx, request.address, request.readOnly)
-			}
-			if dashboardErr == nil {
-				select {
-				case <-dashboardReady:
-				case <-ctx.Done():
-					continue running
-				case <-request.ctx.Done():
-					dashboardErr = request.ctx.Err()
-				}
-			}
-			if ctx.Err() != nil && request.ctx.Err() == nil {
-				continue running
-			}
-			request.result <- dashboardErr
-		}
-	}
+	err := <-daemonDone
 	session.cancel()
 	workers.Wait()
 	stopAPI()
@@ -340,6 +262,38 @@ running:
 	failuresMu.Lock()
 	defer failuresMu.Unlock()
 	return errors.Join(err, failures)
+}
+
+// bindDashboard leaves admission serving when the port is taken, because a busy
+// dashboard port must not stop runs; status reports the bind error instead.
+// A taken port is never swapped for another, since bookmarks and HTTPS proxies
+// name this address.
+func (r *localRuntime) bindDashboard(ctx context.Context, session *localRuntimeSession, controller LocalController, workers *sync.WaitGroup, ready chan struct{}, serve func(string, func() error)) {
+	d, settings := session.daemon, r.cfg.Dashboard
+	listen := r.listen
+	if listen == nil {
+		listen = func(network, address string) (net.Listener, error) {
+			return (&net.ListenConfig{}).Listen(ctx, network, address)
+		}
+	}
+	ln, err := listen("tcp", settings.Address)
+	if err != nil {
+		err = fmt.Errorf("dashboard listen on %s: %w", settings.Address, err)
+		d.cfg.logf("wingd: %v; runs continue without the dashboard", err)
+		r.mu.Lock()
+		session.dashboardErr = err
+		r.mu.Unlock()
+		close(ready)
+		return
+	}
+	session.logins.serving("http://" + ln.Addr().String())
+	handler := guardDashboard(controller.HTTP(), ln.Addr().String(), session.logins, settings.ReadOnly)
+	workers.Go(func() {
+		defer ln.Close()
+		serve("dashboard", func() error {
+			return ServeLocalHTTP(ctx, &readyListener{Listener: ln, ready: ready}, handler, nil, d.dashboardConnection)
+		})
+	})
 }
 
 func localShutdownError(err error) bool {
@@ -437,7 +391,11 @@ func (r *localRuntime) statusLocked(session *localRuntimeSession) LocalStatus {
 	defer d.mu.Unlock()
 	activity := d.localActivity
 	activity.DashboardConnections += d.dashboardConns
-	return LocalStatus{Running: session.ready && !d.shuttingDown && !d.draining, PID: os.Getpid(), Version: d.cfg.Version, Activity: activity, DashboardURL: session.logins.servingOrigin()}
+	status := LocalStatus{Running: session.ready && !d.shuttingDown && !d.draining, PID: os.Getpid(), Version: d.cfg.Version, Activity: activity, DashboardURL: session.logins.servingOrigin()}
+	if session.dashboardErr != nil {
+		status.DashboardError = session.dashboardErr.Error()
+	}
+	return status
 }
 
 func (r *localRuntime) control(session *localRuntimeSession) LocalStatus {

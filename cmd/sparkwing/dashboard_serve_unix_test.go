@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/url"
+	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -15,6 +16,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/testhome"
+	"github.com/sparkwing-dev/sparkwing/internal/wingd"
 	wingdclient "github.com/sparkwing-dev/sparkwing/internal/wingd/client"
 )
 
@@ -27,7 +29,11 @@ func TestDashboardServesAControllerARunStarted(t *testing.T) {
 	home := testhome.TempDir(t)
 	t.Setenv("SPARKWING_HOME", home)
 	t.Setenv("SPARKWING_SECRETS_KEY_FILE", filepath.Join(home, "secrets.key"))
-	t.Setenv("SPARKWING_CONFIG", filepath.Join(home, "missing.yaml"))
+	config := filepath.Join(home, "config.yaml")
+	if err := os.WriteFile(config, []byte("dashboard: {address: '127.0.0.1:0'}\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("SPARKWING_CONFIG", config)
 	offlineStopDaemon(t, home)
 	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Minute)
 	defer cancel()
@@ -50,18 +56,13 @@ func TestDashboardServesAControllerARunStarted(t *testing.T) {
 		}
 		return result
 	}
-	if before := status(); before.State != "running" || before.Dashboard != "not_serving" || before.URL != "" {
-		t.Fatalf("an on-demand controller should run without a dashboard: %+v", before)
+	if before := status(); before.State != "running" || before.Dashboard != "serving" || before.URL == "" {
+		t.Fatalf("an on-demand controller should serve its dashboard: %+v", before)
 	}
 
 	var out bytes.Buffer
-	err = runDashboardCommandArgs(ctx, []string{"open", "-o", "json"}, &out, runtime.GOOS, func(ctx context.Context) (dashboardServices, error) {
-		services, err := resolveLocalServices(ctx)
-		services.options.DashboardAddress = "127.0.0.1:0"
-		return services, err
-	})
-	if err != nil {
-		t.Fatalf("dashboard open against a controller that is not serving: %v", err)
+	if err := runDashboardCommandArgs(ctx, []string{"open", "-o", "json"}, &out, runtime.GOOS, resolveLocalServices); err != nil {
+		t.Fatalf("dashboard open: %v", err)
 	}
 	var opened dashboardLoginResult
 	if err := json.Unmarshal(out.Bytes(), &opened); err != nil {
@@ -94,7 +95,6 @@ func TestDashboardServesAControllerARunStarted(t *testing.T) {
 		t.Fatalf("status should report the same controller running and the dashboard serving at %s: %+v", origin, after)
 	}
 
-	// safety: a direct drain preserves the saved dashboard for an on-demand restart.
 	if err := wingdclient.Stop(ctx, wingdclient.Options{Home: home}); err != nil {
 		t.Fatalf("drain the controller: %v", err)
 	}
@@ -107,16 +107,47 @@ func TestDashboardServesAControllerARunStarted(t *testing.T) {
 		t.Fatalf("a controller restarted on demand should serve its dashboard again: %+v", restarted)
 	}
 
+	registry, err := wingdclient.NewLocalRunnerClient(home, installedVersion())
+	if err != nil {
+		t.Fatal(err)
+	}
+	runner, err := registry.Active(ctx)
+	for err != nil && ctx.Err() == nil {
+		time.Sleep(100 * time.Millisecond)
+		runner, err = registry.Active(ctx)
+	}
+	if err != nil {
+		t.Fatalf("the controller started no local runner: %v", err)
+	}
 	out.Reset()
-	if err := runDashboardCommandArgs(ctx, []string{"stop", "-o", "json"}, &out, runtime.GOOS, resolveLocalServices); err != nil {
-		t.Fatalf("dashboard stop: %v", err)
+	if err := runDaemonLifecycleCommandArgs(ctx, []string{"stop", "-o", "json"}, &out, resolveLocalServices); err != nil {
+		t.Fatalf("daemon stop: %v", err)
 	}
-	if _, err := ensureLocalController(ctx, home, func(ctx context.Context) (dashboardServices, error) {
-		return resolveLocalServicesAt(ctx, home)
-	}); err != nil {
-		t.Fatalf("on-demand controller start after stop: %v", err)
+	exited, stop := context.WithTimeout(ctx, 10*time.Second)
+	defer stop()
+	for {
+		alive, err := wingd.LocalRunnerProcessAlive(runner)
+		if err == nil && !alive {
+			break
+		}
+		if exited.Err() != nil {
+			t.Fatalf("an idle local runner outlived daemon stop: alive=%t err=%v", alive, err)
+		}
+		time.Sleep(50 * time.Millisecond)
 	}
-	if stopped := status(); stopped.State != "running" || stopped.Dashboard != "not_serving" {
-		t.Fatalf("an explicitly stopped dashboard came back: %+v", stopped)
+	// safety: a runner that outlives its controller exits on failed claims instead, without recording
+	// its stop or revoking its claim token.
+	logs, err := filepath.Glob(filepath.Join(home, "runners", "*", "runner.log"))
+	if err != nil || len(logs) == 0 {
+		t.Fatalf("runner logs: %v %v", logs, err)
+	}
+	for _, path := range logs {
+		body, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if strings.Contains(string(body), "api.sock") {
+			t.Fatalf("the runner lost its controller before retiring:\n%s", body)
+		}
 	}
 }
