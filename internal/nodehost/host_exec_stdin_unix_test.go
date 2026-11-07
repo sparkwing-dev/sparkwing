@@ -29,7 +29,7 @@ func TestHostCommandKeepsBufferedOutputPastASlowSink(t *testing.T) {
 		}
 		return nil
 	}
-	done, session := runHostCommand(req, make(chan struct{}), make(chan struct{}), sink)
+	done, session := runHostCommand(req, nil, make(chan struct{}), make(chan struct{}), sink)
 	if err := endCommandSessions([]*commandSession{session}); err != nil {
 		t.Fatal(err)
 	}
@@ -48,7 +48,7 @@ func TestHostCommandReturnsWhenABackgroundChildHoldsStdin(t *testing.T) {
 	}
 	finished := make(chan *commandSession, 1)
 	go func() {
-		_, session := runHostCommand(req, make(chan struct{}), make(chan struct{}), func(string, []byte, bool) error { return nil })
+		_, session := runHostCommand(req, nil, make(chan struct{}), make(chan struct{}), func(string, []byte, bool) error { return nil })
 		finished <- session
 	}()
 	t.Cleanup(func() {
