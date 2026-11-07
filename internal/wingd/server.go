@@ -66,6 +66,7 @@ type Daemon struct {
 	cancelledRunOrder  []string
 	draining           bool
 	runnerWake         runnerWake
+	runnerChanges      sync.Mutex
 	shuttingDown       bool
 	localActivity      LocalActivity
 	dashboardConns     int

@@ -86,15 +86,12 @@ func (d *Daemon) localRunnerHTTP(next http.Handler) http.Handler {
 			writeLoginFailure(w, &apierr.Error{Code: apierr.Unavailable, Message: "local runner persistence is unavailable"})
 			return
 		}
-		d.mu.Lock()
-		draining := d.draining
-		d.mu.Unlock()
-		// safety: a stopping controller must not hand its supervisor a reason to start a runner it then abandons.
-		if draining && r.URL.Path == localRunnerPath {
-			writeLoginFailure(w, &apierr.Error{Code: apierr.Unavailable, Message: "the local controller is stopping"})
-			return
-		}
 		if r.URL.Path == localRunnerPath && r.Method == http.MethodGet && r.URL.Query().Get("state") == "active" {
+			// safety: a stopping controller must not hand its supervisor a reason to start a runner it then abandons.
+			if d.isDraining() {
+				writeLocalRunnerFailure(w, errControllerStopping)
+				return
+			}
 			instance, err := registry.ActiveLocalRunner(r.Context(), subject)
 			if err != nil {
 				writeLocalRunnerFailure(w, err)
@@ -104,7 +101,13 @@ func (d *Daemon) localRunnerHTTP(next http.Handler) http.Handler {
 			return
 		}
 		if r.URL.Path == localRunnerPath && r.Method == http.MethodPost {
+			release, ok := d.admitRunnerChange()
+			if !ok {
+				writeLocalRunnerFailure(w, errControllerStopping)
+				return
+			}
 			instance, err := registerLocalRunnerHTTP(w, r, registry, subject, peer)
+			release()
 			if err != nil {
 				writeLocalRunnerFailure(w, err)
 				return
@@ -129,7 +132,13 @@ func (d *Daemon) localRunnerHTTP(next http.Handler) http.Handler {
 		}
 		switch parts[1] {
 		case "activate":
+			release, ok := d.admitRunnerChange()
+			if !ok {
+				writeLocalRunnerFailure(w, errControllerStopping)
+				return
+			}
 			err = registry.ActivateLocalRunner(r.Context(), subject, parts[0])
+			release()
 		case "drain":
 			err = registry.DrainLocalRunner(r.Context(), subject, parts[0])
 		case "stop":
@@ -159,15 +168,17 @@ func (d *Daemon) retireLocalRunner(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	d.runnerChanges.Lock()
 	instance, err := registry.ActiveLocalRunner(ctx, subject)
 	var failure *apierr.Error
+	if err == nil {
+		err = registry.DrainLocalRunner(ctx, subject, instance.ID)
+	}
+	d.runnerChanges.Unlock()
 	if errors.As(err, &failure) && failure.Code == apierr.NotFound {
 		return nil
 	}
 	if err != nil {
-		return err
-	}
-	if err := registry.DrainLocalRunner(ctx, subject, instance.ID); err != nil {
 		return err
 	}
 	d.runnerWake.notify()
@@ -185,6 +196,25 @@ func (d *Daemon) retireLocalRunner(ctx context.Context) error {
 		case <-time.After(50 * time.Millisecond):
 		}
 	}
+}
+
+var errControllerStopping = &apierr.Error{Code: apierr.Unavailable, Message: "the local controller is stopping"}
+
+func (d *Daemon) isDraining() bool {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return d.draining
+}
+
+// safety: registration and activation hold runnerChanges through persistence and check draining under it, so a
+// retirement, which drains while holding it after draining is set, sees every change that passed and refuses the rest.
+func (d *Daemon) admitRunnerChange() (func(), bool) {
+	d.runnerChanges.Lock()
+	if d.isDraining() {
+		d.runnerChanges.Unlock()
+		return nil, false
+	}
+	return d.runnerChanges.Unlock, true
 }
 
 func validLocalRunnerID(id string) bool {

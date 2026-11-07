@@ -11,7 +11,9 @@ import (
 	"sync"
 	"testing"
 	"testing/synctest"
+	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/localhostwire"
 )
 
@@ -205,5 +207,141 @@ func TestControllerDrainRetiresTheRunnerOnlyForStop(t *testing.T) {
 				t.Fatalf("active discovery while stopping: %d", w.Code)
 			}
 		})
+	}
+}
+
+type runnerSetFixture struct {
+	FuncRunStore
+	mu        sync.Mutex
+	instances map[string]localhostwire.LocalRunnerInstance
+	activate  func()
+	actives   int
+}
+
+func (f *runnerSetFixture) RegisterLocalRunner(_ context.Context, _ string, instance localhostwire.LocalRunnerInstance) (localhostwire.LocalRunnerInstance, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	instance.State = "registered"
+	f.instances[instance.ID] = instance
+	return instance, nil
+}
+
+func (f *runnerSetFixture) ReadLocalRunner(_ context.Context, _, id string) (localhostwire.LocalRunnerInstance, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.instances[id], nil
+}
+
+func (f *runnerSetFixture) ActiveLocalRunner(context.Context, string) (localhostwire.LocalRunnerInstance, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.actives++
+	for _, instance := range f.instances {
+		if instance.State == "active" {
+			return instance, nil
+		}
+	}
+	return localhostwire.LocalRunnerInstance{}, &apierr.Error{Code: apierr.NotFound, Message: "no active runner"}
+}
+
+func (f *runnerSetFixture) ActivateLocalRunner(_ context.Context, _, id string) error {
+	if f.activate != nil {
+		f.activate()
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for key, instance := range f.instances {
+		if instance.State == "active" {
+			instance.State = "draining"
+			f.instances[key] = instance
+		}
+	}
+	instance := f.instances[id]
+	instance.State = "active"
+	f.instances[id] = instance
+	return nil
+}
+
+func (f *runnerSetFixture) DrainLocalRunner(_ context.Context, _, id string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	instance := f.instances[id]
+	instance.State = "draining"
+	f.instances[id] = instance
+	return nil
+}
+
+func (f *runnerSetFixture) StopLocalRunner(context.Context, string, string) error { return nil }
+
+func (f *runnerSetFixture) state(id string) string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.instances[id].State
+}
+
+func TestControllerStopRetiresAnActivatingSuccessorAndRefusesLaterOnes(t *testing.T) {
+	exited := exec.Command("true")
+	if err := exited.Run(); err != nil {
+		t.Skip("no exited process to stand in for a runner: ", err)
+	}
+	instance := func(id, state string) localhostwire.LocalRunnerInstance {
+		return localhostwire.LocalRunnerInstance{ID: id, PID: exited.Process.Pid, ProcessBirth: "exited", State: state}
+	}
+	d := newHTTPAdmissionTest(t, &admissionMemoryStore{})
+	entered, release := make(chan struct{}), make(chan struct{})
+	fixture := &runnerSetFixture{instances: map[string]localhostwire.LocalRunnerInstance{
+		"old": instance("old", "active"), "successor": instance("successor", "registered"), "late": instance("late", "registered"),
+	}}
+	fixture.activate = func() {
+		close(entered)
+		<-release
+	}
+	d.cfg.Runs = fixture
+	runners := d.localRunnerHTTP(http.NotFoundHandler())
+	activated := make(chan int, 1)
+	go func() {
+		w := httptest.NewRecorder()
+		runners.ServeHTTP(w, runnerHTTPRequest(t, t.Context(), http.MethodPost, "/successor/activate", nil))
+		activated <- w.Code
+	}()
+	<-entered
+	stopped := make(chan int, 1)
+	go func() {
+		w := httptest.NewRecorder()
+		d.controllerHTTP(http.NotFoundHandler()).ServeHTTP(w, controllerHTTPRequest(t, http.MethodPost, "drain?runner=retire", "", true))
+		stopped <- w.Code
+	}()
+	// safety: retirement must wait for the activation that passed the draining check before it looks for the active runner.
+	time.Sleep(100 * time.Millisecond)
+	fixture.mu.Lock()
+	early := fixture.actives
+	fixture.mu.Unlock()
+	if early != 0 {
+		t.Fatal("retirement read the active runner while an activation was persisting")
+	}
+	fixture.activate = nil
+	close(release)
+	if code := <-activated; code != http.StatusOK {
+		t.Fatalf("in-flight activation: %d", code)
+	}
+	if code := <-stopped; code != http.StatusOK {
+		t.Fatalf("stop: %d", code)
+	}
+	if fixture.state("old") != "draining" || fixture.state("successor") != "draining" {
+		t.Fatalf("stop missed a runner: old=%s successor=%s", fixture.state("old"), fixture.state("successor"))
+	}
+	for _, path := range []string{"/late/activate", ""} {
+		w := httptest.NewRecorder()
+		var body any
+		if path == "" {
+			body = instance("later", "")
+		}
+		runners.ServeHTTP(w, runnerHTTPRequest(t, t.Context(), http.MethodPost, path, body))
+		if w.Code != http.StatusServiceUnavailable {
+			t.Fatalf("%q while stopping: %d", path, w.Code)
+		}
+	}
+	if fixture.state("late") != "registered" {
+		t.Fatalf("a successor activated after stop: %s", fixture.state("late"))
 	}
 }
