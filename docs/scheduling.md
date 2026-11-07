@@ -143,9 +143,11 @@ The list is the whole allowed set: a target that is not listed never runs the
 job, so a list without `cloud` never spends Cloud credits on it. The list binds
 job IDs, not code: a job renamed to `macos` takes the `macos` override, and in a
 pipeline with only `jobs` overrides every other job keeps today's routing. A
-child run stays inside the list of the job that started it; the child
-pipeline's own default-branch list can only narrow it, and a child whose list
-shares no tier with its parent's is refused. Requirements
+child run takes the list of the job that started it, unchanged, and never reads
+its own pipeline's list. The list is a cost and preference policy, not a
+confinement boundary: a child of a job without a list runs under today's
+routing, and a list in another repository's configuration does not apply to
+children started from this one. Requirements
 from the SDK and the pipeline's `requires` still apply in every tier, and tier
 labels narrow only their own tier. A job block replaces the pipeline list; an
 empty `prefer: []` gives that job the routing it would have without a list.
@@ -160,8 +162,10 @@ not contain is ignored. Plan and expansion acceptance refuse a job whose
 override names it while it is inline, and a job whose operating-system
 requirement no tier can meet, such as `os=darwin` with only `cloud` listed. Listing
 `cloud` or `github-actions` under a `run.route: local` pipeline is an error,
-and a GitHub App runner setting other than `anywhere`, an explicit `--runner`
-or burst routing refuses the run with both settings named. When the
+and a GitHub App runner setting other than `anywhere` or an explicit
+`--runner` other than `here` refuses the run with both settings named.
+`--runner here` and burst runs read no list, because the controller fetched no
+commit for them, so they keep today's routing. When the
 default-branch file cannot be read or parsed, that pipeline's run is refused
 with the reason, and the rest of the delivery proceeds. `sparkwing pipeline lint` prints the resolved list for
 every declared job. `sparkwing runs status` and the run page show each held

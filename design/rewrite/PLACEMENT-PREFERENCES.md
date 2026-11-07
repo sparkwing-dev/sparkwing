@@ -113,13 +113,13 @@ How it composes with what exists:
 | Pipeline `run.route: local` | Conflict with any `cloud` or `github-actions` tier. Lint error. |
 | `sparkwing run`, `--sw-route cloud`, machine burst | Unchanged. Asserted runs never read repository placement. |
 
-Which runs read it: runs whose intake seals repository proof. That is App
-push, pull request and release deliveries, App-armed schedules, and Run now on
-a commit Sparkwing fetched. The policy comes from the verified default-branch
-config, sealed with its revision next to the event's execution revision, so a
-pull request cannot add a paid tier or pick a workflow (decided question 3).
-Unknown job IDs fail at plan acceptance with a located error; generated jobs
-are checked when expansion closes. `sparkwing pipeline lint` prints the
+Which runs read it: App push, pull request and release deliveries, App-armed
+schedules, and Run now on a commit Sparkwing fetched, whether or not intake
+could verify them; the list only narrows placement, so an unverified run seals
+it too. The policy comes from the verified default-branch config, sealed with
+its revision next to the event's execution revision, so a pull request cannot
+add a paid tier or pick a workflow (decided question 3). An override for a job
+the plan does not contain is inert. `sparkwing pipeline lint` prints the
 resolved list for every known job.
 
 Inline jobs stay on their run host and cannot carry a placement override; lint
@@ -281,9 +281,12 @@ Sizes: S half a day, M one to two days, L three to five days, tests included.
 - The list only narrows, so intake seals it whatever the run's provenance,
   including App runs whose compare was unavailable. Any runner pin (App runner
   setting, `--runner`, burst routing) conflicts and refuses the run.
-- A child run is bound to the list of the job that started it; its own
-  pipeline's default-branch list narrows that by intersecting tiers, and an
-  empty intersection refuses the child.
+- A child run takes the resolved list of the job that started it, unchanged,
+  and never reads its own pipeline's list; a child of a job without a list has
+  none. Lists are a cost and preference policy, not a confinement boundary, so
+  a child of an unbound job, or a child whose pipeline lives in a repository
+  with its own list, is not confined by any list. A child's runner selection
+  conflicts with an inherited list.
 - App-armed schedules read the default-branch list each time they fire, in
   the controller's schedule source resolution.
 - An override for a job a plan lacks is inert: the list binds job IDs, and a
