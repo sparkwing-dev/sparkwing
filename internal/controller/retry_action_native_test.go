@@ -436,7 +436,7 @@ func TestFailedRetryReusesOnlyReleasedJobsAndStaysClaimable(t *testing.T) {
 	s, options, _, source := retryActionDispatchFixture(t, "private-value", false, runspec.DispatchController, store.WithPolicies(func(*store.Store) (store.Policies, error) {
 		return store.Policies{ResultBlobs: storage.BlobManifests{}}, nil
 	}))
-	// build reruns, check reuses its result, test failed, and package reruns behind build.
+	// safety: build reruns, check reuses its result, test failed and package reruns behind build.
 	jobs := []nodeproto.JobSpec{{ID: "build"}, {ID: "check", Needs: []string{"build"}}, {ID: "test", Needs: []string{"check"}}, {ID: "package", Needs: []string{"build"}}}
 	plan, err := json.Marshal(nodeproto.PlanDoc{Jobs: jobs})
 	if err != nil {

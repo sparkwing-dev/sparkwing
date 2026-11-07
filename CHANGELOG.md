@@ -48,7 +48,7 @@ unlock.
 
 ### Fixed
 
-- **controller:** `sparkwing runs retry --failed` starts when a reused job has to run again. A job whose earlier result could not be reused, such as one written by another runner, used to stay ready while every runner claim failed with "financial lock order: work must precede the ledger". Reuse is now checked when a job's dependencies finish, as local runs already did, so a later job no longer reuses its earlier result or starts while a job it needs runs again.
+- **controller:** `sparkwing runs retry --failed` starts when a reused job has to run again. A job whose earlier result could not be reused, such as one written by another runner, used to stay ready while every runner claim failed with "financial lock order: work must precede the ledger". Reuse is now checked when a job's dependencies finish, as local runs already did, so a later job no longer reuses its earlier result or starts while a job it needs runs again. A job whose earlier result the controller refuses to reuse, such as one that no longer matches the job, now runs again; before, the refusal stopped the controller from scheduling that run and every run after it.
 
 - **local controller:** Store time no longer moves backward when time sync or a VM resume steps the wall clock back, which had failed job and step completion with a `finished_at >= started_at` constraint error and refused plan settlement with "billing checkpoint is outside its awarded time range".
 

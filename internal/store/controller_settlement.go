@@ -4,8 +4,11 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"log/slog"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
+	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 )
@@ -60,7 +63,7 @@ func settleControllerTx(ctx context.Context, tx *storeTx, team Team, runID strin
 	if err != nil || actor == nil {
 		return err
 	}
-	missed := map[string]bool{}
+	reuse := &retryReuse{missed: map[string]bool{}}
 	for {
 		snapshot, err := readSnapshotTx(ctx, tx, team, runID)
 		if err != nil {
@@ -83,7 +86,7 @@ func settleControllerTx(ctx context.Context, tx *storeTx, team Team, runID strin
 			return err
 		}
 		decision := Decide(graph)
-		reused, deferred, err := reuseReleasedRetryJobsTx(ctx, tx, team, snapshot.Run, decision, *actor, missed)
+		reused, deferred, err := reuseReleasedRetryJobsTx(ctx, tx, team, snapshot, decision, *actor, reuse)
 		if err != nil {
 			return err
 		}
@@ -146,38 +149,106 @@ func settleControllerTx(ctx context.Context, tx *storeTx, team Team, runID strin
 	}
 }
 
-// A retry probes reuse when a selected job is released, as the run host does,
-// so no job reuses a result while a job it needs runs again. The probe reads
-// result bytes and locks the source run, which a claim or completion cannot do
-// once it holds the ledger; such jobs stay pending for the controller sweep.
-func reuseReleasedRetryJobsTx(ctx context.Context, tx *storeTx, team Team, run RunRow, decision ScheduleDecision, actor runstate.Actor, missed map[string]bool) (bool, map[string]bool, error) {
+// safety: reuse is probed when a selected job is released, as the run host does, so no job reuses a result
+// while a job it needs runs again. The probe reads result bytes and locks the source run, which a claim or
+// completion cannot do once it holds the ledger; such jobs stay pending for the controller sweep.
+func reuseReleasedRetryJobsTx(ctx context.Context, tx *storeTx, team Team, snapshot RunSnapshot, decision ScheduleDecision, actor runstate.Actor, state *retryReuse) (bool, map[string]bool, error) {
+	run := snapshot.Run
 	if run.Retry == nil || run.CancelRequestedAt != nil {
 		return false, nil, nil
 	}
 	probe := tx.blobIO != nil && !tx.ledgerLocked
 	deferred := map[string]bool{}
-	reused := false
-	var pending error
+	var released []runspec.NodeID
 	for _, node := range decision.Nodes {
-		selected, ok := run.Retry.Results[node.NodeID]
-		if !ok || missed[node.NodeID] || node.Kind != DecisionReady && node.Kind != DecisionApproval {
+		if _, ok := run.Retry.Results[node.NodeID]; !ok || state.missed[node.NodeID] || node.Kind != DecisionReady && node.Kind != DecisionApproval {
 			continue
 		}
 		if !probe {
 			deferred[node.NodeID] = true
 			continue
 		}
-		source := runstate.MaterializeSource{Kind: runstate.SourceManualRetry, Result: &selected}
-		ok, err := tryMaterializationTx(ctx, tx, team, ReconcileRequest{Ref: runspec.NodeRef{RunID: runspec.RunID(run.ID), NodeID: runspec.NodeID(node.NodeID)}, Actor: actor, Policy: source.Kind, Source: &source})
-		if errors.Is(err, errBlobIOPending) {
-			pending = err
-			continue
+		released = append(released, runspec.NodeID(node.NodeID))
+	}
+	if len(released) == 0 {
+		return false, deferred, nil
+	}
+	// safety: a deferred read restarts the transaction and discards reuse made in it, so every waiting
+	// job's reads are gathered first; otherwise each dependency level costs a read round.
+	if !state.prefetched {
+		if err := prefetchRetryReadsTx(ctx, tx, team, snapshot, actor); err != nil {
+			return false, nil, err
 		}
+		state.prefetched = true
+	}
+	reused := false
+	for _, id := range released {
+		ok, err := reuseRetryJobTx(ctx, tx, team, runspec.NodeRef{RunID: runspec.RunID(run.ID), NodeID: id}, actor, run.Retry.Results[string(id)])
 		if err != nil {
 			return false, nil, err
 		}
-		missed[node.NodeID] = !ok
+		state.missed[string(id)] = !ok
 		reused = reused || ok
 	}
-	return reused, deferred, pending
+	return reused, deferred, nil
+}
+
+type retryReuse struct {
+	missed     map[string]bool
+	prefetched bool
+}
+
+func prefetchRetryReadsTx(ctx context.Context, tx *storeTx, team Team, snapshot RunSnapshot, actor runstate.Actor) error {
+	var pending error
+	for _, node := range snapshot.Nodes {
+		selected, ok := snapshot.Run.Retry.Results[string(node.Ref.NodeID)]
+		if !ok || node.Status != runstate.StatusPending || node.ReadyAt != nil || node.ClaimedBy != "" {
+			continue
+		}
+		if _, err := tx.execContext(ctx, "SAVEPOINT retry_reuse_reads"); err != nil {
+			return err
+		}
+		source := runstate.MaterializeSource{Kind: runstate.SourceManualRetry, Result: &selected}
+		_, err := tryMaterializationTx(ctx, tx, team, ReconcileRequest{Ref: node.Ref, Actor: actor, Policy: source.Kind, Source: &source})
+		if errors.Is(err, errBlobIOPending) {
+			pending = err
+		}
+		if _, err := tx.execContext(ctx, "ROLLBACK TO SAVEPOINT retry_reuse_reads"); err != nil {
+			return err
+		}
+		if _, err := tx.execContext(ctx, "RELEASE SAVEPOINT retry_reuse_reads"); err != nil {
+			return err
+		}
+	}
+	return pending
+}
+
+// safety: a refused source runs the job again; it never takes the refused result, and failing the job
+// would leave the user to retry the whole plan.
+func reuseRetryJobTx(ctx context.Context, tx *storeTx, team Team, ref runspec.NodeRef, actor runstate.Actor, selected runstate.MaterializedResultSource) (bool, error) {
+	if _, err := tx.execContext(ctx, "SAVEPOINT retry_reuse"); err != nil {
+		return false, err
+	}
+	source := runstate.MaterializeSource{Kind: runstate.SourceManualRetry, Result: &selected}
+	reused, err := tryMaterializationTx(ctx, tx, team, ReconcileRequest{Ref: ref, Actor: actor, Policy: source.Kind, Source: &source})
+	if err != nil {
+		if !reuseRefused(err) {
+			return false, err
+		}
+		slog.Warn("retry cannot reuse the source result; the job runs again", "team", team, "run", ref.RunID, "job", ref.NodeID, "source_run", selected.Ref.RunID, "err", err)
+		if _, rollback := tx.execContext(ctx, "ROLLBACK TO SAVEPOINT retry_reuse"); rollback != nil {
+			return false, errors.Join(err, rollback)
+		}
+		reused = false
+	}
+	_, err = tx.execContext(ctx, "RELEASE SAVEPOINT retry_reuse")
+	return reused, err
+}
+
+// safety: refusals are store verdicts on the source; database and read failures stay errors so the sweep
+// tries the run again.
+func reuseRefused(err error) bool {
+	var refused *apierr.Error
+	var illegal *ErrIllegalTransition
+	return !errors.Is(err, errBlobIOPending) && (errors.As(err, &refused) || errors.As(err, &illegal) || errors.Is(err, blob.ErrDigestNotReadable))
 }
