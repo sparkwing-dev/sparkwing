@@ -203,21 +203,21 @@ func materializationKeysTx(ctx context.Context, tx *storeTx, team Team, a blobAc
 var _ materializationRecords = (*blobRecords)(nil)
 
 func tryMaterializationTx(ctx context.Context, tx *storeTx, team Team, request ReconcileRequest) (bool, error) {
-	if _, err := tx.execContext(ctx, "SAVEPOINT materialize_result"); err != nil {
+	attempt, err := savepointTx(ctx, tx, "materialize_result")
+	if err != nil {
 		return false, err
 	}
 
-	_, err := transitionNodeStateTx(ctx, tx, team, nodeTransition{Ref: request.Ref, Actor: request.Actor, Cause: causeMaterialize, Extra: transitionExtra{Materialize: request.Source}})
+	_, err = transitionNodeStateTx(ctx, tx, team, nodeTransition{Ref: request.Ref, Actor: request.Actor, Cause: causeMaterialize, Extra: transitionExtra{Materialize: request.Source}})
 	if err != nil {
 		if !blob.IsCacheMiss(err) {
 			return false, err
 		}
-		if _, rollback := tx.execContext(ctx, "ROLLBACK TO SAVEPOINT materialize_result"); rollback != nil {
+		if rollback := attempt.rollback(ctx, tx); rollback != nil {
 			return false, errors.Join(err, rollback)
 		}
 	}
-	_, released := tx.execContext(ctx, "RELEASE SAVEPOINT materialize_result")
-	return err == nil, released
+	return err == nil, attempt.release(ctx, tx)
 }
 
 // safety: The controller copies only the retry's sealed scope; it has no runner credential.

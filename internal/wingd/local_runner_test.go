@@ -11,7 +11,6 @@ import (
 	"sync"
 	"testing"
 	"testing/synctest"
-	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/localhostwire"
@@ -287,61 +286,63 @@ func TestControllerStopRetiresAnActivatingSuccessorAndRefusesLaterOnes(t *testin
 	instance := func(id, state string) localhostwire.LocalRunnerInstance {
 		return localhostwire.LocalRunnerInstance{ID: id, PID: exited.Process.Pid, ProcessBirth: "exited", State: state}
 	}
-	d := newHTTPAdmissionTest(t, &admissionMemoryStore{})
-	entered, release := make(chan struct{}), make(chan struct{})
-	fixture := &runnerSetFixture{instances: map[string]localhostwire.LocalRunnerInstance{
-		"old": instance("old", "active"), "successor": instance("successor", "registered"), "late": instance("late", "registered"),
-	}}
-	fixture.activate = func() {
-		close(entered)
-		<-release
-	}
-	d.cfg.Runs = fixture
-	runners := d.localRunnerHTTP(http.NotFoundHandler())
-	activated := make(chan int, 1)
-	go func() {
-		w := httptest.NewRecorder()
-		runners.ServeHTTP(w, runnerHTTPRequest(t, t.Context(), http.MethodPost, "/successor/activate", nil))
-		activated <- w.Code
-	}()
-	<-entered
-	stopped := make(chan int, 1)
-	go func() {
-		w := httptest.NewRecorder()
-		d.controllerHTTP(http.NotFoundHandler()).ServeHTTP(w, controllerHTTPRequest(t, http.MethodPost, "drain?runner=retire", "", true))
-		stopped <- w.Code
-	}()
-	// safety: retirement must wait for the activation that passed the draining check before it looks for the active runner.
-	time.Sleep(100 * time.Millisecond)
-	fixture.mu.Lock()
-	early := fixture.actives
-	fixture.mu.Unlock()
-	if early != 0 {
-		t.Fatal("retirement read the active runner while an activation was persisting")
-	}
-	fixture.activate = nil
-	close(release)
-	if code := <-activated; code != http.StatusOK {
-		t.Fatalf("in-flight activation: %d", code)
-	}
-	if code := <-stopped; code != http.StatusOK {
-		t.Fatalf("stop: %d", code)
-	}
-	if fixture.state("old") != "draining" || fixture.state("successor") != "draining" {
-		t.Fatalf("stop missed a runner: old=%s successor=%s", fixture.state("old"), fixture.state("successor"))
-	}
-	for _, path := range []string{"/late/activate", ""} {
-		w := httptest.NewRecorder()
-		var body any
-		if path == "" {
-			body = instance("later", "")
+	synctest.Test(t, func(t *testing.T) {
+		d := newHTTPAdmissionTest(t, &admissionMemoryStore{})
+		entered, release := make(chan struct{}), make(chan struct{})
+		fixture := &runnerSetFixture{instances: map[string]localhostwire.LocalRunnerInstance{
+			"old": instance("old", "active"), "successor": instance("successor", "registered"), "late": instance("late", "registered"),
+		}}
+		fixture.activate = func() {
+			close(entered)
+			<-release
 		}
-		runners.ServeHTTP(w, runnerHTTPRequest(t, t.Context(), http.MethodPost, path, body))
-		if w.Code != http.StatusServiceUnavailable {
-			t.Fatalf("%q while stopping: %d", path, w.Code)
+		d.cfg.Runs = fixture
+		runners := d.localRunnerHTTP(http.NotFoundHandler())
+		activated := make(chan int, 1)
+		go func() {
+			w := httptest.NewRecorder()
+			runners.ServeHTTP(w, runnerHTTPRequest(t, t.Context(), http.MethodPost, "/successor/activate", nil))
+			activated <- w.Code
+		}()
+		<-entered
+		stopped := make(chan int, 1)
+		go func() {
+			w := httptest.NewRecorder()
+			d.controllerHTTP(http.NotFoundHandler()).ServeHTTP(w, controllerHTTPRequest(t, http.MethodPost, "drain?runner=retire", "", true))
+			stopped <- w.Code
+		}()
+		// safety: once both goroutines are durably blocked, retirement is waiting on the activation that passed first.
+		synctest.Wait()
+		fixture.mu.Lock()
+		early := fixture.actives
+		fixture.mu.Unlock()
+		if early != 0 {
+			t.Fatal("retirement read the active runner while an activation was persisting")
 		}
-	}
-	if fixture.state("late") != "registered" {
-		t.Fatalf("a successor activated after stop: %s", fixture.state("late"))
-	}
+		fixture.activate = nil
+		close(release)
+		if code := <-activated; code != http.StatusOK {
+			t.Fatalf("in-flight activation: %d", code)
+		}
+		if code := <-stopped; code != http.StatusOK {
+			t.Fatalf("stop: %d", code)
+		}
+		if fixture.state("old") != "draining" || fixture.state("successor") != "draining" {
+			t.Fatalf("stop missed a runner: old=%s successor=%s", fixture.state("old"), fixture.state("successor"))
+		}
+		for _, path := range []string{"/late/activate", ""} {
+			w := httptest.NewRecorder()
+			var body any
+			if path == "" {
+				body = instance("later", "")
+			}
+			runners.ServeHTTP(w, runnerHTTPRequest(t, t.Context(), http.MethodPost, path, body))
+			if w.Code != http.StatusServiceUnavailable {
+				t.Fatalf("%q while stopping: %d", path, w.Code)
+			}
+		}
+		if fixture.state("late") != "registered" {
+			t.Fatalf("a successor activated after stop: %s", fixture.state("late"))
+		}
+	})
 }
