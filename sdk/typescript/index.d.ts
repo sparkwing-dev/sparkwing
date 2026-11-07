@@ -307,14 +307,6 @@ export interface Cmd {
 }
 /** contract: Root-relative paths match command cwd and file helper resolution. */
 export declare function workDir(): string;
-/** contract: Absolute-first joins work even without a discovered project. */
-export declare function path(...parts: readonly string[]): string;
-/** contract: Relative reads use the pipeline root rather than a command's temporary cwd. */
-export declare function readFile(path: string): Promise<Uint8Array>;
-/** contract: Writes create or truncate with mode 0644, matching the Go helper. */
-export declare function writeFile(path: string, data: Uint8Array): Promise<void>;
-/** contract: Glob returns absolute matches for *, ? and character classes, without recursive **. */
-export declare function glob(pattern: string): Promise<string[]>;
 /** contract: Missing project roots are distinguishable from ordinary filesystem errors. */
 export declare class NoProjectError extends Error {}
 /** contract: Git snapshots stay sealed while live methods inspect the current working tree. */

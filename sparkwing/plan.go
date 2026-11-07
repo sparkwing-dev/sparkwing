@@ -18,7 +18,7 @@ import (
 // dependencies with [JobNode.Needs].
 type Plan struct {
 	evalGate                  chan struct{}
-	generated                 map[string][]nodeproto.JobSpec
+	generated                 map[string]nodeproto.PlanDoc
 	generatedArguments        map[string][]nodeproto.ArgumentDescription
 	registration              *registration
 	source                    *Checkout

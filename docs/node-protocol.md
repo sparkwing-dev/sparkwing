@@ -48,19 +48,15 @@ pipe or argv handle argument, respectively.
 
 ```text
 -> {"id":"1","op":"hello","protocol":2,"engine":{"version":"v0.71.0"},"runner":{"name":"local","type":"local","labels":["os=linux"]},"binding":{"run_id":"r1","job_id":"build","routes":{"url":"http://127.0.0.1:41873","bearer":"example-bearer"}}}
-<- {"reply":"1","ok":true,"result":{"protocol":2,"sdk":{"language":"go","version":"v0.71.0"},"features":[]}}
+<- {"reply":"1","ok":true,"result":{"protocol":2,"sdk":{"language":"go","version":"v0.71.0"}}}
 ```
 
 Hello occurs exactly once. A major mismatch returns `protocol_mismatch` with
 `supported_majors` in error details. The selected major applies to the process.
 Documents and HTTP requests carry their own data without another version stamp.
-The SDK's optional operations are advertised in hello's `features` array.
-The host's hello request may carry its own `features` array naming optional
-plan declarations it accepts. An SDK leaves a declaration out of the plan when
-the host does not name it, so a newer pipeline still plans on an older host.
-Host features are `job_cores`, which admits a job's `cores`, and `host_exec`,
-which offers to run the SDK's commands (Unix hosts only; see
-[Host-run commands](#host-run-commands)).
+The current SDK and host use the same protocol contract. Hello carries identities
+and the process binding. Core requests and host services are sent directly.
+Linux and macOS run SDK commands in the host. Windows runs commands in the SDK.
 
 ## Framing
 
@@ -310,17 +306,13 @@ has stopped. That operation also receives its own reply.
 
 ### Host-run commands
 
-When hello names `host_exec`, an SDK sends each command as a frame instead of
-spawning it, and the host owns the process: it starts the command in its own
-session, masks and logs its output, kills the session on cancellation or when the
-SDK session ends, and records it for crash cleanup. `env` is the complete
-environment the SDK would have used, so pipeline changes to its own environment
-still apply; the host drops engine-minted credentials such as
-`SPARKWING_NODE_TOKEN`. `dir` must be absolute. A Go SDK resolves the executable
-against its own `PATH`, as `exec.Command` did, and sends it as `path`. Without
-`path` the host searches as Node's spawn does: `PATH` from `env`, relative and empty
-entries (and an empty `PATH`) against `dir`, and `/bin:/usr/bin` when `env` has no
-`PATH`; a file without `#!` then runs through `/bin/sh`, as `execvp` does. Children a
+On Linux and macOS, SDKs send commands as frames and the host owns execution,
+masking, cancellation and crash cleanup. `env` is the complete SDK process
+environment plus command overrides. The host strips engine credentials and
+protocol variables. `dir` must be absolute. Both clients use the command's `PATH`,
+resolving relative and empty entries against `dir`. An absent `PATH` searches
+`/bin:/usr/bin`. Executable text without `#!` runs through `/bin/sh`.
+Children a
 command leaves running in the background survive its exit, as they did under the
 SDK, and the host kills them when the SDK session ends.
 
@@ -413,3 +405,14 @@ node protocol once through hello. Optional wire fields, routes, error codes and
 log events are additive. Optional operations are advertised in `features`.
 Breaking wire changes require a new major. Strict plan fields must be understood
 by the accepting engine.
+
+### Host helpers
+
+Both SDKs POST typed operations to `/node/v1/helpers` through the bound process
+routes. Requests contain `operation`, an `args` array, absolute `dir`, and `env`.
+Git, Docker and service behavior runs in the host. The host filters command
+environments, resolves paths against `dir`, masks errors, and owns resource
+cleanup through the process cleanup ledger. Responses contain `result`, or
+`error` and its optional sentinel `code`. SDKs decode results and render output.
+Generators return a complete plan document in `eval.value`; the host requires
+expansions to contain jobs only before accepting their declarations.

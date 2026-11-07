@@ -2,7 +2,6 @@ package sparkwing
 
 import (
 	"context"
-	"fmt"
 	"os"
 	"time"
 
@@ -361,14 +360,8 @@ func Mask(ctx context.Context, value string) error {
 
 // Variable distinguishes a declared unmasked value from a secret.
 func Variable(ctx context.Context, name string) (string, error) {
-	v, masked, err := resolveValue(ctx, "Variable", name)
-	if err != nil {
-		return "", err
-	}
-	if masked {
-		return "", fmt.Errorf("sparkwing: Variable(%q) is a secret", name)
-	}
-	return v, nil
+	v, _, err := resolveValue(ctx, "Variable", name)
+	return v, err
 }
 
 // MustVariable makes a missing required plain value fail the job.

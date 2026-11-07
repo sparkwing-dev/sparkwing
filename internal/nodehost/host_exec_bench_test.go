@@ -150,11 +150,7 @@ func TestHostExecBenchmark(t *testing.T) {
 	if err := json.Unmarshal([]byte(raw), &spec); err != nil {
 		t.Fatal(err)
 	}
-	sdkVariant := map[string]string{"D": "direct", "T": "logged", "TC": "captured", "P1": "logged", "P2": "captured"}[spec.Variant]
-	features := []string{nodeproto.FeatureJobCores}
-	if spec.Variant == "P1" || spec.Variant == "P2" {
-		features = nodeproto.HostFeatures()
-	}
+	sdkVariant := map[string]string{"D": "direct", "P1": "logged", "P2": "captured"}[spec.Variant]
 	logFile, err := os.Create(spec.Out + ".log")
 	if err != nil {
 		t.Fatal(err)
@@ -174,7 +170,7 @@ func TestHostExecBenchmark(t *testing.T) {
 		_, err = logs.Write(append(line, '\n'))
 		return err
 	}
-	h := startHostExecHarnessWithSink(t, spec.Lang, "bench", features, spec.Dir, sink,
+	h := startHostExecHarnessWithSink(t, spec.Lang, "bench", spec.Dir, sink,
 		"HOSTEXEC_SDK_CPUPROFILE="+os.Getenv("HOSTEXEC_SDK_CPUPROFILE"), "GODEBUG="+os.Getenv("HOSTEXEC_SDK_GODEBUG"),
 		"HOSTEXEC_BENCH_VARIANT="+sdkVariant, "HOSTEXEC_BENCH_SIZE="+spec.Size, "HOSTEXEC_BENCH_COUNT="+strconv.Itoa(spec.Count),
 		"HOSTEXEC_BENCH_CONC="+strconv.Itoa(spec.Conc), "HOSTEXEC_BENCH_BYTES="+strconv.FormatInt(spec.Bytes, 10))

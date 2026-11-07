@@ -15,6 +15,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 )
 
@@ -78,7 +79,7 @@ func nativeHello(t *testing.T, h *host) {
 			URL: "http://127.0.0.1:1", Bearer: "hello-only-bearer",
 		}},
 	}, &hello)
-	if hello.Protocol != 2 || hello.SDK.Language != "typescript" || hello.SDK.Version == "" || hello.Features == nil {
+	if hello.Protocol != 2 || hello.SDK.Language != "typescript" || hello.SDK.Version == "" {
 		t.Fatalf("hello: %+v", hello)
 	}
 	manifest, err := os.ReadFile(filepath.Join(h.command.Dir, "package.json"))
@@ -286,6 +287,27 @@ func (h *host) frame() wireFrame {
 	parsed, err := nodeproto.ParseFrame(line)
 	if err != nil {
 		h.t.Fatalf("frame: %v\n%s", err, line)
+	}
+	if parsed.Exec != nil {
+		req := *parsed.Exec
+		write := func(value any) error {
+			body, err := json.Marshal(value)
+			if err != nil {
+				return err
+			}
+			_, err = h.requests.Write(append(body, '\n'))
+			return err
+		}
+		done := nodehost.ExecuteCommand(h.t.Context(), req, func(stream string, data []byte, eof bool) error {
+			if !req.Capture || eof {
+				return nil
+			}
+			return write(nodeproto.ExecOutput{ID: req.ID, Stream: stream, Data: data})
+		})
+		if err := write(done); err != nil {
+			h.t.Fatal(err)
+		}
+		return wireFrame{}
 	}
 	var frame wireFrame
 	if parsed.Reply != nil {

@@ -15,7 +15,6 @@ var cloudGateSecretShapedFixtures = []string{
 	".gitleaks.toml",
 	"charts/sparkwing-full/examples/external-secrets.yaml",
 	"design/rewrite/proposals/thin-sdk-step1/measurements.json",
-	"testdata/sdk-compat/*/compat-cache-key.txt",
 }
 
 type landCloudGate struct {

@@ -22,6 +22,8 @@ unlock.
 
 ### Breaking
 
+- **SDK (Breaking):** Git, Docker and services execute through host helpers. Generic file helpers and hello feature negotiation are removed. Unix commands require the current host. Local TypeScript packages use the installed candidate engine, matching Go replacements. See [the migration guide](docs/migrations/_unreleased.md#use-the-current-thin-sdk-contract).
+
 - **SDK (Breaking):** When the host runs a command, `Run` (Go `Cmd.Run`, TypeScript `run()`) returns only the last 64 KiB of each of stdout and stderr; the whole output stays in the job log. Pipelines that parse `Run` output should use `Capture`. See [the migration guide](docs/migrations/_unreleased.md#parse-command-output-with-capture).
 - **controller (Breaking):** The schema baseline advances to version 34, adding a partial index on live child runs for the parent-cancellation sweep. Recognized schema 33 stores upgrade in place. Older binaries refuse the upgraded store. See [the migration guide](docs/migrations/_unreleased.md#upgrade-the-store-in-place-to-schema-baseline-34).
 

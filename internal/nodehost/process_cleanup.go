@@ -3,10 +3,13 @@ package nodehost
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"slices"
 	"strconv"
 	"sync"
+
+	helperruntime "github.com/sparkwing-dev/sparkwing/internal/hosthelpers/runtime"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 )
@@ -79,4 +82,19 @@ func (c *ProcessCleanups) run(ctx context.Context, scope CleanupScope) error {
 		}
 	}
 	return errors.Join(append(failures, context.Cause(ctx))...)
+}
+
+func (c *ProcessCleanups) finish(ctx context.Context, id string) error {
+	c.mu.Lock()
+	index := slices.IndexFunc(c.list.items, func(item cleanup) bool { return item.id == id })
+	if index < 0 || c.closed {
+		c.mu.Unlock()
+		return executorError(apierr.NotFound, "process has no cleanup with that ID")
+	}
+	argv := slices.Clone(c.list.items[index].argv)
+	c.mu.Unlock()
+	if output, err := helperruntime.Command(ctx, argv[0], argv[1:]...).CombinedOutput(); err != nil {
+		return fmt.Errorf("helper cleanup: %w: %s", err, output)
+	}
+	return c.release(id)
 }

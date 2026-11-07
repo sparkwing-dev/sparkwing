@@ -45,7 +45,7 @@ func registeredServiceRequest(t *testing.T, routes *serviceRegistrar, auth capab
 func TestProcessServicesRegisterCompleteNegotiatedSurface(t *testing.T) {
 	routes, _, _ := serviceFixture(t)
 	want := []string{
-		"POST /node/v1/masks", "POST /node/v1/annotations", "POST /node/v1/summary",
+		"POST /node/v1/helpers", "POST /node/v1/masks", "POST /node/v1/annotations", "POST /node/v1/summary",
 		"GET /node/v1/secrets/{name}", "GET /node/v1/jobs/{job}/output", "GET /node/v1/pipelines/{name}/latest",
 		"POST /node/v1/oidc-token", "POST /node/v1/children", "GET /node/v1/children/{run}/await",
 		"POST /node/v1/cleanups", "DELETE /node/v1/cleanups/{cleanup}",

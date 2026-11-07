@@ -32,12 +32,10 @@ func testGoSDKAdditiveFieldsAndChildHandles(t *testing.T) {
 	if err := protocolProbeReply(t, process, "hello").Decode(&hello); err != nil {
 		t.Fatal(err)
 	}
-	if hello.Protocol != nodeproto.Version || hello.Features == nil {
+	if hello.Protocol != nodeproto.Version {
 		t.Fatalf("additive hello = %+v", hello)
 	}
-	for _, feature := range hello.Features {
-		t.Fatalf("add a transcript for advertised optional operation %q", feature)
-	}
+
 	sendProtocolProbe(t, process, map[string]any{
 		"id": "plan", "op": "plan", "pipeline": protocolgo.ChildHandlesName,
 		"args": map[string]string{"name": "child"}, "run": map[string]any{"run_id": "r", "pipeline": "invoked-child", "future": true},
@@ -109,7 +107,7 @@ func testProtocolAdditiveFrames(t *testing.T) {
 			if frame.Reply == nil {
 				t.Fatal("reply lost its discriminator")
 			}
-			if err := frame.Reply.Decode(&hello); err != nil || len(hello.Features) != 1 || hello.Features[0] != "optional-probe" {
+			if err := frame.Reply.Decode(&hello); err != nil {
 				t.Fatalf("optional feature advertisement = %+v, %v", hello, err)
 			}
 		})

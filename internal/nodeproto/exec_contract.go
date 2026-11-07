@@ -8,11 +8,6 @@ import (
 	"reflect"
 )
 
-// FeatureHostExec is the hello feature by which a host offers to run an SDK's
-// commands. An SDK that sees it sends [ExecRequest] frames instead of spawning
-// commands itself; an older SDK ignores it and spawns as before.
-const FeatureHostExec = "host_exec"
-
 // ExecRequest is an SDK frame asking the host to run one command. Env is the
 // complete environment the SDK would have given the command, so pipeline code
 // that changes its own environment keeps working; the host still applies its
@@ -20,11 +15,8 @@ const FeatureHostExec = "host_exec"
 // job log and returns only bounded tails; with Capture it returns every byte
 // through [ExecOutput] lines and writes nothing to the log.
 type ExecRequest struct {
-	ID   string `json:"exec"`
-	Step string `json:"step,omitempty"`
-	// Path is the executable the SDK resolved, as a Go SDK always has; without it the host
-	// searches Env's PATH as Node's spawn does.
-	Path    string   `json:"path,omitempty"`
+	ID      string   `json:"exec"`
+	Step    string   `json:"step,omitempty"`
 	Argv    []string `json:"argv"`
 	Dir     string   `json:"dir"`
 	Env     []string `json:"env"`

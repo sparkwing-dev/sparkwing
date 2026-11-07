@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math"
 	"net"
 	"net/url"
 	"strconv"
@@ -54,7 +55,11 @@ func (s *routeServices) call(ctx context.Context, method, path string, body, out
 	if dial == nil {
 		dial = dialLoopback
 	}
-	resp, err := roundTrip(ctx, dial, net.JoinHostPort(u.Hostname(), port), method, path, s.binding.Routes.Bearer, raw, limits.NodeOutputBytes+limits.ProtocolEnvelopeBytes)
+	responseLimit := int64(limits.NodeOutputBytes + limits.ProtocolEnvelopeBytes)
+	if path == "/node/v1/helpers" {
+		responseLimit = math.MaxInt64 - 1
+	}
+	resp, err := roundTrip(ctx, dial, net.JoinHostPort(u.Hostname(), port), method, path, s.binding.Routes.Bearer, raw, responseLimit)
 	if err != nil {
 		return err
 	}
@@ -83,7 +88,11 @@ func (s *routeServices) Secret(ctx context.Context, name string) (string, bool, 
 		Value  *string `json:"value"`
 		Masked *bool   `json:"masked"`
 	}
-	if err := s.call(ctx, "GET", "/node/v1/secrets/"+routeSegment(name), nil, &out); err != nil {
+	path := "/node/v1/secrets/" + routeSegment(name)
+	if SecretIsVariable(ctx) {
+		path += "?variable=true"
+	}
+	if err := s.call(ctx, "GET", path, nil, &out); err != nil {
 		return "", false, err
 	}
 	if out.Value == nil || out.Masked == nil {
@@ -227,4 +236,17 @@ func (s *routeServices) RegisterCleanup(ctx context.Context, argv []string, desc
 
 func (s *routeServices) ReleaseCleanup(ctx context.Context, id string) error {
 	return s.call(ctx, "DELETE", "/node/v1/cleanups/"+routeSegment(id), nil, nil)
+}
+
+type secretClassKey struct{}
+
+// WithSecretClass identifies the requested value classification for host enforcement.
+func WithSecretClass(ctx context.Context, variable bool) context.Context {
+	return context.WithValue(ctx, secretClassKey{}, variable)
+}
+
+// SecretIsVariable reports which classification the client requested.
+func SecretIsVariable(ctx context.Context) bool {
+	variable, _ := ctx.Value(secretClassKey{}).(bool)
+	return variable
 }

@@ -8,7 +8,7 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"slices"
+	"runtime"
 	"sync"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
@@ -255,7 +255,7 @@ func (s *server) negotiate(req nodeproto.Request) {
 		return
 	}
 	s.hello = &req
-	s.reply(req.ID, nodeproto.HelloResult{Protocol: nodeproto.Version, SDK: nodeproto.SDKIdentity{Language: "go", Version: s.cfg.SDKVersion}, Features: []string{}}, nil)
+	s.reply(req.ID, nodeproto.HelloResult{Protocol: nodeproto.Version, SDK: nodeproto.SDKIdentity{Language: "go", Version: s.cfg.SDKVersion}}, nil)
 }
 
 func (s *server) execute(ctx context.Context, req nodeproto.Request, rc nodeproto.RunContext) (result any, err error) {
@@ -271,8 +271,7 @@ func (s *server) execute(ctx context.Context, req nodeproto.Request, rc nodeprot
 	if req.Op == nodeproto.OpPlan || req.Op == nodeproto.OpDescribe {
 		services.binding = nil
 	}
-	ctx = WithHostFeatures(ctx, s.hello.Features)
-	if services.binding != nil && slices.Contains(s.hello.Features, nodeproto.FeatureHostExec) {
+	if services.binding != nil && runtime.GOOS != "windows" {
 		ctx = WithHostExec(ctx, s.hostExec)
 	}
 	ctx = s.cfg.Operations.Context(ctx, rc, *s.hello.Runner, services)

@@ -3,174 +3,17 @@ package sparkwing
 import (
 	"context"
 	"errors"
-	"fmt"
-	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
-	"sync"
 	"testing"
-	"time"
+
+	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
+	"github.com/sparkwing-dev/sparkwing/internal/sdkserve"
 )
 
-func TestSh_Success(t *testing.T) {
-	logger := &recordingLogger{}
-	ctx := withTestLogger(context.Background(), logger)
-
-	res, err := Bash(ctx, "echo hello-world").Run()
-	if err != nil {
-		t.Fatalf("Sh: %v", err)
-	}
-	if res.ExitCode != 0 {
-		t.Fatalf("ExitCode = %d, want 0", res.ExitCode)
-	}
-	if !strings.Contains(res.Stdout, "hello-world") {
-		t.Fatalf("Stdout missing echo: %q", res.Stdout)
-	}
-	if len(logger.lines) == 0 {
-		t.Fatal("logger saw no lines")
-	}
-}
-
-func TestSh_FailureProducesExecError(t *testing.T) {
-	ctx := withTestLogger(context.Background(), &recordingLogger{})
-	_, err := Bash(ctx, "exit 7").Run()
-	if err == nil {
-		t.Fatal("expected error on non-zero exit")
-	}
-	var ee *ExecError
-	if !errors.As(err, &ee) {
-		t.Fatalf("error is not *ExecError: %T", err)
-	}
-	if ee.ExitCode != 7 {
-		t.Fatalf("ExitCode = %d, want 7", ee.ExitCode)
-	}
-}
-
-func TestCmd_DirRunsInDir(t *testing.T) {
-	dir := t.TempDir()
-	want := writeDirectoryMarker(t, dir)
-	res, err := Bash(t.Context(), "cat sparkwing-directory-marker").Dir(dir).Run()
-	if err != nil {
-		t.Fatalf("read marker: %v", err)
-	}
-	if got := strings.TrimSpace(res.Stdout); got != want {
-		t.Fatalf("directory marker = %q, want %q", got, want)
-	}
-}
-
-func TestCmd_EnvMapInjectsEnv(t *testing.T) {
-	res, err := Exec(context.Background(), "sh", "-c", "echo $SPARKWING_TEST_VAR").
-		EnvMap(map[string]string{"SPARKWING_TEST_VAR": "xyz"}).
-		Run()
-	if err != nil {
-		t.Fatalf("Run: %v", err)
-	}
-	if !strings.Contains(res.Stdout, "xyz") {
-		t.Fatalf("env var not propagated: %q", res.Stdout)
-	}
-}
-
-func TestCmd_ContextEnvInheritedByExecAndOverriddenByExplicitEnv(t *testing.T) {
-	ctx := WithCommandEnv(context.Background(), map[string]string{
-		"SPARKWING_TEST_VAR":  "context-value",
-		"SPARKWING_OTHER_VAR": "other-value",
-		"SPARKWING_EMPTY_KEY": "kept",
-		"":                    "dropped",
-	})
-	res, err := Exec(ctx, "sh", "-c", "printf '%s/%s' \"$SPARKWING_TEST_VAR\" \"$SPARKWING_OTHER_VAR\"").
-		Env("SPARKWING_TEST_VAR", "explicit-value").
-		Run()
-	if err != nil {
-		t.Fatalf("Run: %v", err)
-	}
-	if got := strings.TrimSpace(res.Stdout); got != "explicit-value/other-value" {
-		t.Fatalf("stdout = %q, want explicit override plus inherited context env", got)
-	}
-}
-
-func TestCmd_EnvSingle(t *testing.T) {
-	ctx := withTestLogger(context.Background(), &recordingLogger{})
-	res, err := Bash(ctx, "echo $SPARKWING_TEST_VAR").
-		Env("SPARKWING_TEST_VAR", "shval").
-		Run()
-	if err != nil {
-		t.Fatalf("Run: %v", err)
-	}
-	if !strings.Contains(res.Stdout, "shval") {
-		t.Fatalf("env var not propagated: %q", res.Stdout)
-	}
-}
-
-func TestBash_RunsBashOnlyFeatures(t *testing.T) {
-	ctx := withTestLogger(context.Background(), &recordingLogger{})
-	res, err := Bash(ctx, `if [[ "abc" == a* ]]; then echo matched; fi`).Run()
-	if err != nil {
-		t.Fatalf("Bash: %v", err)
-	}
-	if !strings.Contains(res.Stdout, "matched") {
-		t.Fatalf("Bash output missing match: %q", res.Stdout)
-	}
-}
-
-func TestExec_ConcurrentCommandsKeepTheirOwnStdout(t *testing.T) {
-	const (
-		workers  = 16
-		perGroup = 16
-	)
-	dir := t.TempDir()
-	var wg sync.WaitGroup
-	failures := make(chan string, workers*perGroup)
-	for w := range workers {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-
-			ctx := withTestLogger(context.Background(), &recordingLogger{})
-			for i := range perGroup {
-				want := fmt.Sprintf("marker-%d-%d", w, i)
-				res, err := Exec(ctx, "sh", "-c", "echo "+want).Dir(dir).Capture()
-				if err != nil {
-					failures <- fmt.Sprintf("%s: Capture: %v", want, err)
-					continue
-				}
-				if !strings.Contains(res.Stdout, want) {
-					failures <- fmt.Sprintf("%s: stdout = %q, want the command's own output", want, res.Stdout)
-				}
-			}
-		}()
-	}
-	wg.Wait()
-	close(failures)
-
-	var lost []string
-	for f := range failures {
-		lost = append(lost, f)
-	}
-	if len(lost) > 0 {
-		t.Fatalf("%d of %d concurrent commands lost their output; first: %s",
-			len(lost), workers*perGroup, lost[0])
-	}
-}
-
-func TestBash_DirRunsInDir(t *testing.T) {
-	dir := t.TempDir()
-	want := writeDirectoryMarker(t, dir)
-	res, err := Bash(t.Context(), "cat sparkwing-directory-marker").Dir(dir).Run()
-	if err != nil {
-		t.Fatalf("read marker: %v", err)
-	}
-	if got := strings.TrimSpace(res.Stdout); got != want {
-		t.Fatalf("directory marker = %q, want %q", got, want)
-	}
-}
-
 func TestExecError_MessageIncludesCommandAndOutput(t *testing.T) {
-	ctx := withTestLogger(context.Background(), &recordingLogger{})
-	_, err := Bash(ctx, "echo problem-one >&2 ; exit 1").Run()
-	if err == nil {
-		t.Fatal("expected error")
-	}
+	err := &ExecError{Command: "echo problem-one >&2 ; exit 1", Stderr: "problem-one", ExitCode: 1}
 	msg := err.Error()
 	if !strings.Contains(msg, "exit 1") {
 		t.Fatalf("error missing exit: %q", msg)
@@ -197,67 +40,6 @@ func TestExecError_MessageCapsALongCommandAndKeepsTheField(t *testing.T) {
 	}
 }
 
-func TestBash_EnvInjects(t *testing.T) {
-	ctx := withTestLogger(context.Background(), &recordingLogger{})
-	res, err := Bash(ctx, `if [[ -n "$SPARKWING_TEST_VAR" ]]; then echo got-$SPARKWING_TEST_VAR; fi`).
-		Env("SPARKWING_TEST_VAR", "bashval").
-		Run()
-	if err != nil {
-		t.Fatalf("Bash: %v", err)
-	}
-	if !strings.Contains(res.Stdout, "got-bashval") {
-		t.Fatalf("env var not propagated through bash: %q", res.Stdout)
-	}
-}
-
-func TestCmd_DirMissingRendersStartFailure(t *testing.T) {
-	ctx := withTestLogger(context.Background(), &recordingLogger{})
-	bogus := filepath.Join(t.TempDir(), "does-not-exist")
-	_, err := Bash(ctx, "true").Dir(bogus).Run()
-	if err == nil {
-		t.Fatal("expected error for missing dir")
-	}
-	var ee *ExecError
-	if !errors.As(err, &ee) {
-		t.Fatalf("error is not *ExecError: %T", err)
-	}
-	if ee.ExitCode != ExitNotStarted {
-		t.Fatalf("ExitCode = %d, want ExitNotStarted (%d)", ee.ExitCode, ExitNotStarted)
-	}
-	msg := err.Error()
-	if strings.Contains(msg, "exit 0") {
-		t.Fatalf("error must not pretend exit 0 for chdir failure: %q", msg)
-	}
-	if !strings.Contains(msg, "command failed to start") {
-		t.Fatalf("missing failed-to-start prefix: %q", msg)
-	}
-	if !strings.Contains(msg, "does-not-exist") {
-		t.Fatalf("missing dir name in cause: %q", msg)
-	}
-}
-
-func TestExec_MissingBinaryRendersStartFailure(t *testing.T) {
-	ctx := withTestLogger(context.Background(), &recordingLogger{})
-	_, err := Exec(ctx, "sparkwing-bogus-binary-xyz").Run()
-	if err == nil {
-		t.Fatal("expected error for missing binary")
-	}
-	var ee *ExecError
-	if !errors.As(err, &ee) {
-		t.Fatalf("error is not *ExecError: %T", err)
-	}
-	if ee.ExitCode != ExitNotStarted {
-		t.Fatalf("ExitCode = %d, want ExitNotStarted (%d)", ee.ExitCode, ExitNotStarted)
-	}
-	msg := err.Error()
-	if strings.Contains(msg, "exit 0") {
-		t.Fatalf("error must not pretend exit 0: %q", msg)
-	}
-	if !strings.Contains(msg, "command failed to start") {
-		t.Fatalf("missing failed-to-start prefix: %q", msg)
-	}
-}
-
 func TestExecError_TerminatedRendersSignalNotStartFailure(t *testing.T) {
 	e := &ExecError{
 		Command:    "go test ./...",
@@ -275,168 +57,34 @@ func TestExecError_TerminatedRendersSignalNotStartFailure(t *testing.T) {
 	}
 }
 
-func TestExec_CancellationKillReadsAsTerminatedNotFailedToStart(t *testing.T) {
-	marker := filepath.Join(t.TempDir(), "started")
-	ctx := withTestLogger(context.Background(), &recordingLogger{})
-	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
-	var err error
-	done := make(chan struct{})
-	go func() {
-		if runtime.GOOS == "windows" {
-			_, err = Exec(ctx, os.Args[0], "-test.run=^TestExec_WindowsCancellationHelper$").Env("SPARKWING_EXEC_READY", marker).Run() //nolint:contextcheck // safety: Exec stores ctx; Run takes no context argument.
-		} else {
-			_, err = Bash(ctx, fmt.Sprintf("printf ready > %q; sleep 30", marker)).Run() //nolint:contextcheck // safety: Bash stores ctx; Run takes no context argument.
-		}
-		close(done)
-	}()
-	t.Cleanup(func() {
-		cancel()
-		select {
-		case <-done:
-		case <-time.After(2 * time.Second):
-			t.Error("cancelled command did not stop during cleanup")
-		}
+func TestCommandRelaysArgumentsEnvironmentAndCapture(t *testing.T) {
+	var got nodeproto.ExecRequest
+	ctx := sdkserve.WithHostExec(t.Context(), func(_ context.Context, req nodeproto.ExecRequest) (sdkserve.HostExecResult, error) {
+		got = req
+		return sdkserve.HostExecResult{Done: nodeproto.ExecDone{ExitCode: 0}, Stdout: []byte("one\ntwo\n")}, nil
 	})
-	ticker := time.NewTicker(10 * time.Millisecond)
-	defer ticker.Stop()
-	for {
-		if _, statErr := os.Stat(marker); statErr == nil {
-			break
-		} else if !os.IsNotExist(statErr) {
-			t.Fatalf("readiness marker: %v", statErr)
-		}
-		select {
-		case <-ticker.C:
-		case <-done:
-			t.Fatalf("command exited before readiness: %v", err)
-		case <-ctx.Done():
-			t.Fatal("command did not publish its readiness marker")
+	lines, err := Exec(ctx, "sh", "-c", "ignored").Dir("sub").Env("CLIENT_ENV", "value").Lines()
+	if err != nil || len(lines) != 2 || lines[1] != "two" {
+		t.Fatalf("result=%v error=%v", lines, err)
+	}
+	if !got.Capture || got.Dir != filepath.Join(WorkDir(), "sub") || len(got.Argv) != 3 {
+		t.Fatalf("request=%+v", got)
+	}
+	found := false
+	for _, entry := range got.Env {
+		if entry == "CLIENT_ENV=value" {
+			found = true
 		}
 	}
-	cancel()
-	select {
-	case <-done:
-	case <-time.After(2 * time.Second):
-		t.Fatal("cancelled command did not stop")
-	}
-	if err == nil {
-		t.Fatal("expected error for a cancelled command")
-	}
-	var ee *ExecError
-	if !errors.As(err, &ee) {
-		t.Fatalf("error is not *ExecError: %T", err)
-	}
-	if ee.Terminated != "cancellation" {
-		t.Fatalf("Terminated = %q, want cancellation", ee.Terminated)
-	}
-	msg := err.Error()
-	if strings.Contains(msg, "command failed to start") {
-		t.Fatalf("a killed-mid-run command must not read as a start failure: %q", msg)
-	}
-	if !strings.Contains(msg, "command terminated by cancellation") {
-		t.Fatalf("want cancellation wording: %q", msg)
-	}
-	if runtime.GOOS != "windows" && !strings.Contains(msg, "signal: killed") {
-		t.Fatalf("want the underlying signal in the message: %q", msg)
+	if !found {
+		t.Fatal("environment missing")
 	}
 }
-
-func TestCmd_AbsoluteDirPassesThrough(t *testing.T) {
-	other := t.TempDir()
-	want := writeDirectoryMarker(t, other)
-	res, err := Bash(t.Context(), "cat sparkwing-directory-marker").Dir(other).Run()
-	if err != nil {
-		t.Fatalf("read absolute directory marker: %v", err)
+func TestUnixCommandRequiresHost(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows owns command execution")
 	}
-	if got := strings.TrimSpace(res.Stdout); got != want {
-		t.Fatalf("absolute directory marker = %q, want %q", got, want)
-	}
-}
-
-func writeDirectoryMarker(t *testing.T, dir string) string {
-	t.Helper()
-	want := t.Name()
-	if err := os.WriteFile(filepath.Join(dir, "sparkwing-directory-marker"), []byte(want), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	return want
-}
-
-func TestCmd_StringTrimsStdout(t *testing.T) {
-	ctx := withTestLogger(context.Background(), &recordingLogger{})
-	out, err := Bash(ctx, "printf 'hello\\n\\n'").String()
-	if err != nil {
-		t.Fatalf("String: %v", err)
-	}
-	if out != "hello" {
-		t.Fatalf("String() = %q, want %q", out, "hello")
-	}
-}
-
-func TestCmd_LinesSplitsAndDropsBlanks(t *testing.T) {
-	ctx := withTestLogger(context.Background(), &recordingLogger{})
-	lines, err := Bash(ctx, `printf 'a\n\nb\n  c  \n'`).Lines()
-	if err != nil {
-		t.Fatalf("Lines: %v", err)
-	}
-	want := []string{"a", "b", "c"}
-	if len(lines) != len(want) {
-		t.Fatalf("Lines() = %v, want %v", lines, want)
-	}
-	for i := range want {
-		if lines[i] != want[i] {
-			t.Fatalf("Lines()[%d] = %q, want %q", i, lines[i], want[i])
-		}
-	}
-}
-
-func TestCmd_JSONDecodes(t *testing.T) {
-	ctx := withTestLogger(context.Background(), &recordingLogger{})
-	var got struct {
-		Items []string `json:"items"`
-	}
-	err := Bash(ctx, `printf '{"items":["a","b"]}'`).JSON(&got)
-	if err != nil {
-		t.Fatalf("JSON: %v", err)
-	}
-	if len(got.Items) != 2 || got.Items[0] != "a" || got.Items[1] != "b" {
-		t.Fatalf("decoded = %+v", got)
-	}
-}
-
-func TestCmd_JSONFailurePreservesExecError(t *testing.T) {
-	ctx := withTestLogger(context.Background(), &recordingLogger{})
-	var dst map[string]any
-	err := Bash(ctx, "exit 11").JSON(&dst)
-	if err == nil {
-		t.Fatal("expected error")
-	}
-	var ee *ExecError
-	if !errors.As(err, &ee) {
-		t.Fatalf("err is not *ExecError: %T", err)
-	}
-	if ee.ExitCode != 11 {
-		t.Fatalf("ExitCode = %d, want 11", ee.ExitCode)
-	}
-}
-
-func TestCmd_MustBeEmptyHappyPath(t *testing.T) {
-	ctx := withTestLogger(context.Background(), &recordingLogger{})
-	if err := Bash(ctx, "true").MustBeEmpty("should be quiet"); err != nil {
-		t.Fatalf("MustBeEmpty: %v", err)
-	}
-}
-
-func TestCmd_MustBeEmptyFlagsOutput(t *testing.T) {
-	ctx := withTestLogger(context.Background(), &recordingLogger{})
-	err := Bash(ctx, "echo offending-file.go").MustBeEmpty("formatting drift")
-	if err == nil {
-		t.Fatal("expected error for non-empty stdout")
-	}
-	if !strings.Contains(err.Error(), "formatting drift") {
-		t.Fatalf("missing reason: %q", err)
-	}
-	if !strings.Contains(err.Error(), "offending-file.go") {
-		t.Fatalf("missing offending stdout: %q", err)
+	if _, err := Exec(t.Context(), "sh", "-c", "exit 0").Run(); err == nil {
+		t.Fatal("command ran without a host")
 	}
 }

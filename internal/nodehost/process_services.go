@@ -15,6 +15,8 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
+	"github.com/sparkwing-dev/sparkwing/internal/hosthelpers"
+	helperruntime "github.com/sparkwing-dev/sparkwing/internal/hosthelpers/runtime"
 	"github.com/sparkwing-dev/sparkwing/internal/limits"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
@@ -53,6 +55,7 @@ func RegisterProcessServices(router ProcessEndpointRegistrar, resolve func(conte
 		return errors.New("process services require policy router and live resolver")
 	}
 	for _, route := range []struct{ method, path string }{
+		{http.MethodPost, "/node/v1/helpers"},
 		{http.MethodPost, "/node/v1/masks"},
 		{http.MethodPost, "/node/v1/annotations"},
 		{http.MethodPost, "/node/v1/summary"},
@@ -182,6 +185,30 @@ func serviceEvidence(request *http.Request, pattern string) (capability.RequestE
 
 func (s *ProcessServices) serve(request *http.Request, auth capability.Authorized, path string) (any, int, error) {
 	switch path {
+	case "/node/v1/helpers":
+		var body nodeproto.HelperRequest
+		if err := decodeService(request, &body); err != nil {
+			return nil, 0, err
+		}
+		ctx := request.Context()
+		if s.Cleanups != nil {
+			cleanupCtx := helperruntime.WithEnvironment(ctx, body.Dir, body.Env)
+			ctx = helperruntime.WithCleanups(ctx, s.Cleanups.register, func(id string) error { return s.Cleanups.finish(cleanupCtx, id) })
+		}
+		if body.Operation == "docker.Login" {
+			var args []json.RawMessage
+			if json.Unmarshal(body.Args, &args) == nil && len(args) == 3 {
+				var secret string
+				if json.Unmarshal(args[2], &secret) == nil {
+					if err := s.Masks.registerValue(secret); err != nil {
+						return nil, 0, err
+					}
+				}
+			}
+		}
+		response := hosthelpers.Run(ctx, body)
+		response.Error = s.Masks.mask(response.Error)
+		return response, http.StatusOK, nil
 	case "/node/v1/masks", "/node/v1/annotations", "/node/v1/summary":
 		return nodeproto.ServiceAcknowledged{}, http.StatusOK, s.write(request, auth, path)
 	case "/node/v1/cleanups":

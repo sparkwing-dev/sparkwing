@@ -2,14 +2,13 @@ package nodehost
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"os"
 	"os/exec"
-	"path/filepath"
-	"strings"
 	"sync"
 	"time"
 
@@ -121,13 +120,10 @@ func runHostCommand(req nodeproto.ExecRequest, kill, closed <-chan struct{}, sin
 		done.StartError = fmt.Sprintf("dir %q: not a directory", req.Dir)
 		return done, nil
 	}
-	path := req.Path
-	if path == "" {
-		var err error
-		if path, err = lookCommand(req.Argv[0], req.Env, req.Dir); err != nil {
-			done.StartError, done.NotFound = err.Error(), errors.Is(err, exec.ErrNotFound)
-			return done, nil
-		}
+	path, err := procenv.LookupCommand(req.Argv[0], req.Env, req.Dir)
+	if err != nil {
+		done.StartError, done.NotFound = err.Error(), errors.Is(err, exec.ErrNotFound)
+		return done, nil
 	}
 	outR, outW, err := os.Pipe()
 	if err != nil {
@@ -164,7 +160,7 @@ func runHostCommand(req nodeproto.ExecRequest, kill, closed <-chan struct{}, sin
 	default:
 	}
 	err = cmd.Start()
-	if err != nil && req.Path == "" && execFormatError(err) {
+	if err != nil && execFormatError(err) {
 		// hack: Node's spawn runs a file without #! through /bin/sh, as execvp does; Go SDKs send path and keep the error.
 		cmd = command("/bin/sh", "/bin/sh", append([]string{path}, req.Argv[1:]...))
 		err = cmd.Start()
@@ -286,44 +282,17 @@ func (t *commandTail) bytes() []byte {
 	return t.data
 }
 
-// hack: Go SDKs send the path they resolved, so this follows Node's spawn: env PATH, relative entries against dir.
-func lookCommand(name string, env []string, dir string) (string, error) {
-	if strings.Contains(name, string(filepath.Separator)) {
-		return name, nil
-	}
-	path, set := "", false
-	for _, entry := range env {
-		if value, ok := strings.CutPrefix(entry, "PATH="); ok {
-			path, set = value, true
-		}
-	}
-	if !set {
-		path = defaultSearchPath
-	}
-	entries := filepath.SplitList(path)
-	if path == "" {
-		entries = []string{""}
-	}
-	for _, entry := range entries {
-		if entry == "" {
-			entry = "."
-		}
-		candidate := filepath.Join(entry, name)
-		if !filepath.IsAbs(candidate) {
-			candidate = filepath.Join(dir, candidate)
-		}
-		if info, err := os.Stat(candidate); err == nil && !info.IsDir() && info.Mode()&0o111 != 0 {
-			return candidate, nil
-		}
-	}
-	return "", &exec.Error{Name: name, Err: exec.ErrNotFound}
-}
-
-// hack: glibc's _CS_PATH, which execvp searches when PATH is unset.
-const defaultSearchPath = "/bin:/usr/bin"
-
 func closeFiles(files ...io.Closer) {
 	for _, f := range files {
 		_ = f.Close()
 	}
+}
+
+// ExecuteCommand runs a command for an in-process SDK host and joins its process tree.
+func ExecuteCommand(ctx context.Context, req nodeproto.ExecRequest, sink func(string, []byte, bool) error) nodeproto.ExecDone {
+	done, session := runHostCommand(req, ctx.Done(), ctx.Done(), sink)
+	if session != nil {
+		_ = endCommandSessions([]*commandSession{session})
+	}
+	return done
 }

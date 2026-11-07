@@ -1,31 +1,11 @@
-// Package docker provides build, push, login, and container helpers using
-// the Docker CLI and buildx bundled in Sparkwing Cloud.
-//
-// Free functions, (T, error) returns, no must-variants. Shell-outs
-// are context-aware so cancellation and deadlines propagate. Secrets
-// pass via stdin, never argv.
-//
-// Leaf package: the only allowed sparkwing import is the sibling
-// sparkwing/git subpackage. No registry provider is baked in;
-// opinionated flows (ECR login, kind-load shortcuts) live in
-// downstream libraries.
 package docker
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
-	"fmt"
 	"io"
-	"log"
 	"os"
-	"os/exec"
-	"path/filepath"
-	"regexp"
-	"strings"
 
-	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 	"github.com/sparkwing-dev/sparkwing/internal/sdkserve"
 )
 
@@ -48,320 +28,70 @@ var ErrPlatformUnsupported = errors.New("docker: requested platform not supporte
 // BuildConfig configures a Docker image build and optional push.
 type BuildConfig struct {
 	// Image is the image name without registry prefix (e.g. "myapp").
-	Image string
+	Image string `json:"image"`
 	// Dockerfile is the path to the Dockerfile. Defaults to "Dockerfile".
-	Dockerfile string
+	Dockerfile string `json:"dockerfile"`
 	// Context is the build context directory. Defaults to ".".
-	Context string
+	Context string `json:"context"`
 	// Platforms is the list of target platforms (e.g.
 	// ["linux/amd64", "linux/arm64"]). Empty means local-arch
 	// single-platform build via plain `docker build`. Non-empty
 	// switches to `docker buildx build` and requires buildx.
-	Platforms []string
+	Platforms []string `json:"platforms"`
 	// Registries is the list of registries to push to. Empty means
 	// local build only, no push.
-	Registries []string
+	Registries []string `json:"registries"`
 	// Tags is the list of tags to apply (and push when registries are
 	// set). At least one tag is required.
-	Tags []string
+	Tags []string `json:"tags"`
 	// BuildArgs are passed via --build-arg KEY=VAL.
-	BuildArgs map[string]string
+	BuildArgs map[string]string `json:"buildArgs"`
 	// Labels are passed via --label KEY=VAL.
-	Labels map[string]string
+	Labels map[string]string `json:"labels"`
 }
 
 // BuildResult is returned by Build / BuildAndPush.
 type BuildResult struct {
 	// Image is the fully-qualified image name pushed to the first
 	// registry (if any), otherwise the local image reference.
-	Image string
+	Image string `json:"image"`
 	// Digests maps each pushed "<registry>/<image>:<tag>" reference to
 	// its pushed digest, when one could be resolved. Populated by
 	// BuildAndPush and Push only.
-	Digests map[string]string
+	Digests map[string]string `json:"digests"`
 	// Registries is the list of registries successfully pushed to.
-	Registries []string
+	Registries []string `json:"registries"`
 }
 
 // Build runs `docker build` (or `docker buildx build` when Platforms
 // is non-empty) and applies the tags locally. It does not push.
 func Build(ctx context.Context, cfg BuildConfig) (BuildResult, error) {
-	sdkserve.RequireExecution(ctx, "docker.Build")
-	return build(ctx, cfg, false)
+	var result BuildResult
+	err := sdkserve.Helper(ctx, "docker.Build", []any{cfg}, &result)
+	return result, err
 }
 
 // BuildAndPush builds the image (same rules as Build) and pushes it
 // to every configured registry. For multi-platform builds, buildx
 // handles push in-line via --push.
 func BuildAndPush(ctx context.Context, cfg BuildConfig) (BuildResult, error) {
-	sdkserve.RequireExecution(ctx, "docker.BuildAndPush")
-	return build(ctx, cfg, true)
-}
-
-func build(ctx context.Context, cfg BuildConfig, push bool) (BuildResult, error) {
-	if err := ensureDocker(); err != nil {
-		return BuildResult{}, err
-	}
-	if cfg.Image == "" {
-		return BuildResult{}, errors.New("docker: BuildConfig.Image is required")
-	}
-	if len(cfg.Tags) == 0 {
-		return BuildResult{}, errors.New("docker: BuildConfig.Tags must have at least one entry")
-	}
-	if cfg.Dockerfile == "" {
-		cfg.Dockerfile = "Dockerfile"
-	}
-	if cfg.Context == "" {
-		cfg.Context = "."
-	}
-
-	multiPlatform := len(cfg.Platforms) > 0
-	if multiPlatform {
-		if !buildxAvailable(ctx) {
-			return BuildResult{}, ErrBuildxRequired
-		}
-		if advertised, err := BuildxPlatforms(ctx); err == nil && len(advertised) > 0 {
-			var missing []string
-			for _, p := range cfg.Platforms {
-				if !platformAdvertised(p, advertised) {
-					missing = append(missing, p)
-				}
-			}
-			if len(missing) > 0 {
-				return BuildResult{}, fmt.Errorf("%w: %v not in builder's advertised platforms %v; install QEMU emulation (e.g. `docker run --privileged --rm tonistiigi/binfmt --install all`) or trim BuildConfig.Platforms",
-					ErrPlatformUnsupported, missing, advertised)
-			}
-		}
-	}
-
-	localRefs := make([]string, 0, len(cfg.Tags))
-	for _, t := range cfg.Tags {
-		localRefs = append(localRefs, fmt.Sprintf("%s:%s", cfg.Image, t))
-	}
-
-	remoteRefs := make([]string, 0, len(cfg.Registries)*len(cfg.Tags))
-	for _, reg := range cfg.Registries {
-		for _, t := range cfg.Tags {
-			remoteRefs = append(remoteRefs, fmt.Sprintf("%s/%s:%s", reg, cfg.Image, t))
-		}
-	}
-
-	var args []string
-	if multiPlatform {
-		args = append(args, "buildx", "build", "--platform", strings.Join(cfg.Platforms, ","))
-		if push && len(cfg.Registries) > 0 {
-			args = append(args, "--push")
-		} else if len(cfg.Platforms) == 1 {
-			// hack: buildx cannot --load multi-platform images; single-platform only.
-			args = append(args, "--load")
-		}
-	} else {
-		args = append(args, "build")
-	}
-
-	args = append(args, "-f", cfg.Dockerfile)
-
-	// hack: in multi-platform push mode, bare image:tag resolves to docker.io (no credentials); omit local refs.
-	includeLocal := !(multiPlatform && push && len(cfg.Registries) > 0)
-	if includeLocal {
-		for _, t := range localRefs {
-			args = append(args, "-t", t)
-		}
-	}
-	if multiPlatform {
-		for _, r := range remoteRefs {
-			args = append(args, "-t", r)
-		}
-	}
-
-	for k, v := range cfg.BuildArgs {
-		args = append(args, "--build-arg", fmt.Sprintf("%s=%s", k, v))
-	}
-	for k, v := range cfg.Labels {
-		args = append(args, "--label", fmt.Sprintf("%s=%s", k, v))
-	}
-
-	args = append(args, cfg.Context)
-
-	metadataPath := ""
-	if multiPlatform && push && len(remoteRefs) > 0 {
-		if dir, err := os.MkdirTemp("", "sparkwing-push-"); err == nil {
-			defer func() {
-				if err := os.RemoveAll(dir); err != nil {
-					log.Printf("remove Docker push metadata: %v", err)
-				}
-			}()
-			metadataPath = filepath.Join(dir, "metadata.json")
-			args = append(args[:len(args)-1], "--metadata-file", metadataPath, cfg.Context)
-		}
-	}
-	if _, err := runDocker(ctx, nil, args...); err != nil {
-		return BuildResult{}, fmt.Errorf("docker build: %w", err)
-	}
-
-	result := BuildResult{
-		Image:   firstOrEmpty(localRefs),
-		Digests: map[string]string{},
-	}
-
-	if !push || len(cfg.Registries) == 0 {
-		return result, nil
-	}
-
-	if multiPlatform {
-		if data, err := os.ReadFile(metadataPath); err == nil {
-			var metadata struct {
-				Digest string `json:"containerimage.digest"`
-			}
-			if json.Unmarshal(data, &metadata) == nil && manifestDigestPattern.MatchString(metadata.Digest) {
-				for _, ref := range remoteRefs {
-					result.Digests[ref] = metadata.Digest
-				}
-			}
-		}
-		result.Registries = append(result.Registries, cfg.Registries...)
-		if len(remoteRefs) > 0 {
-			result.Image = remoteRefs[0]
-		}
-		return result, nil
-	}
-
-	primaryLocal := localRefs[0]
-
-	var pushed []string
-	var errs []error
-	pushedRegistries := map[string]struct{}{}
-
-	for _, reg := range cfg.Registries {
-		regSucceeded := true
-		for _, t := range cfg.Tags {
-			remote := fmt.Sprintf("%s/%s:%s", reg, cfg.Image, t)
-			if _, err := runDocker(ctx, nil, "tag", primaryLocal, remote); err != nil {
-				errs = append(errs, fmt.Errorf("docker tag %s -> %s: %w", primaryLocal, remote, err))
-				regSucceeded = false
-				continue
-			}
-			output, err := runDocker(ctx, nil, "push", remote)
-			if err != nil {
-				errs = append(errs, fmt.Errorf("docker push %s: %w", remote, err))
-				regSucceeded = false
-				continue
-			}
-			if digest := pushedManifestDigest(output, t); digest != "" {
-				result.Digests[remote] = digest
-			}
-			pushed = append(pushed, remote)
-		}
-		if regSucceeded {
-			pushedRegistries[reg] = struct{}{}
-		}
-	}
-
-	for _, reg := range cfg.Registries {
-		if _, ok := pushedRegistries[reg]; ok {
-			result.Registries = append(result.Registries, reg)
-		}
-	}
-	if len(pushed) > 0 {
-		result.Image = pushed[0]
-	}
-	if err := errors.Join(errs...); err != nil {
-		return result, err
-	}
-	return result, nil
-}
-
-var manifestDigestPattern = regexp.MustCompile(`^sha256:[a-f0-9]{64}$`)
-
-func pushedManifestDigest(output, tag string) string {
-	pattern := regexp.MustCompile(`(?m)^` + regexp.QuoteMeta(tag) + `: digest: (sha256:[a-f0-9]{64}) size: [0-9]+\s*$`)
-	digest := ""
-	for _, match := range pattern.FindAllStringSubmatch(output, -1) {
-		if digest != "" && digest != match[1] {
-			return ""
-		}
-		digest = match[1]
-	}
-	return digest
+	var result BuildResult
+	err := sdkserve.Helper(ctx, "docker.BuildAndPush", []any{cfg}, &result)
+	return result, err
 }
 
 // Push tags and pushes the given local `image` reference to each
 // registry with every requested tag. Best-effort: a single registry
 // failure does not abort the rest; errors are joined.
 func Push(ctx context.Context, image string, tags, registries []string) error {
-	sdkserve.RequireExecution(ctx, "docker.Push")
-	if err := ensureDocker(); err != nil {
-		return err
-	}
-	if image == "" {
-		return errors.New("docker: Push image is required")
-	}
-	if len(tags) == 0 {
-		return errors.New("docker: Push requires at least one tag")
-	}
-	if len(registries) == 0 {
-		return errors.New("docker: Push requires at least one registry")
-	}
-
-	base := image
-	if i := strings.LastIndex(image, ":"); i > strings.LastIndex(image, "/") {
-		base = image[:i]
-	}
-
-	var errs []error
-	for _, reg := range registries {
-		for _, t := range tags {
-			remote := fmt.Sprintf("%s/%s:%s", reg, base, t)
-			if _, err := runDocker(ctx, nil, "tag", image, remote); err != nil {
-				errs = append(errs, fmt.Errorf("docker tag %s -> %s: %w", image, remote, err))
-				continue
-			}
-			if _, err := runDocker(ctx, nil, "push", remote); err != nil {
-				errs = append(errs, fmt.Errorf("docker push %s: %w", remote, err))
-				continue
-			}
-		}
-	}
-	return errors.Join(errs...)
+	return sdkserve.Helper(ctx, "docker.Push", []any{image, tags, registries}, nil)
 }
 
 // Login authenticates docker with the given registry. The secret is
 // piped via stdin to `docker login --password-stdin`, never placed on
 // the command line.
 func Login(ctx context.Context, registry, username, secret string) error {
-	sdkserve.RequireExecution(ctx, "docker.Login")
-	if err := ensureDocker(); err != nil {
-		return err
-	}
-	if registry == "" {
-		return errors.New("docker: Login registry is required")
-	}
-	if username == "" {
-		return errors.New("docker: Login username is required")
-	}
-	if secret == "" {
-		return errors.New("docker: Login secret is required")
-	}
-
-	args := []string{"login", "--username", username, "--password-stdin", registry}
-	if _, err := runDocker(ctx, strings.NewReader(secret), args...); err != nil {
-		return fmt.Errorf("docker login %s: %w", registry, err)
-	}
-	return nil
-}
-
-func ensureDocker() error {
-	if _, err := exec.LookPath("docker"); err != nil {
-		return ErrDockerUnavailable
-	}
-	return nil
-}
-
-func buildxAvailable(ctx context.Context) bool {
-	cmd := procenv.HostCommandContext(ctx, "docker", "buildx", "version")
-	cmd.Stdout = io.Discard
-	cmd.Stderr = io.Discard
-	return cmd.Run() == nil
+	return sdkserve.Helper(ctx, "docker.Login", []any{registry, username, secret}, nil)
 }
 
 // BuildxPlatforms returns the list of platforms the active buildx
@@ -372,18 +102,9 @@ func buildxAvailable(ctx context.Context) bool {
 // Returns ErrDockerUnavailable when docker is not on PATH and
 // ErrBuildxRequired when the buildx plugin is missing.
 func BuildxPlatforms(ctx context.Context) ([]string, error) {
-	sdkserve.RequireExecution(ctx, "docker.BuildxPlatforms")
-	if err := ensureDocker(); err != nil {
-		return nil, err
-	}
-	if !buildxAvailable(ctx) {
-		return nil, ErrBuildxRequired
-	}
-	out, err := runDocker(ctx, nil, "buildx", "inspect")
-	if err != nil {
-		return nil, fmt.Errorf("docker buildx inspect: %w", err)
-	}
-	return parseBuildxPlatforms(out), nil
+	var result []string
+	err := sdkserve.Helper(ctx, "docker.BuildxPlatforms", []any{}, &result)
+	return result, err
 }
 
 // FilterBuildxPlatforms returns the subset of `wish` that the active
@@ -392,78 +113,140 @@ func BuildxPlatforms(ctx context.Context) ([]string, error) {
 // any "linux/amd64/<variant>" entry. Order is preserved relative to
 // `wish`. Returns the same errors as BuildxPlatforms.
 func FilterBuildxPlatforms(ctx context.Context, wish []string) ([]string, error) {
-	sdkserve.RequireExecution(ctx, "docker.FilterBuildxPlatforms")
-	if len(wish) == 0 {
-		return nil, nil
-	}
-	advertised, err := BuildxPlatforms(ctx)
-	if err != nil {
-		return nil, err
-	}
-	out := make([]string, 0, len(wish))
-	for _, w := range wish {
-		if platformAdvertised(w, advertised) {
-			out = append(out, w)
-		}
-	}
-	return out, nil
+	var result []string
+	err := sdkserve.Helper(ctx, "docker.FilterBuildxPlatforms", []any{wish}, &result)
+	return result, err
 }
 
-func parseBuildxPlatforms(raw string) []string {
-	seen := map[string]struct{}{}
-	var out []string
-	for _, line := range strings.Split(raw, "\n") {
-		line = strings.TrimSpace(line)
-		if !strings.HasPrefix(line, "Platforms:") {
-			continue
-		}
-		rest := strings.TrimSpace(strings.TrimPrefix(line, "Platforms:"))
-		for _, entry := range strings.Split(rest, ",") {
-			entry = strings.TrimSpace(entry)
-			entry = strings.TrimSuffix(entry, "*")
-			if entry == "" {
-				continue
-			}
-			if _, ok := seen[entry]; ok {
-				continue
-			}
-			seen[entry] = struct{}{}
-			out = append(out, entry)
-		}
-	}
-	return out
+// RunOptions configures a one-shot container invocation. The intended
+// use is to execute a command in some language toolchain (npm, ruby,
+// python, ...) without baking that toolchain into the runner image.
+//
+// Cross-environment safe: never relies on bind mounts, so it works
+// under DinD. Inputs and outputs travel over the docker API via
+// `docker cp`.
+type RunOptions struct {
+	// Image is the container image (e.g. "node:22-alpine"). Required.
+	Image string `json:"image"`
+	// Cmd is the command + args to run inside the container. When
+	// empty, the image's default CMD runs.
+	Cmd []string `json:"cmd"`
+	// WorkDir is the working directory inside the container. Defaults
+	// to "/work". InputDir's contents land here when InputDir is set.
+	WorkDir string `json:"workDir"`
+	// Env adds environment variables to the container.
+	Env map[string]string `json:"env"`
+	// User overrides the container user ("uid:gid" or "uid"). Empty
+	// uses the image's default user. Named cache volumes often
+	// require the image's default user to write, so override with
+	// care.
+	User string `json:"user"`
+	// InputDir is a local directory whose contents are copied into the
+	// container at WorkDir before Cmd runs. Empty means no inputs are
+	// copied (the container starts with whatever the image provides).
+	InputDir string `json:"inputDir"`
+	// OutputDir is a path inside the container whose contents are
+	// extracted after Cmd exits successfully. Empty means no outputs
+	// are pulled. If the path does not exist after Cmd, Run returns an
+	// error rather than silently producing an empty OutputTo.
+	OutputDir string `json:"outputDir"`
+	// OutputTo is the local destination directory for OutputDir's
+	// contents. Created if missing. Required when OutputDir is set.
+	// Existing files at OutputTo are NOT cleared first; the caller
+	// owns staging.
+	OutputTo string `json:"outputTo"`
+	// Volumes maps named docker volumes to mount paths inside the
+	// container, e.g. {"sparkwing-npm-cache": "/root/.npm"}. Use named
+	// volumes (not host paths) so the same code works under DinD.
+	Volumes map[string]string `json:"volumes"`
+	// Stdout / Stderr receive the container's output during start.
+	// Default os.Stdout / os.Stderr.
+	Stdout io.Writer `json:"-"`
+	Stderr io.Writer `json:"-"`
 }
 
-func platformAdvertised(wish string, advertised []string) bool {
-	for _, a := range advertised {
-		if a == wish || strings.HasPrefix(a, wish+"/") {
-			return true
-		}
+// Run executes Opts.Cmd inside a one-shot Opts.Image container. The
+// flow is:
+//
+//  1. docker pull <image>          (checks the registry on every call)
+//  2. docker create ...            (named container, returns id)
+//  3. docker cp <inputDir>/. <id>:<workDir>/   (when InputDir set)
+//  4. docker start -a <id>         (streams stdout/stderr)
+//  5. docker cp <id>:<outputDir>/. <outputTo>/ (when OutputDir set)
+//  6. docker rm <id>               (always; even on error)
+//
+// The docker daemon at DOCKER_HOST need not share a filesystem with
+// the caller; all I/O moves through the docker API.
+func Run(ctx context.Context, opts RunOptions) error {
+	var out struct{ Stdout, Stderr string }
+	err := sdkserve.Helper(ctx, "docker.Run", []any{opts}, &out)
+	stdout, stderr := opts.Stdout, opts.Stderr
+	if stdout == nil {
+		stdout = os.Stdout
 	}
-	return false
+	if stderr == nil {
+		stderr = os.Stderr
+	}
+	_, outErr := io.WriteString(stdout, out.Stdout)
+	_, errErr := io.WriteString(stderr, out.Stderr)
+	return errors.Join(err, outErr, errErr)
 }
 
-func runDocker(ctx context.Context, stdin io.Reader, args ...string) (string, error) {
-	cmd := procenv.HostCommandContext(ctx, "docker", args...)
-	if stdin != nil {
-		cmd.Stdin = stdin
-	}
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
-	if err := cmd.Run(); err != nil {
-		msg := strings.TrimSpace(stderr.String())
-		if msg == "" {
-			return "", fmt.Errorf("docker %s: %w", strings.Join(args, " "), err)
-		}
-		return "", fmt.Errorf("docker %s: %w: %s", strings.Join(args, " "), err, msg)
-	}
-	return stdout.String(), nil
+// ImageTag holds the deterministic image-tag components for a single
+// build: short commit SHA, content hash of the build's fileset, and a
+// dirty bit. The same tag format is consumed by every deploy path
+// (kind, gitops, ECR) so a tag's shape alone identifies the build
+// inputs.
+//
+// Branch is a separate readable label; it isn't part of DeployTag /
+// ProdTag (those stay content-addressed).
+type ImageTag struct {
+	Commit  string
+	Content string `json:"content"`
+	Branch  string
+	Dirty   bool
 }
 
-func firstOrEmpty(ss []string) string {
-	if len(ss) == 0 {
-		return ""
+// DeployTag is the canonical content-addressed tag applied to every
+// build. Format: commit-<sha>-files-<hash>[-dirty], so a tag names the
+// commit, the content hash and whether the tree was dirty; a clean commit
+// always produces the same tag across re-runs.
+func (t ImageTag) DeployTag() string {
+	tag := "commit-" + t.Commit + "-files-" + t.Content
+	if t.Dirty {
+		tag += "-dirty"
 	}
-	return ss[0]
+	return tag
+}
+
+// ProdTag is the gitops-consumed tag: DeployTag with a "-prod"
+// suffix, so kind and prod gitops flows don't collide on the same
+// digest in image-hash bookkeeping.
+func (t ImageTag) ProdTag() string {
+	return t.DeployTag() + "-prod"
+}
+
+// All returns every tag a build pipeline should apply: DeployTag plus
+// ProdTag. Pushing both lets kind callers resolve by DeployTag and
+// prod gitops resolve by ProdTag without re-tagging at deploy time.
+func (t ImageTag) All() []string {
+	return []string{t.DeployTag(), t.ProdTag()}
+}
+
+// ComputeTags reads the git repo state at the process CWD and
+// returns an ImageTag describing it. Not running inside a git repo
+// is a hard error. Pipelines that operate on a sibling clone use
+// ComputeTagsIn instead.
+func ComputeTags(ctx context.Context) (ImageTag, error) {
+	var result ImageTag
+	err := sdkserve.Helper(ctx, "docker.ComputeTags", []any{}, &result)
+	return result, err
+}
+
+// ComputeTagsIn reads the git repo state in repoDir and returns an
+// ImageTag describing it. Empty repoDir falls back to process CWD.
+func ComputeTagsIn(ctx context.Context, repoDir string) (ImageTag, error) {
+	var result ImageTag
+	err := sdkserve.Helper(ctx, "docker.ComputeTagsIn", []any{repoDir}, &result)
+	return result, err
 }

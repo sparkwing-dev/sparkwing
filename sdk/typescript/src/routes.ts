@@ -8,7 +8,7 @@ export interface ProcessRoutes {
   bearer: string;
 }
 export interface HostServices {
-  secret(name: string, signal: AbortSignal): Promise<string>;
+  secret(name: string, signal: AbortSignal, variable?: boolean): Promise<string>;
   output<T>(job: string, signal: AbortSignal): Promise<T | undefined>;
   latest<T>(ref: PipelineRef<T>, signal: AbortSignal): Promise<T>;
   annotate(annotation: Annotation, signal: AbortSignal, step?: string): Promise<void>;
@@ -20,6 +20,12 @@ export interface HostServices {
 }
 
 export class NodeRoutes implements HostServices {
+ async helper(operation: string, args: readonly unknown[], dir: string, signal: AbortSignal, environment: readonly string[]): Promise<unknown> {
+ const data=await this.#request("POST","/node/v1/helpers",signal,{operation,args,dir,env:environment});
+ if(data.error)throw Object.assign(new Error(String(data.error)),{code:data.code,result:data.result});
+ return data.result;
+ }
+
   readonly #base: string;
   readonly #bearer: string;
   readonly #fetch: typeof fetch;
@@ -78,8 +84,8 @@ export class NodeRoutes implements HostServices {
     if (!response.ok) throw decodeError(data.error);
     return data;
   }
-  async secret(name: string, signal: AbortSignal): Promise<string> {
-    const data = await this.#request("GET", `/node/v1/secrets/${encodeURIComponent(name)}`, signal);
+  async secret(name: string, signal: AbortSignal, variable?: boolean): Promise<string> {
+    const data = await this.#request("GET", `/node/v1/secrets/${encodeURIComponent(name)}${variable?"?variable=true":""}`, signal);
     if (typeof data.value !== "string") throw failure("protocol_error", "secret response requires a string value");
     return data.value;
   }

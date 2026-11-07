@@ -94,7 +94,7 @@ The Go module pipeline authors import:
 
 - **[`sparkwing/`](./sparkwing)** -- the stable user-facing DSL: Plan,
   Job, Work, Step, modifiers, runtime helpers (`sparkwing.Bash`,
-  `sparkwing.Path`, etc.), wire types. This is the package with
+  `sparkwing.Exec`, etc.), wire types. This is the package with
   stability guarantees.
 - **Other `pkg/` packages** -- `pkg/backends`, `pkg/match`,
   `pkg/wingwire` and the rest. Exported

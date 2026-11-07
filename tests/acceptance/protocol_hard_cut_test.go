@@ -44,9 +44,7 @@ func testGoSDKVersionAndHardCut(t *testing.T) {
 		sendProtocolProbe(t, process, additive)
 		var negotiated nodeproto.HelloResult
 		decodeProtocolProbe(t, protocolProbeReply(t, process, "hello"), &negotiated)
-		if negotiated.Features == nil {
-			t.Fatal("SDK omitted its optional feature advertisement")
-		}
+
 		sendProtocolProbe(t, process, map[string]any{"id": "removed", "op": "run_node", "job": "probe"})
 		reply := protocolProbeReply(t, process, "removed")
 		requireProtocolCode(t, reply, apierr.UnknownOp)

@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"io"
 	"reflect"
-	"runtime"
 	"slices"
 	"time"
 
@@ -17,7 +16,7 @@ import (
 // Version is checked once in hello; documents and HTTP headers carry no protocol version.
 const Version = 2
 
-// Op keeps the complete launch operation vocabulary separate from optional hello features.
+// Op keeps the complete launch operation vocabulary separate from requests.
 type Op string
 
 // OpHello through OpCancel name the supported protocol operations.
@@ -50,23 +49,6 @@ type Request struct {
 	Input    json.RawMessage   `json:"input,omitempty"`
 	// Target identifies the active request cancelled by OpCancel, including eval without job/step.
 	Target string `json:"target,omitempty"`
-	// Features names the optional plan declarations and services this host accepts. Hello only; an
-	// SDK leaves a declaration the host does not name out of the plan, so an older host still
-	// accepts it, and uses a service only when the host names it.
-	Features []string `json:"features,omitempty"`
-}
-
-// FeatureJobCores is the hello feature for a job's declared core request.
-const FeatureJobCores = "job_cores"
-
-// HostFeatures lists the optional plan declarations and services this host accepts.
-// Host exec needs Unix sessions to kill a command's whole tree, so Windows hosts leave
-// commands to the SDK.
-func HostFeatures() []string {
-	if runtime.GOOS == "windows" {
-		return []string{FeatureJobCores}
-	}
-	return []string{FeatureJobCores, FeatureHostExec}
 }
 
 // EngineIdentity permits actionable mismatch diagnostics without stamping every request.
@@ -94,11 +76,10 @@ type ProcessRoutes struct {
 	Bearer string `json:"bearer"`
 }
 
-// HelloResult advertises optional operations so additive protocol changes need no major bump.
+// HelloResult identifies the current SDK protocol.
 type HelloResult struct {
 	Protocol int         `json:"protocol"`
 	SDK      SDKIdentity `json:"sdk"`
-	Features []string    `json:"features"`
 }
 
 // SDKIdentity lets a mismatch name the package that must be rebuilt or upgraded.
@@ -265,10 +246,10 @@ func ParseFrame(line []byte) (Frame, error) {
 // OperationFields names the request fields an operation must carry and may carry, by JSON name.
 type OperationFields struct{ Required, Allowed []string }
 
-var requestFieldNames = []string{"protocol", "engine", "runner", "binding", "features", "pipeline", "args", "run", "job", "step", "attempt", "settled", "failure", "closure", "input", "target"}
+var requestFieldNames = []string{"protocol", "engine", "runner", "binding", "pipeline", "args", "run", "job", "step", "attempt", "settled", "failure", "closure", "input", "target"}
 
 var requestFieldRules = map[Op]OperationFields{
-	OpHello:    {[]string{"protocol", "engine", "runner"}, []string{"protocol", "engine", "runner", "binding", "features"}},
+	OpHello:    {[]string{"protocol", "engine", "runner"}, []string{"protocol", "engine", "runner", "binding"}},
 	OpDescribe: {},
 	OpPlan:     {[]string{"pipeline", "args", "run"}, []string{"pipeline", "args", "run"}},
 	OpRunStep:  {[]string{"job", "step", "attempt", "settled"}, []string{"args", "job", "step", "attempt", "settled", "failure"}},
@@ -288,7 +269,7 @@ func RequestFields(op Op) OperationFields {
 
 func (r Request) fields() map[string]bool {
 	return map[string]bool{
-		"protocol": r.Protocol != 0, "engine": r.Engine != nil, "runner": r.Runner != nil, "binding": r.Binding != nil, "features": r.Features != nil,
+		"protocol": r.Protocol != 0, "engine": r.Engine != nil, "runner": r.Runner != nil, "binding": r.Binding != nil,
 		"pipeline": r.Pipeline != "", "args": r.Args != nil, "run": r.Run != nil, "job": r.Job != "", "step": r.Step != "",
 		"attempt": r.Attempt != 0, "settled": r.Settled != nil, "failure": r.Failure != nil, "closure": r.Closure != "",
 		"input": len(r.Input) != 0, "target": r.Target != "",
@@ -391,7 +372,7 @@ func (r Reply) Decode(result any) error {
 	}
 	switch v := result.(type) {
 	case *HelloResult:
-		if v.Protocol != Version || v.SDK.Language == "" || v.SDK.Version == "" || v.Features == nil {
+		if v.Protocol != Version || v.SDK.Language == "" || v.SDK.Version == "" {
 			return fmt.Errorf("%w: invalid hello result", ErrMalformed)
 		}
 	case *RunResult:

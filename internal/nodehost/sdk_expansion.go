@@ -1,7 +1,6 @@
 package nodehost
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 
@@ -19,13 +18,19 @@ func (h *sdkCode) generate(ctx context.Context, session *executorSession, code N
 		if err != nil {
 			return nil, err
 		}
-		value = bytes.TrimSpace(value)
-		if len(value) == 0 || value[0] != '[' {
-			return nil, executorError(apierr.ProtocolError, "generator must return a jobs array")
+
+		var document map[string]json.RawMessage
+		if err := json.Unmarshal(value, &document); err != nil || document == nil {
+			return nil, executorError(apierr.ProtocolError, "generator must return a plan document")
+		}
+		for key := range document {
+			if key != "jobs" {
+				return nil, executorError(apierr.PlanInvalid, "expansion may declare jobs only")
+			}
 		}
 		var group []json.RawMessage
-		if err := json.Unmarshal(value, &group); err != nil {
-			return nil, executorError(apierr.ProtocolError, "generator returned an invalid jobs array")
+		if err := json.Unmarshal(document["jobs"], &group); err != nil || group == nil {
+			return nil, executorError(apierr.ProtocolError, "generator requires a jobs array")
 		}
 		for _, raw := range group {
 			var member struct {

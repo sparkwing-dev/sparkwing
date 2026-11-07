@@ -40,7 +40,7 @@ func main() {
 		var result any = map[string]any{}
 		switch q.Op {
 		case "hello":
-			result = nodeproto.HelloResult{Protocol: nodeproto.Version, SDK: nodeproto.SDKIdentity{Language: "go", Version: "test"}, Features: []string{}}
+			result = nodeproto.HelloResult{Protocol: nodeproto.Version, SDK: nodeproto.SDKIdentity{Language: "go", Version: "test"}}
 		case "describe":
 			result = map[string]any{"pipelines": []any{map[string]any{"name": "probe", "args": []any{}}}}
 		case "plan":

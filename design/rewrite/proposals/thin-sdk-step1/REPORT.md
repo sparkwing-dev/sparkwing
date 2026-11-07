@@ -1,9 +1,11 @@
+> Historical measurement record. The compatibility fixtures and matrix were removed before launch.
+
 # Historical SDK compatibility evidence
 
 Implemented the direct compatibility matrix for the three released Go modules
 and three npm packages selected independently on 2026-11-05. Both registries
 selected 0.69.2, 0.69.1 and 0.69.0. QA, prerelease and retracted Go releases
-were excluded. The [manifest](../../../../testdata/sdk-compat/manifest.json)
+were excluded. The manifest
 records each artifact checksum, frozen source revision, toolchain contract,
 wire major, advertised capabilities and expected result. Go fixtures have exact
 go.mod/go.sum files without replacements. npm fixtures have exact lockfiles
@@ -82,7 +84,7 @@ authoring measurements and process clocks. [warm.log](warm.log),
 
 ## Shared behavior vectors
 
-[vectors.json](../../../../testdata/sdk-compat/vectors.json) contains 14 vectors.
+vectors.json contains 14 vectors.
 Five execute against every released artifact:
 
 - Callback environment mutation reaches subprocesses in both languages.

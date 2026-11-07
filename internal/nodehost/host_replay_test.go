@@ -141,7 +141,7 @@ func TestGeneratorReplay(t *testing.T) {
 							peer.Groups = []string{"target"}
 						}
 						if mode == "unknown_field" {
-							return json.RawMessage(`[{"id":"peer","groups":["peers"],"unknown":true}]`), nil
+							return json.RawMessage(`{"jobs":[{"id":"peer","groups":["peers"],"unknown":true}]}`), nil
 						}
 						jobs = append(jobs, peer)
 					}
@@ -149,7 +149,7 @@ func TestGeneratorReplay(t *testing.T) {
 				default:
 					return nil, errors.New("unexpected generator")
 				}
-				return json.Marshal(jobs)
+				return json.Marshal(nodeproto.PlanDoc{Jobs: jobs})
 			})
 			executor, err := NewNodeExecutor(ExecutorDependencies{
 				Store: s, Start: func(_ context.Context, in NodeInput, _ ExecutorActivity) (ExecutorProcess, error) {

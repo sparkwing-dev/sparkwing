@@ -31,7 +31,7 @@ func SDKCommand(environment []string, name string, args ...string) *exec.Cmd {
 		key, _, _ := strings.Cut(entry, "=")
 		// perf: every engine credential row shares this prefix, so other names skip the registry scan.
 		if strings.HasPrefix(envKey(key), engineCredentialPrefix) {
-			if row, ok := Lookup(key); ok && row.Class == Credential && row.Owner == "engine" {
+			if row, ok := Lookup(key); ok && (row.Class == Credential || row.Class == Protocol) && row.Owner == "engine" {
 				continue
 			}
 		}

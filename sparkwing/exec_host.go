@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
@@ -20,16 +19,7 @@ func hostExecCmd(ctx context.Context, run sdkserve.HostExecFunc, display, name s
 		env = append(env, key+"="+value)
 	}
 	argv := append([]string{name}, args...)
-	// safety: resolve against this process's PATH, as exec.Command did here, so lookups keep their meaning.
-	path := name
-	if filepath.Base(name) == name {
-		resolved, err := exec.LookPath(name)
-		if err != nil {
-			return ExecResult{Command: display}, &ExecError{Command: display, ExitCode: ExitNotStarted, Cause: err}
-		}
-		path = resolved
-	}
-	reply, err := run(ctx, nodeproto.ExecRequest{Step: stepFromContext(ctx), Path: path, Argv: argv, Dir: dir, Env: env, Capture: isSilent(ctx)})
+	reply, err := run(ctx, nodeproto.ExecRequest{Step: stepFromContext(ctx), Argv: argv, Dir: dir, Env: env, Capture: isSilent(ctx)})
 	if err != nil {
 		return ExecResult{Command: display}, &ExecError{Command: display, ExitCode: ExitNotStarted, Cause: err}
 	}

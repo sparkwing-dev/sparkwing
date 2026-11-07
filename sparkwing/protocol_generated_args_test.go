@@ -69,12 +69,12 @@ func TestGeneratedJobArguments(t *testing.T) {
 				if !result.DeclarationsKnown || len(result.Arguments) == 0 {
 					t.Fatalf("successful expansion did not disclose its arguments: %+v", result)
 				}
-				var children []nodeproto.JobSpec
-				if err := json.Unmarshal(result.Value, &children); err != nil || len(children) == 0 {
+				var document nodeproto.PlanDoc
+				if err := json.Unmarshal(result.Value, &document); err != nil || len(document.Jobs) == 0 {
 					t.Fatalf("generated declarations: %s, %v", result.Value, err)
 				}
 				var child nodeproto.JobSpec
-				for _, member := range children {
+				for _, member := range document.Jobs {
 					if member.ID == "child" {
 						child = member
 					}

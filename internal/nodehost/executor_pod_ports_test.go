@@ -61,7 +61,7 @@ func TestNodeExecutorGeneratedRecoveryUsesRecordedFailure(t *testing.T) {
 		answer := fake.answer
 		fake.answer = func(ctx context.Context, request nodeproto.Request) (any, error) {
 			if request.Op == nodeproto.OpEval && request.Closure == "children" {
-				raw, err := json.Marshal([]nodeproto.JobSpec{job})
+				raw, err := json.Marshal(nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{job}})
 				return nodeproto.EvalResult{Value: raw}, err
 			}
 			if request.Op == nodeproto.OpRunStep {

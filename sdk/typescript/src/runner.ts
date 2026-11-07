@@ -27,6 +27,7 @@ interface Planned {
   definition: PipelineDef;
 }
 interface PendingExec {
+  onOutput?:HostExecRequest["onOutput"];
   stdout: Buffer[];
   stderr: Buffer[];
   capture: boolean;
@@ -58,7 +59,6 @@ class Session {
   readonly #frames: LineSink;
   #done = false;
   #helloSeen = false;
-  #hostFeatures: readonly string[] = [];
   #runner: RunnerInfo | undefined;
   #binding: { run: string; job: string } | undefined;
   #services: HostServices | undefined;
@@ -106,7 +106,7 @@ class Session {
       // safety: keep waiting after a cancel so the result reports how the killed command ended.
       const cancel = () => writeFrame(this.#frames, { exec_cancel: id });
       const release = () => signal.removeEventListener("abort", cancel);
-      this.#execs.set(id, { stdout: [], stderr: [], capture: request.capture, resolve, reject, release });
+      this.#execs.set(id, { stdout: [], stderr: [], capture: request.capture, onOutput:request.onOutput, resolve, reject, release });
       writeFrame(this.#frames, {
         exec: id,
         ...(request.step === undefined ? {} : { step: request.step }),
@@ -125,7 +125,9 @@ class Session {
     if (!pending) throw failure("protocol_error", "host sent output for an unknown command");
     const bytes = (value: unknown) => Buffer.from(typeof value === "string" ? value : "", "base64");
     if (line.exec_output !== undefined) {
-      (line.stream === "stderr" ? pending.stderr : pending.stdout).push(bytes(line.data));
+      const data=bytes(line.data);
+      pending.onOutput?.(String(line.stream),data);
+      (line.stream === "stderr" ? pending.stderr : pending.stdout).push(data);
       return;
     }
     this.#execs.delete(id);
@@ -202,15 +204,11 @@ class Session {
       this.#services = this.#options.services ? this.#options.services(routes) : new NodeRoutes(routes);
     }
     this.#runner = runner;
-    this.#hostFeatures = Array.isArray(req.features) ? [...(req.features as string[])] : [];
     const { version } = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")) as { version: string };
-    return { protocol: 2, sdk: { language: "typescript", version: `v${version}` }, features: [] };
+    return { protocol: 2, sdk: { language: "typescript", version: `v${version}` } };
   }
   // safety: a host older than a declaration refuses the whole plan, so a core request it never named stays out.
-  #forHost(jobs: { cores?: number }[]): void {
-    if (this.#hostFeatures.includes("job_cores")) return;
-    for (const job of jobs) delete job.cores;
-  }
+
   #root(): string {
     return this.#options.root ?? process.cwd();
   }
@@ -264,7 +262,6 @@ class Session {
     if (this.#binding && run.id !== this.#binding.run) throw failure("bad_request", "plan run does not match hello binding");
     await runScope({ phase: "plan", root: this.#root() }, () => definition.plan(plan, run));
     const doc = plan.toDoc();
-    this.#forHost(doc.jobs);
     plan.seal();
     this.#planned = { plan, run, definition };
     return doc;
@@ -307,7 +304,7 @@ class Session {
       definition,
       outputs,
       bodyEnv: env,
-      ...(this.#hostFeatures.includes("host_exec") ? { hostExec: this.#hostExec } : {}),
+      ...(process.platform === "win32" ? {} : { hostExec: this.#hostExec }),
       ...(failureInfo === undefined ? {} : { failure: failureInfo }),
       ...(this.#services === undefined ? {} : { services: this.#services }),
     });
@@ -390,12 +387,11 @@ class Session {
       const generated = new Generated(closure.generator.source, closure.id, plan);
       await closure.fn(generated, req.input ?? null, ctx);
       ctx.signal.throwIfAborted();
-      const jobs = generated.toDoc().jobs;
-      this.#forHost(jobs);
+      const document = generated.toDoc();
       plan.insert(generated);
       this.#generatedArguments.set(closure.id, generated.jobs().flatMap((job) => job.argSpecs().map((spec) => argument(spec, job.id))));
-      this.#generated.set(closure.id, jobs);
-      return jobs;
+      this.#generated.set(closure.id, document);
+      return document;
     }
 
     if (closure.kind === "after_run") {

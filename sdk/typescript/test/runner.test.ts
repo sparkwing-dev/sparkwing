@@ -68,7 +68,7 @@ test("shared nested generation corpus preserves every source group", async () =>
     const planned = await host.send(planRequest);
     const first = await host.send({ id: "first", op: "eval", closure: "source/generate/0", input: null });
     const second = await host.send({ id: "second", op: "eval", closure: "child/generate/0", input: null });
-    const jobs = [...planned.result.jobs, ...first.result.value, ...second.result.value];
+    const jobs = [...planned.result.jobs, ...first.result.value.jobs, ...second.result.value.jobs];
     assert.deepEqual(
       jobs.map((job) => ({ job: job.id, groups: [...job.groups].sort() })),
       vectors.groups,
@@ -97,7 +97,7 @@ test("generated declarations use the frame budget while typed outputs keep their
     const expanded = await host.send({ id: "expand", op: "eval", closure: planned.result.jobs[0].closures.generate[0], input: null });
     assert.equal(expanded.ok, true);
     assert.equal(expanded.result.error, undefined, JSON.stringify(expanded.result.error));
-    assert.equal(expanded.result.value.length, 256);
+    assert.equal(expanded.result.value.jobs.length, 256);
     assert.ok(Buffer.byteLength(JSON.stringify(expanded)) > MAX_OUTPUT_BYTES);
     assert.ok(Buffer.byteLength(JSON.stringify(expanded)) < MAX_FRAME_BYTES);
     const executed = await host.send({ id: "execute", op: "run_step", job: "build", step: "run", attempt: 1, settled: [] });
@@ -410,6 +410,7 @@ test("secrets are lazy and declared, optional absence is narrow, masks are ackno
   const services = fakeServices({
     async secret(name) {
       calls.push(name);
+      if(name==="OTHER")throw new SDKError("undeclared",{code:"forbidden",details:{reason:"secret_undeclared"}});
       if (name === "ABSENT") throw new SDKError("missing", { code: "not_found" });
       return name === "KEY" ? "value" : "west";
     },
@@ -440,7 +441,7 @@ test("secrets are lazy and declared, optional absence is narrow, masks are ackno
     release();
     const result = await pending;
     assert.equal(result.result.output, "done");
-    assert.deepEqual(calls, ["KEY", "REGION", "ABSENT", "annotation", "summary"]);
+    assert.deepEqual(calls, ["KEY", "REGION", "ABSENT", "OTHER", "annotation", "summary"]);
     const record = host.frames.find((frame) => frame.msg === "after mask");
     assert.ok(record);
     assert.equal("job" in record, false);
@@ -495,10 +496,10 @@ test("eval supports predicates, hooks, noMemo and generation from recorded outpu
     }
     assert.deepEqual(called, ["before", "verify", "failed"]);
     const expansion = await host.send({ id: "generate", op: "eval", closure: closures.generate[0], input: "recorded memo output" });
-    assert.equal(expansion.result.value[0].id, "generated");
+    assert.equal(expansion.result.value.jobs[0].id, "generated");
     assert.equal(expansion.result.declarations_known, true);
     assert.deepEqual(expansion.result.arguments, [{ name: "token", type: "[]string", required: false, default: "alpha-secret,beta-secret", secret: true, job_id: "generated" }]);
-    assert.ok(expansion.result.value[0].groups.includes(closures.generate[0]));
+    assert.ok(expansion.result.value.jobs[0].groups.includes(closures.generate[0]));
     const again = await host.send({ id: "again", op: "eval", closure: closures.generate[0], input: "changed" });
     assert.deepEqual(again.result.value, expansion.result.value);
   } finally {
@@ -613,7 +614,7 @@ test("a generated-job process reconstructs from recorded source output without r
       op: "run_step",
       settled: [],
       job: "child",
-      step: expanded.result.value[0].steps[0].id,
+      step: expanded.result.value.jobs[0].steps[0].id,
       attempt: 7,
     });
     assert.deepEqual(result.result.output, { persisted: true });
@@ -742,7 +743,7 @@ test("generator source body env does not leak into the reconstructed child", asy
       op: "run_step",
       settled: [],
       job: "child",
-      step: expanded.result.value[0].steps[0].id,
+      step: expanded.result.value.jobs[0].steps[0].id,
       attempt: 1,
     });
     assert.equal(result.result.output, "absent");
@@ -872,7 +873,7 @@ test("generated argument declarations rely on host preparation", async () => {
     const planned = await host.send(planRequest);
     const expanded = await host.send({ id: "expand", op: "eval", closure: planned.result.jobs[0].closures.generate[0], input: null });
     assert.equal(expanded.result.error, undefined);
-    assert.deepEqual(expanded.result.value[0].arguments, [{ name: "required", type: "string", required: true, job_id: "child" }]);
+    assert.deepEqual(expanded.result.value.jobs[0].arguments, [{ name: "required", type: "string", required: true, job_id: "child" }]);
     const child = await host.send({ id: "child", op: "run_step", args: { required: "prepared-by-host" }, job: "child", step: "run", attempt: 1, settled: [] });
     assert.equal(child.result.outcome, "success");
     assert.equal(child.result.output, "prepared-by-host");
@@ -924,23 +925,7 @@ test("standalone generator returns author error for host sanitization", async ()
   }
 });
 
-test("core requests reach only a host that names job_cores in hello", async () => {
-  resetPipelines();
-  definePipeline({
-    name: "fixture",
-    plan(plan) {
-      plan.job("light", () => null).cores(0.25);
-    },
-  });
-  for (const [features, want] of [
-    [undefined, undefined],
-    [["job_cores"], 0.25],
-  ] as const) {
-    const host = new Host();
-    assert.equal((await host.send(features ? { ...hello, features } : hello)).ok, true);
-    const reply = await host.send(planRequest);
-    assert.equal(reply.ok, true);
-    assert.equal(reply.result.jobs[0].cores, want);
-    await host.close();
-  }
+test("core requests reach the current host",async()=>{
+ resetPipelines();definePipeline({name:"fixture",plan(plan){plan.job("light",()=>null).cores(0.25)}});
+ const host=new Host();assert.equal((await host.send(hello)).ok,true);const reply=await host.send(planRequest);assert.equal(reply.result.jobs[0].cores,0.25);await host.close();
 });

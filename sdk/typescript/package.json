@@ -19,7 +19,7 @@
     "node": ">=22.18"
   },
   "scripts": {
-    "test": "node --test \"test/**/*.test.ts\" \"test/**/*.test.mjs\"",
+    "test": "node --test --test-concurrency=1 --test-concurrency=1 \"test/**/*.test.ts\" \"test/**/*.test.mjs\"",
     "test:native": "go test -p 4 ./test/nativehost -run TestNative",
     "typecheck": "tsc -p tsconfig.json",
     "build": "tsc -p tsconfig.build.json",

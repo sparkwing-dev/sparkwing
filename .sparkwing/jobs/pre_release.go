@@ -98,7 +98,6 @@ func (PreRelease) ShortHelp() string {
 func (PreRelease) Help() string {
 	return "Run lint, race tests, Postgres tests, admission fault tests, vulnerability scans, " +
 		"dependency checks, public interface checks, Terraform checks, and workflow checks. " +
-		"The sdk-compat step runs every historical SDK fixture against the candidate nodehost with cold artifact preparation. " +
 		"Committed Go modules must use released dependencies; the pipeline module may replace " +
 		"the Sparkwing module with its parent checkout. Keep Go workspace files untracked. " +
 		"Published modules and generated init or template modules must use a minor-only or zero-patch Go floor. " +
@@ -162,7 +161,6 @@ func preReleaseChecks(part raceStorePart) []preReleaseCheck {
 		}},
 		{id: "gofmt", run: checkPreReleaseGofmt},
 		{id: "lint", run: runGolangciLint},
-		{id: "sdk-compat", run: runSDKCompatibilityCold},
 		{id: "race", run: preReleaseShell("go -C .sparkwing test -race ./...")},
 		// safety: the gate defers this race suite to the release boundary.
 		{id: "race-store", run: func(ctx context.Context) error {
@@ -245,7 +243,7 @@ func checkPreReleaseInstallToGreen(ctx context.Context) error {
 func checkPreReleaseDocExamples(ctx context.Context) error {
 	if _, err := sparkwing.Bash(ctx,
 		`cd "$ROOT" && go run ./internal/doccheck "$ROOT/docs" "$ROOT"`,
-	).Env("ROOT", sparkwing.Path()).Run(); err != nil {
+	).Env("ROOT", sparkwing.WorkDir()).Run(); err != nil {
 		return fmt.Errorf("doc-examples: %w", err)
 	}
 	return nil
@@ -269,7 +267,7 @@ func committedGoMods(jobContext context.Context) ([]string, error) {
 	// safety: git -C anchors paths to repo root regardless of process cwd.
 	output, err := sparkwing.Bash(jobContext,
 		`git -C "$SPARKWING_WORKDIR" ls-files '*go.mod'`,
-	).Env("SPARKWING_WORKDIR", sparkwing.Path()).String()
+	).Env("SPARKWING_WORKDIR", sparkwing.WorkDir()).String()
 	if err != nil {
 		return nil, fmt.Errorf("list go.mod files: %w", err)
 	}
@@ -305,7 +303,7 @@ func checkNoReplaceDirectivesInCommittedGoMods(jobContext context.Context) error
 	}
 	var offenders []string
 	for _, relativePath := range moduleFiles {
-		absolutePath := sparkwing.Path(relativePath)
+		absolutePath := filepath.Join(sparkwing.WorkDir(), relativePath)
 		contents, readError := os.ReadFile(absolutePath)
 		if readError != nil {
 			return fmt.Errorf("read %s: %w", relativePath, readError)

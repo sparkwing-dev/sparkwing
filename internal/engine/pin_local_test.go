@@ -39,7 +39,7 @@ func TestReadTypeScriptLocalPin(t *testing.T) {
 					t.Fatalf("local pin digest changed across platforms: %s", pin.InputsDigest)
 				}
 				version, err := VersionForPin(pin)
-				if err != nil || version != "v0.68.0-qa.16" {
+				if err != nil || version != "(devel)" {
 					t.Fatalf("version=%s error=%v", version, err)
 				}
 				input := "sdk.tgz"

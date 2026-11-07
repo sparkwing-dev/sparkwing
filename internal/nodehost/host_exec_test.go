@@ -215,12 +215,12 @@ func hostExecCommand(t testing.TB, lang string) []string {
 	return []string{exe, "-test.run=^TestHostExecSDKChild$", "--", "hostexec-sdk"}
 }
 
-func startHostExecHarness(t testing.TB, lang string, features []string, dir string, extraEnv ...string) *hostExecHarness {
+func startHostExecHarness(t testing.TB, lang string, dir string, extraEnv ...string) *hostExecHarness {
 	t.Helper()
-	return startHostExecHarnessWithSink(t, lang, "job", features, dir, nil, extraEnv...)
+	return startHostExecHarnessWithSink(t, lang, "job", dir, nil, extraEnv...)
 }
 
-func startHostExecHarnessWithSink(t testing.TB, lang, job string, features []string, dir string, sink func(context.Context, nodeproto.FrameLog) error, extraEnv ...string) *hostExecHarness {
+func startHostExecHarnessWithSink(t testing.TB, lang, job string, dir string, sink func(context.Context, nodeproto.FrameLog) error, extraEnv ...string) *hostExecHarness {
 	t.Helper()
 	var err error
 	masker := secrets.NewMasker()
@@ -249,7 +249,7 @@ func startHostExecHarnessWithSink(t testing.TB, lang, job string, features []str
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = h.session.Close() })
-	h.call(t, nodeproto.Request{Op: nodeproto.OpHello, Protocol: nodeproto.Version, Engine: &nodeproto.EngineIdentity{Version: "test"}, Runner: &nodeproto.RunnerIdentity{Name: "granted", Type: "local", Labels: []string{}}, Binding: &nodeproto.ProcessBinding{RunID: "r", JobID: job, Routes: nodeproto.ProcessRoutes{URL: "http://127.0.0.1:9", Bearer: "private-test-bearer"}}, Features: features})
+	h.call(t, nodeproto.Request{Op: nodeproto.OpHello, Protocol: nodeproto.Version, Engine: &nodeproto.EngineIdentity{Version: "test"}, Runner: &nodeproto.RunnerIdentity{Name: "granted", Type: "local", Labels: []string{}}, Binding: &nodeproto.ProcessBinding{RunID: "r", JobID: job, Routes: nodeproto.ProcessRoutes{URL: "http://127.0.0.1:9", Bearer: "private-test-bearer"}}})
 	h.call(t, nodeproto.Request{Op: nodeproto.OpPlan, Pipeline: "hostexec", Args: map[string]string{}, Run: &nodeproto.RunContext{RunID: "r", Pipeline: "hostexec"}})
 	return h
 }
@@ -300,20 +300,14 @@ func (h *hostExecHarness) messages(step string) string {
 	return strings.Join(lines, "\n")
 }
 
-// The same SDK must behave the same whether it runs commands itself (an older
-// host) or hands them to a host that offers host_exec.
+// Both language clients exercise the same host command contract.
 func TestHostExecMatchesSDKExecution(t *testing.T) {
 	for _, lang := range []string{"go", "typescript"} {
-		for _, mode := range []struct {
-			name     string
-			features []string
-		}{{"sdk", []string{nodeproto.FeatureJobCores}}, {"host", nodeproto.HostFeatures()}} {
-			t.Run(lang+"/"+mode.name, func(t *testing.T) { checkHostExecScenarios(t, lang, mode.name, mode.features) })
-		}
+		t.Run(lang, func(t *testing.T) { checkHostExecScenarios(t, lang, "host") })
 	}
 }
 
-func checkHostExecScenarios(t *testing.T, lang, mode string, features []string) {
+func checkHostExecScenarios(t *testing.T, lang, mode string) {
 	{
 		{
 			dir := t.TempDir()
@@ -329,7 +323,7 @@ func checkHostExecScenarios(t *testing.T, lang, mode string, features []string) 
 			if err := os.WriteFile(filepath.Join(dir, "bin", "plain"), []byte("echo plain-ran\n"), 0o755); err != nil {
 				t.Fatal(err)
 			}
-			h := startHostExecHarness(t, lang, features, dir)
+			h := startHostExecHarness(t, lang, dir)
 
 			logged := h.step(t, "logged")
 			if logged.Error != "" || logged.Stdout != "line one\n"+hostExecSecret+" two\n" || logged.Stderr != "err text" {
@@ -352,23 +346,19 @@ func checkHostExecScenarios(t *testing.T, lang, mode string, features []string) 
 			if failing := h.step(t, "failing"); failing.Exit != 3 || !strings.Contains(failing.Error, "command failed (exit 3)") || !strings.Contains(failing.Error, "boom") || failing.Terminated != "" {
 				t.Fatalf("failing = %#v", failing)
 			}
-			// safety: SDK-run Go commands pass engine credentials a pipeline sets; TypeScript and the host drop them.
 			wantToken := "unset"
-			if lang == "go" && mode == "sdk" {
-				wantToken = "leak"
-			}
 			if env := h.step(t, "env"); env.Stdout != "from-pipeline|x|"+wantToken {
 				t.Fatalf("env = %#v", env)
 			}
 			if dirResult := h.step(t, "dir"); dirResult.Stdout != filepath.Join(dir, "sub")+"\n" {
 				t.Fatalf("dir = %#v", dirResult)
 			}
-			// safety: Go searches its own PATH, TypeScript the command's, with relative entries against its directory.
-			if lookup := h.step(t, "lookup"); lang == "go" && !lookup.NotFound || lang == "typescript" && lookup.Stdout != "rel-found\n" {
+			// safety: the host resolves both clients against the command environment.
+			if lookup := h.step(t, "lookup"); lookup.Stdout != "rel-found\n" {
 				t.Errorf("lookup = %#v", lookup)
 			}
-			// hack: Node's spawn runs a file without #! through /bin/sh, as execvp does; Go's os/exec refuses it.
-			if plain := h.step(t, "noshebang"); lang == "go" && !strings.Contains(plain.Error, "exec format error") || lang == "typescript" && plain.Stdout != "plain-ran\n" {
+			// hack: executable text follows execvp semantics through the host shell.
+			if plain := h.step(t, "noshebang"); plain.Stdout != "plain-ran\n" {
 				t.Errorf("noshebang = %#v", plain)
 			}
 			if lang == "go" {
@@ -421,7 +411,7 @@ func pidAlive(t *testing.T, path string) (int, bool) {
 // it, but not the SDK session that started it.
 func TestHostExecBackgroundChildEndsWithTheSession(t *testing.T) {
 	dir := t.TempDir()
-	h := startHostExecHarness(t, "go", nodeproto.HostFeatures(), dir)
+	h := startHostExecHarness(t, "go", dir)
 	if background := h.step(t, "background"); background.Error != "" {
 		t.Fatalf("background = %#v", background)
 	}
@@ -450,7 +440,7 @@ func TestHostExecCloseBoundsABlockedLogSink(t *testing.T) {
 		<-ctx.Done()
 		return ctx.Err()
 	}
-	h := startHostExecHarnessWithSink(t, "go", "job", nodeproto.HostFeatures(), t.TempDir(), sink)
+	h := startHostExecHarnessWithSink(t, "go", "job", t.TempDir(), sink)
 	go func() {
 		_, _ = h.session.Request(context.Background(), nodeproto.Request{ID: "logged", Op: nodeproto.OpRunStep, Job: "job", Step: "logged", Attempt: 1, Settled: []string{}})
 	}()

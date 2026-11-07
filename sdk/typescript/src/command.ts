@@ -14,6 +14,7 @@ interface CommandBinding {
   hostExec?: HostExec;
 }
 export interface HostExecRequest {
+  onOutput?:(stream:string,data:Buffer)=>void;
   step?: string;
   argv: readonly string[];
   dir: string;
@@ -74,6 +75,8 @@ function boundedCommand(command: string): string {
 export function registerCommandContext(ctx: Context, emit: Emitter, env: Readonly<Record<string, string>> = {}, hostExec?: HostExec): void {
   bindings.set(ctx, { emit, env: { ...env }, ...(hostExec === undefined ? {} : { hostExec }) });
 }
+
+export function commandEnvironment(ctx:Context):Readonly<Record<string,string>>{return binding(ctx).env}
 
 function binding(ctx: Context): CommandBinding {
   return bindings.get(ctx) ?? { emit: (event, attrs) => ctx.log.info(event, attrs), env: {} };
@@ -166,31 +169,7 @@ export interface CommandOptions extends ExecOptions {
   capture?: boolean;
 }
 
-const protocolEnv = new Set([
-  "SPARKWING_NODE_TOKEN",
-  "SPARKWING_AGENT_TOKEN",
-  "SPARKWING_CACHE_GRANT",
-  "SPARKWING_SOURCE_TOKEN",
-  "SPARKWING_API_TOKEN",
-  "SPARKWING_LEASE_TOKEN",
-  "SPARKWING_SECRETS_KEY",
-  "SPARKWING_SECRETS_PREVIOUS_KEY",
-  "SPARKWING_RELEASE_SIGNING_KEY",
-  "SPARKWING_NODE_URL",
-  "SPARKWING_PROTOCOL_HANDLES",
-  "SPARKWING_CONTROLLER_URL",
-]);
-
-function commandEnv(ctx: Context, options: ExecOptions): NodeJS.ProcessEnv {
-  const env: NodeJS.ProcessEnv = Object.create(null);
-  for (const layer of [process.env, binding(ctx).env, options.env ?? {}]) {
-    for (const [name, value] of Object.entries(layer)) {
-      const key = process.platform === "win32" ? name.toUpperCase() : name;
-      if (!protocolEnv.has(key) && !key.startsWith("SPARKWING_NODE_CLAIM_")) env[key] = value;
-    }
-  }
-  return env;
-}
+function commandEnv(ctx:Context,options:ExecOptions):NodeJS.ProcessEnv{return {...process.env,...binding(ctx).env,...options.env};}
 
 export function runInput(
   ctx: Context,
@@ -214,7 +193,8 @@ export async function runCommand(ctx: Context, argv: readonly [string, ...string
     const cwd = options.cwd !== undefined && isAbsolute(options.cwd) ? options.cwd : resolve(projectRoot(), options.cwd ?? "");
     const hostExec = binding(ctx).hostExec;
     // Output callbacks need the bytes as they arrive, so those commands stay in the SDK.
-    if (hostExec && !options.stdout && !options.stderr) {
+    if (process.platform !== "win32") {
+      if(!hostExec)throw new Error("host command service unavailable");
       const reply = await hostCommand(ctx, hostExec, argv, cwd, options);
       result = { command, stdout: reply.stdout.toString("utf8"), stderr: reply.stderr.toString("utf8"), exitCode: reply.exitCode };
       if (reply.startError !== undefined) {
@@ -258,9 +238,10 @@ function hostCommand(ctx: Context, hostExec: HostExec, argv: readonly string[], 
     {
       ...(ctx.stepId === undefined ? {} : { step: ctx.stepId }),
       argv,
+      onOutput:(stream,data)=>(stream==="stdout"?options.stdout:options.stderr)?.(data),
       dir,
       env,
-      capture: options.capture === true,
+      capture: options.capture === true || !!options.stdout || !!options.stderr,
       ...(options.input === undefined ? {} : { stdin: options.input }),
     },
     ctx.signal,

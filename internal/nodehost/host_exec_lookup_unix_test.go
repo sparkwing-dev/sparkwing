@@ -4,6 +4,7 @@ package nodehost
 
 import (
 	"errors"
+	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -35,11 +36,11 @@ func TestLookCommandMatchesNodeSpawn(t *testing.T) {
 		if test.want == "/bin/sh" {
 			name = "sh"
 		}
-		if got, err := lookCommand(name, test.env, test.dir); err != nil || got != test.want {
+		if got, err := procenv.LookupCommand(name, test.env, test.dir); err != nil || got != test.want {
 			t.Errorf("%s: lookCommand = %q, %v; want %q", label, got, err, test.want)
 		}
 	}
-	if _, err := lookCommand("swlookup", []string{"PATH=/usr/bin"}, dir); !errors.Is(err, exec.ErrNotFound) {
+	if _, err := procenv.LookupCommand("swlookup", []string{"PATH=/usr/bin"}, dir); !errors.Is(err, exec.ErrNotFound) {
 		t.Fatalf("missing command: %v", err)
 	}
 }

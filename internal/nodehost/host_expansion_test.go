@@ -38,9 +38,9 @@ func strictExpansionJobs(mode, closure string) json.RawMessage {
 	}
 	if field, ok := fields[mode]; ok {
 		if closure == "second" {
-			return json.RawMessage(`[]`)
+			return json.RawMessage(`{"jobs":[]}`)
 		}
-		return json.RawMessage(`[{` + field + `"id":"child","groups":["first"],"steps":[{"id":"body"}]}]`)
+		return json.RawMessage(`{"jobs":[{` + field + `"id":"child","groups":["first"],"steps":[{"id":"body"}]}]}`)
 	}
 	if mode != "fan256" && mode != "fan257" {
 		return nil
@@ -55,7 +55,7 @@ func strictExpansionJobs(mode, closure string) json.RawMessage {
 			jobs = append(jobs, nodeproto.JobSpec{ID: fmt.Sprintf("child-%d", i), Groups: []string{"first"}, Steps: []nodeproto.StepSpec{{ID: "body"}}})
 		}
 	}
-	raw, _ := json.Marshal(jobs)
+	raw, _ := json.Marshal(nodeproto.PlanDoc{Jobs: jobs})
 	return raw
 }
 

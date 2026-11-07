@@ -60,7 +60,7 @@ function parseRequest(line: string): Request | HostLine {
   return value as Request;
 }
 const fields: Record<string, readonly string[]> = {
-  hello: ["protocol", "engine", "runner", "binding", "features"],
+  hello: ["protocol", "engine", "runner", "binding"],
   describe: [],
   plan: ["pipeline", "args", "run"],
   run_step: ["args", "job", "step", "attempt", "settled", "failure"],
@@ -82,8 +82,6 @@ export function validateRequest(req: Request): void {
     string(runner.type, "runner.type");
     if (!Array.isArray(runner.labels) || runner.labels.some((v) => typeof v !== "string"))
       throw failure("bad_request", "runner.labels must be strings");
-    if (req.features !== undefined && (!Array.isArray(req.features) || req.features.some((v) => typeof v !== "string")))
-      throw failure("bad_request", "features must be strings");
     if (req.binding !== undefined) {
       const binding = object(req.binding, "binding");
       string(binding.run_id, "binding.run_id");

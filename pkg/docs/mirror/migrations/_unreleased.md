@@ -281,3 +281,27 @@ lookup when the controller cannot resolve it, including older controllers and
 repository-scoped HTTPS source credentials. Without an explicit token, the CLI
 returns the controller's error and makes no anonymous GitHub request.
 No route, wire field or SDK surface is removed.
+
+## Use the current thin SDK contract
+
+Upgrade Go and TypeScript pins together with the host. Historical SDKs and older
+hosts are unsupported. Linux and macOS always execute SDK commands in the host.
+Windows keeps SDK command spawning. Hello carries no feature negotiation, and
+jobs always send their declared core requests.
+
+Git, Docker and sidecar functions keep their typed APIs and send host requests.
+The host owns command construction, filesystem inputs, environment filtering,
+secret classification, resource cleanup and plan validation. Generated jobs send
+a complete declaration so invalid expansion settings reach host validation.
+
+Replace Go `Path`, `ReadFile`, `WriteFile` and `Glob` calls with `path/filepath`
+and `os`. Resolve project-relative paths from `sparkwing.WorkDir()`. Replace the
+TypeScript `path`, `readFile`, `writeFile` and `glob` exports with `node:path` and
+`node:fs/promises`, using `workDir()` for project-relative paths.
+
+Both command clients resolve the command environment's `PATH` in its requested
+working directory. This makes Go respect command-level `PATH` overrides.
+Executable text without a shebang runs through `/bin/sh` on Unix for both SDKs.
+Docker container output callbacks receive their bytes after the helper finishes.
+Local TypeScript `file:` packages select the installed candidate engine, as a Go
+module replacement does. Both paths report that release pinning is disabled.
