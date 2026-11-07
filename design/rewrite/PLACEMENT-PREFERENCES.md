@@ -301,7 +301,7 @@ Sizes: S half a day, M one to two days, L three to five days, tests included.
 - A configuration reader older than these keys refuses a file that uses them.
   Pre-launch, readers get no tolerance for unknown keys (Korey, 2026-11-07):
   upgrade the controller and CLIs before adding the keys. The repository's own
-  pre-release YAML waits on `bw-3095-placement-repo-yaml` until the installed
+  pre-release YAML moves to a separate configuration change after the installed
   CLI is rebuilt.
 - A `github-actions` tier takes only an Actions runner already polling until
   slice 5 adds dispatch. The projection says so.
