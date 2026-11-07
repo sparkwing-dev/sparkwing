@@ -128,8 +128,8 @@ func readRunFailuresTx(ctx context.Context, tx *storeTx, team Team, runID string
 	return readExpansionFailuresTx(ctx, tx, team, runID, failures)
 }
 
-// readExpansionFailuresTx reads a generator's failure from its expansion row rather than the job's
-// result, so a retry reusing the successful generator does not inherit a stale error.
+// safety: reads the expansion row, not the job's result, so a retry reusing the successful generator
+// does not inherit a stale error.
 func readExpansionFailuresTx(ctx context.Context, tx *storeTx, team Team, runID string, failures []RunFailure) ([]RunFailure, error) {
 	rows, err := tx.queryContext(ctx, `SELECT node_id,expansion_failure FROM nodes WHERE team=? AND run_id=? AND expansion='failed' AND error='' AND expansion_failure IS NOT NULL`, team, runID)
 	if err != nil {

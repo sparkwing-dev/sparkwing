@@ -121,7 +121,7 @@ func runDetailResponse(target capability.Target, facts RunStatusFacts) (controll
 		nodes[string(row.Ref.NodeID)] = row
 		job := snapshotJob(row)
 		job.Error = errorsByJob[job.ID]
-		// The generator itself succeeded, so without this its run fails naming a job that reads as green.
+		// hack: the generator itself succeeded, so without this the run fails naming a job that reads as green.
 		if row.Expansion == runstate.ExpansionFailed && job.Reason == "" {
 			job.Reason, job.StatusDetail = store.FailureExpansionFailed, "expansion_failed: the generated jobs were not added"
 		}
@@ -217,8 +217,8 @@ func fillJobDeclarations(jobs []controllerwire.JobDetail, nodes map[string]runst
 			resolved = true
 		}
 		var blocked []string
-		// The scheduler cancels on a failed generated-group barrier before judging ordinary dependencies, and
-		// continue_on_error on the generator does not lift that barrier.
+		// safety: mirrors the scheduler, which cancels on a failed generated-group barrier before ordinary
+		// dependencies, and continue_on_error on the generator does not lift that barrier.
 		for _, group := range generatedNeeds[jobs[i].ID] {
 			source, exists := generators[group]
 			entry := fmt.Sprintf("%q (expansion failed)", source)
