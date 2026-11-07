@@ -22,6 +22,8 @@ unlock.
 
 ### Breaking
 
+- **compatibility (Breaking):** Remove old-controller field-stripping retries, historical hook forwarder exemptions, admission snapshot upgrades, retired configuration diagnostics, and redundant completion columns. Stores older than schema 30 are refused; schemas in use retain their upgrade path. Remove the unused `pkg/backends` package. See [the contract cut](docs/migrations/_unreleased.md#current-contracts-only).
+
 - **controller (Breaking):** The schema baseline advances to version 34, adding a partial index on live child runs for the parent-cancellation sweep. Recognized schema 33 stores upgrade in place. Older binaries refuse the upgraded store. See [the migration guide](docs/migrations/_unreleased.md#upgrade-the-store-in-place-to-schema-baseline-34).
 
 - **local controller (Breaking):** The schema baseline advances to version 33, adding durable runner process identities and lifecycle state. Recognized schema 32 stores upgrade in place. Older binaries refuse the upgraded store. See [the migration guide](docs/migrations/_unreleased.md#upgrade-the-store-in-place-to-schema-baseline-33).

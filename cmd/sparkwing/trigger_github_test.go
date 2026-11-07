@@ -122,7 +122,7 @@ func TestGitHubLookupFallbackRequiresExplicitToken(t *testing.T) {
 		wantFallback, wantSuccess bool
 	}{
 		{"private", `{"error":{"code":"not_found","message":"controller lookup"}}`, "GH_TOKEN=explicit-token", 404, 200, true, true},
-		{"older controller", `{"error":{"code":"unsupported_route","message":"controller lookup"}}`, "GITHUB_TOKEN=explicit-token", 404, 200, true, true},
+		{"unsupported route", `{"error":{"code":"unsupported_route","message":"controller lookup"}}`, "GITHUB_TOKEN=explicit-token", 404, 200, false, false},
 		{"App uncovered cache", `{"error":{"code":"forbidden","message":"controller lookup","details":{"reason":"repository_unauthorized"}}}`, "GH_TOKEN=explicit-token", 403, 200, true, true},
 		{"no token", `{"error":{"code":"not_found","message":"controller lookup"}}`, "GH_TOKEN=", 404, 200, false, false},
 		{"failed fallback", `{"error":{"code":"not_found","message":"controller lookup"}}`, "GH_TOKEN=explicit-token", 404, 404, true, false},

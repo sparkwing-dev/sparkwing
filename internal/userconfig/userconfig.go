@@ -10,14 +10,12 @@ import (
 	"path/filepath"
 	"reflect"
 	"runtime"
-	"slices"
 	"strings"
 
 	"go.yaml.in/yaml/v3"
 
 	"github.com/sparkwing-dev/sparkwing/internal/configguard"
 	"github.com/sparkwing-dev/sparkwing/internal/fssecure"
-	"github.com/sparkwing-dev/sparkwing/pkg/backends"
 )
 
 // Filename is the settings file inside [fssecure.ConfigDir].
@@ -242,8 +240,6 @@ func readFile(path string) ([]byte, error) {
 	return data, nil
 }
 
-var removedSections = []string{"agent", "logs", "fleet", "allow_repos", "dispatch_wait"}
-
 func parseRoot(path string, data []byte) (*yaml.Node, error) {
 	_, root, err := parseDoc(path, data)
 	return root, err
@@ -255,18 +251,6 @@ func parseDoc(path string, data []byte) (*yaml.Node, *yaml.Node, error) {
 	var cfg Config
 	doc, err := DecodeYAML(path, data, &cfg)
 	if err != nil {
-		var field *FieldError
-		if errors.As(err, &field) && field.Problem == "unknown key" && slices.Contains(removedSections, field.Key) {
-			field.Problem = fmt.Sprintf("%s is removed; delete it (see %s)", field.Key, backends.MigrationGuideURL)
-		}
-		if errors.As(err, &field) && field.Problem == "unknown key" && strings.HasPrefix(field.Key, "profiles.") {
-			for _, key := range []string{"state", "secrets", "logs", "cache", "mirror_local"} {
-				if name, ok := strings.CutSuffix(strings.TrimPrefix(field.Key, "profiles."), "."+key); ok {
-					field.Problem = fmt.Sprintf("profile %q: %s is removed; use a controller connection (see %s)", name, key, backends.MigrationGuideURL)
-					break
-				}
-			}
-		}
 		return nil, nil, err
 	}
 	if err := ValidateConfig(cfg); err != nil {

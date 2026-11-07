@@ -23,7 +23,7 @@ func lookupTriggerGitHubID(ctx context.Context, remote, profile string, captured
 		if ctx.Err() != nil || !errors.As(err, &failure) {
 			return 0, err
 		}
-		fallback := failure.Code == apierr.UnsupportedRoute || failure.Code == apierr.NotFound || failure.Code == apierr.RateLimited ||
+		fallback := failure.Code == apierr.NotFound || failure.Code == apierr.RateLimited ||
 			failure.Code == apierr.Forbidden && (failure.Details["reason"] == nil || failure.Details["reason"] == string(apierr.ReasonRepositoryUnauthorized))
 		if !fallback {
 			return 0, err

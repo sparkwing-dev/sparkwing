@@ -46,7 +46,6 @@ type HookObservation struct {
 	Declared       bool   `json:"declared"`
 	Active         bool   `json:"active"`
 	Borrowed       bool   `json:"borrowed"`
-	Forwarder      bool   `json:"forwarder,omitempty"`
 	Error          string `json:"error,omitempty"`
 	Body           string `json:"-"`
 }
@@ -87,7 +86,7 @@ type RepoGates struct {
 func (r RepoGates) NotFiring() []string {
 	var names []string
 	for _, h := range r.Hooks {
-		if !h.Borrowed && !h.Forwarder && (!h.Current() || !h.Active) {
+		if !h.Borrowed && (!h.Current() || !h.Active) {
 			names = append(names, h.Name)
 		}
 	}
@@ -259,7 +258,6 @@ func Survey(git Git, repoRoot string, expected Expectations) RepoGates {
 		default:
 			h.Present, h.Body = true, string(body)
 			h.Managed = strings.Contains(h.Body, Marker)
-			h.Forwarder = !wanted && h.Body == legacyForwarder(name)
 			h.ContentMatches = wanted && h.Body == spec.Content
 			h.VersionMatches = strings.Contains(h.Body, "# "+Marker+" "+Format)
 			info, statErr := os.Stat(path)
@@ -272,8 +270,7 @@ func Survey(git Git, repoRoot string, expected Expectations) RepoGates {
 		if !wanted && !h.Managed && h.Error == "" {
 			continue
 		}
-		// safety: a pre-v0.68 forwarder only execs the global hook, so it stays and does not fail install.
-		h.Required = h.Required || (h.Managed && !wanted && !h.Forwarder)
+		h.Required = h.Required || (h.Managed && !wanted)
 		row.Hooks = append(row.Hooks, h)
 		if h.Declared {
 			row.Declared = append(row.Declared, name)
@@ -313,20 +310,6 @@ func Survey(git Git, repoRoot string, expected Expectations) RepoGates {
 		row.State = GateArmed
 	}
 	return row
-}
-
-// safety: Sparkwing v0.50 through v0.67 wrote exactly this body to chain a global hook it
-// ran no pipeline for; any other marked script that no pipeline declares stays a conflict.
-func legacyForwarder(name string) string {
-	body := "#!/bin/sh\n# " + Marker + " -- do not edit; use `sparkwing pipeline hooks (un)install`\n"
-	if name != "post-commit" {
-		body += "set -e\n"
-	}
-	return body + "global=\"$(git config --global --type=path core.hooksPath 2>/dev/null)\" || exit 0\n" +
-		"[ -n \"$global\" ] || exit 0\n" +
-		"hook=\"$global/" + name + "\"\n" +
-		"[ -x \"$hook\" ] || exit 0\n" +
-		"exec \"$hook\" \"$@\"\n"
 }
 
 func broken(repoRoot string, err error) RepoGates {

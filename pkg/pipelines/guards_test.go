@@ -114,10 +114,3 @@ func TestGuards_EvaluateEmptyIsNoop(t *testing.T) {
 		t.Errorf("empty guards should be a no-op; got %v", err)
 	}
 }
-
-func TestParseGuardToken_ProfileNameIsRemoved(t *testing.T) {
-	_, err := pipelines.ParseGuardToken("where:name=prod")
-	if err == nil || !strings.Contains(err.Error(), "where:name= is removed") {
-		t.Fatalf("where:name=prod = %v, want the removal named", err)
-	}
-}

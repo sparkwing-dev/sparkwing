@@ -204,7 +204,6 @@ func Restore(snap Snapshot, tokenGen func() string) (*Ledger, error) {
 	if snap.TotalMilliCores < 0 || snap.HeadroomMilliCores < 0 || snap.BurstMilliCores < 0 {
 		return nil, fmt.Errorf("%w: negative core capacity", errInvalidSnapshot)
 	}
-	upgradeLegacyAdmitRanks(&snap)
 	scheduling := cloneSchedulingPolicy(snap.Scheduling)
 	if scheduling.Burst.MaxCores == 0 && snap.BurstMilliCores > 0 {
 		scheduling.Burst.MaxCores = float64(snap.BurstMilliCores) / 1000
@@ -254,45 +253,6 @@ func Restore(snap Snapshot, tokenGen func() string) (*Ledger, error) {
 	return l, nil
 }
 
-func upgradeLegacyAdmitRanks(snap *Snapshot) {
-	if !ranklessLegacySnapshot(*snap) {
-		return
-	}
-	sort.Slice(snap.Leases, func(i, j int) bool {
-		return snap.Leases[i].Seq < snap.Leases[j].Seq
-	})
-	for i := range snap.Leases {
-		snap.AdmitSeq++
-		snap.Leases[i].Admit = snap.AdmitSeq
-		snap.Leases[i].OwnerAdmit = snap.AdmitSeq
-	}
-	sort.Slice(snap.Waiters, func(i, j int) bool {
-		return snap.Waiters[i].Arrival < snap.Waiters[j].Arrival
-	})
-	for i := range snap.Waiters {
-		snap.AdmitSeq++
-		snap.Waiters[i].Admit = snap.AdmitSeq
-		snap.Waiters[i].OwnerAdmit = snap.AdmitSeq
-	}
-}
-
-func ranklessLegacySnapshot(snap Snapshot) bool {
-	if snap.AdmitSeq != 0 {
-		return false
-	}
-	for _, lease := range snap.Leases {
-		if lease.Admit != 0 || lease.OwnerAdmit != 0 || lease.OwnerID != "" {
-			return false
-		}
-	}
-	for _, waiter := range snap.Waiters {
-		if waiter.Admit != 0 || waiter.OwnerAdmit != 0 || waiter.OwnerID != "" {
-			return false
-		}
-	}
-	return true
-}
-
 func (l *Ledger) restoreLease(ls LeaseState) error {
 	if ls.ID == "" || ls.Token == "" || ls.RequestID == "" {
 		return fmt.Errorf("%w: lease %q with empty id, token, or request id", errInvalidSnapshot, ls.ID)
@@ -316,15 +276,11 @@ func (l *Ledger) restoreLease(ls LeaseState) error {
 	if err != nil {
 		return fmt.Errorf("%w: lease %s: %v", errInvalidSnapshot, ls.ID, err)
 	}
-	ownerAdmit := ls.OwnerAdmit
-	if ownerAdmit == 0 {
-		ownerAdmit = ls.Admit
-	}
 	le := &lease{
 		seq:         ls.Seq,
 		admit:       ls.Admit,
 		ownerID:     ls.OwnerID,
-		ownerAdmit:  ownerAdmit,
+		ownerAdmit:  ls.OwnerAdmit,
 		id:          ls.ID,
 		token:       ls.Token,
 		requestID:   ls.RequestID,
@@ -370,7 +326,7 @@ func (l *Ledger) restoreLease(ls LeaseState) error {
 			continue
 		}
 		if _, ok := le.parents[child]; !ok {
-			le.parents[child] = ls.RequestID
+			return fmt.Errorf("%w: member %q has no parent", errInvalidSnapshot, child)
 		}
 	}
 	for child := range le.parents {
@@ -434,10 +390,6 @@ func (l *Ledger) restoreWaiter(ws WaiterState) error {
 	if err != nil {
 		return fmt.Errorf("%w: waiter %q: %v", errInvalidSnapshot, ws.RequestID, err)
 	}
-	ownerAdmit := ws.OwnerAdmit
-	if ownerAdmit == 0 {
-		ownerAdmit = ws.Admit
-	}
 	l.waiters = append(l.waiters, &waiter{
 		arrival:         ws.Arrival,
 		backfillCount:   ws.BackfillCount,
@@ -446,7 +398,7 @@ func (l *Ledger) restoreWaiter(ws WaiterState) error {
 			id:            ws.RequestID,
 			admit:         ws.Admit,
 			ownerID:       ws.OwnerID,
-			ownerAdmit:    ownerAdmit,
+			ownerAdmit:    ws.OwnerAdmit,
 			priority:      ws.Priority,
 			class:         normalizeClass(ws.Class),
 			expectedP99MS: max(ws.ExpectedP99MS, 0),
@@ -462,11 +414,8 @@ func (l *Ledger) restoreWaiter(ws WaiterState) error {
 }
 
 func validateStoredOwnerRank(ownerID string, ownerAdmit, admit, admitSeq uint64, subject string) error {
-	if ownerID != "" && ownerAdmit == 0 {
-		return fmt.Errorf("%w: %s has no owner admission", errInvalidSnapshot, subject)
-	}
 	if ownerAdmit == 0 {
-		return nil
+		return fmt.Errorf("%w: %s has no owner admission", errInvalidSnapshot, subject)
 	}
 	if ownerAdmit > admit || ownerAdmit > admitSeq {
 		return fmt.Errorf("%w: %s owner admission %d outside participant admission %d and counter %d",
