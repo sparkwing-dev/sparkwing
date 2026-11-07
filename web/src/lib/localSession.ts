@@ -65,6 +65,7 @@ export function ensureLocalSignIn(): Promise<void> | null {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ code }),
+    signal: AbortSignal.timeout(15_000),
   })
     .then(async (res) => {
       if (!res.ok) {
@@ -81,9 +82,10 @@ export function ensureLocalSignIn(): Promise<void> | null {
       signInFailure = null;
       // A replaced session is revoked best-effort; it would otherwise stay valid until it expires.
       if (previous && previous !== grant.token) {
-        await fetch(LOCAL_LOGOUT_PATH, {
+        void fetch(LOCAL_LOGOUT_PATH, {
           method: "POST",
           headers: { Authorization: `Bearer ${previous}` },
+          signal: AbortSignal.timeout(15_000),
         }).catch(() => undefined);
       }
     })
@@ -122,7 +124,7 @@ export function localAuthHeaders(): Record<string, string> {
 export async function logOutLocal(): Promise<void> {
   const headers = localAuthHeaders();
   if (!headers.Authorization) return;
-  const res = await fetch(LOCAL_LOGOUT_PATH, { method: "POST", headers });
+  const res = await fetch(LOCAL_LOGOUT_PATH, { method: "POST", headers, signal: AbortSignal.timeout(15_000) });
   if (!res.ok && res.status !== 401) {
     throw new Error(`sign-out failed (HTTP ${res.status}); the session is still active`);
   }

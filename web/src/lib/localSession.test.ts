@@ -122,6 +122,25 @@ describe("local sign-in", () => {
     assert.equal(localSignInFailure(), null);
   });
 
+  it("allows authenticated requests while replacement logout is hung", async () => {
+    const { w } = page("#code=fresh");
+    w.localStorage.setItem("sparkwing.localSession", "old");
+    runtime.fetch = async (input, init) => {
+      if (String(input) === "/login") {
+        assert.ok(init?.signal);
+        return Response.json({ token: "new" });
+      }
+      if (String(input) === "/logout") {
+        assert.ok(init?.signal);
+        return new Promise<Response>(() => {});
+      }
+      assert.equal(new Headers(init?.headers).get("Authorization"), "Bearer new");
+      return new Response(null, { status: 204 });
+    };
+    await cancelRun("run-one");
+    assert.equal(localSession(), "new");
+  });
+
   it("ignores a fragment outside the local dashboard", async () => {
     const { replaced } = page("#code=planted", "true");
     let calls = 0;

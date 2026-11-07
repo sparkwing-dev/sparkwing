@@ -475,7 +475,10 @@ a bearer session from a one-time link that `sparkwing dashboard open` mints over
 the socket; no cookie is used. The link works once within 60 seconds, and the
 browser then acts as the socket peer that minted it until 30 days pass since
 sign-in, the session logs out, or the controller restarts. Idle time does not
-expire a session. There is no separate dashboard store. Root and
+expire a session. Sign-in and sign-out bodies are limited to 4 KiB. Dashboard
+request headers and bodies, and browser sign-in and sign-out requests, have
+15-second timeouts. Replacing a session does not wait for the old session
+to sign out. There is no separate dashboard store. Root and
 same-account code remain inside the machine trust boundary. See
 [security](security.md#local-daemon-socket).
 

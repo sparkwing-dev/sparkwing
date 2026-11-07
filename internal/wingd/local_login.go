@@ -7,7 +7,9 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"io"
 	"net/http"
+	"net/url"
 	"strings"
 	"sync"
 	"time"
@@ -67,7 +69,7 @@ func newDashboardLogins(now func() time.Time) *dashboardLogins {
 func (l *dashboardLogins) serving(origin string) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	l.origin = origin
+	l.origin = normalizeDashboardOrigin(origin)
 }
 
 func (l *dashboardLogins) servingOrigin() string {
@@ -162,9 +164,18 @@ func tokenDigest(token string) string {
 	return hex.EncodeToString(sum[:])
 }
 
+func normalizeDashboardOrigin(origin string) string {
+	parsed, err := url.Parse(origin)
+	if err == nil && parsed.Scheme == "http" && parsed.Port() == "80" {
+		parsed.Host = strings.TrimSuffix(parsed.Host, ":80")
+		return parsed.String()
+	}
+	return origin
+}
+
 // safety: the origin guard has already refused a foreign Host, so this is the origin the browser addressed.
 func requestOrigin(r *http.Request) string {
-	return "http://" + r.Host
+	return normalizeDashboardOrigin("http://" + r.Host)
 }
 
 // safety: only the Authorization header authenticates. A browser attaches it from script on this origin alone,
@@ -254,7 +265,7 @@ func (l *dashboardLogins) serveSession(w http.ResponseWriter, r *http.Request, n
 // safety: a cookie-authenticated write must name this dashboard's own origin; a missing, null or foreign Origin is
 // refused, because SameSite alone does not stop another page on the same host.
 func sameDashboardOrigin(r *http.Request) bool {
-	return r.Header.Get("Origin") == requestOrigin(r)
+	return normalizeDashboardOrigin(r.Header.Get("Origin")) == requestOrigin(r)
 }
 
 func unsafeDashboardMethod(method string) bool {
@@ -352,6 +363,10 @@ func (l *dashboardLogins) logout(w http.ResponseWriter, r *http.Request) {
 	}
 	if !sameDashboardOrigin(r) {
 		http.Error(w, "forbidden: sign out from the dashboard's own origin", http.StatusForbidden)
+		return
+	}
+	if _, err := io.Copy(io.Discard, http.MaxBytesReader(w, r.Body, 4096)); err != nil {
+		http.Error(w, "invalid sign-out body", http.StatusBadRequest)
 		return
 	}
 	token, ok := sessionToken(r)

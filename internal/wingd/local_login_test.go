@@ -657,3 +657,96 @@ func TestLocalDashboardForgedBearersLeaveNoWatches(t *testing.T) {
 		t.Fatalf("forged bearers left %d watches", len(logins.watch))
 	}
 }
+
+func TestLocalDashboardDefaultPortOrigins(t *testing.T) {
+	for _, minted := range []string{"http://127.0.0.1", "http://127.0.0.1:80"} {
+		for _, requested := range []string{"http://127.0.0.1", "http://127.0.0.1:80"} {
+			t.Run(minted+"/"+requested, func(t *testing.T) {
+				logins := servingLogins(nil, minted)
+				login, failure := logins.mint(localhostwire.LocalPeerIdentity{})
+				if failure != nil {
+					t.Fatal(failure)
+				}
+				response := exchangeRequest(logins.gate(http.NotFoundHandler(), nil), login.URL, requested)
+				var grant dashboardSessionGrant
+				if response.Code != http.StatusOK || json.Unmarshal(response.Body.Bytes(), &grant) != nil {
+					t.Fatalf("exchange: %d %s", response.Code, response.Body)
+				}
+				request := httptest.NewRequest(http.MethodPost, minted+"/logout", nil)
+				withSessionFrom(grant.Token, requested)(request)
+				response = httptest.NewRecorder()
+				logins.gate(http.NotFoundHandler(), nil).ServeHTTP(response, request)
+				if response.Code != http.StatusNoContent {
+					t.Fatalf("logout: %d %s", response.Code, response.Body)
+				}
+			})
+		}
+	}
+}
+
+func TestLocalDashboardBoundsAuthBodies(t *testing.T) {
+	logins := servingLogins(nil, "http://127.0.0.1:4343")
+	for _, path := range []string{"/login", "/logout"} {
+		request := httptest.NewRequest(http.MethodPost, logins.servingOrigin()+path, strings.NewReader(strings.Repeat(" ", 4097)))
+		withSessionFrom(signInThrough(t, logins), logins.servingOrigin())(request)
+		response := httptest.NewRecorder()
+		logins.gate(http.NotFoundHandler(), nil).ServeHTTP(response, request)
+		if response.Code < 400 {
+			t.Fatalf("%s accepted oversized body: %d", path, response.Code)
+		}
+	}
+}
+
+func TestLocalDashboardSlowAuthDoesNotBlockOtherSessions(t *testing.T) {
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	origin := "http://" + listener.Addr().String()
+	logins := servingLogins(nil, origin)
+	reading := make(chan struct{}, 2)
+	gate := logins.gate(http.NotFoundHandler(), nil)
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		reading <- struct{}{}
+		gate.ServeHTTP(w, r)
+	})
+	ctx, cancel := context.WithCancel(t.Context())
+	done := make(chan error, 1)
+	go func() { done <- serveLocalHTTP(ctx, listener, handler, nil, nil, 200*time.Millisecond) }()
+	defer func() {
+		cancel()
+		if err := <-done; err != nil {
+			t.Error(err)
+		}
+	}()
+	for _, path := range []string{"/login", "/logout"} {
+		connection, err := net.Dial("tcp", listener.Addr().String())
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := connection.SetDeadline(time.Now().Add(2 * time.Second)); err != nil {
+			t.Fatal(err)
+		}
+		_, err = fmt.Fprintf(connection, "POST %s HTTP/1.1\r\nHost: %s\r\nOrigin: %s\r\nContent-Length: 100\r\n\r\n{", path, listener.Addr(), origin)
+		if err != nil {
+			t.Fatal(err)
+		}
+		<-reading
+		session := signInThrough(t, logins)
+		response := httptest.NewRecorder()
+		request := httptest.NewRequest(http.MethodPost, origin+"/logout", nil)
+		withSessionFrom(session, origin)(request)
+		gate.ServeHTTP(response, request)
+		if response.Code != http.StatusNoContent {
+			t.Fatalf("concurrent logout: %d", response.Code)
+		}
+		responseBytes, err := io.ReadAll(connection)
+		connection.Close()
+		if err != nil {
+			t.Fatalf("slow %s was not disconnected: %v", path, err)
+		}
+		if !strings.Contains(string(responseBytes), "400") && !strings.Contains(string(responseBytes), "401") {
+			t.Fatalf("slow %s response: %s", path, responseBytes)
+		}
+	}
+}
