@@ -14,15 +14,18 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 )
 
-// safety: the list only narrows where jobs run, so it is sealed whatever the provenance, a child stays inside
-// the list of the parent job that started it, and any runner pin conflicts with a list rather than one winning.
+// safety: the list only narrows where jobs run, so it is sealed whatever the provenance. A child takes the list of
+// the parent job that started it and never its own, and any runner pin conflicts with a list rather than one winning.
 func sealRepositoryPlacement(input *runspec.Request, own, parent *runspec.RepositoryPlacement, parentJob string, owner GitHubAppRunner) error {
 	if input.Mode != runspec.IntakeExecute {
 		return nil
 	}
-	policy, err := runspec.BindToParent(own, parent, parentJob)
-	if err != nil {
-		return authorityError(apierr.BadRequest, fmt.Sprintf("the placement of child pipeline %s %v; narrow it to tiers its parent allows", input.Pipeline, err))
+	policy := own
+	if parentJob != "" {
+		policy = nil
+		if tiers := parent.ForJob(parentJob); len(tiers) > 0 {
+			policy = &runspec.RepositoryPlacement{Revision: parent.Revision, Prefer: slices.Clone(tiers)}
+		}
 	}
 	if !policy.Active() {
 		return nil

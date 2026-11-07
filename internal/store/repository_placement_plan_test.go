@@ -94,42 +94,32 @@ func TestEmptyRepositoryListSealsNothingAndConflictsWithNothing(t *testing.T) {
 	}
 }
 
-func TestChildPlacementStaysInsideItsParentJobsList(t *testing.T) {
+func TestChildTakesItsParentJobsListAndNeverItsOwn(t *testing.T) {
 	parent := &runspec.RepositoryPlacement{Revision: placementSHA, Prefer: []runspec.RepositoryTier{teamTier(), cloudTier()}, Jobs: []runspec.RepositoryJobPlacement{{Job: "free", Prefer: []runspec.RepositoryTier{}}}}
-	own := func(tiers ...runspec.RepositoryTier) *runspec.RepositoryPlacement {
-		return &runspec.RepositoryPlacement{Revision: strings.Repeat("b", 40), Prefer: tiers}
-	}
+	own := &runspec.RepositoryPlacement{Revision: strings.Repeat("b", 40), Prefer: []runspec.RepositoryTier{teamTier("os=darwin")}}
 	for name, test := range map[string]struct {
 		own       *runspec.RepositoryPlacement
 		parentJob string
-		want      []runspec.RepositoryTier
-		refused   bool
+		want      int
 	}{
-		"no own list inherits the parent job's":   {nil, "build", []runspec.RepositoryTier{teamTier(), cloudTier()}, false},
-		"own list narrows by intersection":        {own(teamTier("os=darwin")), "build", []runspec.RepositoryTier{teamTier("os=darwin")}, false},
-		"own list outside the parent is refused":  {own(runspec.RepositoryTier{Target: runspec.PlacementGitHubActions, Workflow: ".github/workflows/f.yaml", Runner: "ubuntu-latest"}), "build", nil, true},
-		"an unlisted parent job leaves the child": {own(cloudTier()), "free", []runspec.RepositoryTier{cloudTier()}, false},
+		"bound child inherits the parent job's tiers": {nil, "build", 2},
+		"bound child ignores its own list":            {own, "build", 2},
+		"child of an unbound job has no list":         {own, "free", 0},
+		"any parent job without an override binds":    {own, "deploy", 2},
 	} {
 		input := runspec.Request{Mode: runspec.IntakeExecute, Pipeline: "child"}
-		err := sealRepositoryPlacement(&input, test.own, parent, test.parentJob, GitHubAppRunnerAnywhere)
-		if test.refused {
-			if err == nil || !strings.Contains(err.Error(), "shares no tier with parent job build") {
-				t.Errorf("%s: %v", name, err)
-			}
-			continue
+		if err := sealRepositoryPlacement(&input, test.own, parent, test.parentJob, GitHubAppRunnerAnywhere); err != nil {
+			t.Fatalf("%s: %v", name, err)
 		}
-		if err != nil || input.Placement == nil || len(input.Placement.Prefer) != len(test.want) {
-			t.Errorf("%s: %+v %v", name, input.Placement, err)
-			continue
-		}
-		for i, tier := range test.want {
-			got := input.Placement.Prefer[i]
-			if got.Target != tier.Target || strings.Join(got.Labels, ",") != strings.Join(tier.Labels, ",") {
-				t.Errorf("%s: tier %d = %+v, want %+v", name, i, got, tier)
-			}
+		if got := len(input.Placement.ForJob("job")); got != test.want || test.want > 0 && input.Placement.Revision != placementSHA {
+			t.Errorf("%s: %+v, want %d tiers from the parent", name, input.Placement, test.want)
 		}
 	}
-	input := runspec.Request{Mode: runspec.IntakeExecute, Pipeline: "child", Options: runspec.Options{Runner: runspec.Setting[runspec.RunnerSelection]{Optional: runspec.Optional[runspec.RunnerSelection]{Set: true, Value: runspec.RunnerSelection{Kind: runspec.RunnerName, Value: "box"}}}}}
+	input := runspec.Request{Mode: runspec.IntakeExecute, Pipeline: "child"}
+	if err := sealRepositoryPlacement(&input, own, nil, "build", ""); err != nil || input.Placement != nil {
+		t.Fatalf("a child of a run without a list took its own list: %+v %v", input.Placement, err)
+	}
+	input = runspec.Request{Mode: runspec.IntakeExecute, Pipeline: "child", Options: runspec.Options{Runner: runspec.Setting[runspec.RunnerSelection]{Optional: runspec.Optional[runspec.RunnerSelection]{Set: true, Value: runspec.RunnerSelection{Kind: runspec.RunnerName, Value: "box"}}}}}
 	if err := sealRepositoryPlacement(&input, nil, parent, "build", ""); err == nil {
 		t.Fatal("a child's own runner selection escaped its parent's list")
 	}
@@ -159,11 +149,5 @@ func TestChildIntakeIsBoundByItsParentJobsList(t *testing.T) {
 	request.Request.Options.Runner = runspec.Setting[runspec.RunnerSelection]{Optional: runspec.Optional[runspec.RunnerSelection]{Set: true, Value: runspec.RunnerSelection{Kind: runspec.RunnerName, Value: "box"}}}
 	if _, err := tenant.AdmitRun(t.Context(), request); err == nil || !strings.Contains(err.Error(), "runner selection name box") {
 		t.Fatalf("a child runner selection escaped its parent's list: %v", err)
-	}
-	tenant, request = childIntakeFixture(t)
-	bind(t, tenant)
-	request.RepositoryPlacement = &runspec.RepositoryPlacement{Revision: placementSHA, Prefer: []runspec.RepositoryTier{cloudTier()}}
-	if _, err := tenant.AdmitRun(t.Context(), request); err == nil || !strings.Contains(err.Error(), "shares no tier") {
-		t.Fatalf("a child list outside its parent's was admitted: %v", err)
 	}
 }
