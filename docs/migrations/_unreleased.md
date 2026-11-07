@@ -19,6 +19,16 @@ const res = await ctx.exec(["go", "list", "./..."]).capture();
 `String`, `Lines`, `JSON` and `MustBeEmpty` (`string()`, `lines()`, `json()` and
 `mustBeEmpty()`) already capture and need no change.
 
+## Local stores are copied before schema upgrades
+
+A binary that upgrades a local SQLite store first copies it beside the store as
+`state.db.schema-<N>-<YYYYMMDDTHHMMSSZ>.bak`, where N is the schema version it
+upgrades from. Delete old copies yourself when you no longer need to return to
+an older binary; they hold the same encrypted secrets as the store. A failed
+copy refuses the upgrade and leaves the store unchanged. PostgreSQL stores still
+need an operator snapshot before upgrading. See
+[Schema compatibility](../backup-restore.md#schema-compatibility).
+
 ## Upgrade the store in place to schema baseline 34
 
 Schema 34 adds the partial index `idx_runs_live_children` on pending and
@@ -37,8 +47,8 @@ Schema 33 adds `local_runner_instances` to the recognized schema 32 baseline in
 one transaction. It records each runner's claim credential prefix, PID, process
 birth, version, executable SHA-256 and registered, active, draining or stopped
 state. Earlier recognized baselines run their existing upgrades first. Older
-binaries refuse the upgraded store. Retain a backup before upgrading if you
-need to return to an older binary.
+binaries refuse the upgraded store. The upgrade copies a SQLite store first;
+see [Local stores are copied before schema upgrades](#local-stores-are-copied-before-schema-upgrades).
 
 Verified socket peers use `POST /api/v1/local/runners` to register, and
 `GET /api/v1/local/runners/{id}` to read an instance. The optional

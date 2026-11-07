@@ -182,7 +182,13 @@ Restart preserves a stopped controller. An answering controller on the exact
 installed version stays running unless `--force` is selected. Replacement waits
 for shutdown before starting the installed executable with the same home,
 dashboard address. An incomplete drain or unready replacement
-returns an error without a success receipt.
+returns an error without a success receipt. On Linux and macOS, jobs held by the
+local runner keep running through the drain, including jobs waiting on child
+runs, and requests the old controller abandons are retried against its
+replacement. A controller from v0.69.2 or earlier answers abandoned requests as
+internal errors, so restart one of those when no runs are active. A replacement
+that upgrades the store's schema first copies it, as described in
+[Schema compatibility](backup-restore.md#schema-compatibility).
 
 A client reuses a running compatible daemon regardless of release or source-build
 version. A repo-pinned CLI leaves the shared daemon and its active runs running.
