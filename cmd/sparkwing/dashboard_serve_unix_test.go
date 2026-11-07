@@ -11,7 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
-	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -68,29 +68,34 @@ func TestDashboardServesAControllerARunStarted(t *testing.T) {
 		t.Fatalf("dashboard open receipt: %v", err)
 	}
 	link, err := url.Parse(opened.URL)
-	if err != nil || link.Path != "/login" || link.Query().Get("token") == "" {
-		t.Fatalf("dashboard open printed no sign-in link: %v", err)
+	if err != nil || link.Path != "/" || !strings.HasPrefix(link.Fragment, "code=") {
+		t.Fatalf("dashboard open printed no sign-in link: %q %v", opened.URL, err)
 	}
-	client := &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+	client := &http.Client{}
 	defer client.CloseIdleConnections()
-	request, err := http.NewRequestWithContext(ctx, http.MethodGet, opened.URL, nil)
+	origin := link.Scheme + "://" + link.Host
+	request, err := http.NewRequestWithContext(ctx, http.MethodPost, origin+"/login", strings.NewReader(`{"code":"`+strings.TrimPrefix(link.Fragment, "code=")+`"}`))
 	if err != nil {
 		t.Fatal(err)
 	}
+	request.Header.Set("Origin", origin)
+	request.Header.Set("Content-Type", "application/json")
 	response, err := client.Do(request)
 	if err != nil {
-		t.Fatalf("sign-in link does not answer: %v", err)
+		t.Fatalf("sign-in exchange does not answer: %v", err)
 	}
-	if err := response.Body.Close(); err != nil {
-		t.Fatal(err)
+	var grant struct {
+		Token string `json:"token"`
 	}
-	signedIn := slices.ContainsFunc(response.Cookies(), func(c *http.Cookie) bool { return c.Name == "sw_dashboard" && c.Value != "" && c.HttpOnly })
-	if response.StatusCode != http.StatusSeeOther || response.Header.Get("Location") != "/" || !signedIn {
-		t.Fatalf("sign-in link did not start a session: HTTP %d, Set-Cookie %q", response.StatusCode, response.Header.Values("Set-Cookie"))
+	err = json.NewDecoder(response.Body).Decode(&grant)
+	if closeErr := response.Body.Close(); closeErr != nil {
+		t.Fatal(closeErr)
+	}
+	if response.StatusCode != http.StatusOK || err != nil || grant.Token == "" {
+		t.Fatalf("sign-in exchange did not start a session: HTTP %d (%v)", response.StatusCode, err)
 	}
 
 	after := status()
-	origin := link.Scheme + "://" + link.Host
 	if after.State != "running" || after.PID != started.PID || after.Dashboard != "serving" || after.URL != origin {
 		t.Fatalf("status should report the same controller running and the dashboard serving at %s: %+v", origin, after)
 	}

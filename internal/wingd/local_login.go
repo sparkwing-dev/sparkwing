@@ -8,7 +8,6 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"net/http"
-	"net/url"
 	"strings"
 	"sync"
 	"time"
@@ -24,9 +23,6 @@ const DashboardLoginPath = "/api/v1/local/dashboard/login"
 const (
 	dashboardLoginLifetime   = 60 * time.Second
 	dashboardSessionLifetime = 30 * 24 * time.Hour
-	dashboardCookie          = "sw_dashboard"
-	// safety: the marker only tells the page to offer sign-out; the gate never reads it.
-	dashboardSignedInMarker = "sw_dashboard_signed_in"
 )
 
 // DashboardLogin is the one-time sign-in link api.sock returns.
@@ -143,7 +139,9 @@ func (l *dashboardLogins) mint(ctx context.Context, peer localhostwire.LocalPeer
 	if err := store.MintDashboardCode(ctx, tokenDigest(token), origin, peer.Clone(), now, expires); err != nil {
 		return DashboardLogin{}, &apierr.Error{Code: apierr.Internal, Message: "store dashboard sign-in code: " + err.Error()}
 	}
-	return DashboardLogin{URL: origin + "/login?" + url.Values{"token": {token}}.Encode(), ExpiresAt: expires}, nil
+	// safety: the code rides in the fragment, which the browser never sends; the page exchanges it
+	// and drops it from history.
+	return DashboardLogin{URL: origin + "/#code=" + token, ExpiresAt: expires}, nil
 }
 
 func tokenDigest(token string) string {
@@ -156,19 +154,11 @@ func requestOrigin(r *http.Request) string {
 	return "http://" + r.Host
 }
 
-// safety: one cookie of our name is required; a duplicate planted by another service on this host is refused.
-func sessionToken(r *http.Request, name string) (string, bool) {
-	var value string
-	for _, cookie := range r.Cookies() {
-		if cookie.Name != name {
-			continue
-		}
-		if value != "" || cookie.Value == "" {
-			return "", false
-		}
-		value = cookie.Value
-	}
-	return value, value != ""
+// safety: only the Authorization header authenticates. A browser attaches it from script on this origin alone,
+// unlike a cookie, which every port on the host receives.
+func sessionToken(r *http.Request) (string, bool) {
+	token, ok := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer ")
+	return token, ok && token != "" && !strings.ContainsAny(token, " \t")
 }
 
 type dashboardSession struct {
@@ -241,7 +231,7 @@ func (l *dashboardLogins) serveSession(w http.ResponseWriter, r *http.Request, n
 	request.Header.Del("Cookie")
 	for _, cookie := range cookies {
 		switch cookie.Name {
-		case dashboardCookie, dashboardSignedInMarker, "sw_session", "__Host-sw_session":
+		case "sw_session", "__Host-sw_session":
 		default:
 			request.AddCookie(cookie)
 		}
@@ -263,8 +253,8 @@ func unsafeDashboardMethod(method string) bool {
 	return true
 }
 
-// safety: a browser acts as the api.sock peer that minted its link only while it holds that session's
-// cookie. The static shell carries no run data and loads signed out.
+// safety: a browser acts as the api.sock peer that minted its link only while it sends that session's
+// bearer. The static shell carries no run data and loads signed out; it exchanges the sign-in code.
 func (l *dashboardLogins) gate(next, shell http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
@@ -275,7 +265,7 @@ func (l *dashboardLogins) gate(next, shell http.Handler) http.Handler {
 			l.logout(w, r)
 			return
 		}
-		if token, ok := sessionToken(r, dashboardCookie); ok {
+		if token, ok := sessionToken(r); ok {
 			digest := tokenDigest(token)
 			ended, release := l.watchSession(digest)
 			current, failure := l.lookup(r, digest)
@@ -305,12 +295,25 @@ func (l *dashboardLogins) gate(next, shell http.Handler) http.Handler {
 	})
 }
 
+type dashboardExchange struct {
+	Code string `json:"code"`
+}
+
+type dashboardSessionGrant struct {
+	Token     string    `json:"token"`
+	ExpiresAt time.Time `json:"expires_at"`
+}
+
 func (l *dashboardLogins) login(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("Referrer-Policy", "no-referrer")
-	if r.Method != http.MethodGet {
-		w.Header().Set("Allow", http.MethodGet)
-		writeLoginFailure(w, &apierr.Error{Code: apierr.MethodNotAllowed, Message: "open the sign-in link in a browser"})
+	if r.Method != http.MethodPost {
+		w.Header().Set("Allow", http.MethodPost)
+		writeLoginFailure(w, &apierr.Error{Code: apierr.MethodNotAllowed, Message: "the dashboard page exchanges its sign-in code with POST"})
+		return
+	}
+	if !sameDashboardOrigin(r) {
+		http.Error(w, "forbidden: exchange a sign-in code from the dashboard's own origin", http.StatusForbidden)
 		return
 	}
 	store, failure := l.sessions()
@@ -318,27 +321,27 @@ func (l *dashboardLogins) login(w http.ResponseWriter, r *http.Request) {
 		writeLoginFailure(w, failure)
 		return
 	}
-	code := r.URL.Query().Get("token")
+	var exchange dashboardExchange
+	refused := &apierr.Error{Code: apierr.Unauthenticated, Message: "this sign-in link is invalid, expired, already used or for another address", Hint: "run sparkwing dashboard open for a new link"}
+	if json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096)).Decode(&exchange) != nil || exchange.Code == "" {
+		writeLoginFailure(w, refused)
+		return
+	}
 	session, err := randomToken()
-	if code == "" || err != nil {
-		writeLoginFailure(w, &apierr.Error{Code: apierr.Unauthenticated, Message: "this sign-in link is invalid, expired or already used", Hint: "run sparkwing dashboard open for a new link"})
+	if err != nil {
+		writeLoginFailure(w, &apierr.Error{Code: apierr.Internal, Message: "dashboard session token: " + err.Error()})
 		return
 	}
-	origin, now := requestOrigin(r), l.now()
+	now := l.now()
 	expires := now.Add(dashboardSessionLifetime)
-	if _, err := store.RedeemDashboardCode(r.Context(), tokenDigest(code), tokenDigest(session), origin, now, expires); err != nil {
-		writeLoginFailure(w, &apierr.Error{Code: apierr.Unauthenticated, Message: "this sign-in link is invalid, expired, already used or for another address", Hint: "run sparkwing dashboard open for a new link"})
+	if _, err := store.RedeemDashboardCode(r.Context(), tokenDigest(exchange.Code), tokenDigest(session), requestOrigin(r), now, expires); err != nil {
+		writeLoginFailure(w, refused)
 		return
 	}
-	http.SetCookie(w, &http.Cookie{
-		Name: dashboardCookie, Value: session, Path: "/", Expires: expires, MaxAge: int(dashboardSessionLifetime / time.Second),
-		HttpOnly: true, SameSite: http.SameSiteStrictMode,
-	})
-	http.SetCookie(w, &http.Cookie{
-		Name: dashboardSignedInMarker, Value: "1", Path: "/", Expires: expires, MaxAge: int(dashboardSessionLifetime / time.Second),
-		SameSite: http.SameSiteStrictMode,
-	})
-	http.Redirect(w, r, "/", http.StatusSeeOther)
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(dashboardSessionGrant{Token: session, ExpiresAt: expires}); err != nil {
+		panic(http.ErrAbortHandler) //nolint:forbidigo // net/http aborts the incomplete response.
+	}
 }
 
 func (l *dashboardLogins) logout(w http.ResponseWriter, r *http.Request) {
@@ -357,20 +360,18 @@ func (l *dashboardLogins) logout(w http.ResponseWriter, r *http.Request) {
 		writeLoginFailure(w, failure)
 		return
 	}
-	token, ok := sessionToken(r, dashboardCookie)
+	token, ok := sessionToken(r)
 	live := false
 	if ok {
 		digest := tokenDigest(token)
 		var err error
-		// safety: revoke before clearing cookies, so a failed revocation leaves the browser able to retry.
+		// safety: the page forgets its token only after this succeeds, so a failed revocation can be retried.
 		if live, err = store.RevokeDashboardSession(r.Context(), digest, l.now()); err != nil {
 			writeLoginFailure(w, &apierr.Error{Code: apierr.Unavailable, Message: "revoke dashboard session: " + err.Error(), Hint: "try Log out again; the session stays valid until it is revoked"})
 			return
 		}
 		l.end(digest)
 	}
-	http.SetCookie(w, &http.Cookie{Name: dashboardCookie, Value: "", Path: "/", MaxAge: -1, HttpOnly: true, SameSite: http.SameSiteStrictMode})
-	http.SetCookie(w, &http.Cookie{Name: dashboardSignedInMarker, Value: "", Path: "/", MaxAge: -1, SameSite: http.SameSiteStrictMode})
 	if !live {
 		writeLoginFailure(w, &apierr.Error{Code: apierr.Unauthenticated, Message: "this browser is not signed in"})
 		return

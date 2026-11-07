@@ -49,7 +49,7 @@ func TestDashboardLoginAuthorizesControllerAPIAsMintingPeer(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	origin, _, _ := strings.Cut(login.URL, "/login?")
+	origin, code, _ := strings.Cut(login.URL, "/#code=")
 	local, err := lifecycle.Status(t.Context())
 	if err != nil {
 		t.Fatal(err)
@@ -72,7 +72,7 @@ func TestDashboardLoginAuthorizesControllerAPIAsMintingPeer(t *testing.T) {
 			t.Fatal(err)
 		}
 		if session != "" {
-			r.AddCookie(&http.Cookie{Name: "sw_dashboard", Value: session})
+			r.Header.Set("Authorization", "Bearer "+session)
 		}
 		if method != http.MethodGet {
 			r.Header.Set("Origin", origin)
@@ -95,21 +95,27 @@ func TestDashboardLoginAuthorizesControllerAPIAsMintingPeer(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	resp, err := browser.Get(login.URL)
+	exchange, err := http.NewRequestWithContext(t.Context(), http.MethodPost, origin+"/login", strings.NewReader(`{"code":"`+code+`"}`))
 	if err != nil {
 		t.Fatal(err)
 	}
-	resp.Body.Close()
-	var session string
-	for _, cookie := range resp.Cookies() {
-		if cookie.Name == "sw_dashboard" {
-			session = cookie.Value
-		}
+	exchange.Header.Set("Origin", origin)
+	exchange.Header.Set("Content-Type", "application/json")
+	resp, err := browser.Do(exchange)
+	if err != nil {
+		t.Fatal(err)
 	}
-	if resp.StatusCode != http.StatusSeeOther || resp.Header.Get("Location") != "/" || session == "" {
-		t.Fatalf("dashboard login: HTTP %d, Location %q, Set-Cookie %q", resp.StatusCode, resp.Header.Get("Location"), resp.Header.Values("Set-Cookie"))
+	var grant struct {
+		Token string `json:"token"`
+	}
+	err = json.NewDecoder(resp.Body).Decode(&grant)
+	resp.Body.Close()
+	session := grant.Token
+	if resp.StatusCode != http.StatusOK || err != nil || session == "" || len(resp.Header.Values("Set-Cookie")) != 0 {
+		t.Fatalf("dashboard sign-in exchange: HTTP %d, Set-Cookie %q (%v)", resp.StatusCode, resp.Header.Values("Set-Cookie"), err)
 	}
 	base := link.Scheme + "://" + link.Host
+	request(http.MethodGet, base+"/api/v1/runs", "", http.StatusUnauthorized, &http.Cookie{Name: "sw_dashboard", Value: session})
 	request(http.MethodGet, base+"/api/v1/runs", "", http.StatusUnauthorized)
 	request(http.MethodGet, base+"/api/v1/runs", session, http.StatusOK)
 	var identity struct {

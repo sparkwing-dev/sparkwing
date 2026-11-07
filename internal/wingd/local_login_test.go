@@ -156,7 +156,7 @@ func loginRequest(t *testing.T, client *http.Client, method, target string, edit
 }
 
 func withSession(session string) func(*http.Request) {
-	return func(req *http.Request) { req.Header.Set("Cookie", dashboardCookie+"="+session) }
+	return func(req *http.Request) { req.Header.Set("Authorization", "Bearer "+session) }
 }
 
 func withSessionFrom(session, origin string) func(*http.Request) {
@@ -173,15 +173,25 @@ func signInThrough(t testing.TB, logins *dashboardLogins) string {
 	if failure != nil {
 		t.Fatal(failure)
 	}
-	response := httptest.NewRecorder()
-	logins.gate(http.NotFoundHandler(), nil).ServeHTTP(response, httptest.NewRequest(http.MethodGet, login.URL, nil))
-	for _, cookie := range response.Result().Cookies() {
-		if cookie.Name == dashboardCookie && cookie.Value != "" {
-			return cookie.Value
-		}
+	response := exchangeRequest(logins.gate(http.NotFoundHandler(), nil), login.URL, "")
+	var grant dashboardSessionGrant
+	if response.Code != http.StatusOK || json.Unmarshal(response.Body.Bytes(), &grant) != nil || grant.Token == "" {
+		t.Fatalf("sign-in exchange: HTTP %d %s", response.Code, response.Body)
 	}
-	t.Fatalf("sign-in set no session cookie: HTTP %d %s", response.Code, response.Body)
-	return ""
+	return grant.Token
+}
+
+func exchangeRequest(handler http.Handler, link, origin string) *httptest.ResponseRecorder {
+	base, code, _ := strings.Cut(link, "/#code=")
+	if origin == "" {
+		origin = base
+	}
+	request := httptest.NewRequest(http.MethodPost, origin+"/login", strings.NewReader(`{"code":"`+code+`"}`))
+	request.Header.Set("Origin", origin)
+	request.Header.Set("Content-Type", "application/json")
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	return response
 }
 
 func storedLogins(clock func() time.Time, origin string) *dashboardLogins {
@@ -194,7 +204,7 @@ func storedLogins(clock func() time.Time, origin string) *dashboardLogins {
 func TestDashboardSessionForwardsUnrelatedCookies(t *testing.T) {
 	request := httptest.NewRequest(http.MethodGet, "/api/v1/runs", nil)
 	request.Header.Set("Authorization", "Bearer stale")
-	for _, name := range []string{"sw_session", "__Host-sw_session", dashboardCookie, dashboardSignedInMarker} {
+	for _, name := range []string{"sw_session", "__Host-sw_session"} {
 		request.AddCookie(&http.Cookie{Name: name, Value: "stale"})
 	}
 	request.AddCookie(&http.Cookie{Name: "theme", Value: "dark"})
@@ -211,7 +221,7 @@ func TestDashboardSessionForwardsUnrelatedCookies(t *testing.T) {
 	if !forwarded {
 		t.Fatal("authenticated request did not reach the handler")
 	}
-	if len(request.Cookies()) != 5 {
+	if len(request.Cookies()) != 3 {
 		t.Fatal("forwarding changed the original request cookies")
 	}
 }
@@ -253,25 +263,34 @@ func TestLocalDashboardSignsInOnceThroughSocketMintedLink(t *testing.T) {
 		return login
 	}
 	browser := noRedirects()
+	exchange := func(login DashboardLogin, origin string) loginReply {
+		t.Helper()
+		base, code, _ := strings.Cut(login.URL, "/#code=")
+		if origin == "" {
+			origin = base
+		}
+		return loginRequest(t, browser, http.MethodPost, base+"/login", func(req *http.Request) {
+			req.Body = io.NopCloser(strings.NewReader(`{"code":"` + code + `"}`))
+			req.Header.Set("Content-Type", "application/json")
+			if origin != "-" {
+				req.Header.Set("Origin", origin)
+			}
+		})
+	}
 	signIn := func(login DashboardLogin) string {
 		t.Helper()
-		resp := loginRequest(t, browser, http.MethodGet, login.URL, nil)
-		if resp.StatusCode != http.StatusSeeOther || resp.Header.Get("Location") != "/" {
-			t.Fatalf("sign in: HTTP %d to %q", resp.StatusCode, resp.Header.Get("Location"))
+		resp := exchange(login, "")
+		var grant dashboardSessionGrant
+		if resp.StatusCode != http.StatusOK || json.Unmarshal(resp.Body, &grant) != nil || len(grant.Token) < 43 {
+			t.Fatalf("sign in: HTTP %d %s", resp.StatusCode, resp.Body)
 		}
-		if resp.Header.Get("Cache-Control") != "no-store" || resp.Header.Get("Referrer-Policy") != "no-referrer" {
+		if resp.Header.Get("Cache-Control") != "no-store" || resp.Header.Get("Referrer-Policy") != "no-referrer" || len(resp.Header.Values("Set-Cookie")) != 0 {
 			t.Fatalf("sign in headers %v", resp.Header)
 		}
-		cookies := (&http.Response{Header: resp.Header}).Cookies()
-		if len(cookies) != 2 || cookies[1].Name != dashboardSignedInMarker || cookies[1].Value != "1" || cookies[1].HttpOnly || cookies[1].SameSite != http.SameSiteStrictMode {
-			t.Fatalf("sign in set cookies %q", resp.Header.Values("Set-Cookie"))
+		if !grant.ExpiresAt.Equal(clock.Now().Add(dashboardSessionLifetime)) {
+			t.Fatalf("session expires at %s", grant.ExpiresAt)
 		}
-		cookie, raw := cookies[0], resp.Header.Values("Set-Cookie")[0]
-		if cookie.Name != dashboardCookie || len(cookie.Value) < 43 || cookie.Path != "/" || cookie.Domain != "" || !cookie.HttpOnly || cookie.Secure ||
-			cookie.SameSite != http.SameSiteStrictMode || cookie.MaxAge != int(dashboardSessionLifetime/time.Second) || !strings.Contains(raw, "Expires=") {
-			t.Fatalf("session cookie %q", raw)
-		}
-		return cookie.Value
+		return grant.Token
 	}
 
 	if resp := loginRequest(t, socket, http.MethodGet, "http://sparkwing-api/api/v1/runs", nil); resp.StatusCode != http.StatusOK || api.reached() != 1 {
@@ -282,7 +301,7 @@ func TestLocalDashboardSignsInOnceThroughSocketMintedLink(t *testing.T) {
 		t.Fatalf("link expires at %s", login.ExpiresAt)
 	}
 	link, err := url.Parse(login.URL)
-	if err != nil || link.Path != "/login" || len(link.Query().Get("token")) < 43 {
+	if err != nil || link.Path != "/" || link.RawQuery != "" || !strings.HasPrefix(link.Fragment, "code=") || len(link.Fragment) < 48 {
 		t.Fatalf("login link %q", login.URL)
 	}
 	base := "http://" + link.Host
@@ -301,21 +320,28 @@ func TestLocalDashboardSignsInOnceThroughSocketMintedLink(t *testing.T) {
 		t.Fatal("an unauthenticated TCP request reached the dashboard")
 	}
 
+	for _, origin := range []string{"-", "null", "http://evil.example"} {
+		if resp := exchange(login, origin); resp.StatusCode != http.StatusForbidden {
+			t.Fatalf("exchange with Origin %q: HTTP %d", origin, resp.StatusCode)
+		}
+	}
+	if resp := loginRequest(t, browser, http.MethodGet, base+"/login", nil); resp.StatusCode != http.StatusMethodNotAllowed {
+		t.Fatalf("GET exchange: HTTP %d", resp.StatusCode)
+	}
 	session := signIn(login)
-	if again := loginRequest(t, browser, http.MethodGet, login.URL, nil); again.StatusCode != http.StatusUnauthorized || len(again.Header.Values("Set-Cookie")) != 0 {
+	if again := exchange(login, ""); again.StatusCode != http.StatusUnauthorized {
 		t.Fatalf("second use: HTTP %d", again.StatusCode)
 	}
 	for _, edit := range []func(*http.Request){
-		func(req *http.Request) { req.Header.Set("Authorization", "Bearer "+session) },
+		func(req *http.Request) { req.Header.Set("Cookie", "sw_dashboard="+session) },
 		func(req *http.Request) { req.Header.Set("Cookie", "sw_session="+session) },
-		func(req *http.Request) { req.Header.Set("Cookie", "__Host-"+dashboardCookie+"="+session) },
-		func(req *http.Request) {
-			req.Header.Set("Cookie", dashboardCookie+"="+session+"; "+dashboardCookie+"=planted")
-		},
+		func(req *http.Request) { req.Header.Set("Authorization", session) },
+		func(req *http.Request) { req.Header.Set("Authorization", "Basic "+session) },
+		func(req *http.Request) { req.Header.Set("Authorization", "Bearer "+session+" extra") },
 		withSession(session[:len(session)-1] + map[bool]string{true: "B", false: "A"}[strings.HasSuffix(session, "A")]),
 	} {
 		if resp := loginRequest(t, browser, http.MethodGet, runs, edit); resp.StatusCode != http.StatusUnauthorized {
-			t.Fatalf("a presentation other than the session cookie: HTTP %d", resp.StatusCode)
+			t.Fatalf("a presentation other than the session bearer: HTTP %d", resp.StatusCode)
 		}
 	}
 	if resp := loginRequest(t, browser, http.MethodGet, runs, withSession(session)); resp.StatusCode != http.StatusOK {
@@ -401,10 +427,8 @@ func TestLocalDashboardSignsInOnceThroughSocketMintedLink(t *testing.T) {
 	if resp := loginRequest(t, browser, http.MethodGet, runs, withSession(session)); resp.StatusCode != http.StatusOK {
 		t.Fatalf("session after refused logouts: HTTP %d", resp.StatusCode)
 	}
-	resp := loginRequest(t, browser, http.MethodPost, logout, withSessionFrom(session, base))
-	cleared := resp.Header.Values("Set-Cookie")
-	if resp.StatusCode != http.StatusNoContent || len(cleared) != 2 || !strings.HasPrefix(cleared[0], dashboardCookie+"=;") || !strings.HasPrefix(cleared[1], dashboardSignedInMarker+"=;") || !strings.Contains(cleared[0], "Max-Age=0") || !strings.Contains(cleared[1], "Max-Age=0") {
-		t.Fatalf("logout: HTTP %d Set-Cookie %q", resp.StatusCode, cleared)
+	if resp := loginRequest(t, browser, http.MethodPost, logout, withSessionFrom(session, base)); resp.StatusCode != http.StatusNoContent || len(resp.Header.Values("Set-Cookie")) != 0 {
+		t.Fatalf("logout: HTTP %d Set-Cookie %q", resp.StatusCode, resp.Header.Values("Set-Cookie"))
 	}
 	if resp := loginRequest(t, browser, http.MethodGet, runs, withSession(session)); resp.StatusCode != http.StatusUnauthorized {
 		t.Fatalf("session after logout: HTTP %d", resp.StatusCode)
@@ -415,7 +439,7 @@ func TestLocalDashboardSignsInOnceThroughSocketMintedLink(t *testing.T) {
 
 	stale := mint()
 	clock.advance(60 * time.Second)
-	if resp := loginRequest(t, browser, http.MethodGet, stale.URL, nil); resp.StatusCode != http.StatusUnauthorized || resp.Header.Get("Location") != "" {
+	if resp := exchange(stale, ""); resp.StatusCode != http.StatusUnauthorized {
 		t.Fatalf("expired link: HTTP %d", resp.StatusCode)
 	}
 	fresh := mint()
@@ -430,21 +454,17 @@ func TestLocalDashboardLinkRedeemsOnlyAtItsOrigin(t *testing.T) {
 	if failure != nil {
 		t.Fatal(failure)
 	}
-	other := strings.Replace(login.URL, "127.0.0.1:4343", "127.0.0.1:9999", 1)
-	response := httptest.NewRecorder()
-	logins.gate(http.NotFoundHandler(), nil).ServeHTTP(response, httptest.NewRequest(http.MethodGet, other, nil))
-	if response.Code != http.StatusUnauthorized || len(response.Result().Cookies()) != 0 {
+	gate := logins.gate(http.NotFoundHandler(), nil)
+	if response := exchangeRequest(gate, login.URL, "http://127.0.0.1:9999"); response.Code != http.StatusUnauthorized {
 		t.Fatalf("redeemed at another port: HTTP %d", response.Code)
 	}
-	response = httptest.NewRecorder()
-	logins.gate(http.NotFoundHandler(), nil).ServeHTTP(response, httptest.NewRequest(http.MethodGet, login.URL, nil))
-	if response.Code != http.StatusUnauthorized {
+	if response := exchangeRequest(gate, login.URL, ""); response.Code != http.StatusUnauthorized {
 		t.Fatalf("a link refused at another origin stayed redeemable: HTTP %d", response.Code)
 	}
 	session := signInThrough(t, logins)
 	request := httptest.NewRequest(http.MethodGet, "http://127.0.0.1:9999/api/v1/runs", nil)
 	withSession(session)(request)
-	response = httptest.NewRecorder()
+	response := httptest.NewRecorder()
 	logins.gate(http.NotFoundHandler(), nil).ServeHTTP(response, request)
 	if response.Code != http.StatusUnauthorized {
 		t.Fatalf("a session redeemed at one port authorized another: HTTP %d", response.Code)
@@ -468,7 +488,7 @@ func TestLocalDashboardMintRefusesWithoutServingDashboard(t *testing.T) {
 	}
 }
 
-func FuzzLocalDashboardRequiresSessionCookie(f *testing.F) {
+func FuzzLocalDashboardRequiresSessionBearer(f *testing.F) {
 	server := httptest.NewServer(nil)
 	f.Cleanup(server.Close)
 	logins := storedLogins(nil, server.URL)
@@ -485,17 +505,17 @@ func FuzzLocalDashboardRequiresSessionCookie(f *testing.F) {
 	})
 	server.Config.Handler = guardDashboard(localhostwire.LocalHTTP{Dashboard: dashboard, Shell: shell}, server.Listener.Addr().String(), logins, false)
 	session := signInThrough(f, logins)
-	f.Add("GET", "/api/v1/runs", "Bearer "+session, "", "")
-	f.Add("POST", "/api/v1/runs/x/cancel", "", dashboardCookie+"="+session[:10], "")
+	f.Add("GET", "/api/v1/runs", "", "sw_dashboard="+session, "")
+	f.Add("POST", "/api/v1/runs/x/cancel", "Bearer "+session[:10], "", "")
 	f.Add("GET", "/api/v1/runs", "", "sw_session="+session, "")
-	f.Add("POST", "/logout", "", "", "")
-	f.Add("GET", "/login", "", "", "token=")
-	f.Add("GET", "/", "", dashboardCookie+"=", "")
-	f.Add("DELETE", "/login/../api", "bearer x", "other=x; "+dashboardCookie+"=", "token=")
+	f.Add("POST", "/logout", "", "sw_dashboard="+session, "")
+	f.Add("POST", "/login", "", "", "code=")
+	f.Add("GET", "/", "Bearer ", "", "")
+	f.Add("DELETE", "/login/../api", "bearer "+session, "other=x", "code=")
 	client := noRedirects()
 	var probe int
 	f.Fuzz(func(t *testing.T, method, path, authorization, cookie, query string) {
-		if strings.Contains(cookie, session) {
+		if strings.Contains(authorization, "Bearer "+session) {
 			t.Skip()
 		}
 		probe++
@@ -529,13 +549,13 @@ func FuzzLocalDashboardRequiresSessionCookie(f *testing.F) {
 	})
 }
 
-func signedInCookie(t *testing.T, r *localRuntime) (string, string) {
+func signedInBearer(t *testing.T, r *localRuntime) (string, string) {
 	t.Helper()
 	r.mu.Lock()
 	logins := r.run.logins
 	r.mu.Unlock()
 	session := signInThrough(t, logins)
-	return dashboardCookie + "=" + session, strings.TrimPrefix(logins.servingOrigin(), "http://")
+	return "Bearer " + session, strings.TrimPrefix(logins.servingOrigin(), "http://")
 }
 
 func TestLocalDashboardStreamsEndWithTheirSession(t *testing.T) {
@@ -700,7 +720,7 @@ func TestLocalDashboardLogoutAfterLookupStillEndsTheStream(t *testing.T) {
 	}
 }
 
-func TestLocalDashboardForgedCookiesLeaveNoWatches(t *testing.T) {
+func TestLocalDashboardForgedBearersLeaveNoWatches(t *testing.T) {
 	logins := storedLogins(nil, "http://127.0.0.1:4343")
 	for i := range 50 {
 		request := httptest.NewRequest(http.MethodGet, "http://127.0.0.1:4343/api/v1/runs", nil)
@@ -708,7 +728,7 @@ func TestLocalDashboardForgedCookiesLeaveNoWatches(t *testing.T) {
 		logins.gate(http.NotFoundHandler(), nil).ServeHTTP(httptest.NewRecorder(), request)
 	}
 	if len(logins.watch) != 0 {
-		t.Fatalf("forged cookies left %d watches", len(logins.watch))
+		t.Fatalf("forged bearers left %d watches", len(logins.watch))
 	}
 }
 
@@ -718,7 +738,7 @@ func (failingRevoke) RevokeDashboardSession(context.Context, string, time.Time) 
 	return false, errors.New("store is busy")
 }
 
-func TestLocalDashboardLogoutKeepsCookiesWhenRevocationFails(t *testing.T) {
+func TestLocalDashboardLogoutKeepsTheSessionWhenRevocationFails(t *testing.T) {
 	const origin = "http://127.0.0.1:4343"
 	sessions := &memoryDashboardSessions{}
 	logins := newDashboardLogins(nil)
@@ -730,8 +750,8 @@ func TestLocalDashboardLogoutKeepsCookiesWhenRevocationFails(t *testing.T) {
 	withSessionFrom(session, origin)(request)
 	response := httptest.NewRecorder()
 	logins.gate(http.NotFoundHandler(), nil).ServeHTTP(response, request)
-	if response.Code != http.StatusServiceUnavailable || len(response.Result().Cookies()) != 0 {
-		t.Fatalf("failed revocation: HTTP %d Set-Cookie %q", response.Code, response.Header().Values("Set-Cookie"))
+	if response.Code != http.StatusServiceUnavailable {
+		t.Fatalf("failed revocation: HTTP %d", response.Code)
 	}
 	if _, _, _, live, err := sessions.DashboardSession(t.Context(), tokenDigest(session), time.Now()); err != nil || !live {
 		t.Fatalf("session after a failed revocation: live=%t %v", live, err)
