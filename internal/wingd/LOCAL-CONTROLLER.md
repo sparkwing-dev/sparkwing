@@ -81,7 +81,11 @@ the machine's CPU count, OS and architecture, plus the `runner.labels` the
 machine configuration listed when the controller started. Ambient runner names and tokens
 cannot select the account. It holds no store handle or credential. The local
 queue delegates exactly `triggers.claim` and `nodes.claim` through
-`POST /api/v1/tokens`. The store retains the peer root across controller starts,
+`POST /api/v1/tokens`. That delegate expires within `LocalClaimantLifetime`
+(seven days) instead of inheriting the peer root's absent expiry. The runner
+drains after a seventh of that lifetime, so a fresh instance and token take over
+while held work finishes. On Windows the embedded queue starts its next instance
+after the drained one joins. The store retains the peer root across controller starts,
 so process-specific delegates keep the same machine placement identity.
 After the loop joins its hosts, the queue records its stopped instance and
 revokes its delegate after terminal acknowledgements. The runner has an

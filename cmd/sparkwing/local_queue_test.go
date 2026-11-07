@@ -6,15 +6,19 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"sync/atomic"
 	"testing"
 	"testing/synctest"
+	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/controller"
 	"github.com/sparkwing-dev/sparkwing/internal/controller/client"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/localhostwire"
 	"github.com/sparkwing-dev/sparkwing/internal/runners"
+	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
 )
 
 func localQueueTestClient(t *testing.T, revoked func(context.Context)) client.EngineOptions {
@@ -241,4 +245,61 @@ func TestLocalQueuePeerCredentialOnlyClaimsAndRevokesThroughAPI(t *testing.T) {
 	if _, err := claimant.Claim(t.Context(), request); err == nil {
 		t.Fatal("revoked queue credential still claims work")
 	}
+}
+
+func TestLocalQueuePeerCredentialExpires(t *testing.T) {
+	var offset atomic.Int64
+	options := productionLocalPolicyClient(t, teststore.WithClock(func() time.Time { return time.Now().Add(time.Duration(offset.Load())) }))
+	tokens, err := client.NewTokenManager(options, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	scopes := []capability.Grant{capability.NodesClaim, capability.TriggersClaim}
+	beyond := int64((controller.LocalClaimantLifetime + time.Hour) / time.Second)
+	_, err = tokens.CreateToken(t.Context(), controllerwire.TokenCreate{Scopes: scopes, TTLSecs: &beyond})
+	var refusal *apierr.Error
+	if !errors.As(err, &refusal) || refusal.Code != apierr.BadRequest {
+		t.Fatalf("local claimant outliving its bound: %v", err)
+	}
+	issued, err := tokens.CreateToken(t.Context(), controllerwire.TokenCreate{Scopes: scopes})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if expires := issued.Metadata.ExpiresAt; expires == nil || time.Unix(*expires, 0).After(time.Now().Add(controller.LocalClaimantLifetime)) {
+		t.Fatalf("default local claimant expiry: %v", expires)
+	}
+	options.Bearer = func(context.Context) (string, error) { return issued.Token, nil }
+	claimant, err := client.NewEngineClient(options)
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := controllerwire.ClaimRequest{RunnerVersion: installedVersion(), Kinds: []capability.UnitKind{capability.UnitTrigger, capability.UnitNode}}
+	if _, err := claimant.Claim(t.Context(), request); err != nil {
+		t.Fatalf("fresh queue credential could not poll: %v", err)
+	}
+	offset.Store(int64(controller.LocalClaimantLifetime + time.Minute))
+	if _, err := claimant.Claim(t.Context(), request); !errors.As(err, &refusal) || refusal.Code != apierr.Unauthenticated {
+		t.Fatalf("expired queue credential: %v", err)
+	}
+}
+
+func TestLocalQueueRollsBeforeItsCredentialExpires(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		drained := make(chan struct{})
+		lifecycle := &queueLifecycleFixture{drain: func(context.Context) error { close(drained); return nil }}
+		loop := &runners.Loop{
+			Config:       runners.LoopConfig{Version: "development", MaxConcurrent: 1, Kinds: []capability.UnitKind{capability.UnitTrigger}},
+			CheckVersion: func(context.Context, string) error { return nil },
+			Host:         queueHostFunc(func(context.Context, controllerwire.ClaimedUnit) error { <-drained; return nil }),
+		}
+		options := localQueueTestClient(t, nil)
+		start := time.Now()
+		if err := runLocalQueue(t.Context(), "test-instance", options, loop, lifecycle); err != nil {
+			t.Fatal(err)
+		}
+		<-drained
+		if elapsed := time.Since(start); elapsed < localRunnerRollAfter || elapsed >= controller.LocalClaimantLifetime {
+			t.Fatalf("runner rolled after %s", elapsed)
+		}
+	})
 }

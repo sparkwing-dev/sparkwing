@@ -65,7 +65,11 @@ also stays CLI-hosted. No flag, route or wire symbol is removed by this piece;
 The local queue obtains its credential through the authenticated API socket and
 uses the shared HTTP claim client. Verified socket peers may request exactly
 `triggers.claim` and `nodes.claim` from `POST /api/v1/tokens`. Other member-token
-requests remain refused. The queue revokes its delegate after hosts join.
+requests remain refused. That claim token expires within seven days: an omitted
+`expires_at` defaults to seven days and a later one is refused with a bad-request
+error. A runner drains after one day and the supervisor starts a fresh instance
+with a new token, so a job running longer than about six days on a local runner
+loses its claim authority. The queue revokes its delegate after hosts join.
 Detached runner cleanup uses the API independently of the controller's shutdown
 lifetime. Captured account and label policy holds no store handle or credential.
 

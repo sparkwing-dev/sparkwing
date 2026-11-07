@@ -115,7 +115,7 @@ the HTTP shutdown worker. An empty address starts no listener.
 
 The local queue obtains a claim-only delegate through `POST /api/v1/tokens`
 using verified socket peer authority. It asks for exactly `triggers.claim` and
-`nodes.claim`. The queue uses the shared HTTP claim client and revokes its
+`nodes.claim`, which expire within seven days; the runner rolls after one. The queue uses the shared HTTP claim client and revokes its
 delegate after `Loop.Run` joins all hosts, while the API still serves cleanup.
 `ClaimProfile` owns captured account and configured-label policy without holding
 a store or issuing credentials. Each HTTP claim rechecks authority, signed local

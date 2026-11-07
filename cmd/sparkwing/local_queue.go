@@ -4,12 +4,17 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/controller"
 	"github.com/sparkwing-dev/sparkwing/internal/controller/client"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/runners"
 )
+
+// safety: a runner drains well before its claim token expires so a fresh instance and token replace it.
+const localRunnerRollAfter = controller.LocalClaimantLifetime / 7
 
 func runLocalQueue(ctx context.Context, id string, options client.EngineOptions, loop *runners.Loop, lifecycle localRunnerLifecycle) (err error) {
 	if loop == nil || loop.CheckVersion == nil || lifecycle == nil {
@@ -59,6 +64,8 @@ func runLocalQueue(ctx context.Context, id string, options client.EngineOptions,
 			err = errors.Join(err, watchErr)
 		}
 	}()
+	roll := time.AfterFunc(localRunnerRollAfter, loop.Drain)
+	defer roll.Stop()
 	drainCtx, stopDrain := context.WithCancel(context.WithoutCancel(ctx))
 	drainResult := make(chan error, 1)
 	draining := false

@@ -2,6 +2,7 @@ package controller
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"slices"
 	"time"
@@ -52,9 +53,16 @@ func (s *Server) handleIssueCredential(w http.ResponseWriter, r *http.Request, a
 		return routepolicy.MissingEndpointPolicy()
 	}
 	p := a.Principal
-	// safety: a token minted under the local peer keeps its local subject, which no member route accepts from a bearer.
-	if p.Class == capability.CredentialPeer && request.Data == nil && (request.AllowTeamAdmin || len(request.Grants) != 2 || !slices.Contains(request.Grants, capability.NodesClaim) || !slices.Contains(request.Grants, capability.TriggersClaim)) {
-		return &apierr.Error{Code: apierr.CapabilityUnsupported, Message: "a local controller issues no member tokens; the CLI reaches it over its socket, and `sparkwing dashboard open` signs a browser in"}
+	if p.Class == capability.CredentialPeer && request.Data == nil {
+		if !peerClaimantRequest(request) {
+			return &apierr.Error{Code: apierr.CapabilityUnsupported, Message: "a local controller issues no member tokens; the CLI reaches it over its socket, and `sparkwing dashboard open` signs a browser in"}
+		}
+		limit := time.Now().UTC().Add(LocalClaimantLifetime)
+		if request.ExpiresAt == nil {
+			request.ExpiresAt = &limit
+		} else if request.ExpiresAt.After(limit) {
+			return invalidEngineBody(fmt.Sprintf("a local runner token expires within %s; omit expires_at for that default", LocalClaimantLifetime))
+		}
 	}
 	var issued capability.Issued
 	var err error
@@ -89,6 +97,17 @@ func (s *Server) handleIssueCredential(w http.ResponseWriter, r *http.Request, a
 		Principal: issued.Capability.Subject.ID,
 	})
 	return nil
+}
+
+// LocalClaimantLifetime bounds a local runner's claim token, which the peer
+// would otherwise issue without expiry. A runner rolls well before it ends.
+const LocalClaimantLifetime = 7 * 24 * time.Hour
+
+// safety: the local peer may delegate only the runner's claim pair. The token keeps the peer's
+// local subject, which isMember refuses from a bearer, so it reaches claimant routes and no member route.
+func peerClaimantRequest(request credentialRequest) bool {
+	return !request.AllowTeamAdmin && len(request.Grants) == 2 &&
+		slices.Contains(request.Grants, capability.NodesClaim) && slices.Contains(request.Grants, capability.TriggersClaim)
 }
 
 func validateCredentialRequest(request credentialRequest) error {
